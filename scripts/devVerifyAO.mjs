@@ -769,6 +769,9 @@ const RUNNERS = {
       await b.evaluate(`localStorage.removeItem('tms.tracking.map.collapsed')`)
       await b.reload()
       await openDrawer(b, idB)
+      // The panel paints (stop pins) before the first breadcrumb read returns; wait for the 12 fixes, then judge.
+      await b.poll(async () => (await mapFacts(b)).fixes === 12, 'the brokered leg\'s 12 fixes', 45_000).catch(() => {})
+      await settleMap(b)
       const f = await mapFacts(b)
       const bad = []
       if (!f.panel || !f.strip || !f.panes) bad.push('strip, map panel or panes is missing')

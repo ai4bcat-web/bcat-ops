@@ -49,6 +49,7 @@ const AL_TABLES = ['SpotSettings', 'ShipmentMessage', 'ShipmentPosting', 'ProCla
 
 const ALLOW_PROBLEMS = [
   { pattern: /Manifest: Line: 1, column: 1, Syntax error\. http:\/\/(127\.0\.0\.1|localhost):5173\/manifest\.webmanifest$/, reason: 'vite dev server has no built manifest' },
+  { pattern: /net::ERR_CERT_VERIFIER_CHANGED/, reason: 'headless Chrome re-reads its cert store mid-run; the request is retried by the client' },
   { pattern: /The map is initialized without a valid Map ID/, reason: 'dev Maps key is neutered' },
 ]
 const HOOK_CLASSES = ['tms-overdue', 'tms-due', 'tms-theme-toggle', 'tms-dash', 'tms-probe-field', 'tms-public-head', 'tms-public-brand-name', 'tms-drawer-md']
@@ -676,7 +677,11 @@ async function al07Actions(ctx) {
     ctx.ship('ACCEPT_OFFER', { quoteId: q10.id, expectedUpdatedAt: load0.updatedAt, acknowledgeWarnings: BOOKING_ACKS }))
   notes.push('ACCEPT_OFFER refused for the unknown MC')
 
-  const won = await ctx.ship('ACCEPT_OFFER', { quoteId: q12.id, expectedUpdatedAt: load0.updatedAt, acknowledgeWarnings: BOOKING_ACKS })
+  // The vetted ZZ carrier already covers the F6 load (same pickup day): the product's DOUBLE_BOOKED warning must be acknowledged by key.
+  await refused('ACCEPT_OFFER without acknowledging the warnings', /Acknowledge these before booking/i, () =>
+    ctx.ship('ACCEPT_OFFER', { quoteId: q12.id, expectedUpdatedAt: load0.updatedAt }))
+  const acks = [...BOOKING_ACKS, `DOUBLE_BOOKED:${ctx.seeded.covered.loadId}`]
+  const won = await ctx.ship('ACCEPT_OFFER', { quoteId: q12.id, expectedUpdatedAt: load0.updatedAt, acknowledgeWarnings: acks })
   void won
   const after = await ctx.ship('GET_SHIPMENT_BUNDLE', { shipmentId: ctx.seeded.open.shipmentId })
   expect(after.loads[0].activeLoadCarrierId, 'ACCEPT_OFFER did not cover the load')
