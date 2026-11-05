@@ -1292,7 +1292,7 @@ async function setupFixtures(ctx) {
   ctx.locNames = { shipper: `ZZ AH Shipper ${ts}`, receiver: `ZZ AH Receiver ${ts}`, pick2: `ZZ AH Second Pick ${ts}`, stop2: `ZZ AH Second Stop ${ts}` }
   const places = [['shipper', 'Chicago', 'IL', '60601', 41.88, -87.63], ['receiver', 'Dallas', 'TX', '75201', 32.78, -96.8], ['pick2', 'Joliet', 'IL', '60431', 41.52, -88.08], ['stop2', 'Waco', 'TX', '76701', 31.55, -97.15]]
   for (const [key, city, state, zip, lat, lng] of places) {
-    const loc = await ctx.dir('UPSERT_LOCATION', { name: ctx.locNames[key], street: '1 ZZ Test Way', city, state, zip, country: 'US' })
+    const loc = await ctx.dir('UPSERT_LOCATION', { name: ctx.locNames[key], street: `${String(ts).slice(-6)} ZZ Test Way`, city, state, zip, country: 'US' })
     const id = String((loc.location ?? loc).id)
     ctx.locationIds.push(id)
     // Coordinates normally come from a signed geocode token the harness cannot mint: set them on this run's own ZZ row
