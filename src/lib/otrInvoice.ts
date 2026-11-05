@@ -475,7 +475,8 @@ export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
    * MC", which is a question somebody can answer, rather than a guess nobody can audit.
    */
   const directoryName = clean(input.customerName)
-  const hasMc = clean(String(input.customerMcNumber ?? '')) !== undefined
+  // An MC typed on the row counts too: setMc writes it there as well as on the Customer.
+  const hasMc = clean(m.BrokerMC) !== undefined || clean(String(input.customerMcNumber ?? '')) !== undefined
   const customerName = hasMc ? (directoryName ?? null) : null
   const customerSource: OtrReadiness['customerSource'] =
     customerName === null

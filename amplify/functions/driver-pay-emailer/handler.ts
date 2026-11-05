@@ -6,6 +6,7 @@
  * a multipart/mixed MIME message and sends it via SES (SendEmail → Raw content).
  */
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
+import { splitAddresses } from '../../../src/lib/payEmail'
 
 const ses = new SESv2Client({})
 const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'ai4bcat@gmail.com'
@@ -29,7 +30,9 @@ function wrap76(b64: string): string {
 export const handler = async (event: { arguments: Args }) => {
   const a = event.arguments
   const to = (a.to ?? '').trim()
-  const cc = (a.cc ?? '').trim()
+  // The Cc field may hold several addresses (Ryne + Jenny by default); SES wants one per entry.
+  const ccList = splitAddresses(a.cc)
+  const cc = ccList.join(', ')
   if (!to) return { sent: false, error: 'no-recipient' }
   if (!a.pdfBase64) return { sent: false, error: 'no-pdf' }
 
@@ -67,7 +70,7 @@ export const handler = async (event: { arguments: Args }) => {
   try {
     await ses.send(new SendEmailCommand({
       FromEmailAddress: FROM_ADDRESS,
-      Destination: { ToAddresses: [to], CcAddresses: cc ? [cc] : undefined },
+      Destination: { ToAddresses: [to], CcAddresses: ccList.length ? ccList : undefined },
       Content: { Raw: { Data: new TextEncoder().encode(raw) } },
     }))
   } catch (err) {

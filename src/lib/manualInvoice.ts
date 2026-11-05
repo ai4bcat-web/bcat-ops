@@ -58,3 +58,37 @@ export function withManualStep(
 ): ManualInvoiceSteps {
   return { ...(steps ?? {}), [id]: done ? mark : null }
 }
+
+/** The send record for a row that went out by hand: when, who, and to which AP address. */
+export interface ManualSentInfo {
+  /** ISO — when the invoice email went out (the "emailed" tick), else when the last step closed. */
+  at: string
+  /** Email of the person who sent it. */
+  by: string
+  /** The broker AP address it went to, when one was recorded. */
+  to: string | null
+}
+
+/**
+ * Who sent a manually invoiced row and when. The emailed step is the send itself, so its
+ * stamp wins; a row finished out of order falls back to the moment the last step closed
+ * and whoever closed it. Null until every step is done.
+ */
+export function manualSentInfo(item: {
+  status?: string | null
+  manualSteps?: ManualInvoiceSteps | null
+  manualInvoicedAt?: string | null
+  apEmail?: string | null
+}): ManualSentInfo | null {
+  const steps = item.manualSteps ?? null
+  if (item.status !== 'INVOICED_MANUALLY' && !manualProgress(steps).complete) return null
+  const emailed = steps?.emailed ?? null
+  const latest = MANUAL_STEP_IDS
+    .map((id) => steps?.[id] ?? null)
+    .filter((m): m is NonNullable<typeof m> => !!m)
+    .sort((a, b) => (a.at < b.at ? 1 : -1))[0] ?? null
+  const at = emailed?.at ?? item.manualInvoicedAt ?? latest?.at ?? null
+  const by = emailed?.by ?? latest?.by ?? ''
+  if (!at) return null
+  return { at, by, to: item.apEmail?.trim() || null }
+}

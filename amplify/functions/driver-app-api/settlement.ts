@@ -159,6 +159,8 @@ export interface RawDeduction {
 
 export interface RawCredit {
   kind?: string | null
+  /** PENDING / REJECTED credits are not on the check; null means approved. */
+  approvalStatus?: string | null
   reasonCode: string
   label?: string | null
   amount: number

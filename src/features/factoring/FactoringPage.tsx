@@ -30,6 +30,7 @@ import { otrDocsIncomplete, otrDocsErrorMessage } from '@/lib/otrSubmitOutcome'
 import { uploadOtrDocs, resolveLoad, assembleInvoice } from '@/lib/otrClient'
 import { loadFromFactoringItem } from './loadFromInvoice'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
+import { manualSentInfo } from '@/lib/manualInvoice'
 
 // ── Status labels ────────────────────────────────────────────────────────────
 
@@ -332,11 +333,32 @@ function OtrDocsFlag({ item, onResent }: { item: FactoringItem; onResent: () => 
   )
 }
 
+/**
+ * The send record for a row invoiced by hand — when it went out, who sent it, and to
+ * which AP address — so the Invoiced manually tab works as the log of everything that
+ * left without OTR. The stamps come from the steps the sender ticked.
+ */
+function SentByHandCell({ item }: { item: FactoringItem }) {
+  const sent = manualSentInfo(item)
+  if (!sent) return <span className="tms-muted">—</span>
+  const who = sent.by.split('@')[0] || 'unknown'
+  return (
+    <div className="whitespace-nowrap" aria-label={`PRO ${item.proNumber} sent by hand ${formatReceivedAt(sent.at)} by ${who}${sent.to ? ` to ${sent.to}` : ''}`}>
+      <div style={{ fontWeight: 600 }}>{formatReceivedAt(sent.at)}</div>
+      <div className="tms-muted" style={{ fontSize: 12 }}>by {who}{sent.to ? <> · to {sent.to}</> : ' · AP email not recorded'}</div>
+    </div>
+  )
+}
+
 function StatusBadge({ item }: { item: FactoringItem }) {
+  const sent = item.status === 'INVOICED_MANUALLY' ? manualSentInfo(item) : null
+  const title = sent
+    ? `${STATUS_CAUSE[item.status]} Sent ${formatReceivedAt(sent.at)} by ${sent.by}${sent.to ? ` to ${sent.to}` : ''}.`
+    : STATUS_CAUSE[item.status]
   return (
     <TmsBadge
       tone={STATUS_TONE[item.status]}
-      title={STATUS_CAUSE[item.status]}
+      title={title}
       aria-label={`Status for PRO ${item.proNumber}: ${FACTORING_STATUS_LABEL[item.status]}`}
     >
       {FACTORING_STATUS_LABEL[item.status]}
@@ -427,7 +449,10 @@ export function FactoringPage() {
       )
       .filter((item) => activeTab !== 'PENDING_WITH_OTR' || !otrFilter || otrLabelOf(item) === otrFilter)
       .filter((item) => matchesSearch(item, search))
-      .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
+      // The Invoiced manually tab is a send log, so it reads newest send first.
+      .sort((a, b) => activeTab === 'INVOICED_MANUALLY'
+        ? (manualSentInfo(b)?.at ?? '').localeCompare(manualSentInfo(a)?.at ?? '')
+        : new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
   }, [items, activeTab, search, otrFilter])
 
   /*
@@ -637,12 +662,14 @@ export function FactoringPage() {
     },
     {
       key: 'received',
-      header: 'RECEIVED',
-      render: (item) => (
-        <span className="whitespace-nowrap tms-muted" title={formatReceivedAt(item.receivedAt)}>
-          {relativeReceived(item.receivedAt)}
-        </span>
-      ),
+      header: activeTab === 'INVOICED_MANUALLY' ? 'SENT' : 'RECEIVED',
+      render: (item) => activeTab === 'INVOICED_MANUALLY'
+        ? <SentByHandCell item={item} />
+        : (
+          <span className="whitespace-nowrap tms-muted" title={formatReceivedAt(item.receivedAt)}>
+            {relativeReceived(item.receivedAt)}
+          </span>
+        ),
     },
     {
       key: 'status',
