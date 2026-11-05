@@ -10,6 +10,8 @@
  * /tmp/demoY-state.json so a stage can be re-run. Passwords and tokens are never printed.
  */
 import { mkdir } from 'node:fs/promises'
+import { LambdaClient, GetFunctionConfigurationCommand, GetFunctionUrlConfigCommand } from '@aws-sdk/client-lambda'
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { launchBrowser, DEV_ORIGIN, pause } from './lib/cdpBrowser.mjs'
@@ -25,7 +27,7 @@ const say = (msg) => console.log(msg)
 
 /** A headless browser signed in as `ident`, 1440×900. */
 async function openBrowser(ident, { width = 1440, height = 900 } = {}) {
-  const b = await launchBrowser({ origin: DEV_ORIGIN, storage: ident.storage, profilePrefix: 'bcat-demoy-', purpose: 'Step Y demo', viewport: { width, height, deviceScaleFactor: 1 } })
+  const b = await launchBrowser({ origin: process.env.DEMO_ORIGIN ?? DEV_ORIGIN, storage: ident.storage, profilePrefix: 'bcat-demoy-', purpose: 'Step Y demo', viewport: { width, height, deviceScaleFactor: 1 } })
   return b
 }
 const waitSettled = async (b) => {
@@ -83,7 +85,7 @@ STAGES.fixtures = async (ctx) => {
   const rep = profiles.find((p) => p.status === 'ACTIVE' && p.role === 'CUSTOMER_REP') ?? profiles.find((p) => p.status === 'ACTIVE')
   S.ts = ts
   S.repId = rep.id
-  S.senderEmail = `zz-demo-sender-${ts}@example.invalid`
+  S.senderEmail = `ai4bcat+zzdemosender${ts}@gmail.com`
   S.intakeAddress = `zz-demo-tenders-${ts}@example.invalid`
   S.billToId = `zz-demo-bt-${ts}`
   const code = `ZZ_DEMO_${ts}`
@@ -93,7 +95,7 @@ STAGES.fixtures = async (ctx) => {
   S.divisionName = `ZZ DEMO Brokerage ${ts}`
   const customer = await ctx.dir('UPSERT_CUSTOMER', {
     name: `ZZ DEMO Customer ${ts}`, creditLimitCents: 100_000_000, paymentTermsDays: 30, mcNumber: `8${String(ts).slice(-6)}`,
-    billingEmail: `zz-demo-ap-${ts}@example.invalid`,
+    billingEmail: 'ai4bcat@gmail.com',
     contacts: [{ id: `cnt-${randomUUID()}`, name: 'ZZ DEMO Shipper Contact', email: S.senderEmail, types: [] }],
     billToParties: [{ id: S.billToId, name: 'ZZ DEMO Bill To', isDefault: false }],
   })
@@ -147,59 +149,77 @@ const buttonState = (b, pattern) => b.evaluate(`(() => { const el = [...document
 
 STAGES.intake = async (ctx) => {
   const S = ctx.state
-  const rev = await ctx.mint('rev', ['page-intakeReview', 'page-tms'])
-  const intakeUrl = `/tms/shipments/intake/${encodeURIComponent(S.intakeId)}`
   S.log ??= {}
+  const intakeUrl = `/tms/shipments/intake/${encodeURIComponent(S.intakeId)}`
   let row = await getRow(ctx.token, 'IntakeLoad', S.intakeId, INTAKE_SELECTION)
-  if (row.status === 'MOVED') { say(`already moved to ${row.shipmentNumber}`); return }
-
-  // 1–2: the Intake tab for the division, then the tender with fields still missing
-  const admin = await openBrowser(ctx.id)
+  if (row.status === 'MOVED') { S.shipmentId = row.shipmentId; S.shipmentNumber = row.shipmentNumber; S.log.createdStatus = (await bundleOf(ctx)).shipment.status; say(`already created: ${S.shipmentNumber}`); return }
+  const b = await openBrowser(ctx.id)
   try {
-    await admin.navigate('/tms/dashboard'); await pause(3500)
-    await shot(admin, `/tms/shipments/intake?division=${encodeURIComponent(S.divisionCode)}`, '01-intake-tab-new-tender', { wait: () => admin.evaluate(`document.body.innerText.includes('Tender TMS ID')`) })
-    await shot(admin, intakeUrl, '02-intake-tender-fields-missing', { wait: () => admin.evaluate(`document.body.innerText.includes('Customer & billing')`) })
-    S.log.moveWhileMissing = await buttonState(admin, '^Move to active$')
-    say(`  Move to active while fields are missing: ${S.log.moveWhileMissing}`)
-  } finally { await admin.close() }
-  S.log.refusedMissing = await refusal(() => rev.ship('INTAKE_MOVE_TO_ACTIVE', { intakeId: row.id, expectedVersion: versionOf(row) }))
-  say(`  server refuses a move with fields missing: ${S.log.refusedMissing}`)
-  S.log.refusedReviewMissing = await refusal(() => rev.ship('INTAKE_MARK_REVIEWED', { intakeId: row.id, expectedVersion: versionOf(row) }))
-  say(`  server refuses Mark reviewed with fields missing: ${S.log.refusedReviewMissing}`)
-
-  // 3: populate every required field (what Save does), still unreviewed
-  await rev.ship('INTAKE_SAVE_DRAFT', { intakeId: row.id, expectedVersion: versionOf(row), fields: completeFields(S), confirm: { add: INTAKE_KEYS, remove: [] } })
-  row = await getRow(ctx.token, 'IntakeLoad', S.intakeId, INTAKE_SELECTION)
-  say(`  after the save: missing ${JSON.stringify(row.missingFields)} reviewedBy ${row.reviewedBy}`)
-  S.log.refusedUnreviewed = await refusal(() => rev.ship('INTAKE_MOVE_TO_ACTIVE', { intakeId: row.id, expectedVersion: versionOf(row) }))
-  say(`  server refuses a complete but unreviewed move: ${S.log.refusedUnreviewed}`)
-
-  // 4: the reviewer, in the browser: Mark reviewed, then Move to active
-  const rb = await openBrowser(rev)
+    await b.navigate('/tms/dashboard'); await pause(3500)
+    await shot(b, `/tms/shipments/intake?division=${encodeURIComponent(S.divisionCode)}`, '01-intake-tab-new-tender', { wait: () => b.evaluate(`document.body.innerText.includes('Tender TMS ID')`) })
+    await shot(b, intakeUrl, '02-intake-review-fields-missing', { wait: () => b.evaluate(`document.body.innerText.includes('Customer & billing')`) })
+    S.log.moveWhileMissing = await buttonState(b, '^Move to active$')
+    // Create shipment (prefilled from the e-mail) with required fields missing: the form names every blocker
+    await b.navigate(`/tms/shipments/new?intake=${encodeURIComponent(S.intakeId)}`); await waitSettled(b); await pause(4000)
+    await b.click({ selector: '[data-testid="ship-form-create"]' }); await pause(2500)
+    S.log.formIssues = await b.evaluate(`[...document.querySelectorAll('[data-testid^="issue-link"]')].map((e) => e.textContent.trim())`)
+    say(`  create with fields missing is blocked: ${JSON.stringify(S.log.formIssues)}`)
+    await snap(b, '03-create-form-prefilled-blocked')
+  } finally { await b.close() }
+  // the missing fields are filled (what the Save on the review page sends), so the prefill is whole
+  await ctx.ship('INTAKE_SAVE_DRAFT', { intakeId: row.id, expectedVersion: versionOf(row), fields: completeFields(S), confirm: { add: INTAKE_KEYS, remove: [] } })
+  const b2 = await openBrowser(ctx.id)
   try {
-    await rb.navigate('/tms/dashboard'); await pause(3500)
-    await shot(rb, intakeUrl, '03-intake-complete-needs-review', { wait: () => rb.evaluate(`document.body.innerText.includes('Customer & billing')`) })
-    S.log.moveBeforeReview = await buttonState(rb, '^Move to active$')
-    S.log.markBeforeReview = await buttonState(rb, '^Mark reviewed$')
-    say(`  complete, unreviewed: Move to active ${S.log.moveBeforeReview}, Mark reviewed ${S.log.markBeforeReview}`)
-    await rb.click({ selector: '.tms-main button', pattern: '^Mark reviewed$' })
-    await rb.poll(async () => (await getRow(ctx.token, 'IntakeLoad', S.intakeId, INTAKE_SELECTION)).reviewedBy, 'reviewedBy', 30_000)
-    await waitSettled(rb)
-    await snap(rb, '04-intake-reviewed')
-    row = await getRow(ctx.token, 'IntakeLoad', S.intakeId, INTAKE_SELECTION)
-    S.log.reviewedBy = 'the temporary reviewer (page-intakeReview)'
-    S.log.moveAfterReview = await buttonState(rb, '^Move to active$')
-    say(`  reviewed by the reviewer; Move to active now ${S.log.moveAfterReview}`)
-    await rb.click({ selector: '.tms-main button', pattern: '^Move to active$' })
-    await rb.poll(async () => (await getRow(ctx.token, 'IntakeLoad', S.intakeId, INTAKE_SELECTION)).status === 'MOVED', 'moved', 60_000)
-  } finally { await rb.close() }
+    await b2.navigate('/tms/dashboard'); await pause(3500)
+    await b2.navigate(`/tms/shipments/new?intake=${encodeURIComponent(S.intakeId)}`); await waitSettled(b2); await pause(4000)
+    await snap(b2, '04-create-form-prefilled-complete')
+    await b2.click({ selector: '[data-testid="ship-form-create"]' })
+    await b2.poll(async () => /\/tms\/shipments\/shp-/.test(await b2.evaluate('location.pathname')), 'navigate to the new shipment', 60_000).catch(async () => {
+      S.log.formIssuesAfter = await b2.evaluate(`[...document.querySelectorAll('[data-testid^="issue-link"]')].map((e) => e.textContent.trim())`)
+      await snap(b2, '_form-still-blocked'); throw new Error(`form did not create: ${JSON.stringify(S.log.formIssuesAfter)}`)
+    })
+    await waitSettled(b2)
+    S.shipmentId = (await b2.evaluate('location.pathname')).match(/shipments\/(shp-[^/]+)/)[1]
+    await snap(b2, '05-shipment-created-from-form')
+  } finally { await b2.close() }
+  const bundle = await bundleOf(ctx)
+  S.shipmentNumber = bundle.shipment.number
+  S.log.createdStatus = bundle.shipment.status
   row = await getRow(ctx.token, 'IntakeLoad', S.intakeId, INTAKE_SELECTION)
-  S.shipmentId = row.shipmentId
-  S.shipmentNumber = row.shipmentNumber
-  say(`  moved to active: shipment ${row.shipmentNumber} (${row.shipmentId})`)
-  const sh = await getRow(ctx.token, 'Shipment', row.shipmentId, 'id number intakeReviewedBy')
-  S.log.intakeReviewedByIsReviewer = String(sh.intakeReviewedBy ?? '').toLowerCase() === rev.email.toLowerCase()
-  say(`  Shipment.intakeReviewedBy = the reviewer: ${S.log.intakeReviewedByIsReviewer}`)
+  S.log.intakeAfter = { status: row.status, shipmentNumber: row.shipmentNumber }
+  say(`  shipment ${S.shipmentNumber} created from the form, status ${bundle.shipment.status}; intake row ${row.status}; PO codes ${JSON.stringify((bundle.orders[0].references ?? []).map((r) => r.code))}`)
+}
+
+
+/** The seeded in-transit demo shipment: the Tracking drawer is shot on it while job 171's drawer cannot render a thread with an inbound reply (messageAttachments fix pending deploy). */
+async function seedTrackId(ctx) {
+  if (ctx.state.seedTrackId) return ctx.state.seedTrackId
+  const st = await ctx.ship('GET_DEMO_STATE', {})
+  ctx.state.seedTrackId = (st.records ?? []).find((r) => r.kind === 'SHIPMENT' && r.demoKey === 'shipment.intransit')?.recordId
+  return ctx.state.seedTrackId
+}
+
+const INTAKE_LAMBDA = 'amplify-d3dejqzs77khq6-de-shipmentemailintakelambd-YsxNLkk5biqY'
+async function messagesOf(ctx, shipmentId) {
+  const rows = []; let next = null
+  do {
+    const r = await ctx.gql('query($s: String!, $n: String) { listShipmentMessageByShipmentIdAndAt(shipmentId: $s, limit: 200, nextToken: $n) { items { id messageId providerRef inReplyTo direction channel kind status error to cc } nextToken } }', { s: shipmentId, n: next })
+    rows.push(...r.listShipmentMessageByShipmentIdAndAt.items); next = r.listShipmentMessageByShipmentIdAndAt.nextToken
+  } while (next)
+  return rows
+}
+/** A carrier's reply routed by the thread's plus-address through the real intake Function URL (secret read from SSM, never printed). */
+async function postThreadReply(shipmentId, text) {
+  const lambda = new LambdaClient({ region: 'us-east-1' })
+  const env = (await lambda.send(new GetFunctionConfigurationCommand({ FunctionName: INTAKE_LAMBDA }))).Environment?.Variables ?? {}
+  const cfg = JSON.parse(env.AMPLIFY_SSM_ENV_CONFIG ?? '{}').SHIPMENT_EMAIL_INTAKE_SECRET ?? {}
+  const ssm = new SSMClient({ region: 'us-east-1' })
+  let secret
+  for (const name of [cfg.path, cfg.sharedPath].filter(Boolean)) { try { secret = (await ssm.send(new GetParameterCommand({ Name: name, WithDecryption: true }))).Parameter?.Value; if (secret) break } catch { /* next */ } }
+  if (!secret) throw new Error('intake secret unreadable')
+  const url = (await lambda.send(new GetFunctionUrlConfigCommand({ FunctionName: INTAKE_LAMBDA }))).FunctionUrl
+  const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ secret, messageId: `<zz.demo.reply.${Date.now()}@gmail.com>`, to: `ai4bcat+tracking.${shipmentId}@gmail.com`, from: 'ai4bcat@gmail.com', subject: 'Re: Rate confirmation', body: text }) })
+  return { status: res.status, body: await res.json().catch(() => ({})) }
 }
 
 // ───────────────────────────── carrier: packet (MCP), cover, rate con ─────────────────────────────
@@ -220,12 +240,12 @@ STAGES.carrier = async (ctx) => {
   const S = ctx.state
   S.log ??= {}
   const nextYear = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString()
-  const carrierMail = `zz-demo-carrier-${S.ts}@example.invalid`
+  const carrierMail = 'ai4bcat@gmail.com'
   if (!S.carrierId) {
     const n = String(S.ts).slice(-6)
     const carrier = await ctx.car('UPSERT_CARRIER', {
       name: `ZZ DEMO Carrier ${n}`, type: 'TL', status: 'ACTIVE', mcNumber: `9${n}`, dotNumber: `9${n}`,
-      mcpStatus: 'NOT_INVITED', accountingEmail: `zz-demo-carrier-ap-${S.ts}@example.invalid`, dispatcherEmail: `zz-demo-dispatch-${S.ts}@example.invalid`,
+      mcpStatus: 'NOT_INVITED', accountingEmail: 'ai4bcat@gmail.com', dispatcherEmail: 'ai4bcat@gmail.com',
       insurancePolicies: [
         { type: 'AUTO_LIABILITY', company: 'ZZ DEMO Mutual', policyNumber: `ZZAL-${S.ts}`, limitCents: 100000000, expiresAt: nextYear },
         { type: 'CARGO', company: 'ZZ DEMO Mutual', policyNumber: `ZZCG-${S.ts}`, limitCents: 10000000, expiresAt: nextYear },
@@ -233,12 +253,17 @@ STAGES.carrier = async (ctx) => {
       notes: 'ZZ DEMO — Step Y demonstration carrier. Not a real carrier; safe to archive.',
     }).then((r) => r.carrier ?? r)
     S.carrierId = carrier.id; S.carrierName = carrier.name
-    await ctx.car('UPSERT_PAYMENT_METHOD', { carrierId: carrier.id, method: 'ACH', recipientType: 'CARRIER', isPreferred: true, accountName: carrier.name, payeeEmail: `zz-demo-carrier-ap-${S.ts}@example.invalid` }).catch((e) => say(`  (payment method: ${short(e)})`))
+    await ctx.car('UPSERT_PAYMENT_METHOD', { carrierId: carrier.id, method: 'ACH', recipientType: 'CARRIER', isPreferred: true, accountName: carrier.name, payeeEmail: 'ai4bcat@gmail.com' }).catch((e) => say(`  (payment method: ${short(e)})`))
     say(`  carrier ${carrier.name} (${carrier.id}), MCP status NOT_INVITED`)
   }
 
   // the tender arrives TENDER_PENDING: accepting it is undertaking to bill it, and the owner of the cover is whoever accepts
   let bundle = await bundleOf(ctx)
+  if (bundle.shipment.status === 'DRAFT') {
+    await ctx.ship('SUBMIT_ORDER', { shipmentId: S.shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt })
+    bundle = await bundleOf(ctx)
+    say(`  order submitted -> ${bundle.shipment.status}`)
+  }
   if (bundle.shipment.status === 'TENDER_PENDING') {
     bundle = await ctx.ship('TENDER_RESPOND', { shipmentId: S.shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt, decision: 'ACCEPT' })
     say(`  tender accepted -> ${bundle.shipment.status}`)
@@ -271,14 +296,15 @@ STAGES.carrier = async (ctx) => {
     await shot(b, `/tms/carriers/${encodeURIComponent(S.carrierId)}`, '06-carrier-profile-mcp-not-invited', { wait: waitText(b, 'ZZ DEMO Carrier') })
     await shot(b, '/tms/brokerage/integrations/MYCARRIERPACKETS', '07-mcp-integration-validated', { wait: () => b.evaluate(`document.body.innerText.length > 400`) })
 
-    // the packet: the real MCP call (Validate passed)
-    if (!S.packet) {
-      try {
-        const r = await ctx.ship('SEND_CARRIER_SETUP_PACKET', { carrierId: S.carrierId, email: carrierMail })
-        S.packet = { sent: r.sent, mode: r.mode, message: r.message }
-      } catch (e) { S.packet = { sent: false, mode: S.log.mcpValidate.mode, message: short(e) } }
-      say(`  setup packet: ${JSON.stringify(S.packet)}`)
-    }
+    // Find & Invite: a READ-ONLY MyCarrierPackets lookup of MC 274623. No invitation is ever sent by this script.
+    await b.navigate('/tms/carriers/find'); await waitSettled(b); await pause(1500)
+    await b.evaluate(`document.querySelector('.tms-main input').focus()`)
+    await b.command('Input.insertText', { text: '274623' }); await pause(300)
+    await b.click({ selector: 'button', text: 'Look up' })
+    await b.poll(() => b.evaluate(`/Risk assessment/.test(document.body.innerText)`), 'MCP lookup result', 60_000).catch(() => say('  (lookup result did not render)'))
+    S.log.findLookup = (await b.evaluate(`(document.querySelector('.tms-main').innerText.match(/[A-Z ]+\\n?MC 274623[^\\n]*/) ?? [null])[0]`))
+    await snap(b, '08a-find-and-invite-lookup-read-only')
+    S.packet = { sent: false, note: 'no invitation sent (read-only lookup only)' }
 
     // Carrier Sales: the load is waiting for cover (search narrows the 49-row queue to ours)
     await b.navigate('/tms/carrier-sales'); await waitSettled(b)
@@ -286,13 +312,25 @@ STAGES.carrier = async (ctx) => {
     await typeInto(b, 'input[placeholder^="Search shipment"]', S.shipmentNumber)
     await b.poll(waitText(b, S.shipmentNumber), 'our load in Needs cover', 60_000).catch(() => say('  (our load did not show in Needs cover)'))
     await snap(b, '08-carrier-sales-needs-cover')
+    for (const [tab, file] of [['Offers', '08c-carrier-sales-offers-hub'], ['Unmatched', '08d-carrier-sales-unmatched']]) {
+      await b.click({ selector: '[role=tab]', pattern: `^${tab}` }).catch(() => {}); await pause(2500); await snap(b, file)
+    }
 
-    // cover: book the carrier
+    // Cover dialog (read-only lookup of the same MC; nothing is assigned from it)
+    await b.navigate(shipUrl(S, 'carrier')); await waitSettled(b); await pause(2000)
+    await b.click({ selector: 'button', text: 'Cover' }); await pause(1200)
+    await b.evaluate(`document.querySelector('[role=dialog] input').focus()`)
+    await b.command('Input.insertText', { text: '274623' }); await pause(300)
+    await b.click({ selector: '[role=dialog] button', text: 'Look up' }); await pause(8000)
+    await snap(b, '08b-cover-dialog-lookup')
+    S.log.coverDialog = (await b.evaluate(`([...document.querySelectorAll('[role=dialog]')].pop()?.innerText ?? '').replace(/\\s+/g,' ').slice(0,300)`))
+    await b.press('Escape'); await pause(500)
+    // cover: the ZZ carrier (not in MCP) is assigned through the same action the dialog calls
     const load = bundle.loads[0]
     if (!activeLeg(bundle)) {
       await ctx.ship('BOOK_CARRIER', {
         loadId: load.id, expectedUpdatedAt: load.updatedAt, carrierId: S.carrierId, carrierRateCents: 180000,
-        driverName: 'ZZ DEMO Driver', driverPhone: '+15555550123', dispatcherEmail: `zz-demo-dispatch-${S.ts}@example.invalid`, truckNumber: 'ZZ-T1', trailerNumber: 'ZZ-TR1',
+        driverName: 'ZZ DEMO Driver', driverPhone: '+15555550123', dispatcherEmail: 'ai4bcat@gmail.com', truckNumber: 'ZZ-T1', trailerNumber: 'ZZ-TR1',
         acknowledgeWarnings: ['MISSING_DOC:COI_CARGO', 'MISSING_DOC:COI_AUTO', 'MISSING_DOC:W9', 'MISSING_DOC:CARRIER_AGREEMENT', 'INSURANCE_UNVERIFIED'],
       })
       bundle = await bundleOf(ctx)
@@ -307,7 +345,7 @@ STAGES.carrier = async (ctx) => {
 
     // MCP reports the packet complete: the nightly MCP sync writes this status. It is stood in here because a ZZ carrier on a made-up DOT cannot fill in a packet.
     const cur = (await ctx.gql(`query { getCarrier(id: ${JSON.stringify(S.carrierId)}) { id updatedAt mcpStatus } }`)).getCarrier
-    if (cur.mcpStatus !== 'ACCEPTABLE') await ctx.car('UPSERT_CARRIER', { id: S.carrierId, expectedUpdatedAt: cur.updatedAt, name: S.carrierName, type: 'TL', status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })
+    if (cur.mcpStatus !== 'ACCEPTABLE') await ctx.car('UPSERT_CARRIER', { id: S.carrierId, expectedUpdatedAt: cur.updatedAt, name: S.carrierName, type: 'TL', status: 'ACTIVE', mcpStatus: 'ACCEPTABLE', mcNumber: `9${String(S.ts).slice(-6)}`, dotNumber: `9${String(S.ts).slice(-6)}`, accountingEmail: 'ai4bcat@gmail.com', dispatcherEmail: 'ai4bcat@gmail.com', insurancePolicies: [{ type: 'AUTO_LIABILITY', company: 'ZZ DEMO Mutual', policyNumber: `ZZAL-${S.ts}`, limitCents: 100000000, expiresAt: new Date(Date.now() + 365 * 864e5).toISOString() }, { type: 'CARGO', company: 'ZZ DEMO Mutual', policyNumber: `ZZCG-${S.ts}`, limitCents: 10000000, expiresAt: new Date(Date.now() + 365 * 864e5).toISOString() }] })
     await shot(b, `/tms/carriers/${encodeURIComponent(S.carrierId)}`, '10-carrier-profile-mcp-packet-complete', { wait: waitText(b, 'ZZ DEMO Carrier') })
 
     // rate con
@@ -338,6 +376,22 @@ STAGES.carrier = async (ctx) => {
     S.log.rateCon = { status: signed.rateConStatus, version: signed.rateConVersion }
     say(`  after the carrier signed: rate con ${signed.rateConStatus}`)
   }
+  // the e-mail evidence and the carrier's reply on the per-load thread
+  const out = (await messagesOf(ctx, S.shipmentId)).find((m) => m.direction === 'OUT' && m.kind === 'RATE_CON')
+  S.log.rateConEmail = out ? { status: out.status, ses: Boolean(out.providerRef), toAll: String(out.to).split(/[,;]/).every((x) => /^ai4bcat(\+[^@]*)?@gmail\.com$/.test(x.trim())) } : null
+  say(`  rate con e-mail row: ${JSON.stringify(S.log.rateConEmail)}`)
+  if (!S.replyPosted) {
+    const r = await postThreadReply(S.shipmentId, 'ZZ DEMO reply: driver is assigned and on the way.')
+    S.replyPosted = r.status === 200 && r.body.shipmentId === S.shipmentId
+    S.log.reply = { status: r.status, routed: S.replyPosted }
+    say(`  carrier reply routed to the thread: ${JSON.stringify(S.log.reply)}`)
+  }
+  const b3 = await openBrowser(ctx.id)
+  try {
+    await b3.navigate('/tms/dashboard'); await pause(3500)
+    await shot(b3, shipUrl(S, 'carrier'), '13a-carrier-assignment-ladder-signed', { wait: waitText(b3, 'ZZ DEMO Carrier') })
+    await shot(b3, `/tms/tracking?shipment=${encodeURIComponent(await seedTrackId(ctx))}`, '13b-load-tracking-drawer-sms-email-panes', { wait: () => b3.evaluate(`document.body.innerText.length > 800`) })
+  } finally { await b3.close() }
 }
 
 // ───────────────────────────── tracking, dispatch, delivery, POD ─────────────────────────────
@@ -397,12 +451,12 @@ STAGES.tracking = async (ctx) => {
   try {
     await b.navigate('/tms/dashboard'); await pause(3500)
     await shot(b, `/tms/tracking?assignee=${encodeURIComponent(S.trackerId)}`, '14-tracking-board-by-assignee', { wait: waitText(b, S.shipmentNumber) })
-    await shot(b, shipUrl(S, 'tracking'), '15-shipment-tracking-tab', { wait: waitText(b, 'Tracking') })
+    await shot(b, `/tms/tracking?shipment=${encodeURIComponent(await seedTrackId(ctx))}`, '15-load-tracking-drawer-summary-map', { wait: () => b.evaluate(`document.body.innerText.length > 800`) })
     await b.navigate('/tms/brokerage'); await waitSettled(b)
     await b.poll(waitText(b, 'Tracking automation'), 'the tracking automation card', 60_000).catch(() => say('  (tracking automation card not found)'))
     await snapAt(b, '16-settings-tracking-automation', 'Tracking automation')
     await snapAt(b, '16b-settings-documents-pod-request', '^Documents')
-    await shot(b, '/tms/tracking?assignee=all&focus=checkcalls', '17-check-calls', { wait: waitText(b, 'Check') })
+    await shot(b, '/tms/tracking?assignee=all&focus=checkcalls', '17-check-calls-focus', { wait: waitText(b, 'Tracking') })
   } finally { await b.close() }
 }
 
@@ -461,7 +515,7 @@ STAGES.delivered = async (ctx) => {
   const b = await openBrowser(ctx.id)
   try {
     await b.navigate('/tms/dashboard'); await pause(3500)
-    await shot(b, shipUrl(S, 'tracking'), '18-shipment-tracking-delivered', { wait: waitText(b, 'Tracking') })
+    await shot(b, `/tms/tracking?assignee=all`, '18-load-tracking-board-all', { wait: waitText(b, S.shipmentNumber) })
     await shot(b, shipUrl(S, 'documents'), '19-shipment-documents-pod', { wait: waitText(b, 'POD') })
     await shot(b, '/tms/tracking?assignee=all&focus=docs', '20-document-review-workstation', { wait: waitText(b, 'Document') })
   } finally { await b.close() }
@@ -484,6 +538,25 @@ STAGES.billing = async (ctx) => {
   const leg = activeLeg(bundle)
   say(`  shipment ${bundle.shipment.status}, load ${bundle.loads[0].status}, order ${order.arStatus}`)
 
+  // 0. Push to Load Review from the Shipments board (the Demo chip isolates the ZZ rows)
+  if (!S.pushed) {
+    const bp = await openBrowser(ctx.id)
+    try {
+      await bp.navigate('/tms/dashboard'); await pause(3500)
+      await bp.navigate('/tms/shipments?demo=1'); await waitSettled(bp)
+      await bp.poll(waitText(bp, S.shipmentNumber), 'our delivered row on the board', 60_000).catch(() => say('  (row not on the board)'))
+      await pause(1500)
+      await bp.evaluate(`(() => { const row = [...document.querySelectorAll('tbody tr')].find((r) => r.textContent.includes(${JSON.stringify(S.shipmentNumber)})); row?.querySelector('input[type=checkbox]')?.click() })()`)
+      await pause(800)
+      await snap(bp, '21a-shipments-board-row-selected-demo-chip')
+      await bp.click({ selector: 'button', pattern: 'Push to Load Review' }).catch((e) => say(`  (push button: ${short(e)})`))
+      await pause(5000)
+      S.log.pushText = await bp.evaluate(`(document.body.innerText.match(/[^\\n]*(Load Review|refused|pushed)[^\\n]*/gi) ?? []).slice(0, 4)`)
+      await snap(bp, '21b-pushed-to-load-review-outcome')
+      S.pushed = true
+    } finally { await bp.close() }
+    say(`  push outcome: ${JSON.stringify(S.log.pushText)}`)
+  }
   // 1. Load Review says what is still wrong
   let review = await lr.ship('REVIEW_LOAD', { shipmentId: S.shipmentId })
   S.log.reviewBefore = review.releaseGate.missing.map((m) => m.message)
@@ -531,6 +604,12 @@ STAGES.billing = async (ctx) => {
     const gen = await ctx.fin('GENERATE_INVOICE', { orderId: bundle.orders[0].id })
     S.invoiceId = gen.invoice.id; S.invoiceNumber = gen.invoice.number
     say(`  invoice ${gen.invoice.number} ${gen.invoice.status} total ${gen.invoice.totalCents}`)
+  }
+  if (!S.invoiceEmailed) {
+    const em = await ctx.fin('EMAIL_INVOICE', { invoiceId: S.invoiceId, to: ['ai4bcat@gmail.com'] }).catch((e) => ({ emailStatus: 'ERROR', emailError: short(e) }))
+    S.invoiceEmailed = em.emailStatus === 'SENT'
+    S.log.invoiceEmail = { status: em.emailStatus, ses: Boolean(em.notice?.messageId), recipientsInMailbox: [...(em.to ?? []), ...(em.cc ?? [])].every((x) => /^ai4bcat(\+[^@]*)?@gmail\.com$/.test(x)), error: em.emailError ?? null }
+    say(`  invoice e-mail: ${JSON.stringify(S.log.invoiceEmail)}`)
   }
   if (!S.carrierInvoiceDoc) {
     // the carrier's own invoice, attached to its assignment (the carrier-scope paperwork gate reads documents placed on the leg)
@@ -691,7 +770,7 @@ STAGES.verify146 = async (ctx) => {
   const load = bundle.loads[0]
   V.loadPlanStored = load.checkCallPlan
   const c = (await ctx.gql(`query { getCustomer(id: ${JSON.stringify(S.customerId)}) { id name updatedAt mcNumber } }`)).getCustomer
-  const up = await ctx.dir('UPSERT_CUSTOMER', { id: c.id, expectedUpdatedAt: c.updatedAt, name: c.name, mcNumber: c.mcNumber, billingEmail: `zz-demo-ap2-${S.ts}@example.invalid`, creditLimitCents: 100000000 }).then((r) => ({ ok: true, billingEmail: !!(r.customer ?? r).billingEmail })).catch((e) => ({ ok: false, error: short(e) }))
+  const up = await ctx.dir('UPSERT_CUSTOMER', { id: c.id, expectedUpdatedAt: c.updatedAt, name: c.name, mcNumber: c.mcNumber, billingEmail: 'ai4bcat@gmail.com', creditLimitCents: 100000000 }).then((r) => ({ ok: true, billingEmail: !!(r.customer ?? r).billingEmail })).catch((e) => ({ ok: false, error: short(e) }))
   V.upsertCustomer = up
   const b = await openBrowser(ctx.id)
   try {
@@ -720,6 +799,59 @@ STAGES.verify147 = async (ctx) => {
     await snap(b, '43-shipments-board-demo-chip')
   } finally { await b.close() }
   say(JSON.stringify(V))
+}
+
+// ───────────────────────────── tour: the rest of the structure ─────────────────────────────
+STAGES.tour = async (ctx) => {
+  const S = ctx.state
+  S.log ??= {}
+  S.log.tour ??= {}
+  // a quote request in the SIMULATED inbox (Google OAuth is not connected on dev): added the way "Add request" does
+  if (false) {
+    const r = await ctx.spot('SPOT_ADD_MANUAL', { text: `Hi, can you quote a dry van from Lubbock, TX to Shreveport, LA picking up ${addDays(chicagoToday(), 3)}? 38,000 lbs paper goods. ZZ DEMO request. Thanks, ZZ DEMO Shipper Contact`, subject: 'ZZ DEMO quote request: Lubbock TX to Shreveport LA', fromEmail: S.senderEmail, fromName: 'ZZ DEMO Shipper Contact' }).catch((e) => ({ error: short(e) }))
+    if (r.error) { S.log.tour.spotAdd = r.error; say(`  spot add: ${r.error}`) } else { S.spotId = r.request.id; say(`  spot request ${S.spotId}`) }
+  }
+  const b = await openBrowser(ctx.id)
+  const t = S.log.tour
+  const page = async (url, file, text, extra) => {
+    try {
+      await shot(b, url, file, { wait: text ? waitText(b, text) : () => b.evaluate('document.body.innerText.length > 400') })
+      if (extra) await extra()
+    } catch (e) { t[file] = short(e); say(`  (${file}: ${short(e)})`) }
+  }
+  try {
+    await b.navigate('/tms/dashboard'); await pause(3500)
+    await page('/tms/dashboard', '50-company-dashboard-kpis', 'Dashboard')
+    await page('/tms/dashboard/new', '51-new-dashboard-chat-builder', null)
+    const search = async (text) => {
+      await b.evaluate(`(() => { const el = [...document.querySelectorAll('input')].find((e) => /search/i.test(e.placeholder || '') && e.offsetParent); el?.focus() })()`)
+      await b.command('Input.insertText', { text }); await pause(2500)
+    }
+    await page('/tms/customers', '52-customers-dense-grid', 'Customer', async () => { await search('ZZ DEMO Customer'); await snap(b, '52-customers-dense-grid') })
+    await page('/tms/carriers', '53-carriers-dense-grid', 'Carrier', async () => { await search('ZZ DEMO Carrier'); await snap(b, '53-carriers-dense-grid') })
+    await page('/tms/brokerage/users', '54-settings-users-and-claims', 'Users')
+    await page('/tms/rates/spot', '55-spot-inbox', 'Spot', async () => {
+      await pause(2000)
+      // "Add a request" in the simulated inbox (Google OAuth is not connected on dev), owned by this session's user
+      await b.click({ selector: 'button', pattern: 'Add (a )?request' }).catch((e) => { t.spotAddBtn = short(e) })
+      await pause(1200)
+      await b.evaluate(`document.querySelector('[role=dialog] textarea')?.focus()`)
+      await b.command('Input.insertText', { text: `Hi, can you quote a dry van from Lubbock, TX to Shreveport, LA picking up ${addDays(chicagoToday(), 3)}? 38,000 lbs paper goods. ZZ DEMO request. Thanks` }); await pause(500)
+      await b.click({ selector: '[data-testid="spot-add-submit"]' }).catch((e) => { t.spotSubmit = short(e) })
+      await pause(6000)
+      await snap(b, '55-spot-inbox')
+      await b.evaluate(`(() => { const row = [...document.querySelectorAll('tbody tr, [role=row], [data-testid*=spot-row]')].find((r) => /Lubbock|ZZ DEMO/.test(r.textContent)); row?.click() })()`)
+      await pause(5000)
+      await snap(b, '56-spot-request-drawer-suggested-response')
+      t.spotDrawer = (await b.evaluate(`document.body.innerText.replace(/\\s+/g,' ').match(/Suggested[^]{0,300}/)?.[0] ?? null`))
+    })
+    await page('/tms/invoicing/payable', '57-accounts-payable-and-ap-inbox', 'Accounts Payable')
+    await page('/tms/invoicing', '58-accounts-receivable', 'Accounts Receivable')
+    await page('/feedback', '59-feedback-page', null)
+    await page('/tms/load-review', '60-load-review-queue', 'Load Review')
+    await page('/tms/rates', '61-quotes', 'Quotes')
+  } finally { await b.close() }
+  say(JSON.stringify(t))
 }
 
 // ───────────────────────────── retire: tidy an earlier attempt ─────────────────────────────

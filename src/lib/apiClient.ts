@@ -1,4 +1,5 @@
 import { generateClient } from 'aws-amplify/data'
+import { messageAttachments } from '@/lib/shipmentThread'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
 import outputs from '../../amplify_outputs.json'
 import type { Load, Stop, ApptType, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
@@ -8222,7 +8223,9 @@ export async function listShipmentMessages(shipmentId: string): Promise<Shipment
   const rows = await listAllByIndex<ShipmentMessageRecord>(
     'listShipmentMessageByShipmentIdAndAt', { shipmentId }, SHIPMENT_MESSAGE_FIELDS, 200,
   )
-  return rows.sort((a, b) => String(a.at).localeCompare(String(b.at)))
+  return rows
+    .map((row) => ({ ...row, attachments: messageAttachments(row.attachments) }))
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)))
 }
 
 export async function sendShipmentMessage(input: {

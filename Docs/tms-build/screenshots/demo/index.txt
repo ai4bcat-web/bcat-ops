@@ -1,0 +1,57 @@
+01-intake-tab-new-tender.png	Intake tab, new tender row
+02-intake-review-fields-missing.png	Intake review, fields missing
+03-create-form-prefilled-blocked.png	Create form blocked, four issues
+04-create-form-prefilled-complete.png	Create form prefilled, complete
+05-shipment-accepted-need-to-cover.png	Shipment open, needs cover
+05-shipment-created-from-form.png	Shipment created from form
+06-carrier-profile-mcp-not-invited.png	ZZ carrier profile page
+07-mcp-integration-validated.png	MyCarrierPackets integration, LIVE, validated
+08-carrier-sales-needs-cover.png	Carrier Sales, Needs cover tab
+08a-find-and-invite-lookup-read-only.png	Find and Invite, MC 274623 lookup
+08b-cover-dialog-lookup.png	Cover dialog, MC lookup
+08c-carrier-sales-offers-hub.png	Carrier Sales Offers hub tab
+08d-carrier-sales-unmatched.png	Carrier Sales Unmatched tab
+09-shipment-carrier-covered.png	Carrier tab after cover
+10-carrier-profile-mcp-packet-complete.png	Carrier profile, packet complete
+11-rate-con-sent.png	Rate con sent, real e-mail
+12-carrier-signs-rate-con-link.png	Carrier signing page, public link
+13-rate-con-signed-confirmation.png	Rate con signed confirmation
+13a-carrier-assignment-ladder-signed.png	Carrier assignment ladder, all rungs
+14-tracking-board-by-assignee.png	Load Tracking board by assignee
+15-load-tracking-drawer-summary-map.png	Tracking drawer, summary, map, panes
+16-settings-tracking-automation.png	Settings, automatic check calls, POD
+16b-settings-documents-pod-request.png	Settings, shipments and documents cards
+17-check-calls-focus.png	Check calls focus view
+18-load-tracking-board-all.png	Load Tracking board, all assignees
+19-shipment-documents-pod.png	Shipment documents, BOL and POD
+21-load-review-blocked.png	Load Review drawer, carrier bill missing
+21a-shipments-board-row-selected-demo-chip.png	Shipments board, Demo chip, selected
+21b-pushed-to-load-review-outcome.png	Push to Load Review outcome
+22-load-review-ready.png	Load Review drawer, ready
+23-load-review-released.png	Load Review, Released tab
+24-invoice.png	Invoice 20006 issued
+25-carrier-bill.png	Carrier bill detail
+26-factoring-queue.png	Factoring queue row
+27-shipment-invoicing-tab.png	Shipment Invoicing tab
+30-own-asset-no-driver-yet.png	Ivan Cartage load, no driver
+31-own-asset-book-dialog-driver-required.png	Book dialog, driver required
+32-own-asset-book-dialog-driver-picked.png	Book dialog, roster driver picked
+33-own-asset-driver-assigned.png	Own-asset driver assigned
+34-schedule-driver-day.png	Schedule, driver day
+35-calendar-own-fleet.png	Calendar, own fleet load
+36-own-asset-dispatched.png	Own-asset load dispatched
+37-own-asset-carrier-pay-is-settlement.png	Carrier Pay tab, settlement note
+38-owner-operator-settlement.png	Owner-operator settlement line
+39-amazon-settlements-payroll-banner.png	Amazon settlements, Wednesday banner
+40-accounting-vendors-not-driver-pay.png	Vendors, driver pay elsewhere
+50-company-dashboard-kpis.png	Company Dashboard KPIs
+51-new-dashboard-chat-builder.png	New dashboard chat builder
+52-customers-dense-grid.png	Customers dense grid, ZZ search
+53-carriers-dense-grid.png	Carriers dense grid, ZZ search
+54-settings-users-and-claims.png	Settings, Users and roles
+55-spot-inbox.png	Spot inbox (caller error, open)
+57-accounts-payable-and-ap-inbox.png	Accounts Payable with AP inbox
+58-accounts-receivable.png	Accounts Receivable
+59-feedback-page.png	Feedback page
+60-load-review-queue.png	Load Review queue
+61-quotes.png	Quotes list

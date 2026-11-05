@@ -404,7 +404,7 @@ export function connectedRow(over: Partial<GmailConnectionRecord> = {}): GmailCo
   } as GmailConnectionRecord
 }
 
-export function makeRig(opts: { dev?: boolean; aiAgents?: AiAgentsSettings | null } = {}): TestRig {
+export function makeRig(opts: { dev?: boolean; aiAgents?: AiAgentsSettings | null; directory?: Record<string, string> } = {}): TestRig {
   const clock = { now: new Date('2026-11-04T18:00:00Z') }
   const store = memoryStore(() => clock.now)
   const port = new FakePort()
@@ -421,6 +421,7 @@ export function makeRig(opts: { dev?: boolean; aiAgents?: AiAgentsSettings | nul
     },
     now: () => clock.now,
     devStack: opts.dev ?? false,
+    resolveEmail: async (username) => opts.directory?.[username] ?? '',
     portalOrigins: ['https://ops.zz-bcat.test'],
     portalOrigin: 'https://ops.zz-bcat.test',
     ownDomains: ['zz-bcat.test'],

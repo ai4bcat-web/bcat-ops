@@ -515,3 +515,48 @@ describe('suggestion follows the rep’s edits', () => {
     expect(out.request.suggestion).toMatchObject({ basis: 'STUB', stub: true })
   })
 })
+
+describe('caller resolution: ID token and ACCESS token', () => {
+  const access = (username: string, groups = ['page-quotes']) => ({ sub: `sub-${username}`, username, claims: { 'cognito:groups': groups, token_use: 'access' } })
+
+  it('an access token (no e-mail claim) resolves the e-mail through Cognito, on every kind of action', async () => {
+    const rig = makeRig({ directory: { 'uuid-rep-1': REP_EMAIL } })
+    rig.store.connections.set('uuid-rep-1', connectedRow({ id: 'uuid-rep-1' }))
+    const who = access('uuid-rep-1')
+    const status = (await dispatch('SPOT_STATUS', {}, who, rig.deps)) as { connection: { id: string } | null }
+    expect(status.connection?.id).toBe('uuid-rep-1')
+    expect(await dispatch('SPOT_COUNT', {}, who, rig.deps)).toEqual({ new: 0, needsInfo: 0, needsAttention: 0 })
+    await expect(dispatch('SPOT_LIST_REQUESTS', {}, who, rig.deps)).resolves.toMatchObject({ rows: [] })
+    // The OAuth start path uses the resolved e-mail as the login hint and the stored owner e-mail.
+    await dispatch('SPOT_OAUTH_START', { redirectUri: 'https://ops.zz-bcat.test/tms/rates/spot/callback' }, who, rig.deps)
+    expect(rig.store.connections.get('uuid-rep-1')!.pendingState).toBeTruthy()
+  })
+
+  it('an access token for an owner resolves to ADMIN rights', async () => {
+    const rig = makeRig({ directory: { 'uuid-owner': 'ryne@bcatcorp.com' } })
+    await expect(dispatch('SPOT_SAVE_SETTINGS', { settings: { retentionDays: 30 } }, access('uuid-owner', []), rig.deps)).resolves.toBeTruthy()
+  })
+
+  it('an ID token still works without any lookup', async () => {
+    const rig = makeRig()
+    rig.deps.resolveEmail = async () => {
+      throw new Error('must not be called')
+    }
+    await expect(dispatch('SPOT_COUNT', {}, REP, rig.deps)).resolves.toBeTruthy()
+  })
+
+  it('refuses as Unauthorized when the e-mail cannot be resolved, and never reads data', async () => {
+    const rig = makeRig({ directory: {} })
+    await expect(dispatch('SPOT_COUNT', {}, access('uuid-unknown'), rig.deps)).rejects.toThrow(/Unauthorized: could not resolve caller/)
+    rig.deps.resolveEmail = async () => {
+      throw new Error('cognito down')
+    }
+    await expect(dispatch('SPOT_STATUS', {}, access('uuid-x'), rig.deps)).rejects.toThrow(/Unauthorized/)
+    await expect(dispatch('SPOT_STATUS', {}, null, rig.deps)).rejects.toThrow(/missing identity/)
+  })
+
+  it('still enforces the page-group rule after resolving', async () => {
+    const rig = makeRig({ directory: { 'uuid-d': 'd@zz-bcat.test' } })
+    await expect(dispatch('SPOT_COUNT', {}, access('uuid-d', ['page-dispatch']), rig.deps)).rejects.toThrow(/Forbidden/)
+  })
+})

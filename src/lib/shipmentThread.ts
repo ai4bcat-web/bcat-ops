@@ -129,3 +129,15 @@ export function shipmentIdFromSubject(subject: string | null | undefined): strin
   const m = /\[ref ([A-Za-z0-9_-]+)\]/.exec(String(subject ?? ''))
   return m ? m[1] : null
 }
+
+/**
+ * `ShipmentMessage.attachments` is an AWSJSON column: AppSync returns it as JSON text, so a row that carries attachments (or
+ * an inbound reply the intake wrote) reached the Tracking drawer as a string and `.map` crashed the whole drawer.
+ */
+export function messageAttachments(raw: unknown): { name: string; contentType?: string | null; size?: number | null }[] {
+  let value = raw
+  for (let i = 0; i < 2 && typeof value === 'string'; i++) {
+    try { value = JSON.parse(value) } catch { return [] }
+  }
+  return Array.isArray(value) ? (value as { name: string }[]) : []
+}

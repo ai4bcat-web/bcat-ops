@@ -77,3 +77,15 @@ describe('subject reference token', () => {
     expect(shipmentIdFromSubject(null)).toBeNull()
   })
 })
+
+describe('messageAttachments', () => {
+  it('reads the JSON text AppSync returns, and never hands back a non-array', async () => {
+    const { messageAttachments } = await import('./shipmentThread')
+    expect(messageAttachments('[{"name":"pod.pdf"}]')).toEqual([{ name: 'pod.pdf' }])
+    expect(messageAttachments([{ name: 'a' }])).toEqual([{ name: 'a' }])
+    expect(messageAttachments('[]')).toEqual([])
+    expect(messageAttachments(null)).toEqual([])
+    expect(messageAttachments('{"name":"x"}')).toEqual([])
+  })
+})
+

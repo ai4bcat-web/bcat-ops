@@ -89,11 +89,21 @@ function groupsOf(identity: AppSyncIdentity): string[] {
   return []
 }
 
-export function authorize(action: string, identity: AppSyncIdentity | null | undefined): SpotCaller {
+/**
+ * The caller's e-mail: the `email` claim of an ID token, else a username that is an address, else
+ * (an ACCESS token carries no e-mail claim, which is what a browser sends) the injected resolver,
+ * a Cognito AdminGetUser lookup of the username.
+ */
+export async function authorize(
+  action: string,
+  identity: AppSyncIdentity | null | undefined,
+  resolveEmail?: (username: string) => Promise<string>,
+): Promise<SpotCaller> {
   if (!identity) throw new Error('Unauthorized: missing identity')
-  const candidates = [claimString(identity.claims, 'email'), identity.username]
-  const email = (candidates.find((v): v is string => typeof v === 'string' && v.includes('@')) ?? '').toLowerCase().trim()
+  const candidates = [claimString(identity.claims, 'email'), identity.username, claimString(identity.claims, 'cognito:username')]
+  let email = (candidates.find((v): v is string => typeof v === 'string' && v.includes('@')) ?? '').toLowerCase().trim()
   const userId = identity.username ?? claimString(identity.claims, 'cognito:username') ?? identity.sub ?? ''
+  if (!email && userId && resolveEmail) email = (await resolveEmail(userId).catch(() => '')).toLowerCase().trim()
   if (!email || !userId) throw new Error('Unauthorized: could not resolve caller')
   const groups = groupsOf(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
@@ -748,7 +758,7 @@ export async function dispatch(
   }
   const handler = (HANDLERS as Record<string, Handler | undefined>)[action]
   if (!handler) throw new Error(`Unknown action: ${action}`)
-  const caller = authorize(action, identity)
+  const caller = await authorize(action, identity, deps.resolveEmail)
   if (DEV_ONLY[action] && !deps.devStack) throw new Error(`${action} is only available on the dev stack`)
   return handler(deps, caller, inputOf(rawInput))
 }

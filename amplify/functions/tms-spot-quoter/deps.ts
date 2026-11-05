@@ -4,6 +4,7 @@
  * S3, Gmail REST, Anthropic); tests build their
  * own from fakes. Nothing outside this file constructs an AWS client except store.ts.
  */
+import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
 import type {
   CrmContactRecord,
@@ -81,6 +82,8 @@ export interface SpotDeps {
   /** Registry-style provider modes: LIVE only when the credentials exist. */
   providerModes(): Promise<{ gmail: 'STUB' | 'LIVE'; dat: 'STUB' | 'LIVE' }>
   now(): Date
+  /** Cognito username -> e-mail (an access token has no e-mail claim); '' when unknown. */
+  resolveEmail?(username: string): Promise<string>
   /** Per model call; a slower answer is treated as an error (retried next run). */
   modelTimeoutMs?: number
   devStack: boolean
@@ -101,6 +104,8 @@ function parseOrigins(raw: string | undefined): string[] {
   }
   return []
 }
+
+let cognito: CognitoIdentityProviderClient | undefined
 
 export function createSpotDeps(): SpotDeps {
   const store = createDynamoStore()
@@ -142,6 +147,12 @@ export function createSpotDeps(): SpotDeps {
       return { gmail: client ? 'LIVE' : 'STUB', dat: dat ? 'LIVE' : 'STUB' }
     },
     now: () => new Date(),
+    async resolveEmail(username) {
+      const me = await (cognito ??= new CognitoIdentityProviderClient({})).send(
+        new AdminGetUserCommand({ UserPoolId: process.env.USER_POOL_ID ?? '', Username: username }),
+      )
+      return me.UserAttributes?.find((a) => a.Name === 'email')?.Value ?? ''
+    },
     devStack: IS_DEV_STACK,
     portalOrigins: parseOrigins(process.env.PORTAL_ORIGINS),
     portalOrigin: process.env.PORTAL_ORIGIN ?? parseOrigins(process.env.PORTAL_ORIGINS).slice(-1)[0] ?? '',

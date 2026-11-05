@@ -16,7 +16,7 @@ export async function saveState(state) { await writeFile(STATE_FILE, JSON.string
 
 export async function withDemoAdmin(fn, groups = ['ADMIN', 'page-tms']) {
   if (DEV_API !== 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql' || DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('dev only')
-  const email = `zz-demoy-${Date.now()}@example.invalid`
+  const email = `ai4bcat+zzdemoy${Date.now()}@gmail.com`
   const id = await mintIdentity(email, groups)
   const ctx = {
     email, id, origin: DEV_ORIGIN, token: id.token,
@@ -25,13 +25,14 @@ export async function withDemoAdmin(fn, groups = ['ADMIN', 'page-tms']) {
     fin: routerAs(id.token, 'tmsFinanceActions'),
     trk: routerAs(id.token, 'tmsTrackingActions'),
     car: routerAs(id.token, 'tmsCarrierActions'),
+    spot: routerAs(id.token, 'tmsSpotActions'),
     gql: (q, v) => gql(id.token, q, v),
     state: await loadState(),
     save: async () => saveState(ctx.state),
     minted: [],
     /** Another throwaway login (e.g. a single-grant persona); deleted with the rest. */
     mint: async (suffix, groups) => {
-      const e = `zz-demoy-${suffix}-${Date.now()}@example.invalid`
+      const e = `ai4bcat+zzdemoy${suffix}${Date.now()}@gmail.com`
       const ident = await mintIdentity(e, groups)
       ctx.minted.push(e)
       return { email: e, ...ident, ship: routerAs(ident.token, 'tmsShipmentActions') }

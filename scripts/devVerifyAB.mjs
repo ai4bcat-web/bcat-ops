@@ -642,6 +642,10 @@ async function ab11Ui(b, ctx, theme) {
     if (!matches(id)) return
     try {
       const detail = await fn()
+      // A real browser sends an ACCESS token (no e-mail claim): any router that cannot resolve the caller shows this text.
+      await pause(1500)
+      const page = await b.evaluate(`document.body?.innerText ?? ''`)
+      expect(!/Unauthorized|could not resolve caller/i.test(page), `${id}: the page shows an authorization error ("${(page.match(/.{0,40}(Unauthorized|could not resolve caller).{0,40}/i) ?? [''])[0].replace(/\s+/g, ' ')}")`)
       const problems = problemList(b).slice(0, 3)
       if (problems.length) throw new Error(problems.join(' | '))
       line('PASS', `${id} ${theme}`, detail)
@@ -651,6 +655,8 @@ async function ab11Ui(b, ctx, theme) {
     await openPage(b, '/tms/rates/spot')
     const text = await b.evaluate(`document.querySelector('.tms-main')?.innerText ?? ''`)
     expect(/spot/i.test(text), 'the Spot inbox page rendered no Spot content')
+    // The status call (SPOT_STATUS) succeeded in the browser: the connection chip only renders from its answer.
+    await b.poll(() => hasTestId(b, 'spot-conn-chip'), 'the connection chip (SPOT_STATUS in the browser)', 20_000)
     await snap('AB11a', 'spot-inbox')
     return 'Spot inbox renders'
   })

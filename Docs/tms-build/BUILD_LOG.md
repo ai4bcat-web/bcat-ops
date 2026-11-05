@@ -1,5 +1,11 @@
 # TMS build log
 
+## 2026-11-05 - Step Y demo refreshed (job 171)
+
+- Full demo re-run on dev job 171 after RESET_DEMO_DATA: brokered 99671 (Intake > Create shipment prefilled, blocked then created; Find & Invite MC 274623 read-only; Cover dialog; rate con and invoice 20006 as real SES e-mails to ai4bcat@gmail.com; thread reply routed; Push to Load Review from the Demo chip; Load Review release; AP/factoring) and Ivan Cartage 99672 (roster driver dialog, Schedule, dispatch, owner-operator settlement with Wednesday banner). 57 screenshots + index.txt; `DEMO_WALKTHROUGH.md` rewritten with a Thursday checklist.
+- Defect fixed locally, **needs frontend deploy**: Tracking drawer crashed on a thread with an inbound reply (`attachments` AWSJSON text; `messageAttachments` + test).
+- Open: Spot inbox "could not resolve caller" in the browser for a temp admin (API fine); carrier bill approve needs full ACH payee; four-driver-fields dispatch gate not exercised. ZZ records left for Ryne (not retired); no invitation sent.
+
 ## 2026-11-05 - Perf pass 3: G6 re-baseline, READ_ACTION parity, dashboard look-ahead, documented re-bases (dev tree edit; not committed or deployed by this entry)
 
 - **G6**: `DEFAULT_BASE` ef6b7af. Reviewed `git diff origin/main` of the NB-9 files: `otrInvoice.ts(+test)` and `driver-pay-emailer/handler.ts` are byte-identical to production; `useBoxTruckPay.ts` differs from main only by the `useEnsureLoadRange` windowing line; `otr-actions/handler.ts` differs by Step F shipment-document lookups (no amount/rate arithmetic). `moneyFreeze` now also passes a frozen file that moved since the base but is identical to `origin/main` (skipped when `origin/main` is not fetched). Earlier re-baselines (a064b26, aac15dd) were review-gating and table-name wiring only.
