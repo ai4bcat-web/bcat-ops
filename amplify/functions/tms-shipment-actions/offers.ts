@@ -82,6 +82,9 @@ const LAST_REQUESTABLE_RANK = MOVEMENT_RANK.DISPATCHED
 const BOOKABLE_STATUSES: readonly QuoteStatus[] = ['QUOTED', 'SENT_COUNTER', 'RECEIVED_REPLY', 'RECEIVED_COUNTER']
 /** The rungs we may counter from: the carrier has spoken and it is our move. */
 const COUNTERABLE_STATUSES: readonly QuoteStatus[] = ['QUOTED', 'RECEIVED_COUNTER']
+/** Step AL: an inbound offer (mail / call / board) lands RECEIVED_REPLY with a price on it and the move is ours: it can be countered too. */
+const countersFrom = (quote: Row): readonly QuoteStatus[] =>
+  quote.offerSource ? [...COUNTERABLE_STATUSES, 'RECEIVED_REPLY'] : COUNTERABLE_STATUSES
 
 // ── Load reads ───────────────────────────────────────────────────────────────
 
@@ -375,7 +378,8 @@ export async function counterOffer(deps: QuoteDeps, input: Row, caller: Caller):
   const quote = await loadQuote(deps, quoteId)
   if (quote.side !== 'BUY') throw new Error('Use COUNTER_QUOTE to counter a customer')
   const status = String(quote.status ?? '') as QuoteStatus
-  if (!COUNTERABLE_STATUSES.includes(status)) {
+  const counterable = countersFrom(quote)
+  if (!counterable.includes(status)) {
     throw new Error(`A ${status} offer has nothing to counter`)
   }
 
@@ -411,7 +415,7 @@ export async function counterOffer(deps: QuoteDeps, input: Row, caller: Caller):
     deps,
     [quoteUpdateTx(deps.tables.quote, quoteId, patch, {
       expectedVersion: expectedVersionOf(input),
-      statusIn: COUNTERABLE_STATUSES,
+      statusIn: counterable,
     })],
     'offer',
   )

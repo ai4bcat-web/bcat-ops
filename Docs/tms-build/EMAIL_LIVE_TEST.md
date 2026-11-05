@@ -187,3 +187,55 @@ PASS  fixture shipment voided — shp-d6a42500-1e10-46ea-9adf-4274efd8a041
 FAIL  fixture shipment voided — shp-5c1a4485-6665-48a1-8f6d-00a9dfc44669: Vetted Transport LLC has a carrier bill on this shipment; void the bill first, then void the shipmen
 PASS  temp admin identity deleted
 ```
+
+## Live run 2026-11-05T00:01:32.070Z — ALL PASSED
+
+Recipient: the single allow-listed mailbox only. Ids and statuses; no other addresses.
+
+```json
+{
+  "rateCon": {
+    "shipmentId": "shp-ad6a8047-3aab-468d-b15c-9599bf992327",
+    "loadCarrierId": "lcr-61958f3c-1b48-456a-ab6d-a658a15b8986",
+    "messageRowId": "msg:shp-ad6a8047-3aab-468d-b15c-9599bf992327:92eacce5-ee66-4e98-9e85-f3ca64946238",
+    "status": "SENT",
+    "sesMessageId": "010001a1a902221c-49f16525-1517-45c0-b907-662483fdcb82-000000",
+    "storedMessageIdHeader": "<010001a1a902221c-49f16525-1517-45c0-b907-662483fdcb82-000000@email.amazonses.com>",
+    "threadKey": "tracking+shp-ad6a8047-3aab-468d-b15c-9599bf992327",
+    "error": null
+  },
+  "invoice": {
+    "shipmentId": "shp-40770f8f-d713-437f-88cd-a6d74feb08f6",
+    "invoiceId": "20005",
+    "noticeId": "inv:20005:1",
+    "status": "SENT",
+    "sesMessageId": "010001a1a902a60f-8bad4b69-dbbe-436e-84de-1e97d75d00a9-000000",
+    "error": null
+  },
+  "reply": {
+    "intakeStatus": 200,
+    "routedShipmentMatches": true,
+    "inboundRowId": "msg:shp-ad6a8047-3aab-468d-b15c-9599bf992327:6002e1ce-a0ca-4d6f-8b64-bc47a86b68de",
+    "inboundThreadKey": "tracking+shp-ad6a8047-3aab-468d-b15c-9599bf992327",
+    "strippedAliasStatus": 200
+  }
+}
+```
+
+```
+PASS  fixture customer created — 1793836837929-462ntjik1
+PASS  SEND_RATE_CON returned SENT — loadCarrier lcr-61958f3c-1b48-456a-ab6d-a658a15b8986
+PASS  rate con SENT through SES — SES MessageId 010001a1a902221c-49f16525-1517-45c0-b907-662483fdcb82-000000
+PASS  every rate con recipient is inside the allow-listed mailbox — to 1, cc 2
+PASS  stored Message-ID header and per-load thread key — <010001a1a902221c-49f16525-1517-45c0-b907-662483fdcb82-000000@email.amazonses.com> · tracking+shp-ad6a8047-3aab-468d-b15c-9599bf992327
+PASS  reply routed by the plus address to the right shipment — HTTP 200
+PASS  inbound reply landed on the same per-load thread key — tracking+shp-ad6a8047-3aab-468d-b15c-9599bf992327
+PASS  reply with the plus alias stripped threads by In-Reply-To — HTTP 200
+PASS  fixture invoice generated — 20005
+PASS  invoice SENT through SES — SES MessageId 010001a1a902a60f-8bad4b69-dbbe-436e-84de-1e97d75d00a9-000000 · notice inv:20005:1
+PASS  every invoice recipient is inside the allow-listed mailbox — to 1, cc 0
+PASS  fixture carrier bill voided — cb:lcr-25d13acf-0ea2-42de-819a-e148f0a93839:1
+PASS  fixture shipment voided — shp-ad6a8047-3aab-468d-b15c-9599bf992327
+PASS  fixture shipment voided — shp-40770f8f-d713-437f-88cd-a6d74feb08f6
+PASS  temp admin identity deleted
+```

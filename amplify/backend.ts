@@ -3710,7 +3710,7 @@ factoringIntakeFn.addToRolePolicy(
 // Least privilege, every statement named: read/write on its own three tables and the four
 // CRM tables, READ-ONLY on the tables it only looks at, PutItem on AuditLog. It holds no
 // write on Quote, Customer, Shipment, Order, Load or Invoice, no ses:*, no bedrock:*, no
-// KMS, no Secrets Manager and no Cognito admin action. The only way it creates a Quote is
+// KMS, no Secrets Manager and no Cognito admin action except AdminGetUser (Step AL caller resolution). The only way it creates a Quote is
 // the direct-invoke door on tms-shipment-actions (lambda:InvokeFunction on that one
 // function). No Google secret is an Amplify secret: the OAuth client id/secret are read
 // from the Integrations page parameter, each rep's refresh token from its own prefix.
@@ -3839,6 +3839,12 @@ backend.data.resources.cfnResources.amplifyDynamoDbTables['TruckLocationHistory'
 // target (no cycle). NO sourceArn: a direct Invoke by a role carries no aws:SourceArn, so that
 // condition (the TrackingAutomationInvoke shape) never matches and the call is denied.
 spotFn.addEnvironment('SHIPMENT_ACTIONS_FUNCTION_NAME', backend.tmsShipmentActions.resources.lambda.functionName)
+// Access tokens carry no e-mail claim: csAuthorize resolves the caller through AdminGetUser (the AP inbox / vendorApActions pattern).
+spotFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
+spotFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['cognito-idp:AdminGetUser'],
+  resources: [backend.auth.resources.userPool.userPoolArn],
+}))
 backend.tmsShipmentActions.resources.lambda.addPermission('CarrierInboxInvoke', {
   principal: spotFn.grantPrincipal,
   action: 'lambda:InvokeFunction',

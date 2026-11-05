@@ -7,6 +7,7 @@
  * READ-ONLY MAILBOX: `portFor` returns a `GmailPort`, which has no send, draft or modify
  * method, and nothing in this directory imports one.
  */
+import { CognitoIdentityProviderClient, AdminGetUserCommand } from '@aws-sdk/client-cognito-identity-provider'
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
 import type { AiAgentsSettings } from '../../../../src/types/tms'
 import type { GmailPort } from '../../../../src/lib/spot/port'
@@ -39,9 +40,13 @@ export interface CarrierInboxDeps {
   modelTimeoutMs?: number
   devStack: boolean
   portalOrigins: string[]
+  /** Cognito username -> e-mail, for access tokens (no e-mail claim). Absent in tests. */
+  resolveEmail?(username: string): Promise<string>
   /** The org's own mail domains (never a carrier; matched by the stage-1 filter). */
   ownDomains: string[]
 }
+
+let cognito: CognitoIdentityProviderClient | undefined
 
 export function createCarrierInboxDeps(spot: SpotDeps): CarrierInboxDeps {
   return {
@@ -63,5 +68,11 @@ export function createCarrierInboxDeps(spot: SpotDeps): CarrierInboxDeps {
     devStack: spot.devStack,
     portalOrigins: spot.portalOrigins,
     ownDomains: spot.ownDomains,
+    async resolveEmail(username) {
+      const me = await (cognito ??= new CognitoIdentityProviderClient({})).send(
+        new AdminGetUserCommand({ UserPoolId: process.env.USER_POOL_ID ?? '', Username: username }),
+      )
+      return me.UserAttributes?.find((a) => a.Name === 'email')?.Value ?? ''
+    },
   }
 }

@@ -6327,6 +6327,18 @@ describe('carrier offers', () => {
     expect(String(row.linkToken)).toMatch(/^[A-Za-z0-9_-]{32}$/)
   })
 
+  it('counters an inbound (mail / call) offer that lands RECEIVED_REPLY, but not a link reply', async () => {
+    const { loadId } = await sourcingLoad()
+    seedBookableCarrier()
+    const logged = (await call('LOG_OFFER', { loadId, carrierId: 'car-1', amountCents: 190_000 })) as { quote: Row }
+    const quoteId = String(logged.quote.id)
+    table(TABLES.quote).set(quoteId, { ...quoteRow(quoteId), status: 'RECEIVED_REPLY' })
+    await expect(call('COUNTER_OFFER', { quoteId, amountCents: 175_000 }, QUOTER)).rejects.toThrow(/nothing to counter/)
+    table(TABLES.quote).set(quoteId, { ...quoteRow(quoteId), status: 'RECEIVED_REPLY', offerSource: 'EMAIL' })
+    await call('COUNTER_OFFER', { quoteId, amountCents: 175_000 }, QUOTER)
+    expect(quoteRow(quoteId)).toMatchObject({ status: 'SENT_COUNTER', counterCents: 175_000, rounds: 1 })
+  })
+
   it('books the carrier at our counter once they take it, not at their ask', async () => {
     const { loadId } = await sourcingLoad()
     seedBookableCarrier()

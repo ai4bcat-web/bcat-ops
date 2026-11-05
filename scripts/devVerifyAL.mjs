@@ -647,6 +647,10 @@ const offerRows = async (ctx, key) => (await quotesOf(ctx, key)).filter((q) => q
 const mid = (ctx, id) => msgIdOf(ctx.mailFx(id).message.messageId)
 
 async function al07Actions(ctx) {
+  // F12 (MC belongs to another carrier than the stated name) is the offer the vetted carrier is accepted through.
+  await inject(ctx, 'zz-al-f12')
+  const s12 = await poll(ctx)
+  expect(s12.errors === 0 && s12.filed >= 1, `F12 poll filed ${s12.filed}, errors ${s12.errors}`)
   const open = await offerRows(ctx, 'open')
   const q1 = quoteFor(open, mid(ctx, 'zz-al-f01'))
   const q10 = quoteFor(open, mid(ctx, 'zz-al-f10'))
@@ -740,7 +744,11 @@ async function al09Ui(b, ctx, theme) {
       const problems = problemList(b).slice(0, 3)
       if (problems.length) throw new Error(problems.join(' | '))
       line('PASS', `${id} ${theme}`, detail)
-    } catch (err) { line('FAIL', `${id} ${theme}`, short(err)) }
+    } catch (err) {
+      const page = await b.evaluate(`(document.querySelector('.tms-main')?.innerText ?? document.body.innerText).replace(/\\s+/g, ' ').slice(0, 220)`).catch(() => '')
+      line('FAIL', `${id} ${theme}`, `${short(err)} | page: ${page}`)
+      await snap(`${id}-FAIL`, 'failure')
+    }
   }
   const idsWith = (prefix) => b.evaluate(`[...document.querySelectorAll('[data-testid^="${prefix}"]')].map((n) => n.getAttribute('data-testid').slice(${prefix.length}))`)
   const open = ctx.seeded.open
@@ -758,8 +766,9 @@ async function al09Ui(b, ctx, theme) {
     for (const h of ['CARRIER', 'OFFERED RATE', 'SOURCE', 'RECEIVED', 'PACKET', 'RISK']) expect(text.includes(h), `the offers table has no ${h} column`)
     const sources = (await Promise.all(rows.map((q) => textOf(b, `cs-offer-source-${q}`)))).join(' ')
     expect(/E-mail/.test(sources) && /Phone/.test(sources), 'the source column does not show both an e-mail and a phone offer')
+    await b.poll(() => b.evaluate(`document.querySelectorAll('[data-testid^="cs-thread-item-"]').length >= 2`), 'thread items', 30_000).catch(() => {})
     const items = await idsWith('cs-thread-item-')
-    expect(items.length >= 2 && await hasTestId(b, 'cs-thread'), `the thread shows ${items.length} items`)
+    expect(items.length >= 2 && await hasTestId(b, 'cs-thread'), `the thread shows ${items.length} items; thread text: ${(await textOf(b, 'cs-thread')).replace(/\s+/g, ' ').slice(0, 160)}`)
     expect(await b.evaluate(`!!document.querySelector('[data-testid="cs-thread"] [aria-label="Phone call"]') && !!document.querySelector('[data-testid="cs-thread"] [aria-label="E-mail"]')`), 'the thread does not carry both a mail and a call item')
     await snap('AL09a', 'offers-hub')
     return `${rows.length} offer rows with carrier/rate/source/packet/risk cells, ${items.length} thread items (mail + call)`

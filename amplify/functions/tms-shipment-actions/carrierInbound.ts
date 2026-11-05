@@ -529,6 +529,9 @@ export async function fileInboundOffer(deps: CarrierInboundDeps, raw: Row, calle
     authorName: 'Carrier inbox',
     at: new Date(Date.parse(input.receivedAt)).toISOString(),
     createdBy: caller.email,
+    // AppSync's ShipmentMessage.createdAt/updatedAt are non-null: a raw put must carry them or every GraphQL read of the row errors.
+    createdAt: now,
+    updatedAt: now,
     offer: record,
     ...(matched ? {} : { ttlEpoch: ttlFor(input.receivedAt, retentionDays, now) }),
   }

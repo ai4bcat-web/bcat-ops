@@ -1,4 +1,10 @@
+Docs/tms-build/screenshots/al/AL09-offers-hub-FAIL-failure-L.png
 Docs/tms-build/screenshots/al/AL09b-accept-dialog-L.png
+Docs/tms-build/screenshots/al/AL09c-offers-after-actions-L.png
+Docs/tms-build/screenshots/al/AL09-unmatched-FAIL-failure-L.png
+Docs/tms-build/screenshots/al/AL09-settings-FAIL-failure-L.png
+Docs/tms-build/screenshots/al/AL09-offers-hub-FAIL-failure-D.png
 Docs/tms-build/screenshots/al/AL09b-accept-dialog-D.png
 Docs/tms-build/screenshots/al/AL09c-offers-after-actions-D.png
 Docs/tms-build/screenshots/al/AL09d-unmatched-D.png
+Docs/tms-build/screenshots/al/AL09-settings-FAIL-failure-D.png

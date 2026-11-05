@@ -71,13 +71,22 @@ function groupsOf(identity: CsIdentity): string[] {
   return []
 }
 
-export function csAuthorize(action: string, identity: CsIdentity | null | undefined, devStack: boolean): CsCaller {
+/** Access tokens carry no e-mail claim: the caller's Cognito username is resolved through AdminGetUser (the AP inbox fix). */
+export type CsEmailResolver = (username: string) => Promise<string>
+
+export async function csAuthorize(
+  action: string,
+  identity: CsIdentity | null | undefined,
+  devStack: boolean,
+  resolveEmail?: CsEmailResolver,
+): Promise<CsCaller> {
   if (!identity) throw new Error('Unauthorized: missing identity')
   const claimEmail = identity.claims?.email
   const candidates = [typeof claimEmail === 'string' ? claimEmail : undefined, identity.username]
-  const email = (candidates.find((v): v is string => typeof v === 'string' && v.includes('@')) ?? '').toLowerCase().trim()
+  let email = (candidates.find((v): v is string => typeof v === 'string' && v.includes('@')) ?? '').toLowerCase().trim()
   const cognitoUser = identity.claims?.['cognito:username']
   const userId = identity.username ?? (typeof cognitoUser === 'string' ? cognitoUser : undefined) ?? identity.sub ?? ''
+  if (!email && userId && resolveEmail) email = (await resolveEmail(userId).catch(() => '')).toLowerCase().trim()
   if (!email || !userId) throw new Error('Unauthorized: could not resolve caller')
   const groups = groupsOf(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
@@ -381,6 +390,6 @@ export async function csDispatch(
   deps: CarrierInboxDeps,
 ): Promise<unknown> {
   if (!isCsAction(action)) throw new Error(`Unknown action: ${action}`)
-  const caller = csAuthorize(action, identity, deps.devStack)
+  const caller = await csAuthorize(action, identity, deps.devStack, deps.resolveEmail)
   return HANDLERS[action](deps, caller, inputOf(rawInput))
 }

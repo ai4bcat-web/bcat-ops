@@ -188,6 +188,8 @@ describe('fileInboundOffer', () => {
     expect(res).toMatchObject({ outcome: 'UNMATCHED', shipmentId: null, quoteId: null })
     const msg = messages(store)[0]!
     expect(msg).toMatchObject({ shipmentId: UNMATCHED_SHIPMENT_ID, threadKey: 'offers+unmatched' })
+    // AppSync reads createdAt/updatedAt as non-null: a row without them fails every thread / bucket list.
+    expect(msg).toMatchObject({ createdAt: NOW, updatedAt: NOW })
     expect(msg.ttlEpoch).toBe(Math.floor(Date.parse(NOW) / 1000) + 30 * 86_400)
     expect(quotes(store)).toHaveLength(0)
   })

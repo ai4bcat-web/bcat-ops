@@ -29,12 +29,22 @@ describe('caller rules', () => {
     await expect(csDispatch('CS_NOPE', {}, ADMIN, rig.deps)).rejects.toThrow(/Unknown action/)
   })
 
-  it('keeps the simulated mailbox to an ADMIN on the dev stack, enforced in code', () => {
+  it('keeps the simulated mailbox to an ADMIN on the dev stack, enforced in code', async () => {
     for (const action of ['CS_CONNECT_SIMULATED', 'CS_SIM_INJECT_MAIL', 'CS_SIM_INJECT_CALL', 'CS_SIM_RESET', 'CS_SIM_PURGE_TEST']) {
-      expect(() => csAuthorize(action, ADMIN, false), action).toThrow(/dev stack/)
-      expect(() => csAuthorize(action, rep(['page-loads']), true), action).toThrow(/Forbidden/)
-      expect(csAuthorize(action, owner, true).isAdmin).toBe(true)
+      await expect(csAuthorize(action, ADMIN, false), action).rejects.toThrow(/dev stack/)
+      await expect(csAuthorize(action, rep(['page-loads']), true), action).rejects.toThrow(/Forbidden/)
+      expect((await csAuthorize(action, owner, true)).isAdmin).toBe(true)
     }
+  })
+
+  it('resolves the e-mail of an access token (no email claim) through the resolver, and still refuses without one', async () => {
+    const access: CsIdentity = { sub: 'u-1', username: 'uuid-1', claims: { 'cognito:groups': ['page-loads'] } }
+    await expect(csAuthorize('CS_STATUS', access, false)).rejects.toThrow(/could not resolve caller/)
+    await expect(csAuthorize('CS_STATUS', access, false, async () => '')).rejects.toThrow(/could not resolve caller/)
+    const caller = await csAuthorize('CS_STATUS', access, false, async (u) => (u === 'uuid-1' ? 'Rep@BCATcorp.com' : ''))
+    expect(caller).toMatchObject({ email: 'rep@bcatcorp.com', userId: 'uuid-1', isAdmin: false })
+    const boss: CsIdentity = { sub: 'u-2', username: 'uuid-2', claims: {} }
+    expect((await csAuthorize('CS_SAVE_SETTINGS', boss, false, async () => 'ryne@bcatcorp.com')).isAdmin).toBe(true)
   })
 })
 
