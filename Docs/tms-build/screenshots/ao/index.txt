@@ -1,3 +1,13 @@
+Docs/tms-build/screenshots/ao/01-drawer-map-expanded.png
+Docs/tms-build/screenshots/ao/04-prefs-row-idle.png
+Docs/tms-build/screenshots/ao/07-map-all-sources.png
+Docs/tms-build/screenshots/ao/08-map-approx-overlay.png
+Docs/tms-build/screenshots/ao/10-map-no-key-fallback.png
+Docs/tms-build/screenshots/ao/02-drawer-map-expanded-dark.png
+Docs/tms-build/screenshots/ao/03-drawer-map-collapsed.png
+Docs/tms-build/screenshots/ao/09-map-stale.png
+Docs/tms-build/screenshots/ao/12-map-provider-stub.png
+Docs/tms-build/screenshots/ao/13-tracking-tab-full-page.png
 Docs/tms-build/screenshots/ao/05-prefs-row-dirty.png
 Docs/tms-build/screenshots/ao/06-prefs-row-saved-no-reflow.png
 Docs/tms-build/screenshots/ao/14-driver-consent.png
