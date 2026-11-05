@@ -135,3 +135,52 @@ only in edit mode (Load Tracking preview per AH feedback 5), never on create.
 - Walkthrough screenshots of create (brokered) and create (Ivan Cartage with driver) at 1440 and
   1280 widths added to `Docs/tms-build/aljex-create/` and referenced in DEMO_WALKTHROUGH.md.
 - BUILD_LOG entry "## Step AR deployed" with the deploy job number.
+
+## Ryne's feedback 2 (2026-11-05, before the first cut was reviewed)
+"On creating a shipment, can you make documents its own section. Can you make the bill to section
+more clear with more details about the specific customer. Can you add a tracking section that pulls
+details from the tracking page at a high level. Can you also add a historical section that pulls
+what we recently ran a specific lane for and also what the DAT RateView rates are showing for that
+lane. Should be another high level section."
+
+Main column becomes **eight cards**, still in build order; the More strip keeps only
+Instructions · References · Items · Notes.
+
+1. Customer
+2. **Bill To** — its own card directly under Customer, read-only, filled on customer select. Show,
+   in a 3-column detail grid with labels: Bill-to name and billing address; payment terms (Net N)
+   and credit limit / open AR / available credit (from Customer v2 + the Open AR rollup used on
+   the Customers page); factoring status (Factored via OTR / Not factored) with the factor's
+   notice-of-assignment flag; billing e-mails (both) and billing contact + phone; invoicing
+   requirements (POD required, PO/ref required, per-customer required fields from Step AP);
+   customer status ladder badge (ACTIVE / CREDIT HOLD / NEW) and a "credit hold" warning strip
+   when the shipment's customer total would exceed available credit. Link "Open customer".
+3. Route
+4. Freight
+5. Rates
+6. **Rate history** — high-level card for the lane in the Route card (origin → destination
+   metro/zone, Step AE lane matching), two side-by-side blocks:
+   - **What we ran it for**: last 5 shipments on this lane (PRO, date, customer, equipment,
+     customer rate, carrier rate, margin), plus averages for 30 / 90 days and last year; link
+     "All lane history".
+   - **DAT RateView**: spot and contract low / average / high for the lane and equipment, with
+     the date DAT last refreshed. While the DAT service login is missing, the block renders the
+     stub with a plain `DAT not connected` badge and a Settings → Integrations link, never a
+     fake number.
+   One line of "suggested rate" from the Step AE rate intelligence under the two blocks.
+   Recomputes when stops or equipment change.
+7. Carrier
+8. **Tracking** — high-level read-only card pulled from the Load Tracking page for this load:
+   status chip, tracking method / mode (SMS, link, Motive, carrier check calls) and assignee,
+   last known position + time, ETA to next stop, last check call (time, city/state, note), next
+   check call due, POD status; "Open in Load Tracking" link. On create, before the load exists,
+   it shows the planned setup: the customer's default tracking mode and method, auto e-mail/text
+   settings that will apply (Step V), and "Tracking starts when the load is covered". This card
+   replaces the AH "Check Calls preview" item.
+9. **Documents** — its own card (not in the More strip): upload drop zone, Public / Private tabs,
+   list with type, name, uploaded by/when, preview; "Required for release" checklist (rate con,
+   BOL/POD, carrier invoice) with ticks as documents arrive. Works on create (attach the tender
+   or rate con before the shipment exists; held in the draft and written as ShipmentDocument on
+   Create).
+
+Summary rail unchanged. Required-field, mapping and fixture rules unchanged.
