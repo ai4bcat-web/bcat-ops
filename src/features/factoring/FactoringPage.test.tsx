@@ -345,9 +345,9 @@ describe('invoices sent by hand', () => {
 
   it('logs when each one went out, who sent it and where, on the Invoiced manually tab', () => {
     setup([sentRow, item({ id: 'n1', proNumber: 'N1' })])
-    fireEvent.click(screen.getByRole('button', { name: /^Invoiced manually/ }))
-    expect(screen.getByRole('columnheader', { name: 'Sent' })).toBeInTheDocument()
-    expect(screen.queryByRole('columnheader', { name: 'Received' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /^Invoiced manually/ }))
+    expect(screen.getByRole('columnheader', { name: /^Sent/i })).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: /^Received/i })).not.toBeInTheDocument()
     const cell = screen.getByLabelText(/PRO H1 sent by hand/)
     expect(cell).toHaveTextContent('by ruben')
     expect(cell).toHaveTextContent('to ap@broker.com')
@@ -360,7 +360,7 @@ describe('invoices sent by hand', () => {
       manualInvoicedAt: '2026-10-20T12:00:00Z',
     })
     setup([older, sentRow])
-    fireEvent.click(screen.getByRole('button', { name: /^Invoiced manually/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Invoiced manually/ }))
     const labels = screen.getAllByLabelText(/sent by hand/).map((el) => el.getAttribute('aria-label') ?? '')
     expect(labels[0]).toContain('PRO H1')
     expect(labels[1]).toContain('PRO H0')
@@ -368,7 +368,7 @@ describe('invoices sent by hand', () => {
 
   it('keeps the Received column everywhere else', () => {
     setup([sentRow])
-    fireEvent.click(screen.getByRole('button', { name: /^All/ }))
-    expect(screen.getByRole('columnheader', { name: 'Received' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /^All/ }))
+    expect(screen.getByRole('columnheader', { name: /^Received/i })).toBeInTheDocument()
   })
 })
