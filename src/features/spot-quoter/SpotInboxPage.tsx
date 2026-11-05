@@ -110,7 +110,7 @@ export function SpotInboxPage() {
     : needsReconnect
       ? <TmsBadge tone="red" data-testid="spot-conn-chip">Needs reconnect</TmsBadge>
       : simulated
-        ? <TmsBadge tone="orange" data-testid="spot-simulated-badge">SIMULATED INBOX</TmsBadge>
+        ? <span data-testid="spot-conn-chip"><TmsBadge tone="orange" data-testid="spot-simulated-badge">SIMULATED INBOX</TmsBadge></span>
         : <TmsBadge tone="green" data-testid="spot-conn-chip">Gmail connected · {connection.googleEmail ?? connection.userEmail}</TmsBadge>
 
   const companyChip = (row: SpotRequestRow) => {

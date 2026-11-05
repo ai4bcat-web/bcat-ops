@@ -1,10 +1,8 @@
-Docs/tms-build/ab-proof/AB11a-spot-inbox-L.png
 Docs/tms-build/ab-proof/AB11b-org-settings-L.png
 Docs/tms-build/ab-proof/AB11c-customers-prospects-L.png
 Docs/tms-build/ab-proof/AB11d-customer-card-strip-L.png
 Docs/tms-build/ab-proof/AB11e-customer-activity-L.png
 Docs/tms-build/ab-proof/AB11f-follow-ups-L.png
-Docs/tms-build/ab-proof/AB11a-spot-inbox-D.png
 Docs/tms-build/ab-proof/AB11b-org-settings-D.png
 Docs/tms-build/ab-proof/AB11c-customers-prospects-D.png
 Docs/tms-build/ab-proof/AB11d-customer-card-strip-D.png

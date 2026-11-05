@@ -157,6 +157,8 @@ describe('Spot inbox connection states', () => {
     setup({ status: status({ devStack: true, connection: { ...CONNECTION, mode: 'SIMULATED' } as never }) })
     draw()
     expect(await screen.findByTestId('spot-simulated-badge')).toHaveTextContent('SIMULATED INBOX')
+    // Every connection state carries the one connection-chip hook (the verification harness waits on it).
+    expect(screen.getByTestId('spot-conn-chip')).toContainElement(screen.getByTestId('spot-simulated-badge'))
     fireEvent.change(screen.getByTestId('spot-sim-fixture'), { target: { value: 'req-van-clear' } })
     fireEvent.click(screen.getByTestId('spot-sim-load'))
     await waitFor(() => expect(calls('SPOT_SIM_INJECT')[0][1]).toEqual({ fixtureId: 'req-van-clear' }))
