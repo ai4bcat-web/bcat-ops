@@ -24,6 +24,7 @@ vi.mock('@/lib/apiClient', () => ({
   mcpPreviewCarrier: mocks.preview,
   mcpGetCarrier: mocks.get,
   mcpSendInvite: mocks.invite,
+  mcpAddCarrier: vi.fn(),
 }))
 vi.mock('@/hooks/useCarriers', () => ({
   useCarriers: () => ({ carriers: mocks.carriers, loading: false, error: null, refresh: mocks.refresh, replace: vi.fn() }),
@@ -95,76 +96,88 @@ describe('FindInvitePage', () => {
     expect(screen.getByTestId('mcp-review-card').getAttribute('data-source')).toBe('STUB')
   })
 
-  it('a carrier already in the directory shows its packet status and a profile link', async () => {
+  it('a carrier already in the directory leads with Set up with us, its status, its packet standing and a profile link', async () => {
     mocks.carriers = [carrierRow({ mcpStatus: 'ACCEPTABLE', mcpInvitedAt: '2026-10-20T10:00:00.000Z', mcpInvitedTo: 'ops@zephyr.example' })]
     renderPage()
     await search('MC 900001')
 
-    const note = screen.getByTestId('mcp-in-directory')
-    expect(note.textContent).toMatch(/Zephyr Test Freight is in our carriers/)
-    expect(note.textContent).toMatch(/Packet complete, acceptable/)
-    expect(note.textContent).toMatch(/last invited 2026-10-20 at ops@zephyr.example/)
-    expect(screen.getByTestId('mcp-open-profile').getAttribute('href')).toBe('/tms/carriers/car-1')
-    expect(screen.queryByTestId('mcp-add-carrier')).toBeNull()
+    const card = screen.getByTestId('find-lookup-card')
+    expect(card.dataset.inDirectory).toBe('true')
+    expect(within(card).getByTestId('find-lookup-card-standing').textContent).toMatch(/^Set up with us · ACTIVEPacket complete/)
+    expect(within(card).getByTestId('find-lookup-card-active').textContent).toBe('Active with us — ready to cover')
+    expect(within(card).getByTestId('find-lookup-card-open').getAttribute('href')).toBe('/tms/carriers/car-1')
+    expect(within(card).queryByTestId('find-lookup-card-add')).toBeNull()
   })
 
-  it('has no way to add a carrier by hand: the setup packet is the only way in', async () => {
+  it('a carrier not in the directory says so, lists every MCP e-mail, and can be sent a packet or added without one', async () => {
     renderPage()
     await search('MC 900001')
-    expect(screen.queryByTestId('mcp-add-carrier')).toBeNull()
-    expect(screen.queryByRole('button', { name: /add to carriers/i })).toBeNull()
-    expect(screen.getByTestId('mcp-send-invite').textContent).toMatch(/Send setup packet via MyCarrierPackets/)
+    const card = screen.getByTestId('find-lookup-card')
+    expect(card.dataset.inDirectory).toBe('false')
+    expect(within(card).getByTestId('find-lookup-card-standing').textContent).toMatch(/^Not in directory/)
+    expect(within(card).getByTestId('find-lookup-card-emails').textContent).toMatch(/dispatch@zephyr.example, owner@zephyr.example/)
+    expect((within(card).getByTestId('find-lookup-card-send') as HTMLButtonElement).disabled).toBe(false)
+    expect((within(card).getByTestId('find-lookup-card-add') as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('invites to an approved address, from a load: carrier id, shipment and load go with it', async () => {
+  it('the setup packet defaults to ALL of MCP’s addresses; from a load the carrier id, shipment and load go with it', async () => {
     mocks.carriers = [carrierRow()]
-    mocks.invite.mockResolvedValue({ mode: 'LIVE', sent: true, message: 'Packet invitation sent to dispatch@zephyr.example.', carrierLogged: true, threadLogged: true })
+    mocks.invite.mockResolvedValue({ mode: 'LIVE', sent: true, message: 'Packet invitation sent to dispatch@zephyr.example, owner@zephyr.example.', carrierLogged: true, threadLogged: true })
     renderPage('/tms/carriers/find?shipmentId=ship-1&loadId=load-1')
     await search('MC 900001')
-    fireEvent.click(screen.getByTestId('mcp-send-invite'))
+    fireEvent.click(screen.getByTestId('find-lookup-card-send'))
 
-    const picker = await screen.findByLabelText('Send to')
-    expect(within(picker).getAllByRole('option').map((o) => o.textContent)).toEqual([
-      'dispatch@zephyr.example (Dispatch) · approved by MCP', 'owner@zephyr.example · approved by MCP', 'Another address…',
-    ])
+    const list = await screen.findByTestId('mcp-invite-recipients')
+    expect(within(list).getAllByRole('checkbox').map((c) => (c as HTMLInputElement).checked)).toEqual([true, true])
     fireEvent.click(screen.getByTestId('mcp-invite-send'))
 
     await waitFor(() => expect(mocks.invite).toHaveBeenCalledTimes(1))
     expect(mocks.invite).toHaveBeenCalledWith({
-      mcNumber: 'MC900001', email: 'dispatch@zephyr.example', carrierId: 'car-1', carrierName: 'Zephyr Test Freight LLC', shipmentId: 'ship-1', loadId: 'load-1', ensureCarrier: true,
+      mcNumber: 'MC900001', emails: ['dispatch@zephyr.example', 'owner@zephyr.example'], carrierId: 'car-1', carrierName: 'Zephyr Test Freight LLC', shipmentId: 'ship-1', loadId: 'load-1', ensureCarrier: true,
     })
     expect((await screen.findByTestId('mcp-invite-result')).textContent).toMatch(/Noted on the shipment thread.*Logged on the carrier/)
   })
 
-  it('a typed address is validated before anything is sent', async () => {
+  it('an unticked address is left out and a typed address is added to the list, validated first', async () => {
     renderPage()
     await search('MC 900001')
-    fireEvent.click(screen.getByTestId('mcp-send-invite'))
-    fireEvent.change(await screen.findByLabelText('Send to'), { target: { value: '__typed__' } })
+    fireEvent.click(screen.getByTestId('find-lookup-card-send'))
+    fireEvent.click(await screen.findByLabelText('owner@zephyr.example'))
 
-    fireEvent.change(screen.getByLabelText('E-mail address'), { target: { value: 'not-an-email' } })
-    fireEvent.click(screen.getByTestId('mcp-invite-send'))
+    fireEvent.change(screen.getByLabelText('Add another address'), { target: { value: 'not-an-email' } })
+    fireEvent.click(screen.getByTestId('mcp-invite-add'))
     expect(await screen.findByText('That is not a valid e-mail address.')).toBeTruthy()
-    expect(mocks.invite).not.toHaveBeenCalled()
 
     mocks.invite.mockResolvedValue({ mode: 'LIVE', sent: true, message: 'sent', carrierLogged: false, threadLogged: false })
-    fireEvent.change(screen.getByLabelText('E-mail address'), { target: { value: 'New@Carrier.com' } })
+    fireEvent.change(screen.getByLabelText('Add another address'), { target: { value: 'New@Carrier.com' } })
+    fireEvent.click(screen.getByTestId('mcp-invite-add'))
     fireEvent.click(screen.getByTestId('mcp-invite-send'))
-    await waitFor(() => expect(mocks.invite).toHaveBeenCalledWith(expect.objectContaining({ email: 'new@carrier.com', mcNumber: 'MC900001' })))
+    await waitFor(() => expect(mocks.invite).toHaveBeenCalledWith(expect.objectContaining({ emails: ['dispatch@zephyr.example', 'new@carrier.com'], mcNumber: 'MC900001' })))
   })
 
-  it('a stub invitation reports that nothing was sent', async () => {
+  it('unticking every address disables the send: an empty list never invites', async () => {
+    renderPage()
+    await search('MC 900001')
+    fireEvent.click(screen.getByTestId('find-lookup-card-send'))
+    fireEvent.click(await screen.findByLabelText('dispatch@zephyr.example'))
+    fireEvent.click(screen.getByLabelText('owner@zephyr.example'))
+    expect((screen.getByTestId('mcp-invite-send') as HTMLButtonElement).disabled).toBe(true)
+    expect(mocks.invite).not.toHaveBeenCalled()
+  })
+
+  it('a stub lookup says "Stub, no MCP call", lists no e-mails, and the send is disabled with the reason', async () => {
     const stub = stubReviewCard({ mcNumber: 'MC274623' }, NOW)
     mocks.preview.mockResolvedValue({ mode: 'STUB', reason: 'r', card: stub, notFound: false })
     mocks.get.mockResolvedValue({ mode: 'STUB', reason: 'r', card: stub, notFound: false })
-    mocks.invite.mockResolvedValue({ mode: 'STUB', sent: false, message: 'STUB: nothing was sent. r', carrierLogged: false, threadLogged: false })
     renderPage()
     await search('MC 274623')
-    fireEvent.click(screen.getByTestId('mcp-send-invite'))
-    fireEvent.click(await screen.findByTestId('mcp-invite-send'))
-
-    expect((await screen.findByTestId('mcp-invite-result')).textContent).toMatch(/STUB: nothing was sent/)
-    expect(mocks.toast.success).not.toHaveBeenCalled()
+    const card = screen.getByTestId('find-lookup-card')
+    expect(within(card).getByTestId('find-lookup-card-standing').textContent).toMatch(/Stub, no MCP call/)
+    expect(within(card).queryByTestId('find-lookup-card-emails')).toBeNull()
+    const send = within(card).getByTestId('find-lookup-card-send') as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    expect(send.title).toMatch(/^Stub, no MCP call/)
+    expect(mocks.invite).not.toHaveBeenCalled()
   })
 
   it('a name searches our directory only; MyCarrierPackets is not called', async () => {

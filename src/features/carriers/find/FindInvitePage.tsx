@@ -17,14 +17,14 @@ import { Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsAlert, TmsButton, TmsInput, TmsPage } from '@/features/tms/kit'
 import { useCarriers } from '@/hooks/useCarriers'
-import { mcpGetCarrier, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
+import { mcpAddCarrier, mcpGetCarrier, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
 import type { McpInviteResult, McpLookupResult } from '@/lib/apiClient'
 import {
-  PACKET_LABELS, matchDirectoryCarrier, mergeReviewCards, parseSearch, refLabel, searchDirectory,
+  matchDirectoryCarrier, mergeReviewCards, parseSearch, refLabel, searchDirectory,
   type McpReviewCard,
 } from '@/lib/integrations/mcpReview'
-import type { McpCarrierStatus } from '@/lib/integrations/mcpAdapter'
-import { InviteDialog } from './InviteDialog'
+import { CarrierLookupCard } from '@/features/carriers/lookup/CarrierLookupCard'
+import type { LookupDirectoryRow } from '@/features/carriers/lookup/lookupModel'
 import { McpReviewCardView } from './McpReviewCardView'
 
 type Ref = { mcNumber?: string; dotNumber?: string }
@@ -51,7 +51,6 @@ export function FindInvitePage() {
   const [nameQuery, setNameQuery] = useState<string | null>(null)
   const [searching, setSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [inviteOpen, setInviteOpen] = useState(false)
   const [sending, setSending] = useState(false)
   const [lastInvite, setLastInvite] = useState<McpInviteResult | null>(null)
   const request = useRef(0)
@@ -107,13 +106,13 @@ export function FindInvitePage() {
   const nameMatches = useMemo(() => (nameQuery ? searchDirectory(carriers, nameQuery) : []), [carriers, nameQuery])
   const stub = shown?.mode === 'STUB'
 
-  const send = async (email: string) => {
+  const send = async (emails: string[]) => {
     if (!card) return
     setSending(true)
     try {
       const result = await mcpSendInvite({
         ...shown!.ref,
-        email,
+        emails,
         carrierId: inDirectory?.carrier.id,
         carrierName: card.identity.legalName,
         shipmentId,
@@ -121,7 +120,6 @@ export function FindInvitePage() {
         ensureCarrier: true,
       })
       setLastInvite(result)
-      setInviteOpen(false)
       if (result.sent) toast.success(result.message)
       else toast.info(result.message)
       if (result.carrierLogged) void refresh()
@@ -132,31 +130,33 @@ export function FindInvitePage() {
     }
   }
 
-  const packetLabel = (status: string | null | undefined): string =>
-    status ? (PACKET_LABELS[status as McpCarrierStatus] ?? status) : 'No packet on file'
-
-  const actions = card && (
-    <>
-      {inDirectory && (
-        <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={`/tms/carriers/${inDirectory.carrier.id}`} data-testid="mcp-open-profile">Open carrier profile</Link>
-      )}
-      {/* Step AM: no "Add to carriers". A carrier enters the directory only through its MyCarrierPackets setup packet. */}
-      <TmsButton size="sm" variant="primary" onClick={() => setInviteOpen(true)} data-testid="mcp-send-invite">Send setup packet via MyCarrierPackets</TmsButton>
-    </>
-  )
+  const [nowIso] = useState(() => new Date().toISOString())
+  const add = async () => {
+    if (!shown) return
+    setSending(true)
+    try {
+      await mcpAddCarrier(shown.ref)
+      toast.success('Added to the directory as Pending')
+      void refresh()
+    } catch (e) {
+      toast.error(messageOf(e))
+    } finally {
+      setSending(false)
+    }
+  }
 
   const banner = card && (
     <>
-      {inDirectory && (
-        <TmsAlert tone="blue" title="Already in directory" role="status">
-          <span data-testid="mcp-in-directory">
-            {inDirectory.carrier.name} is in our carriers (matched on {inDirectory.by === 'MC' ? 'MC' : inDirectory.by === 'DOT' ? 'DOT' : 'name'}).
-            {' '}Packet status on the row: <strong>{packetLabel(inDirectory.carrier.mcpStatus)}</strong>
-            {inDirectory.carrier.mcpInvitedAt ? `; last invited ${inDirectory.carrier.mcpInvitedAt.slice(0, 10)}${inDirectory.carrier.mcpInvitedTo ? ` at ${inDirectory.carrier.mcpInvitedTo}` : ''}` : ''}.
-            {' '}<Link to={`/tms/carriers/${inDirectory.carrier.id}`}>Open profile</Link>
-          </span>
-        </TmsAlert>
-      )}
+      <CarrierLookupCard
+        card={card}
+        mode={shown?.mode ?? 'LIVE'}
+        carrier={inDirectory && inDirectory.by !== 'NAME' ? inDirectory.carrier as LookupDirectoryRow : null}
+        nowIso={nowIso}
+        busy={sending}
+        onSendPacket={send}
+        onAddToDirectory={add}
+        testId="find-lookup-card"
+      />
       {shown?.completing && <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>Loading the full MyCarrierPackets record…</p>}
       {lastInvite && (
         <TmsAlert tone={lastInvite.sent ? 'green' : 'orange'} title={lastInvite.sent ? 'Invitation sent' : 'Nothing was sent (STUB)'} role="status">
@@ -221,18 +221,8 @@ export function FindInvitePage() {
         </TmsAlert>
       )}
 
-      {card && <McpReviewCardView card={card} actions={actions} banner={banner} />}
+      {card && <McpReviewCardView card={card} banner={banner} />}
 
-      {inviteOpen && card && (
-        <InviteDialog
-          carrierName={card.identity.legalName ?? refLabel(card.identity)}
-          approved={card.approvedEmails}
-          stub={stub}
-          busy={sending}
-          onClose={() => setInviteOpen(false)}
-          onSend={(email) => { void send(email) }}
-        />
-      )}
     </TmsPage>
   )
 }

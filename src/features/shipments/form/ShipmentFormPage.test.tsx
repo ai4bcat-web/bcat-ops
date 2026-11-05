@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ShipmentBundle } from '@/types/tms'
-import { LABEL, SECTION_ORDER } from './labels'
+import { LABEL } from './labels'
 
 const h = vi.hoisted(() => ({
   toastInfo: vi.fn(),
@@ -43,23 +43,29 @@ vi.mock('./useFormActions', () => ({
 }))
 vi.mock('./defaultSections', () => {
   const none = () => null
+  type P = { values: { ship: { equipmentType: string }; customer: { typedName: string } }; update: (fn: (v: never) => unknown) => void }
   return {
-    SECTION_COMPONENTS: {
-      shipping: (p: { value: { equipmentType: string }; onChange: (v: { equipmentType: string }) => void }) => (
+    CARD_COMPONENTS: {
+      customer: (p: P) => (
         <input
-          data-testid="f-shipping-equipmentType" value={p.value.equipmentType}
-          onChange={(e) => p.onChange({ equipmentType: e.target.value })}
+          data-testid="f-customer-name" value={p.values.customer.typedName}
+          onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, customer: { ...(v.customer as object), typedName: e.target.value, useTyped: true } }) as never)}
         />
       ),
-      customer: (p: { value: { typedName: string }; onChange: (v: object) => void }) => (
+      route: none,
+      freight: (p: P) => (
         <input
-          data-testid="f-customer-name" value={p.value.typedName}
-          onChange={(e) => p.onChange({ typedName: e.target.value, useTyped: true })}
+          data-testid="f-shipping-equipmentType" value={p.values.ship.equipmentType}
+          onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, ship: { ...(v.ship as object), equipmentType: e.target.value } }) as never)}
         />
       ),
-      pickup: none, consignee: none, history: none, roles: none, more: none, rates: none,
-      carrier: none, picks: none, documents: none, checkCalls: none,
+      rates: none,
+      carrier: none,
     },
+    MORE_TAB_COMPONENTS: {
+      instructions: none, references: none, items: none, notes: none, documents: none, rateHistory: none, checkCalls: none, updates: none,
+    },
+    RAIL_ROLES: none,
   }
 })
 
@@ -152,7 +158,9 @@ describe('ShipmentFormPage — create mode', () => {
       const first = renderForm('create')
       fireEvent.change(screen.getByTestId(CUSTOMER_TESTID), { target: { value: 'ZZ Draft Customer' } })
       expect(Object.keys(localStorage).some((k) => k.includes('draft'))).toBe(false)
-      await act(async () => { vi.advanceTimersByTime(900) })
+      await act(async () => { vi.advanceTimersByTime(9_000) })
+      expect(Object.keys(localStorage).some((k) => k.includes('draft'))).toBe(false)
+      await act(async () => { vi.advanceTimersByTime(10_100) })
       expect(Object.keys(localStorage).some((k) => k.includes('draft'))).toBe(true)
       first.unmount()
     } finally {
@@ -167,40 +175,79 @@ describe('ShipmentFormPage — create mode', () => {
   })
 })
 
-describe('ShipmentFormPage — sections and issues', () => {
-  it('collapsing keeps the value and persists; Create force-expands a section with a blocking issue', async () => {
-    renderForm('create')
-    fireEvent.change(screen.getByTestId('f-shipping-equipmentType'), { target: { value: 'Van' } })
-    const toggle = screen.getByTestId('section-shipping-toggle')
-    fireEvent.click(toggle)
-    expect(toggle.getAttribute('aria-expanded')).toBe('false')
-    expect(document.getElementById('section-shipping-body')?.hidden).toBe(true)
-    expect(localStorage.getItem('tms:ship-form:sections:rep@example.invalid')).toContain('"shipping":false')
-
-    fireEvent.click(screen.getByTestId('ship-form-create'))
-    await waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('true'))
-    expect((screen.getByTestId('f-shipping-equipmentType') as HTMLInputElement).value).toBe('Van')
-    expect(screen.getByTestId('section-shipping-errors')).toBeTruthy()
-  })
-
-  it('an issue link expands its section and focuses the field', async () => {
+describe('ShipmentFormPage — issues and rail', () => {
+  it('Create with blocking issues focuses the first missing field', async () => {
     renderForm('create')
     fireEvent.click(screen.getByTestId('ship-form-create'))
     await screen.findByTestId('ship-form-issues')
-    fireEvent.click(screen.getByTestId('section-shipping-toggle'))
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('f-customer-name')))
+  })
+
+  it('an issue link focuses the field', async () => {
+    renderForm('create')
+    fireEvent.click(screen.getByTestId('ship-form-create'))
+    await screen.findByTestId('ship-form-issues')
     fireEvent.click(screen.getByTestId('issue-link-shipping:equipmentType'))
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('f-shipping-equipmentType')))
-    expect(screen.getByTestId('section-shipping-toggle').getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('the rail checklist counts live, marks a row done when its field is filled, and focuses on click', () => {
+    renderForm('create')
+    const count = screen.getByTestId('rail-required-count')
+    expect(count.textContent).toBe('0 / 7')
+    fireEvent.change(screen.getByTestId('f-customer-name'), { target: { value: 'ZZ Customer' } })
+    expect(count.textContent).toBe('1 / 7')
+    expect(screen.getByTestId('rail-req-customer').getAttribute('data-done')).toBe('true')
+    expect(screen.getByTestId('rail-req-equipment').getAttribute('data-missing')).toBe('false')
+    fireEvent.click(screen.getByTestId('rail-req-equipment'))
+    return waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('f-shipping-equipmentType')))
+  })
+
+  it('missing rows turn amber only after a blocked attempt', async () => {
+    renderForm('create')
+    fireEvent.click(screen.getByTestId('ship-form-create'))
+    await screen.findByTestId('ship-form-issues')
+    expect(screen.getByTestId('rail-req-weight').getAttribute('data-missing')).toBe('true')
+  })
+
+  it('Cmd+Enter creates and Cmd+S saves a draft, even while typing in a field', async () => {
+    renderForm('create')
+    const input = screen.getByTestId('f-customer-name')
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
+    await screen.findByTestId('ship-form-issues')
+    h.toastInfo.mockClear()
+    fireEvent.keyDown(input, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(h.toastInfo).toHaveBeenCalledWith(expect.stringMatching(/local draft/i)))
+    expect(h.runCreate).not.toHaveBeenCalled()
   })
 })
 
 describe('ShipmentFormPage — layout contract', () => {
-  it('sections sit in Aljex tab order, all open, with no positive tabindex', () => {
+  it('five numbered cards in build order, no positive tabindex', () => {
     renderForm('create')
-    const toggles = [...document.querySelectorAll<HTMLElement>('[data-section-toggle]')].map((n) => n.dataset.sectionToggle)
-    expect(toggles).toEqual([...SECTION_ORDER])
-    for (const t of document.querySelectorAll<HTMLElement>('[data-section-toggle]')) expect(t.getAttribute('aria-expanded')).toBe('true')
+    const cards = [...document.querySelectorAll<HTMLElement>('[data-testid^="section-"]:not([data-testid$="-errors"])')].map((n) => n.dataset.testid)
+    expect(cards).toEqual(['section-customer', 'section-route', 'section-freight', 'section-rates', 'section-carrier'])
+    expect([...document.querySelectorAll('.tms-ship-card-num')].map((n) => n.textContent)).toEqual(['1', '2', '3', '4', '5'])
     expect([...document.querySelectorAll('[tabindex]')].every((n) => Number(n.getAttribute('tabindex')) <= 0)).toBe(true)
+  })
+
+  it('the header shows Division, Mode, status and a read-only PRO preview', () => {
+    renderForm('create')
+    expect(screen.getByTestId('ship-form-title').textContent).toBe('New shipment')
+    expect(screen.getByTestId('ship-form-status').textContent).toBe('Draft')
+    expect(screen.getByLabelText('Division')).toBeTruthy()
+    expect((screen.getByLabelText('Mode') as HTMLSelectElement).value).toBe('FTL')
+  })
+
+  it('Check calls and Updates tabs exist only in edit mode', () => {
+    const { unmount } = renderForm('create')
+    expect([...document.querySelectorAll('[role="tab"]')].map((n) => n.textContent)).toEqual(
+      ['Instructions', 'References', 'Items', 'Notes', 'Documents', 'Rate history'])
+    unmount()
+    h.shipment = { bundle: bundleOf('DRAFT'), loading: false, error: null }
+    renderForm('edit')
+    expect([...document.querySelectorAll('[role="tab"]')].map((n) => n.textContent)).toContain('Check calls')
+    expect([...document.querySelectorAll('[role="tab"]')].map((n) => n.textContent)).toContain('Updates')
   })
 
   it('the issues strip names required fields without asterisks', async () => {
@@ -218,7 +265,7 @@ describe('ShipmentFormPage — edit mode', () => {
     renderForm('edit')
     expect(screen.queryByTestId('ship-form-create')).toBeNull()
     expect(screen.getByTestId('ship-form-submit')).toBeTruthy()
-    expect(screen.getByTestId('ship-form-title').textContent).toContain('S000123')
+    expect(screen.getByTestId('ship-form-title').textContent).toBe('Edit PRO S000123')
     // Strict level needs the required fields; fill nothing → blocked, nothing called.
     fireEvent.click(screen.getByTestId('ship-form-save'))
     await screen.findByTestId('ship-form-issues')

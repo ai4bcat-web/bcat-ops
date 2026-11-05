@@ -12,11 +12,16 @@ const mocks = vi.hoisted(() => ({
   listShipmentsByNumber: vi.fn(),
   mcpPreviewCarrier: vi.fn(),
   rejectOffer: vi.fn(),
-  sendSetupPacket: vi.fn(),
+  mcpSendInvite: vi.fn(),
+  mcpAddCarrier: vi.fn(),
+  carriers: [] as unknown[],
 }))
 
 vi.mock('@/lib/apiClient', () => ({ ...mocks, csAction: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('@/hooks/useCarriers', () => ({
+  useCarriers: () => ({ carriers: mocks.carriers, loading: false, error: null, refresh: vi.fn(), replace: vi.fn() }),
+}))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isAdmin: false, isOwner: false }) }))
 vi.mock('@/features/quotes/components/AcceptOfferDialog', () => ({
   AcceptOfferDialog: ({ quote }: { quote: { id: string } }) => <div data-testid="accept-dialog">{quote.id}</div>,
@@ -24,6 +29,12 @@ vi.mock('@/features/quotes/components/AcceptOfferDialog', () => ({
 vi.mock('@/features/quotes/components/CounterDialog', () => ({
   CounterDialog: ({ quote }: { quote: { id: string } }) => <div data-testid="counter-dialog">{quote.id}</div>,
 }))
+
+const LIVE_CARD = {
+  source: 'LIVE', identity: { legalName: 'Hauler LLC', mcNumber: 'MC999999' }, operating: {}, risk: { totalPoints: 100, tone: 'green', categories: [] },
+  insurance: [], packet: { status: 'NOT_INVITED', label: 'Not invited', completed: false, rawStatuses: [] },
+  emails: [{ address: 'dispatch@hauler.example', source: 'MCP_APPROVED', label: 'Dispatch' }, { address: 'owner@hauler.example', source: 'MCP_PROFILE', label: 'Carrier profile / FMCSA' }],
+}
 
 const SHIPMENT = { id: 's-1', number: 'L100', originCity: 'Chicago', destinationCity: 'Dallas', pickupAppt: '2026-11-06T14:00:00Z', equipmentType: 'Van', postedBoards: ['DAT'] }
 
@@ -88,18 +99,44 @@ describe('OffersHub', () => {
     expect(mocks.listCarrierOffers).not.toHaveBeenCalled()
   })
 
-  it('an offer from a carrier outside the directory cannot be accepted (the gate’s own words) but can be sent a setup packet', async () => {
+  it('an offer from a carrier outside the directory cannot be accepted (the gate’s own words); Send setup packet needs no e-mail on the offer: the card lists MCP’s addresses and sends to all of them', async () => {
     mocks.listCarrierOffers.mockResolvedValue({
-      offers: [offer('Q2', { carrierMc: '999999', vetting: { known: false, bookable: false, blockers: ['Carrier is not in the directory.'], warnings: [], status: null, mcpStatus: null }, carrierRisk: undefined })],
+      offers: [offer('Q2', { carrierMc: '999999', carrierEmail: null, vetting: { known: false, bookable: false, blockers: ['Carrier is not in the directory.'], warnings: [], status: null, mcpStatus: null }, carrierRisk: undefined })],
     })
-    mocks.sendSetupPacket.mockResolvedValue({ sent: true, mode: 'STUB', message: 'STUB: nothing sent' })
+    mocks.mcpPreviewCarrier.mockResolvedValue({ mode: 'LIVE', reason: null, notFound: false, card: LIVE_CARD })
+    mocks.mcpSendInvite.mockResolvedValue({ mode: 'LIVE', sent: true, message: 'Packet invitation sent', emails: ['dispatch@hauler.example', 'owner@hauler.example'], carrierLogged: false, threadLogged: true })
     render(<Harness initial="L100" />)
     const accept = (await screen.findByTestId('cs-offer-accept-Q2')) as HTMLButtonElement
     expect(accept.disabled).toBe(true)
     expect(accept.title).toBe('Carrier is not in the directory.')
-    expect(screen.getByText('Not in directory')).toBeTruthy()
-    fireEvent.click(screen.getByTestId('cs-offer-setup-packet-Q2'))
-    await waitFor(() => expect(mocks.sendSetupPacket).toHaveBeenCalledWith({ shipmentId: 's-1', quoteId: 'Q2', email: 'dispatch@hauler.example.invalid' }))
+    const setup = screen.getByTestId('cs-offer-setup-packet-Q2') as HTMLButtonElement
+    expect(setup.disabled).toBe(false)
+    fireEvent.click(setup)
+
+    const card = await screen.findByTestId('cs-lookup-card')
+    expect(card.dataset.inDirectory).toBe('false')
+    expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toMatch(/^Not in directory/)
+    expect(within(card).getByTestId('cs-lookup-card-emails').textContent).toMatch(/dispatch@hauler.example, owner@hauler.example/)
+    fireEvent.click(within(card).getByTestId('cs-lookup-card-send'))
+    fireEvent.click(await screen.findByTestId('mcp-invite-send'))
+    await waitFor(() => expect(mocks.mcpSendInvite).toHaveBeenCalledWith({
+      mcNumber: '999999', emails: ['dispatch@hauler.example', 'owner@hauler.example'], carrierId: undefined, carrierName: 'Hauler LLC', shipmentId: 's-1', loadId: undefined, ensureCarrier: true,
+    }))
+  })
+
+  it('a directory carrier shows Set up with us, its status and packet standing first', async () => {
+    mocks.carriers = [{ id: 'car-1', name: 'Hauler LLC', status: 'ACTIVE', mcNumber: 'MC999999', mcpStatus: 'ACCEPTABLE' }]
+    mocks.listCarrierOffers.mockResolvedValue({
+      offers: [offer('Q4', { carrierMc: '999999', vetting: { known: false, bookable: false, blockers: ['x'], warnings: [], status: null, mcpStatus: null }, carrierRisk: undefined })],
+    })
+    mocks.mcpPreviewCarrier.mockResolvedValue({ mode: 'LIVE', reason: null, notFound: false, card: LIVE_CARD })
+    render(<Harness initial="L100" />)
+    fireEvent.click(await screen.findByTestId('cs-offer-setup-packet-Q4'))
+    const card = await screen.findByTestId('cs-lookup-card')
+    expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toMatch(/^Set up with us · ACTIVEPacket complete/)
+    expect(within(card).getByTestId('cs-lookup-card-active').textContent).toBe('Active with us — ready to cover')
+    expect(within(card).getByTestId('cs-lookup-card-open').getAttribute('href')).toBe('/tms/carriers/car-1')
+    mocks.carriers = []
   })
 
   it('Check MCP looks the MC up once and labels a stub answer', async () => {

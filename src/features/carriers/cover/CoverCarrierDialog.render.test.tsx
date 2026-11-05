@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { CarrierRecord } from '@/types/tms'
 import { buildReviewCard, stubReviewCard } from '@/lib/integrations/mcpReview'
+import { MemoryRouter } from 'react-router-dom'
 import { CoverCarrierDialog } from './CoverCarrierDialog'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -54,7 +55,7 @@ const onClose = vi.fn()
 const onCovered = vi.fn()
 
 function renderDialog() {
-  return render(<CoverCarrierDialog shipmentId="shp-1" shipmentNumber="S000001" onClose={onClose} onCovered={onCovered} />)
+  return render(<MemoryRouter><CoverCarrierDialog shipmentId="shp-1" shipmentNumber="S000001" onClose={onClose} onCovered={onCovered} /></MemoryRouter>)
 }
 
 async function lookUp(text: string) {
@@ -79,13 +80,13 @@ beforeEach(() => {
 })
 
 describe('CoverCarrierDialog', () => {
-  it('an ACTIVE directory carrier is assigned straight away, without calling MyCarrierPackets', async () => {
+  it('an ACTIVE directory carrier is assigned straight away: the lookup card says Active with us and the MCP read gates nothing', async () => {
     mocks.carriers = [carrierRow({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })]
     renderDialog()
     await lookUp('MC 900001')
 
     expect((await screen.findByTestId('cover-packet-status')).textContent).toBe('Packet complete, acceptable')
-    expect(mocks.preview).not.toHaveBeenCalled()
+    expect((await screen.findByTestId('cover-lookup-card-active')).textContent).toBe('Active with us — ready to cover')
     enterRate()
     fireEvent.click(screen.getByTestId('cover-assign'))
 
@@ -102,7 +103,7 @@ describe('CoverCarrierDialog', () => {
     await lookUp('MC 900001')
     expect(screen.queryByTestId('cover-directory')).toBeNull()
     mocks.loading = false
-    view.rerender(<CoverCarrierDialog shipmentId="shp-1" shipmentNumber="S000001" onClose={onClose} onCovered={onCovered} />)
+    view.rerender(<MemoryRouter><CoverCarrierDialog shipmentId="shp-1" shipmentNumber="S000001" onClose={onClose} onCovered={onCovered} /></MemoryRouter>)
     expect(await screen.findByTestId('cover-directory')).toBeTruthy()
   })
 
@@ -128,7 +129,7 @@ describe('CoverCarrierDialog', () => {
 
     await waitFor(() => expect(mocks.invite).toHaveBeenCalledTimes(1))
     expect(mocks.invite).toHaveBeenCalledWith(expect.objectContaining({
-      email: 'dispatch@zephyr.example', carrierId: 'car-1', shipmentId: 'shp-1', loadId: 'load-1', ensureCarrier: true,
+      emails: ['dispatch@zephyr.example'], carrierId: 'car-1', shipmentId: 'shp-1', loadId: 'load-1', ensureCarrier: true,
     }))
     // The invite landed before the assignment, and the assignment is for the row the invite made.
     await waitFor(() => expect(mocks.cover).toHaveBeenCalledWith(expect.objectContaining({ carrierId: 'car-1', carrierRateCents: 150_000 })))
@@ -147,19 +148,20 @@ describe('CoverCarrierDialog', () => {
     expect(mocks.invite).not.toHaveBeenCalled()
   })
 
-  it('a carrier MCP does not know is not in the directory: the packet is the only way in, and a STUB invite assigns nothing', async () => {
+  it('a STUB lookup says "Stub, no MCP call": no recipient to send to, so nothing is invited and nothing is assigned', async () => {
     const stub = stubReviewCard({ mcNumber: 'MC274623' }, NOW)
     mocks.preview.mockResolvedValue({ mode: 'STUB', reason: 'credentials not configured', card: stub, notFound: false })
-    mocks.invite.mockResolvedValue({ mode: 'STUB', sent: false, message: 'STUB: nothing was sent.', carrierLogged: false, threadLogged: false })
     renderDialog()
     await lookUp('MC 274623')
     await screen.findByTestId('cover-mcp-card')
     enterRate()
     expect(screen.getByTestId('cover-stub-reason').textContent).toMatch(/credentials not configured/)
+    const cardSend = screen.getByTestId('cover-lookup-card-send') as HTMLButtonElement
+    expect(cardSend.disabled).toBe(true)
+    expect(cardSend.title).toMatch(/^Stub, no MCP call/)
     fireEvent.click(screen.getByTestId('cover-send-packet'))
-    fireEvent.click(await screen.findByTestId('mcp-invite-send'))
-
-    expect((await screen.findByTestId('cover-error')).textContent).toMatch(/not assigned/)
+    expect((await screen.findByTestId('mcp-invite-send') as HTMLButtonElement).disabled).toBe(true)
+    expect(mocks.invite).not.toHaveBeenCalled()
     expect(mocks.cover).not.toHaveBeenCalled()
   })
 

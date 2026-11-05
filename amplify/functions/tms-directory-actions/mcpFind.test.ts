@@ -21,7 +21,7 @@ const CALLER = { email: 'rep@bcat.example', sub: 's1', groups: ['page-carriers']
 
 interface Sent { type: string; input: Record<string, unknown> }
 
-function harness(opts: { failFirstCarrierUpdate?: boolean } = {}) {
+function harness(opts: { failFirstCarrierUpdate?: boolean; previewEmails?: string[]; failInviteTo?: string } = {}) {
   const sent: Sent[] = []
   const audits: Array<{ entityType: string; entityId: string; action: string; changes: Record<string, unknown> }> = []
   let updates = 0
@@ -40,8 +40,11 @@ function harness(opts: { failFirstCarrierUpdate?: boolean } = {}) {
   const fetchImpl = vi.fn(async (url: string) => {
     calls.push(url)
     if (url.includes('/token')) return new Response(JSON.stringify({ access_token: 'tok-1', expires_in: 3600 }), { status: 200 })
+    if (url.includes('EmailPacketInvitation')) {
+      if (opts.failInviteTo && url.includes(encodeURIComponent(opts.failInviteTo))) return new Response(JSON.stringify({ Message: 'bad address' }), { status: 400 })
+    }
     if (url.includes('EmailPacketInvitation')) return new Response(JSON.stringify({ Success: true, Message: 'queued' }), { status: 200 })
-    if (url.includes('PreviewCarrier')) return new Response(JSON.stringify([{ DotNumber: 7000001, DocketNumber: 'MC900001', CompanyName: 'Zephyr Test Freight LLC', Status: 'ACTIVE', Emails: [{ Email: 'dispatch@zephyr.example' }] }]), { status: 200 })
+    if (url.includes('PreviewCarrier')) return new Response(JSON.stringify([{ DotNumber: 7000001, DocketNumber: 'MC900001', CompanyName: 'Zephyr Test Freight LLC', Status: 'ACTIVE', Emails: (opts.previewEmails ?? ['dispatch@zephyr.example']).map((Email) => ({ Email })) }]), { status: 200 })
     if (url.includes('GetCarrierData')) return new Response(JSON.stringify({ DOTNumber: 7000001, MCNumber: 'MC900001', LegalName: 'Zephyr Test Freight LLC', CarrierCustomerPacketStatuses: [{ CarrierPacketStatus: 'Invited' }] }), { status: 200 })
     return new Response('[]', { status: 200 })
   })
@@ -132,7 +135,7 @@ describe('MCP_SEND_INVITE', () => {
     expect(JSON.stringify(put.input)).toContain('tracking+ship-1')
     expect(JSON.stringify(put.input)).toContain('dispatch@zephyr.example')
 
-    expect(h.audits).toEqual([{ entityType: 'CARRIER', entityId: 'car-1', action: 'MCP_SEND_INVITE', changes: expect.objectContaining({ email: 'dispatch@zephyr.example', mode: 'LIVE', sent: true, mcpStatus: 200, mcpBodyKeys: ['Message', 'Success'], shipmentId: 'ship-1' }) }])
+    expect(h.audits).toEqual([{ entityType: 'CARRIER', entityId: 'car-1', action: 'MCP_SEND_INVITE', changes: expect.objectContaining({ emails: ['dispatch@zephyr.example'], mode: 'LIVE', sent: true, mcpStatus: 200, mcpBodyKeys: ['Message', 'Success'], shipmentId: 'ship-1' }) }])
     expect(JSON.stringify([out, h.audits, h.sent])).not.toMatch(/fake-pass-123|tok-1/)
   })
 
@@ -195,11 +198,71 @@ describe('MCP_SEND_INVITE', () => {
     expect(h.audits[0]).toMatchObject({ action: 'MCP_SEND_INVITE', changes: { mode: 'STUB', sent: false } })
   })
 
-  it.each(['', 'nope', 'a@b', 'x@y.com, z@y.com'])('refuses the recipient %j before any call', async (email) => {
+  it.each(['nope', 'a@b', 'x@y.com, z@y.com'])('refuses the recipient %j before any call', async (email) => {
     const h = harness()
     await expect(mcpSendInvite(h.deps, { mcNumber: 'MC900001', email }, CALLER)).rejects.toThrow()
     expect(gate).not.toHaveBeenCalled()
     expect(h.fetchImpl).not.toHaveBeenCalled()
+  })
+})
+
+describe('MCP_SEND_INVITE recipients (Step AS)', () => {
+  const invites = (h: ReturnType<typeof harness>) => h.calls.filter((u) => u.includes('EmailPacketInvitation'))
+
+  it('no recipients passed: defaults to every address MCP returns, one invitation each, all logged on the carrier, thread and audit', async () => {
+    gate.mockResolvedValue(LIVE)
+    const h = harness({ previewEmails: ['Dispatch@Zephyr.Example', 'owner@zephyr.example', 'dispatch@zephyr.example'] })
+    const out = await mcpSendInvite(h.deps, { mcNumber: 'MC900001', dotNumber: '7000001', carrierId: 'car-1', shipmentId: 'ship-1' }, CALLER)
+    expect(invites(h).map((u) => new URL(u).searchParams.get('carrierEmail'))).toEqual(['dispatch@zephyr.example', 'owner@zephyr.example'])
+    expect(out).toMatchObject({ sent: true, emails: ['dispatch@zephyr.example', 'owner@zephyr.example'], failed: [], carrierLogged: true, threadLogged: true })
+    expect(JSON.stringify(h.sent.find((s) => s.type === 'UpdateItemCommand')!.input)).toContain('dispatch@zephyr.example, owner@zephyr.example')
+    expect(JSON.stringify(h.sent.find((s) => s.type === 'PutItemCommand')!.input)).toContain('dispatch@zephyr.example, owner@zephyr.example')
+    expect(h.audits[0]!.changes).toMatchObject({ emails: ['dispatch@zephyr.example', 'owner@zephyr.example'], failed: [] })
+  })
+
+  it('an unticked address is not invited: only the listed ones go, and MCP\'s list is not consulted', async () => {
+    gate.mockResolvedValue(LIVE)
+    const h = harness({ previewEmails: ['a@zephyr.example', 'b@zephyr.example'] })
+    const out = await mcpSendInvite(h.deps, { mcNumber: 'MC900001', emails: ['b@zephyr.example'] }, CALLER)
+    expect(invites(h).map((u) => new URL(u).searchParams.get('carrierEmail'))).toEqual(['b@zephyr.example'])
+    expect(h.calls.some((u) => u.includes('PreviewCarrier'))).toBe(false)
+    expect(out).toMatchObject({ emails: ['b@zephyr.example'] })
+  })
+
+  it('a hand-typed address is additive to the ticked list, lower-cased and deduped', async () => {
+    gate.mockResolvedValue(LIVE)
+    const h = harness()
+    await mcpSendInvite(h.deps, { mcNumber: 'MC900001', emails: ['a@zephyr.example', 'B@zephyr.example'], email: 'typed@carrier.example' }, CALLER)
+    expect(invites(h).map((u) => new URL(u).searchParams.get('carrierEmail'))).toEqual(['a@zephyr.example', 'b@zephyr.example', 'typed@carrier.example'])
+  })
+
+  it('an empty recipient list is no invitation at all', async () => {
+    const h = harness()
+    await expect(mcpSendInvite(h.deps, { mcNumber: 'MC900001', emails: [] }, CALLER)).rejects.toThrow(/at least one recipient/)
+    expect(gate).not.toHaveBeenCalled()
+    expect(h.fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('default list with nothing from MCP sends nothing and says why', async () => {
+    gate.mockResolvedValue(LIVE)
+    const h = harness({ previewEmails: [] })
+    await expect(mcpSendInvite(h.deps, { mcNumber: 'MC900001' }, CALLER)).rejects.toThrow(/no e-mail address/)
+    expect(invites(h)).toEqual([])
+    expect(h.audits).toEqual([])
+  })
+
+  it('an invalid address in the list refuses the whole send before any call', async () => {
+    const h = harness()
+    await expect(mcpSendInvite(h.deps, { mcNumber: 'MC900001', emails: ['ok@zephyr.example', 'nope'] }, CALLER)).rejects.toThrow(/not a valid/)
+    expect(h.fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('one address MCP rejects does not undo the others: it is reported as failed and not logged as invited', async () => {
+    gate.mockResolvedValue(LIVE)
+    const h = harness({ failInviteTo: 'bad@zephyr.example' })
+    const out = await mcpSendInvite(h.deps, { mcNumber: 'MC900001', emails: ['ok@zephyr.example', 'bad@zephyr.example'], carrierId: 'car-1' }, CALLER)
+    expect(out).toMatchObject({ sent: true, emails: ['ok@zephyr.example'], failed: [{ email: 'bad@zephyr.example' }] })
+    expect(JSON.stringify(h.sent.find((s) => s.type === 'UpdateItemCommand')!.input)).not.toContain('bad@zephyr.example')
   })
 })
 

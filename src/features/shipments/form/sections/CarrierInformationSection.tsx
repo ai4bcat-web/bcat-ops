@@ -2,7 +2,8 @@
  * Carrier Information (AH-plan §4.9). Inputs work in create mode (they live in the form and
  * the local draft); every button that talks to the server needs a saved shipment. Cover goes
  * through the existing BookCarrierDialog (own fleet: AssignDriverDialog) — this section only
- * opens it with the form's values prefilled via `ctx.actions.cover()`.
+ * opens it via `ctx.actions.cover()`. Step AR card 5: collapsed to "No carrier yet" + Cover/Assign
+ * until a carrier is picked (or Ivan Cartage / a typed name is chosen).
  */
 import { memo, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -18,11 +19,11 @@ import { formatCents } from '@/lib/tmsDirectory'
 import type { CarrierRecord, InsurancePolicyType } from '@/types/tms'
 import { US_STATES } from '../constants'
 import { LABEL } from '../labels'
-import { financialPreview } from '../mapping'
 import { activeLoadCarrier, isLocked, lockReason } from '../model'
 import type { SliceSectionProps } from '../sectionRegistry'
 import { fieldAttrs } from './fieldAttrs'
 import { FindInvite } from './carrier/FindInvite'
+import '../cards/moneyCards.css'
 
 
 function policyText(carrier: CarrierRecord | null, type: InsurancePolicyType): string {
@@ -41,10 +42,10 @@ function Static({ def, text }: { def: { text: string; testId: string }; text: st
   )
 }
 
-function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSectionProps<'carrier'>) {
+function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false }: SliceSectionProps<'carrier'> & { expanded?: boolean }) {
   const roster = useOwnFleetRoster()
   const [search, setSearch] = useState('')
-  const [coverHint, setCoverHint] = useState<string | null>(null)
+  const [assigning, setAssigning] = useState(false)
 
   const bundle = ctx.bundle
   const active = activeLoadCarrier(bundle)
@@ -93,22 +94,36 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSect
     : active ? 'A carrier is already covering this load'
     : loadStatus !== 'SOURCING' ? 'The load must be SOURCING to cover'
     : !isTruckloadMode(bundle?.shipment.mode) ? 'Only truckload modes can be covered'
-    : !own && !value.carrierId ? 'Pick a carrier from the directory'
-    : !own && (!value.originCity.trim() || !value.originState.trim()) ? 'Origin City and Origin State are required'
     : null
 
-  const onCover = () => {
-    // The carrier rate lives in Rates (another slice); it is read here, at click time.
-    if (!own && financialPreview(form.getValues(), ctx.customer, ctx.settings).carrierTotalLhCents <= 0) {
-      setCoverHint('Enter a carrier rate in Rates first')
-      return
-    }
-    setCoverHint(null)
-    ctx.actions.cover()
-  }
+  // Own fleet opens the driver dialog; every other carrier goes through the Step AM ladder (directory first, then MCP).
+  const onCover = () => ctx.actions.cover()
 
   const dash = (iso: string | null | undefined) => (iso ? formatDateTime(iso) : '—')
   const needSave = saved ? undefined : 'Save the draft first'
+
+  const hasCarrier = carrier != null || own || value.useTyped || active != null
+  if (!hasCarrier && !assigning && !expanded) {
+    return (
+      <div className="tms-card-carrier-empty" data-testid="section-carrier-body">
+        <span className="tms-card-carrier-empty-text" data-testid="carrier-empty">No carrier yet</span>
+        <TmsButton
+          variant="primary"
+          size="sm"
+          data-testid={LABEL.carrier.cover.testId}
+          title={coverBlock ?? undefined}
+          disabled={disabled || coverBlock != null}
+          onClick={onCover}
+        >
+          {LABEL.carrier.cover.text}
+        </TmsButton>
+        <TmsButton size="sm" data-testid="carrier-assign" disabled={disabled || pickerLocked} onClick={() => setAssigning(true)}>
+          Assign…
+        </TmsButton>
+        {coverBlock && <span className="tms-muted text-xs" data-testid="carrier-cover-reason">{coverBlock}</span>}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3" data-testid="section-carrier-body">
@@ -116,7 +131,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSect
         <p className="tms-muted text-xs" data-testid="carrier-not-covered">Carrier selected — not covered yet</p>
       )}
 
-      <div className="grid gap-2 min-[1500px]:grid-cols-3">
+      <div className="tms-card-carrier-grid">
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-sm">
             {carrier ? (
@@ -239,7 +254,6 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form }: SliceSect
           {LABEL.carrier.cover.text}
         </TmsButton>
         {coverBlock && <span className="tms-muted text-xs" data-testid="carrier-cover-reason">{coverBlock}</span>}
-        {coverHint && <span className="text-xs" role="alert" data-testid="carrier-cover-hint">{coverHint}</span>}
       </div>
 
       <div className="grid grid-cols-2 gap-2 min-[1500px]:grid-cols-3">

@@ -1,0 +1,87 @@
+/*
+ * Step AR cards 1-3: Customer, Route, Freight. Tokens only; every rule is scoped under .tms-shell.
+ * Grids size to content (no empty halves) and never force horizontal scroll.
+ */
+
+.tms-shell .tms-card-body-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.tms-shell .tms-card-spacer { flex: 1 1 auto; }
+
+.tms-shell .tms-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 12px;
+  align-items: end;
+}
+.tms-shell .tms-card-grid-name { grid-template-columns: minmax(220px, 3fr) minmax(120px, 1fr); }
+.tms-shell .tms-card-grid-desc { grid-template-columns: minmax(220px, 3fr) repeat(auto-fit, minmax(120px, 1fr)); }
+.tms-shell .tms-card-grid-4 { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.tms-shell .tms-card-grid-addr { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+
+/* Type-ahead rows: name, then a muted city/state or "Recent". */
+.tms-shell .tms-card-typeahead-list button { display: flex; justify-content: space-between; gap: 8px; }
+.tms-shell .tms-card-typeahead-sub { color: var(--tms-muted); font-size: 11px; white-space: nowrap; }
+.tms-shell .tms-card-typeahead-list button[data-recent='true'] > span:first-child { font-weight: 600; }
+
+/* Lane header ------------------------------------------------------- */
+.tms-shell .tms-card-lane {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 16px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--tms-border);
+}
+.tms-shell .tms-card-lane-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tms-shell .tms-card-lane-label { font-size: 14px; font-weight: 600; color: var(--tms-text); overflow-wrap: anywhere; }
+.tms-shell .tms-card-lane-miles { display: flex; gap: 12px; }
+.tms-shell .tms-card-miles { width: 120px; }
+
+/* Timeline ---------------------------------------------------------- */
+.tms-shell .tms-card-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.tms-shell .tms-card-timeline-item { position: relative; padding: 0 0 0 20px; }
+.tms-shell .tms-card-timeline-item::before {
+  content: ''; position: absolute; left: 5px; top: 18px; bottom: -8px; width: 2px; background: var(--tms-border);
+}
+.tms-shell .tms-card-timeline-item[data-dragging] { opacity: 0.5; }
+.tms-shell .tms-card-stop {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); padding: 12px;
+  background: var(--tms-card);
+}
+.tms-shell .tms-card-stop-head { display: flex; align-items: center; gap: 8px; }
+.tms-shell .tms-card-stop-title { font-size: 12px; color: var(--tms-text); }
+.tms-shell .tms-card-stop-dot {
+  position: absolute; left: 0; top: 14px; width: 12px; height: 12px; border-radius: var(--tms-radius-pill);
+  border: 2px solid var(--tms-primary); background: var(--tms-card);
+}
+.tms-shell .tms-card-stop-dot[data-type='pickup'] { background: var(--tms-primary); }
+.tms-shell .tms-card-handle {
+  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0;
+  background: none; border: 0; color: var(--tms-muted); cursor: grab;
+}
+.tms-shell .tms-card-handle:disabled { cursor: default; opacity: 0.5; }
+.tms-shell .tms-card-addr-line { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; font-size: 12px; color: var(--tms-text-2); }
+.tms-shell .tms-card-gap { display: flex; gap: 8px; padding: 6px 0 6px 20px; position: relative; }
+.tms-shell .tms-card-gap:last-child { padding-bottom: 0; }
+.tms-shell .tms-card-undo {
+  display: flex; gap: 12px; align-items: center; font-size: 12px; color: var(--tms-text-2);
+  border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); padding: 6px 10px;
+}
+
+/* Freight: requirements chip bar ----------------------------------- */
+.tms-shell .tms-card-req { display: flex; flex-direction: column; gap: 6px; }
+.tms-shell .tms-card-req-title { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tms-muted); }
+.tms-shell .tms-card-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tms-shell .tms-card-chip {
+  position: relative; display: inline-flex; align-items: center; height: 28px; padding: 0 10px; font-size: 12px;
+  border: 1px solid var(--tms-input-border); border-radius: var(--tms-radius-pill); color: var(--tms-text-2);
+  background: var(--tms-card); cursor: pointer; user-select: none;
+}
+.tms-shell .tms-card-chip:hover { background: var(--tms-surface-hover); }
+.tms-shell .tms-card-chip[data-on='true'] { background: var(--tms-primary-tint); border-color: var(--tms-primary); color: var(--tms-primary-ink); font-weight: 600; }
+.tms-shell .tms-card-chip[data-disabled='true'] { opacity: 0.55; cursor: not-allowed; }
+.tms-shell .tms-card-chip:focus-within { outline: 2px solid var(--tms-primary); outline-offset: 1px; }
+.tms-shell .tms-card-chip-input { position: absolute; opacity: 0; inset: 0; margin: 0; width: 100%; height: 100%; cursor: inherit; }
+.tms-shell .tms-card-req-sub {
+  display: flex; flex-direction: column; gap: 8px; padding: 8px 12px;
+  border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); background: var(--tms-surface-subtle);
+}
+.tms-shell .tms-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 8px; border-top: 1px solid var(--tms-border); }
+.tms-shell .tms-card-gap::before { content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; background: var(--tms-border); }
+.tms-shell .tms-card-gap:last-child::before { display: none; }

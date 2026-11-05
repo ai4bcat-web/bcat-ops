@@ -14,27 +14,26 @@ function setup(rates: Partial<ShipmentFormValues['rates']> = {}, ctx = makeCtx()
 }
 
 describe('RatesSection', () => {
-  it('shows Net and Profit % from the same pricing the server uses', () => {
+  it('prices the Total LH cells from the same pricing the server uses', () => {
     const v = emptyValues()
     setup({
       customer: { ...v.rates.customer, lhRate: '1000' },
       carrier: { ...v.rates.carrier, lhRate: '800' },
     })
     expect((screen.getByLabelText('Customer Total LH') as HTMLInputElement).value).toBe('$1000.00')
-    expect(screen.getByTestId('rates-total-customer').textContent).toBe('$1000.00')
-    expect(screen.getByTestId('rates-total-carrier').textContent).toBe('$800.00')
-    expect(screen.getByTestId('f-rates-netProfit').textContent).toBe('Net $200.00 | Profit 20.0%')
+    expect((screen.getByLabelText('Carrier Total LH') as HTMLInputElement).value).toBe('$800.00')
+    expect(screen.queryByTestId('f-rates-netProfit')).toBeNull()
   })
 
-  it('enables Hours only for Per Hour and Pay % only for % of Customer', () => {
+  it('shows Hours only for Per Hour and Pay % only for % of Customer', () => {
     const v = emptyValues()
     setup({
       customer: { ...v.rates.customer, rateType: 'PER_HOUR' },
       carrier: { ...v.rates.carrier, rateType: 'PCT_OF_CUSTOMER' },
     })
-    expect((screen.getByLabelText('Customer Hours') as HTMLInputElement).disabled).toBe(false)
-    expect((screen.getByLabelText('Carrier Hours') as HTMLInputElement).disabled).toBe(true)
-    expect((screen.getByLabelText('Pay %') as HTMLInputElement).disabled).toBe(false)
+    expect(screen.getByLabelText('Customer Hours')).toBeTruthy()
+    expect(screen.queryByLabelText('Carrier Hours')).toBeNull()
+    expect(screen.getByLabelText('Pay %')).toBeTruthy()
     expect((screen.getByLabelText('Carrier LH Rate') as HTMLInputElement).disabled).toBe(true)
   })
 

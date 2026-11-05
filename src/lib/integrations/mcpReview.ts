@@ -42,6 +42,13 @@ export interface ReviewTimelineEntry {
   detail?: string
 }
 
+/** One address MyCarrierPackets returns for the carrier: where it came from and what it is for. */
+export interface McpReviewEmail {
+  address: string
+  source: 'MCP_APPROVED' | 'MCP_PROFILE' | 'MCP_CONTACT'
+  label: string
+}
+
 export interface McpReviewCard {
   /** LIVE = answered by MyCarrierPackets; STUB = a labelled fixture, nothing was called. */
   source: 'LIVE' | 'STUB'
@@ -84,6 +91,8 @@ export interface McpReviewCard {
   timeline: ReviewTimelineEntry[]
   contacts: McpContact[]
   approvedEmails: Array<{ email: string; description?: string }>
+  /** Step AS. Every e-mail MCP returns (approved, FMCSA / profile, packet and dispatch / billing contacts), lower-cased, deduped. The invite defaults to all of them. */
+  emails: McpReviewEmail[]
   equipment: {
     powerUnits?: number
     tractors?: number
@@ -233,6 +242,22 @@ const authorityLine = (value: string | undefined, pending: unknown, revocation: 
   return extra.length ? `${value} (${extra.join(', ')})` : value
 }
 
+const CONTACT_LABEL: Record<string, string> = { DISPATCH: 'Dispatch', CLAIMS: 'Claims', OWNER: 'Owner', AFTER_HOURS: 'After hours', MANAGER: 'Manager', BILLING: 'Billing' }
+
+/** Approved first, then the FMCSA / profile address, then each contact's: one entry per lower-cased address. */
+function collectEmails(approved: McpReviewCard['approvedEmails'], profileEmail: string | undefined, contacts: McpContact[], carrierBillingEmail?: string): McpReviewEmail[] {
+  const out = new Map<string, McpReviewEmail>()
+  const add = (raw: string | undefined, source: McpReviewEmail['source'], label: string) => {
+    const address = raw?.trim().toLowerCase()
+    if (address && !out.has(address)) out.set(address, { address, source, label })
+  }
+  for (const e of approved) add(e.email, 'MCP_APPROVED', e.description ?? 'Approved by MyCarrierPackets')
+  add(profileEmail, 'MCP_PROFILE', 'Carrier profile / FMCSA')
+  for (const c of contacts) add(c.email, 'MCP_CONTACT', c.types.map((t) => CONTACT_LABEL[t] ?? t).join(', ') || c.name)
+  add(carrierBillingEmail, 'MCP_CONTACT', 'Billing')
+  return [...out.values()]
+}
+
 /**
  * One PreviewCarrier or GetCarrierData body -> the review card. Null when MCP knows no carrier.
  * `data` says which endpoint answered, so the page can tell a thin preview from the full record.
@@ -286,7 +311,14 @@ export function buildReviewCard(
     const email = text(field(e, 'Email'))?.toLowerCase()
     return email ? [{ email, ...(text(field(e, 'Description')) ? { description: text(field(e, 'Description'))! } : {}) }] : []
   })
-  const approvedEmails = [...new Map(approved.map((e) => [e.email, e])).values()]
+  const byAddress = new Map<string, { email: string; description?: string }>()
+  for (const e of approved) {
+    const prev = byAddress.get(e.email)
+    if (!prev) byAddress.set(e.email, e)
+    else if (!prev.description && e.description) byAddress.set(e.email, e)
+  }
+  const approvedEmails = [...byAddress.values()]
+  const emails = collectEmails(approvedEmails, profile.email, profile.contacts, profile.payment?.recipientType === 'CARRIER' ? profile.payment.payeeEmail : undefined)
 
   const tractors = num(field(op, 'NumberOfTractors')) ?? num(field(op, 'OwnedTractors'))
   const drivers = num(field(op, 'CDLEmployedDrivers')) ?? num(field(op, 'InterstateDriversTotal'))
@@ -341,6 +373,7 @@ export function buildReviewCard(
     timeline,
     contacts: profile.contacts,
     approvedEmails,
+    emails,
     equipment: {
       ...(profile.powerUnits ? { powerUnits: profile.powerUnits } : {}),
       ...(tractors ? { tractors } : {}),
@@ -374,6 +407,7 @@ export function mergeReviewCards(preview: McpReviewCard | null, data: McpReviewC
     timeline: pick(data.timeline, preview.timeline),
     contacts: pick(data.contacts, preview.contacts),
     approvedEmails: [...new Map([...preview.approvedEmails, ...data.approvedEmails].map((e) => [e.email, e])).values()],
+    emails: [...new Map([...preview.emails, ...data.emails].map((e) => [e.address, e])).values()],
     equipment: { ...preview.equipment, ...data.equipment },
     packet: data.packet.rawStatuses.length > 0 || data.packet.status !== 'NOT_INVITED' ? data.packet : preview.packet.status !== 'NOT_INVITED' ? preview.packet : data.packet,
     monitoring: { monitored: data.monitoring.monitored ?? preview.monitoring.monitored, blocked: data.monitoring.blocked ?? preview.monitoring.blocked },
@@ -519,5 +553,5 @@ const STUB_BODY = (ref: { mcNumber?: string; dotNumber?: string }, nowMs: number
 /** The stub card for a looked-up number: a fixture, clearly marked, nothing called. */
 export function stubReviewCard(ref: { mcNumber?: string; dotNumber?: string }, nowMs: number = Date.now()): McpReviewCard {
   const card = buildReviewCard(STUB_BODY(ref, nowMs), ref, 'data', nowMs)!
-  return { ...card, source: 'STUB', fetched: { preview: true, data: true } }
+  return { ...card, source: 'STUB', emails: [], fetched: { preview: true, data: true } }
 }

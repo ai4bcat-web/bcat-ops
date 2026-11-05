@@ -6,12 +6,14 @@
  * sent / signed, the four driver fields for the last rung); the buttons only do the work that produces those
  * facts. There is no "setup complete" button: setup arrives from MyCarrierPackets or not at all.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Check, Circle, FileSignature, Send, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { InviteDialog } from '@/features/carriers/find/InviteDialog'
+import { CarrierLookupCard } from '@/features/carriers/lookup/CarrierLookupCard'
 import { TmsAlert, TmsButton, TmsCard } from '@/features/tms/kit'
 import { mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
+import type { McpLookupResult } from '@/lib/apiClient'
 import {
   CARRIER_ASSIGNMENT_LABELS, CARRIER_ASSIGNMENT_STATUSES, isCarrierAssignmentStatus, parseAssignmentTimes, rungOf,
 } from '@/lib/carrierAssignment'
@@ -35,11 +37,24 @@ export function CarrierLadderCard({ bundle, loadCarrier, carrier, actions, onRem
   onRemove: () => void
 }) {
   const [dialog, setDialog] = useState<Dialog>(null)
-  const [approved, setApproved] = useState<Array<{ email: string; description?: string }>>([])
-  const [stub, setStub] = useState(false)
+  const [looked, setLooked] = useState<McpLookupResult | null>(null)
+  const [nowIso] = useState(() => new Date().toISOString())
   const [working, setWorking] = useState(false)
 
   const ladder = isCarrierAssignmentStatus(loadCarrier.assignmentStatus) ? loadCarrier.assignmentStatus : null
+  const mcRaw = carrier?.mcNumber ?? loadCarrier.carrierMc ?? ''
+  const dotRaw = carrier?.dotNumber ?? ''
+  const lookupKey = ladder ? `${mcRaw}|${dotRaw}` : ''
+  useEffect(() => {
+    if (!lookupKey || lookupKey === '|') return
+    let alive = true
+    mcpPreviewCarrier({ ...(mcRaw ? { mcNumber: mcRaw.replace(/^MC/i, '') } : {}), ...(dotRaw ? { dotNumber: dotRaw } : {}) })
+      .then((r) => { if (alive) setLooked(r) })
+      .catch(() => { if (alive) setLooked(null) })
+    return () => { alive = false }
+  // Keyed on the carrier's numbers: one MyCarrierPackets read per carrier shown.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lookupKey])
   if (!ladder) return null
 
   const times = parseAssignmentTimes(loadCarrier.assignmentTimes)
@@ -59,9 +74,7 @@ export function CarrierLadderCard({ bundle, loadCarrier, carrier, actions, onRem
   const openPacket = async () => {
     setWorking(true)
     try {
-      const preview = await mcpPreviewCarrier(ref)
-      setApproved(preview.card?.approvedEmails ?? [])
-      setStub(preview.mode === 'STUB')
+      setLooked(await mcpPreviewCarrier(ref))
       setDialog('packet')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not reach MyCarrierPackets')
@@ -70,10 +83,10 @@ export function CarrierLadderCard({ bundle, loadCarrier, carrier, actions, onRem
     }
   }
 
-  const sendPacket = async (email: string) => {
+  const sendPacket = async (emails: string[]) => {
     setWorking(true)
     try {
-      const out = await mcpSendInvite({ ...ref, email, carrierId: carrier?.id ?? loadCarrier.carrierId ?? undefined, carrierName: name, shipmentId: bundle.shipment.id, loadId: load?.id })
+      const out = await mcpSendInvite({ ...ref, emails, carrierId: carrier?.id ?? loadCarrier.carrierId ?? undefined, carrierName: name, shipmentId: bundle.shipment.id, loadId: load?.id })
       setDialog(null)
       if (out.sent) toast.success(out.message)
       else toast.info(out.message)
@@ -123,6 +136,21 @@ export function CarrierLadderCard({ bundle, loadCarrier, carrier, actions, onRem
           <p className="mt-3 text-xs" role="status" data-testid="dispatch-gate" style={{ color: 'var(--tms-badge-orange)' }}>{gate}</p>
         )}
 
+        {looked && (looked.card || carrier) && (
+          <div className="mt-3">
+            <CarrierLookupCard
+              card={looked.card}
+              mode={looked.mode}
+              carrier={carrier}
+              nowIso={nowIso}
+              heading={name}
+              busy={busy}
+              onSendPacket={sendPacket}
+              testId="ladder-lookup-card"
+            />
+          </div>
+        )}
+
         <div className="mt-3 flex flex-wrap gap-2">
           {buttons.map((b) => (
             <TmsButton
@@ -166,11 +194,11 @@ export function CarrierLadderCard({ bundle, loadCarrier, carrier, actions, onRem
       {dialog === 'packet' && (
         <InviteDialog
           carrierName={name}
-          approved={approved}
-          stub={stub}
+          candidates={looked?.card?.emails ?? []}
+          stub={looked?.mode === 'STUB'}
           busy={working}
           onClose={() => setDialog(null)}
-          onSend={(email) => { void sendPacket(email) }}
+          onSend={(emails) => { void sendPacket(emails) }}
         />
       )}
     </TmsCard>

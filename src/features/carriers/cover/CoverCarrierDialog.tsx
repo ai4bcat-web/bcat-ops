@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import { MoneyField } from '@/features/directory/components/MoneyField'
 import { InviteDialog } from '@/features/carriers/find/InviteDialog'
 import { McpReviewCardView } from '@/features/carriers/find/McpReviewCardView'
+import { CarrierLookupCard } from '@/features/carriers/lookup/CarrierLookupCard'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsInput, TmsMetaList } from '@/features/tms/kit'
 import { useCarriers } from '@/hooks/useCarriers'
 import { coverCarrier, getShipmentBundle, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
@@ -42,15 +43,17 @@ const refOf = (c: CarrierRecord): Ref => ({
   ...(c.dotNumber ? { dotNumber: c.dotNumber } : {}),
 })
 
-export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCovered }: {
+export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = '', onClose, onCovered }: {
   shipmentId: string
   shipmentNumber?: string
+  /** Look this MC / DOT up as soon as the directory has loaded (Carrier Sales' "Cover with this carrier"). */
+  initialQuery?: string
   onClose: () => void
   /** The covered shipment bundle, for the caller to swap in or refresh from. */
   onCovered: (bundle: ShipmentBundle) => void
 }) {
   const { carriers, loading: carriersLoading, refresh } = useCarriers()
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(initialQuery)
   const [looked, setLooked] = useState(false)
   const [nameMatches, setNameMatches] = useState<CarrierRecord[] | null>(null)
   const [selected, setSelected] = useState<CarrierRecord | null>(null)
@@ -62,7 +65,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
   const [inviteOpen, setInviteOpen] = useState(false)
   const [working, setWorking] = useState(false)
   // A lookup asked for while the directory is still loading waits for it, instead of the click doing nothing.
-  const [queued, setQueued] = useState(false)
+  const [queued, setQueued] = useState(initialQuery.trim() !== '')
   const [error, setError] = useState<string | null>(null)
 
   const card = preview?.card ?? null
@@ -80,7 +83,6 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
     setPreview(null)
     setAcked(false)
     setError(null)
-    if (carrier && carrier.status === 'ACTIVE') return
     setPreviewing(true)
     mcpPreviewCarrier(next)
       .then(setPreview)
@@ -141,7 +143,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
     }
   }
 
-  const inviteAndAssign = async (email: string) => {
+  const inviteAndAssign = async (emails: string[]) => {
     if (!ref || !card) return
     setWorking(true)
     setError(null)
@@ -149,7 +151,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
       const load = (await getShipmentBundle(shipmentId)).loads[0]
       const invite = await mcpSendInvite({
         ...ref,
-        email,
+        emails,
         carrierId: selected?.id,
         carrierName: card.identity.legalName ?? selected?.name,
         shipmentId,
@@ -178,11 +180,22 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
     }
   }
 
+  const [nowIso] = useState(() => new Date().toISOString())
+  const needRate = 'Enter the carrier rate first: the carrier is assigned right after the setup packet is sent.'
+  const requestInvite = (emails: string[]) => {
+    if (!rateOk) { setError(needRate); return }
+    void inviteAndAssign(emails)
+  }
+  const requestAssign = async () => {
+    if (!rateOk) { setError('Enter the carrier rate first.'); return }
+    await assign()
+  }
+
   const title = shipmentNumber ? `Cover ${shipmentNumber}` : 'Cover shipment'
   const mainLabel = route === 'ASSIGN_NOW' ? 'Assign carrier'
     : route === 'ASSIGN_WAITING' ? 'Assign, waiting for carrier setup'
       : 'Send setup packet via MyCarrierPackets'
-  const approved = card?.approvedEmails ?? []
+  const candidates = card?.emails ?? []
   const carrierName = card?.identity.legalName ?? selected?.name ?? (ref ? refLabel(ref) : 'the carrier')
   const hasTarget = selected != null || card != null
 
@@ -254,6 +267,20 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
             </div>
           )}
 
+          {(selected || card) && !previewing && (
+            <CarrierLookupCard
+              card={card}
+              mode={preview?.mode ?? 'LIVE'}
+              carrier={selected}
+              nowIso={nowIso}
+              heading={carrierName}
+              busy={working}
+              onSendPacket={requestInvite}
+              onCover={() => { void requestAssign() }}
+              testId="cover-lookup-card"
+            />
+          )}
+
           {selected && (
             <div className="flex flex-col gap-2" data-testid="cover-directory">
               <TmsMetaList
@@ -315,11 +342,11 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, onClose, onCove
       {inviteOpen && card && (
         <InviteDialog
           carrierName={carrierName}
-          approved={approved}
+          candidates={candidates}
           stub={stub}
           busy={working}
           onClose={() => setInviteOpen(false)}
-          onSend={(email) => { void inviteAndAssign(email) }}
+          onSend={(emails) => { setInviteOpen(false); void inviteAndAssign(emails) }}
         />
       )}
     </>

@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { BookCarrierDialog, type BookCarrierFields } from '@/features/carriers/components/BookCarrierDialog'
+import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
 import { AssignDriverDialog } from '@/features/shipments/components/AssignDriverDialog'
 import { DispatchDialog } from '@/features/shipments/components/DispatchDialog'
 import { RemoveCarrierDialog } from '@/features/shipments/components/StatusActions'
@@ -18,7 +18,6 @@ import {
 } from '@/lib/apiClient'
 import type { ShipmentBundle, ShipmentDocumentType, TmsSettings } from '@/types/tms'
 import { activeLoadCarrier, type ShipmentFormValues } from './model'
-import { toBookCarrierDraft } from './mapping'
 import { RateConDialog } from './RateConDialog'
 import { toLogCheckCallInput } from './checkCallNote'
 import { runCover } from './pipelines'
@@ -116,21 +115,19 @@ export function useFormActions(o: {
   const close = () => setDialog(null)
   let node: ReactNode = null
   if (dialog === 'book' && bundle) {
-    const { carrierName: _name, maxRateCents: _max, ...initial } = toBookCarrierDraft(values)
-    void _name; void _max
-    const prefill = Object.fromEntries(Object.entries(initial).filter(([, v]) => v != null)) as Partial<BookCarrierFields>
+    // Step AM ladder: directory carrier assigned straight away, otherwise an MCP lookup and invite.
     node = (
-      <BookCarrierDialog
-        bundle={bundle} isAdmin={isAdmin} busy={busy} initial={prefill}
+      <CoverCarrierDialog
+        shipmentId={bundle.shipment.id}
+        shipmentNumber={bundle.shipment.number}
         onClose={close}
-        onConfirm={async (input) => {
-          await sa.bookCarrier(input)
-          const after = await runCover(ref.current.values, latestBundle.current as ShipmentBundle)
+        onCovered={async (covered) => {
+          track(covered)
+          const after = await runCover(ref.current.values, covered)
           if (after.bundle) track(after.bundle)
-          if (!after.ok) toast.error(after.message ?? 'Booked, but the carrier details did not all save')
+          if (!after.ok) toast.error(after.message ?? 'Covered, but the carrier details did not all save')
           close()
         }}
-        onRateCon={close}
       />
     )
   } else if (dialog === 'assign' && bundle && load) {

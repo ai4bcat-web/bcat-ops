@@ -111,6 +111,30 @@ describe('buildReviewCard (response -> card model)', () => {
   })
 })
 
+describe('card.emails (Step AS): every address MyCarrierPackets returns', () => {
+  it('collects approved, profile and contact addresses in that order, lower-cased and deduped, with where each came from', () => {
+    const card = buildReviewCard([preview({
+      Email: 'Info@Zephyr.Example',
+      Emails: [{ Description: 'Dispatch', Email: 'Dispatch@Zephyr.Example' }, { Email: 'dispatch@zephyr.example' }],
+      CarrierDispatchers: [{ DispatcherName: 'Dee', Email: 'DEE@zephyr.example' }, { DispatcherName: 'Dup', Email: 'info@zephyr.example' }],
+      ClaimsContactName: 'Cal', ClaimsContactEmail: 'claims@zephyr.example',
+      CarrierRemit: { CarrierRemitEmail: 'Billing@Zephyr.Example' },
+    })], { dotNumber: '7000001' }, 'preview', NOW)!
+    expect(card.emails).toEqual([
+      { address: 'dispatch@zephyr.example', source: 'MCP_APPROVED', label: 'Dispatch' },
+      { address: 'info@zephyr.example', source: 'MCP_PROFILE', label: 'Carrier profile / FMCSA' },
+      { address: 'dee@zephyr.example', source: 'MCP_CONTACT', label: 'Dispatch' },
+      { address: 'claims@zephyr.example', source: 'MCP_CONTACT', label: 'Claims' },
+      { address: 'billing@zephyr.example', source: 'MCP_CONTACT', label: 'Billing' },
+    ])
+  })
+
+  it('merging the preview and the full record keeps every address once', () => {
+    const merged = mergeReviewCards(buildReviewCard([preview()], {}, 'preview', NOW), buildReviewCard(data(), {}, 'data', NOW))!
+    expect(merged.emails.map((e) => e.address)).toEqual(['dispatch@zephyr.example', 'dee@zephyr.example'])
+  })
+})
+
 describe('STUB mode', () => {
   it('is a labelled fixture built by the same mapper, never a real carrier, for the number asked about', () => {
     const card = stubReviewCard({ mcNumber: 'MC274623' }, NOW)
@@ -120,6 +144,7 @@ describe('STUB mode', () => {
     expect(card.risk).toMatchObject({ totalPoints: 450, tone: 'amber' })
     expect(card.insurance.length).toBeGreaterThan(0)
     expect(card.approvedEmails.length).toBeGreaterThan(0)
+    expect(card.emails).toEqual([]) // a stub lists no addresses
     expect(card.fetched).toEqual({ preview: true, data: true })
   })
 })

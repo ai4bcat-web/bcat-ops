@@ -15,7 +15,7 @@ import {
   type PipelineCtx, type PipelineResult, type ResumePoint,
 } from './pipelines'
 
-export const AUTOSAVE_MS = 800
+export const AUTOSAVE_MS = 10_000
 
 export type RunKind = 'draft' | 'create' | 'save' | 'submit'
 
@@ -126,12 +126,24 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
     [attempt, values, mode, customer, settings],
   )
 
-  // ── local draft autosave (create mode, before any server write) ──
+  // ── local draft autosave (create mode, before any server write): at most once per AUTOSAVE_MS while editing,
+  // and a last write when the page closes with a pending change ──
+  const autosaveTimer = useRef<number | null>(null)
+  const flushDraft = useRef<() => void>(() => {})
   useEffect(() => {
-    if (!dirty || bundle) return
-    const t = setTimeout(() => saveDraft(email, clientDraftId.current, valuesRef.current), AUTOSAVE_MS)
-    return () => clearTimeout(t)
-  }, [values, dirty, bundle, email])
+    flushDraft.current = () => {
+      if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null }
+      if (live.current.bundle) return
+      saveDraft(email, clientDraftId.current, valuesRef.current)
+    }
+  }, [email])
+  useEffect(() => {
+    if (!dirty || bundle || autosaveTimer.current) return
+    autosaveTimer.current = window.setTimeout(() => { autosaveTimer.current = null; flushDraft.current() }, AUTOSAVE_MS)
+  }, [values, dirty, bundle])
+  useEffect(() => () => {
+    if (autosaveTimer.current) flushDraft.current()
+  }, [])
 
   const resumeDraft = useCallback((id: string) => {
     const d = drafts.find((x) => x.clientDraftId === id)
@@ -167,6 +179,7 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
     }
     setPartial(null)
     if (!next) return
+    if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null }
     deleteDraft(email, clientDraftId.current)
     const queued = valuesRef.current.docs.queued
     if (queued.length > 0) {

@@ -10,13 +10,14 @@ import { Check, Mail, Phone, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsInput, TmsTable } from '@/features/tms/kit'
 import type { ColumnDef } from '@/features/tms/kit'
+import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
 import { AcceptOfferDialog } from '@/features/quotes/components/AcceptOfferDialog'
 import { CounterDialog } from '@/features/quotes/components/CounterDialog'
 import { offerActions, statusLabel, theirNumberCents, whoseMoveLabel } from '@/features/quotes/quoteViews'
 import { useAuth } from '@/hooks/useAuth'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 import {
-  listCarrierOffers, listShipmentsByNumber, mcpPreviewCarrier, rejectOffer, sendSetupPacket,
+  listCarrierOffers, listShipmentsByNumber, mcpPreviewCarrier, rejectOffer,
 } from '@/lib/apiClient'
 import type { CarrierOfferRow } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
@@ -25,6 +26,7 @@ import { mcpPacketStanding } from '@/lib/mcpPacket'
 import { normalizePro } from '@/lib/proNumber'
 import { isOpenQuoteStatus } from '@/lib/quotes'
 import type { QuoteRecord, ShipmentRecord } from '@/types/tms'
+import { CarrierLookupPanel } from './CarrierLookupPanel'
 import { useCarrierInboxStatus } from './useCarrierInboxStatus'
 import { useActivePostings } from './useActivePostings'
 import { useLoadThread } from './useLoadThread'
@@ -210,6 +212,9 @@ function LoadOffers({ load, postingRateCents, onChanged }: { load: HubLoad; post
   const [dialog, setDialog] = useState<Dialog>(null)
   const [busy, setBusy] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  // Step AS: the carrier whose lookup card (directory standing, packet, MCP e-mails, send / cover) is open.
+  const [lookupOf, setLookupOf] = useState<CarrierOfferRow | null>(null)
+  const [coverOpen, setCoverOpen] = useState<string | null>(null)
   const [mcp, setMcp] = useState<Record<string, RiskCell | 'loading' | { error: string }>>({})
   const checked = useRef(new Set<string>())
   const [nowIso] = useState(() => new Date().toISOString())
@@ -239,15 +244,6 @@ function LoadOffers({ load, postingRateCents, onChanged }: { load: HubLoad; post
       await rejectOffer({ quoteId: q.id, expectedVersion: q.version })
       toast.success(`Offer from ${q.carrierName ?? 'the carrier'} rejected`)
       await refresh()
-    } catch (e) { toast.error(messageOf(e)) } finally { setBusy(false) }
-  }
-
-  const setup = async (q: QuoteRecord) => {
-    if (!q.carrierEmail || !q.shipmentId) { toast.error('No carrier e-mail on this offer — use Find & invite.'); return }
-    setBusy(true)
-    try {
-      const r = await sendSetupPacket({ shipmentId: q.shipmentId, quoteId: q.id, email: q.carrierEmail })
-      toast.success(r.message)
     } catch (e) { toast.error(messageOf(e)) } finally { setBusy(false) }
   }
 
@@ -360,8 +356,9 @@ function LoadOffers({ load, postingRateCents, onChanged }: { load: HubLoad; post
               onClick={() => { void reject(o) }}><X size={13} />Reject</TmsButton>
             {blocked ? (
               <>
-                <TmsButton size="sm" data-testid={`cs-offer-setup-packet-${o.id}`} disabled={busy || !o.carrierEmail} title={o.carrierEmail ? undefined : 'No carrier e-mail on this offer'}
-                  onClick={() => { void setup(o) }}>Send setup packet</TmsButton>
+                <TmsButton size="sm" data-testid={`cs-offer-setup-packet-${o.id}`} disabled={busy || !o.carrierMc}
+                  title={o.carrierMc ? 'Shows where this carrier stands and the e-mail addresses MyCarrierPackets returns' : 'No MC on this offer: use Find & invite'}
+                  onClick={() => setLookupOf(o)}>Send setup packet</TmsButton>
                 {!o.vetting.known && o.carrierMc ? <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={`/tms/carriers/find?from=carrier-sales&mc=${encodeURIComponent(o.carrierMc)}`}>Find &amp; invite</Link> : null}
               </>
             ) : null}
@@ -391,6 +388,24 @@ function LoadOffers({ load, postingRateCents, onChanged }: { load: HubLoad; post
       </TmsCard>
 
       {offers.error ? <p className="tms-field-error">{offers.error}</p> : null}
+      {lookupOf?.carrierMc ? (
+        <TmsCard title={`${lookupOf.carrierName || 'Carrier'} · MC ${lookupOf.carrierMc}`} actions={<TmsButton size="sm" variant="ghost" onClick={() => setLookupOf(null)}>Close</TmsButton>}>
+          <div data-testid="cs-offer-lookup">
+            <CarrierLookupPanel
+              key={lookupOf.id}
+              lookup={{ mcNumber: lookupOf.carrierMc }}
+              shipmentId={load.id}
+              carrierName={lookupOf.carrierName ?? undefined}
+              onCover={covered ? undefined : () => setCoverOpen(lookupOf.carrierMc ?? null)}
+              onChanged={() => { void refresh() }}
+            />
+          </div>
+        </TmsCard>
+      ) : null}
+      {coverOpen ? (
+        <CoverCarrierDialog shipmentId={load.id} shipmentNumber={load.number} initialQuery={`MC ${coverOpen.replace(/^MC/i, '')}`}
+          onClose={() => setCoverOpen(null)} onCovered={() => { setCoverOpen(null); void refresh() }} />
+      ) : null}
       <div data-testid="cs-offers-table">
         <TmsTable
           columns={columns}

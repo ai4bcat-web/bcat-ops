@@ -1,46 +1,34 @@
 /**
- * One collapsible card of the shipment form (AH-plan §6). Collapsing never unmounts the body
- * (`hidden` + `inert`), so values, focus order and collapsed required fields all survive.
+ * One numbered card of the shipment form (Step AR): 1 px border, 8 px radius, a 20 px number
+ * circle before the title, no header box. The body is always mounted (cards never collapse), so
+ * required fields stay in the DOM and keep their focus order.
  */
 import { memo, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
-import type { SectionKey } from './sectionProps'
+import type { CardKey } from './cards/cardRegistry'
 
 export interface FormSectionProps {
-  id: SectionKey
+  id: CardKey
+  /** 1-5, the build order. */
+  number: number
   title: string
-  open: boolean
-  onToggle: (id: SectionKey) => void
   /** Count of blocking issues inside; 0 hides the badge. */
   errorCount: number
   children: ReactNode
 }
 
-function FormSectionImpl({ id, title, open, onToggle, errorCount, children }: FormSectionProps) {
-  const bodyId = `section-${id}-body`
+function FormSectionImpl({ id, number, title, errorCount, children }: FormSectionProps) {
   return (
-    <section className={`tms-ship-section tms-ship-section-${id}`} data-testid={`section-${id}`} data-open={open}>
-      <h2 className="tms-ship-section-head">
-        <button
-          type="button"
-          className="tms-ship-section-toggle"
-          data-testid={`section-${id}-toggle`}
-          data-section-toggle={id}
-          aria-expanded={open}
-          aria-controls={bodyId}
-          onClick={() => onToggle(id)}
-          onKeyDown={(e) => { if (e.key === 'Escape' && open) { e.stopPropagation(); onToggle(id) } }}
-        >
-          {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
-          <span>{title}</span>
-        </button>
+    <section className={`tms-ship-card tms-ship-card-${id}`} data-testid={`section-${id}`} aria-labelledby={`section-${id}-title`}>
+      <h2 className="tms-ship-card-head">
+        <span className="tms-ship-card-num" aria-hidden="true">{number}</span>
+        <span id={`section-${id}-title`} className="tms-ship-card-title">{title}</span>
         {errorCount > 0 ? (
-          <span className="tms-ship-section-badge" data-testid={`section-${id}-errors`} aria-label={`${errorCount} problem${errorCount === 1 ? '' : 's'}`}>
+          <span className="tms-ship-card-badge" data-testid={`section-${id}-errors`} aria-label={`${errorCount} problem${errorCount === 1 ? '' : 's'}`}>
             {errorCount}
           </span>
         ) : null}
       </h2>
-      <div id={bodyId} className="tms-ship-section-body" hidden={!open} inert={!open}>
+      <div id={`section-${id}-body`} className="tms-ship-card-body">
         {children}
       </div>
     </section>

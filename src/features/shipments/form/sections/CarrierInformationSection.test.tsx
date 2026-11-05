@@ -37,13 +37,13 @@ const carrier = (over: Partial<CarrierRecord> = {}): CarrierRecord => ({
   ...over,
 } as CarrierRecord)
 
-function setup(patch: Partial<ShipmentFormValues['carrier']> = {}, ctxOver: Partial<FormCtx> = {}, values = emptyValues()) {
+function setup(patch: Partial<ShipmentFormValues['carrier']> = {}, ctxOver: Partial<FormCtx> = {}, values = emptyValues(), expanded = false) {
   const v = { ...values, carrier: { ...values.carrier, ...patch } }
   const onChange = vi.fn()
   const ctx = makeCtx({ directory: { customers: [], locations: [], staff: [], carriers: [carrier()] }, ...ctxOver })
   render(
     <MemoryRouter>
-      <CarrierInformationSection value={v.carrier} onChange={onChange} ctx={ctx} form={makeForm(v)} />
+      <CarrierInformationSection value={v.carrier} onChange={onChange} ctx={ctx} form={makeForm(v)} expanded={expanded} />
     </MemoryRouter>,
   )
   return { onChange, ctx }
@@ -58,26 +58,25 @@ describe('CarrierInformationSection', () => {
     expect(screen.getByTestId('carrier-cover-reason').textContent).toBe('Save the draft first')
   })
 
-  it('needs Origin City and State before Cover on a saved SOURCING shipment', () => {
-    const { ctx } = setup({ carrierId: 'car-1' }, { mode: 'edit', bundle: savedBundle() })
-    expect(cover().disabled).toBe(true)
-    expect(screen.getByTestId('carrier-cover-reason').textContent).toContain('Origin City and Origin State')
-    expect(ctx.actions.cover).not.toHaveBeenCalled()
+  it('is collapsed to "No carrier yet" with Cover and Assign until a carrier is picked', () => {
+    const { onChange } = setup({}, { mode: 'edit', bundle: savedBundle() })
+    expect(screen.getByTestId('carrier-empty').textContent).toBe('No carrier yet')
+    expect(screen.queryByLabelText('Truck #')).toBeNull()
+    expect(cover().disabled).toBe(false)
+    fireEvent.click(screen.getByTestId('carrier-assign'))
+    expect(screen.getByLabelText('Carrier')).toBeTruthy()
+    expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('refuses to open the booking dialog without a carrier rate', () => {
-    const { ctx } = setup({ carrierId: 'car-1', originCity: 'Joliet', originState: 'IL' }, { mode: 'edit', bundle: savedBundle() })
-    fireEvent.click(cover())
-    expect(screen.getByTestId('carrier-cover-hint').textContent).toContain('carrier rate')
-    expect(ctx.actions.cover).not.toHaveBeenCalled()
-  })
-
-  it('opens the booking dialog once the carrier rate is entered', () => {
-    const v = emptyValues()
-    v.rates.carrier.lhRate = '900'
-    const { ctx } = setup({ carrierId: 'car-1', originCity: 'Joliet', originState: 'IL' }, { mode: 'edit', bundle: savedBundle() }, v)
+  it('Cover opens the AM ladder for a saved SOURCING shipment without needing a carrier, origin or typed rate', () => {
+    const { ctx } = setup({}, { mode: 'edit', bundle: savedBundle() })
     fireEvent.click(cover())
     expect(ctx.actions.cover).toHaveBeenCalledTimes(1)
+  })
+
+  it('the Ivan Cartage division opens the card without a click on Assign', () => {
+    setup({}, {}, emptyValues(), true)
+    expect(screen.getByTestId('carrier-own-fleet')).toBeTruthy()
   })
 
   it('Ivan Cartage gets the roster picker (no brokers, no inactive), no Driver 2, and a selection fills phone, truck and trailer', () => {

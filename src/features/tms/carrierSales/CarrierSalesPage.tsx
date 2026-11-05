@@ -23,6 +23,7 @@ import { mcpPacketStanding } from '@/lib/mcpPacket'
 import type { QuoteRecord, RateConStatus } from '@/types/tms'
 import { QuotePostingsCard } from './QuotePostingsCard'
 import { coveredRows, needsCoverRows, offersByShipment, openOffers } from './carrierSalesQueue'
+import { CarrierLookup } from './CarrierLookup'
 import { OffersHub } from './OffersHub'
 import { UnmatchedOffers } from './UnmatchedOffers'
 import { useUnmatchedOffers } from './useUnmatchedOffers'
@@ -224,6 +225,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
             </TmsSelect>
           </label>
         ) : null}
+        <CarrierLookup needsCover={needs} onCovered={() => { void refresh() }} />
         <QuotePostingsCard />
       </>
     ),

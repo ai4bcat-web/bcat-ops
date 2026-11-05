@@ -1,6 +1,6 @@
 /**
- * Rates (AH-plan §4.8): Customer and Carrier rate rows, accessorial lines, totals and the
- * Net $ | Profit % box. Every figure comes from `financialPreview`, the function the detail
+ * Rates (AH-plan §4.8, Step AR card 4): compact Customer and Carrier rate rows and accessorial
+ * lines. Net $ | Profit % live in the summary rail. Every figure comes from `financialPreview`, the function the detail
  * and the server price with; nothing is recomputed here.
  *
  * Carrier money typed before Cover stays in the form (F7); the pipeline never writes a
@@ -16,6 +16,7 @@ import { financialPreview } from '../mapping'
 import { isLocked, lockReason, type AccessorialLine, type CarrierRateKind, type FormRateKind } from '../model'
 import type { RatesSectionProps } from '../sectionRegistry'
 import { fieldAttrs } from './fieldAttrs'
+import '../cards/moneyCards.css'
 
 const usd = (cents: number) => `$${formatCents(cents)}`
 
@@ -47,12 +48,12 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
   const setLine = (i: number, patch: Partial<AccessorialLine>) =>
     onChange((p) => ({ ...p, lines: p.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }))
 
-  const net = preview.netCents
   return (
-    <div className="space-y-3" data-testid="section-rates-body">
+    <div className="tms-card-rates" data-testid="section-rates-body">
       {lockNote && <p className="tms-muted text-xs" data-testid="rates-lock-note">{lockNote}</p>}
 
-      <div className="grid grid-cols-2 gap-2 min-[1500px]:grid-cols-6">
+      <div className="tms-card-rate-row" role="group" aria-label="Customer rate">
+        <span className="tms-card-rate-row-title">Customer</span>
         <TmsField label={LABEL.rates.customerRateType.text}>
           <TmsSelect
             {...fieldAttrs(LABEL.rates.customerRateType)}
@@ -62,15 +63,17 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
             options={RATE_KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
           />
         </TmsField>
-        <TmsField label={LABEL.rates.customerHours.text}>
-          <TmsInput
-            {...fieldAttrs(LABEL.rates.customerHours)}
-            type="number" min={0} step="any"
-            value={cust.hours}
-            disabled={disabled || ratesLocked || cust.rateType !== 'PER_HOUR'}
-            onChange={(e) => setCustomer({ hours: e.target.value })}
-          />
-        </TmsField>
+        {cust.rateType === 'PER_HOUR' && (
+          <TmsField label={LABEL.rates.customerHours.text}>
+            <TmsInput
+              {...fieldAttrs(LABEL.rates.customerHours)}
+              type="number" min={0} step="any"
+              value={cust.hours}
+              disabled={disabled || ratesLocked}
+              onChange={(e) => setCustomer({ hours: e.target.value })}
+            />
+          </TmsField>
+        )}
         <TmsField label={LABEL.rates.customerLhRate.text}>
           <TmsInput
             {...fieldAttrs(LABEL.rates.customerLhRate)}
@@ -101,13 +104,6 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
             onChange={(e) => onChange({ fscPerMile: e.target.value })}
           />
         </TmsField>
-      </div>
-      {fscBoth && (
-        <p className="text-xs" data-testid="rates-fsc-note" style={{ color: 'var(--tms-badge-amber, var(--tms-muted))' }}>
-          Use FSC % or FSC/Mile, not both — FSC/Mile wins.
-        </p>
-      )}
-      <div className="grid grid-cols-2 gap-2 min-[1500px]:grid-cols-6">
         <TmsField label={LABEL.rates.smr.text} hint="Informational — not in Totals">
           <TmsInput
             {...fieldAttrs(LABEL.rates.smr)}
@@ -118,8 +114,14 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
           />
         </TmsField>
       </div>
+      {fscBoth && (
+        <p className="tms-card-rate-note" data-testid="rates-fsc-note">
+          Use FSC % or FSC/Mile, not both — FSC/Mile wins.
+        </p>
+      )}
 
-      <div className="grid grid-cols-2 gap-2 min-[1500px]:grid-cols-6">
+      <div className="tms-card-rate-row" role="group" aria-label="Carrier rate">
+        <span className="tms-card-rate-row-title">Carrier</span>
         <TmsField label={LABEL.rates.carrierRateType.text}>
           <TmsSelect
             {...fieldAttrs(LABEL.rates.carrierRateType)}
@@ -129,15 +131,17 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
             options={CARRIER_RATE_KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
           />
         </TmsField>
-        <TmsField label={LABEL.rates.carrierHours.text}>
-          <TmsInput
-            {...fieldAttrs(LABEL.rates.carrierHours)}
-            type="number" min={0} step="any"
-            value={car.hours}
-            disabled={disabled || carrierLocked || car.rateType !== 'PER_HOUR'}
-            onChange={(e) => setCarrier({ hours: e.target.value })}
-          />
-        </TmsField>
+        {car.rateType === 'PER_HOUR' && (
+          <TmsField label={LABEL.rates.carrierHours.text}>
+            <TmsInput
+              {...fieldAttrs(LABEL.rates.carrierHours)}
+              type="number" min={0} step="any"
+              value={car.hours}
+              disabled={disabled || carrierLocked}
+              onChange={(e) => setCarrier({ hours: e.target.value })}
+            />
+          </TmsField>
+        )}
         <TmsField label={LABEL.rates.carrierLhRate.text}>
           <TmsInput
             {...fieldAttrs(LABEL.rates.carrierLhRate)}
@@ -150,15 +154,17 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
         <TmsField label={LABEL.rates.carrierTotalLh.text}>
           <TmsInput {...fieldAttrs(LABEL.rates.carrierTotalLh)} readOnly value={usd(preview.carrierTotalLhCents)} />
         </TmsField>
-        <TmsField label={LABEL.rates.payPct.text}>
-          <TmsInput
-            {...fieldAttrs(LABEL.rates.payPct)}
-            inputMode="decimal"
-            value={car.payPct}
-            disabled={disabled || carrierLocked || car.rateType !== 'PCT_OF_CUSTOMER'}
-            onChange={(e) => setCarrier({ payPct: e.target.value })}
-          />
-        </TmsField>
+        {car.rateType === 'PCT_OF_CUSTOMER' && (
+          <TmsField label={LABEL.rates.payPct.text}>
+            <TmsInput
+              {...fieldAttrs(LABEL.rates.payPct)}
+              inputMode="decimal"
+              value={car.payPct}
+              disabled={disabled || carrierLocked}
+              onChange={(e) => setCarrier({ payPct: e.target.value })}
+            />
+          </TmsField>
+        )}
         <TmsField
           label={LABEL.rates.maxRate.text}
           hint={ctx.bundle?.financials[0]?.topSpendCents != null ? `Top spend ${usd(ctx.bundle.financials[0].topSpendCents)}` : undefined}
@@ -173,38 +179,36 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
         </TmsField>
       </div>
 
-      <div className="space-y-1" data-testid="rates-lines">
-        <div className="grid grid-cols-12 gap-2 text-xs tms-muted">
-          <span className="col-span-2">{LABEL.rates.release.text}</span>
-          <span className="col-span-2">{LABEL.rates.lineCarrier.text}</span>
-          <span className="col-span-3">{LABEL.rates.lineAccessorial.text}</span>
-          <span className="col-span-2">{LABEL.rates.lineCarrierAmount.text}</span>
-          <span className="col-span-2">{LABEL.rates.lineCustomerAmount.text}</span>
-          <span className="col-span-1" />
+      <div className="tms-card-lines" data-testid="rates-lines">
+        <div className="tms-card-line tms-card-line-head">
+          <span>{LABEL.rates.release.text}</span>
+          <span>{LABEL.rates.lineCarrier.text}</span>
+          <span>{LABEL.rates.lineAccessorial.text}</span>
+          <span>{LABEL.rates.lineCarrierAmount.text}</span>
+          <span>{LABEL.rates.lineCustomerAmount.text}</span>
+          <span />
         </div>
-        <div className="grid grid-cols-12 gap-2 text-sm" data-testid="rates-line-linehaul">
-          <span className="col-span-2" />
-          <span className="col-span-2 truncate">{carrierName}</span>
-          <span className="col-span-3">Line Haul</span>
-          <span className="col-span-2">{usd(preview.carrierTotalLhCents)}</span>
-          <span className="col-span-2">{usd(preview.customerTotalLhCents)}</span>
-          <span className="col-span-1" />
+        <div className="tms-card-line" data-testid="rates-line-linehaul">
+          <span />
+          <span>{carrierName}</span>
+          <span>Line Haul</span>
+          <span>{usd(preview.carrierTotalLhCents)}</span>
+          <span>{usd(preview.customerTotalLhCents)}</span>
+          <span />
         </div>
         <datalist id="rates-charge-codes">
           {codes.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
         </datalist>
         {value.lines.map((line, i) => (
-          <div key={i} className="grid grid-cols-12 items-center gap-2" data-testid={`rates-line-${i}`}>
+          <div key={i} className="tms-card-line" data-testid={`rates-line-${i}`}>
             <TmsInput
-              className="col-span-2"
               aria-label={`${LABEL.rates.release.text} ${i + 1}`}
               value={line.release}
               disabled={disabled || ratesLocked}
               onChange={(e) => setLine(i, { release: e.target.value })}
             />
-            <span className="col-span-2 truncate text-sm">{line.carrierKey || carrierName}</span>
+            <span>{line.carrierKey || carrierName}</span>
             <TmsInput
-              className="col-span-3"
               aria-label={`${LABEL.rates.lineAccessorial.text} ${i + 1}`}
               list="rates-charge-codes"
               value={line.code}
@@ -216,7 +220,6 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
               }}
             />
             <TmsInput
-              className="col-span-2"
               aria-label={`${LABEL.rates.lineCarrierAmount.text} ${i + 1}`}
               inputMode="decimal"
               value={line.carrierAmount}
@@ -224,7 +227,6 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
               onChange={(e) => setLine(i, { carrierAmount: e.target.value })}
             />
             <TmsInput
-              className="col-span-2"
               aria-label={`${LABEL.rates.lineCustomerAmount.text} ${i + 1}`}
               inputMode="decimal"
               value={line.customerAmount}
@@ -233,7 +235,6 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
             />
             <TmsIconButton
               shape="plain"
-              className="col-span-1"
               aria-label={`Remove accessorial line ${i + 1}`}
               disabled={disabled || ratesLocked}
               onClick={() => onChange((p) => ({ ...p, lines: p.lines.filter((_, j) => j !== i) }))}
@@ -242,29 +243,17 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
             </TmsIconButton>
           </div>
         ))}
-        <TmsButton
-          size="sm"
-          data-testid={LABEL.rates.addLine.testId}
-          aria-label="Add accessorial line"
-          disabled={disabled || ratesLocked}
-          onClick={() => onChange((p) => ({ ...p, lines: [...p.lines, emptyAccessorialLine()] }))}
-        >
-          <Plus size={14} className="mr-1" /> {LABEL.rates.addLine.text}
-        </TmsButton>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-4 text-sm" data-testid={LABEL.rates.totalUsd.testId}>
-        <strong>{LABEL.rates.totalUsd.text}</strong>
-        <span>{LABEL.rates.lineCarrierAmount.text} <span data-testid="rates-total-carrier">{usd(preview.carrierTotalCents)}</span></span>
-        <span>{LABEL.rates.lineCustomerAmount.text} <span data-testid="rates-total-customer">{usd(preview.customerTotalCents)}</span></span>
-        <span
-          data-testid={LABEL.rates.netProfit.testId}
-          aria-label={LABEL.rates.netProfit.text}
-          className="rounded border px-2 py-1"
-          style={{ borderColor: 'var(--tms-badge-red)', color: net < 0 ? 'var(--tms-badge-red)' : undefined }}
-        >
-          Net {usd(net)} | Profit {preview.profitPct.toFixed(1)}%
-        </span>
+        <div>
+          <TmsButton
+            size="sm"
+            data-testid={LABEL.rates.addLine.testId}
+            aria-label="Add accessorial line"
+            disabled={disabled || ratesLocked}
+            onClick={() => onChange((p) => ({ ...p, lines: [...p.lines, emptyAccessorialLine()] }))}
+          >
+            <Plus size={14} className="mr-1" /> {LABEL.rates.addLine.text}
+          </TmsButton>
+        </div>
       </div>
     </div>
   )

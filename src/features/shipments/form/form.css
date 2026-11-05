@@ -1,31 +1,23 @@
 /*
- * The Aljex-parity shipment form (AH-plan §6). Dense, tokens only. Grid classes (never inline
- * `repeat(3` styles — the phone rules match on the serialized attribute).
+ * The shipment form, Step AR layout: header bar, five numbered cards, More tabs, sticky summary
+ * rail (bottom sheet under 1280 px). S1 tokens only; 8 px grid; 32 px inputs; 11 px caps labels;
+ * 16 px card padding; 1 px border, 8 px radius. Grid classes (never inline `repeat(3` styles — the
+ * phone rules match on the serialized attribute).
  */
 
 .tms-shell .tms-ship-form {
-  --ship-gap: 6px;
+  --ship-gap: 16px;
 }
 
 .tms-shell .tms-ship-form-scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 6px;
+  padding: 16px;
   background: var(--tms-surface-subtle);
 }
 
-.tms-shell .tms-ship-form .tms-dense-bar .tms-ship-dirty {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--tms-radius-pill);
-  background: var(--tms-badge-red);
-}
-
-.tms-shell .tms-ship-form .tms-ship-banner {
-  margin-bottom: 8px;
-}
-
+.tms-shell .tms-ship-form .tms-ship-banner,
 .tms-shell .tms-ship-form .tms-ship-issues {
   margin-bottom: 8px;
 }
@@ -40,52 +32,142 @@
   font: inherit;
 }
 
-/* ── Sections ─────────────────────────────────────────────────────────────── */
+/* ── Header bar ───────────────────────────────────────────────────────────── */
 
-.tms-shell .tms-ship-grid {
+.tms-shell .tms-ship-hdr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 8px 16px;
+  background: var(--tms-card);
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-ship-hdr-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+.tms-shell .tms-ship-hdr-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--tms-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tms-shell .tms-ship-hdr-link:hover {
+  color: var(--tms-text);
+  text-decoration: underline;
+}
+
+.tms-shell .tms-ship-hdr-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-ship-hdr-spacer {
+  flex: 1 1 auto;
+}
+
+.tms-shell .tms-ship-hdr-pro {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tms-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-ship-dirty {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-badge-orange);
+}
+
+.tms-shell .tms-ship-pill {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--tms-input-border);
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-input);
+  color: var(--tms-text);
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 200px;
+}
+
+.tms-shell .tms-ship-pill:disabled {
+  color: var(--tms-disabled);
+}
+
+/* ── Layout: main column + rail ───────────────────────────────────────────── */
+
+.tms-shell .tms-ship-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--ship-gap, 8px);
+  gap: var(--ship-gap);
   align-items: start;
 }
 
-.tms-shell .tms-ship-section {
+.tms-shell .tms-ship-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ship-gap);
   min-width: 0;
+}
+
+@media (min-width: 1280px) {
+  .tms-shell .tms-ship-layout {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-ship-card {
+  min-width: 0;
+  padding: 16px;
   background: var(--tms-card);
   border: 1px solid var(--tms-border);
   border-radius: var(--tms-radius-sm);
 }
 
-.tms-shell .tms-ship-section-head {
+.tms-shell .tms-ship-card-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 0;
-  padding: 0 8px;
-  background: var(--tms-surface-subtle);
-  border-bottom: 1px solid var(--tms-border);
-  border-radius: var(--tms-radius-sm) var(--tms-radius-sm) 0 0;
-  font-size: 13px;
+  gap: 8px;
+  margin: 0 0 16px;
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tms-text);
 }
 
-.tms-shell .tms-ship-section-toggle {
+.tms-shell .tms-ship-card-num {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  flex: 1 1 auto;
-  min-height: 24px;
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--tms-text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+  font-size: 11px;
+  letter-spacing: 0;
 }
 
-.tms-shell .tms-ship-section-badge {
+.tms-shell .tms-ship-card-badge {
   min-width: 18px;
+  margin-left: 4px;
   padding: 0 5px;
   border-radius: var(--tms-radius-pill);
   background: var(--tms-badge-red);
@@ -95,27 +177,33 @@
   text-align: center;
 }
 
-.tms-shell .tms-ship-section-body {
-  padding: 6px 8px;
+.tms-shell .tms-ship-card-body {
+  min-width: 0;
 }
 
-.tms-shell .tms-ship-section-body[hidden] {
-  display: none;
-}
-
-/* ── Density ──────────────────────────────────────────────────────────────── */
+/* ── Density: 32 px inputs, 11 px caps labels above ───────────────────────── */
 
 .tms-shell .tms-ship-form .tms-input,
 .tms-shell .tms-ship-form .tms-select {
-  height: 28px;
-  min-height: 28px;
+  height: 32px;
+  min-height: 32px;
   padding-top: 0;
   padding-bottom: 0;
-  font-size: 12px;
+  font-size: 13px;
+}
+
+.tms-shell .tms-ship-form .tms-field {
+  gap: 4px;
+  margin-bottom: 0;
+  min-width: 0;
 }
 
 .tms-shell .tms-ship-form .tms-field-label {
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tms-muted);
 }
 
 /* Required = green input (Ryne, item 1): no asterisks anywhere. Sections mark a required field with
@@ -129,73 +217,6 @@
   background-color: var(--tms-badge-green-tint);
 }
 
-/* ── Aljex rows ───────────────────────────────────────────────────────────── */
-
-@media (min-width: 1100px) and (max-width: 1499px) {
-  .tms-shell .tms-ship-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .tms-shell .tms-ship-section-shipping {
-    grid-column: 1 / -1;
-  }
-}
-
-/* Tight vertical rhythm inside cards (no dead space). */
-.tms-shell .tms-ship-form .tms-field {
-  gap: 2px;
-  margin-bottom: 0;
-}
-
-@media (min-width: 1280px) and (max-width: 1499px) {
-  .tms-shell .tms-ship-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .tms-shell .tms-ship-section-shipping,
-  .tms-shell .tms-ship-section-more,
-  .tms-shell .tms-ship-section-rates {
-    grid-column: 1 / -1;
-  }
-}
-
-@media (min-width: 1500px) {
-  .tms-shell .tms-ship-grid {
-    grid-template-columns: repeat(10, minmax(0, 1fr));
-  }
-
-  /* Row 1: Shipping Requirements, full width. */
-  .tms-shell .tms-ship-section-shipping {
-    grid-column: 1 / -1;
-  }
-
-  /* Row 2: five cards. */
-  .tms-shell .tms-ship-section-customer,
-  .tms-shell .tms-ship-section-pickup,
-  .tms-shell .tms-ship-section-consignee,
-  .tms-shell .tms-ship-section-history,
-  .tms-shell .tms-ship-section-roles {
-    grid-column: span 2;
-  }
-
-  /* Row 3: More Information (~60%) + Rates (~40%). */
-  .tms-shell .tms-ship-section-more {
-    grid-column: span 6;
-  }
-
-  .tms-shell .tms-ship-section-rates {
-    grid-column: span 4;
-  }
-
-  /* Rows 4 and 5: two halves. */
-  .tms-shell .tms-ship-section-carrier,
-  .tms-shell .tms-ship-section-picks,
-  .tms-shell .tms-ship-section-documents,
-  .tms-shell .tms-ship-section-checkCalls {
-    grid-column: span 5;
-  }
-}
-
 /* Fields pre-filled from an intake e-mail / rate confirmation (Ryne's feedback 7). */
 .tms-shell .tms-ship-form .tms-from-email {
   margin-left: 6px; padding: 0 5px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 14px;
@@ -204,4 +225,278 @@
 .tms-shell .tms-ship-form .tms-field-from-email .tms-input,
 .tms-shell .tms-ship-form .tms-field-from-email .tms-select {
   box-shadow: inset 3px 0 0 var(--tms-badge-blue, var(--tms-primary-ink));
+}
+
+/* ── More tabs ────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-ship-more {
+  min-width: 0;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+}
+
+.tms-shell .tms-ship-more-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-ship-more-tab {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 8px;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--tms-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tms-shell .tms-ship-more-tab:hover {
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-ship-more-tab[aria-selected='true'] {
+  color: var(--tms-text);
+  font-weight: 600;
+  border-bottom-color: var(--tms-primary);
+}
+
+.tms-shell .tms-ship-more-panel {
+  min-width: 0;
+  padding: 16px;
+}
+
+.tms-shell .tms-ship-more-panel[hidden] {
+  display: none;
+}
+
+/* ── Summary rail ─────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+}
+
+.tms-shell .tms-rail-sheetbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--tms-border);
+  color: var(--tms-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tms-shell .tms-rail-sheetbar-money {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.tms-shell .tms-rail-sheetbar-req {
+  color: var(--tms-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-rail-sheet-chev {
+  transition: transform 120ms;
+}
+
+.tms-shell .tms-rail[data-sheet='open'] .tms-rail-sheet-chev {
+  transform: rotate(180deg);
+}
+
+.tms-shell .tms-rail-body {
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.tms-shell .tms-rail[data-sheet='open'] .tms-rail-body {
+  display: flex;
+}
+
+.tms-shell .tms-rail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-rail-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-rail-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-rail-count[data-ready='true'] {
+  color: var(--tms-badge-green);
+}
+
+.tms-shell .tms-rail-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--tms-text-2);
+  overflow-wrap: anywhere;
+}
+
+.tms-shell .tms-rail-line-strong {
+  font-weight: 600;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-rail-money-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--tms-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-rail-net {
+  padding-top: 8px;
+  border-top: 1px solid var(--tms-border);
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-rail-net strong {
+  font-size: 16px;
+}
+
+.tms-shell .tms-rail-profit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tms-shell .tms-rail-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-muted);
+}
+
+.tms-shell .tms-rail-dot[data-tone='green'] { background: var(--tms-badge-green); }
+.tms-shell .tms-rail-dot[data-tone='amber'] { background: var(--tms-badge-orange); }
+.tms-shell .tms-rail-dot[data-tone='red'] { background: var(--tms-badge-red); }
+
+.tms-shell .tms-rail-reqs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tms-shell .tms-rail-req {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  background: none;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-pill);
+  color: var(--tms-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tms-shell .tms-rail-req[data-done='true'] {
+  color: var(--tms-badge-green);
+  border-color: transparent;
+}
+
+.tms-shell .tms-rail-req[data-missing='true'] {
+  color: var(--tms-badge-orange);
+  border-color: var(--tms-badge-orange);
+}
+
+.tms-shell .tms-rail-req:hover {
+  background: var(--tms-surface-hover);
+}
+
+.tms-shell .tms-rail-roles .ship-body {
+  gap: 8px;
+}
+
+.tms-shell .tms-rail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px;
+  background: var(--tms-card);
+  border-radius: 0 0 var(--tms-radius-sm) var(--tms-radius-sm);
+}
+
+/* An un-ready Create stays clickable (it explains what is missing) but reads as not-yet. */
+.tms-shell .tms-rail-actions [aria-disabled='true'][data-ready='false'] {
+  opacity: 0.6;
+}
+
+@media (min-width: 1280px) {
+  .tms-shell .tms-rail {
+    position: sticky;
+    top: 0;
+    bottom: auto;
+    align-self: start;
+    max-height: calc(100vh - 160px);
+  }
+
+  .tms-shell .tms-rail-sheetbar {
+    display: none;
+  }
+
+  .tms-shell .tms-rail-body {
+    display: flex;
+    flex: 1 1 auto;
+    max-height: none;
+  }
+
+  .tms-shell .tms-rail-actions {
+    border-top: 1px solid var(--tms-border);
+  }
 }

@@ -1,11 +1,12 @@
 /**
- * Create / edit shipment with Aljex's twelve sections (AH-plan §3-§9). Route element for
- * `/tms/shipments/new` (mode "create") and `/tms/shipments/:id/edit` (mode "edit").
+ * Create / edit shipment (Step AR): header bar, five numbered cards in build order, the "More" tab
+ * strip, and the sticky summary rail. Route element for `/tms/shipments/new` (mode "create") and
+ * `/tms/shipments/:id/edit` (mode "edit"). Fields, mapping, pipelines and validation are Step AH's.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { TmsAlert, TmsBadge, TmsButton, TmsDialog } from '@/features/tms/kit'
+import { TmsAlert, TmsButton, TmsDialog } from '@/features/tms/kit'
 import { flattenDivisions } from '@/features/tms/settings/taxonomyDrafts'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { useAuth } from '@/hooks/useAuth'
@@ -16,35 +17,31 @@ import { useStaff } from '@/hooks/useStaff'
 import { getTmsSettings, linkIntakeShipment, listLocations } from '@/lib/apiClient'
 import { useIntakeLoad } from '../intake/useIntakeLoads'
 import type { LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
-import { routeSignature } from './sections/milesEstimate'
-import { SECTION_COMPONENTS } from './defaultSections'
+import { CARD_ORDER, CARD_TITLE, type CardKey, type CardProps, type MoreTabKey } from './cards/cardRegistry'
+import { CARD_COMPONENTS, MORE_TAB_COMPONENTS, RAIL_ROLES } from './defaultSections'
+import { FormHeader } from './FormHeader'
 import { FormSection } from './FormSection'
 import { FromEmailContext } from './fromEmail'
 import { intakePrefill } from './intakePrefill'
-import { SECTION_ORDER, SECTION_TITLE } from './labels'
-import { lockedFields, type FormMode, type FormStop, type ShipmentFormValues } from './model'
-import type { FormCtx, FormIssue, SectionKey } from './sectionProps'
+import { LABEL } from './labels'
+import { lockedFields } from './model'
+import { MoreTabs } from './MoreTabs'
+import { cardOfSection, proPreview, railSummary, requiredRows } from './railModel'
+import type { FormCtx, FormIssue } from './sectionProps'
 import type { FormApi } from './sectionRegistry'
+import { SummaryRail } from './SummaryRail'
 import { useFormActions } from './useFormActions'
 import { useShipmentForm, type RunKind } from './useShipmentForm'
-import { blockingIssues, issueSummary, issuesForSection } from './validation'
+import { blockingIssues, issueSummary } from './validation'
 import './form.css'
 
 const NEW_PATH = '/tms/shipments'
 
-type SliceKey = 'ship' | 'customer' | 'roles' | 'more' | 'rates' | 'carrier' | 'checkCall'
-
-function sectionsStorageKey(email: string): string {
-  return `tms:ship-form:sections:${email}`
-}
-
-function readOpen(email: string): Partial<Record<SectionKey, boolean>> {
-  try {
-    const raw = localStorage.getItem(sectionsStorageKey(email))
-    return raw ? (JSON.parse(raw) as Partial<Record<SectionKey, boolean>>) : {}
-  } catch {
-    return {}
-  }
+/** The More tab a blocking issue lives in. */
+function moreTabOfIssue(i: FormIssue): MoreTabKey {
+  if (i.section === 'documents') return 'documents'
+  if (i.section === 'checkCalls') return 'checkCalls'
+  return i.fieldKey === LABEL.more.references.testId ? 'references' : 'instructions'
 }
 
 export function ShipmentFormPage({ mode }: { mode: 'create' | 'edit' }) {
@@ -95,8 +92,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     return () => { live = false }
   }, [])
 
-  const [open, setOpen] = useState<Partial<Record<SectionKey, boolean>>>(() => readOpen(email))
   const [confirmCancel, setConfirmCancel] = useState(false)
+  const [moreTab, setMoreTab] = useState<MoreTabKey>('instructions')
   const rootRef = useRef<HTMLDivElement>(null)
 
   const pipelineCtx = useMemo(() => ({
@@ -108,22 +105,17 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     onNotice: (msg: string) => { toast.message(msg) },
   }), [directory, locations, loadLocations, settings, email])
 
-  const isOpen = (key: SectionKey) => open[key] !== false
-  const setSectionOpen = useCallback((keys: SectionKey[], value: boolean) => {
-    setOpen((prev) => {
-      const next = { ...prev }
-      for (const k of keys) next[k] = value
-      try { localStorage.setItem(sectionsStorageKey(email), JSON.stringify(next)) } catch { /* storage full or blocked */ }
-      return next
-    })
-  }, [email])
-  const toggle = useCallback((key: SectionKey) => {
-    setOpen((prev) => {
-      const next = { ...prev, [key]: prev[key] === false }
-      try { localStorage.setItem(sectionsStorageKey(email), JSON.stringify(next)) } catch { /* storage full or blocked */ }
-      return next
-    })
-  }, [email])
+  // Scroll to and focus the control whose `data-testid` is `fieldKey`, opening its More tab first.
+  const focusField = useCallback((fieldKey: string) => {
+    const find = () => [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-testid]') ?? [])].find((n) => n.dataset.testid === fieldKey)
+    const tab = find()?.closest<HTMLElement>('[data-more-tab]')?.dataset.moreTab
+    if (tab) setMoreTab(tab as MoreTabKey)
+    setTimeout(() => {
+      const el = find()
+      el?.scrollIntoView?.({ block: 'center' })
+      el?.focus()
+    }, 0)
+  }, [])
 
   const form = useShipmentForm({
     email,
@@ -147,7 +139,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
       toast.success(`Shipment ${b.shipment.number} submitted`)
       navigate(`/tms/shipments/${b.shipment.id}`)
     },
-    onBlocked: (issues) => setSectionOpen([...new Set(issues.map((i) => i.section))], true),
+    onBlocked: (issues) => { if (issues[0]) focusField(issues[0].fieldKey) },
   })
   const { values, update, getValues, bundle, mode, busy: pipelineBusy } = form
 
@@ -169,15 +161,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const formApi = useMemo<FormApi>(() => ({
     getValues,
     update,
-    focusField: (fieldKey, section) => {
-      if (section) setSectionOpen([section], true)
-      setTimeout(() => {
-        const el = [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-testid]') ?? [])].find((n) => n.dataset.testid === fieldKey)
-        el?.scrollIntoView?.({ block: 'center' })
-        el?.focus()
-      }, 0)
-    },
-  }), [getValues, update, setSectionOpen])
+    focusField,
+  }), [getValues, update, focusField])
 
   const status = bundle?.shipment.status ?? 'NEW'
   const locked = useMemo(() => lockedFields(bundle), [bundle])
@@ -195,64 +180,43 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     issues: form.issues,
   }), [mode, bundle, status, locked, directory.customers, locations, ensureLocations, carriers, staff, settings, form.customer, divisions, busy, actions, form.issues])
 
-  // Slice onChange handlers are created once; they read the latest values through `update`.
-  const slice = useMemo(() => {
-    const make = <K extends SliceKey>(key: K) => (patch: Partial<ShipmentFormValues[K]> | ((p: ShipmentFormValues[K]) => ShipmentFormValues[K])) =>
-      update((p) => ({
-        ...p,
-        [key]: typeof patch === 'function' ? patch(p[key]) : { ...p[key], ...patch },
-      }))
-    return {
-      ship: make('ship'), customer: make('customer'), roles: make('roles'), more: make('more'),
-      rates: make('rates'), carrier: make('carrier'), checkCall: make('checkCall'),
-      stops: (patch: Partial<FormStop[]> | ((p: FormStop[]) => FormStop[])) =>
-        update((p) => ({ ...p, stops: typeof patch === 'function' ? patch(p.stops) : (patch as FormStop[]) })),
-      docs: (patch: Partial<ShipmentFormValues['docs']> | ((p: ShipmentFormValues['docs']) => ShipmentFormValues['docs'])) =>
-        update((p) => ({ ...p, docs: typeof patch === 'function' ? patch(p.docs) : { ...p.docs, ...patch } })),
-      mode: (m: FormMode) => update((p) => ({ ...p, mode: m })),
-      stop: (which: 'first' | 'last') => (patch: Partial<FormStop> | ((p: FormStop) => FormStop)) =>
-        update((p) => {
-          const i = which === 'first' ? 0 : p.stops.length - 1
-          const cur = p.stops[i]
-          if (!cur) return p
-          const next = typeof patch === 'function' ? patch(cur) : { ...cur, ...patch }
-          return { ...p, stops: p.stops.map((s, j) => (j === i ? next : s)) }
-        }),
-    }
-  }, [update])
-  const onPickup = useMemo(() => slice.stop('first'), [slice])
-  const onConsignee = useMemo(() => slice.stop('last'), [slice])
+  const common = useMemo<CardProps>(() => ({
+    values, update, ctx, form: formApi, issues: form.issues, mode, locked,
+  }), [values, update, ctx, formApi, form.issues, mode, locked])
 
-  const C = SECTION_COMPONENTS
-  const lastIndex = Math.max(0, values.stops.length - 1)
-  const sectionBody: Record<SectionKey, React.ReactNode> = {
-    shipping: <C.shipping value={values.ship} onChange={slice.ship} ctx={ctx} form={formApi} mode={values.mode} onModeChange={slice.mode} routeKey={routeSignature(values.stops)} />,
-    customer: <C.customer value={values.customer} onChange={slice.customer} ctx={ctx} form={formApi} />,
-    pickup: <C.pickup kind="pickup" index={0} stop={values.stops[0]} onChange={onPickup} ctx={ctx} form={formApi} />,
-    consignee: <C.consignee kind="consignee" index={lastIndex} stop={values.stops[lastIndex]} onChange={onConsignee} ctx={ctx} form={formApi} />,
-    history: <C.history stops={values.stops} equipmentType={values.ship.equipmentType} ctx={ctx} form={formApi} />,
-    roles: <C.roles value={values.roles} onChange={slice.roles} ctx={ctx} form={formApi} />,
-    more: <C.more value={values.more} onChange={slice.more} ctx={ctx} form={formApi} values={values} />,
-    rates: <C.rates value={values.rates} onChange={slice.rates} ctx={ctx} form={formApi} values={values} ship={values.ship} />,
-    carrier: <C.carrier value={values.carrier} onChange={slice.carrier} ctx={ctx} form={formApi} values={values} />,
-    picks: <C.picks value={values.stops} onChange={slice.stops} ctx={ctx} form={formApi} />,
-    documents: <C.documents value={values.docs} onChange={slice.docs} ctx={ctx} form={formApi} values={values} />,
-    checkCalls: <C.checkCalls value={values.checkCall} onChange={slice.checkCall} ctx={ctx} form={formApi} values={values} />,
-  }
-
-  // ── header actions ──
+  // ── header / rail model ──
   const isDraftStatus = status === 'NEW' || status === 'DRAFT'
   const voided = locked.voided
-  const primaryKind: RunKind = mode === 'create' ? 'create' : 'save'
   const { run } = form
   const blocking = blockingIssues(form.issues)
   const attempted = form.attempt !== null && blocking.length > 0
+  const rows = useMemo(() => requiredRows(values, mode, { customer: form.customer, settings }), [values, mode, form.customer, settings])
+  const summary = useMemo(() => railSummary(values, form.customer, settings), [values, form.customer, settings])
 
-  const cancel = () => {
+  const errorsByCard = useMemo(() => {
+    const out: Partial<Record<CardKey, number>> = {}
+    for (const i of blockingIssues(form.issues)) {
+      const c = cardOfSection(i.section)
+      if (c !== 'more' && c !== 'rail') out[c] = (out[c] ?? 0) + 1
+    }
+    return out
+  }, [form.issues])
+  const errorsByTab = useMemo(() => {
+    const out: Partial<Record<MoreTabKey, number>> = {}
+    for (const i of blockingIssues(form.issues)) {
+      if (cardOfSection(i.section) !== 'more') continue
+      const t = moreTabOfIssue(i)
+      out[t] = (out[t] ?? 0) + 1
+    }
+    return out
+  }, [form.issues])
+
+  const leave = useCallback(() => navigate(bundle ? `${NEW_PATH}/${bundle.shipment.id}` : NEW_PATH), [navigate, bundle])
+  const cancel = useCallback(() => {
     if (form.dirty) { setConfirmCancel(true); return }
     leave()
-  }
-  const leave = () => navigate(bundle ? `${NEW_PATH}/${bundle.shipment.id}` : NEW_PATH)
+  }, [form.dirty, leave])
+  const onRun = useCallback((kind: RunKind) => { void run(kind) }, [run])
 
   useEffect(() => {
     if (!form.dirty || !bundle) return
@@ -261,60 +225,33 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     return () => window.removeEventListener('beforeunload', warn)
   }, [form.dirty, bundle])
 
-  const runRef = useRef({ run, primaryKind, voided, isDraftStatus })
-  useEffect(() => { runRef.current = { run, primaryKind, voided, isDraftStatus } })
+  // ⌘/Ctrl+Enter = Create (Save in edit mode); ⌘/Ctrl+S = Save draft (Save in a non-draft edit).
+  const runRef = useRef({ run, mode, voided, isDraftStatus })
+  useEffect(() => { runRef.current = { run, mode, voided, isDraftStatus } })
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const r = runRef.current
-      if (r.voided) return
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void r.run(r.primaryKind); return }
-      const t = e.target as HTMLElement | null
-      const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
-      if (typing || e.metaKey || e.ctrlKey || e.altKey) return
-      if ((e.key === 's' || e.key === 'S') && (r.primaryKind === 'create' || r.isDraftStatus)) { e.preventDefault(); void r.run('draft'); return }
-      if (e.key === '[' || e.key === ']') {
-        const toggles = [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-section-toggle]') ?? [])]
-        if (toggles.length === 0) return
-        const at = toggles.indexOf(document.activeElement as HTMLElement)
-        const next = e.key === ']' ? (at + 1) % toggles.length : (at <= 0 ? toggles.length - 1 : at - 1)
-        toggles[next].focus()
+      if (r.voided || !(e.metaKey || e.ctrlKey) || e.altKey) return
+      if (e.key === 'Enter') { e.preventDefault(); void r.run(r.mode === 'create' ? 'create' : 'save'); return }
+      if (e.key === 's' || e.key === 'S') {
+        e.preventDefault()
+        void r.run(r.mode === 'create' || r.isDraftStatus ? 'draft' : 'save')
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  const title = bundle ? `Shipment ${bundle.shipment.number} · edit` : 'New truckload shipment'
-  const errorsBySection = (key: SectionKey) => blockingIssues(issuesForSection(form.issues, key)).length
+  const title = bundle ? `Edit PRO ${bundle.shipment.number}` : 'New shipment'
+  const pro = bundle?.shipment.number ?? proPreview(settings)
 
   return (
     <div className="tms-dense-page tms-ship-form" ref={rootRef} data-testid="ship-form" data-mode={mode}>
-      <div className="tms-dense-bar">
-        <span className="tms-dense-title" data-testid="ship-form-title">{title}</span>
-        <TmsBadge tone={isDraftStatus ? 'gray' : 'blue'}>{status === 'NEW' ? 'New' : status}</TmsBadge>
-        {form.dirty ? <span className="tms-ship-dirty" data-testid="ship-form-dirty" title="Unsaved changes" role="img" aria-label="Unsaved changes" /> : null}
-        <span className="tms-dense-spacer" />
-        {isDraftStatus ? (
-          <TmsButton
-            size="sm" data-testid="ship-form-save-draft" disabled={busy || voided} onClick={() => { void run('draft') }}
-            title={mode === 'create' ? 'The first server save consumes a permanent shipment number' : undefined}
-          >
-            Save draft
-          </TmsButton>
-        ) : null}
-        <TmsButton
-          size="sm" variant="primary" data-testid={mode === 'create' ? 'ship-form-create' : 'ship-form-save'}
-          disabled={busy || voided} onClick={() => { void run(primaryKind) }}
-        >
-          {mode === 'create' ? 'Create shipment' : 'Save changes'}
-        </TmsButton>
-        {mode === 'edit' && status === 'DRAFT' ? (
-          <TmsButton size="sm" variant="primary" data-testid="ship-form-submit" disabled={busy || voided} onClick={() => { void run('submit') }}>
-            Submit order
-          </TmsButton>
-        ) : null}
-        <TmsButton size="sm" variant="ghost" data-testid="ship-form-cancel" onClick={cancel}>Cancel</TmsButton>
-      </div>
+      <FormHeader
+        title={title} status={status} dirty={form.dirty} pro={pro} mode={mode} formMode={values.mode}
+        revDivision={values.ship.revDivision} divisions={ctx.divisions} locked={locked} disabled={busy || voided}
+        update={update} onBack={cancel}
+      />
 
       <div className="tms-ship-form-scroll">
         {voided ? <TmsAlert tone="red" className="tms-ship-banner">{locked.fields.all}</TmsAlert> : null}
@@ -348,7 +285,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
               <ul>
                 {blocking.map((i: FormIssue) => (
                   <li key={i.id}>
-                    <button type="button" data-testid={`issue-link-${i.id}`} onClick={() => formApi.focusField(i.fieldKey, i.section)}>
+                    <button type="button" data-testid={`issue-link-${i.id}`} onClick={() => focusField(i.fieldKey)}>
                       {i.label}
                     </button>
                     {i.message ? <span> — {i.message}</span> : null}
@@ -365,13 +302,23 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
         ) : null}
 
         <FromEmailContext.Provider value={fromEmail}>
-        <div className="tms-ship-grid">
-          {SECTION_ORDER.map((key) => (
-            <FormSection key={key} id={key} title={SECTION_TITLE[key]} open={isOpen(key)} onToggle={toggle} errorCount={errorsBySection(key)}>
-              {sectionBody[key]}
-            </FormSection>
-          ))}
-        </div>
+          <div className="tms-ship-layout">
+            <div className="tms-ship-main">
+              {CARD_ORDER.map((key, i) => {
+                const Card = CARD_COMPONENTS[key]
+                return (
+                  <FormSection key={key} id={key} number={i + 1} title={CARD_TITLE[key]} errorCount={errorsByCard[key] ?? 0}>
+                    <Card {...common} />
+                  </FormSection>
+                )
+              })}
+              <MoreTabs common={common} components={MORE_TAB_COMPONENTS} active={moreTab} onActive={setMoreTab} errors={errorsByTab} />
+            </div>
+            <SummaryRail
+              common={common} summary={summary} rows={rows} attempted={attempted} status={status}
+              busy={busy} voided={voided} Roles={RAIL_ROLES} onRun={onRun} onDiscard={cancel}
+            />
+          </div>
         </FromEmailContext.Provider>
       </div>
 

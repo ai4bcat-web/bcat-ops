@@ -2035,6 +2035,9 @@ export interface McpInviteResult {
   mode: McpFindMode
   sent: boolean
   message: string
+  /** Step AS. The addresses the invitation went to. */
+  emails?: string[]
+  failed?: Array<{ email: string; error: string }>
   mcpResponse?: { status: number; bodyKeys: string[]; message: string | null }
   invitedAt?: string
   /** Step AM. With `ensureCarrier`: the directory row the invitation created or matched. */
@@ -2058,7 +2061,10 @@ export async function mcpGetCarrier(ref: { mcNumber?: string; dotNumber?: string
 export async function mcpSendInvite(input: {
   mcNumber?: string
   dotNumber?: string
-  email: string
+  /** One recipient (kept for compatibility); additive with `emails`. */
+  email?: string
+  /** Step AS. The recipients. Omit both `emails` and `email` for the default: every address MCP returns. */
+  emails?: string[]
   carrierId?: string
   carrierName?: string
   shipmentId?: string
