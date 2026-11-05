@@ -6,9 +6,9 @@
 05-shipment-created-from-form.png	Shipment created from form
 06-carrier-profile-mcp-not-invited.png	ZZ carrier profile page
 07-mcp-integration-validated.png	MyCarrierPackets integration, LIVE, validated
-08-carrier-sales-needs-cover.png	Carrier Sales, Needs cover tab
-08a-find-and-invite-lookup-read-only.png	Find and Invite, MC 274623 lookup
-08b-cover-dialog-lookup.png	Cover dialog, MC lookup
+08-carrier-sales-needs-cover.png	Carrier Sales, MC lookup card (Set up with us, packet standing)
+08a-find-and-invite-lookup-read-only.png	Find and Invite, lookup card with directory standing and actions
+08b-cover-dialog-lookup.png	Cover dialog, MC lookup card
 08c-carrier-sales-offers-hub.png	Carrier Sales Offers hub tab
 08d-carrier-sales-unmatched.png	Carrier Sales Unmatched tab
 09-shipment-carrier-covered.png	Carrier tab after cover

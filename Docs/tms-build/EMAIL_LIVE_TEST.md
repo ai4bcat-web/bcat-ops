@@ -385,3 +385,12 @@ PASS  fixture shipment voided — shp-3b1f0d87-7c16-4c5e-8e78-46be34b0e5d8
 PASS  fixture shipment voided — shp-95827d0c-6510-43c2-8e22-e1f4bc72d89e
 PASS  temp admin identity deleted
 ```
+
+## 2026-11-05 - Step AS live invitation (dev, job 179)
+
+- `node scripts/devVerifyAS.mjs --live-invite`, run once. MC 274623 only; MyCarrierPackets returned **1** address for it (source MCP_APPROVED), and it is not ai4bcat. So the default-list path was NOT used: the call named `ai4bcat@gmail.com` explicitly (`emails: ['ai4bcat@gmail.com']`) and nothing was sent to MCP's own address.
+- EmailPacketInvitation: sent=true, mode LIVE, MCP HTTP status 200, 1 recipient (ai4bcat@gmail.com).
+- Ivan Cartage was not in the dev directory, so the call used `ensureCarrier`: the PENDING row was created from MCP's record after the invitation (it is now status PENDING, mcpStatus INVITED), and the invitation is logged on it. It also noted the invitation on the first listed dev shipment's thread.
+- Read back through the API afterwards (separate script; the harness's own read-back crashed on a GraphQL variable type and an audit scan limit, both fixed in `devVerifyAS.mjs`, not re-run because a second invitation is not allowed): carrier row stamped (mcpInvitedAt set, mcpInvitedTo only ai4bcat, mcpStatus INVITED); audit `MCP_SEND_INVITE` on the carrier with emails only ai4bcat; one thread note "MyCarrierPackets packet invitation" to ai4bcat only.
+- Result: PASSED for the invitation and its three logs, as read back by hand. The harness's own AS04 read-back step has not run to green, so this is not recorded as ALL PASSED.
+- Default-list (all MCP addresses) sending is proven by unit tests only, not live, because MCP's list for this carrier is a real address.

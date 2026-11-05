@@ -58,6 +58,7 @@ const PICKER_USERS = [
 ]
 const TEST_IDS = [
   ['carrier-own-fleet', 'src/features/shipments/form/sections/CarrierInformationSection.tsx'],
+  ['carrier-assign', 'src/features/shipments/form/sections/CarrierInformationSection.tsx'],
   ['assign-driver-select', 'src/features/shipments/components/AssignDriverDialog.tsx'],
   ['driver-info-picker', 'src/features/shipments/components/DriverInfoDialog.tsx'],
   ['book-own-fleet-driver', 'src/features/carriers/components/BookCarrierDialog.tsx'],
@@ -138,7 +139,10 @@ async function runWalk(ctx, b) {
 
   await step('AQ02 shipment form: own-fleet Driver 1 is a select of the whole roster; nothing about the driver can be typed', async () => {
     await b.navigate('/tms/shipments/new')
-    await b.poll(() => has(tid('carrier-own-fleet')), 'the Carrier Information section', 90_000)
+    // Step AR: the Carrier card is collapsed ("No carrier yet" + Assign); Assign opens the picker that offers Ivan Cartage.
+    await b.poll(() => has(tid('carrier-assign')), 'the collapsed Carrier card', 90_000)
+    await click(tid('carrier-assign'))
+    await b.poll(() => has(tid('carrier-own-fleet')), 'the own-fleet button in the Assign picker', 15_000)
     await click(tid('carrier-own-fleet'))
     await b.poll(() => has(tid('f-carrier-driver1')), 'the own-fleet Driver 1 picker', 15_000)
     await b.poll(() => b.evaluate(`document.querySelector('[data-testid="f-carrier-driver1"]').options.length > 1`), 'the driver roster to load', 30_000)

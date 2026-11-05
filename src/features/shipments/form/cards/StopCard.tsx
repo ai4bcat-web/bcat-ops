@@ -5,7 +5,7 @@
  * pieces / weight (what "Calculate totals from picks" counts) and the note. Same FormStop fields
  * and `f-<prefix>-<field>` test ids as the AH stop block (prefix: pickup | stop-<i> | consignee).
  */
-import { useEffect, useMemo, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { useContext, useEffect, useMemo, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { GripVertical, Pencil, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { DirectoryCreateDialog } from '@/components/directory-picker/DirectoryCreateDialog'
@@ -17,6 +17,7 @@ import { findLocationMatches } from '@/lib/tmsDirectory'
 import type { LocationRecord } from '@/types/tms'
 import { COUNTRIES, MAX, US_STATES } from '../constants'
 import { LABEL, labelFor, type LabelDef } from '../labels'
+import { FromEmailContext } from '../fromEmail'
 import type { FormStop } from '../model'
 import type { FormCtx } from '../sectionProps'
 import { LField } from '../sections/formControls'
@@ -58,7 +59,8 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
   const [recent, setRecent] = useState(() => readRecents('location', userEmail))
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState(false)
-  const [editAddr, setEditAddr] = useState(() => !stop.city.trim())
+  const fromEmail = useContext(FromEmailContext)
+  const [editAddr, setEditAddr] = useState(() => !stop.city.trim() || fromEmail.has(`f-${prefix}-city`))
   const base = disabledState(ctx)
   const stopLock = ctx.locked.stops[stop.id]
   const placeLocked = base.disabled || Boolean(stopLock)

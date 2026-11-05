@@ -59,6 +59,13 @@ export interface LaneRunStats {
   lastDate: string | null
 }
 
+/** The same loads cut to the last 30 / 90 / 365 days, so a short list of rows never skews an average. */
+export interface LaneRunWindows {
+  d30: LaneRunStats
+  d90: LaneRunStats
+  d365: LaneRunStats
+}
+
 export type QuoteOutcome = 'WON' | 'LOST' | 'EXPIRED' | 'PENDING'
 
 export interface LaneQuoteRow {
@@ -94,7 +101,7 @@ export interface LaneIntelligence {
   fromDate: string
   months: number
   generatedAt: string
-  runs: { stats: LaneRunStats; rows: LaneRunRow[] }
+  runs: { stats: LaneRunStats; rows: LaneRunRow[]; windows: LaneRunWindows }
   quotes: { stats: LaneQuoteStats; rows: LaneQuoteRow[] }
   /** True when a read hit its page ceiling: the numbers are real but are not every row. */
   truncated: boolean
@@ -223,6 +230,20 @@ export function laneRunStats(rows: readonly LaneRunRow[]): LaneRunStats {
     marginAvgBps: margins.length ? Math.round(margins.reduce((a, b) => a + b, 0) / margins.length) : null,
     lastDate: rows.length ? rows[0].date : null,
   }
+}
+
+const DAY_MS = 86_400_000
+
+/** 'YYYY-MM-DD' of the day `days` before `nowIso`'s UTC date (whole UTC days: no DST arithmetic). */
+function dayFloor(nowIso: string, days: number): string {
+  const day = Date.parse(`${nowIso.slice(0, 10)}T00:00:00Z`)
+  return new Date(day - days * DAY_MS).toISOString().slice(0, 10)
+}
+
+/** Loads dated on or after each window's floor; `rows` are every match, not the listed page. */
+export function laneRunWindows(rows: readonly LaneRunRow[], nowIso: string): LaneRunWindows {
+  const within = (days: number) => laneRunStats(rows.filter((r) => r.date >= dayFloor(nowIso, days)))
+  return { d30: within(30), d90: within(90), d365: within(365) }
 }
 
 /**

@@ -55,8 +55,43 @@ describe('CustomerCard', () => {
     expect(v.customer.emails[0]).toBe('pat@acme.test')
     expect(v.roles.salesRepId).toBe('rep-1')
     expect(v.ship.revDivision).toBe('FOOD')
-    expect(screen.getByTestId('f-customer-billToBlock')).toBeTruthy()
+    expect(screen.queryByTestId('f-customer-billToBlock')).toBeNull()
     expect(screen.getAllByTestId(/^f-customer-email-/)).toHaveLength(2)
     expect(localStorage.getItem('tms:ship-form:recent:customer:rep@bcat.test')).toBe('["c-acme"]')
+  })
+})
+
+describe('CustomerCard — typed name, lock, e-mails', () => {
+  const set = (c: Partial<CustomerRecord>[] = customers, over: object = {}) =>
+    renderCard(CustomerCard, { ctx: () => ({ directory: { customers: c as CustomerRecord[], locations: [], carriers: [], staff: [] }, ...over }) })
+
+  it('shows exactly two Email fields and hides inactive contacts', () => {
+    set([mk('c1', 'Acme', { contacts: [
+      { id: 'a', name: 'Active Ann', types: [], notifications: [], active: true },
+      { id: 'b', name: 'Gone Gil', types: [], notifications: [], active: false },
+    ] })], { customer: mk('c1', 'Acme', { contacts: [
+      { id: 'a', name: 'Active Ann', types: [], notifications: [], active: true },
+      { id: 'b', name: 'Gone Gil', types: [], notifications: [], active: false },
+    ] }) })
+    expect(screen.getAllByTestId(/^f-customer-email-/)).toHaveLength(2)
+    expect(screen.queryByText('Gone Gil')).toBeNull()
+    expect(screen.getByText('Active Ann')).toBeTruthy()
+  })
+
+  it('records a typed name only when the person chooses to, and never with a customer id', () => {
+    const host = set()
+    expect(screen.getByTestId('f-customer-useTyped')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('f-customer-useTyped'))
+    fireEvent.change(screen.getByTestId('f-customer-name'), { target: { value: 'Brand New Co' } })
+    expect(host.current!.getValues().customer).toMatchObject({ useTyped: true, typedName: 'Brand New Co', id: '' })
+  })
+
+  it('locks the name after create and points at the detail page to change it', () => {
+    set(customers, {
+      mode: 'edit', locked: { fields: { customer: 'Locked: customer is fixed once created' }, stops: {}, voided: false },
+      bundle: { shipment: { id: 'sh-9' } }, customer: ACME,
+    })
+    expect((screen.getByTestId('f-customer-name') as HTMLInputElement).readOnly).toBe(true)
+    expect(screen.getByText('Change customer…').getAttribute('href')).toBe('/tms/shipments/sh-9')
   })
 })

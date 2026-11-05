@@ -1,6 +1,6 @@
 /**
  * Card 1: Customer (Step AR). A type-ahead (five most recently used first), Ref #, then Contact /
- * Phone / Email 1 / Email 2 and the read-only Bill To block. Choosing a customer seeds Bill To,
+ * Phone / Email 1 / Email 2 (the read-only Bill To detail is its own card). Choosing a customer seeds Bill To,
  * contact, the two e-mails, sales rep and division through `applyCustomerDefaults` (never over
  * what a person already typed). Same data and test ids as the AH Customer section.
  */
@@ -15,7 +15,6 @@ import { formatPhone } from '@/lib/utils'
 import type { CustomerRecord } from '@/types/tms'
 import { LABEL, labelFor } from '../labels'
 import { applyCustomerDefaults, isLocked, lockReason } from '../model'
-import { BillToBlock } from '../sections/BillToBlock'
 import { ctl, disabledState, issueFor } from '../sections/fieldUtil'
 import { LField } from '../sections/formControls'
 import { type CardProps, sliceOf } from './cardRegistry'
@@ -154,7 +153,6 @@ export function CustomerCard({ values, update, ctx, form }: CardProps) {
           </LField>
         </div>
       )}
-      {customer && <BillToBlock key={customer.id} customer={customer} settings={ctx.settings} billToId={value.billToId} />}
     </div>
   )
 }

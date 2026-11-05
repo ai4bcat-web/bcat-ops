@@ -1,6 +1,6 @@
 /**
- * Create / edit shipment (Step AR): header bar, five numbered cards in build order, the "More" tab
- * strip, and the sticky summary rail. Route element for `/tms/shipments/new` (mode "create") and
+ * Create / edit shipment (Step AR): header bar, nine numbered cards in build order, the "More" tab
+ * strip (Instructions, References, Items, Notes), and the sticky summary rail. Route element for `/tms/shipments/new` (mode "create") and
  * `/tms/shipments/:id/edit` (mode "edit"). Fields, mapping, pipelines and validation are Step AH's.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -39,8 +39,6 @@ const NEW_PATH = '/tms/shipments'
 
 /** The More tab a blocking issue lives in. */
 function moreTabOfIssue(i: FormIssue): MoreTabKey {
-  if (i.section === 'documents') return 'documents'
-  if (i.section === 'checkCalls') return 'checkCalls'
   return i.fieldKey === LABEL.more.references.testId ? 'references' : 'instructions'
 }
 
@@ -112,8 +110,10 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     if (tab) setMoreTab(tab as MoreTabKey)
     setTimeout(() => {
       const el = find()
-      el?.scrollIntoView?.({ block: 'center' })
-      el?.focus()
+      // A group (the Customer type-ahead) is not focusable itself: land on the control inside it.
+      const target = el && !el.matches('input, select, textarea, button, a[href], [tabindex]') ? (el.querySelector<HTMLElement>('input, select, textarea, button') ?? el) : el
+      target?.scrollIntoView?.({ block: 'center' })
+      target?.focus()
     }, 0)
   }, [])
 

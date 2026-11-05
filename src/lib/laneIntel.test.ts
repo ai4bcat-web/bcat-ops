@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  laneInputOfStops, laneIntelFloor, laneIntelMonths, laneQuoteRows, laneQuoteStats, laneRunRows, laneRunStats, quoteOutcome,
+  laneInputOfStops, laneIntelFloor, laneIntelMonths, laneQuoteRows, laneQuoteStats, laneRunRows, laneRunStats, laneRunWindows, quoteOutcome,
 } from './laneIntel'
 import { lanePlace } from './laneMatch'
 import type { LaneRateSampleRecord, QuoteRecord } from '../types/tms'
@@ -54,6 +54,19 @@ describe('what we ran this lane for', () => {
 
   it('reports an empty lane as nulls, not zeros', () => {
     expect(laneRunStats([])).toMatchObject({ count: 0, customer: { avgCents: null, lowCents: null }, marginAvgBps: null, lastDate: null })
+  })
+
+  it('cuts 30 / 90 / 365-day windows over every match, edges inclusive', () => {
+    const rows = laneRunRows([
+      sample({ id: 'a', customerRateCents: 300000, carrierRateCents: 250000, date: '2026-10-05' }), // 30 days back: in
+      sample({ id: 'b', customerRateCents: 200000, carrierRateCents: 150000, date: '2026-10-04' }), // 31 days: 90 only
+      sample({ id: 'c', customerRateCents: 100000, carrierRateCents: 90000, date: '2025-11-04' }), // 365 days: in 365
+      sample({ id: 'd', customerRateCents: 500000, carrierRateCents: 400000, date: '2025-11-03' }), // 366 days: out
+    ], target, {})
+    const w = laneRunWindows(rows, NOW)
+    expect([w.d30.count, w.d90.count, w.d365.count]).toEqual([1, 2, 3])
+    expect(w.d90.customer.avgCents).toBe(250000)
+    expect(w.d365.carrier.avgCents).toBe(163333)
   })
 })
 

@@ -1,0 +1,67 @@
+/*
+ * Step AR card 6 (Rate history). Tokens only; every rule is scoped under .tms-shell.
+ * Two blocks side by side; they stack below 768 px so nothing forces horizontal scroll.
+ */
+.tms-shell .tms-card-rh { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+.tms-shell .tms-card-rh[data-stale='true'] .tms-card-rh-blocks { opacity: 0.6; }
+
+.tms-shell .tms-card-rh-blocks {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+}
+
+@media (max-width: 767px) {
+  .tms-shell .tms-card-rh-blocks { grid-template-columns: minmax(0, 1fr); }
+}
+
+.tms-shell .tms-card-rh-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--tms-border);
+  border-radius: 8px;
+}
+
+.tms-shell .tms-card-rh-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-card-rh-muted,
+.tms-shell .tms-card-rh-empty { margin: 0; font-size: 12px; color: var(--tms-muted); }
+
+.tms-shell .tms-card-rh-error { margin: 0; font-size: 12px; color: var(--tms-badge-red); }
+
+.tms-shell .tms-card-rh-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+
+.tms-shell .tms-card-rh-scroll { max-width: 100%; overflow-x: auto; }
+
+.tms-shell .tms-card-rh-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+
+.tms-shell .tms-card-rh-table th {
+  padding: 0 8px 4px 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-card-rh-table td { padding: 4px 8px 4px 0; border-top: 1px solid var(--tms-border); white-space: nowrap; }
+
+.tms-shell .tms-card-rh-clip { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+
+.tms-shell .tms-card-rh-num { font-variant-numeric: tabular-nums; text-align: right; }
+
+.tms-shell .tms-card-rh-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }

@@ -1,5 +1,5 @@
 /**
- * The card registry (Step AR): what `ShipmentFormPage` hands each of the five numbered cards and
+ * The card registry (Step AR): what `ShipmentFormPage` hands each of the nine numbered cards and
  * each "More" tab. Cards compose the existing section components (`../sections/*`, imported
  * directly) and read/write ONE shared values object through `update`. The page looks the
  * components up in `defaultSections.tsx` (`CARD_COMPONENTS`, `MORE_TAB_COMPONENTS`).
@@ -21,32 +21,25 @@ import type { FormMode, LockSet, ShipmentFormValues } from '../model'
 import type { FormCtx, FormIssue } from '../sectionProps'
 import type { FormApi } from '../sectionRegistry'
 
-export type CardKey = 'customer' | 'route' | 'freight' | 'rates' | 'carrier'
+export type CardKey = 'customer' | 'billTo' | 'route' | 'freight' | 'rates' | 'rateHistory' | 'carrier' | 'tracking' | 'documents'
 
-/** Page order = build order (numbers 1-5). */
-export const CARD_ORDER: readonly CardKey[] = ['customer', 'route', 'freight', 'rates', 'carrier'] as const
-
-export const CARD_TITLE: Record<CardKey, string> = {
-  customer: 'Customer', route: 'Route', freight: 'Freight', rates: 'Rates', carrier: 'Carrier',
-}
-
-/** "More" strip tabs. `checkCalls` and `updates` render in edit mode only (the page enforces it). */
-export type MoreTabKey = 'instructions' | 'references' | 'items' | 'notes' | 'documents' | 'rateHistory' | 'checkCalls' | 'updates'
-
-export const MORE_TAB_ORDER: readonly MoreTabKey[] = [
-  'instructions', 'references', 'items', 'notes', 'documents', 'rateHistory', 'checkCalls', 'updates',
+/** Page order = build order (numbers 1-9). */
+export const CARD_ORDER: readonly CardKey[] = [
+  'customer', 'billTo', 'route', 'freight', 'rates', 'rateHistory', 'carrier', 'tracking', 'documents',
 ] as const
 
-const EDIT_ONLY_TABS: readonly MoreTabKey[] = ['checkCalls', 'updates']
-
-/** The tabs a mode shows: Check calls and Updates never appear on create. */
-export function moreTabsFor(mode: 'create' | 'edit'): MoreTabKey[] {
-  return MORE_TAB_ORDER.filter((k) => mode === 'edit' || !EDIT_ONLY_TABS.includes(k))
+export const CARD_TITLE: Record<CardKey, string> = {
+  customer: 'Customer', billTo: 'Bill To', route: 'Route', freight: 'Freight', rates: 'Rates',
+  rateHistory: 'Rate history', carrier: 'Carrier', tracking: 'Tracking', documents: 'Documents',
 }
+
+/** "More" strip tabs: the four free-text / list panes. Everything else is a card. */
+export type MoreTabKey = 'instructions' | 'references' | 'items' | 'notes'
+
+export const MORE_TAB_ORDER: readonly MoreTabKey[] = ['instructions', 'references', 'items', 'notes'] as const
 
 export const MORE_TAB_TITLE: Record<MoreTabKey, string> = {
   instructions: 'Instructions', references: 'References', items: 'Items', notes: 'Notes',
-  documents: 'Documents', rateHistory: 'Rate history', checkCalls: 'Check calls', updates: 'Updates',
 }
 
 export interface CardProps {
@@ -62,6 +55,7 @@ export interface CardProps {
   locked: LockSet
 }
 
+/** `props.issues` is the full list; filter by `section` (`customer`, `pickup`/`consignee`/`picks`, `shipping`, `rates`, `history`, `carrier`, `checkCalls`, `documents`). */
 export type CardComponent = ComponentType<CardProps>
 
 /** Every More tab receives the same props as a card. */

@@ -127,7 +127,9 @@ async function inventory() {
   const carriersPage = await readFile('src/features/carriers/CarriersPage.tsx', 'utf8').catch(() => '')
   check(/isAdmin \? <TmsButton[\s\S]*?>Carrier \(admin data fix\)/.test(carriersPage), 'Carriers page: manual add is admin-only')
   const find = await readFile('src/features/carriers/find/FindInvitePage.tsx', 'utf8').catch(() => '')
-  check(!/mcpAddCarrier|mcp-add-carrier/.test(find), 'Find & Invite: no "Add to carriers"')
+  check(/onAddToDirectory=\{add\}/.test(find) && /mcpAddCarrier\(shown\.ref\)/.test(find), 'Find & Invite: "Add to directory" exists and is MCP-sourced (mcpAddCarrier from the MCP record)')
+  const cover = await readFile('src/features/carriers/cover/CoverCarrierDialog.tsx', 'utf8').catch(() => '')
+  check(!/onAddToDirectory|mcpAddCarrier/.test(cover), 'Cover dialog: no add-to-directory action')
 
   console.log(ok ? '\ninventory: ok' : '\ninventory: FAILED')
   return ok
@@ -254,7 +256,7 @@ async function runWalk(ctx, b) {
   }
   const typeInto = async (label, value) => {
     await b.evaluate(`(() => {
-      const el = document.querySelector('[aria-label=${JSON.stringify(label)}]')
+      const el = (document.querySelector('[role="dialog"] [aria-label=${JSON.stringify(label)}]') ?? document.querySelector('[aria-label=${JSON.stringify(label)}]'))
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
       set.call(el, ${JSON.stringify(value)})
       el.dispatchEvent(new Event('input', { bubbles: true }))
@@ -289,10 +291,10 @@ async function runWalk(ctx, b) {
       await b.poll(() => has(tid('cover-mcp-card')), 'the MCP review card', 90_000)
       await pause(600)
       expect(await has(tid('cover-send-packet')), 'there is no "Send setup packet via MyCarrierPackets" button')
-      expect(!(await b.evaluate(`document.body.innerText.includes('Add to carriers')`)), 'an "Add to carriers" button is still offered')
+      expect(!(await b.evaluate(`document.body.innerText.includes('Add to directory') || document.body.innerText.includes('Add to carriers')`)), 'an add-to-directory button is offered inside the Cover dialog')
       await shot('AM02-cover-dialog-mcp-preview')
       await closeDialog()
-      return 'review card + Send setup packet shown; no Add to carriers; nothing sent'
+      return 'review card + Send setup packet shown; no add-to-directory in the dialog; nothing sent'
     })
   } else {
     line('SKIPPED', 'AM02 Cover dialog: MCP review card', 'opt-in (--mcp-preview): it calls MyCarrierPackets PreviewCarrier')

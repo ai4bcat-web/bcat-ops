@@ -1,10 +1,10 @@
 /**
- * The "More" strip under the fifth card: Instructions, References, Items, Notes, Documents, Rate
- * history; Check calls and Updates only in edit mode. Every panel stays mounted (hidden when not
- * active) so required fields inside (references) are still in the DOM and keep their values.
+ * The "More" strip under the ninth card: Instructions, References, Items, Notes. Every panel stays
+ * mounted (hidden when not active) so required fields inside (references) are still in the DOM and
+ * keep their values.
  */
 import { memo, useRef, type KeyboardEvent } from 'react'
-import { MORE_TAB_TITLE, moreTabsFor, type CardProps, type MoreTabComponents, type MoreTabKey } from './cards/cardRegistry'
+import { MORE_TAB_ORDER, MORE_TAB_TITLE, type CardProps, type MoreTabComponents, type MoreTabKey } from './cards/cardRegistry'
 
 export interface MoreTabsProps {
   common: CardProps
@@ -16,7 +16,7 @@ export interface MoreTabsProps {
 }
 
 function MoreTabsImpl({ common, components, active, onActive, errors }: MoreTabsProps) {
-  const keys = moreTabsFor(common.mode)
+  const keys = MORE_TAB_ORDER
   const listRef = useRef<HTMLDivElement>(null)
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return

@@ -116,7 +116,10 @@ export async function run(ctx) {
     })
     await check('S2.10', 'Create-shipment form: own-fleet Driver 1/2 are selects limited to active drivers', async () => {
       await b.navigate('/tms/shipments/new')
-      await b.waitFor('[data-testid="carrier-own-fleet"]', 90_000)
+      // Step AR: the Carrier card starts collapsed; Assign opens the picker that offers Ivan Cartage.
+      await b.waitFor('[data-testid="carrier-assign"]', 90_000)
+      await b.evaluate(`document.querySelector('[data-testid="carrier-assign"]').click()`)
+      await b.waitFor('[data-testid="carrier-own-fleet"]', 15_000)
       await b.evaluate(`document.querySelector('[data-testid="carrier-own-fleet"]').click()`)
       await b.waitFor('[data-testid="f-carrier-driver1"]', 15_000)
       await b.poll(() => b.evaluate(`document.querySelector('[data-testid="f-carrier-driver1"]').options.length > 3`), 'roster', 30_000)

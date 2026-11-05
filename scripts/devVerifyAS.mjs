@@ -146,13 +146,19 @@ async function runRead(identity, dir, origin) {
 
     // AS01 — an MC that is in the directory.
     try {
-      await lookUp(AS_INVITE_MC)
+      // MC 274623 (Ivan Cartage) is not in the dev directory right now, so the in-directory case uses a real dev
+      // directory carrier with an MC (ACTIVE preferred); read-only query.
+      const rows = await gql(identity.token, 'query { listCarriers(limit: 1000, filter: { mcNumber: { attributeExists: true } }) { items { id name mcNumber status mcpStatus } } }')
+      const items = rows.listCarriers.items.filter((c) => /\d/.test(c.mcNumber ?? ''))
+      const pick = items.find((c) => c.status === 'ACTIVE' && /ACCEPTABLE|MODERATE|PENDING_REVIEW/.test(c.mcpStatus ?? '')) ?? items.find((c) => c.status === 'ACTIVE') ?? items[0]
+      expect(pick, 'the dev directory has no carrier with an MC to look up')
+      await lookUp(pick.mcNumber)
       const standing = await text('cs-lookup-card-standing')
       expect(/Set up with us/.test(standing), `first line does not say Set up with us: "${standing}"`)
       expect(/ACTIVE|INACTIVE|PENDING|REVIEW|DO NOT USE/.test(standing), `no directory status on the first line: "${standing}"`)
       expect(/Packet|No packet|Stub, no MCP call/.test(standing), `no packet standing on the first line: "${standing}"`)
       await shot('AS01-carrier-sales-in-directory')
-      line('PASS', 'AS01 MC 274623 in directory', standing.replace(/\s+/g, ' '))
+      line('PASS', `AS01 directory carrier (${pick.status}, packet ${pick.mcpStatus ?? 'none'})`, standing.replace(/\s+/g, ' '))
     } catch (err) {
       line('FAIL', 'AS01 MC 274623 in directory', short(err).slice(0, 220))
       process.exitCode = 1
@@ -203,13 +209,35 @@ async function runLiveInvite(identity, dir) {
     const plan = planInvite(mcpAddresses)
     const found = await gql(identity.token, 'query($f: ModelCarrierFilterInput) { listCarriers(filter: $f, limit: 5) { items { id name } } }', { f: { mcNumber: { contains: '274623' } } })
     const carrierId = found.listCarriers.items.find((c) => /\bivan\b/i.test(c.name))?.id
-    expect(carrierId, 'Ivan Cartage is not in the dev directory, so the invitation could not be logged on its row')
-    const input = assertInviteInputSafe({ ...ref, carrierId, carrierName: preview.card.identity.legalName, ...(plan.emails ? { emails: plan.emails } : {}) }, mcpAddresses)
+    const ships = await gql(identity.token, 'query { listShipments(limit: 1) { items { id number } } }')
+    const shipment = ships.listShipments.items[0]
+    expect(shipment, 'no dev shipment to note the invitation on')
+    const input = assertInviteInputSafe({ ...ref, shipmentId: shipment.id, ...(carrierId ? { carrierId } : { ensureCarrier: true }), carrierName: preview.card.identity.legalName, ...(plan.emails ? { emails: plan.emails } : {}) }, mcpAddresses)
     createInviteBudget(1).take()
     const res = await dir('MCP_SEND_INVITE', input)
     expect(res.sent === true, `MyCarrierPackets did not send the invitation (${res.message ?? 'no message'})`)
     line('PASS', 'AS03 live invitation', `${plan.mode}; ${(res.emails ?? []).length} recipient(s), all ai4bcat; MCP status ${res.mcpResponse?.status ?? 'n/a'}; carrier row logged=${res.carrierLogged === true}`)
-    await appendFile(EMAIL_LOG, `${await exists(EMAIL_LOG) ? '\n' : ''}## ${new Date().toISOString()} — Step AS live invitation (MC 274623, Ivan Cartage)\n\n- Recipient plan: ${plan.mode} (MCP returned ${mcpAddresses.length} address(es) for the carrier${plan.mode === 'EXPLICIT' ? '; the default list was NOT used because it contains an address other than ai4bcat@gmail.com' : ''}).\n- Sent to: ${(res.emails ?? []).join(', ')}\n- EmailPacketInvitation: sent=${res.sent}, mode=${res.mode}, MCP HTTP status ${res.mcpResponse?.status ?? '(n/a)'}, response keys: ${(res.mcpResponse?.bodyKeys ?? []).join(', ') || '(none)'}\n- Logged: carrier row=${res.carrierLogged === true}, shipment thread=${res.threadLogged === true} (no shipment in this run)\n`)
+    // Read back through the API: carrier row, audit, thread.
+    const back = {}
+    if (res.carrierId) {
+      const c = await gql(identity.token, 'query($id: ID!) { getCarrier(id: $id) { id status mcpStatus mcpInvitedAt mcpInvitedTo mcpInvitedBy } }', { id: res.carrierId })
+      back.carrier = { invitedTo: c.getCarrier?.mcpInvitedTo ?? null, mcpStatus: c.getCarrier?.mcpStatus ?? null, hasInvitedAt: !!c.getCarrier?.mcpInvitedAt }
+    }
+    const auditId = res.carrierId ?? 'MYCARRIERPACKETS'
+    let tok = null
+    const auditRows = []
+    do {
+      const r = await gql(identity.token, 'query($f: ModelAuditLogFilterInput, $n: String) { listAuditLogs(filter: $f, limit: 10000, nextToken: $n) { items { action changes } nextToken } }', { f: { entityId: { eq: auditId } }, n: tok })
+      auditRows.push(...r.listAuditLogs.items); tok = r.listAuditLogs.nextToken
+    } while (tok)
+    back.audit = auditRows.some((a) => a.action === 'MCP_SEND_INVITE' && String(a.changes).includes('ai4bcat'))
+    const th = await gql(identity.token, 'query($s: String!) { listShipmentMessageByShipmentIdAndAt(shipmentId: $s, limit: 200) { items { subject to } } }', { s: shipment.id })
+    back.thread = th.listShipmentMessageByShipmentIdAndAt.items.some((m) => /packet invitation/i.test(m.subject ?? '') && /ai4bcat/i.test(m.to ?? ''))
+    const onlyAllowed = (v) => !v || String(v).split(',').every((a) => /^\s*ai4bcat(\+[a-z0-9._-]+)?@gmail\.com\s*$/i.test(a))
+    const readBackOk = back.audit && back.thread && (!res.carrierId || (back.carrier.hasInvitedAt && onlyAllowed(back.carrier.invitedTo) && /ai4bcat/i.test(back.carrier.invitedTo ?? '')))
+    line(readBackOk ? 'PASS' : 'FAIL', 'AS04 read-back', `carrier row ${JSON.stringify({ ...back.carrier, invitedTo: undefined })}; audit=${back.audit}; thread=${back.thread}`)
+    if (!readBackOk) process.exitCode = 1
+    await appendFile(EMAIL_LOG, `${await exists(EMAIL_LOG) ? '\n' : ''}## ${new Date().toISOString()} — Step AS live invitation (MC 274623, Ivan Cartage)\n\n- Recipient plan: ${plan.mode} (MCP returned ${mcpAddresses.length} address(es) for the carrier${plan.mode === 'EXPLICIT' ? '; the default list was NOT used because it contains an address other than ai4bcat@gmail.com' : ''}).\n- Sent to: ${(res.emails ?? []).join(', ')}\n- EmailPacketInvitation: sent=${res.sent}, mode=${res.mode}, MCP HTTP status ${res.mcpResponse?.status ?? '(n/a)'}, response keys: ${(res.mcpResponse?.bodyKeys ?? []).join(', ') || '(none)'}\n- Logged: carrier row=${res.carrierLogged === true}, shipment thread=${res.threadLogged === true}. Read-back through the API: carrier row stamped=${back.carrier?.hasInvitedAt ?? 'n/a'} (mcpStatus ${back.carrier?.mcpStatus ?? 'n/a'}), audit row=${back.audit}, thread note=${back.thread}.\n- Result: ${readBackOk ? 'ALL PASSED' : 'NOT ALL PASSED (see harness output)'}\n`)
     console.log('log: appended to Docs/tms-build/EMAIL_LIVE_TEST.md')
   } catch (err) {
     line('FAIL', 'AS03 live invitation', short(err).slice(0, 240))

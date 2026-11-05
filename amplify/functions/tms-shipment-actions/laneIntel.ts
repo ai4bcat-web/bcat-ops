@@ -25,6 +25,7 @@ import {
   laneQuoteRows,
   laneQuoteStats,
   laneRunRows,
+  laneRunWindows,
   laneRunStats,
   type LaneIntelligence,
 } from '../../../src/lib/laneIntel'
@@ -168,7 +169,7 @@ export async function getLaneIntelligence(deps: LaneIntelDeps, input: Row): Prom
     fromDate,
     months: LANE_INTEL_MONTHS,
     generatedAt: nowIso,
-    runs: { stats: laneRunStats(runAll), rows: runAll.slice(0, LANE_INTEL_LIST_LIMIT) },
+    runs: { stats: laneRunStats(runAll), rows: runAll.slice(0, LANE_INTEL_LIST_LIMIT), windows: laneRunWindows(runAll, nowIso) },
     quotes: { stats: laneQuoteStats(quoteAll), rows: quoteAll.slice(0, LANE_INTEL_LIST_LIMIT) },
     truncated: exact.truncated || zip3.truncated || monthResults.some((r) => r.truncated),
   }

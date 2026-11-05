@@ -59,11 +59,10 @@ vi.mock('./defaultSections', () => {
           onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, ship: { ...(v.ship as object), equipmentType: e.target.value } }) as never)}
         />
       ),
-      rates: none,
-      carrier: none,
+      billTo: none, rates: none, rateHistory: none, carrier: none, tracking: none, documents: none,
     },
     MORE_TAB_COMPONENTS: {
-      instructions: none, references: none, items: none, notes: none, documents: none, rateHistory: none, checkCalls: none, updates: none,
+      instructions: none, references: none, items: none, notes: none,
     },
     RAIL_ROLES: none,
   }
@@ -223,11 +222,11 @@ describe('ShipmentFormPage — issues and rail', () => {
 })
 
 describe('ShipmentFormPage — layout contract', () => {
-  it('five numbered cards in build order, no positive tabindex', () => {
+  it('nine numbered cards in build order, no positive tabindex', () => {
     renderForm('create')
     const cards = [...document.querySelectorAll<HTMLElement>('[data-testid^="section-"]:not([data-testid$="-errors"])')].map((n) => n.dataset.testid)
-    expect(cards).toEqual(['section-customer', 'section-route', 'section-freight', 'section-rates', 'section-carrier'])
-    expect([...document.querySelectorAll('.tms-ship-card-num')].map((n) => n.textContent)).toEqual(['1', '2', '3', '4', '5'])
+    expect(cards).toEqual(['section-customer', 'section-billTo', 'section-route', 'section-freight', 'section-rates', 'section-rateHistory', 'section-carrier', 'section-tracking', 'section-documents'])
+    expect([...document.querySelectorAll('.tms-ship-card-num')].map((n) => n.textContent)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
     expect([...document.querySelectorAll('[tabindex]')].every((n) => Number(n.getAttribute('tabindex')) <= 0)).toBe(true)
   })
 
@@ -239,15 +238,14 @@ describe('ShipmentFormPage — layout contract', () => {
     expect((screen.getByLabelText('Mode') as HTMLSelectElement).value).toBe('FTL')
   })
 
-  it('Check calls and Updates tabs exist only in edit mode', () => {
+  it('the More strip holds only Instructions, References, Items and Notes, in both modes', () => {
     const { unmount } = renderForm('create')
-    expect([...document.querySelectorAll('[role="tab"]')].map((n) => n.textContent)).toEqual(
-      ['Instructions', 'References', 'Items', 'Notes', 'Documents', 'Rate history'])
+    const names = () => [...document.querySelectorAll('[role="tab"]')].map((n) => n.textContent)
+    expect(names()).toEqual(['Instructions', 'References', 'Items', 'Notes'])
     unmount()
     h.shipment = { bundle: bundleOf('DRAFT'), loading: false, error: null }
     renderForm('edit')
-    expect([...document.querySelectorAll('[role="tab"]')].map((n) => n.textContent)).toContain('Check calls')
-    expect([...document.querySelectorAll('[role="tab"]')].map((n) => n.textContent)).toContain('Updates')
+    expect(names()).toEqual(['Instructions', 'References', 'Items', 'Notes'])
   })
 
   it('the issues strip names required fields without asterisks', async () => {

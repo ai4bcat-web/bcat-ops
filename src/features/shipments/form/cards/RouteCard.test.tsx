@@ -93,4 +93,60 @@ describe('RouteCard', () => {
     await new Promise((r) => setTimeout(r, 800))
     expect(milesMock).not.toHaveBeenCalled()
   })
+
+  it('never overwrites miles that were saved or typed, and does not measure an incomplete route', async () => {
+    milesMock.mockResolvedValue({ miles: 912, source: 'google' })
+    const host = setup((v) => ({
+      ...v, ship: { ...v.ship, customerMiles: '640' },
+      stops: v.stops.map((s, i) => ({ ...s, city: i ? 'Dallas' : 'Chicago', state: i ? 'TX' : 'IL' })),
+    }))
+    await waitFor(() => expect(milesMock).toHaveBeenCalled(), { timeout: 3000 })
+    await waitFor(() => expect(host.current!.getValues().ship.truckMiles).toBe('912'))
+    expect(host.current!.getValues().ship.customerMiles).toBe('640')
+    expect(screen.getByTestId('f-shipping-milesSource').textContent).toMatch(/Miles from the stop addresses/)
+    milesMock.mockClear()
+    setup()
+    await new Promise((r) => setTimeout(r, 800))
+    expect(milesMock).not.toHaveBeenCalled()
+  })
+
+  it('invites typing when the route cannot be measured', async () => {
+    milesMock.mockResolvedValue({ miles: null, source: null, error: 'boom' })
+    const host = setup((v) => ({ ...v, stops: v.stops.map((s, i) => ({ ...s, city: i ? 'Dallas' : 'Chicago', state: i ? 'TX' : 'IL' })) }))
+    await waitFor(() => expect(screen.getByTestId('f-shipping-milesSource').textContent).toMatch(/type the miles/))
+    expect(host.current!.getValues().ship.customerMiles).toBe('')
+  })
+
+  it('typed location text that matches nothing is kept; renaming a linked stop drops its link and pin', () => {
+    const host = setup((v) => ({ ...v, stops: v.stops.map((s, i) => (i ? s : { ...s, name: 'Joliet Dock', locationId: 'l1', geo: { lat: 1, lng: 2 } } as typeof s)) }))
+    fireEvent.change(screen.getByTestId('f-pickup-name'), { target: { value: 'Joliet Dock East' } })
+    expect(host.current!.getValues().stops[0]).toMatchObject({ name: 'Joliet Dock East', locationId: '', geo: null })
+    fireEvent.change(screen.getByTestId('f-pickup-name'), { target: { value: 'Nowhere Ltd' } })
+    expect(host.current!.getValues().stops[0].name).toBe('Nowhere Ltd')
+  })
+
+  it('Pick Up Name and Ready are the red fields; the consignee has Must Deliver instead of Ready', () => {
+    setup()
+    expect(screen.getByLabelText('Name (required)')).toBeTruthy()
+    expect(screen.getByLabelText('Ready (required)')).toBeTruthy()
+    expect(screen.getByTestId('f-consignee-mustDeliver')).toBeTruthy()
+    expect(screen.queryByTestId('f-consignee-ready')).toBeNull()
+  })
+
+  it('masks the phone as typed and keeps zip to digits', () => {
+    const host = setup((v) => ({ ...v, stops: v.stops.map((s, i) => (i ? s : { ...s, city: '' })) }))
+    fireEvent.change(screen.getByTestId('f-pickup-phone'), { target: { value: '3125550100' } })
+    expect(host.current!.getValues().stops[0].phone).toBe('(312) 555-0100')
+    fireEvent.change(screen.getByTestId('f-pickup-zip'), { target: { value: '60a6-01' } })
+    expect(host.current!.getValues().stops[0].zip).toBe('60601')
+  })
+
+  it('a stop the truck has already reached cannot be removed or have its place changed', () => {
+    renderCard(RouteCard, {
+      ctx: () => ({ directory: { customers: [], locations: [DOCK], carriers: [], staff: [] }, locked: { fields: {}, stops: { mid: 'The truck has arrived here' }, voided: false } }),
+      seed: (v) => ({ ...v, stops: [v.stops[0], { ...v.stops[1], id: 'mid', name: 'Mid', type: 'pickup' as const }, { ...v.stops[1], id: 'end' }] }),
+    })
+    expect((screen.getByTestId('f-route-remove-1') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('f-stop-1-name') as HTMLInputElement).disabled).toBe(true)
+  })
 })
