@@ -8,8 +8,11 @@
  * customer, load or invoice, and it refuses to run against anything but the dev API.
  *
  *   BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyAr.mjs
+ *
+ * Without those variables it mints a throwaway ADMIN login in the dev pool and deletes it after.
  */
-import { authenticateTmsUser } from './lib/tmsAuth.mjs'
+import { devAdminSession } from './lib/devAdminSession.mjs'
+import { bookCarrier, findActiveRepId, poReference, recordCarrierBill, releaseForReview } from './lib/releaseFixture.mjs'
 import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
 refuseReadOnlyFlag('devVerifyAr.mjs')
 
@@ -92,9 +95,16 @@ async function attachDocument(shipmentId, orderId, loadId, type) {
 }
 
 async function main() {
-  const auth = await authenticateTmsUser(outputs)
-  token = auth.token
-  if (auth.endpoint !== DEV_API) throw new Error('refusing to run against a non-dev API')
+  const session = await devAdminSession('ar')
+  token = session.token
+  try {
+    await verify()
+  } finally {
+    if (!(await session.cleanup())) console.log('  (temporary admin identity was not deleted)')
+  }
+}
+
+async function verify() {
 
   // An isolated fixture customer, not one of the copied accounts: the verification
   // posts money, and no real customer's credit or ledger may move because of it.
@@ -130,7 +140,7 @@ async function main() {
     order: {
       mode: 'FTL',
       equipmentType: 'Dry Van',
-      references: [{ code: 'PO', label: 'Purchase order', value: `VERIFY-${stamp}`, level: 'ORDER', visibility: 'CUSTOMER' }],
+      references: [poReference(`VERIFY-${stamp}`)],
     },
     stops: [
       { type: 'pickup', name: 'Verify Shipper', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: `${today}T13:00:00.000Z` },
@@ -146,6 +156,8 @@ async function main() {
   const reload = async () => { bundle = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId }) }
 
   await shipAction('SUBMIT_ORDER', { shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt })
+  // An outside carrier on the load (its bill is recorded before the release, below).
+  await bookCarrier({ ship: shipAction, shipmentId, rateCents: 180000 })
   await reload()
   // The shipment's movement status is derived from its loads, so the fixture is
   // walked up the load ladder rather than hand-set.
@@ -170,9 +182,14 @@ async function main() {
     shipAction('READY_TO_INVOICE', { orderId, expectedUpdatedAt: bundle.orders[0].updatedAt }))
   await attachDocument(shipmentId, orderId, bundle.loads[0].id, 'BOL')
   await attachDocument(shipmentId, orderId, bundle.loads[0].id, 'POD')
+  // An outside carrier's load also needs its rate confirmation on file.
+  await attachDocument(shipmentId, orderId, bundle.loads[0].id, 'RATE_CON')
   await reload()
   // Release happens in Load Review only: the same action, carrying the Load Review marker.
-  await shipAction('READY_TO_INVOICE', { orderId, expectedUpdatedAt: bundle.orders[0].updatedAt, review: { source: 'LOAD_REVIEW' } })
+  // The fixture also earns the review requirements: PO and charges above, POD here, the carrier's bill,
+  // then rep and division in the helper.
+  const carrierBill = await recordCarrierBill({ ship: shipAction, fin: finAction, shipmentId, billNumber: `ZZ-AR-${String(stamp).slice(-6)}`, billedCents: 180000 })
+  await releaseForReview({ ship: shipAction, shipmentId, repId: await findActiveRepId(gql) })
   await reload()
   ok('READY_TO_INVOICE (Load Review marker) moved the order to UNBILLED', bundle.orders[0].arStatus)
 
@@ -347,6 +364,8 @@ async function main() {
 
   const secondVoid = await finAction('VOID_INVOICE', { invoiceId: secondId, reason: 'verification cleanup' })
   ok('the void archived and released the queue row', secondVoid.invoice.status)
+  // A shipment with a recorded carrier bill cannot be cancelled until the bill is voided.
+  await finAction('VOID_BILL', { billId: carrierBill.id, reason: 'verification cleanup' })
   await reload()
   await shipAction('SET_SHIPMENT_STATUS', {
     shipmentId, status: 'CANCELED', reason: 'dev verification fixture', expectedUpdatedAt: bundle.shipment.updatedAt,

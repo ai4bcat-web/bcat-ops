@@ -26,6 +26,7 @@ import { LambdaClient, GetFunctionConfigurationCommand, GetFunctionUrlConfigComm
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { IAMClient, ListRolePoliciesCommand, GetRolePolicyCommand } from '@aws-sdk/client-iam'
 import { DEV_API, region, gql, routerAs, mintIdentity, deleteIdentity } from './lib/devIdentity.mjs'
+import { bookCarrier, findActiveRepId, recordCarrierBill, releaseForReview } from './lib/releaseFixture.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const REPORT = resolve(here, '../Docs/tms-build/EMAIL_LIVE_TEST.md')
@@ -277,14 +278,7 @@ async function run() {
     let ib = await newFixture(customer, true)
     const invShipment = ib.shipment.id
     const orderId = ib.orders[0].id
-    const invLoad = ib.loads[0]
-    const othersNow = ((await ship('LIST_LOAD_CARRIERS_BY_CARRIER', { carrierId: 'carr-demo-vetted' }))?.loadCarriers ?? []).filter((c) => c.status === 'ACTIVE')
-    await ship('BOOK_CARRIER', {
-      loadId: invLoad.id, carrierId: 'carr-demo-vetted', carrierRateCents: 180000, expectedUpdatedAt: invLoad.updatedAt,
-      driverName: 'ZZ Driver', driverPhone: '+12245550137', dispatcherEmail: ALLOWED,
-      acknowledgeWarnings: ['COST_EXCEEDS_TOP_SPEND', ...othersNow.map((c) => `DOUBLE_BOOKED:${c.loadId}`)],
-    })
-    ib = await ship('GET_SHIPMENT_BUNDLE', { shipmentId: invShipment })
+    ib = await bookCarrier({ ship, shipmentId: invShipment, rateCents: 180000, driver: { dispatcherEmail: ALLOWED } })
     for (const status of ['BOOKED', 'PLANNED', 'DISPATCHED', 'LOADING', 'PICKED_UP', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
       const l = ib.loads[0]
       try { await ship('SET_LOAD_STATUS', { loadId: l.id, status, expectedUpdatedAt: l.updatedAt }) } catch { /* ladder step not applicable */ }
@@ -293,13 +287,12 @@ async function run() {
     await attach(invShipment, orderId, ib.loads[0].id, 'BOL')
     await attach(invShipment, orderId, ib.loads[0].id, 'POD')
     await attach(invShipment, orderId, ib.loads[0].id, 'RATE_CON')
-    ib = await ship('GET_SHIPMENT_BUNDLE', { shipmentId: invShipment })
     // The release gate refuses an outside carrier until its bill is recorded.
-    const leg = ib.loadCarriers.find((c) => c.status === 'ACTIVE')
-    const rec = await fin('RECORD_BILL', { loadCarrierId: leg.id, billNumber: `ZZ-EMAIL-${String(stamp).slice(-6)}`, billDate: today, billedCents: 180000 })
-    fixtures.bills.push(rec.bill.id)
-    ib = await ship('GET_SHIPMENT_BUNDLE', { shipmentId: invShipment })
-    await ship('READY_TO_INVOICE', { orderId, expectedUpdatedAt: ib.orders[0].updatedAt, review: { source: 'LOAD_REVIEW' } })
+    const bill = await recordCarrierBill({ ship, fin, shipmentId: invShipment, billNumber: `ZZ-EMAIL-${String(stamp).slice(-6)}`, billedCents: 180000, billDate: today })
+    fixtures.bills.push(bill.id)
+    // Release is Load Review's act: the fixture earns the review requirements (PO, POD, revenue, expense above;
+    // sales rep and revenue division here) and releases with the marker.
+    await releaseForReview({ ship, shipmentId: invShipment, repId: await findActiveRepId((q, v) => gql(token, q, v)) })
     const generated = await fin('GENERATE_INVOICE', { orderId })
     const invoiceId = generated.invoice.id
     ok('fixture invoice generated', `${generated.invoice.number}`)

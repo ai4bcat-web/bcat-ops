@@ -2,7 +2,7 @@
  * Step I live verification against the DEV stack.
  *
  * Throwaway, and the sibling of `devVerifyAr.mjs` / `devVerifyAp.mjs`. It builds its
- * own customer, carrier and shipments, turns commissions on with a plan of its own,
+ * own customer and shipments (the seeded vetted demo carrier is booked), turns commissions on with a plan of its own,
  * and then drives the deployed Lambdas through the whole of Step I:
  *
  *   - roles are projected onto Cognito groups, and the SERVER refuses what the role
@@ -30,9 +30,13 @@
  * instead, with the same AWS credentials the backfills use.
  *
  *   BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyCommissions.mjs
+ *
+ * Without those variables it signs in a throwaway ADMIN minted in the dev pool. That admin is
+ * not the owner, so the owner-only user-management steps are refused, as they should be.
  */
 import { randomBytes } from 'node:crypto'
-import { authenticateTmsUser } from './lib/tmsAuth.mjs'
+import { devAdminSession } from './lib/devAdminSession.mjs'
+import { bookCarrier, poReference, recordCarrierBill, releaseForReview } from './lib/releaseFixture.mjs'
 import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
 refuseReadOnlyFlag('devVerifyCommissions.mjs')
 
@@ -82,7 +86,6 @@ const routerAs = (authToken, field) => async (action, input) => {
 const shipAction = (action, input) => routerAs(token, 'tmsShipmentActions')(action, input)
 const finAction = (action, input) => routerAs(token, 'tmsFinanceActions')(action, input)
 const dirAction = (action, input) => routerAs(token, 'tmsDirectoryActions')(action, input)
-const carrierAction = (action, input) => routerAs(token, 'tmsCarrierActions')(action, input)
 
 // ── documents: a tiny real PDF through PREPARE → PUT → COMMIT ────────────────
 // The release gate has no override, so a fixture earns its BOL and POD the way a
@@ -211,14 +214,14 @@ async function tokenFor(email, temporaryPassword) {
 }
 
 async function main() {
-  const auth = await authenticateTmsUser(outputs)
-  token = auth.token
-  if (auth.endpoint !== DEV_API) throw new Error('refusing to run against a non-dev API')
+  const session = await devAdminSession('commissions')
+  token = session.token
 
   const stamp = Date.now()
   const today = new Date().toISOString().slice(0, 10)
   const createdUsers = []
   const createdShipments = []
+  const createdBills = []
   let settingsBefore = null
 
   try {
@@ -275,7 +278,7 @@ async function main() {
     const repToken = await tokenFor(repEmail, repPassword)
     const noneToken = await tokenFor(noneEmail, nonePassword)
     // The admin session was signed out by the temporary logins; sign back in.
-    token = (await authenticateTmsUser(outputs)).token
+    token = await session.relogin()
 
     const repFin = routerAs(repToken, 'tmsFinanceActions')
     const repShip = routerAs(repToken, 'tmsShipmentActions')
@@ -347,20 +350,21 @@ async function main() {
     }).then((r) => r.customer ?? r)
     console.log(`fixture customer: ${customer.name} (${customer.id})`)
 
-    const nextYear = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString()
-    const carrier = await carrierAction('UPSERT_CARRIER', {
-      name: `ZZ Commission Carrier ${stamp}`,
-      type: 'TL',
+    // The own-fleet fixture has no cost by design (that is what it proves), so its customer asks the
+    // review for everything except expense and profit: a per-customer requirement list, the real feature.
+    const ownFleetCustomer = await dirAction('UPSERT_CUSTOMER', {
+      name: `ZZ Commission Own Fleet ${stamp}`,
       status: 'ACTIVE',
-      mcNumber: `6${String(stamp).slice(-6)}`,
-      dotNumber: `6${String(stamp).slice(-6)}`,
-      accountingEmail: 'commission-carrier@example.invalid',
-      insurancePolicies: [
-        { type: 'AUTO_LIABILITY', company: 'Verification Mutual', policyNumber: `AL-${stamp}`, limitCents: 100000000, expiresAt: nextYear },
-        { type: 'CARGO', company: 'Verification Mutual', policyNumber: `CG-${stamp}`, limitCents: 10000000, expiresAt: nextYear },
-      ],
+      active: true,
+      mcNumber: `8${String(stamp).slice(-6)}`,
+      billingEmail: 'commission-verification@example.invalid',
+      creditLimitCents: 100000000,
+      paymentTermsDays: 30,
+      accountOwnerIds: [repId ?? repEmail, noneId ?? noneEmail],
+      teamKey: 'VERIFY',
+      reviewRequirements: ['revDivision', 'referenceNumber', 'podReceived', 'salesRep', 'revenueEntered'],
       notes: 'Dev-only Step I verification fixture. Safe to delete.',
-    }).then((r) => r.carrier ?? r)
+    }).then((r) => r.customer ?? r)
 
     /**
      * A priced, delivered, invoiceable shipment of our own. Each one picks up on its
@@ -372,7 +376,7 @@ async function main() {
     const makeShipment = async ({ revenueCents, costCents, ownFleet = false }) => {
       fixtureDay += 1
       const day = new Date(Date.now() + fixtureDay * 24 * 3600 * 1000).toISOString().slice(0, 10)
-      let b = await shipAction('CREATE_SHIPMENT', { customerId: customer.id })
+      let b = await shipAction('CREATE_SHIPMENT', { customerId: (ownFleet ? ownFleetCustomer : customer).id })
       const id = b.shipment.id
       createdShipments.push(id)
       b = await shipAction('SAVE_ORDER_FORM', {
@@ -382,7 +386,7 @@ async function main() {
           mode: 'FTL',
           equipmentType: 'Dry Van',
           customerRepId: repId ?? repEmail,
-          references: [{ code: 'PO', label: 'Purchase order', value: `VERIFY-${stamp}`, level: 'ORDER', visibility: 'CUSTOMER' }],
+          references: [poReference(`VERIFY-${stamp}`)],
         },
         stops: [
           { type: 'pickup', name: 'Verify Shipper', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: `${day}T13:00:00.000Z` },
@@ -393,19 +397,8 @@ async function main() {
       await shipAction('SUBMIT_ORDER', { shipmentId: id, expectedUpdatedAt: b.shipment.updatedAt })
       b = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: id })
 
-      if (!ownFleet) {
-        await shipAction('BOOK_CARRIER', {
-          loadId: b.loads[0].id,
-          expectedUpdatedAt: b.loads[0].updatedAt,
-          carrierId: carrier.id,
-          carrierRateCents: costCents,
-          // A carrier built here has no certificates in the bucket: warnings, not blocks.
-          acknowledgeWarnings: [
-            'MISSING_DOC:COI_CARGO', 'MISSING_DOC:COI_AUTO', 'MISSING_DOC:W9', 'MISSING_DOC:CARRIER_AGREEMENT',
-            'INSURANCE_UNVERIFIED',
-          ],
-        }).catch((err) => console.log(`  (book: ${String(err.message).slice(0, 120)})`))
-      }
+      // The seeded vetted demo carrier (an ACTIVE carrier is the only kind that can be booked).
+      if (!ownFleet) await bookCarrier({ ship: shipAction, shipmentId: id, rateCents: costCents })
       b = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: id })
       return b
     }
@@ -423,15 +416,24 @@ async function main() {
       }
       // Step R: READY_TO_INVOICE has no override. The fixture uploads the BOL and the
       // POD the release gate asks for, then the gate opens on its own.
-      await attachDocument(bundle.shipment.id, (fresh.orders?.[0] ?? fresh.order).id, fresh.loads[0].id, 'BOL')
-      await attachDocument(bundle.shipment.id, (fresh.orders?.[0] ?? fresh.order).id, fresh.loads[0].id, 'POD')
-      fresh = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: bundle.shipment.id })
+      const shipmentId = bundle.shipment.id
+      const orderId = (fresh.orders?.[0] ?? fresh.order).id
+      await attachDocument(shipmentId, orderId, fresh.loads[0].id, 'BOL')
+      await attachDocument(shipmentId, orderId, fresh.loads[0].id, 'POD')
+      const outside = (fresh.loadCarriers ?? []).find((c) => c.status === 'ACTIVE' && c.kind === 'CARRIER')
+      if (outside) {
+        // An outside carrier's load needs its rate con on file and its bill recorded before it can release.
+        await attachDocument(shipmentId, orderId, fresh.loads[0].id, 'RATE_CON')
+        const bill = await recordCarrierBill({
+          ship: shipAction, fin: finAction, shipmentId,
+          billNumber: `ZZ-COM-${String(stamp).slice(-6)}-${createdBills.length + 1}`, billedCents: outside.carrierRateCents,
+        })
+        createdBills.push(bill.id)
+      }
+      // Rep and division through the real actions, then the review release (throws if the fixture is not ready).
+      await releaseForReview({ ship: shipAction, shipmentId, repId: repId ?? repEmail })
+      fresh = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId })
       const order = fresh.orders?.[0] ?? fresh.order
-      await shipAction('READY_TO_INVOICE', {
-        orderId: order.id,
-        expectedUpdatedAt: order.updatedAt,
-        review: { source: 'LOAD_REVIEW' },
-      }).catch((err) => console.log(`  (ready: ${String(err.message).slice(0, 120)})`))
       const result = await finAction('GENERATE_INVOICE', { orderId: order.id })
       return result.invoice
     }
@@ -616,7 +618,7 @@ async function main() {
     ok('the commission ledger answers by month', `${byMonth.length} row(s) in ${month}`)
   } finally {
     // ── cleanup: the identities first, then the freight ────────────────────
-    token = (await authenticateTmsUser(outputs).catch(() => ({ token }))).token ?? token
+    token = await session.relogin().catch(() => token)
     let ownerOnlyRefusalSeen = false
     for (const { email, profileId } of createdUsers) {
       try {
@@ -647,6 +649,9 @@ async function main() {
         if (!order.invoiceId) continue
         await finAction('VOID_INVOICE', { invoiceId: order.invoiceId, reason: 'dev verification cleanup' })
           .catch((err) => console.log(`cleanup: could not void invoice ${order.invoiceId}: ${String(err.message).slice(0, 120)}`))
+      }
+      for (const billId of createdBills.splice(0)) {
+        await finAction('VOID_BILL', { billId, reason: 'dev verification cleanup' }).catch(() => undefined)
       }
       const fresh = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId }).catch(() => current)
       await shipAction('VOID_SHIPMENT', {

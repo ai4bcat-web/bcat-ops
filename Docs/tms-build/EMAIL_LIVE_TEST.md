@@ -239,3 +239,149 @@ PASS  fixture shipment voided — shp-ad6a8047-3aab-468d-b15c-9599bf992327
 PASS  fixture shipment voided — shp-40770f8f-d713-437f-88cd-a6d74feb08f6
 PASS  temp admin identity deleted
 ```
+
+## Live run 2026-11-05T10:41:28.399Z — ABORTED: Not ready for accounting: Missing sales rep
+
+Recipient: the single allow-listed mailbox only. Ids and statuses; no other addresses.
+
+```json
+{
+  "rateCon": {
+    "shipmentId": "shp-66adc04f-6e21-49e9-844c-0d621ba171cc",
+    "loadCarrierId": "lcr-2b5587af-ac7f-4f52-9aba-96379734e10e",
+    "messageRowId": "msg:shp-66adc04f-6e21-49e9-844c-0d621ba171cc:2178b172-9446-489e-b73f-eabc7228895a",
+    "status": "SENT",
+    "sesMessageId": "010001a1ab4c4f1a-3cc2c7ee-4803-4440-ac90-6bac966f057d-000000",
+    "storedMessageIdHeader": "<010001a1ab4c4f1a-3cc2c7ee-4803-4440-ac90-6bac966f057d-000000@email.amazonses.com>",
+    "threadKey": "tracking+shp-66adc04f-6e21-49e9-844c-0d621ba171cc",
+    "error": null
+  },
+  "invoice": {},
+  "reply": {
+    "intakeStatus": 200,
+    "routedShipmentMatches": true,
+    "inboundRowId": "msg:shp-66adc04f-6e21-49e9-844c-0d621ba171cc:f6c52426-107e-4a72-9b96-cdbd148e8826",
+    "inboundThreadKey": "tracking+shp-66adc04f-6e21-49e9-844c-0d621ba171cc",
+    "strippedAliasStatus": 200
+  }
+}
+```
+
+```
+PASS  fixture customer created — 1793875262066-ezfq3tfpc
+PASS  SEND_RATE_CON returned SENT — loadCarrier lcr-2b5587af-ac7f-4f52-9aba-96379734e10e
+PASS  rate con SENT through SES — SES MessageId 010001a1ab4c4f1a-3cc2c7ee-4803-4440-ac90-6bac966f057d-000000
+PASS  every rate con recipient is inside the allow-listed mailbox — to 1, cc 2
+PASS  stored Message-ID header and per-load thread key — <010001a1ab4c4f1a-3cc2c7ee-4803-4440-ac90-6bac966f057d-000000@email.amazonses.com> · tracking+shp-66adc04f-6e21-49e9-844c-0d621ba171cc
+PASS  reply routed by the plus address to the right shipment — HTTP 200
+PASS  inbound reply landed on the same per-load thread key — tracking+shp-66adc04f-6e21-49e9-844c-0d621ba171cc
+PASS  reply with the plus alias stripped threads by In-Reply-To — HTTP 200
+PASS  fixture carrier bill voided — cb:lcr-1a8b35eb-b288-405b-886b-c0fe66e56cfc:1
+PASS  fixture shipment voided — shp-66adc04f-6e21-49e9-844c-0d621ba171cc
+PASS  fixture shipment voided — shp-0fa91813-1f4f-4d16-8f13-471929296d91
+PASS  temp admin identity deleted
+```
+
+## Live run 2026-11-05T10:44:07.080Z — ALL PASSED
+
+Recipient: the single allow-listed mailbox only. Ids and statuses; no other addresses.
+
+```json
+{
+  "rateCon": {
+    "shipmentId": "shp-68997274-4b3c-4f37-9e67-aec22262ff3a",
+    "loadCarrierId": "lcr-cb77335c-06c4-4849-b5a2-a5b27884f366",
+    "messageRowId": "msg:shp-68997274-4b3c-4f37-9e67-aec22262ff3a:1e648eb4-90fb-4a93-bb97-ffaf17799618",
+    "status": "SENT",
+    "sesMessageId": "010001a1ab4eb663-39ab10f1-70a4-4304-bd70-d48cf2cbfcb6-000000",
+    "storedMessageIdHeader": "<010001a1ab4eb663-39ab10f1-70a4-4304-bd70-d48cf2cbfcb6-000000@email.amazonses.com>",
+    "threadKey": "tracking+shp-68997274-4b3c-4f37-9e67-aec22262ff3a",
+    "error": null
+  },
+  "invoice": {
+    "shipmentId": "shp-226841ba-7bd9-486b-b4b6-0fa7ba3f249c",
+    "invoiceId": "20007",
+    "noticeId": "inv:20007:1",
+    "status": "SENT",
+    "sesMessageId": "010001a1ab4eff5e-8dd6ef9b-c78c-40f9-b871-60e45b917317-000000",
+    "error": null
+  },
+  "reply": {
+    "intakeStatus": 200,
+    "routedShipmentMatches": true,
+    "inboundRowId": "msg:shp-68997274-4b3c-4f37-9e67-aec22262ff3a:bce28534-e969-44d7-8e8d-58cf959deb13",
+    "inboundThreadKey": "tracking+shp-68997274-4b3c-4f37-9e67-aec22262ff3a",
+    "strippedAliasStatus": 200
+  }
+}
+```
+
+```
+PASS  fixture customer created — 1793875417983-em2e0w9ho
+PASS  SEND_RATE_CON returned SENT — loadCarrier lcr-cb77335c-06c4-4849-b5a2-a5b27884f366
+PASS  rate con SENT through SES — SES MessageId 010001a1ab4eb663-39ab10f1-70a4-4304-bd70-d48cf2cbfcb6-000000
+PASS  every rate con recipient is inside the allow-listed mailbox — to 1, cc 2
+PASS  stored Message-ID header and per-load thread key — <010001a1ab4eb663-39ab10f1-70a4-4304-bd70-d48cf2cbfcb6-000000@email.amazonses.com> · tracking+shp-68997274-4b3c-4f37-9e67-aec22262ff3a
+PASS  reply routed by the plus address to the right shipment — HTTP 200
+PASS  inbound reply landed on the same per-load thread key — tracking+shp-68997274-4b3c-4f37-9e67-aec22262ff3a
+PASS  reply with the plus alias stripped threads by In-Reply-To — HTTP 200
+PASS  fixture invoice generated — 20007
+PASS  invoice SENT through SES — SES MessageId 010001a1ab4eff5e-8dd6ef9b-c78c-40f9-b871-60e45b917317-000000 · notice inv:20007:1
+PASS  every invoice recipient is inside the allow-listed mailbox — to 1, cc 0
+PASS  fixture carrier bill voided — cb:lcr-7323e631-96d2-4c12-8571-c550291bacac:1
+PASS  fixture shipment voided — shp-68997274-4b3c-4f37-9e67-aec22262ff3a
+PASS  fixture shipment voided — shp-226841ba-7bd9-486b-b4b6-0fa7ba3f249c
+PASS  temp admin identity deleted
+```
+
+## Live run 2026-11-05T11:07:57.001Z — ALL PASSED
+
+Recipient: the single allow-listed mailbox only. Ids and statuses; no other addresses.
+
+```json
+{
+  "rateCon": {
+    "shipmentId": "shp-3b1f0d87-7c16-4c5e-8e78-46be34b0e5d8",
+    "loadCarrierId": "lcr-5e0d4f16-39ab-4e32-9f4a-cd2cb53077f1",
+    "messageRowId": "msg:shp-3b1f0d87-7c16-4c5e-8e78-46be34b0e5d8:959736ec-8bb1-4033-9e95-6989b084ff49",
+    "status": "SENT",
+    "sesMessageId": "010001a1ab6460cb-19d3e709-a219-4dd2-99b3-6ee8fbcecfc9-000000",
+    "storedMessageIdHeader": "<010001a1ab6460cb-19d3e709-a219-4dd2-99b3-6ee8fbcecfc9-000000@email.amazonses.com>",
+    "threadKey": "tracking+shp-3b1f0d87-7c16-4c5e-8e78-46be34b0e5d8",
+    "error": null
+  },
+  "invoice": {
+    "shipmentId": "shp-95827d0c-6510-43c2-8e22-e1f4bc72d89e",
+    "invoiceId": "20022",
+    "noticeId": "inv:20022:1",
+    "status": "SENT",
+    "sesMessageId": "010001a1ab64c947-1f916bc6-10c1-48c2-8cf4-23de71d227f3-000000",
+    "error": null
+  },
+  "reply": {
+    "intakeStatus": 200,
+    "routedShipmentMatches": true,
+    "inboundRowId": "msg:shp-3b1f0d87-7c16-4c5e-8e78-46be34b0e5d8:fb7fd0cf-e856-4aa0-bbf3-828580c842f8",
+    "inboundThreadKey": "tracking+shp-3b1f0d87-7c16-4c5e-8e78-46be34b0e5d8",
+    "strippedAliasStatus": 200
+  }
+}
+```
+
+```
+PASS  fixture customer created — 1793876836773-xlay95zhx
+PASS  SEND_RATE_CON returned SENT — loadCarrier lcr-5e0d4f16-39ab-4e32-9f4a-cd2cb53077f1
+PASS  rate con SENT through SES — SES MessageId 010001a1ab6460cb-19d3e709-a219-4dd2-99b3-6ee8fbcecfc9-000000
+PASS  every rate con recipient is inside the allow-listed mailbox — to 1, cc 2
+PASS  stored Message-ID header and per-load thread key — <010001a1ab6460cb-19d3e709-a219-4dd2-99b3-6ee8fbcecfc9-000000@email.amazonses.com> · tracking+shp-3b1f0d87-7c16-4c5e-8e78-46be34b0e5d8
+PASS  reply routed by the plus address to the right shipment — HTTP 200
+PASS  inbound reply landed on the same per-load thread key — tracking+shp-3b1f0d87-7c16-4c5e-8e78-46be34b0e5d8
+PASS  reply with the plus alias stripped threads by In-Reply-To — HTTP 200
+PASS  fixture invoice generated — 20022
+PASS  invoice SENT through SES — SES MessageId 010001a1ab64c947-1f916bc6-10c1-48c2-8cf4-23de71d227f3-000000 · notice inv:20022:1
+PASS  every invoice recipient is inside the allow-listed mailbox — to 1, cc 0
+PASS  fixture carrier bill voided — cb:lcr-798b418c-f1ea-4110-b9e4-527e9ceee21a:1
+PASS  fixture shipment voided — shp-3b1f0d87-7c16-4c5e-8e78-46be34b0e5d8
+PASS  fixture shipment voided — shp-95827d0c-6510-43c2-8e22-e1f4bc72d89e
+PASS  temp admin identity deleted
+```

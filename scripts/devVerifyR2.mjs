@@ -30,6 +30,7 @@
  */
 import { randomBytes, randomUUID, createHash } from 'node:crypto'
 import { authenticateTmsUser } from './lib/tmsAuth.mjs'
+import { findActiveRepId, poReference, releaseForReview } from './lib/releaseFixture.mjs'
 import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
 refuseReadOnlyFlag('devVerifyR2.mjs')
 
@@ -302,7 +303,8 @@ async function main() {
     const codes = divisions.map((d) => d.code).sort()
     ok('division rows', codes.join(' '))
     for (const c of ['BROKERAGE', 'ASSETS', 'OWNER_OPERATOR', 'BOX_TRUCK', 'LOCAL', 'CAR_SHIPPING', 'COMPANY']) equals(`division ${c} seeded`, codes.includes(c), true)
-    equals('division codes are exactly the seven seeded ones', codes.join(','), 'ASSETS,BOX_TRUCK,BROKERAGE,CAR_SHIPPING,COMPANY,LOCAL,OWNER_OPERATOR')
+    // ZZ_DEMO_* divisions are the demo-data harness's own; the seed never creates them.
+    equals('division codes are exactly the seven seeded ones', codes.filter((c) => !c.startsWith('ZZ_DEMO_')).join(','), 'ASSETS,BOX_TRUCK,BROKERAGE,CAR_SHIPPING,COMPANY,LOCAL,OWNER_OPERATOR')
     equals('no Amazon division exists', codes.filter((c) => /^AMAZON$/i.test(c)).length, 0)
 
     const seedRuleIds = new Set([
@@ -454,20 +456,26 @@ async function main() {
     const customerTarget = await makeCustomer('TARGET')
     const customerTarget2 = await makeCustomer('TARGET2')
 
-    async function newShipment(label, customerId) {
+    // `expenseCents` puts a carrier-side charge on the order form: the expense (and so the profit) the review asks for.
+    // `submit: false` leaves the order a draft: Auto Shipper is a copied customer whose live exposure can sit at its credit
+    // limit, and the tag checks below read the tag the rules set at create/save, not anything a submit does.
+    async function newShipment(label, customerId, { expenseCents = 0, submit = true } = {}) {
       let bundle = await shipAction('CREATE_SHIPMENT', { customerId })
       const shipmentId = bundle.shipment.id
       fixtures.shipmentIds.push(shipmentId)
       bundle = await shipAction('SAVE_ORDER_FORM', {
         shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt,
-        order: { mode: 'FTL', equipmentType: 'Dry Van', references: [{ code: 'PO', label: 'PO number', value: `R2-${label}-${stamp}`, level: 'ORDER', visibility: 'CUSTOMER' }] },
+        order: { mode: 'FTL', equipmentType: 'Dry Van', references: [poReference(`R2-${label}-${stamp}`)] },
         stops: [
           { type: 'pickup', name: 'Verify Shipper', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: `${today}T13:00:00.000Z` },
           { type: 'delivery', name: 'Verify Receiver', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' }, appt: `${today}T21:00:00.000Z` },
         ],
-        charges: [{ side: 'CUSTOMER', code: 'LINEHAUL', rateCents: 250000, count: 1 }],
+        charges: [
+          { side: 'CUSTOMER', code: 'LINEHAUL', rateCents: 250000, count: 1 },
+          ...(expenseCents > 0 ? [{ side: 'CARRIER', code: 'LINEHAUL', rateCents: expenseCents, count: 1 }] : []),
+        ],
       })
-      await shipAction('SUBMIT_ORDER', { shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt })
+      if (submit) await shipAction('SUBMIT_ORDER', { shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt })
       bundle = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId })
       console.log(`fixture shipment ${label}: ${bundle.shipment.number} (${shipmentId})`)
       return bundle
@@ -586,7 +594,7 @@ async function main() {
 
     /** A shipment taken all the way to an issued invoice, the honest way: through the gate. */
     const invoicedShipment = async (label, customerId, driver) => {
-      const built = await newShipment(label, customerId)
+      const built = await newShipment(label, customerId, { expenseCents: 180000 })
       const shipmentId = built.shipment.id
       const loadId = built.loads[0].id
       await shipAction('ASSIGN_ASSET', {
@@ -599,7 +607,8 @@ async function main() {
       await deliver(shipmentId)
       await attachDocument(shipmentId, built.orders[0].id, loadId, 'BOL')
       await attachDocument(shipmentId, built.orders[0].id, loadId, 'POD')
-      await shipAction('READY_TO_INVOICE', { orderId: built.orders[0].id, expectedUpdatedAt: built.orders[0].updatedAt, review: { source: 'LOAD_REVIEW' } })
+      // PO, revenue and expense are on the order; the POD is attached above; rep and division come from the helper.
+      await releaseForReview({ ship: shipAction, shipmentId, repId: await findActiveRepId(gql) })
       const issued = await finAction('GENERATE_INVOICE', { orderId: built.orders[0].id })
       return { shipmentId, loadId, orderId: built.orders[0].id, invoiceId: issued.invoice.id }
     }
@@ -655,7 +664,7 @@ async function main() {
       applications: [{ invoiceId: paidShipment.invoiceId, amountCents: 100000 }],
       note: 'R2 partial payment',
     })
-    await refuses('REPOINT_INVOICED_CUSTOMER refuses an invoice with money already applied', /payment or write-off/, () =>
+    await refuses('REPOINT_INVOICED_CUSTOMER refuses an invoice with money already applied', /invoice with a payment/, () =>
       finAction('REPOINT_INVOICED_CUSTOMER', { shipmentId: paidShipment.shipmentId, customerId: customerTarget.id, reason: 'try', idempotencyKey: `r2-paid-${stamp}` }))
     await finAction('REVERSE_PAYMENT', { paymentId: partialPayment.payment.id, reason: 'R2 reverse partial payment' })
     const invoiceAfterReversal = await invoiceRow(paidShipment.invoiceId)
@@ -663,7 +672,7 @@ async function main() {
 
     // 4d. RESOLVE_REV_TAG re-resolves after a move and leaves a hand tag alone
     if (autoShipper) {
-      const ruleShipment = await newShipment('REV-RULE', autoShipper.id)
+      const ruleShipment = await newShipment('REV-RULE', autoShipper.id, { submit: false })
       equals('Auto Shipper rule tags CAR_SHIPPING by default', ruleShipment.shipment.revDivision, 'CAR_SHIPPING')
       await shipAction('REPOINT_SHIPMENT_CUSTOMER', { shipmentId: ruleShipment.shipment.id, customerId: customerTarget.id, reason: 'R2 resolve tag verify', expectedUpdatedAt: (await reload(ruleShipment.shipment.id)).shipment.updatedAt })
       const resolvedRule = await shipAction('RESOLVE_REV_TAG', { shipmentId: ruleShipment.shipment.id })

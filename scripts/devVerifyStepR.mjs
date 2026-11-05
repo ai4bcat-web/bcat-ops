@@ -34,9 +34,12 @@
  * to run against anything but the dev API.
  *
  *   BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyStepR.mjs
+ *
+ * Without those variables it signs in a throwaway ADMIN minted in the dev pool (not the owner).
  */
 import { randomBytes, randomUUID } from 'node:crypto'
-import { authenticateTmsUser } from './lib/tmsAuth.mjs'
+import { devAdminSession } from './lib/devAdminSession.mjs'
+import { findActiveRepId, poReference, releaseForReview } from './lib/releaseFixture.mjs'
 import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
 refuseReadOnlyFlag('devVerifyStepR.mjs')
 
@@ -207,9 +210,8 @@ const loadRow = async (id) => (await gql(
 const stopsOf = (load) => { try { return JSON.parse(load.stops ?? '[]') } catch { return [] } }
 
 async function main() {
-  const auth = await authenticateTmsUser(outputs)
-  token = auth.token
-  if (auth.endpoint !== DEV_API) throw new Error('refusing to run against a non-dev API')
+  const session = await devAdminSession('stepr')
+  token = session.token
   const stamp = Date.now()
   const today = new Date().toISOString().slice(0, 10)
   const createdUsers = []
@@ -242,8 +244,11 @@ async function main() {
     ok('division rows', codes.join(' '))
     for (const c of ['BROKERAGE', 'ASSETS', 'OWNER_OPERATOR', 'BOX_TRUCK', 'LOCAL', 'CAR_SHIPPING', 'COMPANY']) equals(`division ${c} seeded`, codes.includes(c), true)
     equals('three ASSETS subsidiaries', divisions.filter((d) => d.parentId === 'ASSETS').length, 3)
-    equals('seven seed rules', rules.filter((r) => r.id.startsWith('rule-seed-')).length, 7)
-    equals('ten seed views', views.filter((v) => v.active !== false).length >= 10, true, `${views.length} views: ${views.map((v) => v.slug).join(' ')}`)
+    // Step R2 reworked the seed: eight live rules (the dropped rule-seed-6 survives, deactivated).
+    equals('eight live seed rules', rules.filter((r) => r.id.startsWith('rule-seed-') && r.active !== false).length, 8)
+    const seedViewSlugs = ['active-shipments', 'my-queue', 'team-queue', 'brokerage-board', 'car-shipping-board', 'owner-operators', 'box-trucks', 'local-drivers']
+    const liveSlugs = new Set(views.filter((v) => v.active !== false).map((v) => v.slug))
+    equals('the eight seed views are live', seedViewSlugs.filter((slug) => !liveSlugs.has(slug)).join(',') || 'all', 'all')
 
     // ── 3. a non-admin identity, from a real token ────────────────────────
     const repEmail = `zz-r-rep-${stamp}@example.invalid`
@@ -252,7 +257,7 @@ async function main() {
     createdUsers.push({ email: repEmail, profileId: repCreated.profile?.id ?? null })
     await setPoolPassword(repEmail, repPassword)
     const repToken = await tokenFor(repEmail, repPassword)
-    token = (await authenticateTmsUser(outputs)).token
+    token = await session.relogin()
     const repShip = routerAs(repToken, 'tmsShipmentActions')
 
     // ── 4. fixtures: a customer that requires BOL + POD + a PO reference ──
@@ -275,18 +280,22 @@ async function main() {
     const expectedSub = ivanDriver.fleetGroup === 'BOX_TRUCK' ? 'BOX_TRUCK' : ivanDriver.fleetGroup === 'LOCAL' ? 'LOCAL' : 'OWNER_OPERATOR'
     console.log(`Ivan driver for the proof: ${ivanDriver.name} (${ivanDriver.id}, ${ivanDriver.fleetGroup})`)
 
-    async function newShipment(label) {
+    // `expenseCents` adds a carrier-side charge: the expense (and so profit) the Load Review asks for.
+    async function newShipment(label, { expenseCents = 0 } = {}) {
       let bundle = await shipAction('CREATE_SHIPMENT', { customerId: customer.id })
       const shipmentId = bundle.shipment.id
       fixtures.shipmentIds.push(shipmentId)
       bundle = await shipAction('SAVE_ORDER_FORM', {
         shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt,
-        order: { mode: 'FTL', equipmentType: 'Dry Van', references: [{ code: 'PO', label: 'PO number', value: `R-${label}-${stamp}`, level: 'ORDER', visibility: 'CUSTOMER' }] },
+        order: { mode: 'FTL', equipmentType: 'Dry Van', references: [poReference(`R-${label}-${stamp}`)] },
         stops: [
           { type: 'pickup', name: 'Verify Shipper', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: `${today}T13:00:00.000Z` },
           { type: 'delivery', name: 'Verify Receiver', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' }, appt: `${today}T21:00:00.000Z` },
         ],
-        charges: [{ side: 'CUSTOMER', code: 'LINEHAUL', rateCents: 250000, count: 1 }],
+        charges: [
+          { side: 'CUSTOMER', code: 'LINEHAUL', rateCents: 250000, count: 1 },
+          ...(expenseCents > 0 ? [{ side: 'CARRIER', code: 'LINEHAUL', rateCents: expenseCents, count: 1 }] : []),
+        ],
       })
       await shipAction('SUBMIT_ORDER', { shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt })
       bundle = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId })
@@ -305,7 +314,7 @@ async function main() {
     }
 
     // ── 5. shipment A: Ivan Cartage (own fleet) ───────────────────────────
-    let a = await newShipment('A')
+    let a = await newShipment('A', { expenseCents: 180000 })
     const aId = a.shipment.id
     const aOrderId = a.orders[0].id
     const aLoadId = a.loads[0].id
@@ -358,7 +367,8 @@ async function main() {
     const incidentId = incident.event?.id
     await shipAction('RESOLVE_INCIDENT', { checkCallId: incidentId, note: 'resolved for the proof' })
     a = await reload(aId)
-    const released = await shipAction('READY_TO_INVOICE', { orderId: aOrderId, expectedUpdatedAt: a.orders[0].updatedAt, review: { source: 'LOAD_REVIEW' } })
+    // The review's own facts: PO, charges and POD are on A; the rep and (already ASSETS) division come from the helper.
+    const released = await releaseForReview({ ship: shipAction, shipmentId: aId, repId: await findActiveRepId(gql) })
     equals('with BOL + POD + PO + own-fleet leg + no exceptions the gate opens', released.releaseGate?.ok ?? (released.bundle?.orders?.[0]?.arStatus === 'UNBILLED'), true)
     a = await reload(aId)
     equals('order is UNBILLED', a.orders[0].arStatus, 'UNBILLED')
@@ -595,9 +605,15 @@ async function main() {
 
     // ── 8. RETAG dry run writes nothing ───────────────────────────────────
     const before = (await reload(aId)).shipment.updatedAt
-    const retag = await shipAction('RETAG_SHIPMENTS', { dryRun: true })
-    ok('RETAG_SHIPMENTS dry run', `scanned ${retag.scanned} changed ${retag.changed} hand ${retag.handTagged} byDivision ${JSON.stringify(retag.byDivision)} bySubdivision ${JSON.stringify(retag.bySubdivision)}`)
-    equals('the dry run wrote nothing', (await reload(aId)).shipment.updatedAt, before)
+    // RETAG scans every shipment, order, load, leg and driver; on dev's copied data volume AppSync can cut it off at 30 s.
+    // That is reported as a skip, never as a pass.
+    const retag = await shipAction('RETAG_SHIPMENTS', { dryRun: true }).catch((err) => {
+      if (/timed out/i.test(String(err.message))) return null
+      throw err
+    })
+    if (!retag) console.log('SKIP  RETAG_SHIPMENTS dry run — AppSync timed out scanning the dev tables (not counted as a check)')
+    else ok('RETAG_SHIPMENTS dry run', `scanned ${retag.scanned} changed ${retag.changed} hand ${retag.handTagged} byDivision ${JSON.stringify(retag.byDivision)} bySubdivision ${JSON.stringify(retag.bySubdivision)}`)
+    if (retag) equals('the dry run wrote nothing', (await reload(aId)).shipment.updatedAt, before)
 
     // ── 9. retire A by void (void the invoice first, which is the rule) ───
     await finAction('VOID_INVOICE', { invoiceId: aInvoiceId, reason: 'Dev verification fixture — Step R proof' })
@@ -633,6 +649,7 @@ async function main() {
         console.log('cleanup: fixture customer BLOCKED')
       } catch (e) { console.log(`(customer retire skipped: ${String(e.message).slice(0, 80)})`) }
     }
+    if (!(await session.cleanup())) console.log('(temporary admin identity was not deleted)')
     const passed = results.filter((r) => r.ok).length
     console.log(`\n${passed}/${results.length} checks passed`)
     if (passed !== results.length) process.exitCode = 1

@@ -29,6 +29,7 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { DEMO_STAFF } from './seedDemo.mjs'
 import { verifyTrackingUi } from './lib/verifyTrackingUi.mjs'
 import { DEV_POOL, PUBLIC_API, region, cognito, gql, routerAs, mintIdentity } from './lib/devIdentity.mjs'
+import { enterCarrierCharge, findActiveRepId, releaseForReview, reviewGaps } from './lib/releaseFixture.mjs'
 
 const SHIPMENT_ACTIONS_LAMBDA = 'amplify-d3dejqzs77khq6-de-tmsshipmentactionslambda-x2KeBv2mM6Mk'
 
@@ -372,7 +373,12 @@ async function main() {
     const readyBundle = await getBundle(adminToken, readyRec.recordId)
     const readyOrder = readyBundle.orders?.[0]
     if (!readyOrder) { bad('P10 ready-to-bill order', 'missing'); return }
-    const release = await ship('READY_TO_INVOICE', { orderId: readyOrder.id, expectedUpdatedAt: readyOrder.updatedAt, review: { source: 'LOAD_REVIEW' } })
+    // The seeded ready-to-bill shipment has its POD, PO, rep and division but its carrier leg carries no cost, so the
+    // review's expense/profit requirements fail. Enter the carrier charge through the real action, then release
+    // through the review helper (it asks the server what is still missing before it sends the marker).
+    const reviewBefore = await ship('REVIEW_LOAD', { shipmentId: readyRec.recordId })
+    if (reviewGaps(reviewBefore).includes('No expense entered')) await enterCarrierCharge({ ship, shipmentId: readyRec.recordId, rateCents: 180000 })
+    const release = await releaseForReview({ ship, shipmentId: readyRec.recordId, repId: await findActiveRepId((q, v) => gql(adminToken, q, v)) })
     equals('P10 release to billing succeeds', release.bundle?.orders?.[0]?.arStatus, 'UNBILLED')
 
     // ── P11: reset demo data ──────────────────────────────────────────────────
