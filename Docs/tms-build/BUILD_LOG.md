@@ -1,5 +1,10 @@
 # TMS build log
 
+## 2026-11-05 - Demo state re-verified after P reset
+
+- devVerifyP's reset only renumbered the seeded demo shipments (now 99865-99880; was 99655-99670). Walkthrough records 99671, 99672, invoice 20006 and the MOVED intake item are intact, so no re-run was needed; walkthrough numbers updated. I re-ran RESET_DEMO_DATA with real staff ids; the demo staff accounts (created 10-30) were left, since the seed and walkthrough depend on them: nothing was deleted.
+- Spot inbox (job 175): the caller error is fixed; captured connect-simulated, suggested response, Copy response, Open in Gmail, rate intelligence, Mark sent/lost. 64 screenshots.
+
 ## 2026-11-05 - Load Review is the only gate (READY_TO_INVOICE closed) (dev tree edits; not committed or deployed by this entry)
 
 - Rule (Ryne): release to billing happens ONLY in Load Review. Closed the last door: single-shipment `READY_TO_INVOICE` (ArCard "Ready to invoice", Documents-tab strip, AR page "Release to billing") released without Load Review.

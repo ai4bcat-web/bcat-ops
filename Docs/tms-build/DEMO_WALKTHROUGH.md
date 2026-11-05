@@ -6,7 +6,7 @@ Dev only: https://dev.d3dejqzs77khq6.amplifyapp.com. Everything below was driven
 
 1. Sign in at https://dev.d3dejqzs77khq6.amplifyapp.com with your own login (the temp identities are gone). Use an ADMIN account so every nav row shows.
 2. ZZ records to click through (all labelled **ZZ DEMO**, none are real PROs): brokered shipment **99671** (https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments/shp-90460179-4789-44a3-98d0-691662ae6b48), Ivan Cartage shipment **99672** (https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments/shp-f05d7ba6-1954-4720-8007-1268426798b3), invoice **20006**, carrier **ZZ DEMO Carrier 986251**, driver **ZZ DEMO Driver 986251**, customer **ZZ DEMO Customer 1793860986251**, division **ZZ DEMO Brokerage 1793860986251**. Earlier rehearsal runs also left older ZZ divisions in the Intake tab strip and the Divisions page; ignore them.
-3. Shipments board **Demo** chip: https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments?demo=1 shows only ZZ DEMO rows. The seeded demo shipments (Settings > Demo, after Reset demo data) are 99655-99670; the in-transit ones (e.g. PRO 99666) are the best for the Tracking drawer.
+3. Shipments board **Demo** chip: https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments?demo=1 shows only ZZ DEMO rows. The seeded demo shipments (Settings > Demo, after Reset demo data) are 99865-99880; the in-transit ones (e.g. PRO 99876) are the best for the Tracking drawer.
 4. Real e-mail: the rate con, the per-load thread reply and the invoice really went through SES to **ai4bcat@gmail.com** only (allow-list). Check that inbox. Everything else is STUB: DAT/Truckstop postings, Twilio SMS (texts show NOT SENT with the exact text), Google OAuth (not connected: Spot inbox runs on a SIMULATED inbox).
 5. MyCarrierPackets is **LIVE** (Validate: CONNECTED/OK). The script only did a read-only lookup of MC 274623; **no invitation was sent**.
 
@@ -53,13 +53,22 @@ DAT / Truckstop posting (STUB), Twilio SMS and voice (STUB), Google OAuth (not c
 
 ## Known gaps and defects
 
-1. **Tracking drawer white-screens on any shipment whose thread has an inbound reply** (`e.attachments.map is not a function`). Fix written and tested (`messageAttachments` in `src/lib/shipmentThread.ts`, used by `listShipmentMessages`); **needs a frontend deploy**. Until then the demo's drawer shot is taken on the seeded in-transit shipment 99666; do not open the Tracking drawer or Tracking tab on 99671.
-2. **Spot inbox shows "Unauthorized: could not resolve caller"** for the throwaway admin in the browser, though the same login succeeds against the same action over the API. Not diagnosed: Ryne should check it with his own login (connect the simulated inbox or Add request); the suggested response / Copy / Open in Gmail / Mark won-lost / Rate intelligence-in-drawer were therefore not captured.
+1. **Tracking drawer white-screens on any shipment whose thread has an inbound reply** (`e.attachments.map is not a function`). Fix written and tested (`messageAttachments` in `src/lib/shipmentThread.ts`, used by `listShipmentMessages`); **needs a frontend deploy**. Until then the demo's drawer shot is taken on the seeded in-transit shipment 99876; do not open the Tracking drawer or Tracking tab on 99671.
+2. **(FIXED on job 175, kept for history) Spot inbox showed "Unauthorized: could not resolve caller"** for the throwaway admin in the browser, though the same login succeeds against the same action over the API. Not diagnosed: Ryne should check it with his own login (connect the simulated inbox or Add request); the suggested response / Copy / Open in Gmail / Mark won-lost / Rate intelligence-in-drawer were therefore not captured.
 3. **Dispatch gate on the four driver fields** was not exercised: the brokered load was booked with the driver fields, and the roster driver carries them for own-asset. Ladder shows the last rung ticked.
 4. The ZZ carrier cannot be set ACTIVE by a person (only MCP's completed status does), so it was created with MCP status ACCEPTABLE to stand in for the sync. The "rate con refused until the packet is complete" refusal was therefore not re-shown this run (it was on job 145).
 5. Carrier bill approve needs a complete ACH payee.
-6. Screenshot 06/10 are the same ZZ carrier profile (the "not invited" state is no longer reachable because status order changed).
+6. Screenshots 06/10 are the same ZZ carrier profile (the "not invited" state is no longer reachable because status order changed).
 
 ## Defects found, fixed, verified earlier (jobs 146-147)
 
 POD review IAM, intake PO code, check-call index key, per-load plan, customer upsert, Demo chip: all verified live on jobs 146/147 and still fine on 171 (intake-created shipment carries `PO`; "Run check call now" on a delivered load returned "The load is not moving").
+
+## Spot inbox quoter (captured on job 175, simulated inbox)
+
+Spot inbox ({'https://dev.d3dejqzs77khq6.amplifyapp.com'}/tms/rates/spot): "Not connected / Gmail sign-in is not set up" until you press **Use simulated inbox**; then **Add request** (or Load sample mail). Open a request: STUB DAT market price and suggested rate, **Rate intelligence**, a read-only **Suggested response** with **Copy response**, **Open in Gmail** and **Open in mail app** (these need a reply address on the request), **Mark sent**, **Dismiss**, and outcome buttons (**Mark lost**; "Create the quote to mark this won"). The mailbox is never sent to or drafted in by the app.
+![spot inbox connected](screenshots/demo/55a-spot-inbox-simulated-connected.png) ![drawer](screenshots/demo/56-spot-request-drawer-suggested-response.png) ![suggested](screenshots/demo/56a-spot-suggested-response-and-copy.png) ![rate intelligence](screenshots/demo/56b-spot-rate-intelligence.png) ![actions](screenshots/demo/56c-spot-open-in-gmail-mark-won-lost.png) ![after mark sent](screenshots/demo/56d-spot-after-mark-sent-outcome.png) ![copy and gmail](screenshots/demo/56e-spot-copy-response-and-open-in-gmail.png)
+
+## State check after the devVerifyP reset (job 175)
+
+Intact and unchanged: 99671, 99672, invoice 20006, the MOVED intake item, the Demo chip rows. Only the seeded demo shipments were renumbered (now 99865-99880, in-transit PRO 99876). The seeded demo staff (Demo Carrier Rep 1/2, Team Lead, Sales Rep, Tracker, Accounting) are the standing demo accounts (created 2026-10-30) and are not removed; the extra profile rows keyed by e-mail address are the seed's own rows.

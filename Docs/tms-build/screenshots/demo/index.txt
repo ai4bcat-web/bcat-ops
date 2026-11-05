@@ -18,7 +18,7 @@
 13-rate-con-signed-confirmation.png	Rate con signed confirmation
 13a-carrier-assignment-ladder-signed.png	Carrier assignment ladder, all rungs
 14-tracking-board-by-assignee.png	Load Tracking board by assignee
-15-load-tracking-drawer-summary-map.png	Tracking drawer, summary, map, panes
+15-load-tracking-drawer-summary-map.png	Tracking drawer, seeded in-transit
 16-settings-tracking-automation.png	Settings, automatic check calls, POD
 16b-settings-documents-pod-request.png	Settings, shipments and documents cards
 17-check-calls-focus.png	Check calls focus view
@@ -50,6 +50,13 @@
 53-carriers-dense-grid.png	Carriers dense grid, ZZ search
 54-settings-users-and-claims.png	Settings, Users and roles
 55-spot-inbox.png	Spot inbox (caller error, open)
+55a-spot-inbox-simulated-connected.png	Spot inbox, simulated inbox connected
+56-spot-request-drawer-suggested-response.png	Spot request drawer, top
+56a-spot-suggested-response-and-copy.png	Spot suggested response section
+56b-spot-rate-intelligence.png	Spot rate intelligence panel
+56c-spot-open-in-gmail-mark-won-lost.png	Spot actions, mark lost
+56d-spot-after-mark-sent-outcome.png	Spot outcome after mark sent
+56e-spot-copy-response-and-open-in-gmail.png	Spot Copy and Open in Gmail
 57-accounts-payable-and-ap-inbox.png	Accounts Payable with AP inbox
 58-accounts-receivable.png	Accounts Receivable
 59-feedback-page.png	Feedback page
