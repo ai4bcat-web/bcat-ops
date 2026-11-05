@@ -105,6 +105,14 @@ describe('TrucksPage trailers: active / inactive', () => {
   const rowOf = async (unit: string) => (await screen.findByText(`#${unit}`)).closest('tr') as HTMLElement
   const dialog = () => screen.findByRole('dialog')
 
+  it('opens the detail of a parked unit that has no ownership recorded (older rows) instead of blanking the page', async () => {
+    useAppStore.setState({ equipment: [trailer('t3', '503', { active: false, inactiveSince: '2026-10-01', ownership: undefined as unknown as Equipment['ownership'] })] })
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Inactive (1)' }))
+    fireEvent.click(await screen.findByText('#503'))
+    expect(await screen.findByText('Inactive from 2026-10-01')).toBeTruthy()
+  })
+
   it('lists active units under All and Trailers, and the parked ones only under Inactive', async () => {
     renderPage()
     await screen.findByText('#501')

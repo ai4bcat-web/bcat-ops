@@ -45,6 +45,9 @@ const links: TrackingLinkRecord[] = [{
   sentTo: '+13125550101', sentVia: 'SMS', openCount: 2, createdBy: 'rep@bcatcorp.com',
 }]
 
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+
 // Use importOriginal (recommended) so every export the component tree reaches is
 // defined, and only the calls we actually need to control are overridden.
 vi.mock('@/lib/apiClient', async (importOriginal) => {
@@ -53,6 +56,12 @@ vi.mock('@/lib/apiClient', async (importOriginal) => {
     ...actual,
     listCheckCallsByLoad: vi.fn(async () => events),
     listTrackingLinksByShipment: vi.fn(async () => links),
+    listLoadBreadcrumbs: vi.fn(async () => []),
+    getTmsSettings: vi.fn(async () => null),
+    getLoadRoute: vi.fn(async () => ({ encoded: null, meters: null, seconds: null, source: 'NONE', cached: false, fetchedAt: null, waypoints: [], reason: null })),
+    listUserProfiles: vi.fn(async () => []),
+    listDivisions: vi.fn(async () => []),
+    listShipmentMessages: vi.fn(async () => []),
     listTruckPositions: vi.fn(async () => []),
     listTruckConfigs: vi.fn(async () => []),
     textDriver: vi.fn(async () => ({ messageId: null, smsStatus: 'NOT_CONFIGURED', smsError: null })),

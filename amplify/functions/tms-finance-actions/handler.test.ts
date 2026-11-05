@@ -624,7 +624,11 @@ function seedSecondOrder(orderId: string, over: Row = {}): void {
  * so the clock is pinned there: a commission's trigger date comes from "now" at invoicing,
  * and the period that claims it must not depend on the day the suite happens to run.
  */
+// Send / render failures are logged with console.error; the tests that provoke one assert it.
+let errorSpy: ReturnType<typeof vi.spyOn>
+
 beforeEach(() => {
+  errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.useFakeTimers({ now: new Date('2026-10-22T12:00:00.000Z'), toFake: ['Date'] })
   store.clear()
   send.mockReset()
@@ -641,6 +645,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+  errorSpy.mockRestore()
 })
 
 // ── authorization ───────────────────────────────────────────────────────────
@@ -776,6 +781,7 @@ describe('GENERATE_INVOICE', () => {
     })
     const { invoiceId } = await generate()
     expect(table(TABLES.invoice).get(invoiceId)!.pdfKey).toBeUndefined()
+    expect(errorSpy).toHaveBeenCalledWith('[tms-finance-actions] invoice PDF failed', 'INV-000001', 'Error: S3 is down')
 
     s3Send.mockImplementation(runS3)
     const repaired = (await call('RENDER_INVOICE_PDF', { invoiceId })) as { invoice: Row }
@@ -937,6 +943,7 @@ describe('EMAIL_INVOICE', () => {
     const sent = (await call('EMAIL_INVOICE', { invoiceId })) as { emailStatus: string; emailError: string; downloads: Row[] }
     expect(sent.emailStatus).toBe('NOT_SENT')
     expect(sent.emailError).toMatch(/Access denied/)
+    expect(errorSpy).toHaveBeenCalledWith('[shipmentNotices] send failed', 'inv:INV-000001:1', 'Access denied: ses:SendEmail')
     expect(sent.downloads.length).toBeGreaterThan(0)
     // Nothing claims a send that did not happen.
     expect(table(TABLES.invoice).get(invoiceId)!.sentAt).toBeUndefined()
@@ -2010,6 +2017,7 @@ describe('SEND_REMITTANCE', () => {
       body: string
     }
     expect(sent.emailStatus).toBe('NOT_SENT')
+    expect(errorSpy).toHaveBeenCalledWith('[shipmentNotices] send failed', expect.stringMatching(/^remit:/), 'Email address is not verified')
     expect(sent.body).toContain('ACH-88120')
     expect(sent.downloads.length).toBe(1)
     expect((table(TABLES.apPayment).get(String(paid.payment.id)) as Row).remittanceSentAt).toBeUndefined()

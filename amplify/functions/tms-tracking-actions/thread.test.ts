@@ -692,10 +692,16 @@ describe('ingestShipmentMessage — Step AO position sources', () => {
 
   it('keeps the message and check call when the ping write fails', async () => {
     const store = fresh()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const putPing = vi.fn(async () => { throw new Error('ddb down') })
     const result = await ingest(makeDeps(store, { putPing }), '41.5251, -88.0817')
 
     expect(result.routed).toBe(true)
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[tms-tracking-actions] ping write failed',
+      expect.objectContaining({ err: 'Error: ddb down' }),
+    )
+    warnSpy.mockRestore()
     expect(callsOf(store).some((c) => c.type === 'LOCATION_UPDATE')).toBe(true)
   })
 

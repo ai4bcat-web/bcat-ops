@@ -358,7 +358,7 @@ async function main() {
     const incidentId = incident.event?.id
     await shipAction('RESOLVE_INCIDENT', { checkCallId: incidentId, note: 'resolved for the proof' })
     a = await reload(aId)
-    const released = await shipAction('READY_TO_INVOICE', { orderId: aOrderId, expectedUpdatedAt: a.orders[0].updatedAt })
+    const released = await shipAction('READY_TO_INVOICE', { orderId: aOrderId, expectedUpdatedAt: a.orders[0].updatedAt, review: { source: 'LOAD_REVIEW' } })
     equals('with BOL + POD + PO + own-fleet leg + no exceptions the gate opens', released.releaseGate?.ok ?? (released.bundle?.orders?.[0]?.arStatus === 'UNBILLED'), true)
     a = await reload(aId)
     equals('order is UNBILLED', a.orders[0].arStatus, 'UNBILLED')

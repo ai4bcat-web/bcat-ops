@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ConditionalCheckFailedException, type DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import type { SESv2Client } from '@aws-sdk/client-sesv2'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
@@ -367,6 +367,7 @@ describe('notifyLoadStream', () => {
   })
 
   it('keeps the rendered text on a NOT_SENT row when SES refuses, and carries on', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { db, deps } = setup({ sesFailure: 'AccessDenied: not authorized to SendEmail' })
     const summary = await notifyLoadStream(moved(loadRow(), loadRow({ status: 'IN_TRANSIT' })), deps)
 
@@ -377,6 +378,8 @@ describe('notifyLoadStream', () => {
     expect(String(notice?.subject)).toBe('S-1001 — In transit')
     expect(String(notice?.body)).toContain('BCAT Logistics Inc')
     expect(db.get(TABLES.shipment, 'ship-1')).toMatchObject({ lastNoticeStatus: 'NOT_SENT' })
+    expect(error).toHaveBeenCalledWith('[shipmentNotices] send failed', 'ms:ship-1:IN_TRANSIT', 'AccessDenied: not authorized to SendEmail')
+    error.mockRestore()
   })
 
   it('ignores a legacy load that belongs to no shipment', async () => {
@@ -400,6 +403,7 @@ describe('notifyLoadStream', () => {
   })
 
   it('finishes the batch when one record cannot be read', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { db, ses, deps } = setup()
     db.explodeOn.add('ship-bad')
     const doomed = loadRow({ id: 'load-9', shipmentId: 'ship-bad' })
@@ -413,5 +417,7 @@ describe('notifyLoadStream', () => {
     const summary = await notifyLoadStream(event, deps)
     expect(summary).toMatchObject({ records: 2, considered: 1, milestones: 1, sent: 1, failures: 1 })
     expect(ses.sent).toHaveLength(1)
+    expect(error).toHaveBeenCalledWith('[shipment-notifier] record failed', expect.objectContaining({ loadId: 'load-9' }))
+    error.mockRestore()
   })
 })

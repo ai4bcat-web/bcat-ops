@@ -302,6 +302,10 @@ function withSettingsGet(base: (cmd: MockCommand) => unknown): (cmd: MockCommand
 // ── beforeEach ────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
+  // Handlers narrate on the console (and fixtures trip the logged failure paths); keep it out of the run output.
+  vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  vi.spyOn(console, 'error').mockImplementation(() => undefined)
   send.mockReset()
   cognitoSend.mockReset()
   cognitoSend.mockRejectedValue(new Error('UserNotFoundException'))

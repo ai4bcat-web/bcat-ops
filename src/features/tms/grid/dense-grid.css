@@ -478,6 +478,12 @@
   text-align: center;
 }
 
+/* The row-action button must not set the row height: --tms-control-h (40px) made every Shipments row 41px in both densities. */
+.tms-shell .tms-dg-table tbody tr:not(.tms-dg-group):not(.tms-dg-spacer) td.tms-dg-fixed .tms-icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
 .tms-shell .tms-dense-group-by {
   display: inline-flex;
   align-items: center;

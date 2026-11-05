@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { TmsSettings } from '@/types/tms'
 
@@ -35,7 +35,15 @@ const api = vi.hoisted(() => ({
   graphqlErrorText: (e: unknown) => (e instanceof Error ? e.message : String(e)),
 }))
 vi.mock('@/lib/apiClient', () => api)
-
+vi.mock('@/lib/complianceClient', () => ({
+  listEscalationRules: vi.fn(async () => []),
+  seedDefaultEscalationRules: vi.fn(),
+  updateEscalationRule: vi.fn(),
+  ensureComplianceSettings: vi.fn(async () => ({
+    id: 'GLOBAL', portalEmailsPaused: true, escalationEmailsPaused: true, managerEmails: [],
+  })),
+  updateComplianceSettings: vi.fn(),
+}))
 import { SettingsPage } from './SettingsPage'
 import { ShipmentSettingsCard } from './ShipmentSettingsCard'
 import { ChargeCodesCard } from './ChargeCodesCard'
@@ -56,14 +64,14 @@ beforeEach(() => {
 
 describe('SettingsPage', () => {
   it('renders admin-only cards', async () => {
-    render(<MemoryRouter><SettingsPage /></MemoryRouter>)
+    await act(async () => { render(<MemoryRouter><SettingsPage /></MemoryRouter>) })
     for (const heading of ['TMS defaults', 'Customer settings', 'Carrier documents', 'Consolidation', 'Quotes & offers', 'Accounting · AP inbox']) {
       expect(screen.getAllByText(heading).length).toBeGreaterThan(0)
     }
   })
 
   it('renders the step I cards for an admin', async () => {
-    render(<MemoryRouter><SettingsPage /></MemoryRouter>)
+    await act(async () => { render(<MemoryRouter><SettingsPage /></MemoryRouter>) })
     for (const heading of ['Shipments', 'Consolidation', 'Customer settings', 'Carrier documents', 'Charge codes', 'Teams', 'Roles & pages', 'Commissions', 'Truck work phones']) {
       expect(screen.getAllByText(heading).length).toBeGreaterThan(0)
     }

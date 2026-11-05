@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+vi.mock('aws-amplify/data', () => ({ generateClient: vi.fn(() => ({ graphql: vi.fn() })) }))
 import { holdingArea, platesAndEldFor, runningOn, stopFromPatch } from './truckInactive'
 import { insuranceRangeByTruckDated, truckActiveOn } from './insuranceAllocation'
 import type { RecurringExpenseData, TruckExpenseAllocationData, ExpenseTypeData } from './apiClient'

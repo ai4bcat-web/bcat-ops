@@ -7,7 +7,7 @@
  */
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AljexImportJob, EngineRow, RunSliceResult, TableSet } from '../../../src/types/tms'
 import { ALJEX_HEADERS_V1, LAYOUT_V1 } from '../../../src/lib/aljex/layout'
 import { MemoryStore } from './engine/memoryStore'
@@ -365,8 +365,14 @@ describe('worker', () => {
     const job = await stagedJob(h)
     await h.router.dispatch('IMPORT_PLAN', { jobId: job.id, options: { target: 'REHEARSAL', targetTag: 'rh1103' } }, ADMIN)
     h.setRun(async () => { throw new Error('boom') })
-    await h.router.work({ kind: 'WORK', jobId: job.id })
-    expect(await jobOf(h, job.id)).toMatchObject({ status: 'FAILED', error: 'boom' })
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await h.router.work({ kind: 'WORK', jobId: job.id })
+      expect(await jobOf(h, job.id)).toMatchObject({ status: 'FAILED', error: 'boom' })
+      expect(error).toHaveBeenCalledWith('[tms-aljex-import] runSlice threw:', 'boom')
+    } finally {
+      error.mockRestore()
+    }
   })
 
   it('fails a chain that never ends', async () => {

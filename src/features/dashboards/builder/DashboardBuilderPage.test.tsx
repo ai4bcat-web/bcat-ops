@@ -99,7 +99,9 @@ function mount(path = '/tms/dashboard/new') {
 
 async function say(text: string) {
   fireEvent.change(screen.getByLabelText('Message'), { target: { value: text } })
-  fireEvent.click(screen.getByTestId('dash-send'))
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('dash-send'))
+  })
 }
 
 beforeEach(() => {

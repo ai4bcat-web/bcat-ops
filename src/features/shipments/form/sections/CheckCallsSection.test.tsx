@@ -6,6 +6,8 @@ import { CheckCallsSection } from './CheckCallsSection'
 import { emptyCheckCall, emptyValues } from '../model'
 import { makeCtx, makeForm, savedBundle } from './ah5TestKit'
 
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
 vi.mock('@/hooks/useLoadTracking', () => ({
   useLoadTracking: () => ({
     events: [{ id: 'e1', at: '2026-01-02T10:00:00.000Z', type: 'LOCATION_UPDATE', source: 'MANUAL', city: 'Joliet', state: 'IL', createdBy: 'x' }],

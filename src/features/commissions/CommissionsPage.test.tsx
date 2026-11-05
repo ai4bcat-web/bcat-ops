@@ -8,7 +8,7 @@
  * empty tabs over a feature nobody turned on.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { CommissionsPage } from './CommissionsPage'
 import type { CommissionRecord, TmsSettings } from '@/types/tms'
@@ -108,7 +108,7 @@ describe('CommissionsPage', () => {
     byRepMock.mockResolvedValue([])
     draw()
     await waitFor(() => expect(within(tab('To approve')).getByText('2')).toBeTruthy())
-    tab('To approve').click()
+    fireEvent.click(tab('To approve'))
     await waitFor(() => expect(screen.getByLabelText('Approve mine')).toBeTruthy())
     expect(screen.getByLabelText('Approve theirs')).toBeTruthy()
   })
@@ -121,7 +121,7 @@ describe('CommissionsPage', () => {
     ])
     draw()
     await waitFor(() => expect(within(tab('To approve')).getByText('1')).toBeTruthy())
-    tab('To approve').click()
+    fireEvent.click(tab('To approve'))
     await waitFor(() => expect(
       screen.getByText(/ran on our own trucks, so there is no carrier cost to take a margin from/),
     ).toBeTruthy())

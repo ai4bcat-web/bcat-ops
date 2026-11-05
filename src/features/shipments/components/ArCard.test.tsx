@@ -3,20 +3,24 @@
  * The AR card is the one place on a shipment that says where the money is, so these
  * tests pin the four things a reader relies on: the lit rung matches the order's rung,
  * a status that is not on the ladder does not draw one, an issued invoice shows its
- * number, balance and due date, and Generate is offered at exactly one rung.
+ * number, balance and due date, and Generate is offered at exactly one rung. Releasing to
+ * billing is not on this card: it pushes to Load Review (imported history excepted).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ArCard } from './ArCard'
 import type { ArStatus, InvoiceRecord, OrderRecord, ShipmentBundle, ShipmentRecord } from '@/types/tms'
 
 const getInvoice = vi.hoisted(() => vi.fn())
+const readyToInvoice = vi.hoisted(() => vi.fn())
+const pushToLoadReview = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/apiClient', () => ({
   getInvoice,
   getInvoicePdfUrl: vi.fn(async () => 'https://example.com/invoice.pdf'),
-  readyToInvoice: vi.fn(),
+  readyToInvoice,
+  pushToLoadReview,
   saveOrderForm: vi.fn(),
   voidInvoice: vi.fn(),
 }))
@@ -56,10 +60,11 @@ function invoice(over: Partial<InvoiceRecord> = {}): InvoiceRecord {
   }
 }
 
-function renderCard(order: Partial<OrderRecord>) {
+function renderCard(order: Partial<OrderRecord>, shipment: Partial<ShipmentRecord> = {}) {
+  const base = bundle(order)
   render(
     <MemoryRouter>
-      <ArCard bundle={bundle(order)} onReload={vi.fn(async () => {})} />
+      <ArCard bundle={{ ...base, shipment: { ...base.shipment, ...shipment } }} onReload={vi.fn(async () => {})} />
     </MemoryRouter>,
   )
 }
@@ -123,8 +128,36 @@ describe('ArCard', () => {
     expect(screen.queryByRole('button', { name: 'Generate invoice' })).toBeNull()
   })
 
-  it('offers Ready to invoice only while documents are outstanding', () => {
+  it('offers no Ready to invoice: a load with paperwork outstanding is pushed to Load Review', () => {
     renderCard({ arStatus: 'DOCS_NEEDED' })
+    expect(screen.queryByRole('button', { name: 'Ready to invoice' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Push to Load Review' })).toBeTruthy()
+  })
+
+  it('shows the per-row reasons when the push is refused and never calls READY_TO_INVOICE', async () => {
+    pushToLoadReview.mockResolvedValue({
+      results: [{ shipmentId: 'shp-1', number: 'S000001', ok: false, message: 'Missing sales rep', reasons: ['Missing sales rep', 'Missing document: POD'] }],
+    })
+    renderCard({ arStatus: 'DOCS_NEEDED' })
+    fireEvent.click(screen.getByRole('button', { name: 'Push to Load Review' }))
+    const reasons = await screen.findByTestId('push-to-load-review-reasons')
+    expect(reasons.textContent).toContain('Missing sales rep')
+    expect(reasons.textContent).toContain('Missing document: POD')
+    expect(pushToLoadReview).toHaveBeenCalledWith(['shp-1'])
+    expect(readyToInvoice).not.toHaveBeenCalled()
+  })
+
+  it('links to the load in Load Review once the push lands', async () => {
+    pushToLoadReview.mockResolvedValue({ results: [{ shipmentId: 'shp-1', number: 'S000001', ok: true, message: null }] })
+    renderCard({ arStatus: 'DOCS_NEEDED' })
+    fireEvent.click(screen.getByRole('button', { name: 'Push to Load Review' }))
+    const link = await screen.findByRole('link', { name: 'Open in Load Review' })
+    expect(link.getAttribute('href')).toBe('/tms/load-review?shipment=shp-1')
+  })
+
+  it('keeps Ready to invoice only for imported Aljex history, which has no review', () => {
+    renderCard({ arStatus: 'DOCS_NEEDED' }, { legacyImported: true })
     expect(screen.getByRole('button', { name: 'Ready to invoice' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Push to Load Review' })).toBeNull()
   })
 })

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { FakeDispatchStore } from '../_shared/dispatchFakeStore'
 import { twilioSignature } from '../_shared/twilio'
 import type { DispatchConfig } from '../_shared/dispatchConfig'
@@ -41,10 +41,17 @@ function deps(config: DispatchConfig = CONFIG) {
 }
 
 beforeEach(() => {
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  vi.spyOn(console, 'error').mockImplementation(() => {})
   store = new FakeDispatchStore()
   store.drivers = [{ id: 'd-jason', name: 'Jason Smith', phone: '(847) 555-0100', active: true, dispatcherPrimary: 'Jenny@bcatcorp.com', dispatcherBackup: 'dennis@bcatcorp.com' }]
   uploads = []; slackPosts = []; autoReplies = []
   resetCaches()
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('gate', () => {
@@ -59,6 +66,8 @@ describe('gate', () => {
     expect((await handleEvent({ ...post('/sms', {}), requestContext: { http: { method: 'GET', path: '/sms' } } }, deps())).statusCode).toBe(405)
     expect((await handleEvent(post('/nothing', {}), deps())).statusCode).toBe(404)
     expect(store.messages.size).toBe(0)
+    expect(console.warn).toHaveBeenCalledWith('[dispatch-webhook] bad secret', { route: 'sms' })
+    expect(console.warn).toHaveBeenCalledWith('[dispatch-webhook] foreign account', { route: 'sms' })
   })
   it('checks the Twilio signature when the auth token is stored', async () => {
     const cfg = { ...CONFIG, authToken: 'tok' }

@@ -14,8 +14,6 @@ import type { SmsTarget } from '../../../src/lib/workPhone'
 export interface PodReviewDeps extends ThreadDeps {
   /** Run the app-side POD legibility / page-count / signature reviewer. */
   checkPod(input: { s3Key: string; contentType: string; stops: Row[] }): Promise<PodCheckResult>
-  /** Delegate the release-to-accounting gate to the step-F owner. */
-  readyForBilling(shipmentId: string, caller: Caller): Promise<Row>
 }
 
 export interface PodCheckResult {
@@ -248,8 +246,9 @@ export async function reviewShipmentPod(deps: PodReviewDeps, input: Row, caller:
         { remove: ['reviewNote'] },
       ),
     ])
-    const billing = await deps.readyForBilling(shipmentId, caller)
-    return { documentId, status: 'ACCEPTED', readyForBillingCalled: true, billing }
+    // An accepted POD only clears the paperwork check. Release to billing happens in
+    // Load Review alone, where the load is already queued once delivered.
+    return { documentId, status: 'ACCEPTED' }
   }
 
   // Reject and possibly re-request.

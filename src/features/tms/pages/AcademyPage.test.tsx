@@ -11,6 +11,8 @@ import { AcademyPage } from './AcademyPage'
 
 import type * as ApiClient from '@/lib/apiClient'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+
 const askAcademy = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/apiClient', async () => {
   const actual = await vi.importActual<typeof ApiClient>('@/lib/apiClient')

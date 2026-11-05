@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { FIXTURE_DISTRIBUTION_ADDRESS, CARRIER_INBOX_MAIL_FIXTURES } from '../../../../src/lib/carrierInbox/fixtures'
 import type { GmailMessageMeta } from '../../../../src/lib/spot/port'
 import type { AiAgentsSettings } from '../../../../src/types/tms'
@@ -104,6 +104,7 @@ describe('carrier inbox cursor and kill switches', () => {
     const rig = makeCsRig({ mailbox: MAILBOX })
     addOffer(rig.port, 'a1')
     rig.model.answer = () => new Error('model down')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     for (let held = 1; held <= MAX_HELD_RUNS; held += 1) {
       const r = await run(rig)
       expect(r.stats.errors).toBe(1)
@@ -113,6 +114,8 @@ describe('carrier inbox cursor and kill switches', () => {
     expect(last.stats.abandoned).toBe(1)
     expect(mailboxState(rig)).toMatchObject({ held: 0, historyId: '100' })
     expect(rig.files.calls).toHaveLength(0)
+    expect(warn).toHaveBeenCalledWith('[carrier-inbox] one message failed:', expect.stringContaining('model down'))
+    warn.mockRestore()
   })
 
   it('holds the cursor when the router hand-over fails, and replays idempotently', async () => {
@@ -125,8 +128,11 @@ describe('carrier inbox cursor and kill switches', () => {
     const rig2 = makeCsRig({ mailbox: MAILBOX })
     addOffer(rig2.port, 'a1')
     rig2.files.failKeys.add(key)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const failed = await run(rig2)
     expect(failed.stats.errors).toBe(1)
+    expect(warn).toHaveBeenCalledWith('[carrier-inbox] hand-over failed:', expect.stringContaining('router throttled'))
+    warn.mockRestore()
     expect(mailboxState(rig2).historyId).toBe('50')
     rig2.files.failKeys.clear()
     const retried = await run(rig2)

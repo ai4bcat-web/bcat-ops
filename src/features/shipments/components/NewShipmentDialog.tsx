@@ -20,7 +20,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Check, CheckCircle2, Circle, FileText } from 'lucide-react'
 import { toast } from 'sonner'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DirectoryPicker } from '@/components/directory-picker/DirectoryPicker'
@@ -413,8 +413,9 @@ export function NewShipmentDialog({ open, prefill, defaultMode = 'FTL', onClose,
         onEscapeKeyDown={(e) => e.preventDefault()}
       >
         <div className="tms-new-shipment-head">
-          <h2>New shipment</h2>
+          <DialogTitle asChild><h2>New shipment</h2></DialogTitle>
         </div>
+        <DialogDescription className="sr-only">Enter the customer, stops, and freight details to create a shipment.</DialogDescription>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 8px' }}>
           {/* `handleSubmit` is bound in the handler, not during render: the submit closure

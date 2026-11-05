@@ -2,6 +2,8 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+
 // "This week" is 2026-09-27; the newest imported trips are the week before.
 const trips = [
   { id: 't1', driverId: 'drv-1', periodStart: '2026-09-13', freightAmount: 500, status: 'Completed' },

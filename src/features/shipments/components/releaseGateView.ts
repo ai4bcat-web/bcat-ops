@@ -20,3 +20,8 @@ export function releaseGateMessages(message: string): string[] | null {
   const parts = body.split(';').map((part) => part.trim()).filter(Boolean)
   return parts.length > 0 ? parts : null
 }
+
+/** Where one shipment is reviewed and released to billing. Load Review is the only way in. */
+export function loadReviewHref(shipmentId: string): string {
+  return `/tms/load-review?shipment=${encodeURIComponent(shipmentId)}`
+}

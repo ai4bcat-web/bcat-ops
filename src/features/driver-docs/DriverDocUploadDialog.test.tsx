@@ -19,6 +19,7 @@ vi.mock('@/lib/driverSubmissionsClient', async (orig) => {
   const real = await orig<typeof import('@/lib/driverSubmissionsClient')>()
   return { ...real, staffUploadDriverDoc: (i: unknown) => staffUploadDriverDoc(i) }
 })
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const { DriverDocUploadDialog } = await import('./DriverDocUploadDialog')

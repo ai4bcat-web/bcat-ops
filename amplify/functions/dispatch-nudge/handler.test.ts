@@ -26,6 +26,7 @@ describe('runNudges', () => {
 
 describe('runDwellAlerts', () => {
   it('notes a driver two hours on site in their conversation, once, and never texts them', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const store = new FakeDispatchStore()
     store.drivers = [{ id: 'd1', name: 'Eulalio Cortez', phone: '(224) 713-6044', active: true }]
     const slack = { call: async () => ({}) as never, download: async () => { throw new Error('no') }, upload: async () => { throw new Error('no') } } as unknown as SlackClient
@@ -35,6 +36,7 @@ describe('runDwellAlerts', () => {
     const loads = { onSite: async () => (stamped ? [stamped] : [load]) as never, markAlerted: async (_l: unknown, stops: unknown) => { stamped = { ...load, stops } } }
     const first = await runDwellAlerts({ store: store.asStore(), slack, now: () => now, loads })
     expect(first.flagged).toBe(1)
+    expect(log).toHaveBeenCalledWith('[dispatch-nudge] dwell alert', { driver: 'Eulalio Cortez', loadId: 'l1', stopId: 's1', minutes: 150 })
     const msgs = [...store.messages.values()]
     expect(msgs).toHaveLength(1)
     expect(msgs[0]).toMatchObject({ kind: 'STATUS', direction: 'IN' })
@@ -42,5 +44,6 @@ describe('runDwellAlerts', () => {
     const second = await runDwellAlerts({ store: store.asStore(), slack, now: () => new Date('2026-10-15T20:05:00Z'), loads })
     expect(second.flagged).toBe(0)
     expect([...store.messages.values()]).toHaveLength(1)
+    log.mockRestore()
   })
 })

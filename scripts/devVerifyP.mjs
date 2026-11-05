@@ -372,7 +372,7 @@ async function main() {
     const readyBundle = await getBundle(adminToken, readyRec.recordId)
     const readyOrder = readyBundle.orders?.[0]
     if (!readyOrder) { bad('P10 ready-to-bill order', 'missing'); return }
-    const release = await ship('READY_TO_INVOICE', { orderId: readyOrder.id, expectedUpdatedAt: readyOrder.updatedAt })
+    const release = await ship('READY_TO_INVOICE', { orderId: readyOrder.id, expectedUpdatedAt: readyOrder.updatedAt, review: { source: 'LOAD_REVIEW' } })
     equals('P10 release to billing succeeds', release.bundle?.orders?.[0]?.arStatus, 'UNBILLED')
 
     // ── P11: reset demo data ──────────────────────────────────────────────────

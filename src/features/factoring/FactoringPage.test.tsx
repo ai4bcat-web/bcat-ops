@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom/vitest'
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react'
 import { FactoringPage } from './FactoringPage'
 import type { FactoringItem } from '@/types'
 import type { OtrReadiness } from '@/lib/otrInvoice'
@@ -19,7 +19,11 @@ const assembleInvoice = vi.hoisted(() => vi.fn().mockResolvedValue({}))
 vi.mock('@/hooks/useFactoringItems', () => ({ useFactoringItems: hookMock }))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: authMock }))
 vi.mock('@/store/useAppStore', () => ({
-  useAppStore: (sel: (s: unknown) => unknown) => sel({ loads: [], updateLoad: vi.fn() }),
+  useAppStore: Object.assign(
+    (sel: (s: unknown) => unknown) => sel({ loads: [], updateLoad: vi.fn() }),
+    { setState: vi.fn() },
+  ),
+  mergeLoads: (held: unknown[], rows: unknown[]) => [...held, ...rows],
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 const uploadOtrDocsMock = vi.hoisted(() => vi.fn())
@@ -32,6 +36,18 @@ vi.mock('@/lib/otrClient', () => ({ syncOtrStatus: vi.fn(), assembleInvoice, upl
 vi.mock('@/hooks/useLoadDriverDocs', () => ({
   useLoadDriverDocs: () => ({ pods: [], ratecons: [], loading: false, error: null, refresh: vi.fn() }),
 }))
+// The queue only passes the directory through to the drawer (mocked above); a real read would hit AWS.
+// Modules pulled in by the shipment drawer build an Amplify data client at import time; give them an inert one.
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+// The page reads the TMS settings once on mount and resolves loads through the store; neither may reach AWS.
+vi.mock('@/lib/apiClient', () => ({
+  getTmsSettings: vi.fn().mockResolvedValue(null),
+  createShipment: vi.fn(),
+  getLoads: vi.fn().mockResolvedValue([]),
+  listLoadsByShipmentIds: vi.fn().mockResolvedValue([]),
+  listShipmentsByNumber: vi.fn().mockResolvedValue([]),
+}))
+vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [], locations: [] }) }))
 
 function readiness(over: Partial<OtrReadiness> = {}): OtrReadiness {
   return { ready: false, payload: {}, sources: {}, missingFields: [], missingDocuments: [], warnings: [], ...over }
@@ -47,7 +63,7 @@ function item(over: Partial<FactoringItem> = {}): FactoringItem {
   } as FactoringItem
 }
 
-function setup(items: FactoringItem[], email = 'ryne@bcatcorp.com') {
+async function setup(items: FactoringItem[], email = 'ryne@bcatcorp.com') {
   const refresh = vi.fn()
   const removeItem = vi.fn().mockResolvedValue(undefined)
   hookMock.mockReturnValue({
@@ -55,7 +71,8 @@ function setup(items: FactoringItem[], email = 'ryne@bcatcorp.com') {
     refresh, updateStatus: vi.fn(), removeItem,
   })
   authMock.mockReturnValue({ user: { email, groups: [] } })
-  render(<FactoringPage />)
+  // Let the mount-time settings read land inside act, before the test acts on the page.
+  await act(async () => { render(<FactoringPage />) })
   return { refresh, removeItem }
 }
 
@@ -67,17 +84,17 @@ function range(): string {
 beforeEach(() => vi.clearAllMocks())
 
 describe('filters', () => {
-  it('lists them in work order with Need to factor first', () => {
-    setup([item()])
+  it('lists them in work order with Need to factor first', async () => {
+    await setup([item()])
     const labels = screen.getAllByRole('tab')
       .map((b) => b.textContent?.replace(/\d+$/, '').trim())
       .filter((t) => ['Need to factor', 'Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'].includes(t ?? ''))
     expect(labels).toEqual(['Need to factor', 'Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'])
   })
 
-  it('opens on Need to factor, not All', () => {
+  it('opens on Need to factor, not All', async () => {
     // An empty queue there is the only state worth celebrating, so it is the landing view.
-    setup([
+    await setup([
       item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR' }),
       item({ id: 'b', proNumber: 'B2', status: 'FACTORED' }),
     ])
@@ -85,8 +102,8 @@ describe('filters', () => {
     expect(screen.queryByText('B2')).not.toBeInTheDocument()
   })
 
-  it('switches to another status when asked', () => {
-    setup([
+  it('switches to another status when asked', async () => {
+    await setup([
       item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR' }),
       item({ id: 'b', proNumber: 'B2', status: 'FACTORED' }),
     ])
@@ -97,8 +114,8 @@ describe('filters', () => {
 })
 
 describe('required fields on the row', () => {
-  it('counts what resolved and marks each field green or red', () => {
-    setup([item({
+  it('counts what resolved and marks each field green or red', async () => {
+    await setup([item({
       otrReadiness: readiness({
         payload: { InvoiceNo: '14538', PoNumber: 'PO-7' },
         missingFields: ['BrokerMC', 'FromZip', 'ToZip'],
@@ -112,16 +129,16 @@ describe('required fields on the row', () => {
     expect(screen.getByTitle('Destination ZIP is missing')).toBeInTheDocument()
   })
 
-  it('says so plainly when the row has never been prepared', () => {
-    setup([item()])
+  it('says so plainly when the row has never been prepared', async () => {
+    await setup([item()])
     expect(screen.getByText('Not prepared yet')).toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 })
 
 describe('documents on the row', () => {
-  it('offers an upload for each document and names what is missing', () => {
-    setup([item({
+  it('offers an upload for each document and names what is missing', async () => {
+    await setup([item({
       loadId: 'load-1',
       otrReadiness: readiness({ missingDocuments: ['POD'] }),
     })])
@@ -131,21 +148,21 @@ describe('documents on the row', () => {
     expect(screen.getByRole('button', { name: 'Replace the Rate con for PRO 14538' })).toBeInTheDocument()
   })
 
-  it('cannot upload against a row with no load resolved yet', () => {
-    setup([item({ loadId: null, otrReadiness: readiness({ missingDocuments: ['POD', 'Rate confirmation'] }) })])
+  it('cannot upload against a row with no load resolved yet', async () => {
+    await setup([item({ loadId: null, otrReadiness: readiness({ missingDocuments: ['POD', 'Rate confirmation'] }) })])
     expect(screen.getByRole('button', { name: 'Upload the POD for PRO 14538' })).toBeDisabled()
   })
 })
 
 describe('deleting a row', () => {
-  it('is offered to the people who run factoring', () => {
-    setup([item()], 'jenny@bcatcorp.com')
+  it('is offered to the people who run factoring', async () => {
+    await setup([item()], 'jenny@bcatcorp.com')
     expect(screen.getByRole('button', { name: 'Delete queue row for PRO 14538' })).toBeInTheDocument()
   })
 
-  it('is hidden from everyone else, including other admins', () => {
+  it('is hidden from everyone else, including other admins', async () => {
     // Deleting drops the record that a PRO was ever sent for factoring.
-    setup([item()], 'dennis@bcatcorp.com')
+    await setup([item()], 'dennis@bcatcorp.com')
     expect(screen.queryByRole('button', { name: /Delete queue row/ })).not.toBeInTheDocument()
   })
 })
@@ -164,21 +181,21 @@ describe('what the queue is worth', () => {
         : readiness({ payload: { InvoiceAmount: amount } }),
     })
 
-  it('shows each invoice amount on its own row', () => {
-    setup([priced('A1', 'NEED_TO_FACTOR', 1850.5)])
+  it('shows each invoice amount on its own row', async () => {
+    await setup([priced('A1', 'NEED_TO_FACTOR', 1850.5)])
     expect(within(screen.getByRole('table')).getByText('$1,850.50')).toBeInTheDocument()
   })
 
-  it('offers a way in when no rate came through, rather than a dead dash', () => {
-    setup([priced('A1', 'NEED_TO_FACTOR')])
+  it('offers a way in when no rate came through, rather than a dead dash', async () => {
+    await setup([priced('A1', 'NEED_TO_FACTOR')])
     const add = screen.getByRole('button', { name: 'Add the rate for PRO A1' })
     fireEvent.click(add)
     // It opens the row's editor, which is where the rate is typed.
     expect(screen.getByTestId('otr-panel')).toBeInTheDocument()
   })
 
-  it('totals each status separately', () => {
-    setup([
+  it('totals each status separately', async () => {
+    await setup([
       priced('A1', 'NEED_TO_FACTOR', 800),
       priced('A2', 'NEED_TO_FACTOR', 1200),
       priced('B1', 'PENDING_WITH_OTR', 2500),
@@ -191,18 +208,18 @@ describe('what the queue is worth', () => {
     expect(totals.getByLabelText(/^All: \$5,500\.00 across 4 invoices$/)).toBeInTheDocument()
   })
 
-  it('says how many rows it could not price instead of folding them in as zero', () => {
-    setup([priced('A1', 'NEED_TO_FACTOR', 800), priced('A2', 'NEED_TO_FACTOR')])
+  it('says how many rows it could not price instead of folding them in as zero', async () => {
+    await setup([priced('A1', 'NEED_TO_FACTOR', 800), priced('A2', 'NEED_TO_FACTOR')])
     const totals = within(screen.getByRole('group', { name: /What the queue is worth/ }))
     expect(totals.getByLabelText(/^Need to factor: \$800\.00 across 2 invoices$/)).toBeInTheDocument()
     expect(totals.getAllByText(/1 with no rate/).length).toBeGreaterThan(0)
   })
 
-  it('totals every status, not only the one being looked at', () => {
+  it('totals every status, not only the one being looked at', async () => {
     // The tabs filter the table; the figures are about the whole queue, which is the
     // question being asked — "how much is sitting in Pending with OTR" is not answered by
     // a number that changes when you click a tab.
-    setup([priced('B1', 'PENDING_WITH_OTR', 2500)])
+    await setup([priced('B1', 'PENDING_WITH_OTR', 2500)])
     const totals = within(screen.getByRole('group', { name: /What the queue is worth/ }))
     expect(totals.getByLabelText(/^Pending with OTR: \$2,500\.00 across 1 invoices$/)).toBeInTheDocument()
   })
@@ -218,14 +235,14 @@ describe('paging through the queue', () => {
     Array.from({ length: n }, (_, i) =>
       item({ id: `p${i}`, proNumber: `${20000 + i}`, receivedAt: `2026-10-01T${String(i % 24).padStart(2, '0')}:00:00Z` }))
 
-  it('shows ten by default', () => {
-    setup(many(25))
+  it('shows ten by default', async () => {
+    await setup(many(25))
     expect(range()).toContain('1 – 10 of 25')
     expect(screen.getByText('Page 1 of 3')).toBeInTheDocument()
   })
 
-  it('moves through the pages', () => {
-    setup(many(25))
+  it('moves through the pages', async () => {
+    await setup(many(25))
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
     expect(range()).toContain('11 – 20 of 25')
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
@@ -234,8 +251,8 @@ describe('paging through the queue', () => {
     expect(range()).toContain('11 – 20 of 25')
   })
 
-  it('offers 10, 50 and 100', () => {
-    setup(many(25))
+  it('offers 10, 50 and 100', async () => {
+    await setup(many(25))
     const select = screen.getByLabelText('Invoices per page')
     expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['10', '50', '100'])
     fireEvent.change(select, { target: { value: '50' } })
@@ -243,25 +260,25 @@ describe('paging through the queue', () => {
     expect(screen.getByText('Page 1 of 1')).toBeInTheDocument()
   })
 
-  it('goes back to the first page when the filter changes', () => {
+  it('goes back to the first page when the filter changes', async () => {
     // Otherwise a narrower filter leaves an empty table with the rows behind you.
-    setup(many(25))
+    await setup(many(25))
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
     expect(range()).toContain('11 – 20 of 25')
     fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: '2000' } })
     expect(range()).toMatch(/Showing 1 –/)
   })
 
-  it('says so plainly when a filter matches nothing', () => {
-    setup(many(3))
+  it('says so plainly when a filter matches nothing', async () => {
+    await setup(many(3))
     fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: 'zzzzzz' } })
     expect(range()).toContain('0 – 0 of 0')
   })
 })
 
 describe('invoicing by hand', () => {
-  it('flags a No Buy broker on the row and files it under Invoice manually', () => {
-    setup([
+  it('flags a No Buy broker on the row and files it under Invoice manually', async () => {
+    await setup([
       item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR' }),
       item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY', brokerCheckResult: 'NO_BUY', brokerMcChecked: '592002' }),
     ])
@@ -272,8 +289,8 @@ describe('invoicing by hand', () => {
     expect(screen.queryByText('A1')).not.toBeInTheDocument()
   })
 
-  it('opens a manual row to its checklist, not the OTR editor', () => {
-    setup([item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY' })])
+  it('opens a manual row to its checklist, not the OTR editor', async () => {
+    await setup([item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY' })])
     fireEvent.click(screen.getByRole('tab', { name: /^Invoice manually/ }))
     fireEvent.click(screen.getByRole('button', { name: /Open the steps for PRO B2/ }))
     expect(screen.getByTestId('manual-panel')).toBeInTheDocument()
@@ -285,8 +302,8 @@ describe('Pending with OTR shows what OTR says', () => {
   const pending = (id: string, otrStatus: string | null) =>
     item({ id, proNumber: id, status: 'PENDING_WITH_OTR', otrInvoiceId: `inv-${id}`, otrStatus, otrStatusSyncedAt: otrStatus ? '2026-10-12T14:05:30Z' : null })
 
-  it("flags each row with OTR's own status and breaks the tab down by it", () => {
-    setup([pending('14564', '6'), pending('14550', '8'), pending('14604', '1'), pending('14599', '1'), pending('14700', null)])
+  it("flags each row with OTR's own status and breaks the tab down by it", async () => {
+    await setup([pending('14564', '6'), pending('14550', '8'), pending('14604', '1'), pending('14599', '1'), pending('14700', null)])
     fireEvent.click(screen.getByRole('tab', { name: /Pending with OTR/ }))
     expect(screen.getByLabelText('OTR status for PRO 14564: IssueClient')).toHaveTextContent('OTR: IssueClient ⚠')
     expect(screen.getByLabelText('OTR status for PRO 14550: IssueFollowUp')).toBeInTheDocument()
@@ -297,8 +314,8 @@ describe('Pending with OTR shows what OTR says', () => {
     expect(chips).toEqual(['IssueClient ⚠1', 'IssueFollowUp ⚠1', 'Pending2', 'Awaiting OTR1'])
   })
 
-  it('narrows the tab to one OTR status and back', () => {
-    setup([pending('14564', '6'), pending('14604', '1'), pending('14700', null)])
+  it('narrows the tab to one OTR status and back', async () => {
+    await setup([pending('14564', '6'), pending('14604', '1'), pending('14700', null)])
     fireEvent.click(screen.getByRole('tab', { name: /Pending with OTR/ }))
     const group = screen.getByRole('group', { name: 'OTR status' })
     fireEvent.click(within(group).getByRole('button', { name: /IssueClient/ }))
@@ -309,23 +326,23 @@ describe('Pending with OTR shows what OTR says', () => {
     expect(screen.getByText('14604')).toBeInTheDocument()
   })
 
-  it('does not put OTR chips on rows that are not with OTR', () => {
-    setup([item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR', otrStatus: '1' })])
+  it('does not put OTR chips on rows that are not with OTR', async () => {
+    await setup([item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR', otrStatus: '1' })])
     expect(screen.queryByLabelText(/OTR status for PRO A1/)).not.toBeInTheDocument()
     expect(screen.queryByRole('group', { name: 'OTR status' })).not.toBeInTheDocument()
   })
 })
 
 describe('documents that did not reach OTR', () => {
-  it('keeps the row in Need to factor with a red flag', () => {
-    setup([item({ id: 'x', proNumber: '14564', status: 'NEED_TO_FACTOR', otrInvoiceId: '25594544', otrError: 'POD did not reach OTR.' })])
+  it('keeps the row in Need to factor with a red flag', async () => {
+    await setup([item({ id: 'x', proNumber: '14564', status: 'NEED_TO_FACTOR', otrInvoiceId: '25594544', otrError: 'POD did not reach OTR.' })])
     expect(screen.getByText('14564')).toBeInTheDocument()
     expect(screen.getByLabelText('OTR documents missing for PRO 14564')).toHaveTextContent('DOCS NOT AT OTR')
   })
 
   it('resends the documents from the row and re-reads the queue', async () => {
     uploadOtrDocsMock.mockResolvedValue({ invoiceId: '25594544', uploaded: { pod: 'k' }, documentErrors: [] })
-    const { refresh } = setup([item({ id: 'x', proNumber: '14564', status: 'NEED_TO_FACTOR', otrInvoiceId: '25594544', otrError: 'POD did not reach OTR.' })])
+    const { refresh } = await setup([item({ id: 'x', proNumber: '14564', status: 'NEED_TO_FACTOR', otrInvoiceId: '25594544', otrError: 'POD did not reach OTR.' })])
     fireEvent.click(screen.getByRole('button', { name: 'Resend documents for PRO 14564' }))
     await waitFor(() => expect(uploadOtrDocsMock).toHaveBeenCalledWith('x'))
     await waitFor(() => expect(refresh).toHaveBeenCalled())
@@ -343,8 +360,8 @@ describe('invoices sent by hand', () => {
     manualInvoicedAt: '2026-10-28T15:10:00Z',
   })
 
-  it('logs when each one went out, who sent it and where, on the Invoiced manually tab', () => {
-    setup([sentRow, item({ id: 'n1', proNumber: 'N1' })])
+  it('logs when each one went out, who sent it and where, on the Invoiced manually tab', async () => {
+    await setup([sentRow, item({ id: 'n1', proNumber: 'N1' })])
     fireEvent.click(screen.getByRole('tab', { name: /^Invoiced manually/ }))
     expect(screen.getByRole('columnheader', { name: /^Sent/i })).toBeInTheDocument()
     expect(screen.queryByRole('columnheader', { name: /^Received/i })).not.toBeInTheDocument()
@@ -353,21 +370,21 @@ describe('invoices sent by hand', () => {
     expect(cell).toHaveTextContent('to ap@broker.com')
   })
 
-  it('lists the newest send first', () => {
+  it('lists the newest send first', async () => {
     const older = item({
       id: 'h0', proNumber: 'H0', status: 'INVOICED_MANUALLY', receivedAt: '2026-10-20T10:00:00Z',
       manualSteps: { emailed: { at: '2026-10-20T12:00:00Z', by: 'dennis@bcatcorp.com' } },
       manualInvoicedAt: '2026-10-20T12:00:00Z',
     })
-    setup([older, sentRow])
+    await setup([older, sentRow])
     fireEvent.click(screen.getByRole('tab', { name: /^Invoiced manually/ }))
     const labels = screen.getAllByLabelText(/sent by hand/).map((el) => el.getAttribute('aria-label') ?? '')
     expect(labels[0]).toContain('PRO H1')
     expect(labels[1]).toContain('PRO H0')
   })
 
-  it('keeps the Received column everywhere else', () => {
-    setup([sentRow])
+  it('keeps the Received column everywhere else', async () => {
+    await setup([sentRow])
     fireEvent.click(screen.getByRole('tab', { name: /^All/ }))
     expect(screen.getByRole('columnheader', { name: /^Received/i })).toBeInTheDocument()
   })

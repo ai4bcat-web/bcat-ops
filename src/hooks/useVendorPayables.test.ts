@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { cleanup, renderHook, waitFor } from '@testing-library/react'
 import { act } from 'react'
 import {
   listVendorPayables,
@@ -87,9 +87,11 @@ describe('useVendorPayables', () => {
   })
 
   afterEach(() => {
+    cleanup()
     vi.runOnlyPendingTimers()
     vi.useRealTimers()
     vi.clearAllMocks()
+    vi.restoreAllMocks()
   })
 
   it('loads on mount and polls every 30 seconds', async () => {
@@ -269,6 +271,7 @@ describe('useVendorPayables', () => {
 
   it('surfaces fetch errors without clearing existing items', async () => {
     const initial = payable()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.mocked(listVendorPayables).mockResolvedValueOnce([initial]).mockRejectedValueOnce(new Error('network down'))
 
     const { result } = renderHook(() => useVendorPayables())
@@ -278,6 +281,8 @@ describe('useVendorPayables', () => {
     await act(async () => vi.advanceTimersByTime(30_000))
     await waitFor(() => expect(result.current.error).toBe('network down'))
     expect(result.current.items).toHaveLength(1)
+    expect(errorSpy).toHaveBeenCalledWith('[useVendorPayables] fetch error', expect.objectContaining({ message: 'network down' }))
+    errorSpy.mockRestore()
   })
 
   it('reverts to the previous value and removes pending when a mutation fails', async () => {

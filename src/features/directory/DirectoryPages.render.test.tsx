@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, cleanup, act } from '@testing-library/react'
 import type { CustomerRecord, LocationRecord, Division, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { CustomersPage, LocationsPage } from './DirectoryPages'
@@ -571,9 +571,9 @@ describe('CustomerForm', () => {
     }))
   })
 
-  it('preselects AGENT / BOTH / work-then-personal on a new customer and writes all three', () => {
+  it('preselects AGENT / BOTH / work-then-personal on a new customer and writes all three', async () => {
     const onSave = vi.fn()
-    render(<CustomerFormHarness initial={null} onSave={onSave} />)
+    await act(async () => { render(<CustomerFormHarness initial={null} onSave={onSave} />) })
     expect((screen.getByRole('radio', { name: 'AI agent tracking' }) as HTMLInputElement).checked).toBe(true)
     expect((screen.getByRole('radio', { name: 'Both' }) as HTMLInputElement).checked).toBe(true)
 
@@ -583,9 +583,9 @@ describe('CustomerForm', () => {
     }))
   })
 
-  it('round-trips a changed choice into the saved record', () => {
+  it('round-trips a changed choice into the saved record', async () => {
     const onSave = vi.fn()
-    render(<CustomerFormHarness initial={null} onSave={onSave} />)
+    await act(async () => { render(<CustomerFormHarness initial={null} onSave={onSave} />) })
     fireEvent.click(screen.getByRole('radio', { name: 'Manual' }))
     fireEvent.click(screen.getByRole('radio', { name: 'SMS to driver' }))
     fireEvent.change(screen.getByLabelText('Driver SMS goes to'), { target: { value: 'PERSONAL' } })
@@ -596,9 +596,9 @@ describe('CustomerForm', () => {
     }))
   })
 
-  it('shows "Not set" for a legacy customer and sends no tracking keys when another field is saved', () => {
+  it('shows "Not set" for a legacy customer and sends no tracking keys when another field is saved', async () => {
     const onSave = vi.fn()
-    render(<CustomerFormHarness initial={legacy} onSave={onSave} />)
+    await act(async () => { render(<CustomerFormHarness initial={legacy} onSave={onSave} />) })
     expect(screen.getByText(/Not set — follows Settings/)).toBeTruthy()
     expect(screen.getAllByRole('radio').every((r) => !(r as HTMLInputElement).checked)).toBe(true)
 
@@ -609,9 +609,9 @@ describe('CustomerForm', () => {
     expect(record).not.toHaveProperty('driverSmsTarget')
   })
 
-  it('keeps the stored choices of a customer that has them', () => {
+  it('keeps the stored choices of a customer that has them', async () => {
     const onSave = vi.fn()
-    render(<CustomerFormHarness initial={{ ...legacy, trackingMode: 'MANUAL', trackingMethod: 'EMAIL', driverSmsTarget: 'WORK_ONLY' }} onSave={onSave} />)
+    await act(async () => { render(<CustomerFormHarness initial={{ ...legacy, trackingMode: 'MANUAL', trackingMethod: 'EMAIL', driverSmsTarget: 'WORK_ONLY' }} onSave={onSave} />) })
     expect((screen.getByRole('radio', { name: 'Manual' }) as HTMLInputElement).checked).toBe(true)
     expect((screen.getByRole('radio', { name: 'E-mail thread (dispatcher)' }) as HTMLInputElement).checked).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: 'Save form' }))

@@ -4,6 +4,9 @@ import { render, screen, within, waitFor, fireEvent } from '@testing-library/rea
 import { BrowserRouter } from 'react-router-dom'
 import '@testing-library/jest-dom/vitest'
 
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+
 import { DemoPage } from './DemoPage'
 import { TmsShell } from '../TmsShell'
 import * as apiClient from '@/lib/apiClient'

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { CarrierSalesPage } from './CarrierSalesPage'
 import { needsCoverCount } from './carrierSalesQueue'
@@ -56,8 +56,10 @@ const ROWS = [
   shipment('s-4', { assignmentType: 'CARRIER', carrierName: 'Hauler', carrierMc: '123' }),
 ]
 
-function renderPage() {
-  return render(<MemoryRouter><CarrierSalesPage /></MemoryRouter>)
+async function renderPage(initialEntries = ['/']) {
+  await act(async () => {
+    render(<MemoryRouter initialEntries={initialEntries}><CarrierSalesPage /></MemoryRouter>)
+  })
 }
 
 beforeEach(() => {
@@ -70,8 +72,8 @@ beforeEach(() => {
 })
 
 describe('CarrierSalesPage', () => {
-  it('Needs cover tab count equals the badge count and every Cover action opens the Cover dialog for its own shipment', () => {
-    renderPage()
+  it('Needs cover tab count equals the badge count and every Cover action opens the Cover dialog for its own shipment', async () => {
+    await renderPage()
     const tab = screen.getByRole('tab', { name: /Needs cover/ })
     expect(within(tab).getByText(String(needsCoverCount(ROWS as never)))).toBeTruthy()
     const covers = screen.getAllByRole('button', { name: /^Cover / })
@@ -80,7 +82,7 @@ describe('CarrierSalesPage', () => {
     expect(screen.getByTestId('cover-dialog').getAttribute('data-shipment')).toBe('s-2')
   })
 
-  it('the Covered tab shows each load’s carrier-assignment rung and filters by it', () => {
+  it('the Covered tab shows each load’s carrier-assignment rung and filters by it', async () => {
     mocks.shipments.mockReturnValue({
       shipments: [
         shipment('s-5', { assignmentType: 'CARRIER', carrierName: 'Hauler', carrierMc: '1', carrierAssignmentStatus: 'ASSIGNED_SETUP_PENDING' }),
@@ -88,7 +90,7 @@ describe('CarrierSalesPage', () => {
       ],
       loading: false, error: null, refresh: vi.fn(),
     })
-    renderPage()
+    await renderPage()
     fireEvent.click(screen.getByRole('tab', { name: /Covered/ }))
     expect(screen.getAllByTestId('assignment-chip').map((c) => c.textContent)).toEqual([
       'Carrier assigned - waiting for carrier setup', 'Rate con sent',
@@ -99,31 +101,31 @@ describe('CarrierSalesPage', () => {
 
   it('has an Unmatched tab whose count is the bucket size and whose body is the bucket', async () => {
     mocks.unmatched.mockResolvedValue([{ id: 'msg:cs:1' }, { id: 'msg:cs:2' }])
-    renderPage()
+    await renderPage()
     const tab = await screen.findByRole('tab', { name: /Unmatched/ })
     await waitFor(() => expect(within(tab).getByText('2')).toBeTruthy())
-    fireEvent.click(tab)
+    await act(async () => { fireEvent.click(tab) })
     expect(screen.getByTestId('unmatched-stub').getAttribute('data-rows')).toBe('2')
   })
 
-  it('the Offers tab hands the typed load to the hub and keeps it in the URL', () => {
-    render(<MemoryRouter initialEntries={['/tms/carrier-sales?tab=offers&load=L123']}><CarrierSalesPage /></MemoryRouter>)
+  it('the Offers tab hands the typed load to the hub and keeps it in the URL', async () => {
+    await renderPage(['/tms/carrier-sales?tab=offers&load=L123'])
     expect(screen.getByTestId('hub-stub').getAttribute('data-load')).toBe('L123')
     expect(screen.getByRole('tab', { name: /Offers/ }).getAttribute('aria-selected')).toBe('true')
   })
 
-  it('without the Quotes grant the Offers tab gets no open-offers list and never reads the worklist', () => {
+  it('without the Quotes grant the Offers tab gets no open-offers list and never reads the worklist', async () => {
     mocks.hasPageAccess.mockImplementation((key: string) => key === 'loads')
-    renderPage()
-    fireEvent.click(screen.getByRole('tab', { name: /Offers/ }))
+    await renderPage()
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: /Offers/ })) })
     expect(screen.getByTestId('hub-stub').getAttribute('data-quotes')).toBe('no')
     expect(mocks.worklist).not.toHaveBeenCalled()
   })
 
-  it('launches Find & invite from Carrier Sales on every tab', () => {
-    renderPage()
+  it('launches Find & invite from Carrier Sales on every tab', async () => {
+    await renderPage()
     expect(screen.getByTestId('launch-find-invite').getAttribute('href')).toBe('/tms/carriers/find?from=carrier-sales')
-    fireEvent.click(screen.getByRole('tab', { name: /Offers/ }))
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: /Offers/ })) })
     expect(screen.getByTestId('launch-find-invite')).toBeTruthy()
   })
 
@@ -133,7 +135,7 @@ describe('CarrierSalesPage', () => {
       { id: 'post:s-1:DAT', shipmentId: 's-1', provider: 'DAT', status: 'POSTED', mode: 'LIVE' },
     ])
     mocks.unpostQuoteLoad.mockResolvedValue({ postings: [] })
-    renderPage()
+    await renderPage()
     const card = await screen.findByTestId('quote-postings')
     expect(within(card).getByText('Q7')).toBeTruthy()
     expect(within(card).getByText('STUB')).toBeTruthy()

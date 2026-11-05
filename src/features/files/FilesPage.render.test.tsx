@@ -11,8 +11,8 @@
  * helper declared below it, which typechecked and passed every test but would have
  * thrown on import in the browser.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { act, render, screen, fireEvent as rawFireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
@@ -112,13 +112,28 @@ vi.mock('@/store/useAppStore', () => {
 // the first one past its timeout under the full suite.
 const { FilesPage } = await import('./FilesPage')
 
-const renderIn = (ui: React.ReactElement) => render(<MemoryRouter>{ui}</MemoryRouter>)
+// The tree fires mount-time fetches (all mocked, resolving on a microtask). Flushing them
+// inside act keeps their state updates in scope instead of landing after the test ends.
+const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+
+// Every interaction mounts new panels that fetch; settle them inside act as well.
+const fireEvent = {
+  click: async (el: Element) => { rawFireEvent.click(el); await settle() },
+  change: async (el: Element, init: Parameters<typeof rawFireEvent.change>[1]) => { rawFireEvent.change(el, init); await settle() },
+}
+
+const renderIn = async (ui: React.ReactElement) => {
+  const result = render(<MemoryRouter>{ui}</MemoryRouter>)
+  await settle()
+  return result
+}
 
 beforeEach(() => { vi.clearAllMocks() })
+afterEach(settle)
 
 describe('Files hub renders', () => {
   it('mounts without throwing and shows both tabs', async () => {
-    renderIn(<FilesPage />)
+    await renderIn(<FilesPage />)
     expect(screen.getByText('Files')).toBeTruthy()
     expect(screen.getByText('Trucks')).toBeTruthy()
     expect(screen.getByText('Drivers')).toBeTruthy()
@@ -128,47 +143,43 @@ describe('Files hub renders', () => {
     // The driver editor is always mounted and gated on its `open` prop. When that gate
     // was lost, the "Add driver" panel rendered permanently over the Files page and
     // every other assertion here still passed, because the list was underneath it.
-    renderIn(<FilesPage />)
+    await renderIn(<FilesPage />)
     expect(screen.queryByText('Add driver')).toBeNull()
     expect(screen.queryByText('New driver')).toBeNull()
     expect(screen.queryByText('Driver Details')).toBeNull()
   })
 
   it('lists the truck with its VIN uppercased', async () => {
-    renderIn(<FilesPage />)
+    await renderIn(<FilesPage />)
     // Stored lowercase in the fixture — proves formatVin is applied at the display site.
     expect(screen.getByText('1FUJGLD55LLAA3391')).toBeTruthy()
   })
 
   it('shows each driver\'s email in the list', async () => {
-    const { fireEvent } = await import('@testing-library/react')
-    renderIn(<FilesPage />)
-    fireEvent.click(screen.getByText('Drivers'))
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
     // Phone and email share a Contact column now — ten columns were being clipped.
     expect(screen.getByText('Contact')).toBeTruthy()
     expect(screen.getByText('zak@bcatcorp.com')).toBeTruthy()
   })
 
   it('shows the driver\'s truck work phone above their personal number', async () => {
-    const { fireEvent } = await import('@testing-library/react')
-    renderIn(<FilesPage />)
-    fireEvent.click(screen.getByText('Drivers'))
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
     expect((await screen.findByTestId('driver-phone-work')).textContent).toBe('Work (truck 214): (312) 555-0142')
     expect(screen.getAllByTestId('driver-phone-personal').map((n) => n.textContent)).toContain('Personal: (847) 293-6704')
   })
 
   it('finds a driver by their email', async () => {
-    const { fireEvent } = await import('@testing-library/react')
-    renderIn(<FilesPage />)
-    fireEvent.click(screen.getByText('Drivers'))
-    fireEvent.change(screen.getByPlaceholderText(/Search name/), { target: { value: 'zak@bcat' } })
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
+    await fireEvent.change(screen.getByPlaceholderText(/Search name/), { target: { value: 'zak@bcat' } })
     expect(screen.getByText('Zak Pace')).toBeTruthy()
   })
 
   it('filters drivers by status from the tabs below the list', async () => {
-    const { fireEvent } = await import('@testing-library/react')
-    renderIn(<FilesPage />)
-    fireEvent.click(screen.getByText('Drivers'))
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
 
     // Status is a filter, not a column.
     expect(screen.queryByRole('columnheader', { name: 'Status' })).toBeNull()
@@ -177,40 +188,37 @@ describe('Files hub renders', () => {
 
     // The fixture driver has no checklist, so they're Active — filtering to Onboarding
     // should empty the list rather than showing them anyway.
-    fireEvent.click(screen.getByText('Onboarding'))
+    await fireEvent.click(screen.getByText('Onboarding'))
     expect(screen.queryByText('Zak Pace')).toBeNull()
-    fireEvent.click(screen.getByText('Active'))
+    await fireEvent.click(screen.getByText('Active'))
     expect(screen.getByText('Zak Pace')).toBeTruthy()
   })
 
   it('shows each driver\'s hire date', async () => {
-    const { fireEvent } = await import('@testing-library/react')
-    renderIn(<FilesPage />)
-    fireEvent.click(screen.getByText('Drivers'))
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
     expect(screen.getByText('Hired')).toBeTruthy()
     expect(screen.getByText('6/2/25')).toBeTruthy()
   })
 
   it('shows a dash when there is no hire date, rather than a blank cell', async () => {
-    const { fireEvent } = await import('@testing-library/react')
-    renderIn(<FilesPage />)
-    fireEvent.click(screen.getByText('Drivers'))
-    fireEvent.click(screen.getByText('Inactive'))
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
+    await fireEvent.click(screen.getByText('Inactive'))
     // Armando has no hireDate in the fixtures.
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 
   it('uses the settlement email when the driver record has none', async () => {
-    const { fireEvent } = await import('@testing-library/react')
-    renderIn(<FilesPage />)
-    fireEvent.click(screen.getByText('Drivers'))
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
     // Armando has no email on his driver record, but does on his pay setting. Asking
     // for it again would be entering the same address twice.
     expect(await screen.findByText('armando@bcatcorp.com')).toBeTruthy()
   })
 
   it('shows the admin-only Private docs control', async () => {
-    renderIn(<FilesPage />)
+    await renderIn(<FilesPage />)
     expect(screen.getByText('Private docs')).toBeTruthy()
   })
 })
@@ -224,7 +232,7 @@ describe('driver file panel renders', () => {
       const hub = useFileHub()
       return <EntityFilePanel entity={{ kind: 'DRIVER', driver }} hub={hub} onClose={() => {}} canSeePrivate />
     }
-    renderIn(<Harness />)
+    await renderIn(<Harness />)
 
     expect(screen.getByText('Zak Pace')).toBeTruthy()
     expect(screen.getByText('Onboarding')).toBeTruthy()
@@ -246,7 +254,7 @@ describe('driver file panel renders', () => {
       const hub = useFileHub()
       return <EntityFilePanel entity={{ kind: 'DRIVER', driver }} hub={hub} onClose={() => {}} canSeePrivate />
     }
-    renderIn(<Harness />)
+    await renderIn(<Harness />)
     // Catalog labels now, so match on the meaningful part rather than my earlier wording.
     expect(screen.getAllByText(/Employment application/).length).toBeGreaterThan(0)
     expect(screen.getByText('Employment agreement')).toBeTruthy()
@@ -260,7 +268,7 @@ describe('driver file panel renders', () => {
       const hub = useFileHub()
       return <EntityFilePanel entity={{ kind: 'DRIVER', driver }} hub={hub} onClose={() => {}} canSeePrivate={false} />
     }
-    renderIn(<Harness />)
+    await renderIn(<Harness />)
     expect(screen.getAllByText(/Employment application/).length).toBeGreaterThan(0)
     expect(screen.queryByText('Employment agreement')).toBeNull()
   })
@@ -272,7 +280,7 @@ describe('driver file panel renders', () => {
       const hub = useFileHub()
       return <EntityFilePanel entity={{ kind: 'TRUCK', truck }} hub={hub} onClose={() => {}} canSeePrivate />
     }
-    renderIn(<Harness />)
+    await renderIn(<Harness />)
     expect(screen.getByText('Truck 214')).toBeTruthy()
     expect(screen.getByText('VIN plate')).toBeTruthy()
     // I-PASS is Local/Box Truck only, and this truck is LOCAL.
@@ -282,24 +290,22 @@ describe('driver file panel renders', () => {
 
 describe('editing a driver opens ONE drawer', () => {
   it('closes the file panel when the editor opens, then returns to it', async () => {
-    const { fireEvent } = await import('@testing-library/react')
-    renderIn(<FilesPage />)
+    await renderIn(<FilesPage />)
 
     // Open the driver's file.
-    fireEvent.click(screen.getByText('Drivers'))
-    fireEvent.click(screen.getByText('Zak Pace'))
+    await fireEvent.click(screen.getByText('Drivers'))
+    await fireEvent.click(screen.getByText('Zak Pace'))
     expect(screen.getByText('Driver file')).toBeTruthy()
 
     // Opening the editor must dismiss the file panel — two z-50 drawers with their own
     // backdrops stacked on top of each other is what looked broken.
-    fireEvent.click(screen.getByText('Edit'))
+    await fireEvent.click(screen.getByText('Edit'))
     expect(screen.queryByText('Driver file')).toBeNull()
     // The editor now uses the same SidePanel shell: driver name as title, role beneath.
     expect(screen.getByText('Edit driver')).toBeTruthy()
   })
 
   it('shows an uploaded CDL in the compliance section, even with no expiry typed', async () => {
-    const { fireEvent } = await import('@testing-library/react')
     const { getSnapshot, applyDoc, __resetForTests } = await import('@/lib/complianceDocStore')
     __resetForTests({ loaded: true })
     applyDoc({
@@ -309,10 +315,10 @@ describe('editing a driver opens ONE drawer', () => {
     })
     expect(getSnapshot().docs).toHaveLength(1)
 
-    renderIn(<FilesPage />)
-    fireEvent.click(screen.getByText('Drivers'))
-    fireEvent.click(screen.getByText('Zak Pace'))
-    fireEvent.click(screen.getByText('Edit'))
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
+    await fireEvent.click(screen.getByText('Zak Pace'))
+    await fireEvent.click(screen.getByText('Edit'))
 
     // The record carries no expiry — reading only the record showed nothing at all.
     expect(screen.getByText('On file')).toBeTruthy()
@@ -320,7 +326,6 @@ describe('editing a driver opens ONE drawer', () => {
   })
 
   it('offers delete and replace on a document that is on file', async () => {
-    const { fireEvent } = await import('@testing-library/react')
     const { applyDoc, __resetForTests } = await import('@/lib/complianceDocStore')
     __resetForTests({ loaded: true })
     applyDoc({
@@ -329,9 +334,9 @@ describe('editing a driver opens ONE drawer', () => {
       expirationDate: '2027-03-14', createdAt: '2026-08-01', updatedAt: '2026-08-01',
     })
 
-    renderIn(<FilesPage />)
-    fireEvent.click(screen.getByText('Drivers'))
-    fireEvent.click(screen.getByText('Zak Pace'))
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
+    await fireEvent.click(screen.getByText('Zak Pace'))
 
     expect(screen.getByLabelText(/Delete CDL copy/i)).toBeTruthy()
     expect(screen.getByLabelText(/Replace CDL copy/i)).toBeTruthy()
@@ -339,11 +344,10 @@ describe('editing a driver opens ONE drawer', () => {
   })
 
   it('uses the same panel shell as the driver file', async () => {
-    const { fireEvent } = await import('@testing-library/react')
-    renderIn(<FilesPage />)
-    fireEvent.click(screen.getByText('Drivers'))
-    fireEvent.click(screen.getByText('Zak Pace'))
-    fireEvent.click(screen.getByText('Edit'))
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
+    await fireEvent.click(screen.getByText('Zak Pace'))
+    await fireEvent.click(screen.getByText('Edit'))
 
     // Same shell as the file panel — subtitle under the name, and the form sections
     // that supply the padding.
@@ -354,23 +358,21 @@ describe('editing a driver opens ONE drawer', () => {
 
 describe('inactive drivers stay reachable', () => {
   it('shows a deactivated driver under All and Inactive', async () => {
-    const { fireEvent } = await import('@testing-library/react')
-    renderIn(<FilesPage />)
-    fireEvent.click(screen.getByText('Drivers'))
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
 
     // Armando is active:false in the fixtures. The base list used to exclude
     // active===false BEFORE the status tabs ran, so he vanished from the app entirely.
     expect(screen.getByText('Armando Aranda')).toBeTruthy()
-    fireEvent.click(screen.getByText('Inactive'))
+    await fireEvent.click(screen.getByText('Inactive'))
     expect(screen.getByText('Armando Aranda')).toBeTruthy()
-    fireEvent.click(screen.getByText('Active'))
+    await fireEvent.click(screen.getByText('Active'))
     expect(screen.queryByText('Armando Aranda')).toBeNull()
   })
 })
 
 describe('document preview', () => {
   it('previews in place instead of opening a browser tab', async () => {
-    const { fireEvent } = await import('@testing-library/react')
     const { DocumentPreviewModal } = await import('./DocumentPreviewModal')
     const doc = {
       id: 'doc1', entityType: 'DRIVER' as const, entityId: 'd1', documentType: 'cdl_copy',
@@ -378,12 +380,11 @@ describe('document preview', () => {
       status: 'VALID' as const, uploadedBy: 'INTERNAL' as const,
       expirationDate: '2027-03-14', createdAt: '', updatedAt: '',
     }
-    renderIn(<DocumentPreviewModal doc={doc} getUrl={async () => 'blob:preview'} onClose={() => {}} />)
+    await renderIn(<DocumentPreviewModal doc={doc} getUrl={async () => 'blob:preview'} onClose={() => {}} />)
 
     expect(screen.getByText('CDL copy')).toBeTruthy()
     // Download stays available alongside the preview.
     expect(screen.getByText('Download')).toBeTruthy()
-    expect(fireEvent).toBeTruthy()
   })
 
   it('says so plainly for a HEIC photo rather than showing an empty frame', async () => {
@@ -393,7 +394,7 @@ describe('document preview', () => {
       title: 'Front', s3Key: 'compliance/TRUCK/t1/photo_front/1-IMG.heic',
       status: 'VALID' as const, uploadedBy: 'INTERNAL' as const, createdAt: '', updatedAt: '',
     }
-    renderIn(<DocumentPreviewModal doc={doc} getUrl={async () => 'blob:x'} onClose={() => {}} />)
+    await renderIn(<DocumentPreviewModal doc={doc} getUrl={async () => 'blob:x'} onClose={() => {}} />)
     expect(await screen.findByText(/browsers can't display/i)).toBeTruthy()
   })
 })

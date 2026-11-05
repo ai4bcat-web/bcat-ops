@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CARRIER_INBOX_CALL_FIXTURES } from '../../../../src/lib/carrierInbox/fixtures'
 import { handleCarrierCall, MAX_CALL_BODY_BYTES, sha256Hex, type FunctionUrlEvent } from './voice'
 import { makeCsRig, offerRaw, type CsRig } from './testkit'
@@ -97,7 +97,10 @@ describe('voice door', () => {
   it('files nothing and tells the agent to retry when classification fails', async () => {
     const r = rig()
     r.model.answer = () => new Error('model down')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const res = await handleCarrierCall(post({ secret: SECRET, ...CALL }), r.deps)
+    expect(warn).toHaveBeenCalledWith('[carrier-inbox] call intake failed:', 'model down')
+    warn.mockRestore()
     expect(res.statusCode).toBe(503)
     expect(parse(res)).toEqual({ ok: false, error: 'try again' })
     expect(r.files.calls).toHaveLength(0)

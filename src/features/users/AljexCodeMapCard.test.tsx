@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { AljexCodeSummary } from '@/types/tms'
 
@@ -51,7 +51,7 @@ describe('AljexCodeMapCard', () => {
       render(<AljexCodeMapCard />)
       expect(screen.getByText(/Loading codes/)).toBeInTheDocument()
       expect(api.listAljexCodes).not.toHaveBeenCalled()
-      reveal([{ isIntersecting: true }])
+      act(() => { reveal([{ isIntersecting: true }]) })
       await waitFor(() => expect(api.listAljexCodes).toHaveBeenCalledTimes(1))
       expect(await screen.findByTestId('code-map-SALES_REP')).toBeInTheDocument()
     } finally {

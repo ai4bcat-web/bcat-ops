@@ -299,7 +299,7 @@ async function run() {
     const rec = await fin('RECORD_BILL', { loadCarrierId: leg.id, billNumber: `ZZ-EMAIL-${String(stamp).slice(-6)}`, billDate: today, billedCents: 180000 })
     fixtures.bills.push(rec.bill.id)
     ib = await ship('GET_SHIPMENT_BUNDLE', { shipmentId: invShipment })
-    await ship('READY_TO_INVOICE', { orderId, expectedUpdatedAt: ib.orders[0].updatedAt })
+    await ship('READY_TO_INVOICE', { orderId, expectedUpdatedAt: ib.orders[0].updatedAt, review: { source: 'LOAD_REVIEW' } })
     const generated = await fin('GENERATE_INVOICE', { orderId })
     const invoiceId = generated.invoice.id
     ok('fixture invoice generated', `${generated.invoice.number}`)

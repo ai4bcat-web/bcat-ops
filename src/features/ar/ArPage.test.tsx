@@ -2,7 +2,7 @@
 /** The AR desk's job is to be believed. */
 import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type {
@@ -12,7 +12,6 @@ import { ageInvoices } from '@/lib/arAging'
 import { ArPage } from './ArPage'
 import { InvoiceDetail } from './InvoiceDetail'
 import * as apiClient from '@/lib/apiClient'
-import { releaseGateError } from '@/lib/releaseGate'
 
 const worklistMock = vi.hoisted(() => vi.fn())
 const openInvoicesMock = vi.hoisted(() => vi.fn())
@@ -167,7 +166,10 @@ function notice(patch: Partial<ShipmentNoticeRecord> = {}): ShipmentNoticeRecord
 
 const openSet = [invoice()]
 
-function setup(rowsByTab: Partial<Record<string, ArWorklistRow[]>> = {}) {
+/** Let the page's mocked fetches resolve inside act, so their state updates are not reported as stray. */
+const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+
+async function setup(rowsByTab: Partial<Record<string, ArWorklistRow[]>> = {}) {
   worklistMock.mockImplementation((tab: string) => ({
     rows: rowsByTab[tab] ?? [],
     loading: false,
@@ -190,7 +192,9 @@ function setup(rowsByTab: Partial<Record<string, ArWorklistRow[]>> = {}) {
     error: null,
     refresh: vi.fn().mockResolvedValue(undefined),
   })
-  return render(<MemoryRouter><ArPage /></MemoryRouter>)
+  const view = render(<MemoryRouter><ArPage /></MemoryRouter>)
+  await settle()
+  return view
 }
 
 beforeEach(() => {
@@ -200,11 +204,12 @@ beforeEach(() => {
 })
 
 describe('the AR board', () => {
-  it('offers every view of the money, and each one renders', () => {
-    setup({ UNBILLED: [worklistRow()], DOCS_NEEDED: [worklistRow({ docsMissing: ['POD'], docsReady: false })] })
+  it('offers every view of the money, and each one renders', async () => {
+    await setup({ UNBILLED: [worklistRow()], DOCS_NEEDED: [worklistRow({ docsMissing: ['POD'], docsReady: false })] })
     for (const label of ['Docs needed', 'Ready for billing', 'Unbilled', 'Unpaid', 'Paid', 'Payments & credits', 'Aging']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
       fireEvent.click(tab)
+      await settle()
       expect(tab.getAttribute('aria-selected')).toBe('true')
     }
     // The last click landed on Aging, whose body is the strip.
@@ -216,9 +221,10 @@ describe('the AR board', () => {
    * of `@/lib/arAging` — the page must not reach its own total, or the CSV and the screen
    * would disagree about what is owed.
    */
-  it('leads the aging view with the lib\'s own totals', () => {
-    setup({ UNBILLED: [worklistRow()] })
+  it('leads the aging view with the lib\'s own totals', async () => {
+    await setup({ UNBILLED: [worklistRow()] })
     fireEvent.click(screen.getByRole('tab', { name: /^Aging/ }))
+    await settle()
 
     // One open invoice of $2,500.00, eight days past a 2026-10-20 due date.
     const strip = within(screen.getByLabelText('AR totals'))
@@ -234,8 +240,8 @@ describe('the AR board', () => {
    * A row that is not billable has to say so where the decision is made. Hiding the
    * refusal behind the dialog means opening every row to find the two that are stuck.
    */
-  it('refuses to generate an order that is not ready, and says why', () => {
-    setup({
+  it('refuses to generate an order that is not ready, and says why', async () => {
+    await setup({
       UNBILLED: [worklistRow({
         docsReady: false,
         docsMissing: ['POD'],
@@ -257,33 +263,22 @@ describe('the AR board', () => {
         missing: [{ code: 'CARRIER_CHARGES_UNSETTLED', message: 'Carrier charges not settled: Acme Trucking — record the carrier bill first' }],
       },
     })
-    setup({
+    await setup({
       DOCS_NEEDED: [worklistRow({ arStatus: 'DOCS_NEEDED', docsReady: true, docsMissing: [] })],
     })
     fireEvent.click(screen.getByRole('tab', { name: /^Ready for billing/ }))
     expect(await screen.findByTestId('ready-gate-o1')).toHaveTextContent('Carrier charges not settled: Acme Trucking — record the carrier bill first')
   })
 
-  it('releases a shipment to billing through readyToInvoice', async () => {
-    setup({
+  it('opens a ready shipment in Load Review instead of releasing it from the AR page', async () => {
+    await setup({
       DOCS_NEEDED: [worklistRow({ arStatus: 'DOCS_NEEDED', docsReady: true, docsMissing: [] })],
     })
     fireEvent.click(screen.getByRole('tab', { name: /^Ready for billing/ }))
-    const button = await screen.findByRole('button', { name: 'Release to billing S-1001' })
-    fireEvent.click(button)
-    expect(apiClient.readyToInvoice).toHaveBeenCalledWith({ orderId: 'o1', expectedUpdatedAt: '2026-10-20T12:00:00.000Z' })
-  })
-
-  it('shows the gate exact sentence when release to billing is refused', async () => {
-    ;(apiClient.readyToInvoice as Mock).mockRejectedValue(
-      releaseGateError([{ code: 'REFERENCE_MISSING', detail: 'PO', message: 'Missing reference: PO number' }]),
-    )
-    setup({
-      DOCS_NEEDED: [worklistRow({ arStatus: 'DOCS_NEEDED', docsReady: true, docsMissing: [] })],
-    })
-    fireEvent.click(screen.getByRole('tab', { name: /^Ready for billing/ }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Release to billing S-1001' }))
-    expect(await screen.findByTestId('ready-release-refusal')).toHaveTextContent('Missing reference: PO number')
+    const link = await screen.findByRole('link', { name: 'Open S-1001 in Load Review' })
+    expect(link.getAttribute('href')).toMatch(/^\/tms\/load-review\?shipment=/)
+    expect(screen.queryByRole('button', { name: /Release to billing/ })).toBeNull()
+    expect(apiClient.readyToInvoice).not.toHaveBeenCalled()
   })
 })
 

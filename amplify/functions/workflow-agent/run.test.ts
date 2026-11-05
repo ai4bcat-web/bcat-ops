@@ -586,6 +586,7 @@ describe('runFor', () => {
     it('a failing intake write is swallowed: the run still ends PROPOSED with the same proposal', async () => {
       seedInboxMessage('workflow-inbox/u5/message.json', { subject: 'Tender CHICAGO, IL to DALLAS, TX', fromEmail: 'dispatch@batory.com', bodyText: 'Ref #: 778899', attachments: [] })
       modelReplies.push({ agent: 'TENDER', confidence: 'high', reason: 't' }, { ...TENDER_FILL, reference: '778899' })
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {})
       const original = send.getMockImplementation() as (cmd: MockCommand) => Promise<unknown>
       send.mockImplementation(async (cmd: MockCommand) => {
         if (cmd.__type === 'Put' && cmd.input.TableName === TABLES.intakeLoad) throw new Error('DynamoDB unavailable')
@@ -597,7 +598,9 @@ describe('runFor', () => {
         expect(run.status).toBe('COMPLETED')
         expect(run.proposalKind).toBe('TENDER')
         expect(intakeRows()).toHaveLength(0)
+        expect(error).toHaveBeenCalledWith('[workflow-agent] intake staging failed', run.id, expect.objectContaining({ message: 'DynamoDB unavailable' }))
       } finally {
+        error.mockRestore()
         send.mockImplementation(original)
       }
     })
@@ -719,12 +722,18 @@ describe('runFor', () => {
       attachments: [{ key: 'workflow-inbox/h/0-tender.docx', name: 'tender.docx', contentType: 'application/msword', size: 400 }],
     })
     modelReplies.push({})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const run = await runFor({ sourceKind: 'INBOX', sourceId: 'm8', inboxRole: 'TENDER', provider: 'INBOX', sourceKey: 'workflow-inbox/h/message.json' })
 
     expect(run.status).toBe('FAILED')
     expect(run.errorCode).toBe('UNSUPPORTED_ATTACHMENT')
     expect(run.exceptionOpen).toBe('OPEN')
+    expect(warn).toHaveBeenCalledWith('[workflow-agent] could not read', 'workflow-inbox/h/0-tender.docx', expect.stringContaining('no such key'))
+    expect(error).toHaveBeenCalledWith('[workflow-agent] run failed', run.id, 'UNSUPPORTED_ATTACHMENT', 'UNSUPPORTED_ATTACHMENT')
+    warn.mockRestore()
+    error.mockRestore()
   })
 
   it('ends a webhook IGNORED with the stored payload key on the row', async () => {
@@ -1008,8 +1017,11 @@ describe('runFor', () => {
     })
     // The model never answers, so only the budget can end this run.
     modelReplies.push({ __hang: true })
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const run = await retryRun('wf:QUOTE:slow', 2, { email: 'ryne@bcatcorp.com' }, 20)
+    expect(error).toHaveBeenCalledWith('[workflow-agent] run failed', 'wf:QUOTE:slow', 'DEADLINE', 'DEADLINE')
+    error.mockRestore()
 
     expect(run.status).toBe('FAILED')
     expect(run.errorCode).toBe('DEADLINE')

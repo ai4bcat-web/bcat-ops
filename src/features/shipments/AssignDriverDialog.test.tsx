@@ -9,6 +9,8 @@ import type { ShipmentLoad } from '@/types/tms'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
 vi.mock('@/hooks/useTruckConfigs', () => ({ useTruckConfigs: () => ({ byId: new Map() }) }))
 
 const driver = (over: Partial<Driver>): Driver => ({

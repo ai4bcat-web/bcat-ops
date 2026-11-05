@@ -16,7 +16,7 @@
  * linked to the id that came back. A failed link leaves the quote saved.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QuoteDetail } from './QuoteDetail'
@@ -159,7 +159,8 @@ function saved(id: string): { quote: QuoteRecord; pricing: QuotePricingResult } 
 beforeEach(() => vi.clearAllMocks())
 
 describe('Rate intelligence on the quote page', () => {
-  it('is shown for a saved quote with its own lane and equipment, excluding the quote itself', () => {
+  it('is shown for a saved quote with its own lane and equipment, excluding the quote itself', async () => {
+    await act(async () => {
     setup('/tms/rates/Q000007', '/tms/rates/:id', quote({
       id: 'Q000007',
       equipmentType: 'VAN',
@@ -168,34 +169,45 @@ describe('Rate intelligence on the quote page', () => {
         { id: 's2', type: 'delivery', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' }, appt: '', driverId: null, sequence: 1 },
       ] as unknown as QuoteRecord['stops'],
     }))
+    })
     const panel = screen.getByTestId('rate-intel-mock')
     expect(panel).toHaveAttribute('data-lane', 'Chicago>Dallas')
     expect(panel).toHaveAttribute('data-equipment', 'VAN')
     expect(panel).toHaveAttribute('data-exclude', 'Q000007')
   })
 
-  it('offers Push to DAT on an open quote, switched off once it is closed or a shipment', () => {
+  it('offers Push to DAT on an open quote, switched off once it is closed or a shipment', async () => {
+    await act(async () => {
     setup('/tms/rates/Q000008', '/tms/rates/:id', quote({ id: 'Q000008', status: 'QUOTED' }))
+    })
     expect(screen.getByTestId('push-dat-mock')).toHaveAttribute('data-disabled', 'false')
     cleanup()
+    await act(async () => {
     setup('/tms/rates/Q000009', '/tms/rates/:id', quote({ id: 'Q000009', status: 'LOST' }))
+    })
     expect(screen.getByTestId('push-dat-mock')).toHaveAttribute('data-disabled', 'true')
     cleanup()
+    await act(async () => {
     setup('/tms/rates/Q000010', '/tms/rates/:id', quote({ id: 'Q000010', status: 'QUOTED', shipmentId: 'S1' }))
+    })
     expect(screen.getByTestId('push-dat-mock')).toHaveAttribute('data-disabled', 'true')
   })
 })
 
 describe('quote outcome on the detail page', () => {
-  it('shows the outcome beside the status and offers Mark won / Mark lost on a quote that is out', () => {
+  it('shows the outcome beside the status and offers Mark won / Mark lost on a quote that is out', async () => {
+    await act(async () => {
     setup('/tms/rates/Q000011', '/tms/rates/:id', quote({ id: 'Q000011', status: 'QUOTED', expiresAt: new Date(Date.now() + 86_400_000).toISOString() }))
+    })
     expect(screen.getByTestId('quote-outcome')).toHaveTextContent('Pending')
     expect(screen.getByRole('button', { name: 'Mark the quote won' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Mark the quote lost' })).toBeTruthy()
   })
 
-  it('reads a converted quote as Won with no win or loss left to record', () => {
+  it('reads a converted quote as Won with no win or loss left to record', async () => {
+    await act(async () => {
     setup('/tms/rates/Q000012', '/tms/rates/:id', quote({ id: 'Q000012', status: 'WON', shipmentId: 'S1' }))
+    })
     expect(screen.getByTestId('quote-outcome')).toHaveTextContent('Won')
     expect(screen.queryByRole('button', { name: 'Mark the quote won' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Mark the quote lost' })).toBeNull()

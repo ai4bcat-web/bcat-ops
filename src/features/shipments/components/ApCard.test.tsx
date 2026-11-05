@@ -6,7 +6,7 @@
  * a TONU'd assignment still has a card, because a truck that showed up is owed.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ApCard } from './ApCard'
 import type {
@@ -80,12 +80,12 @@ function bundleOf(loadCarriers: LoadCarrierRecord[], charges: LoadChargeRecord[]
   }
 }
 
-function renderCard(loadCarriers: LoadCarrierRecord[], charges?: LoadChargeRecord[]) {
-  render(
+async function renderCard(loadCarriers: LoadCarrierRecord[], charges?: LoadChargeRecord[]) {
+  await act(async () => { render(
     <MemoryRouter>
       <ApCard bundle={bundleOf(loadCarriers, charges)} onReload={vi.fn(async () => {})} />
     </MemoryRouter>,
-  )
+  ) })
 }
 
 beforeEach(() => {
@@ -100,14 +100,14 @@ describe('ApCard', () => {
     ['IN_REVIEW', 'ap-rung-IN_REVIEW'],
     ['TO_BE_PAID', 'ap-rung-TO_BE_PAID'],
     ['PAID', 'ap-rung-PAID'],
-  ])('lights the %s rung and no other', (apStatus, litId) => {
-    renderCard([assignment({ apStatus })])
+  ])('lights the %s rung and no other', async (apStatus, litId) => {
+    await renderCard([assignment({ apStatus })])
     const lit = screen.getAllByTestId(/^ap-rung-/).filter((el) => el.getAttribute('aria-current') === 'step')
     expect(lit.map((el) => el.getAttribute('data-testid'))).toEqual([litId])
   })
 
-  it('keeps an own-fleet leg out of AP entirely: no ladder, no Record, a settlement link instead', () => {
-    renderCard([assignment({ kind: 'OWN_ASSET', carrierId: null, carrierName: null, driverId: 'drv-9', driverName: 'Rosa Vega' })])
+  it('keeps an own-fleet leg out of AP entirely: no ladder, no Record, a settlement link instead', async () => {
+    await renderCard([assignment({ kind: 'OWN_ASSET', carrierId: null, carrierName: null, driverId: 'drv-9', driverName: 'Rosa Vega' })])
 
     expect(screen.getByTestId('ap-card')).toBeTruthy()
     expect(screen.queryByTestId('ap-ladder')).toBeNull()
@@ -118,8 +118,8 @@ describe('ApCard', () => {
       .toBe('/driver-pay?week=2026-03-29&driver=drv-9')
   })
 
-  it('still cards a TONU\u2019d assignment, and drops a bounced one', () => {
-    renderCard([
+  it('still cards a TONU’d assignment, and drops a bounced one', async () => {
+    await renderCard([
       assignment({ id: 'lc-1', status: 'TONU' }),
       assignment({ id: 'lc-2', status: 'BOUNCED', carrierName: 'No Show Lines' }),
     ])
@@ -131,7 +131,7 @@ describe('ApCard', () => {
 
   it('shows the bill number, net, balance and due date once the assignment is billed', async () => {
     getCarrierBill.mockResolvedValue(bill({ paidCents: 50000, balanceCents: 150000, status: 'PARTIAL' }))
-    renderCard([assignment({ apStatus: 'TO_BE_PAID', invoiceId: 'cb:lc-1:1' })])
+    await renderCard([assignment({ apStatus: 'TO_BE_PAID', invoiceId: 'cb:lc-1:1' })])
 
     await waitFor(() => expect(screen.getByRole('link', { name: 'PT-7781' })).toBeTruthy())
     expect(screen.getByRole('link', { name: 'PT-7781' }).getAttribute('href')).toBe('/tms/invoicing/payable/bills/cb:lc-1:1')
@@ -143,27 +143,27 @@ describe('ApCard', () => {
 
   it('names the factor as the payee when the bill was factored', async () => {
     getCarrierBill.mockResolvedValue(bill({ payeeKind: 'FACTOR', remitTo: { name: 'TBS Factoring', factorName: 'TBS Factoring' } }))
-    renderCard([assignment({ apStatus: 'TO_BE_PAID', invoiceId: 'cb:lc-1:1' })])
+    await renderCard([assignment({ apStatus: 'TO_BE_PAID', invoiceId: 'cb:lc-1:1' })])
 
     await waitFor(() => expect(screen.getByTestId('ap-payee').textContent).toContain('TBS Factoring (factor)'))
   })
 
   it('offers Record bill once the directory confirms the carrier is billable', async () => {
-    renderCard([assignment()])
+    await renderCard([assignment()])
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Record bill/ }).hasAttribute('disabled')).toBe(false)
     })
   })
 
   it('refuses Record bill, with the reason, when the assignment has no carrier charges', async () => {
-    renderCard([assignment()], [])
+    await renderCard([assignment()], [])
     await waitFor(() => expect(screen.getByTestId('ap-readiness').textContent).toContain('no carrier charges'))
     expect(screen.getByRole('button', { name: /Record bill/ }).hasAttribute('disabled')).toBe(true)
   })
 
   it('swaps Record for the money actions once a bill exists', async () => {
     getCarrierBill.mockResolvedValue(bill({ status: 'IN_REVIEW' }))
-    renderCard([assignment({ apStatus: 'IN_REVIEW', invoiceId: 'cb:lc-1:1' })])
+    await renderCard([assignment({ apStatus: 'IN_REVIEW', invoiceId: 'cb:lc-1:1' })])
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Approve/ })).toBeTruthy())
     expect(screen.queryByRole('button', { name: /Record bill/ })).toBeNull()

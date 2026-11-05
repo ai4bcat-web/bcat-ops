@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { encodePolyline } from '@/lib/polyline'
 import { currentFix, type TrackingFix } from '@/lib/trackingPings'
@@ -51,11 +51,16 @@ function trackingOf(fixes: TrackingFix[]): LoadTracking {
   return { fixes, current: currentFix(fixes, NOW), nowMs: NOW, links: [] } as unknown as LoadTracking
 }
 
-function renderPanel(over: { fixes?: TrackingFix[]; links?: TrackingLinkRecord[]; b?: ShipmentBundle } = {}) {
+/** Renders inside async act so the panel's route/outline loading settles before assertions. */
+async function renderPanel(over: { fixes?: TrackingFix[]; links?: TrackingLinkRecord[]; b?: ShipmentBundle } = {}) {
   const fixes = over.fixes ?? [fix({ at: minAgo(14) })]
-  return render(
-    <TrackingMapPanel bundle={over.b ?? bundle} tracking={trackingOf(fixes)} summary={summary} links={over.links ?? []} onProviderChanged={vi.fn()} />,
-  )
+  let view!: ReturnType<typeof render>
+  await act(async () => {
+    view = render(
+      <TrackingMapPanel bundle={over.b ?? bundle} tracking={trackingOf(fixes)} summary={summary} links={over.links ?? []} onProviderChanged={vi.fn()} />,
+    )
+  })
+  return view
 }
 
 beforeEach(() => {
@@ -71,7 +76,7 @@ afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 describe('TrackingMapPanel', () => {
   it('with no browser key draws the outline and never requests the Google chunk', async () => {
-    renderPanel()
+    await renderPanel()
     const map = await screen.findByTestId('tracking-map')
     expect(map).toHaveAttribute('data-mode', 'fallback')
     expect(screen.getByTestId('tracking-map-caption')).toHaveTextContent('Google map not configured — showing outline')
@@ -82,7 +87,7 @@ describe('TrackingMapPanel', () => {
 
   it('falls back to the outline with a caption when Google rejects the key', async () => {
     vi.stubEnv('VITE_GOOGLE_MAPS_API_KEY', 'test-key-not-real')
-    renderPanel()
+    await renderPanel()
     const probe = await screen.findByTestId('fake-google')
     expect(screen.getByTestId('tracking-map')).toHaveAttribute('data-mode', 'google')
     fireEvent.click(probe)
@@ -91,7 +96,7 @@ describe('TrackingMapPanel', () => {
   })
 
   it('remembers a collapsed panel across remounts and mounts no map while collapsed', async () => {
-    const first = renderPanel()
+    const first = await renderPanel()
     await screen.findByTestId('tracking-map')
     fireEvent.click(screen.getByTestId('tracking-map-toggle'))
     expect(screen.queryByTestId('tracking-map')).not.toBeInTheDocument()
@@ -99,7 +104,7 @@ describe('TrackingMapPanel', () => {
     first.unmount()
 
     getLoadRoute.mockClear()
-    renderPanel()
+    await renderPanel()
     expect(screen.getByTestId('tracking-map-toggle')).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByTestId('tracking-map')).not.toBeInTheDocument()
     expect(getLoadRoute).not.toHaveBeenCalled()
@@ -107,36 +112,39 @@ describe('TrackingMapPanel', () => {
   })
 
   it('reads "place · age · source" and repeats the strip\'s own ETA text', async () => {
-    renderPanel()
+    await renderPanel()
     expect(screen.getByTestId('tracking-map-current')).toHaveTextContent('Joliet, IL · 14 min ago · Driver phone (link)')
     expect(screen.getByTestId('tracking-map-eta')).toHaveTextContent(`ETA ${etaText(ETA)}`)
     expect(screen.getByTestId('tracking-map-current')).toHaveAttribute('data-tone', 'fresh')
   })
 
   it('goes stale after an hour and says so', async () => {
-    renderPanel({ fixes: [fix({ at: minAgo(61) })] })
+    await renderPanel({ fixes: [fix({ at: minAgo(61) })] })
     const head = screen.getByTestId('tracking-map-current')
     expect(head).toHaveAttribute('data-tone', 'stale')
     expect(head).toHaveTextContent('stale')
   })
 
   it('shows the approximate badge only when a newer approximate fix sits beside a precise one', async () => {
-    const { unmount } = renderPanel()
+    const { unmount } = await renderPanel()
     expect(screen.queryByTestId('tracking-map-approx')).not.toBeInTheDocument()
     unmount()
-    renderPanel({ fixes: [fix({ at: minAgo(120) }), fix({ at: minAgo(5), source: 'sms-geocode', approx: true, accuracyM: 9000, place: 'Gary, IN', lat: 41.6, lng: -87.3 })] })
-    expect(screen.getByTestId('tracking-map-approx')).toBeInTheDocument()
+    await renderPanel({ fixes: [fix({ at: minAgo(120) }), fix({ at: minAgo(5), source: 'sms-geocode', approx: true, accuracyM: 9000, place: 'Gary, IN', lat: 41.6, lng: -87.3 })] })
+    // The badge in the header (the fallback map draws its own approximate circle under the same test id).
+    expect(screen.getByText('approx.')).toBeInTheDocument()
     // The marker stays on the precise fix.
     expect(screen.getByTestId('tracking-map-current')).toHaveTextContent('Joliet, IL')
   })
 
   it('says there is no position instead of drawing an empty map', async () => {
-    renderPanel({ fixes: [], b: { ...bundle, loads: [{ ...load, stops: [] } as ShipmentLoad] } })
+    // No stops, no fixes and no route from the server: nothing to draw.
+    getLoadRoute.mockResolvedValue({ encoded: null, meters: null, seconds: null, source: 'NONE', cached: false, fetchedAt: null, waypoints: [], reason: null })
+    await renderPanel({ fixes: [], b: { ...bundle, loads: [{ ...load, stops: [] } as ShipmentLoad] } })
     expect(await screen.findByTestId('tracking-map-empty')).toHaveTextContent('No position yet')
   })
 
   it('offers to start a tracking provider on a brokered leg, as STUB, and calls the API', async () => {
-    renderPanel()
+    await renderPanel()
     fireEvent.click(screen.getByTestId('tracking-map-menu'))
     const start = await screen.findByTestId('provider-start-MACROPOINT')
     expect(start).toHaveTextContent(/^Start .*tracking \(STUB\)$/)
@@ -146,15 +154,15 @@ describe('TrackingMapPanel', () => {
 
   it('shows the STUB badge and a Stop action while a provider subscription is active', async () => {
     const link = { id: 'T1', kind: 'PROVIDER_TRACK', status: 'ACTIVE', provider: 'MACROPOINT' } as TrackingLinkRecord
-    renderPanel({ links: [link] })
+    await renderPanel({ links: [link] })
     expect(screen.getByTestId('tracking-map-provider')).toHaveTextContent('· STUB')
     fireEvent.click(screen.getByTestId('tracking-map-menu'))
     fireEvent.click(screen.getByTestId('provider-stop'))
     await waitFor(() => expect(stopProviderTracking).toHaveBeenCalledWith({ linkId: 'T1' }))
   })
 
-  it('offers no provider menu on an own-fleet leg (the ELD is the source there)', () => {
-    renderPanel({ b: { ...bundle, loadCarriers: [{ ...leg, kind: 'OWN_ASSET' } as LoadCarrierRecord] } })
+  it('offers no provider menu on an own-fleet leg (the ELD is the source there)', async () => {
+    await renderPanel({ b: { ...bundle, loadCarriers: [{ ...leg, kind: 'OWN_ASSET' } as LoadCarrierRecord] } })
     expect(screen.queryByTestId('tracking-map-menu')).not.toBeInTheDocument()
   })
 })

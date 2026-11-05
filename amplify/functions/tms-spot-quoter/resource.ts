@@ -6,7 +6,8 @@ import { defineFunction, secret } from '@aws-amplify/backend'
  *
  * It reads each rep's own mailbox through the Gmail REST API, classifies mail with the
  * same Anthropic key `workflow-agent` uses, stores only mail classified as a quote
- * request, and creates REPLY DRAFTS in the rep's Gmail. No Google credential is an
+ * request. The mailbox is READ-ONLY (gmail.readonly): it never sends, drafts or
+ * modifies mail; the rep copies the suggested response. No Google credential is an
  * Amplify secret: the OAuth client id/secret come from the Integrations page (SSM) and
  * each rep's refresh token from `/bcat/gmail/<poolId>/users/<userId>`.
  */

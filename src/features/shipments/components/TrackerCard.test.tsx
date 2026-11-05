@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { toast } from 'sonner'
 import { TrackerCard } from './TrackerCard'
@@ -24,6 +24,8 @@ const shipment = (over: Partial<ShipmentRecord> = {}): ShipmentRecord => ({
   id: 'shp-1', number: 'S000001', status: 'OPEN', customerId: 'cust-1', customerName: 'Acme Freight',
   mode: 'FTL', source: 'MANUAL', createdBy: 'a@b.c', updatedBy: 'a@b.c', createdAt: WHEN, updatedAt: WHEN, ...over,
 }) as ShipmentRecord
+/** Let useStaff's profile load land inside act, before the test ends. */
+const settle = () => act(async () => {})
 const customer = { id: 'cust-1', name: 'Acme Freight', defaultTrackerId: 'trk-1' } as CustomerRecord
 
 beforeEach(() => {
@@ -33,17 +35,19 @@ beforeEach(() => {
 })
 
 describe('TrackerCard', () => {
-  it('says Unassigned when read-only with no tracker', () => {
+  it('says Unassigned when read-only with no tracker', async () => {
     render(<TrackerCard shipment={shipment()} canEdit={false} onChanged={vi.fn()} />)
     expect(screen.getByTestId('tracker-name')).toHaveTextContent('Unassigned')
     expect(screen.queryByTestId('tracker-picker')).toBeNull()
+    await settle()
   })
 
-  it('hints inheritance only while the tracker equals the customer default', () => {
+  it('hints inheritance only while the tracker equals the customer default', async () => {
     const { rerender } = render(<TrackerCard shipment={shipment({ trackerId: 'trk-1' })} customer={customer} canEdit onChanged={vi.fn()} />)
     expect(screen.getByTestId('tracker-inherited')).toHaveTextContent('Inherited from Acme Freight')
     rerender(<TrackerCard shipment={shipment({ trackerId: 'trk-2' })} customer={customer} canEdit onChanged={vi.fn()} />)
     expect(screen.queryByTestId('tracker-inherited')).toBeNull()
+    await settle()
   })
 
   it('assigns exactly this shipment, then reloads', async () => {
@@ -62,8 +66,9 @@ describe('TrackerCard', () => {
     expect(toast.success).not.toHaveBeenCalled()
   })
 
-  it('is read-only on a voided shipment even when editing is allowed', () => {
+  it('is read-only on a voided shipment even when editing is allowed', async () => {
     render(<TrackerCard shipment={shipment({ voidedAt: WHEN, trackerId: 'trk-1' })} canEdit onChanged={vi.fn()} />)
     expect(screen.queryByTestId('tracker-picker')).toBeNull()
+    await settle()
   })
 })

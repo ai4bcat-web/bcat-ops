@@ -599,7 +599,7 @@ async function main() {
       await deliver(shipmentId)
       await attachDocument(shipmentId, built.orders[0].id, loadId, 'BOL')
       await attachDocument(shipmentId, built.orders[0].id, loadId, 'POD')
-      await shipAction('READY_TO_INVOICE', { orderId: built.orders[0].id, expectedUpdatedAt: built.orders[0].updatedAt })
+      await shipAction('READY_TO_INVOICE', { orderId: built.orders[0].id, expectedUpdatedAt: built.orders[0].updatedAt, review: { source: 'LOAD_REVIEW' } })
       const issued = await finAction('GENERATE_INVOICE', { orderId: built.orders[0].id })
       return { shipmentId, loadId, orderId: built.orders[0].id, invoiceId: issued.invoice.id }
     }

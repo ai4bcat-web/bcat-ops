@@ -5,6 +5,8 @@ import { MoreInformationSection } from './MoreInformationSection'
 import { emptyValues, type ShipmentFormValues } from '../model'
 import { makeCtx, makeForm } from './ah5TestKit'
 
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
 vi.mock('@/features/shipments/components/HistorySection', () => ({ HistorySection: () => <div>history</div> }))
 
 function setup(more: Partial<ShipmentFormValues['more']> = {}, values = emptyValues()) {

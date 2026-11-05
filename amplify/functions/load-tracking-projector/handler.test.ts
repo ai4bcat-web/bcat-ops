@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import type { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import {
@@ -297,7 +297,10 @@ describe('projectLoadStream', () => {
     const { db, deps } = setup()
     // The stored row has moved on; the stream image is stale.
     db.seed(TABLES.load, pickedUp({ updatedAt: '2026-10-28T11:30:00.000Z', status: 'IN_TRANSIT', updatedBy: 'ryne@bcatcorp.com' }))
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const summary = await projectLoadStream(stamp(loadRow(), pickedUp()), deps)
+    expect(log).toHaveBeenCalledWith('[load-tracking-projector] load moved under us; skipping status', { loadId: 'load-1' })
+    log.mockRestore()
 
     expect(summary).toMatchObject({ events: 2, statusWrites: 0, conflicts: 1 })
     expect(db.get(TABLES.load, 'load-1')).toMatchObject({ updatedAt: '2026-10-28T11:30:00.000Z', updatedBy: 'ryne@bcatcorp.com' })

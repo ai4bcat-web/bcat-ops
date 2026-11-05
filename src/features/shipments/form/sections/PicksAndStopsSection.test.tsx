@@ -8,6 +8,7 @@ import { makeCtx, sliceChange } from './sectionTestKit'
 import type { FormCtx } from '../sectionProps'
 import type { FormApi } from '../sectionRegistry'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))  // clients build at import
 function stop(type: FormStop['type'], name: string, city = 'Joliet', state = 'IL'): FormStop {
   return { ...emptyStop(type), name, city, state, ready: '2026-05-01T08:00' }
 }

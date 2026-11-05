@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -7,6 +7,12 @@ import vm from 'vm';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const gsCode = readFileSync(resolve(__dirname, 'agentEmailBridge.gs'), 'utf8');
 
+beforeEach(() => {
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+afterEach(() => vi.restoreAllMocks());
 const WEBHOOK_URL = 'https://example.com/workflow-agent';
 
 // ── Test harness ─────────────────────────────────────────────────────────────
@@ -71,6 +77,7 @@ function makeBridge({
     s3ResponseIndex: 0,
     lockHeld: false,
     searchCalls: [],
+    logs: [],
   };
 
   function makeLabel(name) {
@@ -182,7 +189,10 @@ function makeBridge({
     },
   };
 
-  const ctx = loadScript({ ...mocks, ...globals });
+  // The bridge logs through console; capture it per bridge so output is inspectable, not noise.
+  const record = (level) => (...args) => { state.logs.push({ level, args }); };
+  const fakeConsole = { log: record('log'), warn: record('warn'), error: record('error') };
+  const ctx = loadScript({ ...mocks, ...globals, console: fakeConsole });
   return { ctx, state };
 }
 

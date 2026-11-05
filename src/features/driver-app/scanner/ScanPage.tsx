@@ -264,7 +264,7 @@ export default function ScanPage() {
     } finally {
       setBusy(false)
     }
-  }, [kind, pages, referenceNumber, note, resumeFromId, selectedSubmissionId, initialLoadId])
+  }, [kind, pages, referenceNumber, note, resumeFromId, selectedSubmissionId, initialLoadId, initialStopId, initialStopLabel])
 
   const reset = useCallback(() => {
     setKind(null)

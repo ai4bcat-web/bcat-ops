@@ -70,8 +70,9 @@ vi.mock('@/lib/apiClient', () => ({
 
 import { TmsLayout } from './TmsLayout'
 
-const renderAt = (path: string) =>
-  render(
+// The layout's data hooks resolve their mocked fetches after mount; settle them inside act.
+const renderAt = async (path: string) => {
+  const view = render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route element={<TmsLayout />}>
@@ -85,10 +86,20 @@ const renderAt = (path: string) =>
           <Route path="/tms/shipments/:id/edit" element={<div data-testid="page" />} />
           <Route path="/tms/tracking" element={<div data-testid="page" />} />
           <Route path="/tms/tracking/links" element={<div data-testid="page" />} />
+          <Route path="/tms/customers" element={<div data-testid="page" />} />
+          <Route path="/tms/customers/follow-ups" element={<div data-testid="page" />} />
+          <Route path="/tms/carriers" element={<div data-testid="page" />} />
+          <Route path="/tms/carriers/find" element={<div data-testid="page" />} />
+          <Route path="/tms/carriers/:id" element={<div data-testid="page" />} />
         </Route>
       </Routes>
     </MemoryRouter>,
   )
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+  return view
+}
 
 beforeEach(() => {
   // jsdom has no matchMedia; the legacy dispatch column asks whether this is a desktop.
@@ -103,8 +114,8 @@ beforeEach(() => {
 })
 
 describe('TmsLayout', () => {
-  it('runs legacy pages in fill mode, inside the host, with the dispatch column and the store', () => {
-    renderAt('/trucks')
+  it('runs legacy pages in fill mode, inside the host, with the dispatch column and the store', async () => {
+    await renderAt('/trucks')
     expect(shell.props?.fill).toBe(true)
     expect(screen.getByTestId('page').closest('.tms-legacy-host')).not.toBeNull()
     expect(screen.getByTestId('dispatch-aside')).toBeTruthy()
@@ -112,8 +123,8 @@ describe('TmsLayout', () => {
     expect(loadReferenceData).not.toHaveBeenCalled()
   })
 
-  it('leaves /tms pages in page scroll: no host, no fill, no dispatch column, no store init', () => {
-    renderAt('/tms/dashboard')
+  it('leaves /tms pages in page scroll: no host, no fill, no dispatch column, no store init', async () => {
+    await renderAt('/tms/dashboard')
     expect(shell.props?.fill).toBe(false)
     expect(screen.getByTestId('page').closest('.tms-legacy-host')).toBeNull()
     expect(screen.queryByTestId('dispatch-aside')).toBeNull()
@@ -121,29 +132,29 @@ describe('TmsLayout', () => {
     expect(loadReferenceData).toHaveBeenCalledTimes(1)
   })
 
-  it('titles a legacy page that is not a nav item', () => {
-    renderAt('/driver-view/x')
+  it('titles a legacy page that is not a nav item', async () => {
+    await renderAt('/driver-view/x')
     expect(shell.props?.breadcrumb.map((c) => c.label)).toEqual(['Owner operator pay', 'Driver app'])
   })
 
-  it('hands the shell the intake trail for an intake load', () => {
-    renderAt('/tms/shipments/intake/abc')
+  it('hands the shell the intake trail for an intake load', async () => {
+    await renderAt('/tms/shipments/intake/abc')
     expect(shell.props?.breadcrumb.map((c) => c.label)).toEqual(['Shipments', 'Intake', 'Load'])
   })
 
-  it('hands the shell the query string, so Active and All can tell the board lists apart', () => {
-    renderAt('/tms/shipments?list=all')
+  it('hands the shell the query string, so Active and All can tell the board lists apart', async () => {
+    await renderAt('/tms/shipments?list=all')
     expect(shell.props?.activeSearch).toBe('?list=all')
   })
 
-  it('runs the list pages dense (icon rail, full bleed) and every other /tms page normally', () => {
+  it('runs the list pages dense (icon rail, full bleed) and every other /tms page normally', async () => {
     for (const path of ['/tms/shipments', '/tms/shipments?list=all', '/tms/shipments/intake', '/tms/tracking', '/tms/shipments/new', '/tms/shipments/S-1/edit', '/tms/customers', '/tms/carriers', '/tms/carriers/C-1']) {
-      const view = renderAt(path)
+      const view = await renderAt(path)
       expect(shell.props?.dense, path).toBe(true)
       view.unmount()
     }
     for (const path of ['/tms/dashboard', '/tms/shipments/S-1', '/tms/shipments/intake/abc', '/tms/tracking/links', '/trucks', '/tms/customers/follow-ups', '/tms/carriers/find']) {
-      const view = renderAt(path)
+      const view = await renderAt(path)
       expect(shell.props?.dense, path).toBe(false)
       view.unmount()
     }
@@ -155,7 +166,7 @@ describe('TmsLayout', () => {
       kind: 'CHECK_CALLS', label: 'Check calls', total: 1, moreTo: '/tms/tracking?assignee=all&focus=checkcalls', moreLabel: 'Open worklist',
       items: [{ id: 'cc:s1', kind: 'CHECK_CALLS', severity: 'critical', title: 'L-1 — check call overdue', detail: 'Acme', at: null, to: '/tms/shipments/s1?tab=tracking' }],
     }]
-    renderAt('/tms/dashboard')
+    await renderAt('/tms/dashboard')
     expect(shell.props?.notificationCount).toBe(3)
     expect(screen.queryByRole('dialog')).toBeNull()
     act(() => shell.props?.onOpenNotifications?.())

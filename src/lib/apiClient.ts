@@ -8297,7 +8297,6 @@ export interface PodReviewOutcome {
   attempt: number
   /** True when the app has now asked twice and handed it to a person. */
   flaggedForHuman: boolean
-  readyForBilling: boolean
 }
 
 /** Review a POD already on the shipment: legibility, page count, signature and date. */

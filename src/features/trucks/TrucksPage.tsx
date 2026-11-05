@@ -680,7 +680,7 @@ function DetailPanel({ equip, dates, tasks, invoices, driverName, onPark }: Deta
           ['Assigned Driver', driverName || '—'],
           ['Fleet Manager',   equip.fleetManagerAssignee ? equip.fleetManagerAssignee.charAt(0).toUpperCase() + equip.fleetManagerAssignee.slice(1) : '—'],
           ['Tollway Account', equip.onTollwayAccount ? 'Yes' : 'No'],
-          ['Ownership',       equip.ownership.charAt(0).toUpperCase() + equip.ownership.slice(1)],
+          ['Ownership',       equip.ownership ? equip.ownership.charAt(0).toUpperCase() + equip.ownership.slice(1) : '—'],
           ['Mileage',         equip.mileage ? equip.mileage.toLocaleString() + ' mi' : '—'],
           ['VIN',             formatVin(equip.vin) || '—'],
         ].map(([label, value]) => (

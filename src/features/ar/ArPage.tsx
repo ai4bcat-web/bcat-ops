@@ -38,7 +38,6 @@ import { chicagoDateStr } from '@/lib/date'
 import { saveBlob } from '@/lib/download'
 import { formatCents } from '@/lib/invoiceBuild'
 import { otrStatusLabel } from '@/lib/otrInvoiceStatus'
-import { ReleaseGateList } from '@/features/shipments/components/ReleaseGateCard'
 import { AgingStrip } from './AgingStrip'
 import {
   AR_PAYMENT_KIND_LABEL, AR_PAYMENT_METHOD_LABEL, BATCH_GENERATE_LIMIT, EMPTY_UNPAID_FILTERS,
@@ -54,7 +53,7 @@ import { SendToFactorDialog } from './components/SendToFactorDialog'
 import { useReadyForBilling, type ReadyRow } from './components/useReadyForBilling'
 import { ReadyForBillingShipmentCell } from './components/ReadyForBillingShipmentCell'
 import { ReadyForBillingGateCell } from './components/ReadyForBillingGateCell'
-import { ReadyForBillingReleaseCell } from './components/ReadyForBillingReleaseCell'
+import { ReadyForBillingReviewCell } from './components/ReadyForBillingReviewCell'
 import type { FactoringItem } from '@/types'
 import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord } from '@/types/tms'
 
@@ -330,7 +329,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : tab === 'ready-for-billing' ? readyForBillingView({
       banner: errorBanner,
       ...readyBilling,
-      onReleased: closeAndRefresh,
     })
     : tab === 'unpaid' ? unpaidView({
       errorBanner,
@@ -662,31 +660,11 @@ function readyForBillingView({
   banner,
   rows,
   loading,
-  releasingId,
-  refusal,
-  release,
-  clearRefusal,
-  onReleased,
 }: {
   banner: ReactNode
   rows: ReadyRow[]
   loading: boolean
-  releasingId: string | null
-  refusal: { orderId: string; message: string } | null
-  release: (row: ArWorklistRow, onDone: () => void) => Promise<void>
-  clearRefusal: () => void
-  onReleased: () => void
 }): ListView {
-  const refusalMessages = refusal
-    ? refusal.message.startsWith('Not ready for accounting')
-      ? refusal.message
-          .replace(/^Not ready for accounting[:\s]+/, '')
-          .split(';')
-          .map((part) => part.trim())
-          .filter(Boolean)
-      : [refusal.message]
-    : null
-
   const columns: ColumnDef<ReadyRow>[] = [
     {
       key: 'shipment',
@@ -699,32 +677,14 @@ function readyForBillingView({
       render: (row) => <ReadyForBillingGateCell row={row} />,
     },
     {
-      key: 'release',
+      key: 'review',
       header: '',
-      render: (row) => (
-        <ReadyForBillingReleaseCell
-          row={row}
-          releasing={releasingId === row.orderId}
-          onRelease={() => {
-            clearRefusal()
-            void release(row, onReleased)
-          }}
-        />
-      ),
+      render: (row) => <ReadyForBillingReviewCell row={row} />,
     },
   ]
 
   return view<ReadyRow>({
-    banner: (
-      <>
-        {banner}
-        {refusalMessages && (
-          <TmsCard title="Release refused" className="tms-ready-refusal">
-            <ReleaseGateList messages={refusalMessages} testId="ready-release-refusal" />
-          </TmsCard>
-        )}
-      </>
-    ),
+    banner,
     columns,
     rows,
     rowKey: (row) => row.orderId,

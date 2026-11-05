@@ -10,6 +10,7 @@ import type * as ApiClient from '@/lib/apiClient'
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {} }) }))  // apiClient builds its client at import
 vi.mock('@/hooks/useDrivers', () => ({
   useDrivers: () => ({
     drivers: [{ id: 'drv-1', name: 'Pavel Ivanov', phone: '', active: true, fleetGroup: 'LOCAL' }],

@@ -9,6 +9,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { QueueCard } from './IntakePage'
 import type { IntakeItem } from '@/types'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: vi.fn(() => ({ graphql: vi.fn() })) }))
 const base = {
   id: 't1', source: 'IVAN_CARTAGE', status: 'NEW', subject: 'Book delivery appt — Pro# 123',
   bodyText: '', receivedAt: '2026-09-11T12:00:00Z', assignedTo: 'dennis@bcatcorp.com',

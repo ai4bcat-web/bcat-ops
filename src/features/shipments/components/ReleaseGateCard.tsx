@@ -5,6 +5,7 @@
  * card never decides anything: it asks `PREVIEW_INVOICE` — which writes nothing — for
  * the same verdict the write path will reach, and prints `releaseGate.missing[].message`
  * verbatim. The list is the checklist; "Ready for accounting" is the only other answer.
+ * It has no release button: release to billing happens in Load Review alone.
  *
  * Before delivery there is nothing to check, so the card says what it is waiting for
  * rather than inventing a list the gate has not produced.
@@ -12,7 +13,8 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { previewInvoice } from '@/lib/apiClient'
-import { isDeliveredOrLater } from './releaseGateView'
+import { Link } from 'react-router-dom'
+import { isDeliveredOrLater, loadReviewHref } from './releaseGateView'
 import { TmsCard } from '@/features/tms/kit'
 import type { ReleaseGateResult } from '@/lib/releaseGate'
 import type { OrderRecord, ShipmentRecord } from '@/types/tms'
@@ -76,6 +78,11 @@ export function ReleaseGateCard({ shipment, order }: { shipment: ShipmentRecord;
           </p>
         )}
         {gate && !gate.ok && <ReleaseGateList messages={gate.missing.map((reason) => reason.message)} />}
+        {order.arStatus === 'DOCS_NEEDED' && shipment.legacyImported !== true && (
+          <p className="tms-muted text-xs" data-testid="release-gate-load-review">
+            Release to billing happens in <Link className="underline underline-offset-2" to={loadReviewHref(shipment.id)}>Load Review</Link>.
+          </p>
+        )}
       </div>
     </TmsCard>
   )

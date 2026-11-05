@@ -12,6 +12,7 @@ const setting = {
   updatedAt: '2026-09-01T00:00:00Z', createdAt: '2026-09-01T00:00:00Z',
 }
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {} }) }))  // apiClient builds its client at import
 vi.mock('@/lib/apiClient', async (orig) => ({
   ...(await orig() as object),
   ...(await import('./loadWindowFixture')).fixtureApi,

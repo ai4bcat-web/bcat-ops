@@ -4,13 +4,14 @@
  * with an uploaded PDF, and the Cover entry on a load nobody is on.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { CarrierSection } from './components/CarrierSection'
 import type { ShipmentActions } from './useShipmentActions'
 import type { CarrierRecord, LoadCarrierRecord, ShipmentBundle } from '@/types/tms'
 import type * as ApiClient from '@/lib/apiClient'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: vi.fn(() => ({ graphql: vi.fn() })) }))
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
 if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
@@ -91,8 +92,10 @@ beforeEach(() => {
 })
 
 describe('Carrier tab ladder', () => {
-  it('a load nobody is on offers Cover, which opens the dialog for this shipment', () => {
+  it('a load nobody is on offers Cover, which opens the dialog for this shipment', async () => {
+    await act(async () => {
     render(<MemoryRouter><CarrierSection bundle={bundleOf([], { assignmentType: 'NEED_TO_COVER' })} actions={actionsOf()} /></MemoryRouter>)
+    })
     fireEvent.click(screen.getByTestId('cover-open'))
     expect(screen.getByTestId('cover-dialog').getAttribute('data-shipment')).toBe('shp-1')
   })
@@ -243,8 +246,10 @@ describe('Carrier tab ladder', () => {
     await waitFor(() => expect(actions.load.onRemoveCarrier).toHaveBeenCalledWith('lc-1', 'BOUNCED', 'GAVE_BACK', undefined, true))
   })
 
-  it('a leg with no ladder (own fleet, legacy) shows no ladder card and keeps the old Dispatch behaviour', () => {
+  it('a leg with no ladder (own fleet, legacy) shows no ladder card and keeps the old Dispatch behaviour', async () => {
+    await act(async () => {
     render(<MemoryRouter><CarrierSection bundle={bundleOf([leg({ assignmentStatus: null })])} actions={actionsOf()} /></MemoryRouter>)
+    })
     expect(screen.queryByTestId('carrier-ladder')).toBeNull()
     expect((screen.getByRole('button', { name: /^Dispatch$/ }) as HTMLButtonElement).disabled).toBe(false)
   })

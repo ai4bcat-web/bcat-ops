@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { ShipmentDetail } from './components/ShipmentDetail'
 import { normalizeDetailTab } from './components/detailTabs'
@@ -28,6 +28,7 @@ const runIntegrationStub = vi.hoisted(() => vi.fn())
 // Step K — the AI Agent tab exists only while this answers with a run.
 const listWorkflowRunsForShipment = vi.hoisted(() => vi.fn())
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {} }) }))  // apiClient builds its client at import
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers: [] }) }))
 vi.mock('@/hooks/useTrucks', () => ({ useTrucks: () => ({ equipment: [] }) }))
 vi.mock('@/features/loads/LoadDriverDocs', () => ({
@@ -211,7 +212,7 @@ function Where() {
   return <output data-testid="where">{useLocation().pathname}</output>
 }
 
-function renderDetail(
+async function renderDetail(
   status: ShipmentStatus = 'BOOKED',
   over: Partial<React.ComponentProps<typeof ShipmentDetail>> = {},
   bundleOver: Partial<ShipmentBundle> = {},
@@ -236,6 +237,8 @@ function renderDetail(
       />
     </MemoryRouter>,
   )
+  // The tabs load their data on mount; settle those reads inside act so no update lands after it.
+  await act(async () => {})
 }
 
 /*
@@ -249,15 +252,15 @@ describe('a shipment with no customer record', () => {
     createdBy: 'a@b.c', updatedBy: 'a@b.c', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   } as CustomerRecord
 
-  function renderUnresolved(status: ShipmentStatus = 'BOOKED') {
+  async function renderUnresolved(status: ShipmentStatus = 'BOOKED') {
     const base = bundle(status)
-    renderDetail(status, { customers: [directDrive] }, {
+    await renderDetail(status, { customers: [directDrive] }, {
       shipment: { ...base.shipment, customerId: null, customerName: 'DIRECT DRIVE LOGISTICS' },
     })
   }
 
   it('says what is blocked, and links a customer record when one is picked', async () => {
-    renderUnresolved()
+    await renderUnresolved()
     const note = screen.getByTestId('unresolved-customer-note').textContent ?? ''
     expect(note).toContain('DIRECT DRIVE LOGISTICS')
     expect(note).toContain('Link a customer before submitting, invoicing or factoring it')
@@ -267,21 +270,21 @@ describe('a shipment with no customer record', () => {
     await waitFor(() => expect(actions.setCustomer).toHaveBeenCalledWith('cust-9'))
   })
 
-  it('offers the same link above the draft editor, where it is commonest', () => {
-    renderUnresolved('DRAFT')
+  it('offers the same link above the draft editor, where it is commonest', async () => {
+    await renderUnresolved('DRAFT')
     expect(screen.getByTestId('unresolved-customer-note')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Link customer' })).toBeTruthy()
   })
 
-  it('says nothing of the sort once a customer is linked', () => {
-    renderDetail('BOOKED', { customers: [directDrive] })
+  it('says nothing of the sort once a customer is linked', async () => {
+    await renderDetail('BOOKED', { customers: [directDrive] })
     expect(screen.queryByTestId('unresolved-customer-note')).toBeNull()
   })
 })
 
 describe('ShipmentDetail tabs', () => {
-  it('opens on Overview with the facts the old Summary and Details tabs both held', () => {
-    renderDetail()
+  it('opens on Overview with the facts the old Summary and Details tabs both held', async () => {
+    await renderDetail()
     expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('Acme Freight')).toBeTruthy()
     expect(screen.getByText('Chicago, IL')).toBeTruthy()
@@ -292,7 +295,7 @@ describe('ShipmentDetail tabs', () => {
   })
 
   it('shows the nine tabs and switches between them', async () => {
-    renderDetail()
+    await renderDetail()
     const names = [
       'Overview', 'Stops', 'Carrier/Driver', 'Tracking', 'Documents', 'Financials', 'Invoicing', 'Carrier Pay', 'History',
     ]
@@ -315,7 +318,7 @@ describe('ShipmentDetail tabs', () => {
     await waitFor(() => expect(listAuditLogsFor).toHaveBeenCalled())
   })
 
-  it('maps the pre-merge deep links onto Overview and keeps the new keys', () => {
+  it('maps the pre-merge deep links onto Overview and keeps the new keys', async () => {
     expect(normalizeDetailTab('summary')).toBe('overview')
     expect(normalizeDetailTab('details')).toBe('overview')
     expect(normalizeDetailTab('carrierPay')).toBe('carrierPay')
@@ -323,42 +326,42 @@ describe('ShipmentDetail tabs', () => {
   })
 
   it('opens on the tab a deep link asked for', async () => {
-    renderDetail('BOOKED', { initialTab: 'carrierPay' })
+    await renderDetail('BOOKED', { initialTab: 'carrierPay' })
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Carrier Pay' }).getAttribute('aria-selected')).toBe('true'))
   })
 
-  it('never shows the user the word Order', () => {
-    renderDetail()
+  it('never shows the user the word Order', async () => {
+    await renderDetail()
     expect(screen.queryByText(/\bOrder\b/)).toBeNull()
   })
 
-  it('shows the draft editor instead of tabs while the shipment is a draft', () => {
-    renderDetail('DRAFT')
+  it('shows the draft editor instead of tabs while the shipment is a draft', async () => {
+    await renderDetail('DRAFT')
     expect(screen.queryByRole('tab', { name: 'Overview' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Submit shipment' })).toBeTruthy()
   })
 
-  it('opens the Aljex form from Edit, on a draft and on a live shipment, but not on a voided one', () => {
-    renderDetail('DRAFT')
+  it('opens the Aljex form from Edit, on a draft and on a live shipment, but not on a voided one', async () => {
+    await renderDetail('DRAFT')
     fireEvent.click(screen.getByTestId('shipment-edit'))
     expect(screen.getByTestId('where').textContent).toBe(`/tms/shipments/${bundle('BOOKED').shipment.id}/edit`)
     cleanup()
-    renderDetail('BOOKED')
+    await renderDetail('BOOKED')
     fireEvent.click(screen.getByTestId('shipment-edit'))
     expect(screen.getByTestId('where').textContent).toBe(`/tms/shipments/${bundle('BOOKED').shipment.id}/edit`)
     cleanup()
-    renderDetail('BOOKED', {}, { shipment: { ...bundle('BOOKED').shipment, voidedAt: '2026-04-04T10:00:00.000Z' } })
+    await renderDetail('BOOKED', {}, { shipment: { ...bundle('BOOKED').shipment, voidedAt: '2026-04-04T10:00:00.000Z' } })
     expect((screen.getByTestId('shipment-edit') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('refuses stop edits on a canceled shipment', async () => {
-    renderDetail('CANCELED')
+    await renderDetail('CANCELED')
     fireEvent.click(screen.getByRole('tab', { name: 'Stops' }))
     await waitFor(() => expect((screen.getByLabelText('Stop 1 actions') as HTMLButtonElement).disabled).toBe(true))
   })
 
   it('freezes stop edits on a voided shipment', async () => {
-    renderDetail('BOOKED', {}, {
+    await renderDetail('BOOKED', {}, {
       shipment: {
         ...bundle('BOOKED').shipment,
         voidedAt: '2026-04-04T10:00:00.000Z', voidedBy: 'ryne@bcatcorp.com', voidReason: 'Duplicate of S000002',
@@ -381,13 +384,13 @@ describe('the AI Agent tab', () => {
   }
 
   it('is not in the strip while no run is linked to the shipment', async () => {
-    renderDetail()
+    await renderDetail()
     await waitFor(() => expect(listWorkflowRunsForShipment).toHaveBeenCalledWith('shp-1'))
     expect(screen.queryByRole('tab', { name: 'AI Agent' })).toBeNull()
   })
 
   it('sends a ?tab=aiAgent deep link to Overview when there is no such tab', async () => {
-    renderDetail('BOOKED', { initialTab: 'aiAgent' })
+    await renderDetail('BOOKED', { initialTab: 'aiAgent' })
     await waitFor(() => expect(listWorkflowRunsForShipment).toHaveBeenCalled())
     expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.queryByTestId('shipment-workflow-runs')).toBeNull()
@@ -395,7 +398,7 @@ describe('the AI Agent tab', () => {
 
   it('lists the linked run and points it at the trace', async () => {
     listWorkflowRunsForShipment.mockResolvedValue([run])
-    renderDetail()
+    await renderDetail()
     fireEvent.click(await screen.findByRole('tab', { name: 'AI Agent' }))
     const list = await screen.findByTestId('shipment-workflow-runs')
     expect(within(list).getByRole('link', { name: 'Tender' }).getAttribute('href')).toBe('/tms/workflows/runs/wf:TENDER:9f2c')
@@ -405,7 +408,7 @@ describe('the AI Agent tab', () => {
 
   it('opens on A pressed inside the detail', async () => {
     listWorkflowRunsForShipment.mockResolvedValue([run])
-    renderDetail()
+    await renderDetail()
     await screen.findByRole('tab', { name: 'AI Agent' })
 
     fireEvent.keyDown(screen.getByTestId('shipment-detail'), { key: 'a' })
@@ -415,7 +418,7 @@ describe('the AI Agent tab', () => {
 
   it('leaves A alone while it is being typed into a field', async () => {
     listWorkflowRunsForShipment.mockResolvedValue([run])
-    renderDetail()
+    await renderDetail()
     await screen.findByRole('tab', { name: 'AI Agent' })
     fireEvent.click(screen.getByRole('tab', { name: 'Financials' }))
 
@@ -452,7 +455,7 @@ describe('Overview division card', () => {
   it('names the rule that tagged the shipment', async () => {
     listOwnershipDivisions.mockResolvedValue(divisions)
     listOwnershipRules.mockResolvedValue(rules)
-    renderDetail()
+    await renderDetail()
     await waitFor(() => expect(screen.getByTestId('division-chip').textContent).toBe('BCAT Logistics'))
     expect(screen.getByTestId('division-provenance').textContent).toBe('Tagged by rule Everything else is Brokerage')
   })
@@ -460,7 +463,7 @@ describe('Overview division card', () => {
   it('hand-tags through the client and offers the way back to the rules', async () => {
     listOwnershipDivisions.mockResolvedValue(divisions)
     listOwnershipRules.mockResolvedValue(rules)
-    renderDetail('BOOKED', { isAdmin: true })
+    await renderDetail('BOOKED', { isAdmin: true })
 
     fireEvent.click(await screen.findByRole('button', { name: 'Set tag…' }))
     fireEvent.change(await screen.findByLabelText('Division'), { target: { value: 'ASSETS' } })
@@ -475,7 +478,7 @@ describe('Overview division card', () => {
   it('offers Back to rules only on a hand tag, and clears through the client', async () => {
     listOwnershipDivisions.mockResolvedValue(divisions)
     listOwnershipRules.mockResolvedValue(rules)
-    renderDetail('BOOKED', { isAdmin: true }, {
+    await renderDetail('BOOKED', { isAdmin: true }, {
       shipment: {
         ...bundle('BOOKED').shipment,
         revTagSource: 'HAND', revRuleId: null, revDivision: 'ASSETS', revTaggedBy: 'dennis@bcatcorp.com',
@@ -490,7 +493,7 @@ describe('Overview division card', () => {
 
   it('hides the tag controls from a user who may not tag', async () => {
     listOwnershipDivisions.mockResolvedValue(divisions)
-    renderDetail()
+    await renderDetail()
     await waitFor(() => expect(screen.getByTestId('division-card')).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Set tag…' })).toBeNull()
   })
@@ -512,7 +515,7 @@ describe('Invoicing release gate', () => {
       recipients: { to: [], cc: [] },
       attachments: [],
     })
-    renderDetail('DELIVERED')
+    await renderDetail('DELIVERED')
     fireEvent.click(screen.getByRole('tab', { name: 'Invoicing' }))
 
     const list = await screen.findByTestId('release-gate-missing')
@@ -529,14 +532,14 @@ describe('Invoicing release gate', () => {
       recipients: { to: [], cc: [] },
       attachments: [],
     })
-    renderDetail('DELIVERED')
+    await renderDetail('DELIVERED')
     fireEvent.click(screen.getByRole('tab', { name: 'Invoicing' }))
 
     expect((await screen.findByTestId('release-gate-ok')).textContent).toContain('Ready for accounting')
   })
 
   it('does not run the gate before the shipment is delivered', async () => {
-    renderDetail('BOOKED')
+    await renderDetail('BOOKED')
     fireEvent.click(screen.getByRole('tab', { name: 'Invoicing' }))
     await waitFor(() => expect(screen.getByTestId('release-gate')).toBeTruthy())
     expect(previewInvoice).not.toHaveBeenCalled()
@@ -545,7 +548,7 @@ describe('Invoicing release gate', () => {
 
 describe('own fleet on the Carrier/Driver tab', () => {
   it('shows the driver, the truck, the trailer and where the load already is', async () => {
-    renderDetail('BOOKED', {}, { loadCarriers: [ownAssetLeg()] })
+    await renderDetail('BOOKED', {}, { loadCarriers: [ownAssetLeg()] })
     fireEvent.click(screen.getByRole('tab', { name: 'Carrier/Driver' }))
 
     await waitFor(() => expect(screen.getAllByText('Pavel Ivanov').length).toBeGreaterThan(0))
@@ -569,7 +572,7 @@ describe('the Overview Integrations card', () => {
   it('is hidden on a voided shipment', async () => {
     listIntegrations.mockResolvedValue([otrRow])
     const voided = { ...bundle('DELIVERED').shipment, voidedAt: '2026-02-01T00:00:00.000Z' }
-    renderDetail('DELIVERED', { isAdmin: true }, { shipment: voided })
+    await renderDetail('DELIVERED', { isAdmin: true }, { shipment: voided })
 
     await waitFor(() => expect(screen.getByText('Shipment')).toBeTruthy())
     expect(screen.queryByText('Integrations')).toBeNull()
@@ -577,7 +580,7 @@ describe('the Overview Integrations card', () => {
   })
 
   it('is not rendered — and the list is never asked for — for a non-admin viewer', async () => {
-    renderDetail('BOOKED', { isAdmin: false })
+    await renderDetail('BOOKED', { isAdmin: false })
 
     await waitFor(() => expect(screen.getByText('Shipment')).toBeTruthy())
     expect(screen.queryByText('Integrations')).toBeNull()
@@ -588,7 +591,7 @@ describe('the Overview Integrations card', () => {
 
   it('offers a live link only for a connected live provider, and a stub run for the rest', async () => {
     listIntegrations.mockResolvedValue([otrRow])
-    renderDetail('BOOKED', { isAdmin: true })
+    await renderDetail('BOOKED', { isAdmin: true })
 
     const toggle = await screen.findByRole('button', { name: 'Expand integrations' })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
@@ -617,7 +620,7 @@ describe('the Overview Integrations card', () => {
       id: 'TRUCKER_TOOLS', provider: 'TRUCKER_TOOLS', kind: 'PROVIDER' as const, mode: 'LIVE' as const,
       credentialSource: 'PAGE' as const, status: 'CONNECTED' as const, health: 'UNABLE_TO_VERIFY' as const,
     }])
-    renderDetail('BOOKED', { isAdmin: true })
+    await renderDetail('BOOKED', { isAdmin: true })
 
     fireEvent.click(await screen.findByRole('button', { name: 'Expand integrations' }))
 
@@ -634,7 +637,7 @@ describe('the Overview Integrations card', () => {
     runIntegrationStub.mockResolvedValue({
       row: {}, result: { mode: 'STUB', ok: true, message: 'STUB — DAT post was not sent', externalId: 'stub:1' },
     })
-    renderDetail('BOOKED', { isAdmin: true })
+    await renderDetail('BOOKED', { isAdmin: true })
 
     fireEvent.click(await screen.findByRole('button', { name: 'Expand integrations' }))
     const dat = screen.getAllByText('DAT')[0].closest('li') as HTMLElement
@@ -653,7 +656,7 @@ describe('a refused "Move load to… Delivered"', () => {
     actions.load.onSetLoadStatus = vi.fn(async () => { throw new Error(refusal) })
     const toastSpy = vi.spyOn(toast, 'error')
     const base = bundle('IN_TRANSIT')
-    renderDetail('IN_TRANSIT', {}, { loads: [{ ...base.loads[0], status: 'IN_TRANSIT', assignmentType: 'OWN_ASSET' }] })
+    await renderDetail('IN_TRANSIT', {}, { loads: [{ ...base.loads[0], status: 'IN_TRANSIT', assignmentType: 'OWN_ASSET' }] })
 
     fireEvent.pointerDown(screen.getByLabelText('Load actions'), { button: 0, pointerType: 'mouse' })
     fireEvent.click(await screen.findByText('DEL'))

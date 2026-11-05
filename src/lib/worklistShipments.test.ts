@@ -21,6 +21,12 @@ vi.mock('@/lib/boardData', () => ({
   },
 }))
 
+// The by-id reader is the unit under test; the real client would build an Amplify client on import.
+vi.mock('@/lib/apiClient', () => ({
+  listDocsNeededOrdersNarrow: vi.fn(),
+  listOrdersByShipmentIds: vi.fn(),
+}))
+
 import { loadWorklistShipments } from './worklistShipments'
 
 const shipment = (id: string, patch: Partial<ShipmentRecord> = {}): ShipmentRecord => ({

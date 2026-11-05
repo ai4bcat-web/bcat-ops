@@ -214,14 +214,14 @@ function DriverAppLink() {
     }
   }
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginTop: 6 }}>
+    <span style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginTop: 6 }}>
       <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Driver app</span>
       <code style={{ fontSize: 12, color: 'var(--tms-text)', background: 'var(--tms-bg)', padding: '2px 6px', borderRadius: 6 }}>{DRIVER_PORTAL_URL}</code>
       <button onClick={() => { void copyUrl() }} title="Copy the driver app URL" aria-label="Copy the driver app URL"
         style={{ display: 'flex', alignItems: 'center', gap: 5, height: 24, padding: '0 8px', borderRadius: 7, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text-2)', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit' }}>
         <Copy size={12} /> Copy
       </button>
-    </div>
+    </span>
   )
 }
 

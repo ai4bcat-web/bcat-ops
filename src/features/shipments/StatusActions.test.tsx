@@ -17,6 +17,7 @@ import { ShipmentRowActions, type ShipmentActionHandlers } from './components/St
 import { AuthContext } from '@/hooks/useAuth'
 import type { ShipmentRecord } from '@/types/tms'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
 vi.mock('./components/VoidShipmentDialog', () => ({
   VoidShipmentDialog: ({ shipment }: { shipment: { number: string } }) => (
     <div data-testid="void-dialog">Void {shipment.number}</div>

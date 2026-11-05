@@ -5,6 +5,7 @@ import { renderHook } from '@testing-library/react'
 import { FIXTURE_NOW } from './loadWindowFixture'
 import { computeFullAndWindowed } from './loadWindowRun'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: vi.fn(() => ({ graphql: vi.fn() })) }))
 vi.mock('@/lib/apiClient', async (orig) => ({
   ...(await orig() as object),
   ...(await import('./loadWindowFixture')).fixtureApi,

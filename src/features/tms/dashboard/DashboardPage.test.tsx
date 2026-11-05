@@ -1,6 +1,17 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
+import { cloneElement, type ReactElement } from 'react'
+
+// jsdom has no layout; give the real charts a fixed size instead of measuring 0x0.
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: ReactElement<{ width?: number; height?: number }> }) =>
+      cloneElement(children, { width: 600, height: 300 }),
+  }
+})
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { LaneRateSampleRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
 import { DashboardPage } from './DashboardPage'

@@ -10,6 +10,7 @@ import type {
   LoadCarrierRecord, ShipmentBundle, ShipmentLoad, ShipmentMessageRecord, ShipmentRecord,
 } from '@/types/tms'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: vi.fn(() => ({ graphql: vi.fn() })) }))
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
 
@@ -25,6 +26,7 @@ vi.mock('@/lib/apiClient', async () => {
     getTmsSettings: vi.fn(async () => ({ defaultCheckCallPlan: null })),
     listDivisions: vi.fn(async () => []),
     listCheckCallsByLoad: vi.fn(async () => []),
+    listLoadBreadcrumbs: vi.fn(async () => []),
     listTrackingLinksByShipment: vi.fn(async () => []),
     listTruckPositions: vi.fn(async () => []),
     listTruckConfigs: vi.fn(async () => []),

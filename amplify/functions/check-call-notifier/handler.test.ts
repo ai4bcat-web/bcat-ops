@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import type { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import type { SlackClient } from '../_shared/slackApi'
@@ -158,10 +158,14 @@ describe('runCheckCallNotices', () => {
 
   it('does not stamp a notice Slack refused, so the next tick tries again', async () => {
     const { db, deps } = setup({ failing: true })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     expect(await runCheckCallNotices(deps)).toEqual({ checked: 1, due: 1, overdue: 0, sent: 0, failed: 1 })
     expect(db.table(TABLES.load).get('load-1')).not.toHaveProperty('checkCallDueNotifiedAt')
     expect(await runCheckCallNotices(deps)).toMatchObject({ due: 1, failed: 1 })
+    expect(warn).toHaveBeenCalledTimes(2)
+    expect(warn).toHaveBeenCalledWith('[check-call-notifier] could not DM', expect.any(String), expect.stringContaining('invalid_auth'))
+    warn.mockRestore()
   })
 
   it('keeps a notice to itself when the check call was rescheduled while Slack was answering', async () => {
@@ -176,8 +180,11 @@ describe('runCheckCallNotices', () => {
         },
       },
     }
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     await runCheckCallNotices(slow)
     expect(db.table(TABLES.load).get('load-1')).not.toHaveProperty('checkCallDueNotifiedAt')
+    expect(log).toHaveBeenCalledWith('[check-call-notifier] check call rescheduled mid-send; not stamping', { loadId: 'load-1' })
+    log.mockRestore()
   })
 
   it('sends nothing on an in-app stack and leaves the load on the worklist', async () => {

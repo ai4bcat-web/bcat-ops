@@ -137,7 +137,7 @@ describe('ShippingRequirementsSection', () => {
     it('leaves the fields alone and invites typing when the route cannot be measured', async () => {
       milesMock.mockResolvedValue({ miles: null, source: null })
       setup(makeCtx(), undefined, ROUTE)
-      await waitFor(() => expect(milesMock).toHaveBeenCalled())
+      await waitFor(() => expect(screen.getByTestId('f-shipping-milesSource').textContent).toMatch(/type the miles/))
       expect(customer().value).toBe('')
     })
 

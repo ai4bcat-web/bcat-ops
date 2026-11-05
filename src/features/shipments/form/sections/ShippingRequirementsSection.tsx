@@ -81,8 +81,7 @@ function ShippingRequirementsImpl({ value, onChange, ctx, form, mode, onModeChan
       getRouteMiles(JSON.parse(routeKey) as RoutePointInput[])
         .then(({ miles, source, error }) => {
           if (!alive) return
-          if (error) { setMilesNote('Could not measure the route — type the miles'); return }
-          if (miles === null) return
+          if (error || miles === null) { setMilesNote('Could not measure the route — type the miles'); return }
           const next = String(miles)
           onChangeRef.current((prev) => {
             const patch: Partial<Ship> = {}

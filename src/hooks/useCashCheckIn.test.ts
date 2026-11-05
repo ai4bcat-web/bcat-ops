@@ -22,6 +22,7 @@ import {
 } from '@/lib/cashCheckInClient'
 import { useCashCheckIn } from './useCashCheckIn'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))  // clients build at import
 vi.mock('@/hooks/useAuth')
 vi.mock('@/lib/cashCheckInClient', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/cashCheckInClient')>()

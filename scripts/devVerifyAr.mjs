@@ -171,9 +171,10 @@ async function main() {
   await attachDocument(shipmentId, orderId, bundle.loads[0].id, 'BOL')
   await attachDocument(shipmentId, orderId, bundle.loads[0].id, 'POD')
   await reload()
-  await shipAction('READY_TO_INVOICE', { orderId, expectedUpdatedAt: bundle.orders[0].updatedAt })
+  // Release happens in Load Review only: the same action, carrying the Load Review marker.
+  await shipAction('READY_TO_INVOICE', { orderId, expectedUpdatedAt: bundle.orders[0].updatedAt, review: { source: 'LOAD_REVIEW' } })
   await reload()
-  ok('READY_TO_INVOICE moved the order to UNBILLED', bundle.orders[0].arStatus)
+  ok('READY_TO_INVOICE (Load Review marker) moved the order to UNBILLED', bundle.orders[0].arStatus)
 
   const preview = await finAction('PREVIEW_INVOICE', { orderId })
   ok('PREVIEW_INVOICE is ready and writes nothing', `ready=${preview.readiness.ready} total=${preview.snapshot.totalCents}`)
@@ -327,6 +328,7 @@ async function main() {
   await shipAction('READY_TO_INVOICE', {
     orderId,
     expectedUpdatedAt: bundle.orders[0].updatedAt,
+    review: { source: 'LOAD_REVIEW' },
   }).catch(() => undefined)
   const reissued = await finAction('GENERATE_INVOICE', { orderId })
   const secondId = reissued.invoice.id

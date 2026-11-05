@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { handler } from './handler'
 
 const lambdaSend = vi.hoisted(() => vi.fn())
@@ -38,6 +38,9 @@ const JSON_BODY = (res: { statusCode: number; body: string }) => JSON.parse(res.
 
 describe('shipment-email-intake', () => {
   beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.resetModules()
     lambdaSend.mockReset()
     dynamoSend.mockReset()
@@ -46,6 +49,10 @@ describe('shipment-email-intake', () => {
     process.env.THREAD_MAILBOX = 'ai4bcat@gmail.com'
     process.env.SHIPMENT_MESSAGE_TABLE_NAME = 'ShipmentMessage-test'
     process.env.TMS_TRACKING_ACTIONS_FUNCTION_NAME = 'tms-tracking-actions-test'
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('rejects a bad secret', async () => {

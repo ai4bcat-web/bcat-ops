@@ -21,6 +21,10 @@ describe('tmsTokens', () => {
       await Promise.resolve()
     })
     expect(result.current['--tms-primary']).toBe('two')
-    document.documentElement.removeAttribute('data-tms-theme')
+    // Removing the attribute fires the observer again; flush that re-render before the test ends.
+    await act(async () => {
+      document.documentElement.removeAttribute('data-tms-theme')
+      await Promise.resolve()
+    })
   })
 })

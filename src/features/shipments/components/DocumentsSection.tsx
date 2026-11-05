@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsDialog, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { PushToLoadReview } from './PushToLoadReview'
 import { LegacyBadge } from '@/features/tms/brokerage/company/components/LegacyBadge'
 import { WAIVED_LABEL } from '@/features/tms/brokerage/company/components/legacyLabels'
 import { Label } from '@/components/ui/label'
@@ -35,7 +36,7 @@ import { DocumentPreview } from '@/features/documents/DocumentPreview'
 import { LoadDriverDocs } from '@/features/loads/LoadDriverDocs'
 import {
   attachDriverDoc, getInvoice, getInvoicePdfUrl, getRateConfirmUrl, getShipmentDocumentUrl, getTmsSettings,
-  listDivisions, listTrackingLinksByShipment, readyToInvoice, revokeUploadLink, sendUploadLink, updateDocument,
+  listDivisions, listTrackingLinksByShipment, revokeUploadLink, sendUploadLink, updateDocument,
   voidDocument,
 } from '@/lib/apiClient'
 import { attachDocs, getDriverDocUrl, type DriverSubmissionRecord } from '@/lib/driverSubmissionsClient'
@@ -111,7 +112,6 @@ export function DocumentsSection({
   const [links, setLinks] = useState<TrackingLinkRecord[]>([])
   const [dialog, setDialog] = useState<DocDialog>(null)
   const [preview, setPreview] = useState<{ doc: ShipmentDocumentRecord; url: string | null } | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   const docs = useShipmentDocuments(shipment.id, { bundle, customer, settings, legacyImported: shipment.legacyImported })
 
@@ -228,25 +228,15 @@ export function DocumentsSection({
       </div>
 
       {docs.error && <TmsAlert tone="orange">{docs.error}</TmsAlert>}
-      {error && <TmsAlert tone="red">{error}</TmsAlert>}
 
       {order && (
         <RequiredStrip
           gate={docs.orderGates[order.id]}
           documents={docs.documents}
           arStatus={order.arStatus ?? null}
-          onReady={async () => {
-            setError(null)
-            try {
-              await readyToInvoice({ orderId: order.id, expectedUpdatedAt: order.updatedAt })
-              await refreshAll()
-              toast.success('Ready to invoice')
-            } catch (err) {
-              // The Lambda's message lists the documents that are missing, which is
-              // exactly what the user needs to read.
-              setError(err instanceof Error ? err.message : 'The shipment could not be moved to Ready to invoice')
-            }
-          }}
+          shipmentId={shipment.id}
+          legacy={shipment.legacyImported === true}
+          onPushed={() => { void refreshAll() }}
         />
       )}
 
@@ -388,34 +378,26 @@ function Section({ title, count, lead, children }: {
 }
 
 /**
- * What the order still owes before it can be billed, and the button that says so.
+ * What the order still owes before it can be billed, and the way forward.
  *
  * A free-text entry nobody could map to a type is shown as what it is: an instruction
  * that cannot be checked automatically. It never blocks, because refusing to invoice
  * over a string nobody can evaluate would be worse than the risk it describes.
  *
- * There is no override. Step R made the release to accounting a server rule with no
- * bypass, so a button offering one here would be a lie: the Lambda re-runs the whole
- * gate and answers with the list of what is still missing.
+ * There is no release button here and no override. Release to billing happens in Load
+ * Review alone, so the strip offers "Push to Load Review", which answers with the
+ * customer's review requirements (one sentence per reason) when the load is not ready.
  */
-function RequiredStrip({ gate, documents, arStatus, onReady }: {
+function RequiredStrip({ gate, documents, arStatus, shipmentId, legacy, onPushed }: {
   gate: DocGateResult | undefined
   documents: ShipmentDocumentRecord[]
   arStatus: string | null
-  onReady: () => Promise<void>
+  shipmentId: string
+  /** Imported Aljex history is not reviewed; there is nothing to push. */
+  legacy: boolean
+  onPushed: () => void
 }) {
-  const [busy, setBusy] = useState(false)
-
   if (!gate) return null
-
-  const run = async () => {
-    setBusy(true)
-    try {
-      await onReady()
-    } finally {
-      setBusy(false)
-    }
-  }
 
   const satisfiedBy = (type: ShipmentDocumentType) =>
     documents.find((d) => d.type === type && countsAsPresent(d))?.name ?? null
@@ -425,16 +407,11 @@ function RequiredStrip({ gate, documents, arStatus, onReady }: {
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-xs uppercase tracking-wider tms-muted">Required documents</p>
         {arStatus && <TmsBadge tone="gray" className="text-[10px]">AR {arStatus.replace(/_/g, ' ').toLowerCase()}</TmsBadge>}
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <TmsButton variant="primary"
-            size="sm"
-            disabled={!gate.ready || busy}
-            title={gate.ready ? undefined : `Missing: ${gate.missing.map((t) => DOCUMENT_TYPE_LABELS[t]).join(', ')}`}
-            onClick={() => { void run() }}
-          >
-            {busy ? 'Working…' : 'Ready to invoice'}
-          </TmsButton>
-        </div>
+        {arStatus === 'DOCS_NEEDED' && !legacy && (
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <PushToLoadReview shipmentId={shipmentId} onPushed={onPushed} />
+          </div>
+        )}
       </div>
 
       {gate.legacy === true ? (

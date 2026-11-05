@@ -3,6 +3,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { PayModal } from './DriverPayForms'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) })) // apiClient builds its client at import
+
 describe('PayModal', () => {
   it('is a named dialog that closes on Escape', () => {
     const onClose = vi.fn()

@@ -38,6 +38,23 @@ const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => auth }))
 vi.mock('@/lib/apiClient', () => mocks)
+vi.mock('@/lib/complianceClient', () => ({
+  listComplianceDocumentsByStatus: vi.fn().mockResolvedValue([]),
+  listApplicationsByStatus: vi.fn().mockResolvedValue([]),
+  listOnboardingTasks: vi.fn().mockResolvedValue([]),
+  updateDriverApplication: vi.fn(),
+  setTaskStatus: vi.fn(),
+  updateOnboardingTask: vi.fn(),
+  writeComplianceAudit: vi.fn(),
+  sendOnboardingEmail: vi.fn(),
+}))
+vi.mock('@/lib/registrationsClient', () => ({
+  SignupAuditNeedsScanError: class SignupAuditNeedsScanError extends Error {},
+  dismissDriverSignup: vi.fn().mockResolvedValue(undefined),
+  listDriverPoolUsers: vi.fn().mockResolvedValue({ users: [] }),
+  listDriverSignupAudit: vi.fn().mockResolvedValue([]),
+  listDriverSignupAuditScan: vi.fn().mockResolvedValue([]),
+}))
 vi.mock('sonner', () => ({ toast: toastMock }))
 
 import { UsersPage } from './UsersPage'

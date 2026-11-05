@@ -11,6 +11,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import type { Load } from '@/types'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: vi.fn(() => ({ graphql: vi.fn() })) }))
+vi.mock('@/hooks/useLoadDriverDocs', () => ({ useLoadDriverDocs: () => ({ pods: [], ratecons: [], misc: [], loading: false, error: null, refresh: vi.fn() }) }))
+vi.mock('@/lib/apiClient', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/apiClient')>(),
+  createLocation: vi.fn(async (input) => ({ ...input, id: `location-${input.name}` })),
+}))
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
 if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false

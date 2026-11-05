@@ -122,8 +122,11 @@ describe('the v2 create-invoice response', () => {
      * click — could otherwise never be finished: every later attempt died on the 409
      * before reaching the documents.
      */
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const { impl } = stubFetch({ status: 409, body: { ...CREATED, IsDuplicate: false } })
     const r = await client(impl).createInvoice(PAYLOAD)
+    expect(warn).toHaveBeenCalledWith('[otr] invoice already exists at OTR; continuing with it', expect.objectContaining({ invoiceId: 25520749 }))
+    warn.mockRestore()
     expect(r.invoiceId).toBe(25520749)
     expect(r.isDuplicate).toBe(true)
     expect(r.invoiceExists).toBe(true)

@@ -15,6 +15,9 @@ const listShipmentMessages = vi.hoisted(() => vi.fn(async () => [] as ShipmentMe
 const sendShipmentMessage = vi.hoisted(() => vi.fn(async () => ({ message: {} })))
 const listTruckConfigs = vi.hoisted(() => vi.fn(async () => [] as unknown[]))
 
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+
 vi.mock('@/lib/apiClient', async () => {
   const actual = await vi.importActual<typeof import('@/lib/apiClient')>('@/lib/apiClient')
   return {

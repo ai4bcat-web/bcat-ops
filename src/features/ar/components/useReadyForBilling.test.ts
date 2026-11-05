@@ -4,7 +4,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
 
 const previewInvoice = vi.fn()
-vi.mock('@/lib/apiClient', () => ({ previewInvoice: (...a: unknown[]) => previewInvoice(...a), readyToInvoice: vi.fn() }))
+vi.mock('@/lib/apiClient', () => ({ previewInvoice: (...a: unknown[]) => previewInvoice(...a) }))
 
 const { useReadyForBilling } = await import('./useReadyForBilling')
 

@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
-const api = { fetchTimeClock: vi.fn(), punchTimeClock: vi.fn(), fetchMe: vi.fn(), fetchTrucks: vi.fn(), selectTruck: vi.fn(), fetchTrailers: vi.fn(), selectTrailer: vi.fn() }
+const api = { fetchTimeClock: vi.fn(), punchTimeClock: vi.fn(), fetchMe: vi.fn(), fetchTrucks: vi.fn(), selectTruck: vi.fn(), fetchTrailers: vi.fn(), selectTrailer: vi.fn(), fetchPaperwork: vi.fn() }
 vi.mock('../driverApi', () => api)
 const { clearCachedProgram } = await import('../useDriverProgram')
 
@@ -48,6 +48,8 @@ beforeEach(() => {
   clearCachedProgram()
   api.fetchMe.mockResolvedValue({ driverId: 'd1', name: 'Jason Smith', program: 'PAPERWORK', truck: { id: 'eq-3114', unitNumber: '3114' } })
   api.fetchTrucks.mockResolvedValue([{ id: 'eq-3114', unitNumber: '3114', eld: true, holder: null, yours: true }])
+  // The punch gate reads the week's paperwork; an empty week lets the punch straight through.
+  api.fetchPaperwork.mockResolvedValue({ loads: [] })
   respond()
 })
 

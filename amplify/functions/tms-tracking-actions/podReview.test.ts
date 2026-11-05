@@ -8,7 +8,7 @@ const CALLER = { email: 'ops@bcatcorp.com', sub: 'sub-ops', groups: [], isAdmin:
 
 function makePodDeps(
   store: MemoryStore,
-  overrides: { checkPod?: (input: { s3Key: string; contentType: string; stops: Row[] }) => Promise<PodCheckResult>; readyForBilling?: () => Promise<Row> } = {},
+  overrides: { checkPod?: (input: { s3Key: string; contentType: string; stops: Row[] }) => Promise<PodCheckResult> } = {},
 ): PodReviewDeps {
   return {
     tables: {
@@ -36,7 +36,6 @@ function makePodDeps(
     now: () => currentTime,
     randomId: () => `r${Math.random().toString(36).slice(2)}`,
     checkPod: overrides.checkPod ?? vi.fn(async () => passResult()),
-    readyForBilling: overrides.readyForBilling ?? vi.fn(async () => ({ ok: true })),
   }
 }
 
@@ -212,7 +211,7 @@ describe('reviewShipmentPod', () => {
     currentTime = '2026-02-02T12:00:00.000Z'
   })
 
-  it('accepts a legible POD with all pages and routes to readyForBilling', async () => {
+  it('accepts a legible POD with all pages without releasing the load to billing', async () => {
     const store = new MemoryStore()
     seedDeliveredShipment(store)
     seedDeliveredLoad(store)
@@ -223,7 +222,8 @@ describe('reviewShipmentPod', () => {
     const result = await reviewShipmentPod(deps, { shipmentId: 'shp-1', documentId: 'sdoc-1' }, CALLER)
 
     expect(result.status).toBe('ACCEPTED')
-    expect(result.readyForBillingCalled).toBe(true)
+    // Accepting the POD clears paperwork only; release to billing is Load Review's act.
+    expect(result).not.toHaveProperty('billing')
     const doc = store.getById('ShipmentDocument-test', 'sdoc-1')
     expect(doc?.reviewStatus).toBe('ACCEPTED')
     expect(doc?.reviewedBy).toBe(CALLER.email)
@@ -316,20 +316,6 @@ describe('reviewShipmentPod', () => {
 
     expect(result.status).toBe('REJECTED')
     expect(result.reason).toContain('Signature')
-  })
-
-  it('does not call readyForBilling on a failing review', async () => {
-    const store = new MemoryStore()
-    seedDeliveredShipment(store)
-    seedDeliveredLoad(store)
-    seedCarrier(store)
-    seedPodDocument(store)
-    const readyForBilling = vi.fn(async () => ({ ok: true }))
-    const deps = makePodDeps(store, { checkPod: async () => missingPageResult(), readyForBilling })
-
-    await reviewShipmentPod(deps, { shipmentId: 'shp-1', documentId: 'sdoc-1' }, CALLER)
-
-    expect(readyForBilling).not.toHaveBeenCalled()
   })
 
   it('throws when the document is not a POD', async () => {

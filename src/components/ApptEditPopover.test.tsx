@@ -18,6 +18,7 @@ vi.mock('@/store/useAppStore', () => ({
 vi.mock('@/lib/apiClient', () => ({
   notifyApptNeeded: vi.fn().mockResolvedValue(null),
   createApptMoveTask: vi.fn().mockResolvedValue({ id: 'task-1' }),
+  createApptTask: vi.fn().mockResolvedValue({ id: 'book-task-1' }),
   updateIntakeItem: vi.fn().mockResolvedValue({}),
 }))
 

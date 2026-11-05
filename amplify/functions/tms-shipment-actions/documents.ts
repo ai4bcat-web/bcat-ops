@@ -824,6 +824,9 @@ export async function voidDocument(deps: DocumentDeps, input: Row, caller: Calle
   return documentResult(deps, shipmentId, next)
 }
 
+/** The refusal for a release that did not come through Load Review (single READY_TO_INVOICE, SET_AR_STATUS UNBILLED). */
+export const LOAD_REVIEW_ONLY_MESSAGE = 'Release happens in Load Review: push this shipment to Load Review and release it there'
+
 // ── READY_TO_INVOICE ─────────────────────────────────────────────────────────
 
 /**
@@ -884,6 +887,13 @@ export async function readyToInvoice(
   } else if (!release.ok) {
     throw releaseGateError(release.missing)
   }
+  // Load Review is the single gate into billing. The gate above speaks first (a load
+  // that is not ready hears exactly why), then a release with no Load Review marker
+  // is refused. Exempt: imported Aljex history (`legacyImported`, set only by the
+  // import engine), which has no review to go through. Already-released / invoiced
+  // orders never get here (they stop at the arStatus check), and there is no
+  // ADMIN bypass: an admin releases from Load Review like everybody else.
+  if (!review && bundle.shipment.legacyImported !== true) throw new Error(LOAD_REVIEW_ONLY_MESSAGE)
 
   const gate = customerDocGate({ bundle, documents: bundle.documents, order, customer, settings })
   const now = nowIso()

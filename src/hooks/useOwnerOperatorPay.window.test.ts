@@ -6,6 +6,9 @@ import { renderHook } from '@testing-library/react'
 import { FIXTURE_NOW } from './loadWindowFixture'
 import { computeFullAndWindowed } from './loadWindowRun'
 
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+
 const setting = {
   id: 's-oo', driverId: 'd-oo', payGroup: 'OWNER_OPERATOR', payPercent: 0.8,
   expensesBeforePercent: true, active: true, fixedExpenses: [],
@@ -23,7 +26,7 @@ vi.mock('@/lib/apiClient', async (orig) => ({
   listDriverPayCredits: () => Promise.resolve([]),
 }))
 vi.mock('@/lib/podsClient', () => ({ listPods: () => Promise.resolve({ items: [], nextToken: null }) }))
-vi.mock('@/lib/driverSubmissionsClient', () => ({ listDriverSubmissions: () => Promise.resolve({ items: [], nextToken: null }) }))
+vi.mock('@/lib/driverSubmissionsClient', () => ({ listDriverSubmissions: () => Promise.resolve([]) }))
 vi.mock('./useDrivers', async () => {
   const { FIXTURE_DRIVERS } = await import('./loadWindowFixture')
   return { useDrivers: () => ({ drivers: FIXTURE_DRIVERS, updateDriver: vi.fn() }) }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { RegistrationCards } from './RegistrationCards'
 
@@ -46,26 +46,26 @@ describe('RegistrationCards', () => {
     expect(screen.getByText('No registrations waiting.')).toBeTruthy()
   })
 
-  it('cannot reject an application without a reason', () => {
+  it('cannot reject an application without a reason', async () => {
     const props = setup({ applications: [application] })
     fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
     const submit = screen.getAllByRole('button', { name: 'Reject' }).at(-1)!
     expect((submit as HTMLButtonElement).disabled).toBe(true)
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Not a fit' } })
     expect((submit as HTMLButtonElement).disabled).toBe(false)
-    fireEvent.click(submit)
+    await act(async () => { fireEvent.click(submit) })
     expect(props.onReject).toHaveBeenCalledWith(application.application, 'Not a fit')
   })
 
-  it('dismisses a blocked sign-up and resends a staff invite', () => {
+  it('dismisses a blocked sign-up and resends a staff invite', async () => {
     const props = setup({
       refusals: [{ email: 'x@y.com', at: '2026-03-02T00:00:00Z', reason: 'NO_DRIVER_RECORD' }],
       staffInvites: [{ username: 'sub-1', email: 'new@bcatcorp.com' }],
     })
     expect(screen.getByText(/not on the roster/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Dismiss' })) })
     expect(props.onDismiss).toHaveBeenCalledWith('x@y.com')
-    fireEvent.click(screen.getByRole('button', { name: 'Resend invite' }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Resend invite' })) })
     expect(props.onReinvite).toHaveBeenCalledWith('sub-1')
   })
 })

@@ -5,7 +5,7 @@
  * DynamoDB (via @aws-sdk/lib-dynamodb). Verifies that location rows are written
  * even when geocoding cannot produce a description.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { send } = vi.hoisted(() => {
   process.env.BLUE_INK_TECH_API_KEY = 'test-bit-key'
@@ -115,11 +115,16 @@ function mockDynamoResponse(cmd: MockCommand) {
   return {}
 }
 
+let logSpy: ReturnType<typeof vi.spyOn>
+
 beforeEach(() => {
+  logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
   fetchMock.mockReset()
   send.mockReset()
   process.env.GOOGLE_PLACES_API_KEY = 'test-google-key'
 })
+
+afterEach(() => { logSpy.mockRestore() })
 
 describe('blueink-sync location sync', () => {
   it('reverse-geocodes a first fix and stores the city/state description', async () => {
@@ -140,6 +145,7 @@ describe('blueink-sync location sync', () => {
     const historyItem = putItemFor(process.env.TRUCK_LOCATION_HISTORY_TABLE_NAME!)
     expect(historyItem.truckId).toBe('eq-310')
     expect(historyItem.description).toBe('Payson, AZ')
+    expect(logSpy).toHaveBeenCalledWith('[blueink-location] complete — 1/1 updated')
   })
 
   it('still writes the location row when geocoding returns null', async () => {
@@ -166,5 +172,6 @@ describe('blueink-sync location sync', () => {
 
     const historyItem = putItemFor(process.env.TRUCK_LOCATION_HISTORY_TABLE_NAME!)
     expect(historyItem.description).toBeNull()
+    expect(logSpy).toHaveBeenCalledWith('[blueink-location] complete — 1/1 updated')
   })
 })

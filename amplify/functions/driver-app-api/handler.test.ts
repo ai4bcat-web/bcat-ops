@@ -548,8 +548,22 @@ function matchesFilterExpression(
 /** The in-memory DynamoDB. Module-scoped so a test can seed an extra row. */
 let tables: ReturnType<typeof defaultTables>
 
+/** The handler narrates every request on the console; keep it out of the test output. */
+let logSpy: ReturnType<typeof vi.spyOn>
+let warnSpy: ReturnType<typeof vi.spyOn>
+let errorSpy: ReturnType<typeof vi.spyOn>
+
+afterEach(() => {
+  logSpy.mockRestore()
+  warnSpy.mockRestore()
+  errorSpy.mockRestore()
+})
+
 beforeEach(() => {
   vi.clearAllMocks()
+  logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   mockVerify.mockReset()
   mockVerify.mockResolvedValue({ email: EMAIL_A, email_verified: true })
   mockGetSignedUrl.mockResolvedValue('https://s3.test/presigned-url')

@@ -5,6 +5,9 @@ import { renderHook } from '@testing-library/react'
 import { FIXTURE_NOW } from './loadWindowFixture'
 import { computeFullAndWindowed } from './loadWindowRun'
 
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+
 const setting = (driverId: string) => ({
   id: `s-${driverId}`, driverId, payGroup: 'BOX_TRUCK', payPercent: 0.3,
   expensesBeforePercent: true, active: true, fixedExpenses: [],

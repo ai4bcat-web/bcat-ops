@@ -81,6 +81,7 @@ function makeBridge({
     s3ResponseIndex: 0,
     lockHeld: false,
     searchCalls: [],
+    logs: [],
   };
 
   function makeLabel(name) {
@@ -188,7 +189,10 @@ function makeBridge({
     },
   };
 
-  const ctx = loadScript({ ...mocks, ...globals, Date: fakeDate });
+  // The bridge logs through console; capture it per bridge so output is inspectable, not noise.
+  const record = (level) => (...args) => { state.logs.push({ level, args }); };
+  const fakeConsole = { log: record('log'), warn: record('warn'), error: record('error') };
+  const ctx = loadScript({ ...mocks, ...globals, console: fakeConsole, Date: fakeDate });
   return { ctx, state };
 }
 
@@ -320,6 +324,7 @@ describe('vendorApEmailBridge.gs', () => {
 
     expect(() => ctx.processVendorApEmails()).toThrow();
     expect(state.properties['vendorap:msg:m4']).toBeUndefined();
+    expect(state.logs.some((l) => l.level === 'error' && l.args[0].includes('prepare failed'))).toBe(true);
   });
 
   it('labels 422 commit responses and acks them after uploads', () => {

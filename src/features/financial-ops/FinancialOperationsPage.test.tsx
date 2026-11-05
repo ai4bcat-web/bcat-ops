@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { cloneElement, type ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { render, screen, within } from '@testing-library/react'
@@ -8,6 +9,16 @@ import { FinancialOperationsPage } from './FinancialOperationsPage'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
+
+// jsdom has no layout, so ResponsiveContainer measures 0x0 and warns; give the chart a fixed size.
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: ReactElement<{ width?: number; height?: number }> }) =>
+      cloneElement(children, { width: 600, height: 300 }),
+  }
+})
 
 vi.mock('@/lib/apiClient', () => ({ getRemittancePdfUrl: vi.fn() }))
 

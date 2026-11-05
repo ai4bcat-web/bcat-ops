@@ -16,6 +16,7 @@ const assembleInvoice = vi.hoisted(() => vi.fn())
 const setBrokerMc = vi.hoisted(() => vi.fn())
 const uploadOtrDocs = vi.hoisted(() => vi.fn().mockResolvedValue({ documentErrors: [] }))
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))  // clients build at import
 vi.mock('@/lib/apiClient', () => ({}))
 vi.mock('@/lib/otrClient', () => ({
   assembleInvoice,

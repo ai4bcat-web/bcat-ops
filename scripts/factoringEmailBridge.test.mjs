@@ -57,6 +57,7 @@ function makeBridge({ properties = {}, responses = [], messages = [], globals = 
     responseIndex: 0,
     lockHeld: false,
     searchCalls: [],
+    logs: [],
   };
 
   function makeLabel(name) {
@@ -152,7 +153,10 @@ function makeBridge({ properties = {}, responses = [], messages = [], globals = 
     },
   };
 
-  const ctx = loadScript({ ...mocks, ...globals, Date: fakeDate });
+  // The bridge logs through console; capture it per bridge so output is inspectable, not noise.
+  const record = (level) => (...args) => { state.logs.push({ level, args }); };
+  const fakeConsole = { log: record('log'), warn: record('warn'), error: record('error') };
+  const ctx = loadScript({ ...mocks, ...globals, console: fakeConsole, Date: fakeDate });
   return { ctx, state };
 }
 
@@ -296,6 +300,7 @@ describe('factoringEmailBridge.gs', () => {
     });
 
     expect(() => ctx.processFactoringEmails()).toThrow();
+    expect(state.logs.some((l) => l.level === 'error' && String(l.args[0]).includes('webhook failed for'))).toBe(true);
     expect(state.properties['factoring:msg:err1']).toBeUndefined();
     expect(state.fetched).toHaveLength(1);
   });

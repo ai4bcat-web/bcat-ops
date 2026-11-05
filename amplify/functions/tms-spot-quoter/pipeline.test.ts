@@ -2,11 +2,17 @@
  * The polling pipeline: what is stored, what is never stored, and what survives a retry.
  * Doubles come from testkit.ts; the mail corpus is the shared fixture set.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SPOT_FIXTURES, type SpotFixture } from '../../../src/lib/spot/fixtures'
 import { NeedsReconnect } from '../_shared/gmail/errors'
 import { pollAll } from './poll'
 import { connectedRow, emptyRaw, makeRig, REP_ID, requestRaw, type TestRig } from './testkit'
+
+// Failures are logged with console.warn; each test that provokes one asserts the line,
+// and the spy keeps every other test's output clean.
+let warnSpy: ReturnType<typeof vi.spyOn>
+beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}) })
+afterEach(() => { warnSpy.mockRestore() })
 
 function seed(rig: TestRig, fixtures: SpotFixture[]): void {
   for (const fx of fixtures) {
@@ -123,6 +129,7 @@ describe('idempotency and retries', () => {
     rig.model.answer = () => new Error('anthropic down')
     const first = await pollAll(rig.deps)
     expect(first.stats.errors).toBe(1)
+    expect(warnSpy).toHaveBeenCalledWith('[tms-spot-quoter] one message failed:', expect.stringContaining('anthropic down'))
     expect(rig.store.requests.size).toBe(0)
     expect(rig.store.connections.get(REP_ID)!.historyId).toBe('50')
 
@@ -144,6 +151,7 @@ describe('idempotency and retries', () => {
     }
     expect(rig.store.connections.get(REP_ID)!.historyId).toBe('77')
     expect(rig.store.requests.size).toBe(0)
+    expect(warnSpy).toHaveBeenCalledTimes(4)
   })
 
   it('falls back to a recent listing when Gmail has expired the history cursor', async () => {
@@ -174,6 +182,7 @@ describe('idempotency and retries', () => {
     rig.port.failBody.add(a.meta.id)
     const { stats } = await pollAll(rig.deps)
     expect(stats.errors).toBe(1)
+    expect(warnSpy).toHaveBeenCalledWith('[tms-spot-quoter] one message failed:', expect.any(String))
     expect(rig.store.requests.has(`sr:${REP_ID}:${b.meta.id}`)).toBe(true)
   })
 })
@@ -269,6 +278,7 @@ describe('threads', () => {
     const row = rig.store.requests.get(id)!
     expect(row.thread).toHaveLength(1)
     expect(row.replyIntent).toBeUndefined()
+    expect(warnSpy).toHaveBeenCalledWith('[tms-spot-quoter] reply intent failed:', expect.stringContaining('down'))
   })
 })
 
@@ -299,6 +309,7 @@ describe('slow or failing model', () => {
     seed(rig, fresh.filter((f) => f.expectStage === 'STORE').slice(0, 2))
     const { stats } = await pollAll(rig.deps)
     expect(stats.errors).toBe(2)
+    expect(warnSpy).toHaveBeenCalledTimes(2)
     expect(rig.store.requests.size).toBe(0)
     const conn = rig.store.connections.get(REP_ID)!
     expect(conn.lastPollOk).toBe(false)

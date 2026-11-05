@@ -43,6 +43,7 @@ function draw(at = '/tms/brokerage') {
     <MemoryRouter initialEntries={[at]}>
       <Routes>
         <Route path="/tms/brokerage/*" element={<BrokeragePage />} />
+        <Route path="/tms/dashboard" element={<p>tms dashboard landing</p>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -88,6 +89,7 @@ describe('BrokeragePage', () => {
     draw('/tms/brokerage/integrations')
 
     expect(screen.queryByText('integrations body')).toBeNull()
+    expect(screen.getByText('tms dashboard landing')).toBeInTheDocument()
   })
 
   it('opens Integrations for an admin, deep link included', () => {

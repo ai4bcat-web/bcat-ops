@@ -633,6 +633,10 @@ function runS3Command(cmd: MockCommand): unknown {
 }
 
 beforeEach(() => {
+  // Handlers narrate on the console (and fixtures trip the logged failure paths); keep it out of the run output.
+  vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  vi.spyOn(console, 'error').mockImplementation(() => undefined)
   // The fixtures are dated early March 2026. Step W's pay lock closes any delivery week that
   // has passed, so the suite's "today" is pinned inside the fixtures' own week. Only Date is
   // faked: timers and promises stay real.
@@ -4075,11 +4079,17 @@ describe('SET_AR_STATUS', () => {
     expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
   })
 
-  it('allows UNBILLED once delivered and the gate is satisfied', async () => {
+  it('refuses UNBILLED outside Load Review once delivered and the gate is satisfied (legacy history exempt)', async () => {
     const ids = await deliverable()
     seedReleasePaperwork(ids)
     await deliver(ids)
     expect(table(TABLES.shipment).get(ids.shipmentId)!.status).toBe('DELIVERED')
+    // The gate is satisfied, but a hand-set UNBILLED is a release outside Load Review.
+    await expect(call('SET_AR_STATUS', { orderId: ids.orderId, status: 'UNBILLED' }))
+      .rejects.toThrow('Release happens in Load Review: push this shipment to Load Review and release it there')
+    expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
+    // Imported Aljex history is exempt: it has no review to go through.
+    table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, legacyImported: true })
     const bundle = (await call('SET_AR_STATUS', { orderId: ids.orderId, status: 'UNBILLED' })) as { orders: Row[] }
     expect(bundle.orders[0].arStatus).toBe('UNBILLED')
     expect(bundle.orders[0].readyToInvoiceAt).toBeTruthy()
@@ -4575,10 +4585,9 @@ describe('READY_TO_INVOICE', () => {
   })
 
   it('releases an own-fleet load on its paperwork alone, with no rate confirmation', async () => {
-    const ids = await deliveredOrder()
-    seedDocs(ids)
+    const ids = await reviewable()
     const before = table(TABLES.order).get(ids.orderId)!
-    const result = (await ready(ids.orderId)) as { bundle: { orders: Row[] }; releaseGate: { ok: boolean } }
+    const result = (await ready(ids.orderId, { review: REVIEW })) as { bundle: { orders: Row[] }; releaseGate: { ok: boolean } }
 
     expect(result.releaseGate.ok).toBe(true)
     const saved = result.bundle.orders[0]
@@ -4608,9 +4617,8 @@ describe('READY_TO_INVOICE', () => {
   })
 
   it('refuses an order that is not waiting on documents', async () => {
-    const ids = await deliveredOrder()
-    seedDocs(ids)
-    await ready(ids.orderId)
+    const ids = await reviewable()
+    await ready(ids.orderId, { review: REVIEW })
     await expect(ready(ids.orderId)).rejects.toThrow(/already UNBILLED/)
   })
 
@@ -4645,9 +4653,6 @@ describe('READY_TO_INVOICE', () => {
     expect(table(TABLES.order).get(String(order.id))!.arStatus).toBe('DOCS_NEEDED')
   })
 
-  describe('Load Review', () => {
-    const REVIEWER = { sub: 'sub-lr', username: 'lr', claims: { email: 'lr@bcatcorp.com', 'cognito:groups': ['page-loadReview'] } }
-    const INTAKE_ONLY = { sub: 'sub-ir', username: 'ir', claims: { email: 'ir@bcatcorp.com', 'cognito:groups': ['page-intakeReview'] } }
     const REVIEW = { source: 'LOAD_REVIEW' }
 
     /** A delivered, documented own-fleet order; `tag` fills the rep, division and revenue the review needs. */
@@ -4677,6 +4682,9 @@ describe('READY_TO_INVOICE', () => {
       table(TABLES.financials).set(ids.loadId, { ...(table(TABLES.financials).get(ids.loadId) ?? { id: ids.loadId, loadId: ids.loadId }), costCents: 90_000 })
       return ids
     }
+  describe('Load Review', () => {
+    const REVIEWER = { sub: 'sub-lr', username: 'lr', claims: { email: 'lr@bcatcorp.com', 'cognito:groups': ['page-loadReview'] } }
+    const INTAKE_ONLY = { sub: 'sub-ir', username: 'ir', claims: { email: 'ir@bcatcorp.com', 'cognito:groups': ['page-intakeReview'] } }
     const releaseAudits = (action: string): Row[] => [...table(TABLES.audit).values()].filter((row) => row.action === action)
 
     it('admits a page-loadReview caller to exactly the four review actions and the release batch', async () => {
@@ -4782,7 +4790,7 @@ describe('READY_TO_INVOICE', () => {
       expect(failing.releaseGate.missing.map((m) => m.code)).toContain('DOC_MISSING')
 
       const released = await reviewable()
-      await ready(released.orderId)
+      await ready(released.orderId, { review: REVIEW })
       const after = (await call('REVIEW_LOAD', { shipmentId: released.shipmentId }, REVIEWER)) as { arStatus: string }
       expect(after.arStatus).toBe('UNBILLED')
     })
@@ -4806,14 +4814,30 @@ describe('READY_TO_INVOICE', () => {
       )
     })
 
-    it('releases the same incomplete order without review exactly as before', async () => {
-      const ids = await reviewable({ rep: false, division: false, revenue: 0 })
+    it('refuses a release with no Load Review marker, for every non-admin and admin caller alike', async () => {
+      const ids = await reviewable()
+      for (const identity of [DISPATCHER, ADMIN]) {
+        await expect(ready(ids.orderId, {}, identity)).rejects.toThrow(
+          'Release happens in Load Review: push this shipment to Load Review and release it there',
+        )
+      }
+      // A bogus marker is not a marker.
+      await expect(ready(ids.orderId, { review: { source: 'ARCARD' } })).rejects.toThrow(/Release happens in Load Review/)
+      expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
+      expect(releaseAudits('READY_TO_INVOICE')).toEqual([])
+    })
+
+    it('still lets the gate speak first when a marker-less call is also not ready', async () => {
+      const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'] })
+      await expect(ready(ids.orderId)).rejects.toThrow(/^Not ready for accounting: Missing document: POD; Missing document: BOL$/)
+    })
+
+    it('exempts imported Aljex history: a legacy shipment releases without the marker', async () => {
+      const ids = await deliveredOrder()
+      table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, legacyImported: true })
       const result = (await ready(ids.orderId)) as { bundle: { orders: Row[] } }
       expect(result.bundle.orders[0].arStatus).toBe('UNBILLED')
-      const audits = releaseAudits('READY_TO_INVOICE')
-      expect(audits).toHaveLength(1)
-      expect(JSON.parse(String(audits[0].changes))).toEqual({ missing: [] })
-      expect(releaseAudits('LOAD_REVIEW_RELEASED')).toEqual([])
+      expect(JSON.parse(String(releaseAudits('READY_TO_INVOICE')[0].changes))).toEqual({ missing: [] })
     })
 
     it('a clean review release audits the checks on the order and on the shipment history', async () => {

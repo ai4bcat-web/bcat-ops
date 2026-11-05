@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { parseArJson } from './apiClient'
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+
 import type { ArPaymentRecord, InvoiceRecord } from '@/types/tms'
 
 /**
@@ -40,8 +43,11 @@ describe('parseArJson', () => {
 
   it('nulls a column that will not parse instead of leaking the raw string', () => {
     const row = { id: 'INV-000004', lines: '{not json' } as unknown as InvoiceRecord
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     expect(parseArJson(row, INVOICE_JSON_FIELDS).lines).toBeNull()
+    expect(warn).toHaveBeenCalledWith('[ar] could not parse', 'lines', 'on', 'INV-000004')
+    warn.mockRestore()
   })
 
   it('leaves an already-parsed column alone', () => {

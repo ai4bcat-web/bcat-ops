@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { CarrierRecord } from '@/types/tms'
 import { buildReviewCard, stubReviewCard } from '@/lib/integrations/mcpReview'
 import { CoverCarrierDialog } from './CoverCarrierDialog'
@@ -59,7 +59,7 @@ function renderDialog() {
 
 async function lookUp(text: string) {
   fireEvent.change(screen.getByLabelText('Carrier MC or DOT'), { target: { value: text } })
-  fireEvent.click(screen.getByTestId('cover-lookup'))
+  await act(async () => { fireEvent.click(screen.getByTestId('cover-lookup')) })
 }
 
 function enterRate(value = '1500') {

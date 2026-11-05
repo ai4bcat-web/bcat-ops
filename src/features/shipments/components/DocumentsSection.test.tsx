@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { DocumentsSection } from './DocumentsSection'
 import type {
   CustomerRecord, LoadCarrierRecord, OrderRecord, ShipmentBundle, ShipmentDocumentRecord, ShipmentLoad,
@@ -9,11 +9,13 @@ import type {
 
 const listShipmentDocuments = vi.hoisted(() => vi.fn())
 const readyToInvoice = vi.hoisted(() => vi.fn())
+const pushToLoadReview = vi.hoisted(() => vi.fn())
 const getInvoice = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/apiClient', () => ({
   listShipmentDocuments,
   readyToInvoice,
+  pushToLoadReview,
   getInvoice,
   getInvoicePdfUrl: vi.fn(async () => 'https://example.com/invoice.pdf'),
   getTmsSettings: vi.fn(async () => null),
@@ -139,7 +141,10 @@ describe('DocumentsSection', () => {
     expect(within(carrier).getByText('signed')).toBeTruthy()
   })
 
-  it('shows the missing required document and refuses to bill without it', async () => {
+  it('shows the missing required document and offers no release: the way forward is Load Review', async () => {
+    pushToLoadReview.mockResolvedValue({
+      results: [{ shipmentId: 'shp-1', number: 'S000001', ok: false, message: 'Missing document: BOL', reasons: ['Missing document: BOL'] }],
+    })
     renderSection()
     const strip = await screen.findByTestId('required-documents')
 
@@ -150,9 +155,9 @@ describe('DocumentsSection', () => {
     expect(within(strip).getByText('missing')).toBeTruthy()
     expect(within(strip).getByText(/1 still missing: Bill of lading/)).toBeTruthy()
 
-    const button = within(strip).getByRole('button', { name: 'Ready to invoice' }) as HTMLButtonElement
-    expect(button.disabled).toBe(true)
-    expect(button.getAttribute('title')).toBe('Missing: Bill of lading')
+    expect(within(strip).queryByRole('button', { name: 'Ready to invoice' })).toBeNull()
+    fireEvent.click(within(strip).getByRole('button', { name: 'Push to Load Review' }))
+    expect((await within(strip).findByTestId('push-to-load-review-reasons')).textContent).toContain('Missing document: BOL')
     expect(readyToInvoice).not.toHaveBeenCalled()
   })
 

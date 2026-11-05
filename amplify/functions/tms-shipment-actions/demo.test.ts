@@ -1,7 +1,7 @@
 /**
  * @vitest-environment node
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
 import {
   seedDemoData,
@@ -579,7 +579,9 @@ function makeDeps(isDevStack = true): DemoDeps {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('demo seed', () => {
+  afterEach(() => vi.restoreAllMocks())
   beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
     clearStore()
     audits.length = 0
     idCounter = 0

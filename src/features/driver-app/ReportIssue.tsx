@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Loader2, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { listMaintenanceTasks, reportMaintenanceTask, type DriverMaintenanceTask, type DriverTruck } from './driverApi'
 import { useDriverTruck } from './useDriverProgram'
 import { errorText } from '@/lib/errorText'
@@ -82,6 +82,7 @@ export function ReportIssueDialog({ open, onClose, onReported }: { open: boolean
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>What's wrong with the truck?</DialogTitle>
+          <DialogDescription className="sr-only">Describe the problem so the shop can follow up.</DialogDescription>
         </DialogHeader>
         {open && <ReportForm onClose={onClose} onReported={onReported} />}
       </DialogContent>

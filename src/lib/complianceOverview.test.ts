@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+vi.mock('aws-amplify/data', () => ({ generateClient: vi.fn(() => ({ graphql: vi.fn() })) }))
 import { buildOverviewRows, expiringQueue, filterRows, overviewCounts, sortForReview, tabCounts } from './complianceOverview'
 import type { OverviewInput } from './complianceOverview'
 import { slotState, truckSlotState } from './fileHub'

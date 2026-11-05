@@ -10,7 +10,7 @@
  * route to five of them.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
 import type { CarrierBillRecord, LoadCarrierRecord, ShipmentRecord } from '@/types/tms'
@@ -160,7 +160,7 @@ function bill(patch: Partial<CarrierBillRecord> = {}): CarrierBillRecord {
   }
 }
 
-function setup(options: { rowsByTab?: Partial<Record<string, ApWorklistRow[]>>; bills?: CarrierBillRecord[] } = {}) {
+async function setup(options: { rowsByTab?: Partial<Record<string, ApWorklistRow[]>>; bills?: CarrierBillRecord[] } = {}) {
   const bills = options.bills ?? [bill()]
   worklistMock.mockImplementation((tab: string) => ({
     rows: options.rowsByTab?.[tab] ?? [],
@@ -188,14 +188,16 @@ function setup(options: { rowsByTab?: Partial<Record<string, ApWorklistRow[]>>; 
     error: null,
     refresh: vi.fn().mockResolvedValue(undefined),
   })
-  return render(<MemoryRouter><ApPage /></MemoryRouter>)
+  let view!: ReturnType<typeof render>
+  await act(async () => { view = render(<MemoryRouter><ApPage /></MemoryRouter>) })
+  return view
 }
 
 beforeEach(() => vi.clearAllMocks())
 
 describe('the AP board', () => {
-  it('offers every view of the money, and each one renders', () => {
-    setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
+  it('offers every view of the money, and each one renders', async () => {
+    await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
     for (const label of ['Awaiting invoice', 'In review', 'To be paid', 'Paid', 'Payments & credits', 'Aging', 'AP inbox']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
       fireEvent.click(tab)
@@ -212,8 +214,8 @@ describe('the AP board', () => {
    * variance beside the Approve button is how somebody knows to fix the lines instead of
    * opening the dialog to be refused.
    */
-  it('shows the variance on a bill whose carrier invoice disagrees with the lines', () => {
-    setup({
+  it('shows the variance on a bill whose carrier invoice disagrees with the lines', async () => {
+    await setup({
       rowsByTab: { IN_REVIEW: [worklistRow()] },
       bills: [bill({ status: 'IN_REVIEW', billedCents: 175_000, varianceCents: 25_000 })],
     })
@@ -224,8 +226,8 @@ describe('the AP board', () => {
   })
 
   /** The pay run is worked oldest first, so how late a bill already is has to be on it. */
-  it('ages an approved bill on the row that pays it', () => {
-    setup()
+  it('ages an approved bill on the row that pays it', async () => {
+    await setup()
     fireEvent.click(screen.getByRole('tab', { name: /^To be paid/ }))
 
     expect(screen.getByText('10 days late')).toBeTruthy()
@@ -237,8 +239,8 @@ describe('the AP board', () => {
    * of `@/lib/arAging` — the page must not reach its own total, or the CSV and the screen
    * would disagree about what we owe.
    */
-  it('leads the aging view with the lib\'s own totals', () => {
-    setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
+  it('leads the aging view with the lib\'s own totals', async () => {
+    await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
     fireEvent.click(screen.getByRole('tab', { name: /^Aging/ }))
 
     const strip = within(screen.getByLabelText('AP totals'))
@@ -251,8 +253,8 @@ describe('the AP board', () => {
     expect(within(strip.getByText('Avg days to pay').closest('.tms-kpi-card') as HTMLElement).getByText('—')).toBeTruthy()
   })
 
-  it('offers to record a bill against an assignment nobody has invoiced', () => {
-    setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
+  it('offers to record a bill against an assignment nobody has invoiced', async () => {
+    await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
 
     expect(screen.getByRole('button', { name: 'Record bill for S-1001' })).toBeTruthy()
     expect(screen.getByText('$1,500.00')).toBeTruthy()
@@ -262,8 +264,8 @@ describe('the AP board', () => {
    * An own-fleet leg is paid through the driver's settlement. A Record button here would
    * raise a carrier bill for freight the driver is already being paid for.
    */
-  it('refuses to bill an own-fleet leg and points at driver pay instead', () => {
-    setup({
+  it('refuses to bill an own-fleet leg and points at driver pay instead', async () => {
+    await setup({
       rowsByTab: {
         AWAITING_INVOICE: [worklistRow({
           assignment: assignment({ kind: 'OWN_ASSET', driverName: 'Ivan P.', carrierName: null }),

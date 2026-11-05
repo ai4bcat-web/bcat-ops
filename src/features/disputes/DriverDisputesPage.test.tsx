@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 vi.mock('@/lib/disputePortalClient', () => ({
@@ -58,8 +58,9 @@ describe('DriverDisputesPage evidence chips', () => {
 })
 
 describe('DriverDisputesPage frame', () => {
-  it('is a public page: tms-public root, no staff shell', () => {
-    const { container } = renderIn(<DriverDisputesPage />)
+  it('is a public page: tms-public root, no staff shell', async () => {
+    let container!: HTMLElement
+    await act(async () => { container = renderIn(<DriverDisputesPage />).container })
     expect(container.querySelector('.tms-public')).toBeTruthy()
     expect(container.querySelector('.tms-shell')).toBeNull()
   })

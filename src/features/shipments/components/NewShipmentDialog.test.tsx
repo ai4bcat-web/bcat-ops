@@ -12,7 +12,7 @@
  * still run, because deleting the create path would otherwise drop them silently.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { useAppStore } from '@/store/useAppStore'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -191,10 +191,10 @@ describe('a broker no record matches', () => {
     expect(screen.getByText(/Customer not linked/)).toBeTruthy()
   })
 
-  it('refuses to save with neither a record nor typed text', () => {
+  it('refuses to save with neither a record nor typed text', async () => {
     render(<NewShipmentDialog open onClose={vi.fn()} prefill={{ dateStr: '2026-10-09' }} />)
     fillStopDates('2026-10-09')
-    save()
+    await act(async () => { save() })
     expect(createShipmentMock).not.toHaveBeenCalled()
   })
 })

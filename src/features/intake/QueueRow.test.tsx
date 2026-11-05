@@ -11,6 +11,8 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { QueueRow } from './IntakePage'
 import type { IntakeItem } from '@/types'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+
 const base = {
   id: 't1', source: 'IVAN_CARTAGE', status: 'NEW',
   subject: 'Tender TMS ID 212666394: CHICAGO, IL(10/08)',

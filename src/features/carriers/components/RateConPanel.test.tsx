@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
@@ -33,22 +33,25 @@ const contacts = [
 const carrier = (mcpStatus?: string | null) =>
   ({ id: 'car-1', name: 'Swift', status: 'ACTIVE', email: 'main@swift.com', mcpStatus }) as CarrierRecord
 
-function setup(opts: { carrier?: CarrierRecord | null; rateConVersion?: number } = {}) {
+/** Renders inside async act so the divisions load lands before the assertions. */
+async function setup(opts: { carrier?: CarrierRecord | null; rateConVersion?: number } = {}) {
   const onSend = vi.fn(async () => {})
-  render(
-    <MemoryRouter>
-      <RateConPanel
-        bundle={bundle}
-        loadCarrier={{ ...loadCarrier, rateConVersion: opts.rateConVersion } as LoadCarrierRecord}
-        carrier={opts.carrier === undefined ? carrier('ACCEPTABLE') : opts.carrier}
-        contacts={contacts}
-        settings={null}
-        busy={false}
-        onSend={onSend}
-        onVoid={vi.fn(async () => {})}
-      />
-    </MemoryRouter>,
-  )
+  await act(async () => {
+    render(
+      <MemoryRouter>
+        <RateConPanel
+          bundle={bundle}
+          loadCarrier={{ ...loadCarrier, rateConVersion: opts.rateConVersion } as LoadCarrierRecord}
+          carrier={opts.carrier === undefined ? carrier('ACCEPTABLE') : opts.carrier}
+          contacts={contacts}
+          settings={null}
+          busy={false}
+          onSend={onSend}
+          onVoid={vi.fn(async () => {})}
+        />
+      </MemoryRouter>,
+    )
+  })
   return onSend
 }
 
@@ -57,14 +60,14 @@ const addBox = () => screen.getByLabelText('Add another address')
 
 describe('RateConPanel recipients', () => {
   it('sends to the default recipients when the user just clicks Send', async () => {
-    const onSend = setup()
+    const onSend = await setup()
     fireEvent.click(sendButton())
     await waitFor(() => expect(onSend).toHaveBeenCalled())
     expect(onSend.mock.calls[0][0].to).toEqual(['dana@swift.com'])
   })
 
   it('sends only the addresses still ticked', async () => {
-    const onSend = setup()
+    const onSend = await setup()
     fireEvent.click(screen.getByLabelText(/pat@swift\.com/))
     fireEvent.click(screen.getByLabelText(/dana@swift\.com/))
     fireEvent.click(sendButton())
@@ -73,7 +76,7 @@ describe('RateConPanel recipients', () => {
   })
 
   it('commits a valid pending address on Send', async () => {
-    const onSend = setup()
+    const onSend = await setup()
     fireEvent.change(addBox(), { target: { value: 'New@Carrier.com' } })
     fireEvent.click(sendButton())
     await waitFor(() => expect(onSend).toHaveBeenCalled())
@@ -81,7 +84,7 @@ describe('RateConPanel recipients', () => {
   })
 
   it('blocks the send when the pending address is invalid', async () => {
-    const onSend = setup()
+    const onSend = await setup()
     fireEvent.change(addBox(), { target: { value: 'bad@' } })
     fireEvent.click(sendButton())
     expect(await screen.findByText('"bad@" is not a valid email address.')).toBeInTheDocument()
@@ -89,7 +92,7 @@ describe('RateConPanel recipients', () => {
   })
 
   it('blocks the send on an invalid CC token and passes valid ones', async () => {
-    const onSend = setup()
+    const onSend = await setup()
     fireEvent.change(screen.getByLabelText('Rate con cc'), { target: { value: 'ok@x.com, nope' } })
     fireEvent.click(sendButton())
     expect(await screen.findByText('CC: "nope" is not a valid email address.')).toBeInTheDocument()
@@ -101,21 +104,21 @@ describe('RateConPanel recipients', () => {
     expect(onSend.mock.calls[0][0].cc).toEqual(['ok@x.com', 'two@x.com'])
   })
 
-  it('disables Send when nothing is selected', () => {
-    setup()
+  it('disables Send when nothing is selected', async () => {
+    await setup()
     fireEvent.click(screen.getByLabelText(/dana@swift\.com/))
     expect(sendButton()).toBeDisabled()
   })
 
-  it('tells the sender they are copied automatically', () => {
-    setup()
+  it('tells the sender they are copied automatically', async () => {
+    await setup()
     expect(screen.getByText(/dispatch@bcatcorp\.com/)).toHaveTextContent('copied automatically')
   })
 })
 
 describe('RateConPanel MyCarrierPackets gate', () => {
-  it('blocks Send and Re-send with a notice and a profile link, but keeps Preview', () => {
-    const onSend = setup({ carrier: carrier('INVITED'), rateConVersion: 1 })
+  it('blocks Send and Re-send with a notice and a profile link, but keeps Preview', async () => {
+    const onSend = await setup({ carrier: carrier('INVITED'), rateConVersion: 1 })
     expect(sendButton()).toHaveTextContent('Re-send')
     expect(sendButton()).toBeDisabled()
     expect(screen.getByRole('status')).toHaveTextContent('Swift')
@@ -125,20 +128,20 @@ describe('RateConPanel MyCarrierPackets gate', () => {
     expect(onSend).not.toHaveBeenCalled()
   })
 
-  it('enables Send for a completed packet', () => {
-    setup({ carrier: carrier('ACCEPTABLE') })
+  it('enables Send for a completed packet', async () => {
+    await setup({ carrier: carrier('ACCEPTABLE') })
     expect(sendButton()).toBeEnabled()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it('blocks Send for a carrier that is not Active even with a completed packet (MyCarrierPackets moved it out of compliance)', () => {
-    setup({ carrier: { ...carrier('ACCEPTABLE'), status: 'INACTIVE' } as CarrierRecord })
+  it('blocks Send for a carrier that is not Active even with a completed packet (MyCarrierPackets moved it out of compliance)', async () => {
+    await setup({ carrier: { ...carrier('ACCEPTABLE'), status: 'INACTIVE' } as CarrierRecord })
     expect(sendButton()).toBeDisabled()
     expect(screen.getByRole('status')).toHaveTextContent('not Active')
   })
 
-  it('does not pre-block while the carrier bundle has not loaded (the server decides)', () => {
-    setup({ carrier: null })
+  it('does not pre-block while the carrier bundle has not loaded (the server decides)', async () => {
+    await setup({ carrier: null })
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 })

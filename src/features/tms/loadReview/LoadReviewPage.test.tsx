@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   divisions: vi.fn(),
 }))
 
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
 vi.mock('@/hooks/useShipments', () => ({ useShipments: mocks.shipments }))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ hasPageAccess: mocks.hasPageAccess }) }))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: mocks.divisions() }) }))

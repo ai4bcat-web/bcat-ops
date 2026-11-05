@@ -78,6 +78,11 @@ function sentEmail(ses: MockInstance): { to: string; subject: string; body: stri
 const INVITE = { id: 'inv-1', driverId: 'drv-1', email: 'roy@example.com', token: 'tok-abc' }
 const DRIVER = { id: 'drv-1', name: 'Roy Workman', email: 'roy@example.com' }
 
+beforeEach(() => {
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+})
+
 afterEach(() => vi.restoreAllMocks())
 
 describe('appInvite', () => {

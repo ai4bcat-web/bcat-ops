@@ -7,7 +7,7 @@
  * with `DISPATCHER` and anything another feature owns still on them — and the page
  * grid must not be able to take a role, a claim or admin away.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 
 type Row = Record<string, unknown>
@@ -397,7 +397,13 @@ function auditRows(): Row[] {
   return [...table(TABLES.audit).values()]
 }
 
+let warnSpy: ReturnType<typeof vi.spyOn>
+
 beforeEach(() => {
+  // The handler narrates every action and refusal on the console; keep the run quiet.
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
   store.clear()
   pool.users.clear()
   pool.membership.clear()
@@ -413,12 +419,22 @@ beforeEach(() => {
   seedUser(ADMIN_EMAIL, ['ADMIN', 'DISPATCHER', 'page-users'])
 })
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 // ── The gate ─────────────────────────────────────────────────────────────────
 
 describe('authorization', () => {
   it('refuses a signed-in user who is neither owner nor ADMIN', async () => {
     seedUser('sam@bcatcorp.com', ['DISPATCHER'])
     await expect(call({ action: 'list' }, staff)).rejects.toThrow('Forbidden: managing users requires owner or ADMIN.')
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('forbidden caller'),
+      'sam@bcatcorp.com',
+      '| identity:',
+      expect.any(String),
+    )
   })
 
   it('refuses an ADMIN who tries to grant the ADMIN role', async () => {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 const api = vi.hoisted(() => ({
   listTruckConfigs: vi.fn(async () => []),
@@ -33,21 +33,23 @@ describe('TruckPhoneEditor', () => {
     expect(api.upsertTruckConfig).toHaveBeenCalledWith({ truckId: 't1', unitNumber: '12', phone: '+13125550142', phoneLabel: 'Cab phone' })
   })
 
-  it('shows the reason and writes nothing for a number that is not a US number', () => {
+  it('shows the reason and writes nothing for a number that is not a US number', async () => {
     render(<TruckPhoneEditor truckId="t1" unitNumber="12" />)
     fireEvent.change(phoneBox(), { target: { value: '312555' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(screen.getByRole('alert').textContent).toMatch(/US phone number/)
     expect(api.upsertTruckConfig).not.toHaveBeenCalled()
+    await act(async () => {}) // the truck-config list load settles inside act
   })
 
-  it('refuses letters', () => {
+  it('refuses letters', async () => {
     render(<TruckPhoneEditor truckId="t1" unitNumber="12" />)
     fireEvent.change(phoneBox(), { target: { value: '+1 312 555 CALL' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(screen.getByRole('alert').textContent).toMatch(/digits only/)
     expect(api.upsertTruckConfig).not.toHaveBeenCalled()
+    await act(async () => {}) // the truck-config list load settles inside act
   })
 
   it('Clear sends nulls for the phone and its label', async () => {

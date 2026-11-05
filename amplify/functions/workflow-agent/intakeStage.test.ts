@@ -91,7 +91,10 @@ describe('stageIntake', () => {
 
   it('swallows a failing write and reports it in the detail', async () => {
     db.failPut = true
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const result = await stageIntake(run(), mail([]), BARE)
+    expect(error).toHaveBeenCalledWith('[workflow-agent] intake staging failed', expect.any(String), expect.any(Error))
+    error.mockRestore()
     expect(result).toMatchObject({ staged: false })
     expect(result.detail).toMatch(/intake staging failed.*DynamoDB unavailable/)
   })

@@ -13,7 +13,7 @@ import { CheckCircle2, Circle, Edit2, Upload, X, FileImage } from 'lucide-react'
 import { SidePanel } from '@/features/files/SidePanel'
 import { panelBtn } from '@/lib/ui/panel-btn'
 import { DirectoryCreateDialog } from '@/components/directory-picker/DirectoryCreateDialog'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -109,9 +109,10 @@ function EditLoadDialog({
           padding: '16px 52px 16px 24px', borderBottom: '1px solid var(--tms-border)',
           flexShrink: 0,
         }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--tms-text)', margin: 0 }}>
+          <DialogTitle style={{ fontSize: 16, fontWeight: 600, color: 'var(--tms-text)', margin: 0, lineHeight: 'normal' }}>
             {`Edit — ${load?.aljexId ?? 'Load'}`}
-          </h2>
+          </DialogTitle>
+          <DialogDescription className="sr-only">Edit the details of this load.</DialogDescription>
         </div>
 
         {/* Scrollable body */}
@@ -606,11 +607,11 @@ export function LoadDrawer() {
   const proDialog = proDraft !== null && load && (
     <Dialog open onOpenChange={(open) => { if (!open) setProDraft(null) }}>
       <DialogContent className="tms-portal" style={{ maxWidth: 420 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--tms-text)', margin: 0 }}>Change Pro #</h2>
-        <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', margin: '6px 0 0' }}>
+        <DialogTitle style={{ fontSize: 16, fontWeight: 600, color: 'var(--tms-text)', margin: 0, lineHeight: 'normal' }}>Change Pro #</DialogTitle>
+        <DialogDescription style={{ fontSize: 12.5, color: 'var(--tms-muted)', margin: '6px 0 0' }}>
           The new number is claimed for good. {load.aljexId || 'The old one'} stays claimed too —
           a Pro # is never reissued, so nothing can land on it again.
-        </p>
+        </DialogDescription>
         <Input
           autoFocus
           aria-label="New Pro #"

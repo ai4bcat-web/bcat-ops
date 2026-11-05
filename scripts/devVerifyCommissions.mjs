@@ -430,6 +430,7 @@ async function main() {
       await shipAction('READY_TO_INVOICE', {
         orderId: order.id,
         expectedUpdatedAt: order.updatedAt,
+        review: { source: 'LOAD_REVIEW' },
       }).catch((err) => console.log(`  (ready: ${String(err.message).slice(0, 120)})`))
       const result = await finAction('GENERATE_INVOICE', { orderId: order.id })
       return result.invoice

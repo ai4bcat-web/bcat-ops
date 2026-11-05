@@ -30,6 +30,10 @@ function item(over: Record<string, unknown> = {}) {
 const LOAD = { id: 'l1', aljexId: '14556  ', tmsId: '212666394', pickupNumber: '1749123' }
 
 beforeEach(() => {
+  // Handlers narrate on the console (and fixtures trip the logged failure paths); keep it out of the run output.
+  vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  vi.spyOn(console, 'error').mockImplementation(() => undefined)
   vi.clearAllMocks()
   sent.length = 0
   send.mockImplementation(async (cmd: { constructor: { name: string }; input: Record<string, unknown> }) => {

@@ -8,12 +8,15 @@
  * reusing its number. So `useLoads().loads` must hide it and `useLoads().allLoads` must
  * still hold it. These tests pin both halves against the one record that matters.
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { proConflict } from '@/lib/proConflict'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from './useLoads'
 import type { Load } from '@/types'
+
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
 
 const load = (over: Partial<Load>): Load => ({
   id: 'l1', aljexId: '14578', stops: [], readyToInvoice: false, ...over,

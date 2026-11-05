@@ -12,8 +12,16 @@
  * and the bytes — so the next change to this function cannot quietly drift from the spec
  * while we are still working out whose fault the 500 is.
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { OtrClient, OTR_DOC_TYPE } from './otrClient'
+
+// The client logs every upload and failure; these tests assert on the request, not the log.
+beforeEach(() => {
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+})
+afterEach(() => vi.restoreAllMocks())
 
 /** A real PDF header, so a byte-for-byte comparison means something. */
 const PDF_BYTES = new Uint8Array([

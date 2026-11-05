@@ -16,6 +16,8 @@ import type { DriverPayCredit, DriverPayCreditInput } from '@/lib/apiClient'
 import { calcDriverPay } from '@/lib/driverPay'
 import { CreditModal } from './DriverPayForms'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) })) // apiClient builds its client at import
+
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
 

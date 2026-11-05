@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { BookCarrierDialog, type BookCarrierFields } from './BookCarrierDialog'
 import type { CarrierRecord, ShipmentBundle, TmsSettings, UserProfileRecord } from '@/types/tms'
@@ -231,6 +231,7 @@ describe('BookCarrierDialog', () => {
     expect(params.get('loadId')).toBe('load-1')
     expect(params.get('q')).toBe('Ivan Cartage')
     expect(onClose).toHaveBeenCalled()
+    await act(async () => {})
   })
 
   describe('Ivan Cartage (own fleet)', () => {
@@ -244,6 +245,8 @@ describe('BookCarrierDialog', () => {
       await waitFor(() => expect(screen.getByText('Preflight')).toBeTruthy())
       for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box)
       fireEvent.click(screen.getByRole('tab', { name: '3. Dispatch' }))
+      // The Dispatch step mounts the RepPicker, which loads the staff directory.
+      await act(async () => {})
     }
 
     it('takes the driver from the roster only: a select, no typed driver, phone, truck or trailer', async () => {

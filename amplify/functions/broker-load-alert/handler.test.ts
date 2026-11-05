@@ -9,7 +9,7 @@
  *
  * util-dynamodb (marshall/unmarshall) is left REAL so stream images round-trip like prod.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { marshall } from '@aws-sdk/util-dynamodb'
 
 // Resolve the broker driver by id so the handler skips the Driver-table Scan.
@@ -74,11 +74,18 @@ const baseLoad = (over: LoadImage = {}): LoadImage => ({
 })
 
 beforeEach(() => {
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  vi.spyOn(console, 'error').mockImplementation(() => {})
   send.mockReset()
   fetchMock.mockClear()
   fetchMock.mockImplementation(async () => ({ json: async () => ({ ok: true }) }))
   // Default: PutItem succeeds.
   send.mockResolvedValue({})
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('broker-load-alert handler', () => {

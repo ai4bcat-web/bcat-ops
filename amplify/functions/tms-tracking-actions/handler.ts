@@ -2570,32 +2570,6 @@ const podReviewDeps: PodReviewDeps = {
       pro: '',
     }) as never
   },
-  // The Step F gate, never around it: the shipment router owns READY_TO_INVOICE
-  // and this delegates to it rather than writing arStatus itself.
-  readyForBilling: async (shipmentId, caller) => {
-    const orders = await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
-    const order = orders[0]
-    if (!order) throw new Error(`Shipment ${shipmentId} has no order to release`)
-    // The real READY_TO_INVOICE, imported rather than reimplemented: it runs
-    // `evaluateReleaseGate` and refuses in the gate's own words. A POD that
-    // passes review does not buy its way past paperwork that is still missing.
-    const { readyToInvoice } = await import('../tms-shipment-actions/documents')
-    return readyToInvoice(
-      {
-        store: stepPStore,
-        s3,
-        bucket: BUCKET_NAME,
-        customerTable: CUSTOMER_TABLE_NAME,
-        settingsTable: TMS_SETTINGS_TABLE_NAME,
-        driverSubmissionTable: '',
-        driverSubmissionDocTable: '',
-        writeAudit: (entityType, entityId, action, actor, changes) =>
-          writeAudit(entityType as AuditEntityType, entityId, action as Action, actor, changes),
-      },
-      { orderId: String(order.id), expectedUpdatedAt: String(order.updatedAt ?? '') },
-      caller,
-    )
-  },
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────

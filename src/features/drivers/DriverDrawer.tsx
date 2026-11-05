@@ -11,7 +11,7 @@
  * update so there is still exactly ONE assignment path, shared with the Fleet page.
  */
 import { useState, useRef, useEffect } from 'react'
-import { useForm, Controller } from 'react-hook-form'
+import { useForm, useWatch, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Trash2, Building2, Truck, Camera, Check, ShieldCheck, User } from 'lucide-react'
 import { FormSection, Field } from '@/components/ui/form-section'
@@ -42,6 +42,15 @@ import { cn } from '@/lib/utils'
 
 function getInitials(name: string): string {
   return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()
+}
+
+const DRIVER_COLOR_KEYS: ColorKey[] = [
+  'driver-1','driver-2','driver-3','driver-4','driver-5','driver-6',
+  'driver-7','driver-8','driver-9','driver-10','driver-11','driver-12',
+]
+
+function randomDriverColor(): ColorKey {
+  return DRIVER_COLOR_KEYS[Math.floor(Math.random() * DRIVER_COLOR_KEYS.length)]
 }
 
 function normalizePhone(raw: string): string {
@@ -84,7 +93,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
   const [shouldDeletePhoto, setShouldDeletePhoto] = useState(false)
 
   const {
-    register, handleSubmit, reset, control, watch, setValue,
+    register, handleSubmit, reset, control, setValue,
     formState: { errors, isSubmitting },
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
@@ -110,11 +119,10 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
     }
   }
 
-  const watchType = watch('type')
-  const watchName = watch('name')
-  const watchColorKey = watch('colorKey')
-  const watchFleet = watch('fleetGroup')
-  const watchTruckId = watch('assignedTruckId')
+  const [watchType, watchName, watchColorKey, watchFleet, watchTruckId] = useWatch({
+    control,
+    name: ['type', 'name', 'colorKey', 'fleetGroup', 'assignedTruckId'],
+  })
 
   // The work phone belongs to the truck selected in the form, so it follows the select live.
   // The personal number is the editable Phone field above it, so it is left out here.
@@ -128,7 +136,20 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
     return { ...phones, personal: null, personalRaw: null }
   })()
 
-  // Reset form and photo state whenever the drawer opens or the driver changes
+  // Photo state follows the drawer: a fresh draft each time it opens or the driver changes.
+  // Derived during render (not in an effect) so the form never paints the previous driver's photo.
+  const photoKey = open ? (driver?.id ?? 'new') : null
+  const [prevPhotoKey, setPrevPhotoKey] = useState<string | null>(null)
+  if (prevPhotoKey !== photoKey) {
+    setPrevPhotoKey(photoKey)
+    if (photoKey !== null) {
+      setPhotoFile(null)
+      setPhotoPreview(driver?.photoUrl ?? null)
+      setShouldDeletePhoto(false)
+    }
+  }
+
+  // Reset the form whenever the drawer opens or the driver changes
   useEffect(() => {
     if (open) {
       reset(driver
@@ -149,9 +170,6 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
             fleetGroup: driver.fleetGroup ?? null,
           }
         : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '', ivanApp: null, timeClock: null, unitType: null })
-      setPhotoFile(null)
-      setPhotoPreview(driver?.photoUrl ?? null)
-      setShouldDeletePhoto(false)
     }
   }, [open, driver?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -182,11 +200,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
 
   const onSubmit = async (values: DriverFormValues) => {
     // Auto-assign a color if none chosen
-    const colorKeys: ColorKey[] = [
-      'driver-1','driver-2','driver-3','driver-4','driver-5','driver-6',
-      'driver-7','driver-8','driver-9','driver-10','driver-11','driver-12',
-    ]
-    const autoColor = values.colorKey ?? colorKeys[Math.floor(Math.random() * colorKeys.length)]
+    const autoColor = values.colorKey ?? randomDriverColor()
     const normalized = { ...values, phone: normalizePhone(values.phone), colorKey: autoColor, dispatcherPrimary: values.dispatcherPrimary || null, dispatcherBackup: values.dispatcherBackup || null }
     try {
       let driverId: string

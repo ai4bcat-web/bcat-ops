@@ -536,9 +536,17 @@ function seedDocument(overrides: Row = {}): Row {
 // real promises throughout.
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
 })
 
+// Refused sends, an unconfigured Twilio and unparseable fixtures are logged by design in this
+// suite; keep that output out of the run (and inspectable via these spies).
+let warnSpy: ReturnType<typeof vi.spyOn>
+let errorSpy: ReturnType<typeof vi.spyOn>
+
 beforeEach(() => {
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
   vi.useFakeTimers({ now: new Date('2026-02-02T12:00:00.000Z'), toFake: ['Date'] })
   store.clear()
   send.mockReset()
@@ -740,6 +748,7 @@ describe('SEND_TRACKING_LINK', () => {
     const token = String((result.link as Row).id)
 
     expect(result.smsStatus).toBe('FAILED')
+    expect(errorSpy).toHaveBeenCalledWith('[tms-tracking-actions] text failed', expect.objectContaining({ phone: '+12245550137' }))
     expect(result.url).toBe(`https://portal.test/track/l/${token}`)
     expect(table(TABLES.link).get(token)).toMatchObject({ status: 'ACTIVE', sentAt: null })
     // And the check call carries the gateway's reason, not a claim of delivery.
@@ -754,6 +763,7 @@ describe('SEND_TRACKING_LINK', () => {
     const result = await call('SEND_TRACKING_LINK', { loadCarrierId: 'lc-1', via: 'SMS' })
 
     expect(result.smsStatus).toBe('NOT_CONFIGURED')
+    expect(warnSpy).toHaveBeenCalledWith('[tms-tracking-actions] dispatch is not connected to Twilio; nothing texted')
     const events = [...table(TABLES.checkCall).values()]
     expect(events).toHaveLength(1)
     // The timeline is read long after the dialog is closed; it must not claim a text

@@ -102,6 +102,7 @@ import {
 } from '../_shared/actionInputs'
 import {
   attachDriverDoc,
+  LOAD_REVIEW_ONLY_MESSAGE,
   commitDocument,
   prepareDocumentUpload,
   rateCarrier,
@@ -7256,6 +7257,9 @@ async function setArStatus(input: Row, caller: Caller): Promise<Row> {
       ),
     )
     if (!release.ok) throw releaseGateError(release.missing)
+    // Load Review is the only way into billing: a hand-set UNBILLED is the same
+    // release by another door. Imported Aljex history (legacyImported) is exempt.
+    if (bundle.shipment.legacyImported !== true) throw new Error(LOAD_REVIEW_ONLY_MESSAGE)
   }
   if (requested === 'INVOICE_NOT_NEEDED' && revenue !== 0) {
     throw new Error('An order with revenue still needs an invoice')

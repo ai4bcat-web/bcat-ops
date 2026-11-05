@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 import { Loader2, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { fetchTrucks, selectTruck, type TruckChoice } from './driverApi'
 import { useDriverTruck } from './useDriverProgram'
 import { errorText } from '@/lib/errorText'
@@ -27,10 +27,10 @@ export function TruckPickerDialog({
       <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Which truck are you in today?</DialogTitle>
+          <DialogDescription>
+            Pick your unit so your ELD logs and your truck's location are on your name.
+          </DialogDescription>
         </DialogHeader>
-        <p className="text-sm text-muted-foreground">
-          Pick your unit so your ELD logs and your truck's location are on your name.
-        </p>
         {/* Mounted fresh each time the dialog opens, so the list is fetched anew without any state to reset. */}
         {open && <TruckList onClose={onClose} onPicked={onPicked} />}
       </DialogContent>

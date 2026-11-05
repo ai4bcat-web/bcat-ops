@@ -9,7 +9,7 @@
  * `quoteViews.test.ts` without a browser.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QuotesPage } from './QuotesPage'
 import type { QuoteRecord, QuoteStatus } from '@/types/tms'
@@ -53,7 +53,7 @@ function quote(patch: Partial<QuoteRecord> & { id: string; status: QuoteStatus }
   }
 }
 
-function setup(options: { open?: QuoteRecord[]; month?: QuoteRecord[] } = {}) {
+async function setup(options: { open?: QuoteRecord[]; month?: QuoteRecord[] } = {}) {
   worklistMock.mockReturnValue({
     open: options.open ?? [],
     loading: false,
@@ -61,14 +61,16 @@ function setup(options: { open?: QuoteRecord[]; month?: QuoteRecord[] } = {}) {
     refresh: vi.fn().mockResolvedValue(undefined),
   })
   monthMock.mockResolvedValue(options.month ?? [])
-  return render(<MemoryRouter><QuotesPage /></MemoryRouter>)
+  let view!: ReturnType<typeof render>
+  await act(async () => { view = render(<MemoryRouter><QuotesPage /></MemoryRouter>) })
+  return view
 }
 
 beforeEach(() => vi.clearAllMocks())
 
 describe('the quote board', () => {
-  it('offers every view of the pipeline, and each one renders', () => {
-    setup({ open: [quote({ id: 'Q1', status: 'REQUESTED' })] })
+  it('offers every view of the pipeline, and each one renders', async () => {
+    await setup({ open: [quote({ id: 'Q1', status: 'REQUESTED' })] })
     for (const label of ['To price', 'Sent', 'Replies', 'Drafts', 'Won / Lost', 'Carrier offers']) {
       // The MVMNT quick tab carries its count inside the button, so the accessible
       // name is "To price 1"; the tab is still identified by the label it leads with.
@@ -80,8 +82,8 @@ describe('the quote board', () => {
     expect(screen.getByText('No offer is out with a carrier.')).toBeTruthy()
   })
 
-  it('counts each tab by the rows that tab actually draws', () => {
-    setup({
+  it('counts each tab by the rows that tab actually draws', async () => {
+    await setup({
       open: [
         quote({ id: 'Q1', status: 'REQUESTED' }),
         quote({ id: 'Q2', status: 'QUOTED', expiresAt: TOMORROW }),
@@ -108,8 +110,8 @@ describe('the quote board', () => {
    * on it and that hour is gone. Both facts come off `quoteState`, so the row cannot
    * offer a verb the Lambda would refuse.
    */
-  it('offers Re-send and not Convert on a quote whose link has lapsed', () => {
-    setup({ open: [quote({ id: 'Q9', status: 'QUOTED', expiresAt: YESTERDAY, linkToken: 'tok' })] })
+  it('offers Re-send and not Convert on a quote whose link has lapsed', async () => {
+    await setup({ open: [quote({ id: 'Q9', status: 'QUOTED', expiresAt: YESTERDAY, linkToken: 'tok' })] })
     fireEvent.click(screen.getByRole('tab', { name: /^Sent/ }))
 
     expect(screen.getAllByText('Expired').length).toBeGreaterThan(0)
@@ -117,8 +119,8 @@ describe('the quote board', () => {
     expect(screen.queryByRole('button', { name: 'Convert Q9' })).toBeNull()
   })
 
-  it('leads with the money on the table and a win rate a quiet month cannot break', () => {
-    setup({ open: [quote({ id: 'Q1', status: 'QUOTED', amountCents: 250_000, expiresAt: TOMORROW })] })
+  it('leads with the money on the table and a win rate a quiet month cannot break', async () => {
+    await setup({ open: [quote({ id: 'Q1', status: 'QUOTED', amountCents: 250_000, expiresAt: TOMORROW })] })
 
     const strip = within(screen.getByLabelText('Quote totals'))
     const tile = (label: string) => within(strip.getByText(label).closest('.tms-kpi-card') as HTMLElement)
@@ -128,8 +130,8 @@ describe('the quote board', () => {
     expect(tile('Median hours to reply').getByText('—')).toBeTruthy()
   })
 
-  it('shows each sent quote as Pending or Expired in one outcome column', () => {
-    setup({
+  it('shows each sent quote as Pending or Expired in one outcome column', async () => {
+    await setup({
       open: [
         quote({ id: 'Q1', status: 'QUOTED', expiresAt: TOMORROW }),
         quote({ id: 'Q2', status: 'QUOTED', expiresAt: YESTERDAY }),
@@ -141,7 +143,7 @@ describe('the quote board', () => {
   })
 
   it('filters Won / Lost by outcome, a converted quote counting as Won', async () => {
-    setup({
+    await setup({
       month: [
         quote({ id: 'QW', status: 'WON', shipmentId: 'S1', closedAt: '2026-03-12T00:00:00Z' }),
         quote({ id: 'QL', status: 'LOST', lostReason: 'TOO_HIGH', closedAt: '2026-03-11T00:00:00Z' }),

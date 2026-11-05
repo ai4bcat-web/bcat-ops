@@ -8,6 +8,8 @@ import { FACTORING_FEE_LABEL, type DriverPayStatement } from '@/lib/driverPay'
 import type { Driver } from '@/types'
 import type { DriverPaySetting } from '@/lib/apiClient'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) })) // apiClient builds its client at import
+
 const useAmazonPayMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/hooks/useAmazonPay', () => ({
@@ -65,10 +67,13 @@ function csvFromExportClick(): Promise<string> {
   const revoke = URL.revokeObjectURL
   URL.createObjectURL = (b: Blob) => { blobs.push(b); return 'blob:test' }
   URL.revokeObjectURL = () => {}
+  // The download is an anchor click; jsdom would try to navigate to the blob URL.
+  const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
   try {
     fireEvent.click(screen.getByRole('button', { name: 'CSV' }))
     return blobs[0].text()
   } finally {
+    anchorClick.mockRestore()
     URL.createObjectURL = create
     URL.revokeObjectURL = revoke
   }

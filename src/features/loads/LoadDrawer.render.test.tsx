@@ -11,7 +11,7 @@
  * either one.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import type { Load } from '@/types'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -31,6 +31,13 @@ vi.mock('@/store/useAppStore', () => ({
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ user: { email: 'ryne@bcatcorp.com' }, isAdmin: true, isOwner: true }),
   useAuthUser: () => ({ email: 'ryne@bcatcorp.com' }),
+}))
+
+// Staff submissions are fetched over the API; nothing here depends on them.
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {} }) }))  // clients build at import
+vi.mock('@/lib/driverSubmissionsClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/driverSubmissionsClient')>()),
+  listDriverSubmissions: () => Promise.resolve([]),
 }))
 
 vi.mock('@/features/pods/LoadPods', () => ({
@@ -59,47 +66,54 @@ const baseState = (drawerMode: string | null) => ({
 
 beforeEach(() => { state = baseState(null) })
 
+// The drawer's data hooks resolve on a later tick; settle them inside act so the render is final.
+async function renderDrawer() {
+  const result = render(<LoadDrawer />)
+  await act(async () => {})
+  return result
+}
+
 describe('LoadDrawer visibility', () => {
-  it('renders NOTHING when no drawer is open', () => {
-    const { container } = render(<LoadDrawer />)
+  it('renders NOTHING when no drawer is open', async () => {
+    const { container } = await renderDrawer()
     expect(container.textContent).toBe('')
   })
 
-  it('opens on the load when drawerMode is set', () => {
+  it('opens on the load when drawerMode is set', async () => {
     state = baseState('view')
-    render(<LoadDrawer />)
+    await renderDrawer()
     expect(screen.getAllByText(/55501/).length).toBeGreaterThan(0)
   })
 })
 
 describe('LoadDrawer uses the shared panel', () => {
-  it('renders as a named dialog with a Close control', () => {
+  it('renders as a named dialog with a Close control', async () => {
     state = baseState('view')
-    render(<LoadDrawer />)
+    await renderDrawer()
     const dialog = screen.getByRole('dialog')
     expect(dialog.getAttribute('aria-labelledby')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
   })
 
-  it('shows the invoice status badge as a header action', () => {
+  it('shows the invoice status badge as a header action', async () => {
     state = baseState('view')
-    render(<LoadDrawer />)
+    await renderDrawer()
     // Appears twice by design: the header badge and the Status field in the body.
     expect(screen.getAllByText(/Ready to Invoice/i).length).toBeGreaterThanOrEqual(2)
   })
 
-  it('keeps the load number as the panel title and the customer as its subtitle', () => {
+  it('keeps the load number as the panel title and the customer as its subtitle', async () => {
     state = baseState('view')
-    render(<LoadDrawer />)
+    await renderDrawer()
     expect(screen.getAllByText('55501').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/Metz/).length).toBeGreaterThan(0)
   })
 
   // Ryne, 2026-10-28: a PRO number is permanent, so no screen may offer to delete a
   // load. The drawer is the last place one was reachable from.
-  it('offers Edit Load in the pinned footer and no way to delete the load', () => {
+  it('offers Edit Load in the pinned footer and no way to delete the load', async () => {
     state = baseState('view')
-    render(<LoadDrawer />)
+    await renderDrawer()
     expect(screen.getByText(/Edit Load/i)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /delete/i })).toBeNull()
   })
@@ -112,9 +126,9 @@ describe('LoadDrawer uses the shared panel', () => {
  * src/features/shipments/components/NewShipmentDialog.test.tsx.
  */
 describe('the drawer never creates a record', () => {
-  it('edits a leg and offers no way to mint one', () => {
+  it('edits a leg and offers no way to mint one', async () => {
     state = baseState('edit')
-    render(<LoadDrawer />)
+    await renderDrawer()
     expect(screen.getByRole('button', { name: /save changes/i })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /create load/i })).toBeNull()
   })
@@ -124,9 +138,9 @@ describe('the drawer never creates a record', () => {
    * Shipment and the Order stayed unresolved, so the release gate and the AR worklist
    * disagreed with what the calendar showed.
    */
-  it('shows the customer read-only and points at the shipment detail', () => {
+  it('shows the customer read-only and points at the shipment detail', async () => {
     state = baseState('edit')
-    render(<LoadDrawer />)
+    await renderDrawer()
     const customer = [...document.body.querySelectorAll('input')]
       .find((el) => el.value === 'Metz Logistics')
     expect(customer?.disabled).toBe(true)
@@ -137,9 +151,9 @@ describe('the drawer never creates a record', () => {
    * `aljexId` is field-level read-only to clients now: the PRO claim owns it, so the only
    * way to move one is SET_LOAD_PRO, which takes a new claim and never releases the old.
    */
-  it('offers Pro # only through the claim action, never as an editable field', () => {
+  it('offers Pro # only through the claim action, never as an editable field', async () => {
     state = baseState('edit')
-    render(<LoadDrawer />)
+    await renderDrawer()
     const proField = [...document.body.querySelectorAll('input')].find((el) => el.value === '55501')
     expect(proField?.readOnly).toBe(true)
     expect(screen.getByRole('button', { name: 'Change Pro #' })).toBeTruthy()

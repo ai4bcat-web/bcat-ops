@@ -39,7 +39,10 @@ describe('loadReferenceData', () => {
 
   it('marks the fleet loaded even when the roster read fails (no endless spinner)', async () => {
     api.listDrivers.mockRejectedValue(new Error('down'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     await useAppStore.getState().loadReferenceData()
+    expect(warn).toHaveBeenCalledWith('[store] loadReferenceData: drivers failed', expect.any(Error))
+    warn.mockRestore()
     expect(useAppStore.getState().fleetLoaded).toBe(true)
   })
 })

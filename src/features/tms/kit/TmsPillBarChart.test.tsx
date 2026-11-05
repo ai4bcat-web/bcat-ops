@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { render, screen } from '@testing-library/react'
 import { TmsPillBarChart } from './TmsPillBarChart'
 
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  return { ...actual, ResponsiveContainer: (props: React.ComponentProps<typeof actual.ResponsiveContainer>) => <actual.ResponsiveContainer {...props} width={800} height={300} /> }
+})
 const series = [{ key: 'a', label: 'Brokerage' }, { key: 'b', label: 'Assets' }]
 
 describe('TmsPillBarChart', () => {

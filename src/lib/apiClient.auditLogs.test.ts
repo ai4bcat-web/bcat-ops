@@ -57,9 +57,12 @@ describe('listAuditLogsFor', () => {
     graphqlMock
       .mockRejectedValueOnce({ errors: [{ message: 'Validation error: Cannot query field "listAuditLogByEntityTypeAndEntityId" on type "Query".' }] })
       .mockResolvedValueOnce({ data: { listAuditLogs: { items: [indexRow('1', 'Load', 'l1'), indexRow('2', 'Shipment', 'l1')], nextToken: null } } })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { listAuditLogsFor } = await import('./apiClient')
     const rows = await listAuditLogsFor([{ entityType: 'Load', entityId: 'l1' }])
     expect(rows.map((r) => r.id)).toEqual(['1'])
+    expect(warn).toHaveBeenCalledWith('[apiClient] backend has no AuditLog entity index yet — scanning until deploy')
+    warn.mockRestore()
     // the missing index is remembered: the next call scans straight away
     graphqlMock.mockResolvedValueOnce({ data: { listAuditLogs: { items: [], nextToken: null } } })
     await listAuditLogsFor([{ entityType: 'Load', entityId: 'l2' }])

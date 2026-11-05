@@ -31,7 +31,10 @@ describe('file key classification', () => {
 })
 
 describe('buildFilePacket', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 
   it('produces a cover page even with no documents', async () => {
     const { bytes, outcomes } = await buildFilePacket({
@@ -71,6 +74,7 @@ describe('buildFilePacket', () => {
   })
 
   it('keeps going and marks the item failed when a download breaks', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { bytes, outcomes } = await buildFilePacket({
       ...baseInput,
       items: [
@@ -85,6 +89,7 @@ describe('buildFilePacket', () => {
     ])
     const out = await PDFDocument.load(bytes)
     expect(out.getPageCount()).toBe(3)   // cover + one failure page + one placeholder
+    expect(errorSpy).toHaveBeenCalledWith('[filePacket] could not embed', 'Insurance', expect.objectContaining({ message: 'S3 said no' }))
   })
 })
 

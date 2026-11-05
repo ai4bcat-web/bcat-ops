@@ -407,11 +407,14 @@ describe('event discrimination', () => {
   })
 
   it('refuses a Function URL request with a bad secret and a bad role', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const bad = await handler({
       requestContext: { http: { method: 'POST' } },
       body: JSON.stringify({ action: 'prepare', secret: 'wrong', role: 'AP', messageId: 'm1' }),
     } as never)
     expect(bad).toMatchObject({ statusCode: 401 })
+    expect(warn).toHaveBeenCalledWith('[workflow-agent] unauthorized inbox request')
+    warn.mockRestore()
 
     const role = await handler({
       requestContext: { http: { method: 'POST' } },
@@ -451,6 +454,7 @@ describe('event discrimination', () => {
   })
 
   it('refuses a commit that names an object outside its own message folder', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     // The object exists and its headers match what the caller claims, which is exactly
     // the point: the only thing standing between a holder of the shared secret and
     // another message's invoice is the prefix check.
@@ -477,6 +481,11 @@ describe('event discrimination', () => {
     expect(JSON.parse(result.body).error).toMatch(/outside this message's folder/)
     // Nothing was recorded: no message.json, no run.
     expect(table(TABLES.run).size).toBe(0)
+    expect(warn).toHaveBeenCalledWith(
+      '[workflow-agent] commit named a key outside its own slot',
+      expect.objectContaining({ s3Key: 'intake-pdfs/vendor-ap/someone-elses-invoice.pdf' }),
+    )
+    warn.mockRestore()
   })
 })
 
@@ -488,8 +497,12 @@ describe('intake routing inputs', () => {
     table(TABLES.division).set('B', { id: 'B', code: 'B', name: 'B', active: false, intakeEmail: 'old@bcatcorp.com' })
     table(TABLES.division).set('C', { id: 'C', code: 'C', name: 'C', active: true })
 
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect((await post({ action: 'intakeAddresses', secret: 'wrong' })).statusCode).toBe(401)
     expect((await post({ action: 'intakeAddresses' })).statusCode).toBe(401)
+    expect(warn).toHaveBeenCalledTimes(2)
+    expect(warn).toHaveBeenCalledWith('[workflow-agent] unauthorized inbox request')
+    warn.mockRestore()
     const ok = await post({ action: 'intakeAddresses', secret: 'inbox-secret' })
     expect(ok.statusCode).toBe(200)
     expect(JSON.parse(ok.body)).toEqual({ ok: true, addresses: [{ email: 'tenders+a@bcatcorp.com', divisionCode: 'A' }] })

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { previewInvoice, readyToInvoice } from '@/lib/apiClient'
+import { useEffect, useRef, useState } from 'react'
+import { previewInvoice } from '@/lib/apiClient'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type { ReleaseGateResult } from '@/lib/releaseGate'
 
@@ -10,16 +10,13 @@ export interface ReadyRow extends ArWorklistRow {
 export interface UseReadyForBillingResult {
   rows: ReadyRow[]
   loading: boolean
-  releasingId: string | null
-  refusal: { orderId: string; message: string } | null
-  release: (row: ArWorklistRow, onDone: () => void) => Promise<void>
-  clearRefusal: () => void
 }
 
 /**
- * P10 — the accounting view's data: every DOCS_NEEDED shipment that looks complete,
+ * The accounting view's data: every DOCS_NEEDED shipment that looks complete,
  * cross-checked with the same Step F gate the release path will run. The gate is
- * authoritative; this hook only reads it, never recomputes it.
+ * authoritative; this hook only reads it, never recomputes it. It releases nothing:
+ * release to billing happens in Load Review alone.
  *
  * One PREVIEW_INVOICE per row, so the gates are read only while `enabled` (the tab is open) and
  * once per row set: a page that merely shows the tab's count does not pay a request per order.
@@ -28,8 +25,6 @@ export function useReadyForBilling(rows: ArWorklistRow[], enabled = true): UseRe
   // `null` means the gates for the current row set have not landed yet — that is
   // the loading flag, so no state is ever set synchronously to mark a refetch.
   const [gates, setGates] = useState<Record<string, ReleaseGateResult | null> | null>(null)
-  const [releasingId, setReleasingId] = useState<string | null>(null)
-  const [refusal, setRefusal] = useState<{ orderId: string; message: string } | null>(null)
 
   const rowIds = rows.map((r) => r.orderId).sort().join(',')
 
@@ -48,12 +43,12 @@ export function useReadyForBilling(rows: ArWorklistRow[], enabled = true): UseRe
     let settled = false
     readFor.current = rowIds
     Promise.all(
-      rows.map(async (row) => {
+      rowIds.split(',').filter(Boolean).map(async (orderId) => {
         try {
-          const p = await previewInvoice({ orderId: row.orderId })
-          return { orderId: row.orderId, gate: p.releaseGate }
+          const p = await previewInvoice({ orderId })
+          return { orderId, gate: p.releaseGate }
         } catch {
-          return { orderId: row.orderId, gate: null }
+          return { orderId, gate: null }
         }
       }),
     ).then((results) => {
@@ -69,25 +64,7 @@ export function useReadyForBilling(rows: ArWorklistRow[], enabled = true): UseRe
     }
   }, [rowIds, enabled])
 
-  const release = useCallback(async (row: ArWorklistRow, onDone: () => void) => {
-    setReleasingId(row.orderId)
-    setRefusal(null)
-    try {
-      await readyToInvoice({ orderId: row.orderId, expectedUpdatedAt: row.order.updatedAt })
-      onDone()
-    } catch (err) {
-      setRefusal({
-        orderId: row.orderId,
-        message: err instanceof Error ? err.message : 'Release failed',
-      })
-    } finally {
-      setReleasingId(null)
-    }
-  }, [])
-
-  const clearRefusal = useCallback(() => setRefusal(null), [])
-
   const rowsWithGate: ReadyRow[] = rows.map((r) => ({ ...r, gate: gates?.[r.orderId] }))
 
-  return { rows: rowsWithGate, loading: enabled && gates === null && rows.length > 0, releasingId, refusal, release, clearRefusal }
+  return { rows: rowsWithGate, loading: enabled && gates === null && rows.length > 0 }
 }

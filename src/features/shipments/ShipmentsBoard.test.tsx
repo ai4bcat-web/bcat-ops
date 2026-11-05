@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, within, fireEvent, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ShipmentsBoard } from './ShipmentsBoard'
@@ -393,14 +393,14 @@ describe('ShipmentsBoard', () => {
     renderBoard('/tms/shipments', [row('S001', { assignmentType: 'OWN_ASSET', driverId: null })])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
     fireEvent.click(screen.getByRole('checkbox', { name: /Select all rows/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Batch task/i }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Batch task/i })) })
     const dialog = await screen.findByRole('dialog', { name: /Batch task/i })
 
     expect(within(dialog).queryByText(/Off Driver/)).toBeNull()
     expect(within(dialog).queryByText(/BROKER COVERED/)).toBeNull()
     fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'driver:drv-1' } })
     expect(within(dialog).getByRole('option', { name: 'Assign driver (Ivan Cartage): Dana Driver' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Run$/i }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Run$/i })) })
 
     await waitFor(() => expect(batchShipmentTask).toHaveBeenCalledTimes(1))
     expect(batchShipmentTask).toHaveBeenCalledWith({
@@ -409,7 +409,8 @@ describe('ShipmentsBoard', () => {
       params: { driverId: 'drv-1', truckId: 'trk-1', truckNumber: '101' },
     })
     await waitFor(() => expect(screen.getByText('Delivered 2026-10-14: that pay week has closed.')).toBeTruthy())
-    useAppStore.setState({ drivers: [], equipment: [] })
+    // The board subscribes to the store; reset it inside act so the re-render is not un-acted.
+    await act(async () => { useAppStore.setState({ drivers: [], equipment: [] }) })
   })
 
   it('Create shipment opens the new-shipment form, not the mint utility, and needs no admin rights', async () => {
@@ -465,7 +466,7 @@ describe('ShipmentsBoard', () => {
     const fillAndSubmit = async () => {
       fireEvent.change(screen.getByRole('combobox', { name: /New customer/i }), { target: { value: 'cust-2' } })
       fireEvent.change(screen.getByRole('textbox', { name: /Reason/i }), { target: { value: 'Sold to different division' } })
-      fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i }))
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Re-point$/i })) })
     }
 
     // First credit path.
@@ -483,7 +484,8 @@ describe('ShipmentsBoard', () => {
     await waitFor(() => expect(screen.getByText(/already been invoiced/i)).toBeTruthy())
 
     repointInvoicedCustomer.mockResolvedValueOnce({})
-    fireEvent.click(await screen.findByRole('button', { name: /Credit original and rebill/i }))
+    const credit1 = await screen.findByRole('button', { name: /Credit original and rebill/i })
+    await act(async () => { fireEvent.click(credit1) })
     await waitFor(() => expect(repointInvoicedCustomer).toHaveBeenCalledTimes(1))
     const firstKey = repointInvoicedCustomer.mock.calls[0][0].idempotencyKey
     expect(firstKey).toEqual(expect.any(String))
@@ -498,7 +500,8 @@ describe('ShipmentsBoard', () => {
     await waitFor(() => expect(screen.getByText(/already been invoiced/i)).toBeTruthy())
 
     repointInvoicedCustomer.mockResolvedValueOnce({})
-    fireEvent.click(await screen.findByRole('button', { name: /Credit original and rebill/i }))
+    const credit2 = await screen.findByRole('button', { name: /Credit original and rebill/i })
+    await act(async () => { fireEvent.click(credit2) })
     await waitFor(() => expect(repointInvoicedCustomer).toHaveBeenCalledTimes(2))
     expect(repointInvoicedCustomer.mock.calls[1][0].idempotencyKey).not.toBe(firstKey)
   })

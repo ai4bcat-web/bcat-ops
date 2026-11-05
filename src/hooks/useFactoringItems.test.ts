@@ -34,6 +34,7 @@ describe('useFactoringItems', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.resetAllMocks()
+    vi.restoreAllMocks()
   })
 
   it('loads and polls every 30 seconds', async () => {
@@ -87,6 +88,7 @@ describe('useFactoringItems', () => {
 
 
   it('surfaces fetch errors without clearing existing items', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.mocked(listFactoringItems)
       .mockResolvedValueOnce([item()])
       .mockRejectedValueOnce(new Error('AppSync down'))
@@ -100,6 +102,7 @@ describe('useFactoringItems', () => {
     })
 
     expect(result.current.error).toBeTruthy()
+    expect(errorSpy).toHaveBeenCalledWith('[useFactoringItems] fetch error', expect.objectContaining({ message: 'AppSync down' }))
 
     expect(result.current.items).toHaveLength(1)
   })

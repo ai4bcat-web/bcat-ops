@@ -103,6 +103,8 @@ const renderScheduler = () =>
 const duplicateLeg = async () => {
   fireEvent.contextMenu(screen.getByRole('button', { name: 'leg load-2' }))
   fireEvent.click(await screen.findByText('Duplicate'))
+  // The copy opening is the last thing the click does; wait for it so no update lands after the test.
+  await screen.findByTestId('shipment-detail')
 }
 
 describe('scheduler duplicate', () => {

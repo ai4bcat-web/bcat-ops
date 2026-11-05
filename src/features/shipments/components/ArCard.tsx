@@ -5,8 +5,9 @@
  * Three rules shape it.
  *
  * 1. **The ladder is a ladder.** DOCS_NEEDED → UNBILLED → UNPAID → PAID is a sequence a
- *    person walks, and only two of its steps are ever taken by hand: Ready to invoice
- *    and Generate. The money rungs are written by `GENERATE_INVOICE` and `RECORD_PAYMENT`
+ *    person walks, and only two of its steps are ever taken by hand: pushing to Load Review
+ *    (where the release to billing happens) and Generate. The money rungs are written by
+ *    `GENERATE_INVOICE` and `RECORD_PAYMENT`
  *    and are shown, never offered. LEGACY and INVOICE_NOT_NEEDED are not on that walk at
  *    all — an Aljex-era bill and a deliberate non-bill — so they render as a flat chip
  *    rather than as a ladder stuck at a rung nobody will advance.
@@ -25,6 +26,7 @@ import { toast } from 'sonner'
 import { Switch } from '@/components/ui/switch'
 import { TmsBadge, TmsButton, TmsCard, TmsMetaList, TmsStatRow } from '@/features/tms/kit'
 import { ReleaseGateList } from './ReleaseGateCard'
+import { PushToLoadReview } from './PushToLoadReview'
 import { releaseGateMessages } from './releaseGateView'
 import { getInvoice, readyToInvoice, saveOrderForm, voidInvoice, getInvoicePdfUrl } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -116,10 +118,10 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
   }
 
   /**
-   * Unbilled is the release gate, not a status somebody types. The Lambda re-runs the
-   * whole rule — delivered, paperwork, references, carrier cost, open exceptions — and
-   * refuses with `Not ready for accounting: …` listing what is still missing, which is
-   * the message worth reading, so it is surfaced as written. There is no override.
+   * Imported Aljex history only. Everything else reaches billing through Load Review
+   * (`PushToLoadReview`); the server refuses a release without its marker, and exempts
+   * `legacyImported` shipments, which have no review to go through. The Lambda still
+   * re-runs the whole gate and refuses with `Not ready for accounting: …`, shown as written.
    */
   const onReady = () => run('Ready to invoice', () => readyToInvoice({
     orderId: order.id,
@@ -243,11 +245,14 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
       {invoice && <EmailStatus invoice={invoice} />}
 
       <div className="flex flex-wrap gap-2">
-        {arStatus === 'DOCS_NEEDED' && (
+        {arStatus === 'DOCS_NEEDED' && (shipment.legacyImported === true ? (
+          // Imported Aljex history has no review to go through; the server exempts it.
           <TmsButton variant="primary" size="sm" disabled={busy} onClick={() => { void onReady() }}>
             Ready to invoice
           </TmsButton>
-        )}
+        ) : (
+          <PushToLoadReview shipmentId={shipment.id} onPushed={() => { void refresh() }} />
+        ))}
         {arStatus === 'UNBILLED' && !invoiceId && (
           <TmsButton variant="primary" size="sm" disabled={busy} onClick={() => setDialog({ kind: 'generate' })}>
             Generate invoice
