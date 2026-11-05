@@ -256,6 +256,12 @@ const COMPARED: Record<RollupSourceTable, readonly string[]> = {
   CarrierBill: ['apOpen', 'balanceCents', 'loadId', 'status'],
 }
 
+/** 'YYYY-MM' + one month. */
+function nextMonth(month: string): string {
+  const [y, m] = month.split('-').map(Number)
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
+}
+
 function asRecord(image: unknown): Record<string, unknown> | null {
   return image && typeof image === 'object' ? (image as Record<string, unknown>) : null
 }
@@ -297,6 +303,14 @@ export function dirtyKeysForRecord(table: RollupSourceTable, oldImage: unknown, 
     if (!month) continue
     keys.add(`M:${month}`)
     if (table === 'Shipment' || table === 'Load') keys.add(`LG:${month}`)
+  }
+  // A void / unvoid moves the shipment's samples in or out of the revenue figures, and a sample sits in
+  // the month it was delivered (usually the pickup month or the next), which no Shipment image names.
+  if (table === 'Shipment' && before && after && JSON.stringify(before.voidedAt) !== JSON.stringify(after.voidedAt)) {
+    for (const image of [before, after]) {
+      const month = monthOfImage(table, image)
+      if (month) keys.add(`M:${nextMonth(month)}`)
+    }
   }
   return [...keys]
 }

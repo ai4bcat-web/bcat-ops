@@ -108,7 +108,10 @@ async function readRows(token, ids) {
   return ids.map((_, i) => {
     const row = data[`r${i}`]
     if (!row) return null
-    return { ...row, payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload }
+    // AWSJSON arrives as a JSON string and the Lambda stores a string already: decode until an object comes out (as dashboardRollupClient does).
+    let payload = row.payload
+    for (let depth = 0; typeof payload === 'string' && depth < 3; depth++) payload = JSON.parse(payload)
+    return { ...row, payload }
   })
 }
 

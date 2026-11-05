@@ -6962,6 +6962,11 @@ export async function listArPaymentsByCustomer(customerId: string): Promise<ArPa
  */
 export async function listOrdersByArStatus(status: ArStatus): Promise<OrderRecord[]> {
   if (!arModelsAvailable) return []
+  // The sidebar badge, the AR page's tabs and the shell counts read the same rung inside a second of each other: one request per window.
+  return [...(await cachedList(`ar:ordersByStatus:${status}`, () => readOrdersByArStatus(status), { ttlMs: 15_000 }))]
+}
+
+async function readOrdersByArStatus(status: ArStatus): Promise<OrderRecord[]> {
   try {
     const rows = await readOrders((fields) => listAllByIndex<OrderRecord>(
       // Amplify names an inline model enum `<Model><Field>`, not `<Field>`: the

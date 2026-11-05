@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CrmFakeDb } from '../_shared/crmFakeDb'
 import { addSystemActivity } from '../_shared/crmStore'
 import { authorize, dispatch, type AppSyncIdentity } from './actions'
@@ -192,6 +192,68 @@ describe('CRM_BACKFILL', () => {
     expect(db.get(T.domain, 'zz-bf.test')).toMatchObject({ customerId: 'c-bf', conflict: false })
     const again = (await call(admin, 'CRM_BACKFILL', { apply: true })) as { created: { accounts: number; contacts: number; domains: number } }
     expect(again.created).toEqual({ accounts: 0, contacts: 0, domains: 0 })
+  })
+})
+
+describe('CRM_LIST_ACCOUNTS withActivity (Open AR + last shipment)', () => {
+  type Row = { customerId: string; openArCents?: number; lastShipmentAt?: string | null }
+  const list = async (who: AppSyncIdentity, input: object = { withActivity: true }) =>
+    ((await call(who, 'CRM_LIST_ACCOUNTS', input)) as { rows: Row[] }).rows
+  const by = (rows: Row[], customerId: string) => rows.find((r) => r.customerId === customerId)
+  const queries = (table: string) => db.log.filter((l) => l.op === 'QueryCommand' && l.table === table).length
+
+  beforeEach(() => {
+    process.env.INVOICE_TABLE_NAME = 'Invoice'
+    // arOpen is the sparse marker: paid/void invoices carry none, so the index never returns them.
+    db.seed('Invoice', { id: 'i1', customerId: 'c-mine', arOpen: 'OPEN', balanceCents: 10_000 })
+    db.seed('Invoice', { id: 'i2', customerId: 'c-mine', arOpen: 'OPEN', balanceCents: 2_550 })
+    db.seed('Invoice', { id: 'i3', customerId: 'c-mine', balanceCents: 0 })
+    db.seed('Invoice', { id: 'i4', customerId: 'c-theirs', arOpen: 'OPEN', balanceCents: 777_00 })
+    db.seed(T.shipment, { id: 's1', customerId: 'c-mine', pickupAppt: '2026-03-01T08:00:00.000Z' })
+    db.seed(T.shipment, { id: 's2', customerId: 'c-mine', pickupAppt: '2026-05-09T08:00:00.000Z' })
+    db.seed(T.shipment, { id: 's3', customerId: 'c-theirs', pickupAppt: '2026-06-01T08:00:00.000Z' })
+  })
+
+  it('sums open balances and returns the newest pickup per customer; no activity is zero/null', async () => {
+    const rows = await list(manager)
+    expect(by(rows, 'c-mine')).toMatchObject({ openArCents: 12_550, lastShipmentAt: '2026-05-09T08:00:00.000Z' })
+    expect(by(rows, 'c-theirs')).toMatchObject({ openArCents: 77_700, lastShipmentAt: '2026-06-01T08:00:00.000Z' })
+    expect(by(rows, 'c-free')).toMatchObject({ openArCents: 0, lastShipmentAt: null })
+  })
+
+  it('adds nothing and queries nothing unless asked', async () => {
+    const rows = await list(manager, {})
+    expect(by(rows, 'c-mine')).not.toHaveProperty('openArCents')
+    expect(by(rows, 'c-mine')).not.toHaveProperty('lastShipmentAt')
+    expect(queries('Invoice') + queries(T.shipment)).toBe(0)
+  })
+
+  it('a rep gets, and pays queries for, only the accounts they may see', async () => {
+    const rows = await list(rep1)
+    expect(rows.map((r) => r.customerId).sort()).toEqual(['c-free', 'c-mine'])
+    expect(JSON.stringify(rows)).not.toContain('777')
+    expect(queries(T.shipment)).toBe(2)
+  })
+
+  it('costs one invoice query plus one shipment query per customer, then serves 60 s from cache', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-07-01T00:00:00Z'))
+      await list(manager)
+      expect(queries('Invoice')).toBe(1)
+      expect(queries(T.shipment)).toBe(3)
+      vi.setSystemTime(new Date('2026-07-01T00:00:30Z'))
+      await list(manager)
+      expect(queries('Invoice')).toBe(1)
+      expect(queries(T.shipment)).toBe(3)
+      db.seed('Invoice', { id: 'i5', customerId: 'c-free', arOpen: 'OPEN', balanceCents: 500 })
+      vi.setSystemTime(new Date('2026-07-01T00:01:01Z'))
+      expect(by(await list(manager), 'c-free')?.openArCents).toBe(500)
+      expect(queries('Invoice')).toBe(2)
+      expect(queries(T.shipment)).toBe(6)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

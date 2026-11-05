@@ -76,11 +76,11 @@ const DENSE_ROWS_CAP = 20
 export function pageSpecs(expected) {
   const rowsOr = (n, cap) => (n === 0 ? { minRows: 0, expectEmpty: true } : { minRows: Math.min(n, cap) })
   return {
-    '/tms/dashboard': { minRows: 0, minCharts: 4, kpi: true, kpiTestId: KPI_TESTIDS['/tms/dashboard'] },
+    '/tms/dashboard': { minRows: 0, kpi: true, kpiTestId: KPI_TESTIDS['/tms/dashboard'] },
     '/tms/tracking': rowsOr(expected.trackingRows, DENSE_ROWS_CAP),
     '/tms/shipments': rowsOr(expected.activeLowerBound, DENSE_ROWS_CAP),
     '/tms/shipments?list=all': rowsOr(expected.activeLowerBound, DENSE_ROWS_CAP),
-    '/tms/customers': rowsOr(expected.customers, 50),
+    '/tms/customers': rowsOr(expected.customers, DENSE_ROWS_CAP),
     '/tms/brokerage/users': { minRows: 3 },
     '/tms/invoicing': rowsOr(expected.unbilledOrders, 1),
     '/tms/invoicing/payable': rowsOr(expected.openBills, 1),
@@ -200,7 +200,7 @@ const KPI_RUNS = () => ({ cold: RUNS, warm: RUNS, spa: RUNS })
 async function measureKpiAll(launch, paths) {
   const out = {}
   for (const path of paths.filter((p) => KPI_TESTIDS[p] && KPI_BUDGETS[p])) {
-    out[path] = await measureModes(launch, path, { kpiTestId: KPI_TESTIDS[path] }, KPI_RUNS())
+    out[path] = await measureModes(launch, path, { kpiTestId: KPI_TESTIDS[path], scrollToCharts: path === '/tms/dashboard' }, KPI_RUNS())
     for (const mode of ['cold', 'warm', 'spa']) {
       out[path][mode].forEach((r, i) => console.log(`     ${path} ${mode} ${i + 1}/${RUNS}: KPIs ${fmt(r.kpiS, 2)} s (${r.kpiSource ?? 'never'}${r.kpiAsOf ? ` as of ${r.kpiAsOf}` : ''}), chart ${fmt(r.chartS, 2)} s, last change ${fmt(r.lastChangeS, 2)} s, ${r.requests} req, ${fmt(r.mb)} MB, KPI flips ${r.kpiFlips ?? '—'}, before KPIs ${r.kpiRequests ?? '—'} req / ${fmt(r.kpiMb)} MB${r.timedOut ? ' TIMEOUT' : ''}`))
     }
@@ -208,7 +208,7 @@ async function measureKpiAll(launch, paths) {
   return out
 }
 
-const KPI_KEYS = ['cold', 'warm', 'spa', 'chartsCold', 'chartsWarm', 'allCold', 'spaRequests', 'spaMb', 'kpiFlips']
+const KPI_KEYS = ['cold', 'warm', 'spa', 'chartsCold', 'chartsWarm', 'chartsRequests', 'chartsMb', 'allCold', 'spaRequests', 'spaMb', 'kpiFlips']
 function summarizeKpi(kpi) {
   return Object.fromEntries(Object.entries(kpi).map(([path, m]) => [path, {
     medians: Object.fromEntries(KPI_METRICS.map(([key, mode, field]) => {

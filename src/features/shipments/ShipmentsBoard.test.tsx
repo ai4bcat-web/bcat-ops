@@ -4,6 +4,7 @@ import { render, screen, within, fireEvent, waitFor } from '@testing-library/rea
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ShipmentsBoard } from './ShipmentsBoard'
+import { ALJEX_COLUMN_KEYS } from '@/lib/shipmentViewDefs'
 import type { ShipmentRow } from './shipmentViews'
 import { useAppStore } from '@/store/useAppStore'
 
@@ -198,6 +199,11 @@ function pickFacet(header: string, option: string) {
   fireEvent.click(screen.getByRole('checkbox', { name: `${header}: ${option}` }))
 }
 
+/** A user whose saved layout shows the full Aljex set: the default set is the short one, so tests of other columns opt in. */
+function saveFullColumnLayout() {
+  localStorage.setItem('tms:grid:shipments-left:ryne@bcatcorp.com:v1', JSON.stringify({ columns: ['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== 'proNumber')] }))
+}
+
 describe('ShipmentsBoard', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -303,6 +309,7 @@ describe('ShipmentsBoard', () => {
   })
 
   it('Export to CSV writes the visible columns', async () => {
+    saveFullColumnLayout()
     const shipments = [deliveredRow('S001', { customerReference: 'PO-123', equipmentType: 'Van', revenueCents: 100_000 })]
     renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
@@ -358,6 +365,7 @@ describe('ShipmentsBoard', () => {
   })
 
   it('flags a live Ivan Cartage shipment with no driver, and only that', async () => {
+    saveFullColumnLayout()
     renderBoard('/tms/shipments', [
       row('S001', { assignmentType: 'OWN_ASSET', driverId: null }),
       row('S002', { assignmentType: 'OWN_ASSET', driverId: 'drv-1', driverName: 'Dana Driver' }),
@@ -533,6 +541,7 @@ describe('ShipmentsBoard', () => {
   })
 
   it('tones the next check call cell overdue or due', async () => {
+    saveFullColumnLayout()
     const now = new Date('2026-01-15T12:00:00.000Z')
     vi.setSystemTime(now)
     const overdue = deliveredRow('S001', { nextCheckCallAt: '2026-01-15T11:00:00.000Z', checkCallOpen: 'OPEN' })
@@ -554,6 +563,7 @@ describe('ShipmentsBoard', () => {
   })
 
   it('renders exception icons for incidents, open check calls and missing documents', async () => {
+    saveFullColumnLayout()
     const shipments = [
       deliveredRow('S001', { openIncidentCount: 2 }),
       deliveredRow('S002', { nextCheckCallAt: '2026-01-01T00:00:00.000Z', checkCallOpen: 'OPEN' }),
@@ -792,6 +802,7 @@ describe('ShipmentsBoard', () => {
     })
 
     it('a header text filter narrows the rows as you type', async () => {
+      saveFullColumnLayout()
       renderBoard('/tms/shipments', [row('S001', { customerReference: 'PO-100' }), row('S002', { customerReference: 'PO-200' })])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
       fireEvent.click(screen.getByRole('button', { name: 'Filter Customer Reference Number' }))

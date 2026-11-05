@@ -27,11 +27,19 @@ const READ_ACTIONS = new Set(['status', 'list', 'assets', 'senderMappings'])
 export const POD_CACHE_PREFIX = 'pods:'
 const POD_CACHE = { ttlMs: 15_000 }
 
+/**
+ * A failed list is remembered for the same window as a good one (listCache never stores a rejection): while the POD connection is
+ * unconfigured or down, every mounted paperwork/pay hook would otherwise re-issue the failing request (dev: 4 per page). A pod write
+ * (configure included) clears it with the lists.
+ */
+const listFailures = new Map<string, { error: unknown; at: number }>()
+
 async function podAction<T>(action: string, input: unknown): Promise<T> {
   if (READ_ACTIONS.has(action)) return runPodAction<T>(action, input)
   try {
     return await runPodAction<T>(action, input)
   } finally {
+    listFailures.clear()
     invalidateLists(POD_CACHE_PREFIX)
     invalidateLists(SUBMISSION_CACHE_PREFIX)
   }
@@ -64,7 +72,12 @@ export async function configurePods(input: { apiKey: string; clientId: string })
 /** One request per page inside the window: the paperwork hooks on a page each list the same pods. */
 export function listPods(input?: { loadId?: string; nextToken?: string | null }): Promise<PodPage> {
   const key = `${POD_CACHE_PREFIX}list:${input?.loadId ?? ''}|${input?.nextToken ?? ''}`
-  return cachedList(key, () => podAction<PodPage>('list', { ...(input ?? {}) }), POD_CACHE)
+  const failed = listFailures.get(key)
+  if (failed && Date.now() - failed.at < POD_CACHE.ttlMs) return Promise.reject(failed.error)
+  return cachedList(key, () => podAction<PodPage>('list', { ...(input ?? {}) }), POD_CACHE).catch((error: unknown) => {
+    listFailures.set(key, { error, at: Date.now() })
+    throw error
+  })
 }
 
 export async function backfillPods(): Promise<{ queued: true }> {

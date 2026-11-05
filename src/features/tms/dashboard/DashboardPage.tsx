@@ -16,6 +16,9 @@ import {
 import { TmsButton, TmsDialog, TmsFilterChip, TmsIconButton, TmsInput, TmsKpiCard, TmsPage } from '@/features/tms/kit'
 import { useTmsCompany } from '@/features/tms/tmsCompany'
 import { useAuth } from '@/hooks/useAuth'
+import { useOnVisible } from '@/hooks/useOnVisible'
+import { listUserProfiles } from '@/lib/apiClient'
+import type { UserProfileRecord } from '@/lib/apiClient'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { personName } from '@/lib/roles'
 import { indexOf } from '@/lib/dashboardCharts'
@@ -23,7 +26,7 @@ import { formatCents } from '@/lib/invoiceBuild'
 import { LazyChartCard, ChartPlaceholder } from './LazyChartCard'
 import { BROKERAGE_CHARTS } from './brokerageCards'
 import { CLASSIC_CHARTS } from './classicCharts'
-import { useDashboardKpis } from './useDashboardKpis'
+import { hasFacetFilter, useDashboardKpis } from './useDashboardKpis'
 import { WelcomeHeader } from './WelcomeHeader'
 import { useBrokerageDashboard } from './useBrokerageDashboard'
 import {
@@ -125,13 +128,22 @@ export function DashboardPage() {
   const [saveOpen, setSaveOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
 
-  const { data, final, error, failedMonths, refresh: refreshExact } = useBrokerageDashboard(filters)
   // Refresh always runs the exact path (and re-reads the rollup afterwards); the window it was pressed on stays "live".
   const windowKey = `${filters.from}|${filters.to}`
   const [refreshedWindow, setRefreshedWindow] = useState<string | null>(null)
+  // The KPI strip paints from the rollup; the exact bundle (charts, filter options, Export) is read only once something needs it:
+  // the chart grid is within reach of the viewport, a filter chip is open, Export was pressed, or the KPIs themselves need the exact path.
+  const [gridRef, gridNear] = useOnVisible<HTMLDivElement>('600px')
+  const [exportWanted, setExportWanted] = useState(false)
+  const [kpisNeedExact, setKpisNeedExact] = useState(false)
+  const exactEnabled = gridNear || (openChip !== null && openChip !== 'date' && openChip !== 'division' && openChip !== 'add') || exportWanted || kpisNeedExact || refreshedWindow === windowKey || hasFacetFilter(filters)
+  const { data, final, error, failedMonths, refresh: refreshExact } = useBrokerageDashboard(filters, exactEnabled)
+  const [profiles, setProfiles] = useState<UserProfileRecord[]>([])
+  useEffect(() => { void listUserProfiles().then(setProfiles, () => {}) }, [])
   const kpis = useDashboardKpis(filters, { data, final, error }, refreshedWindow === windowKey)
   const refresh = useCallback(() => { setRefreshedWindow(windowKey); refreshExact() }, [windowKey, refreshExact])
   const { strips, totals } = kpis
+  if (kpis.needsExact && !kpisNeedExact) setKpisNeedExact(true) // sticky: the rollup could not serve this view, the exact bundle is read
   const kpiSignature = kpis.state === 'loading' ? null : JSON.stringify(totals)
   const kpiFlips = useRef({ signature: null as string | null, flips: 0 })
   const kpiNode = useRef<HTMLDivElement | null>(null)
@@ -153,9 +165,9 @@ export function DashboardPage() {
   )
 
   const firstName = useMemo(() => {
-    const profile = data?.profiles.find((candidate) => candidate.email?.toLowerCase() === email.toLowerCase())
+    const profile = profiles.find((candidate) => candidate.email?.toLowerCase() === email.toLowerCase())
     return personName({ name: profile?.name, email }).split(/\s+/)[0]
-  }, [data, email])
+  }, [profiles, email])
 
   const selectDivision = useCallback((code: string) => {
     setFilters((current) =>
@@ -189,7 +201,7 @@ export function DashboardPage() {
     setOpenChip(null)
   }, [now])
 
-  const exportCsv = useCallback(() => {
+  const exportNow = useCallback(() => {
     // The cards compute as they scroll into view, so the export computes its own copy of every chart.
     const rows = data
       ? visible.map((def) => {
@@ -208,6 +220,15 @@ export function DashboardPage() {
     anchor.remove()
     URL.revokeObjectURL(url)
   }, [data, visible, overrides, groupBy, filters])
+  // Export needs every card's data: press it before the bundle is read and it reads it, then downloads.
+  const exportRequested = useRef(false)
+  const exportCsv = useCallback(() => {
+    if (final) exportNow()
+    else { exportRequested.current = true; setExportWanted(true) }
+  }, [final, exportNow])
+  useEffect(() => {
+    if (exportRequested.current && final) { exportRequested.current = false; exportNow() }
+  }, [final, exportNow])
 
   const selectView = useCallback((name: string) => {
     setViewName(name)
@@ -273,7 +294,7 @@ export function DashboardPage() {
       <TmsIconButton aria-label="Refresh" onClick={refresh}><RotateCw size={15} /></TmsIconButton>
       <TmsIconButton aria-label="Clear filters" onClick={clearAll}><XCircle size={15} /></TmsIconButton>
       <TmsIconButton aria-label="Save view" onClick={() => setSaveOpen(true)}><Save size={15} /></TmsIconButton>
-      <TmsButton variant="primary" onClick={exportCsv} disabled={!final}><Download size={15} aria-hidden="true" /> Export CSV</TmsButton>
+      <TmsButton variant="primary" onClick={exportCsv}><Download size={15} aria-hidden="true" /> Export CSV</TmsButton>
       <button
         type="button"
         className="tms-dash-picker-btn"
@@ -535,7 +556,7 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      <div className="tms-dash-cards">
+      <div className="tms-dash-cards" ref={gridRef}>
         {visible.map((def) => {
           const override = overrides[def.key]
           return data ? (

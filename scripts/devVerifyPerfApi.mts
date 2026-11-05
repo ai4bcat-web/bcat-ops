@@ -220,8 +220,7 @@ async function main() {
       const rollupLib = await import('../src/lib/dashboardRollup.ts')
       const strips = await import('../src/features/tms/dashboard/businessStrips.ts')
       const views = await import('../src/features/tms/dashboard/dashboardViews.ts')
-      const charts = await import('../src/lib/dashboardCharts.ts')
-      const reports = await import('../src/lib/reportsClient.ts')
+      const dashboardHook = await import('../src/features/tms/dashboard/useBrokerageDashboard.ts')
       const nowIso = new Date().toISOString()
       const windowsToCheck = [
         { label: 'this month', ...views.presetRange('this-month', nowIso) },
@@ -235,17 +234,14 @@ async function main() {
         return ids.map((_id, i) => {
           const row = data[`r${i}`]
           if (!row) return null
-          const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload
+          // AWSJSON string wrapping a stored JSON string: decode until an object (as dashboardRollupClient does).
+          let payload: unknown = row.payload
+          for (let depth = 0; typeof payload === 'string' && depth < 3; depth++) payload = JSON.parse(payload)
           return { id: row.id, schemaVersion: row.schemaVersion ?? 0, computedAt: row.computedAt ?? '', payload }
         })
       }
       const divisions = await api.listOwnershipDivisions()
       const topLevel = divisions.filter((d) => d.active !== false && d.parentId == null).map((d) => d.code)
-      const unionById = <T extends { id: string }>(...sets: T[][]): T[] => [...new Map(sets.flat().map((r) => [r.id, r] as const)).values()]
-      const working = workingBundle ?? await board.loadBoardBundle({ kind: 'working' })
-      const openInvoices = await api.listOpenInvoices()
-      const openBills = await api.listOpenBills()
-      const profiles = await api.listUserProfiles()
 
       // The rollup read budget: one aliased request for the months of the widest window (what the page issues).
       const wide = windowsToCheck[2]
@@ -264,23 +260,12 @@ async function main() {
       const nz = (n: number | null | undefined) => n ?? 0
       const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
       const sortKeys = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)))
+      // Like with like: the exact side is the very read the dashboard issues (window + samples + open AR/AP + referents by id).
       const bundleCache = new Map<string, Promise<unknown>>()
       const exactData = async (from: string, to: string) => {
-        const months = windows.monthsCovering(from, to, 1)
-        const key = months.join(',')
-        if (!bundleCache.has(key)) bundleCache.set(key, (async () => {
-          const windowed = await board.loadBoardBundle({ kind: 'window', months }, { force: true })
-          const samples = await reports.loadSamples(from, to)
-          return { windowed, samples }
-        })())
-        const { windowed, samples } = await bundleCache.get(key) as { windowed: Awaited<ReturnType<typeof board.loadBoardBundle>>; samples: Awaited<ReturnType<typeof reports.loadSamples>> }
-        const shipments = windows.mergeShipmentSets(windowed.shipments, working.shipments)
-        const loadCarriers = unionById(windowed.loadCarriers, working.loadCarriers)
-        return {
-          shipments, orders: unionById(windowed.orders, working.orders),
-          loads: charts.hydrateLoads(unionById(windowed.loads, working.loads), shipments, loadCarriers, samples.rows),
-          loadCarriers, samples: samples.rows, openInvoices, openBills, quotes: [], profiles, divisions, now: nowIso,
-        }
+        const key = `${from}|${to}`
+        if (!bundleCache.has(key)) bundleCache.set(key, dashboardHook.readDashboardWindow(from, to).then((b) => b.data))
+        return await bundleCache.get(key) as Awaited<ReturnType<typeof dashboardHook.readDashboardWindow>>['data']
       }
 
       for (const w of windowsToCheck) {
@@ -317,7 +302,7 @@ async function main() {
             const sum = top.reduce((a, st) => a + nz(st[k]), 0)
             if (sum > nz(rolled.totals[k])) bad.push(`Σ strips ${k} ${sum} > company ${rolled.totals[k]} (untagged would be negative)`)
           }
-          outAF(bad.length > 0, id, bad.length ? bad.slice(0, 6).join('; ') : `${exactStrips.length} strips + company equal (AR/AP rollup ≥ exact)`)
+          outAF(bad.length > 0, id, bad.length ? bad.slice(0, 12).join('; ') : `${exactStrips.length} strips + company equal (AR/AP rollup ≥ exact)`)
         }
       }
     }
@@ -328,4 +313,4 @@ async function main() {
   process.exitCode = failed === 0 ? 0 : 1
 }
 
-main().catch((err) => { console.error(`devVerifyPerfApi failed: ${err?.message ?? err}`); process.exit(1) })
+main().catch((err) => { console.error(`devVerifyPerfApi failed: ${err?.message ?? err}`, process.env.PERF_STACK ? err?.stack : ""); process.exit(1) })

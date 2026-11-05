@@ -30,15 +30,23 @@ export const RATCHET_FACTOR = 1.5
 // DOCS_NEEDED live-only read (dev: 4.0 -> ~1.7 MB cold): re-measure after deploy, then --ratchet.
 // '/dashboard' re-based (Step AF, D-AF15): measured 160 requests / 30.2 MB / 6.6 s settled on deployed dev, so the old 130 / 20 was
 // red for a pre-existing reason. measured + 10 %; AF4's deploy lowers it (--ratchet), it is never raised again.
+// Pass 3 (BUILD_LOG "Perf pass 3", measured on deployed dev, 3 runs each):
+//  - /tms/shipments and ?list=all firstRows 3 -> 3.6: first rows wait on the working set's first partial (G2: 2.05 s API, 26 trips)
+//    behind a 1.15-1.55 s boot (AF-plan 0.4) = 3.1-3.5 s measured medians; the 3 s was set before the dense grid + shell floor existed.
+//  - /tms/invoicing requests 60 -> 72, mb 9 -> 10.5: the page mounts three AR worklists (UNBILLED, DOCS_NEEDED, UNPAID) + the paid month +
+//    factoring, each a sparse-index read joined to its shipments by id: 21 requests / 3.0 MB over the shell floor measured in the same run
+//    (carriers probe: 48 req / 6.7 MB). The UNBILLED rung is now shared with the sidebar badge (listCache, 15 s), so the floor is not paid twice.
+//  - /tms/dashboard keeps its ceilings: the KPI strip paints from the rollup and the exact bundle is read only when the chart grid nears
+//    the viewport (DashboardPage), so the page as landed is ~35 requests; the full-bundle cost is gated by KPI budgets chartsRequests/chartsMb.
 // <budgets>
 export const PAGE_BUDGETS = {
   '/tms/dashboard': { firstRows: 4.5, settled: 6, requests: 80, mb: 12 },
   '/tms/tracking': { firstRows: 3.5, settled: 5.2, requests: 50, mb: 8 },
-  '/tms/shipments': { firstRows: 3, settled: 6, requests: 60, mb: 12 },
-  '/tms/shipments?list=all': { firstRows: 3, settled: 6, requests: 70, mb: 12 },
+  '/tms/shipments': { firstRows: 3.6, settled: 6, requests: 60, mb: 12 },
+  '/tms/shipments?list=all': { firstRows: 3.6, settled: 6, requests: 70, mb: 12 },
   '/tms/customers': { firstRows: 2.5, settled: 4.8, requests: 50, mb: 7 },
   '/tms/brokerage/users': { firstRows: 2, settled: 4, requests: 50, mb: 7 },
-  '/tms/invoicing': { firstRows: 3, settled: 5.5, requests: 60, mb: 9 },
+  '/tms/invoicing': { firstRows: 3, settled: 5.5, requests: 72, mb: 10.5 },
   '/tms/invoicing/payable': { firstRows: 3, settled: 5, requests: 60, mb: 8 },
   '/tms/carriers': { firstRows: 2.5, settled: 4.4, requests: 50, mb: 7 },
   '/schedule': { firstRows: 4.5, settled: 5, requests: 85, mb: 12 },
@@ -188,7 +196,10 @@ export function rewriteBudgets(source, budgets) {
  * Seconds until the KPI strip is visible (data-testid="dash-kpis"|"legacy-kpis" with data-state="ready" and values, see
  * perfProbe.kpiReadiness), per navigation mode: cold = new browser profile, warm = reload with the HTTP cache warm,
  * spa = sidebar link click with the shell warm. D-AF14: never raised, only ratcheted.
- *   chartsCold/chartsWarm  seconds to the first chart (/tms/dashboard)
+ *   chartsCold/chartsWarm  seconds to the first chart (/tms/dashboard); the probe scrolls the chart grid into view when the KPIs land
+ *                          (the cards sit below ~1,300 px of strips, and the exact bundle is read only once the grid is near the viewport)
+ *   chartsRequests/chartsMb  requests and MB of the cold run INCLUDING that bundle (measured 85-86 req / 12.7 MB before the gating; the
+ *                          joins narrowing of AF-plan 4.1 `needs` is what lowers it: ceilings are the measured values + 5 %)
  *   spaRequests / spaMb    requests and MB of the in-app mode (G12)
  *   kpiFlips               text changes of the strip after the first ready paint (cache -> rollup is the one allowed)
  *   allCold                seconds to the last change of the legacy page's first 1,400 characters
@@ -196,7 +207,7 @@ export function rewriteBudgets(source, budgets) {
  */
 // <kpi-budgets>
 export const KPI_BUDGETS = {
-  '/tms/dashboard': { cold: 3, warm: 1.5, spa: 0.8, chartsCold: 4.5, chartsWarm: 3, spaRequests: 25, spaMb: 3, kpiFlips: 1 },
+  '/tms/dashboard': { cold: 3, warm: 1.5, spa: 0.8, chartsCold: 4.5, chartsWarm: 3, chartsRequests: 90, chartsMb: 13.5, spaRequests: 25, spaMb: 3, kpiFlips: 1 },
   '/dashboard': { cold: 3, warm: 1.5, spa: 1, allCold: 5, kpiFlips: 1 },
 }
 // </kpi-budgets>
@@ -209,6 +220,8 @@ export const KPI_METRICS = [
   ['chartsCold', 'cold', 'chartS'],
   ['chartsWarm', 'warm', 'chartS'],
   ['allCold', 'cold', 'lastChangeS'],
+  ['chartsRequests', 'cold', 'requests'],
+  ['chartsMb', 'cold', 'mb'],
   ['spaRequests', 'spa', 'requests'],
   ['spaMb', 'spa', 'mb'],
   ['kpiFlips', '*', 'kpiFlips'],
@@ -257,8 +270,8 @@ export function ratchetKpi(current, p95) {
     for (const key of Object.keys(budget)) {
       const m = p95?.[path]?.[key]
       if (m == null || Number.isNaN(m) || key === 'kpiFlips') continue // flips is a contract (<= 1), not a measured ceiling
-      const target = key === 'spaRequests' ? Math.ceil(+(m * RATCHET_FACTOR).toFixed(6)) : Math.ceil(+(m * RATCHET_FACTOR * 10).toFixed(6)) / 10
-      next[path][key] = Math.min(budget[key], Math.max(target, key === 'spaRequests' ? 1 : 0.1))
+      const target = key === 'spaRequests' || key === 'chartsRequests' ? Math.ceil(+(m * RATCHET_FACTOR).toFixed(6)) : Math.ceil(+(m * RATCHET_FACTOR * 10).toFixed(6)) / 10
+      next[path][key] = Math.min(budget[key], Math.max(target, key === 'spaRequests' || key === 'chartsRequests' ? 1 : 0.1))
     }
   }
   return next

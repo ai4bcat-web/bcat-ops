@@ -241,7 +241,7 @@ Lambda `tms-dashboard-rollup` (`amplify/functions/tms-dashboard-rollup/{resource
 
    | Source table | fields compared (old vs new) | dirty keys |
    |---|---|---|
-   | Shipment | `status, pickupAppt, pickupMonth, revDivision, revSubdivision, voidedAt, deletedAt` | `M:<old pickupMonth>`, `M:<new pickupMonth>`, `LG:` same months |
+   | Shipment | `status, pickupAppt, pickupMonth, revDivision, revSubdivision, voidedAt, deletedAt` | `M:<old pickupMonth>`, `M:<new pickupMonth>`, `LG:` same months; a `voidedAt` change also marks `M:` of the month after each (a voided shipment's samples sit in the delivery month) |
    | Order | `docsMissing, shipmentId` (+ `pickupAppt` month) | `M:<month of pickupAppt>` |
    | Load | `status, pickupAppt, pickupMonth, shipmentId, revDivision, revSubdivision, pickupDriverId, deliveryDriverId, rate, voidedAt` | `M:` and `LG:` of old/new `pickupMonth` |
    | LaneRateSample | `excluded, date, sampleMonth, revenueCents, costCents, profitCents, revDivision, revSubdivision, podReceivedAt, shipmentId` | `M:<old/new sampleMonth>` |

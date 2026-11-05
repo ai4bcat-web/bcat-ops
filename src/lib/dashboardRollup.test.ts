@@ -255,6 +255,12 @@ describe('dirtyKeysForRecord', () => {
     expect(dirtyKeysForRecord('Shipment', ship, { ...ship, updatedAt: 'b', notes: 'y' })).toEqual([])
   })
 
+  it('a void marks the pickup month and the next, where a delivered sample may sit', () => {
+    expect(dirtyKeysForRecord('Shipment', ship, { ...ship, voidedAt: 'v' }).sort()).toEqual(['LG:2026-10', 'M:2026-10', 'M:2026-11'])
+    const december = { ...ship, pickupAppt: '2026-12-31T12:00:00Z', pickupMonth: '2026-12' }
+    expect(dirtyKeysForRecord('Shipment', { ...december, voidedAt: 'v' }, december)).toContain('M:2027-01')
+  })
+
   it('removing or inserting a row marks its month; a voided removal still counts', () => {
     expect(dirtyKeysForRecord('Shipment', { ...ship, voidedAt: 'v' }, undefined)).toEqual(['M:2026-10', 'LG:2026-10'])
     expect(dirtyKeysForRecord('LaneRateSample', undefined, { date: '2026-10-05', sampleMonth: '2026-10', revenueCents: 1 })).toEqual(['M:2026-10'])

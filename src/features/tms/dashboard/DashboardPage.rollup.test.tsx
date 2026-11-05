@@ -5,6 +5,7 @@ import { act, render, renderHook, screen, waitFor } from '@testing-library/react
 import type { LaneRateSampleRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
 import { computeLive, computeMonth, rollupMonthsFor, type LivePayload, type MonthPayload, type MonthSource } from '@/lib/dashboardRollup'
 import { invalidateLists } from '@/lib/listCache'
+import { loadBoardBundle } from '@/lib/boardData'
 import { DashboardPage } from './DashboardPage'
 import { defaultFilters } from './dashboardViews'
 import { useDashboardKpis } from './useDashboardKpis'
@@ -194,17 +195,23 @@ describe('the dashboard KPI strip from the rollup', () => {
     expect(hoisted.batchCalls).toHaveLength(1)
   })
 
-  it('does not mount any chart until its card is near the viewport', async () => {
+  it('reads the exact bundle only once the chart grid is near the viewport, then mounts a chart only when its card is', async () => {
     await seedRows(60_000)
     IdleObserver.instances.length = 0
+    vi.mocked(loadBoardBundle).mockClear()
     vi.stubGlobal('IntersectionObserver', IdleObserver)
     render(<DashboardPage />)
-    await waitFor(() => expect(IdleObserver.instances.length).toBeGreaterThan(0))
     await waitFor(() => expect(kpis()).toHaveAttribute('data-state', 'ready'))
+    expect(kpis()).toHaveAttribute('data-source', 'rollup')
+    expect(loadBoardBundle).not.toHaveBeenCalled() // KPIs came from the rollup: nothing below the fold has been fetched
     expect(document.querySelectorAll('.tms-chart-title')).toHaveLength(0)
-    expect(document.querySelectorAll('section[aria-busy="true"]').length).toBeGreaterThan(20)
 
-    await act(async () => { IdleObserver.instances[0]!.callback([{ isIntersecting: true }]) })
+    await act(async () => { IdleObserver.instances[0]!.callback([{ isIntersecting: true }]) }) // the grid comes within reach
+    await waitFor(() => expect(loadBoardBundle).toHaveBeenCalled())
+    await waitFor(() => expect(document.querySelectorAll('section[aria-busy="true"]').length).toBeGreaterThan(20))
+    expect(document.querySelectorAll('.tms-chart-title')).toHaveLength(0)
+
+    await act(async () => { IdleObserver.instances[IdleObserver.instances.length - 1]!.callback([{ isIntersecting: true }]) })
     await waitFor(() => expect(document.querySelectorAll('.tms-chart-title')).toHaveLength(1))
   })
 })

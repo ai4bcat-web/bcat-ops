@@ -10,7 +10,9 @@
  *
  * Dev only. Mints one throwaway ADMIN on the dev pool (zz-ac2-<ts>), deletes it and proves it gone in
  * `finally`. Never prints a name, e-mail, token or cell text: counts and booleans only. The walk only
- * changes this temp user's own layout prefs (localStorage) and never clicks a row action.
+ * changes this temp user's own layout prefs (localStorage) and never clicks a row action. The one
+ * exception is the Customers activity step: it creates a ZZ customer plus zz-ac2- invoices/shipments in
+ * the dev tables (suffix-guarded) and removes them again in `finally`.
  *
  * Per board it checks:  rows render | header filters (type-ahead / multi-select + select all + clear /
  * date range / numeric range) | popovers on the last columns stay inside the window, close on outside
@@ -24,7 +26,7 @@
 import { access, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { launchBrowser, ALLOWED_ORIGINS, DEV_ORIGIN } from './lib/cdpBrowser.mjs'
-import { mintIdentity, deleteIdentity } from './lib/devIdentity.mjs'
+import { mintIdentity, deleteIdentity, gql, routerAs } from './lib/devIdentity.mjs'
 
 const SHOTS = resolve('Docs/tms-build/screenshots/ac2')
 const args = process.argv.slice(2)
@@ -33,12 +35,13 @@ const only = args.find((a) => a.startsWith('--only='))?.slice('--only='.length)
 
 /**
  * One entry per dense list page. ACCustomers / ACCarriers own their entries: set `path` to the
- * page. `wide` marks the Aljex-order Shipments boards, whose full default set (28 columns) is meant
- * to scroll sideways: they report the visible count instead of failing the no-scroll check.
+ * page. Every board, Shipments Active / All included, must fit its default columns at 1440 and 1920
+ * without horizontal scroll (the Shipments default is the short Aljex-order set, see
+ * SHIPMENT_DEFAULT_COLUMNS).
  */
 const BOARDS = [
-  { id: 'shipments-active', title: 'Shipments Active', path: '/tms/shipments', wide: true },
-  { id: 'shipments-all', title: 'Shipments All', path: '/tms/shipments?list=all', wide: true },
+  { id: 'shipments-active', title: 'Shipments Active', path: '/tms/shipments' },
+  { id: 'shipments-all', title: 'Shipments All', path: '/tms/shipments?list=all' },
   { id: 'intake', title: 'Intake', path: '/tms/shipments/intake' },
   { id: 'tracking', title: 'Load Tracking', path: '/tms/tracking?assignee=all' },
   { id: 'customers', title: 'Customers', path: '/tms/customers' },
@@ -49,6 +52,7 @@ const CHECKS = [
   'rows', 'sticky', 'rail', 'no-filter-panel', 'fit-1440', 'fit-1920',
   'filter-text', 'filter-multi', 'filter-select-all-clear', 'filter-date', 'filter-number',
   'popover-last-columns', 'sort', 'columns-dialog', 'columns-persist', 'density-persist',
+  'customers-activity-columns (Open AR + Last shipment: ZZ fixtures, Columns dialog, p95 latency)',
 ]
 
 const report = []
@@ -201,8 +205,8 @@ async function checkFit(b, board, width) {
   const rows = await rowCount(b)
   await b.screenshot(`${SHOTS}/${board.id}-${width}.png`)
   if (fit && fit.hScroll) line('INFO', `${board.id} column widths @${width}`, JSON.stringify(await b.evaluate(WIDTHS)))
-  const ok = fit && (!fit.hScroll || board.wide)
-  line(ok ? (fit.hScroll ? 'INFO' : 'PASS') : 'FAIL', `${board.id} default columns without horizontal scroll @${width}`, `${fit?.fit}/${fit?.total} columns within view, scrollWidth ${fit?.scrollWidth} vs ${fit?.clientWidth}, ${rows} rows`)
+  const ok = fit && !fit.hScroll
+  line(ok ? 'PASS' : 'FAIL', `${board.id} default columns without horizontal scroll @${width}`, `${fit?.fit}/${fit?.total} columns within view, scrollWidth ${fit?.scrollWidth} vs ${fit?.clientWidth}, ${rows} rows`)
   return fit
 }
 
@@ -470,6 +474,112 @@ async function walkBoard(b, board) {
   line('INFO', `${board.id} default columns`, `1440: ${fit1440?.fit}/${fit1440?.total} in view; 1920: ${fit1920?.fit}/${fit1920?.total} in view`)
 }
 
+// ── Customers: Open AR + Last shipment (CRM_LIST_ACCOUNTS withActivity) ──────────────────────────
+
+const DEV_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
+/** A dev table by model; refuses anything that is not the dev stack's. */
+const devTable = (model) => {
+  const name = `${model}-${DEV_SUFFIX}`
+  if (!name.endsWith(`-${DEV_SUFFIX}`) || name.includes(PROD_SUFFIX)) throw new Error(`refusing non-dev table ${name}`)
+  return name
+}
+const pct = (values, p) => { const s = [...values].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)] }
+
+/**
+ * Guarded fixtures: a ZZ customer (through the directory router) with two open invoices (1,234.56 + 43.21)
+ * and two shipments, written straight to the dev tables under zz-ac2- ids and deleted in the caller's
+ * `finally`. Expected cells: Open AR $1,278, Last shipment 2026-03-14 (the later pickup).
+ */
+async function createActivityFixtures(token, ts) {
+  const { DynamoDBClient } = await import('@aws-sdk/client-dynamodb')
+  const { DynamoDBDocumentClient, PutCommand } = await import('@aws-sdk/lib-dynamodb')
+  const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }), { marshallOptions: { removeUndefinedValues: true } })
+  const dir = routerAs(token, 'tmsDirectoryActions')
+  const name = `ZZ AC2 Activity ${ts}`
+  const customer = await dir('UPSERT_CUSTOMER', { name, billingEmail: 'ac2-verification@example.invalid', notes: 'Dev-only AC2 verification fixture. Safe to delete.' }).then((r) => r.customer ?? r)
+  const customerId = String(customer.id)
+  const now = new Date().toISOString()
+  const put = (model, item) => doc.send(new PutCommand({ TableName: devTable(model), Item: { __typename: model, createdAt: now, updatedAt: now, ...item } }))
+  const owned = { Invoice: [], Shipment: [] }
+  const invoice = async (n, balanceCents) => {
+    const id = `zz-ac2-${ts}-inv${n}`
+    await put('Invoice', { id, number: id, orderId: `zz-ac2-${ts}-ord`, customerId, status: 'ISSUED', arOpen: 'OPEN', balanceCents, dueAt: '2099-01-01T00:00:00.000Z', issuedAt: now })
+    owned.Invoice.push(id)
+  }
+  const shipment = async (n, pickupAppt) => {
+    const id = `zz-ac2-${ts}-ship${n}`
+    await put('Shipment', { id, number: `ZZAC2-${ts}-${n}`, customerId, status: 'CANCELED', pickupAppt, deletedAt: now })
+    owned.Shipment.push(id)
+  }
+  await invoice(1, 123_456)
+  await invoice(2, 4_321)
+  await shipment(1, '2026-01-05T15:00:00.000Z')
+  await shipment(2, '2026-03-14T15:00:00.000Z')
+  return { customerId, name, owned, doc }
+}
+
+async function removeActivityFixtures(fx, token) {
+  const { DeleteCommand, GetCommand } = await import('@aws-sdk/lib-dynamodb')
+  let gone = true
+  for (const [model, ids] of Object.entries(fx.owned)) {
+    for (const id of ids) {
+      if (!id.startsWith('zz-ac2-')) { gone = false; continue }
+      await fx.doc.send(new DeleteCommand({ TableName: devTable(model), Key: { id } })).catch(() => {})
+      if ((await fx.doc.send(new GetCommand({ TableName: devTable(model), Key: { id } })).catch(() => ({ Item: 1 }))).Item) gone = false
+    }
+  }
+  const dir = routerAs(token, 'tmsDirectoryActions')
+  const row = (await gql(token, `query { getCustomer(id: ${JSON.stringify(fx.customerId)}) { id updatedAt active } }`, {})).getCustomer
+  if (row && row.active !== false) await dir('ARCHIVE_CUSTOMER', { id: fx.customerId, expectedUpdatedAt: String(row.updatedAt) }).catch(() => {})
+  const after = (await gql(token, `query { getCustomer(id: ${JSON.stringify(fx.customerId)}) { active } }`, {})).getCustomer
+  return gone && after?.active === false
+}
+
+async function checkCustomerActivity(b, board, token, fx) {
+  // Server contract + latency: the same call the page makes, from the temp ADMIN.
+  const crm = routerAs(token, 'tmsCrmActions')
+  const timed = async (input) => { const t0 = performance.now(); const out = await crm('CRM_LIST_ACCOUNTS', input); return { ms: performance.now() - t0, out } }
+  const plain = await timed({ scope: 'all' })
+  const cold = await timed({ scope: 'all', withActivity: true })
+  const mine = cold.out.rows.find((r) => r.customerId === fx.customerId)
+  line(mine?.openArCents === 127_777 && mine?.lastShipmentAt === '2026-03-14T15:00:00.000Z' ? 'PASS' : 'FAIL', `${board.id} CRM_LIST_ACCOUNTS withActivity`, `rows ${cold.out.rows.length}, fixture openArCents match ${mine?.openArCents === 127_777}, lastShipmentAt match ${mine?.lastShipmentAt === '2026-03-14T15:00:00.000Z'}`)
+  line(plain.out.rows.every((r) => !('openArCents' in r)) ? 'PASS' : 'FAIL', `${board.id} activity is opt-in`, 'no openArCents without withActivity')
+  const warm = []
+  for (let i = 0; i < 9; i += 1) warm.push((await timed({ scope: 'all', withActivity: true })).ms)
+  line('INFO', `${board.id} withActivity latency (ms)`, `first call ${Math.round(cold.ms)} (cold when no other call in the last 60 s; includes AppSync + Lambda), 9 cached p95 ${Math.round(pct(warm, 95))}, plain list ${Math.round(plain.ms)}, ${cold.out.rows.length} accounts`)
+
+  // The page: add both columns through the Columns dialog, then read the ZZ row.
+  await openBoard(b, board, 1440)
+  await b.click({ text: 'Columns' })
+  await b.waitFor('.tms-cd-panes', 10_000).catch(() => {})
+  const added = await b.evaluate(`(() => { const ids = ['tms-cd-openAr', 'tms-cd-lastShipment']; const boxes = ids.map((i) => document.getElementById(i)); if (boxes.some((x) => !x)) return false; boxes.forEach((x) => { if (!x.checked) x.click() }); return true })()`)
+  await settle(b, 300)
+  await b.click({ text: 'Apply' })
+  await settle(b, 800)
+  line(added ? 'PASS' : 'FAIL', `${board.id} Open AR / Last shipment in the Columns dialog`, `available and addable: ${added}`)
+  const heads = await b.evaluate(HEADERS)
+  line(heads.includes('Open AR') && heads.includes('Last shipment') ? 'PASS' : 'FAIL', `${board.id} activity headers`, `Open AR ${heads.includes('Open AR')}, Last shipment ${heads.includes('Last shipment')}`)
+  await b.evaluate(SET_VALUE('input[aria-label="Search customers"]', fx.name))
+  await settle(b, 1500)
+  const read = () => b.evaluate(`(() => {
+    const ths = [...document.querySelectorAll('.tms-dg-scroll thead th')]
+    const col = (l) => ths.findIndex((h) => h.querySelector('.tms-dg-th-label')?.textContent.trim() === l)
+    const tr = [...document.querySelectorAll(${ROWS})].find((r) => r.textContent.includes(${JSON.stringify(fx.name)}))
+    if (!tr) return null
+    return { ar: tr.children[col('Open AR')]?.textContent.trim(), last: tr.children[col('Last shipment')]?.textContent.trim() }
+  })()`)
+  let cells = await read()
+  if (!cells) { await b.click({ text: 'Prospects' }).catch(() => {}); await settle(b, 800); cells = await read() }
+  line(cells?.ar === '$1,278' && cells?.last === '2026-03-14' ? 'PASS' : 'FAIL', `${board.id} ZZ row shows open AR and last shipment`, `row found ${!!cells}, Open AR ok ${cells?.ar === '$1,278'}, Last shipment ok ${cells?.last === '2026-03-14'}`)
+  // put the temp user's layout back
+  await b.click({ text: 'Columns' }).catch(() => {})
+  await settle(b, 600)
+  await b.evaluate(`['tms-cd-openAr', 'tms-cd-lastShipment'].forEach((i) => { const x = document.getElementById(i); if (x?.checked) x.click() })`)
+  await b.click({ text: 'Apply' }).catch(() => {})
+  await settle(b, 400)
+}
+
 async function inventory() {
   for (const board of BOARDS) line('INFO', `board ${board.id}`, `${board.title} ${board.path}`)
   line('INFO', 'checks', CHECKS.join(', '))
@@ -495,6 +605,19 @@ async function main() {
     b = await launchBrowser({ origin, storage: id.storage, profilePrefix: 'bcat-ac2-', purpose: 'AC2 verification', viewport: { width: 1440, height: 900 } })
     for (const board of boards) {
       try { await walkBoard(b, board) } catch (err) { line('FAIL', `${board.id} walk`, String(err.message).slice(0, 200)) }
+      if (board.id === 'customers') {
+        let fx
+        try {
+          fx = await createActivityFixtures(id.token, Date.now())
+          await checkCustomerActivity(b, board, id.token, fx)
+        } catch (err) { line('FAIL', `${board.id} activity columns`, String(err.message).slice(0, 200)) }
+        finally {
+          if (fx) {
+            const clean = await removeActivityFixtures(fx, id.token).catch(() => false)
+            line(clean ? 'PASS' : 'FAIL', `${board.id} ZZ activity fixtures removed`, 'zz-ac2- invoices/shipments deleted, customer archived')
+          }
+        }
+      }
     }
     const exceptions = b.problems().exceptions
     line(exceptions.length === 0 ? 'PASS' : 'FAIL', 'page exceptions', `${exceptions.length}`)

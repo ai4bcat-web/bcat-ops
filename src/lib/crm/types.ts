@@ -161,4 +161,7 @@ export interface CrmListAccountRow {
   nextStep: string | null
   nextStepDueAt: string | null
   openTaskCount: number
+  /** Only when the list was asked `withActivity`: open invoice balance, and the newest shipment pickup. */
+  openArCents?: number
+  lastShipmentAt?: string | null
 }

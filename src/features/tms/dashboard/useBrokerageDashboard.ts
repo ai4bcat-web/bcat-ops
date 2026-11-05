@@ -16,7 +16,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { listOpenBills, listOpenInvoices, listOwnershipDivisions, listUserProfiles } from '@/lib/apiClient'
-import { loadBoardBundle, type BoardBundle } from '@/lib/boardData'
+import { getShipmentsByIds, loadBoardBundle, type BoardBundle } from '@/lib/boardData'
 import { cachedList, invalidateLists } from '@/lib/listCache'
 import { monthsCovering, mergeShipmentSets } from '@/lib/shipmentWindows'
 import { clearReportCache, loadQuotes, loadSamples, type FailedMonth } from '@/lib/reportsClient'
@@ -44,15 +44,32 @@ function unionById<T extends { id: string }>(...sets: T[][]): T[] {
 }
 
 /**
+ * The priced samples that count: a sample whose shipment was voided is not revenue. The window read drops
+ * voided shipments server-side, so `applyFilters`' own voided check never sees them; the shipments the
+ * samples name that the window did not load are looked up narrowly by id (one aliased request per 100)
+ * and the voided ones' samples dropped, the same rule `computeMonth` applies (rollup parity, G9).
+ */
+export async function dropVoidedSamples<S extends { shipmentId?: string | null }>(
+  samples: readonly S[],
+  loadedShipmentIds: ReadonlySet<string>,
+): Promise<S[]> {
+  const unknown = [...new Set(samples.map((s) => s.shipmentId).filter((id): id is string => !!id && !loadedShipmentIds.has(id)))]
+  if (unknown.length === 0) return [...samples]
+  const found = await getShipmentsByIds(unknown, true)
+  return samples.filter((s) => !(s.shipmentId && found.get(s.shipmentId)?.voidedAt))
+}
+
+/**
  * One window's data: the shipments picking up in the window (±1 month, the UTC-vs-local month edge;
  * `applyFilters` then cuts to the exact days) with their orders, loads and legs joined by id.
  * Tier A (the window alone) is enough to draw every window card, so it is reported first. The
  * only rows outside the window the cards read are the ones the open invoices and bills point to
  * (AR/AP by rep); those are fetched BY ID once the open lists are in, never as a working set.
+ * Exported for the G9 rollup-parity gate, which must compare the rollup with this very read.
  */
-async function readWindow(from: string, to: string, onPartial: (b: DashboardBundle) => void): Promise<DashboardBundle> {
+export async function readDashboardWindow(from: string, to: string, onPartial: (b: DashboardBundle) => void = () => {}): Promise<DashboardBundle> {
   const months = monthsCovering(from, to, 1)
-  const [windowed, samples, quotes, openInvoices, openBills, profiles, divisions] = await Promise.all([
+  const [windowed, loadedSamples, quotes, openInvoices, openBills, profiles, divisions] = await Promise.all([
     loadBoardBundle({ kind: 'window', months, financials: false }),
     loadSamples(from, to),
     loadQuotes(from, to),
@@ -61,8 +78,9 @@ async function readWindow(from: string, to: string, onPartial: (b: DashboardBund
     listUserProfiles(),
     listOwnershipDivisions(),
   ])
-  const rest = { samples, quotes, openInvoices, openBills, profiles, divisions }
   const inWindow = new Set(windowed.shipments.map((s) => s.id))
+  const samples = { ...loadedSamples, rows: await dropVoidedSamples(loadedSamples.rows, inWindow) }
+  const rest = { samples, quotes, openInvoices, openBills, profiles, divisions }
   const referents = [...new Set([...openInvoices, ...openBills].map((row) => row.shipmentId).filter((id): id is string => !!id && !inWindow.has(id)))]
   if (referents.length === 0) return assemble(windowed, emptyBoard, rest)
   onPartial(assemble(windowed, emptyBoard, rest))
@@ -104,7 +122,7 @@ const partialListeners = new Map<string, Set<(b: DashboardBundle) => void>>()
 
 function bundleFor(from: string, to: string): Promise<DashboardBundle> {
   const key = `${CACHE_PREFIX}${from}|${to}`
-  return cachedList(key, () => readWindow(from, to, (b) => partialListeners.get(key)?.forEach((fn) => fn(b))), { ttlMs: TTL_MS })
+  return cachedList(key, () => readDashboardWindow(from, to, (b) => partialListeners.get(key)?.forEach((fn) => fn(b))), { ttlMs: TTL_MS })
 }
 
 export interface BrokerageDashboard {
@@ -117,7 +135,12 @@ export interface BrokerageDashboard {
   refresh: () => void
 }
 
-export function useBrokerageDashboard(filters: DashboardFilters): BrokerageDashboard {
+/**
+ * `enabled` gates the whole read: the KPI strip paints from the rollup, so this ~12 MB / 55-request bundle
+ * (charts, filter options, the exact fallback) starts only once something needs it. A disabled hook is the
+ * loading state (`data` null, `final` false).
+ */
+export function useBrokerageDashboard(filters: DashboardFilters, enabled = true): BrokerageDashboard {
   const { from, to } = filters
   const [reloadToken, setReloadToken] = useState(0)
   const key = `${from}|${to}|${reloadToken}`
@@ -128,6 +151,7 @@ export function useBrokerageDashboard(filters: DashboardFilters): BrokerageDashb
   })
 
   useEffect(() => {
+    if (!enabled) return
     let live = true
     const listenKey = `${CACHE_PREFIX}${from}|${to}`
     const onPartial = (next: DashboardBundle) => { if (live) setSettled({ key, bundle: next, error: null, partial: true }) }
@@ -146,7 +170,7 @@ export function useBrokerageDashboard(filters: DashboardFilters): BrokerageDashb
       listeners.delete(onPartial)
       if (listeners.size === 0) partialListeners.delete(listenKey)
     }
-  }, [from, to, key])
+  }, [from, to, key, enabled])
 
   const loading = settled.key !== key
   const bundle = settled.bundle

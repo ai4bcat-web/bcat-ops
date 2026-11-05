@@ -34,6 +34,8 @@ export interface DashboardKpis {
   totals: CompanyTotals | null
   /** The division tree the strips were built from (seeded, so the chip has options before the charts load). */
   divisions: DivisionInput[] | null
+  /** The rollup cannot serve this view (facet filter, Refresh, unusable rows): the exact bundle must be read. */
+  needsExact: boolean
 }
 
 /** Facets the rollup does not carry: any of them set means the exact path. */
@@ -41,7 +43,7 @@ export function hasFacetFilter(f: Pick<DashboardFilters, 'mode' | 'status' | 'cu
   return Boolean(f.mode || f.status || f.customerId || f.carrierId || f.repId)
 }
 
-const EMPTY: DashboardKpis = { state: 'loading', source: null, asOf: null, strips: [], totals: null, divisions: null }
+const EMPTY: DashboardKpis = { state: 'loading', source: null, asOf: null, strips: [], totals: null, divisions: null, needsExact: false }
 
 function fromRollup(window: RollupWindow, filters: DashboardFilters, divisions: DivisionInput[]): Pick<DashboardKpis, 'strips' | 'totals'> {
   const { strips, totals } = stripsFromRollup(window, filters, divisions)
@@ -108,14 +110,15 @@ export function useDashboardKpis(filters: DashboardFilters, exact: ExactRead, fo
         source: windowSource,
         asOf: new Date(asOfMs).toISOString(),
         divisions,
+        needsExact: false,
         ...fromRollup(window, filters, divisions),
       }
     }
     // Exact path: only when the rollup cannot serve (facet, refresh, unusable) and only once final.
     const rollupGaveUp = !eligible || rollupWindow === null
     if (!rollupGaveUp) return EMPTY
-    if (exact.error && !exact.data) return { state: 'ready', source: 'live', asOf: null, strips: [], totals: null, divisions }
-    if (!exact.data || !exact.final) return EMPTY
+    if (exact.error && !exact.data) return { state: 'ready', source: 'live', asOf: null, strips: [], totals: null, divisions, needsExact: true }
+    if (!exact.data || !exact.final) return { ...EMPTY, needsExact: true }
     const exactDivisions = exact.data.divisions.length > 0 ? exact.data.divisions : SEED_DIVISIONS
     return {
       state: 'ready',
@@ -124,6 +127,7 @@ export function useDashboardKpis(filters: DashboardFilters, exact: ExactRead, fo
       strips: rollupBusinessStrips(buildBusinessStrips(exact.data, filters, exactDivisions)),
       totals: buildCompanyTotals(exact.data, filters),
       divisions: exactDivisions,
+      needsExact: true,
     }
   }, [eligible, window, windowSource, rollupWindow, divisions, exact.data, exact.final, exact.error, filters, now])
 }

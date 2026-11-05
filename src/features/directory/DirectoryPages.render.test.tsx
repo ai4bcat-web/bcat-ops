@@ -247,6 +247,37 @@ describe('DirectoryPages', () => {
       await waitFor(() => expect(names()).toEqual(['Zeta Active']))
     })
 
+    it('Open AR and Last shipment are opt-in: no activity query by default, values, filter and sort once added', async () => {
+      renderCustomers()
+      await screen.findByText('Zeta Active')
+      for (const h of ['Open AR', 'Last shipment']) expect(screen.queryByRole('columnheader', { name: new RegExp(`^${h}`) })).toBeNull()
+      expect(crmAction.mock.calls.filter(([a, i]) => a === 'CRM_LIST_ACCOUNTS' && i.withActivity).length).toBe(0)
+      cleanup()
+
+      localStorage.setItem('tms:grid:customers:admin@bcatcorp.com:v1', JSON.stringify({ columns: ['name', 'openAr', 'lastShipment'] }))
+      crmRows.value = [
+        { customerId: 'c-active', openArCents: 250_000, lastShipmentAt: '2026-05-09T08:00:00.000Z' },
+        { customerId: 'c-pending', openArCents: 4_000, lastShipmentAt: '2026-02-01T08:00:00.000Z' },
+      ]
+      renderCustomers()
+      await screen.findByText('Active Co')
+      await waitFor(() => expect(crmAction).toHaveBeenCalledWith('CRM_LIST_ACCOUNTS', { scope: 'all', withActivity: true }))
+      const active = (await screen.findByText('Active Co')).closest('tr') as HTMLElement
+      await waitFor(() => expect(active.textContent).toContain('$2,500'))
+      expect(active.textContent).toContain('2026-05-09')
+
+      fireEvent.click(within(header('Open AR')).getByTitle('Sort by Open AR'))
+      await waitFor(() => expect(names().slice(0, 2)).toEqual(['Pending Co', 'Active Co']))
+      fireEvent.click(within(header('Last shipment')).getByTitle('Sort by Last shipment'))
+      await waitFor(() => expect(names().slice(0, 2)).toEqual(['Pending Co', 'Active Co']))
+      fireEvent.click(within(header('Last shipment')).getByTitle('Sort by Last shipment'))
+      await waitFor(() => expect(names().slice(0, 2)).toEqual(['Active Co', 'Pending Co']))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Filter Open AR' }))
+      fireEvent.change(screen.getByLabelText('Open AR min'), { target: { value: '100' } })
+      await waitFor(() => expect(names()).toEqual(['Active Co']))
+    })
+
     it('a numeric range on credit limit and a multi-select on Factored narrow the rows', async () => {
       localStorage.setItem('tms:grid:customers:admin@bcatcorp.com:v1', JSON.stringify({ columns: ['name', 'credit', 'factored', 'team', 'billingEmails'] }))
       renderCustomers()

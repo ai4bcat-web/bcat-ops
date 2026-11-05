@@ -83,7 +83,6 @@ import { needsCover } from '@/features/tms/carrierSales/carrierSalesQueue'
 import { RepointCustomerDialog } from './components/RepointCustomerDialog'
 
 import {
-  ALJEX_COLUMN_KEYS,
   BOARD_COLUMNS,
   boardRowTone,
   boardStatusOf,
@@ -97,6 +96,7 @@ import {
 import {
   ACTIONS_COLUMN,
   SHIPMENT_COLUMN_KEYS,
+  SHIPMENT_DEFAULT_COLUMNS,
   SHIPMENT_GRID_COLUMNS,
   sentence,
   statusCellText,
@@ -150,9 +150,6 @@ function normalizePageSize(size: number): number {
 const SETTABLE_STATUSES = ['ON_HOLD', 'OPEN', 'CANCELED', 'UNCANCEL'] as const
 
 const DEFAULT_SORT: DenseSort = { key: 'pickupShip', dir: 'asc' }
-
-/** The Aljex column order, with the PRO first: it is the sticky column. */
-const DEFAULT_COLUMNS = ['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== 'proNumber')]
 
 const COLUMN_BY_KEY = Object.fromEntries(SHIPMENT_GRID_COLUMNS.map((c) => [c.key, c]))
 
@@ -487,7 +484,7 @@ function BoardPane({
   const prefs = useDenseGridPrefs({
     gridId: `shipments-${pane}`,
     email,
-    defaultColumns: DEFAULT_COLUMNS,
+    defaultColumns: SHIPMENT_DEFAULT_COLUMNS,
     validKeys: SHIPMENT_COLUMN_KEYS,
     defaultSort: DEFAULT_SORT,
   })

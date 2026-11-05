@@ -103,6 +103,17 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
 
 export const SHIPMENT_COLUMN_KEYS = SHIPMENT_GRID_COLUMNS.map((c) => c.key)
 
+/**
+ * The columns Shipments Active / All show until a user saves their own layout: the Aljex board order
+ * (`ALJEX_COLUMN_KEYS`), PRO # first because it is the sticky column, cut to what fits the 1129 px
+ * scroller at 1440 wide without sideways scrolling (live header widths 91+142+92+122+106+135+97+134+113
+ * + the 40 px Actions column = 1072). Every other column stays in the Columns dialog.
+ * Revert to the full Aljex set: `['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== 'proNumber')]`.
+ */
+export const SHIPMENT_DEFAULT_COLUMNS = [
+  'proNumber', 'status', 'equip', 'customerName', 'carrier', 'pickupShip', 'originCity', 'destinationCity', 'deliveryAppt',
+]
+
 /** The Actions column the page appends after the chosen columns. */
 export const ACTIONS_COLUMN: DenseColumn<ShipmentRow> = {
   key: 'actions',

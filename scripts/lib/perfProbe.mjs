@@ -250,9 +250,9 @@ export function HOOK_SOURCE(config) {
     }, (err) => { entry.status = -1; done(); throw err })
   }
   const kpiReadiness = ${kpiReadiness.toString()}
-  st.t0 = 0; st.reqBase = 0; st.bytesBase = 0; st.kpiAt = null; st.chartAt = null; st.lastChangeAt = null; st.kpiFlips = 0
+  st.t0 = 0; st.reqBase = 0; st.bytesBase = 0; st.kpiAt = null; st.chartAt = null; st.lastChangeAt = null; st.kpiFlips = 0; st.scrolled = false; st.scrollToCharts = !!cfg.scrollToCharts
   let kpiSig = null; let pageSig = null
-  window.__perfMark = () => { st.t0 = T(); st.reqBase = st.reqs.length; st.bytesBase = st.bytes; st.kpiAt = null; st.chartAt = null; st.lastChangeAt = null; st.kpiFlips = 0; kpiSig = null; pageSig = null }
+  window.__perfMark = () => { st.t0 = T(); st.reqBase = st.reqs.length; st.bytesBase = st.bytes; st.kpiAt = null; st.chartAt = null; st.lastChangeAt = null; st.kpiFlips = 0; st.scrolled = false; kpiSig = null; pageSig = null }
   const kpiProbe = () => {
     if (!cfg.kpiTestId || !document.body) return
     const now = T()
@@ -268,6 +268,12 @@ export function HOOK_SOURCE(config) {
       const sig = (el.innerText || '').replace(/\\D/g, '')
       if (sig !== kpiSig) { st.kpiFlips += 1; kpiSig = sig }
       st.kpiFlipsAttr = el.getAttribute('data-kpi-flips')
+    }
+    // The dashboard's chart cards mount lazily (PERF R6) and sit below ~800 px of business strips: a user who wants a chart scrolls to the cards
+    // as soon as the KPIs land, so charts are measured from that scroll (the chunk load + first paint), not from a viewport that never reaches them.
+    if (st.scrollToCharts && st.kpiAt != null && !st.scrolled) {
+      const grid = document.querySelector('.tms-dash-cards')
+      if (grid) { grid.scrollIntoView({ block: 'start' }); st.scrolled = true }
     }
     if (st.chartAt == null && document.querySelector('.recharts-surface')) st.chartAt = now
     const sig = ((document.querySelector('.tms-main') || document.body).innerText || '').slice(0, 1400).replace(/\\D/g, '')
@@ -292,6 +298,7 @@ export function HOOK_SOURCE(config) {
     if (!main) return // the hook is injected before <body> exists on a cold navigation
     st.empty = !!main.querySelector('[data-testid*="empty"], .tms-empty, [class*="empty-state"]') || /\\bno (loads|shipments|results|rows|customers|carriers|invoices|bills|items|data|matching)\\b/i.test(main.innerText || '')
     let ok = cfg.expectEmpty ? st.empty && rows === 0 : rows >= cfg.minRows
+    if (st.scrollToCharts && st.kpiAt != null && !st.scrolled) return // scroll first (kpiProbe), then count the charts
     if (cfg.minCharts) ok = ok && st.charts >= cfg.minCharts
     if (cfg.kpi) ok = ok && (st.kpiAt != null || /^\\d+ shipments?$/.test(st.kpiSub || ''))
     if (cfg.readyOps) {
@@ -424,7 +431,7 @@ async function navigateKpi(browser, path) {
  * Returns { cold: [run], warm: [run], spa: [run] } with run as in awaitKpiRun.
  */
 export async function measureModes(launch, path, spec, runs = { cold: 3, warm: 3, spa: 3 }) {
-  const hook = HOOK_SOURCE({ minRows: 0, kpiTestId: spec.kpiTestId })
+  const hook = HOOK_SOURCE({ minRows: 0, kpiTestId: spec.kpiTestId, scrollToCharts: spec.scrollToCharts })
   const withHook = async (browser) => { await browser.command('Page.addScriptToEvaluateOnNewDocument', { source: hook }); return browser }
   const out = { cold: [], warm: [], spa: [] }
   for (let i = 0; i < (runs.cold ?? 0); i += 1) {
@@ -445,7 +452,7 @@ export async function measureModes(launch, path, spec, runs = { cold: 3, warm: 3
         await navigateKpi(b, spec.spaFrom ?? '/tms/carriers')
         await awaitKpiRun(b, {}) // shell warm and quiet
         b.mark()
-        await b.evaluate('window.__perfMark()')
+        await b.evaluate('window.__perfMark(); window.__perf.scrollToCharts = false') // in-app mode: the user did not scroll, so the below-the-fold bundle stays unread
         await b.click(`a[href="${path}"]`)
         out.spa.push({ mode: 'spa', ...(await awaitKpiRun(b, {})) })
       }

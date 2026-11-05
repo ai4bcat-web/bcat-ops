@@ -97,10 +97,13 @@ const yesNo = (v: boolean | null | undefined) => (v === true ? 'Yes' : 'No')
 const opt = (v: string | null | undefined) => (v ? [{ value: v, label: v }] : [])
 
 const DEFAULT_COLUMNS = ['name', 'status', 'owner', 'lastTouch', 'nextStep', 'credit', 'terms', 'contact', 'city']
+/** Columns fed by CRM_LIST_ACCOUNTS `withActivity`. */
+const ACTIVITY_COLUMN_KEYS = ['openAr', 'lastShipment']
 const ALL_COLUMN_KEYS = [
   ...DEFAULT_COLUMNS,
   'team', 'billingEmails', 'factored', 'email', 'state',
   'division', 'stage', 'nextDue', 'openTasks', 'phone', 'mc', 'dot', 'archived', 'aljexCode', 'industry', 'leadSource', 'created',
+  ...ACTIVITY_COLUMN_KEYS,
 ]
 const ACTIONS_KEY = 'actions'
 
@@ -146,6 +149,14 @@ const gridCatalog: Array<DenseColumn<CustomerRow>> = [
       key: 'billingEmails', header: 'Billing e-mails', group: 'Billing', text: (r) => String(billingEmailCount(r.record)),
       filter: 'number', numberOf: (r) => billingEmailCount(r.record), align: 'right',
     },
+    {
+      key: 'openAr', header: 'Open AR', group: 'Billing', text: (r) => (r.crm?.openArCents != null ? dollars(r.crm.openArCents) : ''),
+      filter: 'number', numberOf: (r) => (r.crm?.openArCents != null ? r.crm.openArCents / 100 : null), numberUnit: '$', align: 'right',
+    },
+    {
+      key: 'lastShipment', header: 'Last shipment', group: 'Activity', text: (r) => r.crm?.lastShipmentAt?.slice(0, 10) ?? '',
+      filter: 'date', dateOf: (r) => r.crm?.lastShipmentAt ?? null, sortValue: (r) => r.crm?.lastShipmentAt ?? null,
+    },
     { key: 'factored', header: 'Factored', group: 'Billing', text: (r) => yesNo(r.record.factored), filter: 'multi' },
     { key: 'contact', header: 'Contact', group: 'Contact', text: (r) => r.record.contactName ?? '' },
     { key: 'email', header: 'E-mail', group: 'Contact', text: (r) => r.record.contactEmail ?? '' },
@@ -167,7 +178,16 @@ export function CustomersPage() {
   const isManager = isCrmManager(auth)
   // Managers and admins can narrow to their own accounts; everyone else is always on their own (§5.6).
   const [scope, setScope] = useState<'mine' | 'all'>('all')
-  const crm = useCrmAccounts(isManager ? scope : 'mine')
+  const prefs = useDenseGridPrefs({
+    gridId: 'customers',
+    email: user?.email,
+    defaultColumns: DEFAULT_COLUMNS,
+    validKeys: ALL_COLUMN_KEYS,
+    defaultSort: { key: 'name', dir: 'asc' },
+  })
+  // Open AR and Last shipment cost server queries, so they are fetched only while a column shows them.
+  const withActivity = prefs.columns.some((k) => ACTIVITY_COLUMN_KEYS.includes(k))
+  const crm = useCrmAccounts(isManager ? scope : 'mine', withActivity)
   const { nameOf } = useStaff(user?.email)
   const [noteFor, setNoteFor] = useState<CustomerRecord | null>(null)
   const [query, setQuery] = useState('')
@@ -230,13 +250,6 @@ export function CustomersPage() {
 
   const [activeTab, setActiveTab] = useState<BoardTab>('active')
 
-  const prefs = useDenseGridPrefs({
-    gridId: 'customers',
-    email: user?.email,
-    defaultColumns: DEFAULT_COLUMNS,
-    validKeys: ALL_COLUMN_KEYS,
-    defaultSort: { key: 'name', dir: 'asc' },
-  })
   const gridColumns = useMemo(
     () => [
       ...prefs.columns.map((k) => gridCatalog.find((c) => c.key === k)).filter((c) => c != null),

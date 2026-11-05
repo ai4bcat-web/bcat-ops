@@ -56,7 +56,11 @@ vi.mock('./components/SendRemittanceDialog', () => ({ SendRemittanceDialog: () =
 
 /** Dates are relative to the day the suite runs, so no clock makes this flaky. */
 const TODAY = chicagoDateStr(new Date())
-const daysAgo = (days: number) => chicagoDateStr(new Date(Date.now() - days * 86_400_000))
+// Subtract calendar days from the Chicago date string: a fixed 24 h per day is off by one across a DST change.
+const daysAgo = (days: number) => {
+  const [y, m, d] = TODAY.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - days)).toISOString().slice(0, 10)
+}
 
 function assignment(patch: Partial<LoadCarrierRecord> = {}): LoadCarrierRecord {
   return {
