@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
 import { encodePolyline } from '@/lib/polyline'
@@ -21,7 +21,7 @@ vi.mock('@vis.gl/react-google-maps', () => {
   const lib = { Polyline, Circle }
   const map = { fitBounds: vi.fn(), setCenter: vi.fn(), setZoom: vi.fn() }
   return {
-    APIProvider: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+    APIProvider: ({ children, onError }: { children: ReactNode; onError?: (e: unknown) => void }) => <div data-testid="api" onClick={() => onError?.(new Error('script'))}>{children}</div>,
     Map: ({ children }: { children: ReactNode }) => <div>{children}</div>,
     AdvancedMarker: ({ children, title }: { children: ReactNode; title?: string }) => <div data-testid="marker" title={title}>{children}</div>,
     useMap: () => map,
@@ -79,5 +79,13 @@ describe('TrackingRouteMap (Google branch)', () => {
     expect(previous).toHaveBeenCalledOnce()
     unmount()
     expect(w.gm_authFailure).toBe(previous)
+  })
+
+  it('treats a Maps script load failure like a key refusal, so the panel can draw the outline', () => {
+    const onAuthFailure = vi.fn()
+    const model = buildMapModel({ mode: 'staff', fixes: [], current: null, route: null, routeSource: 'NONE', nowMs: NOW, pins: [] })
+    render(<TrackingRouteMap apiKey="k" mapId="m" model={model} fitKey="L1" recenter={0} onAuthFailure={onAuthFailure} />)
+    fireEvent.click(screen.getByTestId('api'))
+    expect(onAuthFailure).toHaveBeenCalledOnce()
   })
 })

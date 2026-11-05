@@ -57,6 +57,7 @@ const ROLLUP_TABLE = 'DashboardRollup'
 const ALLOW_PROBLEMS = [
   { pattern: /Manifest: Line: 1, column: 1, Syntax error\. http:\/\/(127\.0\.0\.1|localhost):5173\/manifest\.webmanifest$/, reason: 'vite dev server has no built manifest' },
   { pattern: /The map is initialized without a valid Map ID/, reason: 'dev Maps key is neutered' },
+  { pattern: /net::ERR_CERT_VERIFIER_CHANGED/, reason: 'headless Chrome re-reads its cert store mid-run; the request is retried by the client' },
 ]
 const HOOK_CLASSES = ['tms-overdue', 'tms-due', 'tms-theme-toggle', 'tms-dash', 'tms-probe-field', 'tms-public-head', 'tms-public-brand-name', 'tms-drawer-md']
 export const SKIP_ALLOWED = {

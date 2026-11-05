@@ -850,7 +850,8 @@ const RUNNERS = {
 
     // SVG outline data blocked: the panel degrades to text and keeps the position readable.
     await openInIdentity(ctx, ctx.ids.tms.storage, 'bcat-ao-blocked-', async (b) => {
-      await b.blockUrls(['*states-10m*'])
+      // The dev Maps key works, so block Google too: the Maps script failing must degrade to the outline, whose data is blocked as well.
+      await b.blockUrls(['*states-10m*', '*maps.googleapis.com*', '*maps.gstatic.com*'])
       await b.navigate(`/tms/tracking?assignee=all&shipment=${encodeURIComponent(idB)}`)
       await b.poll(() => has(b, tid('tracking-map-unavailable')), 'the "Map unavailable" text', 60_000)
       expect(/Map unavailable/.test(await textOf(b, tid('tracking-map-unavailable')) ?? ''), 'the unavailable text is wrong')

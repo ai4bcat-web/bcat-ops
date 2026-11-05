@@ -11,7 +11,7 @@ import type { MapModel } from './mapModel'
 const TrackingRouteMap = lazy(() => import('./TrackingRouteMap'))
 
 const NO_KEY_CAPTION = 'Google map not configured — showing outline'
-const AUTH_CAPTION = 'Google rejected the map key — showing outline'
+const AUTH_CAPTION = 'Google rejected the map key or could not load — showing outline'
 const CHUNK_CAPTION = 'Google map could not load — showing outline'
 
 /** A failed lazy chunk (offline, a stale deploy) degrades to the outline instead of blanking the drawer. */

@@ -87,7 +87,7 @@ describe('TrackingMapPanel', () => {
     expect(screen.getByTestId('tracking-map')).toHaveAttribute('data-mode', 'google')
     fireEvent.click(probe)
     await waitFor(() => expect(screen.getByTestId('tracking-map')).toHaveAttribute('data-mode', 'fallback'))
-    expect(screen.getByTestId('tracking-map-caption')).toHaveTextContent('Google rejected the map key — showing outline')
+    expect(screen.getByTestId('tracking-map-caption')).toHaveTextContent('Google rejected the map key or could not load — showing outline')
   })
 
   it('remembers a collapsed panel across remounts and mounts no map while collapsed', async () => {

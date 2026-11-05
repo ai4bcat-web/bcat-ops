@@ -105,7 +105,7 @@ export interface TrackingRouteMapProps {
   model: MapModel
   fitKey: string
   recenter: number
-  /** Google tells us (asynchronously, via `window.gm_authFailure`) that the key was refused. */
+  /** Google refused the key (`window.gm_authFailure`) or its script failed to load (`APIProvider.onError`): either way, draw the outline. */
   onAuthFailure: () => void
 }
 
@@ -119,7 +119,7 @@ export default function TrackingRouteMap({ apiKey, mapId, model, fitKey, recente
 
   return (
     <div className="tms-map-google" data-testid="tracking-map-google">
-      <APIProvider apiKey={apiKey}>
+      <APIProvider apiKey={apiKey} onError={onAuthFailure}>
         <GoogleMap
           mapId={mapId}
           defaultCenter={{ lat: 39.8283, lng: -98.5795 }}

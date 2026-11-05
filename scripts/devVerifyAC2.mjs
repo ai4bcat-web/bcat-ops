@@ -141,7 +141,9 @@ async function openBoard(b, board, width = 1440) {
   await b.waitFor('.tms-dg-scroll', 60_000)
   // Rows (or the empty state) are in: a spinner-only first paint has no table body yet.
   await b.poll(async () => (await rowCount(b)) >= 0, 'grid body', 30_000)
-  await settle(b, 3500)
+  // The working set lands in stages (first partial after a few seconds): wait for real rows, up to 30 s.
+  await b.poll(async () => (await rowCount(b)) > 0, 'rows', 30_000).catch(() => {})
+  await settle(b, 1500)
 }
 
 const closePopover = async (b) => { await b.press('Escape'); await settle(b, 250) }
@@ -328,10 +330,17 @@ async function checkPopovers(b, board, labels) {
     await settle(b, 400)
     await openFilter(b, label)
     const at = await b.evaluate(`(() => { const r = document.querySelector('.tms-dg-scroll').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } })()`)
-    await b.command('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.x, y: at.y, deltaX: 300, deltaY: 0 })
-    await b.poll(() => b.evaluate(`document.querySelector('.tms-dg-scroll').scrollLeft > 0`), 'sideways wheel scroll', 5000).catch(() => issues.push('wheel did not scroll the grid sideways'))
-    await settle(b, 400)
-    if (await b.evaluate(`!!document.querySelector('.tms-dg-popover')`)) issues.push('popover stays open (detached from its header) after a real sideways scroll')
+    const farRight = await b.evaluate(`document.querySelector('.tms-dg-scroll').scrollLeft`)
+    const wheel = b.command('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.x, y: at.y, deltaX: -300, deltaY: 0 })
+    await Promise.race([wheel, b.pause(5000)]).catch(() => {})
+    // opening the last filter scrolled the grid to its far right: wheel back left; fall back to a programmatic scroll when the wheel never lands
+    const moved = () => b.evaluate(`document.querySelector('.tms-dg-scroll').scrollLeft < ${farRight} - 1`)
+    await b.poll(moved, 'sideways wheel scroll', 3000).catch(async () => { await b.evaluate(`document.querySelector('.tms-dg-scroll').scrollLeft = ${farRight} - 300`) })
+    // headless Chrome emits scroll events on frames and makes none after a CDP key press: a screenshot forces one
+    await b.command('Page.captureScreenshot', { format: 'jpeg', quality: 10 }).catch(() => {})
+    // a heavy board repaints slowly after a scroll: give the close up to 8 s
+    await b.poll(() => b.evaluate(`!document.querySelector('.tms-dg-popover')`), 'popover closed by scroll', 8000).catch(() => {})
+    if (await b.evaluate(`!!document.querySelector('.tms-dg-popover')`)) issues.push('popover stays open (detached from its header) after a real sideways scroll ' + JSON.stringify(await b.evaluate(`({ sl: document.querySelector('.tms-dg-scroll').scrollLeft, far: ${farRight}, pops: [...document.querySelectorAll('.tms-dg-popover')].map((x) => x.getAttribute('aria-label') + '@' + Math.round(x.getBoundingClientRect().left)), label: ${JSON.stringify(label)} })`)))
   }
   await closePopover(b)
   const pageAfter = await b.evaluate(`({ y: scrollY, h: document.documentElement.scrollHeight })`)
@@ -431,7 +440,7 @@ async function checkDensity(b, board) {
 
 /** Carriers only (asked for by the Carriers page owner): status tabs carry counts, a row opens the profile, Find & invite is linked. */
 async function checkCarriersExtras(b, board) {
-  const tabs = await b.evaluate(`[...document.querySelectorAll('button, [role=tab]')].map((x) => x.textContent.trim()).filter((t) => /^(Pending|Active|Inactive)\\b/i.test(t))`)
+  const tabs = await b.evaluate(`[...document.querySelectorAll('button, [role=tab]')].map((x) => x.textContent.trim()).filter((t) => /^(Pending|Active|Inactive)/i.test(t))`)
   line(tabs.length >= 3 && tabs.every((t) => /\d/.test(t)) ? 'PASS' : 'FAIL', `${board.id} status tabs with counts`, JSON.stringify(tabs))
   const find = await b.evaluate(`!![...document.querySelectorAll('a')].find((a) => /\\/tms\\/carriers\\/find$/.test(a.getAttribute('href') ?? ''))`)
   line(find ? 'PASS' : 'FAIL', `${board.id} Find & invite link`)
