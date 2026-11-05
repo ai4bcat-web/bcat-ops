@@ -29,6 +29,7 @@ const api = vi.hoisted(() => ({
   postQuoteLoad: vi.fn(),
   unpostQuoteLoad: vi.fn(),
   markQuoteLost: vi.fn(),
+  markQuoteWon: vi.fn(),
   graphqlErrorText: (e: unknown) => (e instanceof Error ? e.message : String(e)),
 }))
 vi.mock('@/lib/apiClient', () => api)
@@ -87,7 +88,7 @@ function request(over: Partial<SpotRequestRecord> = {}): SpotRequestRecord {
 
 const STUB_ANSWER = {
   answer: { averageCents: 200000, lowCents: 180000, highCents: 220000, fuelCents: 0, perMileCents: 200, miles: 1000, reports: 0, days: 0, stub: true, source: 'DAT_RATEVIEW', message: 'STUB — no DAT call was made' },
-  targetBps: 2000, floorBps: 1200, autoReply: false, suggestedSellCents: 250000, belowFloor: false, floorSellCents: 227000, marginAtSuggested: 0.2,
+  targetBps: 2000, floorBps: 1200, suggestedSellCents: 250000, belowFloor: false, floorSellCents: 227000, marginAtSuggested: 0.2,
 }
 
 const NO_INTEL = {
@@ -133,6 +134,7 @@ beforeEach(() => {
   api.listShipmentPostings.mockResolvedValue([])
   api.postQuoteLoad.mockResolvedValue({ postings: [] })
   api.markQuoteLost.mockResolvedValue({ quote: {} })
+  api.markQuoteWon.mockResolvedValue({ quote: {} })
 })
 
 describe('Spot inbox connection states', () => {
@@ -310,8 +312,11 @@ describe('Spot request detail', () => {
     const sent = request({ status: 'SENT', sentAt: '2026-11-04T10:05:00Z', quoteId: 'Q1' })
     setup({ detail: sent, rows: [sent] })
     draw('/tms/rates/spot?request=sr:u1:m1')
+    expect(await screen.findByTestId('spot-request-outcome')).toHaveTextContent('Pending')
     fireEvent.click(await screen.findByTestId('spot-mark-won'))
     await waitFor(() => expect(calls('SPOT_MARK_OUTCOME')[0][1]).toEqual({ requestId: 'sr:u1:m1', outcome: 'WON' }))
+    // the open quote behind it is won first, so the request can read that outcome (and the lane win rate counts it)
+    expect(api.markQuoteWon).toHaveBeenCalledWith({ quoteId: 'Q1' })
     fireEvent.click(screen.getByTestId('spot-mark-lost'))
     fireEvent.change(await screen.findByTestId('spot-lost-reason'), { target: { value: 'went with a cheaper carrier' } })
     fireEvent.click(screen.getByTestId('spot-lost-confirm'))

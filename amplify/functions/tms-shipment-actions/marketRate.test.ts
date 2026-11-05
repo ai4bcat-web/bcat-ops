@@ -89,9 +89,8 @@ function assertStub(answer: RateViewAnswer) {
 
 describe('priceFromMarket', () => {
   it('returns a stub answer labelled STUB when no DAT credentials exist', async () => {
-    const result = (await priceFromMarket(deps(), baseInput, caller)) as { answer: RateViewAnswer; autoReply: boolean }
+    const result = (await priceFromMarket(deps(), baseInput, caller)) as { answer: RateViewAnswer }
     assertStub(result.answer)
-    expect(result.autoReply).toBe(false)
   })
 
   it('returns the same stub number for the same lane (determinism)', async () => {
@@ -182,23 +181,20 @@ describe('priceFromMarket', () => {
     expect(result.targetBps).toBe(1800)
   })
 
-  it('forces autoReply false when the suggested rate is below the floor', async () => {
+  it('flags a suggested rate that falls below the floor', async () => {
     // A 2.5% target rounds to a dollar sell rate whose actual margin can drop
-    // below the floor when floor is set to the same 250 bps, proving the agent
-    // refuses to auto-send money-losing prices.
+    // below the floor when floor is set to the same 250 bps.
     const d = deps({
       getSettings: async () =>
         ({
           id: 'default',
           marginTargetBps: 250,
           marginFloorBps: 250,
-          quoteAutoReplyDefault: true,
         } as Row),
     })
     const result: MarketRateResult = await priceFromMarket(d, baseInput, caller) as unknown as MarketRateResult
     expect(result.belowFloor).toBe(true)
     expect(result.marginAtSuggested).toBeLessThan(result.floorBps)
-    expect(result.autoReply).toBe(false)
     expect(result.floorSellCents).toBeGreaterThan(0)
   })
 

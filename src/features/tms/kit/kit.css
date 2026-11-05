@@ -447,20 +447,13 @@
 .tms-portal.tms-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 61; display: flex; flex-direction: column; width: 100%; max-width: min(560px, 100vw); min-width: 0; overflow-x: hidden; background: var(--tms-card); border-left: 1px solid var(--tms-border); box-shadow: var(--tms-shadow-modal); }
 .tms-portal.tms-drawer-lg { max-width: min(760px, 100vw); }
 .tms-portal.tms-drawer-xl { max-width: min(1040px, 100vw); }
-.tms-shell .tms-portal .tms-drawer-head,
-.tms-portal .tms-portal .tms-drawer-head { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; padding: 14px var(--tms-pad); border-bottom: 1px solid var(--tms-border); }
-.tms-shell .tms-portal .tms-drawer-titles,
-.tms-portal .tms-portal .tms-drawer-titles { flex: 1 1 auto; min-width: 0; }
-.tms-shell .tms-portal .tms-drawer-title,
-.tms-portal .tms-portal .tms-drawer-title { margin: 0; font-size: 16px; font-weight: 600; }
-.tms-shell .tms-portal .tms-drawer-desc,
-.tms-portal .tms-portal .tms-drawer-desc { margin: 2px 0 0; color: var(--tms-muted); font-size: 13px; }
-.tms-shell .tms-portal .tms-drawer-extra,
-.tms-portal .tms-portal .tms-drawer-extra { display: inline-flex; align-items: center; gap: 8px; }
-.tms-shell .tms-portal .tms-drawer-body,
-.tms-portal .tms-portal .tms-drawer-body { flex: 1 1 auto; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; padding: var(--tms-pad); background: var(--tms-bg); }
-.tms-shell .tms-portal .tms-drawer-foot,
-.tms-portal .tms-portal .tms-drawer-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 0 auto; padding: 12px var(--tms-pad); border-top: 1px solid var(--tms-border); }
+.tms-portal.tms-drawer .tms-drawer-head { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; padding: 14px var(--tms-pad); border-bottom: 1px solid var(--tms-border); }
+.tms-portal.tms-drawer .tms-drawer-titles { flex: 1 1 auto; min-width: 0; }
+.tms-portal.tms-drawer .tms-drawer-title { margin: 0; font-size: 16px; font-weight: 600; }
+.tms-portal.tms-drawer .tms-drawer-desc { margin: 2px 0 0; color: var(--tms-muted); font-size: 13px; }
+.tms-portal.tms-drawer .tms-drawer-extra { display: inline-flex; align-items: center; gap: 8px; }
+.tms-portal.tms-drawer .tms-drawer-body { flex: 1 1 auto; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; padding: var(--tms-pad); background: var(--tms-bg); }
+.tms-portal.tms-drawer .tms-drawer-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 0 auto; padding: 12px var(--tms-pad); border-top: 1px solid var(--tms-border); }
 
 /* ── Notification rows (bell drawer) ─ */
 .tms-portal .tms-notification-row { display: flex; align-items: flex-start; gap: 10px; min-width: 0; margin: 0 -8px; padding: 10px 8px; border-bottom: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); color: var(--tms-text); text-decoration: none; }

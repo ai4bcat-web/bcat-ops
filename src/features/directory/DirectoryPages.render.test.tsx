@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import type { CustomerRecord, LocationRecord, Division, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { CustomersPage, LocationsPage } from './DirectoryPages'
@@ -78,6 +78,16 @@ const customers: CustomerRecord[] = [
     operatedById: 'legacy.rep@nowhere.test', accountOwnerIds: ['legacy.owner@nowhere.test'],
     createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
   } as CustomerRecord,
+  {
+    id: 'c-zeta', name: 'Zeta Active', status: 'ACTIVE', active: true, factored: true, creditLimitCents: 500000,
+    paymentTermsDays: 30, billingEmail: 'ap@zeta.test, ar@zeta.test', teamKey: 'DESK_1',
+    createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+  } as CustomerRecord,
+  {
+    id: 'c-alpha', name: 'Alpha Active', status: 'ACTIVE', active: true, factored: false, creditLimitCents: 100000,
+    paymentTermsDays: 45,
+    createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
+  } as CustomerRecord,
 ]
 
 const locations: LocationRecord[] = []
@@ -147,6 +157,7 @@ describe('DirectoryPages', () => {
     authState.isAdmin = true
     authState.user = { email: 'admin@bcatcorp.com' }
     crmRows.value = []
+    localStorage.clear()
     crmAction.mockReset()
     crmAction.mockImplementation(async (action: string, input: { scope?: string }) => {
       if (action === 'CRM_LIST_ACCOUNTS') {
@@ -205,6 +216,108 @@ describe('DirectoryPages', () => {
       fireEvent.change(await screen.findByTestId('crm-note-text'), { target: { value: 'Met at the expo' } })
       fireEvent.click(screen.getByTestId('crm-note-save'))
       await waitFor(() => expect(crmAction).toHaveBeenCalledWith('CRM_ADD_ACTIVITY', { customerId: 'c-active', kind: 'NOTE', summary: 'Met at the expo' }))
+    })
+  })
+
+  describe('dense grid', () => {
+    const names = () => Array.from(document.querySelectorAll('tbody tr:not(.tms-dg-spacer) td:first-child')).map((td) => td.textContent)
+    const header = (name: string) => screen.getByRole('columnheader', { name: new RegExp(`^${name}`) })
+
+    it('lists every active customer sorted by name, with the Customers columns', async () => {
+      renderCustomers()
+      await waitFor(() => expect(names()).toEqual(['Active Co', 'Alpha Active', 'Legacy Active', 'Pending Co', 'Zeta Active']))
+      for (const h of ['Customer', 'Status', 'Owner', 'Team', 'Last touch', 'Next step', 'Credit limit', 'Terms', 'Billing e-mails', 'Factored']) {
+        expect(header(h)).toBeTruthy()
+      }
+      expect(header('Customer').className).toContain('tms-dg-sticky')
+      const zeta = screen.getByText('Zeta Active').closest('tr') as HTMLElement
+      expect(zeta.textContent).toContain('$5,000')
+      expect(zeta.textContent).toContain('Net 30')
+      expect(zeta.textContent).toContain('Desk One')
+      expect(within(zeta).getAllByRole('cell').map((c) => c.textContent)).toContain('2') // two billing e-mails
+    })
+
+    it('a header type-ahead filter narrows the rows', async () => {
+      renderCustomers()
+      await screen.findByText('Zeta Active')
+      fireEvent.click(screen.getByRole('button', { name: 'Filter Customer' }))
+      fireEvent.change(screen.getByPlaceholderText('Filter Customer…'), { target: { value: 'zeta' } })
+      await waitFor(() => expect(names()).toEqual(['Zeta Active']))
+    })
+
+    it('a numeric range on credit limit and a multi-select on Factored narrow the rows', async () => {
+      renderCustomers()
+      await screen.findByText('Zeta Active')
+      fireEvent.click(screen.getByRole('button', { name: 'Filter Credit limit' }))
+      fireEvent.change(screen.getByLabelText('Credit limit min'), { target: { value: '2000' } })
+      await waitFor(() => expect(names()).toEqual(['Zeta Active']))
+      fireEvent.change(screen.getByLabelText('Credit limit min'), { target: { value: '' } })
+      fireEvent.change(screen.getByLabelText('Credit limit max'), { target: { value: '1500' } })
+      await waitFor(() => expect(names()).toEqual(['Alpha Active']))
+      fireEvent.click(screen.getByRole('button', { name: 'Clear 1 filter' }))
+      await waitFor(() => expect(names()).toHaveLength(5))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Filter Factored' }))
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Factored: Yes' }))
+      await waitFor(() => expect(names()).toEqual(['Zeta Active']))
+    })
+
+    it('clicking a header sorts ascending, then descending, and the order persists for that user only', async () => {
+      const { unmount } = renderCustomers()
+      await screen.findByText('Zeta Active')
+      const sortBy = (label: string) => fireEvent.click(within(header(label)).getByTitle(`Sort by ${label}`))
+      sortBy('Credit limit')
+      await waitFor(() => expect(names().slice(0, 2)).toEqual(['Alpha Active', 'Zeta Active'])) // blanks sort last
+      sortBy('Credit limit')
+      await waitFor(() => expect(names().slice(0, 2)).toEqual(['Zeta Active', 'Alpha Active']))
+      unmount()
+
+      renderCustomers()
+      await waitFor(() => expect(names().slice(0, 2)).toEqual(['Zeta Active', 'Alpha Active']))
+      expect(header('Credit limit').getAttribute('aria-sort')).toBe('descending')
+      cleanup()
+
+      authState.user = { email: 'other@bcatcorp.com' }
+      renderCustomers()
+      await waitFor(() => expect(names()[0]).toBe('Active Co'))
+      expect(localStorage.getItem('tms:grid:customers:admin@bcatcorp.com:v1')).not.toBeNull()
+    })
+
+    it('keeps the layout the user chose: a hidden column stays hidden after a reload', async () => {
+      localStorage.setItem('tms:grid:customers:admin@bcatcorp.com:v1', JSON.stringify({ columns: ['name', 'status'] }))
+      renderCustomers()
+      await screen.findByText('Zeta Active')
+      expect(header('Customer')).toBeTruthy()
+      expect(header('Status')).toBeTruthy()
+      expect(screen.queryByRole('columnheader', { name: /^Owner/ })).toBeNull()
+    })
+
+    it('the Prospects tab shows the CRM columns of its rows', async () => {
+      crmRows.value = [{
+        customerId: 'c-lead', ownerId: 'dana@bcatcorp.com', stage: 'NEW', lastTouchAt: PAST, lastTouchKind: 'CALL',
+        nextStep: 'Send intro', nextStepDueAt: PAST, openTaskCount: 1,
+      }]
+      renderCustomers()
+      fireEvent.click(await screen.findByText('Prospects'))
+      const lead = (await screen.findByText('Lead Co')).closest('tr') as HTMLElement
+      await waitFor(() => expect(within(lead).getByTestId('crm-next-step-c-lead').textContent).toContain('Send intro'))
+      expect(within(lead).getByText('NEW')).toBeTruthy()
+      expect(within(lead).getByText('Dana Carr')).toBeTruthy()
+      expect(within(lead).getByTestId('crm-last-touch-c-lead').textContent).toContain('Call')
+    })
+
+    it('shows 100 rows and offers the next hundred', async () => {
+      const original = customers.length
+      for (let i = 0; i < 130; i += 1) customers.push({ id: `bulk-${i}`, name: `Bulk ${String(i).padStart(3, '0')}`, status: 'ACTIVE', active: true, createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' } as CustomerRecord)
+      try {
+        renderCustomers()
+        await screen.findByText('Active Co')
+        expect(screen.getByTestId('customers-more').textContent).toContain('Showing 100 of 135')
+        fireEvent.click(screen.getByRole('button', { name: 'Show next 100' }))
+        await waitFor(() => expect(screen.queryByTestId('customers-more')).toBeNull())
+      } finally {
+        customers.length = original
+      }
     })
   })
 

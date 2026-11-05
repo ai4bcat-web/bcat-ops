@@ -1,7 +1,7 @@
 /**
  * My Brokerage → Spot quoter & e-mail (ADMIN). Company-wide policy for the per-rep Gmail
- * spot quoter: whether it runs, how long a stored request lives, whether reps may switch
- * on auto-send at all and the caps behind it. The Reps table shows connection state and
+ * spot quoter: whether it runs and how long a stored request lives. The mailbox is read-only
+ * (no send, draft or auto-send exists). The Reps table shows connection state and
  * poll counters only — numbers and states, never a subject or a body.
  */
 import { useCallback, useEffect, useState } from 'react'

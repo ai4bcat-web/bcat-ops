@@ -365,6 +365,10 @@
 .tms-shell .tms-tracking-view,
 .tms-portal .tms-tracking-view { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; }
 .tms-portal .tms-tracking-drawer-body { display: flex; flex-direction: column; min-height: 100%; }
+/* One compact header row (title, Manage links, open, close) and a tight body so the whole view sits above the fold. */
+.tms-portal.tms-tracking-drawer .tms-drawer-head { padding: 8px 12px; }
+.tms-portal.tms-tracking-drawer .tms-drawer-title { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tms-portal.tms-tracking-drawer .tms-drawer-body { padding: 8px 12px; }
 .tms-portal .tms-tracking-drawer-body > .tms-tracking-view { flex: 1 1 auto; }
 
 /* Summary strip card: the one-line facts, then (optionally) the inline tracking-prefs row. */
@@ -375,10 +379,10 @@
   background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
 }
 .tms-shell .tms-strip-line,
-.tms-portal .tms-strip-line { display: flex; align-items: center; gap: 12px; min-width: 0; white-space: nowrap; }
+.tms-portal .tms-strip-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; min-width: 0; white-space: nowrap; }
 /* Fixed height, fixed select widths, nothing conditional: saving can never move what is below. */
 .tms-shell .tms-strip-line-prefs,
-.tms-portal .tms-strip-line-prefs { height: 28px; flex: 0 0 28px; gap: 8px; }
+.tms-portal .tms-strip-line-prefs { height: 28px; flex: 0 0 28px; flex-wrap: nowrap; gap: 8px; }
 .tms-shell .tms-strip-prefs,
 .tms-portal .tms-strip-prefs { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; }
 .tms-shell .tms-strip-prefs-label,
@@ -386,11 +390,11 @@
 .tms-shell .tms-strip-prefs .tms-select,
 .tms-portal .tms-strip-prefs .tms-select { height: 24px; padding-top: 0; padding-bottom: 0; font-size: 12px; flex: 0 0 auto; }
 .tms-shell .tms-strip-prefs .tms-select[data-field='mode'],
-.tms-portal .tms-strip-prefs .tms-select[data-field='mode'] { width: 128px; }
+.tms-portal .tms-strip-prefs .tms-select[data-field='mode'] { width: 150px; }
 .tms-shell .tms-strip-prefs .tms-select[data-field='method'],
-.tms-portal .tms-strip-prefs .tms-select[data-field='method'] { width: 150px; }
+.tms-portal .tms-strip-prefs .tms-select[data-field='method'] { width: 160px; }
 .tms-shell .tms-strip-prefs .tms-select[data-field='sms'],
-.tms-portal .tms-strip-prefs .tms-select[data-field='sms'] { width: 168px; }
+.tms-portal .tms-strip-prefs .tms-select[data-field='sms'] { width: 210px; }
 .tms-shell .tms-strip-prefs .tms-btn,
 .tms-portal .tms-strip-prefs .tms-btn { height: 24px; flex: 0 0 auto; }
 .tms-shell .tms-strip-prefs-effective,

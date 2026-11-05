@@ -129,6 +129,26 @@ describe('buildNavSections', () => {
     ])
   })
 
+  it('never lists the retired tracking sub-pages, for any role, owner or grant', () => {
+    interface Row { to: string; label: string; children?: Row[] }
+    const walk = (items: Row[]): Row[] => items.flatMap((i) => [i, ...walk(i.children ?? [])])
+    const retired = /^\/tms\/(check-calls|documents\/review|tracking\/links|tracking\/.+)/
+    const roles = [
+      buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true }),
+      buildNavSections({ divisions: FOUR, hasPageAccess: () => true }),
+      buildNavSections({ divisions: FOUR, hasPageAccess: grants('loads') }),
+      buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms', 'loads', 'loadReview', 'compliance') }),
+    ]
+    for (const { pinned, sections } of roles) {
+      const all = walk([...pinned, ...sections.flatMap((s) => s.items ?? [])])
+      const tracking = all.filter((i) => i.label === 'Load Tracking')
+      expect(tracking).toHaveLength(1)
+      expect(tracking[0].to).toBe('/tms/tracking')
+      expect(tracking[0].children).toBeUndefined()
+      expect(all.filter((i) => retired.test(i.to) || /^(Check calls|Document review|Customer links)$/.test(i.label))).toEqual([])
+    }
+  })
+
   it('shows a loadReview-only grant Load Review alone', () => {
     expect(labels(pinnedOf('loadReview'))).toEqual(['Load Review'])
   })

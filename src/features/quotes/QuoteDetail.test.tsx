@@ -186,6 +186,22 @@ describe('Rate intelligence on the quote page', () => {
   })
 })
 
+describe('quote outcome on the detail page', () => {
+  it('shows the outcome beside the status and offers Mark won / Mark lost on a quote that is out', () => {
+    setup('/tms/rates/Q000011', '/tms/rates/:id', quote({ id: 'Q000011', status: 'QUOTED', expiresAt: new Date(Date.now() + 86_400_000).toISOString() }))
+    expect(screen.getByTestId('quote-outcome')).toHaveTextContent('Pending')
+    expect(screen.getByRole('button', { name: 'Mark the quote won' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Mark the quote lost' })).toBeTruthy()
+  })
+
+  it('reads a converted quote as Won with no win or loss left to record', () => {
+    setup('/tms/rates/Q000012', '/tms/rates/:id', quote({ id: 'Q000012', status: 'WON', shipmentId: 'S1' }))
+    expect(screen.getByTestId('quote-outcome')).toHaveTextContent('Won')
+    expect(screen.queryByRole('button', { name: 'Mark the quote won' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Mark the quote lost' })).toBeNull()
+  })
+})
+
 describe('the quote editor', () => {
   it('opens a new quote on the customer the link named', async () => {
     setup('/quotes/new?customerId=CUST-2', '/quotes/new')
@@ -318,7 +334,6 @@ describe('market-rate panel', () => {
       },
       targetBps: 2500,
       floorBps: 1200,
-      autoReply: false,
       suggestedSellCents: 225_000,
       belowFloor: false,
       floorSellCents: 202_000,
@@ -339,7 +354,7 @@ describe('market-rate panel', () => {
     expect(screen.getByLabelText('Send the suggested rate')).toBeEnabled()
   })
 
-  it('refuses to auto-send a rate that is below the floor', async () => {
+  it('offers no Send for a suggested rate that is below the floor', async () => {
     const below = marketAnswer(false)
     below.belowFloor = true
     below.suggestedSellCents = 190_000

@@ -24,7 +24,7 @@
  *
  * Screenshots: Docs/tms-build/screenshots/ae/<name>.png, 1440×900, listed in index.txt.
  */
-import { mkdir, writeFile, readFile, access } from 'node:fs/promises'
+import { mkdir, writeFile, readFile, readdir, access } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
@@ -47,11 +47,13 @@ export const AE_STEPS = [
   { id: 'AE03', slug: 'mark-lost-reason', ui: false },
   { id: 'AE04', slug: 'ui', ui: true },
   { id: 'AE05', slug: 'push-to-dat', ui: false },
+  { id: 'AE06', slug: 'mark-won-win-rate', ui: false },
+  { id: 'AE07', slug: 'outcome-ui', ui: true },
 ]
 
 /** Router actions the harness calls: each must exist in the handler's action union (checked offline by --inventory). */
 export const ACTIONS = {
-  'amplify/functions/tms-shipment-actions/handler.ts': ['LANE_INTELLIGENCE', 'SAVE_QUOTE', 'SEND_QUOTE', 'MARK_QUOTE_LOST', 'CANCEL_QUOTE', 'POST_QUOTE_LOAD', 'UNPOST_QUOTE_LOAD'],
+  'amplify/functions/tms-shipment-actions/handler.ts': ['LANE_INTELLIGENCE', 'SAVE_QUOTE', 'SEND_QUOTE', 'MARK_QUOTE_LOST', 'MARK_QUOTE_WON', 'CANCEL_QUOTE', 'POST_QUOTE_LOAD', 'UNPOST_QUOTE_LOAD'],
   'amplify/functions/tms-directory-actions/handler.ts': ['UPSERT_CUSTOMER', 'ARCHIVE_CUSTOMER'],
 }
 /** data-testids the UI step reads, and the source file that must carry each. */
@@ -59,7 +61,9 @@ export const TEST_IDS = {
   'src/features/quotes/components/RateIntelligencePanel.tsx': ['rate-intel', 'rate-intel-dat', 'rate-intel-ran', 'rate-intel-quoted', 'rate-intel-stub', 'rate-intel-live', 'rate-intel-winrate'],
   'src/features/quotes/components/PushToDatCard.tsx': ['push-dat', 'push-dat-status', 'push-dat-stub', 'push-dat-live', 'push-dat-post', 'push-dat-unpost'],
   'src/features/tms/carrierSales/QuotePostingsCard.tsx': ['quote-postings'],
-  'src/features/spot-quoter/SpotRequestDrawer.tsx': ['spot-section-intel', 'spot-lost-code', 'spot-section-push-dat'],
+  'src/features/quotes/components/OutcomeBadge.tsx': ['quote-outcome'],
+  'src/features/spot-quoter/SpotInboxPage.tsx': ['spot-outcome'],
+  'src/features/spot-quoter/SpotRequestDrawer.tsx': ['spot-section-intel', 'spot-lost-code', 'spot-section-push-dat', 'spot-mark-won', 'spot-mark-lost', 'spot-request-outcome', 'spot-copy', 'spot-open-compose', 'spot-mark-sent'],
 }
 const PLAN_FILES = [
   'src/lib/laneMatch.ts', 'src/lib/laneIntel.ts', 'src/lib/retiredRoutes.ts', 'src/components/ParamRedirect.tsx',
@@ -115,7 +119,24 @@ export async function inventory() {
   check(/\/tms\/rates\/lanes[^}]*\/tms\/rates'/.test(retired), 'AE00 gate 7: old Lane rates URL redirects', '/tms/rates/lanes → /tms/rates')
   const app = await readFile('src/App.tsx', 'utf8').catch(() => '')
   check(!/LaneRatesPage/.test(app) && /RETIRED_ROUTES/.test(app), 'AE00 gate 8: the Lane rates page is not routed', 'App.tsx mounts RETIRED_ROUTES, not LaneRatesPage')
-  check(await exists('src/features/quotes/LaneRatesPage.tsx'), 'AE00 gate 9: Lane rates code is kept', 'LaneRatesPage.tsx still in the tree (unrouted)')
+  check(!(await exists('src/features/quotes/LaneRatesPage.tsx')), 'AE00 gate 9: Lane rates page code is deleted', 'LaneRatesPage.tsx is gone')
+
+  // Read-only mailbox: no send / draft / compose / modify scope or Gmail write call anywhere in app or Lambda source (tests excluded: they assert the absence).
+  const FORBIDDEN = /auth\/gmail\.(?!readonly)|gmail\.(send|compose|modify|insert|labels)\b|messages\.send|drafts\.(create|send|update)|\b(sendDraft|createDraft|updateDraft|sendReply)\(|data-testid="spot-(create-draft|send-now|update-draft|autosend)/
+  const hits = []
+  const walk = async (dir) => {
+    for (const e of await readdir(resolve(dir), { withFileTypes: true }).catch(() => [])) {
+      const rel = `${dir}/${e.name}`
+      if (e.isDirectory()) { if (!['node_modules', 'dist', '.git'].includes(e.name)) await walk(rel) }
+      else if (/\.(ts|tsx|mjs)$/.test(e.name) && !/\.test\./.test(e.name)) { if (FORBIDDEN.test(await readFile(resolve(rel), 'utf8'))) hits.push(rel) }
+    }
+  }
+  await walk('src'); await walk('amplify')
+  check(hits.length === 0, 'AE00 gate 10: Gmail is read-only (no send/draft/compose/modify scope or call)', hits.length ? `found in: ${hits.join(', ')}` : 'src/ and amplify/ source scanned')
+  const oauth = await readFile('amplify/functions/_shared/gmail/oauth.ts', 'utf8').catch(() => '')
+  check(/REQUIRED_GMAIL_SCOPES = \['https:\/\/www\.googleapis\.com\/auth\/gmail\.readonly'\]/.test(oauth), 'AE00 gate 11: the OAuth scope list is gmail.readonly only', 'REQUIRED_GMAIL_SCOPES')
+  const outcomeSrc = await readFile('src/lib/laneIntel.ts', 'utf8').catch(() => '')
+  check(/quote\.shipmentId \|\| quote\.status === 'WON'\) return 'WON'/.test(outcomeSrc), 'AE00 gate 12: a converted quote is WON automatically', 'quoteOutcome reads shipmentId')
   return ok
 }
 
@@ -268,7 +289,92 @@ async function ae05(ctx) {
   return 'STUB posting recorded against quote:<id> with the lane, read back POSTED, then UNPOSTED (row kept); no Shipment touched'
 }
 
-export const RUNNERS = { AE01: ae01, AE02: ae02, AE03: ae03, AE04: ae04, AE05: ae05 }
+async function ae06(ctx) {
+  await ensureFixture(ctx)
+  // A third quote on the ZZ lane, won by hand (no shipment): the lane's win rate must read 1 won / 1 lost (A) / 1 pending (B).
+  const quoteC = await newQuote(ctx, 2)
+  ctx.quoteC = quoteC
+  const won = (await ctx.ship('MARK_QUOTE_WON', { quoteId: quoteC, note: 'ZZ AE verification' })).quote
+  expect(won.status === 'WON' && won.wonAt && won.closedAt, `quote C is ${won.status}`)
+  expect(!won.shipmentId, 'Mark won built a shipment')
+  let refused = false
+  try { await ctx.ship('MARK_QUOTE_WON', { quoteId: quoteC }) } catch { refused = true }
+  expect(refused, 'a second Mark won was accepted')
+  await new Promise((r) => setTimeout(r, 61_000)) // LANE_INTELLIGENCE caches an answer for a minute
+  const out = await ctx.ship('LANE_INTELLIGENCE', zzLane(ctx.ts))
+  const { stats, rows } = out.quotes
+  expect(stats.won === 1 && stats.lost === 1 && stats.pending === 1, `outcomes won ${stats.won} / lost ${stats.lost} / pending ${stats.pending}`)
+  expect(stats.winRate === 0.5, `win rate ${stats.winRate}`)
+  expect(rows.find((r) => r.id === quoteC)?.outcome === 'WON', 'quote C is not WON in the lane history')
+  return 'Mark won (by hand, no shipment) → WON with wonAt/closedAt; second close refused; lane win rate 50 % (1 won / 1 lost / 1 pending)'
+}
+
+async function ae07(ctx) {
+  const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
+  if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`origin ${origin} is not in ALLOWED_ORIGINS`)
+  await ensureFixture(ctx)
+  await mkdir(SHOTS, { recursive: true })
+  const shots = []
+  const b = await launchBrowser({ origin, storage: ctx.storage, profilePrefix: 'bcat-ae-', purpose: 'AE outcome verification', viewport: { width: 1440, height: 900 } })
+  const sleep = (ms) => b.evaluate(`new Promise((r) => setTimeout(r, ${ms}))`)
+  const click = (label) => b.evaluate(`(() => { const n = [...document.querySelectorAll('button, [role="tab"]')].find((x) => x.textContent.trim().startsWith(${JSON.stringify(label)})); if (!n) return false; n.click(); return true })()`)
+  try {
+    // 1. Quotes › Sent: an Outcome column, a filter chip + dialog
+    await b.navigate('/tms/rates')
+    await b.waitFor('.tms-nav-child, .tms-nav-row', 60_000)
+    await sleep(2500)
+    expect(await click('Sent'), 'no Sent tab')
+    await sleep(800)
+    const header = await b.evaluate(`[...document.querySelectorAll('th')].map((n) => n.textContent.trim().toUpperCase())`)
+    expect(header.includes('OUTCOME'), `Sent tab columns: ${header.join('|')}`)
+    const chip = await b.evaluate(`document.body.innerText.includes('Outcome is')`)
+    expect(chip, 'the Sent tab has no Outcome filter chip')
+    const pending = await b.evaluate(`[...document.querySelectorAll('[data-testid="quote-outcome"]')].map((n) => n.textContent.trim())`)
+    expect(pending.includes('Pending'), `Sent outcomes: ${[...new Set(pending)].join(',') || 'none'}`)
+    await b.screenshot(`${SHOTS}/AE04-quotes-sent-outcome-column.png`); shots.push('AE04-quotes-sent-outcome-column.png')
+    expect(await click('Won / Lost'), 'no Won / Lost tab')
+    await sleep(2500)
+    await b.screenshot(`${SHOTS}/AE05-quotes-won-lost-outcome.png`); shots.push('AE05-quotes-won-lost-outcome.png')
+
+    // 2. Quote detail: outcome in the header, Mark won / Mark lost on an open quote
+    await b.navigate(`/tms/rates/${ctx.quoteB}`)
+    await b.waitFor(tid('rate-intel'), 60_000)
+    const head = await b.evaluate(`document.querySelector('[data-testid="quote-outcome"]')?.textContent.trim() ?? null`)
+    expect(head === 'Pending', `Quote detail header outcome ${head}`)
+    const btns = await b.evaluate(`['Mark the quote won', 'Mark the quote lost'].map((l) => !!document.querySelector('button[aria-label="' + l + '"]'))`)
+    expect(btns.every(Boolean), `Mark won / Mark lost buttons: ${JSON.stringify(btns)}`)
+    await b.waitFor(tid('rate-intel-quoted-table'), 30_000)
+    const wr = await b.evaluate(`document.querySelector('[data-testid="rate-intel-winrate"]')?.textContent.trim() ?? null`)
+    expect(wr, 'the quoted section shows no win rate')
+    await b.screenshot(`${SHOTS}/AE06-quote-detail-outcome-actions.png`, { clipToContent: true }); shots.push('AE06-quote-detail-outcome-actions.png')
+
+    // 3. Won quote C reads Won with no verbs left
+    if (ctx.quoteC) {
+      await b.navigate(`/tms/rates/${ctx.quoteC}`)
+      await b.waitFor(tid('rate-intel'), 60_000)
+      const won = await b.evaluate(`document.querySelector('[data-testid="quote-outcome"]')?.textContent.trim() ?? null`)
+      expect(won === 'Won', `won quote header outcome ${won}`)
+      expect(await b.evaluate(`!document.querySelector('button[aria-label="Mark the quote won"]') && !document.querySelector('button[aria-label="Mark the quote lost"]')`), 'a won quote still offers Mark won / Mark lost')
+    }
+
+    // 4. Spot inbox: an Outcome column when requests exist; the drawer carries Mark won / Mark lost once sent
+    await b.navigate('/tms/rates/spot')
+    await sleep(2500)
+    const spotCols = await b.evaluate(`[...document.querySelectorAll('th')].map((n) => n.textContent.trim().toUpperCase())`)
+    const hasRows = await b.evaluate(`document.querySelectorAll('tbody tr').length`)
+    if (hasRows > 0) {
+      expect(spotCols.includes('OUTCOME'), `Spot inbox columns: ${spotCols.join('|')}`)
+      await b.screenshot(`${SHOTS}/AE07-spot-inbox-outcome.png`); shots.push('AE07-spot-inbox-outcome.png')
+    }
+    // 5. Carrier Sales still lists quote postings (outcome beside each) — the card only renders when something is posted
+    return `Sent tab: OUTCOME column + chip (${[...new Set(pending)].join('/')}); detail header ${head}, Mark won / Mark lost present, win rate shown; won quote reads Won${ctx.quoteC ? '' : ' (skipped: AE06 not run)'}; spot inbox ${hasRows > 0 ? 'Outcome column present' : 'has no requests on dev (outcome asserted in unit tests)'}; shots ${shots.join(', ')}`
+  } finally {
+    await b.close()
+    await writeFile(resolve(SHOTS, 'index-outcome.txt'), `${shots.join('\n')}\n`)
+  }
+}
+
+export const RUNNERS = { AE01: ae01, AE02: ae02, AE03: ae03, AE04: ae04, AE05: ae05, AE06: ae06, AE07: ae07 }
 
 async function main() {
   if (flag('inventory')) { if (!(await inventory())) process.exitCode = 1; return }
@@ -277,7 +383,7 @@ async function main() {
   const ts = Date.now()
   const email = `zz-ae-${ts}@example.invalid`
   let made = false
-  const ctx = { ts, token: '', storage: null, customerId: null, quoteA: null, quoteB: null, quoteIds: new Set(), ship: null, dir: null }
+  const ctx = { ts, token: '', storage: null, customerId: null, quoteA: null, quoteB: null, quoteC: null, quoteIds: new Set(), ship: null, dir: null }
   try {
     const admin = await mintIdentity(email, ['ADMIN', 'page-tms'])
     made = true

@@ -3,8 +3,17 @@
  * saved with, and the one-line labels the list prints.
  */
 import { formatCents } from '@/lib/invoiceBuild'
+import type { QuoteOutcome } from '@/lib/laneIntel'
 import type { Stop } from '@/types'
 import type { SpotExtraction, SpotStop } from '@/lib/spot/types'
+
+/** A spot request in the shared Won / Lost / Expired / Pending vocabulary; a dismissed request never reached a quote (null). */
+export function spotOutcome(status: string): QuoteOutcome | null {
+  if (status === 'WON') return 'WON'
+  if (status === 'LOST') return 'LOST'
+  if (status === 'DISMISSED') return null
+  return 'PENDING'
+}
 
 export interface SpotEnd {
   city: string

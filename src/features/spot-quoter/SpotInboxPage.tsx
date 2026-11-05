@@ -20,6 +20,8 @@ import { PROSPECT_STATUSES, useCustomerList } from './useCustomerIndex'
 import {
   SPOT_CALLBACK_PATH, SPOT_TABS, useSpotCounts, useSpotRequests, useSpotStatus,
 } from './useSpotRequests'
+import { OUTCOME_LABEL, OUTCOME_TONE } from '@/features/quotes/quoteViews'
+import { spotOutcome } from './spotHelpers'
 import './spot.css'
 
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
@@ -142,6 +144,14 @@ export function SpotInboxPage() {
       key: 'price',
       header: 'Our price',
       render: (r) => <span className="tms-spot-numbers">{money((r.suggestion as SpotSuggestion | null | undefined)?.suggestedCents)}</span>,
+    },
+    {
+      key: 'outcome',
+      header: 'Outcome',
+      render: (r) => {
+        const outcome = spotOutcome(r.status)
+        return outcome ? <TmsBadge tone={OUTCOME_TONE[outcome]} data-testid="spot-outcome">{OUTCOME_LABEL[outcome]}</TmsBadge> : <span className="tms-muted">—</span>
+      },
     },
     {
       key: 'status',

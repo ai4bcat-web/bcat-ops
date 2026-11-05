@@ -23,12 +23,6 @@ import {
 } from '@/lib/flowDefaults'
 import type { TmsSettings } from '@/types/tms'
 
-const AUTO_REPLY_OPTIONS = [
-  { value: '', label: '— inherit from org —' },
-  { value: 'auto', label: 'Auto-send suggested rate' },
-  { value: 'manual', label: 'Manual — queue for review' },
-]
-
 const PREVIEW_MODES = ['FTL', 'LTL']
 
 export interface FlowDefaultsValue {
@@ -199,16 +193,6 @@ export function FlowDefaultsCard({ value, settings, onChange }: FlowDefaultsCard
               />
             </TmsField>
           </div>
-          <TmsField label="Quote reply" hint={value.quoteAutoReply != null ? 'Customer override' : 'Org default'}>
-            <TmsSelect
-              value={value.quoteAutoReply === true ? 'auto' : value.quoteAutoReply === false ? 'manual' : ''}
-              onChange={(e) => {
-                const v = e.target.value
-                onChange({ quoteAutoReply: v === 'auto' ? true : v === 'manual' ? false : null })
-              }}
-              options={AUTO_REPLY_OPTIONS}
-            />
-          </TmsField>
         </Panel>
 
         <Panel>

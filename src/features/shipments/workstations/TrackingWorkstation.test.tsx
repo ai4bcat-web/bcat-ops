@@ -5,7 +5,13 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { TrackingWorkstation } from './TrackingWorkstation'
+import { TRACKING_DEFAULT_COLUMNS } from './tracking/trackingColumns'
+import { densePrefsKey } from '@/features/tms/grid/useDenseGridPrefs'
 import type { ShipmentRow } from '../shipmentViews'
+
+/** The default columns plus these, as the signed-in user's saved layout (the Columns dialog's result). */
+const showColumns = (...extra: string[]) =>
+  localStorage.setItem(densePrefsKey('tracking', 'me@bcatcorp.com'), JSON.stringify({ columns: [...TRACKING_DEFAULT_COLUMNS, ...extra] }))
 
 const now = Date.parse('2026-10-29T12:00:00Z')
 const api = vi.hoisted(() => ({
@@ -263,6 +269,7 @@ describe('row actions', () => {
 
 describe('computed cells', () => {
   it('flags an overdue check call and a POD that is needed', async () => {
+    showColumns('pod')
     renderPage('/tms/tracking?assignee=all')
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
     expect(within(trackingRow('S-OVERDUE')).getAllByText('overdue 35 m').length).toBeGreaterThan(0)
@@ -403,6 +410,7 @@ describe('dense grid', () => {
   })
 
   it('the Tracker multi-select narrows to one person', async () => {
+    showColumns('tracker')
     renderPage('/tms/tracking?assignee=all')
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole('button', { name: 'Filter Tracker' }))

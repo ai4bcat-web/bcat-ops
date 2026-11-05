@@ -564,8 +564,20 @@ const RUNNERS = {
   },
 
   async AJ07(ctx) {
+    // Every role: the page-tms grant first, then the admin, each with its own session.
+    const adminNote = await openInIdentity(ctx, ctx.ids.admin.storage, 'bcat-aj-nav-admin-', async (b) => {
+      await b.navigate('/tms/dashboard'); await waitShell(b); await waitLoaded(b).catch(() => {})
+      const rows = await b.evaluate(SIDEBAR_JS)
+      expect(rows.filter((r) => r.label === 'Load Tracking').length === 1, 'admin: not exactly one Load Tracking row')
+      expect(rows.filter((r) => /tracking|check-calls|documents/.test(String(r.href)) && r.href !== '/tms/tracking').length === 0, 'admin: a tracking, check-calls or documents child link is in the rail')
+      await b.navigate('/tms/tracking?assignee=all'); await waitLoaded(b)
+      await b.poll(() => has(b, tid('tracking-focus-tabs')), 'admin Focus control', 45_000)
+      const collapsed = await b.evaluate(SIDEBAR_JS)
+      expect(collapsed.filter((r) => r.label === 'Load Tracking' || /\/tms\/tracking/.test(String(r.href))).length <= 1, 'admin: the collapsed rail lists more than one tracking row')
+      return 'admin: one row'
+    })
     return openInIdentity(ctx, ctx.ids.tms.storage, 'bcat-aj-nav-', async (b) => {
-      const note = []
+      const note = [adminNote]
       for (const t of themes(b)) {
         await b.navigate('/tms/dashboard'); await waitShell(b); await waitLoaded(b).catch(() => {})
         await t.apply()
@@ -671,6 +683,10 @@ const RUNNERS = {
             emailStill: email ? email.scrollTop === before : null,
             wouldHaveSent: /would have sent/i.test(document.querySelector('[data-testid="pane-sms"]')?.innerText ?? ''),
             target: document.querySelector('[data-testid="sms-target"]')?.innerText ?? '',
+            head: rect('.tms-tracking-drawer .tms-drawer-head'),
+            map: rect('.tms-map-body'),
+            clipped: ['strip-driver', 'strip-phones', 'last-known', 'delivery-eta', 'strip-pod'].filter((id) => { const el = document.querySelector('[data-testid="' + id + '"]'); return el && el.scrollWidth > el.clientWidth + 1 }),
+            fontPx: Math.round(parseFloat(getComputedStyle(document.querySelector('[data-testid="tracking-strip"]')).fontSize)),
           };
         })()`)
         const bad = []
@@ -678,6 +694,10 @@ const RUNNERS = {
           if (!facts[key]) bad.push(`${key} is missing`)
           else if (facts[key].bottom > facts.h) bad.push(`${key} ends at ${facts[key].bottom}px, below the ${facts.h}px fold`)
         }
+        if (facts.head && facts.head.bottom - facts.head.top > 56) bad.push(`the drawer header is ${facts.head.bottom - facts.head.top}px tall (one row expected)`)
+        if (facts.map && (facts.map.bottom - facts.map.top < 150 || facts.map.bottom - facts.map.top > 260)) bad.push(`the map body is ${facts.map.bottom - facts.map.top}px (150-260 expected)`)
+        if (facts.clipped.length) bad.push(`strip segments are clipped: ${facts.clipped.join(', ')}`)
+        if (facts.fontPx < 12 || facts.fontPx > 13) bad.push(`strip font is ${facts.fontPx}px (12-13 expected)`)
         if (facts.smsScrolls !== true) bad.push('the SMS stream does not scroll with 40+ rows')
         if (facts.emailStill === false) bad.push('scrolling the SMS stream moved the e-mail stream')
         if (!facts.wouldHaveSent) bad.push('no "Would have sent" text in the SMS pane')

@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Save, Cog } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsButton, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { TmsButton, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import { getTmsSettings, saveTmsSettings } from '@/lib/apiClient'
 import type { TmsSettings } from '@/types/tms'
 import { REQUIRED_FIELD_CATALOG } from '@/lib/flowDefaults'
@@ -196,20 +196,6 @@ export function TmsSettingsCard() {
                 />
               </TmsField>
             </div>
-            <TmsField label="Quote reply">
-              <TmsSelect
-                value={quoteAutoReplyDefault === true ? 'auto' : quoteAutoReplyDefault === false ? 'manual' : ''}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setQuoteAutoReplyDefault(v === 'auto' ? true : v === 'manual' ? false : null)
-                }}
-                options={[
-                  { value: '', label: '— unset —' },
-                  { value: 'auto', label: 'Auto-send suggested rate' },
-                  { value: 'manual', label: 'Manual — queue for review' },
-                ]}
-              />
-            </TmsField>
           </Panel>
 
           <Panel>

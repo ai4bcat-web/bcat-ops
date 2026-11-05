@@ -27,7 +27,23 @@ function carrier(id: string, patch: Partial<CarrierRecord>): CarrierRecord {
 const carriers: CarrierRecord[] = [
   carrier('Alpha Trucking', { status: 'PENDING', mcNumber: '111111' }),
   carrier('Bravo Lines', { status: 'REVIEW', mcNumber: '222222' }),
-  carrier('Charlie Freight', { status: 'ACTIVE', mcNumber: '333333' }),
+  carrier('Charlie Freight', {
+    status: 'ACTIVE',
+    mcNumber: '333333',
+    mcpRiskScore: 10,
+    loadCount: 12,
+    insurancePolicies: [
+      { id: 'c1', type: 'CARGO', expiresAt: '2099-03-01T00:00:00.000Z' },
+      { id: 'c2', type: 'AUTO_LIABILITY', expiresAt: '2099-03-05T00:00:00.000Z' },
+    ],
+  }),
+  carrier('Golf Lines', {
+    status: 'ACTIVE',
+    mcNumber: '777777',
+    mcpRiskScore: 40,
+    loadCount: 3,
+    insurancePolicies: [{ id: 'g1', type: 'CARGO', expiresAt: '2098-12-01T00:00:00.000Z' }],
+  }),
   // Stored ACTIVE, but every cargo certificate lapsed — the board derives Inactive.
   carrier('Delta Haul', {
     status: 'ACTIVE',
@@ -57,22 +73,32 @@ const staff = vi.hoisted(() => [
 ] as UserProfileRecord[])
 vi.mock('@/lib/apiClient', () => ({
   getTmsSettings: vi.fn(async () => null),
-  listCarrierDocuments: vi.fn(async () => []),
   listUserProfiles: vi.fn(async () => staff),
   upsertCarrier,
   graphqlErrorText: () => '',
 }))
-vi.mock('./components/CarrierProfile', () => ({ CarrierProfile: () => null }))
+vi.mock('./components/CarrierProfile', () => ({
+  CarrierProfile: ({ carrierId }: { carrierId: string }) => <div data-testid="profile">{carrierId}</div>,
+}))
 
 function renderBoard() {
   return render(<MemoryRouter><CarriersPage /></MemoryRouter>)
+}
+
+/** Names in the order the grid draws them (first cell of every body row). */
+function names(): string[] {
+  return [...document.querySelectorAll('tbody tr:not(.tms-dg-spacer) td:first-child')].map((td) => td.textContent ?? '')
+}
+
+function openFilter(header: string) {
+  fireEvent.click(screen.getByRole('button', { name: `Filter ${header}` }))
 }
 
 function tab(name: string): HTMLElement {
   return screen.getByRole('tab', { name: new RegExp(`^${name}`) })
 }
 
-beforeEach(() => { auth.isAdmin = true })
+beforeEach(() => { auth.isAdmin = true; localStorage.clear() })
 
 describe('CarriersPage', () => {
   it('counts every carrier under its effective status', async () => {
@@ -80,7 +106,7 @@ describe('CarriersPage', () => {
     await waitFor(() => expect(screen.getByText('Carriers')).toBeTruthy())
 
     expect(within(tab('Pending/Review')).getByText('2')).toBeTruthy()
-    expect(within(tab('Active')).getByText('1')).toBeTruthy()
+    expect(within(tab('Active')).getByText('2')).toBeTruthy()
     // Echo, Foxtrot and Delta — the last one only because its cargo cover expired.
     expect(within(tab('Inactive/Do not use')).getByText('3')).toBeTruthy()
   })
@@ -175,5 +201,63 @@ describe('CarriersPage', () => {
     auth.isAdmin = false
     renderBoard()
     expect(screen.getByTestId('launch-find-invite').getAttribute('href')).toBe('/tms/carriers/find')
+  })
+
+  it('sorts on a header click: ascending, then descending', async () => {
+    renderBoard()
+    await waitFor(() => expect(names()).toEqual(['Charlie Freight', 'Golf Lines']))
+    fireEvent.click(screen.getByRole('button', { name: 'Loads' }))
+    expect(names()).toEqual(['Golf Lines', 'Charlie Freight'])
+    fireEvent.click(screen.getByRole('button', { name: 'Loads' }))
+    expect(names()).toEqual(['Charlie Freight', 'Golf Lines'])
+  })
+
+  it('narrows by the risk score range in the header filter', async () => {
+    renderBoard()
+    await waitFor(() => expect(names()).toHaveLength(2))
+    openFilter('Risk')
+    fireEvent.change(screen.getByLabelText('Risk min'), { target: { value: '20' } })
+    expect(names()).toEqual(['Golf Lines'])
+  })
+
+  it('narrows by the insurance expiry date range', async () => {
+    renderBoard()
+    await waitFor(() => expect(names()).toHaveLength(2))
+    openFilter('Cargo ins. exp.')
+    fireEvent.change(screen.getByLabelText('Cargo ins. exp. from'), { target: { value: '2099-01-01' } })
+    expect(names()).toEqual(['Charlie Freight'])
+    fireEvent.change(screen.getByLabelText('Cargo ins. exp. from'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('Cargo ins. exp. to'), { target: { value: '2098-12-31' } })
+    expect(names()).toEqual(['Golf Lines'])
+  })
+
+  it('filters the status column by multi-select, across the effective statuses', async () => {
+    renderBoard()
+    await waitFor(() => expect(names()).toHaveLength(2))
+    fireEvent.click(tab('Inactive/Do not use'))
+    await waitFor(() => expect(names()).toHaveLength(3))
+    openFilter('Status')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Status: Do not use' }))
+    expect(names()).toEqual(['Echo Carriers'])
+  })
+
+  it('remembers density per user and board', async () => {
+    const view = renderBoard()
+    await waitFor(() => expect(names()).toHaveLength(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Comfortable' }))
+    const stored = JSON.parse(localStorage.getItem('tms:grid:carriers:ryne@bcatcorp.com:v1') ?? '{}')
+    expect(stored.density).toBe('comfortable')
+
+    view.unmount()
+    renderBoard()
+    expect(screen.getByRole('button', { name: 'Comfortable' }).getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('opens the carrier profile when a row is clicked', async () => {
+    renderBoard()
+    await waitFor(() => expect(names()).toHaveLength(2))
+    expect(screen.queryByTestId('profile')).toBeNull()
+    fireEvent.click(screen.getByText('Golf Lines'))
+    expect(screen.getByTestId('profile').textContent).toBe('Golf Lines')
   })
 })

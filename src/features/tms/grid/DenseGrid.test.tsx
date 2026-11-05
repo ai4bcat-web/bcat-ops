@@ -101,6 +101,28 @@ describe('DenseGrid', () => {
     expect(screen.queryByRole('dialog', { name: 'City filter' })).not.toBeInTheDocument()
   })
 
+  it('Select all takes every option a search leaves, and the long list is searchable', () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({ id: `r${i}`, name: `Row ${i}`, city: `City ${i}` }))
+    const { props } = grid({ rows })
+    fireEvent.click(screen.getByRole('button', { name: 'Filter City' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search City options' }), { target: { value: 'City 1' } })
+    expect(screen.getAllByRole('checkbox', { name: /^City: / })).toHaveLength(3)
+    fireEvent.click(screen.getByRole('button', { name: 'Select all City' }))
+    const values = vi.mocked(props.onFilterChange).mock.calls[0][1]?.values ?? []
+    expect(values).toHaveLength(3)
+    expect(values.every((v) => v.startsWith('City 1'))).toBe(true)
+  })
+
+  it('a short list has no search box; the filter closes when the columns slide sideways', () => {
+    grid()
+    fireEvent.click(screen.getByRole('button', { name: 'Filter City' }))
+    expect(screen.queryByRole('textbox', { name: /Search City/ })).not.toBeInTheDocument()
+    const scroll = document.querySelector('.tms-dg-scroll') as HTMLElement
+    scroll.scrollLeft = 120
+    fireEvent.scroll(scroll)
+    expect(screen.queryByRole('dialog', { name: 'City filter' })).not.toBeInTheDocument()
+  })
+
   it('marks an active filter on its header button', () => {
     grid({ filters: { name: { text: 'row' } } })
     expect(screen.getByRole('button', { name: 'Filter Name' })).toHaveAttribute('aria-pressed', 'true')

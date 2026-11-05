@@ -122,6 +122,7 @@ import {
   counterQuote,
   duplicateQuotes,
   markQuoteLost,
+  markQuoteWon,
   passQuote,
   restoreQuote,
   revertToQuote,
@@ -643,6 +644,7 @@ type Action =
   | 'COUNTER_QUOTE'
   | 'ACCEPT_COUNTER'
   | 'MARK_QUOTE_LOST'
+  | 'MARK_QUOTE_WON'
   | 'RESTORE_QUOTE'
   | 'CANCEL_QUOTE'
   | 'PASS_QUOTE'
@@ -698,6 +700,7 @@ const QUOTE_ACTIONS: Record<string, true> = {
   COUNTER_QUOTE: true,
   ACCEPT_COUNTER: true,
   MARK_QUOTE_LOST: true,
+  MARK_QUOTE_WON: true,
   RESTORE_QUOTE: true,
   CANCEL_QUOTE: true,
   PASS_QUOTE: true,
@@ -8195,6 +8198,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return acceptCounter(quoteDeps, input, caller)
     case 'MARK_QUOTE_LOST':
       return markQuoteLost(quoteDeps, input, caller)
+    case 'MARK_QUOTE_WON':
+      return markQuoteWon(quoteDeps, input, caller)
     case 'RESTORE_QUOTE':
       return restoreQuote(quoteDeps, input, caller)
     case 'CANCEL_QUOTE':

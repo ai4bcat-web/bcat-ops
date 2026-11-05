@@ -1,6 +1,6 @@
 /**
  * The rules the Spot inbox enforces in the browser, kept apart from the components: what
- * blocks Create, what the auto-send dialog has to say, and how an edited field form becomes
+ * blocks Create, and how an edited field form becomes
  * a patch. (The server re-checks all of it.)
  */
 import type { SpotEquipmentCode, SpotExtraction, SpotRequestMode, SpotStop } from '@/lib/spot/types'

@@ -45,8 +45,10 @@ import { ConvertQuoteDialog } from './components/ConvertQuoteDialog'
 import { CounterDialog } from './components/CounterDialog'
 import { DuplicateQuoteDialog } from './components/DuplicateQuoteDialog'
 import { MarkLostDialog } from './components/MarkLostDialog'
+import { MarkWonDialog } from './components/MarkWonDialog'
+import { OutcomeBadge } from './components/OutcomeBadge'
 import { SendQuoteDialog } from './components/SendQuoteDialog'
-import { expiryChip, laneLookupKeys, marginChip, quoteLinkUrl, statusLabel, whoseMoveLabel } from './quoteViews'
+import { expiryChip, laneLookupKeys, marginChip, outcomeOf, quoteLinkUrl, statusLabel, whoseMoveLabel } from './quoteViews'
 import type {
   ChargeCalc, ChargeCodeDef, CustomerRecord, LoadChargeInput, QuoteProposal, QuoteRecord, RateType,
   ShipmentMode, TmsSettings, WorkflowRunRecord,
@@ -59,6 +61,7 @@ type DetailDialog =
   | { kind: 'convert' }
   | { kind: 'duplicate' }
   | { kind: 'markLost' }
+  | { kind: 'markWon' }
 
 interface StopDraft {
   id: string
@@ -559,6 +562,7 @@ export function QuoteDetail() {
           </Link>
           {quote?.id ?? 'New quote'}
           {quote && <TmsBadge tone="blue">{statusLabel(quote)}</TmsBadge>}
+          {quote && outcomeOf(quote, now) && <OutcomeBadge quote={quote} now={now} />}
           {chip && <TmsBadge tone={chip.tone === 'danger' ? 'red' : 'gray'}>{chip.text}</TmsBadge>}
         </span>
       }
@@ -614,6 +618,11 @@ export function QuoteDetail() {
         )}
         {quote && (
           <TmsButton aria-label="Duplicate the quote" disabled={busy} onClick={() => setDialog({ kind: 'duplicate' })}>Duplicate…</TmsButton>
+        )}
+        {state?.canMarkWon && (
+          <TmsButton variant="ghost" aria-label="Mark the quote won" disabled={busy} onClick={() => setDialog({ kind: 'markWon' })}>
+            Mark won
+          </TmsButton>
         )}
         {state?.canMarkLost && (
           <TmsButton variant="ghost" aria-label="Mark the quote lost" disabled={busy} onClick={() => setDialog({ kind: 'markLost' })}>
@@ -1011,6 +1020,9 @@ export function QuoteDetail() {
       )}
       {quote && dialog?.kind === 'duplicate' && (
         <DuplicateQuoteDialog open quote={quote} onOpenChange={(o) => { if (!o) setDialog(null) }} onDone={closeAndRefresh} />
+      )}
+      {quote && dialog?.kind === 'markWon' && (
+        <MarkWonDialog open quote={quote} onOpenChange={(o) => { if (!o) setDialog(null) }} onDone={closeAndRefresh} />
       )}
       {quote && dialog?.kind === 'markLost' && (
         <MarkLostDialog open quote={quote} onOpenChange={(o) => { if (!o) setDialog(null) }} onDone={closeAndRefresh} />

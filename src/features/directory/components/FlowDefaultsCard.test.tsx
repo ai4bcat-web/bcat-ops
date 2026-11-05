@@ -112,7 +112,7 @@ describe('FlowDefaultsCard', () => {
     )
     expect((screen.getByLabelText('Target margin %') as HTMLInputElement).value).toBe('30.00')
     expect((screen.getByLabelText('Floor margin %') as HTMLInputElement).value).toBe('10.00')
-    expect((screen.getByLabelText('Quote reply') as HTMLSelectElement).value).toBe('manual')
+    expect(screen.queryByLabelText('Quote reply')).toBeNull()
   })
 
   it('checks and disables the org five required fields, and labels them org default', () => {

@@ -10,12 +10,12 @@ import { toast } from 'sonner'
 import { ConvertQuoteDialog } from '@/features/quotes/components/ConvertQuoteDialog'
 import { PushToDatCard } from '@/features/quotes/components/PushToDatCard'
 import { RateIntelligencePanel } from '@/features/quotes/components/RateIntelligencePanel'
-import { LOST_REASON_LABEL } from '@/features/quotes/quoteViews'
+import { LOST_REASON_LABEL, OUTCOME_LABEL, OUTCOME_TONE } from '@/features/quotes/quoteViews'
 import {
   TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsDrawer, TmsField, TmsInput, TmsSelect, TmsTextarea,
 } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
-import { createCustomer, getQuote, markQuoteLost, saveQuote, sendQuote, spotAction } from '@/lib/apiClient'
+import { createCustomer, getQuote, markQuoteLost, markQuoteWon, saveQuote, sendQuote, spotAction } from '@/lib/apiClient'
 import { LOST_REASONS, isOpenQuoteStatus } from '@/lib/quotes'
 import { QUOTE_LINE_CODES } from '@/lib/spot/accessorials'
 import type { LoadChargeInput, QuoteLostReason, QuoteRecord, SpotEquipmentCode, SpotRequestMode } from '@/types/tms'
@@ -23,7 +23,7 @@ import type { SpotRequestRecord, SpotStatusView, SpotSuggestedResponse } from '@
 import { FieldChip } from './FieldChips'
 import { PricingCard } from './PricingCard'
 import { formFrom, patchFromForm, rateBlock, type Form } from './spotRules'
-import { copyText, gmailComposeUrl, gmailThreadUrl, mailtoUrl, quoteStops, relativeTime, spotEnds } from './spotHelpers'
+import { copyText, gmailComposeUrl, gmailThreadUrl, mailtoUrl, quoteStops, relativeTime, spotEnds, spotOutcome } from './spotHelpers'
 import { PROSPECT_STATUSES, useCustomerList } from './useCustomerIndex'
 import { useSpotPricing } from './useSpotPricing'
 import { useSpotRequest } from './useSpotRequests'
@@ -228,6 +228,16 @@ function RequestPanel({
       setLostDialog(false)
       finish()
     }
+  }
+
+  // Same order as Mark lost: the quote behind the request (when still open) is won first, then the request
+  // reads that outcome, so the lane's win rate and the inbox agree. No shipment is built here.
+  const markWon = async () => {
+    const ok = await run(async () => {
+      if (quoteId && (!request.quoteStatus || isOpenQuoteStatus(request.quoteStatus as QuoteRecord['status']))) await markQuoteWon({ quoteId })
+      await spotAction('SPOT_MARK_OUTCOME', { requestId: request.id, outcome: 'WON' })
+    }, 'Marked as won')
+    if (ok) finish()
   }
 
   const dismiss = async () => {
@@ -496,11 +506,17 @@ function RequestPanel({
           <div className="tms-spot-actions">
             {request.sentAt ? <p className="tms-flush tms-muted">Marked sent {relativeTime(request.sentAt)}.</p> : null}
             {quoteId ? <TmsButton data-testid="spot-convert" disabled={busy} onClick={() => void openConvert()}>Convert to shipment</TmsButton> : null}
-            <TmsButton data-testid="spot-mark-won" disabled={busy} onClick={() => void run(() => spotAction('SPOT_MARK_OUTCOME', { requestId: request.id, outcome: 'WON' }), 'Marked as won').then((ok) => ok && finish())}>Mark won</TmsButton>
+            {quoteId ? <TmsButton data-testid="spot-mark-won" disabled={busy} onClick={() => void markWon()}>Mark won</TmsButton> : null}
             <TmsButton variant="destructive" data-testid="spot-mark-lost" disabled={busy} onClick={() => setLostDialog(true)}>Mark lost</TmsButton>
           </div>
         ) : null}
         {request.status === 'WON' && request.shipmentNumber ? <p className="tms-flush">Booked as shipment {request.shipmentNumber}.</p> : null}
+        {spotOutcome(request.status) ? (
+          <p className="tms-flush" data-testid="spot-request-outcome">
+            Outcome: <TmsBadge tone={OUTCOME_TONE[spotOutcome(request.status)!]}>{OUTCOME_LABEL[spotOutcome(request.status)!]}</TmsBadge>
+          </p>
+        ) : null}
+        {sent && !quoteId ? <p className="tms-flush tms-muted">Create the quote to mark this won.</p> : null}
         {quoteId ? <p className="tms-flush tms-muted">Quote {request.quoteNumber ?? quoteId}{request.quoteStatus ? ` · ${request.quoteStatus}` : ''}</p> : null}
       </Section>
 

@@ -1,12 +1,1 @@
-Docs/tms-build/screenshots/aj/AJ01-nav-collapsed-L.png
-Docs/tms-build/screenshots/aj/AJ01-nav-collapsed-D.png
-Docs/tms-build/screenshots/aj/AJ02-grid-default-L.png
-Docs/tms-build/screenshots/aj/AJ03-grid-focus-checkcalls-L.png
-Docs/tms-build/screenshots/aj/AJ04-grid-focus-docs-L.png
-Docs/tms-build/screenshots/aj/AJ07-drawer-notsent-L.png
-Docs/tms-build/screenshots/aj/AJ08-drawer-prefs-row-L.png
-Docs/tms-build/screenshots/aj/AJ06-drawer-L.png
-Docs/tms-build/screenshots/aj/AJ06-drawer-D.png
-Docs/tms-build/screenshots/aj/AJ09-customer-create-tracking-L.png
-Docs/tms-build/screenshots/aj/AK01-fleet-phone-column-L.png
-Docs/tms-build/screenshots/aj/AK03-settings-truck-phones-report-L.png
+Docs/tms-build/screenshots/aj/DBG-drawer-fail.png

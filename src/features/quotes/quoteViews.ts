@@ -10,6 +10,7 @@
  * module never compares a status to a string to decide what may be done.
  */
 import { laneKey3For, laneKeyFor } from '@/lib/laneKey'
+import { quoteOutcome, type QuoteOutcome } from '@/lib/laneIntel'
 import { OFFER_STATUS_LABEL, QUOTE_STATUS_LABEL, isOpenQuoteStatus, quoteState } from '@/lib/quotes'
 import type { Stop } from '@/types'
 import type { QuoteLostReason, QuoteRecord } from '@/types/tms'
@@ -34,6 +35,17 @@ export const LOST_REASON_LABEL: Record<QuoteLostReason, string> = {
   WITHDRAWN: 'We withdrew',
   OTHER: 'Other',
   NO_REASON: 'No reason given',
+}
+
+/** The one outcome vocabulary every surface that shows a customer quote uses (laneIntel.quoteOutcome is the rule). */
+export const OUTCOMES: readonly QuoteOutcome[] = ['PENDING', 'WON', 'LOST', 'EXPIRED']
+export const OUTCOME_LABEL: Record<QuoteOutcome, string> = { PENDING: 'Pending', WON: 'Won', LOST: 'Lost', EXPIRED: 'Expired' }
+export const OUTCOME_TONE: Record<QuoteOutcome, 'green' | 'red' | 'orange' | 'gray'> = {
+  WON: 'green', LOST: 'red', EXPIRED: 'orange', PENDING: 'gray',
+}
+/** A customer quote's outcome; null for a carrier offer, a draft or a canceled quote (never put to a customer). */
+export function outcomeOf(quote: Parameters<typeof quoteOutcome>[0], nowIso: string): QuoteOutcome | null {
+  return quoteOutcome(quote, nowIso)
 }
 
 /** A quote's rung in the words of its own side: a carrier is booked, not won. */

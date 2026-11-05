@@ -1102,11 +1102,11 @@ async function closeQuote(
   deps: QuoteDeps,
   input: Row,
   caller: Caller,
-  args: { action: string; status: QuoteStatus; lostReason: QuoteLostReason | null; sellOnly?: boolean },
+  args: { action: string; status: QuoteStatus; lostReason: QuoteLostReason | null; sellOnly?: boolean; won?: boolean },
 ): Promise<Row> {
   const quoteId = assertString(input.quoteId, 'quoteId')
   const quote = await loadQuote(deps, quoteId)
-  if (args.sellOnly && quote.side !== 'SELL') throw new Error('Only a customer quote can be passed on')
+  if (args.sellOnly && quote.side !== 'SELL') throw new Error('Only a customer quote can be passed on or won')
   const status = String(quote.status ?? '')
   if (!isOpenQuoteStatus(status as QuoteStatus)) throw new Error(`That quote is already ${status}`)
 
@@ -1120,6 +1120,7 @@ async function closeQuote(
     lostReason: reason,
     lostNote: note,
     closedAt: now,
+    ...(args.won ? { wonAt: now } : {}),
     events: pushEvent(quote, { at: now, by: caller.email, kind: args.status, note: note ?? reason }),
     ...stamp(quote, caller, now),
   }
@@ -1136,6 +1137,14 @@ async function closeQuote(
 
 export function markQuoteLost(deps: QuoteDeps, input: Row, caller: Caller): Promise<Row> {
   return closeQuote(deps, input, caller, { action: 'MARK_QUOTE_LOST', status: 'LOST', lostReason: 'NO_REASON' })
+}
+
+/**
+ * The rep's own word that the customer took the quote, with no shipment built yet (a converted quote
+ * is WON by CONVERT_QUOTE itself). Customer quotes only; the note is the only free text.
+ */
+export function markQuoteWon(deps: QuoteDeps, input: Row, caller: Caller): Promise<Row> {
+  return closeQuote(deps, input, caller, { action: 'MARK_QUOTE_WON', status: 'WON', lostReason: null, sellOnly: true, won: true })
 }
 
 export function cancelQuote(deps: QuoteDeps, input: Row, caller: Caller): Promise<Row> {

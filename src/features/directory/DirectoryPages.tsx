@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Archive, MessageSquarePlus, Merge, Pencil, Settings2 } from 'lucide-react'
+import { Archive, MessageSquarePlus, Merge, Pencil, Search, Settings2, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
 import { useStaff } from '@/hooks/useStaff'
@@ -19,6 +19,21 @@ import {
   TmsSelect,
 } from '@/features/tms/kit'
 import type { ColumnDef, TmsTone } from '@/features/tms/kit'
+import { TmsSegmentedTabs } from '@/features/tms/kit'
+import { DenseGrid } from '@/features/tms/grid/DenseGrid'
+import { ClearFiltersButton, ColumnsButton, DensityToggle, DenseKpiStrip, SummaryToggle } from '@/features/tms/grid/DenseControls'
+import {
+  activeFilterCount,
+  filterRows,
+  nextSort,
+  reorderKeys,
+  sortDenseRows,
+  type DenseColumn,
+  type DenseColumnFilter,
+  type DenseFilters,
+} from '@/features/tms/grid/denseGridModel'
+import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
+import type { CrmListAccountRow } from '@/lib/crm/types'
 import {
   graphqlErrorText,
   listDivisions,
@@ -60,14 +75,86 @@ const statusTones: Record<CustomerStatus, TmsTone> = {
 
 const CUSTOMER_STATUSES: CustomerStatus[] = ['NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING', 'PENDING', 'ACTIVE', 'DORMANT', 'CLOSED', 'BLOCKED']
 
-interface CustomerFilters {
-  status: CustomerStatus | ''
-  factored: '' | 'yes' | 'no'
-  archived: '' | 'yes' | 'no'
-  division: string
+/** A hundred rows a page; the grid virtualises them, so the DOM holds only the rows in view. */
+const PAGE_SIZE = 100
+
+type BoardTab = 'leads' | 'active' | 'inactive'
+
+interface CustomerRow {
+  record: CustomerRecord
+  effective: CustomerStatus
+  tab: BoardTab
+  crm: CrmListAccountRow | undefined
+  ownerName: string
+  teamName: string
+  divisionName: string
 }
 
-const EMPTY_CUSTOMER_FILTERS: CustomerFilters = { status: '', factored: '', archived: '', division: '' }
+const dollars = (cents: number) => `$${Math.round(cents / 100).toLocaleString('en-US')}`
+/** How many distinct billing addresses the customer has on file (the field holds a comma or semicolon list). */
+const billingEmailCount = (c: CustomerRecord) => (c.billingEmail ?? '').split(/[\s,;]+/).filter((s) => s.includes('@')).length
+const yesNo = (v: boolean | null | undefined) => (v === true ? 'Yes' : 'No')
+const opt = (v: string | null | undefined) => (v ? [{ value: v, label: v }] : [])
+
+const DEFAULT_COLUMNS = ['name', 'status', 'owner', 'team', 'lastTouch', 'nextStep', 'credit', 'terms', 'billingEmails', 'factored', 'contact', 'email', 'city', 'state']
+const ALL_COLUMN_KEYS = [
+  ...DEFAULT_COLUMNS,
+  'division', 'stage', 'nextDue', 'openTasks', 'phone', 'mc', 'dot', 'archived', 'aljexCode', 'industry', 'leadSource', 'created',
+]
+const ACTIONS_KEY = 'actions'
+
+const gridCatalog: Array<DenseColumn<CustomerRow>> = [
+    { key: 'name', header: 'Customer', group: 'Account', text: (r) => r.record.name },
+    {
+      key: 'status', header: 'Status', group: 'Account', text: (r) => r.record.status ?? '', filter: 'multi',
+      fixedOptions: CUSTOMER_STATUSES.map((s) => ({ value: s, label: s })), optionsOf: (r) => opt(r.record.status),
+    },
+    { key: 'owner', header: 'Owner', group: 'Account', text: (r) => r.ownerName, filter: 'multi', optionsOf: (r) => opt(r.ownerName) },
+    { key: 'team', header: 'Team', group: 'Account', text: (r) => r.teamName, filter: 'multi', optionsOf: (r) => opt(r.teamName) },
+    { key: 'division', header: 'Division', group: 'Account', text: (r) => r.divisionName, filter: 'multi', optionsOf: (r) => opt(r.divisionName) },
+    { key: 'stage', header: 'CRM stage', group: 'Account', text: (r) => r.crm?.stage ?? '', filter: 'multi', optionsOf: (r) => opt(r.crm?.stage) },
+    { key: 'archived', header: 'Archived', group: 'Account', text: (r) => yesNo(r.record.active === false), filter: 'multi' },
+    { key: 'aljexCode', header: 'Aljex #', group: 'Account', text: (r) => r.record.aljexCode ?? '' },
+    { key: 'industry', header: 'Industry', group: 'Account', text: (r) => r.record.industry ?? '', filter: 'multi', optionsOf: (r) => opt(r.record.industry) },
+    { key: 'leadSource', header: 'Lead source', group: 'Account', text: (r) => r.record.leadSource ?? '', filter: 'multi', optionsOf: (r) => opt(r.record.leadSource) },
+    { key: 'created', header: 'Created', group: 'Account', text: (r) => r.record.createdAt.slice(0, 10), filter: 'date', dateOf: (r) => r.record.createdAt, sortValue: (r) => r.record.createdAt },
+    {
+      key: 'lastTouch', header: 'Last touch', group: 'CRM',
+      text: (r) => (r.crm?.lastTouchAt ? `${kindLabel(r.crm.lastTouchKind)} · ${relativeDay(r.crm.lastTouchAt)}` : ''),
+      filter: 'date', dateOf: (r) => r.crm?.lastTouchAt ?? null, sortValue: (r) => r.crm?.lastTouchAt ?? null,
+    },
+    {
+      key: 'nextStep', header: 'Next step', group: 'CRM',
+      text: (r) => (r.crm?.nextStep ? `${r.crm.nextStep}${r.crm.nextStepDueAt ? ` · ${r.crm.nextStepDueAt.slice(0, 10)}` : ''}` : ''),
+      sortValue: (r) => r.crm?.nextStep ?? null,
+    },
+    {
+      key: 'nextDue', header: 'Next step due', group: 'CRM', text: (r) => r.crm?.nextStepDueAt?.slice(0, 10) ?? '',
+      filter: 'date', dateOf: (r) => r.crm?.nextStepDueAt ?? null, sortValue: (r) => r.crm?.nextStepDueAt ?? null,
+    },
+    { key: 'openTasks', header: 'Open tasks', group: 'CRM', text: (r) => String(r.crm?.openTaskCount ?? 0), filter: 'number', numberOf: (r) => r.crm?.openTaskCount ?? 0, align: 'right' },
+    {
+      key: 'credit', header: 'Credit limit', group: 'Billing', text: (r) => (r.record.creditLimitCents != null ? dollars(r.record.creditLimitCents) : ''),
+      filter: 'number', numberOf: (r) => (r.record.creditLimitCents != null ? r.record.creditLimitCents / 100 : null), numberUnit: '$', align: 'right',
+    },
+    {
+      key: 'terms', header: 'Terms', group: 'Billing', text: (r) => (r.record.paymentTermsDays != null ? `Net ${r.record.paymentTermsDays}` : ''),
+      filter: 'number', numberOf: (r) => r.record.paymentTermsDays ?? null, numberUnit: 'days', align: 'right',
+    },
+    {
+      key: 'billingEmails', header: 'Billing e-mails', group: 'Billing', text: (r) => String(billingEmailCount(r.record)),
+      filter: 'number', numberOf: (r) => billingEmailCount(r.record), align: 'right',
+    },
+    { key: 'factored', header: 'Factored', group: 'Billing', text: (r) => yesNo(r.record.factored), filter: 'multi' },
+    { key: 'contact', header: 'Contact', group: 'Contact', text: (r) => r.record.contactName ?? '' },
+    { key: 'email', header: 'E-mail', group: 'Contact', text: (r) => r.record.contactEmail ?? '' },
+    { key: 'phone', header: 'Phone', group: 'Contact', text: (r) => r.record.contactPhone ?? '' },
+    { key: 'city', header: 'City', group: 'Contact', text: (r) => r.record.billingAddress?.city ?? '' },
+    { key: 'state', header: 'State', group: 'Contact', text: (r) => r.record.billingAddress?.state ?? '', filter: 'multi', optionsOf: (r) => opt(r.record.billingAddress?.state) },
+    { key: 'mc', header: 'MC', group: 'Authority', text: (r) => r.record.mcNumber ?? '' },
+    { key: 'dot', header: 'DOT', group: 'Authority', text: (r) => r.record.dotNumber ?? '' },
+    { key: ACTIONS_KEY, header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 110 },
+]
 
 export function CustomersPage() {
   const [params, setParams] = useSearchParams()
@@ -83,8 +170,7 @@ export function CustomersPage() {
   const { nameOf } = useStaff(user?.email)
   const [noteFor, setNoteFor] = useState<CustomerRecord | null>(null)
   const [query, setQuery] = useState('')
-  const [filters, setFilters] = useState<CustomerFilters>(EMPTY_CUSTOMER_FILTERS)
-  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [filters, setFilters] = useState<DenseFilters>({})
   const [editing, setEditing] = useState<CustomerRecord | 'new' | null>(null)
   // `?customer=<id>` owns which profile is open (Settings → Tracking automation links here), the way `?doc=` does elsewhere.
   const setProfileId = useCallback((id: string | null) => {
@@ -97,7 +183,7 @@ export function CustomersPage() {
   const [divisions, setDivisions] = useState<Division[]>([])
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [showDefaults, setShowDefaults] = useState(false)
-  const [pageSize, setPageSize] = useState(50)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE)
 
   useEffect(() => {
     listDivisions().then(setDivisions).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load divisions'))
@@ -108,20 +194,32 @@ export function CustomersPage() {
 
   const catalog = useMemo<ChargeCodeDef[]>(() => settings?.chargeCodes ?? [], [settings])
 
-  const rowsWithStatus = useMemo(() => {
+  const teamNames = useMemo(() => new Map((settings?.teams ?? []).map((t) => [t.key, t.name])), [settings])
+  const divisionNames = useMemo(() => new Map(divisions.map((d) => [d.key, d.name])), [divisions])
+
+  const rowsWithStatus = useMemo<CustomerRow[]>(() => {
     const q = query.trim().toLowerCase()
     const visibleOnly = crm.loaded && (!isManager || scope === 'mine')
+    const now = new Date().toISOString()
     return dir.customers
       .filter((c) => !visibleOnly || crm.byCustomer.has(c.id))
       .filter((c) =>
         !q || [c.name, c.contactName, c.contactEmail, c.mcNumber, c.dotNumber].some((v) => (v ?? '').toLowerCase().includes(q))
       )
-      .filter((c) => (filters.status ? c.status === filters.status : true))
-      .filter((c) => (filters.factored ? (c.factored === true) === (filters.factored === 'yes') : true))
-      .filter((c) => (filters.archived ? (c.active === false) === (filters.archived === 'yes') : true))
-      .filter((c) => (filters.division ? c.defaultDivisionKey === filters.division : true))
-      .map((c) => ({ record: c, effective: effectiveCustomerStatus(c, null, new Date().toISOString()), tab: boardTab(effectiveCustomerStatus(c, null, new Date().toISOString())) }))
-  }, [dir.customers, query, filters, crm.loaded, crm.byCustomer, isManager, scope])
+      .map((c) => {
+        const effective = effectiveCustomerStatus(c, null, now)
+        const row = crm.byCustomer.get(c.id)
+        return {
+          record: c,
+          effective,
+          tab: boardTab(effective),
+          crm: row,
+          ownerName: row?.ownerId ? nameOf(row.ownerId) : '',
+          teamName: c.teamKey ? (teamNames.get(c.teamKey) ?? c.teamKey) : '',
+          divisionName: c.defaultDivisionKey ? (divisionNames.get(c.defaultDivisionKey) ?? c.defaultDivisionKey) : '',
+        }
+      })
+  }, [dir.customers, query, crm.loaded, crm.byCustomer, isManager, scope, nameOf, teamNames, divisionNames])
 
   const counts = useMemo(() => ({
     leads: rowsWithStatus.filter((r) => r.tab === 'leads').length,
@@ -129,10 +227,41 @@ export function CustomersPage() {
     inactive: rowsWithStatus.filter((r) => r.tab === 'inactive').length,
   }), [rowsWithStatus])
 
-  const [activeTab, setActiveTab] = useState<'leads' | 'active' | 'inactive'>('active')
+  const [activeTab, setActiveTab] = useState<BoardTab>('active')
 
-  const visibleRows = useMemo(() => rowsWithStatus.filter((r) => r.tab === activeTab), [rowsWithStatus, activeTab])
-  const pageRows = useMemo(() => visibleRows.slice(0, pageSize), [visibleRows, pageSize])
+  const prefs = useDenseGridPrefs({
+    gridId: 'customers',
+    email: user?.email,
+    defaultColumns: DEFAULT_COLUMNS,
+    validKeys: ALL_COLUMN_KEYS,
+    defaultSort: { key: 'name', dir: 'asc' },
+  })
+  const gridColumns = useMemo(
+    () => [
+      ...prefs.columns.map((k) => gridCatalog.find((c) => c.key === k)).filter((c) => c != null),
+      ...gridCatalog.filter((c) => c.key === ACTIONS_KEY),
+    ],
+    [prefs.columns],
+  )
+  const tabRows = useMemo(() => rowsWithStatus.filter((r) => r.tab === activeTab), [rowsWithStatus, activeTab])
+  const filteredRows = useMemo(() => filterRows(tabRows, gridCatalog, filters), [tabRows, filters])
+  const sortedRows = useMemo(() => sortDenseRows(filteredRows, gridCatalog, prefs.sort), [filteredRows, prefs.sort])
+  const pageRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
+  const setColumnFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
+    setPageSize(PAGE_SIZE)
+    setFilters((prev) => {
+      const copy = { ...prev }
+      if (next) copy[key] = next
+      else delete copy[key]
+      return copy
+    })
+  }, [])
+  const kpis = useMemo(() => [
+    { label: 'Customers', value: sortedRows.length },
+    { label: 'Next step overdue', value: sortedRows.filter((r) => r.crm?.nextStep && isOverdue(r.crm.nextStepDueAt)).length, tone: 'bad' as const },
+    { label: 'No owner', value: sortedRows.filter((r) => !r.ownerName).length, tone: 'warn' as const },
+    { label: 'Factored', value: sortedRows.filter((r) => r.record.factored === true).length },
+  ], [sortedRows])
 
   useEffect(() => { if (dir.error) toast.error(dir.error) }, [dir.error])
 
@@ -158,215 +287,151 @@ export function CustomersPage() {
     toast.success('Org defaults saved')
   }
 
-  type Row = (typeof rowsWithStatus)[number]
-
-  const columns: Array<ColumnDef<Row>> = [
-    {
-      key: 'name',
-      header: 'CUSTOMER',
-      width: 240,
-      render: ({ record: c }) => (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontWeight: 600 }}>{c.name}</span>
-          {c.apptWorkflow === 'BATORY' && <TmsBadge tone="blue">BATORY</TmsBadge>}
-          {c.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'STATUS',
-      width: 150,
-      render: ({ record: c, effective }) => (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          {c.status ? <TmsBadge tone={statusTones[c.status]}>{c.status}</TmsBadge> : <span className="tms-muted">—</span>}
-          {c.status && effective !== c.status && <span className="tms-muted" style={{ fontSize: 11 }}>(effective {effective})</span>}
-        </span>
-      ),
-    },
-    {
-      key: 'owner',
-      header: 'OWNER',
-      width: 140,
-      render: ({ record: c }) => {
-        const ownerId = crm.byCustomer.get(c.id)?.ownerId
-        return ownerId ? nameOf(ownerId) : <span className="tms-muted">—</span>
-      },
-    },
-    {
-      key: 'lastTouch',
-      header: 'LAST TOUCH',
-      width: 150,
-      render: ({ record: c }) => {
-        const row = crm.byCustomer.get(c.id)
-        return row?.lastTouchAt
-          ? <span data-testid={`crm-last-touch-${c.id}`}>{kindLabel(row.lastTouchKind)} · {relativeDay(row.lastTouchAt)}</span>
+  const renderCell = (row: CustomerRow, key: string) => {
+    const { record: c, effective, crm: crmRow } = row
+    switch (key) {
+      case 'name':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontWeight: 600 }}>{c.name}</span>
+            {c.apptWorkflow === 'BATORY' && <TmsBadge tone="blue">BATORY</TmsBadge>}
+            {c.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
+          </span>
+        )
+      case 'status':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {c.status ? <TmsBadge tone={statusTones[c.status]}>{c.status}</TmsBadge> : <span className="tms-muted">—</span>}
+            {c.status && effective !== c.status && <span className="tms-muted" style={{ fontSize: 11 }}>(effective {effective})</span>}
+          </span>
+        )
+      case 'owner':
+        return row.ownerName || <span className="tms-muted">—</span>
+      case 'lastTouch':
+        return crmRow?.lastTouchAt
+          ? <span data-testid={`crm-last-touch-${c.id}`}>{kindLabel(crmRow.lastTouchKind)} · {relativeDay(crmRow.lastTouchAt)}</span>
           : <span className="tms-muted">—</span>
-      },
-    },
-    {
-      key: 'nextStep',
-      header: 'NEXT STEP',
-      width: 200,
-      render: ({ record: c }) => {
-        const row = crm.byCustomer.get(c.id)
-        if (!row?.nextStep) return <span className="tms-muted">—</span>
-        const overdue = isOverdue(row.nextStepDueAt)
+      case 'nextStep': {
+        if (!crmRow?.nextStep) return <span className="tms-muted">—</span>
+        const overdue = isOverdue(crmRow.nextStepDueAt)
         return (
           <span data-testid={`crm-next-step-${c.id}`} data-overdue={overdue ? 'true' : undefined}>
-            {row.nextStep}{row.nextStepDueAt ? ` · ${row.nextStepDueAt.slice(0, 10)}` : ''}
+            {crmRow.nextStep}{crmRow.nextStepDueAt ? ` · ${crmRow.nextStepDueAt.slice(0, 10)}` : ''}
             {overdue && <> <TmsBadge tone="red">overdue</TmsBadge></>}
           </span>
         )
-      },
-    },
-    { key: 'contact', header: 'CONTACT', width: 160, render: ({ record: c }) => c.contactName || <span className="tms-muted">no contact yet</span> },
-    { key: 'email', header: 'EMAIL', width: 200, render: ({ record: c }) => c.contactEmail ?? '—' },
-    { key: 'phone', header: 'PHONE', width: 140, render: ({ record: c }) => c.contactPhone ?? '—' },
-    { key: 'mc', header: 'MC', width: 100, render: ({ record: c }) => c.mcNumber ?? '—' },
-    { key: 'dot', header: 'DOT', width: 100, render: ({ record: c }) => c.dotNumber ?? '—' },
-    {
-      key: 'factored',
-      header: 'FACTORED',
-      width: 110,
-      render: ({ record: c }) => (
-        <label
-          title={c.factored ? 'Factored — shipments need an MC and both ZIPs' : 'Not factored — no MC or ZIP needed to book'}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <input
-            type="checkbox"
-            checked={c.factored === true}
-            onChange={(e) => void dir.saveCustomer(c, { factored: e.target.checked })}
-            aria-label={`${c.name} is factored`}
-          />
-          {c.factored ? 'Yes' : 'No'}
-        </label>
-      ),
-    },
-    {
-      key: 'billing',
-      header: 'BILLING',
-      width: 220,
-      render: ({ record: c }) => [c.billingContactName, c.billingEmail, c.billingAddress?.city].filter(Boolean).join(' · ') || '—',
-    },
-    {
-      key: 'actions',
-      header: '',
-      width: 110,
-      render: ({ record: c }) => (
-        <span style={{ display: 'inline-flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
-          <TmsIconButton shape="plain" aria-label={`Add note to ${c.name}`} title="Add note" onClick={() => setNoteFor(c)}><MessageSquarePlus size={14} /></TmsIconButton>
-          <TmsIconButton shape="plain" aria-label={`Edit ${c.name}`} title="Edit" onClick={() => setEditing(c)}><Pencil size={14} /></TmsIconButton>
-          {isAdmin && (
-            <TmsIconButton shape="plain" aria-label={`Archive ${c.name}`} title="Archive" onClick={() => void archive(c)}><Archive size={14} /></TmsIconButton>
-          )}
-        </span>
-      ),
-    },
-  ]
-
-  const chips = [
-    { key: 'status', label: 'Status is', value: filters.status || null, onClick: () => setFiltersOpen(true) },
-    { key: 'factored', label: 'Factored is', value: filters.factored ? (filters.factored === 'yes' ? 'Yes' : 'No') : null, onClick: () => setFiltersOpen(true) },
-    { key: 'archived', label: 'Archived is', value: filters.archived ? (filters.archived === 'yes' ? 'Yes' : 'No') : null, onClick: () => setFiltersOpen(true) },
-    {
-      key: 'division',
-      label: 'Division is',
-      value: filters.division ? (divisions.find((d) => d.key === filters.division)?.name ?? filters.division) : null,
-      onClick: () => setFiltersOpen(true),
-    },
-  ]
+      }
+      case 'factored':
+        return (
+          <label
+            title={c.factored ? 'Factored — shipments need an MC and both ZIPs' : 'Not factored — no MC or ZIP needed to book'}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={c.factored === true}
+              onChange={(e) => void dir.saveCustomer(c, { factored: e.target.checked })}
+              aria-label={`${c.name} is factored`}
+            />
+            {c.factored ? 'Yes' : 'No'}
+          </label>
+        )
+      case ACTIONS_KEY:
+        return (
+          <span style={{ display: 'inline-flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+            <TmsIconButton shape="plain" aria-label={`Add note to ${c.name}`} title="Add note" onClick={() => setNoteFor(c)}><MessageSquarePlus size={14} /></TmsIconButton>
+            <TmsIconButton shape="plain" aria-label={`Edit ${c.name}`} title="Edit" onClick={() => setEditing(c)}><Pencil size={14} /></TmsIconButton>
+            {isAdmin && (
+              <TmsIconButton shape="plain" aria-label={`Archive ${c.name}`} title="Archive" onClick={() => void archive(c)}><Archive size={14} /></TmsIconButton>
+            )}
+          </span>
+        )
+      default:
+        return gridCatalog.find((col) => col.key === key)?.text(row) || <span className="tms-muted">—</span>
+    }
+  }
 
   return (
     <>
-      <TmsListPage<Row>
-        title="Customers"
-        primaryAction={{ label: 'Customer', onClick: () => setEditing('new') }}
-        actions={(isAdmin || isManager) ? (
-          <>
-            {isManager && (
-              <span role="group" aria-label="Account scope" style={{ display: 'inline-flex', gap: 4 }} data-testid="crm-scope">
-                <TmsButton size="sm" variant={scope === 'mine' ? 'primary' : undefined} aria-pressed={scope === 'mine'} onClick={() => setScope('mine')} data-testid="crm-scope-mine">Mine</TmsButton>
-                <TmsButton size="sm" variant={scope === 'all' ? 'primary' : undefined} aria-pressed={scope === 'all'} onClick={() => setScope('all')} data-testid="crm-scope-all">All</TmsButton>
-              </span>
-            )}
-            {isAdmin && (
-              <TmsIconButton aria-label="Organization defaults" title="Organization defaults" onClick={() => setShowDefaults(true)}>
-                <Settings2 size={16} />
-              </TmsIconButton>
-            )}
-          </>
-        ) : null}
-        search={{ value: query, onChange: setQuery, placeholder: 'Search customers' }}
-        onRefresh={dir.refresh}
-        filterChips={chips}
-        onAddFilter={() => setFiltersOpen(true)}
-        quickTabs={{
-          tabs: [
-            { key: 'leads', label: 'Prospects', count: counts.leads },
-            { key: 'active', label: 'Active', count: counts.active },
-            { key: 'inactive', label: 'Inactive', count: counts.inactive },
-          ],
-          active: activeTab,
-          onSelect: (key) => setActiveTab(key as 'leads' | 'active' | 'inactive'),
-        }}
-        columns={columns}
-        rows={pageRows}
-        rowKey={(row) => row.record.id}
-        onRowClick={(row) => setProfileId(row.record.id)}
-        page={{ from: pageRows.length === 0 ? 0 : 1, to: pageRows.length, total: visibleRows.length, pageSize, onPageSize: setPageSize }}
-        emptyText={dir.loading ? 'Loading customers…' : 'No customers match this tab and these filters.'}
-        onClearFilters={() => { setQuery(''); setFilters(EMPTY_CUSTOMER_FILTERS) }}
-      />
-
-      <TmsDialog
-        open={filtersOpen}
-        onOpenChange={setFiltersOpen}
-        title="Filter customers"
-        footer={
-          <>
-            <TmsButton onClick={() => setFilters(EMPTY_CUSTOMER_FILTERS)}>Clear</TmsButton>
-            <TmsButton variant="primary" onClick={() => setFiltersOpen(false)}>Done</TmsButton>
-          </>
-        }
-      >
-        <div style={{ display: 'grid', gap: 14 }}>
-          <TmsField label="Status is">
-            <TmsSelect
-              value={filters.status}
-              onChange={(e) => setFilters({ ...filters, status: e.target.value as CustomerStatus | '' })}
-              placeholder="Any"
-              options={CUSTOMER_STATUSES.map((s) => ({ value: s, label: s }))}
-            />
-          </TmsField>
-          <TmsField label="Factored is">
-            <TmsSelect
-              value={filters.factored}
-              onChange={(e) => setFilters({ ...filters, factored: e.target.value as '' | 'yes' | 'no' })}
-              placeholder="Any"
-              options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]}
-            />
-          </TmsField>
-          <TmsField label="Archived is">
-            <TmsSelect
-              value={filters.archived}
-              onChange={(e) => setFilters({ ...filters, archived: e.target.value as '' | 'yes' | 'no' })}
-              placeholder="Any"
-              options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]}
-            />
-          </TmsField>
-          <TmsField label="Division is">
-            <TmsSelect
-              value={filters.division}
-              onChange={(e) => setFilters({ ...filters, division: e.target.value })}
-              placeholder="Any"
-              options={divisions.map((d) => ({ value: d.key, label: d.name }))}
-            />
-          </TmsField>
+      <div className="tms-dense-page">
+        <div className="tms-dense-bar">
+          <span className="tms-dense-title"><Users size={18} aria-hidden="true" /> Customers</span>
+          <Search size={14} className="tms-muted" aria-hidden="true" />
+          <TmsInput
+            placeholder="Search customers"
+            aria-label="Search customers"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setPageSize(PAGE_SIZE) }}
+            className="tms-dense-search"
+          />
+          <TmsSegmentedTabs
+            aria-label="Customer board"
+            size="sm"
+            tabs={[
+              { key: 'leads', label: 'Prospects', count: counts.leads },
+              { key: 'active', label: 'Active', count: counts.active },
+              { key: 'inactive', label: 'Inactive', count: counts.inactive },
+            ]}
+            active={activeTab}
+            onSelect={(key) => { setActiveTab(key as BoardTab); setPageSize(PAGE_SIZE) }}
+          />
+          {isManager && (
+            <span role="group" aria-label="Account scope" style={{ display: 'inline-flex', gap: 4 }} data-testid="crm-scope">
+              <TmsButton size="sm" variant={scope === 'mine' ? 'primary' : undefined} aria-pressed={scope === 'mine'} onClick={() => setScope('mine')} data-testid="crm-scope-mine">Mine</TmsButton>
+              <TmsButton size="sm" variant={scope === 'all' ? 'primary' : undefined} aria-pressed={scope === 'all'} onClick={() => setScope('all')} data-testid="crm-scope-all">All</TmsButton>
+            </span>
+          )}
+          <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => { setFilters({}); setPageSize(PAGE_SIZE) }} />
+          <span className="tms-dense-spacer" />
+          <TmsButton size="sm" variant="secondary" onClick={() => void dir.refresh()}>Refresh</TmsButton>
+          <ColumnsButton
+            catalog={gridCatalog}
+            columns={prefs.columns}
+            widths={prefs.widths}
+            pinned={prefs.pinned}
+            onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })}
+          />
+          <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
+          <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
+          {isAdmin && (
+            <TmsIconButton aria-label="Organization defaults" title="Organization defaults" onClick={() => setShowDefaults(true)}>
+              <Settings2 size={16} />
+            </TmsIconButton>
+          )}
+          <TmsButton size="sm" variant="primary" onClick={() => setEditing('new')}>Customer</TmsButton>
         </div>
-      </TmsDialog>
+        <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+        <div className="tms-dense-body">
+          <DenseGrid<CustomerRow>
+            aria-label="Customers"
+            recentKey={`tms:customers:recent:${user?.email ?? 'anon'}`}
+            resetKey={`${activeTab}|${scope}|${query}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+            columns={gridColumns}
+            rows={pageRows}
+            fitRows={tabRows}
+            rowKey={(r) => r.record.id}
+            renderCell={renderCell}
+            density={prefs.density}
+            userWidths={prefs.widths}
+            stickyCount={Math.max(1, prefs.pinned.length)}
+            sort={prefs.sort}
+            onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
+            filters={filters}
+            onFilterChange={setColumnFilter}
+            onReorder={(from, to) => prefs.setColumns(reorderKeys(prefs.columns, from, to))}
+            onResize={prefs.setWidth}
+            onRowClick={(r) => setProfileId(r.record.id)}
+            empty={dir.loading ? 'Loading customers…' : 'No customers match this tab and these filters.'}
+          />
+          {sortedRows.length > pageRows.length && (
+            <div className="tms-dense-bar" data-testid="customers-more">
+              <span className="tms-muted">Showing {pageRows.length} of {sortedRows.length}</span>
+              <TmsButton size="sm" variant="secondary" onClick={() => setPageSize((s) => s + PAGE_SIZE)}>Show next {PAGE_SIZE}</TmsButton>
+            </div>
+          )}
+        </div>
+      </div>
 
       {noteFor && <AddNoteDialog customerId={noteFor.id} customerName={noteFor.name} onClose={() => setNoteFor(null)} onSaved={() => void crm.refresh()} />}
 

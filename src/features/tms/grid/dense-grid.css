@@ -413,6 +413,22 @@
   overflow: auto;
 }
 
+.tms-shell .tms-dg-filter-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tms-shell .tms-dg-filter-clear:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tms-shell .tms-dg-popover {
+  overscroll-behavior: contain;
+}
+
 .tms-shell .tms-dg-filter-count {
   margin-left: 6px;
   color: var(--tms-muted);

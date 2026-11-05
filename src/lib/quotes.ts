@@ -154,6 +154,8 @@ export interface QuoteState {
   canEdit: boolean
   canCancel: boolean
   canMarkLost: boolean
+  /** The rep may record that the customer took it: a customer quote that has been put to them and is still open. */
+  canMarkWon: boolean
 }
 
 export type QuoteStateInput = Pick<
@@ -201,6 +203,7 @@ export function quoteState(quote: QuoteStateInput, nowIso: string): QuoteState {
     canEdit: rung === 'DRAFT' || rung === 'REQUESTED',
     canCancel: open,
     canMarkLost: open,
+    canMarkWon: open && quote.side === 'SELL' && rung !== 'DRAFT' && rung !== 'REQUESTED',
   }
 }
 

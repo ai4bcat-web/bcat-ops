@@ -279,6 +279,17 @@ describe('quoteState', () => {
   })
 })
 
+describe('canMarkWon', () => {
+  const sell = (status: QuoteStatus, side: 'SELL' | 'BUY' = 'SELL') =>
+    quoteState({ side, status, expiresAt: null, amountCents: 100_00, counterCents: null }, '2026-11-04T00:00:00Z').canMarkWon
+
+  it('is for a customer quote that has been put to them and is still open', () => {
+    for (const status of ['QUOTED', 'SENT_COUNTER', 'RECEIVED_REPLY', 'RECEIVED_COUNTER'] as const) expect(sell(status)).toBe(true)
+    for (const status of ['DRAFT', 'REQUESTED', 'WON', 'LOST', 'PASS', 'CANCELED'] as const) expect(sell(status)).toBe(false)
+    expect(sell('QUOTED', 'BUY')).toBe(false)
+  })
+})
+
 describe('quoteExpiry', () => {
   const sentAt = '2026-03-18T12:00:00.000Z'
 

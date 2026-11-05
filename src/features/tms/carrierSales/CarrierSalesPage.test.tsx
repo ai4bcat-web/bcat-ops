@@ -8,6 +8,7 @@ import { needsCoverCount } from './carrierSalesQueue'
 const mocks = vi.hoisted(() => ({
   listActivePostings: vi.fn(),
   unpostQuoteLoad: vi.fn(),
+  getQuote: vi.fn().mockResolvedValue(null),
   shipments: vi.fn(),
   worklist: vi.fn(),
   hasPageAccess: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/apiClient', () => ({
   listActivePostings: mocks.listActivePostings,
   unpostQuoteLoad: mocks.unpostQuoteLoad,
+  getQuote: mocks.getQuote,
   listUnmatchedMessages: mocks.unmatched,
   graphqlErrorText: (e: unknown) => String(e),
 }))

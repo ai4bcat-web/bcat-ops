@@ -9,7 +9,7 @@
  * `quoteViews.test.ts` without a browser.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QuotesPage } from './QuotesPage'
 import type { QuoteRecord, QuoteStatus } from '@/types/tms'
@@ -112,7 +112,7 @@ describe('the quote board', () => {
     setup({ open: [quote({ id: 'Q9', status: 'QUOTED', expiresAt: YESTERDAY, linkToken: 'tok' })] })
     fireEvent.click(screen.getByRole('tab', { name: /^Sent/ }))
 
-    expect(screen.getByText('Expired')).toBeTruthy()
+    expect(screen.getAllByText('Expired').length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'Re-send Q9' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Convert Q9' })).toBeNull()
   })
@@ -126,5 +126,32 @@ describe('the quote board', () => {
     expect(tile('Win rate').getByText('0%')).toBeTruthy()
     // Nobody has answered anything, so the reply time is unmeasured rather than zero.
     expect(tile('Median hours to reply').getByText('—')).toBeTruthy()
+  })
+
+  it('shows each sent quote as Pending or Expired in one outcome column', () => {
+    setup({
+      open: [
+        quote({ id: 'Q1', status: 'QUOTED', expiresAt: TOMORROW }),
+        quote({ id: 'Q2', status: 'QUOTED', expiresAt: YESTERDAY }),
+      ],
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /^Sent/ }))
+    const outcomes = screen.getAllByTestId('quote-outcome').map((n) => n.textContent)
+    expect([...outcomes].sort()).toEqual(['Expired', 'Pending'])
+  })
+
+  it('filters Won / Lost by outcome, a converted quote counting as Won', async () => {
+    setup({
+      month: [
+        quote({ id: 'QW', status: 'WON', shipmentId: 'S1', closedAt: '2026-03-12T00:00:00Z' }),
+        quote({ id: 'QL', status: 'LOST', lostReason: 'TOO_HIGH', closedAt: '2026-03-11T00:00:00Z' }),
+      ],
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /^Won \/ Lost/ }))
+    await waitFor(() => expect(screen.getAllByTestId('quote-outcome')).toHaveLength(2))
+
+    fireEvent.click(screen.getByText('Outcome is'))
+    fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'WON' } })
+    await waitFor(() => expect(screen.getAllByTestId('quote-outcome').map((n) => n.textContent)).toEqual(['Won']))
   })
 })

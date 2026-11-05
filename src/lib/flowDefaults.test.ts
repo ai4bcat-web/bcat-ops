@@ -17,7 +17,6 @@ describe('the margin a quote is built with', () => {
     const m = resolveMargin(null, null, 'FTL')
     expect(m.targetBps).toBe(DEFAULT_MARGIN_TARGET_BPS)
     expect(m.targetSource).toBe('BUILT_IN')
-    expect(m.autoReply).toBe(false)
   })
 
   it('takes the org default over the built-in', () => {
@@ -41,11 +40,6 @@ describe('the margin a quote is built with', () => {
   it('ignores a nonsense margin rather than pricing with it', () => {
     expect(resolveMargin({ marginTargetBps: 12000 }, null, 'FTL').targetBps).toBe(DEFAULT_MARGIN_TARGET_BPS)
     expect(resolveMargin(null, { marginTargetBps: -500 }, 'FTL').targetBps).toBe(DEFAULT_MARGIN_TARGET_BPS)
-  })
-
-  it('lets a customer switch auto replies on while the org leaves them off', () => {
-    expect(resolveMargin({ quoteAutoReplyDefault: false }, { quoteAutoReply: true }, 'FTL').autoReply).toBe(true)
-    expect(resolveMargin({ quoteAutoReplyDefault: true }, { quoteAutoReply: false }, 'FTL').autoReply).toBe(false)
   })
 
   it('treats an unset override as inheritance, not as a zero margin', () => {

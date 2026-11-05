@@ -82,7 +82,6 @@ export interface CustomerFlowSource {
 export interface ResolvedMargin {
   targetBps: number
   floorBps: number
-  autoReply: boolean
   /** Where the target came from, so the UI can say "org default" rather than imply a choice. */
   targetSource: 'CUSTOMER' | 'ORG_MODE' | 'ORG' | 'BUILT_IN'
 }
@@ -141,11 +140,7 @@ export function resolveMargin(
   const floorRaw = usableBps(customer?.marginFloorBps) ?? usableBps(settings?.marginFloorBps) ?? 0
   const floorBps = Math.min(floorRaw, targetBps)
 
-  const autoReply = customer?.quoteAutoReply != null
-    ? Boolean(customer.quoteAutoReply)
-    : Boolean(settings?.quoteAutoReplyDefault)
-
-  return { targetBps, floorBps, autoReply, targetSource }
+  return { targetBps, floorBps, targetSource }
 }
 
 /**

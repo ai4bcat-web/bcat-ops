@@ -32,7 +32,7 @@ import { formatCents } from '@/lib/invoiceBuild'
 import { quoteState } from '@/lib/quotes'
 import { lastThreeMonths, monthLabel } from '@/features/ar/arViews'
 import {
-  LOST_REASON_LABEL, QUOTE_TABS, ageHours, expiryChip, marginChip, quoteLinkUrl, quoteTabCounts,
+  LOST_REASON_LABEL, OUTCOMES, OUTCOME_LABEL, QUOTE_TABS, outcomeOf, ageHours, expiryChip, marginChip, quoteLinkUrl, quoteTabCounts,
   quoteTotals, splitQuoteTabs, statusLabel, theirNumberCents, whoseMoveLabel, offerActions,
   type QuoteChip, type QuoteTabKey,
 } from './quoteViews'
@@ -40,6 +40,7 @@ import { AcceptOfferDialog } from './components/AcceptOfferDialog'
 import { ConvertQuoteDialog } from './components/ConvertQuoteDialog'
 import { CounterDialog } from './components/CounterDialog'
 import { MarkLostDialog } from './components/MarkLostDialog'
+import { OutcomeBadge } from './components/OutcomeBadge'
 import { SendQuoteDialog } from './components/SendQuoteDialog'
 import type { QuoteRecord } from '@/types/tms'
 
@@ -116,6 +117,7 @@ export function QuotesPage() {
   const [monthRows, setMonthRows] = useState<QuoteRecord[]>([])
   const [monthLoading, setMonthLoading] = useState(true)
   const [lostFacet, setLostFacet] = useState('')
+  const [outcomeFacet, setOutcomeFacet] = useState('')
 
   // No synchronous setState in an effect (react-hooks/set-state-in-effect): every write
   // happens inside the promise chain.
@@ -201,15 +203,16 @@ export function QuotesPage() {
   }, [rows])
 
   const tabRows = useMemo(() => {
-    const base = tab === 'won-lost'
+    let base = tab === 'won-lost'
       ? (lostFacet ? rows['won-lost'].filter((quote) => quote.lostReason === lostFacet) : rows['won-lost'])
       : rows[tab]
+    if (outcomeFacet && tab !== 'offers') base = base.filter((quote) => outcomeOf(quote, now) === outcomeFacet)
     const q = query.trim().toLowerCase()
     if (q.length === 0) return base
     return base.filter((quote) => [
       quote.id, quote.customerName, quote.carrierName, quote.shipmentNumber, quote.loadNumber, laneText(quote),
     ].some((v) => (v ?? '').toLowerCase().includes(q)))
-  }, [tab, rows, lostFacet, query])
+  }, [tab, rows, lostFacet, outcomeFacet, query, now])
 
   const pageRows = useMemo(() => tabRows.slice(0, pageSize), [tabRows, pageSize])
 
@@ -217,6 +220,7 @@ export function QuotesPage() {
 
   const quoteCol: ColumnDef<QuoteRecord> = { key: 'quote', header: 'QUOTE', width: 120, render: (q) => <QuoteLink quote={q} /> }
   const customerCol: ColumnDef<QuoteRecord> = { key: 'customer', header: 'CUSTOMER', width: 180, render: (q) => q.customerName || '—' }
+  const outcomeCol: ColumnDef<QuoteRecord> = { key: 'outcome', header: 'OUTCOME', width: 110, render: (q) => <OutcomeBadge quote={q} now={now} /> }
   const laneCol: ColumnDef<QuoteRecord> = { key: 'lane', header: 'LANE', width: 220, render: (q) => laneText(q) }
 
   const columnsByTab: Record<QuoteTabKey, Array<ColumnDef<QuoteRecord>>> = {
@@ -242,7 +246,7 @@ export function QuotesPage() {
       },
     ],
     sent: [
-      quoteCol, customerCol, laneCol,
+      quoteCol, customerCol, laneCol, outcomeCol,
       {
         key: 'amount',
         header: 'AMOUNT',
@@ -309,7 +313,7 @@ export function QuotesPage() {
       },
     ],
     replies: [
-      quoteCol, customerCol,
+      quoteCol, customerCol, outcomeCol,
       { key: 'ours', header: 'OURS', width: 120, render: (q) => <span style={MONEY_CELL}>{formatCents(q.amountCents)}</span> },
       {
         key: 'theirs',
@@ -405,7 +409,7 @@ export function QuotesPage() {
         width: 180,
         render: (q) => (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            {statusLabel(q)}
+            <OutcomeBadge quote={q} now={now} />
             {q.lostReason && <TmsBadge tone="gray">{LOST_REASON_LABEL[q.lostReason]}</TmsBadge>}
           </span>
         ),
@@ -527,17 +531,26 @@ export function QuotesPage() {
     />
   )
 
-  const chips = tab === 'won-lost'
-    ? [
-      { key: 'month', label: 'Month is', value: monthLabel(month), onClick: () => setFiltersOpen(true) },
+  const filterable = tab === 'sent' || tab === 'replies' || tab === 'won-lost'
+  const chips = !filterable
+    ? []
+    : [
+      ...(tab === 'won-lost' ? [{ key: 'month', label: 'Month is', value: monthLabel(month), onClick: () => setFiltersOpen(true) }] : []),
       {
         key: 'outcome',
         label: 'Outcome is',
-        value: lostFacet ? (LOST_REASON_LABEL[lostFacet as keyof typeof LOST_REASON_LABEL] ?? lostFacet) : null,
+        value: outcomeFacet ? OUTCOME_LABEL[outcomeFacet as keyof typeof OUTCOME_LABEL] : null,
         onClick: () => setFiltersOpen(true),
       },
+      ...(tab === 'won-lost'
+        ? [{
+          key: 'reason',
+          label: 'Lost reason is',
+          value: lostFacet ? (LOST_REASON_LABEL[lostFacet as keyof typeof LOST_REASON_LABEL] ?? lostFacet) : null,
+          onClick: () => setFiltersOpen(true),
+        }]
+        : []),
     ]
-    : []
 
   return (
     <>
@@ -547,7 +560,7 @@ export function QuotesPage() {
         search={{ value: query, onChange: setQuery, placeholder: 'Search quotes, customers, lanes' }}
         onRefresh={() => void refreshAll()}
         filterChips={chips}
-        onAddFilter={tab === 'won-lost' ? () => setFiltersOpen(true) : undefined}
+        onAddFilter={filterable ? () => setFiltersOpen(true) : undefined}
         quickTabs={{
           tabs: QUOTE_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] })),
           active: tab,
@@ -562,36 +575,49 @@ export function QuotesPage() {
           worklist.error
             ?? (tab === 'won-lost' && monthLoading ? `Reading ${monthLabel(month)}…` : EMPTY_TEXT[tab])
         }
-        onClearFilters={() => { setQuery(''); setLostFacet('') }}
+        onClearFilters={() => { setQuery(''); setLostFacet(''); setOutcomeFacet('') }}
       />
 
       <TmsDialog
         open={filtersOpen}
         onOpenChange={setFiltersOpen}
-        title="Filter closed quotes"
+        title="Filter quotes"
         footer={<TmsButton variant="primary" onClick={() => setFiltersOpen(false)}>Done</TmsButton>}
       >
         <div style={{ display: 'grid', gap: 14 }}>
-          <TmsField label="Month">
-            <TmsSelect
-              aria-label="Quote month"
-              value={month}
-              onChange={(e) => { setMonthLoading(true); setMonth(e.target.value) }}
-              options={months.map((ym) => ({ value: ym, label: monthLabel(ym) }))}
-            />
-          </TmsField>
+          {tab === 'won-lost' && (
+            <TmsField label="Month">
+              <TmsSelect
+                aria-label="Quote month"
+                value={month}
+                onChange={(e) => { setMonthLoading(true); setMonth(e.target.value) }}
+                options={months.map((ym) => ({ value: ym, label: monthLabel(ym) }))}
+              />
+            </TmsField>
+          )}
           <TmsField label="Outcome">
             <TmsSelect
-              aria-label="Lost reason"
-              value={lostFacet}
-              onChange={(e) => setLostFacet(e.target.value)}
+              aria-label="Outcome"
+              value={outcomeFacet}
+              onChange={(e) => setOutcomeFacet(e.target.value)}
               placeholder="Every outcome"
-              options={lostFacets.map((reason) => ({
-                value: reason,
-                label: LOST_REASON_LABEL[reason as keyof typeof LOST_REASON_LABEL] ?? reason,
-              }))}
+              options={OUTCOMES.map((value) => ({ value, label: OUTCOME_LABEL[value] }))}
             />
           </TmsField>
+          {tab === 'won-lost' && (
+            <TmsField label="Lost reason">
+              <TmsSelect
+                aria-label="Lost reason"
+                value={lostFacet}
+                onChange={(e) => setLostFacet(e.target.value)}
+                placeholder="Every reason"
+                options={lostFacets.map((reason) => ({
+                  value: reason,
+                  label: LOST_REASON_LABEL[reason as keyof typeof LOST_REASON_LABEL] ?? reason,
+                }))}
+              />
+            </TmsField>
+          )}
         </div>
       </TmsDialog>
 

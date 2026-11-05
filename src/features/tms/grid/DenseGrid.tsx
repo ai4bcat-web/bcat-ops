@@ -44,6 +44,8 @@ import './dense-grid.css'
 const OVERSCAN = 8
 /** Used until the scroll container has been measured (and under jsdom, which never measures). */
 const FALLBACK_VIEWPORT = 720
+/** Matches `.tms-dg-popover` width in dense-grid.css. */
+const POPOVER_WIDTH = 280
 
 export interface DenseGridProps<T> {
   /** The visible columns, in order. */
@@ -141,7 +143,7 @@ export function DenseGrid<T>({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [topRow, setTopRow] = useState(0)
   const [viewport, setViewport] = useState(FALLBACK_VIEWPORT)
-  const [openFilter, setOpenFilter] = useState<{ key: string; top: number; left: number } | null>(null)
+  const [openFilter, setOpenFilter] = useState<{ key: string; top?: number; bottom?: number; left: number; maxHeight: number } | null>(null)
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [dropKey, setDropKey] = useState<string | null>(null)
   const [liveWidths, setLiveWidths] = useState<Record<string, number>>({})
@@ -175,10 +177,17 @@ export function DenseGrid<T>({
     if (scrollRef.current) scrollRef.current.scrollTop = 0
   }, [resetKey])
 
+  const lastLeft = useRef(0)
   const onScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const next = Math.floor(e.currentTarget.scrollTop / rowHeight)
       setTopRow((prev) => (prev === next ? prev : next))
+      // The popover is anchored to its header cell: when the columns slide under it, close it.
+      const left = e.currentTarget.scrollLeft
+      if (left !== lastLeft.current) {
+        lastLeft.current = left
+        setOpenFilter(null)
+      }
     },
     [rowHeight],
   )
@@ -194,11 +203,14 @@ export function DenseGrid<T>({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpenFilter(null)
     }
+    const onResize = () => setOpenFilter(null)
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onResize)
     return () => {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onResize)
     }
   }, [openFilter])
 
@@ -248,8 +260,16 @@ export function DenseGrid<T>({
       return
     }
     const rect = button.getBoundingClientRect()
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - 300))
-    setOpenFilter({ key, top: rect.bottom + 4, left })
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - 8))
+    const below = window.innerHeight - rect.bottom - 12
+    const above = rect.top - 12
+    // Open downwards unless there is clearly more room above (a short window or a low header).
+    const up = below < 220 && above > below
+    setOpenFilter(
+      up
+        ? { key, bottom: window.innerHeight - rect.top + 4, maxHeight: above, left }
+        : { key, top: rect.bottom + 4, maxHeight: below, left },
+    )
   }
 
   const openColumn = openFilter ? columns.find((c) => c.key === openFilter.key) : undefined
@@ -435,7 +455,12 @@ export function DenseGrid<T>({
       </div>
 
       {openColumn && openFilter && (
-        <div className="tms-dg-popover" style={{ top: openFilter.top, left: openFilter.left }} role="dialog" aria-label={`${openColumn.header} filter`}>
+        <div
+          className="tms-dg-popover"
+          style={{ top: openFilter.top, bottom: openFilter.bottom, left: openFilter.left, maxHeight: Math.max(160, openFilter.maxHeight) }}
+          role="dialog"
+          aria-label={`${openColumn.header} filter`}
+        >
           <DenseFilterPopover
             column={openColumn}
             rows={fit}

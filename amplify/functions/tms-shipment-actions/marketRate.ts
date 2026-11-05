@@ -57,7 +57,6 @@ export interface MarketRateResult {
   answer: RateViewAnswer
   targetBps: number
   floorBps: number
-  autoReply: boolean
   suggestedSellCents: number
   marginAtSuggested: number
   belowFloor: boolean
@@ -155,13 +154,11 @@ export async function priceFromMarket(deps: MarketRateDeps, input: Row, caller: 
   const marginAtSuggested = marginBpsOf(suggestedSellCents, answer.averageCents)
   const floorSellCents = sellRateFromMarket(answer.averageCents, margin.floorBps)
   const belowFloor = marginAtSuggested < margin.floorBps
-  const autoReply = margin.autoReply && !belowFloor
 
   const result: MarketRateResult = {
     answer,
     targetBps: margin.targetBps,
     floorBps: margin.floorBps,
-    autoReply,
     suggestedSellCents,
     marginAtSuggested,
     belowFloor,

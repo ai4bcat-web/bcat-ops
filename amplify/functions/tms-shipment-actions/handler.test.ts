@@ -5872,6 +5872,18 @@ describe('quote rungs that close and reopen', () => {
     expect(row.linkToken).toBeUndefined()
   })
 
+  it('marks a quote won by hand: closed and stamped, link dead, second close refused', async () => {
+    const quote = await sentQuote()
+    await call('MARK_QUOTE_WON', { quoteId: quote.id, note: 'Booked by phone' }, QUOTER)
+
+    const row = quoteRow(String(quote.id))
+    expect(row).toMatchObject({ status: 'WON', lostReason: null, lostNote: 'Booked by phone' })
+    expect(row.wonAt).toBe(row.closedAt)
+    expect(row.quoteOpen).toBeUndefined()
+    expect(row.linkToken).toBeUndefined()
+    await expect(call('MARK_QUOTE_WON', { quoteId: quote.id }, QUOTER)).rejects.toThrow(/already WON/)
+  })
+
   it('restores a lost quote to QUOTED without resurrecting its link', async () => {
     const quote = await sentQuote()
     const token = quoteRow(String(quote.id)).linkToken

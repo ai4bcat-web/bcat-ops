@@ -1,15 +1,17 @@
 /**
  * The body of one column's header filter. The kind comes from the column: a type-ahead for
- * text, a multi-select for facets (the R2 tag picker once the list is long), a from/to date
- * range, a min/max number range. Every edit applies at once; Clear drops just this column.
+ * text, a multi-select checklist for facets (searchable once long, with Select all), a from/to
+ * date range, a min/max number range. Every edit applies at once; Clear drops just this column.
  */
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { BoardCheckbox } from '@/features/shipments/board/parts'
-import { BoardTagPicker } from '@/features/shipments/board/BoardTagPicker'
-import { facetOptions, filterKindOf, type DenseColumn, type DenseColumnFilter } from './denseGridModel'
+import { pushRecent, readRecent } from '@/features/shipments/board/detailSearch'
+import { facetOptions, filterKindOf, type DenseColumn, type DenseColumnFilter, type DenseFacet } from './denseGridModel'
 
-/** At or under this many options the multi-select lists them all; above it, it is the type-ahead tag picker. */
-const CHECKLIST_MAX = 12
+/** Above this many options the checklist gets a search box. */
+const SEARCH_MIN = 8
+/** The checklist draws at most this many rows; the search box narrows the rest. */
+const LIST_MAX = 200
 
 export interface DenseFilterPopoverProps<T> {
   column: DenseColumn<T>
@@ -17,8 +19,99 @@ export interface DenseFilterPopoverProps<T> {
   rows: readonly T[]
   value: DenseColumnFilter | undefined
   onChange: (next: DenseColumnFilter | null) => void
-  /** Namespaces the tag picker's recently-used values. */
+  /** Namespaces the multi-select's recently-used values. */
   recentKey: string
+}
+
+function MultiSelect<T>({
+  column,
+  facets,
+  current,
+  onChange,
+  recentKey,
+}: {
+  column: DenseColumn<T>
+  facets: DenseFacet[]
+  current: DenseColumnFilter
+  onChange: (next: DenseColumnFilter | null) => void
+  recentKey: string
+}) {
+  const [query, setQuery] = useState('')
+  const facet = `dg-${column.key}`
+  const selected = current.values ?? []
+  const recents = useMemo(() => readRecent(recentKey, facet), [recentKey, facet])
+  const matches = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (needle) return facets.filter((f) => f.label.toLowerCase().includes(needle))
+    // Recently picked values float to the top; the rest keep the facet order.
+    const rank = (value: string) => {
+      const i = recents.indexOf(value)
+      return i < 0 ? recents.length : i
+    }
+    return [...facets].sort((a, b) => rank(a.value) - rank(b.value))
+  }, [facets, query, recents])
+  const visible = matches.slice(0, LIST_MAX)
+  const setValues = (values: string[]) => onChange({ values, exclude: current.exclude })
+
+  return (
+    <>
+      {facets.length > SEARCH_MIN && (
+        <input
+          type="text"
+          className="tms-input tms-dg-filter-input"
+          autoFocus
+          placeholder={`Search ${column.header}…`}
+          aria-label={`Search ${column.header} options`}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      )}
+      <div className="tms-dg-filter-actions">
+        <button
+          type="button"
+          className="tms-dg-filter-clear"
+          aria-label={`Select all ${column.header}`}
+          disabled={matches.length === 0}
+          onClick={() => setValues([...new Set([...selected, ...matches.map((f) => f.value)])])}
+        >
+          {query.trim() ? `Select all ${matches.length} shown` : 'Select all'}
+        </button>
+        <BoardCheckbox
+          label="Exclude"
+          className={selected.length === 0 ? 'opacity-50' : ''}
+          checked={current.exclude ?? false}
+          onChange={(exclude) => onChange({ values: selected, exclude })}
+        />
+      </div>
+      <div className="tms-dg-filter-list">
+        {visible.map((f) => (
+          <BoardCheckbox
+            key={f.value}
+            label={
+              <>
+                {f.label}
+                <span className="tms-dg-filter-count">{f.count}</span>
+              </>
+            }
+            aria-label={`${column.header}: ${f.label}`}
+            checked={selected.includes(f.value)}
+            onChange={(checked) => {
+              const set = new Set(selected)
+              if (checked) {
+                set.add(f.value)
+                pushRecent(recentKey, facet, f.value)
+              } else set.delete(f.value)
+              setValues([...set])
+            }}
+          />
+        ))}
+        {matches.length === 0 && <span className="tms-dg-filter-count">No match</span>}
+        {matches.length > visible.length && (
+          <span className="tms-dg-filter-count">{matches.length - visible.length} more: type to narrow</span>
+        )}
+      </div>
+    </>
+  )
 }
 
 export function DenseFilterPopover<T>({ column, rows, value, onChange, recentKey }: DenseFilterPopoverProps<T>) {
@@ -40,47 +133,8 @@ export function DenseFilterPopover<T>({ column, rows, value, onChange, recentKey
         />
       )}
 
-      {kind === 'multi' && facets.length <= CHECKLIST_MAX && (
-        <div className="tms-dg-filter-list">
-          {facets.map((f) => (
-            <BoardCheckbox
-              key={f.value}
-              label={
-                <>
-                  {f.label}
-                  <span className="tms-dg-filter-count">{f.count}</span>
-                </>
-              }
-              aria-label={`${column.header}: ${f.label}`}
-              checked={(current.values ?? []).includes(f.value)}
-              onChange={(checked) => {
-                const set = new Set(current.values ?? [])
-                if (checked) set.add(f.value)
-                else set.delete(f.value)
-                onChange({ values: [...set], exclude: current.exclude })
-              }}
-            />
-          ))}
-          <BoardCheckbox
-            label="Exclude"
-            className={(current.values ?? []).length === 0 ? 'opacity-50' : ''}
-            checked={current.exclude ?? false}
-            onChange={(exclude) => onChange({ values: current.values ?? [], exclude })}
-          />
-        </div>
-      )}
-
-      {kind === 'multi' && facets.length > CHECKLIST_MAX && (
-        <BoardTagPicker
-          facet={`dg-${column.key}`}
-          label={column.header}
-          options={facets}
-          values={current.values ?? []}
-          exclude={current.exclude ?? false}
-          onChange={(values) => onChange({ values, exclude: current.exclude })}
-          onExcludeChange={(exclude) => onChange({ values: current.values ?? [], exclude })}
-          recentStorageKey={recentKey}
-        />
+      {kind === 'multi' && (
+        <MultiSelect column={column} facets={facets} current={current} onChange={onChange} recentKey={recentKey} />
       )}
 
       {kind === 'date' && (

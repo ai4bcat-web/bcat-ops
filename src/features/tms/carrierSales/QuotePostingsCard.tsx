@@ -7,12 +7,24 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsBadge, TmsButton } from '@/features/tms/kit'
-import { graphqlErrorText, listActivePostings, unpostQuoteLoad } from '@/lib/apiClient'
+import { OutcomeBadge } from '@/features/quotes/components/OutcomeBadge'
+import { getQuote, graphqlErrorText, listActivePostings, unpostQuoteLoad } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
-import type { ShipmentPostingRecord } from '@/types/tms'
+import type { QuoteRecord, ShipmentPostingRecord } from '@/types/tms'
 
 const isQuoteSubject = (p: ShipmentPostingRecord): boolean => p.shipmentId.startsWith('quote:') || p.shipmentId.startsWith('spot:')
+
+/** The posted quote's outcome (Won / Lost / Expired / Pending), so a rep does not keep covering a load whose quote is gone. */
+function QuoteOutcome({ quoteId }: { quoteId: string }) {
+  const [quote, setQuote] = useState<QuoteRecord | null>(null)
+  useEffect(() => {
+    let live = true
+    getQuote(quoteId).then((q) => { if (live) setQuote(q) }).catch(() => { /* outcome is decoration; the posting stands on its own */ })
+    return () => { live = false }
+  }, [quoteId])
+  return quote ? <OutcomeBadge quote={quote} now={new Date().toISOString()} /> : null
+}
 
 export function QuotePostingsCard() {
   const [rows, setRows] = useState<ShipmentPostingRecord[]>([])
@@ -49,6 +61,7 @@ export function QuotePostingsCard() {
             <TmsBadge tone="green">{row.provider} · POSTED</TmsBadge>{' '}
             {row.mode === 'STUB' ? <TmsBadge tone="orange">STUB</TmsBadge> : null}{' '}
             {quote ? <Link to={`/tms/rates/${subject}`}>{subject}</Link> : <Link to="/tms/rates/spot">Spot request</Link>}
+            {quote ? <> <QuoteOutcome quoteId={subject} /></> : null}
             {' · '}{row.originCity ?? '—'}, {row.originState ?? ''} → {row.destinationCity ?? '—'}, {row.destinationState ?? ''}
             {row.equipmentType ? ` · ${row.equipmentType}` : ''}
             {row.rateCents != null ? ` · ${formatCents(row.rateCents)}` : ''}

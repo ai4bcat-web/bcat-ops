@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * The org page decides whether reps can auto-send at all and how long mail is kept, so a
+ * The org page decides whether the quoter runs and how long mail is kept, so a
  * save must carry exactly what was typed, a nonsense number must never reach the server,
  * and the Reps table must show states and counters only.
  */

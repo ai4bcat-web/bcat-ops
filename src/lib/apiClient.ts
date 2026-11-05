@@ -7843,6 +7843,15 @@ export async function markQuoteLost(input: {
   return shipmentAction<{ quote: QuoteRecord }>('MARK_QUOTE_LOST', input)
 }
 
+/** The rep's own word that the customer took a quote (no shipment yet; converting a quote is WON by itself). */
+export async function markQuoteWon(input: {
+  quoteId: string
+  expectedVersion?: number
+  note?: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('MARK_QUOTE_WON', input)
+}
+
 /** Back onto the board at QUOTED — without a link, which a lost round has already spent. */
 export async function restoreQuote(input: { quoteId: string; expectedVersion?: number }): Promise<{ quote: QuoteRecord }> {
   return shipmentAction<{ quote: QuoteRecord }>('RESTORE_QUOTE', input)
@@ -8099,7 +8108,6 @@ export interface MarketRateResult {
   answer: RateViewAnswer
   targetBps: number
   floorBps: number
-  autoReply: boolean
   suggestedSellCents: number
   belowFloor: boolean
   floorSellCents: number

@@ -18,20 +18,14 @@ import { getLaneIntelligence, graphqlErrorText, priceFromMarket } from '@/lib/ap
 import type { MarketRateResult } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { laneInputKey } from '@/lib/laneIntel'
-import type { LaneInput, LaneIntelligence, QuoteOutcome } from '@/lib/laneIntel'
+import type { LaneInput, LaneIntelligence } from '@/lib/laneIntel'
 import type { LaneMatchTier } from '@/lib/laneMatch'
+import { OUTCOME_TONE } from '../quoteViews'
 
 const money = (cents: number | null | undefined): string => (cents == null ? '—' : formatCents(cents))
 const percent = (rate: number | null): string => (rate == null ? '—' : `${Math.round(rate * 100)} %`)
 const bpsText = (bps: number | null): string => (bps == null ? '—' : `${(bps / 100).toFixed(1)} %`)
 const plural = (n: number, one: string): string => `${n} ${n === 1 ? one : `${one}s`}`
-
-const OUTCOME_TONE: Record<QuoteOutcome, 'green' | 'red' | 'orange' | 'gray'> = {
-  WON: 'green',
-  LOST: 'red',
-  EXPIRED: 'orange',
-  PENDING: 'gray',
-}
 
 const MATCH_LABEL: Record<LaneMatchTier, string> = { CITY: 'Exact lane', ZIP3: 'ZIP3 area', RADIUS: 'Nearby' }
 

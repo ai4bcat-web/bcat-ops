@@ -103,8 +103,13 @@ export interface TrackingColumnContext {
   prefsOf?: (row: ShipmentRow) => EffectiveTrackingPrefs
 }
 
+/**
+ * Visible out of the box: ten columns that fit a 1440px window without sideways scrolling at their
+ * header-measured widths (about 1250px with the actions column). Ping age, POD, Docs, Check calls,
+ * Carrier status and Tracker wait in the Columns dialog.
+ */
 export const TRACKING_DEFAULT_COLUMNS = [
-  'shipment', 'status', 'customer', 'lane', 'pickup', 'delivery', 'lastLocation', 'ping', 'eta', 'nextCheck', 'pod', 'checkCalls', 'docs', 'carrier', 'carrierAssignment', 'tracker',
+  'shipment', 'status', 'customer', 'lane', 'pickup', 'delivery', 'lastLocation', 'eta', 'nextCheck', 'carrier',
 ]
 
 const DOC_STATES = { REVIEW: 'To review', MISSING: 'Missing', OK: 'OK' } as const

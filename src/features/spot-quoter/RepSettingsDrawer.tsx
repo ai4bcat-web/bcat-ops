@@ -1,6 +1,6 @@
 /**
  * The rep's own Gmail settings, opened from the Spot inbox. Everything here is about the
- * signed-in rep's connection: pause, what to watch, the reply signature, the auto-send
+ * signed-in rep's connection: pause, what to watch, the reply signature,
  * what is
  * stored and who can see it, and how to disconnect.
  */
