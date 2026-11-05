@@ -19,13 +19,13 @@ import { useAppStore } from '@/store/useAppStore'
 import { DispatchDrawer } from '@/features/dispatch/DispatchDrawer'
 import { useShellBadgeCounts } from '@/features/tms/useShellBadgeCounts'
 
-/** The list pages that run edge to edge on an icon rail (Shipments Active / All / Intake, Load Tracking). */
-const DENSE_PATHS = new Set(['/tms/shipments', '/tms/shipments/intake', '/tms/tracking', '/tms/shipments/new'])
+/** The list pages that run edge to edge on an icon rail (Shipments Active / All / Intake, Load Tracking, Customers, Carriers). */
+const DENSE_PATHS = new Set(['/tms/shipments', '/tms/shipments/intake', '/tms/tracking', '/tms/shipments/new', '/tms/customers', '/tms/carriers'])
 
-/** Those pages plus the create / edit shipment form (`/tms/shipments/new`, `/tms/shipments/:id/edit`). */
+/** Those pages plus the create / edit shipment form and a carrier profile opened over the Carriers list (`/tms/carriers/:id`). */
 function isDensePath(pathname: string): boolean {
   const path = pathname.replace(/\/+$/, '')
-  return DENSE_PATHS.has(path) || /^\/tms\/shipments\/[^/]+\/edit$/.test(path)
+  return DENSE_PATHS.has(path) || /^\/tms\/shipments\/[^/]+\/edit$/.test(path) || /^\/tms\/carriers\/(?!find$)[^/]+$/.test(path)
 }
 
 function LegacyRuntime() {

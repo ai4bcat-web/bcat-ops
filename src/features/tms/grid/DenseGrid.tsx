@@ -261,6 +261,8 @@ export function DenseGrid<T>({
     }
     const rect = button.getBoundingClientRect()
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - 8))
+    // Sideways scroll is measured from where the popover opened, not from the last scroll event.
+    lastLeft.current = scrollRef.current?.scrollLeft ?? 0
     const below = window.innerHeight - rect.bottom - 12
     const above = rect.top - 12
     // Open downwards unless there is clearly more room above (a short window or a low header).

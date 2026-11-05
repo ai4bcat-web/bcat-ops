@@ -137,12 +137,12 @@ describe('TmsLayout', () => {
   })
 
   it('runs the list pages dense (icon rail, full bleed) and every other /tms page normally', () => {
-    for (const path of ['/tms/shipments', '/tms/shipments?list=all', '/tms/shipments/intake', '/tms/tracking', '/tms/shipments/new', '/tms/shipments/S-1/edit']) {
+    for (const path of ['/tms/shipments', '/tms/shipments?list=all', '/tms/shipments/intake', '/tms/tracking', '/tms/shipments/new', '/tms/shipments/S-1/edit', '/tms/customers', '/tms/carriers', '/tms/carriers/C-1']) {
       const view = renderAt(path)
       expect(shell.props?.dense, path).toBe(true)
       view.unmount()
     }
-    for (const path of ['/tms/dashboard', '/tms/shipments/S-1', '/tms/shipments/intake/abc', '/tms/tracking/links', '/trucks']) {
+    for (const path of ['/tms/dashboard', '/tms/shipments/S-1', '/tms/shipments/intake/abc', '/tms/tracking/links', '/trucks', '/tms/customers/follow-ups', '/tms/carriers/find']) {
       const view = renderAt(path)
       expect(shell.props?.dense, path).toBe(false)
       view.unmount()

@@ -206,10 +206,10 @@ describe('CarriersPage', () => {
   it('sorts on a header click: ascending, then descending', async () => {
     renderBoard()
     await waitFor(() => expect(names()).toEqual(['Charlie Freight', 'Golf Lines']))
-    fireEvent.click(screen.getByRole('button', { name: 'Loads' }))
-    expect(names()).toEqual(['Golf Lines', 'Charlie Freight'])
-    fireEvent.click(screen.getByRole('button', { name: 'Loads' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Risk' }))
     expect(names()).toEqual(['Charlie Freight', 'Golf Lines'])
+    fireEvent.click(screen.getByRole('button', { name: 'Risk' }))
+    expect(names()).toEqual(['Golf Lines', 'Charlie Freight'])
   })
 
   it('narrows by the risk score range in the header filter', async () => {
@@ -259,5 +259,19 @@ describe('CarriersPage', () => {
     expect(screen.queryByTestId('profile')).toBeNull()
     fireEvent.click(screen.getByText('Golf Lines'))
     expect(screen.getByTestId('profile').textContent).toBe('Golf Lines')
+  })
+
+  it('shows all three status tabs with their counts, zero included', async () => {
+    renderBoard()
+    await waitFor(() => expect(names()).toHaveLength(2))
+    fireEvent.click(tab('Pending/Review'))
+    expect(within(tab('Active')).getByText('2')).toBeTruthy()
+    expect(screen.getAllByRole('tab')).toHaveLength(3)
+  })
+
+  it('opens with the narrow default column set', async () => {
+    renderBoard()
+    await waitFor(() => expect(names()).toHaveLength(2))
+    expect(document.querySelectorAll('thead th').length).toBe(9)
   })
 })

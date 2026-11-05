@@ -366,7 +366,8 @@
 .tms-portal .tms-tracking-view { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; }
 .tms-portal .tms-tracking-drawer-body { display: flex; flex-direction: column; min-height: 100%; }
 /* One compact header row (title, Manage links, open, close) and a tight body so the whole view sits above the fold. */
-.tms-portal.tms-tracking-drawer .tms-drawer-head { padding: 8px 12px; }
+.tms-portal.tms-tracking-drawer .tms-drawer-head { padding: 6px 12px; gap: 8px; }
+.tms-portal.tms-tracking-drawer .tms-drawer-head .tms-icon-btn { width: 24px; height: 24px; min-width: 0; min-height: 0; }
 .tms-portal.tms-tracking-drawer .tms-drawer-title { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tms-portal.tms-tracking-drawer .tms-drawer-body { padding: 8px 12px; }
 .tms-portal .tms-tracking-drawer-body > .tms-tracking-view { flex: 1 1 auto; }

@@ -14,8 +14,7 @@ import type { CarrierRow } from './carrierViews'
 
 /** Visible out of the box; the rest wait in the Columns dialog. */
 export const CARRIER_DEFAULT_COLUMNS = [
-  'name', 'mcNumber', 'dotNumber', 'status', 'packet', 'riskScore', 'cargoExpiry', 'liabilityExpiry',
-  'authority', 'equipment', 'terms', 'factor', 'lastLoadAt', 'loadCount', 'email', 'phone', 'cityState',
+  'name', 'mcNumber', 'status', 'packet', 'riskScore', 'cargoExpiry', 'liabilityExpiry', 'authority', 'lastLoadAt',
 ]
 
 const lower = (s: string) => s.replace(/_/g, ' ').toLowerCase()

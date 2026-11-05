@@ -226,15 +226,17 @@ describe('DirectoryPages', () => {
     it('lists every active customer sorted by name, with the Customers columns', async () => {
       renderCustomers()
       await waitFor(() => expect(names()).toEqual(['Active Co', 'Alpha Active', 'Legacy Active', 'Pending Co', 'Zeta Active']))
-      for (const h of ['Customer', 'Status', 'Owner', 'Team', 'Last touch', 'Next step', 'Credit limit', 'Terms', 'Billing e-mails', 'Factored']) {
+      for (const h of ['Customer', 'Status', 'Owner', 'Last touch', 'Next step', 'Credit limit', 'Terms', 'Contact', 'City']) {
         expect(header(h)).toBeTruthy()
+      }
+      // The rest live in the Columns dialog so the default set fits a 1440px window.
+      for (const h of ['Team', 'Billing e-mails', 'Factored', 'E-mail', 'State']) {
+        expect(screen.queryByRole('columnheader', { name: new RegExp(`^${h}`) })).toBeNull()
       }
       expect(header('Customer').className).toContain('tms-dg-sticky')
       const zeta = screen.getByText('Zeta Active').closest('tr') as HTMLElement
       expect(zeta.textContent).toContain('$5,000')
       expect(zeta.textContent).toContain('Net 30')
-      expect(zeta.textContent).toContain('Desk One')
-      expect(within(zeta).getAllByRole('cell').map((c) => c.textContent)).toContain('2') // two billing e-mails
     })
 
     it('a header type-ahead filter narrows the rows', async () => {
@@ -246,6 +248,7 @@ describe('DirectoryPages', () => {
     })
 
     it('a numeric range on credit limit and a multi-select on Factored narrow the rows', async () => {
+      localStorage.setItem('tms:grid:customers:admin@bcatcorp.com:v1', JSON.stringify({ columns: ['name', 'credit', 'factored', 'team', 'billingEmails'] }))
       renderCustomers()
       await screen.findByText('Zeta Active')
       fireEvent.click(screen.getByRole('button', { name: 'Filter Credit limit' }))
@@ -260,6 +263,9 @@ describe('DirectoryPages', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Filter Factored' }))
       fireEvent.click(screen.getByRole('checkbox', { name: 'Factored: Yes' }))
       await waitFor(() => expect(names()).toEqual(['Zeta Active']))
+      const zeta = screen.getByText('Zeta Active').closest('tr') as HTMLElement
+      expect(zeta.textContent).toContain('Desk One')
+      expect(within(zeta).getAllByRole('cell').map((c) => c.textContent)).toContain('2') // two billing e-mails
     })
 
     it('clicking a header sorts ascending, then descending, and the order persists for that user only', async () => {

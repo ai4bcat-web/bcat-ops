@@ -320,12 +320,19 @@ async function checkPopovers(b, board, labels) {
     await b.press('Escape'); await settle(b, 250)
     if (await b.evaluate(`!!document.querySelector('.tms-dg-popover')`)) issues.push(`${label}: stays open after Escape`)
   }
-  // scrolling the grid closes (not strands) an open popover
-  const label = tail[tail.length - 1]
-  await openFilter(b, label)
-  await b.evaluate(`(() => { const s = document.querySelector('.tms-dg-scroll'); s.scrollLeft = 0; s.dispatchEvent(new Event('scroll')) })()`)
-  await settle(b, 300)
-  if (await b.evaluate(`!!document.querySelector('.tms-dg-popover')`)) issues.push('popover stays open (detached from its header) when the grid scrolls sideways')
+  // a real sideways wheel scroll (CDP mouseWheel deltaX) closes, not strands, an open popover; boards with no overflow have nothing to scroll
+  const overflow = await b.evaluate(`(() => { const s = document.querySelector('.tms-dg-scroll'); return s.scrollWidth > s.clientWidth + 1 })()`)
+  if (overflow) {
+    const label = tail[tail.length - 1]
+    await b.evaluate(`(() => { const s = document.querySelector('.tms-dg-scroll'); s.scrollLeft = 0 })()`)
+    await settle(b, 400)
+    await openFilter(b, label)
+    const at = await b.evaluate(`(() => { const r = document.querySelector('.tms-dg-scroll').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } })()`)
+    await b.command('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.x, y: at.y, deltaX: 300, deltaY: 0 })
+    await b.poll(() => b.evaluate(`document.querySelector('.tms-dg-scroll').scrollLeft > 0`), 'sideways wheel scroll', 5000).catch(() => issues.push('wheel did not scroll the grid sideways'))
+    await settle(b, 400)
+    if (await b.evaluate(`!!document.querySelector('.tms-dg-popover')`)) issues.push('popover stays open (detached from its header) after a real sideways scroll')
+  }
   await closePopover(b)
   const pageAfter = await b.evaluate(`({ y: scrollY, h: document.documentElement.scrollHeight })`)
   if (pageAfter.h > pageAfter.y + pageBefore.vh + 2 && pageAfter.h > pageBefore.h) issues.push('page grew while a popover was open')

@@ -96,9 +96,10 @@ const billingEmailCount = (c: CustomerRecord) => (c.billingEmail ?? '').split(/[
 const yesNo = (v: boolean | null | undefined) => (v === true ? 'Yes' : 'No')
 const opt = (v: string | null | undefined) => (v ? [{ value: v, label: v }] : [])
 
-const DEFAULT_COLUMNS = ['name', 'status', 'owner', 'team', 'lastTouch', 'nextStep', 'credit', 'terms', 'billingEmails', 'factored', 'contact', 'email', 'city', 'state']
+const DEFAULT_COLUMNS = ['name', 'status', 'owner', 'lastTouch', 'nextStep', 'credit', 'terms', 'contact', 'city']
 const ALL_COLUMN_KEYS = [
   ...DEFAULT_COLUMNS,
+  'team', 'billingEmails', 'factored', 'email', 'state',
   'division', 'stage', 'nextDue', 'openTasks', 'phone', 'mc', 'dot', 'archived', 'aljexCode', 'industry', 'leadSource', 'created',
 ]
 const ACTIONS_KEY = 'actions'

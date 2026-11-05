@@ -125,7 +125,7 @@ async function inventory() {
 
   // Rule (g): no manual add-carrier entry point outside the admin-only data fix.
   const carriersPage = await readFile('src/features/carriers/CarriersPage.tsx', 'utf8').catch(() => '')
-  check(/isAdmin \? \{ label: 'Carrier \(admin data fix\)'/.test(carriersPage), 'Carriers page: manual add is admin-only')
+  check(/isAdmin \? <TmsButton[\s\S]*?>Carrier \(admin data fix\)/.test(carriersPage), 'Carriers page: manual add is admin-only')
   const find = await readFile('src/features/carriers/find/FindInvitePage.tsx', 'utf8').catch(() => '')
   check(!/mcpAddCarrier|mcp-add-carrier/.test(find), 'Find & Invite: no "Add to carriers"')
 
