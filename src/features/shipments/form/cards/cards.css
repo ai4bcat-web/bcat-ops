@@ -3,7 +3,7 @@
  * Grids size to content (no empty halves) and never force horizontal scroll.
  */
 
-.tms-shell .tms-card-body-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.tms-shell .tms-card-body-stack { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .tms-shell .tms-card-spacer { flex: 1 1 auto; }
 
 .tms-shell .tms-card-grid {

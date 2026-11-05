@@ -1038,6 +1038,7 @@ const RUNNERS = {
     if (!(await has(b, tid('f-route-undo')))) bad.push('no Undo after deleting a stop')
     await click(b, 'f-route-undoButton'); await pause(250)
     if ((await stops()).join() !== 'pickup,pickup,delivery' || (await valOf(b, 'f-stop-1-refNo')) !== 'AAA') bad.push('Undo did not put the stop back where it was')
+    await pickFrom(b, tid('f-stop-1-name'), tid('f-stop-1-name-option'), ctx.locNames.pick2)
     // lane header: origin → destination, miles inputs, transit estimate
     await pickFrom(b, tid('f-pickup-name'), tid('f-pickup-name-option'), ctx.locNames.shipper)
     await pickFrom(b, tid('f-consignee-name'), tid('f-consignee-name-option'), ctx.locNames.receiver)
@@ -1189,6 +1190,7 @@ const RUNNERS = {
     const rail = await textOf(b, 'rail-customer')
     if (!(rail ?? '').includes('ZZ AH Customer')) bad.push(`the rail customer line reads ${JSON.stringify(rail)}`)
     await shotAR(b, 'intake-prefill-1440')
+    await b.navigate('/tms/shipments') // leave: a later form open must not replay this intake via history state
     failures(bad)
     return `Intake board row → Create shipment opens the new layout pre-filled (${chips} "from e-mail" chips, rate, lane, rail summary)`
   },

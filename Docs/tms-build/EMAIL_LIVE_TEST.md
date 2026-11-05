@@ -394,3 +394,55 @@ PASS  temp admin identity deleted
 - Read back through the API afterwards (separate script; the harness's own read-back crashed on a GraphQL variable type and an audit scan limit, both fixed in `devVerifyAS.mjs`, not re-run because a second invitation is not allowed): carrier row stamped (mcpInvitedAt set, mcpInvitedTo only ai4bcat, mcpStatus INVITED); audit `MCP_SEND_INVITE` on the carrier with emails only ai4bcat; one thread note "MyCarrierPackets packet invitation" to ai4bcat only.
 - Result: PASSED for the invitation and its three logs, as read back by hand. The harness's own AS04 read-back step has not run to green, so this is not recorded as ALL PASSED.
 - Default-list (all MCP addresses) sending is proven by unit tests only, not live, because MCP's list for this carrier is a real address.
+
+## Live run 2026-11-05T17:03:16.101Z — ALL PASSED
+
+Recipient: the single allow-listed mailbox only. Ids and statuses; no other addresses.
+
+```json
+{
+  "rateCon": {
+    "shipmentId": "shp-561a1dee-14dc-490e-8655-31d0b9e98ab6",
+    "loadCarrierId": "lcr-f6b70ae2-b1a9-4612-8a43-ea5c0f38a09e",
+    "messageRowId": "msg:shp-561a1dee-14dc-490e-8655-31d0b9e98ab6:664181ce-e9b4-40e8-ba1f-20691a6015be",
+    "status": "SENT",
+    "sesMessageId": "010001a1aca9be65-d05892de-6e45-4105-9df9-d8bbdd3a39a4-000000",
+    "storedMessageIdHeader": "<010001a1aca9be65-d05892de-6e45-4105-9df9-d8bbdd3a39a4-000000@email.amazonses.com>",
+    "threadKey": "tracking+shp-561a1dee-14dc-490e-8655-31d0b9e98ab6",
+    "error": null
+  },
+  "invoice": {
+    "shipmentId": "shp-7ed66449-afd6-4b87-b1d7-2774cef95e51",
+    "invoiceId": "20023",
+    "noticeId": "inv:20023:1",
+    "status": "SENT",
+    "sesMessageId": "010001a1acaa1d22-2346e608-3c27-486a-a7d8-5a8c8bf830f7-000000",
+    "error": null
+  },
+  "reply": {
+    "intakeStatus": 200,
+    "routedShipmentMatches": true,
+    "inboundRowId": "msg:shp-561a1dee-14dc-490e-8655-31d0b9e98ab6:61d3a972-29f0-425e-a37b-8954b5c0e028",
+    "inboundThreadKey": "tracking+shp-561a1dee-14dc-490e-8655-31d0b9e98ab6",
+    "strippedAliasStatus": 200
+  }
+}
+```
+
+```
+PASS  fixture customer created — 1793898161108-dxojdczef
+PASS  SEND_RATE_CON returned SENT — loadCarrier lcr-f6b70ae2-b1a9-4612-8a43-ea5c0f38a09e
+PASS  rate con SENT through SES — SES MessageId 010001a1aca9be65-d05892de-6e45-4105-9df9-d8bbdd3a39a4-000000
+PASS  every rate con recipient is inside the allow-listed mailbox — to 1, cc 2
+PASS  stored Message-ID header and per-load thread key — <010001a1aca9be65-d05892de-6e45-4105-9df9-d8bbdd3a39a4-000000@email.amazonses.com> · tracking+shp-561a1dee-14dc-490e-8655-31d0b9e98ab6
+PASS  reply routed by the plus address to the right shipment — HTTP 200
+PASS  inbound reply landed on the same per-load thread key — tracking+shp-561a1dee-14dc-490e-8655-31d0b9e98ab6
+PASS  reply with the plus alias stripped threads by In-Reply-To — HTTP 200
+PASS  fixture invoice generated — 20023
+PASS  invoice SENT through SES — SES MessageId 010001a1acaa1d22-2346e608-3c27-486a-a7d8-5a8c8bf830f7-000000 · notice inv:20023:1
+PASS  every invoice recipient is inside the allow-listed mailbox — to 1, cc 0
+PASS  fixture carrier bill voided — cb:lcr-c99d5101-646c-444c-95e8-148a0a9c346a:1
+PASS  fixture shipment voided — shp-561a1dee-14dc-490e-8655-31d0b9e98ab6
+PASS  fixture shipment voided — shp-7ed66449-afd6-4b87-b1d7-2774cef95e51
+PASS  temp admin identity deleted
+```

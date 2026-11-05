@@ -105,8 +105,8 @@ export function CustomerCard({ values, update, ctx, form }: CardProps) {
             </div>
           )}
         </LField>
-        <LField def={LABEL.customer.refNo} error={err(LABEL.customer.refNo.testId)} hint={LABEL.customer.refNo.help}>
-          <TmsInput {...ctl(LABEL.customer.refNo)} value={value.refNo} disabled={refLocked.disabled} title={refLocked.title} onChange={(e) => onChange({ refNo: e.target.value })} />
+        <LField def={LABEL.customer.refNo} error={err(LABEL.customer.refNo.testId)}>
+          <TmsInput {...ctl(LABEL.customer.refNo)} title={refLocked.title ?? LABEL.customer.refNo.help} value={value.refNo} disabled={refLocked.disabled} onChange={(e) => onChange({ refNo: e.target.value })} />
         </LField>
       </div>
       {!nameLocked && !value.id && (

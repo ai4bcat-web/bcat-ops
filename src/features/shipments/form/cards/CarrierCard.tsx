@@ -3,7 +3,7 @@
  * Cartage division opens straight to the roster driver + truck picker (Step AQ: roster drivers
  * only, no free text).
  */
-import { memo } from 'react'
+import { memo, useEffect, useMemo } from 'react'
 import { isIvanCartageName } from '@/lib/ownFleetDrivers'
 import { CarrierInformationSection } from '../sections/CarrierInformationSection'
 import { sliceOf, type CardProps } from './cardRegistry'
@@ -12,7 +12,12 @@ function CarrierCardImpl({ values, update, ctx, form }: CardProps) {
   const code = values.ship.revSubdivision || values.ship.revDivision
   const division = ctx.divisions.find((d) => d.division.code === code)?.division
   const ivan = isIvanCartageName(division?.name ?? code)
-  return <CarrierInformationSection value={values.carrier} onChange={sliceOf(update, 'carrier')} ctx={ctx} form={form} expanded={ivan} />
+  const onChange = useMemo(() => sliceOf(update, 'carrier'), [update])
+  const v = values.carrier
+  const unset = !v.carrierId && !v.useTyped && !v.loadCarrierId && !v.isOwnFleet
+  // The Ivan Cartage division IS the own fleet: open straight to the roster driver + truck picker.
+  useEffect(() => { if (ivan && unset && !ctx.locked.fields.carrierPicker) onChange({ isOwnFleet: true }) }, [ivan, unset, onChange, ctx.locked.fields.carrierPicker])
+  return <CarrierInformationSection value={v} onChange={onChange} ctx={ctx} form={form} expanded={ivan} />
 }
 
 export const CarrierCard = memo(CarrierCardImpl)

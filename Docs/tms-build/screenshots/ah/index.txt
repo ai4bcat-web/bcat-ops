@@ -10,7 +10,6 @@ Docs/tms-build/screenshots/ah/04-06-card-rateHistory-L.png
 Docs/tms-build/screenshots/ah/04-07-card-carrier-L.png
 Docs/tms-build/screenshots/ah/04-08-card-tracking-L.png
 Docs/tms-build/screenshots/ah/04-09-card-documents-L.png
-Docs/tms-build/screenshots/ah/AH04-failure-L.png
 Docs/tms-build/screenshots/ah/06-issues-strip-L.png
 Docs/tms-build/screenshots/ah/07-resume-draft-banner-L.png
 Docs/tms-build/aljex-create/ar-create-brokered-1440.png
@@ -20,13 +19,12 @@ Docs/tms-build/screenshots/ah/09-after-create-edit-mode-L.png
 Docs/tms-build/screenshots/ah/11-edit-mode-reloaded-L.png
 Docs/tms-build/aljex-create/ar-edit-1440.png
 Docs/tms-build/aljex-create/ar-edit-1280.png
-Docs/tms-build/screenshots/ah/AH11-failure-L.png
 Docs/tms-build/screenshots/ah/13-edit-live-locked-fields-L.png
 Docs/tms-build/screenshots/ah/14-carrier-before-cover-L.png
 Docs/tms-build/screenshots/ah/14-cover-dialog-L.png
 Docs/tms-build/screenshots/ah2/15-required-style-L.png
 Docs/tms-build/screenshots/ah2/16-customer-bill-to-L.png
-Docs/tms-build/screenshots/ah/AH17-failure-L.png
+Docs/tms-build/screenshots/ah2/17-auto-miles-L.png
 Docs/tms-build/screenshots/ah2/18-tracking-card-L.png
 Docs/tms-build/screenshots/ah2/19-01-card-customer-L.png
 Docs/tms-build/screenshots/ah2/19-02-card-billTo-L.png
@@ -48,9 +46,8 @@ Docs/tms-build/screenshots/ah/AR06-failure-L.png
 Docs/tms-build/aljex-create/ar-first-screen-1440x900.png
 Docs/tms-build/aljex-create/ar-first-screen-1280x800.png
 Docs/tms-build/screenshots/ah/AR07-failure-L.png
-Docs/tms-build/screenshots/ah/AR08-failure-L.png
+Docs/tms-build/aljex-create/ar-intake-prefill-1440.png
 Docs/tms-build/aljex-create/ar-create-empty-1440x900.png
 Docs/tms-build/aljex-create/ar-create-empty-1280x800.png
-Docs/tms-build/aljex-create/ar-documents-create-1440.png
-Docs/tms-build/aljex-create/ar-rate-history-1440.png
-Docs/tms-build/aljex-create/ar-bill-to-1440.png
+Docs/tms-build/screenshots/ah/AR10-failure-L.png
+Docs/tms-build/screenshots/ah/AR11-failure-L.png
