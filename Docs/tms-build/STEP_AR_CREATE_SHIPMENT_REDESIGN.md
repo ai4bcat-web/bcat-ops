@@ -471,3 +471,16 @@ opens the existing Customer create dialog prefilled with the name and selects th
 save (same pattern as the inline location add in feedback 14). The `useTyped` / `typedName` path
 stays only for Intake-extracted rows that have not been matched yet, shown there as a "Customer
 not matched" chip, never as a checkbox on the form.
+
+## Ryne's feedback 18 (2026-11-05 evening)
+"Let's move the rate history to display on the right side where the summary is."
+The **Rate history** card leaves the main column and becomes a block in the **summary rail**,
+placed directly under the money block (Customer / Carrier / Net / Profit) and above Activity.
+Rail order: Summary header · Money · **Rate history** · Required · Activity · Roles · actions.
+Compact form for the 360 px rail: lane line (origin → destination · equipment); "We ran it"
+as a 5-row mini table (date · customer rate · carrier rate · margin %, hover = PRO + customer)
+with a 30 / 90 / 1y average line under it; "DAT RateView" as one line each for spot and contract
+(low · avg · high) or the `DAT not connected` badge; the AE suggested rate as the last line with a
+"Use" link that fills the customer LH rate. "All lane history" link at the foot. Collapsible with
+the state remembered per user like the cards. Main column order becomes: Freight, Route, Rates,
+Carrier & Tracking, More strip, Documents.
