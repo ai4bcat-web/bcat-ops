@@ -2,6 +2,8 @@ export interface TmsTab {
   key: string
   label: string
   count?: number
+  testId?: string
+  countTestId?: string
 }
 
 export interface TmsTabsProps {

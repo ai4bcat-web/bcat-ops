@@ -48,6 +48,7 @@ export function TmsSegmentedTabs({ tabs, active, onSelect, size = 'md', 'aria-la
             }}
             type="button"
             role="tab"
+            data-testid={tab.testId}
             aria-selected={selected}
             tabIndex={selected || (!hasActive && index === 0) ? 0 : -1}
             className={`tms-seg-item${selected ? ' tms-active' : ''}`}
@@ -55,7 +56,7 @@ export function TmsSegmentedTabs({ tabs, active, onSelect, size = 'md', 'aria-la
             onKeyDown={(event) => onKeyDown(event, index)}
           >
             {tab.label}
-            {tab.count === undefined ? null : <span className="tms-seg-count">{tab.count}</span>}
+            {tab.count === undefined ? null : <span className="tms-seg-count" data-testid={tab.countTestId}>{tab.count}</span>}
           </button>
         )
       })}

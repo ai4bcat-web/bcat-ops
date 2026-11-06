@@ -113,6 +113,27 @@ try {
     await b.navigate('/tms/customers/follow-ups'); await pause(3500)
     const cu = await b.evaluate(`({ path: location.pathname, followRows: [...document.querySelectorAll('.tms-nav-row')].filter((e) => /Follow-?ups?/i.test(e.textContent)).length, lit: [...document.querySelectorAll('.tms-nav-row.tms-active')].map((e) => e.textContent.trim()) })`)
     line(cu.path === '/tms/customers' && cu.followRows === 0, 'AV12 Customers no Follow-ups', `/tms/customers/follow-ups -> ${cu.path}; Follow-ups sidebar rows ${cu.followRows}; lit ${JSON.stringify(cu.lit)}`)
+    // feedback 3: Intake opens on All loads; By rev division / By customer split the same rows; URL-backed (read-only)
+    await b.navigate('/tms/shipments/intake'); await pause(4500)
+    const intakeState = () => b.evaluate(`(() => {
+      const sel = (id) => document.querySelector('[data-testid="' + id + '"]')?.getAttribute('aria-selected')
+      const counts = [...document.querySelectorAll('[data-testid^="intake-group-count-"]')].map((e) => [e.getAttribute('data-testid').slice(19), Number(e.textContent.trim())])
+      return { all: sel('intake-view-all'), division: sel('intake-view-division'), customer: sel('intake-view-customer'), counts, search: location.search }
+    })()`)
+    const iv0 = await intakeState()
+    await b.evaluate(`document.querySelector('[data-testid="intake-view-division"]')?.click()`); await pause(1200)
+    const ivD = await intakeState()
+    await b.evaluate(`document.querySelector('[data-testid="intake-view-customer"]')?.click()`); await pause(1200)
+    const ivC = await intakeState()
+    const sumOf = (st) => st.counts.filter(([id]) => id !== 'all').reduce((n, [, c]) => n + c, 0)
+    const allOf = (st) => st.counts.find(([id]) => id === 'all')?.[1]
+    await b.navigate('/tms/shipments/intake?view=customer'); await pause(4500)
+    const ivR = await intakeState()
+    line(
+      iv0.all === 'true' && iv0.search === '' && ivD.division === 'true' && /view=division/.test(ivD.search) && sumOf(ivD) === allOf(ivD) && ivC.customer === 'true' && /view=customer/.test(ivC.search) && sumOf(ivC) === allOf(ivC) && ivR.customer === 'true' && ivR.search === '?view=customer',
+      'AV13 Intake All loads / by division / by customer',
+      `default All selected ${iv0.all}, url "${iv0.search}"; division sub-tab counts sum ${sumOf(ivD)} vs All ${allOf(ivD)}, url ${ivD.search}; customer sum ${sumOf(ivC)} vs All ${allOf(ivC)}, url ${ivC.search}; reload ${ivR.search} keeps customer ${ivR.customer}`,
+    )
     // sidebar
     await b.navigate('/tms/dashboard'); await pause(3000)
     const rail = await b.evaluate(`[...document.querySelectorAll('.tms-nav-rowwrap, .tms-section-head')].map((e) => e.textContent.trim().split('\\n')[0].slice(0, 40))`)

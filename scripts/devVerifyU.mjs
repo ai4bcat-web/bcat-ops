@@ -530,26 +530,26 @@ async function openInIdentity(ctx, storage, prefix, theme, fn) {
 async function intakeAreaFlow(b, ctx, theme, { viewer = false } = {}) {
   const id = viewer ? 'U05-intake-viewer' : 'U05-intake-area'
   await backendStep(ctx, `${id}-${theme}`, async () => {
-    await b.navigate('/tms/shipments/intake'); await waitLoaded(b)
-    const tabs = await b.evaluate(`[...document.querySelectorAll('.tms-main .tms-tabs [role="tab"]')].map((t) => t.textContent.trim())`)
+    await b.navigate('/tms/shipments/intake?view=division'); await waitLoaded(b)
+    const tabs = await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].map((t) => t.textContent.trim())`)
     const divisions = (await listAllRows(ctx.token, 'listOwnershipDivisions', 'code name active')).filter((d) => d.active)
     for (const d of divisions) if (!tabs.some((t) => t.startsWith(d.name))) throw new Error(`no tab for active division ${d.name}`)
     for (const d of (await listAllRows(ctx.token, 'listOwnershipDivisions', 'code name active')).filter((d) => !d.active)) {
       if (tabs.some((t) => t.startsWith(d.name))) throw new Error(`archived division ${d.name} has a tab`)
     }
     if (!tabs.some((t) => t.startsWith(`ZZ U ${ctx.ts}`))) throw new Error('no ZZ division tab')
-    await b.evaluate(`[...document.querySelectorAll('.tms-main .tms-tabs [role="tab"]')].find((t) => t.textContent.trim().startsWith(${JSON.stringify(`ZZ U ${ctx.ts}`)}))?.click()`)
+    await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].find((t) => t.textContent.trim().startsWith(${JSON.stringify(`ZZ U ${ctx.ts}`)}))?.click()`)
     await b.poll(async () => (await mainText(b)).includes(ctx.rows.m1.subject), 'M1 listed', 20_000)
     const text = await mainText(b)
     if (!text.includes(ctx.rows.m2.subject)) throw new Error('M2 is not listed under the ZZ tab')
     if (!/of \d+ required/.test(text)) throw new Error('no completeness text')
-    await b.evaluate(`[...document.querySelectorAll('.tms-main .tms-tabs [role="tab"]')].find((t) => /^Unrouted/.test(t.textContent.trim()))?.click()`)
+    await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].find((t) => /^Unassigned/.test(t.textContent.trim()))?.click()`)
     await b.poll(async () => (await mainText(b)).includes(ctx.rows.m3.subject), 'M3 under Unrouted', 20_000)
     if (!viewer) await snap(b, 'U08', 'intake-unrouted', theme)
     const open = (await intakeRows(ctx.token)).filter((r) => r.status === 'OPEN').length
     const badge = await b.evaluate(`(() => { const el = document.querySelector('[data-testid="lifecycle-badge-build"]'); const m = el && /(\\d+)\\s*$/.exec(el.textContent.trim()); return m ? Number(m[1]) : 0 })()`)
     if (badge !== open) throw new Error(`Build lifecycle tab Intake badge ${badge}, open intake count ${open}`)
-    await b.evaluate(`[...document.querySelectorAll('.tms-main .tms-tabs [role="tab"]')].find((t) => t.textContent.trim().startsWith(${JSON.stringify(`ZZ U ${ctx.ts}`)}))?.click()`)
+    await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].find((t) => t.textContent.trim().startsWith(${JSON.stringify(`ZZ U ${ctx.ts}`)}))?.click()`)
     await pause(500)
     await snap(b, 'U07', 'intake-tabs', theme)
     return `${tabs.length} tabs; badge ${badge} = ${open} open`

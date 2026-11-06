@@ -1,12 +1,12 @@
 /**
  * Shipments › Intake: the tender e-mails that arrived at a division's intake address and became
- * partially built loads. One tab per active division (+ Unrouted), status chips, a table; a row
- * opens the review page.
+ * partially built loads. Opens on All loads; "By rev division" / "By customer" split the queue into sub-tabs
+ * (?view=&group=), status chips, a table; a row opens the review page.
  */
 import { BatchActionBar } from '../board/BatchActionBar'
 import { outcomesFromServer, selectAllUpToCap, toggleSelection, type BatchOutcome } from '../batchReview'
 import { batchShipmentTask } from '@/lib/apiClient'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Mail, Truck } from 'lucide-react'
 import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsFilterChip, TmsSegmentedTabs } from '@/features/tms/kit'
@@ -36,11 +36,38 @@ import { formatDateTime } from '@/lib/date'
 import { intakeCounts, isDemoIntake } from '@/lib/intakeLoad'
 import type { IntakeLoadRecord, IntakeStatus } from '@/types/intake'
 import { ShipmentsSectionTabs } from '../ShipmentsSectionTabs'
+import {
+  ALL_GROUP,
+  UNASSIGNED,
+  groupByCustomer,
+  groupByDivision,
+  parseView,
+  resolveGroup,
+  rowInGroup,
+  type IntakeView,
+} from './intakeGroups'
 import { useIntakeLoads } from './useIntakeLoads'
 import { useIntakePermissions } from './useIntakePermissions'
 import './intake.css'
 
-const UNROUTED = 'unrouted'
+
+function rememberedView(key: string): IntakeView | null {
+  try {
+    const v = parseView(window.localStorage.getItem(key))
+    return v === 'all' ? null : v
+  } catch {
+    return null
+  }
+}
+
+function rememberView(key: string, view: IntakeView): void {
+  try {
+    window.localStorage.setItem(key, view)
+  } catch {
+    // storage unavailable: the view just is not remembered
+  }
+}
+
 const DEFAULT_COLUMNS = ['received', 'from', 'customer', 'reference', 'route', 'completeness', 'review', 'source']
 
 function reviewText(row: IntakeLoadRecord): string {
@@ -94,30 +121,35 @@ export function IntakeBoard() {
   const activeCodes = useMemo(() => new Set(activeDivisions.map((d) => d.code)), [activeDivisions])
   const isUnrouted = (row: IntakeLoadRecord) => row.divisionCode == null || !activeCodes.has(row.divisionCode)
 
-  const openCounts = useMemo(() => {
-    const counts: Record<string, number> = { [UNROUTED]: 0 }
-    for (const d of activeDivisions) counts[d.code] = 0
-    for (const row of open.rows) {
-      if (row.divisionCode != null && activeCodes.has(row.divisionCode)) counts[row.divisionCode] += 1
-      else counts[UNROUTED] += 1
-    }
-    return counts
-  }, [open.rows, activeDivisions, activeCodes])
+  const unroutedShown = isOwnerOrAdmin || open.rows.some(isUnrouted) || (chip !== 'open' && other.rows.some(isUnrouted))
+  const viewKey = `tms:intake:view:${user?.email ?? 'anon'}`
+  const rawView = params.get('view')
+  const legacyDivision = params.get('division')
+  // A bare ?group= (no ?view) follows the view this person last used; with nothing in the URL the page is always All loads.
+  const view: IntakeView =
+    rawView != null ? parseView(rawView)
+    : legacyDivision ? 'division'
+    : params.get('group') ? (rememberedView(viewKey) ?? 'all')
+    : 'all'
+  const requestedGroup = params.get('group') ?? (legacyDivision === 'unrouted' ? UNASSIGNED : legacyDivision)
 
-  const unroutedShown = isOwnerOrAdmin || openCounts[UNROUTED] > 0 || (chip !== 'open' && other.rows.some(isUnrouted))
-  const tabs = [
-    ...activeDivisions.map((d) => ({ key: d.code, label: d.name, count: openCounts[d.code] })),
-    ...(unroutedShown ? [{ key: UNROUTED, label: 'Unrouted', count: openCounts[UNROUTED] }] : []),
-  ]
+  useEffect(() => {
+    if (view !== 'all') rememberView(viewKey, view)
+  }, [view, viewKey])
 
-  const requested = params.get('division')
-  const selected = tabs.some((t) => t.key === requested)
-    ? (requested as string)
-    : (tabs.find((t) => (t.count ?? 0) > 0) ?? tabs[0])?.key
+  const groups = useMemo(() => {
+    if (view === 'division') return groupByDivision(open.rows, activeDivisions).filter((g) => g.id !== UNASSIGNED || unroutedShown)
+    if (view === 'customer') return groupByCustomer(open.rows)
+    return []
+  }, [view, open.rows, activeDivisions, unroutedShown])
+  const selected = resolveGroup(groups, requestedGroup)
+  const tabs = [{ id: ALL_GROUP, label: 'All', count: open.rows.length }, ...groups].map((g) => ({
+    key: g.id, label: g.label, count: g.count, testId: `intake-group-${g.id}`, countTestId: `intake-group-count-${g.id}`,
+  }))
 
-  const division = activeDivisions.find((d) => d.code === selected)
+  const division = view === 'division' ? activeDivisions.find((d) => d.code === selected) : undefined
   const demoOnly = params.get('demo') === '1'
-  const rows = shown.rows.filter((r) => (selected === UNROUTED ? isUnrouted(r) : r.divisionCode === selected) && (!demoOnly || isDemoIntake(r)))
+  const rows = shown.rows.filter((r) => rowInGroup(r, view, selected, activeCodes) && (!demoOnly || isDemoIntake(r)))
   const missingAddress = activeDivisions.filter((d) => !d.intakeEmail)
 
   function update(next: Record<string, string | null>) {
@@ -127,6 +159,11 @@ export function IntakeBoard() {
       else copy.set(k, v)
     }
     setParams(copy, { replace: true })
+  }
+
+  function selectView(next: string) {
+    const v = parseView(next)
+    update({ view: v === 'all' ? null : v, group: null, division: null })
   }
 
   const columns = useMemo<Array<DenseColumn<IntakeLoadRecord>>>(
@@ -301,13 +338,24 @@ export function IntakeBoard() {
           <Truck size={18} aria-hidden="true" /> Build · Intake
         </span>
         <ShipmentsSectionTabs current="intake" />
-        {tabs.length > 0 ? (
+        <TmsSegmentedTabs
+          aria-label="Intake view"
+          size="sm"
+          active={view}
+          onSelect={selectView}
+          tabs={[
+            { key: 'all', label: 'All loads', testId: 'intake-view-all' },
+            { key: 'division', label: 'By rev division', testId: 'intake-view-division' },
+            { key: 'customer', label: 'By customer', testId: 'intake-view-customer' },
+          ]}
+        />
+        {view !== 'all' ? (
           <TmsSegmentedTabs
-            aria-label="Division"
+            aria-label={view === 'division' ? 'Rev division' : 'Customer'}
             size="sm"
             tabs={tabs}
-            active={selected ?? ''}
-            onSelect={(key) => update({ division: key })}
+            active={selected}
+            onSelect={(key) => update({ view, group: key === ALL_GROUP ? null : key, division: null })}
           />
         ) : null}
         <TmsSegmentedTabs
@@ -355,7 +403,7 @@ export function IntakeBoard() {
         <DenseGrid<IntakeLoadRecord>
           aria-label="Intake"
           recentKey={`tms:intake:recent:${user?.email ?? 'anon'}`}
-          resetKey={`${selected}|${chip}|${demoOnly}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+          resetKey={`${view}|${selected}|${chip}|${demoOnly}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
           columns={gridColumns}
           rows={sortedRows}
           fitRows={rows}
