@@ -95,3 +95,9 @@ defaults (`pinnedOf`).
    on its tab. The sidebar no longer lists Spot inbox separately (Quotes is no longer in the sidebar after
    AV anyway). Always show the inbox tab (no longer behind SHOW_RESERVED_AB if the page exists on dev).
 5. Update `navSections`/`lifecycleTabs` tests for the new structure; BUILD_LOG under Step AV.
+
+## Ryne's feedback 2 (2026-11-06)
+> "put the quote inbox ahead of the quotes in the tabs on that page"
+
+Quote page tab order is **Quote inbox** first, **Quotes** second; the inbox is the default tab at
+`/tms/rates`'s page entry (Quote lifecycle tab links to the inbox). Keep both URLs and the inbox badge.
