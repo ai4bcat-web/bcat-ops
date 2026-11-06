@@ -389,3 +389,22 @@ picks and drops."
   only toggle; "Calculate totals from picks" stays.
 - Rates card: the per-mile rate type reads this Miles value; the summary rail shows it in the
   lane line.
+
+## Ryne's feedback 14 (2026-11-05 evening)
+"If a location does not exist, you should have the ability to add the location right from the
+pickup or delivery area so you can save it for future."
+- In every stop card's Location type-ahead, when there is no match the last row of the dropdown
+  is **"+ Add '<typed text>' as a new location"** (also reachable with Enter on no match).
+- Choosing it turns the stop card's address block into an inline **new-location form** (name,
+  address, address 2, city, state, zip, country, contact, phone, e-mail, hours, appointment
+  required yes/no, location type Shipper / Receiver / Both, notes) prefilled with whatever was
+  typed; the zip auto-fills city / state from the geocoder; **Save location** writes a Location
+  row through the existing directory create action, geocodes it, and selects it for the stop.
+  **Use once** keeps the address on the stop without creating a directory row (for one-off
+  addresses). Cancel returns to the type-ahead.
+- A location saved this way is immediately available in other stop cards, the Locations page
+  and future shipments; it carries `createdFrom: shipment <PRO or draft id>` for the audit.
+- Duplicate guard: before saving, match on normalized name + zip and on address + zip; if one
+  exists, offer "Use existing <name>" instead of creating a twin.
+- The same inline add works in edit mode and in the Intake prefilled form (extracted stop
+  addresses that match no location show the add row pre-selected).
