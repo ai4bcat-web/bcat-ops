@@ -228,3 +228,35 @@ New **Activity** block in the summary rail, between the Required checklist and R
 "Let's move freight section to be above the route section." Main-column order becomes:
 Customer, Bill To, **Freight**, **Route**, Rates, Rate history, Carrier, More strip, Tracking,
 Documents. Tab order follows. Nothing else changes.
+
+## Ryne's feedback 7 (2026-11-05 evening)
+"Let's put the customer and bill to in the strip at the top where division is and let's move the
+freight section to be right below it. Also move the shipment type to be in the freight section
+and add a lot more shipment types."
+
+**Header strip** (full width, sticky with the page title) now holds, left to right:
+Division pill · **Customer** type-ahead (same behaviour as the old Customer card: fills defaults,
+rep, requirements, e-mails) · **Bill To** summary chip: bill-to name · terms · Factored / Not
+factored · available credit, coloured amber on credit hold · a "Details" chevron that drops the
+full Bill To panel (everything from feedback 2: address, credit limit / open AR / available,
+billing e-mails + contact, invoicing requirements, status badge, credit-hold warning) under the
+strip, collapsed by default · status chip · PRO preview. The Customer card and the Bill To card
+leave the main column. Customer contact / phone / two e-mails / Ref # move into the dropped-down
+Bill To panel as a "Customer contact" column.
+
+The **Mode** pill leaves the header: it becomes **Shipment type** as the first field of the
+Freight card.
+
+**Main column order**: Freight, Route, Rates, Rate history, Carrier, More strip, Tracking,
+Documents.
+
+**Shipment type** select (Freight card, required, default per division — Truckload for BCAT
+Logistics and Ivan Cartage, Auto transport for Auto Shipping, Power only for Owner Operators):
+Truckload (FTL) · LTL · Partial / Volume · Expedited · Hot shot · Team · Power only · Drayage ·
+Intermodal (rail) · Rail carload · Air freight · Ocean FCL · Ocean LCL · Auto transport (open) ·
+Auto transport (enclosed) · Heavy haul / Oversize · Flatbed specialized · Refrigerated / Reefer ·
+Hazmat · Final mile · Dedicated · Cross-border (Mexico) · Cross-border (Canada) · Courier / Parcel ·
+Other. Types are a constant list in `constants.ts` so more can be added; the Shipments board
+filter, Intake extractor and the quote → shipment path read the same list. Picking a type sets a
+sensible default equipment and requirement chips (Reefer → temp control on; Hazmat → hazmat chip;
+Auto transport → equipment Auto carrier, pieces = vehicle count) which the user can change.
