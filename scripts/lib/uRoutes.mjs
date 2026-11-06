@@ -71,15 +71,17 @@ const routePaths = (app) => {
 
 /** Gate 1. Returns human-readable gaps (empty = pass). */
 export async function uNavGaps(root = process.cwd()) {
-  const [nav, app] = await Promise.all([
+  const [nav, tabs, app] = await Promise.all([
     readFile(join(root, 'src/lib/navSections.ts'), 'utf8'),
+    readFile(join(root, 'src/lib/lifecycleTabs.ts'), 'utf8'),
     readFile(join(root, 'src/App.tsx'), 'utf8'),
   ])
   const routes = routePaths(app)
   const walked = new Set(U_ROUTES.map((r) => r.path))
   const gaps = []
   for (const to of U_NAV_TARGETS) {
-    if (!nav.includes(`to: '${to}'`)) gaps.push(`${to}: no nav entry in src/lib/navSections.ts`)
+    // Step AV moved Intake from the sidebar to the Build lifecycle tab: either is a nav entry.
+    if (!nav.includes(`to: '${to}'`) && !tabs.includes(`to: '${to}'`)) gaps.push(`${to}: no nav entry in src/lib/navSections.ts or lifecycle tab in src/lib/lifecycleTabs.ts`)
     const segment = to.replace(/^\/tms\//, '')
     if (!routes.has(segment)) gaps.push(`${to}: App.tsx has no <Route path="${segment}">`)
     if (!walked.has(to)) gaps.push(`${to}: no U_ROUTES row`)

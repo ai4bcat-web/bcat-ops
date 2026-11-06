@@ -14,8 +14,10 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
+const LIFECYCLE_LABEL = { quote: 'Quote', build: 'Build', view: 'View', book: 'Book', track: 'Track', review: 'Review' }
+
 export const HOME_ROOTS = [
-  'Company Dashboard', 'Quotes', 'Shipments', 'Carrier Sales', 'Load Tracking', 'Load Review', 'Customers', 'Carriers',
+  'Company Dashboard', 'Active shipments', 'Customers', 'Carriers',
   'Locations', 'Accounting', 'Settings', 'ASSETS', 'CAR SHIPPING', 'COMPANY',
 ]
 
@@ -26,6 +28,8 @@ const page = (pattern, home, navPath, guard) => ({ pattern, kind: 'page', home, 
 const redirect = (pattern, landing) => ({ pattern, kind: 'redirect', home: `→ ${landing}`, navPath: null, guard: '—', landing })
 const hidden = (pattern, home, guard) => ({ pattern, kind: 'hidden', home, navPath: null, guard })
 const offnav = (pattern, home, guard) => ({ pattern, kind: 'offnav', home, navPath: null, guard })
+/** Step AV: homed in the top-bar lifecycle strip (LIFECYCLE_TABS), not the sidebar. `tab` is the strip key that lights. */
+const lifecycle = (pattern, tab, guard) => ({ pattern, kind: 'lifecycle', home: `Lifecycle › ${LIFECYCLE_LABEL[tab]}`, navPath: null, guard, tab })
 const pub = (pattern) => ({ pattern, kind: 'public', home: 'public (outside the shell)', navPath: null, guard: '—' })
 const splat = (pattern, home, guard) => ({ pattern, kind: 'splat', home, navPath: null, guard })
 
@@ -38,26 +42,26 @@ export const AA_HOMES = [
   page('/tms/dashboard/new', 'Company Dashboard', '/tms/dashboard', 'tms'),
   page('/tms/dashboard/d/:id', 'Company Dashboard', '/tms/dashboard', 'tms'),
   page('/tms/dashboard/d/:id/edit', 'Company Dashboard', '/tms/dashboard', 'tms'),
-  page('/tms/shipments', 'Shipments › Active / All', '/tms/shipments', 'loads|tms'),
+  page('/tms/shipments', 'Active shipments', '/tms/shipments', 'loads|tms'),
   redirect('/tms/shipments/view/*', '/tms/shipments'),
-  page('/tms/shipments/intake', 'Shipments › Intake', '/tms/shipments/intake', 'loads|tms|intakeReview'),
-  page('/tms/shipments/intake/:intakeId', 'Shipments › Intake', '/tms/shipments/intake', 'loads|tms|intakeReview'),
-  page('/tms/shipments/new', 'Shipments', '/tms/shipments', 'loads|tms'),
-  page('/tms/shipments/:id/edit', 'Shipments', '/tms/shipments', 'loads|tms'),
-  page('/tms/shipments/:id', 'Shipments', '/tms/shipments', 'loads|tms'),
+  lifecycle('/tms/shipments/intake', 'build', 'loads|tms|intakeReview'),
+  lifecycle('/tms/shipments/intake/:intakeId', 'build', 'loads|tms|intakeReview'),
+  lifecycle('/tms/shipments/new', 'build', 'loads|tms'),
+  lifecycle('/tms/shipments/:id/edit', 'build', 'loads|tms'),
+  page('/tms/shipments/:id', 'Active shipments', '/tms/shipments', 'loads|tms'),
   redirect('/tms/dispatch', '/tms/carrier-sales'),
-  page('/tms/carrier-sales', 'Carrier Sales', '/tms/carrier-sales', 'loads|tms'),
-  page('/tms/tracking', 'Load Tracking', '/tms/tracking', 'loads|tms'),
-  offnav('/tms/tracking/links', 'Load Tracking › Customer links (off-nav)', 'loads|tms'),
+  lifecycle('/tms/carrier-sales', 'book', 'loads|tms'),
+  lifecycle('/tms/tracking', 'track', 'loads|tms'),
+  offnav('/tms/tracking/links', 'Lifecycle › Track › Customer links (off-nav)', 'loads|tms'),
   redirect('/tms/documents/*', DOCS_LANDING),
   redirect('/tms/check-calls', CHECK_CALLS_LANDING),
-  page('/tms/load-review', 'Load Review', '/tms/load-review', 'loadReview|tms'),
-  page('/tms/rates', 'Quotes › Quotes', '/tms/rates', 'quotes|tms'),
-  page('/tms/rates/new', 'Quotes › Quotes', '/tms/rates', 'quotes|tms'),
-  page('/tms/rates/:id', 'Quotes › Quotes', '/tms/rates', 'quotes|tms'),
+  lifecycle('/tms/load-review', 'review', 'loadReview|tms'),
+  lifecycle('/tms/rates', 'quote', 'quotes|tms'),
+  lifecycle('/tms/rates/new', 'quote', 'quotes|tms'),
+  lifecycle('/tms/rates/:id', 'quote', 'quotes|tms'),
   redirect('/tms/rates/lanes', '/tms/rates'),
-  page('/tms/rates/spot', 'Quotes › Spot inbox', '/tms/rates/spot', 'quotes|tms'),
-  page('/tms/rates/spot/callback', 'Quotes › Spot inbox', '/tms/rates/spot', 'quotes|tms'),
+  lifecycle('/tms/rates/spot', 'quote', 'quotes|tms'),
+  lifecycle('/tms/rates/spot/callback', 'quote', 'quotes|tms'),
   page('/tms/invoicing', 'Accounting › Accounts Receivable', '/tms/invoicing', 'invoicing|tms'),
   page('/tms/invoicing/invoices/:id', 'Accounting › Accounts Receivable', '/tms/invoicing', 'invoicing|tms'),
   page('/tms/invoicing/payable', 'Accounting › Accounts Payable', '/tms/invoicing/payable', 'carrierPay|tms'),
@@ -304,16 +308,7 @@ export const AA_OLD_URLS = [
 /** The pinned block of §2.1 as an ADMIN sees it: [label, href, depth]. Section rows (ASSETS, CAR SHIPPING, COMPANY) follow it. */
 export const AA_SIDEBAR = [
   ['Company Dashboard', '/tms/dashboard', 0],
-  ['Quotes', '/tms/rates', 0],
-  ['Quotes', '/tms/rates', 1],
-  ['Spot inbox', '/tms/rates/spot', 1],
-  ['Shipments', '/tms/shipments', 0],
-  ['Active', '/tms/shipments', 1],
-  ['All', '/tms/shipments?list=all', 1],
-  ['Intake', '/tms/shipments/intake', 1],
-  ['Carrier Sales', '/tms/carrier-sales', 0],
-  ['Load Tracking', '/tms/tracking', 0],
-  ['Load Review', '/tms/load-review', 0],
+  ['Active shipments', '/tms/shipments', 0],
   ['Customers', '/tms/customers', 0],
   ['Customers', '/tms/customers', 1],
   ['Follow-ups', '/tms/customers/follow-ups', 1],
@@ -344,15 +339,16 @@ export const AA_SIDEBAR_SECTIONS = ['ASSETS', 'CAR SHIPPING', 'COMPANY']
 
 /** Parents that hold children: navigate to `open` and every child of the parent is in the DOM. */
 export const AA_SIDEBAR_PARENTS = [
-  { label: 'Quotes', open: '/tms/rates' },
-  { label: 'Shipments', open: '/tms/shipments' },
   { label: 'Customers', open: '/tms/customers' },
   { label: 'Accounting', open: '/tms/invoicing' },
   { label: 'Settings', open: '/tms/brokerage' },
 ]
 
-/** Sidebar badge slots the shell must declare (aria-label text is asserted loosely, by the visible row label). */
-export const AA_BADGE_ROWS = ['Quotes', 'Intake', 'Carrier Sales', 'Load Tracking', 'Load Review', 'Accounting', 'Accounts Receivable', 'Accounts Payable']
+/** Sidebar badge slots the shell must declare (aria-label text is asserted loosely, by the visible row label). The lifecycle tabs carry the rest. */
+export const AA_BADGE_ROWS = ['Accounting', 'Accounts Receivable', 'Accounts Payable']
+
+/** The lifecycle strip's tab keys in flow order (Step AV); the routes each opens are parsed from src/lib/lifecycleTabs.ts by aaLifecycleTabs(). */
+export const AA_LIFECYCLE_ORDER = ['quote', 'build', 'view', 'book', 'track', 'review']
 
 /** Rows only an ADMIN/owner sees (§2.8): none may render for a plain `page-tms` user. */
 export const AA_ADMIN_ONLY_HREFS = [
@@ -361,9 +357,10 @@ export const AA_ADMIN_ONLY_HREFS = [
 ]
 
 export const AA_PERSONAS = {
-  loadReview: { groups: ['page-loadReview'], rail: ['/tms/load-review'], landing: '/tms/load-review', redirected: '/tms/carriers' },
+  // Step AV: Load Review is a lifecycle tab, not a sidebar row, so this user's rail is empty and the strip is [review].
+  loadReview: { groups: ['page-loadReview'], rail: [], tabs: ['review'], landing: '/tms/load-review', redirected: '/tms/carriers' },
   compliance: { groups: ['page-compliance'], rail: ['/compliance'], settingsHref: '/compliance' },
-  tms: { groups: ['page-tms'], absent: AA_ADMIN_ONLY_HREFS, present: ['/tms/load-review'] },
+  tms: { groups: ['page-tms'], absent: AA_ADMIN_ONLY_HREFS, presentTabs: ['quote', 'build', 'view', 'book', 'track', 'review'] },
 }
 
 /** Walk rows. `legacy`: lives under TmsLayout via the legacy block (has .tms-legacy-host). */
@@ -427,19 +424,35 @@ export async function aaSourcePatterns(root = process.cwd()) {
   return found
 }
 
-/** The `to: '<path>'` literals the sidebar is built from, in source order. */
+/** The `to: '<path>'` literals (and `to: PATH_CONST` for a file-level `const PATH_CONST = '/…'`) the sidebar is built from, in source order. */
 export async function aaNavTargets(root = process.cwd()) {
   const out = []
   for (const file of ['src/lib/navSections.ts', 'src/lib/navItems.ts']) {
     const source = await readFile(join(root, file), 'utf8')
+    const consts = new Map([...source.matchAll(/^const (\w+) = '(\/[^']*)'/gm)].map((m) => [m[1], m[2]]))
     for (const row of source.split('\n')) {
       // NAV_ITEMS keeps the BROKERAGE rows as permission rows behind the /tms pages; the shell never renders them.
       if (/section:\s*'BROKERAGE'/.test(row)) continue
       for (const m of row.matchAll(/\bto:\s*'([^']+)'/g)) out.push({ file, to: m[1] })
+      for (const m of row.matchAll(/\bto:\s*([A-Z_]+)\b/g)) if (consts.has(m[1])) out.push({ file, to: consts.get(m[1]) })
     }
   }
   return out
 }
+
+/** The tab table of src/lib/lifecycleTabs.ts, read as text (the .mjs scripts cannot import .ts): [{ key, to, matches }]. */
+async function lifecycleTabsOf(root) {
+  const source = await readFile(join(root, 'src/lib/lifecycleTabs.ts'), 'utf8')
+  const body = source.slice(source.indexOf('export const LIFECYCLE_TABS'))
+  return [...body.matchAll(/key: '(\w+)',[\s\S]*?to: '([^']+)',\s*matches: \[([^\]]*)\]/g)].map((m) => ({
+    key: m[1],
+    to: m[2],
+    matches: [...m[3].matchAll(/'([^']+)'/g)].map((x) => x[1]),
+  }))
+}
+
+/** Lifecycle tab keys and the paths each one lights, for the checks that assert the strip (no network). */
+export const aaLifecycleTabs = (root = process.cwd()) => lifecycleTabsOf(root)
 
 /**
  * Gates 1 and 2 (static). Returns { gaps, counts }; empty gaps = pass. `unhomed` = routes with no AA_HOMES row (and rows
@@ -459,6 +472,7 @@ export async function aaInventoryGaps(root = process.cwd()) {
   if (unrouted.length) gaps.push(`AA_HOMES rows with no route in the source: ${unrouted.join(', ')}`)
 
   for (const h of AA_HOMES) {
+    if (h.kind === 'lifecycle' && h.navPath !== null) gaps.push(`${h.pattern}: a lifecycle home is not a sidebar row (navPath must be null)`)
     if (h.kind === 'page') {
       const first = h.home.split(' › ')[0].split(' (')[0]
       if (!h.home || !HOME_ROOTS.includes(first)) gaps.push(`${h.pattern}: home "${h.home}" does not start at a known sidebar root`)
@@ -473,15 +487,34 @@ export async function aaInventoryGaps(root = process.cwd()) {
   for (const navPath of new Set(AA_HOMES.filter((h) => h.kind === 'page').map((h) => h.navPath))) {
     if (!literal.has(navPath)) gaps.push(`${navPath}: no \`to: '${navPath}'\` literal in navSections.ts / navItems.ts`)
   }
+
+  // Lifecycle homes (Step AV): the route must be one a LIFECYCLE_TABS tab lights, in the tab the row names, and no
+  // tab may name a route AA_HOMES does not home. A route in LIFECYCLE_TABS with a page home is also a gap: it has two homes.
+  const tabs = await lifecycleTabsOf(root)
+  if (tabs.map((t) => t.key).join() !== AA_LIFECYCLE_ORDER.join()) gaps.push(`lifecycleTabs.ts: tabs are [${tabs.map((t) => t.key).join(', ')}], expected [${AA_LIFECYCLE_ORDER.join(', ')}]`)
+  const tabFor = (pattern) => tabs.find((t) => t.matches.some((m) => m === pattern || (m.endsWith('/*') && normalise(pattern).startsWith(`${normalise(m.slice(0, -2))}/`))))
+  for (const h of AA_HOMES.filter((x) => x.kind === 'lifecycle')) {
+    const tab = tabFor(h.pattern)
+    if (!tab) { gaps.push(`${h.pattern}: lifecycle home but no LIFECYCLE_TABS tab lights this route`); continue }
+    if (h.tab !== tab.key) gaps.push(`${h.pattern}: lifecycle home names tab "${h.tab}" but LIFECYCLE_TABS lights "${tab.key}"`)
+  }
+  for (const tab of tabs) {
+    if (!AA_HOMES.some((h) => h.kind === 'lifecycle' && h.pattern === tab.to) && !AA_HOMES.some((h) => h.kind === 'page' && h.pattern === tab.to)) {
+      gaps.push(`${tab.to}: LIFECYCLE_TABS "${tab.key}" opens a route AA_HOMES does not home`)
+    }
+  }
+  for (const h of AA_HOMES.filter((x) => x.kind === 'page' && x.pattern !== '/tms/shipments' && !x.pattern.startsWith('/tms/shipments/'))) {
+    if (tabFor(h.pattern)) gaps.push(`${h.pattern}: lights a lifecycle tab but is homed as a sidebar page (use lifecycle())`)
+  }
   const orphan = []
   for (const { to } of targets) {
     const pathname = to.split('?')[0]
-    const served = AA_HOMES.some((h) => h.navPath === pathname || (['page', 'hidden', 'offnav'].includes(h.kind) && matchesPattern(pathname, h.pattern)))
+    const served = AA_HOMES.some((h) => h.navPath === pathname || (['page', 'lifecycle', 'hidden', 'offnav'].includes(h.kind) && matchesPattern(pathname, h.pattern)))
     if (!served) orphan.push(to)
   }
   if (orphan.length) gaps.push(`nav rows no AA_HOMES page serves: ${[...new Set(orphan)].join(', ')}`)
 
-  const kinds = Object.fromEntries(['page', 'redirect', 'hidden', 'offnav', 'public', 'splat'].map((k) => [k, AA_HOMES.filter((h) => h.kind === k).length]))
+  const kinds = Object.fromEntries(['page', 'lifecycle', 'redirect', 'hidden', 'offnav', 'public', 'splat'].map((k) => [k, AA_HOMES.filter((h) => h.kind === k).length]))
   return { gaps, counts: { ...kinds, unhomed: unhomed.length + unrouted.length, duplicate: duplicate.length, orphan: orphan.length } }
 }
 

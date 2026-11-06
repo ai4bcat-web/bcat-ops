@@ -31,7 +31,7 @@ import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from '
 import { createWalk, SHELL_FACTS, TOKEN_PROBE, shellFailures } from './lib/uiWalk.mjs'
 import {
   AA_HOMES, AA_OLD_URLS, AA_SIDEBAR, AA_SIDEBAR_SECTIONS, AA_SIDEBAR_PARENTS, AA_ADMIN_ONLY_HREFS, AA_PERSONAS, AA_ROUTES,
-  aaInventoryGaps, aaMarkdown, matchesPattern,
+  aaInventoryGaps, aaLifecycleTabs, aaMarkdown, matchesPattern,
 } from './lib/aaRoutes.mjs'
 import { requiredPatterns, missingFromRoutes } from './devVerifyS2.mjs'
 import { requiredLegacyPatterns, coveredPatterns } from './devVerifyS3.mjs'
@@ -120,9 +120,9 @@ export async function inventory() {
   const homes = gaps.filter((g) => /AA_HOMES|routes with no|home "|navPath|redirect names|hidden is reserved|duplicate/.test(g) && !/nav rows no|`to:/.test(g))
   const navGaps = gaps.filter((g) => !homes.includes(g))
   if (homes.length) { line('FAIL', 'gate 1: every route has one home', homes.join('; ')); return false }
-  line('PASS', 'gate 1: every route has one home', `pages ${counts.page} · redirects ${counts.redirect} · hidden ${counts.hidden} · off-nav ${counts.offnav} · public ${counts.public} · splat ${counts.splat} · unhomed ${counts.unhomed} · duplicate ${counts.duplicate}`)
-  if (navGaps.length) { line('FAIL', 'gate 2: every page home is a real sidebar row (static)', navGaps.join('; ')); return false }
-  line('PASS', 'gate 2: every page home is a real sidebar row (static)', `orphan nav rows ${counts.orphan}`)
+  line('PASS', 'gate 1: every route has one home', `pages ${counts.page} · lifecycle ${counts.lifecycle} · redirects ${counts.redirect} · hidden ${counts.hidden} · off-nav ${counts.offnav} · public ${counts.public} · splat ${counts.splat} · unhomed ${counts.unhomed} · duplicate ${counts.duplicate}`)
+  if (navGaps.length) { line('FAIL', 'gate 2: every page home is a sidebar row or a lifecycle tab (static)', navGaps.join('; ')); return false }
+  line('PASS', 'gate 2: every page home is a sidebar row or a lifecycle tab (static)', `orphan nav rows ${counts.orphan}; ${counts.lifecycle} lifecycle homes each lit by a LIFECYCLE_TABS tab`)
   const old = oldUrlGaps()
   if (old.length) { line('FAIL', 'gate 3: old-URL registry (static)', old.join('; ')); return false }
   line('PASS', 'gate 3: old-URL registry (static)', `${AA_OLD_URLS.length} old URLs, each served by a route; every redirect and fixed page covered`)
@@ -227,9 +227,16 @@ async function waitShell(b) {
   await b.poll(() => b.evaluate(`!!document.querySelector('.tms-sidebar')`), 'shell sidebar mounted', 45_000)
 }
 
+/** The lifecycle strip's tabs as rendered (Step AV): [{ key, href, active }] in DOM order; waits for the strip to mount. */
+const lifecycleStrip = async (b) => {
+  await b.poll(() => b.evaluate(`!!document.querySelector('[data-testid^="lifecycle-tab-"]')`), 'lifecycle strip mounted', 30_000)
+  return b.evaluate(`[...document.querySelectorAll('[data-testid^="lifecycle-tab-"]')].map((a) => ({ key: a.getAttribute('data-testid').slice('lifecycle-tab-'.length), href: a.getAttribute('href'), active: a.classList.contains('tms-active') }))`)
+}
+
 // ── sidebar facts: the DOM is `.tms-nav-rowwrap` (row + children) and `.tms-section-head` markers, in order ──
 const SIDEBAR_JS = `(() => {
   const nav = document.querySelector('nav[aria-label="TMS sections"]') ?? document.querySelector('.tms-sidebar');
+  if (!nav) return [];
   const rows = [];
   let section = null;
   const text = (el) => (el?.textContent ?? '').trim();
@@ -270,7 +277,7 @@ async function sidebarGate(b, ctx, theme) {
     const pinned = rows.filter((r) => r.section === null)
     const got = pinned.map((r) => `${r.depth}|${r.label}|${r.href}`)
     const want = AA_SIDEBAR.map(([label, href, depth]) => `${depth}|${label}|${href}`)
-    // the live-loads list under Tracking is not a nav row; everything else must match in order
+    // the live-loads list under Tracking is gone with the row; everything else must match in order
     const missing = want.filter((w) => !got.includes(w))
     if (missing.length) fail(`sidebar lacks: ${missing.slice(0, 4).join(' ; ')}`)
     const extra = got.filter((g) => !want.includes(g))
@@ -289,6 +296,14 @@ async function sidebarGate(b, ctx, theme) {
     const rendered = new Set(rows.map((r) => pathOf(r.href)))
     const absent = [...new Set(AA_HOMES.filter((h) => h.kind === 'page').map((h) => h.navPath))].filter((p) => !rendered.has(p))
     if (absent.length) fail(`page homes not rendered as sidebar rows: ${absent.join(', ')}`)
+    // ...and every lifecycle-kind home is NOT a sidebar row of its own: the strip carries it (View's route doubles as the Active shipments row)
+    const tabs = await aaLifecycleTabs()
+    const doubled = tabs.filter((t) => t.key !== 'view' && rendered.has(t.to)).map((t) => t.to)
+    if (doubled.length) fail(`lifecycle pages are still sidebar rows: ${doubled.join(', ')}`)
+    const strip = await lifecycleStrip(b)
+    const wantStrip = tabs.map((t) => `${t.key}|${t.to}`)
+    const gotStrip = strip.map((t) => `${t.key}|${pathOf(t.href)}`)
+    if (gotStrip.join('\n') !== wantStrip.join('\n')) fail(`the lifecycle strip is [${gotStrip.join(', ')}], expected [${wantStrip.join(', ')}]`)
     // group headers point at their first visible child
     for (const [label, href] of [['Accounting', '/tms/invoicing'], ['Settings', '/tms/brokerage']]) {
       const head = pinned.find((r) => r.depth === 0 && r.label === label)
@@ -309,19 +324,25 @@ async function sidebarGate(b, ctx, theme) {
     return `${AA_SIDEBAR_PARENTS.length} parents each open on their own path and only there`
   })
   await step(`AA01-active-row-${theme}`, async () => {
-    const lit = async (path, label, depth) => {
+    const lit = async (path, label) => {
       await b.navigate(path); await waitShell(b); await waitLoaded(b).catch(() => {}); await pause(300)
       const names = await b.evaluate(`[...document.querySelectorAll('.tms-nav-row.tms-active .tms-nav-label, .tms-nav-child.tms-active .tms-nav-child-label')].map((n) => n.textContent.trim())`)
       if (!names.includes(label)) fail(`${path}: "${label}" is not lit (lit: ${names.join(', ') || 'none'})`)
       return names
     }
-    await lit('/tms/shipments', 'Active')
-    await lit('/tms/shipments?list=all', 'All')
-    const all = await b.evaluate(`[...document.querySelectorAll('.tms-nav-child.tms-active .tms-nav-child-label')].map((n) => n.textContent.trim())`)
-    if (all.includes('Active')) fail('Active and All are both lit on ?list=all')
-    await lit('/tms/rates/spot', 'Spot inbox')
-    const q = await b.evaluate(`[...document.querySelectorAll('.tms-nav-child.tms-active .tms-nav-child-label')].map((n) => n.textContent.trim())`)
-    if (q.includes('Quotes')) fail('Quotes child is lit on /tms/rates/spot')
+    const litTab = async (path, key) => {
+      await b.navigate(path); await waitShell(b); await waitLoaded(b).catch(() => {}); await pause(300)
+      const active = (await lifecycleStrip(b)).filter((t) => t.active).map((t) => t.key)
+      if (active.join() !== key) fail(`${path}: lifecycle tab "${key}" is not the lit one (lit: ${active.join(', ') || 'none'})`)
+    }
+    await lit('/tms/shipments', 'Active shipments')
+    await litTab('/tms/shipments', 'view')
+    await litTab('/tms/shipments?list=all', 'view')
+    await litTab('/tms/rates/spot', 'quote')
+    await litTab('/tms/carrier-sales', 'book')
+    await litTab('/tms/tracking', 'track')
+    await litTab('/tms/load-review', 'review')
+    await litTab('/tms/shipments/intake', 'build')
     await lit('/tms/vendors', 'Accounting')
     await lit('/tms/vendors', 'Vendors')
     await lit('/tms/invoicing/payable', 'Accounts Payable')
@@ -329,7 +350,7 @@ async function sidebarGate(b, ctx, theme) {
     if (ar.includes('Accounts Receivable')) fail('Accounts Receivable is lit on /tms/invoicing/payable')
     await lit('/compliance', 'Compliance')
     await lit('/compliance', 'Settings')
-    return 'Active/All, Quotes/Spot inbox, AR/AP, Accounting parent, Settings › Compliance light exactly their own rows'
+    return 'Active shipments row + the lifecycle tab for each page, AR/AP, Accounting parent, Settings › Compliance light exactly their own rows'
   })
   if (theme !== 'light') return
   await step('AA01-collapsed-rail', async () => {
@@ -428,11 +449,11 @@ async function pageFacts(b, ctx, theme) {
   const read = async (path) => { await b.navigate(path); await waitLoaded(b).catch(() => waitBody(b)); await pause(400); return mainText(b) }
   await step(`AA05-quotes-labels-${theme}`, async () => {
     const text = await read('/tms/rates')
-    if (!/^\s*Quotes\b/m.test(text.split('\n').slice(0, 6).join('\n'))) fail('the page title is not "Quotes"')
+    if (!/^\s*Quote · Spot quotes\b/m.test(text.split('\n').slice(0, 6).join('\n'))) fail('the page title is not "Quote · Spot quotes"')
     if (/^\s*Rates\s*$/m.test(text.split('\n').slice(0, 6).join('\n'))) fail('the page title still reads "Rates"')
-    const lit = await b.evaluate(`[...document.querySelectorAll('.tms-nav-child.tms-active .tms-nav-child-label')].map((n) => n.textContent.trim())`)
-    if (!lit.includes('Quotes')) fail('Quotes › Quotes is not lit on /tms/rates')
-    return 'title Quotes; Quotes child lit'
+    const lit = (await lifecycleStrip(b)).filter((t) => t.active).map((t) => t.key)
+    if (lit.join() !== 'quote') fail(`the Quote lifecycle tab is not the lit one on /tms/rates (lit: ${lit.join(', ') || 'none'})`)
+    return 'title Quote · Spot quotes; Quote tab lit'
   })
   await step(`AA08-settings-title-${theme}`, async () => {
     const text = await read('/tms/brokerage')
@@ -470,7 +491,7 @@ async function pageFacts(b, ctx, theme) {
     const tabs = await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].map((t) => t.textContent.trim())`)
     for (const wanted of [/^Needs cover/i, /^Offers/i, /^Covered/i]) if (!tabs.some((t) => wanted.test(t))) fail(`Carrier Sales has no ${wanted} tab (tabs: ${tabs.join(', ')})`)
     if (!/Step T/i.test(text)) fail('the Step T (backburnered) card is missing')
-    if (!/Carrier Sales/.test(text.split('\n').slice(0, 6).join('\n'))) fail('the page title is not "Carrier Sales"')
+    if (!/Book · Carrier sales/.test(text.split('\n').slice(0, 6).join('\n'))) fail('the page title is not "Book · Carrier sales"')
     return 'Needs cover / Offers / Covered tabs, Step T card'
   })
   await step(`AA11-settlements-banner-${theme}`, async () => {
@@ -603,10 +624,12 @@ async function personaGate(ctx, theme) {
     if (landed !== AA_PERSONAS.loadReview.landing) fail(`a page-loadReview-only user lands on ${landed}, expected ${AA_PERSONAS.loadReview.landing}`)
     const rows = await sidebarRows(b)
     const hrefs = [...new Set(rows.map((r) => pathOf(r.href)))]
-    if (hrefs.length !== 1 || hrefs[0] !== '/tms/load-review') fail(`the rail is [${hrefs.join(', ')}], expected only Load Review`)
+    if (hrefs.length !== AA_PERSONAS.loadReview.rail.length) fail(`the rail is [${hrefs.join(', ')}], expected no sidebar rows (Load Review is a lifecycle tab)`)
+    const tabs = (await lifecycleStrip(b)).map((t) => t.key)
+    if (tabs.join() !== AA_PERSONAS.loadReview.tabs.join()) fail(`the lifecycle strip is [${tabs.join(', ')}], expected [${AA_PERSONAS.loadReview.tabs.join(', ')}]`)
     await b.navigate(AA_PERSONAS.loadReview.redirected); await pause(2500)
     if ((await pathname(b)) !== AA_PERSONAS.loadReview.landing) fail(`${AA_PERSONAS.loadReview.redirected} did not redirect to ${AA_PERSONAS.loadReview.landing} (at ${await pathname(b)})`)
-    return 'rail = [Load Review]; lands on /tms/load-review; /tms/carriers redirects there'
+    return 'rail = []; lifecycle strip = [Review]; lands on /tms/load-review; /tms/carriers redirects there'
   }))
   await step(`AA05-persona-compliance-${theme}`, () => openInIdentity(ctx, ctx.ids.comp.storage, 'bcat-aa-comp-', theme, async (b) => {
     await b.navigate('/compliance'); await waitBody(b)
@@ -627,8 +650,10 @@ async function personaGate(ctx, theme) {
     const hrefs = new Set(rows.map((r) => pathOf(r.href)))
     const leaked = AA_ADMIN_ONLY_HREFS.filter((h) => hrefs.has(h))
     if (leaked.length) fail(`a page-tms user sees ADMIN-only rows: ${leaked.join(', ')}`)
-    for (const want of AA_PERSONAS.tms.present) if (!hrefs.has(want)) fail(`a page-tms user does not see ${want}`)
-    return 'no ADMIN-only rows; Load Review visible'
+    const tabs = await lifecycleStrip(b)
+    const lost = AA_PERSONAS.tms.presentTabs.filter((k) => !tabs.some((t) => t.key === k))
+    if (lost.length) fail(`a page-tms user's lifecycle strip lacks: ${lost.join(', ')} (has ${tabs.map((t) => t.key).join(', ') || 'none'})`)
+    return 'no ADMIN-only rows; the lifecycle strip shows all six tabs, Review included'
   }))
   if (theme !== 'light') return
   if (!ctx.reviewDeployed || !ctx.zz.noDocs) { if (matches('AA05-persona-load-review-server')) skipLine('AA05-persona-load-review-server', '', 'Step AA review backend or the ZZ fixture is unavailable', BACKEND_ALLOWED); return }
@@ -749,7 +774,7 @@ async function loadReviewGate(b, ctx, theme) {
     const text0 = await mainText(b)
     const tabs = await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].map((t) => t.textContent.trim())`)
     for (const wanted of [/Needs fixes/i, /Looks ready/i, /All in review/i, /Released/i]) if (!tabs.some((t) => wanted.test(t))) fail(`no ${wanted} tab (tabs: ${tabs.join(', ')})`)
-    if (!/Load Review/.test(text0.split('\n').slice(0, 6).join('\n'))) fail('the page title is not "Load Review"')
+    if (!/Review · Load review/.test(text0.split('\n').slice(0, 6).join('\n'))) fail('the page title is not "Review · Load review"')
     await clickTab(b, 'Looks ready'); await filterQueue(b, ctx.demo.readytobill.number); await clickTab(b, 'Looks ready')
     if (ctx.demoReleased) { if (await rowText(b, ctx.demo.readytobill.number)) fail('the released demo shipment is still in the queue') } else if (!(await rowText(b, ctx.demo.readytobill.number))) fail(`${ctx.demo.readytobill.number} (shipment.readytobill) is not under Looks ready`)
     await clickTab(b, 'Needs fixes'); await filterQueue(b, ctx.demo.podflagged.number); await clickTab(b, 'Needs fixes')

@@ -19,6 +19,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 // Kit files are imported directly, never through `./kit`: the barrel re-exports TmsShell.
 import { TmsCountBadge } from './kit/TmsCountBadge'
+import { LifecycleTabs } from './LifecycleTabs'
 import { isPathActive } from './navActive'
 import { personName } from '@/lib/roles'
 import { useTmsCompany } from './tmsCompany'
@@ -96,6 +97,11 @@ export interface TmsShellProps {
   /** The Log out button renders only when this is provided. */
   onLogout?: () => void
   onSearch?: (q: string) => void
+  /**
+   * The sidebar's page gate. When given, `/tms/*` pages show the shipment lifecycle strip in the top
+   * bar, with the tabs this person may open.
+   */
+  canOpenPage?: (pageKey: string) => boolean
   /**
    * Legacy pages: the content area becomes a fixed-height host (`height:100%` pages keep their
    * own scroll container) instead of page scroll.
@@ -397,6 +403,7 @@ function CompanySwitcher({
 
 export function TmsShell({
   pinned = [],
+  canOpenPage,
   sections,
   activePath,
   activeSearch = '',
@@ -577,6 +584,9 @@ export function TmsShell({
               })}
             </ol>
           </nav>
+          {canOpenPage && activePath.startsWith('/tms') ? (
+            <LifecycleTabs pathname={activePath} canOpenPage={canOpenPage} badgeCounts={badgeCounts} />
+          ) : null}
           <div className="tms-topbar-spacer" />
           <form
             className="tms-search"

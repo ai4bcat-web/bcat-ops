@@ -33,6 +33,7 @@ vi.mock('@/features/tms/carrierSales/carrierSalesQueue', () => ({ needsCoverCoun
 import { useShellBadgeCounts } from './useShellBadgeCounts'
 import { NAV_ITEMS } from '@/lib/navItems'
 import { PINNED_ITEMS } from '@/lib/navSections'
+import { LIFECYCLE_TABS } from '@/lib/lifecycleTabs'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 
 const shipments = [
@@ -44,12 +45,13 @@ const args = { shipments }
 
 
 describe('useShellBadgeCounts', () => {
-  it('answers every badgeKey the nav config declares', async () => {
+  it('answers every badgeKey the nav config and the lifecycle strip declare', async () => {
     const declared = new Set<string>()
     for (const item of [...PINNED_ITEMS, ...NAV_ITEMS]) {
       if (item.badgeKey) declared.add(item.badgeKey)
       for (const child of item.children ?? []) if (child.badgeKey) declared.add(child.badgeKey)
     }
+    for (const tab of LIFECYCLE_TABS) if (tab.badgeKey) declared.add(tab.badgeKey)
     expect(declared.size).toBeGreaterThan(5)
     const { result } = renderHook(() => useShellBadgeCounts(args))
     // The open-intake count is a polled read, so it lands a tick after the first paint.

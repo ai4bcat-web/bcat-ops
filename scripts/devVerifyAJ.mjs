@@ -36,7 +36,7 @@ import { DynamoDBDocumentClient, PutCommand, UpdateCommand, DeleteCommand, GetCo
 import { launchBrowser, ALLOWED_ORIGINS, DEV_ORIGIN, pause } from './lib/cdpBrowser.mjs'
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from './lib/devIdentity.mjs'
 import { createWalk } from './lib/uiWalk.mjs'
-import { AA_HOMES, CHECK_CALLS_LANDING, DOCS_LANDING } from './lib/aaRoutes.mjs'
+import { AA_HOMES, CHECK_CALLS_LANDING, DOCS_LANDING, aaLifecycleTabs } from './lib/aaRoutes.mjs'
 import { U_KEPT, U_REDIRECTS } from './lib/uRoutes.mjs'
 import { ROUTES as S2_ROUTES } from './devVerifyS2.mjs'
 
@@ -137,14 +137,19 @@ export async function inventory() {
   if (disagree.length) { line('FAIL', 'AJ00 gate 1: AJ ids registered', `registry and runners disagree on: ${disagree.join(', ')}`); return false }
   line('PASS', 'AJ00 gate 1: AJ ids registered', `${registered.length} steps each have a runner`)
 
-  // gate 2: one nav row, no children
+  // gate 2: Load Tracking is the Track lifecycle tab (Step AV), not a sidebar row
+  const GATE2 = 'AJ00 gate 2: Load Tracking is a lifecycle tab, not a sidebar row'
   const nav = await readFile(resolve('src/lib/navSections.ts'), 'utf8')
-  const row = nav.split('\n').find((l) => l.includes("label: 'Load Tracking'") && l.includes("to: '/tms/tracking'"))
-  if (!row) { line('FAIL', 'AJ00 gate 2: one Load Tracking nav row', 'no `to: /tms/tracking, label: Load Tracking` row in navSections.ts'); return false }
-  if (/children|childGroups/.test(row)) { line('FAIL', 'AJ00 gate 2: one Load Tracking nav row', 'the row still declares children'); return false }
-  const orphans = ['/tms/check-calls', '/tms/documents/review'].filter((p) => nav.includes(`to: '${p}'`))
-  if (orphans.length) { line('FAIL', 'AJ00 gate 2: one Load Tracking nav row', `navSections still links ${orphans.join(', ')}`); return false }
-  line('PASS', 'AJ00 gate 2: one Load Tracking nav row', 'no children, no link to a retired path')
+  const pinned = nav.slice(nav.indexOf('export const PINNED_ITEMS'), nav.indexOf('export function flatNavDefs'))
+  const rows = ['/tms/tracking', '/tms/check-calls', '/tms/documents/review'].filter((p) => pinned.includes(`to: '${p}'`) || pinned.includes(`to: "${p}"`))
+  if (rows.length || /label: 'Load Tracking'/.test(pinned)) { line('FAIL', GATE2, `PINNED_ITEMS still has a Load Tracking row or links ${rows.join(', ') || '(label only)'}`); return false }
+  const tabs = await aaLifecycleTabs()
+  const track = tabs.find((t) => t.key === 'track')
+  if (!track || track.to !== '/tms/tracking') { line('FAIL', GATE2, `LIFECYCLE_TABS has no Track tab linking /tms/tracking (got ${track?.to ?? 'none'})`); return false }
+  if (!track.matches.includes('/tms/tracking') || !track.matches.includes('/tms/tracking/*')) { line('FAIL', GATE2, `the Track tab does not light on /tms/tracking and /tms/tracking/links (matches ${track.matches.join(', ')})`); return false }
+  const home = AA_HOMES.find((h) => h.pattern === '/tms/tracking')
+  if (home?.kind !== 'lifecycle' || home.tab !== 'track') { line('FAIL', GATE2, `aaRoutes homes /tms/tracking as ${home?.kind}/${home?.tab}, expected lifecycle/track`); return false }
+  line('PASS', GATE2, 'no Load Tracking row in the pinned sidebar block; the Track tab links /tms/tracking and lights on /tms/tracking/*; aaRoutes homes it as lifecycle/track')
 
   // gate 3: the redirect table and the registries agree
   const legacy = await readFile(resolve('src/features/shipments/workstations/tracking/legacyRoutes.ts'), 'utf8')
@@ -199,7 +204,9 @@ export async function inventory() {
   ]
   const haystack = (await Promise.all(sources.map((f) => readFile(resolve(f), 'utf8')))).join('\n')
   const ids = [...new Set([...self.matchAll(/\btid\('([^'$]+)'\)/g), ...self.matchAll(/data-testid="([A-Za-z0-9-]+)"/g)].map((m) => m[1]))]
-  const unresolved = ids.filter((id) => !haystack.includes(`"${id}"`) && !haystack.includes(`'${id}'`))
+  // `lifecycle-tab-<key>` is a template in LifecycleTabs.tsx (`lifecycle-tab-${tab.key}`): resolved by the key being a LIFECYCLE_TABS tab.
+  const templated = (id) => /^lifecycle-tab-(\w+)$/.exec(id) && haystack.includes('lifecycle-tab-${tab.key}') && tabs.some((t) => `lifecycle-tab-${t.key}` === id)
+  const unresolved = ids.filter((id) => !templated(id) && !haystack.includes(`"${id}"`) && !haystack.includes(`'${id}'`))
   if (unresolved.length) { line('FAIL', 'AJ00 gate 6: every data-testid a step selects exists', unresolved.join(', ')); return false }
   line('PASS', 'AJ00 gate 6: every data-testid a step selects exists', `${ids.length} ids`)
 
@@ -382,6 +389,7 @@ const waitShell = (b) => b.poll(() => has(b, '.tms-sidebar'), 'shell sidebar mou
 
 const SIDEBAR_JS = `(() => {
   const nav = document.querySelector('nav[aria-label="TMS sections"]') ?? document.querySelector('.tms-sidebar');
+  if (!nav) return [];
   const rows = [];
   const text = (el) => (el?.textContent ?? '').trim();
   for (const el of nav.querySelectorAll('.tms-nav-rowwrap')) {
@@ -568,13 +576,17 @@ const RUNNERS = {
     const adminNote = await openInIdentity(ctx, ctx.ids.admin.storage, 'bcat-aj-nav-admin-', async (b) => {
       await b.navigate('/tms/dashboard'); await waitShell(b); await waitLoaded(b).catch(() => {})
       const rows = await b.evaluate(SIDEBAR_JS)
-      expect(rows.filter((r) => r.label === 'Load Tracking').length === 1, 'admin: not exactly one Load Tracking row')
-      expect(rows.filter((r) => /tracking|check-calls|documents/.test(String(r.href)) && r.href !== '/tms/tracking').length === 0, 'admin: a tracking, check-calls or documents child link is in the rail')
+      expect(rows.filter((r) => r.label === 'Load Tracking').length === 0, 'admin: Load Tracking is still a sidebar row (it is the Track lifecycle tab)')
+      expect(rows.filter((r) => /tracking|check-calls|documents/.test(String(r.href))).length === 0, 'admin: a tracking, check-calls or documents link is in the rail')
+      const tab = await b.evaluate(`[...document.querySelectorAll('[data-testid="lifecycle-tab-track"]')].map((a) => a.getAttribute('href'))`)
+      expect(tab.length === 1 && tab[0] === '/tms/tracking', `admin: the Track lifecycle tab count ${tab.length}, href ${JSON.stringify(tab)}`)
       await b.navigate('/tms/tracking?assignee=all'); await waitLoaded(b)
       await b.poll(() => has(b, tid('tracking-focus-tabs')), 'admin Focus control', 45_000)
+      const lit = await b.evaluate(`document.querySelector('[data-testid="lifecycle-tab-track"]')?.classList.contains('tms-active') ?? false`)
+      expect(lit, 'admin: the Track tab is not lit on /tms/tracking')
       const collapsed = await b.evaluate(SIDEBAR_JS)
-      expect(collapsed.filter((r) => r.label === 'Load Tracking' || /\/tms\/tracking/.test(String(r.href))).length <= 1, 'admin: the collapsed rail lists more than one tracking row')
-      return 'admin: one row'
+      expect(collapsed.filter((r) => r.label === 'Load Tracking' || /\/tms\/tracking/.test(String(r.href))).length === 0, 'admin: the rail lists a tracking row')
+      return 'admin: Track tab, no row'
     })
     return openInIdentity(ctx, ctx.ids.tms.storage, 'bcat-aj-nav-', async (b) => {
       const note = [adminNote]
@@ -582,12 +594,9 @@ const RUNNERS = {
         await b.navigate('/tms/dashboard'); await waitShell(b); await waitLoaded(b).catch(() => {})
         await t.apply()
         const rows = await b.evaluate(SIDEBAR_JS)
-        const parent = rows.find((r) => r.depth === 0 && r.label === 'Load Tracking')
-        expect(parent, 'the sidebar has no Load Tracking row')
-        expect(parent.href === '/tms/tracking' && !parent.caret, `Load Tracking row href ${parent.href}, caret ${parent.caret}`)
-        expect(rows.filter((r) => r.label === 'Load Tracking').length === 1, 'more than one Load Tracking row')
-        const kids = rows.filter((r) => r.depth === 1 && /^\/(tms\/)?(tracking|check-calls|documents)/.test(String(r.href)))
-        expect(kids.length === 0, `Load Tracking still has children: ${kids.map((r) => r.label).join(', ')}`)
+        expect(rows.filter((r) => r.label === 'Load Tracking' || /^\/(tms\/)?(tracking|check-calls|documents)/.test(String(r.href))).length === 0, 'the sidebar still has a Load Tracking row or a tracking, check-calls or documents link')
+        const track = await b.evaluate(`[...document.querySelectorAll('[data-testid="lifecycle-tab-track"]')].map((a) => a.getAttribute('href'))`)
+        expect(track.length === 1 && track[0] === '/tms/tracking', `the Track lifecycle tab count ${track.length}, href ${JSON.stringify(track)}`)
         expect(!(await has(b, '.tms-nav-live')), 'the live-loads list is still rendered')
         expect(!(await has(b, '.tms-nav-rowwrap > .tms-nav-caret[aria-controls*="tracking"]')), 'a caret controls Load Tracking')
         await shotFile(b, `AJ01-nav-collapsed-${t.tag}`)
@@ -606,7 +615,7 @@ const RUNNERS = {
       }
       await b.navigate('/tms/tracking/links')
       await b.poll(() => has(b, tid('customer-links-page')), '/tms/tracking/links page', 45_000)
-      return `one Load Tracking row without caret or live list (${note.join(' + ')}); ${olds.length} old URLs land on the grid focus views; /tms/tracking/links still renders`
+      return `Load Tracking is the Track lifecycle tab (not a sidebar row; no caret, no live list) (${note.join(' + ')}); ${olds.length} old URLs land on the grid focus views; /tms/tracking/links still renders`
     })
   },
 

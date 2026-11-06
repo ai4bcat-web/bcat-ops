@@ -202,7 +202,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   ]
 
   const common = {
-    title: 'Carrier Sales',
+    title: 'Book · Carrier sales',
     search: { value: search, onChange: setSearch, placeholder: 'Search shipment, customer, carrier, lane…' },
     onRefresh: () => { void refresh(); void offers?.refresh() },
     quickTabs: { tabs, active: tab, onSelect: (key: string) => setTab(key as TabKey) },

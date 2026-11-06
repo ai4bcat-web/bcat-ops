@@ -119,7 +119,7 @@ export function LoadReviewPage() {
     {error && <TmsAlert tone="red">{error}</TmsAlert>}{auditError && <TmsAlert tone="red">{auditError}</TmsAlert>}
     {capMessage && <TmsAlert tone="orange" title="Selection limit">{capMessage}</TmsAlert>}
     {notice && <div role="status" className="aa-review-results" style={{ whiteSpace: 'pre-line' }}>{notice}</div>}
-    <TmsListPage title="Load Review" rows={page} columns={columns} rowKey={({ row }) => row.id} onRowClick={({ row }) => update({ shipment: row.id })}
+    <TmsListPage title="Review · Load review" rows={page} columns={columns} rowKey={({ row }) => row.id} onRowClick={({ row }) => update({ shipment: row.id })}
       onRefresh={() => void refresh()} search={{ value: params.get('q') ?? '', onChange: (q) => update({ q, page: null }), placeholder: 'Shipment, customer or reference' }}
       quickTabs={{ active: tab, onSelect: (key) => { update({ tab: key, page: null }); setSelected(new Set()); setCapMessage(null) }, tabs: [{ key: 'fixes', label: 'Needs fixes', count: needs.length }, { key: 'ready', label: 'Looks ready', count: ready.length }, { key: 'all', label: 'All in review', count: queue.length }, { key: 'released', label: 'Released (14 d)', count: released.length }] }}
       filterChips={[

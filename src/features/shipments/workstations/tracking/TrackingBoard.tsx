@@ -373,7 +373,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
   return (
     <div className="tms-dense-page tms-tracking-board">
       <div className="tms-dense-bar">
-        <span className="tms-dense-title">Load tracking</span>
+        <span className="tms-dense-title">Track · Tracking</span>
         <Search size={14} className="tms-muted" aria-hidden="true" />
         <TmsInput
           placeholder="Search shipments..."

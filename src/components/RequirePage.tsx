@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { NAV_ITEMS } from '@/lib/navItems'
 import { flatNavDefs } from '@/lib/navSections'
+import { LIFECYCLE_TABS } from '@/lib/lifecycleTabs'
 
 /**
  * Route-level access control. `hasPageAccess` is the SAME allowlist the sidebar uses,
@@ -16,7 +17,8 @@ import { flatNavDefs } from '@/lib/navSections'
  * those routes accepts its original page key OR `tms`. Pinned items (Shipments) are
  * included so a shared-loads grant still has a landing target.
  */
-const ALL_ITEMS = [...flatNavDefs(), ...NAV_ITEMS]
+// The lifecycle tabs (Quote, Build, View, Book, Track, Review) left the sidebar: a user granted only one of those pages still needs a landing target.
+const ALL_ITEMS = [...flatNavDefs(), ...LIFECYCLE_TABS.map((t) => ({ pageKey: t.pageKey, to: t.to })), ...NAV_ITEMS]
 
 function firstAccessiblePath(hasPageAccess: (k: string) => boolean): string | null {
   return ALL_ITEMS.find((i) => hasPageAccess(i.pageKey))?.to ?? null

@@ -16,10 +16,11 @@
  * one of its children does.
  */
 import {
-  LayoutDashboard, Package, LineChart, Truck, Banknote, Building2,
-  MapPin, PhoneCall, Activity, ClipboardList, SlidersHorizontal, type LucideIcon,
+  LayoutDashboard, Package, Truck, Banknote, Building2,
+  MapPin, SlidersHorizontal, type LucideIcon,
 } from 'lucide-react'
 import { NAV_ITEMS } from '@/lib/navItems'
+import { LIFECYCLE_TABS } from '@/lib/lifecycleTabs'
 import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
 import type { OwnershipDivisionRecord } from '@/types/tms'
 import type { TmsBreadcrumbItem, TmsCompanyOption, TmsNavChild, TmsNavItem, TmsNavSection } from '@/features/tms/TmsShell'
@@ -86,12 +87,6 @@ export interface NavSectionsResult {
   businesses: Array<{ key: string }>
 }
 
-const SHIPMENT_CHILDREN: NavChildDef[] = [
-  { to: '/tms/shipments', label: 'Active', pageKey: 'loads', tms: true, exact: true, params: { list: null } },
-  { to: '/tms/shipments?list=all', label: 'All', pageKey: 'loads', tms: true, exact: true, params: { list: 'all' } },
-  { to: '/tms/shipments/intake', label: 'Intake', pageKey: 'loads', tms: true, badgeKey: 'intakeLoads' },
-]
-
 const ACCOUNTING_CHILDREN: NavChildDef[] = [
   { to: '/tms/invoicing', label: 'Accounts Receivable', pageKey: 'invoicing', tms: true, badgeKey: 'arToInvoice', exclude: ['/tms/invoicing/payable'] },
   { to: '/tms/invoicing/payable', label: 'Accounts Payable', pageKey: 'carrierPay', tms: true, badgeKey: 'apToReview' },
@@ -124,25 +119,9 @@ const SETTINGS_CHILDREN: NavChildDef[] = [
  */
 export const PINNED_ITEMS: NavItemDef[] = [
   { to: '/tms/dashboard', label: 'Company Dashboard', icon: LayoutDashboard, pageKey: 'tms', section: BROKERAGE, tms: true },
-  {
-    to: '/tms/rates',
-    label: 'Quotes',
-    icon: LineChart,
-    pageKey: 'quotes',
-    section: BROKERAGE,
-    tms: true,
-    badgeKey: 'quotesToReply',
-    children: [
-      { to: '/tms/rates', label: 'Quotes', pageKey: 'quotes', tms: true, badgeKey: 'quotesToReply', exclude: ['/tms/rates/spot'] },
-      ...(SHOW_RESERVED_AB
-        ? [{ to: '/tms/rates/spot', label: 'Spot inbox', pageKey: 'quotes', tms: true, badgeKey: 'spotNew' }]
-        : []),
-    ],
-  },
-  { to: '/tms/shipments', label: 'Shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true, children: SHIPMENT_CHILDREN },
-  { to: '/tms/carrier-sales', label: 'Carrier Sales', icon: PhoneCall, pageKey: 'loads', section: BROKERAGE, tms: true, badgeKey: 'carrierSales' },
-  { to: '/tms/tracking', label: 'Load Tracking', icon: Activity, pageKey: 'loads', section: BROKERAGE, tms: true, badgeKey: 'loadTracking' },
-  { to: '/tms/load-review', label: 'Load Review', icon: ClipboardList, pageKey: 'loadReview', section: BROKERAGE, tms: true, badgeKey: 'loadReview' },
+  // The lifecycle pages (Quote · Build · View · Book · Track · Review) are the top-bar strip
+  // (`LIFECYCLE_TABS`); the sidebar keeps the one list people return to all day.
+  { to: SHIPMENTS_PATH, label: 'Active shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true },
   {
     to: '/tms/customers',
     label: 'Customers',
@@ -237,6 +216,8 @@ const CRUMBS: CrumbRule[] = [
   { path: INTAKE_PATH, crumbs: [SHIPMENTS, { label: 'Intake' }] },
   { path: INTAKE_PATH, prefix: true, crumbs: [SHIPMENTS, { label: 'Intake', to: INTAKE_PATH }, { label: 'Load' }] },
   { path: '/tms/tracking', crumbs: [{ label: 'Load Tracking' }] },
+  { path: '/tms/carrier-sales', prefix: true, crumbs: [{ label: 'Carrier Sales' }] },
+  { path: '/tms/load-review', prefix: true, crumbs: [{ label: 'Load Review' }] },
   { path: '/tms/tracking/links', crumbs: [LOAD_TRACKING, { label: 'Customer links' }] },
   { path: '/tms/carriers/find', crumbs: [{ label: 'Carriers', to: '/tms/carriers' }, { label: 'Find & Invite' }] },
   { path: '/tms/customers/follow-ups', crumbs: [{ label: 'Customers', to: '/tms/customers' }, { label: 'Follow-ups' }] },
@@ -299,7 +280,7 @@ export function tmsBreadcrumb(pathname: string): TmsBreadcrumbItem[] {
   // Every nav item answers to its own label, and nothing ever reads "TMS".
   const isTms = pathname === '/tms' || pathname.startsWith('/tms/')
   let best: Pick<NavItemDef, 'to' | 'label'> | null = null
-  for (const item of isTms ? flatNavDefs() : ITEM_POOL) {
+  for (const item of isTms ? [...flatNavDefs(), ...LIFECYCLE_TABS.map((t) => ({ to: t.to, label: `${t.label} · ${t.caption}` }))] : ITEM_POOL) {
     if (pathname === item.to || pathname.startsWith(`${item.to}/`)) {
       if (!best || item.to.length > best.to.length) best = item
     }

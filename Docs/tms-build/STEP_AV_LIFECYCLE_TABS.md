@@ -67,3 +67,7 @@ defaults (`pinnedOf`).
   including detail/edit/new/intake ids), and a `LifecycleTabs.test.tsx` (render, lit state, badges,
   permission hiding) pass; typecheck, lint 0 warnings, full test run, build green.
 - BUILD_LOG entry "## Step AV deployed (job N)".
+
+## Progress
+- Paused 2026-11-06 at Ryne's request (prod batch first). Builder had written lifecycleTabs.ts/LifecycleTabs.tsx (+tests), navSections.ts sidebar trim, TmsShell/TmsLayout/kit.css wiring and six page h1 edits, all UNCOMMITTED and UNVERIFIED (no tsc/eslint/vitest run by me; builder was cancelled mid-run, so files may be mid-edit).
+- To resume: run tsc/eslint/targeted vitest on those files, then the scripts/ sidebar-selector sweep, full gate, push dev, BUILD_LOG "Step AV deployed", DEMO_WALKTHROUGH screenshots. Leave scripts/ingestFuelReport.mjs alone; use explicit paths with git add.

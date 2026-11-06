@@ -228,12 +228,12 @@ async function navFor(roleLabel, identity, wantRows) {
     for (let i = 0; i < 12; i += 1) { const n = await b.evaluate(`(() => { const c = document.querySelector('.tms-nav-rowwrap > .tms-nav-caret[aria-expanded="false"]'); if (!c) return 0; c.click(); return 1 })()`); if (!n) break; await pause(150) }
     const rows = await b.evaluate(SIDEBAR_JS)
     const trackingRows = rows.filter((r) => /tracking/i.test(r.label) || /^\/tms\/tracking/.test(r.href ?? ''))
-    const trackingLinks = await b.evaluate(`[...document.querySelectorAll('.tms-sidebar a, nav a')].filter((a) => /^\\/tms\\/tracking/.test(a.getAttribute('href') ?? '')).map((a) => a.getAttribute('href'))`)
-    const wrap = await b.evaluate(`(() => { const row = [...document.querySelectorAll('.tms-nav-rowwrap')].find((w) => /Load Tracking/.test(w.querySelector(':scope > .tms-nav-row')?.textContent ?? '')); return row ? { children: row.querySelectorAll('.tms-nav-child').length, caret: !!row.querySelector(':scope > .tms-nav-caret'), subList: row.querySelectorAll('li, .tms-nav-live, [class*="live"]').length } : null })()`)
+    const trackingLinks = await b.evaluate(`[...document.querySelectorAll('.tms-sidebar a')].filter((a) => /^\\/tms\\/tracking/.test(a.getAttribute('href') ?? '')).map((a) => a.getAttribute('href'))`)
+    const trackTab = await b.evaluate(`[...document.querySelectorAll('[data-testid="lifecycle-tab-track"]')].map((a) => ({ href: a.getAttribute('href'), lit: a.classList.contains('tms-active') }))`)
     const feedback = await b.evaluate(`!!document.querySelector('a[href="/feedback"]')`)
     const top = rows.filter((r) => r.depth === 0 && r.section === null).map((r) => r.label)
-    const ok = trackingRows.length === 1 && trackingRows[0].depth === 0 && (!wrap || (wrap.children === 0 && !wrap.caret)) && trackingLinks.length === 1
-    rec('nav', `${roleLabel}: ONE Load Tracking row, no children`, wantRows.tracking === false ? (trackingRows.length === 0 ? 'PASS' : 'FAIL') : (ok ? 'PASS' : 'FAIL'), `landing ${landing}; tracking rows ${trackingRows.length} ${JSON.stringify(trackingRows.map((r) => `${r.depth}|${r.label}`))}, tracking links in sidebar ${trackingLinks.length}, wrapper ${JSON.stringify(wrap)}; pinned top-level: ${JSON.stringify(top)}`)
+    const ok = trackingRows.length === 0 && trackingLinks.length === 0 && trackTab.length === 1 && trackTab[0].href === '/tms/tracking' && trackTab[0].lit
+    rec('nav', `${roleLabel}: Load Tracking is the Track lifecycle tab (lit on /tms/tracking), not a sidebar row`, ok ? 'PASS' : 'FAIL', `landing ${landing}; tracking sidebar rows ${trackingRows.length} ${JSON.stringify(trackingRows.map((r) => `${r.depth}|${r.label}`))}, tracking links in sidebar ${trackingLinks.length}, Track tab ${JSON.stringify(trackTab)}; pinned top-level: ${JSON.stringify(top)}`)
     rec('nav', `${roleLabel}: Feedback link`, feedback ? 'PASS' : 'FAIL', `a[href="/feedback"] present ${feedback}`)
     await shot(b, `nav-${roleLabel.replace(/[^a-z]/gi, '')}-1440`)
     return { rows, top }
@@ -243,9 +243,9 @@ async function nav(admin, loadsOnly, viewerTms) {
   const a = await navFor('owner/admin', admin, { tracking: true })
   const want = AA_SIDEBAR.filter((r) => r[2] === 0).map((r) => r[0])
   const got = a.rows.filter((r) => r.depth === 0 && r.section === null).map((r) => r.label)
-  rec('nav', 'admin: top-level order = Quotes / Shipments / Carrier Sales / Load Tracking / Load Review / Customers / Carriers / Locations / Accounting / Settings', JSON.stringify(got) === JSON.stringify(want) ? 'PASS' : 'FAIL', `got ${JSON.stringify(got)}`)
-  const kids = Object.fromEntries(['Shipments', 'Accounting'].map((p) => [p, a.rows.filter((r, i) => r.depth === 1 && a.rows.slice(0, i).reverse().find((x) => x.depth === 0)?.label === p).map((r) => r.label)]))
-  rec('nav', 'admin: Shipments children incl. Intake, Accounting children incl. Vendors', kids.Shipments.includes('Intake') && kids.Accounting.includes('Vendors') ? 'PASS' : 'FAIL', JSON.stringify(kids))
+  rec('nav', 'admin: top-level order = Company Dashboard / Active shipments / Customers / Carriers / Locations / Accounting / Settings (lifecycle pages are the top-bar strip)', JSON.stringify(got) === JSON.stringify(want) ? 'PASS' : 'FAIL', `got ${JSON.stringify(got)}`)
+  const kids = Object.fromEntries(['Accounting'].map((p) => [p, a.rows.filter((r, i) => r.depth === 1 && a.rows.slice(0, i).reverse().find((x) => x.depth === 0)?.label === p).map((r) => r.label)]))
+  rec('nav', 'admin: Accounting children incl. Vendors; Shipments group is gone', kids.Accounting.includes('Vendors') && !a.rows.some((r) => r.label === 'Shipments') ? 'PASS' : 'FAIL', JSON.stringify(kids))
   await navFor('page-loads only', loadsOnly, { tracking: true })
   await navFor('viewer with tms', viewerTms, { tracking: true })
 }

@@ -298,7 +298,7 @@ export function IntakeBoard() {
     <div className="tms-dense-page">
       <div className="tms-dense-bar">
         <span className="tms-dense-title">
-          <Truck size={18} aria-hidden="true" /> Shipments
+          <Truck size={18} aria-hidden="true" /> Build · Intake
         </span>
         <ShipmentsSectionTabs current="intake" />
         {tabs.length > 0 ? (

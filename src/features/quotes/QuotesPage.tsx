@@ -555,7 +555,7 @@ export function QuotesPage() {
   return (
     <>
       <TmsListPage<QuoteRecord>
-        title="Quotes"
+        title="Quote · Spot quotes"
         primaryAction={{ label: 'Quote', onClick: () => navigate('/tms/rates/new') }}
         search={{ value: query, onChange: setQuery, placeholder: 'Search quotes, customers, lanes' }}
         onRefresh={() => void refreshAll()}

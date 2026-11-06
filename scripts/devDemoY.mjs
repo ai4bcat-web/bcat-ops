@@ -848,8 +848,8 @@ STAGES.tour = async (ctx) => {
     await page('/tms/invoicing/payable', '57-accounts-payable-and-ap-inbox', 'Accounts Payable')
     await page('/tms/invoicing', '58-accounts-receivable', 'Accounts Receivable')
     await page('/feedback', '59-feedback-page', null)
-    await page('/tms/load-review', '60-load-review-queue', 'Load Review')
-    await page('/tms/rates', '61-quotes', 'Quotes')
+    await page('/tms/load-review', '60-load-review-queue', 'Review · Load review')
+    await page('/tms/rates', '61-quotes', 'Quote · Spot quotes')
   } finally { await b.close() }
   say(JSON.stringify(t))
 }

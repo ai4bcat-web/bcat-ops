@@ -547,8 +547,8 @@ async function intakeAreaFlow(b, ctx, theme, { viewer = false } = {}) {
     await b.poll(async () => (await mainText(b)).includes(ctx.rows.m3.subject), 'M3 under Unrouted', 20_000)
     if (!viewer) await snap(b, 'U08', 'intake-unrouted', theme)
     const open = (await intakeRows(ctx.token)).filter((r) => r.status === 'OPEN').length
-    const badge = await b.evaluate(`(() => { const a = [...document.querySelectorAll('.tms-sidebar a')].find((x) => /Intake/.test(x.textContent)); const m = a && /(\\d+)\\s*$/.exec(a.textContent.trim()); return m ? Number(m[1]) : null })()`)
-    if (badge !== open) throw new Error(`rail Intake badge ${badge}, open intake count ${open}`)
+    const badge = await b.evaluate(`(() => { const el = document.querySelector('[data-testid="lifecycle-badge-build"]'); const m = el && /(\\d+)\\s*$/.exec(el.textContent.trim()); return m ? Number(m[1]) : 0 })()`)
+    if (badge !== open) throw new Error(`Build lifecycle tab Intake badge ${badge}, open intake count ${open}`)
     await b.evaluate(`[...document.querySelectorAll('.tms-main .tms-tabs [role="tab"]')].find((t) => t.textContent.trim().startsWith(${JSON.stringify(`ZZ U ${ctx.ts}`)}))?.click()`)
     await pause(500)
     await snap(b, 'U07', 'intake-tabs', theme)

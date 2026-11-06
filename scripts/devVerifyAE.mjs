@@ -233,11 +233,11 @@ async function ae04(ctx) {
   try {
     // 1. the old URL lands on Quotes, and the nav has no Lane rates row
     await b.navigate('/tms/rates/lanes?x=1')
-    await b.waitFor('.tms-nav-child, .tms-nav-row', 60_000)
+    await b.waitFor('[data-testid="lifecycle-tab-quote"]', 60_000)
     await b.evaluate('new Promise((r) => setTimeout(r, 1500))')
     const path = await b.evaluate('location.pathname + location.search')
     expect(path.startsWith('/tms/rates') && !path.includes('lanes'), `old Lane rates URL landed on ${path}`)
-    const labels = await b.evaluate(`[...document.querySelectorAll('.tms-nav-child-label, .tms-nav-label')].map((n) => n.textContent.trim())`)
+    const labels = await b.evaluate(`[...document.querySelectorAll('.tms-nav-child-label, .tms-nav-label, .tms-lifecycle-label, .tms-lifecycle-caption')].map((n) => n.textContent.trim())`)
     expect(!labels.includes('Lane rates'), 'the nav still lists Lane rates')
     await b.screenshot(`${SHOTS}/AE01-quotes-after-redirect.png`); shots.push('AE01-quotes-after-redirect.png')
 
@@ -321,7 +321,7 @@ async function ae07(ctx) {
   try {
     // 1. Quotes › Sent: an Outcome column, a filter chip + dialog
     await b.navigate('/tms/rates')
-    await b.waitFor('.tms-nav-child, .tms-nav-row', 60_000)
+    await b.waitFor('[data-testid="lifecycle-tab-quote"]', 60_000)
     await sleep(2500)
     expect(await click('Sent'), 'no Sent tab')
     await sleep(800)

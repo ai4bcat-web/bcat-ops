@@ -644,3 +644,103 @@
 .tms-portal .tms-docframe-muted { color: var(--tms-muted); }
 .tms-shell .tms-docframe-download,
 .tms-portal .tms-docframe-download { position: absolute; top: 8px; right: 8px; }
+
+/* ── Lifecycle strip (Step AV): Quote · Build · View · Book · Track · Review, in the top bar ─────── */
+
+.tms-shell .tms-lifecycle {
+  flex: 1 1 auto;
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.tms-shell .tms-lifecycle-list {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tms-shell .tms-lifecycle-list::-webkit-scrollbar {
+  display: none;
+}
+
+.tms-shell .tms-lifecycle-item {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.tms-shell .tms-lifecycle-chev {
+  flex: 0 0 auto;
+  margin: 0 2px;
+  color: var(--tms-disabled);
+}
+
+.tms-shell .tms-lifecycle-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--tms-radius-pill);
+  color: var(--tms-text-2);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-lifecycle-tab:hover {
+  background: var(--tms-surface-hover);
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-lifecycle-tab.tms-lifecycle-done {
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+}
+
+.tms-shell .tms-lifecycle-tab.tms-active,
+.tms-shell .tms-lifecycle-tab.tms-active:hover {
+  background: var(--tms-primary);
+  color: var(--tms-on-primary);
+}
+
+.tms-shell .tms-lifecycle-caption {
+  color: var(--tms-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tms-shell .tms-lifecycle-tab.tms-active .tms-lifecycle-caption {
+  color: var(--tms-on-primary);
+}
+
+.tms-shell .tms-lifecycle-tab.tms-lifecycle-done .tms-lifecycle-caption {
+  color: var(--tms-primary-ink);
+}
+
+/* Narrow strip: captions go first, the list then scrolls sideways. */
+@container (max-width: 700px) {
+  .tms-shell .tms-lifecycle-caption {
+    display: none;
+  }
+}
+
+/* Phone: the strip drops under the breadcrumb row instead of squeezing it. */
+@media (max-width: 900px) {
+  .tms-shell .tms-topbar:has(.tms-lifecycle) {
+    flex-wrap: wrap;
+    height: auto;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .tms-shell .tms-topbar .tms-lifecycle {
+    order: 10;
+    flex: 1 0 100%;
+  }
+}

@@ -312,7 +312,7 @@ export function ShipmentsBoard() {
       <div className="tms-dense-bar">
         <div className="flex items-center gap-3">
           <Truck size={18} />
-          <span className="font-semibold">Shipments</span>
+          <span className="font-semibold">View · Active shipments</span>
           <ShipmentsSectionTabs current={list} activeCount={counts.active} allCount={needWindow && !windowLoading ? counts.all : undefined} />
           {partial && <TmsBadge tone="gray">Adding delivered loads…</TmsBadge>}
           {needWindow && (

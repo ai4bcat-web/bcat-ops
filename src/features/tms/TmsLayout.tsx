@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { TmsShell } from '@/features/tms/TmsShell'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
-import { buildNavSections, companyOptions, tmsBreadcrumb } from '@/lib/navSections'
+import { TMS_PAGE_KEY, buildNavSections, companyOptions, tmsBreadcrumb } from '@/lib/navSections'
 import { useAuth } from '@/hooks/useAuth'
 import { NotificationsDrawer } from '@/features/tms/notifications/NotificationsDrawer'
 import { useNotifications } from '@/features/tms/notifications/useNotifications'
@@ -87,6 +87,7 @@ export function TmsLayout() {
   return (
     <TmsShell
       pinned={pinned}
+      canOpenPage={(pageKey) => isOwner || isAdmin || hasPageAccess(pageKey) || hasPageAccess(TMS_PAGE_KEY)}
       sections={sections}
       activePath={location.pathname}
       activeSearch={location.search}

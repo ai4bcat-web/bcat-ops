@@ -57,13 +57,10 @@ describe('buildNavSections', () => {
   it('gives the owner the whole rail in order: the pinned freight list, then Assets, Car shipping, Company', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     expect(labels(pinned)).toEqual([
-      'Company Dashboard', 'Quotes', 'Shipments', 'Carrier Sales', 'Load Tracking', 'Load Review',
-      'Customers', 'Carriers', 'Locations', 'Accounting', 'Settings',
+      'Company Dashboard', 'Active shipments', 'Customers', 'Carriers', 'Locations', 'Accounting', 'Settings',
     ])
     const kids = (label: string) => labels(pinned.find((i) => i.label === label)?.children)
-    expect(kids('Quotes')).toEqual(['Quotes', 'Spot inbox'])
-    expect(kids('Shipments')).toEqual(['Active', 'All', 'Intake'])
-    expect(pinned.find((i) => i.label === 'Load Tracking')?.children).toBeUndefined()
+    expect(pinned.find((i) => i.label === 'Active shipments')?.children).toBeUndefined()
     expect(kids('Customers')).toEqual(['Customers', 'Follow-ups'])
     expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Vendors', 'Factoring'])
     expect(kids('Settings')).toEqual([
@@ -118,21 +115,19 @@ describe('buildNavSections', () => {
     expect(sections).toEqual([])
   })
 
-  it('shows a loads grant the shared freight pages, not Load Review or the money pages', () => {
+  it('shows a loads grant Active shipments only, not Load Review or the money pages', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('loads') })
-    expect(labels(pinned)).toEqual(['Shipments', 'Carrier Sales', 'Load Tracking'])
+    expect(labels(pinned)).toEqual(['Active shipments'])
     expect(sections).toEqual([])
-    expect(pinned[0].children).toEqual([
-      expect.objectContaining({ to: '/tms/shipments', label: 'Active' }),
-      expect.objectContaining({ to: '/tms/shipments?list=all', label: 'All' }),
-      expect.objectContaining({ to: '/tms/shipments/intake', label: 'Intake', badgeKey: 'intakeLoads' }),
-    ])
+    expect(pinned[0].to).toBe('/tms/shipments')
+    expect(pinned[0].children).toBeUndefined()
   })
 
-  it('never lists the retired tracking sub-pages, for any role, owner or grant', () => {
-    interface Row { to: string; label: string; children?: Row[] }
+  it('keeps every lifecycle page and its sub-pages out of the sidebar, for any role, owner or grant', () => {
+    interface Row { to: string; label: string; badgeKey?: string; children?: Row[] }
     const walk = (items: Row[]): Row[] => items.flatMap((i) => [i, ...walk(i.children ?? [])])
-    const retired = /^\/tms\/(check-calls|documents\/review|tracking\/links|tracking\/.+)/
+    const lifecycle = /^\/tms\/(rates|carrier-sales|tracking|load-review|shipments\/(intake|new))/
+    const lifecycleBadges = ['quotesToReply', 'spotNew', 'intakeLoads', 'carrierSales', 'loadTracking', 'loadReview']
     const roles = [
       buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true }),
       buildNavSections({ divisions: FOUR, hasPageAccess: () => true }),
@@ -141,16 +136,13 @@ describe('buildNavSections', () => {
     ]
     for (const { pinned, sections } of roles) {
       const all = walk([...pinned, ...sections.flatMap((s) => s.items ?? [])])
-      const tracking = all.filter((i) => i.label === 'Load Tracking')
-      expect(tracking).toHaveLength(1)
-      expect(tracking[0].to).toBe('/tms/tracking')
-      expect(tracking[0].children).toBeUndefined()
-      expect(all.filter((i) => retired.test(i.to) || /^(Check calls|Document review|Customer links)$/.test(i.label))).toEqual([])
+      expect(all.filter((i) => lifecycle.test(i.to))).toEqual([])
+      expect(all.filter((i) => i.badgeKey && lifecycleBadges.includes(i.badgeKey))).toEqual([])
     }
   })
 
-  it('shows a loadReview-only grant Load Review alone', () => {
-    expect(labels(pinnedOf('loadReview'))).toEqual(['Load Review'])
+  it('shows a loadReview-only grant no sidebar row: Review is a lifecycle tab', () => {
+    expect(labels(pinnedOf('loadReview'))).toEqual([])
   })
 
   it('puts a compliance-only grant under Settings, landing the group on Compliance', () => {
@@ -173,11 +165,8 @@ describe('buildNavSections', () => {
     expect(ap[0].to).toBe('/tms/invoicing/payable')
   })
 
-  it('shows a quotes grant the Quotes parent with its own children, and no other freight page', () => {
-    const quotes = pinnedOf('quotes')
-    expect(labels(quotes)).toEqual(['Quotes'])
-    expect(quotes[0].to).toBe('/tms/rates')
-    expect(labels(quotes[0].children)).toEqual(['Quotes', 'Spot inbox'])
+  it('shows a quotes-only grant no sidebar row: Quote is a lifecycle tab', () => {
+    expect(labels(pinnedOf('quotes'))).toEqual([])
   })
 
   it('keeps a fleet user out of the freight list and the Brokerage business', () => {
@@ -188,7 +177,7 @@ describe('buildNavSections', () => {
     expect(businesses).toEqual([{ key: 'ASSETS' }])
   })
 
-  it('renders the Shipments children as Active, All and Intake', () => {
+  it('renders Active shipments as one plain row, with no Active / All / Intake children', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
     render(
       createElement(
@@ -208,10 +197,10 @@ describe('buildNavSections', () => {
       )
     )
     expect(screen.getByRole('link', { name: /^Company Dashboard$/ })).toHaveAttribute('href', '/tms/dashboard')
-    expect(screen.getByRole('link', { name: 'Active' })).toHaveAttribute('href', '/tms/shipments')
-    expect(screen.getByRole('link', { name: 'All' })).toHaveAttribute('href', '/tms/shipments?list=all')
-    expect(screen.getByRole('link', { name: 'Intake' })).toHaveAttribute('href', '/tms/shipments/intake')
-    expect(screen.queryByRole('link', { name: 'Dispatch' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^Active shipments$/ })).toHaveAttribute('href', '/tms/shipments')
+    for (const gone of ['Active', 'All', 'Intake', 'Dispatch', 'Quotes', 'Carrier Sales', 'Load Tracking', 'Load Review']) {
+      expect(screen.queryByRole('link', { name: gone })).not.toBeInTheDocument()
+    }
   })
 
   it('has no Academy, Workflows or Dispatch row anywhere in the rail', () => {
