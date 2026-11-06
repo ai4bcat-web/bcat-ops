@@ -24,6 +24,9 @@ Deviations from STEP_AV_LIFECYCLE_TABS.md
 - Intake badge source: the Build tab's badge is the open Intake count (same source as the former sidebar Intake badge); Quote / Book / Track / Review badges reuse the existing shell badge counts.
 - Division sections in the sidebar (ASSETS etc.) keep their own Intake row (`?division=`); the brokerage rail itself is trimmed as specced.
 
+
+- **Step AV feedback 3 deployed (job 208, commit 024f6f8, dev):** Build / Intake opens on **All loads**; **By rev division** and **By customer** are sibling tabs with a sub-tab per division (Unassigned for rows with none) or per customer (most rows first, Not matched last), counts derived from the loaded queue (no extra reads), URL-backed (`?view=all|division|customer&group=<id>`; legacy `?division=` links still map). The last non-default view is remembered per user (`tms:intake:view:<email>`) but a bare URL always opens on All loads. Live: `devVerifyAV` 38 pass / 0 fail incl. AV13 (All selected by default, division and customer counts sum to the All count, URL reflects the view, reload keeps `?view=customer`). Not green: `devVerifyU --only=intake` (6 fail): the U05 steps look for the ZZ division fixture the full U run creates (absent when run with `--only`), and U07 compares the collapsed intake rail to the dashboard's expanded sidebar; neither was diagnosed beyond that, and a full U run was not done. Gate: tsc x3, eslint 0 warnings, 828 files / 10,287 tests, build.
+
 ### 2026-11-06 - Step AV feedback 1-2 deployed (job 205)
 
 Dev only, commit 8f23058 (Amplify job 205). Live runs against dev, throwaway identities deleted and confirmed gone. Screenshots (1440x900 and 1280x800) in `Docs/tms-build/screenshots/av/` (index.txt there; stale strip shots replaced, `quote-tabs-1440`, `carriers-tabs-1440`, `sidebar-1280` added).
