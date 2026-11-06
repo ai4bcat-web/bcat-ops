@@ -71,3 +71,27 @@ defaults (`pinnedOf`).
 ## Progress
 - Paused 2026-11-06 at Ryne's request (prod batch first). Builder had written lifecycleTabs.ts/LifecycleTabs.tsx (+tests), navSections.ts sidebar trim, TmsShell/TmsLayout/kit.css wiring and six page h1 edits, all UNCOMMITTED and UNVERIFIED (no tsc/eslint/vitest run by me; builder was cancelled mid-run, so files may be mid-edit).
 - To resume: run tsc/eslint/targeted vitest on those files, then the scripts/ sidebar-selector sweep, full gate, push dev, BUILD_LOG "Step AV deployed", DEMO_WALKTHROUGH screenshots. Leave scripts/ingestFuelReport.mjs alone; use explicit paths with git add.
+
+## Ryne's feedback 1 (2026-11-06, screenshot aljex-create/40-av-strip-clipped.png)
+> "lets remove the follow ups from customers. let's merge the carriers and find and invite to be tabs on
+> the same page. Carriers should show find and invite on the first tab and carrier list on the second
+> page. You can't see all the navigation at the top. make sure it's all visible. Also let's merge the
+> quotes and the quote inbox into multiple tabs on the quote page"
+
+1. **Strip fully visible.** The lifecycle strip is clipped at the right edge ("Re…" for Review) beside the
+   breadcrumb. All six tabs must be visible at normal desktop widths (1280 and up) without scrolling:
+   move the breadcrumb off that row (or drop it), tighten tab padding, drop the Quote pill's oversized
+   fill, hide captions first, then shrink to number-only badges, and only below ~1000px fall back to a
+   horizontal scroll with the active tab scrolled into view. Verify with a screenshot at 1280 and 1440.
+2. **Customers: remove Follow-ups.** Remove the Follow-ups child, route link and tab (`/tms/customers/follow-ups`
+   redirects to `/tms/customers`); drop the SHOW_RESERVED_AB follow-ups entry and its nav test.
+3. **Carriers: one page, two tabs.** `/tms/carriers` becomes a page with tabs: **Find & Invite** first
+   (today's `/tms/carriers/find`) and **Carrier list** second (today's list). Default tab is Find & Invite.
+   Tabs are URL-backed (`/tms/carriers/find`, `/tms/carriers`), the sidebar keeps a single Carriers entry,
+   and the old Find & Invite sidebar child goes away. Carrier detail `/tms/carriers/:id` stays and keeps
+   the Carriers entry lit.
+4. **Quote: one page, tabs.** `/tms/rates` becomes the Quote page with tabs **Quotes** and **Quote inbox**
+   (today's Spot inbox, `/tms/rates/spot`, plus its callback route), URL-backed, with the inbox count badge
+   on its tab. The sidebar no longer lists Spot inbox separately (Quotes is no longer in the sidebar after
+   AV anyway). Always show the inbox tab (no longer behind SHOW_RESERVED_AB if the page exists on dev).
+5. Update `navSections`/`lifecycleTabs` tests for the new structure; BUILD_LOG under Step AV.
