@@ -22,7 +22,7 @@ const bob = row('b', 'Bob Ray', [work('5', 'b', '2026-10-12', 240)], null)
 
 function view(over: Partial<React.ComponentProps<typeof HoursPeriodView>> = {}) {
   const props: React.ComponentProps<typeof HoursPeriodView> = {
-    rows: [ann, bob], periodLabel: 'Oct 12 – Oct 25', defaultRateFrom: START, showPay: true, motive: {}, ptoYear: '2026', ptoDays: { a: 1, b: 0 },
+    rows: [ann, bob], periodLabel: 'Oct 12 – Oct 25', defaultRateFrom: START, showPay: true, ratesReady: true, motive: {}, ptoYear: '2026', ptoDays: { a: 1, b: 0 },
     rateInfo: (id) => ({ currentFrom: null, rate: id === 'a' ? 20 : null }),
     onSaveRate: vi.fn().mockResolvedValue(undefined), onExportCsv: vi.fn(),
     editing: null, setEditing: vi.fn(), saving: false, onStartEdit: vi.fn(), onSaveEdit: vi.fn(),
@@ -102,5 +102,24 @@ describe('HoursPeriodView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save rate' }))
     expect((await screen.findByRole('alert')).textContent).toMatch(/began 2026-11-02/)
     expect(screen.getByRole('group', { name: 'Ann Lee hourly rate' })).toBeTruthy()
+  })
+
+  it('a period that predates the rate shows a dash for Rate, a dash for pay, and says days have no rate', () => {
+    // The driver has a current rate (from later), but the setting has none in effect for these days.
+    const early = row('c', 'Cy Poe', [work('9', 'c', '2026-10-12', 480)], null)
+    view({ rows: [early], rateInfo: () => ({ currentFrom: '2026-11-02', rate: 27 }) })
+    const c = screen.getByRole('region', { name: 'Cy Poe' })
+    expect(within(c).queryByRole('button', { name: 'Set rate' })).toBeNull()
+    expect(within(c).getByRole('button', { name: 'Edit Cy Poe hourly rate' })).toBeTruthy()
+    expect(c.textContent).not.toMatch(/\$27/)
+    expect(within(c).getAllByText('—').length).toBe(2)
+    expect(within(c).getByText('some days have no rate')).toBeTruthy()
+  })
+
+  it('while rates are not loaded there is no Set rate, no editor and no rate or pay shown', () => {
+    view({ ratesReady: false })
+    expect(screen.queryByRole('button', { name: 'Set rate' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /hourly rate/ })).toBeNull()
+    expect(document.body.textContent).not.toMatch(/\$20\.00|\$645/)
   })
 })

@@ -56,7 +56,8 @@ export function currentRateFrom(setting: HourlyRateSetting): string | null {
  * The fields to save for a new current rate effective from a day. The old rate's window is
  * closed on that day (kept, with who and when); a rate may not start on or before a day that
  * a past window already covers, since that would rewrite paid time. Re-entering the date the
- * current rate began corrects it in place.
+ * current rate began corrects it in place. The first rate alone may move to any date, since
+ * nothing was paid before it.
  */
 export function withRateChange(
   setting: HourlyRateSetting,
@@ -69,6 +70,14 @@ export function withRateChange(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) throw new Error('Pick the date the rate starts.')
   const history = windows(setting)
   const began = currentRateFrom(setting)
+  // The FIRST rate has nothing paid before it (its only window is the unrated stretch), so its
+  // start date can be moved either way: a mistyped first date must be fixable from the editor.
+  // Same rate on another date, or any rate on or before where it began, is that correction;
+  // a different rate from a later date is a raise like any other.
+  const onlyUnrated = history.length === 1 && history[0].from === EPOCH && history[0].hourlyRate === null
+  if (onlyUnrated && validRate(setting.hourlyRate) && (newRate === setting.hourlyRate || effectiveFrom <= history[0].until)) {
+    return { hourlyRate: newRate, hourlyRateHistory: [{ ...history[0], until: effectiveFrom, endedBy: by, endedAt: at }] }
+  }
   if (began !== null && effectiveFrom < began) {
     throw new Error(`The current rate began ${began}; a new one cannot start before that without rewriting paid time.`)
   }

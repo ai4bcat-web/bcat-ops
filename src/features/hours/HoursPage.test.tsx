@@ -97,4 +97,18 @@ describe('HoursPage', () => {
     // Days before 10/19 keep $25: the period's pay does not move.
     expect(await within(screen.getByRole('region', { name: 'Ann Lee' })).findByText('$400.00')).toBeTruthy()
   })
+
+  it('a failed rates load shows a banner, offers no Set rate for anyone, and recovers on Try again', async () => {
+    api.listDriverPaySettings.mockRejectedValueOnce(new Error('network down'))
+    render(<HoursPage />)
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toMatch(/Hourly rates could not be loaded: network down/)
+    expect(screen.queryByRole('button', { name: 'Set rate' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /hourly rate/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    const ann = await screen.findByRole('region', { name: 'Ann Lee' })
+    expect(await within(ann).findByText('$400.00')).toBeTruthy()
+    expect(screen.queryByText(/could not be loaded/)).toBeNull()
+    expect(within(screen.getByRole('region', { name: 'Bob Ray' })).getByRole('button', { name: 'Set rate' })).toBeTruthy()
+  })
 })

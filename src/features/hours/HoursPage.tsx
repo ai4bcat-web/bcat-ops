@@ -127,7 +127,7 @@ export function HoursPage() {
 
   // Pay (rates and dollars) is for staff who can open the pay pages; everyone else sees hours only.
   const canSeePay = hasPageAccess('driverPay')
-  const { settings: paySettings, saveRate } = useHourlyRates(canSeePay, staffEmail)
+  const { settings: paySettings, status: ratesStatus, error: ratesError, reload: reloadRates, saveRate } = useHourlyRates(canSeePay, staffEmail)
 
   const byDriver = useMemo<DriverHoursRow[]>(() => {
     return clocking.map((d) => {
@@ -246,6 +246,14 @@ export function HoursPage() {
         </div>
       )}
 
+      {ratesStatus === 'error' && (
+        <div role="alert" className="flex items-center gap-2 bg-red-500/10 px-8 py-2 text-sm text-red-700 print:hidden">
+          <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+          Hourly rates could not be loaded{ratesError ? `: ${ratesError}` : ''}. Pay is not shown and rates cannot be edited until they load.
+          <button type="button" className="ml-2 font-semibold underline" onClick={reloadRates}>Try again</button>
+        </div>
+      )}
+
       <div className="flex-1 overflow-auto px-8 py-6 print:overflow-visible print:px-0">
         {byDriver.length === 0 ? (
           <p className="text-sm text-muted-foreground">{roster.length === 0 ? 'No Ivan drivers on the roster.' : 'Every driver is hidden — use the Drivers filter to show some.'}</p>
@@ -255,6 +263,7 @@ export function HoursPage() {
             periodLabel={periodLabel(periodStart)}
             defaultRateFrom={periodStart}
             showPay={canSeePay}
+            ratesReady={ratesStatus === 'ready'}
             motive={motive}
             ptoYear={ptoYear}
             ptoDays={ptoDays}

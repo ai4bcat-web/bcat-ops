@@ -216,7 +216,7 @@ function RateEditor({ name, currentFrom, defaultFrom, initialRate, onSave, onCan
 }
 
 export function HoursPeriodView({
-  rows, periodLabel, defaultRateFrom, showPay, motive, ptoYear, ptoDays, rateInfo, onSaveRate, onExportCsv,
+  rows, periodLabel, defaultRateFrom, showPay, ratesReady, motive, ptoYear, ptoDays, rateInfo, onSaveRate, onExportCsv,
   editing, setEditing, saving, onStartEdit, onSaveEdit,
 }: {
   rows: DriverHoursRow[]
@@ -224,6 +224,8 @@ export function HoursPeriodView({
   /** Start of the period on screen: the default "effective from" for a new rate. */
   defaultRateFrom: string
   showPay: boolean
+  /** Rates finished loading. While they have not (or failed), no rate or editor is offered. */
+  ratesReady: boolean
   motive: Record<string, Record<string, TruckDayWindow>>
   ptoYear: string
   /** driverId -> PTO days used this calendar year, when loaded. */
@@ -241,6 +243,8 @@ export function HoursPeriodView({
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [rateFor, setRateFor] = useState<string | null>(null)
   const totals = totalsOf(rows)
+  // Until the rates are known no dollar figure is shown, whatever the rows carry.
+  const totalPay = ratesReady ? totals.totalPay : null
   const cols = showPay ? PAY_COLS : COLS
   const toggle = (id: string) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const allOpen = rows.length > 0 && open.size === rows.length
@@ -253,7 +257,7 @@ export function HoursPeriodView({
         <Stat label="Worked" value={hm(totals.workedMinutes)} sub={`${decimalHours(totals.workedMinutes)} h`} />
         <Stat label="Total PTO" value={hm(totals.ptoMinutes)} sub={`${decimalHours(totals.ptoMinutes)} h`} tone="text-blue-700" />
         <Stat label="Total holiday" value={hm(totals.holidayMinutes)} sub={`${decimalHours(totals.holidayMinutes)} h`} tone="text-amber-700" />
-        {showPay && <Stat label="Total pay" value={money(totals.totalPay)} sub={periodLabel} tone="text-emerald-700" />}
+        {showPay && <Stat label="Total pay" value={money(totalPay)} sub={periodLabel} tone="text-emerald-700" />}
         <div className="ml-auto flex items-end gap-2 print:hidden">
           <Button variant="outline" size="sm" onClick={() => setOpen(allOpen ? new Set() : new Set(rows.map((r) => r.driverId)))}>
             {allOpen ? 'Collapse all' : 'Expand all'}
@@ -304,10 +308,20 @@ export function HoursPeriodView({
                 <Hours minutes={row.period.totalMinutes} tone="total" />
                 {showPay && row.pay && info && (
                   <div className="text-right">
-                    {row.pay.rate != null || info.rate != null ? (
+                    {!ratesReady ? (
+                      <span className="text-base text-muted-foreground" title="Rates are not loaded">—</span>
+                    ) : row.pay.rate != null ? (
                       <>
-                        <span className="text-base tabular-nums text-foreground">{money(row.pay.rate ?? info.rate)}</span>
+                        <span className="text-base tabular-nums text-foreground">{money(row.pay.rate)}</span>
                         {row.pay.mixedRates && <div className="text-[11px] text-muted-foreground">rate changed in period</div>}
+                        <button type="button" aria-label={`Edit ${row.name} hourly rate`} className="ml-1 text-muted-foreground print:hidden" onClick={() => setRateFor(row.driverId)}>
+                          <Pencil className="inline h-3 w-3" aria-hidden="true" />
+                        </button>
+                      </>
+                    ) : info.rate != null ? (
+                      // A rate exists but began after this period: nothing to show for these days.
+                      <>
+                        <span className="text-base text-muted-foreground">—</span>
                         <button type="button" aria-label={`Edit ${row.name} hourly rate`} className="ml-1 text-muted-foreground print:hidden" onClick={() => setRateFor(row.driverId)}>
                           <Pencil className="inline h-3 w-3" aria-hidden="true" />
                         </button>
@@ -319,12 +333,14 @@ export function HoursPeriodView({
                 )}
                 {showPay && row.pay && (
                   <div className="text-right">
-                    <span className="text-lg font-bold tabular-nums text-emerald-700">{money(row.pay.pay)}</span>
-                    {row.pay.partial && <div className="text-[11px] text-amber-700">some days have no rate</div>}
+                    <span className="text-lg font-bold tabular-nums text-emerald-700">{money(ratesReady ? row.pay.pay : null)}</span>
+                    {ratesReady && (row.pay.partial || (row.pay.rate == null && info?.rate != null && row.period.totalMinutes > 0)) && (
+                      <div className="text-[11px] text-amber-700">some days have no rate</div>
+                    )}
                   </div>
                 )}
               </div>
-              {showPay && rateFor === row.driverId && info && (
+              {showPay && ratesReady && rateFor === row.driverId && info && (
                 <RateEditor
                   name={row.name}
                   currentFrom={info.currentFrom}
@@ -359,7 +375,7 @@ export function HoursPeriodView({
           <Hours minutes={totals.holidayMinutes} tone="holiday" />
           <Hours minutes={totals.totalMinutes} tone="total" />
           {showPay && <span />}
-          {showPay && <span className="text-right text-lg font-bold tabular-nums text-emerald-700">{money(totals.totalPay)}</span>}
+          {showPay && <span className="text-right text-lg font-bold tabular-nums text-emerald-700">{money(totalPay)}</span>}
         </div>
       </div>
     </div>

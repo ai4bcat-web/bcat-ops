@@ -70,6 +70,36 @@ describe('withRateChange', () => {
     expect(fixed.hourlyRateHistory).toHaveLength(2)
   })
 
+  it('the first rate can be moved earlier or later while nothing was paid before it, and its pay follows', () => {
+    const first = withRateChange({}, 22, '2026-10-26', 'r', 't')           // mistyped: meant 10/12
+    const fixed = withRateChange({ hourlyRate: first.hourlyRate, hourlyRateHistory: first.hourlyRateHistory }, 22, '2026-10-12', 'r2', 't2')
+    expect(fixed.hourlyRateHistory).toHaveLength(1)
+    expect(fixed.hourlyRateHistory[0]).toMatchObject({ from: '1970-01-01', until: '2026-10-12', hourlyRate: null, endedBy: 'r2' })
+    expect(rateOn(fixed, '2026-10-12')).toBe(22)
+    expect(rateOn(fixed, '2026-10-11')).toBeNull()
+    const later = withRateChange(fixed, 22, '2026-11-02', 'r', 't')           // same rate, later date
+    expect(rateOn(later, '2026-10-20')).toBeNull()
+    expect(later.hourlyRateHistory).toHaveLength(1)
+    const both = withRateChange(later, 24, '2026-10-05', 'r', 't')            // earlier date with a fixed rate
+    expect(both.hourlyRate).toBe(24)
+    expect(rateOn(both, '2026-10-05')).toBe(24)
+    expect(both.hourlyRateHistory).toHaveLength(1)
+  })
+
+  it('a different rate from a later date is still a raise, not a correction of the first date', () => {
+    const one = withRateChange({}, 22, '2026-10-12', 'r', 't')
+    const raised = withRateChange(one, 25, '2026-10-26', 'r', 't')
+    expect(rateOn(raised, '2026-10-20')).toBe(22)
+    expect(rateOn(raised, '2026-10-26')).toBe(25)
+    expect(raised.hourlyRateHistory).toHaveLength(2)
+  })
+
+  it('once a second rate exists the first window is paid history and stays put', () => {
+    const one = withRateChange({}, 22, '2026-10-12', 'r', 't')
+    const two = withRateChange(one, 25, '2026-10-26', 'r', 't')
+    expect(() => withRateChange(two, 26, '2026-10-20', 'r', 't')).toThrow(/began 2026-10-26/)
+  })
+
   it('rejects a zero, negative or missing rate and a bad date', () => {
     expect(() => withRateChange({}, 0, '2026-10-12', 'r', 't')).toThrow()
     expect(() => withRateChange({}, -3, '2026-10-12', 'r', 't')).toThrow()
