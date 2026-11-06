@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 const api = {
   fetchPaperwork: vi.fn(),
   fetchPaperworkWeeks: vi.fn(),
+  reorderLoads: vi.fn(),
   setStopDetention: vi.fn(),
   recordStopEvent: vi.fn(),
   addLocationNote: vi.fn(),
@@ -417,19 +418,37 @@ describe("today's sheet", () => {
 
   it("shows the place's hours and what other drivers said, and lets this driver add a note", async () => {
     const { fireEvent } = await import('@testing-library/react')
-    api.addLocationNote.mockResolvedValue({ note: { at: '2026-10-07T20:00:00Z', by: 'Jason Smith', text: 'Gate code 4411' } })
+    api.addLocationNote.mockResolvedValue({ locationId: 'loc-1', note: { at: '2026-10-07T20:00:00Z', by: 'Jason Smith', text: 'Gate code 4411' } })
     todayWeek([load({ stops: [stop('st-pu', 'pickup', '2026-10-07', {
       location: { id: 'loc-1', hours: 'Mon–Fri 6am–3pm', dockNotes: 'Check in at the guard shack', notes: null, driverNotes: [{ at: '2026-10-01T12:00:00Z', by: 'Chuck Best', text: 'Use dock 4' }] },
     })] })])
     renderPage()
     await waitFor(() => expect(screen.getByText(/Mon–Fri 6am–3pm/)).toBeTruthy(), { timeout: 5000 })
     expect(screen.getByText(/Check in at the guard shack/)).toBeTruthy()
-    expect(screen.getByText(/Use dock 4/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /Add a note about this place/ }))
+    // The newest note is pinned on the card header AND listed with the place's notes.
+    expect(screen.getByLabelText('Newest location note').textContent).toMatch(/Chuck Best: Use dock 4/)
+    expect(screen.getAllByText(/Use dock 4/).length).toBe(2)
+    expect(screen.getByText(/Location notes \(check-in, dock, gate/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Add a location note/ }))
     fireEvent.change(screen.getByLabelText(/Note about Batory Oakley/), { target: { value: 'Gate code 4411' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save note' }))
-    await waitFor(() => expect(api.addLocationNote).toHaveBeenCalledWith({ loadId: 'load-1', locationId: 'loc-1', text: 'Gate code 4411' }))
-    await waitFor(() => expect(screen.getByText(/Gate code 4411/)).toBeTruthy())
+    await waitFor(() => expect(api.addLocationNote).toHaveBeenCalledWith({ loadId: 'load-1', stopId: 'st-pu', text: 'Gate code 4411' }))
+    await waitFor(() => expect(screen.getByLabelText('Newest location note').textContent).toMatch(/Gate code 4411/))
+  })
+
+  it('offers notes on a stop with no directory place, and pins the note once saved', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    api.addLocationNote.mockResolvedValue({ locationId: 'made-1', note: { at: '2026-10-07T20:00:00Z', by: 'Jason Smith', text: 'Check in at the guard shack' } })
+    todayWeek([load({ stops: [stop('st-pu', 'pickup', '2026-10-07')] })])   // no `location` on this stop
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /Add a location note/ })).toBeTruthy(), { timeout: 5000 })
+    expect(screen.queryByLabelText('Newest location note')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Add a location note/ }))
+    fireEvent.change(screen.getByLabelText(/Note about Batory Oakley/), { target: { value: 'Check in at the guard shack' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save note' }))
+    await waitFor(() => expect(screen.getByLabelText('Newest location note').textContent).toMatch(/Check in at the guard shack/))
+    // Now it has a place, so the note can be edited or removed.
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
   })
 
   it('says so when nothing is scheduled today', async () => {
@@ -612,5 +631,49 @@ describe('reporting a truck problem', () => {
     fireEvent.click(screen.getByRole('button', { name: /Urgent/ }))
     fireEvent.click(screen.getByRole('button', { name: /Send to the shop/ }))
     await waitFor(() => expect(api.reportMaintenanceTask).toHaveBeenCalledWith({ title: 'Brakes squeal', notes: undefined, priority: 'high', truckId: 'eq-3114' }))
+  })
+})
+
+describe('the driver reorders their loads', () => {
+  const week = (a: number, b: number) => ({
+    weekStart: '2026-10-04', today: '2026-10-07', loadCount: 2, podsMissing: 0, podsIllegible: 0,
+    loads: [
+      load({ id: 'l-a', reference: '14570', sortOrder: a, stops: [stop('a-pu', 'pickup', '2026-10-07', { name: 'Alpha Dock' })] }),
+      load({ id: 'l-b', reference: '14571', sortOrder: b, stops: [stop('b-pu', 'pickup', '2026-10-07', { name: 'Bravo Dock' })] }),
+    ],
+  })
+  // The stop cards' titles, in list order (the route strip above repeats the names).
+  const names = () => [...document.querySelectorAll('li p.text-lg')].map((e) => e.textContent)
+
+  it('follows the dispatcher order, moves with the Up button, tells the server, and does not announce its own change', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    api.fetchPaperwork.mockReset()
+    api.fetchPaperwork.mockResolvedValueOnce(week(1, 3))
+    api.reorderLoads.mockResolvedValue({ order: [{ loadId: 'l-b', sortOrder: 1 }, { loadId: 'l-a', sortOrder: 3 }] })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    expect(names()).toEqual(['Alpha Dock', 'Bravo Dock'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move load 14571 up' }))
+    expect(api.reorderLoads).toHaveBeenCalledWith('2026-10-07', ['l-b', 'l-a'])
+    await waitFor(() => expect(names()).toEqual(['Bravo Dock', 'Alpha Dock']))
+
+    // The next read is what the server now holds (the same re-dealt values): no banner.
+    api.fetchPaperwork.mockResolvedValue(week(3, 1))
+    document.dispatchEvent(new Event('visibilitychange'))
+    await waitFor(() => expect(api.fetchPaperwork).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText(/Your schedule changed/)).toBeNull()
+  })
+
+  it('puts the order back from the server when the write is refused', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    api.fetchPaperwork.mockReset()
+    api.fetchPaperwork.mockResolvedValue(week(1, 3))
+    api.reorderLoads.mockRejectedValue(new Error('not on your sheet'))
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Move load 14571 up' }))
+    await waitFor(() => expect(api.fetchPaperwork.mock.calls.length).toBeGreaterThan(1))
+    await waitFor(() => expect(names()).toEqual(['Alpha Dock', 'Bravo Dock']))
   })
 })

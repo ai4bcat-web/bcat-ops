@@ -2,13 +2,16 @@ import { useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import type { Driver } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
+import type { TimeOffType } from '@/lib/timeOff'
 
 type AvailType = 'FULL_DAY_OFF' | 'EARLY_START' | 'LATE_START'
 
-const TYPE_LABELS: Record<AvailType, string> = {
+// PTO rows are listed here too (approved ones), though only the Time Off page adds them.
+const TYPE_LABELS: Record<TimeOffType, string> = {
   FULL_DAY_OFF: 'Full Day Off',
   EARLY_START:  'In Early By',
   LATE_START:   'Late Start',
+  PTO:          'PTO',
 }
 
 interface Props {
@@ -142,7 +145,7 @@ export function DriverAvailabilityModal({ drivers, availabilities, onClose, onCr
           ) : (
             sorted.map((a) => {
               const driver = drivers.find((d) => d.id === a.driverId)
-              const isOff  = a.type === 'FULL_DAY_OFF'
+              const isOff  = a.type === 'FULL_DAY_OFF' || a.type === 'PTO'
               const rangeStr = a.startDate === a.endDate ? a.startDate : `${a.startDate} → ${a.endDate}`
               return (
                 <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 20px', borderBottom: '1px solid var(--ds-border)' }}>

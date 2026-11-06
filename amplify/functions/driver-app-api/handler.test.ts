@@ -123,6 +123,12 @@ vi.hoisted(() => {
   process.env.CUSTOMER_TABLE_NAME = 'Customer-test'
   process.env.LOCATION_TABLE_NAME = 'Location-test'
   process.env.POD_DOCUMENT_TABLE_NAME = 'PodDocument-test'
+  process.env.EQUIPMENT_TABLE_NAME = 'Equipment-test'
+  process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
+  process.env.TIME_CLOCK_TABLE_NAME = 'TimeClockEntry-test'
+  process.env.DRIVER_AVAILABILITY_TABLE_NAME = 'DriverAvailability-test'
+  process.env.STAFF_USER_POOL_ID = 'us-east-1_staffpool'
+  process.env.STAFF_USER_POOL_CLIENT_ID = 'staff-client-id'
   process.env.DRIVER_USER_POOL_ID = 'us-east-1_testpool'
   process.env.DRIVER_USER_POOL_CLIENT_ID = 'test-client-id'
   process.env.SLACK_BOT_TOKEN = 'xoxb-test-token'
@@ -495,6 +501,13 @@ function defaultTables(): Record<string, Record<string, Record<string, unknown>>
       'pod-sat': { id: 'pod-sat', loadId: 'load-c-saturday', processingStatus: 'READY' },
       'pod-a-oo': { id: 'pod-a-oo', loadId: 'load-a-oo', processingStatus: 'READY' },
     },
+    'Equipment-test': {
+      'tr-1': { id: 'tr-1', type: 'trailer', unitNumber: 9001, active: true },
+      'tr-2': { id: 'tr-2', type: 'trailer', unitNumber: 9002, active: true },
+    },
+    'AuditLog-test': {},
+    'TimeClockEntry-test': {},
+    'DriverAvailability-test': {},
     'DriverPayDeduction-test': {},
     'DriverPayCredit-test': {},
     'FuelTransaction-test': {},
@@ -505,6 +518,7 @@ function matchesFilterExpression(
   rec: Record<string, unknown>,
   filter: string,
   values: Record<string, unknown>,
+  names: Record<string, string> = {},
 ): boolean {
   if (!filter) return true
   const clauses = filter.split(/\s+AND\s+/i)
@@ -532,9 +546,10 @@ function matchesFilterExpression(
       if (cmp[2] === '<' && !(v < bound)) return false
       continue
     }
-    const eq = clause.match(/^\s*([\w]+)\s*=\s*(:\w+)\s*$/i)
+    const eq = clause.match(/^\s*(#?[\w]+)\s*=\s*(:\w+)\s*$/i)
     if (eq) {
-      if (rec[eq[1]] !== values[eq[2]]) return false
+      const field = eq[1].startsWith('#') ? names[eq[1]] : eq[1]
+      if (rec[field] !== values[eq[2]]) return false
       continue
     }
     // A clause this fake cannot parse must NOT quietly widen the result set — that is how
@@ -582,7 +597,7 @@ beforeEach(() => {
       const values = input.ExpressionAttributeValues ?? {}
       const items = Object.values(tableRecords ?? {})
       const filtered = items.filter((item) =>
-        matchesFilterExpression(item as Record<string, unknown>, input.FilterExpression ?? '', values),
+        matchesFilterExpression(item as Record<string, unknown>, input.FilterExpression ?? '', values, input.ExpressionAttributeNames),
       )
       return { Items: filtered }
     }
@@ -683,6 +698,7 @@ describe('driver-app-api handler', () => {
         pm: null,
         truck: null,
         trailer: null,
+        bobtail: false,
         dispatchPhone: '+12248756477',
         dispatcher: null,
         // AMAZON pay group, no fleet: a settlement driver with no clock.
@@ -1199,6 +1215,287 @@ describe('driver-app-api handler', () => {
     })
   })
 
+  describe('time off requests', () => {
+    const NOW = new Date('2026-11-06T18:00:00Z')   // Friday 11/6 in Chicago
+    const pto = (over: Record<string, unknown> = {}) => ({ id: 'tc-1', driverId: DRIVER_A_ID, workDate: '2026-02-03', kind: 'PTO', minutes: 480, source: 'STAFF', ...over })
+    const avail = (over: Record<string, unknown> = {}) => ({ id: 'av-1', driverId: DRIVER_A_ID, type: 'FULL_DAY_OFF', startDate: '2026-11-10', endDate: '2026-11-10', createdBy: 'dispatch', createdAt: '2026-11-01T12:00:00Z', ...over })
+    const asDriver = () => mockVerify.mockResolvedValue({ email: EMAIL_A, email_verified: true })
+    const asStaff = (groups: string[] = ['page-timeOff'], email = 'jason@bcatcorp.com') => mockVerify.mockResolvedValue({ email, 'cognito:groups': groups })
+    const post = (path: string, body: unknown) => handler(baseEvent(path, 'POST', { body }))
+    const clock = () => Object.values(tables['TimeClockEntry-test'])
+    const rows = () => tables['DriverAvailability-test']
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(NOW)
+      // Driver A runs the Ivan paperwork app with a clock and may take PTO.
+      Object.assign(tables['Driver-test'][DRIVER_A_ID], { ivanApp: true, timeClock: true, ptoEligible: true })
+    })
+    afterEach(() => vi.useRealTimers())
+
+    it("lists the driver's own requests newest first with a status (none on file reads APPROVED) and the PTO count for the year", async () => {
+      rows()['av-1'] = avail()
+      rows()['av-2'] = avail({ id: 'av-2', startDate: '2026-11-20', endDate: '2026-11-20', status: 'PENDING', hours: 4, createdAt: '2026-11-05T12:00:00Z' })
+      rows()['av-other'] = avail({ id: 'av-other', driverId: DRIVER_B_ID })
+      tables['TimeClockEntry-test']['tc-1'] = pto()
+      tables['TimeClockEntry-test']['tc-2'] = pto({ id: 'tc-2', workDate: '2025-12-30' })
+      const body = JSON.parse((await handler(baseEvent('/time-off'))).body)
+      expect(body.requests.map((r: { id: string; status: string }) => [r.id, r.status])).toEqual([['av-2', 'PENDING'], ['av-1', 'APPROVED']])
+      expect(body.ptoUsed).toEqual({ year: '2026', days: 1 })
+      expect(body.ptoEligible).toBe(true)
+      expect(JSON.parse((await handler(baseEvent('/timeclock'))).body).ptoUsed).toEqual({ year: '2026', days: 1 })
+    })
+
+    it('a request is stored PENDING from the driver, with the hours asked', async () => {
+      const res = await post('/time-off', { type: 'LATE_START', startDate: '2026-11-10', hours: 3, note: ' dentist ' })
+      expect(res.statusCode).toBe(200)
+      expect(Object.values(rows())).toEqual([expect.objectContaining({ driverId: DRIVER_A_ID, type: 'LATE_START', startDate: '2026-11-10', endDate: '2026-11-10', hours: 3, note: 'dentist', status: 'PENDING', source: 'DRIVER', createdBy: 'Driver A' })])
+      expect(JSON.parse(res.body).request).toMatchObject({ status: 'PENDING', hours: 3 })
+    })
+
+    it('PTO is eight hours whatever was sent, only for an eligible driver, never a second one for a day already on the clock', async () => {
+      const res = await post('/time-off', { type: 'PTO', startDate: '2026-11-05', hours: 2 })
+      expect(res.statusCode).toBe(200)
+      expect(Object.values(rows())[0]).toMatchObject({ type: 'PTO', hours: 8, status: 'PENDING' })
+      // Nothing reaches the clock until the office approves.
+      expect(clock()).toHaveLength(0)
+
+      tables['TimeClockEntry-test']['tc-9'] = pto({ id: 'tc-9', workDate: '2026-11-04' })
+      expect((await post('/time-off', { type: 'PTO', startDate: '2026-11-04' })).statusCode).toBe(409)
+
+      tables['Driver-test'][DRIVER_A_ID].ptoEligible = false
+      const no = await post('/time-off', { type: 'PTO', startDate: '2026-11-03' })
+      expect(no.statusCode).toBe(400)
+      expect(JSON.parse(no.body).error).toMatch(/PTO is not set up/)
+    })
+
+    it('refuses a request that overlaps a pending or approved one, with the dates in the message, but not a denied one', async () => {
+      rows()['av-1'] = avail({ startDate: '2026-11-10', endDate: '2026-11-12', status: 'PENDING' })
+      const clash = await post('/time-off', { type: 'FULL_DAY_OFF', startDate: '2026-11-12', hours: 8 })
+      expect(clash.statusCode).toBe(409)
+      expect(JSON.parse(clash.body).error).toContain('Nov 10 – Nov 12')
+      rows()['av-1'].status = 'DENIED'
+      expect((await post('/time-off', { type: 'FULL_DAY_OFF', startDate: '2026-11-12', hours: 8 })).statusCode).toBe(200)
+    })
+
+    it('rejects bad input and a punch for PTO (it is a request now, not a punch)', async () => {
+      expect((await post('/time-off', { type: 'FULL_DAY_OFF', startDate: '2026-11-10', hours: 0 })).statusCode).toBe(400)
+      expect((await post('/time-off', { type: 'FULL_DAY_OFF', startDate: '2026-11-01', hours: 8 })).statusCode).toBe(400)
+      const punch = await post('/timeclock/punch', { action: 'PTO', date: '2026-11-06' })
+      expect(punch.statusCode).toBe(400)
+      expect(clock()).toHaveLength(0)
+    })
+
+    it('approving a PTO request marks it approved by the signed-in staff user and puts 480 minutes on that day', async () => {
+      rows()['av-p'] = avail({ id: 'av-p', type: 'PTO', startDate: '2026-11-05', endDate: '2026-11-05', hours: 8, status: 'PENDING', source: 'DRIVER' })
+      asStaff()
+      const res = await post('/staff/time-off/review', { id: 'av-p', decision: 'APPROVE' })
+      expect(res.statusCode).toBe(200)
+      expect(rows()['av-p']).toMatchObject({ status: 'APPROVED', reviewedBy: 'jason@bcatcorp.com' })
+      expect(rows()['av-p'].reviewedAt).toBeTruthy()
+      expect(clock()).toEqual([expect.objectContaining({ driverId: DRIVER_A_ID, workDate: '2026-11-05', kind: 'PTO', minutes: 480, source: 'STAFF', clockInAt: null })])
+    })
+
+    it('refuses to approve a second PTO for a day that already has one, leaving the request pending', async () => {
+      rows()['av-p'] = avail({ id: 'av-p', type: 'PTO', startDate: '2026-11-05', endDate: '2026-11-05', status: 'PENDING', source: 'DRIVER' })
+      tables['TimeClockEntry-test']['tc-1'] = pto({ workDate: '2026-11-05' })
+      asStaff()
+      const res = await post('/staff/time-off/review', { id: 'av-p', decision: 'APPROVE' })
+      expect(res.statusCode).toBe(409)
+      expect(JSON.parse(res.body).error).toMatch(/already has a PTO day on Nov 5/)
+      expect(rows()['av-p'].status).toBe('PENDING')
+      expect(clock()).toHaveLength(1)
+    })
+
+    it('denying records the note for the driver and creates no hours; approving a non-PTO request creates none either', async () => {
+      rows()['av-p'] = avail({ id: 'av-p', type: 'PTO', startDate: '2026-11-05', endDate: '2026-11-05', status: 'PENDING', source: 'DRIVER' })
+      rows()['av-d'] = avail({ id: 'av-d', status: 'PENDING', source: 'DRIVER' })
+      asStaff(['ADMIN'])
+      await post('/staff/time-off/review', { id: 'av-p', decision: 'DENY', note: 'Short staffed that week' })
+      await post('/staff/time-off/review', { id: 'av-d', decision: 'APPROVE' })
+      expect(rows()['av-p']).toMatchObject({ status: 'DENIED', reviewNote: 'Short staffed that week' })
+      expect(rows()['av-d'].status).toBe('APPROVED')
+      expect(clock()).toHaveLength(0)
+      // The driver then reads the note back.
+      asDriver()
+      const mine = JSON.parse((await handler(baseEvent('/time-off'))).body).requests as Array<{ id: string; reviewNote: string | null }>
+      expect(mine.find((r) => r.id === 'av-p')?.reviewNote).toBe('Short staffed that week')
+    })
+
+    it('only staff with Time Off access may review, and a reviewed request cannot be reviewed again', async () => {
+      rows()['av-p'] = avail({ id: 'av-p', status: 'PENDING', source: 'DRIVER' })
+      asStaff([])
+      expect((await post('/staff/time-off/review', { id: 'av-p', decision: 'APPROVE' })).statusCode).toBe(403)
+      asStaff(['page-timeOff'])
+      expect((await post('/staff/time-off/review', { id: 'av-p', decision: 'DENY' })).statusCode).toBe(200)
+      expect((await post('/staff/time-off/review', { id: 'av-p', decision: 'APPROVE' })).statusCode).toBe(409)
+      expect(rows()['av-p'].status).toBe('DENIED')
+    })
+
+    it('a PTO day entered by staff is approved at once and on the clock; the same day twice is refused', async () => {
+      asStaff(['page-timeOff'], 'ryne@bcatcorp.com')
+      const res = await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2026-11-05', note: 'demo' })
+      expect(res.statusCode).toBe(200)
+      expect(Object.values(rows())).toEqual([expect.objectContaining({ driverId: DRIVER_A_ID, type: 'PTO', startDate: '2026-11-05', hours: 8, status: 'APPROVED', source: 'STAFF', reviewedBy: 'ryne@bcatcorp.com', note: 'demo' })])
+      expect(clock()).toEqual([expect.objectContaining({ workDate: '2026-11-05', kind: 'PTO', minutes: 480, source: 'STAFF' })])
+      expect((await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2026-11-05' })).statusCode).toBe(409)
+      expect(clock()).toHaveLength(1)
+    })
+
+    it('staff PTO needs an eligible driver and a date within 60 days either way of today', async () => {
+      asStaff()
+      // 2026-09-07 is 60 days before 11/6 and 2027-01-05 is 60 days after: both in; one more day out.
+      expect((await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2026-09-07' })).statusCode).toBe(200)
+      expect((await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2027-01-05' })).statusCode).toBe(200)
+      expect((await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2026-09-06' })).statusCode).toBe(400)
+      expect((await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2027-01-06' })).statusCode).toBe(400)
+      tables['Driver-test'][DRIVER_A_ID].ptoEligible = false
+      const no = await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2026-11-05' })
+      expect(no.statusCode).toBe(400)
+      expect(JSON.parse(no.body).error).toMatch(/not PTO eligible/)
+      expect(clock()).toHaveLength(2)
+    })
+  })
+
+  describe('POST /paperwork/location-note', () => {
+    const stopOf = (over: Record<string, unknown> = {}) => ({
+      id: 's1', type: 'pickup', sequence: 0, appt: '2026-10-14T15:00:00Z', driverId: DRIVER_A_ID,
+      name: "Batory's Oakley", city: 'Chicago, IL', address: { street: '1234 S Oakley Ave.', city: 'Chicago', state: 'IL', zip: '60608' }, ...over,
+    })
+    const seedLoad = (stop: Record<string, unknown>) => {
+      tables['Load-test']['ln-1'] = { id: 'ln-1', aljexId: 'ln-1', pickupDriverId: DRIVER_A_ID, deliveryDriverId: DRIVER_A_ID, updatedAt: '2026-10-01T00:00:00Z', stops: [stop] }
+    }
+    const note = (body: Record<string, unknown>) => handler(baseEvent('/paperwork/location-note', 'POST', { body: { loadId: 'ln-1', text: 'Check in at the guard shack', ...body } }))
+    const locations = () => Object.values(tables['Location-test']).filter((l) => l.id !== 'loc-1' && l.id !== 'loc-2')
+
+    it('creates the Location from a stop that has none, links the stop, and saves the note on it', async () => {
+      seedLoad(stopOf())
+      const res = await note({ stopId: 's1' })
+      expect(res.statusCode).toBe(200)
+      const made = locations()
+      expect(made).toHaveLength(1)
+      expect(made[0]).toMatchObject({ name: "Batory's Oakley", street: '1234 S Oakley Ave.', city: 'Chicago', state: 'IL', zip: '60608', normalizedAddress: '1234 s oakley ave chicago il 60608 us' })
+      expect(JSON.parse(res.body).locationId).toBe(made[0].id)
+      expect((made[0].driverNotes as Array<{ text: string; by: string }>)[0]).toMatchObject({ text: 'Check in at the guard shack', by: 'Driver A' })
+      expect((tables['Load-test']['ln-1'].stops as Array<{ locationId?: string }>)[0].locationId).toBe(made[0].id)
+    })
+
+    it('reuses the Location already at that address instead of creating a second one', async () => {
+      tables['Location-test']['dock'] = { id: 'dock', name: 'Batory Foods Chicago', street: '1234 s oakley ave', city: 'CHICAGO', state: 'IL', zip: '60608', active: true, driverNotes: [{ at: 't', by: 'Old', text: 'old', driverId: 'x' }] }
+      seedLoad(stopOf())
+      await note({ stopId: 's1' })
+      expect(locations().map((l) => l.id)).toEqual(['dock'])
+      expect((tables['Location-test'].dock.driverNotes as unknown[]).length).toBe(2)
+      expect((tables['Load-test']['ln-1'].stops as Array<{ locationId?: string }>)[0].locationId).toBe('dock')
+    })
+
+    it('still takes a note on a stop that already has a Location, without creating one', async () => {
+      seedLoad(stopOf({ locationId: 'loc-1' }))
+      const res = await note({ stopId: 's1' })
+      expect(res.statusCode).toBe(200)
+      expect(locations()).toHaveLength(0)
+      expect((tables['Location-test']['loc-1'].driverNotes as unknown[]).length).toBe(1)
+    })
+
+    it('refuses a stop with no name to build a place from, a missing stop, and another driver\'s load', async () => {
+      seedLoad(stopOf({ name: '' }))
+      expect((await note({ stopId: 's1' })).statusCode).toBe(400)
+      expect((await note({ stopId: 'nope' })).statusCode).toBe(404)
+      tables['Load-test']['ln-1'].pickupDriverId = DRIVER_B_ID
+      tables['Load-test']['ln-1'].deliveryDriverId = DRIVER_B_ID
+      ;(tables['Load-test']['ln-1'].stops as Array<Record<string, unknown>>)[0].driverId = DRIVER_B_ID
+      expect((await note({ stopId: 's1' })).statusCode).toBe(404)
+      expect(locations()).toHaveLength(0)
+    })
+  })
+
+  describe('POST /paperwork/reorder', () => {
+    const DAY = '2026-10-14'
+    /** A day line shared by two drivers: 1 and 3 and 5 are A's, 2 and 4 are B's. */
+    function seedDay(extra: Record<string, unknown> = {}) {
+      const load = (id: string, driver: string, sortOrder: number | null, more: Record<string, unknown> = {}) => ({
+        id, aljexId: id, customer: 'Cust', sortOrder, pickupDriverId: driver, deliveryDriverId: driver,
+        stops: [{ id: `${id}-p`, type: 'pickup', sequence: 0, appt: `${DAY}T15:00:00Z`, driverId: driver }],
+        ...more,
+      })
+      Object.assign(tables['Load-test'], {
+        l1: load('l1', DRIVER_A_ID, 1), l2: load('l2', DRIVER_B_ID, 2), l3: load('l3', DRIVER_A_ID, 3),
+        l4: load('l4', DRIVER_B_ID, 4), l5: load('l5', DRIVER_A_ID, 5), ...extra,
+      })
+    }
+    const post = (loadIds: string[]) => handler(baseEvent('/paperwork/reorder', 'POST', { body: { date: DAY, loadIds } }))
+    const order = () => Object.fromEntries(['l1', 'l2', 'l3', 'l4', 'l5'].map((id) => [id, tables['Load-test'][id].sortOrder]))
+
+    it("re-deals the driver's own values in the new order and never touches another driver's loads", async () => {
+      seedDay()
+      const res = await post(['l5', 'l1', 'l3'])
+      expect(res.statusCode).toBe(200)
+      expect(order()).toEqual({ l1: 3, l2: 2, l3: 5, l4: 4, l5: 1 })
+      expect(JSON.parse(res.body).order).toEqual([{ loadId: 'l5', sortOrder: 1 }, { loadId: 'l1', sortOrder: 3 }, { loadId: 'l3', sortOrder: 5 }])
+    })
+
+    it('leaves an audit line on each load that moved, and none on one that did not', async () => {
+      seedDay()
+      await post(['l1', 'l5', 'l3'])
+      const rows = Object.values(tables['AuditLog-test'])
+      expect(rows.map((r) => r.entityId).sort()).toEqual(['l3', 'l5'])
+      expect(rows[0]).toMatchObject({ entityType: 'Load', user: 'Driver A' })
+      expect(String(rows[0].changes)).toContain('Reordered by driver Driver A')
+    })
+
+    it("refuses the whole request, writing nothing, when a load is another driver's", async () => {
+      seedDay()
+      const res = await post(['l5', 'l2', 'l1'])
+      expect(res.statusCode).toBe(404)
+      expect(order()).toEqual({ l1: 1, l2: 2, l3: 3, l4: 4, l5: 5 })
+      expect(Object.keys(tables['AuditLog-test'])).toHaveLength(0)
+    })
+
+    it('refuses a load with no stop of the driver on that date', async () => {
+      seedDay({ l3: { id: 'l3', aljexId: 'l3', sortOrder: 3, pickupDriverId: DRIVER_A_ID, deliveryDriverId: DRIVER_A_ID, stops: [{ id: 'l3-p', type: 'pickup', sequence: 0, appt: '2026-10-15T15:00:00Z', driverId: DRIVER_A_ID }] } })
+      expect((await post(['l1', 'l3'])).statusCode).toBe(404)
+    })
+
+    it('rejects a list that is not at least two different loads', async () => {
+      seedDay()
+      expect((await post(['l1'])).statusCode).toBe(400)
+      expect((await post(['l1', 'l1'])).statusCode).toBe(400)
+    })
+
+    it('re-deals slot badges too, but only when every load has its own', async () => {
+      seedDay({ l1: { id: 'l1', sortOrder: 1, daySlot: 1, pickupDriverId: DRIVER_A_ID, stops: [{ id: 'a', type: 'pickup', sequence: 0, appt: `${DAY}T15:00:00Z`, driverId: DRIVER_A_ID }] }, l3: { id: 'l3', sortOrder: 3, daySlot: 2, pickupDriverId: DRIVER_A_ID, stops: [{ id: 'b', type: 'pickup', sequence: 0, appt: `${DAY}T15:00:00Z`, driverId: DRIVER_A_ID }] } })
+      await post(['l3', 'l1'])
+      expect([tables['Load-test'].l3.daySlot, tables['Load-test'].l1.daySlot]).toEqual([1, 2])
+      // l5 has no slot: a mixed set leaves slots as they were.
+      await post(['l1', 'l5'])
+      expect(tables['Load-test'].l5.daySlot).toBeUndefined()
+      expect(tables['Load-test'].l1.daySlot).toBe(2)
+    })
+  })
+
+  describe('trailer on the driver file', () => {
+    it('picking a trailer sets it and clears bobtail; null sets bobtail; /me reports both', async () => {
+      tables['Driver-test'][DRIVER_A_ID].bobtail = true
+      const picked = await handler(baseEvent('/me/trailer', 'POST', { body: { trailerId: 'tr-1' } }))
+      expect(picked.statusCode).toBe(200)
+      expect(JSON.parse(picked.body).trailer).toEqual({ id: 'tr-1', unitNumber: '9001' })
+      expect(tables['Driver-test'][DRIVER_A_ID]).toMatchObject({ assignedTrailerId: 'tr-1', bobtail: false })
+      expect(tables['Equipment-test']['tr-1'].assignedDriverId).toBe(DRIVER_A_ID)
+      expect(JSON.parse((await handler(baseEvent('/me'))).body)).toMatchObject({ trailer: { id: 'tr-1' }, bobtail: false })
+
+      const bob = await handler(baseEvent('/me/trailer', 'POST', { body: { trailerId: null } }))
+      expect(JSON.parse(bob.body).trailer).toBeNull()
+      expect(tables['Driver-test'][DRIVER_A_ID]).toMatchObject({ assignedTrailerId: null, bobtail: true })
+      expect(tables['Equipment-test']['tr-1'].assignedDriverId).toBeNull()
+      expect(JSON.parse((await handler(baseEvent('/me'))).body)).toMatchObject({ trailer: null, bobtail: true })
+    })
+
+    it('a stale bobtail flag never outranks a trailer staff assigned', async () => {
+      Object.assign(tables['Driver-test'][DRIVER_A_ID], { bobtail: true, assignedTrailerId: 'tr-2' })
+      expect(JSON.parse((await handler(baseEvent('/me'))).body)).toMatchObject({ trailer: { id: 'tr-2' }, bobtail: false })
+    })
+  })
+
   describe('attaching a POD to a load', () => {
     beforeEach(() => {
       mockVerify.mockReset()
@@ -1219,6 +1516,9 @@ describe('driver-app-api handler', () => {
     }
 
     it('offers the driver their own recent loads to attach to', async () => {
+      // The recent-loads window is relative to now; pin it next to the fixture dates.
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-05T12:00:00Z'))
       const res = await handler(baseEvent('/loads/recent', 'GET'))
       expect(res.statusCode).toBe(200)
       const body = JSON.parse(res.body)
@@ -1226,6 +1526,7 @@ describe('driver-app-api handler', () => {
       expect(ids).toContain('load-c-1')
       // Another driver's load is never offered.
       expect(ids).not.toContain('load-a-oo')
+      vi.useRealTimers()
     })
 
     it('attaches the POD and marks the submission linked', async () => {

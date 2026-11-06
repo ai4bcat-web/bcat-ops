@@ -17,6 +17,10 @@ export interface Driver {
   photoUrl?: string  // client-side: resolved presigned URL
   assignedTruckId?: string | null
   assignedTrailerId?: string | null   // Equipment.id of the trailer; null = TBD
+  /** Started the day bobtailing (no trailer) — set from the driver app, cleared when a trailer is picked. */
+  bobtail?: boolean | null
+  /** Accrues PTO: unlocks the PTO type in the driver app's time-off request. */
+  ptoEligible?: boolean | null
   /**
    * Which fleet this driver runs in — mirrors DriverPaySetting.payGroup so the two
    * agree, and decides which documents their file requires.

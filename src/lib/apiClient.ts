@@ -1,5 +1,6 @@
 import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
+import type { TimeOffType, TimeOffStatus } from './timeOff'
 import type { Load, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
@@ -81,11 +82,11 @@ const driverFields = () => [
   driversHaveCompliance ? 'onboardingStatus complianceStatus' : '',
   driversHaveTrailer ? 'assignedTrailerId fleetGroup' : '',
   driversHaveMotive ? 'motiveDriverId' : '',
-  driversHaveDispatcher ? 'dispatcherPrimary dispatcherBackup ivanApp timeClock unitType' : '',
+  driversHaveDispatcher ? 'dispatcherPrimary dispatcherBackup ivanApp timeClock unitType bobtail ptoEligible' : '',
 ].filter(Boolean).join(' ')
 
 const isMotiveFieldUndefined = (err: unknown) => /motiveDriverId/.test(JSON.stringify(err ?? ''))
-const isDispatcherFieldUndefined = (err: unknown) => /dispatcher(Primary|Backup)|ivanApp|timeClock|unitType/.test(JSON.stringify(err ?? ''))
+const isDispatcherFieldUndefined = (err: unknown) => /dispatcher(Primary|Backup)|ivanApp|timeClock|unitType|bobtail|ptoEligible/.test(JSON.stringify(err ?? ''))
 
 function isComplianceFieldUndefined(err: unknown): boolean {
   const errs = (err as { errors?: { message?: string }[] })?.errors
@@ -397,7 +398,7 @@ export async function updateDriver(
   const { photoUrl: _skip, ...all } = patch as typeof patch & { photoUrl?: string }
   const { assignedTrailerId: _t, fleetGroup: _f, ...withoutNewFields } = all
   const { motiveDriverId: _m, ...withoutMotive } = all
-  const { dispatcherPrimary: _dp, dispatcherBackup: _db, ivanApp: _ia, timeClock: _tc, unitType: _ut, ...withoutDispatcher } = all
+  const { dispatcherPrimary: _dp, dispatcherBackup: _db, ivanApp: _ia, timeClock: _tc, unitType: _ut, bobtail: _bt, ptoEligible: _pe, ...withoutDispatcher } = all
 
   // The SELECTION matters as much as the input. Building it from `driversHaveTrailer`
   // meant a stale flag returned a driver with fleetGroup/assignedTrailerId missing —
@@ -405,7 +406,7 @@ export async function updateDriver(
   // saved value instantly read as unsaved. Ask for them on the optimistic attempt.
   const run = async (input: Record<string, unknown>, withNewFields: boolean) => {
     const fields = withNewFields
-      ? `${DRIVER_BASE_FIELDS} ${driversHaveCompliance ? 'onboardingStatus complianceStatus' : ''} assignedTrailerId fleetGroup motiveDriverId dispatcherPrimary dispatcherBackup ivanApp timeClock unitType`
+      ? `${DRIVER_BASE_FIELDS} ${driversHaveCompliance ? 'onboardingStatus complianceStatus' : ''} assignedTrailerId fleetGroup motiveDriverId dispatcherPrimary dispatcherBackup ivanApp timeClock unitType bobtail ptoEligible`
       : driverFields()
     return client.graphql({
       query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${fields} } }`,
@@ -1112,6 +1113,11 @@ export async function archiveLocation(id: string, expectedUpdatedAt: string): Pr
   return directoryAction<LocationRecord>('ARCHIVE_LOCATION', { id, expectedUpdatedAt })
 }
 
+/** Staff remove one driver comment from a place. Returns the location as it now stands. */
+export async function removeLocationDriverNote(locationId: string, note: { at: string; driverId?: string }): Promise<LocationRecord> {
+  return unwrapJsonFields(await directoryAction<LocationRecord>('REMOVE_DRIVER_NOTE', { id: locationId, at: note.at, driverId: note.driverId }), ['contacts', 'driverNotes'])
+}
+
 // ── Location merge — a resumable job, never a single transaction ──────────────
 export async function previewLocationMerge(sourceId: string, targetId: string): Promise<LocationMergePreview> {
   return directoryAction<LocationMergePreview>('PREVIEW_MERGE_LOCATIONS', { sourceId, targetId })
@@ -1494,17 +1500,24 @@ export async function setUserAdmin(username: string, isAdmin: boolean): Promise<
 export interface DriverAvailability {
   id: string
   driverId: string
-  type: 'FULL_DAY_OFF' | 'EARLY_START' | 'LATE_START'
+  type: TimeOffType
   startDate: string
   endDate: string
   time?: string | null
   note?: string | null
+  /** Absent on rows from before requests existed: read it with statusOf() (src/lib/timeOff.ts). */
+  status?: TimeOffStatus | null
+  hours?: number | null
+  source?: 'DRIVER' | 'STAFF' | null
+  reviewedBy?: string | null
+  reviewedAt?: string | null
+  reviewNote?: string | null
   createdBy: string
   createdAt: string
   updatedAt: string
 }
 
-const DA_FIELDS = `id driverId type startDate endDate time note createdBy createdAt updatedAt`
+const DA_FIELDS = `id driverId type startDate endDate time note status hours source reviewedBy reviewedAt reviewNote createdBy createdAt updatedAt`
 
 export async function listDriverAvailabilities(): Promise<DriverAvailability[]> {
   const result = await client.graphql({

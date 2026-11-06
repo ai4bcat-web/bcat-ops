@@ -75,6 +75,8 @@ vi.mock('@/lib/complianceClient', () => ({
 
 vi.mock('@/lib/apiClient', () => ({
   driverTrailerFieldDeployed: () => true,
+  // The driver drawer shows PTO used this year.
+  listTimeClockEntries: vi.fn().mockResolvedValue([]),
   listDriverPaySettings: vi.fn().mockResolvedValue([
     // Armando's address only exists on his settlement setting — the file should use it.
     { id: 'ps1', driverId: 'd2', payPercent: 0.5, expensesBeforePercent: true,

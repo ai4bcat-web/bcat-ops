@@ -73,16 +73,17 @@ describe('the schedule order', () => {
 
 describe('orderOpenStops', () => {
   const at = (s: PaperworkStop, p: Partial<PaperworkStop>): PaperworkStop => ({ ...s, ...p })
-  it('keeps the stop the driver is on site at on top, whatever the calendar says', () => {
+  it('keeps only the stop the driver is on site at on top, whatever the calendar says', () => {
     // Calendar: next load's FCFS pickup (A) is slotted before the delivery (B) the driver is sitting at.
     const aPu = stop('a-pu', 'pickup', '2026-10-19', '2026-10-19T05:00:00Z')
     const bPu = at(stop('b-pu', 'pickup', '2026-10-19', '2026-10-19T13:00:00Z'), { departedAt: '2026-10-19T14:24:00Z', arrivedAt: '2026-10-19T13:26:00Z' })
     const bDe = at(stop('b-de', 'delivery', '2026-10-19', '2026-10-19T14:30:00Z', 1), { arrivedAt: '2026-10-19T16:37:00Z' })
     const all = [{ load: load('A', [aPu]), stop: aPu }, { load: load('B', [bPu, bDe]), stop: bPu }, { load: load('B', [bPu, bDe]), stop: bDe }]
     const open = all.filter((it) => !it.stop.departedAt)
-    expect(orderOpenStops(open, all).map((it) => it.stop.id)).toEqual(['b-de', 'a-pu'])
+    expect(orderOpenStops(open).map((it) => it.stop.id)).toEqual(['b-de', 'a-pu'])
   })
-  it('puts a load with freight on board ahead of one not started, and leaves the plan alone otherwise', () => {
+  it('does not lift a load with freight on board over the dispatcher order once the driver has left', () => {
+    // B was picked up early, but dispatch ordered A first: A still leads until the driver is ON SITE somewhere.
     const aPu = stop('a-pu', 'pickup', '2026-10-19', '2026-10-19T05:00:00Z')
     const bPu = at(stop('b-pu', 'pickup', '2026-10-19', '2026-10-19T13:00:00Z'), { arrivedAt: '2026-10-19T13:00:00Z', departedAt: '2026-10-19T13:30:00Z' })
     const bDe = stop('b-de', 'delivery', '2026-10-19', '2026-10-19T15:00:00Z', 1)
@@ -90,9 +91,19 @@ describe('orderOpenStops', () => {
     const B = load('B', [bPu, bDe])
     const all = [{ load: load('A', [aPu]), stop: aPu }, { load: B, stop: bPu }, { load: B, stop: bDe }, { load: load('C', [cPu]), stop: cPu }]
     const open = all.filter((it) => !it.stop.departedAt)
-    expect(orderOpenStops(open, all).map((it) => it.stop.id)).toEqual(['b-de', 'a-pu', 'c-pu'])
-    // Nothing started: the calendar order stands.
-    const plain = [{ load: load('A', [aPu]), stop: aPu }, { load: load('C', [cPu]), stop: cPu }]
-    expect(orderOpenStops(plain, plain).map((it) => it.stop.id)).toEqual(['a-pu', 'c-pu'])
+    expect(orderOpenStops(open).map((it) => it.stop.id)).toEqual(['a-pu', 'b-de', 'c-pu'])
+  })
+})
+
+describe('the schedule order is numeric', () => {
+  const mk = (id: string, sortOrder: number | null, appt = '2026-10-13T12:00:00.000Z') =>
+    ({ id, reference: id, sortOrder, stops: [{ id: `${id}-d`, type: 'delivery', date: '2026-10-13', yours: true, appt, sequence: 1, name: id }] }) as unknown as PaperworkLoad
+  it('puts 1.5 between 1 and 2, 10 after 9, and a negative first', () => {
+    const loads = [mk('ten', 10), mk('one-half', 1.5), mk('two', 2), mk('nine', 9), mk('one', 1), mk('neg', -1)]
+    expect(stopsForDay(loads, '2026-10-13').map((x) => x.load.reference)).toEqual(['neg', 'one', 'one-half', 'two', 'nine', 'ten'])
+  })
+  it('puts loads with no order after every ordered one, by appointment', () => {
+    const loads = [mk('late-null', null, '2026-10-13T18:00:00.000Z'), mk('early-null', null, '2026-10-13T08:00:00.000Z'), mk('ordered', 99, '2026-10-13T23:00:00.000Z')]
+    expect(stopsForDay(loads, '2026-10-13').map((x) => x.load.reference)).toEqual(['ordered', 'early-null', 'late-null'])
   })
 })

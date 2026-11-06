@@ -4,6 +4,7 @@
 // This is the ONLY module in the driver app allowed to call fetch(). Everything the driver
 // sees comes through here, and every request carries the driver's own id token — the server
 // resolves which driver they are from that token and never from anything we send.
+import type { TimeOffType, TimeOffStatus } from '@/lib/timeOff'
 import outputs from '../../../amplify_outputs.json'
 
 const envUrl: string | undefined =
@@ -102,6 +103,8 @@ export interface DriverProfile {
   truck?: DriverTruck | null
   /** The trailer they started the day with, or null (bobtail / not asked). Optional: older API. */
   trailer?: DriverTruck | null
+  /** Said they started the day bobtailing (no trailer). Optional: older API. */
+  bobtail?: boolean | null
   /** The dispatch number to call or text, E.164; null until Dispatch is set up. Optional: older API. */
   dispatchPhone?: string | null
   /** The driver's own dispatcher, when Dispatch settings list a number for them. Optional: older API. */
@@ -495,11 +498,15 @@ export interface TimeClockResponse {
   weeks: string[]
   openShift: TimeClockRow | null
   ptoEligible: boolean
+  /** PTO days on the clock this calendar year (one row = one day). Optional: older API. */
+  ptoUsed?: PtoUsed
   /** True when staff are viewing a driver's app. Punching is refused server-side. */
   readOnly?: boolean
   /** The pay period's overnight runs. Absent on an API that predates them. */
   overnight?: OvernightPeriod
 }
+
+export interface PtoUsed { year: string; days: number }
 
 export function fetchTimeClock(weekStart?: string): Promise<TimeClockResponse> {
   const q = weekStart ? `?week=${encodeURIComponent(weekStart)}` : ''
@@ -507,10 +514,51 @@ export function fetchTimeClock(weekStart?: string): Promise<TimeClockResponse> {
 }
 
 export function punchTimeClock(
-  action: 'IN' | 'OUT' | 'HOLIDAY' | 'PTO',
+  action: 'IN' | 'OUT' | 'HOLIDAY',
   opts: { date?: string; note?: string } = {},
 ): Promise<{ ok: boolean; openShift?: TimeClockRow | null; alreadyOpen?: boolean }> {
   return request('/timeclock/punch', { method: 'POST', body: JSON.stringify({ action, ...opts }) })
+}
+
+/* ── Time off ─────────────────────────────────────────────────────────────────
+ * Requests in hours that the office approves (src/lib/timeOff.ts has the rules).
+ * PTO is a request of type PTO: nothing reaches the clock until it is approved.
+ */
+
+export interface TimeOffRequest {
+  id: string
+  type: TimeOffType
+  startDate: string
+  endDate: string
+  hours: number | null
+  note: string | null
+  status: TimeOffStatus
+  /** What the office wrote when approving or denying. */
+  reviewNote: string | null
+  reviewedAt: string | null
+  createdAt: string | null
+}
+
+export interface TimeOffState {
+  /** Newest request first. */
+  requests: TimeOffRequest[]
+  ptoEligible: boolean
+  ptoUsed: PtoUsed
+}
+
+export function fetchTimeOff(): Promise<TimeOffState> {
+  return request<TimeOffState>('/time-off')
+}
+
+/** Ask for time off. PTO sends hours as 8 whatever is passed; the server decides. */
+export function requestTimeOff(input: {
+  type: TimeOffType
+  startDate: string
+  endDate?: string
+  hours?: number
+  note?: string
+}): Promise<{ ok: true; request: TimeOffRequest }> {
+  return request('/time-off', { method: 'POST', body: JSON.stringify(input) })
 }
 
 /* ── Ivan paperwork ────────────────────────────────────────────────────────────
@@ -680,7 +728,9 @@ export async function reportMaintenanceTask(input: { title: string; notes?: stri
 }
 
 /** Leave a note about a place for the next driver and the office. */
-export async function addLocationNote(input: { loadId: string; locationId: string; text: string }): Promise<{
+export async function addLocationNote(input: { loadId: string; stopId: string; text: string }): Promise<{
+  /** The directory place the note is on — created from the stop when it had none. */
+  locationId: string
   note: { at: string; by: string; text: string; mine?: boolean }
 }> {
   return request('/paperwork/location-note', { method: 'POST', body: JSON.stringify(input) })
@@ -993,6 +1043,11 @@ export function attachSubmissionToLoad(
 /** End of day: say where a pickup's paperwork is. */
 export async function setPaperworkLocation(loadId: string, kind: 'TRUCK' | 'SHED' | 'TRAILER', unit?: string | null): Promise<void> {
   await request<{ ok: true }>('/paperwork/paperwork-location', { method: 'POST', body: JSON.stringify({ loadId, kind, unit: unit ?? '' }) })
+}
+
+/** The driver put their loads for a day in a new order; the office's calendar follows. */
+export async function reorderLoads(date: string, loadIds: string[]): Promise<{ order: Array<{ loadId: string; sortOrder: number }> }> {
+  return request('/paperwork/reorder', { method: 'POST', body: JSON.stringify({ date, loadIds }) })
 }
 
 /** Start of day: the delivering driver says they have the paperwork, or cannot find it. */

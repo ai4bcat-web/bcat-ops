@@ -51,6 +51,15 @@ describe('whereabouts', () => {
     expect(unitLine({ place: null, fixAgeMin: null, lastEvent: null, eta: null, truck: null, trailer: '5302' })).toBe('Trailer 5302')
     expect(unitLine(null)).toBeNull()
   })
+  it('shows Bobtail only while no trailer is named, else No trailer set', () => {
+    const equipment = [{ id: 'eq-1', unitNumber: '3114' }, { id: 'tr-9', unitNumber: '9001' }]
+    const now = Date.parse('2026-10-12T15:00:00Z')
+    const bob = { id: 'd1', assignedTruckId: 'eq-1', assignedTrailerId: null, bobtail: true } as Driver
+    expect(unitLine(whereaboutsOf(bob, [], equipment, [], now))).toBe('Truck 3114 · Bobtail')
+    expect(unitLine(whereaboutsOf({ ...bob, bobtail: null } as Driver, [], equipment, [], now))).toBe('Truck 3114 · No trailer set')
+    // A stale bobtail flag never outranks a trailer on file.
+    expect(unitLine(whereaboutsOf({ ...bob, assignedTrailerId: 'tr-9' } as Driver, [], equipment, [], now))).toBe('Truck 3114 · Trailer 9001')
+  })
 })
 
 describe('statusLine', () => {

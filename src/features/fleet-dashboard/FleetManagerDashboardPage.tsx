@@ -4,6 +4,7 @@ import { Truck, Container, FileText, Wrench, CalendarOff, ChevronRight } from 'l
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useDriverAvailability } from '@/hooks/useDriverAvailability'
+import type { TimeOffType } from '@/lib/timeOff'
 import { useTruckDocAlerts } from '@/hooks/useTruckDocAlerts'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { RepairInvoicesWidget } from '@/features/dashboard/RepairInvoicesWidget'
@@ -17,8 +18,9 @@ import { DotDueWidget } from './DotDueWidget'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 
 // ── Time-off labels ─────────────────────────────────────────────────────────────
-const TIME_OFF_META: Record<'FULL_DAY_OFF' | 'EARLY_START' | 'LATE_START', { label: string; bg: string; fg: string }> = {
+const TIME_OFF_META: Record<TimeOffType, { label: string; bg: string; fg: string }> = {
   FULL_DAY_OFF: { label: 'Day Off',     bg: '#fef2f2', fg: '#b91c1c' },
+  PTO:          { label: 'PTO',         bg: '#f0fdf4', fg: '#15803d' },
   EARLY_START:  { label: 'In Early By', bg: '#fffbeb', fg: '#b45309' },
   LATE_START:   { label: 'Late Start',  bg: '#eff6ff', fg: '#1d4ed8' },
 }
