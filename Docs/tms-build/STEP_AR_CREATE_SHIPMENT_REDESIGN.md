@@ -334,3 +334,13 @@ Layout rules for EVERY card (enforce in one shared field-grid component, not per
 Freight card rows at 1440: [Division 3 · Shipment type 3 · Equipment 3 · Weight 3] /
 [Billable wt 3 · Pieces 3 · Footage 3 · Freight class 3] / [Description 6 · Declared value 3 ·
 Customer ref 3] / [Requirement chips 12] / [toolbar 12].
+
+## Ryne's feedback 11 (2026-11-05 evening)
+"In the customer strip, make sure to also include customer reference number (PO)."
+The header strip gains a **Customer ref (PO)** text input right after the Customer type-ahead
+(before the Bill To chip). It is the same value as Freight's Customer Ref field: show it in the
+strip only and remove it from the Freight card (Freight rows become [Division 3 · Shipment type 3 ·
+Equipment 3 · Weight 3] / [Billable wt 3 · Pieces 3 · Footage 3 · Freight class 3] /
+[Description 9 · Declared value 3] / chips / toolbar). Required-ness follows the customer's
+per-customer requirements (Step AP): when the customer requires a PO, the strip input turns green
+and the rail checklist lists "Customer ref".
