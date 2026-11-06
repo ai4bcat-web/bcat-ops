@@ -260,3 +260,20 @@ Other. Types are a constant list in `constants.ts` so more can be added; the Shi
 filter, Intake extractor and the quote → shipment path read the same list. Picking a type sets a
 sensible default equipment and requirement chips (Reefer → temp control on; Hazmat → hazmat chip;
 Auto transport → equipment Auto carrier, pieces = vehicle count) which the user can change.
+
+## Ryne's feedback 8 (2026-11-05 evening, screenshots aljex-create/35-37)
+"These are redundant. Let's combine it into one in the freight section. Same with division and
+revenue type."
+- **Revenue Type renders twice** on the form (screenshots 36 and 37, two green selects with the
+  same "Revenue division (ownership tag)" help text). Keep exactly one.
+- **Division (header pill) and Revenue Type are the same thing** (the revenue division /
+  ownership tag: Ivan Cartage, BCAT Logistics, Auto Shipping, Owner Operators). Collapse them into
+  ONE required field named **Division** in the Freight card, placed first, before Shipment type.
+  Remove the Division pill from the header strip and both Revenue Type selects. The single field
+  writes both underlying values (division and the revenue tag) so the Shipments board tabs, Load
+  Review, commissions and the rate-con logo keep reading what they read today.
+- Shipment type's per-division default now keys off this field; changing Division re-applies the
+  default only if the user has not picked a type by hand.
+- Equipment stays its own field (not redundant with Division); it sits after Shipment type.
+Freight card field order: Division · Shipment type · Equipment · Weight / Billable · Pieces ·
+Footage · Description · Freight class · Declared value · Customer Ref · requirement chips.
