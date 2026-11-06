@@ -20,6 +20,7 @@ import type {
   CarrierBillRecord,
   CarrierBillStatus,
   CarrierRecord,
+  LoadCarrierRecord,
   ShipmentDocumentType,
 } from '@/types/tms'
 
@@ -247,4 +248,56 @@ export function billGates(input: {
     settings,
     isAdmin,
   })
+}
+
+/** One live outside carrier on a shipment's load, as the AP surfaces name its siblings. */
+export interface SiblingCarrier {
+  loadCarrierId: string
+  carrierName: string
+  /** The recorded bill, null until Record lands one. */
+  billId: string | null
+}
+
+/**
+ * The OTHER outside carriers live on this bill's load. A load with several carriers has one
+ * bill per carrier, all on one PRO; this is how a bill page links its siblings. Empty for a
+ * single-carrier load (no chrome), and own-fleet legs are never siblings.
+ */
+export function siblingCarriers(
+  loadCarriers: readonly Pick<LoadCarrierRecord, 'id' | 'loadId' | 'kind' | 'status' | 'carrierName' | 'invoiceId' | 'sequence'>[],
+  bill: Pick<CarrierBillRecord, 'loadId' | 'loadCarrierId'>,
+): SiblingCarrier[] {
+  return loadCarriers
+    .filter((lc) => lc.loadId === bill.loadId && lc.id !== bill.loadCarrierId && lc.kind === 'CARRIER' && lc.status === 'ACTIVE')
+    .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0) || a.id.localeCompare(b.id))
+    .map((lc) => ({ loadCarrierId: lc.id, carrierName: lc.carrierName || 'Carrier', billId: lc.invoiceId ?? null }))
+}
+
+/** `loadId` -> how many distinct carrier legs the loaded worklists show for it. */
+export type SharedProIndex = ReadonlyMap<string, number>
+
+/**
+ * Count the carrier legs per load across everything the page has read (awaiting rows plus
+ * open and settled bills; a voided bill is not a leg). A count above one means the PRO is
+ * shared. Only the loaded sets are seen, so it can undercount, never overcount.
+ */
+export function sharedProIndex(
+  rows: readonly Pick<ApWorklistRow, 'loadId' | 'loadCarrierId'>[],
+  bills: readonly Pick<CarrierBillRecord, 'loadId' | 'loadCarrierId' | 'status'>[],
+): SharedProIndex {
+  const legs = new Map<string, Set<string>>()
+  const add = (loadId: string, loadCarrierId: string) => {
+    const set = legs.get(loadId) ?? new Set<string>()
+    set.add(loadCarrierId)
+    legs.set(loadId, set)
+  }
+  for (const r of rows) add(r.loadId, r.loadCarrierId)
+  for (const b of bills) if (b.status !== 'VOID') add(b.loadId, b.loadCarrierId)
+  return new Map([...legs].map(([loadId, set]) => [loadId, set.size]))
+}
+
+/** `Shared PRO · 2 carriers` on a row whose load has a sibling carrier; null otherwise. */
+export function sharedProLabel(index: SharedProIndex, loadId: string): string | null {
+  const n = index.get(loadId) ?? 0
+  return n > 1 ? `Shared PRO · ${n} carriers` : null
 }

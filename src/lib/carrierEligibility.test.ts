@@ -103,6 +103,19 @@ describe('evaluateCarrierBooking — flat refusals', () => {
     expect(keys(result.blocks)).toContain('ALREADY_COVERED')
   })
 
+  it('adding a carrier skips ALREADY_COVERED and checks top spend against the whole load', () => {
+    const covered = { ...input().load, activeLoadCarrierId: 'lc-9' }
+    expect(keys(evaluateCarrierBooking(input({ load: covered, additional: true })).blocks)).not.toContain('ALREADY_COVERED')
+    const over = evaluateCarrierBooking(
+      input({ load: covered, additional: true, carrierRateCents: 100_000, existingCarrierCostCents: 200_001 }),
+    )
+    expect(keys(over.blocks)).toContain('COST_EXCEEDS_TOP_SPEND')
+    const ok = evaluateCarrierBooking(
+      input({ load: covered, additional: true, carrierRateCents: 100_000, existingCarrierCostCents: 200_000 }),
+    )
+    expect(keys(ok.blocks)).not.toContain('COST_EXCEEDS_TOP_SPEND')
+  })
+
   it('refuses a negative carrier rate', () => {
     const result = evaluateCarrierBooking(input({ carrierRateCents: -1 }))
     expect(keys(result.blocks)).toContain('NEGATIVE_CARRIER_CHARGE')

@@ -43,13 +43,18 @@ export interface CheckCallDraft {
 
 /** Post-save actions. Immediate (own buttons); none is part of Save changes. All are no-ops while `ctx.busy`. */
 export interface FormActions {
-  /** Opens BookCarrierDialog prefilled from the form (own fleet: AssignDriverDialog). */
-  cover(): void
+  /**
+   * Opens BookCarrierDialog prefilled from the form (own fleet: AssignDriverDialog). With a carrier slot key
+   * beyond the first it books that slot directly with ADD_CARRIER (the slot's directory carrier, rate, charges, legs).
+   */
+  cover(slot?: string): void
+  /** The four below act on the primary carrier; `openFor` names another carrier of a multi-carrier load. */
   openDispatch(): void
   openSendRateCon(): void
   openSendInfo(): void
   /** Opens the existing RemoveCarrierDialog with outcome TONU. */
   openTonu(): void
+  openFor(kind: 'dispatch' | 'rateCon' | 'info' | 'tonu', loadCarrierId: string): void
   sendSetupPacket(carrierId: string, email: string): Promise<void>
   addCheckCall(draft: CheckCallDraft): Promise<void>
   uploadDocument(file: File, audience: 'ALL' | 'INTERNAL', type: ShipmentDocumentType): Promise<void>
@@ -78,6 +83,8 @@ export interface FormCtx {
   divisions: DivisionTreeRow[]
   /** A pipeline is running: every input is disabled. */
   busy: boolean
+  /** The form holds unsaved edits (the saved shipment no longer equals what is on screen). */
+  dirty: boolean
   actions: FormActions
   /** Re-read the shipment bundle from the server (after a write made outside the form's own pipelines, e.g. tracking mode). */
   refreshBundle: () => Promise<void>

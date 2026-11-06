@@ -6,7 +6,7 @@
  * passes `resume` to re-run only what did not finish.
  */
 import {
-  assignCarrierRep, clearRevTag, commitDocument, createLocation, createShipment, getShipmentBundle,
+  addCarrier, assignCarrierRep, clearRevTag, commitDocument, createLocation, createShipment, getShipmentBundle,
   prepareDocumentUpload, putPresignedFile, recalcCharges, saveOrderForm, setEta, setRevTag, setSalesRep,
   submitOrder, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
   type UpdateLoadCarrierDetailsInput,
@@ -16,13 +16,15 @@ import { fromDateTimeInput } from '@/lib/date'
 import { isIvanCartageName } from '@/lib/ownFleetDrivers'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import type { Stop } from '@/types'
-import type { CustomerRecord, LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
+import type { CustomerRecord, LoadCarrierRecord, LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 import { applyNewShipmentEffects, linkStopsToDirectory } from '../newShipmentEffects'
 import {
-  firstPickupIndex, lastDeliveryIndex, rebaseCharges, toCharges, toCreateInput, toSaveOrderFormInput, toStop, toStops,
+  chargesForBundle, firstPickupIndex, lastDeliveryIndex, rebaseCharges, toAddCarrierInput, toCreateInput, toSaveOrderFormInput, toStop, toStops,
   toUpdateOrderDetailsInput,
 } from './mapping'
-import { activeLoadCarrier, lockedFields, valuesFromBundle, type ShipmentFormValues } from './model'
+import {
+  activeLoadCarrier, carrierSlotsOf, liveCarriers, lockedFields, valuesFromBundle, type CarrierSlot, type ShipmentFormValues,
+} from './model'
 import { blockingIssues, issueSummary, validateForm, type ValidationLevel } from './validation'
 
 export interface PipelineCtx {
@@ -289,10 +291,17 @@ export function diffStopOps(before: ShipmentFormValues, after: ShipmentFormValue
   return ops
 }
 
-function carrierDetailsPatch(values: ShipmentFormValues, bundle: ShipmentBundle): Omit<UpdateLoadCarrierDetailsInput, 'loadCarrierId' | 'expectedUpdatedAt'> | null {
-  const lc = activeLoadCarrier(bundle)
-  if (!lc || lc.kind !== 'CARRIER') return null
-  const c = values.carrier
+/** The assignment a slot shows: by its booked id; slot 0 falls back to the primary assignment. */
+function loadCarrierOfSlot(bundle: ShipmentBundle, slot: CarrierSlot, index: number): LoadCarrierRecord | null {
+  const live = liveCarriers(bundle)
+  return live.find((lc) => lc.id === slot.loadCarrierId) ?? (index === 0 ? live[0] ?? null : null)
+}
+
+const sameLegs = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((id) => b.includes(id))
+
+function carrierDetailsPatch(slot: CarrierSlot, lc: LoadCarrierRecord, withLegs: boolean): Omit<UpdateLoadCarrierDetailsInput, 'loadCarrierId' | 'expectedUpdatedAt'> | null {
+  if (lc.kind !== 'CARRIER') return null
+  const c = slot
   // Step AQ: an Ivan Cartage leg's driver, truck and trailer come from a Driver record through
   // ENTER_DRIVER_INFO's picker; this typed patch never carries them.
   const ivan = isIvanCartageName(lc.carrierName)
@@ -304,10 +313,11 @@ function carrierDetailsPatch(values: ShipmentFormValues, bundle: ShipmentBundle)
     }),
     sealNumber: c.seal, tripNumber: c.carrierRef,
   } as Record<string, string>
-  const patch: Record<string, string | null> = {}
+  const patch: Record<string, string | string[] | null> = {}
   for (const [k, v] of Object.entries(want)) {
     if ((lc[k as keyof typeof lc] as string | null | undefined ?? '') !== v.trim()) patch[k] = v.trim() || null
   }
+  if (withLegs && !sameLegs(lc.legStopIds ?? [], c.legStopIds)) patch.legStopIds = c.legStopIds
   return Object.keys(patch).length > 0 ? patch : null
 }
 
@@ -350,26 +360,32 @@ export async function runEditSave(values: ShipmentFormValues, ctx: PipelineCtx, 
   await r.run('charges', async () => {
     if (locks.fields.rates || locks.fields.all) return
     const b = r.bundle!
-    const ids = { orderId: b.orders[0]?.id ?? null, loadId: b.loads[0]?.id ?? null, activeLoadCarrierId: activeLoadCarrier(b)?.id }
-    const next = toCharges(values, ids)
-    if (eq(next, toCharges(before, ids))) return
+    const next = chargesForBundle(values, b)
+    if (eq(next, chargesForBundle(before, b))) return
     return recalcCharges({ shipmentId: b.shipment.id, expectedVersion: b.shipment.version ?? 0, charges: next })
   })
   await applyRoles(r, values)
+  // Each booked carrier takes its own block; legs are only written when there is more than one carrier.
   await r.run('carrier', async () => {
-    const lc = activeLoadCarrier(r.bundle)
-    const patch = carrierDetailsPatch(values, r.bundle!)
-    if (!lc || !patch) return
-    return updateLoadCarrierDetails({ loadCarrierId: lc.id, expectedUpdatedAt: lc.updatedAt, ...patch })
+    const slots = carrierSlotsOf(values)
+    for (let i = 0; i < slots.length; i++) {
+      const lc = loadCarrierOfSlot(r.bundle!, slots[i], i)
+      const patch = lc ? carrierDetailsPatch(slots[i], lc, slots.length > 1) : null
+      if (!lc || !patch) continue
+      r.bundle = await updateLoadCarrierDetails({ loadCarrierId: lc.id, expectedUpdatedAt: lc.updatedAt, ...patch })
+    }
   })
   await r.run('eta', async () => {
-    const lc = activeLoadCarrier(r.bundle)
-    if (!lc || values.carrier.puEta === before.carrier.puEta) return
-    const res = await setEta({
-      loadCarrierId: lc.id, expectedUpdatedAt: lc.updatedAt,
-      pickupEtaAt: values.carrier.puEta ? fromDateTimeInput(values.carrier.puEta) : null,
-    })
-    return res.bundle
+    const slots = carrierSlotsOf(values)
+    const was = carrierSlotsOf(before)
+    for (let i = 0; i < slots.length; i++) {
+      const lc = loadCarrierOfSlot(r.bundle!, slots[i], i)
+      if (!lc || slots[i].puEta === (was[i]?.puEta ?? '')) continue
+      r.bundle = (await setEta({
+        loadCarrierId: lc.id, expectedUpdatedAt: lc.updatedAt,
+        pickupEtaAt: slots[i].puEta ? fromDateTimeInput(slots[i].puEta) : null,
+      })).bundle
+    }
   })
   return r.result()
 }
@@ -390,32 +406,59 @@ export async function runSubmit(values: ShipmentFormValues, ctx: PipelineCtx, bu
 }
 
 /**
- * After BookCarrierDialog booked the carrier: apply what BOOK_CARRIER cannot take (Seal,
- * Carrier Ref #, PU ETA) and re-tie the per-assignment extras to the new ACTIVE assignment,
- * clearing the pre-Cover carrier rate draft.
+ * After a carrier was booked (BOOK_CARRIER for the first, ADD_CARRIER for the others): apply what the
+ * booking cannot take (Seal, Carrier Ref #, PU ETA) and re-tie the per-assignment extras to the new
+ * assignment, clearing that slot's pre-Cover rate draft. `slotKey` names the slot just booked (default: the first).
  */
-export async function runCover(values: ShipmentFormValues, booked: ShipmentBundle): Promise<PipelineResult> {
-  const lc = activeLoadCarrier(booked)
+export async function runCover(values: ShipmentFormValues, booked: ShipmentBundle, slotKey?: string): Promise<PipelineResult> {
+  const slots = carrierSlotsOf(values)
+  const index = Math.max(0, slots.findIndex((s) => s.slot === slotKey))
+  const known = new Set(slots.map((s) => s.loadCarrierId).filter(Boolean))
+  const live = liveCarriers(booked)
+  // The assignment just booked: the first slot's is the primary; another slot's is the live one no slot owns yet.
+  const lc = index === 0 ? live[0] : live.find((l) => !known.has(l.id))
   if (!lc) return fail('The carrier is not booked yet.', booked)
+  const slot = slots[index]
   const r = new Runner(booked, new Set(), ['carrier', 'eta', 'extras'])
   await r.run('carrier', async () => {
-    const patch = carrierDetailsPatch(values, r.bundle!)
+    const patch = carrierDetailsPatch(slot, lc, slots.length > 1)
     if (!patch) return
-    const active = activeLoadCarrier(r.bundle)!
+    const active = liveCarriers(r.bundle).find((l) => l.id === lc.id)!
     return updateLoadCarrierDetails({ loadCarrierId: active.id, expectedUpdatedAt: active.updatedAt, ...patch })
   })
   await r.run('eta', async () => {
-    if (!values.carrier.puEta) return
-    const active = activeLoadCarrier(r.bundle)!
+    if (!slot.puEta) return
+    const active = liveCarriers(r.bundle).find((l) => l.id === lc.id)!
     return (await setEta({
-      loadCarrierId: active.id, expectedUpdatedAt: active.updatedAt, pickupEtaAt: fromDateTimeInput(values.carrier.puEta),
+      loadCarrierId: active.id, expectedUpdatedAt: active.updatedAt, pickupEtaAt: fromDateTimeInput(slot.puEta),
     })).bundle
   })
   await r.run('extras', async () => {
     const b = r.bundle!
-    const next = { ...values, carrier: { ...values.carrier, loadCarrierId: activeLoadCarrier(b)!.id } }
+    const tied = slots.map((s, i) => (i === index ? { ...s, loadCarrierId: lc.id } : s))
+    const [first, ...rest] = tied
+    const next: ShipmentFormValues = {
+      ...values,
+      carrier: { ...values.carrier, loadCarrierId: first.loadCarrierId || live[0].id },
+      carriers: [first, ...rest],
+    }
     const input = toUpdateOrderDetailsInput(next, b)
     return updateOrderDetails({ shipmentId: input.shipmentId, expectedUpdatedAt: input.expectedUpdatedAt, order: { specialRequirements: input.order?.specialRequirements } })
   })
   return r.result()
+}
+
+/**
+ * Cover one extra carrier slot: ADD_CARRIER with the slot's directory carrier, rate, charges and legs, then
+ * the same follow-up as the first carrier (`runCover`). The server decides whether the add is allowed.
+ */
+export async function runAddCarrier(values: ShipmentFormValues, bundle: ShipmentBundle, slotKey: string): Promise<PipelineResult> {
+  const slot = carrierSlotsOf(values).find((s) => s.slot === slotKey)
+  if (!slot) return fail('That carrier slot is gone.', bundle)
+  if (!slot.carrierId) return fail('Pick the carrier from the directory first.', bundle)
+  const r = new Runner(bundle, new Set(), ['add'])
+  await r.run('add', () => addCarrier(toAddCarrierInput(values, slotKey, r.bundle!)))
+  if (r.stopped || !r.bundle) return r.result()
+  const after = await runCover(values, r.bundle, slotKey)
+  return { ...after, steps: [...r.steps, ...after.steps] }
 }

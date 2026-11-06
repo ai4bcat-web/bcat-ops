@@ -69,6 +69,7 @@ export const ACTION_SENTENCE: Record<string, string> = {
   INGEST_ATTACHMENT: 'filed an e-mail attachment',
   ATTACH_DRIVER_DOC: 'attached a driver document',
   SAVE_GENERATED_DOCUMENT: 'generated a document',
+  EMAIL_BOL: 'e-mailed the bill of lading',
   REVIEW_DOCUMENT: 'reviewed a document',
   UPDATE_DOCUMENT: 'updated a document',
   VOID_DOCUMENT: 'voided a document',
@@ -158,7 +159,10 @@ export interface DetailText { text: string; title: string }
  * The first changed field as `field: new value`; `title` carries the old value for the hover.
  * `changes` is either `{field: {from, to}}` or a flat `{field: value}` (the routers pass both).
  */
-export function auditDetail(changes: unknown): DetailText | null {
+export function auditDetail(input: unknown): DetailText | null {
+  // AppSync hands AWSJSON back as a string, sometimes encoded twice: unwrap one more level.
+  let changes = input
+  if (typeof changes === 'string') { try { changes = JSON.parse(changes) } catch { return null } }
   if (typeof changes !== 'object' || changes === null || Array.isArray(changes)) return null
   for (const [key, raw] of Object.entries(changes as Record<string, unknown>)) {
     if (HIDDEN_KEY.test(key)) continue

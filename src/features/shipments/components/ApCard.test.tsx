@@ -6,7 +6,7 @@
  * a TONU'd assignment still has a card, because a truck that showed up is owed.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ApCard } from './ApCard'
 import type {
@@ -104,6 +104,20 @@ describe('ApCard', () => {
     await renderCard([assignment({ apStatus })])
     const lit = screen.getAllByTestId(/^ap-rung-/).filter((el) => el.getAttribute('aria-current') === 'step')
     expect(lit.map((el) => el.getAttribute('data-testid'))).toEqual([litId])
+  })
+
+  it('with two carriers each one has its own card and its own bill state; one carrier has no summary strip', async () => {
+    await renderCard([
+      assignment({ invoiceId: 'cb:lc-1:1', apStatus: 'IN_REVIEW' }),
+      assignment({ id: 'lc-2', carrierId: 'car-2', carrierName: 'Heartland', apStatus: 'AWAITING_INVOICE' }),
+    ], [charge(), charge({ id: 'chg-2', loadCarrierId: 'lc-2', amountCents: 50000, rateCents: 50000 })])
+    expect(screen.getAllByTestId('ap-card')).toHaveLength(2)
+    expect(screen.getByTestId('ap-bill-state-lc-1').textContent).toContain('Bill recorded')
+    expect(screen.getByTestId('ap-bill-state-lc-1').textContent).toContain('In review')
+    expect(screen.getByTestId('ap-bill-state-lc-2').textContent).toContain('No bill yet')
+    cleanup()
+    await renderCard([assignment()])
+    expect(screen.queryByTestId('ap-bill-states')).toBeNull()
   })
 
   it('keeps an own-fleet leg out of AP entirely: no ladder, no Record, a settlement link instead', async () => {

@@ -2,7 +2,7 @@
 import type { Stop } from '@/types'
 import type { CustomerRecord, ShipmentBundle, SpecialRequirements } from '@/types/tms'
 import { toCharges, toSaveOrderFormInput } from './mapping'
-import { emptyValues, type ShipmentFormValues } from './model'
+import { emptyValues, syncCarrierSlots, type ShipmentFormValues } from './model'
 
 export function filledValues(): ShipmentFormValues {
   const v = emptyValues()
@@ -44,13 +44,13 @@ export function filledValues(): ShipmentFormValues {
     carrier: { rateType: 'FLAT', hours: '', lhRate: '', lineId: '', payPct: '', maxRate: '1500' },
     fscPercent: '12.5', fscPerMile: '', fscLineId: '', smr: '40',
     lines: [
-      { id: '', carrierLineId: '', release: 'R1', carrierKey: '', code: 'LUMPER', label: 'Lumper', carrierAmount: '', customerAmount: '150', note: 'receipt' },
-      { id: '', carrierLineId: '', release: 'R2', carrierKey: '', code: 'DETENTION', label: 'Detention', carrierAmount: '', customerAmount: '90.25', note: '' },
+      { id: '', carrierLineId: '', release: 'R1', paidTo: '', code: 'LUMPER', label: 'Lumper', carrierAmount: '', customerAmount: '150', note: 'receipt' },
+      { id: '', carrierLineId: '', release: 'R2', paidTo: '', code: 'DETENTION', label: 'Detention', carrierAmount: '', customerAmount: '90.25', note: '' },
     ],
     passthrough: [],
   }
   v.carrier = { ...v.carrier, originCity: 'Gary', originState: 'IN', emptyMiles: '12' }
-  return v
+  return syncCarrierSlots(null, v)
 }
 
 export const CUSTOMER: CustomerRecord = {

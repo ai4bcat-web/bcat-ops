@@ -18,6 +18,7 @@
  * file by path, so a `@/` alias would break the function build.
  */
 import type {
+  ApStatus,
   AssignmentType,
   BoardDateFilter,
   BoardDetailFilter,
@@ -171,12 +172,20 @@ export function boardStatusOf(row: {
  * `ShipmentRow` and the extended `ShipmentViewRow` satisfy it, so saved views can run
  * the same filter code without importing the full shipment type.
  */
+/** One live carrier on a board row (Step AT); listed on a row only when there are two or more. */
+export interface BoardCarrier {
+  name: string
+  apStatus: ApStatus | null
+  costCents: number | null
+}
+
 interface BoardFilterableRow {
   status: ShipmentStatus
   voidedAt?: string | null
   deletedAt?: string | null
   customerId?: string | null
   carrierName?: string | null
+  carriers?: BoardCarrier[] | null
   pickupName?: string | null
   consigneeName?: string | null
   fromState?: string | null
@@ -202,7 +211,10 @@ interface BoardFilterableRow {
 export function detailValuesFor(row: BoardFilterableRow, key: BoardDetailKey): string[] {
   switch (key) {
     case 'customer': return row.customerId != null ? [row.customerId] : []
-    case 'carrier': return row.carrierName ? [row.carrierName] : []
+    case 'carrier':
+      // A load with several carriers matches the filter on ANY of them.
+      if (row.carriers && row.carriers.length >= 2) return [...new Set(row.carriers.map((c) => c.name))]
+      return row.carrierName ? [row.carrierName] : []
     case 'pickupName': return row.pickupName ? [row.pickupName] : []
     case 'consigneeName': return row.consigneeName ? [row.consigneeName] : []
     case 'fromStates': return row.fromState ? [row.fromState] : []

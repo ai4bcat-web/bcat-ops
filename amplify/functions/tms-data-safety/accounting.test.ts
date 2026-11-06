@@ -158,3 +158,34 @@ describe('accountant CSVs', () => {
     expect(byName(open, 'ar-payments.csv').length).toBe(byName(files, 'ar-payments.csv').length)
   })
 })
+
+describe('a load with two carriers (Step AT)', () => {
+  // One load, one PRO, two carriers, one bill each. The CSV is one row per bill; the shipment is not counted twice.
+  const twoCarriers: AccountingInput = {
+    ...fixture,
+    carriers: [...fixture.carriers, { id: 'K2', name: 'Second Haul Inc', mcNumber: '654321' }],
+    carrierBills: [
+      { id: 'cb:1:1', billNumber: 'A-1', loadId: 'L1', shipmentId: 'S1', carrierId: 'K1', billDate: '2026-02-10', dueAt: '2026-03-12', termsDays: 30, grossCents: 60000, quickPayFeeCents: 0, netCents: 60000, billedCents: 60000, varianceCents: 0, paidCents: 0, creditedCents: 0, balanceCents: 60000, status: 'IN_REVIEW', createdBy: 'a@x.test' },
+      { id: 'cb:9:1', billNumber: 'B-1', loadId: 'L1', shipmentId: 'S1', carrierId: 'K2', billDate: '2026-02-10', dueAt: '2026-03-12', termsDays: 30, grossCents: 20000, quickPayFeeCents: 500, netCents: 19500, billedCents: 20000, varianceCents: 0, paidCents: 0, creditedCents: 0, balanceCents: 19500, status: 'TO_BE_PAID', createdBy: 'a@x.test' },
+    ],
+    apPayments: [],
+  }
+  const rows = byName(buildAccountingFiles(twoCarriers), 'carrier-bills.csv')
+
+  it('writes one row per bill on the same PRO, each with its own carrier and money', () => {
+    expect(rows[0]).toEqual([...CARRIER_BILLS_HEADERS])
+    const bills = rows.slice(1)
+    expect(bills).toHaveLength(2)
+    expect(bills.map((r) => r[2])).toEqual(['90001', '90001'])
+    expect(bills.map((r) => r[0]).sort()).toEqual(['cb:1:1', 'cb:9:1'])
+    const a = bills.find((r) => r[0] === 'cb:1:1')!
+    const b = bills.find((r) => r[0] === 'cb:9:1')!
+    expect([a[5], a[6], a[11], a[13]]).toEqual(['K1', 'Fake Haul LLC', '600.00', '600.00'])
+    expect([b[5], b[6], b[7], b[11], b[12], b[13]]).toEqual(['K2', 'Second Haul Inc', '654321', '200.00', '5.00', '195.00'])
+  })
+
+  it('does not double count: the rows add up to the sum of the bills, not the load twice', () => {
+    const gross = rows.slice(1).reduce((s, r) => s + Math.round(Number(r[11]) * 100), 0)
+    expect(gross).toBe(80000)
+  })
+})

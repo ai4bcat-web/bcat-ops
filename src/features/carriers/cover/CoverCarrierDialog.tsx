@@ -20,7 +20,7 @@ import { CarrierLookupCard } from '@/features/carriers/lookup/CarrierLookupCard'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsInput, TmsMetaList } from '@/features/tms/kit'
 import { useCarriers } from '@/hooks/useCarriers'
 import { CoverTrackingStep } from './CoverTrackingStep'
-import { coverCarrier, getShipmentBundle, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
+import { addCarrier, coverCarrier, getShipmentBundle, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
 import type { McpLookupResult } from '@/lib/apiClient'
 import { CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
 import { formatDateTime } from '@/lib/date'
@@ -28,6 +28,7 @@ import { PACKET_LABELS, parseSearch, refLabel, searchDirectory } from '@/lib/int
 import type { McpCarrierStatus } from '@/lib/integrations/mcpAdapter'
 import { normalizeMcpStatus } from '@/lib/mcpPacket'
 import type { CarrierRecord, ShipmentBundle } from '@/types/tms'
+import { liveCarriersOf } from '@/lib/carrierTotals'
 import { MODERATE_ACK_KEY, coverGate, coverRoute, findByNumber } from './coverModel'
 
 type Ref = { mcNumber?: string; dotNumber?: string }
@@ -44,13 +45,15 @@ const refOf = (c: CarrierRecord): Ref => ({
   ...(c.dotNumber ? { dotNumber: c.dotNumber } : {}),
 })
 
-export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = '', initialRateCents, onClose, onCovered }: {
+export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = '', initialRateCents, bundle, onClose, onCovered }: {
   shipmentId: string
   shipmentNumber?: string
   /** Look this MC / DOT up as soon as the directory has loaded (Carrier Sales' "Cover with this carrier"). */
   initialQuery?: string
   /** The carrier rate already typed somewhere (the shipment form's Rates card); the rep can still change it. */
   initialRateCents?: number
+  /** The shipment on screen: when it already has a live carrier the dialog offers the legs choice and adds another carrier. */
+  bundle?: ShipmentBundle
   onClose: () => void
   /** The covered shipment bundle, for the caller to swap in or refresh from. */
   onCovered: (bundle: ShipmentBundle) => void
@@ -72,7 +75,14 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   // Set once COVER_CARRIER succeeded: the dialog moves on to the Tracking section instead of closing.
   const [covered, setCovered] = useState<{ bundle: ShipmentBundle; name: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
-
+  // Legs only matter when the caller already shows a live carrier on the load; empty = every stop.
+  const [allStops, setAllStops] = useState(true)
+  const [legStopIds, setLegStopIds] = useState<string[]>([])
+  const addingMore = bundle != null && liveCarriersOf(bundle.loadCarriers, bundle.loads[0]?.id ?? '').length > 0
+  const legStops = (bundle?.loads[0]?.stops ?? []).map((s, i) => ({
+    id: s.id,
+    label: `${i + 1}. ${s.type === 'pickup' ? 'Pickup' : 'Delivery'} ${s.name ?? s.city ?? ''}`.trim(),
+  }))
   const card = preview?.card ?? null
   const stub = preview?.mode === 'STUB'
   const route = coverRoute(selected)
@@ -80,7 +90,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   const needsMcp = !selected || selected.status !== 'ACTIVE'
   const rateOk = rateCents != null && rateCents > 0
   const ackOk = !gate.warning || acked
-  const assignable = rateOk && ackOk && !gate.blocked && !working && !carriersLoading
+  const assignable = rateOk && ackOk && !gate.blocked && !working && !carriersLoading && (allStops || legStopIds.length > 0)
 
   const pick = (carrier: CarrierRecord | null, next: Ref) => {
     setSelected(carrier)
@@ -122,13 +132,17 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
     const fresh = await getShipmentBundle(shipmentId)
     const load = fresh.loads[0]
     if (!load) throw new Error('This shipment has no load to cover.')
-    const covered = await coverCarrier({
+    const input = {
       loadId: load.id,
       expectedUpdatedAt: load.updatedAt ?? fresh.shipment.updatedAt,
       carrierId,
       carrierRateCents: rateCents ?? 0,
       ...(gate.warning && acked ? { acknowledgeWarnings: [MODERATE_ACK_KEY] } : {}),
-    })
+    }
+    // A load that already has a live carrier gets another one (default: every stop), never a replacement.
+    const covered = liveCarriersOf(fresh.loadCarriers, load.id).length > 0
+      ? await addCarrier({ ...input, ...(allStops ? {} : { legStopIds }) })
+      : await coverCarrier(input)
     onCovered(covered)
     return covered
   }
@@ -354,6 +368,27 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
               <div className="max-w-56">
                 <MoneyField label="Carrier rate" value={rateCents} onChange={setRateCents} />
               </div>
+              {addingMore && legStops.length > 1 && (
+                <div className="flex flex-col gap-1" data-testid="cover-legs">
+                  <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>Legs this carrier covers</p>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" data-testid="cover-legs-all" aria-label="All stops" checked={allStops} onChange={(e) => setAllStops(e.target.checked)} />
+                    <span>All stops</span>
+                  </label>
+                  {!allStops && legStops.map((s) => (
+                    <label key={s.id} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        data-testid={`cover-leg-${s.id}`}
+                        aria-label={`Stop ${s.label}`}
+                        checked={legStopIds.includes(s.id)}
+                        onChange={() => setLegStopIds((prev) => (prev.includes(s.id) ? prev.filter((id) => id !== s.id) : [...prev, s.id]))}
+                      />
+                      <span>{s.label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -3,9 +3,11 @@
  * `tms:ship-form:draft:<email>:<clientDraftId>`; at most 5 per user (oldest evicted), 30 days,
  * a version bump drops old drafts silently, and a `File` is never serialised.
  */
-import type { ShipmentFormValues } from './model'
+import { upgradeValues, type ShipmentFormValues } from './model'
 
-export const DRAFT_VERSION = 1
+/** v2: carriers[] and accessorial `paidTo`. A v1 draft is read as a list of one carrier (`upgradeValues`); nothing is dropped. */
+export const DRAFT_VERSION = 2
+const READABLE_VERSIONS: readonly number[] = [1, DRAFT_VERSION]
 export const MAX_DRAFTS = 5
 export const DRAFT_TTL_MS = 30 * 86_400_000
 
@@ -29,9 +31,9 @@ function read(key: string, now: number): StoredDraft | null {
     const raw = s.getItem(key)
     if (!raw) return null
     const p = JSON.parse(raw) as { v?: number; savedAt?: string; clientDraftId?: string; values?: ShipmentFormValues }
-    if (p.v !== DRAFT_VERSION || !p.values || !p.savedAt || !p.clientDraftId) { s.removeItem(key); return null }
+    if (!READABLE_VERSIONS.includes(p.v ?? -1) || !p.values || !p.savedAt || !p.clientDraftId) { s.removeItem(key); return null }
     if (now - Date.parse(p.savedAt) > DRAFT_TTL_MS) { s.removeItem(key); return null }
-    return { clientDraftId: p.clientDraftId, savedAt: p.savedAt, values: { ...p.values, docs: { queued: [] } } }
+    return { clientDraftId: p.clientDraftId, savedAt: p.savedAt, values: upgradeValues({ ...p.values, docs: { queued: [] } }) }
   } catch {
     s.removeItem(key)
     return null

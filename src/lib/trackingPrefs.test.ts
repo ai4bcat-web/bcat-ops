@@ -107,3 +107,29 @@ describe('per-load confirmation (feedback 9)', () => {
     expect(parseTrackingPrefs({ mode: 'AGENT', confirmedAt: 'x', confirmedBy: 'y' })).toEqual({ mode: 'AGENT', confirmedAt: 'x', confirmedBy: 'y' })
   })
 })
+
+describe('effectiveTrackingPrefs with a carrier override (Step AT)', () => {
+  const customer = { trackingMode: 'AGENT', trackingMethod: 'EMAIL', driverSmsTarget: 'WORK_ONLY' }
+  const shipment = { createdAt: '2026-11-07T00:00:00.000Z', trackingPrefs: { mode: 'MANUAL', method: 'BOTH', confirmedAt: '2026-11-07T00:00:00.000Z' } }
+
+  it('carrier wins over shipment wins over customer, per key', () => {
+    const p = effectiveTrackingPrefs({ shipment, customer, loadCarrier: { trackingPrefs: { method: 'SMS' } } })
+    expect(p).toMatchObject({ mode: 'MANUAL', method: 'SMS', driverSms: 'WORK_ONLY' })
+    expect(p.source).toEqual({ mode: 'SHIPMENT', method: 'CARRIER', driverSms: 'CUSTOMER' })
+  })
+
+  it('a carrier without an override, or no carrier, resolves exactly as the shipment did', () => {
+    const base = effectiveTrackingPrefs({ shipment, customer })
+    expect(effectiveTrackingPrefs({ shipment, customer, loadCarrier: {} })).toEqual(base)
+    expect(effectiveTrackingPrefs({ shipment, customer, loadCarrier: { trackingPrefs: '{"bad":1}' } })).toEqual(base)
+    expect(effectiveTrackingPrefs({ shipment, customer, loadCarrier: null })).toEqual(base)
+  })
+
+  it('confirmation: the carrier\'s own confirmedAt or pinned mode confirms; otherwise the shipment decides', () => {
+    const fresh = { createdAt: '2026-11-07T00:00:00.000Z' }
+    expect(effectiveTrackingPrefs({ shipment: fresh, customer }).confirmed).toBe(false)
+    expect(effectiveTrackingPrefs({ shipment: fresh, customer, loadCarrier: { trackingPrefs: { confirmedAt: 't' } } }).confirmed).toBe(true)
+    expect(effectiveTrackingPrefs({ shipment: fresh, customer, loadCarrier: { trackingPrefs: { mode: 'NONE' } } })).toMatchObject({ confirmed: true, mode: 'NONE' })
+    expect(effectiveTrackingPrefs({ shipment: fresh, customer, loadCarrier: { trackingPrefs: { method: 'SMS' } } }).confirmed).toBe(false)
+  })
+})

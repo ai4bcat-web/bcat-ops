@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_AP_INBOX_CONFIG } from './constants'
 import { decide, rankCandidates } from './match'
-import { FX_CARRIER, fxAssignment, fxBill, fxExtraction, fxLedger, fxVendor } from './fixtures'
+import { FX_CARRIER, FX_OTHER_CARRIER, fxAssignment, fxBill, fxExtraction, fxLedger, fxVendor } from './fixtures'
 
 const cfg = DEFAULT_AP_INBOX_CONFIG
 const run = (ext = fxExtraction(), ledger = fxLedger(), runState = { autoApplied: 0 }, config = cfg) => {
@@ -162,5 +162,64 @@ describe('guards', () => {
     const c = rankCandidates(fxExtraction({ amountCents: 300_000 }), fxLedger())[0]
     expect(c.signals.find((s) => s.key === 'AMOUNT_FAR')?.points).toBe(-0.25)
     expect(c.score).toBe(0.6)
+  })
+})
+
+/** Step AT: one PRO, two carriers, one bill each. The carrier is the only thing that separates them. */
+describe('a load with two carriers (one PRO, two bills)', () => {
+  const billA = fxBill()
+  const billB = fxBill({
+    id: 'bill-2', loadCarrierId: 'lc-2', carrierId: FX_OTHER_CARRIER.id, carrierName: FX_OTHER_CARRIER.name,
+    carrierMc: FX_OTHER_CARRIER.mcNumber, billedCents: 80_000, grossCents: 80_000,
+  })
+  const both = () => fxLedger({ bills: [billA, billB] })
+  const asB = { issuer: { name: null, kind: 'CARRIER' as const, mc: '999888', dot: null }, amountCents: 80_000 }
+
+  it("carrier A's invoice lands on A's bill, never B's", () => {
+    const { candidates, d } = run(fxExtraction(), both())
+    expect(d).toMatchObject({ outcome: 'AUTO', top: { targetId: 'bill-1', loadCarrierId: 'lc-1' } })
+    const sibling = candidates.find((c) => c.targetId === 'bill-2')
+    expect(sibling?.vetoes).toContain('CARRIER_CONTRADICTS')
+  })
+
+  it("carrier B's invoice lands on B's bill, never A's", () => {
+    const { d } = run(fxExtraction(asB), both())
+    expect(d).toMatchObject({ outcome: 'AUTO', top: { targetId: 'bill-2', loadCarrierId: 'lc-2' } })
+  })
+
+  it('a PRO-only mail with no carrier signal matches both bills equally: AMBIGUOUS review, never a guess', () => {
+    const { d } = run(fxExtraction({ issuer: { name: null, kind: 'CARRIER', mc: null, dot: null }, amountCents: null }), both())
+    expect(d.outcome).toBe('REVIEW')
+    expect(d.reason).toBe('AMBIGUOUS')
+  })
+
+  it("PRO + amount alone (no carrier) never auto-applies to the bill whose amount fits", () => {
+    const { d } = run(fxExtraction({ issuer: { name: null, kind: 'CARRIER', mc: null, dot: null } }), both())
+    expect(d.outcome).toBe('REVIEW')
+  })
+
+  it("the sibling's carrier mail never applies when only the other carrier's bill is open (cross-carrier)", () => {
+    // A's bill is already paid (not in the ledger); the mail is from A; B's bill shares the PRO.
+    const { d } = run(fxExtraction(), fxLedger({ bills: [billB] }))
+    expect(d.outcome).toBe('REVIEW')
+    expect(d.top?.targetId).toBe('bill-2')
+    expect(d.top?.vetoes).toContain('CARRIER_CONTRADICTS')
+  })
+
+  it('a mail from a carrier on neither bill is queued, not applied to either', () => {
+    const { d } = run(fxExtraction({ issuer: { name: null, kind: 'CARRIER', mc: '777777', dot: null } }), both())
+    expect(d.outcome).toBe('REVIEW')
+  })
+
+  it('an awaiting assignment of carrier A never attaches an invoice from carrier B', () => {
+    const ledger = fxLedger({
+      bills: [],
+      assignments: [
+        fxAssignment({ loadCarrierId: 'lc-a', shipmentNumber: 'S000101-1' }),
+        fxAssignment({ loadCarrierId: 'lc-b', carrierId: FX_OTHER_CARRIER.id, carrierName: FX_OTHER_CARRIER.name, shipmentNumber: 'S000101-1', rateCents: 80_000 }),
+      ],
+    })
+    const { d } = run(fxExtraction(asB), ledger)
+    expect(d).toMatchObject({ outcome: 'REVIEW', reason: 'NO_BILL_YET', top: { loadCarrierId: 'lc-b' }, attach: true })
   })
 })

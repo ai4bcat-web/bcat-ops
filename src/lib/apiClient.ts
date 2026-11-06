@@ -2316,19 +2316,29 @@ let loadCarriersHaveDocuments = true
 // what is still owed on it and when it was paid. A fourth generation with its own flag.
 const LOAD_CARRIER_V4_FIELDS = ['apOpen', 'apStatusChangedAt', 'apBalanceCents', 'apPaidAt']
 let loadCarriersHaveAp = true
+// AT-plan (several carriers on one load): the legs a carrier covers and its optional tracking
+// override. A fifth generation with its own flag, shipped with the schema.
+const LOAD_CARRIER_V5_FIELDS = ['legStopIds', 'trackingPrefs']
+let loadCarriersHaveLegs = true
 const loadCarrierFields = () => [
   LOAD_CARRIER_FIELDS,
   loadCarriersHaveCarrierV2 ? LOAD_CARRIER_V2_FIELDS.join(' ') : '',
   loadCarriersHaveDocuments ? LOAD_CARRIER_V3_FIELDS.join(' ') : '',
   loadCarriersHaveAp ? LOAD_CARRIER_V4_FIELDS.join(' ') : '',
+  loadCarriersHaveLegs ? LOAD_CARRIER_V5_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 
 /** Every LoadCarrier read, with a group dropped and retried if the backend predates it. */
 async function readLoadCarriers<T>(run: (fields: string) => Promise<T>): Promise<T> {
   for (;;) {
     try {
-      return await run(loadCarrierFields())
+      return withParsedPrefs(await run(loadCarrierFields()))
     } catch (err) {
+      if (loadCarriersHaveLegs && fieldNamed(LOAD_CARRIER_V5_FIELDS, err)) {
+        console.warn('[apiClient] backend has no leg fields on LoadCarrier yet — querying without them until deploy')
+        loadCarriersHaveLegs = false
+        continue
+      }
       if (loadCarriersHaveAp && fieldNamed(LOAD_CARRIER_V4_FIELDS, err)) {
         console.warn('[apiClient] backend has no AP fields on LoadCarrier yet — querying without them until deploy')
         loadCarriersHaveAp = false
@@ -3835,6 +3845,13 @@ export async function bookCarrier(input: BookCarrierInput): Promise<ShipmentBund
   return shipmentAction<ShipmentBundle>('BOOK_CARRIER', input)
 }
 
+/** AT-plan: another outside carrier next to the live ones (up to four). `legStopIds` empty/absent = all stops. */
+export type AddCarrierInput = BookCarrierInput & { legStopIds?: string[] }
+/** Books by directory carrier (`carrierId`); a typed carrier (`carrierName`) is the server's other branch. */
+export async function addCarrier(input: AddCarrierInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('ADD_CARRIER', input)
+}
+
 /** `quickPayDays: null` clears the election; any other value must match a configured tier. */
 export async function setQuickPay(input: { loadCarrierId: string; quickPayDays: number | null }): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('SET_QUICK_PAY', input)
@@ -3856,6 +3873,8 @@ export async function voidRateCon(input: { loadCarrierId: string }): Promise<Shi
 
 export interface DispatchLoadInput {
   loadId: string
+  /** Required when the load has two or more carriers: the one that is rolling. */
+  loadCarrierId?: string | null
   dispatchedAt: string
   pickupEtaAt?: string | null
   driverName?: string | null
@@ -4476,12 +4495,38 @@ export interface SaveGeneratedDocumentInput {
   type: 'BOL' | 'LOAD_SUMMARY' | 'RATE_CON'
   loadId?: string | null
   loadCarrierId?: string | null
+  /** BOL only: one delivery stop's own BOL (its own version chain). */
+  stopId?: string | null
+  /** BOL only: a customer copy with rates; stored for the customer only, its own version chain. */
+  rated?: boolean
+  /** `[A-Za-z0-9-]{1,20}`; goes into the stored file name (e.g. `d2`, `rated`). */
+  referenceSuffix?: string | null
   /** The PDF the browser built, base64 with no data: prefix. */
   pdfBase64: string
   filename: string
 }
 export async function saveGeneratedDocument(input: SaveGeneratedDocumentInput): Promise<DocumentResult> {
   return shipmentAction<DocumentResult>('SAVE_GENERATED_DOCUMENT', input)
+}
+
+export interface EmailBolInput {
+  shipmentId: string
+  /** A stored, ACTIVE, plain (not rated) BOL of this shipment. */
+  documentId: string
+  to: string[]
+  cc?: string[]
+  message?: string | null
+  party: 'CARRIER' | 'DISPATCHER' | 'DRIVER' | 'CUSTOMER'
+}
+export interface EmailBolResult {
+  message: ShipmentMessageRecord
+  emailStatus: 'SENT' | 'NOT_SENT'
+  emailError: string | null
+  /** Presigned link to the stored PDF, present when the e-mail was not sent. */
+  downloadUrl?: string | null
+}
+export async function emailBol(input: EmailBolInput): Promise<EmailBolResult> {
+  return shipmentAction<EmailBolResult>('EMAIL_BOL', input)
 }
 
 /** Points a shipment at a file the driver app already holds; the bytes are never copied. */
@@ -8917,6 +8962,10 @@ export interface UpdateLoadCarrierDetailsInput {
   vin?: string | null
   sealNumber?: string | null
   tripNumber?: string | null
+  /** The stops this carrier covers; `[]` or null = all stops. */
+  legStopIds?: string[] | null
+  /** Per-carrier tracking override; null clears it back to the shipment's. */
+  trackingPrefs?: TrackingPrefsOverride | null
 }
 /** Seal # and Carrier Ref # are not BOOK_CARRIER inputs; this is the only writer on an ACTIVE outside-carrier assignment. */
 export async function updateLoadCarrierDetails(input: UpdateLoadCarrierDetailsInput): Promise<ShipmentBundle> {
@@ -8937,14 +8986,14 @@ export async function updateStopDetails(input: UpdateStopDetailsInput): Promise<
 // ── Steps AJ/AK ───────────────────────────────────────────────────────────────
 
 /**
- * Set (or clear, with null / all-inherit) the per-shipment tracking override.
+ * Set (or clear, with null / all-inherit) the per-shipment tracking override, or with `loadCarrierId` that carrier's own (Step AT).
  * Resolves against the customer at read time; see `effectiveTrackingPrefs`.
  */
 export async function setTrackingPrefs(
-  input: { shipmentId: string; prefs: TrackingPrefsOverride | null; expectedUpdatedAt?: string },
-): Promise<{ shipment: ShipmentRecord }> {
-  const r = await shipmentAction<{ shipment: ShipmentRecord }>('SET_TRACKING_PREFS', input)
-  return { shipment: withParsedPrefs(r.shipment) }
+  input: { shipmentId: string; prefs: TrackingPrefsOverride | null; expectedUpdatedAt?: string; loadCarrierId?: string },
+): Promise<{ shipment: ShipmentRecord; loadCarrier?: LoadCarrierRecord }> {
+  const r = await shipmentAction<{ shipment: ShipmentRecord; loadCarrier?: LoadCarrierRecord }>('SET_TRACKING_PREFS', input)
+  return { shipment: withParsedPrefs(r.shipment), ...(r.loadCarrier ? { loadCarrier: withParsedPrefs(r.loadCarrier) } : {}) }
 }
 
 // ── Step AM · cover flow and the carrier assignment ladder ────────────────────

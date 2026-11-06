@@ -190,6 +190,30 @@ describe('runTrackingAutomation', () => {
       expect(podMessages(store)).toHaveLength(2)
     })
 
+    it('asks each live carrier for its own POD, each on its own prefs; one carrier is the primary row as before', async () => {
+      const store = new MemoryStore()
+      seed(store, { settings: ON, ...delivered })
+      store.seed({ ...(store.getById('LoadCarrier-test', 'lc-1') as Row), sequence: 1 })
+      store.seed({
+        id: 'lc-2', __typename: 'LoadCarrier', loadId: 'lod-1', shipmentId: 'shp-1', kind: 'CARRIER', status: 'ACTIVE', sequence: 2,
+        carrierName: 'Werner', driverPhone: '+12245550199', dispatcherEmail: 'dispatch@werner.test', rateConStatus: 'SENT',
+        trackingPrefs: { method: 'EMAIL', confirmedAt: '2026-11-07T00:00:00.000Z' }, updatedAt: '2026-01-02T00:00:00.000Z',
+      })
+      await runTrackingAutomation(makeDeps(store), {}, SYSTEM)
+      expect(podMessages(store).map((m) => m.id).sort()).toEqual(['auto:pod:lc-1:EMAIL', 'auto:pod:lc-1:SMS', 'auto:pod:lc-2:EMAIL'])
+
+      const blocked = new MemoryStore()
+      seed(blocked, { settings: ON, ...delivered })
+      blocked.seed({ ...(blocked.getById('LoadCarrier-test', 'lc-1') as Row), sequence: 1 })
+      blocked.seed({
+        id: 'lc-2', __typename: 'LoadCarrier', loadId: 'lod-1', shipmentId: 'shp-1', kind: 'CARRIER', status: 'ACTIVE', sequence: 2,
+        carrierName: 'Werner', dispatcherEmail: 'dispatch@werner.test', rateConStatus: 'SENT',
+        trackingPrefs: { mode: 'NONE', confirmedAt: '2026-11-07T00:00:00.000Z' }, updatedAt: '2026-01-02T00:00:00.000Z',
+      })
+      await runTrackingAutomation(makeDeps(blocked), {}, SYSTEM)
+      expect(podMessages(blocked).map((m) => m.id).sort()).toEqual(['auto:pod:lc-1:EMAIL', 'auto:pod:lc-1:SMS'])
+    })
+
     it('does not ask a leg again once a person already requested the POD (manual then auto asks once)', async () => {
       const store = new MemoryStore()
       seed(store, { settings: ON, ...delivered })

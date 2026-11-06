@@ -90,6 +90,7 @@ import {
   BOARD_COLUMNS,
   boardRowTone,
   boardStatusOf,
+  carrierHoverText,
   carrierLabel,
   matchesQuery,
   needsDriver,
@@ -795,7 +796,7 @@ function BoardPane({
         )
       }
       if (columnKey === 'carrier') {
-        return <span className={cn(carrierLabel(row) === 'Need to cover' && 'tms-muted')}>{carrierLabel(row)}</span>
+        return <span className={cn(carrierLabel(row) === 'Need to cover' && 'tms-muted')} title={carrierHoverText(row)}>{carrierLabel(row)}</span>
       }
       if (columnKey === 'arStatus' || columnKey === 'apStatus') {
         const value = columnKey === 'arStatus' ? row.arStatus : row.apStatus

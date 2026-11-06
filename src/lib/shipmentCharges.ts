@@ -34,6 +34,8 @@ export interface ChargeLineInput {
   rateCents: number
   count?: number | null
   isRate: boolean
+  /** CARRIER lines: the assignment the line is paid to. Absent = not tagged. */
+  loadCarrierId?: string | null
 }
 
 /**
@@ -84,10 +86,16 @@ export function chargeAmount(line: ChargeLineInput, ctx: ChargeContext = {}): nu
  * otherwise the base would depend on itself. That keeps the math total without
  * rejecting a line somebody coded that way.
  */
-export function rateBaseCents(lines: ChargeLineInput[], side: ChargeSide, ctx: ChargeContext = {}): number {
+export function rateBaseCents(
+  lines: ChargeLineInput[],
+  side: ChargeSide,
+  ctx: ChargeContext = {},
+  loadCarrierId?: string | null,
+): number {
   let base = 0
   for (const line of lines) {
     if (line.side !== side || !line.isRate) continue
+    if (loadCarrierId != null && (line.loadCarrierId ?? null) !== loadCarrierId) continue
     base += chargeAmount(line, { miles: ctx.miles, weightLbs: ctx.weightLbs, sideRateBaseCents: 0 })
   }
   return base
@@ -99,12 +107,26 @@ export function priceCharges(lines: ChargeLineInput[], ctx: ChargeContext = {}):
     CUSTOMER: rateBaseCents(lines, 'CUSTOMER', ctx),
     CARRIER: rateBaseCents(lines, 'CARRIER', ctx),
   }
+  // Two or more carriers named on the CARRIER side: a tagged PERCENT line is a
+  // percentage of ITS carrier's rate lines, not of the sum over carriers. With one
+  // (or no) tagged carrier the whole side is that carrier's, exactly as before.
+  const taggedIds = new Set<string>()
+  for (const line of lines) {
+    if (line.side === 'CARRIER' && line.loadCarrierId != null) taggedIds.add(line.loadCarrierId)
+  }
+  const perCarrier = new Map<string, number>()
+  if (taggedIds.size > 1) {
+    for (const id of taggedIds) perCarrier.set(id, rateBaseCents(lines, 'CARRIER', ctx, id))
+  }
   return lines.map((line) => ({
     ...line,
     amountCents: chargeAmount(line, {
       miles: ctx.miles,
       weightLbs: ctx.weightLbs,
-      sideRateBaseCents: base[line.side],
+      sideRateBaseCents:
+        line.side === 'CARRIER' && line.loadCarrierId != null && perCarrier.has(line.loadCarrierId)
+          ? perCarrier.get(line.loadCarrierId)
+          : base[line.side],
     }),
   }))
 }

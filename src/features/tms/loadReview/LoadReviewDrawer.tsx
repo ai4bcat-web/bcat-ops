@@ -11,6 +11,7 @@ import { releaseGateMessages } from '@/features/shipments/components/releaseGate
 import { reviewLoad, readyToInvoice, setSalesRep, setRevTag, type LoadReviewResult } from '@/lib/apiClient'
 import { DOCS_LANDING } from '@/features/shipments/workstations/tracking/legacyRoutes'
 import { evaluateLoadReview, failingReasons, reviewAgeDays, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL } from '@/lib/loadReview'
+import { CarrierBillsPanel } from './CarrierBillsPanel'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 
@@ -75,7 +76,7 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
   const values = {
     salesRep: row.salesRepName ?? result?.salesRepId ?? row.salesRepId ?? 'Unassigned',
     revDivision: active.find((d) => d.code === (result?.revDivision ?? row.revDivision))?.name ?? result?.revDivision ?? row.revDivision ?? 'Unassigned',
-    details: `Bill-to ${row.billToName ?? row.customerName ?? '—'} · PO ${row.refPo ?? '—'} · ${row.stops?.length ?? 0} stops · ${row.carrierName ?? row.driverName ?? 'Unassigned'}`,
+    details: `Bill-to ${row.billToName ?? row.customerName ?? '—'} · PO ${row.refPo ?? '—'} · ${row.stops?.length ?? 0} stops · ${(row.carrierCount ?? 0) >= 2 ? `${row.carrierCount} carriers` : row.carrierName ?? row.driverName ?? 'Unassigned'}`,
     charges: `Customer ${formatCents(row.orderRevenueCents ?? row.revenueCents ?? 0)} · Cost ${formatCents(row.costCents ?? 0)} · Margin ${row.marginBps == null ? '—' : `${(row.marginBps / 100).toFixed(1)}%`}`,
     documents: (row.docsRequired ?? []).map((type) => `${type}: ${row.docsMissing?.includes(type) ? 'missing' : row.docsMissing == null ? 'unchecked' : 'present'}`).join(' · ') || 'Documents not checked yet',
   }
@@ -99,6 +100,7 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
       {verdict.checks[key].reasons.map((reason, index) => reason.action?.kind === 'OPEN_TAB' ? <p key={`${reason.code}-${index}`}>{shipmentLink(reason.action.tab, `Open ${reason.action.tab}`)}</p> : null)}
       {key === 'documents' && <p>{canOpen ? <Link to={DOCS_LANDING}>Review uploads</Link> : <span title="Needs the Shipments grant">Review uploads</span>}</p>}
     </TmsCard>)}
+    {(row.carrierCount ?? 0) >= 2 && !released && <CarrierBillsPanel shipmentId={row.id} disabled={busy} canOpenAp={hasPageAccess('carrierPay') || hasPageAccess('tms')} onChanged={() => fix(async () => {})} />}
     {verdict.warnings.map((warning) => <p key={warning}>{warning}</p>)}
   </TmsDrawer>
 }

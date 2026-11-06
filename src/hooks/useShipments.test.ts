@@ -130,6 +130,36 @@ describe('useShipments projection', () => {
     expect(row.apStatus).toBe('AWAITING_INVOICE')
   })
 
+  it('lists every live carrier on a multi-carrier shipment and shows the least-advanced AP rung', async () => {
+    data.shipments = [shipment('shp-1'), shipment('shp-2')]
+    data.orders = []
+    data.loads = [
+      { id: 'lod-1', shipmentId: 'shp-1', assignmentType: 'CARRIER' },
+      { id: 'lod-2', shipmentId: 'shp-2', assignmentType: 'CARRIER' },
+    ] as LoadBoardSummary[]
+    data.loadCarriers = [
+      { id: 'lc-b', loadId: 'lod-1', shipmentId: 'shp-1', status: 'ACTIVE', sequence: 2, carrierName: 'Beta', apStatus: 'PAID', costCents: 50_000, createdAt: '2026-03-03T00:00:00.000Z' },
+      { id: 'lc-a', loadId: 'lod-1', shipmentId: 'shp-1', status: 'ACTIVE', sequence: 1, carrierName: 'Alpha', apStatus: 'IN_REVIEW', costCents: 70_000, createdAt: '2026-03-02T00:00:00.000Z' },
+      { id: 'lc-x', loadId: 'lod-1', shipmentId: 'shp-1', status: 'BOUNCED', sequence: 3, carrierName: 'Gone', apStatus: 'PAID', createdAt: '2026-03-04T00:00:00.000Z' },
+      { id: 'lc-s', loadId: 'lod-2', shipmentId: 'shp-2', status: 'ACTIVE', sequence: 1, carrierName: 'Solo', apStatus: 'PAID', costCents: 10_000, createdAt: '2026-03-02T00:00:00.000Z' },
+    ] as LoadCarrierRecord[]
+    data.quotes = []
+
+    const rows = await rowsFor()
+    const multi = rows.find((r) => r.id === 'shp-1')!
+    expect(multi.carrierCount).toBe(2)
+    expect(multi.carriers).toEqual([
+      { name: 'Alpha', apStatus: 'IN_REVIEW', costCents: 70_000 },
+      { name: 'Beta', apStatus: 'PAID', costCents: 50_000 },
+    ])
+    expect(multi.apStatus).toBe('IN_REVIEW')
+    const solo = rows.find((r) => r.id === 'shp-2')!
+    expect(solo.carrierCount).toBe(1)
+    expect(solo.carriers).toEqual([])
+    expect(solo.carrierName).toBe('Solo')
+    expect(solo.apStatus).toBe('PAID')
+  })
+
   it('counts the stops on the route, and says nothing when no load sent a stop list', async () => {
     data.shipments = [shipment('shp-1'), shipment('shp-2')]
     data.orders = []

@@ -9,7 +9,7 @@
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  assignAsset, assignCarrier, bookCarrier, clearRevTag, dispatchLoad, duplicateShipment, enterDriverInfo, getShipmentBundle,
+  addCarrier, assignAsset, assignCarrier, bookCarrier, clearRevTag, dispatchLoad, duplicateShipment, enterDriverInfo, getShipmentBundle,
   logCheckCall, markRateConSigned, recalcCharges, removeLoadCarrier, resolveIncident, saveOrderForm, sendRateCon,
   setArStatus, setEta, setLoadStatus, setNextCheckCall, setQuickPay, setRevTag, setSalesRep, setShipmentCustomer,
   setShipmentStatus, sendTrackingLink, submitOrder, tenderRespond, updateStop, voidRateCon,
@@ -31,6 +31,8 @@ export interface ShipmentActions {
   saveCharges: (charges: LoadChargeInput[]) => Promise<void>
   /** Step C — the carrier side of a load, all CAS-checked against the bundle on screen. */
   bookCarrier: (input: BookCarrierFields) => Promise<void>
+  /** AT-plan: another outside carrier next to the live ones; `legStopIds` empty/absent = all stops. */
+  addCarrier: (input: BookCarrierFields & { legStopIds?: string[] }) => Promise<void>
   setQuickPay: (input: { loadCarrierId: string; quickPayDays: number | null }) => Promise<void>
   sendRateCon: (input: { loadCarrierId: string; pdfBase64: string; to: string[]; cc?: string[]; expiresHours?: number }) => Promise<void>
   voidRateCon: (input: { loadCarrierId: string }) => Promise<void>
@@ -50,7 +52,8 @@ export interface ShipmentActions {
    * so this is the move that unblocks submitting, invoicing and factoring.
    */
   setCustomer: (customerId: string) => Promise<void>
-  dispatchLoad: (input: DispatchFields) => Promise<void>
+  /** `loadCarrierId` names the carrier that is rolling; the server requires it when two or more are live. */
+  dispatchLoad: (input: DispatchFields & { loadCarrierId?: string }) => Promise<void>
   /** Step D — the tracking tab. Each answers with the bundle, which is swapped in here. */
   tracking: TrackingActionHandlers
   /**
@@ -107,6 +110,14 @@ export function useShipmentActions(
     }))
   }
 
+  const add: ShipmentActions['addCarrier'] = async (input) => {
+    await call('Add carrier', () => addCarrier({
+      loadId: load?.id ?? '',
+      expectedUpdatedAt: load?.updatedAt ?? expectedUpdatedAt,
+      ...input,
+    }))
+  }
+
   return {
     busy,
     saveForm: async (values) => {
@@ -152,6 +163,7 @@ export function useShipmentActions(
       }))
     },
     bookCarrier: book,
+    addCarrier: add,
     setQuickPay: async (input) => {
       await call('Quick pay', () => setQuickPay(input))
     },
@@ -185,7 +197,7 @@ export function useShipmentActions(
       // Only after the truck is dispatched, and never rolled back into it: a text that
       // fails to send is reported on its own and leaves the dispatch standing.
       if (alsoSendLink) {
-        const loadCarrier = bundle?.loadCarriers.find((c) => c.status === 'ACTIVE') ?? null
+        const loadCarrier = bundle?.loadCarriers.find((c) => (fields.loadCarrierId ? c.id === fields.loadCarrierId : c.status === 'ACTIVE')) ?? null
         if (!loadCarrier) return
         try {
           const sent = await sendTrackingLink({ loadCarrierId: loadCarrier.id, via: 'SMS' })
@@ -255,6 +267,7 @@ export function useShipmentActions(
         await call('Assign carrier', () => assignCarrier({ loadId: load?.id ?? '', ...input }))
       },
       onBookCarrier: book,
+      onAddCarrier: (input, legStopIds) => add({ ...input, ...(legStopIds?.length ? { legStopIds } : {}) }),
       onRemoveCarrier: async (loadCarrierId, outcome, reason, note, repostToDat) => {
         await call('Remove carrier', () => removeLoadCarrier({ loadCarrierId, outcome, reason, note, ...(repostToDat ? { repostToDat } : {}) }))
       },

@@ -324,7 +324,7 @@ vi.mock('@aws-sdk/client-s3', () => {
         this.input = input
       }
     }
-  return { S3Client, PutObjectCommand: make('PutObject'), HeadObjectCommand: make('Head') }
+  return { S3Client, PutObjectCommand: make('PutObject'), HeadObjectCommand: make('Head'), GetObjectCommand: make('GetObject') }
 })
 
 const getSignedUrl = vi.hoisted(() => vi.fn())
@@ -602,6 +602,8 @@ async function saveForm(shipmentId: string, overrides: Row = {}): Promise<Row> {
 interface S3Head {
   ContentLength: number
   ContentType: string
+  /** What a PutObject stored, so a GetObject can read the same bytes back. */
+  Bytes?: Uint8Array
 }
 const s3Objects = new Map<string, S3Head>()
 
@@ -617,8 +619,14 @@ function runS3Command(cmd: MockCommand): unknown {
     s3Objects.set(key, {
       ContentLength: body ? body.length : 0,
       ContentType: String(cmd.input.ContentType ?? ''),
+      Bytes: body,
     })
     return {}
+  }
+  if (cmd.__type === 'GetObject') {
+    const stored = s3Objects.get(key)?.Bytes
+    if (!stored) throw new Error(`NoSuchKey: ${key}`)
+    return { Body: { transformToByteArray: async () => stored } }
   }
   if (cmd.__type === 'Head') {
     const head = s3Objects.get(key)
@@ -2178,6 +2186,29 @@ describe('tracker assignee', () => {
     await expect(call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'AGENT', confirmedAt: '2020-01-01T00:00:00Z' } }, TMS_USER)).rejects.toThrow(/Unknown tracking preference/)
     await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: null }, TMS_USER)
     expect(table(TABLES.shipment).get(a.shipmentId)!.trackingPrefs ?? null).toBeNull()
+  })
+
+  it('writes a per-carrier tracking override on the LoadCarrier, with the same stamping, leaving the shipment alone', async () => {
+    const a = await createDraft()
+    await call('ASSIGN_CARRIER', { loadId: a.loadId, carrierName: 'SWIFT', carrierMc: '123456', carrierRateCents: 100_000 })
+    const lcId = String([...table(TABLES.carrier).values()].find((c) => c.loadId === a.loadId && c.status === 'ACTIVE')!.id)
+    const other = await createDraft()
+
+    const done = (await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, loadCarrierId: lcId, prefs: { mode: 'MANUAL', confirmed: true } }, TMS_USER)) as { loadCarrier: Row }
+    const stored = table(TABLES.carrier).get(lcId)!.trackingPrefs as Record<string, unknown>
+    expect(done.loadCarrier.trackingPrefs).toEqual(stored)
+    expect(stored).toMatchObject({ mode: 'MANUAL' })
+    expect(typeof stored.confirmedAt).toBe('string')
+    expect(table(TABLES.shipment).get(a.shipmentId)!.trackingPrefs ?? null).toBeNull()
+
+    await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, loadCarrierId: lcId, prefs: { method: 'SMS' } }, TMS_USER)
+    expect(table(TABLES.carrier).get(lcId)!.trackingPrefs).toMatchObject({ method: 'SMS', confirmedAt: stored.confirmedAt })
+    await expect(call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, loadCarrierId: lcId, prefs: { mode: 'AGENT', confirmedAt: 'x' } }, TMS_USER)).rejects.toThrow(/Unknown tracking preference/)
+    // A carrier of another shipment is refused.
+    await expect(call('SET_TRACKING_PREFS', { shipmentId: other.shipmentId, loadCarrierId: lcId, prefs: { mode: 'AGENT' } }, TMS_USER)).rejects.toThrow(/not found on this shipment/)
+
+    await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, loadCarrierId: lcId, prefs: null }, TMS_USER)
+    expect(table(TABLES.carrier).get(lcId)!.trackingPrefs ?? null).toBeNull()
   })
 
   it('refuses a tracking override from an outsider, on a voided shipment, or with a value outside the enums', async () => {
@@ -4475,6 +4506,186 @@ describe('documents', () => {
     expect(second.document.id).toBe(first.document.id)
     expect(second.bundle.documents).toHaveLength(1)
     expect(table(TABLES.shipmentDocument).size).toBe(1)
+  })
+})
+
+// ── Bill of lading: slots, the DRAFT allowance and EMAIL_BOL (AU-plan) ───────
+
+describe('bill of lading', () => {
+  const DELIVERY_B = { ...DELIVERY, id: 'stp-de2', name: 'DALLAS DC', city: 'DALLAS, TX', sequence: 2 }
+
+  async function draftWithTwoDeliveries(): Promise<DocIds> {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId, { stops: [PICKUP, DELIVERY, DELIVERY_B] })
+    return ids
+  }
+
+  const saveBol = (ids: DocIds, extra: Row = {}, type = 'BOL'): Promise<Row> =>
+    call('SAVE_GENERATED_DOCUMENT', {
+      shipmentId: ids.shipmentId, type, loadId: ids.loadId, pdfBase64: PDF_BASE64, filename: 'bol.pdf', ...extra,
+    })
+  const docs = (): Row[] => [...table(TABLES.shipmentDocument).values()]
+
+  describe('SAVE_GENERATED_DOCUMENT', () => {
+    it('allows a BOL on a draft shipment but still refuses the other generated types', async () => {
+      const ids = await draftWithTwoDeliveries()
+      expect(table(TABLES.shipment).get(ids.shipmentId)!.status).toBe('DRAFT')
+      const saved = (await saveBol(ids)) as { document: Row }
+      expect(saved.document).toMatchObject({ type: 'BOL', version: 1, audience: 'ALL', source: 'GENERATED', uploadedBy: 'dispatch@bcatcorp.com' })
+      await expect(saveBol(ids, {}, 'LOAD_SUMMARY')).rejects.toThrow(/draft or canceled/)
+      await expect(saveBol(ids, {}, 'RATE_CON')).rejects.toThrow(/draft or canceled/)
+    })
+
+    it('refuses a BOL on a canceled shipment', async () => {
+      const ids = await draftWithTwoDeliveries()
+      table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, status: 'CANCELED' })
+      await expect(saveBol(ids)).rejects.toThrow(/draft or canceled/)
+      expect(docs()).toHaveLength(0)
+    })
+
+    it('versions each slot on its own: master, one stop, and the rated copy never supersede each other', async () => {
+      const ids = await draftWithTwoDeliveries()
+      const master1 = (await saveBol(ids)) as { document: Row }
+      const stopA1 = (await saveBol(ids, { stopId: 'stp-de' })) as { document: Row }
+      const stopB1 = (await saveBol(ids, { stopId: 'stp-de2' })) as { document: Row }
+      const rated1 = (await saveBol(ids, { rated: true })) as { document: Row }
+      expect([master1, stopA1, stopB1, rated1].map((r) => r.document.version)).toEqual([1, 1, 1, 1])
+      expect(rated1.document.audience).toBe('CUSTOMER')
+      expect(stopA1.document.stopId).toBe('stp-de')
+      expect(docs().filter((d) => d.status === 'ACTIVE')).toHaveLength(4)
+
+      const stopB2 = (await saveBol(ids, { stopId: 'stp-de2' })) as { document: Row }
+      expect(stopB2.document).toMatchObject({ version: 2, supersedesId: stopB1.document.id })
+      const master2 = (await saveBol(ids)) as { document: Row }
+      expect(master2.document).toMatchObject({ version: 2, supersedesId: master1.document.id })
+      const byId = new Map(docs().map((d) => [d.id, d]))
+      expect(byId.get(stopB1.document.id)!.status).toBe('SUPERSEDED')
+      expect(byId.get(master1.document.id)!.status).toBe('SUPERSEDED')
+      for (const kept of [stopA1, rated1]) expect(byId.get(kept.document.id)!.status).toBe('ACTIVE')
+    })
+
+    it('refuses a stop that is not on the load, and scoping on other document types', async () => {
+      const ids = await draftWithTwoDeliveries()
+      await expect(saveBol(ids, { stopId: 'stp-elsewhere' })).rejects.toThrow(/not on this shipment/)
+      await expect(saveBol(ids, { stopId: 'stp-de' }, 'LOAD_SUMMARY')).rejects.toThrow(/Only a bill of lading/)
+      await expect(saveBol(ids, { rated: true }, 'LOAD_SUMMARY')).rejects.toThrow(/Only a bill of lading/)
+      expect(docs()).toHaveLength(0)
+    })
+
+    it('puts a clean suffix in the stored key and rejects a dirty one', async () => {
+      const ids = await draftWithTwoDeliveries()
+      const saved = (await saveBol(ids, { referenceSuffix: 'd2', filename: null })) as { document: Row }
+      expect(String(saved.document.s3Key)).toMatch(/-d2-v1\.pdf$/)
+      await expect(saveBol(ids, { referenceSuffix: '../x' })).rejects.toThrow(/letters, digits and dashes/)
+    })
+
+    it('stamps the slot on the audit row and re-caches the required-doc gate with the row', async () => {
+      seedCustomer({ requiredDocsForInvoice: ['BOL'] })
+      const ids = await draftWithTwoDeliveries()
+      const before = table(TABLES.order).get(ids.orderId)!
+      expect(before.docsMissing ?? ['BOL']).toEqual(['BOL'])
+      const saved = (await saveBol(ids, { stopId: 'stp-de' })) as { document: Row }
+      expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual([])
+      const audit = [...table(TABLES.audit).values()].find((r) => r.action === 'SAVE_GENERATED_DOCUMENT')!
+      expect(audit.entityId).toBe(saved.document.id)
+      expect(JSON.parse(String(audit.changes))).toMatchObject({ stopId: 'stp-de', rated: false, version: 1 })
+    })
+  })
+
+  describe('EMAIL_BOL', () => {
+    const email = (ids: DocIds, documentId: string, extra: Row = {}): Promise<Row> =>
+      call('EMAIL_BOL', {
+        shipmentId: ids.shipmentId, documentId, to: ['ai4bcat+dock@gmail.com'], party: 'CARRIER', ...extra,
+      })
+    const rawMime = (): string => {
+      const sent = sesSend.mock.calls[0][0] as { input: { Content: { Raw: { Data: Uint8Array } } } }
+      return new TextDecoder().decode(sent.input.Content.Raw.Data)
+    }
+
+    it('mails the stored PDF through the thread: attachment bytes, cc, ref subject, message row, audit', async () => {
+      const ids = await draftWithTwoDeliveries()
+      const { document } = (await saveBol(ids, { stopId: 'stp-de2' })) as { document: Row }
+      const out = (await email(ids, String(document.id), { cc: ['ai4bcat+dock@gmail.com', 'ai4bcat+x@gmail.com'], message: 'Pickup at 8.' })) as {
+        message: Row; emailStatus: string; downloadUrl: string | null
+      }
+      expect(out.emailStatus).toBe('SENT')
+      expect(out.downloadUrl).toBeNull()
+
+      const raw = rawMime()
+      expect(raw.replace(/\r\n/g, '')).toContain(PDF_BASE64)
+      expect(raw).toContain(`[ref ${ids.shipmentId}]`)
+      expect(raw).toMatch(/Subject: Bill of lading .* — Delivery 2 /)
+      const sent = (sesSend.mock.calls[0][0] as { input: { Destination: { ToAddresses: string[]; CcAddresses: string[] } } }).input.Destination
+      expect(sent.ToAddresses).toEqual(['ai4bcat+dock@gmail.com'])
+      expect(sent.CcAddresses).toContain('ai4bcat+x@gmail.com')
+      expect(sent.CcAddresses).toContain('dispatch@bcatcorp.com')
+      expect(sent.CcAddresses.some((a) => /\+tracking@/.test(a))).toBe(true)
+      // The typed cc repeating the `to` address does not mail them twice.
+      expect(sent.CcAddresses).not.toContain('ai4bcat+dock@gmail.com')
+
+      const shipment = table(TABLES.shipment).get(ids.shipmentId)!
+      expect(shipment.threadKey).toMatch(/^tracking\+/)
+      const rows = [...table(TABLES.message).values()]
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({
+        kind: 'OTHER', direction: 'OUT', party: 'CARRIER', documentIds: [document.id], threadKey: shipment.threadKey, status: 'SENT',
+        providerRef: 'msg-1',
+      })
+      const audit = [...table(TABLES.audit).values()].find((r) => r.action === 'EMAIL_BOL')!
+      expect(JSON.parse(String(audit.changes))).toMatchObject({ documentId: document.id, stopId: 'stp-de2', emailStatus: 'SENT' })
+    })
+
+    it('refuses a rated BOL, a superseded one, another shipment\'s, a non-BOL and an INTERNAL one, sending nothing', async () => {
+      const ids = await draftWithTwoDeliveries()
+      const v1 = ((await saveBol(ids)) as { document: Row }).document
+      await saveBol(ids)
+      const rated = ((await saveBol(ids, { rated: true })) as { document: Row }).document
+      const summary = table(TABLES.shipmentDocument)
+      summary.set('sdoc-pod', { ...v1, id: 'sdoc-pod', type: 'POD', status: 'ACTIVE' })
+      summary.set('sdoc-internal', { ...v1, id: 'sdoc-internal', status: 'ACTIVE', audience: 'INTERNAL' })
+      summary.set('sdoc-foreign', { ...v1, id: 'sdoc-foreign', status: 'ACTIVE', shipmentId: 'shp-other' })
+
+      await expect(email(ids, String(rated.id))).rejects.toThrow(/customer copy/)
+      await expect(email(ids, String(v1.id))).rejects.toThrow(/current version/)
+      await expect(email(ids, 'sdoc-pod')).rejects.toThrow(/Only a bill of lading/)
+      await expect(email(ids, 'sdoc-internal')).rejects.toThrow(/not marked for sharing/)
+      await expect(email(ids, 'sdoc-foreign')).rejects.toThrow(/not on this shipment/)
+      await expect(email(ids, 'sdoc-missing')).rejects.toThrow(/not on this shipment/)
+      expect(sesSend).not.toHaveBeenCalled()
+      expect(table(TABLES.message).size).toBe(0)
+    })
+
+    it('refuses bad, header-injecting, empty and too many addresses before reading or sending anything', async () => {
+      const ids = await draftWithTwoDeliveries()
+      const { document } = (await saveBol(ids)) as { document: Row }
+      const id = String(document.id)
+      await expect(email(ids, id, { to: ['ai4bcat@gmail.com\r\nBcc: x@y.com'] })).rejects.toThrow(/to\[0\] must be an email address/)
+      await expect(email(ids, id, { to: [] })).rejects.toThrow(/at least one recipient/)
+      await expect(email(ids, id, { cc: ['nope'] })).rejects.toThrow(/cc\[0\] must be an email address/)
+      await expect(email(ids, id, { to: Array.from({ length: 21 }, (_, i) => `ai4bcat+${i}@gmail.com`) })).rejects.toThrow()
+      await expect(email(ids, id, { party: 'STRANGER' })).rejects.toThrow()
+      expect(sesSend).not.toHaveBeenCalled()
+      expect(table(TABLES.message).size).toBe(0)
+    })
+
+    it('a failed send keeps the message row as NOT_SENT and hands back a download link', async () => {
+      const ids = await draftWithTwoDeliveries()
+      const { document } = (await saveBol(ids)) as { document: Row }
+      sesSend.mockRejectedValue(new Error('MessageRejected: not allowed'))
+      getSignedUrl.mockResolvedValue('https://signed.example/bol.pdf')
+      const out = (await email(ids, String(document.id))) as { emailStatus: string; emailError: string; downloadUrl: string; message: Row }
+      expect(out).toMatchObject({ emailStatus: 'NOT_SENT', downloadUrl: 'https://signed.example/bol.pdf' })
+      expect(out.emailError).toMatch(/not allowed/)
+      expect([...table(TABLES.message).values()][0]).toMatchObject({ status: 'NOT_SENT', kind: 'OTHER' })
+    })
+
+    it('does not reopen a thread that is already open', async () => {
+      const ids = await draftWithTwoDeliveries()
+      table(TABLES.shipment).set(ids.shipmentId, { ...table(TABLES.shipment).get(ids.shipmentId)!, threadKey: 'tracking+existing' })
+      const { document } = (await saveBol(ids)) as { document: Row }
+      await email(ids, String(document.id))
+      expect([...table(TABLES.message).values()][0].threadKey).toBe('tracking+existing')
+    })
   })
 })
 
@@ -8170,5 +8381,307 @@ describe('Step AQ — own-fleet drivers come from the Driver records', () => {
     expect([...table(TABLES.carrier).values()][0]).toMatchObject({
       kind: 'OWN_ASSET', driverName: 'Rig Driver', driverPhone: '555-0003', truckId: 'eq-truck', trailerId: 'eq-trailer',
     })
+  })
+})
+
+// ── Several carriers on one load (AT-plan) ───────────────────────────────────
+
+describe('several carriers on one load', () => {
+  const PDF_BASE64 = Buffer.from('%PDF-1.4 rate con').toString('base64')
+
+  async function openLoad(): Promise<{ shipmentId: string; loadId: string }> {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SUBMIT_ORDER', {
+      shipmentId: ids.shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    return ids
+  }
+
+  function seedDirectory(id: string, name: string): void {
+    table(TABLES.carrierDirectory).set(id, {
+      id,
+      __typename: 'Carrier',
+      name,
+      type: 'TL',
+      status: 'ACTIVE',
+      authorityStatus: 'ACTIVE',
+      mcNumber: id === 'car-1' ? '123456' : '654321',
+      dotNumber: id === 'car-1' ? '77' : '88',
+      mcpStatus: 'ACCEPTABLE',
+      dispatcherEmail: `dispatch@${id}.test`,
+      paymentTermsDays: 30,
+      insurancePolicies: [
+        { id: 'ins-1', type: 'AUTO_LIABILITY', limitCents: 100_000_00, expiresAt: '2030-01-01T00:00:00.000Z' },
+        { id: 'ins-2', type: 'CARGO', limitCents: 100_000_00, expiresAt: '2030-01-01T00:00:00.000Z' },
+      ],
+      loadCount: 0,
+      createdBy: 'admin@bcatcorp.com',
+      updatedBy: 'admin@bcatcorp.com',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    })
+    for (const type of ['COI_CARGO', 'COI_AUTO', 'W9', 'CARRIER_AGREEMENT']) {
+      table(TABLES.carrierDoc).set(`cdoc-${id}-${type}`, {
+        id: `cdoc-${id}-${type}`,
+        __typename: 'CarrierDocument',
+        carrierId: id,
+        type,
+        name: `${type}.pdf`,
+        s3Key: `carrier-docs/${id}/${type}.pdf`,
+        contentType: 'application/pdf',
+        sizeBytes: 1024,
+        source: 'UPLOAD',
+        uploadedBy: 'admin@bcatcorp.com',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      })
+    }
+  }
+
+  function carrierInput(loadId: string, input: Row): Row {
+    return {
+      loadId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+      carrierId: 'car-1',
+      carrierRateCents: 100_000,
+      driverName: 'Yuri',
+      driverPhone: '+12245550137',
+      ...input,
+    }
+  }
+  const book = (loadId: string, input: Row = {}) => call('BOOK_CARRIER', carrierInput(loadId, input))
+  const add = (loadId: string, input: Row = {}) => call('ADD_CARRIER', carrierInput(loadId, input))
+
+  const live = (): Row[] =>
+    [...table(TABLES.carrier).values()].filter((c) => c.status === 'ACTIVE').sort((a, b) => Number(a.sequence) - Number(b.sequence))
+  const linesOf = (loadCarrierId: string): Row[] =>
+    [...table(TABLES.charge).values()].filter((c) => c.side === 'CARRIER' && c.loadCarrierId === loadCarrierId)
+
+  /** Two live carriers: SWIFT (car-1, $1,000, first) and WERNER (car-2, $900). */
+  async function twoCarriers(): Promise<{ shipmentId: string; loadId: string; a: string; b: string }> {
+    const ids = await openLoad()
+    seedDirectory('car-1', 'SWIFT TRANSPORTATION')
+    seedDirectory('car-2', 'WERNER')
+    await book(ids.loadId)
+    await add(ids.loadId, { carrierId: 'car-2', carrierRateCents: 90_000 })
+    const [a, b] = live().map((c) => String(c.id))
+    return { ...ids, a, b }
+  }
+
+  it('adds a second carrier: two tagged lines, two AP rows, status and primary pointer unchanged', async () => {
+    const { loadId, a, b } = await twoCarriers()
+
+    expect(live().map((c) => [c.carrierName, c.apStatus, c.apOpen, c.sequence])).toEqual([
+      ['SWIFT TRANSPORTATION', 'AWAITING_INVOICE', 'OPEN', 1],
+      ['WERNER', 'AWAITING_INVOICE', 'OPEN', 2],
+    ])
+    expect(linesOf(a).map((c) => c.amountCents)).toEqual([100_000])
+    expect(linesOf(b).map((c) => c.amountCents)).toEqual([90_000])
+    const load = table(TABLES.load).get(loadId)!
+    expect(load).toMatchObject({ status: 'BOOKED', activeLoadCarrierId: a, assignmentType: 'CARRIER' })
+    // The load's cached cost is the sum; each row keeps only its own.
+    expect(table(TABLES.financials).get(loadId)!.costCents).toBe(190_000)
+    expect(table(TABLES.carrier).get(a)!.costCents).toBe(100_000)
+    expect(table(TABLES.carrier).get(b)!.costCents).toBe(90_000)
+  })
+
+  it('stores validated legs and refuses a stop that is not on the load', async () => {
+    const ids = await openLoad()
+    seedDirectory('car-1', 'SWIFT TRANSPORTATION')
+    seedDirectory('car-2', 'WERNER')
+    await book(ids.loadId, { legStopIds: undefined })
+    await expect(add(ids.loadId, { carrierId: 'car-2', carrierRateCents: 50_000, legStopIds: ['stp-nowhere'] }))
+      .rejects.toThrow(/unknown stop stp-nowhere/)
+    expect(live()).toHaveLength(1)
+
+    await add(ids.loadId, { carrierId: 'car-2', carrierRateCents: 50_000, legStopIds: ['stp-de'] })
+    expect(live()[1].legStopIds).toEqual(['stp-de'])
+  })
+
+  it('refuses a 5th carrier, the same carrier on overlapping legs, a delivered load and own fleet mixing', async () => {
+    const ids = await openLoad()
+    for (const n of [1, 2, 3, 4, 5]) seedDirectory(`car-${n}`, `CARRIER ${n}`)
+    await book(ids.loadId, { carrierId: 'car-1', carrierRateCents: 20_000 })
+    // Same directory carrier twice: no legs on either side overlaps everything.
+    await expect(add(ids.loadId, { carrierId: 'car-1', carrierRateCents: 20_000 })).rejects.toThrow(/separate stops/)
+    for (const n of [2, 3, 4]) await add(ids.loadId, { carrierId: `car-${n}`, carrierRateCents: 20_000 })
+    await expect(add(ids.loadId, { carrierId: 'car-5', carrierRateCents: 20_000 })).rejects.toThrow(/at most 4 carriers/)
+    expect(live()).toHaveLength(4)
+
+    table(TABLES.load).set(ids.loadId, { ...table(TABLES.load).get(ids.loadId)!, status: 'DELIVERED' })
+    await expect(add(ids.loadId, { carrierId: 'car-5', carrierRateCents: 20_000 })).rejects.toThrow(/sourcing, booked or dispatched/)
+  })
+
+  it('refuses to add next to own fleet and leaves the driver on every stop', async () => {
+    const ids = await openLoad()
+    seedDirectory('car-2', 'WERNER')
+    table(TABLES.driver).set('drv-1', { id: 'drv-1', __typename: 'Driver', name: 'Rig Driver', phone: '555-0003', status: 'ACTIVE' })
+    await call('ASSIGN_ASSET', { loadId: ids.loadId, driverId: 'drv-1' })
+    const stopsBefore = String(table(TABLES.load).get(ids.loadId)!.stops)
+
+    await expect(add(ids.loadId, { carrierId: 'car-2', carrierRateCents: 20_000 }))
+      .rejects.toThrow('Own fleet cannot share a load with outside carriers')
+    expect(String(table(TABLES.load).get(ids.loadId)!.stops)).toBe(stopsBefore)
+    expect(live()).toHaveLength(1)
+  })
+
+  it('still refuses BOOK_CARRIER on a covered load and points a two-carrier load at ADD_CARRIER', async () => {
+    const { loadId } = await twoCarriers()
+    await expect(book(loadId, { carrierId: 'car-2' })).rejects.toThrow(/Remove a carrier first or use ADD_CARRIER/)
+  })
+
+  it('removing one of two keeps the load booked and re-points the primary; removing the last uncovers it', async () => {
+    const { loadId, a, b } = await twoCarriers()
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: a, outcome: 'BOUNCED', reason: 'CARRIER_CANNOT_TAKE' })
+
+    const load = table(TABLES.load).get(loadId)!
+    expect(load).toMatchObject({ status: 'BOOKED', activeLoadCarrierId: b, carrierName: 'WERNER', assignmentType: 'CARRIER' })
+    expect(table(TABLES.carrier).get(a)!.status).toBe('BOUNCED')
+    // The bounced carrier's money left with it, the survivor's stayed.
+    expect(linesOf(a)).toHaveLength(0)
+    expect(linesOf(b)).toHaveLength(1)
+    expect(table(TABLES.financials).get(loadId)!.costCents).toBe(90_000)
+
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: b, outcome: 'BOUNCED', reason: 'CARRIER_CANNOT_TAKE' })
+    expect(table(TABLES.load).get(loadId)).toMatchObject({ status: 'SOURCING', activeLoadCarrierId: null, trackingProvider: 'NONE' })
+  })
+
+  it('re-prices each carrier from its own lines and refuses an untagged carrier line', async () => {
+    const { shipmentId, loadId, a, b } = await twoCarriers()
+    const version = () => Number(table(TABLES.shipment).get(shipmentId)!.version)
+    const customerLine = [...table(TABLES.charge).values()].find((c) => c.side === 'CUSTOMER')!
+
+    // B is paid an extra $50 detention and a 10% FSC of ITS linehaul; A is untouched.
+    await call('UPDATE_CARRIER_CHARGES', {
+      loadCarrierId: b,
+      expectedVersion: version(),
+      charges: [
+        { id: String(linesOf(b)[0].id), side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 90_000, sortOrder: 0 },
+        { side: 'CARRIER', code: 'DETENTION', calculatedBy: 'FLAT', rateCents: 5_000, sortOrder: 1 },
+        { side: 'CARRIER', code: 'FSC', calculatedBy: 'PERCENT', rateCents: 1_000, isRate: false, sortOrder: 2 },
+      ],
+    })
+    // PERCENT bases on the carrier's own rate lines: 10% of 90_000, not of 190_000.
+    expect(linesOf(b).map((c) => c.amountCents).sort((x, y) => Number(x) - Number(y))).toEqual([5_000, 9_000, 90_000])
+    expect(table(TABLES.carrier).get(b)!.costCents).toBe(104_000)
+    expect(table(TABLES.carrier).get(a)!.costCents).toBe(100_000)
+    expect(table(TABLES.financials).get(loadId)!.costCents).toBe(204_000)
+
+    // A line that names no carrier cannot be placed when two are live.
+    await expect(call('RECALC_CHARGES', {
+      shipmentId,
+      expectedVersion: version(),
+      charges: [
+        { id: String(customerLine.id), side: 'CUSTOMER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 250_000, sortOrder: 0, isRate: true },
+        { side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 1, sortOrder: 1, isRate: true },
+      ],
+    })).rejects.toThrow(/must name the carrier it is paid to/)
+  })
+
+  it('a recorded bill on A freezes A\'s lines only', async () => {
+    const { shipmentId, a, b } = await twoCarriers()
+    table(TABLES.carrier).set(a, { ...table(TABLES.carrier).get(a)!, chargesFinalizedAt: '2026-03-12T00:00:00.000Z', invoiceId: 'cbl-1' })
+    await expect(call('UPDATE_CARRIER_CHARGES', {
+      loadCarrierId: a, expectedVersion: Number(table(TABLES.shipment).get(shipmentId)!.version), charges: [],
+    })).rejects.toThrow(/void it first/)
+    await call('UPDATE_CARRIER_CHARGES', {
+      loadCarrierId: b,
+      expectedVersion: Number(table(TABLES.shipment).get(shipmentId)!.version),
+      charges: [{ id: String(linesOf(b)[0].id), side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 80_000, sortOrder: 0 }],
+    })
+    expect(table(TABLES.carrier).get(b)!.costCents).toBe(80_000)
+    expect(table(TABLES.carrier).get(a)!.costCents).toBe(100_000)
+  })
+
+  it('sends one rate confirmation per carrier: two tokens, two keys, two file names', async () => {
+    const { a, b } = await twoCarriers()
+    for (const id of [a, b]) {
+      await call('SEND_RATE_CON', { loadCarrierId: id, pdfBase64: PDF_BASE64, to: ['dispatch@carrier.test'] })
+    }
+    const rows = [a, b].map((id) => table(TABLES.carrier).get(id)!)
+    expect(rows[0].rateConToken).not.toBe(rows[1].rateConToken)
+    const docs = [...table(TABLES.carrierDoc).values()].filter((d) => d.type === 'RATE_CON')
+    for (const id of [a, b]) expect(docs.filter((d) => String(d.s3Key).endsWith(`/${id}-v1.pdf`))).toHaveLength(1)
+    expect(docs.map((d) => String(d.name)).sort()).toEqual([
+      expect.stringMatching(/-swift-transportation-v1\.pdf$/),
+      expect.stringMatching(/-werner-v1\.pdf$/),
+    ])
+    // The audit carries only that carrier's own gross.
+    const audits = [...table(TABLES.audit).values()].filter((r) => r.action === 'SEND_RATE_CON').map((r) => JSON.parse(String(r.changes)))
+    expect(audits.map((x) => Number(x.rateConGrossCents)).sort((x, y) => x - y)).toEqual([90_000, 100_000])
+
+    // Voiding A's link leaves B's alive.
+    await call('VOID_RATE_CON', { loadCarrierId: a })
+    expect(table(TABLES.carrier).get(a)).toMatchObject({ rateConStatus: 'VOIDED', rateConToken: null })
+    expect(table(TABLES.carrier).get(b)!.rateConStatus).toBe('SENT')
+  })
+
+  it('refuses a rate confirmation for a carrier with no charges when two are live', async () => {
+    const { a, b } = await twoCarriers()
+    for (const line of linesOf(b)) table(TABLES.charge).delete(String(line.id))
+    await expect(call('SEND_RATE_CON', { loadCarrierId: b, pdfBase64: PDF_BASE64, to: ['dispatch@carrier.test'] }))
+      .rejects.toThrow(/WERNER has no carrier charges yet/)
+    await call('SEND_RATE_CON', { loadCarrierId: a, pdfBase64: PDF_BASE64, to: ['dispatch@carrier.test'] })
+  })
+
+  it('mirrors the least advanced rung of the live carriers', async () => {
+    const { shipmentId, a } = await twoCarriers()
+    await call('SEND_RATE_CON', { loadCarrierId: a, pdfBase64: PDF_BASE64, to: ['dispatch@carrier.test'] })
+    // A is at RATE_CON_SENT, B is still earlier: the board shows the earlier rung.
+    const rung = (id: string) => table(TABLES.carrier).get(id)!.assignmentStatus
+    const shown = table(TABLES.shipment).get(shipmentId)!.carrierAssignmentStatus
+    expect(shown).not.toBe('RATE_CON_SENT')
+    expect(rung(a)).toBe('RATE_CON_SENT')
+  })
+
+  it('dispatch needs the carrier named when two are live, and the second goes out after the load is DISPATCHED', async () => {
+    const { loadId, a, b } = await twoCarriers()
+    for (const id of [a, b]) {
+      table(TABLES.carrier).set(id, {
+        ...table(TABLES.carrier).get(id)!, driverName: 'D', driverPhone: '1', truckNumber: 'T', trailerNumber: 'R',
+      })
+    }
+    const at = '2026-03-02T11:00:00.000Z'
+    await expect(call('DISPATCH_LOAD', { loadId, dispatchedAt: at })).rejects.toThrow(/name the carrier to dispatch/)
+    await call('DISPATCH_LOAD', { loadId, loadCarrierId: a, dispatchedAt: at })
+    expect(table(TABLES.load).get(loadId)!.status).toBe('DISPATCHED')
+    await call('DISPATCH_LOAD', { loadId, loadCarrierId: b, dispatchedAt: at })
+    expect(table(TABLES.carrier).get(b)!.dispatchedAt).toBe(at)
+    expect(table(TABLES.load).get(loadId)!.status).toBe('DISPATCHED')
+    await expect(call('DISPATCH_LOAD', { loadId, loadCarrierId: b, dispatchedAt: at })).rejects.toThrow(/Only a booked load/)
+  })
+
+  it('UPDATE_LOAD_CARRIER_DETAILS sets legs and a tracking override, and refuses overlapping legs of one carrier', async () => {
+    const { a } = await twoCarriers()
+    const row = () => table(TABLES.carrier).get(a)!
+    await call('UPDATE_LOAD_CARRIER_DETAILS', {
+      loadCarrierId: a, expectedUpdatedAt: row().updatedAt, legStopIds: ['stp-pu'], trackingPrefs: { mode: 'MANUAL' },
+    })
+    expect(row()).toMatchObject({ legStopIds: ['stp-pu'], trackingPrefs: { mode: 'MANUAL' } })
+    await expect(call('UPDATE_LOAD_CARRIER_DETAILS', {
+      loadCarrierId: a, expectedUpdatedAt: row().updatedAt, legStopIds: ['stp-zzz'],
+    })).rejects.toThrow(/unknown stop stp-zzz/)
+    await call('UPDATE_LOAD_CARRIER_DETAILS', { loadCarrierId: a, expectedUpdatedAt: row().updatedAt, trackingPrefs: null })
+    expect(row().trackingPrefs ?? null).toBeNull()
+  })
+
+  it('writes the lane sample as excluded while two carriers share the load, but not for one', async () => {
+    const split = await twoCarriers()
+    for (const status of ['DISPATCHED', 'LOADING', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
+      await call('SET_LOAD_STATUS', { loadId: split.loadId, status })
+    }
+    expect(table(TABLES.laneSample).get(`lrs:${split.loadId}`)!.excluded).toBe(true)
+
+    const single = await openLoad()
+    seedDirectory('car-3', 'SOLO')
+    await book(single.loadId, { carrierId: 'car-3' })
+    for (const status of ['DISPATCHED', 'LOADING', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
+      await call('SET_LOAD_STATUS', { loadId: single.loadId, status })
+    }
+    expect(table(TABLES.laneSample).get(`lrs:${single.loadId}`)!.excluded).toBe(false)
   })
 })

@@ -7,7 +7,7 @@ import { NO_LOCKS, type ShipmentFormValues } from '../model'
 import type { FormActions, FormCtx } from '../sectionProps'
 
 export const noopActions = (): FormActions => ({
-  cover: vi.fn(), openDispatch: vi.fn(), openSendRateCon: vi.fn(), openSendInfo: vi.fn(), openTonu: vi.fn(),
+  cover: vi.fn(), openDispatch: vi.fn(), openSendRateCon: vi.fn(), openSendInfo: vi.fn(), openTonu: vi.fn(), openFor: vi.fn(),
   sendSetupPacket: vi.fn(async () => {}), addCheckCall: vi.fn(async () => {}), uploadDocument: vi.fn(async () => {}),
   queueDocument: vi.fn(), unqueueDocument: vi.fn(),
 })
@@ -16,7 +16,7 @@ export function makeCtx(over: Partial<FormCtx> = {}): FormCtx {
   return {
     mode: 'create', bundle: null, shipmentStatus: 'NEW', locked: NO_LOCKS,
     directory: { customers: [], locations: [], carriers: [], staff: [] },
-    settings: null, customer: null, divisions: [], busy: false, actions: noopActions(), refreshBundle: async () => {}, issues: [],
+    settings: null, customer: null, divisions: [], busy: false, dirty: false, actions: noopActions(), refreshBundle: async () => {}, issues: [],
     ...over,
   }
 }

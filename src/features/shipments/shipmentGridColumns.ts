@@ -3,10 +3,10 @@
  * header filter kind, sort value and alignment per column. Built once; nothing here depends on
  * page state, so the Columns dialog, templates and CSV keep speaking in catalog keys.
  */
-import type { DenseColumn, DenseOption } from '@/features/tms/grid/denseGridModel'
+import { optionsOfRow, type DenseColumn, type DenseOption } from '@/features/tms/grid/denseGridModel'
 import { customerDisplayName } from '@/lib/customerResolution'
 import { LADDER_FILTER_OPTIONS, assignmentChipText } from './carrierLadder'
-import { BOARD_COLUMNS, boardStatusOf, rowShipmentType, type ShipmentRow } from './shipmentViews'
+import { BOARD_COLUMNS, boardStatusOf, carrierSortKey, rowShipmentType, type ShipmentRow } from './shipmentViews'
 import { SHIPMENT_TYPES, shipmentTypeLabel } from '@/lib/shipmentTypes'
 
 export function sentence(value: string): string {
@@ -106,6 +106,18 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
         const key = rowShipmentType(row)
         return [{ value: key, label: shipmentTypeLabel(key) }]
       },
+    }
+  }
+  if (col.key === 'carrier') {
+    // Several carriers: the facet lists each of them, so a filter on the second one still finds the load.
+    return {
+      ...base,
+      filter: 'multi',
+      sortValue: carrierSortKey,
+      optionsOf: (row) =>
+        row.carriers && row.carriers.length >= 2 && row.assignmentType !== 'OWN_ASSET'
+          ? [...new Set(row.carriers.map((c) => c.name))].map((name) => ({ value: name, label: name }))
+          : optionsOfRow(base, row),
     }
   }
   if (col.key === 'customerName') {

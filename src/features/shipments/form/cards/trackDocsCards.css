@@ -16,6 +16,9 @@
 
 /* Documents --------------------------------------------------------- */
 .tms-shell .tms-card-docs-top { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; }
+.tms-shell .tms-card-generate { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tms-shell .tms-card-docs-old { display: inline-flex; align-items: center; gap: 6px; }
+.tms-shell .tms-card-docs-stale { color: var(--tms-badge-orange); font-size: 12px; }
 .tms-shell .tms-card-dropzone {
   position: relative; flex: 1 1 240px; min-width: 0;
   display: flex; align-items: center; gap: 8px; padding: 12px;

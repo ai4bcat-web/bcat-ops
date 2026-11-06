@@ -401,6 +401,73 @@ describe('runCheckCallPlan', () => {
   })
 })
 
+describe('runCheckCallPlan with two live carriers (Step AT)', () => {
+  const AUTO = { mode: 'AUTO' as const }
+  const created = '2026-11-07T00:00:00.000Z'
+  const switchedOn = { trackingAutomation: { checkCallsAuto: true } }
+  beforeEach(() => {
+    currentTime = '2026-02-02T12:00:00.000Z'
+  })
+
+  function seedTwo(store: MemoryStore, opts: { firstDeparted?: boolean; lc1?: Row; lc2?: Row; shipment?: Row } = {}) {
+    seedSettings(store)
+    seedCustomer(store, { ...switchedOn, trackingMode: 'AGENT' })
+    seedShipment(store, { createdAt: created, trackingPrefs: { mode: 'AGENT', confirmedAt: created }, ...opts.shipment })
+    seedLoad(store, {
+      status: 'IN_TRANSIT',
+      stops: [
+        { id: 'stp-1', type: 'pickup', sequence: 1, city: 'Chicago', state: 'IL', ...(opts.firstDeparted ? { arrivedAt: 'a', departedAt: 'd' } : {}) },
+        { id: 'stp-2', type: 'delivery', sequence: 2, city: 'Dallas', state: 'TX' },
+      ],
+    })
+    seedCarrier(store, { rateConStatus: 'SENT', sequence: 1, legStopIds: ['stp-1'], ...opts.lc1 })
+    seedCarrier(store, { id: 'lc-2', carrierName: 'Werner', rateConStatus: 'SENT', sequence: 2, legStopIds: ['stp-2'], driverPhone: '+12245550199', dispatcherEmail: 'dispatch@werner.test', ...opts.lc2 })
+    seedLink(store)
+  }
+  const carriersMessaged = (store: MemoryStore) => [...new Set(messagesForLoad(store, 'lod-1').map((m) => String(m.loadCarrierId)))].sort()
+
+  it('gates on the covering carrier\'s own override: the carrier holding the next stop decides', async () => {
+    const run = async (lc1: Row, lc2: Row) => {
+      const store = new MemoryStore()
+      seedTwo(store, { firstDeparted: true, lc1, lc2 })
+      const result = await runCheckCallPlan(makeDeps(store), { shipmentId: 'shp-1' }, CALLER, AUTO)
+      return { acted: result.acted, who: carriersMessaged(store) }
+    }
+    const off = { trackingPrefs: { mode: 'NONE', confirmedAt: created } }
+    // lc-1 has left its stop; lc-2 now covers: lc-1's override is irrelevant, lc-2's decides.
+    expect(await run(off, {})).toEqual({ acted: 1, who: ['lc-2'] })
+    expect((await run({}, off)).acted).toBe(0)
+  })
+
+  it('reminds every live carrier still on its legs, each on its own method, and skips a finished one', async () => {
+    const store = new MemoryStore()
+    seedTwo(store, { lc2: { trackingPrefs: { method: 'EMAIL', confirmedAt: created } } })
+    const deps = makeDeps(store)
+    await runCheckCallPlan(deps, { shipmentId: 'shp-1' }, CALLER, AUTO)
+    const sent = messagesForLoad(store, 'lod-1').filter((m) => m.kind === 'CHECK_CALL')
+    expect(sent.map((m) => `${m.loadCarrierId}:${m.channel}`).sort()).toEqual(['lc-1:EMAIL', 'lc-1:SMS', 'lc-2:EMAIL'])
+
+    // lc-1 finished its leg: only lc-2 is reminded.
+    const done = new MemoryStore()
+    seedTwo(done, { firstDeparted: true })
+    const doneDeps = makeDeps(done)
+    await runCheckCallPlan(doneDeps, { shipmentId: 'shp-1' }, CALLER, AUTO)
+    currentTime = '2026-02-02T20:00:02.000Z'
+    await runCheckCallPlan(doneDeps, { shipmentId: 'shp-1' }, CALLER, AUTO)
+    const late = messagesForLoad(done, 'lod-1').filter((m) => m.kind === 'CHECK_CALL')
+    expect(late.length).toBeGreaterThan(0)
+    expect(late.every((m) => m.loadCarrierId === 'lc-2')).toBe(true)
+  })
+
+  it('a one-carrier load is unchanged: the primary row is messaged whatever its legs say', async () => {
+    const store = new MemoryStore()
+    seedTwo(store)
+    store.seed({ ...(store.getById('LoadCarrier-test', 'lc-2') as Row), status: 'BOUNCED' })
+    await runCheckCallPlan(makeDeps(store), { shipmentId: 'shp-1' }, CALLER, AUTO)
+    expect(carriersMessaged(store)).toEqual(['lc-1'])
+  })
+})
+
 describe('saveCheckCallPlan', () => {
   it('stores a plan that lists VOICE', async () => {
     const store = new MemoryStore()

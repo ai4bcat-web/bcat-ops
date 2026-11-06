@@ -27,7 +27,7 @@ function RolesImpl({ value, onChange, ctx }: SliceSectionProps<'roles'>) {
   )
 
   return (
-    <FieldGrid className="ship-body" testId="section-roles-body">
+    <FieldGrid testId="section-roles-body">
       {rep('salesRepId', LABEL.roles.salesRepId)}
       {rep('serviceRepId', LABEL.roles.serviceRepId)}
       {rep('dispatcherAssignedId', LABEL.roles.dispatcherAssignedId, 'CARRIER_REP')}

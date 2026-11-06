@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { requiresApptProofs } from '@/lib/apptQueue'
 import type { CustomerRecord, ShipmentBundle, TmsSettings, UserProfileRecord } from '@/types/tms'
-import { applyCustomerDefaults, emptyValues, valuesFromBundle, type ShipmentFormValues } from './model'
+import { applyCustomerDefaults, emptyValues, syncCarrierSlots, valuesFromBundle, type ShipmentFormValues } from './model'
 import type { FormIssue } from './sectionProps'
 import { blockingIssues, validateForm, type ValidationLevel } from './validation'
 import { deleteDraft, listDrafts, newDraftId, saveDraft, type StoredDraft } from './draftStore'
@@ -104,6 +104,8 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
     const prev = valuesRef.current
     let next = fn(prev)
     if (next === prev) return
+    // `carriers[0]` and the legacy slot-0 fields are one thing: whichever side the edit touched wins.
+    next = syncCarrierSlots(prev, next)
     if (next.customer.id !== prev.customer.id && !current) {
       next = applyCustomerDefaults(next, next.customer.id ? customerById(next.customer.id) : null)
     }

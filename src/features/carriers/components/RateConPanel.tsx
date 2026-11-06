@@ -24,6 +24,8 @@ import { commitAddress, defaultSelection, knownRecipientOptions, parseCcList } f
 import { quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
+import { rateConLinesFor } from '@/lib/carrierBill'
+import { liveCarriersOf, primaryCarrierOf } from '@/lib/carrierTotals'
 import type { RateConInput, RateConStop } from '@/lib/carrierRateCon'
 import { readExtras } from '@/features/shipments/form/model'
 import type {
@@ -104,10 +106,18 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
   const sent = status === 'SENT' || status === 'OPENED'
   const version = loadCarrier.rateConVersion ?? 0
 
-  const charges = bundle.charges
-    .filter((c) => c.side === 'CARRIER' && (c.loadCarrierId == null || c.loadCarrierId === loadCarrier.id))
-    .map((c) => ({ label: c.label || c.code, amountCents: c.amountCents }))
+  // Only this carrier's lines: its linehaul and the accessorials paid to it. An untagged
+  // CARRIER line belongs to the only live carrier, or to the primary when several are live.
+  const live = liveCarriersOf(bundle.loadCarriers, loadCarrier.loadId)
+  const liveCount = live.length
+  const isPrimary = primaryCarrierOf(live)?.id === loadCarrier.id
+  const charges = rateConLinesFor(bundle.charges, loadCarrier, liveCount, isPrimary).lines
+    .map((line) => ({ label: line.label || line.code, amountCents: line.amountCents }))
   const totalCents = charges.reduce((sum, c) => sum + c.amountCents, 0)
+  // Two rate cons on one load must not share a file name.
+  const fileLoadNumber = liveCount > 1
+    ? `${load?.loadNumber ?? 'load'}-${carrierSlug(carrier?.name ?? loadCarrier.carrierName)}`
+    : load?.loadNumber ?? 'load'
 
   const tier = loadCarrier.quickPayDays ? tierFor(loadCarrier.quickPayDays, quickPayTiersOf(settings)) : null
 
@@ -220,8 +230,9 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
 
   return (
     <div
-      id="rate-con-panel"
+      id={liveCount > 1 && !isPrimary ? `rate-con-panel-${loadCarrier.id}` : 'rate-con-panel'}
       data-testid="rate-con-panel"
+      data-load-carrier-id={loadCarrier.id}
       className="flex flex-col gap-3 p-3"
       style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
     >
@@ -337,7 +348,7 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
           />
           <a
             href={previewUrl}
-            download={rateConFilename(load?.loadNumber ?? 'load', version + 1)}
+            download={rateConFilename(fileLoadNumber, version + 1)}
             className="text-xs underline"
           >
             Download a copy
@@ -346,6 +357,10 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
       )}
     </div>
   )
+}
+
+function carrierSlug(name: string | null | undefined): string {
+  return (name ?? 'carrier').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'carrier'
 }
 
 function Fact({ label, value }: { label: string; value: string }) {

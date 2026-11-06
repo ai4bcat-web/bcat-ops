@@ -29,6 +29,7 @@ import { evaluateCarrierBooking } from '@/lib/carrierEligibility'
 import { effectiveCarrierStatus, CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
 import { netPayable, quickPayFee, quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { formatCents } from '@/lib/tmsDirectory'
+import { liveCarriersOf } from '@/lib/carrierTotals'
 import type { CarrierBundle, CarrierRecord, LoadChargeInput, ShipmentBundle, TmsSettings, TrackingProvider } from '@/types/tms'
 
 /** Everything BOOK_CARRIER takes except the load it is being booked onto. */
@@ -77,14 +78,17 @@ export interface BookCarrierDialogProps {
   isAdmin: boolean
   busy: boolean
   onClose: () => void
-  onConfirm: (input: BookCarrierFields) => Promise<void>
+  /** `legStopIds` is set only when adding another carrier to part of the route. */
+  onConfirm: (input: BookCarrierFields, legStopIds?: string[]) => Promise<void>
+  /** AT-plan: this carrier joins the live ones instead of covering an empty load. */
+  additional?: boolean
   /** Booked and the user wants the rate con — the caller switches to the Carrier tab. */
   onRateCon: () => void
   /** Prefill (the shipment form's Carrier Information section). The preflight still runs on it. */
   initial?: Partial<BookCarrierFields>
 }
 
-export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, onRateCon, initial }: BookCarrierDialogProps) {
+export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, onRateCon, initial, additional = false }: BookCarrierDialogProps) {
   const { carriers, loading: carriersLoading } = useCarriers()
   const inRouter = useInRouterContext()
   const [settings, setSettings] = useState<TmsSettings | null>(null)
@@ -116,6 +120,9 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
   const [error, setError] = useState<string | null>(null)
   const [booked, setBooked] = useState(false)
   const [working, setWorking] = useState(false)
+  // Adding another carrier: empty legs = every stop (AT-plan D9), so "All stops" is the default.
+  const [allStops, setAllStops] = useState(true)
+  const [legStopIds, setLegStopIds] = useState<string[]>([])
 
   // No synchronous setState before the first await: both effects resolve through a
   // promise chain, so a failed read leaves the previous value rather than flashing.
@@ -133,6 +140,11 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
   }, [carrierId])
 
   const load = bundle.loads[0]
+  const stops = (load?.stops ?? []).map((s, i) => ({
+    id: s.id,
+    label: `${i + 1}. ${s.type === 'pickup' ? 'Pickup' : 'Delivery'} ${s.name ?? s.city ?? ''}`.trim(),
+  }))
+  const existingCostCents = liveCarriersOf(bundle.loadCarriers, load?.id ?? '').reduce((sum, lc) => sum + (lc.carrierRateCents ?? 0), 0)
   const order = bundle.orders[0]
   const financials = bundle.financials[0] ?? null
   const now = new Date()
@@ -193,6 +205,7 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
         assignmentType: load.assignmentType ?? null,
       },
       financials: { topSpendCents },
+      ...(additional ? { additional: true, existingCarrierCostCents: existingCostCents } : {}),
       carrierRateCents: rateCents ?? 0,
       // The shipment bundle only carries this load, so the client cannot see the other
       // loads' appointments; DOUBLE_BOOKED is the Lambda's answer to give.
@@ -203,12 +216,13 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
       now: new Date(),
       isAdmin,
     })
-  }, [carrier, carrierBundle, load, order, settings, topSpendCents, rateCents, isAdmin])
+  }, [carrier, carrierBundle, load, order, settings, topSpendCents, rateCents, isAdmin, additional, existingCostCents])
 
   const blocks = preview?.blocks ?? []
   const warnings = preview?.warnings ?? []
   const unacked = warnings.filter((w) => !acked.includes(w.key))
-  const canBook = !!carrierId && rateCents != null && blocks.length === 0 && unacked.length === 0
+  const legsOk = !additional || allStops || legStopIds.length > 0
+  const canBook = !!carrierId && rateCents != null && blocks.length === 0 && unacked.length === 0 && legsOk
 
   const toggleAck = (key: string) => {
     setAcked((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
@@ -256,7 +270,7 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
         quickPayDays: tier ? tier.days : undefined,
         paymentTermsDays: termsDays ? Number(termsDays) : undefined,
         acknowledgeWarnings: warnings.map((w) => w.key).filter((k) => acked.includes(k)),
-      })
+      }, additional && !allStops ? legStopIds : undefined)
       setBooked(true)
     } catch {
       /* the action already toasted the Lambda's own message */
@@ -289,7 +303,7 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
     <TmsDialog
       open
       onOpenChange={(open) => { if (!open) onClose() }}
-      title="Book carrier"
+      title={additional ? 'Add carrier' : 'Book carrier'}
       className="tms-dialog-wide"
       footer={
         <>
@@ -515,6 +529,30 @@ export function BookCarrierDialog({ bundle, isAdmin, busy, onClose, onConfirm, o
               {TRACKING_PROVIDERS.map((p) => <option key={p} value={p}>{p.replace(/_/g, ' ').toLowerCase()}</option>)}
             </TmsSelect>
           </TmsField>
+          {additional && stops.length > 1 && (
+            <div style={{ gridColumn: '1 / -1' }} data-testid="book-legs">
+              <TmsField label="Legs">
+                <div className="flex flex-col gap-1">
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" data-testid="book-legs-all" aria-label="All stops" checked={allStops} onChange={(e) => setAllStops(e.target.checked)} />
+                    <span>All stops</span>
+                  </label>
+                  {!allStops && stops.map((s) => (
+                    <label key={s.id} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        data-testid={`book-leg-${s.id}`}
+                        aria-label={`Stop ${s.label}`}
+                        checked={legStopIds.includes(s.id)}
+                        onChange={() => setLegStopIds((prev) => (prev.includes(s.id) ? prev.filter((id) => id !== s.id) : [...prev, s.id]))}
+                      />
+                      <span>{s.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </TmsField>
+            </div>
+          )}
         </div>
       )}
 

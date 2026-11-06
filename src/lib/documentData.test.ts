@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { bolData, loadSummaryData } from './documentData'
+import { loadSummaryData } from './documentData'
 import type { Stop } from '../types'
 import type {
-  CustomerRecord, Division, LoadCarrierRecord, LoadChargeRecord, LoadCheckCallRecord,
-  LoadFinancialsRecord, LocationRecord, OrderRecord, OrderReference, ShipmentBundle, ShipmentLoad,
+  CustomerRecord, LoadCarrierRecord, LoadChargeRecord, LoadCheckCallRecord,
+  LoadFinancialsRecord, OrderRecord, OrderReference, ShipmentBundle, ShipmentLoad,
   ShipmentRecord,
 } from '../types/tms'
 
@@ -87,14 +87,6 @@ const customer: CustomerRecord = {
   ...WHEN,
 }
 
-const division: Division = {
-  id: 'd1', key: 'BCAT', name: 'BCAT', legalName: 'BCAT Logistics LLC', mcNumber: '123456',
-  remitToAddress: { street: '1 Main St', city: 'Chicago', state: 'IL', zip: '60601' },
-  active: true, ...WHEN,
-}
-
-const locations: LocationRecord[] = []
-
 const bundle: ShipmentBundle = {
   shipment, orders: [order], loads: [load], loadCarriers: [bounced, active], charges,
   financials: [financials], documents: [],
@@ -112,78 +104,6 @@ const checkCalls: LoadCheckCallRecord[] = [
     note: 'Traffic, caught up.', createdBy: WHO.createdBy,
   },
 ]
-
-/** Every key anywhere in a structure, so a money field cannot hide inside a nested one. */
-function deepKeys(value: unknown, found: string[] = []): string[] {
-  if (Array.isArray(value)) {
-    for (const item of value) deepKeys(item, found)
-  } else if (value && typeof value === 'object') {
-    for (const [key, child] of Object.entries(value)) {
-      found.push(key)
-      deepKeys(child, found)
-    }
-  }
-  return found
-}
-
-describe('bolData', () => {
-  it('carries CUSTOMER and ALL references and never an INTERNAL or CARRIER one', () => {
-    const bol = bolData(bundle, customer, division, locations)
-    const values = [...bol.shipper.refs, ...bol.consignee.refs].map((ref) => ref.value)
-
-    expect(values).toContain('PO-1')
-    expect(values).toContain('BOL-9')
-    expect(values).toContain('SEAL-1')
-    expect(values).toContain('DEL-3')
-    expect(values).not.toContain('INT-7')
-    expect(values).not.toContain('PU-5')
-    expect(values).not.toContain('INTERNAL-STOP-NOTE')
-  })
-
-  it('puts the delivery reference on the consignee and the order references on the shipper', () => {
-    const bol = bolData(bundle, customer, division, locations)
-
-    expect(bol.shipper.refs.map((ref) => ref.value)).toEqual(['PO-1', 'BOL-9', 'SEAL-1'])
-    expect(bol.consignee.refs.map((ref) => ref.value)).toEqual(['DEL-3'])
-  })
-
-  it('has no money field at all, and prints no internal note', () => {
-    const bol = bolData(bundle, customer, division, locations)
-    const keys = deepKeys(bol)
-
-    expect(keys.filter((key) => /cent|margin|revenue|cost|profit|charge|rate/i.test(key))).toEqual([])
-    const serialized = JSON.stringify(bol)
-    expect(serialized).not.toContain('250000')
-    expect(serialized).not.toContain('200000')
-    expect(serialized).not.toContain('Thin margin')
-  })
-
-  it('takes the ends of the move, the BOL number and the carrier that is actually on it', () => {
-    const bol = bolData(bundle, customer, division, locations)
-
-    expect(bol.shipmentNumber).toBe('BC-1001')
-    expect(bol.bolNumber).toBe('BOL-9')
-    expect(bol.shipper.name).toBe('Chicago dock')
-    expect(bol.shipper.contact).toBe('Dana Shipper · 312-555-0100')
-    expect(bol.consignee.name).toBe('St. Louis DC')
-    expect(bol.customer).toEqual({ name: 'Widget Co', billTo: 'Widget Co AP' })
-    expect(bol.carrier).toEqual({
-      name: 'Acme Trucking', mc: '777888', driverName: 'Ray Driver',
-      truckNumber: 'T-42', trailerNumber: 'TR-9',
-    })
-    expect(bol.specialRequirements).toEqual(['Team'])
-    expect(bol.customerNotes).toBe('Dock 4, no early arrivals.')
-  })
-
-  it('falls back to the shipment number when nobody issued a BOL number', () => {
-    const withoutBol = {
-      ...bundle,
-      orders: [{ ...order, references: references.filter((ref) => ref.code !== 'BOL') }],
-    }
-
-    expect(bolData(withoutBol, customer, division, locations).bolNumber).toBe('BC-1001')
-  })
-})
 
 describe('loadSummaryData', () => {
   it('reports the cached revenue, cost and margin rather than re-adding the lines', () => {

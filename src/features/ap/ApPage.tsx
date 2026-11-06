@@ -43,7 +43,7 @@ import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
   billGates, billsInReview, billsToPay, isOwnFleet, paidBills, payeeLabel, quickPayLabel, selectionBalanceCents,
-  selectionCarrierId, type ApTabKey, type ToBePaidFilters,
+  selectionCarrierId, sharedProLabel, sharedProIndex, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
@@ -62,6 +62,12 @@ import { INBOX_CHIPS, HISTORY_DAYS, type InboxChip } from './inbox/inboxModel'
 import { InboxChips } from './inbox/InboxParts'
 import { inboxView } from './inbox/inboxView'
 import { useApInboxItems, useApInboxStatus } from './inbox/useApInbox'
+
+/** The "Shared PRO · 2 carriers" badge, or nothing when the load has one carrier. */
+function sharedProChip(shared: SharedProIndex, loadId: string): ReactNode {
+  const label = sharedProLabel(shared, loadId)
+  return label ? <> <TmsBadge tone="gray">{label}</TmsBadge></> : null
+}
 
 /** Which dialog is open, and the one thing it is open about. */
 type ApDialog =
@@ -171,6 +177,12 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const payRows = useMemo(() => applyToBePaidFilters(approved, filters, asOf), [approved, filters, asOf])
   const settled = useMemo(() => paidBills(monthBills), [monthBills])
   const awaitingTotals = useMemo(() => awaitingInvoiceTotals(awaiting.rows), [awaiting.rows])
+  // One bill per carrier per load: a load with several carriers shows up as several rows on
+  // one PRO, and each row says so.
+  const shared = useMemo(
+    () => sharedProIndex([...awaiting.rows, ...inReview.rows], [...open.bills, ...monthBills]),
+    [awaiting.rows, inReview.rows, open.bills, monthBills],
+  )
 
   const refreshAll = () =>
     Promise.all([
@@ -303,6 +315,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     tab === 'awaiting' ? awaitingView({
       banner: errorBanner,
       rows: awaiting.rows,
+      shared,
       busy,
       onRecord: (row) => setDialog({ kind: 'record', loadCarrierId: row.loadCarrierId }),
     })
@@ -310,6 +323,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       banner: errorBanner,
       bills: reviewBills,
       rows: reviewRows,
+      shared,
       carriersById,
       settings,
       isAdmin,
@@ -322,6 +336,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       errorBanner,
       bills: payRows,
       allBills: approved,
+      shared,
       filters,
       showFilters,
       selected,
@@ -337,6 +352,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : tab === 'paid' ? paidView({
       banner: errorBanner,
       bills: settled,
+      shared,
       months,
       month,
       loading: monthLoading,
@@ -515,9 +531,10 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
 /* ── Awaiting invoice ────────────────────────────────────────────────────── */
 
-function awaitingView({ banner, rows, busy, onRecord }: {
+function awaitingView({ banner, rows, shared, busy, onRecord }: {
   banner: ReactNode
   rows: ApWorklistRow[]
+  shared: SharedProIndex
   busy: boolean
   onRecord: (row: ApWorklistRow) => void
 }): ListView {
@@ -539,6 +556,7 @@ function awaitingView({ banner, rows, busy, onRecord }: {
           <>
             {ownFleet ? row.assignment.driverName ?? 'Own asset' : row.carrierName || '—'}
             {quickPay && !ownFleet && <> <TmsBadge tone="gray">{quickPay}</TmsBadge></>}
+            {sharedProChip(shared, row.loadId)}
           </>
         )
       },
@@ -588,7 +606,7 @@ function awaitingView({ banner, rows, busy, onRecord }: {
         ) : (
           <TmsButton
             size="sm"
-            aria-label={`Record bill for ${row.shipmentNumber ?? row.loadCarrierId}`}
+            aria-label={`Record bill for ${row.shipmentNumber ?? row.loadCarrierId}${sharedProLabel(shared, row.loadId) ? ` — ${row.carrierName}` : ''}`}
             disabled={busy}
             onClick={() => onRecord(row)}
           >
@@ -612,11 +630,12 @@ function awaitingView({ banner, rows, busy, onRecord }: {
 /* ── In review ───────────────────────────────────────────────────────────── */
 
 function reviewView({
-  banner, bills, rows, carriersById, settings, isAdmin, busy, onApprove, onCharges, onVoid,
+  banner, bills, rows, shared, carriersById, settings, isAdmin, busy, onApprove, onCharges, onVoid,
 }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
   rows: Map<string, ApWorklistRow>
+  shared: SharedProIndex
   carriersById: Map<string, CarrierRecord>
   settings: Pick<ApSettings, 'apRequireSignedRateCon'> | null
   isAdmin: boolean
@@ -633,7 +652,7 @@ function reviewView({
         <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>
       ),
     },
-    { key: 'carrier', header: 'CARRIER', render: (bill) => bill.carrierName || '—' },
+    { key: 'carrier', header: 'CARRIER', render: (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</> },
     { key: 'billDate', header: 'BILL DATE', render: (bill) => formatDay(bill.billDate) },
     { key: 'due', header: 'DUE', render: (bill) => formatDay(bill.dueAt) },
     {
@@ -710,12 +729,13 @@ function reviewView({
 /* ── To be paid ──────────────────────────────────────────────────────────── */
 
 function toBePaidView({
-  errorBanner, bills, allBills, filters, showFilters, selected, asOf, busy,
+  errorBanner, bills, allBills, shared, filters, showFilters, selected, asOf, busy,
   onToggleFilters, onFilters, onSelect, onPay, onPaySelected, onUnapprove,
 }: {
   errorBanner: ReactNode
   bills: CarrierBillRecord[]
   allBills: CarrierBillRecord[]
+  shared: SharedProIndex
   filters: ToBePaidFilters
   showFilters: boolean
   selected: string[]
@@ -760,7 +780,7 @@ function toBePaidView({
         </>
       ),
     },
-    { key: 'carrier', header: 'CARRIER', render: (bill) => bill.carrierName || '—' },
+    { key: 'carrier', header: 'CARRIER', render: (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</> },
     { key: 'due', header: 'DUE', render: (bill) => formatDay(bill.dueAt) },
     {
       key: 'age',
@@ -875,9 +895,10 @@ function toBePaidView({
 
 /* ── Paid ────────────────────────────────────────────────────────────────── */
 
-function paidView({ banner, bills, months, month, loading, onMonth }: {
+function paidView({ banner, bills, shared, months, month, loading, onMonth }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
+  shared: SharedProIndex
   months: string[]
   month: string
   loading: boolean
@@ -889,7 +910,7 @@ function paidView({ banner, bills, months, month, loading, onMonth }: {
       header: 'BILL',
       render: (bill) => <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>,
     },
-    { key: 'carrier', header: 'CARRIER', render: (bill) => bill.carrierName || '—' },
+    { key: 'carrier', header: 'CARRIER', render: (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</> },
     { key: 'billDate', header: 'BILL DATE', render: (bill) => formatDay(bill.billDate) },
     { key: 'paid', header: 'PAID', render: (bill) => formatDay(bill.paidAt) },
     { key: 'payee', header: 'PAYEE', render: (bill) => payeeLabel(bill) },

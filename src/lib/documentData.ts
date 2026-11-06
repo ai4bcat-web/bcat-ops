@@ -1,18 +1,12 @@
 /**
- * What goes on the two documents the broker generates for a shipment: the bill of
- * lading the driver carries, and the load summary the office reads.
+ * What goes on the load summary the broker generates for a shipment (the bill of
+ * lading lives in `bolModel.ts`).
  *
  * The assembly lives here, away from jsPDF, for two reasons. The Lambdas have to be
  * able to describe a document without rendering one (so imports stay relative and
  * type-only — a `@/` alias would break the function bundle), and the audience rules
  * are the whole point of these shapes rather than an afterthought of the layout.
  *
- * The audience split is enforced by the types, not by discipline:
- *
- *   `BolInput`  — a bill of lading is a receipt for freight. It has no field for
- *                 money, margin or an internal note, so no caller and no future
- *                 layout change can leak one onto a page a carrier hands to a dock.
- *                 Its references are filtered to CUSTOMER and ALL.
  *   `LoadSummaryInput` — internal by construction: both sides' charges, the margin,
  *                 every reference whatever its visibility, the bounced and TONU
  *                 assignments, the open incidents and the internal notes. It is
@@ -20,20 +14,16 @@
  *
  * Money is integer cents; the renderers divide by 100, nothing here does.
  */
-import type { Stop } from '../types'
 import type {
   Address,
   ChargeCodeDef,
   CustomerRecord,
-  Division,
-  FreightItem,
   IncidentType,
   LoadCarrierKind,
   LoadCarrierStatus,
   LoadChargeRecord,
   LoadCheckCallRecord,
   LoadWorkflowStatus,
-  LocationRecord,
   OrderRecord,
   OrderReference,
   RateConStatus,
@@ -45,78 +35,6 @@ import type {
   ShipmentStatus,
   SpecialRequirements,
 } from '../types/tms'
-
-// ── Bill of lading ───────────────────────────────────────────────────────────
-
-/** A reference as it prints on a BOL: no level, no visibility, nothing to filter twice. */
-export interface BolReference {
-  label: string
-  value: string
-}
-
-/** One end of the move. The same shape serves the shipper and the consignee. */
-export interface BolParty {
-  name: string
-  /** Street and city line, newline-joined, ready to print as a block. */
-  address: string
-  /** Who takes the paperwork here — `Name · phone`, or null when nobody is named. */
-  contact: string | null
-  /** ISO 8601, or null when the stop is still TBD. */
-  appt: string | null
-  refs: BolReference[]
-}
-
-export interface BolCarrier {
-  name: string
-  mc: string | null
-  driverName: string | null
-  truckNumber: string | null
-  trailerNumber: string | null
-}
-
-/**
- * Everything a bill of lading prints. There is deliberately nowhere to put a rate,
- * a margin or an internal note.
- */
-export interface BolInput {
-  broker: { name: string; address: string; phone: string | null; mc: string | null }
-  shipmentNumber: string
-  bolNumber: string
-  customer: { name: string; billTo: string | null }
-  shipper: BolParty
-  consignee: BolParty
-  /** Null until somebody is assigned; a BOL can be printed before a carrier exists. */
-  carrier: BolCarrier | null
-  freight: FreightItem[]
-  /** Team, tarps, hazmat, temperature… as printable labels. */
-  specialRequirements: string[]
-  customerNotes: string | null
-  terms: string
-}
-
-export interface BolOptions {
-  /** The broker's phone. `Division` carries none, so the caller supplies it. */
-  brokerPhone?: string | null
-  /** Overrides the number when the customer dictates their own BOL number. */
-  bolNumber?: string | null
-  /** Replaces `DEFAULT_BOL_TERMS` when the org has its own wording. */
-  terms?: string | null
-}
-
-/**
- * The straight bill of lading conditions. Short on purpose: this page is a receipt
- * for freight, and the commercial terms live on the rate confirmation the carrier
- * signed and in the customer's agreement.
- */
-export const DEFAULT_BOL_TERMS =
-  'Received, subject to the classifications and lawfully filed tariffs in effect on the date of issue, '
-  + 'the property described above in apparent good order except as noted (contents and condition of '
-  + 'contents of packages unknown), marked, consigned and destined as shown. The carrier certifies that '
-  + 'it is in possession of the property described, that the property is properly described by name and '
-  + 'is in proper condition for transportation according to the applicable regulations of the DOT, and '
-  + 'agrees to deliver it to the consignee named above. Shipper hereby certifies that it is familiar with '
-  + 'all the terms and conditions of this bill of lading and that those terms and conditions are agreed to '
-  + 'by the shipper and accepted for itself and its assigns.'
 
 // ── Load summary ─────────────────────────────────────────────────────────────
 
@@ -282,122 +200,6 @@ function referenceLabel(reference: OrderReference): string {
   return reference.label || reference.code
 }
 
-// ── bolData ──────────────────────────────────────────────────────────────────
-
-/** Only what the customer's own paperwork may show. INTERNAL and CARRIER never print. */
-function customerVisible(reference: OrderReference): boolean {
-  return reference.visibility === 'CUSTOMER' || reference.visibility === 'ALL'
-}
-
-function partyContact(stop: Stop, location: LocationRecord | null): string | null {
-  const name = text(stop.documentContact?.name) ?? text(location?.apptContactName)
-  const phone = text(stop.documentContact?.phone) ?? text(location?.apptContactPhone)
-  return [name, phone].filter(Boolean).join(' · ') || null
-}
-
-function bolParty(stop: Stop | null, location: LocationRecord | null, refs: BolReference[]): BolParty {
-  if (!stop) return { name: '', address: '', contact: null, appt: null, refs }
-  const address = stop.address
-    ? addressBlock(stop.address)
-    : addressBlock(location) || text(stop.city) || ''
-  return {
-    name: text(stop.name) ?? text(location?.name) ?? '',
-    address,
-    contact: partyContact(stop, location),
-    appt: text(stop.appt),
-    refs,
-  }
-}
-
-/**
- * The bill of lading for a shipment: the first pickup is the shipper, the last
- * delivery the consignee, and everything in between is the carrier's problem rather
- * than the dock's.
- *
- * `locations` fills in what the stop snapshot left out — the facility's appointment
- * contact and, on a legacy stop with no address block, its address. `customer`
- * supplies the bill-to party and `division` the broker letterhead; both may be null
- * while a shipment is still being built.
- *
- * Nothing on the returned shape is money, margin or an internal note, and the
- * references are filtered to CUSTOMER and ALL before they get here.
- */
-export function bolData(
-  bundle: ShipmentBundle,
-  customer: CustomerRecord | null,
-  division: Division | null,
-  locations: readonly LocationRecord[],
-  options: BolOptions = {},
-): BolInput {
-  const loads = orderedLoads(bundle)
-  const byLocation = new Map(locations.map((location) => [location.id, location]))
-
-  const pickups: { load: ShipmentLoad; stop: Stop }[] = []
-  const deliveries: { load: ShipmentLoad; stop: Stop }[] = []
-  for (const load of loads) {
-    for (const stop of [...(load.stops ?? [])].sort((a, b) => a.sequence - b.sequence)) {
-      (stop.type === 'pickup' ? pickups : deliveries).push({ load, stop })
-    }
-  }
-  const first = pickups[0] ?? null
-  const last = deliveries[deliveries.length - 1] ?? null
-
-  const orderRefs = bundle.orders.flatMap((order) => order.references ?? []).filter(customerVisible)
-  const refsForStop = (stop: Stop | null): BolReference[] => {
-    if (!stop) return []
-    const stopLevel = [
-      ...orderRefs.filter((reference) => reference.stopId === stop.id),
-      ...(stop.refs ?? []).filter(customerVisible),
-    ]
-    return stopLevel.map((reference) => ({ label: referenceLabel(reference), value: reference.value }))
-  }
-
-  // An order-level reference (the PO) identifies the whole shipment, so it prints once,
-  // at the shipper, which is where a dock hand looks for it.
-  const shipperRefs = [
-    ...orderRefs.filter((reference) => !reference.stopId)
-      .map((reference) => ({ label: referenceLabel(reference), value: reference.value })),
-    ...refsForStop(first?.stop ?? null),
-  ]
-
-  // The carrier on the leg that picks up is the one whose driver signs this page.
-  const active = bundle.loadCarriers.filter((assignment) => assignment.status === 'ACTIVE')
-  const assignment = active.find((row) => row.loadId === first?.load.id) ?? active[0] ?? null
-
-  const bolReference = orderRefs.find((reference) => reference.code.toUpperCase() === 'BOL')
-
-  return {
-    broker: {
-      name: division?.legalName || division?.name || 'Broker',
-      address: addressBlock(division?.remitToAddress),
-      phone: text(options.brokerPhone),
-      mc: text(division?.mcNumber),
-    },
-    shipmentNumber: bundle.shipment.number,
-    bolNumber: text(options.bolNumber) ?? text(bolReference?.value) ?? bundle.shipment.number,
-    customer: {
-      name: customer?.name ?? bundle.shipment.customerName ?? '',
-      billTo: billToName(customer, bundle.orders),
-    },
-    shipper: bolParty(first?.stop ?? null, byLocation.get(first?.stop.locationId ?? '') ?? null, shipperRefs),
-    consignee: bolParty(last?.stop ?? null, byLocation.get(last?.stop.locationId ?? '') ?? null, refsForStop(last?.stop ?? null)),
-    carrier: assignment
-      ? {
-        name: assignment.carrierName ?? '',
-        mc: text(assignment.carrierMc),
-        driverName: text(assignment.driverName),
-        truckNumber: text(assignment.truckNumber),
-        trailerNumber: text(assignment.trailerNumber),
-      }
-      : null,
-    freight: bundle.orders.flatMap((order) => order.freight ?? []),
-    specialRequirements: Array.from(new Set(
-      bundle.orders.flatMap((order) => requirementLabels(order.specialRequirements)),
-    )),
-    customerNotes: text(bundle.orders.map((order) => order.customerNotes ?? '').filter(Boolean).join('\n')),
-    terms: text(options.terms) ?? DEFAULT_BOL_TERMS,
-  }
-}
 
 function summaryReference(reference: OrderReference): LoadSummaryReference {
   return {

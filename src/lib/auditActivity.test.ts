@@ -82,3 +82,10 @@ describe('buildActivityRows', () => {
     expect(r!.action).toBe('sweep stalled')
   })
 })
+
+describe('auditDetail with AppSync AWSJSON strings', () => {
+  it('unwraps a changes value that arrives as a JSON string', () => {
+    expect(auditDetail('{"stops":3,"revenueCents":240000}')).toEqual({ text: 'stops: 3', title: '' })
+    expect(auditDetail('not json')).toBeNull()
+  })
+})

@@ -78,6 +78,34 @@ describe('priceCharges', () => {
   })
 })
 
+describe('per-carrier PERCENT base', () => {
+  const carrierLine = (over: Partial<ChargeLineInput>): ChargeLineInput => line({ side: 'CARRIER', ...over })
+  const lines = [
+    carrierLine({ loadCarrierId: 'A', rateCents: 60_000 }),
+    carrierLine({ loadCarrierId: 'B', rateCents: 20_000 }),
+    carrierLine({ loadCarrierId: 'B', code: 'FSC', calculatedBy: 'PERCENT', rateCents: 1000, isRate: false }),
+  ]
+
+  it('prices carrier B\'s PERCENT line off B\'s rate lines only', () => {
+    expect(priceCharges(lines)[2].amountCents).toBe(2_000)
+    expect(rateBaseCents(lines, 'CARRIER', {}, 'A')).toBe(60_000)
+    expect(rateBaseCents(lines, 'CARRIER')).toBe(80_000)
+  })
+
+  it('keeps the whole side as the base with one carrier, tagged or not', () => {
+    const mixed = [
+      carrierLine({ rateCents: 60_000 }),
+      carrierLine({ loadCarrierId: 'A', code: 'FSC', calculatedBy: 'PERCENT', rateCents: 1000, isRate: false }),
+    ]
+    expect(priceCharges(mixed)[1].amountCents).toBe(6_000)
+  })
+
+  it('leaves the customer side on the customer base', () => {
+    const cust = [line({ rateCents: 100_000 }), line({ code: 'FSC', calculatedBy: 'PERCENT', rateCents: 1000, isRate: false })]
+    expect(priceCharges([...cust, ...lines])[1].amountCents).toBe(10_000)
+  })
+})
+
 describe('computeFinancials', () => {
   const shipmentLines = [
     line({ side: 'CUSTOMER', code: 'LINEHAUL', rateCents: 200_000, isRate: true }),

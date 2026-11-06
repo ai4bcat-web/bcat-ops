@@ -16,12 +16,13 @@ import { mcpPacketStanding } from '@/lib/mcpPacket'
 import { isTruckloadMode } from '@/lib/shipmentStatus'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
-import type { CarrierRecord, InsurancePolicyType } from '@/types/tms'
+import type { CarrierRecord, InsurancePolicyType, LoadCarrierRecord } from '@/types/tms'
 import { US_STATES } from '../constants'
 import { LABEL } from '../labels'
-import { activeLoadCarrier, isLocked, lockReason } from '../model'
+import { activeLoadCarrier, isLocked, liveCarriers, lockReason } from '../model'
 import type { SliceSectionProps } from '../sectionRegistry'
 import { Field, FieldGrid } from '../fieldGrid'
+import { validateCarrierAdd } from '@/lib/carrierLegs'
 import { fieldAttrs } from './fieldAttrs'
 import { FindInvite } from './carrier/FindInvite'
 import '../cards/moneyCards.css'
@@ -35,21 +36,41 @@ function policyText(carrier: CarrierRecord | null, type: InsurancePolicyType): s
   return `${limit}${p.expiresAt ? ` · exp ${p.expiresAt}` : ''}${expired ? ' (expired)' : ''}`
 }
 
-function Static({ def, text, span = 4, narrow = 6 }: { def: { text: string; testId: string }; text: string; span?: number; narrow?: number }) {
+function Static({ def, text, span = 4, narrow = 6, tag = '' }: { def: { text: string; testId: string }; text: string; span?: number; narrow?: number; tag?: string }) {
   return (
     <Field span={span} narrow={narrow} label={def.text}>
-      <TmsInput aria-label={def.text} data-testid={def.testId} readOnly value={text} />
+      <TmsInput aria-label={tag ? `${def.text} ${tag}` : def.text} data-testid={tag ? `${def.testId}-${tag}` : def.testId} readOnly value={text} />
     </Field>
   )
 }
 
-function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false }: SliceSectionProps<'carrier'> & { expanded?: boolean }) {
+/** Which carrier of the load a section instance is: slot 0 keeps every legacy id; the others suffix theirs with the slot key. */
+export interface CarrierSlotProps {
+  /** The slot key (`c1`…). Absent = the first carrier. */
+  slotKey?: string
+  /** Position in the carrier list; 0 = first. */
+  index?: number
+  /** The booked assignment this block shows; absent = the primary (first block only). */
+  loadCarrier?: LoadCarrierRecord | null
+  /** `Stop.id`s this carrier covers (validateCarrierAdd's disjoint-legs rule). */
+  legStopIds?: string[]
+}
+
+function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false, slotKey = 'c0', index = 0, loadCarrier, legStopIds = [] }: SliceSectionProps<'carrier'> & CarrierSlotProps & { expanded?: boolean }) {
   const roster = useOwnFleetRoster()
   const [search, setSearch] = useState('')
   const [assigning, setAssigning] = useState(false)
+  // Slot 0 keeps every legacy id and label; another carrier's controls carry its slot key.
+  const extra = index > 0
+  const tag = extra ? slotKey : ''
+  const x = (id: string) => (tag ? `${id}-${tag}` : id)
+  const fa = (def: Parameters<typeof fieldAttrs>[0]) => {
+    const a = fieldAttrs(def)
+    return tag ? { 'aria-label': `${a['aria-label']} ${tag}`, 'data-testid': x(a['data-testid']) } : a
+  }
 
   const bundle = ctx.bundle
-  const active = activeLoadCarrier(bundle)
+  const active = loadCarrier !== undefined ? loadCarrier : activeLoadCarrier(bundle)
   const saved = ctx.mode === 'edit' && bundle != null
   const disabled = ctx.busy || isLocked(ctx.locked, 'all')
   const pickerLocked = isLocked(ctx.locked, 'carrierPicker') || active != null
@@ -89,75 +110,97 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
   const clear = () => set({ carrierId: '', typedName: '', useTyped: false, isOwnFleet: false })
 
   const loadStatus = bundle?.loads[0]?.status
+  const addBlock = (): string | null => {
+    if (value.isOwnFleet) return validateCarrierAdd([], { kind: 'OWN_ASSET' })
+    if (!value.carrierId) return 'Pick the carrier from the directory first'
+    return validateCarrierAdd(
+      liveCarriers(bundle).map((lc) => ({ id: lc.id, kind: lc.kind, carrierId: lc.carrierId, legStopIds: lc.legStopIds })),
+      { kind: 'CARRIER', carrierId: value.carrierId, legStopIds },
+    )
+  }
   const coverBlock = !saved
     ? 'Save the draft first'
     : isLocked(ctx.locked, 'cover') ? lockReason(ctx.locked, 'cover') ?? 'Cover is locked'
-    : active ? 'A carrier is already covering this load'
-    : loadStatus !== 'SOURCING' ? 'The load must be SOURCING to cover'
-    : !isTruckloadMode(bundle?.shipment.mode) ? 'Only truckload modes can be covered'
-    : null
+    : extra
+      ? active ? 'This carrier is already added'
+        : loadStatus !== 'SOURCING' && loadStatus !== 'BOOKED' && loadStatus !== 'DISPATCHED' ? 'The load must be open to add a carrier'
+        : !isTruckloadMode(bundle?.shipment.mode) ? 'Only truckload modes can be covered'
+        : addBlock()
+      : active ? 'A carrier is already covering this load'
+      : loadStatus !== 'SOURCING' ? 'The load must be SOURCING to cover'
+      : !isTruckloadMode(bundle?.shipment.mode) ? 'Only truckload modes can be covered'
+      : null
+  // Why this block cannot be own fleet: Ivan Cartage never shares a load with outside carriers.
+  const ownFleetBlock = extra ? validateCarrierAdd([], { kind: 'OWN_ASSET' }) : null
 
   // Own fleet opens the driver dialog; every other carrier goes through the Step AM ladder (directory first, then MCP).
-  const onCover = () => ctx.actions.cover()
+  const onCover = () => (extra ? ctx.actions.cover(slotKey) : ctx.actions.cover())
+  // The first block drives the primary assignment's own actions; the others name theirs.
+  const open = (kind: 'dispatch' | 'rateCon' | 'info') => {
+    if (extra && active) ctx.actions.openFor(kind, active.id)
+    else if (kind === 'dispatch') ctx.actions.openDispatch()
+    else if (kind === 'rateCon') ctx.actions.openSendRateCon()
+    else ctx.actions.openSendInfo()
+  }
 
   const dash = (iso: string | null | undefined) => (iso ? formatDateTime(iso) : '—')
   const needSave = saved ? undefined : 'Save the draft first'
 
   const hasCarrier = carrier != null || own || value.useTyped || active != null
-  if (!hasCarrier && !assigning && !expanded) {
+  if (!hasCarrier && !assigning && !expanded && !extra) {
     return (
-      <div className="tms-card-carrier-empty" data-testid="section-carrier-body">
-        <span className="tms-card-carrier-empty-text" data-testid="carrier-empty">No carrier yet</span>
+      <div className="tms-card-carrier-empty" data-testid={x('section-carrier-body')}>
+        <span className="tms-card-carrier-empty-text" data-testid={x('carrier-empty')}>No carrier yet</span>
         <TmsButton
           variant="primary"
           size="sm"
-          data-testid={LABEL.carrier.cover.testId}
+          data-testid={x(LABEL.carrier.cover.testId)}
           title={coverBlock ?? undefined}
           disabled={disabled || coverBlock != null}
           onClick={onCover}
         >
           {LABEL.carrier.cover.text}
         </TmsButton>
-        <TmsButton size="sm" data-testid="carrier-assign" disabled={disabled || pickerLocked} onClick={() => setAssigning(true)}>
+        <TmsButton size="sm" data-testid={x('carrier-assign')} disabled={disabled || pickerLocked} onClick={() => setAssigning(true)}>
           Assign…
         </TmsButton>
-        {coverBlock && <span className="tms-muted text-xs" data-testid="carrier-cover-reason">{coverBlock}</span>}
+        {coverBlock && <span className="tms-muted text-xs" data-testid={x('carrier-cover-reason')}>{coverBlock}</span>}
       </div>
     )
   }
 
   return (
-    <div className="space-y-3" data-testid="section-carrier-body">
+    <div className="space-y-3" data-testid={x('section-carrier-body')}>
       {saved && !active && value.carrierId && (
-        <p className="tms-muted text-xs" data-testid="carrier-not-covered">Carrier selected — not covered yet</p>
+        <p className="tms-muted text-xs" data-testid={x('carrier-not-covered')}>Carrier selected — not covered yet</p>
       )}
 
       <div className="tms-card-carrier-grid">
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-sm">
             {carrier ? (
-              <Link to={`/tms/carriers/${carrier.id}`} className="tms-field-label underline" data-testid="carrier-link">{LABEL.carrier.carrier.text}</Link>
+              <Link to={`/tms/carriers/${carrier.id}`} className="tms-field-label underline" data-testid={x('carrier-link')}>{LABEL.carrier.carrier.text}</Link>
             ) : (
-              <label className="tms-field-label" htmlFor="carrier-search">{LABEL.carrier.carrier.text}</label>
+              <label className="tms-field-label" htmlFor={x('carrier-search')}>{LABEL.carrier.carrier.text}</label>
             )}
             {carrier && <span>{carrier.name}</span>}
             {own && <strong>Ivan Cartage (own fleet)</strong>}
             {value.useTyped && <span>{value.typedName}</span>}
             {(carrier || own || value.useTyped) && !pickerLocked && (
-              <TmsButton size="sm" variant="ghost" aria-label="Clear carrier" disabled={disabled} onClick={clear}>✕</TmsButton>
+              <TmsButton size="sm" variant="ghost" aria-label={tag ? `Clear carrier ${tag}` : 'Clear carrier'} disabled={disabled} onClick={clear}>✕</TmsButton>
             )}
           </div>
           {!carrier && !own && !value.useTyped && (
             <>
               <TmsInput
-                id="carrier-search"
-                {...fieldAttrs(LABEL.carrier.carrier)}
+                id={x('carrier-search')}
+                {...fa(LABEL.carrier.carrier)}
                 value={search}
                 placeholder="Name, MC, DOT or SCAC"
                 disabled={disabled || pickerLocked}
                 onChange={(e) => setSearch(e.target.value)}
               />
-              <ul className="space-y-1" data-testid="carrier-matches">
+              <ul className="space-y-1" data-testid={x('carrier-matches')}>
                 {matches.map((c) => (
                   <li key={c.id}>
                     <button
@@ -172,38 +215,43 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
                 ))}
               </ul>
               {isIvanCartageName(search) && (
-                <p className="text-xs" data-testid="carrier-ivan-hint">
+                <p className="text-xs" data-testid={x('carrier-ivan-hint')}>
                   Ivan Cartage is our own fleet — use the roster picker below.
                 </p>
               )}
               <div className="flex flex-wrap gap-2">
                 <TmsButton
                   size="sm"
-                  data-testid="carrier-own-fleet"
-                  disabled={disabled || pickerLocked}
+                  data-testid={x('carrier-own-fleet')}
+                  disabled={disabled || pickerLocked || ownFleetBlock != null}
+                  title={ownFleetBlock ?? undefined}
                   onClick={() => set({ carrierId: '', typedName: '', useTyped: false, isOwnFleet: true })}
                 >
                   Ivan Cartage (own fleet)
                 </TmsButton>
-                <TmsButton
-                  size="sm"
-                  variant="ghost"
-                  data-testid="carrier-record-name"
-                  disabled={disabled || pickerLocked}
-                  onClick={() => {
-                    if (isIvanCartageName(search)) { set({ carrierId: '', typedName: '', useTyped: false, isOwnFleet: true }); setSearch(''); return }
-                    set({ carrierId: '', useTyped: true, typedName: search.trim(), isOwnFleet: false })
-                    setSearch('')
-                  }}
-                >
-                  Not in the directory — record the name
-                </TmsButton>
+                {extra ? (
+                  <span className="tms-muted text-xs" data-testid={x('carrier-own-fleet-reason')}>{ownFleetBlock}</span>
+                ) : (
+                  <TmsButton
+                    size="sm"
+                    variant="ghost"
+                    data-testid={x('carrier-record-name')}
+                    disabled={disabled || pickerLocked}
+                    onClick={() => {
+                      if (isIvanCartageName(search)) { set({ carrierId: '', typedName: '', useTyped: false, isOwnFleet: true }); setSearch(''); return }
+                      set({ carrierId: '', useTyped: true, typedName: search.trim(), isOwnFleet: false })
+                      setSearch('')
+                    }}
+                  >
+                    Not in the directory — record the name
+                  </TmsButton>
+                )}
               </div>
             </>
           )}
           {value.useTyped && (
             <TmsInput
-              aria-label="Carrier name"
+              aria-label={tag ? `Carrier name ${tag}` : 'Carrier name'}
               value={value.typedName}
               disabled={disabled || pickerLocked}
               onChange={(e) => {
@@ -214,7 +262,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
             />
           )}
           {carrier && standing && (
-            <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="carrier-standing">
+            <div className="flex flex-wrap items-center gap-2 text-xs" data-testid={x('carrier-standing')}>
               <TmsBadge tone="gray">{CARRIER_STATUS_LABELS[standing.status]}</TmsBadge>
               {packet && !packet.completed && <span className="tms-muted">{packet.reason}</span>}
             </div>
@@ -231,15 +279,15 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
         </div>
 
         <FieldGrid>
-          <Static def={LABEL.carrier.mc} narrow={12} text={carrier?.mcNumber ?? '—'} />
-          <Static def={LABEL.carrier.dot} text={carrier?.dotNumber ?? '—'} />
-          <Static def={LABEL.carrier.scac} text={carrier?.scac ?? '—'} />
-          <Static def={LABEL.carrier.safetyRating} text={carrier?.safetyRating ?? '—'} />
-          <Static def={LABEL.carrier.cargo} text={policyText(carrier, 'CARGO')} />
-          <Static def={LABEL.carrier.liability} text={policyText(carrier, 'AUTO_LIABILITY')} />
-          <Static def={LABEL.carrier.genLiability} text={policyText(carrier, 'GENERAL_LIABILITY')} />
-          <Static def={LABEL.carrier.email} text={carrier?.email ?? '—'} />
-          <Static def={LABEL.carrier.phone} text={carrier?.phone ?? '—'} />
+          <Static tag={tag} def={LABEL.carrier.mc} narrow={12} text={carrier?.mcNumber ?? '—'} />
+          <Static tag={tag} def={LABEL.carrier.dot} text={carrier?.dotNumber ?? '—'} />
+          <Static tag={tag} def={LABEL.carrier.scac} text={carrier?.scac ?? '—'} />
+          <Static tag={tag} def={LABEL.carrier.safetyRating} text={carrier?.safetyRating ?? '—'} />
+          <Static tag={tag} def={LABEL.carrier.cargo} text={policyText(carrier, 'CARGO')} />
+          <Static tag={tag} def={LABEL.carrier.liability} text={policyText(carrier, 'AUTO_LIABILITY')} />
+          <Static tag={tag} def={LABEL.carrier.genLiability} text={policyText(carrier, 'GENERAL_LIABILITY')} />
+          <Static tag={tag} def={LABEL.carrier.email} text={carrier?.email ?? '—'} />
+          <Static tag={tag} def={LABEL.carrier.phone} text={carrier?.phone ?? '—'} />
         </FieldGrid>
       </div>
 
@@ -247,27 +295,27 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
         <TmsButton
           variant="primary"
           size="sm"
-          data-testid={LABEL.carrier.cover.testId}
+          data-testid={x(LABEL.carrier.cover.testId)}
           title={coverBlock ?? undefined}
           disabled={disabled || coverBlock != null}
           onClick={onCover}
         >
           {LABEL.carrier.cover.text}
         </TmsButton>
-        {coverBlock && <span className="tms-muted text-xs" data-testid="carrier-cover-reason">{coverBlock}</span>}
+        {coverBlock && <span className="tms-muted text-xs" data-testid={x('carrier-cover-reason')}>{coverBlock}</span>}
       </div>
 
       <FieldGrid>
         <Field span={4} narrow={12} label={LABEL.carrier.dispatcher.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.dispatcher)} value={value.dispatcher.name} disabled={disabled || own}
+          <TmsInput {...fa(LABEL.carrier.dispatcher)} value={value.dispatcher.name} disabled={disabled || own}
             onChange={(e) => setBits('dispatcher', { name: e.target.value })} />
         </Field>
         <Field span={4} narrow={6} label={LABEL.carrier.dispatcherPhone.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.dispatcherPhone)} type="tel" value={value.dispatcher.phone} disabled={disabled || own}
+          <TmsInput {...fa(LABEL.carrier.dispatcherPhone)} type="tel" value={value.dispatcher.phone} disabled={disabled || own}
             onChange={(e) => setBits('dispatcher', { phone: e.target.value })} />
         </Field>
         <Field span={4} narrow={6} label={LABEL.carrier.dispatcherEmail.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.dispatcherEmail)} type="email" value={value.dispatcher.email} disabled={disabled || own}
+          <TmsInput {...fa(LABEL.carrier.dispatcherEmail)} type="email" value={value.dispatcher.email} disabled={disabled || own}
             onChange={(e) => setBits('dispatcher', { email: e.target.value })} />
         </Field>
 
@@ -277,7 +325,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
               roster={roster}
               value={ownFleetDriverByName(roster, value.driver1.name)?.id ?? ''}
               ariaLabel={LABEL.carrier.driver1.text}
-              testId={LABEL.carrier.driver1.testId}
+              testId={x(LABEL.carrier.driver1.testId)}
               disabled={disabled}
               showSummary={false}
               onChange={(d) => onChange((p) => {
@@ -293,59 +341,59 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
           </Field>
         ) : (
           <Field span={4} narrow={12} label={LABEL.carrier.driver1.text}>
-            <TmsInput {...fieldAttrs(LABEL.carrier.driver1)} value={value.driver1.name} disabled={disabled} readOnly={typedLock}
+            <TmsInput {...fa(LABEL.carrier.driver1)} value={value.driver1.name} disabled={disabled} readOnly={typedLock}
               onChange={(e) => setBits('driver1', { name: e.target.value })} />
           </Field>
         )}
         <Field span={4} narrow={6} label={LABEL.carrier.driver1Cell.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.driver1Cell)} type="tel" value={value.driver1.phone} disabled={disabled} readOnly={typedLock}
+          <TmsInput {...fa(LABEL.carrier.driver1Cell)} type="tel" value={value.driver1.phone} disabled={disabled} readOnly={typedLock}
             onChange={(e) => setBits('driver1', { phone: e.target.value })} />
         </Field>
         <Field span={4} narrow={6} label={LABEL.carrier.driver1Email.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.driver1Email)} type="email" value={value.driver1.email} disabled={disabled} readOnly={own}
+          <TmsInput {...fa(LABEL.carrier.driver1Email)} type="email" value={value.driver1.email} disabled={disabled} readOnly={own}
             onChange={(e) => setBits('driver1', { email: e.target.value })} />
         </Field>
 
         {!own && (
           <>
             <Field span={4} narrow={12} label={LABEL.carrier.driver2.text}>
-              <TmsInput {...fieldAttrs(LABEL.carrier.driver2)} value={value.driver2.name} disabled={disabled} readOnly={typedLock}
+              <TmsInput {...fa(LABEL.carrier.driver2)} value={value.driver2.name} disabled={disabled} readOnly={typedLock}
                 onChange={(e) => setBits('driver2', { name: e.target.value })} />
             </Field>
             <Field span={4} narrow={6} label={LABEL.carrier.driver2Cell.text}>
-              <TmsInput {...fieldAttrs(LABEL.carrier.driver2Cell)} type="tel" value={value.driver2.phone} disabled={disabled} readOnly={typedLock}
+              <TmsInput {...fa(LABEL.carrier.driver2Cell)} type="tel" value={value.driver2.phone} disabled={disabled} readOnly={typedLock}
                 onChange={(e) => setBits('driver2', { phone: e.target.value })} />
             </Field>
             <Field span={4} narrow={6} label={LABEL.carrier.driver2Email.text}>
-              <TmsInput {...fieldAttrs(LABEL.carrier.driver2Email)} type="email" value={value.driver2.email} disabled={disabled}
+              <TmsInput {...fa(LABEL.carrier.driver2Email)} type="email" value={value.driver2.email} disabled={disabled}
                 onChange={(e) => setBits('driver2', { email: e.target.value })} />
             </Field>
           </>
         )}
 
         <Field span={3} label={LABEL.carrier.truckNo.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.truckNo)} maxLength={40} value={value.truckNo} disabled={disabled} readOnly={typedLock}
+          <TmsInput {...fa(LABEL.carrier.truckNo)} maxLength={40} value={value.truckNo} disabled={disabled} readOnly={typedLock}
             onChange={(e) => set({ truckNo: e.target.value })} />
         </Field>
         <Field span={3} label={LABEL.carrier.trailerNo.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.trailerNo)} maxLength={40} value={value.trailerNo} disabled={disabled} readOnly={typedLock}
+          <TmsInput {...fa(LABEL.carrier.trailerNo)} maxLength={40} value={value.trailerNo} disabled={disabled} readOnly={typedLock}
             onChange={(e) => set({ trailerNo: e.target.value })} />
         </Field>
         <Field span={3} label={LABEL.carrier.seal.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.seal)} maxLength={40} value={value.seal} disabled={disabled}
+          <TmsInput {...fa(LABEL.carrier.seal)} maxLength={40} value={value.seal} disabled={disabled}
             onChange={(e) => set({ seal: e.target.value })} />
         </Field>
         <Field span={3} label={LABEL.carrier.carrierRef.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.carrierRef)} maxLength={40} value={value.carrierRef} disabled={disabled}
+          <TmsInput {...fa(LABEL.carrier.carrierRef)} maxLength={40} value={value.carrierRef} disabled={disabled}
             onChange={(e) => set({ carrierRef: e.target.value })} />
         </Field>
         <Field span={3} label={LABEL.carrier.originCity.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.originCity)} value={value.originCity} disabled={disabled}
+          <TmsInput {...fa(LABEL.carrier.originCity)} value={value.originCity} disabled={disabled}
             onChange={(e) => set({ originCity: e.target.value })} />
         </Field>
         <Field span={3} label={LABEL.carrier.originState.text}>
           <TmsSelect
-            {...fieldAttrs(LABEL.carrier.originState)}
+            {...fa(LABEL.carrier.originState)}
             value={value.originState}
             disabled={disabled}
             placeholder=""
@@ -354,29 +402,29 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
           />
         </Field>
         <Field span={3} label={LABEL.carrier.emptyMiles.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.emptyMiles)} type="number" min={0} value={value.emptyMiles} disabled={disabled}
+          <TmsInput {...fa(LABEL.carrier.emptyMiles)} type="number" min={0} value={value.emptyMiles} disabled={disabled}
             onChange={(e) => set({ emptyMiles: e.target.value })} />
         </Field>
         <Field span={3} label={LABEL.carrier.puEta.text}>
-          <TmsInput {...fieldAttrs(LABEL.carrier.puEta)} type="datetime-local" value={value.puEta} disabled={disabled}
+          <TmsInput {...fa(LABEL.carrier.puEta)} type="datetime-local" value={value.puEta} disabled={disabled}
             onChange={(e) => set({ puEta: e.target.value })} />
         </Field>
       </FieldGrid>
 
       <FieldGrid>
-        <Static def={LABEL.carrier.confirmSent} narrow={12} text={dash(active?.rateConSentAt)} />
-        <Static def={LABEL.carrier.confirmRec} text={dash(active?.rateConSignedAt)} />
-        <Static def={LABEL.carrier.dispatched} text={dash(active?.dispatchedAt)} />
+        <Static tag={tag} def={LABEL.carrier.confirmSent} narrow={12} text={dash(active?.rateConSentAt)} />
+        <Static tag={tag} def={LABEL.carrier.confirmRec} text={dash(active?.rateConSignedAt)} />
+        <Static tag={tag} def={LABEL.carrier.dispatched} text={dash(active?.dispatchedAt)} />
       </FieldGrid>
 
       <div className="tms-fg-toolbar">
-        <TmsButton size="sm" data-testid="carrier-dispatch" disabled={disabled || !active} title={active ? undefined : 'Cover a carrier first'} onClick={ctx.actions.openDispatch}>
+        <TmsButton size="sm" data-testid={x('carrier-dispatch')} disabled={disabled || !active} title={active ? undefined : 'Cover a carrier first'} onClick={() => open('dispatch')}>
           Dispatch
         </TmsButton>
-        <TmsButton size="sm" data-testid={LABEL.carrier.sendRateConf.testId} disabled={disabled || !active} title={active ? needSave : 'Cover a carrier first'} onClick={ctx.actions.openSendRateCon}>
+        <TmsButton size="sm" data-testid={x(LABEL.carrier.sendRateConf.testId)} disabled={disabled || !active} title={active ? needSave : 'Cover a carrier first'} onClick={() => open('rateCon')}>
           {LABEL.carrier.sendRateConf.text}
         </TmsButton>
-        <TmsButton size="sm" data-testid={LABEL.carrier.sendInfo.testId} disabled={disabled || !active} title={active ? needSave : 'Cover a carrier first'} onClick={ctx.actions.openSendInfo}>
+        <TmsButton size="sm" data-testid={x(LABEL.carrier.sendInfo.testId)} disabled={disabled || !active} title={active ? needSave : 'Cover a carrier first'} onClick={() => open('info')}>
           {LABEL.carrier.sendInfo.text}
         </TmsButton>
       </div>

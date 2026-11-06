@@ -97,7 +97,7 @@ vi.mock('@/hooks/useLoadDriverDocs', () => ({
 }))
 // The generated-document dialog pulls in jsPDF through these; the tab itself does not
 // render a PDF, so the builders stay out of this render test.
-vi.mock('@/lib/bolPdf', () => ({ buildBolPdf: vi.fn(), bolFilename: vi.fn(() => 'bol.pdf') }))
+vi.mock('@/lib/bolPdf', () => ({ buildBolPdf: vi.fn() }))
 vi.mock('@/lib/loadSummaryPdf', () => ({
   buildLoadSummaryPdf: vi.fn(), loadSummaryFilename: vi.fn(() => 'load-summary.pdf'),
 }))

@@ -23,12 +23,14 @@ import { CognitoIdentityProviderClient, AdminGetUserCommand } from '@aws-sdk/cli
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { slackClient, type SlackClient } from '../_shared/slackApi'
 import { readStops, type Row } from '../_shared/shipmentStore'
+import { coveringCarrier, type LegStop } from '../../../src/lib/carrierLegs'
 import { sweepCheckCalls, type CheckCallSweepRow } from '../../../src/lib/checkCalls'
 
 /** Amplify's name for `index('checkCallOpen').sortKeys(['nextCheckCallAt'])`. */
 export const IDX_LOADS_BY_CHECK_CALL = 'loadsByCheckCallOpenAndNextCheckCallAt'
 /** The single TmsSettings row, as every TMS Lambda addresses it. */
 const SETTINGS_ID = 'default'
+const IDX_CARRIERS_BY_LOAD = 'loadCarriersByLoadId'
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
@@ -122,10 +124,37 @@ async function getRow(deps: NotifierDeps, tableName: string, id: string): Promis
 }
 
 /** The customer, the carrier and the driver's number, as the notice names them. */
+/**
+ * Step AT: with two or more live carriers the notice names the one holding the earliest un-departed stop.
+ * One carrier (or a failed lookup) is the load's primary pointer, exactly as before.
+ */
+async function carrierOf(deps: NotifierDeps, load: Row): Promise<Row | null> {
+  const primary = await getRow(deps, deps.tables.loadCarrier, text(load.activeLoadCarrierId))
+  try {
+    const result = await deps.db.send(new QueryCommand({
+      TableName: deps.tables.loadCarrier,
+      IndexName: IDX_CARRIERS_BY_LOAD,
+      KeyConditionExpression: '#load = :load',
+      ExpressionAttributeNames: { '#load': 'loadId' },
+      ExpressionAttributeValues: { ':load': { S: text(load.id) } },
+    }))
+    const live = (result.Items ?? []).map((i) => unmarshall(i)).filter((c) => c.status === 'ACTIVE')
+    if (live.length < 2) return primary
+    const holder = coveringCarrier(
+      live.map((c) => ({ id: String(c.id), legStopIds: Array.isArray(c.legStopIds) ? c.legStopIds.map(String) : [], row: c })),
+      readStops(load) as unknown as LegStop[],
+    )
+    return (holder?.row as Row | undefined) ?? primary
+  } catch (err) {
+    console.warn('[check-call-notifier] could not list the load carriers', String(err))
+    return primary
+  }
+}
+
 async function contextOf(deps: NotifierDeps, load: Row): Promise<NoticeContext> {
   const [order, carrier] = await Promise.all([
     getRow(deps, deps.tables.order, text(load.orderId)),
-    getRow(deps, deps.tables.loadCarrier, text(load.activeLoadCarrierId)),
+    carrierOf(deps, load),
   ])
   const carrierName = text(carrier?.carrierName) || text(load.carrierName)
   const driverPhone = text(carrier?.driverPhone)

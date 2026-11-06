@@ -15,7 +15,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Building2, Send, Truck, UserCog, UserMinus } from 'lucide-react'
+import { Building2, Plus, Send, Truck, UserCog, UserMinus } from 'lucide-react'
 import { RateConPanel } from '@/features/carriers/components/RateConPanel'
 import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
 import { CarrierOffersCard } from '@/features/quotes/components/CarrierOffersCard'
@@ -36,8 +36,11 @@ import { isCarrierAssignmentStatus } from '@/lib/carrierAssignment'
 import { CarrierLadderCard } from './CarrierLadderCard'
 import { dispatchBlock } from '../carrierLadder'
 import { useTrucks } from '@/hooks/useTrucks'
+import { liveCarriersOf } from '@/lib/carrierTotals'
+import { MAX_LIVE_CARRIERS, legStopsOf } from '@/lib/carrierLegs'
 import type { ShipmentActions } from '../useShipmentActions'
-import type { CarrierBundle, ShipmentBundle, TmsSettings } from '@/types/tms'
+import type { CarrierBundle, LoadCarrierRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
+import type { Stop } from '@/types'
 
 const OWN_FLEET_SCHEDULE_PATH = '/schedule'
 
@@ -50,14 +53,14 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
   isAdmin?: boolean
 }) {
   const [settings, setSettings] = useState<TmsSettings | null>(null)
-  const [carrierBundle, setCarrierBundle] = useState<CarrierBundle | null>(null)
   const [dialog, setDialog] = useState<CarrierDialog>(null)
   const { drivers } = useDrivers()
   const { equipment } = useTrucks()
 
   const load = bundle.loads[0]
-  const loadCarrier = bundle.loadCarriers.find((c) => c.status === 'ACTIVE') ?? null
-  const carrierId = loadCarrier?.carrierId ?? null
+  // Every live carrier, in booking order: one block each (AT-plan §6.3). One carrier renders exactly as it always did.
+  const liveCarriers = liveCarriersOf(bundle.loadCarriers, load?.id ?? '')
+  const loadCarrier = liveCarriers[0] ?? null
 
   // No synchronous setState before the first await; a failed read keeps what we had.
   useEffect(() => {
@@ -65,13 +68,6 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
     getTmsSettings().catch(() => null).then((s) => { if (live) setSettings(s) })
     return () => { live = false }
   }, [])
-
-  useEffect(() => {
-    let live = true
-    const answer = carrierId ? getCarrierBundle(carrierId).catch(() => null) : Promise.resolve(null)
-    answer.then((b) => { if (live) setCarrierBundle(b) })
-    return () => { live = false }
-  }, [carrierId])
 
   // The offers come before the assignment on purpose: that is the order the work
   // happens in, and a load with nobody on it is exactly when the buy side matters.
@@ -106,10 +102,12 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
     />
   ) : null
 
+  // The legs choice and addCarrier live in the Cover dialog, which adds (never replaces) once a carrier is live.
   const coverDialog = dialog?.kind === 'cover' ? (
     <CoverCarrierDialog
       shipmentId={shipmentId}
       shipmentNumber={bundle.shipment.number}
+      bundle={bundle}
       onClose={() => setDialog(null)}
       onCovered={() => { void actions.reload() }}
     />
@@ -139,6 +137,91 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
     )
   }
 
+  const multi = liveCarriers.length > 1
+  // Own fleet stays exclusive on a load (D2); the cap is four (D7); a delivered or canceled load takes no more.
+  const mayAdd = !voided && !legacy && load != null
+    && liveCarriers.every((lc) => lc.kind === 'CARRIER')
+    && liveCarriers.length < MAX_LIVE_CARRIERS
+    && (load.status === 'SOURCING' || load.status === 'BOOKED' || load.status === 'DISPATCHED')
+
+  return (
+    <div className="space-y-4">
+      <CarrierOffersSection shipmentId={shipmentId} bundle={bundle} onReload={actions.reload} />
+      <PostingsSection shipmentId={shipmentId} loadId={load?.id} buildState={buildState} onReload={actions.reload} />
+      {offers}
+
+      {liveCarriers.map((lc, index) => (
+        multi
+          ? (
+            <section key={lc.id} className="space-y-4" data-testid="carrier-block" data-load-carrier-id={lc.id}>
+              <h3 className="text-sm font-semibold">Carrier {index + 1} · {lc.kind === 'OWN_ASSET' ? lc.driverName ?? 'Own asset' : lc.carrierName ?? 'Carrier'}</h3>
+              <CarrierBlock bundle={bundle} actions={actions} loadCarrier={lc} settings={settings} isAdmin={isAdmin} multi />
+            </section>
+          )
+          : <CarrierBlock key={lc.id} bundle={bundle} actions={actions} loadCarrier={lc} settings={settings} isAdmin={isAdmin} multi={false} />
+      ))}
+
+      {mayAdd && (
+        <div className="flex flex-wrap items-center gap-3">
+          <TmsButton size="sm" data-testid="add-carrier-open" onClick={() => setDialog({ kind: 'cover' })} disabled={actions.busy}>
+            <Plus size={14} className="mr-1" />Add carrier
+          </TmsButton>
+        </div>
+      )}
+      {coverDialog}
+    </div>
+  )
+}
+
+/** One live carrier's booking: the card, the ladder, quick pay, its own rate con, dispatch, bounce and TONU. */
+function CarrierBlock({ bundle, actions, loadCarrier, settings, isAdmin, multi }: {
+  bundle: ShipmentBundle
+  actions: ShipmentActions
+  loadCarrier: LoadCarrierRecord
+  settings: TmsSettings | null
+  isAdmin: boolean
+  /** Two or more carriers are live: dispatch and tracking names the one that is rolling. */
+  multi: boolean
+}) {
+  const [carrierBundle, setCarrierBundle] = useState<CarrierBundle | null>(null)
+  const [dialog, setDialog] = useState<CarrierDialog>(null)
+  const { drivers } = useDrivers()
+  const { equipment } = useTrucks()
+
+  const load = bundle.loads[0]
+  const carrierId = loadCarrier.carrierId ?? null
+  const voided = Boolean(bundle.shipment.voidedAt)
+  const legacy = bundle.shipment.legacyImported === true
+
+  useEffect(() => {
+    let live = true
+    const answer = carrierId ? getCarrierBundle(carrierId).catch(() => null) : Promise.resolve(null)
+    answer.then((b) => { if (live) setCarrierBundle(b) })
+    return () => { live = false }
+  }, [carrierId])
+
+  const noDriverBanner = (
+    <TmsAlert tone="orange">
+      <div data-testid="own-asset-no-driver" className="flex flex-wrap items-center justify-between gap-2">
+        <span>
+          No driver on this Ivan Cartage load. It will not show on the Schedule or in any settlement until you pick one.
+        </span>
+        <TmsButton size="sm" variant="primary" onClick={() => setDialog({ kind: 'assign' })} disabled={actions.busy}>
+          Assign driver
+        </TmsButton>
+      </div>
+    </TmsAlert>
+  )
+  const assignDialog = dialog?.kind === 'assign' && load ? (
+    <AssignDriverDialog
+      load={load} activeLeg={loadCarrier} drivers={drivers}
+      trucks={equipment.filter((e) => e.type === 'truck')} trailers={equipment.filter((e) => e.type === 'trailer')}
+      isAdmin={isAdmin} busy={actions.busy}
+      onClose={() => setDialog(null)}
+      onConfirm={actions.load.onAssignAsset}
+    />
+  ) : null
+
   const isOwnAsset = loadCarrier.kind === 'OWN_ASSET'
   const ownAssetNoDriver = isOwnAsset && !loadCarrier.driverId && !legacy
   const driver = loadCarrier.driverId ? drivers.find((d) => d.id === loadCarrier.driverId) ?? null : null
@@ -151,13 +234,12 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
   const feeCents = loadCarrier.quickPayFeeCents ?? (tier ? quickPayFee(rateCents, tier.feeBps) : null)
   // Step AM: on the ladder, Dispatch waits for the four driver fields. Tracking keys off that record.
   const driverGate = !isOwnAsset && isCarrierAssignmentStatus(loadCarrier.assignmentStatus) ? dispatchBlock(loadCarrier) : null
+  // One carrier: Dispatch is the BOOKED step, as ever. Several: the load goes DISPATCHED with the first, so each
+  // carrier that has not rolled yet keeps its own Dispatch button.
+  const mayDispatch = load?.status === 'BOOKED' || (multi && load?.status === 'DISPATCHED' && !loadCarrier.dispatchedAt)
 
   return (
     <div className="space-y-4">
-      <CarrierOffersSection shipmentId={shipmentId} bundle={bundle} onReload={actions.reload} />
-      <PostingsSection shipmentId={shipmentId} loadId={load?.id} buildState={buildState} onReload={actions.reload} />
-      {offers}
-
       <TmsCard
         title={
           <span className="flex items-center gap-2">
@@ -182,6 +264,7 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
             { label: 'Driver', value: [loadCarrier.driverName, loadCarrier.driverPhone].filter(Boolean).join(' · ') },
             { label: 'Truck', value: loadCarrier.truckNumber },
             { label: 'Trailer', value: loadCarrier.trailerNumber },
+            ...(multi ? [{ label: 'Legs', value: legsLabel(loadCarrier, load?.stops) }] : []),
           ]}
         />
         {(loadCarrier.bookingWarnings?.length ?? 0) > 0 && (
@@ -265,7 +348,7 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
       )}
 
       <div className="flex flex-wrap gap-2">
-        {load?.status === 'BOOKED' && (
+        {mayDispatch && (
           <TmsButton
             variant="primary" size="sm" onClick={() => setDialog({ kind: 'dispatch' })}
             disabled={actions.busy || ownAssetNoDriver || driverGate != null}
@@ -292,7 +375,10 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
           loadCarrier={loadCarrier}
           busy={actions.busy}
           onClose={() => setDialog(null)}
-          onConfirm={async (input) => { await actions.dispatchLoad(input); setDialog(null) }}
+          onConfirm={async (input) => {
+            await actions.dispatchLoad(multi ? { ...input, loadCarrierId: loadCarrier.id } : input)
+            setDialog(null)
+          }}
         />
       )}
       {assignDialog}
@@ -311,5 +397,12 @@ export function CarrierSection({ bundle, actions, isAdmin = false }: {
       )}
     </div>
   )
+}
+
+/** "All stops" or the covered stops in route order, e.g. "1. Dallas, 2. Austin". */
+function legsLabel(loadCarrier: LoadCarrierRecord, stops: Stop[] | null | undefined): string {
+  const covered = legStopsOf(loadCarrier, stops ?? [])
+  if (!loadCarrier.legStopIds?.length || covered.length === (stops ?? []).length) return 'All stops'
+  return covered.map((s) => `${(stops ?? []).indexOf(s) + 1}. ${s.name ?? s.city ?? s.type}`).join(', ')
 }
 

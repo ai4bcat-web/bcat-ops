@@ -41,6 +41,7 @@ export const UNTAGGED = 'Untagged'
 export const NO_SUBDIVISION = 'No subdivision'
 export const UNASSIGNED = 'Unassigned'
 export const NO_CUSTOMER = 'No customer'
+// Step AT: a load with several carriers is counted once per charts' load rows (the primary carrier's name); the board lists them all.
 export const NO_CARRIER = 'No carrier'
 export const OWN_FLEET = 'Own fleet'
 export const NO_STATUS = 'No status'

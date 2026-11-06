@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   audit: vi.fn(),
   refresh: vi.fn(),
   divisions: vi.fn(),
+  bundle: vi.fn(),
 }))
 
 // The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
@@ -30,6 +31,7 @@ vi.mock('@/lib/apiClient', async (importOriginal) => ({
   listAuditLogsFor: mocks.audit,
   setSalesRep: vi.fn(),
   setRevTag: vi.fn(),
+  getShipmentBundle: mocks.bundle,
 }))
 
 const DAY = 86_400_000
@@ -248,6 +250,38 @@ describe('LoadReviewPage', () => {
     const hrefs = within(screen.getByRole('dialog')).getAllByRole('link').map((a) => a.getAttribute('href'))
     expect(hrefs).toContain('/tms/shipments/s-3?tab=documents')
     expect(hrefs).toContain('/tms/tracking?assignee=all&focus=docs')
+  })
+
+  it('with two carriers the drawer shows both bills side by side and Move stays blocked with the sentences that name the carrier', async () => {
+    mocks.shipments.mockReturnValue({
+      shipments: [shipment('s-m', { assignmentType: 'CARRIER', carrierName: 'Swift', carrierCount: 2, carriers: [{ name: 'Swift', apStatus: 'IN_REVIEW', costCents: 60_000 }, { name: 'Heartland', apStatus: 'AWAITING_INVOICE', costCents: 20_000 }] })],
+      loading: false, error: null, refresh: mocks.refresh,
+    })
+    const lc = (id: string, name: string, sequence: number, over: Record<string, unknown> = {}) => ({ id, loadId: 'load-1', kind: 'CARRIER', status: 'ACTIVE', carrierName: name, sequence, rateConStatus: 'SIGNED', invoiceId: null, ...over })
+    mocks.bundle.mockResolvedValue({
+      loads: [{ id: 'load-1' }],
+      loadCarriers: [lc('lc-a', 'Swift', 1, { invoiceId: 'cb:lc-a:1' }), lc('lc-b', 'Heartland', 2, { rateConStatus: 'SENT' })],
+      charges: [
+        { id: 'c1', side: 'CUSTOMER', code: 'LINEHAUL', amountCents: 100_000, loadCarrierId: null, isRate: true },
+        { id: 'c2', side: 'CARRIER', code: 'LINEHAUL', amountCents: 60_000, loadCarrierId: 'lc-a', isRate: true },
+        { id: 'c3', side: 'CARRIER', code: 'LINEHAUL', amountCents: 20_000, loadCarrierId: 'lc-b', isRate: true },
+      ],
+    })
+    mocks.review.mockResolvedValue({
+      shipmentId: 's-m', orderId: 'o-s-m', orderUpdatedAt: 'u1', arStatus: 'DOCS_NEEDED',
+      releaseGate: { ok: false, missing: [
+        { code: 'CARRIER_CHARGES_UNSETTLED', detail: 'Heartland', message: 'Carrier bill not recorded: Heartland' },
+        { code: 'DOC_MISSING', detail: 'RATE_CON', message: 'Missing document: RATE_CON (unsigned: Heartland)' },
+      ] },
+      extras: [], salesRepId: 'rep-1', revDivision: 'DRY', revSubdivision: null, legacyImported: false,
+    })
+    renderPage('/tms/load-review?shipment=s-m')
+    expect(await screen.findByText('Carrier bill not recorded: Heartland')).toBeTruthy()
+    expect(screen.getByText('Missing document: RATE_CON (unsigned: Heartland)')).toBeTruthy()
+    expect(await screen.findByTestId('carrier-bill-lc-a')).toBeTruthy()
+    expect(screen.getByTestId('carrier-bill-lc-b').textContent).toContain('Bill not recorded')
+    expect(screen.getByText(/2 carriers/)).toBeTruthy()
+    expect(moveButton().disabled).toBe(true)
   })
 
   it('a server failure on open is shown in the drawer and Move stays disabled', async () => {

@@ -11,7 +11,9 @@ import {
   boardRowTone,
   boardStatusCounts,
   boardStatusOf,
+  carrierHoverText,
   carrierLabel,
+  carrierSortKey,
   detailOptions,
   divisionLabel,
   matchesBoardFilters,
@@ -556,5 +558,44 @@ describe('R2 column catalog', () => {
       ],
     })
     expect(visibleColumns(['trackingMotion'])[0]!.value(atStop)).toBe('At stop')
+  })
+})
+
+describe('multiple carriers on one shipment', () => {
+  const two = (id: string, patch: Partial<ShipmentRow> = {}) => row(id, {
+    assignmentType: 'CARRIER',
+    carrierName: 'Beta Freight',
+    carriers: [
+      { name: 'Beta Freight', apStatus: 'PAID', costCents: 50_000 },
+      { name: 'Alpha Lines', apStatus: 'IN_REVIEW', costCents: 70_000 },
+    ],
+    carrierCount: 2,
+    ...patch,
+  })
+
+  it('reads "2 carriers" with a hover list, and the plain name for one', () => {
+    expect(carrierLabel(two('1'))).toBe('2 carriers')
+    expect(carrierHoverText(two('1'))).toBe('Beta Freight · Paid · $500.00\nAlpha Lines · In Review · $700.00')
+    const single = row('2', { assignmentType: 'CARRIER', carrierName: 'Bay Logistics', carriers: [], carrierCount: 1 })
+    expect(carrierLabel(single)).toBe('Bay Logistics')
+    expect(carrierHoverText(single)).toBeUndefined()
+  })
+
+  it('matches the carrier filter and the facet list on ANY carrier', () => {
+    const set = { ...EMPTY_BOARD_FILTER_SET, details: { carrier: { values: ['Alpha Lines'], exclude: false } } }
+    const now = new Date('2026-03-01T00:00:00Z')
+    expect(matchesBoardFilters(two('1'), set, now)).toBe(true)
+    expect(matchesBoardFilters(row('3', { assignmentType: 'CARRIER', carrierName: 'Beta Freight' }), set, now)).toBe(false)
+    expect(detailOptions([two('1')], 'carrier').map((o) => o.value).sort()).toEqual(['Alpha Lines', 'Beta Freight'])
+  })
+
+  it('searches every carrier name and sorts by the names, not the count', () => {
+    expect(matchesQuery(two('1', { searchKey: 'acme' }), 'alpha')).toBe(true)
+    expect(matchesQuery(two('1', { searchKey: 'acme' }), 'zulu')).toBe(false)
+    expect(carrierSortKey(two('1'))).toBe('Alpha Lines, Beta Freight')
+    expect(carrierSortKey(two('1', { carriers: [
+      { name: 'Alpha Lines', apStatus: null, costCents: null },
+      { name: 'Beta Freight', apStatus: null, costCents: null },
+    ] }))).toBe('Alpha Lines, Beta Freight')
   })
 })

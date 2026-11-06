@@ -4,16 +4,23 @@
  */
 import type { PhaseInput, PhaseStop } from '@/lib/deliveryPhase'
 import type { Stop } from '@/types'
-import type { ShipmentBundle, ShipmentStatus } from '@/types/tms'
+import type { LoadCarrierRecord, ShipmentBundle, ShipmentStatus } from '@/types/tms'
 import type { ShipmentRow } from './shipmentViews'
 
 function stopsOf(stops: readonly Stop[] | null | undefined): PhaseStop[] {
   return [...(stops ?? [])]
     .sort((a, b) => a.sequence - b.sequence)
     .map((s) => ({
+      id: s.id,
       type: s.type === 'delivery' ? 'delivery' : 'pickup',
       arrivedAt: s.arrivedAt, departedAt: s.departedAt, appt: s.appt, apptEnd: s.apptEnd, apptType: s.apptType, etaAt: s.etaAt, name: s.name,
     }))
+}
+
+/** The live carriers a legs-aware phase reads; one carrier needs no legs, so it is left out. */
+function liveCarriersOf(carriers: readonly LoadCarrierRecord[]): PhaseInput['carriers'] {
+  const live = carriers.filter((c) => c.status === 'ACTIVE').sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+  return live.length >= 2 ? live.map((c) => ({ name: c.carrierName, legStopIds: c.legStopIds })) : undefined
 }
 
 export function phaseInputOfBundle(bundle: ShipmentBundle | null, nowMs: number): PhaseInput {
@@ -27,6 +34,7 @@ export function phaseInputOfBundle(bundle: ShipmentBundle | null, nowMs: number)
     covered: bundle.loadCarriers.some((c) => c.status === 'ACTIVE'),
     deliveredAt: shipment.deliveredAt ?? load?.deliveredAt,
     stops: stopsOf(load?.stops),
+    carriers: liveCarriersOf(bundle.loadCarriers.filter((c) => c.loadId === load?.id)),
     lastFix: load?.lastKnownAt ? { at: load.lastKnownAt, place: place || null } : null,
     openIncidents: load?.openIncidentCount,
     nowMs,

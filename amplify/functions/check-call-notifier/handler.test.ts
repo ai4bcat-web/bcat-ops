@@ -32,6 +32,9 @@ class FakeDynamo {
       }
       case 'QueryCommand': {
         const values = unmarshall(input.ExpressionAttributeValues as Record<string, never>)
+        if (input.IndexName === 'loadCarriersByLoadId') {
+          return { Items: [...this.table(tableName).values()].filter((r) => r.loadId === values[':load']).map((r) => marshall(r, { removeUndefinedValues: true })) }
+        }
         const items = [...this.table(tableName).values()]
           .filter((r) => r.checkCallOpen === values[':open'] && String(r.nextCheckCallAt ?? '') <= String(values[':now']))
           .sort((a, b) => String(a.nextCheckCallAt).localeCompare(String(b.nextCheckCallAt)))
@@ -209,5 +212,27 @@ describe('runCheckCallNotices', () => {
 
     expect(await runCheckCallNotices(deps)).toEqual({ checked: 1, due: 1, overdue: 0, sent: 0, failed: 1 })
     expect(db.table(TABLES.load).get('load-1')).not.toHaveProperty('checkCallDueNotifiedAt')
+  })
+
+  it('names the carrier holding the earliest un-departed stop when two are live, and the primary otherwise', async () => {
+    const stops = (departed: boolean) => JSON.stringify([
+      { id: 'st-1', type: 'pickup', sequence: 0, city: 'JOLIET, IL', ...(departed ? { departedAt: 't' } : {}) },
+      { id: 'st-2', type: 'delivery', sequence: 1, city: 'MESA, AZ' },
+    ])
+    const { calls, db, deps } = setup({ load: loadRow({ stops: stops(true) }) })
+    db.seed(TABLES.loadCarrier,
+      { id: 'lc-1', loadId: 'load-1', status: 'ACTIVE', carrierName: 'Swift Logistics', legStopIds: ['st-1'] },
+      { id: 'lc-2', loadId: 'load-1', status: 'ACTIVE', carrierName: 'Werner', legStopIds: ['st-2'] })
+    await runCheckCallNotices(deps)
+    const text = String(calls.find((c) => c.method === 'chat.postMessage')?.params.text)
+    expect(text).toContain('Werner')
+    expect(text).not.toContain('Swift')
+
+    const first = setup({ load: loadRow({ stops: stops(false) }) })
+    first.db.seed(TABLES.loadCarrier,
+      { id: 'lc-1', loadId: 'load-1', status: 'ACTIVE', carrierName: 'Swift Logistics', legStopIds: ['st-1'] },
+      { id: 'lc-2', loadId: 'load-1', status: 'ACTIVE', carrierName: 'Werner', legStopIds: ['st-2'] })
+    await runCheckCallNotices(first.deps)
+    expect(String(first.calls.find((c) => c.method === 'chat.postMessage')?.params.text)).toContain('Swift Logistics')
   })
 })

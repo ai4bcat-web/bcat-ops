@@ -27,6 +27,54 @@ function input(overrides: Partial<ReleaseGateInput> = {}): ReleaseGateInput {
 
 const messages = (gate: ReleaseGateInput): string[] => evaluateReleaseGate(gate).missing.map((m) => m.message)
 
+describe('evaluateReleaseGate — several carriers', () => {
+  const settled = '2026-11-01T00:00:00.000Z'
+  const A = (over: Partial<ReleaseGateLeg> = {}) =>
+    outside({ carrierName: 'Alpha', chargesFinalizedAt: settled, rateConStatus: 'SIGNED', carrierRateCents: 60_000, ...over })
+  const B = (over: Partial<ReleaseGateLeg> = {}) =>
+    outside({ carrierName: 'Beta', chargesFinalizedAt: settled, rateConStatus: 'SIGNED', carrierRateCents: 20_000, ...over })
+
+  it('releases when every carrier is signed, billed and priced', () => {
+    expect(evaluateReleaseGate(input({ legs: [A(), B()] }))).toEqual({ ok: true, missing: [] })
+  })
+
+  it('names the carrier without a rate', () => {
+    expect(messages(input({ legs: [A(), B({ chargesFinalizedAt: settled, carrierRateCents: 0 })] }))).toEqual([])
+    expect(messages(input({ legs: [A(), B({ chargesFinalizedAt: null, carrierRateCents: 0 })] }))).toEqual([
+      'Carrier rate missing: Beta — enter the carrier rate first',
+      'Carrier charges not settled: Beta — record the carrier bill first',
+    ])
+  })
+
+  it('names the carrier whose bill is not recorded', () => {
+    expect(messages(input({ legs: [A(), B({ chargesFinalizedAt: null })] })))
+      .toEqual(['Carrier charges not settled: Beta — record the carrier bill first'])
+  })
+
+  it('does not let A\'s signature, or a filed RATE_CON, waive B', () => {
+    const expected = ['Missing document: RATE_CON — Beta']
+    expect(messages(input({ legs: [A(), B({ rateConStatus: 'SENT' })] }))).toEqual(expected)
+    expect(messages(input({
+      legs: [A(), B({ rateConStatus: 'SENT' })],
+      documents: [
+        { type: 'BOL', status: 'ACTIVE', reviewStatus: 'ACCEPTED' },
+        { type: 'POD', status: 'ACTIVE', reviewStatus: 'ACCEPTED' },
+        { type: 'RATE_CON', status: 'ACTIVE', reviewStatus: 'ACCEPTED' },
+      ],
+    }))).toEqual(expected)
+  })
+
+  it('ignores bounced legs and keeps the one-carrier sentence unchanged', () => {
+    expect(evaluateReleaseGate(input({ legs: [A(), B({ status: 'BOUNCED', rateConStatus: 'SENT', chargesFinalizedAt: null })] })).ok).toBe(true)
+    expect(messages(input({ legs: [A({ rateConStatus: 'SENT' })] }))).toEqual(['Missing document: RATE_CON'])
+  })
+
+  it('says nothing about a rate when the leg does not supply one', () => {
+    expect(messages(input({ legs: [outside({ carrierName: 'Zed', rateConStatus: 'SIGNED' })] })))
+      .toEqual(['Carrier charges not settled: Zed — record the carrier bill first'])
+  })
+})
+
 describe('evaluateReleaseGate', () => {
   it('releases a delivered shipment with its paperwork, references and an own truck', () => {
     expect(evaluateReleaseGate(input())).toEqual({ ok: true, missing: [] })

@@ -4,6 +4,8 @@
  * Three independent choices, each set on the Customer and optionally overridden on one
  * Shipment (`Shipment.trackingPrefs`). Resolved at read time, key by key:
  * shipment override → customer → default. Nothing is copied onto a new shipment.
+ * Step AT (D5): a carrier of a multi-carrier load may carry its own override (`LoadCarrier.trackingPrefs`),
+ * which wins over the shipment's for the leg that carrier covers.
  *
  *  - mode     AGENT | MANUAL | NONE. MANUAL and NONE stop every *automatic* request (NONE: this
  *             load is not tracked at all); a person's action is never blocked. null (a legacy
@@ -62,6 +64,9 @@ export interface TrackingPrefsOverride {
   confirmedBy?: string
 }
 
+/** Where a resolved key came from. CARRIER = the covering `LoadCarrier.trackingPrefs` override (Step AT, D5). */
+export type PrefSource = 'CARRIER' | 'SHIPMENT' | 'CUSTOMER' | 'DEFAULT'
+
 export interface EffectiveTrackingPrefs {
   /** null = legacy customer with no choice: Step V's switches decide. */
   mode: TrackingMode | null
@@ -71,9 +76,9 @@ export interface EffectiveTrackingPrefs {
   /** False = the mode is still the customer's suggestion: no automatic request may run. */
   confirmed: boolean
   source: {
-    mode: 'SHIPMENT' | 'CUSTOMER' | 'DEFAULT'
-    method: 'SHIPMENT' | 'CUSTOMER' | 'DEFAULT'
-    driverSms: 'SHIPMENT' | 'CUSTOMER' | 'DEFAULT'
+    mode: PrefSource
+    method: PrefSource
+    driverSms: PrefSource
   }
 }
 
@@ -144,28 +149,41 @@ export interface CustomerPrefsLike {
   driverSmsTarget?: string | null
 }
 
-/** Shipment override ?? customer ?? default, per key independently. */
+/**
+ * Carrier override ?? shipment override ?? customer ?? default, per key independently.
+ * `loadCarrier` is the carrier covering the leg being acted on (Step AT, D5); absent or without
+ * its own override it changes nothing, so a single-carrier load resolves exactly as before.
+ */
 export function effectiveTrackingPrefs(i: {
   shipment?: { trackingPrefs?: unknown; createdAt?: string | null } | null
   customer?: CustomerPrefsLike | null
+  loadCarrier?: { trackingPrefs?: unknown } | null
 }): EffectiveTrackingPrefs {
-  const override = parseTrackingPrefs(i.shipment?.trackingPrefs)
+  const shipmentOverride = parseTrackingPrefs(i.shipment?.trackingPrefs)
+  const carrierOverride = parseTrackingPrefs(i.loadCarrier?.trackingPrefs)
   const c = i.customer ?? null
 
   const customerMode = pick(c?.trackingMode, CUSTOMER_TRACKING_MODES)
   const customerMethod = pick(c?.trackingMethod, TRACKING_METHODS)
   const customerSms = pick(c?.driverSmsTarget, DRIVER_SMS_TARGETS)
 
+  const resolve = <T extends string>(key: 'mode' | 'method' | 'driverSms', customerValue: T | undefined): { value: T | undefined; source: PrefSource } => {
+    const own = carrierOverride?.[key] as T | undefined
+    if (own) return { value: own, source: 'CARRIER' }
+    const ship = shipmentOverride?.[key] as T | undefined
+    if (ship) return { value: ship, source: 'SHIPMENT' }
+    return customerValue ? { value: customerValue, source: 'CUSTOMER' } : { value: undefined, source: 'DEFAULT' }
+  }
+  const mode = resolve('mode', customerMode)
+  const method = resolve('method', customerMethod)
+  const sms = resolve('driverSms', customerSms)
+
   return {
-    mode: override?.mode ?? customerMode ?? null,
-    method: override?.method ?? customerMethod ?? null,
-    driverSms: override?.driverSms ?? customerSms ?? DEFAULT_DRIVER_SMS_TARGET,
-    confirmed: trackingConfirmed(i.shipment ?? null, override),
-    source: {
-      mode: override?.mode ? 'SHIPMENT' : customerMode ? 'CUSTOMER' : 'DEFAULT',
-      method: override?.method ? 'SHIPMENT' : customerMethod ? 'CUSTOMER' : 'DEFAULT',
-      driverSms: override?.driverSms ? 'SHIPMENT' : customerSms ? 'CUSTOMER' : 'DEFAULT',
-    },
+    mode: mode.value ?? null,
+    method: method.value ?? null,
+    driverSms: sms.value ?? DEFAULT_DRIVER_SMS_TARGET,
+    confirmed: carrierOverride?.confirmedAt || carrierOverride?.mode ? true : trackingConfirmed(i.shipment ?? null, shipmentOverride),
+    source: { mode: mode.source, method: method.source, driverSms: sms.source },
   }
 }
 

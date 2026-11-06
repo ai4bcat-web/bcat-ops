@@ -110,6 +110,25 @@ export function billLinesFor(
 }
 
 /**
+ * The lines one carrier's rate confirmation prints: exactly the lines its bill will
+ * snapshot (`billLinesFor`). A CARRIER line with no `loadCarrierId` belongs to the
+ * only live carrier (`liveCount <= 1`, the legacy single-carrier read rule) or, with
+ * several live, to the primary carrier alone (`isPrimary`) — never to every rate con.
+ */
+export function rateConLinesFor(
+  charges: readonly LoadChargeRecord[],
+  loadCarrier: Pick<LoadCarrierRecord, 'id'>,
+  liveCount: number,
+  isPrimary = false,
+): BillLineResult {
+  if (liveCount > 1 && !isPrimary) return billLinesFor(charges, loadCarrier.id)
+  return billLinesFor(
+    charges.map((charge) => (charge.side === 'CARRIER' && charge.loadCarrierId == null ? { ...charge, loadCarrierId: loadCarrier.id } : charge)),
+    loadCarrier.id,
+  )
+}
+
+/**
  * How long the carrier waits. Quick pay wins outright: paying in two days *is* the
  * term, and the fee that was taken for it is the price of those two days. Below
  * that the assignment wins over the carrier, which wins over the org default. A

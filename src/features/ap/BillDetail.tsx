@@ -27,7 +27,7 @@ import { chicagoDateStr, formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/invoiceBuild'
 import { agingChipFor, formatDay } from '@/features/ar/arViews'
 import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
-import { AP_PAYEE_KIND_LABEL, AP_PAYMENT_KIND_LABEL, BILL_STATUS_LABEL, paymentsForBill } from './apViews'
+import { AP_PAYEE_KIND_LABEL, AP_PAYMENT_KIND_LABEL, BILL_STATUS_LABEL, paymentsForBill, siblingCarriers } from './apViews'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { BillInboxStrip } from './inbox/BillInboxStrip'
 import type { CarrierBillStatus } from '@/types/tms'
@@ -92,6 +92,7 @@ export function BillDetail() {
   const chip = agingChipFor(view.dueAt, asOf)
   const document = (bundle?.documents ?? []).find((doc) => doc.id === view.documentId) ?? null
   const applied = paymentsForBill(payments, bill.id)
+  const siblings = siblingCarriers(bundle?.loadCarriers ?? [], bill)
   const acknowledged = bill.approvalWarnings ?? []
   const label = view.billNumber ?? view.id
   // Everything that has already settled part of this bill, however it got there.
@@ -206,6 +207,19 @@ export function BillDetail() {
               value: <Link to={`/tms/shipments/${view.shipmentId}`}>{view.shipmentNumber ?? view.shipmentId}</Link>,
             },
             { label: 'Load', value: view.loadNumber },
+            {
+              label: 'Other carriers on this load',
+              hidden: siblings.length === 0,
+              value: (
+                <span className="flex flex-wrap gap-x-3">
+                  {siblings.map((s) => (
+                    s.billId
+                      ? <Link key={s.loadCarrierId} to={`/tms/invoicing/payable/bills/${s.billId}`}>{s.carrierName}</Link>
+                      : <span key={s.loadCarrierId} className="tms-muted">{s.carrierName} (no bill yet)</span>
+                  ))}
+                </span>
+              ),
+            },
             { label: 'Terms', value: view.quickPay ? `Quick pay, net ${view.termsDays}` : `Net ${view.termsDays}` },
             { label: 'Bill date', value: formatDay(view.billDate) },
             { label: 'Due', value: formatDay(view.dueAt) },

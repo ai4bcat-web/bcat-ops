@@ -15,16 +15,22 @@ import type { QueuedFile } from '../model'
 
 export interface ReleaseDocItem {
   type: ShipmentDocumentType
+  /** The customer's / org's lists ask for it. A BOL is always listed; when nothing requires it, it is optional. */
+  required: boolean
   /** On the shipment already. */
   present: boolean
   /** Not on the shipment yet but a queued file of this type will be written on Create. */
   queued: boolean
+  /** BOL only: the newest ACTIVE generated BOL's version (null when the BOL on file was uploaded). */
+  generatedVersion: number | null
+  /** BOL only: the newest ACTIVE generated BOL predates the last edit of the shipment. */
+  stale: boolean
 }
 
 export function releaseDocItems(i: {
   customer: Pick<CustomerRecord, 'requiredDocsForInvoice' | 'reviewRequirements'> | null
   settings: Pick<TmsSettings, 'defaultRequiredDocs' | 'requiredCarrierUploadTypes' | 'reviewRequirements'> | null
-  bundle: Pick<ShipmentBundle, 'documents' | 'loadCarriers'> | null
+  bundle: Pick<ShipmentBundle, 'documents' | 'loadCarriers'> & { shipment?: Pick<ShipmentBundle['shipment'], 'updatedAt'> } | null
   queued: readonly QueuedFile[]
 }): ReleaseDocItem[] {
   const wanted = new Set<ShipmentDocumentType>(['RATE_CON'])
@@ -38,7 +44,18 @@ export function releaseDocItems(i: {
   if ((i.bundle?.loadCarriers ?? []).some((lc) => lc.status === 'ACTIVE' && lc.rateConStatus === 'SIGNED')) have.add('RATE_CON')
   const queued = new Set(i.queued.map((q) => q.type))
 
-  return SHIPMENT_DOCUMENT_TYPES.filter((t) => wanted.has(t)).map((type) => ({
-    type, present: have.has(type), queued: !have.has(type) && queued.has(type),
+  const generated = (i.bundle?.documents ?? [])
+    .filter((d) => d.type === 'BOL' && d.source === 'GENERATED' && countsAsPresent(d))
+    .sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt))
+    .at(-1)
+  const updatedAt = i.bundle?.shipment?.updatedAt
+  const wantedBol = wanted.has('BOL')
+  return SHIPMENT_DOCUMENT_TYPES.filter((t) => t === 'BOL' || wanted.has(t)).map((type) => ({
+    type,
+    required: type === 'BOL' ? wantedBol : true,
+    present: have.has(type),
+    queued: !have.has(type) && queued.has(type),
+    generatedVersion: type === 'BOL' && generated ? generated.version : null,
+    stale: type === 'BOL' && generated != null && Boolean(updatedAt && generated.uploadedAt < updatedAt),
   }))
 }

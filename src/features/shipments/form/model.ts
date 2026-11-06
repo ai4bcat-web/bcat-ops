@@ -5,6 +5,7 @@
  * money inputs are dollars. `mapping.ts` goes the other way (form → wire). Everything here is
  * pure and synchronous.
  */
+import { MAX_LIVE_CARRIERS } from '@/lib/carrierLegs'
 import { defaultBillToIdOf, customerDefaultsOf } from '@/lib/intakeLoad'
 import { formatDateTimeInput } from '@/lib/date'
 import { effectiveShipmentType, typeOfLegacyMode } from '@/lib/shipmentTypes'
@@ -88,14 +89,59 @@ export interface RateRow<K extends string = FormRateKind> {
   lineId: string
 }
 
+/** One carrier's linehaul rate row. */
+export type CarrierRate = RateRow<CarrierRateKind> & { payPct: string; maxRate: string }
+
+/** The per-carrier block of the form (slot 0 lives at `values.carrier`). */
+export interface CarrierBlock {
+  /** The LoadCarrier this block shows ('' before Cover). */
+  loadCarrierId: string
+  carrierId: string
+  typedName: string
+  useTyped: boolean
+  isOwnFleet: boolean
+  dispatcher: ContactBits
+  driver1: ContactBits
+  driver2: ContactBits
+  truckNo: string
+  trailerNo: string
+  seal: string
+  carrierRef: string
+  originCity: string
+  originState: string
+  emptyMiles: string
+  puEta: string
+}
+
+/**
+ * One carrier on the load (AT-plan, several carriers per shipment): its block, its linehaul rate row
+ * and the stops it covers. `values.carriers[0]` mirrors the legacy `values.carrier` / `values.rates.carrier`
+ * (slot 0); the form's update funnel (`syncCarrierSlots`) keeps the two in step.
+ */
+export interface CarrierSlot extends CarrierBlock {
+  /** Client key, stable for the life of the form (`c0`, `c1`…); the Paid to select and the testids use it. */
+  slot: string
+  /** The booked carrier's name snapshot ('' before Cover); display only. */
+  carrierName: string
+  /** `Stop.id`s this carrier covers; empty = every stop (AT-plan D9). */
+  legStopIds: string[]
+  rate: CarrierRate
+}
+
+/** `AccessorialLine.paidTo`: no carrier is paid this line. */
+export const PAID_TO_NONE = 'NONE'
+
 /** One accessorial row = up to two LoadCharge rows (CUSTOMER `$Customer`, CARRIER `$Carrier`). */
 export interface AccessorialLine {
   /** Customer-side LoadCharge id ('' when none). */
   id: string
   carrierLineId: string
   release: string
-  /** The active carrier's name, or blank. Display only. */
-  carrierKey: string
+  /**
+   * Who `$Carrier` is paid to: a slot's `loadCarrierId` (booked) or `slot` key (not yet booked),
+   * `PAID_TO_NONE`, or '' = the first carrier (the single-carrier form never sets it).
+   */
+  paidTo: string
   code: string
   label: string
   /** Dollars. */
@@ -164,7 +210,7 @@ export interface ShipmentFormValues {
   }
   rates: {
     customer: RateRow<FormRateKind>
-    carrier: RateRow<CarrierRateKind> & { payPct: string; maxRate: string }
+    carrier: CarrierRate
     fscPercent: string
     fscPerMile: string
     fscLineId: string
@@ -173,25 +219,9 @@ export interface ShipmentFormValues {
     /** Charge rows the form does not represent; re-sent verbatim in every charge write. */
     passthrough: LoadChargeRecord[]
   }
-  carrier: {
-    /** The ACTIVE LoadCarrier this block shows ('' before Cover). */
-    loadCarrierId: string
-    carrierId: string
-    typedName: string
-    useTyped: boolean
-    isOwnFleet: boolean
-    dispatcher: ContactBits
-    driver1: ContactBits
-    driver2: ContactBits
-    truckNo: string
-    trailerNo: string
-    seal: string
-    carrierRef: string
-    originCity: string
-    originState: string
-    emptyMiles: string
-    puEta: string
-  }
+  carrier: CarrierBlock
+  /** Every carrier on the load, in booking order; [0] mirrors `carrier` + `rates.carrier`. Always at least one. */
+  carriers: CarrierSlot[]
   checkCall: CheckCallDraft
   docs: { queued: QueuedFile[] }
 }
@@ -291,8 +321,16 @@ export function lockReason(locks: LockSet, key: LockKey): string | undefined {
   return locks.fields.all ?? locks.fields[key]
 }
 
+/** The ACTIVE assignments in booking order (lowest `sequence` first). */
+export function liveCarriers(bundle: ShipmentBundle | null | undefined): LoadCarrierRecord[] {
+  return (bundle?.loadCarriers ?? [])
+    .filter((lc) => lc.status === 'ACTIVE')
+    .sort((a, b) => ((a.sequence ?? 0) - (b.sequence ?? 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+}
+
+/** The primary ACTIVE assignment (what `Load.activeLoadCarrierId` points at). */
 export function activeLoadCarrier(bundle: ShipmentBundle | null | undefined): LoadCarrierRecord | null {
-  return bundle?.loadCarriers.find((lc) => lc.status === 'ACTIVE') ?? null
+  return liveCarriers(bundle)[0] ?? null
 }
 
 export function lockedFields(bundle: ShipmentBundle | null): LockSet {
@@ -320,7 +358,8 @@ export function lockedFields(bundle: ShipmentBundle | null): LockSet {
     const why = 'Invoiced: the numbers are frozen.'
     for (const k of ['rates', 'customerMiles', 'weight'] as const) fields[k] = why
   }
-  if (active?.chargesFinalizedAt) fields.carrierRates = 'AP recorded a carrier bill; carrier charges are final.'
+  const live = liveCarriers(bundle)
+  if (live.length > 0 && live.every((lc) => lc.chargesFinalizedAt)) fields.carrierRates = 'AP recorded a carrier bill; carrier charges are final.'
   if (active) fields.carrierPicker = 'Remove, bounce or TONU the booked carrier first.'
   if (load?.status === 'CANCELED' || shipment.status === 'TENDER_REJECTED') {
     fields.checkCalls = 'This shipment is canceled.'
@@ -353,7 +392,93 @@ export function emptyCheckCall(): CheckCallDraft {
 
 const emptyBits = (): ContactBits => ({ name: '', phone: '', email: '' })
 
+export function emptyCarrierBlock(): CarrierBlock {
+  return {
+    loadCarrierId: '', carrierId: '', typedName: '', useTyped: false, isOwnFleet: false,
+    dispatcher: emptyBits(), driver1: emptyBits(), driver2: emptyBits(),
+    truckNo: '', trailerNo: '', seal: '', carrierRef: '', originCity: '', originState: '', emptyMiles: '', puEta: '',
+  }
+}
+
+export function emptyCarrierRate(): CarrierRate {
+  return { rateType: 'FLAT', hours: '', lhRate: '', lineId: '', payPct: '', maxRate: '' }
+}
+
+/** A blank carrier slot (the "+ Add carrier" row). */
+export function emptyCarrierSlot(slot: string): CarrierSlot {
+  return { ...emptyCarrierBlock(), slot, carrierName: '', legStopIds: [], rate: emptyCarrierRate() }
+}
+
+/** The smallest unused `cN` key. */
+export function nextSlotKey(slots: readonly Pick<CarrierSlot, 'slot'>[]): string {
+  const taken = new Set(slots.map((s) => s.slot))
+  let n = 0
+  while (taken.has(`c${n}`)) n++
+  return `c${n}`
+}
+
+/** The cap on carriers one load carries (AT-plan D7); the form offers no more slots. */
+export const MAX_CARRIER_SLOTS = MAX_LIVE_CARRIERS
+
+/** The block of a slot: its `CarrierBlock` fields only. */
+export function blockOf(s: CarrierSlot): CarrierBlock {
+  const { slot: _slot, carrierName: _name, legStopIds: _legs, rate: _rate, ...block } = s
+  void _slot; void _name; void _legs; void _rate
+  return block
+}
+
+/** Slot 0 as the legacy fields say it (they are canonical for slot 0; `carriers[0]` keeps its key, name and legs). */
+export function slotZeroOf(values: Pick<ShipmentFormValues, 'carrier' | 'carriers'> & { rates: Pick<ShipmentFormValues['rates'], 'carrier'> }): CarrierSlot {
+  const meta = values.carriers?.[0]
+  return {
+    ...values.carrier,
+    slot: meta?.slot ?? 'c0',
+    carrierName: meta?.carrierName ?? '',
+    legStopIds: meta?.legStopIds ?? [],
+    rate: values.rates.carrier,
+  }
+}
+
+/** Every carrier slot, slot 0 read from the legacy fields. The one reader the pure form code uses. */
+export function carrierSlotsOf(values: Pick<ShipmentFormValues, 'carrier' | 'carriers'> & { rates: Pick<ShipmentFormValues['rates'], 'carrier'> }): CarrierSlot[] {
+  return [slotZeroOf(values), ...(values.carriers ?? []).slice(1)]
+}
+
+function slotMirrors(s: CarrierSlot, v: ShipmentFormValues): boolean {
+  if (s.rate !== v.rates.carrier) return false
+  return (Object.keys(v.carrier) as (keyof CarrierBlock)[]).every((k) => s[k] === v.carrier[k])
+}
+
+/**
+ * Keep `carriers[0]` and the legacy slot-0 fields (`carrier`, `rates.carrier`) the same thing. The
+ * form's update funnel calls this after every edit: an edit to `carriers[0]` is copied into the
+ * legacy fields, otherwise the legacy fields (still what the carrier card and the rate history write)
+ * are copied into `carriers[0]`. Returns the same object when nothing differs.
+ */
+export function syncCarrierSlots(prev: ShipmentFormValues | null, next: ShipmentFormValues): ShipmentFormValues {
+  let out = next
+  const c0 = next.carriers?.[0]
+  if (c0 && prev && c0 !== prev.carriers?.[0] && next.carrier === prev.carrier && next.rates.carrier === prev.rates.carrier) {
+    out = { ...next, carrier: blockOf(c0), rates: { ...next.rates, carrier: c0.rate } }
+  }
+  const existing = out.carriers ?? []
+  if (existing[0] && slotMirrors(existing[0], out)) return out
+  return { ...out, carriers: [slotZeroOf(out), ...existing.slice(1)] }
+}
+
+/** A draft saved before slots existed: wrap the legacy fields as `carriers[0]` and give accessorial lines `paidTo`. */
+export function upgradeValues(values: ShipmentFormValues): ShipmentFormValues {
+  const lines = values.rates.lines.map((l) => {
+    const { carrierKey: _gone, ...rest } = l as AccessorialLine & { carrierKey?: string }
+    void _gone
+    return { ...rest, paidTo: rest.paidTo ?? '' }
+  })
+  return syncCarrierSlots(null, { ...values, rates: { ...values.rates, lines } })
+}
+
 export function emptyValues(opts: { mode?: FormMode } = {}): ShipmentFormValues {
+  const carrier = emptyCarrierBlock()
+  const carrierRate = emptyCarrierRate()
   return {
     mode: opts.mode ?? 'FTL',
     shipmentType: typeOfLegacyMode(opts.mode ?? 'FTL'),
@@ -374,14 +499,11 @@ export function emptyValues(opts: { mode?: FormMode } = {}): ShipmentFormValues 
     more: { specialInstructions: '', bolNotes: '', rateConNotes: '', notes: '', references: [], items: [] },
     rates: {
       customer: { rateType: 'FLAT', hours: '', lhRate: '', lineId: '' },
-      carrier: { rateType: 'FLAT', hours: '', lhRate: '', lineId: '', payPct: '', maxRate: '' },
+      carrier: carrierRate,
       fscPercent: '', fscPerMile: '', fscLineId: '', smr: '', lines: [], passthrough: [],
     },
-    carrier: {
-      loadCarrierId: '', carrierId: '', typedName: '', useTyped: false, isOwnFleet: false,
-      dispatcher: emptyBits(), driver1: emptyBits(), driver2: emptyBits(),
-      truckNo: '', trailerNo: '', seal: '', carrierRef: '', originCity: '', originState: '', emptyMiles: '', puEta: '',
-    },
+    carrier,
+    carriers: [{ ...carrier, slot: 'c0', carrierName: '', legStopIds: [], rate: carrierRate }],
     checkCall: emptyCheckCall(),
     docs: { queued: [] },
   }
@@ -403,7 +525,7 @@ export function applyCustomerDefaults(values: ShipmentFormValues, customer: Cust
   const lines = values.rates.lines.length > 0
     ? values.rates.lines
     : (customer.defaultCharges ?? []).map<AccessorialLine>((c) => ({
-      id: '', carrierLineId: '', release: '', carrierKey: '', code: c.code, label: '',
+      id: '', carrierLineId: '', release: '', paidTo: '', code: c.code, label: '',
       carrierAmount: '', customerAmount: centsToDollars(c.amountCents * (c.count ?? 1)), note: '',
     }))
   const out: ShipmentFormValues = {
@@ -498,7 +620,8 @@ export function valuesFromBundle(bundle: ShipmentBundle, ctx: BundleSeedCtx = {}
   const load = bundle.loads[0]
   const sr: SpecialRequirements = order?.specialRequirements ?? {}
   const x = readExtras(order)
-  const active = activeLoadCarrier(bundle)
+  const live = liveCarriers(bundle)
+  const active = live[0] ?? null
   const tie = !active || !x?.carrier?.loadCarrierId || x.carrier.loadCarrierId === active.id
   const refs = order?.references ?? []
   const managed = new Set<string>()
@@ -538,30 +661,88 @@ export function valuesFromBundle(bundle: ShipmentBundle, ctx: BundleSeedCtx = {}
   const charges = bundle.charges
   const custLH = charges.find((c) => c.side === 'CUSTOMER' && c.code === CODE_LINEHAUL && ['FLAT', 'PER_MILE', 'PER_CWT'].includes(c.calculatedBy))
   const custFSC = charges.find((c) => c.side === 'CUSTOMER' && c.code === CODE_FSC && ['PERCENT', 'PER_MILE'].includes(c.calculatedBy))
-  const carLH = active
-    ? charges.find((c) => c.side === 'CARRIER' && c.code === CODE_LINEHAUL && c.loadCarrierId === active.id && ['FLAT', 'PER_MILE', 'PER_CWT'].includes(c.calculatedBy))
-    : undefined
-  const perHour = x?.rates?.customerRateType === 'PER_HOUR' && custLH?.calculatedBy === 'FLAT'
+  const carLHOf = (lc: LoadCarrierRecord): LoadChargeRecord | undefined =>
+    charges.find((c) => c.side === 'CARRIER' && c.code === CODE_LINEHAUL && c.loadCarrierId === lc.id && ['FLAT', 'PER_MILE', 'PER_CWT'].includes(c.calculatedBy))
+  const liveLH = live.map(carLHOf)
+  const liveIds = new Set(live.map((lc) => lc.id))
   const draft = x?.rates?.carrierDraft
-  const used = new Set<string>([custLH?.id, custFSC?.id, carLH?.id].filter((v): v is string => !!v))
+  const perHour = x?.rates?.customerRateType === 'PER_HOUR' && custLH?.calculatedBy === 'FLAT'
+  const used = new Set<string>([custLH?.id, custFSC?.id, ...liveLH.map((c) => c?.id)].filter((v): v is string => !!v))
   const lines: AccessorialLine[] = []
   const passthrough: LoadChargeRecord[] = []
   const sorted = [...charges].sort((a, b) => a.sortOrder - b.sortOrder)
   for (const c of sorted) {
     if (used.has(c.id)) continue
-    const mine = c.side === 'CUSTOMER' || (!!active && c.loadCarrierId === active.id)
+    const mine = c.side === 'CUSTOMER' || (c.loadCarrierId != null && liveIds.has(c.loadCarrierId))
     if (!mine || !isAccessorialShape(c) || isRateTarget(c)) { passthrough.push(c); continue }
     if (c.side === 'CARRIER') {
       const host = lines.find((l) => !l.carrierLineId && l.code === c.code && l.release === str(c.release))
-      if (host) { host.carrierLineId = c.id; host.carrierAmount = centsToDollars(c.amountCents); continue }
-      lines.push({ id: '', carrierLineId: c.id, release: str(c.release), carrierKey: str(active?.carrierName), code: c.code, label: str(c.label), carrierAmount: centsToDollars(c.amountCents), customerAmount: '', note: str(c.note) })
+      if (host) { host.carrierLineId = c.id; host.carrierAmount = centsToDollars(c.amountCents); if (live.length >= 2) host.paidTo = str(c.loadCarrierId); continue }
+      lines.push({ id: '', carrierLineId: c.id, release: str(c.release), paidTo: live.length >= 2 ? str(c.loadCarrierId) : '', code: c.code, label: str(c.label), carrierAmount: centsToDollars(c.amountCents), customerAmount: '', note: str(c.note) })
     } else {
-      lines.push({ id: c.id, carrierLineId: '', release: str(c.release), carrierKey: '', code: c.code, label: str(c.label), carrierAmount: '', customerAmount: centsToDollars(c.amountCents), note: str(c.note) })
+      lines.push({ id: c.id, carrierLineId: '', release: str(c.release), paidTo: '', code: c.code, label: str(c.label), carrierAmount: '', customerAmount: centsToDollars(c.amountCents), note: str(c.note) })
     }
   }
 
   const rateKind = (c: LoadChargeRecord | undefined): FormRateKind =>
     c?.calculatedBy === 'PER_MILE' ? 'PER_MILE' : c?.calculatedBy === 'PER_CWT' ? 'PER_CWT' : 'FLAT'
+
+  type CarrierEntry = NonNullable<AljexFormExtras['carriers']>[number]
+  type OwnExtras = NonNullable<AljexFormExtras['carrier']>
+  const entries = x?.carriers ?? []
+  const rateOf = (lc: LoadChargeRecord | undefined, d: CarrierEntry['draft'], maxCents: number | undefined): CarrierRate =>
+    lc
+      ? { rateType: rateKind(lc), hours: '', lhRate: centsToDollars(lc.rateCents), lineId: lc.id, payPct: '', maxRate: centsToDollars(maxCents) }
+      : {
+        rateType: (d?.rateType as CarrierRateKind | undefined) ?? 'FLAT',
+        hours: numStr(d?.hours), lhRate: centsToDollars(d?.lhRateCents), lineId: '',
+        payPct: numStr(d?.payPct), maxRate: centsToDollars(maxCents),
+      }
+  const blockOfLoadCarrier = (lc: LoadCarrierRecord | null, own: OwnExtras | undefined, tied: boolean): CarrierBlock => ({
+    loadCarrierId: str(lc?.id),
+    carrierId: str(lc?.carrierId),
+    typedName: lc && !lc.carrierId ? str(lc.carrierName) : '',
+    useTyped: !!lc && !lc.carrierId && lc.kind !== 'OWN_ASSET',
+    isOwnFleet: lc?.kind === 'OWN_ASSET',
+    dispatcher: { name: str(lc?.dispatcherName), phone: str(lc?.dispatcherPhone), email: str(lc?.dispatcherEmail) },
+    driver1: { name: str(lc?.driverName), phone: str(lc?.driverPhone), email: tied ? str(own?.driverEmail1) : '' },
+    driver2: { name: str(lc?.driver2Name), phone: str(lc?.driver2Phone), email: tied ? str(own?.driverEmail2) : '' },
+    truckNo: str(lc?.truckNumber),
+    trailerNo: str(lc?.trailerNumber),
+    seal: str(lc?.sealNumber),
+    carrierRef: str(lc?.tripNumber),
+    originCity: tied ? str(own?.originCity) : '',
+    originState: tied ? str(own?.originState) : '',
+    emptyMiles: tied ? numStr(own?.emptyMiles) : '',
+    puEta: isoToInput(lc?.pickupEtaAt),
+  })
+  const carriers: CarrierSlot[] = []
+  const takeKey = (preferred: string | undefined): string =>
+    preferred && !carriers.some((s) => s.slot === preferred) ? preferred : nextSlotKey(carriers)
+  live.forEach((lc, i) => {
+    const entry = entries.find((e) => e.loadCarrierId === lc.id)
+    const slotZero = i === 0
+    carriers.push({
+      ...blockOfLoadCarrier(lc, entry ?? (slotZero ? x?.carrier : undefined), entry ? true : slotZero ? tie : false),
+      slot: takeKey(entry?.slot ?? (slotZero ? entries[0]?.slot : undefined)),
+      carrierName: str(lc.carrierName),
+      legStopIds: [...(lc.legStopIds ?? [])],
+      rate: rateOf(liveLH[i], entry?.draft ?? (slotZero ? draft : undefined), entry?.draft?.maxRateCents ?? (slotZero ? x?.rates?.maxRateCents : undefined)),
+    })
+  })
+  if (live.length === 0) {
+    carriers.push({
+      ...blockOfLoadCarrier(null, x?.carrier, true),
+      slot: takeKey(entries[0]?.slot), carrierName: '', legStopIds: [], rate: rateOf(undefined, draft, x?.rates?.maxRateCents),
+    })
+  }
+  for (const e of entries.slice(1).filter((entry) => !entry.loadCarrierId)) {
+    if (carriers.length >= MAX_CARRIER_SLOTS) break
+    carriers.push({
+      ...blockOfLoadCarrier(null, e, true),
+      slot: takeKey(e.slot), carrierName: '', legStopIds: [], rate: rateOf(undefined, e.draft, e.draft?.maxRateCents),
+    })
+  }
 
   const flags: Record<FlagKey, boolean> = {
     permits: !!sr.permit, fsma: !!sr.fsma, oversized: !!sr.oversize, hazmat: !!sr.hazmat, escorts: !!sr.escort,
@@ -638,13 +819,7 @@ export function valuesFromBundle(bundle: ShipmentBundle, ctx: BundleSeedCtx = {}
         lhRate: centsToDollars(custLH?.rateCents),
         lineId: str(custLH?.id),
       },
-      carrier: carLH
-        ? { rateType: rateKind(carLH), hours: '', lhRate: centsToDollars(carLH.rateCents), lineId: carLH.id, payPct: '', maxRate: centsToDollars(x?.rates?.maxRateCents) }
-        : {
-          rateType: (draft?.rateType as CarrierRateKind | undefined) ?? 'FLAT',
-          hours: numStr(draft?.hours), lhRate: centsToDollars(draft?.lhRateCents), lineId: '',
-          payPct: numStr(draft?.payPct), maxRate: centsToDollars(x?.rates?.maxRateCents),
-        },
+      carrier: carriers[0].rate,
       fscPercent: custFSC?.calculatedBy === 'PERCENT' ? trimZeros((custFSC.rateCents / 100).toFixed(2)) : '',
       fscPerMile: custFSC?.calculatedBy === 'PER_MILE' ? centsToDollars(custFSC.rateCents) : '',
       fscLineId: str(custFSC?.id),
@@ -652,24 +827,8 @@ export function valuesFromBundle(bundle: ShipmentBundle, ctx: BundleSeedCtx = {}
       lines,
       passthrough,
     },
-    carrier: {
-      loadCarrierId: str(active?.id),
-      carrierId: str(active?.carrierId),
-      typedName: active && !active.carrierId ? str(active.carrierName) : '',
-      useTyped: !!active && !active.carrierId && active.kind !== 'OWN_ASSET',
-      isOwnFleet: active?.kind === 'OWN_ASSET',
-      dispatcher: { name: str(active?.dispatcherName), phone: str(active?.dispatcherPhone), email: str(active?.dispatcherEmail) },
-      driver1: { name: str(active?.driverName), phone: str(active?.driverPhone), email: tie ? str(x?.carrier?.driverEmail1) : '' },
-      driver2: { name: str(active?.driver2Name), phone: str(active?.driver2Phone), email: tie ? str(x?.carrier?.driverEmail2) : '' },
-      truckNo: str(active?.truckNumber),
-      trailerNo: str(active?.trailerNumber),
-      seal: str(active?.sealNumber),
-      carrierRef: str(active?.tripNumber),
-      originCity: tie ? str(x?.carrier?.originCity) : '',
-      originState: tie ? str(x?.carrier?.originState) : '',
-      emptyMiles: tie ? numStr(x?.carrier?.emptyMiles) : '',
-      puEta: isoToInput(active?.pickupEtaAt),
-    },
+    carrier: blockOf(carriers[0]),
+    carriers,
     checkCall: emptyCheckCall(),
     docs: { queued: [] },
   }

@@ -63,7 +63,7 @@ export async function resolveDriverSms(
     truck: (id) => (config && config.truckId === id ? config : null),
     unitNumber: optionalString(carrier?.truckNumber, 40),
   })
-  return driverSmsTarget(phones, effectiveTrackingPrefs({ shipment, customer }).driverSms)
+  return driverSmsTarget(phones, effectiveTrackingPrefs({ shipment, customer, loadCarrier: carrier }).driverSms)
 }
 
 /** Same, for callers that only hold a leg: loads the shipment's customer and the load's truck itself. */

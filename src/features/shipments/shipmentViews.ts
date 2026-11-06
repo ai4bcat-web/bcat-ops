@@ -39,7 +39,7 @@ import { formatCents } from '@/lib/invoiceBuild'
 import { paperworkShortLabel, type PaperworkLocation } from '@/lib/paperworkLocation'
 import { DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
-import { boardStatusOf, detailValuesFor } from '@/lib/shipmentViewDefs'
+import { boardStatusOf, detailValuesFor, type BoardCarrier } from '@/lib/shipmentViewDefs'
 import { assignmentChipText } from './carrierLadder'
 import { effectiveShipmentType, shipmentTypeLabel } from '@/lib/shipmentTypes'
 export { ALJEX_COLUMN_KEYS, boardStatusOf, matchesBoardFilters } from '@/lib/shipmentViewDefs'
@@ -63,6 +63,9 @@ export type ShipmentRow = ShipmentRecord & {
   arStatus?: ArStatus | null
   /** The active assignment's AP rung. */
   apStatus?: ApStatus | null
+  /** Step AT — the live carriers when there are two or more; absent/empty means read `carrierName`. */
+  carriers?: BoardCarrier[] | null
+  carrierCount?: number | null
   assignmentType?: AssignmentType | null
   /** Step V — display name of `trackerId`, projected by useShipments. */
   trackerName?: string | null
@@ -468,7 +471,7 @@ export function matchesQuery(row: ShipmentRow, query: string): boolean {
   // The search box reads the server-built `searchKey`, falling back to visible text.
   const hay = (row.searchKey
     ?? [row.number, row.customerName, row.originCity, row.destinationCity].filter(Boolean).join(' ')
-  ).toLowerCase()
+  ).toLowerCase() + ' ' + (row.carriers ?? []).map((c) => c.name.toLowerCase()).join(' ')
   return q.split(/\s+/).every((term) => hay.includes(term))
 }
 
@@ -559,8 +562,29 @@ export function carrierLabel(row: ShipmentRow): string {
     if (own) return own
     return row.legacyImported === true ? OWN_FLEET_HISTORY : 'Own fleet'
   }
+  if (row.carriers && row.carriers.length >= 2) return `${row.carriers.length} carriers`
   if (row.carrierName) return row.carrierName
   return 'Need to cover'
+}
+
+/**
+ * The Carrier cell's hover list for a load with two or more live carriers, one line per
+ * carrier: `name · AP rung · $cost`. Undefined for a single carrier (the cell shows the
+ * name alone, as before).
+ */
+export function carrierHoverText(row: ShipmentRow): string | undefined {
+  if (!row.carriers || row.carriers.length < 2 || row.assignmentType === 'OWN_ASSET') return undefined
+  return row.carriers
+    .map((c) => [c.name, enumLabel(c.apStatus), formatCentsOrEmpty(c.costCents)].filter(Boolean).join(' · '))
+    .join('\n')
+}
+
+/** What the Carrier column sorts by: the carriers' names alphabetically, so a "2 carriers" cell sorts with its names, not under "2". */
+export function carrierSortKey(row: ShipmentRow): string {
+  if (row.carriers && row.carriers.length >= 2 && row.assignmentType !== 'OWN_ASSET') {
+    return row.carriers.map((c) => c.name).sort((a, b) => a.localeCompare(b)).join(', ')
+  }
+  return carrierLabel(row)
 }
 
 /** `BROKERAGE` / `ASSETS (Box trucks)` — the division chip's text. */
@@ -1059,6 +1083,7 @@ export function toViewRow(row: ShipmentRow): ShipmentViewRow {
     // R2 board facets projected so a saved view's board filters round-trip.
     customerId: row.customerId ?? null,
     carrierName: row.carrierName ?? null,
+    carriers: row.carriers ?? null,
     pickupName: row.pickupName ?? null,
     consigneeName: row.consigneeName ?? null,
     fromState: row.fromState ?? null,

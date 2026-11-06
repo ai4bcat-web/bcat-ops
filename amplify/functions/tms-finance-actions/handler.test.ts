@@ -1675,6 +1675,90 @@ describe('RECORD_BILL', () => {
   })
 })
 
+describe('two carriers on one load (Step AT)', () => {
+  const SECOND_LC = 'lc-2'
+  const SECOND_CARRIER = 'car-2'
+
+  /** Carrier A is the seeded assignment ($1,800); carrier B is a second outside carrier on the same load ($600). */
+  function seedSecondCarrier(): void {
+    seedAssignment()
+    table(TABLES.carrier).set(SECOND_CARRIER, {
+      id: SECOND_CARRIER, name: 'Second Haul Inc', mcNumber: '112233', status: 'ACTIVE', paymentTermsDays: 30, email: 'ap@second.test',
+    })
+    table(TABLES.carrierMethod).set('cpm-2', {
+      id: 'cpm-2', carrierId: SECOND_CARRIER, method: 'ACH', recipientType: 'CARRIER', status: 'ACTIVE', isPreferred: true,
+      accountLast4: '9876', bankDetailsKey: 'carrier-docs/car-2/private/ach.pdf', payeeEmail: 'remit@second.test',
+    })
+    table(TABLES.loadCarrier).set(SECOND_LC, {
+      ...table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)!,
+      id: SECOND_LC, carrierId: SECOND_CARRIER, carrierName: 'Second Haul Inc', carrierMc: '112233', sequence: 2, costCents: 60_000,
+    })
+    table(TABLES.charge).set('chg-b', {
+      ...table(TABLES.charge).get('chg-2')!, id: 'chg-b', loadCarrierId: SECOND_LC, rateCents: 60_000, amountCents: 60_000,
+    })
+    for (const [id, type] of [['doc-pod-b', 'POD'], ['doc-inv-b', 'CARRIER_INVOICE']]) {
+      table(TABLES.document).set(id, {
+        ...table(TABLES.document).get(type === 'POD' ? 'doc-pod' : 'doc-inv')!, id, loadCarrierId: SECOND_LC,
+      })
+    }
+  }
+
+  const recordFor = async (loadCarrierId: string, input: Row = {}): Promise<Row> =>
+    ((await call('RECORD_BILL', { loadCarrierId, ...input }, ADMIN)) as { bill: Row }).bill
+
+  it('records one bill per carrier, each with only its own lines, and recording A does not finalize B', async () => {
+    seedSecondCarrier()
+    const a = await recordFor(LOAD_CARRIER_ID)
+    expect(a.id).toBe(`cb:${LOAD_CARRIER_ID}:1`)
+    expect(a.grossCents).toBe(180_000)
+    expect((table(TABLES.loadCarrier).get(SECOND_LC) as Row).chargesFinalizedAt).toBeFalsy()
+    expect((table(TABLES.loadCarrier).get(SECOND_LC) as Row).apStatus).toBe('AWAITING_INVOICE')
+
+    const b = await recordFor(SECOND_LC)
+    expect(b.id).toBe(`cb:${SECOND_LC}:1`)
+    expect(b.grossCents).toBe(60_000)
+    expect(b.carrierId).toBe(SECOND_CARRIER)
+    expect(table(TABLES.carrierBill).size).toBe(2)
+  })
+
+  it('approves and pays one bill while the other stays in review', async () => {
+    seedSecondCarrier()
+    const a = await recordFor(LOAD_CARRIER_ID, { approve: true })
+    const b = await recordFor(SECOND_LC)
+    expect(a.status).toBe('TO_BE_PAID')
+    expect(b.status).toBe('IN_REVIEW')
+
+    await call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID, paidAt: '2026-10-25', method: 'ACH', amountCents: 180_000,
+      applications: [{ billId: a.id, amountCents: 180_000 }],
+    })
+    expect((table(TABLES.carrierBill).get(a.id as string) as Row).status).toBe('PAID')
+    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).apStatus).toBe('PAID')
+    expect((table(TABLES.carrierBill).get(b.id as string) as Row).status).toBe('IN_REVIEW')
+    expect((table(TABLES.loadCarrier).get(SECOND_LC) as Row).apStatus).toBe('IN_REVIEW')
+  })
+
+  it("refuses to apply one carrier's payment to the other carrier's bill", async () => {
+    seedSecondCarrier()
+    await recordFor(LOAD_CARRIER_ID, { approve: true })
+    const b = await recordFor(SECOND_LC, { approve: true })
+    await expect(call('RECORD_AP_PAYMENT', {
+      carrierId: CARRIER_ID, paidAt: '2026-10-25', method: 'ACH', amountCents: 60_000,
+      applications: [{ billId: b.id, amountCents: 60_000 }],
+    })).rejects.toThrow(/belongs to another carrier/)
+    expect((table(TABLES.carrierBill).get(b.id as string) as Row).status).toBe('TO_BE_PAID')
+  })
+
+  it("voiding A's bill leaves B's bill and rung untouched", async () => {
+    seedSecondCarrier()
+    const a = await recordFor(LOAD_CARRIER_ID)
+    await recordFor(SECOND_LC)
+    await call('VOID_BILL', { billId: a.id, reason: 'Entered against the wrong carrier' })
+    expect((table(TABLES.carrierBill).get(`cb:${SECOND_LC}:1`) as Row).status).toBe('IN_REVIEW')
+    expect((table(TABLES.loadCarrier).get(SECOND_LC) as Row).apStatus).toBe('IN_REVIEW')
+  })
+})
+
 describe('imported Aljex history (legacyImported shipment)', () => {
   const flag = (): void => {
     const shipment = table(TABLES.shipment).get(SHIPMENT_ID)!

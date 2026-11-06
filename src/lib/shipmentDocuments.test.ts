@@ -153,6 +153,20 @@ describe('evaluateDocGate — customer scope', () => {
   })
 })
 
+describe('evaluateDocGate — several carriers', () => {
+  const signed = (id: string) => carrier(id, { rateConStatus: 'SIGNED', kind: 'CARRIER' } as Partial<GateCarrier>)
+  const sent = (id: string) => carrier(id, { rateConStatus: 'SENT', kind: 'CARRIER' } as Partial<GateCarrier>)
+
+  it('needs every outside carrier signed, not any', () => {
+    expect(customerGate([], ['RATE_CON'], [signed('a'), sent('b')]).missing).toEqual(['RATE_CON'])
+    expect(customerGate([], ['RATE_CON'], [signed('a'), signed('b')]).missing).toEqual([])
+  })
+
+  it('does not let a filed RATE_CON waive an unsigned carrier', () => {
+    expect(customerGate([doc('RATE_CON')], ['RATE_CON'], [signed('a'), sent('b')]).missing).toEqual(['RATE_CON'])
+  })
+})
+
 describe('evaluateDocGate — carrier scope', () => {
   function carrierGate(documents: ShipmentDocumentRecord[], requiredCarrierUploadTypes?: string[]) {
     return evaluateDocGate({
@@ -221,6 +235,25 @@ describe('supersede', () => {
   it('returns nothing when this is the first of its kind', () => {
     expect(supersede(docs, { type: 'BOL', loadId: 'ld-3' })).toBeNull()
     expect(supersede(docs, { type: 'LOAD_SUMMARY', loadId: 'ld-1' })).toBeNull()
+  })
+
+  it('keeps per-stop, per-carrier and rated slots independent', () => {
+    const slotDocs = [
+      doc('BOL', { id: 'master', version: 1 }),
+      doc('BOL', { id: 'd1', version: 1, stopId: 'st-1' }),
+      doc('BOL', { id: 'd2', version: 2, stopId: 'st-2' }),
+      doc('BOL', { id: 'rated', version: 3, audience: 'CUSTOMER' }),
+      doc('BOL', { id: 'lc', version: 1, loadCarrierId: 'lc-1' }),
+    ]
+    expect(supersede(slotDocs, { type: 'BOL', loadId: 'ld-1', stopId: null, loadCarrierId: null, rated: false })?.id).toBe('master')
+    expect(supersede(slotDocs, { type: 'BOL', loadId: 'ld-1', stopId: 'st-1', rated: false })?.id).toBe('d1')
+    expect(supersede(slotDocs, { type: 'BOL', loadId: 'ld-1', rated: true })?.id).toBe('rated')
+    expect(supersede(slotDocs, { type: 'BOL', loadId: 'ld-1', loadCarrierId: 'lc-1' })?.id).toBe('lc')
+    expect(supersede(slotDocs, { type: 'BOL', loadId: 'ld-1', stopId: 'st-9' })).toBeNull()
+    expect(nextVersion(slotDocs, 'BOL', 'ld-1', { stopId: 'st-2' })).toBe(3)
+    expect(nextVersion(slotDocs, 'BOL', 'ld-1', { stopId: 'st-3' })).toBe(1)
+    expect(nextVersion(slotDocs, 'BOL', 'ld-1', { rated: true })).toBe(4)
+    expect(nextVersion(slotDocs, 'BOL', 'ld-1', {})).toBe(2)
   })
 })
 

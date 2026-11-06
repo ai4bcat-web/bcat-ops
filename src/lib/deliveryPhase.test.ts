@@ -116,3 +116,36 @@ describe('deliveryPhaseText', () => {
     expect(deliveryPhaseText(run({ create: true }))).toBe('Draft')
   })
 })
+
+describe('deliveryPhase: legs-aware with several carriers (Step AT)', () => {
+  const left = { arrivedAt: iso(-300), departedAt: iso(-240) }
+  const stops = [pu({ id: 's1', ...left }), pu({ id: 's2' }), de({ id: 's3' })]
+
+  it('one carrier, with or without legs, is exactly the whole-route answer', () => {
+    const plain = run({ stops })
+    expect(run({ stops, carriers: [{ name: 'Swift', legStopIds: ['s1'] }] })).toEqual(plain)
+    expect(run({ stops, carriers: [] })).toEqual(plain)
+  })
+
+  it('a stop no carrier covers cannot hold the shipment back', () => {
+    const whole = run({ stops })
+    expect(whole).toMatchObject({ stopIndex: 1, stopCount: 3 })
+    const split = run({ stops, carriers: [{ name: 'A', legStopIds: ['s1'] }, { name: 'B', legStopIds: ['s3'] }] })
+    expect(split).toMatchObject({ stopIndex: 1, stopCount: 2, phase: 'IN_TRANSIT' })
+  })
+
+  it('lists each carrier\'s own progress; the shipment waits on the furthest-behind carrier', () => {
+    const r = run({
+      stops: [pu({ id: 's1', ...left }), de({ id: 's2' })],
+      carriers: [{ name: 'A', legStopIds: ['s1'] }, { name: 'B', legStopIds: ['s2'] }],
+    })
+    expect(r.carrierPhases).toEqual([{ name: 'A', phase: 'DONE' }, { name: 'B', phase: 'NOT_STARTED' }])
+    expect(r.phase).not.toBe('DELIVERED')
+  })
+
+  it('carriers with no legs both cover the whole route', () => {
+    const r = run({ stops, carriers: [{ name: 'A' }, { name: 'B', legStopIds: [] }] })
+    expect(r).toMatchObject({ stopIndex: 1, stopCount: 3 })
+    expect(r.carrierPhases?.map((c) => c.phase)).toEqual(['IN_TRANSIT', 'IN_TRANSIT'])
+  })
+})

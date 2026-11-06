@@ -22,6 +22,7 @@ import {
   optionalInteger,
 } from '../_shared/actionInputs'
 import { dedupeEmails, emailKey, isEmailAddress } from '../../../src/lib/emailAddress'
+import { validateTrackingPrefsOverride } from '../../../src/lib/trackingPrefs'
 import { isShipmentTypeKey } from '../../../src/lib/shipmentTypes'
 
 type Row = Record<string, unknown>
@@ -109,7 +110,7 @@ function section(source: Row, key: string, allowed: readonly string[], label: st
  */
 export function validateFormExtras(value: unknown, label = `${SR}.form`): Row {
   const f = assertRecord(value, label)
-  assertKnownKeys(f, ['v', 'shipmentType', 'ship', 'customer', 'roles', 'instructions', 'rates', 'carrier'], label)
+  assertKnownKeys(f, ['v', 'shipmentType', 'ship', 'customer', 'roles', 'instructions', 'rates', 'carrier', 'carriers'], label)
   if (f.v != null && f.v !== 1) throw new Error(`${label}.v must be 1`)
   const out: Row = { v: 1 }
 
@@ -225,6 +226,47 @@ export function validateFormExtras(value: unknown, label = `${SR}.form`): Row {
       driverEmail2: email('driverEmail2'),
     })
     if (Object.keys(carrierOut).length > 0) out.carrier = carrierOut
+  }
+
+  // AT-plan: one entry per carrier slot. Slot 0 is also written to the legacy
+  // `carrier` / `rates.carrierDraft` keys above, which older readers still use.
+  if (f.carriers != null) {
+    if (!Array.isArray(f.carriers)) throw new Error(`${label}.carriers must be an array`)
+    if (f.carriers.length > 4) throw new Error(`${label}.carriers allows at most 4 carriers`)
+    const list = f.carriers.map((raw, i) => {
+      const at = `${label}.carriers[${i}]`
+      const node = assertRecord(raw, at)
+      assertKnownKeys(node, [
+        'slot', 'loadCarrierId', 'draft', 'originCity', 'originState', 'emptyMiles', 'driverEmail1', 'driverEmail2',
+      ], at)
+      const slot = text(node.slot, 40, `${at}.slot`)
+      if (!slot) throw new Error(`${at}.slot is required`)
+      const draft = section(node, 'draft', ['rateType', 'hours', 'lhRateCents', 'payPct', 'maxRateCents'], at)
+      const draftOut = draft == null ? null : compact({
+        rateType: text(draft.rateType, 32, `${at}.draft.rateType`),
+        hours: count(draft.hours, `${at}.draft.hours`),
+        lhRateCents: count(draft.lhRateCents, `${at}.draft.lhRateCents`),
+        payPct: optionalFloat(draft.payPct, { min: 0, max: 1000, label: `${at}.draft.payPct` }),
+        maxRateCents: count(draft.maxRateCents, `${at}.draft.maxRateCents`),
+      })
+      const email = (key: 'driverEmail1' | 'driverEmail2'): string | null => {
+        const v = text(node[key], 200, `${at}.${key}`)
+        if (v == null) return null
+        if (!isEmailAddress(v)) throw new Error(`${at}.${key} is not a valid email address`)
+        return v.toLowerCase()
+      }
+      return compact({
+        slot,
+        loadCarrierId: text(node.loadCarrierId, 100, `${at}.loadCarrierId`),
+        draft: draftOut && Object.keys(draftOut).length > 0 ? draftOut : null,
+        originCity: text(node.originCity, 120, `${at}.originCity`),
+        originState: text(node.originState, 40, `${at}.originState`),
+        emptyMiles: count(node.emptyMiles, `${at}.emptyMiles`),
+        driverEmail1: email('driverEmail1'),
+        driverEmail2: email('driverEmail2'),
+      })
+    })
+    if (list.length > 0) out.carriers = list
   }
   return out
 }
@@ -449,6 +491,8 @@ const CARRIER_MONEY_OR_STATE_KEYS = [
 /** Everything the action's own envelope carries; not part of the patch. */
 const CARRIER_ENVELOPE_KEYS = ['loadCarrierId', 'expectedUpdatedAt'] as const
 
+const MAX_LEG_STOPS = 50
+
 /**
  * The assignment fields a dispatcher may correct in place after Cover. Money, rate-con
  * and status keys are refused by name; any other unknown key is refused too, so a
@@ -463,12 +507,32 @@ export function validateCarrierDetails(input: Row): Row {
     if ((CARRIER_MONEY_OR_STATE_KEYS as readonly string[]).includes(key)) {
       throw new Error(`${key} cannot be changed here: money, rate confirmation and status have their own actions`)
     }
-    if (!(CARRIER_DETAIL_KEYS as readonly string[]).includes(key)) {
+    if (key !== 'legStopIds' && key !== 'trackingPrefs' && !(CARRIER_DETAIL_KEYS as readonly string[]).includes(key)) {
       throw new Error(`${key} is not a recognised assignment detail`)
     }
   }
   for (const key of CARRIER_DETAIL_KEYS) {
     if (present(input, key)) patch[key] = text(input[key], CARRIER_DETAIL_CAPS[key], key)
+  }
+  // AT-plan D9/D5: the stops this carrier covers (absent/empty = all) and the optional
+  // per-carrier tracking override (null clears it back to the shipment's).
+  if (present(input, 'legStopIds')) {
+    const raw = input.legStopIds
+    if (raw == null) patch.legStopIds = []
+    else {
+      if (!Array.isArray(raw)) throw new Error('legStopIds must be an array of stop ids')
+      if (raw.length > MAX_LEG_STOPS) throw new Error(`legStopIds allows at most ${MAX_LEG_STOPS} stops`)
+      patch.legStopIds = [...new Set(raw.map((id, i) => {
+        const v = text(id, 100, `legStopIds[${i}]`)
+        if (!v) throw new Error(`legStopIds[${i}] must be a stop id`)
+        return v
+      }))]
+    }
+  }
+  if (present(input, 'trackingPrefs')) {
+    const sent = validateTrackingPrefsOverride(input.trackingPrefs)
+    if (sent && sent.confirmed !== undefined) throw new Error('trackingPrefs cannot confirm a mode here')
+    patch.trackingPrefs = sent
   }
   if (Object.keys(patch).length === 0 && !present(input, 'driverId')) throw new Error('Nothing to change: send at least one assignment detail')
   return patch

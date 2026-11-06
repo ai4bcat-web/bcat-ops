@@ -190,13 +190,14 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     customer: form.customer,
     divisions: flattenDivisions(divisions ?? []),
     busy,
+    dirty: form.dirty,
     actions,
     refreshBundle,
     canCreateLocation,
     addCustomer,
     addLocation,
     issues: form.issues,
-  }), [mode, bundle, status, locked, directory.customers, locations, ensureLocations, carriers, staff, settings, form.customer, divisions, busy, actions, refreshBundle, canCreateLocation, addCustomer, addLocation, form.issues])
+  }), [mode, bundle, status, locked, directory.customers, locations, ensureLocations, carriers, staff, settings, form.customer, divisions, busy, form.dirty, actions, refreshBundle, canCreateLocation, addCustomer, addLocation, form.issues])
 
   const common = useMemo<CardProps>(() => ({
     values, update, ctx, form: formApi, issues: form.issues, mode, locked,

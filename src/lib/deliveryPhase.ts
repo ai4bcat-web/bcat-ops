@@ -14,6 +14,7 @@
  * Relative imports only: shared by the UI and anything that bundles `src/lib`.
  */
 import type { ShipmentStatus } from '../types/tms'
+import { carrierPhase, type CarrierPhase } from './carrierLegs'
 
 export type DeliveryPhase =
   | 'DRAFT' | 'NOT_COVERED' | 'NOT_DISPATCHED' | 'EN_ROUTE_PICKUP'
@@ -45,6 +46,8 @@ export const PHASE_LABEL: Record<DeliveryPhase, string> = {
 export type PhaseTone = 'grey' | 'green' | 'amber' | 'red'
 
 export interface PhaseStop {
+  /** `Stop.id`; only needed to resolve carrier legs. */
+  id?: string
   type: 'pickup' | 'delivery'
   arrivedAt?: string | null
   departedAt?: string | null
@@ -71,6 +74,11 @@ export interface PhaseInput {
   /** Minutes the current ETA is past the appointment, when tracking computed it. */
   etaLateMinutes?: number | null
   nowMs: number
+  /**
+   * The live carriers (Step AT). With two or more, the shipment phase is the furthest-behind stop among
+   * the stops some carrier covers, and `carrierPhases` lists each carrier's own progress. One or none: ignored.
+   */
+  carriers?: readonly { name?: string | null; legStopIds?: readonly string[] | null }[]
 }
 
 export interface CheckpointState {
@@ -101,6 +109,8 @@ export interface PhaseResult {
   lastFix: { at: string; place: string | null } | null
   /** role=img text: "In transit, stop 2 of 4". */
   summary: string
+  /** Per live carrier, when two or more. */
+  carrierPhases?: { name: string; phase: CarrierPhase }[]
 }
 
 const GRACE_MS = 15 * 60_000
@@ -190,8 +200,26 @@ function lateReason(phase: DeliveryPhase, stop: PhaseStop | undefined, now: numb
 const summaryOf = (label: string, caption: string, stopIndex: number, stopCount: number): string =>
   stopCount > 2 && caption.startsWith('Stop') ? `${label}, stop ${stopIndex + 1} of ${stopCount}` : caption && !caption.startsWith('Stop') ? caption : label
 
+/**
+ * Legs-aware entry point. Stops no live carrier covers cannot hold the shipment back, so the phase is
+ * read off the covered stops; every carrier's own progress rides along. A single carrier (or none) is
+ * exactly `phaseOfStops` on the whole route.
+ */
 export function deliveryPhase(i: PhaseInput): PhaseResult {
-  const stops = i.stops
+  const carriers = i.carriers ?? []
+  if (carriers.length < 2) return phaseOfStops(i, i.stops)
+  const legStops = i.stops.map((s, n) => ({ id: s.id ?? String(n), sequence: n, arrivedAt: s.arrivedAt, departedAt: s.departedAt }))
+  const whole = carriers.some((c) => !c.legStopIds || c.legStopIds.length === 0)
+  const coveredIds = new Set(carriers.flatMap((c) => c.legStopIds ?? []))
+  const covered = whole ? i.stops : i.stops.filter((s, n) => coveredIds.has(s.id ?? String(n)))
+  const result = phaseOfStops(i, covered.length > 0 ? covered : i.stops)
+  return {
+    ...result,
+    carrierPhases: carriers.map((c, n) => ({ name: c.name || `Carrier ${n + 1}`, phase: carrierPhase({ legStopIds: c.legStopIds ? [...c.legStopIds] : undefined }, legStops) })),
+  }
+}
+
+function phaseOfStops(i: PhaseInput, stops: readonly PhaseStop[]): PhaseResult {
   const stopCount = Math.max(1, stops.length)
   const checkpoints = (reached: number, current: PhaseStop | undefined, phase: DeliveryPhase): CheckpointState[] =>
     CHECKPOINTS.map((c, n) => ({

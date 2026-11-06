@@ -2234,6 +2234,11 @@ const schema = a.schema({
       trackingLinkId:    a.string(),
       trackingStartedAt: a.datetime(),
       trackingStoppedAt: a.datetime(),
+      // ── Multiple carriers per load (AT-plan MC0) ───────────────────────
+      // Stop.id values from Load.stops this carrier covers. Absent/empty = all stops.
+      legStopIds:        a.string().array(),
+      // Optional per-carrier override of Shipment.trackingPrefs (absent = inherit).
+      trackingPrefs:     a.json(),
       // ── Documents & delivery (Step E) ───────────────────────────────────
       // The ACTIVE CARRIER_UPLOAD TrackingLink e-mailed to this carrier.
       uploadLinkId:      a.string(),

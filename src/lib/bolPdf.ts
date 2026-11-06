@@ -1,262 +1,356 @@
 /**
  * The bill of lading — the receipt for freight that travels with the driver.
  *
- * Built in the browser from `bolData`, saved by SAVE_GENERATED_DOCUMENT, and handed
- * to a dock. The layout follows the rate confirmation (`src/lib/carrierRateCon.ts`):
- * jsPDF in points on letter stock, a black header band, `jspdf-autotable` for the
- * freight grid.
+ * Built in the browser from `buildBolModel` (`src/lib/bolModel.ts`), saved by
+ * SAVE_GENERATED_DOCUMENT, and handed to a dock. The header is the shared letterhead
+ * (`src/lib/pdfLetterhead.ts`, same as the rate confirmation): jsPDF in points on
+ * letter stock, `jspdf-autotable` for the grids.
  *
  * Browser only — the Lambdas never import this file, so `@/` paths are fine here
  * (unlike the shared pure libs, which must stay relative for the esbuild bundle).
  *
- * There is no money on this page because `BolInput` has no field that could carry
- * any. That is the whole design: a shipper, a driver and a consignee read this, and
- * none of them is entitled to what anybody paid.
+ * There is no money on this page unless the model carries `rates` (a customer copy),
+ * and the model only carries them when the caller asked for them.
  */
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { generatedFilename } from '@/lib/shipmentDocuments'
-import type { BolInput, BolParty } from '@/lib/documentData'
+import { fetchDivisionLogoDataUrl } from '@/lib/divisionLogo'
+import { drawLetterhead, resolveLetterhead } from '@/lib/pdfLetterhead'
+import type { HeaderLogo } from '@/lib/pdfLetterhead'
+import type { BolCarrier, BolInput, BolParty } from '@/lib/bolModel'
 
 /** `jspdf-autotable` writes the finished table's geometry back onto the doc it drew into. */
 interface AutoTabled { lastAutoTable: { finalY: number } }
 
+export interface BuildBolOptions {
+  /** Resolves a Division.logoKey to a PNG/JPEG data URL, or null. Defaults to the S3 loader. */
+  loadLogo?: (logoKey: string) => Promise<string | null>
+}
+
 const M = 40
-const FOOT_ROOM = 56
+const FOOT_ROOM = 44
+/** Where the body starts on every page: under the band and the scope line. */
+const BODY_TOP = 104
 
-/** The same name the generated file gets in S3, so a download matches its key. */
-export function bolFilename(shipmentNumber: string, version: number): string {
-  return generatedFilename('BOL', shipmentNumber, version)
-}
+const GREY = [107, 114, 128] as const
+const INK = [55, 65, 81] as const
 
-function apptText(appt: string | null): string {
-  if (!appt) return 'TBD'
-  const at = new Date(appt)
+function apptText(party: Pick<BolParty, 'appt' | 'apptEnd' | 'apptType'>): string {
+  if (!party.appt) return party.apptType ? `${party.apptType} — TBD` : 'TBD'
+  const at = new Date(party.appt)
   if (Number.isNaN(at.getTime())) return 'TBD'
+  const time = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  const end = party.apptEnd ? new Date(party.apptEnd) : null
+  const window = end && !Number.isNaN(end.getTime()) ? `${time(at)} – ${time(end)}` : time(at)
   const date = at.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  const time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-  return `${date}  ${time}`
+  return `${date}  ${window}${party.apptType ? `  ${party.apptType}` : ''}`
 }
 
-/** Black band at the top of every page: who tendered, which BOL, which shipment. */
-function drawHeader(doc: jsPDF, input: BolInput): void {
-  const W = doc.internal.pageSize.getWidth()
-  doc.setFillColor(0, 0, 0)
-  doc.rect(0, 0, W, 70, 'F')
-  doc.setTextColor(255, 255, 255)
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(16)
-  doc.text(input.broker.name, M, 34)
-  const ids = [
-    input.broker.mc ? `MC ${input.broker.mc}` : '',
-    input.broker.phone ?? '',
-  ].filter(Boolean).join('  ·  ')
-  if (ids) {
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
-    doc.setTextColor(190, 200, 215)
-    doc.text(ids, M, 50)
-  }
-  doc.setTextColor(255, 255, 255)
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(13)
-  doc.text('BILL OF LADING', W - M, 32, { align: 'right' })
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.setTextColor(190, 200, 215)
-  doc.text(`BOL ${input.bolNumber}  ·  Shipment ${input.shipmentNumber}`, W - M, 48, { align: 'right' })
+function dayText(iso: string): string {
+  const at = new Date(`${iso}T12:00:00`)
+  return Number.isNaN(at.getTime())
+    ? iso
+    : at.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-/** One party block. Returns how many lines it drew, so the taller side sets the next y. */
 function partyLines(party: BolParty): string[] {
   const lines = [party.name, ...party.address.split('\n')].filter(Boolean)
   if (party.contact) lines.push(party.contact)
-  lines.push(`Appointment: ${apptText(party.appt)}`)
+  lines.push(`Appointment: ${apptText(party)}`)
   for (const ref of party.refs) lines.push(`${ref.label}: ${ref.value}`)
+  if (party.alsoPickedUp.length > 0) lines.push(`Also picked up at: ${party.alsoPickedUp.join('; ')}`)
   return lines
 }
 
+const weightText = (lbs: number | null): string => (lbs != null ? `${lbs.toLocaleString('en-US')} lbs` : '—')
+const centsText = (c: number): string =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(c / 100)
+
 /**
- * Build the bill of lading. One page, continuing onto a second only when the freight,
- * the notes and the conditions genuinely need it; the signature block always closes
- * the document.
+ * Build the bill of lading. Pages break wherever the content needs it — a long item
+ * list takes the letterhead onto each new page — and the signature block always
+ * closes the document on the last page.
  */
-export async function buildBolPdf(input: BolInput): Promise<jsPDF> {
+export async function buildBolPdf(input: BolInput, options: BuildBolOptions = {}): Promise<jsPDF> {
   const doc = new jsPDF({ unit: 'pt', format: 'letter' })
+  const logo: HeaderLogo | null = await resolveLetterhead(
+    doc,
+    { logoKey: input.broker.logoKey },
+    options.loadLogo ?? fetchDivisionLogoDataUrl,
+  )
   const W = doc.internal.pageSize.getWidth()
   const H = doc.internal.pageSize.getHeight()
+  const contentW = W - M * 2
 
-  drawHeader(doc, input)
-  let y = 100
+  // autotable's didDrawPage fires on the page the table starts on too, so a page's
+  // letterhead is drawn once, whoever reaches the page first.
+  const headed = new Set<number>()
+  const header = () => {
+    const page = doc.getCurrentPageInfo().pageNumber
+    if (headed.has(page)) return
+    headed.add(page)
+    drawLetterhead(doc, {
+      legalName: input.broker.legalName,
+      ids: [
+        input.broker.mc ? `MC ${input.broker.mc}` : '',
+        input.broker.dot ? `DOT ${input.broker.dot}` : '',
+      ].filter(Boolean).join('  ·  '),
+      detail: [input.broker.address.replace(/\n/g, ', '), input.broker.phone ?? ''].filter(Boolean).join('  ·  '),
+      title: 'BILL OF LADING',
+      subtitle: `BOL ${input.bolNumber}  ·  ${dayText(input.date)}`,
+      logo,
+    })
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.setTextColor(...INK)
+    doc.text(input.scopeLabel, M, 88, { maxWidth: contentW })
+  }
+
+  header()
+  let y = BODY_TOP
 
   /** Reserve `h` points on the current page, continuing onto a fresh one if they are gone. */
   const room = (h: number) => {
     if (y + h <= H - FOOT_ROOM) return
     doc.addPage()
-    drawHeader(doc, input)
-    y = 100
+    header()
+    y = BODY_TOP
   }
 
-  // ── Bill to ─────────────────────────────────────────────────────────────────
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9)
-  doc.setTextColor(107, 114, 128)
-  doc.text('CUSTOMER', M, y)
-  y += 14
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.setTextColor(55, 65, 81)
-  doc.text([input.customer.name, input.customer.billTo ? `Bill to: ${input.customer.billTo}` : '']
-    .filter(Boolean).join('     '), M, y)
-  y += 24
+  const label = (caption: string, x = M, at = y) => {
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(8.5)
+    doc.setTextColor(...GREY)
+    doc.text(caption, x, at)
+  }
+  const body = (size = 10) => {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(size)
+    doc.setTextColor(...INK)
+  }
+  const paragraph = (caption: string, content: string, size = 9) => {
+    body(size)
+    const lines = doc.splitTextToSize(content, contentW) as string[]
+    const lead = size + 2
+    room(24 + lines.length * lead)
+    label(caption)
+    y += 13
+    body(size)
+    doc.text(lines, M, y)
+    y += lines.length * lead + 10
+  }
+  const table = (head: string[], rows: string[][], opts: { foot?: string[][]; widths?: Record<number, number> } = {}) => {
+    room(50)
+    autoTable(doc, {
+      startY: y,
+      head: [head],
+      body: rows,
+      foot: opts.foot,
+      showFoot: 'lastPage',
+      theme: 'striped',
+      headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8.5, halign: 'left' },
+      footStyles: { fillColor: [243, 244, 246], textColor: [31, 41, 55], fontSize: 8.5, fontStyle: 'bold' },
+      bodyStyles: { fontSize: 8.5, textColor: [31, 41, 55], valign: 'top' },
+      columnStyles: Object.fromEntries(Object.entries(opts.widths ?? {}).map(([k, w]) => [k, { cellWidth: w }])),
+      margin: { top: BODY_TOP, left: M, right: M, bottom: FOOT_ROOM },
+      tableWidth: contentW,
+      didDrawPage: header,
+    })
+    y = (doc as jsPDF & AutoTabled).lastAutoTable.finalY + 16
+  }
+
+  // ── Customer · bill to · PO ─────────────────────────────────────────────────
+  const third = contentW / 3
+  label('CUSTOMER')
+  label('BILL TO', M + third)
+  label('CUSTOMER PO', M + third * 2)
+  body()
+  doc.text(input.customer.name || '—', M, y + 14, { maxWidth: third - 10 })
+  doc.text(input.customer.billTo || '—', M + third, y + 14, { maxWidth: third - 10 })
+  doc.text(input.customer.poRef || '—', M + third * 2, y + 14, { maxWidth: third - 10 })
+  y += 36
 
   // ── Ship from · ship to ─────────────────────────────────────────────────────
   const right = W / 2 + 10
-  const shipper = partyLines(input.shipper)
-  const consignee = partyLines(input.consignee)
-  room(28 + Math.max(shipper.length, consignee.length) * 13)
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9)
-  doc.setTextColor(107, 114, 128)
-  doc.text('SHIP FROM', M, y)
-  doc.text('SHIP TO', right, y)
-  y += 14
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.setTextColor(55, 65, 81)
+  const half = W / 2 - M - 10
+  const shipper = partyLines(input.shipper).flatMap((l) => doc.splitTextToSize(l, half) as string[])
+  const consignee = partyLines(input.consignee).flatMap((l) => doc.splitTextToSize(l, half) as string[])
   const rows = Math.max(shipper.length, consignee.length)
+  room(30 + rows * 13)
+  label('SHIP FROM')
+  label('SHIP TO', right)
+  y += 14
+  body()
   for (let i = 0; i < rows; i++) {
-    if (shipper[i]) doc.text(shipper[i], M, y + i * 13, { maxWidth: W / 2 - M - 10 })
-    if (consignee[i]) doc.text(consignee[i], right, y + i * 13, { maxWidth: W / 2 - M - 10 })
+    if (shipper[i]) doc.text(shipper[i], M, y + i * 13)
+    if (consignee[i]) doc.text(consignee[i], right, y + i * 13)
   }
-  y += rows * 13 + 14
+  y += rows * 13 + 12
+
+  // ── Stops (master) ──────────────────────────────────────────────────────────
+  if (input.stops.length > 0) {
+    table(
+      ['Stop', 'Location', 'Appointment', 'References'],
+      input.stops.map((s) => [
+        `${s.seq}. ${s.kind === 'PICKUP' ? 'Pickup' : 'Delivery'}`,
+        [s.name, s.cityState].filter(Boolean).join(', ') || '—',
+        apptText({ appt: s.appt, apptEnd: null, apptType: null }),
+        s.refs.map((r) => `${r.label}: ${r.value}`).join('\n') || '—',
+      ]),
+      { widths: { 0: 62, 2: 130, 3: 120 } },
+    )
+  }
 
   // ── Carrier ─────────────────────────────────────────────────────────────────
-  if (input.carrier) {
-    const carrier = [
-      input.carrier.name,
-      input.carrier.mc ? `MC ${input.carrier.mc}` : '',
-      input.carrier.driverName ? `Driver: ${input.carrier.driverName}` : '',
-      input.carrier.truckNumber ? `Truck: ${input.carrier.truckNumber}` : '',
-      input.carrier.trailerNumber ? `Trailer: ${input.carrier.trailerNumber}` : '',
-    ].filter(Boolean).join('     ')
-    room(32)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
-    doc.setTextColor(107, 114, 128)
-    doc.text('CARRIER', M, y)
+  const sealBlank = input.chips.includes('Seal required')
+  const sealOf = (c: BolCarrier) => c.sealNumber ?? (sealBlank ? '________' : '—')
+  if (input.carriers.length > 0) {
+    table(
+      ['Carrier', 'MC', 'Driver', 'Truck', 'Trailer', 'Seal'],
+      input.carriers.map((c) => [
+        [c.name || '—', c.covers ? `Covers: ${c.covers}` : ''].filter(Boolean).join('\n'),
+        c.mc ?? '—',
+        [c.driverName, c.driverPhone].filter(Boolean).join('\n') || '—',
+        c.truckNumber ?? '—',
+        c.trailerNumber ?? '—',
+        sealOf(c),
+      ]),
+      { widths: { 1: 52, 3: 56, 4: 56, 5: 62 } },
+    )
+  } else {
+    label('CARRIER')
     y += 14
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    doc.setTextColor(55, 65, 81)
-    doc.text(carrier, M, y, { maxWidth: W - M * 2 })
+    body()
+    doc.text(`To be assigned${sealBlank ? '          Seal ________' : ''}`, M, y)
     y += 22
   }
 
   // ── Freight ─────────────────────────────────────────────────────────────────
-  room(60)
-  autoTable(doc, {
-    startY: y,
-    head: [['Qty', 'Handling', 'Description', 'Weight', 'Class', 'NMFC', 'Hazmat']],
-    body: input.freight.length > 0
-      ? input.freight.map((item) => [
-        String(item.qty),
-        item.handlingUnit,
-        item.description || '—',
-        item.weightLbs != null ? `${item.weightLbs.toLocaleString()} lbs` : '—',
-        item.freightClass || '—',
-        item.nmfc || '—',
-        item.hazmat ? `UN${item.hazmat.un} · ${item.hazmat.hazClass}` : '—',
-      ])
-      : [['—', '—', 'See attached manifest', '—', '—', '—', '—']],
-    theme: 'striped',
-    headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8.5, halign: 'left' },
-    bodyStyles: { fontSize: 8.5, textColor: [31, 41, 55], valign: 'top' },
-    columnStyles: {
-      0: { cellWidth: 34 }, 1: { cellWidth: 58 }, 3: { cellWidth: 62 },
-      4: { cellWidth: 40 }, 5: { cellWidth: 48 }, 6: { cellWidth: 78 },
+  const pieces = input.totals.pieces
+  table(
+    ['Qty', 'Unit', 'Description', 'Weight', 'Class', 'NMFC', 'Hazmat'],
+    input.lines.map((l) => [
+      l.qty != null ? String(l.qty) : '—',
+      l.unit || '—',
+      l.description || '—',
+      weightText(l.weightLbs),
+      l.freightClass || '—',
+      l.nmfc || '—',
+      l.hazmat || '—',
+    ]),
+    {
+      foot: [[
+        pieces != null ? String(pieces) : '—', 'Total', '', weightText(input.totals.weightLbs), '', '', '',
+      ]],
+      widths: { 0: 34, 1: 52, 3: 62, 4: 40, 5: 48, 6: 78 },
     },
-    // A freight list long enough to break takes the letterhead onto the next page with
-    // it; `margin.top` is where the table resumes under that band.
-    margin: { top: 100, left: M, right: M },
-    didDrawPage: () => drawHeader(doc, input),
-    tableWidth: W - M * 2,
-  })
-  y = (doc as jsPDF & AutoTabled).lastAutoTable.finalY + 20
-
-  // ── Special requirements and the customer's instructions ────────────────────
-  if (input.specialRequirements.length > 0) {
-    room(30)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
-    doc.setTextColor(107, 114, 128)
-    doc.text('SPECIAL REQUIREMENTS', M, y)
+  )
+  y -= 6
+  if (input.linesNote) {
+    body(8.5)
+    doc.text(input.linesNote, M, y)
     y += 14
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    doc.setTextColor(55, 65, 81)
-    doc.text(input.specialRequirements.join('     '), M, y, { maxWidth: W - M * 2 })
-    y += 22
   }
+  if (input.declaredValue) {
+    room(18)
+    body(9)
+    doc.text(`Declared value: ${input.declaredValue}`, M, y)
+    y += 16
+  }
+  y += 4
 
-  if (input.customerNotes) {
-    const lines = doc.splitTextToSize(input.customerNotes, W - M * 2) as string[]
-    room(26 + lines.length * 11)
+  // ── Requirements, references, notes ─────────────────────────────────────────
+  if (input.chips.length > 0) paragraph('REQUIREMENTS', input.chips.join('   ·   '), 10)
+  if (input.references.length > 0) {
+    paragraph('REFERENCES', input.references.map((r) => `${r.label}: ${r.value}`).join('     '))
+  }
+  if (input.bolNotes) paragraph('BOL NOTES', input.bolNotes)
+  if (input.specialInstructions) paragraph('SPECIAL INSTRUCTIONS', input.specialInstructions)
+
+  // ── Charges (customer copy only) ────────────────────────────────────────────
+  if (input.rates) {
+    room(30)
+    body(9)
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
-    doc.setTextColor(107, 114, 128)
-    doc.text('SHIPPING INSTRUCTIONS', M, y)
-    y += 14
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
-    doc.setTextColor(55, 65, 81)
-    doc.text(lines, M, y)
-    y += lines.length * 11 + 12
+    doc.text('Customer copy — contains rates', M, y)
+    y += 8
+    table(
+      ['Charges', 'Amount'],
+      input.rates.lines.map((l) => [l.label, centsText(l.amountCents)]),
+      { foot: [['Total', centsText(input.rates.totalCents)]], widths: { 1: 90 } },
+    )
   }
 
   // ── Conditions ──────────────────────────────────────────────────────────────
-  if (input.terms.trim()) {
-    const lines = doc.splitTextToSize(input.terms.trim(), W - M * 2) as string[]
+  const terms = [input.terms.trim(), input.receiptLineEs ?? ''].filter(Boolean).join('\n')
+  if (terms) {
+    body(8)
+    const lines = doc.splitTextToSize(terms, contentW) as string[]
     room(26 + lines.length * 10)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
-    doc.setTextColor(107, 114, 128)
-    doc.text('CONDITIONS', M, y)
-    y += 14
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(75, 85, 99)
+    label('CONDITIONS')
+    y += 13
+    body(8)
     doc.text(lines, M, y)
-    y += lines.length * 10 + 14
+    y += lines.length * 10 + 12
   }
 
   // ── Signatures ──────────────────────────────────────────────────────────────
   // Three hands touch the freight, so three sign for it: the shipper tendering, the
-  // driver taking possession, the consignee receiving.
-  room(96)
+  // driver taking possession (one block per carrier), the consignee receiving.
+  const block = (col: number, title: string, fields: string[], extra: string[]) => {
+    const x = M + col * third
+    const w = third - 18
+    label(title, x, y)
+    let at = y + 28
+    doc.setDrawColor(...GREY)
+    for (const field of fields) {
+      doc.line(x, at, x + w, at)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7.5)
+      doc.setTextColor(...GREY)
+      doc.text(field, x, at + 9)
+      at += 28
+    }
+    body(8)
+    for (const line of extra) {
+      doc.text(line, x, at - 6, { maxWidth: w })
+      at += 11
+    }
+  }
+  const BLOCK_H = 132
+  room(BLOCK_H + 18)
   doc.setDrawColor(229, 231, 235)
   doc.line(M, y, W - M, y)
-  y += 20
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9)
-  doc.setTextColor(107, 114, 128)
-  doc.text('SIGNATURES', M, y)
-  y += 22
-  const third = (W - M * 2) / 3
-  const captions = ['Shipper / date', 'Driver / date', 'Consignee / date']
-  doc.setDrawColor(107, 114, 128)
-  captions.forEach((caption, i) => {
-    const x = M + i * third
-    doc.line(x, y + 2, x + third - 20, y + 2)
+  y += 16
+  label('SIGNATURES')
+  y += 12
+  const signed = ['Signature', 'Print name', 'Date / time']
+  const drivers = input.carriers.length > 0 ? input.carriers : [null]
+  block(0, 'SHIPPER', signed, [`Pieces tendered: ${pieces ?? '____'}`])
+  block(1, drivers[0]?.name ? `CARRIER / DRIVER — ${drivers[0].name}` : 'CARRIER / DRIVER', signed, [
+    drivers[0]?.driverName ? `Driver: ${drivers[0].driverName}` : 'Driver: ____________',
+  ])
+  block(2, 'CONSIGNEE', signed, [
+    'Pieces received: ______   [ ] in good order',
+    '[ ] exceptions: ____________________',
+  ])
+  y += BLOCK_H
+  for (const extra of drivers.slice(1)) {
+    room(BLOCK_H)
+    block(1, `CARRIER / DRIVER — ${extra?.name ?? ''}`, signed, [
+      extra?.driverName ? `Driver: ${extra.driverName}` : 'Driver: ____________',
+    ])
+    y += BLOCK_H
+  }
+
+  const pages = doc.getNumberOfPages()
+  for (let page = 1; page <= pages; page++) {
+    doc.setPage(page)
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(8)
-    doc.setTextColor(107, 114, 128)
-    doc.text(caption, x, y + 16)
-  })
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8)
-  doc.setTextColor(156, 163, 175)
-  doc.text(`${input.broker.name} — bill of lading ${input.bolNumber}`, M, H - 28)
+    doc.setTextColor(156, 163, 175)
+    doc.text(`${input.broker.legalName} — bill of lading ${input.bolNumber}`, M, H - 24)
+    doc.text(`Page ${page} of ${pages}`, W - M, H - 24, { align: 'right' })
+  }
   return doc
 }

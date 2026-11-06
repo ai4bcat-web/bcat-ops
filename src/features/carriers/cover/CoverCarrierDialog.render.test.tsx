@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   preview: vi.fn(),
   invite: vi.fn(),
   cover: vi.fn(),
+  add: vi.fn(),
   bundle: vi.fn(),
   refresh: vi.fn(),
   carriers: [] as unknown[],
@@ -26,6 +27,7 @@ vi.mock('@/lib/apiClient', () => ({
   mcpPreviewCarrier: mocks.preview,
   mcpSendInvite: mocks.invite,
   coverCarrier: mocks.cover,
+  addCarrier: mocks.add,
   getShipmentBundle: mocks.bundle,
   getTmsSettings: vi.fn(async () => null),
   listCustomers: vi.fn(async () => [{ id: 'cust-1', name: 'Acme' }]),
@@ -84,7 +86,7 @@ beforeEach(() => {
   mocks.loading = false
   mocks.preview.mockResolvedValue(live())
   mocks.refresh.mockResolvedValue(undefined)
-  mocks.bundle.mockResolvedValue({ shipment: { id: 'shp-1', updatedAt: 'S-UPD' }, loads: [{ id: 'load-1', updatedAt: 'L-UPD' }] })
+  mocks.bundle.mockResolvedValue({ shipment: { id: 'shp-1', updatedAt: 'S-UPD' }, loads: [{ id: 'load-1', updatedAt: 'L-UPD' }], loadCarriers: [] })
   mocks.cover.mockResolvedValue({ shipment: { id: 'shp-1', customerId: 'cust-1' }, loads: [{ id: 'load-1' }] })
 })
 
@@ -102,6 +104,24 @@ describe('CoverCarrierDialog', () => {
     await waitFor(() => expect(mocks.cover).toHaveBeenCalledTimes(1))
     expect(mocks.cover).toHaveBeenCalledWith({ loadId: 'load-1', expectedUpdatedAt: 'L-UPD', carrierId: 'car-1', carrierRateCents: 150_000 })
     expect(onCovered).toHaveBeenCalled()
+  })
+
+  it('a load that already has a live carrier gets another one through addCarrier, with the legs the rep ticks, never a replacement', async () => {
+    mocks.carriers = [carrierRow({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })]
+    const stops = [{ id: 'st-1', type: 'pickup', city: 'Dallas' }, { id: 'st-2', type: 'delivery', city: 'Austin' }]
+    const live = { id: 'lc-1', loadId: 'load-1', status: 'ACTIVE', kind: 'CARRIER' }
+    mocks.bundle.mockResolvedValue({ shipment: { id: 'shp-1', updatedAt: 'S-UPD' }, loads: [{ id: 'load-1', updatedAt: 'L-UPD', stops }], loadCarriers: [live] })
+    mocks.add.mockResolvedValue({ shipment: { id: 'shp-1', customerId: 'cust-1' }, loads: [{ id: 'load-1' }], loadCarriers: [live] })
+    render(<MemoryRouter><CoverCarrierDialog shipmentId="shp-1" bundle={await mocks.bundle()} onClose={onClose} onCovered={onCovered} /></MemoryRouter>)
+    await lookUp('MC 900001')
+    enterRate()
+    fireEvent.click(await screen.findByLabelText('All stops'))
+    fireEvent.click(await screen.findByTestId('cover-leg-st-2'))
+    fireEvent.click(screen.getByTestId('cover-assign'))
+
+    await waitFor(() => expect(mocks.add).toHaveBeenCalledTimes(1))
+    expect(mocks.add).toHaveBeenCalledWith({ loadId: 'load-1', expectedUpdatedAt: 'L-UPD', carrierId: 'car-1', carrierRateCents: 150_000, legStopIds: ['st-2'] })
+    expect(mocks.cover).not.toHaveBeenCalled()
   })
 
   it('after the cover it stays open on the Tracking section for this load and customer, and Done closes it (feedback 9)', async () => {

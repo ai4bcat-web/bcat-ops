@@ -20,6 +20,7 @@ import {
   type ReviewFacts,
   type ReviewRequirement,
 } from './reviewRequirements'
+import { aggregateApStatus } from './carrierTotals'
 import { isReleasedToInvoicing } from './shipmentLists'
 import {
   releaseGateError,
@@ -93,6 +94,8 @@ export interface LoadReviewRow {
   revDivision?: string | null
   assignmentType?: AssignmentType | null
   apStatus?: ApStatus | null
+  /** Every live carrier on the load (AT-plan); absent = read the single `apStatus`. */
+  carriers?: { name?: string | null; apStatus?: ApStatus | null; costCents?: number | null }[] | null
   docsRequired?: string[] | null
   docsMissing?: string[] | null
   openIncidentCount?: number | null
@@ -145,6 +148,7 @@ export const GATE_CODE_CHECK: Record<ReleaseGateReasonCode, LoadReviewCheckKey> 
   REFERENCE_MISSING: 'details',
   CARRIER_NOT_ASSIGNED: 'details',
   DRIVER_MISSING: 'details',
+  CARRIER_RATE_MISSING: 'charges',
   CARRIER_CHARGES_UNSETTLED: 'charges',
   OPEN_EXCEPTIONS: 'details',
 }
@@ -157,6 +161,7 @@ const GATE_CODE_TAB: Record<ReleaseGateReasonCode, LoadReviewAction | null> = {
   REFERENCE_MISSING: { kind: 'OPEN_TAB', tab: 'overview' },
   CARRIER_NOT_ASSIGNED: { kind: 'OPEN_TAB', tab: 'carrier' },
   DRIVER_MISSING: { kind: 'OPEN_TAB', tab: 'carrier' },
+  CARRIER_RATE_MISSING: { kind: 'OPEN_TAB', tab: 'carrierPay' },
   CARRIER_CHARGES_UNSETTLED: { kind: 'OPEN_TAB', tab: 'carrierPay' },
   OPEN_EXCEPTIONS: { kind: 'OPEN_TAB', tab: 'tracking' },
 }
@@ -266,7 +271,10 @@ function gateFromRow(row: LoadReviewRow): LoadReviewReason[] {
   if (row.assignmentType == null || row.assignmentType === 'NEED_TO_COVER') {
     out.push(reason('CARRIER_NOT_ASSIGNED', 'No carrier or driver assigned', 'details', GATE_CODE_TAB.CARRIER_NOT_ASSIGNED))
   }
-  if (row.assignmentType === 'CARRIER' && (row.apStatus == null || row.apStatus === 'AWAITING_INVOICE')) {
+  const apStatus = row.carriers && row.carriers.length > 0
+    ? aggregateApStatus(row.carriers.map((c, i) => ({ id: String(i), status: 'ACTIVE' as const, apStatus: c.apStatus })))
+    : row.apStatus
+  if (row.assignmentType === 'CARRIER' && (apStatus == null || apStatus === 'AWAITING_INVOICE')) {
     out.push(reason(
       'CARRIER_CHARGES_UNSETTLED',
       'Carrier charges not settled — record the carrier bill first',

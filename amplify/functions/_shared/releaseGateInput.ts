@@ -202,6 +202,7 @@ export async function loadReleaseGateInput(
     })(),
     chargesFinalizedAt: leg.chargesFinalizedAt == null ? null : String(leg.chargesFinalizedAt),
     rateConStatus: leg.rateConStatus == null ? null : String(leg.rateConStatus),
+    carrierRateCents: typeof leg.costCents === 'number' ? leg.costCents : 0,
   }))
 
   const references: ReleaseGateOrderReference[] = Array.isArray(order.references)

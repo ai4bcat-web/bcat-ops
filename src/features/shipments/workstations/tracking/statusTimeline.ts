@@ -9,6 +9,7 @@
 import type { TmsTimelineItem } from '@/features/tms/kit/TmsTimeline'
 import { statusTone, type TmsTone } from '@/features/tms/kit/statusTone'
 import { MOVEMENT_STATUSES } from '@/lib/brokerageCharts'
+import { coveringCarrier, type LegStop } from '@/lib/carrierLegs'
 import { formatDateTime } from '@/lib/date'
 import { trackingEtaEstimate, type ComputedTrackingEta } from '@/lib/trackingEta'
 import type { Stop } from '@/types'
@@ -45,7 +46,11 @@ export interface LegGeometry {
 
 export function legGeometry(bundle: ShipmentBundle | null | undefined, shipmentId: string): LegGeometry {
   const load = bundle?.shipment.id === shipmentId ? bundle.loads[0] ?? null : null
-  const leg = load ? bundle?.loadCarriers.find((c) => c.loadId === load.id && c.status === 'ACTIVE') ?? null : null
+  const live = load ? (bundle?.loadCarriers ?? []).filter((c) => c.loadId === load.id && c.status === 'ACTIVE') : []
+  // Step AT: with two or more live carriers the leg is the one holding the earliest un-departed stop.
+  const leg = live.length >= 2 && load
+    ? coveringCarrier(live, (load.stops ?? []) as unknown as LegStop[]) ?? live[0] ?? null
+    : live[0] ?? null
   const lat = load?.lastKnownLat
   const lng = load?.lastKnownLng
   const lastKnown = lat == null || lng == null ? null : { lat, lng }

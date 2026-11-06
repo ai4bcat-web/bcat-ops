@@ -1,3 +1,1 @@
-Docs/tms-build/screenshots/ah2/15-required-style-L.png
-Docs/tms-build/screenshots/ah2/16-customer-bill-to-L.png
-Docs/tms-build/screenshots/ah2/20-intake-prefill-L.png
+

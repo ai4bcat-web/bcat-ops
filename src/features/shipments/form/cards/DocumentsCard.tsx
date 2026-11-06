@@ -21,6 +21,7 @@ import { LABEL } from '../labels'
 import { isLocked } from '../model'
 import { fieldAttrs } from '../sections/fieldAttrs'
 import type { CardProps } from './cardRegistry'
+import { GenerateRow } from './GenerateRow'
 import { releaseDocItems } from './releaseDocs'
 import './trackDocsCards.css'
 
@@ -50,14 +51,16 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
   const [problem, setProblem] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
   const [over, setOver] = useState(false)
+  const [showOld, setShowOld] = useState(false)
   const input = useRef<HTMLInputElement>(null)
 
   const saved = ctx.mode === 'edit' && ctx.bundle != null
   const audience: 'ALL' | 'INTERNAL' = tab === 'public' ? 'ALL' : 'INTERNAL'
   const disabled = ctx.busy || working || isLocked(ctx.locked, 'all')
   const queuedAll = values.docs.queued
-
-  const active = (ctx.bundle?.documents ?? []).filter((d) => d.status === 'ACTIVE')
+  const all = ctx.bundle?.documents ?? []
+  const hasOld = all.some((d) => d.status === 'SUPERSEDED')
+  const active = all.filter((d) => d.status === 'ACTIVE' || (showOld && d.status === 'SUPERSEDED'))
   const shown = active.filter((d) => (tab === 'public' ? PUBLIC_AUDIENCES.includes(d.audience) : d.audience === 'INTERNAL'))
   const queued = queuedAll
     .map((q, index) => ({ q, index }))
@@ -99,6 +102,7 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
 
   return (
     <div className="tms-card-body-stack" data-testid="card-documents-body">
+      <GenerateRow ctx={ctx} />
       <TmsTabs
         tabs={[{ key: 'public', label: LABEL.documents.public.text }, { key: 'private', label: LABEL.documents.private.text }]}
         active={tab}
@@ -141,6 +145,12 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
         </Field>
       </div>
       {problem && <p className="tms-card-docs-problem" role="alert" data-testid="card-documents-problem">{problem}</p>}
+      {hasOld && (
+        <label className="tms-card-docs-old text-xs">
+          <input type="checkbox" checked={showOld} onChange={(e) => setShowOld(e.target.checked)} data-testid="card-documents-show-superseded" />
+          <span>Show superseded</span>
+        </label>
+      )}
       {!saved && (
         <p className="tms-muted text-xs" data-testid="card-documents-draft-note">
           Files attached before Create are written to the shipment when you create it. They are held in this browser tab
@@ -159,7 +169,11 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
           {shown.map((d) => (
             <tr key={d.id} data-testid="card-documents-row">
               <td>{d.name}</td>
-              <td>{DOCUMENT_TYPE_LABELS[d.type] ?? d.type}</td>
+              <td>
+                {DOCUMENT_TYPE_LABELS[d.type] ?? d.type}
+                {d.source === 'GENERATED' && <span className="tms-muted">{` v${d.version}`}</span>}
+                {d.status === 'SUPERSEDED' && <span className="tms-muted" data-testid="card-documents-superseded-chip"> superseded</span>}
+              </td>
               <td className="tms-muted">{[d.uploadedBy, formatBoardDateTime(d.uploadedAt)].filter(Boolean).join(' · ')}</td>
               <td>
                 <TmsIconButton shape="plain" aria-label={`Preview ${d.name}`} onClick={() => void preview(d.s3Key)}>
@@ -195,11 +209,19 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
               key={c.type}
               data-testid={`card-documents-check-${c.type}`}
               data-met={c.present ? 'true' : 'false'}
+              data-required={c.required ? 'true' : 'false'}
               data-queued={c.queued || undefined}
             >
               {c.present || c.queued ? <Check size={12} aria-hidden /> : <Circle size={12} aria-hidden />}
               <span>{DOCUMENT_TYPE_LABELS[c.type]}</span>
+              {!c.required && <span className="tms-muted">optional</span>}
               {c.queued && <span className="tms-muted">queued</span>}
+              {c.generatedVersion != null && c.present && <span className="tms-muted" data-testid="card-documents-check-generated">{`generated v${c.generatedVersion}`}</span>}
+              {c.stale && (
+                <span className="tms-card-docs-stale" data-testid="card-documents-bol-stale">
+                  {`BOL v${c.generatedVersion} predates the last edit: regenerate`}
+                </span>
+              )}
             </li>
           ))}
         </ul>

@@ -81,6 +81,10 @@ export interface CarrierBookingInput {
   > | null
   now: Date | string
   isAdmin: boolean
+  /** AT-plan ADD_CARRIER: another carrier next to the live ones, not a replacement. */
+  additional?: boolean
+  /** With `additional`: Σ cost of the carriers already on the load, for the top-spend check. */
+  existingCarrierCostCents?: number
 }
 
 export interface CarrierBookingResult {
@@ -210,7 +214,7 @@ export function evaluateCarrierBooking(input: CarrierBookingInput): CarrierBooki
       { block: true },
     )
   }
-  if (load.activeLoadCarrierId) {
+  if (load.activeLoadCarrierId && !input.additional) {
     add('ALREADY_COVERED', 'ALREADY_COVERED', 'This load already has an active carrier on it.', {
       block: true,
     })
@@ -263,11 +267,12 @@ export function evaluateCarrierBooking(input: CarrierBookingInput): CarrierBooki
     )
   }
   const topSpend = financials?.topSpendCents
-  if (topSpend != null && carrierRateCents > topSpend) {
+  const spendCents = carrierRateCents + (input.additional ? Math.max(0, input.existingCarrierCostCents ?? 0) : 0)
+  if (topSpend != null && spendCents > topSpend) {
     add(
       'COST_EXCEEDS_TOP_SPEND',
       'COST_EXCEEDS_TOP_SPEND',
-      `Carrier rate ${dollars(carrierRateCents)} is over the top spend of ${dollars(topSpend)} for this load.`,
+      `Carrier rate ${dollars(spendCents)} is over the top spend of ${dollars(topSpend)} for this load.`,
       { block: !isAdmin, adminOnly: isAdmin },
     )
   }

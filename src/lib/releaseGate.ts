@@ -27,6 +27,7 @@ export type ReleaseGateReasonCode =
   | 'REFERENCE_MISSING'
   | 'CARRIER_NOT_ASSIGNED'
   | 'DRIVER_MISSING'
+  | 'CARRIER_RATE_MISSING'
   | 'CARRIER_CHARGES_UNSETTLED'
   | 'OPEN_EXCEPTIONS'
 
@@ -83,6 +84,12 @@ export interface ReleaseGateLeg {
    * the Documents tab and the cached gate use.
    */
   rateConStatus?: string | null
+  /**
+   * The leg's own CARRIER total in cents (its cached `costCents`). A number at or
+   * below zero on an unbilled carrier leg is "rate missing"; absent = not supplied,
+   * nothing is said.
+   */
+  carrierRateCents?: number | null
 }
 
 export interface ReleaseGateInput {
@@ -175,10 +182,22 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
     for (const doc of documents) {
       if (countsAsPresent(doc)) present.add(doc.type)
     }
-    if (legs.some((leg) => leg.status === 'ACTIVE' && leg.kind === 'CARRIER' && leg.rateConStatus === 'SIGNED')) {
+    // One outside carrier: any signed rate con satisfies RATE_CON, as ever. Two or
+    // more: every one must be signed, and a signed one never waives another's.
+    const carrierLegs = legs.filter((leg) => leg.status === 'ACTIVE' && leg.kind === 'CARRIER')
+    const perCarrierRateCon = carrierLegs.length >= 2
+    if (!perCarrierRateCon && carrierLegs.some((leg) => leg.rateConStatus === 'SIGNED')) {
       present.add('RATE_CON')
     }
     for (const type of requiredDocTypesForRelease(input.requiredDocTypes, legs)) {
+      if (type === 'RATE_CON' && perCarrierRateCon) {
+        const unsigned = carrierLegs.filter((leg) => leg.rateConStatus !== 'SIGNED')
+        if (unsigned.length > 0) {
+          const names = unsigned.map((leg) => leg.carrierName?.trim() || 'the carrier').join(', ')
+          missing.push(reason('DOC_MISSING', type, `Missing document: ${type} — ${names}`))
+        }
+        continue
+      }
       if (!present.has(type)) missing.push(reason('DOC_MISSING', type, `Missing document: ${type}`))
     }
   }
@@ -204,6 +223,18 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
     } else if (!leg.deliveryDriverId?.trim()) {
       missing.push(reason('DRIVER_MISSING', null, OWN_ASSET_MESSAGES.releaseNoDeliveryDriver))
     }
+  }
+  for (const leg of active) {
+    if (leg.kind !== 'CARRIER' || leg.chargesFinalizedAt) continue
+    if (typeof leg.carrierRateCents !== 'number' || leg.carrierRateCents > 0) continue
+    const carrier = leg.carrierName?.trim() || 'the carrier'
+    missing.push(
+      reason(
+        'CARRIER_RATE_MISSING',
+        leg.carrierName ?? null,
+        `Carrier rate missing: ${carrier} — enter the carrier rate first`,
+      ),
+    )
   }
   // An own-asset leg is already recorded: its cost is a driver settlement, and it
   // never enters AP. Somebody else's truck has to have a bill against it first.

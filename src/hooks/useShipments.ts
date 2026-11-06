@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { listCarriers, listCustomers, listDrivers, listQuotes, listUserProfiles } from '@/lib/apiClient'
 import type { LoadBoardSummary } from '@/lib/apiClient'
 import { loadBoardBundle, peekBoardBundle, type BoardBundle, type BoardView } from '@/lib/boardData'
+import { aggregateApStatus } from '@/lib/carrierTotals'
+import type { BoardCarrier } from '@/lib/shipmentViewDefs'
 import type { Driver, Stop } from '@/types'
 import type { PaperworkLocation } from '@/lib/paperworkLocation'
 import type {
@@ -31,6 +33,10 @@ export interface ShipmentListRow extends ShipmentRecord {
   invoiceId?: string | null
   /** Step G — the active assignment's AP rung, for the board's AP column. */
   apStatus: ApStatus | null
+  /** Step AT — the live carriers, listed only when there are two or more (empty = read `carrierName`). */
+  carriers: BoardCarrier[]
+  /** Step AT — how many ACTIVE carriers the shipment has. */
+  carrierCount: number
   assignmentType: AssignmentType | null
   loadStatus: LoadWorkflowStatus | null
   /** Step D — the load's tracking clock, for the board's Last update / Next check call / Exceptions. */
@@ -402,6 +408,18 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
       const held = activeByShipment[lc.shipmentId]
       if (!held || (lc.createdAt ?? '') > (held.createdAt ?? '')) activeByShipment[lc.shipmentId] = lc
     }
+    // Step AT — every ACTIVE row of a shipment, in booking order, for the Carrier cell's
+    // list. Built from the rows this view already read (no extra table read), so it is
+    // exactly as complete as the board's LoadCarrier window: a row outside it is absent
+    // from the list and the count, never fetched here.
+    const liveByShipment: Record<string, LoadCarrierRecord[]> = {}
+    for (const lc of loadCarriers) {
+      if (lc.status !== 'ACTIVE' || !lc.shipmentId) continue
+      ;(liveByShipment[lc.shipmentId] ??= []).push(lc)
+    }
+    for (const list of Object.values(liveByShipment)) {
+      list.sort((a, b) => ((a.sequence ?? 0) - (b.sequence ?? 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    }
 
     const assignmentByShipment: Record<string, AssignmentType> = {}
     const statusByShipment: Record<string, LoadWorkflowStatus> = {}
@@ -543,6 +561,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
 
     return shipments.map((s) => {
       const active = activeByShipment[s.id]
+      const live = liveByShipment[s.id] ?? []
+      const multi = live.length >= 2
       const tracking = trackingByShipment[s.id]
       const shipmentLoads = loadsByShipment[s.id] ?? []
       const firstLoad = shipmentLoads[0]
@@ -615,7 +635,11 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
       return {
         ...s,
         arStatus: arByShipment[s.id] ?? null,
-        apStatus: active?.apStatus ?? null,
+        apStatus: multi ? aggregateApStatus(live) : active?.apStatus ?? null,
+        carriers: multi
+          ? live.map((lc) => ({ name: lc.carrierName ?? 'Carrier', apStatus: lc.apStatus ?? null, costCents: lc.costCents ?? null }))
+          : [],
+        carrierCount: live.length,
         docsMissing: docsByShipment[s.id] ?? null,
         assignmentType: assignmentByShipment[s.id] ?? null,
         loadStatus: statusByShipment[s.id] ?? null,

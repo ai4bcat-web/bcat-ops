@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { defaultColumnWidth } from '@/features/tms/grid/denseGridModel'
 import { ALJEX_COLUMN_KEYS } from './shipmentViews'
+import { matchesColumnFilter } from '@/features/tms/grid/denseGridModel'
 import { ACTIONS_COLUMN, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS, SHIPMENT_GRID_COLUMNS } from './shipmentGridColumns'
 
 /** The scroller at 1440 wide: the default set plus the Actions column must not scroll sideways. */
@@ -22,5 +23,19 @@ describe('Shipments default columns', () => {
     const positions = SHIPMENT_DEFAULT_COLUMNS.map((k) => aljexOrder.indexOf(k))
     expect(positions.every((p) => p >= 0)).toBe(true)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
+  })
+})
+
+describe('Carrier column with several carriers', () => {
+  it('filters on the second carrier and sorts by names', () => {
+    const col = SHIPMENT_GRID_COLUMNS.find((c) => c.key === 'carrier')!
+    const base = { id: '1', number: 'S1', status: 'OPEN', assignmentType: 'CARRIER', carrierName: 'Beta' } as never
+    const multi = { ...(base as object), carriers: [{ name: 'Beta', apStatus: null, costCents: null }, { name: 'Alpha', apStatus: null, costCents: null }] } as never
+    expect(col.text(multi)).toBe('2 carriers')
+    expect(col.optionsOf!(multi).map((o) => o.value)).toEqual(['Beta', 'Alpha'])
+    expect(matchesColumnFilter(multi, col, { values: ['Alpha'] })).toBe(true)
+    expect(matchesColumnFilter(base, col, { values: ['Alpha'] })).toBe(false)
+    expect(col.optionsOf!(base).map((o) => o.value)).toEqual(['Beta'])
+    expect(col.sortValue!(multi)).toBe('Alpha, Beta')
   })
 })

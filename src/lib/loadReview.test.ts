@@ -147,7 +147,7 @@ describe('gate code mapping', () => {
   // Typed as the full union: adding a gate code without extending this list fails to compile.
   const ALL: Record<ReleaseGateReasonCode, true> = {
     VOIDED: true, CANCELED: true, NOT_DELIVERED: true, DOC_MISSING: true, REFERENCE_MISSING: true,
-    CARRIER_NOT_ASSIGNED: true, DRIVER_MISSING: true, CARRIER_CHARGES_UNSETTLED: true, OPEN_EXCEPTIONS: true,
+    CARRIER_NOT_ASSIGNED: true, DRIVER_MISSING: true, CARRIER_RATE_MISSING: true, CARRIER_CHARGES_UNSETTLED: true, OPEN_EXCEPTIONS: true,
   }
 
   it('maps every ReleaseGateReasonCode to a real check, and a supplied gate lands each under it', () => {
@@ -164,7 +164,7 @@ describe('gate code mapping', () => {
     const grouped: Record<LoadReviewCheckKey, ReleaseGateReasonCode[]> = { salesRep: [], revDivision: [], details: [], charges: [], documents: [] }
     for (const code of Object.keys(ALL) as ReleaseGateReasonCode[]) grouped[GATE_CODE_CHECK[code]].push(code)
     expect(grouped.documents).toEqual(['DOC_MISSING'])
-    expect(grouped.charges).toEqual(['CARRIER_CHARGES_UNSETTLED'])
+    expect(grouped.charges).toEqual(['CARRIER_RATE_MISSING', 'CARRIER_CHARGES_UNSETTLED'])
     expect(grouped.salesRep).toEqual([])
     expect(grouped.revDivision).toEqual([])
   })
@@ -217,6 +217,15 @@ describe('loadReviewExtras', () => {
 })
 
 describe('evaluateLoadReview — cached row verdict', () => {
+  it('reads the least-advanced rung across several carriers', () => {
+    const unsettled = (carriers: { apStatus: 'AWAITING_INVOICE' | 'TO_BE_PAID' }[]) =>
+      evaluateLoadReview({ row: delivered({ assignmentType: 'CARRIER', apStatus: 'TO_BE_PAID', carriers }) })
+        .checks.details.reasons.length + evaluateLoadReview({ row: delivered({ assignmentType: 'CARRIER', apStatus: 'TO_BE_PAID', carriers }) })
+        .checks.charges.reasons.filter((r) => r.code === 'CARRIER_CHARGES_UNSETTLED').length
+    expect(unsettled([{ apStatus: 'TO_BE_PAID' }, { apStatus: 'TO_BE_PAID' }])).toBe(0)
+    expect(unsettled([{ apStatus: 'TO_BE_PAID' }, { apStatus: 'AWAITING_INVOICE' }])).toBe(1)
+  })
+
   it('passes a clean delivered row', () => {
     const verdict = evaluateLoadReview({ row: delivered() })
     expect(verdict.ok).toBe(true)

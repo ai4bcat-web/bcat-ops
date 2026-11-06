@@ -18,7 +18,7 @@ vi.mock('@/lib/apiClient', () => ({
   pushToLoadReview,
   getInvoice,
   getInvoicePdfUrl: vi.fn(async () => 'https://example.com/invoice.pdf'),
-  getTmsSettings: vi.fn(async () => null),
+  getTmsSettings: vi.fn(async () => ({ bolTerms: 'Terms X' })),
   listDivisions: vi.fn(async () => []),
   listTrackingLinksByShipment: vi.fn(async () => []),
   listCheckCallsByLoad: vi.fn(async () => []),
@@ -41,7 +41,18 @@ vi.mock('@/lib/driverSubmissionsClient', () => ({
   getDriverDocUrl: vi.fn(async () => 'https://example.com/driver'),
   attachDocs: vi.fn(async () => []),
 }))
-vi.mock('@/lib/bolPdf', () => ({ buildBolPdf: vi.fn(), bolFilename: vi.fn(() => 'bol.pdf') }))
+vi.mock('@/lib/bolPdf', () => ({ buildBolPdf: vi.fn() }))
+vi.mock('./BolDialog', () => ({
+  BolDialog: ({ settings, onSaved, onClose }: {
+    settings: { bolTerms?: string | null } | null; onSaved: () => void; onClose: () => void
+  }) => (
+    <div data-testid="bol-dialog-stub">
+      <span data-testid="bol-stub-terms">{settings?.bolTerms ?? 'none'}</span>
+      <button onClick={onSaved}>saved</button>
+      <button onClick={onClose}>close</button>
+    </div>
+  ),
+}))
 vi.mock('@/lib/loadSummaryPdf', () => ({
   buildLoadSummaryPdf: vi.fn(), loadSummaryFilename: vi.fn(() => 'load-summary.pdf'),
 }))
@@ -103,7 +114,7 @@ function bundle(invoiceId: string | null = null): ShipmentBundle {
 
 const CUSTOMER = { id: 'cust-1', name: 'Acme Freight', requiredDocsForInvoice: ['POD', 'BOL'] } as CustomerRecord
 
-function renderSection(isAdmin = false, invoiceId: string | null = null) {
+function renderSection(isAdmin = false, invoiceId: string | null = null, onReload = vi.fn(async () => {})) {
   render(
     <DocumentsSection
       bundle={bundle(invoiceId)}
@@ -112,7 +123,7 @@ function renderSection(isAdmin = false, invoiceId: string | null = null) {
       catalog={[]}
       currentUser="ryne@bcatcorp.com"
       isAdmin={isAdmin}
-      onReload={vi.fn(async () => {})}
+      onReload={onReload}
     />,
   )
 }
@@ -196,5 +207,21 @@ describe('DocumentsSection', () => {
     await screen.findByTestId('documents-customer')
     expect(screen.queryByTestId('invoice-line')).toBeNull()
     expect(getInvoice).not.toHaveBeenCalled()
+  })
+
+  it('opens the bill of lading dialog from the Generate menu with the loaded settings, and re-reads the shipment when it saves', async () => {
+    const onReload = vi.fn(async () => {})
+    renderSection(false, null, onReload)
+    const trigger = await screen.findByTestId('documents-generate-menu')
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByTestId('documents-generate-bol'))
+
+    expect(await screen.findByTestId('bol-dialog-stub')).toBeTruthy()
+    await waitFor(() => expect(screen.getByTestId('bol-stub-terms').textContent).toBe('Terms X'))
+
+    fireEvent.click(screen.getByText('saved'))
+    await waitFor(() => expect(onReload).toHaveBeenCalled())
+    fireEvent.click(screen.getByText('close'))
+    expect(screen.queryByTestId('bol-dialog-stub')).toBeNull()
   })
 })

@@ -19,6 +19,8 @@ import autoTable from 'jspdf-autotable'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import type { CarrierRecord, Division, LoadCarrierRecord, RateConRequiredField } from '@/types/tms'
 import { fetchDivisionLogoDataUrl } from '@/lib/divisionLogo'
+import { drawLetterhead, resolveLetterhead } from '@/lib/pdfLetterhead'
+import type { HeaderLogo } from '@/lib/pdfLetterhead'
 
 /** `jspdf-autotable` writes the finished table's geometry back onto the doc it drew into. */
 interface AutoTabled { lastAutoTable: { finalY: number } }
@@ -154,82 +156,18 @@ export interface BuildRateConOptions {
   loadLogo?: (logoKey: string) => Promise<string | null>
 }
 
-interface HeaderLogo { dataUrl: string; format: 'PNG' | 'JPEG'; width: number; height: number }
-
-const LOGO_BOX_W = 150
-const LOGO_BOX_H = 38
-
-/**
- * The division logo fitted into its box, or null. Every failure (no key, loader null or
- * throw, undecodable or non-PNG/JPEG image) is the same fallback: the text header.
- * A logo problem must never fail a send.
- */
-async function resolveLogo(
-  doc: jsPDF,
-  division: Division | null,
-  loadLogo: (logoKey: string) => Promise<string | null>,
-): Promise<HeaderLogo | null> {
-  const logoKey = division?.logoKey
-  if (!logoKey) return null
-  try {
-    const dataUrl = await loadLogo(logoKey)
-    if (!dataUrl) return null
-    const props = doc.getImageProperties(dataUrl)
-    const format = String(props.fileType).toUpperCase()
-    if ((format !== 'PNG' && format !== 'JPEG') || !(props.width > 0) || !(props.height > 0)) return null
-    const scale = Math.min(LOGO_BOX_W / props.width, LOGO_BOX_H / props.height)
-    return { dataUrl, format, width: props.width * scale, height: props.height * scale }
-  } catch {
-    return null
-  }
-}
-
 /** Black band at the top of every page: who is tendering, which load, which leg. */
 function drawHeader(doc: jsPDF, input: RateConInput, legIndex: number, legCount: number, logo: HeaderLogo | null): void {
-  const W = doc.internal.pageSize.getWidth()
   const broker = brokerLines(input.division)
-  doc.setFillColor(0, 0, 0)
-  doc.rect(0, 0, W, 70, 'F')
-  doc.setTextColor(255, 255, 255)
-  doc.setFont('helvetica', 'bold')
-  if (logo) {
-    // Brand marks are usually dark: sit it on a white plate inside the black band. The
-    // fixed alias embeds the image once however many pages draw the header.
-    const plateW = logo.width + 16
-    doc.setFillColor(255, 255, 255)
-    doc.roundedRect(M - 8, 10, plateW, 50, 5, 5, 'F')
-    doc.addImage(logo.dataUrl, logo.format, M, 35 - logo.height / 2, logo.width, logo.height, 'division-logo')
-    const x = M + plateW + 10
-    doc.setFontSize(11)
-    const name = (doc.splitTextToSize(broker.name, W - M - 150 - x) as string[])[0] ?? broker.name
-    doc.text(name, x, 32)
-    if (broker.ids) {
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(9)
-      doc.setTextColor(190, 200, 215)
-      doc.text(broker.ids, x, 47)
-    }
-  } else {
-    doc.setFontSize(16)
-    doc.text(broker.name, M, 34)
-    if (broker.ids) {
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(9)
-      doc.setTextColor(190, 200, 215)
-      doc.text(broker.ids, M, 50)
-    }
-  }
-  doc.setTextColor(255, 255, 255)
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(13)
-  doc.text('RATE CONFIRMATION', W - M, 32, { align: 'right' })
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.setTextColor(190, 200, 215)
-  const label = legCount > 1
-    ? `Load ${input.loadNumber}  ·  Leg ${legIndex + 1} of ${legCount}`
-    : `Load ${input.loadNumber}`
-  doc.text(label, W - M, 48, { align: 'right' })
+  drawLetterhead(doc, {
+    legalName: broker.name,
+    ids: broker.ids,
+    title: 'RATE CONFIRMATION',
+    subtitle: legCount > 1
+      ? `Load ${input.loadNumber}  ·  Leg ${legIndex + 1} of ${legCount}`
+      : `Load ${input.loadNumber}`,
+    logo,
+  })
 }
 
 /** Remit-to on the left, the carrier we booked on the right. Returns the next y. */
@@ -307,7 +245,7 @@ export async function buildRateConPdf(input: RateConInput, options: BuildRateCon
   }
 
   const doc = new jsPDF({ unit: 'pt', format: 'letter' })
-  const logo = await resolveLogo(doc, input.division, options.loadLogo ?? fetchDivisionLogoDataUrl)
+  const logo = await resolveLetterhead(doc, input.division, options.loadLogo ?? fetchDivisionLogoDataUrl)
   const W = doc.internal.pageSize.getWidth()
   const H = doc.internal.pageSize.getHeight()
   const legs = legsOf(input.stops)

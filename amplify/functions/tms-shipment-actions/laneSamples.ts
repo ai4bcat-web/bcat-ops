@@ -166,6 +166,8 @@ export async function writeLaneSample(deps: QuoteDeps, loadId: string): Promise<
       : []
     const mine = assignments.filter((row) => String(row.loadId ?? '') === loadId)
     const loadCarrier = mine.find((row) => row.status === 'ACTIVE') ?? mine.find((row) => row.status === 'TONU') ?? null
+    // AT-plan D8: a load split across two or more carriers is not a lane price.
+    const splitAcrossCarriers = mine.filter((row) => row.status === 'ACTIVE').length >= 2
 
     const sample = laneSampleFor(
       {
@@ -222,7 +224,7 @@ export async function writeLaneSample(deps: QuoteDeps, loadId: string): Promise<
           podReceivedAt: (existing?.podReceivedAt as string | undefined) ?? podReceivedAtOf(documents, loadId),
           // An exclusion already recorded is a fact about the load, not about its
           // price: a later re-price must not quietly put it back in the averages.
-          excluded: sample.excluded || existing?.excluded === true,
+          excluded: sample.excluded || splitAcrossCarriers || existing?.excluded === true,
           version: (numberOrNull(existing?.version) ?? 0) + 1,
           createdAt: (existing?.createdAt as string | undefined) ?? now,
           updatedAt: now,

@@ -24,6 +24,8 @@ import { BookCarrierDialog, type BookCarrierFields } from '@/features/carriers/c
 import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
 import { TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { type RemoveLoadCarrierReason } from '@/lib/apiClient'
+import { liveCarriersOf } from '@/lib/carrierTotals'
+import { MAX_LIVE_CARRIERS } from '@/lib/carrierLegs'
 import { VoidShipmentDialog } from './VoidShipmentDialog'
 import { AssignDriverDialog, type AssignDriverFields } from './AssignDriverDialog'
 import { OWN_ASSET_MESSAGES } from '@/lib/ownAssetDriver'
@@ -245,6 +247,8 @@ export interface LoadActionHandlers {
   }) => Promise<void>
   /** A directory carrier: everything the gate checks, acknowledged warnings included. */
   onBookCarrier: (input: BookCarrierFields) => Promise<void>
+  /** AT-plan: another outside carrier beside the live ones; `legStopIds` absent = every stop. */
+  onAddCarrier?: (input: BookCarrierFields, legStopIds?: string[]) => Promise<void>
   onRemoveCarrier: (
     loadCarrierId: string, outcome: 'BOUNCED' | 'TONU', reason: RemoveLoadCarrierReason, note?: string,
     /** Step AM: put the freed load back on DAT. Optional, off unless the rep ticks it. */
@@ -256,7 +260,7 @@ export interface LoadActionHandlers {
 }
 
 type LoadDialog =
-  | { kind: 'asset' } | { kind: 'carrier' } | { kind: 'book' } | { kind: 'cover' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
+  | { kind: 'asset' } | { kind: 'carrier' } | { kind: 'book' } | { kind: 'add' } | { kind: 'cover' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
 
 export function LoadActions({
   load, mode, bundle, activeCarrier, drivers, trucks, trailers, arStatus, isAdmin, voided = false, handlers, onRateCon, onError,
@@ -285,6 +289,10 @@ export function LoadActions({
   // BOOK_CARRIER is the truckload path and only exists while the load is still being
   // covered; everything else keeps the name-only assignment it always had.
   const bookable = load.status === 'SOURCING' && isTruckloadMode(mode) && !activeCarrier
+  // AT-plan: a second (third, fourth) outside carrier joins the live one; own fleet stays exclusive (D2).
+  const liveCount = liveCarriersOf(bundle.loadCarriers, load.id).length
+  const addable = isTruckloadMode(mode) && !ownLeg && liveCount > 0 && liveCount < MAX_LIVE_CARRIERS
+    && (load.status === 'SOURCING' || load.status === 'BOOKED' || load.status === 'DISPATCHED')
 
   // An issued invoice owns the AR rung: the card voids it, this menu does not move it.
   const order = bundle.orders[0] ?? null
@@ -331,6 +339,11 @@ export function LoadActions({
           {isAdmin && (
             <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'carrier' })}>
               <Building2 size={14} className="mr-2" />Assign carrier by name (admin data fix)
+            </DropdownMenuItem>
+          )}
+          {addable && (
+            <DropdownMenuItem disabled={voided} data-testid="menu-add-carrier" onSelect={() => setDialog({ kind: 'add' })}>
+              <Building2 size={14} className="mr-2" />Add carrier
             </DropdownMenuItem>
           )}
           {activeCarrier && (
@@ -395,17 +408,21 @@ export function LoadActions({
         <CoverCarrierDialog
           shipmentId={bundle.shipment.id}
           shipmentNumber={bundle.shipment.number}
+          bundle={bundle}
           onClose={() => setDialog(null)}
           onCovered={() => { void handlers.onCovered?.() }}
         />
       )}
-      {dialog?.kind === 'book' && (
+      {(dialog?.kind === 'book' || dialog?.kind === 'add') && (
         <BookCarrierDialog
           bundle={bundle}
           isAdmin={isAdmin}
           busy={busy}
+          additional={dialog.kind === 'add'}
           onClose={() => setDialog(null)}
-          onConfirm={(input) => handlers.onBookCarrier(input)}
+          onConfirm={(input, legStopIds) => (dialog.kind === 'add' && handlers.onAddCarrier
+            ? handlers.onAddCarrier(input, legStopIds)
+            : handlers.onBookCarrier(input))}
           onRateCon={onRateCon}
         />
       )}

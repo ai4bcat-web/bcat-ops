@@ -41,7 +41,8 @@ import {
   type TransactWriteItem,
 } from '@aws-sdk/client-dynamodb'
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { createHash, randomBytes, randomUUID } from 'crypto'
@@ -220,6 +221,9 @@ import {
   isRateCode,
   type ChargeLineInput,
 } from '../../../src/lib/shipmentCharges'
+import { liveCarriersOf, type CarrierLike } from '../../../src/lib/carrierTotals'
+import { validateCarrierAdd, validateLegs, type LegStop } from '../../../src/lib/carrierLegs'
+import { rateConLinesFor } from '../../../src/lib/carrierBill'
 import {
   canTransitionLoadStatus,
   canTransitionShipmentStatus,
@@ -265,8 +269,10 @@ import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseG
 import { isEmailAddress } from '../../../src/lib/emailAddress'
 import { mcpPacketStanding, rateConMcpRefusal } from '../../../src/lib/mcpPacket'
 import { composeRateConCc } from './rateConRecipients'
+import { assertBolEmailable, bolEmailBody, bolEmailSubject, deliveryLabel, parseEmailBolInput } from './bolEmail'
+import { MAX_GENERATED_BYTES } from '../../../src/lib/shipmentDocuments'
 import {
-  advanceTarget, deriveAssignmentStatus, driverInfoGaps, isCarrierAssignmentStatus, ladderPatch,
+  advanceTarget, deriveAssignmentStatus, driverInfoGaps, isCarrierAssignmentStatus, ladderPatch, rungOf,
   type AssignmentFacts, type CarrierAssignmentStatus,
 } from '../../../src/lib/carrierAssignment'
 import {
@@ -609,6 +615,8 @@ type Action =
   | 'ASSIGN_ASSET'
   | 'ASSIGN_CARRIER'
   | 'BOOK_CARRIER'
+  // AT-plan. Another outside carrier next to the live ones (up to four).
+  | 'ADD_CARRIER'
   // Step AM. The cover flow and the assignment ladder it climbs.
   | 'COVER_CARRIER'
   | 'ENTER_DRIVER_INFO'
@@ -632,6 +640,8 @@ type Action =
   | 'PREPARE_DOCUMENT_UPLOAD'
   | 'COMMIT_DOCUMENT'
   | 'SAVE_GENERATED_DOCUMENT'
+  // AU-plan. Mail a stored (plain) bill of lading through the shipment thread.
+  | 'EMAIL_BOL'
   | 'ATTACH_DRIVER_DOC'
   | 'REVIEW_DOCUMENT'
   | 'UPDATE_DOCUMENT'
@@ -1294,6 +1304,7 @@ function toChargeLine(c: ChargeInput): ChargeLineInput {
     rateCents: c.rateCents,
     count: c.count,
     isRate: c.isRate,
+    loadCarrierId: c.loadCarrierId,
   }
 }
 
@@ -3621,6 +3632,23 @@ async function assignTracker(input: Row, caller: Caller): Promise<Row> {
 }
 
 /**
+ * The stored override for a validated client input: `confirmed: true` stamps who and when (never client-supplied);
+ * an edit without it keeps the earlier confirmation; null clears everything. Shared by SET_TRACKING_PREFS and
+ * UPDATE_LOAD_CARRIER_DETAILS so a carrier override is stamped identically on both paths.
+ */
+function stampTrackingPrefs(sent: ReturnType<typeof validateTrackingPrefsOverride>, prior: TrackingPrefsOverride | null, caller: Caller): TrackingPrefsOverride | null {
+  if (!sent) return null
+  return {
+    ...(sent.mode ? { mode: sent.mode } : {}),
+    ...(sent.method ? { method: sent.method } : {}),
+    ...(sent.driverSms ? { driverSms: sent.driverSms } : {}),
+    ...(sent.confirmed
+      ? { confirmedAt: nowIso(), confirmedBy: caller.email }
+      : prior?.confirmedAt ? { confirmedAt: prior.confirmedAt, ...(prior.confirmedBy ? { confirmedBy: prior.confirmedBy } : {}) } : {}),
+  }
+}
+
+/**
  * SET_TRACKING_PREFS — the per-shipment override of the customer's tracking mode, method and
  * driver-SMS target (Step AJ), and (feedback 9) the per-load confirmation of that mode.
  * `prefs` is `{ mode?, method?, driverSms?, confirmed? }` (mode may be NONE); a key left out or
@@ -3632,38 +3660,53 @@ async function setTrackingPrefs(input: Row, caller: Caller): Promise<Row> {
   if (!('prefs' in input)) throw new Error('prefs is required; send null to inherit everything')
   const sent = validateTrackingPrefsOverride(input.prefs)
   const expectedUpdatedAt = input.expectedUpdatedAt == null ? null : assertExpectedUpdatedAt(input)
+  const loadCarrierId = optionalString(input.loadCarrierId, 100)
 
   const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
   assertNotVoided(shipment)
+  // Step AT (D5): with `loadCarrierId` the same override is written on that carrier instead of the shipment,
+  // and wins over the shipment's for the leg the carrier covers. Same validation, same confirmation stamping.
+  const target = loadCarrierId ? await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId) : null
+  if (loadCarrierId) {
+    if (!target || String(target.shipmentId) !== shipmentId) throw new Error(`Load carrier not found on this shipment: ${loadCarrierId}`)
+    if (String(target.status ?? '') !== 'ACTIVE') throw new Error('Only an active carrier assignment can carry a tracking override')
+  }
+  const holder = target ?? shipment
   // Feedback 9: `confirmed: true` stamps who confirmed the load's mode and when (never client-supplied);
   // a later edit keeps the earlier confirmation; clearing the override (null) clears it too.
-  const prior = parseTrackingPrefs(shipment.trackingPrefs)
-  const prefs: TrackingPrefsOverride | null = sent
-    ? {
-      ...(sent.mode ? { mode: sent.mode } : {}),
-      ...(sent.method ? { method: sent.method } : {}),
-      ...(sent.driverSms ? { driverSms: sent.driverSms } : {}),
-      ...(sent.confirmed
-        ? { confirmedAt: nowIso(), confirmedBy: caller.email }
-        : prior?.confirmedAt ? { confirmedAt: prior.confirmedAt, ...(prior.confirmedBy ? { confirmedBy: prior.confirmedBy } : {}) } : {}),
-    }
-    : null
+  const prior = parseTrackingPrefs(holder.trackingPrefs)
+  const prefs = stampTrackingPrefs(sent, prior, caller)
 
-  await transact(
-    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
-      trackingPrefs: prefs,
-      updatedBy: caller.email,
-      updatedAt: nowIso(),
-      version: (numberOrNull(shipment.version) ?? 1) + 1,
-    }, expectedUpdatedAt)],
-    'shipment',
-  )
+  if (target) {
+    await transact(
+      [updateItemTx(LOAD_CARRIER_TABLE_NAME, String(target.id), {
+        trackingPrefs: prefs,
+        updatedBy: caller.email,
+        updatedAt: nowIso(),
+      }, expectedUpdatedAt)],
+      'loadCarrier',
+    )
+  } else {
+    await transact(
+      [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+        trackingPrefs: prefs,
+        updatedBy: caller.email,
+        updatedAt: nowIso(),
+        version: (numberOrNull(shipment.version) ?? 1) + 1,
+      }, expectedUpdatedAt)],
+      'shipment',
+    )
+  }
   await writeAudit('SHIPMENT', shipmentId, 'SET_TRACKING_PREFS', caller, {
-    from: parseTrackingPrefs(shipment.trackingPrefs),
+    from: prior,
     to: prefs,
+    ...(target ? { loadCarrierId: String(target.id) } : {}),
   })
-  return { shipment: await getById(SHIPMENT_TABLE_NAME, shipmentId) } as unknown as Row
+  return {
+    shipment: await getById(SHIPMENT_TABLE_NAME, shipmentId),
+    ...(target ? { loadCarrier: await getById(LOAD_CARRIER_TABLE_NAME, String(target.id)) } : {}),
+  } as unknown as Row
 }
 
 /**
@@ -4755,6 +4798,9 @@ async function assignAssetCore(input: Row, caller: Caller, opts: { skipPayLock?:
 
   const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
   const activeCarrier = carriers.find((c) => c.status === 'ACTIVE') ?? null
+  if (carriers.filter((c) => c.status === 'ACTIVE').length > 1) {
+    throw new Error('Remove the extra carriers first: own fleet cannot share a load with outside carriers')
+  }
   const activeOwn = activeCarrier && activeCarrier.kind === 'OWN_ASSET' ? activeCarrier : null
   const stopsBefore = readStops(load)
 
@@ -4911,7 +4957,7 @@ async function assignAssetCore(input: Row, caller: Caller, opts: { skipPayLock?:
   return rederiveShipmentStatus(shipmentId, caller)
 }
 
-async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
+async function assignCarrier(input: Row, caller: Caller, options: { additional?: boolean } = {}): Promise<Row> {
   // A carrier out of the directory goes through the booking gate, which checks its
   // authority, insurance and documents before it is allowed to hold freight.
   if (input.carrierId != null) {
@@ -4929,7 +4975,13 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
   const shipment = await requireLiveShipment(shipmentId)
 
   const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
-  const activeCarrier = carriers.find((c) => c.status === 'ACTIVE') ?? null
+  const additional = options.additional === true
+  const live = liveRowsOf(carriers, loadId)
+  if (!additional && live.length > 1) throw new Error(REMOVE_FIRST_MESSAGE)
+  const legIds = additional
+    ? assertAdditionalCarrier({ load, live, adding: { carrierId: null, carrierName }, legStopIds: input.legStopIds })
+    : []
+  const activeCarrier: Row | null = additional ? null : live[0] ?? null
   const sequence = carriers.reduce((max, c) => Math.max(max, numberOrNull(c.sequence) ?? 0), 0) + 1
   const newCarrierId = `lcr-${randomUUID()}`
   const now = nowIso()
@@ -4945,6 +4997,7 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
     kind: 'CARRIER',
     status: 'ACTIVE',
     sequence,
+    ...(legIds.length > 0 ? { legStopIds: legIds } : {}),
     // No `carrierId`: this path is refused above when one is given, and a NULL on
     // the `loadCarriersByCarrierId` hash key is an item DynamoDB will not take.
     carrierName,
@@ -5006,7 +5059,9 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
   // Step R. An outside carrier takes the load off the calendar, out of dispatch and
   // out of every driver settlement: whatever own-fleet assignment was on it before
   // has to be cleared, not merely overwritten with a carrier name.
-  const cleared = outsideCarrierLoadPatch(readStops(load) as MirrorStop[], { carrierName })
+  const cleared = additional && live.length > 0
+    ? null
+    : outsideCarrierLoadPatch(readStops(load) as MirrorStop[], { carrierName })
   // The leg this call just wrote is what the rules read; the leg index may still be
   // serving the one it retired.
   const tag = await applyTag(await recordsForTag(shipment, load, newLeg), caller)
@@ -5014,10 +5069,13 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
   assertLoadWriteOk(
     await client.models.Load.update({
       id: loadId,
-      ...cleared,
-      stops: JSON.stringify(cleared.stops),
-      activeLoadCarrierId: newCarrierId,
-      trackingProvider: optionalEnum(input.trackingProvider, TRACKING_PROVIDERS, 'trackingProvider') ?? 'MANUAL',
+      ...(cleared ? { ...cleared, stops: JSON.stringify(cleared.stops) } : {}),
+      ...(!additional || live.length === 0
+        ? {
+            activeLoadCarrierId: newCarrierId,
+            trackingProvider: optionalEnum(input.trackingProvider, TRACKING_PROVIDERS, 'trackingProvider') ?? 'MANUAL',
+          }
+        : {}),
       ...tag,
       ...(nextStatus !== currentStatus
         ? { status: nextStatus, statusChangedAt: now, statusChangedBy: caller.email, statusSource: 'USER' }
@@ -5027,7 +5085,9 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
     'Load update',
   )
 
-  await writeAudit('LOAD_CARRIER', newCarrierId, 'ASSIGN_CARRIER', caller, { loadId, carrierName, carrierRateCents })
+  await writeAudit('LOAD_CARRIER', newCarrierId, additional ? 'ADD_CARRIER' : 'ASSIGN_CARRIER', caller, {
+    loadId, carrierName, carrierRateCents, ...(additional ? { legStopIds: legIds } : {}),
+  })
   // Step H. A covered load never shows a live request.
   await cancelOpenOffers(quoteDeps, loadId, caller)
   return rederiveShipmentStatus(shipmentId, caller)
@@ -5055,6 +5115,13 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
   const shipment = await requireLiveShipment(shipmentId)
   const load = await getById(LOAD_TABLE_NAME, loadId)
   if (!load) throw new Error(`Load not found: ${loadId}`)
+  // AT-plan D6: another live carrier keeps the load covered; only the pointers move.
+  const siblings = liveRowsOf(
+    await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId),
+    loadId,
+  ).filter((c) => String(c.id) !== loadCarrierId)
+  const primary: Row | null = siblings[0] ?? null
+  const siblingRung = leastRung(siblings.map((c) => c.assignmentStatus as CarrierAssignmentStatus | null | undefined))
 
   // A rate con the carrier could still open is dead the moment they come off.
   const voidsRateCon = OPEN_RATE_CON_STATUSES.includes(String(carrier.rateConStatus ?? ''))
@@ -5071,8 +5138,9 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
         ...(voidsRateCon ? { rateConStatus: 'VOIDED', rateConToken: null } : {}),
         ...(stopsTracking ? { trackingLinkId: null, trackingStoppedAt: removedAt } : {}),
       }),
-      // Step AM. Nobody is on the shipment now; the retired row keeps its rung as history.
-      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, ladderMirror(null, removedAt), null),
+      // Step AM. With nobody left the retired row keeps its rung as history; with a sibling
+      // the shipment shows the least advanced live rung.
+      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, ladderMirror(primary ? siblingRung : null, removedAt), null),
       ...(trackingLink
         ? [updateItemTx(TRACKING_LINK_TABLE_NAME, String(trackingLink.id), {
             status: 'REVOKED',
@@ -5096,6 +5164,54 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
     }
   }
 
+  if (primary) {
+    const at = nowIso()
+    const orderId = String(load.orderId ?? '')
+    if (outcome === 'BOUNCED') {
+      // The bounced carrier's money left with it: the cached load totals follow, from the
+      // lines that remain (the leg index may still serve the ones just deleted).
+      const customer = await customerOf(shipment)
+      const settings = await getSettings()
+      const remaining = (await queryIndex(LOAD_CHARGE_TABLE_NAME, IDX_CHARGES_BY_SHIPMENT, 'shipmentId', shipmentId))
+        .filter((c) => String(c.loadCarrierId ?? '') !== loadCarrierId)
+        .filter((c) => (c.loadId ? String(c.loadId) === loadId : String(c.orderId ?? '') === orderId))
+      const { totals } = priceFor(
+        remaining.map(chargeRowToInput),
+        { miles: numberOrNull(load.miles), weightLbs: numberOrNull(load.weight) },
+        pricingDefaultsOf(customer),
+        marginFloorBpsOf(settings),
+      )
+      const existingFinancials = await getById(LOAD_FINANCIALS_TABLE_NAME, loadId)
+      await transact(
+        [putItem(
+          LOAD_FINANCIALS_TABLE_NAME,
+          financialsRow(loadId, shipmentId, orderId || null, totals, (numberOrNull(existingFinancials?.version) ?? 0) + 1, caller, existingFinancials),
+          false,
+        )],
+        'financials',
+      )
+    }
+    const tag = await applyTag(await recordsForTag(shipment, load, primary), caller)
+    const client = await getDataClient()
+    assertLoadWriteOk(
+      await client.models.Load.update({
+        id: loadId,
+        activeLoadCarrierId: String(primary.id),
+        carrierName: optionalString(primary.carrierName, 200),
+        assignmentType: 'CARRIER',
+        carrierAssignmentStatus: siblingRung,
+        ...tag,
+        updatedBy: caller.email,
+      }),
+      'Load update',
+    )
+    await writeAudit('LOAD_CARRIER', loadCarrierId, `REMOVE_LOAD_CARRIER:${outcome}`, caller, {
+      loadId, reason, note, voidedRateCon: voidsRateCon, revokedTrackingLink: trackingLink != null,
+      assignmentStatus: carrier.assignmentStatus ?? null, repostToDat: false, stillCovered: true, primaryLoadCarrierId: String(primary.id), at,
+    })
+    if (outcome === 'TONU' && isDeliveredOrLater(load.status)) await excludeLaneSample(quoteDeps, loadId)
+    return rederiveShipmentStatus(shipmentId, caller)
+  }
   const now = nowIso()
   // Nobody is on it. The driver, the truck and the trailer come off whether the leg
   // that left was ours or an outside carrier's: a bounce of an own-fleet leg that
@@ -5252,6 +5368,90 @@ function ladderMirrorWrites(row: Row, status: CarrierAssignmentStatus | null, no
   ]
 }
 
+/** AT-plan: why a replace-style booking refuses while several carriers share the load. */
+const REMOVE_FIRST_MESSAGE = 'Remove a carrier first or use ADD_CARRIER'
+
+type LiveRow = CarrierLike & Row
+
+/** The ACTIVE rows of one load in booking order (lowest sequence = primary). */
+function liveRowsOf(rows: Row[], loadId: string): LiveRow[] {
+  return liveCarriersOf(rows as LiveRow[], loadId)
+}
+
+/** The least advanced rung of the given ones; a row with no rung counts as the lowest. */
+function leastRung(
+  rungs: ReadonlyArray<CarrierAssignmentStatus | null | undefined>,
+): CarrierAssignmentStatus | null {
+  let least: CarrierAssignmentStatus | null = null
+  rungs.forEach((rung, index) => {
+    if (index === 0 || rungOf(rung) < rungOf(least)) least = rung ?? null
+  })
+  return least
+}
+
+/**
+ * The rung to mirror onto the Shipment/Load when `row` moves to `to`: the least advanced
+ * among the live carriers (the row itself counted at `to`). One carrier: `to` itself.
+ */
+async function mirrorRungFor(row: Row, to: CarrierAssignmentStatus): Promise<CarrierAssignmentStatus | null> {
+  const loadId = String(row.loadId)
+  const live = liveRowsOf(await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId), loadId)
+  if (live.length <= 1) return to
+  return leastRung(live.map((c) => (String(c.id) === String(row.id) ? to : (c.assignmentStatus as CarrierAssignmentStatus | null | undefined))))
+}
+
+/** A file-name fragment for a carrier: letters and digits only. */
+function carrierSlug(name: string | null, fallback: string): string {
+  const slug = (name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+  return slug || fallback
+}
+
+function toLegCarrier(row: Row): { id: string; carrierName: string | null; legStopIds: string[]; kind: 'OWN_ASSET' | 'CARRIER'; carrierId: string | null } {
+  return {
+    id: String(row.id),
+    carrierName: optionalString(row.carrierName, 200),
+    legStopIds: Array.isArray(row.legStopIds) ? row.legStopIds.map(String) : [],
+    kind: row.kind === 'OWN_ASSET' || isIvanCartageName(optionalString(row.carrierName, 200)) ? 'OWN_ASSET' : 'CARRIER',
+    carrierId: optionalString(row.carrierId, 100),
+  }
+}
+
+/**
+ * ADD_CARRIER's gate (AT-plan §5): the load takes another carrier only while it is
+ * sourcing, booked or dispatched, under the cap, never next to own fleet, with the same
+ * directory carrier twice only on separate stops, and with legs that name real stops.
+ * Returns the validated `legStopIds` (empty = all stops).
+ */
+function assertAdditionalCarrier(args: {
+  load: Row
+  live: LiveRow[]
+  adding: { carrierId: string | null; carrierName: string | null }
+  legStopIds: unknown
+}): string[] {
+  const { load, live, adding } = args
+  if (!['SOURCING', 'BOOKED', 'DISPATCHED'].includes(String(load.status ?? ''))) {
+    throw new Error('A carrier can be added only while the load is sourcing, booked or dispatched')
+  }
+  const legStopIds = args.legStopIds == null
+    ? []
+    : [...new Set(assertArrayOf(args.legStopIds, 'legStopIds', (v, i) => assertString(v, `legStopIds[${i}]`), 50))]
+  const legLive = live.map(toLegCarrier)
+  if (live.length > 0) {
+    const refusal = validateCarrierAdd(legLive, {
+      kind: isIvanCartageName(adding.carrierName) ? 'OWN_ASSET' : 'CARRIER',
+      carrierId: adding.carrierId,
+      legStopIds,
+    })
+    if (refusal) throw new Error(refusal)
+  }
+  const checked = validateLegs(
+    [...legLive, { id: '__new', carrierName: adding.carrierName, legStopIds }],
+    readStops(load) as unknown as LegStop[],
+  )
+  if (checked.errors.length > 0) throw new Error(checked.errors.join('; '))
+  return legStopIds
+}
+
 /**
  * Book a directory carrier onto a load.
  *
@@ -5260,7 +5460,7 @@ function ladderMirrorWrites(row: Row, status: CarrierAssignmentStatus | null, no
  * acknowledged by key, and the keys that were acknowledged are kept on the row so
  * the next person can see what was waved through and by whom.
  */
-async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra, options: { cover?: boolean } = {}): Promise<Row> {
+async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra, options: { cover?: boolean; additional?: boolean } = {}): Promise<Row> {
   const loadId = assertString(input.loadId, 'loadId')
   const expectedUpdatedAt = assertExpectedUpdatedAt(input)
   const carrierId = assertString(input.carrierId, 'carrierId')
@@ -5284,12 +5484,15 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
   const { shipment } = bundle
   assertNotVoided(shipment)
   if (String(load.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('load', null)
-  if (String(load.status ?? '') !== 'SOURCING') {
+  const additional = options.additional === true
+  const live = liveRowsOf(bundle.loadCarriers, loadId)
+  if (!additional && live.length > 1) throw new Error(REMOVE_FIRST_MESSAGE)
+  if (!additional && String(load.status ?? '') !== 'SOURCING') {
     throw new Error('Only a load that is still sourcing can be booked')
   }
   const mode = optionalEnum(shipment.mode, SHIPMENT_MODES, 'mode')
   if (!isTruckloadMode(mode)) throw new Error('Only a truckload shipment books an outside carrier')
-  if (bundle.loadCarriers.some((c) => c.loadId === loadId && c.status === 'ACTIVE')) {
+  if (!additional && live.length > 0) {
     throw new Error('That load already has an active assignment')
   }
   const order = bundle.orders.find((o) => o.id === load.orderId) ?? bundle.orders[0] ?? null
@@ -5306,6 +5509,9 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
   ])
   if (!carrier) throw new Error(`Carrier not found: ${carrierId}`)
   const carrierName = optionalString(carrier.name, 200)
+  const legIds = additional
+    ? assertAdditionalCarrier({ load, live, adding: { carrierId, carrierName }, legStopIds: input.legStopIds })
+    : []
 
   // Everything else this carrier is already holding, with the day it loads: a truck
   // promised to two shippers at the same hour is the oldest way to lose freight.
@@ -5337,6 +5543,12 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
     },
     financials: existingFinancials ? { topSpendCents: numberOrNull(existingFinancials.topSpendCents) } : null,
     carrierRateCents,
+    ...(additional
+      ? {
+          additional: true,
+          existingCarrierCostCents: live.reduce((sum, c) => sum + (numberOrNull(c.costCents) ?? 0), 0),
+        }
+      : {}),
     otherActiveLoadCarriers: activeOtherRows.map((c) => ({
       loadId: String(c.loadId),
       pickupAppt: pickupByLoad.get(String(c.loadId)) ?? null,
@@ -5401,8 +5613,15 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
   // totals are the whole load's, not just the carrier's slice of it.
   const kept = bundle.charges.filter((c) =>
     c.loadId ? String(c.loadId) === loadId : String(c.orderId ?? '') === orderId)
+  // A lone carrier's untagged CARRIER lines are named for it before a second carrier
+  // shares the side: an untagged line is refused once two are live.
+  const retag = additional && live.length === 1 ? String(live[0].id) : null
+  const retagged = retag ? kept.filter((c) => c.side === 'CARRIER' && c.loadCarrierId == null) : []
+  const retaggedIds = new Set(retagged.map((c) => String(c.id)))
+  const keptInputs = kept.map((c) =>
+    retaggedIds.has(String(c.id)) ? { ...chargeRowToInput(c), loadCarrierId: retag } : chargeRowToInput(c))
   const { amounts, totals } = priceFor(
-    [...kept.map(chargeRowToInput), ...added],
+    [...keptInputs, ...added],
     { miles: numberOrNull(load.miles), weightLbs: numberOrNull(load.weight) },
     pricingDefaultsOf(customer),
     marginFloorBpsOf(settings),
@@ -5439,6 +5658,8 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
     trailerNumber: optionalString(input.trailerNumber, 40),
   }))
   const ladderCols = ladderPatch({}, startRung, now)
+  // The shipment shows the least advanced rung of its live carriers.
+  const mirrorRung = additional ? leastRung([...live.map((c) => c.assignmentStatus as CarrierAssignmentStatus | null | undefined), startRung]) : startRung
   // Step AQ. A directory carrier that is Ivan Cartage takes its driver from our Driver records.
   const ownFleetDriver: Row | null = isIvanCartageName(carrierName)
     ? await ownFleetDriverPatch(input, {
@@ -5455,6 +5676,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
     kind: 'CARRIER',
     status: 'ACTIVE',
     sequence,
+    ...(legIds.length > 0 ? { legStopIds: legIds } : {}),
     // A snapshot of who was booked: the directory may be edited afterwards, but
     // this is the carrier the rate confirmation names.
     carrierId,
@@ -5505,6 +5727,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
       conditionCheckUpdatedAtTx(LOAD_TABLE_NAME, loadId, expectedUpdatedAt),
       putItem(LOAD_CARRIER_TABLE_NAME, loadCarrier),
       ...addedRows.map((row) => putItem(LOAD_CHARGE_TABLE_NAME, row)),
+      ...retagged.map((row) => putItem(LOAD_CHARGE_TABLE_NAME, { ...row, loadCarrierId: retag, updatedBy: caller.email, updatedAt: now }, false)),
       putItem(
         LOAD_FINANCIALS_TABLE_NAME,
         financialsRow(
@@ -5526,7 +5749,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
         updatedBy: caller.email,
         updatedAt: now,
       }, null),
-      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, ladderMirror(startRung, now), null),
+      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, ladderMirror(mirrorRung, now), null),
       // Step H. ACCEPT_OFFER stamps its offer WON and closes the round's losers
       // here, so the quote thread and the assignment land together or not at all.
       ...(extra?.writes ?? []),
@@ -5537,7 +5760,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
   // Step R. Booking an outside carrier onto a load our own fleet was holding has to
   // clear the driver, the truck and the stop-level assignment, or the load stays on
   // the calendar and in that driver's settlement while somebody else hauls it.
-  const cleared = outsideCarrierLoadPatch(readStops(load) as MirrorStop[], { carrierName })
+  const cleared = live.length === 0 ? outsideCarrierLoadPatch(readStops(load) as MirrorStop[], { carrierName }) : null
   // Every record the rules read is already in hand — including the leg this call
   // just put, which the leg index may not be serving yet. An outside carrier never
   // carries one of our drivers, so there is no driver row to look up.
@@ -5547,17 +5770,13 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
     await client.models.Load.update(
       {
         id: loadId,
-        ...cleared,
-        stops: JSON.stringify(cleared.stops),
-        activeLoadCarrierId: newCarrierId,
-        carrierAssignmentStatus: startRung,
-        equipmentType,
-        trackingProvider,
+        ...(cleared ? { ...cleared, stops: JSON.stringify(cleared.stops) } : {}),
+        ...(live.length === 0 ? { activeLoadCarrierId: newCarrierId, equipmentType, trackingProvider } : {}),
+        carrierAssignmentStatus: mirrorRung,
         ...tag,
-        status: 'BOOKED',
-        statusChangedAt: now,
-        statusChangedBy: caller.email,
-        statusSource: 'USER',
+        ...(String(load.status ?? '') === 'SOURCING'
+          ? { status: 'BOOKED' as const, statusChangedAt: now, statusChangedBy: caller.email, statusSource: 'USER' as const }
+          : {}),
         updatedBy: caller.email,
       },
       { condition: { updatedAt: { eq: expectedUpdatedAt } } },
@@ -5565,7 +5784,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
     'Load update',
   )
 
-  await writeAudit('LOAD_CARRIER', newCarrierId, cover ? 'COVER_CARRIER' : 'BOOK_CARRIER', caller, {
+  await writeAudit('LOAD_CARRIER', newCarrierId, cover ? 'COVER_CARRIER' : additional ? 'ADD_CARRIER' : 'BOOK_CARRIER', caller, {
     loadId,
     carrierId,
     carrierRateCents,
@@ -5574,6 +5793,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
     blocks: [],
     warnings: warnings.map((w) => w.key),
     acknowledged,
+    ...(additional ? { legStopIds: legIds } : {}),
   })
   // Step H. A covered load never shows a live request. ACCEPT_OFFER's own winner
   // is already WON by the transaction above, so this only closes the rest.
@@ -5640,21 +5860,20 @@ function wrap76(b64: string): string {
 }
 
 /**
- * The rate confirmation, as the carrier receives it: the PDF attached, and the
- * signing link they open to agree to it. Built as raw MIME because SES's simple
- * content has nowhere to put an attachment.
+ * One thread e-mail with any number of attachments (the rate confirmation's PDF + signing
+ * link, a bill of lading). Built as raw MIME because SES's simple content has nowhere to put
+ * an attachment.
  */
-async function sendRateConEmail(args: {
+async function sendThreadMime(args: {
   to: string[]
   cc: string[]
   subject: string
   body: string
-  filename: string
-  pdfBase64: string
+  attachments: { filename: string; contentType: string; base64: string }[]
   messageId: string
   replyTo: string
 }): Promise<{ status: 'SENT' | 'NOT_SENT' | 'FAILED'; error: string | null; raw: string; sesMessageId: string | null }> {
-  const boundary = `=_bcatratecon_${Date.now().toString(36)}`
+  const boundary = `=_bcatthread_${Date.now().toString(36)}`
   const raw =
     `From: ${FROM_ADDRESS}\r\n` +
     `To: ${args.to.join(', ')}\r\n` +
@@ -5671,12 +5890,13 @@ async function sendRateConEmail(args: {
     `\r\n` +
     `${wrap76(Buffer.from(args.body, 'utf8').toString('base64'))}\r\n` +
     `\r\n` +
-    `--${boundary}\r\n` +
-    `Content-Type: application/pdf; name="${args.filename}"\r\n` +
-    `Content-Transfer-Encoding: base64\r\n` +
-    `Content-Disposition: attachment; filename="${args.filename}"\r\n` +
-    `\r\n` +
-    `${wrap76(args.pdfBase64)}\r\n` +
+    args.attachments.map((a) =>
+      `--${boundary}\r\n` +
+      `Content-Type: ${a.contentType}; name="${a.filename}"\r\n` +
+      `Content-Transfer-Encoding: base64\r\n` +
+      `Content-Disposition: attachment; filename="${a.filename}"\r\n` +
+      `\r\n` +
+      `${wrap76(a.base64)}\r\n`).join('') +
     `--${boundary}--\r\n`
 
   try {
@@ -5775,6 +5995,22 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
   if (!BUCKET_NAME) throw new Error('Document storage is not configured')
+  const liveRows = liveRowsOf(await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId), loadId)
+  const multi = liveRows.length > 1
+  let rateConGrossCents: number | null = null
+  if (multi) {
+    // Only this carrier's own lines go on its rate confirmation (the bill snapshots the same).
+    const ownLines = rateConLinesFor(
+      (await queryIndex(LOAD_CHARGE_TABLE_NAME, IDX_CHARGES_BY_SHIPMENT, 'shipmentId', shipmentId)) as unknown as Parameters<typeof rateConLinesFor>[0],
+      { id: loadCarrierId },
+      liveRows.length,
+      String(liveRows[0].id) === loadCarrierId,
+    )
+    if (ownLines.lines.length === 0) {
+      throw new Error(`${optionalString(carrier.carrierName, 200) ?? 'This carrier'} has no carrier charges yet: enter the carrier rate before sending the rate confirmation.`)
+    }
+    rateConGrossCents = ownLines.grossCents
+  }
 
   const settings = await getSettings()
   const requiredKeys: string[] = ['DISPATCHER_EMAIL']
@@ -5807,7 +6043,13 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   const expiresAt = new Date(Date.now() + hours * 3_600_000).toISOString()
   const token = randomBytes(32).toString('base64url')
   const documentId = `cdoc-${randomUUID()}`
-  const filename = `rate-con-${loadNumber}-v${version}.pdf`
+  const carrierLabel = optionalString(carrier.carrierName, 200)?.replace(/[\r\n]+/g, ' ') ?? null
+  const filename = multi
+    ? `rate-con-${loadNumber}-${carrierSlug(carrierLabel, loadCarrierId)}-v${version}.pdf`
+    : `rate-con-${loadNumber}-v${version}.pdf`
+  const subject = multi && carrierLabel
+    ? `Rate confirmation — load ${loadNumber} — ${carrierLabel} ${subjectRef(shipmentId)}`
+    : `Rate confirmation — load ${loadNumber} ${subjectRef(shipmentId)}`
   const messageId = newMessageId(shipmentId, version)
   const composed = composeRateConCc({
     to: toInput,
@@ -5845,7 +6087,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
     to: to.join(', '),
     cc: cc.join(', '),
     from: FROM_ADDRESS,
-    subject: `Rate confirmation — load ${loadNumber} ${subjectRef(shipmentId)}`,
+    subject,
     body,
     status: 'SENT',
     error: null,
@@ -5865,6 +6107,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   }
 
   const sentRung = ladderStep(carrier, directoryCarrier.status, { rateConStatus: 'SENT' }, now)
+  const mirrorTo = sentRung ? await mirrorRungFor(carrier, sentRung.to) : null
   const transactionItems: TransactWriteItem[] = [
     putItem(CARRIER_DOCUMENT_TABLE_NAME, {
       id: documentId,
@@ -5903,25 +6146,24 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
       updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
         threadKey,
         threadOpenedAt: now,
-        ...(sentRung ? ladderMirror(sentRung.to, now) : {}),
+        ...(sentRung ? ladderMirror(mirrorTo, now) : {}),
         updatedAt: now,
         updatedBy: caller.email,
       }, String(shipment.updatedAt ?? '')),
     )
-    if (sentRung) transactionItems.push(updateItemTx(LOAD_TABLE_NAME, loadId, ladderMirror(sentRung.to, now), null))
+    if (sentRung) transactionItems.push(updateItemTx(LOAD_TABLE_NAME, loadId, ladderMirror(mirrorTo, now), null))
   } else if (sentRung) {
-    transactionItems.push(...ladderMirrorWrites(carrier, sentRung.to, now))
+    transactionItems.push(...ladderMirrorWrites(carrier, mirrorTo, now))
   }
 
   await transact(transactionItems, 'rate confirmation')
 
-  const emailOutcome = await sendRateConEmail({
+  const emailOutcome = await sendThreadMime({
     to,
     cc,
-    subject: `Rate confirmation — load ${loadNumber} ${subjectRef(shipmentId)}`,
+    subject,
     body,
-    filename,
-    pdfBase64,
+    attachments: [{ filename, contentType: 'application/pdf', base64: pdfBase64 }],
     messageId,
     replyTo: threadReplyAddress(shipmentId),
   })
@@ -5969,8 +6211,145 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
     loadId, version, to, cc, senderCc: composed.senderCopied ? caller.email : null, mcpStatus: standing.status,
     assignmentStatus: sentRung?.to ?? carrier.assignmentStatus ?? null,
     expiresAt, documentId, s3Key, threadKey, emailStatus: emailOutcome.status, sesMessageId: emailOutcome.sesMessageId,
+    ...(multi ? { liveCarriers: liveRows.length, rateConGrossCents } : {}),
   })
   return readBundle(shipmentId) as unknown as Row
+}
+
+/**
+ * Mail a stored bill of lading. The PDF is read back from S3 (never trusted from the
+ * browser), goes only to the validated recipients the rep picked, is copied to the
+ * tracking mailbox and the sender, and rides the shipment thread (opened here when it
+ * is not yet) so replies land in it. A rated BOL is a customer copy and is refused
+ * before anything is read or sent. A failed send still leaves the message row (status
+ * NOT_SENT) and answers with a download link, as the rate confirmation does on a dev stack.
+ */
+async function emailBol(input: Row, caller: Caller): Promise<Row> {
+  const parsed = parseEmailBolInput(input)
+  const { shipmentId } = parsed
+  const shipment = await requireLiveShipment(shipmentId)
+  const doc = assertBolEmailable(await getById(SHIPMENT_DOCUMENT_TABLE_NAME, parsed.documentId), shipmentId)
+  if (!BUCKET_NAME) throw new Error('Document storage is not configured')
+
+  const loads = await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const load = loads.find((l) => l.id === doc.loadId) ?? loads[0] ?? null
+  const pro = optionalString(load?.loadNumber, 60) ?? optionalString(shipment.number, 60) ?? shipmentId
+  const delivery = load ? deliveryLabel(readStops(load), doc.stopId) : null
+
+  const object = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: String(doc.s3Key) }))
+  const bytes = object.Body ? Buffer.from(await object.Body.transformToByteArray()) : Buffer.alloc(0)
+  if (bytes.length === 0) throw new Error('That bill of lading has no stored file')
+  if (bytes.length > MAX_GENERATED_BYTES) throw new Error('That bill of lading is too large to send')
+
+  const composed = composeRateConCc({
+    to: parsed.to,
+    extraCc: parsed.cc,
+    tracking: trackingMailbox(),
+    sender: isEmailAddress(caller.email) ? caller.email : null,
+  })
+  const { to, cc } = composed
+  const now = nowIso()
+  const firstName = firstNameFromEmail(caller.email)
+  const subject = bolEmailSubject(pro, delivery, subjectRef(shipmentId))
+  const body = bolEmailBody(parsed.message, firstName)
+  const filename = String(doc.name ?? `bol-${pro}.pdf`).replace(/[\r\n"]+/g, ' ')
+  const messageId = newMessageId(shipmentId, numberOrNull(doc.version) ?? 1)
+  const threadKey = String(shipment.threadKey ?? threadKeyFor(shipmentId))
+
+  const message: Row = {
+    id: `msg:${shipmentId}:${randomUUID()}`,
+    __typename: 'ShipmentMessage',
+    shipmentId,
+    threadKey,
+    loadId: optionalString(doc.loadId, 100),
+    loadCarrierId: optionalString(doc.loadCarrierId, 100),
+    direction: 'OUT',
+    channel: 'EMAIL',
+    kind: 'OTHER',
+    party: parsed.party,
+    to: to.join(', '),
+    cc: cc.join(', '),
+    from: FROM_ADDRESS,
+    subject,
+    body,
+    status: 'SENT',
+    error: null,
+    authorKind: 'PERSON',
+    authorName: firstName,
+    messageId,
+    inReplyTo: null,
+    providerRef: null,
+    attachments: null,
+    documentIds: [String(doc.id)],
+    trackingLinkId: null,
+    workflowRunId: null,
+    at: now,
+    createdBy: caller.email,
+    createdAt: now,
+    updatedAt: now,
+  }
+  const items: TransactWriteItem[] = [putItem(SHIPMENT_MESSAGE_TABLE_NAME, message)]
+  if (!shipment.threadKey) {
+    items.push(
+      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+        threadKey,
+        threadOpenedAt: now,
+        updatedAt: now,
+        updatedBy: caller.email,
+      }, String(shipment.updatedAt ?? '')),
+    )
+  }
+  await transact(items, 'bill of lading e-mail')
+
+  const outcome = await sendThreadMime({
+    to,
+    cc,
+    subject,
+    body,
+    attachments: [{ filename, contentType: 'application/pdf', base64: bytes.toString('base64') }],
+    messageId,
+    replyTo: threadReplyAddress(shipmentId),
+  })
+
+  let downloadUrl: string | null = null
+  if (outcome.status === 'SENT') {
+    // SES rewrites Message-ID, so store the wire id a reply's In-Reply-To will carry.
+    if (outcome.sesMessageId) {
+      await dynamo.send(new UpdateItemCommand({
+        TableName: SHIPMENT_MESSAGE_TABLE_NAME,
+        Key: marshall({ id: message.id }),
+        UpdateExpression: 'SET providerRef = :ref, messageId = :mid',
+        ExpressionAttributeValues: marshall({ ':ref': outcome.sesMessageId, ':mid': sesWireMessageId(outcome.sesMessageId) }),
+      }))
+      message.providerRef = outcome.sesMessageId
+      message.messageId = sesWireMessageId(outcome.sesMessageId)
+    }
+  } else {
+    console.error('[tms-shipment-actions] bol email failed', outcome.error)
+    console.log('[tms-shipment-actions] bol email would have sent:\n', outcome.raw)
+    await dynamo.send(new UpdateItemCommand({
+      TableName: SHIPMENT_MESSAGE_TABLE_NAME,
+      Key: marshall({ id: message.id }),
+      UpdateExpression: 'SET #status = :status, #error = :error, #updatedAt = :updatedAt',
+      ExpressionAttributeNames: { '#status': 'status', '#error': 'error', '#updatedAt': 'updatedAt' },
+      ExpressionAttributeValues: marshall({ ':status': 'NOT_SENT', ':error': outcome.error, ':updatedAt': nowIso() }),
+    }))
+    message.status = 'NOT_SENT'
+    message.error = outcome.error
+    downloadUrl = await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET_NAME, Key: String(doc.s3Key) }), { expiresIn: 300 })
+  }
+
+  await writeAudit('SHIPMENT_DOCUMENT', String(doc.id), 'EMAIL_BOL', caller, {
+    shipmentId, documentId: doc.id, version: doc.version ?? null, stopId: doc.stopId ?? null,
+    party: parsed.party, to, cc, senderCc: composed.senderCopied ? caller.email : null, threadKey,
+    emailStatus: outcome.status === 'SENT' ? 'SENT' : 'NOT_SENT', sesMessageId: outcome.sesMessageId,
+  })
+  return {
+    message,
+    emailStatus: outcome.status === 'SENT' ? 'SENT' : 'NOT_SENT',
+    emailError: outcome.error,
+    downloadUrl,
+  }
 }
 
 /** Kill the open link without putting anybody else on the load. */
@@ -6043,7 +6422,7 @@ async function enterDriverInfo(input: Row, caller: Caller): Promise<Row> {
   await transact(
     [
       updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, { ...fields, ...(step?.cols ?? {}), updatedBy: caller.email, updatedAt: now }, null),
-      ...(step ? ladderMirrorWrites(row, step.to, now) : []),
+      ...(step ? ladderMirrorWrites(row, await mirrorRungFor(row, step.to), now) : []),
     ],
     'driver info',
   )
@@ -6086,7 +6465,7 @@ async function markRateConSigned(input: Row, caller: Caller): Promise<Row> {
   await transact(
     [
       updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, { ...signed, ...(step?.cols ?? {}), updatedBy: caller.email, updatedAt: now }, null),
-      ...(step ? ladderMirrorWrites(row, step.to, now) : []),
+      ...(step ? ladderMirrorWrites(row, await mirrorRungFor(row, step.to), now) : []),
     ],
     'rate confirmation',
   )
@@ -6113,13 +6492,21 @@ async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
   if (!shipmentId) throw new Error('That load is not part of a shipment yet')
   await requireLiveShipment(shipmentId)
   const current = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
-  if (current !== 'BOOKED') throw new Error('Only a booked load can be dispatched')
-  if (!canTransitionLoadStatus(current, 'DISPATCHED')) {
+  const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
+  const live = liveRowsOf(carriers, loadId)
+  // AT-plan: with several carriers the caller names the one that is rolling.
+  const requestedId = optionalString(input.loadCarrierId, 100)
+  if (live.length > 1 && !requestedId) {
+    throw new Error(`This load has ${live.length} carriers: name the carrier to dispatch (loadCarrierId)`)
+  }
+  const active: Row | null = requestedId ? live.find((c) => String(c.id) === requestedId) ?? null : live[0] ?? null
+  if (requestedId && !active) throw new Error('That carrier is not on this load')
+  // The second carrier of a split load goes out after the load is already DISPATCHED.
+  const laterCarrier = live.length > 1 && current === 'DISPATCHED' && active != null && active.dispatchedAt == null
+  if (current !== 'BOOKED' && !laterCarrier) throw new Error('Only a booked load can be dispatched')
+  if (current === 'BOOKED' && !canTransitionLoadStatus(current, 'DISPATCHED')) {
     throw new Error(`A load cannot go from ${current ?? 'SOURCING'} to DISPATCHED`)
   }
-
-  const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
-  const active = carriers.find((c) => c.status === 'ACTIVE') ?? null
   // An Ivan Cartage load with no leg at all is the driverless case, so it gets the driver
   // message and not the generic one.
   await assertOwnAssetDriver(load, active, 'DISPATCH')
@@ -6195,10 +6582,9 @@ async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
   assertLoadWriteOk(
     await client.models.Load.update({
       id: loadId,
-      status: 'DISPATCHED',
-      statusChangedAt: now,
-      statusChangedBy: caller.email,
-      statusSource: 'USER',
+      ...(current === 'BOOKED'
+        ? { status: 'DISPATCHED' as const, statusChangedAt: now, statusChangedBy: caller.email, statusSource: 'USER' as const }
+        : {}),
       ...(trackingProvider ? { trackingProvider } : {}),
       // The sparse marker is what the check-call worklist is built from.
       ...(nextCheckCallAt ? { nextCheckCallAt, checkCallOpen: 'OPEN' } : {}),
@@ -6300,16 +6686,34 @@ function repriceShipment(args: {
   const existingFinancials = bundle.financials.find((f) => f.id === loadId) ?? null
   const existingById = new Map(bundle.charges.map((row) => [String(row.id), row]))
 
-  const activeCarrier = bundle.loadCarriers.find((c) => c.loadId === loadId && c.status === 'ACTIVE') ?? null
+  const live = liveRowsOf(bundle.loadCarriers, loadId)
+  const knownIds = new Set(
+    bundle.loadCarriers.filter((c) => String(c.loadId) === loadId && c.status !== 'BOUNCED').map((c) => String(c.id)),
+  )
+  // AT-plan: an untagged CARRIER line belongs to the only live carrier; with two or more
+  // it is refused, and every explicit tag must name a carrier of this load.
+  const tagged = charges.map((c): ChargeInput => {
+    if (c.side !== 'CARRIER') return c
+    if (c.loadCarrierId == null) {
+      if (live.length > 1) {
+        throw new Error(`Carrier charge ${c.code} must name the carrier it is paid to: ${live.length} carriers are on this load`)
+      }
+      return { ...c, loadCarrierId: live.length === 1 ? String(live[0].id) : null }
+    }
+    if (live.length > 1 && !knownIds.has(c.loadCarrierId)) {
+      throw new Error(`Carrier charge ${c.code} names a carrier that is not on this load`)
+    }
+    return c
+  })
   const { amounts, totals } = priceFor(
-    charges,
+    tagged,
     { miles: numberOrNull(load.miles), weightLbs: numberOrNull(load.weight) },
     pricingDefaultsOf(customer),
     marginFloorBpsOf(settings),
   )
 
-  const chargeRows = charges.map((c, i) => chargeRow(
-    { ...c, loadCarrierId: c.loadCarrierId ?? (c.side === 'CARRIER' ? (activeCarrier ? String(activeCarrier.id) : null) : null) },
+  const chargeRows = tagged.map((c, i) => chargeRow(
+    c,
     amounts[i],
     { shipmentId, orderId, loadId },
     caller,
@@ -6347,11 +6751,12 @@ function repriceShipment(args: {
       version: (numberOrNull(shipment.version) ?? 1) + 1,
     }, args.expectedShipmentUpdatedAt),
   ]
-  if (activeCarrier) {
+  // Every live carrier's cache is re-derived from its own lines.
+  for (const carrier of live) {
     writes.push(updateItemTx(
       LOAD_CARRIER_TABLE_NAME,
-      String(activeCarrier.id),
-      carrierCachePatch(chargeRows, activeCarrier, caller, now),
+      String(carrier.id),
+      carrierCachePatch(chargeRows, carrier, caller, now),
       null,
     ))
   }
@@ -6473,10 +6878,10 @@ async function updateCarrierCharges(input: Row, caller: Caller): Promise<Row> {
     expectedShipmentUpdatedAt: String(shipment.updatedAt ?? ''),
   })
   const loadId = String(assignment.loadId)
-  const active = bundle.loadCarriers.find((c) => c.loadId === loadId && c.status === 'ACTIVE') ?? null
+  const liveIds = new Set(liveRowsOf(bundle.loadCarriers, loadId).map((c) => String(c.id)))
   // A TONU'd assignment is still owed its retained lines, and repricing only
   // re-caches the carrier currently on the load; this one has to be told itself.
-  if (String(active?.id ?? '') !== loadCarrierId) {
+  if (!liveIds.has(loadCarrierId)) {
     writes.push(updateItemTx(
       LOAD_CARRIER_TABLE_NAME,
       loadCarrierId,
@@ -6663,6 +7068,22 @@ async function updateLoadCarrierDetails(input: Row, caller: Caller): Promise<Row
   const shipmentId = String(assignment.shipmentId)
   await requireLiveShipment(shipmentId)
   if (String(assignment.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('assignment', null)
+  if (patch.legStopIds !== undefined) {
+    const legLoadId = String(assignment.loadId)
+    const legLoad = await getById(LOAD_TABLE_NAME, legLoadId)
+    const live = liveRowsOf(await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', legLoadId), legLoadId)
+    const others = live.filter((c) => String(c.id) !== loadCarrierId).map(toLegCarrier)
+    const legStopIds = patch.legStopIds as string[]
+    const checked = validateLegs(
+      [...others, { ...toLegCarrier(assignment), legStopIds }],
+      (legLoad ? readStops(legLoad) : []) as unknown as LegStop[],
+    )
+    if (checked.errors.length > 0) throw new Error(checked.errors.join('; '))
+    const overlap = others.length > 0
+      ? validateCarrierAdd(others, { kind: 'CARRIER', carrierId: optionalString(assignment.carrierId, 100), legStopIds })
+      : null
+    if (overlap) throw new Error(overlap)
+  }
   // Step AQ. An Ivan Cartage carrier's driver is a Driver record, never typed; on every other leg a
   // roster id has no meaning here.
   const ivan = isIvanCartageName(optionalString(assignment.carrierName, 200))
@@ -6670,6 +7091,14 @@ async function updateLoadCarrierDetails(input: Row, caller: Caller): Promise<Row
     throw new Error('driverId cannot be changed here: money, rate confirmation and status have their own actions')
   }
   const ownFleetPatch: Row = ivan ? await ownFleetDriverPatch(input, patch) : {}
+  // Step AT: a details edit of the carrier's override keeps an earlier confirmation, like SET_TRACKING_PREFS.
+  if (patch.trackingPrefs !== undefined) {
+    patch.trackingPrefs = stampTrackingPrefs(
+      patch.trackingPrefs as ReturnType<typeof validateTrackingPrefsOverride>,
+      parseTrackingPrefs(assignment.trackingPrefs),
+      caller,
+    )
+  }
 
   // Step AM. Filling in the last driver field here earns the same rung ENTER_DRIVER_INFO does.
   const directoryId = optionalString(assignment.carrierId, 100)
@@ -6685,7 +7114,7 @@ async function updateLoadCarrierDetails(input: Row, caller: Caller): Promise<Row
         { ...merged, ...(step?.cols ?? {}), updatedBy: caller.email, updatedAt: now },
         expectedUpdatedAt,
       ),
-      ...(step ? ladderMirrorWrites(assignment, step.to, now) : []),
+      ...(step ? ladderMirrorWrites(assignment, await mirrorRungFor(assignment, step.to), now) : []),
     ],
     'assignment',
   )
@@ -6917,7 +7346,7 @@ async function logCheckCall(input: Row, caller: Caller): Promise<Row> {
   }
 
   const bundle = await readBundle(shipmentId)
-  const activeCarrier = bundle.loadCarriers.find((c) => c.loadId === loadId && c.status === 'ACTIVE') ?? null
+  const activeCarrier: Row | null = liveRowsOf(bundle.loadCarriers, loadId)[0] ?? null
   const financials = bundle.financials.find((f) => f.id === loadId) ?? null
   if (chargeRequests.length > 0 && financials?.frozenAt) {
     throw new Error('This load\'s financials are frozen and can no longer be changed')
@@ -7701,7 +8130,7 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
     let activeLoadCarrierId = plan.loadCarrierId
     if (plan.relink) {
       const legs = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', plan.loadId)
-      const active = legs.find((c) => c.status === 'ACTIVE') ?? null
+      const active: Row | null = liveRowsOf(legs, plan.loadId)[0] ?? null
       activeLoadCarrierId = active ? String(active.id) : null
       assignmentType = active ? (active.kind === 'CARRIER' ? 'CARRIER' : 'OWN_ASSET') : 'NEED_TO_COVER'
     }
@@ -8148,6 +8577,10 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return assignCarrier(input, caller)
     case 'BOOK_CARRIER':
       return bookCarrier(input, caller)
+    case 'ADD_CARRIER':
+      return input.carrierId != null
+        ? bookCarrier(input, caller, undefined, { additional: true })
+        : assignCarrier(input, caller, { additional: true })
     case 'COVER_CARRIER':
       return bookCarrier(input, caller, undefined, { cover: true })
     case 'ENTER_DRIVER_INFO':
@@ -8192,6 +8625,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return commitDocument(documentDeps, input, caller)
     case 'SAVE_GENERATED_DOCUMENT':
       return saveGeneratedDocument(documentDeps, input, caller)
+    case 'EMAIL_BOL':
+      return emailBol(input, caller)
     case 'ATTACH_DRIVER_DOC':
       return attachDriverDoc(documentDeps, input, caller)
     case 'REVIEW_DOCUMENT':

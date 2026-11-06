@@ -49,6 +49,7 @@ import { useShipmentDocuments } from '@/hooks/useShipmentDocuments'
 import { useLoadDriverDocs, type LoadDriverDoc } from '@/hooks/useLoadDriverDocs'
 import { UploadDocumentDialog } from './UploadDocumentDialog'
 import { GeneratedDocumentDialog, type GeneratedKind } from './GeneratedDocumentDialog'
+import { BolDialog } from './BolDialog'
 import { EmailDocumentsDialog } from './EmailDocumentsDialog'
 import type {
   ChargeCodeDef, CustomerRecord, DocGateResult, InvoiceRecord, LoadCarrierRecord, LocationRecord, ShipmentBundle,
@@ -84,6 +85,7 @@ const ATTACH_AS: Record<'POD' | 'RATECON' | 'MISC', 'POD' | 'PHOTO' | 'OTHER'> =
 type DocDialog =
   | { kind: 'upload' }
   | { kind: 'generate'; which: GeneratedKind }
+  | { kind: 'bol' }
   | { kind: 'email' }
   | { kind: 'retype'; doc: ShipmentDocumentRecord }
   | { kind: 'void'; doc: ShipmentDocumentRecord }
@@ -205,12 +207,12 @@ export function DocumentsSection({
           </TmsButton>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <TmsButton size="sm">
+              <TmsButton size="sm" data-testid="documents-generate-menu">
                 <Wand2 size={14} className="mr-1" />Generate <ChevronDown size={14} className="ml-1" />
               </TmsButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="tms-portal">
-              <DropdownMenuItem onSelect={() => setDialog({ kind: 'generate', which: 'BOL' })}>
+              <DropdownMenuItem onSelect={() => setDialog({ kind: 'bol' })} data-testid="documents-generate-bol">
                 <FileText size={14} className="mr-2" />Bill of lading
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setDialog({ kind: 'generate', which: 'LOAD_SUMMARY' })}>
@@ -297,6 +299,16 @@ export function DocumentsSection({
       {dialog?.kind === 'upload' && (
         <UploadDocumentDialog
           bundle={bundle}
+          onClose={() => setDialog(null)}
+          onSaved={() => { void refreshAll() }}
+        />
+      )}
+      {dialog?.kind === 'bol' && (
+        <BolDialog
+          bundle={bundle}
+          customer={customer}
+          locations={locations}
+          settings={settings}
           onClose={() => setDialog(null)}
           onSaved={() => { void refreshAll() }}
         />

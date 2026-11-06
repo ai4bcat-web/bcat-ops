@@ -119,8 +119,21 @@ export function ApCard({ bundle, onReload }: ApCardProps) {
 
   if (assignments.length === 0) return null
 
+  const billable = assignments.filter((row) => row.kind === 'CARRIER')
+
   return (
     <div className="space-y-3">
+      {billable.length > 1 && (
+        <ul className="flex flex-wrap gap-2" data-testid="ap-bill-states">
+          {billable.map((row) => (
+            <li key={row.id} data-testid={`ap-bill-state-${row.id}`} className="flex items-center gap-1 text-xs">
+              <span className="font-medium">{row.carrierName ?? 'Carrier'}</span>
+              <TmsBadge tone={row.invoiceId ? 'green' : 'gray'}>{row.invoiceId ? 'Bill recorded' : 'No bill yet'}</TmsBadge>
+              <TmsBadge tone="gray">{RUNGS.find((rung) => rung.key === (row.apStatus ?? 'AWAITING_INVOICE'))?.label}</TmsBadge>
+            </li>
+          ))}
+        </ul>
+      )}
       {assignments.map((loadCarrier) => (
         <AssignmentCard
           key={loadCarrier.id}

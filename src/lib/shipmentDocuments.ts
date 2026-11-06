@@ -293,18 +293,43 @@ export function generatedFilename(type: ShipmentDocumentType, reference: string,
 }
 
 /**
- * Versions count per shipment + type + load, so a two-leg shipment's two BOLs are
- * both v1 rather than v1 and v2 of one document.
+ * The extra keys of a generated document's slot. Omit the whole object and the slot is
+ * (type, load) as it always was; pass it (even `{}`) and a row only shares the slot when
+ * stop, carrier and rated-ness all match, with undefined = null. A rated BOL is stored
+ * with audience CUSTOMER, so that is how a stored row says it is rated.
+ */
+export interface DocumentSlot {
+  stopId?: string | null
+  loadCarrierId?: string | null
+  rated?: boolean
+}
+
+function sameSlot(
+  doc: Pick<ShipmentDocumentRecord, 'type' | 'stopId' | 'loadCarrierId' | 'audience'>,
+  slot: DocumentSlot | undefined,
+): boolean {
+  if (!slot) return true
+  if ((doc.stopId ?? null) !== (slot.stopId ?? null)) return false
+  if ((doc.loadCarrierId ?? null) !== (slot.loadCarrierId ?? null)) return false
+  if (doc.type === 'BOL' && (doc.audience === 'CUSTOMER') !== (slot.rated === true)) return false
+  return true
+}
+
+/**
+ * Versions count per shipment + type + load (+ slot), so a two-leg shipment's two BOLs
+ * are both v1 rather than v1 and v2 of one document, and so are two delivery stops'.
  */
 export function nextVersion(
-  docs: readonly Pick<ShipmentDocumentRecord, 'type' | 'loadId' | 'version'>[],
+  docs: readonly Pick<ShipmentDocumentRecord, 'type' | 'loadId' | 'version' | 'stopId' | 'loadCarrierId' | 'audience'>[],
   type: ShipmentDocumentType,
   loadId: string | null | undefined,
+  slot?: DocumentSlot,
 ): number {
   let max = 0
   for (const doc of docs) {
     if (doc.type !== type) continue
     if ((doc.loadId ?? null) !== (loadId ?? null)) continue
+    if (!sameSlot(doc, slot)) continue
     if (typeof doc.version === 'number' && doc.version > max) max = doc.version
   }
   return max + 1
@@ -312,16 +337,24 @@ export function nextVersion(
 
 /**
  * The row a new generated document replaces: the current ACTIVE one of the same type
- * on the same load. At most one, because every generation supersedes its predecessor.
+ * on the same load and slot. At most one, because every generation supersedes its
+ * predecessor.
  */
-export function supersede<T extends Pick<ShipmentDocumentRecord, 'id' | 'type' | 'loadId' | 'status'>>(
+export function supersede<
+  T extends Pick<ShipmentDocumentRecord, 'id' | 'type' | 'loadId' | 'status' | 'stopId' | 'loadCarrierId' | 'audience'>,
+>(
   docs: readonly T[],
-  next: Pick<ShipmentDocumentRecord, 'type' | 'loadId'>,
+  next: Pick<ShipmentDocumentRecord, 'type' | 'loadId'> & DocumentSlot,
 ): T | null {
+  const slot: DocumentSlot | undefined =
+    'stopId' in next || 'loadCarrierId' in next || 'rated' in next
+      ? { stopId: next.stopId, loadCarrierId: next.loadCarrierId, rated: next.rated }
+      : undefined
   for (const doc of docs) {
     if (doc.status !== 'ACTIVE') continue
     if (doc.type !== next.type) continue
     if ((doc.loadId ?? null) !== (next.loadId ?? null)) continue
+    if (!sameSlot(doc, slot)) continue
     return doc
   }
   return null
@@ -339,7 +372,7 @@ export type DocGateScope = 'CUSTOMER' | 'CARRIER'
 
 export interface PresentDocTypesInput {
   documents: readonly ShipmentDocumentRecord[]
-  loadCarriers: readonly Pick<LoadCarrierRecord, 'id' | 'status' | 'rateConStatus'>[]
+  loadCarriers: readonly (Pick<LoadCarrierRecord, 'id' | 'status' | 'rateConStatus'> & { kind?: LoadCarrierRecord['kind'] })[]
   orderId?: string | null
   loadIds?: readonly string[] | null
   /** CARRIER scope looks at exactly one assignment, by id. */
@@ -380,7 +413,13 @@ export function presentDocTypes(input: PresentDocTypesInput): ShipmentDocumentTy
     input.scope === 'CARRIER'
       ? input.loadCarriers.filter((lc) => lc.id === input.loadCarrierId)
       : input.loadCarriers.filter((lc) => lc.status === 'ACTIVE')
-  if (signedScope.some((lc) => lc.rateConStatus === 'SIGNED')) present.add('RATE_CON')
+  // Two or more outside carriers on the load: every one must have signed, and a
+  // filed RATE_CON (or one signature) never waives another carrier's.
+  const outside = signedScope.filter((lc) => lc.kind !== 'OWN_ASSET')
+  if (input.scope !== 'CARRIER' && outside.length >= 2) {
+    present.delete('RATE_CON')
+    if (outside.every((lc) => lc.rateConStatus === 'SIGNED')) present.add('RATE_CON')
+  } else if (signedScope.some((lc) => lc.rateConStatus === 'SIGNED')) present.add('RATE_CON')
 
   return SHIPMENT_DOCUMENT_TYPES.filter((type) => present.has(type))
 }
@@ -407,7 +446,7 @@ export function gateLoadIds(
 export interface DocGateInput {
   order?: Pick<OrderRecord, 'id'> | null
   loadIds?: readonly string[] | null
-  loadCarriers: readonly Pick<LoadCarrierRecord, 'id' | 'status' | 'rateConStatus'>[]
+  loadCarriers: readonly (Pick<LoadCarrierRecord, 'id' | 'status' | 'rateConStatus'> & { kind?: LoadCarrierRecord['kind'] })[]
   documents: readonly ShipmentDocumentRecord[]
   customer?: Pick<CustomerRecord, 'requiredDocsForInvoice'> | null
   settings?: Pick<TmsSettings, 'defaultRequiredDocs' | 'requiredCarrierUploadTypes'> | null

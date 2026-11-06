@@ -24,9 +24,10 @@ import {
   type TemplatePlaceholder,
 } from '../../../src/lib/trackingAutomation'
 import { MAX_SMS_BODY } from '../../../src/lib/dispatch'
-import { AUTO_BLOCK_NOTE, autoRequestBlock, channelsAllowedBy, effectiveTrackingPrefs, type TrackingMethod } from '../../../src/lib/trackingPrefs'
+import { AUTO_BLOCK_NOTE, autoRequestBlock, channelsAllowedBy, effectiveTrackingPrefs, type EffectiveTrackingPrefs, type TrackingMethod } from '../../../src/lib/trackingPrefs'
 import { resolveDriverSms } from './driverPhone'
 import { TZ } from '../../../src/lib/date'
+import { carrierPhase, coveringCarrier } from '../../../src/lib/carrierLegs'
 import { isVoided } from '../_shared/voided'
 import { assertExpectedUpdatedAt, assertString, optionalString, type Caller } from '../_shared/actionInputs'
 import { type Row, updateItemTx } from '../_shared/shipmentStore'
@@ -52,6 +53,8 @@ interface TickResult {
   tick: CheckCallTick
   plan: CheckCallPlan | null
   carrier: Row | null
+  /** The covering carrier's effective prefs. */
+  prefs: EffectiveTrackingPrefs
   policy: AutomationPolicy
   /** AUTO only: why this leg may not be touched at all (no write, nothing sent). */
   blocked: string | null
@@ -98,6 +101,37 @@ export function activeLoadCarrier(load: Row, carriers: Row[]): Row | null {
     if (found) return found
   }
   return carriers.find((c) => c.loadId === load.id && c.status === 'ACTIVE') ?? null
+}
+
+/** The ACTIVE rows of one load in assignment order (Step AT). */
+export function liveCarriersOfLoad(load: Row, carriers: Row[]): Row[] {
+  return carriers
+    .filter((c) => c.loadId === load.id && c.status === 'ACTIVE')
+    .sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0))
+}
+
+/**
+ * The carrier an automatic action on this load is about: with two or more live carriers, the one whose
+ * leg holds the earliest un-departed stop; otherwise (and once every stop has left) the primary pointer,
+ * exactly `activeLoadCarrier`. A single-carrier load never reaches the legs code.
+ */
+export function coveringLoadCarrier(load: Row, carriers: Row[]): Row | null {
+  const live = liveCarriersOfLoad(load, carriers)
+  if (live.length >= 2) {
+    const holder = coveringCarrier(live as never[], parseStops(load) as never[])
+    if (holder) return holder as Row
+  }
+  return activeLoadCarrier(load, carriers)
+}
+
+/** Who a cadence reminder goes to: every live carrier that has not finished its legs (covering one first); one carrier = that carrier. */
+function reminderTargets(load: Row, carriers: Row[], covering: Row | null): Row[] {
+  const live = liveCarriersOfLoad(load, carriers)
+  if (live.length < 2) return covering ? [covering] : []
+  const stops = parseStops(load) as never[]
+  const open = live.filter((c) => carrierPhase({ legStopIds: c.legStopIds as string[] | undefined }, stops) !== 'DONE')
+  if (open.length === 0) return covering ? [covering] : []
+  return covering && open.some((c) => c.id === covering.id) ? [covering, ...open.filter((c) => c.id !== covering.id)] : open
 }
 
 function parseStops(load: Row): Row[] {
@@ -219,11 +253,11 @@ export async function runCheckCallPlan(
     shipment.customerId ? deps.getById(deps.tables.customer, String(shipment.customerId)) : Promise.resolve(null),
   ])
 
-  const prefs = effectiveTrackingPrefs({ shipment, customer })
   const knownIds = new Set(messages.map((m) => String(m.id ?? '')))
   const results: TickResult[] = []
   for (const load of loads) {
-    const carrier = activeLoadCarrier(load, carriers)
+    const carrier = coveringLoadCarrier(load, carriers)
+    const prefs = effectiveTrackingPrefs({ shipment, customer, loadCarrier: carrier })
     const resolved = resolveAutomation({
       settings,
       customer,
@@ -249,6 +283,7 @@ export async function runCheckCallPlan(
         tick: { kind: 'NONE', milestone: null, channels: [], nextDueAt: null, reason: blocked },
         plan,
         carrier,
+        prefs,
         policy,
         blocked,
       })
@@ -267,6 +302,7 @@ export async function runCheckCallPlan(
         },
         plan: null,
         carrier,
+        prefs,
         policy,
         blocked: null,
       })
@@ -282,7 +318,7 @@ export async function runCheckCallPlan(
       const owed = plan.channels.filter((c) => (c === 'SMS' || c === 'EMAIL') && isChannelEnabled(c) && !messages.some((m) => m.id === slotId(c)))
       if (spent && owed.length) tick = { ...tick, kind: 'CADENCE', channels: owed, reason: `Every ${plan.intervalHours} h in transit` }
     }
-    results.push({ load, tick, plan, carrier, policy, blocked: null })
+    results.push({ load, tick, plan, carrier, prefs, policy, blocked: null })
   }
 
   let acted = 0
@@ -291,7 +327,7 @@ export async function runCheckCallPlan(
   let skipped = 0
   const processed: Row[] = []
 
-  for (const { load, tick, plan, carrier, policy, blocked } of results) {
+  for (const { load, tick, plan, carrier, prefs, policy, blocked } of results) {
     const now = deps.now()
     const loadId = String(load.id)
     const loadStatus = String(load.status ?? '')
@@ -456,15 +492,13 @@ export async function runCheckCallPlan(
       ? `auto:cc:${carrier?.id}:${slot.index}:EMAIL`
       : `${milestoneMessageId(loadId, String(milestone))}:email`
 
-    const dispatcherEmail = optionalString(carrier?.dispatcherEmail, 250)
-    const wantsSms = Boolean(carrier && tick.channels.includes('SMS'))
-    // Step AK: the truck's work phone first, the driver's own number as the fallback (per the customer / shipment override).
-    const sms = wantsSms && carrier ? await resolveDriverSms(deps, { carrier, shipment, customer, load }) : null
-    const hasSms = Boolean(sms?.to)
-    const hasEmail = Boolean(dispatcherEmail && tick.channels.includes('EMAIL'))
-    // A channel held back by quiet hours: nothing is stamped, so the next tick sends it if the slot is still open.
-    const held = (hasSms && !channels.includes('SMS')) || (hasEmail && !channels.includes('EMAIL'))
-
+    // Step AT: a cadence reminder goes to every live carrier still moving freight, each on its own prefs.
+    const targets = tick.kind === 'CADENCE' ? reminderTargets(load, carriers, carrier) : carrier ? [carrier] : []
+    let wantsSms = false
+    let smsReason: string | undefined
+    let hasSmsAny = false
+    let hasEmail = false
+    let held = false
     let attempted = 0 // new rows this run (SENT, NOT_SENT or FAILED alike)
     let covered = 0 // channels that already had their row for this slot
     let anySent = false
@@ -476,48 +510,75 @@ export async function runCheckCallPlan(
       attempted += 1
       if (outcome.status === 'SENT') anySent = true
     }
-    if (hasSms && channels.includes('SMS')) {
-      track(knownIds.has(smsId) ? null : await sendShipmentMessage(
-        deps,
-        {
-          id: smsId,
-          shipmentId,
-          loadId,
-          loadCarrierId: carrier!.id,
-          channel: 'SMS',
-          kind: 'CHECK_CALL',
-          party: 'DRIVER',
-          to: sms?.to,
-          body,
-          label: carrier,
-          authorKind: 'AGENT',
-        },
-        caller,
-      ))
-    }
-    if (hasEmail && channels.includes('EMAIL')) {
-      track(knownIds.has(emailId) ? null : await sendShipmentMessage(
-        deps,
-        {
-          id: emailId,
-          shipmentId,
-          loadId,
-          loadCarrierId: carrier!.id,
-          channel: 'EMAIL',
-          kind: 'CHECK_CALL',
-          party: 'DISPATCHER',
-          to: dispatcherEmail,
-          subject: emailSubject,
-          body: emailBody,
-          authorKind: 'AGENT',
-        },
-        caller,
-      ))
+    for (const target of targets) {
+      const isCovering = target === carrier
+      const targetPrefs = isCovering ? prefs : effectiveTrackingPrefs({ shipment, customer, loadCarrier: target })
+      if (!isCovering) {
+        if (auto && autoRequestBlock(targetPrefs)) continue
+        if (auto && (target.kind !== 'CARRIER' || !isRateConSent(target))) continue
+      }
+      const allow = <T extends string>(list: readonly T[]): T[] => (isCovering ? [...list] : channelsAllowedBy(targetPrefs.method, list))
+      const tChannels = allow(tick.channels)
+      const sendChannels = allow(channels)
+      const targetSmsId = slot ? `auto:cc:${target.id}:${slot.index}:SMS` : smsId
+      const targetEmailId = slot ? `auto:cc:${target.id}:${slot.index}:EMAIL` : emailId
+
+      const dispatcherEmail = optionalString(target.dispatcherEmail, 250)
+      const targetWantsSms = tChannels.includes('SMS')
+      // Step AK: the truck's work phone first, the driver's own number as the fallback (per the carrier / shipment / customer override).
+      const sms = targetWantsSms ? await resolveDriverSms(deps, { carrier: target, shipment, customer, load }) : null
+      const hasSms = Boolean(sms?.to)
+      const targetHasEmail = Boolean(dispatcherEmail && tChannels.includes('EMAIL'))
+      wantsSms ||= targetWantsSms
+      hasSmsAny ||= hasSms
+      smsReason ??= targetWantsSms && !sms?.to ? sms?.reason ?? undefined : undefined
+      hasEmail ||= targetHasEmail
+      // A channel held back by quiet hours: nothing is stamped, so the next tick sends it if the slot is still open.
+      held ||= (hasSms && !sendChannels.includes('SMS')) || (targetHasEmail && !sendChannels.includes('EMAIL'))
+
+      if (hasSms && sendChannels.includes('SMS')) {
+        track(knownIds.has(targetSmsId) ? null : await sendShipmentMessage(
+          deps,
+          {
+            id: targetSmsId,
+            shipmentId,
+            loadId,
+            loadCarrierId: target.id,
+            channel: 'SMS',
+            kind: 'CHECK_CALL',
+            party: 'DRIVER',
+            to: sms?.to,
+            body,
+            label: target,
+            authorKind: 'AGENT',
+          },
+          caller,
+        ))
+      }
+      if (targetHasEmail && sendChannels.includes('EMAIL')) {
+        track(knownIds.has(targetEmailId) ? null : await sendShipmentMessage(
+          deps,
+          {
+            id: targetEmailId,
+            shipmentId,
+            loadId,
+            loadCarrierId: target.id,
+            channel: 'EMAIL',
+            kind: 'CHECK_CALL',
+            party: 'DISPATCHER',
+            to: dispatcherEmail,
+            subject: emailSubject,
+            body: emailBody,
+            authorKind: 'AGENT',
+          },
+          caller,
+        ))
+      }
     }
 
     if (attempted + covered === 0 && !held) {
       skipped += 1
-      processed.push({ loadId, kind: 'NONE', reason: wantsSms && !sms?.to && !hasEmail ? sms?.reason ?? 'No driver phone' : 'No available channel' })
+      processed.push({ loadId, kind: 'NONE', reason: wantsSms && !hasSmsAny && !hasEmail ? smsReason ?? 'No driver phone' : 'No available channel' })
       continue
     }
 

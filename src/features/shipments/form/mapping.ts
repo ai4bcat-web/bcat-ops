@@ -4,11 +4,12 @@
  */
 import { fromDateTimeInput } from '@/lib/date'
 import { distanceMeters } from '@/lib/tmsDirectory'
+import { carrierTotals, marginOf, type CarrierTotals } from '@/lib/carrierTotals'
 import {
   chargeAmount, computeFinancials, isRateCode, type ChargeLineInput, type FinancialTotals,
 } from '@/lib/shipmentCharges'
 import type {
-  BookCarrierInput, CreateShipmentInput, SaveOrderFormInput, UpdateOrderDetailsInput,
+  AddCarrierInput, BookCarrierInput, CreateShipmentInput, SaveOrderFormInput, UpdateOrderDetailsInput,
 } from '@/lib/apiClient'
 import type { Stop } from '@/types'
 import type {
@@ -16,9 +17,9 @@ import type {
   OrderReference, ShipmentBundle, SpecialRequirements, TmsSettings,
 } from '@/types/tms'
 import {
-  CODE_FSC, CODE_LINEHAUL, MAIN_FREIGHT_ID, REF_DELIVERY, REF_PICKUP, REF_PO,
-  activeLoadCarrier, centsToDollars, dollarsToCents, parseCount, parseInteger, readExtras,
-  type FormRateKind, type FormStop, type ShipmentFormValues,
+  CODE_FSC, CODE_LINEHAUL, MAIN_FREIGHT_ID, PAID_TO_NONE, REF_DELIVERY, REF_PICKUP, REF_PO,
+  carrierSlotsOf, centsToDollars, dollarsToCents, liveCarriers, parseCount, parseInteger, readExtras,
+  type AccessorialLine, type CarrierRate, type CarrierSlot, type FormRateKind, type FormStop, type ShipmentFormValues,
 } from './model'
 
 const blank = (s: string | null | undefined): boolean => !(s ?? '').trim()
@@ -230,6 +231,31 @@ export function toExtras(values: ShipmentFormValues): AljexFormExtras {
   if (carrier.driver1.email.trim()) cx.driverEmail1 = carrier.driver1.email.trim()
   if (carrier.driver2.email.trim()) cx.driverEmail2 = carrier.driver2.email.trim()
   if (Object.keys(cx).length > 0) x.carrier = cx
+  const slots = carrierSlotsOf(values)
+  if (slots.length >= 2) {
+    x.carriers = slots.map((s) => {
+      const e: NonNullable<AljexFormExtras['carriers']>[number] = { slot: s.slot }
+      if (s.loadCarrierId) e.loadCarrierId = s.loadCarrierId
+      const lh = dollarsToCents(s.rate.lhRate)
+      const pct = s.rate.payPct.trim() ? Number(s.rate.payPct) : undefined
+      const hours = parseHours(s.rate.hours)
+      const maxCents = dollarsToCents(s.rate.maxRate)
+      const d: NonNullable<typeof e.draft> = { rateType: s.rate.rateType }
+      if (!s.loadCarrierId) {
+        if (hours !== undefined) d.hours = hours
+        if (lh !== undefined) d.lhRateCents = lh
+        if (pct !== undefined && Number.isFinite(pct)) d.payPct = pct
+      }
+      if (maxCents !== undefined) d.maxRateCents = maxCents
+      if (Object.keys(d).length > 1) e.draft = d
+      if (s.originCity.trim()) e.originCity = s.originCity.trim()
+      if (s.originState.trim()) e.originState = s.originState.trim()
+      const empty = numOrUndef(s.emptyMiles); if (empty !== undefined) e.emptyMiles = empty
+      if (s.driver1.email.trim()) e.driverEmail1 = s.driver1.email.trim()
+      if (s.driver2.email.trim()) e.driverEmail2 = s.driver2.email.trim()
+      return e
+    })
+  }
   return x
 }
 
@@ -315,20 +341,23 @@ export function customerTotalLhCents(values: ShipmentFormValues): number {
   return line ? chargeAmount(asLine(line), ctxOf(values)) : 0
 }
 
-/** Carrier linehaul as a CARRIER charge line (no ids, no loadCarrierId); % of Customer is flattened to the total. */
-export function carrierLinehaulLine(values: ShipmentFormValues): LoadChargeInput | null {
-  const r = values.rates.carrier
+/**
+ * One carrier's linehaul as a CARRIER charge line (no ids, no loadCarrierId); % of Customer is flattened to the total.
+ * `rate` defaults to slot 0, the legacy `values.rates.carrier`.
+ */
+export function carrierLinehaulLine(values: ShipmentFormValues, rate: CarrierRate = values.rates.carrier): LoadChargeInput | null {
+  const r = rate
   let line: LoadChargeInput
   if (r.rateType === 'PCT_OF_CUSTOMER') {
     const pct = r.payPct.trim() ? Number(r.payPct) : NaN
     if (!Number.isFinite(pct) || pct < 0) return null
     line = { side: 'CARRIER', code: CODE_LINEHAUL, label: 'Linehaul', calculatedBy: 'FLAT', rateCents: Math.round((customerTotalLhCents(values) * pct) / 100), count: 1, isRate: true, sortOrder: 0 }
   } else {
-    const rate = dollarsToCents(r.lhRate)
-    if (rate === undefined) return null
+    const rateCents = dollarsToCents(r.lhRate)
+    if (rateCents === undefined) return null
     const hours = r.rateType === 'PER_HOUR' ? parseHours(r.hours) ?? 1 : undefined
     line = {
-      side: 'CARRIER', code: CODE_LINEHAUL, label: 'Linehaul', calculatedBy: rateCalc(r.rateType), rateCents: rate,
+      side: 'CARRIER', code: CODE_LINEHAUL, label: 'Linehaul', calculatedBy: rateCalc(r.rateType), rateCents,
       count: r.rateType === 'FLAT' ? 1 : hours ?? null, isRate: true, sortOrder: 0,
     }
   }
@@ -337,7 +366,7 @@ export function carrierLinehaulLine(values: ShipmentFormValues): LoadChargeInput
 }
 
 function asLine(l: LoadChargeInput): ChargeLineInput {
-  return { side: l.side, code: l.code, calculatedBy: l.calculatedBy, rateCents: l.rateCents, count: l.count, isRate: l.isRate }
+  return { side: l.side, code: l.code, calculatedBy: l.calculatedBy, rateCents: l.rateCents, count: l.count, isRate: l.isRate, loadCarrierId: l.loadCarrierId ?? null }
 }
 
 export function passthroughInput(c: LoadChargeRecord): LoadChargeInput {
@@ -351,19 +380,46 @@ export function passthroughInput(c: LoadChargeRecord): LoadChargeInput {
 export interface ChargeBuildCtx {
   orderId: string | null
   loadId: string | null
-  /** The ACTIVE assignment. Carrier lines are emitted only when this is set (F7), unless `includeCarrier`. */
+  /** The primary ACTIVE assignment. Carrier lines are emitted only for assignments that exist (F7), unless `includeCarrier`. */
   activeLoadCarrierId?: string | null
+  /** Every ACTIVE assignment in booking order: a later carrier slot owns the id it carries as `loadCarrierId`. Defaults to `[activeLoadCarrierId]`. */
+  liveCarrierIds?: readonly string[]
   /** Preview only: price the carrier lines even before Cover. Never send this output. */
   includeCarrier?: boolean
+}
+
+/**
+ * The carrier slot an accessorial row pays: `paidTo` names a slot (by booked id or key); '' is the
+ * first carrier; `NONE` or an unknown value is nobody. -1 = nobody.
+ */
+export function paidSlotIndex(slots: readonly CarrierSlot[], paidTo: string): number {
+  if (paidTo === PAID_TO_NONE) return -1
+  if (paidTo === '') return 0
+  return slots.findIndex((s) => s.loadCarrierId === paidTo || s.slot === paidTo)
+}
+
+/** What the Paid to select shows for a row: its `paidTo`, else the first carrier when an amount is typed, else nobody. */
+export function paidToOf(line: Pick<AccessorialLine, 'paidTo' | 'carrierAmount'>, slots: readonly CarrierSlot[]): string {
+  if (line.paidTo) return line.paidTo
+  return line.carrierAmount.trim() ? slots[0]?.loadCarrierId || slots[0]?.slot || '' : PAID_TO_NONE
 }
 
 /** Every charge row the form would write (customer + passthrough, carrier only after Cover). */
 export function toCharges(values: ShipmentFormValues, ctx: ChargeBuildCtx): LoadChargeInput[] {
   const out: LoadChargeInput[] = []
-  const carrierId = ctx.activeLoadCarrierId ?? null
-  const withCarrier = Boolean(carrierId) || Boolean(ctx.includeCarrier)
+  const slots = carrierSlotsOf(values)
+  const ids = ctx.liveCarrierIds ?? (ctx.activeLoadCarrierId ? [ctx.activeLoadCarrierId] : [])
+  /**
+   * The assignment a slot's lines belong to; null = no line (not booked yet). The first slot is the primary
+   * assignment; a later slot is the one whose booked id it carries, never a position (booking order is not slot order).
+   * A preview prices every slot under its key.
+   */
+  const idOf = (i: number): string | null => {
+    const booked = i === 0 ? ids[0] : ids.find((id) => id === slots[i]?.loadCarrierId)
+    return booked ?? (ctx.includeCarrier ? slots[i]?.slot ?? null : null)
+  }
   const cust = (l: LoadChargeInput): LoadChargeInput => ({ ...l, orderId: ctx.orderId, loadId: ctx.loadId })
-  const car = (l: LoadChargeInput): LoadChargeInput => ({ ...l, orderId: null, loadId: ctx.loadId, loadCarrierId: carrierId })
+  const car = (l: LoadChargeInput, id: string): LoadChargeInput => ({ ...l, orderId: null, loadId: ctx.loadId, loadCarrierId: id })
   const lh = customerLinehaulLine(values); if (lh) out.push(cust(lh))
   const fsc = fscLine(values); if (fsc) out.push(cust(fsc))
   values.rates.lines.forEach((row, i) => {
@@ -373,18 +429,31 @@ export function toCharges(values: ShipmentFormValues, ctx: ChargeBuildCtx): Load
     const c = dollarsToCents(row.customerAmount)
     if (c !== undefined) out.push(cust({ ...base, id: row.id || undefined, side: 'CUSTOMER', rateCents: c }))
     const k = dollarsToCents(row.carrierAmount)
-    if (withCarrier && k !== undefined) out.push(car({ ...base, id: row.carrierLineId || undefined, side: 'CARRIER', rateCents: k }))
+    const target = paidSlotIndex(slots, row.paidTo)
+    const id = target >= 0 ? idOf(target) : null
+    if (id && k !== undefined) out.push(car({ ...base, id: row.carrierLineId || undefined, side: 'CARRIER', rateCents: k }, id))
   })
-  if (withCarrier) {
-    const clh = carrierLinehaulLine(values)
-    if (clh) out.push(car(clh))
-  }
+  slots.forEach((s, i) => {
+    const id = idOf(i)
+    const clh = id ? carrierLinehaulLine(values, s.rate) : null
+    if (id && clh) out.push(car(clh, id))
+  })
   for (const p of values.rates.passthrough) out.push(passthroughInput(p))
   return out
 }
 
+/** `toCharges` for a bundle: every ACTIVE assignment tagged by its booking order. */
+export function chargesForBundle(values: ShipmentFormValues, bundle: ShipmentBundle): LoadChargeInput[] {
+  const live = liveCarriers(bundle)
+  return toCharges(values, {
+    orderId: bundle.orders[0]?.id ?? null, loadId: bundle.loads[0]?.id ?? null,
+    activeLoadCarrierId: live[0]?.id, liveCarrierIds: live.map((lc) => lc.id),
+  })
+}
+
 export interface FinancialPreview {
   customerTotalLhCents: number
+  /** Σ over every carrier slot. */
   carrierTotalLhCents: number
   customerTotalCents: number
   carrierTotalCents: number
@@ -392,6 +461,9 @@ export interface FinancialPreview {
   /** Percent with one decimal. */
   profitPct: number
   totals: FinancialTotals
+  /** Per carrier slot (in slot order, keyed by `slot`): its linehaul and gross. */
+  carriers: { slot: string; linehaulCents: number; totalCents: number; hasRate: boolean }[]
+  carrierTotals: CarrierTotals
 }
 
 /** Same function the shipment detail and the server price with; SMR is excluded (D7). */
@@ -401,15 +473,27 @@ export function financialPreview(
   const lines = toCharges(values, { orderId: null, loadId: null, includeCarrier: true })
   const ctx = ctxOf(values)
   const totals = computeFinancials(lines.map(asLine), ctx, customer?.pricingDefaults ?? null, settings?.marginFloorBps ?? null)
-  const carrierLH = carrierLinehaulLine(values)
+  const slots = carrierSlotsOf(values)
+  const slotKeys = new Set(slots.map((s) => s.slot))
+  // Each slot's lines are tagged with its key; a carrier line from elsewhere (a TONU row's) is untagged here, so the gross stays the whole carrier side.
+  const byCarrier = carrierTotals(
+    totals.lines.map((l) => ({ side: l.side, loadCarrierId: l.loadCarrierId != null && slotKeys.has(l.loadCarrierId) ? l.loadCarrierId : null, amountCents: l.amountCents, isRate: l.isRate })),
+    slots.map((s, i) => ({ id: s.slot, status: 'ACTIVE' as const, sequence: i, kind: s.isOwnFleet ? 'OWN_ASSET' as const : 'CARRIER' as const })),
+  )
+  const margin = marginOf({ customerTotalCents: totals.revenueCents, carrierGrossCents: byCarrier.totalCents })
+  const carriers = byCarrier.perCarrier.map((row) => ({
+    slot: row.loadCarrierId, linehaulCents: row.linehaulCents, totalCents: row.totalCents, hasRate: row.hasRate,
+  }))
   return {
     customerTotalLhCents: customerTotalLhCents(values),
-    carrierTotalLhCents: carrierLH ? chargeAmount(asLine(carrierLH), ctx) : 0,
+    carrierTotalLhCents: carriers.reduce((sum, c) => sum + c.linehaulCents, 0),
     customerTotalCents: totals.revenueCents,
-    carrierTotalCents: totals.costCents,
-    netCents: totals.profitCents,
-    profitPct: Math.round(totals.marginBps / 10) / 10,
+    carrierTotalCents: byCarrier.totalCents,
+    netCents: margin.marginCents,
+    profitPct: Math.round(margin.marginBps / 10) / 10,
     totals,
+    carriers,
+    carrierTotals: byCarrier,
   }
 }
 
@@ -440,7 +524,7 @@ export function rebaseCharges(values: ShipmentFormValues, bundle: ShipmentBundle
       continue
     }
     if (c.calculatedBy === 'FLAT' && (c.count ?? 1) === 1 && !['QUICKPAY_FEE', 'ADVANCE_FEE'].includes(c.code)) {
-      lines.push({ id: c.id, carrierLineId: '', release: c.release ?? '', carrierKey: '', code: c.code, label: c.label ?? '', carrierAmount: '', customerAmount: centsToDollars(c.amountCents), note: c.note ?? '' })
+      lines.push({ id: c.id, carrierLineId: '', release: c.release ?? '', paidTo: '', code: c.code, label: c.label ?? '', carrierAmount: '', customerAmount: centsToDollars(c.amountCents), note: c.note ?? '' })
     } else passthrough.push(c)
   }
   return { ...values, rates: { ...values.rates, lines, passthrough } }
@@ -510,13 +594,13 @@ function orderPatch(values: ShipmentFormValues, bundle: ShipmentBundle, includeM
 export function toSaveOrderFormInput(values: ShipmentFormValues, bundle: ShipmentBundle, opts: SaveMapOpts): SaveOrderFormInput {
   const order = bundle.orders[0]
   const load = bundle.loads[0]
-  const active = activeLoadCarrier(bundle)
+  const live = liveCarriers(bundle)
   const input: SaveOrderFormInput = {
     shipmentId: bundle.shipment.id,
     expectedUpdatedAt: bundle.shipment.updatedAt,
     order: orderPatch(values, bundle, true) as SaveOrderFormInput['order'],
     stops: toStops(values, opts),
-    charges: toCharges(values, { orderId: order?.id ?? null, loadId: load?.id ?? null, activeLoadCarrierId: active?.id }),
+    charges: toCharges(values, { orderId: order?.id ?? null, loadId: load?.id ?? null, activeLoadCarrierId: live[0]?.id, liveCarrierIds: live.map((lc) => lc.id) }),
     loadFields: toLoadFields(values),
     shipmentFlags: { osd: values.ship.flags.osd },
   }
@@ -546,14 +630,16 @@ export interface BookCarrierDraft extends Pick<BookCarrierInput,
   carrierName: string
   maxRateCents: number | null
 }
-export function toBookCarrierDraft(values: ShipmentFormValues): BookCarrierDraft {
-  const c = values.carrier
-  const lh = carrierLinehaulLine(values)
+/** `slotIndex` 0 = the first carrier (legacy `values.carrier`); another index books that slot. */
+export function toBookCarrierDraft(values: ShipmentFormValues, slotIndex = 0): BookCarrierDraft {
+  const slots = carrierSlotsOf(values)
+  const c = slots[slotIndex] ?? slots[0]
+  const lh = carrierLinehaulLine(values, c.rate)
   const ctx = ctxOf(values)
   const extra: LoadChargeInput[] = []
   values.rates.lines.forEach((row, i) => {
     const k = dollarsToCents(row.carrierAmount)
-    if (!row.code.trim() || k === undefined) return
+    if (!row.code.trim() || k === undefined || paidSlotIndex(slots, row.paidTo) !== slotIndex) return
     extra.push({
       side: 'CARRIER', code: row.code.trim(), label: row.label.trim() || null, calculatedBy: 'FLAT', rateCents: k, count: 1,
       isRate: isRateCode(row.code), release: row.release.trim() || null, note: row.note.trim() || null, sortOrder: 10 + i,
@@ -573,7 +659,23 @@ export function toBookCarrierDraft(values: ShipmentFormValues): BookCarrierDraft
     driver2Phone: orUndef(c.driver2.phone) ?? null,
     truckNumber: orUndef(c.truckNo) ?? null,
     trailerNumber: orUndef(c.trailerNo) ?? null,
-    maxRateCents: dollarsToCents(values.rates.carrier.maxRate) ?? null,
+    maxRateCents: dollarsToCents(c.rate.maxRate) ?? null,
+  }
+}
+
+/** ADD_CARRIER for one extra slot: the slot's draft plus the stops it covers (empty = all stops). */
+export function toAddCarrierInput(values: ShipmentFormValues, slotKey: string, bundle: ShipmentBundle): AddCarrierInput {
+  const slots = carrierSlotsOf(values)
+  const index = Math.max(0, slots.findIndex((s) => s.slot === slotKey))
+  const load = bundle.loads[0]
+  const { carrierName: _name, maxRateCents: _max, ...draft } = toBookCarrierDraft(values, index)
+  void _name; void _max
+  const legs = slots[index].legStopIds
+  return {
+    loadId: load?.id ?? '',
+    expectedUpdatedAt: load?.updatedAt ?? '',
+    ...draft,
+    ...(legs.length > 0 ? { legStopIds: legs } : {}),
   }
 }
 

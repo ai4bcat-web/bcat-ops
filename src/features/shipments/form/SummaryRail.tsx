@@ -11,6 +11,7 @@ import type { IntakeLoadRecord } from '@/types/intake'
 import { ActivityBlock } from './ActivityBlock'
 import { RateHistoryRail } from './RateHistoryRail'
 import { sliceOf, type CardProps } from './cards/cardRegistry'
+import { carrierBreakdown } from './cards/ratesSummary'
 import { requiredProgress, type RailRow, type RailSummary } from './railModel'
 import type { SliceSectionProps } from './sectionRegistry'
 
@@ -38,6 +39,7 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
   const dash = '—'
   const net = money.priced ? formatCents(money.netCents) : dash
   const pct = money.priced ? `${money.profitPct.toFixed(1)}%` : dash
+  const breakdown = useMemo(() => carrierBreakdown(values, money.preview, ctx.directory.carriers), [values, money.preview, ctx.directory.carriers])
   const onRoles = useMemo(() => sliceOf(update, 'roles'), [update])
 
   return (
@@ -64,7 +66,10 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
 
         <section className="tms-rail-block" data-testid="rail-money" aria-label="Money">
           <div className="tms-rail-money-row"><span>Customer</span><span data-testid="rail-customer-total">{money.priced ? formatCents(money.customerTotalCents) : dash}</span></div>
-          <div className="tms-rail-money-row"><span>Carrier</span><span data-testid="rail-carrier-total">{money.carrierTotalCents > 0 ? formatCents(money.carrierTotalCents) : dash}</span></div>
+          <div
+            className="tms-rail-money-row" data-testid="rail-carrier-row"
+            title={breakdown.length > 0 ? breakdown.map((b) => `${b.label} ${formatCents(b.totalCents)}`).join(' · ') : undefined}
+          ><span>Carrier</span><span data-testid="rail-carrier-total">{money.carrierTotalCents > 0 ? formatCents(money.carrierTotalCents) : dash}</span></div>
           <div className="tms-rail-money-row tms-rail-net">
             <span>Net <strong data-testid="rail-net">{net}</strong></span>
             <span className="tms-rail-profit" title={money.priced ? `${TONE_WORD[money.tone]} (target ${money.targetPct.toFixed(1)}%)` : undefined}>

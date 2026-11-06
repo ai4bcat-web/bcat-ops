@@ -18,10 +18,10 @@ import {
 } from '@/lib/apiClient'
 import type { CarrierRecord, ShipmentBundle, ShipmentDocumentType, TmsSettings } from '@/types/tms'
 import { financialPreview } from './mapping'
-import { activeLoadCarrier, type ShipmentFormValues } from './model'
+import { carrierSlotsOf, liveCarriers, type ShipmentFormValues } from './model'
 import { RateConDialog } from './RateConDialog'
 import { toLogCheckCallInput } from './checkCallNote'
-import { runCover } from './pipelines'
+import { runAddCarrier, runCover } from './pipelines'
 import type { FormActions } from './sectionProps'
 
 type DialogKind = 'book' | 'assign' | 'dispatch' | 'rateCon' | 'info' | 'tonu' | null
@@ -46,26 +46,50 @@ export function useFormActions(o: {
   const latestBundle = useRef(bundle)
   const track = useCallback((b: ShipmentBundle) => { latestBundle.current = b; setBundle(b) }, [setBundle])
   const sa = useShipmentActions(bundle, track)
-  const busy = o.busy || sa.busy
+  const [dialog, setDialog] = useState<DialogKind>(null)
+  /** The assignment a dialog acts on; unset = the primary one. */
+  const [target, setTarget] = useState<string | undefined>(undefined)
+  const [adding, setAdding] = useState(false)
+  const busy = o.busy || sa.busy || adding
   const { drivers } = useDrivers()
   const { equipment } = useTrucks()
-  const [dialog, setDialog] = useState<DialogKind>(null)
 
   const ref = useRef({ values, bundle, busy })
   useEffect(() => { ref.current = { values, bundle, busy } })
 
   const load = bundle?.loads[0]
-  const active = activeLoadCarrier(bundle)
+  const live = liveCarriers(bundle)
+  const active = live.find((lc) => lc.id === target) ?? live[0] ?? null
 
   const actions = useMemo<FormActions>(() => ({
-    cover: () => {
+    cover: (slotKey) => {
       const r = ref.current
-      if (!r.busy && r.bundle) setDialog(r.values.carrier.isOwnFleet ? 'assign' : 'book')
+      if (r.busy || !r.bundle) return
+      const bundleNow = r.bundle
+      const slots = carrierSlotsOf(r.values)
+      const index = slots.findIndex((sl) => sl.slot === slotKey)
+      if (index <= 0) { setDialog(r.values.carrier.isOwnFleet ? 'assign' : 'book'); return }
+      // Another carrier: ADD_CARRIER straight from the slot (its directory carrier, rate, charges and legs).
+      const known = new Set(slots.map((sl) => sl.loadCarrierId).filter(Boolean))
+      setAdding(true)
+      void runAddCarrier(r.values, bundleNow, slots[index].slot).then((res) => {
+        if (res.bundle) track(res.bundle)
+        const added = res.bundle ? liveCarriers(res.bundle).find((lc) => !known.has(lc.id)) : undefined
+        if (added) {
+          update((p) => ({
+            ...p,
+            carriers: p.carriers.map((sl) => (sl.slot === slots[index].slot ? { ...sl, loadCarrierId: added.id, carrierName: added.carrierName ?? '' } : sl)),
+          }))
+        }
+        if (res.ok) toast.success('Carrier added')
+        else toast.error(res.message ?? 'The carrier was not added')
+      }).finally(() => setAdding(false))
     },
-    openDispatch: () => { if (!ref.current.busy) setDialog('dispatch') },
-    openSendRateCon: () => { if (!ref.current.busy) setDialog('rateCon') },
-    openSendInfo: () => { if (!ref.current.busy) setDialog('info') },
-    openTonu: () => { if (!ref.current.busy) setDialog('tonu') },
+    openDispatch: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('dispatch') } },
+    openSendRateCon: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('rateCon') } },
+    openSendInfo: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('info') } },
+    openTonu: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('tonu') } },
+    openFor: (kind, id) => { if (!ref.current.busy) { setTarget(id); setDialog(kind) } },
     async sendSetupPacket(carrierId, email) {
       const res = await sendCarrierSetupPacket({ carrierId, email })
       toast.success(res.message)
@@ -113,9 +137,9 @@ export function useFormActions(o: {
     unqueueDocument(index) {
       update((p) => ({ ...p, docs: { queued: p.docs.queued.filter((_, i) => i !== index) } }))
     },
-  }), [setBundle, update])
+  }), [setBundle, update, track])
 
-  const close = () => setDialog(null)
+  const close = () => { setDialog(null); setTarget(undefined) }
   // Cover starts from what the form already says: the picked carrier's MC / DOT and the typed carrier rate.
   const picked = dialog === 'book' ? carriers.find((c) => c.id === values.carrier.carrierId) : undefined
   const coverSeed = {
@@ -171,7 +195,7 @@ export function useFormActions(o: {
       />
     )
   } else if (dialog === 'rateCon' && bundle && active) {
-    node = <RateConDialog bundle={bundle} carrierId={active.carrierId ?? ''} settings={settings} busy={busy} onClose={close} sa={sa} />
+    node = <RateConDialog bundle={bundle} loadCarrierId={active.id} settings={settings} busy={busy} onClose={close} sa={sa} />
   }
   return { actions, dialogs: node, busy }
 }

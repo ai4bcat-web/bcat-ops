@@ -6,6 +6,7 @@
  *   create — Create:       Aljex's red fields + customer's required references block.
  *   submit — Submit order: create + the org/customer required-field list + stop format rules.
  */
+import { validateCarrierAdd, validateLegs } from '@/lib/carrierLegs'
 import { fromDateTimeInput } from '@/lib/date'
 import {
   missingRequiredFields, requiredFieldLabel, resolveRequiredFields, type RequiredFieldSubject,
@@ -14,10 +15,10 @@ import type { CustomerRecord, TmsSettings } from '@/types/tms'
 import { TRUCKLOAD_MODES } from '../orderDraft'
 import { LABEL, SECTION_TITLE } from './labels'
 import { MAX } from './constants'
-import { financialPreview, firstPickupIndex, lastDeliveryIndex } from './mapping'
+import { carrierLinehaulLine, financialPreview, firstPickupIndex, lastDeliveryIndex } from './mapping'
 import { isShipmentTypeKey } from '@/lib/shipmentTypes'
 import { poReferenceRequired } from './customerRef'
-import { parseInteger, type FormStop, type ShipmentFormValues } from './model'
+import { carrierSlotsOf, parseInteger, type CarrierSlot, type FormStop, type ShipmentFormValues } from './model'
 import type { FormIssue, SectionKey } from './sectionProps'
 
 export type ValidationLevel = 'draft' | 'create' | 'submit'
@@ -32,6 +33,9 @@ export interface ValidateOpts {
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const isTruckload = (v: ShipmentFormValues): boolean => (TRUCKLOAD_MODES as string[]).includes(v.mode)
 const empty = (s: string | null | undefined): boolean => !(s ?? '').trim()
+
+const carrierIsSet = (s: CarrierSlot): boolean => Boolean(s.carrierId || (s.useTyped && s.typedName.trim()) || s.loadCarrierId)
+const slotName = (s: CarrierSlot, i: number): string => s.carrierName.trim() || s.typedName.trim() || `Carrier ${i + 1}`
 
 /** Which section and control a required-list key belongs to. */
 const REQUIRED_KEY_TARGET: Record<string, { section: SectionKey; fieldKey: string }> = {
@@ -159,6 +163,49 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
     const pct = Number(values.rates.carrier.payPct)
     if (values.rates.carrier.payPct.trim() && !(pct >= 0 && pct <= 100)) push('rates', 'payPct', LABEL.rates.payPct.testId, LABEL.rates.payPct.text, 'Pay % must be between 0 and 100.')
   }
+
+  // Carriers beyond the first (AT-plan): each has its own rate row, the stops it covers, and the same caps the server holds.
+  const slots = carrierSlotsOf(values)
+  slots.forEach((s, i) => {
+    if (i === 0) return
+    const name = slotName(s, i)
+    if (carrierIsSet(s)) {
+      if (empty(s.originCity) || empty(s.originState)) push('carrier', `origin:${s.slot}`, `carrier-${s.slot}-originCity`, `${name} origin`, `${name} needs an origin city and state.`, 'warn')
+    }
+    if (s.rate.rateType === 'PER_HOUR' && !(Number(s.rate.hours) > 0) && s.rate.lhRate.trim()) {
+      push('rates', `carrierHours:${s.slot}`, `rates-carrier-${s.slot}-hours`, `${name} Hours`, 'Hours must be greater than zero for a per-hour rate.')
+    }
+    if (s.rate.rateType === 'PCT_OF_CUSTOMER') {
+      const pct = Number(s.rate.payPct)
+      if (s.rate.payPct.trim() && !(pct >= 0 && pct <= 100)) push('rates', `payPct:${s.slot}`, `rates-carrier-${s.slot}-payPct`, `${name} Pay %`, 'Pay % must be between 0 and 100.')
+    }
+  })
+  const carriersSet = slots.filter(carrierIsSet)
+  if (carriersSet.length >= 2) {
+    carriersSet.forEach((s, k) => {
+      if (k === 0) return
+      const problem = validateCarrierAdd(
+        carriersSet.slice(0, k).map((o) => ({ id: o.slot, legStopIds: o.legStopIds, kind: o.isOwnFleet ? 'OWN_ASSET' as const : 'CARRIER' as const, carrierId: o.carrierId || null })),
+        { kind: s.isOwnFleet ? 'OWN_ASSET' : 'CARRIER', carrierId: s.carrierId || null, legStopIds: s.legStopIds },
+      )
+      if (problem) push('carrier', `add:${s.slot}`, 'section-carrier-tracking', slotName(s, slots.indexOf(s)), problem)
+    })
+    carriersSet.forEach((s) => {
+      const i = slots.indexOf(s)
+      const line = carrierLinehaulLine(values, s.rate)
+      if (line && line.rateCents > 0) return
+      push('rates', `carrierRate:${s.slot}`, `rates-carrier-${s.slot}-rate`, `${slotName(s, i)} rate`, `${slotName(s, i)} needs a rate before the order is submitted.`, submit ? 'error' : 'warn')
+    })
+    const known = new Set(values.stops.map((st) => st.id))
+    const legCarriers = carriersSet.map((s) => ({ id: s.slot, legStopIds: s.legStopIds.filter((id) => known.has(id)), carrierName: slotName(s, slots.indexOf(s)) }))
+    carriersSet.forEach((s) => {
+      if (s.legStopIds.some((id) => !known.has(id))) push('carrier', `legs:${s.slot}`, 'section-carrier-tracking', slotName(s, slots.indexOf(s)), `${slotName(s, slots.indexOf(s))} covers a stop that was removed; pick its stops again.`)
+    })
+    validateLegs(legCarriers, values.stops.map((st, i) => ({ id: st.id, sequence: i }))).warnings
+      .forEach((w, n) => push('carrier', `legs:uncovered:${n}`, 'section-carrier-tracking', 'Stops', w, 'warn'))
+  }
+  const pctSum = slots.reduce((sum, s) => sum + (s.rate.rateType === 'PCT_OF_CUSTOMER' && Number(s.rate.payPct) > 0 ? Number(s.rate.payPct) : 0), 0)
+  if (pctSum > 100) push('rates', 'pctOver100', LABEL.rates.payPct.testId, LABEL.rates.payPct.text, `Carrier pay percentages add up to ${pctSum}% of the customer linehaul.`, 'warn')
   if (values.ship.temp.on) {
     const min = parseInteger(values.ship.temp.min)
     const max = parseInteger(values.ship.temp.max)

@@ -2040,6 +2040,11 @@ export interface LoadCarrierRecord {
   trackingLinkId?: string | null
   trackingStartedAt?: string | null
   trackingStoppedAt?: string | null
+  // AT-plan MC0 — several carriers on one load
+  /** `Stop.id`s of the load this carrier covers. Absent/empty = every stop. */
+  legStopIds?: string[] | null
+  /** Per-carrier override of the shipment's tracking prefs; absent = inherit. */
+  trackingPrefs?: TrackingPrefsOverride | null
   // Step E — the carrier upload portal and the carrier's paperwork
   uploadLinkId?: string | null
   podRequestedAt?: string | null
@@ -4262,6 +4267,8 @@ export interface ShipmentViewRow {
   // filters can be applied to the flat shape as well as to a full ShipmentRow.
   customerId?: string | null
   carrierName?: string | null
+  /** Step AT — every live carrier when there are two or more, so a carrier facet matches ANY of them. */
+  carriers?: { name: string; apStatus: ApStatus | null; costCents: number | null }[] | null
   pickupName?: string | null
   consigneeName?: string | null
   fromState?: string | null
@@ -4909,6 +4916,20 @@ export interface AljexFormExtras {
     driverEmail1?: string
     driverEmail2?: string
   }
+  /**
+   * AT-plan: one entry per carrier slot of the form. Slot 0 is also written to `carrier` and
+   * `rates.carrierDraft` (the legacy keys a load with one carrier reads); this list carries every slot.
+   */
+  carriers?: {
+    slot: string
+    loadCarrierId?: string
+    draft?: { rateType: string; hours?: number; lhRateCents?: number; payPct?: number; maxRateCents?: number }
+    originCity?: string
+    originState?: string
+    emptyMiles?: number
+    driverEmail1?: string
+    driverEmail2?: string
+  }[]
 }
 
 export interface SpecialRequirements {

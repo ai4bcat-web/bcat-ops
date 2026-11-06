@@ -257,3 +257,40 @@ describe('dev extraction bypass', () => {
     expect(prod.mem.items.size).toBe(0)
   })
 })
+
+/** Step AT: one PRO, two carriers, one bill each. A mail applies to its own carrier's bill or waits in review. */
+describe('a load with two carriers', () => {
+  const twoCarrierSeed = () => ({
+    carriers: [FX_CARRIER, FX_OTHER_CARRIER],
+    bills: [
+      bill({ id: 'BA', loadCarrierId: 'lc-a', shipmentNumber: 'S000201-1', loadNumber: 'S000201-1', grossCents: 150_000 }),
+      bill({
+        id: 'BB', loadCarrierId: 'lc-b', shipmentNumber: 'S000201-1', loadNumber: 'S000201-1', grossCents: 80_000,
+        carrierId: FX_OTHER_CARRIER.id, carrierName: FX_OTHER_CARRIER.name, carrierMc: FX_OTHER_CARRIER.mcNumber,
+        remitToName: FX_OTHER_CARRIER.name,
+      }),
+    ],
+  })
+  const script: Record<string, RawApModelOutput> = {
+    'inv a': rawInvoice({ proNumbers: ['S000201-1'], invoiceNumber: 'A-1', amountDollars: 1500 }),
+    'inv b': rawInvoice({ proNumbers: ['S000201-1'], mcNumber: '999888', issuerName: 'Blue Ridge Freight Inc', invoiceNumber: 'B-1', amountDollars: 800 }),
+    'inv none': rawInvoice({ proNumbers: ['S000201-1'], mcNumber: '', issuerName: '', invoiceNumber: 'N-1', amountDollars: 800 }),
+  }
+
+  it("each carrier's invoice updates only its own bill; a carrier-less mail is queued and writes nothing", async () => {
+    const kit = makeSyncKit(twoCarrierSeed(), { model: (input) => script[input.subject] ?? rawOther('OTHER') })
+    for (const [i, subject] of Object.keys(script).entries()) {
+      await kit.inject({ id: `zz-${subject.slice(4)}`, from: FROM, subject, body: BODY, internalDate: hoursAgo(10 - i), attachments: [pdf(`${i}.pdf`)] })
+    }
+    await scripted(kit)
+
+    const items = Object.fromEntries([...kit.mem.items.values()].map((it) => [it.messageId, it]))
+    expect(items['zz-a']).toMatchObject({ status: 'APPLIED' })
+    expect(items['zz-b']).toMatchObject({ status: 'APPLIED' })
+    expect(items['zz-none']).toMatchObject({ status: 'NEEDS_REVIEW', reviewReason: 'LOW_CONFIDENCE' })
+    expect(kit.mem.bills.get('BA')).toMatchObject({ billNumber: 'A-1', billedCents: 150_000, apInboxItemId: items['zz-a'].id })
+    expect(kit.mem.bills.get('BB')).toMatchObject({ billNumber: 'B-1', billedCents: 80_000, apInboxItemId: items['zz-b'].id })
+    // The carrier-less mail linked to neither bill.
+    expect([...kit.mem.bills.values()].some((b) => b.apInboxItemId === items['zz-none'].id)).toBe(false)
+  })
+})

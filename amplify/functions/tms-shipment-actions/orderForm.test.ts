@@ -109,3 +109,25 @@ describe('validateStopDetailsPatch', () => {
     expect(() => validateStopDetailsPatch({ pieces: -1 })).toThrow(/pieces/)
   })
 })
+
+describe('multi-carrier form extras and leg details', () => {
+  it('keeps up to four carrier slots and refuses a fifth or an unknown key', () => {
+    const slot = (n: number) => ({ slot: `s${n}`, draft: { rateType: 'FLAT', lhRateCents: 90_000 }, driverEmail1: 'A@Example.com' })
+    const out = validateFormExtras({ v: 1, carriers: [slot(0), slot(1)] })
+    expect(out.carriers).toEqual([
+      { slot: 's0', draft: { rateType: 'FLAT', lhRateCents: 90_000 }, driverEmail1: 'a@example.com' },
+      { slot: 's1', draft: { rateType: 'FLAT', lhRateCents: 90_000 }, driverEmail1: 'a@example.com' },
+    ])
+    expect(() => validateFormExtras({ v: 1, carriers: [0, 1, 2, 3, 4].map(slot) })).toThrow(/at most 4/)
+    expect(() => validateFormExtras({ v: 1, carriers: [{ slot: 's0', rate: 1 }] })).toThrow(/rate/)
+  })
+
+  it('takes legs and a tracking override on the carrier details, and refuses a confirmed mode', () => {
+    expect(validateCarrierDetails({ loadCarrierId: 'lc', expectedUpdatedAt: 'x', legStopIds: ['a', 'a', 'b'] }))
+      .toEqual({ legStopIds: ['a', 'b'] })
+    expect(validateCarrierDetails({ loadCarrierId: 'lc', expectedUpdatedAt: 'x', trackingPrefs: null }))
+      .toEqual({ trackingPrefs: null })
+    expect(() => validateCarrierDetails({ loadCarrierId: 'lc', expectedUpdatedAt: 'x', trackingPrefs: { mode: 'MANUAL', confirmed: true } }))
+      .toThrow(/cannot confirm/)
+  })
+})

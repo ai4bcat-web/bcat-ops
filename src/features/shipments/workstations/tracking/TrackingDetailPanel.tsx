@@ -134,7 +134,7 @@ function DetailSession({ row, bundle, loading, customers, settings, mapsKey, onS
             columns={3}
             dense
             items={[
-              { label: 'Carrier', value: carrier?.kind === 'OWN_ASSET' ? 'Own fleet' : carrier?.carrierName ?? 'No carrier assigned' },
+              { label: (row.carrierCount ?? 0) >= 2 ? 'Covering carrier' : 'Carrier', value: carrier?.kind === 'OWN_ASSET' ? 'Own fleet' : carrier?.carrierName ?? 'No carrier assigned' },
               { label: 'Truck #', value: carrier?.truckNumber, hidden: !carrier?.truckNumber },
               { label: 'Trailer #', value: carrier?.trailerNumber, hidden: !carrier?.trailerNumber },
             ]}

@@ -221,6 +221,9 @@ export const LABEL = {
     public: def('documents', 'public', 'Public'),
     private: def('documents', 'private', 'Private'),
     upload: def('documents', 'upload', 'Upload'),
+    generateBol: def('documents', 'generateBol', 'Generate BOL'),
+    rateCon: def('documents', 'rateCon', 'Rate Con'),
+    sendInfo: def('documents', 'sendInfo', 'Send Info'),
     fileType: def('documents', 'fileType', 'File Type'),
   },
   checkCalls: {

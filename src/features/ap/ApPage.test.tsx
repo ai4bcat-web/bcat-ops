@@ -276,4 +276,47 @@ describe('the AP board', () => {
     expect(screen.getByText(/Settled through driver pay/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Record bill/ })).toBeNull()
   })
+
+  /**
+   * One bill per carrier per load: a two-carrier load is two awaiting rows on one PRO. Each
+   * carries its own Record action (named for its carrier), and the single-carrier row beside
+   * them wears no chip.
+   */
+  it('lists a two-carrier load as two awaiting rows, each with its own Record bill', async () => {
+    const second = worklistRow({
+      assignment: assignment({ id: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight', costCents: 80_000 }),
+      loadCarrierId: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight', costCents: 80_000,
+    })
+    const solo = worklistRow({
+      assignment: assignment({ id: 'lc9', loadId: 'l9', shipmentId: 's9', carrierName: 'Solo Haul' }),
+      loadCarrierId: 'lc9', loadId: 'l9', shipmentId: 's9', shipmentNumber: 'S-2002', carrierName: 'Solo Haul',
+    })
+    await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow(), second, solo] }, bills: [] })
+
+    expect(screen.getAllByText('Shared PRO · 2 carriers')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Record bill for S-1001 — Blue Line Trucking' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Record bill for S-1001 — Red Line Freight' })).toBeTruthy()
+    // Byte-identical for a single-carrier load: same label, no chip.
+    expect(screen.getByRole('button', { name: 'Record bill for S-2002' })).toBeTruthy()
+  })
+
+  it('pays, ages and shows each carrier bill of one load on its own row', async () => {
+    const a = bill({ id: 'cb:lc1:1', billNumber: 'BL-1', dueAt: daysAgo(10), balanceCents: 150_000 })
+    const b = bill({
+      id: 'cb:lc2:1', loadCarrierId: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight',
+      billNumber: 'RL-1', dueAt: daysAgo(45), balanceCents: 80_000, grossCents: 80_000, netCents: 80_000, billedCents: 80_000,
+    })
+    await setup({ bills: [a, b] })
+    fireEvent.click(screen.getByRole('tab', { name: /^To be paid/ }))
+    expect(screen.getByRole('button', { name: 'Pay bill BL-1' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Pay bill RL-1' })).toBeTruthy()
+    expect(screen.getAllByText('Shared PRO · 2 carriers')).toHaveLength(2)
+
+    // Aging: two carriers, two buckets, the shipment is counted once per bill and not twice.
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging/ }))
+    const strip = within(screen.getByLabelText('AP totals'))
+    expect(within(strip.getByText('Open AP').closest('.tms-kpi-card') as HTMLElement).getByText('$2,300.00')).toBeTruthy()
+    expect(screen.getByText('Blue Line Trucking')).toBeTruthy()
+    expect(screen.getByText('Red Line Freight')).toBeTruthy()
+  })
 })

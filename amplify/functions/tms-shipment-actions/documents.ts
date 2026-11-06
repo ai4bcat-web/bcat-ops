@@ -486,13 +486,29 @@ export async function saveGeneratedDocument(deps: DocumentDeps, input: Row, call
   const pdfBase64 = assertString(input.pdfBase64, 'pdfBase64')
   const loadId = optionalString(input.loadId, 100)
   const loadCarrierId = optionalString(input.loadCarrierId, 100)
+  const stopId = optionalString(input.stopId, 100)
+  const rated = input.rated === true
+  const referenceSuffix = optionalString(input.referenceSuffix, 20)
+  if (referenceSuffix && !/^[A-Za-z0-9-]{1,20}$/.test(referenceSuffix)) {
+    throw new Error('referenceSuffix may hold only letters, digits and dashes')
+  }
+  if (type !== 'BOL' && (stopId || rated)) {
+    throw new Error('Only a bill of lading can be scoped to a stop or marked rated')
+  }
 
   const bundle = await liveBundle(deps, shipmentId)
   const status = String(bundle.shipment.status ?? 'DRAFT')
-  if (status === 'DRAFT' || status === 'CANCELED') {
+  // A bill of lading may exist on the DRAFT shipment right after Create; the other paperwork may not.
+  if (status === 'CANCELED' || (status === 'DRAFT' && type !== 'BOL')) {
     throw new Error('A draft or canceled shipment has no paperwork to generate')
   }
-  assertPlacement(bundle, { loadId, loadCarrierId })
+  assertPlacement(bundle, { loadId, loadCarrierId, stopId })
+  if (stopId && loadId) {
+    const own = bundle.loads.find((l) => l.id === loadId)
+    if (!own || !readStops(own).some((stop) => stop.id === stopId)) {
+      throw new Error(`Stop ${stopId} is not on load ${loadId}`)
+    }
+  }
 
   const assignment = loadCarrierId
     ? bundle.loadCarriers.find((c) => c.id === loadCarrierId) ?? null
@@ -506,10 +522,13 @@ export async function saveGeneratedDocument(deps: DocumentDeps, input: Row, call
   if (bytes.length > MAX_GENERATED_BYTES) throw new Error('That document is too large to save')
 
   const documents = bundle.documents as unknown as ShipmentDocumentRecord[]
-  const version = nextVersion(documents, type, loadId)
-  const previous = supersede(documents, { type, loadId })
+  // A BOL is versioned per slot (stop / carrier / rated copy); every other type keeps (type, load).
+  const slot = type === 'BOL' ? { stopId, loadCarrierId, rated } : undefined
+  const version = nextVersion(documents, type, loadId, slot)
+  const previous = supersede(documents, { type, loadId, ...slot })
   const load = loadId ? bundle.loads.find((l) => l.id === loadId) ?? null : null
-  const reference = String(load?.loadNumber ?? bundle.shipment.number ?? shipmentId)
+  const baseReference = String(load?.loadNumber ?? bundle.shipment.number ?? shipmentId)
+  const reference = referenceSuffix ? `${baseReference}-${referenceSuffix}` : baseReference
 
   const documentId = `sdoc-${randomUUID()}`
   const s3Key = generatedKey(shipmentId, documentId, type, reference, version)
@@ -525,13 +544,14 @@ export async function saveGeneratedDocument(deps: DocumentDeps, input: Row, call
     orderId: null,
     loadId,
     loadCarrierId: assignment && type === 'RATE_CON' ? String(assignment.id) : loadCarrierId,
+    stopId,
     type,
     name: optionalString(input.filename, MAX_DOCUMENT_NAME) ?? generatedFilename(type, reference, version),
     s3Key,
     contentType: PDF_CONTENT_TYPE,
     sizeBytes: bytes.length,
     source: 'GENERATED',
-    audience: DEFAULT_AUDIENCE[type],
+    audience: rated ? 'CUSTOMER' : DEFAULT_AUDIENCE[type],
     status: 'ACTIVE',
     version,
     supersedesId: previous ? previous.id : null,
@@ -564,7 +584,7 @@ export async function saveGeneratedDocument(deps: DocumentDeps, input: Row, call
     'document',
   )
   await deps.writeAudit('SHIPMENT_DOCUMENT', documentId, 'SAVE_GENERATED_DOCUMENT', caller, {
-    shipmentId, type, loadId, version, s3Key, supersedesId: row.supersedesId,
+    shipmentId, type, loadId, version, s3Key, supersedesId: row.supersedesId, stopId, loadCarrierId, rated,
   })
   return documentResult(deps, shipmentId, row)
 }

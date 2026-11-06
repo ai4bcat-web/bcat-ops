@@ -21,6 +21,7 @@ import type { Caller } from '../_shared/actionInputs'
 import type { Row } from '../_shared/shipmentStore'
 import {
   activeLoadCarrier,
+  liveCarriersOfLoad,
   activePingLink,
   runCheckCallPlan,
   templateVarsFor,
@@ -151,7 +152,11 @@ export async function runTrackingAutomation(deps: AutomationDeps, input: Row, ca
           deps.queryIndex(deps.tables.message, 'shipmentMessagesByShipmentIdAndAt', 'shipmentId', shipmentId),
         ])
         for (const load of loads) {
-          const carrier = activeLoadCarrier(load, carriers)
+          // Step AT: each live carrier delivers its own leg, so each is asked for its own POD on its own prefs;
+          // a single-carrier load is the primary row exactly as before.
+          const live = liveCarriersOfLoad(load, carriers)
+          const podCarriers = live.length >= 2 ? live : [activeLoadCarrier(load, carriers)]
+          for (const carrier of podCarriers) {
           if (!carrier || carrier.kind !== 'CARRIER' || carrier.status !== 'ACTIVE' || !isRateConSent(carrier)) continue
           result.pod.checked += 1
 
@@ -159,7 +164,7 @@ export async function runTrackingAutomation(deps: AutomationDeps, input: Row, ca
           const customerId = String(shipment.customerId ?? '')
           if (customerId && !customers.has(customerId)) customers.set(customerId, await deps.getById(deps.tables.customer, customerId))
           const customer = customerId ? customers.get(customerId) ?? null : null
-          const prefs = effectiveTrackingPrefs({ shipment, customer })
+          const prefs = effectiveTrackingPrefs({ shipment, customer, loadCarrier: carrier })
           const block = autoRequestBlock(prefs)
           if (block) {
             result.pod.skipped += 1
@@ -231,6 +236,7 @@ export async function runTrackingAutomation(deps: AutomationDeps, input: Row, ca
           })
           result.pod.requested += sent.requested
           if (sent.requested === 0) result.pod.skipped += 1
+          }
         }
       } catch (err) {
         fail(shipmentId, err)

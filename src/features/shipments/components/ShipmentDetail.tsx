@@ -20,6 +20,7 @@ import { formatCents } from '@/lib/tmsDirectory'
 import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { formatDateTime } from '@/lib/date'
 import { computeFinancials } from '@/lib/shipmentCharges'
+import { liveCarriersOf, primaryCarrierOf } from '@/lib/carrierTotals'
 import { laneKey3For, laneKeyFor } from '@/lib/laneKey'
 import { SHIPMENT_STATUS_LABELS, LOAD_WORKFLOW_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { useDrivers } from '@/hooks/useDrivers'
@@ -122,7 +123,9 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
       Edit
     </TmsButton>
   )
-  const activeCarrier = bundle.loadCarriers.find((c) => c.status === 'ACTIVE') ?? null
+  // The primary (lowest sequence) carrier is the one the single-driver surfaces speak for.
+  const liveCarriers = liveCarriersOf(bundle.loadCarriers, load?.id ?? '')
+  const activeCarrier = primaryCarrierOf(liveCarriers)
   const totals = useMemo(
     () => computeFinancials(bundle.charges, { miles: load?.miles ?? null }, pricing, marginFloorBps),
     [bundle.charges, load?.miles, pricing, marginFloorBps],
@@ -385,15 +388,19 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
             {shipment.tenderRejectReason && <Note label="Tender rejected" text={shipment.tenderRejectReason} />}
           </TmsCard>
 
-          {activeCarrier && (
+          {liveCarriers.length > 0 && (
             <TmsCard title="Assigned">
-              <p className="text-sm font-medium">
-                {activeCarrier.kind === 'OWN_ASSET' ? activeCarrier.driverName ?? 'Own asset' : activeCarrier.carrierName ?? 'Carrier'}
-              </p>
-              <p className="tms-muted text-xs">
-                {[activeCarrier.truckNumber && `Truck ${activeCarrier.truckNumber}`, activeCarrier.trailerNumber && `Trailer ${activeCarrier.trailerNumber}`, activeCarrier.driverPhone]
-                  .filter(Boolean).join(' · ') || '—'}
-              </p>
+              {liveCarriers.map((lc) => (
+                <div key={lc.id} data-testid="assigned-carrier" data-load-carrier-id={lc.id} className={liveCarriers.length > 1 ? 'mt-2 first:mt-0' : undefined}>
+                  <p className="text-sm font-medium">
+                    {lc.kind === 'OWN_ASSET' ? lc.driverName ?? 'Own asset' : lc.carrierName ?? 'Carrier'}
+                  </p>
+                  <p className="tms-muted text-xs">
+                    {[lc.truckNumber && `Truck ${lc.truckNumber}`, lc.trailerNumber && `Trailer ${lc.trailerNumber}`, lc.driverPhone]
+                      .filter(Boolean).join(' · ') || '—'}
+                  </p>
+                </div>
+              ))}
             </TmsCard>
           )}
 

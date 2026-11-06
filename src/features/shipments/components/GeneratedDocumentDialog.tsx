@@ -1,11 +1,11 @@
 /**
- * Generate a bill of lading, a load summary or a saved copy of the rate confirmation,
+ * Generate a load summary or a saved copy of the rate confirmation,
  * look at it, and keep it on the shipment.
  *
  * The PDF is built in the browser from the bundle already on screen — the same
  * `jsPDF` → base64 → Lambda route the rate confirmation uses (`RateConPanel`) — so
  * nothing is rendered server-side and the preview is byte-for-byte the file that gets
- * saved. Saving is explicit about what it costs: a second BOL is v2 and leaves v1
+ * saved. Saving is explicit about what it costs: a second copy is v2 and leaves v1
  * SUPERSEDED rather than overwriting it, because a dock may already be holding v1.
  *
  * A load summary carries both sides of the money, so the Lambda writes it with
@@ -16,8 +16,7 @@ import { FileText, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog } from '@/features/tms/kit'
 import { getTmsSettings, listCheckCallsByLoad, listDivisions, saveGeneratedDocument } from '@/lib/apiClient'
-import { bolData, loadSummaryData } from '@/lib/documentData'
-import { buildBolPdf, bolFilename } from '@/lib/bolPdf'
+import { loadSummaryData } from '@/lib/documentData'
 import { buildLoadSummaryPdf, loadSummaryFilename } from '@/lib/loadSummaryPdf'
 import { buildRateConPdf, joinRateConNotes, type RateConInput, type RateConStop } from '@/lib/carrierRateCon'
 import { readExtras } from '../form/model'
@@ -28,10 +27,9 @@ import type {
   ShipmentBundle, TmsSettings,
 } from '@/types/tms'
 
-export type GeneratedKind = 'BOL' | 'LOAD_SUMMARY' | 'RATE_CON'
+export type GeneratedKind = 'LOAD_SUMMARY' | 'RATE_CON'
 
 const TITLES: Record<GeneratedKind, string> = {
-  BOL: 'Generate a bill of lading',
   LOAD_SUMMARY: 'Generate a load summary',
   RATE_CON: 'Save a copy of the rate confirmation',
 }
@@ -67,18 +65,16 @@ export function GeneratedDocumentDialog({
   const assignment = bundle.loadCarriers.find((c) => c.status === 'ACTIVE') ?? null
   const loadNumber = load?.loadNumber ?? load?.id ?? bundle.shipment.number
 
-  // A BOL belongs to the shipment (its number is the BOL number); a load summary and a
-  // rate con belong to one load, which is what versions them separately per leg.
-  const loadId = kind === 'BOL' ? null : load?.id ?? null
+  // A load summary and a rate con belong to one load, which is what versions them
+  // separately per leg. (The bill of lading has its own dialog: `BolDialog`.)
+  const loadId = load?.id ?? null
   const version = useMemo(
     () => nextVersion(bundle.documents, kind, loadId),
     [bundle.documents, kind, loadId],
   )
-  const filename = kind === 'BOL'
-    ? bolFilename(bundle.shipment.number, version)
-    : kind === 'LOAD_SUMMARY'
-      ? loadSummaryFilename(loadNumber, version)
-      : generatedFilename('RATE_CON', loadNumber, version)
+  const filename = kind === 'LOAD_SUMMARY'
+    ? loadSummaryFilename(loadNumber, version)
+    : generatedFilename('RATE_CON', loadNumber, version)
 
   // No synchronous setState before the first await; a failed read keeps what we had.
   useEffect(() => {
@@ -171,12 +167,6 @@ export function GeneratedDocumentDialog({
     let url: string | null = null
 
     const build = async () => {
-      if (kind === 'BOL') {
-        return buildBolPdf(bolData(bundle, customer, division, locations, {
-          brokerPhone: settings?.trackingContact?.phone ?? null,
-          terms: settings?.bolTerms ?? null,
-        }))
-      }
       if (kind === 'LOAD_SUMMARY') {
         return buildLoadSummaryPdf(loadSummaryData(bundle, customer, catalog, checkCalls))
       }

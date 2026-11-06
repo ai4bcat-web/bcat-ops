@@ -176,7 +176,7 @@ describe('rates', () => {
   })
   it('after CREATE the seeded default charge is adopted, not duplicated', () => {
     const v = filledValues()
-    v.rates.lines = [{ id: '', carrierLineId: '', release: '', carrierKey: '', code: 'FUEL_ADJ', label: '', carrierAmount: '', customerAmount: '25', note: '' }]
+    v.rates.lines = [{ id: '', carrierLineId: '', release: '', paidTo: '', code: 'FUEL_ADJ', label: '', carrierAmount: '', customerAmount: '25', note: '' }]
     const bundle = storedBundle(v)
     bundle.charges = [{ id: 'srv-1', shipmentId: 'shp-1', side: 'CUSTOMER', code: 'FUEL_ADJ', calculatedBy: 'FLAT', rateCents: 2500, count: 1, amountCents: 2500, isRate: false, sortOrder: 5, createdBy: '', createdAt: '', updatedAt: '' }]
     const rebased = rebaseCharges(v, bundle)
