@@ -101,3 +101,15 @@ defaults (`pinnedOf`).
 
 Quote page tab order is **Quote inbox** first, **Quotes** second; the inbox is the default tab at
 `/tms/rates`'s page entry (Quote lifecycle tab links to the inbox). Keep both URLs and the inbox badge.
+
+## Ryne's feedback 3 (2026-11-06)
+> "default the intake to show all loads as the first tab and then an option to click tab by rev division
+> or by customer"
+
+Build · Intake page (`/tms/shipments/intake`): the first tab is **All loads** (every intake row across
+divisions and customers) and it is the default when the page opens. Next to it, a grouping choice with
+two views, as tabs: **By rev division** (one sub-tab per division, each with its count) and **By
+customer** (one sub-tab per customer that has intake rows, with count, most rows first). URL-backed
+(`?view=all|division|customer&group=<id>`) so a view can be linked; counts update with the queue; the
+existing intake filters, review actions and badge on the Build tab are unchanged. Remember the last
+non-default view per user in localStorage but always open on All loads.
