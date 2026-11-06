@@ -223,3 +223,8 @@ New **Activity** block in the summary rail, between the Required checklist and R
   shipment.
 - Edit mode shows live data; the block refreshes after each save. Reads go through the existing
   AuditLog GSI by entity id, no new table.
+
+## Ryne's feedback 6 (2026-11-05 evening)
+"Let's move freight section to be above the route section." Main-column order becomes:
+Customer, Bill To, **Freight**, **Route**, Rates, Rate history, Carrier, More strip, Tracking,
+Documents. Tab order follows. Nothing else changes.
