@@ -461,3 +461,13 @@ multiple AP records."
   Regenerating creates a new version and keeps the old one listed as superseded.
 - BOL is required for release only if the customer's requirements say so (AP per-customer
   requirements); otherwise it is optional and the checklist shows it as optional.
+
+## Ryne's feedback 17 (2026-11-05 evening)
+"Let's remove the typed name only from the create shipment."
+Remove the **"Typed name only"** checkbox from the header strip's Customer control
+(`CustomerCard.tsx`, `f-customer-useTyped`). A shipment's customer must be picked from the
+directory; on no match the dropdown's last row is **"+ Add '<typed>' as a new customer"**, which
+opens the existing Customer create dialog prefilled with the name and selects the new customer on
+save (same pattern as the inline location add in feedback 14). The `useTyped` / `typedName` path
+stays only for Intake-extracted rows that have not been matched yet, shown there as a "Customer
+not matched" chip, never as a checkbox on the form.
