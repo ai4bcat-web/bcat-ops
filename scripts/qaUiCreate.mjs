@@ -68,7 +68,7 @@ try {
   await b.evaluate(`document.querySelector('${tid('section-route')}').scrollIntoView({ block: 'start' })`); await b.screenshot(`${SHOTS}/create-auto-miles-1440.png`)
   // 6 layout: total scroll height, columns, no horizontal overflow, tab order
   const lay = await b.evaluate(`(() => { const sc = document.querySelector('.tms-ship-form-scroll'); const cards = [...document.querySelectorAll('.tms-ship-card')].map((s) => s.dataset.testid.replace('section-', '')); const rail = document.querySelector('[data-testid="ship-form-rail"]').getBoundingClientRect(); return { cards, hOverflow: Math.max(sc.scrollWidth - sc.clientWidth, document.documentElement.scrollWidth - innerWidth), railWidth: Math.round(rail.width), railTop: Math.round(rail.top) } })()`)
-  rec('seven cards in order (Customer + Bill To in the header), 360 px rail, no h-overflow', lay.hOverflow <= 1 && lay.cards.join() === 'freight,route,rates,rateHistory,carrier,tracking,documents' && lay.railWidth === 360 ? 'PASS' : 'FAIL', lay)
+  rec('six cards in order (Customer + Bill To in the header), 360 px rail, no h-overflow', lay.hOverflow <= 1 && lay.cards.join() === 'freight,route,rates,rateHistory,carrier,documents' && lay.railWidth === 360 ? 'PASS' : 'FAIL', lay)
   // first screen: Customer, Bill To, the Freight card start and the rail's Create button are visible without scrolling
   await b.evaluate(`document.querySelector('.tms-ship-form-scroll')?.scrollTo(0, 0)`); await pause(400)
   const fold = await b.evaluate(`(() => { const r = (id) => document.querySelector('[data-testid="' + id + '"]')?.getBoundingClientRect(); const pu = r('f-shipping-equipmentType'); const c = r('ship-form-create'); const cu = r('ship-form-header'); const bt = r('hdr-billTo-chip'); return { customerBottom: Math.round(cu?.bottom ?? -1), billToTop: Math.round(bt?.top ?? -1), freightFieldBottom: Math.round(pu?.bottom ?? -1), createBottom: Math.round(c?.bottom ?? -1), h: innerHeight } })()`)
@@ -86,9 +86,9 @@ try {
   const sid = await b.evaluate(`document.querySelector('a[aria-label="Open full page"]')?.getAttribute('href') ?? null`)
   if (sid) {
     await b.navigate(sid.replace(/\?.*$/, '') + '/edit'); await ready()
-    await b.evaluate(`document.querySelector('${tid('section-tracking')}')?.scrollIntoView({ block: 'start' })`); await pause(1500)
-    const cc = await b.evaluate(`(() => { const s = document.querySelector('[data-testid="section-tracking"]'); if (!s) return null; const link = s.querySelector('[data-testid="card-tracking-open"]'); return { strip: !!s.querySelector('[data-testid="card-tracking-facts"]'), link: link?.getAttribute('href')?.replace(/\\/shipments\\/[^/?]+/, '/shipments/<id>') ?? null, inputs: s.querySelectorAll('input:not([type=checkbox]), textarea, select').length, rows: s.querySelectorAll('tbody tr, .tms-recent-row, li').length } })()`)
-    rec('Tracking card = read-only Load Tracking pull', cc && cc.strip && cc.link?.includes('/tms/tracking') && cc.inputs === 0 ? 'PASS' : 'FAIL', cc)
+    await b.evaluate(`document.querySelector('${tid('card-tracking-body')}')?.scrollIntoView({ block: 'start' })`); await pause(1500)
+    const cc = await b.evaluate(`(() => { const s = document.querySelector('[data-testid="card-tracking-body"]'); if (!s) return null; const link = s.querySelector('[data-testid="card-tracking-open"]'); return { strip: !!s.querySelector('[data-testid="card-tracking-facts"]'), link: link?.getAttribute('href')?.replace(/\\/shipments\\/[^/?]+/, '/shipments/<id>') ?? null, inputs: [...s.querySelectorAll('input:not([type=checkbox]):not([type=radio]), textarea, select')].filter((i) => !i.closest('[data-testid="tracking-mode-control"]')).length, rows: s.querySelectorAll('tbody tr, .tms-recent-row, li').length } })()`)
+    rec('Tracking half of Carrier & Tracking = Load Tracking pull (read-only outside the mode control)', cc && cc.strip && cc.link?.includes('/tms/tracking') && cc.inputs === 0 ? 'PASS' : 'FAIL', cc)
     await b.screenshot(`${SHOTS}/create-check-calls-preview-1440.png`)
   } else rec('Tracking card', 'SKIP', 'no shipment link on the board')
   // 7 intake prefill: open an intake row, press Create shipment, read the banner + chips (nothing saved)

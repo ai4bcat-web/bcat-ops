@@ -16,6 +16,7 @@ import { LABEL, SECTION_TITLE } from './labels'
 import { MAX } from './constants'
 import { financialPreview, firstPickupIndex, lastDeliveryIndex } from './mapping'
 import { isShipmentTypeKey } from '@/lib/shipmentTypes'
+import { poReferenceRequired } from './customerRef'
 import { parseInteger, type FormStop, type ShipmentFormValues } from './model'
 import type { FormIssue, SectionKey } from './sectionProps'
 
@@ -181,9 +182,14 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
         + values.more.references.filter((r) => r.code.trim().toLowerCase() === code && !empty(r.value)).length
       if (n < req.countOnNewOrder) {
         const target = code === 'po' ? LABEL.customer.refNo : null
-        push(code === 'po' ? 'customer' : 'more', `ref:${code}`, target?.testId ?? LABEL.more.references.testId, req.label || req.code, `This customer requires ${req.countOnNewOrder} ${req.label || req.code} reference${req.countOnNewOrder === 1 ? '' : 's'}.`)
+        push(code === 'po' ? 'customer' : 'more', `ref:${code}`, target?.testId ?? LABEL.more.references.testId, code === 'po' ? LABEL.customer.refNo.text : req.label || req.code, `This customer requires ${req.countOnNewOrder} ${req.label || req.code} reference${req.countOnNewOrder === 1 ? '' : 's'}.`)
       }
     }
+  }
+
+  // A customer whose review requirements demand a PO (Step AP) needs it before Create, like a required reference.
+  if (strictRed && o.customer && poReferenceRequired(o.customer, o.settings) && empty(values.customer.refNo) && !issues.some((i) => i.id === 'customer:ref:po')) {
+    push('customer', 'ref:po', LABEL.customer.refNo.testId, LABEL.customer.refNo.text, 'This customer requires a PO / reference number.')
   }
 
   // Truckload only for Submit.

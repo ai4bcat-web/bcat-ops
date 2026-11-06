@@ -11,7 +11,7 @@ function ReferencesTabImpl({ values, update, ctx }: CardProps) {
   return (
     <div className="tms-card-more-pane" data-testid={LABEL.more.references.testId} aria-label={LABEL.more.references.text}>
       <p className="tms-muted text-xs">
-        Customer Ref #, Pick Up Ref # and Consignee Ref # are entered in the Customer and Route cards.
+        Customer ref is in the header strip; Pick Up Ref # and Consignee Ref # are in the Route card.
       </p>
       {refsLocked && <p className="tms-muted text-xs">{lockReason(ctx.locked, 'references')}</p>}
       <fieldset disabled={disabled || refsLocked} className="m-0 min-w-0 border-0 p-0">

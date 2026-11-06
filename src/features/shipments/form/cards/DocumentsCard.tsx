@@ -6,10 +6,11 @@
  * written as ShipmentDocument by `runUploadQueued` right after Create. Delete is available for
  * queued files (the drafted ones); saved documents are preview-only here.
  */
+import { Field } from '../fieldGrid'
 import { memo, useRef, useState, type DragEvent } from 'react'
 import { Check, Circle, Download, Upload } from 'lucide-react'
 import { toast } from 'sonner'
-import { TmsButton, TmsField, TmsIconButton, TmsSelect, TmsTabs } from '@/features/tms/kit'
+import { TmsButton, TmsIconButton, TmsSelect, TmsTabs } from '@/features/tms/kit'
 import { getShipmentDocumentUrl } from '@/lib/apiClient'
 import { formatBoardDateTime } from '@/lib/date'
 import {
@@ -129,7 +130,7 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
             onChange={(e) => void take(e.target.files)}
           />
         </div>
-        <TmsField label={LABEL.documents.fileType.text}>
+        <Field span={12} label={LABEL.documents.fileType.text}>
           <TmsSelect
             {...fieldAttrs(LABEL.documents.fileType)}
             value={type}
@@ -137,7 +138,7 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
             onChange={(e) => setType(e.target.value as ShipmentDocumentType)}
             options={SHIPMENT_DOCUMENT_TYPES.map((t) => ({ value: t, label: DOCUMENT_TYPE_LABELS[t] ?? t }))}
           />
-        </TmsField>
+        </Field>
       </div>
       {problem && <p className="tms-card-docs-problem" role="alert" data-testid="card-documents-problem">{problem}</p>}
       {!saved && (

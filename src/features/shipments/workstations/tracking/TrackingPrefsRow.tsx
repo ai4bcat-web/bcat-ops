@@ -8,6 +8,7 @@
  * rendered unconditionally with a fixed height, Save and Reset are disabled rather than
  * removed, and nothing here is a portal or an overlay — so saving can never move the panes.
  */
+import { TrackingModeNotSetChip } from '../../trackingModeControl/TrackingModeNotSetChip'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { TmsButton, TmsSelect } from '@/features/tms/kit'
@@ -37,9 +38,11 @@ function overrideOf(draft: Draft): TrackingPrefsOverride | null {
   return Object.keys(out).length > 0 ? out : null
 }
 
-export function TrackingPrefsRow({ shipment, customer, onSaved }: {
+export function TrackingPrefsRow({ shipment, customer, hasCarrier = false, onSaved }: {
   shipment: ShipmentRecord
   customer: CustomerRecord | null
+  /** A carrier is booked: an unconfirmed tracking mode then shows the amber "Tracking mode not set" chip. */
+  hasCarrier?: boolean
   /** Called after a successful save so the owner re-reads the shipment. */
   onSaved: () => void | Promise<void>
 }) {
@@ -73,6 +76,7 @@ export function TrackingPrefsRow({ shipment, customer, onSaved }: {
   return (
     <div className="tms-strip-prefs" data-testid="tracking-prefs-row">
       <span className="tms-strip-prefs-label">Tracking</span>
+      <TrackingModeNotSetChip shipment={shipment} hasCarrier={hasCarrier} />
       <TmsSelect aria-label="Mode" data-field="mode" value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value as Draft['mode'] })}>
         <option value="">Inherit ({inherited.mode ? TRACKING_MODE_LABELS[inherited.mode] : 'not set'})</option>
         {TRACKING_MODES.map((m) => <option key={m} value={m}>{TRACKING_MODE_LABELS[m]}</option>)}

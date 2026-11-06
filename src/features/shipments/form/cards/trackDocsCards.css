@@ -36,3 +36,9 @@
 }
 .tms-shell .tms-card-docs-checklist li { display: inline-flex; align-items: center; gap: 4px; color: var(--tms-muted); }
 .tms-shell .tms-card-docs-checklist li[data-met='true'] { color: var(--tms-text); }
+
+/* Carrier & Tracking (feedback 9): the tracking half under the carrier block, the mode control, the amber chip. */
+.tms-shell .tms-trk-half { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--tms-border); }
+.tms-shell .tms-trk-half-head { display: flex; align-items: center; gap: 8px; }
+.tms-shell .tms-trk-half-title { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tms-muted); }
+.tms-shell .tms-trk-greyed { opacity: 0.6; }

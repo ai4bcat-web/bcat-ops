@@ -18,7 +18,9 @@ import { formatPhone } from '@/lib/utils'
 import type { CustomerRecord } from '@/types/tms'
 import { LABEL, labelFor } from '../labels'
 import { applyCustomerDefaults, isLocked, lockReason } from '../model'
+import { poReferenceRequired } from '../customerRef'
 import { ctl, disabledState, issueFor } from '../sections/fieldUtil'
+import { FieldGrid } from '../fieldGrid'
 import { LField } from '../sections/formControls'
 import { type CardProps, sliceOf } from './cardRegistry'
 import { pushRecent, rankWithRecents, readRecents, recentFirst } from './recents'
@@ -71,9 +73,10 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
   }
 
   return (
-    <div className="tms-ship-hdr-customer-wrap" data-testid="hdr-customer">
-      <div className="tms-ship-hdr-customer">
-        <LField def={LABEL.customer.name} error={err(LABEL.customer.name.testId)}>
+    <>
+      <div className="tms-ship-hdr-customer-wrap" data-testid="hdr-customer">
+        <FieldGrid>
+        <LField span={12} def={LABEL.customer.name} error={err(LABEL.customer.name.testId)}>
           {nameLocked ? (
             <div className="ship-inline">
               <TmsInput {...ctl(LABEL.customer.name)} readOnly value={customer?.name ?? value.typedName} title={lockReason(ctx.locked, 'customer')} />
@@ -98,16 +101,36 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
             </div>
           )}
         </LField>
+        </FieldGrid>
       </div>
       {!nameLocked && !value.id && (
-        <label className="ship-check">
-          <input
-            type="checkbox" data-testid="f-customer-useTyped" aria-label="No matching customer — record the name for now"
-            checked={value.useTyped} disabled={base.disabled} onChange={(e) => onChange({ useTyped: e.target.checked, typedName: e.target.checked ? value.typedName : '' })}
-          />
-          No matching customer — record the name for now
-        </label>
+        <div className="tms-ship-hdr-cell" title="No matching customer: record the name you typed for now">
+          <span className="tms-fg-label" aria-hidden="true">&nbsp;</span>
+          <label className="ship-check tms-ship-hdr-check">
+            <input
+              type="checkbox" data-testid="f-customer-useTyped" aria-label="No matching customer — record the name for now"
+              checked={value.useTyped} disabled={base.disabled} onChange={(e) => onChange({ typedName: e.target.checked ? value.typedName : '', useTyped: e.target.checked })}
+            />
+            Typed name only
+          </label>
+        </div>
       )}
+    </>
+  )
+}
+
+/** The strip's Customer ref (PO): the same value as `customer.refNo` / REF_PO, shown in the header only. Green when this customer requires a PO. */
+export function CustomerRef({ values, update, ctx }: CardProps) {
+  const onChange = useMemo(() => sliceOf(update, 'customer'), [update])
+  const refLocked = disabledState(ctx, 'references')
+  const required = poReferenceRequired(ctx.customer, ctx.settings)
+  return (
+    <div className="tms-ship-hdr-ref-wrap" data-testid="hdr-customer-ref">
+      <FieldGrid>
+      <LField span={12} def={LABEL.customer.refNo} required={required} hint={LABEL.customer.refNo.help} error={issueFor(ctx, 'customer', LABEL.customer.refNo.testId)}>
+        <TmsInput {...ctl(LABEL.customer.refNo)} placeholder="PO #" title={refLocked.title ?? LABEL.customer.refNo.help} value={values.customer.refNo} disabled={refLocked.disabled} onChange={(e) => onChange({ refNo: e.target.value })} />
+      </LField>
+      </FieldGrid>
     </div>
   )
 }
@@ -119,7 +142,6 @@ export function CustomerContact({ values, update, ctx }: CardProps) {
   const customer = ctx.customer
   const billToLocked = disabledState(ctx, 'billTo')
   const contactLocked = disabledState(ctx, 'contact')
-  const refLocked = disabledState(ctx, 'references')
   const err = (testId: string) => issueFor(ctx, 'customer', testId)
   const contacts = (customer?.contacts ?? []).filter((c) => c.active || c.id === value.contactId)
   const selectedContact = contacts.find((c) => c.id === value.contactId)
@@ -130,38 +152,33 @@ export function CustomerContact({ values, update, ctx }: CardProps) {
 
   return (
     <div className="tms-card-body-stack" data-testid="section-customer-contact">
-      <div className="tms-card-grid">
-        <LField def={LABEL.customer.refNo} error={err(LABEL.customer.refNo.testId)}>
-          <TmsInput {...ctl(LABEL.customer.refNo)} title={refLocked.title ?? LABEL.customer.refNo.help} value={value.refNo} disabled={refLocked.disabled} onChange={(e) => onChange({ refNo: e.target.value })} />
-        </LField>
-        <LField def={LABEL.customer.contact}>
+      <FieldGrid>
+        <LField span={6} def={LABEL.customer.contact}>
           <TmsSelect {...ctl(LABEL.customer.contact)} value={value.contactId} disabled={contactLocked.disabled} title={contactLocked.title} onChange={(e) => onChange({ contactId: e.target.value })}>
             <option value="" />
             {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </TmsSelect>
         </LField>
-        <LField def={LABEL.customer.phone}>
+        <LField span={6} def={LABEL.customer.phone}>
           <TmsInput {...ctl(LABEL.customer.phone)} readOnly className="ship-readonly" value={phone ? formatPhone(phone) : ''} />
         </LField>
         {value.emails.slice(0, VISIBLE_EMAILS).map((email, i) => {
           const def = LABEL.customer.email(i + 1)
           return (
-            <LField key={def.testId} def={def} error={err(def.testId)}>
+            <LField key={def.testId} span={6} def={def} error={err(def.testId)}>
               <TmsInput {...ctl(def)} type="email" value={email} disabled={base.disabled} onChange={(e) => setEmail(i, e.target.value)} />
             </LField>
           )
         })}
-      </div>
-      {(billTos.length > 1 || err(LABEL.customer.billTo.testId)) && (
-        <div className="tms-card-grid">
-          <LField def={LABEL.customer.billTo} error={err(LABEL.customer.billTo.testId)}>
+        {(billTos.length > 1 || err(LABEL.customer.billTo.testId)) && (
+          <LField span={12} def={LABEL.customer.billTo} error={err(LABEL.customer.billTo.testId)}>
             <TmsSelect {...ctl(LABEL.customer.billTo)} value={value.billToId} disabled={billToLocked.disabled} title={billToLocked.title} onChange={(e) => onChange({ billToId: e.target.value })}>
               <option value="" />
               {billTos.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </TmsSelect>
           </LField>
-        </div>
-      )}
+        )}
+      </FieldGrid>
       {customer && (
         <span className="ship-hint">
           From the customer record · <Link className="ship-link" to={`/tms/customers/${customer.id}`}>Edit customer</Link>

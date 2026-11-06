@@ -7,7 +7,7 @@
  */
 import { memo, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { TmsBadge, TmsButton, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
 import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
 import { CARRIER_STATUS_LABELS, effectiveCarrierStatus } from '@/lib/carrierStatus'
@@ -21,6 +21,7 @@ import { US_STATES } from '../constants'
 import { LABEL } from '../labels'
 import { activeLoadCarrier, isLocked, lockReason } from '../model'
 import type { SliceSectionProps } from '../sectionRegistry'
+import { Field, FieldGrid } from '../fieldGrid'
 import { fieldAttrs } from './fieldAttrs'
 import { FindInvite } from './carrier/FindInvite'
 import '../cards/moneyCards.css'
@@ -34,11 +35,11 @@ function policyText(carrier: CarrierRecord | null, type: InsurancePolicyType): s
   return `${limit}${p.expiresAt ? ` · exp ${p.expiresAt}` : ''}${expired ? ' (expired)' : ''}`
 }
 
-function Static({ def, text }: { def: { text: string; testId: string }; text: string }) {
+function Static({ def, text, span = 4, narrow = 6 }: { def: { text: string; testId: string }; text: string; span?: number; narrow?: number }) {
   return (
-    <TmsField label={def.text}>
+    <Field span={span} narrow={narrow} label={def.text}>
       <TmsInput aria-label={def.text} data-testid={def.testId} readOnly value={text} />
-    </TmsField>
+    </Field>
   )
 }
 
@@ -229,8 +230,8 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-2 min-[1500px]:col-span-2 min-[1500px]:grid-cols-4">
-          <Static def={LABEL.carrier.mc} text={carrier?.mcNumber ?? '—'} />
+        <FieldGrid>
+          <Static def={LABEL.carrier.mc} narrow={12} text={carrier?.mcNumber ?? '—'} />
           <Static def={LABEL.carrier.dot} text={carrier?.dotNumber ?? '—'} />
           <Static def={LABEL.carrier.scac} text={carrier?.scac ?? '—'} />
           <Static def={LABEL.carrier.safetyRating} text={carrier?.safetyRating ?? '—'} />
@@ -239,7 +240,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
           <Static def={LABEL.carrier.genLiability} text={policyText(carrier, 'GENERAL_LIABILITY')} />
           <Static def={LABEL.carrier.email} text={carrier?.email ?? '—'} />
           <Static def={LABEL.carrier.phone} text={carrier?.phone ?? '—'} />
-        </div>
+        </FieldGrid>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -256,22 +257,22 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
         {coverBlock && <span className="tms-muted text-xs" data-testid="carrier-cover-reason">{coverBlock}</span>}
       </div>
 
-      <div className="grid grid-cols-2 gap-2 min-[1500px]:grid-cols-3">
-        <TmsField label={LABEL.carrier.dispatcher.text}>
+      <FieldGrid>
+        <Field span={4} narrow={12} label={LABEL.carrier.dispatcher.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.dispatcher)} value={value.dispatcher.name} disabled={disabled || own}
             onChange={(e) => setBits('dispatcher', { name: e.target.value })} />
-        </TmsField>
-        <TmsField label={LABEL.carrier.dispatcherPhone.text}>
+        </Field>
+        <Field span={4} narrow={6} label={LABEL.carrier.dispatcherPhone.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.dispatcherPhone)} type="tel" value={value.dispatcher.phone} disabled={disabled || own}
             onChange={(e) => setBits('dispatcher', { phone: e.target.value })} />
-        </TmsField>
-        <TmsField label={LABEL.carrier.dispatcherEmail.text}>
+        </Field>
+        <Field span={4} narrow={6} label={LABEL.carrier.dispatcherEmail.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.dispatcherEmail)} type="email" value={value.dispatcher.email} disabled={disabled || own}
             onChange={(e) => setBits('dispatcher', { email: e.target.value })} />
-        </TmsField>
+        </Field>
 
         {own ? (
-          <TmsField label={LABEL.carrier.driver1.text} hint="One driver per Ivan Cartage load">
+          <Field span={4} narrow={12} label={LABEL.carrier.driver1.text} info="One driver per Ivan Cartage load">
             <OwnFleetDriverPicker
               roster={roster}
               value={ownFleetDriverByName(roster, value.driver1.name)?.id ?? ''}
@@ -289,60 +290,60 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
                 }
               })}
             />
-          </TmsField>
+          </Field>
         ) : (
-          <TmsField label={LABEL.carrier.driver1.text}>
+          <Field span={4} narrow={12} label={LABEL.carrier.driver1.text}>
             <TmsInput {...fieldAttrs(LABEL.carrier.driver1)} value={value.driver1.name} disabled={disabled} readOnly={typedLock}
               onChange={(e) => setBits('driver1', { name: e.target.value })} />
-          </TmsField>
+          </Field>
         )}
-        <TmsField label={LABEL.carrier.driver1Cell.text}>
+        <Field span={4} narrow={6} label={LABEL.carrier.driver1Cell.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.driver1Cell)} type="tel" value={value.driver1.phone} disabled={disabled} readOnly={typedLock}
             onChange={(e) => setBits('driver1', { phone: e.target.value })} />
-        </TmsField>
-        <TmsField label={LABEL.carrier.driver1Email.text}>
+        </Field>
+        <Field span={4} narrow={6} label={LABEL.carrier.driver1Email.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.driver1Email)} type="email" value={value.driver1.email} disabled={disabled} readOnly={own}
             onChange={(e) => setBits('driver1', { email: e.target.value })} />
-        </TmsField>
+        </Field>
 
         {!own && (
           <>
-            <TmsField label={LABEL.carrier.driver2.text}>
+            <Field span={4} narrow={12} label={LABEL.carrier.driver2.text}>
               <TmsInput {...fieldAttrs(LABEL.carrier.driver2)} value={value.driver2.name} disabled={disabled} readOnly={typedLock}
                 onChange={(e) => setBits('driver2', { name: e.target.value })} />
-            </TmsField>
-            <TmsField label={LABEL.carrier.driver2Cell.text}>
+            </Field>
+            <Field span={4} narrow={6} label={LABEL.carrier.driver2Cell.text}>
               <TmsInput {...fieldAttrs(LABEL.carrier.driver2Cell)} type="tel" value={value.driver2.phone} disabled={disabled} readOnly={typedLock}
                 onChange={(e) => setBits('driver2', { phone: e.target.value })} />
-            </TmsField>
-            <TmsField label={LABEL.carrier.driver2Email.text}>
+            </Field>
+            <Field span={4} narrow={6} label={LABEL.carrier.driver2Email.text}>
               <TmsInput {...fieldAttrs(LABEL.carrier.driver2Email)} type="email" value={value.driver2.email} disabled={disabled}
                 onChange={(e) => setBits('driver2', { email: e.target.value })} />
-            </TmsField>
+            </Field>
           </>
         )}
 
-        <TmsField label={LABEL.carrier.truckNo.text}>
+        <Field span={3} label={LABEL.carrier.truckNo.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.truckNo)} maxLength={40} value={value.truckNo} disabled={disabled} readOnly={typedLock}
             onChange={(e) => set({ truckNo: e.target.value })} />
-        </TmsField>
-        <TmsField label={LABEL.carrier.trailerNo.text}>
+        </Field>
+        <Field span={3} label={LABEL.carrier.trailerNo.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.trailerNo)} maxLength={40} value={value.trailerNo} disabled={disabled} readOnly={typedLock}
             onChange={(e) => set({ trailerNo: e.target.value })} />
-        </TmsField>
-        <TmsField label={LABEL.carrier.seal.text}>
+        </Field>
+        <Field span={3} label={LABEL.carrier.seal.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.seal)} maxLength={40} value={value.seal} disabled={disabled}
             onChange={(e) => set({ seal: e.target.value })} />
-        </TmsField>
-        <TmsField label={LABEL.carrier.carrierRef.text}>
+        </Field>
+        <Field span={3} label={LABEL.carrier.carrierRef.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.carrierRef)} maxLength={40} value={value.carrierRef} disabled={disabled}
             onChange={(e) => set({ carrierRef: e.target.value })} />
-        </TmsField>
-        <TmsField label={LABEL.carrier.originCity.text}>
+        </Field>
+        <Field span={3} label={LABEL.carrier.originCity.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.originCity)} value={value.originCity} disabled={disabled}
             onChange={(e) => set({ originCity: e.target.value })} />
-        </TmsField>
-        <TmsField label={LABEL.carrier.originState.text}>
+        </Field>
+        <Field span={3} label={LABEL.carrier.originState.text}>
           <TmsSelect
             {...fieldAttrs(LABEL.carrier.originState)}
             value={value.originState}
@@ -351,29 +352,27 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false 
             onChange={(e) => set({ originState: e.target.value })}
             options={US_STATES.map((s) => ({ value: s, label: s }))}
           />
-        </TmsField>
-        <TmsField label={LABEL.carrier.emptyMiles.text}>
+        </Field>
+        <Field span={3} label={LABEL.carrier.emptyMiles.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.emptyMiles)} type="number" min={0} value={value.emptyMiles} disabled={disabled}
             onChange={(e) => set({ emptyMiles: e.target.value })} />
-        </TmsField>
-        <TmsField label={LABEL.carrier.puEta.text}>
+        </Field>
+        <Field span={3} label={LABEL.carrier.puEta.text}>
           <TmsInput {...fieldAttrs(LABEL.carrier.puEta)} type="datetime-local" value={value.puEta} disabled={disabled}
             onChange={(e) => set({ puEta: e.target.value })} />
-        </TmsField>
-      </div>
+        </Field>
+      </FieldGrid>
 
-      <div className="grid grid-cols-3 gap-2">
-        <Static def={LABEL.carrier.confirmSent} text={dash(active?.rateConSentAt)} />
+      <FieldGrid>
+        <Static def={LABEL.carrier.confirmSent} narrow={12} text={dash(active?.rateConSentAt)} />
         <Static def={LABEL.carrier.confirmRec} text={dash(active?.rateConSignedAt)} />
-        <div className="flex items-end gap-2">
-          <Static def={LABEL.carrier.dispatched} text={dash(active?.dispatchedAt)} />
-          <TmsButton size="sm" data-testid="carrier-dispatch" disabled={disabled || !active} title={active ? undefined : 'Cover a carrier first'} onClick={ctx.actions.openDispatch}>
-            Dispatch
-          </TmsButton>
-        </div>
-      </div>
+        <Static def={LABEL.carrier.dispatched} text={dash(active?.dispatchedAt)} />
+      </FieldGrid>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="tms-fg-toolbar">
+        <TmsButton size="sm" data-testid="carrier-dispatch" disabled={disabled || !active} title={active ? undefined : 'Cover a carrier first'} onClick={ctx.actions.openDispatch}>
+          Dispatch
+        </TmsButton>
         <TmsButton size="sm" data-testid={LABEL.carrier.sendRateConf.testId} disabled={disabled || !active} title={active ? needSave : 'Cover a carrier first'} onClick={ctx.actions.openSendRateCon}>
           {LABEL.carrier.sendRateConf.text}
         </TmsButton>

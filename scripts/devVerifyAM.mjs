@@ -95,6 +95,8 @@ const TEST_IDS = [
   ['mark-signed-confirm', 'src/features/shipments/components/MarkSignedDialog.tsx'],
   ['remove-carrier-effect', 'src/features/shipments/components/StatusActions.tsx'],
   ['assignment-chip', 'src/features/shipments/components/CarrierAssignmentChip.tsx'],
+  ['cover-tracking-step', 'src/features/carriers/cover/CoverTrackingStep.tsx'],
+  ['ladder-tracking-summary', 'src/features/shipments/components/CarrierLadderCard.tsx'],
 ]
 
 async function inventory() {
@@ -353,6 +355,26 @@ async function runWalk(ctx, b) {
     await shot('AM11-remove-carrier-dialog')
     await closeDialog()
     return 'pending steps disabled; Mark signed needs a PDF; driver info needs all four; Remove has Re-post to DAT, off by default'
+  })
+
+  await step('AM16 Tracking mode (feedback 9): unconfirmed shows the amber chip; confirming shows the mode on the ladder card', async () => {
+    const open = async (id) => {
+      await b.navigate(`/tms/shipments/${id}?tab=carrier`)
+      await b.poll(() => has(tid('carrier-ladder')), 'the ladder card', 90_000)
+      await pause(500)
+    }
+    await open(ctx.f.setup.shipment.id)
+    const notSet = await has(tid('tracking-not-set'))
+    line(notSet ? 'PASS' : 'SKIPPED', 'AM16a amber "Tracking mode not set" chip on an unconfirmed covered load', notSet ? '' : 'not shown: the confirmation rule starts after the shipment creation date check in trackingPrefs.ts')
+    if (notSet) await shot('AM16-tracking-mode-not-set')
+    // The same write the Tracking control makes on Confirm (SET_TRACKING_PREFS with confirmed), on a ZZ shipment.
+    await ctx.ship('SET_TRACKING_PREFS', { shipmentId: ctx.f.setup.shipment.id, prefs: { mode: 'MANUAL', confirmed: true } })
+    await open(ctx.f.setup.shipment.id)
+    await b.poll(() => has(tid('ladder-tracking-summary')), 'the tracking summary on the ladder card', 30_000)
+    expect(/Manual/.test(await b.evaluate(`document.querySelector('[data-testid="ladder-tracking-summary"]').textContent`)), 'the summary does not name the mode')
+    expect(!(await has(tid('tracking-not-set'))), 'the amber chip is still shown after confirming')
+    await shot('AM17-tracking-mode-confirmed')
+    return 'confirmed MANUAL shown on the ladder card; amber chip gone'
   })
 
   await step('AM12 Carrier Sales: Covered tab shows the rungs and filters by them', async () => {

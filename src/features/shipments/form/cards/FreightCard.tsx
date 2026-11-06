@@ -17,6 +17,7 @@ import { SHIPMENT_TYPES } from '@/lib/shipmentTypes'
 import { activeLoadCarrier, isLocked, lockReason, type FlagKey, type ShipmentFormValues } from '../model'
 import { applyShipmentType, typeForDivisionChange } from '../shipmentType'
 import { ctl, digitsOnly, disabledState, dollarText, issueFor, signedDigits } from '../sections/fieldUtil'
+import { FieldGrid } from '../fieldGrid'
 import { LField } from '../sections/formControls'
 import { type CardProps, sliceOf } from './cardRegistry'
 import './cards.css'
@@ -44,7 +45,6 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
   const base = disabledState(ctx)
   const equipLock = disabledState(ctx, 'equipment')
   const weightLock = disabledState(ctx, 'weight')
-  const refLock = disabledState(ctx, 'references')
   const err = (testId: string) => issueFor(ctx, 'shipping', testId)
   const set = (patch: Partial<Ship>) => onChange(patch)
   const txt = (key: keyof Ship, clean: (s: string) => string = (s) => s) => (e: { target: { value: string } }) =>
@@ -117,8 +117,8 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
   const tempOff = !value.temp.on
   return (
     <div className="tms-card-body-stack" data-testid="section-freight-body">
-      <div className="tms-card-grid">
-        <LField def={LABEL.shipping.revDivision} error={err(LABEL.shipping.revDivision.testId)} hint={LABEL.shipping.revDivision.help}>
+      <FieldGrid>
+        <LField span={3} def={LABEL.shipping.revDivision} error={err(LABEL.shipping.revDivision.testId)} hint={LABEL.shipping.revDivision.help}>
           <TmsSelect {...ctl(LABEL.shipping.revDivision)} value={revCode} disabled={base.disabled} onChange={(e) => pickDivision(e.target.value)}>
             <option value="" />
             {rows.map((r) => (
@@ -126,7 +126,7 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
             ))}
           </TmsSelect>
         </LField>
-        <LField def={LABEL.shipping.shipmentType} error={err(LABEL.shipping.shipmentType.testId)}>
+        <LField span={3} def={LABEL.shipping.shipmentType} error={err(LABEL.shipping.shipmentType.testId)}>
           <TmsSelect
             {...ctl(LABEL.shipping.shipmentType)} aria-label={LABEL.shipping.shipmentType.text} value={values.shipmentType}
             disabled={base.disabled || typeLocked} title={typeLocked ? lockReason(ctx.locked, 'mode') : undefined}
@@ -140,92 +140,84 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
             ))}
           </TmsSelect>
         </LField>
-        <LField def={LABEL.shipping.equipmentType} error={err(LABEL.shipping.equipmentType.testId)}>
+        <LField span={3} def={LABEL.shipping.equipmentType} error={err(LABEL.shipping.equipmentType.testId)}>
           <TmsInput {...ctl(LABEL.shipping.equipmentType)} list={EQUIPMENT_LIST_ID} maxLength={MAX.equipment} value={value.equipmentType} disabled={equipLock.disabled} title={equipLock.title} onChange={txt('equipmentType')} />
         </LField>
         <datalist id={EQUIPMENT_LIST_ID}>{EQUIPMENT_SUGGESTIONS.map((e) => <option key={e} value={e} />)}</datalist>
-        <LField def={LABEL.shipping.weightLbs} error={err(LABEL.shipping.weightLbs.testId)}>
+        <LField span={3} def={LABEL.shipping.weightLbs} error={err(LABEL.shipping.weightLbs.testId)}>
           <TmsInput {...ctl(LABEL.shipping.weightLbs)} inputMode="numeric" value={value.weightLbs} disabled={weightLock.disabled} title={weightLock.title} onChange={txt('weightLbs', digitsOnly)} />
         </LField>
-        <LField def={LABEL.shipping.billableWeightLbs}>
+        <LField span={3} def={LABEL.shipping.billableWeightLbs}>
           <TmsInput {...ctl(LABEL.shipping.billableWeightLbs)} inputMode="numeric" value={value.billableWeightLbs} disabled={base.disabled} onChange={txt('billableWeightLbs', digitsOnly)} />
         </LField>
-        <LField def={LABEL.shipping.pieces}>
+        <LField span={3} def={LABEL.shipping.pieces}>
           <TmsInput {...ctl(LABEL.shipping.pieces)} inputMode="numeric" value={value.pieces} disabled={base.disabled} onChange={txt('pieces', digitsOnly)} />
         </LField>
-        <LField def={LABEL.shipping.footage}>
+        <LField span={3} def={LABEL.shipping.footage}>
           <TmsInput {...ctl(LABEL.shipping.footage)} inputMode="numeric" value={value.footage} disabled={base.disabled} onChange={txt('footage', digitsOnly)} />
         </LField>
-      </div>
-      <div className="tms-card-grid tms-card-grid-desc">
-        <LField def={LABEL.shipping.description} error={err(LABEL.shipping.description.testId)} hint={LABEL.shipping.description.help}>
-          <TmsInput {...ctl(LABEL.shipping.description)} maxLength={MAX.description} value={value.description} disabled={base.disabled} onChange={txt('description')} />
-        </LField>
-        <LField def={LABEL.shipping.freightClass}>
+        <LField span={3} def={LABEL.shipping.freightClass}>
           <TmsSelect {...ctl(LABEL.shipping.freightClass)} value={value.freightClass} disabled={base.disabled} onChange={(e) => set({ freightClass: e.target.value })}>
             <option value="" />
             {value.freightClass && !(FREIGHT_CLASSES as readonly string[]).includes(value.freightClass) && <option value={value.freightClass}>{value.freightClass}</option>}
             {FREIGHT_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
           </TmsSelect>
         </LField>
-        <LField def={LABEL.shipping.declaredValue}>
+        <LField span={9} def={LABEL.shipping.description} error={err(LABEL.shipping.description.testId)} hint={LABEL.shipping.description.help}>
+          <TmsInput {...ctl(LABEL.shipping.description)} maxLength={MAX.description} value={value.description} disabled={base.disabled} onChange={txt('description')} />
+        </LField>
+        <LField span={3} narrow={12} def={LABEL.shipping.declaredValue}>
           <TmsInput {...ctl(LABEL.shipping.declaredValue)} inputMode="decimal" value={value.declaredValue} disabled={base.disabled} onChange={txt('declaredValue', dollarText)} />
         </LField>
-        <LField def={{ text: 'Customer Ref', testId: 'f-freight-customerRef', help: LABEL.customer.refNo.help }} hint={LABEL.customer.refNo.help}>
-          <TmsInput
-            aria-label="Customer Ref" data-testid="f-freight-customerRef" value={values.customer.refNo} disabled={refLock.disabled} title={refLock.title}
-            onChange={(e) => update((p) => ({ ...p, customer: { ...p.customer, refNo: e.target.value } }))}
-          />
-        </LField>
-      </div>
-
-      <div className="tms-card-req" role="group" aria-label="Requirements" data-testid="f-shipping-flags">
-        <span className="tms-card-req-title">Requirements</span>
-        <div className="tms-card-chips">{CHIP_ORDER.map(chip)}</div>
-      </div>
+        <div className="tms-card-req tms-fg-chips" role="group" aria-label="Requirements" data-testid="f-shipping-flags">
+          <span className="tms-card-req-title">Requirements</span>
+          <div className="tms-card-chips">{CHIP_ORDER.map(chip)}</div>
+        </div>
+      </FieldGrid>
 
       {(value.temp.on || value.palletExchange.on || value.tarps.on) && (
         <div className="tms-card-req-sub" data-testid="f-shipping-subfields">
           {value.temp.on && (
-            <div className="tms-card-grid tms-card-grid-4">
-              <LField def={LABEL.shipping.tempType}>
+            <FieldGrid>
+              <LField span={3} def={LABEL.shipping.tempType}>
                 <TmsSelect {...ctl(LABEL.shipping.tempType)} value={value.temp.unit} disabled={base.disabled || tempOff} onChange={(e) => set({ temp: { ...value.temp, unit: e.target.value as 'F' | 'C' } })}>
                   <option value="F">F</option>
                   <option value="C">C</option>
                 </TmsSelect>
               </LField>
-              <LField def={LABEL.shipping.tempMin}>
+              <LField span={3} def={LABEL.shipping.tempMin}>
                 <TmsInput {...ctl(LABEL.shipping.tempMin)} inputMode="numeric" placeholder="#°" value={value.temp.min} disabled={base.disabled} onChange={(e) => set({ temp: { ...value.temp, min: signedDigits(e.target.value) } })} />
               </LField>
-              <LField def={LABEL.shipping.tempMax}>
+              <LField span={3} def={LABEL.shipping.tempMax}>
                 <TmsInput {...ctl(LABEL.shipping.tempMax)} inputMode="numeric" placeholder="#°" value={value.temp.max} disabled={base.disabled} onChange={(e) => set({ temp: { ...value.temp, max: signedDigits(e.target.value) } })} />
               </LField>
-              <LField def={LABEL.shipping.tempPreCool}>
+              <LField span={3} def={LABEL.shipping.tempPreCool}>
                 <TmsInput {...ctl(LABEL.shipping.tempPreCool)} inputMode="numeric" placeholder="#°" value={value.temp.preCool} disabled={base.disabled} onChange={(e) => set({ temp: { ...value.temp, preCool: signedDigits(e.target.value) } })} />
               </LField>
-            </div>
+            </FieldGrid>
           )}
           {value.palletExchange.on && (
-            <div className="tms-card-grid tms-card-grid-4">
-              <LField def={LABEL.shipping.palletsIn}>
+            <FieldGrid>
+              <LField span={6} def={LABEL.shipping.palletsIn}>
                 <TmsInput {...ctl(LABEL.shipping.palletsIn)} inputMode="numeric" value={value.palletExchange.palletsIn} disabled={base.disabled} onChange={(e) => set({ palletExchange: { ...value.palletExchange, palletsIn: digitsOnly(e.target.value) } })} />
               </LField>
-              <LField def={LABEL.shipping.palletsOut}>
+              <LField span={6} def={LABEL.shipping.palletsOut}>
                 <TmsInput {...ctl(LABEL.shipping.palletsOut)} inputMode="numeric" value={value.palletExchange.palletsOut} disabled={base.disabled} onChange={(e) => set({ palletExchange: { ...value.palletExchange, palletsOut: digitsOnly(e.target.value) } })} />
               </LField>
-            </div>
+            </FieldGrid>
           )}
           {value.tarps.on && (
-            <div className="tms-card-grid tms-card-grid-4">
-              <LField def={LABEL.shipping.tarpSize}>
+            <FieldGrid>
+              <LField span={12} def={LABEL.shipping.tarpSize}>
                 <TmsInput {...ctl(LABEL.shipping.tarpSize)} maxLength={MAX.shortText} value={value.tarps.size} disabled={base.disabled} onChange={(e) => set({ tarps: { ...value.tarps, size: e.target.value } })} />
               </LField>
-            </div>
+            </FieldGrid>
           )}
         </div>
       )}
 
-      <div className="tms-card-foot">
+      <div className="tms-fg-toolbar" data-testid="f-shipping-toolbar">
+        {hint && <span className="tms-muted text-xs" role="status" data-testid="f-shipping-hint">{hint}</span>}
         <TmsButton type="button" size="sm" {...ctl(LABEL.shipping.calculateTotals)} disabled={weightLock.disabled} onClick={calculate}>
           {LABEL.shipping.calculateTotals.text}
         </TmsButton>
@@ -236,7 +228,6 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
           />
           {LABEL.shipping.disableMileage.text}
         </label>
-        {hint && <span className="ship-hint" role="status" data-testid="f-shipping-hint">{hint}</span>}
       </div>
     </div>
   )

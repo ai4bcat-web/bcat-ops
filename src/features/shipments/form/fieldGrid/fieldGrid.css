@@ -1,0 +1,69 @@
+/*
+ * The shared field grid (feedback 10). 12 columns, 16 px gutters, one rhythm for every field:
+ * label (16 px, one line) -> 32 px control -> nothing. Tokens only; scoped under .tms-shell.
+ * Narrow rule: the grid sits in a container; below 760 px of card width every quarter/third field
+ * becomes a half and anything of 6+ fills the row (or the field's own `narrow` span).
+ */
+.tms-shell .tms-fg {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 8px 16px;
+  align-items: start;
+  min-width: 0;
+}
+.tms-shell .tms-fg-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; grid-column: span 12; }
+.tms-shell .tms-fg-field[data-span='1'] { grid-column: span 1; }
+.tms-shell .tms-fg-field[data-span='2'] { grid-column: span 2; }
+.tms-shell .tms-fg-field[data-span='3'] { grid-column: span 3; }
+.tms-shell .tms-fg-field[data-span='4'] { grid-column: span 4; }
+.tms-shell .tms-fg-field[data-span='5'] { grid-column: span 5; }
+.tms-shell .tms-fg-field[data-span='6'] { grid-column: span 6; }
+.tms-shell .tms-fg-field[data-span='7'] { grid-column: span 7; }
+.tms-shell .tms-fg-field[data-span='8'] { grid-column: span 8; }
+.tms-shell .tms-fg-field[data-span='9'] { grid-column: span 9; }
+.tms-shell .tms-fg-field[data-span='10'] { grid-column: span 10; }
+.tms-shell .tms-fg-field[data-span='11'] { grid-column: span 11; }
+.tms-shell .tms-fg-field[data-span='12'] { grid-column: span 12; }
+
+.tms-shell .tms-fg-label {
+  display: flex; align-items: center; gap: 4px; height: 16px; margin: 0;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tms-muted);
+  white-space: nowrap; overflow: hidden;
+}
+.tms-shell .tms-fg-label-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tms-shell .tms-fg-info { flex: none; color: var(--tms-muted); cursor: help; }
+.tms-shell .tms-fg-control { display: flex; flex-direction: column; min-width: 0; }
+.tms-shell .tms-fg-control > input:not([type='checkbox']):not([type='radio']),
+.tms-shell .tms-fg-control > select,
+.tms-shell .tms-fg-control .ship-inline input:not([type='checkbox']),
+.tms-shell .tms-fg-control .ship-typeahead input { height: 32px; box-sizing: border-box; width: 100%; }
+.tms-shell .tms-fg-field[data-invalid='true'] input,
+.tms-shell .tms-fg-field[data-invalid='true'] select { border-color: var(--tms-badge-red); }
+.tms-shell .tms-fg-field[data-invalid='true'] .tms-fg-label { color: var(--tms-badge-red); }
+/* Visually hidden, still read by assistive tech and test queries. */
+.tms-shell .tms-fg-sr {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* One toolbar row: 32 px, right-aligned (Calculate totals / Disable mileage). */
+.tms-shell .tms-fg-toolbar {
+  grid-column: span 12; display: flex; align-items: center; justify-content: flex-end; gap: 16px;
+  min-height: 32px; padding-top: 8px; border-top: 1px solid var(--tms-border);
+}
+.tms-shell .tms-fg-chips { grid-column: span 12; }
+
+.tms-shell .tms-ship-card, .tms-shell .tms-ship-hdr-panel { container-type: inline-size; }
+@container (max-width: 759px) {
+  .tms-shell .tms-fg-field[data-span] { grid-column: span 6; }
+  .tms-shell .tms-fg-field[data-span='6'], .tms-shell .tms-fg-field[data-span='7'], .tms-shell .tms-fg-field[data-span='8'],
+  .tms-shell .tms-fg-field[data-span='9'], .tms-shell .tms-fg-field[data-span='10'], .tms-shell .tms-fg-field[data-span='11'],
+  .tms-shell .tms-fg-field[data-span='12'] { grid-column: span 12; }
+  .tms-shell .tms-fg-field[data-span-narrow='3'] { grid-column: span 3; }
+  .tms-shell .tms-fg-field[data-span-narrow='4'] { grid-column: span 4; }
+  .tms-shell .tms-fg-field[data-span-narrow='6'] { grid-column: span 6; }
+  .tms-shell .tms-fg-field[data-span-narrow='8'] { grid-column: span 8; }
+  .tms-shell .tms-fg-field[data-span-narrow='12'] { grid-column: span 12; }
+}
+.tms-shell .tms-fg-control textarea.tms-fg-oneline { height: 32px; min-height: 32px; resize: none; padding-top: 6px; }
+.tms-shell .tms-fg-counter { height: 16px; display: flex; align-items: center; font-size: 11px; color: var(--tms-muted); }

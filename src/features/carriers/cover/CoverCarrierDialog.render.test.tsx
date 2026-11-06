@@ -27,9 +27,18 @@ vi.mock('@/lib/apiClient', () => ({
   mcpSendInvite: mocks.invite,
   coverCarrier: mocks.cover,
   getShipmentBundle: mocks.bundle,
+  getTmsSettings: vi.fn(async () => null),
+  listCustomers: vi.fn(async () => [{ id: 'cust-1', name: 'Acme' }]),
 }))
 vi.mock('@/hooks/useCarriers', () => ({
   useCarriers: () => ({ carriers: mocks.carriers, loading: mocks.loading, error: null, refresh: mocks.refresh, replace: vi.fn() }),
+}))
+vi.mock('@/features/shipments/trackingModeControl', () => ({
+  TrackingModeControl: ({ shipment, load, customer, onSaved }: { shipment: { id: string }; load: { id: string } | null; customer: { id: string } | null; onSaved: () => void }) => (
+    <div data-testid="tracking-mode-control" data-shipment={shipment.id} data-load={load?.id} data-customer={customer?.id ?? ''}>
+      <button data-testid="tracking-confirm" onClick={onSaved}>Confirm</button>
+    </div>
+  ),
 }))
 vi.mock('sonner', () => ({ toast: mocks.toast }))
 
@@ -76,7 +85,7 @@ beforeEach(() => {
   mocks.preview.mockResolvedValue(live())
   mocks.refresh.mockResolvedValue(undefined)
   mocks.bundle.mockResolvedValue({ shipment: { id: 'shp-1', updatedAt: 'S-UPD' }, loads: [{ id: 'load-1', updatedAt: 'L-UPD' }] })
-  mocks.cover.mockResolvedValue({ shipment: { id: 'shp-1' } })
+  mocks.cover.mockResolvedValue({ shipment: { id: 'shp-1', customerId: 'cust-1' }, loads: [{ id: 'load-1' }] })
 })
 
 describe('CoverCarrierDialog', () => {
@@ -92,8 +101,34 @@ describe('CoverCarrierDialog', () => {
 
     await waitFor(() => expect(mocks.cover).toHaveBeenCalledTimes(1))
     expect(mocks.cover).toHaveBeenCalledWith({ loadId: 'load-1', expectedUpdatedAt: 'L-UPD', carrierId: 'car-1', carrierRateCents: 150_000 })
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(onCovered).toHaveBeenCalled()
+  })
+
+  it('after the cover it stays open on the Tracking section for this load and customer, and Done closes it (feedback 9)', async () => {
+    mocks.carriers = [carrierRow({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })]
+    renderDialog()
+    await lookUp('MC 900001')
+    enterRate()
+    fireEvent.click(await screen.findByTestId('cover-assign'))
+
+    const control = await screen.findByTestId('tracking-mode-control')
+    expect(onClose).not.toHaveBeenCalled()
+    expect(control.getAttribute('data-shipment')).toBe('shp-1')
+    expect(control.getAttribute('data-load')).toBe('load-1')
+    await waitFor(() => expect(control.getAttribute('data-customer')).toBe('cust-1'))
+    fireEvent.click(screen.getByTestId('cover-done'))
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('a failed cover never shows the tracking section, so there is nothing to confirm against a load that is not covered', async () => {
+    mocks.carriers = [carrierRow({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })]
+    mocks.cover.mockRejectedValue(new Error('nope'))
+    renderDialog()
+    await lookUp('MC 900001')
+    enterRate()
+    fireEvent.click(await screen.findByTestId('cover-assign'))
+    await screen.findByTestId('cover-error')
+    expect(screen.queryByTestId('tracking-mode-control')).toBeNull()
   })
 
   it('a lookup submitted while the directory is still loading runs when it finishes, not never', async () => {

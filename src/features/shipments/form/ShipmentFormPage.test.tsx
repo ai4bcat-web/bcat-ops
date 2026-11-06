@@ -53,7 +53,7 @@ vi.mock('./defaultSections', () => {
           onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, ship: { ...(v.ship as object), equipmentType: e.target.value } }) as never)}
         />
       ),
-      rates: none, rateHistory: none, carrier: none, tracking: none, documents: none,
+      rates: none, rateHistory: none, carrier: none, documents: none,
     },
     HEADER_PARTS: {
       CustomerPicker: (p: P) => (
@@ -62,14 +62,17 @@ vi.mock('./defaultSections', () => {
           onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, customer: { ...(v.customer as object), typedName: e.target.value, useTyped: true } }) as never)}
         />
       ),
+      CustomerRef: (p: P) => (
+        <input
+          data-testid="f-customer-refNo" value={p.values.customer.refNo}
+          onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, customer: { ...(v.customer as object), refNo: e.target.value } }) as never)}
+        />
+      ),
       BillToStrip: (p: P & { open: boolean; onToggle: () => void }) => (
         <>
           <button type="button" data-testid="hdr-billTo-chip" aria-expanded={p.open} onClick={p.onToggle}>Bill To</button>
           <div data-testid="ship-form-header-panel" data-header-panel hidden={!p.open}>
-            <input
-              data-testid="f-customer-refNo" value={p.values.customer.refNo}
-              onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, customer: { ...(v.customer as object), refNo: e.target.value } }) as never)}
-            />
+            <input data-testid="f-customer-email-1" defaultValue="" />
           </div>
         </>
       ),
@@ -236,18 +239,18 @@ describe('ShipmentFormPage — issues and rail', () => {
 })
 
 describe('ShipmentFormPage — layout contract', () => {
-  it('seven numbered cards in build order (Customer and Bill To live in the header), no positive tabindex', () => {
+  it('six numbered cards in build order (Customer and Bill To live in the header), no positive tabindex', () => {
     renderForm('create')
     const cards = [...document.querySelectorAll<HTMLElement>('[data-testid^="section-"]:not([data-testid$="-errors"])')].map((n) => n.dataset.testid)
-    expect(cards).toEqual(['section-freight', 'section-route', 'section-rates', 'section-rateHistory', 'section-carrier', 'section-tracking', 'section-documents'])
-    expect([...document.querySelectorAll('.tms-ship-card-num')].map((n) => n.textContent)).toEqual(['1', '2', '3', '4', '5', '6', '7'])
+    expect(cards).toEqual(['section-freight', 'section-route', 'section-rates', 'section-rateHistory', 'section-carrier', 'section-documents'])
+    expect([...document.querySelectorAll('.tms-ship-card-num')].map((n) => n.textContent)).toEqual(['1', '2', '3', '4', '5', '6'])
     expect([...document.querySelectorAll('[tabindex]')].every((n) => Number(n.getAttribute('tabindex')) <= 0)).toBe(true)
   })
 
-  it('the More strip sits directly under Carrier and before Tracking', () => {
+  it('the More strip sits directly under Carrier & Tracking and before Documents', () => {
     renderForm('create')
     const order = [...document.querySelectorAll<HTMLElement>('[data-testid^="section-"]:not([data-testid$="-errors"]), [data-testid="ship-form-more"]')].map((n) => n.dataset.testid)
-    expect(order).toEqual(['section-freight', 'section-route', 'section-rates', 'section-rateHistory', 'section-carrier', 'ship-form-more', 'section-tracking', 'section-documents'])
+    expect(order).toEqual(['section-freight', 'section-route', 'section-rates', 'section-rateHistory', 'section-carrier', 'ship-form-more', 'section-documents'])
   })
 
   it('the header strip holds the Customer picker and the Bill To chip, with no Mode pill', () => {
@@ -255,8 +258,10 @@ describe('ShipmentFormPage — layout contract', () => {
     const header = screen.getByTestId('ship-form-header')
     expect(screen.getByTestId('ship-form-title').textContent).toBe('New shipment')
     expect(screen.getByTestId('ship-form-status').textContent).toBe('Draft')
-    for (const id of ['f-customer-name', 'hdr-billTo-chip', 'ship-form-pro']) expect(header.querySelector(`[data-testid="${id}"]`)).not.toBeNull()
+    for (const id of ['f-customer-name', 'f-customer-refNo', 'hdr-billTo-chip', 'ship-form-pro']) expect(header.querySelector(`[data-testid="${id}"]`)).not.toBeNull()
     expect(screen.queryByLabelText('Mode')).toBeNull()
+    expect(header.querySelector('[data-testid="delivery-timeline"]')).not.toBeNull()
+    expect(screen.getByTestId('delivery-caption').textContent).toBe('Draft')
     expect(screen.queryByTestId('f-header-division')).toBeNull()
     expect(screen.queryByLabelText('Division')).toBeNull()
     expect(screen.getByTestId('hdr-billTo-chip').getAttribute('aria-expanded')).toBe('false')

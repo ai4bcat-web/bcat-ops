@@ -60,7 +60,7 @@ const { line, report, written, problemList, waitLoaded, matches } = walk
 
 const SECTIONS = [
   ['freight', 'Freight'], ['route', 'Route'], ['rates', 'Rates'],
-  ['rateHistory', 'Rate history'], ['carrier', 'Carrier'], ['tracking', 'Tracking'], ['documents', 'Documents'],
+  ['rateHistory', 'Rate history'], ['carrier', 'Carrier & Tracking'], ['documents', 'Documents'],
 ]
 const MORE_TABS = ['instructions', 'references', 'items', 'notes']
 const AR_DIR = resolve('Docs/tms-build/aljex-create')
@@ -100,6 +100,8 @@ export const AH_STEPS = [
   { id: 'AR10', slug: 'documents-on-create' },
   { id: 'AR11', slug: 'bill-to-and-rate-history-cards' },
   { id: 'AR12', slug: 'rail-activity-roles-shipment-type' },
+  { id: 'AR13', slug: 'carrier-and-tracking-mode' },
+  { id: 'AR14', slug: 'grid-symmetry-and-timeline' },
 ]
 
 // ───────────────────────────── selectors (every literal id here is checked by --inventory) ─────────────────────────────
@@ -168,7 +170,9 @@ export async function inventory() {
   const facts = await labelFacts()
   const sources = [
     ...await sourceFiles('src/features/shipments/form'),
+    ...await sourceFiles('src/features/shipments/trackingModeControl'),
     'src/features/shipments/ShipmentsBoard.tsx',
+    'src/features/shipments/DeliveryTimeline.tsx',
     'src/features/shipments/intake/IntakeBoard.tsx',
     'src/features/shipments/components/ShipmentDetail.tsx',
     'src/features/tms/brokerage/company/components/MintShipmentCard.tsx',
@@ -390,7 +394,7 @@ const RUNNERS = {
     const title = await textOf(b, 'ship-form-title')
     if (title !== 'New shipment') bad.push(`title is ${JSON.stringify(title)}`)
     for (const id of ['ship-form-header', 'f-customer-name', 'hdr-billTo-chip', 'ship-form-status', 'ship-form-pro']) if (!(await has(b, tid(id)))) bad.push(`header lacks ${id}`)
-    if (await has(b, `${tid('ship-form-header')} ${tid('f-shipping-shipmentType')}`) || await has(b, tid('f-header-division'))) bad.push('the Mode / Shipment type / Division select is still in the header')
+    if (await has(b, `${tid('ship-form-header')} ${tid('f-shipping-shipmentType')}`) || await has(b, '[data-testid="f-header-' + 'division"]')) bad.push('the Mode / Shipment type / Division select is still in the header')
     if ((await b.evaluate(`document.querySelectorAll('[data-testid="f-shipping-revDivision"]').length`)) !== 1) bad.push('Division / Revenue Type renders more than once')
     if ((await b.evaluate(`document.querySelector('[data-testid="ship-form-header-panel"]')?.hidden ?? null`)) !== true) bad.push('the Bill To panel is not collapsed by default')
     if ((await b.evaluate(`(document.querySelector('[data-testid="section-freight-body"] select, [data-testid="section-freight-body"] input'))?.dataset.testid ?? null`)) !== 'f-shipping-revDivision') bad.push('Division is not the first field of the Freight card')
@@ -401,7 +405,7 @@ const RUNNERS = {
     const heads = await b.evaluate(`[...document.querySelectorAll('.tms-ship-card')].map((c) => c.dataset.testid + ':' + c.querySelector('.tms-ship-card-num')?.textContent + ':' + c.querySelector('.tms-ship-card-title')?.textContent)`)
     const want = SECTIONS.map(([k, t], i) => `section-${k}:${i + 1}:${t}`)
     if (heads.join('|') !== want.join('|')) bad.push(`cards ${heads.join(' | ')} ≠ ${want.join(' | ')}`)
-    const reds = ['Equipment (required)', 'Division (required)', 'Weight (required)', 'Description (required)', 'Name (required)', 'Ready (required)']
+    const reds = ['Equipment (required)', 'Division (required)', 'Weight (required)', 'Description (required)', 'Customer (required)', 'Name (required)', 'Ready (required)']
     for (const label of reds) if (!(await has(b, `[aria-label=${JSON.stringify(label)}]`))) bad.push(`red-required control "${label}" is missing`)
     // every Aljex flag is a chip; nothing of the old accordions is left
     const absent = []
@@ -441,7 +445,7 @@ const RUNNERS = {
       await shotFile(b, `04-${String(n + 1).padStart(2, '0')}-card-${key}`)
     }
     failures([...bad, ...problemList(b).slice(0, 2)])
-    return `header strip (title, Customer, Bill To chip, Draft chip, PRO preview), 7 numbered cards in order, Division then Shipment type first in Freight, ${reds.length} red-required controls, ${facts.flags.length} flag chips, Carrier collapsed, rail present, Tab order ${got.join(' > ')}, no horizontal scroll at 1440 / 1280`
+    return `header strip (title, Customer, Bill To chip, Draft chip, PRO preview), 6 numbered cards in order (Carrier & Tracking merged), Division then Shipment type first in Freight, ${reds.length} red-required controls, ${facts.flags.length} flag chips, Carrier collapsed, rail present, Tab order ${got.join(' > ')}, no horizontal scroll at 1440 / 1280`
   },
 
   async AH05(ctx) {
@@ -661,7 +665,7 @@ const RUNNERS = {
     await shotFile(b, '11-edit-mode-reloaded')
     const editTitle = await textOf(b, 'ship-form-title')
     if (!/^Edit PRO /.test(editTitle ?? '')) bad.push(`edit title is ${JSON.stringify(editTitle)}`)
-    if (!(await has(b, tid('card-tracking-updates')))) bad.push('edit mode lacks the Updates feed in the Tracking card')
+    if (!(await has(b, tid('card-tracking-updates')))) bad.push('edit mode lacks the Updates feed in the Carrier & Tracking card')
     await b.setViewport(1440, 1800); await pause(400); await shotAR(b, 'edit-1440')
     await b.setViewport(1280, 1800); await pause(400); await shotAR(b, 'edit-1280')
     await b.setViewport(1440, 900)
@@ -807,26 +811,28 @@ const RUNNERS = {
     expect(ctx.fullId, 'AH09 did not create a shipment')
     const b = ctx.b
     const bad = []
-    // create: the Tracking card shows the planned setup, never check-call entry
+    // create: the Carrier & Tracking card shows the planned setup (customer suggestion greyed), no mode control, never check-call entry
     await openForm(b, '/tms/shipments/new')
-    if (!(await has(b, tid('card-tracking-planned')))) bad.push('create: the Tracking card does not show the planned setup')
-    if (!/starts when the load is covered/i.test((await textOf(b, 'card-tracking-body')) ?? '')) bad.push('create: no "Tracking starts when the load is covered" line')
+    if (!(await has(b, tid('card-tracking-planned')))) bad.push('create: the Carrier & Tracking card does not show the planned setup')
+    if (await has(b, tid('tracking-mode-control'))) bad.push('create: the tracking mode control is shown before a carrier is booked')
+    if (!/Tracking is chosen when the carrier is booked/i.test((await textOf(b, 'card-tracking-body')) ?? '')) bad.push('create: no "Tracking is chosen when the carrier is booked" line')
     if (await has(b, tid('card-tracking-updates'))) bad.push('create: the Updates feed is on the create form')
     await openForm(b, `/tms/shipments/${ctx.fullId}/edit`)
-    await b.evaluate(`document.querySelector(${JSON.stringify(tid('section-tracking'))}).scrollIntoView({ block: 'start' })`)
+    await b.evaluate(`document.querySelector(${JSON.stringify(tid('card-tracking-body'))}).scrollIntoView({ block: 'start' })`)
     await pause(300)
     const facts = await b.evaluate(`(() => {
-      const s = document.querySelector('[data-testid="section-tracking"]');
+      const s = document.querySelector('[data-testid="card-tracking-body"]');
       const link = s.querySelector('[data-testid="card-tracking-open"]');
-      return { facts: !!s.querySelector('[data-testid="card-tracking-facts"]'), link: link?.getAttribute('href') ?? null, inputs: s.querySelectorAll('input:not([type=checkbox]), textarea, select').length, updates: !!s.querySelector('[data-testid="card-tracking-updates"]'), status: s.querySelector('[data-testid="card-tracking-status"]')?.innerText ?? null };
+      return { facts: !!s.querySelector('[data-testid="card-tracking-facts"]'), link: link?.getAttribute('href') ?? null, inputs: [...s.querySelectorAll('input:not([type=checkbox]), textarea, select')].filter((i) => !i.closest('[data-testid="tracking-mode-control"]')).length, control: !!s.querySelector('[data-testid="tracking-mode-control"]'), updates: !!s.querySelector('[data-testid="card-tracking-updates"]'), status: s.querySelector('[data-testid="card-tracking-status"]')?.innerText ?? null };
     })()`)
+    if (!facts.control) bad.push('edit: no TrackingModeControl in the Carrier & Tracking card')
     if (!facts.facts) bad.push('edit: no tracking facts block')
     if (!facts.link || !facts.link.includes('/tms/tracking')) bad.push(`"Open in Load Tracking" link is ${JSON.stringify(facts.link)}`)
-    if (facts.inputs > 0) bad.push(`the Tracking card has ${facts.inputs} entry inputs (read-only)`)
-    if (!facts.updates) bad.push('edit: the Updates feed is not inside the Tracking card')
+    if (facts.inputs > 0) bad.push(`the tracking read has ${facts.inputs} entry inputs outside the mode control (read-only)`)
+    if (!facts.updates) bad.push('edit: the Updates feed is not inside the Carrier & Tracking card')
     await shotFile2(b, '18-tracking-card')
     failures(bad)
-    return `Tracking card: planned setup on create (no entry, no Updates); in edit mode read-only facts (status ${JSON.stringify(facts.status)}), Open in Load Tracking link and the Updates feed`
+    return `Carrier & Tracking card: planned setup on create (no control, no entry, no Updates); in edit mode the mode control + read-only facts (status ${JSON.stringify(facts.status)}), Open in Load Tracking link and the Updates feed`
   },
 
   async AH19(ctx) {
@@ -1151,12 +1157,10 @@ const RUNNERS = {
         if (!rail || !create || create.bottom > height || rail.top < 0) bad.push(`1440x900: the rail / Create are not on the first screen (create bottom ${Math.round(create?.bottom ?? -1)})`)
         await shotAR(b, 'first-screen-1440x900')
       } else await shotAR(b, 'first-screen-1280x800')
-      // field grids size to content: the rightmost child of every grid reaches the right of the grid
-      const gaps = await b.evaluate(`[...document.querySelectorAll('.tms-card-grid')].filter((g) => g.getClientRects().length && g.children.length > 1).map((g) => { const gr = g.getBoundingClientRect(); const right = Math.max(...[...g.children].map((c) => c.getBoundingClientRect().right)); return { cls: g.className.replace('tms-card-grid ', ''), empty: Math.round(gr.right - right), width: Math.round(gr.width) } }).filter((g) => g.empty > g.width * 0.25)`)
-      if (gaps.length) bad.push(`${width}: grids with an empty right quarter: ${JSON.stringify(gaps)}`)
+      // (the symmetry of every grid row is asserted by AR14)
     }
     failures(bad)
-    return 'no horizontal scroll at 1440 and 1280; at 1440x900 the first screen shows Customer, the Freight card start and the rail with Create; no field grid has an empty half'
+    return 'no horizontal scroll at 1440 and 1280; at 1440x900 the first screen shows Customer, the Freight card start and the rail with Create; grid symmetry is AR14'
   },
 
   async AR08(ctx) {
@@ -1255,7 +1259,7 @@ const RUNNERS = {
     if ((await b.evaluate(`document.querySelector('[data-testid="ship-form-header-panel"]').hidden`)) !== false) bad.push('the Details chevron did not open the Bill To panel')
     const editable = await b.evaluate(`document.querySelector('[data-testid="f-customer-billToBlock"]').querySelectorAll('input:not([readonly]):not([disabled]), textarea, select').length`)
     if (editable > 0) bad.push(`the Bill To detail has ${editable} editable controls`)
-    for (const id of ['f-customer-refNo', 'f-customer-contact', 'f-customer-phone', 'f-customer-email-1', 'f-customer-email-2']) if (!(await b.evaluate(`!!document.querySelector('[data-testid="ship-form-header-panel"] [data-testid="${id}"]')`))) bad.push(`the panel's Customer contact column lacks ${id}`)
+    for (const id of ['f-customer-contact', 'f-customer-phone', 'f-customer-email-1', 'f-customer-email-2']) if (!(await b.evaluate(`!!document.querySelector('[data-testid="ship-form-header-panel"] [data-testid="${id}"]')`))) bad.push(`the panel's Customer contact column lacks ${id}`)
     const cols = await b.evaluate(`(() => { const g = document.querySelector('[data-testid="ship-form-header-panel"] [class*="tms-card-billto-grid"]'); return g ? getComputedStyle(g).gridTemplateColumns.split(' ').length : 0 })()`)
     if (cols !== 3) bad.push(`the Bill To grid has ${cols} columns at 1440 (want 3)`)
     // Rate history: the lane, what we ran it for, DAT (stub badge while the login is missing), suggested rate
@@ -1333,6 +1337,114 @@ const RUNNERS = {
       .catch(() => bad.push('Full history did not open the audit page filtered to this shipment'))
     failures(bad)
     return `create: Draft not created yet, Activity placeholder, Required > Activity > Roles, Roles = Sales / Service / Dispatcher Assigned, Shipment type first with ${typeOpts.length} types; edit ${id}: stage ${JSON.stringify(chip)}, ${rows.length} activity rows after a save (actor ${JSON.stringify(rows[0]?.actor)}), Full history filters the audit page`
+  },
+
+  async AR13(ctx) {
+    expect(ctx.fullId, 'AH09 did not create a shipment')
+    const b = ctx.b
+    const bad = []
+    await b.setViewport(1440, 900)
+    await openForm(b, '/tms/shipments/new')
+    const cards = await b.evaluate(`[...document.querySelectorAll('.tms-ship-card')].map((c) => c.dataset.testid.replace('section-', '')).join()`)
+    if (cards !== 'freight,route,rates,rateHistory,carrier,documents') bad.push(`cards ${cards}`)
+    if ((await b.evaluate(`document.querySelector('[data-testid="section-carrier"] .tms-ship-card-title')?.innerText ?? ''`)) !== 'Carrier & Tracking') bad.push('the carrier card is not titled "Carrier & Tracking"')
+    if (await has(b, tid('section-tracking'))) bad.push('a separate Tracking card is still on the page')
+
+    // Edit a shipment with a carrier (AH14 covered it): the control is live; confirm one mode through the UI.
+    await openForm(b, `/tms/shipments/${ctx.fullId}/edit`)
+    await b.poll(() => has(b, tid('tracking-mode-control')), 'tracking mode control', 15_000)
+    if ((await b.evaluate(`document.querySelector('[data-testid="tracking-mode-control"]').dataset.disabled`)) !== 'false') bad.push('the control is read-only on a shipment with a carrier')
+    const before = await getBundle(ctx, ctx.fullId)
+    const wasConfirmed = !!before.shipment.trackingPrefs?.confirmedAt
+    if (!wasConfirmed && !(await has(b, tid('tracking-not-set')))) bad.push('an unconfirmed booked load shows no "Tracking mode not set" chip')
+    await click(b, 'tracking-mode-MANUAL')
+    await click(b, 'tracking-confirm')
+    await b.poll(async () => !!(await getBundle(ctx, ctx.fullId)).shipment.trackingPrefs?.confirmedAt, 'the confirmation on the shipment', 30_000).catch(() => bad.push('Confirm did not write trackingPrefs.confirmedAt'))
+    const after = await getBundle(ctx, ctx.fullId)
+    if (after.shipment.trackingPrefs?.mode !== 'MANUAL') bad.push(`trackingPrefs.mode is ${after.shipment.trackingPrefs?.mode}`)
+    if (!after.shipment.trackingPrefs?.confirmedBy) bad.push('no confirmedBy stamp')
+    await b.poll(async () => !(await has(b, tid('tracking-not-set'))), 'the chip to clear', 15_000).catch(() => bad.push('the amber chip stayed after Confirm'))
+    await shotAR(b, 'carrier-and-tracking-1440')
+    failures(bad)
+    return `6 cards (Carrier & Tracking merged, no Tracking card); create shows no control; edit with a carrier: control live, ${wasConfirmed ? 'already confirmed' : 'amber chip shown'}, Confirm wrote mode MANUAL + confirmedAt/By and cleared the chip`
+  },
+
+  async AR14(ctx) {
+    const id = ctx.fullId ?? ctx.ivanId
+    expect(id, 'no ZZ shipment to measure')
+    const b = ctx.b
+    const bad = []
+    // Measures every .tms-fg grid: label height, 32 px inputs sharing a row top, nothing under an input
+    // except the notes counters, spans (data-span) that sum to 12 per row, no horizontal overflow.
+    const MEASURE = `(() => {
+      const r = (el) => el.getBoundingClientRect();
+      const out = { grids: 0, fields: 0, problems: [], overflow: Math.max(document.documentElement.scrollWidth - innerWidth, (document.querySelector('.tms-ship-form-scroll')?.scrollWidth ?? 0) - (document.querySelector('.tms-ship-form-scroll')?.clientWidth ?? 0)) };
+      for (const grid of document.querySelectorAll('.tms-fg')) {
+        if (!grid.getClientRects().length) continue;
+        out.grids += 1;
+        const fields = [...grid.children].filter((c) => c.classList.contains('tms-fg-field') && c.getClientRects().length);
+        // rows by top
+        const rows = [];
+        for (const f of fields) { const top = Math.round(r(f).top); let row = rows.find((x) => Math.abs(x.top - top) < 3); if (!row) { row = { top, fields: [] }; rows.push(row) } row.fields.push(f) }
+        const gr = r(grid);
+        for (const row of rows) {
+          const where = row.fields.map((f) => f.querySelector('.tms-fg-label-text')?.textContent ?? '?').join('|');
+          const labels = row.fields.map((f) => Math.round(r(f.querySelector('.tms-fg-label')).height));
+          if (new Set(labels).size > 1) out.problems.push('label heights differ in row ' + where);
+          const controls = row.fields.map((f) => f.querySelector('.tms-fg-control input:not([type=checkbox]):not([type=radio]):not([type=file]), .tms-fg-control select')).filter(Boolean);
+          const tops = controls.map((c) => Math.round(r(c).top));
+          if (new Set(tops).size > 1) out.problems.push('inputs do not share a top in row ' + where + ' ' + tops.join(','));
+          for (const c of controls) { const h = Math.round(r(c).height); if (h !== 32) out.problems.push('input height ' + h + ' in row ' + where) }
+          const left = Math.min(...row.fields.map((f) => r(f).left)), right = Math.max(...row.fields.map((f) => r(f).right));
+          const spans = row.fields.map((f) => Number(f.dataset.span));
+          const narrowLayout = grid.closest('.tms-ship-card, .tms-ship-hdr-panel') && r(grid.closest('.tms-ship-card, .tms-ship-hdr-panel')).width < 760;
+          if (!narrowLayout && spans.reduce((a, c) => a + c, 0) !== 12 && row.fields.length > 0 && !grid.className.includes('tms-card-lane-miles')) out.problems.push('row spans ' + spans.join('+') + ' != 12 in ' + where);
+          if (Math.abs(left - gr.left) > 2 || Math.abs(right - gr.right) > 2) out.problems.push('row not flush (' + Math.round(left - gr.left) + ',' + Math.round(gr.right - right) + ') in ' + where);
+        }
+        for (const f of fields) {
+          out.fields += 1;
+          const control = f.querySelector('.tms-fg-control');
+          const under = [...f.children].slice(2).filter((c) => !c.classList.contains('tms-fg-sr') && !c.classList.contains('tms-fg-counter'));
+          if (under.length) out.problems.push('element under the input of ' + (f.querySelector('.tms-fg-label-text')?.textContent ?? '?'));
+          if (/\(/.test(f.querySelector('.tms-fg-label-text')?.textContent ?? '')) out.problems.push('parenthetical in a label');
+          void control;
+        }
+      }
+      return out;
+    })()`
+    for (const [width, height] of [[1440, 900], [1280, 800]]) {
+      await b.setViewport(width, height)
+      await openForm(b, `/tms/shipments/${id}/edit`)
+      await b.poll(() => has(b, tid('delivery-timeline')), 'delivery timeline', 20_000)
+      // open the Bill To panel so its grid is measured too
+      await click(b, 'hdr-billTo-chip'); await pause(300)
+      const m = await b.evaluate(MEASURE)
+      if (m.overflow > 1) bad.push(`${width}: horizontal overflow ${m.overflow}px`)
+      for (const p of m.problems.slice(0, 6)) bad.push(`${width}: ${p}`)
+      if (m.fields < 20) bad.push(`${width}: only ${m.fields} fields measured`)
+      const phase = await b.evaluate(`(() => { const t = document.querySelector('[data-testid="delivery-timeline"]'); const s = document.querySelector('[data-testid="delivery-timeline-svg"]'); return t ? { phase: t.dataset.phase, label: s?.getAttribute('aria-label') ?? '', top: Math.round(t.getBoundingClientRect().top), right: Math.round(innerWidth - t.getBoundingClientRect().right), h: Math.round(t.getBoundingClientRect().height) } : null })()`)
+      if (!phase || !phase.label) bad.push(`${width}: delivery timeline missing or has no text summary`)
+      else if (phase.h > 56) bad.push(`${width}: the timeline is ${phase.h}px tall (fixed strip height expected)`)
+      await click(b, 'hdr-billTo-chip'); await pause(200)
+      await b.evaluate(`document.querySelector('.tms-ship-form-scroll')?.scrollTo(0, 0)`)
+      await shotAR(b, `edit-grid-${width}`)
+      for (const key of ['freight', 'route', 'rates', 'carrier']) {
+        await b.evaluate(`document.querySelector(${JSON.stringify(tid(`section-${key}`))})?.scrollIntoView({ block: 'start' })`); await pause(250)
+        await shotAR(b, `grid-${key}-${width}`)
+      }
+    }
+    // Freight rows at 1440 exactly: 3+3+3+3 / 3+3+3+3 / 9+3
+    await b.setViewport(1440, 900)
+    await openForm(b, '/tms/shipments/new')
+    const rows = await b.evaluate(`[...document.querySelectorAll('[data-testid="section-freight-body"] > .tms-fg > .tms-fg-field')].map((f) => f.dataset.span).join()`)
+    if (rows !== '3,3,3,3,3,3,3,3,9,3') bad.push(`Freight spans ${rows}`)
+    if (await has(b, '[data-testid="f-freight-' + 'customerRef"]')) bad.push('Customer ref is still in the Freight card')
+    const hdr = await b.evaluate(`(() => { const ids = ['f-customer-name-input', 'f-customer-refNo', 'hdr-billTo-chip']; return ids.map((i) => { const el = document.querySelector('[data-testid="' + i + '"]'); return el ? Math.round(el.getBoundingClientRect().left) : null }) })()`)
+    if (hdr.some((x) => x === null) || !(hdr[0] < hdr[1] && hdr[1] < hdr[2])) bad.push(`header order Customer, Customer ref, Bill To broken: ${hdr.join(',')}`)
+    if (!(await b.evaluate(`document.querySelector('[data-testid="delivery-caption"]')?.innerText === 'DRAFT' || document.querySelector('[data-testid="delivery-caption"]')?.textContent === 'Draft'`))) bad.push('create: the timeline caption is not Draft')
+    await shotAR(b, 'create-grid-1440')
+    failures(bad)
+    return 'every .tms-fg grid at 1440 and 1280: label height equal, inputs 32 px sharing a row top, nothing under an input but notes counters, spans sum to 12, rows flush, no horizontal overflow; Freight spans 3,3,3,3 / 3,3,3,3 / 9,3; header order Customer > Customer ref > Bill To; delivery timeline present with a text summary; screenshots ar-*-grid-*.png'
   },
 }
 

@@ -12,7 +12,6 @@ describe('FreightCard shipment type', () => {
     const first = document.querySelector('[data-testid="section-freight-body"] select, [data-testid="section-freight-body"] input')
     // Division is first, Shipment type second.
     expect(first).toBe(screen.getByTestId('f-shipping-revDivision'))
-    expect(first!.nextElementSibling ?? first!.closest('.tms-field')!.nextElementSibling).toBeTruthy()
     expect(document.querySelectorAll('[data-testid="f-shipping-revDivision"]')).toHaveLength(1)
     const labels = Array.from(select.options).map((o) => o.textContent)
     expect(labels).toHaveLength(25)
@@ -72,14 +71,14 @@ describe('FreightCard', () => {
     expect((screen.getByTestId('f-shipping-flag-tonu') as HTMLInputElement).disabled).toBe(true)
   })
 
-  it('Calculate totals sums the picks into Pieces and Weight; Customer Ref edits the customer ref', () => {
+  it('Calculate totals sums the picks into Pieces and Weight; Customer ref is not in the card (it lives in the header strip)', () => {
     const host = renderCard(FreightCard, {
       seed: (v) => ({ ...v, stops: [{ ...v.stops[0], pieces: '3', weightLbs: '1000' }, { ...v.stops[1] }] }),
     })
     fireEvent.click(screen.getByTestId('f-shipping-calculateTotals'))
     expect(host.current!.getValues().ship).toMatchObject({ pieces: '3', weightLbs: '1000' })
     expect(screen.getByTestId('f-shipping-hint').textContent).toBe('1 pick counted')
-    fireEvent.change(screen.getByTestId('f-freight-customerRef'), { target: { value: 'PO-77' } })
-    expect(host.current!.getValues().customer.refNo).toBe('PO-77')
+    expect(screen.queryByTestId('f-freight-customerRef')).toBeNull()
+    expect(screen.queryByTestId('f-customer-refNo')).toBeNull()
   })
 })

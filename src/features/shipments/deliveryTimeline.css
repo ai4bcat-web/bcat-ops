@@ -1,0 +1,20 @@
+/* Delivery timeline (feedback 12): fixed 52 px (16 px caption + 4 + 32 px line), tokens only. */
+.tms-shell .tms-dt { display: flex; flex-direction: column; gap: 4px; flex: 0 0 304px; width: 304px; }
+.tms-shell .tms-dt-svg { display: block; overflow: visible; }
+.tms-shell .tms-dt[data-voided='true'] .tms-dt-svg { opacity: 0.55; }
+.tms-shell .tms-dt-seg { stroke: var(--tms-border); stroke-width: 3; stroke-linecap: round; }
+.tms-shell .tms-dt-seg[data-on='true'] { stroke: var(--tms-badge-green); }
+.tms-shell .tms-dt-motion { stroke: var(--tms-badge-green); stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0.5; }
+.tms-shell .tms-dt-dot { fill: var(--tms-card); stroke: var(--tms-border); stroke-width: 2; }
+.tms-shell .tms-dt-dot[data-on='true'] { fill: var(--tms-badge-green); stroke: var(--tms-badge-green); }
+.tms-shell .tms-dt-truck-body { fill: var(--tms-muted); }
+.tms-shell .tms-dt-wheel { fill: var(--tms-text); }
+.tms-shell .tms-dt-truck[data-tone='green'] .tms-dt-truck-body { fill: var(--tms-badge-green); }
+.tms-shell .tms-dt-truck[data-tone='amber'] .tms-dt-truck-body { fill: var(--tms-badge-orange); }
+.tms-shell .tms-dt-truck[data-tone='red'] .tms-dt-truck-body { fill: var(--tms-badge-red); }
+.tms-shell .tms-dt-strike { stroke: var(--tms-badge-red); stroke-width: 2; }
+.tms-shell .tms-dt-truck { transition: transform 200ms; }
+.tms-shell .tms-dt-text[data-tone='green'] { color: var(--tms-badge-green); }
+.tms-shell .tms-dt-text[data-tone='amber'] { color: var(--tms-badge-orange); }
+.tms-shell .tms-dt-text[data-tone='red'] { color: var(--tms-badge-red); text-decoration: line-through; }
+.tms-shell .tms-dt-text[data-tone='grey'] { color: var(--tms-muted); }

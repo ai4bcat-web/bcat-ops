@@ -51,7 +51,7 @@
 .tms-shell .tms-ship-hdr {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px 16px;
   padding: 8px 16px;
   background: var(--tms-card);
@@ -59,6 +59,9 @@
 }
 
 .tms-shell .tms-ship-hdr-title {
+  display: flex;
+  align-items: center;
+  height: 32px;
   margin: 0;
   font-size: 16px;
   font-weight: 600;
@@ -70,20 +73,25 @@
 }
 
 .tms-shell .tms-ship-hdr-pro {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
   font-size: 12px;
   font-weight: 600;
   color: var(--tms-text-2);
   font-variant-numeric: tabular-nums;
 }
 
-/* Header strip: Customer type-ahead, Bill To chip and the dropdown panel (feedback 7). */
-.tms-shell .tms-ship-hdr-customer-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 0 1 300px;
-  min-width: 200px;
+/* The delivery timeline sits in the right third; under 1400 px it drops to the strip's second row, right-aligned. */
+@media (max-width: 1399px) {
+  .tms-shell .tms-ship-hdr .tms-dt { order: 10; margin-left: auto; }
 }
+
+/* Header strip: Customer type-ahead, Bill To chip and the dropdown panel (feedback 7). */
+.tms-shell .tms-ship-hdr-customer-wrap { flex: 0 1 300px; min-width: 200px; }
+.tms-shell .tms-ship-hdr-ref-wrap { flex: 0 0 160px; min-width: 120px; }
+.tms-shell .tms-ship-hdr-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tms-shell .tms-ship-hdr-check { height: 32px; }
 
 .tms-shell .tms-ship-hdr-customer {
   display: flex;
@@ -96,7 +104,7 @@
   gap: 8px;
   min-width: 0;
   max-width: 100%;
-  height: 28px;
+  height: 32px;
   padding: 0 10px;
   background: var(--tms-card);
   border: 1px solid var(--tms-border);
@@ -224,6 +232,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  height: 32px;
   margin: 0 0 8px;
   font-size: 11px;
   font-weight: 600;

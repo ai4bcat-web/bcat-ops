@@ -64,8 +64,8 @@ describe('BillToStrip', () => {
     const body = screen.getByTestId('f-customer-billToBlock')
     expect(within(body).queryAllByRole('textbox')).toHaveLength(0)
     expect(body.querySelector('input,select,textarea')).toBeNull()
-    expect(screen.getByTestId('f-customer-refNo')).toBeTruthy()
     expect(screen.getByTestId('f-customer-email-1')).toBeTruthy()
+    expect(screen.queryByTestId('f-customer-refNo')).toBeNull()
   })
 
   it('the chip summarises name, terms, factoring and available credit, and the panel is hidden until opened', () => {
@@ -74,7 +74,7 @@ describe('BillToStrip', () => {
     expect(screen.getByTestId('hdr-billTo-chip').getAttribute('aria-expanded')).toBe('false')
     expect((screen.getByTestId('ship-form-header-panel') as HTMLElement).hidden).toBe(true)
     // Hidden, but still mounted so its fields keep their test ids.
-    expect(screen.getByTestId('f-customer-refNo')).toBeTruthy()
+    expect(screen.getByTestId('f-customer-email-1')).toBeTruthy()
   })
 
   it('the chip goes amber and says CREDIT HOLD for a customer on hold; the toggle calls back', () => {

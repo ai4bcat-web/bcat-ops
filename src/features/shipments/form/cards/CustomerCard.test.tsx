@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, within } from '@testing-library/react'
 import type { CustomerRecord } from '@/types/tms'
-import { CustomerContact, CustomerPicker } from './CustomerCard'
+import { CustomerContact, CustomerPicker, CustomerRef } from './CustomerCard'
 import { renderCard } from './cardTestKit'
 import { pushRecent } from './recents'
 
@@ -63,13 +63,13 @@ describe('CustomerPicker — typed name, lock', () => {
   const set = (c: Partial<CustomerRecord>[] = customers, over: object = {}) =>
     renderCard(CustomerPicker, { ctx: () => ({ directory: { customers: c as CustomerRecord[], locations: [], carriers: [], staff: [] }, ...over }) })
 
-  it('the contact column has Ref #, exactly two Email fields, and hides inactive contacts', () => {
+  it('the contact column has exactly two Email fields, and hides inactive contacts', () => {
     const contactOf = (customer: CustomerRecord) => renderCard(CustomerContact, { ctx: () => ({ customer }) })
     contactOf(mk('c1', 'Acme', { contacts: [
       { id: 'a', name: 'Active Ann', types: [], notifications: [], active: true },
       { id: 'b', name: 'Gone Gil', types: [], notifications: [], active: false },
     ] }))
-    expect(screen.getByTestId('f-customer-refNo')).toBeTruthy()
+    expect(screen.queryByTestId('f-customer-refNo')).toBeNull()
     expect(screen.getAllByTestId(/^f-customer-email-/)).toHaveLength(2)
     expect(screen.queryByText('Gone Gil')).toBeNull()
     expect(screen.getByText('Active Ann')).toBeTruthy()
@@ -90,5 +90,35 @@ describe('CustomerPicker — typed name, lock', () => {
     })
     expect((screen.getByTestId('f-customer-name') as HTMLInputElement).readOnly).toBe(true)
     expect(screen.getByText('Change customer…').getAttribute('href')).toBe('/tms/shipments/sh-9')
+  })
+})
+
+describe('CustomerRef (header strip)', () => {
+  const ref = (customer: CustomerRecord | null, settings: unknown = null) =>
+    renderCard(CustomerRef, { ctx: () => ({ customer, settings: settings as never }) })
+  const wrapper = () => screen.getByTestId('f-customer-refNo').closest('.tms-fg-field') as HTMLElement
+
+  it('edits the one customer.refNo value and labels it Customer ref', () => {
+    const host = ref(ACME)
+    fireEvent.change(screen.getByTestId('f-customer-refNo'), { target: { value: 'PO-77' } })
+    expect(host.current!.getValues().customer.refNo).toBe('PO-77')
+    expect(wrapper().querySelector('.tms-fg-label-text')!.textContent).toBe('Customer ref')
+  })
+
+  it('is green only when the customer demands a PO (required reference, or a set review-requirements list)', () => {
+    ref(ACME)
+    expect(wrapper().classList.contains('tms-field-req')).toBe(false)
+    cleanup()
+    ref(mk('c1', 'Needs PO', { requiredReferences: [{ code: 'PO', label: 'PO', level: 'ORDER', display: true, countOnNewOrder: 1 }] }))
+    expect(wrapper().classList.contains('tms-field-req')).toBe(true)
+    cleanup()
+    ref(mk('c2', 'Custom list', { reviewRequirements: ['salesRep', 'referenceNumber'] }))
+    expect(wrapper().classList.contains('tms-field-req')).toBe(true)
+    cleanup()
+    ref(mk('c3', 'Opted out', { reviewRequirements: ['salesRep'] }), { reviewRequirements: ['referenceNumber'] })
+    expect(wrapper().classList.contains('tms-field-req')).toBe(false)
+    cleanup()
+    ref(mk('c4', 'Org list'), { reviewRequirements: ['referenceNumber'] })
+    expect(wrapper().classList.contains('tms-field-req')).toBe(true)
   })
 })

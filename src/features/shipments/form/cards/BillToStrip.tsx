@@ -149,6 +149,8 @@ export interface BillToStripProps extends CardProps {
 
 function Chip({ text, hold, open, onToggle, empty }: { text: string; hold: boolean; open: boolean; onToggle: () => void; empty?: boolean }) {
   return (
+    <div className="tms-ship-hdr-cell tms-ship-hdr-billto">
+    <span className="tms-fg-label"><span className="tms-fg-label-text">Bill to</span></span>
     <button
       type="button" className="tms-ship-billto-chip" data-testid="hdr-billTo-chip" data-hold={hold} data-empty={empty === true}
       aria-expanded={open} aria-controls="ship-form-header-panel" onClick={onToggle}
@@ -156,6 +158,7 @@ function Chip({ text, hold, open, onToggle, empty }: { text: string; hold: boole
       <span className="tms-ship-billto-text" data-testid="hdr-billTo-text">{text}</span>
       <span className="tms-ship-billto-details">Details<ChevronDown size={14} aria-hidden="true" data-open={open} /></span>
     </button>
+    </div>
   )
 }
 

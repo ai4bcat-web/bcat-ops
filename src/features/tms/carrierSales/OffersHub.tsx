@@ -404,7 +404,7 @@ function LoadOffers({ load, postingRateCents, onChanged }: { load: HubLoad; post
       ) : null}
       {coverOpen ? (
         <CoverCarrierDialog shipmentId={load.id} shipmentNumber={load.number} initialQuery={`MC ${coverOpen.replace(/^MC/i, '')}`}
-          onClose={() => setCoverOpen(null)} onCovered={() => { setCoverOpen(null); void refresh() }} />
+          onClose={() => setCoverOpen(null)} onCovered={() => { void refresh() }} />
       ) : null}
       <div data-testid="cs-offers-table">
         <TmsTable

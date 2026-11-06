@@ -7,15 +7,9 @@
 /* Rates ------------------------------------------------------------- */
 .tms-shell .tms-card-rates { display: flex; flex-direction: column; gap: 12px; }
 
-.tms-shell .tms-card-rate-row {
-  display: grid;
-  grid-template-columns: 72px repeat(auto-fit, minmax(96px, 1fr));
-  align-items: end;
-  gap: 8px;
-}
+.tms-shell .tms-card-rate-row { display: flex; flex-direction: column; gap: 8px; }
 
 .tms-shell .tms-card-rate-row-title {
-  align-self: center;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -55,11 +49,7 @@
 
 .tms-shell .tms-card-carrier-empty-text { flex: 1 1 auto; color: var(--tms-muted); font-size: 14px; }
 
-.tms-shell .tms-card-carrier-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
-}
+.tms-shell .tms-card-carrier-grid { display: flex; flex-direction: column; gap: 8px; }
 
 .tms-shell .tms-card-carrier-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
 .tms-shell .tms-card-carrier-matches { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }

@@ -14,7 +14,7 @@ import { useCarriers } from '@/hooks/useCarriers'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useShipment } from '@/hooks/useShipment'
 import { useStaff } from '@/hooks/useStaff'
-import { getTmsSettings, linkIntakeShipment, listLocations } from '@/lib/apiClient'
+import { getShipmentBundle, getTmsSettings, linkIntakeShipment, listLocations } from '@/lib/apiClient'
 import { useIntakeLoad } from '../intake/useIntakeLoads'
 import type { LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 import { CARD_ORDER, CARD_TITLE, type CardKey, type CardProps, type MoreTabKey } from './cards/cardRegistry'
@@ -168,6 +168,11 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   }), [getValues, update, focusField])
 
   const status = bundle?.shipment.status ?? 'NEW'
+  const shipmentId = bundle?.shipment.id
+  const { setBundle } = form
+  const refreshBundle = useCallback(async () => {
+    if (shipmentId) setBundle(await getShipmentBundle(shipmentId))
+  }, [shipmentId, setBundle])
   const locked = useMemo(() => lockedFields(bundle), [bundle])
   const ctx = useMemo<FormCtx>(() => ({
     mode,
@@ -180,8 +185,9 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     divisions: flattenDivisions(divisions ?? []),
     busy,
     actions,
+    refreshBundle,
     issues: form.issues,
-  }), [mode, bundle, status, locked, directory.customers, locations, ensureLocations, carriers, staff, settings, form.customer, divisions, busy, actions, form.issues])
+  }), [mode, bundle, status, locked, directory.customers, locations, ensureLocations, carriers, staff, settings, form.customer, divisions, busy, actions, refreshBundle, form.issues])
 
   const common = useMemo<CardProps>(() => ({
     values, update, ctx, form: formApi, issues: form.issues, mode, locked,

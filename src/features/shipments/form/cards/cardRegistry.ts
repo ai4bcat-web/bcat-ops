@@ -1,5 +1,5 @@
 /**
- * The card registry (Step AR): what `ShipmentFormPage` hands each of the seven numbered cards and
+ * The card registry (Step AR): what `ShipmentFormPage` hands each of the six numbered cards and
  * each "More" tab. Cards compose the existing section components (`../sections/*`, imported
  * directly) and read/write ONE shared values object through `update`. The page looks the
  * components up in `defaultSections.tsx` (`CARD_COMPONENTS`, `MORE_TAB_COMPONENTS`).
@@ -21,16 +21,16 @@ import type { LockSet, ShipmentFormValues } from '../model'
 import type { FormCtx, FormIssue } from '../sectionProps'
 import type { FormApi } from '../sectionRegistry'
 
-export type CardKey = 'freight' | 'route' | 'rates' | 'rateHistory' | 'carrier' | 'tracking' | 'documents'
+export type CardKey = 'freight' | 'route' | 'rates' | 'rateHistory' | 'carrier' | 'documents'
 
-/** Page order = build order (numbers 1-7). Customer and Bill To live in the header strip, not here. */
+/** Page order = build order (numbers 1-6). Customer and Bill To live in the header strip, not here. */
 export const CARD_ORDER: readonly CardKey[] = [
-  'freight', 'route', 'rates', 'rateHistory', 'carrier', 'tracking', 'documents',
+  'freight', 'route', 'rates', 'rateHistory', 'carrier', 'documents',
 ] as const
 
 export const CARD_TITLE: Record<CardKey, string> = {
   freight: 'Freight', route: 'Route', rates: 'Rates',
-  rateHistory: 'Rate history', carrier: 'Carrier', tracking: 'Tracking', documents: 'Documents',
+  rateHistory: 'Rate history', carrier: 'Carrier & Tracking', documents: 'Documents',
 }
 
 /** "More" strip tabs: the four free-text / list panes. Everything else is a card. */

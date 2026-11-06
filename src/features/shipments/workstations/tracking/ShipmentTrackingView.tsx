@@ -133,7 +133,7 @@ export function ShipmentTrackingView({ bundle, customer, catalog = [], actions, 
         summary={summary}
         busy={actions.busy}
         onSetNextCheck={(iso) => { void actions.tracking.setNextCheckCall(iso).catch(() => { /* reported */ }) }}
-        prefs={<TrackingPrefsRow key={JSON.stringify(shipment.trackingPrefs ?? null)} shipment={shipment} customer={customer} onSaved={() => actions.reload()} />}
+        prefs={<TrackingPrefsRow key={JSON.stringify(shipment.trackingPrefs ?? null)} shipment={shipment} customer={customer} hasCarrier={Boolean(loadCarrier)} onSaved={() => actions.reload()} />}
       />
 
       <TrackingMapPanel

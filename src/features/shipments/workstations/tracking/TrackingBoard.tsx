@@ -8,6 +8,7 @@
  *   shipment page and this table can never drift. Rows are stamped with
  *   data-testid="tracking-row", data-status, data-shipment-id and data-tracker-id.
  */
+import { TrackingModeNotSetRowChip } from '../../trackingModeControl/TrackingModeNotSetChip'
 import { useCallback, useMemo, useState } from 'react'
 import { Heart, Link2, MoreHorizontal, Plus, Search, X } from 'lucide-react'
 import { TrackerPicker } from '@/components/TrackerPicker'
@@ -266,7 +267,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
         case 'delivery':
           return <span>{row.deliveryAppt ? formatBoardDateTime(row.deliveryAppt) : '—'}</span>
         case 'status':
-          return <StatusCell row={row} nowMs={nowMs} />
+          return <span className="flex items-center gap-1"><StatusCell row={row} nowMs={nowMs} /><TrackingModeNotSetRowChip row={row} /></span>
         case 'lastLocation':
           return <LastLocationCell row={row} nowMs={nowMs} />
         case 'ping':

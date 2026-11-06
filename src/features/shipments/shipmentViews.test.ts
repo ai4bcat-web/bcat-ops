@@ -194,6 +194,18 @@ describe('board status mapping', () => {
   })
 })
 
+describe('Delivery column', () => {
+  it('is an optional column: in the catalog, not in the default layout, and reads the row\'s own stops and status', () => {
+    expect(DEFAULT_COLUMN_KEYS).not.toContain('delivery')
+    const col = visibleColumns(['delivery'])[0]!
+    expect(col.label).toBe('Delivery')
+    expect(col.value(row('a', { status: 'OPEN' }))).toBe('Not dispatched')
+    expect(col.value(row('b', { status: 'IN_TRANSIT', assignmentType: 'CARRIER' }))).toBe('In transit')
+    expect(col.value(row('c', { status: 'DELIVERED', deliveredAt: '2026-01-02T00:00:00.000Z' }))).toBe('Delivered')
+    expect(col.value(row('d', { status: 'DELIVERED', voidedAt: '2026-01-03T00:00:00.000Z' }))).toBe('Voided')
+  })
+})
+
 describe('stop progress', () => {
   it('counts departed stops over total stops', () => {
     const stops = [

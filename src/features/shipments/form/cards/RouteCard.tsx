@@ -12,6 +12,7 @@ import { TmsButton, TmsInput } from '@/features/tms/kit'
 import { LABEL } from '../labels'
 import { emptyStop, type FormStop } from '../model'
 import { ctl, digitsOnly, disabledState, issueFor } from '../sections/fieldUtil'
+import { FieldGrid } from '../fieldGrid'
 import { LField } from '../sections/formControls'
 import { routeSignature } from '../sections/milesEstimate'
 import { type CardProps, sliceOf, stopsOf } from './cardRegistry'
@@ -90,7 +91,7 @@ export function RouteCard({ values, update, ctx }: CardProps) {
   )
 
   const milesInput = (def: typeof LABEL.shipping.customerMiles, value: string, disabled: boolean, title: string | undefined, key: 'customerMiles' | 'truckMiles', est: boolean) => (
-    <LField def={def} error={issueFor(ctx, 'shipping', def.testId)} hint={est ? <span data-testid={`${def.testId}-est`}>est.</span> : undefined} className="tms-card-miles">
+    <LField span={6} def={def} error={issueFor(ctx, 'shipping', def.testId)} hint={est ? <span data-testid={`${def.testId}-est`}>est.</span> : undefined} className="tms-card-miles">
       <TmsInput {...ctl(def)} inputMode="numeric" value={value} disabled={disabled} title={title} onChange={(e) => onShip({ [key]: digitsOnly(e.target.value) })} />
     </LField>
   )
@@ -101,13 +102,13 @@ export function RouteCard({ values, update, ctx }: CardProps) {
         <div className="tms-card-lane-main">
           <span className="tms-card-lane-label" data-testid="f-route-lane">{lane || 'Add a pickup and a delivery'}</span>
           {transit && <span className="ship-hint" data-testid="f-route-transit">≈ {transit} transit</span>}
+          {auto.failed && !ship.disableMileage && <span className="ship-hint" data-testid="f-shipping-milesSource">Could not measure the route — type the miles</span>}
+          {!auto.failed && auto.source === 'google' && !ship.disableMileage && <span className="ship-hint" data-testid="f-shipping-milesSource">Miles from the stop addresses</span>}
         </div>
-        <div className="tms-card-lane-miles">
+        <FieldGrid className="tms-card-lane-miles">
           {milesInput(LABEL.shipping.customerMiles, ship.customerMiles, milesLock.disabled, milesLock.title, 'customerMiles', customerEst)}
           {milesInput(LABEL.shipping.truckMiles, ship.truckMiles, base.disabled, undefined, 'truckMiles', truckEst)}
-        </div>
-        {auto.failed && !ship.disableMileage && <span className="ship-hint" data-testid="f-shipping-milesSource">Could not measure the route — type the miles</span>}
-        {!auto.failed && auto.source === 'google' && !ship.disableMileage && <span className="ship-hint" data-testid="f-shipping-milesSource">Miles from the stop addresses</span>}
+        </FieldGrid>
       </div>
 
       <ol className="tms-card-timeline" aria-label="Stops">

@@ -484,6 +484,21 @@ describe('runCheckCallPlan in AUTO mode', () => {
     expect(messagesForLoad(store, 'lod-1').map((m) => m.channel).sort()).toEqual(['EMAIL', 'SMS'])
   })
 
+  it('per-load tracking mode: an unconfirmed new load never auto-runs, a confirmed one does, None never does, and a legacy load keeps running', async () => {
+    const run = async (shipment: Row) => {
+      const store = new MemoryStore()
+      seedAutoWorld(store, { ...switchedOn, trackingMode: 'AGENT' })
+      store.seed({ ...(store.getById('Shipment-test', 'shp-1') as Row), ...shipment })
+      const result = await runCheckCallPlan(makeDeps(store), { shipmentId: 'shp-1' }, CALLER, AUTO)
+      return { acted: result.acted, sent: messagesForLoad(store, 'lod-1').length }
+    }
+    const created = '2026-11-07T00:00:00.000Z'
+    expect(await run({ createdAt: created })).toEqual({ acted: 0, sent: 0 })
+    expect((await run({ createdAt: created, trackingPrefs: { mode: 'AGENT', confirmedAt: created } })).acted).toBe(1)
+    expect((await run({ createdAt: created, trackingPrefs: { mode: 'NONE', confirmedAt: created } })).acted).toBe(0)
+    expect((await run({ createdAt: '2026-10-01T00:00:00.000Z' })).acted).toBe(1)
+  })
+
   it('skips a leg whose rate confirmation was not sent, an own-fleet leg and a voided shipment', async () => {
     for (const carrier of [{ rateConStatus: 'NOT_SENT' }, { rateConStatus: 'DECLINED' }, { kind: 'OWN_ASSET' }]) {
       const store = new MemoryStore()

@@ -19,6 +19,7 @@ import { McpReviewCardView } from '@/features/carriers/find/McpReviewCardView'
 import { CarrierLookupCard } from '@/features/carriers/lookup/CarrierLookupCard'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsInput, TmsMetaList } from '@/features/tms/kit'
 import { useCarriers } from '@/hooks/useCarriers'
+import { CoverTrackingStep } from './CoverTrackingStep'
 import { coverCarrier, getShipmentBundle, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
 import type { McpLookupResult } from '@/lib/apiClient'
 import { CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
@@ -68,6 +69,8 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   const [working, setWorking] = useState(false)
   // A lookup asked for while the directory is still loading waits for it, instead of the click doing nothing.
   const [queued, setQueued] = useState(initialQuery.trim() !== '')
+  // Set once COVER_CARRIER succeeded: the dialog moves on to the Tracking section instead of closing.
+  const [covered, setCovered] = useState<{ bundle: ShipmentBundle; name: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const card = preview?.card ?? null
@@ -135,9 +138,9 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
     setWorking(true)
     setError(null)
     try {
-      await cover(selected.id)
+      const bundle = await cover(selected.id)
       toast.success(route === 'ASSIGN_NOW' ? `${selected.name} assigned` : `${selected.name} assigned, waiting for carrier setup`)
-      onClose()
+      setCovered({ bundle, name: selected.name })
     } catch (e) {
       setError(messageOf(e))
     } finally {
@@ -172,9 +175,9 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
         setError('The setup packet was sent, but the carrier is not in our directory yet. Look it up again in a moment and assign it.')
         return
       }
-      await cover(carrierId)
+      const bundle = await cover(carrierId)
       toast.success('Setup packet sent. Carrier assigned, waiting for carrier setup')
-      onClose()
+      setCovered({ bundle, name: card.identity.legalName ?? selected?.name ?? 'The carrier' })
     } catch (e) {
       setError(messageOf(e))
     } finally {
@@ -202,6 +205,21 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   const hasTarget = selected != null || card != null
 
   const pending = selected != null && selected.status !== 'ACTIVE'
+
+  if (covered) {
+    return (
+      <TmsDialog
+        open
+        onOpenChange={(open) => { if (!open) onClose() }}
+        title={title}
+        description="Carrier assigned. Last step: how this load is tracked."
+        className="tms-dialog-wide"
+        footer={<TmsButton variant="primary" data-testid="cover-done" onClick={onClose}>Done</TmsButton>}
+      >
+        <CoverTrackingStep initial={covered.bundle} carrierName={covered.name} onChanged={onCovered} />
+      </TmsDialog>
+    )
+  }
 
   return (
     <>

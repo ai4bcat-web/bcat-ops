@@ -22,6 +22,7 @@ import {
 } from '@/lib/apiClient'
 import { evaluateCarrierBooking } from '@/lib/carrierEligibility'
 import { formatCents } from '@/lib/invoiceBuild'
+import { CoverTrackingStep } from '@/features/carriers/cover/CoverTrackingStep'
 import { theirNumberCents } from '../quoteViews'
 import type { CarrierBundle, QuoteRecord, ShipmentBundle, TmsSettings, TrackingProvider } from '@/types/tms'
 
@@ -111,6 +112,8 @@ export function AcceptOfferDialog({ quote, open, onOpenChange, onDone }: {
   const revenueCents = financials?.revenueCents ?? 0
   const profitCents = revenueCents - (rateCents ?? 0)
 
+  const [booked, setBooked] = useState<ShipmentBundle | null>(null)
+
   const submit = () => {
     if (leg == null) { setError('The load behind this offer could not be read.'); return }
     if (rateCents == null || rateCents <= 0) { setError('A booking needs a rate.'); return }
@@ -136,7 +139,10 @@ export function AcceptOfferDialog({ quote, open, onOpenChange, onDone }: {
     })
       .then(() => {
         toast.success(`${quote.carrierName ?? 'Carrier'} booked at ${formatCents(rateCents)}`)
-        onDone()
+        // Feedback 9: booking is where tracking is chosen. The booking is saved; if the re-read fails, just finish.
+        return getShipmentBundle(shipmentId ?? bundle?.shipment.id ?? '')
+          .then((fresh) => setBooked(fresh))
+          .catch(() => onDone())
       })
       .catch((err: unknown) => {
         const text = graphqlErrorText(err)
@@ -144,6 +150,20 @@ export function AcceptOfferDialog({ quote, open, onOpenChange, onDone }: {
         toast.error(text)
       })
       .finally(() => setBusy(false))
+  }
+
+  if (booked) {
+    return (
+      <TmsDialog
+        open={open}
+        onOpenChange={(next) => { if (!next) onDone(); onOpenChange(next) }}
+        className="tms-dialog-wide"
+        title={`${quote.carrierName ?? 'Carrier'} booked`}
+        footer={<TmsButton variant="primary" data-testid="accept-done" onClick={onDone}>Done</TmsButton>}
+      >
+        <CoverTrackingStep initial={booked} carrierName={quote.carrierName ?? 'The carrier'} />
+      </TmsDialog>
+    )
   }
 
   const blocked = leg == null || carrier == null || blocks.length > 0 || unacknowledged.length > 0

@@ -4,7 +4,8 @@
  * silently; it can only shrink.
  */
 import { memo } from 'react'
-import { TmsField, TmsTextarea } from '@/features/tms/kit'
+import { TmsTextarea } from '@/features/tms/kit'
+import { Field, FieldGrid } from '../../fieldGrid'
 import { MAX } from '../../constants'
 import { LABEL } from '../../labels'
 import { isLocked } from '../../model'
@@ -19,8 +20,8 @@ function InstructionsTabImpl({ values, update, ctx }: CardProps) {
   const bol = value.bolNotes
   return (
     <div className="tms-card-more-pane" data-testid="more-instructions">
-      <div className="tms-card-more-pair">
-        <TmsField label={LABEL.more.specialInstructions.text} hint={<Counter used={value.specialInstructions.length} max={MAX.specialInstructions} testId="more-special-counter" />}>
+      <FieldGrid>
+        <Field span={6} narrow={12} label={LABEL.more.specialInstructions.text} info={LABEL.more.specialInstructions.help} footer={<Counter used={value.specialInstructions.length} max={MAX.specialInstructions} testId="more-special-counter" />}>
           <TmsTextarea
             {...fieldAttrs(LABEL.more.specialInstructions)}
             rows={4}
@@ -29,8 +30,8 @@ function InstructionsTabImpl({ values, update, ctx }: CardProps) {
             disabled={disabled}
             onChange={(e) => onChange({ specialInstructions: e.target.value })}
           />
-        </TmsField>
-        <TmsField label={LABEL.more.rateConNotes.text} hint={<Counter used={value.rateConNotes.length} max={MAX.rateConNotes} testId="more-ratecon-counter" />}>
+        </Field>
+        <Field span={6} narrow={12} label={LABEL.more.rateConNotes.text} footer={<Counter used={value.rateConNotes.length} max={MAX.rateConNotes} testId="more-ratecon-counter" />}>
           <TmsTextarea
             {...fieldAttrs(LABEL.more.rateConNotes)}
             rows={4}
@@ -39,9 +40,8 @@ function InstructionsTabImpl({ values, update, ctx }: CardProps) {
             disabled={disabled}
             onChange={(e) => onChange({ rateConNotes: e.target.value })}
           />
-        </TmsField>
-      </div>
-      <TmsField label={LABEL.more.bolNotes.text} hint={<Counter used={bol.length} max={MAX.bolNotes} testId="more-bol-counter" />}>
+        </Field>
+      <Field span={12} label={LABEL.more.bolNotes.text} footer={<Counter used={bol.length} max={MAX.bolNotes} testId="more-bol-counter" />}>
         <TmsTextarea
           {...fieldAttrs(LABEL.more.bolNotes)}
           rows={3}
@@ -53,7 +53,8 @@ function InstructionsTabImpl({ values, update, ctx }: CardProps) {
             onChange({ bolNotes: next })
           }}
         />
-      </TmsField>
+      </Field>
+      </FieldGrid>
     </div>
   )
 }

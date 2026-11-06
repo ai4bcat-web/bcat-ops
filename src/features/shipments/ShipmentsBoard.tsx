@@ -8,6 +8,10 @@
  * A single pane handles the normal view. Split Screen renders two independent panes,
  * each with its own list (Active or All), filters and selection.
  */
+import { deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
+import { phaseInputOfRow } from './deliveryPhaseInputs'
+import './deliveryTimeline.css'
+import { TrackingModeNotSetRowChip } from './trackingModeControl/TrackingModeNotSetChip'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -775,7 +779,11 @@ function BoardPane({
         )
       }
       if (columnKey === 'status') {
-        return <span className="font-medium">{statusCellText(row)}</span>
+        return <span className="flex items-center gap-1"><span className="font-medium">{statusCellText(row)}</span><TrackingModeNotSetRowChip row={row} /></span>
+      }
+      if (columnKey === 'delivery') {
+        const r = deliveryPhase(phaseInputOfRow(row, Date.now()))
+        return <span className="tms-dt-text" data-tone={r.tone} title={r.reason ?? undefined}>{deliveryPhaseText(r)}</span>
       }
       if (columnKey === 'customerName') {
         if (!isCustomerUnresolved(row)) return <>{customerDisplayName(row)}</>

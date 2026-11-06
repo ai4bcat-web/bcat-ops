@@ -18,8 +18,10 @@ import {
   CARRIER_ASSIGNMENT_LABELS, CARRIER_ASSIGNMENT_STATUSES, isCarrierAssignmentStatus, parseAssignmentTimes, rungOf,
 } from '@/lib/carrierAssignment'
 import { formatDateTime } from '@/lib/date'
+import { TRACKING_METHOD_LABELS, TRACKING_MODE_LABELS, parseTrackingPrefs } from '@/lib/trackingPrefs'
 import type { CarrierRecord, LoadCarrierRecord, ShipmentBundle } from '@/types/tms'
 import { dispatchBlock, ladderActions } from '../carrierLadder'
+import { TrackingModeNotSetChip } from '../trackingModeControl/TrackingModeNotSetChip'
 import type { ShipmentActions } from '../useShipmentActions'
 import { CarrierAssignmentChip } from './CarrierAssignmentChip'
 import { isIvanCartageName } from '@/lib/ownFleetDrivers'
@@ -107,7 +109,7 @@ export function CarrierLadderCard({ bundle, loadCarrier, carrier, actions, onRem
 
   return (
     <TmsCard
-      title={<span className="flex items-center gap-2"><FileSignature size={14} />Carrier assignment</span>}
+      title={<span className="flex items-center gap-2"><FileSignature size={14} />Carrier assignment<TrackingModeNotSetChip shipment={bundle.shipment} hasCarrier /></span>}
       actions={<CarrierAssignmentChip ladder={ladder} shipmentStatus={bundle.shipment.status} />}
     >
       <div data-testid="carrier-ladder" data-rung={ladder}>
@@ -124,6 +126,18 @@ export function CarrierLadderCard({ bundle, loadCarrier, carrier, actions, onRem
             )
           })}
         </ol>
+
+        {(() => {
+          const prefs = parseTrackingPrefs(bundle.shipment.trackingPrefs)
+          if (prefs?.mode && prefs.confirmedAt) {
+            return (
+              <p className="mt-3 text-xs" data-testid="ladder-tracking-summary">
+                Tracking: <strong>{TRACKING_MODE_LABELS[prefs.mode]}</strong>{prefs.method ? ` · ${TRACKING_METHOD_LABELS[prefs.method]}` : ''}
+              </p>
+            )
+          }
+          return null
+        })()}
 
         {ladder === 'ASSIGNED_SETUP_PENDING' && (
           <div className="mt-3">

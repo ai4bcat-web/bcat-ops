@@ -8,6 +8,8 @@
  * voided row keeps its PRO, and rows that were soft-deleted before Void existed are
  * read as voided for exactly the same reason — the PRO never leaves the book.
  */
+import { deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
+import { phaseInputOfRow } from './deliveryPhaseInputs'
 import type { Stop } from '@/types'
 import type {
   ApStatus,
@@ -588,6 +590,10 @@ function statusWithProgress(row: ShipmentRow): string {
   return `${label} ${done}/${total}`
 }
 
+function deliveryText(row: ShipmentRow): string {
+  return deliveryPhaseText(deliveryPhase(phaseInputOfRow(row, Date.now())))
+}
+
 const titleCase = (value: string): string =>
   value.toLowerCase().replace(/(^|[\s_])(\w)/g, (_, lead: string, ch: string) => `${lead === '_' ? ' ' : lead}${ch.toUpperCase()}`)
 
@@ -697,6 +703,8 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     width: 90,
   },
   { key: 'status', label: 'Status', group: 'Shipment', value: statusWithProgress, sortKey: 'status', width: 130 },
+  // Optional (not in the default layout): where the load is in its delivery, from the stop projection the row already carries. No extra reads.
+  { key: 'delivery', label: 'Delivery', group: 'Computed', value: deliveryText, width: 170 },
   { key: 'proNumber', label: 'PRO #', group: 'Shipment', value: (r) => r.number ?? '', sortKey: 'number', width: 120 },
   { key: 'equip', label: 'Equip', group: 'Order', value: (r) => r.equipmentType ?? '', width: 100 },
   { key: 'customerReference', label: 'Customer Reference Number', group: 'Order', value: (r) => r.customerReference ?? '', width: 180 },

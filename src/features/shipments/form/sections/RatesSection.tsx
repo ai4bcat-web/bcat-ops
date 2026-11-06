@@ -6,15 +6,16 @@
  * Carrier money typed before Cover stays in the form (F7); the pipeline never writes a
  * CARRIER charge before the carrier is booked.
  */
-import { memo, useMemo } from 'react'
+import { memo, useMemo, type ReactNode } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { TmsButton, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { formatCents } from '@/lib/tmsDirectory'
 import { CARRIER_RATE_KIND_OPTIONS, RATE_KIND_OPTIONS } from '../constants'
 import { LABEL } from '../labels'
 import { financialPreview } from '../mapping'
 import { isLocked, lockReason, type AccessorialLine, type CarrierRateKind, type FormRateKind } from '../model'
 import type { RatesSectionProps } from '../sectionRegistry'
+import { Field, FieldGrid, spread } from '../fieldGrid'
 import { fieldAttrs } from './fieldAttrs'
 import '../cards/moneyCards.css'
 
@@ -22,6 +23,21 @@ const usd = (cents: number) => `$${formatCents(cents)}`
 
 function emptyAccessorialLine(): AccessorialLine {
   return { id: '', carrierLineId: '', release: '', carrierKey: '', code: '', label: '', carrierAmount: '', customerAmount: '', note: '' }
+}
+
+interface RateField { key: string; label: string; info?: string; node: ReactNode }
+
+/** A titled row of rate fields on the shared 12-column grid; the count (hours, pay %) decides the spans so every row stays flush. */
+function RateRow({ title, label, fields }: { title: string; label: string; fields: RateField[] }) {
+  const { wide, narrow } = spread(fields.length)
+  return (
+    <div className="tms-card-rate-row" role="group" aria-label={label}>
+      <span className="tms-card-rate-row-title">{title}</span>
+      <FieldGrid>
+        {fields.map((f, i) => <Field key={f.key} label={f.label} info={f.info} span={wide[i]!} narrow={narrow[i]}>{f.node}</Field>)}
+      </FieldGrid>
+    </div>
+  )
 }
 
 function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProps) {
@@ -48,136 +64,55 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form }: RatesSectionProp
   const setLine = (i: number, patch: Partial<AccessorialLine>) =>
     onChange((p) => ({ ...p, lines: p.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }))
 
+  const customerFields: RateField[] = [
+    { key: 'ct', label: LABEL.rates.customerRateType.text, node: (
+      <TmsSelect
+        {...fieldAttrs(LABEL.rates.customerRateType)} value={cust.rateType} disabled={disabled || ratesLocked}
+        onChange={(e) => setCustomer({ rateType: e.target.value as FormRateKind })}
+        options={RATE_KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+      />) },
+    ...(cust.rateType === 'PER_HOUR' ? [{ key: 'ch', label: LABEL.rates.customerHours.text, node: (
+      <TmsInput {...fieldAttrs(LABEL.rates.customerHours)} type="number" min={0} step="any" value={cust.hours} disabled={disabled || ratesLocked} onChange={(e) => setCustomer({ hours: e.target.value })} />) }] : []),
+    { key: 'lh', label: LABEL.rates.customerLhRate.text, node: (
+      <TmsInput {...fieldAttrs(LABEL.rates.customerLhRate)} inputMode="decimal" value={cust.lhRate} disabled={disabled || ratesLocked} onChange={(e) => setCustomer({ lhRate: e.target.value })} />) },
+    { key: 'tl', label: LABEL.rates.customerTotalLh.text, node: <TmsInput {...fieldAttrs(LABEL.rates.customerTotalLh)} readOnly value={usd(preview.customerTotalLhCents)} /> },
+    { key: 'fp', label: LABEL.rates.fscPercent.text, node: (
+      <TmsInput {...fieldAttrs(LABEL.rates.fscPercent)} inputMode="decimal" value={value.fscPercent} disabled={disabled || ratesLocked} onChange={(e) => onChange({ fscPercent: e.target.value })} />) },
+    { key: 'fm', label: LABEL.rates.fscPerMile.text, node: (
+      <TmsInput {...fieldAttrs(LABEL.rates.fscPerMile)} inputMode="decimal" value={value.fscPerMile} disabled={disabled || ratesLocked} onChange={(e) => onChange({ fscPerMile: e.target.value })} />) },
+    { key: 'smr', label: LABEL.rates.smr.text, info: 'Informational, not in Totals', node: (
+      <TmsInput {...fieldAttrs(LABEL.rates.smr)} inputMode="decimal" value={value.smr} disabled={disabled || ratesLocked} onChange={(e) => onChange({ smr: e.target.value })} />) },
+  ]
+  const topSpend = ctx.bundle?.financials[0]?.topSpendCents
+  const carrierFields: RateField[] = [
+    { key: 'kt', label: LABEL.rates.carrierRateType.text, node: (
+      <TmsSelect
+        {...fieldAttrs(LABEL.rates.carrierRateType)} value={car.rateType} disabled={disabled || carrierLocked}
+        onChange={(e) => setCarrier({ rateType: e.target.value as CarrierRateKind })}
+        options={CARRIER_RATE_KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+      />) },
+    ...(car.rateType === 'PER_HOUR' ? [{ key: 'kh', label: LABEL.rates.carrierHours.text, node: (
+      <TmsInput {...fieldAttrs(LABEL.rates.carrierHours)} type="number" min={0} step="any" value={car.hours} disabled={disabled || carrierLocked} onChange={(e) => setCarrier({ hours: e.target.value })} />) }] : []),
+    { key: 'klh', label: LABEL.rates.carrierLhRate.text, node: (
+      <TmsInput {...fieldAttrs(LABEL.rates.carrierLhRate)} inputMode="decimal" value={car.lhRate} disabled={disabled || carrierLocked || car.rateType === 'PCT_OF_CUSTOMER'} onChange={(e) => setCarrier({ lhRate: e.target.value })} />) },
+    { key: 'ktl', label: LABEL.rates.carrierTotalLh.text, node: <TmsInput {...fieldAttrs(LABEL.rates.carrierTotalLh)} readOnly value={usd(preview.carrierTotalLhCents)} /> },
+    ...(car.rateType === 'PCT_OF_CUSTOMER' ? [{ key: 'kp', label: LABEL.rates.payPct.text, node: (
+      <TmsInput {...fieldAttrs(LABEL.rates.payPct)} inputMode="decimal" value={car.payPct} disabled={disabled || carrierLocked} onChange={(e) => setCarrier({ payPct: e.target.value })} />) }] : []),
+    { key: 'kmax', label: LABEL.rates.maxRate.text, info: topSpend != null ? `Top spend ${usd(topSpend)}` : undefined, node: (
+      <TmsInput {...fieldAttrs(LABEL.rates.maxRate)} inputMode="decimal" value={car.maxRate} disabled={disabled || carrierLocked} onChange={(e) => setCarrier({ maxRate: e.target.value })} />) },
+  ]
+
   return (
     <div className="tms-card-rates" data-testid="section-rates-body">
       {lockNote && <p className="tms-muted text-xs" data-testid="rates-lock-note">{lockNote}</p>}
 
-      <div className="tms-card-rate-row" role="group" aria-label="Customer rate">
-        <span className="tms-card-rate-row-title">Customer</span>
-        <TmsField label={LABEL.rates.customerRateType.text}>
-          <TmsSelect
-            {...fieldAttrs(LABEL.rates.customerRateType)}
-            value={cust.rateType}
-            disabled={disabled || ratesLocked}
-            onChange={(e) => setCustomer({ rateType: e.target.value as FormRateKind })}
-            options={RATE_KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-          />
-        </TmsField>
-        {cust.rateType === 'PER_HOUR' && (
-          <TmsField label={LABEL.rates.customerHours.text}>
-            <TmsInput
-              {...fieldAttrs(LABEL.rates.customerHours)}
-              type="number" min={0} step="any"
-              value={cust.hours}
-              disabled={disabled || ratesLocked}
-              onChange={(e) => setCustomer({ hours: e.target.value })}
-            />
-          </TmsField>
-        )}
-        <TmsField label={LABEL.rates.customerLhRate.text}>
-          <TmsInput
-            {...fieldAttrs(LABEL.rates.customerLhRate)}
-            inputMode="decimal"
-            value={cust.lhRate}
-            disabled={disabled || ratesLocked}
-            onChange={(e) => setCustomer({ lhRate: e.target.value })}
-          />
-        </TmsField>
-        <TmsField label={LABEL.rates.customerTotalLh.text}>
-          <TmsInput {...fieldAttrs(LABEL.rates.customerTotalLh)} readOnly value={usd(preview.customerTotalLhCents)} />
-        </TmsField>
-        <TmsField label={LABEL.rates.fscPercent.text}>
-          <TmsInput
-            {...fieldAttrs(LABEL.rates.fscPercent)}
-            inputMode="decimal"
-            value={value.fscPercent}
-            disabled={disabled || ratesLocked}
-            onChange={(e) => onChange({ fscPercent: e.target.value })}
-          />
-        </TmsField>
-        <TmsField label={LABEL.rates.fscPerMile.text}>
-          <TmsInput
-            {...fieldAttrs(LABEL.rates.fscPerMile)}
-            inputMode="decimal"
-            value={value.fscPerMile}
-            disabled={disabled || ratesLocked}
-            onChange={(e) => onChange({ fscPerMile: e.target.value })}
-          />
-        </TmsField>
-        <TmsField label={LABEL.rates.smr.text} hint="Informational — not in Totals">
-          <TmsInput
-            {...fieldAttrs(LABEL.rates.smr)}
-            inputMode="decimal"
-            value={value.smr}
-            disabled={disabled || ratesLocked}
-            onChange={(e) => onChange({ smr: e.target.value })}
-          />
-        </TmsField>
-      </div>
+      <RateRow title="Customer" label="Customer rate" fields={customerFields} />
       {fscBoth && (
         <p className="tms-card-rate-note" data-testid="rates-fsc-note">
           Use FSC % or FSC/Mile, not both — FSC/Mile wins.
         </p>
       )}
-
-      <div className="tms-card-rate-row" role="group" aria-label="Carrier rate">
-        <span className="tms-card-rate-row-title">Carrier</span>
-        <TmsField label={LABEL.rates.carrierRateType.text}>
-          <TmsSelect
-            {...fieldAttrs(LABEL.rates.carrierRateType)}
-            value={car.rateType}
-            disabled={disabled || carrierLocked}
-            onChange={(e) => setCarrier({ rateType: e.target.value as CarrierRateKind })}
-            options={CARRIER_RATE_KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-          />
-        </TmsField>
-        {car.rateType === 'PER_HOUR' && (
-          <TmsField label={LABEL.rates.carrierHours.text}>
-            <TmsInput
-              {...fieldAttrs(LABEL.rates.carrierHours)}
-              type="number" min={0} step="any"
-              value={car.hours}
-              disabled={disabled || carrierLocked}
-              onChange={(e) => setCarrier({ hours: e.target.value })}
-            />
-          </TmsField>
-        )}
-        <TmsField label={LABEL.rates.carrierLhRate.text}>
-          <TmsInput
-            {...fieldAttrs(LABEL.rates.carrierLhRate)}
-            inputMode="decimal"
-            value={car.lhRate}
-            disabled={disabled || carrierLocked || car.rateType === 'PCT_OF_CUSTOMER'}
-            onChange={(e) => setCarrier({ lhRate: e.target.value })}
-          />
-        </TmsField>
-        <TmsField label={LABEL.rates.carrierTotalLh.text}>
-          <TmsInput {...fieldAttrs(LABEL.rates.carrierTotalLh)} readOnly value={usd(preview.carrierTotalLhCents)} />
-        </TmsField>
-        {car.rateType === 'PCT_OF_CUSTOMER' && (
-          <TmsField label={LABEL.rates.payPct.text}>
-            <TmsInput
-              {...fieldAttrs(LABEL.rates.payPct)}
-              inputMode="decimal"
-              value={car.payPct}
-              disabled={disabled || carrierLocked}
-              onChange={(e) => setCarrier({ payPct: e.target.value })}
-            />
-          </TmsField>
-        )}
-        <TmsField
-          label={LABEL.rates.maxRate.text}
-          hint={ctx.bundle?.financials[0]?.topSpendCents != null ? `Top spend ${usd(ctx.bundle.financials[0].topSpendCents)}` : undefined}
-        >
-          <TmsInput
-            {...fieldAttrs(LABEL.rates.maxRate)}
-            inputMode="decimal"
-            value={car.maxRate}
-            disabled={disabled || carrierLocked}
-            onChange={(e) => setCarrier({ maxRate: e.target.value })}
-          />
-        </TmsField>
-      </div>
+      <RateRow title="Carrier" label="Carrier rate" fields={carrierFields} />
 
       <div className="tms-card-lines" data-testid="rates-lines">
         <div className="tms-card-line tms-card-line-head">

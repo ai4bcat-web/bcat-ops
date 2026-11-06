@@ -1,12 +1,15 @@
 /**
- * The header strip (Step AR, feedback 7): title, the Customer type-ahead, the Bill To
+ * The header strip (Step AR, feedback 7/11): title, the Customer type-ahead, the Customer ref (PO), the Bill To
  * summary chip (its Details chevron drops the full panel under the strip, collapsed by default),
  * status chip and read-only PRO. Division (the revenue division and ownership tag, one field) and
  * the shipment type are the first two fields of the Freight card.
  */
-import { memo } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { TmsBadge } from '@/features/tms/kit'
 import type { CardProps } from './cards/cardRegistry'
+import { deliveryPhase } from '@/lib/deliveryPhase'
+import { DeliveryTimeline } from '../DeliveryTimeline'
+import { phaseInputOfBundle } from '../deliveryPhaseInputs'
 import { HEADER_PARTS } from './defaultSections'
 
 export interface FormHeaderProps {
@@ -24,12 +27,22 @@ export interface FormHeaderProps {
 
 function FormHeaderImpl({ title, status, dirty, pro, mode, common, panelOpen, onPanelToggle }: FormHeaderProps) {
   const draft = status === 'NEW' || status === 'DRAFT'
+  const bundle = common.ctx.bundle
+  // The timeline's clock: re-read once a minute so a late truck turns amber without a reload.
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 60_000)
+    return () => clearInterval(t)
+  }, [])
+  const phase = useMemo(() => deliveryPhase(phaseInputOfBundle(bundle, nowMs)), [bundle, nowMs])
   return (
     <header className="tms-ship-hdr" data-testid="ship-form-header">
       <h1 className="tms-ship-hdr-title" data-testid="ship-form-title">{title}</h1>
       <HEADER_PARTS.CustomerPicker {...common} />
+      <HEADER_PARTS.CustomerRef {...common} />
       <HEADER_PARTS.BillToStrip {...common} open={panelOpen} onToggle={onPanelToggle} />
       <span className="tms-ship-hdr-spacer" />
+      <DeliveryTimeline result={phase} />
       {dirty ? <span className="tms-ship-dirty" data-testid="ship-form-dirty" title="Unsaved changes" role="img" aria-label="Unsaved changes" /> : null}
       <TmsBadge tone={draft ? 'gray' : 'blue'} data-testid="ship-form-status">{draft ? 'Draft' : status}</TmsBadge>
       <span className="tms-ship-hdr-pro" data-testid="ship-form-pro" title={mode === 'create' ? 'Preview only: the number is minted when you create' : undefined}>

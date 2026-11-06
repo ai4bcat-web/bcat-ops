@@ -10,7 +10,7 @@ const base = { mode: 'create' as const, settings: null }
 describe('required fields by action', () => {
   it('Save draft needs only a customer', () => {
     const v = emptyValues()
-    expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer: null })).map((i) => i.label)).toEqual(['Name'])
+    expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer: null })).map((i) => i.label)).toEqual(['Customer'])
     v.customer.useTyped = true; v.customer.typedName = 'Typed'
     expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer: null }))).toEqual([])
   })
@@ -95,11 +95,28 @@ describe('Aljex wording', () => {
       LABEL.carrier.originCity, LABEL.carrier.carrierRef, LABEL.carrier.sendRateConf, LABEL.checkCalls.nextAt, LABEL.checkCalls.ediReason,
     ].map((d) => d.text)
     expect(texts).toEqual([
-      'Equipment', 'Division', 'Customer Miles', 'Billable Weight', 'Calculate Totals from Picks', 'Customs Bonded',
+      'Equipment', 'Division', 'Customer Miles', 'Billable wt', 'Calculate Totals from Picks', 'Customs Bonded',
       'Straps/Chains', 'Mass Release', 'Dispatcher Assigned', 'FSC/Mile', 'Max Rate', 'Origin City', 'Carrier Ref #',
       'Send Rate Conf', 'Next Chk Call Date And Time', 'EDI Reason',
     ])
     expect(labelFor(LABEL.shipping.weightLbs)).toBe('Weight (required)')
     expect(labelFor(LABEL.shipping.pieces)).toBe('Pieces')
+  })
+})
+
+describe('customer ref (PO) is required when the customer demands it', () => {
+  it('blocks Create with a Customer ref row on the header input; a draft never blocks', () => {
+    const v = filledValues(); v.customer.refNo = ''
+    const customer = { ...CUSTOMER, reviewRequirements: ['referenceNumber'] }
+    const issues = blockingIssues(validateForm(v, { ...base, level: 'create', customer }))
+    expect(issues.map((i) => [i.id, i.label, i.fieldKey])).toEqual([['customer:ref:po', 'Customer ref', 'f-customer-refNo']])
+    expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer }))).toEqual([])
+    v.customer.refNo = 'PO-1'
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer }))).toEqual([])
+  })
+  it('the required-reference path and this one never produce two rows', () => {
+    const v = filledValues(); v.customer.refNo = ''
+    const customer = { ...CUSTOMER, reviewRequirements: ['referenceNumber'], requiredReferences: [{ code: 'PO', label: 'PO', level: 'ORDER' as const, display: true, countOnNewOrder: 1 }] }
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer })).filter((i) => i.id === 'customer:ref:po')).toHaveLength(1)
   })
 })

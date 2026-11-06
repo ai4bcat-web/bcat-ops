@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { TrackerPicker } from '@/components/TrackerPicker'
 import { TmsButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { assignTracker, saveLoadCheckCallPlan, setTrackingPrefs } from '@/lib/apiClient'
+import './trackingModeControl.css'
 import { resolveCheckCallPlanWithSource } from '../workstations/tracking/checkCallPlanSource'
 import { TRACKING_METHOD_LABELS, TRACKING_MODE_LABELS, type TrackingMethod, type TrackingMode } from '@/lib/trackingPrefs'
 import type { CustomerRecord, ShipmentLoad, ShipmentRecord, TmsSettings } from '@/types/tms'
@@ -35,7 +36,7 @@ export interface TrackingModeControlProps {
 
 const MODES: readonly TrackingMode[] = ['AGENT', 'MANUAL', 'NONE']
 const METHODS: readonly TrackingMethod[] = ['BOTH', 'SMS', 'EMAIL']
-export const MODE_CHOICE_LABEL: Record<TrackingMode, string> = { AGENT: 'Automated', MANUAL: 'Manual', NONE: 'None' }
+const MODE_CHOICE_LABEL: Record<TrackingMode, string> = { AGENT: 'Automated', MANUAL: 'Manual', NONE: 'None' }
 
 export function TrackingModeControl({ shipment, load, customer, settings = null, disabled = false, compact = false, onSaved }: TrackingModeControlProps) {
   const plan = useMemo(
