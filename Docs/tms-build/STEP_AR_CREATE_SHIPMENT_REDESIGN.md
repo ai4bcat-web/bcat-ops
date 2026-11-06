@@ -344,3 +344,29 @@ Equipment 3 · Weight 3] / [Billable wt 3 · Pieces 3 · Footage 3 · Freight cl
 [Description 9 · Declared value 3] / chips / toolbar). Required-ness follows the customer's
 per-customer requirements (Step AP): when the customer requires a PO, the strip input turns green
 and the rail checklist lists "Customer ref".
+
+## Ryne's feedback 12 (2026-11-05 evening)
+"In the same strip at the top where the customer is, can you put a timeline that shows a truck
+with the checkpoint for where it is in delivery? On site, departed, in transit, on site at
+delivery, delivered. Some little illustration line graph would be nice."
+
+**Delivery timeline** in the header strip, right-aligned (takes the right third of the strip at
+1440; wraps to a second strip row at 1280):
+- Five checkpoints on one horizontal line, left to right: **On site** (at pickup) · **Departed**
+  · **In transit** · **On site** (at delivery) · **Delivered**. Each checkpoint is a small dot with
+  its label underneath; reached checkpoints and the line segment behind them are filled in the
+  accent green, upcoming ones are grey.
+- A small **truck icon** (inline SVG from the kit, ~20 px, facing right) sits on the line at the
+  current checkpoint; between checkpoints it sits mid-segment (In transit shows it midway with a
+  faint motion line). Hover on the truck shows the last position / time from tracking; hover on a
+  reached checkpoint shows the timestamp and who recorded it.
+- Multi-stop loads: the line still shows the five phases; "On site" / "Departed" refer to the
+  current stop, and a "Stop 2 of 4" caption appears under the truck.
+- Before the load is covered the line is all grey with the truck parked at the far left and the
+  caption "Not dispatched"; on create (no row yet) it renders greyed with "Draft".
+- Source: the stop-event timestamps already written by Load Tracking / check calls (arrived at
+  pickup, departed, in transit position updates, arrived at delivery, delivered / POD). Phase
+  derivation lives in one helper (`deliveryPhase.ts`) shared with the Shipments board, which
+  gets the same mini timeline as an optional column.
+- Exceptions: a late / exception flag from tracking turns the truck amber and shows the reason
+  on hover. Voided loads show the line struck through.
