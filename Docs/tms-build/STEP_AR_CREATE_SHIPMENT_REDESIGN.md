@@ -199,3 +199,27 @@ rail's Roles block. Roles keeps Sales Representative, Service Representative and
 Assigned only. Keep the underlying fields in the model and mapping (quote-to-shipment conversion
 still links the Quote row on its own path; dispatcher-actual keeps being stamped by tracking);
 they are simply no longer shown or editable on the create/edit form.
+
+## Ryne's feedback 5 (2026-11-05 evening, screenshot aljex-create/34-rail-activity-feedback.png)
+"Let's also show a summary of the audit log, who entered what (agent or user's name) and what they
+did and what stage the shipment is in."
+
+New **Activity** block in the summary rail, between the Required checklist and Roles:
+- **Stage** line at the top: a chip with the shipment's current stage and a compact stepper
+  (Draft → Intake review → Active → Covered → In transit → Delivered → Load Review → Billed →
+  Paid; Voided shown as a red chip). On create before the row exists: `Draft — not created yet`.
+  Stage comes from the same status ladder the Shipments board and Load Review use.
+- **Recent activity**: the last 8 AuditLog entries for this shipment (and its Load / Intake item),
+  newest first, one line each: relative time · **actor** · action · detail. Actor is the user's
+  display name for a person, or `AI agent · <agent name>` (Intake extractor, Tracking agent, Rate
+  con AI, AP inbox sync …) for an automation, or `System` for scheduled jobs. Action is plain
+  language ("set customer rate $2,400", "covered with Ivan Cartage", "uploaded POD", "extracted
+  12 fields from e-mail"). Field-level edits that AH already records (who changed what, old → new)
+  show the field name and new value; hover shows old value.
+- Fields prefilled from an Intake e-mail appear here as the extractor's entries, so the reviewer
+  sees what the agent entered versus what a person typed; this complements the "from e-mail" tags
+  on the fields.
+- "Full history" link opens the shipment's audit page (existing AuditLog view) filtered to this
+  shipment.
+- Edit mode shows live data; the block refreshes after each save. Reads go through the existing
+  AuditLog GSI by entity id, no new table.
