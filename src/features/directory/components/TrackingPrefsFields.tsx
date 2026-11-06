@@ -5,7 +5,7 @@ import {
   DRIVER_SMS_TARGET_LABELS,
   TRACKING_METHODS,
   TRACKING_METHOD_LABELS,
-  TRACKING_MODES,
+  CUSTOMER_TRACKING_MODES,
   TRACKING_MODE_LABELS,
   type DriverSmsTarget,
   type TrackingMethod,
@@ -68,7 +68,7 @@ export function TrackingPrefsFields({
     <div style={{ display: 'grid', gap: 12 }}>
       <RadioGroup
         legend="Tracking mode"
-        options={TRACKING_MODES}
+        options={CUSTOMER_TRACKING_MODES}
         labels={TRACKING_MODE_LABELS}
         value={value.trackingMode}
         onChange={(trackingMode) => onChange({ trackingMode })}

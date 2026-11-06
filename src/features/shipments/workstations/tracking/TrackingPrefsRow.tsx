@@ -19,7 +19,7 @@ import {
 } from '@/lib/trackingPrefs'
 import type { CustomerRecord, ShipmentRecord } from '@/types/tms'
 
-const SHORT_MODE: Record<TrackingMode, string> = { AGENT: 'AI agent', MANUAL: 'Manual' }
+const SHORT_MODE: Record<TrackingMode, string> = { AGENT: 'AI agent', MANUAL: 'Manual', NONE: 'No tracking' }
 const SHORT_METHOD: Record<TrackingMethod, string> = { EMAIL: 'E-mail', SMS: 'SMS', BOTH: 'E-mail + SMS' }
 
 interface Draft { mode: TrackingMode | ''; method: TrackingMethod | ''; driverSms: DriverSmsTarget | '' }

@@ -14,7 +14,7 @@
  */
 import { renderTemplate, isQuietNow, isRateConSent, resolveAutomation } from '../../../src/lib/trackingAutomation'
 import { MAX_SMS_BODY } from '../../../src/lib/dispatch'
-import { allowsAutoRequests, channelsAllowedBy, effectiveTrackingPrefs } from '../../../src/lib/trackingPrefs'
+import { AUTO_BLOCK_NOTE, autoRequestBlock, channelsAllowedBy, effectiveTrackingPrefs } from '../../../src/lib/trackingPrefs'
 import { resolveDriverSms } from './driverPhone'
 import { isVoided } from '../_shared/voided'
 import type { Caller } from '../_shared/actionInputs'
@@ -160,9 +160,10 @@ export async function runTrackingAutomation(deps: AutomationDeps, input: Row, ca
           if (customerId && !customers.has(customerId)) customers.set(customerId, await deps.getById(deps.tables.customer, customerId))
           const customer = customerId ? customers.get(customerId) ?? null : null
           const prefs = effectiveTrackingPrefs({ shipment, customer })
-          if (!allowsAutoRequests(prefs)) {
+          const block = autoRequestBlock(prefs)
+          if (block) {
             result.pod.skipped += 1
-            note(`${String(shipment.number ?? shipmentId)}: Customer tracking is manual`)
+            note(`${String(shipment.number ?? shipmentId)}: ${AUTO_BLOCK_NOTE[block]}`)
             continue
           }
           // Step AK: the driver is texted on the truck's work phone, personal as the fallback.

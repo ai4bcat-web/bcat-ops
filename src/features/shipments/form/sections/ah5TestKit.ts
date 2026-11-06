@@ -17,7 +17,7 @@ export function makeCtx(over: Partial<FormCtx> = {}): FormCtx & { actions: Retur
   return {
     mode: 'create', bundle: null, shipmentStatus: 'NEW', locked: NO_LOCKS,
     directory: { customers: [], locations: [], carriers: [], staff: [] },
-    settings: null, customer: null, divisions: [], busy: false, issues: [],
+    settings: null, customer: null, divisions: [], busy: false, refreshBundle: async () => {}, issues: [],
     ...over,
     actions: (over.actions as ReturnType<typeof makeActions>) ?? makeActions(),
   }

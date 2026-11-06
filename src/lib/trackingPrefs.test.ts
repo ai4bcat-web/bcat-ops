@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  allowsAutoRequests, channelsAllowedBy, effectiveTrackingPrefs, parseTrackingPrefs, validateTrackingPrefsOverride,
+  allowsAutoRequests, autoRequestBlock, channelsAllowedBy, effectiveTrackingPrefs, parseTrackingPrefs, trackingConfirmed, trackingModeNotSet,
+  TRACKING_CONFIRMATION_STARTS_AT, validateTrackingPrefsOverride,
 } from './trackingPrefs'
 
 describe('effectiveTrackingPrefs', () => {
@@ -58,5 +59,51 @@ describe('validateTrackingPrefsOverride / parseTrackingPrefs', () => {
   it('parse yields null when nothing usable remains', () => {
     expect(parseTrackingPrefs({})).toBeNull()
     expect(parseTrackingPrefs(null)).toBeNull()
+  })
+})
+
+describe('per-load confirmation (feedback 9)', () => {
+  const before = '2026-11-01T00:00:00.000Z'
+  const after = '2026-11-07T00:00:00.000Z'
+  const agentCustomer = { trackingMode: 'AGENT', trackingMethod: 'BOTH' }
+
+  it('a new load with only the customer suggestion is unconfirmed and automation must not auto-run', () => {
+    const p = effectiveTrackingPrefs({ shipment: { createdAt: after }, customer: agentCustomer })
+    expect(p).toMatchObject({ mode: 'AGENT', confirmed: false })
+    expect(autoRequestBlock(p)).toBe('UNCONFIRMED')
+    expect(allowsAutoRequests(p)).toBe(false)
+  })
+
+  it('confirming (confirmedAt) or pinning a mode on the load lets automation run', () => {
+    expect(allowsAutoRequests(effectiveTrackingPrefs({ shipment: { createdAt: after, trackingPrefs: { confirmedAt: after, mode: 'AGENT' } }, customer: agentCustomer }))).toBe(true)
+    expect(allowsAutoRequests(effectiveTrackingPrefs({ shipment: { createdAt: after, trackingPrefs: { mode: 'AGENT' } }, customer: agentCustomer }))).toBe(true)
+  })
+
+  it('the load value wins over the customer: NONE and MANUAL on the load block automation', () => {
+    const none = effectiveTrackingPrefs({ shipment: { createdAt: after, trackingPrefs: { mode: 'NONE', confirmedAt: after } }, customer: agentCustomer })
+    expect(none.mode).toBe('NONE')
+    expect(autoRequestBlock(none)).toBe('NONE')
+    expect(autoRequestBlock(effectiveTrackingPrefs({ shipment: { createdAt: after, trackingPrefs: { mode: 'MANUAL' } }, customer: agentCustomer }))).toBe('MANUAL')
+  })
+
+  it('legacy rows stay live: created before the cutoff, or with no createdAt, count as confirmed', () => {
+    expect(TRACKING_CONFIRMATION_STARTS_AT > before).toBe(true)
+    expect(effectiveTrackingPrefs({ shipment: { createdAt: before }, customer: agentCustomer }).confirmed).toBe(true)
+    expect(effectiveTrackingPrefs({ shipment: {}, customer: agentCustomer }).confirmed).toBe(true)
+    expect(allowsAutoRequests(effectiveTrackingPrefs({ shipment: { createdAt: before }, customer: agentCustomer }))).toBe(true)
+  })
+
+  it('"Tracking mode not set" needs a booked carrier and an unconfirmed load', () => {
+    expect(trackingModeNotSet({ createdAt: after }, true)).toBe(true)
+    expect(trackingModeNotSet({ createdAt: after }, false)).toBe(false)
+    expect(trackingModeNotSet({ createdAt: before }, true)).toBe(false)
+    expect(trackingConfirmed({ createdAt: after, trackingPrefs: { confirmedAt: after } })).toBe(true)
+  })
+
+  it('NONE is a load-level mode only: the customer default ignores it, and the server input takes `confirmed` but never confirmedAt', () => {
+    expect(effectiveTrackingPrefs({ customer: { trackingMode: 'NONE' } }).mode).toBeNull()
+    expect(validateTrackingPrefsOverride({ mode: 'NONE', confirmed: true })).toEqual({ mode: 'NONE', confirmed: true })
+    expect(() => validateTrackingPrefsOverride({ confirmedAt: 'x' })).toThrow(/Unknown tracking preference/)
+    expect(parseTrackingPrefs({ mode: 'AGENT', confirmedAt: 'x', confirmedBy: 'y' })).toEqual({ mode: 'AGENT', confirmedAt: 'x', confirmedBy: 'y' })
   })
 })

@@ -1,6 +1,6 @@
 /**
- * Card 1: Freight (Step AR; first card since feedback 7). Shipment type (required, first field; picking one
- * fills its default equipment and chips where still empty), Equipment, Revenue Type, Weight (+ billable), Pieces, Footage,
+ * Card 1: Freight (Step AR; first card since feedback 7). Division (required, first: the ownership division and the revenue tag in one pick), Shipment type (required; picking
+ * one fills its default equipment and chips where still empty), Equipment, Weight (+ billable), Pieces, Footage,
  * Description, Class, Declared Value and the customer's reference; then the REQUIREMENTS chip
  * bar that replaces the AH checkbox grid. A chip toggles the same `ship.flags` key (or the
  * Temp / Tarps / Pallet exchange / Liftgate / Inside field it stands for); Temp, Tarps and
@@ -118,6 +118,14 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
   return (
     <div className="tms-card-body-stack" data-testid="section-freight-body">
       <div className="tms-card-grid">
+        <LField def={LABEL.shipping.revDivision} error={err(LABEL.shipping.revDivision.testId)} hint={LABEL.shipping.revDivision.help}>
+          <TmsSelect {...ctl(LABEL.shipping.revDivision)} value={revCode} disabled={base.disabled} onChange={(e) => pickDivision(e.target.value)}>
+            <option value="" />
+            {rows.map((r) => (
+              <option key={r.division.id} value={r.division.code}>{`${'\u00a0\u00a0'.repeat(r.depth)}${r.division.name}`}</option>
+            ))}
+          </TmsSelect>
+        </LField>
         <LField def={LABEL.shipping.shipmentType} error={err(LABEL.shipping.shipmentType.testId)}>
           <TmsSelect
             {...ctl(LABEL.shipping.shipmentType)} aria-label={LABEL.shipping.shipmentType.text} value={values.shipmentType}
@@ -136,14 +144,6 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
           <TmsInput {...ctl(LABEL.shipping.equipmentType)} list={EQUIPMENT_LIST_ID} maxLength={MAX.equipment} value={value.equipmentType} disabled={equipLock.disabled} title={equipLock.title} onChange={txt('equipmentType')} />
         </LField>
         <datalist id={EQUIPMENT_LIST_ID}>{EQUIPMENT_SUGGESTIONS.map((e) => <option key={e} value={e} />)}</datalist>
-        <LField def={LABEL.shipping.revDivision} error={err(LABEL.shipping.revDivision.testId)} hint={LABEL.shipping.revDivision.help}>
-          <TmsSelect {...ctl(LABEL.shipping.revDivision)} value={revCode} disabled={base.disabled} onChange={(e) => pickDivision(e.target.value)}>
-            <option value="" />
-            {rows.map((r) => (
-              <option key={r.division.id} value={r.division.code}>{`${'\u00a0\u00a0'.repeat(r.depth)}${r.division.name}`}</option>
-            ))}
-          </TmsSelect>
-        </LField>
         <LField def={LABEL.shipping.weightLbs} error={err(LABEL.shipping.weightLbs.testId)}>
           <TmsInput {...ctl(LABEL.shipping.weightLbs)} inputMode="numeric" value={value.weightLbs} disabled={weightLock.disabled} title={weightLock.title} onChange={txt('weightLbs', digitsOnly)} />
         </LField>

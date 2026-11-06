@@ -1,15 +1,16 @@
 /**
- * Card 8: Tracking (Step AR). READ-ONLY, high level, pulled from the Load Tracking page.
+ * The tracking read inside the "Carrier & Tracking" card (Step AR; feedback 9 merged the old Tracking
+ * card into the Carrier card). READ-ONLY, high level, pulled from the Load Tracking page; the
+ * TrackingModeControl above it is what writes.
  *  - Edit mode: status chip, tracking mode / method / assignee, the summary strip (position + age,
  *    ETA, next check call, POD), the last check call, recent check calls, "Open in Load Tracking",
  *    and the Updates feed (formerly in the More strip).
- *  - Create mode (no load yet): the planned setup: the customer's default tracking mode, method
- *    and driver-SMS target, the Step V automation that will apply, and "Tracking starts when the
- *    load is covered".
+ *  - Before a carrier is booked: "Tracking is chosen when the carrier is booked" with the customer's
+ *    suggestion (mode, method, driver-SMS target, the Step V automation) greyed.
  * Nothing here writes; the strip's reminder menu is inert (`busy`), logging happens in Load Tracking.
  * It adds no reads of its own beyond the per-load tracking hook the AH preview already used.
  */
-import { memo, useMemo, type ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { TmsBadge, statusTone } from '@/features/tms/kit'
 import { useLoadTracking } from '@/hooks/useLoadTracking'
@@ -33,7 +34,7 @@ import { UpdatesTab } from './more/UpdatesTab'
 import './trackDocsCards.css'
 
 const NOOP = () => {}
-const SHORT_MODE = { AGENT: 'AI agent', MANUAL: 'Manual' } as const
+const SHORT_MODE = { AGENT: 'AI agent', MANUAL: 'Manual', NONE: 'No tracking' } as const
 const SHORT_METHOD = { EMAIL: 'E-mail', SMS: 'SMS', BOTH: 'E-mail + SMS' } as const
 
 function Fact({ label, testId, children }: { label: string; testId: string; children: ReactNode }) {
@@ -50,7 +51,7 @@ function setupText(p: EffectiveTrackingPrefs): string {
   return [p.mode ? SHORT_MODE[p.mode] : 'not set', p.method ? SHORT_METHOD[p.method] : 'plan channels', DRIVER_SMS_TARGET_LABELS[p.driverSms].toLowerCase()].join(' · ')
 }
 
-function EditBody(props: CardProps & { bundle: ShipmentBundle }) {
+export function TrackingReadout(props: CardProps & { bundle: ShipmentBundle }) {
   const { bundle, ctx } = props
   const load = bundle.loads[0] ?? null
   const leg = bundle.loadCarriers.find((c) => c.status === 'ACTIVE') ?? null
@@ -126,12 +127,12 @@ function automationLine(ctx: FormCtx, revDivision: string): string[] {
   ]
 }
 
-function PlannedBody({ values, ctx }: CardProps) {
+export function TrackingPlanned({ values, ctx }: CardProps) {
   const prefs = effectiveTrackingPrefs({ customer: ctx.customer })
   const lines = automationLine(ctx, values.ship.revDivision)
   return (
     <>
-      <div className="tms-card-facts" data-testid="card-tracking-planned">
+      <div className="tms-card-facts tms-trk-greyed" data-testid="card-tracking-planned">
         <Fact label="Tracking mode" testId="card-tracking-planned-mode">
           {prefs.mode ? TRACKING_MODE_LABELS[prefs.mode] : <span className="tms-muted">{ctx.customer ? 'Not set for this customer' : 'Pick a customer'}</span>}
         </Fact>
@@ -143,18 +144,7 @@ function PlannedBody({ values, ctx }: CardProps) {
           <ul className="tms-card-docs-checklist">{lines.map((l) => <li key={l}>{l}</li>)}</ul>
         </Fact>
       </div>
-      <p className="tms-muted text-sm" data-testid="card-tracking-after-create">Tracking starts when the load is covered.</p>
+      <p className="tms-muted text-sm" data-testid="card-tracking-after-create">Tracking is chosen when the carrier is booked.</p>
     </>
   )
 }
-
-function TrackingCardImpl(props: CardProps) {
-  const bundle = props.ctx.mode === 'edit' ? props.ctx.bundle : null
-  return (
-    <div className="tms-card-body-stack" data-testid="card-tracking-body">
-      {bundle ? <EditBody {...props} bundle={bundle} /> : <PlannedBody {...props} />}
-    </div>
-  )
-}
-
-export const TrackingCard = memo(TrackingCardImpl)

@@ -253,8 +253,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     <div className="tms-dense-page tms-ship-form" ref={rootRef} data-testid="ship-form" data-mode={mode}>
       <FormHeader
         title={title} status={status} dirty={form.dirty} pro={pro} mode={mode}
-        revDivision={values.ship.revDivision} divisions={ctx.divisions} disabled={busy || voided}
-        update={update} common={common} panelOpen={panelOpen} onPanelToggle={togglePanel}
+        common={common} panelOpen={panelOpen} onPanelToggle={togglePanel}
       />
 
       <div className="tms-ship-form-scroll">

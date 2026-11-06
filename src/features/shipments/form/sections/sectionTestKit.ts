@@ -16,7 +16,7 @@ export function makeCtx(over: Partial<FormCtx> = {}): FormCtx {
   return {
     mode: 'create', bundle: null, shipmentStatus: 'NEW', locked: NO_LOCKS,
     directory: { customers: [], locations: [], carriers: [], staff: [] },
-    settings: null, customer: null, divisions: [], busy: false, actions: noopActions(), issues: [],
+    settings: null, customer: null, divisions: [], busy: false, actions: noopActions(), refreshBundle: async () => {}, issues: [],
     ...over,
   }
 }

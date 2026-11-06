@@ -44,7 +44,7 @@ export const LABEL = {
   shipping: {
     shipmentType: def('shipping', 'shipmentType', 'Shipment type'),
     equipmentType: def('shipping', 'equipmentType', 'Equipment', { required: true }),
-    revDivision: def('shipping', 'revDivision', 'Revenue Type', { required: true, help: 'Revenue division (ownership tag)' }),
+    revDivision: def('shipping', 'revDivision', 'Division', { required: true, help: 'Revenue Type: the revenue division (ownership tag)' }),
     office: def('shipping', 'office', 'Office', { help: 'Follows the Sales Representative’s team' }),
     customerMiles: def('shipping', 'customerMiles', 'Customer Miles', { help: 'Load miles — every per-mile charge multiplies this' }),
     truckMiles: def('shipping', 'truckMiles', 'Truck Miles'),

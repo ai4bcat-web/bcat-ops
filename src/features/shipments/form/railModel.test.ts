@@ -10,7 +10,7 @@ const gate = (v: Parameters<typeof validateForm>[0]) =>
 describe('requiredRows', () => {
   it('lists the seven Aljex reds plus Shipment type on an empty form; only the defaulted type is done', () => {
     const rows = requiredRows(emptyValues(), 'create')
-    expect(rows.map((r) => r.key)).toEqual(['customer', 'shipmentType', 'pickup', 'ready', 'equipment', 'weight', 'description', 'revenue'])
+    expect(rows.map((r) => r.key)).toEqual(['customer', 'shipmentType', 'pickup', 'ready', 'equipment', 'weight', 'description', 'division'])
     expect(rows.filter((r) => r.done).map((r) => r.key)).toEqual(['shipmentType'])
     expect(requiredProgress(rows)).toEqual({ done: 1, total: 8, ready: false })
     expect(rows.find((r) => r.key === 'customer')?.card).toBe('header')

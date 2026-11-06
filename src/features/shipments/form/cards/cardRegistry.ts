@@ -12,9 +12,8 @@
  *  - The page owns the card chrome (border, number circle, title); a card component renders only
  *    the body and is always mounted and never collapsed by the page, so required fields stay in
  *    the DOM. CarrierCard owns its own "collapsed until set" presentation inside its body.
- *  - The header owns Division (top-level revDivision), the Customer type-ahead and the Bill To chip /
- *    panel (Customer contact, Ref #); the rail owns Net/Profit, roles and the checklist. Shipment type
- *    (first field) and Revenue Type are in Freight.
+ *  - The header owns the Customer type-ahead and the Bill To chip / panel (Customer contact, Ref #);
+ *    the rail owns Net/Profit, roles and the checklist. Division (first) and Shipment type are in Freight.
  *  - Cards are NOT given `form.values`; use `values`. `locked` is `ctx.locked` (convenience).
  */
 import type { ComponentType } from 'react'

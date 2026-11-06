@@ -162,7 +162,7 @@ import {
   type ShipmentTag,
 } from './ownershipResolve'
 import { assertNotVoided, isVoided } from '../_shared/voided'
-import { parseTrackingPrefs, validateTrackingPrefsOverride } from '../../../src/lib/trackingPrefs'
+import { parseTrackingPrefs, validateTrackingPrefsOverride, type TrackingPrefsOverride } from '../../../src/lib/trackingPrefs'
 import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
 import { INTAKE_ACTIONS, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
@@ -3622,19 +3622,33 @@ async function assignTracker(input: Row, caller: Caller): Promise<Row> {
 
 /**
  * SET_TRACKING_PREFS — the per-shipment override of the customer's tracking mode, method and
- * driver-SMS target (Step AJ). `prefs` is `{ mode?, method?, driverSms? }`; a key left out or
+ * driver-SMS target (Step AJ), and (feedback 9) the per-load confirmation of that mode.
+ * `prefs` is `{ mode?, method?, driverSms?, confirmed? }` (mode may be NONE); a key left out or
  * null inherits the customer, and an empty override (or `prefs: null`) clears the field.
  * Refused on a voided shipment. Same authorization as ASSIGN_TRACKER.
  */
 async function setTrackingPrefs(input: Row, caller: Caller): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
   if (!('prefs' in input)) throw new Error('prefs is required; send null to inherit everything')
-  const prefs = validateTrackingPrefsOverride(input.prefs)
+  const sent = validateTrackingPrefsOverride(input.prefs)
   const expectedUpdatedAt = input.expectedUpdatedAt == null ? null : assertExpectedUpdatedAt(input)
 
   const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
   assertNotVoided(shipment)
+  // Feedback 9: `confirmed: true` stamps who confirmed the load's mode and when (never client-supplied);
+  // a later edit keeps the earlier confirmation; clearing the override (null) clears it too.
+  const prior = parseTrackingPrefs(shipment.trackingPrefs)
+  const prefs: TrackingPrefsOverride | null = sent
+    ? {
+      ...(sent.mode ? { mode: sent.mode } : {}),
+      ...(sent.method ? { method: sent.method } : {}),
+      ...(sent.driverSms ? { driverSms: sent.driverSms } : {}),
+      ...(sent.confirmed
+        ? { confirmedAt: nowIso(), confirmedBy: caller.email }
+        : prior?.confirmedAt ? { confirmedAt: prior.confirmedAt, ...(prior.confirmedBy ? { confirmedBy: prior.confirmedBy } : {}) } : {}),
+    }
+    : null
 
   await transact(
     [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {

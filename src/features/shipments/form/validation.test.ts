@@ -18,7 +18,7 @@ describe('required fields by action', () => {
   it('Create on an empty form lists exactly the Aljex reds', () => {
     const issues = blockingIssues(validateForm(emptyValues(), { ...base, level: 'create', customer: null }))
     expect(issues.map((i) => i.label)).toEqual(
-      expect.arrayContaining(['Name', 'Equipment', 'Revenue Type', 'Weight', 'Description']))
+      expect.arrayContaining(['Name', 'Equipment', 'Division', 'Weight', 'Description']))
     const labels = new Set(issues.map((i) => `${i.section}:${i.label}`))
     expect(labels).toContain('pickup:Name')
     expect(labels).toContain('pickup:Ready')
@@ -95,7 +95,7 @@ describe('Aljex wording', () => {
       LABEL.carrier.originCity, LABEL.carrier.carrierRef, LABEL.carrier.sendRateConf, LABEL.checkCalls.nextAt, LABEL.checkCalls.ediReason,
     ].map((d) => d.text)
     expect(texts).toEqual([
-      'Equipment', 'Revenue Type', 'Customer Miles', 'Billable Weight', 'Calculate Totals from Picks', 'Customs Bonded',
+      'Equipment', 'Division', 'Customer Miles', 'Billable Weight', 'Calculate Totals from Picks', 'Customs Bonded',
       'Straps/Chains', 'Mass Release', 'Dispatcher Assigned', 'FSC/Mile', 'Max Rate', 'Origin City', 'Carrier Ref #',
       'Send Rate Conf', 'Next Chk Call Date And Time', 'EDI Reason',
     ])

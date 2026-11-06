@@ -2164,6 +2164,22 @@ describe('tracker assignee', () => {
     expect(audits).toContainEqual({ from: { method: 'EMAIL' }, to: null })
   })
 
+  it('confirms a load\'s tracking mode: the server stamps who and when, later edits keep it, clearing drops it, NONE is allowed', async () => {
+    const a = await createDraft()
+    const done = (await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'NONE', confirmed: true } }, TMS_USER)) as { shipment: Row }
+    const stored = done.shipment.trackingPrefs as Record<string, unknown>
+    expect(stored).toMatchObject({ mode: 'NONE' })
+    expect(typeof stored.confirmedAt).toBe('string')
+    expect(typeof stored.confirmedBy).toBe('string')
+
+    await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'AGENT', method: 'SMS' } }, TMS_USER)
+    expect(table(TABLES.shipment).get(a.shipmentId)!.trackingPrefs).toMatchObject({ mode: 'AGENT', method: 'SMS', confirmedAt: stored.confirmedAt })
+
+    await expect(call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'AGENT', confirmedAt: '2020-01-01T00:00:00Z' } }, TMS_USER)).rejects.toThrow(/Unknown tracking preference/)
+    await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: null }, TMS_USER)
+    expect(table(TABLES.shipment).get(a.shipmentId)!.trackingPrefs ?? null).toBeNull()
+  })
+
   it('refuses a tracking override from an outsider, on a voided shipment, or with a value outside the enums', async () => {
     const a = await createDraft()
     await expect(call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'MANUAL' } }, OUTSIDER)).rejects.toThrow(/page-loads/)

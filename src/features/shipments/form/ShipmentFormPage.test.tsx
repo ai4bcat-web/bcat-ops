@@ -250,13 +250,15 @@ describe('ShipmentFormPage — layout contract', () => {
     expect(order).toEqual(['section-freight', 'section-route', 'section-rates', 'section-rateHistory', 'section-carrier', 'ship-form-more', 'section-tracking', 'section-documents'])
   })
 
-  it('the header strip holds Division, the Customer picker and the Bill To chip, with no Mode pill', () => {
+  it('the header strip holds the Customer picker and the Bill To chip, with no Mode pill', () => {
     renderForm('create')
     const header = screen.getByTestId('ship-form-header')
     expect(screen.getByTestId('ship-form-title').textContent).toBe('New shipment')
     expect(screen.getByTestId('ship-form-status').textContent).toBe('Draft')
-    for (const id of ['f-header-division', 'f-customer-name', 'hdr-billTo-chip', 'ship-form-pro']) expect(header.querySelector(`[data-testid="${id}"]`)).not.toBeNull()
+    for (const id of ['f-customer-name', 'hdr-billTo-chip', 'ship-form-pro']) expect(header.querySelector(`[data-testid="${id}"]`)).not.toBeNull()
     expect(screen.queryByLabelText('Mode')).toBeNull()
+    expect(screen.queryByTestId('f-header-division')).toBeNull()
+    expect(screen.queryByLabelText('Division')).toBeNull()
     expect(screen.getByTestId('hdr-billTo-chip').getAttribute('aria-expanded')).toBe('false')
     expect((screen.getByTestId('ship-form-header-panel') as HTMLElement).hidden).toBe(true)
   })

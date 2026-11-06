@@ -101,7 +101,7 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   const truckload = isTruckload(values)
   if (!isShipmentTypeKey(values.shipmentType)) red('shipping', 'shipmentType', LABEL.shipping.shipmentType, 'Pick a shipment type.')
   if (truckload && empty(values.ship.equipmentType)) red('shipping', 'equipmentType', LABEL.shipping.equipmentType, 'A truckload order needs an equipment type.')
-  if (empty(values.ship.revDivision)) red('shipping', 'revDivision', LABEL.shipping.revDivision, 'Pick a revenue type.')
+  if (empty(values.ship.revDivision)) red('shipping', 'revDivision', LABEL.shipping.revDivision, 'Pick a division.')
   if (!(Number(values.ship.weightLbs) > 0)) red('shipping', 'weightLbs', LABEL.shipping.weightLbs, 'Weight must be greater than zero.')
   if (empty(values.ship.description)) red('shipping', 'description', LABEL.shipping.description, 'Describe what is on the truck.')
 

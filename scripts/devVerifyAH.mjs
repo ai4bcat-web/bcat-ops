@@ -309,7 +309,7 @@ const rectOf = (b, selector) => b.evaluate(`(() => { const el = document.querySe
 const countOf = (b, selector) => b.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`)
 const overflowOf = (b) => b.evaluate(`Math.max(document.documentElement.scrollWidth - innerWidth, (document.querySelector('.tms-ship-form-scroll')?.scrollWidth ?? 0) - (document.querySelector('.tms-ship-form-scroll')?.clientWidth ?? 0))`)
 
-/** The seven Aljex reds, minimal: customer, equipment, Revenue Type, weight, description, pickup name + ready. */
+/** The seven Aljex reds, minimal: customer, equipment, Division, weight, description, pickup name + ready. */
 async function fillRequired(ctx, b, { division } = {}) {
   await pickFrom(b, `${tid('f-customer-name')} input`, CUSTOMER_OPTION, ctx.customerName)
   await fill(b, 'f-shipping-equipmentType', 'Dry Van')
@@ -386,13 +386,14 @@ const RUNNERS = {
     await b.setViewport(1440, 900)
     await openForm(b, '/tms/shipments/new')
     const bad = []
-    // header strip: title, Division pill, Customer type-ahead, Bill To chip, status chip, read-only PRO preview (no Mode pill)
+    // header strip: title, Customer type-ahead, Bill To chip, status chip, read-only PRO preview (no Division or Mode pill)
     const title = await textOf(b, 'ship-form-title')
     if (title !== 'New shipment') bad.push(`title is ${JSON.stringify(title)}`)
-    for (const id of ['ship-form-header', 'f-header-division', 'f-customer-name', 'hdr-billTo-chip', 'ship-form-status', 'ship-form-pro']) if (!(await has(b, tid(id)))) bad.push(`header lacks ${id}`)
-    if (await has(b, `${tid('ship-form-header')} ${tid('f-shipping-shipmentType')}`)) bad.push('the Mode / Shipment type select is still in the header')
+    for (const id of ['ship-form-header', 'f-customer-name', 'hdr-billTo-chip', 'ship-form-status', 'ship-form-pro']) if (!(await has(b, tid(id)))) bad.push(`header lacks ${id}`)
+    if (await has(b, `${tid('ship-form-header')} ${tid('f-shipping-shipmentType')}`) || await has(b, tid('f-header-division'))) bad.push('the Mode / Shipment type / Division select is still in the header')
+    if ((await b.evaluate(`document.querySelectorAll('[data-testid="f-shipping-revDivision"]').length`)) !== 1) bad.push('Division / Revenue Type renders more than once')
     if ((await b.evaluate(`document.querySelector('[data-testid="ship-form-header-panel"]')?.hidden ?? null`)) !== true) bad.push('the Bill To panel is not collapsed by default')
-    if ((await b.evaluate(`(document.querySelector('[data-testid="section-freight-body"] select, [data-testid="section-freight-body"] input'))?.dataset.testid ?? null`)) !== 'f-shipping-shipmentType') bad.push('Shipment type is not the first field of the Freight card')
+    if ((await b.evaluate(`(document.querySelector('[data-testid="section-freight-body"] select, [data-testid="section-freight-body"] input'))?.dataset.testid ?? null`)) !== 'f-shipping-revDivision') bad.push('Division is not the first field of the Freight card')
     if ((await valOf(b, 'f-shipping-shipmentType')) !== 'FTL') bad.push('Shipment type does not default to FTL')
     if ((await textOf(b, 'ship-form-status')) !== 'Draft') bad.push('status chip is not Draft')
     if (await has(b, `${tid('ship-form-pro')} input`)) bad.push('the PRO preview is editable')
@@ -400,7 +401,7 @@ const RUNNERS = {
     const heads = await b.evaluate(`[...document.querySelectorAll('.tms-ship-card')].map((c) => c.dataset.testid + ':' + c.querySelector('.tms-ship-card-num')?.textContent + ':' + c.querySelector('.tms-ship-card-title')?.textContent)`)
     const want = SECTIONS.map(([k, t], i) => `section-${k}:${i + 1}:${t}`)
     if (heads.join('|') !== want.join('|')) bad.push(`cards ${heads.join(' | ')} ≠ ${want.join(' | ')}`)
-    const reds = ['Equipment (required)', 'Revenue Type (required)', 'Weight (required)', 'Description (required)', 'Name (required)', 'Ready (required)']
+    const reds = ['Equipment (required)', 'Division (required)', 'Weight (required)', 'Description (required)', 'Name (required)', 'Ready (required)']
     for (const label of reds) if (!(await has(b, `[aria-label=${JSON.stringify(label)}]`))) bad.push(`red-required control "${label}" is missing`)
     // every Aljex flag is a chip; nothing of the old accordions is left
     const absent = []
@@ -440,7 +441,7 @@ const RUNNERS = {
       await shotFile(b, `04-${String(n + 1).padStart(2, '0')}-card-${key}`)
     }
     failures([...bad, ...problemList(b).slice(0, 2)])
-    return `header strip (title, Division, Customer, Bill To chip, Draft chip, PRO preview), 7 numbered cards in order, Shipment type first in Freight, ${reds.length} red-required controls, ${facts.flags.length} flag chips, Carrier collapsed, rail present, Tab order ${got.join(' > ')}, no horizontal scroll at 1440 / 1280`
+    return `header strip (title, Customer, Bill To chip, Draft chip, PRO preview), 7 numbered cards in order, Division then Shipment type first in Freight, ${reds.length} red-required controls, ${facts.flags.length} flag chips, Carrier collapsed, rail present, Tab order ${got.join(' > ')}, no horizontal scroll at 1440 / 1280`
   },
 
   async AH05(ctx) {
@@ -467,7 +468,7 @@ const RUNNERS = {
     await b.poll(() => has(b, tid('ship-form-issues')), 'issues strip', 15_000)
     const text = await b.evaluate(`document.querySelector(${JSON.stringify(tid('ship-form-issues'))}).innerText`)
     const bad = []
-    for (const name of ['Equipment', 'Revenue Type', 'Weight', 'Description']) if (!text.includes(name)) bad.push(`issues strip does not name ${name}`)
+    for (const name of ['Equipment', 'Division', 'Weight', 'Description']) if (!text.includes(name)) bad.push(`issues strip does not name ${name}`)
     if ((await pathOf(b)) !== url) bad.push('Create on an empty form navigated away')
     const rail = await textOf(b, 'rail-required-count')
     if (!/^0 \/ \d+$/.test(rail ?? '')) bad.push(`rail checklist reads ${JSON.stringify(rail)} on an empty form`)
@@ -1105,7 +1106,7 @@ const RUNNERS = {
     })()`)
     if (!card.select) {
       await shotFile(b, 'AR06-no-roster-picker')
-      throw new Error(`the Ivan Cartage division card has no roster picker (Driver 1 select); revDivision ${JSON.stringify(await valOf(b, 'f-shipping-revDivision'))}, header division ${JSON.stringify(await valOf(b, 'f-header-division'))}, options ${JSON.stringify(await b.evaluate(`[...document.querySelector(${JSON.stringify(tid('f-shipping-revDivision'))}).options].map((o) => o.value + '=' + o.textContent.trim())`))}, card text ${JSON.stringify((await b.evaluate(`document.querySelector('[data-testid="section-carrier-body"]').innerText`)).slice(0, 200))}`)
+      throw new Error(`the Ivan Cartage division card has no roster picker (Driver 1 select); revDivision ${JSON.stringify(await valOf(b, 'f-shipping-revDivision'))}, options ${JSON.stringify(await b.evaluate(`[...document.querySelector(${JSON.stringify(tid('f-shipping-revDivision'))}).options].map((o) => o.value + '=' + o.textContent.trim())`))}, card text ${JSON.stringify((await b.evaluate(`document.querySelector('[data-testid="section-carrier-body"]').innerText`)).slice(0, 200))}`)
     }
     if (card.typed > 0) bad.push(`${card.typed} free-text driver inputs on the Ivan Cartage card`)
     if (card.empty) bad.push('the Ivan Cartage card is still the collapsed "No carrier yet" card')

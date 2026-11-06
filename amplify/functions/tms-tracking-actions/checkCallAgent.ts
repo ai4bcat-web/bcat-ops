@@ -24,7 +24,7 @@ import {
   type TemplatePlaceholder,
 } from '../../../src/lib/trackingAutomation'
 import { MAX_SMS_BODY } from '../../../src/lib/dispatch'
-import { allowsAutoRequests, channelsAllowedBy, effectiveTrackingPrefs, type TrackingMethod } from '../../../src/lib/trackingPrefs'
+import { AUTO_BLOCK_NOTE, autoRequestBlock, channelsAllowedBy, effectiveTrackingPrefs, type TrackingMethod } from '../../../src/lib/trackingPrefs'
 import { resolveDriverSms } from './driverPhone'
 import { TZ } from '../../../src/lib/date'
 import { isVoided } from '../_shared/voided'
@@ -237,7 +237,8 @@ export async function runCheckCallPlan(
     const plan = enabled.length ? { ...resolved.plan, channels: methodChannels } : null
     let blocked: string | null = null
     if (auto) {
-      if (!allowsAutoRequests(prefs)) blocked = 'Customer tracking is manual'
+      const prefsBlock = autoRequestBlock(prefs)
+      if (prefsBlock) blocked = AUTO_BLOCK_NOTE[prefsBlock]
       else if (!policy.checkCallsAuto) blocked = 'Automatic check calls are off'
       else if (!carrier || carrier.kind !== 'CARRIER' || carrier.status !== 'ACTIVE') blocked = 'Not a brokered carrier leg'
       else if (!isRateConSent(carrier)) blocked = 'Rate confirmation not sent'

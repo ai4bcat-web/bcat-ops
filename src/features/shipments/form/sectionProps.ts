@@ -79,6 +79,8 @@ export interface FormCtx {
   /** A pipeline is running: every input is disabled. */
   busy: boolean
   actions: FormActions
+  /** Re-read the shipment bundle from the server (after a write made outside the form's own pipelines, e.g. tracking mode). */
+  refreshBundle: () => Promise<void>
   /** All current issues; a section filters by `section`. */
   issues: FormIssue[]
 }

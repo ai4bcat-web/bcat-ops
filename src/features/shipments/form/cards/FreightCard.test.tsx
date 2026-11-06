@@ -5,12 +5,15 @@ import { FreightCard } from './FreightCard'
 import { renderCard } from './cardTestKit'
 
 describe('FreightCard shipment type', () => {
-  it('is the first required field, lists every type, and starts on the division default (Truckload)', () => {
+  it('comes after Division, lists every type, and starts on the division default (Truckload)', () => {
     renderCard(FreightCard)
     const select = screen.getByTestId('f-shipping-shipmentType') as HTMLSelectElement
     expect(select.value).toBe('FTL')
     const first = document.querySelector('[data-testid="section-freight-body"] select, [data-testid="section-freight-body"] input')
-    expect(first).toBe(select)
+    // Division is first, Shipment type second.
+    expect(first).toBe(screen.getByTestId('f-shipping-revDivision'))
+    expect(first!.nextElementSibling ?? first!.closest('.tms-field')!.nextElementSibling).toBeTruthy()
+    expect(document.querySelectorAll('[data-testid="f-shipping-revDivision"]')).toHaveLength(1)
     const labels = Array.from(select.options).map((o) => o.textContent)
     expect(labels).toHaveLength(25)
     expect(labels).toEqual(expect.arrayContaining(['Truckload (FTL)', 'Auto transport (open)', 'Heavy haul / Oversize', 'Cross-border (Mexico)', 'Courier / Parcel', 'Other']))

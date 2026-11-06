@@ -48,7 +48,7 @@ const FIXED: FixedRow[] = [
   { key: 'equipment', label: 'Equipment', ids: ['shipping:equipmentType'], fieldKey: LABEL.shipping.equipmentType.testId, card: 'freight', truckloadOnly: true },
   { key: 'weight', label: 'Weight', ids: ['shipping:weightLbs'], fieldKey: LABEL.shipping.weightLbs.testId, card: 'freight' },
   { key: 'description', label: 'Description', ids: ['shipping:description'], fieldKey: LABEL.shipping.description.testId, card: 'freight' },
-  { key: 'revenue', label: 'Revenue type', ids: ['shipping:revDivision'], fieldKey: LABEL.shipping.revDivision.testId, card: 'freight' },
+  { key: 'division', label: 'Division', ids: ['shipping:revDivision'], fieldKey: LABEL.shipping.revDivision.testId, card: 'freight' },
 ]
 
 const CARD_OF_SECTION: Record<string, RailRow['card']> = {
