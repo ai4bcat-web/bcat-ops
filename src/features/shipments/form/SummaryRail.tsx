@@ -1,19 +1,17 @@
 /**
  * The sticky summary rail (Step AR): load summary lines, live money block (Net $ and Profit % with
  * a margin dot), required checklist (click a row = scroll to and focus the field), the Activity block (stage and
- * recent audit entries), roles, and the
- * pinned actions. Below 1280 px the same element becomes a collapsible bottom sheet (CSS only), so
+ * recent audit entries) and roles. The actions live in the page's bottom ActionBar. Below 1280 px the same element becomes a collapsible bottom sheet (CSS only), so
  * there is one set of controls, one set of test ids.
  */
 import { Check, ChevronUp, Circle } from 'lucide-react'
 import { memo, useMemo, useState, type ComponentType } from 'react'
-import { TmsButton } from '@/features/tms/kit'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { IntakeLoadRecord } from '@/types/intake'
 import { ActivityBlock } from './ActivityBlock'
+import { RateHistoryRail } from './RateHistoryRail'
 import { sliceOf, type CardProps } from './cards/cardRegistry'
 import { requiredProgress, type RailRow, type RailSummary } from './railModel'
-import type { RunKind } from './useShipmentForm'
 import type { SliceSectionProps } from './sectionRegistry'
 
 export interface SummaryRailProps {
@@ -22,26 +20,21 @@ export interface SummaryRailProps {
   rows: RailRow[]
   /** The user pressed Create / Save and something blocked: missing rows turn amber. */
   attempted: boolean
-  status: string
-  busy: boolean
-  voided: boolean
   Roles: ComponentType<SliceSectionProps<'roles'>>
+  /** The Rate history body (feedback 18): rendered under Money, collapsible. */
+  RateHistory: ComponentType<CardProps>
   /** The intake item the create page was opened from (its extractor entries show in Activity). */
   intakeId?: string
   intake?: IntakeLoadRecord | null
-  onRun: (kind: RunKind) => void
-  onDiscard: () => void
 }
 
 const TONE_WORD = { green: 'On target', amber: 'Near target', red: 'Below target' } as const
 
-function SummaryRailImpl({ common, summary, rows, attempted, status, busy, voided, Roles, intakeId, intake, onRun, onDiscard }: SummaryRailProps) {
+function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory, intakeId, intake }: SummaryRailProps) {
   const [sheetOpen, setSheetOpen] = useState(false)
-  const { mode, values, update, ctx, form } = common
+  const { values, update, ctx, form } = common
   const { money } = summary
   const { done, total, ready } = requiredProgress(rows)
-  const isDraft = status === 'NEW' || status === 'DRAFT'
-  const createMode = mode === 'create'
   const dash = '—'
   const net = money.priced ? formatCents(money.netCents) : dash
   const pct = money.priced ? `${money.profitPct.toFixed(1)}%` : dash
@@ -81,6 +74,8 @@ function SummaryRailImpl({ common, summary, rows, attempted, status, busy, voide
           </div>
         </section>
 
+        <RateHistoryRail common={common} Body={RateHistory} />
+
         <section className="tms-rail-block" data-testid="rail-required" aria-label="Required">
           <h2 className="tms-rail-h">Required <span className="tms-rail-count" data-testid="rail-required-count" data-ready={ready}>{done} / {total}</span></h2>
           <ul className="tms-rail-reqs">
@@ -105,30 +100,6 @@ function SummaryRailImpl({ common, summary, rows, attempted, status, busy, voide
           <h2 className="tms-rail-h">Roles</h2>
           <Roles value={values.roles} onChange={onRoles} ctx={ctx} form={form} />
         </section>
-      </div>
-
-      <div className="tms-rail-actions" data-testid="rail-actions">
-        {isDraft ? (
-          <TmsButton
-            size="sm" data-testid="ship-form-save-draft" disabled={busy || voided} onClick={() => onRun('draft')}
-            title={createMode ? 'Autosaves on this browser every 10 s. The first server save consumes a permanent shipment number. ⌘/Ctrl+S' : '⌘/Ctrl+S'}
-          >
-            Save draft
-          </TmsButton>
-        ) : null}
-        <TmsButton
-          size="sm" variant="primary" data-testid={createMode ? 'ship-form-create' : 'ship-form-save'}
-          aria-disabled={!ready} data-ready={ready} disabled={busy || voided} onClick={() => onRun(createMode ? 'create' : 'save')}
-          title={createMode ? '⌘/Ctrl+Enter' : undefined}
-        >
-          {createMode ? 'Create shipment' : 'Save changes'}
-        </TmsButton>
-        {!createMode && status === 'DRAFT' ? (
-          <TmsButton size="sm" variant="primary" data-testid="ship-form-submit" disabled={busy || voided} onClick={() => onRun('submit')}>
-            Submit order
-          </TmsButton>
-        ) : null}
-        <TmsButton size="sm" variant="ghost" data-testid="ship-form-cancel" onClick={onDiscard}>{createMode ? 'Cancel' : 'Discard'}</TmsButton>
       </div>
     </aside>
   )

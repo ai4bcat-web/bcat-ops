@@ -29,7 +29,14 @@
 }
 .tms-shell .tms-card-lane-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .tms-shell .tms-card-lane-label { font-size: 14px; font-weight: 600; color: var(--tms-text); overflow-wrap: anywhere; }
-.tms-shell .tms-card-lane-miles { width: 288px; flex: 0 0 288px; }
+.tms-shell .tms-card-lane-miles { width: 160px; flex: 0 0 160px; }
+.tms-shell .tms-card-miles-box { position: relative; display: flex; gap: 4px; align-items: center; }
+.tms-shell .tms-card-miles-box > input { flex: 1 1 auto; min-width: 0; }
+.tms-shell .tms-card-miles-pop {
+  position: absolute; right: 0; top: 36px; z-index: 6; display: flex; gap: 4px; align-items: center; padding: 8px;
+  background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); box-shadow: var(--tms-shadow-md, 0 4px 12px var(--tms-border));
+}
+.tms-shell .tms-card-miles-pop input { width: 90px; }
 
 /* Timeline ---------------------------------------------------------- */
 .tms-shell .tms-card-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -84,3 +91,8 @@
 .tms-shell .tms-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 8px; border-top: 1px solid var(--tms-border); }
 .tms-shell .tms-card-gap::before { content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; background: var(--tms-border); }
 .tms-shell .tms-card-gap:last-child::before { display: none; }
+
+/* Inline new location (feedback 14) */
+.tms-shell .tms-card-newloc { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px dashed var(--tms-border); border-radius: var(--tms-radius-sm); background: var(--tms-surface-subtle); }
+.tms-shell .tms-card-newloc-dup { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; font-size: 12px; border: 1px solid var(--tms-badge-orange); border-radius: var(--tms-radius-sm); background: var(--tms-badge-orange-tint); color: var(--tms-text); }
+.tms-shell .tms-card-typeahead-add { color: var(--tms-primary); font-weight: 600; }

@@ -7,11 +7,10 @@
  */
 import { useContext, useEffect, useMemo, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { GripVertical, Pencil, Trash2 } from 'lucide-react'
-import { toast } from 'sonner'
-import { DirectoryCreateDialog } from '@/components/directory-picker/DirectoryCreateDialog'
 import { TmsIconButton, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { NewLocationForm } from './NewLocationForm'
+import { draftFromStop, onceStopPatch, type LocationDraft } from './newLocation'
 import { useAuthUser } from '@/hooks/useAuth'
-import { createLocation } from '@/lib/apiClient'
 import { requiresApptProofs } from '@/lib/apptQueue'
 import { findLocationMatches } from '@/lib/tmsDirectory'
 import type { LocationRecord } from '@/types/tms'
@@ -59,10 +58,12 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
   const userEmail = useAuthUser()?.email ?? ''
   const [recent, setRecent] = useState(() => readRecents('location', userEmail))
   const [query, setQuery] = useState('')
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useState<LocationDraft | null>(null)
   const fromEmail = useContext(FromEmailContext)
   const [editAddr, setEditAddr] = useState(() => !stop.city.trim() || fromEmail.has(`f-${prefix}-city`))
   const base = disabledState(ctx)
+  const canSave = ctx.canCreateLocation === true
+  const intakeStop = fromEmail.has(`f-${prefix}-name`) && !stop.locationId && stop.name.trim() !== ''
   const stopLock = ctx.locked.stops[stop.id]
   const placeLocked = base.disabled || Boolean(stopLock)
   const section = prefix === 'pickup' ? 'pickup' : prefix === 'consignee' ? 'consignee' : 'picks'
@@ -76,6 +77,14 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
   const ensureLocations = ctx.directory.ensureLocations
   const searching = query.trim().length >= 2
   useEffect(() => { if (searching) ensureLocations?.() }, [searching, ensureLocations])
+
+  // Intake pre-fill: an extracted stop with no directory match shows the add form on its own, name and address filled.
+  const [dismissed, setDismissed] = useState(false)
+  useEffect(() => { if (intakeStop) ensureLocations?.() }, [intakeStop, ensureLocations])
+  const autoOpen = intakeStop && !dismissed && ctx.directory.locations.length > 0
+    && findLocationMatches({ name: stop.name, city: stop.city || undefined }, ctx.directory.locations).length === 0
+  const form = adding ?? (autoOpen ? draftFromStop(stop) : null)
+  const closeForm = () => { setAdding(null); setDismissed(true) }
 
   const items = useMemo<TypeaheadItem[]>(() => {
     const sub = (r: LocationRecord) => [r.city, r.state].filter(Boolean).join(', ')
@@ -160,8 +169,9 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
             inputTestId={nameDef.testId} optionTestId={`${nameDef.testId}-option`} ariaLabel={labelFor(nameDef)}
             placeholder="Search locations…" value={stop.name} onValueChange={typeName} items={items} onPick={choose}
             disabled={placeLocked} title={stopLock} onFocus={() => ensureLocations?.()}
+            addRow={stop.name.trim().length >= 2 && items.length === 0 && !placeLocked ? { label: `+ Add ${stop.name.trim()} as a new location`, testId: `f-${prefix}-addRow`, onAdd: () => setAdding(draftFromStop(stop)) } : null}
           />
-          <TmsIconButton aria-label={`Add location (${nameDef.text})`} data-testid={`f-${prefix}-addLocation`} disabled={placeLocked} onClick={() => setAdding(true)}>
+          <TmsIconButton aria-label={`Add location (${nameDef.text})`} data-testid={`f-${prefix}-addLocation`} disabled={placeLocked} onClick={() => setAdding(draftFromStop(stop))}>
             <Pencil size={13} />
           </TmsIconButton>
         </div>
@@ -218,19 +228,13 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
         </LField>
       </FieldGrid>
 
-      {adding && (
-        <DirectoryCreateDialog
-          type="location" open tmsTheme
-          initial={{ name: stop.name, city: stop.city }}
-          customers={ctx.directory.customers} divisions={[]}
-          onClose={() => setAdding(false)}
-          onSave={async (record, geocodeToken) => {
-            const { id: _id, createdAt: _c, updatedAt: _u, ...input } = record as LocationRecord
-            const loc = await createLocation({ ...input, ...(geocodeToken ? { geocodeToken } : {}) })
-            onChange(stopPatchFromLocation(loc))
-            setRecent(pushRecent('location', userEmail, loc.id))
-            toast.success('Location added')
-          }}
+      {form && (
+        <NewLocationForm
+          initial={form} locations={ctx.directory.locations} canSave={canSave} createdFrom={intakeStop ? 'intake' : 'shipment-form'} prefix={prefix}
+          onCancel={closeForm}
+          onUseExisting={(loc) => { choose(loc.id); closeForm() }}
+          onUseOnce={(d) => { onChange(onceStopPatch(d)); setEditAddr(false); closeForm() }}
+          onSaved={(loc) => { ctx.addLocation?.(loc); onChange(stopPatchFromLocation(loc)); setRecent(pushRecent('location', userEmail, loc.id)); setEditAddr(false); closeForm() }}
         />
       )}
     </div>

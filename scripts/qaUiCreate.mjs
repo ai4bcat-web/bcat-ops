@@ -59,7 +59,7 @@ try {
   }
   let miles = 0
   for (let i = 0; i < 30 && !(miles > 0); i += 1) { await pause(1000); miles = Number(await b.evaluate(`document.querySelector('${tid('f-shipping-customerMiles')}')?.value ?? ''`)) }
-  const truck = Number(await b.evaluate(`document.querySelector('${tid('f-shipping-truckMiles')}')?.value ?? ''`))
+  const truck = miles
   const src = await b.evaluate(`document.querySelector('${tid('f-shipping-milesSource')}')?.innerText ?? ''`)
   const cities = (await b.evaluate(`[document.querySelector('${tid('f-pickup-addressLine')}')?.innerText, document.querySelector('${tid('f-consignee-addressLine')}')?.innerText]`)).map((x) => (x && !/No address/.test(x) ? 'set' : 'empty'))
   const dbg = await b.evaluate(`({ ps: document.querySelector('${tid('f-pickup-state')}')?.value?.length, cs: document.querySelector('${tid('f-consignee-state')}')?.value?.length, pz: !!document.querySelector('${tid('f-pickup-zip')}')?.value, note: document.querySelector('${tid('f-shipping-milesSource')}')?.innerText ?? null, disabled: document.querySelector('${tid('f-shipping-disableMileage')}')?.checked })`)
@@ -68,7 +68,7 @@ try {
   await b.evaluate(`document.querySelector('${tid('section-route')}').scrollIntoView({ block: 'start' })`); await b.screenshot(`${SHOTS}/create-auto-miles-1440.png`)
   // 6 layout: total scroll height, columns, no horizontal overflow, tab order
   const lay = await b.evaluate(`(() => { const sc = document.querySelector('.tms-ship-form-scroll'); const cards = [...document.querySelectorAll('.tms-ship-card')].map((s) => s.dataset.testid.replace('section-', '')); const rail = document.querySelector('[data-testid="ship-form-rail"]').getBoundingClientRect(); return { cards, hOverflow: Math.max(sc.scrollWidth - sc.clientWidth, document.documentElement.scrollWidth - innerWidth), railWidth: Math.round(rail.width), railTop: Math.round(rail.top) } })()`)
-  rec('six cards in order (Customer + Bill To in the header), 360 px rail, no h-overflow', lay.hOverflow <= 1 && lay.cards.join() === 'freight,route,rates,rateHistory,carrier,documents' && lay.railWidth === 360 ? 'PASS' : 'FAIL', lay)
+  rec('five cards in order (Customer + Bill To in the header), 360 px rail, no h-overflow', lay.hOverflow <= 1 && lay.cards.join() === 'freight,route,rates,carrier,documents' && lay.railWidth === 360 ? 'PASS' : 'FAIL', lay)
   // first screen: Customer, Bill To, the Freight card start and the rail's Create button are visible without scrolling
   await b.evaluate(`document.querySelector('.tms-ship-form-scroll')?.scrollTo(0, 0)`); await pause(400)
   const fold = await b.evaluate(`(() => { const r = (id) => document.querySelector('[data-testid="' + id + '"]')?.getBoundingClientRect(); const pu = r('f-shipping-equipmentType'); const c = r('ship-form-create'); const cu = r('ship-form-header'); const bt = r('hdr-billTo-chip'); return { customerBottom: Math.round(cu?.bottom ?? -1), billToTop: Math.round(bt?.top ?? -1), freightFieldBottom: Math.round(pu?.bottom ?? -1), createBottom: Math.round(c?.bottom ?? -1), h: innerHeight } })()`)

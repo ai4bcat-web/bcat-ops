@@ -81,6 +81,12 @@ export interface FormCtx {
   actions: FormActions
   /** Re-read the shipment bundle from the server (after a write made outside the form's own pipelines, e.g. tracking mode). */
   refreshBundle: () => Promise<void>
+  /** May this user create a directory Location (owner / ADMIN / page grant)? Without it a stop offers "Use once" only. */
+  canCreateLocation?: boolean
+  /** Creates a directory Customer (set only for users the directory lets create one); the picker's "+ Add as a new customer" row needs it. */
+  addCustomer?: (input: Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>) => Promise<CustomerRecord>
+  /** Hands a freshly created Location to the page so every other stop (and the type-ahead) sees it at once. */
+  addLocation?: (loc: LocationRecord) => void
   /** All current issues; a section filters by `section`. */
   issues: FormIssue[]
 }

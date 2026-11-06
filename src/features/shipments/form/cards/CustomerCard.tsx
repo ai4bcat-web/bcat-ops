@@ -10,6 +10,8 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { X } from 'lucide-react'
+import { toast } from 'sonner'
+import { DirectoryCreateDialog } from '@/components/directory-picker/DirectoryCreateDialog'
 import { TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { useAuthUser } from '@/hooks/useAuth'
 import { effectiveCustomerStatus } from '@/lib/customerCredit'
@@ -52,48 +54,55 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
   }, [ctx.directory.customers])
 
   const items = useMemo<TypeaheadItem[]>(() => {
-    const q = (query ?? '').trim()
+    const q = (query ?? (value.useTyped && !value.id ? value.typedName : '')).trim()
     const toItem = (c: CustomerRecord, isRecent: boolean): TypeaheadItem => ({
       id: c.id, label: c.name, sub: isRecent ? 'Recent' : undefined, recent: isRecent,
     })
     if (!q) return recentFirst(shippable, recent).filter((c) => recent.includes(c.id)).map((c) => toItem(c, true))
     return rankWithRecents(findCustomerMatches(q, shippable), recent).slice(0, OFFERED).map((c) => toItem(c, recent.includes(c.id)))
-  }, [query, shippable, recent])
+  }, [query, shippable, recent, value.useTyped, value.id, value.typedName])
 
-  const pick = (id: string | null) => {
-    setQuery(null)
-    if (!id) { onChange({ id: '', contactId: '', billToId: '' }); return }
-    const picked = ctx.directory.customers.find((c) => c.id === id)
-    if (!picked) return
+  const select = (picked: CustomerRecord) => {
+    const id = picked.id
     setRecent(pushRecent('customer', userEmail, id))
     form.update((prev) => {
       const seeded = applyCustomerDefaults({ ...prev, customer: { ...prev.customer, useTyped: false, typedName: '' } }, picked)
       return { ...seeded, customer: { ...seeded.customer, emails: seeded.customer.emails.map((e, i) => (i < VISIBLE_EMAILS ? e : prev.customer.emails[i] ?? '')) } }
     })
   }
+  const pick = (id: string | null) => {
+    setQuery(null)
+    if (!id) { onChange({ id: '', contactId: '', billToId: '' }); return }
+    const picked = ctx.directory.customers.find((c) => c.id === id)
+    if (picked) select(picked)
+  }
+  // Customer must come from the directory: no match offers the existing create dialog (when the user may create one).
+  const [adding, setAdding] = useState(false)
+  const typed = (query ?? (value.useTyped ? value.typedName : '')).trim()
+  const addRow = ctx.addCustomer && typed.length >= 2 && items.length === 0
+    ? { label: `+ Add ${typed} as a new customer`, testId: 'f-customer-addRow', onAdd: () => setAdding(true) }
+    : null
 
   return (
     <>
       <div className="tms-ship-hdr-customer-wrap" data-testid="hdr-customer">
         <FieldGrid>
-        <LField span={12} def={LABEL.customer.name} error={err(LABEL.customer.name.testId)}>
+        <LField
+          span={12} def={LABEL.customer.name} error={err(LABEL.customer.name.testId)}
+          hint={value.useTyped && !value.id && value.typedName ? <span className="tms-hdr-unmatched" data-testid="f-customer-unmatched" title="Extracted from the e-mail; pick or add the customer from the directory">not matched</span> : undefined}
+        >
           {nameLocked ? (
             <div className="ship-inline">
               <TmsInput {...ctl(LABEL.customer.name)} readOnly value={customer?.name ?? value.typedName} title={lockReason(ctx.locked, 'customer')} />
               {ctx.bundle && <Link className="ship-link" to={`/tms/shipments/${ctx.bundle.shipment.id}`}>Change customer…</Link>}
             </div>
-          ) : value.useTyped ? (
-            <TmsInput
-              {...ctl(LABEL.customer.name)} value={value.typedName} disabled={base.disabled}
-              onChange={(e) => onChange({ typedName: e.target.value, id: '' })}
-            />
           ) : (
             <div className="ship-inline">
               <Typeahead
                 groupTestId={LABEL.customer.name.testId} inputTestId={`${LABEL.customer.name.testId}-input`}
                 ariaLabel={labelFor(LABEL.customer.name)} placeholder="Search customers…"
-                value={query ?? customer?.name ?? ''} onValueChange={setQuery} onBlur={() => setQuery(null)}
-                items={items} onPick={pick} disabled={base.disabled}
+                value={query ?? customer?.name ?? (value.useTyped ? value.typedName : '')} onValueChange={setQuery} onBlur={() => setQuery(null)}
+                items={items} onPick={pick} disabled={base.disabled} addRow={addRow}
               />
               <TmsIconButton aria-label="Clear customer" data-testid="f-customer-clear" disabled={base.disabled || !value.id} onClick={() => pick(null)}>
                 <X size={14} />
@@ -103,17 +112,17 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
         </LField>
         </FieldGrid>
       </div>
-      {!nameLocked && !value.id && (
-        <div className="tms-ship-hdr-cell" title="No matching customer: record the name you typed for now">
-          <span className="tms-fg-label" aria-hidden="true">&nbsp;</span>
-          <label className="ship-check tms-ship-hdr-check">
-            <input
-              type="checkbox" data-testid="f-customer-useTyped" aria-label="No matching customer — record the name for now"
-              checked={value.useTyped} disabled={base.disabled} onChange={(e) => onChange({ typedName: e.target.checked ? value.typedName : '', useTyped: e.target.checked })}
-            />
-            Typed name only
-          </label>
-        </div>
+      {adding && (
+        <DirectoryCreateDialog
+          type="customer" open tmsTheme initial={{ name: typed }} onClose={() => setAdding(false)}
+          onSave={async (record) => {
+            const { id: _id, createdAt: _c, updatedAt: _u, ...input } = record as CustomerRecord
+            const created = await ctx.addCustomer!(input)
+            select(created)
+            setQuery(null)
+            toast.success('Customer added')
+          }}
+        />
       )}
     </>
   )

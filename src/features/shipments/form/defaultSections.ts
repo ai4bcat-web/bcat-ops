@@ -1,5 +1,5 @@
 /**
- * The six main-column cards, the header's Customer / Bill To parts and the "More" tabs, looked up by key. The page imports this and nothing else from
+ * The five main-column cards, the header's Customer / Bill To parts and the "More" tabs, looked up by key. The page imports this and nothing else from
  * `cards/`, so a test can replace the whole registry with one `vi.mock('./defaultSections')`.
  * (The Aljex section components stay the building blocks; the cards import them directly.)
  */
@@ -22,12 +22,14 @@ export const CARD_COMPONENTS: CardComponents = {
   freight: FreightCard,
   route: RouteCard,
   rates: RatesCard,
-  rateHistory: RateHistoryCard,
   carrier: CarrierTrackingCard,
   documents: DocumentsCard,
 }
 
 /** The header strip's Customer type-ahead and Bill To chip + dropdown panel (feedback 7). */
+/** Rate history lives in the summary rail (feedback 18), under the Money block. */
+export const RAIL_RATE_HISTORY = RateHistoryCard
+
 export const HEADER_PARTS = { CustomerPicker, CustomerRef, BillToStrip }
 
 export const MORE_TAB_COMPONENTS: MoreTabComponents = {

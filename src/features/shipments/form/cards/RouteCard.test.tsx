@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('aws-amplify/data', () => ({ generateClient: vi.fn(() => ({ graphql: vi.fn() })) }))
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { LocationRecord } from '@/types/tms'
 import { RouteCard } from './RouteCard'
 import { renderCard } from './cardTestKit'
@@ -69,7 +69,7 @@ describe('RouteCard', () => {
     expect(host.current!.getValues().stops.map((s) => s.name)).toEqual(['', 'B', 'A'])
   })
 
-  it('auto-fills miles with an est. label, keeps a typed override, and shows transit', async () => {
+  it('shows ONE read-only Miles field, auto-filled from the route into BOTH miles fields; the source is a tooltip, not text', async () => {
     milesMock.mockResolvedValue({ miles: 912, source: 'estimate' })
     const host = setup((v) => ({
       ...v,
@@ -77,12 +77,40 @@ describe('RouteCard', () => {
     }))
     await waitFor(() => expect(host.current!.getValues().ship.customerMiles).toBe('912'), { timeout: 3000 })
     expect(host.current!.getValues().ship.truckMiles).toBe('912')
-    expect(screen.getByTestId('f-shipping-customerMiles-est')).toBeTruthy()
+    expect((screen.getByTestId('f-shipping-customerMiles') as HTMLInputElement).readOnly).toBe(true)
+    expect(screen.queryByTestId('f-shipping-truckMiles')).toBeNull()
+    expect(screen.getByTestId('f-shipping-customerMiles').closest('.tms-fg-field')!.getAttribute('title')).toBe('Estimate')
     expect(screen.getByTestId('f-route-transit').textContent).toContain('2 days')
     expect(screen.getByTestId('f-route-lane').textContent).toBe('Chicago, IL → Dallas, TX')
-    await act(async () => { fireEvent.change(screen.getByTestId('f-shipping-customerMiles'), { target: { value: '950' } }) })
-    expect(screen.queryByTestId('f-shipping-customerMiles-est')).toBeNull()
+  })
+
+  it('the Distance Matrix answer is labelled as such', async () => {
+    milesMock.mockResolvedValue({ miles: 700, source: 'google' })
+    setup((v) => ({ ...v, stops: v.stops.map((s, i) => ({ ...s, city: i ? 'Dallas' : 'Chicago', state: i ? 'TX' : 'IL' })) }))
+    await waitFor(() => expect(screen.getByTestId('f-shipping-milesSource').textContent).toBe('Distance Matrix'), { timeout: 3000 })
+  })
+
+  it('the pencil override writes both fields, sticks through a route change, and Clear hands it back to the route', async () => {
+    milesMock.mockResolvedValue({ miles: 912, source: 'google' })
+    const host = setup((v) => ({ ...v, stops: v.stops.map((s, i) => ({ ...s, city: i ? 'Dallas' : 'Chicago', state: i ? 'TX' : 'IL' })) }))
+    await waitFor(() => expect(host.current!.getValues().ship.customerMiles).toBe('912'), { timeout: 3000 })
+    fireEvent.click(screen.getByTestId('f-shipping-milesEdit'))
+    fireEvent.change(screen.getByTestId('f-shipping-milesInput'), { target: { value: '950' } })
+    fireEvent.click(screen.getByTestId('f-shipping-milesApply'))
+    expect(host.current!.getValues().ship).toMatchObject({ customerMiles: '950', truckMiles: '950' })
+    expect(screen.getByTestId('f-shipping-milesSource').textContent).toBe('Override')
+    // A route change does not re-measure over the override.
+    milesMock.mockClear()
+    fireEvent.click(screen.getByTestId('f-route-addDelivery-1')) // adding a stop changes the route
+    await new Promise((r) => setTimeout(r, 800))
+    expect(milesMock).not.toHaveBeenCalled()
     expect(host.current!.getValues().ship.customerMiles).toBe('950')
+    fireEvent.click(screen.getByTestId('f-route-remove-1')) // back to a measurable route
+    // Clear: the route is measured again and both fields follow it.
+    milesMock.mockResolvedValue({ miles: 880, source: 'google' })
+    fireEvent.click(screen.getByTestId('f-shipping-milesEdit'))
+    fireEvent.click(screen.getByTestId('f-shipping-milesClear'))
+    await waitFor(() => expect(host.current!.getValues().ship).toMatchObject({ customerMiles: '880', truckMiles: '880' }), { timeout: 3000 })
   })
 
   it('does not measure while Disable mileage is on', async () => {
@@ -94,26 +122,26 @@ describe('RouteCard', () => {
     expect(milesMock).not.toHaveBeenCalled()
   })
 
-  it('never overwrites miles that were saved or typed, and does not measure an incomplete route', async () => {
+  it('a saved miles value counts as an override: it is not re-measured over', async () => {
     milesMock.mockResolvedValue({ miles: 912, source: 'google' })
     const host = setup((v) => ({
-      ...v, ship: { ...v.ship, customerMiles: '640' },
+      ...v, ship: { ...v.ship, customerMiles: '640', truckMiles: '640' },
       stops: v.stops.map((s, i) => ({ ...s, city: i ? 'Dallas' : 'Chicago', state: i ? 'TX' : 'IL' })),
     }))
-    await waitFor(() => expect(milesMock).toHaveBeenCalled(), { timeout: 3000 })
-    await waitFor(() => expect(host.current!.getValues().ship.truckMiles).toBe('912'))
+    await new Promise((r) => setTimeout(r, 900))
+    expect(milesMock).not.toHaveBeenCalled()
     expect(host.current!.getValues().ship.customerMiles).toBe('640')
-    expect(screen.getByTestId('f-shipping-milesSource').textContent).toMatch(/Miles from the stop addresses/)
+    expect(screen.getByTestId('f-shipping-milesSource').textContent).toBe('Override')
     milesMock.mockClear()
     setup()
     await new Promise((r) => setTimeout(r, 800))
     expect(milesMock).not.toHaveBeenCalled()
   })
 
-  it('invites typing when the route cannot be measured', async () => {
+  it('invites using the pencil when the route cannot be measured', async () => {
     milesMock.mockResolvedValue({ miles: null, source: null, error: 'boom' })
     const host = setup((v) => ({ ...v, stops: v.stops.map((s, i) => ({ ...s, city: i ? 'Dallas' : 'Chicago', state: i ? 'TX' : 'IL' })) }))
-    await waitFor(() => expect(screen.getByTestId('f-shipping-milesSource').textContent).toMatch(/type the miles/))
+    await waitFor(() => expect(screen.getByTestId('f-shipping-milesFailed').textContent).toMatch(/pencil/), { timeout: 3000 })
     expect(host.current!.getValues().ship.customerMiles).toBe('')
   })
 

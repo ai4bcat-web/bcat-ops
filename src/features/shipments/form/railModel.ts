@@ -53,7 +53,7 @@ const FIXED: FixedRow[] = [
 
 const CARD_OF_SECTION: Record<string, RailRow['card']> = {
   customer: 'header', pickup: 'route', consignee: 'route', picks: 'route', shipping: 'freight',
-  rates: 'rates', carrier: 'carrier', more: 'more', roles: 'rail', history: 'rateHistory', documents: 'documents', checkCalls: 'carrier',
+  rates: 'rates', carrier: 'carrier', more: 'more', roles: 'rail', history: 'rail', documents: 'documents', checkCalls: 'carrier',
 }
 
 export function cardOfSection(section: string): RailRow['card'] {

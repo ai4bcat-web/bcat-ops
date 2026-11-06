@@ -18,7 +18,8 @@ import { getShipmentBundle, getTmsSettings, linkIntakeShipment, listLocations } 
 import { useIntakeLoad } from '../intake/useIntakeLoads'
 import type { LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 import { CARD_ORDER, CARD_TITLE, type CardKey, type CardProps, type MoreTabKey } from './cards/cardRegistry'
-import { CARD_COMPONENTS, MORE_TAB_COMPONENTS, RAIL_ROLES } from './defaultSections'
+import { CARD_COMPONENTS, MORE_TAB_COMPONENTS, RAIL_RATE_HISTORY, RAIL_ROLES } from './defaultSections'
+import { ActionBar } from './ActionBar'
 import { FormHeader } from './FormHeader'
 import { FormSection } from './FormSection'
 import { FromEmailContext } from './fromEmail'
@@ -26,7 +27,7 @@ import { intakePrefill } from './intakePrefill'
 import { LABEL } from './labels'
 import { lockedFields } from './model'
 import { MoreTabs } from './MoreTabs'
-import { cardOfSection, proPreview, railSummary, requiredRows } from './railModel'
+import { cardOfSection, proPreview, railSummary, requiredProgress, requiredRows } from './railModel'
 import type { FormCtx, FormIssue } from './sectionProps'
 import type { FormApi } from './sectionRegistry'
 import { SummaryRail } from './SummaryRail'
@@ -69,7 +70,9 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const intake = useIntakeLoad(intakeId)
   const [fromEmail, setFromEmail] = useState<ReadonlySet<string>>(() => new Set())
   const seededFor = useRef<string | null>(null)
-  const { user, isAdmin } = useAuth()
+  const { user, isAdmin, isOwner, hasPageAccess } = useAuth()
+  // Same door as the directory's create action: owner, ADMIN, or the Shipments / Locations / Loads page grants.
+  const canCreateLocation = Boolean(isAdmin || isOwner || hasPageAccess('tms') || hasPageAccess('loads') || hasPageAccess('locations'))
   const email = user?.email ?? ''
   const directory = useDirectory({ locations: false })
   // The locations table is 3,000+ rows: read it once, the first time a stop is searched or saved.
@@ -79,6 +82,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     locationsRead.current ??= listLocations().then((rows) => { setLocations(rows); return rows })
     return locationsRead.current
   }, [])
+  const addLocation = useCallback((loc: LocationRecord) => { setLocations((prev) => (prev.some((l) => l.id === loc.id) ? prev : [...prev, loc])) }, [])
   const ensureLocations = useCallback(() => { void loadLocations().catch(() => { locationsRead.current = null }) }, [loadLocations])
   const { carriers } = useCarriers()
   const { staff } = useStaff(email)
@@ -170,6 +174,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const status = bundle?.shipment.status ?? 'NEW'
   const shipmentId = bundle?.shipment.id
   const { setBundle } = form
+  const { addCustomer: createDirectoryCustomer } = directory
+  const addCustomer = useMemo(() => (canCreateLocation ? createDirectoryCustomer : undefined), [canCreateLocation, createDirectoryCustomer])
   const refreshBundle = useCallback(async () => {
     if (shipmentId) setBundle(await getShipmentBundle(shipmentId))
   }, [shipmentId, setBundle])
@@ -186,8 +192,11 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     busy,
     actions,
     refreshBundle,
+    canCreateLocation,
+    addCustomer,
+    addLocation,
     issues: form.issues,
-  }), [mode, bundle, status, locked, directory.customers, locations, ensureLocations, carriers, staff, settings, form.customer, divisions, busy, actions, refreshBundle, form.issues])
+  }), [mode, bundle, status, locked, directory.customers, locations, ensureLocations, carriers, staff, settings, form.customer, divisions, busy, actions, refreshBundle, canCreateLocation, addCustomer, addLocation, form.issues])
 
   const common = useMemo<CardProps>(() => ({
     values, update, ctx, form: formApi, issues: form.issues, mode, locked,
@@ -200,6 +209,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const blocking = blockingIssues(form.issues)
   const attempted = form.attempt !== null && blocking.length > 0
   const rows = useMemo(() => requiredRows(values, mode, { customer: form.customer, settings }), [values, mode, form.customer, settings])
+  const progress = useMemo(() => requiredProgress(rows), [rows])
   const summary = useMemo(() => railSummary(values, form.customer, settings), [values, form.customer, settings])
 
   const errorsByCard = useMemo(() => {
@@ -258,7 +268,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   return (
     <div className="tms-dense-page tms-ship-form" ref={rootRef} data-testid="ship-form" data-mode={mode}>
       <FormHeader
-        title={title} status={status} dirty={form.dirty} pro={pro} mode={mode}
+        title={title} dirty={form.dirty} pro={pro} mode={mode}
         common={common} panelOpen={panelOpen} onPanelToggle={togglePanel}
       />
 
@@ -328,12 +338,17 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
               })}
             </div>
             <SummaryRail
-              common={common} summary={summary} rows={rows} attempted={attempted} status={status}
-              busy={busy} voided={voided} Roles={RAIL_ROLES} intakeId={intakeId} intake={intake.row} onRun={onRun} onDiscard={cancel}
+              common={common} summary={summary} rows={rows} attempted={attempted}
+              Roles={RAIL_ROLES} RateHistory={RAIL_RATE_HISTORY} intakeId={intakeId} intake={intake.row}
             />
           </div>
         </FromEmailContext.Provider>
       </div>
+
+      <ActionBar
+        createMode={mode === 'create'} status={status} dirty={form.dirty} savedAt={bundle?.shipment.updatedAt ?? form.savedAt}
+        done={progress.done} total={progress.total} ready={progress.ready} busy={busy} voided={voided} onRun={onRun} onDiscard={cancel}
+      />
 
       {dialogs}
       <TmsDialog

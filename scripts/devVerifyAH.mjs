@@ -60,7 +60,7 @@ const { line, report, written, problemList, waitLoaded, matches } = walk
 
 const SECTIONS = [
   ['freight', 'Freight'], ['route', 'Route'], ['rates', 'Rates'],
-  ['rateHistory', 'Rate history'], ['carrier', 'Carrier & Tracking'], ['documents', 'Documents'],
+  ['carrier', 'Carrier & Tracking'], ['documents', 'Documents'],
 ]
 const MORE_TABS = ['instructions', 'references', 'items', 'notes']
 const AR_DIR = resolve('Docs/tms-build/aljex-create')
@@ -102,6 +102,10 @@ export const AH_STEPS = [
   { id: 'AR12', slug: 'rail-activity-roles-shipment-type' },
   { id: 'AR13', slug: 'carrier-and-tracking-mode' },
   { id: 'AR14', slug: 'grid-symmetry-and-timeline' },
+  { id: 'AR15', slug: 'multi-stop-miles' },
+  { id: 'AR16', slug: 'inline-new-location' },
+  { id: 'AR17', slug: 'inline-new-customer' },
+  { id: 'AR18', slug: 'action-bar' },
 ]
 
 // ───────────────────────────── selectors (every literal id here is checked by --inventory) ─────────────────────────────
@@ -231,6 +235,12 @@ async function setValue(b, selector, value) {
   if (hit !== 'ok') throw new Error(`set ${selector}: ${hit}`)
 }
 const fill = (b, id, value) => setValue(b, tid(id), value)
+/** The Route card's one Miles field is read-only: the pencil popover is how a person types a number. */
+async function overrideMiles(b, value) {
+  await click(b, 'f-shipping-milesEdit'); await pause(150)
+  await fill(b, 'f-shipping-milesInput', value)
+  await click(b, 'f-shipping-milesApply'); await pause(150)
+}
 const fillAria = (b, label, value) => setValue(b, `[aria-label=${JSON.stringify(label)}]`, value)
 
 async function clickSel(b, selector) {
@@ -410,12 +420,12 @@ const RUNNERS = {
     // every Aljex flag is a chip; nothing of the old accordions is left
     const absent = []
     for (const k of facts.flags) if (!(await has(b, tid(`f-shipping-flag-${k}`)))) absent.push(`f-shipping-flag-${k}`)
-    for (const id of ['f-shipping-shipmentType', 'f-shipping-weightLbs', 'f-shipping-pieces', 'f-shipping-footage', 'f-shipping-billableWeightLbs', 'f-shipping-freightClass', 'f-shipping-declaredValue', 'f-shipping-description', 'f-shipping-equipmentType', 'f-shipping-revDivision', 'f-shipping-customerMiles', 'f-shipping-truckMiles', 'f-shipping-disableMileage', 'f-shipping-calculateTotals', 'f-customer-email-1', 'f-customer-email-2']) if (!(await has(b, tid(id)))) absent.push(id)
+    for (const id of ['f-shipping-shipmentType', 'f-shipping-weightLbs', 'f-shipping-pieces', 'f-shipping-footage', 'f-shipping-freightClass', 'f-shipping-declaredValue', 'f-shipping-description', 'f-shipping-equipmentType', 'f-shipping-revDivision', 'f-shipping-customerMiles', 'f-shipping-milesEdit', 'f-shipping-disableMileage', 'f-shipping-calculateTotals', 'f-customer-email-1', 'f-customer-email-2']) if (!(await has(b, tid(id)))) absent.push(id)
     if (absent.length) bad.push(`missing controls: ${absent.join(', ')}`)
     if (await has(b, '[data-section-toggle]')) bad.push('an accordion toggle is still on the page')
     if (await has(b, tid('f-customer-hours'))) bad.push('Customer Hours is still on the form (removed in AR)')
     // the rail
-    for (const id of ['ship-form-rail', 'rail-customer', 'rail-lane', 'rail-freight', 'rail-money', 'rail-required', 'rail-roles', 'rail-actions', 'ship-form-save-draft', 'ship-form-create']) if (!(await has(b, tid(id)))) bad.push(`rail lacks ${id}`)
+    for (const id of ['ship-form-rail', 'rail-customer', 'rail-lane', 'rail-freight', 'rail-money', 'rail-required', 'rail-roles', 'ship-form-actionbar', 'ship-form-save-draft', 'ship-form-create']) if (!(await has(b, tid(id)))) bad.push(`rail lacks ${id}`)
     // Carrier is a collapsed card on a brokered create
     if (!(await has(b, tid('carrier-empty')))) bad.push('the Carrier card is not collapsed to "No carrier yet"')
     // Tab order: the main column top to bottom, then the rail
@@ -529,12 +539,10 @@ const RUNNERS = {
     // Shipping Requirements
     await fill(b, 'f-shipping-equipmentType', 'Dry Van')
     ctx.revDivision = await selectFirst(b, 'f-shipping-revDivision')
-    await fill(b, 'f-shipping-customerMiles', '500')
-    await fill(b, 'f-shipping-truckMiles', '520')
+    await overrideMiles(b, '500')
     await fill(b, 'f-shipping-footage', '48')
     await fill(b, 'f-shipping-pieces', '10')
     await fill(b, 'f-shipping-weightLbs', '12000')
-    await fill(b, 'f-shipping-billableWeightLbs', '12500')
     await fill(b, 'f-shipping-description', ctx.commodity)
     await fill(b, 'f-shipping-declaredValue', '5000')
     await check(b, 'f-shipping-liftgate'); await check(b, 'f-shipping-inside')
@@ -611,7 +619,7 @@ const RUNNERS = {
     eq('tempControl', sr.tempControl, true); eq('tarps', sr.tarps, true); eq('palletExchange', sr.palletExchange, true)
     eq('tempF mirror (2-4 °C → °F)', [sr.tempF?.min, sr.tempF?.max], [36, 39])
     eq('form.ship.temp', [form.ship?.temp?.unit, form.ship?.temp?.min, form.ship?.temp?.max], ['C', 2, 4])
-    eq('form.ship.truckMiles', form.ship?.truckMiles, 520)
+    eq('form.ship.truckMiles (same value as the one Miles field)', form.ship?.truckMiles, 500)
     eq('form.customer.emails', form.customer?.emails?.length, 2)
     eq('form.instructions.special length', form.instructions?.special?.length, 420)
     eq('form.instructions.rateCon length', form.instructions?.rateCon?.length, 260)
@@ -649,7 +657,6 @@ const RUNNERS = {
     await eq('f-shipping-weightLbs', '12000')
     await eq('f-shipping-pieces', '10')
     await eq('f-shipping-customerMiles', '500')
-    await eq('f-shipping-truckMiles', '520')
     await eq('f-shipping-tempMin', '2')
     await eq('f-shipping-tempMax', '4')
     await eq('f-shipping-palletsIn', '3')
@@ -699,7 +706,7 @@ const RUNNERS = {
     if (modeDisabled !== true) bad.push(`Shipment type is ${modeDisabled === null ? 'missing' : 'still editable'} on a submitted order`)
     await shotFile(b, '13-edit-live-locked-fields')
     await fill(b, 'f-shipping-description', `${ctx.commodity} edited`)
-    await fill(b, 'f-shipping-customerMiles', '650')
+    await overrideMiles(b, '650')
     await click(b, 'ship-form-save')
     await b.poll(async () => (await getBundle(ctx, ctx.fullId)).loads[0]?.commodity?.endsWith('edited') === true || await has(b, tid('ship-form-issues')), 'edit saved', 45_000)
     const after = await getBundle(ctx, ctx.fullId)
@@ -794,17 +801,18 @@ const RUNNERS = {
       throw new Error(`${err.message} (lane ${JSON.stringify(await textOf(b, 'f-route-lane'))}, pickup line ${JSON.stringify(await textOf(b, 'f-pickup-addressLine'))}, hint ${JSON.stringify(await textOf(b, 'f-shipping-milesSource'))}, problems ${JSON.stringify(problemList(b).slice(0, 3))})`)
     })
     const miles = Number(await read('f-shipping-customerMiles'))
-    const truck = Number(await read('f-shipping-truckMiles'))
+    const truck = miles
     const bad = []
     if (!(miles > 500 && miles < 1300)) bad.push(`Chicago to Dallas came out as ${miles} miles`)
-    if (!(truck > 0)) bad.push('Truck Miles was not calculated')
+    if (await has(b, '[data-testid="f-shipping-' + 'truckMiles"]')) bad.push('a separate Truck Miles field is still on the form')
+    if (!(await b.evaluate(`document.querySelector(${JSON.stringify(tid('f-shipping-customerMiles'))})?.readOnly === true`))) bad.push('Miles is not read-only')
     const source = await b.evaluate(`document.querySelector(${JSON.stringify(tid('f-shipping-milesSource'))})?.innerText ?? ''`)
-    await fill(b, 'f-shipping-customerMiles', '777'); await pause(1500)
-    if ((await read('f-shipping-customerMiles')) !== '777') bad.push('a typed Customer Miles was overwritten by the calculation')
+    await overrideMiles(b, '777'); await pause(1500)
+    if ((await read('f-shipping-customerMiles')) !== '777') bad.push('an overridden Miles was overwritten by the calculation')
     await b.evaluate(`document.querySelector(${JSON.stringify(tid('section-route'))}).scrollIntoView({ block: 'start' })`)
     await shotFile2(b, '17-auto-miles')
     failures(bad)
-    return `Customer Miles ${miles} / Truck Miles ${truck} calculated from the two stops (${JSON.stringify(source.slice(0, 60))}); an override sticks`
+    return `one Miles field (${miles}) calculated from the two stops (${JSON.stringify(source.slice(0, 60))}); an override sticks`
   },
 
   async AH18(ctx) {
@@ -977,19 +985,17 @@ const RUNNERS = {
     const full = await textOf(b, 'rail-required-count')
     if (!/^(\d+) \/ \1$/.test(full ?? '')) bad.push(`rail did not reach M / M on a complete form (${full})`)
     if ((await b.evaluate(`document.querySelector(${JSON.stringify(tid('rail-required-count'))}).dataset.ready`)) !== 'true') bad.push('the count is not marked ready')
-    // sticky rail while the main column scrolls
-    const scroll = await b.evaluate(`(() => { const s = document.querySelector('.tms-ship-form-scroll'); s.scrollTo(0, 600); return { top: s.scrollTop, room: s.scrollHeight - s.clientHeight } })()`)
+    // The rail scrolls with the page (feedback 19); the action bar stays put and Create stays reachable.
+    await b.evaluate(`document.querySelector('.tms-ship-form-scroll').scrollTo(0, 600)`)
     await pause(250)
-    const rail = await rectOf(b, tid('ship-form-rail'))
-    const box = await rectOf(b, '.tms-ship-form-scroll')
-    if (scroll.top < 100) bad.push(`the form only scrolled ${scroll.top}px (room ${scroll.room}), cannot judge the sticky rail`)
-    else if (!rail || rail.top - box.top > 24 || rail.bottom > 900 + 1) bad.push(`the rail left the viewport while scrolling (top ${Math.round(rail?.top - box.top)}, bottom ${Math.round(rail?.bottom)})`)
+    const barRect = await rectOf(b, tid('ship-form-actionbar'))
+    if (!barRect || barRect.bottom > 901 || barRect.top < 700) bad.push(`the action bar is not at the foot of the screen after scrolling (${JSON.stringify(barRect)})`)
     await shotAR(b, 'rail-sticky-scrolled-1440')
     await b.evaluate(`document.querySelector('.tms-ship-form-scroll').scrollTo(0, 0)`)
     await click(b, 'ship-form-create')
     const id = await waitEditUrl(ctx, b, 'rail-complete create')
     failures(bad)
-    return `rail ${done} / ${total} on a half-filled form matched ${listed} blocking issues; M / M after the rest (${id} created); rail stayed pinned after scrolling ${scroll.top}px`
+    return `rail ${done} / ${total} on a half-filled form matched ${listed} blocking issues; M / M after the rest (${id} created); action bar stayed at the foot after scrolling`
   },
 
   async AR03(ctx) {
@@ -1000,7 +1006,7 @@ const RUNNERS = {
     const vis = (id) => b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(tid(id))}); return !!e && e.getClientRects().length > 0 })()`)
     if (!(await vis('rail-sheet-toggle'))) bad.push('no bottom-sheet bar below 1280 px')
     if (await vis('rail-money')) bad.push('the rail body shows before the sheet is opened')
-    if (!(await vis('ship-form-create')) || !(await vis('ship-form-save-draft'))) bad.push('the actions are not visible in the collapsed sheet')
+    if (!(await vis('ship-form-create')) || !(await vis('ship-form-save-draft'))) bad.push('the action bar is not visible below 1280 px')
     const bar = await textOf(b, 'rail-sheet-toggle')
     if (!/Net .* · /.test(bar ?? '')) bad.push(`sheet bar lacks the money line (${JSON.stringify(bar)})`)
     const rail = await rectOf(b, tid('ship-form-rail'))
@@ -1272,7 +1278,7 @@ const RUNNERS = {
     const dat = await b.evaluate(`document.querySelector('[data-testid="card-rateHistory-dat"]')?.innerText ?? ''`)
     if (!/not connected/i.test(dat)) bad.push(`the DAT block does not say "DAT not connected" (${JSON.stringify(dat.replace(/\s+/g, ' ').slice(0, 120))})`)
     if (/\\$\\s?\\d/.test(dat) && /not connected/i.test(dat)) bad.push('the DAT block shows a dollar figure while saying DAT is not connected')
-    await b.evaluate(`document.querySelector(${JSON.stringify(tid('section-rateHistory'))}).scrollIntoView({ block: 'start' })`)
+    await b.evaluate(`document.querySelector(${JSON.stringify(tid('rail-rate-history'))}).scrollIntoView({ block: 'start' })`)
     await shotAR(b, 'rate-history-1440')
     await b.evaluate(`document.querySelector('.tms-ship-form-scroll')?.scrollTo(0, 0)`)
     await shotAR(b, 'bill-to-1440')
@@ -1346,7 +1352,9 @@ const RUNNERS = {
     await b.setViewport(1440, 900)
     await openForm(b, '/tms/shipments/new')
     const cards = await b.evaluate(`[...document.querySelectorAll('.tms-ship-card')].map((c) => c.dataset.testid.replace('section-', '')).join()`)
-    if (cards !== 'freight,route,rates,rateHistory,carrier,documents') bad.push(`cards ${cards}`)
+    if (cards !== 'freight,route,rates,carrier,documents') bad.push(`cards ${cards}`)
+    const railOrder = await b.evaluate(`[...document.querySelectorAll('[data-testid="rail-money"], [data-testid="rail-rate-history"], [data-testid="rail-required"], [data-testid="rail-activity"], [data-testid="rail-roles"]')].map((n) => n.dataset.testid).join()`)
+    if (railOrder !== 'rail-money,rail-rate-history,rail-required,rail-activity,rail-roles') bad.push(`rail order ${railOrder}`)
     if ((await b.evaluate(`document.querySelector('[data-testid="section-carrier"] .tms-ship-card-title')?.innerText ?? ''`)) !== 'Carrier & Tracking') bad.push('the carrier card is not titled "Carrier & Tracking"')
     if (await has(b, tid('section-tracking'))) bad.push('a separate Tracking card is still on the page')
 
@@ -1430,7 +1438,7 @@ const RUNNERS = {
     await b.setViewport(1440, 900)
     await openForm(b, '/tms/shipments/new')
     const rows = await b.evaluate(`[...document.querySelectorAll('[data-testid="section-freight-body"] > .tms-fg > .tms-fg-field')].map((f) => f.dataset.span).join()`)
-    if (rows !== '3,3,3,3,3,3,3,3,9,3') bad.push(`Freight spans ${rows}`)
+    if (rows !== '3,3,3,3,3,3,3,3,12') bad.push(`Freight spans ${rows}`)
     if (await has(b, '[data-testid="f-freight-' + 'customerRef"]')) bad.push('Customer ref is still in the Freight card')
     const hdr = await b.evaluate(`(() => { const ids = ['f-customer-name-input', 'f-customer-refNo', 'hdr-billTo-chip']; return ids.map((i) => { const el = document.querySelector('[data-testid="' + i + '"]'); return el ? Math.round(el.getBoundingClientRect().left) : null }) })()`)
     if (hdr.some((x) => x === null) || !(hdr[0] < hdr[1] && hdr[1] < hdr[2])) bad.push(`header order Customer, Customer ref, Bill To broken: ${hdr.join(',')}`)
@@ -1438,6 +1446,106 @@ const RUNNERS = {
     await shotAR(b, 'create-grid-1440')
     failures(bad)
     return 'every .tms-fg grid at 1440 and 1280: label height equal, inputs 32 px sharing a row top, nothing under an input but notes counters, spans sum to 12, rows flush, no horizontal overflow; Freight spans 3,3,3,3 / 3,3,3,3 / 9,3; header order Customer > Customer ref > Bill To; delivery timeline present with a text summary; screenshots ar-*-grid-*.png'
+  },
+
+  async AR15(ctx) {
+    const b = ctx.b
+    const bad = []
+    await b.setViewport(1440, 900)
+    await openForm(b, '/tms/shipments/new')
+    await pickFrom(b, tid('f-pickup-name'), tid('f-pickup-name-option'), ctx.locNames.shipper)
+    await pickFrom(b, tid('f-consignee-name'), tid('f-consignee-name-option'), ctx.locNames.receiver)
+    const read = () => b.evaluate(`Number(document.querySelector('[data-testid="f-shipping-customerMiles"]')?.value ?? 0)`)
+    await b.poll(async () => (await read()) > 0, 'two-stop miles', 30_000)
+    const direct = await read()
+    // Insert a middle pickup with another ZZ location: 3 stops = 2 legs, summed.
+    await click(b, 'f-route-addPickup-1'); await pause(300)
+    await pickFrom(b, tid('f-stop-1-name'), tid('f-stop-1-name-option'), ctx.locNames.pick2)
+    await b.poll(async () => (await read()) !== direct, 'three-stop miles', 30_000).catch(() => bad.push('adding a middle stop did not re-measure the miles'))
+    const three = await read()
+    if (!(three >= direct)) bad.push(`three-stop miles ${three} < the two-stop ${direct} (legs must add up, not shrink)`)
+    if (await has(b, '[data-testid="f-shipping-' + 'truckMiles"]')) bad.push('a Truck Miles field is still on the form')
+    await fillRequired(ctx, b)
+    await click(b, 'ship-form-save-draft')
+    const id = await waitEditUrl(ctx, b, 'AR15 draft')
+    const bundle = await getBundle(ctx, id)
+    const form = (typeof bundle.orders?.[0]?.specialRequirements === 'string' ? JSON.parse(bundle.orders[0].specialRequirements) : bundle.orders?.[0]?.specialRequirements)?.form
+    if (bundle.loads?.[0]?.miles !== three) bad.push(`load.miles ${bundle.loads?.[0]?.miles} ≠ ${three}`)
+    if (form?.ship?.truckMiles !== three) bad.push(`form.ship.truckMiles ${form?.ship?.truckMiles} ≠ ${three}`)
+    failures(bad)
+    return `one Miles field: 2 stops ${direct} mi, 3 stops ${three} mi (two legs summed); the draft saved ${three} to both the load miles and form.ship.truckMiles`
+  },
+
+  async AR16(ctx) {
+    const b = ctx.b
+    const bad = []
+    const name = `ZZ AR Dock ${ctx.ts}`
+    await b.setViewport(1440, 900)
+    await openForm(b, '/tms/shipments/new')
+    await setValue(b, tid('f-pickup-name'), name)
+    await b.poll(() => has(b, tid('f-pickup-addRow')), 'the + Add row', 15_000)
+    await click(b, 'f-pickup-addRow')
+    await fill(b, 'f-pickup-new-street', '1 ZZ Test Way'); await fill(b, 'f-pickup-new-zip', '60431')
+    await b.poll(async () => (await valOf(b, 'f-pickup-new-city')) !== '', 'zip autofill', 20_000).catch(() => bad.push('the zip did not auto-fill the city'))
+    await click(b, 'f-pickup-new-save')
+    await b.poll(async () => (await valOf(b, 'f-pickup-name')) === name && !(await has(b, tid('f-pickup-newLocation'))), 'the new location selected', 30_000).catch(() => bad.push('Save location did not select the new location'))
+    const rows = (await listAll(ctx.token, 'Location', { name: { eq: name } }, 'id updatedAt'))
+    for (const r of rows) ctx.locationIds.push(r.id)
+    if (rows.length !== 1) bad.push(`${rows.length} Location rows named ${name}`)
+    // Reuse on the consignee stop of the same form: it is offered at once.
+    await setValue(b, tid('f-consignee-name'), name)
+    await b.poll(() => has(b, tid('f-consignee-name-option')), 'the saved location offered on another stop', 15_000).catch(() => bad.push('the new location is not offered on another stop'))
+    failures(bad)
+    return `typed ${JSON.stringify(name)} -> "+ Add as a new location" -> zip auto-fill -> Save location created 1 directory row, selected it, and offered it on the consignee stop (archived in cleanup)`
+  },
+
+  async AR17(ctx) {
+    const b = ctx.b
+    const bad = []
+    const name = `ZZ AR Customer ${ctx.ts}`
+    await b.setViewport(1440, 900)
+    await openForm(b, '/tms/shipments/new')
+    if (await has(b, '[data-testid="f-customer-' + 'useTyped"]')) bad.push('the typed-name checkbox is still on the form')
+    await setValue(b, `${tid('f-customer-name')} input`, name)
+    await b.poll(() => has(b, tid('f-customer-addRow')), 'the + Add customer row', 15_000)
+    await click(b, 'f-customer-addRow')
+    await b.poll(() => has(b, '[role="dialog"]'), 'the create dialog', 10_000)
+    const clicked = await b.evaluate(`(() => { const d = document.querySelector('[role="dialog"]'); const btn = [...d.querySelectorAll('button')].find((x) => /^(save|create|add)/i.test(x.innerText.trim())); if (!btn) return false; btn.click(); return true })()`)
+    if (!clicked) bad.push('no Save button in the customer dialog')
+    await b.poll(async () => (await b.evaluate(`document.querySelector('[data-testid="f-customer-name-input"]')?.value ?? ''`)) === name, 'the new customer selected in the header', 30_000).catch(() => bad.push('the created customer was not selected'))
+    const rows = await listAll(ctx.token, 'Customer', { name: { eq: name } }, 'id updatedAt')
+    for (const r of rows) { ctx.extraCustomers = [...(ctx.extraCustomers ?? []), r] }
+    if (rows.length !== 1) bad.push(`${rows.length} Customer rows named ${name}`)
+    failures(bad)
+    return `unknown customer ${JSON.stringify(name)} -> "+ Add as a new customer" -> the directory dialog created 1 row and the header selected it (archived in cleanup)`
+  },
+
+  async AR18(ctx) {
+    const b = ctx.b
+    const bad = []
+    for (const [width, height] of [[1440, 900], [1280, 800]]) {
+      await b.setViewport(width, height)
+      await openForm(b, '/tms/shipments/new')
+      await pickFrom(b, `${tid('f-customer-name')} input`, CUSTOMER_OPTION, ctx.customerName)
+      await pause(400)
+      await b.evaluate(`document.querySelector('.tms-ship-form-scroll')?.scrollTo(0, 0)`)
+      const r = (id) => rectOf(b, tid(id))
+      const bar = await r('ship-form-actionbar'); const create = await r('ship-form-create')
+      if (!bar || bar.bottom > height + 1 || bar.top < 0) bad.push(`${width}: the action bar is not on screen at load (${JSON.stringify(bar)})`)
+      if (!bar || bar.bottom > height + 1 || bar.height < 44 || bar.height > 64) bad.push(`${width}: the action bar is not 48 px at the foot (${JSON.stringify(bar)})`)
+      if (!create || create.bottom > height || create.top < bar.top - 1) bad.push(`${width}: Create is not inside the visible bar`)
+      for (const id of ['ship-form-status', 'ship-form-savestate', 'ship-form-required', 'ship-form-cancel', 'ship-form-save-draft']) if (!(await has(b, tid(id)))) bad.push(`${width}: the bar lacks ${id}`)
+      if (await has(b, '[data-testid="rail-' + 'actions"]')) bad.push(`${width}: the rail still has an actions footer`)
+      // Scroll to the very bottom: the bar must not overlap the last card field nor the rail's Roles block.
+      await b.evaluate(`(() => { const s = document.querySelector('.tms-ship-form-scroll'); s.scrollTo(0, s.scrollHeight); for (const el of document.querySelectorAll('*')) if (el.scrollHeight > el.clientHeight + 4 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) el.scrollTo(0, el.scrollHeight); window.scrollTo(0, document.documentElement.scrollHeight) })()`); await pause(300)
+      const bar2 = await r('ship-form-actionbar')
+      const overlap = await b.evaluate(`(() => { const bar = document.querySelector('[data-testid="ship-form-actionbar"]').getBoundingClientRect(); const hits = []; for (const sel of ['[data-testid="rail-roles"]', '[data-testid="section-documents"]', '[data-testid="ship-form-more"]']) { const el = document.querySelector(sel); if (!el || !el.getClientRects().length) continue; const q = el.getBoundingClientRect(); if (q.bottom > bar.top + 1 && q.top < bar.bottom - 1 && q.top >= 0) hits.push(sel) } return hits })()`)
+      if (overlap.length) bad.push(`${width}: the bar overlaps ${overlap.join(', ')} at the bottom of the page`)
+      if (!bar2 || bar2.bottom > height + 1) bad.push(`${width}: the bar left the screen when scrolled to the bottom`)
+      await shotAR(b, `action-bar-${width}`)
+    }
+    failures(bad)
+    return 'at 1440x900 and 1280x800 the 48 px action bar is visible without scrolling and at the bottom of the page, holds status / save state / required count / Cancel / Save draft / Create, overlaps neither Roles nor the last card, and the rail has no actions footer'
   },
 }
 
@@ -1533,6 +1641,9 @@ async function cleanup(ctx) {
   for (const id of ctx.locationIds) {
     const row = await getRow(ctx.token, 'Location', id, 'id updatedAt').catch(() => null)
     if (row) await ctx.dir('ARCHIVE_LOCATION', { id, expectedUpdatedAt: String(row.updatedAt) }).then(() => say(`location ${id} archived`), (err) => say(`location archive failed: ${short(err).slice(0, 80)}`, false))
+  }
+  for (const r of ctx.extraCustomers ?? []) {
+    await ctx.dir('ARCHIVE_CUSTOMER', { id: r.id, expectedUpdatedAt: String(r.updatedAt) }).then(() => say(`customer ${r.id} archived`), (err) => say(`customer archive failed: ${short(err).slice(0, 80)}`, false))
   }
   if (ctx.customerId) {
     const row = await getRow(ctx.token, 'Customer', ctx.customerId, 'id updatedAt').catch(() => null)

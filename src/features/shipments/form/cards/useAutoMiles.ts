@@ -1,56 +1,60 @@
 /**
- * Customer Miles / Truck Miles follow the route until a person types over them (Ryne's feedback
- * #2, moved here from Shipping Requirements into the Route card's lane header). Behaviour is
- * unchanged: debounce 600 ms, GET_ROUTE_MILES through `getRouteMiles`, a field is overwritten
- * only while blank or still holding the last number we wrote.
+ * The ONE Miles value of the Route card (feedback 13). It follows the route (every stop, in order,
+ * legs summed by GET_ROUTE_MILES: Distance Matrix per leg when the key answers, the straight-line
+ * estimate per leg otherwise) until a person overrides it; the override sticks until cleared.
+ * One number is written to BOTH underlying fields (customer miles and truck miles) so per-mile
+ * rates, FSC/mile, margin, reports and the Load mapping keep reading what they read.
+ *
+ * Debounced 600 ms; any change of the route signature (a stop's address / zip, order, add, remove)
+ * re-measures; a response for a route that is no longer current is dropped (stale-response guard).
  */
 import { useEffect, useRef, useState } from 'react'
 import type { ShipmentFormValues } from '../model'
-import { mayAutoFill, type RoutePointInput } from '../sections/milesEstimate'
+import type { RoutePointInput } from '../sections/milesEstimate'
 import { getRouteMiles } from '../sections/routeMilesApi'
 
 type Ship = ShipmentFormValues['ship']
 
+export type MilesSource = 'google' | 'estimate' | 'override' | null
+
 export interface AutoMiles {
-  /** Where the number came from: the stop addresses, a straight-line estimate, or nothing yet. */
-  source: 'google' | 'estimate' | null
-  /** The last measured number; a miles field still holding it reads "est." rather than typed. */
-  miles: string
+  /** Where the shown number came from. */
+  source: MilesSource
   /** Set when the route could not be measured. */
   failed: boolean
 }
 
+/** Both miles fields get the same value. */
+export const withMiles = (prev: Ship, miles: string): Ship => ({ ...prev, customerMiles: miles, truckMiles: miles })
+
 export function useAutoMiles(
   routeKey: string,
   blocked: boolean,
+  overridden: boolean,
   onChange: (patch: (prev: Ship) => Ship) => void,
+  debounceMs = 600,
 ): AutoMiles {
-  const [state, setState] = useState<AutoMiles>({ source: null, miles: '', failed: false })
-  const lastAuto = useRef({ customer: '', truck: '' })
+  const [measured, setMeasured] = useState<{ source: 'google' | 'estimate' | null; failed: boolean }>({ source: null, failed: false })
   const onChangeRef = useRef(onChange)
   useEffect(() => { onChangeRef.current = onChange })
   useEffect(() => {
-    if (!routeKey || blocked) return
-    let alive = true
+    if (!routeKey || blocked || overridden) return
+    let current = true
     const timer = setTimeout(() => {
       getRouteMiles(JSON.parse(routeKey) as RoutePointInput[]).then(({ miles, source, error }) => {
-        if (!alive) return
-        if (error || miles === null) { setState((s) => ({ ...s, failed: true })); return }
-        const next = String(miles)
-        onChangeRef.current((prev) => {
-          const patch: Partial<Ship> = {}
-          if (mayAutoFill(prev.customerMiles, lastAuto.current.customer)) patch.customerMiles = next
-          if (mayAutoFill(prev.truckMiles, lastAuto.current.truck)) patch.truckMiles = next
-          lastAuto.current = {
-            customer: patch.customerMiles ?? lastAuto.current.customer,
-            truck: patch.truckMiles ?? lastAuto.current.truck,
-          }
-          return { ...prev, ...patch }
-        })
-        setState({ source, miles: next, failed: false })
+        if (!current) return
+        if (error || miles === null) { setMeasured((s) => ({ ...s, failed: true })); return }
+        onChangeRef.current((prev) => withMiles(prev, String(miles)))
+        setMeasured({ source, failed: false })
       })
-    }, 600)
-    return () => { alive = false; clearTimeout(timer) }
-  }, [routeKey, blocked])
-  return state
+    }, debounceMs)
+    return () => { current = false; clearTimeout(timer) }
+  }, [routeKey, blocked, overridden, debounceMs])
+  return { source: overridden ? 'override' : measured.source, failed: measured.failed }
+}
+
+export const MILES_SOURCE_TEXT: Record<'google' | 'estimate' | 'override', string> = {
+  google: 'Distance Matrix',
+  estimate: 'Estimate',
+  override: 'Override',
 }

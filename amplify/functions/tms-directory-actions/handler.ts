@@ -1385,6 +1385,8 @@ async function archiveCustomer(input: Record<string, unknown>, caller: Caller): 
 
 // ── Location actions ───────────────────────────────────────────────────────────
 
+const LOCATION_CREATED_FROM = ['shipment-form', 'intake'] as const
+
 async function upsertLocation(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
   const name = assertString(input.name, 'name')
   const customerIds = optionalStringArray(input.customerIds, 100)
@@ -1545,6 +1547,9 @@ async function upsertLocation(input: Record<string, unknown>, caller: Caller): P
         ConditionExpression: 'attribute_not_exists(id)',
       }),
     )
+    // Where the row was created from (no schema field for it): one audit row, only when the caller says.
+    const createdFrom = optionalEnum(input.createdFrom, LOCATION_CREATED_FROM, 'createdFrom')
+    if (createdFrom) await writeAudit('LOCATION', id, 'CREATE_LOCATION', caller, { name, createdFrom })
     return item
   }
 

@@ -12,6 +12,15 @@
   gap: 16px;
 }
 
+/* In the 360 px rail the two blocks stack and the table shrinks (feedback 18). */
+.tms-shell .tms-rail-rh .tms-card-rh { gap: 8px; }
+.tms-shell .tms-rail-rh .tms-card-rh-blocks { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.tms-shell .tms-rail-rh .tms-card-rh-block { padding: 8px; }
+.tms-shell .tms-rail-rh .tms-card-rh-table { font-size: 11px; }
+.tms-shell .tms-rail-rh .tms-card-rh-clip { max-width: 90px; }
+.tms-shell .tms-rail-rh-toggle { display: inline-flex; align-items: center; gap: 4px; padding: 0; background: none; border: 0; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; cursor: pointer; }
+.tms-shell .tms-rail-rh-toggle svg[data-open='true'] { transform: rotate(180deg); }
+
 @media (max-width: 767px) {
   .tms-shell .tms-card-rh-blocks { grid-template-columns: minmax(0, 1fr); }
 }

@@ -1,11 +1,10 @@
 /**
  * The header strip (Step AR, feedback 7/11): title, the Customer type-ahead, the Customer ref (PO), the Bill To
  * summary chip (its Details chevron drops the full panel under the strip, collapsed by default),
- * status chip and read-only PRO. Division (the revenue division and ownership tag, one field) and
+ * read-only PRO. Division (the revenue division and ownership tag, one field) and
  * the shipment type are the first two fields of the Freight card.
  */
 import { memo, useEffect, useMemo, useState } from 'react'
-import { TmsBadge } from '@/features/tms/kit'
 import type { CardProps } from './cards/cardRegistry'
 import { deliveryPhase } from '@/lib/deliveryPhase'
 import { DeliveryTimeline } from '../DeliveryTimeline'
@@ -14,7 +13,6 @@ import { HEADER_PARTS } from './defaultSections'
 
 export interface FormHeaderProps {
   title: string
-  status: string
   dirty: boolean
   /** The shipment's own PRO in edit mode; the next counter value in create mode ('' = unknown). */
   pro: string
@@ -25,8 +23,7 @@ export interface FormHeaderProps {
   onPanelToggle: () => void
 }
 
-function FormHeaderImpl({ title, status, dirty, pro, mode, common, panelOpen, onPanelToggle }: FormHeaderProps) {
-  const draft = status === 'NEW' || status === 'DRAFT'
+function FormHeaderImpl({ title, dirty, pro, mode, common, panelOpen, onPanelToggle }: FormHeaderProps) {
   const bundle = common.ctx.bundle
   // The timeline's clock: re-read once a minute so a late truck turns amber without a reload.
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -44,7 +41,6 @@ function FormHeaderImpl({ title, status, dirty, pro, mode, common, panelOpen, on
       <span className="tms-ship-hdr-spacer" />
       <DeliveryTimeline result={phase} />
       {dirty ? <span className="tms-ship-dirty" data-testid="ship-form-dirty" title="Unsaved changes" role="img" aria-label="Unsaved changes" /> : null}
-      <TmsBadge tone={draft ? 'gray' : 'blue'} data-testid="ship-form-status">{draft ? 'Draft' : status}</TmsBadge>
       <span className="tms-ship-hdr-pro" data-testid="ship-form-pro" title={mode === 'create' ? 'Preview only: the number is minted when you create' : undefined}>
         PRO {pro || '—'}
       </span>

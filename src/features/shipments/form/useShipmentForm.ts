@@ -73,6 +73,8 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
   })
   const valuesRef = useRef(values)
   const [dirty, setDirty] = useState(false)
+  /** When the local draft was last written (create mode); the action bar's "Last saved". */
+  const [savedAt, setSavedAt] = useState<string | null>(null)
   const [attempt, setAttempt] = useState<ValidationLevel | null>(null)
   const [busy, setBusy] = useState(false)
   const [partial, setPartial] = useState<PartialFailure | null>(null)
@@ -135,6 +137,7 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
       if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null }
       if (live.current.bundle) return
       saveDraft(email, clientDraftId.current, valuesRef.current)
+      setSavedAt(new Date().toISOString())
     }
   }, [email])
   useEffect(() => {
@@ -249,7 +252,7 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
   }, [partial, pipelineCtxFor, finish])
 
   return {
-    values, update, getValues, dirty, mode, bundle, setBundle, customer,
+    values, update, getValues, dirty, savedAt, mode, bundle, setBundle, customer,
     issues, attempt, busy, partial, retry,
     drafts, resumeDraft, discardDraft, seedValues: reseed,
     run,

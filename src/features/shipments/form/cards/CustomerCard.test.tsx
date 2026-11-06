@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { CustomerRecord } from '@/types/tms'
 import { CustomerContact, CustomerPicker, CustomerRef } from './CustomerCard'
 import { renderCard } from './cardTestKit'
@@ -75,12 +75,42 @@ describe('CustomerPicker — typed name, lock', () => {
     expect(screen.getByText('Active Ann')).toBeTruthy()
   })
 
-  it('records a typed name only when the person chooses to, and never with a customer id', () => {
-    const host = set()
-    expect(screen.getByTestId('f-customer-useTyped')).toBeTruthy()
-    fireEvent.click(screen.getByTestId('f-customer-useTyped'))
-    fireEvent.change(screen.getByTestId('f-customer-name'), { target: { value: 'Brand New Co' } })
-    expect(host.current!.getValues().customer).toMatchObject({ useTyped: true, typedName: 'Brand New Co', id: '' })
+  it('there is no "typed name" checkbox: a manual create picks from the directory only', () => {
+    set()
+    expect(screen.queryByTestId('f-customer-useTyped')).toBeNull()
+  })
+
+  it('no match offers "+ Add <typed> as a new customer" (and Enter does the same) only to users who may create one; the dialog creates, selects and refreshes', async () => {
+    const created = mk('c-new', 'ZZ Brand New Co')
+    const addCustomer = vi.fn(async () => created)
+    const host = renderCard(CustomerPicker, { ctx: () => ({ directory: { customers, locations: [], carriers: [], staff: [] }, addCustomer }) })
+    fireEvent.change(screen.getByTestId('f-customer-name-input'), { target: { value: 'ZZ Brand New Co' } })
+    expect(screen.getByTestId('f-customer-addRow').textContent).toBe('+ Add ZZ Brand New Co as a new customer')
+    fireEvent.keyDown(screen.getByTestId('f-customer-name-input'), { key: 'Enter' })
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /save|create|add/i }))
+    await waitFor(() => expect(addCustomer).toHaveBeenCalledTimes(1))
+    expect(addCustomer.mock.calls[0]![0]).toMatchObject({ name: 'ZZ Brand New Co' })
+    await waitFor(() => expect(host.current!.getValues().customer.id).toBe('c-new'))
+    expect(host.current!.getValues().customer.useTyped).toBe(false)
+  })
+
+  it('without the directory create permission a no-match shows no add row', () => {
+    set()
+    fireEvent.change(screen.getByTestId('f-customer-name-input'), { target: { value: 'ZZ Nobody Inc' } })
+    expect(screen.queryByTestId('f-customer-addRow')).toBeNull()
+  })
+
+  it('an intake-extracted unmatched name shows the amber chip and the same add row, not a checkbox', () => {
+    const addCustomer = vi.fn()
+    renderCard(CustomerPicker, {
+      seed: (v) => ({ ...v, customer: { ...v.customer, useTyped: true, typedName: 'ZZ Extracted Co' } }),
+      ctx: () => ({ directory: { customers, locations: [], carriers: [], staff: [] }, addCustomer }),
+    })
+    expect(screen.getByTestId('f-customer-unmatched')).toBeTruthy()
+    expect(screen.queryByTestId('f-customer-useTyped')).toBeNull()
+    fireEvent.focus(screen.getByTestId('f-customer-name-input'))
+    expect(screen.getByTestId('f-customer-addRow').textContent).toBe('+ Add ZZ Extracted Co as a new customer')
   })
 
   it('locks the name after create and points at the detail page to change it', () => {

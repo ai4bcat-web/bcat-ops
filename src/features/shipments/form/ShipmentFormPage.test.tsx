@@ -26,7 +26,7 @@ vi.mock('./pipelines', () => ({
 }))
 vi.mock('react-router-dom', async (orig) => ({ ...(await orig<typeof import('react-router-dom')>()), useNavigate: () => h.navigate }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn(), info: h.toastInfo } }))
-vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: { email: 'rep@example.invalid' }, isAdmin: false }) }))
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: { email: 'rep@example.invalid' }, isAdmin: false, isOwner: false, hasPageAccess: () => false }), useAuthUser: () => ({ userId: 'u1', email: 'rep@example.invalid', groups: [] }) }))
 vi.mock('@/hooks/useShipment', () => ({
   useShipment: () => ({ ...h.shipment, refresh: vi.fn(), replace: vi.fn() }),
 }))
@@ -53,7 +53,7 @@ vi.mock('./defaultSections', () => {
           onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, ship: { ...(v.ship as object), equipmentType: e.target.value } }) as never)}
         />
       ),
-      rates: none, rateHistory: none, carrier: none, documents: none,
+      rates: none, carrier: none, documents: none,
     },
     HEADER_PARTS: {
       CustomerPicker: (p: P) => (
@@ -81,6 +81,7 @@ vi.mock('./defaultSections', () => {
       instructions: none, references: none, items: none, notes: none,
     },
     RAIL_ROLES: none,
+    RAIL_RATE_HISTORY: () => <div data-testid="card-rateHistory-stub" />,
   }
 })
 
@@ -239,18 +240,18 @@ describe('ShipmentFormPage — issues and rail', () => {
 })
 
 describe('ShipmentFormPage — layout contract', () => {
-  it('six numbered cards in build order (Customer and Bill To live in the header), no positive tabindex', () => {
+  it('five numbered cards in build order (Customer and Bill To live in the header), no positive tabindex', () => {
     renderForm('create')
     const cards = [...document.querySelectorAll<HTMLElement>('[data-testid^="section-"]:not([data-testid$="-errors"])')].map((n) => n.dataset.testid)
-    expect(cards).toEqual(['section-freight', 'section-route', 'section-rates', 'section-rateHistory', 'section-carrier', 'section-documents'])
-    expect([...document.querySelectorAll('.tms-ship-card-num')].map((n) => n.textContent)).toEqual(['1', '2', '3', '4', '5', '6'])
+    expect(cards).toEqual(['section-freight', 'section-route', 'section-rates', 'section-carrier', 'section-documents'])
+    expect([...document.querySelectorAll('.tms-ship-card-num')].map((n) => n.textContent)).toEqual(['1', '2', '3', '4', '5'])
     expect([...document.querySelectorAll('[tabindex]')].every((n) => Number(n.getAttribute('tabindex')) <= 0)).toBe(true)
   })
 
   it('the More strip sits directly under Carrier & Tracking and before Documents', () => {
     renderForm('create')
     const order = [...document.querySelectorAll<HTMLElement>('[data-testid^="section-"]:not([data-testid$="-errors"]), [data-testid="ship-form-more"]')].map((n) => n.dataset.testid)
-    expect(order).toEqual(['section-freight', 'section-route', 'section-rates', 'section-rateHistory', 'section-carrier', 'ship-form-more', 'section-documents'])
+    expect(order).toEqual(['section-freight', 'section-route', 'section-rates', 'section-carrier', 'ship-form-more', 'section-documents'])
   })
 
   it('the header strip holds the Customer picker and the Bill To chip, with no Mode pill', () => {

@@ -659,29 +659,11 @@
   cursor: pointer;
 }
 
-.tms-shell .tms-rail-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 16px;
-  background: var(--tms-card);
-  border-radius: 0 0 var(--tms-radius-sm) var(--tms-radius-sm);
-}
-
-/* An un-ready Create stays clickable (it explains what is missing) but reads as not-yet. */
-.tms-shell .tms-rail-actions [aria-disabled='true'][data-ready='false'] {
-  opacity: 0.6;
-}
-
 @media (min-width: 1280px) {
+  /* The rail scrolls with the page (feedback 19): no pinned footer, so no height cap. */
   .tms-shell .tms-rail {
-    position: sticky;
-    top: 0;
-    bottom: auto;
+    position: static;
     align-self: start;
-    max-height: calc(100vh - 250px);
   }
 
   .tms-shell .tms-rail-sheetbar {
@@ -693,8 +675,39 @@
     flex: 1 1 auto;
     max-height: none;
   }
-
-  .tms-shell .tms-rail-actions {
-    border-top: 1px solid var(--tms-border);
-  }
 }
+
+.tms-shell .tms-hdr-unmatched {
+  display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: var(--tms-radius-pill);
+  background: var(--tms-badge-orange-tint); color: var(--tms-badge-orange); font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none;
+}
+
+/* ── Bottom action bar (feedback 19): always visible, sticky to the bottom, never over a field (the form's scroll area ends above it) ── */
+.tms-shell .tms-ship-form { --tms-actionbar-h: 48px; }
+.tms-shell .tms-ship-actionbar {
+  flex: 0 0 auto;
+  /* Pinned to the viewport bottom whichever element scrolls: in a height-fixed page it is the last flex row,
+     and where the page grows with the shell's own scroll the sticky offset holds it at the bottom edge. */
+  position: sticky;
+  bottom: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-sizing: border-box;
+  min-height: var(--tms-actionbar-h);
+  padding: 0 16px env(safe-area-inset-bottom);
+  background: var(--tms-card);
+  border-top: 1px solid var(--tms-border);
+}
+.tms-shell .tms-ship-actionbar-left, .tms-shell .tms-ship-actionbar-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tms-shell .tms-ship-actionbar-save { font-size: 12px; color: var(--tms-muted); white-space: nowrap; }
+.tms-shell .tms-ship-actionbar-save[data-dirty='true'] { color: var(--tms-badge-orange); }
+.tms-shell .tms-ship-actionbar-req {
+  padding: 0; background: none; border: 0; font: inherit; font-size: 12px; font-weight: 600; color: var(--tms-text-2);
+  font-variant-numeric: tabular-nums; cursor: pointer; white-space: nowrap;
+}
+.tms-shell .tms-ship-actionbar-req[data-ready='true'] { color: var(--tms-badge-green); }
+.tms-shell .tms-ship-actionbar [aria-disabled='true'][data-ready='false'] { opacity: 0.6; }
+@media (max-width: 767px) { .tms-shell .tms-ship-actionbar-save { display: none; } }

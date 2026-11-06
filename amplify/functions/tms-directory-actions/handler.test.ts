@@ -1063,6 +1063,24 @@ describe('UPSERT_LOCATION', () => {
     expect(result.normalizedAddress).toBeTruthy()
   })
 
+  it('audits where a location was created from, only for a known source', async () => {
+    const puts: MockCommand[] = []
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') { puts.push(cmd); return Promise.resolve({}) }
+      throw new Error('unexpected')
+    })
+    const row = { name: 'ZZ Dock', street: '1 ZZ Way', city: 'Joliet', state: 'IL', zip: '60431' }
+    await handler(event('UPSERT_LOCATION', { ...row, createdFrom: 'shipment-form' }))
+    const audits = puts.filter((c) => JSON.stringify(c).includes('CREATE_LOCATION'))
+    expect(audits).toHaveLength(1)
+    expect(JSON.stringify(audits[0])).toContain('shipment-form')
+    puts.length = 0
+    await handler(event('UPSERT_LOCATION', { ...row, name: 'ZZ Dock 2', street: '2 ZZ Way' }))
+    expect(puts.filter((c) => JSON.stringify(c).includes('CREATE_LOCATION'))).toHaveLength(0)
+    await expect(handler(event('UPSERT_LOCATION', { ...row, name: 'ZZ Dock 3', street: '3 ZZ Way', createdFrom: 'somewhere' }))).rejects.toThrow(/createdFrom/)
+  })
+
   it('rejects duplicate by normalized address', async () => {
     const existing1 = makeDynamoItem({
       id: 'l-1', name: 'Warehouse', street: '123 main st', city: 'chicago', state: 'il', zip: '60601', country: 'US',

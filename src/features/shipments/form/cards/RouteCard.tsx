@@ -7,8 +7,8 @@
  * delivery (those are the Pick Up and Consignee roles in the mapping).
  */
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { Plus } from 'lucide-react'
-import { TmsButton, TmsInput } from '@/features/tms/kit'
+import { Pencil, Plus } from 'lucide-react'
+import { TmsButton, TmsIconButton, TmsInput } from '@/features/tms/kit'
 import { LABEL } from '../labels'
 import { emptyStop, type FormStop } from '../model'
 import { ctl, digitsOnly, disabledState, issueFor } from '../sections/fieldUtil'
@@ -18,7 +18,7 @@ import { routeSignature } from '../sections/milesEstimate'
 import { type CardProps, sliceOf, stopsOf } from './cardRegistry'
 import { canInsert, laneLabel, moveStop, removeStop, stopPrefix, transitEstimate, validOrder } from './routeUtil'
 import { StopCard } from './StopCard'
-import { useAutoMiles } from './useAutoMiles'
+import { MILES_SOURCE_TEXT, useAutoMiles, withMiles } from './useAutoMiles'
 import './cards.css'
 
 const UNDO_MS = 10_000
@@ -37,12 +37,21 @@ export function RouteCard({ values, update, ctx }: CardProps) {
   const undoTimer = useRef<number | undefined>(undefined)
   useEffect(() => () => clearTimeout(undoTimer.current), [])
 
-  const auto = useAutoMiles(routeSignature(stops), ship.disableMileage || milesLock.disabled, onShip)
+  // A miles value that was already saved counts as an override (we cannot tell it from a typed one); Clear hands it back to the route.
+  const [overridden, setOverridden] = useState(() => ship.customerMiles.trim() !== '')
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const auto = useAutoMiles(routeSignature(stops), ship.disableMileage || milesLock.disabled, overridden, onShip)
   const lane = laneLabel(stops)
   const transit = transitEstimate(ship.customerMiles)
-  const isEstimate = (value: string) => auto.source === 'estimate' && value !== '' && value === auto.miles
-  const customerEst = isEstimate(ship.customerMiles)
-  const truckEst = isEstimate(ship.truckMiles)
+  const applyOverride = () => {
+    const v = digitsOnly(draft)
+    if (v === '') return
+    onShip((prev) => withMiles(prev, v))
+    setOverridden(true)
+    setEditing(false)
+  }
+  const clearOverride = () => { setOverridden(false); onShip((prev) => withMiles(prev, '')); setEditing(false) }
 
   const patchStop = (i: number) => (patch: Partial<FormStop> | ((prev: FormStop) => FormStop)) =>
     onStops((prev) => prev.map((s, n) => (n === i ? (typeof patch === 'function' ? patch(s) : { ...s, ...patch }) : s)))
@@ -90,24 +99,37 @@ export function RouteCard({ values, update, ctx }: CardProps) {
     </li>
   )
 
-  const milesInput = (def: typeof LABEL.shipping.customerMiles, value: string, disabled: boolean, title: string | undefined, key: 'customerMiles' | 'truckMiles', est: boolean) => (
-    <LField span={6} def={def} error={issueFor(ctx, 'shipping', def.testId)} hint={est ? <span data-testid={`${def.testId}-est`}>est.</span> : undefined} className="tms-card-miles">
-      <TmsInput {...ctl(def)} inputMode="numeric" value={value} disabled={disabled} title={title} onChange={(e) => onShip({ [key]: digitsOnly(e.target.value) })} />
-    </LField>
-  )
-
   return (
     <div className="tms-card-body-stack" data-testid="section-route-body">
       <div className="tms-card-lane" data-testid="f-route-laneHeader">
         <div className="tms-card-lane-main">
           <span className="tms-card-lane-label" data-testid="f-route-lane">{lane || 'Add a pickup and a delivery'}</span>
           {transit && <span className="ship-hint" data-testid="f-route-transit">≈ {transit} transit</span>}
-          {auto.failed && !ship.disableMileage && <span className="ship-hint" data-testid="f-shipping-milesSource">Could not measure the route — type the miles</span>}
-          {!auto.failed && auto.source === 'google' && !ship.disableMileage && <span className="ship-hint" data-testid="f-shipping-milesSource">Miles from the stop addresses</span>}
+          {auto.failed && !overridden && !ship.disableMileage && <span className="ship-hint" data-testid="f-shipping-milesFailed">Could not measure the route: use the pencil to type the miles</span>}
         </div>
         <FieldGrid className="tms-card-lane-miles">
-          {milesInput(LABEL.shipping.customerMiles, ship.customerMiles, milesLock.disabled, milesLock.title, 'customerMiles', customerEst)}
-          {milesInput(LABEL.shipping.truckMiles, ship.truckMiles, base.disabled, undefined, 'truckMiles', truckEst)}
+          <LField
+            span={12} def={LABEL.shipping.customerMiles} error={issueFor(ctx, 'shipping', LABEL.shipping.customerMiles.testId)}
+            hint={auto.source ? MILES_SOURCE_TEXT[auto.source] : 'Follows the stops'}
+          >
+            <div className="tms-card-miles-box">
+              <TmsInput {...ctl(LABEL.shipping.customerMiles)} readOnly className="ship-readonly" value={ship.customerMiles} title={milesLock.title} />
+              <TmsIconButton
+                aria-label="Override miles" data-testid="f-shipping-milesEdit" disabled={milesLock.disabled}
+                onClick={() => { setDraft(ship.customerMiles); setEditing((e) => !e) }}
+              >
+                <Pencil size={13} />
+              </TmsIconButton>
+              {editing && (
+                <div className="tms-card-miles-pop" role="dialog" aria-label="Override miles" data-testid="f-shipping-milesPop">
+                  <TmsInput aria-label="Miles override" data-testid="f-shipping-milesInput" inputMode="numeric" value={draft} onChange={(e) => setDraft(digitsOnly(e.target.value))} />
+                  <TmsButton size="sm" variant="primary" data-testid="f-shipping-milesApply" disabled={draft === ''} onClick={applyOverride}>Use</TmsButton>
+                  <TmsButton size="sm" data-testid="f-shipping-milesClear" disabled={!overridden} onClick={clearOverride}>Clear</TmsButton>
+                </div>
+              )}
+              {auto.source ? <span className="tms-fg-sr" data-testid="f-shipping-milesSource">{MILES_SOURCE_TEXT[auto.source]}</span> : null}
+            </div>
+          </LField>
         </FieldGrid>
       </div>
 

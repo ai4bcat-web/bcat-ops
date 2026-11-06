@@ -114,7 +114,7 @@ describe('ActivityBlock', () => {
 })
 
 describe('SummaryRail order', () => {
-  it('stacks Summary, Money, Required, Activity, Roles', () => {
+  it('stacks Summary, Money, Rate history, Required, Activity, Roles', () => {
     const values = emptyValues()
     const ctx = makeCtx()
     const noop = vi.fn()
@@ -123,12 +123,15 @@ describe('SummaryRail order', () => {
       <MemoryRouter>
         <SummaryRail
           common={common} summary={railSummary(values, null, null)} rows={requiredRows(values, 'create')} attempted={false} status="NEW"
-          busy={false} voided={false} Roles={() => <div data-testid="roles-stub" />} onRun={noop} onDiscard={noop}
+          busy={false} voided={false} Roles={() => <div data-testid="roles-stub" />} RateHistory={() => <div data-testid="rh-stub" />} onRun={noop} onDiscard={noop}
         />
       </MemoryRouter>,
     )
-    const order = [...document.querySelectorAll('[data-testid="rail-required"], [data-testid="rail-activity"], [data-testid="rail-roles"]')].map((n) => n.getAttribute('data-testid'))
-    expect(order).toEqual(['rail-required', 'rail-activity', 'rail-roles'])
+    const order = [...document.querySelectorAll('[data-testid="rail-money"], [data-testid="rail-rate-history"], [data-testid="rail-required"], [data-testid="rail-activity"], [data-testid="rail-roles"]')].map((n) => n.getAttribute('data-testid'))
+    expect(order).toEqual(['rail-money', 'rail-rate-history', 'rail-required', 'rail-activity', 'rail-roles'])
     expect(screen.getByTestId('rail-stage-chip').textContent).toBe('Draft, not created yet')
+    // The actions are the page's bottom bar now: nothing action-like is left in the rail.
+    expect(screen.queryByTestId('rail-actions')).toBeNull()
+    expect(screen.getByTestId('ship-form-rail').querySelector('[data-testid="ship-form-create"], [data-testid="ship-form-save-draft"]')).toBeNull()
   })
 })
