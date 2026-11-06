@@ -125,6 +125,10 @@ vi.hoisted(() => {
   process.env.POD_DOCUMENT_TABLE_NAME = 'PodDocument-test'
   process.env.EQUIPMENT_TABLE_NAME = 'Equipment-test'
   process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
+  process.env.TIME_CLOCK_TABLE_NAME = 'TimeClockEntry-test'
+  process.env.DRIVER_AVAILABILITY_TABLE_NAME = 'DriverAvailability-test'
+  process.env.STAFF_USER_POOL_ID = 'us-east-1_staffpool'
+  process.env.STAFF_USER_POOL_CLIENT_ID = 'staff-client-id'
   process.env.DRIVER_USER_POOL_ID = 'us-east-1_testpool'
   process.env.DRIVER_USER_POOL_CLIENT_ID = 'test-client-id'
   process.env.SLACK_BOT_TOKEN = 'xoxb-test-token'
@@ -502,6 +506,8 @@ function defaultTables(): Record<string, Record<string, Record<string, unknown>>
       'tr-2': { id: 'tr-2', type: 'trailer', unitNumber: 9002, active: true },
     },
     'AuditLog-test': {},
+    'TimeClockEntry-test': {},
+    'DriverAvailability-test': {},
     'DriverPayDeduction-test': {},
     'DriverPayCredit-test': {},
     'FuelTransaction-test': {},
@@ -1206,6 +1212,134 @@ describe('driver-app-api handler', () => {
       // A brokerage load delivered BEFORE the changeover was never settled to the driver,
       // so the list must report the same gross the detail view builds for that week.
       expect(weeks.find((w) => w.weekStart === '2026-09-20')?.gross).toBe(1000)
+    })
+  })
+
+  describe('time off requests', () => {
+    const NOW = new Date('2026-11-06T18:00:00Z')   // Friday 11/6 in Chicago
+    const pto = (over: Record<string, unknown> = {}) => ({ id: 'tc-1', driverId: DRIVER_A_ID, workDate: '2026-02-03', kind: 'PTO', minutes: 480, source: 'STAFF', ...over })
+    const avail = (over: Record<string, unknown> = {}) => ({ id: 'av-1', driverId: DRIVER_A_ID, type: 'FULL_DAY_OFF', startDate: '2026-11-10', endDate: '2026-11-10', createdBy: 'dispatch', createdAt: '2026-11-01T12:00:00Z', ...over })
+    const asDriver = () => mockVerify.mockResolvedValue({ email: EMAIL_A, email_verified: true })
+    const asStaff = (groups: string[] = ['page-timeOff'], email = 'jason@bcatcorp.com') => mockVerify.mockResolvedValue({ email, 'cognito:groups': groups })
+    const post = (path: string, body: unknown) => handler(baseEvent(path, 'POST', { body }))
+    const clock = () => Object.values(tables['TimeClockEntry-test'])
+    const rows = () => tables['DriverAvailability-test']
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(NOW)
+      // Driver A runs the Ivan paperwork app with a clock and may take PTO.
+      Object.assign(tables['Driver-test'][DRIVER_A_ID], { ivanApp: true, timeClock: true, ptoEligible: true })
+    })
+    afterEach(() => vi.useRealTimers())
+
+    it("lists the driver's own requests newest first with a status (none on file reads APPROVED) and the PTO count for the year", async () => {
+      rows()['av-1'] = avail()
+      rows()['av-2'] = avail({ id: 'av-2', startDate: '2026-11-20', endDate: '2026-11-20', status: 'PENDING', hours: 4, createdAt: '2026-11-05T12:00:00Z' })
+      rows()['av-other'] = avail({ id: 'av-other', driverId: DRIVER_B_ID })
+      tables['TimeClockEntry-test']['tc-1'] = pto()
+      tables['TimeClockEntry-test']['tc-2'] = pto({ id: 'tc-2', workDate: '2025-12-30' })
+      const body = JSON.parse((await handler(baseEvent('/time-off'))).body)
+      expect(body.requests.map((r: { id: string; status: string }) => [r.id, r.status])).toEqual([['av-2', 'PENDING'], ['av-1', 'APPROVED']])
+      expect(body.ptoUsed).toEqual({ year: '2026', days: 1 })
+      expect(body.ptoEligible).toBe(true)
+      expect(JSON.parse((await handler(baseEvent('/timeclock'))).body).ptoUsed).toEqual({ year: '2026', days: 1 })
+    })
+
+    it('a request is stored PENDING from the driver, with the hours asked', async () => {
+      const res = await post('/time-off', { type: 'LATE_START', startDate: '2026-11-10', hours: 3, note: ' dentist ' })
+      expect(res.statusCode).toBe(200)
+      expect(Object.values(rows())).toEqual([expect.objectContaining({ driverId: DRIVER_A_ID, type: 'LATE_START', startDate: '2026-11-10', endDate: '2026-11-10', hours: 3, note: 'dentist', status: 'PENDING', source: 'DRIVER', createdBy: 'Driver A' })])
+      expect(JSON.parse(res.body).request).toMatchObject({ status: 'PENDING', hours: 3 })
+    })
+
+    it('PTO is eight hours whatever was sent, only for an eligible driver, never a second one for a day already on the clock', async () => {
+      const res = await post('/time-off', { type: 'PTO', startDate: '2026-11-05', hours: 2 })
+      expect(res.statusCode).toBe(200)
+      expect(Object.values(rows())[0]).toMatchObject({ type: 'PTO', hours: 8, status: 'PENDING' })
+      // Nothing reaches the clock until the office approves.
+      expect(clock()).toHaveLength(0)
+
+      tables['TimeClockEntry-test']['tc-9'] = pto({ id: 'tc-9', workDate: '2026-11-04' })
+      expect((await post('/time-off', { type: 'PTO', startDate: '2026-11-04' })).statusCode).toBe(409)
+
+      tables['Driver-test'][DRIVER_A_ID].ptoEligible = false
+      const no = await post('/time-off', { type: 'PTO', startDate: '2026-11-03' })
+      expect(no.statusCode).toBe(400)
+      expect(JSON.parse(no.body).error).toMatch(/PTO is not set up/)
+    })
+
+    it('refuses a request that overlaps a pending or approved one, with the dates in the message, but not a denied one', async () => {
+      rows()['av-1'] = avail({ startDate: '2026-11-10', endDate: '2026-11-12', status: 'PENDING' })
+      const clash = await post('/time-off', { type: 'FULL_DAY_OFF', startDate: '2026-11-12', hours: 8 })
+      expect(clash.statusCode).toBe(409)
+      expect(JSON.parse(clash.body).error).toContain('Nov 10 – Nov 12')
+      rows()['av-1'].status = 'DENIED'
+      expect((await post('/time-off', { type: 'FULL_DAY_OFF', startDate: '2026-11-12', hours: 8 })).statusCode).toBe(200)
+    })
+
+    it('rejects bad input and a punch for PTO (it is a request now, not a punch)', async () => {
+      expect((await post('/time-off', { type: 'FULL_DAY_OFF', startDate: '2026-11-10', hours: 0 })).statusCode).toBe(400)
+      expect((await post('/time-off', { type: 'FULL_DAY_OFF', startDate: '2026-11-01', hours: 8 })).statusCode).toBe(400)
+      const punch = await post('/timeclock/punch', { action: 'PTO', date: '2026-11-06' })
+      expect(punch.statusCode).toBe(400)
+      expect(clock()).toHaveLength(0)
+    })
+
+    it('approving a PTO request marks it approved by the signed-in staff user and puts 480 minutes on that day', async () => {
+      rows()['av-p'] = avail({ id: 'av-p', type: 'PTO', startDate: '2026-11-05', endDate: '2026-11-05', hours: 8, status: 'PENDING', source: 'DRIVER' })
+      asStaff()
+      const res = await post('/staff/time-off/review', { id: 'av-p', decision: 'APPROVE' })
+      expect(res.statusCode).toBe(200)
+      expect(rows()['av-p']).toMatchObject({ status: 'APPROVED', reviewedBy: 'jason@bcatcorp.com' })
+      expect(rows()['av-p'].reviewedAt).toBeTruthy()
+      expect(clock()).toEqual([expect.objectContaining({ driverId: DRIVER_A_ID, workDate: '2026-11-05', kind: 'PTO', minutes: 480, source: 'STAFF', clockInAt: null })])
+    })
+
+    it('refuses to approve a second PTO for a day that already has one, leaving the request pending', async () => {
+      rows()['av-p'] = avail({ id: 'av-p', type: 'PTO', startDate: '2026-11-05', endDate: '2026-11-05', status: 'PENDING', source: 'DRIVER' })
+      tables['TimeClockEntry-test']['tc-1'] = pto({ workDate: '2026-11-05' })
+      asStaff()
+      const res = await post('/staff/time-off/review', { id: 'av-p', decision: 'APPROVE' })
+      expect(res.statusCode).toBe(409)
+      expect(JSON.parse(res.body).error).toMatch(/already has a PTO day on Nov 5/)
+      expect(rows()['av-p'].status).toBe('PENDING')
+      expect(clock()).toHaveLength(1)
+    })
+
+    it('denying records the note for the driver and creates no hours; approving a non-PTO request creates none either', async () => {
+      rows()['av-p'] = avail({ id: 'av-p', type: 'PTO', startDate: '2026-11-05', endDate: '2026-11-05', status: 'PENDING', source: 'DRIVER' })
+      rows()['av-d'] = avail({ id: 'av-d', status: 'PENDING', source: 'DRIVER' })
+      asStaff(['ADMIN'])
+      await post('/staff/time-off/review', { id: 'av-p', decision: 'DENY', note: 'Short staffed that week' })
+      await post('/staff/time-off/review', { id: 'av-d', decision: 'APPROVE' })
+      expect(rows()['av-p']).toMatchObject({ status: 'DENIED', reviewNote: 'Short staffed that week' })
+      expect(rows()['av-d'].status).toBe('APPROVED')
+      expect(clock()).toHaveLength(0)
+      // The driver then reads the note back.
+      asDriver()
+      const mine = JSON.parse((await handler(baseEvent('/time-off'))).body).requests as Array<{ id: string; reviewNote: string | null }>
+      expect(mine.find((r) => r.id === 'av-p')?.reviewNote).toBe('Short staffed that week')
+    })
+
+    it('only staff with Time Off access may review, and a reviewed request cannot be reviewed again', async () => {
+      rows()['av-p'] = avail({ id: 'av-p', status: 'PENDING', source: 'DRIVER' })
+      asStaff([])
+      expect((await post('/staff/time-off/review', { id: 'av-p', decision: 'APPROVE' })).statusCode).toBe(403)
+      asStaff(['page-timeOff'])
+      expect((await post('/staff/time-off/review', { id: 'av-p', decision: 'DENY' })).statusCode).toBe(200)
+      expect((await post('/staff/time-off/review', { id: 'av-p', decision: 'APPROVE' })).statusCode).toBe(409)
+      expect(rows()['av-p'].status).toBe('DENIED')
+    })
+
+    it('a PTO day entered by staff is approved at once and on the clock; the same day twice is refused', async () => {
+      asStaff(['page-timeOff'], 'ryne@bcatcorp.com')
+      const res = await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2026-11-05', note: 'demo' })
+      expect(res.statusCode).toBe(200)
+      expect(Object.values(rows())).toEqual([expect.objectContaining({ driverId: DRIVER_A_ID, type: 'PTO', startDate: '2026-11-05', hours: 8, status: 'APPROVED', source: 'STAFF', reviewedBy: 'ryne@bcatcorp.com', note: 'demo' })])
+      expect(clock()).toEqual([expect.objectContaining({ workDate: '2026-11-05', kind: 'PTO', minutes: 480, source: 'STAFF' })])
+      expect((await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2026-11-05' })).statusCode).toBe(409)
+      expect(clock()).toHaveLength(1)
     })
   })
 

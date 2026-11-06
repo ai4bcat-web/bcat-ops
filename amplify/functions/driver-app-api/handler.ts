@@ -83,6 +83,10 @@ import { parseDriverNotes, ownNoteIndex, withNoteText, withoutNote } from './loc
 import { matchLocation, newLocationItem, type LocationLike } from './locationFromStop'
 import { chicagoDateStr } from '../../../src/lib/date'
 import { reorderedSortValues } from '../../../src/lib/loadReorder'
+import {
+  validateTimeOffRequest, overlappingRequest, describeRange, ptoDaysUsed, ptoRowFor, statusOf, yearOf,
+  type TimeOffType, type TimeOffStatus,
+} from '../../../src/lib/timeOff'
 import { locateCity } from '../../../src/lib/eldRadius'
 import {
   applyStopEvent, estimateEta, planDeliveryEta, withEta, type LatLng, type StopEvent,
@@ -187,6 +191,7 @@ const MAINTENANCE_TASK_TABLE = process.env.MAINTENANCE_TASK_TABLE_NAME ?? ''
 const MOTIVE_API_KEY = process.env.MOTIVE_API_KEY ?? ''
 const MOTIVE_BASE = 'https://api.gomotive.com/v1'
 const TIME_CLOCK_TABLE = process.env.TIME_CLOCK_TABLE_NAME ?? ''
+const DRIVER_AVAILABILITY_TABLE = process.env.DRIVER_AVAILABILITY_TABLE_NAME ?? ''
 const PAY_DEDUCTION_TABLE = process.env.DRIVER_PAY_DEDUCTION_TABLE_NAME!
 const PAY_CREDIT_TABLE = process.env.DRIVER_PAY_CREDIT_TABLE_NAME!
 const FUEL_TX_TABLE = process.env.FUEL_TRANSACTION_TABLE_NAME!
@@ -1037,6 +1042,12 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   }
   if (segments[0] === 'timeclock' && !segments[1]) {
     return { path: '/timeclock' }
+  }
+  if (segments[0] === 'time-off' && !segments[1]) {
+    return { path: '/time-off' }
+  }
+  if (segments[0] === 'staff' && segments[1] === 'time-off' && (segments[2] === 'review' || segments[2] === 'pto')) {
+    return { path: `/staff/time-off/${segments[2]}` }
   }
   if (segments[0] === 'timeclock' && segments[1] === 'punch') {
     return { path: '/timeclock/punch' }
@@ -2030,6 +2041,51 @@ async function timeClockRowsFor(driverId: string): Promise<TimeClockRow[]> {
   return out
 }
 
+interface AvailabilityRow {
+  id: string
+  driverId: string
+  type: TimeOffType
+  startDate: string
+  endDate: string
+  hours?: number | null
+  note?: string | null
+  status?: TimeOffStatus | null
+  source?: 'DRIVER' | 'STAFF' | null
+  reviewedBy?: string | null
+  reviewedAt?: string | null
+  reviewNote?: string | null
+  createdBy: string
+  createdAt?: string
+}
+
+/** A driver's availability rows, newest request first. The table is small; scanned and filtered. */
+async function availabilityRowsFor(driverId: string): Promise<AvailabilityRow[]> {
+  if (!DRIVER_AVAILABILITY_TABLE) return []
+  const rows = await scan<AvailabilityRow>(DRIVER_AVAILABILITY_TABLE, 'driverId = :d', {}, { ':d': driverId })
+  return rows.sort((a, b) => String(b.createdAt ?? b.startDate).localeCompare(String(a.createdAt ?? a.startDate)))
+}
+
+/** The driver's view of a row: what they asked for, where it stands, and what the office said. */
+function timeOffView(r: AvailabilityRow) {
+  return {
+    id: r.id, type: r.type, startDate: r.startDate, endDate: r.endDate, hours: r.hours ?? null, note: r.note ?? null,
+    status: statusOf(r), reviewNote: r.reviewNote ?? null, reviewedAt: r.reviewedAt ?? null, createdAt: r.createdAt ?? null,
+  }
+}
+
+/** The PTO row already on a driver's clock for this day, if any: one per driver per day. */
+function ptoRowOn(rows: readonly TimeClockRow[], date: string): TimeClockRow | undefined {
+  return rows.find((r) => r.kind === 'PTO' && r.workDate === date)
+}
+
+/**
+ * Staff approve a PTO day: the day's 480-minute row goes on the driver's clock. Refused when
+ * the driver already has a PTO row that day, so the same day can never be paid twice.
+ */
+async function putPtoRow(driverId: string, date: string, approvedBy: string): Promise<void> {
+  await ddb.send(new PutCommand({ TableName: TIME_CLOCK_TABLE, Item: ptoRowFor(driverId, date, approvedBy, randomUUID(), new Date().toISOString()) }))
+}
+
 /**
  * The shift this driver currently has running, if any.
  *
@@ -2098,19 +2154,37 @@ async function overnightForWeek(
  * writes an audit entry, which is right for "look at their app" and wrong for "show me the
  * office a report". Same staff pool, same permission check, no impersonation.
  */
-async function verifyStaff(event: FnUrlEvent): Promise<string> {
+async function staffClaims(event: FnUrlEvent): Promise<{ email: string; groups: string[] }> {
   const token = extractBearer(event.headers)
   if (!token) throw new ApiError(401, 'Missing authorization')
   if (!staffVerifier) throw new ApiError(403, 'Staff access is not configured')
-  let claims: { email?: string }
+  let claims: { email?: string; 'cognito:groups'?: string[] | string }
   try {
-    claims = (await staffVerifier.verify(token)) as { email?: string }
+    claims = (await staffVerifier.verify(token)) as typeof claims
   } catch (err) {
     throw new ApiError(401, `Invalid staff token: ${err instanceof Error ? err.message : String(err)}`)
   }
   const email = normalizeEmail(claims.email ?? '')
   if (!email) throw new ApiError(401, 'Staff token missing email')
+  const raw = claims['cognito:groups']
+  return { email, groups: Array.isArray(raw) ? raw : typeof raw === 'string' && raw ? [raw] : [] }
+}
+
+async function verifyStaff(event: FnUrlEvent): Promise<string> {
+  const { email } = await staffClaims(event)
   if (!mayImpersonate(email)) throw new ApiError(403, 'Not permitted')
+  return email
+}
+
+/**
+ * A staff session allowed on one staff page: the same rule the page itself uses (the owner,
+ * the ADMIN group, or an explicit `page-<key>` grant), so whoever may open /time-off may
+ * approve there without also being on the short impersonation list.
+ */
+async function verifyStaffForPage(event: FnUrlEvent, pageKey: string): Promise<string> {
+  const { email, groups } = await staffClaims(event)
+  const allowed = email === 'ryne@bcatcorp.com' || groups.includes('ADMIN') || groups.includes(`page-${pageKey}`)
+  if (!allowed) throw new ApiError(403, 'Not permitted')
   return email
 }
 
@@ -2440,6 +2514,95 @@ export const handler = async (event: FnUrlEvent) => {
       return reply(200, { days: await motiveDaysFor(ids, from, to) })
     }
 
+    /*
+     * The office reviews a driver's time-off request. Staff session, checked against the
+     * Time Off page's own access rule, handled before the driver branch. Approving PTO also
+     * puts the day's 480 minutes on the driver's clock — here, in one place, so the status
+     * and the hours cannot disagree.
+     */
+    if (method === 'POST' && path === '/staff/time-off/review') {
+      const reviewer = await verifyStaffForPage(event, 'timeOff')
+      if (!DRIVER_AVAILABILITY_TABLE || !TIME_CLOCK_TABLE) return reply(503, { error: 'Time off is not configured' })
+      const body = parseBody(event) as { id?: string; decision?: string; note?: string }
+      const id = String(body.id ?? '').trim()
+      const approve = body.decision === 'APPROVE'
+      if (!id || (!approve && body.decision !== 'DENY')) return reply(400, { error: 'id and decision (APPROVE or DENY) are required' })
+      const row = (await ddb.send(new GetCommand({ TableName: DRIVER_AVAILABILITY_TABLE, Key: { id } }))).Item as AvailabilityRow | undefined
+      if (!row) return reply(404, { error: 'request not found' })
+      const wanted: TimeOffStatus = approve ? 'APPROVED' : 'DENIED'
+      if (row.source === 'DRIVER' && statusOf(row) === wanted) return reply(200, { ok: true, status: wanted, alreadyDone: true })
+      if (statusOf(row) !== 'PENDING') return reply(409, { error: `That request is already ${statusOf(row).toLowerCase()}.` })
+      const isPto = row.type === 'PTO'
+      if (approve && isPto) {
+        if (ptoRowOn(await timeClockRowsFor(row.driverId), row.startDate)) {
+          return reply(409, { error: `This driver already has a PTO day on ${describeRange(row.startDate, row.startDate)}. Deny this request, or remove the other PTO day on the Hours page first.` })
+        }
+      }
+      const now = new Date().toISOString()
+      const note = String(body.note ?? '').trim().slice(0, 500)
+      try {
+        await ddb.send(new UpdateCommand({
+          TableName: DRIVER_AVAILABILITY_TABLE,
+          Key: { id },
+          UpdateExpression: `SET #s = :s, reviewedBy = :by, reviewedAt = :at, updatedAt = :at${note ? ', reviewNote = :n' : ''}`,
+          ConditionExpression: '#s = :pending',
+          ExpressionAttributeNames: { '#s': 'status' },
+          ExpressionAttributeValues: { ':s': wanted, ':by': reviewer, ':at': now, ':pending': 'PENDING', ...(note ? { ':n': note } : {}) },
+        }))
+      } catch (err) {
+        if ((err as { name?: string }).name === 'ConditionalCheckFailedException') return reply(409, { error: 'Someone else already reviewed that request.' })
+        throw err
+      }
+      if (approve && isPto) {
+        try {
+          await putPtoRow(row.driverId, row.startDate, reviewer)
+        } catch (err) {
+          // The status must never say approved while the hours are missing: put it back.
+          await ddb.send(new UpdateCommand({
+            TableName: DRIVER_AVAILABILITY_TABLE, Key: { id },
+            UpdateExpression: 'SET #s = :p, updatedAt = :at REMOVE reviewedBy, reviewedAt',
+            ExpressionAttributeNames: { '#s': 'status' }, ExpressionAttributeValues: { ':p': 'PENDING', ':at': now },
+          })).catch((e2) => console.error('[driver-app-api] could not revert time-off status', { id, error: String(e2) }))
+          throw err
+        }
+      }
+      console.log('[driver-app-api] time off reviewed', { id, driverId: row.driverId, type: row.type, status: wanted, by: reviewer })
+      return reply(200, { ok: true, status: wanted, reviewedBy: reviewer, reviewedAt: now, reviewNote: note || null })
+    }
+
+    /* Staff put a PTO day on a driver directly: approved from the start, and on the clock the same way. */
+    if (method === 'POST' && path === '/staff/time-off/pto') {
+      const staff = await verifyStaffForPage(event, 'timeOff')
+      if (!DRIVER_AVAILABILITY_TABLE || !TIME_CLOCK_TABLE) return reply(503, { error: 'Time off is not configured' })
+      const body = parseBody(event) as { driverId?: string; date?: string; note?: string }
+      const targetId = String(body.driverId ?? '').trim()
+      const date = String(body.date ?? '').trim()
+      if (!targetId) return reply(400, { error: 'driverId is required' })
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply(400, { error: 'date must be YYYY-MM-DD' })
+      const target = (await ddb.send(new GetCommand({ TableName: DRIVER_TABLE, Key: { id: targetId } }))).Item as DriverRow | undefined
+      if (!target) return reply(404, { error: 'driver not found' })
+      if (ptoRowOn(await timeClockRowsFor(targetId), date)) {
+        return reply(409, { error: `${target.name} already has a PTO day on ${describeRange(date, date)}.` })
+      }
+      const now = new Date().toISOString()
+      const note = String(body.note ?? '').trim().slice(0, 500)
+      const id = randomUUID()
+      await ddb.send(new PutCommand({ TableName: DRIVER_AVAILABILITY_TABLE, Item: {
+        id, __typename: 'DriverAvailability', driverId: targetId, type: 'PTO', startDate: date, endDate: date, hours: 8,
+        ...(note ? { note } : {}), status: 'APPROVED', source: 'STAFF', reviewedBy: staff, reviewedAt: now,
+        createdBy: staff, createdAt: now, updatedAt: now,
+      } }))
+      try {
+        await putPtoRow(targetId, date, staff)
+      } catch (err) {
+        await ddb.send(new DeleteCommand({ TableName: DRIVER_AVAILABILITY_TABLE, Key: { id } }))
+          .catch((e2) => console.error('[driver-app-api] could not remove the orphan PTO request', { id, error: String(e2) }))
+        throw err
+      }
+      console.log('[driver-app-api] staff PTO day', { driverId: targetId, date, by: staff })
+      return reply(200, { ok: true, id })
+    }
+
     const { driver, setting, impersonatedBy } = await loadVerifiedDriver(event)
     const driverId = driver.id
 
@@ -2699,7 +2862,7 @@ export const handler = async (event: FnUrlEvent) => {
      * The employee time clock. Ivan drivers only — owner operators are settled a percentage
      * and do not clock, so the gate is driverProgramOf again rather than a second rule.
      */
-    if (path === '/timeclock' || path === '/timeclock/punch') {
+    if (path === '/timeclock' || path === '/timeclock/punch' || path === '/time-off') {
       if (driverProgramOf({ ...driver, payGroup: setting.payGroup }) !== 'PAPERWORK') {
         return reply(409, { error: 'The time clock is an Ivan driver feature.' })
       }
@@ -2711,6 +2874,46 @@ export const handler = async (event: FnUrlEvent) => {
       if (!TIME_CLOCK_TABLE) return reply(503, { error: 'Time clock is not configured' })
 
       const rows = await timeClockRowsFor(driverId)
+
+      /*
+       * Time off the driver asks for, in hours, and where each ask stands. PTO is a request
+       * like the rest: nothing reaches the clock until the office approves it.
+       */
+      if (path === '/time-off') {
+        if (!DRIVER_AVAILABILITY_TABLE) return reply(503, { error: 'Time off is not configured' })
+        const today = chicagoToday()
+        const year = yearOf(today)
+        const mine = await availabilityRowsFor(driverId)
+        if (method === 'GET') {
+          return reply(200, {
+            requests: mine.map(timeOffView),
+            ptoEligible: driver.ptoEligible === true,
+            // Days of PTO on the clock this calendar year: one row is one day.
+            ptoUsed: { year, days: ptoDaysUsed(rows, year) },
+          })
+        }
+        if (method !== 'POST') return reply(405, { error: 'method not allowed' })
+        const checked = validateTimeOffRequest(parseBody(event) as Record<string, unknown>, today, driver.ptoEligible === true)
+        if (!checked.ok) return reply(400, { error: checked.error })
+        const want = checked.value
+        const clash = overlappingRequest(mine, want.startDate, want.endDate)
+        if (clash) {
+          return reply(409, { error: `You already have time off ${statusOf(clash) === 'PENDING' ? 'requested' : 'approved'} for ${describeRange(clash.startDate, clash.endDate)}.` })
+        }
+        if (want.type === 'PTO' && ptoRowOn(rows, want.startDate)) {
+          return reply(409, { error: `You already have a PTO day on ${describeRange(want.startDate, want.startDate)}.` })
+        }
+        const now = new Date().toISOString()
+        const item = {
+          id: randomUUID(), __typename: 'DriverAvailability', driverId, type: want.type, startDate: want.startDate, endDate: want.endDate,
+          hours: want.hours, ...(want.note ? { note: want.note } : {}), status: 'PENDING', source: 'DRIVER',
+          createdBy: driver.name, createdAt: now, updatedAt: now,
+        }
+        await ddb.send(new PutCommand({ TableName: DRIVER_AVAILABILITY_TABLE, Item: item }))
+        // The office sees the ask in the driver's Dispatch thread as well as on /time-off.
+        await postDriverStatus(driver, `Asked for ${want.type === 'PTO' ? 'PTO' : 'time off'} ${describeRange(want.startDate, want.endDate)} · ${want.hours}h`, now)
+        return reply(200, { ok: true, request: timeOffView(item as unknown as AvailabilityRow) })
+      }
 
       if (method === 'GET' && path === '/timeclock') {
         const weekParam = (event.queryStringParameters?.week ?? '').trim()
@@ -2726,8 +2929,10 @@ export const handler = async (event: FnUrlEvent) => {
           // Newest first, so the app's week picker needs no sorting of its own.
           weeks: recentWeekStarts(today, 12),
           openShift: open,
-          // Only Jason and Chuck accrue PTO; the app hides the button for everyone else.
+          // Only drivers marked PTO eligible on their file; the app hides the button for everyone else.
           ptoEligible: driver.ptoEligible === true,
+          // PTO days used this calendar year, so the Hours tab can show it beside the week.
+          ptoUsed: { year: yearOf(today), days: ptoDaysUsed(rows, yearOf(today)) },
           /*
            * An admin viewing a driver's app must never punch their clock, so the punch
            * route refuses outright. Saying so here lets the app disable the button rather
@@ -2795,10 +3000,8 @@ export const handler = async (event: FnUrlEvent) => {
           return reply(200, { ok: true, openShift: null, minutes: rowMinutes(closed) })
         }
 
-        if (action === 'HOLIDAY' || action === 'PTO') {
-          if (action === 'PTO' && driver.ptoEligible !== true) {
-            return reply(403, { error: 'PTO is not set up for this driver.' })
-          }
+        // PTO is not a punch: it is a request the office approves (POST /time-off).
+        if (action === 'HOLIDAY') {
           const workDate = String(body.date ?? '').trim()
           if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate)) {
             return reply(400, { error: 'date must be YYYY-MM-DD' })
@@ -2820,7 +3023,7 @@ export const handler = async (event: FnUrlEvent) => {
           return reply(200, { ok: true, entry: item })
         }
 
-        return reply(400, { error: 'action must be IN, OUT, HOLIDAY or PTO' })
+        return reply(400, { error: 'action must be IN, OUT or HOLIDAY' })
       }
     }
 

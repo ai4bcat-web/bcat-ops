@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
-const api = { fetchTimeClock: vi.fn(), punchTimeClock: vi.fn(), fetchMe: vi.fn(), fetchTrucks: vi.fn(), selectTruck: vi.fn(), fetchTrailers: vi.fn(), selectTrailer: vi.fn() }
+const api = { fetchTimeClock: vi.fn(), punchTimeClock: vi.fn(), fetchTimeOff: vi.fn(), requestTimeOff: vi.fn(), fetchMe: vi.fn(), fetchTrucks: vi.fn(), selectTruck: vi.fn(), fetchTrailers: vi.fn(), selectTrailer: vi.fn() }
 vi.mock('../driverApi', () => api)
 const { clearCachedProgram } = await import('../useDriverProgram')
 
@@ -44,6 +44,8 @@ function respond(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks()
   api.punchTimeClock.mockResolvedValue({ ok: true })
+  api.fetchTimeOff.mockResolvedValue({ requests: [], ptoEligible: false, ptoUsed: { year: '2026', days: 0 } })
+  api.requestTimeOff.mockResolvedValue({ ok: true })
   // The clock-in path asks which truck first; a driver already in one goes straight through.
   clearCachedProgram()
   api.fetchMe.mockResolvedValue({ driverId: 'd1', name: 'Jason Smith', program: 'PAPERWORK', truck: { id: 'eq-3114', unitNumber: '3114' } })
@@ -146,6 +148,18 @@ describe('holiday and PTO', () => {
     await waitFor(() => expect(screen.getByText(/Use PTO for today/)).toBeTruthy())
   })
 
+  it('files Use PTO for today as a request, never a punch', async () => {
+    respond({ ptoEligible: true })
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText(/Use PTO for today/)).toBeTruthy())
+    await waitFor(() => expect(api.fetchTimeOff).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByText(/Use PTO for today/))
+    await waitFor(() => expect(api.requestTimeOff).toHaveBeenCalledWith({ type: 'PTO', startDate: '2026-10-05', endDate: '2026-10-05', hours: 8 }))
+    expect(api.punchTimeClock).not.toHaveBeenCalled()
+    // The list reloads so the new Pending row appears.
+    await waitFor(() => expect(api.fetchTimeOff).toHaveBeenCalledTimes(2))
+  })
+
   it('names the paid holidays rather than leaving it to memory', async () => {
     render(<TimeClockPage />)
     await waitFor(() => expect(screen.getByText(/Thanksgiving/)).toBeTruthy())
@@ -161,7 +175,9 @@ describe('what a driver cannot do', () => {
     render(<TimeClockPage />)
     await waitFor(() => expect(screen.getByText(/Mon, Oct 5/)).toBeTruthy())
     expect(screen.queryByText(/Edit/i)).toBeNull()
-    expect(screen.queryByRole('textbox')).toBeNull()
+    // The Time off form has a note box; the card itself has none.
+    const section = screen.getByRole('region', { name: 'Time off' })
+    expect(screen.queryAllByRole('textbox').filter((t) => !section.contains(t))).toEqual([])
   })
 
   it('does not offer holiday or PTO on a past week', async () => {

@@ -18,7 +18,8 @@ import { Button } from '@/components/ui/button'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { fetchTimeClock, punchTimeClock, type TimeClockResponse } from '../driverApi'
+import { fetchTimeClock, punchTimeClock, requestTimeOff, type TimeClockResponse } from '../driverApi'
+import { TimeOffSection } from './TimeOffSection'
 import { minutesLabel, PAID_HOLIDAYS } from '@/lib/timeClock'
 import { errorText } from '@/lib/errorText'
 import { fetchPaperwork } from '../driverApi'
@@ -70,6 +71,7 @@ export function TimeClockPage() {
   const { truck, loaded: truckLoaded } = useDriverTruck()
   const [pickTruck, setPickTruck] = useState(false)
   const [pickTrailer, setPickTrailer] = useState(false)
+  const [timeOffKey, setTimeOffKey] = useState(0)
   const ivanLocal = useDriverProfile()?.ivanLocal === true
 
   /*
@@ -113,16 +115,26 @@ export function TimeClockPage() {
     await punch(action)
   }
 
-  const punch = async (action: 'IN' | 'OUT' | 'HOLIDAY' | 'PTO', opts?: { date?: string }) => {
+  const punch = async (action: 'IN' | 'OUT' | 'HOLIDAY', opts?: { date?: string }) => {
     setBusy(true)
     try {
       await punchTimeClock(action, opts)
-      toast.success(
-        action === 'IN' ? 'Clocked in'
-          : action === 'OUT' ? 'Clocked out'
-            : action === 'PTO' ? 'PTO added' : 'Holiday added',
-      )
+      toast.success(action === 'IN' ? 'Clocked in' : action === 'OUT' ? 'Clocked out' : 'Holiday added')
       load(selected ?? undefined)
+    } catch (e) {
+      toast.error(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // PTO is a request now: it is Pending until the office approves it, then becomes the day.
+  const requestPtoToday = async (today: string) => {
+    setBusy(true)
+    try {
+      await requestTimeOff({ type: 'PTO', startDate: today, endDate: today, hours: 8 })
+      toast.success('PTO requested \u2014 the office will approve it')
+      setTimeOffKey((k) => k + 1)
     } catch (e) {
       toast.error(errorText(e))
     } finally {
@@ -348,7 +360,7 @@ export function TimeClockPage() {
               variant="outline"
               className="h-12"
               disabled={busy || readOnly}
-              onClick={() => void punch('PTO', { date: data.today })}
+              onClick={() => void requestPtoToday(data.today)}
             >
               <Plane className="mr-2 h-4 w-4" aria-hidden="true" />
               Use PTO for today
@@ -360,6 +372,8 @@ export function TimeClockPage() {
           </p>
         </div>
       )}
+
+      <TimeOffSection today={data.today} readOnly={readOnly} refreshKey={timeOffKey} />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, CalendarOff, Info, Plus, X } from 'lucide-react'
 import { useDriverAvailability } from '@/hooks/useDriverAvailability'
 import { useAppStore } from '@/store/useAppStore'
@@ -6,6 +6,10 @@ import { getColor } from '@/lib/driverColors'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { TimeOffFormModal } from './TimeOffFormModal'
 import type { DriverAvailability } from '@/lib/apiClient'
+import { toast } from 'sonner'
+import { reviewTimeOff } from '@/lib/staffTimeOff'
+import { statusOf } from '@/lib/timeOff'
+import { TimeOffRequestsPanel } from './TimeOffRequestsPanel'
 
 // ── Types & labels ──────────────────────────────────────────────────────────────
 
@@ -15,9 +19,10 @@ const TYPE_META: Record<AvailType, { label: string; short: string; bg: string; f
   FULL_DAY_OFF: { label: 'Full Day Off', short: 'Off',   bg: '#fef2f2', fg: '#b91c1c', dot: '#dc2626' },
   EARLY_START:  { label: 'In Early By',  short: 'In by', bg: '#fffbeb', fg: '#b45309', dot: '#f59e0b' },
   LATE_START:   { label: 'Late Start',   short: 'Late',  bg: '#eff6ff', fg: '#1d4ed8', dot: '#3b82f6' },
+  PTO:          { label: 'PTO',          short: 'PTO',   bg: '#f0fdf4', fg: '#15803d', dot: '#16a34a' },
 }
 
-const TYPE_ORDER: AvailType[] = ['FULL_DAY_OFF', 'EARLY_START', 'LATE_START']
+const TYPE_ORDER: AvailType[] = ['FULL_DAY_OFF', 'EARLY_START', 'LATE_START', 'PTO']
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 // ── Date helpers (all work on local 'YYYY-MM-DD' strings) ───────────────────────
@@ -38,7 +43,7 @@ function prettyRange(a: DriverAvailability): string {
 // ── Page ────────────────────────────────────────────────────────────────────────
 
 export function TimeOffPage() {
-  const { availabilities, loading, createAvailability, updateAvailability, deleteAvailability } = useDriverAvailability()
+  const { availabilities, all, loading, refresh, createAvailability, updateAvailability, deleteAvailability } = useDriverAvailability()
   const drivers = useAppStore((s) => s.drivers)
   const isMobile = useIsMobile()
 
@@ -48,11 +53,35 @@ export function TimeOffPage() {
   // editor === null → closed; { entry: null } → add; { entry } → edit that entry
   const [editor, setEditor] = useState<{ entry: DriverAvailability | null } | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [showDenied, setShowDenied] = useState(false)
 
   async function handleDelete(id: string) {
     setDeletingId(id)
     try { await deleteAvailability(id) } finally { setDeletingId(null) }
   }
+
+  async function review(id: string, decision: 'APPROVE' | 'DENY', note?: string) {
+    setBusyId(id)
+    try {
+      await reviewTimeOff(id, decision, note)
+      toast.success(decision === 'APPROVE' ? 'Approved' : 'Denied')
+      await refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not save the decision')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // Requests arrive from the driver app through the Lambda, which no AppSync subscription
+  // announces, so the page re-reads every minute and whenever the tab comes back.
+  useEffect(() => {
+    const t = setInterval(() => void refresh(), 60_000)
+    const onVisible = () => { if (document.visibilityState === 'visible') void refresh() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisible) }
+  }, [refresh])
 
   const driverById = useMemo(() => new Map(drivers.map((d) => [d.id, d])), [drivers])
   const today = todayStr()
@@ -85,10 +114,14 @@ export function TimeOffPage() {
         })
   }, [filtered, driverById])
 
-  // Upcoming: entries still active or in the future, soonest first.
+  // Upcoming: entries still active or in the future, soonest first. Denied ones only when asked for.
+  const denied = useMemo(
+    () => (showDenied ? all.filter((a) => statusOf(a) === 'DENIED' && activeTypes.has(a.type)) : []),
+    [all, showDenied, activeTypes],
+  )
   const upcoming = useMemo(
-    () => filtered.filter((a) => a.endDate >= today).sort((a, b) => a.startDate.localeCompare(b.startDate)),
-    [filtered, today],
+    () => [...filtered, ...denied].filter((a) => a.endDate >= today).sort((a, b) => a.startDate.localeCompare(b.startDate)),
+    [filtered, denied, today],
   )
 
   // How many distinct drivers are off (full day) at some point this visible month.
@@ -169,6 +202,14 @@ export function TimeOffPage() {
           </div>
         </div>
 
+        <TimeOffRequestsPanel
+          requests={all}
+          driverName={(id) => driverById.get(id)?.name ?? 'Unknown'}
+          onApprove={(id) => void review(id, 'APPROVE')}
+          onDeny={(id, note) => void review(id, 'DENY', note)}
+          busyId={busyId}
+        />
+
         {/* ── Calendar card ───────────────────────────────────────────────── */}
         <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
           {/* Month nav */}
@@ -247,8 +288,12 @@ export function TimeOffPage() {
         <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
           <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Upcoming &amp; active time off</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Info size={13} /> Added from Calendar → Driver Availability
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                <input type="checkbox" checked={showDenied} onChange={(e) => setShowDenied(e.target.checked)} />
+                Show denied
+              </label>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Info size={13} /> Added from Calendar → Driver Availability</span>
             </div>
           </div>
           <div>
@@ -282,7 +327,12 @@ export function TimeOffPage() {
                     <span style={{ fontSize: 12, color: 'var(--ds-t3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {a.note ?? ''}
                     </span>
-                    {active && (
+                    {statusOf(a) === 'DENIED' && (
+                      <span style={{ fontSize: 10.5, fontWeight: 700, color: '#b91c1c', background: '#fef2f2', padding: '2px 7px', borderRadius: 4, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Denied
+                      </span>
+                    )}
+                    {active && statusOf(a) !== 'DENIED' && (
                       <span style={{ fontSize: 10.5, fontWeight: 700, color: '#15803d', background: '#f0fdf4', padding: '2px 7px', borderRadius: 4, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                         Off now
                       </span>
@@ -313,7 +363,8 @@ export function TimeOffPage() {
         <TimeOffFormModal
           drivers={drivers}
           editing={editor.entry}
-          onClose={() => setEditor(null)}
+          // A PTO day is written by the server, which AppSync subscriptions do not announce: re-read on close.
+          onClose={() => { setEditor(null); void refresh() }}
           onCreate={createAvailability}
           onUpdate={updateAvailability}
           onDelete={deleteAvailability}

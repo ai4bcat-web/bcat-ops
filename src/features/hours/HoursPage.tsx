@@ -25,6 +25,7 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
 import { listTimeClockEntries, correctTimeClockEntry } from '@/lib/apiClient'
 import type { TimeClockEntry } from '@/types'
+import { ptoDaysUsed, yearOf } from '@/lib/timeOff'
 import {
   summarizePayPeriod, payPeriodStartOf, payPeriodDays, recentPayPeriodStarts,
   minutesLabel, decimalHours, rowMinutes, clockEdges, CLOCK_EDGE_TOLERANCE_MINUTES,
@@ -88,6 +89,20 @@ export function HoursPage() {
   }, [])
 
   useEffect(() => { load(periodStart) }, [load, periodStart])
+
+  /*
+   * PTO used this calendar year, per driver. The pay-period load above is only fourteen days,
+   * so the year is its own small load; a failure leaves the figure blank, not the page broken.
+   */
+  const ptoYear = yearOf(todayChicago())
+  const [yearRows, setYearRows] = useState<TimeClockEntry[] | null>(null)
+  useEffect(() => {
+    let stale = false
+    listTimeClockEntries({ from: `${ptoYear}-01-01`, to: `${ptoYear}-12-31` })
+      .then((rows) => { if (!stale) setYearRows(rows) })
+      .catch(() => { /* the figure just stays blank */ })
+    return () => { stale = true }
+  }, [ptoYear, entries])
 
   /*
    * Only drivers who clock. Everyone else would be an empty row forever, and a page of
@@ -224,7 +239,14 @@ export function HoursPage() {
             {byDriver.map(({ driver, period }) => (
               <section key={driver.id} className="rounded-xl border border-border bg-background">
                 <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3">
-                  <h2 className="text-sm font-semibold text-foreground">{driver.name}</h2>
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {driver.name}
+                    {yearRows && (
+                      <span className="ml-3 text-xs font-normal text-muted-foreground">
+                        PTO used {ptoYear}: {ptoDaysUsed(yearRows.filter((e) => e.driverId === driver.id), ptoYear)} days
+                      </span>
+                    )}
+                  </h2>
                   <p className="text-sm tabular-nums text-muted-foreground">
                     <span className="font-bold text-foreground">{minutesLabel(period.totalMinutes)}</span>
                     {' '}· {decimalHours(period.totalMinutes)} h

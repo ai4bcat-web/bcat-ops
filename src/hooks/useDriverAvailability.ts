@@ -1,10 +1,18 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import * as api from '@/lib/apiClient'
+import { isApproved } from '@/lib/timeOff'
 
 export type DriverAvailability = api.DriverAvailability
 
+/**
+ * `availabilities` is what the calendar, planner, fleet dashboard and availability modal
+ * show: APPROVED days only (a row with no status is the office's own and counts as approved).
+ * A driver's PENDING request and a DENIED one never reach them. `all` is every row, for the
+ * Time Off page's Requests panel.
+ */
 export function useDriverAvailability() {
-  const [availabilities, setAvailabilities] = useState<api.DriverAvailability[]>([])
+  const [all, setAvailabilities] = useState<api.DriverAvailability[]>([])
+  const availabilities = useMemo(() => all.filter(isApproved), [all])
   const [loading, setLoading] = useState(true)
 
   // Poll-friendly refetch (used by the calendar's periodic refresh). Non-fatal on error.
@@ -32,7 +40,8 @@ export function useDriverAvailability() {
   const createAvailability = useCallback(async (
     input: Omit<api.DriverAvailability, 'id' | 'createdAt' | 'updatedAt'>
   ) => {
-    const created = await api.createDriverAvailability(input)
+    // Rows staff type in are approved from the start; only a driver's own request waits.
+    const created = await api.createDriverAvailability({ status: 'APPROVED', source: 'STAFF', ...input })
     setAvailabilities((prev) => [...prev, created])
     return created
   }, [])
@@ -51,5 +60,5 @@ export function useDriverAvailability() {
     setAvailabilities((prev) => prev.filter((a) => a.id !== id))
   }, [])
 
-  return { availabilities, loading, refresh, createAvailability, updateAvailability, deleteAvailability }
+  return { availabilities, all, loading, refresh, createAvailability, updateAvailability, deleteAvailability }
 }

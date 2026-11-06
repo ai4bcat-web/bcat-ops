@@ -35,6 +35,16 @@ import { driverSchema, type DriverFormValues } from '@/lib/schemas'
 import type { Driver } from '@/types'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { usePtoUsed } from '@/hooks/usePtoUsed'
+
+function PtoUsed({ driverId }: { driverId: string }) {
+  const { year, days } = usePtoUsed(driverId)
+  return (
+    <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+      PTO used in {year}: {days === null ? '—' : `${days} ${days === 1 ? 'day' : 'days'}`}
+    </span>
+  )
+}
 
 function getInitials(name: string): string {
   return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()
@@ -437,6 +447,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                       <div className="flex items-center gap-3">
                         <Switch checked={field.value === true} onCheckedChange={(v) => field.onChange(v ? true : null)} />
                         <span className="text-xs text-muted-foreground">{field.value === true ? 'Eligible' : 'Not eligible'}</span>
+                        {isEdit && <PtoUsed driverId={driver.id} />}
                       </div>
                     )} />
                   </Field>

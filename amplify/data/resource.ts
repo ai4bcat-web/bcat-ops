@@ -1431,12 +1431,20 @@ const schema = a.schema({
   DriverAvailability: a
     .model({
       driverId:  a.string().required(),
-      type:      a.enum(['FULL_DAY_OFF', 'EARLY_START', 'LATE_START']),
+      type:      a.enum(['FULL_DAY_OFF', 'EARLY_START', 'LATE_START', 'PTO']),
       startDate: a.string().required(),   // YYYY-MM-DD
       endDate:   a.string().required(),   // YYYY-MM-DD (= startDate for single day)
       time:      a.string(),              // "HH:MM" for EARLY_START / LATE_START
       note:      a.string(),
       createdBy: a.string().required(),
+      // Driver requests (src/lib/timeOff.ts). A row with no status predates requests and
+      // reads as APPROVED; staff-entered rows are written APPROVED, driver ones PENDING.
+      status:     a.enum(['PENDING', 'APPROVED', 'DENIED']),
+      hours:      a.float(),              // requested hours (a PTO day is always 8)
+      source:     a.enum(['DRIVER', 'STAFF']),
+      reviewedBy: a.string(),             // staff email who approved / denied
+      reviewedAt: a.datetime(),
+      reviewNote: a.string(),             // shown to the driver
     })
     .secondaryIndexes((index) => [
       index('driverId').sortKeys(['startDate']),

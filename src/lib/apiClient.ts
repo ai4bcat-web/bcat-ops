@@ -1,5 +1,6 @@
 import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
+import type { TimeOffType, TimeOffStatus } from './timeOff'
 import type { Load, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
@@ -1499,17 +1500,24 @@ export async function setUserAdmin(username: string, isAdmin: boolean): Promise<
 export interface DriverAvailability {
   id: string
   driverId: string
-  type: 'FULL_DAY_OFF' | 'EARLY_START' | 'LATE_START'
+  type: TimeOffType
   startDate: string
   endDate: string
   time?: string | null
   note?: string | null
+  /** Absent on rows from before requests existed: read it with statusOf() (src/lib/timeOff.ts). */
+  status?: TimeOffStatus | null
+  hours?: number | null
+  source?: 'DRIVER' | 'STAFF' | null
+  reviewedBy?: string | null
+  reviewedAt?: string | null
+  reviewNote?: string | null
   createdBy: string
   createdAt: string
   updatedAt: string
 }
 
-const DA_FIELDS = `id driverId type startDate endDate time note createdBy createdAt updatedAt`
+const DA_FIELDS = `id driverId type startDate endDate time note status hours source reviewedBy reviewedAt reviewNote createdBy createdAt updatedAt`
 
 export async function listDriverAvailabilities(): Promise<DriverAvailability[]> {
   const result = await client.graphql({

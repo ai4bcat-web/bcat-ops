@@ -3,6 +3,8 @@ import { Trash2 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import type { Driver } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
+import { addStaffPtoDay } from '@/lib/staffTimeOff'
+import { PTO_HOURS } from '@/lib/timeOff'
 
 type AvailType = DriverAvailability['type']
 
@@ -10,6 +12,7 @@ const TYPE_OPTIONS: { value: AvailType; label: string }[] = [
   { value: 'FULL_DAY_OFF', label: 'Full Day Off' },
   { value: 'EARLY_START',  label: 'In Early By' },
   { value: 'LATE_START',   label: 'Late Start' },
+  { value: 'PTO',          label: 'PTO (8h)' },
 ]
 
 interface Props {
@@ -34,25 +37,37 @@ export function TimeOffFormModal({ drivers, editing, onClose, onCreate, onUpdate
   const [note,      setNote]      = useState(editing?.note ?? '')
   const [saving,    setSaving]    = useState(false)
   const [deleting,  setDeleting]  = useState(false)
+  const [error,     setError]     = useState<string | null>(null)
 
+  const isPto = type === 'PTO'
+  // A saved PTO day is also a time-clock row on the server: remove it here, edit nothing.
+  const readOnly = isEdit && editing?.type === 'PTO'
   const needsTime = type === 'EARLY_START' || type === 'LATE_START'
-  const canSubmit = !!driverId && !!startDate && !!endDate && (!needsTime || !!time) && endDate >= startDate
+  const canSubmit = !!driverId && !!startDate && (isPto || (!!endDate && endDate >= startDate)) && (!needsTime || !!time)
 
   async function handleSave() {
-    if (!canSubmit) return
+    if (!canSubmit || readOnly) return
     setSaving(true)
+    setError(null)
     try {
-      const fields = {
-        driverId,
-        type,
-        startDate,
-        endDate,
-        time: needsTime ? time : null,
-        note: note || null,
+      if (isPto) {
+        // The server writes the approved PTO row and the 8-hour time-clock row together.
+        await addStaffPtoDay(driverId, startDate, note)
+      } else {
+        const fields = {
+          driverId,
+          type,
+          startDate,
+          endDate,
+          time: needsTime ? time : null,
+          note: note || null,
+        }
+        if (isEdit && editing) await onUpdate(editing.id, fields)
+        else await onCreate({ ...fields, createdBy: currentUser })
       }
-      if (isEdit && editing) await onUpdate(editing.id, fields)
-      else await onCreate({ ...fields, createdBy: currentUser })
       onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save')
     } finally {
       setSaving(false)
     }
@@ -61,7 +76,10 @@ export function TimeOffFormModal({ drivers, editing, onClose, onCreate, onUpdate
   async function handleDelete() {
     if (!editing) return
     setDeleting(true)
-    try { await onDelete(editing.id); onClose() } finally { setDeleting(false) }
+    setError(null)
+    try { await onDelete(editing.id); onClose() }
+    catch (err) { setError(err instanceof Error ? err.message : 'Could not remove') }
+    finally { setDeleting(false) }
   }
 
   const activeDrivers = drivers.filter((d) => d.active).sort((a, b) => a.name.localeCompare(b.name))
@@ -95,7 +113,7 @@ export function TimeOffFormModal({ drivers, editing, onClose, onCreate, onUpdate
         <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
           <div>
             <label style={labelStyle}>Driver</label>
-            <select value={driverId} onChange={(e) => setDriverId(e.target.value)} style={inputStyle}>
+            <select aria-label="Driver" value={driverId} onChange={(e) => setDriverId(e.target.value)} disabled={readOnly} style={inputStyle}>
               <option value="">Select driver…</option>
               {activeDrivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
@@ -103,20 +121,41 @@ export function TimeOffFormModal({ drivers, editing, onClose, onCreate, onUpdate
 
           <div>
             <label style={labelStyle}>Type</label>
-            <select value={type} onChange={(e) => setType(e.target.value as AvailType)} style={inputStyle}>
-              {TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            <select
+              aria-label="Type"
+              value={type}
+              onChange={(e) => setType(e.target.value as AvailType)}
+              disabled={readOnly}
+              style={inputStyle}
+            >
+              {/* A saved day keeps its type; PTO only exists as a new entry (it has a time-clock row). */}
+              {TYPE_OPTIONS.filter((o) => o.value !== 'PTO' || !isEdit || readOnly).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: needsTime ? '1fr 1fr 90px' : '1fr 1fr', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isPto ? '1fr 90px' : needsTime ? '1fr 1fr 90px' : '1fr 1fr', gap: 10 }}>
             <div>
-              <label style={labelStyle}>From</label>
-              <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); if (!endDate || endDate < e.target.value) setEndDate(e.target.value) }} style={inputStyle} />
+              <label style={labelStyle}>{isPto ? 'Day' : 'From'}</label>
+              <input
+                type="date"
+                aria-label={isPto ? 'Day' : 'From'}
+                value={startDate}
+                disabled={readOnly}
+                onChange={(e) => { setStartDate(e.target.value); if (!endDate || endDate < e.target.value) setEndDate(e.target.value) }}
+                style={inputStyle}
+              />
             </div>
-            <div>
-              <label style={labelStyle}>To</label>
-              <input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} style={inputStyle} />
-            </div>
+            {isPto ? (
+              <div>
+                <label style={labelStyle}>Hours</label>
+                <div style={{ ...inputStyle, display: 'flex', alignItems: 'center' }}>{PTO_HOURS}h</div>
+              </div>
+            ) : (
+              <div>
+                <label style={labelStyle}>To</label>
+                <input type="date" aria-label="To" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} style={inputStyle} />
+              </div>
+            )}
             {needsTime && (
               <div>
                 <label style={labelStyle}>{type === 'EARLY_START' ? 'In by' : 'Time'}</label>
@@ -127,8 +166,9 @@ export function TimeOffFormModal({ drivers, editing, onClose, onCreate, onUpdate
 
           <div>
             <label style={labelStyle}>Note (optional)</label>
-            <input type="text" placeholder="e.g. Doctor appointment" value={note} onChange={(e) => setNote(e.target.value)} style={inputStyle} />
+            <input type="text" aria-label="Note" placeholder="e.g. Doctor appointment" value={note} disabled={readOnly} onChange={(e) => setNote(e.target.value)} style={inputStyle} />
           </div>
+          {error && <div role="alert" style={{ fontSize: 12.5, color: '#b91c1c' }}>{error}</div>}
         </div>
 
         {/* Footer */}
@@ -149,13 +189,15 @@ export function TimeOffFormModal({ drivers, editing, onClose, onCreate, onUpdate
             >
               Cancel
             </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || deleting || !canSubmit}
-              style={{ height: 34, padding: '0 18px', borderRadius: 6, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: canSubmit ? 'pointer' : 'default', opacity: (!canSubmit || saving) ? 0.5 : 1 }}
-            >
-              {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add'}
-            </button>
+            {!readOnly && (
+              <button
+                onClick={handleSave}
+                disabled={saving || deleting || !canSubmit}
+                style={{ height: 34, padding: '0 18px', borderRadius: 6, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: canSubmit ? 'pointer' : 'default', opacity: (!canSubmit || saving) ? 0.5 : 1 }}
+              >
+                {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add'}
+              </button>
+            )}
           </div>
         </div>
       </div>
