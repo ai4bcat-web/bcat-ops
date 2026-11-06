@@ -14,7 +14,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Loader2, RefreshCcw, Truck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { fetchPaperwork, type Paperwork } from '../driverApi'
+import { fetchPaperwork, reorderLoads, type Paperwork } from '../driverApi'
+import { reorderedSortValues } from '@/lib/loadReorder'
 import { scheduleFingerprint, announceScheduleChange, SCHEDULE_CHECK_MS } from './scheduleFingerprint'
 import { TodayStops } from './TodayStops'
 import { DayLogs } from './DayLogs'
@@ -24,6 +25,7 @@ import { chicagoDateStr } from '@/lib/date'
 import { defaultSheetDay } from './sheetDay'
 import { useDriverProfile } from '../useDriverProgram'
 import { errorText } from '@/lib/errorText'
+import { toast } from 'sonner'
 import { useDriverPm } from '../useDriverProgram'
 import { PmGauge } from './PmGauge'
 import { stopsForDay } from './daySheet'
@@ -76,6 +78,8 @@ export function PaperworkPage() {
   const [error, setError] = useState<string | null>(null)
   const [retryKey, setRetryKey] = useState(0)
   const dateInput = useRef<HTMLInputElement>(null)
+  // Bumped around the driver's own reorder so a schedule check started before it is ignored.
+  const reorderGen = useRef(0)
 
   // The sheet is built from the week that holds the day; stepping within a week is free.
   const weekStart = weekStartOfISO(day)
@@ -99,11 +103,13 @@ export function PaperworkPage() {
     let stale = false
     const current = week
     const check = () => {
+      const gen = reorderGen.current
       if (document.visibilityState !== 'visible') return
       if (!current || current.weekStart !== weekStart) return
       fetchPaperwork(weekStart)
         .then((fresh) => {
-          if (stale) return
+          // A read that began before the driver's own reorder landed would call it a change.
+          if (stale || reorderGen.current !== gen) return
           if (scheduleFingerprint(fresh.loads, day) !== scheduleFingerprint(current.loads, day)) {
             setPendingWeek(fresh)
             announceScheduleChange()
@@ -115,6 +121,24 @@ export function PaperworkPage() {
     document.addEventListener('visibilitychange', check)
     return () => { stale = true; clearInterval(t); document.removeEventListener('visibilitychange', check) }
   }, [weekStart, day, week])
+  /*
+   * The driver put today's loads in a new order. Shown at once, with the very values the
+   * server will write (src/lib/loadReorder.ts), so the schedule check that follows sees a
+   * sheet equal to its own and does not announce "Your schedule changed" for the driver's
+   * own drag. A refused write puts the week back from the server.
+   */
+  const reorder = useCallback((loadIds: string[]) => {
+    if (!week) return
+    const byId = new Map(week.loads.map((l) => [l.id, l]))
+    const values = reorderedSortValues(loadIds.map((id) => ({ id, sortOrder: byId.get(id)?.sortOrder ?? null })))
+    const patchWeek = (w: Paperwork): Paperwork => ({ ...w, loads: w.loads.map((l) => (values.has(l.id) ? { ...l, sortOrder: values.get(l.id) as number } : l)) })
+    reorderGen.current++
+    setWeek((w) => (w ? patchWeek(w) : w))
+    setPendingWeek((p) => (p ? patchWeek(p) : p))
+    reorderLoads(day, loadIds)
+      .then(() => { reorderGen.current++ })
+      .catch((err) => { toast.error(errorText(err)); reorderGen.current++; reload() })
+  }, [week, day, reload])
   const applyPending = () => { if (pendingWeek) { setWeek(pendingWeek); setPendingWeek(null) } }
 
   const sendPod = useCallback(
@@ -248,7 +272,7 @@ export function PaperworkPage() {
           {/* Logs or no logs, before anything else: the one thing to know before rolling. */}
           <DayLogs loads={dayLoads} date={day} isToday={isToday} />
 
-          <TodayStops loads={week.loads} today={day} onSendPod={sendPod} onAddPhotos={addPhotos} onChange={reload} />
+          <TodayStops loads={week.loads} today={day} onSendPod={sendPod} onAddPhotos={addPhotos} onChange={reload} onReorder={reorder} />
         </>
       )}
 

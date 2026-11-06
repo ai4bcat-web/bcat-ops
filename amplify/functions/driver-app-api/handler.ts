@@ -81,6 +81,7 @@ import { isOvernightLoad } from '../../../src/lib/overnightLoads'
 import { getStops } from '../../../src/lib/stops'
 import { parseDriverNotes, ownNoteIndex, withNoteText, withoutNote } from './locationNotes'
 import { chicagoDateStr } from '../../../src/lib/date'
+import { reorderedSortValues } from '../../../src/lib/loadReorder'
 import { locateCity } from '../../../src/lib/eldRadius'
 import {
   applyStopEvent, estimateEta, planDeliveryEta, withEta, type LatLng, type StopEvent,
@@ -89,6 +90,7 @@ import {
 import {
   buildPaperworkLoad,
   driverIsOnPaperworkLoad,
+  stopOwner,
   summarize,
   type LoadTimeRow,
   type PaperworkLoadLike,
@@ -1010,6 +1012,9 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   }
   if (segments[0] === 'trailers' && !segments[1]) {
     return { path: '/trailers' }
+  }
+  if (segments[0] === 'paperwork' && segments[1] === 'reorder') {
+    return { path: '/paperwork/reorder' }
   }
   if (segments[0] === 'paperwork' && segments[1] === 'location-note') {
     return { path: '/paperwork/location-note' }
@@ -3094,6 +3099,62 @@ export const handler = async (event: FnUrlEvent) => {
       }))
       await postDriverStatus(driver, `Paperwork${pro ? ` for PRO ${pro}` : ''}: ${paperworkLocationLabel(value)}`, now)
       return reply(200, { ok: true, loadId, paperworkLocation: value })
+    }
+
+    /*
+     * The driver drags their loads into the order they are really running them. Writes
+     * Load.sortOrder, the same field the calendar and the dispatch driver panel read, so the
+     * office sees the new order at once.
+     *
+     * sortOrder is one number line shared by every driver on a day, so only the values the
+     * named loads already hold are re-dealt among them (see reorderedSortValues): another
+     * driver's loads never move. Every load must be this driver's with a stop of theirs on
+     * the date; one that is not fails the whole request and nothing is written.
+     */
+    if (method === 'POST' && path === '/paperwork/reorder') {
+      const body = JSON.parse(event.body || '{}') as { date?: string; loadIds?: unknown }
+      const date = (body.date ?? '').trim()
+      const ids = Array.isArray(body.loadIds) ? body.loadIds.map((x) => String(x ?? '').trim()) : []
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply(400, { error: 'date is required (YYYY-MM-DD)' })
+      if (ids.length < 2 || ids.length > 50 || ids.some((x) => !x) || new Set(ids).size !== ids.length) {
+        return reply(400, { error: 'loadIds must be 2 to 50 different loads' })
+      }
+      const found = await Promise.all(ids.map((id) => ddb.send(new GetCommand({ TableName: LOAD_TABLE_NAME, Key: { id } }))))
+      const loads = found.map((f) => f.Item as (PaperworkLoadLike & { id: string; daySlot?: number | null }) | undefined)
+      const notMine = loads.some((l) => {
+        if (!l || !driverIsOnPaperworkLoad(l, driverId)) return true
+        const stops = getStops(l as unknown as Load) as Stop[]
+        return !stops.some((s) => s.appt && chicagoDateStr(s.appt) === date && stopOwner(l, stops, s) === driverId)
+      })
+      if (notMine) return reply(404, { error: 'one of those loads is not on your sheet for that day' })
+      const ordered = loads as Array<PaperworkLoadLike & { id: string; daySlot?: number | null }>
+      const values = reorderedSortValues(ordered)
+      // The planner stacks a driver's loads by slot badge when they carry one, so when every
+      // load here has its own slot the slots are re-dealt the same way; otherwise untouched.
+      const slotted = ordered.every((l) => typeof l.daySlot === 'number')
+        && new Set(ordered.map((l) => l.daySlot)).size === ordered.length
+      const slotPool = slotted ? ordered.map((l) => l.daySlot as number).sort((a, b) => a - b) : []
+      const slots = slotted ? new Map(ordered.map((l, i) => [l.id, slotPool[i]])) : null
+      const now = nowIso()
+      await Promise.all(ordered.map((l) => ddb.send(new UpdateCommand({
+        TableName: LOAD_TABLE_NAME,
+        Key: { id: l.id },
+        UpdateExpression: slots ? 'SET sortOrder = :s, daySlot = :d, updatedAt = :u' : 'SET sortOrder = :s, updatedAt = :u',
+        ExpressionAttributeValues: slots ? { ':s': values.get(l.id), ':d': slots.get(l.id), ':u': now } : { ':s': values.get(l.id), ':u': now },
+      }))))
+      if (AUDIT_LOG_TABLE) {
+        await Promise.all(ordered.filter((l) => values.get(l.id) !== l.sortOrder).map((l) => ddb.send(new PutCommand({
+          TableName: AUDIT_LOG_TABLE,
+          Item: {
+            id: randomUUID(), __typename: 'AuditLog', entityType: 'Load', entityId: l.id, action: 'update',
+            user: driver.name,
+            changes: JSON.stringify({ sortOrder: { from: l.sortOrder ?? null, to: values.get(l.id) }, note: { from: null, to: `Reordered by driver ${driver.name}` } }),
+            createdAt: now, updatedAt: now,
+          },
+        })).catch((err) => console.error('[driver-app-api] reorder audit failed', { loadId: l.id, error: err instanceof Error ? err.message : String(err) }))))
+      }
+      console.log('[driver-app-api] loads reordered', { driverId, driverName: driver.name, date, count: ordered.length })
+      return reply(200, { ok: true, order: ordered.map((l) => ({ loadId: l.id, sortOrder: values.get(l.id) as number })) })
     }
 
     /*

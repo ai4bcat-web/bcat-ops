@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 const api = {
   fetchPaperwork: vi.fn(),
   fetchPaperworkWeeks: vi.fn(),
+  reorderLoads: vi.fn(),
   setStopDetention: vi.fn(),
   recordStopEvent: vi.fn(),
   addLocationNote: vi.fn(),
@@ -612,5 +613,49 @@ describe('reporting a truck problem', () => {
     fireEvent.click(screen.getByRole('button', { name: /Urgent/ }))
     fireEvent.click(screen.getByRole('button', { name: /Send to the shop/ }))
     await waitFor(() => expect(api.reportMaintenanceTask).toHaveBeenCalledWith({ title: 'Brakes squeal', notes: undefined, priority: 'high', truckId: 'eq-3114' }))
+  })
+})
+
+describe('the driver reorders their loads', () => {
+  const week = (a: number, b: number) => ({
+    weekStart: '2026-10-04', today: '2026-10-07', loadCount: 2, podsMissing: 0, podsIllegible: 0,
+    loads: [
+      load({ id: 'l-a', reference: '14570', sortOrder: a, stops: [stop('a-pu', 'pickup', '2026-10-07', { name: 'Alpha Dock' })] }),
+      load({ id: 'l-b', reference: '14571', sortOrder: b, stops: [stop('b-pu', 'pickup', '2026-10-07', { name: 'Bravo Dock' })] }),
+    ],
+  })
+  // The stop cards' titles, in list order (the route strip above repeats the names).
+  const names = () => [...document.querySelectorAll('li p.text-lg')].map((e) => e.textContent)
+
+  it('follows the dispatcher order, moves with the Up button, tells the server, and does not announce its own change', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    api.fetchPaperwork.mockReset()
+    api.fetchPaperwork.mockResolvedValueOnce(week(1, 3))
+    api.reorderLoads.mockResolvedValue({ order: [{ loadId: 'l-b', sortOrder: 1 }, { loadId: 'l-a', sortOrder: 3 }] })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    expect(names()).toEqual(['Alpha Dock', 'Bravo Dock'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move load 14571 up' }))
+    expect(api.reorderLoads).toHaveBeenCalledWith('2026-10-07', ['l-b', 'l-a'])
+    await waitFor(() => expect(names()).toEqual(['Bravo Dock', 'Alpha Dock']))
+
+    // The next read is what the server now holds (the same re-dealt values): no banner.
+    api.fetchPaperwork.mockResolvedValue(week(3, 1))
+    document.dispatchEvent(new Event('visibilitychange'))
+    await waitFor(() => expect(api.fetchPaperwork).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText(/Your schedule changed/)).toBeNull()
+  })
+
+  it('puts the order back from the server when the write is refused', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    api.fetchPaperwork.mockReset()
+    api.fetchPaperwork.mockResolvedValue(week(1, 3))
+    api.reorderLoads.mockRejectedValue(new Error('not on your sheet'))
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Move load 14571 up' }))
+    await waitFor(() => expect(api.fetchPaperwork.mock.calls.length).toBeGreaterThan(1))
+    await waitFor(() => expect(names()).toEqual(['Alpha Dock', 'Bravo Dock']))
   })
 })

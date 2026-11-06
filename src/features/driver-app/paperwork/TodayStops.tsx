@@ -34,6 +34,7 @@ import { errorText } from '@/lib/errorText'
 import { addLocationNote, editLocationNote, removeLocationNote, recordStopEvent, setStopDetention, type LocationDriverNote, type PaperworkLoad, type PaperworkStop, type StopEvent } from '../driverApi'
 
 import { DETENTION_HOURS, isDelivery, stopsForDay, type TodayStop, orderOpenStops } from './daySheet'
+import { ReorderableLoads } from './ReorderableLoads'
 
 function DetentionBox({ item, onChange }: { item: TodayStop; onChange: (next: TodayStop) => void }) {
   const [saving, setSaving] = useState(false)
@@ -302,6 +303,7 @@ export function TodayStops({
   onSendPod,
   onAddPhotos,
   onChange,
+  onReorder,
 }: {
   loads: PaperworkLoad[]
   /** The day on screen — today, or one the driver paged back to. */
@@ -311,6 +313,8 @@ export function TodayStops({
   onAddPhotos?: (load: PaperworkLoad, stop: PaperworkStop) => void
   /** A flag or event changed; the page refreshes its copy of the week. */
   onChange: () => void
+  /** The driver put the open loads in a new order (load ids, first to last). */
+  onReorder?: (loadIds: string[]) => void
 }) {
   // What the driver just did, applied on top of the week until the refetch lands.
   const [patches, setPatches] = useState<Record<string, Partial<PaperworkStop>>>({})
@@ -361,9 +365,11 @@ export function TodayStops({
 
   // Done stops drop to a Completed section so the next load is at the top; they stay
   // openable for a late POD, a trailer change or where the paperwork went.
-  // The stop the driver is at right now leads, then the load with freight on board.
-  const openItems = orderOpenStops(items.filter((it) => !it.stop.departedAt), items)
+  // The stop the driver is on site at leads; the rest follow the dispatcher's order.
+  const openItems = orderOpenStops(items.filter((it) => !it.stop.departedAt))
   const doneItems = items.filter((it) => !!it.stop.departedAt)
+  // One block per load, where its first open stop sits; a load's stops stay together in route order.
+  const openLoads = [...new Map(openItems.map((it) => [it.load.id, it.load])).values()]
 
   // One card per stop, used for today's list and the completed section alike.
   const renderCard = (item: TodayStop) => {
@@ -548,7 +554,13 @@ export function TodayStops({
       </div>
     ) : null}
     <ul className="flex flex-col gap-3">
-      {openItems.map(renderCard)}
+      {onReorder && openLoads.length > 1 ? (
+        <ReorderableLoads
+          blocks={openLoads.map((l) => ({ id: l.id, label: l.reference }))}
+          render={(id) => <ul className="flex flex-col gap-3">{openItems.filter((it) => it.load.id === id).map(renderCard)}</ul>}
+          onReorder={onReorder}
+        />
+      ) : openItems.map(renderCard)}
       {doneItems.length > 0 ? (
         <li className="mt-1">
           <button type="button" onClick={() => setShowDone((v) => !v)} aria-expanded={showDone}

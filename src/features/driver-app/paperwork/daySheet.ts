@@ -27,15 +27,18 @@ export function stopsForDay(loads: PaperworkLoad[], today: string): TodayStop[] 
   // A load's stops stay in route order — its pickup always before its delivery — whatever
   // the clock says: a delivery window that opens at 08:00 must not sort ahead of the 09:00
   // pickup that feeds it (Josh was shown "Delivered — send POD" before he had picked up).
-  // Loads order by the dispatcher's calendar order first, then by each load's earliest
-  // appointment (timed before first-come-first-served / date-only, see apptOrder.ts).
+  // Loads order by the dispatcher's calendar order first (a number, so 1.5 sits between 1
+  // and 2 and 10 after 9), then by each load's earliest appointment (timed before
+  // first-come-first-served / date-only, see apptOrder.ts). One the dispatcher never
+  // ordered goes after the ordered ones.
   const anchor = new Map<string, string>()
   for (const { load, stop } of out) {
-    const key = `${String(scheduleRank(load)).padStart(16, '0')}|${apptSortKey(stop)}`
+    const key = apptSortKey(stop)
     const cur = anchor.get(load.id)
     if (cur === undefined || key < cur) anchor.set(load.id, key)
   }
   return out.sort((a, b) =>
+    compareRank(scheduleRank(a.load), scheduleRank(b.load)) ||
     (anchor.get(a.load.id) ?? '').localeCompare(anchor.get(b.load.id) ?? '') ||
     a.load.id.localeCompare(b.load.id) ||
     a.stop.sequence - b.stop.sequence)
@@ -43,7 +46,12 @@ export function stopsForDay(loads: PaperworkLoad[], today: string): TodayStop[] 
 
 /** A load's place on the schedule; one the dispatcher never ordered goes after the ordered ones. */
 function scheduleRank(load: Pick<PaperworkLoad, 'sortOrder'>): number {
-  return typeof load.sortOrder === 'number' ? load.sortOrder : Number.MAX_SAFE_INTEGER
+  return typeof load.sortOrder === 'number' && Number.isFinite(load.sortOrder) ? load.sortOrder : Infinity
+}
+
+/** Ascending, with Infinity (unordered) last; plain subtraction would give NaN for two of them. */
+function compareRank(a: number, b: number): number {
+  return a === b ? 0 : a < b ? -1 : 1
 }
 
 export function isDelivery(stop: PaperworkStop): boolean {
@@ -51,23 +59,19 @@ export function isDelivery(stop: PaperworkStop): boolean {
 }
 
 /**
- * Where the driver is right now comes first. The dispatcher's calendar order is the plan;
- * the day rarely runs exactly to it. A stop the driver has tapped "on site" at but not left
- * stays at the top until they depart, and a load with freight on board (its pickup done,
- * its delivery open) stays ahead of loads not started. Jason sat at a delivery while the
- * sheet put the next load's first-come pickup above it, because that pickup was slotted
- * earlier on the calendar.
+ * The stop the driver is on site at right now stays at the top until they depart; every
+ * other open stop keeps the order stopsForDay gave it, which is the dispatcher's. An earlier
+ * version also floated any load with freight on board above loads not started, and that
+ * overrode the calendar order whenever a driver had done one pickup early.
  */
-export function openStopRank(item: TodayStop, all: readonly TodayStop[]): number {
-  if (item.stop.arrivedAt && !item.stop.departedAt) return 0
-  const loadStarted = all.some((it) => it.load.id === item.load.id && !!it.stop.departedAt)
-  return loadStarted ? 1 : 2
+export function openStopRank(item: TodayStop): number {
+  return item.stop.arrivedAt && !item.stop.departedAt ? 0 : 1
 }
 
-/** Open stops in the order to show them: on-site first, in-progress loads next, then the plan. */
-export function orderOpenStops(open: readonly TodayStop[], all: readonly TodayStop[]): TodayStop[] {
+/** Open stops in the order to show them: on-site first, then the plan. */
+export function orderOpenStops(open: readonly TodayStop[]): TodayStop[] {
   return open
-    .map((item, i) => ({ item, i, rank: openStopRank(item, all) }))
+    .map((item, i) => ({ item, i, rank: openStopRank(item) }))
     .sort((a, b) => a.rank - b.rank || a.i - b.i)
     .map((x) => x.item)
 }

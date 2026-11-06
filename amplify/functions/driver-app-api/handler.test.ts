@@ -124,6 +124,7 @@ vi.hoisted(() => {
   process.env.LOCATION_TABLE_NAME = 'Location-test'
   process.env.POD_DOCUMENT_TABLE_NAME = 'PodDocument-test'
   process.env.EQUIPMENT_TABLE_NAME = 'Equipment-test'
+  process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
   process.env.DRIVER_USER_POOL_ID = 'us-east-1_testpool'
   process.env.DRIVER_USER_POOL_CLIENT_ID = 'test-client-id'
   process.env.SLACK_BOT_TOKEN = 'xoxb-test-token'
@@ -500,6 +501,7 @@ function defaultTables(): Record<string, Record<string, Record<string, unknown>>
       'tr-1': { id: 'tr-1', type: 'trailer', unitNumber: 9001, active: true },
       'tr-2': { id: 'tr-2', type: 'trailer', unitNumber: 9002, active: true },
     },
+    'AuditLog-test': {},
     'DriverPayDeduction-test': {},
     'DriverPayCredit-test': {},
     'FuelTransaction-test': {},
@@ -1204,6 +1206,70 @@ describe('driver-app-api handler', () => {
       // A brokerage load delivered BEFORE the changeover was never settled to the driver,
       // so the list must report the same gross the detail view builds for that week.
       expect(weeks.find((w) => w.weekStart === '2026-09-20')?.gross).toBe(1000)
+    })
+  })
+
+  describe('POST /paperwork/reorder', () => {
+    const DAY = '2026-10-14'
+    /** A day line shared by two drivers: 1 and 3 and 5 are A's, 2 and 4 are B's. */
+    function seedDay(extra: Record<string, unknown> = {}) {
+      const load = (id: string, driver: string, sortOrder: number | null, more: Record<string, unknown> = {}) => ({
+        id, aljexId: id, customer: 'Cust', sortOrder, pickupDriverId: driver, deliveryDriverId: driver,
+        stops: [{ id: `${id}-p`, type: 'pickup', sequence: 0, appt: `${DAY}T15:00:00Z`, driverId: driver }],
+        ...more,
+      })
+      Object.assign(tables['Load-test'], {
+        l1: load('l1', DRIVER_A_ID, 1), l2: load('l2', DRIVER_B_ID, 2), l3: load('l3', DRIVER_A_ID, 3),
+        l4: load('l4', DRIVER_B_ID, 4), l5: load('l5', DRIVER_A_ID, 5), ...extra,
+      })
+    }
+    const post = (loadIds: string[]) => handler(baseEvent('/paperwork/reorder', 'POST', { body: { date: DAY, loadIds } }))
+    const order = () => Object.fromEntries(['l1', 'l2', 'l3', 'l4', 'l5'].map((id) => [id, tables['Load-test'][id].sortOrder]))
+
+    it("re-deals the driver's own values in the new order and never touches another driver's loads", async () => {
+      seedDay()
+      const res = await post(['l5', 'l1', 'l3'])
+      expect(res.statusCode).toBe(200)
+      expect(order()).toEqual({ l1: 3, l2: 2, l3: 5, l4: 4, l5: 1 })
+      expect(JSON.parse(res.body).order).toEqual([{ loadId: 'l5', sortOrder: 1 }, { loadId: 'l1', sortOrder: 3 }, { loadId: 'l3', sortOrder: 5 }])
+    })
+
+    it('leaves an audit line on each load that moved, and none on one that did not', async () => {
+      seedDay()
+      await post(['l1', 'l5', 'l3'])
+      const rows = Object.values(tables['AuditLog-test'])
+      expect(rows.map((r) => r.entityId).sort()).toEqual(['l3', 'l5'])
+      expect(rows[0]).toMatchObject({ entityType: 'Load', user: 'Driver A' })
+      expect(String(rows[0].changes)).toContain('Reordered by driver Driver A')
+    })
+
+    it("refuses the whole request, writing nothing, when a load is another driver's", async () => {
+      seedDay()
+      const res = await post(['l5', 'l2', 'l1'])
+      expect(res.statusCode).toBe(404)
+      expect(order()).toEqual({ l1: 1, l2: 2, l3: 3, l4: 4, l5: 5 })
+      expect(Object.keys(tables['AuditLog-test'])).toHaveLength(0)
+    })
+
+    it('refuses a load with no stop of the driver on that date', async () => {
+      seedDay({ l3: { id: 'l3', aljexId: 'l3', sortOrder: 3, pickupDriverId: DRIVER_A_ID, deliveryDriverId: DRIVER_A_ID, stops: [{ id: 'l3-p', type: 'pickup', sequence: 0, appt: '2026-10-15T15:00:00Z', driverId: DRIVER_A_ID }] } })
+      expect((await post(['l1', 'l3'])).statusCode).toBe(404)
+    })
+
+    it('rejects a list that is not at least two different loads', async () => {
+      seedDay()
+      expect((await post(['l1'])).statusCode).toBe(400)
+      expect((await post(['l1', 'l1'])).statusCode).toBe(400)
+    })
+
+    it('re-deals slot badges too, but only when every load has its own', async () => {
+      seedDay({ l1: { id: 'l1', sortOrder: 1, daySlot: 1, pickupDriverId: DRIVER_A_ID, stops: [{ id: 'a', type: 'pickup', sequence: 0, appt: `${DAY}T15:00:00Z`, driverId: DRIVER_A_ID }] }, l3: { id: 'l3', sortOrder: 3, daySlot: 2, pickupDriverId: DRIVER_A_ID, stops: [{ id: 'b', type: 'pickup', sequence: 0, appt: `${DAY}T15:00:00Z`, driverId: DRIVER_A_ID }] } })
+      await post(['l3', 'l1'])
+      expect([tables['Load-test'].l3.daySlot, tables['Load-test'].l1.daySlot]).toEqual([1, 2])
+      // l5 has no slot: a mixed set leaves slots as they were.
+      await post(['l1', 'l5'])
+      expect(tables['Load-test'].l5.daySlot).toBeUndefined()
+      expect(tables['Load-test'].l1.daySlot).toBe(2)
     })
   })
 

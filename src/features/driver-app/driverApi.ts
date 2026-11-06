@@ -997,6 +997,11 @@ export async function setPaperworkLocation(loadId: string, kind: 'TRUCK' | 'SHED
   await request<{ ok: true }>('/paperwork/paperwork-location', { method: 'POST', body: JSON.stringify({ loadId, kind, unit: unit ?? '' }) })
 }
 
+/** The driver put their loads for a day in a new order; the office's calendar follows. */
+export async function reorderLoads(date: string, loadIds: string[]): Promise<{ order: Array<{ loadId: string; sortOrder: number }> }> {
+  return request('/paperwork/reorder', { method: 'POST', body: JSON.stringify({ date, loadIds }) })
+}
+
 /** Start of day: the delivering driver says they have the paperwork, or cannot find it. */
 export async function confirmPaperwork(loadId: string, confirm: 'HAVE' | 'MISSING'): Promise<void> {
   await request<{ ok: true }>('/paperwork/paperwork-location', { method: 'POST', body: JSON.stringify({ loadId, confirm }) })
