@@ -192,3 +192,10 @@ Rate Confirmation Notes, Rate Confirmation Notes and Bill of Lading Notes textar
 bottom of the page to directly under the **Carrier** card, before Tracking. New main-column order:
 Customer, Bill To, Route, Freight, Rates, Rate history, Carrier, **More strip**, Tracking, Documents.
 Nothing else changes.
+
+## Ryne's feedback 4 (2026-11-05 evening, screenshot aljex-create/33-roles-remove-fields.png)
+"Let's remove these fields": **Dispatcher Actual**, **Tariff** and **Quote** come off the summary
+rail's Roles block. Roles keeps Sales Representative, Service Representative and Dispatcher
+Assigned only. Keep the underlying fields in the model and mapping (quote-to-shipment conversion
+still links the Quote row on its own path; dispatcher-actual keeps being stamped by tracking);
+they are simply no longer shown or editable on the create/edit form.
