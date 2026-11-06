@@ -1219,6 +1219,9 @@ describe('driver-app-api handler', () => {
     }
 
     it('offers the driver their own recent loads to attach to', async () => {
+      // The recent-loads window is relative to now; pin it next to the fixture dates.
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-05T12:00:00Z'))
       const res = await handler(baseEvent('/loads/recent', 'GET'))
       expect(res.statusCode).toBe(200)
       const body = JSON.parse(res.body)
@@ -1226,6 +1229,7 @@ describe('driver-app-api handler', () => {
       expect(ids).toContain('load-c-1')
       // Another driver's load is never offered.
       expect(ids).not.toContain('load-a-oo')
+      vi.useRealTimers()
     })
 
     it('attaches the POD and marks the submission linked', async () => {
