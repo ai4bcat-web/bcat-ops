@@ -184,3 +184,11 @@ Instructions · References · Items · Notes.
    Create).
 
 Summary rail unchanged. Required-field, mapping and fixture rules unchanged.
+
+## Ryne's feedback 3 (2026-11-05 evening, screenshot aljex-create/32-more-strip-feedback.webp)
+"Let's move the instructions and this piece to be right below carrier."
+The More strip (Instructions · References · Items · Notes tabs, with the Special Instructions &
+Rate Confirmation Notes, Rate Confirmation Notes and Bill of Lading Notes textareas) moves from the
+bottom of the page to directly under the **Carrier** card, before Tracking. New main-column order:
+Customer, Bill To, Route, Freight, Rates, Rate history, Carrier, **More strip**, Tracking, Documents.
+Nothing else changes.
