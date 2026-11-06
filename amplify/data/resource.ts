@@ -97,6 +97,9 @@ const schema = a.schema({
       // Equipment.id of the trailer this driver pulls. Null = not yet assigned ("TBD"),
       // which is the normal state until trailers are handed out.
       assignedTrailerId:  a.string(),
+      // True when the driver said they started the day bobtailing (no trailer). Set by the
+      // driver app's POST /me/trailer with null; cleared when a trailer is picked.
+      bobtail:            a.boolean(),
       // Which fleet this driver runs in. Mirrors DriverPaySetting.payGroup so the two
       // agree, and decides which documents their file requires (see src/lib/fileHub.ts).
       fleetGroup:         a.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']),

@@ -102,6 +102,8 @@ export interface DriverProfile {
   truck?: DriverTruck | null
   /** The trailer they started the day with, or null (bobtail / not asked). Optional: older API. */
   trailer?: DriverTruck | null
+  /** Said they started the day bobtailing (no trailer). Optional: older API. */
+  bobtail?: boolean | null
   /** The dispatch number to call or text, E.164; null until Dispatch is set up. Optional: older API. */
   dispatchPhone?: string | null
   /** The driver's own dispatcher, when Dispatch settings list a number for them. Optional: older API. */

@@ -47,7 +47,7 @@ export function entityFields(entity: FileEntity, drivers: Driver[], equipment: E
       { label: 'CDL expires', value: fmtDate(d.cdlExpiration) },
       { label: 'Med card expires', value: fmtDate(d.medCardExpiration) },
       { label: 'Truck', value: truck?.unitNumber ?? '' },
-      { label: 'Trailer', value: trailer?.unitNumber ?? 'TBD' },
+      { label: 'Trailer', value: trailer?.unitNumber ?? (d.bobtail ? 'Bobtail' : 'No trailer set') },
     ]
   }
 

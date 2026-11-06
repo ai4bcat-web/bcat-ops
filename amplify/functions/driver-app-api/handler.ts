@@ -269,6 +269,7 @@ interface FnUrlEvent {
 
 interface DriverRow {
   assignedTrailerId?: string | null
+  bobtail?: boolean | null
   id: string
   name: string
   active: boolean
@@ -2471,6 +2472,8 @@ export const handler = async (event: FnUrlEvent) => {
         truck: await truckForDriver(driver),
         // The trailer they said they started the day with, if asked.
         trailer: await trailerForDriver(driver),
+        // Said they started the day bobtailing; a trailer on file always wins over a stale flag.
+        bobtail: driver.bobtail === true && !(driver.assignedTrailerId ?? '').trim(),
         // The number to call or text dispatch, pinned to the top of the app.
         dispatchPhone: await dispatchPhone(),
         // Their own dispatcher's name and number, when one is on file — shown above it.
@@ -2627,7 +2630,7 @@ export const handler = async (event: FnUrlEvent) => {
     }
 
     /*
-     * The trailer the driver is starting the day with (Ivan local drivers, at clock-in).
+     * The trailer the driver is hooked to, set any time (Ivan local drivers).
      * Written on the driver's file and the trailer's row, like the truck; null clears it
      * (bobtail). The trailer a LOAD rides on is still named as they leave each pickup.
      */
@@ -2648,7 +2651,7 @@ export const handler = async (event: FnUrlEvent) => {
       const previousHolders = roster.filter((d) => d.id !== driver.id)
       const released = mine.filter((t) => t.id !== trailerId)
       await Promise.all([
-        ddb.send(new UpdateCommand({ TableName: DRIVER_TABLE, Key: { id: driver.id }, UpdateExpression: 'SET assignedTrailerId = :t, updatedAt = :u', ExpressionAttributeValues: { ':t': trailerId || null, ':u': now } })),
+        ddb.send(new UpdateCommand({ TableName: DRIVER_TABLE, Key: { id: driver.id }, UpdateExpression: 'SET assignedTrailerId = :t, bobtail = :b, updatedAt = :u', ExpressionAttributeValues: { ':t': trailerId || null, ':b': !trailerId, ':u': now } })),
         ...(trailerId ? [ddb.send(new UpdateCommand({ TableName: EQUIPMENT_TABLE, Key: { id: trailerId }, UpdateExpression: 'SET assignedDriverId = :d, updatedAt = :u', ExpressionAttributeValues: { ':d': driver.id, ':u': now } }))] : []),
         ...previousHolders.map((d) => ddb.send(new UpdateCommand({ TableName: DRIVER_TABLE, Key: { id: d.id }, UpdateExpression: 'SET assignedTrailerId = :n, updatedAt = :u', ExpressionAttributeValues: { ':n': null, ':u': now } }))),
         ...released.map((t) => ddb.send(new UpdateCommand({ TableName: EQUIPMENT_TABLE, Key: { id: t.id }, UpdateExpression: 'SET assignedDriverId = :n, updatedAt = :u', ExpressionAttributeValues: { ':n': null, ':u': now } }))),

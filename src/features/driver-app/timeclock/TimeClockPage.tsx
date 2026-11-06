@@ -28,7 +28,7 @@ import { pickupsNeedingPaperworkLocation, deliveriesNeedingPaperworkConfirm } fr
 import { EndOfDayPaperworkDialog, StartOfDayPaperworkDialog, type WhereItem, type ConfirmItem } from '../paperwork/PaperworkGates'
 import { useDriverTruck, useDriverProfile } from '../useDriverProgram'
 import { TruckPickerDialog, TruckLine } from '../TruckPicker'
-import { TrailerPickerDialog } from '../TrailerPicker'
+import { TrailerPickerDialog, TrailerLine } from '../TrailerPicker'
 
 /** Cents to "$1,500.00" — a figure a driver checks against what they were paid. */
 function money(cents: number): string {
@@ -207,6 +207,8 @@ export function TimeClockPage() {
       {/* Picked the wrong truck at clock in? Change it here any time; the ELD, the map and
           the mile readings follow the truck on file from that moment on. */}
       {openShift && <TruckLine />}
+      {/* The trailer can change any time, on or off the clock. */}
+      <TrailerLine />
 
       <TruckPickerDialog open={pickTruck} onClose={() => setPickTruck(false)} onPicked={() => { if (ivanLocal) setPickTrailer(true); else void gatedPunch('IN') }} />
       <TrailerPickerDialog open={pickTrailer} onClose={() => setPickTrailer(false)} onPicked={() => void gatedPunch('IN')} />

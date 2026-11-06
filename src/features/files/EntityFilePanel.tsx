@@ -268,7 +268,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
   const setTrailer = async (trailerId: string) => {
     if (entity.kind !== 'DRIVER') return
     try {
-      await updateDriver(entity.driver.id, { assignedTrailerId: trailerId || null })
+      await updateDriver(entity.driver.id, trailerId ? { assignedTrailerId: trailerId, bobtail: false } : { assignedTrailerId: null })
       toast.success(trailerId ? 'Trailer assigned' : 'Trailer set back to TBD')
     } catch (err) {
       toast.error(`Couldn't save the trailer: ${err instanceof Error ? err.message : 'unknown error'}`)
@@ -332,7 +332,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
                 onChange={(e) => setTrailer(e.target.value)}
                 disabled={!driverTrailerFieldDeployed()}
                 style={{ height: 34, width: '100%', maxWidth: 280, borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontFamily: 'inherit' }}>
-                <option value="">TBD — not assigned</option>
+                <option value="">{entity.driver.bobtail ? 'Bobtail (no trailer)' : 'No trailer set'}</option>
                 {trailers.map((t) => <option key={t.id} value={t.id}>{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}</option>)}
               </select>
               {!driverTrailerFieldDeployed() && (

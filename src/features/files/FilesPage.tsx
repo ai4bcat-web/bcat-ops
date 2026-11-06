@@ -404,7 +404,7 @@ export function FilesPage() {
                     <ExpiryCell info={driverExpiry(d.medCardExpiration, hub.docFor('DRIVER', d.id, 'medical_card'))} />
                     <td style={{ ...TD, whiteSpace: 'nowrap' }}>
                       <span style={{ color: 'var(--ds-t2)' }}>{truck?.unitNumber ?? '—'}</span>
-                      <span style={{ color: 'var(--ds-t3)' }}> / {trailer?.unitNumber ?? 'TBD'}</span>
+                      <span style={{ color: 'var(--ds-t3)' }}> / {trailer?.unitNumber ?? (d.bobtail ? 'Bobtail' : 'No trailer set')}</span>
                     </td>
                     <td style={{ ...TD, whiteSpace: 'nowrap', color: d.hireDate ? 'var(--ds-t2)' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>
                       {d.hireDate ? shortDate(d.hireDate.slice(0, 10)) : '—'}

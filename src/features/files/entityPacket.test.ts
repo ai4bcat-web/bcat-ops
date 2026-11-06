@@ -88,9 +88,9 @@ describe('driver packet fields', () => {
     expect(label(fields, 'Trailer')).toBe('T-88')
   })
 
-  it('falls back to TBD when no trailer is assigned', () => {
-    const fields = entityFields({ kind: 'DRIVER', driver: driver() }, [], [])
-    expect(label(fields, 'Trailer')).toBe('TBD')
+  it('says "No trailer set" when none is assigned and "Bobtail" when the driver reported it', () => {
+    expect(label(entityFields({ kind: 'DRIVER', driver: driver() }, [], []), 'Trailer')).toBe('No trailer set')
+    expect(label(entityFields({ kind: 'DRIVER', driver: driver({ bobtail: true }) }, [], []), 'Trailer')).toBe('Bobtail')
   })
 })
 

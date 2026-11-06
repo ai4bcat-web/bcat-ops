@@ -23,6 +23,8 @@ export interface Whereabouts {
   truck: string | null
   /** The trailer under them: the one named on the load they are hauling, else the one on their file. */
   trailer: string | null
+  /** They said they started the day bobtailing and no trailer is named since. */
+  bobtail?: boolean
 }
 
 /**
@@ -70,6 +72,7 @@ export function whereaboutsOf(
   now: number,
 ): Whereabouts | null {
   if (!driver) return null
+  const trailer = trailerOnDriver(driver, loads, equipment)
   const truck = driver.assignedTruckId ? equipment.find((e) => e.id === driver.assignedTruckId) : undefined
   const loc = truck ? locations.filter((l) => l.truckId === truck.id || l.unitNumber === String(truck.unitNumber)).sort((a, b) => (a.locatedAt < b.locatedAt ? 1 : -1))[0] : undefined
   const load = currentLoadForDriver(loads as Load[], driver.id, now)
@@ -88,15 +91,16 @@ export function whereaboutsOf(
     lastEvent: ev ? { label: ev.label, at: ev.at, place: [ev.stopName, ev.city].filter(Boolean).join(', ') || null } : null,
     eta: pending ? { at: pending.etaAt, stopName: etaStop, basis: pending.basis } : null,
     truck: truck ? String(truck.unitNumber) : null,
-    trailer: trailerOnDriver(driver, loads, equipment),
+    trailer,
+    bobtail: !trailer && driver.bobtail === true && !driver.assignedTrailerId,
   }
 }
 
-/** "Truck 3114 · Trailer 5302", or whichever half is known, or null. */
+/** "Truck 3114 · Trailer 5302" / "Truck 3114 · Bobtail" / "Truck 3114 · No trailer set". */
 export function unitLine(w: Whereabouts | null): string | null {
   if (!w) return null
-  const parts = [w.truck ? `Truck ${w.truck}` : null, w.trailer ? `Trailer ${w.trailer}` : null].filter(Boolean)
-  return parts.length ? parts.join(' · ') : null
+  const trailer = w.trailer ? `Trailer ${w.trailer}` : w.bobtail ? 'Bobtail' : 'No trailer set'
+  return [w.truck ? `Truck ${w.truck}` : null, trailer].filter(Boolean).join(' · ')
 }
 
 /** One line for the list: "📍 Schaumburg, IL · ETA 2:45 PM Batory". */

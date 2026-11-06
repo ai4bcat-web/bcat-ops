@@ -123,6 +123,7 @@ vi.hoisted(() => {
   process.env.CUSTOMER_TABLE_NAME = 'Customer-test'
   process.env.LOCATION_TABLE_NAME = 'Location-test'
   process.env.POD_DOCUMENT_TABLE_NAME = 'PodDocument-test'
+  process.env.EQUIPMENT_TABLE_NAME = 'Equipment-test'
   process.env.DRIVER_USER_POOL_ID = 'us-east-1_testpool'
   process.env.DRIVER_USER_POOL_CLIENT_ID = 'test-client-id'
   process.env.SLACK_BOT_TOKEN = 'xoxb-test-token'
@@ -495,6 +496,10 @@ function defaultTables(): Record<string, Record<string, Record<string, unknown>>
       'pod-sat': { id: 'pod-sat', loadId: 'load-c-saturday', processingStatus: 'READY' },
       'pod-a-oo': { id: 'pod-a-oo', loadId: 'load-a-oo', processingStatus: 'READY' },
     },
+    'Equipment-test': {
+      'tr-1': { id: 'tr-1', type: 'trailer', unitNumber: 9001, active: true },
+      'tr-2': { id: 'tr-2', type: 'trailer', unitNumber: 9002, active: true },
+    },
     'DriverPayDeduction-test': {},
     'DriverPayCredit-test': {},
     'FuelTransaction-test': {},
@@ -505,6 +510,7 @@ function matchesFilterExpression(
   rec: Record<string, unknown>,
   filter: string,
   values: Record<string, unknown>,
+  names: Record<string, string> = {},
 ): boolean {
   if (!filter) return true
   const clauses = filter.split(/\s+AND\s+/i)
@@ -532,9 +538,10 @@ function matchesFilterExpression(
       if (cmp[2] === '<' && !(v < bound)) return false
       continue
     }
-    const eq = clause.match(/^\s*([\w]+)\s*=\s*(:\w+)\s*$/i)
+    const eq = clause.match(/^\s*(#?[\w]+)\s*=\s*(:\w+)\s*$/i)
     if (eq) {
-      if (rec[eq[1]] !== values[eq[2]]) return false
+      const field = eq[1].startsWith('#') ? names[eq[1]] : eq[1]
+      if (rec[field] !== values[eq[2]]) return false
       continue
     }
     // A clause this fake cannot parse must NOT quietly widen the result set — that is how
@@ -582,7 +589,7 @@ beforeEach(() => {
       const values = input.ExpressionAttributeValues ?? {}
       const items = Object.values(tableRecords ?? {})
       const filtered = items.filter((item) =>
-        matchesFilterExpression(item as Record<string, unknown>, input.FilterExpression ?? '', values),
+        matchesFilterExpression(item as Record<string, unknown>, input.FilterExpression ?? '', values, input.ExpressionAttributeNames),
       )
       return { Items: filtered }
     }
@@ -683,6 +690,7 @@ describe('driver-app-api handler', () => {
         pm: null,
         truck: null,
         trailer: null,
+        bobtail: false,
         dispatchPhone: '+12248756477',
         dispatcher: null,
         // AMAZON pay group, no fleet: a settlement driver with no clock.
@@ -1196,6 +1204,29 @@ describe('driver-app-api handler', () => {
       // A brokerage load delivered BEFORE the changeover was never settled to the driver,
       // so the list must report the same gross the detail view builds for that week.
       expect(weeks.find((w) => w.weekStart === '2026-09-20')?.gross).toBe(1000)
+    })
+  })
+
+  describe('trailer on the driver file', () => {
+    it('picking a trailer sets it and clears bobtail; null sets bobtail; /me reports both', async () => {
+      tables['Driver-test'][DRIVER_A_ID].bobtail = true
+      const picked = await handler(baseEvent('/me/trailer', 'POST', { body: { trailerId: 'tr-1' } }))
+      expect(picked.statusCode).toBe(200)
+      expect(JSON.parse(picked.body).trailer).toEqual({ id: 'tr-1', unitNumber: '9001' })
+      expect(tables['Driver-test'][DRIVER_A_ID]).toMatchObject({ assignedTrailerId: 'tr-1', bobtail: false })
+      expect(tables['Equipment-test']['tr-1'].assignedDriverId).toBe(DRIVER_A_ID)
+      expect(JSON.parse((await handler(baseEvent('/me'))).body)).toMatchObject({ trailer: { id: 'tr-1' }, bobtail: false })
+
+      const bob = await handler(baseEvent('/me/trailer', 'POST', { body: { trailerId: null } }))
+      expect(JSON.parse(bob.body).trailer).toBeNull()
+      expect(tables['Driver-test'][DRIVER_A_ID]).toMatchObject({ assignedTrailerId: null, bobtail: true })
+      expect(tables['Equipment-test']['tr-1'].assignedDriverId).toBeNull()
+      expect(JSON.parse((await handler(baseEvent('/me'))).body)).toMatchObject({ trailer: null, bobtail: true })
+    })
+
+    it('a stale bobtail flag never outranks a trailer staff assigned', async () => {
+      Object.assign(tables['Driver-test'][DRIVER_A_ID], { bobtail: true, assignedTrailerId: 'tr-2' })
+      expect(JSON.parse((await handler(baseEvent('/me'))).body)).toMatchObject({ trailer: { id: 'tr-2' }, bobtail: false })
     })
   })
 

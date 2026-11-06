@@ -130,6 +130,33 @@ export function useDriverTruck(): { truck: DriverTruck | null; loaded: boolean; 
   }
 }
 
+/**
+ * The trailer the driver is hooked to, or bobtail, with an optimistic setter like setTruck.
+ * `trailer` null and `bobtail` true = said they are bobtailing; both empty = never said.
+ */
+export function useDriverTrailer(): { trailer: DriverTruck | null; bobtail: boolean; loaded: boolean; setTrailer: (t: DriverTruck | null) => void } {
+  const [, rerender] = useReducer((n: number) => n + 1, 0)
+
+  useEffect(() => {
+    listeners.add(rerender)
+    if (!cachedProfile && !lastError) void load()
+    return () => { listeners.delete(rerender) }
+  }, [])
+
+  const trailer = cachedProfile?.trailer ?? null
+  return {
+    trailer,
+    bobtail: !trailer && cachedProfile?.bobtail === true,
+    loaded: cachedProfile !== null,
+    setTrailer: (t) => {
+      // Shown at once (null is the driver choosing bobtail), then confirmed against /me.
+      if (cachedProfile) cachedProfile = { ...cachedProfile, trailer: t, bobtail: t === null }
+      notify()
+      void load()
+    },
+  }
+}
+
 /** The whole /me profile, for the bits of chrome (dispatch number) that read one field. */
 export function useDriverProfile(): DriverProfile | null {
   const [, rerender] = useReducer((n: number) => n + 1, 0)
