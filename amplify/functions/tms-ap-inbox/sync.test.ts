@@ -236,7 +236,7 @@ describe('failure handling', () => {
 
   it('a second press while a run holds the lock is a no-op', async () => {
     const kit = makeSyncKit(seed(), { model })
-    await kit.deps.store.claimRun(new Date(), new Date(0))
+    await kit.deps.store.claimRun(kit.deps.now(), new Date(0))
     expect(await scripted(kit)).toMatchObject({ skipped: 'RUNNING', done: true })
   })
 })

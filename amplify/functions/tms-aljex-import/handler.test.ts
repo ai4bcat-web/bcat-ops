@@ -565,6 +565,7 @@ describe('router + real engine on the synthetic golden file', () => {
     const store = new MemoryStore({ tables: devTables })
     store.seed('settings', [{ id: 'default', createdBy: 'seed', updatedBy: 'seed' }])
     const invoked: Array<Record<string, unknown>> = []
+    let idSeq = 0
     const deps: RouterDeps = {
       store,
       bucket: 'b',
@@ -593,7 +594,8 @@ describe('router + real engine on the synthetic golden file', () => {
       putText: async (k, b) => { await store.putObject(k, b) },
       invokeMcp: async () => ({ ready: false, results: [], cursor: null, done: false }),
       remainingMs: () => 900_000,
-      randomId: () => 'e2e01',
+      // Job ids are time36 + this; unique per call so two jobs minted in the same millisecond never collide.
+      randomId: () => `e2e${String(++idSeq).padStart(2, '0')}`,
     }
     const router = createRouter(deps)
     const prep = await router.dispatch('IMPORT_PREPARE', { fileName: 'synth.csv', fileHash: createHash('sha256').update(csv).digest('hex'), sizeBytes: csv.length }, ADMIN)

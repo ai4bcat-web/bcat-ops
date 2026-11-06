@@ -162,7 +162,8 @@ export const simReset = (userId: string, s3?: SimS3) => purge(userId, s3)
 export const simPurgeTest = (userId: string, s3?: SimS3) =>
   purge(userId, s3, (k) => (k.split('/').pop() ?? '').startsWith('zz-'))
 
-export function simPort(userId: string, s3?: SimS3): MailboxPort {
+/** `now` is the clock `listRecent`'s look-back is measured on; it MUST be the clock that stamps injected `internalDate`s. */
+export function simPort(userId: string, s3?: SimS3, now: () => number = Date.now): MailboxPort {
   const s = () => store(s3)
 
   async function find(id: string): Promise<StoredMessage> {
@@ -179,7 +180,7 @@ export function simPort(userId: string, s3?: SimS3): MailboxPort {
     },
 
     async listRecent({ lookbackDays, label, max }) {
-      const cutoff = Date.now() - lookbackDays * 86_400_000
+      const cutoff = now() - lookbackDays * 86_400_000
       const all = await readAll(userId, 'inbox', s())
       return all
         .filter((m) => Number(m.internalDate) >= cutoff)

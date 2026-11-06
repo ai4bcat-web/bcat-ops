@@ -184,7 +184,7 @@ export function makeCsRig(opts: { dev?: boolean; aiAgents?: AiAgentsSettings | n
       purgeTest: (userId) => simPurgeTest(userId, s3),
     },
     simDevExtraction: (mailboxId, messageId) => simDevExtraction(csUserId(mailboxId), messageId, s3),
-    portFor: (m) => (m.mode === 'SIMULATED' ? simPort(csUserId(m.id), s3) : port),
+    portFor: (m) => (m.mode === 'SIMULATED' ? simPort(csUserId(m.id), s3, () => clock.now.getTime()) : port),
     loadAiAgents: async () => opts.aiAgents ?? null,
     loadBlacklist: async () => ({ addresses: [], keywords: [] }),
     providerModes: async () => ({ gmail: oauth.client ? 'LIVE' : 'STUB' }),

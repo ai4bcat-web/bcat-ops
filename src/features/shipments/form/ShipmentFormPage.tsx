@@ -3,7 +3,7 @@
  * strip (Instructions, References, Items, Notes), and the sticky summary rail. Route element for `/tms/shipments/new` (mode "create") and
  * `/tms/shipments/:id/edit` (mode "edit"). Fields, mapping, pipelines and validation are Step AH's.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsAlert, TmsButton, TmsDialog } from '@/features/tms/kit'
@@ -307,12 +307,16 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
               {CARD_ORDER.map((key, i) => {
                 const Card = CARD_COMPONENTS[key]
                 return (
-                  <FormSection key={key} id={key} number={i + 1} title={CARD_TITLE[key]} errorCount={errorsByCard[key] ?? 0}>
-                    <Card {...common} />
-                  </FormSection>
+                  <Fragment key={key}>
+                    <FormSection id={key} number={i + 1} title={CARD_TITLE[key]} errorCount={errorsByCard[key] ?? 0}>
+                      <Card {...common} />
+                    </FormSection>
+                    {key === 'carrier' ? (
+                      <MoreTabs common={common} components={MORE_TAB_COMPONENTS} active={moreTab} onActive={setMoreTab} errors={errorsByTab} />
+                    ) : null}
+                  </Fragment>
                 )
               })}
-              <MoreTabs common={common} components={MORE_TAB_COMPONENTS} active={moreTab} onActive={setMoreTab} errors={errorsByTab} />
             </div>
             <SummaryRail
               common={common} summary={summary} rows={rows} attempted={attempted} status={status}

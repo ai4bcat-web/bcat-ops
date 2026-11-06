@@ -230,6 +230,12 @@ describe('ShipmentFormPage — layout contract', () => {
     expect([...document.querySelectorAll('[tabindex]')].every((n) => Number(n.getAttribute('tabindex')) <= 0)).toBe(true)
   })
 
+  it('the More strip sits directly under Carrier and before Tracking', () => {
+    renderForm('create')
+    const order = [...document.querySelectorAll<HTMLElement>('[data-testid^="section-"]:not([data-testid$="-errors"]), [data-testid="ship-form-more"]')].map((n) => n.dataset.testid)
+    expect(order).toEqual(['section-customer', 'section-billTo', 'section-route', 'section-freight', 'section-rates', 'section-rateHistory', 'section-carrier', 'ship-form-more', 'section-tracking', 'section-documents'])
+  })
+
   it('the header shows Division, Mode, status and a read-only PRO preview', () => {
     renderForm('create')
     expect(screen.getByTestId('ship-form-title').textContent).toBe('New shipment')
