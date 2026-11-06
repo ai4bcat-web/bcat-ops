@@ -130,7 +130,6 @@ export const ROUTES = [
   { nn: '36', slug: 'load-review', path: '/tms/load-review', pattern: '/tms/load-review', dark: true, wideOk: true },
   { nn: '37', slug: 'spot-inbox', path: '/tms/rates/spot', pattern: '/tms/rates/spot' },
   { nn: '37b', slug: 'spot-callback', path: '/tms/rates/spot/callback', pattern: '/tms/rates/spot/callback' },
-  { nn: '38', slug: 'follow-ups', path: '/tms/customers/follow-ups', pattern: '/tms/customers/follow-ups' },
   { nn: '39', slug: 'spot-quoter', path: '/tms/brokerage/spot-quoter', pattern: '/tms/brokerage/spot-quoter' },
   { nn: '39b', slug: 'carrier-sales-settings', path: '/tms/brokerage/carrier-sales', pattern: '/tms/brokerage/carrier-sales' },
 ]

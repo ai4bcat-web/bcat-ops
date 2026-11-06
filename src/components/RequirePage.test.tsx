@@ -61,10 +61,10 @@ describe('LandingRedirect', () => {
     expect(screen.getByTestId('path')).toHaveTextContent('/tms/load-review')
   })
 
-  it('sends a carriers-only user to /tms/carriers', () => {
+  it('sends a carriers-only user to the Carriers page (Find & Invite, its default tab)', () => {
     auth.hasPageAccess = (key) => key === 'carriers'
     renderRedirect()
-    expect(screen.getByTestId('path')).toHaveTextContent('/tms/carriers')
+    expect(screen.getByTestId('path')).toHaveTextContent('/tms/carriers/find')
   })
 
   it('shows a user with no page the no-access card instead of redirecting', () => {

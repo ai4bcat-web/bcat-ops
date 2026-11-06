@@ -31,7 +31,7 @@ export const LIFECYCLE_TABS: readonly LifecycleTab[] = [
     key: 'quote',
     label: 'Quote',
     caption: 'Spot quotes',
-    to: '/tms/rates',
+    to: '/tms/rates/spot',
     matches: ['/tms/rates', '/tms/rates/*'],
     pageKey: 'quotes',
     badgeKey: 'quotesToReply',

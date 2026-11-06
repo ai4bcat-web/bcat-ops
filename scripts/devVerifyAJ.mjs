@@ -489,8 +489,9 @@ const RUNNERS = {
     const blocked = await run()
     const after = await messagesOf(ctx, id)
     expect(after.length === before.length, `${after.length - before.length} thread rows written for a MANUAL customer`)
-    expect(/customer tracking is manual/i.test(JSON.stringify(blocked)), `the sweep did not say why: ${JSON.stringify(blocked).slice(0, 160)}`)
+    expect(/customer tracking is manual|tracking mode not confirmed/i.test(JSON.stringify(blocked)), `the sweep did not say why: ${JSON.stringify(blocked).slice(0, 400)}`)
     await setCustomer(ctx, custM, { trackingMode: 'AGENT' })
+    await ctx.ship('SET_TRACKING_PREFS', { shipmentId: id, prefs: { confirmed: true } })   // feedback 9: a new load's mode must be confirmed before automation runs
     await run()
     const fresh = freshRows(outRows(await messagesOf(ctx, id), 'CHECK_CALL'), outRows(before, 'CHECK_CALL'))
     expect(fresh.length >= 1, 'flipping the customer to AGENT produced no check-call row from the sweep')

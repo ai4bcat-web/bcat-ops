@@ -61,7 +61,12 @@ describe('buildNavSections', () => {
     ])
     const kids = (label: string) => labels(pinned.find((i) => i.label === label)?.children)
     expect(pinned.find((i) => i.label === 'Active shipments')?.children).toBeUndefined()
-    expect(kids('Customers')).toEqual(['Customers', 'Follow-ups'])
+    // Customers and Carriers are single rows: Carriers' two tabs live on its page, Follow-ups is gone.
+    expect(pinned.find((i) => i.label === 'Customers')?.children).toBeUndefined()
+    const carriers = pinned.find((i) => i.label === 'Carriers')
+    expect(carriers?.children).toBeUndefined()
+    expect(carriers?.to).toBe('/tms/carriers/find')
+    expect(carriers?.matches).toEqual(['/tms/carriers'])
     expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Vendors', 'Factoring'])
     expect(kids('Settings')).toEqual([
       'General & automation', 'Company', 'Divisions & ownership', 'Users & roles', 'Integrations', 'AI agents',
@@ -110,8 +115,8 @@ describe('buildNavSections', () => {
   it('shows a carriers-only grant Carriers and nothing else', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('carriers') })
     expect(labels(pinned)).toEqual(['Carriers'])
-    // Find & Invite is a Carriers sub-page on the same grant.
-    expect(labels(pinned[0].children)).toEqual(['Carriers', 'Find & Invite'])
+    expect(pinned[0].children).toBeUndefined()
+    expect(pinned[0].to).toBe('/tms/carriers/find')
     expect(sections).toEqual([])
   })
 
@@ -200,6 +205,24 @@ describe('buildNavSections', () => {
     expect(screen.getByRole('link', { name: /^Active shipments$/ })).toHaveAttribute('href', '/tms/shipments')
     for (const gone of ['Active', 'All', 'Intake', 'Dispatch', 'Quotes', 'Carrier Sales', 'Load Tracking', 'Load Review']) {
       expect(screen.queryByRole('link', { name: gone })).not.toBeInTheDocument()
+    }
+  })
+
+  it('lights the one Carriers row on the list, the Find & Invite tab and a carrier page, and links it to Find & Invite', () => {
+    const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
+    for (const path of ['/tms/carriers', '/tms/carriers/find', '/tms/carriers/CAR-7']) {
+      const view = render(
+        createElement(
+          MemoryRouter,
+          { initialEntries: [path] },
+          createElement(TmsShell, { pinned, sections, activePath: path, breadcrumb: [{ label: 'Carriers' }], user: { initial: 'R', email: 'r@x.test' } }, createElement('div')),
+        ),
+      )
+      const row = screen.getByRole('link', { name: /^Carriers$/ })
+      expect(row, path).toHaveAttribute('href', '/tms/carriers/find')
+      expect(row, path).toHaveClass('tms-active')
+      expect(screen.getByRole('link', { name: /^Customers$/ })).not.toHaveClass('tms-active')
+      view.unmount()
     }
   })
 
@@ -304,7 +327,9 @@ describe('tmsBreadcrumb', () => {
 
   it('names the item and one level below it, hiding ids behind Details', () => {
     expect(labels('/tms/customers/CUS-12')).toEqual(['Customers', 'Details'])
-    expect(labels('/tms/customers/follow-ups')).toEqual(['Customers', 'Follow-ups'])
+    expect(labels('/tms/carriers/find')).toEqual(['Carriers', 'Find & Invite'])
+    expect(labels('/tms/carriers')).toEqual(['Carriers', 'Carrier list'])
+    expect(labels('/tms/carriers/CAR-7')).toEqual(['Carriers', 'Details'])
     expect(labels('/tms/shipments/SHP-1')).toEqual(['Shipments', 'Shipment'])
     expect(labels('/tms/carrier-sales')).toEqual(['Carrier Sales'])
     expect(labels('/tms/load-review')).toEqual(['Load Review'])

@@ -586,6 +586,9 @@
 .tms-shell .tms-search {
   position: relative;
   width: 280px;
+  /* gives way before the lifecycle strip does (Step AV): the strip keeps all six tabs in view at 1440 */
+  flex: 0 6 280px;
+  min-width: 160px;
   margin: 0;
 }
 

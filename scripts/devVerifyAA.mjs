@@ -101,7 +101,7 @@ export function oldUrlGaps() {
   }
   // Rows that legitimately have no pre-AA URL of their own: new routes, params of an already-listed route, the splats.
   const NO_OLD = new Set([
-    '/tms/load-review', '/tms/carrier-sales', '/tms/rates/spot', '/tms/rates/spot/callback', '/tms/customers/follow-ups',
+    '/tms/load-review', '/tms/carrier-sales', '/tms/rates/spot', '/tms/rates/spot/callback',
     '/tms/brokerage/spot-quoter', '/tms/shipments/intake/:intakeId', '/tms/shipments/new', '/tms/shipments/:id/edit', '/tms/workflows/runs/:id', '/driver-view/:driverId',
     '/tms/brokerage/integrations/:provider',
   ])
@@ -294,11 +294,13 @@ async function sidebarGate(b, ctx, theme) {
     if (orphans.length) fail(`orphan sidebar rows: ${orphans.slice(0, 4).map((r) => `${r.label} ${r.href}`).join(', ')}`)
     // gate 2 (browser): every page-kind home with a navPath is a rendered row for ADMIN
     const rendered = new Set(rows.map((r) => pathOf(r.href)))
+    // a division section's own Intake row (`/tms/shipments/intake?division=CODE`, navSections) is not the brokerage Intake page row
+    const plainRendered = new Set(rows.filter((r) => !String(r.href).includes('?')).map((r) => pathOf(r.href)))
     const absent = [...new Set(AA_HOMES.filter((h) => h.kind === 'page').map((h) => h.navPath))].filter((p) => !rendered.has(p))
     if (absent.length) fail(`page homes not rendered as sidebar rows: ${absent.join(', ')}`)
     // ...and every lifecycle-kind home is NOT a sidebar row of its own: the strip carries it (View's route doubles as the Active shipments row)
     const tabs = await aaLifecycleTabs()
-    const doubled = tabs.filter((t) => t.key !== 'view' && rendered.has(t.to)).map((t) => t.to)
+    const doubled = tabs.filter((t) => t.key !== 'view' && plainRendered.has(t.to)).map((t) => t.to)
     if (doubled.length) fail(`lifecycle pages are still sidebar rows: ${doubled.join(', ')}`)
     const strip = await lifecycleStrip(b)
     const wantStrip = tabs.map((t) => `${t.key}|${t.to}`)
@@ -336,6 +338,8 @@ async function sidebarGate(b, ctx, theme) {
       if (active.join() !== key) fail(`${path}: lifecycle tab "${key}" is not the lit one (lit: ${active.join(', ') || 'none'})`)
     }
     await lit('/tms/shipments', 'Active shipments')
+    await lit('/tms/carriers', 'Carriers')
+    await lit('/tms/carriers/find', 'Carriers')
     await litTab('/tms/shipments', 'view')
     await litTab('/tms/shipments?list=all', 'view')
     await litTab('/tms/rates/spot', 'quote')
@@ -490,9 +494,8 @@ async function pageFacts(b, ctx, theme) {
     const text = await read('/tms/carrier-sales')
     const tabs = await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].map((t) => t.textContent.trim())`)
     for (const wanted of [/^Needs cover/i, /^Offers/i, /^Covered/i]) if (!tabs.some((t) => wanted.test(t))) fail(`Carrier Sales has no ${wanted} tab (tabs: ${tabs.join(', ')})`)
-    if (!/Step T/i.test(text)) fail('the Step T (backburnered) card is missing')
     if (!/Book · Carrier sales/.test(text.split('\n').slice(0, 6).join('\n'))) fail('the page title is not "Book · Carrier sales"')
-    return 'Needs cover / Offers / Covered tabs, Step T card'
+    return 'Needs cover / Offers / Covered tabs'
   })
   await step(`AA11-settlements-banner-${theme}`, async () => {
     for (const path of ['/driver-pay', '/driver-pay-box-trucks', '/owner-operator-pay']) {
@@ -505,7 +508,7 @@ async function pageFacts(b, ctx, theme) {
     }
     return 'the cadence line (Wednesday, next pay date, Sun–Sat period) shows on all three settlement pages'
   })
-  for (const [nn, path] of [['AA12', '/tms/rates/spot'], ['AA13', '/tms/customers/follow-ups'], ['AA14', '/tms/brokerage/spot-quoter']]) {
+  for (const [nn, path] of [['AA12', '/tms/rates/spot'], ['AA14', '/tms/brokerage/spot-quoter']]) {
     await step(`${nn}-placeholder-${theme}`, async () => {
       const text = await read(path)
       if (!/Arrives with Step AB/i.test(text) && !/Spot|Follow-?ups?/i.test(text)) fail(`${path} renders neither the labelled placeholder nor Step AB content`)

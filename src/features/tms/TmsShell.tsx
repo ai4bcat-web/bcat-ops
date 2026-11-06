@@ -56,6 +56,8 @@ export interface TmsNavItem {
   childGroups?: TmsNavChildGroup[]
   /** A header row with no page of its own: `to` is its first visible child and only a child lights it. */
   group?: boolean
+  /** Path prefixes that also light this row when `to` is not their prefix (a page whose default tab lives deeper). */
+  matches?: string[]
 }
 
 export interface TmsNavSection {
@@ -203,7 +205,9 @@ function NavRow({
     [activePath, activeSearch, items, groups],
   )
   // A group header has no page of its own: only a lit child lights it.
-  const parentActive = item.group ? anyChildActive : isPathActive(activePath, item.to) || anyChildActive
+  const parentActive = item.group
+    ? anyChildActive
+    : isPathActive(activePath, item.to) || (item.matches?.some((p) => isPathActive(activePath, p)) ?? false) || anyChildActive
   // Landing under the item opens it; a caret click afterwards is remembered for that
   // path only, so the next navigation under the item opens it again.
   const [toggle, setToggle] = useState<{ path: string; open: boolean } | null>(null)

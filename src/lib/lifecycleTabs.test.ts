@@ -22,6 +22,12 @@ describe('activeLifecycleTab', () => {
     expect(activeLifecycleTab(path)).toBe(key)
   })
 
+  it('the Quote tab opens the Quote inbox yet stays lit on the Quotes tab and the callback', () => {
+    expect(LIFECYCLE_TABS.find((t) => t.key === 'quote')?.to).toBe('/tms/rates/spot')
+    expect(activeLifecycleTab('/tms/rates')).toBe('quote')
+    expect(activeLifecycleTab('/tms/rates/spot/callback')).toBe('quote')
+  })
+
   it('lights Build, never View, for the intake queue', () => {
     expect(activeLifecycleTab('/tms/shipments/intake')).not.toBe('view')
   })

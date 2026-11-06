@@ -36,8 +36,8 @@ const SHIPMENTS_PATH = '/tms/shipments'
 export const COMPANY_DIVISION = 'COMPANY'
 
 /**
- * The three rows Step AB owns (Spot inbox, Follow-ups, Spot quoter & e-mail). Their routes
- * and placeholder pages exist either way; flip to `false` to hide the rows before AB ships.
+ * The row Step AB owns (Spot quoter & e-mail). Its route and placeholder page exist either way;
+ * flip to `false` to hide the row before AB ships.
  */
 const SHOW_RESERVED_AB = true
 
@@ -68,6 +68,8 @@ export interface NavItemDef {
   group?: boolean
   /** Sub-items rendered under this row. */
   children?: NavChildDef[]
+  /** Path prefixes that also light this row when its own `to` is not their prefix. */
+  matches?: string[]
 }
 
 /** A built item: a `TmsNavItem` plus what the legacy rail needs to gate and count it. */
@@ -122,32 +124,10 @@ export const PINNED_ITEMS: NavItemDef[] = [
   // The lifecycle pages (Quote · Build · View · Book · Track · Review) are the top-bar strip
   // (`LIFECYCLE_TABS`); the sidebar keeps the one list people return to all day.
   { to: SHIPMENTS_PATH, label: 'Active shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true },
-  {
-    to: '/tms/customers',
-    label: 'Customers',
-    icon: Building2,
-    pageKey: 'customers',
-    section: BROKERAGE,
-    tms: true,
-    children: [
-      { to: '/tms/customers', label: 'Customers', pageKey: 'customers', tms: true, exclude: ['/tms/customers/follow-ups'] },
-      ...(SHOW_RESERVED_AB
-        ? [{ to: '/tms/customers/follow-ups', label: 'Follow-ups', pageKey: 'customers', tms: true }]
-        : []),
-    ],
-  },
-  {
-    to: '/tms/carriers',
-    label: 'Carriers',
-    icon: Truck,
-    pageKey: 'carriers',
-    section: BROKERAGE,
-    tms: true,
-    children: [
-      { to: '/tms/carriers', label: 'Carriers', pageKey: 'carriers', tms: true, exclude: ['/tms/carriers/find'] },
-      { to: '/tms/carriers/find', label: 'Find & Invite', pageKey: 'carriers', tms: true },
-    ],
-  },
+  { to: '/tms/customers', label: 'Customers', icon: Building2, pageKey: 'customers', section: BROKERAGE, tms: true },
+  // One Carriers page with two tabs (Find & Invite first, then the Carrier list); the row opens
+  // the default tab and stays lit on the list and on a carrier's own page.
+  { to: '/tms/carriers/find', label: 'Carriers', icon: Truck, pageKey: 'carriers', section: BROKERAGE, tms: true, matches: ['/tms/carriers'] },
   { to: '/tms/locations', label: 'Locations', icon: MapPin, pageKey: 'locations', section: BROKERAGE, tms: true },
   {
     to: '/tms/invoicing',
@@ -219,8 +199,9 @@ const CRUMBS: CrumbRule[] = [
   { path: '/tms/carrier-sales', prefix: true, crumbs: [{ label: 'Carrier Sales' }] },
   { path: '/tms/load-review', prefix: true, crumbs: [{ label: 'Load Review' }] },
   { path: '/tms/tracking/links', crumbs: [LOAD_TRACKING, { label: 'Customer links' }] },
-  { path: '/tms/carriers/find', crumbs: [{ label: 'Carriers', to: '/tms/carriers' }, { label: 'Find & Invite' }] },
-  { path: '/tms/customers/follow-ups', crumbs: [{ label: 'Customers', to: '/tms/customers' }, { label: 'Follow-ups' }] },
+  { path: '/tms/carriers', crumbs: [{ label: 'Carriers', to: '/tms/carriers/find' }, { label: 'Carrier list' }] },
+  { path: '/tms/carriers', prefix: true, crumbs: [{ label: 'Carriers', to: '/tms/carriers' }, { label: 'Details' }] },
+  { path: '/tms/carriers/find', crumbs: [{ label: 'Carriers', to: '/tms/carriers/find' }, { label: 'Find & Invite' }] },
   { path: '/tms/invoicing', crumbs: [ACCOUNTING, { label: 'Accounts Receivable' }] },
   { path: '/tms/invoicing/invoices', prefix: true, crumbs: [ACCOUNTING, AR, { label: 'Invoice' }] },
   { path: '/tms/invoicing/payable', crumbs: [ACCOUNTING, { label: 'Accounts Payable' }] },
@@ -362,6 +343,7 @@ export function buildNavSections({
       badgeKey: def.badgeKey,
       children: children.length > 0 ? children : undefined,
       group: def.group,
+      matches: def.matches,
     })
   }
 

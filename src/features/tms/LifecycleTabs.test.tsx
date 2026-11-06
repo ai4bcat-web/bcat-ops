@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, useLocation } from 'react-router-dom'
@@ -68,5 +68,20 @@ describe('LifecycleTabs', () => {
     expect(screen.getByTestId('where')).toHaveTextContent('/tms/carrier-sales')
     fireEvent.keyDown(window, { altKey: true, code: 'Digit5' })
     expect(screen.getByTestId('where')).toHaveTextContent('/tms/tracking')
+  })
+
+  it('the Quote tab links the inbox and stays lit on the Quotes tab', () => {
+    setup('/tms/rates')
+    expect(screen.getByTestId('lifecycle-tab-quote')).toHaveAttribute('href', '/tms/rates/spot')
+    expect(screen.getByTestId('lifecycle-tab-quote')).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('scrolls the lit tab into view so a narrow, scrolling strip never hides it', () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    const view = setup('/tms/load-review')
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByTestId('lifecycle-tab-review'))
+    view.unmount()
   })
 })

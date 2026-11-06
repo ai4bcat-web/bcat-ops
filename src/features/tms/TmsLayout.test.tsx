@@ -87,7 +87,6 @@ const renderAt = async (path: string) => {
           <Route path="/tms/tracking" element={<div data-testid="page" />} />
           <Route path="/tms/tracking/links" element={<div data-testid="page" />} />
           <Route path="/tms/customers" element={<div data-testid="page" />} />
-          <Route path="/tms/customers/follow-ups" element={<div data-testid="page" />} />
           <Route path="/tms/carriers" element={<div data-testid="page" />} />
           <Route path="/tms/carriers/find" element={<div data-testid="page" />} />
           <Route path="/tms/carriers/:id" element={<div data-testid="page" />} />
@@ -153,7 +152,7 @@ describe('TmsLayout', () => {
       expect(shell.props?.dense, path).toBe(true)
       view.unmount()
     }
-    for (const path of ['/tms/dashboard', '/tms/shipments/S-1', '/tms/shipments/intake/abc', '/tms/tracking/links', '/trucks', '/tms/customers/follow-ups', '/tms/carriers/find']) {
+    for (const path of ['/tms/dashboard', '/tms/shipments/S-1', '/tms/shipments/intake/abc', '/tms/tracking/links', '/trucks', '/tms/carriers/find']) {
       const view = await renderAt(path)
       expect(shell.props?.dense, path).toBe(false)
       view.unmount()

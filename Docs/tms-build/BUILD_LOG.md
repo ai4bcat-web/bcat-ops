@@ -1,5 +1,29 @@
 # TMS build log
 
+## 2026-11-06 - Step AV deployed (job 202): lifecycle tabs Quote / Build / View / Book / Track / Review
+
+Dev only, commit 5e7ad1a. Live runs against dev with throwaway identities (all deleted and confirmed gone). Screenshots at 1440x900: `Docs/tms-build/screenshots/av/` (index.txt there); DEMO_WALKTHROUGH.md now narrates Quote > Build > View > Book > Track > Review and the short sidebar.
+
+Evidence
+- New `node scripts/devVerifyAV.mjs`: 29/29 PASS. Six tabs with the right one lit on /tms/rates (quote), /tms/shipments/intake, /new and /<id>/edit (build), /tms/shipments and /<id> (view), /tms/carrier-sales (book), /tms/tracking (track), /tms/load-review (review) at 1440 and 1280, no horizontal page scroll; badges render; Alt+1..6 land on rates, intake, shipments, carrier-sales, tracking, load-review; sidebar rail is Company Dashboard, Active shipments, Customers, Carriers, Locations, Accounting, Settings (plus the division sections); a page-loadReview-only user sees one tab (Review), /tms/load-review opens, and /tms/rates, /shipments, /carrier-sales, /tracking, /shipments/new all land back on /tms/load-review.
+- `devVerifyAE.mjs` 7/7 PASS (1m39). `devVerifyAH.mjs --only=AH05` 6/6 PASS (create form opens). `devVerifyAC2.mjs --only=shipments-active` 18 passed, 0 failed, 1 skipped.
+- `devVerifyAJ.mjs`: 18 PASS, 1 FAIL, 1 SKIPPED (AJ13 allowed) on the first run; AJ03 was a stale harness (see below); AJ03 re-run alone now PASS (8/8 with its gates).
+- `devVerifyAA.mjs` full (before harness fixes): 55 pass / 33 fail. Every fail triaged:
+  - 22 x "unstyled classes: tms-lifecycle-label" (all light/dark/phone walks): REAL cosmetic defect, the label span had no CSS rule. Fixed in tree (`kit.css` `.tms-lifecycle-label`), needs redeploy; the live site still reports it.
+  - 4 x stale AA harness vs sidebar: Carriers child row and Settings > Carrier Sales were missing from `AA_SIDEBAR`; "Step T card" check removed (card gone since Step AL); lifecycle-row check now ignores the per-division `/tms/shipments/intake?division=CODE` rows. Fixed in `scripts/lib/aaRoutes.mjs` and `scripts/devVerifyAA.mjs`; `--only=AA01-sidebar` PASS 7/7 afterwards.
+  - Remaining, NOT Step AV and not fixed: AA03 Load Review fixtures (AA03-list "100224 not under Looks ready" light/dark, drawer-ready, legacy-excluded 8969, move-to-billing / batch-refusal "No expense entered; Profit not available") and AA07-intake-edit-clears-review ("confirm shipmentType"). They come from later gates (Step AT per-carrier bills / expense gate, intake shipmentType confirmation) that the AA fixtures predate. Harness needs a refresh in a separate pass.
+  - AA05 personas (loadReview one tab, tms six tabs, compliance) all PASS light and dark.
+- AJ harness: AJ03 expected "Customer tracking is manual" but a new unconfirmed load now answers "Tracking mode not confirmed for this load" (Step feedback 9); harness accepts either and confirms the load's mode via SET_TRACKING_PREFS {confirmed:true} before the AGENT leg.
+
+Defects (files)
+- `src/features/tms/kit/kit.css`: `.tms-lifecycle-label` rule (redeploy).
+- `src/features/tms/shell.css`: at 1440 the strip lost Track/Review behind the 280px search (strip scrolls inside itself but gives no cue); `.tms-search` now `flex: 0 6 280px; min-width: 160px` so search gives way first. UNVERIFIED live (needs redeploy, then re-run `devVerifyAV.mjs` and look at strip-build-new-1440.png).
+
+Deviations from STEP_AV_LIFECYCLE_TABS.md
+- The post-login landing redirect and the breadcrumb pool now include the lifecycle tabs, so a single-grant user (e.g. loadReview only, with no sidebar rows) keeps a landing page and a breadcrumb; the sidebar alone no longer decides them.
+- Intake badge source: the Build tab's badge is the open Intake count (same source as the former sidebar Intake badge); Quote / Book / Track / Review badges reuse the existing shell badge counts.
+- Division sections in the sidebar (ASSETS etc.) keep their own Intake row (`?division=`); the brokerage rail itself is trimmed as specced.
+
 ## 2026-11-05 - Step AT deployed (job 197): multiple carriers per shipment (Ryne feedback 15)
 
 Slices MC0..MC6 live on dev (commit bd28ffb). Dev live run `node scripts/devVerifyMC.mjs` (ZZ MC fixtures, temp admin identity, e-mail only to `ai4bcat+zz-mc-...@gmail.com`; bills voided, shipments voided, carriers INACTIVE, customer archived, identity deleted and confirmed gone). Screenshots: `Docs/tms-build/screenshots/at/`.

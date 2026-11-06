@@ -676,20 +676,24 @@
 
 .tms-shell .tms-lifecycle-chev {
   flex: 0 0 auto;
-  margin: 0 2px;
+  margin: 0 1px;
   color: var(--tms-disabled);
 }
 
 .tms-shell .tms-lifecycle-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 5px;
+  padding: 4px 9px;
   border-radius: var(--tms-radius-pill);
   color: var(--tms-text-2);
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-lifecycle-label {
   white-space: nowrap;
 }
 
@@ -723,8 +727,14 @@
   color: var(--tms-primary-ink);
 }
 
-/* Narrow strip: captions go first, the list then scrolls sideways. */
-@container (max-width: 700px) {
+/* The strip owns the top bar: the breadcrumb trail drops to its home icon (the page h1 names the page). */
+.tms-shell .tms-topbar:has(.tms-lifecycle) .tms-crumb:not(:first-child) {
+  display: none;
+}
+
+/* Narrow strip: captions go first (all six tabs stay in view from 1280 up), the list then scrolls
+   sideways with the lit tab scrolled into view (LifecycleTabs). */
+@container (max-width: 900px) {
   .tms-shell .tms-lifecycle-caption {
     display: none;
   }

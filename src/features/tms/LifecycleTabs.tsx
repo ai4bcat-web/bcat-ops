@@ -3,7 +3,7 @@
  * The active tab is filled, the tabs before it are tinted "done", the rest are plain. Alt+1..6 jumps
  * to the tab at that position in the full flow (a hidden tab leaves its number unused).
  */
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
 import { TmsCountBadge } from './kit/TmsCountBadge'
@@ -29,6 +29,13 @@ export function LifecycleTabs({ pathname, canOpenPage, badgeCounts }: LifecycleT
   const activeKey = activeLifecycleTab(pathname)
   const activeIndex = tabs.findIndex((t) => t.key === activeKey)
   const openKeys = tabs.map((t) => t.key).join()
+  const listRef = useRef<HTMLOListElement>(null)
+
+  // Below ~1000px the strip scrolls sideways: keep the lit tab in view when the route changes.
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>('[aria-current="page"]')
+    el?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [activeKey])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -47,7 +54,7 @@ export function LifecycleTabs({ pathname, canOpenPage, badgeCounts }: LifecycleT
 
   return (
     <nav className="tms-lifecycle" aria-label="Shipment lifecycle">
-      <ol className="tms-lifecycle-list">
+      <ol ref={listRef} className="tms-lifecycle-list">
         {tabs.map((tab, i) => {
           const active = i === activeIndex
           const done = activeIndex >= 0 && i < activeIndex

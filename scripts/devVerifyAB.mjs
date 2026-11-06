@@ -685,12 +685,12 @@ async function ab11Ui(b, ctx, theme) {
     await snap('AB11e', 'customer-activity')
     return 'card strip + Activity tab (composer, timeline)'
   })
-  await shotStep('AB11-follow-ups', async () => {
-    await openPage(b, '/tms/customers/follow-ups')
-    const text = await b.evaluate(`document.querySelector('.tms-main')?.innerText ?? ''`)
-    expect(/Next steps due/.test(text) && /tasks/i.test(text), 'Follow-ups page lacks its two sections')
-    await snap('AB11f', 'follow-ups')
-    return 'two sections render'
+  await shotStep('AB11-follow-ups-redirect', async () => {
+    // Follow-ups left Customers (Ryne feedback): the old URL lands on the Customers list.
+    await openPage(b, '/tms/customers/follow-ups', () => b.evaluate(`location.pathname === '/tms/customers'`))
+    const path = await b.evaluate(`location.pathname`)
+    expect(path === '/tms/customers', `/tms/customers/follow-ups landed on ${path}, not /tms/customers`)
+    return 'the old Follow-ups URL redirects to /tms/customers'
   })
 }
 

@@ -1,16 +1,45 @@
-# Step Y: demo walkthrough for Ryne (refreshed on dev job 197, commit bd28ffb; create-shipment, multi-carrier and BOL sections added for Steps AR / AT / AU)
+# Step Y: demo walkthrough for Ryne (refreshed on dev job 202, commit 5e7ad1a, Step AV lifecycle tabs; earlier refresh job 197; create-shipment, multi-carrier and BOL sections added for Steps AR / AT / AU)
 
 Dev only: https://dev.d3dejqzs77khq6.amplifyapp.com. Everything below was driven live by `node scripts/devDemoY.mjs <stage>` (stages: reset fixtures tender intake carrier tracking delivered billing own tour; `retire` tidies) in headless Chrome at 1440 px with throwaway identities that were deleted afterwards. Screenshots are in `screenshots/demo/` (57 files, captions in `screenshots/demo/index.txt`).
 
 ## Thursday checklist
 
-1. Sign in at https://dev.d3dejqzs77khq6.amplifyapp.com with your own login (the temp identities are gone). Use an ADMIN account so every nav row shows.
+1. Sign in at https://dev.d3dejqzs77khq6.amplifyapp.com with your own login (the temp identities are gone). Use an ADMIN account so every nav row shows. The left sidebar is now short (Step AV, below); the brokerage workflow lives in the strip across the top.
 2. ZZ records to click through (all labelled **ZZ DEMO**, none are real PROs): brokered shipment **99671** (https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments/shp-90460179-4789-44a3-98d0-691662ae6b48), Ivan Cartage shipment **99672** (https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments/shp-f05d7ba6-1954-4720-8007-1268426798b3), invoice **20006**, carrier **ZZ DEMO Carrier 986251**, driver **ZZ DEMO Driver 986251**, customer **ZZ DEMO Customer 1793860986251**, division **ZZ DEMO Brokerage 1793860986251**. Earlier rehearsal runs also left older ZZ divisions in the Intake tab strip and the Divisions page; ignore them.
 3. Shipments board **Demo** chip: https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments?demo=1 shows only ZZ DEMO rows. The seeded demo shipments (Settings > Demo, after Reset demo data) are 99865-99880; the in-transit ones (e.g. PRO 99876) are the best for the Tracking drawer.
 4. Real e-mail: the rate con, the per-load thread reply and the invoice really went through SES to **ai4bcat@gmail.com** only (allow-list). Check that inbox. Everything else is STUB: DAT/Truckstop postings, Twilio SMS (texts show NOT SENT with the exact text), Google OAuth (not connected: Spot inbox runs on a SIMULATED inbox).
 5. MyCarrierPackets is **LIVE** (Validate: CONNECTED/OK). The script only did a read-only lookup of MC 274623; **no invitation was sent**.
 
 URLs: Quotes https://dev.d3dejqzs77khq6.amplifyapp.com/tms/rates · New shipment https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments/new · Intake https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments/intake · Carrier Sales https://dev.d3dejqzs77khq6.amplifyapp.com/tms/carrier-sales · Find & Invite https://dev.d3dejqzs77khq6.amplifyapp.com/tms/carriers/find · Load Tracking https://dev.d3dejqzs77khq6.amplifyapp.com/tms/tracking · Load Review https://dev.d3dejqzs77khq6.amplifyapp.com/tms/load-review · AR https://dev.d3dejqzs77khq6.amplifyapp.com/tms/invoicing · AP https://dev.d3dejqzs77khq6.amplifyapp.com/tms/invoicing/payable · Factoring https://dev.d3dejqzs77khq6.amplifyapp.com/tms/factors · Owner Operator Settlements https://dev.d3dejqzs77khq6.amplifyapp.com/owner-operator-pay · Dashboards https://dev.d3dejqzs77khq6.amplifyapp.com/tms/dashboard · Spot inbox https://dev.d3dejqzs77khq6.amplifyapp.com/tms/rates/spot · Feedback https://dev.d3dejqzs77khq6.amplifyapp.com/feedback.
+
+## 0. The lifecycle strip and the new sidebar (Step AV, job 202, dev, 1440 x 900, fresh shots in `screenshots/av/`)
+
+Start a demo at the top of the page, left to right: **Quote > Build > View > Book > Track > Review**. Six tabs sit in the top bar of every brokerage page (keys Alt+1 to Alt+6); the tab for the page you are on is lit and the earlier ones are tinted, so you can see how far along the flow you are. Each tab shows a count badge when something waits there.
+
+| Tab | Goes to | What the demo does there | Mode |
+|---|---|---|---|
+| 1 Quote | /tms/rates | Spot quotes, lane rate intelligence (DAT block is a STUB on dev) | live |
+| 2 Build | /tms/shipments/intake, /tms/shipments/new, the edit page | Review the tender, then Create shipment; lit on all three. Badge = open Intake rows | live |
+| 3 View | /tms/shipments, a shipment page | Active shipments board and the shipment itself (this is also the sidebar's Active shipments row) | live |
+| 4 Book | /tms/carrier-sales | Needs cover, Offers, Unmatched; carrier lookup, Cover, rate con (SES to ai4bcat@gmail.com only) | live; load boards, Twilio SMS STUB |
+| 5 Track | /tms/tracking | Load Tracking grid and drawer (SMS = STUB, shows NOT SENT) | live |
+| 6 Review | /tms/load-review | Release to billing. A user who holds only the Load Review grant sees just this one tab and lands on it; every other brokerage route sends them back there | live |
+
+The sidebar no longer repeats those pages. It shows only: **Company Dashboard, Active shipments, the directories (Customers, Carriers, Locations), Accounting, Settings** (plus the Ivan Cartage assets section for users who have it). At 1280 px and 1440 px the page never scrolls sideways; if the strip is wider than its space it scrolls inside itself.
+
+| What | Shot |
+|---|---|
+| Sidebar | ![sidebar](screenshots/av/sidebar-1440.png) |
+| Quote | ![quote](screenshots/av/strip-quote-1440.png) |
+| Build (Intake) | ![build intake](screenshots/av/strip-build-intake-1440.png) |
+| Build (New shipment) | ![build new](screenshots/av/strip-build-new-1440.png) |
+| View (board) | ![view board](screenshots/av/strip-view-board-1440.png) |
+| Book | ![book](screenshots/av/strip-book-1440.png) |
+| Track | ![track](screenshots/av/strip-track-1440.png) |
+| Review | ![review](screenshots/av/strip-review-1440.png) |
+| Load Review only user | ![persona](screenshots/av/persona-load-review-1440.png) |
+
+Real vs stubbed is unchanged by Step AV: it only moved navigation. Where the sections below say "Shipments > Intake", "Carrier Sales", "Load Tracking" or "Load Review" in the sidebar, use the Build, Book, Track and Review tabs instead.
 
 ## A. Brokered shipment (99671)
 
