@@ -75,6 +75,7 @@ type Action =
   | 'UPSERT_LOCATION'
   | 'ARCHIVE_CUSTOMER'
   | 'ARCHIVE_LOCATION'
+  | 'REMOVE_DRIVER_NOTE'
   | 'SAVE_DIVISION'
   | 'SAVE_SETTINGS'
   | 'PREVIEW_MERGE_LOCATIONS'
@@ -139,6 +140,7 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     ARCHIVE_CUSTOMER: true,
     UPSERT_LOCATION: true,
     ARCHIVE_LOCATION: true,
+    REMOVE_DRIVER_NOTE: true,
   }
   const settingsActions: Partial<Record<Action, true>> = { SAVE_DIVISION: true, SAVE_SETTINGS: true }
   const mergeActions: Partial<Record<Action, true>> = {
@@ -888,6 +890,51 @@ async function archiveLocation(input: Record<string, unknown>, caller: Caller): 
   }
 }
 
+/**
+ * Staff take a driver's comment off a place (a wrong gate code, a note on the wrong
+ * facility). Driver notes are appended by the driver app, never by UPSERT_LOCATION, so this
+ * is the one staff write to the field: it re-reads the row, drops the one note keyed by its
+ * timestamp (and driver, when the note carries one), and writes the rest back only if
+ * nothing else touched the row in between.
+ */
+async function removeDriverNote(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+  const id = assertString(input.id, 'id')
+  const at = assertString(input.at, 'at')
+  const driverId = typeof input.driverId === 'string' ? input.driverId : undefined
+  const existing = await getById(LOCATION_TABLE_NAME, id)
+  if (!existing) throw new Error(`Location not found: ${id}`)
+  const raw = typeof existing.driverNotes === 'string' ? JSON.parse(existing.driverNotes) : existing.driverNotes
+  const notes = (Array.isArray(raw) ? raw : []) as Array<{ at?: string; driverId?: string }>
+  const next = notes.filter((n) => !(n.at === at && (driverId === undefined || n.driverId === driverId)))
+  if (next.length === notes.length) throw new Error('That note is already gone')
+
+  const values: Record<string, AttributeValue> = {
+    ':notes': marshall({ v: next }).v,
+    ':updatedAt': { S: nowIso() },
+    ':updatedBy': { S: caller.email },
+  }
+  try {
+    const result = await dynamo.send(
+      new UpdateItemCommand({
+        TableName: LOCATION_TABLE_NAME,
+        Key: marshall({ id }),
+        ConditionExpression: buildDynamoCasCondition(values, String(existing.updatedAt ?? '')),
+        UpdateExpression: 'SET driverNotes = :notes, updatedAt = :updatedAt, updatedBy = :updatedBy',
+        ExpressionAttributeValues: values,
+        ReturnValues: 'ALL_NEW',
+      }),
+    )
+    if (!result.Attributes) throw new Error('Removing the note failed')
+    return unmarshall(result.Attributes)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('ConditionalCheckFailed') || msg.includes('TransactionCanceled')) {
+      throw conflictError('location', err)
+    }
+    throw err
+  }
+}
+
 // ── Division / Settings ────────────────────────────────────────────────────────
 
 async function saveDivision(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
@@ -1333,6 +1380,8 @@ export const handler = async (event: AppSyncEvent): Promise<Record<string, unkno
       return archiveCustomer(input, caller)
     case 'ARCHIVE_LOCATION':
       return archiveLocation(input, caller)
+    case 'REMOVE_DRIVER_NOTE':
+      return removeDriverNote(input, caller)
     case 'SAVE_DIVISION':
       return saveDivision(input, caller)
     case 'SAVE_SETTINGS':

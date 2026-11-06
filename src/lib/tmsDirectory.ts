@@ -102,3 +102,9 @@ export function locationMatches(query: LocationQuery, record: LocationRecord): b
   return findLocationMatches(query, [record]).length > 0
 }
 
+
+/** How many driver comments a place carries and when the newest was left (null when none). */
+export function driverNotesSummary(notes: readonly { at: string }[] | null | undefined): { count: number; newestAt: string | null } {
+  const list = Array.isArray(notes) ? notes : []
+  return { count: list.length, newestAt: list.reduce<string | null>((n, x) => (n === null || x.at > n ? x.at : n), null) }
+}

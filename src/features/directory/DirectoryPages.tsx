@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useDirectory, type CustomerRecord, type LocationRecord } from '@/hooks/useDirectory'
-import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
+import { driverNotesSummary, isActiveDirectoryRecord } from '@/lib/tmsDirectory'
 import { graphqlErrorText, listDivisions, previewLocationMerge, startLocationMerge, resumeLocationMerge, listLocationMergeJobs } from '@/lib/apiClient'
 import type { Division, LocationMergeJob, LocationMergePreview } from '@/types/tms'
 import { Button } from '@/components/ui/button'
@@ -241,6 +241,15 @@ export function LocationsPage() {
               )}
               {l.aliases && l.aliases.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>Aliases: {l.aliases.join(', ')}</div>}
             </div>
+            {(() => {
+              const { count, newestAt } = driverNotesSummary(l.driverNotes)
+              return (
+                <div title="Comments drivers left from the driver app" style={{ fontSize: 11.5, textAlign: 'right', minWidth: 96, color: count ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ds-t3)' }}>Driver notes</div>
+                  {count ? <span><b>{count}</b>{newestAt ? ` · ${new Date(newestAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}</span> : '—'}
+                </div>
+              )
+            })()}
             <button onClick={() => setOpenId(openId === l.id ? null : l.id)} title={openId === l.id ? 'Hide details' : 'Map and load history'} style={{ background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer' }}>{openId === l.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
             <button onClick={() => setEditing(l)} title="Edit" style={{ background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer' }}><Pencil size={14} /></button>
             {isAdmin && (
@@ -249,7 +258,7 @@ export function LocationsPage() {
                 <button onClick={() => setMergeOpen(true)} title="Merge" style={{ background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer' }}><Merge size={14} /></button>
               </>
             )}
-            {openId === l.id && <div style={{ flexBasis: '100%' }}><LocationDetail location={l} /></div>}
+            {openId === l.id && <div style={{ flexBasis: '100%' }}><LocationDetail location={l} onRemoveNote={async (note) => { await dir.removeDriverNote(l, note); toast.success('Driver note removed') }} /></div>}
           </div>
         ))}
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dwellMinutes, findCustomerMatches, findLocationMatches, formatCents, normalizeAddress, normalizeName, parseCents } from './tmsDirectory'
+import { driverNotesSummary, dwellMinutes, findCustomerMatches, findLocationMatches, formatCents, normalizeAddress, normalizeName, parseCents } from './tmsDirectory'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
 
 const customer = (over: Partial<CustomerRecord>): CustomerRecord =>
@@ -105,5 +105,15 @@ describe('dwellMinutes — actual events only', () => {
     expect(dwellMinutes({ arrivedAt: '2026-09-01T10:00:00Z', departedAt: '2026-09-01T11:30:00Z' })).toBe(90)
     expect(dwellMinutes({ arrivedAt: '2026-09-01T10:00:00Z' })).toBeNull()
     expect(dwellMinutes({ arrivedAt: '2026-09-01T12:00:00Z', departedAt: '2026-09-01T11:30:00Z' })).toBeNull()
+  })
+})
+
+describe('driverNotesSummary', () => {
+  it('counts the notes and reports the newest stamp, whatever order they are stored in', () => {
+    expect(driverNotesSummary([{ at: '2026-10-01T12:00:00Z' }, { at: '2026-11-04T09:00:00Z' }, { at: '2026-10-20T00:00:00Z' }])).toEqual({ count: 3, newestAt: '2026-11-04T09:00:00Z' })
+  })
+  it('is zero and null for none, and survives a non-array', () => {
+    expect(driverNotesSummary(null)).toEqual({ count: 0, newestAt: null })
+    expect(driverNotesSummary('x' as never)).toEqual({ count: 0, newestAt: null })
   })
 })

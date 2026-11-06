@@ -401,9 +401,10 @@ driverApiFn.addToRolePolicy(
     resources: [driverApiDriverTable.tableArn, driverApiEquipmentTable.tableArn],
   }),
 )
-// A driver's note about a facility is appended to the directory record (driverNotes only).
+// A driver's note about a facility is appended to the directory record (driverNotes only);
+// a note on a stop with no directory place creates that Location first (PutItem).
 driverApiFn.addToRolePolicy(
-  new PolicyStatement({ actions: ['dynamodb:UpdateItem'], resources: [driverApiLocationTable.tableArn] }),
+  new PolicyStatement({ actions: ['dynamodb:UpdateItem', 'dynamodb:PutItem'], resources: [driverApiLocationTable.tableArn] }),
 )
 // A driver reports a truck problem: one new MaintenanceTask on their own unit, nothing else.
 driverApiFn.addToRolePolicy(

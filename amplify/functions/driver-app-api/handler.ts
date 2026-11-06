@@ -80,6 +80,7 @@ import {
 import { isOvernightLoad } from '../../../src/lib/overnightLoads'
 import { getStops } from '../../../src/lib/stops'
 import { parseDriverNotes, ownNoteIndex, withNoteText, withoutNote } from './locationNotes'
+import { matchLocation, newLocationItem, type LocationLike } from './locationFromStop'
 import { chicagoDateStr } from '../../../src/lib/date'
 import { reorderedSortValues } from '../../../src/lib/loadReorder'
 import { locateCity } from '../../../src/lib/eldRadius'
@@ -3161,22 +3162,57 @@ export const handler = async (event: FnUrlEvent) => {
      * A driver leaves a note about a place — the gate code, which dock, who to ask for.
      * Appended to the directory record so the next driver sent there reads it, and the
      * office sees it on the location. Only for a stop on a load this driver is on.
+     *
+     * Many stops carry no directory Location. A note on one of those makes the Location from
+     * the stop's name and address (reusing the record already at that address), links the
+     * stop to it, and then saves the note — so every stop can take notes and the office
+     * finds them in the directory. The request names the stop; `locationId` alone (an older
+     * app build) still works for a stop that already has one.
      */
     if (method === 'POST' && path === '/paperwork/location-note') {
       if (!LOCATION_TABLE_NAME) return reply(503, { error: 'The directory is not configured' })
-      const body = JSON.parse(event.body || '{}') as { loadId?: string; locationId?: string; text?: string }
+      const body = JSON.parse(event.body || '{}') as { loadId?: string; locationId?: string; stopId?: string; text?: string }
       const loadId = (body.loadId ?? '').trim()
-      const locationId = (body.locationId ?? '').trim()
+      const stopId = (body.stopId ?? '').trim()
+      let locationId = (body.locationId ?? '').trim()
       const text = (body.text ?? '').trim().slice(0, 1000)
       if (!loadId) return reply(400, { error: 'loadId is required' })
-      if (!locationId) return reply(400, { error: 'locationId is required' })
+      if (!locationId && !stopId) return reply(400, { error: 'stopId is required' })
       if (!text) return reply(400, { error: 'say something first' })
       const found = await ddb.send(new GetCommand({ TableName: LOAD_TABLE_NAME, Key: { id: loadId } }))
-      const load = found.Item as PaperworkLoadLike | undefined
+      const load = found.Item as (PaperworkLoadLike & { updatedAt?: string }) | undefined
       if (!load || !driverIsOnPaperworkLoad(load, driverId)) return reply(404, { error: 'load not found' })
-      if (!(getStops(load as unknown as Load) as Stop[]).some((s) => s.locationId === locationId)) {
-        return reply(404, { error: 'that place is not a stop on this load' })
+      const stops = getStops(load as unknown as Load) as Stop[]
+      const stop = stopId ? stops.find((s) => s.id === stopId) : stops.find((s) => s.locationId === locationId)
+      if (!stop) return reply(404, { error: stopId ? 'stop not found' : 'that place is not a stop on this load' })
+      if (!locationId) locationId = (stop.locationId ?? '').trim()
+      if (locationId && stop.locationId !== locationId) return reply(404, { error: 'that place is not a stop on this load' })
+
+      if (!locationId) {
+        const existing = await scan<LocationLike>(LOCATION_TABLE_NAME)
+        let place = matchLocation(stop, existing)
+        if (!place) {
+          const item = newLocationItem(stop, randomUUID(), nowIso(), driver.email ?? driver.name)
+          if (!item) return reply(400, { error: 'this stop has no name or address to save a place for' })
+          await ddb.send(new PutCommand({ TableName: LOCATION_TABLE_NAME, Item: item, ConditionExpression: 'attribute_not_exists(id)' }))
+          console.log('[driver-app-api] location created from stop', { driverId, loadId, stopId: stop.id, locationId: item.id })
+          place = item as unknown as LocationLike
+        }
+        locationId = place.id
+        // Link the stop; the condition keeps a concurrent staff edit from being overwritten.
+        const now = nowIso()
+        await ddb.send(new UpdateCommand({
+          TableName: LOAD_TABLE_NAME,
+          Key: { id: loadId },
+          UpdateExpression: 'SET stops = :stops, updatedAt = :now, updatedBy = :by',
+          ConditionExpression: load.updatedAt ? 'updatedAt = :prev' : 'attribute_not_exists(updatedAt)',
+          ExpressionAttributeValues: {
+            ':stops': stops.map((s) => (s.id === stop.id ? { ...s, locationId } : s)), ':now': now, ':by': driver.email ?? driverId,
+            ...(load.updatedAt ? { ':prev': load.updatedAt } : {}),
+          },
+        }))
       }
+
       const note = { at: nowIso(), driverId, by: driver.name, text }
       await ddb.send(new UpdateCommand({
         TableName: LOCATION_TABLE_NAME,
@@ -3186,7 +3222,7 @@ export const handler = async (event: FnUrlEvent) => {
         ExpressionAttributeValues: { ':empty': [], ':note': [note], ':u': nowIso() },
       }))
       console.log('[driver-app-api] location note', { driverId, locationId, loadId })
-      return reply(200, { ok: true, note: { at: note.at, by: note.by, text: note.text, mine: true } })
+      return reply(200, { ok: true, locationId, note: { at: note.at, by: note.by, text: note.text, mine: true } })
     }
 
     /* The driver fixes or removes a comment they left on a place (a note on the wrong stop). */

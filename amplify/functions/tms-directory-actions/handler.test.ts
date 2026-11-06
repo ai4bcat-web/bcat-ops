@@ -874,3 +874,43 @@ describe('DynamoDB write shape (sandbox regressions)', () => {
     expect(put?.ConditionExpression ?? '').not.toMatch(DYNAMO_RESERVED_BARE)
   })
 })
+
+// ── REMOVE_DRIVER_NOTE ───────────────────────────────────────────────────────
+
+describe('REMOVE_DRIVER_NOTE', () => {
+  const notes = [
+    { at: '2026-10-01T12:00:00Z', driverId: 'd1', by: 'Chuck', text: 'wrong gate' },
+    { at: '2026-10-02T12:00:00Z', driverId: 'd2', by: 'Jason', text: 'dock 4' },
+  ]
+  const run = async (input: Record<string, unknown>) => {
+    const loc = makeDynamoItem({ id: 'l-1', name: 'Dock', active: true, updatedAt: '2026-10-02T12:00:00Z', driverNotes: notes })
+    let update: MockUpdateCommand['input'] | undefined
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: loc })
+      if (cmd.__type === 'Update') {
+        update = cmd.input as MockUpdateCommand['input']
+        return Promise.resolve({ Attributes: makeDynamoItem({ id: 'l-1', name: 'Dock', driverNotes: [notes[1]] }) })
+      }
+      throw new Error('unexpected')
+    })
+    const result = await handler(event('REMOVE_DRIVER_NOTE', { id: 'l-1', ...input }))
+    return { result, update }
+  }
+
+  it('drops only the named note and writes the rest back under the row version it just read', async () => {
+    const { result, update } = await run({ at: '2026-10-01T12:00:00Z', driverId: 'd1' })
+    expect(result.driverNotes).toEqual([notes[1]])
+    expect(update?.UpdateExpression).toContain('driverNotes = :notes')
+    expect(update?.ExpressionAttributeValues?.[':casExpectedUpdatedAt']).toEqual({ S: '2026-10-02T12:00:00Z' })
+    const written = (update?.ExpressionAttributeValues?.[':notes'] as { L: Array<{ M: { text: { S: string } } }> }).L
+    expect(written.map((n) => n.M.text.S)).toEqual(['dock 4'])
+  })
+
+  it('says so when the note is already gone, and writes nothing', async () => {
+    await expect(run({ at: '2026-09-09T00:00:00Z', driverId: 'd1' })).rejects.toThrow('already gone')
+  })
+
+  it('is refused for a user with no directory access', async () => {
+    await expect(handler(event('REMOVE_DRIVER_NOTE', { id: 'l-1', at: 'x' }, identity({ groups: [] })))).rejects.toThrow('Forbidden')
+  })
+})

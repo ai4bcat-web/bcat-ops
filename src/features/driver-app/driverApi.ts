@@ -682,7 +682,9 @@ export async function reportMaintenanceTask(input: { title: string; notes?: stri
 }
 
 /** Leave a note about a place for the next driver and the office. */
-export async function addLocationNote(input: { loadId: string; locationId: string; text: string }): Promise<{
+export async function addLocationNote(input: { loadId: string; stopId: string; text: string }): Promise<{
+  /** The directory place the note is on — created from the stop when it had none. */
+  locationId: string
   note: { at: string; by: string; text: string; mine?: boolean }
 }> {
   return request('/paperwork/location-note', { method: 'POST', body: JSON.stringify(input) })

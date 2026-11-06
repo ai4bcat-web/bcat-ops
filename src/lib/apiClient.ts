@@ -1112,6 +1112,11 @@ export async function archiveLocation(id: string, expectedUpdatedAt: string): Pr
   return directoryAction<LocationRecord>('ARCHIVE_LOCATION', { id, expectedUpdatedAt })
 }
 
+/** Staff remove one driver comment from a place. Returns the location as it now stands. */
+export async function removeLocationDriverNote(locationId: string, note: { at: string; driverId?: string }): Promise<LocationRecord> {
+  return unwrapJsonFields(await directoryAction<LocationRecord>('REMOVE_DRIVER_NOTE', { id: locationId, at: note.at, driverId: note.driverId }), ['contacts', 'driverNotes'])
+}
+
 // ── Location merge — a resumable job, never a single transaction ──────────────
 export async function previewLocationMerge(sourceId: string, targetId: string): Promise<LocationMergePreview> {
   return directoryAction<LocationMergePreview>('PREVIEW_MERGE_LOCATIONS', { sourceId, targetId })

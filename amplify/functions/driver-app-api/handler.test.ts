@@ -1209,6 +1209,58 @@ describe('driver-app-api handler', () => {
     })
   })
 
+  describe('POST /paperwork/location-note', () => {
+    const stopOf = (over: Record<string, unknown> = {}) => ({
+      id: 's1', type: 'pickup', sequence: 0, appt: '2026-10-14T15:00:00Z', driverId: DRIVER_A_ID,
+      name: "Batory's Oakley", city: 'Chicago, IL', address: { street: '1234 S Oakley Ave.', city: 'Chicago', state: 'IL', zip: '60608' }, ...over,
+    })
+    const seedLoad = (stop: Record<string, unknown>) => {
+      tables['Load-test']['ln-1'] = { id: 'ln-1', aljexId: 'ln-1', pickupDriverId: DRIVER_A_ID, deliveryDriverId: DRIVER_A_ID, updatedAt: '2026-10-01T00:00:00Z', stops: [stop] }
+    }
+    const note = (body: Record<string, unknown>) => handler(baseEvent('/paperwork/location-note', 'POST', { body: { loadId: 'ln-1', text: 'Check in at the guard shack', ...body } }))
+    const locations = () => Object.values(tables['Location-test']).filter((l) => l.id !== 'loc-1' && l.id !== 'loc-2')
+
+    it('creates the Location from a stop that has none, links the stop, and saves the note on it', async () => {
+      seedLoad(stopOf())
+      const res = await note({ stopId: 's1' })
+      expect(res.statusCode).toBe(200)
+      const made = locations()
+      expect(made).toHaveLength(1)
+      expect(made[0]).toMatchObject({ name: "Batory's Oakley", street: '1234 S Oakley Ave.', city: 'Chicago', state: 'IL', zip: '60608', normalizedAddress: '1234 s oakley ave chicago il 60608 us' })
+      expect(JSON.parse(res.body).locationId).toBe(made[0].id)
+      expect((made[0].driverNotes as Array<{ text: string; by: string }>)[0]).toMatchObject({ text: 'Check in at the guard shack', by: 'Driver A' })
+      expect((tables['Load-test']['ln-1'].stops as Array<{ locationId?: string }>)[0].locationId).toBe(made[0].id)
+    })
+
+    it('reuses the Location already at that address instead of creating a second one', async () => {
+      tables['Location-test']['dock'] = { id: 'dock', name: 'Batory Foods Chicago', street: '1234 s oakley ave', city: 'CHICAGO', state: 'IL', zip: '60608', active: true, driverNotes: [{ at: 't', by: 'Old', text: 'old', driverId: 'x' }] }
+      seedLoad(stopOf())
+      await note({ stopId: 's1' })
+      expect(locations().map((l) => l.id)).toEqual(['dock'])
+      expect((tables['Location-test'].dock.driverNotes as unknown[]).length).toBe(2)
+      expect((tables['Load-test']['ln-1'].stops as Array<{ locationId?: string }>)[0].locationId).toBe('dock')
+    })
+
+    it('still takes a note on a stop that already has a Location, without creating one', async () => {
+      seedLoad(stopOf({ locationId: 'loc-1' }))
+      const res = await note({ stopId: 's1' })
+      expect(res.statusCode).toBe(200)
+      expect(locations()).toHaveLength(0)
+      expect((tables['Location-test']['loc-1'].driverNotes as unknown[]).length).toBe(1)
+    })
+
+    it('refuses a stop with no name to build a place from, a missing stop, and another driver\'s load', async () => {
+      seedLoad(stopOf({ name: '' }))
+      expect((await note({ stopId: 's1' })).statusCode).toBe(400)
+      expect((await note({ stopId: 'nope' })).statusCode).toBe(404)
+      tables['Load-test']['ln-1'].pickupDriverId = DRIVER_B_ID
+      tables['Load-test']['ln-1'].deliveryDriverId = DRIVER_B_ID
+      ;(tables['Load-test']['ln-1'].stops as Array<Record<string, unknown>>)[0].driverId = DRIVER_B_ID
+      expect((await note({ stopId: 's1' })).statusCode).toBe(404)
+      expect(locations()).toHaveLength(0)
+    })
+  })
+
   describe('POST /paperwork/reorder', () => {
     const DAY = '2026-10-14'
     /** A day line shared by two drivers: 1 and 3 and 5 are A's, 2 and 4 are B's. */
