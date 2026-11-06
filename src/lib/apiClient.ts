@@ -2653,23 +2653,28 @@ export interface DriverPaySetting {
   fixedExpenses?:        FixedExpense[] | null
   /** Pinned past rate windows — see PayRateOverride in src/lib/driverPay.ts. */
   rateHistory?:          import('./driverPay').PayRateOverride[] | null
+  /** Hourly pay for time-card drivers (src/lib/hoursPay.ts). Staff only: never read by the driver API. */
+  hourlyRate?:           number | null
+  hourlyRateHistory?:    import('./hoursPay').HourlyRateWindow[] | null
   active?:               boolean | null
   notes?:                string | null
   createdAt:             string
   updatedAt:             string
 }
 
-const PAY_SETTING_FIELDS = `id driverId payGroup payPercent expensesBeforePercent email fuelCardNumber fuelCardHistory fixedExpenses rateHistory active notes createdAt updatedAt`
+const PAY_SETTING_FIELDS = `id driverId payGroup payPercent expensesBeforePercent email fuelCardNumber fuelCardHistory fixedExpenses rateHistory hourlyRate hourlyRateHistory active notes createdAt updatedAt`
 
-function normalizePaySetting(raw: DriverPaySetting & { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown }): DriverPaySetting {
+function normalizePaySetting(raw: DriverPaySetting & { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown; hourlyRateHistory?: unknown }): DriverPaySetting {
   const v = unwrapJson(raw.fixedExpenses)
   const h = unwrapJson(raw.rateHistory)
   const c = unwrapJson(raw.fuelCardHistory)
+  const hh = unwrapJson(raw.hourlyRateHistory)
   return {
     ...raw,
     fixedExpenses: Array.isArray(v) ? v as FixedExpense[] : [],
     rateHistory: Array.isArray(h) ? h as DriverPaySetting['rateHistory'] : [],
     fuelCardHistory: Array.isArray(c) ? c as DriverPaySetting['fuelCardHistory'] : [],
+    hourlyRateHistory: Array.isArray(hh) ? hh as DriverPaySetting['hourlyRateHistory'] : [],
   }
 }
 
@@ -2680,11 +2685,12 @@ export async function listDriverPaySettings(): Promise<DriverPaySetting[]> {
   return (result.data.listDriverPaySettings.items ?? []).map(normalizePaySetting)
 }
 
-function serializePaySetting<T extends { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown }>(input: T): T {
+function serializePaySetting<T extends { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown; hourlyRateHistory?: unknown }>(input: T): T {
   let out: T = input
   if (out.fixedExpenses != null) out = { ...out, fixedExpenses: JSON.stringify(out.fixedExpenses) }
   if (out.rateHistory != null) out = { ...out, rateHistory: JSON.stringify(out.rateHistory) }
   if (out.fuelCardHistory != null) out = { ...out, fuelCardHistory: JSON.stringify(out.fuelCardHistory) }
+  if (out.hourlyRateHistory != null) out = { ...out, hourlyRateHistory: JSON.stringify(out.hourlyRateHistory) }
   return out
 }
 
