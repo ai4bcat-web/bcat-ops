@@ -370,3 +370,22 @@ delivery, delivered. Some little illustration line graph would be nice."
   gets the same mini timeline as an optional column.
 - Exceptions: a late / exception flag from tracking turns the truck amber and shows the reason
   on hover. Voided loads show the line struck through.
+
+## Ryne's feedback 13 (2026-11-05 evening)
+"We can remove billable wt. We can remove customer miles and truck miles. It should just say miles
+and it should calculate based on zip codes to and from and add all miles if there are multiple
+picks and drops."
+- **Billable weight** is removed from the form (field stays in the model for imported Aljex rows;
+  not shown or editable). Freight rows: [Division 3 · Shipment type 3 · Equipment 3 · Weight 3] /
+  [Pieces 3 · Footage 3 · Freight class 3 · Declared value 3] / [Description 12] / chips / toolbar.
+- **Customer miles and Truck miles collapse into one field: Miles**, shown in the Route card's
+  lane header (read-only display with a pencil to override). It is computed from the **zip codes
+  of the stops in order**: pickup 1 → pickup 2 … → delivery n, each leg zip-to-zip, all legs
+  **summed**. Legs use Distance Matrix when the server key answers, else the geocode / straight
+  line × 1.2 estimate already in `milesEstimate.ts`; recomputes whenever a stop zip changes or
+  stops are reordered / added / removed. An override sticks until the user clears it (then it
+  recomputes). The single value writes both underlying miles fields (customer and truck) so
+  per-mile rates, FSC per mile, margin and reports keep working. "Disable mileage" stays as the
+  only toggle; "Calculate totals from picks" stays.
+- Rates card: the per-mile rate type reads this Miles value; the summary rail shows it in the
+  lane line.
