@@ -438,3 +438,26 @@ multiple AP records."
 - Reporting / commissions: margin is customer total minus the sum of carrier bills; Shipments
   board "Carrier" column shows "2 carriers" with hover list; existing single-carrier loads are
   simply a list of one, nothing migrates.
+
+## Ryne's feedback 16 (2026-11-05 evening)
+"There should be an area to generate a BOL once the shipment is saved."
+- **Documents card gains a "Generate" row** at its top, enabled once the shipment exists (after
+  Create / in edit mode): **Generate BOL** (first), plus the existing Rate Con and Send Info as
+  secondary buttons so every generated document lives in one place.
+- **BOL content**: division logo + legal name / address / phone, BOL number = PRO, date;
+  Shipper (pickup location, address, contact, phone, ready / appt), Consignee (delivery location,
+  same fields), Bill To (from the header strip); Customer ref (PO) and all References; carrier
+  name, MC, driver, truck / trailer, seal; freight lines from Items (or one line from Description
+  / Weight / Pieces / Freight class / Hazmat / Declared value when Items is empty); Bill of Lading
+  Notes (260 chars) and Special Instructions; requirements chips as a line (Hazmat, Temp control
+  with range, Tarps …); signature blocks for Shipper, Carrier / Driver, Consignee with date / time
+  and "received in good order" piece count; multi-stop: one BOL per delivery stop (stop range in
+  the title) or a master BOL listing all stops, chosen in the dialog.
+- **Flow**: dialog previews the PDF (same renderer as the rate con), options: per-stop vs master,
+  include rates No (default) / Yes, language note; **Generate** stores it as a ShipmentDocument
+  (type BOL, Public), stamps the audit (actor, time) and ticks "BOL" in the required-for-release
+  checklist; **Download** and **E-mail** (to pickup contact, carrier dispatcher, driver — recipient
+  picker like the rate con, sent through the shipment's thread) from the same dialog.
+  Regenerating creates a new version and keeps the old one listed as superseded.
+- BOL is required for release only if the customer's requirements say so (AP per-customer
+  requirements); otherwise it is optional and the checklist shows it as optional.
