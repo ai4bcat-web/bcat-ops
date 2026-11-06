@@ -307,3 +307,30 @@ the carrier sales page. You can merge tracking and carrier together into one sec
   for the per-load override); the customer-level default stays as the suggestion source. Load
   Tracking reads the per-load value first. Carrier Sales booking writes the same fields through
   the same Lambda action.
+
+## Ryne's feedback 10 (2026-11-05 evening, screenshot aljex-create/38-freight-alignment.webp)
+"Make sure the whole page is symmetrical. Some sections have text fields that don't fit. Remove
+the things in parentheses if it will help."
+
+Layout rules for EVERY card (enforce in one shared field-grid component, not per card):
+- One 12-column grid per card, 16 px gutters; each field declares its span (2 / 3 / 4 / 6 / 12);
+  every row sums to 12 so there is no ragged right edge and no empty half.
+- Every field has exactly the same vertical rhythm: label (one line, 11 px caps, fixed height)
+  → input (32 px) → nothing underneath. **No inline help text under inputs.** Help text moves to
+  an ⓘ tooltip on the label (and `title` on the input). The only exception is the character
+  counter on the three notes textareas, which gets a fixed-height row.
+- Labels never wrap: shorten them instead ("Billable wt", "Declared value", "Customer ref").
+- Drop parentheticals everywhere: option labels ("Truckload", not "Truckload (FTL)"; "Ocean FCL"
+  stays since it is the name), labels ("Revenue type", help text gone), chip labels unchanged.
+- Rows align across the card: inputs in the same row share one baseline; no field may be
+  taller or offset because of a longer label or help text (the Revenue Type offset in the
+  screenshot is exactly this).
+- Chips wrap in a flex row with 8 px gaps; the Calculate / Disable mileage controls sit in one
+  32 px toolbar row at the card foot, right-aligned.
+- Cards share the same padding (16 px), title row (number circle + title, 40 px), and bottom
+  margin (16 px). The rail uses the same label/input rhythm.
+- Check at 1440 and 1280: no horizontal scroll, every row flush left and right, screenshot both
+  into aljex-create/ after the change.
+Freight card rows at 1440: [Division 3 · Shipment type 3 · Equipment 3 · Weight 3] /
+[Billable wt 3 · Pieces 3 · Footage 3 · Freight class 3] / [Description 6 · Declared value 3 ·
+Customer ref 3] / [Requirement chips 12] / [toolbar 12].
