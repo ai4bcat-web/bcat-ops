@@ -73,3 +73,13 @@ Production = Amplify app `d3dejqzs77khq6`, branch `main`, active job `0000000711
 **Blocked, not done**
 - Authenticated checks (DOT Save on `/truck-docs`, Requests panel on `/time-off`, `/hours`, the driver app's Time off section via View as driver) need a staff session. This machine has AWS root credentials but no ops.bcatcorp.com login, and no relay to a signed-in browser. Not worked around (no password reset or test user created in the production staff pool).
 - Jason's PTO day for 2026-11-05 not created: `POST /staff/time-off/pto` needs a staff ID token (owner, ADMIN or `page-timeOff`) and refuses a driver who is not PTO eligible, which Jason is not. Setting his `ptoEligible` is a production write to a real driver's record that was not part of the request.
+
+### Jason Smith PTO day for 2026-11-05 — NOT created (existing 11/5 availability row)
+
+Ryne approved turning on `ptoEligible` for Jason and entering the day by direct writes to the production (main) tables, on condition that nothing already exists for him on 11/5. Read-only pre-check (production API `5ucwdyvwivelbo4k4jomvrwel4`):
+
+- `Driver` `9f8266cd-d9ab-46ad-80b5-d62b5abfa70c` (Jason Smith, LOCAL, active): `ptoEligible` absent, `updatedAt` 2026-11-06T11:00:41.835Z.
+- `TimeClockEntry` rows for Jason: 22, none on 2026-11-05, none of kind PTO (nearest: WORK on 11/4 and 11/6).
+- `DriverAvailability` rows for Jason: 3. **One is on 2026-11-05**: id `241ccad2-deba-45a7-9455-a3db1bbccb8d`, type `FULL_DAY_OFF`, startDate = endDate = 2026-11-05, no status (reads APPROVED), createdBy `Ryne@bcatcorp.com`, createdAt 2026-11-02T17:49:23.725Z. (The other two are 6/26 and 9/23–9/25.)
+
+Per the instruction "if one exists, change nothing and report", **no write was made**: not `ptoEligible`, not the availability row, not the clock row.
