@@ -681,7 +681,7 @@
     top: 0;
     bottom: auto;
     align-self: start;
-    max-height: calc(100vh - 150px);
+    max-height: calc(100vh - 250px);
   }
 
   .tms-shell .tms-rail-sheetbar {

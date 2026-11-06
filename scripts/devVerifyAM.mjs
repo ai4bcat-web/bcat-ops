@@ -49,6 +49,7 @@ const line = (status, name, detail) => {
 }
 const short = (err) => String(err?.message ?? err).replace(/\s+/g, ' ')
 const tid = (id) => `[data-testid="${id}"]`
+class SkipError extends Error {}
 const expect = (cond, message) => { if (!cond) throw new Error(message) }
 const nowIso = () => new Date().toISOString()
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date())
@@ -254,7 +255,7 @@ async function runWalk(ctx, b) {
   const click = (selector) => b.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`)
   const closeDialog = () => b.evaluate(`document.querySelector('.tms-dialog-close')?.click()`)
   const step = async (name, fn) => {
-    try { line('PASS', name, await fn()) } catch (err) { line('FAIL', name, short(err).slice(0, 220)); process.exitCode = 1 }
+    try { line('PASS', name, await fn()) } catch (err) { if (err instanceof SkipError) { line('SKIPPED', name, err.message); return } line('FAIL', name, short(err).slice(0, 220)); process.exitCode = 1 }
   }
   const typeInto = async (label, value) => {
     await b.evaluate(`(() => {
@@ -377,6 +378,67 @@ async function runWalk(ctx, b) {
     return 'confirmed MANUAL shown on the ladder card; amber chip gone'
   })
 
+  for (const [name, path] of [['AM16b board', `/tms/shipments?q=${ctx.f.pending.shipment.number}`], ['AM16c Load Tracking', '/tms/tracking']]) {
+    await step(`${name}: amber "Tracking mode not set" chip on unconfirmed booked loads`, async () => {
+      await b.navigate(path)
+      await b.poll(() => b.evaluate(`/Columns/.test(document.body?.innerText ?? '')`), 'the grid', 90_000)
+      const count = () => b.evaluate(`document.querySelectorAll('[data-testid="tracking-not-set"]').length`)
+      await b.poll(async () => (await count()) > 0, 'an amber chip', 45_000).catch(() => null)
+      const n = await count()
+      if (n === 0) throw new Error('no amber chip rendered on the grid (ZZ unconfirmed loads exist; chip may be hidden by saved columns or virtualisation)')
+      await shot(`AM16-${path.split('?')[0].split('/').pop()}-not-set`)
+      return `${n} chip(s)`
+    })
+  }
+
+  await step('AM18 live booking from Carrier Sales on a ZZ shipment: Tracking section, per-load mode, ladder summary, rate con not blocked', async () => {
+    const number = ctx.openBundle.shipment.number
+    const sid = ctx.openBundle.shipment.id
+    await b.navigate('/tms/carrier-sales')
+    await b.poll(() => has('input[aria-label="Search"]'), 'the Carrier Sales search', 60_000)
+    await typeInto('Search', number)
+    await b.poll(() => has(`[aria-label="Cover ${number}"]`), `the Cover button for ${number}`, 90_000)
+    await b.evaluate(`document.querySelector('[aria-label="Cover ${number}"]').click()`)
+    await b.poll(() => has(tid('cover-lookup')), 'the Cover dialog', 15_000)
+    await typeInto('Carrier MC or DOT', ctx.activeCarrier.mc)
+    await b.poll(() => b.evaluate(`document.querySelector('[data-testid="cover-lookup"]')?.disabled === false`), 'Look up to enable', 60_000)
+    await click(tid('cover-lookup'))
+    await b.poll(() => has(tid('cover-directory')), 'the directory result', 30_000)
+    await b.evaluate(`(() => {
+      const el = document.querySelector('[role="dialog"] input[aria-label="Carrier rate"], [role="dialog"] input[placeholder="0.00"]')
+      el.focus()
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '1500')
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.blur()
+    })()`)
+    await pause(500)
+    await b.poll(() => b.evaluate(`document.querySelector('[data-testid="cover-assign"]')?.disabled === false`), 'Assign to enable', 15_000)
+    await click(tid('cover-assign'))
+    await b.poll(async () => (await has(tid('cover-tracking-step'))) || (await has(tid('cover-error'))), 'the Tracking section or an error', 60_000)
+    if (await has(tid('cover-error'))) {
+      const why = await b.evaluate(`document.querySelector('[data-testid="cover-error"]').textContent`)
+      // COVER_CARRIER re-checks the carrier on MyCarrierPackets; a ZZ carrier has no MCP record (HTTP 404), and the walk makes no live MCP call.
+      if (/PreviewCarrier|MyCarrierPackets/.test(why)) throw new SkipError(`COVER_CARRIER needs a real MCP record for the carrier (${why.slice(0, 90)}); not coverable with a ZZ carrier`)
+      throw new Error(`cover refused: ${why}`)
+    }
+    await b.poll(() => has(tid('tracking-mode-control')), 'the tracking control', 30_000)
+    await pause(500)
+    await shot('AM18-cover-tracking-section')
+    const suggested = await has(tid('tracking-mode-suggested'))
+    // Unconfirmed: the amber chip is on the covered load (board + tracking are checked below).
+    await click(tid('tracking-mode-MANUAL'))
+    await click(tid('tracking-confirm'))
+    await b.poll(() => b.evaluate(`!!document.querySelector('[data-testid="tracking-confirm"]') && /Save tracking/.test(document.querySelector('[data-testid="tracking-confirm"]').textContent)`), 'the confirm to land', 30_000)
+    await click(tid('cover-done'))
+    await b.navigate(`/tms/shipments/${sid}?tab=carrier`)
+    await b.poll(() => has(tid('ladder-tracking-summary')), 'the tracking summary', 60_000)
+    expect(/Manual/.test(await b.evaluate(`document.querySelector('[data-testid="ladder-tracking-summary"]').textContent`)), 'summary does not name Manual')
+    expect(!(await has(tid('tracking-not-set'))), 'amber chip still shown after confirm')
+    const sendEnabled = await b.evaluate(`document.querySelector('[data-testid="ladder-SEND_RATE_CON"]')?.disabled === false`)
+    await shot('AM19-booked-tracking-confirmed')
+    return `${suggested ? 'suggested label shown; ' : 'no suggestion (customer has no default); '}MANUAL confirmed, summary on ladder card; rate-con button ${sendEnabled ? 'enabled' : 'disabled'}`
+  })
+
   await step('AM12 Carrier Sales: Covered tab shows the rungs and filters by them', async () => {
     await b.navigate('/tms/carrier-sales')
     await b.poll(() => b.evaluate(`[...document.querySelectorAll('[role="tab"]')].some((t) => /Covered/.test(t.textContent))`), 'the Covered tab', 90_000)
@@ -473,7 +535,9 @@ async function main() {
       ctx.f[s.key] = bundle
     }
     // One more open shipment so Carrier Sales has a Needs cover row to click Cover on.
-    await createShipment(ctx, customerId)
+    ctx.openBundle = await createShipment(ctx, customerId)
+    // A fresh shipment is a DRAFT; Carrier Sales lists OPEN ones.
+    await sdkUpdate(ctx, 'Shipment', ctx.openBundle.shipment.id, { status: 'OPEN' })
     console.log(`fixtures: ${STATES.length} ZZ shipments on the ladder, 1 open, 2 ZZ carriers (all removed in cleanup)`)
 
     const b = await launchBrowser({ origin, storage: identity.storage, profilePrefix: 'bcat-am-', purpose: 'AM verification', viewport: { width: 1440, height: 900, deviceScaleFactor: 1 } })

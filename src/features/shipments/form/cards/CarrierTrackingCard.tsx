@@ -35,7 +35,8 @@ function CarrierTrackingCardImpl(props: CardProps) {
               shipment={bundle.shipment} load={bundle.loads[0] ?? null} customer={ctx.customer} settings={ctx.settings}
               disabled={!booked || ctx.locked.voided || ctx.busy} onSaved={onSaved}
             />
-            {booked ? <TrackingReadout {...props} bundle={bundle} /> : <p className="tms-muted text-sm" data-testid="card-tracking-after-create">Tracking is chosen when the carrier is booked.</p>}
+            {booked ? null : <p className="tms-muted text-sm" data-testid="card-tracking-after-create">Tracking is chosen when the carrier is booked.</p>}
+            <TrackingReadout {...props} bundle={bundle} />
           </>
         ) : <TrackingPlanned {...props} />}
       </div>
