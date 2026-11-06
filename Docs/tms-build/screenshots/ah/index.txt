@@ -3,13 +3,14 @@ Docs/tms-build/screenshots/ah/03-settings-data-mint-card-L.png
 Docs/tms-build/screenshots/ah/04-00-form-top-L.png
 Docs/tms-build/screenshots/ah/04-01-card-customer-L.png
 Docs/tms-build/screenshots/ah/04-02-card-billTo-L.png
-Docs/tms-build/screenshots/ah/04-03-card-route-L.png
-Docs/tms-build/screenshots/ah/04-04-card-freight-L.png
+Docs/tms-build/screenshots/ah/04-03-card-freight-L.png
+Docs/tms-build/screenshots/ah/04-04-card-route-L.png
 Docs/tms-build/screenshots/ah/04-05-card-rates-L.png
 Docs/tms-build/screenshots/ah/04-06-card-rateHistory-L.png
 Docs/tms-build/screenshots/ah/04-07-card-carrier-L.png
 Docs/tms-build/screenshots/ah/04-08-card-tracking-L.png
 Docs/tms-build/screenshots/ah/04-09-card-documents-L.png
+Docs/tms-build/screenshots/ah/AH04-failure-L.png
 Docs/tms-build/screenshots/ah/06-issues-strip-L.png
 Docs/tms-build/screenshots/ah/07-resume-draft-banner-L.png
 Docs/tms-build/aljex-create/ar-create-brokered-1440.png
@@ -28,8 +29,8 @@ Docs/tms-build/screenshots/ah2/17-auto-miles-L.png
 Docs/tms-build/screenshots/ah2/18-tracking-card-L.png
 Docs/tms-build/screenshots/ah2/19-01-card-customer-L.png
 Docs/tms-build/screenshots/ah2/19-02-card-billTo-L.png
-Docs/tms-build/screenshots/ah2/19-03-card-route-L.png
-Docs/tms-build/screenshots/ah2/19-04-card-freight-L.png
+Docs/tms-build/screenshots/ah2/19-03-card-freight-L.png
+Docs/tms-build/screenshots/ah2/19-04-card-route-L.png
 Docs/tms-build/screenshots/ah2/19-05-card-rates-L.png
 Docs/tms-build/screenshots/ah2/19-06-card-rateHistory-L.png
 Docs/tms-build/screenshots/ah2/19-07-card-carrier-L.png
@@ -45,6 +46,7 @@ Docs/tms-build/aljex-create/ar-create-ivan-1440.png
 Docs/tms-build/aljex-create/ar-create-ivan-1280.png
 Docs/tms-build/aljex-create/ar-first-screen-1440x900.png
 Docs/tms-build/aljex-create/ar-first-screen-1280x800.png
+Docs/tms-build/screenshots/ah/AR07-failure-L.png
 Docs/tms-build/aljex-create/ar-intake-prefill-1440.png
 Docs/tms-build/aljex-create/ar-create-empty-1440x900.png
 Docs/tms-build/aljex-create/ar-create-empty-1280x800.png

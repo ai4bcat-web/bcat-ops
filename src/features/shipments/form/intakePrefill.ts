@@ -3,6 +3,8 @@
  * `IntakeLoadRecord.fields` (customer, stops, dates, equipment, weight, commodity, refs, rate) becomes a
  * `ShipmentFormValues`, plus the list of control test ids that carry extracted text so the form can mark them.
  */
+import { isShipmentTypeKey } from '@/lib/shipmentTypes'
+import { applyShipmentType, typeForDivisionChange } from './shipmentType'
 import { applyCustomerDefaults, emptyStop, emptyValues, type FormStop, type ShipmentFormValues } from './model'
 import type { IntakeLoadRecord, IntakeStop } from '@/types/intake'
 import type { CustomerRecord } from '@/types/tms'
@@ -54,7 +56,12 @@ export function intakePrefill(row: Pick<IntakeLoadRecord, 'fields'>, customer: C
   if (text(f.billToId)) { v = { ...v, customer: { ...v.customer, billToId: text(f.billToId) } }; mark('f-customer-billTo') }
   if (text(f.reference)) { v = { ...v, customer: { ...v.customer, refNo: text(f.reference) } }; mark('f-customer-refNo') }
   if (text(f.salesRepId)) { v = { ...v, roles: { ...v.roles, salesRepId: text(f.salesRepId) } }; mark('f-roles-salesRepId') }
-  if (text(f.divisionCode)) { v = { ...v, ship: { ...v.ship, revDivision: text(f.divisionCode) } }; mark('f-shipping-revDivision') }
+  if (text(f.divisionCode)) {
+    v = typeForDivisionChange(v, { ...v, ship: { ...v.ship, revDivision: text(f.divisionCode) } })
+    mark('f-shipping-revDivision')
+  }
+  // The extractor's type goes in before its equipment so an e-mailed equipment wins over the type's default.
+  if (isShipmentTypeKey(f.shipmentType)) { v = applyShipmentType(v, f.shipmentType); mark('f-shipping-shipmentType') }
   if (text(f.equipmentType)) { v = { ...v, ship: { ...v.ship, equipmentType: text(f.equipmentType) } }; mark('f-shipping-equipmentType') }
   if (text(f.commodity)) { v = { ...v, ship: { ...v.ship, description: text(f.commodity) } }; mark('f-shipping-description') }
   if (typeof f.weightLb === 'number' && f.weightLb > 0) {

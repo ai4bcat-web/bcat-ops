@@ -333,7 +333,7 @@ export const BOARD_COLUMN_KEYS = [
   'description', 'revenueType', 'salesRep', 'tracker', 'customerName', 'carrier', 'customerTotalRate',
   'carrierTotalRates', 'grossProfit', 'netMargin', 'pickupShip', 'originCity', 'destinationCity',
   'pickupAppt', 'deliveryAppt', 'stops', 'salesRepId', 'division', 'driver', 'truck', 'arStatus',
-  'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'openIncidentCount', 'mode', 'docsMissing',
+  'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'openIncidentCount', 'mode', 'shipmentType', 'docsMissing',
   // Shipment.
   'previousStatus', 'statusChangedAt', 'statusChangedBy', 'holdReason', 'voidReason',
   'pickupMonth', 'originState', 'destinationState', 'source', 'customerLinkSentAt',

@@ -22,6 +22,7 @@ import {
   optionalInteger,
 } from '../_shared/actionInputs'
 import { dedupeEmails, emailKey, isEmailAddress } from '../../../src/lib/emailAddress'
+import { isShipmentTypeKey } from '../../../src/lib/shipmentTypes'
 
 type Row = Record<string, unknown>
 
@@ -108,9 +109,14 @@ function section(source: Row, key: string, allowed: readonly string[], label: st
  */
 export function validateFormExtras(value: unknown, label = `${SR}.form`): Row {
   const f = assertRecord(value, label)
-  assertKnownKeys(f, ['v', 'ship', 'customer', 'roles', 'instructions', 'rates', 'carrier'], label)
+  assertKnownKeys(f, ['v', 'shipmentType', 'ship', 'customer', 'roles', 'instructions', 'rates', 'carrier'], label)
   if (f.v != null && f.v !== 1) throw new Error(`${label}.v must be 1`)
   const out: Row = { v: 1 }
+
+  if (f.shipmentType != null && f.shipmentType !== '') {
+    if (!isShipmentTypeKey(f.shipmentType)) throw new Error(`${label}.shipmentType is not a known shipment type`)
+    out.shipmentType = f.shipmentType
+  }
 
   const ship = section(f, 'ship', [
     'truckMiles', 'footage', 'billableWeightLbs', 'disableMileage', 'freightClass', 'tarpSize', 'temp',

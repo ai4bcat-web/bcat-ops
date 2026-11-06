@@ -76,6 +76,95 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Header strip: Customer type-ahead, Bill To chip and the dropdown panel (feedback 7). */
+.tms-shell .tms-ship-hdr-customer-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 1 300px;
+  min-width: 200px;
+}
+
+.tms-shell .tms-ship-hdr-customer {
+  display: flex;
+  min-width: 0;
+}
+
+.tms-shell .tms-ship-billto-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-pill);
+  color: var(--tms-text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tms-shell .tms-ship-billto-chip[data-hold='true'] {
+  background: var(--tms-badge-orange-tint);
+  border-color: var(--tms-badge-orange);
+  color: var(--tms-badge-orange);
+}
+
+.tms-shell .tms-ship-billto-chip[data-empty='true'] {
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-ship-billto-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-ship-billto-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  font-weight: 600;
+  color: var(--tms-primary);
+}
+
+.tms-shell .tms-ship-billto-details svg {
+  transition: transform 120ms;
+}
+
+.tms-shell .tms-ship-billto-details svg[data-open='true'] {
+  transform: rotate(180deg);
+}
+
+.tms-shell .tms-ship-hdr-panel {
+  order: 1;
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-ship-hdr-panel[hidden] {
+  display: none;
+}
+
+.tms-shell .tms-ship-hdr-panel-h {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tms-muted);
+}
+
 .tms-shell .tms-ship-dirty {
   width: 8px;
   height: 8px;
@@ -451,6 +540,114 @@
 
 .tms-shell .tms-rail-roles .ship-body {
   gap: 8px;
+}
+
+/* Activity: stage chip + stepper, then dense one/two-line audit rows (12 px). */
+.tms-shell .tms-rail-link {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--tms-primary);
+  text-decoration: none;
+}
+
+.tms-shell .tms-rail-link:hover {
+  text-decoration: underline;
+}
+
+.tms-shell .tms-rail-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.tms-shell .tms-rail-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tms-shell .tms-rail-chip[data-terminal='true'] {
+  background: var(--tms-badge-red-tint);
+  color: var(--tms-badge-red);
+}
+
+.tms-shell .tms-rail-steps {
+  display: flex;
+  gap: 3px;
+  align-self: stretch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tms-shell .tms-rail-step {
+  flex: 1 1 0;
+  height: 4px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-border);
+}
+
+.tms-shell .tms-rail-step[data-state='done'] { background: var(--tms-badge-green); }
+.tms-shell .tms-rail-step[data-state='current'] { background: var(--tms-primary); }
+
+.tms-shell .tms-rail-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tms-shell .tms-rail-act {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--tms-text-2);
+  overflow-wrap: anywhere;
+}
+
+.tms-shell .tms-rail-act-time {
+  color: var(--tms-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-rail-act-actor {
+  font-weight: 600;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-rail-act[data-actor-kind='agent'] .tms-rail-act-actor {
+  color: var(--tms-badge-purple);
+}
+
+.tms-shell .tms-rail-act-detail {
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-rail-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-rail-more {
+  align-self: flex-start;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--tms-primary);
+  cursor: pointer;
 }
 
 .tms-shell .tms-rail-actions {

@@ -16,6 +16,7 @@ import { formatDateTime } from '@/lib/date'
 import { TmsCard, TmsTimeline } from '@/features/tms/kit'
 import type { AuditLogEntry } from '@/types'
 import type { ShipmentBundle } from '@/types/tms'
+import { auditEntitiesFor } from '../auditEntities'
 
 /** Every record id this shipment is made of; the audit rows point at one of them. */
 function auditIdsFor(bundle: ShipmentBundle): string[] {
@@ -24,21 +25,6 @@ function auditIdsFor(bundle: ShipmentBundle): string[] {
     ...bundle.orders.map((o) => o.id),
     ...bundle.loads.map((l) => l.id),
     ...bundle.loadCarriers.map((c) => c.id),
-  ]
-}
-
-/**
- * The (entityType, entityId) keys the AuditLog index is read by. The Lambda writers stamp the
- * upper-case names and the browser writers the model names, so both spellings are asked for;
- * `SHIPMENT_POSTING` rows are keyed by the shipment id (POST_LOAD / UNPOST_LOAD).
- */
-function auditEntitiesFor(bundle: ShipmentBundle): Array<{ entityType: string; entityId: string }> {
-  const keyed = (types: string[], ids: string[]) => ids.flatMap((entityId) => types.map((entityType) => ({ entityType, entityId })))
-  return [
-    ...keyed(['SHIPMENT', 'Shipment', 'SHIPMENT_POSTING'], [bundle.shipment.id]),
-    ...keyed(['ORDER', 'Order'], bundle.orders.map((o) => o.id)),
-    ...keyed(['LOAD', 'Load'], bundle.loads.map((l) => l.id)),
-    ...keyed(['LOAD_CARRIER', 'LoadCarrier'], bundle.loadCarriers.map((c) => c.id)),
   ]
 }
 

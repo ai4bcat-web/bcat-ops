@@ -1,8 +1,11 @@
 /**
- * Card 1: Customer (Step AR). A type-ahead (five most recently used first), Ref #, then Contact /
- * Phone / Email 1 / Email 2 (the read-only Bill To detail is its own card). Choosing a customer seeds Bill To,
- * contact, the two e-mails, sales rep and division through `applyCustomerDefaults` (never over
- * what a person already typed). Same data and test ids as the AH Customer section.
+ * The Customer controls (Step AR feedback 7): they live in the header, not a card.
+ *  - `CustomerPicker`: the strip's type-ahead (five most recently used first). Choosing a customer
+ *    seeds Bill To, contact, the two e-mails, sales rep and division through `applyCustomerDefaults`
+ *    (never over what a person already typed).
+ *  - `CustomerContact`: Ref #, Contact / Phone / Email 1 / Email 2 and the bill-to party select, in
+ *    the Bill To panel's "Customer contact" column.
+ * Same data and test ids as the AH Customer section.
  */
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -26,7 +29,7 @@ import './cards.css'
 const VISIBLE_EMAILS = 2
 const OFFERED = 8
 
-export function CustomerCard({ values, update, ctx, form }: CardProps) {
+export function CustomerPicker({ values, update, ctx, form }: CardProps) {
   const value = values.customer
   const onChange = useMemo(() => sliceOf(update, 'customer'), [update])
   const userEmail = useAuthUser()?.email ?? ''
@@ -36,9 +39,6 @@ export function CustomerCard({ values, update, ctx, form }: CardProps) {
   const base = disabledState(ctx)
   const customer = ctx.customer
   const nameLocked = isLocked(ctx.locked, 'customer')
-  const billToLocked = disabledState(ctx, 'billTo')
-  const contactLocked = disabledState(ctx, 'contact')
-  const refLocked = disabledState(ctx, 'references')
   const err = (testId: string) => issueFor(ctx, 'customer', testId)
 
   const shippable = useMemo(() => {
@@ -70,16 +70,9 @@ export function CustomerCard({ values, update, ctx, form }: CardProps) {
     })
   }
 
-  const contacts = (customer?.contacts ?? []).filter((c) => c.active || c.id === value.contactId)
-  const selectedContact = contacts.find((c) => c.id === value.contactId)
-  const phone = selectedContact?.phone ?? customer?.contactPhone ?? ''
-  const billTos = customer?.billToParties ?? []
-  const setEmail = (i: number, text: string) =>
-    onChange((prev) => ({ ...prev, emails: prev.emails.map((e, n) => (n === i ? text : e)) }))
-
   return (
-    <div className="tms-card-body-stack" data-testid="section-customer-body">
-      <div className="tms-card-grid tms-card-grid-name">
+    <div className="tms-ship-hdr-customer-wrap" data-testid="hdr-customer">
+      <div className="tms-ship-hdr-customer">
         <LField def={LABEL.customer.name} error={err(LABEL.customer.name.testId)}>
           {nameLocked ? (
             <div className="ship-inline">
@@ -105,9 +98,6 @@ export function CustomerCard({ values, update, ctx, form }: CardProps) {
             </div>
           )}
         </LField>
-        <LField def={LABEL.customer.refNo} error={err(LABEL.customer.refNo.testId)}>
-          <TmsInput {...ctl(LABEL.customer.refNo)} title={refLocked.title ?? LABEL.customer.refNo.help} value={value.refNo} disabled={refLocked.disabled} onChange={(e) => onChange({ refNo: e.target.value })} />
-        </LField>
       </div>
       {!nameLocked && !value.id && (
         <label className="ship-check">
@@ -118,12 +108,32 @@ export function CustomerCard({ values, update, ctx, form }: CardProps) {
           No matching customer — record the name for now
         </label>
       )}
-      {customer && (
-        <span className="ship-hint">
-          From the customer record · <Link className="ship-link" to={`/tms/customers/${customer.id}`}>Edit customer</Link>
-        </span>
-      )}
+    </div>
+  )
+}
+
+export function CustomerContact({ values, update, ctx }: CardProps) {
+  const value = values.customer
+  const onChange = useMemo(() => sliceOf(update, 'customer'), [update])
+  const base = disabledState(ctx)
+  const customer = ctx.customer
+  const billToLocked = disabledState(ctx, 'billTo')
+  const contactLocked = disabledState(ctx, 'contact')
+  const refLocked = disabledState(ctx, 'references')
+  const err = (testId: string) => issueFor(ctx, 'customer', testId)
+  const contacts = (customer?.contacts ?? []).filter((c) => c.active || c.id === value.contactId)
+  const selectedContact = contacts.find((c) => c.id === value.contactId)
+  const phone = selectedContact?.phone ?? customer?.contactPhone ?? ''
+  const billTos = customer?.billToParties ?? []
+  const setEmail = (i: number, text: string) =>
+    onChange((prev) => ({ ...prev, emails: prev.emails.map((e, n) => (n === i ? text : e)) }))
+
+  return (
+    <div className="tms-card-body-stack" data-testid="section-customer-contact">
       <div className="tms-card-grid">
+        <LField def={LABEL.customer.refNo} error={err(LABEL.customer.refNo.testId)}>
+          <TmsInput {...ctl(LABEL.customer.refNo)} title={refLocked.title ?? LABEL.customer.refNo.help} value={value.refNo} disabled={refLocked.disabled} onChange={(e) => onChange({ refNo: e.target.value })} />
+        </LField>
         <LField def={LABEL.customer.contact}>
           <TmsSelect {...ctl(LABEL.customer.contact)} value={value.contactId} disabled={contactLocked.disabled} title={contactLocked.title} onChange={(e) => onChange({ contactId: e.target.value })}>
             <option value="" />
@@ -151,6 +161,11 @@ export function CustomerCard({ values, update, ctx, form }: CardProps) {
             </TmsSelect>
           </LField>
         </div>
+      )}
+      {customer && (
+        <span className="ship-hint">
+          From the customer record · <Link className="ship-link" to={`/tms/customers/${customer.id}`}>Edit customer</Link>
+        </span>
       )}
     </div>
   )

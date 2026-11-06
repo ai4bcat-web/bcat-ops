@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen, within } from '@testing-library/react'
 import type { CustomerRecord, TmsSettings } from '@/types/tms'
-import { BillToCard } from './BillToCard'
+import { BillToStrip } from './BillToStrip'
 import { creditWarning, requirementChips } from './billToModel'
 import { renderCard } from './cardTestKit'
 
@@ -21,9 +21,9 @@ const mk = (extra: object = {}) => ({
 }) as unknown as CustomerRecord
 const settings = { factorRemitTo: { name: 'OTR', noticeText: 'Pay OTR' } } as unknown as TmsSettings
 
-function setup(customer: CustomerRecord | null) {
+function setup(customer: CustomerRecord | null, open = true, onToggle: () => void = () => {}) {
   return renderCard(
-    BillToCard,
+    (props) => <BillToStrip {...props} open={open} onToggle={onToggle} />,
     {
       seed: (v) => ({
         ...v,
@@ -35,7 +35,7 @@ function setup(customer: CustomerRecord | null) {
 }
 const t = (id: string) => screen.getByTestId(id).textContent
 
-describe('BillToCard', () => {
+describe('BillToStrip', () => {
   it('shows the empty state with no customer', () => {
     setup(null)
     expect(t('card-billTo-empty')).toBe('Choose a customer to see billing details')
@@ -59,11 +59,37 @@ describe('BillToCard', () => {
     expect(screen.queryByTestId('card-billTo-creditWarn')).toBeNull()
   })
 
-  it('has no editable inputs', () => {
+  it('the billing detail has no editable inputs; the contact column beside it does', () => {
     setup(mk())
     const body = screen.getByTestId('f-customer-billToBlock')
     expect(within(body).queryAllByRole('textbox')).toHaveLength(0)
     expect(body.querySelector('input,select,textarea')).toBeNull()
+    expect(screen.getByTestId('f-customer-refNo')).toBeTruthy()
+    expect(screen.getByTestId('f-customer-email-1')).toBeTruthy()
+  })
+
+  it('the chip summarises name, terms, factoring and available credit, and the panel is hidden until opened', () => {
+    setup(mk(), false)
+    expect(t('hdr-billTo-text')).toBe('Acme AP · Net 45 · Factored · $10,000.00 available')
+    expect(screen.getByTestId('hdr-billTo-chip').getAttribute('aria-expanded')).toBe('false')
+    expect((screen.getByTestId('ship-form-header-panel') as HTMLElement).hidden).toBe(true)
+    // Hidden, but still mounted so its fields keep their test ids.
+    expect(screen.getByTestId('f-customer-refNo')).toBeTruthy()
+  })
+
+  it('the chip goes amber and says CREDIT HOLD for a customer on hold; the toggle calls back', () => {
+    const toggle = vi.fn()
+    setup(mk({ creditHoldFlag: true }), false, toggle)
+    expect(screen.getByTestId('hdr-billTo-chip').getAttribute('data-hold')).toBe('true')
+    expect(t('hdr-billTo-text')).toMatch(/^CREDIT HOLD · /)
+    screen.getByTestId('hdr-billTo-chip').click()
+    expect(toggle).toHaveBeenCalledTimes(1)
+  })
+
+  it('with no customer the chip asks for one', () => {
+    setup(null, false)
+    expect(t('hdr-billTo-text')).toBe('Bill To: choose a customer')
+    expect(screen.getByTestId('hdr-billTo-chip').getAttribute('data-hold')).toBe('false')
   })
 
   it('shows not-factored and requirement chips', () => {

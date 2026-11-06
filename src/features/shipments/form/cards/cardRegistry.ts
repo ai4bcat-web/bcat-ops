@@ -1,5 +1,5 @@
 /**
- * The card registry (Step AR): what `ShipmentFormPage` hands each of the nine numbered cards and
+ * The card registry (Step AR): what `ShipmentFormPage` hands each of the seven numbered cards and
  * each "More" tab. Cards compose the existing section components (`../sections/*`, imported
  * directly) and read/write ONE shared values object through `update`. The page looks the
  * components up in `defaultSections.tsx` (`CARD_COMPONENTS`, `MORE_TAB_COMPONENTS`).
@@ -12,24 +12,25 @@
  *  - The page owns the card chrome (border, number circle, title); a card component renders only
  *    the body and is always mounted and never collapsed by the page, so required fields stay in
  *    the DOM. CarrierCard owns its own "collapsed until set" presentation inside its body.
- *  - The header owns Division (top-level revDivision) and Mode (`values.mode`, testid f-shipping-mode);
- *    the rail owns Net/Profit, roles and the checklist. Revenue Type stays in Freight.
+ *  - The header owns Division (top-level revDivision), the Customer type-ahead and the Bill To chip /
+ *    panel (Customer contact, Ref #); the rail owns Net/Profit, roles and the checklist. Shipment type
+ *    (first field) and Revenue Type are in Freight.
  *  - Cards are NOT given `form.values`; use `values`. `locked` is `ctx.locked` (convenience).
  */
 import type { ComponentType } from 'react'
-import type { FormMode, LockSet, ShipmentFormValues } from '../model'
+import type { LockSet, ShipmentFormValues } from '../model'
 import type { FormCtx, FormIssue } from '../sectionProps'
 import type { FormApi } from '../sectionRegistry'
 
-export type CardKey = 'customer' | 'billTo' | 'route' | 'freight' | 'rates' | 'rateHistory' | 'carrier' | 'tracking' | 'documents'
+export type CardKey = 'freight' | 'route' | 'rates' | 'rateHistory' | 'carrier' | 'tracking' | 'documents'
 
-/** Page order = build order (numbers 1-9). */
+/** Page order = build order (numbers 1-7). Customer and Bill To live in the header strip, not here. */
 export const CARD_ORDER: readonly CardKey[] = [
-  'customer', 'billTo', 'route', 'freight', 'rates', 'rateHistory', 'carrier', 'tracking', 'documents',
+  'freight', 'route', 'rates', 'rateHistory', 'carrier', 'tracking', 'documents',
 ] as const
 
 export const CARD_TITLE: Record<CardKey, string> = {
-  customer: 'Customer', billTo: 'Bill To', route: 'Route', freight: 'Freight', rates: 'Rates',
+  freight: 'Freight', route: 'Route', rates: 'Rates',
   rateHistory: 'Rate history', carrier: 'Carrier', tracking: 'Tracking', documents: 'Documents',
 }
 
@@ -91,8 +92,4 @@ export function edgeStopOf(update: FormApi['update'], which: 'first' | 'last') {
       const next = typeof patch === 'function' ? patch(cur) : { ...cur, ...patch }
       return { ...p, stops: p.stops.map((s, j) => (j === i ? next : s)) }
     })
-}
-
-export function modeOf(update: FormApi['update']) {
-  return (m: FormMode) => update((p) => ({ ...p, mode: m }))
 }

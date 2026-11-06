@@ -39,6 +39,7 @@ import { DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { boardStatusOf, detailValuesFor } from '@/lib/shipmentViewDefs'
 import { assignmentChipText } from './carrierLadder'
+import { effectiveShipmentType, shipmentTypeLabel } from '@/lib/shipmentTypes'
 export { ALJEX_COLUMN_KEYS, boardStatusOf, matchesBoardFilters } from '@/lib/shipmentViewDefs'
 
 export type {
@@ -595,6 +596,12 @@ function enumLabel(value: string | null | undefined): string {
   return value ? titleCase(value) : ''
 }
 
+/** The row's shipment type key: the order form's explicit key, else the one derived from `mode`. */
+export function rowShipmentType(r: Pick<ShipmentRow, 'mode' | 'specialRequirements'>): string {
+  const explicit = (r.specialRequirements?.form as { shipmentType?: unknown } | null | undefined)?.shipmentType
+  return effectiveShipmentType(typeof explicit === 'string' ? explicit : null, r.mode)
+}
+
 /** "Team, Tarps, 34–36°F" — the order's special requirements in one cell. */
 function specialRequirementsLabel(req: SpecialRequirements | null | undefined): string {
   if (!req) return ''
@@ -734,6 +741,15 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     width: 110,
   },
   { key: 'mode', label: 'Mode', group: 'Shipment', value: (r) => r.mode, width: 90 },
+  {
+    // The order form's `shipmentType` key when the projected row carries it; else derived from the stored mode
+    // (the board projection has no other source: no extra order read).
+    key: 'shipmentType',
+    label: 'Shipment type',
+    group: 'Shipment',
+    value: (r) => shipmentTypeLabel(rowShipmentType(r)),
+    width: 160,
+  },
   /*
    * Three states, and the CSV says which in words: nothing at all when the gate has
    * never run for this shipment, "Complete" when it has and found everything, and the

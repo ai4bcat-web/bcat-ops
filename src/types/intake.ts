@@ -26,6 +26,8 @@ export interface IntakeFields {
   billToId: string | null;    salesRepId: string | null;  divisionCode: string | null
   reference: string | null;   pickupNumber: string | null;  deliveryNumber: string | null
   equipmentType: string | null; commodity: string | null
+  /** A key from `SHIPMENT_TYPES` (`src/lib/shipmentTypes.ts`); null when the e-mail does not say. */
+  shipmentType: string | null
   weightLb: number | null;    customerRateCents: number | null
   stops: IntakeStop[]
 }

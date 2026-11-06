@@ -73,6 +73,7 @@ import {
 } from '../../../src/lib/quoteNotices'
 import { newLinkToken } from '../../../src/lib/trackingLink'
 import type { CreditSummary } from '../../../src/lib/customerCredit'
+import { typeOfLegacyMode } from '../../../src/lib/shipmentTypes'
 import type { Stop } from '../../../src/types'
 import type {
   ChargeCalc,
@@ -1428,6 +1429,8 @@ export async function convertQuote(deps: QuoteDeps, input: Row, caller: Caller):
       references: ci.references,
       internalNotes: ci.quoteNotes,
       customerRepId: repOverride ?? optionalString(quote.customerRepId, 100),
+      // The quote only knows the coarse mode; the order's fine type is the one it maps back to.
+      specialRequirements: { form: { v: 1, shipmentType: typeOfLegacyMode(ci.mode) } },
     },
     charges: ci.lines as unknown as Row[],
     loadFields: { miles: ci.miles, weight: ci.weightLbs, commodity: ci.commodity },

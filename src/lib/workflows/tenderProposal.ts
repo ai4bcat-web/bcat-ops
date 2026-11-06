@@ -11,6 +11,7 @@
  */
 import type { TenderPrefill, TenderStopPrefill } from '../intakeTender'
 import type { WorkflowRunRecord } from '../../types/tms'
+import { isShipmentTypeKey } from '../shipmentTypes'
 
 export interface TenderModelStop {
   type?: 'pickup' | 'delivery' | null
@@ -31,6 +32,8 @@ export interface TenderModelFill {
   reference?: string | null
   pickupNumber?: string | null
   weightLb?: number | null
+  /** A `SHIPMENT_TYPES` key; '' (or anything not on the list) means the message does not say. */
+  shipmentType?: string | null
   stops?: TenderModelStop[] | null
 }
 
@@ -111,6 +114,7 @@ export function tenderFromParse(prefill: TenderPrefill, fill: TenderModelFill | 
         : typeof fill.weightLb === 'number' && Number.isFinite(fill.weightLb)
           ? fill.weightLb
           : undefined,
+    shipmentType: isShipmentTypeKey(fill.shipmentType) ? fill.shipmentType : prefill.shipmentType,
     stops,
   }
 }

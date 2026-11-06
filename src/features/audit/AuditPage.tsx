@@ -5,6 +5,7 @@
  * MVMNT filter row, table, empty state and footer, with no title row of its own.
  */
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { TmsBadge, TmsButton, TmsInput, TmsListPage } from '@/features/tms/kit'
 import type { ColumnDef, TmsTone } from '@/features/tms/kit'
 import { useAuditLog } from '@/hooks/useAuditLog'
@@ -49,8 +50,11 @@ const LOOKUP_ENTITY_TYPES = [
 ]
 
 export function AuditPage() {
-  const [lookupDraft, setLookupDraft] = useState('')
-  const [lookupId, setLookupId] = useState('')
+  // `?entity=<id>` (the shipment form's "Full history" link) opens the page already looked up.
+  const [params, setParams] = useSearchParams()
+  const linked = (params.get('entity') ?? '').trim()
+  const [lookupDraft, setLookupDraft] = useState(linked)
+  const [lookupId, setLookupId] = useState(linked)
   const lookupEntities = useMemo(
     () => (lookupId ? LOOKUP_ENTITY_TYPES.map((entityType) => ({ entityType, entityId: lookupId })) : undefined),
     [lookupId],
@@ -62,6 +66,10 @@ export function AuditPage() {
   )
   const [query, setQuery] = useState('')
   const submitLookup = () => setLookupId(lookupDraft.trim())
+  const clearLookup = () => {
+    setLookupDraft(''); setLookupId('')
+    if (params.has('entity')) setParams((p) => { p.delete('entity'); return p }, { replace: true })
+  }
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -91,7 +99,7 @@ export function AuditPage() {
           />
           <TmsButton type="submit" variant="secondary">Look up</TmsButton>
           {lookupId ? (
-            <TmsButton type="button" variant="secondary" onClick={() => { setLookupDraft(''); setLookupId('') }}>
+            <TmsButton type="button" variant="secondary" onClick={clearLookup}>
               Back to this session
             </TmsButton>
           ) : null}

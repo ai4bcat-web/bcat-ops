@@ -3,11 +3,13 @@
  * everything shared from `FormCtx`; they never import each other.
  */
 import type {
-  CarrierRecord, CustomerRecord, LocationRecord, ShipmentBundle, ShipmentDocumentType, ShipmentStatus,
+  CarrierRecord, CustomerRecord, LocationRecord, OwnershipDivisionRecord, ShipmentBundle, ShipmentDocumentType, ShipmentStatus,
   TmsSettings, UserProfileRecord,
 } from '@/types/tms'
-import type { DivisionTreeRow } from '@/features/tms/settings/taxonomyDrafts'
 import type { LockSet, ShipmentFormValues } from './model'
+
+// Structural copy of taxonomyDrafts.DivisionTreeRow: that module pulls UI-only imports ('@/lib/apiClient') into the Lambda typecheck, because amplify/ bundles this form model.
+type DivisionTreeRow = { division: OwnershipDivisionRecord; depth: number }
 
 export type SectionKey =
   | 'shipping' | 'customer' | 'pickup' | 'consignee' | 'history' | 'roles'

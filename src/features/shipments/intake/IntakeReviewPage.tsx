@@ -18,6 +18,7 @@ import {
 } from '@/lib/apiClient'
 import { requiredFieldLabel } from '@/lib/flowDefaults'
 import { formatDateTime } from '@/lib/date'
+import { SHIPMENT_TYPES } from '@/lib/shipmentTypes'
 import { canMarkReviewed, canMoveToActive, fieldStatusOf, intakeFieldKeys, intakeRequired, patchIntakeFields, withCustomerDefaults } from '@/lib/intakeLoad'
 import type { CustomerRecord, TmsSettings } from '@/types/tms'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeStop } from '@/types/intake'
@@ -301,6 +302,14 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             {textField('reference', 'Reference / PO')}
             {textField('pickupNumber', 'Pickup #')}
             {textField('deliveryNumber', 'Delivery #')}
+            {fieldRow(
+              'shipmentType',
+              'Shipment type',
+              <TmsSelect aria-label="Shipment type" disabled={!editable} value={work.fields.shipmentType ?? ''} onChange={(e) => edit({ shipmentType: text(e.target.value) })}>
+                <option value="">— choose type —</option>
+                {SHIPMENT_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </TmsSelect>,
+            )}
             {textField('equipmentType', 'Equipment')}
             {textField('commodity', 'Commodity')}
             {textField('weightLb', 'Weight (lb)', 'number')}

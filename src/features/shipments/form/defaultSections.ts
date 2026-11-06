@@ -1,12 +1,12 @@
 /**
- * The nine cards and the "More" tabs, looked up by key. The page imports this and nothing else from
+ * The seven main-column cards, the header's Customer / Bill To parts and the "More" tabs, looked up by key. The page imports this and nothing else from
  * `cards/`, so a test can replace the whole registry with one `vi.mock('./defaultSections')`.
  * (The Aljex section components stay the building blocks; the cards import them directly.)
  */
-import { BillToCard } from './cards/BillToCard'
+import { BillToStrip } from './cards/BillToStrip'
 import { CarrierCard } from './cards/CarrierCard'
 import type { CardComponents, MoreTabComponents } from './cards/cardRegistry'
-import { CustomerCard } from './cards/CustomerCard'
+import { CustomerPicker } from './cards/CustomerCard'
 import { DocumentsCard } from './cards/DocumentsCard'
 import { FreightCard } from './cards/FreightCard'
 import { RateHistoryCard } from './cards/RateHistoryCard'
@@ -20,16 +20,17 @@ import { ReferencesTab } from './cards/more/ReferencesTab'
 import { RolesSection } from './sections/RolesSection'
 
 export const CARD_COMPONENTS: CardComponents = {
-  customer: CustomerCard,
-  billTo: BillToCard,
-  route: RouteCard,
   freight: FreightCard,
+  route: RouteCard,
   rates: RatesCard,
   rateHistory: RateHistoryCard,
   carrier: CarrierCard,
   tracking: TrackingCard,
   documents: DocumentsCard,
 }
+
+/** The header strip's Customer type-ahead and Bill To chip + dropdown panel (feedback 7). */
+export const HEADER_PARTS = { CustomerPicker, BillToStrip }
 
 export const MORE_TAB_COMPONENTS: MoreTabComponents = {
   instructions: InstructionsTab,

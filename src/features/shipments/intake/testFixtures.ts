@@ -3,7 +3,7 @@ import type { IntakeFields, IntakeLoadRecord, IntakeMeta } from '@/types/intake'
 export function intakeFields(over: Partial<IntakeFields> = {}): IntakeFields {
   return {
     customerId: 'c1', customerName: 'Acme Foods', billToId: null, salesRepId: 'rep1', divisionCode: 'BRK',
-    reference: 'PO-100', pickupNumber: null, deliveryNumber: null, equipmentType: 'Dry van', commodity: null,
+    reference: 'PO-100', pickupNumber: null, deliveryNumber: null, shipmentType: null, equipmentType: 'Dry van', commodity: null,
     weightLb: 20000, customerRateCents: null,
     stops: [
       { type: 'pickup', name: null, street: null, city: 'Dallas', state: 'TX', zip: null, date: '2026-11-10', time: null, instructions: null },

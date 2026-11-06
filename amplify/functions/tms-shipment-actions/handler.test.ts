@@ -6030,6 +6030,18 @@ describe('CONVERT_QUOTE', () => {
     expect(other.quoteOpen).toBeUndefined()
   })
 
+  it('stamps the order with the shipment type its quote mode maps to', async () => {
+    const quote = await sentQuote({ mode: 'PTL' })
+    const result = (await call('CONVERT_QUOTE', {
+      quoteId: quote.id,
+      expectedVersion: quoteRow(String(quote.id)).version,
+    }, QUOTER)) as { bundle: { orders: Row[] } }
+    const sr = result.bundle.orders[0].specialRequirements as { form?: { shipmentType?: string } } | string
+    const form = (typeof sr === 'string' ? JSON.parse(sr) : sr).form
+    expect(form?.shipmentType).toBe('PARTIAL')
+    expect(result.bundle.orders[0].mode).toBe('PTL')
+  })
+
   it('files the order and the leg under the division and rep the dialog chose', async () => {
     // `Division` is keyed by `key`, which is what a load's `divisionKey` points at.
     table(TABLES.division).set('IVAN_CARTAGE', {

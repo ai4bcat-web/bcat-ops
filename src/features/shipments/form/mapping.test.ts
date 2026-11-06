@@ -9,6 +9,7 @@ import {
 } from './mapping'
 import { emptyValues, lockedFields, readExtras, valuesFromBundle, withExtras, type ShipmentFormValues } from './model'
 import { diffStopOps } from './pipelines'
+import { applyShipmentType } from './shipmentType'
 import type { ShipmentBundle } from '@/types/tms'
 
 const strip = (v: ShipmentFormValues) => ({
@@ -36,6 +37,14 @@ describe('form → payload → form', () => {
     const second = valuesFromBundle(storedBundle(edited), { customer: CUSTOMER })
     expect(strip(second)).toEqual(strip(edited))
     expect(second.ship.flags.hot).toBe(false)
+  })
+
+  it('round-trips the chosen shipment type through specialRequirements.form and keeps the stored mode in step', () => {
+    const values = applyShipmentType(filledValues(), 'AIR')
+    expect(toSpecialRequirements(values).form?.shipmentType).toBe('AIR')
+    expect(values.mode).toBe('AIR')
+    const back = valuesFromBundle(storedBundle(values), { customer: CUSTOMER })
+    expect(back).toMatchObject({ shipmentType: 'AIR', mode: 'AIR' })
   })
 
   it('keeps the account state of a typed-name customer', () => {

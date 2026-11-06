@@ -36,22 +36,16 @@ vi.mock('@/hooks/useDirectory', () => ({
 vi.mock('@/hooks/useCarriers', () => ({ useCarriers: () => ({ carriers: [] }) }))
 vi.mock('@/hooks/useStaff', () => ({ useStaff: () => ({ staff: [] }) }))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: null }) }))
-vi.mock('@/lib/apiClient', () => ({ getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations, linkIntakeShipment: h.linkIntakeShipment }))
+vi.mock('@/lib/apiClient', () => ({ getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations, linkIntakeShipment: h.linkIntakeShipment, listAuditLogsFor: vi.fn(async () => []) }))
 vi.mock('../intake/useIntakeLoads', () => ({ useIntakeLoad: () => ({ row: h.intakeRow, loading: false, error: null, reload: vi.fn(), setRow: vi.fn() }) }))
 vi.mock('./useFormActions', () => ({
   useFormActions: (o: { busy: boolean }) => ({ actions: {}, dialogs: null, busy: o.busy }),
 }))
 vi.mock('./defaultSections', () => {
   const none = () => null
-  type P = { values: { ship: { equipmentType: string }; customer: { typedName: string } }; update: (fn: (v: never) => unknown) => void }
+  type P = { values: { ship: { equipmentType: string }; customer: { typedName: string; refNo: string } }; update: (fn: (v: never) => unknown) => void }
   return {
     CARD_COMPONENTS: {
-      customer: (p: P) => (
-        <input
-          data-testid="f-customer-name" value={p.values.customer.typedName}
-          onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, customer: { ...(v.customer as object), typedName: e.target.value, useTyped: true } }) as never)}
-        />
-      ),
       route: none,
       freight: (p: P) => (
         <input
@@ -59,7 +53,26 @@ vi.mock('./defaultSections', () => {
           onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, ship: { ...(v.ship as object), equipmentType: e.target.value } }) as never)}
         />
       ),
-      billTo: none, rates: none, rateHistory: none, carrier: none, tracking: none, documents: none,
+      rates: none, rateHistory: none, carrier: none, tracking: none, documents: none,
+    },
+    HEADER_PARTS: {
+      CustomerPicker: (p: P) => (
+        <input
+          data-testid="f-customer-name" value={p.values.customer.typedName}
+          onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, customer: { ...(v.customer as object), typedName: e.target.value, useTyped: true } }) as never)}
+        />
+      ),
+      BillToStrip: (p: P & { open: boolean; onToggle: () => void }) => (
+        <>
+          <button type="button" data-testid="hdr-billTo-chip" aria-expanded={p.open} onClick={p.onToggle}>Bill To</button>
+          <div data-testid="ship-form-header-panel" data-header-panel hidden={!p.open}>
+            <input
+              data-testid="f-customer-refNo" value={p.values.customer.refNo}
+              onChange={(e) => p.update((v: Record<string, unknown>) => ({ ...v, customer: { ...(v.customer as object), refNo: e.target.value } }) as never)}
+            />
+          </div>
+        </>
+      ),
     },
     MORE_TAB_COMPONENTS: {
       instructions: none, references: none, items: none, notes: none,
@@ -193,9 +206,10 @@ describe('ShipmentFormPage — issues and rail', () => {
   it('the rail checklist counts live, marks a row done when its field is filled, and focuses on click', () => {
     renderForm('create')
     const count = screen.getByTestId('rail-required-count')
-    expect(count.textContent).toBe('0 / 7')
+    // Shipment type defaults to Truckload, so that row starts done.
+    expect(count.textContent).toBe('1 / 8')
     fireEvent.change(screen.getByTestId('f-customer-name'), { target: { value: 'ZZ Customer' } })
-    expect(count.textContent).toBe('1 / 7')
+    expect(count.textContent).toBe('2 / 8')
     expect(screen.getByTestId('rail-req-customer').getAttribute('data-done')).toBe('true')
     expect(screen.getByTestId('rail-req-equipment').getAttribute('data-missing')).toBe('false')
     fireEvent.click(screen.getByTestId('rail-req-equipment'))
@@ -222,26 +236,41 @@ describe('ShipmentFormPage — issues and rail', () => {
 })
 
 describe('ShipmentFormPage — layout contract', () => {
-  it('nine numbered cards in build order, no positive tabindex', () => {
+  it('seven numbered cards in build order (Customer and Bill To live in the header), no positive tabindex', () => {
     renderForm('create')
     const cards = [...document.querySelectorAll<HTMLElement>('[data-testid^="section-"]:not([data-testid$="-errors"])')].map((n) => n.dataset.testid)
-    expect(cards).toEqual(['section-customer', 'section-billTo', 'section-route', 'section-freight', 'section-rates', 'section-rateHistory', 'section-carrier', 'section-tracking', 'section-documents'])
-    expect([...document.querySelectorAll('.tms-ship-card-num')].map((n) => n.textContent)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+    expect(cards).toEqual(['section-freight', 'section-route', 'section-rates', 'section-rateHistory', 'section-carrier', 'section-tracking', 'section-documents'])
+    expect([...document.querySelectorAll('.tms-ship-card-num')].map((n) => n.textContent)).toEqual(['1', '2', '3', '4', '5', '6', '7'])
     expect([...document.querySelectorAll('[tabindex]')].every((n) => Number(n.getAttribute('tabindex')) <= 0)).toBe(true)
   })
 
   it('the More strip sits directly under Carrier and before Tracking', () => {
     renderForm('create')
     const order = [...document.querySelectorAll<HTMLElement>('[data-testid^="section-"]:not([data-testid$="-errors"]), [data-testid="ship-form-more"]')].map((n) => n.dataset.testid)
-    expect(order).toEqual(['section-customer', 'section-billTo', 'section-route', 'section-freight', 'section-rates', 'section-rateHistory', 'section-carrier', 'ship-form-more', 'section-tracking', 'section-documents'])
+    expect(order).toEqual(['section-freight', 'section-route', 'section-rates', 'section-rateHistory', 'section-carrier', 'ship-form-more', 'section-tracking', 'section-documents'])
   })
 
-  it('the header shows Division, Mode, status and a read-only PRO preview', () => {
+  it('the header strip holds Division, the Customer picker and the Bill To chip, with no Mode pill', () => {
     renderForm('create')
+    const header = screen.getByTestId('ship-form-header')
     expect(screen.getByTestId('ship-form-title').textContent).toBe('New shipment')
     expect(screen.getByTestId('ship-form-status').textContent).toBe('Draft')
-    expect(screen.getByLabelText('Division')).toBeTruthy()
-    expect((screen.getByLabelText('Mode') as HTMLSelectElement).value).toBe('FTL')
+    for (const id of ['f-header-division', 'f-customer-name', 'hdr-billTo-chip', 'ship-form-pro']) expect(header.querySelector(`[data-testid="${id}"]`)).not.toBeNull()
+    expect(screen.queryByLabelText('Mode')).toBeNull()
+    expect(screen.getByTestId('hdr-billTo-chip').getAttribute('aria-expanded')).toBe('false')
+    expect((screen.getByTestId('ship-form-header-panel') as HTMLElement).hidden).toBe(true)
+  })
+
+  it('the Bill To panel opens from the chip, and focusing a field inside it (an issue link, the rail) opens it', async () => {
+    renderForm('create')
+    fireEvent.click(screen.getByTestId('hdr-billTo-chip'))
+    expect((screen.getByTestId('ship-form-header-panel') as HTMLElement).hidden).toBe(false)
+    fireEvent.click(screen.getByTestId('hdr-billTo-chip'))
+    expect((screen.getByTestId('ship-form-header-panel') as HTMLElement).hidden).toBe(true)
+    // Customer is required, so Create focuses the header picker; the panel stays shut for it.
+    fireEvent.click(screen.getByTestId('ship-form-create'))
+    await screen.findByTestId('ship-form-issues')
+    expect((screen.getByTestId('ship-form-header-panel') as HTMLElement).hidden).toBe(true)
   })
 
   it('the More strip holds only Instructions, References, Items and Notes, in both modes', () => {

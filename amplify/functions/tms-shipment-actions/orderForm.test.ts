@@ -56,6 +56,15 @@ describe('special requirements patch', () => {
   })
 })
 
+describe('validateFormExtras shipmentType', () => {
+  it('keeps a known type key, drops an empty one, and refuses an unknown one', () => {
+    expect(validateFormExtras({ v: 1, shipmentType: 'REEFER' })).toEqual({ v: 1, shipmentType: 'REEFER' })
+    expect(validateFormExtras({ v: 1, shipmentType: '' })).toEqual({ v: 1 })
+    expect(() => validateFormExtras({ v: 1, shipmentType: 'SPACESHIP' })).toThrow(/form\.shipmentType/)
+    expect(() => validateFormExtras({ v: 1, shipmentType: 7 })).toThrow(/form\.shipmentType/)
+  })
+})
+
 describe('validateFormExtras', () => {
   it('refuses an unknown key and names its path', () => {
     expect(() => validateFormExtras({ v: 1, ship: { bogus: 1 } })).toThrow(/form\.ship\.bogus/)

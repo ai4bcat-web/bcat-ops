@@ -42,7 +42,7 @@ export const SECTION_ORDER: readonly SectionKey[] = [
 
 export const LABEL = {
   shipping: {
-    mode: def('shipping', 'mode', 'Mode'),
+    shipmentType: def('shipping', 'shipmentType', 'Shipment type'),
     equipmentType: def('shipping', 'equipmentType', 'Equipment', { required: true }),
     revDivision: def('shipping', 'revDivision', 'Revenue Type', { required: true, help: 'Revenue division (ownership tag)' }),
     office: def('shipping', 'office', 'Office', { help: 'Follows the Sales Representative’s team' }),
@@ -253,7 +253,7 @@ export const FLAG_COLUMNS = {
 
 /** Shipping Requirements field order (Tab order), key = `LABEL.shipping` / `LABEL.flags` key. */
 export const SHIPPING_TAB_ORDER = [
-  'mode', 'equipmentType', 'revDivision', 'office', 'customerMiles', 'truckMiles',
+  'shipmentType', 'equipmentType', 'revDivision', 'office', 'customerMiles', 'truckMiles',
   'footage', 'pieces', 'weightLbs', 'billableWeightLbs', 'calculateTotals', 'disableMileage',
   'freightClass', 'description', 'declaredValue', 'liftgate', 'inside',
   'tempControl', 'tempType', 'tempMin', 'tempMax', 'tempPreCool',

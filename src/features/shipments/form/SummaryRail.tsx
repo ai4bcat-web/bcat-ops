@@ -1,6 +1,7 @@
 /**
  * The sticky summary rail (Step AR): load summary lines, live money block (Net $ and Profit % with
- * a margin dot), required checklist (click a row = scroll to and focus the field), roles, and the
+ * a margin dot), required checklist (click a row = scroll to and focus the field), the Activity block (stage and
+ * recent audit entries), roles, and the
  * pinned actions. Below 1280 px the same element becomes a collapsible bottom sheet (CSS only), so
  * there is one set of controls, one set of test ids.
  */
@@ -8,6 +9,8 @@ import { Check, ChevronUp, Circle } from 'lucide-react'
 import { memo, useMemo, useState, type ComponentType } from 'react'
 import { TmsButton } from '@/features/tms/kit'
 import { formatCents } from '@/lib/invoiceBuild'
+import type { IntakeLoadRecord } from '@/types/intake'
+import { ActivityBlock } from './ActivityBlock'
 import { sliceOf, type CardProps } from './cards/cardRegistry'
 import { requiredProgress, type RailRow, type RailSummary } from './railModel'
 import type { RunKind } from './useShipmentForm'
@@ -23,13 +26,16 @@ export interface SummaryRailProps {
   busy: boolean
   voided: boolean
   Roles: ComponentType<SliceSectionProps<'roles'>>
+  /** The intake item the create page was opened from (its extractor entries show in Activity). */
+  intakeId?: string
+  intake?: IntakeLoadRecord | null
   onRun: (kind: RunKind) => void
   onDiscard: () => void
 }
 
 const TONE_WORD = { green: 'On target', amber: 'Near target', red: 'Below target' } as const
 
-function SummaryRailImpl({ common, summary, rows, attempted, status, busy, voided, Roles, onRun, onDiscard }: SummaryRailProps) {
+function SummaryRailImpl({ common, summary, rows, attempted, status, busy, voided, Roles, intakeId, intake, onRun, onDiscard }: SummaryRailProps) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const { mode, values, update, ctx, form } = common
   const { money } = summary
@@ -92,6 +98,8 @@ function SummaryRailImpl({ common, summary, rows, attempted, status, busy, voide
             ))}
           </ul>
         </section>
+
+        <ActivityBlock bundle={ctx.bundle} staff={ctx.directory.staff} intakeId={intakeId} intake={intake} />
 
         <section className="tms-rail-block tms-rail-roles" data-testid="rail-roles" aria-label="Roles">
           <h2 className="tms-rail-h">Roles</h2>

@@ -56,7 +56,15 @@ describe('required fields by action', () => {
     const submit = blockingIssues(validateForm(v, { ...base, level: 'submit', customer: CUSTOMER }))
     expect(submit.map((i) => i.id)).toEqual(expect.arrayContaining(['roles:needs:salesRep', 'customer:needs:billTo']))
     const ltl = filledValues(); ltl.mode = 'LTL'
-    expect(blockingIssues(validateForm(ltl, { ...base, level: 'submit', customer: CUSTOMER })).map((i) => i.id)).toContain('shipping:mode')
+    expect(blockingIssues(validateForm(ltl, { ...base, level: 'submit', customer: CUSTOMER })).map((i) => i.id)).toContain('shipping:shipmentType:submit')
+  })
+
+  it('a shipment type is required for Create and Submit, and a draft only warns', () => {
+    const v = filledValues(); v.shipmentType = ''
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER })).map((i) => i.id)).toEqual(['shipping:shipmentType'])
+    expect(blockingIssues(validateForm(v, { ...base, level: 'draft', customer: CUSTOMER }))).toEqual([])
+    v.shipmentType = 'NOT_A_TYPE'
+    expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER })).map((i) => i.id)).toEqual(['shipping:shipmentType'])
   })
 
   it('stop format rules: two-letter state and zip digits', () => {

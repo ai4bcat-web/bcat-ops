@@ -85,6 +85,30 @@ describe('buildIntakeDraft provenance', () => {
   })
 })
 
+describe('shipment type', () => {
+  const withType = (shipmentType: string) => draft({
+    tender: { format: null, shipmentType, stops: [] }, parserTender: { format: null, stops: [] }, fillKind: 'EMAIL',
+  })
+
+  it('carries a model-read key, marked MODEL', () => {
+    const d = withType('REEFER')
+    expect(d.fields.shipmentType).toBe('REEFER')
+    expect(d.meta.shipmentType).toEqual({ source: 'MODEL', confidence: 'high' })
+  })
+
+  it('leaves it blank when the message names none or a key off the list', () => {
+    expect(draft().fields.shipmentType).toBeNull()
+    expect(withType('SPACESHIP').fields.shipmentType).toBeNull()
+  })
+
+  it('a reviewer-typed key off the list reads INVALID', () => {
+    const d = withType('REEFER')
+    const row = { fields: d.fields, meta: d.meta, confirmed: [] }
+    const patched = patchIntakeFields(row, { shipmentType: 'NOPE' }, { add: [], remove: [] })
+    expect(fieldStatusOf('shipmentType', patched.fields, patched.meta, [])).toBe('INVALID')
+  })
+})
+
 describe('fieldStatusOf', () => {
   it('MISSING / LOW / AUTO / CONFIRMED / INVALID transitions', () => {
     const d = draft({ party: { ...EMAIL_PARTY, how: 'NAME' } })

@@ -92,6 +92,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
 
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [moreTab, setMoreTab] = useState<MoreTabKey>('instructions')
+  // The Bill To panel under the header strip: collapsed until asked for (or until a field inside it is focused).
+  const [panelOpen, setPanelOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
   const pipelineCtx = useMemo(() => ({
@@ -108,6 +110,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     const find = () => [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-testid]') ?? [])].find((n) => n.dataset.testid === fieldKey)
     const tab = find()?.closest<HTMLElement>('[data-more-tab]')?.dataset.moreTab
     if (tab) setMoreTab(tab as MoreTabKey)
+    if (find()?.closest('[data-header-panel]')) setPanelOpen(true)
     setTimeout(() => {
       const el = find()
       // A group (the Customer type-ahead) is not focusable itself: land on the control inside it.
@@ -197,7 +200,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     const out: Partial<Record<CardKey, number>> = {}
     for (const i of blockingIssues(form.issues)) {
       const c = cardOfSection(i.section)
-      if (c !== 'more' && c !== 'rail') out[c] = (out[c] ?? 0) + 1
+      if (c !== 'more' && c !== 'rail' && c !== 'header') out[c] = (out[c] ?? 0) + 1
     }
     return out
   }, [form.issues])
@@ -211,6 +214,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     return out
   }, [form.issues])
 
+  const togglePanel = useCallback(() => setPanelOpen((o) => !o), [])
   const leave = useCallback(() => navigate(bundle ? `${NEW_PATH}/${bundle.shipment.id}` : NEW_PATH), [navigate, bundle])
   const cancel = useCallback(() => {
     if (form.dirty) { setConfirmCancel(true); return }
@@ -248,9 +252,9 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   return (
     <div className="tms-dense-page tms-ship-form" ref={rootRef} data-testid="ship-form" data-mode={mode}>
       <FormHeader
-        title={title} status={status} dirty={form.dirty} pro={pro} mode={mode} formMode={values.mode}
-        revDivision={values.ship.revDivision} divisions={ctx.divisions} locked={locked} disabled={busy || voided}
-        update={update}
+        title={title} status={status} dirty={form.dirty} pro={pro} mode={mode}
+        revDivision={values.ship.revDivision} divisions={ctx.divisions} disabled={busy || voided}
+        update={update} common={common} panelOpen={panelOpen} onPanelToggle={togglePanel}
       />
 
       <div className="tms-ship-form-scroll">
@@ -320,7 +324,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
             </div>
             <SummaryRail
               common={common} summary={summary} rows={rows} attempted={attempted} status={status}
-              busy={busy} voided={voided} Roles={RAIL_ROLES} onRun={onRun} onDiscard={cancel}
+              busy={busy} voided={voided} Roles={RAIL_ROLES} intakeId={intakeId} intake={intake.row} onRun={onRun} onDiscard={cancel}
             />
           </div>
         </FromEmailContext.Provider>

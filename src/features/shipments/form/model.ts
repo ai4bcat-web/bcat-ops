@@ -7,6 +7,8 @@
  */
 import { defaultBillToIdOf, customerDefaultsOf } from '@/lib/intakeLoad'
 import { formatDateTimeInput } from '@/lib/date'
+import { effectiveShipmentType, typeOfLegacyMode } from '@/lib/shipmentTypes'
+import { typeForDivisionChange } from './shipmentType'
 import type { Stop } from '@/types'
 import type {
   AljexCustomerRateKind, AljexFormExtras, ChargeCalc, CustomerRecord, FreightItem, LoadCarrierRecord,
@@ -105,7 +107,10 @@ export interface AccessorialLine {
 export interface QueuedFile { file: File; audience: 'ALL' | 'INTERNAL'; type: ShipmentDocumentType }
 
 export interface ShipmentFormValues {
+  /** Stored `Order.mode`; always `legacyModeOf(shipmentType)` for a type the user picked. */
   mode: FormMode
+  /** Key from `SHIPMENT_TYPES`; saved in `specialRequirements.form.shipmentType`. Required. */
+  shipmentType: string
   /** Create only; blank = derived `<shipmentNumber>-1`. */
   pro: string
   ship: {
@@ -230,7 +235,7 @@ const isoToInput = (iso: string | null | undefined): string => (iso ? formatDate
 
 // ── extras accessor: the one seam to specialRequirements.form (AH-plan §4.0) ──
 
-export type ExtrasPatch = { [G in keyof Omit<AljexFormExtras, 'v'>]?: Partial<NonNullable<AljexFormExtras[G]>> | null }
+export type ExtrasPatch = { [G in keyof Omit<AljexFormExtras, 'v' | 'shipmentType'>]?: Partial<NonNullable<AljexFormExtras[G]>> | null }
 
 export function readExtras(order: Pick<OrderRecord, 'specialRequirements'> | null | undefined): AljexFormExtras | undefined {
   const f = order?.specialRequirements?.form
@@ -351,6 +356,7 @@ const emptyBits = (): ContactBits => ({ name: '', phone: '', email: '' })
 export function emptyValues(opts: { mode?: FormMode } = {}): ShipmentFormValues {
   return {
     mode: opts.mode ?? 'FTL',
+    shipmentType: typeOfLegacyMode(opts.mode ?? 'FTL'),
     pro: '',
     ship: {
       equipmentType: '', revDivision: '', revSubdivision: '', officeLabel: '', customerMiles: '', truckMiles: '',
@@ -400,7 +406,7 @@ export function applyCustomerDefaults(values: ShipmentFormValues, customer: Cust
       id: '', carrierLineId: '', release: '', carrierKey: '', code: c.code, label: '',
       carrierAmount: '', customerAmount: centsToDollars(c.amountCents * (c.count ?? 1)), note: '',
     }))
-  return {
+  const out: ShipmentFormValues = {
     ...values,
     customer: {
       ...values.customer,
@@ -414,6 +420,8 @@ export function applyCustomerDefaults(values: ShipmentFormValues, customer: Cust
     ship: { ...values.ship, revDivision: values.ship.revDivision || customer.defaultDivisionKey || '' },
     rates: { ...values.rates, lines },
   }
+  // A division filled in by the customer's default brings that division's default shipment type with it.
+  return out.ship.revDivision === values.ship.revDivision ? out : typeForDivisionChange(values, out)
 }
 
 // ── bundle → form ────────────────────────────────────────────────────────────
@@ -566,6 +574,8 @@ export function valuesFromBundle(bundle: ShipmentBundle, ctx: BundleSeedCtx = {}
   return {
     ...base,
     mode: shipment.mode,
+    // An order saved before types existed shows the type its mode implies.
+    shipmentType: effectiveShipmentType(x?.shipmentType, shipment.mode),
     ship: {
       equipmentType: str(order?.equipmentType ?? load?.equipmentType),
       revDivision: str(shipment.revDivision),

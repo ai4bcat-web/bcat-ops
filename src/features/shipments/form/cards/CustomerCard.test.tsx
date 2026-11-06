@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, within } from '@testing-library/react'
 import type { CustomerRecord } from '@/types/tms'
-import { CustomerCard } from './CustomerCard'
+import { CustomerContact, CustomerPicker } from './CustomerCard'
 import { renderCard } from './cardTestKit'
 import { pushRecent } from './recents'
 
@@ -23,12 +23,12 @@ const customers = [ACME, KROGER, ACORN, BLOCKED]
 
 beforeEach(() => localStorage.clear())
 
-const setup = () => renderCard(CustomerCard, {
+const setup = () => renderCard(CustomerPicker, {
   ctx: (v) => ({ directory: { customers, locations: [], carriers: [], staff: [] }, customer: customers.find((c) => c.id === v.customer.id) ?? null }),
 })
 const options = () => within(screen.getByTestId('f-customer-name')).queryAllByRole('option').map((o) => o.textContent)
 
-describe('CustomerCard', () => {
+describe('CustomerPicker', () => {
   it('offers the recently used customers first when the box is focused empty, newest first', () => {
     pushRecent('customer', 'rep@bcat.test', 'c-kro')
     pushRecent('customer', 'rep@bcat.test', 'c-acorn')
@@ -55,24 +55,21 @@ describe('CustomerCard', () => {
     expect(v.customer.emails[0]).toBe('pat@acme.test')
     expect(v.roles.salesRepId).toBe('rep-1')
     expect(v.ship.revDivision).toBe('FOOD')
-    expect(screen.queryByTestId('f-customer-billToBlock')).toBeNull()
-    expect(screen.getAllByTestId(/^f-customer-email-/)).toHaveLength(2)
     expect(localStorage.getItem('tms:ship-form:recent:customer:rep@bcat.test')).toBe('["c-acme"]')
   })
 })
 
-describe('CustomerCard — typed name, lock, e-mails', () => {
+describe('CustomerPicker — typed name, lock', () => {
   const set = (c: Partial<CustomerRecord>[] = customers, over: object = {}) =>
-    renderCard(CustomerCard, { ctx: () => ({ directory: { customers: c as CustomerRecord[], locations: [], carriers: [], staff: [] }, ...over }) })
+    renderCard(CustomerPicker, { ctx: () => ({ directory: { customers: c as CustomerRecord[], locations: [], carriers: [], staff: [] }, ...over }) })
 
-  it('shows exactly two Email fields and hides inactive contacts', () => {
-    set([mk('c1', 'Acme', { contacts: [
+  it('the contact column has Ref #, exactly two Email fields, and hides inactive contacts', () => {
+    const contactOf = (customer: CustomerRecord) => renderCard(CustomerContact, { ctx: () => ({ customer }) })
+    contactOf(mk('c1', 'Acme', { contacts: [
       { id: 'a', name: 'Active Ann', types: [], notifications: [], active: true },
       { id: 'b', name: 'Gone Gil', types: [], notifications: [], active: false },
-    ] })], { customer: mk('c1', 'Acme', { contacts: [
-      { id: 'a', name: 'Active Ann', types: [], notifications: [], active: true },
-      { id: 'b', name: 'Gone Gil', types: [], notifications: [], active: false },
-    ] }) })
+    ] }))
+    expect(screen.getByTestId('f-customer-refNo')).toBeTruthy()
     expect(screen.getAllByTestId(/^f-customer-email-/)).toHaveLength(2)
     expect(screen.queryByText('Gone Gil')).toBeNull()
     expect(screen.getByText('Active Ann')).toBeTruthy()

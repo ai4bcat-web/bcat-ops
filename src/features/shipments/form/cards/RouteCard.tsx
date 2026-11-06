@@ -1,5 +1,5 @@
 /**
- * Card 2: Route (Step AR). A lane header (origin → destination, Customer Miles / Truck Miles with
+ * Card 4: Route (Step AR). A lane header (origin → destination, Customer Miles / Truck Miles with
  * the AH auto-calc and click-to-type override, transit estimate), then the stops as a vertical
  * timeline: one StopCard per stop, "+ Add pickup / + Add delivery" in the gaps, drag (or arrow
  * keys on the handle) to reorder, delete with undo. It edits the same `values.stops` rows as the

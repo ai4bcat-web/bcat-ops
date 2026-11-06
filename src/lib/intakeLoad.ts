@@ -28,6 +28,7 @@ import {
   type RequiredFieldSubject,
 } from './flowDefaults'
 import { fromDateInput, fromDateTimeInput } from './date'
+import { isShipmentTypeKey } from './shipmentTypes'
 
 type Row = Record<string, unknown>
 
@@ -40,7 +41,7 @@ export type IntakeStopKey = (typeof INTAKE_STOP_KEYS)[number]
 
 const SCALAR_KEYS = [
   'customerId', 'customerName', 'billToId', 'salesRepId', 'divisionCode',
-  'reference', 'pickupNumber', 'deliveryNumber', 'equipmentType', 'commodity',
+  'reference', 'pickupNumber', 'deliveryNumber', 'shipmentType', 'equipmentType', 'commodity',
   'weightLb', 'customerRateCents',
 ] as const
 type ScalarKey = (typeof SCALAR_KEYS)[number]
@@ -48,7 +49,7 @@ type ScalarKey = (typeof SCALAR_KEYS)[number]
 const SCALAR_LABELS: Record<ScalarKey, string> = {
   customerId: 'Customer', customerName: 'Customer name', billToId: 'Bill-to party', salesRepId: 'Sales rep',
   divisionCode: 'Revenue division', reference: 'Reference (PO / TMS ID)', pickupNumber: 'Pickup number',
-  deliveryNumber: 'Delivery number', equipmentType: 'Equipment type', commodity: 'Commodity',
+  deliveryNumber: 'Delivery number', shipmentType: 'Shipment type', equipmentType: 'Equipment type', commodity: 'Commodity',
   weightLb: 'Weight', customerRateCents: 'Customer rate',
 }
 const STOP_LABELS: Record<IntakeStopKey, string> = {
@@ -65,7 +66,7 @@ export function intakeFieldLabel(key: string): string {
 export function emptyIntakeFields(): IntakeFields {
   return {
     customerId: null, customerName: null, billToId: null, salesRepId: null, divisionCode: null,
-    reference: null, pickupNumber: null, deliveryNumber: null, equipmentType: null, commodity: null,
+    reference: null, pickupNumber: null, deliveryNumber: null, shipmentType: null, equipmentType: null, commodity: null,
     weightLb: null, customerRateCents: null, stops: [],
   }
 }
@@ -110,6 +111,7 @@ function formatOk(key: string, value: unknown): boolean {
   }
   if (k === 'weightLb') return typeof value === 'number' && value > 0 && value <= 80_000
   if (k === 'customerRateCents') return typeof value === 'number' && value >= 0
+  if (k === 'shipmentType') return isShipmentTypeKey(s)
   return true
 }
 
@@ -220,10 +222,12 @@ export function buildIntakeDraft(input: {
   const t = tender
   fields.reference = clean(t?.reference)
   fields.pickupNumber = clean(t?.pickupNumber)
+  fields.shipmentType = isShipmentTypeKey(t?.shipmentType) ? t.shipmentType : null
   fields.weightLb = typeof t?.weightLb === 'number' && Number.isFinite(t.weightLb) ? t.weightLb : null
   for (const [key, parserHas] of [
     ['reference', !!clean(parser?.reference)],
     ['pickupNumber', !!clean(parser?.pickupNumber)],
+    ['shipmentType', false],
     ['weightLb', typeof parser?.weightLb === 'number'],
   ] as const) {
     const s = sourceOfTender(key, parserHas)

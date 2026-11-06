@@ -1,5 +1,6 @@
 /**
- * Card 3: Freight (Step AR). Equipment, Revenue Type, Weight (+ billable), Pieces, Footage,
+ * Card 1: Freight (Step AR; first card since feedback 7). Shipment type (required, first field; picking one
+ * fills its default equipment and chips where still empty), Equipment, Revenue Type, Weight (+ billable), Pieces, Footage,
  * Description, Class, Declared Value and the customer's reference; then the REQUIREMENTS chip
  * bar that replaces the AH checkbox grid. A chip toggles the same `ship.flags` key (or the
  * Temp / Tarps / Pallet exchange / Liftgate / Inside field it stands for); Temp, Tarps and
@@ -12,7 +13,9 @@ import { TmsButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { EQUIPMENT_SUGGESTIONS, FREIGHT_CLASSES, MAX } from '../constants'
 import { LABEL, type LabelDef } from '../labels'
 import { calculateTotalsFromPicks } from '../mapping'
-import { activeLoadCarrier, type FlagKey, type ShipmentFormValues } from '../model'
+import { SHIPMENT_TYPES } from '@/lib/shipmentTypes'
+import { activeLoadCarrier, isLocked, lockReason, type FlagKey, type ShipmentFormValues } from '../model'
+import { applyShipmentType, typeForDivisionChange } from '../shipmentType'
 import { ctl, digitsOnly, disabledState, dollarText, issueFor, signedDigits } from '../sections/fieldUtil'
 import { LField } from '../sections/formControls'
 import { type CardProps, sliceOf } from './cardRegistry'
@@ -49,15 +52,19 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
 
   const revCode = value.revSubdivision || value.revDivision
   const rows = ctx.divisions.filter((r) => r.division.active || r.division.code === revCode)
+  const setDivision = (revDivision: string, revSubdivision: string) =>
+    update((p) => typeForDivisionChange(p, { ...p, ship: { ...p.ship, revDivision, revSubdivision } }))
+  const typeLocked = isLocked(ctx.locked, 'mode')
+  const typeGroups = [...new Set(SHIPMENT_TYPES.map((t) => t.group))]
   const pickDivision = (code: string) => {
-    if (!code) { set({ revDivision: '', revSubdivision: '' }); return }
+    if (!code) { setDivision('', ''); return }
     const byId = new Map(ctx.divisions.map((r) => [r.division.id, r.division]))
     let node = ctx.divisions.find((r) => r.division.code === code)?.division
     if (!node) return
-    if (!node.parentId) { set({ revDivision: node.code, revSubdivision: '' }); return }
+    if (!node.parentId) { setDivision(node.code, ''); return }
     const chosen = node.code
     for (let guard = 0; node?.parentId && guard < 20; guard++) node = byId.get(node.parentId)
-    set({ revDivision: node?.code ?? chosen, revSubdivision: chosen })
+    setDivision(node?.code ?? chosen, chosen)
   }
 
   const calculate = () => {
@@ -111,6 +118,20 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
   return (
     <div className="tms-card-body-stack" data-testid="section-freight-body">
       <div className="tms-card-grid">
+        <LField def={LABEL.shipping.shipmentType} error={err(LABEL.shipping.shipmentType.testId)}>
+          <TmsSelect
+            {...ctl(LABEL.shipping.shipmentType)} aria-label={LABEL.shipping.shipmentType.text} value={values.shipmentType}
+            disabled={base.disabled || typeLocked} title={typeLocked ? lockReason(ctx.locked, 'mode') : undefined}
+            onChange={(e) => update((p) => applyShipmentType(p, e.target.value))}
+          >
+            {!SHIPMENT_TYPES.some((t) => t.key === values.shipmentType) && <option value={values.shipmentType} disabled>{values.shipmentType || 'Select…'}</option>}
+            {typeGroups.map((g) => (
+              <optgroup key={g} label={g}>
+                {SHIPMENT_TYPES.filter((t) => t.group === g).map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </optgroup>
+            ))}
+          </TmsSelect>
+        </LField>
         <LField def={LABEL.shipping.equipmentType} error={err(LABEL.shipping.equipmentType.testId)}>
           <TmsInput {...ctl(LABEL.shipping.equipmentType)} list={EQUIPMENT_LIST_ID} maxLength={MAX.equipment} value={value.equipmentType} disabled={equipLock.disabled} title={equipLock.title} onChange={txt('equipmentType')} />
         </LField>

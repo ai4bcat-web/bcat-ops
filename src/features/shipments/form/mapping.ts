@@ -167,6 +167,7 @@ const toF = (value: number, unit: 'F' | 'C'): number => (unit === 'C' ? Math.rou
 export function toExtras(values: ShipmentFormValues): AljexFormExtras {
   const { ship, customer, roles, more, rates, carrier } = values
   const x: AljexFormExtras = { v: 1 }
+  if (values.shipmentType) x.shipmentType = values.shipmentType
   const shipX: NonNullable<AljexFormExtras['ship']> = {}
   const truck = numOrUndef(ship.truckMiles); if (truck !== undefined) shipX.truckMiles = truck
   const foot = numOrUndef(ship.footage); if (foot !== undefined) shipX.footage = foot

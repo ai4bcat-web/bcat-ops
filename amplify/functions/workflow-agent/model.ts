@@ -23,6 +23,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { UNTRUSTED_NOTICE, wrapUntrusted } from '../../../src/lib/workflows/untrusted'
 import type { TenderModelFill } from '../../../src/lib/workflows/tenderProposal'
+import { SHIPMENT_TYPE_KEYS } from '../../../src/lib/shipmentTypes'
 
 export const MODEL_ID = 'claude-sonnet-5'
 export const MAX_MODEL_CALLS = 3
@@ -117,12 +118,13 @@ export const CLASSIFY_SCHEMA = {
 export const TENDER_FILL_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['customer', 'reference', 'pickupNumber', 'weightLb', 'stops', 'lowConfidence'],
+  required: ['customer', 'reference', 'pickupNumber', 'weightLb', 'shipmentType', 'stops', 'lowConfidence'],
   properties: {
     customer: { type: ['string', 'null'], description: 'The broker or shipper offering the load.' },
     reference: { type: ['string', 'null'], description: 'The reference the broker will match on — TMS ID, load #, order #.' },
     pickupNumber: { type: ['string', 'null'], description: 'Shipment / SO / PU number at the pickup.' },
     weightLb: { type: ['number', 'null'], description: 'Total weight in pounds.' },
+    shipmentType: { type: 'string', description: `The kind of shipment, exactly one of ${SHIPMENT_TYPE_KEYS.join(', ')}; empty string when the message does not say.` },
     lowConfidence: {
       type: 'array',
       items: { type: 'string' },

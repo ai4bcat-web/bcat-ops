@@ -89,6 +89,15 @@ describe('columns', () => {
     ])
   })
 
+  it('shows the order form shipment type, else the one its mode maps to', () => {
+    const col = BOARD_COLUMNS.find((c) => c.key === 'shipmentType')!
+    expect(col.group).toBe('Shipment')
+    const explicit = row('1', { mode: 'FTL', specialRequirements: { form: { v: 1, shipmentType: 'REEFER' } } as never })
+    expect(col.value(explicit)).toBe('Refrigerated / Reefer')
+    expect(col.value(row('2', { mode: 'PTL' }))).toBe('Partial / Volume')
+    expect(col.value(row('3', { mode: 'FTL', specialRequirements: { form: { v: 1, shipmentType: 'bogus' } } as never }))).toBe('Truckload (FTL)')
+  })
+
   it('renders columns in the order of the supplied keys, dropping unknown keys', () => {
     const cols = visibleColumns(['carrier', 'status', 'unknown', 'number'])
     expect(cols.map((c) => c.key)).toEqual(['carrier', 'status', 'number'])

@@ -3,16 +3,6 @@
  * the real list (check-call Message, EDI Reason) the seed below is [INFERENCE] and is meant
  * to be replaced here, in one place, once Ryne sends Aljex's own lists (AH-plan D9).
  */
-import type { ShipmentMode } from '@/types/tms'
-
-/** Mode select: Aljex's four. Any other `ShipmentMode` already on a record is preserved read-only. */
-export const FORM_MODE_OPTIONS: { value: ShipmentMode; label: string }[] = [
-  { value: 'FTL', label: 'Truckload' },
-  { value: 'LTL', label: 'LTL' },
-  { value: 'AIR', label: 'Air' },
-  { value: 'OCEAN', label: 'Ocean' },
-]
-
 export const EQUIPMENT_SUGGESTIONS = [
   'Dry Van', 'Reefer', 'Flatbed', 'Step Deck', 'Power Only', 'Container', 'Box Truck', 'Hotshot', 'Conestoga',
 ] as const

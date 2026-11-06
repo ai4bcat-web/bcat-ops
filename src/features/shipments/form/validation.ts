@@ -15,6 +15,7 @@ import { TRUCKLOAD_MODES } from '../orderDraft'
 import { LABEL, SECTION_TITLE } from './labels'
 import { MAX } from './constants'
 import { financialPreview, firstPickupIndex, lastDeliveryIndex } from './mapping'
+import { isShipmentTypeKey } from '@/lib/shipmentTypes'
 import { parseInteger, type FormStop, type ShipmentFormValues } from './model'
 import type { FormIssue, SectionKey } from './sectionProps'
 
@@ -98,6 +99,7 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   }
 
   const truckload = isTruckload(values)
+  if (!isShipmentTypeKey(values.shipmentType)) red('shipping', 'shipmentType', LABEL.shipping.shipmentType, 'Pick a shipment type.')
   if (truckload && empty(values.ship.equipmentType)) red('shipping', 'equipmentType', LABEL.shipping.equipmentType, 'A truckload order needs an equipment type.')
   if (empty(values.ship.revDivision)) red('shipping', 'revDivision', LABEL.shipping.revDivision, 'Pick a revenue type.')
   if (!(Number(values.ship.weightLbs) > 0)) red('shipping', 'weightLbs', LABEL.shipping.weightLbs, 'Weight must be greater than zero.')
@@ -185,13 +187,13 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   }
 
   // Truckload only for Submit.
-  if (submit && !truckload) push('shipping', 'mode', LABEL.shipping.mode.testId, LABEL.shipping.mode.text, 'Only truckload modes can be submitted yet; this one is saved as a draft.')
+  if (submit && !truckload) push('shipping', 'shipmentType:submit', LABEL.shipping.shipmentType.testId, LABEL.shipping.shipmentType.text, 'Only truckload modes can be submitted yet; this one is saved as a draft.')
 
   // The org + customer required-field list: informational until Submit.
   const required = resolveRequiredFields(o.settings, o.customer)
   const known = new Set(issues.filter((i) => i.severity === 'error').map((i) => `${i.section}:${i.fieldKey}`))
   for (const key of missingRequiredFields(toRequiredFieldSubject(values, o.customer), required)) {
-    const t = REQUIRED_KEY_TARGET[key] ?? { section: 'shipping' as SectionKey, fieldKey: LABEL.shipping.mode.testId }
+    const t = REQUIRED_KEY_TARGET[key] ?? { section: 'shipping' as SectionKey, fieldKey: LABEL.shipping.shipmentType.testId }
     if (known.has(`${t.section}:${t.fieldKey}`)) continue
     push(t.section, `needs:${key}`, t.fieldKey, requiredFieldLabel(key), `Needs: ${requiredFieldLabel(key)}`, submit ? 'error' : 'warn')
   }

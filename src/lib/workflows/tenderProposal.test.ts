@@ -53,6 +53,12 @@ describe('tenderFromParse', () => {
     expect(out.format).toBe('E2OPEN')
   })
 
+  it('takes the model shipment type only when it is a key on the list', () => {
+    expect(tenderFromParse(PARSED, { shipmentType: 'HOT_SHOT' }).shipmentType).toBe('HOT_SHOT')
+    expect(tenderFromParse(PARSED, { shipmentType: '' }).shipmentType).toBeUndefined()
+    expect(tenderFromParse(PARSED, { shipmentType: 'Hot shot' }).shipmentType).toBeUndefined()
+  })
+
   it('appends a stop the parser never found, typed by position', () => {
     const out = tenderFromParse({ format: null, stops: [] }, { stops: [{ city: 'CHICAGO' }, { city: 'DANVILLE' }] })
     expect(out.stops.map((s) => s.type)).toEqual(['pickup', 'delivery'])

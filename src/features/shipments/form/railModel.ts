@@ -19,7 +19,7 @@ export interface RailRow {
   done: boolean
   /** `data-testid` of the control to focus. */
   fieldKey: string
-  card: CardKey | 'more' | 'rail'
+  card: CardKey | 'more' | 'rail' | 'header'
   /** The validation message when not done. */
   message: string
 }
@@ -41,7 +41,8 @@ interface FixedRow {
 }
 
 const FIXED: FixedRow[] = [
-  { key: 'customer', label: 'Customer', ids: ['customer:name'], fieldKey: LABEL.customer.name.testId, card: 'customer' },
+  { key: 'customer', label: 'Customer', ids: ['customer:name'], fieldKey: LABEL.customer.name.testId, card: 'header' },
+  { key: 'shipmentType', label: 'Shipment type', ids: ['shipping:shipmentType'], fieldKey: LABEL.shipping.shipmentType.testId, card: 'freight' },
   { key: 'pickup', label: 'Pickup', ids: ['picks:pickup', 'pickup:name'], fieldKey: LABEL.pickup.name.testId, card: 'route' },
   { key: 'ready', label: 'Ready', ids: ['pickup:ready'], fieldKey: LABEL.pickup.ready.testId, card: 'route' },
   { key: 'equipment', label: 'Equipment', ids: ['shipping:equipmentType'], fieldKey: LABEL.shipping.equipmentType.testId, card: 'freight', truckloadOnly: true },
@@ -51,7 +52,7 @@ const FIXED: FixedRow[] = [
 ]
 
 const CARD_OF_SECTION: Record<string, RailRow['card']> = {
-  customer: 'customer', pickup: 'route', consignee: 'route', picks: 'route', shipping: 'freight',
+  customer: 'header', pickup: 'route', consignee: 'route', picks: 'route', shipping: 'freight',
   rates: 'rates', carrier: 'carrier', more: 'more', roles: 'rail', history: 'rateHistory', documents: 'documents', checkCalls: 'tracking',
 }
 

@@ -4,6 +4,36 @@ import { fireEvent, screen } from '@testing-library/react'
 import { FreightCard } from './FreightCard'
 import { renderCard } from './cardTestKit'
 
+describe('FreightCard shipment type', () => {
+  it('is the first required field, lists every type, and starts on the division default (Truckload)', () => {
+    renderCard(FreightCard)
+    const select = screen.getByTestId('f-shipping-shipmentType') as HTMLSelectElement
+    expect(select.value).toBe('FTL')
+    const first = document.querySelector('[data-testid="section-freight-body"] select, [data-testid="section-freight-body"] input')
+    expect(first).toBe(select)
+    const labels = Array.from(select.options).map((o) => o.textContent)
+    expect(labels).toHaveLength(25)
+    expect(labels).toEqual(expect.arrayContaining(['Truckload (FTL)', 'Auto transport (open)', 'Heavy haul / Oversize', 'Cross-border (Mexico)', 'Courier / Parcel', 'Other']))
+  })
+
+  it('picking a type sets the stored mode, default equipment and chips; typed equipment survives', () => {
+    const host = renderCard(FreightCard)
+    fireEvent.change(screen.getByTestId('f-shipping-shipmentType'), { target: { value: 'REEFER' } })
+    expect(host.current!.getValues()).toMatchObject({ shipmentType: 'REEFER', mode: 'FTL' })
+    expect(host.current!.getValues().ship.equipmentType).toBe('Reefer')
+    expect(host.current!.getValues().ship.temp.on).toBe(true)
+    fireEvent.change(screen.getByTestId('f-shipping-equipmentType'), { target: { value: 'My trailer' } })
+    fireEvent.change(screen.getByTestId('f-shipping-shipmentType'), { target: { value: 'FLATBED_SPECIALIZED' } })
+    expect(host.current!.getValues().ship.equipmentType).toBe('My trailer')
+  })
+
+  it('changing the revenue division swaps the type only while it is still the default', () => {
+    const host = renderCard(FreightCard, { ctx: () => ({ divisions: [{ depth: 0, division: { id: 'd1', code: 'CAR_SHIPPING', name: 'Auto Shipping', active: true, parentId: null } }] as never }) })
+    fireEvent.change(screen.getByTestId('f-shipping-revDivision'), { target: { value: 'CAR_SHIPPING' } })
+    expect(host.current!.getValues().shipmentType).toBe('AUTO_OPEN')
+  })
+})
+
 describe('FreightCard', () => {
   it('toggles the same flag keys the checkbox grid did, and only the clicked one', () => {
     const host = renderCard(FreightCard)

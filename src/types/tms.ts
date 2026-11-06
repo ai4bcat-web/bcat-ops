@@ -4880,6 +4880,8 @@ export type AljexCustomerRateKind = 'FLAT' | 'PER_MILE' | 'PER_HOUR' | 'PER_CWT'
  */
 export interface AljexFormExtras {
   v: 1
+  /** Step AR feedback 7: the chosen shipment type key (`src/lib/shipmentTypes.ts`); `Order.mode` stays derived from it. */
+  shipmentType?: string
   ship?: {
     truckMiles?: number
     footage?: number

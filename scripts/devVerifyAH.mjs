@@ -59,7 +59,7 @@ const walk = createWalk({ shots: SHOTS, allowProblems: ALLOW_PROBLEMS, hookClass
 const { line, report, written, problemList, waitLoaded, matches } = walk
 
 const SECTIONS = [
-  ['customer', 'Customer'], ['billTo', 'Bill To'], ['route', 'Route'], ['freight', 'Freight'], ['rates', 'Rates'],
+  ['freight', 'Freight'], ['route', 'Route'], ['rates', 'Rates'],
   ['rateHistory', 'Rate history'], ['carrier', 'Carrier'], ['tracking', 'Tracking'], ['documents', 'Documents'],
 ]
 const MORE_TABS = ['instructions', 'references', 'items', 'notes']
@@ -99,6 +99,7 @@ export const AH_STEPS = [
   { id: 'AR09', slug: 'walkthrough-shots' },
   { id: 'AR10', slug: 'documents-on-create' },
   { id: 'AR11', slug: 'bill-to-and-rate-history-cards' },
+  { id: 'AR12', slug: 'rail-activity-roles-shipment-type' },
 ]
 
 // ───────────────────────────── selectors (every literal id here is checked by --inventory) ─────────────────────────────
@@ -385,10 +386,14 @@ const RUNNERS = {
     await b.setViewport(1440, 900)
     await openForm(b, '/tms/shipments/new')
     const bad = []
-    // header: title, Division + Mode pills, status chip, read-only PRO preview
+    // header strip: title, Division pill, Customer type-ahead, Bill To chip, status chip, read-only PRO preview (no Mode pill)
     const title = await textOf(b, 'ship-form-title')
     if (title !== 'New shipment') bad.push(`title is ${JSON.stringify(title)}`)
-    for (const id of ['ship-form-header', 'f-header-division', 'f-shipping-mode', 'ship-form-status', 'ship-form-pro']) if (!(await has(b, tid(id)))) bad.push(`header lacks ${id}`)
+    for (const id of ['ship-form-header', 'f-header-division', 'f-customer-name', 'hdr-billTo-chip', 'ship-form-status', 'ship-form-pro']) if (!(await has(b, tid(id)))) bad.push(`header lacks ${id}`)
+    if (await has(b, `${tid('ship-form-header')} ${tid('f-shipping-shipmentType')}`)) bad.push('the Mode / Shipment type select is still in the header')
+    if ((await b.evaluate(`document.querySelector('[data-testid="ship-form-header-panel"]')?.hidden ?? null`)) !== true) bad.push('the Bill To panel is not collapsed by default')
+    if ((await b.evaluate(`(document.querySelector('[data-testid="section-freight-body"] select, [data-testid="section-freight-body"] input'))?.dataset.testid ?? null`)) !== 'f-shipping-shipmentType') bad.push('Shipment type is not the first field of the Freight card')
+    if ((await valOf(b, 'f-shipping-shipmentType')) !== 'FTL') bad.push('Shipment type does not default to FTL')
     if ((await textOf(b, 'ship-form-status')) !== 'Draft') bad.push('status chip is not Draft')
     if (await has(b, `${tid('ship-form-pro')} input`)) bad.push('the PRO preview is editable')
     // five numbered cards in build order
@@ -400,7 +405,7 @@ const RUNNERS = {
     // every Aljex flag is a chip; nothing of the old accordions is left
     const absent = []
     for (const k of facts.flags) if (!(await has(b, tid(`f-shipping-flag-${k}`)))) absent.push(`f-shipping-flag-${k}`)
-    for (const id of ['f-shipping-weightLbs', 'f-shipping-pieces', 'f-shipping-footage', 'f-shipping-billableWeightLbs', 'f-shipping-freightClass', 'f-shipping-declaredValue', 'f-shipping-description', 'f-shipping-equipmentType', 'f-shipping-revDivision', 'f-shipping-customerMiles', 'f-shipping-truckMiles', 'f-shipping-disableMileage', 'f-shipping-calculateTotals', 'f-customer-email-1', 'f-customer-email-2']) if (!(await has(b, tid(id)))) absent.push(id)
+    for (const id of ['f-shipping-shipmentType', 'f-shipping-weightLbs', 'f-shipping-pieces', 'f-shipping-footage', 'f-shipping-billableWeightLbs', 'f-shipping-freightClass', 'f-shipping-declaredValue', 'f-shipping-description', 'f-shipping-equipmentType', 'f-shipping-revDivision', 'f-shipping-customerMiles', 'f-shipping-truckMiles', 'f-shipping-disableMileage', 'f-shipping-calculateTotals', 'f-customer-email-1', 'f-customer-email-2']) if (!(await has(b, tid(id)))) absent.push(id)
     if (absent.length) bad.push(`missing controls: ${absent.join(', ')}`)
     if (await has(b, '[data-section-toggle]')) bad.push('an accordion toggle is still on the page')
     if (await has(b, tid('f-customer-hours'))) bad.push('Customer Hours is still on the form (removed in AR)')
@@ -418,7 +423,7 @@ const RUNNERS = {
     }
     const order = seen.filter((x, i, all) => x && all.indexOf(x) === i)
     // Bill To, Rate history and Tracking hold no inputs, so the Tab walk skips them
-    const wantOrder = ['customer', 'route', 'freight', 'rates', 'carrier', 'documents'].map((k) => `section-${k}`).concat('ship-form-rail')
+    const wantOrder = ['customer', 'freight', 'route', 'rates', 'carrier', 'documents'].map((k) => `section-${k}`).concat('ship-form-rail')
     const got = order.filter((x) => wantOrder.includes(x))
     if (got.join() !== wantOrder.slice(0, got.length).join() || got.length < 6) bad.push(`Tab order ${got.join(' > ')}`)
     for (const width of [1440, 1280]) {
@@ -435,7 +440,7 @@ const RUNNERS = {
       await shotFile(b, `04-${String(n + 1).padStart(2, '0')}-card-${key}`)
     }
     failures([...bad, ...problemList(b).slice(0, 2)])
-    return `header (title, Division, Mode, Draft chip, PRO preview), 5 numbered cards in order, ${reds.length} red-required controls, ${facts.flags.length} flag chips, Carrier collapsed, rail present, Tab order ${got.join(' > ')}, no horizontal scroll at 1440 / 1280`
+    return `header strip (title, Division, Customer, Bill To chip, Draft chip, PRO preview), 7 numbered cards in order, Shipment type first in Freight, ${reds.length} red-required controls, ${facts.flags.length} flag chips, Carrier collapsed, rail present, Tab order ${got.join(' > ')}, no horizontal scroll at 1440 / 1280`
   },
 
   async AH05(ctx) {
@@ -685,8 +690,8 @@ const RUNNERS = {
     const b = ctx.b
     await openForm(b, `/tms/shipments/${ctx.fullId}/edit`)
     const bad = []
-    const modeDisabled = await b.evaluate(`document.querySelector(${JSON.stringify(tid('f-shipping-mode'))})?.disabled ?? null`)
-    if (modeDisabled !== true) bad.push(`Mode is ${modeDisabled === null ? 'missing' : 'still editable'} on a submitted order`)
+    const modeDisabled = await b.evaluate(`document.querySelector(${JSON.stringify(tid('f-shipping-shipmentType'))})?.disabled ?? null`)
+    if (modeDisabled !== true) bad.push(`Shipment type is ${modeDisabled === null ? 'missing' : 'still editable'} on a submitted order`)
     await shotFile(b, '13-edit-live-locked-fields')
     await fill(b, 'f-shipping-description', `${ctx.commodity} edited`)
     await fill(b, 'f-shipping-customerMiles', '650')
@@ -698,7 +703,7 @@ const RUNNERS = {
     const audit = await listAll(ctx.token, 'AuditLog', { entityId: { eq: ctx.fullId }, action: { eq: 'UPDATE_ORDER_DETAILS' } }, 'id')
     if (audit.length === 0) bad.push('no UPDATE_ORDER_DETAILS audit row after editing a non-draft shipment')
     failures(bad)
-    return `Save changes on an OPEN order wrote through UPDATE_ORDER_DETAILS (${audit.length} audit rows); Mode is locked`
+    return `Save changes on an OPEN order wrote through UPDATE_ORDER_DETAILS (${audit.length} audit rows); Shipment type is locked`
   },
 
   async AH14(ctx) {
@@ -759,6 +764,7 @@ const RUNNERS = {
     expect(emailInputs === 2, `${emailInputs} customer e-mail fields, wanted 2`)
     await pickFrom(b, `${tid('f-customer-name')} input`, CUSTOMER_OPTION, ctx.customerName)
     await b.poll(() => has(b, tid('f-customer-billToBlock')), 'Bill To block', 10_000)
+    await click(b, 'hdr-billTo-chip'); await pause(200)
     const bad = []
     const rowText = (k) => b.evaluate(`document.querySelector(${JSON.stringify(tid(`f-customer-billTo-${k}`))})?.innerText ?? null`)
     for (const k of ['terms', 'factoring', 'emails', 'limit', 'available']) {
@@ -767,7 +773,7 @@ const RUNNERS = {
     }
     const editable = await b.evaluate(`document.querySelector(${JSON.stringify(tid('f-customer-billToBlock'))}).querySelectorAll('input:not([readonly]):not([disabled]), textarea, select').length`)
     if (editable > 0) bad.push(`Bill To block has ${editable} editable controls (it must be read-only)`)
-    await b.evaluate(`document.querySelector(${JSON.stringify(tid('section-customer'))}).scrollIntoView({ block: 'start' })`)
+    await b.evaluate(`document.querySelector(${JSON.stringify(tid('ship-form-header'))}).scrollIntoView({ block: 'start' })`)
     await shotFile2(b, '16-customer-bill-to')
     failures(bad)
     return `2 customer e-mail fields; Bill To block shows terms, factoring, billing e-mails and credit for the ZZ customer read-only`
@@ -1134,13 +1140,13 @@ const RUNNERS = {
       await pause(400)
       const ov = await overflowOf(b)
       if (ov > 1) bad.push(`horizontal scroll of ${ov}px at ${width}`)
-      // first screen: Customer + the Route card start + the rail with its actions, no scrolling
-      const cust = await rectOf(b, tid('section-customer')); const route = await rectOf(b, tid('section-route'))
-      const pu = await rectOf(b, tid('f-pickup-name')); const create = await rectOf(b, tid('ship-form-create'))
+      // first screen: Customer + the Freight card start + the rail with its actions, no scrolling
+      const cust = await rectOf(b, tid('ship-form-header')); const route = await rectOf(b, tid('section-freight'))
+      const pu = await rectOf(b, tid('f-shipping-equipmentType')); const create = await rectOf(b, tid('ship-form-create'))
       const rail = await rectOf(b, tid('ship-form-rail'))
       if (width === 1440) {
-        if (!cust || cust.bottom > height) bad.push(`1440x900: the Customer card runs past the first screen (bottom ${Math.round(cust?.bottom)})`)
-        if (!route || !pu || pu.bottom > height) bad.push(`1440x900: the Route card's pickup is below the first screen (pickup bottom ${Math.round(pu?.bottom ?? -1)})`)
+        if (!cust || cust.bottom > height) bad.push(`1440x900: the header strip runs past the first screen (bottom ${Math.round(cust?.bottom)})`)
+        if (!route || !pu || pu.bottom > height) bad.push(`1440x900: the Freight card's Equipment field is below the first screen (field bottom ${Math.round(pu?.bottom ?? -1)})`)
         if (!rail || !create || create.bottom > height || rail.top < 0) bad.push(`1440x900: the rail / Create are not on the first screen (create bottom ${Math.round(create?.bottom ?? -1)})`)
         await shotAR(b, 'first-screen-1440x900')
       } else await shotAR(b, 'first-screen-1280x800')
@@ -1149,7 +1155,7 @@ const RUNNERS = {
       if (gaps.length) bad.push(`${width}: grids with an empty right quarter: ${JSON.stringify(gaps)}`)
     }
     failures(bad)
-    return 'no horizontal scroll at 1440 and 1280; at 1440x900 the first screen shows Customer, the pickup stop and the rail with Create; no field grid has an empty half'
+    return 'no horizontal scroll at 1440 and 1280; at 1440x900 the first screen shows Customer, the Freight card start and the rail with Create; no field grid has an empty half'
   },
 
   async AR08(ctx) {
@@ -1241,9 +1247,15 @@ const RUNNERS = {
     await pickFrom(b, `${tid('f-customer-name')} input`, CUSTOMER_OPTION, ctx.customerName)
     await b.poll(() => has(b, tid('f-customer-billToBlock')), 'Bill To card', 10_000)
     for (const id of ['card-billTo-terms', 'card-billTo-limit', 'card-billTo-available', 'card-billTo-emails', 'card-billTo-factoring', 'card-billTo-requirements', 'card-billTo-status', 'card-billTo-open']) if (!(await has(b, tid(id)))) bad.push(`Bill To card lacks ${id}`)
-    const editable = await b.evaluate(`document.querySelector('[data-testid="section-billTo"]').querySelectorAll('input:not([readonly]):not([disabled]), textarea, select').length`)
-    if (editable > 0) bad.push(`the Bill To card has ${editable} editable controls`)
-    const cols = await b.evaluate(`(() => { const g = document.querySelector('[data-testid="section-billTo"] [class*="grid"]'); return g ? getComputedStyle(g).gridTemplateColumns.split(' ').length : 0 })()`)
+    if ((await b.evaluate(`document.querySelector('[data-testid="ship-form-header-panel"]').hidden`)) !== true) bad.push('the Bill To panel is not collapsed by default')
+    const chip = await textOf(b, 'hdr-billTo-text')
+    if (!/Net \d+|Due on receipt|Terms/i.test(chip ?? '') && !/Factored/.test(chip ?? '')) bad.push(`the Bill To chip reads ${JSON.stringify(chip)}`)
+    await click(b, 'hdr-billTo-chip'); await pause(200)
+    if ((await b.evaluate(`document.querySelector('[data-testid="ship-form-header-panel"]').hidden`)) !== false) bad.push('the Details chevron did not open the Bill To panel')
+    const editable = await b.evaluate(`document.querySelector('[data-testid="f-customer-billToBlock"]').querySelectorAll('input:not([readonly]):not([disabled]), textarea, select').length`)
+    if (editable > 0) bad.push(`the Bill To detail has ${editable} editable controls`)
+    for (const id of ['f-customer-refNo', 'f-customer-contact', 'f-customer-phone', 'f-customer-email-1', 'f-customer-email-2']) if (!(await b.evaluate(`!!document.querySelector('[data-testid="ship-form-header-panel"] [data-testid="${id}"]')`))) bad.push(`the panel's Customer contact column lacks ${id}`)
+    const cols = await b.evaluate(`(() => { const g = document.querySelector('[data-testid="ship-form-header-panel"] [class*="tms-card-billto-grid"]'); return g ? getComputedStyle(g).gridTemplateColumns.split(' ').length : 0 })()`)
     if (cols !== 3) bad.push(`the Bill To grid has ${cols} columns at 1440 (want 3)`)
     // Rate history: the lane, what we ran it for, DAT (stub badge while the login is missing), suggested rate
     await pickFrom(b, tid('f-pickup-name'), tid('f-pickup-name-option'), ctx.locNames.shipper)
@@ -1257,10 +1269,69 @@ const RUNNERS = {
     if (/\\$\\s?\\d/.test(dat) && /not connected/i.test(dat)) bad.push('the DAT block shows a dollar figure while saying DAT is not connected')
     await b.evaluate(`document.querySelector(${JSON.stringify(tid('section-rateHistory'))}).scrollIntoView({ block: 'start' })`)
     await shotAR(b, 'rate-history-1440')
-    await b.evaluate(`document.querySelector(${JSON.stringify(tid('section-billTo'))}).scrollIntoView({ block: 'start' })`)
+    await b.evaluate(`document.querySelector('.tms-ship-form-scroll')?.scrollTo(0, 0)`)
     await shotAR(b, 'bill-to-1440')
     failures(bad)
-    return `Bill To card read-only, 3-column grid, status / terms / credit / e-mails / requirements / Open customer; Rate history shows the lane blocks (DAT: ${JSON.stringify(dat.replace(/\\s+/g, ' ').slice(0, 80))})`
+    return `Bill To chip + collapsed-by-default panel (read-only detail, 3-column grid, Customer contact column), status / terms / credit / e-mails / requirements / Open customer; Rate history shows the lane blocks (DAT: ${JSON.stringify(dat.replace(/\\s+/g, ' ').slice(0, 80))})`
+  },
+
+  async AR12(ctx) {
+    const b = ctx.b
+    const id = ctx.ivanId ?? ctx.fullId
+    expect(id, 'no ZZ shipment from AR06 / AH12 to read the Activity block from')
+    await b.setViewport(1440, 900)
+    const bad = []
+
+    // Create: Draft chip only, empty-state line, block order, exactly three roles, Shipment type first in Freight.
+    await openForm(b, '/tms/shipments/new')
+    if ((await textOf(b, 'rail-stage-chip')) !== 'Draft, not created yet') bad.push(`create stage chip reads ${JSON.stringify(await textOf(b, 'rail-stage-chip'))}`)
+    if ((await b.evaluate(`document.querySelector('[data-testid="rail-step-DRAFT"]')?.getAttribute('data-state')`)) !== 'current') bad.push('the stepper is not at Draft on create')
+    if (!/Activity starts when the shipment is created/.test((await textOf(b, 'rail-activity-empty')) ?? '')) bad.push('create mode lacks "Activity starts when the shipment is created"')
+    const order = await b.evaluate(`[...document.querySelectorAll('[data-testid="rail-required"], [data-testid="rail-activity"], [data-testid="rail-roles"]')].map((n) => n.dataset.testid).join()`)
+    if (order !== 'rail-required,rail-activity,rail-roles') bad.push(`rail block order ${order}`)
+    const roles = await b.evaluate(`[...document.querySelectorAll('[data-testid="rail-roles"] [data-testid^="f-roles-"]')].map((n) => n.dataset.testid).join()`)
+    if (roles !== 'f-roles-salesRepId,f-roles-serviceRepId,f-roles-dispatcherAssignedId') bad.push(`Roles shows ${roles}`)
+    for (const gone of ['f-roles-tariff', 'f-roles-quoteId', 'f-roles-dispatcherActual']) if (await has(b, tid(gone))) bad.push(`${gone} is still on the form`)
+    const typeOpts = await b.evaluate(`[...(document.querySelector('[data-testid="f-shipping-shipmentType"]')?.options ?? [])].map((o) => o.textContent)`)
+    if (typeOpts.length < 25) bad.push(`Shipment type offers ${typeOpts.length} types (want 25)`)
+    await shotAR(b, 'create-rail-activity-1440')
+
+    // Edit an existing ZZ shipment: stage chip, save, activity row with the actor's display name and a field detail.
+    await openForm(b, `/tms/shipments/${id}/edit`)
+    await b.poll(async () => /\S/.test((await textOf(b, 'rail-stage-chip')) ?? '') && (await textOf(b, 'rail-stage-chip')) !== 'Draft, not created yet', 'stage chip on an existing shipment', 15_000)
+    const labels = ['Draft', 'Intake review', 'Active', 'Covered', 'In transit', 'Delivered', 'Load Review', 'Billed', 'Paid', 'Voided', 'Canceled']
+    const chip = await textOf(b, 'rail-stage-chip')
+    if (!labels.includes(chip)) bad.push(`stage chip ${JSON.stringify(chip)} is not on the ladder`)
+    const stamp = `ZZ AR activity ${ctx.ts}`
+    await fill(b, 'f-shipping-description', stamp)
+    if (await b.evaluate(`!document.querySelector('[data-testid="f-shipping-shipmentType"]')?.disabled`)) await setValue(b, tid('f-shipping-shipmentType'), 'HOT_SHOT')
+    await click(b, 'ship-form-save')
+    await b.poll(async () => (await b.evaluate(`document.querySelectorAll('[data-testid="rail-activity-row"]').length`)) > 0 || await has(b, tid('ship-form-issues')), 'activity rows after a save', 45_000)
+    if (await has(b, tid('ship-form-issues'))) bad.push('the save was blocked, so no activity could be written')
+    const rows = await b.evaluate(`[...document.querySelectorAll('[data-testid="rail-activity-row"]')].map((r) => ({ text: r.innerText.replace(/\\s+/g, ' '), actor: r.querySelector('[data-testid="rail-activity-actor"]')?.innerText ?? '', detail: r.querySelector('[data-testid="rail-activity-detail"]')?.innerText ?? '' }))`)
+    if (rows.length === 0) bad.push('no Activity rows after a save')
+    else {
+      const first = rows[0]
+      if (!first.actor || /@/.test(first.actor) || first.actor === 'Unknown user') bad.push(`newest row actor ${JSON.stringify(first.actor)} is not a display name`)
+      if (!/just now|\d+m ago/.test(first.text)) bad.push(`newest row is not recent: ${JSON.stringify(first.text)}`)
+      if (!/: /.test(first.detail)) bad.push(`newest row has no "field: value" detail: ${JSON.stringify(first.detail)}`)
+      if (rows.length > 5 && !(await has(b, tid('rail-activity-more')))) bad.push('more than five rows with no Show more')
+    }
+    if (rows.some((r) => /token|secret|password/i.test(r.text))) bad.push('an Activity row shows a secret-looking field')
+    const bundle = await getBundle(ctx, id)
+    const sr = bundle.orders?.[0]?.specialRequirements
+    const form = (typeof sr === 'string' ? JSON.parse(sr) : sr)?.form
+    if (form && form.shipmentType === undefined) bad.push('the order has no specialRequirements.form.shipmentType after a save')
+    await shotAR(b, 'edit-rail-activity-1440')
+
+    // Full history link: filtered to this shipment.
+    const href = await b.evaluate(`document.querySelector('[data-testid="rail-activity-history"]')?.getAttribute('href') ?? ''`)
+    if (!href.endsWith(`/tms/brokerage/audit?entity=${id}`)) bad.push(`Full history href ${href}`)
+    await click(b, 'rail-activity-history')
+    await b.poll(async () => (await b.evaluate(`document.querySelector('[aria-label="Entity lookup"]')?.value ?? ''`)) === id, 'the audit page filtered to the shipment', 20_000)
+      .catch(() => bad.push('Full history did not open the audit page filtered to this shipment'))
+    failures(bad)
+    return `create: Draft not created yet, Activity placeholder, Required > Activity > Roles, Roles = Sales / Service / Dispatcher Assigned, Shipment type first with ${typeOpts.length} types; edit ${id}: stage ${JSON.stringify(chip)}, ${rows.length} activity rows after a save (actor ${JSON.stringify(rows[0]?.actor)}), Full history filters the audit page`
   },
 }
 

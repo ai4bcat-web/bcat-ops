@@ -6,7 +6,8 @@
 import type { DenseColumn, DenseOption } from '@/features/tms/grid/denseGridModel'
 import { customerDisplayName } from '@/lib/customerResolution'
 import { LADDER_FILTER_OPTIONS, assignmentChipText } from './carrierLadder'
-import { BOARD_COLUMNS, boardStatusOf, type ShipmentRow } from './shipmentViews'
+import { BOARD_COLUMNS, boardStatusOf, rowShipmentType, type ShipmentRow } from './shipmentViews'
+import { SHIPMENT_TYPES, shipmentTypeLabel } from '@/lib/shipmentTypes'
 
 export function sentence(value: string): string {
   return value.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
@@ -53,6 +54,8 @@ const BOARD_STATUS_ORDER = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTE
 
 export const STATUS_OPTIONS: DenseOption[] = BOARD_STATUS_ORDER.map((s) => ({ value: s, label: sentence(s) }))
 
+export const SHIPMENT_TYPE_OPTIONS: DenseOption[] = SHIPMENT_TYPES.map((t) => ({ value: t.key, label: t.label }))
+
 function readField(row: ShipmentRow, field: string): string | null {
   const v = (row as unknown as Record<string, unknown>)[field]
   return typeof v === 'string' && v !== '' ? v : null
@@ -92,6 +95,17 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
       optionsOf: (row) => LADDER_FILTER_OPTIONS.filter((o) => o.value === row.carrierAssignmentStatus),
       sortValue: (row) => LADDER_FILTER_OPTIONS.findIndex((o) => o.value === row.carrierAssignmentStatus),
       text: (row) => assignmentChipText(row, statusCellText(row)),
+    }
+  }
+  if (col.key === 'shipmentType') {
+    return {
+      ...base,
+      filter: 'multi',
+      fixedOptions: SHIPMENT_TYPE_OPTIONS,
+      optionsOf: (row) => {
+        const key = rowShipmentType(row)
+        return [{ value: key, label: shipmentTypeLabel(key) }]
+      },
     }
   }
   if (col.key === 'customerName') {
