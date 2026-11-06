@@ -427,6 +427,12 @@ const schema = a.schema({
       // pay weeks starting in [from, until) use that model instead of the base fields,
       // so changing a driver's current rate never rewrites already-paid history.
       rateHistory:           a.json(),
+      // Hourly pay for the Ivan drivers' time cards (src/lib/hoursPay.ts), dollars per hour.
+      // STAFF ONLY: the driver API never reads these two fields and the driver app must never
+      // show them. hourlyRateHistory is [{ from, until, hourlyRate, endedBy, endedAt }] like
+      // rateHistory, so a raise never rewrites a paid period.
+      hourlyRate:            a.float(),
+      hourlyRateHistory:     a.json(),
       active:                a.boolean(),
       notes:                 a.string(),
     })
