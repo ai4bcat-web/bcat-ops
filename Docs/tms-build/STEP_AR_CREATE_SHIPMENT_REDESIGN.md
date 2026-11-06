@@ -484,3 +484,18 @@ with a 30 / 90 / 1y average line under it; "DAT RateView" as one line each for s
 "Use" link that fills the customer LH rate. "All lane history" link at the foot. Collapsible with
 the state remembered per user like the cards. Main column order becomes: Freight, Route, Rates,
 Carrier & Tracking, More strip, Documents.
+
+## Ryne's feedback 19 (2026-11-05 evening, screenshot aljex-create/39-rail-actions-overlap.png)
+"Let's move Save draft and Create shipment to a fixed bar at the bottom of the page instead of on
+the right side." (The rail's pinned footer also overlapped the Roles fields in the screenshot.)
+- Remove the action footer from the summary rail. The rail scrolls freely and nothing is pinned
+  inside it.
+- Add a **fixed bottom action bar** spanning the full page width (above the viewport bottom,
+  48 px tall, same background as the cards with a top border, respects safe-area inset): left =
+  status chip + "Last saved 2 min ago / Unsaved changes" text + required count ("6 / 8 required",
+  click scrolls the rail checklist into view); right = **Cancel** (text) · **Save draft**
+  (secondary) · **Create shipment** (primary; in edit mode **Save** and **Discard**). The bar is
+  always visible while the form is open; the main column and rail get bottom padding equal to the
+  bar height so nothing hides behind it. Keyboard shortcuts unchanged (⌘/Ctrl+Enter create,
+  ⌘/Ctrl+S save draft).
+- Below 1280 px the bar stays; the rail collapses to a bottom sheet above it as before.
