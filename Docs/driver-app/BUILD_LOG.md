@@ -58,3 +58,18 @@ Spec: `Docs/driver-app/2026-11-06-employee-hours-view.md`.
 **Can drivers read DriverPaySetting over AppSync? No.** The data API's only authorization mode is `userPool` (`defaultAuthorizationMode: 'userPool'`, `amplify/data/resource.ts`), which is the staff pool. The driver pool (`bcat-driver-pool`, `amplify/backend.ts`) is a separate CDK pool that is not an authorization provider on the API; driver tokens are verified only by the driver-app-api Lambda, and the driver app has no AppSync client (checked by the test above). No auth change was needed.
 
 **Verification pending** (after the orchestrator says deploy is live): open `/hours` in production, confirm summary bar and expand against real data. No driver's rate was entered.
+
+## 2026-11-06 — production verification of deploy 711 (batch PR 135, main `37a22a0c`)
+
+Production = Amplify app `d3dejqzs77khq6`, branch `main`, active job `0000000711`; AppSync API `5ucwdyvwivelbo4k4jomvrwel4` (tag `amplify:branch-name=main`). Read-only checks only; nothing was written.
+
+**Verified without a login**
+- Schema: `DriverAvailability` in production has `status`, `hours`, `source`, `reviewedBy`, `reviewedAt`, `reviewNote` and type `PTO`. `Driver`/pay-setting fields from PR 136 (`hourlyRate`) are correctly not there yet.
+- Driver Lambda `driverappapilambda…U31WM0kM1L82` (modified 2026-11-06T15:28Z) has `DRIVER_AVAILABILITY_TABLE_NAME`, `TIME_CLOCK_TABLE_NAME`, `STAFF_USER_POOL_ID`. Unauthenticated `GET /time-off`, `POST /time-off`, `POST /staff/time-off/pto` return 401 (routes exist, auth enforced), not 404.
+- Served bundle (`ops.bcatcorp.com`, `index-DbUDTljF.js`) contains the new UI strings: "Show denied", "No requests waiting", "Driver notes".
+
+**Jason lookup (production `Driver` table, read-only scan, 16 drivers):** exactly one driver whose name contains "Jason": `Jason Smith`, id `9f8266cd-d9ab-46ad-80b5-d62b5abfa70c`, active, `fleetGroup` LOCAL, **`ptoEligible` unset**. (The two Motive "Jason Smith" accounts are not Driver rows.)
+
+**Blocked, not done**
+- Authenticated checks (DOT Save on `/truck-docs`, Requests panel on `/time-off`, `/hours`, the driver app's Time off section via View as driver) need a staff session. This machine has AWS root credentials but no ops.bcatcorp.com login, and no relay to a signed-in browser. Not worked around (no password reset or test user created in the production staff pool).
+- Jason's PTO day for 2026-11-05 not created: `POST /staff/time-off/pto` needs a staff ID token (owner, ADMIN or `page-timeOff`) and refuses a driver who is not PTO eligible, which Jason is not. Setting his `ptoEligible` is a production write to a real driver's record that was not part of the request.
