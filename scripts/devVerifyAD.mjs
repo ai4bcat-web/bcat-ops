@@ -166,7 +166,7 @@ async function main() {
       }
 
       try {
-        await b.evaluate(`document.querySelector('[data-testid="mcp-send-invite"]').click()`)
+        await b.evaluate(`document.querySelector('[data-testid="find-lookup-card-send"]').click()`)
         await b.poll(() => has(tid('mcp-invite-send')), 'the invite dialog', 15_000)
         await pause(300)
         await shot('AD02-invite-dialog')

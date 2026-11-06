@@ -12,25 +12,29 @@ Dev only: https://dev.d3dejqzs77khq6.amplifyapp.com. Everything below was driven
 
 URLs: Quotes https://dev.d3dejqzs77khq6.amplifyapp.com/tms/rates · New shipment https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments/new · Intake https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments/intake · Carrier Sales https://dev.d3dejqzs77khq6.amplifyapp.com/tms/carrier-sales · Find & Invite https://dev.d3dejqzs77khq6.amplifyapp.com/tms/carriers/find · Load Tracking https://dev.d3dejqzs77khq6.amplifyapp.com/tms/tracking · Load Review https://dev.d3dejqzs77khq6.amplifyapp.com/tms/load-review · AR https://dev.d3dejqzs77khq6.amplifyapp.com/tms/invoicing · AP https://dev.d3dejqzs77khq6.amplifyapp.com/tms/invoicing/payable · Factoring https://dev.d3dejqzs77khq6.amplifyapp.com/tms/factors · Owner Operator Settlements https://dev.d3dejqzs77khq6.amplifyapp.com/owner-operator-pay · Dashboards https://dev.d3dejqzs77khq6.amplifyapp.com/tms/dashboard · Spot inbox https://dev.d3dejqzs77khq6.amplifyapp.com/tms/rates/spot · Feedback https://dev.d3dejqzs77khq6.amplifyapp.com/feedback.
 
-## 0. The lifecycle strip and the new sidebar (Step AV, job 202, dev, 1440 x 900, fresh shots in `screenshots/av/`)
+## 0. The lifecycle strip and the new sidebar (Step AV, jobs 202 and 205, dev, 1440 x 900 and 1280 x 800, fresh shots in `screenshots/av/`)
 
 Start a demo at the top of the page, left to right: **Quote > Build > View > Book > Track > Review**. Six tabs sit in the top bar of every brokerage page (keys Alt+1 to Alt+6); the tab for the page you are on is lit and the earlier ones are tinted, so you can see how far along the flow you are. Each tab shows a count badge when something waits there.
 
 | Tab | Goes to | What the demo does there | Mode |
 |---|---|---|---|
-| 1 Quote | /tms/rates | Spot quotes, lane rate intelligence (DAT block is a STUB on dev) | live |
+| 1 Quote | /tms/rates/spot (Quote inbox tab, first), /tms/rates (Quotes tab) | One Quote page, two tabs: Quote inbox first (the Quote tab opens it), then Quotes. Spot quotes, lane rate intelligence (DAT block is a STUB on dev) | live |
 | 2 Build | /tms/shipments/intake, /tms/shipments/new, the edit page | Review the tender, then Create shipment; lit on all three. Badge = open Intake rows | live |
 | 3 View | /tms/shipments, a shipment page | Active shipments board and the shipment itself (this is also the sidebar's Active shipments row) | live |
 | 4 Book | /tms/carrier-sales | Needs cover, Offers, Unmatched; carrier lookup, Cover, rate con (SES to ai4bcat@gmail.com only) | live; load boards, Twilio SMS STUB |
 | 5 Track | /tms/tracking | Load Tracking grid and drawer (SMS = STUB, shows NOT SENT) | live |
 | 6 Review | /tms/load-review | Release to billing. A user who holds only the Load Review grant sees just this one tab and lands on it; every other brokerage route sends them back there | live |
 
-The sidebar no longer repeats those pages. It shows only: **Company Dashboard, Active shipments, the directories (Customers, Carriers, Locations), Accounting, Settings** (plus the Ivan Cartage assets section for users who have it). At 1280 px and 1440 px the page never scrolls sideways; if the strip is wider than its space it scrolls inside itself.
+The sidebar no longer repeats those pages. It shows only: **Company Dashboard, Active shipments, the directories (Customers, Carriers, Locations), Accounting, Settings** (plus the Ivan Cartage assets section for users who have it). All six tabs, Review included, are fully visible at 1280 px and 1440 px and the page never scrolls sideways.
+
+Two directory changes (job 205): **Customers has no Follow-ups** (the old /tms/customers/follow-ups link lands on the Customers list). **Carriers is one page with two tabs**, Find & Invite first (/tms/carriers/find) then Carrier list (/tms/carriers); the sidebar has a single Carriers entry that stays lit on both and on a carrier's own page, with no Find & Invite child.
 
 | What | Shot |
 |---|---|
 | Sidebar | ![sidebar](screenshots/av/sidebar-1440.png) |
-| Quote | ![quote](screenshots/av/strip-quote-1440.png) |
+| Quote (Quote inbox tab first) | ![quote tabs](screenshots/av/quote-tabs-1440.png) |
+| Quote (Quotes tab) | ![quote](screenshots/av/strip-quote-1440.png) |
+| Carriers (Find & Invite first) | ![carriers tabs](screenshots/av/carriers-tabs-1440.png) |
 | Build (Intake) | ![build intake](screenshots/av/strip-build-intake-1440.png) |
 | Build (New shipment) | ![build new](screenshots/av/strip-build-new-1440.png) |
 | View (board) | ![view board](screenshots/av/strip-view-board-1440.png) |

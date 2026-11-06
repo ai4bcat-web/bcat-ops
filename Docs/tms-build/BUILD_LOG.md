@@ -24,6 +24,18 @@ Deviations from STEP_AV_LIFECYCLE_TABS.md
 - Intake badge source: the Build tab's badge is the open Intake count (same source as the former sidebar Intake badge); Quote / Book / Track / Review badges reuse the existing shell badge counts.
 - Division sections in the sidebar (ASSETS etc.) keep their own Intake row (`?division=`); the brokerage rail itself is trimmed as specced.
 
+### 2026-11-06 - Step AV feedback 1-2 deployed (job 205)
+
+Dev only, commit 8f23058 (Amplify job 205). Live runs against dev, throwaway identities deleted and confirmed gone. Screenshots (1440x900 and 1280x800) in `Docs/tms-build/screenshots/av/` (index.txt there; stale strip shots replaced, `quote-tabs-1440`, `carriers-tabs-1440`, `sidebar-1280` added).
+
+Evidence
+- `node scripts/devVerifyAV.mjs`: 37/37 PASS. All six lifecycle tabs fully inside the viewport (Review not clipped) and the right tab lit on every route at 1440 and 1280; no horizontal page scroll; Alt+1..6; Load Review-only persona. New checks: Quote page tabs Quote inbox first (selected from the Quote lifecycle tab, /tms/rates/spot) then Quotes (/tms/rates), strip Quote badge = 2; Carriers tabs Find & Invite first (/tms/carriers/find) then Carrier list (/tms/carriers), sidebar one Carriers entry lit on /find, list and /tms/carriers/<id>, no Find & Invite child; Customers sidebar has no Follow-ups and /tms/customers/follow-ups lands on /tms/customers.
+- `devVerifyAA.mjs --only=AA01`: 14/14 PASS. `devVerifyAM.mjs --walk`: 85 pass, 0 fail, 2 skipped (opt-in). `devVerifyAD.mjs --read`: 32/32 PASS after a harness fix (AD03 clicked the removed `mcp-send-invite`; now `find-lookup-card-send`). `devVerifyAB.mjs --only=AB11`: spot inbox, org settings, customers and the Follow-ups redirect PASS; AB11-customer-card cannot run alone (its prospect fixture is made by AB10, which needs the full chain), not a Step AV defect.
+- `devVerifyAE.mjs --only=AE04`: 0/1, "quoted table lists PENDING (expected LOST)": quote-data assertion, not navigation, untouched by Step AV.
+- Harness: `scripts/devVerifyAV.mjs` extended (AV09-AV12, 1280 pass at 1280x800, new shots); `scripts/devVerifyAD.mjs` AD03 selector.
+
+Defects: none found in the app; nothing to redeploy.
+
 ## 2026-11-05 - Step AT deployed (job 197): multiple carriers per shipment (Ryne feedback 15)
 
 Slices MC0..MC6 live on dev (commit bd28ffb). Dev live run `node scripts/devVerifyMC.mjs` (ZZ MC fixtures, temp admin identity, e-mail only to `ai4bcat+zz-mc-...@gmail.com`; bills voided, shipments voided, carriers INACTIVE, customer archived, identity deleted and confirmed gone). Screenshots: `Docs/tms-build/screenshots/at/`.

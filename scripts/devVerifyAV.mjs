@@ -53,7 +53,7 @@ try {
       ['/tms/carrier-sales', 'book', 'book'], ['/tms/tracking', 'track', 'track'], ['/tms/load-review', 'review', 'review'],
     ]
     for (const width of [1440, 1280]) {
-      await b.setViewport(width, 900)
+      await b.setViewport(width, width === 1280 ? 800 : 900)
       for (const [path, want, slug] of routes) {
         await b.navigate(path); await pause(2500)
         const s = await strip(b)
@@ -63,7 +63,7 @@ try {
         const ok = s.tabs.map((t) => t.key).join() === KEYS.join() && lit.join() === want && !s.hscroll && clipped.length === 0
         line(ok, `AV01 ${path.startsWith('/tms/shipments/shp') ? path.replace(sid, '<id>') : path} @${width}`, `tabs [${s.tabs.map((t) => t.key)}] lit [${lit}] expected ${want}; page hscroll ${s.hscroll}; tabs clipped/outside viewport [${clipped}] (right edges ${s.tabs.map((t) => Math.round(t.rect.right))} of ${s.vw}); badges ${s.badges.join(' ') || 'none'}`)
         await b.screenshot(join(SHOTS, `strip-${slug}-${width}.png`))
-        index.push(`strip-${slug}-${width}.png — ${(sid ? path.replace(sid, '<id>') : path)}: lifecycle strip, ${want} tab lit (${width}x900, admin)`)
+        index.push(`strip-${slug}-${width}.png — ${(sid ? path.replace(sid, '<id>') : path)}: lifecycle strip, ${want} tab lit (${width}x${width === 1280 ? 800 : 900}, admin)`)
       }
     }
     await b.setViewport(1440, 900)
@@ -87,6 +87,32 @@ try {
     const qTabs = await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].slice(0, 2).map((t) => ({ text: t.textContent.trim().replace(/[0-9]+$/, ''), sel: t.getAttribute('aria-selected') }))`)
     const qPath = await b.evaluate('location.pathname')
     line(qPath === '/tms/rates/spot' && qTabs[0]?.text === 'Quote inbox' && qTabs[0]?.sel === 'true' && qTabs[1]?.text === 'Quotes', 'AV08 Quote page tabs', `strip Quote lands on ${qPath}; tabs ${JSON.stringify(qTabs)}`)
+    await b.screenshot(join(SHOTS, 'quote-tabs-1440.png'))
+    index.push('quote-tabs-1440.png — /tms/rates/spot: Quote page tabs, Quote inbox first (selected) then Quotes (1440x900, admin)')
+    const inboxBadge = await b.evaluate(`document.querySelector('.tms-main [role="tab"]')?.textContent.trim() ?? ''`)
+    console.log(`       quote inbox tab text (badge count if any): ${JSON.stringify(inboxBadge)}`)
+    await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].find((t) => /^Quotes/.test(t.textContent.trim()))?.click()`); await pause(2500)
+    const qPath2 = await b.evaluate('location.pathname')
+    const qSel2 = await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].slice(0, 2).filter((t) => t.getAttribute('aria-selected') === 'true').map((t) => t.textContent.trim().replace(/[0-9]+$/, ''))`)
+    line(qPath2 === '/tms/rates' && qSel2.join() === 'Quotes', 'AV09 Quotes tab URL', `click Quotes -> ${qPath2}, selected ${JSON.stringify(qSel2)}`)
+    // feedback 1: Carriers page, Find & Invite first (default) then Carrier list, URL-backed; one sidebar entry
+    const carrierPages = [['/tms/carriers/find', 'Find & Invite'], ['/tms/carriers', 'Carrier list']]
+    const carriersFixture = await b.evaluate(`1`)
+    for (const [path, want] of carrierPages) {
+      await b.navigate(path); await pause(3500)
+      const c = await b.evaluate(`({ path: location.pathname, tabs: [...document.querySelectorAll('.tms-main [role="tab"]')].slice(0, 2).map((t) => t.textContent.trim()), sel: [...document.querySelectorAll('.tms-main [role="tab"]')].slice(0, 2).filter((t) => t.getAttribute('aria-selected') === 'true').map((t) => t.textContent.trim()), lit: [...document.querySelectorAll('.tms-nav-row.tms-active')].map((e) => e.textContent.trim()), carriersRows: [...document.querySelectorAll('.tms-nav-row')].filter((e) => /^Carriers$/.test(e.textContent.trim())).length, findChild: [...document.querySelectorAll('.tms-nav-row')].some((e) => /Find & Invite/.test(e.textContent)) })`)
+      line(c.tabs.join() === 'Find & Invite,Carrier list' && c.sel.join() === want && c.lit.join() === 'Carriers' && c.carriersRows === 1 && !c.findChild, `AV10 Carriers ${path}`, `tabs ${JSON.stringify(c.tabs)} selected ${JSON.stringify(c.sel)}; sidebar lit ${JSON.stringify(c.lit)}; Carriers rows ${c.carriersRows}; Find&Invite child ${c.findChild}`)
+      if (path === '/tms/carriers/find') { await b.screenshot(join(SHOTS, 'carriers-tabs-1440.png')); index.push('carriers-tabs-1440.png — /tms/carriers/find: Carriers page tabs, Find & Invite first (selected) then Carrier list; sidebar one Carriers entry lit (1440x900, admin)') }
+    }
+    // /tms/carriers/<id>: open the first carrier row of the list
+    await b.evaluate(`document.querySelector('.tms-main tbody tr')?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`); await pause(3500)
+    let cid = await b.evaluate('location.pathname')
+    const cd = await b.evaluate(`({ lit: [...document.querySelectorAll('.tms-nav-row.tms-active')].map((e) => e.textContent.trim()), tabs: [...document.querySelectorAll('.tms-main [role="tab"]')].slice(0, 2).map((t) => t.textContent.trim()) })`)
+    line(/^\/tms\/carriers\/[^/]+$/.test(cid) && cd.lit.join() === 'Carriers', 'AV11 Carriers /tms/carriers/<id>', `at ${cid.replace(/carriers\/.+/, 'carriers/<id>')}; sidebar lit ${JSON.stringify(cd.lit)}; tabs ${JSON.stringify(cd.tabs)}`)
+    // feedback 1: Customers has no Follow-ups; the old URL redirects
+    await b.navigate('/tms/customers/follow-ups'); await pause(3500)
+    const cu = await b.evaluate(`({ path: location.pathname, followRows: [...document.querySelectorAll('.tms-nav-row')].filter((e) => /Follow-?ups?/i.test(e.textContent)).length, lit: [...document.querySelectorAll('.tms-nav-row.tms-active')].map((e) => e.textContent.trim()) })`)
+    line(cu.path === '/tms/customers' && cu.followRows === 0, 'AV12 Customers no Follow-ups', `/tms/customers/follow-ups -> ${cu.path}; Follow-ups sidebar rows ${cu.followRows}; lit ${JSON.stringify(cu.lit)}`)
     // sidebar
     await b.navigate('/tms/dashboard'); await pause(3000)
     const rail = await b.evaluate(`[...document.querySelectorAll('.tms-nav-rowwrap, .tms-section-head')].map((e) => e.textContent.trim().split('\\n')[0].slice(0, 40))`)
@@ -97,6 +123,10 @@ try {
     const gone = ['Quotes', 'Intake', 'Carrier Sales', 'Load Tracking', 'Load Review', 'New shipment'].filter((x) => all.includes(x))
     line(hasAll && gone.length === 0, 'AV04 sidebar', `has the kept rows: ${hasAll}; lifecycle rows still in rail: ${gone.join(', ') || 'none'}`)
     await b.screenshot(join(SHOTS, 'sidebar-1440.png'))
+    await b.setViewport(1280, 800); await pause(1500)
+    await b.screenshot(join(SHOTS, 'sidebar-1280.png'))
+    index.push('sidebar-1280.png — sidebar at 1280x800 (admin, dashboard)')
+    await b.setViewport(1440, 900); await pause(1000)
     index.push('sidebar-1440.png — sidebar: Company Dashboard, Active shipments, directories, Accounting, Settings (1440x900, admin, dashboard)')
   } finally { await b.close() }
 
