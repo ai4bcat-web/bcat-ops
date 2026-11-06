@@ -83,3 +83,13 @@ Ryne approved turning on `ptoEligible` for Jason and entering the day by direct 
 - `DriverAvailability` rows for Jason: 3. **One is on 2026-11-05**: id `241ccad2-deba-45a7-9455-a3db1bbccb8d`, type `FULL_DAY_OFF`, startDate = endDate = 2026-11-05, no status (reads APPROVED), createdBy `Ryne@bcatcorp.com`, createdAt 2026-11-02T17:49:23.725Z. (The other two are 6/26 and 9/23–9/25.)
 
 Per the instruction "if one exists, change nothing and report", **no write was made**: not `ptoEligible`, not the availability row, not the clock row.
+
+### Jason Smith PTO day for 2026-11-05 — CREATED (Ryne approved option 2: keep the day-off row, add PTO alongside)
+
+Written 2026-11-06T17:17:36.433Z by direct DynamoDB writes to the production (main) tables, replicating `POST /staff/time-off/pto` (no staff login on the machine). Right before writing: no PTO availability and no clock row for Jason on 11/5; the existing FULL_DAY_OFF row `241ccad2-deba-45a7-9455-a3db1bbccb8d` left untouched (read back byte-identical).
+
+1. `Driver` `9f8266cd-d9ab-46ad-80b5-d62b5abfa70c` only: `SET ptoEligible = true, updatedAt = 2026-11-06T17:17:36.433Z` (was: absent / 2026-11-06T11:00:41.835Z). Nothing else on the row changed.
+2. `DriverAvailability` `460dee28-51fc-4035-a459-39695423947e` (conditional put, attribute_not_exists(id)): type PTO, startDate = endDate = 2026-11-05, hours 8, status APPROVED, source STAFF, createdBy and reviewedBy `Ryne@bcatcorp.com`, reviewedAt/createdAt/updatedAt 2026-11-06T17:17:36.433Z, note "PTO demo day entered at Ryne's request".
+3. `TimeClockEntry` `ae0249ce-5157-49b1-b33d-4220c946adec` (conditional put): driverId Jason, workDate 2026-11-05, kind PTO, minutes 480, clockInAt/clockOutAt null, source STAFF, note "PTO approved by Ryne@bcatcorp.com", createdAt/updatedAt as above.
+
+Verified by reading the rows back and running them through the project's own logic: `ptoDaysUsed(…, '2026')` = 1; `statusOf`/`isApproved` on 11/5 gives FULL_DAY_OFF/APPROVED and PTO/APPROVED; `summarizePayPeriod` for the 2026-10-26 period shows 11/5 as worked 0:00, **PTO 8:00**, holiday 0:00, day total 8:00 (period PTO 8:00, period total 79:52). Not checked in a browser (no staff login); no pay rate entered.
