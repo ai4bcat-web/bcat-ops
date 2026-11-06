@@ -22,6 +22,10 @@ describe('matchLocation', () => {
     expect(matchLocation(bare, [loc({ id: 'e', name: 'EAGLE FOODS', city: 'Gary' })])?.id).toBe('e')
     expect(matchLocation(bare, [loc({ id: 'e', name: 'EAGLE FOODS', city: 'Hammond' })])).toBeNull()
   })
+  it('does not link a same-name, same-city facility at a different street', () => {
+    const amazon = { name: 'Amazon', city: 'Chicago, IL', address: { street: '123 A St', city: 'Chicago', state: 'IL', zip: '60601' } }
+    expect(matchLocation(amazon, [loc({ id: 'b', name: 'Amazon', city: 'Chicago', street: '900 B St', state: 'IL', zip: '60601' })])).toBeNull()
+  })
   it('finds nothing for a stop with neither a name nor a street', () => {
     expect(matchLocation({ city: 'Gary, IN' }, [loc({})])).toBeNull()
   })

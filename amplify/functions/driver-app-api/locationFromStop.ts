@@ -52,16 +52,18 @@ const live = (l: LocationLike) => l.active !== false && !l.mergedIntoId
 
 /**
  * The existing directory record for this stop: same normalised street address (the key
- * the spec dedupes on), else same facility name in the same city for a stop with no street.
+ * the spec dedupes on); only a stop with NO street falls back to same facility name in the
+ * same city.
  * Null when nothing matches or the stop has neither a name nor an address.
  */
 export function matchLocation(stop: StopPlace, locations: readonly LocationLike[]): LocationLike | null {
   const addr = stopAddress(stop)
   if (addr.street) {
     const key = normalizeAddress({ ...addr, country: 'US' })
-    const hit = locations.find((l) => live(l) && (l.normalizedAddress === key
-      || (l.street && normalizeAddress({ street: l.street, city: l.city, state: l.state, zip: l.zip, country: l.country ?? 'US' }) === key)))
-    if (hit) return hit
+    // A stop with a street matches on the street alone: the same name in the same city at a
+    // different street is a different facility, so no name fallback.
+    return locations.find((l) => live(l) && (l.normalizedAddress === key
+      || (l.street && normalizeAddress({ street: l.street, city: l.city, state: l.state, zip: l.zip, country: l.country ?? 'US' }) === key))) ?? null
   }
   const name = normalizeName(stop.name ?? '')
   if (!name) return null

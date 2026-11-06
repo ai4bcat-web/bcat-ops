@@ -84,7 +84,7 @@ import { matchLocation, newLocationItem, type LocationLike } from './locationFro
 import { chicagoDateStr } from '../../../src/lib/date'
 import { reorderedSortValues } from '../../../src/lib/loadReorder'
 import {
-  validateTimeOffRequest, overlappingRequest, describeRange, ptoDaysUsed, ptoRowFor, statusOf, yearOf,
+  validateTimeOffRequest, overlappingRequest, addDaysISO, describeRange, ptoDaysUsed, ptoRowFor, statusOf, yearOf,
   type TimeOffType, type TimeOffStatus,
 } from '../../../src/lib/timeOff'
 import { locateCity } from '../../../src/lib/eldRadius'
@@ -192,6 +192,8 @@ const MOTIVE_API_KEY = process.env.MOTIVE_API_KEY ?? ''
 const MOTIVE_BASE = 'https://api.gomotive.com/v1'
 const TIME_CLOCK_TABLE = process.env.TIME_CLOCK_TABLE_NAME ?? ''
 const DRIVER_AVAILABILITY_TABLE = process.env.DRIVER_AVAILABILITY_TABLE_NAME ?? ''
+/** How far either way staff may enter a PTO day (a driver's own window is narrower: src/lib/timeOff.ts). */
+const STAFF_PTO_WINDOW_DAYS = 60
 const PAY_DEDUCTION_TABLE = process.env.DRIVER_PAY_DEDUCTION_TABLE_NAME!
 const PAY_CREDIT_TABLE = process.env.DRIVER_PAY_CREDIT_TABLE_NAME!
 const FUEL_TX_TABLE = process.env.FUEL_TRANSACTION_TABLE_NAME!
@@ -2581,6 +2583,12 @@ export const handler = async (event: FnUrlEvent) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply(400, { error: 'date must be YYYY-MM-DD' })
       const target = (await ddb.send(new GetCommand({ TableName: DRIVER_TABLE, Key: { id: targetId } }))).Item as DriverRow | undefined
       if (!target) return reply(404, { error: 'driver not found' })
+      if (target.ptoEligible !== true) return reply(400, { error: `${target.name} is not PTO eligible. Switch it on in the driver file first.` })
+      // Staff may back-date or plan further than a driver can ask (60 days either way).
+      const todayChicago = chicagoToday()
+      if (date < addDaysISO(todayChicago, -STAFF_PTO_WINDOW_DAYS) || date > addDaysISO(todayChicago, STAFF_PTO_WINDOW_DAYS)) {
+        return reply(400, { error: `PTO can be entered from ${STAFF_PTO_WINDOW_DAYS} days back to ${STAFF_PTO_WINDOW_DAYS} days ahead.` })
+      }
       if (ptoRowOn(await timeClockRowsFor(targetId), date)) {
         return reply(409, { error: `${target.name} already has a PTO day on ${describeRange(date, date)}.` })
       }

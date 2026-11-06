@@ -1341,6 +1341,20 @@ describe('driver-app-api handler', () => {
       expect((await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2026-11-05' })).statusCode).toBe(409)
       expect(clock()).toHaveLength(1)
     })
+
+    it('staff PTO needs an eligible driver and a date within 60 days either way of today', async () => {
+      asStaff()
+      // 2026-09-07 is 60 days before 11/6 and 2027-01-05 is 60 days after: both in; one more day out.
+      expect((await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2026-09-07' })).statusCode).toBe(200)
+      expect((await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2027-01-05' })).statusCode).toBe(200)
+      expect((await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2026-09-06' })).statusCode).toBe(400)
+      expect((await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2027-01-06' })).statusCode).toBe(400)
+      tables['Driver-test'][DRIVER_A_ID].ptoEligible = false
+      const no = await post('/staff/time-off/pto', { driverId: DRIVER_A_ID, date: '2026-11-05' })
+      expect(no.statusCode).toBe(400)
+      expect(JSON.parse(no.body).error).toMatch(/not PTO eligible/)
+      expect(clock()).toHaveLength(2)
+    })
   })
 
   describe('POST /paperwork/location-note', () => {
