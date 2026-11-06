@@ -42,3 +42,19 @@ Spec: `Docs/driver-app/2026-11-06-driver-app-production-batch.md`. Seven items f
 ### Production verification (after the orchestrator confirms the deploy)
 
 Pending: Amplify job number, DOT Save on `/truck-docs`, Requests panel, test-driver round trip, and the Jason PTO day for 2026-11-05 (read-only driver lookup first; stop and report if not exactly one Jason).
+
+## 2026-11-06 — Employee hours view and hourly rates (branch `feat/hours-view`, cut from `main` after PR 135)
+
+Spec: `Docs/driver-app/2026-11-06-employee-hours-view.md`.
+
+**The page (`/hours`).** `HoursPage` now loads and gates; `HoursPeriodView` lays out: a summary bar (Drivers, Total hours, Worked, Total PTO, Total holiday, Total pay), one collapsible row per driver sorted by name (Worked / PTO / Holiday / Total hours as `h:mm` with decimal beneath, Rate, 2-week pay), a footer total row (the same `totalsOf` as the bar), Expand all / Collapse all, Export CSV (`periodCsv`) and Print. Expanding a driver shows the 14 days: In/Out, Worked, PTO, Holiday, Day total, Motive first/last move, note, the signed Edit correction, Week 1 / Week 2 subtotals, empty days dimmed. Warning chip per day (`dayWarning`): still on the clock, or the clock more than 60 minutes from the truck's first/last move. Kept: corrections, Motive column wording, the driver filter, PTO used this year.
+
+**Rates.** `DriverPaySetting.hourlyRate` (float) and `hourlyRateHistory` (json windows `[{from, until, hourlyRate, endedBy, endedAt}]`), additive. `src/lib/hoursPay.ts`: `rateOn`, `withRateChange` (closes the old window with who/when; a rate may not start before the current one began; same date corrects in place; a first rate leaves earlier days unrated), `payForPeriod` (each day's paid minutes at that day's rate, rounded to cents once), `money` (a dash, never $0, for no rate). The rate cell on `/hours` has an inline editor (dollars/hour, Effective from defaulting to the period start); `useHourlyRates` creates a `LOCAL` pay setting (0% placeholder) for a driver with none, keeps the group of an existing row, and writes an AuditLog line. Rate and pay need `hasPageAccess('driverPay')` (owner, ADMIN or `page-driverPay`); without it the page is hours only, no pay column, no editor, and the pay settings are not even fetched.
+
+**Not done on purpose:** the "Hourly rate" field in the existing driver pay settings modal. That modal (`DriverPayForms.SettingsModal`) is the Amazon percent model: it requires a percent and saves `payGroup: 'AMAZON'`, so using it for a LOCAL driver would flip their group. The `/hours` editor writes the same fields.
+
+**Pay rate never reaches the driver app.** The driver Lambda does not read `hourlyRate` / `hourlyRateHistory`. Tests: `handler.test.ts` seeds both fields (and a history rate) on DriverPaySetting and asserts the serialized `/timeclock`, `/me`, `/time-off` (GET and POST), `/paperwork`, `/paperwork/weeks` responses contain neither the keys nor the values, and that a percent-paid driver's `/settlement` is byte-identical with and without an hourly rate; `src/lib/driverAppNoPayRate.test.ts` fails if `hourlyRate`, `hourlyRateHistory` or `hoursPay` appear under `src/features/driver-app/` or `amplify/functions/driver-app-api/`, or if the driver app imports the AppSync client.
+
+**Can drivers read DriverPaySetting over AppSync? No.** The data API's only authorization mode is `userPool` (`defaultAuthorizationMode: 'userPool'`, `amplify/data/resource.ts`), which is the staff pool. The driver pool (`bcat-driver-pool`, `amplify/backend.ts`) is a separate CDK pool that is not an authorization provider on the API; driver tokens are verified only by the driver-app-api Lambda, and the driver app has no AppSync client (checked by the test above). No auth change was needed.
+
+**Verification pending** (after the orchestrator says deploy is live): open `/hours` in production, confirm summary bar and expand against real data. No driver's rate was entered.

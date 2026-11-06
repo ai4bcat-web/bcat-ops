@@ -1215,6 +1215,48 @@ describe('driver-app-api handler', () => {
     })
   })
 
+  describe('pay rate never reaches a driver', () => {
+    const RATE = 23.77
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-11-06T18:00:00Z'))
+      // Driver A runs the Ivan paperwork app with a clock; both drivers' pay settings carry an hourly rate.
+      Object.assign(tables['Driver-test'][DRIVER_A_ID], { ivanApp: true, timeClock: true, ptoEligible: true })
+      for (const id of ['set-a', 'set-b']) {
+        Object.assign(tables['DriverPaySetting-test'][id], {
+          hourlyRate: RATE,
+          hourlyRateHistory: [{ from: '1970-01-01', until: '2026-10-19', hourlyRate: 19.41 }],
+        })
+      }
+    })
+    afterEach(() => vi.useRealTimers())
+
+    const leaks = (body: string) => /hourlyRate|23\.77|19\.41/.test(body)
+
+    it.each(['/timeclock', '/me', '/time-off', '/paperwork', '/paperwork/weeks'])('GET %s carries neither the rate nor its keys', async (path) => {
+      const res = await handler(baseEvent(path))
+      expect(res.statusCode).toBe(200)
+      expect(leaks(res.body)).toBe(false)
+    })
+
+    it("a driver's POST /time-off response carries no rate either", async () => {
+      const res = await handler(baseEvent('/time-off', 'POST', { body: { type: 'FULL_DAY_OFF', startDate: '2026-11-10', hours: 8 } }))
+      expect(res.statusCode).toBe(200)
+      expect(leaks(res.body)).toBe(false)
+    })
+
+    it('the settlement of a percent-paid driver is unchanged by an hourly rate on the setting', async () => {
+      mockVerify.mockResolvedValue({ email: EMAIL_B, email_verified: true })
+      const settle = () => handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
+      const withRate = await settle()
+      expect(withRate.statusCode).toBe(200)
+      expect(leaks(withRate.body)).toBe(false)
+      delete tables['DriverPaySetting-test']['set-b'].hourlyRate
+      delete tables['DriverPaySetting-test']['set-b'].hourlyRateHistory
+      expect(JSON.parse((await settle()).body)).toEqual(JSON.parse(withRate.body))
+    })
+  })
+
   describe('time off requests', () => {
     const NOW = new Date('2026-11-06T18:00:00Z')   // Friday 11/6 in Chicago
     const pto = (over: Record<string, unknown> = {}) => ({ id: 'tc-1', driverId: DRIVER_A_ID, workDate: '2026-02-03', kind: 'PTO', minutes: 480, source: 'STAFF', ...over })
