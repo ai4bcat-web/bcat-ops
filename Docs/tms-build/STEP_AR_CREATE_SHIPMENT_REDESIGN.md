@@ -408,3 +408,33 @@ pickup or delivery area so you can save it for future."
   exists, offer "Use existing <name>" instead of creating a twin.
 - The same inline add works in edit mode and in the Intake prefilled form (extracted stop
   addresses that match no location show the add row pre-selected).
+
+## Ryne's feedback 15 (2026-11-05 evening)
+"You should also be able to add multiple carriers onto a shipment and choose what accessorial each
+carrier should be paid on. If there are multiple carriers on a shipment it should also create
+multiple AP records."
+
+- **Carrier & Tracking card holds a list of carriers** (LoadCarrier rows already exist; make
+  them first-class). "+ Add carrier" appends another carrier block; each block has the full
+  carrier section (lookup card, Cover / Assign, details, dispatcher, drivers, truck / trailer,
+  origin, ETA, confirm timestamps, **Send Rate Conf** for that carrier only) plus the
+  TrackingModeControl and tracking read for that carrier. Optional **Legs** on each carrier:
+  which stops it covers (defaults to all; for transloads / multi-leg pick the stop range), so
+  tracking and the delivery timeline know which carrier is moving the load at each phase. Ivan
+  Cartage division: one of the "carriers" can be the own fleet (driver + truck), alongside
+  brokered carriers for other legs.
+- **Rates card**: one **Carrier rate row per carrier** (Rate Type, LH Rate, Total LH, Pay %, Max
+  Rate), labelled with the carrier name. **Accessorial lines gain a "Paid to" column**: a select
+  listing the carriers on the load plus "Not paid to a carrier" (customer-billed only), so each
+  accessorial is assigned to exactly the carrier that earns it; "$Carrier" on the line is the
+  amount paid to that carrier. A line can be billed to the customer and paid to a carrier, billed
+  only, or paid only. Totals: Carrier total = sum over carriers; Net / Profit in the rail use it.
+- **Rate con per carrier** contains only that carrier's linehaul and its assigned accessorials;
+  the e-mail thread / tracking address stay per shipment, the rate con document is per carrier.
+- **AP: one carrier bill (AP record) per carrier** on release, each with its linehaul + assigned
+  accessorials; Load Review shows the bills side by side and will not release while any carrier
+  on the load lacks a rate; AP inbox sync (AG) matches invoices to the right bill by carrier +
+  PRO; factoring / quick pay act per bill; AP aging and the accountant CSV list each bill.
+- Reporting / commissions: margin is customer total minus the sum of carrier bills; Shipments
+  board "Carrier" column shows "2 carriers" with hover list; existing single-carrier loads are
+  simply a list of one, nothing migrates.
