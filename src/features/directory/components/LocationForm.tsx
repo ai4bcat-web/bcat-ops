@@ -1,5 +1,6 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { TmsButton, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { useZipAutofill } from '@/hooks/useZipAutofill'
 import { AddressAutocomplete } from './AddressAutocomplete'
 import type { CustomerRecord, LocationRecord, LocationContact } from '@/types/tms'
 import type { LocationFormValue } from './useLocationForm'
@@ -42,6 +43,10 @@ export function LocationForm({
   customers: CustomerRecord[]
 }) {
   const activeCustomers = customers.filter((c) => c.active !== false)
+  useZipAutofill(value.address?.zip, value.address?.city, value.address?.state, (f) => {
+    if (f.city) setAddressField('city', f.city)
+    if (f.state) setAddressField('state', f.state)
+  })
 
   const toggleCustomer = (id: string) => {
     set('customerIds', value.customerIds.includes(id) ? value.customerIds.filter((x) => x !== id) : [...value.customerIds, id])

@@ -67,7 +67,6 @@ describe('stop card: add a new location inline', () => {
     fireEvent.click(screen.getByTestId('f-pickup-new-save'))
     expect(api.createLocation).not.toHaveBeenCalled()
     expect(screen.getAllByRole('alert').length).toBeGreaterThan(0)
-    api.geocodeAddress.mockResolvedValueOnce({ city: 'Plainfield', state: 'IL' })
     type('f-pickup-new-zip', '60544')
     await waitFor(() => expect((screen.getByTestId('f-pickup-new-city') as HTMLInputElement).value).toBe('Plainfield'))
     expect((screen.getByTestId('f-pickup-new-state') as HTMLSelectElement).value).toBe('IL')

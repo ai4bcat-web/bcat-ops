@@ -1486,16 +1486,16 @@ const RUNNERS = {
     const b = ctx.b
     const bad = []
     const name = `ZZ AR Dock ${ctx.ts}`
-    const notes = []
     await b.setViewport(1440, 900)
     await openForm(b, '/tms/shipments/new')
     await setValue(b, tid('f-pickup-name'), name)
     await b.poll(() => has(b, tid('f-pickup-addRow')), 'the + Add row', 15_000)
     await click(b, 'f-pickup-addRow')
-    await fill(b, 'f-pickup-new-street', '1 ZZ Test Way'); await fill(b, 'f-pickup-new-zip', '60431')
+    await fill(b, 'f-pickup-new-street', '1 ZZ Test Way'); await fill(b, 'f-pickup-new-zip', '60435')
     await shotAR(b, 'inline-add-location-1440')
-    // Zip autofill needs the geocoder; when dev's key does not answer, type the city and state so the rest still runs.
-    await b.poll(async () => (await valOf(b, 'f-pickup-new-city')) !== '', 'zip autofill', 12_000).catch(async () => { notes.push('zip autofill did not answer'); await fill(b, 'f-pickup-new-city', 'Joliet'); await fill(b, 'f-pickup-new-state', 'IL') })
+    // Zip autofill is the offline zip table (no geocoder): a real zip must fill both fields without typing.
+    await b.poll(async () => (await valOf(b, 'f-pickup-new-city')) !== '' && (await valOf(b, 'f-pickup-new-state')) !== '', 'zip autofill', 12_000).catch(() => bad.push('typing zip 60435 did not fill city and state'))
+    if ((await valOf(b, 'f-pickup-new-city')) !== 'Joliet' || (await valOf(b, 'f-pickup-new-state')) !== 'IL') bad.push(`zip 60435 filled ${JSON.stringify(await valOf(b, 'f-pickup-new-city'))}, ${JSON.stringify(await valOf(b, 'f-pickup-new-state'))} instead of Joliet, IL`)
     await click(b, 'f-pickup-new-save')
     await b.poll(async () => (await valOf(b, 'f-pickup-name')) === name && !(await has(b, tid('f-pickup-newLocation'))), 'the new location selected', 30_000).catch(() => bad.push('Save location did not select the new location'))
     const rows = (await listAll(ctx.token, 'Location', { name: { eq: name } }, 'id updatedAt'))
@@ -1505,7 +1505,7 @@ const RUNNERS = {
     await setValue(b, tid('f-consignee-name'), name)
     await b.poll(() => has(b, tid('f-consignee-name-option')), 'the saved location offered on another stop', 15_000).catch(() => bad.push('the new location is not offered on another stop'))
     failures(bad)
-    return `typed ${JSON.stringify(name)} -> "+ Add as a new location" -> zip auto-fill -> Save location created 1 directory row, selected it, and offered it on the consignee stop (archived in cleanup)${notes.length ? `; ${notes.join('; ')}` : ''}`
+    return `typed ${JSON.stringify(name)} -> "+ Add as a new location" -> zip auto-fill -> Save location created 1 directory row, selected it, and offered it on the consignee stop (archived in cleanup)`
   },
 
   async AR17(ctx) {

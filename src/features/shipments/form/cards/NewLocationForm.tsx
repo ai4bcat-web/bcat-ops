@@ -1,13 +1,14 @@
 /**
  * The inline "new location" form inside a stop card (feedback 14), on the shared field grid.
- * Save location: zip auto-fills city / state (tmsGeocode), the row is created through the directory's
+ * Save location: zip auto-fills city / state (offline table, lib/zipLookup), the row is created through the directory's
  * UPSERT_LOCATION (geocoded, `createdFrom` audited) and selected for the stop. Use once: the address
  * stays on the stop with no directory row. A duplicate (same name + zip, or address + zip) offers
  * "Use existing". Without the directory create permission only Use once is offered.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useState, useMemo } from 'react'
 import { toast } from 'sonner'
 import { TmsButton, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
+import { useZipAutofill } from '@/hooks/useZipAutofill'
 import { createLocation, geocodeAddress } from '@/lib/apiClient'
 import type { LocationRecord } from '@/types/tms'
 import { COUNTRIES, US_STATES } from '../constants'
@@ -37,19 +38,8 @@ export function NewLocationForm({ initial, locations, canSave, createdFrom, pref
   const dup = useMemo(() => (Object.keys(errors).length === 0 ? findDuplicate(d, locations) : null), [d, errors, locations])
   const t = (key: string) => `f-${prefix}-new-${key}`
 
-  // Zip autofill: a complete zip fills city / state when they are still blank (never over typed text).
-  const looked = useRef('')
-  useEffect(() => {
-    const zip = d.zip.trim()
-    if (!/^\d{5}$/.test(zip) || looked.current === zip || (d.city.trim() && d.state.trim())) return
-    looked.current = zip
-    let live = true
-    geocodeAddress(zip).then((g) => {
-      if (!live) return
-      setD((p) => ({ ...p, city: p.city.trim() ? p.city : (g.city ?? ''), state: p.state.trim() ? p.state : (g.state ?? '').toUpperCase() }))
-    }).catch(() => { /* the person types them */ })
-    return () => { live = false }
-  }, [d.zip, d.city, d.state])
+  // Zip autofill: a complete US zip fills city / state when they are still blank (never over typed text); offline table, no geocoder.
+  useZipAutofill(d.zip, d.city, d.state, (f) => setD((p) => ({ ...p, city: p.city.trim() ? p.city : (f.city ?? p.city), state: p.state.trim() ? p.state : (f.state ?? p.state) })))
 
   const save = async () => {
     setTried(true)

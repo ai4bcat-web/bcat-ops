@@ -6,6 +6,7 @@ import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { MoneyField } from './MoneyField'
 import { getTmsSettings } from '@/lib/apiClient'
 import type { Division, CustomerStatus, Team } from '@/types/tms'
+import { useZipAutofill } from '@/hooks/useZipAutofill'
 import type { CustomerFormValue } from './useCustomerForm'
 import { APPT_WORKFLOW_OPTIONS, INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
 import { TrackingPrefsFields, type TrackingPrefsValue } from './TrackingPrefsFields'
@@ -27,6 +28,10 @@ export function CustomerForm({
 }) {
   const [tab, setTab] = useState('Overview')
   const [teams, setTeams] = useState<Team[]>([])
+  useZipAutofill(value.billingAddressZip, value.billingAddressCity, value.billingAddressState, (f) => {
+    if (f.city) set('billingAddressCity', f.city)
+    if (f.state) set('billingAddressState', f.state)
+  })
   const accountOwnerIds = value.accountOwnerIdsText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
 
   // The dialog that hosts this form has no settings of its own, and threading one read
