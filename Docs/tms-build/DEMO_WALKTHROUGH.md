@@ -1,4 +1,4 @@
-# Step Y: demo walkthrough for Ryne (refreshed on dev job 171, commit 25b8464)
+# Step Y: demo walkthrough for Ryne (refreshed on dev job 197, commit bd28ffb; create-shipment, multi-carrier and BOL sections added for Steps AR / AT / AU)
 
 Dev only: https://dev.d3dejqzs77khq6.amplifyapp.com. Everything below was driven live by `node scripts/devDemoY.mjs <stage>` (stages: reset fixtures tender intake carrier tracking delivered billing own tour; `retire` tidies) in headless Chrome at 1440 px with throwaway identities that were deleted afterwards. Screenshots are in `screenshots/demo/` (57 files, captions in `screenshots/demo/index.txt`).
 
@@ -42,6 +42,62 @@ URLs: Quotes https://dev.d3dejqzs77khq6.amplifyapp.com/tms/rates · New shipment
 | 4 | Dispatch | shipment page | Dispatched (the roster driver already carries the driver fields) | ![36-own-asset-dispatched](screenshots/demo/36-own-asset-dispatched.png) |
 | 5 | Settlement / payroll | Assets > Owner Operator Settlements | Line 99672 at 25% share; banner "Payroll runs every Wednesday . Next pay date Wed Nov 11"; Carrier Pay tab says own-fleet pay is a settlement | ![37-own-asset-carrier-pay-is-settlement](screenshots/demo/37-own-asset-carrier-pay-is-settlement.png) ![38-owner-operator-settlement](screenshots/demo/38-owner-operator-settlement.png) ![39-amazon-settlements-payroll-banner](screenshots/demo/39-amazon-settlements-payroll-banner.png) |
 | 6 | Not in Vendors | Accounting > Vendors | Notice pointing driver pay to Assets > settlements | ![40-accounting-vendors-not-driver-pay](screenshots/demo/40-accounting-vendors-not-driver-pay.png) |
+
+## A2. Create shipment, final Step AR layout (job 197, dev)
+
+Open https://dev.d3dejqzs77khq6.amplifyapp.com/tms/shipments/new (Shipments board **Create shipment**, or Load Tracking **Load tracking** button). Images are 1440 px wide, light theme, ZZ fixtures only, written by `node scripts/devVerifyAH.mjs`.
+
+| # | Click path | What to see | Mode | Shot |
+|---|---|---|---|---|
+| 1 | Open the form, nothing typed | Header strip: title, Customer type-ahead, Customer ref (PO), Bill To chip (Details chevron drops the full panel), delivery timeline captioned DRAFT, PRO preview. Below: Freight (Division then Shipment type first), Route, Rates, Carrier & Tracking, Documents; More strip (Instructions / References / Items / Notes); rail with Summary, Required, Activity, Roles | live | ![first screen 1440x900](aljex-create/ar-first-screen-1440x900.png) ![first screen 1280x800](aljex-create/ar-first-screen-1280x800.png) ![empty 1440](aljex-create/ar-create-empty-1440x900.png) |
+| 2 | Create brokered: type a customer, pick it, fill the seven red fields, **Create shipment** (Ctrl/Cmd+Enter or the bottom bar) | Shipment lands as DRAFT on its edit URL; rail Required reaches M / M | live | ![brokered 1440](aljex-create/ar-create-brokered-1440.png) ![brokered 1280](aljex-create/ar-create-brokered-1280.png) |
+| 3 | Create Ivan Cartage with a driver: Division ASSETS, then pick the Driver from the roster select (no free text) | Driver, phone, truck and trailer fill from the record; created with division ASSETS | live | ![Ivan 1440](aljex-create/ar-create-ivan-1440.png) ![Ivan 1280](aljex-create/ar-create-ivan-1280.png) |
+| 4 | Edit a saved shipment (edit URL) | Same layout, stage chip and Activity rows with actor and `field: value`, Shipment type locked once OPEN | live | ![edit 1440](aljex-create/ar-edit-1440.png) ![edit 1280](aljex-create/ar-edit-1280.png) ![edit rail Activity](aljex-create/ar-edit-rail-activity-1440.png) |
+| 5 | Carrier & Tracking card | Carrier assign / cover entry plus the per-load tracking mode (Automated / Manual / None); read-only on create | live | ![Carrier and Tracking](aljex-create/ar-carrier-and-tracking-1440.png) |
+| 6 | Pick Pickup and Consignee, look at the rail | Rate history in the rail (same card body as before, collapsible): what we ran the lane for, 30 / 90 day and last-year averages, DAT block ("DAT not connected" on dev, no numbers) | live (DAT STUB) | ![rate history](aljex-create/ar-rate-history-1440.png) |
+| 7 | Scroll to the foot | 48 px action bar at the foot of the page (status, saved state, required count, Cancel / Save draft / Create shipment); the rail has no footer of its own | live | ![action bar 1440](aljex-create/ar-action-bar-1440.png) ![action bar 1280](aljex-create/ar-action-bar-1280.png) |
+| 8 | Type a pickup name that is not in the directory > **+ Add as a new location** | Inline form (Name, Type, Address, ZIP, City, State, Contact, Hours, ...; **Cancel / Use once / Save location**); Save creates the Location, selects it and offers it on the other stops. A customer with no match offers **+ Add as a new customer** (the directory dialog) the same way | live (zip autofill needs the geocoder, which does not answer on dev) | ![inline add location](aljex-create/ar-inline-add-location-1440.png) |
+| 9 | **+ Add pickup** between the two stops, pick a third location | Miles is one field summing both legs (966 mi for Chicago > Dallas, 1168 mi when Waco is inserted) | live | ![3-stop miles](aljex-create/ar-three-stop-miles-1440.png) ![route timeline](aljex-create/ar-route-timeline-1440.png) |
+| 10 | Header strip, right side | Delivery timeline: On site / Departed / In transit / On site / Delivered with a truck at the current phase; "Draft" before the shipment exists, "Not dispatched" parked state, stop caption only with three or more stops | live | ![delivery timeline](aljex-create/ar-delivery-timeline-1440.png) |
+
+Other layout shots: grid symmetry ![](aljex-create/ar-create-grid-1440.png) ![](aljex-create/ar-edit-grid-1440.png), requirement chips ![](aljex-create/ar-chips-subfields-1440.png), Bill To panel ![](aljex-create/ar-bill-to-1440.png), documents on create ![](aljex-create/ar-documents-create-1440.png), bottom sheet below 1280 px ![](aljex-create/ar-sheet-open-1100.png).
+
+## B2. Two carriers on one shipment (Step AT, job 197)
+
+Click path: shipment > **Carrier** tab > **Cover** (first carrier, legs: stop 1) > **Add carrier** (second carrier, legs: stop 2) > Carrier Pay tab (two cards) > Load Review > **Record all bills** > release.
+
+| # | Where | Result | Shot |
+|---|---|---|---|
+| 1 | Carrier tab | Two carrier blocks, each with its legs, rate, rate con and tracking override | ![](screenshots/at/06-carrier-tab-two-blocks.png) |
+| 2 | Own-fleet load | **Add carrier** is hidden (own fleet cannot share a load with outside carriers) | ![](screenshots/at/04-own-fleet-no-add-carrier.png) |
+| 3 | Load Review, before recording | Gate names the carrier ("Carrier rate missing: ...", "bill not recorded"), side-by-side Carrier bills panel with margin line | ![](screenshots/at/07-load-review-two-carrier-blocked.png) ![](screenshots/at/08a-load-review-before-record-all.png) |
+| 4 | **Record all bills** | One bill per carrier (stops at the first error naming the carrier), then release | ![](screenshots/at/08b-load-review-after-record-all.png) |
+| 5 | Accounting > AP, shipment Carrier Pay tab | Two payable cards plus a per-carrier bill-state strip | ![](screenshots/at/09a-ap-payable.png) ![](screenshots/at/09b-shipment-carrier-pay-two-cards.png) |
+| 6 | Shipments board | Carrier column reads "2 carriers" (hover lists name, rung, cost) | ![](screenshots/at/10-board-two-carriers.png) |
+| 7 | Single-carrier shipment | No block chrome, no legs; wording unchanged | ![](screenshots/at/11-single-carrier-unchanged.png) |
+
+Real: all of the above ran against dev data through the real actions (`BOOK_CARRIER`, `ADD_CARRIER`, `RECORD_BILL`), two rate-con tokens, per-carrier tracking override. Stubbed / limited: rate con e-mail row ends NOT_SENT on dev (SES denies `ses:SendRawEmail`), maximum 4 carriers, own fleet beside outside carriers refused (decision D2 open).
+
+## B3. Generate BOL (Step AU, job 197)
+
+Click path: shipment (create form after **Create shipment**, or edit) > Documents card > **Generate** row > **Generate BOL** > pick master or a stop, include rates No / Yes > **Generate** > the document row appears (v1) > regenerate for v2 (v1 under **Show superseded**) > **E-mail** panel.
+
+| # | Where | Result | Shot |
+|---|---|---|---|
+| 1 | Documents card on create | Generate BOL, Rate Con, Send Info all disabled with a reason | ![](screenshots/au/01-generate-row-create-1440-L.png) |
+| 2 | After Create (DRAFT) | Generate BOL enabled; an unsaved edit disables it with "Save first" | ![](screenshots/au/01-generate-row-saved-1440-L.png) ![](screenshots/au/01-generate-row-saved-1280-L.png) |
+| 3 | BOL dialog | Master or per-stop BOL; plain BOL has no dollar amounts, rated BOL is a CUSTOMER copy | ![](screenshots/au/02-dialog-1440-L.png) |
+| 4 | Regenerate | v2 ACTIVE, v1 SUPERSEDED, **Show superseded** lists it | ![](screenshots/au/04-superseded-list-1440-L.png) |
+| 5 | E-mail panel | Recipient picker, nothing preselected; sends only to ai4bcat@gmail.com | ![](screenshots/au/08-email-panel-1440-L.png) |
+
+Real: PDF generation, storage, versioning, download (presigned) and the e-mail record. Stubbed / limited on dev: the e-mail row ends NOT_SENT with a download link (SES). Not built: multi-carrier BOL pairing (per-carrier BOL scope, Rate Con carrier menu). Not live-run: Rate Con and Send Info dialogs (need a covered carrier; unit-tested).
+
+## Known rough edges (job 197)
+
+- Zip autofill and miles from real directory locations need the geocoder, which does not answer on dev: new locations need city / state typed, and the prod-refreshed locations have no coordinates, so auto miles only work on locations that carry coordinates (the ZZ fixtures do).
+- Rate history, DAT block: "DAT not connected" until the DAT login is configured.
+- A generated, unsigned BOL satisfies the "BOL required" release gate (risk R2), and a BOL can be generated on a DRAFT shipment (D5): both await Ryne's call.
+- The delivery timeline has no geofence evidence; a board row has no tracking ETA.
 
 ## C. The rest of the structure
 

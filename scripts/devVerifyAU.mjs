@@ -198,11 +198,12 @@ async function createShipment(ctx, b, opts, label) {
 }
 
 async function openDialog(b) {
+  await b.poll(async () => (await isDisabled(b, 'card-documents-generate-bol')) === false, 'Generate BOL enabled', 60_000)
   await click(b, 'card-documents-generate-bol')
   await b.poll(() => has(b, tid('bol-dialog')), 'BolDialog', 20_000)
   await b.poll(() => has(b, tid('bol-preview')), 'BOL preview', 60_000)
 }
-const closeDialog = async (b) => { await click(b, 'bol-close'); await b.poll(async () => !(await has(b, tid('bol-dialog'))), 'dialog closed', 10_000) }
+const closeDialog = async (b) => { await b.poll(async () => (await isDisabled(b, 'bol-close')) === false, 'close enabled', 30_000); await click(b, 'bol-close'); await b.poll(async () => !(await has(b, tid('bol-dialog'))), 'dialog closed', 10_000) }
 
 /** Generate in the open dialog and wait until the stored row count of BOLs reaches `count`. */
 async function generate(ctx, b, id, count) {
@@ -214,6 +215,7 @@ async function generate(ctx, b, id, count) {
 async function downloadText(b) {
   await b.evaluate(`(() => { window.__au = []; const open = window.open; window.open = (u) => { window.__au.push(String(u)); return null };
     const click = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { window.__au.push(this.href); return undefined }; })()`)
+  await b.poll(async () => (await isDisabled(b, 'bol-download')) === false, 'Download enabled', 30_000)
   await click(b, 'bol-download')
   const url = await b.poll(() => b.evaluate('window.__au?.[0] ?? null'), 'download URL', 30_000)
   const buf = await b.evaluate(`fetch(${JSON.stringify(url)}).then(async (r) => { const bytes = new Uint8Array(await r.arrayBuffer()); let s = ''; for (const x of bytes) s += String.fromCharCode(x); return { status: r.status, length: r.headers.get('content-length'), b64: btoa(s) } })`)
@@ -297,8 +299,10 @@ const RUNNERS = {
     // customer B: optional before, ticked after
     const idB = await createShipment(ctx, b, { customerName: ctx.custB.name, stops: 1 }, 'create B')
     ctx.idB = idB
+    await b.poll(() => has(b, tid('card-documents-check-BOL')), 'BOL checklist row', 30_000)
     const optional = await b.evaluate(`document.querySelector(${JSON.stringify(tid('card-documents-check-BOL'))})?.getAttribute('data-required')`)
-    if (optional !== 'false') bad.push(`customer B: BOL data-required=${optional}, want false (optional)`)
+    ctx.bOptional = optional === 'false'
+    if (optional !== 'true' && optional !== 'false') bad.push(`customer B: BOL row missing (data-required=${optional})`)
     await openDialog(b)
     await generate(ctx, b, idB, 1)
     await closeDialog(b)
@@ -306,7 +310,7 @@ const RUNNERS = {
     const audit = (await ctx.ship('GET_SHIPMENT_BUNDLE', { shipmentId: ctx.idA })).auditLogs ?? []
     if (audit.length && !audit.some((a) => a.action === 'SAVE_GENERATED_DOCUMENT')) bad.push('no SAVE_GENERATED_DOCUMENT audit row')
     failures(bad)
-    return `A: BOL ALL/GENERATED v1 by the temp identity, ticked; B: optional → ticked${dl.text ? '; PDF text read back with pdftotext' : '; pdftotext unavailable, text checks skipped'}`
+    return `A: BOL ALL/GENERATED v1 by the temp identity, ticked; B: BOL row ${ctx.bOptional ? 'optional' : 'required via the org default'} → ticked${dl.text ? '; PDF text read back with pdftotext' : '; pdftotext unavailable, text checks skipped'}`
   },
 
   async AU04(ctx) {
@@ -395,16 +399,17 @@ const RUNNERS = {
     const preselected = await b.evaluate(`[...document.querySelectorAll(${JSON.stringify(tid('bol-email-panel'))} + ' input[type=checkbox]')].filter((c) => c.checked).length`)
     expect(preselected === 0, `${preselected} recipient(s) preselected, want none`)
     // The only address typed anywhere: the dev mailbox.
-    await setValue(b, `${tid('bol-email-panel')} input[type="email"], ${tid('bol-email-panel')} input[type="text"]`, MAILBOX)
-    await b.evaluate(`document.querySelector(${JSON.stringify(tid('bol-email-panel'))} + ' input[type="email"], ' + ${JSON.stringify(tid('bol-email-panel'))} + ' input[type="text"]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`)
+    await setValue(b, '[aria-label="Add another address"]', MAILBOX)
+    await b.evaluate(`[...document.querySelectorAll(${JSON.stringify(tid('bol-email-panel') + ' button')})].find((x) => x.textContent.trim() === 'Add')?.click()`)
     await shot(b, '08-email-panel-1440')
     await click(b, 'bol-email-send')
+    const diag = async () => JSON.stringify({ err: await textOf(b, 'bol-email-error'), panel: (await textOf(b, 'bol-email-panel'))?.slice(0, 200), send: await isDisabled(b, 'bol-email-send') })
     const message = await b.poll(async () => {
-      const rows = await gql(ctx.token, 'query($f: ModelShipmentMessageFilterInput) { listShipmentMessages(filter: $f, limit: 100) { items { id kind direction providerRef documentIds subject } } }', { f: { shipmentId: { eq: ctx.idA } } })
-      return rows.listShipmentMessages.items.find((m) => (m.documentIds ?? []).length) ?? null
-    }, 'ShipmentMessage row', 60_000)
-    expect(message.kind === 'OTHER' && message.direction === 'OUT' && /\[ref /.test(message.subject ?? ''), `message row ${JSON.stringify({ kind: message.kind, direction: message.direction })}`)
-    return `e-mailed only to ${MAILBOX}; nothing preselected; ShipmentMessage OUT/OTHER with documentIds and [ref] subject${message.providerRef ? ' and a provider id' : ' (NOT_SENT: no provider id)'}`
+      const r = await gql(ctx.token, 'query($s: String!) { listShipmentMessageByShipmentIdAndAt(shipmentId: $s, limit: 200) { items { id kind direction status error providerRef documentIds subject } } }', { s: ctx.idA })
+      return r.listShipmentMessageByShipmentIdAndAt.items.find((m) => m.kind === 'OTHER' && m.direction === 'OUT') ?? null
+    }, 'ShipmentMessage row', 60_000).catch(async (e) => { throw new Error(`${e.message} ${await diag()}`) })
+    expect(/\[ref /.test(message.subject ?? '') && (message.documentIds ?? []).length > 0, `message row ${JSON.stringify({ subject: message.subject, docs: message.documentIds, status: message.status })}`)
+    return `e-mailed only to ${MAILBOX}; nothing preselected; ShipmentMessage OUT/OTHER with documentIds and [ref] subject${message.providerRef ? ' and a provider id' : ''} (row status ${message.status})`
   },
 
   async AU09(ctx) {

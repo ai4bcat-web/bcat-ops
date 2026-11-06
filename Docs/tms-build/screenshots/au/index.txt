@@ -1,0 +1,6 @@
+Docs/tms-build/screenshots/au/01-generate-row-create-1440-L.png
+Docs/tms-build/screenshots/au/01-generate-row-saved-1440-L.png
+Docs/tms-build/screenshots/au/01-generate-row-saved-1280-L.png
+Docs/tms-build/screenshots/au/02-dialog-1440-L.png
+Docs/tms-build/screenshots/au/04-superseded-list-1440-L.png
+Docs/tms-build/screenshots/au/08-email-panel-1440-L.png

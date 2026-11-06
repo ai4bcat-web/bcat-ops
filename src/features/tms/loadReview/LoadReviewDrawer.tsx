@@ -55,6 +55,11 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
     } catch (err) { setError(err instanceof Error ? err.message : String(err)) }
     finally { setBusy(false) }
   }
+  // Recording bills only changes this review: re-read it in place. A board refresh here would swap the drawer's row
+  // out from under the panel and wipe its per-carrier result list.
+  async function rereview() {
+    try { setResult(await reviewLoad({ shipmentId: row.id })) } catch (err) { setError(err instanceof Error ? err.message : String(err)) }
+  }
   async function move() {
     if (!result || !verdict.ok || released) return
     setBusy(true)
@@ -100,7 +105,7 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
       {verdict.checks[key].reasons.map((reason, index) => reason.action?.kind === 'OPEN_TAB' ? <p key={`${reason.code}-${index}`}>{shipmentLink(reason.action.tab, `Open ${reason.action.tab}`)}</p> : null)}
       {key === 'documents' && <p>{canOpen ? <Link to={DOCS_LANDING}>Review uploads</Link> : <span title="Needs the Shipments grant">Review uploads</span>}</p>}
     </TmsCard>)}
-    {(row.carrierCount ?? 0) >= 2 && !released && <CarrierBillsPanel shipmentId={row.id} disabled={busy} canOpenAp={hasPageAccess('carrierPay') || hasPageAccess('tms')} onChanged={() => fix(async () => {})} />}
+    {(row.carrierCount ?? 0) >= 2 && !released && <CarrierBillsPanel shipmentId={row.id} disabled={busy} canOpenAp={hasPageAccess('carrierPay') || hasPageAccess('tms')} onChanged={rereview} />}
     {verdict.warnings.map((warning) => <p key={warning}>{warning}</p>)}
   </TmsDrawer>
 }

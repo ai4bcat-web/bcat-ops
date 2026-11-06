@@ -331,7 +331,8 @@ async function fillRequired(ctx, b, { division } = {}) {
   if (division) await fill(b, 'f-shipping-revDivision', division); else await selectFirst(b, 'f-shipping-revDivision')
   await fill(b, 'f-shipping-weightLbs', '12000')
   await fill(b, 'f-shipping-description', ctx.commodity)
-  await pickFrom(b, tid('f-pickup-name'), tid('f-pickup-name-option'), ctx.locNames.shipper)
+  // Re-typing the name an earlier step already picked is no change: the suggestion list would never open.
+  if ((await valOf(b, 'f-pickup-name')) !== ctx.locNames.shipper) await pickFrom(b, tid('f-pickup-name'), tid('f-pickup-name-option'), ctx.locNames.shipper)
   await fill(b, 'f-pickup-ready', localDt(1, 7))
 }
 
@@ -1445,6 +1446,7 @@ const RUNNERS = {
     if (hdr.some((x) => x === null) || !(hdr[0] < hdr[1] && hdr[1] < hdr[2])) bad.push(`header order Customer, Customer ref, Bill To broken: ${hdr.join(',')}`)
     if (!(await b.evaluate(`document.querySelector('[data-testid="delivery-caption"]')?.innerText === 'DRAFT' || document.querySelector('[data-testid="delivery-caption"]')?.textContent === 'Draft'`))) bad.push('create: the timeline caption is not Draft')
     await shotAR(b, 'create-grid-1440')
+    await shotAR(b, 'delivery-timeline-1440')
     failures(bad)
     return 'every .tms-fg grid at 1440 and 1280: label height equal, inputs 32 px sharing a row top, nothing under an input but notes counters, spans sum to 12, rows flush, no horizontal overflow; Freight spans 3,3,3,3 / 3,3,3,3 / 9,3; header order Customer > Customer ref > Bill To; delivery timeline present with a text summary; screenshots ar-*-grid-*.png'
   },
@@ -1459,11 +1461,14 @@ const RUNNERS = {
     const read = () => b.evaluate(`Number(document.querySelector('[data-testid="f-shipping-customerMiles"]')?.value ?? 0)`)
     await b.poll(async () => (await read()) > 0, 'two-stop miles', 30_000)
     const direct = await read()
-    // Insert a middle pickup with another ZZ location: 3 stops = 2 legs, summed.
-    await click(b, 'f-route-addPickup-1'); await pause(300)
-    await pickFrom(b, tid('f-stop-1-name'), tid('f-stop-1-name-option'), ctx.locNames.pick2)
+    // Insert a middle pickup at a ZZ location off the Chicago-Dallas line (Waco): 3 stops = 2 legs, summed. Joliet lies on the line, so its detour can round to the same miles.
+    await click(b, 'f-route-addPickup-1')
+    await b.poll(() => has(b, tid('f-stop-1-name')), 'inserted pick field', 10_000)
+    await pickFrom(b, tid('f-stop-1-name'), tid('f-stop-1-name-option'), ctx.locNames.stop2)
     await b.poll(async () => (await read()) !== direct, 'three-stop miles', 30_000).catch(() => bad.push('adding a middle stop did not re-measure the miles'))
     const three = await read()
+    await b.evaluate(`document.querySelector('[data-testid="f-route-lane"]')?.scrollIntoView({ block: 'start' })`); await pause(400)
+    await shotAR(b, 'three-stop-miles-1440')
     if (!(three >= direct)) bad.push(`three-stop miles ${three} < the two-stop ${direct} (legs must add up, not shrink)`)
     if (await has(b, '[data-testid="f-shipping-' + 'truckMiles"]')) bad.push('a Truck Miles field is still on the form')
     await fillRequired(ctx, b)
@@ -1488,6 +1493,7 @@ const RUNNERS = {
     await b.poll(() => has(b, tid('f-pickup-addRow')), 'the + Add row', 15_000)
     await click(b, 'f-pickup-addRow')
     await fill(b, 'f-pickup-new-street', '1 ZZ Test Way'); await fill(b, 'f-pickup-new-zip', '60431')
+    await shotAR(b, 'inline-add-location-1440')
     // Zip autofill needs the geocoder; when dev's key does not answer, type the city and state so the rest still runs.
     await b.poll(async () => (await valOf(b, 'f-pickup-new-city')) !== '', 'zip autofill', 12_000).catch(async () => { notes.push('zip autofill did not answer'); await fill(b, 'f-pickup-new-city', 'Joliet'); await fill(b, 'f-pickup-new-state', 'IL') })
     await click(b, 'f-pickup-new-save')
@@ -1505,7 +1511,8 @@ const RUNNERS = {
   async AR17(ctx) {
     const b = ctx.b
     const bad = []
-    const name = `ZZ AR Customer ${ctx.ts}`
+    // One unique token: the picker also lists near names (the fixture "ZZ AH Customer <ts>" shares 3 of 4 words with "ZZ AR Customer <ts>"), which would hide the + Add row.
+    const name = `ZZ ARNewCo${ctx.ts}`
     await b.setViewport(1440, 900)
     await openForm(b, '/tms/shipments/new')
     if (await has(b, '[data-testid="f-customer-' + 'useTyped"]')) bad.push('the typed-name checkbox is still on the form')
@@ -1516,7 +1523,10 @@ const RUNNERS = {
     const clicked = await b.evaluate(`(() => { const d = document.querySelector('[role="dialog"]'); const btn = [...d.querySelectorAll('button')].find((x) => /^(save|create|add)/i.test(x.innerText.trim())); if (!btn) return false; btn.click(); return true })()`)
     if (!clicked) bad.push('no Save button in the customer dialog')
     await b.poll(async () => (await b.evaluate(`document.querySelector('[data-testid="f-customer-name-input"]')?.value ?? ''`)) === name, 'the new customer selected in the header', 30_000).catch(() => bad.push('the created customer was not selected'))
-    const rows = await listAll(ctx.token, 'Customer', { name: { eq: name } }, 'id updatedAt')
+    // The header input still shows the typed text while the save runs, so the poll above can pass at once: wait for the dialog to close and the row to exist.
+    await b.poll(async () => !(await has(b, '[role="dialog"]')), 'the create dialog closing', 30_000).catch(() => bad.push('the create dialog did not close after Save'))
+    let rows = []
+    for (let i = 0; i < 15 && rows.length === 0; i++) { rows = await listAll(ctx.token, 'Customer', { name: { eq: name } }, 'id updatedAt'); if (rows.length === 0) await pause(1000) }
     for (const r of rows) { ctx.extraCustomers = [...(ctx.extraCustomers ?? []), r] }
     if (rows.length !== 1) bad.push(`${rows.length} Customer rows named ${name}`)
     failures(bad)
