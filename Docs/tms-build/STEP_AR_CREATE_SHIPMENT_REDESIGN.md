@@ -277,3 +277,33 @@ revenue type."
 - Equipment stays its own field (not redundant with Division); it sits after Shipment type.
 Freight card field order: Division · Shipment type · Equipment · Weight / Billable · Pieces ·
 Footage · Description · Freight class · Declared value · Customer Ref · requirement chips.
+
+## Ryne's feedback 9 (2026-11-05 evening)
+"For tracking, let's make the tracking mode case by case instead of hard coded by customer. It
+should be selected when a carrier is booked in either the carrier section of new shipment or in
+the carrier sales page. You can merge tracking and carrier together into one section."
+
+- **Tracking mode is chosen per load, at booking time**, not inherited from the customer. The
+  customer's default (Step V / AJ) becomes a suggestion only: it pre-selects the control but the
+  user confirms it when the carrier is booked.
+- **Where it is chosen**: (a) the Carrier card of the create/edit form, and (b) the Cover /
+  booking step on the Carrier Sales page (Step AM ladder, state where the carrier is assigned).
+  Both use the same **TrackingModeControl**: Mode (Automated / Manual / None) and Method (SMS to
+  driver, tracking link, Motive / ELD, carrier check calls, e-mail), check-call cadence, auto
+  e-mail / text toggles for the customer (Step V settings), tracking assignee. Booking a carrier
+  without confirming tracking mode leaves a "Tracking mode not set" amber chip on the load in
+  the Shipments board and Load Tracking, and the rate con is not blocked.
+- **Carrier and Tracking merge into one card** named **Carrier & Tracking** in the main column
+  (where Carrier sat). Top half: the carrier block as specified (lookup card, Cover / Assign,
+  carrier details, dispatcher, drivers, truck/trailer, origin, ETA, confirm timestamps, Send Rate
+  Conf / Send Info; Ivan Cartage division shows the roster picker). Bottom half: the
+  TrackingModeControl, then the high-level tracking read (status, method, assignee, last position,
+  ETA, last / next check call, POD, "Open in Load Tracking"). Before a carrier is booked the
+  bottom half shows "Tracking is chosen when the carrier is booked" with the suggested mode
+  greyed. The separate Tracking card is removed.
+- Main column order: Freight, Route, Rates, Rate history, Carrier & Tracking, More strip,
+  Documents.
+- Data: tracking mode / method / cadence are stored on the Load (they already exist from V / AJ
+  for the per-load override); the customer-level default stays as the suggestion source. Load
+  Tracking reads the per-load value first. Carrier Sales booking writes the same fields through
+  the same Lambda action.
