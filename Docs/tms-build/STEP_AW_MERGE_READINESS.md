@@ -239,3 +239,36 @@ Cutover
 29. Inactive Aljex customers import as **Locations**, not customers (they have no active billing).
 30. Duplicate carriers (the repeated MC, 17 repeated names): **merge**, keep the Aljex Carrier IDs of the
     merged rows as aliases.
+
+## Ryne's answers round 2 (2026-11-07) and the Monday go-live
+1. Numbering from 20000 applies to the **PRO** (shipment number). As in Aljex, the invoice number is the PRO,
+   so invoices carry the same number; no separate invoice series. Wire it as the next-number counter start.
+2. **Go live Monday 2026-11-09; Aljex is not used after that.** Today is Saturday 11-07. The cutoff
+   2026-11-07 00:00 stays the snapshot, and a FINAL DELTA import (loads, customers, carriers, AR, AP created or
+   changed in Aljex since the snapshot) runs from fresh Aljex exports Sunday night / Monday early morning.
+3. Danisco 120-day terms apply to **both** accounts (100338 DANISCO US INC., 100629 DANISCO USA INC.) and
+   any "DANISCO US, INC." variant that resolves to either.
+4. Customers whose Aljex e-billing address is invoicefactoring@bcatcorp.com (UNITED PLASTICS INC, TOMBO
+   LOGISTICS LLC) are **FACTOR**, not manual. The other 7 internal-address customers are manual.
+5. **Jenny = Jenny@bcatcorp.com**: the only user who can Release to billing, Send invoice and sign off the
+   reconciliation (find her Cognito user by that e-mail; fail loudly if absent).
+6. User list confirmed: the existing BCAT Ops logins carry over.
+7. **UI merge rule: keep BCAT Ops' blue palette, use the dev UI's styling and branding.** Dev layout, shell,
+   components, typography, spacing, logo/branding stay; the dev green accent tokens (`--tms-*`) are replaced
+   by BCAT's production blue (take the exact hex values from production's design tokens on `main`),
+   light and dark. Every merged production page (Dispatch, Calendar, driver pages, Hours, Time off, Files,
+   Fleet etc.) must show the same blue-accent, dev-styled look; deliver before/after screenshots at 1440 and
+   1280 of the main pages for Ryne's review, and a contrast check (WCAG AA) on the blue.
+
+### Schedule (hard target: live Monday 2026-11-09)
+Sat 11-07 and Sun 11-08: finish stage B rehearsal + regression gaps, C (shipments replace loads), D (billing
+method, Billing setup, release rules, Jenny-only), E (importers + reconciliation with open-balance/approve),
+F (blue palette on dev styling), the encrypted tax-ID store design. Sun evening: full rehearsal pass on the
+copy of production with fresh data, reconciliation report, go/no-go checklist for Ryne. Monday early morning:
+the GSI prep deploy and the real merge to `main` ONLY on Ryne's explicit go at that checkpoint, with a
+fresh backup taken right before (rerun the 2026-11-08 backup procedure under a new stamp). If a go/no-go
+criterion fails, report it and recommend slipping rather than shipping broken.
+Go/no-go criteria: full test suite and build green; MERGE_REGRESSION gaps all covered; rehearsal regression
+run clean; schema diff has no blockers and the data stack is under the cap; required prod secrets present;
+AR/AP/customer/carrier reconciliation done with every difference matched or approved; Jenny's login works
+for release/send; backup verified.
