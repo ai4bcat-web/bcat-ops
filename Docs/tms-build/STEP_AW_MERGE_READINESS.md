@@ -309,3 +309,16 @@ due date; Ryne's 120-day Danisco term applies to new invoices.
 Import as carried-over open invoices (never resend), keep Invoice Date and Due Date, bill-to party, partial
 payments as an ArPayment of the amount paid. Stage E reconciliation: open AR by invoice, by customer, by bill-to
 and by aging bucket to the cent ($357,753.44), plus the factored/manual split.
+
+## Ryne's answers round 4 (2026-11-07)
+1. **Danisco: REDATE ALL to 120 days.** Every carried-over Danisco invoice (accounts 100338 DANISCO US INC.,
+   100629 DANISCO USA INC., and any variant resolving to them, incl. the 54 invoices Aljex has at 90 days)
+   gets due date = invoice date + 120 days, not the Aljex due date. Record the original Aljex due date and
+   terms on the invoice (`aljexDueDate`, `aljexTerms`) with an audit line "Redated to 120 days per Ryne
+   2026-11-07"; reconciliation shows these as approved due-date differences (amounts still match to the
+   cent). Aging buckets are recomputed from the new due date. New Danisco invoices use Net 120.
+2. The two customers set to factor (UNITED PLASTICS INC, TOMBO LOGISTICS LLC) get no invoice e-mail
+   (cleared), as for all factored customers.
+3. The encrypted tax-ID design (AW_TAXID_DESIGN.md) is approved: build it as designed.
+4. Staged production deploys: ask Ryne for an explicit go before EACH deploy (he replies with the exact
+   instruction, e.g. "merge PR N to production").
