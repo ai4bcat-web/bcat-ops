@@ -1,5 +1,9 @@
 # TMS build log
 
+## 2026-11-08 - Step AW stage A: origin/main merged into dev (branch `merge/main-into-dev`, not pushed to dev)
+- Merge `51c769c`: 16 main-only commits (78 files) into dev; 16 conflicted files resolved keeping both feature sets (directory/Locations driver notes, driver-app trailer/bobtail, files DOT/doc dates, Hours period view + hourly rates, time-off/PTO, fleet dashboard). `resource.ts`, `backend.ts`, `App.tsx`, `navSections.ts` auto-merged cleanly (Feedback page was already on dev). main's new files were re-tokenised to `--tms-*` (dev's S3 palette rule). One main test edited (`LocationDetail.test.tsx` store mock gained `loadedMonths`/`ensureLoadRange`; assertions untouched). Full gate green: tsc x3, eslint 0 warnings, 844 files / 10,420 tests, build.
+- Inventory: `Docs/tms-build/MERGE_REGRESSION.md` (78 features: 38 covered, 30 partial, 10 gap; 64 Lambdas, 15 with no test). Schema/size: `Docs/tms-build/AW_SCHEMA_DIFF.md` (no blockers; Load +3 GSIs, AuditLog +1; data stack 968,579 B / 460 of 500 on the prod shape). PRO link findings: `Docs/tms-build/AW_PRO_LINK_FINDINGS.md`.
+
 ## 2026-11-06 - Step AV deployed (job 202): lifecycle tabs Quote / Build / View / Book / Track / Review
 
 Dev only, commit 5e7ad1a. Live runs against dev with throwaway identities (all deleted and confirmed gone). Screenshots at 1440x900: `Docs/tms-build/screenshots/av/` (index.txt there); DEMO_WALKTHROUGH.md now narrates Quote > Build > View > Book > Track > Review and the short sidebar.
