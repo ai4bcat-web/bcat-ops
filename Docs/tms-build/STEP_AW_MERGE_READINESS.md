@@ -159,3 +159,23 @@ there; production has no carrier directory table. Dry run: new vs matching by MC
 different name or e-mail), the duplicate-MC pair, inactive carriers (import inactive, never active), and
 carriers with a Factor Id. Reconciliation (stage E) compares name, MC, DOT, remit-to, terms, quick pay,
 status, factor.
+
+## Aljex AP and active-shipment files received (2026-11-08)
+Files in `/Users/adminoid/aljex-export/` (outside the repo, mode 600):
+- `aljex-ap-aging-2026-11-08.csv`: open carrier bills (AP aging). 67 bills, $83,407.20 (0-30: $66,642.20,
+  31-60: $16,765.00, nothing older). Key = Pro # + Vendor ID (Vendor ID is the Aljex Carrier ID, same value as
+  `Aljex Carrier ID` in the carrier list). Pay to differs from Vendor on 40 rows (factored carriers: map to
+  the carrier's remit-to/factor). **`Amount Paid` equals the open amount on all 67 rows, so it is the bill
+  amount mislabeled, not a payment: do not treat it as paid; confirm with Ryne.** `Voucher #` is blank,
+  `Vend Invoice #` is just the PRO on 38 rows and a placeholder word (LINE, MAC, a driver name) on 29: BCAT
+  bill number = PRO + vendor, keep the Aljex text as a reference only. Check/Draft code C or D: record as
+  `aljexPayMethod`, meaning unconfirmed. No PJ hold, super hold or claim holds.
+- `aljex-ap-expected-2026-11-08.csv`: 36 loads whose carrier cost is expected but not yet billed,
+  $35,269.18. 12 rows ($7,562.71) are dated 2024 and 2025 and look stale; PRO 6269 appears three times
+  (vendor name variants). List stale and duplicate rows for Ryne; do not carry them as payables.
+- `aljex-active-shipments-2026-11-08.csv`: 10 currently active shipments with customer and carrier rates and
+  status (OPEN, COVERED, DEPARTED 1/2, DELIVERED 2/2). Use as the first end-to-end cross-check: each PRO must
+  exist in BCAT with the same customer, carrier, rates and stops. 99 of the 110 Aljex PROs across these files
+  are already in dev (the other 11 are probably newer than the Nov 3 import): report them.
+Reconciliation (stage E) for AP: open bills by carrier, by pay-to and by aging bucket equal to the cent
+($83,407.20 total), plus the expected list as its own line. AR is NOT in these files yet.
