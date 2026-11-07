@@ -30,6 +30,7 @@
  * are SKIP_ALLOWED when AWS cannot list it; the harness never calls lambda:Invoke, so the direct scheduled-door check of
  * AG07 is SKIP_ALLOWED (AG07 proves the cursor and the partial/continue path through the Review now door instead).
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -41,11 +42,11 @@ import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from '
 import { createWalk } from './lib/uiWalk.mjs'
 import { buildInvoicePdf, buildCorpus, expectedCounts, injectInput, rawExtraction, BANK_SENTINEL } from './lib/apInboxFixtures.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
-const DEV_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+const DEV_APPSYNC = APPSYNC_URL_RE
+const DEV_SUFFIX = STACK.tableSuffix
 const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
 const PROD_BUCKET = 'amplify-d3dejqzs77khq6-ma-bcatrateconfirmsbucketf4-8peppeemuqmg'
-const DEV_BUCKET_PREFIX = 'amplify-d3dejqzs77khq6-de'
+const DEV_BUCKET_PREFIX = STACK.lambdaPrefix
 const SHOTS = resolve('Docs/tms-build/ag-proof')
 const REGION = 'us-east-1'
 const MAIL_OBJECT_PREFIX = 'intake-pdfs/ap-inbox/'
@@ -835,7 +836,7 @@ function claims(token) {
 
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAG refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAG refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAG refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyAG only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
 

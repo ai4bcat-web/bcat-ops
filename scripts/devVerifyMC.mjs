@@ -16,6 +16,7 @@
  * deleted: PROs are permanent), customer archived, carriers set INACTIVE. Output carries ids and counts only.
  * Screenshots: Docs/tms-build/screenshots/at/<nn>-<slug>.png at 1440x900.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -24,7 +25,7 @@ import { launchBrowser, ALLOWED_ORIGINS, DEV_ORIGIN, pause } from './lib/cdpBrow
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from './lib/devIdentity.mjs'
 import { poReference, findActiveRepId, reviewGaps, REVIEW_MARKER, DEFAULT_DIVISION } from './lib/releaseFixture.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const SHOTS = resolve('Docs/tms-build/screenshots/at')
 const VOID_REASON = 'ZZ MC harness'
 const MAILBOX = 'ai4bcat@gmail.com'
@@ -581,7 +582,7 @@ async function cleanup(ctx) {
 async function main() {
   if (flag('inventory')) { inventory(); return }
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyMC refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyMC refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyMC refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyMC only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
   await mkdir(SHOTS, { recursive: true })

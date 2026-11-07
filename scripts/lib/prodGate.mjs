@@ -21,10 +21,15 @@
  * four gates, the backup check, the real engine) against the DEV tables `<Model>-<suffix>` where the suffix is
  * the dev suffix, optionally followed by `-rh<tag>` (a rehearsal copy). The gate treats it as production-shaped.
  * The seam can only ever point at a dev suffix, never at production.
+ *
+ * REHEARSAL STACK: with env BCAT_STACK=rehearsal (scripts/lib/stackConfig.mjs) the `rehearsal` Amplify branch's
+ * table suffix is ALSO classified as a non-production target ('rehearsal'), so the dev guards and the seam accept
+ * it. Without that env it is 'unknown' like any other suffix, and the production suffix is refused in both modes.
  */
 import { createInterface } from 'node:readline/promises';
 import { DynamoDBClient, ListBackupsCommand } from '@aws-sdk/client-dynamodb';
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts';
+import { STACK, isRehearsal } from './stackConfig.mjs';
 
 export const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE';
 export const PROD_SUFFIX_FRAGMENT = '5ucwdyvwivelbo4k4jomvrwel4';
@@ -61,11 +66,18 @@ export class ProdGateError extends Error {
 /** True when `value` (a suffix or a full table name) names the production stack anywhere. */
 export const isProductionSuffix = (value) => typeof value === 'string' && value.includes(PROD_SUFFIX_FRAGMENT);
 
-/** 'prod' | 'dev' | 'dev-rehearsal' | 'unknown' for a table suffix. A string naming both stacks is 'prod'. */
-export function classifySuffix(suffix) {
+/** The rehearsal stack's table suffix, only when BCAT_STACK=rehearsal selected it for this process. */
+export const SELECTED_REHEARSAL_SUFFIX = isRehearsal ? STACK.tableSuffix : null;
+
+/**
+ * 'prod' | 'dev' | 'dev-rehearsal' | 'rehearsal' | 'unknown' for a table suffix. A string naming both stacks is
+ * 'prod'. 'rehearsal' is the BCAT_STACK=rehearsal stack's own suffix (`rehearsalSuffix`, null unless that env is set).
+ */
+export function classifySuffix(suffix, rehearsalSuffix = SELECTED_REHEARSAL_SUFFIX) {
   if (typeof suffix !== 'string' || !suffix) return 'unknown';
   if (isProductionSuffix(suffix)) return 'prod';
   if (suffix === DEV_SUFFIX) return 'dev';
+  if (rehearsalSuffix && suffix === rehearsalSuffix) return 'rehearsal';
   if (suffix.startsWith(`${DEV_SUFFIX}-rh`) && /^-rh[a-z0-9]{3,12}$/.test(suffix.slice(DEV_SUFFIX.length))) return 'dev-rehearsal';
   return 'unknown';
 }
@@ -195,8 +207,8 @@ export function resolveProdSuffix(values) {
   const seam = values['prod-mode-rehearsal-suffix'];
   const explicit = values.suffix;
   if (seam !== undefined) {
-    if (typeof seam !== 'string' || !['dev', 'dev-rehearsal'].includes(classifySuffix(seam))) {
-      throw new ProdGateError(`--prod-mode-rehearsal-suffix must be the dev suffix ${DEV_SUFFIX} or ${DEV_SUFFIX}-rh<tag>, never production (got "${seam}")`);
+    if (typeof seam !== 'string' || !['dev', 'dev-rehearsal', 'rehearsal'].includes(classifySuffix(seam))) {
+      throw new ProdGateError(`--prod-mode-rehearsal-suffix must be the dev suffix ${DEV_SUFFIX} or ${DEV_SUFFIX}-rh<tag> (or the BCAT_STACK=rehearsal suffix), never production (got "${seam}")`);
     }
     if (explicit !== undefined && explicit !== seam) throw new ProdGateError('--suffix and --prod-mode-rehearsal-suffix disagree; pass only the rehearsal suffix');
     return { suffix: seam, rehearsal: true };

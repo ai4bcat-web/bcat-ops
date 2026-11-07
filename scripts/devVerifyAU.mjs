@@ -22,6 +22,7 @@
  * hazmat lines are not typed; the PDF read-back asserts what the form does set (PRO, PO, chips, seal when booked).
  * Screenshots: Docs/tms-build/screenshots/au/<nn>-<slug>-L.png at 1440 and 1280.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -32,7 +33,7 @@ import { launchBrowser, ALLOWED_ORIGINS, DEV_ORIGIN, pause } from './lib/cdpBrow
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from './lib/devIdentity.mjs'
 import { createWalk } from './lib/uiWalk.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const SHOTS = resolve('Docs/tms-build/screenshots/au')
 const VOID_REASON = 'AU harness'
 const MAILBOX = 'ai4bcat@gmail.com'
@@ -530,7 +531,7 @@ async function runStep(ctx, step) {
 async function main() {
   if (flag('inventory')) { if (!(await inventory())) process.exitCode = 1; return }
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAU refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAU refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAU refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyAU only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
   if (!(await inventory())) { process.exitCode = 1; return }

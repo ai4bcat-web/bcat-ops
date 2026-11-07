@@ -34,16 +34,17 @@
  * Without those variables it signs in a throwaway ADMIN minted in the dev pool. That admin is
  * not the owner, so the owner-only user-management steps are refused, as they should be.
  */
+import { STACK } from './lib/stackConfig.mjs'
 import { randomBytes } from 'node:crypto'
 import { devAdminSession } from './lib/devAdminSession.mjs'
 import { bookCarrier, poReference, recordCarrierBill, releaseForReview } from './lib/releaseFixture.mjs'
 import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
 refuseReadOnlyFlag('devVerifyCommissions.mjs')
 
-const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
-const DEV_POOL = 'us-east-1_UKhMNVAG1'
-const DEV_CLIENT = '59284j3vm69gqg49cinjrr4dci'
-const DEV_TABLE_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+const DEV_API = STACK.apiUrl
+const DEV_POOL = STACK.staffPoolId
+const DEV_CLIENT = STACK.staffClientId
+const DEV_TABLE_SUFFIX = STACK.tableSuffix
 /** Must match OWNER_EMAIL in amplify/functions/userManagement/handler.ts. */
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 

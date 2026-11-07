@@ -1,3 +1,4 @@
+import { STACK } from '../stackConfig.mjs'
 import { DynamoDBClient, DescribeTableCommand } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, UpdateCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb'
 import { readFile } from 'node:fs/promises'
@@ -22,7 +23,7 @@ export async function run(ctx) {
   const tms = ctx.id.tms
   const ddb = new DynamoDBClient({ region: 'us-east-1' })
   const doc = DynamoDBDocumentClient.from(ddb, { marshallOptions: { removeUndefinedValues: true } })
-  const suffix = process.env.DEV_TABLE_SUFFIX || 'nc3jsnxdmjhkpequimypiatkma-NONE'
+  const suffix = process.env.DEV_TABLE_SUFFIX || STACK.tableSuffix
   if (/prod/i.test(suffix)) throw new Error('refusing a production table suffix')
   await ddb.send(new DescribeTableCommand({ TableName: `Carrier-${suffix}` }))
   const owned = new Set()

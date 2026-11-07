@@ -1,6 +1,8 @@
 /**
  * Dev-stack identity + API helpers shared by the dev verification scripts.
- * Dev only: every constant points at the dev Cognito pool / AppSync / public Lambda URL.
+ * Dev only: every constant points at the SELECTED stack's Cognito pool / AppSync / public Lambda URL: the dev stack
+ * by default, the rehearsal stack under BCAT_STACK=rehearsal (scripts/lib/stackConfig.mjs). Temporary identities are
+ * created and deleted in that stack's staff pool only; a production pool id is refused before any Cognito call.
  * Passwords are generated here and never printed.
  */
 import { randomBytes } from 'node:crypto'
@@ -14,12 +16,21 @@ import {
   AdminGetUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider'
 import { blockWhenReadOnly } from './readOnlyGuard.mjs'
+import { PRODUCTION, STACK } from './stackConfig.mjs'
 
-export const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
-export const DEV_POOL = 'us-east-1_UKhMNVAG1'
-export const DEV_CLIENT = '59284j3vm69gqg49cinjrr4dci'
-export const PUBLIC_API = 'https://jk65s5nfkj2sfnnoang4huvbvq0bsruo.lambda-url.us-east-1.on.aws'
-export const region = 'us-east-1'
+// The names say DEV for history; they are the selected stack's values (BCAT_STACK, default dev).
+export const DEV_API = STACK.apiUrl
+export const DEV_POOL = STACK.staffPoolId
+export const DEV_CLIENT = STACK.staffClientId
+export const PUBLIC_API = STACK.publicApi
+export const region = STACK.region
+
+/** Throws unless `pool` is the selected stack's staff pool and not a production pool. */
+export function assertStaffPool(pool) {
+  if (pool === PRODUCTION.staffPoolId || pool === PRODUCTION.driverPoolId || pool !== STACK.staffPoolId) {
+    throw new Error(`refusing Cognito pool ${pool}: only the ${STACK.name} staff pool is allowed`)
+  }
+}
 
 export const outputs = {
   auth: {
@@ -58,6 +69,7 @@ export const routerAs = (token, field) => async (action, input) => {
 
 /** A throwaway dev login. The password is generated here and never printed. */
 export async function mintIdentity(email, groups) {
+  assertStaffPool(DEV_POOL)
   const password = `Aa1!${randomBytes(18).toString('base64url')}`
   await cognito.send(new AdminCreateUserCommand({
     UserPoolId: DEV_POOL, Username: email, MessageAction: 'SUPPRESS',
@@ -99,6 +111,7 @@ export async function mintIdentity(email, groups) {
  * Returns true when the user no longer exists; never throws.
  */
 export async function deleteIdentity(email) {
+  assertStaffPool(DEV_POOL)
   await cognito.send(new AdminDeleteUserCommand({ UserPoolId: DEV_POOL, Username: email })).catch(() => {})
   try {
     await cognito.send(new AdminGetUserCommand({ UserPoolId: DEV_POOL, Username: email }))

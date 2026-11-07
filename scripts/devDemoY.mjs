@@ -10,6 +10,7 @@
  * /tmp/demoY-state.json so a stage can be re-run. Passwords and tokens are never printed.
  */
 import { mkdir } from 'node:fs/promises'
+import { lambdaName } from './lib/stackConfig.mjs'
 import { LambdaClient, GetFunctionConfigurationCommand, GetFunctionUrlConfigCommand } from '@aws-sdk/client-lambda'
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { resolve } from 'node:path'
@@ -199,7 +200,7 @@ async function seedTrackId(ctx) {
   return ctx.state.seedTrackId
 }
 
-const INTAKE_LAMBDA = 'amplify-d3dejqzs77khq6-de-shipmentemailintakelambd-YsxNLkk5biqY'
+const INTAKE_LAMBDA = lambdaName('shipmentemailintakelambd', 'amplify-d3dejqzs77khq6-de-shipmentemailintakelambd-YsxNLkk5biqY')
 async function messagesOf(ctx, shipmentId) {
   const rows = []; let next = null
   do {

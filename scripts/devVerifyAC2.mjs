@@ -23,6 +23,7 @@
  *
  * Screenshots: Docs/tms-build/screenshots/ac2/<board>-<width>.png
  */
+import { STACK } from './lib/stackConfig.mjs'
 import { access, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { launchBrowser, ALLOWED_ORIGINS, DEV_ORIGIN } from './lib/cdpBrowser.mjs'
@@ -476,7 +477,7 @@ async function walkBoard(b, board) {
 
 // ── Customers: Open AR + Last shipment (CRM_LIST_ACCOUNTS withActivity) ──────────────────────────
 
-const DEV_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+const DEV_SUFFIX = STACK.tableSuffix
 const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
 /** A dev table by model; refuses anything that is not the dev stack's. */
 const devTable = (model) => {

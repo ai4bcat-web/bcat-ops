@@ -32,6 +32,7 @@
  * is only ever enabled on ZZ customers (and, for one step, a BROKERAGE division override that is put
  * back in `finally`).
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -42,9 +43,9 @@ import { launchBrowser, ALLOWED_ORIGINS, DEV_ORIGIN, pause } from './lib/cdpBrow
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from './lib/devIdentity.mjs'
 import { createWalk, SHELL_FACTS, TOKEN_PROBE, shellFailures } from './lib/uiWalk.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
-const DEV_LAMBDA_PREFIX = 'amplify-d3dejqzs77khq6-de'
+const DEV_LAMBDA_PREFIX = STACK.lambdaPrefix
 const SHOTS = resolve('Docs/tms-build/screenshots/V')
 const REGION = 'us-east-1'
 const VOID_REASON = 'step V verification fixture'
@@ -198,7 +199,7 @@ const ddb = new DynamoDBClient({ region: REGION })
 const doc = DynamoDBDocumentClient.from(ddb, { marshallOptions: { removeUndefinedValues: true } })
 
 async function discoverDevSuffix() {
-  const suffix = process.env.DEV_TABLE_SUFFIX || 'nc3jsnxdmjhkpequimypiatkma-NONE'
+  const suffix = process.env.DEV_TABLE_SUFFIX || STACK.tableSuffix
   if (suffix === PROD_SUFFIX || suffix.includes(PROD_SUFFIX)) throw new Error('refusing the production table suffix')
   await ddb.send(new DescribeTableCommand({ TableName: `Load-${suffix}` })).catch(() => { throw new Error(`no Load-${suffix} table in the account`) })
   return suffix
@@ -970,7 +971,7 @@ async function cleanup(ctx) {
 // ───────────────────────────── main ─────────────────────────────
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyV refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyV refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyV refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyV only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
 

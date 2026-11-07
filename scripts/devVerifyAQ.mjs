@@ -19,6 +19,7 @@
  * One throwaway ADMIN identity (zz-aq-admin-<ts>) and one ZZ customer/shipment are created and removed (voided / archived /
  * deleted, and proven gone) in `finally`. Nothing is ever assigned, saved or confirmed on a real driver.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { access, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -26,7 +27,7 @@ import { randomUUID } from 'node:crypto'
 import { launchBrowser, ALLOWED_ORIGINS, DEV_ORIGIN, pause } from './lib/cdpBrowser.mjs'
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from './lib/devIdentity.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const VOID_REASON = 'ZZ AQ verification fixture'
 
 const args = process.argv.slice(2)
@@ -230,7 +231,7 @@ async function cleanup(ctx) {
 async function main() {
   if (!walk) { if (!(await inventory())) process.exitCode = 1; if (!flag('inventory')) console.log('(no --walk: nothing was called)'); return }
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAQ refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAQ refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAQ refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyAQ only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
   if (!(await inventory())) { process.exitCode = 1; return }

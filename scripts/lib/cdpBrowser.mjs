@@ -3,8 +3,10 @@ import { mkdtemp, readFile, rm, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import WebSocket from 'ws'
+import { STACK } from './stackConfig.mjs'
 
-export const DEV_ORIGIN = 'https://dev.d3dejqzs77khq6.amplifyapp.com'
+/** The selected stack's web origin: the dev branch by default, the rehearsal branch under BCAT_STACK=rehearsal. */
+export const DEV_ORIGIN = STACK.origin
 export const ALLOWED_ORIGINS = [DEV_ORIGIN, 'http://localhost:5173', 'http://127.0.0.1:5173']
 export const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 

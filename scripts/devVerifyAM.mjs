@@ -21,6 +21,7 @@
  *
  * Screenshots: Docs/tms-build/screenshots/am/<name>.png, 1440x900, listed in index.txt.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile, access } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -30,7 +31,7 @@ import { DynamoDBDocumentClient, PutCommand, UpdateCommand, DeleteCommand, GetCo
 import { launchBrowser, ALLOWED_ORIGINS, DEV_ORIGIN, pause } from './lib/cdpBrowser.mjs'
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from './lib/devIdentity.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const SHOTS = resolve('Docs/tms-build/screenshots/am')
 const REGION = 'us-east-1'
 const PROD_SUFFIX = process.env.PROD_TABLE_SUFFIX || 'rzxdbk7k6zh6vjpcdbmzbmfk4q-NONE'
@@ -143,7 +144,7 @@ const ddb = new DynamoDBClient({ region: REGION })
 const doc = DynamoDBDocumentClient.from(ddb, { marshallOptions: { removeUndefinedValues: true } })
 
 async function discoverDevSuffix() {
-  const suffix = process.env.DEV_TABLE_SUFFIX || 'nc3jsnxdmjhkpequimypiatkma-NONE'
+  const suffix = process.env.DEV_TABLE_SUFFIX || STACK.tableSuffix
   if (suffix.includes(PROD_SUFFIX)) throw new Error('refusing the production table suffix')
   await ddb.send(new DescribeTableCommand({ TableName: `Load-${suffix}` })).catch(() => { throw new Error(`no Load-${suffix} table in the account`) })
   return suffix
@@ -498,7 +499,7 @@ async function runWalk(ctx, b) {
 async function main() {
   if (!walk) { if (!(await inventory())) process.exitCode = 1; if (!walk && !flag('inventory')) console.log('(no --walk: nothing was called)'); return }
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAM refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAM refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAM refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyAM only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
   if (!(await inventory())) { process.exitCode = 1; return }

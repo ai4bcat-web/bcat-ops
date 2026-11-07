@@ -5,12 +5,13 @@
  * Throwaway identities only (deleted at the end). Dev only.
  *   node scripts/devVerifyAV.mjs
  */
+import { STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { launchBrowser, DEV_ORIGIN, pause } from './lib/cdpBrowser.mjs'
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity } from './lib/devIdentity.mjs'
 
-if (!/f5iqzdpidzalvjys7yxijn5ave/.test(DEV_API) || DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('dev only')
+if (DEV_API !== STACK.apiUrl || DEV_POOL !== STACK.staffPoolId) throw new Error('dev only')
 const SHOTS = resolve('Docs/tms-build/screenshots/av')
 await mkdir(SHOTS, { recursive: true })
 const ts = Date.now()

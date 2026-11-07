@@ -18,6 +18,7 @@
  * minted in the dev pool and deleted afterwards. With --target prod the shared gate decides and the
  * identity is the BCAT_EMAIL / BCAT_PASSWORD ADMIN login on the pool in --outputs. SSM is never touched.
  */
+import { API_HOST } from './lib/stackConfig.mjs'
 import { pathToFileURL } from 'node:url'
 import { parseArgs as nodeParseArgs } from 'node:util'
 import { PROD_GATE_OPTIONS, requireProd } from './lib/prodGate.mjs'
@@ -26,7 +27,7 @@ import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs'
 export const DRIVER_NAME = 'John Brittich'
 export const PHONE_LABEL = 'Dev test phone (Ryne)'
 export const PRODUCTION_SUFFIX_FRAGMENT = '5ucwdyvwivelbo4k4jomvrwel4'
-const DEV_API_HOST = 'f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com'
+const DEV_API_HOST = API_HOST
 
 /** US E.164 only (what Twilio is set up for). Returns null for anything else. */
 export function toE164(raw) {

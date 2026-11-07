@@ -18,6 +18,7 @@
  * No passwords, tokens or secrets are printed. Results go to Docs/tms-build/EMAIL_LIVE_TEST.md
  * (ids and statuses; no addresses beyond the allow-listed mailbox).
  */
+import { STACK, lambdaName, roleName } from './lib/stackConfig.mjs'
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -32,10 +33,10 @@ const here = dirname(fileURLToPath(import.meta.url))
 const REPORT = resolve(here, '../Docs/tms-build/EMAIL_LIVE_TEST.md')
 
 export const ALLOWED = 'ai4bcat@gmail.com'
-const SHIPMENT_LAMBDA = 'amplify-d3dejqzs77khq6-de-tmsshipmentactionslambda-x2KeBv2mM6Mk'
-const FINANCE_LAMBDA = 'amplify-d3dejqzs77khq6-de-tmsfinanceactionslambda4-Lqsan9dSRpVa'
-const INTAKE_LAMBDA = 'amplify-d3dejqzs77khq6-de-shipmentemailintakelambd-YsxNLkk5biqY'
-const SHIPMENT_ROLE = 'amplify-d3dejqzs77khq6-de-tmsshipmentactionslambdaS-qg7E3EtcTcYJ'
+const SHIPMENT_LAMBDA = lambdaName('tmsshipmentactionslambda', 'amplify-d3dejqzs77khq6-de-tmsshipmentactionslambda-x2KeBv2mM6Mk')
+const FINANCE_LAMBDA = lambdaName('tmsfinanceactionslambda', 'amplify-d3dejqzs77khq6-de-tmsfinanceactionslambda4-Lqsan9dSRpVa')
+const INTAKE_LAMBDA = lambdaName('shipmentemailintakelambd', 'amplify-d3dejqzs77khq6-de-shipmentemailintakelambd-YsxNLkk5biqY')
+const SHIPMENT_ROLE = roleName('tmsshipmentactionslambdaS', 'amplify-d3dejqzs77khq6-de-tmsshipmentactionslambdaS-qg7E3EtcTcYJ')
 
 /** Exactly the mailbox, or one of its +tag aliases (which Gmail delivers to the same inbox). */
 export function isMailbox(address) {
@@ -362,7 +363,7 @@ async function main() {
     console.log('usage: node scripts/devVerifyEmail.mjs --inventory | --run')
     return
   }
-  if (DEV_API !== 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql') throw new Error('refusing to run against a non-dev API')
+  if (DEV_API !== STACK.apiUrl) throw new Error('refusing to run against a non-dev API')
   let verdict
   try {
     await run()

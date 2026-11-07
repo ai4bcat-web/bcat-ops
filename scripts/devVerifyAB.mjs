@@ -25,6 +25,7 @@
  * instead of waiting for DEV_VERIFY_REP2_* credentials, so the SKIP for it is gone; the sim `sent/` prefix is not read
  * directly (no bucket handle here) — the request carries no sentAt/sentVia until the rep marks it with SPOT_MARK_SENT.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -38,8 +39,8 @@ import { createWalk } from './lib/uiWalk.mjs'
 
 const run = promisify(execFile)
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
-const DEV_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+const DEV_APPSYNC = APPSYNC_URL_RE
+const DEV_SUFFIX = STACK.tableSuffix
 const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
 const SHOTS = resolve('Docs/tms-build/ab-proof')
 const REGION = 'us-east-1'
@@ -780,7 +781,7 @@ function claims(token) {
 
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAB refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAB refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAB refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyAB only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
 

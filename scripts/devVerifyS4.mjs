@@ -19,6 +19,7 @@
  * by a client (create/read only), so they are deleted through the AWS SDK against the dev table; residue is a
  * failure. Passwords and tokens are never printed.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -38,12 +39,12 @@ import { createWalk, SHELL_FACTS, TOKEN_PROBE, shellFailures } from './lib/uiWal
 import { S4_ROUTES, S4_REDIRECTS, s4NavGaps } from './lib/s4Routes.mjs'
 import { requiredLegacyPatterns, coveredPatterns } from './devVerifyS3.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
-const DRIVER_POOL = 'us-east-1_nnJzcFvTY'
-const DRIVER_CLIENT = 'qvnqkida69qhuquir2tahjvq'
+const DEV_APPSYNC = APPSYNC_URL_RE
+const DRIVER_POOL = STACK.driverPoolId
+const DRIVER_CLIENT = STACK.driverClientId
 const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
 const PROD_BUCKET = 'amplify-d3dejqzs77khq6-ma-bcatrateconfirmsbucketf4-8peppeemuqmg'
-const DEV_BUCKET_PREFIX = 'amplify-d3dejqzs77khq6-de'
+const DEV_BUCKET_PREFIX = STACK.lambdaPrefix
 const SHOTS = resolve('Docs/tms-build/screenshots/S4')
 const REGION = 'us-east-1'
 
@@ -226,7 +227,7 @@ const driverCognito = new CognitoIdentityProviderClient({ region: REGION })
  * DEV_TABLE_SUFFIX; the production suffix is always refused. The table must actually exist.
  */
 async function discoverDevSuffix() {
-  const suffix = process.env.DEV_TABLE_SUFFIX || 'nc3jsnxdmjhkpequimypiatkma-NONE'
+  const suffix = process.env.DEV_TABLE_SUFFIX || STACK.tableSuffix
   if (suffix === PROD_SUFFIX || suffix.includes(PROD_SUFFIX)) throw new Error('refusing the production table suffix')
   await ddb.send(new DescribeTableCommand({ TableName: `Load-${suffix}` })).catch(() => { throw new Error(`no Load-${suffix} table in the account`) })
   return suffix
@@ -860,8 +861,8 @@ async function cleanAuditResidue(ctx, token) {
 // ───────────────────────────── main ─────────────────────────────
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyS4 refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyS4 refuses any staff pool other than the dev pool')
-  if (DRIVER_POOL !== 'us-east-1_nnJzcFvTY') throw new Error('devVerifyS4 refuses any driver pool other than the dev driver pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyS4 refuses any staff pool other than the dev pool')
+  if (DRIVER_POOL !== STACK.driverPoolId) throw new Error('devVerifyS4 refuses any driver pool other than the dev driver pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyS4 only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
 

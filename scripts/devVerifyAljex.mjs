@@ -22,6 +22,7 @@
  * UI-only checks (page reload of the profile, stepper rendering) are covered by the component tests; this harness
  * drives the same API the page does and reports where a step is the API-level equivalent of a screen.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -33,8 +34,8 @@ import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from '
 import { generateAljex, renderAljexCsv, SYNTH_PRO_MIN, SYNTH_PRO_MAX } from './lib/aljexFixture.mjs'
 import { PLACEHOLDER_EMAILS, planRevDivisions } from './seedRevDivisions.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
-const DEV_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+const DEV_APPSYNC = APPSYNC_URL_RE
+const DEV_SUFFIX = STACK.tableSuffix
 const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
 const REGION = 'us-east-1'
 const LIVE_TAG = 'ZZ-IMPORT-1k'
@@ -488,7 +489,7 @@ const RUNNERS = {
 // ───────────────────────────── main ─────────────────────────────
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAljex refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAljex refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAljex refuses any staff pool other than the dev pool')
   if (DEV_SUFFIX === PROD_SUFFIX) throw new Error('dev suffix equals production suffix')
 
   if (!(await inventory())) { process.exitCode = 1; return }

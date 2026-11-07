@@ -25,6 +25,7 @@
  *
  * Screenshots: Docs/tms-build/screenshots/as/<name>.png, 1440x900, listed in index.txt.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile, access, appendFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -33,7 +34,7 @@ import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, routerAs, gql } from '
 import { createInviteBudget } from './lib/adLive.mjs'
 import { AS_INVITE_MC, assertInviteInputSafe, candidateMcs, planInvite } from './lib/asLive.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const SHOTS = resolve('Docs/tms-build/screenshots/as')
 const EMAIL_LOG = resolve('Docs/tms-build/EMAIL_LIVE_TEST.md')
 
@@ -94,7 +95,7 @@ async function main() {
   if (read && liveInvite) throw new Error('run --read and --live-invite separately')
 
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAS refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAS refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAS refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyAS only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
 

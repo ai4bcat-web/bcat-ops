@@ -21,6 +21,7 @@
  *
  * Screenshots: Docs/tms-build/screenshots/ad/<name>.png, 1440x900, listed in index.txt.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile, access, appendFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -31,7 +32,7 @@ import {
   createInviteBudget, keysOf, liveLogSection,
 } from './lib/adLive.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const SHOTS = resolve('Docs/tms-build/screenshots/ad')
 const LIVE_LOG = resolve('Docs/tms-build/MCP_LIVE_TEST.md')
 
@@ -98,7 +99,7 @@ async function main() {
   if (!read) { console.log('(no --read / --live: nothing was called)'); return }
 
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAD refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAD refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAD refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyAD only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
 

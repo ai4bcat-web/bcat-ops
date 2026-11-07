@@ -18,12 +18,13 @@
  * never printed. Counts are DEV counts; the exposure (which models are readable) is a property of the schema and is the same on
  * `main` — re-run against production only by an operator who owns that decision.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join, resolve, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql } from './lib/devIdentity.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const OUT = resolve('Docs/tms-build/AI-exposure-audit.md')
 const PAGE_SIZE = 1000
 export const DEFAULT_PAGES = 25
@@ -179,7 +180,7 @@ async function coverageReport(token, pages) {
 
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('auditDataExposure refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('auditDataExposure refuses any pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('auditDataExposure refuses any pool other than the dev pool')
   const auth = parseSchemaAuth(await readFile(join(process.cwd(), 'amplify/data/resource.ts'), 'utf8'))
   const declared = Object.keys(auth)
   const authText = (m) => {

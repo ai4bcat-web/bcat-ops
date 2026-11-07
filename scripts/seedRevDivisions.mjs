@@ -30,6 +30,7 @@
  *   --target prod --i-mean-production, env BCAT_ALLOW_PROD=<today>, fresh prodpre-seedRevDivisions- backups to --apply,
  *   typed confirmation; a dry run unless --apply (see lib/prodGate.mjs).
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { parseArgs } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from './lib/devIdentity.mjs'
@@ -38,7 +39,7 @@ import { loadAmplifyOutputs } from './lib/tmsConfig.mjs'
 import { PROD_GATE_OPTIONS, requireProd } from './lib/prodGate.mjs'
 import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 
 /** UNCONFIRMED placeholders — nothing routes to these until an admin confirms the mailbox exists. */
 export const PLACEHOLDER_EMAILS = {
@@ -272,7 +273,7 @@ async function main() {
     return
   }
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('seedRevDivisions refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('seedRevDivisions refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('seedRevDivisions refuses any staff pool other than the dev pool')
   const apply = args.values.apply === true
   const email = `zz-revdiv-admin-${Date.now()}@example.invalid`
   let made = false

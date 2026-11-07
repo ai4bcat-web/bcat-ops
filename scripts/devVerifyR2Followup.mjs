@@ -9,6 +9,7 @@
  *
  *   BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyR2Followup.mjs
  */
+import { STACK } from './lib/stackConfig.mjs'
 import { randomBytes } from 'node:crypto'
 import {
   CognitoIdentityProviderClient,
@@ -21,9 +22,9 @@ import { authenticateTmsUser } from './lib/tmsAuth.mjs'
 import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
 refuseReadOnlyFlag('devVerifyR2Followup.mjs')
 
-const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
-const DEV_POOL = 'us-east-1_UKhMNVAG1'
-const DEV_CLIENT = '59284j3vm69gqg49cinjrr4dci'
+const DEV_API = STACK.apiUrl
+const DEV_POOL = STACK.staffPoolId
+const DEV_CLIENT = STACK.staffClientId
 const region = 'us-east-1'
 
 const outputs = {

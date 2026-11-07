@@ -24,6 +24,7 @@
  *
  * Screenshots: Docs/tms-build/screenshots/ae/<name>.png, 1440×900, listed in index.txt.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile, readdir, access } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -31,7 +32,7 @@ import { randomUUID } from 'node:crypto'
 import { launchBrowser, ALLOWED_ORIGINS, DEV_ORIGIN } from './lib/cdpBrowser.mjs'
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from './lib/devIdentity.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const SHOTS = resolve('Docs/tms-build/screenshots/ae')
 /** Budget for the panel's data (plan: < 2 s). */
 const PANEL_BUDGET_S = 2
@@ -379,7 +380,7 @@ export const RUNNERS = { AE01: ae01, AE02: ae02, AE03: ae03, AE04: ae04, AE05: a
 async function main() {
   if (flag('inventory')) { if (!(await inventory())) process.exitCode = 1; return }
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAE refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAE refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAE refuses any staff pool other than the dev pool')
   const ts = Date.now()
   const email = `zz-ae-${ts}@example.invalid`
   let made = false

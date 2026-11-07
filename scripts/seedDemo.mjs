@@ -14,6 +14,7 @@
  * and a hard refusal of any production outputs file or non-dev endpoint.
  */
 
+import { STACK } from './lib/stackConfig.mjs';
 import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import {
@@ -53,7 +54,7 @@ Options:
  * The only AppSync endpoint this dev-only script will touch.
  * See scripts/devVerifyR2Followup.mjs for the same guard.
  */
-const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql';
+const DEV_API = STACK.apiUrl;
 
 export const DEMO_STAFF = [
   { id: 'demo-carrier-rep-1@example.invalid', email: 'demo-carrier-rep-1@example.invalid', name: 'Demo Carrier Rep 1', role: 'CARRIER_REP' },

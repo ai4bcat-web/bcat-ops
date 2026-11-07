@@ -20,6 +20,7 @@
  * prefix. Passwords, tokens and row contents are never printed (counts and seconds only). The temporary admin is deleted in
  * `finally` (`identity deleted: true`).
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
@@ -27,8 +28,8 @@ import { LambdaClient, ListFunctionsCommand, InvokeCommand } from '@aws-sdk/clie
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs, region } from './lib/devIdentity.mjs'
 import { fullScan } from './lib/perfExpected.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
-const DEV_PREFIX = 'amplify-d3dejqzs77khq6-de'
+const DEV_APPSYNC = APPSYNC_URL_RE
+const DEV_PREFIX = STACK.lambdaPrefix
 const SCHEMA_VERSION = 1
 const BACKFILL_FLOOR = '2024-01'
 const WRITE_BUDGET_S = 60
@@ -189,7 +190,7 @@ async function onWriteLatency(ctx) {
 async function main() {
   if (flag('inventory')) { if (!(await inventory())) process.exitCode = 1; return }
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAF refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAF refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAF refuses any staff pool other than the dev pool')
   const email = `zz-af-${Date.now()}@example.invalid`
   let made = false
   const ctx = { token: '', customerId: null, shipmentIds: new Set(), voided: new Set(), get: async () => null }

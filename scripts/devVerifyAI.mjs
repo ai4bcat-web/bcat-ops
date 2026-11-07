@@ -32,6 +32,7 @@
  * (AI13) waits for one real rollup sweep (every 5 min on dev) and SKIPs honestly when none ran; TS modules (spec parser, catalog)
  * are loaded with tsx (`tsx/esm/api`), which is installed in node_modules but not a declared devDependency.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -43,8 +44,8 @@ import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from '
 import { createWalk } from './lib/uiWalk.mjs'
 import { AMOUNTS, SLOTS, AR_SLOTS, VISIBLE, costOf, profitOf, expectedSums, forbiddenSlots, scanForbidden, kpiValue, rowLabels, percentile, canonical, money } from './lib/aiProbe.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
-const DEV_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+const DEV_APPSYNC = APPSYNC_URL_RE
+const DEV_SUFFIX = STACK.tableSuffix
 const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
 const SHOTS = resolve('Docs/tms-build/screenshots/ai')
 const REGION = 'us-east-1'
@@ -1140,7 +1141,7 @@ async function step(id, fn) {
 
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAI refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAI refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAI refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyAI only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
 

@@ -14,15 +14,16 @@
  *
  *   BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyQuotes.mjs
  */
+import { STACK } from './lib/stackConfig.mjs'
 import { authenticateTmsUser } from './lib/tmsAuth.mjs'
 import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
 refuseReadOnlyFlag('devVerifyQuotes.mjs')
 
-const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
-const DEV_POOL = 'us-east-1_UKhMNVAG1'
-const DEV_CLIENT = '59284j3vm69gqg49cinjrr4dci'
+const DEV_API = STACK.apiUrl
+const DEV_POOL = STACK.staffPoolId
+const DEV_CLIENT = STACK.staffClientId
 /** The dev tracking-api Function URL: `GET /q/<token>` and `POST /q/<token>/respond`. */
-const PUBLIC_API = 'https://jk65s5nfkj2sfnnoang4huvbvq0bsruo.lambda-url.us-east-1.on.aws'
+const PUBLIC_API = STACK.publicApi
 
 const outputs = {
   auth: {

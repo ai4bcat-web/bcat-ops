@@ -31,6 +31,7 @@
  *
  * Screenshots: Docs/tms-build/screenshots/ao/<name>.png (drawer 1440x900, driver page 390x844), listed in index.txt.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile, readdir, access } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -43,7 +44,7 @@ import { createWalk } from './lib/uiWalk.mjs'
 import { AA_HOMES } from './lib/aaRoutes.mjs'
 import { ROUTES as S2_ROUTES } from './devVerifyS2.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4'
 const SHOTS = resolve('Docs/tms-build/screenshots/ao')
 const VOID_REASON = 'AO harness'
@@ -244,7 +245,7 @@ const ddb = new DynamoDBClient({ region: REGION })
 const doc = DynamoDBDocumentClient.from(ddb, { marshallOptions: { removeUndefinedValues: true } })
 
 async function discoverDevSuffix() {
-  const suffix = process.env.DEV_TABLE_SUFFIX || 'nc3jsnxdmjhkpequimypiatkma-NONE'
+  const suffix = process.env.DEV_TABLE_SUFFIX || STACK.tableSuffix
   if (suffix.includes(PROD_SUFFIX)) throw new Error('refusing the production table suffix')
   await ddb.send(new DescribeTableCommand({ TableName: `Load-${suffix}` })).catch(() => { throw new Error(`no Load-${suffix} table in the account`) })
   return suffix
@@ -1051,7 +1052,7 @@ async function cleanup(ctx) {
 async function main() {
   if (flag('inventory')) { if (!(await inventory())) process.exitCode = 1; return }
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyAO refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyAO refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyAO refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyAO only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
   if (!(await inventory())) { process.exitCode = 1; return }

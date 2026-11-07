@@ -20,6 +20,7 @@
  * deleted), workflow runs dismissed, the rest deleted through the AWS SDK against the dev tables; residue is a failure.
  * The demo seed is restored with RESET_DEMO_DATA (dev-only flag on the Lambda). Passwords and tokens are never printed.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -42,7 +43,7 @@ import {
   resolveIntakeSecret, tenderBody, INTAKE_SELECTION,
 } from './devVerifyU.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const SHOTS = resolve('Docs/tms-build/screenshots/AA')
 const BACKEND_ALLOWED = 'ships with the deploy'
 
@@ -1097,7 +1098,7 @@ async function main() {
     return
   }
   if (!DEV_APPSYNC.test(DEV_API)) fail('devVerifyAA refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') fail('devVerifyAA refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) fail('devVerifyAA refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) fail(`devVerifyAA only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
 

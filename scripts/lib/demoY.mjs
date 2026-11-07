@@ -3,6 +3,7 @@
  * `withDemoAdmin(fn)` mints one temporary ADMIN identity on the dev pool, hands `fn` a ctx with the API routers,
  * and always deletes the identity afterwards. Passwords and tokens are never printed.
  */
+import { STACK } from './stackConfig.mjs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql, routerAs } from './devIdentity.mjs'
 import { DEV_ORIGIN } from './cdpBrowser.mjs'
@@ -15,7 +16,7 @@ export async function loadState() { try { return JSON.parse(await readFile(STATE
 export async function saveState(state) { await writeFile(STATE_FILE, JSON.stringify(state, null, 2)) }
 
 export async function withDemoAdmin(fn, groups = ['ADMIN', 'page-tms']) {
-  if (DEV_API !== 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql' || DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('dev only')
+  if (DEV_API !== STACK.apiUrl || DEV_POOL !== STACK.staffPoolId) throw new Error('dev only')
   const email = `ai4bcat+zzdemoy${Date.now()}@gmail.com`
   const id = await mintIdentity(email, groups)
   const ctx = {

@@ -17,6 +17,7 @@
  * tracking page and saves screenshots under Docs/tms-build/screenshots/.
  * The script refuses to run against any endpoint other than the dev AppSync URL.
  */
+import { STACK, lambdaName } from './lib/stackConfig.mjs'
 import { randomBytes } from 'node:crypto'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -31,7 +32,7 @@ import { verifyTrackingUi } from './lib/verifyTrackingUi.mjs'
 import { DEV_POOL, PUBLIC_API, region, cognito, gql, routerAs, mintIdentity } from './lib/devIdentity.mjs'
 import { enterCarrierCharge, findActiveRepId, releaseForReview, reviewGaps } from './lib/releaseFixture.mjs'
 
-const SHIPMENT_ACTIONS_LAMBDA = 'amplify-d3dejqzs77khq6-de-tmsshipmentactionslambda-x2KeBv2mM6Mk'
+const SHIPMENT_ACTIONS_LAMBDA = lambdaName('tmsshipmentactionslambda', 'amplify-d3dejqzs77khq6-de-tmsshipmentactionslambda-x2KeBv2mM6Mk')
 
 const results = []
 function ok(name, detail) { results.push({ ok: true, name, detail }); console.log(`PASS  ${name}${detail ? ` — ${detail}` : ''}`) }
@@ -397,7 +398,7 @@ async function main() {
       via: 'COPY', to: [], cc: [], expiresAt, notes: 'P8-UI live verification',
     })
     equals('P8-UI customer link expiry', customerLink.link.expiresAt, expiresAt)
-    const customerUrlResolved = customerLink.url.startsWith('http') ? new URL(customerLink.url) : new URL(customerLink.url, 'https://dev.d3dejqzs77khq6.amplifyapp.com')
+    const customerUrlResolved = customerLink.url.startsWith('http') ? new URL(customerLink.url) : new URL(customerLink.url, STACK.origin)
     equals('P8-UI customer link URL contains token path', customerUrlResolved.pathname, `/track/s/${customerLink.link.id}`)
     // The public page is served by the React app, but the data comes from the public
     // tracking API Lambda, which exposes `/s/<token>` (not `/track/s/<token>`).

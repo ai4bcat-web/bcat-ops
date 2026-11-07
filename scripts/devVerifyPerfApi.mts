@@ -11,13 +11,14 @@
  * (`identity deleted: true`). The identity is minted BEFORE the app modules are imported so Amplify is configured when
  * apiClient creates its client. `fetch` is wrapped to count AppSync round trips and response bytes per measurement.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { DEV_API, DEV_POOL, mintIdentity, deleteIdentity, gql } from './lib/devIdentity.mjs'
 import { LOADER_BUDGETS, SCALE, AF_ENFORCED } from './lib/perfBudgets.mjs'
 import { fullScan, activeIdsOf, monthIdsOf, pageAll, trackingRows } from './lib/perfExpected.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const only = process.argv.find((a) => a.startsWith('--only='))?.slice(7)
 const ENFORCE_AF = AF_ENFORCED || process.argv.includes('--enforce-af')
 /** A Step AF verdict: FAIL when enforced, WARN until the AF deploys land. */
@@ -67,7 +68,7 @@ function g2Af(id: string, m: { seconds: number; trips: number; mb: number }, bud
 
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyPerfApi refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyPerfApi refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyPerfApi refuses any staff pool other than the dev pool')
   const email = `zz-perfapi-${Date.now()}@example.invalid`
   let made = false
   try {

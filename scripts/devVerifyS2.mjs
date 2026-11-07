@@ -20,13 +20,14 @@
  * password/tokens are never printed, and it is deleted (and proven gone) in `finally`.
  * Exit code is non-zero on any FAIL or any SKIPPED that is not in SKIP_ALLOWED.
  */
+import { APPSYNC_URL_RE } from './lib/stackConfig.mjs'
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { launchBrowser, ALLOWED_ORIGINS, DEV_ORIGIN, pause } from './lib/cdpBrowser.mjs'
 import { DEV_API, mintIdentity, deleteIdentity, routerAs } from './lib/devIdentity.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 
 const SHOTS = resolve('Docs/tms-build/screenshots/S2')
 

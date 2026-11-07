@@ -19,6 +19,7 @@
  * never printed. Steps that need the deployed Step U backend (IntakeLoad, INTAKE_* actions, staging, address
  * validation) report `SKIPPED (allowed: ships with the deploy)` while the backend is absent.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -32,9 +33,9 @@ import {
   U_ROUTES, U_KEPT, U_REDIRECTS, U_GONE, SIDEBAR_BANNED, SIDEBAR_BANNED_HREFS, uNavGaps, uGoneGaps, uViewHookGaps,
 } from './lib/uRoutes.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
-const DEV_LAMBDA_PREFIX = 'amplify-d3dejqzs77khq6-de'
+const DEV_LAMBDA_PREFIX = STACK.lambdaPrefix
 const SHOTS = resolve('Docs/tms-build/screenshots/U')
 const REGION = 'us-east-1'
 const BACKEND_ALLOWED = 'ships with the deploy'
@@ -169,7 +170,7 @@ const ddb = new DynamoDBClient({ region: REGION })
 export const doc = DynamoDBDocumentClient.from(ddb, { marshallOptions: { removeUndefinedValues: true } })
 
 export async function discoverDevSuffix() {
-  const suffix = process.env.DEV_TABLE_SUFFIX || 'nc3jsnxdmjhkpequimypiatkma-NONE'
+  const suffix = process.env.DEV_TABLE_SUFFIX || STACK.tableSuffix
   if (suffix === PROD_SUFFIX || suffix.includes(PROD_SUFFIX)) throw new Error('refusing the production table suffix')
   await ddb.send(new DescribeTableCommand({ TableName: `Load-${suffix}` })).catch(() => { throw new Error(`no Load-${suffix} table in the account`) })
   return suffix
@@ -743,7 +744,7 @@ async function cleanup(ctx) {
 // ───────────────────────────── main ─────────────────────────────
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyU refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyU refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyU refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyU only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
 

@@ -13,6 +13,7 @@
  * driver pools. Temp identities are zz-s3-*@example.invalid and are deleted (and re-read) in `finally`.
  * Passwords and tokens are never printed. No state is mutated except the temp users and Driver rows.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -31,9 +32,9 @@ import { auditInPage, auditFailures, publicAuditInPage } from './devVerifyS2.mjs
 import { createWalk, extraAuditInPage, SHELL_FACTS, TOKEN_PROBE, shellFailures } from './lib/uiWalk.mjs'
 import { S4_PATTERNS, S4_REDIRECTS } from './lib/s4Routes.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
-const DRIVER_POOL = 'us-east-1_nnJzcFvTY'
-const DRIVER_CLIENT = 'qvnqkida69qhuquir2tahjvq'
+const DEV_APPSYNC = APPSYNC_URL_RE
+const DRIVER_POOL = STACK.driverPoolId
+const DRIVER_CLIENT = STACK.driverClientId
 const SHOTS = resolve('Docs/tms-build/screenshots/S3')
 
 /** Console / network problems that are tolerated. Each entry: { pattern: RegExp, reason }. */
@@ -493,7 +494,7 @@ async function equipmentCode(token) {
 
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyS3 refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyS3 refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyS3 refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyS3 only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
 

@@ -10,6 +10,7 @@
  * minted on the dev pool and deleted (proven gone) in `finally`; ZZ fixtures are voided / archived. Output is counts and
  * yes/no only (no names, phones, tokens). Section checks live in scripts/lib/qaFlows/*.mjs.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -23,8 +24,8 @@ const SECTIONS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7']
 const selected = only.length ? SECTIONS.filter((s) => only.includes(s)) : SECTIONS
 if (args.includes('--list')) { console.log(SECTIONS.join(' ')); process.exit(0) }
 
-if (!/^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/.test(DEV_API)) throw new Error('refuses any endpoint but the dev AppSync URL')
-if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('refuses any pool but the dev pool')
+if (!APPSYNC_URL_RE.test(DEV_API)) throw new Error('refuses any endpoint but the dev AppSync URL')
+if (DEV_POOL !== STACK.staffPoolId) throw new Error('refuses any pool but the dev pool')
 const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
 if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`origin ${origin} not allowed`)
 

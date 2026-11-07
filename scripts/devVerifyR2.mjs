@@ -28,16 +28,17 @@
  * ADMIN identity in the dev pool through the Cognito admin API (AWS credentials
  * must be available in the environment) and deletes it in the `finally`.
  */
+import { STACK } from './lib/stackConfig.mjs'
 import { randomBytes, randomUUID, createHash } from 'node:crypto'
 import { authenticateTmsUser } from './lib/tmsAuth.mjs'
 import { findActiveRepId, poReference, releaseForReview } from './lib/releaseFixture.mjs'
 import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
 refuseReadOnlyFlag('devVerifyR2.mjs')
 
-const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
-const DEV_POOL = 'us-east-1_UKhMNVAG1'
-const DEV_CLIENT = '59284j3vm69gqg49cinjrr4dci'
-const DEV_TABLE_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+const DEV_API = STACK.apiUrl
+const DEV_POOL = STACK.staffPoolId
+const DEV_CLIENT = STACK.staffClientId
+const DEV_TABLE_SUFFIX = STACK.tableSuffix
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const region = 'us-east-1'
 

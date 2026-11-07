@@ -57,18 +57,19 @@
  * when it is absent. `INTAKE_WEBHOOK_SECRET` is required: it is the shared intake
  * secret the bridge posts with, and nothing on the stack hands it back out.
  */
+import { STACK } from './lib/stackConfig.mjs'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
 refuseReadOnlyFlag('devVerifyStepK.mjs')
 
-const DEV_API = 'https://f5iqzdpidzalvjys7yxijn5ave.appsync-api.us-east-1.amazonaws.com/graphql'
-const DEV_POOL = 'us-east-1_UKhMNVAG1'
-const DEV_CLIENT = '59284j3vm69gqg49cinjrr4dci'
-const DEV_TABLE_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
-const DEV_PREFIX = 'amplify-d3dejqzs77khq6-de'
+const DEV_API = STACK.apiUrl
+const DEV_POOL = STACK.staffPoolId
+const DEV_CLIENT = STACK.staffClientId
+const DEV_TABLE_SUFFIX = STACK.tableSuffix
+const DEV_PREFIX = STACK.lambdaPrefix
 const region = 'us-east-1'
 
-if (!DEV_API.includes('f5iqzdpidzalvjys7yxijn5ave')) throw new Error('Refusing to run against anything but the dev API')
+if (DEV_API !== STACK.apiUrl) throw new Error('Refusing to run against anything but the dev API')
 
 const outputs = {
   auth: { user_pool_id: DEV_POOL, user_pool_client_id: DEV_CLIENT, aws_region: region, username_attributes: ['email'] },

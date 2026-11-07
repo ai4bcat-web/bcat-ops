@@ -58,3 +58,6 @@ Docs/tms-build/screenshots/S3/
 Docs/tms-build/screenshots/S4/
 Docs/tms-build/screenshots/U/
 Docs/tms-build/screenshots/V/
+
+# BCAT_STACK=rehearsal discovery cache (scripts/lib/stackConfig.mjs): ids only, regenerated on demand
+scripts/.stack-cache.json

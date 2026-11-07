@@ -19,6 +19,7 @@
  * (localhost would talk to the committed production API). The temporary admin identity is deleted in `finally`
  * and proven gone (`identity deleted: true`). Passwords and tokens are never printed.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -35,7 +36,7 @@ import { measurePage, measureModes, measureSoak, repeatViolations, KPI_TESTIDS, 
 import { perfGaps, moneyFreeze, afStatic } from './lib/perfGaps.mjs'
 import { expectedCounts } from './lib/perfExpected.mjs'
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
+const DEV_APPSYNC = APPSYNC_URL_RE
 const PERF_DIR = resolve('Docs/tms-build/perf')
 // Re-baselined 2364934 (the AA merge, before the PERF pass) -> a064b26 (Main, Step AF6 review of `git diff 2364934 HEAD`): the only frozen
 // files that moved since are tms-shipment-actions/batch.ts + documents.ts (Step AP: Load Review gating: requirement checks read revenue/
@@ -178,7 +179,7 @@ function printTable(summary) {
 
 async function withBrowser(fn) {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyPerf refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyPerf refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyPerf refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (origin !== DEV_ORIGIN) throw new Error(`devVerifyPerf only measures ${DEV_ORIGIN} (got ${origin}): localhost talks to the production API`)
   const email = `zz-perf-${Date.now()}@example.invalid`

@@ -32,6 +32,7 @@
  * /schedule, /calendar and the owner-operator page open on it without date navigation; the closed-week fixture and
  * the batch fixtures keep the plan's dates.
  */
+import { APPSYNC_URL_RE, STACK } from './lib/stackConfig.mjs'
 import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -46,8 +47,8 @@ import { createWalk, SHELL_FACTS, TOKEN_PROBE, shellFailures } from './lib/uiWal
 
 const run = promisify(execFile)
 
-const DEV_APPSYNC = /^https:\/\/f5iqzdpidzalvjys7yxijn5ave\.appsync-api\.us-east-1\.amazonaws\.com\/graphql$/
-const DEV_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
+const DEV_APPSYNC = APPSYNC_URL_RE
+const DEV_SUFFIX = STACK.tableSuffix
 const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
 const SHOTS = resolve('Docs/tms-build/screenshots/W')
 const REGION = 'us-east-1'
@@ -1069,7 +1070,7 @@ async function apiSteps(ctx, runUi) {
 // ───────────────────────────── main ─────────────────────────────
 async function main() {
   if (!DEV_APPSYNC.test(DEV_API)) throw new Error('devVerifyW refuses any endpoint other than the dev AppSync URL')
-  if (DEV_POOL !== 'us-east-1_UKhMNVAG1') throw new Error('devVerifyW refuses any staff pool other than the dev pool')
+  if (DEV_POOL !== STACK.staffPoolId) throw new Error('devVerifyW refuses any staff pool other than the dev pool')
   const origin = process.env.DEV_VERIFY_UI_URL ?? DEV_ORIGIN
   if (!ALLOWED_ORIGINS.includes(origin)) throw new Error(`devVerifyW only permits ${ALLOWED_ORIGINS.join(', ')} (got ${origin})`)
 
