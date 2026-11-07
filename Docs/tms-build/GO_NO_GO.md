@@ -6,23 +6,31 @@ Status: OPEN / IN PROGRESS / PASS / FAIL / AT RISK. Evidence = a file, a log lin
 
 | # | Criterion (from Ryne, round 2) | Status | Evidence / note |
 |---|---|---|---|
-| 1 | Full test suite and build green on the merged tree | PASS (stage A) | 844 files / 10,420 tests, build ok, commit 51c769c |
-| 2 | MERGE_REGRESSION gaps all covered (tests or scripted live checks) | OPEN | 10 gaps + 30 partial listed in MERGE_REGRESSION.md |
-| 3 | Rehearsal regression run clean (full copy of production, fresh data) | RED (blocked by #13) | the merged tree does NOT deploy to a stack in one update (see #13); rehearsal will be rebuilt through the staged path |
-| 4 | Schema diff has no blockers; data stack under the cap | PASS (stage A), recheck after C/D/E | AW_SCHEMA_DIFF.md: no blockers; 968,579 / 1,000,000 B, 460/500 |
+| 1 | Full test suite and build green on the merged tree | PASS (latest tree) | 920 files / 11,074 tests, tsc x3, eslint 0 warnings, build, stageDeployCheck OK; commit 5f45cf75 |
+| 2 | MERGE_REGRESSION gaps all covered (tests or scripted live checks) | MOSTLY COVERED | gap tests added: driver-app routes, pay golden, factoring bridge identity, 15 Lambda smokes, 16 page renders, merge-surface guard (MERGE_REGRESSION.md statuses to be refreshed after the live run) |
+| 3 | Rehearsal regression run clean (full copy of production, fresh data) | IN PROGRESS | rehearsal2: baseline job 2 SUCCEED, stage 0 job 3 SUCCEED (42 min), stages 1..5 running (scripts/stageRun.sh); then prod-data load + devVerifyAW/devVerifyProdPages |
+| 4 | Schema diff has no blockers; data stack under the cap | PASS | AW_SCHEMA_DIFF.md no blockers; data stack 968,472 B / 460 (cap 1,000,000 / 500) after tax vault, AR, billing fields |
 | 5 | Required production secrets present | PASS (stage A) | AW_SECRETS_ENV_AUDIT.md: none fail the deploy; degrade-only list |
 | 6 | AR / AP / customer / carrier reconciliation done, every difference matched or approved | OPEN | stage E |
 | 7 | Jenny@bcatcorp.com login works for Release to billing, Send invoice, reconciliation sign-off | OPEN | stage D |
 | 8 | Fresh backup taken and verified right before the real merge | OPEN | rerun the 2026-11-08 procedure under a new stamp |
 | 9 | Load -> Shipment backfill dry-run clean (PRO-first, ID fallback), no unmappable/ambiguous unexplained | OPEN | stage C |
 | 10 | Billing method set for every active customer (or listed for Ryne); factor/manual paths tested | OPEN | stage D |
-| 11 | Numbering starts at 20000 (PRO = invoice number) | OPEN | wired in stage C/D; scope confirmed round 2 |
-| 12 | BCAT blue palette on dev styling, AA contrast, before/after screenshots for Ryne | IN PROGRESS | stage F |
-| 13 | The merged schema deploys to a production-shaped stack (P4) | RED: FAILS in one deploy | Rehearsal job 3 (baseline 60-model stack -> merged tree, one update) failed: CloudFormation 'Limit on the number of resources in a single stack operation exceeded' (cap 2,500 created/updated/deleted per operation across nested stacks); rollback then stuck (UPDATE_ROLLBACK_FAILED) on TruckLocationHistory TTL cooldown. A fresh create of the merged stack fails the same way (job 1). Fix in progress: BCAT_SCHEMA_STAGE staged deploy (Docs/tms-build/AW_STAGED_DEPLOY.md), Load +3 GSIs and AuditLog +1 each in their own stage, TruckLocationHistory TTL alone in the last stage. The real merge to main MUST NOT be a single push. |
+| 11 | Numbering starts at 20000 (PRO = invoice number) | BUILT, NOT APPLIED | scripts/seedSeries20000.mjs (PRO = invoice number, counter floor 20000) dry-run default, refuses production; applied at cutover only |
+| 12 | BCAT blue palette on dev styling, AA contrast, before/after screenshots for Ryne | BUILT; AFTER shots pending | BCAT blue (#0369a1 light / #1ea8f3 dark), contrast check passes, before shots captured; after shots once dev deploy lands |
+| 13 | The merged schema deploys to a production-shaped stack (P4) | RED -> staged plan proven in part | one-shot deploy FAILS (rehearsal jobs 1 and 3). Staged path BCAT_SCHEMA_STAGE 0..5 (deltas 427/121/588/533/453/3): baseline->stage 0 SUCCEED on the rehearsal (42 min); stages 1-5 in progress. Production needs 6 deploys (+ GSI prep) each ~15-45 min |
 | 14 | Final delta import (loads, customers, carriers, AR, AP changed in Aljex since the snapshot) | OPEN | from fresh Aljex exports Sunday night / Monday early |
 | 15 | Old factoring bridge and intake mailboxes untouched and still running | PASS (never touched) | rules honoured |
 
+## Built in this stage batch (Sat 11-07 evening)
+- C: PRO-first link (importer LINK class), awBackfillShipments dry-run CLI, /loads redirects, projector mirror, division + sales-rep rules, numbering-20000 script (not applied).
+- D: billing method on Customer, Billing setup page, RELEASE_TO_BILLING / SEND_INVOICE / SYNC_FACTORING_CHANGE, always-copy invoices@, Jenny-only grants (page-billingRelease / page-aljexSignoff, no role bypass incl. ADMIN/owner; scripts/grantJenny.mjs fails loudly if absent), post-invoice reason + timeline, Possible-duplicate badges.
+- E: importers (customers, carriers, AP aging, AP expected, AR with Danisco 120-day redate, active-shipments check) wired to router/CLI/wizard (scripts/awImport.mjs, AW_IMPORT_RUNBOOK.md), reconciliation page with open-balance/approve and Jenny-only sign-off, Settings > Integrations deployment-secrets card, encrypted carrier tax-ID vault (AW_TAXID_BUILD.md).
+- F: BCAT blue palette (AW_PALETTE.md).
+
 ## Risks for Monday (kept current)
+- **Production deploy time:** stage 0 took 42 min on the rehearsal (baseline -> merged tree). Six staged deploys plus the GSI prep will take roughly 2.5-3.5 hours of wall clock, one Ryne go each. Earliest Monday-safe window: start the staged sequence before 04:00 CST Monday; the Aljex data loads (customers/carriers/AR/AP/loads) and reconciliation come after stage 4 (Invoice, CarrierBill, Shipment tables exist only from stages 3-4).
+- Per-file import actions run inside the AppSync request (30 s): the carriers file (2,462 rows) must use the CLI direct-Lambda path (scripts/awImport.mjs), not the browser wizard.
 - **BLOCKER (stage B):** one-shot deploy of the merged schema fails (above). The real merge becomes a sequence of N Amplify deploys (~15-25 min each); the stage count and per-stage delta come from the staged-deploy work. Tell the operator preparing the GSI prep push on main: do not merge in one push; do not change TruckLocationHistory TTL in the same deploy as anything else.
 - Carrier.einNumber stores carrier tax IDs in clear today on dev (readable by all staff); the encrypted-vault design (AW_TAXID_DESIGN.md) removes it. Carrier is not on production, so not a CloudFormation blocker.
 - Fresh CloudFormation create of the full merged stack failed on 'Limit on the number of resources in a single stack operation' (rehearsal job 1). The real merge is an UPDATE of the production stack (60 -> 109 models); the rehearsal tests exactly that (baseline stack then merged update). Result: see BUILD_LOG Step AW stage B.
