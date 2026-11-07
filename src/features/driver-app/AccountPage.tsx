@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { fetchMe, type DriverProfile } from './driverApi'
 import { useDriverAuth } from './useDriverAuth'
 import { TruckLine } from './TruckPicker'
+import { TrailerLine } from './TrailerPicker'
 
 /** What DriverApp hands down through <Outlet context>: its single theme instance. */
 export interface DriverThemeContext {
@@ -71,6 +72,7 @@ export function AccountPage() {
       {!loading && profile && (
         <div className="flex flex-col gap-4">
           <TruckLine />
+          <TrailerLine />
           <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 shadow-sm">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
               <User className="h-6 w-6" aria-hidden="true" />

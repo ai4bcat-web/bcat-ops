@@ -10,6 +10,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { fleetCounts } from '@/lib/fleetActive'
 import { useAuth } from '@/hooks/useAuth'
 import { useDriverAvailability } from '@/hooks/useDriverAvailability'
+import type { TimeOffType } from '@/lib/timeOff'
 import { useTruckDocAlerts } from '@/hooks/useTruckDocAlerts'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { RepairInvoicesWidget } from '@/features/dashboard/RepairInvoicesWidget'
@@ -23,8 +24,9 @@ import { DotDueWidget } from './DotDueWidget'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 
 // ── Time-off labels ─────────────────────────────────────────────────────────────
-const TIME_OFF_META: Record<'FULL_DAY_OFF' | 'EARLY_START' | 'LATE_START', { label: string; tone: TmsTone }> = {
+const TIME_OFF_META: Record<TimeOffType, { label: string; tone: TmsTone }> = {
   FULL_DAY_OFF: { label: 'Day Off',     tone: 'red' },
+  PTO:          { label: 'PTO',         tone: 'green' },
   EARLY_START:  { label: 'In Early By', tone: 'orange' },
   LATE_START:   { label: 'Late Start',  tone: 'blue' },
 }

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { TmsTimeline } from '@/features/tms/kit'
+import { toast } from 'sonner'
 import { APIProvider, Map as GoogleMap, AdvancedMarker } from '@vis.gl/react-google-maps'
 import { useAppStore } from '@/store/useAppStore'
 import { isLoadVoided } from '@/lib/shipmentVoid'
@@ -19,7 +20,8 @@ const MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefine
  * booked here. Dwell is shown only from recorded arrival/departure events; an
  * appointment time is never turned into a dwell figure.
  */
-export function LocationDetail({ location }: { location: LocationRecord }) {
+export function LocationDetail({ location, onRemoveNote }: { location: LocationRecord; onRemoveNote?: (note: { at: string; driverId?: string }) => Promise<void> }) {
+  const [removing, setRemoving] = useState<string | null>(null)
   const [openedAt] = useState(() => Date.now())
   const allLoads = useAppStore((s) => s.loads)
   // The history lists the newest 50 visits; the store holds only windowed loads, so ask for
@@ -82,6 +84,19 @@ export function LocationDetail({ location }: { location: LocationRecord }) {
               at: formatDateTime(n.at),
               description: n.text,
               tone: 'gray' as const,
+              tag: onRemoveNote ? (
+                <button type="button" disabled={removing === n.at}
+                  onClick={async () => {
+                    if (!window.confirm(`Remove ${n.by}'s note?\n\n"${n.text}"`)) return
+                    setRemoving(n.at)
+                    try { await onRemoveNote({ at: n.at, driverId: n.driverId }) }
+                    catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+                    finally { setRemoving(null) }
+                  }}
+                  style={{ background: 'none', border: 'none', padding: 0, fontSize: 11, color: 'var(--tms-badge-red)', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}>
+                  {removing === n.at ? 'Removing…' : 'Remove'}
+                </button>
+              ) : undefined,
             }))}
           />
         )}

@@ -45,6 +45,7 @@ import {
   saveTmsSettings,
 } from '@/lib/apiClient'
 import { effectiveCustomerStatus, boardTab } from '@/lib/customerCredit'
+import { driverNotesSummary } from '@/lib/tmsDirectory'
 import type { Division, LocationMergeJob, LocationMergePreview, TmsSettings, ChargeCodeDef, CustomerStatus } from '@/types/tms'
 import { CustomerForm } from './components/CustomerForm'
 import { useCustomerForm } from './components/useCustomerForm'
@@ -608,6 +609,19 @@ export function LocationsPage() {
         : '—'),
     },
     {
+      key: 'driverNotes',
+      header: 'DRIVER NOTES',
+      width: 130,
+      render: (l) => {
+        const { count, newestAt } = driverNotesSummary(l.driverNotes)
+        return count ? (
+          <span title="Comments drivers left from the driver app">
+            <b>{count}</b>{newestAt ? ` · ${new Date(newestAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+          </span>
+        ) : '—'
+      },
+    },
+    {
       key: 'actions',
       header: '',
       width: 80,
@@ -703,7 +717,7 @@ export function LocationsPage() {
         >
           <TmsCard title="Map and shipment history" flush>
             <div style={{ padding: 12 }}>
-              <LocationDetail location={open} />
+              <LocationDetail location={open} onRemoveNote={async (note) => { await dir.removeDriverNote(open, note); toast.success('Driver note removed') }} />
             </div>
           </TmsCard>
         </TmsDialog>

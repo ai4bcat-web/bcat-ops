@@ -34,6 +34,7 @@ import { errorText } from '@/lib/errorText'
 import { addLocationNote, editLocationNote, removeLocationNote, recordStopEvent, setStopDetention, type LocationDriverNote, type PaperworkLoad, type PaperworkStop, type StopEvent } from '../driverApi'
 
 import { DETENTION_HOURS, isDelivery, stopsForDay, type TodayStop, orderOpenStops } from './daySheet'
+import { ReorderableLoads } from './ReorderableLoads'
 
 function DetentionBox({ item, onChange }: { item: TodayStop; onChange: (next: TodayStop) => void }) {
   const [saving, setSaving] = useState(false)
@@ -123,25 +124,25 @@ function PodStatus({ load, doc, onView }: { load: PaperworkLoad; doc: TripDoc | 
  * Hours and dock notes come from the directory; the comments are other drivers'. A
  * driver's own comments can be reworded or taken back (a note left on the wrong stop).
  */
-function PlaceNotes({ item, onNotes }: { item: TodayStop; onNotes: (notes: LocationDriverNote[]) => void }) {
+function PlaceNotes({ item, onNotes }: { item: TodayStop; onNotes: (notes: LocationDriverNote[], locationId?: string) => void }) {
   const [text, setText] = useState('')
   // null: not writing; 'new': adding; an ISO stamp: editing the driver's own note made then.
   const [writing, setWriting] = useState<null | 'new' | string>(null)
   const [busy, setBusy] = useState(false)
-  const loc = item.stop.location
-  if (!loc) return null
-  const notes = loc.driverNotes ?? []
+  // A stop with no directory place yet still takes notes: the first one creates the place.
+  const loc = item.stop.location ?? null
+  const notes = loc?.driverNotes ?? []
 
   async function save() {
     if (!text.trim() || !writing) return
     setBusy(true)
     try {
       if (writing === 'new') {
-        const res = await addLocationNote({ loadId: item.load.id, locationId: loc!.id, text: text.trim() })
-        onNotes([...notes, { ...res.note, mine: true }])
+        const res = await addLocationNote({ loadId: item.load.id, stopId: item.stop.id, text: text.trim() })
+        onNotes([...notes, { ...res.note, mine: true }], res.locationId)
         toast.success('Noted — the next driver here will see it')
       } else {
-        const res = await editLocationNote({ locationId: loc!.id, at: writing, text: text.trim() })
+        const res = await editLocationNote({ locationId: loc?.id ?? '', at: writing, text: text.trim() })
         onNotes(res.notes)
         toast.success('Note updated')
       }
@@ -157,7 +158,7 @@ function PlaceNotes({ item, onNotes }: { item: TodayStop; onNotes: (notes: Locat
   async function remove(at: string) {
     setBusy(true)
     try {
-      const res = await removeLocationNote({ locationId: loc!.id, at })
+      const res = await removeLocationNote({ locationId: loc?.id ?? '', at })
       onNotes(res.notes)
       toast.success('Note removed — add it on the right place')
     } catch (err) {
@@ -169,14 +170,15 @@ function PlaceNotes({ item, onNotes }: { item: TodayStop; onNotes: (notes: Locat
 
   return (
     <div className="mt-3 rounded-lg border border-border bg-background/50 p-3 text-sm">
-      {loc.hours && (
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Location notes (check-in, dock, gate…)</p>
+      {loc?.hours && (
         <p className="flex items-start gap-2 text-foreground">
           <Clock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span><span className="font-semibold">Hours:</span> {loc.hours}</span>
         </p>
       )}
-      {loc.dockNotes && <p className="mt-1 text-muted-foreground"><span className="font-semibold text-foreground">Dock:</span> {loc.dockNotes}</p>}
-      {loc.notes && <p className="mt-1 text-muted-foreground">{loc.notes}</p>}
+      {loc?.dockNotes && <p className="mt-1 text-muted-foreground"><span className="font-semibold text-foreground">Dock:</span> {loc.dockNotes}</p>}
+      {loc?.notes && <p className="mt-1 text-muted-foreground">{loc.notes}</p>}
       {notes.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1">
           {notes.slice(-5).map((n, i) => (
@@ -200,7 +202,7 @@ function PlaceNotes({ item, onNotes }: { item: TodayStop; onNotes: (notes: Locat
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Gate code, which dock, who to ask for…"
+            placeholder="Where to check in, which dock, gate code, who to ask for…"
             aria-label={`Note about ${item.stop.name ?? 'this place'}`}
             className="min-h-[72px] w-full rounded-md border border-input bg-background p-2 text-sm text-foreground"
           />
@@ -213,7 +215,7 @@ function PlaceNotes({ item, onNotes }: { item: TodayStop; onNotes: (notes: Locat
         </div>
       ) : (
         <button type="button" onClick={() => setWriting('new')} className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
-          <MessageSquare className="h-4 w-4" aria-hidden="true" /> Add a note about this place
+          <MessageSquare className="h-4 w-4" aria-hidden="true" /> Add a location note
         </button>
       )}
     </div>
@@ -302,6 +304,7 @@ export function TodayStops({
   onSendPod,
   onAddPhotos,
   onChange,
+  onReorder,
 }: {
   loads: PaperworkLoad[]
   /** The day on screen — today, or one the driver paged back to. */
@@ -311,6 +314,8 @@ export function TodayStops({
   onAddPhotos?: (load: PaperworkLoad, stop: PaperworkStop) => void
   /** A flag or event changed; the page refreshes its copy of the week. */
   onChange: () => void
+  /** The driver put the open loads in a new order (load ids, first to last). */
+  onReorder?: (loadIds: string[]) => void
 }) {
   // What the driver just did, applied on top of the week until the refetch lands.
   const [patches, setPatches] = useState<Record<string, Partial<PaperworkStop>>>({})
@@ -361,9 +366,11 @@ export function TodayStops({
 
   // Done stops drop to a Completed section so the next load is at the top; they stay
   // openable for a late POD, a trailer change or where the paperwork went.
-  // The stop the driver is at right now leads, then the load with freight on board.
-  const openItems = orderOpenStops(items.filter((it) => !it.stop.departedAt), items)
+  // The stop the driver is on site at leads; the rest follow the dispatcher's order.
+  const openItems = orderOpenStops(items.filter((it) => !it.stop.departedAt))
   const doneItems = items.filter((it) => !!it.stop.departedAt)
+  // One block per load, where its first open stop sits; a load's stops stay together in route order.
+  const openLoads = [...new Map(openItems.map((it) => [it.load.id, it.load])).values()]
 
   // One card per stop, used for today's list and the completed section alike.
   const renderCard = (item: TodayStop) => {
@@ -405,6 +412,16 @@ export function TodayStops({
                       <span className="block">{line2 || '—'}</span>
                     </a>
                   )
+                })()}
+                {/* The newest note about this place, where the driver sees it before arriving. */}
+                {(() => {
+                  const newest = [...(stop.location?.driverNotes ?? [])].sort((a, b) => a.at.localeCompare(b.at)).pop()
+                  return newest ? (
+                    <p className="mt-2 flex items-start gap-1.5 rounded-md bg-[color:var(--tms-badge-orange-tint)] px-2 py-1 text-sm text-[color:var(--tms-badge-orange)]" aria-label="Newest location note">
+                      <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span className="min-w-0"><span className="font-semibold">{newest.by}:</span> {newest.text}</span>
+                    </p>
+                  ) : null
                 })()}
               </div>
               <div className="shrink-0 text-right">
@@ -458,7 +475,11 @@ export function TodayStops({
 
             <PlaceNotes
               item={item}
-              onNotes={(driverNotes) => patch(item, { location: item.stop.location ? { ...item.stop.location, driverNotes } : null })}
+              onNotes={(driverNotes, locationId) => patch(item, {
+                location: item.stop.location
+                  ? { ...item.stop.location, driverNotes }
+                  : locationId ? { id: locationId, hours: null, dockNotes: null, notes: null, driverNotes } : null,
+              })}
             />
 
             <StopProgress
@@ -548,7 +569,13 @@ export function TodayStops({
       </div>
     ) : null}
     <ul className="flex flex-col gap-3">
-      {openItems.map(renderCard)}
+      {onReorder && openLoads.length > 1 ? (
+        <ReorderableLoads
+          blocks={openLoads.map((l) => ({ id: l.id, label: l.reference }))}
+          render={(id) => <ul className="flex flex-col gap-3">{openItems.filter((it) => it.load.id === id).map(renderCard)}</ul>}
+          onReorder={onReorder}
+        />
+      ) : openItems.map(renderCard)}
       {doneItems.length > 0 ? (
         <li className="mt-1">
           <button type="button" onClick={() => setShowDone((v) => !v)} aria-expanded={showDone}

@@ -2,6 +2,7 @@ import { generateClient } from 'aws-amplify/data'
 import { messageAttachments } from '@/lib/shipmentThread'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
 import outputs from '../../amplify_outputs.json'
+import type { TimeOffType, TimeOffStatus } from './timeOff'
 import type { Load, Stop, ApptType, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
 import type { McpPullState } from '@/lib/integrations/mcpPull'
@@ -217,11 +218,11 @@ const driverFields = () => [
   driversHaveCompliance ? 'onboardingStatus complianceStatus' : '',
   driversHaveTrailer ? 'assignedTrailerId fleetGroup' : '',
   driversHaveMotive ? 'motiveDriverId' : '',
-  driversHaveDispatcher ? 'dispatcherPrimary dispatcherBackup ivanApp timeClock unitType' : '',
+  driversHaveDispatcher ? 'dispatcherPrimary dispatcherBackup ivanApp timeClock unitType bobtail ptoEligible' : '',
 ].filter(Boolean).join(' ')
 
 const isMotiveFieldUndefined = (err: unknown) => /motiveDriverId/.test(JSON.stringify(err ?? ''))
-const isDispatcherFieldUndefined = (err: unknown) => /dispatcher(Primary|Backup)|ivanApp|timeClock|unitType/.test(JSON.stringify(err ?? ''))
+const isDispatcherFieldUndefined = (err: unknown) => /dispatcher(Primary|Backup)|ivanApp|timeClock|unitType|bobtail|ptoEligible/.test(JSON.stringify(err ?? ''))
 
 function isComplianceFieldUndefined(err: unknown): boolean {
   const errs = (err as { errors?: { message?: string }[] })?.errors
@@ -587,7 +588,7 @@ export async function updateDriver(
   const { photoUrl: _skip, ...all } = patch as typeof patch & { photoUrl?: string }
   const { assignedTrailerId: _t, fleetGroup: _f, ...withoutNewFields } = all
   const { motiveDriverId: _m, ...withoutMotive } = all
-  const { dispatcherPrimary: _dp, dispatcherBackup: _db, ivanApp: _ia, timeClock: _tc, unitType: _ut, ...withoutDispatcher } = all
+  const { dispatcherPrimary: _dp, dispatcherBackup: _db, ivanApp: _ia, timeClock: _tc, unitType: _ut, bobtail: _bt, ptoEligible: _pe, ...withoutDispatcher } = all
 
   // The SELECTION matters as much as the input. Building it from `driversHaveTrailer`
   // meant a stale flag returned a driver with fleetGroup/assignedTrailerId missing —
@@ -595,7 +596,7 @@ export async function updateDriver(
   // saved value instantly read as unsaved. Ask for them on the optimistic attempt.
   const run = async (input: Record<string, unknown>, withNewFields: boolean) => {
     const fields = withNewFields
-      ? `${DRIVER_BASE_FIELDS} ${driversHaveCompliance ? 'onboardingStatus complianceStatus' : ''} assignedTrailerId fleetGroup motiveDriverId dispatcherPrimary dispatcherBackup ivanApp timeClock unitType`
+      ? `${DRIVER_BASE_FIELDS} ${driversHaveCompliance ? 'onboardingStatus complianceStatus' : ''} assignedTrailerId fleetGroup motiveDriverId dispatcherPrimary dispatcherBackup ivanApp timeClock unitType bobtail ptoEligible`
       : driverFields()
     return client.graphql({
       query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${fields} } }`,
@@ -1629,6 +1630,11 @@ export async function updateLocation(id: string, patch: Partial<Omit<LocationRec
 }
 export async function archiveLocation(id: string, expectedUpdatedAt: string): Promise<LocationRecord> {
   return directoryAction<LocationRecord>('ARCHIVE_LOCATION', { id, expectedUpdatedAt })
+}
+
+/** Staff remove one driver comment from a place. Returns the location as it now stands. */
+export async function removeLocationDriverNote(locationId: string, note: { at: string; driverId?: string }): Promise<LocationRecord> {
+  return unwrapJsonFields(await directoryAction<LocationRecord>('REMOVE_DRIVER_NOTE', { id: locationId, at: note.at, driverId: note.driverId }), ['contacts', 'driverNotes'])
 }
 
 // ── Location merge — a resumable job, never a single transaction ──────────────
@@ -5199,17 +5205,24 @@ export async function forceSignOut(username: string): Promise<void> {
 export interface DriverAvailability {
   id: string
   driverId: string
-  type: 'FULL_DAY_OFF' | 'EARLY_START' | 'LATE_START'
+  type: TimeOffType
   startDate: string
   endDate: string
   time?: string | null
   note?: string | null
+  /** Absent on rows from before requests existed: read it with statusOf() (src/lib/timeOff.ts). */
+  status?: TimeOffStatus | null
+  hours?: number | null
+  source?: 'DRIVER' | 'STAFF' | null
+  reviewedBy?: string | null
+  reviewedAt?: string | null
+  reviewNote?: string | null
   createdBy: string
   createdAt: string
   updatedAt: string
 }
 
-const DA_FIELDS = `id driverId type startDate endDate time note createdBy createdAt updatedAt`
+const DA_FIELDS = `id driverId type startDate endDate time note status hours source reviewedBy reviewedAt reviewNote createdBy createdAt updatedAt`
 
 export async function listDriverAvailabilities(): Promise<DriverAvailability[]> {
   const result = await client.graphql({
@@ -6411,23 +6424,28 @@ export interface DriverPaySetting {
   fixedExpenses?:        FixedExpense[] | null
   /** Pinned past rate windows — see PayRateOverride in src/lib/driverPay.ts. */
   rateHistory?:          import('./driverPay').PayRateOverride[] | null
+  /** Hourly pay for time-card drivers (src/lib/hoursPay.ts). Staff only: never read by the driver API. */
+  hourlyRate?:           number | null
+  hourlyRateHistory?:    import('./hoursPay').HourlyRateWindow[] | null
   active?:               boolean | null
   notes?:                string | null
   createdAt:             string
   updatedAt:             string
 }
 
-const PAY_SETTING_FIELDS = `id driverId payGroup payPercent expensesBeforePercent email fuelCardNumber fuelCardHistory fixedExpenses rateHistory active notes createdAt updatedAt`
+const PAY_SETTING_FIELDS = `id driverId payGroup payPercent expensesBeforePercent email fuelCardNumber fuelCardHistory fixedExpenses rateHistory hourlyRate hourlyRateHistory active notes createdAt updatedAt`
 
-function normalizePaySetting(raw: DriverPaySetting & { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown }): DriverPaySetting {
+function normalizePaySetting(raw: DriverPaySetting & { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown; hourlyRateHistory?: unknown }): DriverPaySetting {
   const v = unwrapJson(raw.fixedExpenses)
   const h = unwrapJson(raw.rateHistory)
   const c = unwrapJson(raw.fuelCardHistory)
+  const hh = unwrapJson(raw.hourlyRateHistory)
   return {
     ...raw,
     fixedExpenses: Array.isArray(v) ? v as FixedExpense[] : [],
     rateHistory: Array.isArray(h) ? h as DriverPaySetting['rateHistory'] : [],
     fuelCardHistory: Array.isArray(c) ? c as DriverPaySetting['fuelCardHistory'] : [],
+    hourlyRateHistory: Array.isArray(hh) ? hh as DriverPaySetting['hourlyRateHistory'] : [],
   }
 }
 
@@ -6441,11 +6459,12 @@ export async function listDriverPaySettings(): Promise<DriverPaySetting[]> {
   return rows.map(normalizePaySetting)
 }
 
-function serializePaySetting<T extends { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown }>(input: T): T {
+function serializePaySetting<T extends { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown; hourlyRateHistory?: unknown }>(input: T): T {
   let out: T = input
   if (out.fixedExpenses != null) out = { ...out, fixedExpenses: JSON.stringify(out.fixedExpenses) }
   if (out.rateHistory != null) out = { ...out, rateHistory: JSON.stringify(out.rateHistory) }
   if (out.fuelCardHistory != null) out = { ...out, fuelCardHistory: JSON.stringify(out.fuelCardHistory) }
+  if (out.hourlyRateHistory != null) out = { ...out, hourlyRateHistory: JSON.stringify(out.hourlyRateHistory) }
   return out
 }
 

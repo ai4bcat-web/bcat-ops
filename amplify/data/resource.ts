@@ -279,6 +279,9 @@ const schema = a.schema({
       // Equipment.id of the trailer this driver pulls. Null = not yet assigned ("TBD"),
       // which is the normal state until trailers are handed out.
       assignedTrailerId:  a.string(),
+      // True when the driver said they started the day bobtailing (no trailer). Set by the
+      // driver app's POST /me/trailer with null; cleared when a trailer is picked.
+      bobtail:            a.boolean(),
       // Which fleet this driver runs in. Mirrors DriverPaySetting.payGroup so the two
       // agree, and decides which documents their file requires (see src/lib/fileHub.ts).
       // OWNER_OPERATOR is a driver-only value: trucks stay LOCAL/AMAZON/BOX_TRUCK.
@@ -607,6 +610,12 @@ const schema = a.schema({
       // pay weeks starting in [from, until) use that model instead of the base fields,
       // so changing a driver's current rate never rewrites already-paid history.
       rateHistory:           a.json(),
+      // Hourly pay for the Ivan drivers' time cards (src/lib/hoursPay.ts), dollars per hour.
+      // STAFF ONLY: the driver API never reads these two fields and the driver app must never
+      // show them. hourlyRateHistory is [{ from, until, hourlyRate, endedBy, endedAt }] like
+      // rateHistory, so a raise never rewrites a paid period.
+      hourlyRate:            a.float(),
+      hourlyRateHistory:     a.json(),
       active:                a.boolean(),
       notes:                 a.string(),
     })
@@ -4248,12 +4257,20 @@ const schema = a.schema({
   DriverAvailability: a
     .model({
       driverId:  a.string().required(),
-      type:      a.enum(['FULL_DAY_OFF', 'EARLY_START', 'LATE_START']),
+      type:      a.enum(['FULL_DAY_OFF', 'EARLY_START', 'LATE_START', 'PTO']),
       startDate: a.string().required(),   // YYYY-MM-DD
       endDate:   a.string().required(),   // YYYY-MM-DD (= startDate for single day)
       time:      a.string(),              // "HH:MM" for EARLY_START / LATE_START
       note:      a.string(),
       createdBy: a.string().required(),
+      // Driver requests (src/lib/timeOff.ts). A row with no status predates requests and
+      // reads as APPROVED; staff-entered rows are written APPROVED, driver ones PENDING.
+      status:     a.enum(['PENDING', 'APPROVED', 'DENIED']),
+      hours:      a.float(),              // requested hours (a PTO day is always 8)
+      source:     a.enum(['DRIVER', 'STAFF']),
+      reviewedBy: a.string(),             // staff email who approved / denied
+      reviewedAt: a.datetime(),
+      reviewNote: a.string(),             // shown to the driver
     })
     .secondaryIndexes((index) => [
       index('driverId').sortKeys(['startDate']),

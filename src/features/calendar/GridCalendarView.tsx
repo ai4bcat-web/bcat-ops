@@ -19,6 +19,7 @@ import { isLoadCanceled, isLoadVoided } from '@/lib/shipmentVoid'
 import { PodMark } from './CalendarPaperwork'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
+import type { TimeOffType } from '@/lib/timeOff'
 import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_COLORS, canSetChangeNeeded, type EffectiveApptStatus } from '@/lib/apptStatus'
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -68,7 +69,7 @@ interface DayEntry { load: Load; role: Role; key: string; stop?: Stop }
 interface AvailabilityStrip {
   driverId:   string
   driverName: string
-  type:       'FULL_DAY_OFF' | 'EARLY_START' | 'LATE_START'
+  type:       TimeOffType
   time?:      string | null
 }
 
@@ -665,8 +666,8 @@ function DayColumn({
       {availabilityStrips.length > 0 && (
         <div style={{ padding: '3px 6px 4px', borderBottom: '1px solid var(--tms-border)', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
           {availabilityStrips.map((strip, i) => {
-            const isOff  = strip.type === 'FULL_DAY_OFF'
-            const label  = isOff ? 'OFF' : strip.type === 'EARLY_START' ? `In by ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
+            const isOff  = strip.type === 'FULL_DAY_OFF' || strip.type === 'PTO'
+            const label  = strip.type === 'PTO' ? 'PTO' : isOff ? 'OFF' : strip.type === 'EARLY_START' ? `In by ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
             return (
               <div key={`${strip.driverId}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 5px', borderRadius: 3, background: isOff ? 'var(--tms-badge-red-tint)' : 'var(--tms-badge-orange-tint)' }}>
                 <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOff ? 'var(--tms-badge-red)' : 'var(--tms-badge-orange)', flexShrink: 0 }} />

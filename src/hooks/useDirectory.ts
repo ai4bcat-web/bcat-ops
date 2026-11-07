@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   listCustomers, createCustomer, updateCustomer, archiveCustomer, setCustomerStatus as setCustomerStatusAction,
-  listLocations, createLocation, updateLocation, archiveLocation,
+  listLocations, createLocation, updateLocation, archiveLocation, removeLocationDriverNote,
 } from '@/lib/apiClient'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
 
@@ -66,6 +66,9 @@ export function useDirectory(opts?: { includeArchived?: boolean; locations?: boo
     },
     saveLocation: async (current: LocationRecord, patch: Parameters<typeof updateLocation>[1]) => {
       const l = await updateLocation(current.id, patch, current.updatedAt); replaceLocation(l); return l
+    },
+    removeDriverNote: async (current: LocationRecord, note: { at: string; driverId?: string }) => {
+      const l = await removeLocationDriverNote(current.id, note); replaceLocation(l); return l
     },
     archiveLocation: async (current: LocationRecord) => {
       const l = await archiveLocation(current.id, current.updatedAt)

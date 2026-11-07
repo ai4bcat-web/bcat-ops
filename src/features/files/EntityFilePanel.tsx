@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { Avatar } from '@/components/ui/avatar'
 import { getColor } from '@/lib/driverColors'
 import { ACCEPTED_DOC_EXT } from '@/lib/complianceClient'
-import { driverTrailerFieldDeployed } from '@/lib/apiClient'
+import { driverTrailerFieldDeployed, updateEquipment as apiUpdateEquipment } from '@/lib/apiClient'
 import { activeUnits } from '@/lib/fleetActive'
 import {
   slotsForAsset, slotsForDriver, slotState, docOutsideSlots, DRIVER_FILE_SLOTS, driverExpiryPatch,
@@ -25,6 +25,7 @@ import { TmsDialog } from '@/features/tms/kit/TmsDialog'
 import { TmsDrawer } from '@/features/tms/kit/TmsDrawer'
 import { TmsInput } from '@/features/tms/kit/TmsInput'
 import { PacketPickerModal } from './PacketPickerModal'
+import { DraftDateField } from './DraftDateField'
 import { DocumentPreviewModal } from './DocumentPreviewModal'
 import { packetItems } from './entityPacket'
 import { approveDocument, rejectDocument } from '@/lib/documentReview'
@@ -218,24 +219,19 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
   // DOT inspection date lives on the truck (and syncs with the Fleet page); expiration
   // dates and waivers live on the document. Both were editable inline before this page
   // adopted the Files layout, and Jason's workflow depends on them.
-  const setDotDate = (date: string) => {
+  // Awaits the real write and only then updates the store (the store's own
+  // updateEquipment is fire-and-forget and swallows errors). null clears the date.
+  const saveDotDate = async (date: string | null) => {
     if (entity.kind !== 'TRUCK') return
-    updateEquipment(entity.truck.id, { dotInspectionDate: date || undefined })
-    toast.success(date ? 'DOT inspection date updated' : 'DOT inspection date cleared')
+    const updated = await apiUpdateEquipment(entity.truck.id, { dotInspectionDate: date })
+    useAppStore.setState((s) => ({
+      equipment: s.equipment.map((e) => e.id === entity.truck.id ? { ...e, dotInspectionDate: updated?.dotInspectionDate ?? undefined } : e),
+    }))
   }
 
   const setAssignee = (value: string) => {
     if (entity.kind !== 'TRUCK') return
     updateEquipment(entity.truck.id, { fleetManagerAssignee: value || undefined })
-  }
-
-  const setExpiration = async (doc: ComplianceDocument, date: string) => {
-    try {
-      await hub.setExpiration(doc, date || null)
-      toast.success('Expiration updated')
-    } catch (err) {
-      toast.error(`Couldn't update the date: ${err instanceof Error ? err.message : 'unknown error'}`)
-    }
   }
 
   const toggleWaived = async (slot: FileSlot, doc: ComplianceDocument | undefined) => {
@@ -283,7 +279,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
   const setTrailer = async (trailerId: string) => {
     if (entity.kind !== 'DRIVER') return
     try {
-      await updateDriver(entity.driver.id, { assignedTrailerId: trailerId || null })
+      await updateDriver(entity.driver.id, trailerId ? { assignedTrailerId: trailerId, bobtail: false } : { assignedTrailerId: null })
       toast.success(trailerId ? 'Trailer assigned' : 'Trailer set back to TBD')
     } catch (err) {
       toast.error(`Couldn't save the trailer: ${err instanceof Error ? err.message : 'unknown error'}`)
@@ -351,7 +347,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
               onChange={(e) => setTrailer(e.target.value)}
               disabled={!driverTrailerFieldDeployed()}
               style={{ height: 34, width: '100%', maxWidth: 280, borderRadius: 8, border: '1px solid var(--tms-border)', padding: '0 10px', fontSize: 13, background: 'var(--tms-card)', color: 'var(--tms-text)', fontFamily: 'inherit' }}>
-              <option value="">TBD — not assigned</option>
+              <option value="">{entity.driver.bobtail ? 'Bobtail (no trailer)' : 'No trailer set'}</option>
               {trailers.map((t) => <option key={t.id} value={t.id}>{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}</option>)}
             </select>
             {!driverTrailerFieldDeployed() && (
@@ -364,9 +360,9 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 22 }}>
             <div>
               <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Last DOT inspection</div>
-              <input type="date" value={entity.truck.dotInspectionDate ?? ''} onChange={(e) => setDotDate(e.target.value)}
-                title="Last DOT inspection — syncs with the Fleet page"
-                style={{ height: 34, borderRadius: 8, border: '1px solid var(--tms-border)', padding: '0 10px', fontSize: 13, background: 'var(--tms-card)', color: 'var(--tms-text)', fontFamily: 'inherit' }} />
+              <DraftDateField value={entity.truck.dotInspectionDate} onSave={saveDotDate}
+                label="DOT inspection date" title="Last DOT inspection — syncs with the Fleet page"
+                successMessage="DOT inspection date updated" clearedMessage="DOT inspection date cleared" />
             </div>
             <div>
               <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Fleet manager</div>
@@ -426,9 +422,9 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
                 {/* Expiration is editable for dated paperwork (not photos, and not
                     DOT — whose date comes from the truck field above). */}
                 {doc?.s3Key && slot.expires && !TRUCK_DOC_SPECS.find((s) => s.key === slot.key)?.dot && (
-                  <input type="date" value={doc.expirationDate ?? ''} onChange={(e) => setExpiration(doc, e.target.value)}
-                    title="Expiration date"
-                    style={{ height: 28, width: '100%', borderRadius: 6, border: '1px solid var(--tms-border)', padding: '0 6px', fontSize: 11.5, background: 'var(--tms-bg)', color: 'var(--tms-text)', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                  <DraftDateField compact value={doc.expirationDate} onSave={async (d) => { await hub.setExpiration(doc, d) }}
+                    label={`${slot.label} expiration`} title="Expiration date"
+                    successMessage="Expiration updated" clearedMessage="Expiration cleared" />
                 )}
 
                 <button onClick={() => toggleWaived(slot, doc)}

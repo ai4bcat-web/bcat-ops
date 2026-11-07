@@ -39,6 +39,16 @@ import { driverSchema, type DriverFormValues } from '@/lib/schemas'
 import type { Driver } from '@/types'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { usePtoUsed } from '@/hooks/usePtoUsed'
+
+function PtoUsed({ driverId }: { driverId: string }) {
+  const { year, days } = usePtoUsed(driverId)
+  return (
+    <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+      PTO used in {year}: {days === null ? '—' : `${days} ${days === 1 ? 'day' : 'days'}`}
+    </span>
+  )
+}
 
 function getInitials(name: string): string {
   return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()
@@ -97,7 +107,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
     formState: { errors, isSubmitting },
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
-    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '', ivanApp: null, timeClock: null, unitType: null },
+    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '', ivanApp: null, timeClock: null, unitType: null, bobtail: null, ptoEligible: null },
   })
 
   // Trucks available to assign (manually-added or Motive-connected — both are Equipment).
@@ -119,9 +129,9 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
     }
   }
 
-  const [watchType, watchName, watchColorKey, watchFleet, watchTruckId] = useWatch({
+  const [watchType, watchName, watchColorKey, watchFleet, watchTruckId, watchBobtail] = useWatch({
     control,
-    name: ['type', 'name', 'colorKey', 'fleetGroup', 'assignedTruckId'],
+    name: ['type', 'name', 'colorKey', 'fleetGroup', 'assignedTruckId', 'bobtail'],
   })
 
   // The work phone belongs to the truck selected in the form, so it follows the select live.
@@ -165,11 +175,13 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
             dispatcherBackup: driver.dispatcherBackup ?? '',
             ivanApp: driver.ivanApp ?? null,
             timeClock: driver.timeClock ?? null,
+            bobtail: driver.bobtail ?? null,
+            ptoEligible: driver.ptoEligible ?? null,
             unitType: driver.unitType ?? null,
             assignedTrailerId: driver.assignedTrailerId ?? null,
             fleetGroup: driver.fleetGroup ?? null,
           }
-        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '', ivanApp: null, timeClock: null, unitType: null })
+        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '', ivanApp: null, timeClock: null, unitType: null, bobtail: null, ptoEligible: null })
     }
   }, [open, driver?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -377,8 +389,12 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                       name="assignedTrailerId"
                       control={control}
                       render={({ field }) => (
-                        <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || null)} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
-                          <option value="">— TBD, not assigned —</option>
+                        <select value={field.value ?? ''} onChange={(e) => {
+                          field.onChange(e.target.value || null)
+                          // A trailer picked here ends a bobtail the driver reported from the app.
+                          if (e.target.value) setValue('bobtail', false, { shouldDirty: true })
+                        }} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
+                          <option value="">{watchBobtail ? '— Bobtail (no trailer) —' : '— No trailer set —'}</option>
                           {trailers.map((t) => (
                             <option key={t.id} value={t.id}>#{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}</option>
                           ))}
@@ -459,6 +475,15 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                           <ToggleGroupItem value="on">On</ToggleGroupItem>
                           <ToggleGroupItem value="off">Off</ToggleGroupItem>
                         </ToggleGroup>
+                      </div>
+                    )} />
+                  </Field>
+                  <Field label="PTO eligible" hint="Lets the driver request PTO days (8 hours each) in their app">
+                    <Controller name="ptoEligible" control={control} render={({ field }) => (
+                      <div className="flex items-center gap-3">
+                        <Switch checked={field.value === true} onCheckedChange={(v) => field.onChange(v ? true : null)} />
+                        <span className="text-xs text-muted-foreground">{field.value === true ? 'Eligible' : 'Not eligible'}</span>
+                        {isEdit && <PtoUsed driverId={driver.id} />}
                       </div>
                     )} />
                   </Field>

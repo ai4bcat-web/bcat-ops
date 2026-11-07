@@ -38,6 +38,8 @@ export const driverSchema = z.object({
   dispatcherBackup: z.string().trim().toLowerCase().email().or(z.literal('')).nullable().optional(),
   ivanApp: z.boolean().nullable().optional(),
   timeClock: z.boolean().nullable().optional(),
+  bobtail: z.boolean().nullable().optional(),
+  ptoEligible: z.boolean().nullable().optional(),
   unitType: z.enum(['DRY_VAN', 'FLATBED', 'POWER_ONLY']).nullable().optional(),
 })
 

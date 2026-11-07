@@ -119,7 +119,7 @@ const SEVERITY_ORDER: Record<ExpiryState, number> = { none: 0, ok: 1, expiring: 
 // Consolidated compliance cell — one worst-of status pill + per-field chips with date tooltips.
 function ComplianceCell({ equip, isTruck, dates }: { equip: Equipment; isTruck: boolean; dates: ComplianceDates }) {
   const chips: { key: string; date?: string; state: ExpiryState }[] = [
-    { key: 'DOT', date: equip.dotInspectionDate, state: dotInspectionState(equip.dotInspectionDate) },
+    { key: 'DOT', date: equip.dotInspectionDate ?? undefined, state: dotInspectionState(equip.dotInspectionDate ?? undefined) },
     ...(isTruck ? [{ key: 'IFTA', date: dates.ifta, state: chipExpiryState(dates.ifta) }] : []),
     ...(isTruck ? [{ key: 'IRP', date: dates.irp, state: chipExpiryState(dates.irp) }] : []),
     { key: 'INS', date: dates.ins, state: chipExpiryState(dates.ins) },
@@ -247,7 +247,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
       insured: form.insured,
       active: form.active,
       onTollwayAccount: form.onTollwayAccount,
-      dotInspectionDate: form.dotInspectionDate || undefined,
+      dotInspectionDate: form.dotInspectionDate || null,
       insuranceExpirationDate: form.insuranceExpirationDate || undefined,
       iftaExpirationDate: isTruck ? (form.iftaExpirationDate || undefined) : undefined,
       irpExpirationDate: isTruck ? (form.irpExpirationDate || undefined) : undefined,
@@ -663,7 +663,7 @@ function DetailPanel({ equip, dates, tasks, invoices, driverName, onPark }: Deta
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Compliance</p>
         <div className="flex flex-wrap gap-2">
-          <ExpiryBadge date={equip.dotInspectionDate}       label="DOT" stateFn={dotInspectionState} />
+          <ExpiryBadge date={equip.dotInspectionDate ?? undefined}       label="DOT" stateFn={dotInspectionState} />
           <ExpiryBadge date={dates.ins} label="Insurance" />
           {isTruck && <ExpiryBadge date={dates.ifta} label="IFTA" />}
           {isTruck && <ExpiryBadge date={dates.irp}  label="IRP" />}
@@ -1091,7 +1091,7 @@ export function TrucksPage() {
     const isTruck = e.type === 'truck'
     const d = complianceDatesOf(e)
     const states: ExpiryState[] = [
-      dotInspectionState(e.dotInspectionDate),
+      dotInspectionState(e.dotInspectionDate ?? undefined),
       chipExpiryState(d.ins),
       ...(isTruck ? [chipExpiryState(d.ifta), chipExpiryState(d.irp)] : []),
     ]
@@ -1140,7 +1140,7 @@ export function TrucksPage() {
     const dated = e.type === 'truck'
       ? [d.ins, d.ifta, d.irp, e.bobtailInsuranceDate]
       : [d.ins, e.bobtailInsuranceDate]
-    return ['overdue', 'expiring'].includes(dotInspectionState(e.dotInspectionDate)) ||
+    return ['overdue', 'expiring'].includes(dotInspectionState(e.dotInspectionDate ?? undefined)) ||
       dated.some((x) => expiryState(x) === 'overdue' || expiryState(x) === 'expiring')
   }).length
   const openTaskCount = maintenanceTasks.filter((t) => t.status === 'upcoming').length

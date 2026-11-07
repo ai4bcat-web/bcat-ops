@@ -1235,8 +1235,8 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
             {dayStrips.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '3px 8px 4px', borderBottom: '1px solid var(--tms-border)' }}>
                 {dayStrips.map((strip, i) => {
-                  const isOff  = strip.type === 'FULL_DAY_OFF'
-                  const label  = isOff ? 'OFF' : strip.type === 'EARLY_START' ? `In by ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
+                  const isOff  = strip.type === 'FULL_DAY_OFF' || strip.type === 'PTO'
+                  const label  = strip.type === 'PTO' ? 'PTO' : isOff ? 'OFF' : strip.type === 'EARLY_START' ? `In by ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
                   return (
                     <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 7px', borderRadius: 4, background: isOff ? 'var(--tms-badge-red-tint)' : 'var(--tms-badge-orange-tint)', fontSize: 10.5 }}>
                       <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOff ? 'var(--tms-badge-red)' : 'var(--tms-badge-orange)', flexShrink: 0 }} />

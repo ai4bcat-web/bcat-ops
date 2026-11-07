@@ -24,7 +24,7 @@ export interface Equipment {
   active: boolean
   /** The day the truck or trailer was marked inactive (YYYY-MM-DD). */
   inactiveSince?: string | null
-  dotInspectionDate?: string        // YYYY-MM-DD
+  dotInspectionDate?: string | null // YYYY-MM-DD; null clears it
   iftaExpirationDate?: string
   irpExpirationDate?: string
   insuranceExpirationDate?: string

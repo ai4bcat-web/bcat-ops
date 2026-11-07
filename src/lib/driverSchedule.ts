@@ -62,11 +62,14 @@ export function ivanDaySchedule(loads: readonly Load[], driverId: string, today:
   // A load the dispatcher dragged into place on the calendar keeps that place ahead of
   // the rest, matching the driver's own checklist.
   for (const { load, stop } of stops) {
-    const t = (typeof load.sortOrder === 'number' ? `0${String(load.sortOrder).padStart(8, '0')}` : '1') + apptSortKey(stop)
+    const t = apptSortKey(stop)
     const cur = anchor.get(load.id)
     if (cur === undefined || t < cur) anchor.set(load.id, t)
   }
+  // The dispatcher's order compares as a number: padded strings put 1.5 after 2 and 10 before 9.
+  const rank = (l: Load) => (typeof l.sortOrder === 'number' && Number.isFinite(l.sortOrder) ? l.sortOrder : Infinity)
   stops.sort((a, b) =>
+    (rank(a.load) === rank(b.load) ? 0 : rank(a.load) < rank(b.load) ? -1 : 1) ||
     (anchor.get(a.load.id) ?? '').localeCompare(anchor.get(b.load.id) ?? '') ||
     a.load.id.localeCompare(b.load.id) ||
     a.stop.sequence - b.stop.sequence)

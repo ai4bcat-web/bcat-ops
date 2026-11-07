@@ -1,8 +1,9 @@
 /**
  * Employee hours, for the office.
  *
- * One week at a time, one row per driver per day, with the week's total per driver. This is
- * the page payroll is run from, so two things are deliberate:
+ * One fortnightly pay period at a time: a summary bar, one collapsible row per driver (worked,
+ * PTO, holiday, total hours, hourly rate and the period's pay) and a day-by-day table behind
+ * each. This is the page payroll is run from, so these things are deliberate:
  *
  * CORRECTIONS ARE THE OFFICE'S AND ARE SIGNED. Drivers cannot edit their own cards — that
  * is what would make the numbers arguable — so every fix happens here, records who made it,
@@ -14,41 +15,37 @@
  * measurement: a driver on duty doing paperwork is working and the truck is not moving. So
  * the two sit side by side and a gap is flagged for a human, never auto-corrected.
  *
+ * PAY IS GATED. Rate and pay need the pay pages' own access (`driverPay`); without it the page
+ * is hours only and no rate is even fetched. No pay figure of any kind exists in the driver app.
+ *
  * No overtime. See src/lib/timeClock.ts.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Check, Loader2, Pencil, X } from 'lucide-react'
+import { AlertTriangle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsAlert } from '@/features/tms/kit/TmsAlert'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
+import { useHourlyRates } from '@/hooks/useHourlyRates'
 import { listTimeClockEntries, correctTimeClockEntry } from '@/lib/apiClient'
 import type { TimeClockEntry } from '@/types'
+import { ptoDaysUsed, yearOf } from '@/lib/timeOff'
 import {
   summarizePayPeriod, payPeriodStartOf, payPeriodDays, recentPayPeriodStarts,
-  minutesLabel, decimalHours, rowMinutes, clockEdges, CLOCK_EDGE_TOLERANCE_MINUTES,
-  type TimeClockRow,
+  decimalHours, rowMinutes, type TimeClockRow,
 } from '@/lib/timeClock'
+import { payForPeriod, currentRateFrom } from '@/lib/hoursPay'
+import { periodCsv, type DriverHoursRow } from '@/lib/hoursView'
 import { fetchMotiveDays, type MotiveDaysByDriver } from '@/lib/staffMotiveDays'
 import { errorText } from '@/lib/errorText'
 import { defaultHiddenDriverIds, readSavedHiddenIds, saveHiddenDriverIds, toggleHidden } from '@/lib/hoursDriverFilter'
-
-/** How far a time card may differ from the truck before the office is asked to look. */
-const MOTIVE_GAP_TOLERANCE_MIN = 60
+import { HoursPeriodView, type DayEdit } from './HoursPeriodView'
 
 function todayChicago(): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date())
-}
-
-function dayLabel(date: string): string {
-  return new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', {
-    weekday: 'short', month: 'numeric', day: 'numeric', timeZone: 'UTC',
-  })
 }
 
 /** "Sep 28 – Oct 11" — the fortnight as the office says it. */
@@ -62,14 +59,14 @@ function periodLabel(periodStart: string): string {
 
 export function HoursPage() {
   const { drivers } = useDrivers()
-  const { user } = useAuth()
+  const { user, hasPageAccess } = useAuth()
   const staffEmail = user?.email ?? ''
 
   const [periodStart, setPeriodStart] = useState(() => payPeriodStartOf(todayChicago()))
   const [entries, setEntries] = useState<TimeClockEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [editing, setEditing] = useState<{ id: string; hours: string; note: string } | null>(null)
+  const [editing, setEditing] = useState<DayEdit | null>(null)
   /*
    * When each truck actually moved, from the ELD. Loaded beside the cards rather than with
    * them: the page is useful without it, and Motive being slow or down must not stop
@@ -79,7 +76,6 @@ export function HoursPage() {
   const [saving, setSaving] = useState(false)
 
   const periods = useMemo(() => recentPayPeriodStarts(todayChicago(), 13), [])
-  const days = useMemo(() => payPeriodDays(periodStart), [periodStart])
 
   const load = useCallback((start: string) => {
     const end = payPeriodDays(start)[13]
@@ -90,6 +86,20 @@ export function HoursPage() {
   }, [])
 
   useEffect(() => { load(periodStart) }, [load, periodStart])
+
+  /*
+   * PTO used this calendar year, per driver. The pay-period load above is only fourteen days,
+   * so the year is its own small load; a failure leaves the figure blank, not the page broken.
+   */
+  const ptoYear = yearOf(todayChicago())
+  const [yearRows, setYearRows] = useState<TimeClockEntry[] | null>(null)
+  useEffect(() => {
+    let stale = false
+    listTimeClockEntries({ from: `${ptoYear}-01-01`, to: `${ptoYear}-12-31` })
+      .then((rows) => { if (!stale) setYearRows(rows) })
+      .catch(() => { /* the figure just stays blank */ })
+    return () => { stale = true }
+  }, [ptoYear, entries])
 
   /*
    * Only drivers who clock. Everyone else would be an empty row forever, and a page of
@@ -117,16 +127,39 @@ export function HoursPage() {
     return () => { stale = true }
   }, [clocking, periodStart])
 
-  const byDriver = useMemo(() => {
+  // Pay (rates and dollars) is for staff who can open the pay pages; everyone else sees hours only.
+  const canSeePay = hasPageAccess('driverPay')
+  const { settings: paySettings, status: ratesStatus, error: ratesError, reload: reloadRates, saveRate } = useHourlyRates(canSeePay, staffEmail)
+
+  const byDriver = useMemo<DriverHoursRow[]>(() => {
     return clocking.map((d) => {
       const rows = entries.filter((e) => e.driverId === d.id) as TimeClockRow[]
-      return { driver: d, period: summarizePayPeriod(periodStart, rows) }
+      const period = summarizePayPeriod(periodStart, rows)
+      const pay = canSeePay
+        ? payForPeriod(period.days.map((x) => ({ date: x.date, minutes: x.totalMinutes })), paySettings.get(d.id) ?? {})
+        : null
+      return { driverId: d.id, name: d.name, period, pay }
     })
-  }, [clocking, entries, periodStart])
+  }, [clocking, entries, periodStart, canSeePay, paySettings])
 
-  const grandTotal = byDriver.reduce((n, r) => n + r.period.totalMinutes, 0)
+  const ptoDays = useMemo(() => {
+    if (!yearRows) return null
+    return Object.fromEntries(clocking.map((d) => [d.id, ptoDaysUsed(yearRows.filter((e) => e.driverId === d.id), ptoYear)]))
+  }, [yearRows, clocking, ptoYear])
 
-  const startEdit = (row: TimeClockEntry) => {
+  const exportCsv = () => {
+    const blob = new Blob([periodCsv(byDriver, canSeePay)], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `employee-hours-${periodStart}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const startEdit = (rowId: string) => {
+    const row = entries.find((e) => e.id === rowId)
+    if (!row) return
     setEditing({
       id: row.id,
       hours: String(decimalHours(rowMinutes(row as TimeClockRow))),
@@ -134,8 +167,9 @@ export function HoursPage() {
     })
   }
 
-  const saveEdit = async (row: TimeClockEntry) => {
-    if (!editing) return
+  const saveEdit = async (rowId: string) => {
+    const row = entries.find((e) => e.id === rowId)
+    if (!editing || !row) return
     const hours = Number(editing.hours)
     if (!Number.isFinite(hours) || hours < 0 || hours > 24) {
       toast.error('Hours must be between 0 and 24')
@@ -167,7 +201,7 @@ export function HoursPage() {
       title="Employee hours"
       subtitle={<>Ivan drivers&rsquo; time cards, by fortnightly pay period. No overtime &mdash; hours are hours, at forty and at eighty. Truck times are from Motive for context only &mdash; drivers swap trucks, and a pre-trip or a slow dock puts the clock outside the driving window quite legitimately.</>}
       actions={
-        <>
+        <div className="flex items-center gap-3 print:hidden">
           <details className="relative">
             <summary className="flex h-9 cursor-pointer select-none items-center rounded-md border border-input bg-background px-3 text-sm list-none">
               Drivers · {clocking.length} of {roster.length}
@@ -198,189 +232,47 @@ export function HoursPage() {
               <option key={p} value={p}>{periodLabel(p)}{i === 0 ? ' · Current' : ''}</option>
             ))}
           </select>
-          <div className="text-right">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Period total</p>
-            <p className="text-lg font-bold tabular-nums text-foreground">{minutesLabel(grandTotal)}</p>
-          </div>
-        </>
+        </div>
       }
     >
       {error && (
         <TmsAlert tone="red" icon={AlertTriangle}>{error}</TmsAlert>
       )}
 
+      {ratesStatus === 'error' && (
+        <TmsAlert tone="red" icon={AlertTriangle} className="print:hidden">
+          Hourly rates could not be loaded{ratesError ? `: ${ratesError}` : ''}. Pay is not shown and rates cannot be edited until they load.
+          <button type="button" className="ml-2 font-semibold underline" onClick={reloadRates}>Try again</button>
+        </TmsAlert>
+      )}
+
       <div className="mt-4">
         {byDriver.length === 0 ? (
           <p className="text-sm text-muted-foreground">{roster.length === 0 ? 'No Ivan drivers on the roster.' : 'Every driver is hidden — use the Drivers filter to show some.'}</p>
         ) : (
-          <div className="flex flex-col gap-5">
-            {byDriver.map(({ driver, period }) => (
-              <section key={driver.id} className="rounded-xl border border-border bg-background">
-                <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3">
-                  <h2 className="text-sm font-semibold text-foreground">{driver.name}</h2>
-                  <p className="text-sm tabular-nums text-muted-foreground">
-                    <span className="font-bold text-foreground">{minutesLabel(period.totalMinutes)}</span>
-                    {' '}· {decimalHours(period.totalMinutes)} h
-                    {period.holidayMinutes > 0 ? ` · holiday ${minutesLabel(period.holidayMinutes)}` : ''}
-                    {period.ptoMinutes > 0 ? ` · PTO ${minutesLabel(period.ptoMinutes)}` : ''}
-                    {period.open ? ' · still on the clock' : ''}
-                  </p>
-                </header>
-
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                      <th className="px-4 py-2 font-medium">Day</th>
-                      <th className="px-4 py-2 font-medium">Entries</th>
-                      <th className="px-4 py-2 text-right font-medium">Hours</th>
-                      <th className="px-4 py-2 font-medium">Truck moving (FYI)</th>
-                      <th className="px-4 py-2 font-medium">Correct</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {days.map((date, i) => {
-                      const day = period.days.find((d) => d.date === date)!
-                      // Fourteen undifferentiated rows are hard to read; the line between
-                      // the two weeks is where the eye expects a break.
-                      const weekBreak = i === 7
-                      return (
-                        <tr
-                          key={date}
-                          className={`last:border-0 ${weekBreak ? 'border-t-2 border-t-border' : ''} border-b border-border/60`}
-                        >
-                          <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">{dayLabel(date)}</td>
-                          <td className="px-4 py-2">
-                            {day.rows.length === 0 ? (
-                              <span className="text-muted-foreground">&mdash;</span>
-                            ) : (
-                              <div className="flex flex-col gap-0.5">
-                                {day.rows.map((r) => (
-                                  <span key={r.id} className="text-xs text-muted-foreground">
-                                    {r.kind === 'WORK' ? 'Worked' : r.kind === 'HOLIDAY' ? 'Paid holiday' : 'PTO'}
-                                    {r.note ? ` · ${r.note}` : ''}
-                                    {/* Who changed it, so nobody has to ask. */}
-                                    {r.correctedBy ? ` · corrected by ${r.correctedBy}` : ''}
-                                    {r.originalMinutes != null ? ` (was ${minutesLabel(r.originalMinutes)})` : ''}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-2 text-right font-semibold tabular-nums">
-                            {day.open ? 'on the clock' : minutesLabel(day.totalMinutes)}
-                          </td>
-                          {/*
-                            When the wheels actually turned, for context — not for holding
-                            anyone to account. A pre-trip, fuelling, a dock that is not ready
-                            or a day begun in a different truck all put the clock legitimately
-                            outside the driving window, and these drivers do swap trucks. The
-                            column names the unit so a swap reads as a swap, and the wording
-                            stays a note rather than a finding.
-                          */}
-                          <td className="px-4 py-2 text-xs">
-                            <TruckTime
-                              truck={motive[driver.id]?.[date]}
-                              edges={clockEdges(day, motive[driver.id]?.[date])}
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            {day.rows.map((r) => (
-                              <div key={r.id} className="flex items-center gap-1">
-                                {editing?.id === r.id ? (
-                                  <>
-                                    <Input
-                                      aria-label="Hours"
-                                      className="h-7 w-16 text-xs"
-                                      value={editing.hours}
-                                      onChange={(e) => setEditing({ ...editing, hours: e.target.value })}
-                                    />
-                                    <Input
-                                      aria-label="Note"
-                                      className="h-7 w-40 text-xs"
-                                      placeholder="why"
-                                      value={editing.note}
-                                      onChange={(e) => setEditing({ ...editing, note: e.target.value })}
-                                    />
-                                    <Button size="sm" className="h-7 px-2" disabled={saving}
-                                            onClick={() => void saveEdit(r as TimeClockEntry)}>
-                                      <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                                    </Button>
-                                    <Button size="sm" variant="ghost" className="h-7 px-2"
-                                            onClick={() => setEditing(null)}>
-                                      <X className="h-3.5 w-3.5" aria-hidden="true" />
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
-                                          onClick={() => startEdit(r as TimeClockEntry)}>
-                                    <Pencil className="mr-1 h-3 w-3" aria-hidden="true" /> Edit
-                                  </Button>
-                                )}
-                              </div>
-                            ))}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </section>
-            ))}
-          </div>
+          <HoursPeriodView
+            rows={byDriver}
+            periodLabel={periodLabel(periodStart)}
+            defaultRateFrom={periodStart}
+            showPay={canSeePay}
+            ratesReady={ratesStatus === 'ready'}
+            motive={motive}
+            ptoYear={ptoYear}
+            ptoDays={ptoDays}
+            rateInfo={(id) => {
+              const st = paySettings.get(id)
+              return { currentFrom: st ? currentRateFrom(st) : null, rate: st?.hourlyRate ?? null }
+            }}
+            onSaveRate={async (id, rate, from) => { await saveRate(id, rate, from); toast.success('Rate saved') }}
+            onExportCsv={exportCsv}
+            editing={editing}
+            setEditing={setEditing}
+            saving={saving}
+            onStartEdit={startEdit}
+            onSaveEdit={(id) => void saveEdit(id)}
+          />
         )}
       </div>
     </TmsScrollPage>
-  )
-}
-
-export { MOTIVE_GAP_TOLERANCE_MIN }
-
-/**
- * Clock time against wheel time for one day — context, not a finding.
- *
- * Phrased as a note on purpose. These drivers swap trucks, and a clock legitimately sits
- * outside the driving window for a pre-trip, fuelling, or a dock that is not ready. The unit
- * number is shown so a swap reads as a swap rather than as a discrepancy, and nothing here
- * is coloured red or called a problem.
- */
-function TruckTime({
-  truck,
-  edges,
-}: {
-  truck?: { firstMoveAt: string | null; lastMoveAt: string | null; drivingSeconds: number; vehicles?: string[] }
-  edges: { earlyInMinutes: number | null; lateOutMinutes: number | null }
-}) {
-  const clock = (iso: string | null | undefined) =>
-    iso
-      ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' })
-      : '—'
-
-  // No link, or no log for that day. Said as "no Motive data" rather than left blank, so
-  // nobody reads an empty cell as "the truck never moved".
-  if (!truck) return <span className="text-muted-foreground">no Motive data</span>
-  if (!truck.firstMoveAt) return <span className="text-muted-foreground">truck did not move</span>
-
-  const flag = (minutes: number | null) =>
-    minutes != null && minutes > CLOCK_EDGE_TOLERANCE_MINUTES
-
-  const notes = [
-    flag(edges.earlyInMinutes) ? `clocked on ${edges.earlyInMinutes}m before driving` : null,
-    flag(edges.lateOutMinutes) ? `${edges.lateOutMinutes}m after` : null,
-  ].filter(Boolean)
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="tabular-nums text-foreground">
-        {clock(truck.firstMoveAt)} – {clock(truck.lastMoveAt)}
-        {/* Which unit, so a swap is legible rather than looking like a discrepancy. */}
-        {truck.vehicles?.length ? (
-          <span className="ml-1.5 text-muted-foreground">#{truck.vehicles.join(', #')}</span>
-        ) : null}
-      </span>
-      {notes.length > 0 && (
-        // Muted, not amber. This is something to notice, not something to answer for.
-        <span className="text-muted-foreground">{notes.join(', ')}</span>
-      )}
-    </div>
   )
 }

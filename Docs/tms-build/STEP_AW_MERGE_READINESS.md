@@ -108,3 +108,18 @@ C. Shipments replace loads (backfill dry run, nav, consistency tests).
 D. Billing method + Billing setup screen + release logic.
 E. Aljex importers + reconciliation report; run on the rehearsal with whatever uploads exist.
 Report after each stage with counts and failures. Log under "Step AW" in BUILD_LOG. Tracker id `AW`.
+
+## Ryne's clarification 1 (2026-11-08): match on the Aljex PRO number first
+> "can't we just match the aljex pro numbers and do it that way without breaking anything?"
+
+Yes. The load<->shipment link rule becomes, in this order: (1) **Aljex PRO match**: if a production Load
+carries the Aljex PRO (check Load.pickupNumber / tmsId / loadNumber and the shipment PRO field the Aljex
+import stored), link the Aljex-imported shipment to that Load instead of creating a duplicate; (2) **ID
+link** for every Load that has no Aljex PRO (Ivan Cartage, Amazon, box truck, local work): create its
+Shipment keyed by loadId. Matching only ever adds a link; it never edits or deletes a Load. Net-new
+shipments after cutover need no matching: the shipment creates its own Load underneath.
+In the stage A report, give counts from the production export (`tables-main/Load.jsonl`) and the dev
+Aljex import: Loads with an Aljex-style PRO, how many of those match an imported Aljex shipment exactly,
+how many match more than once or not at all, and how many have no PRO. Confirm whether the Aljex "PRO" is
+the same value as the shipment number the dev importer stored. The dry-run backfill report lists
+matched-by-PRO, linked-by-ID, ambiguous (needs Ryne) and unmappable separately.
