@@ -13,6 +13,7 @@
  */
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { RequireAdmin, RequirePage } from '@/components/RequirePage'
+import { DormantPage } from '@/components/RequireModels'
 import { TmsPage, TmsTabs } from '@/features/tms/kit'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { CommissionsPage } from '@/features/commissions/CommissionsPage'
@@ -77,7 +78,7 @@ function activeTab(pathname: string): string {
 function ReconciliationRoute() {
   const { isOwner, isAdmin, hasPageAccess } = useAuth()
   if (isOwner || isAdmin) return <CompanyTab />
-  if (hasPageAccess(ALJEX_SIGNOFF_PAGE_KEY)) return <AljexReconciliationPage />
+  if (hasPageAccess(ALJEX_SIGNOFF_PAGE_KEY)) return <DormantPage page="aljexReconciliation"><AljexReconciliationPage /></DormantPage>
   return <Navigate to={ROOT} replace />
 }
 
@@ -104,21 +105,21 @@ export function BrokeragePage() {
       <Routes>
         <Route index element={<RequirePage page={['settings', TMS_PAGE_KEY]}><SettingsPage /></RequirePage>} />
         <Route path="users" element={<RequireAdmin><UsersPage /></RequireAdmin>} />
-        <Route path="commissions" element={<RequirePage page={['commissions', TMS_PAGE_KEY]}><CommissionsPage /></RequirePage>} />
-        <Route path="reports" element={<RequirePage page={['reports', TMS_PAGE_KEY]}><ReportsPage /></RequirePage>} />
+        <Route path="commissions" element={<RequirePage page={['commissions', TMS_PAGE_KEY]}><DormantPage page="commissions"><CommissionsPage /></DormantPage></RequirePage>} />
+        <Route path="reports" element={<RequirePage page={['reports', TMS_PAGE_KEY]}><DormantPage page="reports"><ReportsPage /></DormantPage></RequirePage>} />
         <Route path="audit" element={<RequirePage page={['audit', TMS_PAGE_KEY]}><AuditPage /></RequirePage>} />
-        <Route path="divisions" element={<RequireAdmin><DivisionsPage /></RequireAdmin>} />
+        <Route path="divisions" element={<RequireAdmin><DormantPage page="divisions"><DivisionsPage /></DormantPage></RequireAdmin>} />
         {/* The tab owns its own index and `:provider` routes, so the strip stays lit
             on a deep link; the guard is here, where a typed URL still meets it. */}
-        <Route path="integrations/*" element={<RequireAdmin><IntegrationsTab /></RequireAdmin>} />
+        <Route path="integrations/*" element={<RequireAdmin><DormantPage page="integrations"><IntegrationsTab /></DormantPage></RequireAdmin>} />
         {/* The page carries its own inner tab strip under one path, so the route is a
             wildcard for the same reason Integrations is. */}
-        <Route path="ai-agents/*" element={<RequireAdmin><AiAgentsPage /></RequireAdmin>} />
-        <Route path="spot-quoter" element={<RequireAdmin><SpotQuoterSettingsPage /></RequireAdmin>} />
+        <Route path="ai-agents/*" element={<RequireAdmin><DormantPage page="aiAgents"><AiAgentsPage /></DormantPage></RequireAdmin>} />
+        <Route path="spot-quoter" element={<RequireAdmin><DormantPage page="spotQuoter"><SpotQuoterSettingsPage /></DormantPage></RequireAdmin>} />
         <Route path="carrier-sales" element={<RequireAdmin><CarrierSalesSettingsPage /></RequireAdmin>} />
         <Route path="company/data/aljex-reconciliation" element={<ReconciliationRoute />} />
         <Route path="company/*" element={<RequireAdmin><CompanyTab /></RequireAdmin>} />
-        <Route path="demo" element={<RequirePage page={[TMS_PAGE_KEY]}><DemoPage /></RequirePage>} />
+        <Route path="demo" element={<RequirePage page={[TMS_PAGE_KEY]}><DormantPage page="demo"><DemoPage /></DormantPage></RequirePage>} />
         {/* An unknown tab is a stale link, not a dead end: Settings is the page's home. */}
         <Route path="*" element={<Navigate to={ROOT} replace />} />
       </Routes>

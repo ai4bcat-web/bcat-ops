@@ -24,6 +24,7 @@ import { useArToInvoiceCount } from '@/hooks/useArToInvoiceCount'
 import { useApToReviewCount } from '@/hooks/useApToReviewCount'
 import { useQuotesToReplyCount } from '@/hooks/useQuotesToReplyCount'
 import { countOpenIntakeLoads } from '@/lib/apiClient'
+import { modelsAvailable } from '@/lib/modelAvailability'
 import { useSpotNewCount } from '@/features/spot-quoter/useSpotRequests'
 import { loadReviewCount } from '@/lib/loadReview'
 import { needsCoverCount } from '@/features/tms/carrierSales/carrierSalesQueue'
@@ -63,31 +64,46 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   const { pendingCount: reviewCount } = useReviewQueue()
   const { outOfDateCount: truckDocAlerts } = useTruckDocAlerts()
   // Check calls due or already overdue, by the same clock the notifier Lambda reads.
-  const { dueCount: checkCallsDue } = useCheckCallWorklist({ enabled: hasPageAccess('loads') })
+  // A count whose table is not deployed yet (staged schema) is 0 and its read never runs.
+  const hasShipments = modelsAvailable(['Shipment'])
+  const hasAssignments = modelsAvailable(['LoadCarrier'])
+  const hasDocuments = modelsAvailable(['ShipmentDocument'])
+  const hasQuotes = modelsAvailable(['Quote'])
+  const hasBilling = modelsAvailable(['Order', 'Invoice'])
+  const hasBills = modelsAvailable(['CarrierBill', 'LoadCarrier'])
+  const hasIntake = modelsAvailable(['IntakeLoad'])
+  const hasSpot = modelsAvailable(['SpotRequest'])
+  const { dueCount: checkCallsDueRaw } = useCheckCallWorklist({ enabled: hasPageAccess('loads') && hasAssignments })
   // Carrier uploads nobody has accepted or refused yet; same page gate as the worklist.
-  const { pendingCount: documentReviewCount } = useDocumentReviewQueue({ enabled: hasPageAccess('loads') })
+  const { pendingCount: documentReviewRaw } = useDocumentReviewQueue({ enabled: hasPageAccess('loads') && hasDocuments })
   // Delivered orders nobody has billed yet; the hook gates itself on `invoicing`.
-  const arToInvoiceCount = useArToInvoiceCount()
+  const arToInvoiceRaw = useArToInvoiceCount()
   // Carrier bills sitting on the review rung; the hook gates itself on `carrierPay`.
-  const apToReviewCount = useApToReviewCount()
+  const apToReviewRaw = useApToReviewCount()
   // Quotes and offers waiting on an answer from us; the hook gates itself on `quotes`.
-  const quotesToReplyCount = useQuotesToReplyCount()
+  const quotesToReplyRaw = useQuotesToReplyCount()
   // Unread driver texts/voicemails; polled only for people who can open the page.
   const dispatchUnread = useDispatchUnread(hasPageAccess('dispatch'))
 
   // Tender e-mails waiting for a person; same page gate as the Intake pages themselves.
   const intakeLoads = useOpenIntakeLoadCount(
-    hasPageAccess('loads') || hasPageAccess('tms') || hasPageAccess('intakeReview'),
+    hasIntake && (hasPageAccess('loads') || hasPageAccess('tms') || hasPageAccess('intakeReview')),
   )
 
   // Spot quote requests waiting on this rep (Quotes › Spot inbox); same page gate as the inbox.
-  const spotNew = useSpotNewCount(hasPageAccess('quotes') || hasPageAccess('tms'))
+  const spotNew = useSpotNewCount(hasSpot && (hasPageAccess('quotes') || hasPageAccess('tms')))
 
   // Both queues are derived from the shipments the shell already holds: no new read.
   const mayReviewLoads = hasPageAccess('loadReview') || hasPageAccess('tms')
   const mayWorkLoads = hasPageAccess('loads') || hasPageAccess('tms')
-  const loadReview = useMemo(() => (mayReviewLoads ? loadReviewCount(shipments) : 0), [mayReviewLoads, shipments])
-  const carrierSales = useMemo(() => (mayWorkLoads ? needsCoverCount(shipments) : 0), [mayWorkLoads, shipments])
+  const loadReview = useMemo(() => (mayReviewLoads && hasShipments ? loadReviewCount(shipments) : 0), [mayReviewLoads, hasShipments, shipments])
+  const carrierSales = useMemo(() => (mayWorkLoads && hasShipments ? needsCoverCount(shipments) : 0), [mayWorkLoads, hasShipments, shipments])
+  // The sub-hooks may answer from a stale cache or a mock; a missing table is always 0.
+  const checkCallsDue = hasAssignments ? checkCallsDueRaw : 0
+  const documentReviewCount = hasDocuments ? documentReviewRaw : 0
+  const arToInvoiceCount = hasBilling ? arToInvoiceRaw : 0
+  const apToReviewCount = hasBills ? apToReviewRaw : 0
+  const quotesToReplyCount = hasQuotes ? quotesToReplyRaw : 0
 
   return useMemo(() => {
     // Every open intake item, appt-move tasks included: the intake queue lists them all.

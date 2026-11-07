@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { spotAction } from '@/lib/apiClient'
+import { modelAvailable } from '@/lib/modelAvailability'
 import type {
   SpotCountView,
   SpotGetRequestResult,
@@ -143,7 +144,9 @@ export function useSpotRequest(id: string | null): SpotRequestResult {
 }
 
 /** The sidebar number: how many requests are waiting on this rep. A failed read keeps the last value. */
-export function useSpotNewCount(enabled: boolean): number {
+export function useSpotNewCount(wanted: boolean): number {
+  // No SpotRequest table yet (staged deploy): zero, and no poll.
+  const enabled = wanted && modelAvailable('SpotRequest')
   const [count, setCount] = useState(0)
   useEffect(() => {
     if (!enabled) return

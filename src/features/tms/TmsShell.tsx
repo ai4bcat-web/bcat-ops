@@ -22,6 +22,7 @@ import { TmsCountBadge } from './kit/TmsCountBadge'
 import { LifecycleTabs } from './LifecycleTabs'
 import { isPathActive } from './navActive'
 import { personName } from '@/lib/roles'
+import { SWITCHES_ON_HINT, pathIsDormant } from '@/lib/dormantPages'
 import { useTmsCompany } from './tmsCompany'
 import { useTmsTheme } from './tmsTheme'
 import './theme.css'
@@ -172,16 +173,23 @@ function NavChildRow({
 }) {
   const active = isChildActive(activePath, activeSearch, child)
   const count = child.badgeKey != null ? (badgeCounts?.[child.badgeKey] ?? 0) : 0
+  const content = (
+    <>
+      <span className="tms-nav-child-label">{child.label}</span>
+      <TmsCountBadge count={count} className="tms-nav-child-badge" />
+    </>
+  )
   return (
     <div className="tms-nav-childrow">
-      <NavLink
-        to={child.to}
-        className={`tms-nav-child${active ? ' tms-active' : ''}`}
-        title={child.label}
-      >
-        <span className="tms-nav-child-label">{child.label}</span>
-        <TmsCountBadge count={count} className="tms-nav-child-badge" />
-      </NavLink>
+      {pathIsDormant(child.to) ? (
+        <span role="link" aria-disabled="true" className="tms-nav-child tms-nav-disabled" title={SWITCHES_ON_HINT}>
+          {content}
+        </span>
+      ) : (
+        <NavLink to={child.to} className={`tms-nav-child${active ? ' tms-active' : ''}`} title={child.label}>
+          {content}
+        </NavLink>
+      )}
     </div>
   )
 }
@@ -218,22 +226,35 @@ function NavRow({
   const hasKids = items.length > 0 || groups.length > 0
   const count = item.badgeKey != null ? (badgeCounts?.[item.badgeKey] ?? 0) : 0
 
+  const rowContent = (
+    <>
+      <Icon className="tms-nav-icon" size={20} aria-hidden="true" />
+      <span className="tms-nav-label">{item.label}</span>
+      {count > 0 ? (
+        <TmsCountBadge count={count} className="tms-nav-badge" />
+      ) : item.badge != null ? (
+        <span className="tms-nav-badge">{item.badge}</span>
+      ) : null}
+    </>
+  )
+
   return (
     <div className={`tms-nav-rowwrap${hasKids ? ' tms-has-children' : ''}`}>
-      <NavLink
-        to={item.to}
-        className={`tms-nav-row${parentActive ? ' tms-active' : ''}`}
-        title={item.label}
-        aria-current={parentActive ? 'page' : undefined}
-      >
-        <Icon className="tms-nav-icon" size={20} aria-hidden="true" />
-        <span className="tms-nav-label">{item.label}</span>
-        {count > 0 ? (
-          <TmsCountBadge count={count} className="tms-nav-badge" />
-        ) : item.badge != null ? (
-          <span className="tms-nav-badge">{item.badge}</span>
-        ) : null}
-      </NavLink>
+      {/* A group header has no page of its own; its children carry their own gate. */}
+      {!item.group && pathIsDormant(item.to) ? (
+        <span role="link" aria-disabled="true" className="tms-nav-row tms-nav-disabled" title={SWITCHES_ON_HINT}>
+          {rowContent}
+        </span>
+      ) : (
+        <NavLink
+          to={item.to}
+          className={`tms-nav-row${parentActive ? ' tms-active' : ''}`}
+          title={item.label}
+          aria-current={parentActive ? 'page' : undefined}
+        >
+          {rowContent}
+        </NavLink>
+      )}
       {hasKids ? (
         <button
           type="button"

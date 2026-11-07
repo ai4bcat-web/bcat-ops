@@ -12,6 +12,7 @@ import { useDocumentReviewQueue } from '@/hooks/useDocumentReviewQueue'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 import { useWorkflowExceptions } from '@/hooks/useWorkflowExceptions'
 import { buildOverviewRows } from '@/lib/complianceOverview'
+import { modelsAvailable } from '@/lib/modelAvailability'
 import { useAppStore } from '@/store/useAppStore'
 import {
   collectNotifications,
@@ -32,8 +33,9 @@ export function useNotifications(shipments: ShipmentListRow[]): Notifications {
   const canLoads = admin || hasPageAccess('loads') || hasPageAccess('tms')
   const canDocs = admin || hasPageAccess('compliance') || hasPageAccess('files')
 
-  const worklist = useCheckCallWorklist({ enabled: canLoads })
-  const review = useDocumentReviewQueue({ enabled: canLoads })
+  // Tables still waiting on their schema stage are not read: the bell just has nothing from them.
+  const worklist = useCheckCallWorklist({ enabled: canLoads && modelsAvailable(['LoadCarrier']) })
+  const review = useDocumentReviewQueue({ enabled: canLoads && modelsAvailable(['ShipmentDocument']) })
   const compliance = useAllComplianceDocuments()
   const workflows = useWorkflowExceptions()
   const drivers = useAppStore((s) => s.drivers)

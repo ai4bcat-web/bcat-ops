@@ -2,6 +2,7 @@
 // aliased request for every row a window needs: no Lambda on the read path. Reads only; the
 // shared graphql runner is installed by apiClient, so this module never imports it.
 import { batchGet } from '@/lib/aliasBatch'
+import { modelAvailable } from '@/lib/modelAvailability'
 import { peekList, readList } from '@/lib/listCache'
 import {
   LIVE_ROW_ID, ROLLUP_SCHEMA_VERSION, rollupMonthsFor,
@@ -41,6 +42,8 @@ const rowsKey = (ids: readonly string[]) => `rollup:rows:${ids.join(',')}`
 const sortedIds = (ids: readonly string[]) => [...new Set(ids)].sort()
 
 async function fetchRows(ids: string[]): Promise<RawRollupRow[]> {
+  // No table yet: no rows, so every reader falls back to computing the figures live.
+  if (!modelAvailable('DashboardRollup')) return []
   const rows = await batchGet<WireRow>({ query: 'getDashboardRollup', fields: FIELDS }, ids)
   // 'DASH:' rows are conversational-dashboard specs (Step AI) sharing this table: never rollup data.
   return [...rows.values()].filter((row) => !row.id.startsWith('DASH:')).map((row) => ({ ...row, payload: parsePayload(row.payload) }))

@@ -3,6 +3,7 @@ import { Navigate, useLocation, useParams, useSearchParams } from 'react-router-
 import { toast } from 'sonner'
 import { getLoads } from '@/lib/apiClient'
 import { normalizePro } from '@/lib/proNumber'
+import { modelAvailable } from '@/lib/modelAvailability'
 
 const SHIPMENTS = '/tms/shipments'
 
@@ -28,7 +29,7 @@ function loadShipmentTarget(
  * Load, follows `shipmentId`; a Load not yet linked lands on the board searched by its PRO;
  * an unknown id lands on the board with a toast. Other query params ride along.
  */
-export function LoadRedirect() {
+function ResolveLoadRedirect() {
   const params = useParams()
   const [searchParams] = useSearchParams()
   const { search, hash } = useLocation()
@@ -57,4 +58,12 @@ export function LoadRedirect() {
   if (!target) return null
   const [path, query] = target.split('?')
   return <Navigate to={{ pathname: path, search: query ? `?${query}` : '', hash }} replace />
+}
+
+/** Production's `/loads` page was the loads grid; before the shipment tables exist the Calendar is where its loads live. */
+const PRE_SHIPMENT_LANDING = '/calendar'
+
+export function LoadRedirect() {
+  if (!modelAvailable('Shipment')) return <Navigate to={PRE_SHIPMENT_LANDING} replace />
+  return <ResolveLoadRedirect />
 }

@@ -3,6 +3,7 @@ import { listCarriers, listCustomers, listDrivers, listQuotes, listUserProfiles 
 import type { LoadBoardSummary } from '@/lib/apiClient'
 import { loadBoardBundle, peekBoardBundle, type BoardBundle, type BoardView } from '@/lib/boardData'
 import { aggregateApStatus } from '@/lib/carrierTotals'
+import { modelsAvailable } from '@/lib/modelAvailability'
 import type { BoardCarrier } from '@/lib/shipmentViewDefs'
 import type { Driver, Stop } from '@/types'
 import type { PaperworkLocation } from '@/lib/paperworkLocation'
@@ -239,6 +240,9 @@ interface Slot {
   error: string | null
 }
 
+/** The board reads these; all four are the shipment core (schema stage 3). */
+const SHIPMENT_MODELS = ['Shipment', 'Order', 'LoadCarrier', 'LoadFinancials'] as const
+
 const EMPTY_BUNDLE: BoardBundle = { shipments: [], orders: [], loads: [], loadCarriers: [], loadFinancials: [] }
 const EMPTY_DIRECTORIES: Directories = { quotes: [], userProfiles: [], customers: [], carriers: [], drivers: [] }
 
@@ -313,7 +317,8 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
   // refetch forever. Its signature is what decides the query.
   const sig = viewSignature(view)
   const stable = useMemo(() => JSON.parse(sig) as ShipmentsView, [sig])
-  const empty = isEmptyView(stable)
+  // Before the shipment tables deploy (staged schema) there is nothing to read: the same empty result as an empty view, no request.
+  const empty = isEmptyView(stable) || !modelsAvailable(SHIPMENT_MODELS)
 
   // The five directory lists the column catalog joins in memory (R2): customer and
   // carrier facts, quotes, staff profiles and names for the load's driver ids. They

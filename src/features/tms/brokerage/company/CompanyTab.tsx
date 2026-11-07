@@ -8,6 +8,7 @@
  */
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { TmsTabs } from '@/features/tms/kit'
+import { DormantPage } from '@/components/RequireModels'
 import { BillingPage } from './BillingPage'
 import { BrandingPage } from './BrandingPage'
 import { CompanyPage } from './CompanyPage'
@@ -59,10 +60,10 @@ export function CompanyTab() {
           <Route path="billing" element={<BillingPage />} />
           <Route path="branding" element={<BrandingPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
-          <Route path="import" element={<ImportPage />} />
-          <Route path="aljex-import" element={<AljexImportPage />} />
-          <Route path="data" element={<DataSafetyPage />} />
-          <Route path="data/aljex-reconciliation" element={<AljexReconciliationPage />} />
+          <Route path="import" element={<DormantPage page="dataImport"><ImportPage /></DormantPage>} />
+          <Route path="aljex-import" element={<DormantPage page="aljexImport"><AljexImportPage /></DormantPage>} />
+          <Route path="data" element={<DormantPage page="dataSafety"><DataSafetyPage /></DormantPage>} />
+          <Route path="data/aljex-reconciliation" element={<DormantPage page="aljexReconciliation"><AljexReconciliationPage /></DormantPage>} />
           <Route path="account" element={<AccountPage />} />
           <Route path="*" element={<Navigate to={`${ROOT}/company`} replace />} />
         </Routes>

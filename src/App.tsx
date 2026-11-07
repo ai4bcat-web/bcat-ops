@@ -78,7 +78,8 @@ import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
 import { PodsPage } from '@/features/pods/PodsPage'
-import { RequirePage, RequireAdmin, LandingRedirect } from '@/components/RequirePage'
+import { RequirePage, RequireAdmin, LandingRedirect, TmsIndexRedirect } from '@/components/RequirePage'
+import { DormantPage } from '@/components/RequireModels'
 import { BrokeragePage } from '@/features/tms/brokerage/BrokeragePage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
 
@@ -137,55 +138,55 @@ export default function App() {
                   */}
                 <Route element={<TmsLayout />}>
                 <Route path="/tms">
-                  <Route index element={<Navigate to="/tms/dashboard" replace />} />
-                  <Route path="dashboard" element={<RequirePage page="tms"><DashboardHome /></RequirePage>} />
+                  <Route index element={<TmsIndexRedirect />} />
+                  <Route path="dashboard" element={<RequirePage page="tms"><DormantPage page="dashboard"><DashboardHome /></DormantPage></RequirePage>} />
                   {/* Step AI: chat-built dashboards. The builder bounces to /tms/dashboard without DASHBOARDS_CREATE. */}
-                  <Route path="dashboard/d/:id" element={<RequirePage page="tms"><DashboardViewPage /></RequirePage>} />
-                  <Route path="dashboard/new" element={<RequirePage page="tms"><Suspense fallback={null}><DashboardBuilderPage /></Suspense></RequirePage>} />
-                  <Route path="dashboard/d/:id/edit" element={<RequirePage page="tms"><Suspense fallback={null}><DashboardBuilderPage /></Suspense></RequirePage>} />
-                  <Route path="shipments" element={<RequirePage page={['loads', 'tms']}><ShipmentsBoard /></RequirePage>} />
+                  <Route path="dashboard/d/:id" element={<RequirePage page="tms"><DormantPage page="dashboard"><DashboardViewPage /></DormantPage></RequirePage>} />
+                  <Route path="dashboard/new" element={<RequirePage page="tms"><DormantPage page="dashboard"><Suspense fallback={null}><DashboardBuilderPage /></Suspense></DormantPage></RequirePage>} />
+                  <Route path="dashboard/d/:id/edit" element={<RequirePage page="tms"><DormantPage page="dashboard"><Suspense fallback={null}><DashboardBuilderPage /></Suspense></DormantPage></RequirePage>} />
+                  <Route path="shipments" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><ShipmentsBoard /></DormantPage></RequirePage>} />
                   {/* Saved board views are gone: old bookmarks land on the board. */}
                   <Route path="shipments/view/*" element={<SavedViewRedirect />} />
-                  <Route path="shipments/intake" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><IntakeBoard /></RequirePage>} />
-                  <Route path="shipments/intake/:intakeId" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><IntakeReviewPage /></RequirePage>} />
-                  <Route path="shipments/new" element={<RequirePage page={['loads', 'tms']}><Suspense fallback={null}><ShipmentFormPage mode="create" /></Suspense></RequirePage>} />
-                  <Route path="shipments/:id/edit" element={<RequirePage page={['loads', 'tms']}><Suspense fallback={null}><ShipmentFormPage mode="edit" /></Suspense></RequirePage>} />
-                  <Route path="shipments/:id" element={<RequirePage page={['loads', 'tms']}><ShipmentPage /></RequirePage>} />
+                  <Route path="shipments/intake" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><DormantPage page="intake"><IntakeBoard /></DormantPage></RequirePage>} />
+                  <Route path="shipments/intake/:intakeId" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><DormantPage page="intake"><IntakeReviewPage /></DormantPage></RequirePage>} />
+                  <Route path="shipments/new" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><Suspense fallback={null}><ShipmentFormPage mode="create" /></Suspense></DormantPage></RequirePage>} />
+                  <Route path="shipments/:id/edit" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><Suspense fallback={null}><ShipmentFormPage mode="edit" /></Suspense></DormantPage></RequirePage>} />
+                  <Route path="shipments/:id" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><ShipmentPage /></DormantPage></RequirePage>} />
                   {/* The old Dispatch "needs cover" workstation is Carrier Sales now. */}
                   <Route path="dispatch" element={<Navigate to="/tms/carrier-sales" replace />} />
-                  <Route path="carrier-sales" element={<RequirePage page={['loads', 'tms']}><CarrierSalesPage /></RequirePage>} />
-                  <Route path="tracking" element={<RequirePage page={['loads', 'tms']}><TrackingWorkstation /></RequirePage>} />
-                  <Route path="tracking/links" element={<RequirePage page={['loads', 'tms']}><CustomerLinksPage /></RequirePage>} />
+                  <Route path="carrier-sales" element={<RequirePage page={['loads', 'tms']}><DormantPage page="carrierSales"><CarrierSalesPage /></DormantPage></RequirePage>} />
+                  <Route path="tracking" element={<RequirePage page={['loads', 'tms']}><DormantPage page="tracking"><TrackingWorkstation /></DormantPage></RequirePage>} />
+                  <Route path="tracking/links" element={<RequirePage page={['loads', 'tms']}><DormantPage page="tracking"><CustomerLinksPage /></DormantPage></RequirePage>} />
                   {/* Retired pages: the Tracking grid's Focus control replaced them (legacyRoutes.ts). */}
                   <Route path="documents/*" element={<Navigate to={DOCS_LANDING} replace />} />
                   <Route path="check-calls" element={<Navigate to={CHECK_CALLS_LANDING} replace />} />
                   {/* Load Review: the pre-billing queue. `?shipment=<id>` opens a load's checklist. */}
-                  <Route path="load-review" element={<RequirePage page={['loadReview', 'tms']}><LoadReviewPage /></RequirePage>} />
+                  <Route path="load-review" element={<RequirePage page={['loadReview', 'tms']}><DormantPage page="loadReview"><LoadReviewPage /></DormantPage></RequirePage>} />
                   {/* Quotes (path stays /tms/rates): customer quotes and carrier offers, with the lane history behind them. */}
-                  <Route path="rates" element={<RequirePage page={['quotes', 'tms']}><QuotePage tab="quotes" /></RequirePage>} />
+                  <Route path="rates" element={<RequirePage page={['quotes', 'tms']}><DormantPage page="quotes"><QuotePage tab="quotes" /></DormantPage></RequirePage>} />
                   {/* Step AB slots, declared before `rates/:id` so a static segment is never read as a quote id. */}
-                  <Route path="rates/spot" element={<RequirePage page={['quotes', 'tms']}><QuotePage tab="inbox" /></RequirePage>} />
-                  <Route path="rates/spot/callback" element={<RequirePage page={['quotes', 'tms']}><SpotCallbackPage /></RequirePage>} />
-                  <Route path="rates/new" element={<RequirePage page={['quotes', 'tms']}><QuoteDetail /></RequirePage>} />
-                  <Route path="rates/:id" element={<RequirePage page={['quotes', 'tms']}><QuoteDetail /></RequirePage>} />
+                  <Route path="rates/spot" element={<RequirePage page={['quotes', 'tms']}><DormantPage page="quotes"><QuotePage tab="inbox" /></DormantPage></RequirePage>} />
+                  <Route path="rates/spot/callback" element={<RequirePage page={['quotes', 'tms']}><DormantPage page="quotes"><SpotCallbackPage /></DormantPage></RequirePage>} />
+                  <Route path="rates/new" element={<RequirePage page={['quotes', 'tms']}><DormantPage page="quotes"><QuoteDetail /></DormantPage></RequirePage>} />
+                  <Route path="rates/:id" element={<RequirePage page={['quotes', 'tms']}><DormantPage page="quotes"><QuoteDetail /></DormantPage></RequirePage>} />
                   {/* Invoicing: what we are owed, with carrier pay as its payable side. */}
-                  <Route path="invoicing" element={<RequirePage page={['invoicing', 'tms']}><InvoicingPage /></RequirePage>} />
-                  <Route path="invoicing/invoices/:id" element={<RequirePage page={['invoicing', 'tms']}><InvoiceDetail /></RequirePage>} />
-                  <Route path="invoicing/payable" element={<RequirePage page={['carrierPay', 'tms']}><InvoicingPage /></RequirePage>} />
-                  <Route path="invoicing/payable/bills/:id" element={<RequirePage page={['carrierPay', 'tms']}><BillDetail /></RequirePage>} />
-                  <Route path="carriers" element={<RequirePage page={['carriers', 'tms']}><CarriersHub tab="list" /></RequirePage>} />
-                  <Route path="carriers/find" element={<RequirePage page={['carriers', 'loads', 'tms']}><CarriersHub tab="find" /></RequirePage>} />
-                  <Route path="carriers/:id" element={<RequirePage page={['carriers', 'tms']}><CarriersPage /></RequirePage>} />
+                  <Route path="invoicing" element={<RequirePage page={['invoicing', 'tms']}><DormantPage page="invoicingAr"><InvoicingPage /></DormantPage></RequirePage>} />
+                  <Route path="invoicing/invoices/:id" element={<RequirePage page={['invoicing', 'tms']}><DormantPage page="invoicingAr"><InvoiceDetail /></DormantPage></RequirePage>} />
+                  <Route path="invoicing/payable" element={<RequirePage page={['carrierPay', 'tms']}><DormantPage page="invoicingAp"><InvoicingPage /></DormantPage></RequirePage>} />
+                  <Route path="invoicing/payable/bills/:id" element={<RequirePage page={['carrierPay', 'tms']}><DormantPage page="invoicingAp"><BillDetail /></DormantPage></RequirePage>} />
+                  <Route path="carriers" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carriers"><CarriersHub tab="list" /></DormantPage></RequirePage>} />
+                  <Route path="carriers/find" element={<RequirePage page={['carriers', 'loads', 'tms']}><DormantPage page="carriers"><CarriersHub tab="find" /></DormantPage></RequirePage>} />
+                  <Route path="carriers/:id" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carrierProfile"><CarriersPage /></DormantPage></RequirePage>} />
                   <Route path="factors" element={<RequirePage page={['factoring', 'tms']}><FactoringPage /></RequirePage>} />
                   <Route path="customers" element={<RequirePage page={['customers', 'tms']}><CustomersPage /></RequirePage>} />
                   {/* Step AW D.2: who is billed how. Same grant as the Customers list. */}
-                  <Route path="customers/billing-setup" element={<RequirePage page={['customers', 'tms']}><BillingSetupPage /></RequirePage>} />
+                  <Route path="customers/billing-setup" element={<RequirePage page={['customers', 'tms']}><DormantPage page="billingSetup"><BillingSetupPage /></DormantPage></RequirePage>} />
                   <Route path="customers/follow-ups" element={<Navigate to="/tms/customers" replace />} />
                   <Route path="locations" element={<RequirePage page={['locations', 'tms']}><LocationsPage /></RequirePage>} />
                   <Route path="vendors" element={<RequirePage page={['vendorAp', 'tms']}><VendorApPage /></RequirePage>} />
                   {/* Hidden, not removed: no nav item, but four live deep links land here. */}
-                  <Route path="workflows" element={<RequirePage page="tms"><WorkflowsPage /></RequirePage>} />
-                  <Route path="workflows/runs/:id" element={<RequirePage page="tms"><RunTracePage /></RequirePage>} />
+                  <Route path="workflows" element={<RequirePage page="tms"><DormantPage page="workflows"><WorkflowsPage /></DormantPage></RequirePage>} />
+                  <Route path="workflows/runs/:id" element={<RequirePage page="tms"><DormantPage page="workflows"><RunTracePage /></DormantPage></RequirePage>} />
                   {/* Academy is hidden: the pages stay in the tree, the routes land on the dashboard. */}
                   <Route path="academy/*" element={<Navigate to="/tms/dashboard" replace />} />
                   {/* Settings (path stays /tms/brokerage) owns its own tab strip and nested routes; each tab

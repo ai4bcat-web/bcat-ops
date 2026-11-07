@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { NAV_ITEMS } from '@/lib/navItems'
 import { flatNavDefs } from '@/lib/navSections'
 import { LIFECYCLE_TABS } from '@/lib/lifecycleTabs'
+import { pathIsDormant } from '@/lib/dormantPages'
 
 /**
  * Route-level access control. `hasPageAccess` is the SAME allowlist the sidebar uses,
@@ -20,8 +21,10 @@ import { LIFECYCLE_TABS } from '@/lib/lifecycleTabs'
 // The lifecycle tabs (Quote, Build, View, Book, Track, Review) left the sidebar: a user granted only one of those pages still needs a landing target.
 const ALL_ITEMS = [...flatNavDefs(), ...LIFECYCLE_TABS.map((t) => ({ pageKey: t.pageKey, to: t.to })), ...NAV_ITEMS]
 
+/** A page whose tables are not deployed yet is a landing of last resort: it shows an empty state, so a person who can open anything else lands there first. */
 function firstAccessiblePath(hasPageAccess: (k: string) => boolean): string | null {
-  return ALL_ITEMS.find((i) => hasPageAccess(i.pageKey))?.to ?? null
+  const open = ALL_ITEMS.filter((i) => hasPageAccess(i.pageKey))
+  return (open.find((i) => !pathIsDormant(i.to)) ?? open[0])?.to ?? null
 }
 
 /**
@@ -38,7 +41,7 @@ function preferredLandingPath(hasPageAccess: (k: string) => boolean): string | n
   for (const key of LANDING_PRIORITY) {
     if (hasPageAccess(key)) {
       const item = ALL_ITEMS.find((i) => i.pageKey === key)
-      if (item) return item.to
+      if (item && !pathIsDormant(item.to)) return item.to
     }
   }
   return firstAccessiblePath(hasPageAccess)
@@ -111,4 +114,12 @@ export function LandingRedirect() {
   const { hasPageAccess } = useAuth()
   const fallback = preferredLandingPath(hasPageAccess)
   return fallback ? <Navigate to={fallback} replace /> : <NoAccess />
+}
+
+/**
+ * `/tms`: the Company Dashboard, once its tables are deployed. Until then it is an empty state,
+ * so `/tms` lands where "/" does (the production Dashboard) rather than on it.
+ */
+export function TmsIndexRedirect() {
+  return pathIsDormant('/tms/dashboard') ? <LandingRedirect /> : <Navigate to="/tms/dashboard" replace />
 }

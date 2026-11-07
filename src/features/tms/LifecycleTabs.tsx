@@ -8,6 +8,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
 import { TmsCountBadge } from './kit/TmsCountBadge'
 import { LIFECYCLE_TABS, activeLifecycleTab, visibleLifecycleTabs } from '@/lib/lifecycleTabs'
+import { SWITCHES_ON_HINT, pathIsDormant } from '@/lib/dormantPages'
 import './kit/kit.css'
 
 export interface LifecycleTabsProps {
@@ -42,7 +43,7 @@ export function LifecycleTabs({ pathname, canOpenPage, badgeCounts }: LifecycleT
       if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || isTyping(e.target)) return
       const n = /^Digit([1-6])$/.exec(e.code)?.[1]
       const tab = n ? LIFECYCLE_TABS[Number(n) - 1] : undefined
-      if (!tab || !openKeys.split(',').includes(tab.key)) return
+      if (!tab || !openKeys.split(',').includes(tab.key) || pathIsDormant(tab.to)) return
       e.preventDefault()
       navigate(tab.to)
     }
@@ -60,24 +61,38 @@ export function LifecycleTabs({ pathname, canOpenPage, badgeCounts }: LifecycleT
           const done = activeIndex >= 0 && i < activeIndex
           const count = tab.badgeKey ? (badgeCounts?.[tab.badgeKey] ?? 0) : 0
           const position = LIFECYCLE_TABS.findIndex((t) => t.key === tab.key) + 1
+          const dormant = pathIsDormant(tab.to)
           return (
             <li key={tab.key} className="tms-lifecycle-item">
               {i > 0 ? <ChevronRight className="tms-lifecycle-chev" size={14} aria-hidden="true" /> : null}
-              <Link
-                to={tab.to}
-                data-testid={`lifecycle-tab-${tab.key}`}
-                className={`tms-lifecycle-tab${active ? ' tms-active' : ''}${done ? ' tms-lifecycle-done' : ''}`}
-                aria-current={active ? 'page' : undefined}
-                title={`${tab.label} · ${tab.caption} (Alt+${position})`}
-              >
-                <span className="tms-lifecycle-label">{tab.label}</span>
-                <span className="tms-lifecycle-caption">{tab.caption}</span>
-                {count > 0 ? (
-                  <span data-testid={`lifecycle-badge-${tab.key}`}>
-                    <TmsCountBadge count={count} />
-                  </span>
-                ) : null}
-              </Link>
+              {dormant ? (
+                <span
+                  role="link"
+                  aria-disabled="true"
+                  data-testid={`lifecycle-tab-${tab.key}`}
+                  className="tms-lifecycle-tab tms-lifecycle-disabled"
+                  title={SWITCHES_ON_HINT}
+                >
+                  <span className="tms-lifecycle-label">{tab.label}</span>
+                  <span className="tms-lifecycle-caption">{tab.caption}</span>
+                </span>
+              ) : (
+                <Link
+                  to={tab.to}
+                  data-testid={`lifecycle-tab-${tab.key}`}
+                  className={`tms-lifecycle-tab${active ? ' tms-active' : ''}${done ? ' tms-lifecycle-done' : ''}`}
+                  aria-current={active ? 'page' : undefined}
+                  title={`${tab.label} · ${tab.caption} (Alt+${position})`}
+                >
+                  <span className="tms-lifecycle-label">{tab.label}</span>
+                  <span className="tms-lifecycle-caption">{tab.caption}</span>
+                  {count > 0 ? (
+                    <span data-testid={`lifecycle-badge-${tab.key}`}>
+                      <TmsCountBadge count={count} />
+                    </span>
+                  ) : null}
+                </Link>
+              )}
             </li>
           )
         })}

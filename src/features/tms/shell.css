@@ -243,6 +243,15 @@
   color: var(--tms-text);
 }
 
+/* A page whose tables are not deployed yet: drawn, readable, not a link. */
+.tms-shell .tms-nav-disabled,
+.tms-shell .tms-nav-disabled:hover {
+  background: transparent;
+  color: var(--tms-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .tms-shell .tms-nav-row.tms-active {
   background: var(--tms-primary);
   color: var(--tms-on-primary);

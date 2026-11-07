@@ -2,6 +2,7 @@ import { generateClient } from 'aws-amplify/data'
 import { messageAttachments } from '@/lib/shipmentThread'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
 import outputs from '../../amplify_outputs.json'
+import { modelAvailable, modelsAvailable } from '@/lib/modelAvailability'
 import type { TimeOffType, TimeOffStatus } from './timeOff'
 import type { Load, Stop, ApptType, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
@@ -2039,6 +2040,7 @@ export async function getAccountInfo(): Promise<AccountInfo> {
 
 /** Every provider row, created from the registry on the first call. */
 export async function listIntegrations(): Promise<IntegrationRecord[]> {
+  if (!modelAvailable('Integration')) return []
   return directoryAction<IntegrationRecord[]>('LIST_INTEGRATIONS', {})
 }
 /** PAGE providers only: the values go to SSM, the row gets the masks. */
@@ -2728,7 +2730,7 @@ const OWNERSHIP_RULE_FIELDS = `
   createdBy updatedBy version createdAt updatedAt
 `
 
-let ownershipModelsAvailable = true
+let ownershipModelsAvailable = modelsAvailable(['OwnershipDivision', 'OwnershipRule', 'ShipmentView'])
 const isMissingOwnershipModel = (err: unknown) =>
   /[\\'"](get|list)(OwnershipDivision|OwnershipRule|ShipmentView)\w*[\\'"]|Unknown type [\\'"]+(OwnershipDivision|OwnershipRule|ShipmentView)/i
     .test(safeStringify(err))
@@ -2797,7 +2799,7 @@ const INTAKE_LOAD_FIELDS = `
 `
 const INTAKE_LOAD_JSON_FIELDS: (keyof IntakeLoadRecord)[] = ['attachments', 'fields', 'autoFields', 'meta']
 
-let intakeModelAvailable = true
+let intakeModelAvailable = modelAvailable('IntakeLoad')
 const isMissingIntakeModel = (err: unknown) =>
   /[\\'"](get|list)IntakeLoad\w*[\\'"]|Unknown type [\\'"]+IntakeLoad/i.test(safeStringify(err))
 
@@ -2909,7 +2911,7 @@ const SHIPMENT_COLUMN_TEMPLATE_FIELDS = `
   id name columns widths pinned ownerEmail shared createdBy updatedBy version createdAt updatedAt
 `
 
-let shipmentColumnTemplateModelsAvailable = true
+let shipmentColumnTemplateModelsAvailable = modelAvailable('ShipmentColumnTemplate')
 const isMissingShipmentColumnTemplateModel = (err: unknown) =>
   /[\\'"](get|list)ShipmentColumnTemplate\w*[\\'"]|Unknown type [\\'"]+ShipmentColumnTemplate/i.test(safeStringify(err))
 
@@ -3200,7 +3202,7 @@ export async function getLoadFinancials(loadId: string): Promise<LoadFinancialsR
 }
 
 // LoadFinancials lands with the shipment layer; until then the board leaves money empty.
-let loadFinancialsModelsAvailable = true
+let loadFinancialsModelsAvailable = modelAvailable('LoadFinancials')
 const isMissingLoadFinancialsModel = (err: unknown) =>
   /[\\'"](get|list)LoadFinancials\w*[\\'"]|Unknown type [\\'"]+LoadFinancials/i.test(safeStringify(err))
 
@@ -3428,6 +3430,7 @@ export async function listShipmentsByMonthFiltered(
 
 /** Exact PRO lookup. The `number` index includes voided shipments (the PRO stays taken). */
 export async function listShipmentsByNumber(number: string): Promise<ShipmentRecord[]> {
+  if (!modelAvailable('Shipment')) return []
   return readShipments((fields) => listAllByIndex<ShipmentRecord>('listShipmentByNumber', { number }, fields, 100))
 }
 
@@ -3548,6 +3551,7 @@ export async function getLoads(ids: readonly string[]): Promise<Load[]> {
 
 /** Every assignment of these loads, grouped by load (replaces one `listLoadCarriersByLoad` per load). */
 export async function listLoadCarriersByLoads(loadIds: readonly string[]): Promise<Map<string, LoadCarrierRecord[]>> {
+  if (!modelAvailable('LoadCarrier')) return new Map()
   return readLoadCarriers((fields) => batchByIndex<LoadCarrierRecord>(
     { query: 'listLoadCarrierByLoadId', keyArg: 'loadId', keyType: 'String!', fields }, loadIds, BOARD_BATCH,
   ))
@@ -3709,12 +3713,14 @@ export const clearTaxId = (carrierId: string, reason: string) =>
 // ── Reads ────────────────────────────────────────────────────────────────────
 
 export async function listCarriers(): Promise<CarrierRecord[]> {
+  if (!modelAvailable('Carrier')) return []
   return cachedDirectory('carriers', async () => {
     const rows = await readCarriers((fields) => listAll<CarrierRecord>('listCarriers', fields, 1000))
     return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
   })
 }
 export async function listCarriersByStatus(status: CarrierStatus): Promise<CarrierRecord[]> {
+  if (!modelAvailable('Carrier')) return []
   // The index key is the Carrier.status enum, so the variable must be declared as one.
   const rows = await readCarriers((fields) => listAllByIndex<CarrierRecord>(
     'listCarrierByStatusAndName', { status }, fields, 1000, { status: 'CarrierStatus!' },
@@ -3739,6 +3745,7 @@ export async function getCarrier(id: string): Promise<CarrierRecord | null> {
 }
 /** Every document in the system — the board's "missing required docs" filter reads it. */
 export async function listCarrierDocuments(): Promise<CarrierDocumentRecord[]> {
+  if (!modelAvailable('CarrierDocument')) return []
   return listAll<CarrierDocumentRecord>('listCarrierDocuments', CARRIER_DOCUMENT_FIELDS, 1000)
 }
 
@@ -4441,7 +4448,7 @@ const SHIPMENT_NOTICE_JSON_FIELDS: (keyof ShipmentNoticeRecord)[] = ['attachment
 // query at all — the error names the query, not a field, so the field-level self-heal
 // above cannot see it. Degrade to "this shipment has no documents" (the same bargain
 // `payCreditsDeployed` strikes) rather than failing every shipment page mid-deploy.
-let documentModelsAvailable = true
+let documentModelsAvailable = modelsAvailable(['ShipmentDocument', 'ShipmentNotice'])
 const isMissingDocumentModel = (err: unknown) =>
   /Cannot query field ['"]listShipment(Document|Notice)|Unknown type ['"]ShipmentDocument/i.test(safeStringify(err))
 
@@ -5195,7 +5202,7 @@ const USER_PROFILE_FIELDS = `
 // all — the error names the query, not a field, so the field-level self-heal cannot see
 // it. Degrade to "no staff" rather than breaking every picker on the page. The quoting
 // and the delimiters are the `quoteModelsAvailable` bargain, for the same reasons.
-let userProfilesAvailable = true
+let userProfilesAvailable = modelAvailable('UserProfile')
 const isMissingUserProfileModel = (err: unknown) =>
   /[\\'"](get|list)UserProfile\w*[\\'"]|Unknown type [\\'"]+UserProfile/i.test(safeStringify(err))
 
@@ -5946,6 +5953,7 @@ export interface CompanyPhone {
 const COMPANY_PHONE_FIELDS = `label number assignedDriverId sortOrder`
 
 export async function listCompanyPhones(): Promise<CompanyPhone[]> {
+  if (!modelAvailable('CompanyPhone')) return []
   const result = await client.graphql({
     query: `query ListCompanyPhones { listCompanyPhones(limit: 1000) { items { ${COMPANY_PHONE_FIELDS} } } }`,
   }) as { data: { listCompanyPhones: { items: CompanyPhone[] } } }
@@ -6964,7 +6972,7 @@ export function parseArJson<T extends object>(row: T, fields: readonly (keyof T)
 // Invoice, ArPayment and the Order arStatus index all arrive with step F's deploy, and
 // until then the error names the *query*, not a field, so the field-level self-heal
 // cannot see it. Degrade to an empty book rather than throwing on every AR read.
-let arModelsAvailable = true
+let arModelsAvailable = modelsAvailable(['Invoice', 'ArPayment', 'Order'])
 const isMissingArModel = (err: unknown) =>
   /Cannot query field ['"](listInvoice|getInvoice|listArPayment|listOrderByArStatus)|Unknown type ['"](Invoice|ArPayment|ArStatus)/i
     .test(safeStringify(err))
@@ -7376,7 +7384,7 @@ const AP_PAYMENT_JSON_FIELDS: (keyof ApPaymentRecord)[] = ['applications', 'cred
 // CarrierBill, ApPayment and the LoadCarrier apOpen index all arrive with step G's
 // deploy, and until then the error names the *query*, not a field, so the field-level
 // self-heal cannot see it. Degrade to an empty book rather than throwing on every AP read.
-let apModelsAvailable = true
+let apModelsAvailable = modelsAvailable(['CarrierBill', 'ApPayment', 'LoadCarrier'])
 const isMissingApModel = (err: unknown) =>
   /Cannot query field ['"](listCarrierBill|getCarrierBill|listApPayment|listLoadCarrierByApOpen)|Unknown type ['"](CarrierBill|ApPayment|LoadCarrierApStatus)/i
     .test(safeStringify(err))
@@ -7745,7 +7753,7 @@ const LANE_SAMPLE_FIELDS = `
 // the `JSON.stringify` inside `safeStringify` — hence the backslash in the class. The
 // delimiters are what keep "Not Authorized to access getQuote" out: a permission
 // refusal is a real error and must still reach the caller.
-let quoteModelsAvailable = true
+let quoteModelsAvailable = modelAvailable('Quote')
 const isMissingQuoteModel = (err: unknown) =>
   /[\\'"](get|list)(Quote|LaneRateSample)\w*[\\'"]|Unknown type [\\'"]+(Quote|LaneRateSample)/i
     .test(safeStringify(err))
@@ -7890,6 +7898,7 @@ export async function listQuotesByMonth(month: string): Promise<QuoteRecord[]> {
  * whole life filtered in the browser.
  */
 export async function listLaneSamples(laneKey: string, fromDate?: string): Promise<LaneRateSampleRecord[]> {
+  if (!modelAvailable('LaneRateSample')) return []
   if (!quoteModelsAvailable || !laneKey) return []
   try {
     return await listTrackingIndex<LaneRateSampleRecord>({
@@ -7909,6 +7918,7 @@ export async function listLaneSamples(laneKey: string, fromDate?: string): Promi
 
 /** The ZIP3 neighbourhood's history — what the panel falls back to on a cold lane. */
 export async function listLaneSamplesByZip3(laneKey3: string, fromDate?: string): Promise<LaneRateSampleRecord[]> {
+  if (!modelAvailable('LaneRateSample')) return []
   if (!quoteModelsAvailable || !laneKey3) return []
   try {
     return await listTrackingIndex<LaneRateSampleRecord>({
@@ -8550,7 +8560,7 @@ const PAY_PERIOD_JSON_FIELDS: (keyof CommissionPayPeriodRecord)[] = ['byRep']
 // answered the same way: one flag for both models, an empty board instead of a throw.
 // The delimiters keep "Not Authorized to access listCommissions" out: a permission
 // refusal is a real error and must still reach the caller.
-let commissionModelsAvailable = true
+let commissionModelsAvailable = modelsAvailable(['Commission', 'CommissionPayPeriod'])
 const isMissingCommissionModel = (err: unknown) =>
   /[\\'"](get|list)Commission\w*[\\'"]|Unknown type [\\'"]+Commission/i.test(safeStringify(err))
 
@@ -8674,6 +8684,7 @@ let laneSamplesHaveRevTag = true
  * month off the `sampleMonth` index rather than the whole lane history filtered here.
  */
 export async function listLaneSamplesByMonth(ym: string): Promise<LaneRateSampleRecord[]> {
+  if (!modelAvailable('LaneRateSample')) return []
   if (!quoteModelsAvailable || !ym) return []
   for (;;) {
     try {
@@ -9183,6 +9194,7 @@ const AP_INBOX_ITEM_FIELDS = `
 
 /** One status of the queue, newest first. `sinceIso` bounds `receivedAt` (the history chips look back 30 days). */
 export async function listApInboxItems(status: ApInboxStatus, sinceIso?: string): Promise<ApInboxItemRecord[]> {
+  if (!modelAvailable('ApInboxItem')) return []
   const rows = await listAllByIndex<ApInboxItemRecord>(
     'listApInboxItemByStatusAndReceivedAt', { status }, AP_INBOX_ITEM_FIELDS, 200, { status: 'ApInboxItemStatus!' },
   )

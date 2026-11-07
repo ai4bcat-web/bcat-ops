@@ -702,6 +702,15 @@
   color: var(--tms-text);
 }
 
+/* A step whose page is not deployed yet: shown, not a link. */
+.tms-shell .tms-lifecycle-tab.tms-lifecycle-disabled,
+.tms-shell .tms-lifecycle-tab.tms-lifecycle-disabled:hover {
+  background: transparent;
+  color: var(--tms-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .tms-shell .tms-lifecycle-tab.tms-lifecycle-done {
   background: var(--tms-primary-tint);
   color: var(--tms-primary-ink);

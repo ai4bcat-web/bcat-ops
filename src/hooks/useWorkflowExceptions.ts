@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { listWorkflowExceptions } from '@/lib/apiClient'
+import { modelAvailable } from '@/lib/modelAvailability'
 import type { WorkflowRunRecord } from '@/types/tms'
 
 const POLL_MS = 60_000
@@ -26,7 +27,8 @@ export function useWorkflowExceptions(): WorkflowExceptions {
   // Non-async on purpose: `react-hooks/set-state-in-effect` cannot see through an
   // `async` function, so every state write lives in an explicit promise chain — the
   // same shape `useIntegrations` uses.
-  const load = useCallback(() => listWorkflowExceptions()
+  // No WorkflowRun table yet (staged deploy): an empty list, not a failed read.
+  const load = useCallback(() => (modelAvailable('WorkflowRun') ? listWorkflowExceptions() : Promise.resolve<WorkflowRunRecord[]>([]))
     .then((next) => {
       setRuns(next)
       setError(null)
