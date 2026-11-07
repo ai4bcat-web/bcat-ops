@@ -290,3 +290,22 @@ the same 244 columns, PRO 6000..14939, deliveries through 2026-11-06, 4 repeated
 carrier name 11, invoice amount 5). Ryne: "use this one instead". Use it for the load import, the 24-month
 window (2024-11-07 onward) and every reconciliation. Keep the 11-03 file untouched as history. The 2 loads
 beyond the 25 in production, and the repeated PROs, go in the dry-run report.
+
+## Aljex AR report received (2026-11-07)
+File: `/Users/adminoid/aljex-export/aljex-ar-2026-11-07.csv` (outside the repo, mode 600): 296 open invoices, 44
+columns, key = Pro # (no duplicates; PRO = invoice number). **Open AR = $357,753.44** = the sum of the five aging
+buckets per row (0-30 $216,416.34; 31-60 $62,201.30; 61-90 $30,005.50; 91-120 $14,874.95; 120+ $34,255.35). It
+equals Invoice Amount $361,203.44 minus Previous Payments $3,450.00 (3 partially paid invoices). It also equals
+the sum of `Balance Due` in the Aljex customer list ($357,753.44), so two independent reports agree.
+**Do not use the AR report's `Balance Due`, `Total Exposure` or `Unbilled` columns per invoice: they repeat the
+customer-level total on every row.** Per-invoice open amount = sum of the aging buckets (or Invoice Amount minus
+Previous Payments). Fields: Invoice Date, Due Date, Days, Customer Terms (30: 236, 90: 55, 15: 5), Bill to +
+Bill to Account # (62 invoices bill a different party than the customer), Customer + Account #, Customer Ref #,
+Revenue Type (B 144, I 152), Previous Payments. No AR notes or collectors. All 296 PROs exist in the 11-07 big
+export. By billing method: 50 factored invoices $40,553.06 and 246 manual invoices $317,200.38 (ties to the
+customer-list totals). 8 invoices are from 2024 ($25,786.91 open); 95 invoices ($110,094.98) are over 35 days and
+29 are over 90 days. Danisco invoices carry 90-day terms in Aljex (54 rows): carried-over invoices KEEP the Aljex
+due date; Ryne's 120-day Danisco term applies to new invoices.
+Import as carried-over open invoices (never resend), keep Invoice Date and Due Date, bill-to party, partial
+payments as an ArPayment of the amount paid. Stage E reconciliation: open AR by invoice, by customer, by bill-to
+and by aging bucket to the cent ($357,753.44), plus the factored/manual split.
