@@ -36,6 +36,9 @@ import { formatCents as formatQuoteCents } from '@/lib/invoiceBuild'
 import { formatCents } from '@/lib/tmsDirectory'
 import { useCustomerForm } from './useCustomerForm'
 import { INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
+import { BillingMethodFields } from './BillingMethodFields'
+import { PossibleDuplicateBadge } from './PossibleDuplicateBadge'
+import { buildDuplicateIndex } from '@/lib/customerDuplicates'
 import { ContactsEditor } from './ContactsEditor'
 import { BillToEditor } from './BillToEditor'
 import { ReferencesEditor } from './ReferencesEditor'
@@ -123,6 +126,10 @@ export function CustomerProfile({
   onStatusChange,
 }: CustomerProfileProps) {
   const { value, set, setPartial, toRecord, errors } = useCustomerForm(customer)
+  const duplicates = useMemo(
+    () => buildDuplicateIndex(activeCustomers.some((c) => c.id === customer.id) ? activeCustomers : [...activeCustomers, customer]),
+    [activeCustomers, customer],
+  )
   const [tab, setTab] = useState('account')
   const [saving, setSaving] = useState(false)
   const [statusAction, setStatusAction] = useState<'activate' | 'deactivate' | 'close' | null>(null)
@@ -206,7 +213,12 @@ export function CustomerProfile({
           name={customer.name}
           as="h3"
           subtitle={`Board: ${boardTab(effectiveStatus)} · effective status ${effectiveStatus}`}
-          chips={customer.status ? <TmsBadge tone={statusTones[customer.status]}>{customer.status}</TmsBadge> : undefined}
+          chips={
+            <>
+              {customer.status ? <TmsBadge tone={statusTones[customer.status]}>{customer.status}</TmsBadge> : null}
+              <PossibleDuplicateBadge info={duplicates.get(customer.id)} />
+            </>
+          }
           actions={
             <>
               {canActivate && (
@@ -220,7 +232,7 @@ export function CustomerProfile({
           }
           columns={[
             { title: 'MC', rows: [{ label: 'MC #', value: customer.mcNumber || '—' }, { label: 'DOT #', value: customer.dotNumber || '—' }] },
-            { title: 'Billing', rows: [{ label: 'Terms', value: customer.paymentTermsDays != null ? `Net ${customer.paymentTermsDays}` : '—' }] },
+            { title: 'Billing', rows: [{ label: 'Terms', value: customer.paymentTermsDays != null ? `Net ${customer.paymentTermsDays}` : '—' }, { label: 'Method', value: customer.billingMethod === 'FACTOR' ? 'Factor' : customer.billingMethod === 'MANUAL' ? 'Manual' : 'Not set' }] },
             { title: 'Account owner', rows: [{ value: accountOwnerIds.length ? `${accountOwnerIds.length} assigned` : 'Unassigned' }] },
           ]}
         />
@@ -284,6 +296,9 @@ export function CustomerProfile({
                   <TmsTextarea value={value.notes} onChange={(e) => set('notes', e.target.value)} />
                 </TmsField>
               </div>
+            </TmsCard>
+            <TmsCard title="Billing method">
+              <BillingMethodFields value={value} set={set} errors={errors} factor={settings?.factorRemitTo ?? null} />
             </TmsCard>
             <CreditLimitCard
               policy={creditSummary.policy}

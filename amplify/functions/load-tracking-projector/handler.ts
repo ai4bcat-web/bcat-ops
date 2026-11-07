@@ -10,8 +10,9 @@
  *
  * Side effects are deliberately tiny and provable:
  *   • legacy own-fleet loads (no `shipmentId`) are ignored entirely;
- *   • the only writes are LoadCheckCall (Put), Load (Update) and — through
- *     `rederiveShipmentStatus` — Shipment. No Slack, no Twilio, no SES, which is
+ *   • the only writes are LoadCheckCall (Put), Load (Update), Order (references:
+ *     trailer, paperwork place) and — through `rederiveShipmentStatus` — Shipment.
+ *     A voided shipment is never written. No Slack, no Twilio, no SES, which is
  *     why this is the one Load-stream consumer left enabled on the dev stack;
  *   • each stop event has a deterministic id (`evt:<loadId>:<stopId>:<event>`)
  *     written with `attribute_not_exists(id)`, so whoever logged it first wins
@@ -31,15 +32,21 @@ import {
 } from '@aws-sdk/client-dynamodb'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import {
+  getById,
   readStops,
   rederiveShipmentStatus,
   shipmentStoreFromEnv,
   marshallRow,
+  numberOrNull,
+  transact,
+  updateItemTx,
+  isConflict,
   type Row,
   type ShipmentStoreDeps,
   type StopShape,
 } from '../_shared/shipmentStore'
 import { lastKnownPatch, statusAfterCheckCall, stopEventId } from '../../../src/lib/checkCalls'
+import { normalizePaperworkLocation, paperworkLocationLabel } from '../../../src/lib/paperworkLocation'
 import { splitCityState } from '../../../src/lib/locationAutoSave'
 import { LOAD_WORKFLOW_STATUSES, type StopTimesLike } from '../../../src/lib/shipmentStatus'
 import type { LoadStatusSource, LoadWorkflowStatus, StopEventType } from '../../../src/types/tms'
@@ -80,6 +87,8 @@ export interface ProjectorSummary {
   statusWrites: number
   /** Load updates refused because a staff write landed first. */
   conflicts: number
+  /** Order reference rows (trailer, paperwork place) rewritten from the Load. */
+  mirrored: number
 }
 
 // ── Driver roster ────────────────────────────────────────────────────────────
@@ -249,15 +258,123 @@ async function putEvent(deps: ProjectorDeps, row: Row): Promise<boolean> {
   }
 }
 
+// ── Order references mirrored from the Load ──────────────────────────────────
+
+/** The two Load fields only the driver app writes, as references on the order. */
+export const TRAILER_REFERENCE_CODE = 'TRAILER_NUMBER'
+export const PAPERWORK_REFERENCE_CODE = 'PAPERWORK_LOCATION'
+const MIRRORED_CODES: readonly string[] = [TRAILER_REFERENCE_CODE, PAPERWORK_REFERENCE_CODE]
+
+/** `a.json` comes back as a string through AppSync and as a map from DynamoDB. */
+function parseJson(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw
+  try { return JSON.parse(raw) } catch { return null }
+}
+
+/** Trailer number as the driver typed it, '' when none. */
+export function trailerOf(load: Row): string {
+  return stamped(load.trailerNumber)
+}
+
+/** "In trailer 5302" for the stored paperworkLocation, '' when nothing usable is filed. */
+export function paperworkPlaceOf(load: Row): string {
+  const raw = parseJson(load.paperworkLocation)
+  if (!raw || typeof raw !== 'object') return ''
+  const loc = raw as { kind?: unknown; unit?: unknown }
+  const place = normalizePaperworkLocation(loc)
+  // An UNKNOWN place is only the carrier of an in-hand / missing answer: not a location.
+  if (!place || place.kind === 'UNKNOWN') return ''
+  return paperworkLocationLabel(place)
+}
+
+/** The wanted value of each mirrored reference; '' means the reference should not exist. */
+function wantedReferences(load: Row): Record<string, string> {
+  return {
+    [TRAILER_REFERENCE_CODE]: trailerOf(load),
+    [PAPERWORK_REFERENCE_CODE]: paperworkPlaceOf(load),
+  }
+}
+
+const REFERENCE_LABEL: Record<string, string> = {
+  [TRAILER_REFERENCE_CODE]: 'Trailer',
+  [PAPERWORK_REFERENCE_CODE]: 'Paperwork',
+}
+
+/**
+ * The order's references with the mirrored ones set to `wanted`. Returns null when
+ * the order already says exactly that (compare before write: a replay writes nothing).
+ */
+export function mergeMirroredReferences(current: unknown, wanted: Record<string, string>): Row[] | null {
+  const parsed = parseJson(current)
+  const list: Row[] = Array.isArray(parsed) ? (parsed as Row[]) : []
+  const kept = list.filter((r) => !MIRRORED_CODES.includes(String(r?.code ?? '')))
+  const next: Row[] = [...kept]
+  for (const code of MIRRORED_CODES) {
+    const value = wanted[code]
+    if (!value) continue
+    next.push({ code, label: REFERENCE_LABEL[code], value, level: 'ORDER', stopId: null, visibility: 'INTERNAL' })
+  }
+  const sameValues = MIRRORED_CODES.every((code) => {
+    const have = list.filter((r) => String(r?.code ?? '') === code)
+    const want = wanted[code]
+    return want ? have.length === 1 && String(have[0].value ?? '') === want : have.length === 0
+  })
+  return sameValues ? null : next
+}
+
+/** Set the trailer / paperwork references on the load's order. True when the order was written. */
+async function mirrorReferences(deps: ProjectorDeps, load: Row, email: string): Promise<boolean> {
+  const orderId = String(load.orderId ?? '')
+  if (!orderId) return false
+  const order = await getById(deps.store.db, deps.store.tables.order, orderId)
+  if (!order) return false
+  const next = mergeMirroredReferences(order.references, wantedReferences(load))
+  if (!next) return false
+  const now = deps.store.now()
+  try {
+    await transact(deps.store.db, [updateItemTx(deps.store.tables.order, orderId, {
+      references: next,
+      updatedAt: now,
+      updatedBy: email,
+      version: (numberOrNull(order.version) ?? 1) + 1,
+    }, stamped(order.updatedAt))], 'order')
+  } catch (err) {
+    if (!isConflict(err)) throw err
+    // Staff edited the order between our read and write; their save wins and the
+    // next Load change re-runs this comparison.
+    console.log('[load-tracking-projector] order moved under us; skipping references', { orderId })
+    return false
+  }
+  return true
+}
+
+/** Stamp `Shipment.deliveredAt` once, with the same guard shipment-notifier uses. */
+async function stampDelivered(deps: ProjectorDeps, bundle: { shipment: Row; loads: Row[] }, fallback: string): Promise<void> {
+  if (bundle.shipment.status !== 'DELIVERED' || stamped(bundle.shipment.deliveredAt)) return
+  const at = bundle.loads.map((l) => stamped(l.deliveredAt)).filter(Boolean).sort().pop() || fallback
+  try {
+    await deps.store.db.send(new UpdateItemCommand({
+      TableName: deps.store.tables.shipment,
+      Key: marshall({ id: String(bundle.shipment.id) }),
+      ...setExpression({ deliveredAt: at, updatedAt: deps.store.now(), updatedBy: PROJECTOR_ACTOR }),
+      ConditionExpression: 'attribute_not_exists(deliveredAt)',
+    }))
+  } catch (err) {
+    // The notifier stamped it first: same value, nothing to do.
+    if (!isConditionFailure(err)) throw err
+  }
+}
+
 // ── Projection ───────────────────────────────────────────────────────────────
 
 /**
  * One stream record. Returns what it wrote so the batch summary is honest.
  *
- * Everything is gated on a changed stop image: a load with no `shipmentId`, an
- * INSERT, a REMOVE, or any edit that left the stop times alone is dropped before
- * a single read — which is what keeps the projector's own Load write from
- * feeding itself.
+ * Everything is gated on a changed stop image or a changed trailer / paperwork
+ * place: a load with no `shipmentId`, an INSERT, a REMOVE, the link UpdateItem
+ * (`shipmentId, orderId, loadNumber, leg` only), or any other edit is dropped
+ * before a single read — which is also what keeps the projector's own Load
+ * write from feeding itself.
  */
 async function projectRecord(record: StreamRecord, deps: ProjectorDeps): Promise<ProjectorSummary | null> {
   if (record.eventName !== 'MODIFY') return null
@@ -272,9 +389,11 @@ async function projectRecord(record: StreamRecord, deps: ProjectorDeps): Promise
   const prev = oldImage ? (unmarshall(oldImage) as Row) : {}
   const stops = readStops(load)
   const events = newStopEvents(stops, readStops(prev))
-  if (events.length === 0) return null
+  const referencesChanged =
+    trailerOf(load) !== trailerOf(prev) || paperworkPlaceOf(load) !== paperworkPlaceOf(prev)
+  if (events.length === 0 && !referencesChanged) return null
 
-  const summary: ProjectorSummary = { records: 0, considered: 1, events: 0, skipped: 0, statusWrites: 0, conflicts: 0 }
+  const summary: ProjectorSummary = { records: 0, considered: 1, events: 0, skipped: 0, statusWrites: 0, conflicts: 0, mirrored: 0 }
 
   const actor = String(load.updatedBy ?? '').trim() || 'system'
   const driverId = driverIdFor(await deps.drivers(), actor)
@@ -282,94 +401,114 @@ async function projectRecord(record: StreamRecord, deps: ProjectorDeps): Promise
   const createdBy = driverId ? `driver:${driverId}` : actor
   const statusSource: LoadStatusSource = driverId ? 'DRIVER_APP' : 'SYSTEM'
 
-  const statusBefore = workflowStatus(load.status)
-  const statusAfter = statusAfterCheckCall(stopTimes(stops), statusBefore)
   const now = deps.store.now()
+  let statusMoved = false
+  let latestAt = ''
 
-  for (const [index, event] of events.entries()) {
-    const last = index === events.length - 1
-    const written = await putEvent(deps, {
-      __typename: 'LoadCheckCall',
-      id: stopEventId(loadId, event.stopId, event.event),
-      loadId,
-      shipmentId,
-      loadCarrierId: load.activeLoadCarrierId ?? null,
-      stopId: event.stopId,
-      at: event.at,
-      type: event.event,
-      source,
-      statusBefore,
-      // Only the event the status landed on claims to have moved the load.
-      statusAfter: last ? statusAfter : null,
-      city: event.city,
-      state: event.state,
-      createdBy,
-      createdAt: now,
-      updatedAt: now,
-    })
-    if (written) summary.events += 1
-    else summary.skipped += 1
-  }
+  if (events.length > 0) {
+    const statusBefore = workflowStatus(load.status)
+    const statusAfter = statusAfterCheckCall(stopTimes(stops), statusBefore)
 
-  if (!statusAfter) return summary
-
-  const latest = events[events.length - 1]
-  const patch: Row = {
-    status: statusAfter,
-    statusChangedAt: now,
-    statusChangedBy: createdBy,
-    statusSource,
-    ...lastKnownPatch(
-      {
-        at: latest.at,
-        type: latest.event,
+    for (const [index, event] of events.entries()) {
+      const last = index === events.length - 1
+      const written = await putEvent(deps, {
+        __typename: 'LoadCheckCall',
+        id: stopEventId(loadId, event.stopId, event.event),
+        loadId,
+        shipmentId,
+        loadCarrierId: load.activeLoadCarrierId ?? null,
+        stopId: event.stopId,
+        at: event.at,
+        type: event.event,
         source,
-        city: latest.city,
-        state: latest.state,
-      },
-      {
-        lastKnownAt: load.lastKnownAt as string | null | undefined,
-        lastKnownCity: load.lastKnownCity as string | null | undefined,
-        lastKnownState: load.lastKnownState as string | null | undefined,
-        lastKnownLat: load.lastKnownLat as number | null | undefined,
-        lastKnownLng: load.lastKnownLng as number | null | undefined,
-      },
-    ),
-    updatedAt: now,
-    updatedBy: PROJECTOR_ACTOR,
-  }
-  if (statusAfter === 'DELIVERED') patch.deliveredAt = latest.at
+        statusBefore,
+        // Only the event the status landed on claims to have moved the load.
+        statusAfter: last ? statusAfter : null,
+        city: event.city,
+        state: event.state,
+        createdBy,
+        createdAt: now,
+        updatedAt: now,
+      })
+      if (written) summary.events += 1
+      else summary.skipped += 1
+    }
 
-  const expectedUpdatedAt = stamped(load.updatedAt)
-  const expression = setExpression(patch)
-  if (expectedUpdatedAt) expression.ExpressionAttributeValues[':expectedUpdatedAt'] = { S: expectedUpdatedAt }
-  try {
-    await deps.store.db.send(new UpdateItemCommand({
-      TableName: deps.store.tables.load,
-      Key: marshall({ id: loadId }),
-      ...expression,
-      ConditionExpression: expectedUpdatedAt
-        ? '#updatedAt = :expectedUpdatedAt'
-        : 'attribute_not_exists(updatedAt)',
-    }))
-    summary.statusWrites += 1
-  } catch (err) {
-    if (!isConditionFailure(err)) throw err
-    // Somebody edited the load between the stamp and this record. Their write
-    // carries the status forward through the same ladder; ours would be stale.
-    console.log('[load-tracking-projector] load moved under us; skipping status', { loadId })
-    summary.conflicts += 1
-    return summary
+    if (statusAfter) {
+      const latest = events[events.length - 1]
+      latestAt = latest.at
+      const patch: Row = {
+        status: statusAfter,
+        statusChangedAt: now,
+        statusChangedBy: createdBy,
+        statusSource,
+        ...lastKnownPatch(
+          {
+            at: latest.at,
+            type: latest.event,
+            source,
+            city: latest.city,
+            state: latest.state,
+          },
+          {
+            lastKnownAt: load.lastKnownAt as string | null | undefined,
+            lastKnownCity: load.lastKnownCity as string | null | undefined,
+            lastKnownState: load.lastKnownState as string | null | undefined,
+            lastKnownLat: load.lastKnownLat as number | null | undefined,
+            lastKnownLng: load.lastKnownLng as number | null | undefined,
+          },
+        ),
+        updatedAt: now,
+        updatedBy: PROJECTOR_ACTOR,
+      }
+      if (statusAfter === 'DELIVERED') patch.deliveredAt = latest.at
+
+      const expectedUpdatedAt = stamped(load.updatedAt)
+      const expression = setExpression(patch)
+      if (expectedUpdatedAt) expression.ExpressionAttributeValues[':expectedUpdatedAt'] = { S: expectedUpdatedAt }
+      try {
+        await deps.store.db.send(new UpdateItemCommand({
+          TableName: deps.store.tables.load,
+          Key: marshall({ id: loadId }),
+          ...expression,
+          ConditionExpression: expectedUpdatedAt
+            ? '#updatedAt = :expectedUpdatedAt'
+            : 'attribute_not_exists(updatedAt)',
+        }))
+        summary.statusWrites += 1
+        statusMoved = true
+      } catch (err) {
+        if (!isConditionFailure(err)) throw err
+        // Somebody edited the load between the stamp and this record. Their write
+        // carries the status forward through the same ladder; ours would be stale.
+        console.log('[load-tracking-projector] load moved under us; skipping status', { loadId })
+        summary.conflicts += 1
+        return summary
+      }
+    }
   }
 
-  // Only after a status actually moved: the shipment mirrors a load's state, and
+  // A voided or deleted shipment is history: nothing below may touch it.
+  const shipment = await getById(deps.store.db, deps.store.tables.shipment, shipmentId)
+  if (!shipment || stamped(shipment.voidedAt) || stamped(shipment.deletedAt)) return summary
+
+  let orderMirrored = false
+  if (referencesChanged) {
+    orderMirrored = await mirrorReferences(deps, load, createdBy)
+    if (orderMirrored) summary.mirrored += 1
+  }
+
+  // Only after something actually moved: the shipment mirrors a load's state, and
   // a re-derive is a write of its own.
-  await rederiveShipmentStatus(deps.store, shipmentId, { email: createdBy })
+  if (statusMoved || orderMirrored) {
+    const bundle = await rederiveShipmentStatus(deps.store, shipmentId, { email: createdBy }) as unknown as { shipment: Row; loads: Row[] }
+    if (statusMoved) await stampDelivered(deps, bundle, latestAt || now)
+  }
   return summary
 }
 
 export async function projectLoadStream(event: StreamEvent, deps: ProjectorDeps): Promise<ProjectorSummary> {
-  const total: ProjectorSummary = { records: 0, considered: 0, events: 0, skipped: 0, statusWrites: 0, conflicts: 0 }
+  const total: ProjectorSummary = { records: 0, considered: 0, events: 0, skipped: 0, statusWrites: 0, conflicts: 0, mirrored: 0 }
   for (const record of event.Records ?? []) {
     total.records += 1
     const one = await projectRecord(record, deps)
@@ -379,6 +518,7 @@ export async function projectLoadStream(event: StreamEvent, deps: ProjectorDeps)
     total.skipped += one.skipped
     total.statusWrites += one.statusWrites
     total.conflicts += one.conflicts
+    total.mirrored += one.mirrored
   }
   return total
 }

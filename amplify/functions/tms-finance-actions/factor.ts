@@ -30,6 +30,8 @@ import type {
   ShipmentRecord,
 } from '../../../src/types/tms'
 import {
+  CARRIED_OVER_MESSAGE,
+  isCarriedOver,
   CUSTOMER_TABLE_NAME,
   FACTORING_ITEM_TABLE_NAME,
   IDX_LOADS_BY_SHIPMENT,
@@ -103,6 +105,7 @@ export async function sendToFactor(input: Row, caller: Caller): Promise<Row> {
 
   const invoiceRow = await getById(INVOICE_TABLE_NAME, invoiceId)
   if (!invoiceRow) throw new Error(`Invoice not found: ${invoiceId}`)
+  if (isCarriedOver(invoiceRow)) throw new Error(CARRIED_OVER_MESSAGE)
   const invoice = invoiceRow as unknown as InvoiceRecord
 
   // Step R cutover. Refused before the customer is read, not after: an invoice whose

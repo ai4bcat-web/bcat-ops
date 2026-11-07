@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { DatabaseBackup, Download } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsAlert, TmsBadge, TmsButton, TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from '@/features/settings/settingsKit'
@@ -15,6 +16,7 @@ import { exportNow, getCsvExport, getCsvExportLinks, getDataStatus, listExports,
 import type { DataExportJob, DataExportLinks, DataExportScope, DataStatus } from '@/types/tms'
 import { ACTIVE_EXPORT, EXPORT_ALL_PHRASE, bytesLabel, csvExportBlockReason, tablesDone } from './components/dataSafetyLogic'
 import { MintShipmentCard } from './components/MintShipmentCard'
+import { AljexCutoffCard } from './components/AljexCutoffCard'
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const POLL_MS = 3000
@@ -230,7 +232,14 @@ export function DataSafetyPage() {
           ) : null}
         </Stack>
       </SettingsCard>
+      <AljexCutoffCard />
 
+      <SettingsCard
+        icon={DatabaseBackup}
+        title="Aljex reconciliation"
+        description="Compare the imported Aljex data with the source files, decide every difference and sign off the import."
+        actions={<Link className="tms-link" to="/tms/brokerage/company/data/aljex-reconciliation">Open reconciliation</Link>}
+      />
       <SettingsCard icon={DatabaseBackup} title="Earlier exports">
         {jobs.length === 0 ? <p className="tms-muted">No exports yet.</p> : (
           <table className="tms-table" data-testid="export-list">

@@ -75,7 +75,38 @@ export const ADMIN_GROUP = 'ADMIN'
 export const INVOICING_PAGE_GROUP = 'page-invoicing'
 /** AP is its own permission: the people who bill customers are not the people who pay carriers. */
 export const CARRIER_PAY_PAGE_GROUP = 'page-carrierPay'
+/**
+ * Step AW: release to billing, sending an invoice, queueing it for the factor and
+ * marking it sent are one person's job (Jenny), granted per user. Judged by this
+ * Cognito group alone: ADMIN and the owner e-mail get no bypass.
+ */
+export const BILLING_RELEASE_PAGE_GROUP = 'page-billingRelease'
 export const SETTINGS_ID = 'default'
+
+export const CARRIED_OVER_MESSAGE =
+  'This invoice was carried over from Aljex (history); it is never re-billed, e-mailed or sent to the factor from here'
+
+/** An invoice imported from Aljex history: it was already billed there. */
+export function isCarriedOver(row: Row): boolean {
+  return row.legacyImported === true
+    || (typeof row.markedSentNote === 'string' && row.markedSentNote.startsWith('Carried over from Aljex'))
+}
+
+const EMAIL_RE = /^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/
+
+/** Lower-cased, trimmed, de-duplicated, validated address list. `null` or `[]` clears. */
+export function normalizeEmailList(value: unknown, label: string): string[] {
+  if (value == null) return []
+  if (!Array.isArray(value)) throw new Error(`${label} must be a list of e-mail addresses`)
+  const out: string[] = []
+  for (const item of value) {
+    const email = typeof item === 'string' ? item.trim().toLowerCase() : ''
+    if (!EMAIL_RE.test(email)) throw new Error(`${label}: "${String(item)}" is not an e-mail address`)
+    if (!out.includes(email)) out.push(email)
+  }
+  if (out.length > 20) throw new Error(`${label} holds at most 20 addresses`)
+  return out
+}
 
 /**
  * Amplify derives these from the model name and the index keys; they are not guesses.

@@ -84,6 +84,9 @@ export function pickDivision(row: CanonicalRow, profile: AljexProfile): RevDivis
         if (row.carrier && ids.some((id) => id === row.carrier?.id || (row.carrier?.mc && id === row.carrier.mc))) return rule.division
         break
       }
+      case 'revType':
+        if (rule.revType && row.freight.revenueType === rule.revType.toUpperCase()) return rule.division
+        break
       case 'default':
         return rule.division
     }

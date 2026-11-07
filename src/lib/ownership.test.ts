@@ -261,6 +261,7 @@ describe('shipmentContextFor', () => {
       mode: 'FTL',
       loadSource: 'MANUAL',
       references: ['VEHICLE 2019 HONDA'],
+      taggedReferences: ['PO=VEHICLE 2019 HONDA'],
     })
   })
 
@@ -274,5 +275,32 @@ describe('shipmentContextFor', () => {
     expect(context.carrierId).toBe('carrier-3')
     expect(context.driverProgram).toBeNull()
     expect(context.references).toEqual(['7781'])
+  })
+})
+
+describe('Aljex Rev Type rules', () => {
+  const ref = (value: string, code = 'ALJEX_REV_TYPE') => ({ code, value, level: 'ORDER' as const, visibility: 'INTERNAL' as const })
+  const tag = (references: ReturnType<typeof ref>[], extra: Partial<ResolveContext> = {}) =>
+    resolveDivision(divisions, rules, { ...shipmentContextFor({ order: { references } }), ...extra }).revDivision
+
+  it('maps B/I/A/O to the four divisions', () => {
+    expect(tag([ref('B')])).toBe('BROKERAGE')
+    expect(tag([ref('I')])).toBe('ASSETS')
+    expect(tag([ref('A')])).toBe('CAR_SHIPPING')
+    expect(tag([ref('O')])).toBe('ASSETS') // OWNER_OPERATOR is a subsidiary of ASSETS in the seed tree
+    expect(resolveDivision(divisions, rules, shipmentContextFor({ order: { references: [ref('O')] } })).revSubdivision).toBe('OWNER_OPERATOR')
+  })
+  it('matches only the Rev Type reference, never another reference that happens to be a letter', () => {
+    expect(tag([ref('I', 'PO')])).toBe('BROKERAGE')
+  })
+  it('lets an attached owner-operator driver beat Rev Type B', () => {
+    const r = resolveDivision(divisions, rules, shipmentContextFor({
+      order: { references: [ref('B')] },
+      driver: { fleetGroup: 'OWNER_OPERATOR', driverType: 'OWNER_OPERATOR' },
+    }))
+    expect(r.revSubdivision).toBe('OWNER_OPERATOR')
+  })
+  it('falls back to BROKERAGE with no Rev Type', () => {
+    expect(tag([])).toBe('BROKERAGE')
   })
 })

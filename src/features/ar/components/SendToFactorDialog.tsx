@@ -17,6 +17,7 @@ import { AlertTriangle, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsDialog } from '@/features/tms/kit'
 import { graphqlErrorText, previewFactor, sendToFactor } from '@/lib/apiClient'
+import { useBillingGrant, BILLING_GRANT_MESSAGE } from '../useBillingGrant'
 import { OTR_FIELD_LABEL, OTR_REQUIRED_FIELDS } from '@/lib/otrInvoice'
 import type { ReleaseGateResult } from '@/lib/releaseGate'
 
@@ -59,7 +60,8 @@ export function SendToFactorDialog({ invoiceId, busy, onClose, onDone }: {
   useEffect(() => { load() }, [load])
 
   const fields = preview?.fields ?? {}
-  const disabled = busy === true || posting || loading
+  const canSend = useBillingGrant()
+  const disabled = busy === true || posting || loading || !canSend
 
   const submit = () => {
     setPosting(true)
@@ -98,6 +100,7 @@ export function SendToFactorDialog({ invoiceId, busy, onClose, onDone }: {
         </>
       }
     >
+      {!canSend && <p role="note" className="text-xs" style={{ color: 'var(--tms-badge-orange)' }}>{BILLING_GRANT_MESSAGE}</p>}
       {loading && (
         <p className="flex items-center gap-2 tms-muted">
           <Loader2 size={14} className="animate-spin" /> Checking the invoice…

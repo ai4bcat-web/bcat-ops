@@ -18,6 +18,7 @@ import { toast } from 'sonner'
 import { TmsButton, TmsDialog, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import {
   emailInvoice,
+  sendInvoice,
   getInvoice,
   getTmsSettings,
   graphqlErrorText,
@@ -28,6 +29,7 @@ import {
 import { billingRecipients, formatCents, invoiceCcRecipients } from '@/lib/invoiceBuild'
 import { renderInvoiceEmail } from '@/lib/shipmentNotices'
 import type { InvoiceRecord } from '@/types/tms'
+import { useBillingGrant, BILLING_GRANT_MESSAGE } from '../useBillingGrant'
 
 /** An editable list of addresses. Blank and duplicate entries are simply not added. */
 function Chips({ label, ariaLabel, emails, disabled, onChange }: {
@@ -99,6 +101,9 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const canSend = useBillingGrant()
+  // A MANUAL customer's recipients are decided by the server (AP address + copy list + company always-copy).
+  const [manual, setManual] = useState(false)
 
   // Non-async on purpose: `react-hooks/set-state-in-effect` cannot see through an
   // `async` function, so every state write lives in an explicit promise chain.
@@ -108,10 +113,21 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
         if (!row) { setError('That invoice no longer exists.'); return }
         const customer = customers.find((c) => c.id === row.customerId) ?? null
         const division = divisions.find((d) => d.key === row.divisionKey) ?? null
-        const addressees = billingRecipients(customer, row.billToId)
         setInvoice(row)
-        setTo(addressees)
-        setCc(invoiceCcRecipients(customer).filter((email) => !addressees.includes(email)))
+        if (customer?.billingMethod === 'MANUAL') {
+          const ap = customer.apEmail?.trim().toLowerCase()
+          const addressees = ap ? [ap] : []
+          const copies = [...(customer.invoiceCopyEmails ?? []), ...(settings?.invoiceAlwaysCopyEmails ?? [])]
+            .map((email) => email.trim().toLowerCase())
+          setManual(true)
+          setTo(addressees)
+          setCc(copies.filter((email, index) => copies.indexOf(email) === index && !addressees.includes(email)))
+        } else {
+          const addressees = billingRecipients(customer, row.billToId)
+          setManual(false)
+          setTo(addressees)
+          setCc(invoiceCcRecipients(customer).filter((email) => !addressees.includes(email)))
+        }
         setPreview(renderInvoiceEmail({
           invoice: row,
           customerName: row.customerName ?? customer?.name ?? null,
@@ -126,13 +142,16 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
 
   useEffect(() => { load() }, [load])
 
-  const disabled = busy === true || sending || loading
+  const disabled = busy === true || sending || loading || !canSend
   const notSent = result !== null && result.emailStatus !== 'SENT'
 
   const send = (via: 'EMAIL' | 'COPY') => {
     setSending(true)
     setError(null)
-    emailInvoice({ invoiceId, to, cc, via, message: message.trim() || undefined })
+    const note = message.trim() || undefined
+    // The manual send takes its recipients from the server; Copy (no e-mail goes out) keeps the plain path.
+    const request = manual && via === 'EMAIL' ? sendInvoice({ invoiceId, message: note }) : emailInvoice({ invoiceId, to, cc, via, message: note })
+    request
       .then((sent) => {
         setResult(sent)
         if (sent.emailStatus === 'SENT') toast.success(`Invoice e-mailed to ${sent.to.join(', ')}`)
@@ -177,8 +196,10 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
 
       {!loading && invoice && (
         <div className="flex flex-col gap-3">
-          <Chips label="To" ariaLabel="Invoice e-mail recipient" emails={to} disabled={disabled} onChange={setTo} />
-          <Chips label="CC" ariaLabel="Invoice e-mail CC" emails={cc} disabled={disabled} onChange={setCc} />
+          {!canSend && <p role="note" className="text-xs" style={{ color: 'var(--tms-badge-orange)' }}>{BILLING_GRANT_MESSAGE}</p>}
+          {manual && <p className="text-xs tms-muted">Manual billing: goes to the customer's AP address, copying their copy list and the company-wide always-copy list.</p>}
+          <Chips label="To" ariaLabel="Invoice e-mail recipient" emails={to} disabled={disabled || manual} onChange={setTo} />
+          <Chips label="CC" ariaLabel="Invoice e-mail CC" emails={cc} disabled={disabled || manual} onChange={setCc} />
           {to.length === 0 && (
             <p className="text-xs" style={{ color: 'var(--tms-badge-orange)' }}>
               Nobody is addressed. Add a billing contact to the customer, or type an address above.

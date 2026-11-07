@@ -4,7 +4,8 @@ import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsListPage, TmsSelect, TmsSt
 import { useAuth } from '@/hooks/useAuth'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 import { isDemoShipment, matchesQuery } from '@/features/shipments/shipmentViews'
-import { batchShipmentTask, listAuditLogsFor } from '@/lib/apiClient'
+import { batchShipmentTask, listAuditLogsFor, releaseToBilling } from '@/lib/apiClient'
+import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
@@ -19,6 +20,7 @@ export function LoadReviewPage() {
   const { shipments, queue, target, loading, partial, error, refresh } = useLoadReviewQueue(params.get('tab') === 'released', params.get('shipment'))
   const { hasPageAccess } = useAuth()
   const canOpen = hasPageAccess('loads') || hasPageAccess('tms')
+  const canRelease = useBillingGrant()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirm, setConfirm] = useState(false)
   const [capMessage, setCapMessage] = useState<string | null>(null)
@@ -87,6 +89,20 @@ export function LoadReviewPage() {
     setBusy(true)
     try {
       const result = await batchShipmentTask({ task: 'RELEASE_TO_BILLING', shipmentIds: chosen, params: { review: { source: 'LOAD_REVIEW' } } })
+      // Accounting accepted the shipment; releasing each of its orders invoices it (factor queue or Ready to send).
+      for (const entry of result.results) {
+        if (!entry.ok) continue
+        const orderIds = shipments.find((row) => row.id === entry.shipmentId)?.orderIds ?? []
+        try {
+          for (const orderId of orderIds) {
+            const released = await releaseToBilling({ orderId, clientRequestId: `batch:${orderId}` })
+            if (released.warnings.includes('OVER_CREDIT_LIMIT')) entry.message = 'Over credit limit (released anyway)'
+          }
+        } catch (err) {
+          entry.ok = false
+          entry.message = `Moved to accounting, not invoiced: ${err instanceof Error ? err.message : String(err)}`
+        }
+      }
       setAttempts((old) => ({ ...old, ...Object.fromEntries(result.results.map((entry) => [entry.shipmentId, entry.ok ? 'Moved to billing' : entry.message ?? 'Release refused'])) }))
       setSelected(new Set())
       setCapMessage(null)
@@ -131,7 +147,7 @@ export function LoadReviewPage() {
       page={{ from: filtered.length ? pageNumber * 50 + 1 : 0, to: pageNumber * 50 + page.length, total: filtered.length, pageSize: 50 }}
       footerExtra={<><TmsButton disabled={!pageNumber} onClick={() => update({ page: String(pageNumber - 1) })}>Previous</TmsButton><TmsButton disabled={(pageNumber + 1) * 50 >= filtered.length} onClick={() => update({ page: String(pageNumber + 1) })}>Next</TmsButton></>}
       emptyText={loading || partial ? 'Loading review queue…' : queue.length ? 'Nothing here.' : 'Nothing is waiting for review.'} />
-    {!!chosen.length && <div className="aa-review-actions"><TmsButton variant="primary" onClick={() => setConfirm(true)}>Move {chosen.length} to billing</TmsButton></div>}
+    {!!chosen.length && <div className="aa-review-actions"><TmsButton variant="primary" disabled={!canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setConfirm(true)}>Move {chosen.length} to billing</TmsButton>{!canRelease && <p role="note" className="tms-muted">{BILLING_GRANT_MESSAGE}</p>}</div>}
     <TmsDialog open={confirm} onOpenChange={setConfirm} title={`Move ${chosen.length} to billing`} description={`These ${chosen.length} shipments go to accounting. The server re-checks each one.`} footer={<TmsButton disabled={busy || !chosen.length} variant="primary" onClick={() => void releaseBatch()}>Confirm move to billing</TmsButton>} />
     <TmsDialog open={!!filter} onOpenChange={(open) => { if (!open) setFilter(null) }} title="Filter review queue"><TmsSelect aria-label="Filter value" value={filter ? params.get(filter) ?? '' : ''} onChange={(event) => { if (filter) update({ [filter]: event.target.value, page: null }); setFilter(null) }}><option value="">All</option>{options.map((value) => <option key={value} value={value}>{value}</option>)}</TmsSelect></TmsDialog>
     {openRow && <LoadReviewDrawer key={openRow.id} row={openRow} onClose={() => update({ shipment: null })} onRefresh={refresh} onFailure={(message) => setAttempts((old) => ({ ...old, [openRow.id]: message }))} onMoved={() => { setNotice(`${openRow.number}: Moved to billing`); const index = filtered.findIndex(({ row }) => row.id === openRow.id); update({ shipment: filtered[index + 1]?.row.id ?? null }) }} />}

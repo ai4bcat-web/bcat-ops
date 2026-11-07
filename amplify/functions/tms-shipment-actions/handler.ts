@@ -164,6 +164,11 @@ import {
 } from './ownershipResolve'
 import { assertNotVoided, isVoided } from '../_shared/voided'
 import { parseTrackingPrefs, validateTrackingPrefsOverride, type TrackingPrefsOverride } from '../../../src/lib/trackingPrefs'
+import {
+  buildPostInvoiceEntry, cleanGuardedInput, diffSnapshots, isInvoicedOrder, isPostInvoiceGuarded, POST_INVOICE_ACTION,
+  postInvoiceCleared, readChangeReason, REASON_REQUIRED_MESSAGE, snapshotOf, type PostInvoiceGuardedAction,
+} from './postInvoice'
+import { salesRepForDivision } from '../../../src/lib/divisionSalesRep'
 import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
 import { INTAKE_ACTIONS, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
@@ -2462,7 +2467,7 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
   const loadIdValue = String(load.id)
   const legacy = deriveLegacyFields(stops)
   const existingFinancials = bundle.financials.find((f) => f.id === loadIdValue) ?? null
-  if (existingFinancials?.frozenAt) throw new Error('This load\'s financials are frozen and can no longer be changed')
+  if (existingFinancials?.frozenAt && !postInvoiceCleared(input)) throw new Error('This load\'s financials are frozen and can no longer be changed')
 
   const chargeRows = charges.map((c, i) =>
     chargeRow(c, amounts[i], { shipmentId, orderId: orderIdValue, loadId: loadIdValue }, caller),
@@ -3149,20 +3154,33 @@ async function applyTag(
       }
       : tag
     const taggedBy = hand ? optionalString(shipment.revTaggedBy, 200) : null
+    const settingsForRep = salesRepOf(shipment, order) == null ? await getSettings() : null
     const salesRepId = salesRepOf(shipment, order)
+      ?? salesRepForDivision(settingsForRep, { revDivision: effective.revDivision, salesRepId: null })
 
     const unchanged = sameTag(shipment, effective, source, taggedBy)
       && (optionalString(shipment.salesRepId, 100) ?? null) === salesRepId
     if (!unchanged) {
       const now = nowIso()
       await transact(
-        [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
-          ...shipmentTagPatch(effective, source, taggedBy),
-          salesRepId,
-          updatedBy: caller.email,
-          updatedAt: now,
-          version: (numberOrNull(shipment.version) ?? 1) + 1,
-        }, null)],
+        [
+          updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+            ...shipmentTagPatch(effective, source, taggedBy),
+            salesRepId,
+            updatedBy: caller.email,
+            updatedAt: now,
+            version: (numberOrNull(shipment.version) ?? 1) + 1,
+          }, null),
+          // A rep filled in from the division map is mirrored onto the order, as SET_SALES_REP does.
+          ...(order && salesRepId && !optionalString(order.customerRepId, 100)
+            ? [updateItemTx(ORDER_TABLE_NAME, String(order.id), {
+              customerRepId: salesRepId,
+              updatedBy: caller.email,
+              updatedAt: now,
+              version: (numberOrNull(order.version) ?? 1) + 1,
+            }, null)]
+            : []),
+        ],
         'shipment tag',
       )
     }
@@ -6777,7 +6795,7 @@ async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
   const load = bundle.loads[0]
   const loadId = load ? String(load.id) : ''
   const existingFinancials = bundle.financials.find((f) => f.id === loadId) ?? null
-  if (existingFinancials?.frozenAt) {
+  if (existingFinancials?.frozenAt && !postInvoiceCleared(input)) {
     throw new Error('This load\'s financials are frozen and can no longer be changed')
   }
 
@@ -6941,7 +6959,7 @@ async function updateOrderDetails(input: Row, caller: Caller): Promise<Row> {
   const loadId = String(load.id)
   const orderId = String(order.id)
 
-  if (order.invoiceId) {
+  if (order.invoiceId && !postInvoiceCleared(input)) {
     const locked = INVOICE_LOCKED_ORDER_KEYS.filter((key) => key in orderIn)
     if (locked.length > 0) {
       const label = optionalString(order.invoiceNumber, 100) ?? String(order.invoiceId)
@@ -6952,7 +6970,7 @@ async function updateOrderDetails(input: Row, caller: Caller): Promise<Row> {
   const milesNext = 'miles' in loadFields ? (loadFields.miles as number | null) : numberOrNull(load.miles)
   const weightNext = 'weight' in loadFields ? (loadFields.weight as number | null) : numberOrNull(load.weight)
   const repriced = milesNext !== numberOrNull(load.miles) || weightNext !== numberOrNull(load.weight)
-  if (repriced && existingFinancials?.frozenAt) {
+  if (repriced && existingFinancials?.frozenAt && !postInvoiceCleared(input)) {
     const locked = FROZEN_LOCKED_LOAD_KEYS.filter((key) => key in loadFields)
     throw new Error(`This load's financials are frozen; ${locked.join(' and ')} can no longer be changed`)
   }
@@ -8482,6 +8500,61 @@ const demoDeps: DemoDeps = {
   randomId: randomUUID,
 }
 
+// ── Step AW D.4: post-invoice change rule ────────────────────────────────────
+
+const guardedRunners: Record<PostInvoiceGuardedAction, (input: Row, caller: Caller) => Promise<Row>> = {
+  SAVE_ORDER_FORM: async (input, caller) => (await saveOrderForm(input, caller)).bundle as unknown as Row,
+  UPDATE_ORDER_DETAILS: updateOrderDetails,
+  UPDATE_STOP: updateStop,
+  UPDATE_LOAD_CARRIER_DETAILS: updateLoadCarrierDetails,
+  RECALC_CHARGES: recalcCharges,
+  UPDATE_CARRIER_CHARGES: updateCarrierCharges,
+}
+
+/** The shipment an edit targets: named directly, or through its load or carrier assignment. */
+async function shipmentIdOfEdit(input: Row): Promise<string | null> {
+  const direct = optionalString(input.shipmentId, 100)
+  if (direct) return direct
+  const loadId = optionalString(input.loadId, 100)
+  if (loadId) return optionalString((await getById(LOAD_TABLE_NAME, loadId))?.shipmentId, 100) ?? null
+  const loadCarrierId = optionalString(input.loadCarrierId, 100)
+  if (loadCarrierId) return optionalString((await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId))?.shipmentId, 100) ?? null
+  return null
+}
+
+/**
+ * R18. An edit to a shipment that already has an invoice is allowed, but needs a
+ * `changeReason` (REASON_REQUIRED otherwise), steps the frozen-financials guards aside,
+ * and leaves one POST_INVOICE_CHANGE entry (reason, before, after, who, when) on the
+ * Shipment, the Order and the Invoice. The gate's own input keys are never taken from
+ * the wire; an un-invoiced shipment runs exactly as before.
+ */
+async function runPostInvoiceGuarded(action: PostInvoiceGuardedAction, input: Row, caller: Caller): Promise<Row> {
+  const run = guardedRunners[action]
+  const shipmentId = await shipmentIdOfEdit(input)
+  const before = shipmentId ? await readBundle(shipmentId) : null
+  const order = before?.orders[0] ?? null
+  if (!shipmentId || !before || !isInvoicedOrder(order)) return run(cleanGuardedInput(input, false), caller)
+
+  const verdict = readChangeReason(input)
+  if (!verdict.ok) throw new Error(REASON_REQUIRED_MESSAGE)
+  const result = await run(cleanGuardedInput(input, true), caller)
+  const after = await readBundle(shipmentId)
+  const entry = buildPostInvoiceEntry({
+    reason: verdict.reason,
+    sourceAction: action,
+    diff: diffSnapshots(snapshotOf(before), snapshotOf(after)),
+    user: caller.email,
+    at: nowIso(),
+    order,
+    shipmentId,
+  })
+  await writeAudit('SHIPMENT', shipmentId, POST_INVOICE_ACTION, caller, entry as unknown as Row)
+  await writeAudit('ORDER', String(order?.id), POST_INVOICE_ACTION, caller, entry as unknown as Row)
+  if (entry.invoiceId) await writeAudit('Invoice', entry.invoiceId, POST_INVOICE_ACTION, caller, entry as unknown as Row)
+  return result
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
@@ -8492,6 +8565,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     : action
   const caller = await authorize(authorizedAction, event.identity, event.systemCaller)
 
+  if (isPostInvoiceGuarded(action)) return runPostInvoiceGuarded(action, input, caller)
+
   switch (action) {
     case 'CREATE_SHIPMENT':
       return createShipment(input, caller)
@@ -8501,8 +8576,6 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'INTAKE_DISMISS':
     case 'INTAKE_LINK_SHIPMENT':
       return runIntakeAction(intakeDeps, action as IntakeAction, input, caller)
-    case 'SAVE_ORDER_FORM':
-      return (await saveOrderForm(input, caller)).bundle as unknown as Row
     case 'CHECK_CREDIT':
       return checkCredit(input)
     case 'SUBMIT_ORDER':
@@ -8569,8 +8642,6 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return setShipmentCustomer(input, caller)
     case 'SET_LOAD_PRO':
       return setLoadPro(input, caller)
-    case 'UPDATE_STOP':
-      return updateStop(input, caller)
     case 'ASSIGN_ASSET':
       return assignAsset(input, caller)
     case 'ASSIGN_CARRIER':
@@ -8597,14 +8668,6 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return dispatchLoad(input, caller)
     case 'REMOVE_LOAD_CARRIER':
       return removeLoadCarrier(input, caller)
-    case 'RECALC_CHARGES':
-      return recalcCharges(input, caller)
-    case 'UPDATE_CARRIER_CHARGES':
-      return updateCarrierCharges(input, caller)
-    case 'UPDATE_ORDER_DETAILS':
-      return updateOrderDetails(input, caller)
-    case 'UPDATE_LOAD_CARRIER_DETAILS':
-      return updateLoadCarrierDetails(input, caller)
     case 'SET_AR_STATUS':
       return setArStatus(input, caller)
     case 'LOG_CHECK_CALL':

@@ -1421,7 +1421,9 @@ const TMS_SETTINGS_V14_FIELDS = [
 const TMS_SETTINGS_V15_FIELDS = ['trackingAutomation']
 // Step AP: the org default Load Review requirements. Its own flag again, for the same reason.
 const TMS_SETTINGS_V16_FIELDS = ['reviewRequirements']
-const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan', 'brandSenders', 'whiteLabel', 'customerPortalDefaults', 'customerTags', 'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions', 'notificationWebhooks', 'notificationDefaults', 'paymentTerms', 'trackingAutomation']
+// Step AW: company-wide invoice always-copy list, the Aljex cutoff and sales rep by division. Its own flag again.
+const TMS_SETTINGS_V17_FIELDS = ['invoiceAlwaysCopyEmails', 'aljexCutoffAt', 'divisionSalesReps']
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan', 'brandSenders', 'whiteLabel', 'customerPortalDefaults', 'customerTags', 'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions', 'notificationWebhooks', 'notificationDefaults', 'paymentTerms', 'trackingAutomation', 'divisionSalesReps']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
 let settingsHaveV4 = true
@@ -1437,6 +1439,7 @@ let settingsHaveV13 = true
 let settingsHaveV14 = true
 let settingsHaveV15 = true
 let settingsHaveV16 = true
+let settingsHaveV17 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1454,6 +1457,7 @@ const tmsSettingsFields = () => [
   settingsHaveV14 ? TMS_SETTINGS_V14_FIELDS.join(' ') : '',
   settingsHaveV15 ? TMS_SETTINGS_V15_FIELDS.join(' ') : '',
   settingsHaveV16 ? TMS_SETTINGS_V16_FIELDS.join(' ') : '',
+  settingsHaveV17 ? TMS_SETTINGS_V17_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1672,7 +1676,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 15) throw err
+      if (attempt >= 16) throw err
+      if (settingsHaveV17 && fieldNamed(TMS_SETTINGS_V17_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Step AW billing settings yet — querying without them until deploy')
+        settingsHaveV17 = false
+        continue
+      }
       if (settingsHaveV16 && fieldNamed(TMS_SETTINGS_V16_FIELDS, err)) {
         console.warn('[apiClient] backend has no Load Review requirement settings yet — querying without them until deploy')
         settingsHaveV16 = false
@@ -1880,6 +1889,30 @@ export async function reconcileAljexImport(jobId: string): Promise<{ job: AljexI
 export async function getAljexReportLinks(jobId: string): Promise<AljexReportLink[]> {
   const r = await aljexImportAction<{ links: AljexReportLink[] }>('IMPORT_REPORT_LINKS', { jobId })
   return r.links ?? []
+}
+
+// Step AW stage E3: Aljex reconciliation (report per entity, decisions, sign-off).
+import type { ReconEntity, ReconJobSummary, ReconPage, ReconOutcome } from './aljexReconcile'
+
+export async function startAljexReconcile(input: { entity: ReconEntity; sourceJobId: string; customersJobId?: string | null }): Promise<{ job: ReconJobSummary }> {
+  return aljexImportAction<{ job: ReconJobSummary }>('IMPORT_RECONCILE_ENTITY', input)
+}
+
+export async function listAljexReconcile(): Promise<{ jobs: ReconJobSummary[] }> {
+  return aljexImportAction<{ jobs: ReconJobSummary[] }>('IMPORT_RECONCILE_GET', {})
+}
+
+export async function getAljexReconcile(input: { jobId: string; kind?: string; state?: 'OPEN' | 'DECIDED' | 'ALL'; q?: string; offset?: number; limit?: number; exportCsv?: boolean }): Promise<ReconPage> {
+  return aljexImportAction<ReconPage>('IMPORT_RECONCILE_GET', input)
+}
+
+/** Needs the per-user `page-aljexSignoff` grant; the Lambda refuses everyone else, admins included. */
+export async function decideAljexReconcile(input: { jobId: string; keys: string[]; filter?: { kind?: string; q?: string }; outcome: ReconOutcome; reason: string }): Promise<{ job: ReconJobSummary; decided: number }> {
+  return aljexImportAction<{ job: ReconJobSummary; decided: number }>('IMPORT_DECIDE', input)
+}
+
+export async function signoffAljexReconcile(input: { jobId: string; note?: string }): Promise<{ job: ReconJobSummary }> {
+  return aljexImportAction<{ job: ReconJobSummary }>('IMPORT_SIGNOFF', input)
 }
 
 /** Mapped fields of up to 5 user-chosen data rows of the uploaded file; customer/carrier names masked unless `unmask`. */
@@ -7225,6 +7258,40 @@ export async function sendToFactor(input: { invoiceId: string }): Promise<{
 
 export async function saveArSettings(input: Partial<ArSettings>): Promise<{ settings: TmsSettings }> {
   return financeAction<{ settings: TmsSettings }>('SAVE_AR_SETTINGS', input)
+}
+
+// ── Step AW stage D: release to billing, send invoice, factoring-queue change sync ──
+// All three need the per-user `page-billingRelease` grant; the Lambda refuses everyone else, admins included.
+
+export interface ReleaseToBillingResult {
+  invoice: InvoiceRecord
+  factoringItem: FactoringItem | null
+  billingMethod: 'FACTOR' | 'MANUAL'
+  alreadyReleased: boolean
+  /** MANUAL only: the invoice is issued and waiting for Send invoice. */
+  readyToSend: boolean
+  /** e.g. OVER_CREDIT_LIMIT: shown, never blocking. */
+  warnings: string[]
+}
+
+export async function releaseToBilling(input: { orderId: string; clientRequestId?: string }): Promise<ReleaseToBillingResult> {
+  const result = await financeAction<ReleaseToBillingResult>('RELEASE_TO_BILLING', input)
+  return { ...result, factoringItem: result.factoringItem ? parseFactoringJson(result.factoringItem) : null }
+}
+
+/** E-mails the PDF to the customer's AP address, the customer copy list and the company always-copy list. */
+export async function sendInvoice(input: { invoiceId: string; message?: string }): Promise<InvoiceEmailResult> {
+  return financeAction<InvoiceEmailResult>('SEND_INVOICE', input)
+}
+
+/** A factoring-queue edit propagated to the invoice, order and charge; `changeReason` is required. */
+export async function syncFactoringChange(input: {
+  proNumber: string
+  changeReason: string
+  changes: { invoiceAmountCents?: number; poNumber?: string; otrManualFields?: Record<string, string> }
+}): Promise<{ invoice: InvoiceRecord; factoringItem: FactoringItem; order: Record<string, unknown>; changed: string[] }> {
+  const result = await financeAction<{ invoice: InvoiceRecord; factoringItem: FactoringItem; order: Record<string, unknown>; changed: string[] }>('SYNC_FACTORING_CHANGE', input)
+  return { ...result, factoringItem: parseFactoringJson(result.factoringItem) }
 }
 
 // ── AP: carrier bills & payments (tmsFinanceActions, Step G) ─────────────────

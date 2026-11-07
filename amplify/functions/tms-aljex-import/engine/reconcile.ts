@@ -16,6 +16,10 @@ import { readChunk, readJson, readStageData, type StageData } from './stage'
 import { IMPORT_ACTOR, type Finding } from './types'
 import { centsDecimal, csvLine, renderImportReport, rootJobIdOf } from './report'
 import { BATCH_ROWS } from './load'
+import { AP_AGING_BUCKETS, AP_AGING_BUCKET_LABEL, apAgingBucketOfDays, centsText, nameKey, type ApAgingBill, type ApAgingBucket, type ApAgingParse } from '../../../../src/lib/aljex/layouts/apAging'
+import { DEFAULT_ALJEX_CUTOFF } from '../../../../src/lib/aljex/layouts/apExpected'
+import { apBillId, loadApCarrierMap } from './apFiles'
+import { daysBetween } from './util'
 
 export const runsPrefix = (jobId: string): string => `imports/runs/${jobId}/`
 export const batchFindingsKey = (jobId: string, chunk: number, offset: number): string => `imports/jobs/${jobId}/findings-${chunk}-${offset}.json`
@@ -139,7 +143,8 @@ export async function reconcile(store: EngineStore, jobId: string, opts: { count
     ['INVOICE_NO_CUSTOMER', 'customer unresolved, no invoice written'],
     ['ENRICH_MISMATCH', 'live record disagrees on revenue/carrier, not enriched'],
     ['PRO_CLAIMED_ELSEWHERE', 'PRO claimed by another record, not imported'],
-    ['UNLINKED_EXISTING', 'live load has no shipment, not touched'],
+    ['LINK_AMBIGUOUS', 'PRO is ambiguous (needs Ryne), not imported'],
+    ['LINK_RACE', 'PRO claimed concurrently, not imported'],
     ['ENRICH_NO_ORDER', 'live load has no order, not touched'],
     ['EXISTING_INVOICE', 'live order already invoiced, left as is'],
   ]
@@ -305,3 +310,192 @@ export async function reconcile(store: EngineStore, jobId: string, opts: { count
   }
   return summary
 }
+
+// ── AP aging reconciliation (Step AW E2; consumed by the E3 router's IMPORT_RECONCILE_ENTITY for entity AP) ───────────
+
+export type ApReconcileOutcome = 'MATCHED' | 'MISMATCH' | 'ALJEX_ONLY' | 'BCAT_ONLY'
+
+export interface ApReconcileRow {
+  /** Stable decision key (`IMPORT_DECIDE`): `<PRO>-<vendor>` for file bills, the bill id for BCAT-only bills. */
+  key: string
+  outcome: ApReconcileOutcome
+  pro: string
+  vendorId: string
+  carrierId: string
+  carrierName: string
+  billNumber: string
+  fileCents: number | null
+  bcatCents: number | null
+  diffCents: number | null
+  fileDue: string
+  bcatDue: string
+  filePayTo: string
+  bcatPayTo: string
+  /** What differs on a MISMATCH / why a row is one-sided. */
+  notes: string[]
+}
+
+export interface ApReconcileGroup {
+  key: string
+  label: string
+  fileCents: number
+  bcatCents: number
+  diffCents: number
+}
+
+export interface ApReconcileResult {
+  jobId: string
+  generatedAt: string
+  asOf: string
+  counts: Record<ApReconcileOutcome, number>
+  /** Σ AP aging file, Σ open BCAT balance of the same bills, Σ every open BCAT bill. */
+  fileCents: number
+  bcatMatchedCents: number
+  bcatOpenAllCents: number
+  bridge: ImportBridgeLine[]
+  byCarrier: ApReconcileGroup[]
+  byPayTo: ApReconcileGroup[]
+  byBucket: ApReconcileGroup[]
+  rows: ApReconcileRow[]
+  /** Every row is matched (differences, if any, are the operator's to decide). */
+  allMatched: boolean
+  files: string[]
+}
+
+const groupOf = (m: Map<string, { label: string; file: number; bcat: number }>): ApReconcileGroup[] =>
+  [...m.entries()]
+    .map(([key, v]) => ({ key, label: v.label, fileCents: v.file, bcatCents: v.bcat, diffCents: v.bcat - v.file }))
+    .sort((a, b) => b.fileCents + b.bcatCents - (a.fileCents + a.bcatCents) || a.key.localeCompare(b.key))
+
+/**
+ * Compares the AP aging file with the open carrier bills in the TABLES (never engine memory): matched, Aljex-only,
+ * BCAT-only and field mismatches, with money side by side to the cent by carrier, pay-to and aging bucket.
+ * Equality is not required: a difference is left as an open balance or approved by the decision flow (E3).
+ */
+export async function reconcileAp(store: EngineStore, jobId: string, aging: ApAgingParse, opts: { asOf?: string; write?: boolean } = {}): Promise<ApReconcileResult> {
+  const asOf = opts.asOf ?? DEFAULT_ALJEX_CUTOFF
+  const carriers = await loadApCarrierMap(store)
+  const carrierName = new Map<string, string>()
+  for (const c of carriers.values()) carrierName.set(c.id, c.name)
+  const allBills = await scanRows(store, 'carrierBill', ['id', 'shipmentNumber', 'loadNumber', 'carrierId', 'carrierName', 'balanceCents', 'apOpen', 'dueAt', 'billDate', 'billNumber', 'aljexPayMethod', 'remitTo', 'status'])
+  const byId = new Map(allBills.map((b) => [text(b.id), b]))
+  const byProCarrier = new Map<string, EngineRow[]>()
+  for (const b of allBills) {
+    const pro = normalizePro(text(b.shipmentNumber) || text(b.loadNumber))
+    if (!pro) continue
+    const k = `${pro}|${text(b.carrierId)}`
+    byProCarrier.set(k, [...(byProCarrier.get(k) ?? []), b])
+  }
+  const payToOf = (b: EngineRow): string => text((b.remitTo as { name?: unknown } | null | undefined)?.name) || text(b.carrierName)
+  const balance = (b: EngineRow): number => (b.apOpen === 'OPEN' && typeof b.balanceCents === 'number' ? b.balanceCents : 0)
+
+  const rows: ApReconcileRow[] = []
+  const used = new Set<string>()
+  const carrierGroups = new Map<string, { label: string; file: number; bcat: number }>()
+  const payToGroups = new Map<string, { label: string; file: number; bcat: number }>()
+  const bucketGroups = new Map<string, { label: string; file: number; bcat: number }>(AP_AGING_BUCKETS.map((b) => [b, { label: AP_AGING_BUCKET_LABEL[b], file: 0, bcat: 0 }]))
+  const add = (m: Map<string, { label: string; file: number; bcat: number }>, key: string, label: string, side: 'file' | 'bcat', cents: number): void => {
+    const g = m.get(key) ?? m.set(key, { label, file: 0, bcat: 0 }).get(key)!
+    g[side] += cents
+  }
+  const bucketOf = (billDate: string): ApAgingBucket => apAgingBucketOfDays(daysBetween(billDate, asOf))
+
+  let bcatMatched = 0
+  const bcatMatchedBuckets: Record<ApAgingBucket, number> = { D0_30: 0, D31_60: 0, D61_90: 0, D91_120: 0, D121_PLUS: 0 }
+  for (const fb of aging.bills as ApAgingBill[]) {
+    const carrier = carriers.get(fb.vendorId)
+    const carrierId = carrier?.id ?? ''
+    const label = carrier?.name || fb.vendorName
+    const cand = byId.get(apBillId(fb.proKey, fb.vendorId)) ?? (carrierId ? (byProCarrier.get(`${fb.proKey}|${carrierId}`) ?? []).find((b) => !used.has(text(b.id))) : undefined)
+    add(carrierGroups, carrierId || `aljex:${fb.vendorId}`, label, 'file', fb.amountCents)
+    add(payToGroups, nameKey(fb.payToName), fb.payToName, 'file', fb.amountCents)
+    add(bucketGroups, fb.bucket, AP_AGING_BUCKET_LABEL[fb.bucket], 'file', fb.amountCents)
+    const base = { key: fb.billNumber, pro: fb.pro, vendorId: fb.vendorId, carrierId, carrierName: label, billNumber: fb.billNumber, fileCents: fb.amountCents, fileDue: fb.dueDate, filePayTo: fb.payToName }
+    if (!cand) {
+      rows.push({ ...base, outcome: 'ALJEX_ONLY', bcatCents: null, diffCents: null, bcatDue: '', bcatPayTo: '', notes: [carrierId ? 'no BCAT bill for this PRO and carrier' : 'carrier not in BCAT'] })
+      continue
+    }
+    used.add(text(cand.id))
+    const bcat = balance(cand)
+    bcatMatched += bcat
+    add(carrierGroups, carrierId, label, 'bcat', bcat)
+    add(payToGroups, nameKey(payToOf(cand)), payToOf(cand), 'bcat', bcat)
+    const candBucket = bucketOf(text(cand.billDate) || fb.agingDate)
+    add(bucketGroups, candBucket, AP_AGING_BUCKET_LABEL[candBucket], 'bcat', bcat)
+    bcatMatchedBuckets[candBucket] += bcat
+    const notes: string[] = []
+    if (bcat !== fb.amountCents) notes.push('amount')
+    if (text(cand.dueAt) !== fb.dueDate) notes.push('due date')
+    if (nameKey(payToOf(cand)) !== nameKey(fb.payToName)) notes.push('pay-to')
+    if (fb.payMethod && text(cand.aljexPayMethod) && text(cand.aljexPayMethod) !== fb.payMethod) notes.push('pay method')
+    rows.push({ ...base, outcome: notes.length ? 'MISMATCH' : 'MATCHED', bcatCents: bcat, diffCents: bcat - fb.amountCents, bcatDue: text(cand.dueAt), bcatPayTo: payToOf(cand), notes })
+  }
+  let bcatOnly = 0
+  for (const b of allBills) {
+    if (b.apOpen !== 'OPEN' || used.has(text(b.id))) continue
+    const cents = balance(b)
+    bcatOnly += cents
+    add(carrierGroups, text(b.carrierId), text(b.carrierName) || carrierName.get(text(b.carrierId)) || text(b.carrierId), 'bcat', cents)
+    add(payToGroups, nameKey(payToOf(b)), payToOf(b), 'bcat', cents)
+    const onlyBucket = bucketOf(text(b.billDate) || asOf)
+    add(bucketGroups, onlyBucket, AP_AGING_BUCKET_LABEL[onlyBucket], 'bcat', cents)
+    rows.push({
+      key: text(b.id),
+      outcome: 'BCAT_ONLY',
+      pro: text(b.shipmentNumber) || text(b.loadNumber),
+      vendorId: '',
+      carrierId: text(b.carrierId),
+      carrierName: text(b.carrierName),
+      billNumber: text(b.billNumber),
+      fileCents: null,
+      bcatCents: cents,
+      diffCents: null,
+      fileDue: '',
+      bcatDue: text(b.dueAt),
+      filePayTo: '',
+      bcatPayTo: payToOf(b),
+      notes: ['open in BCAT, not in the AP aging file'],
+    })
+  }
+
+  const counts: Record<ApReconcileOutcome, number> = { MATCHED: 0, MISMATCH: 0, ALJEX_ONLY: 0, BCAT_ONLY: 0 }
+  for (const r of rows) counts[r.outcome] += 1
+  const byBucket = groupOf(bucketGroups)
+  const bridge: ImportBridgeLine[] = [
+    line('apAgingTotal', 'AP aging file total vs open balance of the same bills in BCAT', aging.totalCents, bcatMatched),
+    ...AP_AGING_BUCKETS.map((b) => line(`apBucket:${b}`, `AP aging ${AP_AGING_BUCKET_LABEL[b]} days: file vs BCAT (same bills)`, aging.byBucket[b], bcatMatchedBuckets[b])),
+    line('apOpenAll', 'AP aging file total vs every open bill in BCAT (difference = BCAT-only open bills)', aging.totalCents, bcatMatched + bcatOnly),
+  ]
+
+  const files: Record<string, string> = {}
+  files['reconcile-ap.csv'] = [
+    csvLine(['outcome', 'pro', 'vendor_id', 'carrier', 'bill_number', 'file_amount', 'bcat_balance', 'difference', 'file_due', 'bcat_due', 'file_pay_to', 'bcat_pay_to', 'notes']),
+    ...rows.map((r) => csvLine([r.outcome, r.pro, r.vendorId, r.carrierName, r.billNumber, r.fileCents == null ? '' : centsText(r.fileCents), r.bcatCents == null ? '' : centsText(r.bcatCents), r.diffCents == null ? '' : centsText(r.diffCents), r.fileDue, r.bcatDue, r.filePayTo, r.bcatPayTo, r.notes.join('; ')])),
+  ].join('\n')
+  const groupCsv = (kind: string, groups: ApReconcileGroup[]): string[] => groups.map((g) => csvLine([kind, g.label, centsText(g.fileCents), centsText(g.bcatCents), centsText(g.diffCents)]))
+  files['reconcile-ap-totals.csv'] = [csvLine(['group', 'name', 'file', 'bcat', 'difference']), ...groupCsv('carrier', groupOf(carrierGroups)), ...groupCsv('pay_to', groupOf(payToGroups)), ...groupCsv('bucket', byBucket)].join('\n')
+
+  const result: ApReconcileResult = {
+    jobId,
+    generatedAt: store.now(),
+    asOf,
+    counts,
+    fileCents: aging.totalCents,
+    bcatMatchedCents: bcatMatched,
+    bcatOpenAllCents: bcatMatched + bcatOnly,
+    bridge,
+    byCarrier: groupOf(carrierGroups),
+    byPayTo: groupOf(payToGroups),
+    byBucket,
+    rows,
+    allMatched: rows.every((r) => r.outcome === 'MATCHED'),
+    files: [...Object.keys(files), 'reconcile-ap.json'],
+  }
+  if (opts.write !== false) {
+    const prefix = runsPrefix(jobId)
+    for (const [name, body] of Object.entries(files)) await store.putObject(`${prefix}${name}`, `${body}\n`)
+    await store.putObject(`${prefix}reconcile-ap.json`, JSON.stringify(result))
+  }
+  return result
+}
+

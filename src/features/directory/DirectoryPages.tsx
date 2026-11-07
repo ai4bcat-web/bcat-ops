@@ -1,5 +1,7 @@
+import { PossibleDuplicateBadge } from './components/PossibleDuplicateBadge'
+import { buildDuplicateIndex } from '@/lib/customerDuplicates'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Archive, MessageSquarePlus, Merge, Pencil, Search, Settings2, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
@@ -170,6 +172,7 @@ const gridCatalog: Array<DenseColumn<CustomerRow>> = [
 ]
 
 export function CustomersPage() {
+  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const profileId = params.get('customer')
   // The directory's 3,000+ locations are only read by the profile's "Shipping locations" tab.
@@ -218,6 +221,8 @@ export function CustomersPage() {
 
   const teamNames = useMemo(() => new Map((settings?.teams ?? []).map((t) => [t.key, t.name])), [settings])
   const divisionNames = useMemo(() => new Map(divisions.map((d) => [d.key, d.name])), [divisions])
+  // "Possible duplicate": accounts of different Aljex Account # that share a normalised name (display only, nothing is merged).
+  const duplicates = useMemo(() => buildDuplicateIndex(dir.customers.filter((c) => c.active !== false)), [dir.customers])
 
   const rowsWithStatus = useMemo<CustomerRow[]>(() => {
     const q = query.trim().toLowerCase()
@@ -311,6 +316,7 @@ export function CustomersPage() {
             <span style={{ fontWeight: 600 }}>{c.name}</span>
             {c.apptWorkflow === 'BATORY' && <TmsBadge tone="blue">BATORY</TmsBadge>}
             {c.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
+            <PossibleDuplicateBadge info={duplicates.get(c.id)} />
           </span>
         )
       case 'status':
@@ -414,6 +420,7 @@ export function CustomersPage() {
               <Settings2 size={16} />
             </TmsIconButton>
           )}
+          <TmsButton size="sm" variant="secondary" onClick={() => navigate('/tms/customers/billing-setup')}>Billing setup</TmsButton>
           <TmsButton size="sm" variant="primary" onClick={() => setEditing('new')}>Customer</TmsButton>
         </div>
         <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />

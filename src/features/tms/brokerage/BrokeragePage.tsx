@@ -22,6 +22,8 @@ import DivisionsPage from '@/features/tms/settings/DivisionsPage'
 import AiAgentsPage from '@/features/tms/settings/AiAgentsPage'
 import { IntegrationsTab } from '@/features/tms/integrations/IntegrationsTab'
 import { CompanyTab } from '@/features/tms/brokerage/company/CompanyTab'
+import { AljexReconciliationPage } from '@/features/tms/brokerage/company/AljexReconciliationPage'
+import { ALJEX_SIGNOFF_PAGE_KEY } from '@/lib/aljexReconcile'
 import { UsersPage } from '@/features/users/UsersPage'
 import { DemoPage } from './DemoPage'
 import { SpotQuoterSettingsPage } from '@/features/tms/settings/SpotQuoterSettingsPage'
@@ -67,6 +69,18 @@ function activeTab(pathname: string): string {
   return TABS.find((t) => t.path === segment)?.key ?? 'settings'
 }
 
+/**
+ * The reconciliation page is the one Company desk a non-admin may open: the per-user `aljexSignoff` grant
+ * (AuthContext.hasPageAccess never opens that key for ADMIN/owner) lands on the bare page, with no Company strip.
+ * Owner/ADMIN keep the whole Company tab around it. The Lambda decides who may decide and sign off.
+ */
+function ReconciliationRoute() {
+  const { isOwner, isAdmin, hasPageAccess } = useAuth()
+  if (isOwner || isAdmin) return <CompanyTab />
+  if (hasPageAccess(ALJEX_SIGNOFF_PAGE_KEY)) return <AljexReconciliationPage />
+  return <Navigate to={ROOT} replace />
+}
+
 export function BrokeragePage() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
@@ -102,6 +116,7 @@ export function BrokeragePage() {
         <Route path="ai-agents/*" element={<RequireAdmin><AiAgentsPage /></RequireAdmin>} />
         <Route path="spot-quoter" element={<RequireAdmin><SpotQuoterSettingsPage /></RequireAdmin>} />
         <Route path="carrier-sales" element={<RequireAdmin><CarrierSalesSettingsPage /></RequireAdmin>} />
+        <Route path="company/data/aljex-reconciliation" element={<ReconciliationRoute />} />
         <Route path="company/*" element={<RequireAdmin><CompanyTab /></RequireAdmin>} />
         <Route path="demo" element={<RequirePage page={[TMS_PAGE_KEY]}><DemoPage /></RequirePage>} />
         {/* An unknown tab is a stale link, not a dead end: Settings is the page's home. */}

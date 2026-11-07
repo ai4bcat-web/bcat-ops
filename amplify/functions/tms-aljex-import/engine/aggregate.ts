@@ -42,6 +42,8 @@ export interface LoadEnv {
   memoOrphans: Map<string, MemoOrphan>
   /** Invoice ids already on the target: id -> orderId. Decides `id = PRO` vs the `ALJ-<pro>` fallback. */
   invoiceOwners: Map<string, string>
+  /** The history cutoff day (YYYY-MM-DD) the stage applied; named on the carried-over marks. Null = no window. */
+  cutoffDate: string | null
   /** Valid-for-this-run tag shown in notes (never a date). */
   actor: string
 }
@@ -64,6 +66,11 @@ export function rowIds(row: CanonicalRow, invoiceOwners?: Map<string, string>): 
   const owner = invoiceOwners?.get(invoiceId)
   if (owner !== undefined && owner !== orderId) invoiceId = `ALJ-${row.pro}`
   return { key, shipmentId: stableId('shp', key), orderId, loadId: stableId('lod', key), loadCarrierId, billId: `cb:${loadCarrierId}:1`, invoiceId }
+}
+
+/** The `markedSentNote` on every imported Invoice / CarrierBill: history is carried over, never re-billed (R21). */
+function carriedOverNote(env: LoadEnv): string {
+  return env.cutoffDate ? `Carried over from Aljex (cutoff ${env.cutoffDate})` : 'Carried over from Aljex'
 }
 
 const LEGACY: LegacyFields = { legacyImported: true, legacySource: 'ALJEX' }
@@ -189,10 +196,23 @@ function stamp(date: string | null | undefined, env: LoadEnv): string {
   return noonUtcIso(date && isPlausibleDate(date, env.window) ? date : env.window.start)
 }
 
-export function buildLoadAggregate(row: CanonicalRow, env: LoadEnv): AggregateResult {
+/**
+ * `link` = the LINK class: the PRO already has a Load on the target with no Shipment. The aggregate is built as for
+ * CREATE but against that Load's id, and the Load is never inserted or rewritten: one conditional UpdateItem adds
+ * `shipmentId, orderId, loadNumber, leg` and nothing else (a link adds only, it never edits or deletes a Load).
+ */
+export interface LinkTarget {
+  loadId: string
+  /** A ProClaim for this PRO already exists (held by this Load): it gets its shipmentId instead of a new claim row. */
+  claimExists: boolean
+  /** LoadFinancials(loadId) already exists: left untouched. */
+  hasFinancials: boolean
+}
+
+export function buildLoadAggregate(row: CanonicalRow, env: LoadEnv, link?: LinkTarget): AggregateResult {
   const { profile, window } = env
   const facts = rowFacts(row, profile, window)
-  const ids = rowIds(row, env.invoiceOwners)
+  const ids = link ? { ...rowIds(row, env.invoiceOwners), loadId: link.loadId } : rowIds(row, env.invoiceOwners)
   const findings: AggregateResult['findings'] = []
   const note = (code: string, detail?: string) => findings.push(detail ? { code, detail } : { code })
 
@@ -424,8 +444,8 @@ export function buildLoadAggregate(row: CanonicalRow, env: LoadEnv): AggregateRe
     palletsIn: f.pltIn ?? undefined,
     palletsOut: f.pltOut ?? undefined,
   })
-  const salesRepId = profile.repMap[row.salesrepId] || undefined
-  const carrierRepId = profile.dispatcherMap[row.staff.actualDispatcher] || undefined
+  // Aljex rep / creator / service-rep / dispatcher codes are NOT imported (Step AW R4): the sales rep comes from the
+  // division map (applyTag) and nobody is assigned a load from an Aljex code.
   const rev = revFields(facts, env)
   const customerName = row.customer.name || undefined
 
@@ -449,12 +469,6 @@ export function buildLoadAggregate(row: CanonicalRow, env: LoadEnv): AggregateRe
     source: 'BACKFILL',
     deliveredAt,
     ...rev,
-    salesRepId,
-    carrierRepId,
-    salesRepCode: row.salesrepId || undefined,
-    createdByCode: row.staff.createdBy || undefined,
-    serviceRepCode: row.staff.serviceRep || undefined,
-    dispatcherCode: row.staff.assignedDispatcher || undefined,
     osd: row.osd || undefined,
     voidedAt,
     voidedBy: facts.isVoid ? IMPORT_ACTOR : undefined,
@@ -527,7 +541,6 @@ export function buildLoadAggregate(row: CanonicalRow, env: LoadEnv): AggregateRe
     statusChangedAt: changedAt,
     statusChangedBy: IMPORT_ACTOR,
     statusSource: 'BACKFILL',
-    carrierRepId,
     assignmentType,
     activeLoadCarrierId: leg ? ids.loadCarrierId : undefined,
     carrierName: row.carrier?.name || undefined,
@@ -537,7 +550,6 @@ export function buildLoadAggregate(row: CanonicalRow, env: LoadEnv): AggregateRe
     cargoValueCents: row.money.declaredValueCents > 0 ? row.money.declaredValueCents : undefined,
     deliveredAt,
     ...rev,
-    salesRepId,
     voidedAt,
     previousStatus: facts.isVoid ? 'SOURCING' : undefined,
     previousReadyToInvoice: facts.isVoid ? false : undefined,
@@ -562,13 +574,26 @@ export function buildLoadAggregate(row: CanonicalRow, env: LoadEnv): AggregateRe
   }
 
   const claim = { id: row.proKey as string, loadId: ids.loadId, shipmentId: ids.shipmentId, claimedAt: '', claimedBy: IMPORT_ACTOR, origin: 'LEGACY' }
+  // ProClaim first: a lost race on it is the "PRO claimed elsewhere" outcome (failedIndex 0).
+  const claimItem: TxItem = link?.claimExists
+    ? { op: 'update', table: 'proClaim', id: claim.id, set: { shipmentId: ids.shipmentId }, condition: { expression: 'attribute_not_exists(shipmentId) OR shipmentId = :shp', values: { ':shp': ids.shipmentId } } }
+    : { op: 'put', table: 'proClaim', item: claim, ifNotExists: true }
+  const loadItem: TxItem = link
+    ? {
+        op: 'update',
+        table: 'load',
+        id: ids.loadId,
+        set: { shipmentId: ids.shipmentId, orderId: ids.orderId, loadNumber: row.pro, leg: 1 },
+        condition: { expression: 'attribute_not_exists(shipmentId) OR shipmentId = :none', values: { ':none': '' } },
+      }
+    : { op: 'put', table: 'load', item: load }
 
   const items: TxItem[] = [
-    { op: 'put', table: 'proClaim', item: claim, ifNotExists: true },
+    claimItem,
     { op: 'put', table: 'shipment', item: shipment },
     { op: 'put', table: 'order', item: order },
-    { op: 'put', table: 'load', item: load },
-    { op: 'put', table: 'loadFinancials', item: financials },
+    loadItem,
+    ...(link?.hasFinancials ? [] : [{ op: 'put', table: 'loadFinancials', item: financials } as TxItem]),
     ...customerCharges.map((item) => ({ op: 'put', table: 'loadCharge', item }) as TxItem),
     ...carrierCharges.map((item) => ({ op: 'put', table: 'loadCharge', item }) as TxItem),
   ]
@@ -646,7 +671,7 @@ export function buildInvoice(
     sentCount: 0,
     markedSentAt: noonUtcIso(invoiceDate),
     markedSentBy: IMPORT_ACTOR,
-    markedSentNote: 'Sent from Aljex',
+    markedSentNote: carriedOverNote(env),
     note: terms.days == null ? 'Aljex import: terms not in export and not configured; Net 30 assumed' : `Aljex import: terms not in export (${terms.source === 'CUSTOMER' ? 'customer' : 'org default'})`,
     createdBy: IMPORT_ACTOR,
     updatedBy: IMPORT_ACTOR,
@@ -731,6 +756,9 @@ export function buildBill(row: CanonicalRow, ap: ApFacts, ids: RowIds, carrier: 
     approvedAt: noonUtcIso(billDate),
     approvedBy: IMPORT_ACTOR,
     approvalWarnings: ['LEGACY_IMPORT'],
+    markedSentAt: noonUtcIso(billDate),
+    markedSentBy: IMPORT_ACTOR,
+    markedSentNote: carriedOverNote(env),
     createdBy: IMPORT_ACTOR,
     updatedBy: IMPORT_ACTOR,
     version: 1,

@@ -20,7 +20,7 @@ export type { EngineRow, EngineStore, TxItem }
 export const IMPORT_ACTOR = 'aljex-import'
 
 /** Row classification against what is already on the target (plan §5.8). */
-export type ProClass = 'CREATE' | 'ENRICH' | 'UNLINKED' | 'CONFLICT' | 'OWN'
+export type ProClass = 'CREATE' | 'ENRICH' | 'LINK' | 'AMBIGUOUS' | 'CONFLICT' | 'OWN'
 
 export interface Finding {
   /** Finding code, e.g. `ZERO_INVOICE`, `JUNK_DATE`. */
@@ -109,6 +109,8 @@ export interface StageIndex {
   findings: Finding[]
   /** Staged outcome counts that never reach the apply phases (skips decided at stage time). */
   stagedSkips: Record<string, number>
+  /** Step AW history window: the cutoff and window start applied at STAGE (null = no window), and what fell outside. */
+  history?: { cutoffDate: string | null; windowStart: string | null; beforeWindow: number; afterCutoff: number }
 }
 
 export interface PhaseContext {

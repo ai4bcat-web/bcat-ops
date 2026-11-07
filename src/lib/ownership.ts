@@ -54,6 +54,8 @@ export interface ResolveContext {
   loadSource: string | null
   /** Every order reference VALUE, for `REFERENCE_MATCHES`. */
   references: string[]
+  /** `CODE=value` per reference, so a rule can pin one reference (the Aljex Rev Type) without matching any other value. */
+  taggedReferences?: string[]
 }
 
 export interface Resolution {
@@ -144,6 +146,7 @@ export function matchesCondition(condition: OwnershipCondition | null | undefine
         return false
       }
       return ctx.references.some((r) => typeof r === 'string' && re.test(r))
+        || (ctx.taggedReferences ?? []).some((r) => re.test(r))
     }
     default:
       return false
@@ -341,8 +344,12 @@ export function shipmentContextFor(input: ShipmentContextInput): ResolveContext 
     : null
 
   const references: string[] = []
+  const taggedReferences: string[] = []
   for (const ref of order?.references ?? []) {
-    if (ref && typeof ref.value === 'string' && ref.value.trim() !== '') references.push(ref.value)
+    if (ref && typeof ref.value === 'string' && ref.value.trim() !== '') {
+      references.push(ref.value)
+      if (typeof ref.code === 'string' && ref.code.trim() !== '') taggedReferences.push(`${ref.code}=${ref.value}`)
+    }
   }
 
   return {
@@ -355,6 +362,7 @@ export function shipmentContextFor(input: ShipmentContextInput): ResolveContext 
     mode: shipment?.mode ?? order?.mode ?? null,
     loadSource: shipment?.source ?? null,
     references,
+    taggedReferences,
   }
 }
 
@@ -483,6 +491,10 @@ export const SEED_DIVISIONS: OwnershipDivisionSeed[] = [
  * customer rule is how a vehicle move is recognised today — nothing in the reference
  * text marks one — and the catch-all keeps every remaining shipment in Brokerage.
  *
+ * The four Rev Type rules (Aljex B/I/A/O, AW-CDE-plan C.5) sit behind every carrier/driver rule, so a
+ * specific owner-operator driver or carrier still wins, and ahead of the catch-all. The seed rewrites
+ * sortOrder from array position.
+ *
  * The Auto Shipper rule's value is resolved at seed time by
  * `ENSURE_OWNERSHIP_SEED`; the static array carries a placeholder so the rule
  * still validates before the seed writer has run.
@@ -545,9 +557,41 @@ export const SEED_RULES: OwnershipRuleSeed[] = [
     divisionCode: 'CAR_SHIPPING',
   },
   {
+    id: 'rule-seed-revtype-b',
+    name: 'BCAT Logistics (Rev Type B)',
+    sortOrder: 8,
+    active: true,
+    condition: { kind: 'REFERENCE_MATCHES', value: '^ALJEX_REV_TYPE=B$' },
+    divisionCode: 'BROKERAGE',
+  },
+  {
+    id: 'rule-seed-revtype-i',
+    name: 'Ivan Cartage (Rev Type I)',
+    sortOrder: 9,
+    active: true,
+    condition: { kind: 'REFERENCE_MATCHES', value: '^ALJEX_REV_TYPE=I$' },
+    divisionCode: 'ASSETS',
+  },
+  {
+    id: 'rule-seed-revtype-a',
+    name: 'Bestcare Auto Transport (Rev Type A)',
+    sortOrder: 10,
+    active: true,
+    condition: { kind: 'REFERENCE_MATCHES', value: '^ALJEX_REV_TYPE=A$' },
+    divisionCode: 'CAR_SHIPPING',
+  },
+  {
+    id: 'rule-seed-revtype-o',
+    name: 'Owner operators (Rev Type O)',
+    sortOrder: 11,
+    active: true,
+    condition: { kind: 'REFERENCE_MATCHES', value: '^ALJEX_REV_TYPE=O$' },
+    divisionCode: 'OWNER_OPERATOR',
+  },
+  {
     id: 'rule-seed-7',
     name: 'Everything else',
-    sortOrder: 8,
+    sortOrder: 12,
     active: true,
     condition: { kind: 'ALWAYS', value: null },
     divisionCode: 'BROKERAGE',

@@ -1,5 +1,5 @@
 /*
- * Light green theme for the whole product.
+ * BCAT blue-accent theme for the whole product.
  *
  * The two token blocks (light default, dark override) are also defined on `:root`, so every
  * surface — staff shell, Radix portals, sonner, sign-in, public pages, the driver app — reads
@@ -20,27 +20,27 @@
 .tms-portal {
   color-scheme: light;
 
-  --tms-bg: #f3f6f4;
+  --tms-bg: #f4f7fb;
   --tms-sidebar: #ffffff;
   --tms-topbar: #ffffff;
   --tms-card: #ffffff;
   --tms-card-body: #ffffff;
   --tms-bg-elevated: #ffffff;
-  --tms-surface: #f7f9f8;
-  --tms-surface-subtle: #f7f9f8;
-  --tms-surface-hover: #eef3f0;
-  --tms-surface-selected: #e8f7ef;
-  --tms-border: #e6eae8;
+  --tms-surface: #f7f9fc;
+  --tms-surface-subtle: #f7f9fc;
+  --tms-surface-hover: #edf2f8;
+  --tms-surface-selected: #e6f4fd;
+  --tms-border: #e2e8f0;
   --tms-input: #ffffff;
-  --tms-input-border: #d5dbd8;
+  --tms-input-border: #cbd5e1;
   --tms-text: #111827;
   --tms-text-2: #4b5563;
   --tms-muted: #6b7280;
   --tms-disabled: #9ca3af;
-  --tms-primary: #1db36a;
-  --tms-primary-hover: #169a5a;
-  --tms-primary-tint: #e8f7ef;
-  --tms-primary-ink: #15803d;
+  --tms-primary: #0369a1;
+  --tms-primary-hover: #075985;
+  --tms-primary-tint: #e6f4fd;
+  --tms-primary-ink: #0369a1;
   --tms-on-primary: #ffffff;
   --tms-destructive: #dc2626;
   --tms-destructive-hover: #b91c1c;
@@ -67,9 +67,9 @@
   /* Page / PDF / image matte in document previews: white in both themes. */
   --tms-paper: #ffffff;
 
-  --tms-scroll-track: #f3f6f4;
-  --tms-scroll-thumb: #cbd5d1;
-  --tms-scroll-thumb-hover: #aeb9b4;
+  --tms-scroll-track: #f4f7fb;
+  --tms-scroll-thumb: #cbd5e1;
+  --tms-scroll-thumb-hover: #a9b6c8;
 
   --tms-count-bg: #f5a524;
   --tms-count-ink: #422006;
@@ -114,16 +114,16 @@
   --tms-row-voided-text: #9ca3af;
 
   /* Chart palette: green, dark green, near-black first, then 9 distinguishable series. */
-  --tms-chart-1: #1db36a;
-  --tms-chart-2: #0f5c3a;
+  --tms-chart-1: #0b8fd9;
+  --tms-chart-2: #0369a1;
   --tms-chart-3: #111827;
   --tms-chart-4: #f5a524;
-  --tms-chart-5: #3b82f6;
+  --tms-chart-5: #14b8a6;
   --tms-chart-6: #8b5cf6;
   --tms-chart-7: #ef4444;
   --tms-chart-8: #06b6d4;
   --tms-chart-9: #9ca3af;
-  --tms-chart-10: #86d9ae;
+  --tms-chart-10: #8fd0f7;
   --tms-chart-11: #d97706;
   --tms-chart-12: #2563eb;
   --tms-chart-axis: var(--tms-muted);
@@ -144,7 +144,7 @@
   --tms-surface: #1d1d1d;
   --tms-surface-subtle: #1b1b1b;
   --tms-surface-hover: #2a2a2a;
-  --tms-surface-selected: #123524;
+  --tms-surface-selected: #0f2a40;
   --tms-border: #383838;
   --tms-input: #383838;
   --tms-input-border: #656565;
@@ -152,11 +152,11 @@
   --tms-text-2: #d4d4d4;
   --tms-muted: #a7a7a7;
   --tms-disabled: #6b6b6b;
-  --tms-primary: #1db36a;
-  --tms-primary-hover: #25c97a;
-  --tms-primary-tint: #123524;
-  --tms-primary-ink: #4ade80;
-  --tms-on-primary: #ffffff;
+  --tms-primary: #1ea8f3;
+  --tms-primary-hover: #52bbf6;
+  --tms-primary-tint: #0f2a40;
+  --tms-primary-ink: #5cc0f7;
+  --tms-on-primary: #0b1220;
   --tms-destructive: #e5484d;
   --tms-destructive-hover: #f0616a;
   --tms-on-destructive: #ffffff;
@@ -212,16 +212,16 @@
   --tms-row-voided: #2a2a2a;
   --tms-row-voided-text: #a0a0a0;
 
-  --tms-chart-1: #25c97a;
-  --tms-chart-2: #1b8a5a;
+  --tms-chart-1: #1ea8f3;
+  --tms-chart-2: #0b8fd9;
   --tms-chart-3: #e5e7eb;
   --tms-chart-4: #fbbf24;
-  --tms-chart-5: #60a5fa;
+  --tms-chart-5: #2dd4bf;
   --tms-chart-6: #a78bfa;
   --tms-chart-7: #f87171;
   --tms-chart-8: #22d3ee;
   --tms-chart-9: #9ca3af;
-  --tms-chart-10: #4ade80;
+  --tms-chart-10: #7cc9f5;
   --tms-chart-11: #f59e0b;
   --tms-chart-12: #93c5fd;
 }

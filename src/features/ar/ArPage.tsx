@@ -50,6 +50,7 @@ import { GenerateInvoiceDialog } from './components/GenerateInvoiceDialog'
 import { ReasonDialog } from './components/ReasonDialog'
 import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
+import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
 import { useReadyForBilling, type ReadyRow } from './components/useReadyForBilling'
 import { ReadyForBillingShipmentCell } from './components/ReadyForBillingShipmentCell'
 import { ReadyForBillingGateCell } from './components/ReadyForBillingGateCell'
@@ -101,6 +102,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [tab, setTab] = useState<ExtendedArTabKey>('to-invoice')
   const [dialog, setDialog] = useState<ArDialog | null>(null)
   const [busy, setBusy] = useState(false)
+  const canRelease = useBillingGrant()
 
   const unbilled = useArWorklist('UNBILLED')
   const docsNeeded = useArWorklist('DOCS_NEEDED')
@@ -320,6 +322,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       selected,
       justGenerated,
       busy,
+      canRelease,
       onSelect: setSelected,
       onGenerate: (row) => setDialog({ kind: 'generate', orderId: row.orderId, shipmentNumber: row.shipmentNumber }),
       onBatchGenerate: runBatchGenerate,
@@ -487,7 +490,7 @@ function RefusalsCard({ refusals, onDismiss }: { refusals: BatchRefusal[]; onDis
 }
 
 function toInvoiceView({
-  banner, rows, customersById, selected, justGenerated, busy, onSelect, onGenerate, onBatchGenerate, onBatchEmail,
+  banner, rows, customersById, selected, justGenerated, busy, canRelease, onSelect, onGenerate, onBatchGenerate, onBatchEmail,
 }: {
   banner: ReactNode
   rows: ArWorklistRow[]
@@ -495,6 +498,7 @@ function toInvoiceView({
   selected: string[]
   justGenerated: string[]
   busy: boolean
+  canRelease: boolean
   onSelect: (ids: string[]) => void
   onGenerate: (row: ArWorklistRow) => void
   onBatchGenerate: () => void
@@ -584,7 +588,8 @@ function toInvoiceView({
         </TmsButton>
         <TmsButton
           aria-label="Batch e-mail generated invoices"
-          disabled={busy || justGenerated.length === 0}
+          disabled={busy || justGenerated.length === 0 || !canRelease}
+          title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
           onClick={onBatchEmail}
         >
           <Mail size={14} /> Batch e-mail ({justGenerated.length})

@@ -26,11 +26,26 @@ import { tmsDataSafety } from '../functions/tms-data-safety/resource'
 import { tmsSpotQuoter } from '../functions/tms-spot-quoter/resource'
 import { tmsApInbox } from '../functions/tms-ap-inbox/resource'
 import { tmsCrmActions } from '../functions/tms-crm-actions/resource'
+import { FINAL_STAGE, currentSchemaStage, modelPresent } from './stages'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
 
-const schema = a.schema({
+// Staged deploy (amplify/data/stages.ts): BCAT_SCHEMA_STAGE=k synthesizes only the models present at
+// stage k. Unset (dev, every existing deploy) keeps everything. The authored object stays whole so
+// `Schema` (and the frontend) are identical at every stage; only the runtime schema is filtered.
+// Custom operations have no `fields` and always stay. No model relates to another by a.hasMany/
+// a.belongsTo/a.ref, so dropping a model leaves no dangling reference.
+function stageTypes<T extends Record<string, unknown>>(types: T): T {
+  const stage = currentSchemaStage()
+  if (stage >= FINAL_STAGE) return types
+  const isModel = (def: unknown): boolean => Boolean((def as { data?: { fields?: unknown } }).data?.fields)
+  return Object.fromEntries(
+    Object.entries(types).filter(([name, def]) => !isModel(def) || modelPresent(name, stage)),
+  ) as T
+}
+
+const schema = a.schema(stageTypes({
   Load: a
     .model({
       // Step R cutover. The PRO and the two identity columns beside it are read-only
@@ -882,6 +897,11 @@ const schema = a.schema({
   // Writes are routed through tmsDirectoryActions so links and archives stay valid.
   Customer: a
     .model({
+      // Step AW stage D: how this customer is billed (Docs/tms-build/AW-CDE-plan.md D.1). Unset = release to billing is refused.
+      billingMethod:        a.enum(['FACTOR', 'MANUAL']),
+      apEmail:              a.string(),
+      invoiceCopyEmails:    a.string().array(),
+      billingNeedsReview:   a.string(),
       name:         a.string().required(),   // e.g. "BATORY FOODS" — matched against Load.customer
       aljexCode:    a.string(),              // Aljex `Customer Account #` (Phase 0 import); no index
       contactName:  a.string(),
@@ -1098,6 +1118,10 @@ const schema = a.schema({
   // Singleton TMS configuration. id='default'. Admin write via tmsDirectoryActions.
   TmsSettings: a
     .model({
+      // Step AW: company-wide always-copy on manual invoices, the Aljex snapshot cutoff, and sales rep by division.
+      invoiceAlwaysCopyEmails: a.string().array(),
+      aljexCutoffAt:         a.datetime(),
+      divisionSalesReps:     a.json(),
       marginFloorBps:        a.integer(),
       // Step AG: AP-inbox config and machine state. Read ONLY through tmsApInboxActions; written
       // only by tms-ap-inbox with UpdateItem SET (never touches updatedAt).
@@ -1640,10 +1664,11 @@ const schema = a.schema({
    */
   AljexImportJob: a
     .model({
+      decisions:   a.json(),     // Step AW: reconciliation decisions { OPEN_BALANCE | APPROVED, by, at, reason }
       id:          a.id(),
       // DRY_RUN/APPLIED/FAILED are the pre-Phase-0 members; the rest drive the pipeline.
       status:      a.enum(['DRY_RUN', 'APPLIED', 'FAILED', 'STAGING', 'READY', 'PLANNING', 'PLANNED', 'RUNNING', 'PAUSED', 'CANCELED']),
-      kind:        a.enum(['IMPORT', 'MCP_SYNC']),
+      kind:        a.enum(['IMPORT', 'MCP_SYNC', 'RECONCILE']),
       phase:       a.string(),
       cursor:      a.json(),     // { phase, entity, chunk, offset }
       heartbeatAt: a.datetime(),
@@ -2455,6 +2480,8 @@ const schema = a.schema({
    */
   CarrierBill: a
     .model({
+      aljexPayMethod:        a.string(),   // Step AW: Aljex Check/Draft code (C = check, D = direct deposit)
+      aljexVendorInvoiceRef: a.string(),   // Step AW: Aljex 'Vend Invoice #' kept as a reference only
       loadCarrierId:   a.string().required(),
       loadId:          a.string().required(),
       shipmentId:      a.string().required(),
@@ -3463,6 +3490,7 @@ const schema = a.schema({
   // Amplify Gen 2 enum fields take no modifiers. The Lambda demands them.
   Carrier: a
     .model({
+      aljexAliases:   a.string().array(),   // Step AW: Aljex Carrier IDs of merged duplicate rows
       name:           a.string().required(),
       aljexCode:      a.string(),            // Aljex `Line Haul Carrier ID` (Phase 0 import); no index
       dbaName:        a.string(),
@@ -5132,7 +5160,7 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(dispatchActions)),
-}).authorization((allow) => [
+})).authorization((allow) => [
   // Phase 1: tmsDirectoryActions Lambda invokes the AppSync API via IAM auth
   // (generated mutations for Load, plus queries for Customer/Location/Division/etc.).
   allow.resource(tmsDirectoryActions).to(['query', 'mutate']),

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PLACEHOLDER_EMAILS, TARGET_DIVISIONS, applyPlan, describePlan, planRevDivisions } from './seedRevDivisions.mjs'
+import { PLACEHOLDER_EMAILS, TARGET_DIVISIONS, applyPlan, describePlan, planDivisionReps, planRevDivisions } from './seedRevDivisions.mjs'
 
 const row = (code, over = {}) => ({
   id: code, code, name: code, brand: null, parentId: null, color: null, sortOrder: 10, active: true,
@@ -110,5 +110,35 @@ describe('applyPlan / describePlan', () => {
     const text = describePlan({ steps: [], blocked: [], notes: [] }, { apply: false })
     expect(text).toContain('DRY RUN')
     for (const email of Object.values(PLACEHOLDER_EMAILS)) expect(text).toContain(email)
+  })
+})
+
+describe('planDivisionReps', () => {
+  const people = [
+    { id: 'u-ryne', name: 'Ryne Bandolik' },
+    { id: 'u-ruben', name: ' ruben  vargas ' },
+  ]
+  it('maps the four divisions, creating the non-login Ivan Cartage profile when absent', () => {
+    const plan = planDivisionReps({ profiles: people, settings: {} })
+    expect(plan.reps).toEqual({ BROKERAGE: 'u-ryne', ASSETS: 'ivan-cartage', CAR_SHIPPING: 'u-ruben', OWNER_OPERATOR: 'u-ruben' })
+    expect(plan.createProfile).toMatchObject({ id: 'ivan-cartage', name: 'Ivan Cartage', role: 'NONE', status: 'ACTIVE' })
+    expect(plan.missing).toEqual([])
+    expect(plan.patch).toEqual(plan.reps)
+  })
+  it('fails (missing) rather than invent a person, and writes nothing', () => {
+    const plan = planDivisionReps({ profiles: [{ id: 'u-ryne', name: 'Ryne Bandolik' }], settings: null })
+    expect(plan.missing.map((m) => m.division).sort()).toEqual(['CAR_SHIPPING', 'OWNER_OPERATOR'])
+    expect(plan.patch).toBeNull()
+  })
+  it('never overwrites an existing entry and is a no-op when complete', () => {
+    const settings = { divisionSalesReps: JSON.stringify({ BROKERAGE: 'someone', ASSETS: 'ivan-cartage', CAR_SHIPPING: 'u-ruben', OWNER_OPERATOR: 'u-ruben' }) }
+    const plan = planDivisionReps({ profiles: [...people, { id: 'ivan-cartage', name: 'Ivan Cartage' }], settings })
+    expect(plan.reps.BROKERAGE).toBe('someone')
+    expect(plan.patch).toBeNull()
+    expect(plan.createProfile).toBeNull()
+  })
+  it('refuses an ambiguous name', () => {
+    const plan = planDivisionReps({ profiles: [...people, { id: 'dup', name: 'Ryne Bandolik' }], settings: {} })
+    expect(plan.missing.map((m) => m.division)).toContain('BROKERAGE')
   })
 })

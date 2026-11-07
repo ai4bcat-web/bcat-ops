@@ -16,6 +16,7 @@ import { ImportPage } from './ImportPage'
 import { AljexImportPage } from './AljexImportPage'
 import { AccountPage } from './AccountPage'
 import { DataSafetyPage } from './DataSafetyPage'
+import { AljexReconciliationPage } from './AljexReconciliationPage'
 
 const ROOT = '/tms/brokerage/company'
 
@@ -61,6 +62,7 @@ export function CompanyTab() {
           <Route path="import" element={<ImportPage />} />
           <Route path="aljex-import" element={<AljexImportPage />} />
           <Route path="data" element={<DataSafetyPage />} />
+          <Route path="data/aljex-reconciliation" element={<AljexReconciliationPage />} />
           <Route path="account" element={<AccountPage />} />
           <Route path="*" element={<Navigate to={`${ROOT}/company`} replace />} />
         </Routes>

@@ -43,7 +43,7 @@ export default defineConfig({
         short_name: 'BCAT',
         description: 'Mobile app for BCAT Amazon drivers',
         theme_color: '#ffffff',
-        background_color: '#f3f6f4',
+        background_color: '#f4f7fb',
         display: 'standalone',
         orientation: 'portrait',
         scope: '/driver',

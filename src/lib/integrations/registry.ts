@@ -825,7 +825,7 @@ export const PROVIDERS: ProviderDescriptor[] = [
     category: 'MAPS',
     credentialSource: 'STACK',
     credentialFields: [],
-    stackSecretNames: ['GOOGLE_MAPS_API_KEY'],
+    stackSecretNames: ['GOOGLE_MAPS_API_KEY', 'GEOCODE_TOKEN_SECRET'],
     settingsFields: [],
     capabilities: ['validate'],
     liveCapabilities: ['validate'],

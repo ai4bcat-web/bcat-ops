@@ -343,6 +343,7 @@ vi.mock('@aws-sdk/client-sesv2', () => {
 })
 
 import { handler } from './handler'
+import { factoringRowFor } from '../../../src/lib/factorHandoff'
 
 interface MockCommand {
   __type: string
@@ -425,7 +426,11 @@ const ADMIN = { sub: 'sub-admin', username: 'admin', claims: { email: 'admin@bca
 const BILLER = { sub: 'sub-bill', username: 'bill', claims: { email: 'bill@bcatcorp.com', 'cognito:groups': ['page-invoicing'] } }
 const DISPATCHER = { sub: 'sub-dis', username: 'dis', claims: { email: 'dis@bcatcorp.com', 'cognito:groups': ['page-loads'] } }
 
-function call(action: string, input: Row, identity: unknown = ADMIN): Promise<Row> {
+// Step AW: releasing, sending and queueing an invoice are per-user grants with no role bypass.
+const JENNY = { sub: 'sub-jen', username: 'jenny', claims: { email: 'jenny@bcatcorp.com', 'cognito:groups': ['page-billingRelease', 'page-invoicing'] } }
+const GRANT_ACTIONS = ['RELEASE_TO_BILLING', 'SEND_INVOICE', 'SYNC_FACTORING_CHANGE', 'EMAIL_INVOICE', 'BATCH_EMAIL', 'SEND_TO_FACTOR', 'MARK_SENT']
+
+function call(action: string, input: Row, identity: unknown = GRANT_ACTIONS.includes(action) ? JENNY : ADMIN): Promise<Row> {
   return handler({ arguments: { action, input: JSON.stringify(input) }, identity } as never)
 }
 
@@ -1263,7 +1268,7 @@ describe('SEND_TO_FACTOR', () => {
       orderId: ORDER_ID,
       shipmentId: SHIPMENT_ID,
       messageId: `tms:${invoiceId}`,
-      fromEmail: 'admin@bcatcorp.com',
+      fromEmail: 'jenny@bcatcorp.com',
     })
     expect(row.otrManualFields).toMatchObject({
       InvoiceNo: 'INV-000001',
@@ -2732,5 +2737,210 @@ describe('REPOINT_INVOICED_CUSTOMER', () => {
     await expect(
       call('REVERSE_PAYMENT', { paymentId: String(credit!.id), reason: 'undo' }),
     ).rejects.toThrow(/REPOINT_INVOICED_CUSTOMER/)
+  })
+})
+
+// ── Step AW stage D.3: release to billing ───────────────────────────────────
+
+const FACTOR_REMIT = { name: 'OTR Solutions', address: null, email: null, noticeText: null }
+const ADMIN_WITH_NO_GRANT = ADMIN
+
+function auditRows(action: string, entityType?: string): Row[] {
+  return [...table(TABLES.audit).values()].filter((r) => r.action === action && (!entityType || r.entityType === entityType))
+}
+
+function seedMethod(method: 'FACTOR' | 'MANUAL' | null, over: Row = {}): void {
+  seed({
+    customer: { billingMethod: method, ...(method === 'MANUAL' ? { apEmail: 'AP@acme.test' } : {}), ...over },
+    settings: method === 'FACTOR' ? { factorRemitTo: FACTOR_REMIT } : { invoiceAlwaysCopyEmails: ['invoices@bcatcorp.com', 'ops@bcatcorp.com'] },
+  })
+}
+
+describe('RELEASE_TO_BILLING', () => {
+  it('FACTOR: invoices and pushes the same queue row the bridge writes, with no customer e-mail', async () => {
+    seedMethod('FACTOR')
+    const out = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID, clientRequestId: 'r1' })) as {
+      invoice: Row; factoringItem: Row; alreadyReleased: boolean; billingMethod: string
+    }
+    expect(out).toMatchObject({ alreadyReleased: false, billingMethod: 'FACTOR' })
+    const invoiceId = String(out.invoice.id)
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ factored: true, factoringItemId: 'S000001-1' })
+
+    const row = { ...table(TABLES.factoring).get('S000001-1')! }
+    delete row.__typename
+    const loads = [...table(TABLES.load).values()]
+    const expected = factoringRowFor({
+      invoice: table(TABLES.invoice).get(invoiceId) as never,
+      order: table(TABLES.order).get(ORDER_ID) as never,
+      load: loads[0] as never,
+      stops: (loads[0].stops ?? []) as never,
+      customer: table(TABLES.customer).get(CUSTOMER_ID) as never,
+      caller: 'jenny@bcatcorp.com',
+      now: String(row.createdAt),
+    })
+    expect(row).toEqual(expected)
+    expect(row).toMatchObject({ status: 'NEED_TO_FACTOR', source: 'TMS', messageId: `tms:${invoiceId}` })
+
+    expect(sesSend).not.toHaveBeenCalled()
+    expect(table(TABLES.notice).size).toBe(0)
+    expect(auditRows('PUSHED_TO_FACTORING_QUEUE_ON_RELEASE', 'Invoice')).toHaveLength(1)
+    const shipmentAudit = auditRows('PUSHED_TO_FACTORING_QUEUE_ON_RELEASE', 'SHIPMENT')
+    expect(shipmentAudit).toHaveLength(1)
+    expect(String(shipmentAudit[0].changes)).toContain('Pushed to factoring queue on release')
+  })
+
+  it('MANUAL: invoice is Ready to send, nothing is e-mailed', async () => {
+    seedMethod('MANUAL')
+    const out = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { invoice: Row; readyToSend: boolean; factoringItem: Row | null }
+    expect(out.readyToSend).toBe(true)
+    expect(out.factoringItem).toBeNull()
+    expect(table(TABLES.invoice).get(String(out.invoice.id))).toMatchObject({ status: 'ISSUED', sentCount: 0 })
+    expect(table(TABLES.invoice).get(String(out.invoice.id))!.sentAt).toBeUndefined()
+    expect(table(TABLES.factoring).size).toBe(0)
+    expect(sesSend).not.toHaveBeenCalled()
+  })
+
+  it('is idempotent: releasing twice never double-invoices or double-queues', async () => {
+    seedMethod('FACTOR')
+    const first = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { invoice: Row }
+    const again = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { invoice: Row; alreadyReleased: boolean }
+    expect(again.alreadyReleased).toBe(true)
+    expect(again.invoice.id).toBe(first.invoice.id)
+    expect(table(TABLES.invoice).size).toBe(1)
+    expect(table(TABLES.factoring).size).toBe(1)
+    const raced = await Promise.allSettled([
+      call('RELEASE_TO_BILLING', { orderId: ORDER_ID }),
+      call('RELEASE_TO_BILLING', { orderId: ORDER_ID }),
+    ])
+    expect(raced.every((r) => r.status === 'fulfilled')).toBe(true)
+    expect(table(TABLES.invoice).size).toBe(1)
+  })
+
+  it('refuses when the customer has no billing method, before any invoice exists', async () => {
+    seedMethod(null)
+    await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID })).rejects.toThrow(/BILLING_METHOD_UNSET/)
+    expect(table(TABLES.invoice).size).toBe(0)
+  })
+
+  it('refuses a MANUAL customer with no AP e-mail', async () => {
+    seedMethod('MANUAL', { apEmail: null })
+    await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID })).rejects.toThrow(/AP_EMAIL_MISSING/)
+    expect(table(TABLES.invoice).size).toBe(0)
+  })
+
+  it('refuses a carried-over Aljex shipment so history is never re-billed', async () => {
+    seedMethod('MANUAL')
+    table(TABLES.shipment).set(SHIPMENT_ID, { ...table(TABLES.shipment).get(SHIPMENT_ID)!, legacyImported: true })
+    await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID })).rejects.toThrow(/CARRIED_OVER/)
+    expect(table(TABLES.invoice).size).toBe(0)
+  })
+
+  it('over the credit limit warns and audits but does not block', async () => {
+    seedMethod('MANUAL', { creditLimitCents: 100 })
+    const out = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { warnings: string[]; invoice: Row }
+    expect(out.warnings).toEqual(['OVER_CREDIT_LIMIT'])
+    expect(table(TABLES.invoice).size).toBe(1)
+    expect(auditRows('OVER_CREDIT_LIMIT', 'Invoice')).toHaveLength(1)
+  })
+
+  it('a FACTOR customer whose queue push is refused keeps the invoice and finishes on the next release', async () => {
+    seedMethod('FACTOR', { mcNumber: null })
+    await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID })).rejects.toThrow(/could not be pushed to the factoring queue/)
+    expect(table(TABLES.invoice).size).toBe(1)
+    expect(table(TABLES.factoring).size).toBe(0)
+    table(TABLES.customer).set(CUSTOMER_ID, { ...table(TABLES.customer).get(CUSTOMER_ID)!, mcNumber: '123456' })
+    const done = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { alreadyReleased: boolean }
+    expect(done.alreadyReleased).toBe(true)
+    expect(table(TABLES.invoice).size).toBe(1)
+    expect(table(TABLES.factoring).size).toBe(1)
+  })
+})
+
+describe('SEND_INVOICE', () => {
+  it('mails the AP address with the customer copy list plus the company always-copy, de-duplicated', async () => {
+    seedMethod('MANUAL', { invoiceCopyEmails: ['Billing@Acme.test', 'invoices@bcatcorp.com', 'ap@acme.test'] })
+    const released = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { invoice: Row }
+    const invoiceId = String(released.invoice.id)
+    const sent = (await call('SEND_INVOICE', { invoiceId })) as { to: string[]; cc: string[]; emailStatus: string }
+    expect(sent.emailStatus).toBe('SENT')
+    expect(sent.to).toEqual(['ap@acme.test'])
+    expect(sent.cc).toEqual(['billing@acme.test', 'invoices@bcatcorp.com', 'ops@bcatcorp.com'])
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ sentCount: 1, sentTo: 'ap@acme.test' })
+    expect(table(TABLES.invoice).get(invoiceId)!.sentAt).toBeTruthy()
+    expect(auditRows('INVOICE_SENT', 'SHIPMENT')).toHaveLength(1)
+    const notice = [...table(TABLES.notice).values()][0]
+    expect(notice).toMatchObject({ to: 'ap@acme.test', cc: 'billing@acme.test, invoices@bcatcorp.com, ops@bcatcorp.com' })
+  })
+
+  it('never e-mails a FACTOR customer', async () => {
+    seedMethod('FACTOR')
+    const released = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { invoice: Row }
+    await expect(call('SEND_INVOICE', { invoiceId: String(released.invoice.id) })).rejects.toThrow(/FACTOR_NOT_EMAILED/)
+    expect(sesSend).not.toHaveBeenCalled()
+  })
+
+  it('refuses a carried-over invoice on every send path', async () => {
+    seedMethod('MANUAL')
+    const released = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { invoice: Row }
+    const invoiceId = String(released.invoice.id)
+    table(TABLES.invoice).set(invoiceId, { ...table(TABLES.invoice).get(invoiceId)!, markedSentNote: 'Carried over from Aljex (cutoff 2026-11-07)' })
+    await expect(call('SEND_INVOICE', { invoiceId })).rejects.toThrow(/CARRIED_OVER/)
+    await expect(call('EMAIL_INVOICE', { invoiceId })).rejects.toThrow(/carried over/i)
+    await expect(call('SEND_TO_FACTOR', { invoiceId })).rejects.toThrow(/carried over/i)
+  })
+})
+
+describe('billingRelease grant', () => {
+  it.each(['RELEASE_TO_BILLING', 'SEND_INVOICE', 'EMAIL_INVOICE', 'BATCH_EMAIL', 'SEND_TO_FACTOR', 'MARK_SENT', 'SYNC_FACTORING_CHANGE'])(
+    '%s is refused for ADMIN, the owner and invoicing users without the grant',
+    async (action) => {
+      seedMethod('MANUAL')
+      const owner = { sub: 'o', username: 'ryne', claims: { email: 'ryne@bcatcorp.com', 'cognito:groups': ['ADMIN', 'page-invoicing', 'page-tms'] } }
+      for (const identity of [ADMIN_WITH_NO_GRANT, owner, BILLER]) {
+        await expect(call(action, { orderId: ORDER_ID, invoiceId: 'x', proNumber: 'x', changeReason: 'x', changes: {}, invoiceIds: [] }, identity))
+          .rejects.toThrow(/Forbidden: .* requires the page-billingRelease grant/)
+      }
+      expect(table(TABLES.invoice).size).toBe(0)
+    },
+  )
+
+  it('lets a user holding only the grant release', async () => {
+    seedMethod('MANUAL')
+    const onlyGrant = { sub: 'g', username: 'g', claims: { email: 'g@bcatcorp.com', 'cognito:groups': ['page-billingRelease'] } }
+    await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID }, onlyGrant)).resolves.toMatchObject({ billingMethod: 'MANUAL' })
+  })
+})
+
+describe('SYNC_FACTORING_CHANGE', () => {
+  async function released(): Promise<string> {
+    seedMethod('FACTOR')
+    const out = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { invoice: Row }
+    return String(out.invoice.id)
+  }
+
+  it('moves the amount through invoice, order, charge and queue row and audits all of them with the reason', async () => {
+    const invoiceId = await released()
+    const out = (await call('SYNC_FACTORING_CHANGE', {
+      proNumber: 'S000001-1', changeReason: 'Detention added', changes: { invoiceAmountCents: 275_000, poNumber: 'PO-9' },
+    })) as { changed: string[] }
+    expect(out.changed).toEqual(['invoiceAmountCents', 'poNumber'])
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ totalCents: 275_000, subtotalCents: 275_000, balanceCents: 275_000 })
+    expect((table(TABLES.invoice).get(invoiceId)!.lines as Row[])[0].amountCents).toBe(275_000)
+    expect(table(TABLES.order).get(ORDER_ID)).toMatchObject({ revenueCents: 275_000, arBalanceCents: 275_000 })
+    expect(table(TABLES.charge).get('chg-1')!.amountCents).toBe(275_000)
+    expect(table(TABLES.factoring).get('S000001-1')!.otrManualFields).toMatchObject({ InvoiceAmount: '2750.00', PoNumber: 'PO-9' })
+    for (const entityType of ['SHIPMENT', 'Invoice', 'FactoringItem']) {
+      const rows = auditRows('POST_INVOICE_CHANGE', entityType)
+      expect(rows).toHaveLength(1)
+      expect(JSON.parse(String(rows[0].changes))).toMatchObject({ reason: 'Detention added', before: { invoiceAmountCents: 250_000 }, after: { invoiceAmountCents: 275_000 } })
+    }
+  })
+
+  it('needs a reason, and refuses a row already submitted to OTR', async () => {
+    await released()
+    await expect(call('SYNC_FACTORING_CHANGE', { proNumber: 'S000001-1', changes: { invoiceAmountCents: 1 } })).rejects.toThrow(/REASON_REQUIRED/)
+    table(TABLES.factoring).set('S000001-1', { ...table(TABLES.factoring).get('S000001-1')!, otrInvoiceId: '777' })
+    await expect(call('SYNC_FACTORING_CHANGE', { proNumber: 'S000001-1', changeReason: 'x', changes: { invoiceAmountCents: 300_000 } }))
+      .rejects.toThrow(/already submitted to OTR/)
   })
 })

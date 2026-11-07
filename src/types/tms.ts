@@ -199,6 +199,14 @@ export interface CustomerRecord {
    */
   factored?: boolean | null
   billingEmail?: string | null
+  /** Step AW: how this customer is billed. Unset = release to billing is refused. */
+  billingMethod?: 'FACTOR' | 'MANUAL' | null
+  /** The customer's accounts-payable address; required for MANUAL. */
+  apEmail?: string | null
+  /** Per-customer "copy on invoices" list (the company-wide always-copy list is added on send). */
+  invoiceCopyEmails?: string[] | null
+  /** Why the billing row needs a human look; cleared when a person saves the billing fields. */
+  billingNeedsReview?: string | null
   billingContactName?: string | null
   billingPhone?: string | null
   billingAddress?: Address | null
@@ -398,6 +406,12 @@ export interface TmsSettings {
   invoiceNumberFormat?: string | null
   /** Past days leave the appointment queue's working list on their own. See splitPastAppts. */
   autoClearPastAppts?: boolean | null
+  /** Step AW: company-wide copy list added to every manual invoice e-mail (never to factored bills). */
+  invoiceAlwaysCopyEmails?: string[] | null
+  /** Step AW: the Aljex export cutoff (24-month history window is measured back from it). */
+  aljexCutoffAt?: string | null
+  /** Step AW: division key -> sales rep user id. */
+  divisionSalesReps?: Record<string, string> | null
 
   // Org defaults for customer credit controls
   defaultCreditLimitCents?: number | null
@@ -815,7 +829,7 @@ export type AljexEntity =
   | 'BILL'
   | 'AP_PAYMENT'
 
-export type AljexImportKind = 'IMPORT' | 'MCP_SYNC'
+export type AljexImportKind = 'IMPORT' | 'MCP_SYNC' | 'RECONCILE'
 
 export type AljexImportStatus =
   | 'DRY_RUN'
@@ -921,6 +935,8 @@ export interface AljexImportJob {
   /** Attached by IMPORT_GET when the reconcile report exists. */
   summary?: ImportReportSummary | null
   rowCount?: number | null
+  /** RECONCILE jobs: JSON text of `ReconDecision[]` (or `{ spilledTo, keys }` once above the item-size budget). */
+  decisions?: string | Record<string, unknown> | unknown[] | null
   /** Legacy (pre-Phase-0) fields; still present on old rows. */
   mapping?: Record<string, string> | null
   counts?: Record<string, number> | null
@@ -965,7 +981,7 @@ export interface AljexStageSummary {
 
 /** PLAN result: `imports/jobs/<rootJobId>/plan-summary.json`. */
 export interface AljexPlanSummary {
-  classes: { CREATE: number; ENRICH: number; UNLINKED: number; CONFLICT: number }
+  classes: { CREATE: number; ENRICH: number; LINK: number; AMBIGUOUS: number; CONFLICT: number }
   warnings: string[]
   bridge?: ImportBridgeLine[]
 }
@@ -1200,6 +1216,10 @@ export type AljexImportAction =
   | 'IMPORT_RESUME'
   | 'IMPORT_CANCEL'
   | 'IMPORT_RECONCILE'
+  | 'IMPORT_RECONCILE_ENTITY'
+  | 'IMPORT_RECONCILE_GET'
+  | 'IMPORT_DECIDE'
+  | 'IMPORT_SIGNOFF'
   | 'IMPORT_REPORT_LINKS'
   | 'IMPORT_SEED_COUNTER'
   | 'IMPORT_SYNC_CARRIERS'
@@ -3146,6 +3166,8 @@ export interface ArSettings {
   arPostingAdminOnly?: boolean | null
   invoiceBatchEmail?: InvoiceBatchEmailMode | null
   defaultPaymentTermsDays?: number | null
+  invoiceAlwaysCopyEmails?: string[] | null
+  aljexCutoffAt?: string | null
 }
 
 // ── AP: carrier bills & payments (Step G) ────────────────────────────────────

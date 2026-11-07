@@ -25,6 +25,13 @@
  * Dev by default: refuses any AppSync endpoint or Cognito pool but the dev ones, with a throwaway ADMIN
  * identity that is deleted (and re-read to prove it) in `finally`. Idempotent: a second run is a no-op.
  *
+ * SALES REP BY DIVISION (AW-CDE-plan C.5): `--reps --suffix <non-production table suffix>` instead seeds
+ * `TmsSettings.divisionSalesReps` (BROKERAGE = Ryne Bandolik, ASSETS = the non-login "Ivan Cartage" profile `ivan-cartage`,
+ * CAR_SHIPPING and OWNER_OPERATOR = Ruben Vargas, matched by UserProfile name) and creates the `ivan-cartage` UserProfile
+ * (role NONE, status ACTIVE) when absent. Dry run unless --apply; existing map entries are never overwritten; a named person
+ * who is not found (or is ambiguous) FAILS the run (exit 2), nobody is invented. Direct DynamoDB (UserProfile is read-only
+ * to clients); the production suffix is refused outright, there is no production path for this mode.
+ *
  * Production only via `--target prod` (the shared gate in lib/prodGate.mjs; `--outputs <repo-root amplify_outputs.json>`,
  * signs in with BCAT_EMAIL / BCAT_PASSWORD, no identity is minted):
  *   --target prod --i-mean-production, env BCAT_ALLOW_PROD=<today>, fresh prodpre-seedRevDivisions- backups to --apply,
@@ -38,6 +45,8 @@ import { authenticateTmsUser } from './lib/tmsAuth.mjs'
 import { loadAmplifyOutputs } from './lib/tmsConfig.mjs'
 import { PROD_GATE_OPTIONS, requireProd } from './lib/prodGate.mjs'
 import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs'
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
+import { DynamoDBDocumentClient, PutCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 
 const DEV_APPSYNC = APPSYNC_URL_RE
 
@@ -209,6 +218,103 @@ export async function applyPlan(plan, { save, archive }) {
   return done
 }
 
+// ── Sales rep by division (seed values live here, never in app code) ─────────
+
+/** Seed identities. `match` is a normalised UserProfile name; `create` = non-login profile made when absent. */
+export const DIVISION_REP_SEED = {
+  BROKERAGE: { match: 'ryne bandolik' },
+  ASSETS: { id: 'ivan-cartage', name: 'Ivan Cartage', match: 'ivan cartage', create: true },
+  CAR_SHIPPING: { match: 'ruben vargas' },
+  OWNER_OPERATOR: { match: 'ruben vargas' },
+}
+export const REP_SEED_USER = 'migration:seedRevDivisions'
+const PROD_FRAGMENT = '5ucwdyvwivelbo4k4jomvrwel4'
+
+const normName = (s) => (typeof s === 'string' ? s.trim().replace(/\s+/g, ' ').toLowerCase() : '')
+
+/**
+ * Pure plan for `TmsSettings.divisionSalesReps`. `profiles` = UserProfile rows, `settings` = the TmsSettings row (or null).
+ * Returns { createProfile, reps, patch, missing, notes }: `reps` is the final map, `patch` the map to write (null = no change),
+ * `missing` lists divisions whose person could not be resolved uniquely (a non-empty list fails the run).
+ */
+export function planDivisionReps({ profiles, settings, nowIso = new Date().toISOString() }) {
+  let current = settings?.divisionSalesReps ?? {}
+  if (typeof current === 'string') { try { current = JSON.parse(current) } catch { current = {} } }
+  if (!current || typeof current !== 'object' || Array.isArray(current)) current = {}
+  const reps = {}
+  const missing = []
+  const notes = []
+  let createProfile = null
+  for (const [division, seed] of Object.entries(DIVISION_REP_SEED)) {
+    if (typeof current[division] === 'string' && current[division].trim() !== '') {
+      reps[division] = current[division]
+      notes.push(`${division}: keeps its existing rep (never overwritten)`)
+      continue
+    }
+    const hits = profiles.filter((p) => (seed.id && p.id === seed.id) || normName(p.name) === seed.match)
+    if (hits.length === 1) { reps[division] = hits[0].id; continue }
+    if (hits.length > 1) { missing.push({ division, reason: `${hits.length} profiles match "${seed.match}"` }); continue }
+    if (seed.create) {
+      createProfile = {
+        id: seed.id, __typename: 'UserProfile', email: `${seed.id}@no-login.invalid`, name: seed.name, role: 'NONE', status: 'ACTIVE',
+        teamKeys: [], claims: [], extraPages: [], createdBy: REP_SEED_USER, updatedBy: REP_SEED_USER, version: 1, createdAt: nowIso, updatedAt: nowIso,
+      }
+      reps[division] = seed.id
+      continue
+    }
+    missing.push({ division, reason: `no UserProfile named "${seed.match}" in this stack` })
+  }
+  const changed = Object.keys(reps).some((k) => reps[k] !== current[k])
+  return { createProfile, reps, patch: changed && missing.length === 0 ? { ...current, ...reps } : null, missing, notes }
+}
+
+export function describeRepPlan(plan, { apply, suffix }) {
+  const out = [`${apply ? 'APPLY' : 'DRY RUN (nothing written; pass --apply to perform)'} — divisionSalesReps on ${suffix}`]
+  if (plan.createProfile) out.push(`  CREATE UserProfile ${plan.createProfile.id} ("${plan.createProfile.name}", role NONE, ACTIVE, no login)`)
+  for (const [d, id] of Object.entries(plan.reps)) out.push(`  ${d} -> ${id}`)
+  for (const m of plan.missing) out.push(`  MISSING ${m.division}: ${m.reason}`)
+  for (const n of plan.notes) out.push(`  note: ${n}`)
+  if (!plan.patch && plan.missing.length === 0) out.push('  nothing to do')
+  return out.join('\n')
+}
+
+async function scanTable(doc, TableName) {
+  const items = []
+  let ExclusiveStartKey
+  do {
+    const page = await doc.send(new ScanCommand({ TableName, ExclusiveStartKey }))
+    items.push(...(page.Items ?? []))
+    ExclusiveStartKey = page.LastEvaluatedKey
+  } while (ExclusiveStartKey)
+  return items
+}
+
+/** `--reps --suffix <s>`: refuses production, fails loudly when a named person is absent. */
+async function runReps({ suffix, apply }) {
+  if (!suffix || suffix.includes(PROD_FRAGMENT)) throw new Error('--reps needs an explicit non-production --suffix (production is refused)')
+  const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }), { marshallOptions: { removeUndefinedValues: true } })
+  const profileTable = `UserProfile-${suffix}`
+  const settingsTable = `TmsSettings-${suffix}`
+  const profiles = await scanTable(doc, profileTable)
+  const settings = (await scanTable(doc, settingsTable)).find((r) => r.id === 'default') ?? null
+  if (!settings) throw new Error(`${settingsTable} has no 'default' row: refusing to create it`)
+  const plan = planDivisionReps({ profiles, settings })
+  console.log(describeRepPlan(plan, { apply, suffix }))
+  if (plan.missing.length) { process.exitCode = 2; return }
+  if (!apply) return
+  if (plan.createProfile) {
+    await doc.send(new PutCommand({ TableName: profileTable, Item: plan.createProfile, ConditionExpression: 'attribute_not_exists(id)' }))
+  }
+  if (plan.patch) {
+    await doc.send(new UpdateCommand({
+      TableName: settingsTable, Key: { id: 'default' }, ConditionExpression: 'attribute_exists(id)',
+      UpdateExpression: 'SET divisionSalesReps = :m, updatedBy = :by, updatedAt = :at',
+      ExpressionAttributeValues: { ':m': plan.patch, ':by': REP_SEED_USER, ':at': new Date().toISOString() },
+    }))
+  }
+  console.log('applied')
+}
+
 async function listAll(gqlCall, token, field, selection) {
   const items = []
   let next = null
@@ -262,7 +368,11 @@ async function runPlan({ token, api, apply }) {
 }
 
 async function main() {
-  const args = parseArgs({ options: { apply: { type: 'boolean' }, outputs: { type: 'string' }, ...PROD_GATE_OPTIONS }, allowPositionals: false })
+  const args = parseArgs({ options: { apply: { type: 'boolean' }, reps: { type: 'boolean' }, suffix: { type: 'string' }, outputs: { type: 'string' }, ...PROD_GATE_OPTIONS }, allowPositionals: false })
+  if (args.values.reps) {
+    await runReps({ suffix: args.values.suffix, apply: args.values.apply === true })
+    return
+  }
   const prod = await requireProd({ script: 'seedRevDivisions', values: args.values, tables: PROD_WRITE_SETS.seedRevDivisions.models })
   if (prod) {
     // Production (or the rehearsal seam): sign in as BCAT_EMAIL / BCAT_PASSWORD (an ADMIN) on the pool in the outputs

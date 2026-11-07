@@ -27,6 +27,7 @@ import {
 } from './invoices'
 import { createCredit, recordPayment, reversePayment, writeOffInvoice } from './payments'
 import { previewFactor, sendToFactor } from './factor'
+import { releaseToBilling, sendInvoice, syncFactoringChange } from './release'
 import {
   approveBill,
   previewBill,
@@ -61,6 +62,7 @@ import {
 } from './commissions'
 import {
   ADMIN_GROUP,
+  BILLING_RELEASE_PAGE_GROUP,
   CARRIER_PAY_PAGE_GROUP,
   INVOICING_PAGE_GROUP,
   OWNER_EMAIL,
@@ -113,6 +115,9 @@ type Action =
   | 'RENDER_COMMISSION_STATEMENT'
   | 'SAVE_COMMISSION_SETTINGS'
   | 'REPOINT_INVOICED_CUSTOMER'
+  | 'RELEASE_TO_BILLING'
+  | 'SEND_INVOICE'
+  | 'SYNC_FACTORING_CHANGE'
 
 /** The actions that move money and are owner/ADMIN while `arPostingAdminOnly` holds. */
 const POSTING_ACTIONS: Record<string, true> = {
@@ -191,6 +196,21 @@ const COMMISSION_ACTIONS: Record<string, true> = {
   SAVE_COMMISSION_SETTINGS: true,
 }
 
+/**
+ * Step AW: release to billing, sending, queueing for the factor and marking sent are
+ * granted per user (`page-billingRelease`) and to nobody else: no ADMIN, owner or
+ * `page-tms`/`page-invoicing` bypass. Checked before every other rule.
+ */
+const BILLING_RELEASE_ACTIONS: Record<string, true> = {
+  RELEASE_TO_BILLING: true,
+  SEND_INVOICE: true,
+  SYNC_FACTORING_CHANGE: true,
+  EMAIL_INVOICE: true,
+  BATCH_EMAIL: true,
+  SEND_TO_FACTOR: true,
+  MARK_SENT: true,
+}
+
 const COMMISSIONS_PAGE_GROUP = 'page-commissions'
 /** Step R: the one BROKERAGE grant. Invoicing and carrier pay are BROKERAGE pages. */
 const TMS_PAGE_GROUP = 'page-tms'
@@ -209,6 +229,11 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = getGroups(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
+
+  if (BILLING_RELEASE_ACTIONS[action] && !groups.includes(BILLING_RELEASE_PAGE_GROUP)) {
+    throw new Error(`Forbidden: ${action} requires the ${BILLING_RELEASE_PAGE_GROUP} grant`)
+  }
+  if (BILLING_RELEASE_ACTIONS[action]) return { email, sub: identity.sub, groups, isAdmin }
 
   // The commission desk is its own door, decided before the AR/AP page rule:
   // a rep who may see their own commission is not thereby an invoicing user,
@@ -280,6 +305,12 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return reversePayment(input, caller) as unknown as Promise<Row>
     case 'REPOINT_INVOICED_CUSTOMER':
       return repointInvoicedCustomer(input, caller) as unknown as Promise<Row>
+    case 'RELEASE_TO_BILLING':
+      return releaseToBilling(input, caller)
+    case 'SEND_INVOICE':
+      return sendInvoice(input, caller)
+    case 'SYNC_FACTORING_CHANGE':
+      return syncFactoringChange(input, caller)
     case 'PREVIEW_FACTOR':
       return previewFactor(input)
     case 'SEND_TO_FACTOR':

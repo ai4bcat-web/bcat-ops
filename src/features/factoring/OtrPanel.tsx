@@ -32,6 +32,9 @@ import { FactoringDocCell } from './FactoringDocCell'
 import { useAuthUser } from '@/hooks/useAuth'
 import { isReadyToSubmit, whatIsMissing } from './factoringFields'
 import type { FactoringItem } from '@/types'
+import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
+import { syncFactoringChange } from '@/lib/apiClient'
+import { factoringChangesFor } from './factoringSync'
 
 /** Keyboard and format hints per field, so a phone offers the right keys. */
 /*
@@ -82,6 +85,8 @@ interface Props {
 export function OtrPanel({ item, onChanged }: Props) {
   const staffEmail = useAuthUser()?.email ?? 'staff'
   const [busy, setBusy] = useState<string | null>(null)
+  // A field typed on a row that already bills an invoice waits here for its reason (D.4).
+  const [pendingChange, setPendingChange] = useState<{ field: EditableField; label: string; value: string } | null>(null)
 
   const readiness = (item.otrReadiness as OtrReadiness | null) ?? null
   const submitted = Boolean(item.otrInvoiceId)
@@ -287,12 +292,20 @@ export function OtrPanel({ item, onChanged }: Props) {
    * Save one typed field; an empty value clears it. Only that field is sent: merging into
    * the row as this page last loaded it let a second quick save erase the first.
    */
-  const saveField = (field: EditableField, label: string, value: string) =>
-    run(
+  const saveField = (field: EditableField, label: string, value: string) => {
+    // Once an invoice exists the change belongs to the whole system and needs a reason.
+    if (item.invoiceId) {
+      const mapped = factoringChangesFor(field, value)
+      if (!mapped.ok) { toast.error(mapped.error); return Promise.resolve() }
+      setPendingChange({ field, label, value })
+      return Promise.resolve()
+    }
+    return run(
       `field:${field}`,
       () => setOtrField(item.id, field, value),
       value.trim() ? `${label} saved` : `${label} cleared`,
     )
+  }
 
   return (
     <div className="space-y-3 rounded-md border border-[var(--tms-border)] bg-[var(--tms-bg)] p-3">
@@ -482,6 +495,26 @@ export function OtrPanel({ item, onChanged }: Props) {
           </TmsButton>
         )}
       </div>
+      {pendingChange && (
+        <ReasonDialog
+          title={`Change ${pendingChange.label}`}
+          description={`PRO ${item.proNumber} already has an invoice. The change updates the invoice, the shipment and this queue row, and is recorded with who, when and why.`}
+          label="Reason for the change"
+          confirmLabel="Save change"
+          tone="default"
+          busy={busy !== null}
+          onClose={() => setPendingChange(null)}
+          onConfirm={(reason) => {
+            const mapped = factoringChangesFor(pendingChange.field, pendingChange.value)
+            if (!mapped.ok) { toast.error(mapped.error); return }
+            void run(
+              `field:${pendingChange.field}`,
+              () => syncFactoringChange({ proNumber: item.proNumber, changes: mapped.changes, changeReason: reason }),
+              `${pendingChange.label} saved on the invoice, shipment and queue`,
+            ).then(() => setPendingChange(null))
+          }}
+        />
+      )}
     </div>
   )
 }

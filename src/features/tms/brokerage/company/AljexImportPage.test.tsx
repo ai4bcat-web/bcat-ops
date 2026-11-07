@@ -39,7 +39,7 @@ const STAGE_UNMAPPED: AljexStageSummary = {
 const job = (over: Partial<AljexImportJob> = {}): AljexImportJob => ({
   id: 'aljexrun:1', kind: 'IMPORT', status: 'PLANNED', phase: 'PLAN', layoutId: 'aljex-full-486-v1', fileName: 'export.csv',
   createdBy: 'owner@example.invalid', startedAt: '2026-11-03T11:00:00Z', rowCount: 100, stage: STAGE_OK,
-  plan: { classes: { CREATE: 90, ENRICH: 5, UNLINKED: 0, CONFLICT: 0 }, warnings: [] },
+  plan: { classes: { CREATE: 90, ENRICH: 5, LINK: 0, AMBIGUOUS: 0, CONFLICT: 0 }, warnings: [] },
   ...over,
 })
 
@@ -164,5 +164,27 @@ describe('AljexImportPage — Stalled', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open aljexrun:1' }))
     expect(await screen.findByRole('button', { name: /Pause/ })).toBeEnabled()
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+describe('AljexImportPage — sensitive columns', () => {
+  async function pickCsv(header: string) {
+    api.listAljexImports.mockResolvedValue([])
+    render(<AljexImportPage />)
+    const file = new File([`${header}\nrow\n`], 'carriers.csv', { type: 'text/csv' })
+    fireEvent.change(await screen.findByLabelText('Aljex export file'), { target: { files: [file] } })
+  }
+
+  it('refuses to upload a file whose header still has Fed/SS #, Bank Account or Routing #, naming the columns', async () => {
+    await pickCsv('"Vendor Name","Fed/SS #","Bank Account","Routing #","MC #"')
+    expect(await screen.findByTestId('sensitive-refusal')).toHaveTextContent(/Fed\/SS #, Bank Account, Routing #/)
+    expect(screen.getByRole('button', { name: /Upload and stage/ })).toBeDisabled()
+    expect(api.prepareAljexImport).not.toHaveBeenCalled()
+  })
+
+  it('shows no refusal for a clean header', async () => {
+    await pickCsv('"Vendor Name","MC #"')
+    await screen.findByTestId('layout-detection')
+    expect(screen.queryByTestId('sensitive-refusal')).toBeNull()
   })
 })

@@ -208,6 +208,8 @@ const CRUMBS: CrumbRule[] = [
   { path: '/tms/invoicing/payable/bills', prefix: true, crumbs: [ACCOUNTING, AP, { label: 'Bill' }] },
   { path: '/tms/vendors', crumbs: [ACCOUNTING, { label: 'Vendors' }] },
   { path: '/tms/factors', crumbs: [ACCOUNTING, { label: 'Factoring' }] },
+  { path: '/tms/customers/billing-setup', crumbs: [{ label: 'Customers', to: '/tms/customers' }, { label: 'Billing setup' }] },
+  { path: '/tms/brokerage/company/data/aljex-reconciliation', crumbs: [SETTINGS, { label: 'Company', to: '/tms/brokerage/company' }, { label: 'Aljex reconciliation' }] },
   { path: '/tms/brokerage', prefix: true, crumbs: [SETTINGS, { label: 'General & automation' }] },
   // One rule per Settings child, labelled as the sidebar labels it (the root is exact-only).
   ...SETTINGS_CHILDREN.filter((c) => c.to !== '/tms/brokerage').map<CrumbRule>((c) => ({

@@ -8,7 +8,9 @@ import { TmsBadge, TmsButton, TmsCard, TmsDrawer, TmsSelect } from '@/features/t
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { ReleaseGateList } from '@/features/shipments/components/ReleaseGateCard'
 import { releaseGateMessages } from '@/features/shipments/components/releaseGateView'
-import { reviewLoad, readyToInvoice, setSalesRep, setRevTag, type LoadReviewResult } from '@/lib/apiClient'
+import { toast } from 'sonner'
+import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
+import { reviewLoad, readyToInvoice, releaseToBilling, setSalesRep, setRevTag, type LoadReviewResult } from '@/lib/apiClient'
 import { DOCS_LANDING } from '@/features/shipments/workstations/tracking/legacyRoutes'
 import { evaluateLoadReview, failingReasons, reviewAgeDays, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL } from '@/lib/loadReview'
 import { CarrierBillsPanel } from './CarrierBillsPanel'
@@ -24,6 +26,7 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
 }) {
   const { hasPageAccess } = useAuth()
   const canOpen = hasPageAccess('loads') || hasPageAccess('tms')
+  const canRelease = useBillingGrant()
   const { divisions } = useOwnershipDivisions()
   const [result, setResult] = useState<LoadReviewResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -66,6 +69,14 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
     setError(null)
     try {
       await readyToInvoice({ orderId: result.orderId, expectedUpdatedAt: result.orderUpdatedAt, review: { source: 'LOAD_REVIEW' } })
+      // The order is now with accounting; releasing it invoices it (and queues it for the factor, or leaves it Ready to send).
+      try {
+        const released = await releaseToBilling({ orderId: result.orderId, clientRequestId: `${result.orderId}:${result.orderUpdatedAt}` })
+        if (released.warnings.includes('OVER_CREDIT_LIMIT')) toast.warning('This customer is over their credit limit. The invoice was still released.')
+      } catch (err) {
+        await onRefresh()
+        throw new Error(`Moved to accounting, but not invoiced: ${err instanceof Error ? err.message : String(err)} Fix that, then release it from Invoicing.`, { cause: err })
+      }
       await onRefresh()
       onMoved()
     } catch (err) {
@@ -90,7 +101,7 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
   return <TmsDrawer open onOpenChange={(open) => { if (!open) onClose() }} title={shipmentLink('overview', row.number)}
     description={`${row.customerName ?? '—'} · ${row.originCity ?? '—'} → ${row.destinationCity ?? '—'} · Delivered ${formatDateTime(row.deliveredAt)}`}
     headerExtra={<><TmsBadge tone={verdict.ok ? 'green' : 'orange'}>{released ? 'Already released' : verdict.ok ? result ? 'Ready' : 'Looks ready' : `${reasons.length} to fix`}</TmsBadge><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'POD before delivery' : age + ' d'}</TmsBadge></>}
-    footer={<><TmsButton variant="primary" disabled={busy || !result || !verdict.ok || released || !!error} onClick={() => void move()}>Move to billing</TmsButton>{shipmentLink('overview', 'Open shipment')}<TmsButton variant="ghost" onClick={onClose}>Close</TmsButton></>}>
+    footer={<><TmsButton variant="primary" disabled={busy || !result || !verdict.ok || released || !!error || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => void move()}>Move to billing</TmsButton>{!canRelease && <p role="note" className="tms-muted">{BILLING_GRANT_MESSAGE}</p>}{shipmentLink('overview', 'Open shipment')}<TmsButton variant="ghost" onClick={onClose}>Close</TmsButton></>}>
     {!result && !error && <p role="status">Checking release requirements…</p>}
     {error && <ReleaseGateList messages={releaseGateMessages(error) ?? [error]} />}
     {LOAD_REVIEW_CHECKS.map((key) => <TmsCard key={key} title={LOAD_REVIEW_CHECK_LABEL[key]}>

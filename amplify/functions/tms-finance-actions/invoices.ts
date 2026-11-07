@@ -95,6 +95,9 @@ import {
   getById,
   getDivision,
   getSettings,
+  normalizeEmailList,
+  CARRIED_OVER_MESSAGE,
+  isCarriedOver,
   invoicePdfKey,
   nextInvoiceNumber,
   nowIso,
@@ -135,7 +138,7 @@ interface OrderContext {
   gateLoadIds: string[]
 }
 
-async function readOrderContext(orderId: string): Promise<OrderContext> {
+export async function readOrderContext(orderId: string): Promise<OrderContext> {
   const orderRow = await getById(ORDER_TABLE_NAME, orderId)
   if (!orderRow) throw new Error(`Order not found: ${orderId}`)
   const order = orderRow as unknown as OrderRecord
@@ -169,7 +172,10 @@ async function readOrderContext(orderId: string): Promise<OrderContext> {
     loadCarriers: carrierRows as unknown as LoadCarrierRecord[],
     charges: chargeRows as unknown as LoadChargeRecord[],
     documents: documentRows as unknown as ShipmentDocumentRecord[],
-    customer: (customerRow as unknown as CustomerRecord) ?? null,
+    // Step AW: a FACTOR billing method is the factored flag, so the bill prints the factor's remit-to.
+    customer: customerRow
+      ? ({ ...customerRow, ...(customerRow.billingMethod === 'FACTOR' ? { factored: true } : {}) } as unknown as CustomerRecord)
+      : null,
     division,
     settings: settings as unknown as TmsSettings,
     gateLoadIds: gateIds,
@@ -186,7 +192,7 @@ async function readOrderContext(orderId: string): Promise<OrderContext> {
  * Refused before the document gate and before the release gate, and never instead
  * of either — both still run on their own afterwards.
  */
-function assertCustomerResolved(context: OrderContext, what: string): void {
+export function assertCustomerResolved(context: OrderContext, what: string): void {
   if (isCustomerUnresolved(context.order)) {
     throw new Error(unresolvedCustomerMessage(context.order, what))
   }
@@ -612,6 +618,7 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
   if (!row) throw new Error(`Invoice not found: ${invoiceId}`)
   const invoice = row as unknown as InvoiceRecord
   if (invoice.status === 'VOID') throw new Error('That invoice is void; it cannot be sent')
+  if (isCarriedOver(row)) throw new Error(CARRIED_OVER_MESSAGE)
 
   const context = await readOrderContext(invoice.orderId)
   const to = emailList(input.to, 'to').length > 0
@@ -884,6 +891,17 @@ export async function saveArSettings(input: Row, caller: Caller): Promise<Row> {
   if (terms) patch.invoiceTerms = terms
   const adminOnly = optionalBoolean(input.arPostingAdminOnly)
   if (adminOnly != null) patch.arPostingAdminOnly = adminOnly
+  if (input.invoiceAlwaysCopyEmails !== undefined) {
+    patch.invoiceAlwaysCopyEmails = normalizeEmailList(input.invoiceAlwaysCopyEmails, 'invoiceAlwaysCopyEmails')
+  }
+  if (input.aljexCutoffAt !== undefined) {
+    if (input.aljexCutoffAt === null || input.aljexCutoffAt === '') patch.aljexCutoffAt = null
+    else {
+      const raw = assertString(input.aljexCutoffAt, 'aljexCutoffAt')
+      if (Number.isNaN(Date.parse(raw))) throw new Error('aljexCutoffAt must be an ISO date-time')
+      patch.aljexCutoffAt = new Date(raw).toISOString()
+    }
+  }
   const termsDays = optionalInteger(input.defaultPaymentTermsDays, { min: 0, max: 365, label: 'defaultPaymentTermsDays' })
   if (termsDays != null) patch.defaultPaymentTermsDays = termsDays
   if (input.factorRemitTo != null) {

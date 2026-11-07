@@ -57,6 +57,17 @@ describe('IntegrationsIndex', () => {
     expect(screen.getAllByText('QuickBooks Online').length).toBeGreaterThan(0)
   })
 
+  it('shows the Deployment secrets card with names, state and the set command, never a value', async () => {
+    api.listIntegrations.mockResolvedValue([
+      rowFor('GOOGLE_MAPS', { credentialSource: 'STACK', missingCredentials: ['GOOGLE_MAPS_API_KEY'] }),
+    ])
+    draw()
+    const card = await screen.findByTestId('deployment-secrets')
+    await waitFor(() => expect(within(card).getByText('Missing')).toBeInTheDocument())
+    expect(within(card).getByText('npx ampx secret set GOOGLE_MAPS_API_KEY --branch main')).toBeInTheDocument()
+    expect(within(card).getByText('GEOCODE_TOKEN_SECRET')).toBeInTheDocument()
+  })
+
   it('shows the missing-credentials strip with what each provider is waiting for', async () => {
     api.listIntegrations.mockResolvedValue([
       rowFor('DAT', { missingCredentials: ['Service account e-mail', 'Service account password'] }),

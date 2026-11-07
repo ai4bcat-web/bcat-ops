@@ -44,6 +44,25 @@ import type {
   SeedProCounterResult,
 } from '../../../src/types/tms'
 import { legacyAljexColumns } from '../../../src/lib/legacyAljexRow'
+import {
+  ALJEX_SIGNOFF_GROUP,
+  decisionStats,
+  mergeDecisions,
+  pageRows,
+  ReconDecisionError,
+  reconCsv,
+  RECON_ENTITIES,
+  DECISIONS_SPILL_BYTES,
+  type ReconDecision,
+  type ReconDiff,
+  type ReconEntity,
+  type ReconJobSummary,
+  type ReconPage,
+  type ReconReport,
+  type ReconRowState,
+  type ReconSignoff,
+} from '../../../src/lib/aljexReconcile'
+import { buildReconReport } from './reconcileEntity'
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
@@ -61,6 +80,10 @@ export const ACTIONS: AljexImportAction[] = [
   'IMPORT_RESUME',
   'IMPORT_CANCEL',
   'IMPORT_RECONCILE',
+  'IMPORT_RECONCILE_ENTITY',
+  'IMPORT_RECONCILE_GET',
+  'IMPORT_DECIDE',
+  'IMPORT_SIGNOFF',
   'IMPORT_REPORT_LINKS',
   'IMPORT_SEED_COUNTER',
   'IMPORT_SYNC_CARRIERS',
@@ -85,6 +108,11 @@ const ACTIVE_STATUSES: AljexImportStatus[] = ['STAGING', 'PLANNING', 'RUNNING']
 const BLOCKING_UNMAPPED_COLUMNS: ReadonlySet<string> = new Set(['status', 'typeOfShipment', 'stopMarkers'])
 const TAG_PATTERN = /^[a-z0-9]{3,12}$/
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
+/** Only the per-user page grant may decide a difference or sign a report off: no role (ADMIN, owner) stands in for it. */
+const GRANT_ONLY_ACTIONS: ReadonlySet<string> = new Set(['IMPORT_DECIDE', 'IMPORT_SIGNOFF'])
+/** Admins and grant holders may both run and read reconciliations. */
+const RECONCILE_VIEW_ACTIONS: ReadonlySet<string> = new Set(['IMPORT_RECONCILE_ENTITY', 'IMPORT_RECONCILE_GET', 'IMPORT_GET', 'IMPORT_LIST', 'IMPORT_REPORT_LINKS'])
 
 export class RouterError extends Error {}
 
@@ -252,7 +280,8 @@ export async function authorize(identity: AppSyncIdentity | null | undefined, re
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = getGroups(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
-  if (!isAdmin) throw new Error('Forbidden: Aljex import requires owner or ADMIN')
+  // The sign-off grant holder (not an admin) may reach the reconciliation actions; `dispatch` limits what else.
+  if (!isAdmin && !groups.includes(ALJEX_SIGNOFF_GROUP)) throw new Error('Forbidden: Aljex import requires owner or ADMIN')
   return { email, sub: identity.sub, groups, isAdmin }
 }
 
@@ -810,11 +839,263 @@ export function createRouter(deps: RouterDeps): Router {
     return { rows, columns: legacyAljexColumns(rows[0]?.fields) } satisfies LegacyAljexRowResult
   }
 
+
+  // ── reconciliation (Step AW E.2) ─────────────────────────────────────────
+
+  const reconFile = (id: string, name: string): string => `imports/runs/${id}/${name}`
+  const isReconEntity = (v: unknown): v is ReconEntity => RECON_ENTITIES.includes(v as ReconEntity)
+
+  function summarize(job: AljexImportJob): ReconJobSummary {
+    const o = (job.options ?? {}) as Json
+    return {
+      id: job.id,
+      entity: o.entity as ReconEntity,
+      status: job.status,
+      sourceJobId: job.parentJobId ?? '',
+      asOf: typeof o.asOf === 'string' ? o.asOf : null,
+      createdAt: job.createdAt ?? null,
+      createdBy: job.createdBy ?? null,
+      finishedAt: job.finishedAt ?? null,
+      error: job.error ?? null,
+      reportPrefix: job.reportPrefix ?? null,
+      counts: (o.counts as ReconJobSummary['counts']) ?? null,
+      stats: (o.stats as ReconJobSummary['stats']) ?? null,
+      signoff: (o.signoff as ReconSignoff | undefined) ?? null,
+    }
+  }
+
+  async function getReconJob(id: string): Promise<AljexImportJob> {
+    const job = await getJob(id)
+    if (job.kind !== 'RECONCILE') throw new RouterError('That job is not a reconciliation')
+    return job
+  }
+
+  async function reconJobs(): Promise<AljexImportJob[]> {
+    const jobs: AljexImportJob[] = []
+    for await (const page of store.scanAll('aljexImportJob')) {
+      for (const row of page) {
+        const j = normalizeJob(row)
+        if (j?.kind === 'RECONCILE') jobs.push(j)
+      }
+    }
+    return jobs.sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))
+  }
+
+  async function readDecisions(job: AljexImportJob): Promise<ReconDecision[]> {
+    const raw = parseJsonField<unknown>(job.decisions)
+    if (Array.isArray(raw)) return raw as ReconDecision[]
+    if (isObject(raw) && typeof raw.spilledTo === 'string') return (await readJson<ReconDecision[]>(raw.spilledTo)) ?? []
+    return []
+  }
+
+  /** Optimistic write of the decisions (and the cached stats / signoff on the row's options). */
+  async function saveDecisions(job: AljexImportJob, decisions: ReconDecision[], options: Json): Promise<void> {
+    let stored = JSON.stringify(decisions)
+    if (stored.length > DECISIONS_SPILL_BYTES) {
+      const key = reconFile(job.id, 'decisions.json')
+      await deps.putText(key, stored)
+      stored = JSON.stringify({ spilledTo: key, keys: decisions.map((d) => d.key) })
+    }
+    const ok = await store.update('aljexImportJob', job.id, { decisions: stored, options, updatedAt: deps.now() }, {
+      expression: '#u = :u',
+      names: { '#u': 'updatedAt' },
+      values: { ':u': job.updatedAt ?? null },
+    })
+    if (!ok) throw new RouterError('The reconciliation changed while saving; reload and try again')
+  }
+
+  async function cutoffDay(input: Json): Promise<string> {
+    const given = str(input, 'cutoffDate', 10)
+    if (given) {
+      if (!DATE_PATTERN.test(given)) throw new RouterError('cutoffDate must be YYYY-MM-DD')
+      return given
+    }
+    const [settings] = await store.getMany('settings', ['default'])
+    const at = typeof settings?.aljexCutoffAt === 'string' ? settings.aljexCutoffAt : ''
+    if (!at) throw new RouterError('The Aljex cutoff is not set (Settings > Data) and no cutoffDate was given')
+    return new Date(at).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
+  }
+
+  async function reconcileEntityAction(input: Json, caller: Caller): Promise<Json> {
+    const entity = input.entity
+    if (!isReconEntity(entity)) throw new RouterError(`entity must be one of ${RECON_ENTITIES.join(', ')}`)
+    const source = await getJob(requireStr(input, 'sourceJobId'))
+    if (source.kind === 'MCP_SYNC' || source.kind === 'RECONCILE') throw new RouterError('The source must be an import job')
+    const customersJobId = str(input, 'customersJobId')
+    if (customersJobId) await getJob(customersJobId)
+    const cutoffDate = await cutoffDay(input)
+    const asOf = str(input, 'asOf', 10) || cutoffDate
+    if (!DATE_PATTERN.test(asOf)) throw new RouterError('asOf must be YYYY-MM-DD')
+    for (const j of await reconJobs()) {
+      const beat = j.heartbeatAt ? Date.parse(j.heartbeatAt) : 0
+      if (j.status === 'RUNNING' && j.parentJobId === source.id && (j.options as Json | null)?.entity === entity && Date.now() - beat < STALLED_AFTER_MS) {
+        return { job: summarize(j) }
+      }
+    }
+    const id = `aljexrec:${entity}:${newJobId(deps).replace(/^aljexrun:/, '')}`
+    const now = deps.now()
+    const job: AljexImportJob = {
+      id,
+      kind: 'RECONCILE',
+      status: 'RUNNING',
+      phase: 'RECONCILE',
+      parentJobId: source.id,
+      options: { entity, asOf, cutoffDate, ...(customersJobId ? { customersJobId } : {}) } as AljexImportOptions,
+      reportPrefix: `imports/runs/${id}/`,
+      startedAt: now,
+      heartbeatAt: now,
+      createdBy: caller.email,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await store.putJob(job)
+    await audit(caller, id, 'RECONCILE_ENTITY', { entity, sourceJobId: source.id, asOf, cutoffDate })
+    await kickWorker(id, 'RECONCILE_ENTITY')
+    return { job: summarize(job) }
+  }
+
+  async function reconcileEntityWork(jobId: string): Promise<Json> {
+    const job = await getReconJob(jobId)
+    if (job.status !== 'RUNNING') return { done: true, status: job.status }
+    const o = (job.options ?? {}) as Json
+    try {
+      const source = await getJob(job.parentJobId ?? '')
+      const customersJob = typeof o.customersJobId === 'string' ? await getJob(o.customersJobId) : null
+      const report = await buildReconReport(store, { streamText: deps.streamText }, {
+        entity: o.entity as ReconEntity,
+        source,
+        customersJob,
+        asOf: String(o.asOf),
+        cutoffDate: String(o.cutoffDate),
+        generatedAt: deps.now(),
+      })
+      // A fresh run starts from the newest earlier decisions of the same entity and source that still apply.
+      const valid = new Set(report.diffs.map((d) => d.key))
+      let carried: ReconDecision[] = []
+      for (const prev of await reconJobs()) {
+        if (prev.id === job.id || prev.status !== 'APPLIED' || prev.parentJobId !== job.parentJobId || (prev.options as Json | null)?.entity !== o.entity) continue
+        carried = (await readDecisions(prev)).filter((d) => valid.has(d.key))
+        break
+      }
+      await deps.putText(reconFile(job.id, `reconcile-${report.entity.toLowerCase()}.json`), JSON.stringify(report))
+      await deps.putText(reconFile(job.id, `reconcile-${report.entity.toLowerCase()}.csv`), reconCsv(report, carried))
+      const stats = decisionStats(report.diffs, carried)
+      const now = deps.now()
+      const ok = await flip(job, ['RUNNING'], {
+        status: 'APPLIED',
+        finishedAt: now,
+        heartbeatAt: now,
+        decisions: JSON.stringify(carried),
+        options: { ...o, counts: report.counts, stats },
+      })
+      return { done: ok }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[tms-aljex-import] reconcile entity failed:', message)
+      await flip(job, ['RUNNING'], { status: 'FAILED', error: message.slice(0, 1000), finishedAt: deps.now() })
+      return { done: true, status: 'FAILED' }
+    }
+  }
+
+  async function readReconReport(job: AljexImportJob): Promise<ReconReport> {
+    const entity = String((job.options as Json | null)?.entity ?? '').toLowerCase()
+    const report = await readJson<ReconReport>(reconFile(job.id, `reconcile-${entity}.json`))
+    if (!report) throw new RouterError('The report file is missing; run the reconciliation again')
+    return report
+  }
+
+  async function reconcileGet(input: Json): Promise<Json> {
+    const jobId = str(input, 'jobId')
+    if (!jobId) return { jobs: (await reconJobs()).map(summarize) }
+    const job = await getReconJob(jobId)
+    if (job.status !== 'APPLIED') return { job: summarize(job), report: null, total: 0, offset: 0, rows: [] } satisfies ReconPage
+    const report = await readReconReport(job)
+    const decisions = await readDecisions(job)
+    const state = (['OPEN', 'DECIDED', 'ALL'] as const).includes(input.state as ReconRowState) ? (input.state as ReconRowState) : 'ALL'
+    const offset = typeof input.offset === 'number' ? input.offset : 0
+    const page = pageRows(report.diffs, decisions, { kind: str(input, 'kind', 20) || null, state, text: str(input, 'q', 100), offset, limit: typeof input.limit === 'number' ? input.limit : 200 })
+    const { diffs: _omit, ...rest } = report
+    void _omit
+    const out: ReconPage = { job: summarize(job), report: rest, total: page.total, offset, rows: page.rows }
+    const result: Json = { ...out }
+    if (input.exportCsv === true) {
+      const key = reconFile(job.id, `reconcile-${report.entity.toLowerCase()}.csv`)
+      await deps.putText(key, reconCsv(report, decisions))
+      result.csvUrl = await deps.presignGet(key)
+    }
+    return result
+  }
+
+  async function decide(input: Json, caller: Caller): Promise<Json> {
+    const job = await getReconJob(requireStr(input, 'jobId'))
+    if (job.status !== 'APPLIED') throw new RouterError(`The reconciliation is ${job.status}; decide on a finished report`)
+    const o = (job.options ?? {}) as Json
+    if (o.signoff) throw new RouterError('This reconciliation is signed off; run it again to change a decision')
+    const report = await readReconReport(job)
+    const existing = await readDecisions(job)
+    let keys = Array.isArray(input.keys) ? (input.keys as unknown[]).filter((k): k is string => typeof k === 'string') : []
+    if (keys.length > 5000) throw new RouterError('Decide at most 5000 differences at a time')
+    if (keys.length === 0 && isObject(input.filter)) {
+      // Bulk: every still-undecided row matching the filter.
+      const f = input.filter
+      keys = pageRows(report.diffs, existing, { kind: typeof f.kind === 'string' ? f.kind : null, state: 'OPEN', text: typeof f.q === 'string' ? f.q : '', limit: 1000, offset: 0 }).rows.map((r) => r.key)
+      const total = pageRows(report.diffs, existing, { kind: typeof f.kind === 'string' ? f.kind : null, state: 'OPEN', text: typeof f.q === 'string' ? f.q : '' }).total
+      if (total > keys.length) throw new RouterError(`${total} rows match; narrow the filter to at most 1000 or decide by selection`)
+    }
+    let merged: ReconDecision[]
+    try {
+      merged = mergeDecisions(existing, keys, input.outcome as ReconDecision['outcome'], str(input, 'reason', 600), caller.email, deps.now(), new Set(report.diffs.map((d: ReconDiff) => d.key)))
+    } catch (err) {
+      if (err instanceof ReconDecisionError) throw new RouterError(err.message)
+      throw err
+    }
+    const stats = decisionStats(report.diffs, merged)
+    await saveDecisions(job, merged, { ...o, stats })
+    await audit(caller, job.id, 'RECONCILE_DECIDE', { entity: o.entity ?? null, outcome: input.outcome, count: keys.length, reason: str(input, 'reason', 600) })
+    return { job: summarize(await getJob(job.id)), decided: keys.length }
+  }
+
+  async function signoff(input: Json, caller: Caller): Promise<Json> {
+    const job = await getReconJob(requireStr(input, 'jobId'))
+    if (job.status !== 'APPLIED') throw new RouterError(`The reconciliation is ${job.status}; sign off a finished report`)
+    const o = (job.options ?? {}) as Json
+    if (o.signoff) throw new RouterError('This reconciliation is already signed off')
+    const report = await readReconReport(job)
+    const stats = decisionStats(report.diffs, await readDecisions(job))
+    if (stats.undecided > 0) throw new RouterError(`${stats.undecided} difference(s) have no decision yet; set each to Open balance or Approved`)
+    const sign: ReconSignoff = { approver: caller.email, at: deps.now(), note: str(input, 'note', 500) || null, diffs: stats.total, openBalance: stats.openBalance, approved: stats.approved }
+    const ok = await store.update('aljexImportJob', job.id, { options: { ...o, stats, signoff: sign }, updatedAt: deps.now() }, {
+      expression: '#u = :u',
+      names: { '#u': 'updatedAt' },
+      values: { ':u': job.updatedAt ?? null },
+    })
+    if (!ok) throw new RouterError('The reconciliation changed while signing off; reload and try again')
+    await deps.putText(reconFile(job.id, `reconcile-${report.entity.toLowerCase()}.csv`), reconCsv(report, await readDecisions(job)))
+    await audit(caller, job.id, 'RECONCILE_SIGNOFF', { entity: report.entity, ...sign })
+    await markRehearsalReconciled(job.parentJobId)
+    return { job: summarize(await getJob(job.id)) }
+  }
+
+  /** Equality is not required, so the rehearsal gate (`options.reconciled`) follows the sign-off of both ledgers and shipments of the applied run. */
+  async function markRehearsalReconciled(sourceId: string | null | undefined): Promise<void> {
+    if (!sourceId) return
+    const source = normalizeJob((await store.getMany('aljexImportJob', [sourceId]))[0])
+    if (!source || source.kind === 'RECONCILE' || source.status !== 'APPLIED' || source.options?.reconciled === true) return
+    const signed = new Set<string>()
+    for (const j of await reconJobs()) {
+      if (j.parentJobId === sourceId && (j.options as Json | null)?.signoff) signed.add(String((j.options as Json).entity))
+    }
+    if (signed.has('AR') && signed.has('SHIPMENTS')) {
+      await store.update('aljexImportJob', source.id, { options: { ...(source.options ?? {}), reconciled: true }, updatedAt: deps.now() })
+    }
+  }
+
   // ── the worker ───────────────────────────────────────────────────────────
 
   async function work(payload: { kind: string; jobId: string; hops?: number }): Promise<Json> {
     const hops = payload.hops ?? 0
     if (payload.kind === 'MCP_SYNC') return mcpWork(payload.jobId, hops)
+    if (payload.kind === 'RECONCILE_ENTITY') return reconcileEntityWork(payload.jobId)
     if (payload.kind === 'RECONCILE') {
       const job = await getJob(payload.jobId)
       const summary = await deps.reconcile(store, job.id)
@@ -852,6 +1133,12 @@ export function createRouter(deps: RouterDeps): Router {
   }
 
   async function dispatch(action: string, input: Json, caller: Caller): Promise<Json> {
+    const holdsGrant = caller.groups.includes(ALJEX_SIGNOFF_GROUP)
+    if (GRANT_ONLY_ACTIONS.has(action)) {
+      if (!holdsGrant) throw new RouterError('Forbidden: deciding and signing off the reconciliation needs the aljexSignoff grant')
+    } else if (!caller.isAdmin && !(holdsGrant && RECONCILE_VIEW_ACTIONS.has(action))) {
+      throw new RouterError('Forbidden: Aljex import requires owner or ADMIN')
+    }
     switch (action as AljexImportAction) {
       case 'IMPORT_PREPARE': return prepare(input, caller)
       case 'IMPORT_STAGE': return stage(input)
@@ -865,6 +1152,10 @@ export function createRouter(deps: RouterDeps): Router {
       case 'IMPORT_RESUME': return resume(input, caller)
       case 'IMPORT_CANCEL': return cancel(input, caller)
       case 'IMPORT_RECONCILE': return reconcileAction(input)
+      case 'IMPORT_RECONCILE_ENTITY': return reconcileEntityAction(input, caller)
+      case 'IMPORT_RECONCILE_GET': return reconcileGet(input)
+      case 'IMPORT_DECIDE': return decide(input, caller)
+      case 'IMPORT_SIGNOFF': return signoff(input, caller)
       case 'IMPORT_REPORT_LINKS': return reportLinks(input)
       case 'IMPORT_SEED_COUNTER': return seed(input)
       case 'IMPORT_SYNC_CARRIERS': return syncCarriers(input, caller)

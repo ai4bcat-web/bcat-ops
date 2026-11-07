@@ -13,6 +13,7 @@ import type {
   CustomerStatus,
   CheckCallPlan,
 } from '@/types/tms'
+import { parseEmailList, validateBillingFields, type BillingMethod } from '@/lib/billingMethod'
 import type { AutomationPolicyPatch } from '@/lib/trackingAutomation'
 import { DEFAULT_DRIVER_SMS_TARGET, type DriverSmsTarget, type TrackingMethod, type TrackingMode } from '@/lib/trackingPrefs'
 
@@ -127,6 +128,14 @@ export interface CustomerFormValue {
   trackingMode: TrackingMode | ''
   trackingMethod: TrackingMethod | ''
   driverSmsTarget: DriverSmsTarget | ''
+
+  // Step AW stage D — how the customer is billed.
+  billingMethod: BillingMethod | ''
+  apEmail: string
+  /** One address per line or comma separated; the always-copy list is added on send. */
+  invoiceCopyText: string
+  /** Why the import flagged the row; the server clears it when billing fields are saved. */
+  billingNeedsReview: string
 }
 
 const APPT_WORKFLOW_OPTIONS: { value: 'UNSET' | 'NONE' | 'BATORY'; label: string }[] = [
@@ -209,6 +218,11 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     trackingMode: initial ? (initial.trackingMode ?? '') : 'AGENT',
     trackingMethod: initial ? (initial.trackingMethod ?? '') : 'BOTH',
     driverSmsTarget: initial ? (initial.driverSmsTarget ?? '') : DEFAULT_DRIVER_SMS_TARGET,
+
+    billingMethod: initial?.billingMethod ?? '',
+    apEmail: initial?.apEmail ?? '',
+    invoiceCopyText: arrayToLines(initial?.invoiceCopyEmails),
+    billingNeedsReview: initial?.billingNeedsReview ?? '',
   }
 }
 
@@ -346,9 +360,27 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     ...(value.trackingMode ? { trackingMode: value.trackingMode } : {}),
     ...(value.trackingMethod ? { trackingMethod: value.trackingMethod } : {}),
     ...(value.driverSmsTarget ? { driverSmsTarget: value.driverSmsTarget } : {}),
+
+    billingMethod: value.billingMethod || null,
+    apEmail: value.apEmail.trim() || null,
+    invoiceCopyEmails: parseEmailList(value.invoiceCopyText),
+    billingNeedsReview: value.billingNeedsReview.trim() || null,
   })
 
-  const errors = useMemo(() => validateCustomerForm(value), [value])
+  const errors = useMemo(() => {
+    const base = validateCustomerForm(value)
+    // Same rule as the server: billing fields are only checked once they change, so a flagged
+    // imported customer can still be edited for anything else.
+    const apEmail = value.apEmail.trim().toLowerCase()
+    const copy = parseEmailList(value.invoiceCopyText)
+    const changed =
+      (value.billingMethod || null) !== (initial?.billingMethod ?? null) ||
+      (apEmail || null) !== (initial?.apEmail?.trim().toLowerCase() || null) ||
+      copy.join(',') !== (initial?.invoiceCopyEmails ?? []).join(',')
+    return changed
+      ? { ...base, ...validateBillingFields({ billingMethod: value.billingMethod || null, apEmail, invoiceCopyEmails: copy }) }
+      : base
+  }, [value, initial])
   return { value, set, setPartial, toRecord, errors }
 }
 

@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   listCustomers: vi.fn(),
   listShipmentsByNumber: vi.fn(),
   listUserProfiles: vi.fn(),
+  getTmsSettings: vi.fn(),
+  saveTmsSettings: vi.fn(),
   saveOwnershipDivision: vi.fn(),
   archiveOwnershipDivision: vi.fn(),
   saveOwnershipRules: vi.fn(),
@@ -80,6 +82,8 @@ beforeEach(() => {
   mocks.listCustomers.mockResolvedValue([{ id: 'cu1', name: 'Acme Foods' }])
   mocks.listShipmentsByNumber.mockResolvedValue([])
   mocks.listUserProfiles.mockResolvedValue([])
+  mocks.getTmsSettings.mockResolvedValue({ id: 'default', updatedAt: 't1', divisionSalesReps: { BROKERAGE: 'u1' } })
+  mocks.saveTmsSettings.mockResolvedValue({ id: 'default', updatedAt: 't2' })
 })
 
 const ready = async () => {
@@ -351,6 +355,22 @@ describe('DivisionsPage', () => {
 
     await waitFor(() => expect(mocks.ensureOwnershipSeed).toHaveBeenCalled())
     expect(await screen.findByText('Created 7 divisions, 7 rules and 10 views.')).toBeInTheDocument()
+  })
+
+  it('picks the sales rep per division and saves the whole map', async () => {
+    mocks.listUserProfiles.mockResolvedValue([
+      { id: 'u1', email: 'a@example.invalid', name: 'Pat One', status: 'ACTIVE' },
+      { id: 'u2', email: 'b@example.invalid', name: 'Sam Two', status: 'ACTIVE' },
+    ])
+    render(<DivisionsPage />)
+    await ready()
+
+    const assets = await screen.findByLabelText('Sales rep for Ivan Cartage')
+    await waitFor(() => expect(screen.getByLabelText('Sales rep for BCAT Logistics')).toHaveValue('u1'))
+    fireEvent.change(assets, { target: { value: 'u2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save reps' }))
+
+    await waitFor(() => expect(mocks.saveTmsSettings).toHaveBeenCalledWith({ divisionSalesReps: { BROKERAGE: 'u1', ASSETS: 'u2' } }, 't1'))
   })
 
   it('tells a signed-in user who is neither owner nor ADMIN to ask one of them', async () => {

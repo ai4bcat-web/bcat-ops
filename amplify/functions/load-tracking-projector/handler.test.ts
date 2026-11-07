@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
+import { marshall } from '@aws-sdk/util-dynamodb'
 import type { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import {
   buildDriverRoster,
@@ -12,130 +12,7 @@ import {
   type StreamEvent,
 } from './handler'
 import type { Row } from '../_shared/shipmentStore'
-
-/**
- * The projector talks to DynamoDB and nothing else, so the fake is the table set:
- * every read the shipment store does is served from it and every write is recorded,
- * which is what lets a test say "this record wrote nothing at all".
- */
-const TABLES = {
-  shipment: 'Shipment-test',
-  order: 'Order-test',
-  load: 'Load-test',
-  loadCarrier: 'LoadCarrier-test',
-  loadFinancials: 'LoadFinancials-test',
-  loadCharge: 'LoadCharge-test',
-  // The projector has no ShipmentDocument grant, so a bundle it reads has no documents.
-  shipmentDocument: '',
-}
-const CHECK_CALL_TABLE = 'LoadCheckCall-test'
-const DRIVER_TABLE = 'Driver-test'
-const NOW = '2026-10-28T12:00:00.000Z'
-
-interface Write { op: 'put' | 'update'; table: string; id: string }
-
-function conditionFailed(): Error {
-  const err = new Error('ConditionalCheckFailedException: the conditional request failed')
-  err.name = 'ConditionalCheckFailedException'
-  return err
-}
-
-class FakeDynamo {
-  readonly rows = new Map<string, Map<string, Row>>()
-  readonly writes: Write[] = []
-  scans = 0
-
-  table(name: string): Map<string, Row> {
-    let t = this.rows.get(name)
-    if (!t) { t = new Map(); this.rows.set(name, t) }
-    return t
-  }
-
-  seed(name: string, ...rows: Row[]): void {
-    for (const row of rows) this.table(name).set(String(row.id), row)
-  }
-
-  get(name: string, id: string): Row | undefined {
-    return this.table(name).get(id)
-  }
-
-  async send(command: { constructor: { name: string }; input: Record<string, unknown> }): Promise<unknown> {
-    const input = command.input
-    const name = command.constructor.name
-    const tableName = String(input.TableName ?? '')
-    switch (name) {
-      case 'GetItemCommand': {
-        const key = unmarshall(input.Key as Record<string, never>)
-        const row = this.get(tableName, String(key.id))
-        return { Item: row ? marshall(row, { removeUndefinedValues: true }) : undefined }
-      }
-      case 'QueryCommand': {
-        const values = unmarshall(input.ExpressionAttributeValues as Record<string, never>)
-        const names = (input.ExpressionAttributeNames ?? {}) as Record<string, string>
-        const key = names['#k'] ?? 'shipmentId'
-        const items = [...this.table(tableName).values()].filter((r) => r[key] === values[':v'])
-        return { Items: items.map((r) => marshall(r, { removeUndefinedValues: true })) }
-      }
-      case 'BatchGetItemCommand': {
-        const requested = input.RequestItems as Record<string, { Keys: Record<string, never>[] }>
-        const Responses: Record<string, unknown[]> = {}
-        for (const [table, spec] of Object.entries(requested)) {
-          Responses[table] = spec.Keys
-            .map((k) => this.get(table, String(unmarshall(k).id)))
-            .filter((r): r is Row => !!r)
-            .map((r) => marshall(r, { removeUndefinedValues: true }))
-        }
-        return { Responses }
-      }
-      case 'ScanCommand': {
-        this.scans += 1
-        return { Items: [...this.table(tableName).values()].map((r) => marshall(r, { removeUndefinedValues: true })) }
-      }
-      case 'PutItemCommand': {
-        const item = unmarshall(input.Item as Record<string, never>)
-        const id = String(item.id)
-        if (String(input.ConditionExpression ?? '').includes('attribute_not_exists(id)') && this.table(tableName).has(id)) {
-          throw conditionFailed()
-        }
-        this.table(tableName).set(id, item)
-        this.writes.push({ op: 'put', table: tableName, id })
-        return {}
-      }
-      case 'UpdateItemCommand':
-        this.applyUpdate(input)
-        return {}
-      case 'TransactWriteItemsCommand': {
-        for (const entry of (input.TransactItems ?? []) as Array<{ Update?: Record<string, unknown> }>) {
-          if (entry.Update) this.applyUpdate(entry.Update)
-        }
-        return {}
-      }
-      default:
-        throw new Error(`FakeDynamo: unexpected ${name}`)
-    }
-  }
-
-  /** Only the `SET #k = :k` shape the projector and the shipment store build. */
-  private applyUpdate(input: Record<string, unknown>): void {
-    const tableName = String(input.TableName ?? '')
-    const id = String(unmarshall(input.Key as Record<string, never>).id)
-    const row = this.get(tableName, id) ?? { id }
-    const names = (input.ExpressionAttributeNames ?? {}) as Record<string, string>
-    const values = unmarshall(input.ExpressionAttributeValues as Record<string, never>)
-    const condition = String(input.ConditionExpression ?? '')
-    if (condition.includes(':expectedUpdatedAt') && row.updatedAt !== values[':expectedUpdatedAt']) {
-      throw conditionFailed()
-    }
-    if (condition.includes('attribute_not_exists(updatedAt)') && row.updatedAt !== undefined) {
-      throw conditionFailed()
-    }
-    for (const [, nameRef, valueRef] of String(input.UpdateExpression ?? '').matchAll(/(#\w+) = (:\w+)/g)) {
-      row[names[nameRef] ?? nameRef.slice(1)] = values[valueRef]
-    }
-    this.table(tableName).set(id, row)
-    this.writes.push({ op: 'update', table: tableName, id })
-  }
-}
+import { CHECK_CALL_TABLE, DRIVER_TABLE, FakeDynamo, NOW, TABLES } from './fakeTables'
 
 type Stop = {
   id: string
@@ -227,7 +104,7 @@ describe('projectLoadStream', () => {
     db.seed(TABLES.load, pickedUp())
     const summary = await projectLoadStream(stamp(loadRow(), pickedUp()), deps)
 
-    expect(summary).toEqual({ records: 1, considered: 1, events: 2, skipped: 0, statusWrites: 1, conflicts: 0 })
+    expect(summary).toEqual({ records: 1, considered: 1, events: 2, skipped: 0, statusWrites: 1, conflicts: 0, mirrored: 0 })
     expect(db.get(CHECK_CALL_TABLE, 'evt:load-1:st-1:ARRIVED')).toMatchObject({
       loadId: 'load-1', shipmentId: 'ship-1', loadCarrierId: 'lc-1', stopId: 'st-1',
       type: 'ARRIVED', source: 'SYSTEM', at: '2026-10-28T09:00:00Z',
@@ -264,7 +141,7 @@ describe('projectLoadStream', () => {
     const after = pickedUp({ shipmentId: undefined, status: undefined })
     const summary = await projectLoadStream(stamp(before, after), deps)
 
-    expect(summary).toEqual({ records: 1, considered: 0, events: 0, skipped: 0, statusWrites: 0, conflicts: 0 })
+    expect(summary).toEqual({ records: 1, considered: 0, events: 0, skipped: 0, statusWrites: 0, conflicts: 0, mirrored: 0 })
     expect(db.writes).toEqual([])
   })
 
@@ -317,8 +194,138 @@ describe('projectLoadStream', () => {
 
     // The projector's own write: same stops, new status and lastKnown* columns.
     const summary = await projectLoadStream(stamp(pickedUp(), own as Row), deps)
-    expect(summary).toEqual({ records: 1, considered: 0, events: 0, skipped: 0, statusWrites: 0, conflicts: 0 })
+    expect(summary).toEqual({ records: 1, considered: 0, events: 0, skipped: 0, statusWrites: 0, conflicts: 0, mirrored: 0 })
     expect(db.writes).toEqual([])
+  })
+})
+
+describe('mirroring the driver app onto the shipment', () => {
+  const withTrailer = (over: Row = {}) => loadRow({ trailerNumber: '5302', updatedBy: 'Lee@bcatcorp.com', ...over })
+  const order = (db: FakeDynamo) => db.get(TABLES.order, 'order-1') as Row
+  const refs = (db: FakeDynamo) => (order(db).references ?? []) as Array<{ code: string; value: string }>
+
+  it('shows the trailer the driver picked as a reference on the shipment order, and in its search key', async () => {
+    const { db, deps } = setup()
+    db.seed(TABLES.load, withTrailer())
+    const summary = await projectLoadStream(stamp(loadRow(), withTrailer()), deps)
+
+    expect(summary).toMatchObject({ considered: 1, mirrored: 1, events: 0, statusWrites: 0 })
+    expect(refs(db)).toEqual([expect.objectContaining({ code: 'TRAILER_NUMBER', value: '5302', level: 'ORDER', visibility: 'INTERNAL' })])
+    expect(db.get(TABLES.shipment, 'ship-1')).toMatchObject({ status: 'DISPATCHED', version: 4 })
+    expect(String(db.get(TABLES.shipment, 'ship-1')?.searchKey)).toContain('5302')
+    // No stop event, no status move: the check-call table and the Load stay untouched.
+    expect(db.writes.map((w) => w.table).sort()).toEqual([TABLES.order, TABLES.shipment].sort())
+  })
+
+  it('mirrors the paperwork place whether the stream carries a map or a JSON string, but not a bare in-hand answer', async () => {
+    for (const stored of [
+      { kind: 'TRAILER', unit: '5302', at: NOW },
+      JSON.stringify({ kind: 'TRAILER', unit: '5302', at: NOW }),
+    ]) {
+      const { db, deps } = setup()
+      const after = loadRow({ paperworkLocation: stored })
+      await projectLoadStream(stamp(loadRow(), after), deps)
+      expect(refs(db)).toEqual([expect.objectContaining({ code: 'PAPERWORK_LOCATION', value: 'In trailer 5302' })])
+    }
+
+    const { db, deps } = setup()
+    const after = loadRow({ paperworkLocation: { kind: 'UNKNOWN', unit: null, at: NOW, inHandAt: NOW } })
+    const summary = await projectLoadStream(stamp(loadRow(), after), deps)
+    expect(summary).toMatchObject({ considered: 0, mirrored: 0 })
+    expect(db.writes).toEqual([])
+  })
+
+  it('is idempotent: replaying the same record, or one that changes nothing the order shows, writes nothing', async () => {
+    const { db, deps } = setup()
+    db.seed(TABLES.load, withTrailer())
+    await projectLoadStream(stamp(loadRow(), withTrailer()), deps)
+    db.writes.length = 0
+
+    const replay = await projectLoadStream(stamp(loadRow(), withTrailer()), deps)
+    expect(replay).toMatchObject({ considered: 1, mirrored: 0 })
+    expect(db.writes).toEqual([])
+  })
+
+  it('replaces the trailer on a change and removes it when the driver clears it, leaving staff references alone', async () => {
+    const { db, deps } = setup()
+    db.seed(TABLES.order, {
+      __typename: 'Order', id: 'order-1', shipmentId: 'ship-1',
+      references: [{ code: 'PO', label: 'PO', value: 'PO-77', level: 'ORDER', visibility: 'ALL' }],
+    })
+    await projectLoadStream(stamp(loadRow(), withTrailer()), deps)
+    await projectLoadStream(stamp(withTrailer(), withTrailer({ trailerNumber: '6001' })), deps)
+    expect(refs(db).map((r) => `${r.code}=${r.value}`).sort()).toEqual(['PO=PO-77', 'TRAILER_NUMBER=6001'])
+
+    await projectLoadStream(stamp(withTrailer({ trailerNumber: '6001' }), withTrailer({ trailerNumber: '' })), deps)
+    expect(refs(db).map((r) => `${r.code}=${r.value}`)).toEqual(['PO=PO-77'])
+  })
+
+  it('ignores the link UpdateItem and any edit that changes neither stops, trailer nor paperwork place', async () => {
+    const { db, deps } = setup()
+    // C.2 step 4: the link writes shipmentId, orderId, loadNumber and leg onto a Load that had none.
+    const bare = loadRow({ shipmentId: undefined, orderId: undefined, loadNumber: undefined, leg: undefined })
+    const linked = await projectLoadStream(stamp(bare, loadRow()), deps)
+    expect(linked).toEqual({ records: 1, considered: 0, events: 0, skipped: 0, statusWrites: 0, conflicts: 0, mirrored: 0 })
+
+    // A rate edit, a staff note, a re-sort: still nothing for the shipment to learn.
+    const edited = await projectLoadStream(stamp(loadRow(), loadRow({ sortOrder: 3, daySlot: 'AM', updatedBy: 'ryne@bcatcorp.com' })), deps)
+    expect(edited.considered).toBe(0)
+    // INSERT and REMOVE carry no change either.
+    const insert = await projectLoadStream({ Records: [{ eventName: 'INSERT', dynamodb: { NewImage: marshall(withTrailer()) } }] }, deps)
+    expect(insert.considered).toBe(0)
+    expect(db.writes).toEqual([])
+  })
+
+  it('never writes a voided shipment or its order, but still logs the stop events and moves the load', async () => {
+    const { db, deps } = setup()
+    db.seed(TABLES.shipment, { __typename: 'Shipment', id: 'ship-1', number: 'S-1001', status: 'DISPATCHED', version: 3, voidedAt: '2026-10-27T00:00:00.000Z' })
+    const after = pickedUp({ trailerNumber: '5302' })
+    db.seed(TABLES.load, after)
+    const summary = await projectLoadStream(stamp(loadRow(), after), deps)
+
+    expect(summary).toMatchObject({ events: 2, statusWrites: 1, mirrored: 0 })
+    expect(db.writes.some((w) => w.table === TABLES.shipment || w.table === TABLES.order)).toBe(false)
+    expect(db.get(TABLES.load, 'load-1')).toMatchObject({ status: 'IN_TRANSIT' })
+  })
+
+  it('carries a driver delivery up to the shipment as DELIVERED with deliveredAt, once', async () => {
+    const delivered = (over: Row = {}) => loadRow({
+      status: 'OUT_FOR_DELIVERY',
+      stops: stops(
+        { id: 'st-1', type: 'pickup', sequence: 0, city: 'JOLIET, IL', arrivedAt: '2026-10-28T09:00:00Z', departedAt: '2026-10-28T10:30:00Z' },
+        { id: 'st-2', type: 'delivery', sequence: 1, city: 'MESA, AZ', arrivedAt: '2026-10-29T08:00:00Z', departedAt: '2026-10-29T09:15:00Z' },
+      ),
+      ...over,
+    })
+    const before = delivered({
+      stops: stops(
+        { id: 'st-1', type: 'pickup', sequence: 0, city: 'JOLIET, IL', arrivedAt: '2026-10-28T09:00:00Z', departedAt: '2026-10-28T10:30:00Z' },
+        { id: 'st-2', type: 'delivery', sequence: 1, city: 'MESA, AZ', arrivedAt: '2026-10-29T08:00:00Z' },
+      ),
+    })
+    const { db, deps } = setup()
+    db.seed(TABLES.shipment, { __typename: 'Shipment', id: 'ship-1', number: 'S-1001', status: 'OUT_FOR_DELIVERY', version: 3 })
+    db.seed(TABLES.load, delivered())
+    await projectLoadStream(stamp(before, delivered()), deps)
+
+    expect(db.get(TABLES.load, 'load-1')).toMatchObject({ status: 'DELIVERED', deliveredAt: '2026-10-29T09:15:00Z' })
+    expect(db.get(TABLES.shipment, 'ship-1')).toMatchObject({ status: 'DELIVERED', deliveredAt: '2026-10-29T09:15:00Z' })
+  })
+
+  it('leaves a deliveredAt the shipment notifier stamped first', async () => {
+    const delivered = loadRow({
+      status: 'OUT_FOR_DELIVERY',
+      stops: stops({ id: 'st-2', type: 'delivery', sequence: 1, city: 'MESA, AZ', arrivedAt: '2026-10-29T08:00:00Z', departedAt: '2026-10-29T09:15:00Z' }),
+    })
+    const before = loadRow({
+      status: 'OUT_FOR_DELIVERY',
+      stops: stops({ id: 'st-2', type: 'delivery', sequence: 1, city: 'MESA, AZ', arrivedAt: '2026-10-29T08:00:00Z' }),
+    })
+    const { db, deps } = setup()
+    db.seed(TABLES.shipment, { __typename: 'Shipment', id: 'ship-1', number: 'S-1001', status: 'OUT_FOR_DELIVERY', version: 3, deliveredAt: '2026-10-29T09:20:00.000Z' })
+    db.seed(TABLES.load, delivered)
+    await projectLoadStream(stamp(before, delivered), deps)
+    expect(db.get(TABLES.shipment, 'ship-1')).toMatchObject({ status: 'DELIVERED', deliveredAt: '2026-10-29T09:20:00.000Z' })
   })
 })
 

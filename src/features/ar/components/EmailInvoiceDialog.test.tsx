@@ -31,6 +31,7 @@ vi.mock('@/lib/apiClient', () => ({
   emailInvoice,
   graphqlErrorText: (err: unknown) => (err instanceof Error ? err.message : 'failed'),
 }))
+vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ userId: 'u', email: 'jenny@bcatcorp.com', groups: ['page-billingRelease'] }) }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }))
 
 const INVOICE: InvoiceRecord = {

@@ -14,6 +14,8 @@ import { useEffect, useState } from 'react'
 import { listAuditLogsFor } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import { TmsCard, TmsTimeline } from '@/features/tms/kit'
+import { ChangeTimeline } from '@/components/ChangeTimeline'
+import { entitiesWithSpellings } from '@/components/changeTimelineModel'
 import type { AuditLogEntry } from '@/types'
 import type { ShipmentBundle } from '@/types/tms'
 import { auditEntitiesFor } from '../auditEntities'
@@ -56,7 +58,15 @@ export function HistorySection({ bundle }: { bundle: ShipmentBundle }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ids])
 
+  const invoiceIds = bundle.orders.map((o) => o.invoiceId).filter((id): id is string => Boolean(id))
   return (
+    <>
+    {invoiceIds.length > 0 && (
+      <ChangeTimeline
+        entities={[...auditEntitiesFor(bundle), ...entitiesWithSpellings(['Invoice', 'INVOICE'], invoiceIds)]}
+        refreshKey={bundle.shipment.updatedAt}
+      />
+    )}
     <TmsCard title="History">
       {error && <p className="text-sm text-[color:var(--tms-badge-red)]">{error}</p>}
       {!error && rows === null && <p className="tms-muted text-sm">Reading the audit log…</p>}
@@ -81,6 +91,7 @@ export function HistorySection({ bundle }: { bundle: ShipmentBundle }) {
         />
       )}
     </TmsCard>
+    </>
   )
 }
 

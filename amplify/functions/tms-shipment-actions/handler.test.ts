@@ -2340,6 +2340,25 @@ describe('RESOLVE_REV_TAG', () => {
   })
 })
 
+describe('applyTag sales rep from the division map', () => {
+  it('fills a missing rep from TmsSettings.divisionSalesReps and never overwrites a set one', async () => {
+    seedCustomer({ id: 'auto-shipper-id-resolved-at-seed', name: 'Auto Shipper', status: 'ACTIVE', active: true, creditLimitCents: 10_000_00 })
+    table(TABLES.settings).set('default', {
+      ...(table(TABLES.settings).get('default') ?? { id: 'default' }),
+      divisionSalesReps: { CAR_SHIPPING: 'rep-car', BROKERAGE: 'rep-brk' },
+    })
+    const made = (await call('CREATE_SHIPMENT', { customerId: 'auto-shipper-id-resolved-at-seed' }, ADMIN)) as { shipment: Row }
+    const shipmentId = String(made.shipment.id)
+    await saveForm(shipmentId)
+    expect(table(TABLES.shipment).get(shipmentId)!).toMatchObject({ revDivision: 'CAR_SHIPPING', salesRepId: 'rep-car' })
+
+    // Moving to a brokerage customer re-resolves the division but the rep already set stays.
+    table(TABLES.shipment).set(shipmentId, { ...table(TABLES.shipment).get(shipmentId)!, customerId: 'cus-1', customerName: 'BATORY FOODS' })
+    await call('RESOLVE_REV_TAG', { shipmentId }, ADMIN)
+    expect(table(TABLES.shipment).get(shipmentId)!).toMatchObject({ revDivision: 'BROKERAGE', salesRepId: 'rep-car' })
+  })
+})
+
 // ── Stops ────────────────────────────────────────────────────────────────────
 
 describe('UPDATE_STOP', () => {
@@ -7797,16 +7816,42 @@ describe('Step AH — UPDATE_ORDER_DETAILS', () => {
     ).rejects.toThrow(/changed by someone else/)
   })
 
-  it('locks references after invoicing and miles/weight once frozen', async () => {
-    const { shipmentId, orderId, loadId } = await openShipment()
+  it('keeps miles/weight locked once frozen without an invoice, and lets a note edit through', async () => {
+    const { shipmentId, loadId } = await openShipment()
     const financials = table(TABLES.financials).get(loadId)!
     table(TABLES.financials).set(loadId, { ...financials, frozenAt: '2026-03-10T00:00:00.000Z' })
     await expect(update(shipmentId, { loadFields: { miles: 900 } })).rejects.toThrow(/frozen/)
     // Resending the value it already has is not a change.
     await update(shipmentId, { loadFields: { miles: 500, notes: 'same miles' } })
-    table(TABLES.order).set(orderId, { ...table(TABLES.order).get(orderId)!, invoiceId: 'inv-1' })
-    await expect(update(shipmentId, { order: { references: [] } })).rejects.toThrow(/invoice/)
     await update(shipmentId, { order: { internalNotes: 'still editable' } })
+  })
+
+  it('post-invoice: refuses without a reason, then allows the change and audits it on shipment, order and invoice', async () => {
+    const { shipmentId, orderId, loadId } = await openShipment()
+    table(TABLES.financials).set(loadId, { ...table(TABLES.financials).get(loadId)!, frozenAt: '2026-03-10T00:00:00.000Z' })
+    table(TABLES.order).set(orderId, { ...table(TABLES.order).get(orderId)!, invoiceId: 'inv-1', invoiceNumber: '20001', arStatus: 'UNPAID' })
+    const auditsBefore = table(TABLES.audit).size
+    await expect(update(shipmentId, { order: { references: [] } })).rejects.toThrow(/REASON_REQUIRED/)
+    await expect(update(shipmentId, { order: { references: [] }, changeReason: '  no ' })).rejects.toThrow(/REASON_REQUIRED/)
+    expect(table(TABLES.audit).size).toBe(auditsBefore)
+    await update(shipmentId, { order: { internalNotes: 'corrected' }, changeReason: 'Customer asked for a note fix' })
+    expect(table(TABLES.order).get(orderId)!.internalNotes).toBe('corrected')
+    const entries = [...table(TABLES.audit).values()].filter((r) => r.action === 'POST_INVOICE_CHANGE')
+    expect(entries.map((r) => `${r.entityType}:${r.entityId}`).sort()).toEqual([`Invoice:inv-1`, `ORDER:${orderId}`, `SHIPMENT:${shipmentId}`].sort())
+    const body = JSON.parse(String(entries[0]!.changes))
+    expect(body).toMatchObject({ reason: 'Customer asked for a note fix', sourceAction: 'UPDATE_ORDER_DETAILS', invoiceId: 'inv-1' })
+    expect(body.after.order.internalNotes).toBe('corrected')
+    expect(entries[0]!.user).toBeTruthy()
+  })
+
+  it('post-invoice: a reason also steps the frozen-financials guard aside, and the wire cannot forge the bypass', async () => {
+    const { shipmentId, orderId, loadId } = await openShipment()
+    table(TABLES.financials).set(loadId, { ...table(TABLES.financials).get(loadId)!, frozenAt: '2026-03-10T00:00:00.000Z' })
+    // frozen but not invoiced: the forged flag is stripped and the lock still holds
+    await expect(update(shipmentId, { loadFields: { miles: 900 }, postInvoiceChange: true })).rejects.toThrow(/frozen/)
+    table(TABLES.order).set(orderId, { ...table(TABLES.order).get(orderId)!, invoiceId: 'inv-1', arStatus: 'PAID' })
+    await update(shipmentId, { loadFields: { miles: 900 }, changeReason: 'Miles were wrong on the BOL' })
+    expect(table(TABLES.load).get(loadId)!.miles).toBe(900)
   })
 
   it('writes extras and notes, refreshes the search key, and audits key names only', async () => {

@@ -36,6 +36,8 @@ vi.mock('@/features/tms/settings/SpotQuoterSettingsPage', () => ({ SpotQuoterSet
 vi.mock('@/features/tms/settings/CarrierSalesSettingsPage', () => ({ CarrierSalesSettingsPage: () => <p>carrier sales body</p> }))
 vi.mock('./company/CompanyTab', () => ({ default: () => <p>company body</p>, CompanyTab: () => <p>company body</p> }))
 
+vi.mock('./company/AljexReconciliationPage', () => ({ AljexReconciliationPage: () => <p>reconciliation body</p> }))
+
 import { BrokeragePage } from './BrokeragePage'
 
 function draw(at = '/tms/brokerage') {
@@ -156,5 +158,32 @@ describe('BrokeragePage', () => {
 
     expect(screen.getByText('divisions body')).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Divisions & ownership' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('lets the aljexSignoff grant open only the reconciliation route, and nothing else under Company', () => {
+    auth.grants = ['aljexSignoff']
+    const recon = draw('/tms/brokerage/company/data/aljex-reconciliation')
+    expect(screen.getByText('reconciliation body')).toBeInTheDocument()
+    expect(screen.queryByText('company body')).toBeNull()
+    recon.unmount()
+
+    draw('/tms/brokerage/company/billing')
+    expect(screen.queryByText('company body')).toBeNull()
+    expect(screen.queryByText('reconciliation body')).toBeNull()
+  })
+
+  it('sends a user without the grant away from the reconciliation route', () => {
+    auth.grants = ['tms']
+    draw('/tms/brokerage/company/data/aljex-reconciliation')
+
+    expect(screen.queryByText('reconciliation body')).toBeNull()
+    expect(screen.queryByText('company body')).toBeNull()
+  })
+
+  it('shows an admin the reconciliation route inside the Company tab', () => {
+    auth.isAdmin = true
+    draw('/tms/brokerage/company/data/aljex-reconciliation')
+
+    expect(screen.getByText('company body')).toBeInTheDocument()
   })
 })

@@ -14,6 +14,7 @@ import { addMonths, derivedWindow, isPlausibleDate, type DateWindow } from '../.
 import { detectLayout, UnknownLayoutError, type AljexLayout } from '../../../../src/lib/aljex/layout'
 import { mapAljexRow } from '../../../../src/lib/aljex/mapRow'
 import { findUnmapped, type DistinctValues } from '../../../../src/lib/aljex/profile'
+import { findSensitiveHeaders, SENSITIVE_COLUMNS_MESSAGE } from '../../../../src/lib/aljex/sensitiveColumns'
 import { rowFacts } from './facts'
 import { resolveStagedMemos } from './memos'
 import { loadProfile } from './profileLoad'
@@ -21,9 +22,24 @@ import { bump, type Counts, type Finding, type MasterCarrier, type MasterCustome
 import { readAll } from './util'
 
 export const ROWS_PER_CHUNK = 500
+/** Step AW (R19/R20): history older than this many months before the cutoff is not imported. */
+export const HISTORY_MONTHS = 24
 const MAX_FINDINGS = 20_000
 
 export const stageKey = (root: string, name: string): string => `imports/jobs/${root}/${name}`
+
+/** The Chicago calendar day of an instant (TmsSettings.aljexCutoffAt is 00:00 America/Chicago). */
+function chicagoDay(iso: string): string | null {
+  const t = Date.parse(iso)
+  return Number.isNaN(t) ? null : new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t))
+}
+
+/** The cutoff day: the job's explicit `cutoffDate`, else `TmsSettings.aljexCutoffAt`; null = no history window. */
+async function resolveCutoff(store: EngineStore, job: AljexImportJob): Promise<string | null> {
+  if (typeof job.options?.cutoffDate === 'string' && job.options.cutoffDate) return job.options.cutoffDate
+  const [settings] = await store.getMany('settings', ['default'])
+  return typeof settings?.aljexCutoffAt === 'string' && settings.aljexCutoffAt ? chicagoDay(settings.aljexCutoffAt) : null
+}
 export const chunkKey = (root: string, n: number): string => stageKey(root, `rows-${String(n).padStart(4, '0')}.jsonl`)
 
 export interface StageData {
@@ -60,6 +76,12 @@ const entityOf = (row: CanonicalRow) => row.kind
 
 export async function runStage(store: EngineStore, job: AljexImportJob, root: string): Promise<{ stageHash: string; summary: AljexStageSummary; rows: number }> {
   const { profile } = await loadProfile(store, job)
+  const cutoff = await resolveCutoff(store, job)
+  const windowStart = cutoff ? addMonths(cutoff, -HISTORY_MONTHS) : null
+  const historySkipped: string[] = []
+  let beforeWindow = 0
+  let afterCutoff = 0
+  let newestAnyPro = 0
   const sourceKey = typeof job.options?.sourceKey === 'string' ? job.options.sourceKey : `imports/source/${root}/${job.fileName ?? ''}`
   const sliceEvery = typeof job.options?.sliceEvery === 'number' && job.options.sliceEvery > 1 ? job.options.sliceEvery : null
 
@@ -87,6 +109,8 @@ export async function runStage(store: EngineStore, job: AljexImportJob, root: st
   const onRow = (cells: string[]) => {
     if (!headers) {
       headers = cells
+      const sensitive = findSensitiveHeaders(cells)
+      if (sensitive.length) throw new Error(`${SENSITIVE_COLUMNS_MESSAGE} Columns: ${sensitive.join(', ')}`)
       try {
         layout = detectLayout(cells)
       } catch (err) {
@@ -129,6 +153,8 @@ export async function runStage(store: EngineStore, job: AljexImportJob, root: st
       for (const c of conflicts) find({ code: c.code, pro: row.pro, rowNumber })
       return
     }
+    // The numbering floor must clear every PRO the file names, in or out of the window.
+    if (/^\d{1,9}$/.test(row.proKey ?? '') && (Number(row.proKey) < 900000 || Number(row.proKey) > 999999)) newestAnyPro = Math.max(newestAnyPro, Number(row.proKey))
     const key = row.proKey as string
     const prior = seen.get(key)
     const sig = createHash('sha1').update(rowSignature(cells)).digest('hex')
@@ -144,6 +170,17 @@ export async function runStage(store: EngineStore, job: AljexImportJob, root: st
       return
     }
     seen.set(key, { sig, rowNumber })
+    const ship = row.kind === 'LOAD' && /^\d{4}-\d{2}-\d{2}$/.test(row.dates.ship ?? '') ? (row.dates.ship as string) : null
+    if (cutoff && windowStart && ship && (ship < windowStart || ship >= cutoff)) {
+      const before = ship < windowStart
+      if (before) beforeWindow += 1
+      else afterCutoff += 1
+      bump(stageCounts, entity, 'skipped')
+      const code = before ? 'HISTORY_BEFORE_WINDOW' : 'AFTER_CUTOFF'
+      stagedSkips[code] = (stagedSkips[code] ?? 0) + 1
+      historySkipped.push(`${row.pro},${ship},${before ? 'BEFORE_WINDOW' : 'AFTER_CUTOFF'}`)
+      return
+    }
     rows.push(row)
   }
 
@@ -302,10 +339,12 @@ export async function runStage(store: EngineStore, job: AljexImportJob, root: st
     stageCounts,
     distinct: distinctValues,
     syntheticOk: syntheticOk && rowNumber > 0,
-    maxProNumber,
+    maxProNumber: Math.max(maxProNumber, newestAnyPro),
+    history: { cutoffDate: cutoff, windowStart, beforeWindow, afterCutoff },
   }
   const memoIndex = resolveStagedMemos(rows, profile, window)
   const masters: StagedMasters = { customers, carriers, memos: memoIndex, newestShip, window, chunkCount, rowsPerChunk: ROWS_PER_CHUNK }
+  if (cutoff) await store.putObject(stageKey(root, 'history-skipped.csv'), `pro,ship_date,reason\n${historySkipped.join('\n')}${historySkipped.length ? '\n' : ''}`)
   await store.putObject(stageKey(root, 'masters.json'), JSON.stringify(masters))
   await store.putObject(stageKey(root, 'stage-index.json'), JSON.stringify(index))
 

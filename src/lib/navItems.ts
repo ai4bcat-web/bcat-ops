@@ -135,6 +135,21 @@ export const NAV_ITEMS: NavItem[] = [
  */
 const TMS_PERMISSION_PAGE = { key: 'tms', label: 'TMS (Brokerage section)' }
 
+/** Per-user grant keys: no role holds them, not even ADMIN. Group names are `page-<key>`. */
+export const BILLING_RELEASE_PAGE = 'billingRelease'
+export const ALJEX_SIGNOFF_PAGE = 'aljexSignoff'
+/** Pages whose grant is never implied by a role. */
+export const PER_USER_GRANT_PAGES: readonly string[] = [BILLING_RELEASE_PAGE, ALJEX_SIGNOFF_PAGE]
+
+/**
+ * Whether a Cognito group list carries a per-user grant. Group-only by design: unlike
+ * `hasPageAccess`, no ADMIN/owner status opens it, because the Lambdas check the
+ * `page-<key>` group alone. A non-grant key is refused rather than guessed at.
+ */
+export function holdsPerUserGrant(groups: readonly string[] | null | undefined, key: string): boolean {
+  return PER_USER_GRANT_PAGES.includes(key) && (groups ?? []).includes(`page-${key}`)
+}
+
 /**
  * Routes guarded by `RequirePage` that are reached from in-page links instead of the
  * sidebar. They still need to be grantable, or they would be owner-only forever.
@@ -144,6 +159,11 @@ const OFF_NAV_PERMISSION_PAGES: { key: string; label: string }[] = [
   { key: 'schedule', label: 'Schedule' },
   { key: 'intakeReview', label: 'Intake review' },
   { key: 'loadReview', label: 'Load review' },
+  // Per-user grants for the two billing/reconciliation actions. Never implied by a role
+  // (ADMIN included): the Lambdas check the `page-<key>` group alone, so only the Users
+  // page checkbox (owner/admin) can hand them out.
+  { key: BILLING_RELEASE_PAGE, label: 'Release to billing / Send invoice' },
+  { key: ALJEX_SIGNOFF_PAGE, label: 'Aljex import sign-off' },
 ]
 
 /**

@@ -5,10 +5,11 @@ import { TmsField, TmsInput, TmsSelect, TmsTabs, TmsTextarea } from '@/features/
 import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { MoneyField } from './MoneyField'
 import { getTmsSettings } from '@/lib/apiClient'
-import type { Division, CustomerStatus, Team } from '@/types/tms'
+import type { Division, CustomerStatus, RemitTo, Team } from '@/types/tms'
 import { useZipAutofill } from '@/hooks/useZipAutofill'
 import type { CustomerFormValue } from './useCustomerForm'
 import { APPT_WORKFLOW_OPTIONS, INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
+import { BillingMethodFields } from './BillingMethodFields'
 import { TrackingPrefsFields, type TrackingPrefsValue } from './TrackingPrefsFields'
 
 const STATUS_OPTIONS: CustomerStatus[] = ['NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING', 'PENDING', 'ACTIVE']
@@ -28,6 +29,7 @@ export function CustomerForm({
 }) {
   const [tab, setTab] = useState('Overview')
   const [teams, setTeams] = useState<Team[]>([])
+  const [factor, setFactor] = useState<RemitTo | null>(null)
   useZipAutofill(value.billingAddressZip, value.billingAddressCity, value.billingAddressState, (f) => {
     if (f.city) set('billingAddressCity', f.city)
     if (f.state) set('billingAddressState', f.state)
@@ -39,7 +41,7 @@ export function CustomerForm({
   useEffect(() => {
     let alive = true
     getTmsSettings()
-      .then((s) => { if (alive) setTeams(s?.teams ?? []) })
+      .then((s) => { if (alive) { setTeams(s?.teams ?? []); setFactor(s?.factorRemitTo ?? null) } })
       .catch(() => {})
     return () => { alive = false }
   }, [])
@@ -125,6 +127,7 @@ export function CustomerForm({
 
       {tab === 'Billing' && (
         <div style={{ display: 'grid', gap: 16 }}>
+          <BillingMethodFields value={value} set={set} errors={errors} factor={factor} />
           <div>
             <div className="tms-field-label">Billing contact</div>
             <div className="tms-grid tms-grid-3" style={{ marginTop: 6 }}>

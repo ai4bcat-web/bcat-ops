@@ -852,6 +852,79 @@ describe('UPSERT_CUSTOMER', () => {
       ':trackingMode': { NULL: true }, ':trackingMethod': { S: 'EMAIL' },
     })
   })
+
+  describe('billing method (Step AW)', () => {
+    const flagged = () => makeDynamoItem({
+      id: 'c-1', name: 'Acme', normalizedName: 'acme', active: true,
+      billingMethod: 'MANUAL', billingNeedsReview: 'internal billing address: real AP e-mail needed',
+      createdAt: '2025-01-01', createdBy: 'someone@bcatcorp.com', updatedAt: '2025-01-02',
+    })
+    function run(existing: Record<string, unknown>) {
+      const cmds: MockCommand[] = []
+      send.mockImplementation((cmd: MockCommand) => {
+        cmds.push(cmd)
+        if (cmd.__type === 'Get') return Promise.resolve({ Item: existing })
+        if (cmd.__type === 'Scan') return Promise.resolve({ Items: [existing], LastEvaluatedKey: undefined })
+        if (cmd.__type === 'Update') return Promise.resolve({ Attributes: existing })
+        if (cmd.__type === 'Put') return Promise.resolve({})
+        throw new Error('unexpected')
+      })
+      return cmds
+    }
+    const updateValues = (cmds: MockCommand[]) =>
+      (cmds.find((c) => c.__type === 'Update')?.input as { ExpressionAttributeValues: Record<string, unknown> }).ExpressionAttributeValues
+    const audits = (cmds: MockCommand[]) => {
+      const rows: Record<string, { S: string }>[] = []
+      for (const c of cmds) {
+        const put: MockPutCommand['input'] = c.input
+        if (c.__type === 'Put' && put.TableName === 'AuditLog-test' && put.Item) rows.push(put.Item as unknown as Record<string, { S: string }>)
+      }
+      return rows
+    }
+
+    it('refuses MANUAL without an AP e-mail and a malformed copy address on create', async () => {
+      send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+        if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+        throw new Error('unexpected')
+      }))
+      await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme', billingMethod: 'MANUAL' }))).rejects.toThrow(/AP e-mail/)
+      await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme', billingMethod: 'MANUAL', apEmail: 'ap@acme.com', invoiceCopyEmails: ['nope'] }))).rejects.toThrow('Not a valid e-mail: nope')
+      await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme', billingMethod: 'CHECK' }))).rejects.toThrow(/billingMethod must be one of/)
+    })
+
+    it('stores a normalised billing setup and writes a BILLING_METHOD_SET audit with before and after', async () => {
+      const cmds = run(makeDynamoItem({ id: 'x' }))
+      send.mockImplementation((cmd: MockCommand) => {
+        cmds.push(cmd)
+        if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+        if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+        return Promise.resolve({})
+      })
+      const result = await handler(event('UPSERT_CUSTOMER', {
+        name: 'Acme', billingMethod: 'MANUAL', apEmail: ' AP@Acme.com ', invoiceCopyEmails: ['A@x.com', 'a@x.com', 'b@x.com'],
+      }))
+      expect(result).toMatchObject({ billingMethod: 'MANUAL', apEmail: 'ap@acme.com', invoiceCopyEmails: ['a@x.com', 'b@x.com'] })
+      const rows = audits(cmds)
+      expect(rows).toHaveLength(1)
+      expect(rows[0].action.S).toBe('BILLING_METHOD_SET')
+      expect(JSON.parse(rows[0].changes.S)).toMatchObject({ before: { billingMethod: null }, after: { billingMethod: 'MANUAL', apEmail: 'ap@acme.com' } })
+    })
+
+    it('lets a flagged customer be saved for another field, keeps the flag, and clears it when a person fixes billing', async () => {
+      const cmds = run(flagged())
+      await handler(event('UPSERT_CUSTOMER', { id: 'c-1', expectedUpdatedAt: '2025-01-02', name: 'Acme', mcNumber: '1' }))
+      expect(updateValues(cmds)).toMatchObject({ ':billingMethod': { S: 'MANUAL' }, ':billingNeedsReview': { S: 'internal billing address: real AP e-mail needed' } })
+      expect(audits(cmds)).toHaveLength(0)
+
+      const fix = run(flagged())
+      await handler(event('UPSERT_CUSTOMER', {
+        id: 'c-1', expectedUpdatedAt: '2025-01-02', name: 'Acme', apEmail: 'ap@acme.com',
+        billingNeedsReview: 'internal billing address: real AP e-mail needed',
+      }))
+      expect(updateValues(fix)).toMatchObject({ ':apEmail': { S: 'ap@acme.com' }, ':billingNeedsReview': { NULL: true } })
+      expect(audits(fix)).toHaveLength(1)
+    })
+  })
 })
 
 // ── SET_CUSTOMER_STATUS ───────────────────────────────────────────────────────

@@ -15,12 +15,17 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   divisions: vi.fn(),
   bundle: vi.fn(),
+  groups: vi.fn(),
+  release: vi.fn(),
 }))
 
 // The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
 vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
 vi.mock('@/hooks/useShipments', () => ({ useShipments: mocks.shipments }))
-vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ hasPageAccess: mocks.hasPageAccess }) }))
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPageAccess: mocks.hasPageAccess }),
+  useAuthUser: () => ({ userId: 'u', email: 'x@bcatcorp.com', groups: mocks.groups() }),
+}))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: mocks.divisions() }) }))
 vi.mock('@/components/RepPicker', () => ({ RepPicker: () => <div data-testid="rep-picker" /> }))
 vi.mock('@/lib/apiClient', async (importOriginal) => ({
@@ -28,6 +33,7 @@ vi.mock('@/lib/apiClient', async (importOriginal) => ({
   batchShipmentTask: mocks.batch,
   reviewLoad: mocks.review,
   readyToInvoice: mocks.ready,
+  releaseToBilling: mocks.release,
   listAuditLogsFor: mocks.audit,
   setSalesRep: vi.fn(),
   setRevTag: vi.fn(),
@@ -73,6 +79,8 @@ beforeEach(() => {
   mocks.shipments.mockReturnValue({ shipments: ROWS, loading: false, error: null, refresh: mocks.refresh })
   mocks.hasPageAccess.mockImplementation((key: string) => key === 'loads' || key === 'loadReview')
   mocks.audit.mockResolvedValue([])
+  mocks.groups.mockReturnValue(['page-billingRelease'])
+  mocks.release.mockResolvedValue({ warnings: [] })
   mocks.review.mockResolvedValue({
     shipmentId: 's-1', orderId: 'o-s-1', orderUpdatedAt: 'u1', arStatus: 'DOCS_NEEDED', releaseGate: GATE_OK, extras: [],
     salesRepId: 'rep-1', revDivision: 'DRY', revSubdivision: null, legacyImported: false,
@@ -179,6 +187,37 @@ describe('LoadReviewPage', () => {
     expect(screen.getByText('Ready')).toBeTruthy()
     fireEvent.click(moveButton())
     await waitFor(() => expect(mocks.ready).toHaveBeenCalledWith({ orderId: 'o-s-1', expectedUpdatedAt: 'u1', review: { source: 'LOAD_REVIEW' } }))
+    await waitFor(() => expect(mocks.release).toHaveBeenCalledWith(expect.objectContaining({ orderId: 'o-s-1' })))
+  })
+
+  it('Move to billing is disabled with the grant message for an admin who does not hold the billing grant', async () => {
+    mocks.hasPageAccess.mockReturnValue(true) // ADMIN: every page, but not the per-user grant
+    mocks.groups.mockReturnValue(['ADMIN'])
+    renderPage('/tms/load-review?tab=ready&shipment=s-1')
+    await waitFor(() => expect(screen.getByText('Ready')).toBeTruthy())
+    expect(moveButton().disabled).toBe(true)
+    expect(screen.getAllByText(/Release to billing \/ Send invoice/).length).toBeGreaterThan(0)
+    fireEvent.click(moveButton())
+    expect(mocks.ready).not.toHaveBeenCalled()
+    expect(mocks.release).not.toHaveBeenCalled()
+  })
+
+  it('a batch release invoices every order of each shipment the server accepted, and reports a release refusal on that row', async () => {
+    mocks.batch.mockResolvedValue({ results: [
+      { shipmentId: 's-1', number: 'S-1', ok: true },
+      { shipmentId: 's-2', number: 'S-2', ok: true },
+    ] })
+    mocks.release.mockImplementation(async ({ orderId }: { orderId: string }) => {
+      if (orderId === 'o-s-2') throw new Error('BILLING_METHOD_UNSET: Acme has no billing method.')
+      return { warnings: [] }
+    })
+    renderPage('/tms/load-review?tab=ready')
+    fireEvent.click(screen.getByRole('button', { name: /Select all looks ready/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Move 2 to billing' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm move to billing' }))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('S-2: Moved to accounting, not invoiced: BILLING_METHOD_UNSET'))
+    expect(screen.getByRole('status').textContent).toContain('S-1: Moved to billing')
+    expect(mocks.release).toHaveBeenCalledTimes(2)
   })
 
   it('the authoritative gate overrides a cached "Looks ready": server reasons show verbatim and Move stays disabled', async () => {

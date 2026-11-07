@@ -22,16 +22,20 @@ import { useAuth } from '@/hooks/useAuth'
 import {
   archiveOwnershipDivision,
   ensureOwnershipSeed,
+  getTmsSettings,
   listCarriers,
   listCustomers,
   listOwnershipDivisions,
   listOwnershipRules,
+  listUserProfiles,
   retagShipments,
   saveOwnershipDivision,
   saveOwnershipRules,
+  saveTmsSettings,
   testOwnershipRules,
 } from '@/lib/apiClient'
 import type { OwnershipRuleTest, RetagReport } from '@/lib/apiClient'
+import { DIVISION_REP_KEYS, parseDivisionSalesReps } from '@/lib/divisionSalesRep'
 import { OWN_FLEET_CARRIER_CODE, validateDivisions, validateRules } from '@/lib/ownership'
 import { checkIntakeEmail, intakeEmailOwner, suggestIntakeMailboxes } from '@/lib/intakeMail'
 import type {
@@ -40,6 +44,7 @@ import type {
   OwnershipConditionKind,
   OwnershipDivisionRecord,
   OwnershipRuleRecord,
+  UserProfileRecord,
 } from '@/types/tms'
 import {
   CONDITION_KINDS,
@@ -795,6 +800,8 @@ export function DivisionsPage() {
         {ruleDrafts.length === 0 && !loading ? <p className="tms-muted">No rules yet.</p> : null}
       </TmsCard>
 
+      <DivisionRepCard divisions={divisions} />
+
       <TmsCard title="Test a shipment">
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
           <TmsField label="PRO or shipment id" className="tms-probe-field">
@@ -902,6 +909,88 @@ export function DivisionsPage() {
         />
       ) : null}
     </div>
+  )
+}
+
+// ── Sales rep by division ────────────────────────────────────────────────────
+
+/**
+ * Who earns a shipment's sales rep, by division (TmsSettings.divisionSalesReps). The Aljex
+ * salesrep code is not imported: a shipment takes the rep of its division when it has none.
+ * The picker lists every staff login; nobody is named in code.
+ */
+function DivisionRepCard({ divisions }: { divisions: OwnershipDivisionRecord[] }) {
+  const [staff, setStaff] = useState<UserProfileRecord[]>([])
+  const [reps, setReps] = useState<Record<string, string>>({})
+  const [updatedAt, setUpdatedAt] = useState<string | undefined>(undefined)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    Promise.all([listUserProfiles(), getTmsSettings()])
+      .then(([profiles, settings]) => {
+        if (!live) return
+        setStaff(profiles)
+        setReps(parseDivisionSalesReps(settings?.divisionSalesReps))
+        setUpdatedAt(settings?.updatedAt ?? undefined)
+      })
+      .catch((err: unknown) => live && setError(messageOf(err)))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const nameOf = (code: string) => divisions.find((d) => d.code === code)?.name ?? code
+  const options = staff
+    .filter((u) => u.status !== 'INACTIVE')
+    .map((u) => ({ value: u.id, label: u.name?.trim() || u.email }))
+
+  const save = async () => {
+    setBusy(true)
+    setError(null)
+    setNote(null)
+    try {
+      const saved = await saveTmsSettings({ divisionSalesReps: reps } as Parameters<typeof saveTmsSettings>[0], updatedAt)
+      setUpdatedAt(saved?.updatedAt ?? undefined)
+      setNote('Saved. New shipments take these reps; existing reps are never overwritten.')
+    } catch (err) {
+      setError(messageOf(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <TmsCard title="Sales rep by division">
+      <p className="tms-muted" style={{ marginTop: 0 }}>
+        A shipment without a sales rep takes the rep of its division. A rep set by hand is never changed.
+      </p>
+      <div className="tms-grid tms-grid-2">
+        {DIVISION_REP_KEYS.map((code) => (
+          <TmsField key={code} label={nameOf(code)}>
+            <TmsSelect
+              aria-label={`Sales rep for ${nameOf(code)}`}
+              value={reps[code] ?? ''}
+              placeholder="No rep"
+              onChange={(e) => {
+                const next = { ...reps }
+                if (e.target.value === '') delete next[code]
+                else next[code] = e.target.value
+                setReps(next)
+              }}
+              options={options}
+            />
+          </TmsField>
+        ))}
+      </div>
+      {error ? <p className="tms-field-error">{error}</p> : null}
+      {note ? <p className="tms-muted">{note}</p> : null}
+      <TmsButton variant="primary" onClick={() => void save()} disabled={busy}>
+        {busy ? 'Saving…' : 'Save reps'}
+      </TmsButton>
+    </TmsCard>
   )
 }
 

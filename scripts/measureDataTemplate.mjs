@@ -7,6 +7,7 @@
  * the `amplifySynth` message — against the dev branch's context, then prints the
  * byte count of every template over 100 KB and the data stack's asset key.
  *
+ * BCAT_SCHEMA_STAGE=k (amplify/data/stages.ts) synthesizes stage k of the staged schema deploy.
  * It writes nothing to AWS. Deploy credentials are still needed because synth
  * resolves branch secrets.
  *
@@ -113,6 +114,7 @@ const dataAsset = data
   : null
 
 console.log(`branch:    ${values.branch}`)
+console.log(`stage:     ${process.env.BCAT_SCHEMA_STAGE?.trim() || 'all'}  (BCAT_SCHEMA_STAGE; see Docs/tms-build/AW_STAGED_DEPLOY.md)`)
 console.log(`templates: ${templates.length}`)
 console.log('')
 for (const t of templates.filter((t) => t.bytes >= REPORT_OVER)) {
@@ -127,6 +129,13 @@ const headroom = CAP_BYTES - data.bytes
 const resources = Object.keys(JSON.parse(readFileSync(join(outdir, data.name), 'utf8')).Resources ?? {}).length
 console.log(`data stack: ${data.bytes} bytes, ${headroom} under the ${CAP_BYTES} cap (guard ${GUARD_BYTES}: ${GUARD_BYTES - data.bytes})`)
 console.log(`resources:  ${resources} of ${RESOURCE_CAP}`)
+// Every stack of the app, for scale against CloudFormation's 2,500 created+updated+deleted per operation
+// (scripts/stageDeployCheck.mjs measures the per-stage delta).
+const allResources = templates.reduce(
+  (sum, t) => sum + Object.keys(JSON.parse(readFileSync(join(outdir, t.name), 'utf8')).Resources ?? {}).length,
+  0,
+)
+console.log(`all stacks: ${allResources} resources in ${templates.length} templates`)
 if (dataAsset) console.log(`asset key:  ${dataAsset[0]}`)
 console.log(`outdir:     ${outdir}`)
 console.log('')

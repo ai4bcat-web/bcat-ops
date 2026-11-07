@@ -16,6 +16,7 @@ import {
 import { createHash } from 'node:crypto'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
+import { FINAL_STAGE, PITR_STAGE, TTL_STAGE, currentSchemaStage, modelPresent } from './data/stages'
 import { storage } from './storage/resource'
 import { userManagement } from './functions/userManagement/resource'
 import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
@@ -195,6 +196,53 @@ const backend = defineBackend({
   dispatchNudge,
 })
 
+// ── Staged schema deploy (amplify/data/stages.ts, Docs/tms-build/AW_STAGED_DEPLOY.md) ──
+// BCAT_SCHEMA_STAGE=k synthesizes only the models present at stage k, so a table the current
+// stage does not have must be skipped cleanly everywhere it is wired. Unset (dev, every deploy
+// today) leaves `stageTables` / `stageCfnTables` as the real objects: zero behavior change.
+// Below the final stage a missing table is an ABSENT stub: grants are no-ops, settable props
+// ignore writes, and `tableName` / `tableArn` / `tableStreamArn` are a sentinel that
+// `addEnvironment` and `addToRolePolicy` drop (a Lambda deploys without that variable or
+// statement). Anything else that would carry the sentinel into a template is caught by
+// scripts/stageDeployCheck.mjs, which fails if the sentinel appears in any synthesized template.
+const SCHEMA_STAGE = currentSchemaStage()
+export const ABSENT_TABLE_SENTINEL = '__BCAT_TABLE_NOT_IN_STAGE__'
+const ABSENT_TABLE = new Proxy({} as Record<string, unknown>, {
+  get: (_t, prop) => (typeof prop === 'string' && /^table(Name|Arn|StreamArn)$/.test(prop)
+    ? ABSENT_TABLE_SENTINEL
+    : () => undefined),
+  set: () => true,
+})
+function stageView<T extends object>(real: T): T {
+  if (SCHEMA_STAGE >= FINAL_STAGE) return real
+  return new Proxy(real, {
+    get: (target, prop, receiver) => (typeof prop === 'string' && !modelPresent(prop, SCHEMA_STAGE) && !(prop in target)
+      ? ABSENT_TABLE
+      : Reflect.get(target, prop, receiver)),
+  })
+}
+const stageTables = stageView(backend.data.resources.tables)
+const stageCfnTables = stageView(backend.data.resources.cfnResources.amplifyDynamoDbTables)
+/** The table, or null when this stage does not have the model. */
+function tableOrNull(model: string): (typeof stageTables)[string] | null {
+  return model in backend.data.resources.tables ? backend.data.resources.tables[model] : null
+}
+if (SCHEMA_STAGE < FINAL_STAGE) {
+  const addEnvironment = LambdaFunction.prototype.addEnvironment
+  LambdaFunction.prototype.addEnvironment = function (this: LambdaFunction, key: string, value: string, options?: Parameters<LambdaFunction['addEnvironment']>[2]) {
+    return value.includes(ABSENT_TABLE_SENTINEL) ? this : addEnvironment.call(this, key, value, options)
+  }
+  const addToRolePolicy = LambdaFunction.prototype.addToRolePolicy
+  LambdaFunction.prototype.addToRolePolicy = function (this: LambdaFunction, statement: PolicyStatement) {
+    const json = statement.toStatementJson()
+    const all: unknown[] = [json.Resource].flat().filter((r) => r !== undefined)
+    const kept = all.filter((r) => !(typeof r === 'string' && r.includes(ABSENT_TABLE_SENTINEL)))
+    if (kept.length === all.length) return addToRolePolicy.call(this, statement)
+    if (kept.length > 0) addToRolePolicy.call(this, PolicyStatement.fromJson({ ...json, Resource: kept }))
+  }
+}
+
+
 // ── Auth session lifetime ──────────────────────────────────────────────────
 // Stay logged in (mobile + desktop) until explicit logout, for up to 60 days. The
 // refresh token controls the overall session length; access/id tokens are short-lived
@@ -325,13 +373,13 @@ const PORTAL_ORIGINS = [
 const driverWelcomeFn = backend.driverWelcome.resources.lambda as LambdaFunction
 driverPool.addTrigger(UserPoolOperation.POST_CONFIRMATION, driverWelcomeFn)
 
-driverWelcomeFn.addEnvironment('DRIVER_TABLE_NAME', backend.data.resources.tables['Driver'].tableName)
+driverWelcomeFn.addEnvironment('DRIVER_TABLE_NAME', stageTables['Driver'].tableName)
 driverWelcomeFn.addEnvironment('FROM_ADDRESS', 'onboarding@bcatcorp.com')
 driverWelcomeFn.addEnvironment('PORTAL_ORIGIN', PORTAL_ORIGIN)
 driverWelcomeFn.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:Scan'],
-    resources: [backend.data.resources.tables['Driver'].tableArn],
+    resources: [stageTables['Driver'].tableArn],
   }),
 )
 driverWelcomeFn.addToRolePolicy(
@@ -383,8 +431,8 @@ backend.userManagement.resources.lambda.addToRolePolicy(
 
 // Step I: the staff directory. The role lives here and is projected onto the
 // Cognito groups above; every change is stamped into the shared audit log.
-const userProfileTable = backend.data.resources.tables['UserProfile']
-const userMgmtAuditTable = backend.data.resources.tables['AuditLog']
+const userProfileTable = stageTables['UserProfile']
+const userMgmtAuditTable = stageTables['AuditLog']
 ;(backend.userManagement.resources.lambda as LambdaFunction).addToRolePolicy(
   new PolicyStatement({
     actions: [
@@ -408,8 +456,8 @@ const userMgmtAuditTable = backend.data.resources.tables['AuditLog']
 
 // ── driverSignupGate Lambda (driver pool PreSignUp trigger) ────────────────
 
-const signupDriverTable = backend.data.resources.tables['Driver']
-const signupDriverPaySettingTable = backend.data.resources.tables['DriverPaySetting']
+const signupDriverTable = stageTables['Driver']
+const signupDriverPaySettingTable = stageTables['DriverPaySetting']
 
 backend.driverSignupGate.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -428,7 +476,7 @@ backend.driverSignupGate.resources.lambda.addToRolePolicy(
 )
 
 // Step S4: best-effort log of refused sign-ups into the existing AuditLog table.
-const signupAuditLogTable = backend.data.resources.tables['AuditLog']
+const signupAuditLogTable = stageTables['AuditLog']
 backend.driverSignupGate.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions: ['dynamodb:PutItem'],
@@ -443,30 +491,30 @@ backend.driverSignupGate.resources.lambda.addToRolePolicy(
 // ── driver-app-api Lambda (driver PWA HTTP API) ────────────────────────────
 
 const driverApiFn = backend.driverAppApi.resources.lambda as LambdaFunction
-const driverSubmissionTable = backend.data.resources.tables['DriverSubmission']
-const driverSubmissionDocTable = backend.data.resources.tables['DriverSubmissionDoc']
+const driverSubmissionTable = stageTables['DriverSubmission']
+const driverSubmissionDocTable = stageTables['DriverSubmissionDoc']
 // Detention times Ivan's drivers record for themselves. Writable by the driver API, which
 // is the only thing that writes them.
-const driverLoadTimeTable = backend.data.resources.tables['DriverLoadTime']
+const driverLoadTimeTable = stageTables['DriverLoadTime']
 // The Ivan time clock. Drivers write their own rows; staff correct them from the hours page.
-const timeClockTable = backend.data.resources.tables['TimeClockEntry']
+const timeClockTable = stageTables['TimeClockEntry']
 // Time-off requests drivers send from the app (and staff approve): DriverAvailability rows.
-const driverApiAvailabilityTable = backend.data.resources.tables['DriverAvailability']
-const driverApiAmazonTripTable = backend.data.resources.tables['AmazonTrip']
-const driverApiDeductionTable = backend.data.resources.tables['DriverPayDeduction']
-const driverApiCreditTable = backend.data.resources.tables['DriverPayCredit']
-const driverApiFuelTxTable = backend.data.resources.tables['FuelTransaction']
-const driverApiDriverTable = backend.data.resources.tables['Driver']
-const driverApiPaySettingTable = backend.data.resources.tables['DriverPaySetting']
-const driverApiLoadTable = backend.data.resources.tables['Load']
-const driverApiCustomerTable = backend.data.resources.tables['Customer']
-const driverApiLocationTable = backend.data.resources.tables['Location']
-const driverApiPodDocumentTable = backend.data.resources.tables['PodDocument']
+const driverApiAvailabilityTable = stageTables['DriverAvailability']
+const driverApiAmazonTripTable = stageTables['AmazonTrip']
+const driverApiDeductionTable = stageTables['DriverPayDeduction']
+const driverApiCreditTable = stageTables['DriverPayCredit']
+const driverApiFuelTxTable = stageTables['FuelTransaction']
+const driverApiDriverTable = stageTables['Driver']
+const driverApiPaySettingTable = stageTables['DriverPaySetting']
+const driverApiLoadTable = stageTables['Load']
+const driverApiCustomerTable = stageTables['Customer']
+const driverApiLocationTable = stageTables['Location']
+const driverApiPodDocumentTable = stageTables['PodDocument']
 // The Ivan app shows a driver when their own truck's next PM falls due. Equipment holds the
 // last PM; TruckLocation holds Motive's odometer. Read-only — the app never edits either.
-const driverApiEquipmentTable = backend.data.resources.tables['Equipment']
-const driverApiTruckLocationTable = backend.data.resources.tables['TruckLocation']
-const driverApiMaintenanceTaskTable = backend.data.resources.tables['MaintenanceTask']
+const driverApiEquipmentTable = stageTables['Equipment']
+const driverApiTruckLocationTable = stageTables['TruckLocation']
+const driverApiMaintenanceTaskTable = stageTables['MaintenanceTask']
 
 // The driver API is internet-facing (Function URL, auth handled in-handler), so it gets
 // read-only access to the roster and pay tables it reports from. Only the two submission
@@ -605,8 +653,8 @@ driverApiFn.addEnvironment(
   'STAFF_USER_POOL_CLIENT_ID',
   backend.auth.resources.userPoolClient.userPoolClientId,
 )
-driverApiFn.addEnvironment('AUDIT_LOG_TABLE_NAME', backend.data.resources.tables['AuditLog'].tableName)
-backend.data.resources.tables['AuditLog'].grantWriteData(driverApiFn)
+driverApiFn.addEnvironment('AUDIT_LOG_TABLE_NAME', stageTables['AuditLog'].tableName)
+stageTables['AuditLog'].grantWriteData(driverApiFn)
 // Plain env vars (not secrets) so a missing value never blocks the deploy.
 driverApiFn.addEnvironment('INTAKE_IVAN_CHANNEL_ID', process.env.INTAKE_IVAN_CHANNEL_ID ?? 'C0B4YJXLYM8')
 driverApiFn.addEnvironment('LOADS_EMAIL_TO', process.env.LOADS_EMAIL_TO ?? 'ivanloads@bcatcorp.com')
@@ -649,7 +697,7 @@ new CfnOutput(driverApiFn.stack, 'DriverAppApiFunctionUrl', {
 
 // ── IntakeItem table (shared by webhook + notifier) ────────────────────────
 
-const intakeTable = backend.data.resources.tables['IntakeItem']
+const intakeTable = stageTables['IntakeItem']
 
 // ── slackIntakeWebhook Lambda ──────────────────────────────────────────────
 
@@ -702,8 +750,8 @@ gmailTaskFn.addEnvironment('INTAKE_IVAN_CHANNEL_ID', process.env.INTAKE_IVAN_CHA
 
 // ── apptReport (daily 3 PM Chicago digest of unconfirmed appts → #bcat-global) ──
 const apptReportFn = backend.apptReport.resources.lambda as LambdaFunction
-const loadTableForReport = backend.data.resources.tables['Load']
-const customerTableForReport = backend.data.resources.tables['Customer']
+const loadTableForReport = stageTables['Load']
+const customerTableForReport = stageTables['Customer']
 backend.apptReport.resources.lambda.addToRolePolicy(
   new PolicyStatement({ actions: ['dynamodb:Scan'], resources: [loadTableForReport.tableArn] })
 )
@@ -724,8 +772,8 @@ apptReportRule.addTarget(new EventsLambdaTarget(apptReportFn))
 // Reads the "Last payroll date" + channel from the CashSettings row the Finance page
 // edits, and skips when a check-in for that payroll is already logged.
 const cashReminderFn = backend.cashCheckinReminder.resources.lambda as LambdaFunction
-const cashSettingsTable = backend.data.resources.tables['CashSettings']
-const cashCheckInTable = backend.data.resources.tables['CashCheckIn']
+const cashSettingsTable = stageTables['CashSettings']
+const cashCheckInTable = stageTables['CashCheckIn']
 backend.cashCheckinReminder.resources.lambda.addToRolePolicy(
   new PolicyStatement({ actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'], resources: [cashSettingsTable.tableArn] })
 )
@@ -769,7 +817,7 @@ new CfnOutput(gmailTaskFn.stack, 'GmailTaskIntakeFunctionUrl', {
 
 // ── shipmentEmailIntake Lambda (inbound replies to tracking+<shipmentId>@) ───
 const shipmentEmailIntakeFn = backend.shipmentEmailIntake.resources.lambda as LambdaFunction
-const shipmentEmailIntakeMessageTable = backend.data.resources.tables['ShipmentMessage']
+const shipmentEmailIntakeMessageTable = stageTables['ShipmentMessage']
 
 backend.shipmentEmailIntake.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -813,7 +861,7 @@ new CfnOutput(twofaFn.stack, 'TwofaIntakeFunctionUrl', { value: twofaUrl.url, de
 
 // ── factoringIntake Lambda (factor@ email → FactoringItem) ──────────────────
 const factoringIntakeFn = backend.factoringIntake.resources.lambda as LambdaFunction
-const factoringTable = backend.data.resources.tables['FactoringItem']
+const factoringTable = stageTables['FactoringItem']
 
 backend.factoringIntake.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -835,9 +883,9 @@ new CfnOutput(factoringIntakeFn.stack, 'FactoringIntakeFunctionUrl', {
 })
 
 // Vendor AP: authenticated payment actions plus secret-authenticated Gmail intake.
-const vendorApTable = backend.data.resources.tables['VendorPayable']
+const vendorApTable = stageTables['VendorPayable']
 const vendorApActionsFn = backend.vendorApActions.resources.lambda as LambdaFunction
-const vendorApMaintenanceTable = backend.data.resources.tables['MaintenanceInvoice']
+const vendorApMaintenanceTable = stageTables['MaintenanceInvoice']
 vendorApActionsFn.addEnvironment('TABLE_NAME', vendorApTable.tableName)
 vendorApActionsFn.addEnvironment('MAINTENANCE_TABLE_NAME', vendorApMaintenanceTable.tableName)
 vendorApActionsFn.addToRolePolicy(new PolicyStatement({
@@ -885,10 +933,10 @@ new CfnOutput(vendorApIntakeFn.stack, 'VendorApIntakeFunctionUrl', {
 // are read at run time (see _shared/dispatchConfig.ts), so this stack deploys before the
 // number exists. scripts/dispatchTwilioSetup.mts fills the path and points Twilio here.
 
-const dispatchConversationTable = backend.data.resources.tables['DispatchConversation']
-const dispatchMessageTable = backend.data.resources.tables['DispatchMessage']
-const dispatchSettingsTable = backend.data.resources.tables['DispatchSettings']
-const dispatchDriverTable = backend.data.resources.tables['Driver']
+const dispatchConversationTable = stageTables['DispatchConversation']
+const dispatchMessageTable = stageTables['DispatchMessage']
+const dispatchSettingsTable = stageTables['DispatchSettings']
+const dispatchDriverTable = stageTables['Driver']
 const dispatchWebhookFn = backend.dispatchTwilioWebhook.resources.lambda as LambdaFunction
 const dispatchActionsFn = backend.dispatchActions.resources.lambda as LambdaFunction
 const dispatchSlackBridgeFn = backend.dispatchSlackBridge.resources.lambda as LambdaFunction
@@ -916,11 +964,13 @@ const trackingActionsFn = backend.tmsTrackingActions.resources.lambda as LambdaF
 // derives `<Model>-<suffix>` for every name it lists. The api id is cut out of a table name (no
 // reference to the API construct: that would close a cycle).
 function passDataTableSuffix(fn: LambdaFunction, tables: Readonly<Record<string, string>>): void {
-  const dataTables = backend.data.resources.tables
+  const dataTables = stageTables
   const models = [...new Set(Object.values(tables))]
   const missing = models.filter((model) => !dataTables[model])
   if (missing.length > 0) throw new Error(`DATA_TABLE_SUFFIX: ${fn.node.id} names models the data stack does not have: ${missing.join(', ')}`)
-  fn.addEnvironment('DATA_TABLE_SUFFIX', `${Fn.select(1, Fn.split('-', dataTables[models[0]].tableName))}-NONE`)
+  // Below the final stage some of the models are not deployed yet; the suffix comes from the first present one.
+  const base = models.map((model) => tableOrNull(model)).find((table) => table)
+  if (base) fn.addEnvironment('DATA_TABLE_SUFFIX', `${Fn.select(1, Fn.split('-', base.tableName))}-NONE`)
 }
 passDataTableSuffix(trackingActionsFn, TRACKING_ACTIONS_TABLES)
 for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, dispatchNudgeFn, driverApiFn, trackingActionsFn]) {
@@ -951,7 +1001,7 @@ for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, d
 // (amplify/functions/_shared/dispatchAutoPod.ts): the webhook reads loads and writes
 // a driver submission, and stamps the delivery.
 {
-  const dispatchLoadTable = backend.data.resources.tables['Load']
+  const dispatchLoadTable = stageTables['Load']
   dispatchWebhookFn.addEnvironment('LOAD_TABLE_NAME', dispatchLoadTable.tableName)
   dispatchWebhookFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME', driverSubmissionTable.tableName)
   dispatchWebhookFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', driverSubmissionDocTable.tableName)
@@ -975,7 +1025,7 @@ for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, d
 //    stack already references the webhook stack (WEBHOOK_URL), so passing the name as an env var here
 //    would close a CloudFormation cycle.
 {
-  const truckConfigTable = backend.data.resources.tables['TruckConfig']
+  const truckConfigTable = stageTables['TruckConfig']
   for (const fn of [trackingActionsFn, driverApiFn]) {
     if (fn !== trackingActionsFn) fn.addEnvironment('TRUCK_CONFIG_TABLE_NAME', truckConfigTable.tableName)
     fn.addToRolePolicy(new PolicyStatement({ actions: ['dynamodb:GetItem'], resources: [truckConfigTable.tableArn] }))
@@ -1012,7 +1062,7 @@ for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, d
 // The five-minute nudge also flags drivers sitting at a stop past two hours
 // (amplify/functions/_shared/dwellAlerts.ts): it reads loads and stamps the flagged stop.
 {
-  const nudgeLoadTable = backend.data.resources.tables['Load']
+  const nudgeLoadTable = stageTables['Load']
   dispatchNudgeFn.addEnvironment('LOAD_TABLE_NAME', nudgeLoadTable.tableName)
   dispatchNudgeFn.addToRolePolicy(new PolicyStatement({
     actions: ['dynamodb:Scan', 'dynamodb:UpdateItem'],
@@ -1059,8 +1109,8 @@ dispatchActionsFn.addToRolePolicy(new PolicyStatement({
 // Same stream as brokerLoadAlert; mapped in the Lambda's own stack for the same reason.
 {
   const rateconTextFn = backend.rateconAssignedText.resources.lambda as LambdaFunction
-  const rateconLoadTable = backend.data.resources.tables['Load']
-  const rateconPayTable = backend.data.resources.tables['DriverPaySetting']
+  const rateconLoadTable = stageTables['Load']
+  const rateconPayTable = stageTables['DriverPaySetting']
   rateconTextFn.addEnvironment('CONVERSATION_TABLE_NAME', dispatchConversationTable.tableName)
   rateconTextFn.addEnvironment('MESSAGE_TABLE_NAME', dispatchMessageTable.tableName)
   rateconTextFn.addEnvironment('SETTINGS_TABLE_NAME', dispatchSettingsTable.tableName)
@@ -1102,7 +1152,7 @@ dispatchActionsFn.addToRolePolicy(new PolicyStatement({
 // ── amazonDisputeIntake Lambda (Google Form → AmazonDispute) ────────────────
 
 const disputeFn = backend.amazonDisputeIntake.resources.lambda as LambdaFunction
-const disputeTable = backend.data.resources.tables['AmazonDispute']
+const disputeTable = stageTables['AmazonDispute']
 
 backend.amazonDisputeIntake.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -1143,21 +1193,21 @@ notifierFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
 // handler). The Lambda reads the credit and the driver's name and writes only the
 // approval fields; it never creates, deletes or re-prices a credit.
 const payApprovalFn = backend.payCreditApproval.resources.lambda as LambdaFunction
-const payApprovalCreditTable = backend.data.resources.tables['DriverPayCredit']
+const payApprovalCreditTable = stageTables['DriverPayCredit']
 payApprovalFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
   resources: [payApprovalCreditTable.tableArn],
 }))
 payApprovalFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem'],
-  resources: [backend.data.resources.tables['Driver'].tableArn],
+  resources: [stageTables['Driver'].tableArn],
 }))
 payApprovalFn.addToRolePolicy(new PolicyStatement({
   actions:   ['cognito-idp:AdminGetUser'],
   resources: [backend.auth.resources.userPool.userPoolArn],
 }))
 payApprovalFn.addEnvironment('PAY_CREDIT_TABLE_NAME', payApprovalCreditTable.tableName)
-payApprovalFn.addEnvironment('DRIVER_TABLE_NAME', backend.data.resources.tables['Driver'].tableName)
+payApprovalFn.addEnvironment('DRIVER_TABLE_NAME', stageTables['Driver'].tableName)
 payApprovalFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
 payApprovalFn.addEnvironment('PORTAL_BASE_URL', PORTAL_PROD_ORIGIN)
 payApprovalFn.addEnvironment('APPROVER_EMAIL', process.env.PAY_CREDIT_APPROVER_EMAIL ?? 'ryne@bcatcorp.com')
@@ -1166,8 +1216,8 @@ payApprovalFn.addEnvironment('APPROVER_EMAIL', process.env.PAY_CREDIT_APPROVER_E
 
 const fuelImportFn = backend.fuelImport.resources.lambda as LambdaFunction
 
-const fuelTxTable = backend.data.resources.tables['FuelTransaction']
-const fuelEquipmentTable = backend.data.resources.tables['Equipment']
+const fuelTxTable = stageTables['FuelTransaction']
+const fuelEquipmentTable = stageTables['Equipment']
 backend.fuelImport.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     // Scan FuelTransaction (dedup) + Equipment (data-backed card→truck map); write FuelTransaction.
@@ -1193,10 +1243,10 @@ new CfnOutput(fuelImportFn.stack, 'FuelImportFunctionUrlOutput', {
 
 const recurringFn = backend.generateRecurringExpenses.resources.lambda as LambdaFunction
 
-const expenseTypeTable   = backend.data.resources.tables['ExpenseType']
-const allocationTable    = backend.data.resources.tables['TruckExpenseAllocation']
-const recurringTable     = backend.data.resources.tables['RecurringExpense']
-const expenseRecordTable = backend.data.resources.tables['ExpenseRecord']
+const expenseTypeTable   = stageTables['ExpenseType']
+const allocationTable    = stageTables['TruckExpenseAllocation']
+const recurringTable     = stageTables['RecurringExpense']
+const expenseRecordTable = stageTables['ExpenseRecord']
 
 // Permissions: read RecurringExpense, write ExpenseRecord, read+write seed tables
 backend.generateRecurringExpenses.resources.lambda.addToRolePolicy(
@@ -1227,11 +1277,11 @@ monthlyRule.addTarget(new EventsLambdaTarget(recurringFn))
 
 const motiveFn = backend.motiveMileageSync.resources.lambda as LambdaFunction
 
-const truckConfigTable  = backend.data.resources.tables['TruckConfig']
-const truckMileageTable = backend.data.resources.tables['TruckMileage']
-const equipmentTable    = backend.data.resources.tables['Equipment']
+const truckConfigTable  = stageTables['TruckConfig']
+const truckMileageTable = stageTables['TruckMileage']
+const equipmentTable    = stageTables['Equipment']
 
-const odometerDayTableForMileage = backend.data.resources.tables['TruckOdometerDay']
+const odometerDayTableForMileage = stageTables['TruckOdometerDay']
 backend.motiveMileageSync.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:Scan', 'dynamodb:PutItem'],
@@ -1265,8 +1315,8 @@ mileageAfterCloseRule.addTarget(new EventsLambdaTarget(motiveFn))
 
 const motiveLocationFn = backend.motiveLocationSync.resources.lambda as LambdaFunction
 
-const truckLocationTable        = backend.data.resources.tables['TruckLocation']
-const truckLocationHistoryTable = backend.data.resources.tables['TruckLocationHistory']
+const truckLocationTable        = stageTables['TruckLocation']
+const truckLocationHistoryTable = stageTables['TruckLocationHistory']
 
 backend.motiveLocationSync.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -1295,7 +1345,7 @@ locationSyncRule.addTarget(new EventsLambdaTarget(motiveLocationFn))
 
 const motiveFaultFn = backend.motiveFaultSync.resources.lambda as LambdaFunction
 
-const truckFaultCodeTable = backend.data.resources.tables['TruckFaultCode']
+const truckFaultCodeTable = stageTables['TruckFaultCode']
 
 backend.motiveFaultSync.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -1322,7 +1372,7 @@ faultSyncRule.addTarget(new EventsLambdaTarget(motiveFaultFn))
 
 const motiveOdometerFn = backend.motiveOdometerSync.resources.lambda as LambdaFunction
 
-const truckOdometerDayTable = backend.data.resources.tables['TruckOdometerDay']
+const truckOdometerDayTable = stageTables['TruckOdometerDay']
 
 backend.motiveOdometerSync.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -1363,16 +1413,16 @@ odometerCloseDayRule.addTarget(new EventsLambdaTarget(motiveOdometerFn, {
 // Replies in a tender's OWN Slack thread once its load exists, and moves the intake
 // item to BUILT. It never starts a thread — see the handler for the refusal.
 const intakeReconcileFn = backend.intakeReconcile.resources.lambda as LambdaFunction
-const intakeReconcileTable = backend.data.resources.tables['IntakeItem']
+const intakeReconcileTable = stageTables['IntakeItem']
 intakeReconcileFn.addEnvironment('INTAKE_TABLE_NAME', intakeReconcileTable.tableName)
-intakeReconcileFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['Load'].tableName)
+intakeReconcileFn.addEnvironment('LOAD_TABLE_NAME', stageTables['Load'].tableName)
 intakeReconcileFn.addToRolePolicy(
   new PolicyStatement({
     actions: ['dynamodb:Scan', 'dynamodb:GetItem'],
     resources: [
       intakeReconcileTable.tableArn, `${intakeReconcileTable.tableArn}/index/*`,
-      backend.data.resources.tables['Load'].tableArn,
-      `${backend.data.resources.tables['Load'].tableArn}/index/*`,
+      stageTables['Load'].tableArn,
+      `${stageTables['Load'].tableArn}/index/*`,
     ],
   }),
 )
@@ -1433,10 +1483,10 @@ blueinkMileageRule.addTarget(new EventsLambdaTarget(blueinkFn, {
 
 const complianceScannerFn = backend.complianceScanner.resources.lambda as LambdaFunction
 
-const complianceDocTable   = backend.data.resources.tables['ComplianceDocument']
-const onboardingTaskTable  = backend.data.resources.tables['OnboardingTask']
-const complianceAlertTable = backend.data.resources.tables['ComplianceAlert']
-const driverTable          = backend.data.resources.tables['Driver']
+const complianceDocTable   = stageTables['ComplianceDocument']
+const onboardingTaskTable  = stageTables['OnboardingTask']
+const complianceAlertTable = stageTables['ComplianceAlert']
+const driverTable          = stageTables['Driver']
 
 backend.complianceScanner.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -1469,11 +1519,11 @@ complianceScanRule.addTarget(new EventsLambdaTarget(complianceScannerFn))
 
 // ── Shared compliance tables ───────────────────────────────────────────────
 
-const onboardingInviteTable    = backend.data.resources.tables['OnboardingInvite']
-const signatureRequestTable    = backend.data.resources.tables['DocumentSignatureRequest']
-const driverApplicationTable   = backend.data.resources.tables['DriverApplication']
-const auditLogTable            = backend.data.resources.tables['AuditLog']
-const complianceSettingsTable  = backend.data.resources.tables['ComplianceSettings']
+const onboardingInviteTable    = stageTables['OnboardingInvite']
+const signatureRequestTable    = stageTables['DocumentSignatureRequest']
+const driverApplicationTable   = stageTables['DriverApplication']
+const auditLogTable            = stageTables['AuditLog']
+const complianceSettingsTable  = stageTables['ComplianceSettings']
 
 
 // ── onboardingPortalApi Lambda (public, token-validated Function URL) ───────
@@ -1528,8 +1578,8 @@ new CfnOutput(portalApiFn.stack, 'OnboardingPortalApiFunctionUrl', {
 // ── disputePortalApi Lambda (public Amazon dispute portal) ────────────────
 
 const disputePortalApiFn = backend.disputePortalApi.resources.lambda as LambdaFunction
-const disputeTableForPortal = backend.data.resources.tables['AmazonDispute']
-const driverTableForPortal = backend.data.resources.tables['Driver']
+const disputeTableForPortal = stageTables['AmazonDispute']
+const driverTableForPortal = stageTables['Driver']
 
 backend.disputePortalApi.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -1592,31 +1642,31 @@ backend.trackingApi.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:Scan', 'dynamodb:GetItem'],
     resources: [
-      backend.data.resources.tables['Equipment'].tableArn,
-      backend.data.resources.tables['TruckLocation'].tableArn,
-      backend.data.resources.tables['Driver'].tableArn,
-      backend.data.resources.tables['Load'].tableArn,
+      stageTables['Equipment'].tableArn,
+      stageTables['TruckLocation'].tableArn,
+      stageTables['Driver'].tableArn,
+      stageTables['Load'].tableArn,
     ],
   })
 )
-trackingApiFn.addEnvironment('EQUIPMENT_TABLE_NAME', backend.data.resources.tables['Equipment'].tableName)
-trackingApiFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME', backend.data.resources.tables['TruckLocation'].tableName)
-trackingApiFn.addEnvironment('DRIVER_TABLE_NAME', backend.data.resources.tables['Driver'].tableName)
-trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['Load'].tableName)
+trackingApiFn.addEnvironment('EQUIPMENT_TABLE_NAME', stageTables['Equipment'].tableName)
+trackingApiFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME', stageTables['TruckLocation'].tableName)
+trackingApiFn.addEnvironment('DRIVER_TABLE_NAME', stageTables['Driver'].tableName)
+trackingApiFn.addEnvironment('LOAD_TABLE_NAME', stageTables['Load'].tableName)
 // ── Step D: the shipment Customer Link and the carrier ping link ───────────
 // Same public Lambda, three new routes (GET /s/<token>, GET /l/<token>,
 // POST /l/<token>/ping). The token IS the TrackingLink row's primary key, so the
 // lookup is a GetItem and no index can be walked from outside.
 {
-  const trackingLinkTable  = backend.data.resources.tables['TrackingLink']
-  const loadCheckCallTable = backend.data.resources.tables['LoadCheckCall']
-  const trackShipmentTable = backend.data.resources.tables['Shipment']
-  const trackOrderTable    = backend.data.resources.tables['Order']
-  const trackLoadCarrier   = backend.data.resources.tables['LoadCarrier']
-  const trackDivisionTable = backend.data.resources.tables['Division']
-  const trackSettingsTable = backend.data.resources.tables['TmsSettings']
-  const trackHistoryTable  = backend.data.resources.tables['TruckLocationHistory']
-  const trackQuoteTable    = backend.data.resources.tables['Quote']
+  const trackingLinkTable  = stageTables['TrackingLink']
+  const loadCheckCallTable = stageTables['LoadCheckCall']
+  const trackShipmentTable = stageTables['Shipment']
+  const trackOrderTable    = stageTables['Order']
+  const trackLoadCarrier   = stageTables['LoadCarrier']
+  const trackDivisionTable = stageTables['Division']
+  const trackSettingsTable = stageTables['TmsSettings']
+  const trackHistoryTable  = stageTables['TruckLocationHistory']
+  const trackQuoteTable    = stageTables['Quote']
   trackingApiFn.addToRolePolicy(new PolicyStatement({
     // The link row itself: read it, bump its counters, expire it.
     actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
@@ -1639,7 +1689,7 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
       `${loadCheckCallTable.tableArn}/index/*`,
       `${trackOrderTable.tableArn}/index/*`,
       `${trackLoadCarrier.tableArn}/index/*`,
-      `${backend.data.resources.tables['Load'].tableArn}/index/*`,
+      `${stageTables['Load'].tableArn}/index/*`,
       `${trackHistoryTable.tableArn}/index/*`,
     ],
   }))
@@ -1672,7 +1722,7 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
   // Order, Load, LoadCarrier or Shipment write grant here: a file a carrier sends
   // lands PENDING and influences a billing decision only once a member of staff
   // accepts it from the review queue.
-  const trackShipmentDocTable = backend.data.resources.tables['ShipmentDocument']
+  const trackShipmentDocTable = stageTables['ShipmentDocument']
   trackingApiFn.addToRolePolicy(new PolicyStatement({
     actions:   ['dynamodb:PutItem', 'dynamodb:Query', 'dynamodb:GetItem'],
     resources: [trackShipmentDocTable.tableArn, `${trackShipmentDocTable.tableArn}/index/*`],
@@ -1682,7 +1732,7 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
   // customer page but not for this one.
   trackingApiFn.addToRolePolicy(new PolicyStatement({
     actions:   ['dynamodb:GetItem'],
-    resources: [trackLoadCarrier.tableArn, backend.data.resources.tables['Load'].tableArn],
+    resources: [trackLoadCarrier.tableArn, stageTables['Load'].tableArn],
   }))
   // A ping writes the computed delivery ETA back to the assignment so the board
   // can show it without recomputing on every load.
@@ -1731,8 +1781,8 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
     actions:   ['ssm:GetParameter'],
     resources: [integrationParamArnFor('*/webhook'), integrationParamArnFor('OPENAPI')],
   }))
-  const trackIntegrationTable = backend.data.resources.tables['Integration']
-  const trackCarrierTable = backend.data.resources.tables['Carrier']
+  const trackIntegrationTable = stageTables['Integration']
+  const trackCarrierTable = stageTables['Carrier']
   trackingApiFn.addToRolePolicy(new PolicyStatement({
     // GetItem reads the client row, UpdateItem stamps lastUsedAt, PutItem files
     // the webhook receipt with attribute_not_exists(id) — which IS the replay guard.
@@ -1780,30 +1830,30 @@ new CfnOutput(trackingApiFn.stack, 'TrackingApiFunctionUrl', { value: trackingAp
 // extractor already filled in, and a PENDING ShipmentDocument row for an invoice it
 // filed. Any widening here has to be argued on its own.
 const workflowAgentFn = backend.workflowAgent.resources.lambda as LambdaFunction
-const workflowRunTable         = backend.data.resources.tables['WorkflowRun']
-const workflowShipmentTable    = backend.data.resources.tables['Shipment']
-const workflowOrderTable       = backend.data.resources.tables['Order']
-const workflowLoadTable        = backend.data.resources.tables['Load']
-const workflowLoadCarrierTable = backend.data.resources.tables['LoadCarrier']
-const workflowCustomerTable    = backend.data.resources.tables['Customer']
-const workflowCarrierTable     = backend.data.resources.tables['Carrier']
-const workflowCarrierContactTable = backend.data.resources.tables['CarrierContact']
-const workflowLocationTable    = backend.data.resources.tables['Location']
-const workflowQuoteTable       = backend.data.resources.tables['Quote']
-const workflowShipmentDocTable = backend.data.resources.tables['ShipmentDocument']
-const workflowSettingsTable    = backend.data.resources.tables['TmsSettings']
-const workflowIntakeTable      = backend.data.resources.tables['IntakeItem']
-const workflowSubmissionTable  = backend.data.resources.tables['DriverSubmission']
-const workflowProClaimTable    = backend.data.resources.tables['ProClaim']
-const workflowIntegrationTable = backend.data.resources.tables['Integration']
-const workflowAuditLogTable    = backend.data.resources.tables['AuditLog']
+const workflowRunTable         = stageTables['WorkflowRun']
+const workflowShipmentTable    = stageTables['Shipment']
+const workflowOrderTable       = stageTables['Order']
+const workflowLoadTable        = stageTables['Load']
+const workflowLoadCarrierTable = stageTables['LoadCarrier']
+const workflowCustomerTable    = stageTables['Customer']
+const workflowCarrierTable     = stageTables['Carrier']
+const workflowCarrierContactTable = stageTables['CarrierContact']
+const workflowLocationTable    = stageTables['Location']
+const workflowQuoteTable       = stageTables['Quote']
+const workflowShipmentDocTable = stageTables['ShipmentDocument']
+const workflowSettingsTable    = stageTables['TmsSettings']
+const workflowIntakeTable      = stageTables['IntakeItem']
+const workflowSubmissionTable  = stageTables['DriverSubmission']
+const workflowProClaimTable    = stageTables['ProClaim']
+const workflowIntegrationTable = stageTables['Integration']
+const workflowAuditLogTable    = stageTables['AuditLog']
 // Step U: the tender e-mails a division's intake address received are staged as IntakeLoad
 // rows (conditional put, so a re-run never overwrites a row a reviewer started editing),
 // and the e-mail bridge asks which addresses to watch, so the division table is read-only
 // here. Put + Get only on IntakeLoad: staging can add a row and see one, never change or
 // remove one — editing and promoting are tmsShipmentActions'.
-const workflowIntakeLoadTable  = backend.data.resources.tables['IntakeLoad']
-const workflowDivisionTable    = backend.data.resources.tables['OwnershipDivision']
+const workflowIntakeLoadTable  = stageTables['IntakeLoad']
+const workflowDivisionTable    = stageTables['OwnershipDivision']
 
 // TABLE_NAME is VendorPayable: the moved AP extractor reads it under that name and
 // changing it would be a rename for no gain.
@@ -1965,13 +2015,13 @@ trackingApiFn.addToRolePolicy(new PolicyStatement({
 // Kept OUT of the isolated-preview allowlist further down — it serves a public
 // Function URL, so a preview stack must never be able to answer on it.
 const rateConSignApiFn      = backend.rateConSignApi.resources.lambda as LambdaFunction
-const signLoadCarrierTable  = backend.data.resources.tables['LoadCarrier']
-const signLoadTable         = backend.data.resources.tables['Load']
-const signShipmentTable     = backend.data.resources.tables['Shipment']
-const signCarrierDocTable   = backend.data.resources.tables['CarrierDocument']
-const signDivisionTable     = backend.data.resources.tables['Division']
-const signSettingsTable     = backend.data.resources.tables['TmsSettings']
-const signAuditLogTable     = backend.data.resources.tables['AuditLog']
+const signLoadCarrierTable  = stageTables['LoadCarrier']
+const signLoadTable         = stageTables['Load']
+const signShipmentTable     = stageTables['Shipment']
+const signCarrierDocTable   = stageTables['CarrierDocument']
+const signDivisionTable     = stageTables['Division']
+const signSettingsTable     = stageTables['TmsSettings']
+const signAuditLogTable     = stageTables['AuditLog']
 
 // The token is found by scanning LoadCarrier (the table may only gain one GSI
 // per deploy and carrierId is that one), exactly as validateInvite does.
@@ -2116,7 +2166,7 @@ googleReviewsFn.addEnvironment('GOOGLE_REVIEWS_URL',    process.env.GOOGLE_REVIE
 // ── paychexPaySync Lambda (weekly Paychex Flex → DriverPayPeriod) ───────────
 
 const paychexFn      = backend.paychexPaySync.resources.lambda as LambdaFunction
-const driverPayTable = backend.data.resources.tables['DriverPayPeriod']
+const driverPayTable = stageTables['DriverPayPeriod']
 backend.paychexPaySync.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:PutItem'],
@@ -2151,8 +2201,8 @@ backend.complianceScanner.resources.lambda.addToRolePolicy(
 // Granted/env'd here (not in the scanner block above) because the escalation
 // tables are declared in the shared-compliance section.
 
-const escalationRuleTable     = backend.data.resources.tables['EscalationRule']
-const escalationEmailLogTable = backend.data.resources.tables['EscalationEmailLog']
+const escalationRuleTable     = stageTables['EscalationRule']
+const escalationEmailLogTable = stageTables['EscalationEmailLog']
 
 backend.complianceScanner.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -2179,22 +2229,22 @@ complianceScannerFn.addEnvironment('PORTAL_BASE_URL',     PORTAL_ORIGIN)
 // tables are written via raw DynamoDB SDK; Load repoints during merge use the
 // generated AppSync mutation (allow.resource(tmsDirectoryActions) on Load).
 const directoryActionsFn = backend.tmsDirectoryActions.resources.lambda as LambdaFunction
-const directoryCustomerTable = backend.data.resources.tables['Customer']
-const directoryLocationTable = backend.data.resources.tables['Location']
-const directoryDivisionTable = backend.data.resources.tables['Division']
-const directorySettingsTable = backend.data.resources.tables['TmsSettings']
-const directoryMergeJobTable = backend.data.resources.tables['DirectoryMergeJob']
+const directoryCustomerTable = stageTables['Customer']
+const directoryLocationTable = stageTables['Location']
+const directoryDivisionTable = stageTables['Division']
+const directorySettingsTable = stageTables['TmsSettings']
+const directoryMergeJobTable = stageTables['DirectoryMergeJob']
 // Step L — spreadsheet import jobs.
-const directoryImportJobTable = backend.data.resources.tables['ImportJob']
-const directoryOwnershipDivisionTable = backend.data.resources.tables['OwnershipDivision']
-const directoryOwnershipRuleTable     = backend.data.resources.tables['OwnershipRule']
-const directoryShipmentViewTable      = backend.data.resources.tables['ShipmentView']
-const directoryShipmentColumnTemplateTable = backend.data.resources.tables['ShipmentColumnTemplate']
-const directoryLoadTable = backend.data.resources.tables['Load']
+const directoryImportJobTable = stageTables['ImportJob']
+const directoryOwnershipDivisionTable = stageTables['OwnershipDivision']
+const directoryOwnershipRuleTable     = stageTables['OwnershipRule']
+const directoryShipmentViewTable      = stageTables['ShipmentView']
+const directoryShipmentColumnTemplateTable = stageTables['ShipmentColumnTemplate']
+const directoryLoadTable = stageTables['Load']
 // Step J: one row per integration provider, API client and webhook receipt.
-const directoryIntegrationTable = backend.data.resources.tables['Integration']
+const directoryIntegrationTable = stageTables['Integration']
 // Step N2: MyCarrierPackets sync writes compliance data onto Carrier rows.
-const directoryCarrierTable = backend.data.resources.tables['Carrier']
+const directoryCarrierTable = stageTables['Carrier']
 
 const directoryTableArns = [
   directoryCustomerTable.tableArn,
@@ -2206,7 +2256,7 @@ const directoryTableArns = [
   directoryLoadTable.tableArn,
   // Step I: saving teams mirrors the membership onto each UserProfile.teamKeys,
   // so the one save keeps the settings row and the staff rows in step.
-  backend.data.resources.tables['UserProfile'].tableArn,
+  stageTables['UserProfile'].tableArn,
   // Step R: the self-serve revenue taxonomy and the saved department views.
   // tmsDirectoryActions is their only writer — the client reads the three
   // tables directly and never writes them.
@@ -2215,7 +2265,7 @@ const directoryTableArns = [
   directoryShipmentViewTable.tableArn,
   directoryShipmentColumnTemplateTable.tableArn,
   // Step R: the taxonomy and view edits are audited like every other settings write.
-  backend.data.resources.tables['AuditLog'].tableArn,
+  stageTables['AuditLog'].tableArn,
   // Step J: the integration framework's only table. Note what is NOT here —
   // Shipment, Order, Invoice and FactoringItem are deliberately absent, so no
   // integration action can reach AR or create a factoring row even by mistake.
@@ -2278,7 +2328,7 @@ directoryActionsFn.addToRolePolicy(
 // finds its receipt. Provider and API-client rows carry no `ttlEpoch` and are
 // never touched by TTL. `defineData` provisions AMPLIFY_TABLE, so the wrapper is
 // the supported way to set this.
-backend.data.resources.cfnResources.amplifyDynamoDbTables['Integration'].timeToLiveAttribute = {
+stageCfnTables['Integration'].timeToLiveAttribute = {
   attributeName: 'ttlEpoch',
   enabled: true,
 }
@@ -2288,13 +2338,17 @@ backend.data.resources.cfnResources.amplifyDynamoDbTables['Integration'].timeToL
 // Amplify-managed table. PITR keeps 35 days and is also what makes
 // ExportTableToPointInTime (the nightly export) and RestoreTableToPointInTime (restore to
 // a new table) usable. Shared file: this lands on production tables too when dev merges.
-for (const table of Object.values(backend.data.resources.cfnResources.amplifyDynamoDbTables)) {
-  table.pointInTimeRecoveryEnabled = true
+// Staged deploy: flipping it on all 60 existing tables rewrites every existing model stack, so it is a
+// stage of its own (PITR_STAGE); tables created at a later stage get it at creation.
+if (SCHEMA_STAGE >= PITR_STAGE) {
+  for (const table of Object.values(stageCfnTables)) {
+    table.pointInTimeRecoveryEnabled = true
+  }
 }
 
 // ── Step N2: MyCarrierPackets scheduled sync ───────────────────────────────
 const mcpSyncFn = backend.mcpSync.resources.lambda as LambdaFunction
-const mcpSyncCarrierTable = backend.data.resources.tables['Carrier']
+const mcpSyncCarrierTable = stageTables['Carrier']
 mcpSyncFn.addEnvironment('CARRIER_TABLE_NAME', mcpSyncCarrierTable.tableName)
 mcpSyncFn.addEnvironment('INTEGRATION_PARAM_PATH', integrationParamPath)
 mcpSyncFn.addToRolePolicy(
@@ -2305,9 +2359,9 @@ mcpSyncFn.addToRolePolicy(
 )
 // MyCarrierPackets pull: contacts and payment methods are written beside the carrier, and
 // every pull is audited. directoryActions starts a pull by invoking this function async.
-const mcpSyncContactTable = backend.data.resources.tables['CarrierContact']
-const mcpSyncPaymentTable = backend.data.resources.tables['CarrierPaymentMethod']
-const mcpSyncAuditTable   = backend.data.resources.tables['AuditLog']
+const mcpSyncContactTable = stageTables['CarrierContact']
+const mcpSyncPaymentTable = stageTables['CarrierPaymentMethod']
+const mcpSyncAuditTable   = stageTables['AuditLog']
 mcpSyncFn.addEnvironment('CARRIER_CONTACT_TABLE_NAME',        mcpSyncContactTable.tableName)
 mcpSyncFn.addEnvironment('CARRIER_PAYMENT_METHOD_TABLE_NAME', mcpSyncPaymentTable.tableName)
 mcpSyncFn.addEnvironment('AUDIT_LOG_TABLE_NAME',              mcpSyncAuditTable.tableName)
@@ -2326,9 +2380,9 @@ mcpSyncFn.addToRolePolicy(
 directoryActionsFn.addEnvironment('MCP_SYNC_FUNCTION_NAME', mcpSyncFn.functionName)
 // Step AM: when MCP activates a carrier, assignments waiting on setup advance (LoadCarrier) and the
 // rung is mirrored onto the Load and Shipment rows. No other write reaches those tables from here.
-const mcpSyncLoadCarrierTable = backend.data.resources.tables['LoadCarrier']
-const mcpSyncShipmentTable    = backend.data.resources.tables['Shipment']
-const mcpSyncLoadTable        = backend.data.resources.tables['Load']
+const mcpSyncLoadCarrierTable = stageTables['LoadCarrier']
+const mcpSyncShipmentTable    = stageTables['Shipment']
+const mcpSyncLoadTable        = stageTables['Load']
 mcpSyncFn.addEnvironment('LOAD_CARRIER_TABLE_NAME', mcpSyncLoadCarrierTable.tableName)
 mcpSyncFn.addEnvironment('SHIPMENT_TABLE_NAME',     mcpSyncShipmentTable.tableName)
 mcpSyncFn.addEnvironment('LOAD_TABLE_NAME',         mcpSyncLoadTable.tableName)
@@ -2343,7 +2397,7 @@ mcpSyncFn.addToRolePolicy(
 )
 // Step AD (Find & Invite): the invitation is noted on the load's thread. PutItem on ShipmentMessage only:
 // no Shipment, Order or invoice table is reachable from here.
-const directoryMessageTable = backend.data.resources.tables['ShipmentMessage']
+const directoryMessageTable = stageTables['ShipmentMessage']
 directoryActionsFn.addToRolePolicy(
   new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [directoryMessageTable.tableArn] }),
 )
@@ -2358,7 +2412,7 @@ mcpSyncFn.addToRolePolicy(
 )
 // Step S4: heartbeat. A successful run stamps lastOkAt on the MYCARRIERPACKETS
 // Integration row so Platform health can show an honest "last sync".
-const mcpSyncIntegrationTable = backend.data.resources.tables['Integration']
+const mcpSyncIntegrationTable = stageTables['Integration']
 mcpSyncFn.addEnvironment('INTEGRATION_TABLE_NAME', mcpSyncIntegrationTable.tableName)
 mcpSyncFn.addToRolePolicy(
   new PolicyStatement({
@@ -2376,8 +2430,8 @@ const mcpSyncRule = new Rule(mcpSyncFn.stack, 'McpSyncRule', {
 mcpSyncRule.addTarget(new EventsLambdaTarget(mcpSyncFn))
 
 // ── Step E tables, declared once for the four Lambdas that share them ───────
-const shipmentDocumentTable  = backend.data.resources.tables['ShipmentDocument']
-const shipmentNoticeTable    = backend.data.resources.tables['ShipmentNotice']
+const shipmentDocumentTable  = stageTables['ShipmentDocument']
+const shipmentNoticeTable    = stageTables['ShipmentNotice']
 // DriverSubmission / DriverSubmissionDoc are already declared for the driver API
 // above; ATTACH_DRIVER_DOC only reads them.
 
@@ -2390,39 +2444,39 @@ const shipmentNoticeTable    = backend.data.resources.tables['ShipmentNotice']
 const shipmentActionsFn = backend.tmsShipmentActions.resources.lambda as LambdaFunction
 passDataTableSuffix(shipmentActionsFn, SHIPMENT_ACTIONS_TABLES)
 ;(shipmentActionsFn.node.defaultChild as CfnFunction).timeout = 120
-const shipmentTable          = backend.data.resources.tables['Shipment']
-const orderTable             = backend.data.resources.tables['Order']
-const loadCarrierTable       = backend.data.resources.tables['LoadCarrier']
-const loadFinancialsTable    = backend.data.resources.tables['LoadFinancials']
-const loadChargeTable        = backend.data.resources.tables['LoadCharge']
-const shipmentLoadTable      = backend.data.resources.tables['Load']
-const shipmentCustomerTable  = backend.data.resources.tables['Customer']
-const shipmentSettingsTable  = backend.data.resources.tables['TmsSettings']
-const shipmentAuditLogTable  = backend.data.resources.tables['AuditLog']
+const shipmentTable          = stageTables['Shipment']
+const orderTable             = stageTables['Order']
+const loadCarrierTable       = stageTables['LoadCarrier']
+const loadFinancialsTable    = stageTables['LoadFinancials']
+const loadChargeTable        = stageTables['LoadCharge']
+const shipmentLoadTable      = stageTables['Load']
+const shipmentCustomerTable  = stageTables['Customer']
+const shipmentSettingsTable  = stageTables['TmsSettings']
+const shipmentAuditLogTable  = stageTables['AuditLog']
 // The backfill needs the driver roster to tell an own-asset load from one that only
 // ever sat on a "Broker Need to Cover" pseudo-driver.
-const shipmentDriverTable    = backend.data.resources.tables['Driver']
+const shipmentDriverTable    = stageTables['Driver']
 // Step C: booking reads the directory carrier and its documents, and the rate
 // confirmation is printed on the division's letterhead. All read-only here —
 // carrier writes belong to tmsCarrierActions.
-const shipmentCarrierTable   = backend.data.resources.tables['Carrier']
-const shipmentCarrierDocTable = backend.data.resources.tables['CarrierDocument']
-const shipmentDivisionTable  = backend.data.resources.tables['Division']
+const shipmentCarrierTable   = stageTables['Carrier']
+const shipmentCarrierDocTable = stageTables['CarrierDocument']
+const shipmentDivisionTable  = stageTables['Division']
 // Step H: quotes and carrier offers are written here — the same Lambda already
 // owns the pricing and the booking a quote turns into. CarrierContact is read
 // only, to address an offer request at a carrier's dispatch desk.
-const shipmentCarrierContactTable = backend.data.resources.tables['CarrierContact']
-const shipmentQuoteTable     = backend.data.resources.tables['Quote']
-const shipmentLaneSampleTable = backend.data.resources.tables['LaneRateSample']
+const shipmentCarrierContactTable = stageTables['CarrierContact']
+const shipmentQuoteTable     = stageTables['Quote']
+const shipmentLaneSampleTable = stageTables['LaneRateSample']
 // Step R: the ownership taxonomy. Read-only here — the rules resolve a
 // shipment's revenue division on every booking, driver change and re-tag;
 // tmsDirectoryActions stays their only writer.
-const shipmentOwnershipDivisionTable = backend.data.resources.tables['OwnershipDivision']
-const shipmentOwnershipRuleTable     = backend.data.resources.tables['OwnershipRule']
-const shipmentProClaimTable          = backend.data.resources.tables['ProClaim']
+const shipmentOwnershipDivisionTable = stageTables['OwnershipDivision']
+const shipmentOwnershipRuleTable     = stageTables['OwnershipRule']
+const shipmentProClaimTable          = stageTables['ProClaim']
 // Step I. ASSIGN_CARRIER_REP validates the rep against a real UserProfile, and
 // BATCH_SHIPMENT_TASK reuses the same lookup for SET_SALES_REP.
-const shipmentUserProfileTable       = backend.data.resources.tables['UserProfile']
+const shipmentUserProfileTable       = stageTables['UserProfile']
 
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2456,8 +2510,8 @@ shipmentActionsFn.addToRolePolicy(
       shipmentDivisionTable.tableArn,
       // Step D: LOG_CHECK_CALL writes the event log; REMOVE_LOAD_CARRIER revokes
       // the carrier's ACTIVE tracking link when the carrier comes off the load.
-      backend.data.resources.tables['LoadCheckCall'].tableArn,
-      backend.data.resources.tables['TrackingLink'].tableArn,
+      stageTables['LoadCheckCall'].tableArn,
+      stageTables['TrackingLink'].tableArn,
       // Step H: the quote and offer rows, and the lane history a delivered load
       // leaves behind. CarrierContact is read-only — the directory owns it.
       // ShipmentNotice carries the CARRIER_OFFER rows an offer request writes,
@@ -2482,7 +2536,7 @@ shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   resources: [shipmentUserProfileTable.tableArn],
 }))
 // Aljex-exit: the code -> user crosswalk (SET_ALJEX_CODE_MAP, REASSIGN_SHIPMENTS_BY_REP_CODE).
-const shipmentAljexCodeMapTable = backend.data.resources.tables['AljexCodeMap']
+const shipmentAljexCodeMapTable = stageTables['AljexCodeMap']
 shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Scan'],
   resources: [shipmentAljexCodeMapTable.tableArn],
@@ -2500,8 +2554,8 @@ shipmentActionsFn.addToRolePolicy(
       `${shipmentCustomerTable.tableArn}/index/*`,
       `${shipmentCarrierTable.tableArn}/index/*`,
       `${shipmentCarrierDocTable.tableArn}/index/*`,
-      `${backend.data.resources.tables['LoadCheckCall'].tableArn}/index/*`,
-      `${backend.data.resources.tables['TrackingLink'].tableArn}/index/*`,
+      `${stageTables['LoadCheckCall'].tableArn}/index/*`,
+      `${stageTables['TrackingLink'].tableArn}/index/*`,
       `${shipmentCarrierContactTable.tableArn}/index/*`,
       `${shipmentQuoteTable.tableArn}/index/*`,
       `${shipmentLaneSampleTable.tableArn}/index/*`,
@@ -2511,7 +2565,7 @@ shipmentActionsFn.addToRolePolicy(
 )
 // Step W: ASSIGN_ASSET refuses to move a load that is already on a box-truck
 // settlement (a stored BoxTruckTrip row). Read-only: one Scan, table ARN only.
-const shipmentBoxTruckTripTable = backend.data.resources.tables['BoxTruckTrip']
+const shipmentBoxTruckTripTable = stageTables['BoxTruckTrip']
 shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:Scan'],
   resources: [shipmentBoxTruckTripTable.tableArn],
@@ -2522,7 +2576,7 @@ shipmentActionsFn.addEnvironment('USER_POOL_ID',               backend.auth.reso
 // (the Put) belongs to workflow-agent. Scan + DeleteItem: the demo seed counts the open
 // rows (GET_DEMO_STATE) and a reset removes the one it staged; ConditionCheckItem for the
 // promote transaction's guards.
-const shipmentIntakeLoadTable = backend.data.resources.tables['IntakeLoad']
+const shipmentIntakeLoadTable = stageTables['IntakeLoad']
 shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan', 'dynamodb:UpdateItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem', 'dynamodb:ConditionCheckItem'],
   resources: [shipmentIntakeLoadTable.tableArn, `${shipmentIntakeLoadTable.tableArn}/index/*`],
@@ -2587,9 +2641,9 @@ backend.storage.resources.bucket.grantReadWrite(shipmentActionsFn, 'shipment-doc
 // routers are a different Lambda) and mints every piece of freight through this
 // file's own CREATE_SHIPMENT / BOOK_CARRIER, so it cannot reach a state the app
 // could not; both tables are already on the big grant above.
-const shipmentPostingTable = backend.data.resources.tables['ShipmentPosting']
-const shipmentDemoTable    = backend.data.resources.tables['DemoRecord']
-const shipmentMessageTable = backend.data.resources.tables['ShipmentMessage']
+const shipmentPostingTable = stageTables['ShipmentPosting']
+const shipmentDemoTable    = stageTables['DemoRecord']
+const shipmentMessageTable = stageTables['ShipmentMessage']
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
     actions: [
@@ -2617,7 +2671,7 @@ shipmentActionsFn.addToRolePolicy(
 // Integration row to decide stub vs live, and the credential pointer it carries.
 shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
-  resources: [backend.data.resources.tables['Integration'].tableArn],
+  resources: [stageTables['Integration'].tableArn],
 }))
 // The credentials themselves stay in SSM. Read-only, and scoped to the same
 // per-pool integration path tmsDirectoryActions writes — a board posting and a
@@ -2635,14 +2689,14 @@ shipmentActionsFn.addToRolePolicy(new PolicyStatement({
 // read-only here — a status change annotates covered loads, it never bounces
 // them, and booking itself stays with tmsShipmentActions.
 const carrierActionsFn        = backend.tmsCarrierActions.resources.lambda as LambdaFunction
-const carrierTable            = backend.data.resources.tables['Carrier']
-const carrierContactTable     = backend.data.resources.tables['CarrierContact']
-const carrierPaymentTable     = backend.data.resources.tables['CarrierPaymentMethod']
-const carrierDocumentTable    = backend.data.resources.tables['CarrierDocument']
-const carrierLoadCarrierTable = backend.data.resources.tables['LoadCarrier']
-const carrierLoadTable        = backend.data.resources.tables['Load']
-const carrierSettingsTable    = backend.data.resources.tables['TmsSettings']
-const carrierAuditLogTable    = backend.data.resources.tables['AuditLog']
+const carrierTable            = stageTables['Carrier']
+const carrierContactTable     = stageTables['CarrierContact']
+const carrierPaymentTable     = stageTables['CarrierPaymentMethod']
+const carrierDocumentTable    = stageTables['CarrierDocument']
+const carrierLoadCarrierTable = stageTables['LoadCarrier']
+const carrierLoadTable        = stageTables['Load']
+const carrierSettingsTable    = stageTables['TmsSettings']
+const carrierAuditLogTable    = stageTables['AuditLog']
 
 carrierActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2709,16 +2763,16 @@ backend.storage.resources.bucket.grantReadWrite(carrierActionsFn, 'carrier-docs/
 // stay on tmsShipmentActions, which is where Load status and money already live.
 // Note SETTINGS_TABLE_NAME was set to DispatchSettings by the dispatch loop, so
 // TmsSettings arrives as TMS_SETTINGS_TABLE_NAME here.
-const trackingLinkTbl       = backend.data.resources.tables['TrackingLink']
-const trackingCheckCallTbl  = backend.data.resources.tables['LoadCheckCall']
-const trackingShipmentTbl   = backend.data.resources.tables['Shipment']
-const trackingOrderTbl      = backend.data.resources.tables['Order']
-const trackingLoadCarrTbl   = backend.data.resources.tables['LoadCarrier']
-const trackingLoadTbl       = backend.data.resources.tables['Load']
-const trackingCustomerTbl   = backend.data.resources.tables['Customer']
-const trackingSettingsTbl   = backend.data.resources.tables['TmsSettings']
-const trackingAuditLogTbl   = backend.data.resources.tables['AuditLog']
-const trackingDivisionTbl   = backend.data.resources.tables['Division']
+const trackingLinkTbl       = stageTables['TrackingLink']
+const trackingCheckCallTbl  = stageTables['LoadCheckCall']
+const trackingShipmentTbl   = stageTables['Shipment']
+const trackingOrderTbl      = stageTables['Order']
+const trackingLoadCarrTbl   = stageTables['LoadCarrier']
+const trackingLoadTbl       = stageTables['Load']
+const trackingCustomerTbl   = stageTables['Customer']
+const trackingSettingsTbl   = stageTables['TmsSettings']
+const trackingAuditLogTbl   = stageTables['AuditLog']
+const trackingDivisionTbl   = stageTables['Division']
 
 trackingActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -2779,7 +2833,7 @@ trackingActionsFn.addToRolePolicy(
 // Step V. The automation engine (a) reads the shipment's tracker (UserProfile) for the
 // {trackerName}/{trackerPhone} template placeholders and (b) queries the Shipment
 // status+pickupAppt index for the POD pass (DELIVERED, last 21 days).
-const trackingUserProfileTbl = backend.data.resources.tables['UserProfile']
+const trackingUserProfileTbl = stageTables['UserProfile']
 trackingActionsFn.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:GetItem'],
@@ -2815,7 +2869,7 @@ backend.storage.resources.bucket.grantRead(trackingActionsFn, 'rate-confirms/*')
 // here rather than beside the shipment writer. It owns ShipmentMessage outright;
 // ShipmentDocument stays read-mostly (above) plus the one review stamp a POD
 // verdict writes, which is why the document grant gains UpdateItem.
-const trackingMessageTbl = backend.data.resources.tables['ShipmentMessage']
+const trackingMessageTbl = stageTables['ShipmentMessage']
 trackingActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
   resources: [trackingMessageTbl.tableArn, `${trackingMessageTbl.tableArn}/index/*`],
@@ -2850,7 +2904,7 @@ trackingActionsFn.addToRolePolicy(new PolicyStatement({
 // which collects the Loads by their ids and each load's LoadFinancials in one BatchGet each.
 // Without these two grants (and the table name) REVIEW_SHIPMENT_POD fails on a real shipment
 // with "not authorized to perform: dynamodb:BatchGetItem".
-const trackingLoadFinancialsTbl = backend.data.resources.tables['LoadFinancials']
+const trackingLoadFinancialsTbl = stageTables['LoadFinancials']
 trackingActionsFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:BatchGetItem'],
   resources: [trackingLoadTbl.tableArn, trackingLoadFinancialsTbl.tableArn],
@@ -2868,31 +2922,31 @@ trackingActionsFn.addToRolePolicy(new PolicyStatement({
 // queue row that Send to Factor hands to the existing OTR submit.
 const financeActionsFn      = backend.tmsFinanceActions.resources.lambda as LambdaFunction
 passDataTableSuffix(financeActionsFn, FINANCE_ACTIONS_TABLES)
-const invoiceTable          = backend.data.resources.tables['Invoice']
-const arPaymentTable        = backend.data.resources.tables['ArPayment']
-const financeOrderTable     = backend.data.resources.tables['Order']
-const financeShipmentTable  = backend.data.resources.tables['Shipment']
-const financeLoadTable      = backend.data.resources.tables['Load']
-const financeLoadCarrierTbl = backend.data.resources.tables['LoadCarrier']
-const financeFinancialsTbl  = backend.data.resources.tables['LoadFinancials']
-const financeChargeTable    = backend.data.resources.tables['LoadCharge']
-const financeCustomerTable  = backend.data.resources.tables['Customer']
-const financeDivisionTable  = backend.data.resources.tables['Division']
-const financeSettingsTable  = backend.data.resources.tables['TmsSettings']
-const financeAuditLogTable  = backend.data.resources.tables['AuditLog']
-const financeFactoringTable = backend.data.resources.tables['FactoringItem']
+const invoiceTable          = stageTables['Invoice']
+const arPaymentTable        = stageTables['ArPayment']
+const financeOrderTable     = stageTables['Order']
+const financeShipmentTable  = stageTables['Shipment']
+const financeLoadTable      = stageTables['Load']
+const financeLoadCarrierTbl = stageTables['LoadCarrier']
+const financeFinancialsTbl  = stageTables['LoadFinancials']
+const financeChargeTable    = stageTables['LoadCharge']
+const financeCustomerTable  = stageTables['Customer']
+const financeDivisionTable  = stageTables['Division']
+const financeSettingsTable  = stageTables['TmsSettings']
+const financeAuditLogTable  = stageTables['AuditLog']
+const financeFactoringTable = stageTables['FactoringItem']
 // Step G (AP): the bill ledger, the payment ledger and the carrier directory rows a
 // bill's payee snapshot is taken from.
-const carrierBillTable      = backend.data.resources.tables['CarrierBill']
-const apPaymentTable        = backend.data.resources.tables['ApPayment']
-const financeCarrierTable   = backend.data.resources.tables['Carrier']
-const financeCarrierPayTbl  = backend.data.resources.tables['CarrierPaymentMethod']
-const financeCarrierCntTbl  = backend.data.resources.tables['CarrierContact']
+const carrierBillTable      = stageTables['CarrierBill']
+const apPaymentTable        = stageTables['ApPayment']
+const financeCarrierTable   = stageTables['Carrier']
+const financeCarrierPayTbl  = stageTables['CarrierPaymentMethod']
+const financeCarrierCntTbl  = stageTables['CarrierContact']
 // Step I: the commission ledger, its pay periods and the staff directory the
 // commission roles resolve people from.
-const commissionTable       = backend.data.resources.tables['Commission']
-const commissionPeriodTable = backend.data.resources.tables['CommissionPayPeriod']
-const financeUserProfileTbl = backend.data.resources.tables['UserProfile']
+const commissionTable       = stageTables['Commission']
+const commissionPeriodTable = stageTables['CommissionPayPeriod']
+const financeUserProfileTbl = stageTables['UserProfile']
 
 financeActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -3024,7 +3078,7 @@ const tableArnPattern = (fn: LambdaFunction, apiId: string, suffix = '') =>
 // the reference tables, and may also write rehearsal copies (`...-rh<tag>` siblings of the
 // same API id) — never another API's (production's) tables, by IAM and by code.
 const aljexImportFn = backend.tmsAljexImport.resources.lambda as LambdaFunction
-const aljexTables = backend.data.resources.tables
+const aljexTables = stageTables
 const ALJEX_WRITE_TABLES: string[] = [
   'AljexImportJob', 'AljexMappingProfile',
   'LegacyAljexRow', 'Shipment', 'Order',
@@ -3166,7 +3220,7 @@ dataSafetyCheckRule.addTarget(new EventsLambdaTarget(dataSafetyFn, { event: Rule
 // IntakeItem task for Arcie and posts to the BCAT global Slack channel.
 
 const brokerAlertFn = backend.brokerLoadAlert.resources.lambda as LambdaFunction
-const loadTable     = backend.data.resources.tables['Load']
+const loadTable     = stageTables['Load']
 
 // Read the Load table's DynamoDB stream (the trigger source).
 brokerAlertFn.addToRolePolicy(
@@ -3229,22 +3283,21 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
     actions:   ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:ListStreams'],
     resources: [loadTable.tableStreamArn!],
   }))
-  // Writes: Load (status), LoadCheckCall (the stop event), Shipment (rederive).
+  // Writes: Load (status), LoadCheckCall (the stop event), Shipment (rederive), Order (rederive).
   // BatchGetItem is what readBundle uses to collect LoadFinancials by load id —
   // without it rederiveShipmentStatus dies after the Load row has already moved.
   projectorFn.addToRolePolicy(new PolicyStatement({
     actions:   ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
-    resources: [loadTable.tableArn, trackingCheckCallTbl.tableArn, trackingShipmentTbl.tableArn],
+    resources: [loadTable.tableArn, trackingCheckCallTbl.tableArn, trackingShipmentTbl.tableArn, trackingOrderTbl.tableArn],
   }))
   // Read-only: the bundle's other halves and the driver roster.
   projectorFn.addToRolePolicy(new PolicyStatement({
     actions:   ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Query', 'dynamodb:Scan'],
     resources: [
-      trackingOrderTbl.tableArn,
       trackingLoadCarrTbl.tableArn,
-      backend.data.resources.tables['LoadFinancials'].tableArn,
-      backend.data.resources.tables['LoadCharge'].tableArn,
-      backend.data.resources.tables['Driver'].tableArn,
+      stageTables['LoadFinancials'].tableArn,
+      stageTables['LoadCharge'].tableArn,
+      stageTables['Driver'].tableArn,
     ],
   }))
   projectorFn.addToRolePolicy(new PolicyStatement({
@@ -3254,7 +3307,7 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
       `${trackingCheckCallTbl.tableArn}/index/*`,
       `${trackingOrderTbl.tableArn}/index/*`,
       `${trackingLoadCarrTbl.tableArn}/index/*`,
-      `${backend.data.resources.tables['LoadCharge'].tableArn}/index/*`,
+      `${stageTables['LoadCharge'].tableArn}/index/*`,
     ],
   }))
   projectorFn.addEnvironment('LOAD_TABLE_NAME',            loadTable.tableName)
@@ -3262,9 +3315,9 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
   projectorFn.addEnvironment('SHIPMENT_TABLE_NAME',        trackingShipmentTbl.tableName)
   projectorFn.addEnvironment('ORDER_TABLE_NAME',           trackingOrderTbl.tableName)
   projectorFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',    trackingLoadCarrTbl.tableName)
-  projectorFn.addEnvironment('LOAD_FINANCIALS_TABLE_NAME', backend.data.resources.tables['LoadFinancials'].tableName)
-  projectorFn.addEnvironment('LOAD_CHARGE_TABLE_NAME',     backend.data.resources.tables['LoadCharge'].tableName)
-  projectorFn.addEnvironment('DRIVER_TABLE_NAME',          backend.data.resources.tables['Driver'].tableName)
+  projectorFn.addEnvironment('LOAD_FINANCIALS_TABLE_NAME', stageTables['LoadFinancials'].tableName)
+  projectorFn.addEnvironment('LOAD_CHARGE_TABLE_NAME',     stageTables['LoadCharge'].tableName)
+  projectorFn.addEnvironment('DRIVER_TABLE_NAME',          stageTables['Driver'].tableName)
   // Same own-stack scoping as BrokerLoadStreamMapping (deploy #227 cycle).
   new EventSourceMapping(Stack.of(projectorFn), 'LoadTrackingProjectorStreamMapping', {
     target:            projectorFn,
@@ -3406,7 +3459,7 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
 // stack-specific SSM SecureString parameter under /bcat/pods/<userPoolId>/connection.
 
 const podActionsFn = backend.podActions.resources.lambda as LambdaFunction
-const podDocumentTable = backend.data.resources.tables['PodDocument']
+const podDocumentTable = stageTables['PodDocument']
 const podStack = Stack.of(podActionsFn)
 // Pin the Lambda name from the root stack name (unique per app/branch/sandbox and a
 // plain string at synth time) so the async self-invoke can be granted by ARN string;
@@ -3421,7 +3474,7 @@ const podFunctionArn = podStack.formatArn({ service: 'lambda', resource: 'functi
 
 const podConnectionParamName = `/bcat/pods/${backend.auth.resources.userPool.userPoolId}/connection`
 
-const podSenderMappingTable = backend.data.resources.tables['PodSenderMapping']
+const podSenderMappingTable = stageTables['PodSenderMapping']
 
 podActionsFn.addEnvironment('POD_DOCUMENT_TABLE_NAME', podDocumentTable.tableName)
 podActionsFn.addEnvironment('POD_SENDER_MAPPING_TABLE_NAME', podSenderMappingTable.tableName)
@@ -3623,16 +3676,16 @@ const OTR_CLIENT_DOT = '547328'
 const otrActionsFn = backend.otrActions.resources.lambda as LambdaFunction
 const otrSyncFn = backend.otrStatusSync.resources.lambda as LambdaFunction
 
-const otrFactoringTable = backend.data.resources.tables['FactoringItem']
-const otrLoadTable = backend.data.resources.tables['Load']
-const otrCustomerTable = backend.data.resources.tables['Customer']
-const otrLocationTable = backend.data.resources.tables['Location']
-const otrPodTable = backend.data.resources.tables['PodDocument']
+const otrFactoringTable = stageTables['FactoringItem']
+const otrLoadTable = stageTables['Load']
+const otrCustomerTable = stageTables['Customer']
+const otrLocationTable = stageTables['Location']
+const otrPodTable = stageTables['PodDocument']
 // A POD can also arrive as a driver scan or a staff upload, which land in
 // DriverSubmissionDoc rather than PodDocument. Submit has to see both, or a POD someone
 // watched reach Slack is invisible to the thing that invoices it.
-const otrSubmissionTable = backend.data.resources.tables['DriverSubmission']
-const otrSubmissionDocTable = backend.data.resources.tables['DriverSubmissionDoc']
+const otrSubmissionTable = stageTables['DriverSubmission']
+const otrSubmissionDocTable = stageTables['DriverSubmissionDoc']
 
 for (const fn of [otrActionsFn, otrSyncFn]) {
   fn.addEnvironment('FACTORING_ITEM_TABLE_NAME', otrFactoringTable.tableName)
@@ -3750,7 +3803,7 @@ factoringIntakeFn.addToRolePolicy(
 const spotFn = backend.tmsSpotQuoter.resources.lambda as LambdaFunction
 const crmFn  = backend.tmsCrmActions.resources.lambda as LambdaFunction
 passDataTableSuffix(crmFn, CRM_ACTIONS_TABLES)
-const abTable = (name: string) => backend.data.resources.tables[name]
+const abTable = (name: string) => stageTables[name]
 const spotSettingsTable   = abTable('SpotSettings')
 const gmailConnTable      = abTable('GmailConnection')
 const spotRequestTable    = abTable('SpotRequest')
@@ -3854,15 +3907,19 @@ spotPollRule.addTarget(new EventsLambdaTarget(spotFn, {
 
 // A spot request carries the mail body: DynamoDB expires it (`ttlEpoch`, epoch seconds)
 // instead of anything sweeping. Dismissed requests get a shorter horizon from the Lambda.
-backend.data.resources.cfnResources.amplifyDynamoDbTables['SpotRequest'].timeToLiveAttribute = {
+stageCfnTables['SpotRequest'].timeToLiveAttribute = {
   attributeName: 'ttlEpoch',
   enabled: true,
 }
 // Step AO: load-keyed breadcrumbs and route-cache rows in TruckLocationHistory carry
 // `ttlEpoch` (90 / 30 days); Motive and Blue Ink rows have none and are never touched.
-backend.data.resources.cfnResources.amplifyDynamoDbTables['TruckLocationHistory'].timeToLiveAttribute = {
-  attributeName: 'ttlEpoch',
-  enabled: true,
+// Staged deploy: set ONLY in the final stage, alone (TTL_STAGE). DynamoDB allows one TTL change per
+// table per hour, so a stage that fails after this change cannot roll back (UPDATE_ROLLBACK_FAILED).
+if (SCHEMA_STAGE >= TTL_STAGE) {
+  stageCfnTables['TruckLocationHistory'].timeToLiveAttribute = {
+    attributeName: 'ttlEpoch',
+    enabled: true,
+  }
 }
 
 // ── Step AL: Carrier Sales inbound offers hub ───────────────────────────────
@@ -3893,7 +3950,7 @@ new CfnOutput(spotFn.stack, 'CarrierCallFunctionUrl', {
 })
 // Unmatched inbound offers carry the mail body: DynamoDB expires them (`ttlEpoch` is set only
 // on shipmentId='UNMATCHED' rows). Every other message row has none and is never touched.
-backend.data.resources.cfnResources.amplifyDynamoDbTables['ShipmentMessage'].timeToLiveAttribute = {
+stageCfnTables['ShipmentMessage'].timeToLiveAttribute = {
   attributeName: 'ttlEpoch',
   enabled: true,
 }
@@ -3999,7 +4056,7 @@ apInboxRule.addTarget(new EventsLambdaTarget(apInboxFn, {
 }))
 
 // An inbox item carries the e-mail text: DynamoDB expires it (`ttlEpoch`, epoch seconds).
-backend.data.resources.cfnResources.amplifyDynamoDbTables['ApInboxItem'].timeToLiveAttribute = {
+stageCfnTables['ApInboxItem'].timeToLiveAttribute = {
   attributeName: 'ttlEpoch',
   enabled: true,
 }
@@ -4017,7 +4074,7 @@ crmFn.addToRolePolicy(new PolicyStatement({
   resources: withIndexes(crmContactTable, crmDomainTable, crmActivityTable, crmAccountTable),
 }))
 // Step AI read sources (Invoice, LaneRateSample, TmsSettings, OwnershipDivision) join this statement.
-const crmAiSources = ['Invoice', 'LaneRateSample', 'TmsSettings', 'OwnershipDivision'].map((m) => backend.data.resources.tables[m])
+const crmAiSources = ['Invoice', 'LaneRateSample', 'TmsSettings', 'OwnershipDivision'].map((m) => stageTables[m])
 crmFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Query', 'dynamodb:Scan'],
   resources: withIndexes(abCustomerTable, abQuoteTable, abShipmentTable, abOrderTable, abUserProfileTable, ...crmAiSources),
@@ -4035,7 +4092,7 @@ crmFn.addToRolePolicy(new PolicyStatement({
 // Step AI (conversational dashboards) rides this router: read-only on the dashboard sources,
 // and DashboardRollup is the spec store (rows 'DASH:<id>'; Put/Update ONLY there).
 {
-  const aiTables = backend.data.resources.tables
+  const aiTables = stageTables
   crmFn.addToRolePolicy(new PolicyStatement({
     actions:   ['dynamodb:GetItem', 'dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
     resources: [aiTables['DashboardRollup'].tableArn],
@@ -4046,9 +4103,10 @@ crmFn.addToRolePolicy(new PolicyStatement({
 // Stream consumer on the six tables the dashboards are computed from, plus a five-minute
 // sweep. Reads the source tables, writes only DashboardRollup. Mappings are created in the
 // Lambda's own stack (deploy #227 cycle), like the other stream consumers.
-{
+// Skipped while the DashboardRollup table is not part of the staged schema.
+if (tableOrNull('DashboardRollup')) {
   const rollupFn = backend.tmsDashboardRollup.resources.lambda as LambdaFunction
-  const rollupTables = backend.data.resources.tables
+  const rollupTables = stageTables
   const rollupTable = rollupTables['DashboardRollup']
   const rollupSources = {
     Shipment:       rollupTables['Shipment'],

@@ -210,9 +210,14 @@ describe('Aljex import engine on the synthetic fixture', () => {
       customerLeadSource: Record<string, string>
     }
     const shipments = new Map(table(store, 'shipment').map((s) => [s.number as string, s]))
-    for (const [pro, code] of Object.entries(o.codes.salesRep)) expect({ pro, code: shipments.get(pro)?.salesRepCode }).toEqual({ pro, code })
-    for (const [pro, code] of Object.entries(o.codes.createdBy)) expect({ pro, code: shipments.get(pro)?.createdByCode }).toEqual({ pro, code })
-    for (const [pro, code] of Object.entries(o.codes.dispatcher)) expect({ pro, code: shipments.get(pro)?.dispatcherCode }).toEqual({ pro, code })
+    // Step AW R4: Aljex rep / creator / service-rep / dispatcher codes are never imported, and nobody is assigned from them.
+    expect(Object.keys(o.codes.salesRep).length).toBeGreaterThan(0)
+    for (const s of shipments.values()) {
+      for (const f of ['salesRepCode', 'createdByCode', 'serviceRepCode', 'dispatcherCode', 'salesRepId', 'carrierRepId']) expect(s[f]).toBeUndefined()
+    }
+    for (const l of table(store, 'load')) {
+      for (const f of ['salesRepId', 'carrierRepId']) expect(l[f]).toBeUndefined()
+    }
     const orders = new Map(table(store, 'order').map((x) => [x.id as string, x]))
     const loads = new Map(table(store, 'load').map((l) => [l.aljexId as string, l]))
     for (const [pro, p] of Object.entries(o.promoted)) {
@@ -389,7 +394,7 @@ describe('seed counter', () => {
 })
 
 describe('dedupe against records already on the target', () => {
-  it('enriches a live record with finance only, leaves its status/stops/carrier untouched, and reports unlinked and conflicting PROs', async () => {
+  it('enriches a live record with finance only, LINKs a live load that has no shipment (adds only), and reports conflicting PROs', async () => {
     const store = makeStore()
     const clean = await (async () => {
       const s = makeStore()
@@ -433,7 +438,6 @@ describe('dedupe against records already on the target', () => {
     const counts = done.entityCounts as AljexEntityCounts
     expect(counts.LOAD?.enriched).toBe(1)
     expect(counts.LOAD?.conflicts).toBeGreaterThanOrEqual(1)
-    expect(counts.LOAD?.skipped).toBeGreaterThanOrEqual(1)
     expect(conservation(counts).ok).toBe(true)
     expect(planned.entityCounts).toEqual(done.entityCounts)
     expect(JSON.stringify(table(store, 'shipment').find((s) => s.id === 'live-shp-1'))).toBe(shipmentBefore)
@@ -442,6 +446,207 @@ describe('dedupe against records already on the target', () => {
     expect(order.invoiceId).toBeTruthy()
     expect(order.arStatus).toMatch(/PAID|UNPAID/)
     expect(table(store, 'auditLog').some((a) => a.entityId === 'live-order-1' && a.action === 'ALJEX_IMPORT_ENRICH')).toBe(true)
+    const linked = table(store, 'load').find((l) => l.id === 'live-load-2')!
+    expect(linked.shipmentId).toBeTruthy()
+    expect(table(store, 'shipment').find((s) => s.id === linked.shipmentId)?.loadIds).toEqual(['live-load-2'])
+    expect(table(store, 'load').filter((l) => l.aljexId === u.load.aljexId)).toHaveLength(1)
+  })
+})
+
+describe('LINK class (Step AW)', () => {
+  /** A clean run supplies realistic rows; a target store gets selected loads as pre-existing, unlinked Loads. */
+  async function target(n: number, mutate: (i: number, load: EngineRow) => EngineRow = (_i, l) => l) {
+    const clean = makeStore()
+    await fullRun(clean, fixture.csv, 'P')
+    const orderById = new Map(table(clean, 'order').map((o) => [o.id as string, o]))
+    const invoiced = table(clean, 'invoice').slice(0, n)
+    const store = makeStore()
+    const live = invoiced.map((inv, i) => {
+      const order = orderById.get(inv.orderId as string)!
+      const load = table(clean, 'load').find((l) => l.shipmentId === order.shipmentId)!
+      const row = mutate(i, { ...load, id: `live-load-${i}`, aljexId: `${load.aljexId}  `, shipmentId: undefined, orderId: undefined, loadNumber: undefined, leg: undefined, status: 'IN_TRANSIT', rate: 4242 } as EngineRow)
+      store.seed('load', [row])
+      store.seed('proClaim', [{ id: normalizePro(load.aljexId as string)!, loadId: row.id, claimedAt: FIXED_NOW, claimedBy: 'backfill', origin: 'BACKFILL' }])
+      return { pro: load.aljexId as string, row }
+    })
+    return { store, live }
+  }
+  const strip = (r: EngineRow): EngineRow => {
+    const { updatedAt: _u, ...rest } = r
+    return rest
+  }
+
+  it('adds shipmentId, orderId, loadNumber and leg to the existing Load and nothing else; never inserts or deletes a Load', async () => {
+    const { store, live } = await target(3)
+    const before = new Map(live.map((l) => [l.row.id as string, strip(table(store, 'load').find((x) => x.id === l.row.id)!)]))
+    const loadsBefore = table(store, 'load').length
+    await stage(store, fixture.csv, 'aljexrun:SL')
+    const planned = await plan(store, 'aljexrun:SL')
+    const done = await apply(store, 'aljexrun:SL', 'aljexrun:AL')
+    expect(done.status).toBe('APPLIED')
+    const counts = done.entityCounts as AljexEntityCounts
+    expect(conservation(counts).ok).toBe(true)
+    expect(planned.entityCounts).toEqual(done.entityCounts)
+    expect(JSON.parse(await readAll(store.getObject('imports/jobs/aljexrun:SL/plan-summary.json'))).classes).toMatchObject({ LINK: 3, AMBIGUOUS: 0 })
+    // The importer created every OTHER load of the file; the three existing ones were reused.
+    expect(table(store, 'load').length - loadsBefore).toBe((counts.LOAD?.created ?? 0) - 3)
+    for (const { pro, row } of live) {
+      const after = strip(table(store, 'load').find((x) => x.id === row.id)!)
+      const shipment = table(store, 'shipment').find((s) => s.number === normalizePro(pro))!
+      expect(after).toEqual({ ...before.get(row.id as string)!, shipmentId: shipment.id, orderId: (shipment.orderIds as string[])[0], loadNumber: normalizePro(pro), leg: 1 })
+      expect(shipment.loadIds).toEqual([row.id])
+      expect(table(store, 'load').filter((l) => normalizePro(l.aljexId as string) === normalizePro(pro))).toHaveLength(1)
+      expect(table(store, 'proClaim').find((c) => c.id === normalizePro(pro))).toMatchObject({ loadId: row.id, shipmentId: shipment.id })
+    }
+  })
+
+  it('is idempotent: a second PLAN has no LINK candidates and a second APPLY writes nothing new', async () => {
+    const { store } = await target(2)
+    await stage(store, fixture.csv, 'aljexrun:SI')
+    await plan(store, 'aljexrun:SI')
+    await apply(store, 'aljexrun:SI', 'aljexrun:AI1')
+    const snapshot = JSON.stringify([...table(store, 'load'), ...table(store, 'shipment'), ...table(store, 'invoice')].map(strip).sort((a, b) => String(a.id).localeCompare(String(b.id))))
+    await plan(store, 'aljexrun:SI')
+    expect(JSON.parse(await readAll(store.getObject('imports/jobs/aljexrun:SI/plan-summary.json'))).classes.LINK).toBe(0)
+    const second = await apply(store, 'aljexrun:SI', 'aljexrun:AI2')
+    expect(second.status).toBe('APPLIED')
+    expect(JSON.stringify([...table(store, 'load'), ...table(store, 'shipment'), ...table(store, 'invoice')].map(strip).sort((a, b) => String(a.id).localeCompare(String(b.id))))).toBe(snapshot)
+  })
+
+  it('writes the four-bucket link report on PLAN, without touching a table', async () => {
+    const { store } = await target(2)
+    store.seed('load', [{ id: 'orphan-no-pro', status: 'SOURCING' }])
+    await stage(store, fixture.csv, 'aljexrun:SR')
+    const loadsBefore = JSON.stringify(table(store, 'load'))
+    await plan(store, 'aljexrun:SR')
+    expect(JSON.stringify(table(store, 'load'))).toBe(loadsBefore)
+    const md = await readAll(store.getObject('imports/runs/aljexrun:SR/link-report.md'))
+    expect(md).toContain('Buckets add up: YES')
+    const csv = (await readAll(store.getObject('imports/runs/aljexrun:SR/link-report.csv'))).split('\n')
+    expect(csv.filter((l) => l.includes(',MATCHED_BY_PRO,'))).toHaveLength(2)
+    expect(csv.some((l) => l.startsWith('orphan-no-pro,,LINKED_BY_ID,NO_PRO'))).toBe(true)
+  })
+
+  it('never guesses: a duplicated PRO, an existing shipment with that PRO, or a foreign claim writes nothing and is listed as ambiguous', async () => {
+    const { store, live } = await target(4)
+    // 0: a second Load carries the same PRO. 1: a Shipment with that PRO already exists. 2: claim held by another Load.
+    store.seed('load', [{ ...table(store, 'load').find((l) => l.id === 'live-load-0')!, id: 'live-load-0-twin' }])
+    store.seed('shipment', [{ id: 'existing-shp', number: normalizePro(live[1].pro)!, status: 'BOOKED', loadIds: [], orderIds: [] }])
+    store.seed('proClaim', [{ id: normalizePro(live[2].pro)!, loadId: 'someone-elses', claimedAt: FIXED_NOW, claimedBy: 'manual', origin: 'CREATE' }])
+    const before = JSON.stringify(table(store, 'load').filter((l) => ['live-load-0', 'live-load-0-twin', 'live-load-1', 'live-load-2'].includes(l.id as string)).map(strip))
+    await stage(store, fixture.csv, 'aljexrun:SA')
+    await plan(store, 'aljexrun:SA')
+    const done = await apply(store, 'aljexrun:SA', 'aljexrun:AA')
+    const counts = done.entityCounts as AljexEntityCounts
+    expect(conservation(counts).ok).toBe(true)
+    expect(JSON.parse(await readAll(store.getObject('imports/jobs/aljexrun:SA/plan-summary.json'))).classes.AMBIGUOUS).toBe(3)
+    expect(JSON.stringify(table(store, 'load').filter((l) => ['live-load-0', 'live-load-0-twin', 'live-load-1', 'live-load-2'].includes(l.id as string)).map(strip))).toBe(before)
+    const found = (await readAll(store.getObject(`imports/runs/aljexrun:AA/findings.csv`))).split('\n').filter((l) => l.startsWith('LINK_AMBIGUOUS'))
+    expect(found.map((l) => l.split(',')[3]).sort()).toEqual(['DUPLICATE_LOAD_PRO', 'PRO_CLAIMED_BY_OTHER_LOAD', 'SHIPMENT_NOT_LINKED'])
+    expect(table(store, 'shipment').filter((s) => s.number === normalizePro(live[0].pro))).toHaveLength(0)
+    // live[3] was unambiguous and linked.
+    expect(table(store, 'load').find((l) => l.id === 'live-load-3')?.shipmentId).toBeTruthy()
+  })
+
+  it('loses cleanly to a concurrent link: the conditional update fails, nothing else is written for that PRO', async () => {
+    const { store, live } = await target(1)
+    await stage(store, fixture.csv, 'aljexrun:SX')
+    await plan(store, 'aljexrun:SX')
+    const realTransact = store.transact.bind(store)
+    store.transact = async (items, label) => {
+      if (label.startsWith('link ')) store.seed('load', [{ ...table(store, 'load').find((l) => l.id === live[0].row.id)!, shipmentId: 'someone-else-linked-it' }])
+      return realTransact(items, label)
+    }
+    const done = await apply(store, 'aljexrun:SX', 'aljexrun:AX')
+    const counts = done.entityCounts as AljexEntityCounts
+    expect(counts.LOAD?.conflicts).toBeGreaterThanOrEqual(1)
+    expect(conservation(counts).ok).toBe(true)
+    expect(table(store, 'load').find((l) => l.id === live[0].row.id)?.shipmentId).toBe('someone-else-linked-it')
+    expect(table(store, 'shipment').filter((s) => s.number === normalizePro(live[0].pro))).toHaveLength(0)
+    expect((await readAll(store.getObject('imports/runs/aljexrun:AX/findings.csv'))).split('\n').some((l) => l.startsWith('LINK_RACE'))).toBe(true)
+  })
+
+  it('does not import Aljex rep, creator, service-rep or dispatcher codes onto a linked shipment either', async () => {
+    const { store } = await target(1)
+    await stage(store, fixture.csv, 'aljexrun:SC2')
+    await plan(store, 'aljexrun:SC2')
+    await apply(store, 'aljexrun:SC2', 'aljexrun:AC2')
+    for (const s of table(store, 'shipment')) for (const f of ['salesRepCode', 'createdByCode', 'serviceRepCode', 'dispatcherCode', 'salesRepId', 'carrierRepId']) expect(s[f]).toBeUndefined()
+  })
+})
+
+describe('history window and carried-over marks (Step AW R19-R21)', () => {
+  const shipDates = async (store: MemoryStore, root: string): Promise<string[]> => {
+    const idx = JSON.parse(await readAll(store.getObject(`imports/jobs/${root}/stage-index.json`))) as { chunkCount: number }
+    const out: string[] = []
+    for (let c = 0; c < idx.chunkCount; c++) {
+      const text = await readAll(store.getObject(`imports/jobs/${root}/rows-${String(c).padStart(4, '0')}.jsonl`))
+      for (const l of text.split('\n').filter(Boolean)) {
+        const r = JSON.parse(l) as { kind: string; dates: { ship: string | null } }
+        if (r.kind === 'LOAD' && r.dates.ship) out.push(r.dates.ship)
+      }
+    }
+    return out.sort()
+  }
+
+  it('skips and counts loads older than cutoff - 24 months and loads on or after the cutoff, and lists them', async () => {
+    const store = makeStore()
+    await stage(store, fixture.csv, 'aljexrun:H0')
+    const dates = await shipDates(store, 'aljexrun:H0')
+    expect(dates.length).toBeGreaterThan(10)
+    // Cutoff on the newest ship day: that day (and only it) is "after the cutoff".
+    const cutoff = dates[dates.length - 1]
+    const afterExpected = dates.filter((d) => d >= cutoff).length
+    const s = await stage(store, fixture.csv, 'aljexrun:H1', { options: { cutoffDate: cutoff } })
+    const idx = JSON.parse(await readAll(store.getObject('imports/jobs/aljexrun:H1/stage-index.json'))) as { history: { cutoffDate: string; windowStart: string; beforeWindow: number; afterCutoff: number }; stagedSkips: Record<string, number>; maxProNumber: number }
+    expect(s.status).toBe('READY')
+    expect(idx.history.afterCutoff).toBe(afterExpected)
+    expect(idx.history.windowStart).toBe(`${Number(cutoff.slice(0, 4)) - 2}${cutoff.slice(4)}`.replace(/-02-29$/, '-02-28'))
+    expect(idx.history.beforeWindow).toBe(dates.filter((d) => d < idx.history.windowStart).length)
+    const csv = (await readAll(store.getObject('imports/jobs/aljexrun:H1/history-skipped.csv'))).split('\n').filter(Boolean)
+    expect(csv).toHaveLength(1 + idx.history.afterCutoff + idx.history.beforeWindow)
+    expect(csv[0]).toBe('pro,ship_date,reason')
+    // A skipped PRO still raises the numbering floor.
+    const plain = JSON.parse(await readAll(store.getObject('imports/jobs/aljexrun:H0/stage-index.json'))) as { maxProNumber: number }
+    expect(idx.maxProNumber).toBe(plain.maxProNumber)
+  })
+
+  it('takes the cutoff from TmsSettings.aljexCutoffAt (Chicago day) when the job gives none', async () => {
+    const store = makeStore()
+    store.seed('settings', [{ id: 'default', defaultPaymentTermsDays: 30, aljexCutoffAt: '2031-11-07T06:00:00.000Z' }])
+    await stage(store, fixture.csv, 'aljexrun:H2')
+    const idx = JSON.parse(await readAll(store.getObject('imports/jobs/aljexrun:H2/stage-index.json'))) as { history: { cutoffDate: string; windowStart: string } }
+    expect(idx.history).toMatchObject({ cutoffDate: '2031-11-07', windowStart: '2029-11-07' })
+  })
+
+  it('marks every imported invoice and bill as carried over, naming the cutoff', async () => {
+    const store = makeStore()
+    await stage(store, fixture.csv, 'aljexrun:H3')
+    const dates = await shipDates(store, 'aljexrun:H3')
+    const cutoff = `${Number(dates[dates.length - 1].slice(0, 4)) + 1}-12-31`
+    await stage(store, fixture.csv, 'aljexrun:H5', { options: { cutoffDate: cutoff } })
+    await plan(store, 'aljexrun:H5')
+    const done = await apply(store, 'aljexrun:H5', 'aljexrun:H6')
+    expect(done.status).toBe('APPLIED')
+    const invoices = table(store, 'invoice')
+    const bills = table(store, 'carrierBill')
+    expect(invoices.length).toBeGreaterThan(0)
+    expect(bills.length).toBeGreaterThan(0)
+    for (const i of invoices) expect(i).toMatchObject({ markedSentAt: i.issuedAt, markedSentNote: expect.stringMatching(/^Carried over from Aljex( \(cutoff \d{4}-\d{2}-\d{2}\))?$/) })
+    for (const b of bills) expect(b).toMatchObject({ markedSentAt: expect.any(String), markedSentNote: expect.stringMatching(/^Carried over from Aljex/) })
+    expect(invoices.some((i) => i.markedSentNote === `Carried over from Aljex (cutoff ${cutoff})`)).toBe(true)
+  })
+})
+
+describe('sensitive columns', () => {
+  it.each(['Fed/SS #', 'Bank Account', 'Routing #'])('refuses a file whose header contains %s, naming the column and reading no cell', async (column) => {
+    const store = makeStore()
+    const [header, ...rest] = fixture.csv.split('\n')
+    const csv = [`${header},${column}`, ...rest.map((l) => (l ? `${l},SENTINEL-VALUE` : l))].join('\n')
+    const job = await stage(store, csv, 'aljexrun:Z')
+    expect(job.status).toBe('FAILED')
+    expect(job.error).toContain(column)
+    expect(job.error).not.toContain('SENTINEL-VALUE')
   })
 })
 

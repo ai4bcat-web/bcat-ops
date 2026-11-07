@@ -34,11 +34,12 @@ export interface ChargeMapEntry {
 }
 
 export interface DivisionRule {
-  /** `ownAsset` = carrier is the own-asset carrier; `typeCodes` = Type of Shipment in list; `carrierIds` = carrier id in list; `default`. */
-  when: 'ownAsset' | 'typeCodes' | 'carrierIds' | 'default'
+  /** `ownAsset` = carrier is the own-asset carrier; `typeCodes` = Type of Shipment in list; `carrierIds` = carrier id in list; `revType` = the Aljex Rev Type letter equals `revType` (B/I/A/O); `default`. */
+  when: 'ownAsset' | 'typeCodes' | 'carrierIds' | 'revType' | 'default'
   division: RevDivisionCode
   typeCodes?: string[]
   carrierIds?: string[]
+  revType?: string
 }
 
 export interface AljexProfile {
@@ -209,6 +210,11 @@ export const DEFAULT_ALJEX_PROFILE: AljexProfile = {
     { when: 'ownAsset', division: 'ASSETS' },
     { when: 'typeCodes', division: 'CAR_SHIPPING', typeCodes: ['V', 'VA', 'VH', 'VM', 'VZ'] },
     { when: 'carrierIds', division: 'OWNER_OPERATOR', carrierIds: [] },
+    // Aljex Rev Type (AW-CDE-plan C.5): behind every specific rule above, ahead of the default.
+    { when: 'revType', division: 'BROKERAGE', revType: 'B' },
+    { when: 'revType', division: 'ASSETS', revType: 'I' },
+    { when: 'revType', division: 'CAR_SHIPPING', revType: 'A' },
+    { when: 'revType', division: 'OWNER_OPERATOR', revType: 'O' },
     { when: 'default', division: 'BROKERAGE' },
   ],
   carrierWindowMonths: 12,

@@ -10,9 +10,10 @@
  */
 import type { AljexEntityCounts, AljexImportCursor, AljexImportJob, AljexImportPhase, AljexPlanSummary, EngineRow, EngineStore, RunSliceResult } from '../../../../src/types/tms'
 import { findUnmapped } from '../../../../src/lib/aljex/profile'
+import { classifyLinkCandidates, linkKeyForShipmentNumber, linkReportCsv, linkReportMarkdown, type LinkReport } from '../../../../src/lib/shipmentLink'
 import { collectLocations, locationRow, runCarriers, runCustomers, loadLocationMaps, selectedCarriers, scanRows, text, auditRow, type LocationAcc, type PhaseEnv } from './directory'
 import { runApLedger, runArLedger } from './ledger'
-import { buildLoadEnv, loadExistingIndex, runLoadPhase } from './load'
+import { buildLoadEnv, classifyPro, loadExistingIndex, runLoadPhase } from './load'
 import { CrashInjected, MemoryStore } from './memoryStore'
 import { loadProfile } from './profileLoad'
 import { batchFindingsKey, conservation, phaseFindingsKey, reconcile, runsPrefix } from './reconcile'
@@ -153,22 +154,20 @@ async function planPhase(store: EngineStore, job: AljexImportJob, root: string):
 
   // Class counts before anything is written.
   const existing = await loadExistingIndex(store)
-  const classes = { CREATE: 0, ENRICH: 0, UNLINKED: 0, CONFLICT: 0 }
+  const classes = { CREATE: 0, ENRICH: 0, LINK: 0, AMBIGUOUS: 0, CONFLICT: 0 }
   let already = 0
   for (let c = 0; c < stage.masters.chunkCount; c++) {
     for (const row of await readChunk(store, root, c)) {
       if (row.kind !== 'LOAD') continue
-      const key = row.proKey as string
-      const loadId = stableId('lod', `aljex:${key}`)
-      const claim = existing.claims.get(key)
-      if (claim === loadId) {
+      const { klass } = classifyPro(row, existing)
+      if (klass === 'OWN') {
         already += 1
         classes.CREATE += 1
-      } else if (existing.loads.has(key)) classes[existing.loads.get(key)!.hasShipment ? 'ENRICH' : 'UNLINKED'] += 1
-      else classes[claim ? 'CONFLICT' : 'CREATE'] += 1
+      } else classes[klass] += 1
     }
   }
   if (already) warnings.push(`${already} row(s) are already imported and will be matched`)
+  if (classes.AMBIGUOUS) warnings.push(`${classes.AMBIGUOUS} PRO(s) are ambiguous (see link-report.csv): nothing is written for them; Ryne decides`)
 
   const env: PhaseEnv = { store: overlay, rootJobId: root, runId: job.id, profile, masters: stage.masters, counts, findings, reentry: false }
   resetEntities(counts, 'CUSTOMER', 'CARRIER', 'LOCATION', 'AR_PAYMENT', 'AP_PAYMENT')
@@ -198,6 +197,7 @@ async function planPhase(store: EngineStore, job: AljexImportJob, root: string):
   if (!cons.ok) warnings.push(`conservation broken for ${cons.broken.join(', ')}`)
   const summaryReport = await reconcile(overlay, job.id, { counts, write: false, findings })
   const plan: AljexPlanSummary = { classes, warnings, bridge: summaryReport.bridge }
+  await writeLinkReport(store, root, job.id)
   await store.putObject(stageKey(root, 'plan-summary.json'), JSON.stringify(plan))
   const patch: EngineRow = { status: 'PLANNED', phase: 'PLAN', entityCounts: counts, cursor: { phase: 'PLAN' }, error: null }
   if (!(await saveJob(store, job, patch))) return { done: true, job: await readJob(store, job.id) }
@@ -311,6 +311,7 @@ async function finalize(store: EngineStore, job: AljexImportJob, stage: StageDat
     if (max > 0) await store.update('settings', 'default', { maxImportedInvoiceNumber: max }, { expression: 'attribute_not_exists(maxImportedInvoiceNumber) OR maxImportedInvoiceNumber < :v', values: { ':v': max } })
     await seedProCounter(store, { apply: true, enableNumericScheme: false, jobId: job.id })
   }
+  await writeLinkReport(store, await rootJobIdOf(store, job), job.id)
   const summary = await reconcile(store, job.id, { counts })
   const patch: EngineRow = { status: 'APPLIED', phase: 'DONE', entityCounts: counts, reportPrefix: runsPrefix(job.id), finishedAt: store.now(), appliedAt: store.now(), appliedBy: job.createdBy, cursor: { phase: 'DONE' }, error: null }
   patch.options = { ...(job.options ?? {}), reconciled: summary.reconciled }
@@ -332,4 +333,33 @@ export async function linkSkippedCarriers(store: EngineStore): Promise<number> {
     if (target && (await store.update('loadCarrier', text(lc.id), { carrierId: target }, { expression: 'attribute_not_exists(carrierId)' }))) linked += 1
   }
   return linked
+}
+
+/**
+ * Dry-run link report (`imports/runs/<job>/link-report.{md,csv}`): every Load of the target in one of the four
+ * buckets (matched by PRO / linked by ID / ambiguous / unmappable) plus the already-linked count. Reads only.
+ * The importer's LINK class is the matched-by-PRO bucket; the ID fallback is `BACKFILL_SHIPMENT` (scripts/awBackfillShipments.mjs).
+ */
+export async function writeLinkReport(store: EngineStore, root: string, jobId: string): Promise<LinkReport> {
+  const stage = await readStageData(store, root)
+  const exportKeys = new Set<string>()
+  for (let c = 0; c < stage.masters.chunkCount; c++) {
+    for (const row of await readChunk(store, root, c)) {
+      if (row.kind !== 'LOAD') continue
+      exportKeys.add(row.proKey as string)
+      const alt = linkKeyForShipmentNumber(row.pro)
+      if (alt) exportKeys.add(alt)
+    }
+  }
+  const [settings] = await store.getMany('settings', ['default'])
+  const report = classifyLinkCandidates({
+    loads: (await scanRows(store, 'load', ['id', 'aljexId', 'shipmentId'])).map((l) => ({ id: text(l.id), aljexId: text(l.aljexId), shipmentId: text(l.shipmentId) })),
+    shipments: (await scanRows(store, 'shipment', ['id', 'number'])).map((s) => ({ id: text(s.id), number: text(s.number) })),
+    claims: (await scanRows(store, 'proClaim', ['id', 'loadId'])).map((c) => ({ id: text(c.id), loadId: text(c.loadId) })),
+    exportKeys,
+    shipmentPrefix: text(settings?.shipmentPrefix) || undefined,
+  })
+  await store.putObject(`${runsPrefix(jobId)}link-report.md`, linkReportMarkdown(report))
+  await store.putObject(`${runsPrefix(jobId)}link-report.csv`, linkReportCsv(report))
+  return report
 }

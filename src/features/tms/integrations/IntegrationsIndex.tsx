@@ -16,6 +16,7 @@ import type { ColumnDef } from '@/features/tms/kit'
 import { useIntegrations } from '@/hooks/useIntegrations'
 import { badgeOf } from '@/lib/integrations/health'
 import { CATEGORIES, PROVIDERS } from '@/lib/integrations/registry'
+import { DeploymentSecretsCard } from './DeploymentSecretsCard'
 import type { IntegrationBadge, IntegrationRecord, ProviderDescriptor } from '@/lib/integrations/types'
 import { formatDateTime } from '@/lib/date'
 import { MODE_LABELS, SOURCE_LABELS, categoryLabel, missingFor, modeLabelOf } from './integrationView'
@@ -145,6 +146,7 @@ export function IntegrationsIndex() {
   return (
     <>
       {error ? <p className="tms-field-error">{error}</p> : null}
+      <DeploymentSecretsCard byKey={byKey} />
       <TmsListPage<IndexRow>
         embedded
         title="Integrations"

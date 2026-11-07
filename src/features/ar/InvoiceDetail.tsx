@@ -32,7 +32,10 @@ import {
   NOTICE_STATUS_LABEL, agingChipFor, appliedToInvoice, formatDay, noticeStatusDetail, recipientList,
 } from './arViews'
 import { EmailInvoiceDialog } from './components/EmailInvoiceDialog'
+import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
 import { ReasonDialog } from './components/ReasonDialog'
+import { ChangeTimeline } from '@/components/ChangeTimeline'
+import { entitiesWithSpellings } from '@/components/changeTimelineModel'
 import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
 import { WriteOffDialog } from './components/WriteOffDialog'
@@ -52,6 +55,7 @@ const TABS = [
   { key: 'email', label: 'E-mail' },
   { key: 'payments', label: 'Payments' },
   { key: 'factoring', label: 'Factoring' },
+  { key: 'history', label: 'What happened' },
 ]
 
 const RED = { color: 'var(--tms-badge-red)' }
@@ -64,6 +68,7 @@ export function InvoiceDetail() {
   // outside the provider, and the commission card's two buttons are not worth throwing
   // the whole invoice away for. The server decides either way.
   const groups = useAuthUser()?.groups ?? []
+  const canRelease = useBillingGrant()
 
   const [tab, setTab] = useState('summary')
   const [dialog, setDialog] = useState<DetailDialog | null>(null)
@@ -168,13 +173,13 @@ export function InvoiceDetail() {
       }
       actions={
         <>
-          <TmsButton variant="primary" aria-label="E-mail invoice" disabled={busy} onClick={() => setDialog({ kind: 'email' })}>
+          <TmsButton variant="primary" aria-label="E-mail invoice" disabled={busy || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setDialog({ kind: 'email' })}>
             E-mail
           </TmsButton>
           <TmsButton aria-label="Receive payment" disabled={busy} onClick={() => setDialog({ kind: 'payment' })}>
             Receive payment
           </TmsButton>
-          <TmsButton aria-label="Send to factor" disabled={busy} onClick={() => setDialog({ kind: 'factor' })}>
+          <TmsButton aria-label="Send to factor" disabled={busy || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setDialog({ kind: 'factor' })}>
             Send to Factor
           </TmsButton>
           <TmsButton aria-label="Write off balance" disabled={busy} onClick={() => setDialog({ kind: 'writeOff' })}>
@@ -333,10 +338,10 @@ export function InvoiceDetail() {
           title="E-mail history"
           actions={
             <>
-              <TmsButton size="sm" aria-label="Resend invoice" disabled={busy} onClick={() => setDialog({ kind: 'email' })}>
+              <TmsButton size="sm" aria-label="Resend invoice" disabled={busy || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setDialog({ kind: 'email' })}>
                 Resend
               </TmsButton>
-              <TmsButton size="sm" aria-label="Mark as sent" disabled={busy} onClick={() => setDialog({ kind: 'markSent' })}>
+              <TmsButton size="sm" aria-label="Mark as sent" disabled={busy || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setDialog({ kind: 'markSent' })}>
                 Mark as sent
               </TmsButton>
             </>
@@ -380,6 +385,19 @@ export function InvoiceDetail() {
             </p>
           )}
         </TmsCard>
+      )}
+
+      {tab === 'history' && (
+        <ChangeTimeline
+          entities={[
+            ...entitiesWithSpellings(['Invoice', 'INVOICE'], [invoice.id]),
+            ...entitiesWithSpellings(['ArPayment', 'AR_PAYMENT'], payments.map((p) => p.id)),
+            ...entitiesWithSpellings(['SHIPMENT', 'Shipment'], invoice.shipmentId ? [invoice.shipmentId] : []),
+            ...entitiesWithSpellings(['ORDER', 'Order'], invoice.orderId ? [invoice.orderId] : []),
+            ...entitiesWithSpellings(['FactoringItem', 'FACTORING_ITEM'], invoice.factoringItemId ? [invoice.factoringItemId] : []),
+          ]}
+          refreshKey={invoice.updatedAt}
+        />
       )}
 
       {tab === 'payments' && (

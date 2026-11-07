@@ -82,6 +82,8 @@ import { RequirePage, RequireAdmin, LandingRedirect } from '@/components/Require
 import { BrokeragePage } from '@/features/tms/brokerage/BrokeragePage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
 
+import { LoadRedirect } from '@/components/LoadRedirect'
+import { BillingSetupPage } from '@/features/directory/BillingSetupPage'
 import { DriverRoutes } from '@/features/driver-app/DriverRoutes'
 
 // The Aljex create/edit form is ~150 controls; load it only when someone opens it.
@@ -176,6 +178,8 @@ export default function App() {
                   <Route path="carriers/:id" element={<RequirePage page={['carriers', 'tms']}><CarriersPage /></RequirePage>} />
                   <Route path="factors" element={<RequirePage page={['factoring', 'tms']}><FactoringPage /></RequirePage>} />
                   <Route path="customers" element={<RequirePage page={['customers', 'tms']}><CustomersPage /></RequirePage>} />
+                  {/* Step AW D.2: who is billed how. Same grant as the Customers list. */}
+                  <Route path="customers/billing-setup" element={<RequirePage page={['customers', 'tms']}><BillingSetupPage /></RequirePage>} />
                   <Route path="customers/follow-ups" element={<Navigate to="/tms/customers" replace />} />
                   <Route path="locations" element={<RequirePage page={['locations', 'tms']}><LocationsPage /></RequirePage>} />
                   <Route path="vendors" element={<RequirePage page={['vendorAp', 'tms']}><VendorApPage /></RequirePage>} />
@@ -192,8 +196,10 @@ export default function App() {
               <Route path="/dashboard" element={<RequirePage page="dashboard"><DashboardPage /></RequirePage>} />
               <Route path="/calendar" element={<RequirePage page="calendar"><CalendarPage /></RequirePage>} />
               <Route path="/driver-info" element={<RequirePage page="dispatch"><DriverInfoPage /></RequirePage>} />
-              {/* The loads grid is retired: one shipment list, under the TMS shell. */}
-              <Route path="/loads" element={<Navigate to="/tms/shipments" replace />} />
+              {/* The loads grid is retired: a Load lives on its Shipment. /loads and any bookmarked
+                  /loads/:id (or /loads?id=) resolve the Load to its Shipment, keeping other query params. */}
+              <Route path="/loads" element={<LoadRedirect />} />
+              <Route path="/loads/:id" element={<LoadRedirect />} />
               <Route path="/shipments" element={<ParamRedirect to="/tms/shipments" />} />
               <Route path="/shipments/:id" element={<ParamRedirect to="/tms/shipments/:id" />} />
               <Route path="/check-calls" element={<Navigate to={CHECK_CALLS_LANDING} replace />} />

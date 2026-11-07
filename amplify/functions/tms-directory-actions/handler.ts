@@ -36,6 +36,7 @@ import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '..
 import { checkIntakeEmail, normalizeIntakeEmail } from '../../../src/lib/intakeMail'
 import { RETIRED_SEED_VIEWS, SEED_VIEWS, slugify, validateView, BOARD_COLUMN_KEYS } from '../../../src/lib/shipmentViewDefs'
 import { validateAiAgents, validatePartyMemory } from '../../../src/lib/workflows/memory'
+import { BILLING_METHODS, validateBillingFields, type BillingMethod } from '../../../src/lib/billingMethod'
 import {
   CHECK_CALL_CHANNELS,
   CHECK_CALL_MILESTONES,
@@ -66,6 +67,7 @@ import {
   validateNotificationSubscriptions,
   validateNotificationWebhooks,
 } from '../../../src/lib/brokerage/notifications'
+import { DIVISION_REP_KEYS, parseDivisionSalesReps } from '../../../src/lib/divisionSalesRep'
 import { validatePaymentTerms } from '../../../src/lib/brokerage/paymentTerms'
 import {
   IMPORT_ENTITIES,
@@ -1001,6 +1003,59 @@ function deriveActiveFromStatus(status: CustomerStatus | null): boolean {
   return !isInactiveStatus(status)
 }
 
+interface BillingFieldsState {
+  billingMethod: BillingMethod | null
+  apEmail: string | null
+  invoiceCopyEmails: string[] | null
+  billingNeedsReview: string | null
+}
+
+/**
+ * Step AW stage D. Absent keys keep the stored value (a save of another field, or the EDI patch that sends the
+ * whole record back, never clears them). When a person changes the method, AP e-mail or copy list the review flag
+ * is cleared unless the request names a different one. Validation only runs when the billing fields change, so a
+ * customer with a flagged import can still be edited for anything else.
+ */
+function resolveBillingFields(
+  input: Record<string, unknown>,
+  existing: Record<string, unknown> | null,
+  isCreate: boolean,
+): { after: BillingFieldsState; before: BillingFieldsState; changed: boolean } {
+  const before: BillingFieldsState = {
+    billingMethod: (existing?.billingMethod as BillingMethod | undefined) ?? null,
+    apEmail: (existing?.apEmail as string | undefined) ?? null,
+    invoiceCopyEmails: (existing?.invoiceCopyEmails as string[] | undefined) ?? null,
+    billingNeedsReview: (existing?.billingNeedsReview as string | undefined) ?? null,
+  }
+  const method = 'billingMethod' in input ? optionalEnumStrict(input.billingMethod, BILLING_METHODS, 'billingMethod') : before.billingMethod
+  const apRaw = 'apEmail' in input ? optionalString(input.apEmail, 254) : before.apEmail
+  const copyRaw = 'invoiceCopyEmails' in input ? optionalStringArray(input.invoiceCopyEmails, 254) : before.invoiceCopyEmails
+  const copy = copyRaw ? [...new Set(copyRaw.map((e) => e.toLowerCase()))] : null
+  const after: BillingFieldsState = {
+    billingMethod: method,
+    apEmail: apRaw ? apRaw.toLowerCase() : null,
+    invoiceCopyEmails: copy && copy.length > 0 ? copy : null,
+    billingNeedsReview: 'billingNeedsReview' in input ? optionalString(input.billingNeedsReview, 500) : before.billingNeedsReview,
+  }
+  const changed =
+    after.billingMethod !== before.billingMethod ||
+    after.apEmail !== before.apEmail ||
+    JSON.stringify(after.invoiceCopyEmails) !== JSON.stringify(before.invoiceCopyEmails)
+  if (changed || (isCreate && (after.billingMethod || after.apEmail || after.invoiceCopyEmails))) {
+    const errors = validateBillingFields(after)
+    const first = Object.values(errors)[0]
+    if (first) throw new Error(first)
+    if (after.billingNeedsReview === before.billingNeedsReview) after.billingNeedsReview = null
+  }
+  return { after, before, changed: changed || (isCreate && (after.billingMethod != null || after.apEmail != null || after.invoiceCopyEmails != null)) }
+}
+
+async function auditBillingChange(id: string, name: string, billing: { before: BillingFieldsState; after: BillingFieldsState; changed: boolean }, caller: Caller): Promise<void> {
+  if (!billing.changed) return
+  await writeAudit('CUSTOMER', id, 'BILLING_METHOD_SET', caller, { name, before: billing.before, after: billing.after })
+}
+
+
 async function upsertCustomer(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
   const name = assertString(input.name, 'name')
   const normalizedName = normalizeName(name)
@@ -1114,6 +1169,7 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
   const active = finalStatus != null ? deriveActiveFromStatus(finalStatus) : (optionalBoolean(input.active) ?? true)
 
   const now = nowIso()
+  const billing = resolveBillingFields(input, existing, isCreate)
   // Step K — the standing notes the AI agents read before they propose anything for
   // this customer. Human-edited here and nowhere else; the agent only reads it.
   const aiMemory = validatePartyMemory(input.aiMemory, existing?.aiMemory, caller.email, now)
@@ -1197,6 +1253,11 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     trackingMode: 'trackingMode' in input ? optionalEnumStrict(input.trackingMode, CUSTOMER_TRACKING_MODES, 'trackingMode') : (existing?.trackingMode as string | undefined) ?? null,
     trackingMethod: 'trackingMethod' in input ? optionalEnumStrict(input.trackingMethod, TRACKING_METHODS, 'trackingMethod') : (existing?.trackingMethod as string | undefined) ?? null,
     driverSmsTarget: 'driverSmsTarget' in input ? optionalEnumStrict(input.driverSmsTarget, DRIVER_SMS_TARGETS, 'driverSmsTarget') : (existing?.driverSmsTarget as string | undefined) ?? null,
+    // Step AW stage D — how this customer is billed. Absent keys keep what is stored.
+    billingMethod: billing.after.billingMethod,
+    apEmail: billing.after.apEmail,
+    invoiceCopyEmails: billing.after.invoiceCopyEmails,
+    billingNeedsReview: billing.after.billingNeedsReview,
 
     createdBy: isCreate ? caller.email : (existing?.createdBy as string) ?? caller.email,
     updatedBy: caller.email,
@@ -1212,6 +1273,7 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
         ConditionExpression: 'attribute_not_exists(id)',
       }),
     )
+    await auditBillingChange(id, name, billing, caller)
     return item
   }
 
@@ -1243,6 +1305,7 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
       }),
     )
     if (!result.Attributes) throw new Error('Customer update failed')
+    await auditBillingChange(id, name, billing, caller)
     return unmarshall(result.Attributes)
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -1914,6 +1977,13 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
     notificationSubscriptions: keep(input.notificationSubscriptions, (v) => validateNotificationSubscriptions(v, { teams: item.teams as Team[] | undefined }), 'notificationSubscriptions'),
     notificationWebhooks: keep(input.notificationWebhooks, (v) => validateNotificationWebhooks(v, existing?.notificationWebhooks as NotificationWebhook[] | undefined), 'notificationWebhooks'),
     notificationDefaults: keep(input.notificationDefaults, validateNotificationDefaults, 'notificationDefaults'),
+    divisionSalesReps: keep(input.divisionSalesReps, (v) => {
+      if (v === null) return null
+      const map = parseDivisionSalesReps(v)
+      const bad = Object.keys(map).filter((k) => !(DIVISION_REP_KEYS as readonly string[]).includes(k))
+      if (bad.length) throw new Error(`divisionSalesReps: unknown division ${bad.join(', ')}`)
+      return map
+    }, 'divisionSalesReps'),
     paymentTerms: keep(input.paymentTerms, (v) => validatePaymentTerms(v, { defaultPaymentTermsDays: defaultPaymentTermsDays as number | undefined }), 'paymentTerms'),
 
     updatedBy: caller.email,

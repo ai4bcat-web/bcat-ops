@@ -16,8 +16,11 @@ import {
   applyAljexImport, cancelAljexImport, getAljexImport, getAljexProfile, listAljexImports, pauseAljexImport,
   planAljexImport, prepareAljexImport, resumeAljexImport, sampleAljexImport, saveAljexProfile, stageAljexImport,
 } from '@/lib/apiClient'
+import { detectCarriersLayout } from '@/lib/aljex/layouts/carriers'
+import { detectCustomersLayout } from '@/lib/aljex/layouts/customers'
 import { DEFAULT_ALJEX_PROFILE } from '@/lib/aljex/profile'
 import type { AljexProfile } from '@/lib/aljex/profile'
+import { SENSITIVE_COLUMNS_MESSAGE, findSensitiveHeaders } from '@/lib/aljex/sensitiveColumns'
 import type { AljexImportJob, AljexMappingProfileBody, AljexSampleRow } from '@/types/tms'
 import { AljexApplyPanel } from './components/AljexApplyPanel'
 import { AljexJobList } from './components/AljexJobList'
@@ -38,6 +41,10 @@ interface PickedFile {
   file: File
   hash: string
   layout: LayoutDetection
+  /** Sensitive headers found (names only; no cell is read). Any entry refuses the upload. */
+  sensitive: string[]
+  /** The per-file directory layout the header matches, if any (customers / carriers lists). */
+  directoryLayout: 'customers' | 'carriers' | null
 }
 
 export function AljexImportPage() {
@@ -130,7 +137,9 @@ export function AljexImportPage() {
     setPicked(null)
     try {
       const [head, hash] = await Promise.all([file.slice(0, HEADER_BYTES).text(), file.arrayBuffer().then(sha256Hex)])
-      setPicked({ file, hash, layout: detectLayout(parseHeaderRecord(head)) })
+      const headers = parseHeaderRecord(head)
+      const directoryLayout = detectCustomersLayout(headers).matches ? 'customers' : detectCarriersLayout(headers).matches ? 'carriers' : null
+      setPicked({ file, hash, layout: detectLayout(headers), sensitive: findSensitiveHeaders(headers), directoryLayout })
     } catch (e) {
       setError(messageOf(e))
     } finally {
@@ -269,7 +278,15 @@ export function AljexImportPage() {
                       ? 'matches the saved layout'
                       : `does not match the saved layout (${picked.layout.expectedCount} columns expected${picked.layout.mismatchedColumns.length ? `; columns ${picked.layout.mismatchedColumns.join(', ')} differ` : ''})`}
                   </p>
-                  <TmsButton variant="primary" disabled={!picked.layout.matches || busy != null} onClick={() => void upload()}>
+                  {picked.directoryLayout ? (
+                    <p data-testid="directory-layout"><TmsBadge tone="turquoise">Aljex {picked.directoryLayout} list recognised</TmsBadge>{' '}Customer and carrier lists are loaded with the directory import (dry run, then apply), not through this full-export stepper.</p>
+                  ) : null}
+                  {picked.sensitive.length > 0 ? (
+                    <TmsAlert tone="red" title="Sensitive columns found: upload refused">
+                      <span data-testid="sensitive-refusal">{SENSITIVE_COLUMNS_MESSAGE} Columns: {picked.sensitive.join(', ')}.</span>
+                    </TmsAlert>
+                  ) : null}
+                  <TmsButton variant="primary" disabled={!picked.layout.matches || picked.sensitive.length > 0 || busy != null} onClick={() => void upload()}>
                     {busy === 'upload' ? 'Uploading…' : 'Upload and stage'}
                   </TmsButton>
                   {!picked.layout.matches ? <Hint>The importer only reads the layout it knows. Export the full Aljex file again, or ask for a new layout profile.</Hint> : null}
@@ -361,8 +378,8 @@ export function AljexImportPage() {
               {job.plan ? (
                 <div style={{ marginTop: 12 }}>
                   <p data-testid="plan-classes">
-                    {(['CREATE', 'ENRICH', 'UNLINKED', 'CONFLICT'] as const).map((k) => (
-                      <span key={k} style={{ marginRight: 12 }}><TmsBadge tone={k === 'CONFLICT' && job.plan!.classes[k] > 0 ? 'red' : 'gray'}>{k}</TmsBadge> {job.plan!.classes[k].toLocaleString('en-US')}</span>
+                    {(['CREATE', 'ENRICH', 'LINK', 'AMBIGUOUS', 'CONFLICT'] as const).map((k) => (
+                      <span key={k} style={{ marginRight: 12 }}><TmsBadge tone={(k === 'CONFLICT' || k === 'AMBIGUOUS') && job.plan!.classes[k] > 0 ? 'red' : 'gray'}>{k}</TmsBadge> {job.plan!.classes[k].toLocaleString('en-US')}</span>
                     ))}
                   </p>
                   {job.plan.warnings.length > 0 ? (

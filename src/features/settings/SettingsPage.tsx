@@ -22,6 +22,7 @@ import { DocumentSettingsCard } from './DocumentSettingsCard'
 import { ArSettingsCard } from './ArSettingsCard'
 import { ApSettingsCard } from './ApSettingsCard'
 import { ApInboxSettingsCard } from './ApInboxSettingsCard'
+import { InvoiceCopyCard } from './InvoiceCopyCard'
 import { QuoteSettingsCard } from './QuoteSettingsCard'
 import { ShipmentSettingsCard } from './ShipmentSettingsCard'
 import { ChargeCodesCard } from './ChargeCodesCard'
@@ -63,6 +64,7 @@ export function SettingsPage() {
           <ArSettingsCard />
           <ApSettingsCard />
           <ApInboxSettingsCard />
+          <InvoiceCopyCard />
           <QuoteSettingsCard />
           <TeamsCard />
           <CommissionSettingsCard />

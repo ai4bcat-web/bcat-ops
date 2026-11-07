@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
+import { MemoryRouter } from 'react-router-dom'
 import type { DataExportJob, DataStatus } from '@/types/tms'
 
 const api = vi.hoisted(() => ({
@@ -11,6 +12,8 @@ const api = vi.hoisted(() => ({
   getDataStatus: vi.fn(),
   listExports: vi.fn(),
   startCsvExport: vi.fn(),
+  getTmsSettings: vi.fn(async () => null),
+  saveArSettings: vi.fn(),
 }))
 
 // The mint utility has its own test and its own data (loads); this page's tests are about exports.
@@ -36,7 +39,7 @@ const start = () => screen.getByRole('button', { name: /Start CSV export/ })
 
 describe('DataSafetyPage', () => {
   it('shows PITR coverage and the sync command', async () => {
-    render(<DataSafetyPage />)
+    render(<MemoryRouter><DataSafetyPage /></MemoryRouter>)
     expect(await screen.findByTestId('backup-status')).toHaveTextContent('93 of 95 tables')
     expect(screen.getByTestId('s3-sync')).toHaveTextContent('aws s3 sync')
     expect(screen.getByText(/Without recovery: Alpha, Beta/)).toBeInTheDocument()
@@ -44,7 +47,7 @@ describe('DataSafetyPage', () => {
 
   it('will not start a CSV export until the personal-data acknowledgement is ticked', async () => {
     api.startCsvExport.mockResolvedValue({ job: JOB })
-    render(<DataSafetyPage />)
+    render(<MemoryRouter><DataSafetyPage /></MemoryRouter>)
     await screen.findByTestId('backup-status')
     expect(start()).toBeDisabled()
     expect(screen.getByTestId('csv-block-reason')).toHaveTextContent(/personal data/)
@@ -58,7 +61,7 @@ describe('DataSafetyPage', () => {
 
   it('exporting ALL tables also needs the typed phrase, exactly', async () => {
     api.startCsvExport.mockResolvedValue({ job: { ...JOB, scope: 'ALL' } })
-    render(<DataSafetyPage />)
+    render(<MemoryRouter><DataSafetyPage /></MemoryRouter>)
     await screen.findByTestId('backup-status')
     fireEvent.change(screen.getByLabelText('Export scope'), { target: { value: 'ALL' } })
     fireEvent.click(screen.getByLabelText('Acknowledge personal data'))
@@ -74,7 +77,7 @@ describe('DataSafetyPage', () => {
 
   it('shows the server refusal verbatim', async () => {
     api.startCsvExport.mockRejectedValue(new Error('Owner or ADMIN only.'))
-    render(<DataSafetyPage />)
+    render(<MemoryRouter><DataSafetyPage /></MemoryRouter>)
     await screen.findByTestId('backup-status')
     fireEvent.click(screen.getByLabelText('Acknowledge personal data'))
     fireEvent.click(start())
@@ -88,7 +91,7 @@ describe('DataSafetyPage', () => {
       jobId: 'csv-1', expiresInSeconds: 900, manifestUrl: 'https://s3.example.invalid/manifest',
       files: [{ name: 'Customer-0001.csv', key: 'k', url: 'https://s3.example.invalid/c', bytes: 2048, pii: true }],
     })
-    render(<DataSafetyPage />)
+    render(<MemoryRouter><DataSafetyPage /></MemoryRouter>)
     fireEvent.click(await screen.findByRole('button', { name: 'Open export csv-1' }))
     expect(await screen.findByText('Customer-0001.csv')).toHaveAttribute('href', 'https://s3.example.invalid/c')
     expect(screen.getByText('Download manifest')).toBeInTheDocument()
