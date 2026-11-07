@@ -75,10 +75,34 @@ const schema = a.schema({
       // delivery*/origin*/destination*/*DriverId fields above are dual-written mirrors
       // derived from stops (first pickup → pickup*, last delivery → delivery*).
       stops:           a.json(),
+
+      // ── Shipment / Order / Load (Step B): the lookup-index key fields only ─
+      // GSI prep. The four attributes below are the keys of the three new Load indexes,
+      // copied verbatim from the TMS tree so the later merge has no schema conflict. They
+      // are additive and nullable; nothing on main reads or writes them yet.
+      shipmentId:      a.string(),   // parent Shipment (movement)
+      status: a.enum([
+        'SOURCING', 'BOOKED', 'PLANNED', 'DISPATCHED', 'LOADING', 'PICKED_UP',
+        'IN_TRANSIT', 'RECOVERED', 'ARRIVED_AT_DELIVERY_TERMINAL', 'OUT_FOR_DELIVERY',
+        'UNLOADING', 'DELIVERED', 'INVOICING', 'CANCELED',
+      ]),
+      nextCheckCallAt: a.datetime(),
+      // Sparse marker: the literal 'OPEN' only while a check call is outstanding, so
+      // the checkCallOpen index holds the worklist and nothing else.
+      checkCallOpen:   a.string(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
-    .secondaryIndexes((index) => [index('customerId')])
+    .secondaryIndexes((index) => [
+      index('customerId'),
+      // Step B board queries: one shipment's legs, the status tabs, and the
+      // outstanding check-call worklist (sparse — only rows with checkCallOpen set).
+      // Status is deliberately not sorted by pickupAppt: own-fleet saves often
+      // write '' for undated stops, and DynamoDB GSI sort keys cannot be empty.
+      index('shipmentId'),
+      index('status'),
+      index('checkCallOpen').sortKeys(['nextCheckCallAt']),
+    ])
     .authorization((allow) => [
       // Phase 1: Load remains userPool-editable; merge repoints use schema-level IAM auth.
       allow.authenticated(),
@@ -1110,6 +1134,10 @@ const schema = a.schema({
       user:       a.string().required(),
       changes:    a.json().required(),
     })
+    // The one PERF index: History, the carrier activity tab, Load Review's Released tab and
+    // the driver-signup refusals read one record's rows (or one entity type) instead of scanning
+    // the whole table. The client falls back to the old filtered scan until this is deployed.
+    .secondaryIndexes((index) => [index('entityType').sortKeys(['entityId'])])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     .disableOperations(['subscriptions'])
