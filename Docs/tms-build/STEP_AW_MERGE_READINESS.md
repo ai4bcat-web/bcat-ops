@@ -141,3 +141,21 @@ Draft list for Ryne to confirm: `/Users/adminoid/aljex-export/billing-method-dra
   Balance Due (reconciliation only), Customer Type, Shipments counts, first/last shipment, Status.
 - 24 names repeat (e.g. MANCHESTER MILLS LLC, TRAFFIX, FOX LOGISTICS): key on Account #, never on name; list
   the duplicate groups for Ryne.
+
+## Aljex carrier list received (2026-11-08)
+File: `/Users/adminoid/aljex-export/aljex-carriers-2026-11-08.csv` (2,462 rows, 40 columns, outside the repo,
+mode 600). **Sensitive columns: `Fed/SS #`, `Bank Account`, `Routing #`.** Never read, print, log, or put them
+in any report, test, fixture, screenshot or BUILD_LOG. Default: do NOT import them into BCAT; the importer
+skips those three columns (decision for Ryne later; if he wants ACH details in BCAT they go in an encrypted
+field, not plain Carrier columns). Report only counts of how many rows have each.
+Findings: 2,443 rows are carriers (Carrier Y/N = Y), 19 are other vendors; 2,191 carriers active (Status Y),
+260 inactive. MC filled on 2,361, DOT on 2,373; 1 MC appears on more than one carrier row; 17 vendor names
+repeat. 187 rows have a Factor Id (carrier paid via a factor: map to the carrier's factor / remit-to),
+14 have Quick Pay (days 10 or 2, % 6.00 or 2.00), 11 have terms (30). Remit-to address on 2,437. Safety rating
+mostly NONE (2,144), 253 SATISFACTORY, 40 CONDITIONAL, 6 UNSATISFACTORY. `Aljex Carrier ID` is on every row:
+store it as the cross-reference key (match on MC/DOT first, then Aljex Carrier ID, never on name alone).
+Dev already holds 933 carrier rows across two tables, and 378 of the 2,360 distinct Aljex MCs are already
+there; production has no carrier directory table. Dry run: new vs matching by MC/DOT, conflicts (same MC
+different name or e-mail), the duplicate-MC pair, inactive carriers (import inactive, never active), and
+carriers with a Factor Id. Reconciliation (stage E) compares name, MC, DOT, remit-to, terms, quick pay,
+status, factor.
