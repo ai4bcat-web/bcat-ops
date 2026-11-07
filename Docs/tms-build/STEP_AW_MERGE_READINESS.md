@@ -281,3 +281,12 @@ flag them in the UI** (a "Possible duplicate" badge on the customer list/profile
 merge later). 5. **GO: Ryne authorised starting tonight** (fresh backup, then the GSI prep push to main, then the
 full merge once the rehearsal regression run is clean) so he can fix bugs on Sunday. The go/no-go criteria
 still apply to the full merge: nothing that breaks existing production functionality ships.
+
+## Aljex big export of 2026-11-07 supersedes the 2026-11-03 file
+File: `/Users/adminoid/aljex-export/aljex-full-export-2026-11-07.csv` (outside the repo, mode 600): 8,347 rows,
+the same 244 columns, PRO 6000..14939, deliveries through 2026-11-06, 4 repeated PROs (as before). Versus the
+11-03 file: 27 new loads (PRO 14913..14939, which are the 25 production loads minted after the old export plus
+2), none dropped, and updates on existing loads (status 30, paid amount 33, invoice date 38, delivered date 27,
+carrier name 11, invoice amount 5). Ryne: "use this one instead". Use it for the load import, the 24-month
+window (2024-11-07 onward) and every reconciliation. Keep the 11-03 file untouched as history. The 2 loads
+beyond the 25 in production, and the repeated PROs, go in the dry-run report.
