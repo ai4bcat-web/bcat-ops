@@ -123,3 +123,21 @@ Aljex import: Loads with an Aljex-style PRO, how many of those match an imported
 how many match more than once or not at all, and how many have no PRO. Confirm whether the Aljex "PRO" is
 the same value as the shipment number the dev importer stored. The dry-run backfill report lists
 matched-by-PRO, linked-by-ID, ambiguous (needs Ryne) and unmappable separately.
+
+## Aljex customer list received (2026-11-08) and how factor/manual is derived
+File: `/Users/adminoid/aljex-export/aljex-customers-2026-11-08.csv` (761 rows, 92 columns, outside the repo; it
+contains a Web Password column: never read, print, log or import that column). Findings: 516 rows are
+Status Y (active), 245 are N. In Aljex the **E-Billing Email** routes the invoice:
+`ivanfactoring@bcatcorp.com` = factored (478 active customers); any other address = invoiced manually
+(38 active, of which 7 use invoices@bcatcorp.com and 2 use invoicefactoring@bcatcorp.com, internal addresses
+flagged for Ryne). No active row has a blank address or more than one address. `Invoice by` / `Billing Pref`
+is 1 (504) or P (257, paper?); treat as informational and list the 12 active P rows for Ryne.
+Draft list for Ryne to confirm: `/Users/adminoid/aljex-export/billing-method-draft-2026-11-08.csv`.
+- Seed rule (Billing setup import, stage D): FACTOR when the e-billing address is exactly the factoring
+  address; MANUAL + AP e-mail = that address otherwise; flagged rows stay "needs review" and are NOT applied
+  until Ryne confirms. Inactive (Status N) customers import as inactive with no method required.
+- Customer import maps the other useful fields: Name, address, phone, contacts and e-mails, Account #
+  (store as the Aljex key for the cross-check), Salesrep code, Rev Type, Invoice Terms Days, Credit Limit,
+  Balance Due (reconciliation only), Customer Type, Shipments counts, first/last shipment, Status.
+- 24 names repeat (e.g. MANCHESTER MILLS LLC, TRAFFIX, FOX LOGISTICS): key on Account #, never on name; list
+  the duplicate groups for Ryne.
