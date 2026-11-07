@@ -123,11 +123,10 @@ describe('apiClient', () => {
 })
 
 /**
- * Env wiring that changed on purpose. `vendorApExtractFn`: the Lambda is deleted, its extractor moved
- * into workflow-agent (AW_SCHEMA_DIFF #5). `directoryActionsFn`: it derives `<Model>-<suffix>` table
+ * Env wiring that changed on purpose. `directoryActionsFn`: it derives `<Model>-<suffix>` table
  * names from DATA_TABLE_SUFFIX instead of one env var per table (deploy 158), so that one var must stay.
+ * (`vendorApExtractFn` is wired again, behind the stage gate, until the stage that creates WorkflowRun.)
  */
-const RETIRED_LAMBDAS = new Set(['vendorApExtractFn'])
 const REPLACED_WIRING: Record<string, string> = { directoryActionsFn: 'DATA_TABLE_SUFFIX' }
 
 describe('backend.ts env wiring', () => {
@@ -142,16 +141,12 @@ describe('backend.ts env wiring', () => {
     expect(wantedPairs.length).toBeGreaterThan(100)
     const lost = wantedPairs.filter((p) => {
       const lambda = p.split(':')[0]
-      return !wired.has(p) && !RETIRED_LAMBDAS.has(lambda) && !(lambda in REPLACED_WIRING)
+      return !wired.has(p) && !(lambda in REPLACED_WIRING)
     })
     expect(lost).toEqual([])
   })
 
   it.each(Object.entries(REPLACED_WIRING))('%s keeps the replacement env var %s', (lambda, name) => {
     expect(wired.has(`${lambda}:${name}`)).toBe(true)
-  })
-
-  it('has really retired the Lambdas it excuses', () => {
-    for (const lambda of RETIRED_LAMBDAS) expect([...wired].filter((p) => p.startsWith(`${lambda}:`))).toEqual([])
   })
 })

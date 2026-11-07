@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { FINAL_STAGE, LAST_MODEL_STAGE, MODEL_STAGE, PRODUCTION_MODELS, TTL_STAGE, modelPresent, parseSchemaStage } from './stages'
+import {
+  FINAL_STAGE, LAST_MODEL_STAGE, MODEL_STAGE, PRODUCTION_MODELS, TRIGGER_MODELS, TTL_STAGE, VENDOR_AP_EXTRACT_RETIRED_STAGE,
+  modelPresent, parseSchemaStage, triggerEnabled, vendorApExtractLegacy, type TriggerName,
+} from './stages'
 
 describe('parseSchemaStage', () => {
   it('unset, empty and >= final all mean the whole schema', () => {
@@ -35,5 +38,35 @@ describe('modelPresent', () => {
 
   it('no production model is also staged', () => {
     expect(Object.keys(MODEL_STAGE).filter((m) => PRODUCTION_MODELS.has(m))).toEqual([])
+  })
+})
+
+describe('triggerEnabled', () => {
+  const expectedStage: Record<TriggerName, number> = {
+    workflowSweep: 4,
+    spotQuoterPoll: 2,
+    mcpSync: 2,
+    dataSafetyNightly: 4,
+    trackingAutomation: 3,
+  }
+
+  it.each(Object.entries(expectedStage))('%s is off below stage %i and on from it', (name, stage) => {
+    expect(triggerEnabled(name as TriggerName, stage - 1)).toBe(false)
+    expect(triggerEnabled(name as TriggerName, stage)).toBe(true)
+    expect(triggerEnabled(name as TriggerName, FINAL_STAGE)).toBe(true)
+  })
+
+  it('no trigger is created at stage 0 (every one reads a table that does not exist yet)', () => {
+    for (const name of Object.keys(TRIGGER_MODELS) as TriggerName[]) expect(triggerEnabled(name, 0)).toBe(false)
+  })
+})
+
+describe('vendorApExtractLegacy', () => {
+  it('production extractor stays below the stage that creates WorkflowRun and goes from it', () => {
+    expect(VENDOR_AP_EXTRACT_RETIRED_STAGE).toBe(MODEL_STAGE.WorkflowRun)
+    expect(vendorApExtractLegacy(0)).toBe(true)
+    expect(vendorApExtractLegacy(VENDOR_AP_EXTRACT_RETIRED_STAGE - 1)).toBe(true)
+    expect(vendorApExtractLegacy(VENDOR_AP_EXTRACT_RETIRED_STAGE)).toBe(false)
+    expect(vendorApExtractLegacy(FINAL_STAGE)).toBe(false)
   })
 })

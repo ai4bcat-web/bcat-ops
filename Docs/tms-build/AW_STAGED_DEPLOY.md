@@ -41,23 +41,37 @@ whose properties differ is updated, one that vanished is deleted. The limit enfo
 
 | Stage | What it deploys | created | updated | deleted | TOTAL |
 |---|---|---|---|---|---|
-| 0 | Production models + 244 additive fields on 9 existing models (Load +50, Customer +51, Location +1, Division +11, TmsSettings +116, FactoringItem +4, VendorPayable +3, TruckConfig +2, TruckLocationHistory +6) + the new Lambdas / custom operations (no new tables, no table change) | 158 | 241 | 28 | 427 |
+| 0 | Production models + 244 additive fields on 9 existing models (Load +50, Customer +51, Location +1, Division +11, TmsSettings +116, FactoringItem +4, VendorPayable +3, TruckConfig +2, TruckLocationHistory +6) + the new Lambdas / custom operations (no new tables, no table change) | 147 | 245 | 25 | 417 |
 | 1 | Point-in-time recovery always on: the `pointInTimeRecoverySpecification` flip on all 60 existing tables. Nothing else | 0 | 121 | 0 | 121 |
-| 2 | 21 models: Carrier, CarrierContact, CarrierPaymentMethod, CarrierDocument, CompanyPhone, OwnershipDivision, OwnershipRule, ShipmentView, ShipmentColumnTemplate, UserProfile, Commission, CommissionPayPeriod, Integration, SpotSettings, GmailConnection, SpotRequest, ApInboxItem, CrmContact, CrmDomain, CrmActivity, CrmAccount | 561 | 27 | 0 | 588 |
-| 3 | 14 models, the shipment core: ProClaim, IntakeLoad, Shipment, Order, LoadCarrier, LoadFinancials, LoadCharge, LoadCheckCall, TrackingLink, ShipmentDocument, ShipmentNotice, ShipmentPosting, ShipmentMessage, Quote | 495 | 38 | 0 | 533 |
-| 4 | 14 models: Invoice, ArPayment, CarrierBill, ApPayment, ImportJob, AljexImportJob, AljexMappingProfile, LegacyAljexRow, AljexCodeMap, DataExportJob, WorkflowRun, DemoRecord, LaneRateSample, DashboardRollup (+ their stream mappings / schedule) | 432 | 21 | 0 | 453 |
+| 2 | 21 models: Carrier, CarrierContact, CarrierPaymentMethod, CarrierDocument, CompanyPhone, OwnershipDivision, OwnershipRule, ShipmentView, ShipmentColumnTemplate, UserProfile, Commission, CommissionPayPeriod, Integration, SpotSettings, GmailConnection, SpotRequest, ApInboxItem, CrmContact, CrmDomain, CrmActivity, CrmAccount | 574 | 27 | 0 | 601 |
+| 3 | 14 models, the shipment core: ProClaim, IntakeLoad, Shipment, Order, LoadCarrier, LoadFinancials, LoadCharge, LoadCheckCall, TrackingLink, ShipmentDocument, ShipmentNotice, ShipmentPosting, ShipmentMessage, Quote | 496 | 38 | 0 | 534 |
+| 4 | 14 models: Invoice, ArPayment, CarrierBill, ApPayment, ImportJob, AljexImportJob, AljexMappingProfile, LegacyAljexRow, AljexCodeMap, DataExportJob, WorkflowRun, DemoRecord, LaneRateSample, DashboardRollup (+ their stream mappings / schedule; deletes the old vendor-ap-extract Lambda) | 438 | 23 | 3 | 464 |
 | 5 | TruckLocationHistory TTL (`ttlEpoch`), ALONE | 0 | 3 | 0 | 3 |
 
 (The numbers are re-measured by the script; stage 5 equals "unset".) A model nobody listed in
 `MODEL_STAGE` lands in stage 4, never stage 5. Adding a field to any model needs no stage edit: a field
 on an existing model rides in stage 0, a field on a new model rides with its model.
 
-### Stage 0 deletes 28 resources, on purpose
+### Stage 0 deletes 25 resources, on purpose
 
 All are API resolvers or one Lambda, no table, no data: the Load `deleteLoad` mutation and `onDeleteLoad`
 subscription (a PRO is permanent), the client create/update/delete mutations on TruckLocationHistory
-(only Lambdas write it), and the old `vendor-ap-extract` Lambda (its extractor moved into workflow-agent).
-`stageDeployCheck.mjs` allows exactly these and fails on any other deletion.
+(only Lambdas write it). `stageDeployCheck.mjs` allows exactly these and fails on any other deletion.
+
+### Triggers wait for their tables; the old vendor extractor waits for WorkflowRun
+
+- Lambdas are deployed at stage 0, but a schedule that reads a table would fail on every run until the table
+  exists, so each is created only at the stage that creates its tables (`TRIGGER_MODELS`/`triggerEnabled` in
+  `amplify/data/stages.ts`): McpSync and SpotQuoterPoll rules at stage 2, the tracking-automation Scheduler
+  schedule at stage 3, WorkflowAgentSweep and the two DataSafety rules at stage 4. Stage 0 creates only the
+  harmless ApInboxHourly rule, the check-call-notifier schedule and two Load-stream mappings.
+- `vendor-ap-extract` (production's invoice extractor) is NOT deleted at stage 0: `vendor-ap-intake` keeps
+  invoking it with `{ id }` exactly as today. Stage 4 (which creates WorkflowRun, what `workflow-agent` needs)
+  repoints the intake at `workflow-agent` (`VENDOR_AP_EXTRACT_TARGET=workflow-agent`, run hand-off payload) and
+  deletes the old Lambda, role and policy (3 resources, the only deletion allowed outside stage 0; the checker
+  permits it at `VENDOR_AP_EXTRACT_RETIRED_STAGE` only). "Stage k is a superset of stage k-1" is checked on the
+  data model only; this one deliberate non-data removal is therefore listed here. Never lower the stage below 4
+  afterwards: the old Lambda would not come back with its production name.
 
 ### Why these boundaries
 

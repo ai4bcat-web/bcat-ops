@@ -44,12 +44,11 @@ import {
 
 /**
  * Resources the merge deliberately removes from production at stage 0 (the only deletions allowed):
- * the old vendor-ap-extract Lambda (its extractor moved into workflow-agent), the Load delete mutation
- * and subscription (a PRO is permanent), and the client create/update/delete mutations on
- * TruckLocationHistory (written by Lambdas only). All are API resolvers or a Lambda; no table or data.
+ * the Load delete mutation and subscription (a PRO is permanent), and the client create/update/delete
+ * mutations on TruckLocationHistory (written by Lambdas only). All are API resolvers; no table or data.
+ * (The old vendor-ap-extract Lambda is deleted later, at VENDOR_AP_EXTRACT_RETIRED_STAGE.)
  */
 const KNOWN_STAGE0_REMOVALS = [
-  /^vendorapextractlambda/,
   /(Mutation|Subscription)(delete|Delete|onDelete|OnDelete)Load/,
   /^(Create|Update|Delete)Load$/,
   /(Mutation)(create|update|delete|Create|Update|Delete)TruckLocationHistory/,
@@ -72,7 +71,7 @@ const { values } = parseArgs({
 
 const root = process.cwd()
 const stages = await tsImport(pathToFileURL(resolve(root, 'amplify/data/stages.ts')).toString(), import.meta.url)
-const { FINAL_STAGE, PITR_STAGE, TTL_STAGE, STAGE_ENV } = stages
+const { FINAL_STAGE, PITR_STAGE, TTL_STAGE, STAGE_ENV, VENDOR_AP_EXTRACT_RETIRED_STAGE } = stages
 const wanted = values.stages ? values.stages.split(',').map(Number) : Array.from({ length: FINAL_STAGE + 1 }, (_, k) => k)
 
 function synth(cwd, stage) {
@@ -158,7 +157,8 @@ for (const k of wanted) {
   for (const v of supersetViolations(prev.schema, schema, tag)) fail(v)
   if (delta.total > DELTA_LIMIT) fail(`${tag}${delta.total} resources > ${DELTA_LIMIT}`)
   const unexpected = delta.changed.filter((c) => c.kind === 'deleted'
-    && !(k === wanted[0] && prev.name === 'baseline' && KNOWN_STAGE0_REMOVALS.some((re) => re.test(c.id))))
+    && !(k === wanted[0] && prev.name === 'baseline' && KNOWN_STAGE0_REMOVALS.some((re) => re.test(c.id)))
+    && !(k === VENDOR_AP_EXTRACT_RETIRED_STAGE && prev.name === `stage ${k - 1}` && /^vendorapextractlambda/.test(c.id)))
   if (unexpected.length > 0) fail(`${tag}${unexpected.length} resources deleted: ${unexpected.slice(0, 5).map((c) => c.id).join(', ')}`)
   for (const g of gsiAdditions(prev.tpl, tpl)) if (g.added.length > 1) fail(`${tag}${g.table} gains ${g.added.length} GSIs: ${g.added.join(', ')}`)
 

@@ -113,3 +113,41 @@ export function currentSchemaStage(): number {
 export function modelPresent(model: string, stage: number): boolean {
   return PRODUCTION_MODELS.has(model) || (MODEL_STAGE[model] ?? LAST_MODEL_STAGE) <= stage
 }
+
+/**
+ * Scheduled/stream triggers that only make sense once the tables they read exist. The Lambda
+ * stays deployed at every stage; only its trigger waits, so nothing fires (and fails on an empty
+ * table name) before its stage. A trigger is on at the first stage where ALL its models exist.
+ */
+export const TRIGGER_MODELS = {
+  /** workflow-agent sweep: queries WorkflowRun. */
+  workflowSweep: ['WorkflowRun'],
+  /** tms-spot-quoter poll: scans GmailConnection, reads SpotSettings/SpotRequest/Integration. */
+  spotQuoterPoll: ['SpotRequest', 'SpotSettings', 'GmailConnection', 'Integration'],
+  /** mcp-sync: reads/writes Carrier and the Integration pull-state row. */
+  mcpSync: ['Carrier', 'Integration'],
+  /** tms-data-safety nightly export + check: derive the table suffix from Shipment, record DataExportJob. */
+  dataSafetyNightly: ['Shipment', 'DataExportJob'],
+  /** tracking-automation Scheduler: POD pass queries Shipment and LoadCheckCall. */
+  trackingAutomation: ['Shipment', 'LoadCheckCall'],
+} as const satisfies Record<string, readonly string[]>
+
+export type TriggerName = keyof typeof TRIGGER_MODELS
+
+/** True when every table `trigger` needs exists at `stage`. */
+export function triggerEnabled(trigger: TriggerName, stage: number): boolean {
+  return TRIGGER_MODELS[trigger].every((model) => modelPresent(model, stage))
+}
+
+/**
+ * The `vendor-ap-extract` Lambda (production's invoice extractor) is kept until this stage, which
+ * is the one that creates WorkflowRun; from here workflow-agent (which needs WorkflowRun) takes
+ * over and the old Lambda is deleted. Below it vendor-ap-intake keeps invoking vendor-ap-extract
+ * exactly as production does today.
+ */
+export const VENDOR_AP_EXTRACT_RETIRED_STAGE = MODEL_STAGE.WorkflowRun
+
+/** True when vendor-ap-extract still exists and vendor-ap-intake still targets it at `stage`. */
+export function vendorApExtractLegacy(stage: number): boolean {
+  return stage < VENDOR_AP_EXTRACT_RETIRED_STAGE
+}

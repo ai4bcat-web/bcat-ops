@@ -18,7 +18,7 @@ import {
 import { createHash } from 'node:crypto'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
-import { FINAL_STAGE, PITR_STAGE, TTL_STAGE, currentSchemaStage, modelPresent } from './data/stages'
+import { FINAL_STAGE, PITR_STAGE, TTL_STAGE, currentSchemaStage, modelPresent, triggerEnabled, vendorApExtractLegacy } from './data/stages'
 import { storage } from './storage/resource'
 import { userManagement } from './functions/userManagement/resource'
 import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
@@ -28,6 +28,7 @@ import { twofaIntake } from './functions/twofa-intake/resource'
 import { factoringIntake } from './functions/factoring-intake/resource'
 import { vendorApActions } from './functions/vendor-ap-actions/resource'
 import { vendorApIntake } from './functions/vendor-ap-intake/resource'
+import { vendorApExtract } from './functions/vendor-ap-extract/resource'
 import { workflowAgent } from './functions/workflow-agent/resource'
 import { apptNeedNotifier } from './functions/appt-need-notifier/resource'
 import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
@@ -139,6 +140,8 @@ const backend = defineBackend({
   factoringIntake,
   vendorApActions,
   vendorApIntake,
+  // Production's extractor stays until the stage that creates WorkflowRun (see stages.ts).
+  ...(vendorApExtractLegacy(currentSchemaStage()) ? { vendorApExtract } : {}),
   workflowAgent,
   apptNeedNotifier,
   slackStatusNotifier,
@@ -915,11 +918,22 @@ vendorApIntakeFn.addToRolePolicy(new PolicyStatement({
 }))
 backend.storage.resources.bucket.grantPut(vendorApIntakeFn, 'intake-pdfs/vendor-ap/*')
 backend.storage.resources.bucket.grantRead(vendorApIntakeFn, 'intake-pdfs/vendor-ap/*')
-// The invoice extractor that used to live in `vendor-ap-extract` moved into
-// `workflow-agent` (Step K), which answers the old `{ id }` / `{ all: true }` payloads
-// unchanged. Its VendorPayable and S3 grants, and this bridge's invoke permission, are
-// wired in the workflow-agent block below — that block also grants the three edge
-// Lambdas, and `trackingApiFn` is not declared until further down this file.
+// Below the stage that creates WorkflowRun the invoice extractor is still `vendor-ap-extract`
+// (production's Lambda, kept until then: workflow-agent cannot run without WorkflowRun). From that
+// stage it lives in `workflow-agent` (Step K), which answers the old `{ id }` / `{ all: true }`
+// payloads unchanged; the extractor is not defined at all and the bridge is repointed in the
+// workflow-agent block below (that block also grants the three edge Lambdas, and `trackingApiFn`
+// is not declared until further down this file).
+const vendorApExtractFn = backend.vendorApExtract?.resources.lambda as LambdaFunction | undefined
+if (vendorApExtractFn) {
+  vendorApExtractFn.addEnvironment('TABLE_NAME', vendorApTable.tableName)
+  vendorApExtractFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
+  vendorApExtractFn.addToRolePolicy(new PolicyStatement({
+    actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:Scan'],
+    resources: [vendorApTable.tableArn],
+  }))
+  backend.storage.resources.bucket.grantRead(vendorApExtractFn, 'intake-pdfs/vendor-ap/*')
+}
 const vendorApIntakeUrl = new FunctionUrl(vendorApIntakeFn.stack, 'VendorApIntakeUrl', {
   function: vendorApIntakeFn,
   authType: FunctionUrlAuthType.NONE,
@@ -1979,23 +1993,33 @@ new CfnOutput(workflowAgentFn.stack, 'WorkflowAgentFunctionUrl', {
 // Fails runs that died mid-flight (a timeout leaves IN_PROGRESS behind, and nothing
 // else would ever close it). DISABLED on dev by the BCAT_DEV_STACK guard at the bottom
 // of this file, where SWEEP_STALLED is the manual door.
-const workflowSweepRule = new Rule(workflowAgentFn.stack, 'WorkflowAgentSweepRule', {
-  schedule:    Schedule.rate(Duration.minutes(15)),
-  description: 'Fail stalled workflow runs every 15 minutes',
-})
-workflowSweepRule.addTarget(new EventsLambdaTarget(workflowAgentFn, {
-  event: RuleTargetInput.fromObject({ sweep: true }),
-}))
+if (triggerEnabled('workflowSweep', SCHEMA_STAGE)) {
+  const workflowSweepRule = new Rule(workflowAgentFn.stack, 'WorkflowAgentSweepRule', {
+    schedule:    Schedule.rate(Duration.minutes(15)),
+    description: 'Fail stalled workflow runs every 15 minutes',
+  })
+  workflowSweepRule.addTarget(new EventsLambdaTarget(workflowAgentFn, {
+    event: RuleTargetInput.fromObject({ sweep: true }),
+  }))
+}
 
 // ── The four bridges that hand work to the agent ───────────────────────────
 // Each is one asynchronous invoke inside a try/catch that only warns: a workflow that
 // cannot start must never fail the intake that was going to succeed. The invoke grant
 // points at workflowAgentFn — the agent itself still holds no InvokeFunction anywhere.
 //
-// vendor-ap-intake keeps the old env var name: its payload is unchanged and the new
-// handler answers it, so the AP bridge is repointed rather than rewritten.
-vendorApIntakeFn.addEnvironment('VENDOR_AP_EXTRACT_FUNCTION_NAME', workflowAgentFn.functionName)
-workflowAgentFn.grantInvoke(vendorApIntakeFn)
+// vendor-ap-intake keeps the old env var name. From the stage that creates WorkflowRun it names
+// the workflow agent (run hand-off payload); below it, vendor-ap-extract is still the target
+// (`{ id }` payload), exactly as production does today. VENDOR_AP_EXTRACT_TARGET tells the
+// intake which payload to send; unset means the legacy extractor.
+if (vendorApExtractFn) {
+  vendorApIntakeFn.addEnvironment('VENDOR_AP_EXTRACT_FUNCTION_NAME', vendorApExtractFn.functionName)
+  vendorApExtractFn.grantInvoke(vendorApIntakeFn)
+} else {
+  vendorApIntakeFn.addEnvironment('VENDOR_AP_EXTRACT_FUNCTION_NAME', workflowAgentFn.functionName)
+  vendorApIntakeFn.addEnvironment('VENDOR_AP_EXTRACT_TARGET', 'workflow-agent')
+  workflowAgentFn.grantInvoke(vendorApIntakeFn)
+}
 // slack-intake-webhook: an e-mailed tender that landed as an IntakeItem.
 webhookFn.addEnvironment('WORKFLOW_AGENT_FUNCTION_NAME', workflowAgentFn.functionName)
 workflowAgentFn.grantInvoke(webhookFn)
@@ -2426,10 +2450,12 @@ mcpSyncFn.addToRolePolicy(
 // The rule is created enabled. The dev-stack guard later disables schedules, so
 // dev still deploys but does not poll MCP by itself. 30 minutes is well over the
 // 4-minute minimum MCP's guide sets between polling calls.
-const mcpSyncRule = new Rule(mcpSyncFn.stack, 'McpSyncRule', {
-  schedule: Schedule.rate(Duration.minutes(30)),
-})
-mcpSyncRule.addTarget(new EventsLambdaTarget(mcpSyncFn))
+if (triggerEnabled('mcpSync', SCHEMA_STAGE)) {
+  const mcpSyncRule = new Rule(mcpSyncFn.stack, 'McpSyncRule', {
+    schedule: Schedule.rate(Duration.minutes(30)),
+  })
+  mcpSyncRule.addTarget(new EventsLambdaTarget(mcpSyncFn))
+}
 
 // ── Step E tables, declared once for the four Lambdas that share them ───────
 const shipmentDocumentTable  = stageTables['ShipmentDocument']
@@ -3312,16 +3338,20 @@ dataSafetyFn.addToRolePolicy(
 )
 // Two rules, in the Lambda's own stack (the other schedules' precedent). They are the ONLY
 // rules the dev guard leaves enabled — see devRuleGuard.ts.
-const dataSafetyNightlyRule = new Rule(dataSafetyFn.stack, 'DataSafetyNightlyExportRule', {
-  schedule: Schedule.cron({ minute: '15', hour: '7', month: '*', weekDay: '*', year: '*' }),
-  description: 'Nightly DynamoDB point-in-time export to the DataSafety bucket (01:15 Central standard)',
-})
-dataSafetyNightlyRule.addTarget(new EventsLambdaTarget(dataSafetyFn, { event: RuleTargetInput.fromObject({ kind: 'NIGHTLY' }) }))
-const dataSafetyCheckRule = new Rule(dataSafetyFn.stack, 'DataSafetyNightlyCheckRule', {
-  schedule: Schedule.cron({ minute: '15', hour: '10', month: '*', weekDay: '*', year: '*' }),
-  description: 'Checks the nightly exports finished and records the result',
-})
-dataSafetyCheckRule.addTarget(new EventsLambdaTarget(dataSafetyFn, { event: RuleTargetInput.fromObject({ kind: 'NIGHTLY_CHECK' }) }))
+const dataSafetyRules: Rule[] = []
+if (triggerEnabled('dataSafetyNightly', SCHEMA_STAGE)) {
+  const dataSafetyNightlyRule = new Rule(dataSafetyFn.stack, 'DataSafetyNightlyExportRule', {
+    schedule: Schedule.cron({ minute: '15', hour: '7', month: '*', weekDay: '*', year: '*' }),
+    description: 'Nightly DynamoDB point-in-time export to the DataSafety bucket (01:15 Central standard)',
+  })
+  dataSafetyNightlyRule.addTarget(new EventsLambdaTarget(dataSafetyFn, { event: RuleTargetInput.fromObject({ kind: 'NIGHTLY' }) }))
+  const dataSafetyCheckRule = new Rule(dataSafetyFn.stack, 'DataSafetyNightlyCheckRule', {
+    schedule: Schedule.cron({ minute: '15', hour: '10', month: '*', weekDay: '*', year: '*' }),
+    description: 'Checks the nightly exports finished and records the result',
+  })
+  dataSafetyCheckRule.addTarget(new EventsLambdaTarget(dataSafetyFn, { event: RuleTargetInput.fromObject({ kind: 'NIGHTLY_CHECK' }) }))
+  dataSafetyRules.push(dataSafetyNightlyRule, dataSafetyCheckRule)
+}
 
 // ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
 // Fires when a load is assigned to the "Broker Need to Cover" driver: creates an
@@ -3559,6 +3589,9 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
     action: 'lambda:InvokeFunction',
     sourceArn: automationFn.functionArn,
   })
+  // defineFunction({schedule}) made the Scheduler schedule as the child `schedule-0`; below the
+  // stage that creates Shipment/LoadCheckCall every run would fail, so the schedule waits.
+  if (!triggerEnabled('trackingAutomation', SCHEMA_STAGE)) automationFn.node.tryRemoveChild('schedule-0')
 }
 
 // ── podActions Lambda (JobsDone PODs) ──────────────────────────────────────
@@ -3732,7 +3765,7 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
     apptReportRule, cashReminderRule, monthlyRule, dailyMileageRule, locationSyncRule,
     faultSyncRule, odometerOpenWeekRule, odometerCloseDayRule,
     blueinkLocationRule, blueinkMileageRule, complianceScanRule, paychexWeeklyRule,
-    dataSafetyNightlyRule, dataSafetyCheckRule,
+    ...dataSafetyRules,
   ]) {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }
@@ -4004,14 +4037,17 @@ spotFn.addToRolePolicy(new PolicyStatement({
 // Read-only mailbox (Ryne, 2026-11-04): the spot Lambda holds no Gmail write and no write on
 // Quote/Shipment/Load/ShipmentMessage/Carrier. Its only invoke is Step AL's, below.
 
-// Every five minutes. DISABLED on dev by the dev guard's CfnRule loop.
-const spotPollRule = new Rule(spotFn.stack, 'SpotQuoterPollRule', {
-  schedule:    Schedule.rate(Duration.minutes(5)),
-  description: 'Poll each connected rep Gmail for quote requests',
-})
-spotPollRule.addTarget(new EventsLambdaTarget(spotFn, {
-  event: RuleTargetInput.fromObject({ poll: true }),
-}))
+// Every five minutes. DISABLED on dev by the dev guard's CfnRule loop. Created at the stage that
+// creates its tables (TRIGGER_MODELS): below it the poll would only fail on an empty table name.
+if (triggerEnabled('spotQuoterPoll', SCHEMA_STAGE)) {
+  const spotPollRule = new Rule(spotFn.stack, 'SpotQuoterPollRule', {
+    schedule:    Schedule.rate(Duration.minutes(5)),
+    description: 'Poll each connected rep Gmail for quote requests',
+  })
+  spotPollRule.addTarget(new EventsLambdaTarget(spotFn, {
+    event: RuleTargetInput.fromObject({ poll: true }),
+  }))
+}
 
 // A spot request carries the mail body: DynamoDB expires it (`ttlEpoch`, epoch seconds)
 // instead of anything sweeping. Dismissed requests get a shorter horizon from the Lambda.
