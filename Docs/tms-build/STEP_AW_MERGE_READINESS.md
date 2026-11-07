@@ -179,3 +179,63 @@ Files in `/Users/adminoid/aljex-export/` (outside the repo, mode 600):
   are already in dev (the other 11 are probably newer than the Nov 3 import): report them.
 Reconciliation (stage E) for AP: open bills by carrier, by pay-to and by aging bucket equal to the cent
 ($83,407.20 total), plus the expected list as its own line. AR is NOT in these files yet.
+
+## Ryne's answers (2026-11-07), final unless marked OPEN
+Billing and customers
+1. The 9 customers with internal BCAT billing addresses are **invoiced manually, never factored**. Batory Foods
+   is manual. (OPEN: the 2 on invoicefactoring@ need a real customer AP address.)
+2. Invoice-by "P" customers: **e-mail like the rest**; no paper/mail option.
+3. **invoices@bcatcorp.com is always copied** on every manually invoiced invoice: a company-wide always-copy
+   setting (Settings), in addition to any per-customer copy list.
+4. Aljex Rev Type map: **B = BCAT Logistics (brokerage), I = Ivan Cartage (assets), A = Bestcare Auto
+   Transport, O = owner operators** (new system: a load is classified owner operator when a specific
+   owner-operator driver/carrier is attached to it). Sales rep is set by division, not by Aljex rep code:
+   BCAT Logistics = Ryne Bandolik; Ivan Cartage = "Ivan Cartage"; Bestcare Auto = Ruben Vargas; owner
+   operator = Ruben Vargas. Aljex salesrep codes and dispatcher codes are NOT imported (start tracking
+   forward in BCAT). Customers also get a default division from their Rev Type where present.
+6. Exclude test/junk customers from the import: TEST CUSTOMER (acct 100003) and any ZZ/test names.
+   GUEST SUPPLY is a REAL customer (1,827 shipments, last 09/15/25): import it.
+7. AP "Amount Paid" / stale expected rows / C-D code: OPEN, Ryne needs examples (files prepared).
+8. Accounting stays inside BCAT Ops for now; QuickBooks integration is a later step.
+9. **Numbering starts at 20000** so the cutover is visible. OPEN: confirm it applies to both shipment/PRO
+   numbers and invoice numbers (in Aljex the invoice number is the PRO). Aljex numbers top out at 14,9xx.
+10. Default invoice terms **Net 30**; **Danisco = 120 days** (OPEN: which of DANISCO US INC. 100338, DANISCO
+    USA INC. 100629 and any "DANISCO US, INC." variants).
+11. Carriers are paid by ACH, Zelle or credit card. Goal: pay directly from BCAT Ops and track it there
+    (a later step: record every payment now with method + reference; no payment execution yet).
+12. **Carrier tax IDs (Fed/SS #) live in BCAT Ops**: import them, but ONLY into an encrypted,
+    admin-only store: field-level encryption with a KMS key, written and read only through a Lambda (no
+    GraphQL read of the clear value by any staff user), UI shows masked last 4 + "on file", an ADMIN-only
+    Reveal action that writes an audit line, never in logs/exports/tests/fixtures. Bank account and routing
+    numbers still NOT imported until the payments step (they stay in the source file).
+13. Quick-pay carrier terms are kept (carrier setting that adjusts the bill).
+14. Over the credit limit: **flag, do not block**. Later step (record as backlog AX): an AI follow-up agent
+    that e-mails customers automatically once an invoice passes 35 days unpaid.
+Factoring and invoicing
+15. New customer billing-method setting pushes an approved shipment straight to the factoring queue when the
+    payment type is Factor; the e-mail bridge is removed only after Aljex is confirmed completely cut over
+    (keep it running until Ryne says so).
+16. Every factored customer goes to the same factor (one factor record).
+17. Release to billing and Send invoice: **Jenny only for now** (permission, not role-wide).
+18. A change to a shipment in the factoring queue updates the whole system. If the load is already invoiced
+    or paid, the change is allowed but needs a required reason, an audit entry (who, when, before/after) and a
+    visible "what happened" timeline on the shipment and invoice so the change can be understood.
+Cutover
+19. Cutoff for carried-over data: **2026-11-07 00:00** (OPEN: confirm what happens to loads created in Aljex
+    after that moment: delta import at go-live?).
+20. Import the **last 24 months** of loads and invoices/bills; older history stays only in the Aljex files.
+21. Open AR and AP at cutover are imported **marked "carried over"** so nobody resends them.
+22. Revert decision deadline **December 1**; revert only if something is lost or broken beyond repair. Aljex
+    stays readable until then.
+23. Reconciliation sign-off: **Jenny**. The report must not require equality: each difference can be left
+    as an **open balance** or **approved with a note** (approver, time, reason recorded).
+24. Secrets/keys (DAT, Maps, MCP etc.): leave a clear place in production (Settings > Integrations) for Ryne
+    to enter them himself; tell Ryne exactly where and when at the end.
+25. Ivan LOCAL driver pay (D-W10): see CUTOVER_PLAN RD4; default stays hourly via Employee Hours.
+26. Users: the existing BCAT Ops logins carry over unchanged (staff pool us-east-1_IbPKPNJC9; list each
+    user's access to the brokerage pages for Ryne to confirm).
+27. Commissions: ignored for now; later configured per owner operator in the driver profile.
+28. 24 duplicate customer names: OPEN, Ryne needs details (file prepared).
+29. Inactive Aljex customers import as **Locations**, not customers (they have no active billing).
+30. Duplicate carriers (the repeated MC, 17 repeated names): **merge**, keep the Aljex Carrier IDs of the
+    merged rows as aliases.
