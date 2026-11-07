@@ -2766,8 +2766,10 @@ backend.storage.resources.bucket.grantReadWrite(carrierActionsFn, 'carrier-docs/
 // two function roles, and the table grants attach to those roles from this stack. Nothing in the data stack
 // references this stack, so the dependency runs one way (TaxVault -> data) and there is no cycle.
 // Keys and table are RETAIN: deleting this stack never loses ciphertext, and a key is never deleted quietly.
-// The vault belongs to no schema stage: it is created at stage 0 and never changes afterwards.
-{
+// Stage 0 (the production shape) must create no table: the vault is created at stage 2, with the Carrier model it serves,
+// and never changes afterwards. Below stage 2 the tax actions answer with a clear 'not available yet' error.
+const TAX_VAULT_STAGE = 2
+if (SCHEMA_STAGE >= TAX_VAULT_STAGE) {
   const vaultStack = backend.createStack('TaxVault')
   // The API id the data stack already exports (no new output, no stage dependence). Nothing in the data stack
   // references this stack, so unlike the Lambdas' own policies this reference cannot close a cycle.
