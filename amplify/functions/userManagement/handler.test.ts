@@ -353,7 +353,7 @@ interface Args {
   input?: string
 }
 
-async function call(args: Args, who: TestIdentity = admin): Promise<Row> {
+async function call(args: Args, who: TestIdentity = owner): Promise<Row> {
   const raw = await handler({ arguments: args as never, identity: who as never })
   return JSON.parse(String(raw)) as Row
 }
@@ -428,7 +428,7 @@ afterEach(() => {
 describe('authorization', () => {
   it('refuses a signed-in user who is neither owner nor ADMIN', async () => {
     seedUser('sam@bcatcorp.com', ['DISPATCHER'])
-    await expect(call({ action: 'list' }, staff)).rejects.toThrow('Forbidden: managing users requires owner or ADMIN.')
+    await expect(call({ action: 'list' }, staff)).rejects.toThrow('Forbidden: only the owner may view or manage users.')
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('forbidden caller'),
       'sam@bcatcorp.com',
@@ -437,21 +437,32 @@ describe('authorization', () => {
     )
   })
 
-  it('refuses an ADMIN who tries to grant the ADMIN role', async () => {
+  it('refuses an ADMIN-group non-owner on every action (user management is owner-only, as on main)', async () => {
     seedUser('sam@bcatcorp.com', ['DISPATCHER'])
     seedProfile('sam@bcatcorp.com', { role: 'CUSTOMER_REP' })
-    await expect(call({ action: 'setRole', username: 'sam@bcatcorp.com', role: 'ADMIN' })).rejects.toThrow(
-      'Forbidden: only the owner may grant the ADMIN role.',
-    )
+    const actions: Args[] = [
+      { action: 'list' },
+      { action: 'create', email: 'new@bcatcorp.com' },
+      { action: 'disable', username: 'sam@bcatcorp.com' },
+      { action: 'resetPassword', username: 'sam@bcatcorp.com' },
+      { action: 'setPageGroups', username: 'sam@bcatcorp.com', pages: '[]' },
+      { action: 'setRole', username: 'sam@bcatcorp.com', role: 'ADMIN' },
+      { action: 'forceSignOut', username: 'sam@bcatcorp.com' },
+      { action: 'setAdmin', username: 'sam@bcatcorp.com', isAdmin: true },
+      { action: 'delete', username: 'sam@bcatcorp.com' },
+    ]
+    for (const args of actions) {
+      await expect(call(args, admin)).rejects.toThrow('Forbidden: only the owner may view or manage users.')
+    }
     expect([...(pool.membership.get('sam@bcatcorp.com') ?? [])]).not.toContain('ADMIN')
+    expect(pool.users.has('sam@bcatcorp.com')).toBe(true)
+    expect(pool.users.has('new@bcatcorp.com')).toBe(false)
   })
 
-  it('refuses an ADMIN who tries to delete a user', async () => {
+  it('still lets the owner run a user action', async () => {
     seedUser('sam@bcatcorp.com', ['DISPATCHER'])
-    await expect(call({ action: 'delete', username: 'sam@bcatcorp.com' })).rejects.toThrow(
-      'Forbidden: only the owner may delete a user.',
-    )
-    expect(pool.users.has('sam@bcatcorp.com')).toBe(true)
+    const out = await call({ action: 'list' }, owner)
+    expect(out).toBeDefined()
   })
 })
 
@@ -480,8 +491,8 @@ describe('lockout', () => {
   it('refuses to demote yourself', async () => {
     seedProfile(ADMIN_EMAIL, { role: 'ADMIN' })
     seedProfile(OWNER_EMAIL, { role: 'ADMIN' })
-    await expect(call({ action: 'setRole', username: ADMIN_EMAIL, role: 'CUSTOMER_REP' })).rejects.toThrow(
-      'You cannot change your own role.',
+    await expect(call({ action: 'setRole', username: OWNER_EMAIL, role: 'CUSTOMER_REP' })).rejects.toThrow(
+      /cannot change your own role|owner's role cannot be changed/,
     )
   })
 })
@@ -489,7 +500,7 @@ describe('lockout', () => {
 // ── Invite + role ────────────────────────────────────────────────────────────
 
 describe('create and setRole', () => {
-  it('lets an ADMIN invite a user and give them a role', async () => {
+  it('lets the owner invite a user and give them a role', async () => {
     const created = await call({
       action: 'create',
       email: 'newrep@bcatcorp.com',
@@ -508,8 +519,8 @@ describe('create and setRole', () => {
       role: 'CUSTOMER_REP',
       status: 'PENDING',
       teamKeys: ['east'],
-      invitedBy: ADMIN_EMAIL,
-      createdBy: ADMIN_EMAIL,
+      invitedBy: OWNER_EMAIL,
+      createdBy: OWNER_EMAIL,
       version: 1,
     })
     expect(profile?.invitedAt).toEqual(expect.any(String))
@@ -545,7 +556,7 @@ describe('create and setRole', () => {
     const after = [...(pool.membership.get('sam@bcatcorp.com') ?? [])].sort()
     expect(after).toContain('DISPATCHER')
     expect(after).toEqual([...new Set([...desired, 'DISPATCHER'])].sort())
-    expect(profileOf('sam@bcatcorp.com')).toMatchObject({ role: 'CUSTOMER_REP', lastRoleChangeBy: ADMIN_EMAIL })
+    expect(profileOf('sam@bcatcorp.com')).toMatchObject({ role: 'CUSTOMER_REP', lastRoleChangeBy: OWNER_EMAIL })
   })
 
   it('keeps the page grants no role handed out', async () => {
@@ -611,7 +622,7 @@ describe('setAdmin', () => {
     expect(profileOf('sam@bcatcorp.com')?.role).toBe('ADMIN')
   })
 
-  it('survives a later claims edit by an admin who is not the owner', async () => {
+  it('survives a later claims edit by the owner', async () => {
     seedUser('sam@bcatcorp.com', ['DISPATCHER', 'role-CUSTOMER_REP'])
     seedProfile('sam@bcatcorp.com', { role: 'CUSTOMER_REP' })
     seedProfile(OWNER_EMAIL, { role: 'ADMIN' })
@@ -621,7 +632,7 @@ describe('setAdmin', () => {
       action: 'setClaims',
       username: 'sam@bcatcorp.com',
       input: JSON.stringify({ claims: ['AR_POSTING'] }),
-    }, admin)
+    }, owner)
 
     const after = pool.membership.get('sam@bcatcorp.com') ?? new Set<string>()
     expect(after.has('ADMIN')).toBe(true)
@@ -853,7 +864,7 @@ describe('updateProfile and reinvite', () => {
     await call({ action: 'reinvite', username: 'sam@bcatcorp.com' })
 
     expect(pool.calls.some((c) => c.type === 'AdminCreateUser' && c.input.MessageAction === 'RESEND')).toBe(true)
-    expect(profileOf('sam@bcatcorp.com')).toMatchObject({ invitedBy: ADMIN_EMAIL })
+    expect(profileOf('sam@bcatcorp.com')).toMatchObject({ invitedBy: OWNER_EMAIL })
   })
 })
 
@@ -863,7 +874,7 @@ describe('listDriverPool', () => {
   it('refuses a non-admin: the driver roll call is not for staff', async () => {
     process.env.DRIVER_USER_POOL_ID = 'us-east-1_DRIVER'
     await expect(call({ action: 'listDriverPool' }, staff)).rejects.toThrow(
-      'Forbidden: managing users requires owner or ADMIN.',
+      'Forbidden: only the owner may view or manage users.',
     )
     expect(pool.calls.some((c) => c.input.UserPoolId === 'us-east-1_DRIVER')).toBe(false)
   })

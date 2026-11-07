@@ -6,9 +6,8 @@
  * authorize anybody — every `authorize()` in the TMS keeps reading `cognito:groups`
  * off the token, so the groups written here are the whole enforcement surface.
  *
- * The gate is two-tier: any ADMIN may run the user actions, but granting ADMIN
- * (`setAdmin`, `setRole` to `ADMIN`) and deleting a login stay with the owner, so an
- * admin can never mint a peer or erase the person above them.
+ * The gate is owner-only (as on production main): only ryne@bcatcorp.com may call any action;
+ * the ADMIN group does not open it.
  */
 import {
   CognitoIdentityProviderClient,
@@ -60,7 +59,6 @@ const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 // created on demand, so a new page added to the frontend nav works without redeploying.
 const PAGE_GROUP_RE = /^page-[A-Za-z0-9_-]+$/
 
-const ADMIN_GROUP = 'ADMIN'
 const DEFAULT_GROUP = 'DISPATCHER'  // auto-assigned to new invited users
 /** Never taken away by a reconcile: it grants nothing and everybody has it. */
 const KEEP_GROUPS = [DEFAULT_GROUP]
@@ -68,7 +66,7 @@ const KEEP_GROUPS = [DEFAULT_GROUP]
 // Only this account may manage users. Must match OWNER_EMAIL in src/lib/auth/admin.ts.
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 
-const FORBIDDEN_NOT_ADMIN = 'Forbidden: managing users requires owner or ADMIN.'
+const FORBIDDEN_NOT_ADMIN = 'Forbidden: only the owner may view or manage users.'
 /** Promoting to ADMIN hands out the ADMIN group, so only the owner may do it. */
 const FORBIDDEN_GRANT_ADMIN = 'Forbidden: only the owner may grant the ADMIN role.'
 const OWNER_ONLY_ACTIONS: Record<string, string> = {
@@ -540,9 +538,10 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
       ? rawGroups.split(',').map((s) => s.trim()).filter(Boolean)
       : []
 
+  // Owner-only, exactly as on production main: the ADMIN group does NOT open user management (Ryne, 2026-11-07).
+  void callerGroups
   const isOwner = callerEmail === OWNER_EMAIL
-  const isAdmin = isOwner || callerGroups.includes(ADMIN_GROUP)
-  if (!isAdmin) {
+  if (!isOwner) {
     console.warn('[userManagement] forbidden caller:', callerEmail || '(unresolved)', '| identity:', JSON.stringify(event.identity))
     throw new Error(FORBIDDEN_NOT_ADMIN)
   }
