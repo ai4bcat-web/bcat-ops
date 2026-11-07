@@ -109,6 +109,8 @@ function evaluateRhs(
 ): unknown {
   rhs = rhs.trim()
   if (rhs.startsWith(':')) return values[rhs]
+  const ifNotExists = rhs.match(/^if_not_exists\s*\(\s*([^,]+?)\s*,\s*(:\w+)\s*\)$/i)
+  if (ifNotExists) return getPath(rec, ifNotExists[1], names) ?? values[ifNotExists[2]]
   const listAppend = rhs.match(/^list_append\s*\(\s*if_not_exists\s*\(\s*([^,]+)\s*,\s*(:\w+)\s*\)\s*,\s*(:\w+)\s*\)$/i)
   if (listAppend) {
     const existing = getPath(rec, listAppend[1], names) as unknown[] | undefined

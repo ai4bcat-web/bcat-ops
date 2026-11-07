@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
-import { ScanCommand, GetCommand, PutCommand, UpdateCommand, QueryCommand } from '@aws-sdk/lib-dynamodb'
+import { ScanCommand, GetCommand, PutCommand, UpdateCommand, QueryCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb'
 import { marshall } from '@aws-sdk/util-dynamodb'
 import type { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { handler } from './handler'
@@ -87,6 +87,9 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
   QueryCommand: vi.fn(function (this: { input: unknown }, input: unknown) {
     this.input = input
   }),
+  DeleteCommand: vi.fn(function (this: { input: unknown }, input: unknown) {
+    this.input = input
+  }),
 }))
 
 // The projector under test uses the real command classes; only the client is stubbed.
@@ -146,6 +149,8 @@ vi.hoisted(() => {
   process.env.INTAKE_IVAN_CHANNEL_ID = 'C0B4YJXLYM8'
   process.env.LOADS_EMAIL_TO = 'ivanloads@bcatcorp.com'
   process.env.SES_FROM_ADDRESS = 'onboarding@bcatcorp.com'
+  process.env.MAINTENANCE_TASK_TABLE_NAME = 'MaintenanceTask-test'
+  process.env.MOTIVE_API_KEY = 'motive-test-key'
   process.env.AWS_REGION = 'us-east-1'
 })
 
@@ -213,6 +218,7 @@ beforeEach(() => {
     'AuditLog-test': {},
     'TimeClockEntry-test': {},
     'DriverAvailability-test': {},
+    'MaintenanceTask-test': {},
   }
 
   mockDynamoSend.mockImplementation(async (cmd: { input?: unknown }) => {
@@ -248,6 +254,11 @@ beforeEach(() => {
         applyUpdateExpression(records[id], input.UpdateExpression ?? '', input.ExpressionAttributeNames ?? {}, input.ExpressionAttributeValues ?? {})
         records[id].updatedAt = new Date().toISOString()
       }
+      return {}
+    }
+    if (cmd instanceof DeleteCommand) {
+      const id = input.Key?.id as string | undefined
+      if (id && records) delete records[id]
       return {}
     }
     if (cmd instanceof QueryCommand) return { Items: [] }
@@ -642,5 +653,322 @@ describe('a shipment edit shows on what the driver app and the dispatch board re
     const summary = await p.relay(beforeEdit)
     expect(summary).toMatchObject({ considered: 0, events: 0, mirrored: 0 })
     expect(p.db.writes).toEqual([])
+  })
+})
+
+// ── The routes still without a handler test (MERGE_REGRESSION C-R3, C-R6, C-R13, C-R16, C-R17) ──
+
+describe('GET and POST /maintenance-tasks', () => {
+  beforeEach(() => {
+    tables['Equipment-test'] = {
+      'k-1': { id: 'k-1', type: 'truck', unitNumber: ' 12 ', active: true },
+      'k-off': { id: 'k-off', type: 'truck', unitNumber: '15', active: false },
+    }
+    tables['Driver-test'][DRIVER_A_ID].assignedTruckId = 'k-1'
+  })
+  const tasks = () => Object.values(tables['MaintenanceTask-test'])
+
+  it('refuses a report with no title, writing nothing', async () => {
+    expect((await call('/maintenance-tasks', 'POST', { title: '   ' })).status).toBe(400)
+    expect(tasks()).toEqual([])
+  })
+
+  it("files the report on the driver's own truck as an upcoming task tagged with who reported it", async () => {
+    const res = await call('/maintenance-tasks', 'POST', { title: 'Brake light out', notes: ' left rear ', priority: 'urgent' })
+    expect(res.status).toBe(200)
+    expect(tasks()).toHaveLength(1)
+    expect(tasks()[0]).toMatchObject({ equipmentId: 'k-1', title: 'Brake light out', priority: 'med', status: 'upcoming', autoDot: false })
+    expect(String(tasks()[0].notes)).toContain('left rear')
+    expect(String(tasks()[0].notes)).toContain(`[driver:${DRIVER_A_ID}]`)
+    expect(res.body.task).toMatchObject({ title: 'Brake light out', priority: 'med', status: 'upcoming', truck: { id: 'k-1', unitNumber: '12' } })
+  })
+
+  it('keeps a high or low priority, and files against a picked truck instead of the assigned one', async () => {
+    tables['Equipment-test']['k-2'] = { id: 'k-2', type: 'truck', unitNumber: '20', active: true }
+    expect((await call('/maintenance-tasks', 'POST', { title: 'Tire', priority: 'high', truckId: 'k-2' })).status).toBe(200)
+    expect(tasks()[0]).toMatchObject({ equipmentId: 'k-2', priority: 'high' })
+  })
+
+  it('tells the driver to pick a truck when none is assigned, or the picked one is inactive', async () => {
+    delete tables['Driver-test'][DRIVER_A_ID].assignedTruckId
+    expect((await call('/maintenance-tasks', 'POST', { title: 'Tire' })).status).toBe(400)
+    expect((await call('/maintenance-tasks', 'POST', { title: 'Tire', truckId: 'k-off' })).status).toBe(400)
+    expect(tasks()).toEqual([])
+  })
+
+  it('lists the truck\'s tasks, open first then newest first, flagging only this driver\'s own reports', async () => {
+    tables['MaintenanceTask-test'] = {
+      a: { id: 'a', equipmentId: 'k-1', title: 'Old open', status: 'upcoming', createdAt: '2026-10-01T00:00:00Z', notes: 'x' },
+      b: { id: 'b', equipmentId: 'k-1', title: 'New open', status: 'upcoming', createdAt: '2026-10-05T00:00:00Z', notes: `y\n[driver:${DRIVER_A_ID}]` },
+      c: { id: 'c', equipmentId: 'k-1', title: 'Done', status: 'completed', createdAt: '2026-10-09T00:00:00Z' },
+      d: { id: 'd', equipmentId: 'other', title: 'Other truck', status: 'upcoming', createdAt: '2026-10-09T00:00:00Z' },
+    }
+    const res = await call('/maintenance-tasks')
+    expect(res.status).toBe(200)
+    const list = res.body.tasks as Array<Row>
+    expect(list.map((t) => t.id)).toEqual(['b', 'a', 'c'])
+    expect(list.map((t) => t.reportedByMe)).toEqual([true, false, false])
+    expect(list[0].priority).toBe('med')
+  })
+
+  it('is an empty list with no truck', async () => {
+    delete tables['Driver-test'][DRIVER_A_ID].assignedTruckId
+    expect((await call('/maintenance-tasks')).body).toEqual({ truck: null, tasks: [] })
+  })
+})
+
+describe('Motive routes: GET /motive/day and GET /staff/motive-days', () => {
+  const motiveResponse = (logs: unknown[], ok = true, status = 200) =>
+    fetchMock.mockResolvedValue({ ok, status, json: async () => ({ logs }) } as unknown as Awaited<ReturnType<FetchLike>>)
+  const log = (driverMotiveId: number, date: string, over: Row = {}) => ({
+    log: {
+      date, driving_duration: 7200, on_duty_duration: 1800, total_miles: 90, vehicle_numbers: [' 12 ', ''],
+      driver: { id: driverMotiveId },
+      events: [{ event: { type: 'driving', start_time: `${date}T13:00:00Z`, end_time: `${date}T15:00:00Z`, location: 'Joliet, IL' } }],
+      ...over,
+    },
+  })
+
+  describe('/motive/day', () => {
+    it('refuses a bad date, and a driver who is not on the Ivan program', async () => {
+      tables['Driver-test'][DRIVER_A_ID].motiveDriverId = 77
+      expect((await call('/motive/day', 'GET', undefined, { date: 'yesterday' })).status).toBe(400)
+      tables['Driver-test'][DRIVER_A_ID].ivanApp = false
+      tables['Driver-test'][DRIVER_A_ID].fleetGroup = 'OWNER_OPERATOR'
+      expect((await call('/motive/day', 'GET', undefined, { date: '2026-10-05' })).status).toBe(409)
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('says so, without asking Motive, when no Motive account is linked', async () => {
+      const res = await call('/motive/day', 'GET', undefined, { date: '2026-10-05' })
+      expect(res.status).toBe(200)
+      expect(res.body).toMatchObject({ linked: false, day: null })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it("asks Motive for the linked id only and returns that day's hours", async () => {
+      tables['Driver-test'][DRIVER_A_ID].motiveDriverId = 77
+      motiveResponse([log(77, '2026-10-05')])
+      const res = await call('/motive/day', 'GET', undefined, { date: '2026-10-05' })
+      expect(res.status).toBe(200)
+      const url = String(fetchMock.mock.calls[0][0])
+      expect(url).toContain('driver_ids[]=77')
+      expect(url).toContain('start_date=2026-10-05')
+      expect(res.body).toMatchObject({ date: '2026-10-05', linked: true })
+      expect(res.body.day).toMatchObject({ drivingSeconds: 7200, onDutySeconds: 1800, workedSeconds: 9000, vehicleNumbers: ['12'] })
+    })
+
+    it('is a day with nothing on it when Motive has no log, and a reason when Motive fails', async () => {
+      tables['Driver-test'][DRIVER_A_ID].motiveDriverId = 77
+      motiveResponse([])
+      expect((await call('/motive/day', 'GET', undefined, { date: '2026-10-05' })).body).toMatchObject({ linked: true, day: null })
+      motiveResponse([], false, 502)
+      const down = await call('/motive/day', 'GET', undefined, { date: '2026-10-05' })
+      expect(down.status).toBe(200)
+      expect(down.body).toMatchObject({ linked: false, day: null })
+      expect(String(down.body.reason)).toContain('502')
+    })
+  })
+
+  describe('/staff/motive-days', () => {
+    const staff = (email = 'ryne@bcatcorp.com') => mockVerify.mockResolvedValue({ email })
+    const q = { driverIds: `${DRIVER_A_ID},${DRIVER_B_ID}`, from: '2026-10-05', to: '2026-10-06' }
+
+    it('is never answered to a driver token, or to staff who may not impersonate', async () => {
+      expect((await call('/staff/motive-days', 'GET', undefined, q)).status).toBe(403)
+      staff('someone@bcatcorp.com')
+      expect((await call('/staff/motive-days', 'GET', undefined, q)).status).toBe(403)
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('validates the drivers and the dates', async () => {
+      staff()
+      expect((await call('/staff/motive-days', 'GET', undefined, { ...q, driverIds: ' , ' })).status).toBe(400)
+      expect((await call('/staff/motive-days', 'GET', undefined, { ...q, from: '10/05' })).status).toBe(400)
+    })
+
+    it('returns each linked driver\'s days keyed by our driver id, and never guesses for an unlinked one', async () => {
+      staff()
+      tables['Driver-test'][DRIVER_A_ID].motiveDriverId = 77
+      motiveResponse([log(77, '2026-10-05'), log(999, '2026-10-05')])
+      const res = await call('/staff/motive-days', 'GET', undefined, q)
+      expect(res.status).toBe(200)
+      const url = String(fetchMock.mock.calls[0][0])
+      expect(url).toContain('driver_ids[]=77')
+      expect(url).not.toContain('999')
+      expect(res.body.days).toEqual({
+        [DRIVER_A_ID]: {
+          '2026-10-05': { firstMoveAt: '2026-10-05T13:00:00Z', lastMoveAt: '2026-10-05T15:00:00Z', drivingSeconds: 7200, onDutySeconds: 1800, vehicles: ['12'] },
+        },
+      })
+    })
+
+    it('is an empty answer, not an error, when nobody is linked or Motive fails', async () => {
+      staff()
+      expect((await call('/staff/motive-days', 'GET', undefined, q)).body).toEqual({ days: {} })
+      expect(fetchMock).not.toHaveBeenCalled()
+      tables['Driver-test'][DRIVER_A_ID].motiveDriverId = 77
+      motiveResponse([], false, 500)
+      expect((await call('/staff/motive-days', 'GET', undefined, q)).body).toEqual({ days: {} })
+    })
+  })
+})
+
+describe('POST /paperwork/location-note-edit', () => {
+  const edit = (body: Row) => call('/paperwork/location-note-edit', 'POST', body)
+  const notes = () => tables['Location-test']['loc-1'].driverNotes as Row[]
+  beforeEach(() => {
+    tables['Location-test'] = {
+      'loc-1': {
+        id: 'loc-1',
+        driverNotes: [
+          { at: '2026-10-01T10:00:00Z', driverId: DRIVER_A_ID, by: 'Driver A', text: 'dock 4' },
+          { at: '2026-10-02T10:00:00Z', driverId: DRIVER_B_ID, by: 'Driver B', text: 'gate code' },
+        ],
+      },
+    }
+  })
+
+  it('validates the request', async () => {
+    expect((await edit({ at: 'x', text: 'y' })).status).toBe(400)
+    expect((await edit({ locationId: 'loc-1', text: 'y' })).status).toBe(400)
+    expect((await edit({ locationId: 'loc-1', at: '2026-10-01T10:00:00Z', text: '  ' })).status).toBe(400)
+    expect((await edit({ locationId: 'nope', at: 'x', text: 'y' })).status).toBe(404)
+  })
+
+  it("will not touch another driver's note, and says the same as for one that is gone", async () => {
+    expect((await edit({ locationId: 'loc-1', at: '2026-10-02T10:00:00Z', text: 'hijacked' })).status).toBe(404)
+    expect((await edit({ locationId: 'loc-1', at: '2026-10-02T10:00:00Z', remove: true })).status).toBe(404)
+    expect((await edit({ locationId: 'loc-1', at: 'never', text: 'x' })).status).toBe(404)
+    expect(notes().map((n) => n.text)).toEqual(['dock 4', 'gate code'])
+  })
+
+  it('rewrites the driver\'s own note, trimmed and capped at 1000 characters, leaving the others', async () => {
+    const res = await edit({ locationId: 'loc-1', at: '2026-10-01T10:00:00Z', text: `  ${'x'.repeat(1200)}  ` })
+    expect(res.status).toBe(200)
+    expect(String(notes()[0].text)).toHaveLength(1000)
+    expect(notes()[1].text).toBe('gate code')
+    expect((res.body.notes as Row[]).map((n) => n.mine)).toEqual([true, false])
+  })
+
+  it('removes the driver\'s own note', async () => {
+    const res = await edit({ locationId: 'loc-1', at: '2026-10-01T10:00:00Z', remove: true })
+    expect(res.status).toBe(200)
+    expect(notes().map((n) => n.text)).toEqual(['gate code'])
+    expect(res.body.notes).toEqual([{ at: '2026-10-02T10:00:00Z', by: 'Driver B', text: 'gate code', mine: false }])
+  })
+})
+
+describe('submission upload and document routes', () => {
+  const page = { fileName: 'bol.jpg', contentType: 'image/jpeg', byteSize: 1000 }
+  const sub = () => tables['DriverSubmission-test']['sub-1']
+  beforeEach(() => {
+    tables['DriverSubmission-test'] = {
+      'sub-1': {
+        id: 'sub-1', driverId: DRIVER_A_ID, status: 'NEW', referenceNumber: '20001',
+        pendingUploads: { POD: [{ fileName: 'p1.jpg', contentType: 'image/jpeg', byteSize: 10, s3Key: 'driver-docs/drv-a/sub-1/POD/1-1.jpg' }] },
+        combinedPodKey: 'driver-docs/drv-a/sub-1/POD/combined.pdf',
+      },
+      'sub-b': { id: 'sub-b', driverId: DRIVER_B_ID, status: 'NEW', combinedPodKey: 'secret.pdf' },
+    }
+    tables['DriverSubmissionDoc-test'] = {
+      'doc-raw': { id: 'doc-raw', submissionId: 'sub-1', driverId: DRIVER_A_ID, kind: 'POD', s3Key: 'raw.jpg', scanStatus: 'PENDING' },
+      'doc-ready': { id: 'doc-ready', submissionId: 'sub-1', driverId: DRIVER_A_ID, kind: 'POD', s3Key: 'raw2.jpg', scanStatus: 'READY', enhancedKey: 'clean2.jpg' },
+      'doc-misc': { id: 'doc-misc', submissionId: 'sub-1', driverId: DRIVER_A_ID, kind: 'MISC', s3Key: 'misc.jpg' },
+      'doc-b': { id: 'doc-b', submissionId: 'sub-b', driverId: DRIVER_B_ID, kind: 'POD', s3Key: 'b.jpg' },
+    }
+    let n = 0
+    mockGetSignedUrl.mockImplementation(async () => `https://s3.test/presigned-${++n}`)
+  })
+  const signedKey = () => (mockGetSignedUrl.mock.calls[0][1] as { input: { Key: string } }).input.Key
+
+  describe('POST /submissions/:id/pod', () => {
+    it('validates the pages before anything is signed', async () => {
+      expect((await call('/submissions/sub-1/pod', 'POST', { pages: [] })).status).toBe(400)
+      expect((await call('/submissions/sub-1/pod', 'POST', { pages: [{ ...page, contentType: 'text/html', fileName: 'x.html' }] })).status).toBe(400)
+      expect((await call('/submissions/sub-1/pod', 'POST', { pages: [{ ...page, byteSize: 0 }] })).status).toBe(400)
+      expect(mockGetSignedUrl).not.toHaveBeenCalled()
+    })
+
+    it("answers 404 for another driver's submission and for one that does not exist, signing nothing", async () => {
+      expect((await call('/submissions/sub-b/pod', 'POST', { pages: [page] })).status).toBe(404)
+      expect((await call('/submissions/nope/pod', 'POST', { pages: [page] })).status).toBe(404)
+      expect(mockGetSignedUrl).not.toHaveBeenCalled()
+    })
+
+    it('signs an upload per page under the driver and submission, and appends the pages to the pending POD list', async () => {
+      const res = await call('/submissions/sub-1/pod', 'POST', { pages: [page, { ...page, contentType: 'application/pdf', fileName: 'b.pdf' }] })
+      expect(res.status).toBe(200)
+      const uploads = res.body.uploads as Array<{ pageNumber: number; s3Key: string }>
+      expect(uploads.map((u) => u.pageNumber)).toEqual([1, 2])
+      expect(uploads[0].s3Key).toMatch(/^driver-docs\/drv-a\/sub-1\/POD\/\d+-1\.jpg$/)
+      expect(uploads[1].s3Key).toMatch(/-2\.pdf$/)
+      const pending = (sub().pendingUploads as { POD: Row[] }).POD
+      expect(pending.map((p) => p.s3Key)).toEqual(['driver-docs/drv-a/sub-1/POD/1-1.jpg', uploads[0].s3Key, uploads[1].s3Key])
+    })
+  })
+
+  describe('GET /submissions/:id/uploads', () => {
+    it('needs a document kind, and only serves the owner', async () => {
+      expect((await call('/submissions/sub-1/uploads')).status).toBe(400)
+      expect((await call('/submissions/sub-b/uploads', 'GET', undefined, { kind: 'POD' })).status).toBe(404)
+    })
+
+    it('re-signs the pages already pending, so a retry can PUT them again', async () => {
+      const res = await call('/submissions/sub-1/uploads', 'GET', undefined, { kind: 'POD' })
+      expect(res.status).toBe(200)
+      expect(res.body.uploads).toEqual([{ pageNumber: 1, url: 'https://s3.test/presigned-1', s3Key: 'driver-docs/drv-a/sub-1/POD/1-1.jpg' }])
+      expect((await call('/submissions/sub-1/uploads', 'GET', undefined, { kind: 'RATECON' })).body.uploads).toEqual([])
+    })
+  })
+
+  describe('GET /submissions/:id/doc/:docId/url', () => {
+    const url = (id: string, doc: string) => call(`/submissions/${id}/doc/${doc}/url`)
+
+    it('serves the original until the cleaned copy is READY, then the cleaned one', async () => {
+      expect((await url('sub-1', 'doc-raw')).body).toEqual({ url: 'https://s3.test/presigned-1' })
+      expect(signedKey()).toBe('raw.jpg')
+      mockGetSignedUrl.mockClear()
+      await url('sub-1', 'doc-ready')
+      expect(signedKey()).toBe('clean2.jpg')
+    })
+
+    it('serves the merged PDF for combined-POD, and 404 for one that was never built', async () => {
+      expect((await url('sub-1', 'combined-POD')).status).toBe(200)
+      expect(signedKey()).toBe('driver-docs/drv-a/sub-1/POD/combined.pdf')
+      expect((await url('sub-1', 'combined-RATECON')).status).toBe(404)
+    })
+
+    it("never opens another driver's document, or a real document through the wrong submission", async () => {
+      expect((await url('sub-b', 'doc-b')).status).toBe(404)
+      expect((await url('sub-1', 'doc-b')).status).toBe(404)
+      expect((await url('sub-b', 'combined-POD')).status).toBe(404)
+      expect((await url('sub-1', 'nope')).status).toBe(404)
+      expect(mockGetSignedUrl).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('DELETE /submissions/:id/docs', () => {
+    const del = (id: string, kind?: string) => call(`/submissions/${id}/docs`, 'DELETE', undefined, kind ? { kind } : undefined)
+
+    it('needs a kind and the owner', async () => {
+      expect((await del('sub-1')).status).toBe(400)
+      expect((await del('sub-b', 'POD')).status).toBe(404)
+      expect(Object.keys(tables['DriverSubmissionDoc-test'])).toHaveLength(4)
+      expect(tables['DriverSubmission-test']['sub-b'].combinedPodKey).toBe('secret.pdf')
+    })
+
+    it('removes only this driver\'s documents of that kind and drops the merged-PDF pointer, leaving S3 alone', async () => {
+      const res = await del('sub-1', 'POD')
+      expect(res).toMatchObject({ status: 200, body: { removed: 2 } })
+      expect(Object.keys(tables['DriverSubmissionDoc-test']).sort()).toEqual(['doc-b', 'doc-misc'])
+      expect(sub().combinedPodKey).toBeUndefined()
+      expect(mockS3Send).not.toHaveBeenCalled()
+    })
+
+    it('leaves the merged-PDF pointer alone when the removed pages are photos', async () => {
+      expect((await del('sub-1', 'MISC')).body).toEqual({ removed: 1 })
+      expect(sub().combinedPodKey).toBe('driver-docs/drv-a/sub-1/POD/combined.pdf')
+    })
   })
 })

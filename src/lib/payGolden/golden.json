@@ -1,0 +1,5068 @@
+{
+ "amazon": [
+  {
+   "driverId": "drv-amz-a",
+   "periodStart": "2026-09-13",
+   "carries": true,
+   "fuel": 355.97,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 150
+    },
+    {
+     "label": "Fuel (card 00031)",
+     "amount": 355.97
+    },
+    {
+     "label": "Tolls",
+     "amount": 42.17
+    }
+   ],
+   "fixedDebits": [
+    {
+     "label": "Truck lease",
+     "amount": 280
+    }
+   ],
+   "perTrip": [
+    1972.95,
+    957.26,
+    1038.07,
+    551.07
+   ],
+   "statement": {
+    "gross": 5135.64,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 4519.36,
+    "totalDeductions": 548.14,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 3971.22,
+    "totalCredits": 0,
+    "totalDebits": 280,
+    "payBeforeCredits": 3971.22,
+    "checkAmount": 3691.22
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "periodStart": "2026-09-13",
+   "carries": true,
+   "fuel": 266.56,
+   "deductions": [
+    {
+     "label": "ELD",
+     "amount": 35
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0
+    },
+    {
+     "label": "Fuel (card 00052)",
+     "amount": 266.56
+    }
+   ],
+   "fixedDebits": [],
+   "perTrip": [
+    1695.72,
+    760.32,
+    345.58
+   ],
+   "statement": {
+    "gross": 3183.66,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 2801.62,
+    "totalDeductions": 301.56,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 2500.06,
+    "totalCredits": 100,
+    "totalDebits": 0,
+    "payBeforeCredits": 2500.06,
+    "checkAmount": 2600.06
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "periodStart": "2026-09-13",
+   "carries": true,
+   "fuel": 254.56,
+   "deductions": [
+    {
+     "label": "Fuel (card 00067)",
+     "amount": 254.56
+    }
+   ],
+   "fixedDebits": [],
+   "perTrip": [
+    417.69,
+    187.66,
+    1264.16,
+    1310.7,
+    1675.52
+   ],
+   "statement": {
+    "gross": 5712.63,
+    "payPercent": 0.85,
+    "expensesBeforePercent": false,
+    "driverAmount": 4855.74,
+    "totalDeductions": 254.56,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 4601.18,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 4601.18,
+    "checkAmount": 4601.18
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "periodStart": "2026-09-20",
+   "carries": true,
+   "fuel": 1028.5,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 150
+    },
+    {
+     "label": "Fuel (card 00049)",
+     "amount": 1028.5
+    }
+   ],
+   "fixedDebits": [
+    {
+     "label": "Truck lease",
+     "amount": 280
+    }
+   ],
+   "perTrip": [
+    351.06,
+    1621.51
+   ],
+   "statement": {
+    "gross": 2241.55,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 1972.56,
+    "totalDeductions": 1178.5,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 794.06,
+    "totalCredits": 225.5,
+    "totalDebits": 480,
+    "payBeforeCredits": 794.06,
+    "checkAmount": 539.56
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "periodStart": "2026-09-20",
+   "carries": true,
+   "fuel": 326.95,
+   "deductions": [
+    {
+     "label": "ELD",
+     "amount": 35
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0
+    },
+    {
+     "label": "Fuel (card 00052)",
+     "amount": 326.95
+    },
+    {
+     "label": "Scale fee",
+     "amount": 12
+    }
+   ],
+   "fixedDebits": [],
+   "perTrip": [
+    274.95,
+    1293.6,
+    1285.28,
+    909.48,
+    1728.5
+   ],
+   "statement": {
+    "gross": 6240.69,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 5491.81,
+    "totalDeductions": 373.95,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 5117.86,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 5117.86,
+    "checkAmount": 5117.86
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "periodStart": "2026-09-20",
+   "carries": true,
+   "fuel": 0,
+   "deductions": [],
+   "fixedDebits": [],
+   "perTrip": [
+    413.27,
+    844.25,
+    1521.94,
+    1535.1,
+    814.98
+   ],
+   "statement": {
+    "gross": 6034.76,
+    "payPercent": 0.85,
+    "expensesBeforePercent": false,
+    "driverAmount": 5129.55,
+    "totalDeductions": 0,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 5129.55,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 5129.55,
+    "checkAmount": 5129.55
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "periodStart": "2026-09-27",
+   "carries": false,
+   "fuel": 0,
+   "deductions": [],
+   "fixedDebits": [],
+   "perTrip": [
+    776.14,
+    562.83
+   ],
+   "statement": {
+    "gross": 1521.56,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 1338.97,
+    "totalDeductions": 0,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 1338.97,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 1338.97,
+    "checkAmount": 1338.97
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "periodStart": "2026-09-27",
+   "carries": false,
+   "fuel": 0,
+   "deductions": [],
+   "fixedDebits": [],
+   "perTrip": [
+    1233.59,
+    1215.36
+   ],
+   "statement": {
+    "gross": 2448.95,
+    "payPercent": 0.5,
+    "expensesBeforePercent": true,
+    "driverAmount": 2448.95,
+    "totalDeductions": 0,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 2448.95,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 1224.47,
+    "checkAmount": 1224.47
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "periodStart": "2026-09-27",
+   "carries": false,
+   "fuel": 0,
+   "deductions": [],
+   "fixedDebits": [],
+   "perTrip": [
+    1947.52,
+    1583.55,
+    1266.19,
+    364.85,
+    684.55
+   ],
+   "statement": {
+    "gross": 6878.42,
+    "payPercent": 0.85,
+    "expensesBeforePercent": false,
+    "driverAmount": 5846.66,
+    "totalDeductions": 0,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 5846.66,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 5846.66,
+    "checkAmount": 5846.66
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "periodStart": "2026-10-04",
+   "carries": false,
+   "fuel": 0,
+   "deductions": [],
+   "fixedDebits": [],
+   "perTrip": [
+    2030.51,
+    520.66
+   ],
+   "statement": {
+    "gross": 2899.06,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 2551.17,
+    "totalDeductions": 0,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 2551.17,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 2551.17,
+    "checkAmount": 2551.17
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "periodStart": "2026-10-04",
+   "carries": false,
+   "fuel": 0,
+   "deductions": [],
+   "fixedDebits": [],
+   "perTrip": [
+    635.55,
+    333.6,
+    1514.05,
+    1211.37
+   ],
+   "statement": {
+    "gross": 3694.57,
+    "payPercent": 0.5,
+    "expensesBeforePercent": true,
+    "driverAmount": 3694.57,
+    "totalDeductions": 0,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 3694.57,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 1847.29,
+    "checkAmount": 1847.29
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "periodStart": "2026-10-04",
+   "carries": false,
+   "fuel": 0,
+   "deductions": [],
+   "fixedDebits": [],
+   "perTrip": [
+    685.75,
+    501.42,
+    341.65
+   ],
+   "statement": {
+    "gross": 1798.6,
+    "payPercent": 0.85,
+    "expensesBeforePercent": false,
+    "driverAmount": 1528.81,
+    "totalDeductions": 0,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 1528.81,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 1528.81,
+    "checkAmount": 1528.81
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "periodStart": "2026-10-11",
+   "carries": false,
+   "fuel": 0,
+   "deductions": [],
+   "fixedDebits": [],
+   "perTrip": [
+    1479.19,
+    1297.19,
+    306.9
+   ],
+   "statement": {
+    "gross": 3503.73,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 3083.28,
+    "totalDeductions": 0,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 3083.28,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 3083.28,
+    "checkAmount": 3083.28
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "periodStart": "2026-10-11",
+   "carries": false,
+   "fuel": 0,
+   "deductions": [],
+   "fixedDebits": [],
+   "perTrip": [
+    479.45,
+    1021.24
+   ],
+   "statement": {
+    "gross": 1500.69,
+    "payPercent": 0.5,
+    "expensesBeforePercent": true,
+    "driverAmount": 1500.69,
+    "totalDeductions": 0,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 1500.69,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 750.35,
+    "checkAmount": 750.35
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "periodStart": "2026-10-11",
+   "carries": false,
+   "fuel": 0,
+   "deductions": [],
+   "fixedDebits": [],
+   "perTrip": [
+    1639.85,
+    576.2,
+    1832.19
+   ],
+   "statement": {
+    "gross": 4762.64,
+    "payPercent": 0.85,
+    "expensesBeforePercent": false,
+    "driverAmount": 4048.24,
+    "totalDeductions": 0,
+    "factoringFee": 0,
+    "factoringFeePct": 0,
+    "subtotal": 4048.24,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 4048.24,
+    "checkAmount": 4048.24
+   }
+  }
+ ],
+ "boxTruck": [
+  {
+   "driverId": "drv-box-a",
+   "periodStart": "2026-09-21",
+   "fuel": 667.71,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 120
+    },
+    {
+     "label": "Fuel (card 00088)",
+     "amount": 667.71
+    }
+   ],
+   "statement": {
+    "gross": 3349.11,
+    "payPercent": 0.45,
+    "expensesBeforePercent": false,
+    "driverAmount": 1507.1,
+    "totalDeductions": 854.69,
+    "factoringFee": 66.98,
+    "factoringFeePct": 0.02,
+    "subtotal": 652.41,
+    "totalCredits": 125,
+    "totalDebits": 0,
+    "payBeforeCredits": 652.41,
+    "checkAmount": 777.41
+   },
+   "pendingCredits": [
+    "c4"
+   ]
+  },
+  {
+   "driverId": "drv-box-a",
+   "periodStart": "2026-10-05",
+   "fuel": 0,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 120
+    },
+    {
+     "label": "Parking",
+     "amount": 25
+    }
+   ],
+   "statement": {
+    "gross": 2459.01,
+    "payPercent": 0.5,
+    "expensesBeforePercent": true,
+    "driverAmount": 2459.01,
+    "totalDeductions": 194.18,
+    "factoringFee": 49.18,
+    "factoringFeePct": 0.02,
+    "subtotal": 2264.83,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 1132.42,
+    "checkAmount": 1132.42
+   },
+   "pendingCredits": []
+  }
+ ],
+ "ownerOperator": [
+  {
+   "driverId": "drv-amz-a",
+   "requested": "2026-09-13",
+   "periodStart": "2026-09-27",
+   "trips": [
+    {
+     "id": "load-60",
+     "loadId": "ZT608393",
+     "customer": "ZZ Customer 6",
+     "origin": "ZZ Origin 3",
+     "destination": "Dallas",
+     "miles": 1086,
+     "freightAmount": 1164,
+     "deliveredAt": "2026-09-29T19:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-9",
+     "loadId": "85743",
+     "customer": "ZZ Customer 8",
+     "origin": "Memphis",
+     "destination": "Houston",
+     "miles": 427,
+     "freightAmount": 1586,
+     "deliveredAt": "2026-09-30T09:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-43",
+     "loadId": "ZT379524",
+     "customer": "ZZ Customer 1",
+     "origin": "Memphis",
+     "destination": "Denver",
+     "miles": 107,
+     "freightAmount": 1057,
+     "deliveredAt": "2026-10-01T19:30:00.000Z",
+     "readiness": {
+      "missingDocuments": [
+       "POD"
+      ]
+     }
+    },
+    {
+     "id": "load-48",
+     "loadId": "ZT990835",
+     "customer": "ZZ Customer 1",
+     "origin": "Omaha",
+     "destination": "Houston",
+     "miles": 926,
+     "freightAmount": 1670,
+     "deliveredAt": "2026-10-02T17:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-47",
+     "loadId": "ZT538461",
+     "customer": "ZZ Customer 3",
+     "origin": "Denver",
+     "destination": "Atlanta",
+     "miles": 362,
+     "freightAmount": 2095,
+     "deliveredAt": "2026-10-03T13:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    }
+   ],
+   "held": [
+    {
+     "id": "load-43",
+     "reason": "NO_POD"
+    }
+   ],
+   "heldFreight": 1057,
+   "payableWhenPodsUnknown": 5,
+   "fuel": 1012.31,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 150
+    },
+    {
+     "label": "Fuel (card 00049)",
+     "amount": 1012.31
+    }
+   ],
+   "statement": {
+    "gross": 6515,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 5733.2,
+    "totalDeductions": 1292.61,
+    "factoringFee": 130.3,
+    "factoringFeePct": 0.02,
+    "subtotal": 4440.59,
+    "totalCredits": 0,
+    "totalDebits": 280,
+    "payBeforeCredits": 4440.59,
+    "checkAmount": 4160.59
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "requested": "2026-09-13",
+   "periodStart": "2026-09-27",
+   "trips": [],
+   "held": [],
+   "heldFreight": 0,
+   "payableWhenPodsUnknown": 0,
+   "fuel": 0,
+   "deductions": [
+    {
+     "label": "ELD",
+     "amount": 35
+    },
+    {
+     "label": "Parking (3/7 days)",
+     "amount": 30
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0
+    }
+   ],
+   "statement": {
+    "gross": 0,
+    "payPercent": 0.5,
+    "expensesBeforePercent": true,
+    "driverAmount": 0,
+    "totalDeductions": 65,
+    "factoringFee": 0,
+    "factoringFeePct": 0.02,
+    "subtotal": -65,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": -32.5,
+    "checkAmount": -32.5
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "requested": "2026-09-13",
+   "periodStart": "2026-09-27",
+   "trips": [
+    {
+     "id": "load-45",
+     "loadId": "96933",
+     "customer": "ZZ Customer 4",
+     "origin": "ZZ Origin 5",
+     "destination": "Houston",
+     "miles": 443,
+     "freightAmount": 2055,
+     "deliveredAt": "2026-09-28T13:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-42",
+     "loadId": "ZT116276",
+     "customer": "ZZ Customer 3",
+     "origin": "Memphis",
+     "destination": "Atlanta",
+     "miles": 0,
+     "freightAmount": 3564,
+     "deliveredAt": "2026-09-30T13:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-27",
+     "loadId": "13578",
+     "customer": "ZZ Customer 9",
+     "origin": "Houston",
+     "destination": "Houston",
+     "miles": 362,
+     "freightAmount": 1867,
+     "deliveredAt": "2026-10-03T10:30:00.000Z",
+     "readiness": {
+      "missingDocuments": [
+       "POD"
+      ]
+     }
+    }
+   ],
+   "held": [
+    {
+     "id": "load-27",
+     "reason": "NO_POD"
+    }
+   ],
+   "heldFreight": 1867,
+   "payableWhenPodsUnknown": 3,
+   "fuel": 0,
+   "deductions": [],
+   "statement": {
+    "gross": 5619,
+    "payPercent": 0.85,
+    "expensesBeforePercent": false,
+    "driverAmount": 4776.15,
+    "totalDeductions": 112.38,
+    "factoringFee": 112.38,
+    "factoringFeePct": 0.02,
+    "subtotal": 4663.77,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 4663.77,
+    "checkAmount": 4663.77
+   }
+  },
+  {
+   "driverId": "drv-oo-a",
+   "requested": "2026-09-13",
+   "periodStart": "2026-09-27",
+   "trips": [
+    {
+     "id": "load-61",
+     "loadId": "ZT104495",
+     "customer": "ZZ Customer 8",
+     "origin": "Houston",
+     "destination": "Atlanta",
+     "miles": 827,
+     "freightAmount": 837,
+     "deliveredAt": "2026-09-29T11:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    }
+   ],
+   "held": [],
+   "heldFreight": 0,
+   "payableWhenPodsUnknown": 1,
+   "fuel": 614.5,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 210
+    },
+    {
+     "label": "Fuel (card 00071)",
+     "amount": 614.5
+    }
+   ],
+   "statement": {
+    "gross": 837,
+    "payPercent": 0.9,
+    "expensesBeforePercent": false,
+    "driverAmount": 753.3,
+    "totalDeductions": 841.24,
+    "factoringFee": 16.74,
+    "factoringFeePct": 0.02,
+    "subtotal": -87.94,
+    "totalCredits": 0,
+    "totalDebits": 100,
+    "payBeforeCredits": -87.94,
+    "checkAmount": -187.94
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "requested": "2026-09-20",
+   "periodStart": "2026-09-27",
+   "trips": [
+    {
+     "id": "load-60",
+     "loadId": "ZT608393",
+     "customer": "ZZ Customer 6",
+     "origin": "ZZ Origin 3",
+     "destination": "Dallas",
+     "miles": 1086,
+     "freightAmount": 1164,
+     "deliveredAt": "2026-09-29T19:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-9",
+     "loadId": "85743",
+     "customer": "ZZ Customer 8",
+     "origin": "Memphis",
+     "destination": "Houston",
+     "miles": 427,
+     "freightAmount": 1586,
+     "deliveredAt": "2026-09-30T09:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-43",
+     "loadId": "ZT379524",
+     "customer": "ZZ Customer 1",
+     "origin": "Memphis",
+     "destination": "Denver",
+     "miles": 107,
+     "freightAmount": 1057,
+     "deliveredAt": "2026-10-01T19:30:00.000Z",
+     "readiness": {
+      "missingDocuments": [
+       "POD"
+      ]
+     }
+    },
+    {
+     "id": "load-48",
+     "loadId": "ZT990835",
+     "customer": "ZZ Customer 1",
+     "origin": "Omaha",
+     "destination": "Houston",
+     "miles": 926,
+     "freightAmount": 1670,
+     "deliveredAt": "2026-10-02T17:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-47",
+     "loadId": "ZT538461",
+     "customer": "ZZ Customer 3",
+     "origin": "Denver",
+     "destination": "Atlanta",
+     "miles": 362,
+     "freightAmount": 2095,
+     "deliveredAt": "2026-10-03T13:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    }
+   ],
+   "held": [
+    {
+     "id": "load-43",
+     "reason": "NO_POD"
+    }
+   ],
+   "heldFreight": 1057,
+   "payableWhenPodsUnknown": 5,
+   "fuel": 1012.31,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 150
+    },
+    {
+     "label": "Fuel (card 00049)",
+     "amount": 1012.31
+    }
+   ],
+   "statement": {
+    "gross": 6515,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 5733.2,
+    "totalDeductions": 1292.61,
+    "factoringFee": 130.3,
+    "factoringFeePct": 0.02,
+    "subtotal": 4440.59,
+    "totalCredits": 0,
+    "totalDebits": 280,
+    "payBeforeCredits": 4440.59,
+    "checkAmount": 4160.59
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "requested": "2026-09-20",
+   "periodStart": "2026-09-27",
+   "trips": [],
+   "held": [],
+   "heldFreight": 0,
+   "payableWhenPodsUnknown": 0,
+   "fuel": 0,
+   "deductions": [
+    {
+     "label": "ELD",
+     "amount": 35
+    },
+    {
+     "label": "Parking (3/7 days)",
+     "amount": 30
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0
+    }
+   ],
+   "statement": {
+    "gross": 0,
+    "payPercent": 0.5,
+    "expensesBeforePercent": true,
+    "driverAmount": 0,
+    "totalDeductions": 65,
+    "factoringFee": 0,
+    "factoringFeePct": 0.02,
+    "subtotal": -65,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": -32.5,
+    "checkAmount": -32.5
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "requested": "2026-09-20",
+   "periodStart": "2026-09-27",
+   "trips": [
+    {
+     "id": "load-45",
+     "loadId": "96933",
+     "customer": "ZZ Customer 4",
+     "origin": "ZZ Origin 5",
+     "destination": "Houston",
+     "miles": 443,
+     "freightAmount": 2055,
+     "deliveredAt": "2026-09-28T13:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-42",
+     "loadId": "ZT116276",
+     "customer": "ZZ Customer 3",
+     "origin": "Memphis",
+     "destination": "Atlanta",
+     "miles": 0,
+     "freightAmount": 3564,
+     "deliveredAt": "2026-09-30T13:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-27",
+     "loadId": "13578",
+     "customer": "ZZ Customer 9",
+     "origin": "Houston",
+     "destination": "Houston",
+     "miles": 362,
+     "freightAmount": 1867,
+     "deliveredAt": "2026-10-03T10:30:00.000Z",
+     "readiness": {
+      "missingDocuments": [
+       "POD"
+      ]
+     }
+    }
+   ],
+   "held": [
+    {
+     "id": "load-27",
+     "reason": "NO_POD"
+    }
+   ],
+   "heldFreight": 1867,
+   "payableWhenPodsUnknown": 3,
+   "fuel": 0,
+   "deductions": [],
+   "statement": {
+    "gross": 5619,
+    "payPercent": 0.85,
+    "expensesBeforePercent": false,
+    "driverAmount": 4776.15,
+    "totalDeductions": 112.38,
+    "factoringFee": 112.38,
+    "factoringFeePct": 0.02,
+    "subtotal": 4663.77,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 4663.77,
+    "checkAmount": 4663.77
+   }
+  },
+  {
+   "driverId": "drv-oo-a",
+   "requested": "2026-09-20",
+   "periodStart": "2026-09-27",
+   "trips": [
+    {
+     "id": "load-61",
+     "loadId": "ZT104495",
+     "customer": "ZZ Customer 8",
+     "origin": "Houston",
+     "destination": "Atlanta",
+     "miles": 827,
+     "freightAmount": 837,
+     "deliveredAt": "2026-09-29T11:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    }
+   ],
+   "held": [],
+   "heldFreight": 0,
+   "payableWhenPodsUnknown": 1,
+   "fuel": 614.5,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 210
+    },
+    {
+     "label": "Fuel (card 00071)",
+     "amount": 614.5
+    }
+   ],
+   "statement": {
+    "gross": 837,
+    "payPercent": 0.9,
+    "expensesBeforePercent": false,
+    "driverAmount": 753.3,
+    "totalDeductions": 841.24,
+    "factoringFee": 16.74,
+    "factoringFeePct": 0.02,
+    "subtotal": -87.94,
+    "totalCredits": 0,
+    "totalDebits": 100,
+    "payBeforeCredits": -87.94,
+    "checkAmount": -187.94
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "requested": "2026-09-27",
+   "periodStart": "2026-09-27",
+   "trips": [
+    {
+     "id": "load-60",
+     "loadId": "ZT608393",
+     "customer": "ZZ Customer 6",
+     "origin": "ZZ Origin 3",
+     "destination": "Dallas",
+     "miles": 1086,
+     "freightAmount": 1164,
+     "deliveredAt": "2026-09-29T19:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-9",
+     "loadId": "85743",
+     "customer": "ZZ Customer 8",
+     "origin": "Memphis",
+     "destination": "Houston",
+     "miles": 427,
+     "freightAmount": 1586,
+     "deliveredAt": "2026-09-30T09:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-43",
+     "loadId": "ZT379524",
+     "customer": "ZZ Customer 1",
+     "origin": "Memphis",
+     "destination": "Denver",
+     "miles": 107,
+     "freightAmount": 1057,
+     "deliveredAt": "2026-10-01T19:30:00.000Z",
+     "readiness": {
+      "missingDocuments": [
+       "POD"
+      ]
+     }
+    },
+    {
+     "id": "load-48",
+     "loadId": "ZT990835",
+     "customer": "ZZ Customer 1",
+     "origin": "Omaha",
+     "destination": "Houston",
+     "miles": 926,
+     "freightAmount": 1670,
+     "deliveredAt": "2026-10-02T17:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-47",
+     "loadId": "ZT538461",
+     "customer": "ZZ Customer 3",
+     "origin": "Denver",
+     "destination": "Atlanta",
+     "miles": 362,
+     "freightAmount": 2095,
+     "deliveredAt": "2026-10-03T13:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    }
+   ],
+   "held": [
+    {
+     "id": "load-43",
+     "reason": "NO_POD"
+    }
+   ],
+   "heldFreight": 1057,
+   "payableWhenPodsUnknown": 5,
+   "fuel": 1012.31,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 150
+    },
+    {
+     "label": "Fuel (card 00049)",
+     "amount": 1012.31
+    }
+   ],
+   "statement": {
+    "gross": 6515,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 5733.2,
+    "totalDeductions": 1292.61,
+    "factoringFee": 130.3,
+    "factoringFeePct": 0.02,
+    "subtotal": 4440.59,
+    "totalCredits": 0,
+    "totalDebits": 280,
+    "payBeforeCredits": 4440.59,
+    "checkAmount": 4160.59
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "requested": "2026-09-27",
+   "periodStart": "2026-09-27",
+   "trips": [],
+   "held": [],
+   "heldFreight": 0,
+   "payableWhenPodsUnknown": 0,
+   "fuel": 0,
+   "deductions": [
+    {
+     "label": "ELD",
+     "amount": 35
+    },
+    {
+     "label": "Parking (3/7 days)",
+     "amount": 30
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0
+    }
+   ],
+   "statement": {
+    "gross": 0,
+    "payPercent": 0.5,
+    "expensesBeforePercent": true,
+    "driverAmount": 0,
+    "totalDeductions": 65,
+    "factoringFee": 0,
+    "factoringFeePct": 0.02,
+    "subtotal": -65,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": -32.5,
+    "checkAmount": -32.5
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "requested": "2026-09-27",
+   "periodStart": "2026-09-27",
+   "trips": [
+    {
+     "id": "load-45",
+     "loadId": "96933",
+     "customer": "ZZ Customer 4",
+     "origin": "ZZ Origin 5",
+     "destination": "Houston",
+     "miles": 443,
+     "freightAmount": 2055,
+     "deliveredAt": "2026-09-28T13:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-42",
+     "loadId": "ZT116276",
+     "customer": "ZZ Customer 3",
+     "origin": "Memphis",
+     "destination": "Atlanta",
+     "miles": 0,
+     "freightAmount": 3564,
+     "deliveredAt": "2026-09-30T13:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-27",
+     "loadId": "13578",
+     "customer": "ZZ Customer 9",
+     "origin": "Houston",
+     "destination": "Houston",
+     "miles": 362,
+     "freightAmount": 1867,
+     "deliveredAt": "2026-10-03T10:30:00.000Z",
+     "readiness": {
+      "missingDocuments": [
+       "POD"
+      ]
+     }
+    }
+   ],
+   "held": [
+    {
+     "id": "load-27",
+     "reason": "NO_POD"
+    }
+   ],
+   "heldFreight": 1867,
+   "payableWhenPodsUnknown": 3,
+   "fuel": 0,
+   "deductions": [],
+   "statement": {
+    "gross": 5619,
+    "payPercent": 0.85,
+    "expensesBeforePercent": false,
+    "driverAmount": 4776.15,
+    "totalDeductions": 112.38,
+    "factoringFee": 112.38,
+    "factoringFeePct": 0.02,
+    "subtotal": 4663.77,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 4663.77,
+    "checkAmount": 4663.77
+   }
+  },
+  {
+   "driverId": "drv-oo-a",
+   "requested": "2026-09-27",
+   "periodStart": "2026-09-27",
+   "trips": [
+    {
+     "id": "load-61",
+     "loadId": "ZT104495",
+     "customer": "ZZ Customer 8",
+     "origin": "Houston",
+     "destination": "Atlanta",
+     "miles": 827,
+     "freightAmount": 837,
+     "deliveredAt": "2026-09-29T11:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    }
+   ],
+   "held": [],
+   "heldFreight": 0,
+   "payableWhenPodsUnknown": 1,
+   "fuel": 614.5,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 210
+    },
+    {
+     "label": "Fuel (card 00071)",
+     "amount": 614.5
+    }
+   ],
+   "statement": {
+    "gross": 837,
+    "payPercent": 0.9,
+    "expensesBeforePercent": false,
+    "driverAmount": 753.3,
+    "totalDeductions": 841.24,
+    "factoringFee": 16.74,
+    "factoringFeePct": 0.02,
+    "subtotal": -87.94,
+    "totalCredits": 0,
+    "totalDebits": 100,
+    "payBeforeCredits": -87.94,
+    "checkAmount": -187.94
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "requested": "2026-10-04",
+   "periodStart": "2026-10-04",
+   "trips": [
+    {
+     "id": "load-57",
+     "loadId": "ZT925588",
+     "customer": "ZZ Customer 6",
+     "origin": "Atlanta",
+     "destination": "Atlanta",
+     "miles": 826,
+     "freightAmount": 2405,
+     "deliveredAt": "2026-10-06T06:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-4",
+     "loadId": "ZT908619",
+     "customer": "ZZ Customer 9",
+     "origin": "Chicago",
+     "destination": "Chicago",
+     "miles": 230,
+     "freightAmount": 630,
+     "deliveredAt": "2026-10-09T14:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-3",
+     "loadId": "ZT446879",
+     "customer": "ZZ Customer 8",
+     "origin": "Dallas",
+     "destination": "Memphis",
+     "miles": 704,
+     "freightAmount": 944,
+     "deliveredAt": "2026-10-10T19:30:00.000Z",
+     "readiness": {
+      "missingDocuments": [
+       "POD"
+      ]
+     }
+    },
+    {
+     "id": "load-dev-mirror",
+     "loadId": "ZT446879",
+     "customer": "ZZ Customer 8",
+     "origin": "Dallas",
+     "destination": "Memphis",
+     "miles": 704,
+     "freightAmount": 944,
+     "deliveredAt": "2026-10-10T19:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    }
+   ],
+   "held": [
+    {
+     "id": "load-3",
+     "reason": "NO_POD"
+    }
+   ],
+   "heldFreight": 944,
+   "payableWhenPodsUnknown": 4,
+   "fuel": 1167.13,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 150
+    },
+    {
+     "label": "Fuel (card 00049)",
+     "amount": 1167.13
+    }
+   ],
+   "statement": {
+    "gross": 3979,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 3501.52,
+    "totalDeductions": 1396.71,
+    "factoringFee": 79.58,
+    "factoringFeePct": 0.02,
+    "subtotal": 2104.81,
+    "totalCredits": 0,
+    "totalDebits": 280,
+    "payBeforeCredits": 2104.81,
+    "checkAmount": 1824.81
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "requested": "2026-10-04",
+   "periodStart": "2026-10-04",
+   "trips": [],
+   "held": [],
+   "heldFreight": 0,
+   "payableWhenPodsUnknown": 0,
+   "fuel": 149.79,
+   "deductions": [
+    {
+     "label": "ELD",
+     "amount": 35
+    },
+    {
+     "label": "Parking",
+     "amount": 70
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0
+    },
+    {
+     "label": "Fuel (card 00052)",
+     "amount": 149.79
+    }
+   ],
+   "statement": {
+    "gross": 0,
+    "payPercent": 0.5,
+    "expensesBeforePercent": true,
+    "driverAmount": 0,
+    "totalDeductions": 254.79,
+    "factoringFee": 0,
+    "factoringFeePct": 0.02,
+    "subtotal": -254.79,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": -127.39,
+    "checkAmount": -127.39
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "requested": "2026-10-04",
+   "periodStart": "2026-10-04",
+   "trips": [
+    {
+     "id": "load-63",
+     "loadId": "10651",
+     "customer": "ZZ Customer 5",
+     "origin": "Atlanta",
+     "destination": "Houston",
+     "miles": 0,
+     "freightAmount": 1258,
+     "deliveredAt": "2026-10-05T10:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-10",
+     "loadId": "ZT715347",
+     "customer": "ZZ Customer 4",
+     "origin": "ZZ Origin 9",
+     "destination": "Memphis",
+     "miles": 832,
+     "freightAmount": 2541,
+     "deliveredAt": "2026-10-06T07:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-67",
+     "loadId": "ZT167680",
+     "customer": "ZZ Customer 2",
+     "origin": "Dallas",
+     "destination": "Chicago",
+     "miles": 257,
+     "freightAmount": 1625,
+     "deliveredAt": "2026-10-09T10:30:00.000Z",
+     "readiness": {
+      "missingDocuments": [
+       "POD"
+      ]
+     }
+    }
+   ],
+   "held": [
+    {
+     "id": "load-67",
+     "reason": "NO_POD"
+    }
+   ],
+   "heldFreight": 1625,
+   "payableWhenPodsUnknown": 3,
+   "fuel": 97.35,
+   "deductions": [
+    {
+     "label": "Fuel (card 00067)",
+     "amount": 97.35
+    }
+   ],
+   "statement": {
+    "gross": 3799,
+    "payPercent": 0.85,
+    "expensesBeforePercent": false,
+    "driverAmount": 3229.15,
+    "totalDeductions": 173.33,
+    "factoringFee": 75.98,
+    "factoringFeePct": 0.02,
+    "subtotal": 3055.82,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 3055.82,
+    "checkAmount": 3055.82
+   }
+  },
+  {
+   "driverId": "drv-oo-a",
+   "requested": "2026-10-04",
+   "periodStart": "2026-10-04",
+   "trips": [
+    {
+     "id": "load-16",
+     "loadId": "ZT903284",
+     "customer": "ZZ Customer 1",
+     "origin": "Chicago",
+     "destination": "Dallas",
+     "miles": 440,
+     "freightAmount": 1588,
+     "deliveredAt": "2026-10-04T19:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-41",
+     "loadId": "ZT175976",
+     "customer": "ZZ Customer 5",
+     "origin": "Chicago",
+     "destination": "Atlanta",
+     "miles": 873,
+     "freightAmount": 2529,
+     "deliveredAt": "2026-10-08T06:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    }
+   ],
+   "held": [],
+   "heldFreight": 0,
+   "payableWhenPodsUnknown": 2,
+   "fuel": 557.96,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 210
+    },
+    {
+     "label": "Fuel (card 00071)",
+     "amount": 557.96
+    },
+    {
+     "label": "Tolls",
+     "amount": 18.4
+    }
+   ],
+   "statement": {
+    "gross": 4117,
+    "payPercent": 0.9,
+    "expensesBeforePercent": false,
+    "driverAmount": 3705.3,
+    "totalDeductions": 868.7,
+    "factoringFee": 82.34,
+    "factoringFeePct": 0.02,
+    "subtotal": 2836.6,
+    "totalCredits": 35,
+    "totalDebits": 190,
+    "payBeforeCredits": 2836.6,
+    "checkAmount": 2681.6
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "requested": "2026-10-11",
+   "periodStart": "2026-10-11",
+   "trips": [
+    {
+     "id": "load-2",
+     "loadId": "ZT286364",
+     "customer": "ZZ Customer 3",
+     "origin": "Chicago",
+     "destination": "Denver",
+     "miles": 339,
+     "freightAmount": 2652,
+     "deliveredAt": "2026-10-12T19:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-37",
+     "loadId": "ZT859983",
+     "customer": "ZZ Customer 6",
+     "origin": "Dallas",
+     "destination": "Memphis",
+     "miles": 301,
+     "freightAmount": 3545,
+     "deliveredAt": "2026-10-13T07:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-26",
+     "loadId": "ZT647707",
+     "customer": "ZZ Customer 1",
+     "origin": "Tulsa",
+     "destination": "Houston",
+     "miles": 740,
+     "freightAmount": 0,
+     "deliveredAt": "2026-10-16T12:30:00.000Z",
+     "readiness": {
+      "missingDocuments": [
+       "POD"
+      ]
+     }
+    }
+   ],
+   "held": [
+    {
+     "id": "load-26",
+     "reason": "NO_POD"
+    }
+   ],
+   "heldFreight": 0,
+   "payableWhenPodsUnknown": 3,
+   "fuel": 303.65,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 150
+    },
+    {
+     "label": "Fuel (card 00049)",
+     "amount": 303.65
+    }
+   ],
+   "statement": {
+    "gross": 6197,
+    "payPercent": 0.88,
+    "expensesBeforePercent": false,
+    "driverAmount": 5453.36,
+    "totalDeductions": 577.59,
+    "factoringFee": 123.94,
+    "factoringFeePct": 0.02,
+    "subtotal": 4875.77,
+    "totalCredits": 0,
+    "totalDebits": 280,
+    "payBeforeCredits": 4875.77,
+    "checkAmount": 4595.77
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "requested": "2026-10-11",
+   "periodStart": "2026-10-11",
+   "trips": [],
+   "held": [],
+   "heldFreight": 0,
+   "payableWhenPodsUnknown": 0,
+   "fuel": 179.75,
+   "deductions": [
+    {
+     "label": "ELD",
+     "amount": 35
+    },
+    {
+     "label": "Parking (1/7 days)",
+     "amount": 10
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0
+    },
+    {
+     "label": "Fuel (card 00052)",
+     "amount": 179.75
+    }
+   ],
+   "statement": {
+    "gross": 0,
+    "payPercent": 0.5,
+    "expensesBeforePercent": true,
+    "driverAmount": 0,
+    "totalDeductions": 224.75,
+    "factoringFee": 0,
+    "factoringFeePct": 0.02,
+    "subtotal": -224.75,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": -112.37,
+    "checkAmount": -112.37
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "requested": "2026-10-11",
+   "periodStart": "2026-10-11",
+   "trips": [
+    {
+     "id": "load-28",
+     "loadId": "ZT885788",
+     "customer": "ZZ Customer 9",
+     "origin": "Chicago",
+     "destination": "Memphis",
+     "miles": 0,
+     "freightAmount": 1791,
+     "deliveredAt": "2026-10-11T09:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-39",
+     "loadId": "ZT796035",
+     "customer": "ZZ Customer 5",
+     "origin": "Dallas",
+     "destination": "Tulsa",
+     "miles": 1072,
+     "freightAmount": 0,
+     "deliveredAt": "2026-10-12T07:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-38",
+     "loadId": "ZT748266",
+     "customer": "ZZ Customer 9",
+     "origin": "Chicago",
+     "destination": "Chicago",
+     "miles": 665,
+     "freightAmount": 3575,
+     "deliveredAt": "2026-10-16T19:30:00.000Z",
+     "readiness": {
+      "missingDocuments": [
+       "POD"
+      ]
+     }
+    }
+   ],
+   "held": [
+    {
+     "id": "load-38",
+     "reason": "NO_POD"
+    }
+   ],
+   "heldFreight": 3575,
+   "payableWhenPodsUnknown": 3,
+   "fuel": 598.5,
+   "deductions": [
+    {
+     "label": "Fuel (card 00067)",
+     "amount": 598.5
+    }
+   ],
+   "statement": {
+    "gross": 1791,
+    "payPercent": 0.85,
+    "expensesBeforePercent": false,
+    "driverAmount": 1522.35,
+    "totalDeductions": 634.32,
+    "factoringFee": 35.82,
+    "factoringFeePct": 0.02,
+    "subtotal": 888.03,
+    "totalCredits": 0,
+    "totalDebits": 0,
+    "payBeforeCredits": 888.03,
+    "checkAmount": 888.03
+   }
+  },
+  {
+   "driverId": "drv-oo-a",
+   "requested": "2026-10-11",
+   "periodStart": "2026-10-11",
+   "trips": [
+    {
+     "id": "load-54",
+     "loadId": "10911",
+     "customer": "ZZ Customer 2",
+     "origin": "Atlanta",
+     "destination": "Memphis",
+     "miles": 933,
+     "freightAmount": 1263,
+     "deliveredAt": "2026-10-12T15:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    },
+    {
+     "id": "load-53",
+     "loadId": "ZT208030",
+     "customer": "ZZ Customer 5",
+     "origin": "Memphis",
+     "destination": "Atlanta",
+     "miles": 988,
+     "freightAmount": 2358,
+     "deliveredAt": "2026-10-14T15:30:00.000Z",
+     "readiness": {
+      "missingDocuments": []
+     }
+    }
+   ],
+   "held": [],
+   "heldFreight": 0,
+   "payableWhenPodsUnknown": 2,
+   "fuel": 391.93,
+   "deductions": [
+    {
+     "label": "Insurance",
+     "amount": 210
+    },
+    {
+     "label": "Fuel (card 00071)",
+     "amount": 391.93
+    }
+   ],
+   "statement": {
+    "gross": 3621,
+    "payPercent": 0.9,
+    "expensesBeforePercent": false,
+    "driverAmount": 3258.9,
+    "totalDeductions": 674.35,
+    "factoringFee": 72.42,
+    "factoringFeePct": 0.02,
+    "subtotal": 2584.55,
+    "totalCredits": 0,
+    "totalDebits": 100,
+    "payBeforeCredits": 2584.55,
+    "checkAmount": 2484.55
+   }
+  }
+ ],
+ "driverAppSettlement": [
+  {
+   "driverId": "drv-amz-a",
+   "periodStart": "2026-09-13",
+   "settlement": {
+    "weekStart": "2026-09-13",
+    "weekLabel": "9/13 – 9/19",
+    "trips": [
+     {
+      "id": "at-3",
+      "date": "2026-09-15",
+      "loadId": "ZZ3608",
+      "origin": "Chicago",
+      "destination": "Tulsa",
+      "miles": 459,
+      "rate": 2.57,
+      "freight": 1179.63,
+      "amount": 1038.07,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-1",
+      "date": "2026-09-18",
+      "loadId": "ZZ6135",
+      "origin": "Denver",
+      "destination": "Denver",
+      "miles": 859,
+      "rate": 2.61,
+      "freight": 2241.99,
+      "amount": 1972.95,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-2",
+      "date": "2026-09-19",
+      "loadId": "ZZ3820",
+      "origin": "Denver",
+      "destination": "Tulsa",
+      "miles": 420,
+      "rate": 2.59,
+      "freight": 1087.8,
+      "amount": 957.26,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-4",
+      "date": "2026-09-19",
+      "loadId": "ZZ5940",
+      "origin": "Chicago",
+      "destination": "Chicago",
+      "miles": 294,
+      "rate": 2.13,
+      "freight": 626.22,
+      "amount": 551.07,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 5135.64,
+    "driverAmount": 4519.36,
+    "payPercent": 0.88,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Insurance",
+      "amount": 150
+     },
+     {
+      "label": "Fuel (card 00031)",
+      "amount": 355.97
+     },
+     {
+      "label": "Tolls",
+      "amount": 42.17
+     }
+    ],
+    "credits": [],
+    "debits": [
+     {
+      "label": "Truck lease",
+      "amount": 280
+     }
+    ],
+    "checkAmount": 3691.22
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "periodStart": "2026-09-13",
+   "settlement": {
+    "weekStart": "2026-09-13",
+    "weekLabel": "9/13 – 9/19",
+    "trips": [
+     {
+      "id": "at-14",
+      "date": "2026-09-14",
+      "loadId": "ZZ8884",
+      "origin": "Memphis",
+      "destination": "Chicago",
+      "miles": 651,
+      "rate": 2.96,
+      "freight": 1926.96,
+      "amount": 1695.72,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-16",
+      "date": "2026-09-14",
+      "loadId": "ZZ7664",
+      "origin": "Omaha",
+      "destination": "Houston",
+      "miles": 210,
+      "rate": 1.87,
+      "freight": 392.7,
+      "amount": 345.58,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-15",
+      "date": "2026-09-17",
+      "loadId": "ZZ7284",
+      "origin": "Memphis",
+      "destination": "Houston",
+      "miles": 432,
+      "rate": 2,
+      "freight": 864,
+      "amount": 760.32,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 3183.66,
+    "driverAmount": 2801.62,
+    "payPercent": 0.88,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "ELD",
+      "amount": 35
+     },
+     {
+      "label": "Mileage charge",
+      "amount": 0
+     },
+     {
+      "label": "Fuel (card 00052)",
+      "amount": 266.56
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": 2500.06
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "periodStart": "2026-09-13",
+   "settlement": {
+    "weekStart": "2026-09-13",
+    "weekLabel": "9/13 – 9/19",
+    "trips": [
+     {
+      "id": "at-33",
+      "date": "2026-09-15",
+      "loadId": "ZZ8428",
+      "origin": "Tulsa",
+      "destination": "Houston",
+      "miles": 771,
+      "rate": 2,
+      "freight": 1542,
+      "amount": 1310.7,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-30",
+      "date": "2026-09-16",
+      "loadId": "ZZ5194",
+      "origin": "Atlanta",
+      "destination": "Dallas",
+      "miles": 210,
+      "rate": 2.34,
+      "freight": 491.4,
+      "amount": 417.69,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-34",
+      "date": "2026-09-16",
+      "loadId": "ZZ3044",
+      "origin": "Omaha",
+      "destination": "Omaha",
+      "miles": 704,
+      "rate": 2.8,
+      "freight": 1971.2,
+      "amount": 1675.52,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-32",
+      "date": "2026-09-18",
+      "loadId": "ZZ9363",
+      "origin": "Houston",
+      "destination": "Atlanta",
+      "miles": 661,
+      "rate": 2.25,
+      "freight": 1487.25,
+      "amount": 1264.16,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-31",
+      "date": "2026-09-19",
+      "loadId": "ZZ3401",
+      "origin": "Atlanta",
+      "destination": "Omaha",
+      "miles": 133,
+      "rate": 1.66,
+      "freight": 220.78,
+      "amount": 187.66,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 5712.63,
+    "driverAmount": 4855.74,
+    "payPercent": 0.85,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Fuel (card 00067)",
+      "amount": 254.56
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": 4601.18
+   }
+  },
+  {
+   "driverId": "drv-oo-a",
+   "periodStart": "2026-09-13",
+   "settlement": {
+    "weekStart": "2026-09-13",
+    "weekLabel": "9/13 – 9/19",
+    "trips": [],
+    "grossPay": 0,
+    "driverAmount": 0,
+    "payPercent": 0.9,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Factoring fee (2%)",
+      "amount": 0
+     },
+     {
+      "label": "Insurance",
+      "amount": 210
+     },
+     {
+      "label": "Fuel (card 00071)",
+      "amount": 802.76
+     }
+    ],
+    "credits": [],
+    "debits": [
+     {
+      "label": "Escrow",
+      "amount": 100
+     }
+    ],
+    "checkAmount": -1112.76
+   }
+  },
+  {
+   "driverId": "drv-box-a",
+   "periodStart": "2026-09-13",
+   "settlement": {
+    "weekStart": "2026-09-13",
+    "weekLabel": "9/13 – 9/19",
+    "trips": [],
+    "grossPay": 0,
+    "driverAmount": 0,
+    "payPercent": 0.45,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Factoring fee (2%)",
+      "amount": 0
+     },
+     {
+      "label": "Insurance",
+      "amount": 120
+     },
+     {
+      "label": "Fuel (card 00088)",
+      "amount": 192.74
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": -312.74
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "periodStart": "2026-09-20",
+   "settlement": {
+    "weekStart": "2026-09-20",
+    "weekLabel": "9/20 – 9/26",
+    "trips": [
+     {
+      "id": "at-6",
+      "date": "2026-09-22",
+      "loadId": "ZZ5580",
+      "origin": "Chicago",
+      "destination": "Atlanta",
+      "miles": 746,
+      "rate": 2.47,
+      "freight": 1842.62,
+      "amount": 1621.51,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-5",
+      "date": "2026-09-25",
+      "loadId": "ZZ9635",
+      "origin": "Denver",
+      "destination": "Atlanta",
+      "miles": 139,
+      "rate": 2.87,
+      "freight": 398.93,
+      "amount": 351.06,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 2241.55,
+    "driverAmount": 1972.56,
+    "payPercent": 0.88,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Insurance",
+      "amount": 150
+     },
+     {
+      "label": "Fuel (card 00049)",
+      "amount": 1028.5
+     }
+    ],
+    "credits": [
+     {
+      "label": "Detention — Detention",
+      "amount": 150,
+      "reasonCode": "DETENTION"
+     },
+     {
+      "label": "Other — Bonus",
+      "amount": 75.5,
+      "reasonCode": "OTHER"
+     }
+    ],
+    "debits": [
+     {
+      "label": "Truck lease",
+      "amount": 280
+     },
+     {
+      "label": "Cash advance — Advance",
+      "amount": 200,
+      "reasonCode": "CASH_ADVANCE"
+     }
+    ],
+    "checkAmount": 539.56
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "periodStart": "2026-09-20",
+   "settlement": {
+    "weekStart": "2026-09-20",
+    "weekLabel": "9/20 – 9/26",
+    "trips": [
+     {
+      "id": "at-21",
+      "date": "2026-09-21",
+      "loadId": "ZZ6244",
+      "origin": "Atlanta",
+      "destination": "Houston",
+      "miles": 805,
+      "rate": 2.44,
+      "freight": 1964.2,
+      "amount": 1728.5,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-17",
+      "date": "2026-09-23",
+      "loadId": "ZZ7759",
+      "origin": "Dallas",
+      "destination": "Chicago",
+      "miles": 146,
+      "rate": 2.14,
+      "freight": 312.44,
+      "amount": 274.95,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-19",
+      "date": "2026-09-23",
+      "loadId": "ZZ7592",
+      "origin": "Memphis",
+      "destination": "Chicago",
+      "miles": 749,
+      "rate": 1.95,
+      "freight": 1460.55,
+      "amount": 1285.28,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-20",
+      "date": "2026-09-23",
+      "loadId": "ZZ3928",
+      "origin": "Chicago",
+      "destination": "Denver",
+      "miles": 530,
+      "rate": 1.95,
+      "freight": 1033.5,
+      "amount": 909.48,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-18",
+      "date": "2026-09-24",
+      "loadId": "ZZ3175",
+      "origin": "Denver",
+      "destination": "Memphis",
+      "miles": 750,
+      "rate": 1.96,
+      "freight": 1470,
+      "amount": 1293.6,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 6240.69,
+    "driverAmount": 5491.81,
+    "payPercent": 0.88,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "ELD",
+      "amount": 35
+     },
+     {
+      "label": "Mileage charge",
+      "amount": 0
+     },
+     {
+      "label": "Fuel (card 00052)",
+      "amount": 326.95
+     },
+     {
+      "label": "Scale fee",
+      "amount": 12
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": 5117.86
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "periodStart": "2026-09-20",
+   "settlement": {
+    "weekStart": "2026-09-20",
+    "weekLabel": "9/20 – 9/26",
+    "trips": [
+     {
+      "id": "at-35",
+      "date": "2026-09-20",
+      "loadId": "ZZ1317",
+      "origin": "Tulsa",
+      "destination": "Houston",
+      "miles": 220,
+      "rate": 2.21,
+      "freight": 486.2,
+      "amount": 413.27,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-36",
+      "date": "2026-09-21",
+      "loadId": "ZZ7561",
+      "origin": "Memphis",
+      "destination": "Denver",
+      "miles": 558,
+      "rate": 1.78,
+      "freight": 993.24,
+      "amount": 844.25,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-39",
+      "date": "2026-09-24",
+      "loadId": "ZZ1998",
+      "origin": "Atlanta",
+      "destination": "Omaha",
+      "miles": 470,
+      "rate": 2.04,
+      "freight": 958.8,
+      "amount": 814.98,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-37",
+      "date": "2026-09-26",
+      "loadId": "ZZ1981",
+      "origin": "Chicago",
+      "destination": "Denver",
+      "miles": 694,
+      "rate": 2.58,
+      "freight": 1790.52,
+      "amount": 1521.94,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-38",
+      "date": "2026-09-26",
+      "loadId": "ZZ5264",
+      "origin": "Atlanta",
+      "destination": "Houston",
+      "miles": 602,
+      "rate": 3,
+      "freight": 1806,
+      "amount": 1535.1,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 6034.76,
+    "driverAmount": 5129.55,
+    "payPercent": 0.85,
+    "heldFreight": 0,
+    "deductions": [],
+    "credits": [],
+    "debits": [],
+    "checkAmount": 5129.55
+   }
+  },
+  {
+   "driverId": "drv-oo-a",
+   "periodStart": "2026-09-20",
+   "settlement": {
+    "weekStart": "2026-09-20",
+    "weekLabel": "9/20 – 9/26",
+    "trips": [],
+    "grossPay": 0,
+    "driverAmount": 0,
+    "payPercent": 0.9,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Factoring fee (2%)",
+      "amount": 0
+     },
+     {
+      "label": "Insurance",
+      "amount": 210
+     },
+     {
+      "label": "Fuel (card 00071)",
+      "amount": 228.87
+     }
+    ],
+    "credits": [],
+    "debits": [
+     {
+      "label": "Escrow",
+      "amount": 100
+     }
+    ],
+    "checkAmount": -538.87
+   }
+  },
+  {
+   "driverId": "drv-box-a",
+   "periodStart": "2026-09-20",
+   "settlement": {
+    "weekStart": "2026-09-20",
+    "weekLabel": "9/20 – 9/26",
+    "trips": [],
+    "grossPay": 0,
+    "driverAmount": 0,
+    "payPercent": 0.45,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Factoring fee (2%)",
+      "amount": 0
+     },
+     {
+      "label": "Insurance",
+      "amount": 120
+     },
+     {
+      "label": "Fuel (card 00088)",
+      "amount": 346.29
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": -466.29
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "periodStart": "2026-09-27",
+   "settlement": {
+    "weekStart": "2026-09-27",
+    "weekLabel": "9/27 – 10/3",
+    "trips": [
+     {
+      "id": "at-7",
+      "date": "2026-09-29",
+      "loadId": "ZZ1599",
+      "origin": "Memphis",
+      "destination": "Houston",
+      "miles": 422,
+      "rate": 2.09,
+      "freight": 881.98,
+      "amount": 776.14,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-8",
+      "date": "2026-10-01",
+      "loadId": "ZZ8563",
+      "origin": "Omaha",
+      "destination": "Chicago",
+      "miles": 226,
+      "rate": 2.83,
+      "freight": 639.58,
+      "amount": 562.83,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 1521.56,
+    "driverAmount": 1338.97,
+    "payPercent": 0.88,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Insurance",
+      "amount": 150
+     },
+     {
+      "label": "Fuel (card 00049)",
+      "amount": 1012.31
+     }
+    ],
+    "credits": [],
+    "debits": [
+     {
+      "label": "Truck lease",
+      "amount": 280
+     }
+    ],
+    "checkAmount": -103.34
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "periodStart": "2026-09-27",
+   "settlement": {
+    "weekStart": "2026-09-27",
+    "weekLabel": "9/27 – 10/3",
+    "trips": [
+     {
+      "id": "at-22",
+      "date": "2026-10-01",
+      "loadId": "ZZ4839",
+      "origin": "Omaha",
+      "destination": "Atlanta",
+      "miles": 439,
+      "rate": 2.81,
+      "freight": 1233.59,
+      "amount": 1233.59,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-23",
+      "date": "2026-10-02",
+      "loadId": "ZZ5031",
+      "origin": "Atlanta",
+      "destination": "Houston",
+      "miles": 422,
+      "rate": 2.88,
+      "freight": 1215.36,
+      "amount": 1215.36,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 2448.95,
+    "driverAmount": 2448.95,
+    "payPercent": 0.5,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "ELD",
+      "amount": 35
+     },
+     {
+      "label": "Parking (3/7 days)",
+      "amount": 30
+     },
+     {
+      "label": "Mileage charge",
+      "amount": 0
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": 1191.97
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "periodStart": "2026-09-27",
+   "settlement": {
+    "weekStart": "2026-09-27",
+    "weekLabel": "9/27 – 10/3",
+    "trips": [
+     {
+      "id": "at-40",
+      "date": "2026-09-27",
+      "loadId": "ZZ4866",
+      "origin": "Houston",
+      "destination": "Houston",
+      "miles": 895,
+      "rate": 2.56,
+      "freight": 2291.2,
+      "amount": 1947.52,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-44",
+      "date": "2026-09-27",
+      "loadId": "ZZ2382",
+      "origin": "Memphis",
+      "destination": "Tulsa",
+      "miles": 455,
+      "rate": 1.77,
+      "freight": 805.35,
+      "amount": 684.55,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-43",
+      "date": "2026-09-29",
+      "loadId": "ZZ8411",
+      "origin": "Chicago",
+      "destination": "Tulsa",
+      "miles": 146,
+      "rate": 2.94,
+      "freight": 429.24,
+      "amount": 364.85,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-41",
+      "date": "2026-09-30",
+      "loadId": "ZZ3994",
+      "origin": "Omaha",
+      "destination": "Chicago",
+      "miles": 675,
+      "rate": 2.76,
+      "freight": 1863,
+      "amount": 1583.55,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-42",
+      "date": "2026-10-02",
+      "loadId": "ZZ7207",
+      "origin": "Atlanta",
+      "destination": "Houston",
+      "miles": 823,
+      "rate": 1.81,
+      "freight": 1489.63,
+      "amount": 1266.19,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 6878.42,
+    "driverAmount": 5846.66,
+    "payPercent": 0.85,
+    "heldFreight": 0,
+    "deductions": [],
+    "credits": [],
+    "debits": [],
+    "checkAmount": 5846.66
+   }
+  },
+  {
+   "driverId": "drv-oo-a",
+   "periodStart": "2026-09-27",
+   "settlement": {
+    "weekStart": "2026-09-27",
+    "weekLabel": "9/27 – 10/3",
+    "trips": [],
+    "grossPay": 0,
+    "driverAmount": 0,
+    "payPercent": 0.9,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Factoring fee (2%)",
+      "amount": 0
+     },
+     {
+      "label": "Insurance",
+      "amount": 210
+     },
+     {
+      "label": "Fuel (card 00071)",
+      "amount": 614.5
+     }
+    ],
+    "credits": [],
+    "debits": [
+     {
+      "label": "Escrow",
+      "amount": 100
+     }
+    ],
+    "checkAmount": -924.5
+   }
+  },
+  {
+   "driverId": "drv-box-a",
+   "periodStart": "2026-09-27",
+   "settlement": {
+    "weekStart": "2026-09-27",
+    "weekLabel": "9/27 – 10/3",
+    "trips": [],
+    "grossPay": 0,
+    "driverAmount": 0,
+    "payPercent": 0.45,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Factoring fee (2%)",
+      "amount": 0
+     },
+     {
+      "label": "Insurance",
+      "amount": 120
+     },
+     {
+      "label": "Fuel (card 00088)",
+      "amount": 588.84
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": -708.84
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "periodStart": "2026-10-04",
+   "settlement": {
+    "weekStart": "2026-10-04",
+    "weekLabel": "10/4 – 10/10",
+    "trips": [
+     {
+      "id": "at-9",
+      "date": "2026-10-08",
+      "loadId": "ZZ1684",
+      "origin": "Memphis",
+      "destination": "Omaha",
+      "miles": 830,
+      "rate": 2.78,
+      "freight": 2307.4,
+      "amount": 2030.51,
+      "onThisCheck": true,
+      "factoring": {
+       "invoiceNo": "ZZ-INV-1",
+       "poNumber": "ZZ-PO-1",
+       "brokerMc": "000001",
+       "invoiceAmount": 2307.4,
+       "invoiceDate": "2026-10-09",
+       "fromCity": "Dallas",
+       "fromState": "TX",
+       "fromZip": "75001",
+       "toCity": "Tulsa",
+       "toState": "OK",
+       "toZip": "74101",
+       "podPresent": true,
+       "rateconPresent": true,
+       "podKnown": true,
+       "blocked": false
+      },
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-10",
+      "date": "2026-10-08",
+      "loadId": "ZZ3657",
+      "origin": "Chicago",
+      "destination": "Houston",
+      "miles": 342,
+      "rate": 1.73,
+      "freight": 591.66,
+      "amount": 520.66,
+      "onThisCheck": false,
+      "factoring": {
+       "invoiceNo": "ZZ-INV-2",
+       "poNumber": "ZZ-PO-1",
+       "brokerMc": "000001",
+       "invoiceAmount": 2307.4,
+       "invoiceDate": "2026-10-09",
+       "fromCity": "Dallas",
+       "fromState": "TX",
+       "fromZip": "75001",
+       "toCity": "Tulsa",
+       "toState": "OK",
+       "toZip": "74101",
+       "podPresent": false,
+       "rateconPresent": true,
+       "podKnown": true,
+       "blocked": true
+      },
+      "heldReason": "NO_POD",
+      "heldLabel": "POD required"
+     },
+     {
+      "id": "at-future",
+      "date": "2099-01-02",
+      "loadId": "ZZ0001",
+      "origin": "Dallas",
+      "destination": "Tulsa",
+      "miles": 300,
+      "rate": 2.33,
+      "freight": 700,
+      "amount": 616,
+      "onThisCheck": false,
+      "factoring": null,
+      "heldReason": "NOT_DELIVERED",
+      "heldLabel": "Not delivered yet"
+     }
+    ],
+    "grossPay": 2307.4,
+    "driverAmount": 2030.51,
+    "payPercent": 0.88,
+    "heldFreight": 1291.66,
+    "deductions": [
+     {
+      "label": "Insurance",
+      "amount": 150
+     },
+     {
+      "label": "Fuel (card 00049)",
+      "amount": 1167.13
+     }
+    ],
+    "credits": [],
+    "debits": [
+     {
+      "label": "Truck lease",
+      "amount": 280
+     }
+    ],
+    "checkAmount": 433.38
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "periodStart": "2026-10-04",
+   "settlement": {
+    "weekStart": "2026-10-04",
+    "weekLabel": "10/4 – 10/10",
+    "trips": [
+     {
+      "id": "at-24",
+      "date": "2026-10-06",
+      "loadId": "ZZ9470",
+      "origin": "Houston",
+      "destination": "Houston",
+      "miles": 285,
+      "rate": 2.23,
+      "freight": 635.55,
+      "amount": 635.55,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-27",
+      "date": "2026-10-06",
+      "loadId": "ZZ3689",
+      "origin": "Houston",
+      "destination": "Houston",
+      "miles": 447,
+      "rate": 2.71,
+      "freight": 1211.37,
+      "amount": 1211.37,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-25",
+      "date": "2026-10-08",
+      "loadId": "ZZ7663",
+      "origin": "Chicago",
+      "destination": "Memphis",
+      "miles": 139,
+      "rate": 2.4,
+      "freight": 333.6,
+      "amount": 333.6,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-26",
+      "date": "2026-10-09",
+      "loadId": "ZZ8999",
+      "origin": "Dallas",
+      "destination": "Atlanta",
+      "miles": 535,
+      "rate": 2.83,
+      "freight": 1514.05,
+      "amount": 1514.05,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 3694.57,
+    "driverAmount": 3694.57,
+    "payPercent": 0.5,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "ELD",
+      "amount": 35
+     },
+     {
+      "label": "Parking",
+      "amount": 70
+     },
+     {
+      "label": "Mileage charge",
+      "amount": 0
+     },
+     {
+      "label": "Fuel (card 00052)",
+      "amount": 149.79
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": 1719.89
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "periodStart": "2026-10-04",
+   "settlement": {
+    "weekStart": "2026-10-04",
+    "weekLabel": "10/4 – 10/10",
+    "trips": [
+     {
+      "id": "at-47",
+      "date": "2026-10-05",
+      "loadId": "ZZ7900",
+      "origin": "Omaha",
+      "destination": "Chicago",
+      "miles": 231,
+      "rate": 1.74,
+      "freight": 401.94,
+      "amount": 341.65,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-46",
+      "date": "2026-10-08",
+      "loadId": "ZZ7827",
+      "origin": "Denver",
+      "destination": "Houston",
+      "miles": 347,
+      "rate": 1.7,
+      "freight": 589.9,
+      "amount": 501.42,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-45",
+      "date": "2026-10-09",
+      "loadId": "ZZ2175",
+      "origin": "Denver",
+      "destination": "Omaha",
+      "miles": 324,
+      "rate": 2.49,
+      "freight": 806.76,
+      "amount": 685.75,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 1798.6,
+    "driverAmount": 1528.81,
+    "payPercent": 0.85,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Fuel (card 00067)",
+      "amount": 97.35
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": 1431.46
+   }
+  },
+  {
+   "driverId": "drv-oo-a",
+   "periodStart": "2026-10-04",
+   "settlement": {
+    "weekStart": "2026-10-04",
+    "weekLabel": "10/4 – 10/10",
+    "trips": [],
+    "grossPay": 0,
+    "driverAmount": 0,
+    "payPercent": 0.9,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Factoring fee (2%)",
+      "amount": 0
+     },
+     {
+      "label": "Insurance",
+      "amount": 210
+     },
+     {
+      "label": "Fuel (card 00071)",
+      "amount": 557.96
+     },
+     {
+      "label": "Tolls",
+      "amount": 18.4
+     }
+    ],
+    "credits": [
+     {
+      "label": "MILEAGE — 500 mi @ $0.07/mi = $35.00",
+      "amount": 35,
+      "reasonCode": "MILEAGE"
+     }
+    ],
+    "debits": [
+     {
+      "label": "Escrow",
+      "amount": 100
+     },
+     {
+      "label": "Other — Damage",
+      "amount": 90,
+      "reasonCode": "OTHER"
+     }
+    ],
+    "checkAmount": -941.36
+   }
+  },
+  {
+   "driverId": "drv-box-a",
+   "periodStart": "2026-10-04",
+   "settlement": {
+    "weekStart": "2026-10-04",
+    "weekLabel": "10/4 – 10/10",
+    "trips": [],
+    "grossPay": 0,
+    "driverAmount": 0,
+    "payPercent": 0.5,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Factoring fee (2%)",
+      "amount": 0
+     },
+     {
+      "label": "Insurance",
+      "amount": 120
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": -60
+   }
+  },
+  {
+   "driverId": "drv-amz-a",
+   "periodStart": "2026-10-11",
+   "settlement": {
+    "weekStart": "2026-10-11",
+    "weekLabel": "10/11 – 10/17",
+    "trips": [
+     {
+      "id": "at-12",
+      "date": "2026-10-12",
+      "loadId": "ZZ4349",
+      "origin": "Chicago",
+      "destination": "Omaha",
+      "miles": 592,
+      "rate": 2.49,
+      "freight": 1474.08,
+      "amount": 1297.19,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-11",
+      "date": "2026-10-13",
+      "loadId": "ZZ4776",
+      "origin": "Houston",
+      "destination": "Dallas",
+      "miles": 862,
+      "rate": 1.95,
+      "freight": 1680.9,
+      "amount": 1479.19,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-13",
+      "date": "2026-10-13",
+      "loadId": "ZZ9555",
+      "origin": "Memphis",
+      "destination": "Omaha",
+      "miles": 125,
+      "rate": 2.79,
+      "freight": 348.75,
+      "amount": 306.9,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 3503.73,
+    "driverAmount": 3083.28,
+    "payPercent": 0.88,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Insurance",
+      "amount": 150
+     },
+     {
+      "label": "Fuel (card 00049)",
+      "amount": 303.65
+     }
+    ],
+    "credits": [],
+    "debits": [
+     {
+      "label": "Truck lease",
+      "amount": 280
+     }
+    ],
+    "checkAmount": 2349.63
+   }
+  },
+  {
+   "driverId": "drv-amz-b",
+   "periodStart": "2026-10-11",
+   "settlement": {
+    "weekStart": "2026-10-11",
+    "weekLabel": "10/11 – 10/17",
+    "trips": [
+     {
+      "id": "at-28",
+      "date": "2026-10-13",
+      "loadId": "ZZ9165",
+      "origin": "Denver",
+      "destination": "Memphis",
+      "miles": 215,
+      "rate": 2.23,
+      "freight": 479.45,
+      "amount": 479.45,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-29",
+      "date": "2026-10-13",
+      "loadId": "ZZ7207",
+      "origin": "Omaha",
+      "destination": "Atlanta",
+      "miles": 484,
+      "rate": 2.11,
+      "freight": 1021.24,
+      "amount": 1021.24,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 1500.69,
+    "driverAmount": 1500.69,
+    "payPercent": 0.5,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "ELD",
+      "amount": 35
+     },
+     {
+      "label": "Parking (1/7 days)",
+      "amount": 10
+     },
+     {
+      "label": "Mileage charge",
+      "amount": 0
+     },
+     {
+      "label": "Fuel (card 00052)",
+      "amount": 179.75
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": 637.97
+   }
+  },
+  {
+   "driverId": "drv-amz-c",
+   "periodStart": "2026-10-11",
+   "settlement": {
+    "weekStart": "2026-10-11",
+    "weekLabel": "10/11 – 10/17",
+    "trips": [
+     {
+      "id": "at-50",
+      "date": "2026-10-13",
+      "loadId": "ZZ8274",
+      "origin": "Omaha",
+      "destination": "Omaha",
+      "miles": 842,
+      "rate": 2.56,
+      "freight": 2155.52,
+      "amount": 1832.19,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-48",
+      "date": "2026-10-15",
+      "loadId": "ZZ1053",
+      "origin": "Houston",
+      "destination": "Houston",
+      "miles": 828,
+      "rate": 2.33,
+      "freight": 1929.24,
+      "amount": 1639.85,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     },
+     {
+      "id": "at-49",
+      "date": "2026-10-17",
+      "loadId": "ZZ5516",
+      "origin": "Dallas",
+      "destination": "Atlanta",
+      "miles": 269,
+      "rate": 2.52,
+      "freight": 677.88,
+      "amount": 576.2,
+      "onThisCheck": true,
+      "factoring": null,
+      "heldReason": null,
+      "heldLabel": null
+     }
+    ],
+    "grossPay": 4762.64,
+    "driverAmount": 4048.24,
+    "payPercent": 0.85,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Fuel (card 00067)",
+      "amount": 598.5
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": 3449.74
+   }
+  },
+  {
+   "driverId": "drv-oo-a",
+   "periodStart": "2026-10-11",
+   "settlement": {
+    "weekStart": "2026-10-11",
+    "weekLabel": "10/11 – 10/17",
+    "trips": [],
+    "grossPay": 0,
+    "driverAmount": 0,
+    "payPercent": 0.9,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Factoring fee (2%)",
+      "amount": 0
+     },
+     {
+      "label": "Insurance",
+      "amount": 210
+     },
+     {
+      "label": "Fuel (card 00071)",
+      "amount": 391.93
+     }
+    ],
+    "credits": [],
+    "debits": [
+     {
+      "label": "Escrow",
+      "amount": 100
+     }
+    ],
+    "checkAmount": -701.93
+   }
+  },
+  {
+   "driverId": "drv-box-a",
+   "periodStart": "2026-10-11",
+   "settlement": {
+    "weekStart": "2026-10-11",
+    "weekLabel": "10/11 – 10/17",
+    "trips": [],
+    "grossPay": 0,
+    "driverAmount": 0,
+    "payPercent": 0.5,
+    "heldFreight": 0,
+    "deductions": [
+     {
+      "label": "Factoring fee (2%)",
+      "amount": 0
+     },
+     {
+      "label": "Insurance",
+      "amount": 120
+     },
+     {
+      "label": "Fuel (card 00088)",
+      "amount": 299.09
+     }
+    ],
+    "credits": [],
+    "debits": [],
+    "checkAmount": -209.54
+   }
+  }
+ ],
+ "weekStarts": {
+  "all": [
+   "2026-11-01",
+   "2026-10-25",
+   "2026-10-18",
+   "2026-10-11",
+   "2026-10-04",
+   "2026-09-27",
+   "2026-09-20",
+   "2026-09-13"
+  ],
+  "floored": [
+   "2026-11-01",
+   "2026-10-25",
+   "2026-10-18",
+   "2026-10-11",
+   "2026-10-04",
+   "2026-09-27"
+  ],
+  "none": [
+   "2026-11-01",
+   "2026-10-25",
+   "2026-10-18",
+   "2026-10-11",
+   "2026-10-04",
+   "2026-09-27"
+  ]
+ },
+ "tripPay": [
+  {
+   "id": "set-1",
+   "perThousand": 880,
+   "perOdd": 1086.41
+  },
+  {
+   "id": "set-2",
+   "perThousand": 1000,
+   "perOdd": 1234.56
+  },
+  {
+   "id": "set-3",
+   "perThousand": 850,
+   "perOdd": 1049.38
+  },
+  {
+   "id": "set-4",
+   "perThousand": 900,
+   "perOdd": 1111.1
+  },
+  {
+   "id": "set-5",
+   "perThousand": 1000,
+   "perOdd": 1234.56
+  },
+  {
+   "id": "set-6",
+   "perThousand": 800,
+   "perOdd": 987.65
+  }
+ ],
+ "rateWindows": [
+  {
+   "id": "set-1",
+   "w": "2026-09-13",
+   "rate": {
+    "payPercent": 0.88,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-1",
+   "w": "2026-09-20",
+   "rate": {
+    "payPercent": 0.88,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-1",
+   "w": "2026-09-27",
+   "rate": {
+    "payPercent": 0.88,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-1",
+   "w": "2026-10-04",
+   "rate": {
+    "payPercent": 0.88,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-1",
+   "w": "2026-10-11",
+   "rate": {
+    "payPercent": 0.88,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-2",
+   "w": "2026-09-13",
+   "rate": {
+    "payPercent": 0.88,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-2",
+   "w": "2026-09-20",
+   "rate": {
+    "payPercent": 0.88,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-2",
+   "w": "2026-09-27",
+   "rate": {
+    "payPercent": 0.5,
+    "expensesBeforePercent": true
+   }
+  },
+  {
+   "id": "set-2",
+   "w": "2026-10-04",
+   "rate": {
+    "payPercent": 0.5,
+    "expensesBeforePercent": true
+   }
+  },
+  {
+   "id": "set-2",
+   "w": "2026-10-11",
+   "rate": {
+    "payPercent": 0.5,
+    "expensesBeforePercent": true
+   }
+  },
+  {
+   "id": "set-3",
+   "w": "2026-09-13",
+   "rate": {
+    "payPercent": 0.85,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-3",
+   "w": "2026-09-20",
+   "rate": {
+    "payPercent": 0.85,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-3",
+   "w": "2026-09-27",
+   "rate": {
+    "payPercent": 0.85,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-3",
+   "w": "2026-10-04",
+   "rate": {
+    "payPercent": 0.85,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-3",
+   "w": "2026-10-11",
+   "rate": {
+    "payPercent": 0.85,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-4",
+   "w": "2026-09-13",
+   "rate": {
+    "payPercent": 0.9,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-4",
+   "w": "2026-09-20",
+   "rate": {
+    "payPercent": 0.9,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-4",
+   "w": "2026-09-27",
+   "rate": {
+    "payPercent": 0.9,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-4",
+   "w": "2026-10-04",
+   "rate": {
+    "payPercent": 0.9,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-4",
+   "w": "2026-10-11",
+   "rate": {
+    "payPercent": 0.9,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-5",
+   "w": "2026-09-13",
+   "rate": {
+    "payPercent": 0.45,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-5",
+   "w": "2026-09-20",
+   "rate": {
+    "payPercent": 0.45,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-5",
+   "w": "2026-09-27",
+   "rate": {
+    "payPercent": 0.45,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-5",
+   "w": "2026-10-04",
+   "rate": {
+    "payPercent": 0.5,
+    "expensesBeforePercent": true
+   }
+  },
+  {
+   "id": "set-5",
+   "w": "2026-10-11",
+   "rate": {
+    "payPercent": 0.5,
+    "expensesBeforePercent": true
+   }
+  },
+  {
+   "id": "set-6",
+   "w": "2026-09-13",
+   "rate": {
+    "payPercent": 0.8,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-6",
+   "w": "2026-09-20",
+   "rate": {
+    "payPercent": 0.8,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-6",
+   "w": "2026-09-27",
+   "rate": {
+    "payPercent": 0.8,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-6",
+   "w": "2026-10-04",
+   "rate": {
+    "payPercent": 0.8,
+    "expensesBeforePercent": false
+   }
+  },
+  {
+   "id": "set-6",
+   "w": "2026-10-11",
+   "rate": {
+    "payPercent": 0.8,
+    "expensesBeforePercent": false
+   }
+  }
+ ],
+ "fixedExpenses": [
+  {
+   "id": "set-1",
+   "a": "2026-09-13",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 150,
+     "expenseId": "e1",
+     "revisionId": "r1",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Truck lease",
+     "amount": 280,
+     "expenseId": "e2",
+     "revisionId": "r2",
+     "afterPercent": true,
+     "from": "2026-09-01"
+    }
+   ]
+  },
+  {
+   "id": "set-1",
+   "a": "2026-09-20",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 150,
+     "expenseId": "e1",
+     "revisionId": "r1",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Truck lease",
+     "amount": 280,
+     "expenseId": "e2",
+     "revisionId": "r2",
+     "afterPercent": true,
+     "from": "2026-09-01"
+    }
+   ]
+  },
+  {
+   "id": "set-1",
+   "a": "2026-09-27",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 150,
+     "expenseId": "e1",
+     "revisionId": "r1",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Truck lease",
+     "amount": 280,
+     "expenseId": "e2",
+     "revisionId": "r2",
+     "afterPercent": true,
+     "from": "2026-09-01"
+    }
+   ]
+  },
+  {
+   "id": "set-1",
+   "a": "2026-10-04",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 150,
+     "expenseId": "e1",
+     "revisionId": "r1",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Truck lease",
+     "amount": 280,
+     "expenseId": "e2",
+     "revisionId": "r2",
+     "afterPercent": true,
+     "from": "2026-09-01"
+    }
+   ]
+  },
+  {
+   "id": "set-1",
+   "a": "2026-10-11",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 150,
+     "expenseId": "e1",
+     "revisionId": "r1",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Truck lease",
+     "amount": 280,
+     "expenseId": "e2",
+     "revisionId": "r2",
+     "afterPercent": true,
+     "from": "2026-09-01"
+    }
+   ]
+  },
+  {
+   "id": "set-2",
+   "a": "2026-09-13",
+   "lines": [
+    {
+     "label": "ELD",
+     "amount": 35,
+     "expenseId": "e3",
+     "revisionId": "r3",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0,
+     "expenseId": "e5",
+     "revisionId": "r5",
+     "mileage": {
+      "costPerMile": 0.07,
+      "miles": 500
+     },
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-2",
+   "a": "2026-09-20",
+   "lines": [
+    {
+     "label": "ELD",
+     "amount": 35,
+     "expenseId": "e3",
+     "revisionId": "r3",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0,
+     "expenseId": "e5",
+     "revisionId": "r5",
+     "mileage": {
+      "costPerMile": 0.07,
+      "miles": 500
+     },
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-2",
+   "a": "2026-09-27",
+   "lines": [
+    {
+     "label": "ELD",
+     "amount": 35,
+     "expenseId": "e3",
+     "revisionId": "r3",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Parking",
+     "amount": 30,
+     "expenseId": "e4",
+     "revisionId": "r4",
+     "from": "2026-10-01",
+     "until": "2026-10-12",
+     "proratedDays": {
+      "days": 3,
+      "periodDays": 7
+     }
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0,
+     "expenseId": "e5",
+     "revisionId": "r5",
+     "mileage": {
+      "costPerMile": 0.07,
+      "miles": 500
+     },
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-2",
+   "a": "2026-10-04",
+   "lines": [
+    {
+     "label": "ELD",
+     "amount": 35,
+     "expenseId": "e3",
+     "revisionId": "r3",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Parking",
+     "amount": 70,
+     "expenseId": "e4",
+     "revisionId": "r4",
+     "from": "2026-10-01",
+     "until": "2026-10-12"
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0,
+     "expenseId": "e5",
+     "revisionId": "r5",
+     "mileage": {
+      "costPerMile": 0.07,
+      "miles": 500
+     },
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-2",
+   "a": "2026-10-11",
+   "lines": [
+    {
+     "label": "ELD",
+     "amount": 35,
+     "expenseId": "e3",
+     "revisionId": "r3",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Parking",
+     "amount": 10,
+     "expenseId": "e4",
+     "revisionId": "r4",
+     "from": "2026-10-01",
+     "until": "2026-10-12",
+     "proratedDays": {
+      "days": 1,
+      "periodDays": 7
+     }
+    },
+    {
+     "label": "Mileage charge",
+     "amount": 0,
+     "expenseId": "e5",
+     "revisionId": "r5",
+     "mileage": {
+      "costPerMile": 0.07,
+      "miles": 500
+     },
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-3",
+   "a": "2026-09-13",
+   "lines": []
+  },
+  {
+   "id": "set-3",
+   "a": "2026-09-20",
+   "lines": []
+  },
+  {
+   "id": "set-3",
+   "a": "2026-09-27",
+   "lines": []
+  },
+  {
+   "id": "set-3",
+   "a": "2026-10-04",
+   "lines": []
+  },
+  {
+   "id": "set-3",
+   "a": "2026-10-11",
+   "lines": []
+  },
+  {
+   "id": "set-4",
+   "a": "2026-09-13",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 210,
+     "expenseId": "e6",
+     "revisionId": "r6",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Escrow",
+     "amount": 100,
+     "expenseId": "e7",
+     "revisionId": "r7",
+     "afterPercent": true,
+     "companyAmount": 40,
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-4",
+   "a": "2026-09-20",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 210,
+     "expenseId": "e6",
+     "revisionId": "r6",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Escrow",
+     "amount": 100,
+     "expenseId": "e7",
+     "revisionId": "r7",
+     "afterPercent": true,
+     "companyAmount": 40,
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-4",
+   "a": "2026-09-27",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 210,
+     "expenseId": "e6",
+     "revisionId": "r6",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Escrow",
+     "amount": 100,
+     "expenseId": "e7",
+     "revisionId": "r7",
+     "afterPercent": true,
+     "companyAmount": 40,
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-4",
+   "a": "2026-10-04",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 210,
+     "expenseId": "e6",
+     "revisionId": "r6",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Escrow",
+     "amount": 100,
+     "expenseId": "e7",
+     "revisionId": "r7",
+     "afterPercent": true,
+     "companyAmount": 40,
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-4",
+   "a": "2026-10-11",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 210,
+     "expenseId": "e6",
+     "revisionId": "r6",
+     "from": "2026-01-01"
+    },
+    {
+     "label": "Escrow",
+     "amount": 100,
+     "expenseId": "e7",
+     "revisionId": "r7",
+     "afterPercent": true,
+     "companyAmount": 40,
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-5",
+   "a": "2026-09-13",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 120,
+     "expenseId": "e8",
+     "revisionId": "r8",
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-5",
+   "a": "2026-09-20",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 120,
+     "expenseId": "e8",
+     "revisionId": "r8",
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-5",
+   "a": "2026-09-27",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 120,
+     "expenseId": "e8",
+     "revisionId": "r8",
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-5",
+   "a": "2026-10-04",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 120,
+     "expenseId": "e8",
+     "revisionId": "r8",
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-5",
+   "a": "2026-10-11",
+   "lines": [
+    {
+     "label": "Insurance",
+     "amount": 120,
+     "expenseId": "e8",
+     "revisionId": "r8",
+     "from": "2026-01-01"
+    }
+   ]
+  },
+  {
+   "id": "set-6",
+   "a": "2026-09-13",
+   "lines": []
+  },
+  {
+   "id": "set-6",
+   "a": "2026-09-20",
+   "lines": []
+  },
+  {
+   "id": "set-6",
+   "a": "2026-09-27",
+   "lines": []
+  },
+  {
+   "id": "set-6",
+   "a": "2026-10-04",
+   "lines": []
+  },
+  {
+   "id": "set-6",
+   "a": "2026-10-11",
+   "lines": []
+  }
+ ],
+ "ratePerMile": [
+  null,
+  9.82,
+  7.82,
+  1.34,
+  2.74,
+  3.38,
+  2.29,
+  null,
+  2.19,
+  3.71,
+  3.05,
+  null,
+  12.33,
+  0,
+  null,
+  2.88,
+  3.61,
+  2.65,
+  2.61,
+  9.9,
+  0.9,
+  null,
+  null,
+  15.87,
+  3.22,
+  2.83,
+  0,
+  5.16,
+  null,
+  7.89,
+  5.14,
+  5.58,
+  1.47,
+  null,
+  0.83,
+  null,
+  3.28,
+  11.78,
+  5.38,
+  0,
+  5.35,
+  2.9,
+  null,
+  9.88,
+  null,
+  4.64,
+  3.4,
+  5.79,
+  1.8,
+  null,
+  3.03,
+  4.72,
+  0,
+  2.39,
+  1.35,
+  null,
+  null,
+  2.91,
+  12.89,
+  4.15,
+  1.07,
+  1.01,
+  9.25,
+  null,
+  1.2,
+  0,
+  null,
+  6.32,
+  3.96,
+  7.1,
+  1.34
+ ],
+ "ownerOpWeeks": [
+  {
+   "id": "drv-amz-a",
+   "weeks": [
+    "2026-10-11",
+    "2026-10-04",
+    "2026-09-27"
+   ]
+  },
+  {
+   "id": "drv-amz-b",
+   "weeks": []
+  },
+  {
+   "id": "drv-amz-c",
+   "weeks": [
+    "2026-10-11",
+    "2026-10-04",
+    "2026-09-27"
+   ]
+  },
+  {
+   "id": "drv-oo-a",
+   "weeks": [
+    "2026-10-11",
+    "2026-10-04",
+    "2026-09-27"
+   ]
+  },
+  {
+   "id": "drv-box-a",
+   "weeks": [
+    "2026-10-11",
+    "2026-10-04",
+    "2026-09-27"
+   ]
+  },
+  {
+   "id": "drv-ivan-a",
+   "weeks": [
+    "2026-10-11",
+    "2026-10-04",
+    "2026-09-27"
+   ]
+  },
+  {
+   "id": "drv-brk-a",
+   "weeks": [
+    "2026-10-11",
+    "2026-10-04",
+    "2026-09-27"
+   ]
+  }
+ ],
+ "revenueByFleet": {
+  "byBucket": [
+   {
+    "bucket": "OWNER_OP",
+    "label": "Owner operators",
+    "revenue": 6957600,
+    "loads": 33
+   },
+   {
+    "bucket": "IVAN",
+    "label": "Ivan drivers",
+    "revenue": 2527700,
+    "loads": 9
+   },
+   {
+    "bucket": "BOX_TRUCK",
+    "label": "Box trucks",
+    "revenue": 1212500,
+    "loads": 6
+   },
+   {
+    "bucket": "BROKER",
+    "label": "Broker covered",
+    "revenue": 1566700,
+    "loads": 8
+   },
+   {
+    "bucket": "UNASSIGNED",
+    "label": "No driver",
+    "revenue": 791900,
+    "loads": 3
+   }
+  ],
+  "total": 13056400,
+  "unrated": 12
+ },
+ "loadsByFleet": {
+  "byBucket": [
+   {
+    "bucket": "OWNER_OP",
+    "label": "Owner operators",
+    "loads": 41
+   },
+   {
+    "bucket": "IVAN",
+    "label": "Ivan drivers",
+    "loads": 10
+   },
+   {
+    "bucket": "BOX_TRUCK",
+    "label": "Box trucks",
+    "loads": 7
+   },
+   {
+    "bucket": "BROKER",
+    "label": "Broker covered",
+    "loads": 10
+   },
+   {
+    "bucket": "UNASSIGNED",
+    "label": "No driver",
+    "loads": 3
+   }
+  ],
+  "total": 71
+ },
+ "ownerOpProfit": {
+  "rows": [
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-amz-a",
+    "driverName": "drv-amz-a",
+    "gross": 6515,
+    "expenses": 1292.61,
+    "driverPay": 4160.59,
+    "profit": 1061.8
+   },
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-amz-b",
+    "driverName": "drv-amz-b",
+    "gross": 0,
+    "expenses": 65,
+    "driverPay": -32.5,
+    "profit": -32.5
+   },
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-amz-c",
+    "driverName": "drv-amz-c",
+    "gross": 5619,
+    "expenses": 112.38,
+    "driverPay": 4663.77,
+    "profit": 842.85
+   },
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-oo-a",
+    "driverName": "drv-oo-a",
+    "gross": 837,
+    "expenses": 841.24,
+    "driverPay": -187.94,
+    "profit": 183.7
+   },
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-amz-a",
+    "driverName": "drv-amz-a",
+    "gross": 6515,
+    "expenses": 1292.61,
+    "driverPay": 4160.59,
+    "profit": 1061.8
+   },
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-amz-b",
+    "driverName": "drv-amz-b",
+    "gross": 0,
+    "expenses": 65,
+    "driverPay": -32.5,
+    "profit": -32.5
+   },
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-amz-c",
+    "driverName": "drv-amz-c",
+    "gross": 5619,
+    "expenses": 112.38,
+    "driverPay": 4663.77,
+    "profit": 842.85
+   },
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-oo-a",
+    "driverName": "drv-oo-a",
+    "gross": 837,
+    "expenses": 841.24,
+    "driverPay": -187.94,
+    "profit": 183.7
+   },
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-amz-a",
+    "driverName": "drv-amz-a",
+    "gross": 6515,
+    "expenses": 1292.61,
+    "driverPay": 4160.59,
+    "profit": 1061.8
+   },
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-amz-b",
+    "driverName": "drv-amz-b",
+    "gross": 0,
+    "expenses": 65,
+    "driverPay": -32.5,
+    "profit": -32.5
+   },
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-amz-c",
+    "driverName": "drv-amz-c",
+    "gross": 5619,
+    "expenses": 112.38,
+    "driverPay": 4663.77,
+    "profit": 842.85
+   },
+   {
+    "periodStart": "2026-09-27",
+    "driverId": "drv-oo-a",
+    "driverName": "drv-oo-a",
+    "gross": 837,
+    "expenses": 841.24,
+    "driverPay": -187.94,
+    "profit": 183.7
+   },
+   {
+    "periodStart": "2026-10-04",
+    "driverId": "drv-amz-a",
+    "driverName": "drv-amz-a",
+    "gross": 3979,
+    "expenses": 1396.71,
+    "driverPay": 1824.81,
+    "profit": 757.48
+   },
+   {
+    "periodStart": "2026-10-04",
+    "driverId": "drv-amz-b",
+    "driverName": "drv-amz-b",
+    "gross": 0,
+    "expenses": 254.79,
+    "driverPay": -127.39,
+    "profit": -127.4
+   },
+   {
+    "periodStart": "2026-10-04",
+    "driverId": "drv-amz-c",
+    "driverName": "drv-amz-c",
+    "gross": 3799,
+    "expenses": 173.33,
+    "driverPay": 3055.82,
+    "profit": 569.85
+   },
+   {
+    "periodStart": "2026-10-04",
+    "driverId": "drv-oo-a",
+    "driverName": "drv-oo-a",
+    "gross": 4117,
+    "expenses": 868.7,
+    "driverPay": 2681.6,
+    "profit": 566.7
+   },
+   {
+    "periodStart": "2026-10-11",
+    "driverId": "drv-amz-a",
+    "driverName": "drv-amz-a",
+    "gross": 6197,
+    "expenses": 577.59,
+    "driverPay": 4595.77,
+    "profit": 1023.64
+   },
+   {
+    "periodStart": "2026-10-11",
+    "driverId": "drv-amz-b",
+    "driverName": "drv-amz-b",
+    "gross": 0,
+    "expenses": 224.75,
+    "driverPay": -112.37,
+    "profit": -112.38
+   },
+   {
+    "periodStart": "2026-10-11",
+    "driverId": "drv-amz-c",
+    "driverName": "drv-amz-c",
+    "gross": 1791,
+    "expenses": 634.32,
+    "driverPay": 888.03,
+    "profit": 268.65
+   },
+   {
+    "periodStart": "2026-10-11",
+    "driverId": "drv-oo-a",
+    "driverName": "drv-oo-a",
+    "gross": 3621,
+    "expenses": 674.35,
+    "driverPay": 2484.55,
+    "profit": 462.1
+   }
+  ],
+  "week": {
+   "revenue": 11895,
+   "driverPay": 7434.84,
+   "expenses": 2693.53,
+   "profit": 1766.63,
+   "rows": [
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-amz-a",
+     "driverName": "drv-amz-a",
+     "gross": 3979,
+     "expenses": 1396.71,
+     "driverPay": 1824.81,
+     "profit": 757.48
+    },
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-amz-b",
+     "driverName": "drv-amz-b",
+     "gross": 0,
+     "expenses": 254.79,
+     "driverPay": -127.39,
+     "profit": -127.4
+    },
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-amz-c",
+     "driverName": "drv-amz-c",
+     "gross": 3799,
+     "expenses": 173.33,
+     "driverPay": 3055.82,
+     "profit": 569.85
+    },
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-oo-a",
+     "driverName": "drv-oo-a",
+     "gross": 4117,
+     "expenses": 868.7,
+     "driverPay": 2681.6,
+     "profit": 566.7
+    }
+   ]
+  },
+  "range": {
+   "revenue": 62417,
+   "driverPay": 41102.58,
+   "expenses": 11738.23,
+   "profit": 9576.19,
+   "rows": [
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-a",
+     "driverName": "drv-amz-a",
+     "gross": 6515,
+     "expenses": 1292.61,
+     "driverPay": 4160.59,
+     "profit": 1061.8
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-b",
+     "driverName": "drv-amz-b",
+     "gross": 0,
+     "expenses": 65,
+     "driverPay": -32.5,
+     "profit": -32.5
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-c",
+     "driverName": "drv-amz-c",
+     "gross": 5619,
+     "expenses": 112.38,
+     "driverPay": 4663.77,
+     "profit": 842.85
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-oo-a",
+     "driverName": "drv-oo-a",
+     "gross": 837,
+     "expenses": 841.24,
+     "driverPay": -187.94,
+     "profit": 183.7
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-a",
+     "driverName": "drv-amz-a",
+     "gross": 6515,
+     "expenses": 1292.61,
+     "driverPay": 4160.59,
+     "profit": 1061.8
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-b",
+     "driverName": "drv-amz-b",
+     "gross": 0,
+     "expenses": 65,
+     "driverPay": -32.5,
+     "profit": -32.5
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-c",
+     "driverName": "drv-amz-c",
+     "gross": 5619,
+     "expenses": 112.38,
+     "driverPay": 4663.77,
+     "profit": 842.85
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-oo-a",
+     "driverName": "drv-oo-a",
+     "gross": 837,
+     "expenses": 841.24,
+     "driverPay": -187.94,
+     "profit": 183.7
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-a",
+     "driverName": "drv-amz-a",
+     "gross": 6515,
+     "expenses": 1292.61,
+     "driverPay": 4160.59,
+     "profit": 1061.8
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-b",
+     "driverName": "drv-amz-b",
+     "gross": 0,
+     "expenses": 65,
+     "driverPay": -32.5,
+     "profit": -32.5
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-c",
+     "driverName": "drv-amz-c",
+     "gross": 5619,
+     "expenses": 112.38,
+     "driverPay": 4663.77,
+     "profit": 842.85
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-oo-a",
+     "driverName": "drv-oo-a",
+     "gross": 837,
+     "expenses": 841.24,
+     "driverPay": -187.94,
+     "profit": 183.7
+    },
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-amz-a",
+     "driverName": "drv-amz-a",
+     "gross": 3979,
+     "expenses": 1396.71,
+     "driverPay": 1824.81,
+     "profit": 757.48
+    },
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-amz-b",
+     "driverName": "drv-amz-b",
+     "gross": 0,
+     "expenses": 254.79,
+     "driverPay": -127.39,
+     "profit": -127.4
+    },
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-amz-c",
+     "driverName": "drv-amz-c",
+     "gross": 3799,
+     "expenses": 173.33,
+     "driverPay": 3055.82,
+     "profit": 569.85
+    },
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-oo-a",
+     "driverName": "drv-oo-a",
+     "gross": 4117,
+     "expenses": 868.7,
+     "driverPay": 2681.6,
+     "profit": 566.7
+    },
+    {
+     "periodStart": "2026-10-11",
+     "driverId": "drv-amz-a",
+     "driverName": "drv-amz-a",
+     "gross": 6197,
+     "expenses": 577.59,
+     "driverPay": 4595.77,
+     "profit": 1023.64
+    },
+    {
+     "periodStart": "2026-10-11",
+     "driverId": "drv-amz-b",
+     "driverName": "drv-amz-b",
+     "gross": 0,
+     "expenses": 224.75,
+     "driverPay": -112.37,
+     "profit": -112.38
+    },
+    {
+     "periodStart": "2026-10-11",
+     "driverId": "drv-amz-c",
+     "driverName": "drv-amz-c",
+     "gross": 1791,
+     "expenses": 634.32,
+     "driverPay": 888.03,
+     "profit": 268.65
+    },
+    {
+     "periodStart": "2026-10-11",
+     "driverId": "drv-oo-a",
+     "driverName": "drv-oo-a",
+     "gross": 3621,
+     "expenses": 674.35,
+     "driverPay": 2484.55,
+     "profit": 462.1
+    }
+   ]
+  },
+  "prorated": {
+   "revenue": 26872.69,
+   "driverPay": 17434.88,
+   "expenses": 5280.33,
+   "profit": 4157.48,
+   "rows": [
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-a",
+     "driverName": "drv-amz-a",
+     "gross": 2792.14,
+     "expenses": 553.98,
+     "driverPay": 1783.11,
+     "profit": 455.05
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-b",
+     "driverName": "drv-amz-b",
+     "gross": 0,
+     "expenses": 27.86,
+     "driverPay": -13.93,
+     "profit": -13.93
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-c",
+     "driverName": "drv-amz-c",
+     "gross": 2408.14,
+     "expenses": 48.16,
+     "driverPay": 1998.76,
+     "profit": 361.22
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-oo-a",
+     "driverName": "drv-oo-a",
+     "gross": 358.71,
+     "expenses": 360.53,
+     "driverPay": -80.55,
+     "profit": 78.73
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-a",
+     "driverName": "drv-amz-a",
+     "gross": 2792.14,
+     "expenses": 553.98,
+     "driverPay": 1783.11,
+     "profit": 455.05
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-b",
+     "driverName": "drv-amz-b",
+     "gross": 0,
+     "expenses": 27.86,
+     "driverPay": -13.93,
+     "profit": -13.93
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-c",
+     "driverName": "drv-amz-c",
+     "gross": 2408.14,
+     "expenses": 48.16,
+     "driverPay": 1998.76,
+     "profit": 361.22
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-oo-a",
+     "driverName": "drv-oo-a",
+     "gross": 358.71,
+     "expenses": 360.53,
+     "driverPay": -80.55,
+     "profit": 78.73
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-a",
+     "driverName": "drv-amz-a",
+     "gross": 2792.14,
+     "expenses": 553.98,
+     "driverPay": 1783.11,
+     "profit": 455.05
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-b",
+     "driverName": "drv-amz-b",
+     "gross": 0,
+     "expenses": 27.86,
+     "driverPay": -13.93,
+     "profit": -13.93
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-amz-c",
+     "driverName": "drv-amz-c",
+     "gross": 2408.14,
+     "expenses": 48.16,
+     "driverPay": 1998.76,
+     "profit": 361.22
+    },
+    {
+     "periodStart": "2026-09-27",
+     "driverId": "drv-oo-a",
+     "driverName": "drv-oo-a",
+     "gross": 358.71,
+     "expenses": 360.53,
+     "driverPay": -80.55,
+     "profit": 78.73
+    },
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-amz-a",
+     "driverName": "drv-amz-a",
+     "gross": 3410.57,
+     "expenses": 1197.18,
+     "driverPay": 1564.12,
+     "profit": 649.27
+    },
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-amz-b",
+     "driverName": "drv-amz-b",
+     "gross": 0,
+     "expenses": 218.39,
+     "driverPay": -109.19,
+     "profit": -109.2
+    },
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-amz-c",
+     "driverName": "drv-amz-c",
+     "gross": 3256.29,
+     "expenses": 148.57,
+     "driverPay": 2619.27,
+     "profit": 488.45
+    },
+    {
+     "periodStart": "2026-10-04",
+     "driverId": "drv-oo-a",
+     "driverName": "drv-oo-a",
+     "gross": 3528.86,
+     "expenses": 744.6,
+     "driverPay": 2298.51,
+     "profit": 485.75
+    }
+   ]
+  }
+ },
+ "hourly": {
+  "rated": {
+   "totalMinutes": 6074,
+   "pay": 2239.5,
+   "rate": 22.75,
+   "mixedRates": true,
+   "partial": false
+  },
+  "unrated": {
+   "totalMinutes": 6074,
+   "pay": null,
+   "rate": null,
+   "mixedRates": false,
+   "partial": false
+  },
+  "firstWeek": {
+   "totalMinutes": 3051,
+   "pay": 1093.28,
+   "rate": 21.5,
+   "mixedRates": false,
+   "partial": false
+  },
+  "rateOn": [
+   21.5,
+   22.75,
+   22.75,
+   24
+  ]
+ },
+ "boxTruckCsv": [
+  {
+   "proNumber": "ZZ1001",
+   "customer": "ZZ Customer 1",
+   "salesRep": "Rep A",
+   "loadDesc": "Boxes",
+   "customerRate": 1150,
+   "carrierCost": 800,
+   "grossProfit": 350,
+   "status": "Delivered",
+   "driverName": "ZZBOX"
+  },
+  {
+   "proNumber": "ZZ1002",
+   "customer": "ZZ Customer, Two",
+   "salesRep": "Rep B",
+   "loadDesc": "Pallets",
+   "customerRate": 900,
+   "carrierCost": 700,
+   "grossProfit": 200.5,
+   "status": "Delivered",
+   "driverName": "ZZBOX"
+  }
+ ]
+}

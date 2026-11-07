@@ -1,10 +1,11 @@
 /**
  * Aljex columns that must never reach a staged chunk, a report, a log or the browser wizard's file
- * (AW_TAXID_DESIGN.md section 4.7): carrier tax ID, bank account and routing number. Matching is on the
+ * (AW_TAXID_DESIGN.md section 4.7): carrier tax ID, bank account, routing number and the customers file's
+ * Web Password. Matching is on the
  * normalised header (case, spacing and punctuation ignored) so `Fed/SS #`, `fed ss` and `FED_SS_#` all hit.
  * Only header NAMES are ever reported; no cell is read.
  */
-const SENSITIVE = ['fedss', 'bankaccount', 'routing']
+const SENSITIVE = ['fedss', 'bankaccount', 'routing', 'webpassword']
 
 const norm = (header: string): string => header.toLowerCase().replace(/[^a-z0-9]/g, '')
 
