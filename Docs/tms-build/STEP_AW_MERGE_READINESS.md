@@ -272,3 +272,12 @@ Go/no-go criteria: full test suite and build green; MERGE_REGRESSION gaps all co
 run clean; schema diff has no blockers and the data stack is under the cap; required prod secrets present;
 AR/AP/customer/carrier reconciliation done with every difference matched or approved; Jenny's login works
 for release/send; backup verified.
+
+## Ryne's answers round 3 (2026-11-07, Saturday evening): GO
+1. AR file: coming. 2. No Sunday/Monday delta import: use today's Aljex exports as final (nothing changes in
+Aljex from here). 3. AP: "Amount Paid" is NOT a payment (the bill is unpaid; it is the bill amount); C = check,
+D = direct deposit; **drop all 12 stale expected rows**. 4. Duplicate customer names: **keep all for now and
+flag them in the UI** (a "Possible duplicate" badge on the customer list/profile, grouped by name, so Ryne can
+merge later). 5. **GO: Ryne authorised starting tonight** (fresh backup, then the GSI prep push to main, then the
+full merge once the rehearsal regression run is clean) so he can fix bugs on Sunday. The go/no-go criteria
+still apply to the full merge: nothing that breaks existing production functionality ships.
