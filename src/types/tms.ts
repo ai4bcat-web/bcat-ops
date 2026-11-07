@@ -1227,6 +1227,11 @@ export type AljexImportAction =
   | 'IMPORT_STEP'
   | 'IMPORT_WORK'
   | 'IMPORT_LEGACY_ROW'
+  | 'IMPORT_CUSTOMERS_MASTER'
+  | 'IMPORT_CARRIERS_MASTER'
+  | 'IMPORT_AP_FILES'
+  | 'IMPORT_AR_FILE'
+  | 'IMPORT_ACTIVE_SHIPMENTS_CHECK'
 
 export interface PrepareAljexImportInput {
   /** The layout the browser detected (e.g. `aljex-full-486-v1`); the engine re-detects at STAGE. */
@@ -1264,6 +1269,40 @@ export interface ApplyAljexImportInput {
   /** The PLANNED job being applied. */
   jobId: string
   options?: AljexImportOptions
+}
+
+/** The per-file import actions (everything but the big export): customers, carriers, AP aging + expected, AR, active-shipments check. */
+export type AljexFileImportAction = 'IMPORT_CUSTOMERS_MASTER' | 'IMPORT_CARRIERS_MASTER' | 'IMPORT_AP_FILES' | 'IMPORT_AR_FILE' | 'IMPORT_ACTIVE_SHIPMENTS_CHECK'
+
+export interface AljexFileImportInput {
+  /** PLAN = dry run (writes nothing); APPLY needs `options.liveTag` and a PLANNED job. */
+  mode: 'PLAN' | 'APPLY'
+  /** The uploaded, staged file's job (every action but IMPORT_AP_FILES). */
+  jobId?: string
+  /** IMPORT_AP_FILES: either or both of the uploaded AP jobs. */
+  agingJobId?: string
+  expectedJobId?: string
+  /** YYYY-MM-DD; defaults to Settings > Data cutoff. */
+  cutoffDate?: string
+  options?: AljexImportOptions
+}
+
+export interface AljexFileImportResult {
+  job: AljexImportJob
+  mode: 'PLAN' | 'APPLY'
+  /** An APPLY on a job that was already applied (the engine changed nothing it had already written). */
+  rerun: boolean
+  reportPrefix: string
+  result: {
+    /** Numbers only. */
+    summary: Record<string, unknown>
+    counts: AljexEntityCounts
+    /** AP / AR tie-out after the run: counts, bridge lines to the cent, allMatched. */
+    reconcile: Record<string, unknown> | null
+    files: string[]
+    review: Array<{ key: string; reason: string }>
+    reviewTotal: number
+  }
 }
 
 export interface SeedProCounterInput {
@@ -2396,7 +2435,10 @@ export interface CarrierRecord {
   mcNumber?: string | null
   dotNumber?: string | null
   scac?: string | null
-  einNumber?: string | null
+  /** Encrypted-vault mirror (read-only to clients): the number itself is never on the Carrier row. */
+  taxIdLast4?: string | null
+  taxIdType?: 'EIN' | 'SSN' | null
+  taxIdOnFileAt?: string | null
   inFmcsa?: boolean | null
   authorityStatus?: AuthorityStatus | null
   authorityGrantedAt?: string | null
@@ -3088,6 +3130,9 @@ export interface InvoiceRecord {
   /** Comma-joined, like `ShipmentNotice.to`. */
   sentTo?: string | null
   sentCount?: number | null
+  /** Step AW: the Aljex due date / customer terms kept as a reference when a carried-over invoice is redated (Danisco 120 days). */
+  aljexDueDate?: string | null
+  aljexTerms?: number | null
   markedSentAt?: string | null
   markedSentBy?: string | null
   markedSentNote?: string | null

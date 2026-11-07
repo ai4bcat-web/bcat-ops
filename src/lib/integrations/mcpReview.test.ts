@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { SYNTHETIC_EIN, SYNTHETIC_SSN } from '@/test/syntheticTaxIds'
 import {
   buildReviewCard, matchDirectoryCarrier, mergeReviewCards, parseSearch, riskTone, stubReviewCard, validateInviteEmail,
 } from './mcpReview'
@@ -106,8 +107,10 @@ describe('buildReviewCard (response -> card model)', () => {
   })
 
   it('carries no bank, tax id or SSN into the card', () => {
-    const card = buildReviewCard(data({ CarrierW9Forms: [{ EIN: '12-3456789', SSN: '000-00-0000' }], CarrierBank: { CarrierBankAccountNumber: '000011112222', CarrierBankRoutingNumber: '999988887777' } }), {}, 'data', NOW)!
-    expect(JSON.stringify(card)).not.toMatch(/000011112222|999988887777|12-3456789|000-00-0000/)
+    const card = buildReviewCard(data({ CarrierW9Forms: [{ EIN: SYNTHETIC_EIN, SSN: SYNTHETIC_SSN }], CarrierBank: { CarrierBankAccountNumber: '000011112222', CarrierBankRoutingNumber: '999988887777' } }), {}, 'data', NOW)!
+    expect(JSON.stringify(card)).not.toMatch(/000011112222|999988887777/)
+    expect(JSON.stringify(card)).not.toContain(SYNTHETIC_EIN)
+    expect(JSON.stringify(card)).not.toContain(SYNTHETIC_SSN)
   })
 })
 

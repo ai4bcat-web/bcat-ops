@@ -100,6 +100,12 @@ export const TMS_TABLES = [
 const TMS_PREFIXES = ['Commission']
 /** Never written to a CSV a person can download (settings rows that may hold secrets). */
 export const CSV_DENYLIST = ['Integration']
+/**
+ * Attributes no CSV ever carries, on any table: the carrier tax-ID mirror and the retired clear
+ * `einNumber` (AW_TAXID_DESIGN §5/§7). The number itself lives only in the encrypted vault, which is not an
+ * Amplify model and so never reaches this export; this keeps even its masked mirror out of the files.
+ */
+export const CSV_NEVER_COLUMNS: ReadonlySet<string> = new Set(['einNumber', 'taxIdLast4', 'taxIdType', 'taxIdOnFileAt'])
 export const PII_TABLES = [
   'Driver', 'DriverSubmission', 'DriverSubmissionDoc', 'UserProfile', 'CarrierContact', 'Customer', 'Location',
   'LegacyAljexRow', 'CarrierPaymentMethod',
@@ -570,7 +576,7 @@ async function exportCsvTable(deps: Deps, job: JobRec, progress: TableProgress, 
     const seen = new Set<string>(['id'])
     if (resumed) for (const c of parseJson<string[]>(await getObjectText(deps, columnsKey), [])) seen.add(c)
     do {
-      for (const row of await scanRound(deps, tableName, cur.segments)) for (const k of Object.keys(row)) seen.add(k)
+      for (const row of await scanRound(deps, tableName, cur.segments)) for (const k of Object.keys(row)) if (!CSV_NEVER_COLUMNS.has(k)) seen.add(k)
       await beat()
       if (cur.segments.some((s) => !s.done) && deps.nowMs() > deadline) {
         await putObject(deps, columnsKey, JSON.stringify([...seen]), 'application/json')

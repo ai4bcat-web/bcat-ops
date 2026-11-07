@@ -39,7 +39,7 @@ import { runSlice } from './runSlice'
 import { seedProCounter } from './seedCounter'
 import { evalCondition } from './stamp'
 import { readStageData } from './stage'
-import { assertTargets, DEV_SUFFIX, MODEL_NAME, productionPolicy, PROD_SUFFIX, resolveTables, TAG_PATTERN, tableSetFor, WRITTEN_TABLES } from './tables'
+import { assertTargets, DEV_SUFFIX, MODEL_NAME, ownStackSuffix, productionPolicy, PROD_SUFFIX, resolveTables, TAG_PATTERN, tableSetFor, WRITTEN_TABLES } from './tables'
 
 export { productionPolicy }
 import { stableId } from './util'
@@ -276,7 +276,7 @@ function rootOf(book: JobBook, row: EngineRow): string {
 // ── tables ───────────────────────────────────────────────────────────────────────────────────
 
 export function liveTableSet(): TableSet {
-  return Object.fromEntries(Object.entries(MODEL_NAME).map(([k, model]) => [k, `${model}-${DEV_SUFFIX}`])) as unknown as TableSet
+  return Object.fromEntries(Object.entries(MODEL_NAME).map(([k, model]) => [k, `${model}-${ownStackSuffix() ?? DEV_SUFFIX}`])) as unknown as TableSet
 }
 
 async function tableExists(db: DynamoDBClient, name: string): Promise<boolean> {
@@ -384,7 +384,7 @@ async function rehearsalDrop(db: DynamoDBClient, tag: string, io: CliIo): Promis
 }
 
 async function pitrRestore(db: DynamoDBClient, model: string, time: string, as: string, io: CliIo, policy?: EngineTargetPolicy): Promise<void> {
-  const suffix = policy ? policy.writeSuffix : DEV_SUFFIX
+  const suffix = policy ? policy.writeSuffix : ownStackSuffix() ?? DEV_SUFFIX
   const source = `${model}-${suffix}`
   if (!Object.values(MODEL_NAME).includes(model)) throw new Error(`unknown model ${model}`)
   if (!new RegExp(`^${model}-${suffix}-rh[a-z0-9]{3,12}$`).test(as)) throw new Error(`--as must be ${model}-${suffix}-rh<tag>: restores never overwrite a table`)

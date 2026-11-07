@@ -17,6 +17,8 @@ import type { McpContact, McpPayment, McpProfile, MatchedBy } from './mcpProfile
 import { normalizeName as carrierKey } from '../tmsDirectory'
 import { mcpCarrierStatusPatch } from './mcpCarrierStatus'
 
+export type TaxIdOutcome = 'SET' | 'UNCHANGED' | 'DUPLICATE' | 'INVALID'
+
 type Row = Record<string, unknown>
 
 export const MCP_PULL_ACTOR = 'mcp-sync'
@@ -103,6 +105,11 @@ export interface McpPullDeps {
   nowMs(): number
   /** Step AM. Called after MCP flipped a carrier's status, so assignments waiting on setup can advance. */
   carrierStatusChanged?(carrierId: string, status: string): Promise<void>
+  /**
+   * Hands MCP's W-9 tax id to the encrypted vault (`_shared/taxVault.ts`); resolves to what happened, never the value.
+   * Absent = the pull has no vault and the tax id is dropped on the floor, never written to the Carrier row.
+   */
+  setTaxId?(carrierId: string, value: string): Promise<TaxIdOutcome>
 }
 
 export interface McpPullOptions {
@@ -117,6 +124,20 @@ export interface McpPullOptions {
 type Outcome = 'UPDATED' | 'UNCHANGED' | 'CONFLICT'
 
 const digits = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
+
+/**
+ * MCP's tax id into the vault, skipped when the row's mirror already shows the same last four.
+ * A thrown error is reported as FAILED with no message: nothing near a tax id may carry its text.
+ */
+async function syncTaxId(deps: McpPullDeps, carrierId: string, row: Row, profile: McpProfile): Promise<TaxIdOutcome | 'FAILED' | null> {
+  if (!profile.taxId || !deps.setTaxId) return null
+  if (typeof row.taxIdLast4 === 'string' && row.taxIdLast4 === digits(profile.taxId).slice(-4)) return null
+  try {
+    return await deps.setTaxId(carrierId, profile.taxId)
+  } catch {
+    return 'FAILED'
+  }
+}
 
 async function syncContacts(deps: McpPullDeps, carrierId: string, wanted: McpContact[], now: string, hadPrimary: boolean): Promise<{ created: number; updated: number }> {
   if (wanted.length === 0) return { created: 0, updated: 0 }
@@ -210,12 +231,13 @@ export async function applyProfileToCarrier(
   const id = String(carrier.id)
   const contacts = await syncContacts(deps, id, profile.contacts, ctx.now, false)
   const payment = await syncPayment(deps, id, profile.payment, ctx.now)
-  const touched = Object.keys(changes).length > 0 || contacts.created > 0 || contacts.updated > 0 || payment !== null
+  const taxId = await syncTaxId(deps, id, carrier, profile)
+  const touched = Object.keys(changes).length > 0 || contacts.created > 0 || contacts.updated > 0 || payment !== null || taxId === 'SET'
   if (touched) {
     await deps.audit({
       entityId: id,
       action: 'MCP_PULL',
-      changes: { source: 'MYCARRIERPACKETS', runId: ctx.runId, matchedBy: ctx.matchedBy, fields: auditChanges(changes), contacts, payment },
+      changes: { source: 'MYCARRIERPACKETS', runId: ctx.runId, matchedBy: ctx.matchedBy, fields: auditChanges(changes), contacts, payment, ...(taxId ? { taxId } : {}) },
     })
   }
   return touched && outcome === 'UNCHANGED' ? 'UPDATED' : outcome
@@ -268,7 +290,8 @@ export async function ingestProfile(
     touched.add(String(row.id))
     const contacts = await syncContacts(deps, String(row.id), profile.contacts, ctx.now, false)
     const payment = await syncPayment(deps, String(row.id), profile.payment, ctx.now)
-    await deps.audit({ entityId: String(row.id), action: 'MCP_CREATE', changes: { source: 'MYCARRIERPACKETS', runId: ctx.runId, matchedBy: 'CREATED', fields: auditChanges(mapProfileToCarrier({}, profile).changes), contacts, payment } })
+    const taxId = await syncTaxId(deps, String(row.id), row, profile)
+    await deps.audit({ entityId: String(row.id), action: 'MCP_CREATE', changes: { source: 'MYCARRIERPACKETS', runId: ctx.runId, matchedBy: 'CREATED', fields: auditChanges(mapProfileToCarrier({}, profile).changes), contacts, payment, ...(taxId ? { taxId } : {}) } })
     counts.created++
     return
   }

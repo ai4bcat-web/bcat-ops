@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { SYNTHETIC_EIN } from '@/test/syntheticTaxIds'
 import {
   apAgingReader,
   canSignOff,
@@ -100,10 +101,10 @@ describe('Aljex file readers', () => {
   it('carriers: never reads tax-id, bank or routing columns', () => {
     const reader = carriersReader()
     reader.push(['Vendor Name', 'Aljex Carrier ID', 'Fed/SS #', 'Bank Account', 'Routing #', 'MC #', 'Status Y/N', 'Quick Pay', 'Factor Id'])
-    reader.push(['Truck Co', 'C1', '99-9999999', '123456789', '021000021', 'MC-123456', 'Y', 'Y', ''])
+    reader.push(['Truck Co', 'C1', SYNTHETIC_EIN, '123456789', '021000021', 'MC-123456', 'Y', 'Y', ''])
     const r = reader.finish()
     expect(r.rows[0].fields).toMatchObject({ mc: '123456', active: 1, quickPay: 1, factored: 0 })
-    expect(JSON.stringify(r)).not.toMatch(/9999999|123456789|021000021/)
+    expect(JSON.stringify(r)).not.toMatch(/0000001|123456789|021000021/)
   })
 
   it('refuses a file that is not the expected layout', () => {

@@ -22,6 +22,9 @@ const sendCarrierSetupPacket = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/apiClient', () => ({
   archiveCarrierContact: vi.fn(),
   archiveCarrierPaymentMethod: vi.fn(),
+  clearTaxId: vi.fn(),
+  revealTaxId: vi.fn(),
+  setTaxId: vi.fn(),
   commitCarrierDocument: vi.fn(),
   deleteCarrierDocument: vi.fn(),
   getCarrier: vi.fn(),

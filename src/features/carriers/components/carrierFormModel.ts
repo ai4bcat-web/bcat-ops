@@ -26,7 +26,6 @@ export interface CarrierFormValue {
   mcNumber: string
   dotNumber: string
   scac: string
-  einNumber: string
   phone: string
   email: string
   website: string
@@ -87,7 +86,6 @@ export function carrierFormFrom(carrier: CarrierRecord | null): CarrierFormValue
     mcNumber: carrier?.mcNumber ?? '',
     dotNumber: carrier?.dotNumber ?? '',
     scac: carrier?.scac ?? '',
-    einNumber: carrier?.einNumber ?? '',
     phone: carrier?.phone ?? '',
     email: carrier?.email ?? '',
     website: carrier?.website ?? '',
@@ -161,7 +159,6 @@ export interface CarrierPatch {
   mcNumber: string | null
   dotNumber: string | null
   scac: string | null
-  einNumber: string | null
   phone: string | null
   email: string | null
   website: string | null
@@ -211,7 +208,6 @@ export function carrierFormInput(value: CarrierFormValue, policies: InsurancePol
     mcNumber: value.mcNumber.trim() || null,
     dotNumber: value.dotNumber.trim() || null,
     scac: value.scac.trim() || null,
-    einNumber: value.einNumber.trim() || null,
     phone: value.phone.trim() || null,
     email: value.email.trim() || null,
     website: value.website.trim() || null,

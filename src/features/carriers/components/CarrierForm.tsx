@@ -70,11 +70,10 @@ export function CarrierForm({ value, set, section }: CarrierFormProps) {
             </TmsSelect>
           </TmsField>
         </div>
-        <div className="tms-grid tms-grid-4">
+        <div className="tms-grid tms-grid-3">
           {text('mcNumber', 'MC #')}
           {text('dotNumber', 'DOT #')}
           {text('scac', 'SCAC')}
-          {text('einNumber', 'EIN')}
         </div>
         <div className="tms-grid tms-grid-3">
           {text('phone', 'Phone')}

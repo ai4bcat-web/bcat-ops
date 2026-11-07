@@ -24,7 +24,9 @@ const api = vi.hoisted(() => ({
   listIntegrations: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => api)
+vi.mock('./components/uploadFile', () => ({ putWithProgress: vi.fn().mockResolvedValue(undefined) }))
 
+import { CUSTOMER_COLUMNS } from '@/lib/aljex/layouts/customers'
 import { AljexImportPage } from './AljexImportPage'
 
 const STAGE_OK: AljexStageSummary = {
@@ -186,5 +188,36 @@ describe('AljexImportPage — sensitive columns', () => {
     await pickCsv('"Vendor Name","MC #"')
     await screen.findByTestId('layout-detection')
     expect(screen.queryByTestId('sensitive-refusal')).toBeNull()
+  })
+})
+
+describe('AljexImportPage — per-file kinds', () => {
+  const header = (extra: string[] = []) => [...Object.values(CUSTOMER_COLUMNS), ...extra].map((h) => `"${h}"`).join(',')
+  const pick = async (h: string) => {
+    api.listAljexImports.mockResolvedValue([])
+    render(<AljexImportPage />)
+    fireEvent.change(await screen.findByLabelText('Aljex export file'), { target: { files: [new File([`${h}\nrow\n`], 'customers.csv', { type: 'text/csv' })] } })
+  }
+
+  it('refuses a customer list that still has the Web Password column', async () => {
+    await pick(header(['Web Password']))
+    expect(await screen.findByTestId('sensitive-refusal')).toHaveTextContent(/Web Password/)
+    expect(screen.getByRole('button', { name: /Upload and stage/ })).toBeDisabled()
+  })
+
+  it('uploads a recognised customer list under its own layout and then offers the dry run and apply', async () => {
+    const staged = job({ id: 'aljexrun:c1', status: 'READY', phase: 'STAGE', layoutId: 'aljex-customers-master-v1', fileName: 'customers.csv', rowCount: 1, stage: null, plan: null })
+    api.prepareAljexImport.mockResolvedValue({ job: { ...staged, status: 'STAGING', phase: 'UPLOAD' }, uploadUrl: 'https://put', uploadKey: 'k' })
+    api.stageAljexImport.mockResolvedValue(staged)
+    await pick(header())
+    expect(await screen.findByTestId('directory-layout')).toHaveTextContent(/Customer list recognised/)
+    const upload = screen.getByRole('button', { name: /Upload and stage/ })
+    expect(upload).toBeEnabled()
+    fireEvent.click(upload)
+    await waitFor(() => expect(api.stageAljexImport).toHaveBeenCalledWith('aljexrun:c1'))
+    expect(api.prepareAljexImport.mock.calls[0][0]).toMatchObject({ layoutId: 'aljex-customers-master-v1', fileName: 'customers.csv' })
+    expect(await screen.findByRole('button', { name: 'Dry run' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '2. Profile' })).toBeNull()
   })
 })

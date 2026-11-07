@@ -2372,6 +2372,8 @@ const schema = a.schema(stageTypes({
    */
   Invoice: a
     .model({
+      aljexDueDate:  a.string(),    // Step AW: the Aljex due date (YYYY-MM-DD) kept as a reference when a carried-over invoice is redated (Danisco 120 days)
+      aljexTerms:    a.integer(),   // Step AW: the Aljex customer terms days kept as a reference
       number:          a.string().required(),   // same value as `id`
       orderId:         a.string().required(),
       shipmentId:      a.string().required(),
@@ -3512,7 +3514,12 @@ const schema = a.schema(stageTypes({
       mcNumber:   a.string(),
       dotNumber:  a.string(),
       scac:       a.string(),
-      einNumber:  a.string(),
+      // Tax ID (EIN/SSN): the number itself is NEVER a Carrier field. It lives encrypted in the Lambda-only
+      // CarrierTaxVault (AW_TAXID_DESIGN.md). These three are the read-only mirror the UI shows as "on file ••••1234";
+      // only tmsCarrierActions / mcpSync write them, in the same transaction as the vault item.
+      taxIdLast4:    a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      taxIdType:     a.string().authorization((allow) => [allow.authenticated().to(['read'])]),   // EIN | SSN
+      taxIdOnFileAt: a.datetime().authorization((allow) => [allow.authenticated().to(['read'])]),
       inFmcsa:    a.boolean(),
       authorityStatus: a.enum(['ACTIVE', 'INACTIVE', 'NONE', 'UNKNOWN']),
       authorityGrantedAt: a.datetime(),

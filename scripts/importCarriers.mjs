@@ -150,7 +150,6 @@ const HEADER_ALIASES = {
   mcNumber: ['mc number', 'mc #', 'mc#', 'mc', 'docket number', 'docket'],
   dotNumber: ['usdot number', 'us dot', 'usdot', 'dot number', 'dot #', 'dot#', 'dot'],
   scac: ['scac code', 'scac'],
-  einNumber: ['ein', 'fein', 'tax id', 'federal tax id'],
   phone: ['carrier phone', 'main phone', 'phone number', 'phone'],
   email: ['carrier email', 'main email', 'email address', 'email'],
   website: ['website', 'web site', 'url'],
@@ -541,7 +540,7 @@ export function mapCarrierRow(row, index) {
   };
 
   const scalars = [
-    ['dbaName', 'dbaName'], ['scac', 'scac'], ['einNumber', 'einNumber'],
+    ['dbaName', 'dbaName'], ['scac', 'scac'],
     ['phone', 'phone'], ['email', 'email'], ['website', 'website'],
     ['dispatcherName', 'dispatcherName'], ['dispatcherPhone', 'dispatcherPhone'],
     ['dispatcherEmail', 'dispatcherEmail'], ['internalNotes', 'internalNotes'],

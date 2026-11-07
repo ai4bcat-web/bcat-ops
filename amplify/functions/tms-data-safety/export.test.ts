@@ -4,6 +4,7 @@ import {
   checkS3Exports, createJob, createS3ExportJob, getJob, listModels, newAccountingJob, newCsvJob, resolveTables,
   runAccountingJob, runCsvJob, runS3Export, type Row,
 } from './export'
+import { SYNTHETIC_EIN } from '../../../src/test/syntheticTaxIds'
 import { sha256Hex } from './csv'
 
 // Synthetic data only.
@@ -67,6 +68,19 @@ describe('CSV export job', () => {
     )
     // accounting files exist even for empty ledgers, header only
     expect(aws.objects.get('exports/csv/csv-1/accounting/invoices.csv')!.startsWith('\uFEFFinvoice_number,')).toBe(true)
+  })
+
+  it('never exports the carrier tax-ID mirror or a retired clear einNumber column, and the vault is not a model', async () => {
+    const aws = new FakeAws()
+    seedLedger(aws)
+    aws.seed('Carrier', [{ id: 'k1', name: 'Fake Haul LLC', mcNumber: 'MC900001', taxIdLast4: '0001', taxIdType: 'EIN', taxIdOnFileAt: '2026-11-10T00:00:00.000Z', einNumber: SYNTHETIC_EIN }])
+    const deps = aws.deps()
+    expect(await listModels(deps)).not.toContain('CarrierTaxVault')
+    await createJob(deps, newCsvJob(deps, { id: 'csv-tax', scope: 'TMS', tables: ['Carrier'], startedBy: 'o@x.test' }))
+    expect((await runCsvJob(deps, 'csv-tax', 900_000))?.status).toBe('COMPLETED')
+    const file = aws.objects.get('exports/csv/csv-tax/raw/Carrier/Carrier-0001.csv')!
+    expect(file.split('\r\n')[0]).toBe('id,mcNumber,name')
+    for (const needle of ['taxId', 'einNumber', SYNTHETIC_EIN, '2026-11-10']) expect(file).not.toContain(needle)
   })
 
   it('resumes across invocations without losing or duplicating a row', async () => {

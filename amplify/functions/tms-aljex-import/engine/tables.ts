@@ -7,7 +7,26 @@ import type { AljexImportJob, EngineTable, EngineTargetPolicy, TableSet } from '
 export const PROD_SUFFIX = '5ucwdyvwivelbo4k4jomvrwel4-NONE'
 export const DEV_SUFFIX = 'nc3jsnxdmjhkpequimypiatkma-NONE'
 export const TAG_PATTERN = /^[a-z0-9]{3,12}$/
-const DEV_TABLE_PATTERN = new RegExp(`-${DEV_SUFFIX}(-rh[a-z0-9]{3,12})?$`)
+const SUFFIX_SHAPE = /^[a-z0-9]{20,32}-NONE$/
+
+/**
+ * The Lambda's OWN stack suffix (the dev branch or the rehearsal branch), read from the table names Amplify gave it
+ * (`Order-<apiId>-NONE`). Honoured ONLY with BCAT_DEV_STACK=true (set on those branches; the synth guard forbids it on
+ * main), and never when it is the production suffix. Null = only the hard-coded dev suffix is a dev-stack table.
+ */
+export function ownStackSuffix(env: Record<string, string | undefined> = process.env): string | null {
+  if (env.BCAT_DEV_STACK !== 'true') return null
+  const suffixes = [env.ORDER_TABLE_NAME, env.LOAD_TABLE_NAME].map((n) => (n ? n.slice(n.indexOf('-') + 1) : ''))
+  const [a, b] = suffixes
+  if (!a || a !== b || !SUFFIX_SHAPE.test(a) || a.includes(PROD_SUFFIX)) return null
+  return a
+}
+
+function devTablePattern(env: Record<string, string | undefined>): RegExp {
+  const own = ownStackSuffix(env)
+  const suffixes = own && own !== DEV_SUFFIX ? [DEV_SUFFIX, own] : [DEV_SUFFIX]
+  return new RegExp(`-(${suffixes.join('|')})(-rh[a-z0-9]{3,12})?$`)
+}
 
 /** Tables the engine writes. Everything else in TableSet is read-only reference data (or the job/profile rows, always live). */
 export const WRITTEN_TABLES = [
@@ -130,7 +149,7 @@ export function productionPolicy(writeSuffix: string): EngineTargetPolicy {
  * 2. REHEARSAL writes only `-rh<tag>` tables with the job's tag; LIVE writes only the live tables and needs a `liveTag`.
  * (The synthetic-data and reconciled-rehearsal gates need staged data / other jobs and live in `runSlice`.)
  */
-export function assertTargets(live: TableSet, written: TableSet, job: Pick<AljexImportJob, 'target' | 'targetTag' | 'liveTag'>, policy?: EngineTargetPolicy): void {
+export function assertTargets(live: TableSet, written: TableSet, job: Pick<AljexImportJob, 'target' | 'targetTag' | 'liveTag'>, policy?: EngineTargetPolicy, env: Record<string, string | undefined> = process.env): void {
   if (policy?.production === true) {
     // Production mode: exactly the policy's table set, a LIVE job, the owner's live tag. No rehearsal tables, no mixing.
     const want = tableSetFor(policy.readSuffix, policy.writeSuffix)
@@ -141,10 +160,11 @@ export function assertTargets(live: TableSet, written: TableSet, job: Pick<Aljex
     if (!job.liveTag || !job.liveTag.trim()) throw new TargetRefused('A production import needs the live tag typed by the owner')
     return
   }
+  const devPattern = devTablePattern(env)
   for (const set of [live, written]) {
     for (const name of Object.values(set)) {
       if (name.includes(PROD_SUFFIX)) throw new TargetRefused(`Refusing to touch a production table (${name})`)
-      if (!DEV_TABLE_PATTERN.test(name)) throw new TargetRefused(`Table ${name} is not a dev-stack table`)
+      if (!devPattern.test(name)) throw new TargetRefused(`Table ${name} is not a dev-stack table`)
     }
   }
   const target = job.target ?? 'LIVE'

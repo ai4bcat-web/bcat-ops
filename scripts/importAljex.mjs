@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Offline Aljex import driver: the same engine the Lambda worker runs, from a laptop with AWS credentials.
- * Dev stack by default (the engine refuses production table names). PRODUCTION only through `--target prod:<liveTag>`
+ * Dev stack by default; BCAT_STACK=rehearsal aims every non-prod command at the rehearsal branch's tables instead
+ * (scripts/lib/stackConfig.mjs; rehearsal-create / run / seed-counter / rehearsal-drop all follow it). The engine refuses production table names. PRODUCTION only through `--target prod:<liveTag>`
  * behind the shared gate (scripts/lib/prodGate.mjs): env BCAT_ALLOW_PROD=<today YYYY-MM-DD>, --i-mean-production,
  * fresh `prodpre-importAljex-` on-demand backups of the 17 written tables (scripts/prodBackup.mjs), a printed plan,
  * a dry run unless --apply, and the typed confirmation <account id>:<table suffix> (prompt or --confirm-prod).
@@ -36,6 +37,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { splitProdArgs } from './lib/importAljexArgs.mjs'
 import { requireProd } from './lib/prodGate.mjs'
+import { STACK, isRehearsal } from './lib/stackConfig.mjs'
 import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -86,6 +88,14 @@ try {
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))
   process.exit(1)
+}
+
+// BCAT_STACK=rehearsal: the engine's own-stack rule (engine/tables.ts ownStackSuffix) accepts the rehearsal branch's tables
+// instead of the dev ones. Production stays refused by name in every mode; this never applies to a gated --target prod run.
+if (isRehearsal && !gate) {
+  process.env.BCAT_DEV_STACK = 'true'
+  process.env.ORDER_TABLE_NAME = `Order-${STACK.tableSuffix}`
+  process.env.LOAD_TABLE_NAME = `Load-${STACK.tableSuffix}`
 }
 
 if (gate && split.stopAfterPlan) {

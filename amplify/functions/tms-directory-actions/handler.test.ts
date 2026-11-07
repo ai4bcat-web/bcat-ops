@@ -7,6 +7,7 @@
 
 import type { AttributeValue } from '@aws-sdk/client-dynamodb'
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
+import { SYNTHETIC_EIN } from '../../../src/test/syntheticTaxIds'
 
 const lambdaSend = vi.hoisted(() => vi.fn())
 vi.mock('@aws-sdk/client-lambda', () => ({
@@ -1637,12 +1638,12 @@ describe('Step L divisions', () => {
       event('SAVE_DIVISION', {
         key: 'BCAT_LOGISTICS',
         name: 'BCAT Logistics',
-        taxId: '12-3456789',
+        taxId: SYNTHETIC_EIN,
         termsUrl: 'https://bcatcorp.com/terms',
         isPrimary: true,
       }, identity({ groups: ['ADMIN'] })),
     )
-    expect(result.taxId).toBe('12-3456789')
+    expect(result.taxId).toBe(SYNTHETIC_EIN)
     expect(result.termsUrl).toBe('https://bcatcorp.com/terms')
     expect(result.isPrimary).toBe(true)
   })

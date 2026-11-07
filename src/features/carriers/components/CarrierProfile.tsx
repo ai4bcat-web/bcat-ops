@@ -45,6 +45,7 @@ import {
 } from './carrierFormModel'
 import { CarrierPaymentEditor, type CarrierPaymentDraft } from './CarrierPaymentEditor'
 import { CarrierStatusDialog } from './CarrierStatusDialog'
+import { TaxIdCard } from './TaxIdCard'
 import { InsurancePoliciesEditor } from './InsurancePoliciesEditor'
 import type { AuditLogEntry } from '@/types'
 import type { TmsTone } from '@/features/tms/kit'
@@ -323,6 +324,8 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
 
           {bundle && carrier && (
             <>
+              {tab === 'profile' && <TaxIdCard carrier={carrier} isAdmin={isAdmin} onChanged={refresh} />}
+
               {(tab === 'profile' || tab === 'equipment' || tab === 'compliance') && (
                 <CarrierDraft
                   key={`${carrier.id}:${carrier.updatedAt}`}

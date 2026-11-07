@@ -18,6 +18,7 @@ import type {
   CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion,
   LocationMergePreview, LocationMergeJob, ImportJob,
   AljexImportJob, AljexMappingProfile, AljexProfileInput, AljexReportLink, AljexSampleRow, ApplyAljexImportInput,
+  AljexFileImportAction, AljexFileImportInput, AljexFileImportResult,
   AljexCodeMapRecord, AljexCodeSummary, LegacyAljexRowResult, ReassignByRepCodeInput, ReassignByRepCodeResult,
   SetAljexCodeMapInput,
   CsvExportStartInput, DataExportJob, DataExportLinks, DataStatus, ImportReportSummary,
@@ -1925,6 +1926,11 @@ export async function seedProCounter(input: SeedProCounterInput = {}): Promise<S
   return aljexImportAction<SeedProCounterResult>('IMPORT_SEED_COUNTER', input)
 }
 
+/** Per-file Aljex imports (customers, carriers, AP, AR, active-shipments check): PLAN is a dry run, APPLY writes. Owner/ADMIN only. */
+export async function runAljexFileImport(action: AljexFileImportAction, input: AljexFileImportInput): Promise<AljexFileImportResult> {
+  return aljexImportAction<AljexFileImportResult>(action, input)
+}
+
 export async function syncImportedCarriers(jobId?: string | null): Promise<SyncImportedCarriersResult> {
   return aljexImportAction<SyncImportedCarriersResult>('IMPORT_SYNC_CARRIERS', { jobId: jobId ?? null })
 }
@@ -3581,7 +3587,7 @@ export type {
 
 const CARRIER_FIELDS_BASE = `
   id name dbaName normalizedName type status statusReason statusNote statusChangedAt statusChangedBy
-  mcNumber dotNumber scac einNumber inFmcsa
+  mcNumber dotNumber scac inFmcsa
   authorityStatus authorityGrantedAt authorityExpiresAt
   safetyRating safetyRatingAt reviewType reviewedAt
   driverInspections driverOos vehicleInspections vehicleOos
@@ -3601,6 +3607,9 @@ let carriersHaveV3 = true
 // Aljex-exit: CA Intrastate / TX PUC numbers + expiries and the legacy flag; MyCarrierPackets review status, packet completion and last sync.
 const CARRIER_V4_FIELDS = ['caIntrastateNumber', 'caIntrastateExpiresAt', 'txPucNumber', 'txPucExpiresAt', 'legacyImported', 'legacySource', 'mcpReviewStatus', 'mcpPacketCompletedAt', 'mcpSyncedAt']
 let carriersHaveV4 = true
+// Encrypted tax-ID vault mirror (masked last four, type, when it went on file). Dropped and retried if the backend predates it.
+const CARRIER_V5_FIELDS = ['taxIdLast4', 'taxIdType', 'taxIdOnFileAt']
+let carriersHaveV5 = true
 const CARRIER_JSON_FIELDS: (keyof CarrierRecord)[] = ['insurancePolicies', 'address', 'aiMemory']
 const CARRIER_CONTACT_FIELDS = `
   id carrierId name types email phone isPrimary rateConRecipient active
@@ -3626,8 +3635,14 @@ async function readCarriers<T>(run: (fields: string) => Promise<T>): Promise<T> 
         carriersHaveV2 ? CARRIER_V2_FIELDS.join(' ') : '',
         carriersHaveV3 ? CARRIER_V3_FIELDS.join(' ') : '',
         carriersHaveV4 ? CARRIER_V4_FIELDS.join(' ') : '',
+        carriersHaveV5 ? CARRIER_V5_FIELDS.join(' ') : '',
       ].filter(Boolean).join(' '))
     } catch (err) {
+      if (carriersHaveV5 && fieldNamed(CARRIER_V5_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Carrier tax-ID mirror fields yet — querying without them until deploy')
+        carriersHaveV5 = false
+        continue
+      }
       if (carriersHaveV4 && fieldNamed(CARRIER_V4_FIELDS, err)) {
         console.warn('[apiClient] backend has no Carrier compliance/legacy fields yet — querying without them until deploy')
         carriersHaveV4 = false
@@ -3664,6 +3679,32 @@ export async function carrierAction<T>(action: string, input: unknown): Promise<
   if (v == null) throw new Error(`${action} returned no result`)
   return v as T
 }
+
+// ── Carrier tax ID (encrypted vault; Docs/tms-build/AW_TAXID_DESIGN.md) ───────
+//
+// The number lives only in the Lambda-owned KMS vault. The Carrier row carries the masked mirror
+// (taxIdLast4/taxIdType/taxIdOnFileAt). The clear value exists in exactly two places: the argument
+// of setTaxId (typed by an ADMIN) and the revealTaxId response; callers keep it in component state,
+// and nothing here logs, caches or stores it.
+
+export interface TaxIdStatus {
+  onFile: boolean
+  last4?: string | null
+  type?: 'EIN' | 'SSN' | null
+  setAt?: string | null
+  source?: 'ALJEX' | 'MCP' | 'MANUAL' | null
+}
+export type SetTaxIdResult =
+  | { ok: true; last4: string; type: 'EIN' | 'SSN' }
+  | { ok: false; duplicateOf: string }
+
+export const getTaxIdStatus = (carrierId: string) => carrierAction<TaxIdStatus>('GET_TAX_ID_STATUS', { carrierId })
+export const setTaxId = (carrierId: string, value: string, type?: 'EIN' | 'SSN') =>
+  carrierAction<SetTaxIdResult>('SET_TAX_ID', { carrierId, value, ...(type ? { type } : {}) })
+export const revealTaxId = (carrierId: string, reason: string) =>
+  carrierAction<{ value: string; expiresInSeconds: number }>('REVEAL_TAX_ID', { carrierId, reason })
+export const clearTaxId = (carrierId: string, reason: string) =>
+  carrierAction<{ ok: true }>('CLEAR_TAX_ID', { carrierId, reason })
 
 // ── Reads ────────────────────────────────────────────────────────────────────
 
@@ -3729,6 +3770,7 @@ export type UpsertCarrierInput = { id?: string; expectedUpdatedAt?: string } & P
   CarrierRecord,
   'id' | 'createdAt' | 'updatedAt' | 'createdBy' | 'updatedBy' | 'version'
   | 'normalizedName' | 'statusChangedAt' | 'statusChangedBy' | 'loadCount' | 'lastLoadAt'
+  | 'taxIdLast4' | 'taxIdType' | 'taxIdOnFileAt'
 >>
 export async function upsertCarrier(input: UpsertCarrierInput): Promise<CarrierRecord> {
   return carrierAction<CarrierRecord>('UPSERT_CARRIER', input)
@@ -6875,7 +6917,7 @@ const INVOICE_FIELDS = `
   lines references subtotalCents totalCents paidCents writtenOffCents balanceCents
   arOpen paidAt remitTo factored factoringItemId
   pdfKey pdfSizeBytes pdfVersion attachDocumentIds
-  sentAt sentTo sentCount markedSentAt markedSentBy lastNoticeId
+  sentAt sentTo sentCount markedSentAt markedSentBy lastNoticeId aljexDueDate aljexTerms
   voidedAt voidedBy voidReason note
   createdBy updatedBy version createdAt updatedAt
 `

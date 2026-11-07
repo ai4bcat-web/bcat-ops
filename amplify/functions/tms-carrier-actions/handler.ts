@@ -11,6 +11,9 @@
  *   UPSERT_PAYMENT_METHOD, ARCHIVE_PAYMENT_METHOD
  *   PREPARE_DOCUMENT, COMMIT_DOCUMENT, DELETE_DOCUMENT
  *   SAVE_CARRIER_SETTINGS
+ *   SET_TAX_ID, GET_TAX_ID_STATUS, REVEAL_TAX_ID, CLEAR_TAX_ID   (encrypted vault, _shared/taxVault.ts;
+ *     the clear number never reaches a log, an audit row or a Carrier field; REVEAL is ADMIN-only)
+ *   internal (direct invoke by the operator CLI, never AppSync): IMPORT_TAX_IDS, MIGRATE_EIN_FIELD
  *
  * Carrier/CarrierContact/CarrierPaymentMethod/CarrierDocument/TmsSettings are
  * written with the raw DynamoDB SDK, in a TransactWriteItems whenever more than one
@@ -26,6 +29,7 @@ import {
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
+  ScanCommand,
   TransactWriteItemsCommand,
   UpdateItemCommand,
   type AttributeValue,
@@ -36,6 +40,20 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'crypto'
+
+import {
+  TaxIdError,
+  clearTaxId,
+  importTaxIds,
+  isProductionApi,
+  redactTaxIds,
+  revealTaxId,
+  setTaxId,
+  taxIdStatus,
+  vaultDepsFromEnv,
+  type ImportRow,
+  type VaultDeps,
+} from '../_shared/taxVault'
 
 import {
   CARRIER_STATUSES,
@@ -106,11 +124,16 @@ type Action =
   | 'COMMIT_DOCUMENT'
   | 'DELETE_DOCUMENT'
   | 'SAVE_CARRIER_SETTINGS'
+  | 'SET_TAX_ID'
+  | 'GET_TAX_ID_STATUS'
+  | 'REVEAL_TAX_ID'
+  | 'CLEAR_TAX_ID'
 
 interface AppSyncIdentity {
   sub: string
   username: string
   claims: Record<string, unknown>
+  sourceIp?: string[]
 }
 
 interface AppSyncEvent {
@@ -187,7 +210,12 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
 
   // Org-wide booking rules are not a carrier edit: they decide who every dispatcher
   // may book tomorrow, so they stay with the people who own the configuration.
-  const adminActions: Partial<Record<Action, true>> = { SAVE_CARRIER_SETTINGS: true }
+  const adminActions: Partial<Record<Action, true>> = {
+    SAVE_CARRIER_SETTINGS: true,
+    SET_TAX_ID: true,
+    REVEAL_TAX_ID: true,
+    CLEAR_TAX_ID: true,
+  }
 
   if (adminActions[action]) {
     if (!isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
@@ -693,7 +721,6 @@ async function upsertCarrier(input: Row, caller: Caller): Promise<Row> {
     mcNumber,
     dotNumber,
     scac: optionalString(input.scac, 20),
-    einNumber: optionalString(input.einNumber, 20),
     inFmcsa: optionalBoolean(input.inFmcsa),
     authorityStatus: optionalEnumStrict(input.authorityStatus, AUTHORITY_STATUSES, 'authorityStatus'),
     authorityGrantedAt: optionalIsoDate(input.authorityGrantedAt, 'authorityGrantedAt'),
@@ -1389,9 +1416,189 @@ async function saveCarrierSettings(input: Row, caller: Caller): Promise<Row> {
 
 // ── Main handler ─────────────────────────────────────────────────────────────
 
-export const handler = async (event: AppSyncEvent): Promise<Row> => {
+// ── Tax-ID vault actions ─────────────────────────────────────────────────────
+// Nothing in this block may log, or put into an error message, anything that came from `input`: the number
+// travels in it. JSON.parse's own SyntaxError quotes a snippet of its text, so a bad body gets a fixed sentence.
+
+const TAX_ACTIONS: Partial<Record<Action, true>> = { SET_TAX_ID: true, GET_TAX_ID_STATUS: true, REVEAL_TAX_ID: true, CLEAR_TAX_ID: true }
+
+let vaultDeps: VaultDeps | null = null
+function vault(): VaultDeps {
+  vaultDeps ??= vaultDepsFromEnv(dynamo)
+  return vaultDeps
+}
+
+function safeTaxInput(raw: AppSyncEvent['arguments']['input']): Row {
+  try {
+    return parseInput(raw)
+  } catch {
+    throw new TaxIdError('Invalid input', 'INVALID_INPUT')
+  }
+}
+
+/** Fixed sentences from TaxIdError pass; anything else (SDK errors) is reduced to its class name. */
+function taxFailure(err: unknown): Error {
+  if (err instanceof TaxIdError) return new Error(redactTaxIds(err.message))
+  console.error('[tms-carrier-actions] tax id action failed:', err instanceof Error ? err.name : 'Error')
+  return new Error('Tax ID store unavailable')
+}
+
+async function taxAction(action: Action, event: AppSyncEvent, caller: Caller): Promise<Row> {
+  const input = safeTaxInput(event.arguments.input)
+  const carrierId = typeof input.carrierId === 'string' ? input.carrierId.trim() : ''
+  if (!carrierId) throw new TaxIdError('carrierId is required', 'INVALID_INPUT')
+  switch (action) {
+    case 'SET_TAX_ID':
+      return { ...(await setTaxId(vault(), { carrierId, value: input.value, type: input.type, source: 'MANUAL', setBy: caller.email })) }
+    case 'GET_TAX_ID_STATUS':
+      return { ...(await taxIdStatus(vault(), carrierId)) }
+    case 'REVEAL_TAX_ID':
+      return { ...(await revealTaxId(vault(), { carrierId, reason: input.reason, user: caller.email, ip: event.identity?.sourceIp?.[0] ?? null })) }
+    case 'CLEAR_TAX_ID':
+      return { ...(await clearTaxId(vault(), { carrierId, reason: input.reason, user: caller.email })) }
+    default:
+      throw new TaxIdError('Unknown action', 'INVALID_INPUT')
+  }
+}
+
+// ── Internal events (operator CLI, direct Lambda invoke) ─────────────────────
+
+interface InternalEvent {
+  internal: string
+  rows?: unknown
+  dryRun?: boolean
+}
+
+/** AppSync always sends `arguments`; a direct invoke (IAM: lambda:InvokeFunction) never does. */
+function isInternalEvent(event: unknown): event is InternalEvent {
+  return event != null && typeof event === 'object' && 'internal' in event && !('arguments' in event) && !('identity' in event)
+}
+
+function parseImportRows(raw: unknown): ImportRow[] {
+  if (!Array.isArray(raw)) throw new TaxIdError('rows must be an array', 'INVALID_INPUT')
+  return raw.map((r, i) => {
+    const row = assertRecord(r, i, 'rows')
+    return {
+      aljexCarrierId: typeof row.aljexCarrierId === 'string' ? row.aljexCarrierId.trim() : '',
+      mcNumber: typeof row.mcNumber === 'string' ? row.mcNumber.trim() : '',
+      dotNumber: typeof row.dotNumber === 'string' ? row.dotNumber.trim() : '',
+      value: typeof row.value === 'string' ? row.value : '',
+    }
+  })
+}
+
+const digitsOnly = (v: string): string => v.replace(/\D/g, '')
+
+/** MC, then DOT, then the Aljex Carrier ID (code or merged alias; no index, one Scan per invoke, only if needed). */
+function carrierResolver(): (row: ImportRow) => Promise<string | null> {
+  let aljexIndex: Map<string, string | null> | null = null
+  const byIndex = async (indexName: string, keyName: string, value: string): Promise<string | null> => {
+    const tries = [...new Set([value, digitsOnly(value)].filter(Boolean))]
+    for (const t of tries) {
+      const rows = await queryIndex(CARRIER_TABLE_NAME, indexName, keyName, t)
+      if (rows.length === 1) return String(rows[0].id)
+      if (rows.length > 1) return null
+    }
+    return null
+  }
+  const loadAljex = async (): Promise<Map<string, string | null>> => {
+    const map = new Map<string, string | null>()
+    let lastKey: Record<string, AttributeValue> | undefined
+    do {
+      const page = await dynamo.send(new ScanCommand({
+        TableName: CARRIER_TABLE_NAME, ExclusiveStartKey: lastKey,
+        ProjectionExpression: 'id, aljexCode, aljexAliases',
+      }))
+      for (const item of page.Items ?? []) {
+        const row = unmarshall(item)
+        const codes = [row.aljexCode, ...(Array.isArray(row.aljexAliases) ? row.aljexAliases : [])].filter((c): c is string => typeof c === 'string' && c !== '')
+        for (const code of codes) map.set(code, map.has(code) ? null : String(row.id))   // an ambiguous code resolves to nothing
+      }
+      lastKey = page.LastEvaluatedKey
+    } while (lastKey)
+    return map
+  }
+  return async (row) => {
+    if (row.mcNumber) {
+      const hit = await byIndex(IDX_CARRIERS_BY_MC, 'mcNumber', row.mcNumber)
+      if (hit) return hit
+    }
+    if (row.dotNumber) {
+      const hit = await byIndex(IDX_CARRIERS_BY_DOT, 'dotNumber', row.dotNumber)
+      if (hit) return hit
+    }
+    if (!row.aljexCarrierId) return null
+    aljexIndex ??= await loadAljex()
+    return aljexIndex.get(row.aljexCarrierId) ?? null
+  }
+}
+
+/**
+ * Dev + rehearsal, before cutover: every Carrier still holding the clear `einNumber` attribute (the old schema
+ * field) has it moved into the vault and then removed. Counts only. A value the vault will not take (malformed, or
+ * already on another carrier) is dropped too: the point is that no clear number stays on any Carrier row.
+ */
+async function migrateEinField(dryRun: boolean): Promise<Row> {
+  const deps = vault()
+  if (isProductionApi(deps.names.apiId)) throw new TaxIdError('MIGRATE_EIN_FIELD runs on dev and rehearsal only', 'FORBIDDEN')
+  const out = { withEin: 0, migrated: 0, unchanged: 0, duplicateDropped: 0, invalidDropped: 0, failed: 0, removed: 0, dryRun }
+  let lastKey: Record<string, AttributeValue> | undefined
+  do {
+    const page = await dynamo.send(new ScanCommand({
+      TableName: CARRIER_TABLE_NAME, ExclusiveStartKey: lastKey,
+      FilterExpression: 'attribute_exists(einNumber)', ProjectionExpression: 'id, einNumber',
+    }))
+    for (const item of page.Items ?? []) {
+      const row = unmarshall(item)
+      if (typeof row.einNumber !== 'string' || !row.einNumber.trim()) { out.withEin++; if (!dryRun) { await removeEin(String(row.id)); out.removed++ } continue }
+      out.withEin++
+      if (dryRun) continue
+      let drop = false
+      try {
+        const r = await setTaxId(deps, { carrierId: String(row.id), value: row.einNumber, type: 'EIN', source: 'MANUAL', setBy: 'ein-migration' })
+        if (!r.ok) { out.duplicateDropped++; drop = true } else if (r.unchanged) { out.unchanged++; drop = true } else { out.migrated++; drop = true }
+      } catch (err) {
+        if (err instanceof TaxIdError && err.code === 'INVALID_FORMAT') { out.invalidDropped++; drop = true } else out.failed++
+      }
+      if (drop) { await removeEin(String(row.id)); out.removed++ }
+    }
+    lastKey = page.LastEvaluatedKey
+  } while (lastKey)
+  return out
+}
+
+async function removeEin(id: string): Promise<void> {
+  await dynamo.send(new UpdateItemCommand({ TableName: CARRIER_TABLE_NAME, Key: marshall({ id }), UpdateExpression: 'REMOVE einNumber' }))
+}
+
+async function internalAction(event: InternalEvent): Promise<Row> {
+  switch (event.internal) {
+    case 'IMPORT_TAX_IDS':
+      return { ...(await importTaxIds(vault(), parseImportRows(event.rows), carrierResolver())) }
+    case 'MIGRATE_EIN_FIELD':
+      return migrateEinField(event.dryRun === true)
+    default:
+      throw new TaxIdError('Unknown internal action', 'INVALID_INPUT')
+  }
+}
+
+export const handler = async (event: AppSyncEvent | InternalEvent): Promise<Row> => {
+  if (isInternalEvent(event)) {
+    try {
+      return await internalAction(event)
+    } catch (err) {
+      throw taxFailure(err)
+    }
+  }
   const action = event.arguments.action as Action
   const caller = await authorize(action, event.identity)
+  if (TAX_ACTIONS[action]) {
+    try {
+      return await taxAction(action, event, caller)
+    } catch (err) {
+      throw taxFailure(err)
+    }
+  }
   const input = parseInput(event.arguments.input)
 
   switch (action) {

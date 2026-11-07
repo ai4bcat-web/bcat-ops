@@ -25,14 +25,17 @@ import { heartbeatUpdate, MCP_INTEGRATION_ID } from './heartbeat'
 import { fetchMcpCarrierRaw, listCarrierChanges, listCompletedPackets, listMonitoredCarriers } from '../../../src/lib/integrations/mcpAdapter'
 import { mcpSyncRefusal, mcpUpdateItem } from '../../../src/lib/integrations/mcpBatchSync'
 import { normalizeMcpProfile } from '../../../src/lib/integrations/mcpProfile'
+import { vaultDepsFromEnv, setTaxIdFromMcp, TaxIdError } from '../_shared/taxVault'
 import { advanceAfterCarrierActive, type LadderDeps } from '../../../src/lib/integrations/mcpLadder'
 import {
   addCarrierFromMcp, newPullState, pullOneCarrier, runBackfillSlice, runChangesPoll, MCP_PULL_ACTOR,
-  type McpPullDeps, type McpPullState,
+  type McpPullDeps, type McpPullState, type TaxIdOutcome,
 } from '../../../src/lib/integrations/mcpPull'
 
 const ssm = new SSMClient({})
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } })
+const rawDdb = new DynamoDBClient({})
+let mcpVault: ReturnType<typeof vaultDepsFromEnv> | null = null
+const ddb = DynamoDBDocumentClient.from(rawDdb, { marshallOptions: { removeUndefinedValues: true } })
 
 const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
 const CONTACT_TABLE_NAME = process.env.CARRIER_CONTACT_TABLE_NAME ?? ''
@@ -233,6 +236,16 @@ function pullDeps(credentials: Record<string, string>): McpPullDeps {
         TableName: AUDIT_LOG_TABLE_NAME,
         Item: { id: randomUUID(), __typename: 'AuditLog', entityType: 'CARRIER', entityId, action, user: MCP_PULL_ACTOR, changes: JSON.stringify(changes), createdAt: now, updatedAt: now },
       }))
+    },
+    // MCP's W-9 tax id goes to the encrypted vault, never onto the Carrier row (AW_TAXID_DESIGN.md). Outcome only.
+    setTaxId: async (carrierId, value): Promise<TaxIdOutcome> => {
+      try {
+        const r = await setTaxIdFromMcp((mcpVault ??= vaultDepsFromEnv(rawDdb)), carrierId, value)
+        return !r.ok ? 'DUPLICATE' : r.unchanged ? 'UNCHANGED' : 'SET'
+      } catch (err) {
+        if (err instanceof TaxIdError && (err.code === 'INVALID_FORMAT' || err.code === 'TYPE_REQUIRED')) return 'INVALID'
+        throw err
+      }
     },
     listMonitored: (page, size) => listMonitoredCarriers(page, size, credentials),
     fetchProfile: async (ref) => {

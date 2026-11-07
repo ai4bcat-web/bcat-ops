@@ -5,6 +5,7 @@
  *
  * Sensitive columns are never read: each file reader names the few columns it wants.
  */
+import { AR_REPORT_LAYOUT_ID, parseArReport } from '../../../src/lib/aljex/layouts/arReport'
 import type { AljexImportJob, EngineStore } from '../../../src/types/tms'
 import { createCsvParser } from '../../../src/lib/aljex/csv'
 import type { CanonicalRow } from '../../../src/lib/aljex/canonical'
@@ -20,6 +21,7 @@ import {
   bcatShipmentRows,
   carriersReader,
   compareLedger,
+  proKeyOf,
   compareRecords,
   customersReader,
   FIELD_SPECS,
@@ -27,6 +29,7 @@ import {
   shipmentSideFromCanonical,
   withBcatFileBuckets,
   type CanonicalFacts,
+  type LedgerItem,
   type ReconCounts,
   type ReconDiff,
   type ReconEntity,
@@ -145,6 +148,21 @@ export async function buildReconReport(store: EngineStore, io: ReconIo, p: Recon
     const r = compareLedger('AP', side.ledger ?? [], bills, p.asOf, withBcatFileBuckets(side.fileBuckets ?? [], bills, p.asOf))
     notes.push("'Amount Paid' in the AP aging file is the bill amount (the bills are unpaid); the open amount is the five aging columns.")
     return assembleReport({ ...base, ...r, excluded: side.excluded, notes })
+  }
+
+  // AR from the Aljex AR report itself (the per-invoice open amount is the sum of its aging columns).
+  if (p.entity === 'AR' && p.source.layoutId === AR_REPORT_LAYOUT_ID) {
+    const cells: string[][] = []
+    await readFile(io, store, p.source, { push: (c) => { if (c.some((x) => x.trim() !== '')) cells.push(c) }, finish: () => ({ rows: [], excluded: {}, notes: [] }) })
+    const parse = parseArReport(cells)
+    const items: LedgerItem[] = parse.invoices.map((i) => ({ key: proKeyOf(i.pro) ?? i.proKey, name: i.pro, partyName: i.customerName, openCents: i.openCents, dueAt: i.dueDate }))
+    const invoices = bcatInvoiceItems(await scanRows(store, 'invoice', ['id', 'number', 'customerName', 'balanceCents', 'arOpen', 'dueAt']))
+    const r = compareLedger('AR', items, invoices, p.asOf)
+    notes.push("Open amount per invoice = the five aging columns of the AR report; its 'Balance Due', 'Total Exposure' and 'Unbilled' columns are customer totals and are not used. Aljex due dates are kept as printed.")
+    const excluded: Record<string, number> = {}
+    if (parse.duplicates.length) excluded['duplicate PRO (first row kept)'] = parse.duplicates.length
+    if (parse.rejected.length) excluded['rows that could not be read'] = parse.rejected.length
+    return assembleReport({ ...base, ...r, excluded, notes })
   }
 
   // AR and shipments read the staged full export.

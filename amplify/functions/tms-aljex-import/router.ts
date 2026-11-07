@@ -63,6 +63,12 @@ import {
   type ReconSignoff,
 } from '../../../src/lib/aljexReconcile'
 import { buildReconReport } from './reconcileEntity'
+import { detectFileKind, fileKindOfLayoutId, FILE_KIND_LABEL, refusedHeaders, type FileKind } from '../../../src/lib/aljex/fileKinds'
+import { parseCsvRows } from '../../../src/lib/aljex/layouts/apAging'
+import { SENSITIVE_COLUMNS_MESSAGE } from '../../../src/lib/aljex/sensitiveColumns'
+import { MemoryStore } from './engine/memoryStore'
+import { PROD_SUFFIX } from './engine/tables'
+import { FILE_ACTIONS, runFileImport, type FileRunResult } from './fileImports'
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
@@ -90,6 +96,11 @@ export const ACTIONS: AljexImportAction[] = [
   'IMPORT_SAMPLE',
   'IMPORT_LEGACY_ROW',
   'IMPORT_STEP',
+  'IMPORT_CUSTOMERS_MASTER',
+  'IMPORT_CARRIERS_MASTER',
+  'IMPORT_AP_FILES',
+  'IMPORT_AR_FILE',
+  'IMPORT_ACTIVE_SHIPMENTS_CHECK',
 ]
 
 /** A RUNNING job whose heartbeat is older than this is stalled and may be resumed. */
@@ -413,6 +424,8 @@ export function createRouter(deps: RouterDeps): Router {
     const job = await getJob(requireStr(input, 'jobId'))
     if (job.kind === 'MCP_SYNC') throw new RouterError('That job is a carrier sync, not an import')
     if (job.status !== 'STAGING' || job.phase !== 'UPLOAD') throw new RouterError(`Job is ${job.status}/${job.phase ?? '-'}; staging starts only from a fresh upload`)
+    const fileKind = fileKindOfLayoutId(job.layoutId)
+    if (fileKind) return stageFile(job, fileKind)
     const key = `imports/source/${job.id}/${job.fileName}`
     const head = await deps.headObject(key)
     if (!head) throw new RouterError('The uploaded file is not in the bucket yet')
@@ -840,6 +853,105 @@ export function createRouter(deps: RouterDeps): Router {
   }
 
 
+  // ── per-file imports (Step AW E1/E3): customers, carriers, AP aging + expected, AR, active-shipments check ──
+
+  /** The Lambda writes only its own stack's tables; production's are refused here (the offline CLI has its own gate). */
+  function assertNotProduction(): void {
+    for (const name of Object.values(store.tables)) {
+      if (name.includes(PROD_SUFFIX)) throw new RouterError(`Refusing to import into a production table (${name})`)
+    }
+  }
+
+  const sourceKey = (job: AljexImportJob): string => `imports/source/${job.id}/${job.fileName}`
+
+  /** STAGE of a per-file kind: header check only (no chunks, no worker). A file with a sensitive column is refused and blanked. */
+  async function stageFile(job: AljexImportJob, kind: FileKind): Promise<Json> {
+    const key = sourceKey(job)
+    const head = await deps.headObject(key)
+    if (!head) throw new RouterError('The uploaded file is not in the bucket yet')
+    const expected = Number(job.options?.sizeBytes ?? 0)
+    if (expected && head.size !== expected) throw new RouterError(`Uploaded ${head.size} bytes but the browser announced ${expected}; upload again`)
+    const text = await deps.getText(key)
+    if (text == null) throw new RouterError('The uploaded file is not in the bucket yet')
+    const rows = parseCsvRows(text)
+    const headers = rows[0] ?? []
+    const refused = refusedHeaders(kind, headers)
+    const now = deps.now()
+    let error: string | null = null
+    if (refused.length > 0) {
+      error = `${SENSITIVE_COLUMNS_MESSAGE} Columns: ${refused.join(', ')}`
+      // The presigned PUT already stored it: blank the object so the sensitive cells are not kept.
+      await deps.putText(key, '')
+    } else if (detectFileKind(headers) !== kind) {
+      error = `The file is not a ${FILE_KIND_LABEL[kind]}: its columns do not match that layout`
+    }
+    const patch: EngineRow = error
+      ? { status: 'FAILED', error, finishedAt: now }
+      : { status: 'READY', phase: 'STAGE', stageHash: job.fileHash ?? null, rowCount: rows.length - 1, startedAt: now, heartbeatAt: now, error: null }
+    if (!(await flip(job, ['STAGING'], patch))) throw new RouterError('The job changed while starting; refresh and try again')
+    return { job: await decorate(await getJob(job.id)) }
+  }
+
+  const REVIEW_CAP = 500
+
+  async function fileImportAction(actionName: string, input: Json, caller: Caller): Promise<Json> {
+    const spec = FILE_ACTIONS[actionName]
+    if (input.mode != null && input.mode !== 'PLAN' && input.mode !== 'APPLY') throw new RouterError('mode must be PLAN or APPLY')
+    const apply = input.mode === 'APPLY'
+    const idKeys: Partial<Record<FileKind, string>> = actionName === 'IMPORT_AP_FILES' ? { AP_AGING: 'agingJobId', AP_EXPECTED: 'expectedJobId' } : { [spec.kinds[0]]: 'jobId' }
+    const jobs: Array<{ kind: FileKind; job: AljexImportJob }> = []
+    for (const kind of spec.kinds) {
+      const id = str(input, idKeys[kind] as string)
+      if (!id) continue
+      const job = await getJob(id)
+      if (job.kind !== 'IMPORT' || fileKindOfLayoutId(job.layoutId) !== kind) throw new RouterError(`Job ${id} is not an uploaded ${FILE_KIND_LABEL[kind]}`)
+      if (!['READY', 'PLANNED', 'APPLIED'].includes(job.status)) throw new RouterError(`The ${FILE_KIND_LABEL[kind]} job is ${job.status}; upload and stage it first`)
+      if (apply && job.status === 'READY') throw new RouterError(`Run the dry run (mode PLAN) of the ${FILE_KIND_LABEL[kind]} before applying it`)
+      jobs.push({ kind, job })
+    }
+    if (jobs.length === 0) throw new RouterError(`${Object.values(idKeys).join(' or ')} is required`)
+    assertNotProduction()
+    const options = sanitizeOptions(input.options, deps.devStack, false)
+    if (apply && !options.liveTag) throw new RouterError('Applying needs the confirmation tag (options.liveTag)')
+    const cutoff = await cutoffDay(input)
+
+    const texts: Partial<Record<FileKind, string>> = {}
+    for (const { kind, job } of jobs) {
+      const text = await deps.getText(sourceKey(job))
+      if (text == null) throw new RouterError(`The ${FILE_KIND_LABEL[kind]} file is not in the bucket`)
+      const refused = refusedHeaders(kind, parseCsvRows(text)[0] ?? [])
+      if (refused.length > 0) throw new RouterError(`${SENSITIVE_COLUMNS_MESSAGE} Columns: ${refused.join(', ')}`)
+      texts[kind] = text
+    }
+    const primary = jobs[0].job
+    const rerun = apply && jobs.some((j) => j.job.status === 'APPLIED')
+    const runId = apply ? primary.id : `${primary.id}-plan`
+    // PLAN runs the same code over an overlay: reads see the target, writes stay in memory.
+    const target: EngineStore = apply ? store : new MemoryStore({ tables: store.tables, base: store, now: () => deps.now() })
+    let result: FileRunResult
+    try {
+      result = await runFileImport(target, spec.action, { runId, cutoff, texts })
+    } catch (err) {
+      throw new RouterError(err instanceof Error ? err.message : String(err))
+    }
+    const now = deps.now()
+    const reportPrefix = `imports/runs/${runId}/`
+    for (const { job } of jobs) {
+      const patch: EngineRow = apply
+        ? { status: 'APPLIED', phase: 'DONE', target: 'LIVE', liveTag: options.liveTag ?? null, entityCounts: result.counts, reportPrefix, error: null, finishedAt: now, appliedAt: now, appliedBy: caller.email, options: { ...(job.options ?? {}), cutoffDate: cutoff, liveTag: options.liveTag ?? null } }
+        : { status: job.status === 'APPLIED' ? 'APPLIED' : 'PLANNED', phase: job.status === 'APPLIED' ? job.phase ?? 'DONE' : 'PLAN', entityCounts: job.status === 'APPLIED' ? job.entityCounts ?? null : result.counts, ...(job.status === 'APPLIED' ? {} : { reportPrefix, options: { ...(job.options ?? {}), cutoffDate: cutoff } }) }
+      if (!(await flip(job, apply ? ['PLANNED', 'APPLIED'] : ['READY', 'PLANNED', 'APPLIED'], patch))) throw new RouterError('The job changed while running; refresh and try again')
+    }
+    await audit(caller, primary.id, `${actionName}_${apply ? 'APPLY' : 'PLAN'}`, { jobIds: jobs.map((j) => j.job.id), cutoff, rerun, counts: result.counts, liveTag: options.liveTag ?? null })
+    return {
+      job: await decorate(await getJob(primary.id)),
+      mode: apply ? 'APPLY' : 'PLAN',
+      rerun,
+      reportPrefix,
+      result: { summary: result.summary, counts: result.counts, reconcile: result.reconcile, files: result.files, review: result.review.slice(0, REVIEW_CAP), reviewTotal: result.review.length },
+    }
+  }
+
   // ── reconciliation (Step AW E.2) ─────────────────────────────────────────
 
   const reconFile = (id: string, name: string): string => `imports/runs/${id}/${name}`
@@ -1161,6 +1273,12 @@ export function createRouter(deps: RouterDeps): Router {
       case 'IMPORT_SYNC_CARRIERS': return syncCarriers(input, caller)
       case 'IMPORT_SAMPLE': return sample(input)
       case 'IMPORT_LEGACY_ROW': return legacyRow(input)
+      case 'IMPORT_CUSTOMERS_MASTER':
+      case 'IMPORT_CARRIERS_MASTER':
+      case 'IMPORT_AP_FILES':
+      case 'IMPORT_AR_FILE':
+      case 'IMPORT_ACTIVE_SHIPMENTS_CHECK':
+        return fileImportAction(action, input, caller)
       case 'IMPORT_STEP': {
         // One bounded slice for the CLI/tests: same runSlice, caller-chosen budget (≤ 20 s).
         const id = requireStr(input, 'jobId')

@@ -5,7 +5,7 @@ import type { CanonicalRow } from '../../../../src/lib/aljex/canonical'
 import { selectedCarriers } from './directory'
 import { apFromRow } from './facts'
 import { invoiceMath } from './memos'
-import { main, parseArgs, parseSlice, parseTarget } from './cli'
+import { liveTableSet, main, parseArgs, parseSlice, parseTarget } from './cli'
 import { makeFixture, makeStore } from './testKit'
 import { MemoryStore } from './memoryStore'
 import { assertTargets, DEV_SUFFIX, PROD_SUFFIX, productionPolicy, tableSetFor, TargetRefused } from './tables'
@@ -172,6 +172,47 @@ describe('invoice math with memo adjustments (DECIDED-1)', () => {
 
   it('does not invent a residual when the load has no Bal Due', () => {
     expect(invoiceMath(load({ invoice: 100_00, paid: 0, bal: null }), 10_00)).toMatchObject({ residualCents: 0, totalCents: 110_00, balanceCents: 110_00 })
+  })
+})
+
+describe("the Lambda's own stack suffix (dev / rehearsal branch)", () => {
+  const REHEARSAL = 'abcd1234efgh5678ijkl9012mn-NONE'
+  const job = { target: 'LIVE' as const, targetTag: null, liveTag: 'REHEARSAL-1' }
+  const rehearsal = tableSetFor(REHEARSAL, REHEARSAL)
+  const envOf = (suffix: string, flag: string | null = 'true') => ({ BCAT_DEV_STACK: flag ?? undefined, ORDER_TABLE_NAME: `Order-${suffix}`, LOAD_TABLE_NAME: `Load-${suffix}` })
+
+  it('accepts the stack the Lambda runs on, and its -rh siblings, only with BCAT_DEV_STACK=true', () => {
+    expect(() => assertTargets(rehearsal, rehearsal, job, undefined, envOf(REHEARSAL))).not.toThrow()
+    const rh = tableSetFor(REHEARSAL, `${REHEARSAL}-rhabc`)
+    expect(() => assertTargets(rehearsal, rh, { ...job, target: 'REHEARSAL', targetTag: 'abc' }, undefined, envOf(REHEARSAL))).not.toThrow()
+    expect(() => assertTargets(rehearsal, rehearsal, job, undefined, envOf(REHEARSAL, null))).toThrow(TargetRefused)
+    expect(() => assertTargets(rehearsal, rehearsal, job, undefined, envOf(REHEARSAL, 'false'))).toThrow(TargetRefused)
+  })
+
+  it('a stack other than the one the Lambda runs on is still refused', () => {
+    expect(() => assertTargets(rehearsal, rehearsal, job, undefined, envOf('zzzz1234efgh5678ijkl9012mn-NONE'))).toThrow(/not a dev-stack table/)
+    expect(() => assertTargets(rehearsal, rehearsal, job, undefined, { BCAT_DEV_STACK: 'true', ORDER_TABLE_NAME: `Order-${REHEARSAL}`, LOAD_TABLE_NAME: 'Load-other-NONE' })).toThrow(TargetRefused)
+  })
+
+  it('the offline CLI follows the selected stack: its live tables are the rehearsal branch tables, dev otherwise', () => {
+    const saved = { f: process.env.BCAT_DEV_STACK, o: process.env.ORDER_TABLE_NAME, l: process.env.LOAD_TABLE_NAME }
+    try {
+      expect(liveTableSet().order).toBe(`Order-${DEV_SUFFIX}`)
+      Object.assign(process.env, { BCAT_DEV_STACK: 'true', ORDER_TABLE_NAME: `Order-${REHEARSAL}`, LOAD_TABLE_NAME: `Load-${REHEARSAL}` })
+      expect(liveTableSet().carrierBill).toBe(`CarrierBill-${REHEARSAL}`)
+    } finally {
+      for (const [k, v] of [['BCAT_DEV_STACK', saved.f], ['ORDER_TABLE_NAME', saved.o], ['LOAD_TABLE_NAME', saved.l]] as const) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
+  it('production is refused in every mode, even when the Lambda claims it as its own stack', () => {
+    const prod = tableSetFor(PROD_SUFFIX, PROD_SUFFIX)
+    expect(() => assertTargets(prod, prod, job, undefined, envOf(PROD_SUFFIX))).toThrow(/production table/)
+    expect(() => assertTargets(prod, prod, job, undefined, envOf(PROD_SUFFIX, 'false'))).toThrow(/production table/)
+    expect(() => assertTargets(rehearsal, prod, job, undefined, envOf(REHEARSAL))).toThrow(/production table/)
   })
 })
 

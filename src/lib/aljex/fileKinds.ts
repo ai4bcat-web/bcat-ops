@@ -9,6 +9,7 @@ import { AP_AGING_LAYOUT_ID, parseApAging } from './layouts/apAging'
 import { AP_EXPECTED_LAYOUT_ID, parseApExpected } from './layouts/apExpected'
 import { ACTIVE_SHIPMENTS_LAYOUT_ID, parseActiveShipments } from './layouts/activeShipments'
 import { AR_REPORT_LAYOUT_ID, parseArReport } from './layouts/arReport'
+import type { AljexFileImportAction } from '../../types/tms'
 import { normalizeHeader } from './layout'
 import { findSensitiveHeaders } from './sensitiveColumns'
 
@@ -61,15 +62,13 @@ export function detectFileKind(headers: readonly string[]): FileKind | null {
   return null
 }
 
-const norm = (h: string): string => normalizeHeader(h)
-
 /**
  * The headers of this file that must be refused before storage: the shared sensitive set (Fed/SS #, Bank Account,
  * Routing #, Web Password) plus, for the carrier list, `Account #` (in that export it carries the tax-id shape).
  */
 export function refusedHeaders(kind: FileKind | null, headers: readonly string[]): string[] {
   const found = new Set(findSensitiveHeaders(headers))
-  if (kind === 'CARRIERS_MASTER') for (const h of headers) if (norm(h) === norm('Account #')) found.add(h)
+  if (kind === 'CARRIERS_MASTER') for (const h of headers) if (normalizeHeader(h) === normalizeHeader('Account #')) found.add(h)
   return headers.filter((h) => found.has(h))
 }
 
@@ -82,4 +81,14 @@ export function stripRefusedColumns(kind: FileKind, headers: readonly string[], 
     rows: rows.map((r) => keep.map((i) => String(r[i] ?? ''))),
     dropped: headers.filter((h) => refused.has(h)),
   }
+}
+
+/** The router action that runs a kind (AP aging and AP expected run together under IMPORT_AP_FILES). */
+export const FILE_KIND_ACTION: Record<FileKind, AljexFileImportAction> = {
+  CUSTOMERS_MASTER: 'IMPORT_CUSTOMERS_MASTER',
+  CARRIERS_MASTER: 'IMPORT_CARRIERS_MASTER',
+  AP_AGING: 'IMPORT_AP_FILES',
+  AP_EXPECTED: 'IMPORT_AP_FILES',
+  ACTIVE_SHIPMENTS: 'IMPORT_ACTIVE_SHIPMENTS_CHECK',
+  AR_REPORT: 'IMPORT_AR_FILE',
 }

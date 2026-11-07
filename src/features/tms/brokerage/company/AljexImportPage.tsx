@@ -16,13 +16,14 @@ import {
   applyAljexImport, cancelAljexImport, getAljexImport, getAljexProfile, listAljexImports, pauseAljexImport,
   planAljexImport, prepareAljexImport, resumeAljexImport, sampleAljexImport, saveAljexProfile, stageAljexImport,
 } from '@/lib/apiClient'
-import { detectCarriersLayout } from '@/lib/aljex/layouts/carriers'
-import { detectCustomersLayout } from '@/lib/aljex/layouts/customers'
+import { FILE_KIND_LABEL, FILE_KIND_LAYOUT_ID, detectFileKind, fileKindOfLayoutId, refusedHeaders } from '@/lib/aljex/fileKinds'
+import type { FileKind } from '@/lib/aljex/fileKinds'
 import { DEFAULT_ALJEX_PROFILE } from '@/lib/aljex/profile'
 import type { AljexProfile } from '@/lib/aljex/profile'
-import { SENSITIVE_COLUMNS_MESSAGE, findSensitiveHeaders } from '@/lib/aljex/sensitiveColumns'
+import { SENSITIVE_COLUMNS_MESSAGE } from '@/lib/aljex/sensitiveColumns'
 import type { AljexImportJob, AljexMappingProfileBody, AljexSampleRow } from '@/types/tms'
 import { AljexApplyPanel } from './components/AljexApplyPanel'
+import { AljexFileImportPanel } from './components/AljexFileImportPanel'
 import { AljexJobList } from './components/AljexJobList'
 import { AljexProfileEditor } from './components/AljexProfileEditor'
 import { AljexReconcilePanel } from './components/AljexReconcilePanel'
@@ -43,8 +44,8 @@ interface PickedFile {
   layout: LayoutDetection
   /** Sensitive headers found (names only; no cell is read). Any entry refuses the upload. */
   sensitive: string[]
-  /** The per-file directory layout the header matches, if any (customers / carriers lists). */
-  directoryLayout: 'customers' | 'carriers' | null
+  /** The per-file layout the header matches (customers, carriers, AP, AR, active shipments), if any. */
+  fileKind: FileKind | null
 }
 
 export function AljexImportPage() {
@@ -135,11 +136,13 @@ export function AljexImportPage() {
     setReading(true)
     setError(null)
     setPicked(null)
+    // A per-file job on screen gives way to the stepper again.
+    if (fileKindOfLayoutId(jobRef.current?.layoutId)) { setJob(null); setStep(0) }
     try {
       const [head, hash] = await Promise.all([file.slice(0, HEADER_BYTES).text(), file.arrayBuffer().then(sha256Hex)])
       const headers = parseHeaderRecord(head)
-      const directoryLayout = detectCustomersLayout(headers).matches ? 'customers' : detectCarriersLayout(headers).matches ? 'carriers' : null
-      setPicked({ file, hash, layout: detectLayout(headers), sensitive: findSensitiveHeaders(headers), directoryLayout })
+      const fileKind = detectFileKind(headers)
+      setPicked({ file, hash, layout: detectLayout(headers), sensitive: refusedHeaders(fileKind, headers), fileKind })
     } catch (e) {
       setError(messageOf(e))
     } finally {
@@ -150,7 +153,7 @@ export function AljexImportPage() {
   const upload = () => run('upload', async () => {
     if (!picked) return
     const { file, hash, layout } = picked
-    const { job: created, uploadUrl } = await prepareAljexImport({ fileName: file.name, fileHash: hash, sizeBytes: file.size, headerCount: layout.headerCount })
+    const { job: created, uploadUrl } = await prepareAljexImport({ fileName: file.name, fileHash: hash, sizeBytes: file.size, headerCount: layout.headerCount, ...(picked.fileKind ? { layoutId: FILE_KIND_LAYOUT_ID[picked.fileKind] } : {}) })
     adopt(created)
     setUploadFraction(0)
     await putWithProgress(uploadUrl, file, setUploadFraction)
@@ -226,6 +229,9 @@ export function AljexImportPage() {
   const stage = job?.stage ?? null
   const sampleColumns = sample && sample.length ? [...new Set(sample.flatMap((r) => Object.keys(r.fields)))] : []
 
+  const jobFileKind = fileKindOfLayoutId(job?.layoutId)
+  const shownStep = jobFileKind ? 0 : step
+
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <SettingsCard
@@ -235,7 +241,7 @@ export function AljexImportPage() {
       >
         <Stack>
           {error ? <ErrorText>{error}</ErrorText> : null}
-          <ol className="tms-stepper" style={{ display: 'flex', gap: 8, listStyle: 'none', padding: 0, margin: 0, flexWrap: 'wrap' }} aria-label="Import steps">
+          {jobFileKind ? null : <ol className="tms-stepper" style={{ display: 'flex', gap: 8, listStyle: 'none', padding: 0, margin: 0, flexWrap: 'wrap' }} aria-label="Import steps">
             {STEPS.map((label, i) => (
               <li key={label}>
                 <TmsButton
@@ -249,9 +255,9 @@ export function AljexImportPage() {
                 </TmsButton>
               </li>
             ))}
-          </ol>
+          </ol>}
 
-          {step === 0 ? (
+          {shownStep === 0 ? (
             <Panel>
               <GroupLabel>File</GroupLabel>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -271,25 +277,25 @@ export function AljexImportPage() {
               {picked ? (
                 <>
                   <p className="tms-field-hint" data-testid="file-hash">SHA-256 {picked.hash.slice(0, 16)}… · {(picked.file.size / 1024 / 1024).toFixed(1)} MB</p>
-                  <p data-testid="layout-detection">
+                  {picked.fileKind ? null : <p data-testid="layout-detection">
                     <TmsBadge tone={picked.layout.matches ? 'green' : 'red'}>{picked.layout.matches ? 'Layout recognised' : 'Layout not recognised'}</TmsBadge>{' '}
                     Aljex full export · {picked.layout.headerCount} columns ·{' '}
                     {picked.layout.matches
                       ? 'matches the saved layout'
                       : `does not match the saved layout (${picked.layout.expectedCount} columns expected${picked.layout.mismatchedColumns.length ? `; columns ${picked.layout.mismatchedColumns.join(', ')} differ` : ''})`}
-                  </p>
-                  {picked.directoryLayout ? (
-                    <p data-testid="directory-layout"><TmsBadge tone="turquoise">Aljex {picked.directoryLayout} list recognised</TmsBadge>{' '}Customer and carrier lists are loaded with the directory import (dry run, then apply), not through this full-export stepper.</p>
+                  </p>}
+                  {picked.fileKind ? (
+                    <p data-testid="directory-layout"><TmsBadge tone="turquoise">{FILE_KIND_LABEL[picked.fileKind]} recognised</TmsBadge>{' '}Upload it, then run the dry run and the apply below the file.</p>
                   ) : null}
                   {picked.sensitive.length > 0 ? (
                     <TmsAlert tone="red" title="Sensitive columns found: upload refused">
                       <span data-testid="sensitive-refusal">{SENSITIVE_COLUMNS_MESSAGE} Columns: {picked.sensitive.join(', ')}.</span>
                     </TmsAlert>
                   ) : null}
-                  <TmsButton variant="primary" disabled={!picked.layout.matches || picked.sensitive.length > 0 || busy != null} onClick={() => void upload()}>
+                  <TmsButton variant="primary" disabled={(!picked.layout.matches && picked.fileKind == null) || picked.sensitive.length > 0 || busy != null} onClick={() => void upload()}>
                     {busy === 'upload' ? 'Uploading…' : 'Upload and stage'}
                   </TmsButton>
-                  {!picked.layout.matches ? <Hint>The importer only reads the layout it knows. Export the full Aljex file again, or ask for a new layout profile.</Hint> : null}
+                  {!picked.layout.matches && picked.fileKind == null ? <Hint>The importer only reads the layout it knows. Export the full Aljex file again, or ask for a new layout profile.</Hint> : null}
                 </>
               ) : null}
               {uploadFraction != null ? (
@@ -302,7 +308,9 @@ export function AljexImportPage() {
             </Panel>
           ) : null}
 
-          {step === 1 && job ? (
+          {jobFileKind && job ? <AljexFileImportPanel job={job} jobs={jobs} onJob={adopt} /> : null}
+
+          {shownStep === 1 && job ? (
             <>
               {blocking.length > 0 ? (
                 <TmsAlert tone="red" title={`${blocking.length} unmapped value${blocking.length === 1 ? '' : 's'} block the import`}>
@@ -322,7 +330,7 @@ export function AljexImportPage() {
             </>
           ) : null}
 
-          {step === 2 && job ? (
+          {shownStep === 2 && job ? (
             <Panel>
               <GroupLabel>What the file contains</GroupLabel>
               {stage ? (
@@ -366,7 +374,7 @@ export function AljexImportPage() {
             </Panel>
           ) : null}
 
-          {step === 3 && job ? (
+          {shownStep === 3 && job ? (
             <Panel>
               <GroupLabel>Plan (dry run: reads the target, writes nothing)</GroupLabel>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -401,7 +409,7 @@ export function AljexImportPage() {
             </Panel>
           ) : null}
 
-          {step === 4 && job ? (
+          {shownStep === 4 && job ? (
             <AljexApplyPanel
               job={job} now={now} target={target} tag={tag} onTarget={setTarget} onTag={setTag}
               blockReason={applyReason} rehearsalGate={job.rehearsalGate} synthetic={synthetic} busy={busy != null}
@@ -410,7 +418,7 @@ export function AljexImportPage() {
             />
           ) : null}
 
-          {step === 5 && job ? <AljexReconcilePanel job={job} onJob={adopt} /> : null}
+          {shownStep === 5 && job ? <AljexReconcilePanel job={job} onJob={adopt} /> : null}
         </Stack>
       </SettingsCard>
 

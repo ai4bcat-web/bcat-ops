@@ -237,9 +237,8 @@ export interface FieldChange {
 const blank = (v: unknown): boolean => v == null || v === '' || (Array.isArray(v) && v.length === 0)
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
 
-/** What the audit may show of a value: the tax id is masked, policies are summarised. */
+/** What the audit may show of a value: policies are summarised (the tax id never reaches a patch). */
 export function auditValue(key: string, value: unknown): unknown {
-  if (key === 'einNumber' && typeof value === 'string') return `***${value.replace(/\D/g, '').slice(-4)}`
   if (key === 'insurancePolicies' && Array.isArray(value)) {
     return value.map((p: Row) => `${String(p.type)} limit=${p.limitCents ?? '-'} exp=${String(p.expiresAt ?? '-').slice(0, 10)}`)
   }
@@ -264,7 +263,7 @@ export function mapProfileToCarrier(existing: Row, profile: McpProfile): { patch
   if (profile.email) want.email = profile.email
   if (profile.website) want.website = profile.website
   if (profile.address) want.address = profile.address
-  if (profile.taxId) want.einNumber = profile.taxId
+  // The tax id never rides the Carrier patch: mcpPull hands `profile.taxId` to the encrypted vault (deps.setTaxId).
   if (profile.powerUnits) want.powerUnits = profile.powerUnits
   if (profile.authorityGrantedAt) want.authorityGrantedAt = profile.authorityGrantedAt
   if (profile.safetyRatingAt) want.safetyRatingAt = profile.safetyRatingAt

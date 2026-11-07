@@ -89,6 +89,8 @@ export interface ArReportInvoice {
   billToAccount: string
   /** The bill-to party is not the customer (different account, or no accounts and different names). */
   billToDiffers: boolean
+  /** The `Bill to` text is not the `Customer` text as printed (Aljex's own "62 invoices bill a different party" count; most are formatting only). */
+  billToNameDiffers: boolean
   billToAddress: ArBillToAddress | null
   customerRef: string
   /** `Customer Terms` (days) as printed, null when blank. */
@@ -112,6 +114,8 @@ export interface ArReportParse {
   previousPaidCents: number
   partialCount: number
   billToDiffersCount: number
+  /** Rows whose `Bill to` text differs from `Customer` as printed (the figure Ryne quotes: 62). `billToDiffersCount` compares accounts. */
+  billToNameDiffersCount: number
   termsCounts: Record<string, number>
   revenueTypeCounts: Record<string, number>
   findings: LayoutFinding[]
@@ -152,6 +156,7 @@ export function parseArReport(rows: string[][]): ArReportParse {
     previousPaidCents: 0,
     partialCount: 0,
     billToDiffersCount: 0,
+    billToNameDiffersCount: 0,
     termsCounts: {},
     revenueTypeCounts: {},
     findings: [],
@@ -240,6 +245,7 @@ export function parseArReport(rows: string[][]): ArReportParse {
       billToName,
       billToAccount,
       billToDiffers,
+      billToNameDiffers: billToName !== customerName,
       billToAddress: addr.street || addr.city || addr.state || addr.zip ? addr : null,
       customerRef: cell(r, at.ref),
       customerTermsDays: termsDays,
@@ -258,6 +264,7 @@ export function parseArReport(rows: string[][]): ArReportParse {
     out.previousPaidCents += previous
     if (previous > 0) out.partialCount += 1
     if (billToDiffers) out.billToDiffersCount += 1
+    if (inv.billToNameDiffers) out.billToNameDiffersCount += 1
     const t = termsDays == null ? 'none' : String(termsDays)
     out.termsCounts[t] = (out.termsCounts[t] ?? 0) + 1
     const rt = inv.revenueType || 'none'

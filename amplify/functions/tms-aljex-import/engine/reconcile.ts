@@ -20,6 +20,8 @@ import { AP_AGING_BUCKETS, AP_AGING_BUCKET_LABEL, apAgingBucketOfDays, centsText
 import { DEFAULT_ALJEX_CUTOFF } from '../../../../src/lib/aljex/layouts/apExpected'
 import { apBillId, loadApCarrierMap } from './apFiles'
 import { daysBetween } from './util'
+import { AR_BUCKETS, AR_BUCKET_LABEL, type ArBucket, type ArReportParse } from '../../../../src/lib/aljex/layouts/arReport'
+import { arBcatBucket, arEffectiveDue, isArDanisco, loadArCustomerMap, type ArCustomer } from './arFile'
 
 export const runsPrefix = (jobId: string): string => `imports/runs/${jobId}/`
 export const batchFindingsKey = (jobId: string, chunk: number, offset: number): string => `imports/jobs/${jobId}/findings-${chunk}-${offset}.json`
@@ -499,3 +501,306 @@ export async function reconcileAp(store: EngineStore, jobId: string, aging: ApAg
   return result
 }
 
+
+// ── AR report reconciliation (Step AW E3; consumed by the router's IMPORT_RECONCILE_ENTITY for entity AR) ───────────
+
+export type ArReconcileOutcome = 'MATCHED' | 'APPROVED' | 'MISMATCH' | 'ALJEX_ONLY' | 'BCAT_ONLY'
+
+/** Who approved a difference without a person: a recorded policy decision, never a staff user. */
+export const DANISCO_APPROVAL = { approver: 'POLICY: Ryne round 4', note: 'Danisco 120-day redate (Ryne decision, round 4)' } as const
+
+export interface ArReconcileRow {
+  /** Stable decision key (`IMPORT_DECIDE`): the invoice number (PRO) for file invoices, the invoice id for BCAT-only ones. */
+  key: string
+  outcome: ArReconcileOutcome
+  pro: string
+  customerAccount: string
+  customerName: string
+  billToAccount: string
+  billToName: string
+  fileCents: number | null
+  bcatCents: number | null
+  diffCents: number | null
+  /** Aljex due date vs the BCAT due date. */
+  fileDue: string
+  bcatDue: string
+  fileBucket: ArBucket | ''
+  bcatBucket: ArBucket | ''
+  /** Customer billing method (file side) vs the invoice's factored flag (BCAT side). */
+  fileSplit: string
+  bcatSplit: string
+  /** The pre-recorded decision when the only difference is the Danisco redate. */
+  approval: typeof DANISCO_APPROVAL | null
+  /** What differs on a MISMATCH / APPROVED row, or why a row is one-sided. */
+  notes: string[]
+}
+
+export interface ArReconcileGroup {
+  key: string
+  label: string
+  fileCents: number
+  bcatCents: number
+  diffCents: number
+}
+
+/** A bucket line also says how much of its difference is the approved Danisco redate shift. */
+export interface ArReconcileBucketGroup extends ArReconcileGroup {
+  approvedShiftCents: number
+  unexplainedCents: number
+}
+
+export interface ArReconcileResult {
+  jobId: string
+  generatedAt: string
+  asOf: string
+  counts: Record<ArReconcileOutcome, number>
+  /** Σ AR report open amounts, Σ open BCAT balance of the same invoices, Σ every open BCAT invoice. */
+  fileCents: number
+  bcatMatchedCents: number
+  bcatOpenAllCents: number
+  /** Σ Balance Due of the Aljex customer list (customer level), when supplied. */
+  customerListBalanceDueCents: number | null
+  bridge: ImportBridgeLine[]
+  byCustomer: ArReconcileGroup[]
+  byBillTo: ArReconcileGroup[]
+  byBucket: ArReconcileBucketGroup[]
+  bySplit: ArReconcileGroup[]
+  redated: { count: number; openCents: number; approval: typeof DANISCO_APPROVAL }
+  rows: ArReconcileRow[]
+  /** Every row is matched or approved (any other difference is the operator's to decide). */
+  allMatched: boolean
+  files: string[]
+}
+
+type GroupAcc = Map<string, { label: string; file: number; bcat: number }>
+
+const arGroupOf = (m: GroupAcc): ArReconcileGroup[] =>
+  [...m.entries()]
+    .map(([key, v]) => ({ key, label: v.label, fileCents: v.file, bcatCents: v.bcat, diffCents: v.bcat - v.file }))
+    .sort((a, b) => b.fileCents + b.bcatCents - (a.fileCents + a.bcatCents) || a.key.localeCompare(b.key))
+
+const splitLabel = (method: string): string => (method === 'FACTOR' ? 'Factored' : method === 'MANUAL' ? 'Manual' : 'No billing method')
+
+/**
+ * Compares the AR report with the open invoices in the TABLES (never engine memory): open AR by invoice, customer,
+ * bill-to party, aging bucket and factored/manual split, to the cent. Equality is not required: a difference is left
+ * open or approved by the decision flow. The Danisco 120-day redate is a pre-approved due-date difference; the bucket
+ * shift it causes is shown as part of that approval so the dollars still tie.
+ */
+export async function reconcileAr(
+  store: EngineStore,
+  jobId: string,
+  report: ArReportParse,
+  opts: { asOf?: string; write?: boolean; customerListBalanceDueCents?: number } = {},
+): Promise<ArReconcileResult> {
+  const asOf = opts.asOf ?? DEFAULT_ALJEX_CUTOFF
+  const customers = await loadArCustomerMap(store)
+  const accountById = new Map<string, string>()
+  const customerById = new Map<string, ArCustomer>()
+  for (const [account, c] of customers) {
+    if (!accountById.has(c.id)) accountById.set(c.id, account)
+    customerById.set(c.id, c)
+  }
+  const invoices = await scanRows(store, 'invoice', ['id', 'number', 'customerId', 'customerName', 'balanceCents', 'paidCents', 'arOpen', 'dueAt', 'invoiceDate', 'billTo', 'factored'])
+  const byNumber = new Map<string, EngineRow>()
+  for (const i of invoices) {
+    const k = normalizePro(text(i.number))
+    if (!k) continue
+    const prior = byNumber.get(k)
+    if (!prior || (prior.arOpen !== 'OPEN' && i.arOpen === 'OPEN')) byNumber.set(k, i)
+  }
+  const bcatOpen = (i: EngineRow): number => (i.arOpen === 'OPEN' && typeof i.balanceCents === 'number' ? i.balanceCents : 0)
+  const billToOf = (i: EngineRow): { name: string; account: string } => {
+    const b = (i.billTo ?? {}) as { name?: unknown; aljexAccount?: unknown }
+    return { name: text(b.name), account: text(b.aljexAccount) }
+  }
+
+  const customerGroups: GroupAcc = new Map()
+  const billToGroups: GroupAcc = new Map()
+  const bucketGroups: GroupAcc = new Map(AR_BUCKETS.map((b) => [b, { label: AR_BUCKET_LABEL[b], file: 0, bcat: 0 }]))
+  const splitGroups: GroupAcc = new Map(['FACTOR', 'MANUAL', ''].map((m) => [m, { label: splitLabel(m), file: 0, bcat: 0 }]))
+  const shift: Record<ArBucket, number> = { D0_30: 0, D31_60: 0, D61_90: 0, D91_120: 0, D121_PLUS: 0 }
+  const add = (m: GroupAcc, key: string, label: string, side: 'file' | 'bcat', cents: number): void => {
+    const g = m.get(key) ?? m.set(key, { label, file: 0, bcat: 0 }).get(key)!
+    g[side] += cents
+  }
+
+  const rows: ArReconcileRow[] = []
+  const used = new Set<string>()
+  let bcatMatched = 0
+  let bcatPaidMatched = 0
+  const splitMatched = { FACTOR: { file: 0, bcat: 0 }, MANUAL: { file: 0, bcat: 0 } }
+  const redated = { count: 0, openCents: 0 }
+
+  for (const inv of report.invoices) {
+    const customer = customers.get(inv.customerAccount)
+    const danisco = isArDanisco(inv.customerAccount, customer)
+    const method = customer?.billingMethod ?? ''
+    const fileBucketCents = inv.bucketCents
+    const cand = byNumber.get(inv.proKey)
+    const customerKey = inv.customerAccount || `name:${nameKey(inv.customerName)}`
+    const billToKey = inv.billToAccount || `name:${nameKey(inv.billToName)}`
+    add(customerGroups, customerKey, inv.customerName, 'file', inv.openCents)
+    add(billToGroups, billToKey, inv.billToName, 'file', inv.openCents)
+    for (const b of AR_BUCKETS) if (fileBucketCents[b]) add(bucketGroups, b, AR_BUCKET_LABEL[b], 'file', fileBucketCents[b])
+    add(splitGroups, method, splitLabel(method), 'file', inv.openCents)
+    if (danisco) {
+      redated.count += 1
+      redated.openCents += inv.openCents
+    }
+    const base = {
+      key: inv.pro,
+      pro: inv.pro,
+      customerAccount: inv.customerAccount,
+      customerName: inv.customerName,
+      billToAccount: inv.billToAccount,
+      billToName: inv.billToName,
+      fileCents: inv.openCents,
+      fileDue: inv.dueDate,
+      fileBucket: inv.bucket,
+      fileSplit: method,
+    }
+    if (!cand) {
+      rows.push({ ...base, outcome: 'ALJEX_ONLY', bcatCents: null, diffCents: null, bcatDue: '', bcatBucket: '', bcatSplit: '', approval: null, notes: [customer ? 'no BCAT invoice for this PRO' : 'customer account not in BCAT; no BCAT invoice for this PRO'] })
+      continue
+    }
+    used.add(text(cand.id))
+    const bal = bcatOpen(cand)
+    bcatMatched += bal
+    bcatPaidMatched += typeof cand.paidCents === 'number' ? cand.paidCents : 0
+    const dueAt = text(cand.dueAt)
+    const bcatBucket = arBcatBucket(text(cand.invoiceDate) || inv.invoiceDate, dueAt, danisco, asOf)
+    const bcatCustomerKey = accountById.get(text(cand.customerId)) ?? `id:${text(cand.customerId)}`
+    const bt = billToOf(cand)
+    // A bill-to without an Aljex account (written by the big-export import) is compared by name.
+    const billToEqual = bt.account ? bt.account === inv.billToAccount : nameKey(bt.name) === nameKey(inv.billToName)
+    const bcatBillToKey = bt.account || (billToEqual ? billToKey : `name:${nameKey(bt.name)}`)
+    const bcatSplit = cand.factored === true ? 'FACTOR' : 'MANUAL'
+    add(customerGroups, bcatCustomerKey, inv.customerName, 'bcat', bal)
+    add(billToGroups, bcatBillToKey, bt.name || inv.billToName, 'bcat', bal)
+    add(bucketGroups, bcatBucket, AR_BUCKET_LABEL[bcatBucket], 'bcat', bal)
+    add(splitGroups, bcatSplit, splitLabel(bcatSplit), 'bcat', bal)
+    if (method === 'FACTOR' || method === 'MANUAL') {
+      splitMatched[method].file += inv.openCents
+      splitMatched[bcatSplit].bcat += bal
+    }
+
+    const notes: string[] = []
+    if (bal !== inv.openCents) notes.push('amount')
+    if ((typeof cand.paidCents === 'number' ? cand.paidCents : 0) !== inv.previousPaidCents) notes.push('previous payments')
+    if (customer && text(cand.customerId) !== customer.id) notes.push('customer')
+    if (!billToEqual) notes.push('bill-to')
+    if (customer && method && (cand.factored === true) !== (method === 'FACTOR')) notes.push('factored flag')
+    const expectedDue = arEffectiveDue(inv, danisco)
+    let dueApproved = false
+    if (dueAt !== inv.dueDate) {
+      if (danisco && dueAt === expectedDue) {
+        dueApproved = true
+        notes.push(`due date redated ${inv.dueDate} -> ${dueAt}`)
+        if (bcatBucket !== inv.bucket) {
+          notes.push(`bucket shift ${AR_BUCKET_LABEL[inv.bucket]} -> ${AR_BUCKET_LABEL[bcatBucket]}`)
+          shift[inv.bucket] -= bal
+          shift[bcatBucket] += bal
+        }
+      } else notes.push('due date')
+    }
+    const hardNotes = notes.filter((n) => !n.startsWith('due date redated') && !n.startsWith('bucket shift'))
+    if (!dueApproved && bcatBucket !== inv.bucket) notes.push('bucket')
+    const outcome: ArReconcileOutcome = hardNotes.length || notes.includes('bucket') ? 'MISMATCH' : dueApproved ? 'APPROVED' : 'MATCHED'
+    rows.push({ ...base, outcome, bcatCents: bal, diffCents: bal - inv.openCents, bcatDue: dueAt, bcatBucket, bcatSplit, approval: outcome === 'APPROVED' ? DANISCO_APPROVAL : null, notes })
+  }
+
+  let bcatOnly = 0
+  for (const i of invoices) {
+    if (i.arOpen !== 'OPEN' || used.has(text(i.id))) continue
+    const cents = bcatOpen(i)
+    bcatOnly += cents
+    const c = customerById.get(text(i.customerId))
+    const bt = billToOf(i)
+    const danisco = isArDanisco(accountById.get(text(i.customerId)) ?? '', c)
+    const bucket = arBcatBucket(text(i.invoiceDate) || asOf, text(i.dueAt) || asOf, danisco, asOf)
+    const split = i.factored === true ? 'FACTOR' : 'MANUAL'
+    add(customerGroups, accountById.get(text(i.customerId)) ?? `id:${text(i.customerId)}`, c?.name || text(i.customerName), 'bcat', cents)
+    add(billToGroups, bt.account || `name:${nameKey(bt.name)}`, bt.name, 'bcat', cents)
+    add(bucketGroups, bucket, AR_BUCKET_LABEL[bucket], 'bcat', cents)
+    add(splitGroups, split, splitLabel(split), 'bcat', cents)
+    rows.push({
+      key: text(i.id),
+      outcome: 'BCAT_ONLY',
+      pro: text(i.number),
+      customerAccount: accountById.get(text(i.customerId)) ?? '',
+      customerName: c?.name || text(i.customerName),
+      billToAccount: bt.account,
+      billToName: bt.name,
+      fileCents: null,
+      bcatCents: cents,
+      diffCents: null,
+      fileDue: '',
+      bcatDue: text(i.dueAt),
+      fileBucket: '',
+      bcatBucket: bucket,
+      fileSplit: '',
+      bcatSplit: split,
+      approval: null,
+      notes: ['open in BCAT, not in the AR report'],
+    })
+  }
+
+  const counts: Record<ArReconcileOutcome, number> = { MATCHED: 0, APPROVED: 0, MISMATCH: 0, ALJEX_ONLY: 0, BCAT_ONLY: 0 }
+  for (const r of rows) counts[r.outcome] += 1
+  const byBucket: ArReconcileBucketGroup[] = AR_BUCKETS.map((b) => {
+    const g = bucketGroups.get(b)!
+    return { key: b, label: g.label, fileCents: g.file, bcatCents: g.bcat, diffCents: g.bcat - g.file, approvedShiftCents: shift[b], unexplainedCents: g.bcat - g.file - shift[b] }
+  })
+  const customerList = opts.customerListBalanceDueCents ?? null
+  const bridge: ImportBridgeLine[] = [
+    line('arTotal', 'AR report open total vs open balance of the same invoices in BCAT', report.totalCents, bcatMatched),
+    line('arInvoiceMinusPayments', 'AR report: Invoice Amount minus Previous Payments vs the sum of the aging buckets', report.invoiceTotalCents - report.previousPaidCents, report.totalCents),
+    line('arPreviousPayments', 'AR report Previous Payments vs paid on the same invoices in BCAT', report.previousPaidCents, bcatPaidMatched),
+    ...byBucket.map((g) => line(`arBucket:${g.key}`, `AR ${g.label} days: file vs BCAT, after the approved Danisco redate shift`, g.fileCents, g.bcatCents - g.approvedShiftCents)),
+    line('arFactored', 'AR factored (customer billing method) vs factored invoices in BCAT', splitMatched.FACTOR.file, splitMatched.FACTOR.bcat),
+    line('arManual', 'AR manual (customer billing method) vs manual invoices in BCAT', splitMatched.MANUAL.file, splitMatched.MANUAL.bcat),
+    line('arOpenAll', 'AR report total vs every open invoice in BCAT (difference = BCAT-only open invoices)', report.totalCents, bcatMatched + bcatOnly),
+  ]
+  if (customerList != null) bridge.push(line('arCustomerList', 'AR report total vs the Aljex customer list Balance Due total (customer level, cross-check)', report.totalCents, customerList))
+
+  const files: Record<string, string> = {}
+  files['reconcile-ar.csv'] = [
+    csvLine(['outcome', 'pro', 'customer_account', 'bill_to_account', 'file_open', 'bcat_balance', 'difference', 'file_due', 'bcat_due', 'file_bucket', 'bcat_bucket', 'file_split', 'bcat_split', 'approval', 'notes']),
+    ...rows.map((r) => csvLine([r.outcome, r.pro, r.customerAccount, r.billToAccount, r.fileCents == null ? '' : centsText(r.fileCents), r.bcatCents == null ? '' : centsText(r.bcatCents), r.diffCents == null ? '' : centsText(r.diffCents), r.fileDue, r.bcatDue, r.fileBucket ? AR_BUCKET_LABEL[r.fileBucket] : '', r.bcatBucket ? AR_BUCKET_LABEL[r.bcatBucket] : '', r.fileSplit, r.bcatSplit, r.approval ? `${r.approval.approver}: ${r.approval.note}` : '', r.notes.join('; ')])),
+  ].join('\n')
+  const groupCsv = (kind: string, groups: ArReconcileGroup[]): string[] => groups.map((g) => csvLine([kind, g.key, g.label, centsText(g.fileCents), centsText(g.bcatCents), centsText(g.diffCents)]))
+  files['reconcile-ar-totals.csv'] = [
+    csvLine(['group', 'key', 'name', 'file', 'bcat', 'difference']),
+    ...groupCsv('customer', arGroupOf(customerGroups)),
+    ...groupCsv('bill_to', arGroupOf(billToGroups)),
+    ...groupCsv('bucket', byBucket),
+    ...groupCsv('split', arGroupOf(splitGroups)),
+  ].join('\n')
+
+  const result: ArReconcileResult = {
+    jobId,
+    generatedAt: store.now(),
+    asOf,
+    counts,
+    fileCents: report.totalCents,
+    bcatMatchedCents: bcatMatched,
+    bcatOpenAllCents: bcatMatched + bcatOnly,
+    customerListBalanceDueCents: customerList,
+    bridge,
+    byCustomer: arGroupOf(customerGroups),
+    byBillTo: arGroupOf(billToGroups),
+    byBucket,
+    bySplit: arGroupOf(splitGroups),
+    redated: { ...redated, approval: DANISCO_APPROVAL },
+    rows,
+    allMatched: rows.every((r) => r.outcome === 'MATCHED' || r.outcome === 'APPROVED'),
+    files: [...Object.keys(files), 'reconcile-ar.json'],
+  }
+  if (opts.write !== false) {
+    const prefix = runsPrefix(jobId)
+    for (const [name, body] of Object.entries(files)) await store.putObject(`${prefix}${name}`, `${body}\n`)
+    await store.putObject(`${prefix}reconcile-ar.json`, JSON.stringify(result))
+  }
+  return result
+}

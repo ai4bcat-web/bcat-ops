@@ -4,6 +4,7 @@ import { normalizeMcpProfile, mapProfileToCarrier, matchCarrier, buildCarrierInd
 import type { McpProfile } from './mcpProfile'
 import { addCarrierFromMcp, newPullState, pullOneCarrier, runBackfillSlice, runChangesPoll } from './mcpPull'
 import type { McpPullDeps } from './mcpPull'
+import { SYNTHETIC_EIN, SYNTHETIC_SSN } from '@/test/syntheticTaxIds'
 
 type Row = Record<string, unknown>
 const NOW = Date.parse('2026-11-03T12:00:00Z')
@@ -19,7 +20,7 @@ const body = (over: Row = {}): Row => ({
   Address1: '1 Test Way', City: 'Testville', State: 'TX', Zipcode: '75001',
   CarrierCustomerPacketStatuses: [{ CarrierPacketStatus: 'Completed' }],
   CarrierCustomerAgreements: [{ SignatureDate: '2026-10-20T09:30:00', OnCurrentCustomerAgreement: true }],
-  CarrierW9Forms: [{ EIN: '12-3456789', SSN: '000-00-0000', IsActive: true }],
+  CarrierW9Forms: [{ EIN: SYNTHETIC_EIN, SSN: SYNTHETIC_SSN, IsActive: true }],
   CarrierOperationalDetail: { TotalPowerUnits: 12 },
   CarrierDispatchers: [{ DispatcherName: 'Dee Patch', Email: 'Dee@Zephyr.Example', PhoneNumber: '555-0101' }],
   ClaimsContactName: 'Clay Mz', ClaimsContactEmail: 'claims@zephyr.example',
@@ -42,14 +43,15 @@ describe('normalizeMcpProfile', () => {
   it('maps the profile fields and keeps no secret', () => {
     const p = profile()
     expect(p).toMatchObject({
-      legalName: 'Zephyr Test Freight LLC', phone: '555-0100', email: 'office@zephyr.example', taxId: '12-3456789', powerUnits: 12,
+      legalName: 'Zephyr Test Freight LLC', phone: '555-0100', email: 'office@zephyr.example', taxId: SYNTHETIC_EIN, powerUnits: 12,
       address: { street: '1 Test Way', city: 'Testville', state: 'TX', zip: '75001' }, packetKnown: true,
     })
     expect(p.payment).toEqual({
       method: 'ACH', recipientType: 'CARRIER', bankName: 'Test Bank', accountName: 'Zephyr', accountLast4: '2222', routingLast4: '7777',
       payeeEmail: 'ap@zephyr.example', remitToAddress: { street: '2 Remit Rd', city: 'Testville', state: 'TX', zip: '75001' },
     })
-    expect(JSON.stringify(p)).not.toMatch(/000011112222|999988887777|000-00-0000/)
+    expect(JSON.stringify(p)).not.toContain(SYNTHETIC_SSN)
+    expect(JSON.stringify(p)).not.toMatch(/000011112222|999988887777/)
     expect(p.contacts).toEqual([
       { name: 'Dee Patch', email: 'dee@zephyr.example', phone: '555-0101', types: ['DISPATCH'] },
       { name: 'Clay Mz', email: 'claims@zephyr.example', types: ['CLAIMS'] },
@@ -71,15 +73,17 @@ describe('normalizeMcpProfile', () => {
 })
 
 describe('mapProfileToCarrier', () => {
-  it('MCP wins over hand-typed values and records filled vs overwrote, masking the tax id', () => {
+  it('MCP wins over hand-typed values and records filled vs overwrote; the tax id never rides the patch', () => {
     const existing: Row = { id: 'c1', name: 'zephyr test freight', phone: '000', insurancePolicies: [{ id: 'm', type: 'CARGO', expiresAt: '2020-01-01T00:00:00.000Z', active: false }, { id: 'o', type: 'OTHER' }] }
     const { patch, changes } = mapProfileToCarrier(existing, profile())
-    expect(patch).toMatchObject({ name: 'Zephyr Test Freight LLC', phone: '555-0100', einNumber: '12-3456789', mcpStatus: 'ACCEPTABLE', mcpReviewStatus: 'ACCEPTABLE', mcpRiskScore: 20, safetyRating: 'SATISFACTORY', authorityStatus: 'ACTIVE', mcpPacketCompletedAt: '2026-10-20T09:30:00.000Z' })
+    expect(patch).toMatchObject({ name: 'Zephyr Test Freight LLC', phone: '555-0100', mcpStatus: 'ACCEPTABLE', mcpReviewStatus: 'ACCEPTABLE', mcpRiskScore: 20, safetyRating: 'SATISFACTORY', authorityStatus: 'ACTIVE', mcpPacketCompletedAt: '2026-10-20T09:30:00.000Z' })
+    expect(JSON.stringify([patch, changes])).not.toContain(SYNTHETIC_EIN)
+    expect(patch).not.toHaveProperty('einNumber')
     const policies = patch.insurancePolicies as Row[]
     expect(policies.find((p) => p.type === 'CARGO')).toMatchObject({ id: 'm', limitCents: 10_000_000, company: 'Fake Mutual', policyNumber: 'P-1', active: true })
     expect(policies.find((p) => p.type === 'OTHER')).toBeDefined()
     expect(changes.phone).toMatchObject({ before: '000', kind: 'OVERWROTE' })
-    expect(changes.einNumber).toMatchObject({ kind: 'FILLED' })
+    expect(changes).not.toHaveProperty('einNumber')
   })
 
   it('is empty when the row already says what MCP says', () => {
@@ -115,6 +119,7 @@ describe('matchCarrier', () => {
 /** In-memory tables behind McpPullDeps. */
 function world(opts: { carriers?: Row[]; monitored?: Array<{ dotNumber?: string; docketNumber?: string }>; profiles?: Record<string, Row | null>; pageSize?: number } = {}) {
   const carriers = new Map((opts.carriers ?? []).map((r) => [String(r.id), { ...r }]))
+  const taxIds = new Map<string, string>()
   const contacts: Row[] = []
   const payments: Row[] = []
   const audits: Array<{ entityId: string; action: string; changes: Record<string, unknown> }> = []
@@ -138,6 +143,14 @@ function world(opts: { carriers?: Row[]; monitored?: Array<{ dotNumber?: string;
     loadPayments: async (id) => payments.filter((c) => c.carrierId === id),
     putPayment: async (r) => { payments.push(r) },
     updatePayment: async (id, patch) => { Object.assign(payments.find((c) => c.id === id)!, patch) },
+    // The vault: keeps the value off the row, mirrors only the last four like the Lambda does.
+    setTaxId: async (carrierId, value) => {
+      if (taxIds.get(carrierId) === value) return 'UNCHANGED'
+      taxIds.set(carrierId, value)
+      const row = carriers.get(carrierId)
+      if (row) row.taxIdLast4 = value.replace(/\D/g, '').slice(-4)
+      return 'SET'
+    },
     audit: async (a) => { audits.push(a) },
     listMonitored: async (page) => ({ entries: monitored.slice((page - 1) * pageSize, page * pageSize), totalPages: Math.max(1, Math.ceil(monitored.length / pageSize)) }),
     fetchProfile: async (ref) => {
@@ -150,7 +163,7 @@ function world(opts: { carriers?: Row[]; monitored?: Array<{ dotNumber?: string;
     sleep: vi.fn(async () => undefined),
     nowMs: () => clock,
   }
-  return { deps, carriers, contacts, payments, audits, tick: (ms: number) => { clock += ms } }
+  return { deps, carriers, contacts, payments, audits, taxIds, tick: (ms: number) => { clock += ms } }
 }
 
 const fleet = () => ({
@@ -176,7 +189,9 @@ describe('runBackfillSlice', () => {
 
     expect(state).toMatchObject({ status: 'DONE', cursor: null, counts: { created: 1, updated: 2, unchanged: 0, errors: 0 }, unmatchedBcatCount: 1 })
     expect(state.unmatchedBcat).toEqual([{ id: 'c9', name: 'Ours Only Trucking', mc: 'MC111111', dot: undefined }])
-    expect(w.carriers.get('c1')).toMatchObject({ mcpStatus: 'ACCEPTABLE', einNumber: '12-3456789', mcpSyncRunId: 'run-1', name: 'Zephyr Test Freight LLC' })
+    expect(w.carriers.get('c1')).toMatchObject({ mcpStatus: 'ACCEPTABLE', taxIdLast4: '0001', mcpSyncRunId: 'run-1', name: 'Zephyr Test Freight LLC' })
+    expect(w.carriers.get('c1')).not.toHaveProperty('einNumber')
+    expect([...w.taxIds.values()]).toEqual([SYNTHETIC_EIN, SYNTHETIC_EIN, SYNTHETIC_EIN])
     expect(w.carriers.get('c2')).toMatchObject({ dotNumber: '7000002', mcNumber: 'MC900002' }) // matched by DOT, MC filled in
     const created = [...w.carriers.values()].find((r) => r.name === 'Brand New Test Co')!
     // Packet complete + monitored (it came from the monitored list): MyCarrierPackets makes it ACTIVE.
@@ -186,11 +201,11 @@ describe('runBackfillSlice', () => {
     expect(w.contacts.filter((c) => c.carrierId === 'c1').map((c) => c.name).sort()).toEqual(['Clay Mz', 'Dee Patch'])
     expect(w.contacts.find((c) => c.name === 'Dee Patch')).toMatchObject({ isPrimary: true, types: ['DISPATCH'] })
     expect(w.payments.find((p) => p.carrierId === 'c1')).toMatchObject({ source: 'MCP', isPreferred: true, accountLast4: '2222' })
-    expect(JSON.stringify([...w.payments, ...w.audits])).not.toMatch(/000011112222|999988887777|12-3456789/)
+    expect(JSON.stringify([...w.payments, ...w.audits, ...w.carriers.values()])).not.toMatch(/000011112222|999988887777|00-0000001|000000001/)
 
     const audit = w.audits.find((a) => a.entityId === 'c1')!
     expect(audit.action).toBe('MCP_PULL')
-    expect(audit.changes).toMatchObject({ matchedBy: 'MC', fields: { name: { before: 'Zephyr Test Freight', kind: 'OVERWROTE' }, einNumber: { after: '***6789', kind: 'FILLED' } } })
+    expect(audit.changes).toMatchObject({ matchedBy: 'MC', taxId: 'SET', fields: { name: { before: 'Zephyr Test Freight', kind: 'OVERWROTE' } } })
     expect(w.audits.some((a) => a.action === 'MCP_CREATE')).toBe(true)
   })
 
@@ -282,7 +297,7 @@ describe('runChangesPoll', () => {
     const w = world({ carriers: [{ id: 'c1', name: 'Zephyr Test Freight LLC', mcNumber: 'MC-900001', updatedAt: 'u0' }], profiles: { '7000001': body() } })
     w.deps.listCompleted = async () => [{ dotNumber: '7000001', docketNumber: 'MC900001' }]
     await runChangesPoll(w.deps, { ...done(), lastChangesAt: new Date(NOW - 10 * 60_000).toISOString() }, { createUnmatched: false })
-    expect(w.carriers.get('c1')).toMatchObject({ mcpStatus: 'ACCEPTABLE', einNumber: '12-3456789' })
+    expect(w.carriers.get('c1')).toMatchObject({ mcpStatus: 'ACCEPTABLE', taxIdLast4: '0001' })
     expect(w.payments).toHaveLength(1)
   })
 })
@@ -306,12 +321,12 @@ describe('addCarrierFromMcp (Find & Invite: Add to carriers)', () => {
     const row = w.carriers.get(out.carrierId!)!
     expect(row).toMatchObject({
       name: 'Zephyr Test Freight LLC', dbaName: 'Zephyr Test', mcNumber: 'MC900001', dotNumber: '7000001', phone: '555-0100',
-      status: 'ACTIVE', mcpStatus: 'ACCEPTABLE', safetyRating: 'SATISFACTORY', authorityStatus: 'ACTIVE', einNumber: '12-3456789',
+      status: 'ACTIVE', mcpStatus: 'ACCEPTABLE', safetyRating: 'SATISFACTORY', authorityStatus: 'ACTIVE', taxIdLast4: '0001',
     })
     expect(w.contacts.filter((c) => c.carrierId === out.carrierId)).toHaveLength(2)
     expect(w.audits).toHaveLength(1)
-    expect(w.audits[0]).toMatchObject({ entityId: out.carrierId, action: 'MCP_CREATE', changes: { source: 'MYCARRIERPACKETS', matchedBy: 'CREATED', fields: { einNumber: { after: '***6789' } } } })
-    expect(JSON.stringify([...w.payments, ...w.audits])).not.toMatch(/000011112222|999988887777|12-3456789/)
+    expect(w.audits[0]).toMatchObject({ entityId: out.carrierId, action: 'MCP_CREATE', changes: { source: 'MYCARRIERPACKETS', matchedBy: 'CREATED', taxId: 'SET' } })
+    expect(JSON.stringify([...w.payments, ...w.audits, row])).not.toMatch(/000011112222|999988887777|00-0000001|000000001/)
   })
 
   it('leaves a carrier that is already in the directory exactly as it is (matched on DOT when the MC differs)', async () => {

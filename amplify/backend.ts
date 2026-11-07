@@ -1,5 +1,7 @@
 import { defineBackend } from '@aws-amplify/backend'
-import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam'
+import { AccountRootPrincipal, AnyPrincipal, ArnPrincipal, Effect, PolicyDocument, PolicyStatement, Role } from 'aws-cdk-lib/aws-iam'
+import { Alias, Key, KeySpec, KeyUsage } from 'aws-cdk-lib/aws-kms'
+import { AttributeType, BillingMode, ProjectionType, Table, TableEncryption } from 'aws-cdk-lib/aws-dynamodb'
 import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { CfnRule, Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
@@ -764,7 +766,7 @@ apptReportFn.addEnvironment('SLACK_GLOBAL_CHANNEL_ID', process.env.SLACK_GLOBAL_
 // 20:00 & 21:00 UTC Mon–Fri — whichever lands on 15:00 America/Chicago posts (DST-proof).
 const apptReportRule = new Rule(apptReportFn.stack, 'ApptReportDailyRule', {
   schedule: Schedule.cron({ minute: '0', hour: '20,21', weekDay: 'MON-FRI', month: '*' }),
-  description: 'Daily 3 PM Chicago unconfirmed-appointments digest to the global Slack channel',
+  description: 'Daily 3 PM Chicago unconfirmed-appt digest',
 })
 apptReportRule.addTarget(new EventsLambdaTarget(apptReportFn))
 
@@ -785,7 +787,7 @@ cashReminderFn.addEnvironment('CHECKIN_TABLE_NAME', cashCheckInTable.tableName)
 // 14:00 & 15:00 UTC daily — whichever lands on 09:00 America/Chicago posts (DST-proof).
 const cashReminderRule = new Rule(cashReminderFn.stack, 'CashCheckinReminderDailyRule', {
   schedule: Schedule.cron({ minute: '0', hour: '14,15', day: '*', month: '*' }),
-  description: 'Slack reminder for the weekly cash check-in the morning after each payroll',
+  description: 'Cash check-in reminder the morning after payroll',
 })
 cashReminderRule.addTarget(new EventsLambdaTarget(cashReminderFn))
 
@@ -812,7 +814,7 @@ const gmailTaskUrl = new FunctionUrl(gmailTaskFn.stack, 'GmailTaskIntakeUrl', {
 
 new CfnOutput(gmailTaskFn.stack, 'GmailTaskIntakeFunctionUrl', {
   value:       gmailTaskUrl.url,
-  description: 'POST tasks@ emails here from the Apps Script (JSON with the shared secret)',
+  description: 'POST tasks@ emails here from the Apps Script',
 })
 
 // ── shipmentEmailIntake Lambda (inbound replies to tracking+<shipmentId>@) ───
@@ -849,7 +851,7 @@ const shipmentEmailIntakeUrl = new FunctionUrl(shipmentEmailIntakeFn.stack, 'Shi
 })
 new CfnOutput(shipmentEmailIntakeFn.stack, 'ShipmentEmailIntakeFunctionUrl', {
   value:       shipmentEmailIntakeUrl.url,
-  description: 'POST tracking+<shipmentId>@ replies here from the Gmail bridge (JSON with the shared secret)',
+  description: 'POST tracking+<shipmentId>@ replies here',
 })
 
 // ── twofaIntake Lambda (Google Voice text forwards → Slack #2fa) ───────────
@@ -857,7 +859,7 @@ const twofaFn = backend.twofaIntake.resources.lambda as LambdaFunction
 // Channel id or name; plain env so a missing value never blocks the deploy (defaults to #2fa).
 twofaFn.addEnvironment('TWO_FA_SLACK_CHANNEL', process.env.TWO_FA_SLACK_CHANNEL ?? '#2fa')
 const twofaUrl = new FunctionUrl(twofaFn.stack, 'TwofaIntakeUrl', { function: twofaFn, authType: FunctionUrlAuthType.NONE })
-new CfnOutput(twofaFn.stack, 'TwofaIntakeFunctionUrl', { value: twofaUrl.url, description: 'POST Google Voice text-forward emails here from the Apps Script (JSON with the shared secret)' })
+new CfnOutput(twofaFn.stack, 'TwofaIntakeFunctionUrl', { value: twofaUrl.url, description: 'POST Google Voice text-forward emails here' })
 
 // ── factoringIntake Lambda (factor@ email → FactoringItem) ──────────────────
 const factoringIntakeFn = backend.factoringIntake.resources.lambda as LambdaFunction
@@ -879,7 +881,7 @@ const factoringIntakeUrl = new FunctionUrl(factoringIntakeFn.stack, 'FactoringIn
 
 new CfnOutput(factoringIntakeFn.stack, 'FactoringIntakeFunctionUrl', {
   value:       factoringIntakeUrl.url,
-  description: 'POST factor@ emails here from the Gmail bridge (JSON with the shared secret)',
+  description: 'POST factor@ emails here from the Gmail bridge',
 })
 
 // Vendor AP: authenticated payment actions plus secret-authenticated Gmail intake.
@@ -1170,7 +1172,7 @@ const disputeIntakeUrl = new FunctionUrl(disputeFn.stack, 'AmazonDisputeIntakeUr
 
 new CfnOutput(disputeFn.stack, 'AmazonDisputeIntakeFunctionUrl', {
   value:       disputeIntakeUrl.url,
-  description: 'Paste into the Google-Form Apps Script (DISPUTE_WEBHOOK_URL) — see amazon-dispute-intake/APPS_SCRIPT.md',
+  description: 'Google-Form Apps Script DISPUTE_WEBHOOK_URL',
 })
 
 // ── slackStatusNotifier Lambda (custom AppSync mutation handler) ───────────
@@ -1971,7 +1973,7 @@ const workflowAgentUrl = new FunctionUrl(workflowAgentFn.stack, 'WorkflowAgentUr
 })
 new CfnOutput(workflowAgentFn.stack, 'WorkflowAgentFunctionUrl', {
   value:       workflowAgentUrl.url,
-  description: 'Workflow inbox (prepare/commit); requires the shared intake secret and a `role` of QUOTE | TENDER | AP | CAPACITY',
+  description: 'Workflow inbox (prepare/commit)',
 })
 
 // Fails runs that died mid-flight (a timeout leaves IN_PROGRESS behind, and nothing
@@ -2755,6 +2757,110 @@ carrierActionsFn.addToRolePolicy(
 // PREPARE_DOCUMENT presigns the PUT and COMMIT_DOCUMENT HEADs the object back.
 // No delete: DELETE_DOCUMENT removes the row and leaves the file.
 backend.storage.resources.bucket.grantReadWrite(carrierActionsFn, 'carrier-docs/*')
+
+// ── TaxVault (Docs/tms-build/AW_TAXID_DESIGN.md): encrypted carrier tax IDs ─────────────────────────
+// A plain CDK table + two KMS keys in a nested stack of their own: NOT an Amplify model, so no AppSync type can
+// ever carry the ciphertext, and the data stack gains no resource. The data stack gains no env var either: the
+// Lambdas derive `CarrierTaxVault-<apiId>` and `alias/bcat-tax-vault[-mac]-<apiId>` from CARRIER_TABLE_NAME
+// (_shared/taxVault.ts vaultNamesFor), and every grant lives HERE, in the vault stack: the key policy names the
+// two function roles, and the table grants attach to those roles from this stack. Nothing in the data stack
+// references this stack, so the dependency runs one way (TaxVault -> data) and there is no cycle.
+// Keys and table are RETAIN: deleting this stack never loses ciphertext, and a key is never deleted quietly.
+// The vault belongs to no schema stage: it is created at stage 0 and never changes afterwards.
+{
+  const vaultStack = backend.createStack('TaxVault')
+  // The API id the data stack already exports (no new output, no stage dependence). Nothing in the data stack
+  // references this stack, so unlike the Lambdas' own policies this reference cannot close a cycle.
+  const vaultApiId = backend.data.apiId
+  const vaultCarrierRole = carrierActionsFn.role!.roleArn
+  const vaultMcpRole = (backend.mcpSync.resources.lambda as LambdaFunction).role!.roleArn
+  const vaultRoles = [vaultCarrierRole, vaultMcpRole].map((arn) => new ArnPrincipal(arn))
+
+  // The encryption context binds a ciphertext to its carrier and its stack: moved to another carrier or another
+  // API, Decrypt fails. Every usage statement requires it (field + api pinned, carrierId present, nothing else).
+  const contextRequired = {
+    StringEquals: { 'kms:EncryptionContext:field': 'taxId', 'kms:EncryptionContext:api': vaultApiId },
+    'ForAllValues:StringEquals': { 'kms:EncryptionContextKeys': ['carrierId', 'field', 'api'] },
+    Null: { 'kms:EncryptionContext:carrierId': 'false' },
+  }
+  // Account root keeps ADMINISTRATION only (unavoidable in AWS: whoever is IAM admin can re-grant themselves; that is
+  // the trust boundary). It has no usage action on either key.
+  const adminStatement = () => new PolicyStatement({
+    sid: 'KeyAdministrationOnly',
+    principals: [new AccountRootPrincipal()],
+    actions: [
+      'kms:Create*', 'kms:Describe*', 'kms:Enable*', 'kms:List*', 'kms:Put*', 'kms:Update*', 'kms:Revoke*', 'kms:Disable*',
+      'kms:Get*', 'kms:Delete*', 'kms:TagResource', 'kms:UntagResource', 'kms:ScheduleKeyDeletion', 'kms:CancelKeyDeletion',
+    ],
+    resources: ['*'],
+  })
+
+  const encryptKey = new Key(vaultStack, 'TaxVaultKey', {
+    description: 'BCAT carrier tax-ID encryption key (direct Encrypt/Decrypt, encryption context enforced)',
+    enableKeyRotation: true,
+    pendingWindow: Duration.days(30),
+    removalPolicy: RemovalPolicy.RETAIN,
+    policy: new PolicyDocument({
+      statements: [
+        adminStatement(),
+        new PolicyStatement({ sid: 'EncryptCarrierActionsAndMcpSync', principals: vaultRoles, actions: ['kms:Encrypt'], resources: ['*'], conditions: contextRequired }),
+        new PolicyStatement({ sid: 'DecryptCarrierActionsOnly', principals: [vaultRoles[0]], actions: ['kms:Decrypt'], resources: ['*'], conditions: contextRequired }),
+        // An IAM policy elsewhere in the account cannot grant Decrypt: nobody but the one role gets it.
+        new PolicyStatement({
+          sid: 'DenyDecryptExceptCarrierActions', effect: Effect.DENY, principals: [new AnyPrincipal()], actions: ['kms:Decrypt'], resources: ['*'],
+          conditions: { ArnNotEquals: { 'aws:PrincipalArn': vaultCarrierRole } },
+        }),
+      ],
+    }),
+  })
+  new Alias(vaultStack, 'TaxVaultKeyAlias', { aliasName: Fn.join('', ['alias/bcat-tax-vault-', vaultApiId]), targetKey: encryptKey })
+
+  // HMAC_256 (GenerateMac) for the duplicate fingerprint: useless without KMS. HMAC keys do not auto-rotate.
+  // GenerateMac takes no encryption context, so these statements carry no context condition.
+  const macKey = new Key(vaultStack, 'TaxVaultMacKey', {
+    description: 'BCAT carrier tax-ID duplicate-fingerprint HMAC key',
+    keySpec: KeySpec.HMAC_256,
+    keyUsage: KeyUsage.GENERATE_VERIFY_MAC,
+    pendingWindow: Duration.days(30),
+    removalPolicy: RemovalPolicy.RETAIN,
+    policy: new PolicyDocument({
+      statements: [
+        adminStatement(),
+        new PolicyStatement({ sid: 'MacCarrierActionsAndMcpSync', principals: vaultRoles, actions: ['kms:GenerateMac'], resources: ['*'] }),
+      ],
+    }),
+  })
+  new Alias(vaultStack, 'TaxVaultMacKeyAlias', { aliasName: Fn.join('', ['alias/bcat-tax-vault-mac-', vaultApiId]), targetKey: macKey })
+
+  // Item: carrierId, ciphertext (B), keyArn, type, last4, fingerprint, setAt, setBy, source, version. Rate-limit rows
+  // `rl#<email>#<hour>` share the table and expire through ttlEpoch. Table SSE stays AWS-managed: the field cipher is
+  // what protects the value (a restored backup is ciphertext only).
+  const vaultTable = new Table(vaultStack, 'CarrierTaxVault', {
+    tableName: Fn.join('', ['CarrierTaxVault-', vaultApiId]),
+    partitionKey: { name: 'carrierId', type: AttributeType.STRING },
+    billingMode: BillingMode.PAY_PER_REQUEST,
+    encryption: TableEncryption.AWS_MANAGED,
+    pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+    timeToLiveAttribute: 'ttlEpoch',
+    removalPolicy: RemovalPolicy.RETAIN,
+  })
+  vaultTable.addGlobalSecondaryIndex({
+    indexName: 'byFingerprint',
+    partitionKey: { name: 'fingerprint', type: AttributeType.STRING },
+    projectionType: ProjectionType.KEYS_ONLY,
+  })
+  // carrierActions: set / status / reveal (rate-limit counter) / clear. mcpSync: set only (never reads a value).
+  const carrierRole = Role.fromRoleArn(vaultStack, 'TaxVaultCarrierActionsRole', vaultCarrierRole, { mutable: true })
+  carrierRole.addToPrincipalPolicy(new PolicyStatement({
+    actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query'],
+    resources: [vaultTable.tableArn, `${vaultTable.tableArn}/index/byFingerprint`],
+  }))
+  const mcpRole = Role.fromRoleArn(vaultStack, 'TaxVaultMcpSyncRole', vaultMcpRole, { mutable: true })
+  mcpRole.addToPrincipalPolicy(new PolicyStatement({
+    actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query'],
+    resources: [vaultTable.tableArn, `${vaultTable.tableArn}/index/byFingerprint`],
+  }))
+}
 
 // ── tmsTrackingActions Lambda (Step D) ──────────────────────────────────────
 // Owns TrackingLink and everything that carries a link outside the office: the
@@ -3946,7 +4052,7 @@ const carrierCallUrl = new FunctionUrl(spotFn.stack, 'CarrierCallUrl', {
 })
 new CfnOutput(spotFn.stack, 'CarrierCallFunctionUrl', {
   value: carrierCallUrl.url,
-  description: 'Cowtown voice agent: POST <url>carrier-call (JSON with the shared secret from Settings > Carrier Sales)',
+  description: 'Cowtown voice agent: POST <url>carrier-call',
 })
 // Unmatched inbound offers carry the mail body: DynamoDB expires them (`ttlEpoch` is set only
 // on shipmentId='UNMATCHED' rows). Every other message row has none and is never touched.
