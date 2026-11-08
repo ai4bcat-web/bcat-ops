@@ -159,9 +159,9 @@ carriers|D|inactive|n|=|252|S|Step 4b Expect
 carriers|D|withFactorId|n|=|183|S|Step 4b Expect
 carriers|D|quickPay|n|=|14|S|Step 4b Expect
 carriers|D|derived.strippedAll|s|=|yes|H|Step 4b (bank/routing/tax not imported)
-carriers|D|rowsWithFedSs|n|=|0|H|Step 4b Stop
-carriers|D|rowsWithBankAccount|n|=|0|H|Step 4b Stop
-carriers|D|rowsWithRouting|n|=|0|H|Step 4b Stop
+carriers|D|rowsWithFedSs|n|info|-|S|Step 4b (importer prints [hidden]; control is derived.strippedAll)
+carriers|D|rowsWithBankAccount|n|info|-|S|Step 4b (importer prints [hidden]; control is derived.strippedAll)
+carriers|D|rowsWithRouting|n|info|-|S|Step 4b (importer prints [hidden]; control is derived.strippedAll)
 carriers|D|CARRIER.errors|n|=|0|H|Step 4b
 carriers|A|job.status|s|=|APPLIED|H|Step 4b
 carriers|A|table.Carrier.delta|n|=|@dry:CARRIER.created|H|Step 4b Verify

@@ -48,7 +48,7 @@ for (const mode of modes) {
   if (step === 'carriers') {
     L('  rows with a value in the columns that are NOT imported: Fed/SS # 2353, Bank Account 442, Routing # 442'); L('  stripped before upload: Account #, Fed/SS #, Bank Account, Routing #')
     L('  uploaded CARRIERS_MASTER: job aljexrun:abcCarriers, 2462 rows'); header('carriers', mode); ent('CARRIER', 2442, 2442, 0, 0, 0, 0, 0)
-    for (const [k, v] of Object.entries({ otherVendorsSkipped: 19, inactive: 252, withFactorId: 183, quickPay: 14, rowsWithFedSs: 0, rowsWithBankAccount: 0, rowsWithRouting: 0 })) L('  ' + k + ': ' + v)
+    for (const [k, v] of Object.entries({ otherVendorsSkipped: 19, inactive: 252, withFactorId: 183, quickPay: 14, rowsWithFedSs: 0, rowsWithBankAccount: 0, rowsWithRouting: 0 })) L('  ' + k + ': ' + (process.env.FAKE_HIDE_SENSITIVE && /^rowsWith/.test(k) ? '[hidden]' : v))
     if (mode === 'APPLY') L('table Carrier: before 0, after 2442, delta 2442')
   }
   if (step === 'ap-aging') {
@@ -255,6 +255,17 @@ describe('awProdRun.sh', () => {
     expect(r.status).toBe(1)
     expect(r.stdout).toMatch(/RECONCILED rehearsal run with the same stageHash/)
     expect(r.applies).not.toMatch(/backfill|ap-aging/)
+  })
+})
+
+describe('carriers sensitive-column counts the importer scrubs to [hidden]', () => {
+  // The importer's log scrub prints rowsWithFedSs/BankAccount/Routing as [hidden]: they are INFO, the control is derived.strippedAll.
+  it('does not stop the carriers dry run when those three counts read [hidden]', () => {
+    const sb = sandbox()
+    const r = run(sb, { args: ['--dry-only', '--only', 'carriers'], input: 'PRODUCTION\n', env: { FAKE_HIDE_SENSITIVE: '1' } })
+    expect(r.stdout).not.toMatch(/STOP: carriers failed/)
+    expect(r.results).not.toMatch(/rowsWith(FedSs|BankAccount|Routing)\t[^\t]*\t[^\t]*\tFAIL/)
+    expect(r.results).toMatch(/derived\.strippedAll\tyes\tyes\tPASS/)
   })
 })
 
