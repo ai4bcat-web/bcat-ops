@@ -111,7 +111,7 @@ case "$*" in
   *"amplify list-jobs"*) printf 'SUCCEED\\tSUCCEED\\n' ;;
   *"keys(branch"*) printf 'BCAT_SCHEMA_STAGE\\tOTHER\\n' ;;
   *"amplify get-branch"*) echo 3 ;;
-  *"list-tables"*) echo 110 ;;
+  *"list-tables"*) printf '%b' "\${FAKE_TABLE_PAGES:-110\\n}" ;;
   *"describe-table"*) [ "$FAKE_VAULT" = 1 ] && exit 0 || exit 255 ;;
   *"dynamodb scan"*) echo 0 ;;
   *) ;;
@@ -243,6 +243,21 @@ describe('awProdRun.sh', () => {
     expect(r.status).toBe(1)
     expect(r.stdout).toMatch(/RECONCILED rehearsal run with the same stageHash/)
     expect(r.applies).not.toMatch(/backfill|ap-aging/)
+  })
+})
+
+describe('preflight table count is page-safe', () => {
+  // `aws dynamodb list-tables --query length(...)` prints ONE number per page (27 27 25 27 4): the runner must sum them.
+  it('sums a multi-page count (27+27+25+27+4 = 110) and passes', () => {
+    const sb = sandbox()
+    const r = run(sb, { args: ['--dry-only', '--only', 'preflight'], input: 'PRODUCTION\n', env: { FAKE_TABLE_PAGES: '27\\n27\\n25\\n27\\n4\\n' } })
+    expect(r.results).toMatch(/tables with suffix\t110\t110\tPASS/)
+  })
+
+  it('fails a multi-page total that is off by one (27+27+25+27+3 = 109)', () => {
+    const sb = sandbox()
+    const r = run(sb, { args: ['--dry-only', '--only', 'preflight'], input: 'PRODUCTION\n', env: { FAKE_TABLE_PAGES: '27\\n27\\n25\\n27\\n3\\n' } })
+    expect(r.results).toMatch(/tables with suffix\t110\t109\tFAIL/)
   })
 })
 

@@ -555,7 +555,7 @@ step_preflight() {
   if [ "$2" = 0 ]; then pf "running Amplify jobs" 0 "$2" PASS; else pf "running Amplify jobs" 0 "$2" FAIL; fi
   if [ "$3" -ge 3 ] 2>/dev/null; then pf "BCAT_SCHEMA_STAGE" ">= 3" "$3" PASS; else pf "BCAT_SCHEMA_STAGE" ">= 3" "$3" FAIL; fi
   [ "$3" -gt 3 ] 2>/dev/null && say "  WARNING: stage $3 > 3 (runbook: stage 4 TruckLocationHistory TTL must not be deployed during the load)"
-  local tc; tc=$(aws dynamodb list-tables --query "length(TableNames[?contains(@,'$SUFFIX')])" --output text 2>/dev/null)
+  local tc; tc=$(aws dynamodb list-tables --query "length(TableNames[?contains(@,'$SUFFIX')])" --output text 2>/dev/null | awk '{s+=$1} END{print s+0}')
   if [ "$TARGET" = prod ]; then
     [ "$tc" = 110 ] && pf "tables with suffix" 110 "$tc" PASS || pf "tables with suffix" 110 "${tc:-?}" FAIL
     local keys; keys=$(aws amplify get-branch --app-id "$APP" --branch-name main --query 'keys(branch.environmentVariables)' --output text 2>/dev/null)
