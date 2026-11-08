@@ -82,8 +82,8 @@ async function* stagedRows(store: EngineStore, root: string, stage: StageData): 
 
 /** Orders/invoices/bills the import wrote itself: the ledger rows only apply to those. */
 async function importedIndex(store: EngineStore) {
-  const invoiceByOrder = new Map<string, { id: string; customerId: string }>()
-  for (const i of await scanRows(store, 'invoice', ['id', 'orderId', 'customerId', 'createdBy'])) if (text(i.createdBy) === IMPORT_ACTOR) invoiceByOrder.set(text(i.orderId), { id: text(i.id), customerId: text(i.customerId) })
+  const invoiceByOrder = new Map<string, { id: string; customerId: string; totalCents: number | null }>()
+  for (const i of await scanRows(store, 'invoice', ['id', 'orderId', 'customerId', 'createdBy', 'totalCents'])) if (text(i.createdBy) === IMPORT_ACTOR) invoiceByOrder.set(text(i.orderId), { id: text(i.id), customerId: text(i.customerId), totalCents: typeof i.totalCents === 'number' ? i.totalCents : null })
   const bills = new Set<string>()
   for (const b of await scanRows(store, 'carrierBill', ['id', 'createdBy'])) if (text(b.createdBy) === IMPORT_ACTOR) bills.add(text(b.id))
   const orderByPro = new Map<string, { orderId: string; activeLoadCarrierId: string }>()
@@ -112,7 +112,9 @@ export async function runArLedger(args: { store: EngineStore; root: string; stag
     // Credits/debits are memo adjustment lines on the invoice itself (DECIDED-1): only receipts are ledger rows.
     const math = invoiceMath(row, memoNet(memoLines[row.proKey as string]))
     const lines = row.payments.filter((p) => p.amountCents !== 0)
-    const carved = carveSurplus(lines.map((p) => p.amountCents), math.surplusCents)
+    // The receipts apply to the invoice AS WRITTEN: a fully paid revenue-difference row carries the paid amount (revenueBasis.ts), so no surplus.
+    const written = invoice.totalCents ?? math.totalCents
+    const carved = carveSurplus(lines.map((p) => p.amountCents), Math.max(0, math.paymentsCents - Math.max(written, 0)))
     lines.forEach((p, i) => {
       const date = p.date ?? row.dates.invoice ?? stage.masters.window.start
       const key = p.checkNo ? `${customerId}|${p.checkNo}|${date}` : `${row.proKey}|${p.n}`

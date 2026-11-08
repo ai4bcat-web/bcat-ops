@@ -2,7 +2,8 @@
  * ENRICH: a PRO that already exists on the target (own-fleet history backfilled from production).
  * Finance only: an Invoice (and its Order cache) and/or a CarrierBill (and its leg's AP cache). Status,
  * stops, driver, carrier, rates, documents and the legacy flag of a live record are never touched; a
- * disagreement on revenue or carrier is a reported mismatch with no write. The pre-image of every
+ * carrier disagreement is a reported mismatch with no write; a revenue disagreement is reported
+ * (ENRICH_REVENUE_DIFFERS) and the Invoice carries the Aljex amount, or the amount actually paid when fully paid (revenueBasis.ts); Order.revenueCents stays. The pre-image of every
  * touched row goes to an AuditLog row in the same transaction.
  */
 import type { EngineRow, EngineStore, TxItem } from '../../../../src/types/tms'
@@ -12,6 +13,7 @@ import { noonUtcIso, addDays } from '../../../../src/lib/aljex/dates'
 import { buildBill, buildInvoice, legacyRow, rowIds, type InvoiceLineInput, type LoadEnv } from './aggregate'
 import { auditRow, text } from './directory'
 import { rowFacts } from './facts'
+import { paidAmountApplies, REVENUE_DIFFERS, type RevenueDifference } from './revenueBasis'
 import { stableId } from './util'
 
 export interface ExistingLoad {
@@ -48,18 +50,37 @@ export async function buildEnrich(store: EngineStore, row: CanonicalRow, existin
   const ids = { ...rowIds(row, env.invoiceOwners), orderId: existing.orderId, shipmentId: existing.shipmentId, loadId: existing.id }
 
   if (facts.invoice && !text(order.invoiceId)) {
-    if (typeof order.revenueCents === 'number' && order.revenueCents !== row.money.invoiceAmountCents) {
-      mismatch = true
-      findings.push({ code: 'ENRICH_MISMATCH', detail: 'revenue' })
-    } else if (!customerId) findings.push({ code: 'INVOICE_NO_CUSTOMER' })
+    if (!customerId) findings.push({ code: 'INVOICE_NO_CUSTOMER' })
     else {
       const lines: InvoiceLineInput[] = row.charges
         .map((c) => ({ c, cl: classifyCharge(c, env.profile) }))
         .filter(({ cl }) => cl.kind === 'CHARGE')
         .map(({ c, cl }) => ({ chargeId: stableId('chg', `${ids.key}:C:${c.line}`), code: cl.code, label: cl.label, rateCents: cl.rateCents ?? cl.amountCents, count: cl.rateCents != null ? cl.count : 1, amountCents: cl.amountCents }))
       const terms = env.customers.termsById.get(customerId) ?? null
-      const built = buildInvoice(row, facts, env, { ids, customerId, lines, customerTermsDays: terms })
+      const differs = typeof order.revenueCents === 'number' && order.revenueCents !== row.money.invoiceAmountCents
+      const paidAmount = differs && paidAmountApplies(row, env.arOpen)
+      const built = buildInvoice(row, facts, env, { ids, customerId, lines, customerTermsDays: terms, paidAmount })
       invoice = true
+      // Option 1 (Ryne): a differing BCAT revenue never blocks the invoice and is never rewritten (see revenueBasis.ts).
+      if (differs) {
+        const aljexCents = row.money.invoiceAmountCents
+        const bcatCents = order.revenueCents as number
+        const detail: RevenueDifference = {
+          pro: row.pro,
+          bcatCents,
+          aljexCents,
+          diffCents: aljexCents - bcatCents,
+          invoiceCents: aljexCents,
+          paidCents: row.money.paymentsReceivedCents,
+          balanceCents: built.balance,
+          dueDate: text(built.row.dueAt).slice(0, 10),
+          state: built.balance === 0 ? 'PAID' : row.money.paymentsReceivedCents > 0 ? 'PARTIAL' : 'OPEN',
+          basis: paidAmount ? 'PAID_AMOUNT' : 'ALJEX_AMOUNT',
+          customer: row.customer.name,
+          billTo: row.billTo.name || row.billTo.account || '',
+        }
+        findings.push({ code: REVENUE_DIFFERS, detail: JSON.stringify(detail) })
+      }
       items.push({ op: 'put', table: 'invoice', item: built.row })
       const set: EngineRow = {
         arStatus: built.balance === 0 ? 'PAID' : 'UNPAID',

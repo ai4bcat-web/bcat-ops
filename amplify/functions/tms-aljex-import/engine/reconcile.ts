@@ -14,6 +14,7 @@ import { rowFacts } from './facts'
 import { loadProfile } from './profileLoad'
 import { readChunk, readJson, readStageData, type StageData } from './stage'
 import { IMPORT_ACTOR, type Finding } from './types'
+import { PAID_AMOUNT_EXPLAINED_KEY, paidAmountApplies, readArOpen } from './revenueBasis'
 import { centsDecimal, csvLine, renderImportReport, rootJobIdOf } from './report'
 import { BATCH_ROWS } from './load'
 import { AP_AGING_BUCKETS, AP_AGING_BUCKET_LABEL, apAgingBucketOfDays, centsText, nameKey, type ApAgingBill, type ApAgingBucket, type ApAgingParse } from '../../../../src/lib/aljex/layouts/apAging'
@@ -61,6 +62,13 @@ async function readFindings(store: EngineStore, jobId: string, stage: StageData)
     for (let o = 0; o < rows; o += BATCH_ROWS) await tryRead(batchFindingsKey(jobId, c, o))
   }
   return out
+}
+
+/** Every finding of an applied job (stage, phase and batch findings): the source of the ENRICH_REVENUE_DIFFERS list. */
+export async function readJobFindings(store: EngineStore, jobId: string): Promise<Finding[]> {
+  const [job] = (await store.getMany('aljexImportJob', [jobId])) as unknown as AljexImportJob[]
+  if (!job) throw new Error(`No such import job: ${jobId}`)
+  return readFindings(store, jobId, await readStageData(store, await rootJobIdOf(store, job)))
 }
 
 export async function reconcile(store: EngineStore, jobId: string, opts: { counts?: AljexEntityCounts; write?: boolean; findings?: Finding[] } = {}): Promise<ImportReportSummary> {
@@ -122,15 +130,15 @@ export async function reconcile(store: EngineStore, jobId: string, opts: { count
   const memoApplied = Object.values(memoByInvoice).flat()
   // Memos whose Reference # is a load of this file: the load's Credits/Debits column echoes them, invoiced or not.
   const memoLinked = [...memoApplied, ...stage.masters.memos.orphans.filter((o) => o.reason === 'REFERENCE_NOT_INVOICED')]
-  const moneyOf = (r: CanonicalRow) => {
-    const m = invoiceMath(r, memoNet(memoByInvoice[r.proKey as string]))
-    const bal = r.money.balDueCents ?? 0
+  const moneyOf = (r: CanonicalRow, paidAmount = false) => {
+    const m = invoiceMath(r, memoNet(memoByInvoice[r.proKey as string]), { paidAmount })
+    const bal = paidAmount ? 0 : (r.money.balDueCents ?? 0)
     return { total: m.totalCents, payments: m.paymentsCents, memo: m.adjustmentCents, residual: m.residualCents, open: Math.max(0, bal), unapplied: Math.max(0, -bal), net: bal }
   }
   const zero = () => ({ n: 0, total: 0, payments: 0, memo: 0, residual: 0, open: 0, unapplied: 0, net: 0 })
   type Money = ReturnType<typeof zero>
-  const addTo = (acc: Money, r: CanonicalRow): void => {
-    const m = moneyOf(r)
+  const addTo = (acc: Money, r: CanonicalRow, paidAmount = false): void => {
+    const m = moneyOf(r, paidAmount)
     acc.n += 1
     acc.total += m.total
     acc.payments += m.payments
@@ -143,7 +151,7 @@ export async function reconcile(store: EngineStore, jobId: string, opts: { count
   // Why an invoiced row of the file has no invoice in the tables (null = unexplained).
   const NOT_WRITTEN_REASONS: Array<[string, string]> = [
     ['INVOICE_NO_CUSTOMER', 'customer unresolved, no invoice written'],
-    ['ENRICH_MISMATCH', 'live record disagrees on revenue/carrier, not enriched'],
+    ['ENRICH_MISMATCH', 'live record disagrees on the carrier, not enriched'],
     ['PRO_CLAIMED_ELSEWHERE', 'PRO claimed by another record, not imported'],
     ['LINK_AMBIGUOUS', 'PRO is ambiguous (needs Ryne), not imported'],
     ['LINK_RACE', 'PRO claimed concurrently, not imported'],
@@ -157,6 +165,16 @@ export async function reconcile(store: EngineStore, jobId: string, opts: { count
     if (orderId && text(orderById.get(orderId)?.invoiceId)) return 'EXISTING_INVOICE'
     return null
   }
+  // Fully paid revenue-difference rows (revenueBasis.ts): their invoice carries the paid amount by design. The row is
+  // explained ONLY when the rule fires on an ENRICHED order AND the written invoice total is exactly the paid amount.
+  const arOpen = await readArOpen(store, root)
+  const paidBasis = (r: CanonicalRow, orderId: string): boolean => {
+    if (ownedKeys.has(r.proKey as string) || !paidAmountApplies(r, arOpen)) return false
+    const rev = orderById.get(orderId)?.revenueCents
+    if (typeof rev !== 'number' || rev === r.money.invoiceAmountCents) return false
+    return invoiceByOrder.get(orderId)?.totalCents === moneyOf(r, true).total
+  }
+  const explained = zero()
   const written = zero()
   const all = zero()
   const notWritten = new Map<string, Money>()
@@ -167,7 +185,12 @@ export async function reconcile(store: EngineStore, jobId: string, opts: { count
     addTo(all, r)
     const orderId = orderIdOf(r)
     if (orderId && invoiceByOrder.has(orderId)) {
-      addTo(written, r)
+      const paid = paidBasis(r, orderId)
+      addTo(written, r, paid)
+      if (paid) {
+        explained.n += 1
+        explained.total += moneyOf(r).total - moneyOf(r, true).total
+      }
       writtenRows.push(r)
       continue
     }
@@ -228,8 +251,9 @@ export async function reconcile(store: EngineStore, jobId: string, opts: { count
     bridge.push(line(`notImported:${code}:payments`, `Not imported (${label}): Σ payments received`, m.payments, null))
     if (m.memo !== 0) bridge.push(line(`notImported:${code}:memos`, `Not imported (${label}): Σ memos`, m.memo, null))
   }
+  if (explained.n > 0) bridge.push(line(PAID_AMOUNT_EXPLAINED_KEY, `Explained (revenue differs, fully paid), ${explained.n} invoice(s) carry the amount actually paid: Σ Aljex invoice totals − Σ paid amounts`, explained.total, null))
   bridge.push(
-    line('invoiceTotalAll', 'Σ invoice totals, every invoiced load of the file vs invoices written + the not-imported items above', all.total, bcatInvoiceTotal + namedSum('total')),
+    line('invoiceTotalAll', 'Σ invoice totals, every invoiced load of the file vs invoices written + the explained and not-imported items above', all.total, bcatInvoiceTotal + explained.total + namedSum('total')),
     line('paymentsAll', 'Σ payments received, every invoiced load of the file vs AR payments + the not-imported items above', all.payments, bcatPayments + namedSum('payments')),
     line('memosAll', 'Σ applied CRED/DEBT memos, every invoiced load of the file vs memo lines written + the not-imported items above', all.memo, memoLineCents + namedSum('memo')),
   )

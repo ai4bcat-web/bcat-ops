@@ -35,7 +35,10 @@ import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import type { AljexEntityCounts, AljexImportJob, EngineRow, EngineStore, EngineTable, EngineTargetPolicy, TableSet, TxCondition } from '../../../../src/types/tms'
 import { DynamoStore } from './dynamoStore'
 import { MemoryStore } from './memoryStore'
-import { reconcile } from './reconcile'
+import { readJobFindings, reconcile } from './reconcile'
+import { arOpenKey, collectRevenueDifferences, PAID_AMOUNT_EXPLAINED_KEY, planRevenueKey, revenueDifferencesCsv, summarizeRevenueDifferences, summaryLines, type RevenueDifference } from './revenueBasis'
+import { parseArReportCsv } from '../../../../src/lib/aljex/layouts/arReport'
+import { readAll } from './util'
 import { runSlice } from './runSlice'
 import { seedProCounter } from './seedCounter'
 import { evalCondition } from './stamp'
@@ -574,6 +577,35 @@ async function driveJob(store: EngineStore, id: string): Promise<AljexImportJob>
   throw new Error('job did not finish in 200 slices')
 }
 
+
+/** The open-AR PRO set (column `Pro #` only) from the Aljex AR report; never printed. Stored next to the stage so plan, apply and reconcile agree. */
+function loadArOpen(path: string): string[] {
+  if (!existsSync(path)) throw new Error(`--ar-file not found: ${path}`)
+  const parsed = parseArReportCsv(readFileSync(path, 'utf8'))
+  if (!parsed.invoices.length) throw new Error('--ar-file has no open invoices (is it the Aljex AR report?)')
+  return [...new Set(parsed.invoices.map((i) => i.proKey))].sort()
+}
+
+const localDay = (): string => new Date().toLocaleDateString('en-CA')
+
+/** Reports directory (PII: customer names): outside the repo, 0700; files 0600. */
+function reportsDir(a: Args): string {
+  const dir = flag(a, 'reports-dir') ?? '/Users/adminoid/aljex-export/reports'
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  chmodSync(dir, 0o700)
+  return dir
+}
+
+function writeReport(path: string, body: string): void {
+  writeFileSync(path, body, { mode: 0o600 })
+  chmodSync(path, 0o600)
+}
+
+async function printRevenueDifferences(io: CliIo, list: RevenueDifference[], bridge: Array<{ key: string; fileCents: number | null }> | undefined): Promise<void> {
+  const explained = bridge?.find((b) => b.key === PAID_AMOUNT_EXPLAINED_KEY)?.fileCents ?? 0
+  for (const l of summaryLines(summarizeRevenueDifferences(list), explained)) io.out(l)
+}
+
 async function cmdRun(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
   const spec = parseTarget(need(a, 'target'))
   const source = need(a, 'source')
@@ -599,6 +631,12 @@ async function cmdRun(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
     createdBy: 'importAljex-cli',
   }
   book.put(base as unknown as EngineRow)
+  const arFile = flag(a, 'ar-file')
+  if (arFile) {
+    const open = loadArOpen(arFile)
+    objects.put(arOpenKey(rootId), JSON.stringify(open))
+    io.out(`AR report: ${open.length} open PROs read (Pro # column only)`)
+  } else io.out('WARNING: no --ar-file: revenue-difference rows keep the Aljex invoice amount and ALL stay on the review list (nothing is treated as fully paid)')
   if (ctx.prod?.rehearsalTag !== undefined) {
     io.out(`PRODUCTION REHEARSAL ${ctx.prod.rehearsalTag}: writes ONLY the -rh${ctx.prod.rehearsalTag} copies of the production tables; reads production reference tables; NOTHING live is written.`)
     io.out(`  job rows (REHEARSAL, with stageHash/profileVersion/reconciled) live in the local job book ${JOBS_FILE}, NOT in the production AljexImportJob table: that file is how a later LIVE run on this machine finds the reconciled rehearsal.`)
@@ -618,6 +656,11 @@ async function cmdRun(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
   if (planned.status !== 'PLANNED') return fail(io, planned)
   io.out(`PLAN ${((Date.now() - t1) / 1000).toFixed(1)}s`)
   printCounts(io, planned.entityCounts)
+  const planDifferences = JSON.parse(await readAll(store.getObject(planRevenueKey(rootId)))) as RevenueDifference[]
+  const planBridge = (JSON.parse(await readAll(store.getObject(`imports/jobs/${rootId}/plan-summary.json`))) as { bridge: Array<{ key: string; fileCents: number | null }> }).bridge
+  await printRevenueDifferences(io, planDifferences, planBridge)
+  objects.put('revenue-differences-preview.csv', revenueDifferencesCsv(planDifferences).csv)
+  io.out(`revenue-differences preview: ${revenueDifferencesCsv(planDifferences).rows} row(s) in ${join(objects.dir, 'revenue-differences-preview.csv')} (0600)`)
   if (a.flags.has('no-apply')) return 0
 
   const applyId = `${rootId}A`
@@ -638,6 +681,12 @@ async function cmdRun(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
   io.out(`totals: stage ${(tStage / 1000).toFixed(1)}s, plan ${((t2 - t1) / 1000).toFixed(1)}s, apply ${(tApply / 1000).toFixed(1)}s; row-level reports in ${objects.dir} (delete after review)`)
   // Second pass writes the report files too (the summary above was read-only).
   await reconcile(store, applyId)
+  const applied = collectRevenueDifferences(await readJobFindings(store, applyId))
+  await printRevenueDifferences(io, applied, summary.bridge)
+  const report = revenueDifferencesCsv(applied)
+  const reportPath = join(reportsDir(a), `revenue-differences-${localDay()}.csv`)
+  writeReport(reportPath, report.csv)
+  io.out(`revenue-differences report: ${report.rows} row(s) -> ${reportPath} (0600; PII, outside the repo)`)
   await store.update('aljexImportJob', applyId, { options: { ...(done.options ?? {}), reconciled: summary.reconciled } })
   return summary.reconciled ? 0 : 2
 }

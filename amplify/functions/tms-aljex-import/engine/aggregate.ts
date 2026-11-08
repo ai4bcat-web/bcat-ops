@@ -42,6 +42,8 @@ export interface LoadEnv {
   memoOrphans: Map<string, MemoOrphan>
   /** Invoice ids already on the target: id -> orderId. Decides `id = PRO` vs the `ALJ-<pro>` fallback. */
   invoiceOwners: Map<string, string>
+  /** Pro keys of the open AR report (Pro # column), or null when the run has no AR report (revenue-difference rows then stay on the review list with the Aljex amount). */
+  arOpen: ReadonlySet<string> | null
   /** The history cutoff day (YYYY-MM-DD) the stage applied; named on the carried-over marks. Null = no window. */
   cutoffDate: string | null
   /** Valid-for-this-run tag shown in notes (never a date). */
@@ -622,10 +624,10 @@ export function buildInvoice(
   row: CanonicalRow,
   facts: RowFacts,
   env: LoadEnv,
-  p: { ids: Pick<RowIds, 'key' | 'orderId' | 'shipmentId' | 'loadId' | 'invoiceId'>; customerId: string; lines: InvoiceLineInput[]; customerTermsDays: number | null },
+  p: { ids: Pick<RowIds, 'key' | 'orderId' | 'shipmentId' | 'loadId' | 'invoiceId'>; customerId: string; lines: InvoiceLineInput[]; customerTermsDays: number | null; paidAmount?: boolean },
 ): { row: EngineRow; balance: number; termsNotConfigured: boolean; residualCents: number; math: InvoiceMath } {
   const adjustments = env.memos[row.proKey as string]
-  const math = invoiceMath(row, memoNet(adjustments))
+  const math = invoiceMath(row, memoNet(adjustments), { paidAmount: p.paidAmount === true })
   const { totalCents: total, paidAppliedCents: paidApplied, balanceCents: balance, status } = math
   const invoiceDate = row.dates.invoice as string
   const terms = resolveTermsDays({ customerTermsDays: p.customerTermsDays, orgDefaultTermsDays: env.settings.defaultPaymentTermsDays })

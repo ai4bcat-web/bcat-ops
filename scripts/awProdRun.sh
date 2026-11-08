@@ -109,12 +109,17 @@ unattended_authorize() { # approval-step action: the ONLY door to an apply in --
   if ap_consumed "$2"; then refuse_run "this approval line was already used to apply $2 (consumed). Write a new approval line to run it again."; fi
   printf '%s\t%s\t%s\n' "$2" "$(now_iso)" "$AP_HASH" >> "$CONSUMED"
 }
+step_done() { # DONE in the state file, or (backfill steps) already applied per the dry probe
+  [ "$(get_state "$1")" = DONE ] && return 0
+  case "$1" in backfill-check|backfill|backfill-emergency) backfill_applied && return 0 ;; esac
+  return 1
+}
 maybe_retire() { # rename the approval file once every listed step is DONE
   [ "$UNATTENDED" = 1 ] && [ "$DRY_ONLY" != 1 ] && [ -n "$AP_LINE" ] && [ -f "$APPROVAL" ] || return 0
   local t s
   for t in $(printf '%s' "$AP_STEPS" | tr ',' ' '); do
-    if [ "$t" = all ]; then for s in $ALL_APPLY_STEPS; do [ "$(get_state "$s")" = DONE ] || return 0; done
-    else [ "$(get_state "$t")" = DONE ] || return 0; fi
+    if [ "$t" = all ]; then for s in $ALL_APPLY_STEPS; do step_done "$s" || return 0; done
+    else step_done "$t" || return 0; fi
   done
   if mv "$APPROVAL" "$APPROVAL.used-$(date +%Y%m%dT%H%M%S)"; then say "approval file retired (every listed step is DONE)"; fi
 }
@@ -228,8 +233,26 @@ set_state() { # step status ; global state only for real (non dry-only) runs
 get_state() { awk -F'\t' -v s="$1" '$1==s{v=$2} END{print v}' "$GSTATE"; }
 save_job() { printf '%s\t%s\n' "$1" "$2" >> "$GJOBS"; }
 get_job() { awk -F'\t' -v s="$1" '$1==s{v=$2} END{print v}' "$GJOBS"; }
+# The emergency backfill linked all 958 Loads (2026-11-08). A dry run that finds every Load already linked (totalLoads == alreadyLinked,
+# nothing left to match or link by id, no Load created after the cutoff) makes backfill-check / backfill-emergency / backfill DONE: they are skipped and the backfill apply is NEVER re-run.
+BF_APPLIED=""
+backfill_applied() {
+  if [ -z "$BF_APPLIED" ]; then
+    BF_APPLIED=no
+    if [ -s "$PROS" ] && cli_run "$RUN_DIR/backfill-probe.out" backfill --cutoff $CUTOFF --export-keys "$PROS"; then
+      parse_out "$RUN_DIR/backfill-probe.out" "$RUN_DIR/backfill-probe.metrics"
+      local t al
+      t=$(metric_of "$RUN_DIR/backfill-probe.metrics" backfill_before.totalLoads); al=$(metric_of "$RUN_DIR/backfill-probe.metrics" backfill_before.alreadyLinked)
+      if [ -n "$t" ] && [ "$t" = "$al" ] && [ "$(metric_of "$RUN_DIR/backfill-probe.metrics" backfill_before.matchedByPro)" = 0 ] && [ "$(metric_of "$RUN_DIR/backfill-probe.metrics" backfill_before.linkedById)" = 0 ] && [ "$(metric_of "$RUN_DIR/backfill-probe.metrics" backfill_before.afterCutoff)" = 0 ]; then
+        BF_APPLIED=yes; say "backfill already applied: skipped (all $t Loads are linked; the backfill apply is not re-run)"
+      fi
+    fi
+  fi
+  [ "$BF_APPLIED" = yes ]
+}
 is_done() { # state file, or the awProd file-step checkpoint marker
   [ "$(get_state "$1")" = DONE ] && return 0
+  case "$1" in backfill-check|backfill|backfill-emergency) backfill_applied && return 0 ;; esac
   case "$1" in customers|carriers|ap-aging|ap-expected|ar)
     [ -f "$LOGS/$1.checkpoint.json" ] && grep -q '"applied:' "$LOGS/$1.checkpoint.json" 2>/dev/null && return 0 ;; esac
   return 1
@@ -249,7 +272,7 @@ backfill-check|D|backfill_before.matchedByPro|n|info|-|S|Step 3a (about 957)
 backfill-check|D|backfill_before.linkedById|n|info|-|S|Step 3a (about 1)
 backfill-check|D|backfill_before.ambiguous|n|=|0|H|Step 3a STOP
 backfill-check|D|backfill_before.unmappable|n|=|0|H|Step 3a STOP
-backfill-check|D|backfill_before.alreadyLinked|n|=|0|S|Step 3 Facts
+backfill-check|D|backfill_before.alreadyLinked|n|=|958|S|Backfill already applied (958 linked)
 backfill-check|D|backfill_before.beforeWindow|n|=|0|S|Step 3a
 # CUTOFF RULE (2026-11-08, CutoffRule): the cutoff means BOOKED. afterCutoff = Loads CREATED on/after the cutoff (still a STOP, must be 0);
 # carriedOver = Loads booked before it that ship on/after it (17 on 2026-11-08: PRO 14811..14939), kept in the window and linked.
@@ -258,7 +281,7 @@ backfill-check|D|backfill_before.carriedOver|n|=|17|S|Step 3a (booked before the
 backfill-check|D|derived.bucketsSum|s|=|yes|H|Step 3a
 backfill-check|D|derived.evaluated|s|=|yes|H|Step 3a --evaluate
 backfill-check|D|derived.dryEqualsEvaluate|s|=|yes|H|Step 3a
-backfill-check|D|table.Shipment.before|n|=|0|S|Step 3 (Shipment empty before loads)
+backfill-check|D|table.Shipment.before|n|>=|958|S|Backfill already applied (>= 958 Shipments)
 customers|D|uploaded.rows|n|=|761|S|Step 4a Expect
 customers|D|CUSTOMER.staged|n|=|515|S|Step 4a Expect
 customers|D|derived.customersTotal|n|=|515|S|Step 4a (created+matched+enriched)
@@ -301,8 +324,17 @@ loads|D|stage.duplicatePros|n|=|4|S|Step 4c (4 repeated PROs)
 loads|D|LOAD.conflicts|n|=|0|H|Step 4c Stop (AMBIGUOUS/CONFLICT)
 loads|D|derived.loadSum|s|=|yes|H|Step 4c
 loads|D|derived.anyErrors|n|=|0|H|Step 4c
-loads|D|LOAD.created|n|info|-|S|Step 4c (CREATE count)
-loads|D|LOAD.matched|n|info|-|S|Step 4c (LINK about 957)
+# Live PLAN 2026-11-08 (Option 1: a differing revenue no longer blocks the invoice; stageHash a56269b365a9): soft exact numbers.
+loads|D|LOAD.created|n|=|4384|S|Plan 11-08 (CREATE)
+loads|D|LOAD.matched|n|=|40|S|Plan 11-08
+loads|D|LOAD.enriched|n|=|915|S|Plan 11-08 (ENRICH, incl. the 283 revenue differences)
+loads|D|INVOICE.created|n|=|4316|S|Plan 11-08
+loads|D|INVOICE.enriched|n|=|915|S|Plan 11-08
+loads|D|INVOICE.conflicts|n|=|0|H|Plan 11-08 (no invoice may be blocked)
+loads|D|BILL.created|n|=|2365|S|Plan 11-08
+loads|D|revdiff.total|n|=|283|S|ENRICH_REVENUE_DIFFERS findings (info; dollar totals printed below the table)
+loads|D|revdiff.paid|n|info|-|S|fully paid: invoice carries the amount paid, internal finding only
+loads|D|revdiff.onReviewCsv|n|info|-|S|rows on revenue-differences-<date>.csv (outstanding / partial)
 loads|A|reconciled|s|=|YES|H|Step 4c Verify
 loads|A|conservation|s|=|OK|H|Step 4c Verify
 loads|A|table.Load.delta|n|>=|0|H|Step 4c Stop (Load count must not decrease)
@@ -394,7 +426,15 @@ function pairs(prefix, rest,   parts, np, i, w, nw, key, v) {
 }
 {
   line = $0
-  if (line ~ /^  [A-Z_]+ +staged [0-9]+/) {
+  if (line ~ /^(revenueDifferences|revenueDifferencesAll|paidAmountUsed): /) {
+    # `revenueDifferences: total 283, paid N (absCents A, shortCount S, ...), partial P (absCents X), outstanding U (absCents Y), onReviewCsv R`
+    pre = (line ~ /^revenueDifferencesAll/) ? "revdiffall" : (line ~ /^paidAmountUsed/) ? "paidused" : "revdiff"
+    t = line; sub(/^[^:]*: /, "", t); gsub(/[(),]/, "", t); np = split(t, w, " "); grp = ""
+    for (i = 1; i < np; i += 2) {
+      if (w[i] == "paid" || w[i] == "partial" || w[i] == "outstanding") { if (pre == "revdiff") { grp = w[i]; put(pre "." w[i], w[i + 1]); continue } }
+      put(pre "." (grp != "" ? grp "." : "") w[i], w[i + 1])
+    }
+  } else if (line ~ /^  [A-Z_]+ +staged [0-9]+/) {
     nw = split(line, w, " "); ent = w[1]
     for (i = 2; i < nw; i += 2) put(ent "." w[i], w[i + 1])
     errs += w[nw]
@@ -537,6 +577,8 @@ print_summary() {
     [ -z "$st" ] && st="not run"
     say "$(printf '  %-15s %s' "$s" "$st")"
   done
+  [ -n "$REPORT_NOTES" ] && say "Review files (names inside: keep them private):
+$REPORT_NOTES"
   say "PASS rows: $(grep -c 'PASS$' "$RESULTS")  FAIL rows: $(grep -c 'FAIL$' "$RESULTS")"
   say "Run dir: $RUN_DIR  (transcript.log, results.tsv, state.tsv; per-step logs: $LOGS)"
   say "Rollback pointers (runbook Whole-load rollback summary): see AW_PROD_DATA_RUNBOOK.md"
@@ -892,6 +934,23 @@ backup_gate() { # prodpre-importAljex(+Recon) backups needed by the offline file
     BCAT_ALLOW_PROD=$TODAY node "$SCRIPTS/prodBackup.mjs" --target prod --i-mean-production --script importAljex,importAljexRecon --apply 2>&1 | scrub | tee -a "$TRANSCRIPT" | tail -5
   fi
 }
+usd() { awk -v c="${1:-0}" 'BEGIN { printf "%.2f", c / 100 }'; }
+revenue_notes() { # metrics file: the dollar totals behind the revenue-difference rows (computed from the plan output, never hard-coded)
+  local m=$1 k; k() { metric_of "$m" "$1"; }
+  [ -n "$(k revdiff.total)" ] || return 0
+  say "  revenue differences (plan): $(k revdiff.total) PROs. All: abs \$$(usd "$(k revdiffall.absCents)"), net \$$(usd "$(k revdiffall.netCents)"), $(k revdiffall.higher) Aljex higher / $(k revdiffall.lower) lower, $(k revdiffall.open) open / $(k revdiffall.paid) paid"
+  say "    paid (invoice carries the amount actually paid, internal finding only): $(k revdiff.paid), short $(k revdiff.paid.shortCount) = \$$(usd "$(k revdiff.paid.shortCents)"), over $(k revdiff.paid.overCount) = \$$(usd "$(k revdiff.paid.overCents)"); explained in reconcile: \$$(usd "$(k paidused.explainedCents)")"
+  say "    partial: $(k revdiff.partial) (abs \$$(usd "$(k revdiff.partial.absCents)")), outstanding: $(k revdiff.outstanding) (abs \$$(usd "$(k revdiff.outstanding.absCents)")); on the review CSV: $(k revdiff.onReviewCsv)"
+}
+REPORT_NOTES=""
+loads_reports() { # apply output file: remember the two report paths/row counts for the end-of-run summary
+  local rd pc
+  rd=$(grep '^revenue-differences report: ' "$1" 2>/dev/null | tail -1 | sed 's/ (0600.*//')
+  pc=$(node "$ROOT/scripts/awPostLoadChecks.mjs" 2>&1 | grep '^post-load checks: ' | sed 's/ (0600.*//')
+  REPORT_NOTES="${rd:-revenue-differences report: not written}
+$pc"
+  say "  $REPORT_NOTES"
+}
 step_loads() {
   CURRENT=loads
   should_run loads || return 0
@@ -905,7 +964,7 @@ step_loads() {
   if [ "$DRY_ONLY" = 1 ] && [ "$TARGET" = prod ]; then say "  (dry-only: the loads plan needs the prodpre backups; running it anyway shows the gate message if they are missing)"; fi
   local name=loads
   local dry=$RUN_DIR/loads.dry.out dm=$RUN_DIR/loads.dry.metrics am=$RUN_DIR/loads.apply.metrics
-  cli_run "$dry" loads --source "$F_BIG" --live-tag "$LOADS_TAG"
+  cli_run "$dry" loads --source "$F_BIG" --ar-file "$F_AR" --live-tag "$LOADS_TAG"
   if [ "$LAST_RC" != 0 ]; then
     FAIL_LIST=" the loads plan exited $LAST_RC: $(grep -i -E 'refus|RECONCILED|backup|gate|ended' "$dry" | head -2 | tr '\n' ' ')"
     [ "$DRY_ONLY" = 1 ] && { ANYFAIL=1; set_state loads DRY-FAIL; return 0; }
@@ -913,6 +972,7 @@ step_loads() {
   fi
   parse_out "$dry" "$dm"
   compare loads D "$dm" || true
+  revenue_notes "$dm"
   if [ "$CMP_FAILS" -gt 0 ]; then
     [ "$DRY_ONLY" = 1 ] && { ANYFAIL=1; set_state loads DRY-FAIL; return 0; }
     stop_fail loads
@@ -922,7 +982,7 @@ step_loads() {
   confirm_apply loads || { say "[loads] not applied."; set_state loads DRY-OK; print_summary; exit 4; }
   recheck_env || stop_fail loads
   export AW_PROD_CONFIRM=$TODAY-loads
-  cli_run "$RUN_DIR/loads.apply.out" loads --source "$F_BIG" --live-tag "$LOADS_TAG" --apply; local rc=$LAST_RC
+  cli_run "$RUN_DIR/loads.apply.out" loads --source "$F_BIG" --ar-file "$F_AR" --live-tag "$LOADS_TAG" --apply; local rc=$LAST_RC
   unset AW_PROD_CONFIRM
   if [ "$rc" != 0 ]; then
     grep -qi 'RECONCILED rehearsal' "$RUN_DIR/loads.apply.out" && say "STOP: importer gate message: $(grep -i 'RECONCILED rehearsal' "$RUN_DIR/loads.apply.out" | head -1)"
@@ -933,6 +993,7 @@ step_loads() {
   [ "$CMP_FAILS" -gt 0 ] && stop_fail loads
   set_state loads DONE
   say "[loads] applied and verified: PASS"
+  loads_reports "$RUN_DIR/loads.apply.out"
 }
 step_reconcile() {
   CURRENT=reconcile
@@ -960,6 +1021,7 @@ step_reconcile() {
     [ "$CMP_FAILS" -gt 0 ] && stop_fail "rec-$ent"
   done
   set_state reconcile DONE
+  loads_reports "$RUN_DIR/loads.apply.out"
   say "[reconcile] reports are in Settings > Data > Aljex reconciliation. Jenny signs off in the app."
 }
 final_checks() {
