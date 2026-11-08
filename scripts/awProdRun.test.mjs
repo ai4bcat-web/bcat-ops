@@ -242,8 +242,11 @@ describe('awProdRun.sh', () => {
     expect(run(sb, { args: ['--suffix', PROD, '--target', 'dev'], input: 'PRODUCTION\n' }).status).toBe(2)
     const typo = run(sb, { input: 'production\n' })
     expect(typo.status).toBe(2); expect(typo.applies).toBe('')
-    const badLogin = run(sb, { input: 'PRODUCTION\n', env: { BCAT_PASSWORD: 'wrong' } })
+    const badLogin = run(sb, { args: ['--only', 'backfill-check'], input: 'PRODUCTION\n', env: { BCAT_PASSWORD: 'wrong' } })
     expect(badLogin.status).toBe(1); expect(badLogin.stdout).toMatch(/Login failed/)
+    // The offline per-file steps never ask for or check the staff password: a wrong one does not stop customers.
+    const offline = run(sb, { args: ['--only', 'customers', '--dry-only'], input: 'PRODUCTION\n', env: { BCAT_PASSWORD: 'wrong' } })
+    expect(offline.stdout).not.toMatch(/Login failed/)
   })
 
   it('stops with the importer message when the live pass needs a reconciled rehearsal', () => {

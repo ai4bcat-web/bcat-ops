@@ -73,7 +73,7 @@ marks the rehearsal reconciled. Decide/sign-off are the only actions that need t
 
 ## 2. Authorization and safety recap
 - Import actions: ADMIN (or the owner) only. Decide / sign-off: the `aljexSignoff` grant only.
-- The Lambda writes only its own stack's tables and refuses any production table; APPLY needs the typed live tag.
+- The Lambda writes only its own stack's tables and refuses any production table (`router.ts assertNotProduction`, every mode); APPLY needs the typed live tag. PRODUCTION runs the same engine functions offline: `node scripts/importAljex.mjs file --kind customers|carriers|ap|ar|active-check ... --target prod:<tag>`, `stage`, `reconcile-entity` (same gate as `loads`: BCAT_ALLOW_PROD, --i-mean-production, fresh prodpre-importAljex backups, typed confirmation; dry run default, nothing written). `scripts/awProd.mjs` and `awProdRun.sh` drive them.
 - A dry run reads the target and writes no table; report files go to the DataSafety bucket under `imports/runs/<job>[-plan]/`.
 - Source files live at `imports/source/<job>/<file>` in the same bucket. A file with a refused column is blanked at STAGE.
 

@@ -18,6 +18,11 @@
  *   node scripts/importAljex.mjs pitr-restore --table Shipment --time 2026-11-03T12:00:00Z --as Shipment-<devSuffix>-rhNNN
  *   node scripts/importAljex.mjs rollback --run <applyJobId> --target ... --i-understand-dev-only [--apply]   # dev-only delete rollback
  *
+ * Per-file imports (Step AW; the same gate in production; dry run unless --apply, which needs --target live|prod:<tag>):
+ *   node scripts/importAljex.mjs file --kind customers|carriers|ap|ar|active-check --file <csv> [--aging-file <csv> --expected-file <csv>] --cutoff YYYY-MM-DD --target live:<tag> [--apply]
+ *   node scripts/importAljex.mjs stage --source <big export csv> --target live:<tag>              # local STAGE only, nothing leaves the machine
+ *   node scripts/importAljex.mjs reconcile-entity --entity CUSTOMERS|CARRIERS|AP|AR|SHIPMENTS --source-job <id> [--customers-job <id>] --cutoff D --target live:<tag> [--apply --bucket <b>]
+ *
  * Production (plan = stage + plan, writes nothing; --apply writes):
  *   BCAT_ALLOW_PROD=$(date +%F) node scripts/importAljex.mjs run --source <csv> --target prod:<liveTag> --i-mean-production [--apply]
  *   ... resume --run <jobId> --target prod:<liveTag> --i-mean-production --apply
@@ -48,7 +53,7 @@ const entry = join(root, 'amplify/functions/tms-aljex-import/engine/cli.ts')
 async function bundle() {
   const engineDir = dirname(entry)
   const stamp = createHash('sha1')
-  for (const dir of [engineDir, join(root, 'src/lib/aljex'), join(root, 'amplify/functions/_shared')]) {
+  for (const dir of [engineDir, dirname(engineDir), join(root, 'src/lib'), join(root, 'src/lib/aljex'), join(root, 'src/lib/aljex/layouts'), join(root, 'amplify/functions/_shared')]) {
     for (const f of readdirSync(dir).sort()) {
       const p = join(dir, f)
       if (statSync(p).isFile()) stamp.update(f).update(readFileSync(p))
@@ -78,9 +83,9 @@ try {
   split = splitProdArgs(process.argv.slice(2))
   if (split.prod) {
     gate = await requireProd({
-      script: 'importAljex',
+      script: split.command === 'reconcile-entity' ? 'importAljexRecon' : 'importAljex',
       values: split.values,
-      tables: PROD_WRITE_SETS.importAljex.models,
+      tables: (split.command === 'reconcile-entity' ? PROD_WRITE_SETS.importAljexRecon : PROD_WRITE_SETS.importAljex).models,
       readOnly: split.readOnly,
     })
     if (gate.rehearsal === false && split.synthetic) throw new Error('--synthetic is never allowed against production')

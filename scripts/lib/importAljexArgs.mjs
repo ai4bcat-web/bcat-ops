@@ -7,11 +7,12 @@
  */
 
 /** Engine commands that may run in production mode. Everything else is dev tooling. */
-export const PROD_COMMANDS = ['run', 'resume', 'seed-counter', 'rollback', 'pitr-restore'];
+export const PROD_COMMANDS = ['run', 'resume', 'seed-counter', 'rollback', 'pitr-restore', 'file', 'stage', 'reconcile-entity'];
 /** Commands whose engine implementation has no dry run of its own: without --apply the wrapper stops after the plan. */
 const NEEDS_APPLY_TO_ACT = ['resume', 'pitr-restore'];
 /** Commands that create a new table / read only: they overwrite nothing, so no backup is demanded. */
-const READ_ONLY = ['pitr-restore'];
+const READ_ONLY = ['pitr-restore', 'stage'];
+const DRY_IS_READ_ONLY = ['file', 'reconcile-entity'];
 
 const GATE_FLAGS = ['i-mean-production', 'confirm-prod', 'prod-mode-rehearsal-suffix'];
 
@@ -75,7 +76,8 @@ export function splitProdArgs(argv) {
     liveTag: liveTag || null,
     values: { ...values, target: 'prod', apply },
     cliArgv,
-    readOnly: READ_ONLY.includes(command),
+    // A dry run of the per-file commands reads only (no backup demanded); their --apply writes and needs the fresh backups.
+    readOnly: READ_ONLY.includes(command) || (DRY_IS_READ_ONLY.includes(command) && !apply),
     stopAfterPlan: NEEDS_APPLY_TO_ACT.includes(command) && !apply,
     synthetic: kept.includes('--synthetic'),
   };

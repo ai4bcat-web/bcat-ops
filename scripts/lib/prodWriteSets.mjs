@@ -17,6 +17,8 @@ export const ALJEX_IMPORT_MODELS = [
 /** @type {Record<string, {models: string[], readOnly?: boolean}>} */
 export const PROD_WRITE_SETS = {
   importAljex: { models: ALJEX_IMPORT_MODELS },
+  // `importAljex.mjs reconcile-entity --apply` publishes a RECONCILE job row (the only table it writes).
+  importAljexRecon: { models: ['AljexImportJob'] },
   backfillApOpen: { models: ['LoadCarrier', 'AuditLog'] },
   backfillLegacyAr: { models: ['Order', 'AuditLog'] },
   backfillLaneSamples: { models: ['LaneRateSample', 'AuditLog'] },

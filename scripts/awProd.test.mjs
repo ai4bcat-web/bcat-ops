@@ -184,3 +184,38 @@ describe('evaluateRun is pure', () => {
     expect(l.path).toMatch(/verify-.*\.log$/)
   })
 })
+
+// ── the offline per-file route (the Lambda refuses production tables in every mode) ─────────────
+import { fileArgs, reconcileArgs, stageArgs } from './lib/awProdOffline.mjs'
+import { splitProdArgs } from './lib/importAljexArgs.mjs'
+import { PROD_SUFFIX as OFFLINE_PROD_SUFFIX } from './lib/awProdGuard.mjs'
+
+describe('offline file steps route through importAljex with the production gate', () => {
+  const v = { file: '/x/c.csv', cutoff: '2026-11-07', 'live-tag': 'AW-PROD-1108' }
+  it('every file step carries --i-mean-production; only --apply carries the typed confirmation', () => {
+    const dry = fileArgs('customers', { ...v, 'live-tag': undefined }, { apply: false, account: '111' })
+    expect(dry).toEqual(expect.arrayContaining(['file', '--kind', 'customers', '--file', '/x/c.csv', '--cutoff', '2026-11-07', '--target', 'prod:plan', '--i-mean-production']))
+    expect(dry).not.toContain('--apply')
+    const apply = fileArgs('ap-expected', v, { apply: true, account: '111' })
+    expect(apply).toEqual(expect.arrayContaining(['--kind', 'ap', '--expected-file', '/x/c.csv', '--target', 'prod:AW-PROD-1108', '--apply', '--confirm-prod', `111:${OFFLINE_PROD_SUFFIX}`]))
+    expect(() => fileArgs('ar', { ...v, 'live-tag': undefined }, { apply: true, account: '111' })).toThrow(/live-tag/)
+    expect(() => fileArgs('ar', { file: 'x' }, { apply: false, account: null })).toThrow(/cutoff/)
+  })
+
+  it('stage and reconcile are gated the same way; reconcile needs the bucket and a cutoff', () => {
+    expect(stageArgs({ file: '/x/big.csv' })).toEqual(expect.arrayContaining(['stage', '--source', '/x/big.csv', '--i-mean-production']))
+    const rec = reconcileArgs({ entity: 'AR', 'source-job': 'j1', 'customers-job': 'j0', cutoff: '2026-11-07' }, { account: '111', bucket: 'b' })
+    expect(rec).toEqual(expect.arrayContaining(['reconcile-entity', '--entity', 'AR', '--customers-job', 'j0', '--bucket', 'b', '--i-mean-production', '--apply']))
+    expect(() => reconcileArgs({ entity: 'AR', 'source-job': 'j1', cutoff: '2026-11-07' }, { account: '111', bucket: '' })).toThrow(/bucket/)
+  })
+
+  it('the wrapper treats a per-file dry run as read-only (no backup demanded) and an apply as a write', () => {
+    const base = ['file', '--kind', 'ar', '--file', 'f', '--cutoff', '2026-11-07', '--target', 'prod:T', '--i-mean-production']
+    expect(splitProdArgs(base).readOnly).toBe(true)
+    expect(splitProdArgs([...base, '--apply']).readOnly).toBe(false)
+    expect(splitProdArgs(['stage', '--source', 'f', '--target', 'prod:T']).readOnly).toBe(true)
+    expect(splitProdArgs(['reconcile-entity', '--entity', 'AR', '--target', 'prod:T', '--apply']).readOnly).toBe(false)
+    // without the prod target the gate flags are refused
+    expect(() => splitProdArgs(['file', '--i-mean-production', '--target', 'live:x'])).toThrow(/only apply together/)
+  })
+})

@@ -495,17 +495,24 @@ if [ "$TARGET" = prod ]; then
   printf 'PRODUCTION prompt answered: %s\n' "$([ "$word" = PRODUCTION ] && echo yes || echo no)" >> "$TRANSCRIPT"
   [ "$word" = PRODUCTION ] || { say "Not confirmed. Nothing was done."; exit 2; }
 fi
-if [ "${AW_PROD_NONINTERACTIVE:-}" != 1 ]; then
-  printf 'Admin e-mail (production staff pool): ' >&2; read -r BCAT_EMAIL
-  printf 'Password (hidden): ' >&2; read -rs BCAT_PASSWORD; printf '\n' >&2
-fi
-export BCAT_EMAIL BCAT_PASSWORD
-say "credentials entered (not logged)"
 if [ "$TARGET" != prod ]; then node "$SCRIPTS/awProdRunHelper.mjs" dev-outputs "$TARGET" "$RUN_DIR/dev-outputs.json" >/dev/null 2>&1; fi
-CURRENT=login
-if ! node "$SCRIPTS/awProdRunHelper.mjs" login "$TARGET" 2>&1 | scrub | tee -a "$TRANSCRIPT" | grep -q 'login: OK'; then
-  say "${RED}Login failed: check the e-mail/password (an ADMIN of the staff pool). Nothing was done.${RST}"; exit 1
-fi
+# Credentials are asked ONLY when a step that still goes through the staff-signed Lambda/AppSync API runs: backfill-check
+# (--evaluate) and backfill. The per-file imports, the big-export stage, the loads and the reconcile run OFFLINE with AWS credentials.
+LOGGED_IN=0
+need_login() {
+  [ "$LOGGED_IN" = 1 ] && return 0
+  if [ "${AW_PROD_NONINTERACTIVE:-}" != 1 ]; then
+    printf 'Admin e-mail (production staff pool; needed by backfill only): ' >&2; read -r BCAT_EMAIL
+    printf 'Password (hidden): ' >&2; read -rs BCAT_PASSWORD; printf '\n' >&2
+  fi
+  export BCAT_EMAIL BCAT_PASSWORD
+  say "credentials entered (not logged)"
+  CURRENT=login
+  if ! node "$SCRIPTS/awProdRunHelper.mjs" login "$TARGET" 2>&1 | scrub | tee -a "$TRANSCRIPT" | grep -q 'login: OK'; then
+    say "${RED}Login failed: check the e-mail/password (an ADMIN of the staff pool). Nothing was done.${RST}"; exit 1
+  fi
+  LOGGED_IN=1
+}
 
 # ---- files -------------------------------------------------------------------------------------------
 F_CUST=$FILES_DIR/aljex-customers-2026-11-08.csv
@@ -604,6 +611,7 @@ standard_step() { # name awstep -- args...
   should_run "$name" || { say "[$name] skipped (--from/--only)"; return 0; }
   already_done "$name" && return 0
   say ""; say "== STEP $name =="
+  [ "$aw" = backfill ] && need_login
   recheck_env || { stop_fail "$name"; }
   local dry=$RUN_DIR/$name.dry.out dm=$RUN_DIR/$name.dry.metrics am=$RUN_DIR/$name.apply.metrics
   cli_run "$dry" "$aw" "$@"
@@ -626,6 +634,7 @@ standard_step() { # name awstep -- args...
   if [ "$DRY_ONLY" = 1 ]; then say "[$name] dry run PASS (dry-only: not applied)"; set_state "$name" "DRY-OK"; return 0; fi
   if [ "$TARGET" != prod ]; then case "$aw" in customers|carriers|ar|ap-aging|ap-expected|stage-export) : ;; *) say "[$name] test mode: apply not supported for this step; skipped"; set_state "$name" "TEST-SKIP"; return 0 ;; esac; fi
   if ! confirm_apply "$name"; then say "[$name] not applied. Re-run the script to resume here."; set_state "$name" "DRY-OK"; print_summary; exit 4; fi
+  case "$aw" in customers|carriers|ar|ap-aging|ap-expected) backup_gate ;; esac
   recheck_env || stop_fail "$name"
   local apply=$RUN_DIR/$name.apply.out
   local applyargs=(--apply)
@@ -682,6 +691,7 @@ step_backfill_check() {
   CURRENT=backfill-check
   should_run backfill-check || return 0
   already_done backfill-check && return 0
+  need_login
   say ""; say "== STEP backfill-check (--evaluate, then dry run; APPLY is deferred until after the loads) =="
   recheck_env || stop_fail backfill-check
   local ev=$RUN_DIR/backfill-check.eval.out dry=$RUN_DIR/backfill-check.dry.out
@@ -721,12 +731,15 @@ step_tax_ids() {
   [ "$rc" = 0 ] || { FAIL_LIST=" apply exited $rc"; stop_fail tax-ids; }
   set_state tax-ids DONE
 }
-backup_gate() { # prodpre-importAljex backups needed by the loads gate (prod only)
+BACKUP_ASKED=0
+backup_gate() { # prodpre-importAljex(+Recon) backups needed by the offline file steps, the loads and the reconcile gate (prod only)
   [ "$TARGET" = prod ] || return 0
   [ "$DRY_ONLY" = 1 ] && return 0
+  [ "$BACKUP_ASKED" = 1 ] && return 0
+  BACKUP_ASKED=1
   say "  The importAljex gate needs fresh prodpre-importAljex-* on-demand backups (runbook 4c-1)."
   if ask_yn "Create/refresh those backups now (production CreateBackup, non-destructive)? [y/N]"; then
-    BCAT_ALLOW_PROD=$TODAY node "$SCRIPTS/prodBackup.mjs" --target prod --i-mean-production --script importAljex --apply 2>&1 | scrub | tee -a "$TRANSCRIPT" | tail -5
+    BCAT_ALLOW_PROD=$TODAY node "$SCRIPTS/prodBackup.mjs" --target prod --i-mean-production --script importAljex,importAljexRecon --apply 2>&1 | scrub | tee -a "$TRANSCRIPT" | tail -5
   fi
 }
 step_loads() {
@@ -776,6 +789,7 @@ step_reconcile() {
   say ""; say "== STEP reconcile (reports only; writes RECONCILE jobs) =="
   if [ "$DRY_ONLY" = 1 ]; then say "[reconcile] dry-only: needs applied import jobs; skipped"; return 0; fi
   local ent src cust sj
+  backup_gate
   cust=$(get_job customers)
   for ent in CUSTOMERS CARRIERS AP AR SHIPMENTS; do
     case "$ent" in CUSTOMERS) src=customers ;; CARRIERS) src=carriers ;; AP) src=ap-aging ;; AR) src=ar ;; SHIPMENTS) src=stage-export ;; esac
@@ -786,7 +800,7 @@ step_reconcile() {
     local extra=(); [ "$ent" = AR ] && extra=(--customers-job "$cust")
     local out=$RUN_DIR/rec-$ent.out
     export AW_PROD_CONFIRM=$TODAY-reconcile
-    cli_run "$out" reconcile --entity "$ent" --source-job "$sj" ${extra[@]+"${extra[@]}"} --apply; local rc=$LAST_RC
+    cli_run "$out" reconcile --entity "$ent" --source-job "$sj" --cutoff $CUTOFF ${extra[@]+"${extra[@]}"} --apply; local rc=$LAST_RC
     unset AW_PROD_CONFIRM
     [ "$rc" = 0 ] || { FAIL_LIST=" reconcile $ent exited $rc"; stop_fail "rec-$ent"; }
     parse_out "$out" "$RUN_DIR/rec-$ent.metrics"

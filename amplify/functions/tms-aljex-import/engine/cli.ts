@@ -30,7 +30,7 @@ import {
   RestoreTableToPointInTimeCommand,
 } from '@aws-sdk/client-dynamodb'
 import { marshall } from '@aws-sdk/util-dynamodb'
-import type { S3Client } from '@aws-sdk/client-s3'
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import type { AljexEntityCounts, AljexImportJob, EngineRow, EngineStore, EngineTable, EngineTargetPolicy, TableSet, TxCondition } from '../../../../src/types/tms'
 import { DynamoStore } from './dynamoStore'
 import { MemoryStore } from './memoryStore'
@@ -43,6 +43,12 @@ import { assertTargets, DEV_SUFFIX, MODEL_NAME, ownStackSuffix, productionPolicy
 
 export { productionPolicy }
 import { stableId } from './util'
+import { detectFileKind, FILE_KIND_LABEL, FILE_KIND_LAYOUT_ID, refusedHeaders, stripRefusedColumns, type FileKind } from '../../../../src/lib/aljex/fileKinds'
+import { parseCsvRows } from '../../../../src/lib/aljex/layouts/apAging'
+import { parseCarrierRows } from '../../../../src/lib/aljex/layouts/carriers'
+import { decisionStats, reconCsv, RECON_ENTITIES, type ReconEntity } from '../../../../src/lib/aljexReconcile'
+import { runFileImport, type FileAction } from '../fileImports'
+import { buildReconReport } from '../reconcileEntity'
 
 const REGION = 'us-east-1'
 const JOBS_FILE = join(tmpdir(), 'aljex-cli-jobs.json')
@@ -208,6 +214,10 @@ class AwsCliStore extends DynamoStore {
   }
   override async putJob(job: AljexImportJob): Promise<void> {
     this.book.put(job as unknown as EngineRow)
+  }
+  /** The one row the app must see (a RECONCILE job): written to the real AljexImportJob table. Only `reconcile-entity --apply`, after assertTargets. */
+  async putJobRemote(job: AljexImportJob): Promise<void> {
+    return super.putJob(job)
   }
   override async putObject(key: string, body: Uint8Array | string): Promise<void> {
     this.local.put(key, body)
@@ -601,11 +611,199 @@ async function cmdRollback(a: Args, io: CliIo, ctx: CliContext): Promise<number>
   return 0
 }
 
+// ── per-file imports, local staging, reconciliation (Step AW) ────────────────────────────────
+// The offline replacement for the Lambda's per-file actions (router.ts refuses production tables in every Lambda mode).
+// Same engine functions, same printed lines; production only through the importAljex.mjs gate (ctx.prod).
+
+const FILE_COMMANDS: Record<string, { action: FileAction; files: Array<[FileKind, string]> }> = {
+  customers: { action: 'CUSTOMERS_MASTER', files: [['CUSTOMERS_MASTER', 'file']] },
+  carriers: { action: 'CARRIERS_MASTER', files: [['CARRIERS_MASTER', 'file']] },
+  ap: { action: 'AP_FILES', files: [['AP_AGING', 'aging-file'], ['AP_EXPECTED', 'expected-file']] },
+  ar: { action: 'AR_FILE', files: [['AR_REPORT', 'file']] },
+  'active-check': { action: 'ACTIVE_SHIPMENTS_CHECK', files: [['ACTIVE_SHIPMENTS', 'file']] },
+}
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/
+const money = (cents: number | null): string => (cents == null ? 'n/a' : `${cents < 0 ? '-' : ''}${Math.trunc(Math.abs(cents) / 100).toLocaleString('en-US')}.${String(Math.abs(cents) % 100).padStart(2, '0')}`)
+const newRunStamp = (): string => `${new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14)}${Math.random().toString(36).slice(2, 8)}`
+
+/** The file without every refused column (Web Password, Fed/SS #, Bank Account, Routing #...): stripped BEFORE anything reads it into a store. */
+export function prepareUpload(expected: FileKind, text: string): { csv: string; dropped: string[]; rows: number } {
+  const rows = parseCsvRows(text)
+  const headers = rows[0] ?? []
+  const kind = detectFileKind(headers)
+  if (kind !== expected) throw new Error(`The file is not a ${FILE_KIND_LABEL[expected]} (its columns match ${kind ? FILE_KIND_LABEL[kind] : 'no known layout'})`)
+  const stripped = stripRefusedColumns(kind, headers, rows.slice(1))
+  const q = (v: string): string => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)
+  const csv = `${[stripped.headers, ...stripped.rows].map((r) => r.map(q).join(',')).join('\n')}\n`
+  if (refusedHeaders(kind, stripped.headers).length > 0) throw new Error('Sensitive columns survived the strip: refusing')
+  return { csv, dropped: stripped.dropped, rows: stripped.rows.length }
+}
+
+function printFileResult(io: CliIo, label: string, mode: string, jobId: string, status: string, result: Awaited<ReturnType<typeof runFileImport>>): void {
+  io.out(`\n== ${label} (${mode}) job ${jobId} ${status}`)
+  for (const [entity, c] of Object.entries(result.counts ?? {})) {
+    if (c) io.out(`  ${entity.padEnd(9)} staged ${c.staged}  created ${c.created}  matched ${c.matched}  enriched ${c.enriched}  skipped ${c.skipped}  conflicts ${c.conflicts}  errors ${c.errors}`)
+  }
+  for (const [k, v] of Object.entries(result.summary)) {
+    if (typeof v === 'number') io.out(`  ${k}: ${/Cents$/.test(k) ? `$${money(v)}` : v}`)
+    else if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const inner = Object.entries(v).filter(([, x]) => typeof x === 'number').map(([k2, x]) => `${k2} ${/Cents$/.test(k2) ? `$${money(x as number)}` : x}`)
+      if (inner.length) io.out(`  ${k}: ${inner.join(', ')}`)
+    }
+  }
+  const rec = result.reconcile as { bridge?: Array<{ key: string; fileCents: number | null; bcatCents: number | null; diffCents: number | null }>; allMatched?: boolean } | null
+  for (const b of rec?.bridge ?? []) io.out(`  tie-out ${String(b.key).padEnd(18)} file $${money(b.fileCents)}  BCAT $${money(b.bcatCents)}  diff $${money(b.diffCents)}`)
+  if (rec) io.out(`  every row matched: ${rec.allMatched ? 'YES' : 'NO'}`)
+  io.out(`  needs a look: ${result.review.length} (keys only, in the report files)`)
+}
+
+/** PLAN view of a store: reads fall through, entity writes stay in memory, and neither job rows nor report objects are written anywhere. */
+function planOverlay(store: EngineStore): EngineStore {
+  const quiet = Object.create(store) as EngineStore
+  quiet.putJob = async () => {}
+  quiet.putObject = async () => {}
+  return new MemoryStore({ tables: store.tables, base: quiet })
+}
+
+async function cmdFile(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
+  const name = need(a, 'kind')
+  const spec = FILE_COMMANDS[name]
+  if (!spec) throw new Error(`--kind must be ${Object.keys(FILE_COMMANDS).join(' | ')}`)
+  const tgt = parseTarget(need(a, 'target'))
+  const cutoff = need(a, 'cutoff')
+  if (!DAY.test(cutoff)) throw new Error('--cutoff must be YYYY-MM-DD')
+  const apply = a.flags.has('apply')
+  const given = spec.files.filter(([, f]) => flag(a, f))
+  if (given.length === 0) throw new Error(`${name} needs ${spec.files.map(([, f]) => `--${f}`).join(' and/or ')}`)
+  if (apply && !tgt.liveTag) throw new Error('--apply needs a live tag')
+  const stamp = newRunStamp()
+  // Strip first: nothing below ever sees a refused column.
+  const prepared: Array<{ kind: FileKind; flagName: string; csv: string; id: string; fileName: string }> = []
+  for (const [kind, f] of given) {
+    const path = need(a, f)
+    if (!existsSync(path)) throw new Error(`file not found: ${path}`)
+    const raw = readFileSync(path, 'utf8')
+    if (kind === 'CARRIERS_MASTER') {
+      const rows = parseCsvRows(raw)
+      const n = parseCarrierRows(rows[0] ?? [], rows.slice(1)).counts.sensitiveRows
+      io.out(`  rows with a value in the columns that are NOT imported: Fed/SS # ${n.fedSs}, Bank Account ${n.bankAccount}, Routing # ${n.routing}`)
+    }
+    const p = prepareUpload(kind, raw)
+    if (p.dropped.length) io.out(`  stripped before upload: ${p.dropped.join(', ')}`)
+    const id = `aljexrun:${stamp}${kind === 'AP_EXPECTED' ? 'e' : ''}`
+    io.out(`  uploaded ${kind}: job ${id}, ${p.rows} rows`)
+    prepared.push({ kind, flagName: f, csv: p.csv, id, fileName: path.split('/').pop() ?? `${kind}.csv` })
+  }
+  const primary = prepared[0].id
+  const { store, objects, book } = await openStore(a, tgt, primary, null, ctx)
+  assertTargets(liveTableSet(), store.tables, { target: tgt.target, targetTag: tgt.targetTag, liveTag: tgt.liveTag ?? 'plan' }, store.targetPolicy)
+  const texts: Partial<Record<FileKind, string>> = {}
+  for (const p of prepared) texts[p.kind] = p.csv
+  const label = name
+  const planned = await runFileImport(planOverlay(store), spec.action, { runId: `${primary}-plan`, cutoff, texts })
+  printFileResult(io, `${label} dry run`, 'PLAN', primary, 'PLANNED', planned)
+  if (!apply) {
+    io.out('\nDry run only: nothing was written. Add --apply --live-tag <TAG> to apply.')
+    return 0
+  }
+  // APPLY: the stripped copy is the only source file kept (0600, in the run directory), then the guarded store writes.
+  const now = new Date().toISOString()
+  for (const p of prepared) {
+    const rel = `source/${p.fileName}`
+    objects.put(rel, p.csv)
+    book.put({ id: p.id, kind: 'IMPORT', status: 'RUNNING', phase: 'APPLY', fileName: p.fileName, layoutId: FILE_KIND_LAYOUT_ID[p.kind], target: 'LIVE', liveTag: tgt.liveTag, options: { cutoffDate: cutoff, liveTag: tgt.liveTag, sourcePath: join(objects.dir, rel) }, createdBy: 'awProd-offline', createdAt: now } as unknown as EngineRow)
+  }
+  const done = await runFileImport(store, spec.action, { runId: primary, cutoff, texts })
+  for (const p of prepared) await store.update('aljexImportJob', p.id, { status: 'APPLIED', phase: 'DONE', entityCounts: done.counts, reportPrefix: `imports/runs/${primary}/`, finishedAt: new Date().toISOString(), appliedAt: new Date().toISOString(), appliedBy: 'awProd-offline' })
+  printFileResult(io, `${label} apply`, 'APPLY', primary, 'APPLIED', done)
+  io.out(`  report files and the stripped source copy: ${objects.dir} (0600; delete after review)`)
+  return 0
+}
+
+/** Local stage of the big export: STAGE only (no table is read for writing, nothing leaves the machine). Job and stage objects live in the local job book / run directory. */
+async function cmdStage(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
+  const spec = parseTarget(need(a, 'target'))
+  const source = need(a, 'source')
+  if (!existsSync(source)) throw new Error(`source not found: ${source}`)
+  const rootId = `aljexrun:${newRunStamp()}`
+  const { store, book } = await openStore(a, spec, rootId, source, ctx)
+  assertTargets(liveTableSet(), store.tables, { target: spec.target, targetTag: spec.targetTag, liveTag: spec.liveTag ?? 'plan' }, store.targetPolicy)
+  const fileName = source.split('/').pop() ?? 'export.csv'
+  book.put({ id: rootId, kind: 'IMPORT', status: 'STAGING', phase: 'STAGE', fileName, target: spec.target, targetTag: spec.targetTag, liveTag: spec.liveTag, synthetic: false, options: { sourcePath: source }, createdBy: 'awProd-offline' } as unknown as EngineRow)
+  const staged = await driveJob(store, rootId)
+  if (staged.status !== 'READY') return fail(io, staged)
+  const stage = await readStageData(store, rootId)
+  io.out(`\n== big export staged: job ${rootId}, ${stage.index.rows} rows, stage hash ${String(staged.stageHash).slice(0, 12)} (no table was written)`)
+  return 0
+}
+
+const ymd = (v: string | undefined, what: string): string => {
+  if (!v || !DAY.test(v)) throw new Error(`${what} must be YYYY-MM-DD`)
+  return v
+}
+
+async function cmdReconcile(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
+  const entity = need(a, 'entity') as ReconEntity
+  if (!RECON_ENTITIES.includes(entity)) throw new Error(`--entity must be ${RECON_ENTITIES.join(' | ')}`)
+  const spec = parseTarget(need(a, 'target'))
+  const cutoff = ymd(flag(a, 'cutoff') ?? new Date().toISOString().slice(0, 10), '--cutoff')
+  const asOf = ymd(flag(a, 'as-of') ?? cutoff, '--as-of')
+  const apply = a.flags.has('apply')
+  const book = new JobBook(JOBS_FILE)
+  const jobOf = (id: string): AljexImportJob => {
+    const [row] = book.get([id])
+    if (!row) throw new Error(`no such job ${id} in ${JOBS_FILE} (jobs of the offline file steps / stage-export live there)`)
+    return row as unknown as AljexImportJob
+  }
+  const source = jobOf(need(a, 'source-job'))
+  const customersJob = flag(a, 'customers-job') ? jobOf(flag(a, 'customers-job') as string) : null
+  const { store } = await openStore(a, spec, rootOf(book, source as unknown as EngineRow), null, ctx)
+  assertTargets(liveTableSet(), store.tables, { target: spec.target, targetTag: spec.targetTag, liveTag: spec.liveTag ?? 'plan' }, store.targetPolicy)
+  const paths = new Map<string, string>()
+  for (const j of [source, customersJob]) {
+    const p = (j?.options as { sourcePath?: string } | null | undefined)?.sourcePath
+    if (j && p) paths.set(j.id, p)
+  }
+  const report = await buildReconReport(store, {
+    streamText: async function* (key) {
+      const path = paths.get(key.split('/')[2] ?? '')
+      if (!path) throw new Error(`no local source file for ${key}`)
+      for await (const chunk of createReadStream(path, { encoding: 'utf8', highWaterMark: 1 << 20 })) yield chunk as string
+    },
+  }, { entity, source, customersJob, asOf, cutoffDate: cutoff, generatedAt: new Date().toISOString() })
+  const c = report.counts
+  io.out(`\n== reconcile ${entity} job ${source.id}\n  Aljex rows ${c.aljexRows}  BCAT rows ${c.bcatRows}  matched ${c.matched}  Aljex-only ${c.aljexOnly}  BCAT-only ${c.bcatOnly}  mismatched ${c.mismatched}  differences ${c.diffs}`)
+  if (report.money) io.out(`  money: Aljex $${money(report.money.aljexCents)}  BCAT $${money(report.money.bcatCents)}  diff $${money(report.money.diffCents)}`)
+  if (!apply) {
+    io.out('\nDry run only: nothing was written. Add --apply (with --bucket) to publish the report for Jenny.')
+    return 0
+  }
+  const bucket = need(a, 'bucket')
+  const aws = store as unknown as AwsCliStore
+  if (typeof aws.putJobRemote !== 'function') throw new Error('publishing a reconciliation needs the AWS store (not --memory)')
+  const id = `aljexrec:${entity}:${newRunStamp()}`
+  const prefix = `imports/runs/${id}/`
+  const s3 = new S3Client({ region: REGION })
+  const put = (name: string, body: string, type: string) => s3.send(new PutObjectCommand({ Bucket: bucket, Key: `${prefix}${name}`, Body: body, ContentType: type }))
+  await put(`reconcile-${report.entity.toLowerCase()}.json`, JSON.stringify(report), 'application/json')
+  await put(`reconcile-${report.entity.toLowerCase()}.csv`, reconCsv(report, []), 'text/csv')
+  const now = new Date().toISOString()
+  await aws.putJobRemote({
+    id, kind: 'RECONCILE', status: 'APPLIED', phase: 'RECONCILE', parentJobId: source.id, reportPrefix: prefix,
+    options: { entity, asOf, cutoffDate: cutoff, ...(customersJob ? { customersJobId: customersJob.id } : {}), counts: report.counts, stats: decisionStats(report.diffs, []) },
+    decisions: '[]', startedAt: now, heartbeatAt: now, finishedAt: now, createdBy: 'awProd-offline', createdAt: now, updatedAt: now,
+  } as unknown as AljexImportJob)
+  io.out(`  published: ${id} (Settings > Data > Aljex reconciliation)`)
+  return 0
+}
+
+
 export async function main(argv: string[], io: CliIo = consoleIo, ctx: CliContext = {}): Promise<number> {
   try {
     const a = parseArgs(argv)
-    if (ctx.prod && !['run', 'resume', 'seed-counter', 'rollback', 'pitr-restore'].includes(a.command)) {
-      throw new Error(`production mode runs run | resume | seed-counter | rollback | pitr-restore only; "${a.command}" is dev tooling (backups: scripts/prodBackup.mjs)`)
+    if (ctx.prod && !['run', 'resume', 'seed-counter', 'rollback', 'pitr-restore', 'file', 'stage', 'reconcile-entity'].includes(a.command)) {
+      throw new Error(`production mode runs run | resume | seed-counter | rollback | pitr-restore | file | stage | reconcile-entity only; "${a.command}" is dev tooling (backups: scripts/prodBackup.mjs)`)
     }
     const aws = () => new DynamoDBClient({ region: REGION })
     switch (a.command) {
@@ -615,6 +813,12 @@ export async function main(argv: string[], io: CliIo = consoleIo, ctx: CliContex
         return await cmdResume(a, io, ctx)
       case 'seed-counter':
         return await cmdSeed(a, io, ctx)
+      case 'file':
+        return await cmdFile(a, io, ctx)
+      case 'stage':
+        return await cmdStage(a, io, ctx)
+      case 'reconcile-entity':
+        return await cmdReconcile(a, io, ctx)
       case 'rollback':
         return await cmdRollback(a, io, ctx)
       case 'rehearsal-create': {
@@ -642,7 +846,7 @@ export async function main(argv: string[], io: CliIo = consoleIo, ctx: CliContex
         return 0
       }
       default:
-        io.err('commands: run | resume | seed-counter | rollback | rehearsal-create | rehearsal-drop | rehearsal-list | backup-create | backup-restore | pitr-restore | drop-copy')
+        io.err('commands: run | resume | file | stage | reconcile-entity | seed-counter | rollback | rehearsal-create | rehearsal-drop | rehearsal-list | backup-create | backup-restore | pitr-restore | drop-copy')
         return 1
     }
   } catch (err) {

@@ -10,17 +10,18 @@
  *   jenny                                      Jenny's Cognito groups page-billingRelease / page-aljexSignoff (+ UserProfile.extraPages)
  *   backfill [--cutoff D] [--export-keys f] [--batch N] [--evaluate] [--allow-empty-shipments]
  *                                              link existing Loads to Shipments by Load id (BACKFILL_SHIPMENT); run AFTER `loads`
- *   customers|carriers|ar --file f.csv         per-file Lambda imports (PLAN then APPLY); --live-tag TAG on apply; --plan stages the PLAN
- *   ap-aging|ap-expected --file f.csv          same, AP aging / AP expected
- *   stage-export --file big.csv                stages the big export in the bucket (no business table)
+ *   customers|carriers|ar --file f.csv --cutoff D   per-file imports, OFFLINE (importAljex.mjs file --target prod:TAG: the Lambda refuses production tables);
+ *                                              PLAN then APPLY; --live-tag TAG on apply; --plan runs the PLAN. AWS credentials only, no staff password
+ *   ap-aging|ap-expected --file f.csv --cutoff D   same, AP aging / AP expected
+ *   stage-export --file big.csv                stages the big export LOCALLY (importAljex.mjs stage); nothing is uploaded or written
  *   loads --source big.csv --live-tag TAG [--resume JOBID]   the Aljex load (importAljex.mjs run --target prod:TAG)
  *   tax-ids --source carriers.csv              Fed/SS # -> encrypted vault via tms-carrier-actions IMPORT_TAX_IDS, 100-row batches
- *   reconcile --entity E --source-job ID [--customers-job ID]
+ *   reconcile --entity E --source-job ID [--customers-job ID] --cutoff D   offline report (importAljex.mjs reconcile-entity); --apply publishes the RECONCILE job + report files
  *   verify                                     read-only: every table's ItemCount, settings, Jenny, vault
  *
  * Apply also needs: ~/bcat-ops-backups/LATEST_BACKUP_STAMP younger than 6 h, production root stack UPDATE_COMPLETE, no Amplify
- * job running on main, BCAT_SCHEMA_STAGE on main >= the stage that creates the step's tables. Lambda/AppSync steps sign in with
- * BCAT_EMAIL / BCAT_PASSWORD (a staff user of the production pool). The production AppSync URL, pool ids and Lambda names are
+ * job running on main, BCAT_SCHEMA_STAGE on main >= the stage that creates the step's tables. Only the steps that still use the staff-signed Lambda/AppSync API
+ * (backfill, incl. backfill-check --evaluate) sign in with BCAT_EMAIL / BCAT_PASSWORD (a staff user of the production pool). The production AppSync URL, pool ids and Lambda names are
  * found with read-only aws amplify/cloudformation/appsync/lambda calls; nothing secret is read or printed.
  * Logs: ~/bcat-ops-backups/aw-prod-logs/<step>-<timestamp>.log (counts and status only) + <step>.checkpoint.json (resume).
  */
@@ -34,6 +35,7 @@ import { register } from 'node:module'
 import { LambdaClient } from '@aws-sdk/client-lambda'
 import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, PutCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { fileArgs, reconcileArgs, stageArgs } from './lib/awProdOffline.mjs'
 import {
   AwProdRefusal, PROD_API_ID, PROD_SUFFIX, REGION, STEPS, STEP_NAMES, checkBackupStamp, confirmTokenFor, createCheckpoint, createLog,
   defaultAws, evaluateRun, localDate, logTableDiff, maskPro, readProdState, resolveProdSuffix, scrub, sha, snapshotTables,
@@ -242,6 +244,22 @@ const FILE_STEPS = {
   'ap-expected': { name: 'ap', flag: 'expected-file' },
 }
 
+/** Spawns scripts/importAljex.mjs (the offline CLI that carries the production gate); every output line is scrubbed into the log. */
+async function spawnImportAljex(ctx, args) {
+  const { log, now } = ctx
+  const env = { ...process.env, BCAT_ALLOW_PROD: localDate(now) }
+  const { spawn } = await import('node:child_process')
+  const code = await new Promise((res) => {
+    const child = spawn('node', args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const sink = (buf) => { for (const line of String(buf).split('\n')) if (line.trim()) { log.info(line); process.stdout.write(`${scrub(line)}\n`) } }
+    child.stdout.on('data', sink)
+    child.stderr.on('data', sink)
+    child.on('close', res)
+  })
+  log.info(`importAljex ${args[1]}: exit code ${code}`)
+  return code
+}
+
 async function stepFile(ctx) {
   const { step, deps, log, apply, values, ckpt } = ctx
   if (!values.file) throw new AwProdRefusal(`${step} needs --file <csv>`)
@@ -256,10 +274,10 @@ async function stepFile(ctx) {
   const key = `applied:${fileFingerprint(values.file)}`
   if (!apply && !values.plan) return { status: 'dry-run' }
   if (apply && ckpt.has(key)) { log.info(`${step}: this exact file was already applied (checkpoint); nothing to do`); return { status: 'already-applied' } }
-  if (apply && !values['live-tag']) throw new AwProdRefusal(`${step} --apply needs --live-tag <TAG>`)
-  const api = imp.makeApi(await deps.apiClient())
-  const v = { [spec.flag]: values.file, apply, 'live-tag': values['live-tag'], cutoff: values.cutoff }
-  await tee(log, () => imp.runFiles(api, core, spec.name, v))
+  const args = fileArgs(step, values, { apply, account: apply ? await deps.accountId() : null })
+  log.info(`${step}: offline import via importAljex file (${apply ? 'plan, then APPLY' : 'plan only, nothing written'}); no staff password needed`)
+  const code = await (deps.importAljex ?? spawnImportAljex)(ctx, args)
+  if (code !== 0) { process.exitCode = code ?? 1; return { status: 'failed' } }
   if (apply) ckpt.mark(key)
   return { status: apply ? 'applied' : 'planned' }
 }
@@ -270,9 +288,9 @@ async function stepStageExport(ctx) {
   const size = statSync(resolve(process.cwd(), values.file)).size
   log.counts('stage-export local check', { bytes: size })
   if (!apply) return { status: 'dry-run' }
-  const imp = await import('./awImport.mjs')
-  const api = imp.makeApi(await deps.apiClient())
-  await tee(log, () => imp.stageExport(api, values.file))
+  log.info('stage-export: staging locally via importAljex stage (nothing is uploaded or written to AWS)')
+  const code = await (deps.importAljex ?? spawnImportAljex)(ctx, stageArgs(values))
+  if (code !== 0) { process.exitCode = code ?? 1; return { status: 'failed' } }
   return { status: 'staged' }
 }
 
@@ -280,9 +298,12 @@ async function stepReconcile(ctx) {
   const { deps, log, apply, values } = ctx
   if (!values.entity || !values['source-job']) throw new AwProdRefusal('reconcile needs --entity and --source-job')
   if (!apply) { log.info(`reconcile ${values.entity}: would start a reconciliation job (writes AljexImportJob/report files)`); return { status: 'dry-run' } }
-  const imp = await import('./awImport.mjs')
-  const api = imp.makeApi(await deps.apiClient())
-  await tee(log, () => imp.runReconcile(api, values))
+  const fn = await deps.lambdaName('tmsaljeximport')
+  const bucket = await deps.aws(['lambda', 'get-function-configuration', '--function-name', fn, '--query', 'Environment.Variables.DATA_SAFETY_BUCKET'])
+  const args = reconcileArgs(values, { account: await deps.accountId(), bucket: typeof bucket === 'string' ? bucket : '' })
+  log.info(`reconcile ${values.entity}: offline report via importAljex reconcile-entity; publishes a RECONCILE job and the report files`)
+  const code = await (deps.importAljex ?? spawnImportAljex)(ctx, args)
+  if (code !== 0) { process.exitCode = code ?? 1; return { status: 'failed' } }
   return { status: 'reconciled' }
 }
 
