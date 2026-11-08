@@ -118,7 +118,7 @@ case "$*" in
   *"amplify list-jobs"*) printf 'SUCCEED\\tSUCCEED\\n' ;;
   *"keys(branch"*) printf 'BCAT_SCHEMA_STAGE\\tOTHER\\n' ;;
   *"amplify get-branch"*) echo 3 ;;
-  *"list-tables"*) printf '%b' "\${FAKE_TABLE_PAGES:-110\\n}" ;;
+  *"list-tables"*) printf '%b' "\${FAKE_TABLE_PAGES:-110\\n}"; case "$*" in *"!contains(@,'-rh')"*|*"ends_with(@,'-NONE')"*) ;; *) [ -n "$FAKE_RH_COPIES" ] && printf '%s\\n' "$FAKE_RH_COPIES" ;; esac ;;
   *"describe-table"*) [ "$FAKE_VAULT" = 1 ] && exit 0 || exit 255 ;;
   *"dynamodb scan"*) echo 0 ;;
   *) ;;
@@ -301,6 +301,12 @@ describe('preflight table count is page-safe', () => {
     const sb = sandbox()
     const r = run(sb, { args: ['--dry-only', '--only', 'preflight'], input: 'PRODUCTION\n', env: { FAKE_TABLE_PAGES: '27\\n27\\n25\\n27\\n3\\n' } })
     expect(r.results).toMatch(/tables with suffix\t110\t109\tFAIL/)
+  })
+
+  it('preflight counts only real production tables: the -rh rehearsal copies do not move the 110', () => {
+    const sb = sandbox()
+    const r = run(sb, { args: ['--dry-only', '--only', 'preflight'], input: 'PRODUCTION\n', env: { FAKE_RH_COPIES: '17' } })
+    expect(r.stdout).toMatch(/tables with suffix\s+110\s+110\s+.*PASS/)
   })
 })
 
