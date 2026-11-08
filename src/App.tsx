@@ -11,8 +11,6 @@ import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { CalendarPage } from '@/features/calendar/CalendarPage'
 import { TmsToaster } from '@/features/tms/kit/TmsToaster'
 import { TmsLayout } from '@/features/tms/TmsLayout'
-import { DashboardHome } from '@/features/dashboards/viewer/DashboardHome'
-import { DashboardViewPage } from '@/features/dashboards/viewer/DashboardViewPage'
 import { WorkflowsPage } from '@/features/workflows/WorkflowsPage'
 import { RunTracePage } from '@/features/workflows/RunTracePage'
 import { TrucksPage } from '@/features/trucks/TrucksPage'
@@ -78,7 +76,7 @@ import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
 import { PodsPage } from '@/features/pods/PodsPage'
-import { RequirePage, RequireAdmin, LandingRedirect, TmsIndexRedirect } from '@/components/RequirePage'
+import { RequirePage, RequireAdmin, LandingRedirect } from '@/components/RequirePage'
 import { DormantPage } from '@/components/RequireModels'
 import { BrokeragePage } from '@/features/tms/brokerage/BrokeragePage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
@@ -88,7 +86,6 @@ import { BillingSetupPage } from '@/features/directory/BillingSetupPage'
 import { DriverRoutes } from '@/features/driver-app/DriverRoutes'
 
 // The Aljex create/edit form is ~150 controls; load it only when someone opens it.
-const DashboardBuilderPage = lazy(() => import('@/features/dashboards/builder/DashboardBuilderPage').then((m) => ({ default: m.DashboardBuilderPage })))
 const ShipmentFormPage = lazy(() => import('@/features/shipments/form/ShipmentFormPage').then((m) => ({ default: m.ShipmentFormPage })))
 
 /** A retired saved-view URL: the all-shipments slug maps to the All list, the rest to Active. */
@@ -138,12 +135,10 @@ export default function App() {
                   */}
                 <Route element={<TmsLayout />}>
                 <Route path="/tms">
-                  <Route index element={<TmsIndexRedirect />} />
-                  <Route path="dashboard" element={<RequirePage page="tms"><DormantPage page="dashboard"><DashboardHome /></DormantPage></RequirePage>} />
-                  {/* Step AI: chat-built dashboards. The builder bounces to /tms/dashboard without DASHBOARDS_CREATE. */}
-                  <Route path="dashboard/d/:id" element={<RequirePage page="tms"><DormantPage page="dashboard"><DashboardViewPage /></DormantPage></RequirePage>} />
-                  <Route path="dashboard/new" element={<RequirePage page="tms"><DormantPage page="dashboard"><Suspense fallback={null}><DashboardBuilderPage /></Suspense></DormantPage></RequirePage>} />
-                  <Route path="dashboard/d/:id/edit" element={<RequirePage page="tms"><DormantPage page="dashboard"><Suspense fallback={null}><DashboardBuilderPage /></Suspense></DormantPage></RequirePage>} />
+                  <Route index element={<LandingRedirect />} />
+                  {/* The Company Dashboard is gone (the Dashboard at /dashboard is home). Its viewer and builder
+                      stay in the repo, unrouted; every old /tms/dashboard bookmark lands on /dashboard. */}
+                  <Route path="dashboard/*" element={<Navigate to="/dashboard" replace />} />
                   <Route path="shipments" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><ShipmentsBoard /></DormantPage></RequirePage>} />
                   {/* Saved board views are gone: old bookmarks land on the board. */}
                   <Route path="shipments/view/*" element={<SavedViewRedirect />} />
@@ -188,7 +183,7 @@ export default function App() {
                   <Route path="workflows" element={<RequirePage page="tms"><DormantPage page="workflows"><WorkflowsPage /></DormantPage></RequirePage>} />
                   <Route path="workflows/runs/:id" element={<RequirePage page="tms"><DormantPage page="workflows"><RunTracePage /></DormantPage></RequirePage>} />
                   {/* Academy is hidden: the pages stay in the tree, the routes land on the dashboard. */}
-                  <Route path="academy/*" element={<Navigate to="/tms/dashboard" replace />} />
+                  <Route path="academy/*" element={<Navigate to="/dashboard" replace />} />
                   {/* Settings (path stays /tms/brokerage) owns its own tab strip and nested routes; each tab
                       keeps the guard its standalone route carried before Step R. */}
                   <Route path="brokerage/*" element={<BrokeragePage />} />

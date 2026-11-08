@@ -20,16 +20,11 @@ export interface DormantPageDef {
   models: readonly string[]
   /** The schema stage that deploys the last of them. */
   stage: 1 | 2 | 3
-  /** Where the empty state's link goes; default is the Company Dashboard. */
-  back?: { to: string; label: string }
 }
 
 const SHIPMENT_CORE = ['Shipment', 'Order', 'LoadCarrier', 'LoadFinancials'] as const
-/** The Company Dashboard is the merged landing page, so its empty state leads to the production Dashboard instead of itself. */
-const PRODUCTION_DASHBOARD = { to: '/dashboard', label: 'Open the Dashboard' } as const
 
 export const DORMANT_PAGES = {
-  dashboard: { area: 'Company Dashboard', models: [...SHIPMENT_CORE, 'Invoice', 'CarrierBill', 'DashboardRollup'], stage: 3, back: PRODUCTION_DASHBOARD },
   shipments: { area: 'Shipments', models: SHIPMENT_CORE, stage: 2 },
   intake: { area: 'Intake', models: ['IntakeLoad', 'Shipment'], stage: 2 },
   carrierSales: { area: 'Carrier Sales', models: ['Shipment', 'LoadCarrier', 'Quote', 'Carrier'], stage: 2 },
@@ -63,8 +58,6 @@ export type DormantPageKey = keyof typeof DORMANT_PAGES
  * lifecycle tabs resolve their `to` through this, so a tab can never be live while its page is not.
  */
 export const DORMANT_ROUTES: readonly { path: string; page: DormantPageKey }[] = [
-  { path: '/tms/dashboard', page: 'dashboard' },
-  { path: '/tms/dashboard/*', page: 'dashboard' },
   { path: '/tms/shipments/intake', page: 'intake' },
   { path: '/tms/shipments/intake/*', page: 'intake' },
   { path: '/tms/shipments', page: 'shipments' },

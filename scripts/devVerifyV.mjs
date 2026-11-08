@@ -1010,19 +1010,19 @@ async function main() {
 
     const b = await launchBrowser({ origin, storage: admin.storage, profilePrefix: 'bcat-v-', purpose: 'V verification', viewport: { width: 1600, height: 1000, deviceScaleFactor: 1 } })
     try {
-      await b.navigate('/tms/dashboard')
+      await b.navigate('/dashboard')
       await waitLoaded(b).catch(() => {})
       await b.poll(() => b.evaluate(`!!document.querySelector('.tms-sidebar')`), 'shell sidebar mounted', 45_000)
       const refs = {}
       for (const theme of ['light', 'dark']) { await setTheme(b, theme); refs[theme] = await b.evaluate(SHELL_FACTS) }
       await setTheme(b, 'light')
       for (const theme of flag('no-dark') ? ['light'] : ['light', 'dark']) {
-        await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+        await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
         await setTheme(b, theme).catch(() => {})
         await v03Table(b, ctx, theme, refs[theme])
         await v10Walk(b, ctx, theme, refs[theme])
       }
-      await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+      await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
       await setTheme(b, 'light').catch(() => {})
       await phonePass(b, ctx)
     } finally { await b.close() }

@@ -45,7 +45,8 @@ export interface NavItem {
  * names; the old paths redirect to their TMS homes.
  */
 export const NAV_ITEMS: NavItem[] = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, pageKey: 'dashboard', section: 'ASSETS' },
+  // Rendered in the pinned block (`PINNED_ITEMS`), so it is not part of the ASSETS section; the row stays here as the permission and landing list.
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, pageKey: 'dashboard', section: 'BROKERAGE' },
   // Texts and calls with drivers through the Twilio dispatch number.
   { to: '/dispatch',  label: 'Dispatch',  icon: MessageSquare,   pageKey: 'dispatch', section: 'ASSETS', badgeKey: 'dispatch' },
   { to: '/driver-info', label: 'Driver info', icon: MapPin,     pageKey: 'dispatch', section: 'ASSETS' },

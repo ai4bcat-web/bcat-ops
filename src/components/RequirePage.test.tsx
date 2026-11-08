@@ -49,10 +49,28 @@ describe('LandingRedirect', () => {
     expect(screen.getByTestId('path')).toHaveTextContent('/tms/shipments')
   })
 
-  it('still sends a tms-granted user to the Brokerage dashboard', () => {
+  it('sends a tms-only user to the Shipments board', () => {
     auth.hasPageAccess = (key) => key === 'tms'
     renderRedirect()
-    expect(screen.getByTestId('path')).toHaveTextContent('/tms/dashboard')
+    expect(screen.getByTestId('path')).toHaveTextContent('/tms/shipments')
+  })
+
+  it('sends a calendar-only user (lost page-dashboard) to /calendar', () => {
+    auth.hasPageAccess = (key) => key === 'calendar'
+    renderRedirect()
+    expect(screen.getByTestId('path')).toHaveTextContent('/calendar')
+  })
+
+  it('prefers /dashboard over the Shipments board when a user holds both grants', () => {
+    auth.hasPageAccess = (key) => key === 'dashboard' || key === 'tms'
+    renderRedirect()
+    expect(screen.getByTestId('path')).toHaveTextContent('/dashboard')
+  })
+
+  it('sends an admin or owner (every grant) to /dashboard', () => {
+    auth.hasPageAccess = () => true
+    renderRedirect()
+    expect(screen.getByTestId('path')).toHaveTextContent('/dashboard')
   })
 
   it('sends a loadReview-only user to Load Review', () => {
@@ -71,6 +89,12 @@ describe('LandingRedirect', () => {
     renderRedirect()
     expect(screen.getByTestId('path')).toHaveTextContent(/^\/$/)
     expect(screen.getByText('No page access')).toBeInTheDocument()
+  })
+
+  it('sends the dashboard grant (Ruben) to /dashboard', () => {
+    auth.hasPageAccess = (key) => key === 'dashboard'
+    renderRedirect()
+    expect(screen.getByTestId('path')).toHaveTextContent('/dashboard')
   })
 })
 
@@ -91,5 +115,45 @@ describe('RequirePage', () => {
       </MemoryRouter>
     )
     expect(screen.getByTestId('content')).toBeInTheDocument()
+  })
+
+  describe('the /dashboard guard', () => {
+    function renderGuarded(path: string) {
+      return render(
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/dashboard" element={<RequirePage page="dashboard"><div data-testid="dash">dashboard</div></RequirePage>} />
+            <Route path="/tms/shipments" element={<RequirePage page={['loads', 'tms']}><div data-testid="ship">shipments</div></RequirePage>} />
+            <Route path="/calendar" element={<RequirePage page="calendar"><div data-testid="cal">calendar</div></RequirePage>} />
+            <Route path="*" element={<CurrentPath />} />
+          </Routes>
+        </MemoryRouter>
+      )
+    }
+
+    it('opens for the dashboard grant, and for an admin, who holds every grant', () => {
+      auth.hasPageAccess = (key) => key === 'dashboard'
+      renderGuarded('/dashboard').unmount()
+      auth.hasPageAccess = () => true
+      renderGuarded('/dashboard')
+      expect(screen.getByTestId('dash')).toBeInTheDocument()
+    })
+
+    it('sends a user who lost the grant to a page they can open, once, without a loop', () => {
+      auth.hasPageAccess = (key) => key === 'calendar'
+      renderGuarded('/dashboard')
+      expect(screen.getByTestId('cal')).toBeInTheDocument()
+    })
+
+    it('sends a tms-only user to the Shipments board, which accepts their grant', () => {
+      auth.hasPageAccess = (key) => key === 'tms'
+      renderGuarded('/dashboard')
+      expect(screen.getByTestId('ship')).toBeInTheDocument()
+    })
+
+    it('shows the no-access card, not an error or a loop, to a user who can open nothing', () => {
+      renderGuarded('/dashboard')
+      expect(screen.getByText('No page access')).toBeInTheDocument()
+    })
   })
 })

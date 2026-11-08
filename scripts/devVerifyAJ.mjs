@@ -576,7 +576,7 @@ const RUNNERS = {
   async AJ07(ctx) {
     // Every role: the page-tms grant first, then the admin, each with its own session.
     const adminNote = await openInIdentity(ctx, ctx.ids.admin.storage, 'bcat-aj-nav-admin-', async (b) => {
-      await b.navigate('/tms/dashboard'); await waitShell(b); await waitLoaded(b).catch(() => {})
+      await b.navigate('/dashboard'); await waitShell(b); await waitLoaded(b).catch(() => {})
       const rows = await b.evaluate(SIDEBAR_JS)
       expect(rows.filter((r) => r.label === 'Load Tracking').length === 0, 'admin: Load Tracking is still a sidebar row (it is the Track lifecycle tab)')
       expect(rows.filter((r) => /tracking|check-calls|documents/.test(String(r.href))).length === 0, 'admin: a tracking, check-calls or documents link is in the rail')
@@ -593,7 +593,7 @@ const RUNNERS = {
     return openInIdentity(ctx, ctx.ids.tms.storage, 'bcat-aj-nav-', async (b) => {
       const note = [adminNote]
       for (const t of themes(b)) {
-        await b.navigate('/tms/dashboard'); await waitShell(b); await waitLoaded(b).catch(() => {})
+        await b.navigate('/dashboard'); await waitShell(b); await waitLoaded(b).catch(() => {})
         await t.apply()
         const rows = await b.evaluate(SIDEBAR_JS)
         expect(rows.filter((r) => r.label === 'Load Tracking' || /^\/(tms\/)?(tracking|check-calls|documents)/.test(String(r.href))).length === 0, 'the sidebar still has a Load Tracking row or a tracking, check-calls or documents link')

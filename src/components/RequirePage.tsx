@@ -21,28 +21,28 @@ import { pathIsDormant } from '@/lib/dormantPages'
 // The lifecycle tabs (Quote, Build, View, Book, Track, Review) left the sidebar: a user granted only one of those pages still needs a landing target.
 const ALL_ITEMS = [...flatNavDefs(), ...LIFECYCLE_TABS.map((t) => ({ pageKey: t.pageKey, to: t.to })), ...NAV_ITEMS]
 
-/** A page whose tables are not deployed yet is a landing of last resort: it shows an empty state, so a person who can open anything else lands there first. */
+/** A page whose tables are not deployed yet is a landing of last resort: it shows an empty state, so a person who can open anything else lands there first. Admin-only rows never open on a page grant, so they are never a landing. */
 function firstAccessiblePath(hasPageAccess: (k: string) => boolean): string | null {
-  const open = ALL_ITEMS.filter((i) => hasPageAccess(i.pageKey))
+  const open = ALL_ITEMS.filter((i) => hasPageAccess(i.pageKey) && !('adminOnly' in i && i.adminOnly))
   return (open.find((i) => !pathIsDormant(i.to)) ?? open[0])?.to ?? null
 }
 
 /**
- * Where "/" (and the "no access to this page" fallback) sends a user. We prefer a
- * home-style landing page — the Brokerage dashboard for a TMS user, then the general
- * Dashboard, then the Fleet Manager Dashboard for fleet managers who lack the general
- * one — before falling back to whatever page comes first in nav order. This keeps admins
- * on the main Dashboard while a fleet manager (granted only fleet pages) lands on their
- * own dashboard instead of Time Off.
+ * Where "/" (and the "no access to this page" fallback) sends a user, in order: the Dashboard
+ * for anyone holding its grant (the owner and ADMIN hold every grant), the Shipments board for a
+ * `tms` user, the Fleet Manager Dashboard for a fleet manager; everyone else lands on the first
+ * page they can open in nav order. Every target passes its own guard for a user who reached it
+ * here, so the redirect cannot loop.
  */
-const LANDING_PRIORITY = ['tms', 'dashboard', 'fleetManagerDashboard']
+const LANDING_PRIORITY = [
+  { key: 'dashboard', to: '/dashboard' },
+  { key: 'tms', to: '/tms/shipments' },
+  { key: 'fleetManagerDashboard', to: '/fleet-dashboard' },
+]
 
 function preferredLandingPath(hasPageAccess: (k: string) => boolean): string | null {
-  for (const key of LANDING_PRIORITY) {
-    if (hasPageAccess(key)) {
-      const item = ALL_ITEMS.find((i) => i.pageKey === key)
-      if (item && !pathIsDormant(item.to)) return item.to
-    }
+  for (const { key, to } of LANDING_PRIORITY) {
+    if (hasPageAccess(key) && !pathIsDormant(to)) return to
   }
   return firstAccessiblePath(hasPageAccess)
 }
@@ -109,17 +109,9 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
   return fallback ? <Navigate to={fallback} replace /> : <NoAccess />
 }
 
-/** Sends "/" to the user's preferred landing page (dashboard-style if available). */
+/** Sends "/" and `/tms` to the user's landing page (see `LANDING_PRIORITY`). */
 export function LandingRedirect() {
   const { hasPageAccess } = useAuth()
   const fallback = preferredLandingPath(hasPageAccess)
   return fallback ? <Navigate to={fallback} replace /> : <NoAccess />
-}
-
-/**
- * `/tms`: the Company Dashboard, once its tables are deployed. Until then it is an empty state,
- * so `/tms` lands where "/" does (the production Dashboard) rather than on it.
- */
-export function TmsIndexRedirect() {
-  return pathIsDormant('/tms/dashboard') ? <LandingRedirect /> : <Navigate to="/tms/dashboard" replace />
 }

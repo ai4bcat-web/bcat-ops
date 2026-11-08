@@ -67,11 +67,7 @@ const HOOK_CLASSES = ['tms-overdue', 'tms-due', 'tms-theme-toggle', 'tms-dash', 
 // path placeholders: {shipment} {quote} {invoice} {bill} {carrier} {run} {provider} {intake}
 // pattern: the App.tsx / tab route this entry covers (":id"/":slug" normalise to ":p"); `light`/`dark` pass flags.
 export const ROUTES = [
-  { nn: '01', slug: 'dashboard', path: '/tms/dashboard', pattern: '/tms/dashboard', dark: true },
-  // Step AI: the builder and viewer. `zz-x` is an id that does not exist: the not-found state is what renders.
-  { nn: '01a', slug: 'dashboard-new', path: '/tms/dashboard/new', pattern: '/tms/dashboard/new' },
-  { nn: '01b', slug: 'dashboard-view', path: '/tms/dashboard/d/zz-x', pattern: '/tms/dashboard/d/:id' },
-  { nn: '01c', slug: 'dashboard-edit', path: '/tms/dashboard/d/zz-x/edit', pattern: '/tms/dashboard/d/:id/edit' },
+  { nn: '01', slug: 'dashboard', path: '/dashboard', pattern: '/dashboard', dark: true },
   { nn: '02', slug: 'shipments', path: '/tms/shipments', pattern: '/tms/shipments', dark: true, wideOk: true },
   { nn: '02b', slug: 'shipments-all', path: '/tms/shipments?list=all', pattern: '/tms/shipments?list=all', wideOk: true },
   { nn: '02i', slug: 'intake', path: '/tms/shipments/intake', pattern: '/tms/shipments/intake', dark: true },
@@ -603,7 +599,7 @@ async function themePass(b) {
   const pre = 'window.__s2Theme=null;new MutationObserver(function(_,o){var v=document.documentElement.getAttribute("data-tms-theme");if(v&&!window.__s2Theme){window.__s2Theme={value:v,readyState:document.readyState};o.disconnect()}}).observe(document,{attributes:true,subtree:true,attributeFilter:["data-tms-theme"]});'
   await b.addInitScript(pre)
   await setTheme(b, 'dark')
-  await b.navigate('/tms/dashboard')
+  await b.navigate('/dashboard')
   await waitLoaded(b).catch(() => {})
   await b.reload()
   await waitLoaded(b).catch(() => {})
@@ -694,7 +690,7 @@ async function main() {
     const b = await launchBrowser({ origin, storage: identity.storage, profilePrefix: 'bcat-s2-', purpose: 'S2 verification' })
     let tokens = {}
     try {
-      await b.navigate('/tms/dashboard')
+      await b.navigate('/dashboard')
       await waitLoaded(b).catch(() => {})
       const { data, state } = await discoverData(b, ship)
       console.log(`discovered: ${Object.entries(data).map(([k, v]) => `${k}=${v ? 'yes' : 'no'}`).join(' ')}`)

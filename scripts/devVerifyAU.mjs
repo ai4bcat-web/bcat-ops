@@ -551,7 +551,7 @@ async function main() {
     console.log(`fixtures: customers ${ctx.custA.id}, ${ctx.custB.id}; carrier ${ctx.carrierId}; ${ctx.locationIds.length} locations`)
     ctx.b = await launchBrowser({ origin, storage: ctx.admin.storage, profilePrefix: 'bcat-au-', purpose: 'AU verification', viewport: { width: 1440, height: 900, deviceScaleFactor: 1 } })
     try {
-      await ctx.b.navigate('/tms/dashboard'); await waitLoaded(ctx.b).catch(() => {})
+      await ctx.b.navigate('/dashboard'); await waitLoaded(ctx.b).catch(() => {})
       await walk.setTheme(ctx.b, 'light').catch(() => {})
       for (const step of AU_STEPS) await runStep(ctx, step)
     } finally { await ctx.b.close() }

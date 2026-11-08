@@ -47,8 +47,6 @@ vi.mock('@/features/driver-app/DriverRoutes', () => h.stub(['DriverRoutes']))
 vi.mock('@/features/tms/brokerage/BrokeragePage', () => h.stub(['BrokeragePage']))
 vi.mock('@/features/dashboard/DashboardPage', () => h.stub(['DashboardPage']))
 vi.mock('@/features/calendar/CalendarPage', () => h.stub(['CalendarPage']))
-vi.mock('@/features/dashboards/viewer/DashboardHome', () => h.stub(['DashboardHome']))
-vi.mock('@/features/dashboards/viewer/DashboardViewPage', () => h.stub(['DashboardViewPage']))
 vi.mock('@/features/workflows/WorkflowsPage', () => h.stub(['WorkflowsPage']))
 vi.mock('@/features/workflows/RunTracePage', () => h.stub(['RunTracePage']))
 vi.mock('@/features/trucks/TrucksPage', () => h.stub(['TrucksPage']))
@@ -115,7 +113,6 @@ vi.mock('@/features/dispatch/DispatchPage', () => h.stub(['DispatchPage']))
 vi.mock('@/features/pods/PodsPage', () => h.stub(['PodsPage']))
 vi.mock('@/features/directory/BillingSetupPage', () => h.stub(['BillingSetupPage']))
 vi.mock('@/features/driver-app/DriverRoutes', () => h.stub(['DriverRoutes']))
-vi.mock('@/features/dashboards/builder/DashboardBuilderPage', () => h.stub(['DashboardBuilderPage']))
 vi.mock('@/features/shipments/form/ShipmentFormPage', () => h.stub(['ShipmentFormPage']))
 
 const grants = (...keys: string[]) => { h.auth.hasPageAccess = (k) => keys.includes(k) }
@@ -248,10 +245,40 @@ describe('App routes', () => {
       await landed('CalendarPage|/calendar')
     })
 
-    it('/ sends a tms user to the Brokerage dashboard', async () => {
+    it('/ sends a tms-only user to the Shipments board', async () => {
       grants('tms')
       await visit('/')
-      await landed('DashboardHome|/tms/dashboard')
+      await landed('ShipmentsBoard|/tms/shipments')
+    })
+
+    it('/ sends a dashboard-grant user to the Dashboard', async () => {
+      grants('dashboard')
+      await visit('/')
+      await landed('DashboardPage|/dashboard')
+    })
+
+    it('/tms sends a dashboard-grant user to the Dashboard', async () => {
+      grants('dashboard')
+      await visit('/tms')
+      await landed('DashboardPage|/dashboard')
+    })
+
+    it('/dashboard opens on the dashboard grant, not on the tms grant', async () => {
+      grants('tms')
+      await visit('/dashboard')
+      await landed('ShipmentsBoard|/tms/shipments')
+    })
+
+    it('/dashboard without a grant lands on a page the user can open, never a loop', async () => {
+      grants('calendar')
+      await visit('/dashboard')
+      await landed('CalendarPage|/calendar')
+    })
+
+    it.each(['/tms/dashboard', '/tms/dashboard/new', '/tms/dashboard/d/D1', '/tms/dashboard/d/D1/edit'])('%s redirects to /dashboard', async (from) => {
+      grants('dashboard', 'tms')
+      await visit(from)
+      await landed('DashboardPage|/dashboard')
     })
   })
 })

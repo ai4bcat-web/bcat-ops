@@ -272,7 +272,7 @@ async function openAllGroups(b) {
 /** Gate 4 (+ gate 2 in the browser): the ADMIN sidebar is exactly §2.1. */
 async function sidebarGate(b, ctx, theme) {
   await step(`AA01-sidebar-tree-${theme}`, async () => {
-    await b.navigate('/tms/dashboard'); await waitShell(b); await waitLoaded(b).catch(() => {})
+    await b.navigate('/dashboard'); await waitShell(b); await waitLoaded(b).catch(() => {})
     await openAllGroups(b)
     const rows = await sidebarRows(b)
     const pinned = rows.filter((r) => r.section === null)
@@ -360,7 +360,7 @@ async function sidebarGate(b, ctx, theme) {
   if (theme !== 'light') return
   await step('AA01-collapsed-rail', async () => {
     await b.evaluate(`localStorage.setItem('tms-sidebar-collapsed', '1')`)
-    await b.navigate('/tms/dashboard'); await waitShell(b); await pause(500)
+    await b.navigate('/dashboard'); await waitShell(b); await pause(500)
     try {
       const facts = await b.evaluate(`(() => ({
         collapsed: !!document.querySelector('.tms-shell.tms-is-collapsed'),
@@ -524,7 +524,7 @@ async function phonePass(b, ctx) {
   await b.setViewport(390, 844, 2)
   try {
     await step('AA01-drawer-phone', async () => {
-      await b.navigate('/tms/dashboard'); await waitShell(b); await pause(500)
+      await b.navigate('/dashboard'); await waitShell(b); await pause(500)
       await b.click({ selector: '[aria-label="Open menu"]' })
       await b.poll(() => b.evaluate(`!!document.querySelector('.tms-shell.tms-nav-open')`), 'nav drawer open', 10_000)
       await openAllGroups(b)
@@ -571,7 +571,7 @@ async function phonePass(b, ctx) {
 async function openInIdentity(ctx, storage, prefix, theme, fn) {
   const b = await launchBrowser({ origin: ctx.origin, storage: { ...storage, ...(theme === 'dark' ? { 'tms-theme': 'dark' } : {}) }, profilePrefix: prefix, purpose: 'AA verification', viewport: { width: 1600, height: 1000, deviceScaleFactor: 1 } })
   try {
-    await b.navigate('/tms/dashboard')
+    await b.navigate('/dashboard')
     await waitShell(b)
     return await fn(b)
   } finally { await b.close() }
@@ -648,7 +648,7 @@ async function personaGate(ctx, theme) {
     return 'rail = Settings › Compliance; Settings header → /compliance'
   }))
   await step(`AA05-persona-tms-${theme}`, () => openInIdentity(ctx, ctx.ids.tms.storage, 'bcat-aa-tms-', theme, async (b) => {
-    await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+    await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
     await openAllGroups(b)
     const rows = await sidebarRows(b)
     const hrefs = new Set(rows.map((r) => pathOf(r.href)))
@@ -1179,14 +1179,14 @@ async function main() {
     const b = await launchBrowser({ origin, storage: ctx.ids.admin.storage, profilePrefix: 'bcat-aa-', purpose: 'AA verification', viewport: { width: 1600, height: 1000, deviceScaleFactor: 1 } })
     b.ctx = ctx
     try {
-      await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {}); await waitShell(b)
+      await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {}); await waitShell(b)
       const refs = {}
       for (const theme of themes) { await setTheme(b, theme); refs[theme] = await b.evaluate(SHELL_FACTS) }
       await setTheme(b, 'light')
 
       await oldUrlsGate(b)
       for (const theme of themes) {
-        await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+        await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
         await setTheme(b, theme).catch(() => {})
         await sidebarGate(b, ctx, theme)
         for (const route of AA_ROUTES) {
@@ -1197,7 +1197,7 @@ async function main() {
         if (ctx.reviewDeployed) await loadReviewGate(b, ctx, theme)
         else if (matches('AA03')) skipLine('AA03-load-review', theme, 'Step AA review backend not deployed', BACKEND_ALLOWED)
       }
-      await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+      await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
       await setTheme(b, 'light').catch(() => {})
       await phonePass(b, ctx)
     } finally { await b.close() }

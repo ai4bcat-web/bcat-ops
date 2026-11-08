@@ -17,7 +17,7 @@ import { join } from 'node:path'
 const LIFECYCLE_LABEL = { quote: 'Quote', build: 'Build', view: 'View', book: 'Book', track: 'Track', review: 'Review' }
 
 export const HOME_ROOTS = [
-  'Company Dashboard', 'Active shipments', 'Customers', 'Carriers',
+  'Dashboard', 'Active shipments', 'Customers', 'Carriers',
   'Locations', 'Accounting', 'Settings', 'ASSETS', 'CAR SHIPPING', 'COMPANY',
 ]
 
@@ -37,11 +37,8 @@ const COMPANY_TABS = ['company', 'billing', 'branding', 'notifications', 'import
 
 export const AA_HOMES = [
   // ── /tms block (§3.1) ──
-  redirect('/tms', '/tms/dashboard'),
-  page('/tms/dashboard', 'Company Dashboard', '/tms/dashboard', 'tms'),
-  page('/tms/dashboard/new', 'Company Dashboard', '/tms/dashboard', 'tms'),
-  page('/tms/dashboard/d/:id', 'Company Dashboard', '/tms/dashboard', 'tms'),
-  page('/tms/dashboard/d/:id/edit', 'Company Dashboard', '/tms/dashboard', 'tms'),
+  redirect('/tms', '/dashboard'),
+  redirect('/tms/dashboard/*', '/dashboard'),
   page('/tms/shipments', 'Active shipments', '/tms/shipments', 'loads|tms'),
   redirect('/tms/shipments/view/*', '/tms/shipments'),
   lifecycle('/tms/shipments/intake', 'build', 'loads|tms|intakeReview'),
@@ -76,7 +73,7 @@ export const AA_HOMES = [
   page('/tms/locations', 'Locations', '/tms/locations', 'locations|tms'),
   hidden('/tms/workflows', 'Settings (breadcrumb only)', 'tms'),
   hidden('/tms/workflows/runs/:id', 'Settings (breadcrumb only)', 'tms'),
-  redirect('/tms/academy/*', '/tms/dashboard'),
+  redirect('/tms/academy/*', '/dashboard'),
   splat('/tms/brokerage/*', 'Settings (below)', 'per tab'),
   page('/tms/brokerage', 'Settings › General & automation', '/tms/brokerage', 'settings|tms'),
   page('/tms/brokerage/users', 'Settings › Users & roles', '/tms/brokerage/users', 'ADMIN'),
@@ -94,7 +91,7 @@ export const AA_HOMES = [
 
   // ── legacy shell routes (§3.2) ──
   redirect('/', 'LandingRedirect (first page the user may open)'),
-  page('/dashboard', 'ASSETS › Dashboard', '/dashboard', 'dashboard'),
+  page('/dashboard', 'Dashboard', '/dashboard', 'dashboard'),
   page('/calendar', 'ASSETS › Calendar', '/calendar', 'calendar'),
   page('/driver-info', 'ASSETS › Driver info', '/driver-info', 'dispatch'),
   page('/dispatch', 'ASSETS › Dispatch', '/dispatch', 'dispatch'),
@@ -183,12 +180,12 @@ export const AA_HOMES = [
  * the landing path is still asserted, the page may legitimately render a not-found state there.
  */
 export const AA_OLD_URLS = [
-  ['/', '/tms/dashboard'],
-  ['/tms', '/tms/dashboard'],
-  ['/tms/dashboard', '/tms/dashboard'],
-  ['/tms/dashboard/new', '/tms/dashboard/new'],
-  ['/tms/dashboard/d/zz-x', '/tms/dashboard/d/zz-x'],
-  ['/tms/dashboard/d/zz-x/edit', '/tms/dashboard/d/zz-x/edit'],
+  ['/', '/dashboard'],
+  ['/tms', '/dashboard'],
+  ['/tms/dashboard', '/dashboard'],
+  ['/tms/dashboard/new', '/dashboard'],
+  ['/tms/dashboard/d/zz-x', '/dashboard'],
+  ['/tms/dashboard/d/zz-x/edit', '/dashboard'],
   ['/tms/shipments', '/tms/shipments'],
   ['/tms/shipments?list=all', '/tms/shipments', '?list=all'],
   ['/tms/shipments/view/zz-x', '/tms/shipments'],
@@ -221,8 +218,8 @@ export const AA_OLD_URLS = [
   ['/tms/carriers/zz-x', '/tms/carriers/zz-x'],
   ['/tms/locations', '/tms/locations'],
   ['/tms/workflows', '/tms/workflows'],
-  ['/tms/academy', '/tms/dashboard'],
-  ['/tms/academy/zz-x', '/tms/dashboard'],
+  ['/tms/academy', '/dashboard'],
+  ['/tms/academy/zz-x', '/dashboard'],
   ['/tms/brokerage', '/tms/brokerage'],
   ['/tms/brokerage/users', '/tms/brokerage/users'],
   ['/tms/brokerage/commissions', '/tms/brokerage/commissions'],
@@ -308,7 +305,7 @@ export const AA_OLD_URLS = [
 
 /** The pinned block of §2.1 as an ADMIN sees it: [label, href, depth]. Section rows (ASSETS, CAR SHIPPING, COMPANY) follow it. */
 export const AA_SIDEBAR = [
-  ['Company Dashboard', '/tms/dashboard', 0],
+  ['Dashboard', '/dashboard', 0],
   ['Active shipments', '/tms/shipments', 0],
   ['Customers', '/tms/customers', 0],
   ['Carriers', '/tms/carriers/find', 0],
@@ -363,7 +360,7 @@ export const AA_PERSONAS = {
 
 /** Walk rows. `legacy`: lives under TmsLayout via the legacy block (has .tms-legacy-host). */
 export const AA_ROUTES = [
-  { nn: 'AA01', slug: 'sidebar', path: '/tms/dashboard', pattern: '/tms/dashboard', dark: true, phone: true },
+  { nn: 'AA01', slug: 'sidebar', path: '/dashboard', pattern: '/dashboard', dark: true, phone: true },
   { nn: 'AA02', slug: 'carrier-sales', path: '/tms/carrier-sales', pattern: '/tms/carrier-sales', dark: true, phone: true },
   { nn: 'AA03', slug: 'load-review', path: '/tms/load-review', pattern: '/tms/load-review', dark: true, wideOk: true, phone: true },
   { nn: 'AA04', slug: 'vendors', path: '/tms/vendors', pattern: '/tms/vendors', dark: true, phone: true },

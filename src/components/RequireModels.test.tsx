@@ -24,7 +24,7 @@ describe('RequireModels', () => {
     const status = screen.getByRole('status')
     expect(status.textContent).toContain('Shipments turns on during the merge')
     expect(status.textContent).toContain('This area switches on when the merge finishes. Nothing is wrong and no data is lost. Existing pages keep working.')
-    expect(screen.getByRole('link', { name: 'Back to Company Dashboard' }).getAttribute('href')).toBe('/tms/dashboard')
+    expect(screen.getByRole('link', { name: 'Back to Dashboard' }).getAttribute('href')).toBe('/dashboard')
   })
 
   it('renders the children once every model is deployed', () => {
@@ -35,18 +35,17 @@ describe('RequireModels', () => {
   })
 
   it('lets a page point the way out somewhere else', () => {
-    renderGuard(<RequireModels models={['Shipment']} area="Dash" back={{ to: '/dashboard', label: 'Open the Dashboard' }}><p>x</p></RequireModels>)
-    expect(screen.getByRole('link', { name: 'Open the Dashboard' }).getAttribute('href')).toBe('/dashboard')
+    renderGuard(<RequireModels models={['Shipment']} area="Dash" back={{ to: '/calendar', label: 'Open the Calendar' }}><p>x</p></RequireModels>)
+    expect(screen.getByRole('link', { name: 'Open the Calendar' }).getAttribute('href')).toBe('/calendar')
   })
 })
 
 describe('DormantPage', () => {
   beforeEach(() => { deployed.models = new Set() })
 
-  it('takes area and models from the page table, and the Company Dashboard leads to the production Dashboard rather than itself', () => {
-    renderGuard(<DormantPage page="dashboard"><p>live</p></DormantPage>)
-    expect(screen.getByRole('status').textContent).toContain('Company Dashboard turns on during the merge')
-    expect(screen.getByRole('link', { name: 'Open the Dashboard' }).getAttribute('href')).toBe('/dashboard')
+  it('takes area and models from the page table', () => {
+    renderGuard(<DormantPage page="shipments"><p>live</p></DormantPage>)
+    expect(screen.getByRole('status').textContent).toContain('Shipments turns on during the merge')
   })
 
   it('stays dormant while any one model of the page is missing, then turns on when the last one arrives', () => {

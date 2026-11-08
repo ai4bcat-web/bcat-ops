@@ -1021,7 +1021,7 @@ async function main() {
     }
     // AL09 runs before AL07 so the offers it clicks are still open (recorded deviation).
     if (b && ctx.seeded.open) {
-      await b.navigate('/tms/dashboard')
+      await b.navigate('/dashboard')
       await waitLoaded(b).catch(() => {})
       await b.poll(() => b.evaluate(`!!document.querySelector('.tms-sidebar')`), 'shell sidebar mounted', 45_000)
       for (const theme of flag('no-dark') ? ['light'] : ['light', 'dark']) {

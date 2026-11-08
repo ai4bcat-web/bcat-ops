@@ -370,7 +370,7 @@ async function removalFlow(b) {
       const left = gone.markers.filter((m) => text.includes(m))
       if (left.length) throw new Error(`${gone.path} still renders: ${left.join(', ')}`)
     }
-    await b.navigate('/tms/dashboard'); await waitLoaded(b)
+    await b.navigate('/dashboard'); await waitLoaded(b)
     const side = await sidebarText(b)
     const banned = SIDEBAR_BANNED.filter((w) => new RegExp(`\\b${w}\\b`).test(side))
     if (banned.length) throw new Error(`sidebar still names: ${banned.join(', ')}`)
@@ -389,7 +389,7 @@ async function removalFlow(b) {
     return `${U_KEPT.length} kept pages still render`
   })
   await step('U07-dashboard', async () => {
-    await b.navigate('/tms/dashboard'); await waitLoaded(b)
+    await b.navigate('/dashboard'); await waitLoaded(b)
     const text = await mainText(b)
     if (/Academy|Workflows/.test(text)) throw new Error('the dashboard still names Academy or Workflows')
     return 'no Academy/Workflows card'
@@ -521,7 +521,7 @@ async function ingestFlow(ctx) {
 async function openInIdentity(ctx, storage, prefix, theme, fn) {
   const b = await launchBrowser({ origin: ctx.origin, storage: { ...storage, ...(theme === 'dark' ? { 'tms-theme': 'dark' } : {}) }, profilePrefix: prefix, purpose: 'U verification', viewport: { width: 1600, height: 1000, deviceScaleFactor: 1 } })
   try {
-    await b.navigate('/tms/dashboard')
+    await b.navigate('/dashboard')
     await b.poll(() => b.evaluate(`!!document.querySelector('.tms-sidebar')`), 'shell sidebar mounted', 45_000)
     return await fn(b)
   } finally { await b.close() }
@@ -804,7 +804,7 @@ async function main() {
 
     const b = await launchBrowser({ origin, storage: admin.storage, profilePrefix: 'bcat-u-', purpose: 'U verification', viewport: { width: 1600, height: 1000, deviceScaleFactor: 1 } })
     try {
-      await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+      await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
       await b.poll(() => b.evaluate(`!!document.querySelector('.tms-sidebar')`), 'shell sidebar mounted', 45_000)
       const refs = {}
       for (const theme of ['light', 'dark']) { await setTheme(b, theme); refs[theme] = await b.evaluate(SHELL_FACTS) }
@@ -812,14 +812,14 @@ async function main() {
 
       await removalFlow(b)
       for (const theme of flag('no-dark') ? ['light'] : ['light', 'dark']) {
-        await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+        await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
         await setTheme(b, theme).catch(() => {})
         for (const route of U_ROUTES) await auditRoute(b, route, theme, refs[theme])
         await shipmentsFlow(b, ctx, theme)
         await divisionFlow(b, ctx, theme)
         await intakeAreaFlow(b, ctx, theme)
       }
-      await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+      await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
       await setTheme(b, 'light').catch(() => {})
       await probeFlow(ctx)
       await phonePass(b, ctx)

@@ -32,7 +32,7 @@ describe('activeLifecycleTab', () => {
     expect(activeLifecycleTab('/tms/shipments/intake')).not.toBe('view')
   })
 
-  it.each(['/tms/dashboard', '/tms/customers', '/tms/invoicing', '/tms/brokerage/users', '/tms/ratesheet', '/tms', '/compliance'])(
+  it.each(['/dashboard', '/tms/customers', '/tms/invoicing', '/tms/brokerage/users', '/tms/ratesheet', '/tms', '/compliance'])(
     '%s lights no tab',
     (path) => {
       expect(activeLifecycleTab(path)).toBeNull()

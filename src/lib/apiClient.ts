@@ -1763,8 +1763,40 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     }
   }
 }
-export async function saveTmsSettings(patch: Partial<Omit<TmsSettings, 'id' | 'createdAt' | 'updatedAt' | 'trackingAutomation'>>, expectedUpdatedAt?: string): Promise<TmsSettings> {
-  return directoryAction<TmsSettings>('SAVE_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+type TmsSettingsPatch = Partial<Omit<TmsSettings, 'id' | 'createdAt' | 'updatedAt' | 'trackingAutomation'>>
+
+/** Order-insensitive structural equality for the JSON-shaped values a settings row holds. */
+function sameSettingValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const ao = a as Record<string, unknown>
+  const bo = b as Record<string, unknown>
+  const keys = Object.keys(ao)
+  return keys.length === Object.keys(bo).length && keys.every((k) => k in bo && sameSettingValue(ao[k], bo[k]))
+}
+
+/**
+ * Saves part of the one TmsSettings row. The server wants the row's `updatedAt` as an
+ * optimistic-concurrency token the moment the row exists, but a page that loaded before the
+ * row was first created holds no token (`expectedUpdatedAt` undefined = "there was no row").
+ * When that save is refused with "expectedUpdatedAt is required", someone created the row in
+ * between: refetch it and retry ONCE with its current token. This is never a silent overwrite:
+ * if the new row already holds a different value for any field being saved, the caller sees the
+ * same conflict error a stale token produces. Any other error, and a failed retry, propagate.
+ */
+export async function saveTmsSettings(patch: TmsSettingsPatch, expectedUpdatedAt?: string): Promise<TmsSettings> {
+  try {
+    return await directoryAction<TmsSettings>('SAVE_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+  } catch (err) {
+    if (expectedUpdatedAt !== undefined || !(err instanceof Error) || !/expectedUpdatedAt is required/.test(err.message)) throw err
+    const current = await getTmsSettings()
+    if (!current?.updatedAt) throw err
+    const row = current as unknown as Record<string, unknown>
+    const changed = Object.entries(patch).some(([field, value]) => value !== undefined && row[field] != null && !sameSettingValue(row[field], value))
+    if (changed) throw new Error('This settings was changed by someone else — reload and try again.', { cause: err })
+    return directoryAction<TmsSettings>('SAVE_SETTINGS', { id: 'default', expectedUpdatedAt: current.updatedAt, ...patch })
+  }
 }
 
 // ── My Brokerage (Step L) ───────────────────────────────────────────────────

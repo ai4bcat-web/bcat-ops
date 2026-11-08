@@ -570,7 +570,7 @@ const RUNNERS = {
 
   async AW21(ctx) {
     const b = ctx.b
-    await openPage(b, '/tms/dashboard')
+    await openPage(b, '/dashboard')
     const probe = await b.evaluate(`(() => { const root = document.documentElement; const prev = root.getAttribute('data-tms-theme'); const read = (t) => { if (t === 'dark') root.setAttribute('data-tms-theme', 'dark'); else root.removeAttribute('data-tms-theme'); return getComputedStyle(root).getPropertyValue('--tms-primary').trim() }; const out = { light: read('light'), dark: read('dark') }; if (prev) root.setAttribute('data-tms-theme', prev); else root.removeAttribute('data-tms-theme'); return out })()`)
     const probs = paletteProblems(probe)
     must(probs.length === 0, probs.join('; '))
@@ -687,7 +687,7 @@ async function main() {
     ctx.files = writeSyntheticFiles(ctx.eng, tmp)
     ctx.b = await launchBrowser({ origin, storage: ctx.ids.admin.storage, profilePrefix: 'bcat-aw-', purpose: 'AW verification', viewport: { width: 1440, height: 900, deviceScaleFactor: 1 } })
     try {
-      await ctx.b.navigate('/tms/dashboard'); await pause(1500)
+      await ctx.b.navigate('/dashboard'); await pause(1500)
       for (const step of AW_STEPS) await runStep(ctx, step)
     } finally { await ctx.b.close() }
   } finally {

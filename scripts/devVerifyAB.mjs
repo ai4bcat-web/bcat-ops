@@ -834,7 +834,7 @@ async function main() {
       if (id === 'AB02') await step('AB02-model', () => ab02Model(ctx))
     }
     if (b) {
-      await b.navigate('/tms/dashboard')
+      await b.navigate('/dashboard')
       await waitLoaded(b).catch(() => {})
       await b.poll(() => b.evaluate(`!!document.querySelector('.tms-sidebar')`), 'shell sidebar mounted', 45_000)
       const themes = flag('no-dark') ? ['light'] : ['light', 'dark']

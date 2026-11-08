@@ -1708,7 +1708,7 @@ async function main() {
     for (const step of AH_STEPS.filter((s) => ['AH01', 'AH02'].includes(s.id))) await runStep(ctx, step)
     ctx.b = await launchBrowser({ origin, storage: ctx.ids.admin.storage, profilePrefix: 'bcat-ah-', purpose: 'AH verification', viewport: { width: 1600, height: 1400, deviceScaleFactor: 1 } })
     try {
-      await ctx.b.navigate('/tms/dashboard'); await waitLoaded(ctx.b).catch(() => {})
+      await ctx.b.navigate('/dashboard'); await waitLoaded(ctx.b).catch(() => {})
       await walk.setTheme(ctx.b, 'light').catch(() => {})
       for (const step of AH_STEPS.filter((s) => !['AH01', 'AH02'].includes(s.id))) await runStep(ctx, step)
     } finally { await ctx.b.close() }

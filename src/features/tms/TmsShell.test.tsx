@@ -15,7 +15,7 @@ import { TmsShell } from './TmsShell'
 import type { TmsCompanyOption, TmsNavItem, TmsNavSection, TmsShellProps } from './TmsShell'
 
 const PINNED: TmsNavItem[] = [
-  { to: '/tms/dashboard', label: 'Company Dashboard', icon: LayoutDashboard },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   {
     to: '/tms/rates',
     label: 'Quotes',
@@ -108,17 +108,17 @@ describe('TmsShell', () => {
     expect(screen.queryByText(/BROKERAGE/)).not.toBeInTheDocument()
   })
 
-  it('pins Company Dashboard first', () => {
+  it('pins Dashboard first', () => {
     renderShell()
-    const pinned = rail().getAllByRole('link', { name: /^Company Dashboard$|^Quotes$|^Shipments$/ })
-    expect(pinned[0]).toHaveAttribute('href', '/tms/dashboard')
+    const pinned = rail().getAllByRole('link', { name: /^Dashboard$|^Quotes$|^Shipments$/ })
+    expect(pinned[0]).toHaveAttribute('href', '/dashboard')
     expect(pinned[1]).toHaveAttribute('href', '/tms/rates')
   })
 
   it('marks the item matching activePath active and leaves the others alone', () => {
     renderShell('/tms/shipments')
     expect(rail().getByRole('link', { name: /^Shipments$/ })).toHaveClass('tms-active')
-    expect(rail().getByRole('link', { name: /^Company Dashboard$/ })).not.toHaveClass('tms-active')
+    expect(rail().getByRole('link', { name: /^Dashboard$/ })).not.toHaveClass('tms-active')
   })
 
   it('lights Active on the bare board and All on ?list=all, never both', () => {
@@ -172,7 +172,7 @@ describe('TmsShell', () => {
       group: true,
       children: [{ to: '/tms/vendors', label: 'Vendors' }, { to: '/tms/factors', label: 'Factoring' }],
     }
-    const { unmount } = renderShell('/tms/dashboard', undefined, { pinned: [group] })
+    const { unmount } = renderShell('/dashboard', undefined, { pinned: [group] })
     expect(rail().getByRole('link', { name: 'Accounting' })).toHaveAttribute('href', '/tms/vendors')
     expect(rail().getByRole('link', { name: 'Accounting' })).not.toHaveClass('tms-active')
     unmount()
@@ -276,20 +276,20 @@ describe('TmsShell', () => {
   })
 
   it('narrows the rail to the chosen business, always keeps the pinned freight list, and restores on All businesses', () => {
-    renderShell('/tms/dashboard', undefined, { companies: COMPANIES })
+    renderShell('/dashboard', undefined, { companies: COMPANIES })
     expect(rail().getByRole('link', { name: 'Fleet dispatch' })).toBeInTheDocument()
 
     // Choosing the brokerage folds the fleet section; the pinned block never folds.
     fireEvent.click(screen.getByRole('button', { name: /^Business:/ }))
     fireEvent.click(screen.getByRole('option', { name: 'BCAT Logistics' }))
     expect(rail().queryByRole('link', { name: 'Fleet dispatch' })).not.toBeInTheDocument()
-    expect(rail().getByRole('link', { name: 'Company Dashboard' })).toBeInTheDocument()
+    expect(rail().getByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
     expect(window.localStorage.getItem('tms-company')).toBe('BROKERAGE')
 
     fireEvent.click(screen.getByRole('button', { name: /^Business:/ }))
     fireEvent.click(screen.getByRole('option', { name: 'Ivan Cartage' }))
     expect(rail().getByRole('link', { name: 'Fleet dispatch' })).toBeInTheDocument()
-    expect(rail().getByRole('link', { name: 'Company Dashboard' })).toBeInTheDocument()
+    expect(rail().getByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
     expect(window.localStorage.getItem('tms-company')).toBe('ASSETS')
 
     fireEvent.click(screen.getByRole('button', { name: /^Business:/ }))
@@ -300,7 +300,7 @@ describe('TmsShell', () => {
 
   it('treats a stored business that is not offered as All businesses', () => {
     window.localStorage.setItem('tms-company', 'GONE')
-    renderShell('/tms/dashboard', undefined, { companies: COMPANIES })
+    renderShell('/dashboard', undefined, { companies: COMPANIES })
     expect(rail().getByRole('link', { name: 'Fleet dispatch' })).toBeInTheDocument()
   })
 
@@ -344,7 +344,7 @@ describe('TmsShell', () => {
       breadcrumb: [{ label: 'Shipments', to: '/tms/shipments' }, { label: 'Intake', to: '/tms/shipments/intake' }, { label: 'Load' }],
     })
     const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }))
-    expect(trail.getByRole('link', { name: 'Dashboard home' })).toHaveAttribute('href', '/tms/dashboard')
+    expect(trail.getByRole('link', { name: 'Dashboard home' })).toHaveAttribute('href', '/dashboard')
     expect(trail.getByRole('link', { name: 'Shipments' })).toHaveAttribute('href', '/tms/shipments')
     expect(trail.getByText('Load')).toHaveAttribute('aria-current', 'page')
   })
@@ -394,7 +394,7 @@ describe('TmsShell', () => {
     it('closes when a nav link is followed or the backdrop is tapped', () => {
       const { container } = renderShell()
       fireEvent.click(hamburger())
-      fireEvent.click(rail().getByRole('link', { name: 'Company Dashboard' }))
+      fireEvent.click(rail().getByRole('link', { name: 'Dashboard' }))
       expect(container.querySelector('.tms-shell')).not.toHaveClass('tms-nav-open')
       fireEvent.click(hamburger())
       fireEvent.click(container.querySelector('.tms-nav-backdrop')!)

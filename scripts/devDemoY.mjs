@@ -156,7 +156,7 @@ STAGES.intake = async (ctx) => {
   if (row.status === 'MOVED') { S.shipmentId = row.shipmentId; S.shipmentNumber = row.shipmentNumber; S.log.createdStatus = (await bundleOf(ctx)).shipment.status; say(`already created: ${S.shipmentNumber}`); return }
   const b = await openBrowser(ctx.id)
   try {
-    await b.navigate('/tms/dashboard'); await pause(3500)
+    await b.navigate('/dashboard'); await pause(3500)
     await shot(b, `/tms/shipments/intake?division=${encodeURIComponent(S.divisionCode)}`, '01-intake-tab-new-tender', { wait: () => b.evaluate(`document.body.innerText.includes('Tender TMS ID')`) })
     await shot(b, intakeUrl, '02-intake-review-fields-missing', { wait: () => b.evaluate(`document.body.innerText.includes('Customer & billing')`) })
     S.log.moveWhileMissing = await buttonState(b, '^Move to active$')
@@ -171,7 +171,7 @@ STAGES.intake = async (ctx) => {
   await ctx.ship('INTAKE_SAVE_DRAFT', { intakeId: row.id, expectedVersion: versionOf(row), fields: completeFields(S), confirm: { add: INTAKE_KEYS, remove: [] } })
   const b2 = await openBrowser(ctx.id)
   try {
-    await b2.navigate('/tms/dashboard'); await pause(3500)
+    await b2.navigate('/dashboard'); await pause(3500)
     await b2.navigate(`/tms/shipments/new?intake=${encodeURIComponent(S.intakeId)}`); await waitSettled(b2); await pause(4000)
     await snap(b2, '04-create-form-prefilled-complete')
     await b2.click({ selector: '[data-testid="ship-form-create"]' })
@@ -292,7 +292,7 @@ STAGES.carrier = async (ctx) => {
 
   const b = await openBrowser(ctx.id)
   try {
-    await b.navigate('/tms/dashboard'); await pause(3500)
+    await b.navigate('/dashboard'); await pause(3500)
     await shot(b, shipUrl(S), '05-shipment-accepted-need-to-cover', { wait: waitText(b, S.shipmentNumber) })
     await shot(b, `/tms/carriers/${encodeURIComponent(S.carrierId)}`, '06-carrier-profile-mcp-not-invited', { wait: waitText(b, 'ZZ DEMO Carrier') })
     await shot(b, '/tms/brokerage/integrations/MYCARRIERPACKETS', '07-mcp-integration-validated', { wait: () => b.evaluate(`document.body.innerText.length > 400`) })
@@ -389,7 +389,7 @@ STAGES.carrier = async (ctx) => {
   }
   const b3 = await openBrowser(ctx.id)
   try {
-    await b3.navigate('/tms/dashboard'); await pause(3500)
+    await b3.navigate('/dashboard'); await pause(3500)
     await shot(b3, shipUrl(S, 'carrier'), '13a-carrier-assignment-ladder-signed', { wait: waitText(b3, 'ZZ DEMO Carrier') })
     await shot(b3, `/tms/tracking?shipment=${encodeURIComponent(await seedTrackId(ctx))}`, '13b-load-tracking-drawer-sms-email-panes', { wait: () => b3.evaluate(`document.body.innerText.length > 800`) })
   } finally { await b3.close() }
@@ -450,7 +450,7 @@ STAGES.tracking = async (ctx) => {
 
   const b = await openBrowser(ctx.id)
   try {
-    await b.navigate('/tms/dashboard'); await pause(3500)
+    await b.navigate('/dashboard'); await pause(3500)
     await shot(b, `/tms/tracking?assignee=${encodeURIComponent(S.trackerId)}`, '14-tracking-board-by-assignee', { wait: waitText(b, S.shipmentNumber) })
     await shot(b, `/tms/tracking?shipment=${encodeURIComponent(await seedTrackId(ctx))}`, '15-load-tracking-drawer-summary-map', { wait: () => b.evaluate(`document.body.innerText.length > 800`) })
     await b.navigate('/tms/brokerage'); await waitSettled(b)
@@ -515,7 +515,7 @@ STAGES.delivered = async (ctx) => {
   say(`  order ${order.arStatus} readyToInvoiceAt ${order.readyToInvoiceAt ?? 'null'}`)
   const b = await openBrowser(ctx.id)
   try {
-    await b.navigate('/tms/dashboard'); await pause(3500)
+    await b.navigate('/dashboard'); await pause(3500)
     await shot(b, `/tms/tracking?assignee=all`, '18-load-tracking-board-all', { wait: waitText(b, S.shipmentNumber) })
     await shot(b, shipUrl(S, 'documents'), '19-shipment-documents-pod', { wait: waitText(b, 'POD') })
     await shot(b, '/tms/tracking?assignee=all&focus=docs', '20-document-review-workstation', { wait: waitText(b, 'Document') })
@@ -543,7 +543,7 @@ STAGES.billing = async (ctx) => {
   if (!S.pushed) {
     const bp = await openBrowser(ctx.id)
     try {
-      await bp.navigate('/tms/dashboard'); await pause(3500)
+      await bp.navigate('/dashboard'); await pause(3500)
       await bp.navigate('/tms/shipments?demo=1'); await waitSettled(bp)
       await bp.poll(waitText(bp, S.shipmentNumber), 'our delivered row on the board', 60_000).catch(() => say('  (row not on the board)'))
       await pause(1500)
@@ -629,7 +629,7 @@ STAGES.billing = async (ctx) => {
 
   const b = await openBrowser(ctx.id)
   try {
-    await b.navigate('/tms/dashboard'); await pause(3500)
+    await b.navigate('/dashboard'); await pause(3500)
     await shot(b, `/tms/invoicing/invoices/${encodeURIComponent(S.invoiceId)}`, '24-invoice', { wait: waitText(b, S.invoiceNumber) })
     await shot(b, `/tms/invoicing/payable/bills/${encodeURIComponent(S.billId)}`, '25-carrier-bill', { wait: waitText(b, 'ZZ DEMO') })
     await shot(b, '/tms/factors', '26-factoring-queue', { wait: waitText(b, 'Factor') })
@@ -681,7 +681,7 @@ STAGES.own = async (ctx) => {
 
   const b = await openBrowser(ctx.id)
   try {
-    await b.navigate('/tms/dashboard'); await pause(3500)
+    await b.navigate('/dashboard'); await pause(3500)
     if (!(bundle.loadCarriers ?? []).some((c) => c.status === 'ACTIVE')) {
       await shot(b, ownUrl(S), '30-own-asset-no-driver-yet', { wait: waitText(b, 'Actions') })
       S.log.ownDispatchNoDriver = await refusal(() => ctx.ship('DISPATCH_LOAD', { loadId: load.id, dispatchedAt: new Date().toISOString() }))
@@ -735,7 +735,7 @@ STAGES.own = async (ctx) => {
 
   const b2 = await openBrowser(ctx.id)
   try {
-    await b2.navigate('/tms/dashboard'); await pause(3500)
+    await b2.navigate('/dashboard'); await pause(3500)
     await shot(b2, ownUrl(S, 'carrierPay'), '37-own-asset-carrier-pay-is-settlement', { wait: () => b2.evaluate(`document.body.innerText.length > 300`) })
     // the settlement: owner-operator pay, Wednesday payroll
     await b2.navigate('/owner-operator-pay'); await waitSettled(b2)
@@ -775,7 +775,7 @@ STAGES.verify146 = async (ctx) => {
   V.upsertCustomer = up
   const b = await openBrowser(ctx.id)
   try {
-    await b.navigate('/tms/dashboard'); await pause(3500)
+    await b.navigate('/dashboard'); await pause(3500)
     await shot(b, shipUrl(S, 'tracking'), '41-verify-tracking-tab-per-load-plan', { wait: waitText(b, 'Tracking') })
     V.trackingTabPlanText = (await b.evaluate(`(() => { const t = document.body.innerText.replace(/\\s+/g,' '); const i = t.search(/every|Every/); return i < 0 ? null : t.slice(Math.max(0,i-80), i+160) })()`))
     V.trackingTabInterval = await b.evaluate(`(() => { const el = [...document.querySelectorAll('input[type="number"]')][0]; return el ? el.value : null })()`)
@@ -791,7 +791,7 @@ STAGES.verify147 = async (ctx) => {
   V.runOnDelivered = run.error ?? { checked: run.checked, acted: run.acted, skipped: run.skipped, reasons: (run.reasons ?? []).slice(0, 2) }
   const b = await openBrowser(ctx.id)
   try {
-    await b.navigate('/tms/dashboard'); await pause(3500)
+    await b.navigate('/dashboard'); await pause(3500)
     await shot(b, shipUrl(S, 'tracking'), '41-verify-tracking-tab-per-load-plan', { wait: waitText(b, 'Check-call plan') })
     V.interval = await b.evaluate(`[...document.querySelectorAll('input[type="number"]')].slice(0,2).map((e) => e.value)`)
     V.source = await b.evaluate(`(document.body.innerText.match(/(Inherited from [^\\n]*|Overridden for this shipment)/) ?? [null])[0]`)
@@ -821,8 +821,8 @@ STAGES.tour = async (ctx) => {
     } catch (e) { t[file] = short(e); say(`  (${file}: ${short(e)})`) }
   }
   try {
-    await b.navigate('/tms/dashboard'); await pause(3500)
-    await page('/tms/dashboard', '50-company-dashboard-kpis', 'Dashboard')
+    await b.navigate('/dashboard'); await pause(3500)
+    await page('/dashboard', '50-company-dashboard-kpis', 'Dashboard')
     await page('/tms/dashboard/new', '51-new-dashboard-chat-builder', null)
     const search = async (text) => {
       await b.evaluate(`(() => { const el = [...document.querySelectorAll('input')].find((e) => /search/i.test(e.placeholder || '') && e.offsetParent); el?.focus() })()`)

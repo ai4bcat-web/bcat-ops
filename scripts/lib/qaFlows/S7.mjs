@@ -12,7 +12,7 @@ export async function run(ctx) {
   const b = await ctx.newBrowser('admin')
   try {
     // Warm: the first navigation signs in from the injected storage.
-    await b.navigate('/tms/dashboard')
+    await b.navigate('/dashboard')
     await settle(b)
     let tokenUse = {}
     const idCalls = []
