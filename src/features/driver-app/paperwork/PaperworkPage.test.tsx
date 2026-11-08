@@ -466,19 +466,6 @@ describe("today's sheet", () => {
  * SettlementPage has always used the semantic classes and renders correctly in both.
  */
 describe('rendering inside the staff View-as-driver frame', () => {
-  it('uses theme-aware classes, never hardcoded dark ones', async () => {
-    const { readFileSync } = await import('node:fs')
-    const files = [
-      'src/features/driver-app/paperwork/PaperworkPage.tsx',
-      'src/features/driver-app/paperwork/TodayStops.tsx',
-      'src/features/driver-app/paperwork/DayLogs.tsx',
-    ]
-    for (const f of files) {
-      const src = readFileSync(f, 'utf8')
-      expect(src, `${f} must not hardcode dark-only colours`).not.toMatch(/text-white|text-slate-\d|bg-slate-\d|#0b1220/)
-    }
-  })
-
   it('shows the error message rather than an empty card', async () => {
     api.fetchPaperwork.mockRejectedValue(new Error('Driver has no active pay setting'))
     renderPage()

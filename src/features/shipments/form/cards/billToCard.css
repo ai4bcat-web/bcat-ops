@@ -1,0 +1,42 @@
+/* Step AR Bill To card body. Tokens only; scoped under .tms-shell. */
+.tms-shell .tms-card-billto { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tms-shell .tms-card-billto-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tms-shell .tms-card-billto-warn {
+  padding: 8px;
+  border: 1px solid var(--tms-badge-red);
+  border-radius: 6px;
+  background: var(--tms-badge-red-tint);
+  color: var(--tms-badge-red);
+  font-size: 12px;
+}
+.tms-shell .tms-card-billto-pick { max-width: 320px; }
+.tms-shell .tms-card-billto-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.tms-shell .tms-card-billto-item { min-width: 0; }
+/* The requirement chips run along one full-width row instead of wrapping inside one narrow column. */
+.tms-shell .tms-card-billto-item:has([data-testid='card-billTo-requirements']) { grid-column: 1 / -1; }
+.tms-shell .tms-card-billto-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tms-muted);
+}
+.tms-shell .tms-card-billto-value { margin: 0; font-size: 13px; overflow-wrap: anywhere; display: flex; flex-direction: column; }
+.tms-shell .tms-card-billto-sub { font-size: 12px; color: var(--tms-muted); }
+.tms-shell .tms-card-billto-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.tms-shell .tms-card-billto-chip {
+  padding: 0 8px;
+  border: 1px solid var(--tms-border);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--tms-text);
+}
+.tms-shell .tms-card-billto-empty { margin: 0; font-size: 13px; color: var(--tms-muted); }
+@media (max-width: 767px) {
+  .tms-shell .tms-card-billto-grid { grid-template-columns: minmax(0, 1fr); }
+}

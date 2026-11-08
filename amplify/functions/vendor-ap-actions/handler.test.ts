@@ -1,5 +1,5 @@
 import type { AttributeValue } from '@aws-sdk/client-dynamodb'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { marshall } from '@aws-sdk/util-dynamodb'
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
@@ -155,9 +155,16 @@ function event(args: TestEventArgs, id?: TestIdentity): TestAppSyncEvent {
 }
 
 beforeEach(() => {
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  vi.spyOn(console, 'error').mockImplementation(() => {})
   send.mockReset()
   cognitoSend.mockReset()
   cognitoSend.mockRejectedValue(new Error('UserNotFoundException'))
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('authorization', () => {

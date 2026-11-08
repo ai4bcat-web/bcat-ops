@@ -1,5 +1,5 @@
-import { X } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { TmsDrawer } from '@/features/tms/kit/TmsDrawer'
 
 /**
  * The right-hand panel shell used across the Files hub.
@@ -13,7 +13,7 @@ import type { ReactNode } from 'react'
  * Anything that opens beside a file should use this rather than rolling its own.
  */
 export function SidePanel({
-  title, subtitle, avatar, actions, footer, onClose, children, width = 620, zIndex = 50,
+  title, subtitle, avatar, actions, footer, onClose, children, width = 620, zIndex,
 }: {
   title: string
   subtitle?: string
@@ -32,36 +32,24 @@ export function SidePanel({
    */
   zIndex?: number
 }) {
+  const size = width <= 460 ? 'md' : width <= 640 ? 'lg' : 'xl'
   return (
-    <div onClick={onClose}
-      style={{ position: 'fixed', inset: 0, zIndex, background: 'rgba(0,0,0,0.35)', display: 'flex', justifyContent: 'flex-end' }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: width, height: '100%', background: 'var(--ds-surface)',
-          boxShadow: 'var(--sh-lg, -10px 0 40px rgba(0,0,0,0.2))', display: 'flex', flexDirection: 'column',
-        }}>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px', borderBottom: '1px solid var(--ds-border)' }}>
+    <TmsDrawer
+      open
+      onOpenChange={(o) => { if (!o) onClose() }}
+      size={size}
+      zIndex={zIndex}
+      title={avatar ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
           {avatar}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)' }}>{title}</div>
-            {subtitle && <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{subtitle}</div>}
-          </div>
-          {actions}
-          <button onClick={onClose} aria-label="Close"
-            style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }}>
-            <X size={18} />
-          </button>
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>{children}</div>
-
-        {footer && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 20px', borderTop: '1px solid var(--ds-border)' }}>
-            {footer}
-          </div>
-        )}
-      </div>
-    </div>
+          <span>{title}</span>
+        </span>
+      ) : title}
+      description={subtitle}
+      headerExtra={actions}
+      footer={footer}
+    >
+      {children}
+    </TmsDrawer>
   )
 }

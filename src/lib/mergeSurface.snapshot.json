@@ -1,0 +1,1034 @@
+{
+  "ref": "origin/main",
+  "commit": "ff4489ddc83435a7fcb2fd5ed2046b5aef238df4",
+  "navItems": [
+    {
+      "to": "/dashboard",
+      "label": "Dashboard",
+      "pageKey": "dashboard"
+    },
+    {
+      "to": "/dispatch",
+      "label": "Dispatch",
+      "pageKey": "dispatch"
+    },
+    {
+      "to": "/driver-info",
+      "label": "Driver info",
+      "pageKey": "dispatch"
+    },
+    {
+      "to": "/calendar",
+      "label": "Calendar",
+      "pageKey": "calendar"
+    },
+    {
+      "to": "/appts",
+      "label": "Appts",
+      "pageKey": "appts"
+    },
+    {
+      "to": "/time-off",
+      "label": "Time Off",
+      "pageKey": "timeOff"
+    },
+    {
+      "to": "/files",
+      "label": "Files",
+      "pageKey": "files"
+    },
+    {
+      "to": "/loads",
+      "label": "Loads",
+      "pageKey": "loads"
+    },
+    {
+      "to": "/intake",
+      "label": "Intake",
+      "pageKey": "intake"
+    },
+    {
+      "to": "/pods",
+      "label": "PODs",
+      "pageKey": "pods"
+    },
+    {
+      "to": "/factoring",
+      "label": "Factoring Queue",
+      "pageKey": "factoring"
+    },
+    {
+      "to": "/vendor-ap",
+      "label": "Vendor AP Queue",
+      "pageKey": "vendorAp"
+    },
+    {
+      "to": "/customers",
+      "label": "Customers",
+      "pageKey": "customers"
+    },
+    {
+      "to": "/locations",
+      "label": "Locations",
+      "pageKey": "locations"
+    },
+    {
+      "to": "/vehicle-quote",
+      "label": "Vehicle Quote",
+      "pageKey": "vehicleQuote"
+    },
+    {
+      "to": "/vehicle-confirmation",
+      "label": "Booking Confirmation",
+      "pageKey": "vehicleConfirmation"
+    },
+    {
+      "to": "/pricing-margin",
+      "label": "Pricing Margin",
+      "pageKey": "pricingMargin"
+    },
+    {
+      "to": "/driver-pay-box-trucks",
+      "label": "Box Truck Settlements",
+      "pageKey": "driverPayBoxTrucks"
+    },
+    {
+      "to": "/driver-pay",
+      "label": "Amazon Settlements",
+      "pageKey": "driverPay"
+    },
+    {
+      "to": "/owner-operator-pay",
+      "label": "Owner Operator Settlements",
+      "pageKey": "ownerOperatorPay"
+    },
+    {
+      "to": "/ivan-driver-app",
+      "label": "Ivan Driver App",
+      "pageKey": "ivanDriverApp"
+    },
+    {
+      "to": "/hours",
+      "label": "Employee Hours",
+      "pageKey": "hours"
+    },
+    {
+      "to": "/disputes",
+      "label": "Amazon Disputes",
+      "pageKey": "disputes"
+    },
+    {
+      "to": "/fleet-dashboard",
+      "label": "Fleet Manager Dashboard",
+      "pageKey": "fleetManagerDashboard"
+    },
+    {
+      "to": "/maintenance",
+      "label": "Maintenance",
+      "pageKey": "maintenance"
+    },
+    {
+      "to": "/invoices",
+      "label": "Invoices",
+      "pageKey": "invoices"
+    },
+    {
+      "to": "/truck-docs",
+      "label": "Asset Documents",
+      "pageKey": "truckDocs"
+    },
+    {
+      "to": "/fuel",
+      "label": "Fuel",
+      "pageKey": "fuel"
+    },
+    {
+      "to": "/trucks",
+      "label": "Fleet",
+      "pageKey": "trucks"
+    },
+    {
+      "to": "/finances",
+      "label": "Finances",
+      "pageKey": "finances"
+    },
+    {
+      "to": "/finances/review",
+      "label": "Profit Review",
+      "pageKey": "finances"
+    },
+    {
+      "to": "/finance/cash-checkin",
+      "label": "Weekly Cash Check-in",
+      "pageKey": "cashCheckIn"
+    },
+    {
+      "to": "/insurance",
+      "label": "Insurance",
+      "pageKey": "insurance"
+    },
+    {
+      "to": "/settings",
+      "label": "Settings",
+      "pageKey": "settings"
+    },
+    {
+      "to": "/audit-log",
+      "label": "Audit Log",
+      "pageKey": "audit"
+    },
+    {
+      "to": "/reddit-queue",
+      "label": "Reddit Queue",
+      "pageKey": "redditQueue"
+    }
+  ],
+  "offNavKeys": [
+    "tasks",
+    "schedule"
+  ],
+  "routes": [
+    "*",
+    "/*",
+    "/amazon-disputes",
+    "/appts",
+    "/audit",
+    "/audit-log",
+    "/calendar",
+    "/carriers",
+    "/compliance",
+    "/compliance/driver/:driverId",
+    "/compliance/onboarding",
+    "/compliance/review",
+    "/compliance/truck/:truckId",
+    "/customers",
+    "/dashboard",
+    "/dispatch",
+    "/disputes",
+    "/driver-info",
+    "/driver-pay",
+    "/driver-pay-box-trucks",
+    "/driver-view/:driverId",
+    "/driver/*",
+    "/drivers",
+    "/expenses",
+    "/factoring",
+    "/feedback",
+    "/files",
+    "/finance/cash-checkin",
+    "/finances",
+    "/finances/review",
+    "/fleet-dashboard",
+    "/fuel",
+    "/grid",
+    "/hours",
+    "/insurance",
+    "/intake",
+    "/invoices",
+    "/ivan-driver-app",
+    "/loads",
+    "/locations",
+    "/maintenance",
+    "/onboard/:token",
+    "/owner-operator-pay",
+    "/pods",
+    "/pricing-margin",
+    "/reddit-queue",
+    "/schedule",
+    "/settings",
+    "/tasks",
+    "/time-off",
+    "/track/:code",
+    "/truck-docs",
+    "/trucks",
+    "/users",
+    "/vehicle-confirmation",
+    "/vehicle-quote",
+    "/vendor-ap",
+    "account",
+    "loads",
+    "login",
+    "paperwork",
+    "scan",
+    "settlement",
+    "signup",
+    "timeclock"
+  ],
+  "apiClientUse": {
+    "archiveCustomer": [
+      "src/hooks/useDirectory.ts"
+    ],
+    "archiveLocation": [
+      "src/hooks/useDirectory.ts"
+    ],
+    "autocompleteAddress": [
+      "src/features/directory/components/AddressAutocomplete.tsx"
+    ],
+    "checkFuelTxExists": [
+      "src/features/expenses/FuelUploadModal.tsx"
+    ],
+    "cleanupDuplicateFuelTransactions": [
+      "src/features/expenses/ExpensesPage.tsx",
+      "src/features/expenses/FuelUploadModal.tsx"
+    ],
+    "completeVendorPayable": [
+      "src/hooks/useVendorPayables.ts"
+    ],
+    "correctTimeClockEntry": [
+      "src/features/hours/HoursPage.tsx"
+    ],
+    "createAllocation": [
+      "src/hooks/useExpenseData.ts",
+      "src/lib/truckCosts.ts",
+      "src/lib/truckInactive.ts"
+    ],
+    "createAmazonPayMaster": [
+      "src/hooks/useAmazonPayMasters.ts"
+    ],
+    "createAmazonTrip": [
+      "src/features/disputes/DisputesPage.tsx",
+      "src/hooks/useAmazonPay.ts"
+    ],
+    "createApptMoveTask": [
+      "src/lib/sendApptNotices.ts"
+    ],
+    "createApptTask": [
+      "src/lib/sendApptNotices.ts"
+    ],
+    "createAuditLog": [
+      "src/hooks/useHourlyRates.ts"
+    ],
+    "createBoxTruckTrip": [
+      "src/hooks/useBoxTruckPay.ts"
+    ],
+    "createCognitoUser": [
+      "src/features/users/UsersPage.tsx"
+    ],
+    "createCustomer": [
+      "src/hooks/useDirectory.ts"
+    ],
+    "createDriverPayCredit": [
+      "src/hooks/useAmazonPay.ts",
+      "src/hooks/useBoxTruckPay.ts",
+      "src/hooks/useOwnerOperatorPay.ts"
+    ],
+    "createDriverPayDeduction": [
+      "src/hooks/useAmazonPay.ts",
+      "src/hooks/useBoxTruckPay.ts",
+      "src/hooks/useOwnerOperatorPay.ts"
+    ],
+    "createDriverPayPeriod": [
+      "src/hooks/useDriverPay.ts"
+    ],
+    "createDriverPaySetting": [
+      "src/hooks/useAmazonPay.ts",
+      "src/hooks/useBoxTruckPay.ts",
+      "src/hooks/useHourlyRates.ts",
+      "src/hooks/useOwnerOperatorPay.ts"
+    ],
+    "createExpenseRecord": [
+      "src/hooks/useExpenseData.ts"
+    ],
+    "createExpenseType": [
+      "src/hooks/useExpenseData.ts",
+      "src/lib/truckCosts.ts"
+    ],
+    "createFuelTransaction": [
+      "src/features/expenses/FuelUploadModal.tsx"
+    ],
+    "createIntakeItem": [
+      "src/features/dashboard/OpenTasksWidget.tsx"
+    ],
+    "createLocation": [
+      "src/features/loads/LoadDrawer.tsx",
+      "src/hooks/useDirectory.ts"
+    ],
+    "createRecurringExpense": [
+      "src/hooks/useExpenseData.ts",
+      "src/lib/truckCosts.ts",
+      "src/lib/truckInactive.ts"
+    ],
+    "deleteAllocation": [
+      "src/hooks/useExpenseData.ts"
+    ],
+    "deleteAmazonPayMaster": [
+      "src/hooks/useAmazonPayMasters.ts"
+    ],
+    "deleteAmazonTrip": [
+      "src/features/disputes/DisputesPage.tsx",
+      "src/hooks/useAmazonPay.ts"
+    ],
+    "deleteApptProof": [
+      "src/components/ApptProofPanel.tsx"
+    ],
+    "deleteBoxTruckTrip": [
+      "src/hooks/useBoxTruckPay.ts"
+    ],
+    "deleteCognitoUser": [
+      "src/features/users/UsersPage.tsx"
+    ],
+    "deleteDisputeResponseImage": [
+      "src/features/disputes/StatusUpdateModal.tsx"
+    ],
+    "deleteDisputeStaffProof": [
+      "src/features/disputes/DisputesPage.tsx"
+    ],
+    "deleteDriverPayCredit": [
+      "src/hooks/useAmazonPay.ts",
+      "src/hooks/useBoxTruckPay.ts",
+      "src/hooks/useOwnerOperatorPay.ts"
+    ],
+    "deleteDriverPayDeduction": [
+      "src/hooks/useAmazonPay.ts",
+      "src/hooks/useBoxTruckPay.ts",
+      "src/hooks/useOwnerOperatorPay.ts"
+    ],
+    "deleteDriverPayPeriod": [
+      "src/hooks/useDriverPay.ts"
+    ],
+    "deleteDriverPhoto": [
+      "src/features/drivers/DriverDrawer.tsx"
+    ],
+    "deleteExpenseRecord": [
+      "src/hooks/useExpenseData.ts"
+    ],
+    "deleteExpenseType": [
+      "src/hooks/useExpenseData.ts"
+    ],
+    "deleteFactoringItem": [
+      "src/hooks/useFactoringItems.ts"
+    ],
+    "deleteIntakeItem": [
+      "src/hooks/useIntakeItems.ts"
+    ],
+    "deletePayMasterFile": [
+      "src/hooks/useAmazonPayMasters.ts"
+    ],
+    "deleteRecurringExpense": [
+      "src/hooks/useExpenseData.ts"
+    ],
+    "deleteVendorPayable": [
+      "src/hooks/useVendorPayables.ts"
+    ],
+    "disableCognitoUser": [
+      "src/features/users/UsersPage.tsx"
+    ],
+    "dispatchAction": [
+      "src/hooks/useDispatch.ts"
+    ],
+    "driverTrailerFieldDeployed": [
+      "src/features/files/EntityFilePanel.tsx"
+    ],
+    "enableCognitoUser": [
+      "src/features/users/UsersPage.tsx"
+    ],
+    "geocodeAddress": [
+      "src/features/directory/components/AddressAutocomplete.tsx"
+    ],
+    "getApptProofUrl": [
+      "src/components/ApptProofPanel.tsx"
+    ],
+    "getDisputeEvidenceUrl": [
+      "src/features/disputes/EvidenceGallery.tsx"
+    ],
+    "getGoogleReviews": [
+      "src/features/vehicle-confirmation/VehicleConfirmationPage.tsx",
+      "src/features/vehicle-quote/VehicleQuotePage.tsx"
+    ],
+    "getPayMasterUrl": [
+      "src/hooks/useAmazonPayMasters.ts"
+    ],
+    "getPlaceDetails": [
+      "src/features/directory/components/AddressAutocomplete.tsx"
+    ],
+    "getRateConfirmUrl": [
+      "src/features/factoring/FactoringDocCell.tsx"
+    ],
+    "getTmsSettings": [
+      "src/features/appts/ApptsPage.tsx",
+      "src/features/settings/TmsSettingsCard.tsx"
+    ],
+    "getUserGroups": [
+      "src/features/users/UsersPage.tsx"
+    ],
+    "getVendorApAttachmentUrl": [
+      "src/hooks/useVendorPayables.ts"
+    ],
+    "getVendorPayable": [
+      "src/hooks/useVendorPayables.ts"
+    ],
+    "graphqlErrorMessage": [
+      "src/features/driver-pay/DriverPayForms.tsx"
+    ],
+    "graphqlErrorText": [
+      "src/features/directory/DirectoryPages.tsx",
+      "src/features/loads/LoadPodNotes.tsx",
+      "src/features/pods/PodPreviewDialog.tsx",
+      "src/features/pods/PodReviewPanel.tsx",
+      "src/features/pods/PodsPage.tsx",
+      "src/features/pods/podUtils.ts",
+      "src/features/trucks/TruckParking.tsx",
+      "src/hooks/usePodDocuments.ts",
+      "src/lib/otrClient.ts",
+      "src/lib/podsClient.ts"
+    ],
+    "listAllDispatchMessages": [
+      "src/features/finances/DispatchCostsCard.tsx"
+    ],
+    "listAllocations": [
+      "src/hooks/useExpenseData.ts"
+    ],
+    "listAmazonPayMasters": [
+      "src/hooks/useAmazonPayMasters.ts"
+    ],
+    "listAmazonTrips": [
+      "src/hooks/useAmazonPay.ts",
+      "src/hooks/useAmazonProfitability.ts"
+    ],
+    "listBoxTruckTrips": [
+      "src/hooks/useBoxTruckPay.ts"
+    ],
+    "listCognitoUsers": [
+      "src/features/users/UsersPage.tsx"
+    ],
+    "listCustomers": [
+      "src/hooks/useDirectory.ts",
+      "src/hooks/useOwnerOperatorPay.ts"
+    ],
+    "listDispatchConversations": [
+      "src/features/dashboard/DriverLeaderboardWidget.tsx",
+      "src/features/finances/DispatchCostsCard.tsx",
+      "src/hooks/useDispatch.ts"
+    ],
+    "listDispatchMessages": [
+      "src/hooks/useDispatch.ts"
+    ],
+    "listDivisions": [
+      "src/features/directory/DirectoryPages.tsx",
+      "src/features/settings/DivisionCard.tsx"
+    ],
+    "listDriverPayCredits": [
+      "src/hooks/useAmazonPay.ts",
+      "src/hooks/useAmazonProfitability.ts",
+      "src/hooks/useBoxTruckPay.ts",
+      "src/hooks/useOwnerOperatorPay.ts",
+      "src/hooks/useOwnerOperatorProfitability.ts"
+    ],
+    "listDriverPayDeductions": [
+      "src/hooks/useAmazonPay.ts",
+      "src/hooks/useAmazonProfitability.ts",
+      "src/hooks/useBoxTruckPay.ts",
+      "src/hooks/useOwnerOperatorPay.ts",
+      "src/hooks/useOwnerOperatorProfitability.ts"
+    ],
+    "listDriverPayPeriods": [
+      "src/hooks/useDriverPay.ts"
+    ],
+    "listDriverPaySettings": [
+      "src/features/dashboard/DieselPriceWidget.tsx",
+      "src/features/files/FilesPage.tsx",
+      "src/hooks/useAmazonPay.ts",
+      "src/hooks/useAmazonProfitability.ts",
+      "src/hooks/useBoxTruckPay.ts",
+      "src/hooks/useBoxTruckPayEstimate.ts",
+      "src/hooks/useCurrentInsurance.ts",
+      "src/hooks/useHourlyRates.ts",
+      "src/hooks/useInsuranceRecovery.ts",
+      "src/hooks/useOwnerOperatorPay.ts",
+      "src/hooks/useOwnerOperatorProfitability.ts",
+      "src/hooks/useProfitReview.ts"
+    ],
+    "listExpenseRecords": [
+      "src/hooks/useExpenseData.ts"
+    ],
+    "listExpenseTypes": [
+      "src/hooks/useExpenseData.ts",
+      "src/lib/truckCosts.ts",
+      "src/lib/truckInactive.ts"
+    ],
+    "listFactoringItems": [
+      "src/hooks/useFactoringItems.ts",
+      "src/hooks/useOwnerOperatorPay.ts"
+    ],
+    "listFuelTransactions": [
+      "src/hooks/useFuelTransactions.ts"
+    ],
+    "listIntakeItems": [
+      "src/hooks/useIntakeItems.ts",
+      "src/lib/intakeSync.ts"
+    ],
+    "listLoads": [
+      "src/features/expenses/ExpensesPage.tsx",
+      "src/hooks/useOwnerOperatorPay.ts",
+      "src/hooks/useOwnerOperatorProfitability.ts"
+    ],
+    "listLocationMergeJobs": [
+      "src/features/directory/DirectoryPages.tsx"
+    ],
+    "listLocations": [
+      "src/hooks/useDirectory.ts",
+      "src/hooks/useOwnerOperatorPay.ts"
+    ],
+    "listRecurringExpenses": [
+      "src/hooks/useExpenseData.ts"
+    ],
+    "listTimeClockEntries": [
+      "src/features/dashboard/DriverLeaderboardWidget.tsx",
+      "src/features/hours/HoursPage.tsx",
+      "src/hooks/useDeadhead.ts",
+      "src/hooks/usePtoUsed.ts"
+    ],
+    "listTruckConfigs": [
+      "src/features/expenses/ExpensesPage.tsx",
+      "src/features/trucks/TrucksPage.tsx"
+    ],
+    "listTruckFaultCodes": [
+      "src/features/fleet-dashboard/FaultCodesWidget.tsx"
+    ],
+    "listTruckLocations": [
+      "src/features/dashboard/TruckMapWidget.tsx",
+      "src/features/dispatch/DispatchPage.tsx",
+      "src/features/fleet-dashboard/PmDueWidget.tsx",
+      "src/features/ivan-driver-app/IvanDriverAppPage.tsx"
+    ],
+    "listTruckMileages": [
+      "src/features/expenses/ExpensesPage.tsx",
+      "src/hooks/useTruckMileage.ts"
+    ],
+    "listVendorPayables": [
+      "src/hooks/useVendorPayables.ts"
+    ],
+    "managePayCredit": [
+      "src/hooks/useBoxTruckPay.ts"
+    ],
+    "notifyApptNeeded": [
+      "src/lib/sendApptNotices.ts"
+    ],
+    "notifySlackStatusChange": [
+      "src/features/loads/LoadDrawer.tsx",
+      "src/hooks/useIntakeItems.ts"
+    ],
+    "parseRateConfirm": [
+      "src/lib/rateconUpload.ts"
+    ],
+    "parseTripScreenshot": [
+      "src/features/driver-pay/DriverPayForms.tsx"
+    ],
+    "payCreditsDeployed": [
+      "src/features/driver-pay-box-trucks/BoxTruckPayPage.tsx",
+      "src/features/driver-pay/DriverPayPage.tsx",
+      "src/features/owner-operator-pay/OwnerOperatorPayPage.tsx"
+    ],
+    "previewLocationMerge": [
+      "src/features/directory/DirectoryPages.tsx"
+    ],
+    "removeLocationDriverNote": [
+      "src/hooks/useDirectory.ts"
+    ],
+    "reopenVendorPayable": [
+      "src/hooks/useVendorPayables.ts"
+    ],
+    "resetCognitoPassword": [
+      "src/features/users/UsersPage.tsx"
+    ],
+    "resumeLocationMerge": [
+      "src/features/directory/DirectoryPages.tsx"
+    ],
+    "saveDivision": [
+      "src/features/settings/DivisionCard.tsx"
+    ],
+    "saveTmsSettings": [
+      "src/features/appts/ApptsPage.tsx",
+      "src/features/settings/TmsSettingsCard.tsx"
+    ],
+    "sendApptRequestEmail": [
+      "src/components/ApptProofPanel.tsx"
+    ],
+    "sendDriverPayEmail": [
+      "src/features/driver-pay-box-trucks/BoxTruckPayPage.tsx",
+      "src/features/driver-pay/DriverPayPage.tsx",
+      "src/features/owner-operator-pay/OwnerOperatorPayPage.tsx"
+    ],
+    "sendMaintenanceInvoiceToVendorAp": [
+      "src/features/invoices/InvoicesPage.tsx"
+    ],
+    "sendVehicleQuoteEmail": [
+      "src/features/vehicle-confirmation/VehicleConfirmationPage.tsx",
+      "src/features/vehicle-quote/VehicleQuotePage.tsx"
+    ],
+    "setUserAdmin": [
+      "src/features/users/UsersPage.tsx"
+    ],
+    "setUserPageGroups": [
+      "src/features/users/UsersPage.tsx"
+    ],
+    "startLocationMerge": [
+      "src/features/directory/DirectoryPages.tsx"
+    ],
+    "updateAllocation": [
+      "src/hooks/useExpenseData.ts"
+    ],
+    "updateAmazonTrip": [
+      "src/features/disputes/DisputesPage.tsx",
+      "src/hooks/useAmazonPay.ts"
+    ],
+    "updateBoxTruckTrip": [
+      "src/hooks/useBoxTruckPay.ts"
+    ],
+    "updateCustomer": [
+      "src/hooks/useDirectory.ts"
+    ],
+    "updateDriverPayCredit": [
+      "src/hooks/useAmazonPay.ts",
+      "src/hooks/useBoxTruckPay.ts",
+      "src/hooks/useOwnerOperatorPay.ts"
+    ],
+    "updateDriverPayPeriod": [
+      "src/hooks/useDriverPay.ts"
+    ],
+    "updateDriverPaySetting": [
+      "src/hooks/useAmazonPay.ts",
+      "src/hooks/useBoxTruckPay.ts",
+      "src/hooks/useHourlyRates.ts",
+      "src/hooks/useOwnerOperatorPay.ts"
+    ],
+    "updateEquipment": [
+      "src/features/files/EntityFilePanel.tsx"
+    ],
+    "updateExpenseRecord": [
+      "src/hooks/useExpenseData.ts"
+    ],
+    "updateExpenseType": [
+      "src/hooks/useExpenseData.ts"
+    ],
+    "updateFuelTransaction": [
+      "src/hooks/useFuelTransactions.ts"
+    ],
+    "updateIntakeItem": [
+      "src/features/loads/LoadDrawer.tsx",
+      "src/hooks/useIntakeItems.ts",
+      "src/lib/sendApptNotices.ts"
+    ],
+    "updateLocation": [
+      "src/hooks/useDirectory.ts"
+    ],
+    "updateRecurringExpense": [
+      "src/hooks/useExpenseData.ts",
+      "src/lib/truckCosts.ts",
+      "src/lib/truckInactive.ts"
+    ],
+    "updateVendorPayable": [
+      "src/hooks/useVendorPayables.ts"
+    ],
+    "uploadApptProof": [
+      "src/components/ApptProofPanel.tsx",
+      "src/features/appts/ApptsPage.tsx"
+    ],
+    "uploadDispatchMedia": [
+      "src/hooks/useDispatch.ts"
+    ],
+    "uploadDisputeResponseImage": [
+      "src/features/disputes/StatusUpdateModal.tsx"
+    ],
+    "uploadDisputeStaffProof": [
+      "src/features/disputes/DisputesPage.tsx"
+    ],
+    "uploadDriverPhoto": [
+      "src/features/drivers/DriverDrawer.tsx"
+    ],
+    "uploadPayMasterFile": [
+      "src/hooks/useAmazonPayMasters.ts"
+    ],
+    "uploadRateConfirm": [
+      "src/features/factoring/FactoringDocCell.tsx",
+      "src/features/loads/LoadDrawer.tsx",
+      "src/lib/rateconUpload.ts"
+    ],
+    "upsertTruckConfig": [
+      "src/features/trucks/TrucksPage.tsx"
+    ]
+  },
+  "backendEnv": {
+    "apptNeedNotifier": [
+      "APPTS_IVAN_CHANNEL_ID"
+    ],
+    "apptReportFn": [
+      "CUSTOMER_TABLE_NAME",
+      "LOAD_TABLE_NAME",
+      "SLACK_GLOBAL_CHANNEL_ID"
+    ],
+    "apptRequestEmailer": [
+      "FROM_ADDRESS"
+    ],
+    "blueinkFn": [
+      "EQUIPMENT_TABLE_NAME",
+      "GOOGLE_PLACES_API_KEY",
+      "TRUCK_LOCATION_HISTORY_TABLE_NAME",
+      "TRUCK_LOCATION_TABLE_NAME",
+      "TRUCK_MILEAGE_TABLE_NAME"
+    ],
+    "brokerAlertFn": [
+      "BROKER_DRIVER_ID",
+      "BROKER_DRIVER_NAME",
+      "BROKER_TASK_ASSIGNEE",
+      "DRIVER_TABLE_NAME",
+      "SLACK_GLOBAL_CHANNEL_ID",
+      "TABLE_NAME"
+    ],
+    "cashReminderFn": [
+      "CHECKIN_TABLE_NAME",
+      "SETTINGS_TABLE_NAME"
+    ],
+    "complianceScannerFn": [
+      "ALERT_TABLE_NAME",
+      "AUDIT_TABLE_NAME",
+      "DOC_TABLE_NAME",
+      "DRIVER_TABLE_NAME",
+      "EMAILLOG_TABLE_NAME",
+      "FROM_ADDRESS",
+      "INVITE_TABLE_NAME",
+      "PORTAL_BASE_URL",
+      "RULE_TABLE_NAME",
+      "SETTINGS_TABLE_NAME",
+      "TASK_TABLE_NAME",
+      "TRUCK_CONFIG_TABLE_NAME"
+    ],
+    "directoryActionsFn": [
+      "CUSTOMER_TABLE_NAME",
+      "DIVISION_TABLE_NAME",
+      "LOAD_TABLE_NAME",
+      "LOCATION_TABLE_NAME",
+      "MERGE_JOB_TABLE_NAME",
+      "SETTINGS_TABLE_NAME",
+      "TABLE_NAME",
+      "USER_POOL_ID"
+    ],
+    "dispatchActionsFn": [
+      "USER_POOL_ID",
+      "WEBHOOK_URL"
+    ],
+    "dispatchNudgeFn": [
+      "LOAD_TABLE_NAME"
+    ],
+    "dispatchSlackBridgeFn": [
+      "WEBHOOK_URL"
+    ],
+    "dispatchWebhookFn": [
+      "DRIVER_SUBMISSION_DOC_TABLE_NAME",
+      "DRIVER_SUBMISSION_TABLE_NAME",
+      "LOAD_TABLE_NAME"
+    ],
+    "disputeFn": [
+      "TABLE_NAME"
+    ],
+    "disputePortalApiFn": [
+      "BUCKET_NAME",
+      "DRIVER_TABLE_NAME",
+      "TABLE_NAME"
+    ],
+    "driverApiFn": [
+      "AMAZON_TRIP_TABLE_NAME",
+      "AUDIT_LOG_TABLE_NAME",
+      "BUCKET_NAME",
+      "CUSTOMER_TABLE_NAME",
+      "DISPATCH_PARAM_PATH",
+      "DRIVER_AVAILABILITY_TABLE_NAME",
+      "DRIVER_LOAD_TIME_TABLE_NAME",
+      "DRIVER_PAY_CREDIT_TABLE_NAME",
+      "DRIVER_PAY_DEDUCTION_TABLE_NAME",
+      "DRIVER_PAY_SETTING_TABLE_NAME",
+      "DRIVER_SUBMISSION_DOC_TABLE_NAME",
+      "DRIVER_SUBMISSION_TABLE_NAME",
+      "DRIVER_TABLE_NAME",
+      "DRIVER_USER_POOL_CLIENT_ID",
+      "DRIVER_USER_POOL_ID",
+      "EQUIPMENT_TABLE_NAME",
+      "FUEL_TRANSACTION_TABLE_NAME",
+      "INTAKE_IVAN_CHANNEL_ID",
+      "INTAKE_PODS_CHANNEL_ID",
+      "LOADS_EMAIL_TO",
+      "LOAD_TABLE_NAME",
+      "LOCATION_TABLE_NAME",
+      "MAINTENANCE_TASK_TABLE_NAME",
+      "POD_DOCUMENT_TABLE_NAME",
+      "POD_FUNCTION_NAME",
+      "SES_FROM_ADDRESS",
+      "STAFF_USER_POOL_CLIENT_ID",
+      "STAFF_USER_POOL_ID",
+      "TIME_CLOCK_TABLE_NAME",
+      "TRUCK_LOCATION_TABLE_NAME"
+    ],
+    "driverSignupGate": [
+      "DRIVER_PAY_SETTING_TABLE_NAME",
+      "DRIVER_TABLE_NAME"
+    ],
+    "driverWelcomeFn": [
+      "DRIVER_TABLE_NAME",
+      "FROM_ADDRESS",
+      "PORTAL_ORIGIN"
+    ],
+    "emailerFn": [
+      "DRIVER_TABLE_NAME",
+      "FROM_ADDRESS",
+      "INVITE_TABLE_NAME",
+      "PORTAL_BASE_URL",
+      "SETTINGS_TABLE_NAME"
+    ],
+    "factoringIntakeFn": [
+      "OTR_ACTIONS_FUNCTION_NAME",
+      "TABLE_NAME"
+    ],
+    "fn": [
+      "BUCKET_NAME",
+      "CONVERSATION_TABLE_NAME",
+      "DISPATCH_PARAM_PATH",
+      "DRIVER_TABLE_NAME",
+      "FACTORING_ITEM_TABLE_NAME",
+      "MESSAGE_TABLE_NAME",
+      "OTR_BASE_URL",
+      "OTR_CLIENT_DOT",
+      "OTR_UPLOAD_BASE_URL",
+      "SETTINGS_TABLE_NAME"
+    ],
+    "fuelImportFn": [
+      "EQUIPMENT_TABLE_NAME",
+      "FUEL_TX_TABLE_NAME"
+    ],
+    "gmailTaskFn": [
+      "INTAKE_IVAN_CHANNEL_ID",
+      "TABLE_NAME"
+    ],
+    "googleReviewsFn": [
+      "GOOGLE_PLACES_API_KEY",
+      "GOOGLE_PLACE_ID",
+      "GOOGLE_PLACE_QUERY",
+      "GOOGLE_REVIEWS_URL"
+    ],
+    "intakeReconcileFn": [
+      "INTAKE_TABLE_NAME",
+      "LOAD_TABLE_NAME"
+    ],
+    "motiveFaultFn": [
+      "EQUIPMENT_TABLE_NAME",
+      "TRUCK_FAULT_CODE_TABLE_NAME"
+    ],
+    "motiveFn": [
+      "EQUIPMENT_TABLE_NAME",
+      "TRUCK_MILEAGE_TABLE_NAME",
+      "TRUCK_ODOMETER_DAY_TABLE_NAME"
+    ],
+    "motiveLocationFn": [
+      "EQUIPMENT_TABLE_NAME",
+      "TRUCK_LOCATION_HISTORY_TABLE_NAME",
+      "TRUCK_LOCATION_TABLE_NAME"
+    ],
+    "motiveOdometerFn": [
+      "EQUIPMENT_TABLE_NAME",
+      "TRUCK_ODOMETER_DAY_TABLE_NAME"
+    ],
+    "notifierFn": [
+      "TABLE_NAME"
+    ],
+    "otrActionsFn": [
+      "BUCKET_NAME",
+      "CUSTOMER_TABLE_NAME",
+      "DRIVER_SUBMISSION_DOC_TABLE_NAME",
+      "DRIVER_SUBMISSION_TABLE_NAME",
+      "LOAD_TABLE_NAME",
+      "LOCATION_TABLE_NAME",
+      "POD_DOCUMENT_TABLE_NAME",
+      "POD_FUNCTION_NAME"
+    ],
+    "payApprovalFn": [
+      "APPROVER_EMAIL",
+      "DRIVER_TABLE_NAME",
+      "PAY_CREDIT_TABLE_NAME",
+      "PORTAL_BASE_URL",
+      "USER_POOL_ID"
+    ],
+    "paychexFn": [
+      "PAYCHEX_COMPANY_ID",
+      "PAY_TABLE_NAME"
+    ],
+    "payEmailerFn": [
+      "FROM_ADDRESS"
+    ],
+    "podActionsFn": [
+      "BUCKET_NAME",
+      "DRIVER_SUBMISSION_DOC_TABLE_NAME",
+      "DRIVER_SUBMISSION_TABLE_NAME",
+      "LOAD_TABLE_NAME",
+      "POD_BACKGROUND_SYNC_ENABLED",
+      "POD_CONNECTION_PARAM_NAME",
+      "POD_DOCUMENT_TABLE_NAME",
+      "POD_FUNCTION_NAME",
+      "POD_SENDER_MAPPING_TABLE_NAME",
+      "USER_POOL_ID"
+    ],
+    "portalApiFn": [
+      "ALLOWED_ORIGINS",
+      "APP_TABLE_NAME",
+      "AUDIT_TABLE_NAME",
+      "BUCKET_NAME",
+      "DOC_TABLE_NAME",
+      "DRIVER_TABLE_NAME",
+      "INVITE_TABLE_NAME",
+      "SIGN_REQ_TABLE_NAME",
+      "TASK_TABLE_NAME"
+    ],
+    "quoteEmailerFn": [
+      "CC_ADDRESS",
+      "FROM_ADDRESS"
+    ],
+    "rateconTextFn": [
+      "CONVERSATION_TABLE_NAME",
+      "DISPATCH_PARAM_PATH",
+      "DRIVER_TABLE_NAME",
+      "LOAD_TABLE_NAME",
+      "MESSAGE_TABLE_NAME",
+      "PAY_SETTING_TABLE_NAME",
+      "SETTINGS_TABLE_NAME",
+      "WEBHOOK_URL"
+    ],
+    "recurringFn": [
+      "ALLOCATION_TABLE_NAME",
+      "EXPENSE_RECORD_TABLE_NAME",
+      "EXPENSE_TYPE_TABLE_NAME",
+      "RECURRING_TABLE_NAME"
+    ],
+    "trackingApiFn": [
+      "DRIVER_TABLE_NAME",
+      "EQUIPMENT_TABLE_NAME",
+      "LOAD_TABLE_NAME",
+      "TRUCK_LOCATION_TABLE_NAME"
+    ],
+    "twofaFn": [
+      "TWO_FA_SLACK_CHANNEL"
+    ],
+    "userManagement": [
+      "USER_POOL_ID"
+    ],
+    "vendorApActionsFn": [
+      "CONFIRM_CC",
+      "FROM_ADDRESS",
+      "MAINTENANCE_TABLE_NAME",
+      "TABLE_NAME",
+      "USER_POOL_ID"
+    ],
+    "vendorApExtractFn": [
+      "BUCKET_NAME",
+      "TABLE_NAME"
+    ],
+    "vendorApIntakeFn": [
+      "BUCKET_NAME",
+      "TABLE_NAME",
+      "VENDOR_AP_EXTRACT_FUNCTION_NAME"
+    ],
+    "webhookFn": [
+      "BUCKET_NAME",
+      "DISPATCH_CONVERSATION_TABLE_NAME",
+      "DISPATCH_SLACK_BRIDGE_FUNCTION_NAME",
+      "TABLE_NAME"
+    ]
+  }
+}

@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Gauge, ChevronRight, Wrench, Pencil, X } from 'lucide-react'
+import { Gauge, ChevronRight, Pencil } from 'lucide-react'
+import { TmsButton } from '@/features/tms/kit/TmsButton'
+import { TmsDialog } from '@/features/tms/kit/TmsDialog'
+import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
@@ -79,57 +82,54 @@ export function PmDueWidget() {
   const dueSoon = rows.filter((r) => r.remaining != null && r.remaining <= DUE_SOON_MI).length
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Gauge size={16} style={{ color: 'var(--ds-t3)' }} />
+          <Gauge size={16} style={{ color: 'var(--tms-muted)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Miles Until Next PM · Ivan Fleet</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Miles Until Next PM · Ivan Fleet</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>
               Every {nf.format(PM_INTERVAL)} mi{dueSoon > 0 ? ` · ${dueSoon} due soon` : ''}
             </div>
           </div>
         </div>
         {canMaintenance && (
-          <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+          <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--tms-primary)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
             Maintenance <ChevronRight size={13} />
           </Link>
         )}
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-          <Wrench size={22} style={{ opacity: 0.35 }} />
-          No active Ivan-fleet trucks.
-        </div>
+        <TmsEmptyState compact title="No active Ivan-fleet trucks." message={null} />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12, padding: 16 }}>
           {rows.map((r) => {
             const notSet = r.truck.lastPmMileage == null
             const overdue = r.remaining != null && r.remaining < 0
             const soon = r.remaining != null && r.remaining >= 0 && r.remaining <= DUE_SOON_MI
-            const accent = notSet || r.remaining == null ? 'var(--ds-t3)' : overdue ? '#dc2626' : soon ? '#b45309' : '#15803d'
+            const accent = notSet || r.remaining == null ? 'var(--tms-muted)' : overdue ? 'var(--tms-badge-red)' : soon ? 'var(--tms-badge-orange)' : 'var(--tms-badge-green)'
             const pct = r.remaining == null ? 0 : Math.max(0, Math.min(100, ((PM_INTERVAL - r.remaining) / PM_INTERVAL) * 100))
             return (
-              <div key={r.truck.id} style={{ border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 14px', background: 'var(--ds-bg)' }}>
+              <div key={r.truck.id} style={{ border: '1px solid var(--tms-border)', borderRadius: 10, padding: '12px 14px', background: 'var(--tms-bg)' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)', fontFamily: 'var(--font-mono)' }}>
-                    #{r.truck.unitNumber}{r.truck.nickname ? <span style={{ fontFamily: 'inherit', fontWeight: 500, color: 'var(--ds-t3)', fontSize: 12 }}> · {r.truck.nickname}</span> : ''}
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--tms-text)', fontFamily: 'var(--font-mono)' }}>
+                    #{r.truck.unitNumber}{r.truck.nickname ? <span style={{ fontFamily: 'inherit', fontWeight: 500, color: 'var(--tms-muted)', fontSize: 12 }}> · {r.truck.nickname}</span> : ''}
                   </span>
                   <span style={{ fontSize: 15, fontWeight: 700, color: accent, fontVariantNumeric: 'tabular-nums' }}>
                     {notSet || r.remaining == null ? '—' : overdue ? `${miles(Math.abs(r.remaining))} over` : miles(r.remaining)}
                   </span>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 1 }}>
+                <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 1 }}>
                   {notSet ? 'Set last PM to enable' : r.current == null ? 'awaiting Motive odometer' : overdue ? 'overdue' : 'until next PM'}
                 </div>
 
                 {/* Progress toward next PM */}
-                <div style={{ height: 6, borderRadius: 999, background: 'rgba(15,23,42,0.08)', overflow: 'hidden', marginTop: 10 }}>
+                <div style={{ height: 6, borderRadius: 999, background: 'var(--tms-surface-hover)', overflow: 'hidden', marginTop: 10 }}>
                   <div style={{ width: `${pct}%`, height: '100%', borderRadius: 999, background: accent }} />
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 10, fontSize: 11.5, color: 'var(--ds-t2)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 10, fontSize: 11.5, color: 'var(--tms-text-2)' }}>
                   <Line label="Last PM" value={r.lastDate ? `${shortDate(r.lastDate)}${r.truck.lastPmMileage != null ? ` · ${miles(r.lastMileage)}` : ''}` : (r.truck.lastPmMileage != null ? miles(r.lastMileage) : 'Not recorded')} />
                   <Line label="Current" value={r.current != null ? `${miles(r.current)} · Motive` : 'Awaiting Motive sync'} />
                   <Line label="Next due" value={notSet ? '—' : miles(r.nextDue)} />
@@ -137,7 +137,7 @@ export function PmDueWidget() {
 
                 <button
                   onClick={() => setEditing(r.truck)}
-                  style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, color: 'var(--ds-blue)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                  style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, color: 'var(--tms-primary)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
                 >
                   <Pencil size={11} /> Edit last PM
                 </button>
@@ -175,41 +175,35 @@ function PmEditModal({ truck, onClose, onSave }: {
     })
   }
 
-  const field: React.CSSProperties = { height: 36, padding: '0 10px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t1)', fontSize: 13, fontFamily: 'inherit', width: '100%' }
-  const label: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 'var(--ds-t2)', textTransform: 'uppercase', letterSpacing: '0.05em' }
+  const field: React.CSSProperties = { height: 36, padding: '0 10px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text)', fontSize: 13, fontFamily: 'inherit', width: '100%' }
+  const label: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 'var(--tms-text-2)', textTransform: 'uppercase', letterSpacing: '0.05em' }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }} onMouseDown={onClose}>
-      <form onSubmit={submit} style={{ background: 'var(--ds-surface)', borderRadius: 10, border: '1px solid var(--ds-border)', boxShadow: '0 8px 32px rgba(0,0,0,0.22)', width: 400, maxWidth: '92vw', overflow: 'hidden' }} onMouseDown={(e) => e.stopPropagation()}>
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>Preventive maintenance · #{truck.unitNumber}</div>
-          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ds-t3)', padding: 2 }}><X size={16} /></button>
+    <TmsDialog open onOpenChange={(o) => { if (!o) onClose() }} title={`Preventive maintenance · #${truck.unitNumber}`}>
+      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <label style={label}>Last PM date</label>
+          <input type="date" value={lastPmDate} onChange={(e) => setLastPmDate(e.target.value)} style={field} />
         </div>
-        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label style={label}>Last PM date</label>
-            <input type="date" value={lastPmDate} onChange={(e) => setLastPmDate(e.target.value)} style={field} />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label style={label}>Last PM odometer (mi)</label>
-            <input type="number" value={lastPmMileage} onChange={(e) => setLastPmMileage(e.target.value)} placeholder="e.g. 512000" style={field} />
-          </div>
-          <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Current odometer comes from Motive automatically and isn’t set here.</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <label style={label}>Last PM odometer (mi)</label>
+          <input type="number" value={lastPmMileage} onChange={(e) => setLastPmMileage(e.target.value)} placeholder="e.g. 512000" style={field} />
         </div>
-        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--ds-border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button type="button" onClick={onClose} style={{ height: 34, padding: '0 14px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
-          <button type="submit" style={{ height: 34, padding: '0 18px', borderRadius: 6, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Save</button>
+        <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>Current odometer comes from Motive automatically and isn’t set here.</span>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <TmsButton type="button" variant="secondary" onClick={onClose}>Cancel</TmsButton>
+          <TmsButton type="submit" variant="primary">Save</TmsButton>
         </div>
       </form>
-    </div>
+    </TmsDialog>
   )
 }
 
 function Line({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-      <span style={{ color: 'var(--ds-t3)' }}>{label}</span>
-      <span style={{ color: 'var(--ds-t1)', textAlign: 'right' }}>{value}</span>
+      <span style={{ color: 'var(--tms-muted)' }}>{label}</span>
+      <span style={{ color: 'var(--tms-text)', textAlign: 'right' }}>{value}</span>
     </div>
   )
 }

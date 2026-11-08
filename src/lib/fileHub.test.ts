@@ -497,6 +497,7 @@ describe('classification has ONE source', () => {
     expect(classificationForFleet('LOCAL')).toBe('COMPANY')
     expect(classificationForFleet('BOX_TRUCK')).toBe('COMPANY')
     expect(classificationForFleet('AMAZON')).toBe('OWNER_OPERATOR')
+    expect(classificationForFleet('OWNER_OPERATOR')).toBe('OWNER_OPERATOR')
   })
 
   it('defaults an unclassified driver to company', () => {

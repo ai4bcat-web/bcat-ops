@@ -5,15 +5,22 @@ import interactionPlugin from '@fullcalendar/interaction'
 import type { EventContentArg, EventDropArg, EventClickArg, DatesSetArg } from '@fullcalendar/core'
 import type { EventResizeDoneArg as EventResizeArg } from '@fullcalendar/interaction'
 import { toast } from 'sonner'
-import { UserCheck, Trash2, Copy, X } from 'lucide-react'
+import { UserCheck, Copy, X } from 'lucide-react'
 import { useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
+import { useDirectory } from '@/hooks/useDirectory'
+import { ShipmentDrawer } from '@/features/shipments/components/ShipmentDrawer'
+import { duplicateShipment, getTmsSettings } from '@/lib/apiClient'
+import { errorMessage } from '@/lib/utils/errorMessage'
 import { getColor, UNASSIGNED_COLOR } from '@/lib/driverColors'
 import { updateStop } from '@/lib/stops'
 import { EventCard } from './EventCard'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
+import type { TmsSettings } from '@/types/tms'
 import { formatTime } from '@/lib/date'
-import { formatPhone } from '@/lib/utils'
+import { prettyPhone } from '@/lib/dispatch'
+import { useDriverPhones } from '@/hooks/useTruckConfigs'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -52,13 +59,39 @@ interface SchedulerViewProps {
   onDatesSet: (info: DatesSetArg) => void
 }
 
+/** Resource label under the driver's name: work phone (with its truck) first, personal second, load count last. */
+function SchedulerDriverPhones({ driver, loadCount }: { driver: Driver; loadCount: number }) {
+  const unitNumber = useAppStore((s) => s.equipment.find((e) => e.id === driver.assignedTruckId)?.unitNumber ?? null)
+  const phones = useDriverPhones(driver, { unitNumber })
+  const personal = phones.personal ? prettyPhone(phones.personal) : phones.personalRaw
+  const workNumber = phones.work ? prettyPhone(phones.work.number) : 'none'
+  const work = phones.truckId ? `W (T${phones.truckNumber ?? '?'}) ${workNumber}` : null
+  const title = [
+    phones.truckId ? `Work (truck ${phones.truckNumber ?? '?'}): ${workNumber}` : null,
+    personal ? `Personal: ${personal}` : null,
+  ].filter(Boolean).join('\n')
+  return (
+    <span title={title || undefined} className="block">
+      {work && <span className="block truncate" style={phones.work ? undefined : { color: 'var(--tms-badge-orange)' }}>{work}</span>}
+      <span className="block truncate">{personal ? `P ${personal}` : '—'} · {loadCount}</span>
+    </span>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function SchedulerView({
   calendarRef, loads, drivers, conflictIds, filterDriverId, viewMode, weekStart, onDatesSet,
 }: SchedulerViewProps) {
-  const { updateLoad, addLoad, deleteLoad } = useLoads()
+  const { updateLoad } = useLoads()
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
+  const openNewShipment = useAppStore((s) => s.openNewShipment)
+  const directory = useDirectory()
+  const { user, isAdmin } = useAuth()
+  // Where a duplicate lands: the copy's own shipment detail, never a load drawer.
+  const [openShipmentId, setOpenShipmentId] = useState<string | null>(null)
+  const [settings, setSettings] = useState<TmsSettings | null>(null)
+  useEffect(() => { getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [])
 
   const dragModifierRef = useRef<'none' | 'shift' | 'alt'>('none')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -180,12 +213,12 @@ export function SchedulerView({
     if (isUnassigned) {
       return (
         <div className="flex items-center gap-2.5 px-3 py-2.5 w-full h-full">
-          <div className="size-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: 'rgba(251,191,36,0.2)', border: '1px solid rgba(251,191,36,0.4)' }}>
-            <span className="text-sm font-bold" style={{ color: '#fbbf24' }}>?</span>
+          <div className="size-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: 'color-mix(in srgb, var(--tms-badge-orange) 20%, transparent)', border: '1px solid color-mix(in srgb, var(--tms-badge-orange) 40%, transparent)' }}>
+            <span className="text-sm font-bold" style={{ color: 'var(--tms-badge-orange)' }}>?</span>
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-semibold truncate" style={{ color: '#fbbf24' }}>Unassigned</div>
-            <div className="text-xs" style={{ color: '#94a3b8' }}>{loadCount} load{loadCount !== 1 ? 's' : ''}</div>
+            <div className="text-sm font-semibold truncate" style={{ color: 'var(--tms-badge-orange)' }}>Unassigned</div>
+            <div className="text-xs" style={{ color: 'var(--tms-muted)' }}>{loadCount} load{loadCount !== 1 ? 's' : ''}</div>
           </div>
         </div>
       )
@@ -200,7 +233,7 @@ export function SchedulerView({
       <button
         className="flex items-center gap-2.5 px-3 py-2.5 w-full h-full text-left transition-colors"
         style={{ background: 'transparent' }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(74,142,239,0.06)' }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--tms-primary-tint)' }}
         onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
         onClick={() => useAppStore.getState().setFilterDriver(
           useAppStore.getState().filterDriverId === driver.id ? null : driver.id
@@ -213,12 +246,12 @@ export function SchedulerView({
           {initials}
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-semibold truncate text-white" title={driver.name}>{driver.name}</div>
-          <div className="text-xs" style={{ color: '#94a3b8' }}>
+          <div className="text-sm font-semibold truncate text-[color:var(--tms-on-primary)]" title={driver.name}>{driver.name}</div>
+          <div className="text-xs" style={{ color: 'var(--tms-muted)' }}>
             {isBroker ? (
-              <span className="font-medium uppercase tracking-wide text-[10px]" style={{ color: '#64748b' }}>Broker · {loadCount} load{loadCount !== 1 ? 's' : ''}</span>
+              <span className="font-medium uppercase tracking-wide text-[10px]" style={{ color: 'var(--tms-muted)' }}>Broker · {loadCount} load{loadCount !== 1 ? 's' : ''}</span>
             ) : (
-              <span>{formatPhone(driver.phone)} · {loadCount}</span>
+              <SchedulerDriverPhones driver={driver} loadCount={loadCount} />
             )}
           </div>
         </div>
@@ -324,13 +357,13 @@ export function SchedulerView({
     const plusBtn = (dateStr: string) => (
       <button
         style={{
-          width: '18px', height: '18px', borderRadius: '4px', border: '1px solid rgba(74,142,239,0.4)',
-          background: 'rgba(74,142,239,0.12)', color: '#5b9bff', display: 'flex',
+          width: '18px', height: '18px', borderRadius: '4px', border: '1px solid color-mix(in srgb, var(--tms-primary) 40%, transparent)',
+          background: 'var(--tms-primary-tint)', color: 'var(--tms-primary)', display: 'flex',
           alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0,
           fontSize: '14px', lineHeight: 1, padding: 0,
         }}
-        onClick={(e) => { e.stopPropagation(); setSelectedLoad(null, 'create', { driverId: null, dateStr }) }}
-        title={`Add load for ${dateStr}`}
+        onClick={(e) => { e.stopPropagation(); openNewShipment({ driverId: null, dateStr }) }}
+        title={`Add a shipment for ${dateStr}`}
       >+</button>
     )
 
@@ -354,17 +387,17 @@ export function SchedulerView({
         {plusBtn(dateStr)}
       </div>
     )
-  }, [viewMode, setSelectedLoad])
+  }, [viewMode, openNewShipment])
 
-  // ── Date click (add load) ─────────────────────────────────────────────────
+  // ── Date click (add a shipment on the dragged day and lane) ───────────────
 
   const handleDateClick = useCallback((info: { resource?: { id: string }; dateStr: string }) => {
     const driverId = info.resource
       ? (info.resource.id === 'unassigned' ? null : info.resource.id)
       : null
     const dateStr = info.dateStr.slice(0, 10)
-    setSelectedLoad(null, 'create', { driverId, dateStr })
-  }, [setSelectedLoad])
+    openNewShipment({ driverId, dateStr })
+  }, [openNewShipment])
 
   // ── Bulk actions ──────────────────────────────────────────────────────────
 
@@ -376,12 +409,8 @@ export function SchedulerView({
     setSelectedIds(new Set())
   }
 
-  const bulkDelete = () => {
-    if (!confirm(`Delete ${selectedLoads.length} load(s)?`)) return
-    selectedLoads.forEach((l) => deleteLoad(l.id))
-    toast(`${selectedLoads.length} load(s) deleted`)
-    setSelectedIds(new Set())
-  }
+  // No bulk delete: a load carries a PRO number and a PRO number is permanent
+  // (Ryne, 2026-10-28). A shipment leaves the working set by being voided.
 
   // ── Context menu actions ──────────────────────────────────────────────────
 
@@ -394,24 +423,40 @@ export function SchedulerView({
     setContextMenu(null)
   }
 
-  const ctxDuplicate = () => {
+  /*
+   * Duplicate the shipment this leg belongs to, not the row.
+   *
+   * The old version spread the whole Load — `shipmentId` included — and wrote a bare
+   * create, so a shipment-born leg duplicated here became a phantom extra leg under the
+   * SOURCE shipment rather than a shipment of its own. The `-copy` PRO is gone with it: a
+   * PRO is claimed for good, so `X-copy` would collide on the second duplicate, and the
+   * server derives the copy's own number. `keepDriver` is what keeps the copy in the lane
+   * it was dragged from — the stop shift otherwise clears the driver and writes
+   * NEED_TO_COVER.
+   */
+  const ctxDuplicate = async () => {
     if (!ctxLoad) return
-    // id/createdAt/updatedAt are server-managed: the copy must arrive without them.
-    const duplicate: Partial<Load> = { ...ctxLoad, aljexId: `${ctxLoad.aljexId}-copy` }
-    delete duplicate.id
-    delete duplicate.createdAt
-    delete duplicate.updatedAt
-    addLoad(duplicate as Omit<Load, 'id' | 'createdAt' | 'updatedAt'>)
-    toast(`Duplicated ${ctxLoad.aljexId}`)
     setContextMenu(null)
-  }
-
-  const ctxDelete = () => {
-    if (!ctxLoad) return
-    if (!confirm(`Delete ${ctxLoad.aljexId}?`)) return
-    deleteLoad(ctxLoad.id)
-    toast(`Deleted ${ctxLoad.aljexId}`)
-    setContextMenu(null)
+    if (!ctxLoad.shipmentId) {
+      toast.error('This load has no shipment yet, so there is nothing to duplicate.')
+      return
+    }
+    try {
+      const result = await duplicateShipment({
+        shipmentId: ctxLoad.shipmentId,
+        loadId: ctxLoad.id,
+        keepDriver: true,
+        copies: [{
+          pickupAppt: ctxLoad.pickupAppt,
+          deliveryAppt: ctxLoad.deliveryAppt,
+        }],
+      })
+      toast.success(`Duplicated ${ctxLoad.aljexId}`)
+      const copy = result.created[0]
+      if (copy) setOpenShipmentId(copy)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    }
   }
 
   // Close context menu on outside click
@@ -519,13 +564,6 @@ export function SchedulerView({
               <DropdownMenuItem onClick={ctxDuplicate}>
                 <Copy className="size-3.5 mr-2" /> Duplicate
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={ctxDelete}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="size-3.5 mr-2" /> Delete
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -533,33 +571,38 @@ export function SchedulerView({
 
       {/* Floating bulk action bar */}
       {selectedIds.size > 0 && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-slate-900 text-white rounded-full px-4 py-2.5 shadow-2xl text-sm">
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-[color:var(--tms-text)] text-[color:var(--tms-on-primary)] rounded-full px-4 py-2.5 shadow-2xl text-sm">
           <span className="font-semibold">{selectedIds.size} selected</span>
-          <div className="w-px h-4 bg-slate-600 mx-1" />
+          <div className="w-px h-4 bg-[color:var(--tms-muted)] mx-1" />
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 px-2.5 text-white hover:bg-slate-700 hover:text-white text-xs gap-1"
+            className="h-7 px-2.5 text-[color:var(--tms-on-primary)] hover:bg-[color:var(--tms-text)] hover:text-[color:var(--tms-on-primary)] text-xs gap-1"
             onClick={bulkMarkRTI}
           >
             <UserCheck className="size-3.5" /> Mark RTI
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2.5 text-red-400 hover:bg-red-900/40 hover:text-red-300 text-xs gap-1"
-            onClick={bulkDelete}
-          >
-            <Trash2 className="size-3.5" /> Delete
-          </Button>
+
           <button
-            className="ml-1 text-slate-400 hover:text-white"
+            className="ml-1 text-muted-foreground hover:text-[color:var(--tms-on-primary)]"
             onClick={() => setSelectedIds(new Set())}
           >
             <X className="size-4" />
           </button>
         </div>
       )}
+
+      {/* Where a duplicate lands. One record, one detail surface. */}
+      <ShipmentDrawer
+        shipmentId={openShipmentId}
+        onClose={() => setOpenShipmentId(null)}
+        onChanged={() => {}}
+        customers={directory.customers}
+        locations={directory.locations}
+        settings={settings}
+        isAdmin={isAdmin}
+        currentUser={user?.email ?? ''}
+      />
     </div>
   )
 }

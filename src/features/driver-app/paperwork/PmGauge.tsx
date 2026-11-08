@@ -34,10 +34,10 @@ export function PmGauge({ pm }: { pm: DriverPm }) {
 
   const tone =
     pm.state === 'OVERDUE'
-      ? { bar: 'bg-red-500', text: 'text-red-300', ring: 'border-red-500/30 bg-red-500/10' }
+      ? { bar: 'bg-[color:var(--tms-badge-red)]', text: 'text-[color:var(--tms-badge-red)]', ring: 'border-[color:var(--tms-badge-red)]/30 bg-[color:var(--tms-badge-red-tint)]' }
       : pm.state === 'DUE_SOON'
-        ? { bar: 'bg-amber-500', text: 'text-amber-300', ring: 'border-amber-500/30 bg-amber-500/10' }
-        : { bar: 'bg-emerald-500', text: 'text-foreground', ring: 'border-border bg-muted/40' }
+        ? { bar: 'bg-[color:var(--tms-badge-orange)]', text: 'text-[color:var(--tms-badge-orange)]', ring: 'border-[color:var(--tms-badge-orange)]/30 bg-[color:var(--tms-badge-orange-tint)]' }
+        : { bar: 'bg-[color:var(--tms-badge-green)]', text: 'text-foreground', ring: 'border-border bg-muted/40' }
 
   return (
     <div className={`mb-4 rounded-xl border p-3 ${tone.ring}`}>
@@ -59,7 +59,7 @@ export function PmGauge({ pm }: { pm: DriverPm }) {
           */}
           {pct != null && (
             <div
-              className="mt-2 h-2 w-full overflow-hidden rounded-full bg-black/10"
+              className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[color:var(--tms-surface-hover)]"
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={PM_INTERVAL_MI}

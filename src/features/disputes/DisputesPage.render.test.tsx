@@ -8,7 +8,7 @@
  * without dropping the driver's upload.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { AmazonDispute, DisputeEvidence } from '@/types/dispute'
 
 const updateAmazonDispute = vi.fn().mockResolvedValue(undefined)
@@ -547,6 +547,7 @@ describe('DisputesPage — DisputeModal evidence file cap', () => {
     render(<DisputesPage />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
+    await act(async () => {}) // the evidence gallery resolves its previews inside act
 
     expect(screen.getByText(/Maximum 6 files reached/i)).toBeTruthy()
     const evidenceInput = screen.getByLabelText(/Trip confirmation email and any other photos for proof/i) as HTMLInputElement
@@ -565,6 +566,7 @@ describe('DisputesPage — DisputeModal evidence file cap', () => {
     render(<DisputesPage />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
+    await act(async () => {}) // the evidence gallery resolves its previews inside act
     const evidenceInput = screen.getByLabelText(/Trip confirmation email and any other photos for proof/i) as HTMLInputElement
 
     // 4 stored + 2 new = 6 (allowed)

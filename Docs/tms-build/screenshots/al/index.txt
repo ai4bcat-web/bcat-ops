@@ -1,0 +1,12 @@
+Docs/tms-build/screenshots/al/AL09a-offers-hub-L.png
+Docs/tms-build/screenshots/al/AL09b-accept-dialog-L.png
+Docs/tms-build/screenshots/al/AL09c-offers-after-actions-L.png
+Docs/tms-build/screenshots/al/AL09d-unmatched-L.png
+Docs/tms-build/screenshots/al/AL09e-unmatched-after-L.png
+Docs/tms-build/screenshots/al/AL09f-settings-secret-L.png
+Docs/tms-build/screenshots/al/AL09g-settings-L.png
+Docs/tms-build/screenshots/al/AL09a-offers-hub-D.png
+Docs/tms-build/screenshots/al/AL09b-accept-dialog-D.png
+Docs/tms-build/screenshots/al/AL09c-offers-after-actions-D.png
+Docs/tms-build/screenshots/al/AL09d-unmatched-D.png
+Docs/tms-build/screenshots/al/AL09g-settings-D.png

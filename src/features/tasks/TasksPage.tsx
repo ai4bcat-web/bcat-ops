@@ -1,8 +1,11 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { RefreshCw, Inbox, Loader2, Users } from 'lucide-react'
+import { RefreshCw, Loader2, Users } from 'lucide-react'
+import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { Button } from '@/components/ui/button'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
+import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDialog'
 import { TEAM_MEMBERS, ACTIVE_STATUSES, assigneeLabel } from '@/lib/intake'
 import { ProNumberModal, QueueCard } from '@/features/intake/IntakePage'
 import { useAppStore } from '@/store/useAppStore'
@@ -46,7 +49,9 @@ function taskToIntakeShape(t: CommandCenterTask): IntakeItem {
 export function TasksPage() {
   const { user } = useAuth()
   const setSelectedLoad      = useAppStore((s) => s.setSelectedLoad)
-  const setPendingIntakeItem = useAppStore((s) => s.setPendingIntakeItem)
+  const openNewShipment      = useAppStore((s) => s.openNewShipment)
+  const newShipmentPrefill   = useAppStore((s) => s.newShipmentPrefill)
+  const closeNewShipment     = useAppStore((s) => s.closeNewShipment)
 
   const [searchParams] = useSearchParams()
   const filterAssignee = searchParams.get('assignee') ?? 'ALL'
@@ -135,8 +140,8 @@ export function TasksPage() {
         .then((updated) => applyLocalPatch(item.id, updated))
         .catch(() => {})
     }
-    setPendingIntakeItem(item.id)
-    setSelectedLoad(null, 'create')
+    // The item travels with the form, so the shipment it creates links and closes it.
+    openNewShipment({ intakeItemId: item.id })
   }
 
   const handleUpdateLoad = (item: IntakeItem) => {
@@ -187,16 +192,11 @@ export function TasksPage() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--ds-bg)' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.01em', margin: 0 }}>Tasks</h1>
-          <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            Open intake items requiring action · grouped by assignee
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+    <TmsScrollPage
+      title="Tasks"
+      subtitle="Open intake items requiring action · grouped by assignee"
+      actions={
+        <>
           {filterAssignee !== 'ALL' && (
             <a
               href="/tasks"
@@ -215,36 +215,34 @@ export function TasksPage() {
             <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
             Refresh
           </Button>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {/* Content */}
-      <div className="space-y-8" style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
+      <div className="space-y-8">
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
             <Loader2 className="size-4 animate-spin" /> Loading tasks…
           </div>
         ) : openTasks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-2">
-            <Inbox className="size-10 opacity-20" />
-            <p className="text-sm font-medium">
-              {filterAssignee !== 'ALL'
-                ? `No open tasks for ${assigneeLabel(filterAssignee)}`
-                : 'No open tasks — all clear!'}
-            </p>
-          </div>
+          <TmsEmptyState
+            title={filterAssignee !== 'ALL'
+              ? `No open tasks for ${assigneeLabel(filterAssignee)}`
+              : 'No open tasks — all clear!'}
+            message={null}
+          />
         ) : (
           grouped.map(({ key, label, items: groupItems }) => (
             <section key={key}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Users style={{ width: 14, height: 14, color: 'var(--ds-t3)' }} />
+                <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Users style={{ width: 14, height: 14, color: 'var(--tms-muted)' }} />
                 </div>
-                <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>{label}</h2>
-                <span style={{ fontSize: 11, fontWeight: 700, background: 'var(--ds-border)', color: 'var(--ds-t2)', borderRadius: 999, padding: '2px 6px', minWidth: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)', margin: 0 }}>{label}</h2>
+                <span style={{ fontSize: 11, fontWeight: 700, background: 'var(--tms-border)', color: 'var(--tms-text-2)', borderRadius: 999, padding: '2px 6px', minWidth: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {groupItems.length}
                 </span>
-                <div style={{ flex: 1, height: 1, background: 'var(--ds-border)' }} />
+                <div style={{ flex: 1, height: 1, background: 'var(--tms-border)' }} />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -274,7 +272,16 @@ export function TasksPage() {
         />
       )}
 
+      {/* LoadDrawer — opened by "Update load" on a task that already built one. */}
       <LoadDrawer />
-    </div>
+
+      {/* "Build Load" raises this. Nothing is written until Save. */}
+      <NewShipmentDialog
+        open={newShipmentPrefill !== null}
+        prefill={newShipmentPrefill}
+        onClose={closeNewShipment}
+        onCreated={() => { closeNewShipment(); void refresh() }}
+      />
+    </TmsScrollPage>
   )
 }

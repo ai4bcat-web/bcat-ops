@@ -1,0 +1,556 @@
+/*
+ * Shared shipment conversation (the shipment Tracking tab):
+ * stream, bubbles, kind pills, structured cards, composer pieces.
+ * Moved out of TrackingConversation.css (S2 slice C): scoped, tokens only, no fallbacks.
+ */
+
+.tms-shell .tms-convo-root,
+.tms-portal .tms-convo-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.tms-shell .tms-convo-stream,
+.tms-portal .tms-convo-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* ── Bubbles ─────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-thread-stack,
+.tms-portal .tms-thread-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(78%, 560px);
+}
+
+.tms-shell .tms-thread-out .tms-thread-stack,
+.tms-portal .tms-thread-out .tms-thread-stack { align-items: flex-end; }
+.tms-shell .tms-thread-in .tms-thread-stack,
+.tms-portal .tms-thread-in .tms-thread-stack { align-items: flex-start; }
+
+.tms-shell .tms-thread-bubble,
+.tms-portal .tms-thread-bubble {
+  max-width: 100%;
+  padding: 9px 13px;
+  font-size: 13px;
+  line-height: 1.45;
+  border: 1px solid var(--tms-border);
+  border-radius: 14px 14px 14px 4px;
+  background: var(--tms-card);
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-thread-out .tms-thread-bubble,
+.tms-portal .tms-thread-out .tms-thread-bubble {
+  border-color: var(--tms-primary);
+  border-radius: 14px 14px 4px 14px;
+  background: var(--tms-primary);
+  color: var(--tms-on-primary);
+}
+
+.tms-shell .tms-thread-out .tms-thread-bubble a,
+.tms-portal .tms-thread-out .tms-thread-bubble a,
+.tms-shell .tms-thread-out .tms-thread-not-sent,
+.tms-portal .tms-thread-out .tms-thread-not-sent,
+.tms-shell .tms-thread-out .tms-convo-file-chip,
+.tms-portal .tms-thread-out .tms-convo-file-chip {
+  color: var(--tms-on-primary);
+}
+
+.tms-shell .tms-thread-out .tms-convo-bubble-files,
+.tms-portal .tms-thread-out .tms-convo-bubble-files,
+.tms-shell .tms-thread-out .tms-thread-not-sent,
+.tms-portal .tms-thread-out .tms-thread-not-sent {
+  border-top-color: var(--tms-on-primary);
+}
+
+.tms-shell .tms-thread-out .tms-convo-file-chip,
+.tms-portal .tms-thread-out .tms-convo-file-chip {
+  background: transparent;
+  border-color: var(--tms-on-primary);
+}
+
+.tms-shell .tms-thread-meta,
+.tms-portal .tms-thread-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--tms-muted);
+  font-size: 11px;
+}
+
+.tms-shell .tms-thread-out .tms-thread-meta,
+.tms-portal .tms-thread-out .tms-thread-meta { justify-content: flex-end; }
+
+.tms-shell .tms-thread-party,
+.tms-portal .tms-thread-party { font-weight: 500; color: var(--tms-text-2); }
+.tms-shell .tms-thread-time,
+.tms-portal .tms-thread-time { margin-left: 0; }
+.tms-shell .tms-thread-to,
+.tms-portal .tms-thread-to { color: var(--tms-muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tms-shell .tms-thread-subject,
+.tms-portal .tms-thread-subject { font-weight: 600; margin: 0 0 4px; }
+.tms-shell .tms-thread-body,
+.tms-portal .tms-thread-body { margin: 0; white-space: pre-wrap; word-break: break-word; }
+
+/* ── Kind pills ──────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-convo-kind-pill,
+.tms-portal .tms-convo-kind-pill {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+  margin: 0;
+}
+
+/* ── Structured cards inside the thread ──────────────────────────────────── */
+
+.tms-shell .tms-convo-card,
+.tms-portal .tms-convo-card {
+  margin: 4px 0;
+  padding: 12px;
+}
+
+.tms-shell .tms-convo-card-title,
+.tms-portal .tms-convo-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-convo-card-body,
+.tms-portal .tms-convo-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.tms-shell .tms-convo-card-row,
+.tms-portal .tms-convo-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.tms-shell .tms-convo-card-label,
+.tms-portal .tms-convo-card-label {
+  min-width: 60px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-convo-card-value,
+.tms-portal .tms-convo-card-value {
+  font-size: 13px;
+  color: var(--tms-text);
+  text-align: right;
+}
+
+.tms-shell .tms-convo-card-value a,
+.tms-portal .tms-convo-card-value a {
+  color: var(--tms-primary-ink);
+  text-decoration: none;
+}
+
+.tms-shell .tms-convo-card-value a:hover,
+.tms-portal .tms-convo-card-value a:hover { text-decoration: underline; }
+
+.tms-shell .tms-convo-card-time,
+.tms-portal .tms-convo-card-time {
+  font-size: 11px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-convo-card-files,
+.tms-portal .tms-convo-card-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tms-shell .tms-convo-card-file,
+.tms-portal .tms-convo-card-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--tms-muted);
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+}
+
+/* ── File chips ──────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-convo-bubble-files,
+.tms-portal .tms-convo-bubble-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-convo-file-chip,
+.tms-portal .tms-convo-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 200px;
+  padding: 2px 7px;
+  overflow: hidden;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--tms-muted);
+  background: var(--tms-surface);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+}
+
+.tms-shell .tms-convo-attach-bar .tms-convo-file-error,
+.tms-portal .tms-convo-attach-bar .tms-convo-file-error {
+  color: var(--tms-badge-red);
+  border-color: var(--tms-badge-red);
+  background: var(--tms-badge-red-tint);
+}
+
+.tms-shell .tms-convo-file-uploaded,
+.tms-portal .tms-convo-file-uploaded {
+  color: var(--tms-badge-green);
+  border-color: var(--tms-badge-green);
+}
+
+.tms-shell .tms-convo-file-x,
+.tms-portal .tms-convo-file-x { cursor: pointer; opacity: 0.7; }
+.tms-shell .tms-convo-file-x:hover,
+.tms-portal .tms-convo-file-x:hover { opacity: 1; }
+.tms-shell .tms-convo-file-err-text,
+.tms-portal .tms-convo-file-err-text { font-size: 10px; color: var(--tms-badge-red); }
+
+/* ── Composer ────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-thread-composer,
+.tms-portal .tms-thread-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 16px;
+  border-top: 1px solid var(--tms-border);
+  background: var(--tms-card);
+}
+
+.tms-shell .tms-thread-composer-top,
+.tms-portal .tms-thread-composer-top { display: flex; flex-wrap: wrap; gap: 8px; }
+.tms-shell .tms-thread-composer-top > *,
+.tms-portal .tms-thread-composer-top > * { flex: 1 1 auto; min-width: 120px; }
+.tms-shell .tms-thread-composer-top .tms-select,
+.tms-portal .tms-thread-composer-top .tms-select,
+.tms-shell .tms-thread-composer-top .tms-input,
+.tms-portal .tms-thread-composer-top .tms-input { height: 32px; font-size: 12px; }
+.tms-shell .tms-thread-composer textarea,
+.tms-portal .tms-thread-composer textarea { border-radius: var(--tms-radius); }
+.tms-shell .tms-thread-composer-foot,
+.tms-portal .tms-thread-composer-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.tms-shell .tms-thread-signature,
+.tms-portal .tms-thread-signature { color: var(--tms-muted); font-size: 12px; font-style: italic; }
+
+.tms-shell .tms-convo-toolbar,
+.tms-portal .tms-convo-toolbar {
+  display: flex;
+  gap: 2px;
+  align-self: flex-start;
+  padding: 2px 4px;
+  background: var(--tms-surface-hover);
+  border-radius: var(--tms-radius);
+}
+
+.tms-shell .tms-convo-composer-actions,
+.tms-portal .tms-convo-composer-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tms-shell .tms-convo-attach-bar,
+.tms-portal .tms-convo-attach-bar { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.tms-shell .tms-convo-md-li,
+.tms-portal .tms-convo-md-li { display: list-item; margin-left: 1em; }
+
+.tms-shell .tms-convo-mention-dropdown,
+.tms-portal .tms-convo-mention-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 50;
+  min-width: 180px;
+  max-height: 200px;
+  margin-bottom: 4px;
+  overflow-y: auto;
+  background: var(--tms-bg-elevated);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  box-shadow: var(--tms-shadow-pop);
+}
+
+.tms-shell .tms-convo-mention-item,
+.tms-portal .tms-convo-mention-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--tms-text);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.tms-shell .tms-convo-mention-item:hover,
+.tms-portal .tms-convo-mention-item:hover,
+.tms-shell .tms-convo-mention-item:focus-visible,
+.tms-portal .tms-convo-mention-item:focus-visible {
+  background: var(--tms-surface-hover);
+  outline: none;
+}
+
+.tms-shell .tms-convo-mention-empty,
+.tms-portal .tms-convo-mention-empty {
+  display: block;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--tms-muted);
+}
+
+/* ── Shipment tracking view (drawer + Tracking tab): dense, 12–13 px, tokens only ─────────────
+ * The drawer is a Radix portal outside .tms-shell, so every selector also covers .tms-portal. */
+
+/* The thread classes tracking.css scopes to .tms-shell only; the drawer needs them too. */
+.tms-portal .tms-thread-list { display: flex; flex-direction: column; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.tms-portal .tms-thread-row { display: flex; }
+.tms-portal .tms-thread-out { justify-content: flex-end; }
+.tms-portal .tms-thread-in { justify-content: flex-start; }
+.tms-portal .tms-thread-not-sent { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--tms-border); color: var(--tms-muted); font-size: 12px; }
+.tms-portal .tms-thread-not-sent p { margin: 4px 0 0; }
+.tms-portal .tms-thread-composer-error { margin: 0; color: var(--tms-badge-red); font-size: 12px; }
+
+.tms-shell .tms-tracking-view,
+.tms-portal .tms-tracking-view { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; }
+.tms-portal .tms-tracking-drawer-body { display: flex; flex-direction: column; min-height: 100%; }
+/* One compact header row (title, Manage links, open, close) and a tight body so the whole view sits above the fold. */
+.tms-portal.tms-tracking-drawer .tms-drawer-head { padding: 6px 12px; gap: 8px; }
+.tms-portal.tms-tracking-drawer .tms-drawer-head .tms-icon-btn { width: 24px; height: 24px; min-width: 0; min-height: 0; }
+.tms-portal.tms-tracking-drawer .tms-drawer-title { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tms-portal.tms-tracking-drawer .tms-drawer-body { padding: 8px 12px; }
+.tms-portal .tms-tracking-drawer-body > .tms-tracking-view { flex: 1 1 auto; }
+
+/* Summary strip card: the one-line facts, then (optionally) the inline tracking-prefs row. */
+.tms-shell .tms-strip,
+.tms-portal .tms-strip {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 0 0 auto;
+  padding: 6px 10px; font-size: 12px; overflow: visible;
+  background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
+}
+.tms-shell .tms-strip-line,
+.tms-portal .tms-strip-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; min-width: 0; white-space: nowrap; }
+/* Fixed height, fixed select widths, nothing conditional: saving can never move what is below. */
+.tms-shell .tms-strip-line-prefs,
+.tms-portal .tms-strip-line-prefs { height: 28px; flex: 0 0 28px; flex-wrap: nowrap; gap: 8px; }
+.tms-shell .tms-strip-prefs,
+.tms-portal .tms-strip-prefs { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; }
+.tms-shell .tms-strip-prefs-label,
+.tms-portal .tms-strip-prefs-label { flex: 0 0 auto; font-weight: 600; }
+.tms-shell .tms-strip-prefs .tms-select,
+.tms-portal .tms-strip-prefs .tms-select { height: 24px; padding-top: 0; padding-bottom: 0; font-size: 12px; flex: 0 0 auto; }
+.tms-shell .tms-strip-prefs .tms-select[data-field='mode'],
+.tms-portal .tms-strip-prefs .tms-select[data-field='mode'] { width: 150px; }
+.tms-shell .tms-strip-prefs .tms-select[data-field='method'],
+.tms-portal .tms-strip-prefs .tms-select[data-field='method'] { width: 160px; }
+.tms-shell .tms-strip-prefs .tms-select[data-field='sms'],
+.tms-portal .tms-strip-prefs .tms-select[data-field='sms'] { width: 210px; }
+.tms-shell .tms-strip-prefs .tms-btn,
+.tms-portal .tms-strip-prefs .tms-btn { height: 24px; flex: 0 0 auto; }
+.tms-shell .tms-strip-prefs-effective,
+.tms-portal .tms-strip-prefs-effective { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tms-shell .tms-strip-seg,
+.tms-portal .tms-strip-seg {
+  display: inline-flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tms-shell .tms-strip-seg + .tms-strip-seg,
+.tms-portal .tms-strip-seg + .tms-strip-seg { padding-left: 12px; border-left: 1px solid var(--tms-border); }
+.tms-shell .tms-strip a,
+.tms-portal .tms-strip a { color: inherit; text-decoration: underline; text-decoration-color: var(--tms-border); }
+.tms-shell .tms-strip-menu-host,
+.tms-portal .tms-strip-menu-host { position: relative; display: inline-flex; align-items: center; gap: 2px; }
+.tms-shell .tms-strip-seg.tms-strip-menu-host,
+.tms-portal .tms-strip-seg.tms-strip-menu-host { overflow: visible; }
+.tms-shell .tms-strip .tms-icon-btn,
+.tms-portal .tms-strip .tms-icon-btn { width: 20px; height: 20px; }
+.tms-shell .tms-strip-menu,
+.tms-portal .tms-strip-menu {
+  position: absolute; top: 100%; right: 0; z-index: 70; display: flex; flex-direction: column; gap: 2px; min-width: 200px;
+  margin-top: 4px; padding: 6px; font-size: 12px; white-space: normal;
+  background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius); box-shadow: var(--tms-shadow-modal);
+}
+.tms-shell .tms-strip-menu-edit,
+.tms-portal .tms-strip-menu-edit { display: flex; gap: 6px; padding-top: 4px; }
+.tms-shell .tms-dot,
+.tms-portal .tms-dot { display: inline-block; width: 6px; height: 6px; margin-left: 4px; border-radius: 50%; background: var(--tms-badge-orange); }
+
+/* Two independent panes. */
+.tms-shell .tms-tracking-panes,
+.tms-portal .tms-tracking-panes {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+  flex: 1 1 360px; min-height: 280px; height: 360px;
+}
+.tms-portal.tms-tracking-drawer .tms-tracking-panes { height: auto; }
+.tms-shell .tms-tracking-pane,
+.tms-portal .tms-tracking-pane {
+  display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden;
+  background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
+}
+.tms-shell .tms-convo-compact .tms-convo-stream,
+.tms-portal .tms-convo-compact .tms-convo-stream { padding: 8px 10px; gap: 6px; min-height: 0; overflow-y: auto; }
+.tms-shell .tms-convo-compact .tms-thread-composer,
+.tms-portal .tms-convo-compact .tms-thread-composer { padding: 8px 10px; gap: 6px; }
+.tms-shell .tms-convo-compact .tms-thread-composer textarea,
+.tms-portal .tms-convo-compact .tms-thread-composer textarea { font-size: 13px; min-height: 0; }
+.tms-shell .tms-convo-compact .tms-thread-bubble,
+.tms-portal .tms-convo-compact .tms-thread-bubble { font-size: 13px; padding: 6px 10px; }
+.tms-shell .tms-convo-compact .tms-thread-meta,
+.tms-portal .tms-convo-compact .tms-thread-meta { font-size: 11px; }
+.tms-shell .tms-convo-sig,
+.tms-portal .tms-convo-sig { color: var(--tms-muted); font-size: 11px; }
+.tms-shell .tms-convo-head,
+.tms-portal .tms-convo-head {
+  display: flex; align-items: center; gap: 6px; flex: 0 0 auto; min-width: 0; padding: 6px 10px; font-size: 12px; white-space: nowrap;
+  border-bottom: 1px solid var(--tms-border); background: var(--tms-surface-subtle);
+}
+.tms-shell .tms-convo-addr,
+.tms-portal .tms-convo-addr { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--tms-text-2); }
+.tms-shell .tms-convo-warn,
+.tms-portal .tms-convo-warn { color: var(--tms-badge-orange); overflow: hidden; text-overflow: ellipsis; }
+
+/* Recent check calls: one line per row. */
+.tms-shell .tms-recent,
+.tms-portal .tms-recent {
+  flex: 0 0 auto; padding: 6px 10px; font-size: 12px;
+  background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
+}
+.tms-shell .tms-recent-head,
+.tms-portal .tms-recent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.tms-shell .tms-recent-title,
+.tms-portal .tms-recent-title { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--tms-muted); }
+.tms-shell .tms-recent-actions,
+.tms-portal .tms-recent-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.tms-shell .tms-recent-list,
+.tms-portal .tms-recent-list { margin: 0; padding: 0; list-style: none; }
+.tms-shell .tms-recent-empty,
+.tms-portal .tms-recent-empty { margin: 0; }
+.tms-shell .tms-recent-row,
+.tms-portal .tms-recent-row {
+  display: grid; grid-template-columns: 110px minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  min-height: 24px; white-space: nowrap;
+}
+.tms-shell .tms-recent-row > *,
+.tms-portal .tms-recent-row > * { overflow: hidden; text-overflow: ellipsis; }
+.tms-shell .tms-recent-row + .tms-recent-row,
+.tms-portal .tms-recent-row + .tms-recent-row { border-top: 1px solid var(--tms-border); }
+
+/* Route map panel: a 28 px header and a 232 px body between the strip and the panes. */
+.tms-shell .tms-map-panel,
+.tms-portal .tms-map-panel {
+  flex: 0 0 auto; min-width: 0;
+  background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
+}
+.tms-shell .tms-map-head,
+.tms-portal .tms-map-head { display: flex; align-items: center; gap: 8px; min-width: 0; height: 28px; padding: 0 8px; font-size: 12px; white-space: nowrap; }
+.tms-shell .tms-map-head-text,
+.tms-portal .tms-map-head-text { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tms-shell .tms-map-head-end,
+.tms-portal .tms-map-head-end { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.tms-shell .tms-map-chip,
+.tms-portal .tms-map-chip { flex: 0 0 auto; padding: 0 6px; border: 1px solid var(--tms-border); border-radius: 999px; font-size: 11px; line-height: 18px; }
+.tms-shell .tms-map-tone,
+.tms-portal .tms-map-tone { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--tms-muted); }
+.tms-shell .tms-map-tone-fresh,
+.tms-portal .tms-map-tone-fresh { background: var(--tms-badge-green); }
+.tms-shell .tms-map-tone-aging,
+.tms-portal .tms-map-tone-aging { background: var(--tms-badge-orange); }
+.tms-shell .tms-map-body,
+.tms-portal .tms-map-body { position: relative; height: 150px; border-top: 1px solid var(--tms-border); overflow: hidden; }
+.tms-shell .tms-map-body-inner,
+.tms-portal .tms-map-body-inner { position: relative; width: 100%; height: 100%; }
+.tms-shell .tms-map-google,
+.tms-portal .tms-map-google,
+.tms-shell .tms-map-fallback,
+.tms-portal .tms-map-fallback { width: 100%; height: 100%; }
+.tms-shell .tms-map-svg,
+.tms-portal .tms-map-svg { display: block; }
+.tms-shell .tms-map-caption,
+.tms-portal .tms-map-caption {
+  position: absolute; left: 8px; bottom: 6px; margin: 0; padding: 1px 6px; font-size: 11px;
+  background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
+}
+.tms-shell .tms-map-empty,
+.tms-portal .tms-map-empty,
+.tms-shell .tms-map-unavailable,
+.tms-portal .tms-map-unavailable { display: flex; align-items: center; justify-content: center; height: 100%; margin: 0; padding: 12px; font-size: 13px; text-align: center; }
+.tms-shell .tms-map-dot,
+.tms-portal .tms-map-dot { position: relative; display: block; width: 8px; height: 8px; border-radius: 50%; background: var(--tms-badge-blue); border: 1px solid var(--tms-card); }
+.tms-shell .tms-map-dot-approx,
+.tms-portal .tms-map-dot-approx { opacity: 0.5; }
+.tms-shell .tms-map-dot-label,
+.tms-portal .tms-map-dot-label { position: absolute; left: 10px; top: -4px; font-size: 9px; white-space: nowrap; color: var(--tms-muted); }
+.tms-shell .tms-map-pin,
+.tms-portal .tms-map-pin {
+  display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%;
+  font-size: 10px; font-weight: 700; color: var(--tms-card); background: var(--tms-muted); border: 2px solid var(--tms-card);
+}
+.tms-shell .tms-map-pin-pickup,
+.tms-portal .tms-map-pin-pickup { background: var(--tms-badge-green); }
+.tms-shell .tms-map-pin-delivery,
+.tms-portal .tms-map-pin-delivery { background: var(--tms-badge-blue); }
+.tms-shell .tms-map-pin-stop,
+.tms-portal .tms-map-pin-stop { width: 10px; height: 10px; }
+.tms-shell .tms-map-current,
+.tms-portal .tms-map-current { position: relative; display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--tms-muted); border: 2px solid var(--tms-card); box-shadow: var(--tms-shadow-pop); }
+.tms-shell .tms-map-current-fresh,
+.tms-portal .tms-map-current-fresh { background: var(--tms-badge-green); }
+.tms-shell .tms-map-current-aging,
+.tms-portal .tms-map-current-aging { background: var(--tms-badge-orange); }
+.tms-shell .tms-map-warn,
+.tms-portal .tms-map-warn { position: absolute; top: -14px; left: 3px; font-weight: 700; color: var(--tms-badge-red); }
+/* A fresh fix wears a ring; no animation (nothing to reflow, nothing to disable for reduced motion). */
+.tms-shell .tms-map-pulse,
+.tms-portal .tms-map-pulse { box-shadow: 0 0 0 5px var(--tms-badge-green-tint); }
+.tms-portal .tms-public-map { position: relative; height: 260px; }

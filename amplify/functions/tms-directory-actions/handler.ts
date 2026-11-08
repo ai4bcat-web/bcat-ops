@@ -16,6 +16,7 @@ import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'
 import {
   DynamoDBClient,
+  DeleteItemCommand,
   GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
@@ -24,23 +25,122 @@ import {
 } from '@aws-sdk/client-dynamodb'
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
-import { createHmac, timingSafeEqual } from 'crypto'
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto'
+import Anthropic from '@anthropic-ai/sdk'
+import { validateCommissionPlans, validatePaySchedule } from '../../../src/lib/commission'
+import { validateAutomationPatch } from '../../../src/lib/trackingAutomation'
+import { CUSTOMER_TRACKING_MODES, DRIVER_SMS_TARGETS, TRACKING_METHODS } from '../../../src/lib/trackingPrefs'
+import { teamMembership, validateTeams } from '../../../src/lib/teams'
+import { REVIEW_REQUIREMENTS, normalizeReviewRequirements } from '../../../src/lib/reviewRequirements'
+import { SEED_DIVISIONS, SEED_RULES, validateDivisions, validateRules } from '../../../src/lib/ownership'
+import { checkIntakeEmail, normalizeIntakeEmail } from '../../../src/lib/intakeMail'
+import { RETIRED_SEED_VIEWS, SEED_VIEWS, slugify, validateView, BOARD_COLUMN_KEYS } from '../../../src/lib/shipmentViewDefs'
+import { validateAiAgents, validatePartyMemory } from '../../../src/lib/workflows/memory'
+import { BILLING_METHODS, validateBillingFields, type BillingMethod } from '../../../src/lib/billingMethod'
+import {
+  CHECK_CALL_CHANNELS,
+  CHECK_CALL_MILESTONES,
+  DEFAULT_CHECK_CALL_PLAN,
+  type CheckCallChannel,
+  type CheckCallMilestone,
+} from '../../../src/lib/checkCallPlan'
+import { REQUIRED_FIELD_CATALOG } from '../../../src/lib/flowDefaults'
+import {
+  BRAND_ACCENTS,
+  BRAND_THEMES,
+  SIGNATURE_TOKENS,
+  brandKey,
+  logoKeyOk,
+  validateBrandSenders,
+} from '../../../src/lib/brokerage/branding'
+import {
+  validateCustomerPortalDefaults,
+  validateCustomerTags,
+} from '../../../src/lib/brokerage/customerSettings'
+import {
+  validateRateConTemplate,
+  validateCarrierAgreementTemplate,
+} from '../../../src/lib/brokerage/carrierDocuments'
+import { validateConsolidationRules } from '../../../src/lib/brokerage/consolidation'
+import {
+  validateNotificationDefaults,
+  validateNotificationSubscriptions,
+  validateNotificationWebhooks,
+} from '../../../src/lib/brokerage/notifications'
+import { DIVISION_REP_KEYS, parseDivisionSalesReps } from '../../../src/lib/divisionSalesRep'
+import { validatePaymentTerms } from '../../../src/lib/brokerage/paymentTerms'
+import {
+  IMPORT_ENTITIES,
+  type ImportEntity,
+  planImport,
+  validateImportJob,
+  validateRows,
+} from '../../../src/lib/brokerage/import'
+import { validateWhiteLabel, type WhiteLabel } from '../../../src/lib/brokerage/whiteLabel'
+import { writeRawParameter, parameterNameFor } from '../_shared/integrationSecrets'
+import { normalizeAddress, normalizeName, type AddressShape } from '../_shared/directoryKeys'
+import type {
+  CarrierAgreementTemplate,
+  CommissionTrigger,
+  NotificationWebhook,
+  OwnershipDivisionRecord,
+  OwnershipRuleRecord,
+  ShipmentViewFilters,
+  ShipmentViewRecord,
+  Team,
+} from '../../../src/types/tms'
+import {
+  INTEGRATION_ACTIONS,
+  runIntegrationAction,
+  type IntegrationActionName,
+  type IntegrationDeps,
+} from './integrations'
+import { MCP_FIND_ACTIONS, runMcpFindAction, type McpFindActionName, type McpFindDeps } from './mcpFind'
+import { parsePoints, routeMiles } from './routeMiles'
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
 
+/**
+ * Table names. Lambda refuses environment variables over 4 KB, and 17 full table names were what
+ * pushed this function past it (deploy 158). The stack passes ONE `DATA_TABLE_SUFFIX`
+ * (`<apiId>-NONE`) and every table is `<Model>-<suffix>`; an explicit `<X>_TABLE_NAME` still wins
+ * (tests, rehearsal stacks).
+ */
 const TABLE_NAME = process.env.TABLE_NAME ?? ''
-const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? TABLE_NAME
-const LOCATION_TABLE_NAME = process.env.LOCATION_TABLE_NAME ?? TABLE_NAME
-const DIVISION_TABLE_NAME = process.env.DIVISION_TABLE_NAME ?? TABLE_NAME
-const SETTINGS_TABLE_NAME = process.env.SETTINGS_TABLE_NAME ?? TABLE_NAME
-const MERGE_JOB_TABLE_NAME = process.env.MERGE_JOB_TABLE_NAME ?? TABLE_NAME
-const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME ?? ''
+const DATA_TABLE_SUFFIX = process.env.DATA_TABLE_SUFFIX ?? ''
+const tableOf = (envName: string, model: string, fallback = ''): string =>
+  process.env[envName] ?? (DATA_TABLE_SUFFIX ? `${model}-${DATA_TABLE_SUFFIX}` : fallback)
+const CUSTOMER_TABLE_NAME = tableOf('CUSTOMER_TABLE_NAME', 'Customer', TABLE_NAME)
+const LOCATION_TABLE_NAME = tableOf('LOCATION_TABLE_NAME', 'Location', TABLE_NAME)
+const DIVISION_TABLE_NAME = tableOf('DIVISION_TABLE_NAME', 'Division', TABLE_NAME)
+const SETTINGS_TABLE_NAME = tableOf('SETTINGS_TABLE_NAME', 'TmsSettings', TABLE_NAME)
+const MERGE_JOB_TABLE_NAME = tableOf('MERGE_JOB_TABLE_NAME', 'DirectoryMergeJob', TABLE_NAME)
+const LOAD_TABLE_NAME = tableOf('LOAD_TABLE_NAME', 'Load')
+const USER_PROFILE_TABLE_NAME = tableOf('USER_PROFILE_TABLE_NAME', 'UserProfile')
+// Step R — the self-serve revenue taxonomy and the saved department views. This
+// Lambda is their only writer; the client reads the three tables directly.
+const OWNERSHIP_DIVISION_TABLE_NAME = tableOf('OWNERSHIP_DIVISION_TABLE_NAME', 'OwnershipDivision')
+const OWNERSHIP_RULE_TABLE_NAME = tableOf('OWNERSHIP_RULE_TABLE_NAME', 'OwnershipRule')
+const SHIPMENT_VIEW_TABLE_NAME = tableOf('SHIPMENT_VIEW_TABLE_NAME', 'ShipmentView')
+const SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME = tableOf('SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME', 'ShipmentColumnTemplate')
+const AUDIT_LOG_TABLE_NAME = tableOf('AUDIT_LOG_TABLE_NAME', 'AuditLog')
+// Step J — one row per integration provider, API client and webhook receipt.
+// This Lambda is its only writer apart from tracking-api's `lastUsedAt` stamp.
+const INTEGRATION_TABLE_NAME = tableOf('INTEGRATION_TABLE_NAME', 'Integration')
+// Step L — spreadsheet import jobs. Small table; list action scans.
+const IMPORT_JOB_TABLE_NAME = tableOf('IMPORT_JOB_TABLE_NAME', 'ImportJob')
+// Step N2: MyCarrierPackets sync writes compliance data back onto Carrier rows.
+const CARRIER_TABLE_NAME = tableOf('CARRIER_TABLE_NAME', 'Carrier')
+// Step AD: Find & Invite notes the invitation on the load's thread.
+const SHIPMENT_MESSAGE_TABLE_NAME = tableOf('SHIPMENT_MESSAGE_TABLE_NAME', 'ShipmentMessage')
 const GEOCODE_TOKEN_SECRET = process.env.GEOCODE_TOKEN_SECRET ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
+/** Step R: the one BROKERAGE grant. The Shipments page is where loads are built now. */
+const TMS_PAGE_GROUP = 'page-tms'
 
 // ── AppSync data client (used only for Load update during merge) ─────────────
 
@@ -72,6 +172,7 @@ async function getDataClient(): Promise<DataClient> {
 
 type Action =
   | 'UPSERT_CUSTOMER'
+  | 'SET_CUSTOMER_STATUS'
   | 'UPSERT_LOCATION'
   | 'ARCHIVE_CUSTOMER'
   | 'ARCHIVE_LOCATION'
@@ -81,6 +182,27 @@ type Action =
   | 'PREVIEW_MERGE_LOCATIONS'
   | 'MERGE_LOCATIONS'
   | 'RESUME_MERGE'
+  | 'SAVE_OWNERSHIP_DIVISION'
+  | 'ARCHIVE_OWNERSHIP_DIVISION'
+  | 'SAVE_OWNERSHIP_RULES'
+  | 'SAVE_SHIPMENT_VIEW'
+  | 'ARCHIVE_SHIPMENT_VIEW'
+  | 'SAVE_COLUMN_TEMPLATE'
+  | 'DELETE_COLUMN_TEMPLATE'
+  | 'ENSURE_OWNERSHIP_SEED'
+  // Step L — My Brokerage settings, divisions, webhook secrets and import jobs.
+  | 'ROTATE_WEBHOOK_SECRET'
+  | 'PREVIEW_IMPORT'
+  | 'RUN_IMPORT'
+  | 'LIST_IMPORT_JOBS'
+  // Step M — Academy Ask assistant.
+  | 'ASK_ACADEMY'
+  // Step J — the integration framework. Owner/ADMIN only, every one of them.
+  | IntegrationActionName
+  // Step AD — Carriers › Find & Invite (MyCarrierPackets lookups, invitation, add to carriers).
+  | McpFindActionName
+  // Step AH — road miles for the shipment form (Distance Matrix, else a labelled estimate).
+  | 'GET_ROUTE_MILES'
 
 interface AppSyncIdentity {
   sub: string
@@ -99,6 +221,7 @@ interface AppSyncEvent {
 interface Caller {
   email: string
   sub: string
+  groups?: string[]
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -127,6 +250,14 @@ function getGroups(identity?: AppSyncIdentity | null): string[] {
   return []
 }
 
+function isIntegrationAction(action: Action): action is IntegrationActionName {
+  return Object.prototype.hasOwnProperty.call(INTEGRATION_ACTIONS, action)
+}
+
+function isMcpFindAction(action: Action): action is McpFindActionName {
+  return Object.prototype.hasOwnProperty.call(MCP_FIND_ACTIONS, action)
+}
+
 async function authorize(action: Action, identity?: AppSyncIdentity | null): Promise<Caller> {
   if (!identity) throw new Error('Unauthorized: missing identity')
   const email = await getCallerEmail(identity)
@@ -137,28 +268,75 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
 
   const directoryActions: Partial<Record<Action, true>> = {
     UPSERT_CUSTOMER: true,
+    SET_CUSTOMER_STATUS: true,
     ARCHIVE_CUSTOMER: true,
     UPSERT_LOCATION: true,
     ARCHIVE_LOCATION: true,
     REMOVE_DRIVER_NOTE: true,
+    SAVE_COLUMN_TEMPLATE: true,
+    DELETE_COLUMN_TEMPLATE: true,
   }
-  const settingsActions: Partial<Record<Action, true>> = { SAVE_DIVISION: true, SAVE_SETTINGS: true }
+  // Divisions, rules, views and the seed decide who earns every shipment and what
+  // each department sees: shared configuration, owner/ADMIN only, like TMS settings.
+  const settingsActions: Partial<Record<Action, true>> = {
+    SAVE_DIVISION: true,
+    SAVE_SETTINGS: true,
+    SAVE_OWNERSHIP_DIVISION: true,
+    ARCHIVE_OWNERSHIP_DIVISION: true,
+    SAVE_OWNERSHIP_RULES: true,
+    SAVE_SHIPMENT_VIEW: true,
+    ARCHIVE_SHIPMENT_VIEW: true,
+    ENSURE_OWNERSHIP_SEED: true,
+    ROTATE_WEBHOOK_SECRET: true,
+    PREVIEW_IMPORT: true,
+    RUN_IMPORT: true,
+    LIST_IMPORT_JOBS: true,
+  }
   const mergeActions: Partial<Record<Action, true>> = {
     PREVIEW_MERGE_LOCATIONS: true,
     MERGE_LOCATIONS: true,
     RESUME_MERGE: true,
   }
+  // The Academy Ask assistant answers questions from any user who can open the Academy.
+  const assistantActions: Partial<Record<Action, true>> = {
+    ASK_ACADEMY: true,
+  }
 
   if (directoryActions[action]) {
-    // Anyone who builds loads can create the customer/facility the load needs (inline create).
-    const ok = isOwner || isAdmin || groups.includes('page-customers') || groups.includes('page-locations') || groups.includes('page-loads')
-    if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, page-customers, page-locations, or page-loads`)
+    // Anyone who builds loads can create the customer/facility the load needs (inline
+    // create) — and from Step R the one Shipments page is where loads are built, so
+    // `page-tms` opens the same door `page-loads` always did.
+    const ok =
+      isOwner || isAdmin ||
+      groups.includes('page-customers') || groups.includes('page-locations') ||
+      groups.includes('page-loads') || groups.includes(TMS_PAGE_GROUP)
+    if (!ok) {
+      throw new Error(
+        `Forbidden: ${action} requires owner, ADMIN, page-customers, page-locations, page-loads, or ${TMS_PAGE_GROUP}`,
+      )
+    }
+  } else if (isIntegrationAction(action)) {
+    // Credentials for every outside system the brokerage holds: owner/ADMIN only,
+    // and not grantable through a page claim (spec §8.1's "Broker Admin only").
+    if (!isOwner && !isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
+  } else if (isMcpFindAction(action)) {
+    // Finding and inviting a carrier is carrier-desk work, not credential management: the page
+    // groups that open Carriers or build loads may use it (the credentials stay in this Lambda).
+    const ok = isOwner || isAdmin || groups.includes('page-carriers') || groups.includes('page-loads') || groups.includes(TMS_PAGE_GROUP)
+    if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, page-carriers, page-loads, or ${TMS_PAGE_GROUP}`)
+  } else if (action === 'GET_ROUTE_MILES') {
+    // Read-only measuring for whoever builds loads; the key never leaves this Lambda.
+    const ok = isOwner || isAdmin || groups.includes('page-loads') || groups.includes(TMS_PAGE_GROUP)
+    if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, page-loads, or ${TMS_PAGE_GROUP}`)
+  } else if (assistantActions[action]) {
+    const ok = isOwner || isAdmin || groups.includes(TMS_PAGE_GROUP)
+    if (!ok) throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${TMS_PAGE_GROUP}`)
   } else if (settingsActions[action] || mergeActions[action]) {
     // Divisions, TMS settings and merges rewrite shared configuration/history: ADMIN only.
     if (!isOwner && !isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
   }
 
-  return { email, sub: identity.sub }
+  return { email, sub: identity.sub, groups }
 }
 
 // ── Input helpers ──────────────────────────────────────────────────────────────
@@ -197,6 +375,25 @@ function optionalEnum<T extends string>(value: unknown, allowed: readonly T[], f
   return v as T
 }
 
+/** Validate a template string, refusing tokens outside the allowed set. */
+function templateString(value: unknown, maxLen: number, allowedTokens: readonly string[]): string | null {
+  const v = optionalString(value, maxLen)
+  if (v == null) return null
+  const allowed: Record<string, true> = Object.fromEntries(allowedTokens.map((t) => [t, true]))
+  const bad: string[] = []
+  const seen: Record<string, true> = {}
+  for (const match of v.matchAll(/\{([a-zA-Z0-9_]+)\}/g)) {
+    const token = match[1]
+    if (seen[token] || allowed[token]) continue
+    seen[token] = true
+    bad.push(token)
+  }
+  if (bad.length) {
+    throw new Error(`Unknown template token${bad.length > 1 ? 's' : ''}: ${bad.join(', ')}.`)
+  }
+  return v
+}
+
 function optionalString(value: unknown, maxLen?: number): string | null {
   if (value == null) return null
   if (typeof value !== 'string') return null
@@ -233,6 +430,19 @@ function optionalBoolean(value: unknown): boolean | null {
   throw new Error('Value must be a boolean')
 }
 
+/**
+ * Step AP: a Load Review requirement list. Null clears it (customer -> org default,
+ * org -> built-in seven); an empty array is a deliberate "nothing required"; an unknown
+ * key is refused rather than silently dropped.
+ */
+function validateReviewRequirements(value: unknown): string[] | null {
+  if (value == null) return null
+  if (!Array.isArray(value)) throw new Error('reviewRequirements must be an array')
+  const unknown = value.filter((item) => !(REVIEW_REQUIREMENTS as readonly unknown[]).includes(item))
+  if (unknown.length > 0) throw new Error(`Unknown review requirement: ${unknown.map(String).join(', ')}`)
+  return normalizeReviewRequirements(value)
+}
+
 function optionalStringArray(value: unknown, maxLen?: number): string[] | null {
   if (value == null) return null
   if (!Array.isArray(value)) throw new Error('Value must be an array')
@@ -265,6 +475,316 @@ function validateAwsIntegerCents(value: unknown, label: string): number | null {
   return num
 }
 
+/** Division logo keys live under brand/ so they are not mistaken for documents. */
+function divisionLogoKey(value: unknown): string | null {
+  const key = optionalString(value, 300)
+  if (key && !logoKeyOk(key)) {
+    throw new Error('Division logo keys must start with "brand/".')
+  }
+  return key
+}
+
+/** Terms & Conditions URL printed on every invoice must be https. */
+function divisionTermsUrl(value: unknown): string | null {
+  const url = optionalString(value, 300)
+  if (url && !url.startsWith('https://')) {
+    throw new Error('Terms & Conditions URL must use https.')
+  }
+  return url
+}
+
+// ── Customer v2 validators ───────────────────────────────────────────────────
+
+const CUSTOMER_STATUSES = [
+  'NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING',
+  'PENDING', 'ACTIVE', 'DORMANT', 'CLOSED', 'BLOCKED',
+] as const
+type CustomerStatus = (typeof CUSTOMER_STATUSES)[number]
+
+const CUSTOMER_CONTACT_TYPES = ['PRIMARY', 'BILLING', 'OPERATIONS', 'SALES', 'CLAIMS', 'OTHER'] as const
+const CUSTOMER_NOTIFICATIONS = [
+  'APPT_SCHEDULED', 'LOADING', 'PICKED_UP', 'IN_TRANSIT',
+  'OUT_FOR_DELIVERY', 'UNLOADING', 'DELIVERED', 'INVOICE_SENT',
+] as const
+const REFERENCE_LEVELS = ['ORDER', 'HANDLING_UNIT', 'PACKAGE', 'STOP'] as const
+const CHARGE_CALCS = ['FLAT', 'PER_MILE', 'PER_CWT', 'PERCENT'] as const
+const PRICING_MODES = ['MARGIN', 'MARKUP', 'PROFIT'] as const
+const INVOICE_FREQUENCIES = ['DAILY', 'TWICE_WEEKLY', 'WEEKLY', 'MONTHLY'] as const
+
+function assertArrayOf<T>(
+  value: unknown,
+  label: string,
+  maxLen: number,
+  validate: (item: unknown, index: number) => T,
+): T[] | null {
+  const arr = optionalJsonArray(value)
+  if (arr == null) return null
+  if (arr.length > maxLen) throw new Error(`${label} must have at most ${maxLen} elements`)
+  return arr.map((item, i) => validate(item, i))
+}
+
+function assertRecord(item: unknown, index: number, label: string): Record<string, unknown> {
+  if (item == null || typeof item !== 'object' || Array.isArray(item)) {
+    throw new Error(`${label} element ${index} must be an object`)
+  }
+  return item as Record<string, unknown>
+}
+
+function assertNonEmptyString(value: unknown, label: string): string {
+  const s = assertString(value, label)
+  if (!s) throw new Error(`${label} cannot be empty`)
+  return s
+}
+
+function assertStringArray(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`)
+  return value.map((v, i) => {
+    if (typeof v !== 'string' || !v.trim()) throw new Error(`${label} element ${i} must be a non-empty string`)
+    return v.trim()
+  })
+}
+
+function assertEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): T {
+  const s = assertString(value, label)
+  if (!(allowed as readonly string[]).includes(s)) throw new Error(`${label} must be one of ${allowed.join(', ')}`)
+  return s as T
+}
+
+function optionalEnumStrict<T extends string>(value: unknown, allowed: readonly T[], label: string): T | null {
+  if (value == null) return null
+  return assertEnum(value, allowed, label)
+}
+
+function optionalAddress(value: unknown): Record<string, unknown> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  return {
+    street: optionalString(obj.street, 255),
+    city: optionalString(obj.city, 100),
+    state: optionalString(obj.state, 50),
+    zip: optionalString(obj.zip, 20),
+    country: optionalString(obj.country, 50),
+  }
+}
+
+function validateCustomerContacts(value: unknown, billToIds: Set<string>): Record<string, unknown>[] | null {
+  return assertArrayOf(value, 'contacts', 100, (item, i) => {
+    const c = assertRecord(item, i, 'contacts')
+    const id = assertNonEmptyString(c.id, `contacts[${i}].id`)
+    const types = assertStringArray(c.types ?? [], `contacts[${i}].types`)
+    for (const t of types) {
+      if (!CUSTOMER_CONTACT_TYPES.includes(t as (typeof CUSTOMER_CONTACT_TYPES)[number])) {
+        throw new Error(`contacts[${i}].types contains invalid value: ${t}`)
+      }
+    }
+    const notifications = assertStringArray(c.notifications ?? [], `contacts[${i}].notifications`)
+    for (const n of notifications) {
+      if (!CUSTOMER_NOTIFICATIONS.includes(n as (typeof CUSTOMER_NOTIFICATIONS)[number])) {
+        throw new Error(`contacts[${i}].notifications contains invalid value: ${n}`)
+      }
+    }
+    const billToId = c.billToId == null ? null : optionalString(c.billToId, 100)
+    if (billToId && !billToIds.has(billToId)) {
+      throw new Error(`contacts[${i}].billToId references a bill-to not present in this payload`)
+    }
+    return {
+      id,
+      name: assertNonEmptyString(c.name, `contacts[${i}].name`),
+      email: optionalString(c.email, 254),
+      phone: optionalString(c.phone, 50),
+      title: optionalString(c.title, 100),
+      types,
+      billToId,
+      notifications,
+      active: optionalBoolean(c.active) ?? true,
+    }
+  })
+}
+
+function validateBillToParties(value: unknown): { items: Record<string, unknown>[]; defaultId: string | null; ids: Set<string> } {
+  const items = assertArrayOf(value, 'billToParties', 100, (item, i) => {
+    const b = assertRecord(item, i, 'billToParties')
+    return {
+      id: assertNonEmptyString(b.id, `billToParties[${i}].id`),
+      name: assertNonEmptyString(b.name, `billToParties[${i}].name`),
+      address: optionalAddress(b.address),
+      email: optionalString(b.email, 254),
+      phone: optionalString(b.phone, 50),
+      paymentTermsDays: optionalInteger(b.paymentTermsDays, { min: 0 }),
+      isDefault: optionalBoolean(b.isDefault) ?? false,
+    }
+  })
+  const ids = new Set(items?.map((b) => String(b.id)) ?? [])
+  const defaults = items?.filter((b) => b.isDefault) ?? []
+  if (defaults.length > 1) throw new Error('At most one bill-to party may be default')
+  return { items: items ?? [], defaultId: (defaults[0]?.id as string) ?? null, ids }
+}
+
+function validateRequiredReferences(value: unknown): Record<string, unknown>[] | null {
+  return assertArrayOf(value, 'requiredReferences', 100, (item, i) => {
+    const r = assertRecord(item, i, 'requiredReferences')
+    const code = assertNonEmptyString(r.code, `requiredReferences[${i}].code`)
+    const level = assertEnum(r.level, REFERENCE_LEVELS, `requiredReferences[${i}].level`)
+    const count = optionalInteger(r.countOnNewOrder, { min: 0, max: 10 }) ?? 0
+    return { code, label: optionalString(r.label, 100), level, display: optionalBoolean(r.display) ?? true, countOnNewOrder: count }
+  })
+}
+
+function validateChargeCodeOverrides(value: unknown): Record<string, unknown>[] | null {
+  return assertArrayOf(value, 'chargeCodeOverrides', 100, (item, i) => {
+    const o = assertRecord(item, i, 'chargeCodeOverrides')
+    return {
+      code: assertNonEmptyString(o.code, `chargeCodeOverrides[${i}].code`),
+      display: optionalBoolean(o.display) ?? true,
+      customerCode: optionalString(o.customerCode, 50),
+      label: optionalString(o.label, 100),
+      category: optionalString(o.category, 100),
+      calculatedBy: optionalEnumStrict(o.calculatedBy, CHARGE_CALCS, `chargeCodeOverrides[${i}].calculatedBy`),
+      defaultAmountCents: validateAwsIntegerCents(o.defaultAmountCents, `chargeCodeOverrides[${i}].defaultAmountCents`),
+    }
+  })
+}
+
+function validateChargeCodes(value: unknown): Record<string, unknown>[] | null {
+  return assertArrayOf(value, 'chargeCodes', 1000, (item, i) => {
+    const d = assertRecord(item, i, 'chargeCodes')
+    return {
+      code: assertNonEmptyString(d.code, `chargeCodes[${i}].code`),
+      label: assertNonEmptyString(d.label, `chargeCodes[${i}].label`),
+      category: optionalString(d.category, 100),
+      calculatedBy: assertEnum(d.calculatedBy, CHARGE_CALCS, `chargeCodes[${i}].calculatedBy`),
+      defaultAmountCents: validateAwsIntegerCents(d.defaultAmountCents, `chargeCodes[${i}].defaultAmountCents`),
+    }
+  })
+}
+
+function validateDefaultCharges(value: unknown): Record<string, unknown>[] | null {
+  return assertArrayOf(value, 'defaultCharges', 100, (item, i) => {
+    const d = assertRecord(item, i, 'defaultCharges')
+    return {
+      code: assertNonEmptyString(d.code, `defaultCharges[${i}].code`),
+      amountCents: validateAwsIntegerCents(d.amountCents, `defaultCharges[${i}].amountCents`) ?? 0,
+      count: optionalInteger(d.count, { min: 0 }),
+    }
+  })
+}
+
+function validatePricingDefaults(value: unknown): Record<string, unknown> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  const mode = assertEnum(obj.mode, PRICING_MODES, 'pricingDefaults.mode')
+  return {
+    mode,
+    defaultBps: optionalInteger(obj.defaultBps, { min: 0, max: 10000 }),
+    defaultProfitCents: validateAwsIntegerCents(obj.defaultProfitCents, 'pricingDefaults.defaultProfitCents'),
+    minProfitCents: validateAwsIntegerCents(obj.minProfitCents, 'pricingDefaults.minProfitCents'),
+    maxProfitCents: validateAwsIntegerCents(obj.maxProfitCents, 'pricingDefaults.maxProfitCents'),
+    singleChargeCode: optionalString(obj.singleChargeCode, 50),
+    distribution: optionalString(obj.distribution, 100),
+    gpSplitBps: optionalInteger(obj.gpSplitBps, { min: 0, max: 10000 }),
+  }
+}
+
+function validateQuotingDefaults(value: unknown): Record<string, unknown> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  const portalStatusMask = optionalStringArray(obj.portalStatusMask, 50)
+  const blockedLtlCarrierIds = optionalStringArray(obj.blockedLtlCarrierIds, 100)
+  const selfQuoteCarrierIds = optionalStringArray(obj.selfQuoteCarrierIds, 100)
+  return {
+    defaultMode: optionalString(obj.defaultMode, 50),
+    hoursToQuote: optionalInteger(obj.hoursToQuote, { min: 0 }),
+    notes: optionalString(obj.notes, 4000),
+    portalLtlDispatchMode: optionalString(obj.portalLtlDispatchMode, 50),
+    portalStatusMask,
+    blockedLtlCarrierIds,
+    selfQuoteCarrierIds,
+  }
+}
+
+function validateVisibilityPrefs(value: unknown): Record<string, unknown> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  return {
+    milestoneEmails: optionalBoolean(obj.milestoneEmails) ?? false,
+    sharedTrackingLink: optionalBoolean(obj.sharedTrackingLink) ?? false,
+    shipperPortal: optionalBoolean(obj.shipperPortal) ?? false,
+  }
+}
+
+const ALLOWED_FIELD_KEYS: Record<string, true> = Object.fromEntries(
+  REQUIRED_FIELD_CATALOG.map((f) => [f.key, true]),
+)
+
+function validateRequiredLoadFields(value: unknown): string[] | null {
+  const arr = optionalStringArray(value, 50)
+  if (arr == null) return null
+  for (const key of arr) {
+    if (!ALLOWED_FIELD_KEYS[key]) throw new Error(`Unknown required-load field: ${key}`)
+  }
+  return arr
+}
+
+function assertFlowInt(value: unknown, label: string, min: number, max: number): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (value === undefined || value === null || !Number.isFinite(n) || n < min || n > max) {
+    throw new Error(`${label} must be ${min}–${max}`)
+  }
+  return Math.round(n)
+}
+
+function validateCheckCallPlan(value: unknown): Record<string, unknown> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  const interval = assertFlowInt(obj.intervalHours, 'checkCallPlan.intervalHours', 1, 24)
+  const escalate = assertFlowInt(obj.escalateAfterMinutes, 'checkCallPlan.escalateAfterMinutes', 5, 1440)
+  const channels = optionalStringArray(obj.channels, 10)
+  const milestones = optionalStringArray(obj.milestones, 20)
+  for (const ch of channels ?? []) {
+    if (!CHECK_CALL_CHANNELS.includes(ch as CheckCallChannel)) {
+      throw new Error(`Unknown check-call channel: ${ch}`)
+    }
+  }
+  for (const ms of milestones ?? []) {
+    if (!CHECK_CALL_MILESTONES.includes(ms as CheckCallMilestone)) {
+      throw new Error(`Unknown check-call milestone: ${ms}`)
+    }
+  }
+  return {
+    intervalHours: interval,
+    escalateAfterMinutes: escalate,
+    channels: channels?.length ? channels : [...DEFAULT_CHECK_CALL_PLAN.channels],
+    milestones: milestones?.length ? milestones : [...DEFAULT_CHECK_CALL_PLAN.milestones],
+    emailDispatcher: optionalBoolean(obj.emailDispatcher) ?? true,
+  }
+}
+
+function assertBasisPoints(value: unknown, label: string): number | null {
+  if (value === undefined || value === null) return null
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0 || n > 9999) {
+    throw new Error(`${label} must be 0–9999 basis points`)
+  }
+  return Math.round(n)
+}
+
+function validateMarginTargetBpsByMode(value: unknown): Record<string, number> | null {
+  const obj = optionalJsonObject(value)
+  if (obj == null) return null
+  const out: Record<string, number> = {}
+  for (const [mode, raw] of Object.entries(obj)) {
+    const n = assertBasisPoints(raw, `marginTargetBpsByMode.${mode}`)
+    if (n != null) out[mode.toUpperCase()] = n
+  }
+  return Object.keys(out).length ? out : null
+}
+
+function throwIfFloorAboveTarget(target: number | null, floor: number | null, labels: { target: string; floor: string }): void {
+  if (target != null && floor != null && floor > target) {
+    throw new Error(`${labels.floor} cannot be above ${labels.target}`)
+  }
+}
+
 function nowIso(): string {
   return new Date().toISOString()
 }
@@ -281,36 +801,7 @@ function conflictError(itemLabel: string, cause: unknown): Error {
 }
 
 // ── Normalization ─────────────────────────────────────────────────────────────
-
-function normalizeName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/\b(llc|inc|ltd|llp|corp|co|company|enterprises)\b/g, '')
-    .trim()
-}
-
-interface AddressShape {
-  street?: string | null
-  city?: string | null
-  state?: string | null
-  zip?: string | null
-  country?: string | null
-}
-
-function normalizeAddress(value: AddressShape | string): string {
-  if (typeof value === 'string') {
-    return value.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
-  }
-  const parts = [value.street, value.city, value.state, value.zip, value.country]
-  return parts
-    .map((p) => (typeof p === 'string' ? p.toLowerCase().replace(/[^a-z0-9]/g, ' ') : ''))
-    .filter(Boolean)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+// `normalizeName` / `normalizeAddress` / `AddressShape` live in `_shared/directoryKeys.ts` (the import engine shares them).
 
 // ── Geocode token verification ───────────────────────────────────────────────
 
@@ -498,6 +989,73 @@ function deriveLegacyFields(stops: StopShape[]): Record<string, unknown> {
 
 // ── Customer actions ───────────────────────────────────────────────────────────
 
+function isLeadStatus(status: CustomerStatus | null): boolean {
+  if (status == null) return false
+  return ['NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING'].includes(status)
+}
+
+function isInactiveStatus(status: CustomerStatus | null): boolean {
+  return status === 'CLOSED' || status === 'BLOCKED'
+}
+
+function deriveActiveFromStatus(status: CustomerStatus | null): boolean {
+  if (status == null) return true
+  return !isInactiveStatus(status)
+}
+
+interface BillingFieldsState {
+  billingMethod: BillingMethod | null
+  apEmail: string | null
+  invoiceCopyEmails: string[] | null
+  billingNeedsReview: string | null
+}
+
+/**
+ * Step AW stage D. Absent keys keep the stored value (a save of another field, or the EDI patch that sends the
+ * whole record back, never clears them). When a person changes the method, AP e-mail or copy list the review flag
+ * is cleared unless the request names a different one. Validation only runs when the billing fields change, so a
+ * customer with a flagged import can still be edited for anything else.
+ */
+function resolveBillingFields(
+  input: Record<string, unknown>,
+  existing: Record<string, unknown> | null,
+  isCreate: boolean,
+): { after: BillingFieldsState; before: BillingFieldsState; changed: boolean } {
+  const before: BillingFieldsState = {
+    billingMethod: (existing?.billingMethod as BillingMethod | undefined) ?? null,
+    apEmail: (existing?.apEmail as string | undefined) ?? null,
+    invoiceCopyEmails: (existing?.invoiceCopyEmails as string[] | undefined) ?? null,
+    billingNeedsReview: (existing?.billingNeedsReview as string | undefined) ?? null,
+  }
+  const method = 'billingMethod' in input ? optionalEnumStrict(input.billingMethod, BILLING_METHODS, 'billingMethod') : before.billingMethod
+  const apRaw = 'apEmail' in input ? optionalString(input.apEmail, 254) : before.apEmail
+  const copyRaw = 'invoiceCopyEmails' in input ? optionalStringArray(input.invoiceCopyEmails, 254) : before.invoiceCopyEmails
+  const copy = copyRaw ? [...new Set(copyRaw.map((e) => e.toLowerCase()))] : null
+  const after: BillingFieldsState = {
+    billingMethod: method,
+    apEmail: apRaw ? apRaw.toLowerCase() : null,
+    invoiceCopyEmails: copy && copy.length > 0 ? copy : null,
+    billingNeedsReview: 'billingNeedsReview' in input ? optionalString(input.billingNeedsReview, 500) : before.billingNeedsReview,
+  }
+  const changed =
+    after.billingMethod !== before.billingMethod ||
+    after.apEmail !== before.apEmail ||
+    JSON.stringify(after.invoiceCopyEmails) !== JSON.stringify(before.invoiceCopyEmails)
+  if (changed || (isCreate && (after.billingMethod || after.apEmail || after.invoiceCopyEmails))) {
+    const errors = validateBillingFields(after)
+    const first = Object.values(errors)[0]
+    if (first) throw new Error(first)
+    if (after.billingNeedsReview === before.billingNeedsReview) after.billingNeedsReview = null
+  }
+  return { after, before, changed: changed || (isCreate && (after.billingMethod != null || after.apEmail != null || after.invoiceCopyEmails != null)) }
+}
+
+async function auditBillingChange(id: string, name: string, billing: { before: BillingFieldsState; after: BillingFieldsState; changed: boolean }, caller: Caller): Promise<void> {
+  if (!billing.changed) return
+  await writeAudit('CUSTOMER', id, 'BILLING_METHOD_SET', caller, { name, before: billing.before, after: billing.after })
+}
+
+
 async function upsertCustomer(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
   const name = assertString(input.name, 'name')
   const normalizedName = normalizeName(name)
@@ -520,10 +1078,22 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     isCreate = true
   }
 
+  const existingStatus = (existing?.status as CustomerStatus | undefined) ?? null
+
   if (existing) {
     if (existing.mergedIntoId) throw new Error('Cannot edit a merged customer')
-    if (existing.active === false && input.active !== true) {
+    // Legacy archived rows (no status, active=false) require explicit reactivation.
+    // Once a status exists, active is derived and edits go through SET_CUSTOMER_STATUS.
+    if (existingStatus == null && existing.active === false && input.active !== true) {
       throw new Error('Cannot edit an archived customer; unarchive via another action')
+    }
+  }
+
+  // Status may only change through SET_CUSTOMER_STATUS.
+  if (!isCreate && input.status !== undefined) {
+    const requested = optionalEnumStrict(input.status, CUSTOMER_STATUSES, 'status')
+    if (requested !== existingStatus) {
+      throw new Error('Change status with SET_CUSTOMER_STATUS')
     }
   }
 
@@ -535,7 +1105,74 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     }
   }
 
+  // ── JSON array validation (order matters: bill-to IDs are referenced by contacts) ─
+  const { items: billToParties, ids: billToIds } = validateBillToParties(input.billToParties)
+  const contacts = validateCustomerContacts(input.contacts, billToIds)
+  const requiredReferences = validateRequiredReferences(input.requiredReferences)
+  const chargeCodeOverrides = validateChargeCodeOverrides(input.chargeCodeOverrides)
+  const defaultCharges = validateDefaultCharges(input.defaultCharges)
+  const pricingDefaults = validatePricingDefaults(input.pricingDefaults)
+  const quotingDefaults = validateQuotingDefaults(input.quotingDefaults)
+  const visibilityPrefs = validateVisibilityPrefs(input.visibilityPrefs)
+
+  // ── Step P3 — flow defaults ────────────────────────────────────────────────
+  const marginTargetBps = assertBasisPoints(input.marginTargetBps, 'marginTargetBps')
+  const marginFloorBps = assertBasisPoints(input.marginFloorBps, 'marginFloorBps')
+  throwIfFloorAboveTarget(marginTargetBps, marginFloorBps, { target: 'marginTargetBps', floor: 'marginFloorBps' })
+  const requiredLoadFields = validateRequiredLoadFields(input.requiredLoadFields)
+  const checkCallPlan = validateCheckCallPlan(input.checkCallPlan)
+  const trackingAutomation = input.trackingAutomation == null ? null : validateAutomationPatch(input.trackingAutomation)
+
+  // ── Admin-only credit fields ───────────────────────────────────────────────
+  const isAdmin = caller.email === OWNER_EMAIL || (caller.groups ?? []).includes(ADMIN_GROUP)
+  const creditFields = ['creditLimitCents', 'creditHoldFlag', 'freeCreditRequired', 'creditUsageWarningBps', 'maxDaysLate'] as const
+  // Step I. `claim-CREDIT_LIMIT_EDIT` is the one claim these fields answer to: a
+  // credit manager who is not an admin sets limits, and nothing else admin-only.
+  const mayEditCredit = isAdmin || (caller.groups ?? []).includes('claim-CREDIT_LIMIT_EDIT')
+  for (const field of creditFields) {
+    if (input[field] !== undefined && !mayEditCredit) {
+      const existingValue = existing?.[field]
+      const requestedValue = field === 'creditLimitCents'
+        ? validateAwsIntegerCents(input[field], field)
+        : field === 'creditUsageWarningBps'
+          ? optionalInteger(input[field], { min: 0, max: 10000 })
+          : field === 'maxDaysLate'
+            ? optionalInteger(input[field], { min: 0 })
+            : optionalBoolean(input[field])
+      const coerceBoolean = (field === 'creditHoldFlag' || field === 'freeCreditRequired')
+      const normalizedRequested = coerceBoolean ? (requestedValue ?? false) : requestedValue
+      const normalizedExisting = coerceBoolean ? (existingValue ?? false) : (existingValue ?? null)
+      if (JSON.stringify(normalizedRequested) !== JSON.stringify(normalizedExisting)) {
+        throw new Error(`Forbidden: ${field} requires owner or ADMIN`)
+      }
+    }
+  }
+
+  // ── Status defaults and approvals ──────────────────────────────────────────
+  const settings = await getSettings()
+  const requireApproval = settings?.requireCustomerApproval === true
+
+  let status: CustomerStatus | null = null
+  if (isCreate) {
+    const requested = optionalEnumStrict(input.status, CUSTOMER_STATUSES, 'status')
+    if (requested != null) {
+      status = requested
+    } else {
+      // No status requested: default to ACTIVE, or PENDING if approval is required
+      // and the caller is not an owner/admin or primary owner of this account.
+      const autoActive = !requireApproval || isAdmin
+      status = autoActive ? 'ACTIVE' : 'PENDING'
+    }
+  }
+  // Updates keep existingStatus (status changes are handled by SET_CUSTOMER_STATUS).
+  const finalStatus = isCreate ? status : existingStatus
+  const active = finalStatus != null ? deriveActiveFromStatus(finalStatus) : (optionalBoolean(input.active) ?? true)
+
   const now = nowIso()
+  const billing = resolveBillingFields(input, existing, isCreate)
+  // Step K — the standing notes the AI agents read before they propose anything for
+  // this customer. Human-edited here and nowhere else; the agent only reads it.
+  const aiMemory = validatePartyMemory(input.aiMemory, existing?.aiMemory, caller.email, now)
   const item: Record<string, unknown> = {
     id,
     name,
@@ -553,14 +1190,75 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     creditLimitCents: validateAwsIntegerCents(input.creditLimitCents, 'creditLimitCents'),
     creditHoldFlag: optionalBoolean(input.creditHoldFlag),
     requiredDocsForInvoice: optionalStringArray(input.requiredDocsForInvoice, 50),
+    reviewRequirements: validateReviewRequirements(input.reviewRequirements),
     defaultDivisionKey: optionalString(input.defaultDivisionKey, 50),
     defaultSalesRepId: optionalString(input.defaultSalesRepId, 100),
     aliases,
     normalizedName,
-    active: optionalBoolean(input.active) ?? true,
+    active,
     // Unset stays null: the /batory/i name fallback remains in force until an admin decides.
     apptWorkflow: optionalEnum(input.apptWorkflow, ['NONE', 'BATORY'] as const, 'apptWorkflow'),
     mergedIntoId: undefined,
+
+    // Customer v2
+    status: finalStatus,
+    statusReason: isCreate ? null : (existing?.statusReason as string | undefined) ?? null,
+    statusChangedAt: isCreate ? null : (existing?.statusChangedAt as string | undefined) ?? null,
+    statusChangedBy: isCreate ? null : (existing?.statusChangedBy as string | undefined) ?? null,
+    replacementCustomerId: isCreate ? null : (existing?.replacementCustomerId as string | undefined) ?? null,
+    leadSource: optionalString(input.leadSource, 100),
+    industry: optionalString(input.industry, 100),
+    serviceTier: optionalString(input.serviceTier, 100),
+    website: optionalString(input.website, 255),
+    freeCreditRequired: optionalBoolean(input.freeCreditRequired),
+    creditUsageWarningBps: optionalInteger(input.creditUsageWarningBps, { min: 0, max: 10000 }),
+    maxDaysLate: optionalInteger(input.maxDaysLate, { min: 0 }),
+    contacts,
+    billToParties,
+    requiredReferences,
+    chargeCodeOverrides,
+    defaultCharges,
+    pricingDefaults,
+    quotingDefaults,
+    invoiceFrequency: optionalEnumStrict(input.invoiceFrequency, INVOICE_FREQUENCIES, 'invoiceFrequency'),
+    gpSplitBps: optionalInteger(input.gpSplitBps, { min: 0, max: 10000 }),
+    rateConTerms: optionalString(input.rateConTerms, 8000),
+    visibilityPrefs,
+    teamKey: optionalString(input.teamKey, 100),
+    operatedById: optionalString(input.operatedById, 100),
+    accountOwnerIds: optionalStringArray(input.accountOwnerIds, 100),
+
+    // Step J — the ids this customer is known by in an outside system. Stored
+    // now; the syncs that read them are stubs until those providers are live.
+    project44CustomerId: optionalString(input.project44CustomerId, 100),
+    hubspotId: optionalString(input.hubspotId, 100),
+    haulpayDebtorId: optionalString(input.haulpayDebtorId, 100),
+    ediSettings: optionalJsonObject(input.ediSettings),
+    aiMemory,
+
+    // Step P3 — flow defaults (customer override of TmsSettings).
+    defaultCarrierTeamKey: optionalString(input.defaultCarrierTeamKey, 100),
+    defaultCarrierRepId: optionalString(input.defaultCarrierRepId, 100),
+    marginTargetBps,
+    marginFloorBps,
+    quoteAutoReply: optionalBoolean(input.quoteAutoReply),
+    requiredLoadFields,
+    checkCallPlan,
+    // Step V — the tracker a new shipment inherits, and the automation policy override.
+    // Absent keys keep what is stored so a patch that predates the fields never clears them.
+    defaultTrackerId: 'defaultTrackerId' in input ? optionalString(input.defaultTrackerId, 100) : (existing?.defaultTrackerId as string | undefined) ?? null,
+    trackingAutomation: 'trackingAutomation' in input ? trackingAutomation : (existing?.trackingAutomation as Record<string, unknown> | undefined) ?? null,
+    // Steps AJ/AK — how the customer's loads are tracked and which driver number is texted.
+    // Absent keys keep what is stored (a profile save of another field must never wipe them); null clears.
+    trackingMode: 'trackingMode' in input ? optionalEnumStrict(input.trackingMode, CUSTOMER_TRACKING_MODES, 'trackingMode') : (existing?.trackingMode as string | undefined) ?? null,
+    trackingMethod: 'trackingMethod' in input ? optionalEnumStrict(input.trackingMethod, TRACKING_METHODS, 'trackingMethod') : (existing?.trackingMethod as string | undefined) ?? null,
+    driverSmsTarget: 'driverSmsTarget' in input ? optionalEnumStrict(input.driverSmsTarget, DRIVER_SMS_TARGETS, 'driverSmsTarget') : (existing?.driverSmsTarget as string | undefined) ?? null,
+    // Step AW stage D — how this customer is billed. Absent keys keep what is stored.
+    billingMethod: billing.after.billingMethod,
+    apEmail: billing.after.apEmail,
+    invoiceCopyEmails: billing.after.invoiceCopyEmails,
+    billingNeedsReview: billing.after.billingNeedsReview,
+
     createdBy: isCreate ? caller.email : (existing?.createdBy as string) ?? caller.email,
     updatedBy: caller.email,
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,
@@ -575,6 +1273,7 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
         ConditionExpression: 'attribute_not_exists(id)',
       }),
     )
+    await auditBillingChange(id, name, billing, caller)
     return item
   }
 
@@ -584,6 +1283,9 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
   const sets: string[] = []
   for (const [key, value] of Object.entries(item)) {
     if (key === 'id' || key === 'createdAt' || key === 'createdBy' || key === 'mergedIntoId') continue
+    // An undefined value is a field this request did not carry (aiMemory on a customer that has none): marshall drops it, so
+    // naming it in SET would reference an undefined `:key` and DynamoDB would refuse the whole update.
+    if (value === undefined) continue
     names[`#${key}`] = key
     values[`:${key}`] = marshall({ [key]: value }, { removeUndefinedValues: true })[key]
     sets.push(`#${key} = :${key}`)
@@ -603,6 +1305,104 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
       }),
     )
     if (!result.Attributes) throw new Error('Customer update failed')
+    await auditBillingChange(id, name, billing, caller)
+    return unmarshall(result.Attributes)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('ConditionalCheckFailed') || msg.includes('TransactionCanceled')) {
+      throw conflictError('customer', err)
+    }
+    throw err
+  }
+}
+
+async function setCustomerStatus(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+  const id = assertString(input.id, 'id')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  const requested = assertEnum(input.status, CUSTOMER_STATUSES, 'status')
+
+  if (requested === 'DORMANT') throw new Error('DORMANT is derived, not a stored status')
+
+  const existing = await getById(CUSTOMER_TABLE_NAME, id)
+  if (!existing) throw new Error(`Customer not found: ${id}`)
+  if (existing.mergedIntoId) throw new Error('Cannot change status of a merged customer')
+
+  const current = (existing.status as CustomerStatus | undefined) ?? null
+  const settings = await getSettings()
+  const requireApproval = settings?.requireCustomerApproval === true
+  const isAdmin = caller.email === OWNER_EMAIL || (caller.groups ?? []).includes(ADMIN_GROUP)
+
+  // Transition rules
+  let nextStatus: CustomerStatus = requested
+
+  if (requested === 'CLOSED' && !isLeadStatus(current)) {
+    throw new Error('CLOSED is only allowed from a lead stage')
+  }
+
+  if (requested === 'BLOCKED') {
+    const reason = assertString(input.reason ?? '', 'reason')
+    if (reason.length > 250) throw new Error('reason must be at most 250 characters')
+    const replacementId = optionalString(input.replacementCustomerId, 100)
+    if (replacementId) {
+      if (replacementId === id) throw new Error('replacementCustomerId cannot be the customer itself')
+      const replacement = await getById(CUSTOMER_TABLE_NAME, replacementId)
+      if (!replacement) throw new Error(`Replacement customer not found: ${replacementId}`)
+      if (replacement.mergedIntoId) throw new Error('Replacement customer is merged')
+      const replacementStatus = (replacement.status as CustomerStatus | undefined) ?? null
+      const replacementActive = replacementStatus != null ? deriveActiveFromStatus(replacementStatus) : replacement.active !== false
+      if (!replacementActive) throw new Error('Replacement customer is inactive')
+    }
+  }
+
+  if (requested === 'ACTIVE') {
+    if (current === 'PENDING') {
+      if (!isAdmin) throw new Error('PENDING → ACTIVE requires owner or ADMIN')
+      nextStatus = 'ACTIVE'
+    } else if (current === null || isLeadStatus(current) || current === 'BLOCKED') {
+      if (requireApproval && !isAdmin) {
+        nextStatus = 'PENDING'
+      } else {
+        nextStatus = 'ACTIVE'
+      }
+    } else {
+      // ACTIVE → ACTIVE or any other non-terminal transition to ACTIVE is fine.
+      nextStatus = 'ACTIVE'
+    }
+  }
+
+  // Lead stages may transition freely among themselves; nothing extra to enforce.
+  // PENDING/BLOCKED/null → ACTIVE handled above. BLOCKED → lead? Plan doesn't mention,
+  // so treat as allowed (blocked rows can be reactivated to any open state).
+
+  const now = nowIso()
+  const reason = requested === 'BLOCKED' ? assertString(input.reason ?? '', 'reason') : optionalString(input.reason, 250)
+  const replacementCustomerId = optionalString(input.replacementCustomerId, 100)
+  const statusReason = requested === 'BLOCKED' && reason ? reason : (requested === 'CLOSED' ? reason : null)
+
+  const values: Record<string, AttributeValue> = {
+    ':status': { S: nextStatus },
+    ':statusReason': statusReason == null ? { NULL: true } : { S: statusReason },
+    ':statusChangedAt': { S: now },
+    ':statusChangedBy': { S: caller.email },
+    ':replacementCustomerId': replacementCustomerId == null ? { NULL: true } : { S: replacementCustomerId },
+    ':active': { BOOL: deriveActiveFromStatus(nextStatus) },
+    ':updatedAt': { S: now },
+    ':updatedBy': { S: caller.email },
+  }
+
+  try {
+    const result = await dynamo.send(
+      new UpdateItemCommand({
+        TableName: CUSTOMER_TABLE_NAME,
+        Key: marshall({ id }),
+        ConditionExpression: buildDynamoCasCondition(values, expectedUpdatedAt),
+        UpdateExpression: 'SET #status = :status, statusReason = :statusReason, statusChangedAt = :statusChangedAt, statusChangedBy = :statusChangedBy, replacementCustomerId = :replacementCustomerId, active = :active, updatedAt = :updatedAt, updatedBy = :updatedBy',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: values,
+        ReturnValues: 'ALL_NEW',
+      }),
+    )
+    if (!result.Attributes) throw new Error('Customer status update failed')
     return unmarshall(result.Attributes)
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -649,6 +1449,8 @@ async function archiveCustomer(input: Record<string, unknown>, caller: Caller): 
 }
 
 // ── Location actions ───────────────────────────────────────────────────────────
+
+const LOCATION_CREATED_FROM = ['shipment-form', 'intake'] as const
 
 async function upsertLocation(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
   const name = assertString(input.name, 'name')
@@ -810,6 +1612,9 @@ async function upsertLocation(input: Record<string, unknown>, caller: Caller): P
         ConditionExpression: 'attribute_not_exists(id)',
       }),
     )
+    // Where the row was created from (no schema field for it): one audit row, only when the caller says.
+    const createdFrom = optionalEnum(input.createdFrom, LOCATION_CREATED_FROM, 'createdFrom')
+    if (createdFrom) await writeAudit('LOCATION', id, 'CREATE_LOCATION', caller, { name, createdFrom })
     return item
   }
 
@@ -957,11 +1762,34 @@ async function saveDivision(input: Record<string, unknown>, caller: Caller): Pro
     remitToEmail: optionalString(input.remitToEmail, 254),
     invoicePrefix: optionalString(input.invoicePrefix, 10),
     fleetGroup: optionalEnum(input.fleetGroup, ['LOCAL', 'AMAZON', 'BOX_TRUCK'] as const, 'fleetGroup'),
+
+    // Step L — billing entity identity, contacts, payment instructions and invoice footer.
+    taxId: optionalString(input.taxId, 32),
+    phone: optionalString(input.phone, 32),
+    physicalAddress: optionalJsonObject(input.physicalAddress),
+    primaryContact: optionalJsonObject(input.primaryContact),
+    billingContact: optionalJsonObject(input.billingContact),
+    payablesContact: optionalJsonObject(input.payablesContact),
+    termsUrl: divisionTermsUrl(input.termsUrl),
+    paymentInstructions: optionalJsonObject(input.paymentInstructions),
+    invoiceVerbiage: optionalString(input.invoiceVerbiage, 2000),
+    logoKey: divisionLogoKey(input.logoKey),
+    isPrimary: optionalBoolean(input.isPrimary),
+
     active: optionalBoolean(input.active) ?? true,
     createdBy: isCreate ? caller.email : (existing?.createdBy as string) ?? caller.email,
     updatedBy: caller.email,
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,
     updatedAt: now,
+  }
+
+  // Step L — enforce exactly one primary billing entity.
+  if (item.isPrimary === true && (isCreate || existing?.isPrimary !== true)) {
+    const others = await scanTable(DIVISION_TABLE_NAME)
+    const alreadyPrimary = others.find((d) => d.key !== key && d.isPrimary === true)
+    if (alreadyPrimary) {
+      throw new Error(`Another division is already primary: ${alreadyPrimary.name ?? alreadyPrimary.key}. Clear it first.`)
+    }
   }
 
   if (isCreate) {
@@ -1010,6 +1838,51 @@ async function saveDivision(input: Record<string, unknown>, caller: Caller): Pro
   }
 }
 
+/**
+ * Step I. `UserProfile.teamKeys` is a mirror of the `teams` list the settings card
+ * edits — the list is where membership is decided, this is the copy every rep-scoped
+ * query reads. Best effort, row by row: a staff row that would not take the write is
+ * logged the way the audit write is, and never refuses the settings save that caused it.
+ */
+async function mirrorTeamKeys(teams: Team[], caller: Caller): Promise<void> {
+  if (!USER_PROFILE_TABLE_NAME) return
+  const membership = teamMembership(teams)
+  try {
+    let lastKey: Record<string, AttributeValue> | undefined
+    do {
+      const result = await dynamo.send(
+        new ScanCommand({ TableName: USER_PROFILE_TABLE_NAME, ExclusiveStartKey: lastKey, Limit: 500 }),
+      )
+      for (const raw of result.Items ?? []) {
+        const row = unmarshall(raw)
+        const id = typeof row.id === 'string' ? row.id : ''
+        if (!id) continue
+        const keys = membership[id.trim().toLowerCase()] ?? []
+        const current = Array.isArray(row.teamKeys)
+          ? row.teamKeys.filter((key): key is string => typeof key === 'string')
+          : []
+        // Only the rows whose membership actually moved are written.
+        if (current.length === keys.length && current.every((key, i) => key === keys[i])) continue
+        try {
+          await dynamo.send(
+            new UpdateItemCommand({
+              TableName: USER_PROFILE_TABLE_NAME,
+              Key: marshall({ id }),
+              UpdateExpression: 'SET teamKeys = :keys, updatedBy = :by, updatedAt = :now',
+              ExpressionAttributeValues: marshall({ ':keys': keys, ':by': caller.email, ':now': nowIso() }),
+            }),
+          )
+        } catch (err: unknown) {
+          console.warn(`[tms-directory-actions] team mirror failed for ${id}:`, String(err))
+        }
+      }
+      lastKey = result.LastEvaluatedKey
+    } while (lastKey)
+  } catch (err: unknown) {
+    console.warn('[tms-directory-actions] team mirror scan failed:', String(err))
+  }
+}
+
 async function saveSettings(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
   const id = 'default'
   const existing = await getSettings()
@@ -1028,18 +1901,101 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
   const keep = <T,>(raw: unknown, parse: (v: unknown) => T, field: string): T | undefined =>
     raw === undefined ? (existing?.[field] as T | undefined) : parse(raw)
 
+  const defaultPaymentTermsDays = keep(input.defaultPaymentTermsDays, (v) => optionalInteger(v, { min: 0 }), 'defaultPaymentTermsDays')
+
   const item: Record<string, unknown> = {
     id,
     marginFloorBps: keep(input.marginFloorBps, (v) => optionalInteger(v, { min: 0 }), 'marginFloorBps'),
-    defaultPaymentTermsDays: keep(input.defaultPaymentTermsDays, (v) => optionalInteger(v, { min: 0 }), 'defaultPaymentTermsDays'),
+    defaultPaymentTermsDays,
     accessorialCodes: keep(input.accessorialCodes, optionalJsonArray, 'accessorialCodes'),
     loadStatusRules: keep(input.loadStatusRules, optionalJsonObject, 'loadStatusRules'),
     invoiceNumberFormat: keep(input.invoiceNumberFormat, (v) => optionalString(v, 50), 'invoiceNumberFormat'),
     autoClearPastAppts: keep(input.autoClearPastAppts, (v) => (typeof v === 'boolean' ? v : undefined), 'autoClearPastAppts'),
+
+    // Customer v2 org defaults
+    defaultCreditLimitCents: keep(input.defaultCreditLimitCents, (v) => validateAwsIntegerCents(v, 'defaultCreditLimitCents'), 'defaultCreditLimitCents'),
+    defaultFreeCreditRequired: keep(input.defaultFreeCreditRequired, (v) => (typeof v === 'boolean' ? v : undefined), 'defaultFreeCreditRequired'),
+    defaultCreditUsageWarningBps: keep(input.defaultCreditUsageWarningBps, (v) => optionalInteger(v, { min: 0, max: 10000 }), 'defaultCreditUsageWarningBps'),
+    defaultMaxDaysLate: keep(input.defaultMaxDaysLate, (v) => optionalInteger(v, { min: 0 }), 'defaultMaxDaysLate'),
+    requireCustomerApproval: keep(input.requireCustomerApproval, (v) => (typeof v === 'boolean' ? v : undefined), 'requireCustomerApproval'),
+    defaultRequiredDocs: keep(input.defaultRequiredDocs, (v) => optionalStringArray(v, 50), 'defaultRequiredDocs'),
+    reviewRequirements: keep(input.reviewRequirements, validateReviewRequirements, 'reviewRequirements'),
+    defaultRequiredReferences: keep(input.defaultRequiredReferences, validateRequiredReferences, 'defaultRequiredReferences'),
+    chargeCodes: keep(input.chargeCodes, (v) => validateChargeCodes(v), 'chargeCodes'),
+    rateConTerms: keep(input.rateConTerms, (v) => optionalString(v, 8000), 'rateConTerms'),
+
+    // Step P3 — flow defaults (org level; customer may override).
+    marginTargetBps: keep(input.marginTargetBps, (v) => assertBasisPoints(v, 'marginTargetBps'), 'marginTargetBps'),
+    marginTargetBpsByMode: keep(input.marginTargetBpsByMode, validateMarginTargetBpsByMode, 'marginTargetBpsByMode'),
+    quoteAutoReplyDefault: keep(input.quoteAutoReplyDefault, (v) => (typeof v === 'boolean' ? v : undefined), 'quoteAutoReplyDefault'),
+    defaultRequiredLoadFields: keep(input.defaultRequiredLoadFields, validateRequiredLoadFields, 'defaultRequiredLoadFields'),
+    defaultCheckCallPlan: keep(input.defaultCheckCallPlan, validateCheckCallPlan, 'defaultCheckCallPlan'),
+
+    // Step I — teams, the two rep-scoped view limits and the commission defaults.
+    teams: keep(input.teams, validateTeams, 'teams'),
+    limitCustomerRepView: keep(input.limitCustomerRepView, (v) => (typeof v === 'boolean' ? v : undefined), 'limitCustomerRepView'),
+    limitCarrierRepView: keep(input.limitCarrierRepView, (v) => (typeof v === 'boolean' ? v : undefined), 'limitCarrierRepView'),
+    commissionsEnabled: keep(input.commissionsEnabled, (v) => (typeof v === 'boolean' ? v : undefined), 'commissionsEnabled'),
+    commissionTrigger: keep(input.commissionTrigger, (v) => {
+      if (v == null) return null
+      if (v !== 'GENERATE_INVOICE' && v !== 'INVOICE_PAID') {
+        throw new Error('commissionTrigger must be GENERATE_INVOICE or INVOICE_PAID')
+      }
+      return v as CommissionTrigger
+    }, 'commissionTrigger'),
+    commissionPlans: keep(input.commissionPlans, validateCommissionPlans, 'commissionPlans'),
+    commissionPaySchedule: keep(input.commissionPaySchedule, validatePaySchedule, 'commissionPaySchedule'),
+    commissionApprovalAdminOnly: keep(input.commissionApprovalAdminOnly, (v) => (typeof v === 'boolean' ? v : undefined), 'commissionApprovalAdminOnly'),
+    commissionPayAdminOnly: keep(input.commissionPayAdminOnly, (v) => (typeof v === 'boolean' ? v : undefined), 'commissionPayAdminOnly'),
+
+    // Step K — the org's AI agent settings and their standing instructions. The
+    // validator bumps a memory revision only when the markdown actually changed, so
+    // re-saving the settings card does not invent a new revision every time.
+    aiAgents: keep(input.aiAgents, (v) => validateAiAgents(v, existing?.aiAgents, caller.email, now), 'aiAgents'),
+
+    // Step L — My Brokerage: branding, customer settings, carrier documents,
+    // consolidation, notifications and payment terms.
+    brandLogoSquareKey: keep(input.brandLogoSquareKey, brandKey, 'brandLogoSquareKey'),
+    brandLogoWideKey: keep(input.brandLogoWideKey, brandKey, 'brandLogoWideKey'),
+    brandLogoDocumentKey: keep(input.brandLogoDocumentKey, brandKey, 'brandLogoDocumentKey'),
+    brandAccent: keep(input.brandAccent, (v) => optionalEnum(v, BRAND_ACCENTS, 'brandAccent'), 'brandAccent'),
+    brandTheme: keep(input.brandTheme, (v) => {
+      const theme = optionalEnum(v, BRAND_THEMES, 'brandTheme')
+      if (theme && theme !== 'DARK') {
+        throw new Error('Only the dark theme is built; LIGHT and SYSTEM will be available when a second stylesheet exists.')
+      }
+      return theme
+    }, 'brandTheme'),
+    brandSenders: keep(input.brandSenders, validateBrandSenders, 'brandSenders'),
+    emailSignatureTemplate: keep(input.emailSignatureTemplate, (v) => templateString(v, 4000, SIGNATURE_TOKENS), 'emailSignatureTemplate'),
+    whiteLabel: keep(input.whiteLabel, (v) => validateWhiteLabel(v, existing?.whiteLabel as WhiteLabel | null | undefined, caller.email, now), 'whiteLabel'),
+    customerPortalDefaults: keep(input.customerPortalDefaults, validateCustomerPortalDefaults, 'customerPortalDefaults'),
+    customerTags: keep(input.customerTags, validateCustomerTags, 'customerTags'),
+    rateConTemplate: keep(input.rateConTemplate, validateRateConTemplate, 'rateConTemplate'),
+    carrierAgreementTemplate: keep(input.carrierAgreementTemplate, (v) => validateCarrierAgreementTemplate(v, existing?.carrierAgreementTemplate as CarrierAgreementTemplate | null | undefined, caller.email, now), 'carrierAgreementTemplate'),
+    consolidationRules: keep(input.consolidationRules, validateConsolidationRules, 'consolidationRules'),
+    notificationSubscriptions: keep(input.notificationSubscriptions, (v) => validateNotificationSubscriptions(v, { teams: item.teams as Team[] | undefined }), 'notificationSubscriptions'),
+    notificationWebhooks: keep(input.notificationWebhooks, (v) => validateNotificationWebhooks(v, existing?.notificationWebhooks as NotificationWebhook[] | undefined), 'notificationWebhooks'),
+    notificationDefaults: keep(input.notificationDefaults, validateNotificationDefaults, 'notificationDefaults'),
+    divisionSalesReps: keep(input.divisionSalesReps, (v) => {
+      if (v === null) return null
+      const map = parseDivisionSalesReps(v)
+      const bad = Object.keys(map).filter((k) => !(DIVISION_REP_KEYS as readonly string[]).includes(k))
+      if (bad.length) throw new Error(`divisionSalesReps: unknown division ${bad.join(', ')}`)
+      return map
+    }, 'divisionSalesReps'),
+    paymentTerms: keep(input.paymentTerms, (v) => validatePaymentTerms(v, { defaultPaymentTermsDays: defaultPaymentTermsDays as number | undefined }), 'paymentTerms'),
+
     updatedBy: caller.email,
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,
     updatedAt: now,
   }
+
+  throwIfFloorAboveTarget(
+    (item.marginTargetBps as number | undefined) ?? null,
+    (item.marginFloorBps as number | undefined) ?? null,
+    { target: 'marginTargetBps', floor: 'marginFloorBps' },
+  )
 
   if (isCreate) {
     await dynamo.send(
@@ -1049,6 +2005,7 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
         ConditionExpression: 'attribute_not_exists(id)',
       }),
     )
+    if (input.teams !== undefined) await mirrorTeamKeys(item.teams as Team[], caller)
     return item
   }
 
@@ -1058,6 +2015,13 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
   const sets: string[] = []
   for (const [key, value] of Object.entries(item)) {
     if (key === 'id' || key === 'createdAt') continue
+    /*
+     * A field nobody has ever saved reads back `undefined` from `keep`, and naming it
+     * in the SET clause with no value is a DynamoDB validation error that fails the
+     * whole save — every other setting on the card with it. `null` is different: it is
+     * an explicit clear and marshals to NULL, so it is still written.
+     */
+    if (value === undefined) continue
     names[`#${key}`] = key
     values[`:${key}`] = marshall({ [key]: value }, { removeUndefinedValues: true })[key]
     sets.push(`#${key} = :${key}`)
@@ -1076,6 +2040,7 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
       }),
     )
     if (!result.Attributes) throw new Error('Settings update failed')
+    if (input.teams !== undefined) await mirrorTeamKeys(item.teams as Team[], caller)
     return unmarshall(result.Attributes)
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -1083,6 +2048,276 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
       throw conflictError('settings', err)
     }
     throw err
+  }
+}
+
+// ── Step M: Academy Ask assistant ───────────────────────────────────────────
+
+const ASK_MODEL = 'claude-sonnet-5'
+const ASK_MAX_TOKENS = 1500
+
+const ASK_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['answer', 'citations'],
+  properties: {
+    answer: { type: 'string', description: 'Concise answer to the question, based only on the provided Academy articles.' },
+    citations: { type: 'array', items: { type: 'string' }, description: 'Slugs of the Academy articles used to answer the question.' },
+  },
+} as const
+
+function anthropicClient(): Anthropic {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set')
+  return new Anthropic({ apiKey })
+}
+
+function assertArticle(value: unknown, index: number): { slug: string; title: string; content: string } {
+  if (!value || typeof value !== 'object') throw new Error(`articles[${index}] must be an object`)
+  const row = value as Record<string, unknown>
+  return {
+    slug: assertString(row.slug, `articles[${index}].slug`),
+    title: assertString(row.title, `articles[${index}].title`),
+    content: assertString(row.content, `articles[${index}].content`),
+  }
+}
+
+async function askAcademy(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+  const question = assertString(input.question, 'question')
+  const rawArticles = Array.isArray(input.articles) ? input.articles : []
+  if (rawArticles.length === 0) throw new Error('At least one Academy article is required')
+  const articles = rawArticles.map((a, i) => assertArticle(a, i))
+
+  const context = articles
+    .map((a) => `### ${a.slug}: ${a.title}\n\n${a.content}`)
+    .join('\n\n---\n\n')
+
+  const system = `You are the BCAT Ops Academy assistant. Answer the user's question using ONLY the provided Academy articles. Be concise and factual. Cite the article slugs you used in the "citations" array. If the articles do not contain the answer, say so and set citations to an empty array.`
+  const user = `Articles:\n${context}\n\nQuestion: ${question}`
+
+  const response = await anthropicClient().messages.stream({
+    model: ASK_MODEL,
+    max_tokens: ASK_MAX_TOKENS,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: ASK_SCHEMA } },
+    system,
+    messages: [{ role: 'user', content: user }],
+  })
+  const final = await response.finalMessage()
+  const body = final.content.map((block) => (block.type === 'text' ? block.text : '')).join('')
+  const parsed = JSON.parse(body) as { answer: string; citations: string[] }
+  await writeAudit('TmsSettings', 'default', 'ACADEMY_QUESTION_ASKED', caller, { question, citations: parsed.citations })
+  return parsed
+}
+
+// ── Step L: My Brokerage settings helpers ───────────────────────────────────
+
+async function rotateWebhookSecret(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+  const webhookId = assertString(input.webhookId, 'webhookId')
+  const existing = await getSettings()
+  const webhooks = Array.isArray(existing?.notificationWebhooks) ? (existing.notificationWebhooks as Record<string, unknown>[]) : []
+  const target = webhooks.find((w) => w.id === webhookId)
+  if (!target) throw new Error(`Webhook not found: ${webhookId}`)
+
+  const secret = randomBytes(32).toString('base64url')
+  await writeRawParameter(`WEBHOOK:${webhookId}`, { secret })
+
+  const secretLast4 = secret.slice(-4)
+  const now = nowIso()
+  const updated = webhooks.map((w) =>
+    w.id === webhookId
+      ? { ...w, secretRef: parameterNameFor(`WEBHOOK:${webhookId}`), secretLast4 }
+      : w,
+  )
+
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: SETTINGS_TABLE_NAME,
+      Key: marshall({ id: 'default' }),
+      UpdateExpression: 'SET notificationWebhooks = :webhooks, updatedAt = :now, updatedBy = :by',
+      ExpressionAttributeValues: marshall({ ':webhooks': updated, ':now': now, ':by': caller.email }),
+    }),
+  )
+  await writeAudit('TmsSettings', 'default', 'WEBHOOK_SECRET_ROTATED', caller, { webhookId })
+  return { webhookId, secret }
+}
+
+function importJobId(entity: ImportEntity, fileHash: string): string {
+  return `imp:${fileHash.slice(0, 20)}:${entity}`
+}
+
+async function loadDirectoryByKey(entity: ImportEntity): Promise<Record<string, Record<string, unknown>>> {
+  let rows: Record<string, unknown>[]
+  if (entity === 'CUSTOMER') rows = await scanActiveCustomers()
+  else if (entity === 'LOCATION') rows = await scanActiveLocations()
+  else rows = []
+  const byKey: Record<string, Record<string, unknown>> = {}
+  for (const row of rows) {
+    const key = entity === 'CUSTOMER' || entity === 'CARRIER_FACTOR' || entity === 'LOCATION'
+      ? normalizeName(String(row.name ?? ''))
+      : entity === 'CARRIER'
+        ? (String(row.mcNumber ?? '').trim() ? `mc:${String(row.mcNumber).trim().toLowerCase()}` : normalizeName(String(row.name ?? '')))
+        : entity === 'CHARGE_CODE'
+          ? String(row.code ?? '').trim().toUpperCase()
+          : entity === 'PAYMENT_TERM'
+            ? String(row.key ?? '').trim().toLowerCase()
+            : entity === 'VENDOR_CONTACT'
+              ? String(row.email ?? '').trim().toLowerCase()
+              : null
+    if (key) byKey[key] = row
+  }
+  return byKey
+}
+
+async function previewImport(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+  const rows = Array.isArray(input.rows) ? (input.rows as Record<string, unknown>[]) : []
+  if (rows.length > 500) throw new Error('At most 500 rows may be previewed at once.')
+
+  const meta = validateImportJob({ ...input, createdBy: caller.email })
+  const entity = meta.entity
+  const { ok, errors } = validateRows(rows, meta.mapping, entity)
+  const existingByKey = await loadDirectoryByKey(entity)
+  const plan = planImport(ok, existingByKey, entity)
+
+  const counts = {
+    created: plan.create.length,
+    updated: plan.update.length,
+    skipped: plan.skip.length,
+    errored: errors.length,
+  }
+
+  const now = nowIso()
+  const jobId = importJobId(entity, meta.fileHash)
+  const jobItem: Record<string, unknown> = {
+    id: jobId,
+    entity,
+    status: errors.length === 0 ? 'VALIDATED' : 'DRAFT',
+    fileName: meta.fileName,
+    fileHash: meta.fileHash,
+    mapping: meta.mapping,
+    rowCount: rows.length,
+    counts,
+    errorKey: null,
+    dryRun: true,
+    note: meta.note,
+    createdBy: caller.email,
+    appliedAt: null,
+    appliedBy: null,
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: IMPORT_JOB_TABLE_NAME,
+        Item: marshall(jobItem, { removeUndefinedValues: true }),
+        ConditionExpression: 'attribute_not_exists(id)',
+      }),
+    )
+  } catch (err: unknown) {
+    if (isConditionalCheckFailed(err)) {
+      // Return the first job idempotently; the caller already has the same plan.
+      return { jobId, existed: true, counts, errors: errors.slice(0, 50), changes: plan.update.slice(0, 20).map((u) => u.changes) }
+    }
+    throw err
+  }
+
+  return {
+    jobId,
+    existed: false,
+    counts,
+    errors: errors.slice(0, 50),
+    changes: plan.update.slice(0, 20).map((u) => u.changes),
+  }
+}
+
+async function runImport(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+  const rows = Array.isArray(input.rows) ? (input.rows as Record<string, unknown>[]) : []
+  if (rows.length > 500) throw new Error('At most 500 rows may be imported at once.')
+
+  const meta = validateImportJob({ ...input, createdBy: caller.email })
+  const entity = meta.entity
+  if (entity !== 'CUSTOMER' && entity !== 'LOCATION') {
+    throw new Error(`Import apply is not yet supported for ${entity}. Use preview to validate the file.`)
+  }
+
+  const { ok, errors } = validateRows(rows, meta.mapping, entity)
+  if (errors.length > 0) {
+    throw new Error(`Cannot apply: ${errors.length} row(s) failed validation. Preview first.`)
+  }
+  const existingByKey = await loadDirectoryByKey(entity)
+  const plan = planImport(ok, existingByKey, entity)
+
+  const now = nowIso()
+  const jobId = importJobId(entity, meta.fileHash)
+  let created = 0
+  let updated = 0
+  const skipped = plan.skip.length
+
+  for (const row of plan.create) {
+    if (entity === 'CUSTOMER') {
+      await upsertCustomer(row, caller)
+    } else if (entity === 'LOCATION') {
+      await upsertLocation(row, caller)
+    }
+    created += 1
+  }
+
+  for (const { existing, changes } of plan.update) {
+    if (entity === 'CUSTOMER') {
+      await upsertCustomer({ id: existing.id, ...changes, expectedUpdatedAt: existing.updatedAt ?? '' }, caller)
+    } else if (entity === 'LOCATION') {
+      await upsertLocation({ id: existing.id, ...changes, expectedUpdatedAt: existing.updatedAt ?? '' }, caller)
+    }
+    updated += 1
+  }
+
+  const jobItem: Record<string, unknown> = {
+    id: jobId,
+    entity,
+    status: 'APPLIED',
+    fileName: meta.fileName,
+    fileHash: meta.fileHash,
+    mapping: meta.mapping,
+    rowCount: rows.length,
+    counts: { created, updated, skipped, errored: 0 },
+    errorKey: null,
+    dryRun: false,
+    note: meta.note,
+    createdBy: caller.email,
+    appliedAt: now,
+    appliedBy: caller.email,
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: IMPORT_JOB_TABLE_NAME,
+        Item: marshall(jobItem, { removeUndefinedValues: true }),
+        ConditionExpression: 'attribute_not_exists(id)',
+      }),
+    )
+  } catch (err: unknown) {
+    if (isConditionalCheckFailed(err)) {
+      return { jobId, existed: true, counts: jobItem.counts }
+    }
+    throw err
+  }
+
+  return { jobId, existed: false, counts: jobItem.counts }
+}
+
+async function listImportJobs(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const entity = typeof input.entity === 'string' ? (input.entity.trim().toUpperCase() as ImportEntity) : null
+  if (entity && !IMPORT_ENTITIES.includes(entity)) throw new Error(`"${entity}" is not an importable entity.`)
+  const rows = await scanTable(IMPORT_JOB_TABLE_NAME)
+  const filtered = entity ? rows.filter((r) => r.entity === entity) : rows
+  return {
+    jobs: (filtered as Record<string, unknown>[])
+      .map((r) => ({ ...r, mapping: asJson(r.mapping), counts: asJson(r.counts) } as Record<string, unknown>))
+      .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))),
   }
 }
 
@@ -1364,6 +2599,842 @@ async function resumeMerge(input: Record<string, unknown>, caller: Caller): Prom
   return executeMergeJob(job, caller)
 }
 
+// ── Step R: revenue ownership taxonomy and department views ───────────────────
+//
+// `OwnershipDivision`, `OwnershipRule` and `ShipmentView` are data an admin edits —
+// the three businesses, Ivan's subsidiaries and the department slices are SEED ROWS,
+// not constants. This Lambda is their only writer. The rules decide which division
+// earns a shipment, so a broken tree (a cycle, a rule pointing at nothing) would
+// silently untag the board: every save is validated against the WHOLE resulting set
+// by the same pure functions the client and `tmsShipmentActions` resolve with.
+//
+// Nothing here deletes. Archiving sets `active false`, so a shipment already tagged
+// with a division stays resolvable and a rule that was retired can still be read in
+// the history.
+
+/** One audit row per write. Best effort: history must not refuse a saved division. */
+async function writeAudit(
+  entityType: string,
+  entityId: string,
+  action: string,
+  caller: Caller,
+  changes: Record<string, unknown>,
+): Promise<void> {
+  if (!AUDIT_LOG_TABLE_NAME) return
+  const now = nowIso()
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: AUDIT_LOG_TABLE_NAME,
+        Item: marshall(
+          {
+            id: randomUUID(),
+            __typename: 'AuditLog',
+            entityType,
+            entityId,
+            action,
+            user: caller.email,
+            changes: JSON.stringify(changes),
+            createdAt: now,
+            updatedAt: now,
+          },
+          { removeUndefinedValues: true },
+        ),
+      }),
+    )
+  } catch (err) {
+    console.warn('[tms-directory-actions] audit log write failed:', String(err))
+  }
+}
+
+function isConditionalCheckFailed(err: unknown): boolean {
+  const name = err instanceof Error ? err.name : ''
+  const msg = err instanceof Error ? err.message : String(err)
+  return name === 'ConditionalCheckFailedException' || msg.includes('ConditionalCheckFailed')
+}
+
+async function scanTable(tableName: string): Promise<Record<string, unknown>[]> {
+  if (!tableName) throw new Error('Table is not configured on this function')
+  const items: Record<string, unknown>[] = []
+  let startKey: Record<string, AttributeValue> | undefined
+  do {
+    const page: { Items?: Record<string, AttributeValue>[]; LastEvaluatedKey?: Record<string, AttributeValue> } =
+      await dynamo.send(new ScanCommand({ TableName: tableName, ExclusiveStartKey: startKey }))
+    for (const item of page.Items ?? []) items.push(unmarshall(item))
+    startKey = page.LastEvaluatedKey
+  } while (startKey)
+  return items
+}
+
+/**
+ * An `a.json()` column is an AWSJSON string through AppSync but a map when it was
+ * written with the raw SDK, and both shapes are on the table. Read either.
+ */
+function asJson<T>(value: unknown): T | null {
+  if (value == null) return null
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    try {
+      return JSON.parse(trimmed) as T
+    } catch {
+      return null
+    }
+  }
+  return value as T
+}
+
+async function listDivisionRows(): Promise<OwnershipDivisionRecord[]> {
+  const rows = await scanTable(OWNERSHIP_DIVISION_TABLE_NAME)
+  return rows.map((row) => ({
+    ...(row as unknown as OwnershipDivisionRecord),
+    owners: asJson(row.owners),
+    flows: asJson(row.flows),
+  }))
+}
+
+async function listRuleRows(): Promise<OwnershipRuleRecord[]> {
+  const rows = await scanTable(OWNERSHIP_RULE_TABLE_NAME)
+  return rows.map((row) => ({
+    ...(row as unknown as OwnershipRuleRecord),
+    condition: asJson(row.condition) ?? { kind: 'ALWAYS', value: null },
+  }))
+}
+
+async function listViewRows(): Promise<ShipmentViewRecord[]> {
+  const rows = await scanTable(SHIPMENT_VIEW_TABLE_NAME)
+  // Read-time fallback: a view that points at a deleted column template resolves
+  // to its own `columns` array, so deleting a template never breaks the views
+  // that reference it.
+  const templates = await scanTable(SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME)
+  const templatesById = new Map(templates.map((t) => [String(t.id), t]))
+  return rows.map((row) => {
+    const view = {
+      ...(row as unknown as ShipmentViewRecord),
+      filters: asJson(row.filters) ?? {},
+      sort: asJson(row.sort),
+      audience: asJson(row.audience),
+    } as ShipmentViewRecord
+    const resolved = resolveViewColumns(view as unknown as Record<string, unknown>, templatesById)
+    ;(view as unknown as Record<string, unknown>).resolvedColumns = resolved
+    return view
+  })
+}
+
+export function resolveViewColumns(
+  view: Record<string, unknown>,
+  templatesById: Map<string, Record<string, unknown>>,
+): string[] | null {
+  const fallback = Array.isArray(view.columns) ? (view.columns as string[]) : null
+  const templateId = typeof view.columnTemplateId === 'string' ? view.columnTemplateId : null
+  if (!templateId) return fallback
+  const template = templatesById.get(templateId)
+  if (!template) return fallback
+  return Array.isArray(template.columns) ? (template.columns as string[]) : fallback
+}
+
+/** The next free slot at the end of a list, so a new row never lands in the middle. */
+function nextSortOrder(rows: { sortOrder?: number | null }[], step: number): number {
+  let max = 0
+  for (const row of rows) {
+    const value = typeof row.sortOrder === 'number' && Number.isFinite(row.sortOrder) ? row.sortOrder : 0
+    if (value > max) max = value
+  }
+  return max + step
+}
+
+/**
+ * Write a whole row back under its version. There is no `expectedUpdatedAt` on these
+ * three tables' client inputs, so the CAS token is the `version` this call just read:
+ * a second editor who saved in between bumps it and this write is refused.
+ */
+async function putVersioned(
+  tableName: string,
+  item: Record<string, unknown>,
+  expectedVersion: number | null,
+  label: string,
+): Promise<Record<string, unknown>> {
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: tableName,
+        Item: marshall(item, { removeUndefinedValues: true }),
+        ConditionExpression: expectedVersion == null ? 'attribute_not_exists(id)' : '#version = :expectedVersion',
+        ExpressionAttributeNames: expectedVersion == null ? undefined : { '#version': 'version' },
+        ExpressionAttributeValues:
+          expectedVersion == null ? undefined : { ':expectedVersion': { N: String(expectedVersion) } },
+      }),
+    )
+    return item
+  } catch (err: unknown) {
+    if (isConditionalCheckFailed(err)) throw conflictError(label, err)
+    throw err
+  }
+}
+
+/** `active false`, version bumped, nothing removed. The only retirement there is. */
+async function archiveVersioned(
+  tableName: string,
+  id: string,
+  existing: { version?: number | null },
+  caller: Caller,
+  label: string,
+): Promise<Record<string, unknown>> {
+  const values: Record<string, AttributeValue> = {
+    ':active': { BOOL: false },
+    ':updatedAt': { S: nowIso() },
+    ':updatedBy': { S: caller.email },
+    ':version': { N: String((existing.version ?? 0) + 1) },
+    ':expectedVersion': { N: String(existing.version ?? 0) },
+  }
+  try {
+    const result = await dynamo.send(
+      new UpdateItemCommand({
+        TableName: tableName,
+        Key: marshall({ id }),
+        ConditionExpression: '#version = :expectedVersion',
+        UpdateExpression: 'SET active = :active, updatedAt = :updatedAt, updatedBy = :updatedBy, #version = :version',
+        ExpressionAttributeNames: { '#version': 'version' },
+        ExpressionAttributeValues: values,
+        ReturnValues: 'ALL_NEW',
+      }),
+    )
+    if (!result.Attributes) throw new Error(`${label} archive failed`)
+    return unmarshall(result.Attributes)
+  } catch (err: unknown) {
+    if (isConditionalCheckFailed(err)) throw conflictError(label, err)
+    throw err
+  }
+}
+
+async function saveOwnershipDivision(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const code = assertString(input.code, 'code')
+  const name = assertString(input.name, 'name')
+  const givenId = optionalString(input.id, 64)
+  // The id IS the code, so a rename never orphans a shipment already tagged with it.
+  if (givenId != null && givenId !== code) {
+    throw new Error("A division's code cannot be changed — archive this one and add the new code.")
+  }
+
+  const divisions = await listDivisionRows()
+  const existing = divisions.find((d) => d.id === code) ?? null
+  if (existing == null && givenId != null) {
+    throw new Error(`Division not found: ${givenId}`)
+  }
+  if (existing != null && givenId == null) {
+    throw new Error(`Division code "${code}" already exists — open it to edit it.`)
+  }
+
+  // Step U3. An older client that omits the key must not erase the stored address; sending
+  // null or '' clears it, and clearing is only allowed on a division that is not active.
+  const intakeEmail = normalizeIntakeEmail(
+    'intakeEmail' in input ? input.intakeEmail : existing?.intakeEmail,
+  )
+
+  // Phase 0. An address nobody has confirmed (the seeded placeholders) is badged UNCONFIRMED. An
+  // explicit flag wins; otherwise a person changing the address confirms it, and a save that
+  // leaves the address alone (or omits it) keeps whatever was stored.
+  const explicitConfirmed = optionalBoolean(input.intakeEmailConfirmed)
+  const intakeEmailConfirmed =
+    explicitConfirmed ??
+    ('intakeEmail' in input && intakeEmail != null && intakeEmail !== (existing?.intakeEmail ?? null)
+      ? true
+      : existing?.intakeEmailConfirmed ?? null)
+
+  const now = nowIso()
+  const item: Record<string, unknown> = {
+    id: code,
+    __typename: 'OwnershipDivision',
+    code,
+    name,
+    brand: optionalString(input.brand, 120),
+    parentId: optionalString(input.parentId, 64),
+    color: optionalString(input.color, 32),
+    sortOrder:
+      optionalInteger(input.sortOrder, { min: 0, max: 1_000_000 }) ??
+      existing?.sortOrder ??
+      nextSortOrder(divisions, 10),
+    active: optionalBoolean(input.active) ?? existing?.active ?? true,
+    owners: optionalJsonObject(input.owners),
+    flows: optionalJsonObject(input.flows),
+    intakeEmail,
+    intakeEmailConfirmed,
+    createdBy: existing?.createdBy ?? caller.email,
+    updatedBy: caller.email,
+    version: (existing?.version ?? 0) + 1,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+
+  // Required on every save of an ACTIVE division — checked for the row being saved only,
+  // so editing or archiving one division never fails on another that still has no address.
+  if (item.active === true && intakeEmail == null) {
+    throw new Error(
+      `A division needs an intake e-mail address — choose the address tender e-mails for ${name} arrive at`,
+    )
+  }
+  if (intakeEmail != null) {
+    const check = checkIntakeEmail(intakeEmail)
+    if (check.problem) throw new Error(check.message ?? 'Invalid intake e-mail address')
+  }
+
+  // Validated over the resulting SET, not over this row: a parent that closes a cycle
+  // is only visible from the whole tree.
+  const next = divisions
+    .filter((d) => d.id !== code)
+    .concat(item as unknown as OwnershipDivisionRecord)
+  const errors = validateDivisions(next)
+  if (errors.length > 0) throw new Error(errors.join(' '))
+
+  // Structure is not enough: an active subdivision under an archived parent would
+  // tag shipments with a top-level code the sidebar and the dashboards no longer
+  // list, because `resolveDivision` reads only the matched row's `active` and then
+  // rolls up through `parentId`. Every ancestor has to be active too.
+  if (item.active === true) {
+    const byId = new Map(next.map((d) => [d.id, d]))
+    const seen = new Set<string>([code])
+    let parentId = optionalString(item.parentId, 64)
+    while (parentId && !seen.has(parentId)) {
+      seen.add(parentId)
+      const parent = byId.get(parentId)
+      if (!parent) break
+      if (!parent.active) {
+        throw new Error(`"${name}" cannot be active under the archived division "${parent.name}"`)
+      }
+      parentId = parent.parentId ?? null
+    }
+  }
+
+  await putVersioned(OWNERSHIP_DIVISION_TABLE_NAME, item, existing ? existing.version ?? 0 : null, 'division')
+  await writeAudit('OwnershipDivision', code, 'SAVE_OWNERSHIP_DIVISION', caller, {
+    created: existing == null,
+    name,
+    parentId: item.parentId,
+    active: item.active,
+    intakeEmail: { before: existing?.intakeEmail ?? null, after: intakeEmail },
+  })
+  return item
+}
+
+async function archiveOwnershipDivision(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const id = assertString(input.id, 'id')
+  const divisions = await listDivisionRows()
+  const existing = divisions.find((d) => d.id === id) ?? null
+  if (!existing) throw new Error(`Division not found: ${id}`)
+
+  const child = divisions.find((d) => d.id !== id && d.active && d.parentId === existing.code)
+  if (child) {
+    throw new Error(
+      `"${existing.name}" still has an active subsidiary ("${child.name}") — archive the subsidiary first.`,
+    )
+  }
+  const rules = await listRuleRows()
+  const rule = rules.find((r) => r.active && r.divisionCode === existing.code)
+  if (rule) {
+    throw new Error(
+      `An active rule ("${rule.name ?? rule.id}") still tags shipments as "${existing.name}" — change or deactivate it first.`,
+    )
+  }
+
+  const archived = await archiveVersioned(OWNERSHIP_DIVISION_TABLE_NAME, id, existing, caller, 'division')
+  await writeAudit('OwnershipDivision', id, 'ARCHIVE_OWNERSHIP_DIVISION', caller, { name: existing.name })
+  return archived
+}
+
+/**
+ * The whole ordered list, every time. Order IS the rule ("first match wins"), so
+ * `sortOrder` is the array index × 10 and a rule left out of the list is deactivated
+ * rather than deleted — the history of what tagged a shipment has to stay readable.
+ */
+async function saveOwnershipRules(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>[]> {
+  const rules = optionalJsonArray(input.rules)
+  if (rules == null) throw new Error('rules is required')
+  if (rules.length > 200) throw new Error('rules cannot hold more than 200 entries')
+
+  const divisions = await listDivisionRows()
+  const existingRules = await listRuleRows()
+  const priorById = new Map(existingRules.map((r) => [r.id, r]))
+  const now = nowIso()
+  const seenIds = new Set<string>()
+
+  const items = rules.map((raw, index) => {
+    const row = assertRecord(raw, index, 'rules')
+    const id = optionalString(row.id, 64) ?? `rule-${randomUUID()}`
+    if (seenIds.has(id)) throw new Error(`rules[${index}] repeats the rule id "${id}"`)
+    seenIds.add(id)
+    const prior = priorById.get(id) ?? null
+    const condition = optionalJsonObject(row.condition)
+    if (!condition) throw new Error(`rules[${index}].condition is required`)
+    return {
+      id,
+      __typename: 'OwnershipRule',
+      name: optionalString(row.name, 120),
+      sortOrder: index * 10,
+      active: optionalBoolean(row.active) ?? true,
+      condition: {
+        kind: assertString(condition.kind, `rules[${index}].condition.kind`),
+        value: optionalString(condition.value, 400),
+      },
+      divisionCode: assertString(row.divisionCode, `rules[${index}].divisionCode`),
+      createdBy: prior?.createdBy ?? caller.email,
+      updatedBy: caller.email,
+      version: (prior?.version ?? 0) + 1,
+      createdAt: prior?.createdAt ?? now,
+      updatedAt: now,
+    } as Record<string, unknown>
+  })
+
+  const errors = validateRules(items as unknown as OwnershipRuleRecord[], divisions)
+  if (errors.length > 0) throw new Error(errors.join(' '))
+
+  for (const item of items) {
+    const prior = priorById.get(item.id as string) ?? null
+    await putVersioned(OWNERSHIP_RULE_TABLE_NAME, item, prior ? prior.version ?? 0 : null, 'ownership rule')
+  }
+
+  const deactivated: string[] = []
+  for (const prior of existingRules) {
+    if (seenIds.has(prior.id) || !prior.active) continue
+    await archiveVersioned(OWNERSHIP_RULE_TABLE_NAME, prior.id, prior, caller, 'ownership rule')
+    deactivated.push(prior.id)
+  }
+
+  await writeAudit('OwnershipRule', 'list', 'SAVE_OWNERSHIP_RULES', caller, {
+    saved: items.map((r) => r.id),
+    deactivated,
+  })
+  return items
+}
+
+/** Every clause a saved view may carry. An unknown key is a typo that would filter nothing. */
+const SHIPMENT_VIEW_FILTER_KEYS: Record<keyof ShipmentViewFilters, 'list' | 'text' | 'flag' | 'json'> = {
+  divisions: 'list',
+  subdivisions: 'list',
+  statuses: 'list',
+  carrierType: 'text',
+  repId: 'text',
+  pickupWindow: 'text',
+  docsState: 'text',
+  trackingState: 'text',
+  arStatuses: 'list',
+  apStatuses: 'list',
+  quoteToBooked: 'flag',
+  search: 'text',
+  board: 'json',
+}
+
+const BOARD_COLUMN_KEYS_LOOKUP: Record<string, true> = Object.fromEntries(
+  BOARD_COLUMN_KEYS.map((key) => [key, true]),
+)
+
+function validateViewFilters(value: unknown): ShipmentViewFilters {
+  const raw = optionalJsonObject(value) ?? {}
+  const out: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(raw)) {
+    if (entry == null) continue
+    const kind = SHIPMENT_VIEW_FILTER_KEYS[key as keyof ShipmentViewFilters]
+    if (!kind) throw new Error(`"${key}" is not a shipment filter.`)
+    if (kind === 'list') out[key] = optionalStringArray(entry, 64)
+    else if (kind === 'flag') out[key] = optionalBoolean(entry)
+    else if (kind === 'json') out[key] = optionalJsonObject(entry)
+    else out[key] = optionalString(entry, 200)
+  }
+  return out as ShipmentViewFilters
+}
+
+async function saveShipmentView(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const name = assertString(input.name, 'name')
+  // The slug IS the id and the URL. A new view gets it from its name; an existing one
+  // keeps the one its links already carry.
+  const slug = optionalString(input.id, 80) ?? optionalString(input.slug, 80) ?? slugify(name)
+  if (!slug) throw new Error('The view needs a name with letters or numbers.')
+
+  const views = await listViewRows()
+  const existing = views.find((v) => v.id === slug) ?? null
+  const now = nowIso()
+  const item: Record<string, unknown> = {
+    id: slug,
+    __typename: 'ShipmentView',
+    slug,
+    name,
+    department: optionalString(input.department, 80),
+    description: optionalString(input.description, 400),
+    filters: validateViewFilters(input.filters),
+    columns: optionalStringArray(input.columns, 64),
+    columnTemplateId:
+      optionalString(input.columnTemplateId, 64) ??
+      ((existing as unknown as Record<string, unknown> | null)?.columnTemplateId as string | null | undefined) ??
+      null,
+    sort: optionalJsonObject(input.sort),
+    isDefault: optionalBoolean(input.isDefault) ?? existing?.isDefault ?? false,
+    audience: optionalJsonObject(input.audience),
+    sortOrder:
+      optionalInteger(input.sortOrder, { min: 0, max: 1_000_000 }) ??
+      existing?.sortOrder ??
+      nextSortOrder(views, 10),
+    active: optionalBoolean(input.active) ?? existing?.active ?? true,
+    createdBy: existing?.createdBy ?? caller.email,
+    updatedBy: caller.email,
+    version: (existing?.version ?? 0) + 1,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+
+  const errors = validateView(item as unknown as ShipmentViewRecord)
+  if (errors.length > 0) throw new Error(errors.join(' '))
+
+  await putVersioned(SHIPMENT_VIEW_TABLE_NAME, item, existing ? existing.version ?? 0 : null, 'shipment view')
+  await writeAudit('ShipmentView', slug, 'SAVE_SHIPMENT_VIEW', caller, {
+    created: existing == null,
+    name,
+    filters: item.filters,
+  })
+  return item
+}
+
+async function archiveShipmentView(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const id = assertString(input.id, 'id')
+  const existing = await getById(SHIPMENT_VIEW_TABLE_NAME, id)
+  if (!existing) throw new Error(`Shipment view not found: ${id}`)
+  const archived = await archiveVersioned(
+    SHIPMENT_VIEW_TABLE_NAME,
+    id,
+    existing as { version?: number | null },
+    caller,
+    'shipment view',
+  )
+  await writeAudit('ShipmentView', id, 'ARCHIVE_SHIPMENT_VIEW', caller, { name: existing.name ?? null })
+  return archived
+}
+
+function authorizeColumnTemplateMutation(
+  existing: Record<string, unknown>,
+  caller: Caller,
+): void {
+  const ownerEmail = String(existing.ownerEmail ?? '')
+  const shared = !!existing.shared
+  const isOwner = caller.email === ownerEmail
+  const isAdmin = caller.groups?.includes(ADMIN_GROUP) || caller.email === OWNER_EMAIL
+  if (!isOwner && !(shared && isAdmin)) {
+    throw new Error(
+      shared
+        ? 'Forbidden: only the owner or an admin can change a shared column template'
+        : 'Forbidden: only the owner can change a private column template',
+    )
+  }
+}
+
+function assertColumnTemplateColumns(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('columns cannot be empty')
+  }
+  const columns: string[] = []
+  for (let i = 0; i < value.length; i++) {
+    const key = assertString(value[i], `columns[${i}]`)
+    if (!BOARD_COLUMN_KEYS_LOOKUP[key]) {
+      throw new Error(`"${key}" is not a board column`)
+    }
+    columns.push(key)
+  }
+  return columns
+}
+
+async function saveColumnTemplate(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const name = assertString(input.name, 'name')
+  const columns = assertColumnTemplateColumns(input.columns)
+  const widths = optionalJsonObject(input.widths) ?? {}
+  // Pins are part of the layout, not a second list of columns: a pinned key that is
+  // not among the chosen columns would render nowhere, so it is refused here.
+  const pinned = input.pinned == null ? [] : assertColumnTemplateColumns(input.pinned)
+  for (const key of pinned) {
+    if (!columns.includes(key)) throw new Error(`"${key}" is pinned but is not one of the template's columns`)
+  }
+  const shared = optionalBoolean(input.shared) ?? false
+  const id = optionalString(input.id, 64) ?? newId()
+
+  const tableName = SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME
+  const existing = await getById(tableName, id)
+  if (existing) {
+    authorizeColumnTemplateMutation(existing, caller)
+  }
+
+  const now = nowIso()
+  const item: Record<string, unknown> = {
+    id,
+    __typename: 'ShipmentColumnTemplate',
+    name,
+    columns,
+    widths,
+    pinned,
+    ownerEmail: existing?.ownerEmail ?? caller.email,
+    shared,
+    createdBy: existing?.createdBy ?? caller.email,
+    updatedBy: caller.email,
+    version: Number(existing?.version ?? 0) + 1,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+
+  await putVersioned(tableName, item, existing ? Number(existing.version ?? 0) : null, 'column template')
+  await writeAudit('ShipmentColumnTemplate', id, 'SAVE_COLUMN_TEMPLATE', caller, {
+    created: existing == null,
+    name,
+    columns,
+  })
+  return item
+}
+
+async function deleteColumnTemplate(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<Record<string, unknown>> {
+  const id = assertString(input.id, 'id')
+  const tableName = SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME
+  const existing = await getById(tableName, id)
+  if (!existing) throw new Error(`Column template not found: ${id}`)
+  authorizeColumnTemplateMutation(existing, caller)
+
+  try {
+    await dynamo.send(
+      new DeleteItemCommand({
+        TableName: tableName,
+        Key: marshall({ id }),
+        ConditionExpression: '#version = :expectedVersion',
+        ExpressionAttributeNames: { '#version': 'version' },
+        ExpressionAttributeValues: { ':expectedVersion': { N: String(existing.version ?? 0) } },
+      }),
+    )
+  } catch (err: unknown) {
+    if (isConditionalCheckFailed(err)) throw conflictError('column template', err)
+    throw err
+  }
+
+  await writeAudit('ShipmentColumnTemplate', id, 'DELETE_COLUMN_TEMPLATE', caller, {
+    name: existing.name ?? null,
+  })
+  return { id, deleted: true }
+}
+
+/**
+ * Resolve the Auto Shipper customer id by normalized name. The CAR_SHIPPING seed
+ * rule points at this id; when the customer does not exist the rule is written
+ * inactive with an explanatory name and counted, rather than inventing a customer.
+ */
+async function resolveAutoShipperCustomerId(): Promise<string | null> {
+  try {
+    const target = normalizeName('Auto Shipper')
+    const customers = await scanActiveCustomers()
+    const found = customers.find(
+      (c) => typeof c.name === 'string' && normalizeName(c.name) === target,
+    )
+    return found && typeof found.id === 'string' ? found.id : null
+  } catch (err: unknown) {
+    console.warn('[tms-directory-actions] could not resolve Auto Shipper customer:', err)
+    return null
+  }
+}
+
+/**
+ * The three businesses, Ivan's subsidiaries, the seed rules and the ten department
+ * views, written once. Divisions and views stay `attribute_not_exists(id)` idempotent
+ * so an admin edit is never overwritten. Rules converge instead: an existing seed id
+ * is updated in place, a rule no longer in the seed is deactivated, and every change
+ * is counted so a re-seed is observable.
+ */
+async function ensureOwnershipSeed(caller: Caller): Promise<Record<string, unknown>> {
+  const now = nowIso()
+  const stamp = (row: Record<string, unknown>, typename: string): Record<string, unknown> => ({
+    ...row,
+    __typename: typename,
+    createdBy: 'seed',
+    updatedBy: 'seed',
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  })
+
+  const putIfAbsent = async (tableName: string, item: Record<string, unknown>): Promise<boolean> => {
+    try {
+      await dynamo.send(
+        new PutItemCommand({
+          TableName: tableName,
+          Item: marshall(item, { removeUndefinedValues: true }),
+          ConditionExpression: 'attribute_not_exists(id)',
+        }),
+      )
+      return true
+    } catch (err: unknown) {
+      if (isConditionalCheckFailed(err)) return false
+      throw err
+    }
+  }
+
+  // Resolve the one rule whose value lives in Customer data, not in source code.
+  const autoShipperId = await resolveAutoShipperCustomerId()
+  const seedRules = SEED_RULES.map((r) => {
+    if (r.id !== 'rule-seed-auto-shipper') return r
+    if (autoShipperId) {
+      return {
+        ...r,
+        name: 'Auto Shipper customer',
+        condition: { ...r.condition, value: autoShipperId },
+        active: true,
+      }
+    }
+    return {
+      ...r,
+      name: 'Auto Shipper customer (not found — rule inactive)',
+      condition: { ...r.condition, value: '' },
+      active: false,
+    }
+  })
+
+  let divisionsCreated = 0
+  for (const division of SEED_DIVISIONS) {
+    if (await putIfAbsent(OWNERSHIP_DIVISION_TABLE_NAME, stamp({ ...division }, 'OwnershipDivision'))) {
+      divisionsCreated += 1
+    }
+  }
+
+  const existingRules = await listRuleRows()
+  const existingById = new Map(existingRules.map((r) => [r.id, r]))
+  let rulesCreated = 0
+  let rulesUpdated = 0
+  let rulesUnchanged = 0
+  const seenIds = new Set<string>()
+
+  for (let i = 0; i < seedRules.length; i++) {
+    const seed = seedRules[i]
+    seenIds.add(seed.id)
+    const existing = existingById.get(seed.id)
+
+    const desired: Record<string, unknown> = {
+      id: seed.id,
+      __typename: 'OwnershipRule',
+      name: seed.name,
+      sortOrder: i * 10,
+      active: seed.active,
+      condition: seed.condition,
+      divisionCode: seed.divisionCode,
+    }
+
+    if (!existing) {
+      await putVersioned(
+        OWNERSHIP_RULE_TABLE_NAME,
+        { ...desired, createdBy: 'seed', updatedBy: 'seed', version: 1, createdAt: now, updatedAt: now },
+        null,
+        'ownership rule',
+      )
+      rulesCreated += 1
+      continue
+    }
+
+    const same =
+      existing.name === desired.name &&
+      existing.sortOrder === desired.sortOrder &&
+      existing.active === desired.active &&
+      existing.divisionCode === desired.divisionCode &&
+      JSON.stringify(existing.condition) === JSON.stringify(desired.condition)
+
+    if (same) {
+      rulesUnchanged += 1
+      continue
+    }
+
+    await putVersioned(
+      OWNERSHIP_RULE_TABLE_NAME,
+      {
+        ...existing,
+        ...desired,
+        createdBy: existing.createdBy ?? 'seed',
+        createdAt: existing.createdAt ?? now,
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (existing.version ?? 0) + 1,
+      },
+      existing.version ?? 0,
+      'ownership rule',
+    )
+    rulesUpdated += 1
+  }
+
+  let rulesDeactivated = 0
+  for (const existing of existingRules) {
+    // The seed only owns rule-seed-* rows. A person-authored rule-<uuid> must never
+    // be deactivated by re-seeding, or its freight would silently fall through to
+    // the BROKERAGE catch-all.
+    if (!existing.id.startsWith('rule-seed-') || seenIds.has(existing.id) || !existing.active) continue
+    await archiveVersioned(OWNERSHIP_RULE_TABLE_NAME, existing.id, existing, caller, 'ownership rule')
+    rulesDeactivated += 1
+  }
+
+  let viewsCreated = 0
+  for (const view of SEED_VIEWS) {
+    if (await putIfAbsent(SHIPMENT_VIEW_TABLE_NAME, stamp({ ...view }, 'ShipmentView'))) viewsCreated += 1
+  }
+
+  // The views R2's follow-up turned into pages leave the sidebar the same way a
+  // dropped seed rule leaves the stack: deactivated, never deleted.
+  let viewsDeactivated = 0
+  for (const id of RETIRED_SEED_VIEWS) {
+    const existing = await getById(SHIPMENT_VIEW_TABLE_NAME, id)
+    if (!existing || existing.active === false) continue
+    await archiveVersioned(SHIPMENT_VIEW_TABLE_NAME, id, existing, caller, 'shipment view')
+    viewsDeactivated += 1
+  }
+
+  const report = {
+    divisionsCreated,
+    rulesCreated,
+    rulesUpdated,
+    rulesDeactivated,
+    rulesUnchanged,
+    viewsCreated,
+    viewsDeactivated,
+    divisionsPresent: SEED_DIVISIONS.length,
+    rulesPresent: seedRules.length,
+    viewsPresent: SEED_VIEWS.length,
+  }
+  if (divisionsCreated + rulesCreated + rulesUpdated + rulesDeactivated + viewsCreated + viewsDeactivated > 0) {
+    await writeAudit('OwnershipDivision', 'seed', 'ENSURE_OWNERSHIP_SEED', caller, report)
+  }
+  return report
+}
+
+// ── Step J: the integration framework ──────────────────────────────────────────
+// `integrations.ts` takes the DynamoDB client and the audit writer rather than
+// building its own, so there is one client, one audit shape and no import cycle.
+const integrationDeps: IntegrationDeps = {
+  dynamo,
+  integrationTableName: INTEGRATION_TABLE_NAME,
+  carrierTableName: CARRIER_TABLE_NAME,
+  writeAudit: (entityType, entityId, auditAction, caller, changes) =>
+    writeAudit(entityType, entityId, auditAction, caller, changes),
+}
+
+const mcpFindDeps: McpFindDeps = {
+  ...integrationDeps,
+  shipmentMessageTableName: SHIPMENT_MESSAGE_TABLE_NAME,
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────────
 
 export const handler = async (event: AppSyncEvent): Promise<Record<string, unknown>> => {
@@ -1371,9 +3442,22 @@ export const handler = async (event: AppSyncEvent): Promise<Record<string, unkno
   const caller = await authorize(action, event.identity)
   const input = parseInput(event.arguments.input)
 
+  if (isIntegrationAction(action)) {
+    // LIST_INTEGRATIONS answers an array and RUN_STUB a two-part result; both ride
+    // the same AWSJSON return as SAVE_OWNERSHIP_RULES already does.
+    const result = await runIntegrationAction(action, input, caller, integrationDeps)
+    return result as Record<string, unknown>
+  }
+
+  if (isMcpFindAction(action)) {
+    return (await runMcpFindAction(action, input, caller, mcpFindDeps)) as Record<string, unknown>
+  }
+
   switch (action) {
     case 'UPSERT_CUSTOMER':
       return upsertCustomer(input, caller)
+    case 'SET_CUSTOMER_STATUS':
+      return setCustomerStatus(input, caller)
     case 'UPSERT_LOCATION':
       return upsertLocation(input, caller)
     case 'ARCHIVE_CUSTOMER':
@@ -1386,12 +3470,48 @@ export const handler = async (event: AppSyncEvent): Promise<Record<string, unkno
       return saveDivision(input, caller)
     case 'SAVE_SETTINGS':
       return saveSettings(input, caller)
+    case 'ROTATE_WEBHOOK_SECRET':
+      return rotateWebhookSecret(input, caller)
+    case 'ASK_ACADEMY':
+      return askAcademy(input, caller)
+    case 'PREVIEW_IMPORT':
+      return previewImport(input, caller)
+    case 'RUN_IMPORT':
+      return runImport(input, caller)
+    case 'LIST_IMPORT_JOBS':
+      return listImportJobs(input)
     case 'PREVIEW_MERGE_LOCATIONS':
       return previewMergeLocations(input)
     case 'MERGE_LOCATIONS':
       return mergeLocations(input, caller)
     case 'RESUME_MERGE':
       return resumeMerge(input, caller)
+    case 'SAVE_OWNERSHIP_DIVISION':
+      return saveOwnershipDivision(input, caller)
+    case 'ARCHIVE_OWNERSHIP_DIVISION':
+      return archiveOwnershipDivision(input, caller)
+    case 'SAVE_OWNERSHIP_RULES': {
+      // The one action whose payload is a list: order IS the rule, so the whole
+      // ordered array goes back. AWSJSON carries an array as happily as an object
+      // and `saveOwnershipRules` in apiClient.ts is typed to receive one.
+      const rules = await saveOwnershipRules(input, caller)
+      return rules as unknown as Record<string, unknown>
+    }
+    case 'SAVE_SHIPMENT_VIEW':
+      return saveShipmentView(input, caller)
+    case 'ARCHIVE_SHIPMENT_VIEW':
+      return archiveShipmentView(input, caller)
+    case 'SAVE_COLUMN_TEMPLATE':
+      return saveColumnTemplate(input, caller)
+    case 'DELETE_COLUMN_TEMPLATE':
+      return deleteColumnTemplate(input, caller)
+    case 'ENSURE_OWNERSHIP_SEED':
+      return ensureOwnershipSeed(caller)
+    case 'GET_ROUTE_MILES':
+      return { ...(await routeMiles(parsePoints(input.stops), {
+        apiKey: process.env.GOOGLE_MAPS_API_KEY ?? '',
+        fetchJson: async (url) => (await fetch(url)).json(),
+      })) }
     default:
       throw new Error(`Unknown action: ${action}`)
   }

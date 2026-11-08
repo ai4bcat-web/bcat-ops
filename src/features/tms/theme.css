@@ -1,0 +1,1239 @@
+/*
+ * BCAT blue-accent theme for the whole product.
+ *
+ * The two token blocks (light default, dark override) are also defined on `:root`, so every
+ * surface — staff shell, Radix portals, sonner, sign-in, public pages, the driver app — reads
+ * one set of `--tms-*` tokens. Every other selector in the TMS stylesheets starts with
+ * `.tms-shell` or `.tms-portal`, or with `:root[data-tms-theme='dark']` immediately followed
+ * by one of those. The exceptions are the token blocks, the shadcn bridge and the `*` border
+ * default. `src/features/tms/theme.scope.test.ts` enforces that mechanically.
+ *
+ * Colour literals live ONLY in the two token blocks below (light default, dark override);
+ * everything else uses `var(--tms-*)`. The attribute is on <html> (see tmsTheme.ts) because
+ * `.tms-portal` content (Radix dialogs, menus, sonner) renders into document.body.
+ *
+ * Sidebar / top bar rules live in shell.css; kit-only rules in kit/kit.css.
+ */
+
+:root,
+.tms-shell,
+.tms-portal {
+  color-scheme: light;
+
+  --tms-bg: #f4f7fb;
+  --tms-sidebar: #ffffff;
+  --tms-topbar: #ffffff;
+  --tms-card: #ffffff;
+  --tms-card-body: #ffffff;
+  --tms-bg-elevated: #ffffff;
+  --tms-surface: #f7f9fc;
+  --tms-surface-subtle: #f7f9fc;
+  --tms-surface-hover: #edf2f8;
+  --tms-surface-selected: #e6f4fd;
+  --tms-border: #e2e8f0;
+  --tms-input: #ffffff;
+  --tms-input-border: #cbd5e1;
+  --tms-text: #111827;
+  --tms-text-2: #4b5563;
+  --tms-muted: #6b7280;
+  --tms-disabled: #9ca3af;
+  --tms-primary: #0369a1;
+  --tms-primary-hover: #075985;
+  --tms-primary-tint: #e6f4fd;
+  --tms-primary-ink: #0369a1;
+  --tms-on-primary: #ffffff;
+  --tms-destructive: #dc2626;
+  --tms-destructive-hover: #b91c1c;
+  --tms-on-destructive: #ffffff;
+
+  --tms-radius: 10px;
+  --tms-radius-card: 14px;
+  --tms-radius-sm: 8px;
+  --tms-radius-pill: 999px;
+  --tms-gap: 16px;
+  --tms-gutter: 24px;
+  --tms-pad: 20px;
+  --tms-shell-gap: 16px;
+  --tms-sidebar-w: 248px;
+  --tms-sidebar-collapsed-w: 76px;
+  --tms-topbar-h: 56px;
+  --tms-row-h: 44px;
+  --tms-control-h: 40px;
+
+  --tms-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --tms-shadow-pop: 0 12px 40px rgba(16, 24, 40, 0.12);
+  --tms-shadow-modal: 0 24px 60px rgba(16, 24, 40, 0.18);
+  --tms-overlay: rgba(17, 24, 39, 0.45);
+  /* Page / PDF / image matte in document previews: white in both themes. */
+  --tms-paper: #ffffff;
+
+  --tms-scroll-track: #f4f7fb;
+  --tms-scroll-thumb: #cbd5e1;
+  --tms-scroll-thumb-hover: #a9b6c8;
+
+  --tms-count-bg: #f5a524;
+  --tms-count-ink: #422006;
+  --tms-tooltip-bg: #111827;
+  --tms-tooltip-ink: #f9fafb;
+
+  --tms-badge-green: #15803d;
+  --tms-badge-green-tint: #e8f7ef;
+  --tms-badge-orange: #b45309;
+  --tms-badge-orange-tint: #fff4d6;
+  --tms-badge-red: #b91c1c;
+  --tms-badge-red-tint: #fde8e8;
+  --tms-badge-blue: #1d4ed8;
+  --tms-badge-blue-tint: #e6f0ff;
+  --tms-badge-purple: #6d28d9;
+  --tms-badge-purple-tint: #efe7fd;
+  --tms-badge-pink: #be185d;
+  --tms-badge-pink-tint: #fce7f6;
+  --tms-badge-turquoise: #0e7490;
+  --tms-badge-turquoise-tint: #ddf6f8;
+  --tms-badge-gray: #4b5563;
+  --tms-badge-gray-tint: #f3f4f6;
+
+  /* Whole-row board tones. */
+  --tms-row-delivered: #e8f7ef;
+  --tms-row-delivered-text: #14532d;
+  --tms-row-dispatched: #ffedd5;
+  --tms-row-dispatched-text: #9a3412;
+  --tms-row-departed: #dbeafe;
+  --tms-row-departed-text: #1e3a8a;
+  --tms-row-arrived: #e0f2fe;
+  --tms-row-arrived-text: #075985;
+  --tms-row-covered: #fde7da;
+  --tms-row-covered-text: #7c2d12;
+  --tms-row-open: #f3f4f6;
+  --tms-row-open-text: #374151;
+  --tms-row-hold: #fef3c7;
+  --tms-row-hold-text: #92400e;
+  --tms-row-reserved: #ede9fe;
+  --tms-row-reserved-text: #5b21b6;
+  --tms-row-voided: #f3f4f6;
+  --tms-row-voided-text: #9ca3af;
+
+  /* Chart palette: green, dark green, near-black first, then 9 distinguishable series. */
+  --tms-chart-1: #0b8fd9;
+  --tms-chart-2: #0369a1;
+  --tms-chart-3: #111827;
+  --tms-chart-4: #f5a524;
+  --tms-chart-5: #14b8a6;
+  --tms-chart-6: #8b5cf6;
+  --tms-chart-7: #ef4444;
+  --tms-chart-8: #06b6d4;
+  --tms-chart-9: #9ca3af;
+  --tms-chart-10: #8fd0f7;
+  --tms-chart-11: #d97706;
+  --tms-chart-12: #2563eb;
+  --tms-chart-axis: var(--tms-muted);
+  --tms-chart-grid: var(--tms-border);
+}
+
+:root[data-tms-theme='dark'],
+:root[data-tms-theme='dark'] .tms-shell,
+:root[data-tms-theme='dark'] .tms-portal {
+  color-scheme: dark;
+
+  --tms-bg: #232323;
+  --tms-sidebar: #0e0e0e;
+  --tms-topbar: #181818;
+  --tms-card: #181818;
+  --tms-card-body: #232323;
+  --tms-bg-elevated: #2a2a2a;
+  --tms-surface: #1d1d1d;
+  --tms-surface-subtle: #1b1b1b;
+  --tms-surface-hover: #2a2a2a;
+  --tms-surface-selected: #0f2a40;
+  --tms-border: #383838;
+  --tms-input: #383838;
+  --tms-input-border: #656565;
+  --tms-text: #fafaf9;
+  --tms-text-2: #d4d4d4;
+  --tms-muted: #a7a7a7;
+  --tms-disabled: #6b6b6b;
+  --tms-primary: #1ea8f3;
+  --tms-primary-hover: #52bbf6;
+  --tms-primary-tint: #0f2a40;
+  --tms-primary-ink: #5cc0f7;
+  --tms-on-primary: #0b1220;
+  --tms-destructive: #e5484d;
+  --tms-destructive-hover: #f0616a;
+  --tms-on-destructive: #ffffff;
+
+  --tms-shadow: none;
+  --tms-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --tms-shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.55);
+  --tms-overlay: rgba(0, 0, 0, 0.6);
+  --tms-paper: #ffffff;
+
+  --tms-scroll-track: #1b1b1b;
+  --tms-scroll-thumb: #4a4a4a;
+  --tms-scroll-thumb-hover: #5d5d5d;
+
+  --tms-count-bg: #f5a524;
+  --tms-count-ink: #422006;
+  --tms-tooltip-bg: #0e0e0e;
+  --tms-tooltip-ink: #fafaf9;
+
+  --tms-badge-green: #4ade80;
+  --tms-badge-green-tint: #123524;
+  --tms-badge-orange: #fbbf24;
+  --tms-badge-orange-tint: #3a2a08;
+  --tms-badge-red: #f87171;
+  --tms-badge-red-tint: #3b1212;
+  --tms-badge-blue: #60a5fa;
+  --tms-badge-blue-tint: #10233f;
+  --tms-badge-purple: #a78bfa;
+  --tms-badge-purple-tint: #2a1b4d;
+  --tms-badge-pink: #f472b6;
+  --tms-badge-pink-tint: #3b1230;
+  --tms-badge-turquoise: #22d3ee;
+  --tms-badge-turquoise-tint: #0b2e33;
+  --tms-badge-gray: #a7a7a7;
+  --tms-badge-gray-tint: #2a2a2a;
+
+  --tms-row-delivered: #1a4d2e;
+  --tms-row-delivered-text: #d4edda;
+  --tms-row-dispatched: #7c3f0b;
+  --tms-row-dispatched-text: #ffe8cc;
+  --tms-row-departed: #0c3b6e;
+  --tms-row-departed-text: #d6eaff;
+  --tms-row-arrived: #1e4a5c;
+  --tms-row-arrived-text: #dff6ff;
+  --tms-row-covered: #5a3a2a;
+  --tms-row-covered-text: #ffe8d6;
+  --tms-row-open: #3a3a3a;
+  --tms-row-open-text: #f0f0f0;
+  --tms-row-hold: #5a4a10;
+  --tms-row-hold-text: #fff5c2;
+  --tms-row-reserved: #3d2a4d;
+  --tms-row-reserved-text: #f0e6ff;
+  --tms-row-voided: #2a2a2a;
+  --tms-row-voided-text: #a0a0a0;
+
+  --tms-chart-1: #1ea8f3;
+  --tms-chart-2: #0b8fd9;
+  --tms-chart-3: #e5e7eb;
+  --tms-chart-4: #fbbf24;
+  --tms-chart-5: #2dd4bf;
+  --tms-chart-6: #a78bfa;
+  --tms-chart-7: #f87171;
+  --tms-chart-8: #22d3ee;
+  --tms-chart-9: #9ca3af;
+  --tms-chart-10: #7cc9f5;
+  --tms-chart-11: #f59e0b;
+  --tms-chart-12: #93c5fd;
+}
+
+/* ── shadcn bridge: ui/* utilities (bg-popover, text-muted-foreground, …) follow the TMS tokens ── */
+:root, .tms-shell, .tms-portal { --background: var(--tms-card); --foreground: var(--tms-text); --card: var(--tms-card); --card-foreground: var(--tms-text); --popover: var(--tms-bg-elevated); --popover-foreground: var(--tms-text); --primary: var(--tms-primary); --primary-foreground: var(--tms-on-primary); --secondary: var(--tms-surface); --secondary-foreground: var(--tms-text); --muted: var(--tms-surface); --muted-foreground: var(--tms-muted); --accent: var(--tms-surface-hover); --accent-foreground: var(--tms-text); --destructive: var(--tms-destructive); --destructive-foreground: var(--tms-on-destructive); --border: var(--tms-border); --input: var(--tms-input-border); --ring: var(--tms-primary); --radius: var(--tms-radius); }
+
+/* Tailwind v4's bare `border` is currentColor. Layered, so explicit border-[color:…] utilities still win. */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--tms-border);
+  }
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+
+.tms-shell {
+  background: var(--tms-bg);
+  color: var(--tms-text);
+  font-family: Inter, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  min-height: 100vh;
+  display: flex;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tms-shell *,
+.tms-portal * {
+  box-sizing: border-box;
+}
+
+.tms-shell h1 {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0;
+  color: var(--tms-text);
+}
+
+.tms-shell h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.tms-shell h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.tms-shell a {
+  color: var(--tms-primary-ink);
+  text-decoration: none;
+}
+
+.tms-shell button {
+  font: inherit;
+  color: inherit;
+}
+
+.tms-shell .tms-muted,
+.tms-portal .tms-muted {
+  color: var(--tms-muted);
+}
+
+/* Themed scrollbars everywhere inside the shell. */
+.tms-shell ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.tms-shell ::-webkit-scrollbar-track {
+  background: var(--tms-scroll-track);
+}
+
+.tms-shell ::-webkit-scrollbar-thumb {
+  background: var(--tms-scroll-thumb);
+  border-radius: 6px;
+}
+
+.tms-shell ::-webkit-scrollbar-thumb:hover {
+  background: var(--tms-scroll-thumb-hover);
+}
+
+.tms-shell {
+  scrollbar-color: var(--tms-scroll-thumb) var(--tms-scroll-track);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-btn,
+.tms-portal .tms-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--tms-control-h);
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--tms-radius);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  background: none;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-btn-sm,
+.tms-portal .tms-btn-sm {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.tms-shell .tms-btn:disabled,
+.tms-portal .tms-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tms-shell .tms-btn-primary,
+.tms-portal .tms-btn-primary {
+  background: var(--tms-primary);
+  color: var(--tms-on-primary);
+  border-radius: var(--tms-radius);
+  font-weight: 600;
+}
+
+.tms-shell .tms-btn-primary:hover:not(:disabled),
+.tms-portal .tms-btn-primary:hover:not(:disabled) {
+  background: var(--tms-primary-hover);
+}
+
+.tms-shell .tms-btn-secondary,
+.tms-portal .tms-btn-secondary {
+  background: var(--tms-input);
+  border-color: var(--tms-input-border);
+  border-radius: var(--tms-radius);
+}
+
+.tms-shell .tms-btn-secondary:hover:not(:disabled),
+.tms-portal .tms-btn-secondary:hover:not(:disabled) {
+  background: var(--tms-surface-hover);
+}
+
+.tms-shell .tms-btn-ghost,
+.tms-portal .tms-btn-ghost {
+  background: none;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-btn-ghost:hover:not(:disabled),
+.tms-portal .tms-btn-ghost:hover:not(:disabled) {
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-btn-destructive,
+.tms-portal .tms-btn-destructive {
+  background: var(--tms-destructive);
+  color: var(--tms-on-destructive);
+  border-radius: var(--tms-radius);
+}
+
+.tms-shell .tms-btn-destructive:hover:not(:disabled),
+.tms-portal .tms-btn-destructive:hover:not(:disabled) {
+  background: var(--tms-destructive-hover);
+}
+
+.tms-shell .tms-icon-btn,
+.tms-portal .tms-icon-btn {
+  width: var(--tms-control-h);
+  height: var(--tms-control-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--tms-input);
+  border: 0;
+  color: var(--tms-text);
+  cursor: pointer;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
+.tms-shell .tms-icon-btn:hover,
+.tms-portal .tms-icon-btn:hover {
+  background: var(--tms-surface-hover);
+}
+
+.tms-shell .tms-icon-btn-sq {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  background: none;
+  border: 1px solid var(--tms-border);
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-icon-btn-sq:hover {
+  color: var(--tms-text);
+  background: var(--tms-surface-hover);
+}
+
+.tms-shell .tms-icon-btn-plain {
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  background: none;
+  border: 0;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-icon-btn-plain:hover {
+  color: var(--tms-text);
+  background: var(--tms-surface-hover);
+}
+
+/* ── Inputs ───────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-input,
+.tms-shell .tms-select,
+.tms-shell .tms-textarea,
+.tms-portal .tms-input,
+.tms-portal .tms-select,
+.tms-portal .tms-textarea {
+  width: 100%;
+  height: var(--tms-control-h);
+  padding: 0 10px;
+  background: var(--tms-input);
+  border: 1px solid var(--tms-input-border);
+  border-radius: var(--tms-radius);
+  color: var(--tms-text);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.tms-shell .tms-textarea,
+.tms-portal .tms-textarea {
+  height: auto;
+  min-height: 80px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.tms-shell .tms-select,
+.tms-portal .tms-select {
+  appearance: none;
+  padding-right: 28px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--tms-muted) 50%),
+    linear-gradient(135deg, var(--tms-muted) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 17px, calc(100% - 10px) 17px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.tms-shell .tms-select option,
+.tms-portal .tms-select option {
+  background: var(--tms-surface-subtle);
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-input::placeholder,
+.tms-shell .tms-textarea::placeholder,
+.tms-portal .tms-input::placeholder,
+.tms-portal .tms-textarea::placeholder {
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-input:focus,
+.tms-shell .tms-select:focus,
+.tms-shell .tms-textarea:focus,
+.tms-portal .tms-input:focus,
+.tms-portal .tms-select:focus,
+.tms-portal .tms-textarea:focus {
+  outline: none;
+  border-color: var(--tms-primary);
+  box-shadow: 0 0 0 2px var(--tms-primary-tint), 0 0 0 1px var(--tms-primary);
+}
+
+.tms-shell .tms-field,
+.tms-portal .tms-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tms-shell .tms-field-label,
+.tms-portal .tms-field-label {
+  font-size: 12px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-field-hint,
+.tms-portal .tms-field-hint {
+  font-size: 12px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-field-error,
+.tms-portal .tms-field-error {
+  font-size: 12px;
+  color: var(--tms-badge-red);
+}
+
+/* ── Page / list anatomy (MVMNT_UI_REFERENCE §2) ──────────────────────────── */
+
+.tms-shell .tms-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tms-gap);
+  min-width: 0;
+}
+
+.tms-shell .tms-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-height: 40px;
+}
+
+/* The action cluster wraps under the title on a phone instead of pushing the page wider than the
+   viewport (the dashboard's four controls measure 516px). */
+.tms-shell .tms-page-actions {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tms-shell .tms-views-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-style: italic;
+  color: var(--tms-text);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.tms-shell .tms-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.tms-shell .tms-filter-search {
+  width: 160px;
+  flex: 0 0 auto;
+}
+
+.tms-shell .tms-chip {
+  font-style: italic;
+  color: var(--tms-muted);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-chip:hover {
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-chip.tms-chip-set {
+  font-style: normal;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-add-filter,
+.tms-shell .tms-fields-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--tms-primary-ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-fields-btn {
+  margin-left: auto;
+}
+
+.tms-shell .tms-quick-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px;
+  overflow-x: auto;
+  background: var(--tms-surface);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-pill);
+}
+
+.tms-shell .tms-quick-tab {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  background: none;
+  border: 0;
+  border-radius: var(--tms-radius-pill);
+  color: var(--tms-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-quick-tab:hover {
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-quick-tab.tms-active {
+  background: var(--tms-card);
+  color: var(--tms-primary-ink);
+  font-weight: 600;
+  box-shadow: var(--tms-shadow);
+}
+
+.tms-shell .tms-quick-tab-count {
+  margin-left: 6px;
+  padding: 0 7px;
+  min-width: 20px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* ── Table ────────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-table-wrap,
+.tms-portal .tms-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  background: var(--tms-card);
+}
+
+.tms-shell .tms-table,
+.tms-portal .tms-table {
+  width: 100%;
+  max-width: none;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.tms-shell .tms-table thead th,
+.tms-portal .tms-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 42px;
+  padding: 4px 12px;
+  background: var(--tms-surface-subtle);
+  color: var(--tms-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-table th.tms-sortable,
+.tms-portal .tms-table th.tms-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.tms-shell .tms-table th.tms-sortable:hover,
+.tms-portal .tms-table th.tms-sortable:hover {
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-sort-dir,
+.tms-portal .tms-sort-dir {
+  margin-left: 4px;
+  color: var(--tms-primary-ink);
+}
+
+.tms-shell .tms-table tbody td,
+.tms-portal .tms-table tbody td {
+  height: var(--tms-row-h);
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--tms-text);
+  border-bottom: 1px solid var(--tms-border);
+  white-space: nowrap;
+}
+
+.tms-shell .tms-table tbody tr:last-child td,
+.tms-portal .tms-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tms-shell .tms-table tbody tr:hover td,
+.tms-portal .tms-table tbody tr:hover td {
+  background: var(--tms-surface-hover);
+}
+
+.tms-shell .tms-table tbody tr[aria-selected='true'] td,
+.tms-shell .tms-table tbody tr.tms-selected td,
+.tms-portal .tms-table tbody tr[aria-selected='true'] td,
+.tms-portal .tms-table tbody tr.tms-selected td {
+  background: var(--tms-surface-selected);
+}
+
+/* Checkbox column and trailing icon actions. */
+.tms-shell .tms-table th:has(> input[type='checkbox']),
+.tms-shell .tms-table td:has(> input[type='checkbox']),
+.tms-portal .tms-table th:has(> input[type='checkbox']),
+.tms-portal .tms-table td:has(> input[type='checkbox']) {
+  width: 40px;
+  padding-right: 0;
+}
+
+.tms-shell .tms-table td .tms-icon-btn-plain,
+.tms-portal .tms-table td .tms-icon-btn-plain {
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-table td .tms-icon-btn-plain:hover,
+.tms-portal .tms-table td .tms-icon-btn-plain:hover {
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-table tbody tr.tms-clickable,
+.tms-portal .tms-table tbody tr.tms-clickable {
+  cursor: pointer;
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-empty,
+.tms-portal .tms-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 56px 16px;
+  text-align: center;
+}
+
+.tms-shell .tms-empty.tms-empty-compact,
+.tms-portal .tms-empty.tms-empty-compact {
+  padding: 20px 12px;
+}
+
+.tms-shell .tms-empty-icon,
+.tms-portal .tms-empty-icon {
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-empty-title,
+.tms-portal .tms-empty-title {
+  font-size: 18px;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-empty-sub,
+.tms-portal .tms-empty-sub {
+  font-size: 14px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-empty-action,
+.tms-portal .tms-empty-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tms-primary-ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* ── Footer bar ───────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px;
+  font-size: 14px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-footer-count strong {
+  color: var(--tms-text);
+  font-weight: 600;
+}
+
+.tms-shell .tms-page-size {
+  width: 56px;
+  height: 26px;
+  padding: 0 6px;
+  background: var(--tms-input);
+  border: 1px solid var(--tms-input-border);
+  border-radius: var(--tms-radius-sm);
+  color: var(--tms-text);
+  font-size: 13px;
+}
+
+.tms-shell .tms-footer-hints {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tms-shell .tms-key,
+.tms-portal .tms-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--tms-surface-hover);
+  color: var(--tms-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-card,
+.tms-portal .tms-card {
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  overflow: hidden;
+  background: var(--tms-card);
+  box-shadow: var(--tms-shadow);
+  min-width: 0;
+}
+
+.tms-shell .tms-card-head,
+.tms-portal .tms-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 10px var(--tms-pad);
+  background: transparent;
+  border-bottom: 1px solid var(--tms-border);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tms-shell .tms-card-actions,
+.tms-portal .tms-card-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tms-shell .tms-card-body,
+.tms-portal .tms-card-body {
+  background: var(--tms-card-body);
+  padding: var(--tms-pad);
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-tabs,
+.tms-portal .tms-tabs {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid var(--tms-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* Fade the right edge when many tabs overflow (shipment detail has 10); mask uses alpha only. */
+.tms-shell .tms-tabs.tms-tabs-many,
+.tms-portal .tms-tabs.tms-tabs-many {
+  -webkit-mask-image: linear-gradient(to right, var(--tms-text) calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, var(--tms-text) calc(100% - 24px), transparent);
+}
+
+.tms-shell .tms-tab,
+.tms-portal .tms-tab {
+  position: relative;
+  background: none;
+  border: 0;
+  padding: 10px 0;
+  color: var(--tms-muted);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-tab:hover,
+.tms-portal .tms-tab:hover {
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-tab.tms-active,
+.tms-portal .tms-tab.tms-active {
+  color: var(--tms-text);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 0 var(--tms-primary);
+}
+
+.tms-shell .tms-tab-count,
+.tms-portal .tms-tab-count {
+  margin-left: 6px;
+  padding: 0 7px;
+  min-width: 20px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  display: inline-block;
+}
+
+/* ── Badges ───────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-badge,
+.tms-portal .tms-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: var(--tms-radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-badge-blue,
+.tms-portal .tms-badge-blue {
+  background: var(--tms-badge-blue-tint);
+  color: var(--tms-badge-blue);
+}
+
+.tms-shell .tms-badge-green,
+.tms-portal .tms-badge-green {
+  background: var(--tms-badge-green-tint);
+  color: var(--tms-badge-green);
+}
+
+.tms-shell .tms-badge-orange,
+.tms-portal .tms-badge-orange {
+  background: var(--tms-badge-orange-tint);
+  color: var(--tms-badge-orange);
+}
+
+.tms-shell .tms-badge-pink,
+.tms-portal .tms-badge-pink {
+  background: var(--tms-badge-pink-tint);
+  color: var(--tms-badge-pink);
+}
+
+.tms-shell .tms-badge-purple,
+.tms-portal .tms-badge-purple {
+  background: var(--tms-badge-purple-tint);
+  color: var(--tms-badge-purple);
+}
+
+.tms-shell .tms-badge-red,
+.tms-portal .tms-badge-red {
+  background: var(--tms-badge-red-tint);
+  color: var(--tms-badge-red);
+}
+
+.tms-shell .tms-badge-turquoise,
+.tms-portal .tms-badge-turquoise {
+  background: var(--tms-badge-turquoise-tint);
+  color: var(--tms-badge-turquoise);
+}
+
+.tms-shell .tms-badge-gray,
+.tms-portal .tms-badge-gray {
+  background: var(--tms-badge-gray-tint);
+  color: var(--tms-badge-gray);
+  border: 1px solid var(--tms-border);
+}
+
+/* ── Portal surfaces (Radix / sonner render into document.body) ───────────── */
+
+.tms-portal {
+  font-family: Inter, sans-serif;
+  font-size: 14px;
+  color: var(--tms-text);
+}
+
+.tms-portal.tms-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--tms-overlay);
+}
+
+.tms-portal.tms-dialog-content {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 61;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  box-shadow: var(--tms-shadow-modal);
+}
+
+.tms-portal.tms-dialog-content.tms-dialog-wide { max-width: 920px; }
+.tms-portal.tms-dialog-content.tms-dialog-xl { max-width: 1100px; }
+
+.tms-portal .tms-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px var(--tms-pad);
+  background: transparent;
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-portal .tms-dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.tms-portal .tms-dialog-desc {
+  font-size: 13px;
+  color: var(--tms-muted);
+  margin: 0;
+  padding: 12px var(--tms-pad) 0;
+}
+
+.tms-portal .tms-dialog-body {
+  padding: var(--tms-pad);
+}
+
+.tms-portal .tms-dialog-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 var(--tms-pad) var(--tms-pad);
+}
+
+.tms-portal .tms-dialog-close {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  color: var(--tms-muted);
+  cursor: pointer;
+  display: inline-flex;
+  padding: 2px;
+}
+
+.tms-portal .tms-dialog-close:hover {
+  color: var(--tms-text);
+}
+
+.tms-portal :focus-visible {
+  outline: 2px solid var(--tms-primary);
+  outline-offset: 1px;
+}
+
+.tms-shell :focus-visible {
+  outline: 2px solid var(--tms-primary);
+  outline-offset: 1px;
+}
+
+.tms-portal ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.tms-portal ::-webkit-scrollbar-track {
+  background: var(--tms-scroll-track);
+}
+
+.tms-portal ::-webkit-scrollbar-thumb {
+  background: var(--tms-scroll-thumb);
+  border-radius: 6px;
+}
+
+/* ── Count badge (nav, Tracking group, bell) ─────────────────────────────── */
+
+.tms-shell .tms-count-badge,
+.tms-portal .tms-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--tms-radius-pill);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-count-green,
+.tms-portal .tms-count-green {
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+}
+
+.tms-shell .tms-count-amber,
+.tms-portal .tms-count-amber {
+  background: var(--tms-count-bg);
+  color: var(--tms-count-ink);
+}
+
+.tms-shell .tms-count-red,
+.tms-portal .tms-count-red {
+  background: var(--tms-badge-red-tint);
+  color: var(--tms-badge-red);
+}
+
+/* ── Grid helpers ─────────────────────────────────────────────────────────── */
+
+/*
+ * The app's global phone rules collapse any element whose inline `style` attribute
+ * contains `repeat(3`, `grid-template-columns: 1fr 1fr`, `min-width: 520px`, … — they match
+ * on the serialized attribute, so nothing scoped can restore an inline value. TMS pages
+ * therefore declare their grids with these classes instead of inline styles; a class-based
+ * grid is never matched by those selectors and so never leaks.
+ */
+.tms-shell .tms-grid,
+.tms-portal .tms-grid {
+  display: grid;
+  gap: var(--tms-gap);
+  min-width: 0;
+}
+
+.tms-shell .tms-grid-2,
+.tms-portal .tms-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tms-shell .tms-grid-3,
+.tms-portal .tms-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.tms-shell .tms-grid-4,
+.tms-portal .tms-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* ── Phone breakpoint: neutralise the global rules that would reach inside ──── */
+
+@media (max-width: 900px) {
+  /* The app forces a 40px tap target on every button; the kit sets its own heights. */
+  .tms-shell button,
+  .tms-shell a[role='button'] {
+    min-height: 0;
+  }
+
+  /* Re-declared under scope so the TMS table keeps scrolling in its own wrapper. */
+  .tms-shell table {
+    max-width: none;
+  }
+
+  .tms-shell .tms-grid-2,
+  .tms-shell .tms-grid-3,
+  .tms-shell .tms-grid-4 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tms-shell .tms-grid-col-2,
+.tms-portal .tms-grid-col-2 { grid-column: span 2; }

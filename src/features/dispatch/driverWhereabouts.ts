@@ -5,6 +5,7 @@
  */
 import type { Driver, Load } from '@/types'
 import type { Equipment } from '@/types/equipment'
+import { isUnitActive } from '@/lib/fleetActive'
 import type { TruckLocation } from '@/lib/apiClient'
 import { currentLoadForDriver } from '@/lib/driverJourney'
 import { pendingDeliveryEta } from '@/lib/stopEvents'
@@ -33,7 +34,7 @@ export interface Whereabouts {
  * pickup on and not yet delivered is the one that says. Newest departure wins when two
  * loads are both open (a swap at a yard).
  */
-export function trailerOnDriver(driver: Pick<Driver, 'id' | 'assignedTrailerId'>, loads: readonly Load[], equipment: readonly Pick<Equipment, 'id' | 'unitNumber'>[]): string | null {
+export function trailerOnDriver(driver: Pick<Driver, 'id' | 'assignedTrailerId'>, loads: readonly Load[], equipment: readonly (Pick<Equipment, 'id' | 'unitNumber'> & { active?: boolean })[]): string | null {
   let best: { at: string; trailer: string } | null = null
   for (const load of loads) {
     const trailer = load.trailerNumber?.trim()
@@ -49,7 +50,7 @@ export function trailerOnDriver(driver: Pick<Driver, 'id' | 'assignedTrailerId'>
   }
   if (best) return best.trailer
   const own = driver.assignedTrailerId ? equipment.find((e) => e.id === driver.assignedTrailerId) : undefined
-  return own ? String(own.unitNumber) : null
+  return own && isUnitActive(own) ? String(own.unitNumber) : null
 }
 
 /** "City, ST" out of a Motive description, else coordinates, else null. */

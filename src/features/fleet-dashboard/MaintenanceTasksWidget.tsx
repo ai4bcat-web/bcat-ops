@@ -1,14 +1,17 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Wrench, ChevronRight, CheckCircle2 } from 'lucide-react'
+import { Wrench, ChevronRight } from 'lucide-react'
+import { TmsBadge } from '@/features/tms/kit/TmsBadge'
+import type { TmsTone } from '@/features/tms/kit/TmsBadge'
+import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import type { TaskPriority } from '@/types/equipment'
 
-const PRIORITY_META: Record<TaskPriority, { label: string; bg: string; fg: string; rank: number }> = {
-  high: { label: 'High', bg: '#fef2f2', fg: '#b91c1c', rank: 0 },
-  med:  { label: 'Med',  bg: '#fffbeb', fg: '#b45309', rank: 1 },
-  low:  { label: 'Low',  bg: '#eff6ff', fg: '#1d4ed8', rank: 2 },
+const PRIORITY_META: Record<TaskPriority, { label: string; tone: TmsTone; rank: number }> = {
+  high: { label: 'High', tone: 'red', rank: 0 },
+  med:  { label: 'Med',  tone: 'orange', rank: 1 },
+  low:  { label: 'Low',  tone: 'blue', rank: 2 },
 }
 
 const todayStr = () => {
@@ -57,27 +60,24 @@ export function MaintenanceTasksWidget() {
   const shown = open.slice(0, 7)
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Wrench size={16} style={{ color: 'var(--ds-t3)' }} />
+          <Wrench size={16} style={{ color: 'var(--tms-muted)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Open Maintenance Tasks</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>{open.length} open</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Open Maintenance Tasks</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>{open.length} open</div>
           </div>
         </div>
         {canMaintenance && (
-          <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+          <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--tms-primary)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
             View all <ChevronRight size={13} />
           </Link>
         )}
       </div>
 
       {shown.length === 0 ? (
-        <div style={{ padding: '32px 20px', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-          <CheckCircle2 size={22} style={{ color: '#15803d', opacity: 0.7 }} />
-          No open maintenance tasks
-        </div>
+        <TmsEmptyState compact title="No open maintenance tasks" message={null} />
       ) : (
         <div style={{ maxHeight: 320, overflowY: 'auto' }}>
           {shown.map((t) => {
@@ -86,28 +86,28 @@ export function MaintenanceTasksWidget() {
             const body = (
               <>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--ds-t2)' }}>{unitOf(t.equipmentId)}</span> · {t.title}
+                  <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--tms-text-2)' }}>{unitOf(t.equipmentId)}</span> · {t.title}
                   </div>
-                  <div style={{ fontSize: 12, color: overdue ? '#dc2626' : 'var(--ds-t3)', marginTop: 1, fontWeight: overdue ? 600 : 400 }}>
+                  <div style={{ fontSize: 12, color: overdue ? 'var(--tms-badge-red)' : 'var(--tms-muted)', marginTop: 1, fontWeight: overdue ? 600 : 400 }}>
                     {overdue ? 'Overdue · ' : ''}{shortDate(t.dueDate)}
                   </div>
                 </div>
-                <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, background: meta.bg, color: meta.fg }}>{meta.label}</span>
+                <TmsBadge tone={meta.tone} style={{ flexShrink: 0 }}>{meta.label}</TmsBadge>
               </>
             )
             return canMaintenance ? (
               <Link
                 key={t.id}
                 to="/maintenance"
-                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--ds-border)', textDecoration: 'none' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--tms-border)', textDecoration: 'none' }}
               >
                 {body}
               </Link>
             ) : (
               <div
                 key={t.id}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--ds-border)' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--tms-border)' }}
               >
                 {body}
               </div>

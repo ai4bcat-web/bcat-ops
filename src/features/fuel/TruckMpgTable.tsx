@@ -57,27 +57,27 @@ export function TruckMpgTable() {
     return [...all].sort((a, b) => b.localeCompare(a)).slice(0, WEEKS_SHOWN)
   }, [trucks])
 
-  const th: React.CSSProperties = { padding: '8px 16px', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }
+  const th: React.CSSProperties = { padding: '8px 16px', fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }
   const td: React.CSSProperties = { padding: '9px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Gauge size={15} style={{ color: 'var(--ds-t3)' }} />
-        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>MPG by Truck · Motive</span>
-        <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Gauge size={15} style={{ color: 'var(--tms-muted)' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>MPG by Truck · Motive</span>
+        <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>
           · week over week, driving + idle fuel
         </span>
       </div>
 
       {error && (
-        <div style={{ padding: '10px 20px', fontSize: 12.5, color: '#b45309', background: '#fffbeb' }}>{error}</div>
+        <div style={{ padding: '10px 20px', fontSize: 12.5, color: 'var(--tms-badge-orange)', background: 'var(--tms-badge-orange-tint)' }}>{error}</div>
       )}
 
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 620 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+            <tr style={{ borderBottom: '1px solid var(--tms-border)' }}>
               <th style={{ ...th, textAlign: 'left' }}>Truck</th>
               <th style={{ ...th, textAlign: 'right' }}>This week</th>
               <th style={{ ...th, textAlign: 'right' }}>Change</th>
@@ -88,25 +88,25 @@ export function TruckMpgTable() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={3 + weeks.length} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>Loading…</td></tr>
+              <tr><td colSpan={3 + weeks.length} style={{ padding: 28, textAlign: 'center', color: 'var(--tms-muted)' }}>Loading…</td></tr>
             ) : trucks.length === 0 ? (
-              <tr><td colSpan={3} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>
+              <tr><td colSpan={3} style={{ padding: 28, textAlign: 'center', color: 'var(--tms-muted)' }}>
                 No weekly mileage from Motive yet.
               </td></tr>
             ) : trucks.map((t) => (
-              <tr key={t.truckId} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                <td style={{ padding: '9px 16px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)' }}>
+              <tr key={t.truckId} style={{ borderBottom: '1px solid var(--tms-border)' }}>
+                <td style={{ padding: '9px 16px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--tms-text)' }}>
                   #{t.unitNumber}
                 </td>
                 {/* A dash, never 0.0 — a truck that did not move has no economy, not a bad one. */}
-                <td style={{ ...td, fontWeight: 700, color: 'var(--ds-t1)' }}>
+                <td style={{ ...td, fontWeight: 700, color: 'var(--tms-text)' }}>
                   {t.current != null ? t.current.toFixed(1) : '—'}
                 </td>
                 <td style={{ ...td }}>
                   {t.deltaPct == null ? (
-                    <span style={{ color: 'var(--ds-t3)' }}>—</span>
+                    <span style={{ color: 'var(--tms-muted)' }}>—</span>
                   ) : (
-                    <span style={{ color: t.deltaPct >= 0 ? '#15803d' : '#b91c1c', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                    <span style={{ color: t.deltaPct >= 0 ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                       {t.deltaPct >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                       {t.deltaPct > 0 ? '+' : ''}{t.deltaPct.toFixed(1)}%
                     </span>
@@ -115,7 +115,7 @@ export function TruckMpgTable() {
                 {weeks.map((w) => {
                   const hit = t.series.find((s) => s.periodStart === w)
                   return (
-                    <td key={w} style={{ ...td, color: 'var(--ds-t3)' }}>
+                    <td key={w} style={{ ...td, color: 'var(--tms-muted)' }}>
                       {hit?.mpg != null ? hit.mpg.toFixed(1) : '—'}
                     </td>
                   )

@@ -1,4 +1,10 @@
-import type { Address } from './tms'
+import type {
+  Address,
+  ApptRequestedBy,
+  ShipmentLoadFields,
+  StopDocumentContact,
+  StopReference,
+} from './tms'
 
 export type ColorKey =
   | 'driver-1' | 'driver-2' | 'driver-3' | 'driver-4' | 'driver-5' | 'driver-6'
@@ -25,7 +31,7 @@ export interface Driver {
    * Which fleet this driver runs in — mirrors DriverPaySetting.payGroup so the two
    * agree, and decides which documents their file requires.
    */
-  fleetGroup?: import('./equipment').FleetGroup | null
+  fleetGroup?: import('./equipment').DriverFleet | null
   // Compliance & profile fields
   email?: string
   cdl?: string           // CDL number e.g. "CDL-A IL-8823901"
@@ -304,6 +310,25 @@ export interface Stop {
   /** Manually cleared from the Appts queue (Ryne/Ruben's per-day Clear) — the row
    *  leaves the working view and stops counting as open, whatever its dates. */
   apptCleared?: boolean
+  // ── Step B: the broker-side stop card (src/features/shipments) ─────────────
+  /** The window we ASKED for, before anybody confirmed a hard appointment. */
+  requestedStart?: string | null
+  requestedEnd?: string | null
+  apptRequestedBy?: ApptRequestedBy | null
+  apptNote?: string | null
+  /** Stop-level reference numbers (PO at this dock, delivery number, seal…). */
+  refs?: StopReference[] | null
+  /** Who takes the paperwork here. */
+  documentContact?: StopDocumentContact | null
+  /** Free text about this stop; `Load.notes` is the load's, this one is the stop's. */
+  stopNotes?: string | null
+  /** Step AH. The Aljex Pick Up / Consignee block: who to call, and when the dock is open. */
+  contact?: { name?: string | null; phone?: string | null; email?: string | null; hours?: string | null } | null
+  /** Step AH. The stop's driver/carrier-visible note (prints on the rate con); `stopNotes` stays internal. */
+  instructions?: string | null
+  /** Step AH. What is picked up / dropped here; summed by "Calculate totals from picks". */
+  pieces?: number | null
+  weightLbs?: number | null
 }
 
 export type ApptWorkflowStatus =
@@ -313,7 +338,13 @@ export type ApptWorkflowStatus =
   | 'confirmed'      // confirmed-email + E2Open screenshots on file
   | 'change_needed'  // Ruben/Ryne want it moved to apptChangeTo — ladder restarts
 
-export interface Load {
+/**
+ * A load. Since step B it is also the buy side of a shipment: `ShipmentLoadFields`
+ * carries the link to its shipment/order plus the carrier-side status and assignment.
+ * Those fields are absent on every load that predates the shipment layer, and are
+ * written only by the tmsShipmentActions Lambda.
+ */
+export interface Load extends ShipmentLoadFields {
   id: string
   aljexId: string
   tmsId: string
@@ -345,6 +376,8 @@ export interface Load {
   weight?: number | null       // pounds
   pieces?: number | null
   piecesUnit?: string | null   // pallets | cases | pieces | skids | rolls | bundles
+  /** Declared value of what is on the truck, in cents. Read by the carrier booking checks. */
+  cargoValueCents?: number | null
   /** The trailer carrying the load, named by the driver as they leave the pickup. */
   trailerNumber?: string | null
   /** Where the pickup's paperwork is at end of day, answered in the Ivan app at clock-out. */
@@ -362,13 +395,51 @@ export interface Load {
   hot?: boolean | null        // urgent/"hot" load — flagged with 🔥 in schedule
   unscheduled?: boolean | null // true = orphan (no firm date) → calendar's Unscheduled lane
   stops?: Stop[] | null       // canonical multi-stop array; legacy pickup*/delivery* are derived mirrors
+  // ── Revenue ownership (Step R) ───────────────────────────────────────────
+  // Mirrored from the shipment so settlements, the fleet dashboards and the
+  // driver app can be grouped by business without joining. Codes from
+  // `OwnershipDivision`; written only by tmsShipmentActions.
+  revDivision?: string | null
+  revSubdivision?: string | null
+  /** 'HAND' | 'RULE' — a hand tag beats the rules. */
+  revTagSource?: string | null
+  revRuleId?: string | null
+  /** Cognito username of the rep who sold it. */
+  salesRepId?: string | null
+  /**
+   * The shipment's void, mirrored (Step R). Set = the shipment left the working
+   * set, so `listLoads` does not return this row unless a history view asks.
+   * Written by VOID_SHIPMENT in tmsShipmentActions and by the MIRROR pass of
+   * `scripts/backfillRevDivision.mjs`; the generated `updateLoad` can reach it too,
+   * because Load has no field-level auth — nothing but those two should.
+   */
+  voidedAt?: string | null
   createdAt: string
   updatedAt: string
   createdBy: string
   updatedBy: string
 }
 
-export type EntityType = 'Driver' | 'Load'
+export type EntityType =
+  | 'Driver'
+  | 'Load'
+  | 'Shipment'
+  | 'Order'
+  | 'LoadCarrier'
+  | 'LoadCharge'
+  | 'LoadFinancials'
+  | 'Invoice'
+  | 'ArPayment'
+  | 'CarrierBill'
+  | 'ApPayment'
+  | 'Quote'
+  | 'LaneRateSample'
+  | 'UserProfile'
+  | 'Commission'
+  | 'CommissionPayPeriod'
+  | 'Integration'
+  | 'WorkflowRun'
+  | 'Equipment'
 export type AuditAction = 'create' | 'update' | 'delete'
 
 export interface AuditLogEntry {
@@ -499,6 +570,13 @@ export interface FactoringItem {
   /** The broker's accounts-payable address the invoice goes to. */
   apEmail?: string | null
   manualInvoicedAt?: string | null
+  // ── Raised by this system rather than by an intake e-mail (Step F) ────────
+  /** Null reads as EMAIL, so every row the intake wrote is untouched. */
+  source?: 'EMAIL' | 'TMS' | null
+  /** The issued invoice this row bills, and its order and shipment. */
+  invoiceId?: string | null
+  orderId?: string | null
+  shipmentId?: string | null
 }
 
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import '@testing-library/jest-dom/vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import DriverLoginPage from './DriverLoginPage'
 
@@ -83,7 +83,7 @@ describe('DriverLoginPage', () => {
     const event = new Event('beforeinstallprompt', { bubbles: true, cancelable: true })
     Object.assign(event, { prompt })
 
-    window.dispatchEvent(event)
+    act(() => { window.dispatchEvent(event) })
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Install app/i })).toBeInTheDocument()

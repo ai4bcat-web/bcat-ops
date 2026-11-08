@@ -1,0 +1,16 @@
+Docs/tms-build/screenshots/ai/AI01-dashboard-tabs-light.png
+Docs/tms-build/screenshots/ai/AI01-dashboard-tabs-dark.png
+Docs/tms-build/screenshots/ai/AI13-settings-users-permissions-light.png
+Docs/tms-build/screenshots/ai/AI02-no-permission-no-button-light.png
+Docs/tms-build/screenshots/ai/AI12-overview-non-viewall-light.png
+Docs/tms-build/screenshots/ai/AI03-chat-first-turn-light.png
+Docs/tms-build/screenshots/ai/AI03-chat-first-turn-dark.png
+Docs/tms-build/screenshots/ai/AI04-scope-company-disabled-light.png
+Docs/tms-build/screenshots/ai/AI05-scope-picked-generating-light.png
+Docs/tms-build/screenshots/ai/AI06-generated-dashboard-light.png
+Docs/tms-build/screenshots/ai/AI06-generated-dashboard-dark.png
+Docs/tms-build/screenshots/ai/AI07-iterate-monthly-light.png
+Docs/tms-build/screenshots/ai/AI08-save-dialog-light.png
+Docs/tms-build/screenshots/ai/AI09-my-dashboards-cards-light.png
+Docs/tms-build/screenshots/ai/AI10-company-dashboard-as-repa-light.png
+Docs/tms-build/screenshots/ai/AI11-company-dashboard-as-acct-light.png

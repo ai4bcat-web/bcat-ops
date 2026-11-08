@@ -267,7 +267,7 @@ export function StatusUpdateModal({
                   </Field>
                 )}
               </div>
-              <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 6 }}>
+              <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: 6 }}>
                 {settlementWeek
                   ? `Rides that week's Amazon settlement as a DISPUTE shipment dated to the trip, so it pays at the driver's normal percentage.${settlement.posted ? ' Saving moves the existing row.' : ''}`
                   : settlement.posted
@@ -291,7 +291,7 @@ export function StatusUpdateModal({
           </Field>
 
           {dispute.amazonResponseAt && (
-            <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: -6 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: -6 }}>
               Last recorded {new Date(dispute.amazonResponseAt).toLocaleString()}
               {dispute.amazonResponseBy ? ` by ${dispute.amazonResponseBy}` : ''}
             </div>
@@ -305,13 +305,13 @@ export function StatusUpdateModal({
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
                 minHeight: 74, padding: 12, borderRadius: 9, cursor: 'pointer',
-                border: '1px dashed var(--ds-border-strong)', background: 'var(--ds-bg)',
+                border: '1px dashed var(--tms-input-border)', background: 'var(--tms-bg)',
               }}
               onClick={() => fileRef.current?.click()}
             >
-              <ImageUp size={18} style={{ color: 'var(--ds-t3)' }} />
-              <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>
-                Paste (⌘V), drop, or <span style={{ color: 'var(--ds-blue)', fontWeight: 600 }}>browse</span> — screenshot or PDF, up to 10 MB
+              <ImageUp size={18} style={{ color: 'var(--tms-muted)' }} />
+              <span style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>
+                Paste (⌘V), drop, or <span style={{ color: 'var(--tms-primary)', fontWeight: 600 }}>browse</span> — screenshot or PDF, up to 10 MB
               </span>
               <input
                 ref={fileRef}
@@ -332,20 +332,20 @@ export function StatusUpdateModal({
                   key={`${p.file.name}-${i}`}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
-                    borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
+                    borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
                   }}
                 >
                   {p.file.type.startsWith('image/')
                     ? <img src={p.previewUrl} alt={p.file.name} style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6 }} />
-                    : <Paperclip size={16} style={{ color: 'var(--ds-t3)' }} />}
-                  <span style={{ fontSize: 12.5, color: 'var(--ds-t1)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    : <Paperclip size={16} style={{ color: 'var(--tms-muted)' }} />}
+                  <span style={{ fontSize: 12.5, color: 'var(--tms-text)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {p.file.name}
                   </span>
                   <button
                     type="button"
                     aria-label={`Remove ${p.file.name}`}
                     onClick={() => dropPending(i)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ds-red)', display: 'inline-flex', padding: 2 }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tms-badge-red)', display: 'inline-flex', padding: 2 }}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -360,7 +360,7 @@ export function StatusUpdateModal({
             </div>
           )}
           {removedKeys.length > 0 && (
-            <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>
+            <div style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>
               {removedKeys.length} attached file{removedKeys.length === 1 ? '' : 's'} will be removed when you save.
             </div>
           )}
@@ -369,7 +369,7 @@ export function StatusUpdateModal({
         {driverFiles.length > 0 && (
           <FormSection title={`Driver Evidence (${driverFiles.length})`}>
             <EvidenceGallery evidence={driverFiles} />
-            <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>
+            <div style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>
               Uploaded by the driver — kept exactly as filed when you save.
             </div>
           </FormSection>

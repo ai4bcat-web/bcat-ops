@@ -115,8 +115,8 @@ export function FleetMiniMap({ locations }: { locations: TruckLocation[] }) {
 
   const ctrlBtn: React.CSSProperties = {
     width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 6,
-    color: 'var(--ds-t2)', cursor: 'pointer', padding: 0,
+    background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 6,
+    color: 'var(--tms-text-2)', cursor: 'pointer', padding: 0,
   }
   const k = t.k
 
@@ -127,22 +127,22 @@ export function FleetMiniMap({ locations }: { locations: TruckLocation[] }) {
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`} width="100%"
           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerLeave={endDrag}
-          style={{ display: 'block', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
+          style={{ display: 'block', borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)',
             cursor: k > 1 ? (dragging ? 'grabbing' : 'grab') : 'default', touchAction: 'none' }}
           role="img" aria-label="Fleet map"
         >
           {statePaths.length === 0 ? (
-            <text x={W / 2} y={H / 2} textAnchor="middle" fontSize={13} fill="var(--ds-t3)">Loading map…</text>
+            <text x={W / 2} y={H / 2} textAnchor="middle" fontSize={13} fill="var(--tms-muted)">Loading map…</text>
           ) : (
             <g transform={`translate(${t.x} ${t.y}) scale(${k})`}>
               {statePaths.map((d, i) => (
-                <path key={i} d={d} fill="rgba(30,168,243,0.05)" stroke="rgba(30,168,243,0.30)" strokeWidth={0.6 / k} strokeLinejoin="round" />
+                <path key={i} d={d} style={{ fill: 'var(--tms-surface-hover)', stroke: 'var(--tms-border)' }} strokeWidth={0.6 / k} strokeLinejoin="round" />
               ))}
               {dots.map((d) => (
                 <g key={d.id} transform={`translate(${d.x} ${d.y})`}>
                   <title>{`#${d.unit}${d.moving ? ' · driving' : ' · stopped'}`}</title>
-                  <circle r={6.5 / k} fill={d.moving ? 'rgba(34,197,94,0.18)' : 'rgba(148,163,184,0.20)'} />
-                  <circle r={3.5 / k} fill={d.moving ? '#16a34a' : '#64748b'} stroke="#fff" strokeWidth={1 / k} />
+                  <circle r={6.5 / k} style={{ fill: d.moving ? 'var(--tms-primary-tint)' : 'var(--tms-surface-hover)' }} />
+                  <circle r={3.5 / k} style={{ fill: d.moving ? 'var(--tms-primary)' : 'var(--tms-muted)', stroke: 'var(--tms-card)' }} strokeWidth={1 / k} />
                 </g>
               ))}
             </g>
@@ -159,9 +159,9 @@ export function FleetMiniMap({ locations }: { locations: TruckLocation[] }) {
         )}
       </div>
       {projection && dots.length === 0 ? (
-        <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', textAlign: 'center', marginTop: 6 }}>No GPS coordinates yet</div>
+        <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', textAlign: 'center', marginTop: 6 }}>No GPS coordinates yet</div>
       ) : statePaths.length > 0 && (
-        <div style={{ fontSize: 11, color: 'var(--ds-t3)', textAlign: 'center', marginTop: 6 }}>Scroll to zoom · drag to pan</div>
+        <div style={{ fontSize: 11, color: 'var(--tms-muted)', textAlign: 'center', marginTop: 6 }}>Scroll to zoom · drag to pan</div>
       )}
     </div>
   )

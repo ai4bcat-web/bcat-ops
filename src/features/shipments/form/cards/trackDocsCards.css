@@ -1,0 +1,47 @@
+/*
+ * Step AR cards 8-9: Tracking and Documents. Tokens only; every rule is scoped under .tms-shell.
+ */
+
+.tms-shell .tms-card-cap { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tms-muted); }
+.tms-shell .tms-card-visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+
+/* Tracking facts ---------------------------------------------------- */
+.tms-shell .tms-card-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 16px; min-width: 0;
+}
+.tms-shell .tms-card-fact { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tms-shell .tms-card-fact-value { font-size: 13px; color: var(--tms-text); overflow-wrap: anywhere; }
+
+/* Documents --------------------------------------------------------- */
+.tms-shell .tms-card-docs-top { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; }
+.tms-shell .tms-card-generate { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tms-shell .tms-card-docs-old { display: inline-flex; align-items: center; gap: 6px; }
+.tms-shell .tms-card-docs-stale { color: var(--tms-badge-orange); font-size: 12px; }
+.tms-shell .tms-card-dropzone {
+  position: relative; flex: 1 1 240px; min-width: 0;
+  display: flex; align-items: center; gap: 8px; padding: 12px;
+  border: 1px dashed var(--tms-input-border); border-radius: var(--tms-radius-sm);
+  background: var(--tms-surface-subtle); color: var(--tms-muted); font-size: 12px;
+}
+.tms-shell .tms-card-dropzone[data-over] { border-color: var(--tms-primary); background: var(--tms-primary-tint); }
+.tms-shell .tms-card-docs-problem { font-size: 12px; margin: 0; color: var(--tms-badge-red); }
+.tms-shell .tms-card-docs-table { width: 100%; text-align: left; font-size: 12px; border-collapse: collapse; }
+.tms-shell .tms-card-docs-table th {
+  font-size: 11px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tms-muted);
+  padding: 4px 8px 4px 0;
+}
+.tms-shell .tms-card-docs-table td { padding: 4px 8px 4px 0; border-top: 1px solid var(--tms-border); overflow-wrap: anywhere; }
+.tms-shell .tms-card-docs-actions { display: flex; gap: 4px; align-items: center; }
+.tms-shell .tms-card-docs-checklist {
+  list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px;
+}
+.tms-shell .tms-card-docs-checklist li { display: inline-flex; align-items: center; gap: 4px; color: var(--tms-muted); }
+.tms-shell .tms-card-docs-checklist li[data-met='true'] { color: var(--tms-text); }
+
+/* Carrier & Tracking (feedback 9): the tracking half under the carrier block, the mode control, the amber chip. */
+.tms-shell .tms-trk-half { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--tms-border); }
+.tms-shell .tms-trk-half-head { display: flex; align-items: center; gap: 8px; }
+.tms-shell .tms-trk-half-title { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tms-muted); }
+.tms-shell .tms-trk-greyed { opacity: 0.6; }

@@ -108,8 +108,11 @@ describe('appt-need-notifier', () => {
     // not_in_channel is the realistic one: the bot has a valid token but was never
     // invited to #appts-ivan.
     fetchMock.mockResolvedValue({ json: async () => ({ ok: false, error: 'not_in_channel' }) })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const res = await handler(event())
     expect(res).toEqual({ ok: false, error: 'not_in_channel' })
+    expect(errorSpy).toHaveBeenCalledWith('[appt-need-notifier] chat.postMessage failed', 'not_in_channel')
+    errorSpy.mockRestore()
   })
 
   it('skips quietly when the channel is not configured', async () => {
@@ -117,11 +120,14 @@ describe('appt-need-notifier', () => {
     // into the save path — it should no-op and say so.
     const saved = process.env.APPTS_IVAN_CHANNEL_ID
     process.env.APPTS_IVAN_CHANNEL_ID = ''
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const res = await handler(event())
       expect(res).toEqual({ ok: false, error: 'not configured' })
       expect(fetchMock).not.toHaveBeenCalled()
+      expect(warn).toHaveBeenCalledWith('[appt-need-notifier] Slack not configured (token/channel) — skipping post')
     } finally {
+      warn.mockRestore()
       process.env.APPTS_IVAN_CHANNEL_ID = saved
     }
   })
@@ -129,11 +135,14 @@ describe('appt-need-notifier', () => {
   it('skips quietly when the bot token is missing', async () => {
     const saved = process.env.SLACK_BOT_TOKEN
     process.env.SLACK_BOT_TOKEN = ''
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const res = await handler(event())
       expect(res).toEqual({ ok: false, error: 'not configured' })
       expect(fetchMock).not.toHaveBeenCalled()
+      expect(warn).toHaveBeenCalledWith('[appt-need-notifier] Slack not configured (token/channel) — skipping post')
     } finally {
+      warn.mockRestore()
       process.env.SLACK_BOT_TOKEN = saved
     }
   })

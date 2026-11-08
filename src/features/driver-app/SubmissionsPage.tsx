@@ -97,11 +97,11 @@ function DocTile({
         <img
           src={url}
           alt={label}
-          className="h-20 w-20 rounded-md border border-slate-200 object-cover"
+          className="h-20 w-20 rounded-md border border-border object-cover"
         />
         {/* Still a photo only while the merge runs; say it stands for the whole set. */}
         {doc.pageCount > 1 && (
-          <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px] font-semibold text-white">
+          <span className="absolute bottom-1 right-1 rounded bg-[color:var(--tms-overlay)] px-1 text-[10px] font-semibold text-[color:var(--tms-on-primary)]">
             {pages}
           </span>
         )}
@@ -112,12 +112,12 @@ function DocTile({
   const Icon = isImage ? ImageIcon : FileText
   const body = (
     <>
-      <Icon className="h-6 w-6 text-slate-500" aria-hidden="true" />
-      <span className="text-xs font-semibold text-slate-700">{label}</span>
-      <span className="text-[11px] text-slate-500">{pages}</span>
+      <Icon className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+      <span className="text-xs font-semibold text-foreground">{label}</span>
+      <span className="text-[11px] text-muted-foreground">{pages}</span>
     </>
   )
-  const box = 'flex h-20 w-20 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border border-slate-200 bg-slate-50'
+  const box = 'flex h-20 w-20 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border border-border bg-muted'
   return url ? (
     <a href={url} target="_blank" rel="noreferrer" aria-label={`Open ${label}, ${pages}`} className={box}>
       {body}
@@ -134,20 +134,20 @@ function SubmissionCard({ submission }: { submission: SubmissionSummary }) {
   return (
     <div
       data-testid="submission-card"
-      className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+      className="rounded-xl border border-border bg-card p-4 shadow-sm"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p data-testid="submission-title" className="truncate font-semibold text-slate-900">
+          <p data-testid="submission-title" className="truncate font-semibold text-foreground">
             {submission.referenceNumber || `Submission ${submission.id.slice(-6)}`}
           </p>
-          <p className="mt-1 text-xs text-slate-500">{formatDate(submission.createdAt)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{formatDate(submission.createdAt)}</p>
         </div>
         <Badge variant={statusVariant(submission.status)}>{submission.status}</Badge>
       </div>
 
       {submission.note && (
-        <p className="mt-2 line-clamp-2 text-sm text-slate-600">{submission.note}</p>
+        <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{submission.note}</p>
       )}
 
       {documentsOf(submission).length > 0 && (
@@ -216,7 +216,7 @@ export default function SubmissionsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-background/95 px-4 py-4 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b border-border bg-background/95 px-4 py-4 backdrop-blur">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold">My submissions</h1>
           <div className="flex items-center gap-2">
@@ -250,13 +250,13 @@ export default function SubmissionsPage() {
 
         {loading && (
           <div className="flex flex-col items-center justify-center py-16">
-            <Loader2 className="h-8 w-8 animate-spin text-slate-500" aria-hidden="true" />
-            <p className="mt-3 text-sm text-slate-500">Loading submissions…</p>
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-hidden="true" />
+            <p className="mt-3 text-sm text-muted-foreground">Loading submissions…</p>
           </div>
         )}
 
         {!loading && error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+          <div className="rounded-xl border border-[color:var(--tms-badge-red)]/30 bg-[color:var(--tms-badge-red-tint)] p-4 text-[color:var(--tms-badge-red)]">
             <div className="flex items-start gap-3">
               <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
               <div>
@@ -276,9 +276,9 @@ export default function SubmissionsPage() {
 
         {!loading && !error && submissions?.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <Package className="h-12 w-12 text-slate-300" aria-hidden="true" />
-            <p className="mt-4 text-base font-medium text-slate-700">No submissions yet</p>
-            <p className="mt-1 px-6 text-sm text-slate-500">
+            <Package className="h-12 w-12 text-[color:var(--tms-disabled)]" aria-hidden="true" />
+            <p className="mt-4 text-base font-medium text-foreground">No submissions yet</p>
+            <p className="mt-1 px-6 text-sm text-muted-foreground">
               Scan a rate confirmation and it will show up here.
             </p>
             <Button className="mt-6" onClick={() => navigate('/driver/scan?kind=ratecon')}>

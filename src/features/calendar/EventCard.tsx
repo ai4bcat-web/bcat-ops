@@ -33,9 +33,9 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
   const pickupDriverName   = pickupDriver?.name  ?? 'Unassigned'
   const deliveryDriverName = deliveryDriver?.name ?? 'Unassigned'
 
-  const borderColor = isConflict ? '#ef4444' : isRTI ? '#15803d' : color.border
-  const bgColor     = isConflict ? 'rgba(239,68,68,0.08)' : isRTI ? '#22c55e' : color.bg
-  const textColor   = isRTI ? '#fff' : color.text
+  const borderColor = isConflict ? 'var(--tms-badge-red)' : isRTI ? 'var(--tms-primary-ink)' : color.border
+  const bgColor     = isConflict ? 'var(--tms-badge-red-tint)' : isRTI ? 'var(--tms-primary)' : color.bg
+  const textColor   = isRTI ? 'var(--tms-on-primary)' : color.text
 
   const puTime = stopMode
     ? formatApptTime(stop!.appt, stop!.apptType, stop!.apptEnd)
@@ -50,7 +50,7 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
         isConflict && 'animate-pulse-once',
       )}
       style={{
-        borderColor:     isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? '#15803d' : '#111827',
+        borderColor:     isConflict ? 'color-mix(in srgb, var(--tms-badge-red) 30%, transparent)' : isRTI ? 'var(--tms-primary-ink)' : 'var(--tms-text)',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
         ...(isSplit ? { borderRightColor: deliveryColor.border, borderRightWidth: 3 } : {}),
@@ -71,7 +71,7 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
               </span>
             ) : (
               <button
-                className="text-[11px] font-semibold italic truncate text-amber-600 underline underline-offset-2 hover:text-amber-700"
+                className="text-[11px] font-semibold italic truncate text-[color:var(--tms-badge-orange)] underline underline-offset-2 hover:text-[color:var(--tms-badge-orange)]"
                 onClick={(e) => { e.stopPropagation(); onEdit() }}
               >
                 Need to build
@@ -80,7 +80,7 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
           </div>
           <span
             className="text-[9px] font-black shrink-0 rounded-full flex items-center justify-center leading-none"
-            style={{ background: borderColor, color: '#fff', minWidth: '14px', minHeight: '14px', padding: '0 2px' }}
+            style={{ background: borderColor, color: 'var(--tms-on-primary)', minWidth: '14px', minHeight: '14px', padding: '0 2px' }}
           >
             {orderNumber}
           </span>
@@ -88,9 +88,9 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
 
         {/* Row 2: TMS ID → PU# */}
         <div className="flex items-center gap-0.5 min-w-0">
-          <span className="text-[10px] font-mono truncate" style={{ color: '#6b7280' }}>{load.tmsId}</span>
-          <ArrowRight className="size-2 shrink-0" style={{ color: '#9ca3af' }} />
-          <span className="text-[10px] font-mono truncate" style={{ color: '#6b7280' }}>{load.pickupNumber}</span>
+          <span className="text-[10px] font-mono truncate" style={{ color: 'var(--tms-muted)' }}>{load.tmsId}</span>
+          <ArrowRight className="size-2 shrink-0" style={{ color: 'var(--tms-disabled)' }} />
+          <span className="text-[10px] font-mono truncate" style={{ color: 'var(--tms-muted)' }}>{load.pickupNumber}</span>
         </div>
 
         {stopMode ? (
@@ -98,10 +98,10 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
           (stop!.name || stop!.city) && (
             <div className="flex items-center gap-0.5 min-w-0"
               title={[stop!.name, stop!.city].filter(Boolean).join(' · ')}>
-              {stop!.type === 'delivery' && <ArrowRight className="size-2 shrink-0" style={{ color: '#2563eb' }} />}
-              <span className="text-[10px] leading-tight truncate" style={{ color: '#374151' }}>
+              {stop!.type === 'delivery' && <ArrowRight className="size-2 shrink-0" style={{ color: 'var(--tms-badge-blue)' }} />}
+              <span className="text-[10px] leading-tight truncate" style={{ color: 'var(--tms-text-2)' }}>
                 {stop!.name}
-                {stop!.city && <span style={{ color: '#6b7280' }}> · {stop!.city}</span>}
+                {stop!.city && <span style={{ color: 'var(--tms-muted)' }}> · {stop!.city}</span>}
               </span>
             </div>
           )
@@ -109,10 +109,10 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
           <>
             {/* Origin */}
             {(load.originName || load.originCity) && (
-              <div className="text-[10px] leading-tight truncate" style={{ color: '#374151' }}
+              <div className="text-[10px] leading-tight truncate" style={{ color: 'var(--tms-text-2)' }}
                 title={[load.originName, load.originCity].filter(Boolean).join(' · ')}>
                 {load.originName}
-                {load.originCity && <span style={{ color: '#6b7280' }}> · {load.originCity}</span>}
+                {load.originCity && <span style={{ color: 'var(--tms-muted)' }}> · {load.originCity}</span>}
               </div>
             )}
 
@@ -120,10 +120,10 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
             {(load.destinationName || load.destinationCity) && (
               <div className="flex items-center gap-0.5 min-w-0"
                 title={[load.destinationName, load.destinationCity].filter(Boolean).join(' · ')}>
-                <ArrowRight className="size-2 shrink-0" style={{ color: '#2563eb' }} />
-                <span className="text-[10px] leading-tight truncate" style={{ color: '#374151' }}>
+                <ArrowRight className="size-2 shrink-0" style={{ color: 'var(--tms-badge-blue)' }} />
+                <span className="text-[10px] leading-tight truncate" style={{ color: 'var(--tms-text-2)' }}>
                   {load.destinationName}
-                  {load.destinationCity && <span style={{ color: '#6b7280' }}> · {load.destinationCity}</span>}
+                  {load.destinationCity && <span style={{ color: 'var(--tms-muted)' }}> · {load.destinationCity}</span>}
                 </span>
               </div>
             )}
@@ -134,10 +134,10 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
 
         {/* Bottom row: time (left) · RTI icon + driver avatar + name (right) */}
         <div className="flex items-center justify-between gap-1 min-w-0">
-          <span className="text-[10px] shrink-0 tabular-nums" style={{ color: '#6b7280' }}>{puTime}</span>
+          <span className="text-[10px] shrink-0 tabular-nums" style={{ color: 'var(--tms-muted)' }}>{puTime}</span>
           <div className="flex items-center gap-1 min-w-0 overflow-hidden"
             title={isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}>
-            {isRTI && <CheckCircle2 className="size-3 shrink-0" style={{ color: '#fff' }} />}
+            {isRTI && <CheckCircle2 className="size-3 shrink-0" style={{ color: 'var(--tms-on-primary)' }} />}
             {primaryDriverId ? (
               <>
                 <Avatar
@@ -145,7 +145,7 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
                   initials={(pickupDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
                   size="xs"
                   className="shrink-0"
-                  style={{ background: borderColor, color: '#ffffff' }}
+                  style={{ background: borderColor, color: 'var(--tms-on-primary)' }}
                 />
                 {isSplit && deliveryDriver && (
                   <Avatar
@@ -153,12 +153,12 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
                     initials={(deliveryDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
                     size="xs"
                     className="shrink-0 -ml-1"
-                    style={{ background: deliveryColor.border, color: '#ffffff' }}
+                    style={{ background: deliveryColor.border, color: 'var(--tms-on-primary)' }}
                   />
                 )}
               </>
             ) : (
-              <span className="text-[10px] font-medium text-amber-500 shrink-0">Unassigned</span>
+              <span className="text-[10px] font-medium text-[color:var(--tms-badge-orange)] shrink-0">Unassigned</span>
             )}
           </div>
         </div>
@@ -166,8 +166,8 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
 
       {/* Top-right: conflict + multi-day badges */}
       <div className="absolute top-1 right-1 flex items-center gap-0.5 pointer-events-none">
-        {isConflict && <AlertTriangle className="size-3 text-red-500" />}
-        {isMultiDay  && <Clock className="size-3" style={{ color: '#9ca3af' }} />}
+        {isConflict && <AlertTriangle className="size-3 text-[color:var(--tms-badge-red)]" />}
+        {isMultiDay  && <Clock className="size-3" style={{ color: 'var(--tms-disabled)' }} />}
       </div>
     </div>
   )
@@ -192,7 +192,7 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
         <div className="h-full w-full relative">{card}</div>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="max-w-[300px] text-xs space-y-1.5 p-3">
-        <div className="font-bold text-sm text-white">{load.aljexId}</div>
+        <div className="font-bold text-sm text-[color:var(--tms-on-primary)]">{load.aljexId}</div>
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
           <span className="text-muted-foreground">TMS / PO</span><span>{load.tmsId}</span>
           <span className="text-muted-foreground">PU #</span><span>{load.pickupNumber}</span>
@@ -209,7 +209,7 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
           <span className="text-muted-foreground">PU Driver</span><span>{pickupDriverName}</span>
           {isSplit && <><span className="text-muted-foreground">DE Driver</span><span>{deliveryDriverName}</span></>}
           <span className="text-muted-foreground">RTI</span>
-          <span className={isRTI ? 'text-emerald-400 font-medium' : 'text-muted-foreground'}>
+          <span className={isRTI ? 'text-[color:var(--tms-badge-green)] font-medium' : 'text-muted-foreground'}>
             {isRTI ? 'Ready to Invoice' : 'Pending'}
           </span>
         </div>

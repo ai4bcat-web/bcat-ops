@@ -11,15 +11,15 @@ function time(iso: string | null | undefined): string {
  * done, a pulsing one for the stop they are at, the truck marker between stops by
  * position, and a caption with the percent, miles to go and the next ETA.
  */
-export function RouteStrip({ progress, title, dark = false }: { progress: RouteProgress; title?: string; dark?: boolean }) {
+export function RouteStrip({ progress, title }: { progress: RouteProgress; title?: string }) {
   const n = progress.stops.length
   const legs = Math.max(1, n - 1)
   const pct = Math.max(0, Math.min(100, progress.percent))
   const truckLeft = n === 1 ? 50 : (progress.position / legs) * 100
   const next = progress.nextIndex != null ? progress.stops[progress.nextIndex] : null
-  const line = dark ? 'rgba(255,255,255,0.18)' : 'var(--ds-bg-3)'
-  const fill = dark ? '#1ea8f3' : 'var(--ds-blue)'
-  const muted = dark ? '#aab7cb' : 'var(--ds-t3)'
+  const line = 'var(--tms-surface-hover)'
+  const fill = 'var(--tms-primary)'
+  const muted = 'var(--tms-muted)'
   const eta = progress.etaAt ? time(progress.etaAt) : null
   const captionText = progress.complete
     ? 'Route complete'
@@ -38,15 +38,15 @@ export function RouteStrip({ progress, title, dark = false }: { progress: RouteP
           return (
             <div key={s.id} title={`${i + 1}. ${s.type === 'delivery' ? 'Deliver' : 'Pick up'} ${s.label}${s.city ? ` · ${s.city}` : ''}${s.appt ? ` · ${time(s.appt)}` : ''}`}
               style={{ position: 'absolute', left: `${left}%`, top: 22, transform: 'translateX(-50%)', width: 20, height: 20, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, boxSizing: 'border-box',
-                background: done || here ? fill : (dark ? '#141f36' : 'var(--ds-surface)'), color: done || here ? '#fff' : muted, border: `2px solid ${done || here ? fill : muted}`,
-                boxShadow: here ? `0 0 0 4px ${dark ? 'rgba(30,168,243,0.3)' : 'var(--ds-blue-soft)'}` : 'none', textDecoration: 'none' }}>
+                background: done || here ? fill : 'var(--tms-card)', color: done || here ? 'var(--tms-card)' : muted, border: `2px solid ${done || here ? fill : muted}`,
+                boxShadow: here ? `0 0 0 4px var(--tms-primary-tint)` : 'none', textDecoration: 'none' }}>
               {i + 1}
             </div>
           )
         })}
         {!progress.complete ? (
           <div aria-label="Truck position" style={{ position: 'absolute', left: `${truckLeft}%`, top: 0, transform: 'translateX(-50%)', display: 'grid', justifyItems: 'center', transition: 'left .3s' }}>
-            <div style={{ width: 24, height: 24, borderRadius: 12, background: dark ? '#141f36' : 'var(--ds-surface)', border: `2px solid ${fill}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--sh-sm)' }}>
+            <div style={{ width: 24, height: 24, borderRadius: 12, background: 'var(--tms-card)', border: `2px solid ${fill}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--tms-shadow)' }}>
               <Truck className="size-3.5" style={{ color: fill }} />
             </div>
           </div>

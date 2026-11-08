@@ -1,7 +1,13 @@
 import { useMemo } from 'react'
-import { Link } from 'react-router-dom'
-import { Truck, Container, FileText, Wrench, CalendarOff, ChevronRight } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Truck, Container, FileText, Wrench, ChevronRight } from 'lucide-react'
+import { TmsBadge } from '@/features/tms/kit/TmsBadge'
+import type { TmsTone } from '@/features/tms/kit/TmsBadge'
+import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
+import { TmsStatRow } from '@/features/tms/kit/TmsStatRow'
 import { useAppStore } from '@/store/useAppStore'
+import { fleetCounts } from '@/lib/fleetActive'
 import { useAuth } from '@/hooks/useAuth'
 import { useDriverAvailability } from '@/hooks/useDriverAvailability'
 import type { TimeOffType } from '@/lib/timeOff'
@@ -18,11 +24,11 @@ import { DotDueWidget } from './DotDueWidget'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 
 // ── Time-off labels ─────────────────────────────────────────────────────────────
-const TIME_OFF_META: Record<TimeOffType, { label: string; bg: string; fg: string }> = {
-  FULL_DAY_OFF: { label: 'Day Off',     bg: '#fef2f2', fg: '#b91c1c' },
-  PTO:          { label: 'PTO',         bg: '#f0fdf4', fg: '#15803d' },
-  EARLY_START:  { label: 'In Early By', bg: '#fffbeb', fg: '#b45309' },
-  LATE_START:   { label: 'Late Start',  bg: '#eff6ff', fg: '#1d4ed8' },
+const TIME_OFF_META: Record<TimeOffType, { label: string; tone: TmsTone }> = {
+  FULL_DAY_OFF: { label: 'Day Off',     tone: 'red' },
+  PTO:          { label: 'PTO',         tone: 'green' },
+  EARLY_START:  { label: 'In Early By', tone: 'orange' },
+  LATE_START:   { label: 'Late Start',  tone: 'blue' },
 }
 
 const todayStr = () => {
@@ -36,35 +42,16 @@ function prettyRange(startDate: string, endDate: string): string {
   return startDate === endDate ? fmt(startDate) : `${fmt(startDate)} – ${fmt(endDate)}`
 }
 
-// ── Local primitives ────────────────────────────────────────────────────────────
-function StatCard({ label, value, color, icon, to }: {
-  label: string; value: string | number; color: string; icon: React.ReactNode; to?: string
-}) {
-  const inner = (
-    <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ width: 26, height: 26, borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${color}1a`, color }}>{icon}</span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{label}</span>
-      </div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--ds-t1)', marginTop: 8, fontFamily: 'var(--font-mono)' }}>{value}</div>
-    </>
-  )
-  const style: React.CSSProperties = {
-    background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12,
-    boxShadow: 'var(--sh-sm)', padding: '14px 16px', textDecoration: 'none', display: 'block',
-  }
-  return to ? <Link to={to} style={style}>{inner}</Link> : <div style={style}>{inner}</div>
-}
 
 function Card({ title, sub, right, children, noPad = false }: {
   title: string; sub?: string; right?: React.ReactNode; children: React.ReactNode; noPad?: boolean
 }) {
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>{title}</div>
-          {sub && <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>{sub}</div>}
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>{title}</div>
+          {sub && <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 2 }}>{sub}</div>}
         </div>
         {right && <div style={{ flexShrink: 0 }}>{right}</div>}
       </div>
@@ -94,27 +81,24 @@ function TimeOffSummary() {
     <Card
       title="Time Off"
       sub={loading ? 'Loading…' : `${upcoming.length} upcoming`}
-      right={canTimeOff ? <Link to="/time-off" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2 }}>Calendar <ChevronRight size={13} /></Link> : null}
+      right={canTimeOff ? <Link to="/time-off" style={{ fontSize: 12, color: 'var(--tms-primary)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2 }}>Calendar <ChevronRight size={13} /></Link> : null}
       noPad
     >
       {upcoming.length === 0 ? (
-        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-          <CalendarOff size={22} style={{ opacity: 0.35 }} />
-          {loading ? 'Loading…' : 'No upcoming time off'}
-        </div>
+        <TmsEmptyState compact title={loading ? 'Loading…' : 'No upcoming time off'} message={null} />
       ) : (
         <div>
           {upcoming.map((a) => {
             const meta = TIME_OFF_META[a.type]
             return (
-              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--ds-border)' }}>
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--tms-border)' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {driverName.get(a.driverId) ?? 'Unknown driver'}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>{prettyRange(a.startDate, a.endDate)}</div>
+                  <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>{prettyRange(a.startDate, a.endDate)}</div>
                 </div>
-                <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, background: meta.bg, color: meta.fg }}>{meta.label}</span>
+                <TmsBadge tone={meta.tone} style={{ flexShrink: 0 }}>{meta.label}</TmsBadge>
               </div>
             )
           })}
@@ -131,37 +115,37 @@ export function FleetManagerDashboardPage() {
   const canTruckDocs = hasPageAccess('truckDocs')
   const canMaintenance = hasPageAccess('maintenance')
   const isMobile = useIsMobile()
+  const navigate = useNavigate()
   const equipment = useAppStore((s) => s.equipment)
   const maintenanceTasks = useAppStore((s) => s.maintenanceTasks)
   const { expired, expiring } = useTruckDocAlerts()
 
   const stats = useMemo(() => {
-    const trucks = equipment.filter((e) => e.type === 'truck').length
-    const trailers = equipment.filter((e) => e.type === 'trailer').length
+    const { total, trucks, trailers } = fleetCounts(equipment)
     const openTasks = maintenanceTasks.filter((t) => t.status === 'upcoming').length
-    return { total: equipment.length, trucks, trailers, openTasks }
+    return { total, trucks, trailers, openTasks }
   }, [equipment, maintenanceTasks])
 
   const docsExpiring = expired + expiring
   const twoCol = isMobile ? '1fr' : '1fr 1fr'
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '16px 12px' : '24px 32px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {/* Header */}
-        <div>
-          <h1 style={{ fontSize: isMobile ? 20 : 24, fontWeight: 700, color: 'var(--ds-t1)', letterSpacing: '-0.01em' }}>Fleet Manager Dashboard</h1>
-          <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Fleet health, maintenance &amp; driver availability at a glance</p>
-        </div>
-
+    <TmsScrollPage
+      title="Fleet Manager Dashboard"
+      subtitle="Fleet health, maintenance & driver availability at a glance"
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {/* KPI strip */}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
-          <StatCard label="Total Units"   value={stats.total}     color="#1ea8f3" icon={<Truck size={14} />}     to={canTrucks ? '/trucks' : undefined} />
-          <StatCard label="Trucks"        value={stats.trucks}    color="#0369a1" icon={<Truck size={14} />}     to={canTrucks ? '/trucks' : undefined} />
-          <StatCard label="Trailers"      value={stats.trailers}  color="#a78bfa" icon={<Container size={14} />} to={canTrucks ? '/trucks' : undefined} />
-          <StatCard label="Docs Expiring" value={docsExpiring}    color="#ef4444" icon={<FileText size={14} />}  to={canTruckDocs ? '/truck-docs' : undefined} />
-          <StatCard label="Open Tasks"    value={stats.openTasks} color="#f59e0b" icon={<Wrench size={14} />}    to={canMaintenance ? '/maintenance' : undefined} />
-        </div>
+        <TmsStatRow
+          columns={5}
+          items={[
+            { label: 'Total Units',   value: String(stats.total),     icon: Truck,     onClick: canTrucks ? () => navigate('/trucks') : undefined },
+            { label: 'Trucks',        value: String(stats.trucks),    icon: Truck,     onClick: canTrucks ? () => navigate('/trucks') : undefined },
+            { label: 'Trailers',      value: String(stats.trailers),  icon: Container, onClick: canTrucks ? () => navigate('/trucks') : undefined },
+            { label: 'Docs Expiring', value: String(docsExpiring),    icon: FileText,  tone: docsExpiring > 0 ? 'bad' : 'default', onClick: canTruckDocs ? () => navigate('/truck-docs') : undefined },
+            { label: 'Open Tasks',    value: String(stats.openTasks), icon: Wrench,    tone: stats.openTasks > 0 ? 'warn' : 'default', onClick: canMaintenance ? () => navigate('/maintenance') : undefined },
+          ]}
+        />
 
         {/* DOT inspections due / overdue — trucks + trailers */}
         <DotDueWidget />
@@ -192,6 +176,6 @@ export function FleetManagerDashboardPage() {
       </div>
       {/* A PRO in the ELD widget opens the load, PODs and all. */}
       <LoadDrawer />
-    </div>
+    </TmsScrollPage>
   )
 }

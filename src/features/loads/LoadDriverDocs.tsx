@@ -21,7 +21,7 @@ import {
   removeDriverDocs,
   replaceDriverDocs,
   DRIVER_DOC_ACCEPT,
-  useDriverDocAsPod,
+  fileDriverDocAsPod,
 } from '@/lib/driverSubmissionsClient'
 import { queueDriverDocScan } from '@/lib/podsClient'
 import { useAuthUser } from '@/hooks/useAuth'
@@ -81,7 +81,7 @@ export function LoadDriverDocs({
     if (!window.confirm(`File "${doc.fileName?.trim() || 'this picture'}" as the POD for this load?`)) return
     setPromoting(doc.id)
     try {
-      await useDriverDocAsPod(doc.id, loadId, doc.driverId)
+      await fileDriverDocAsPod(doc.id, loadId, doc.driverId)
       toast.success('Filed as the POD')
       refresh()
     } catch (err) {
@@ -117,7 +117,7 @@ export function LoadDriverDocs({
 
   if (error) {
     return (
-      <p className="flex items-center gap-1.5 text-[11px] text-amber-700">
+      <p className="flex items-center gap-1.5 text-[11px] text-[color:var(--tms-badge-orange)]">
         <AlertTriangle className="size-3" /> {error}
       </p>
     )
@@ -158,8 +158,8 @@ export function LoadDriverDocs({
                           doc.cleaning
                             ? 'text-muted-foreground'
                             : doc.enhanced
-                              ? 'text-emerald-600'
-                              : 'text-amber-700'
+                              ? 'text-[color:var(--tms-badge-green)]'
+                              : 'text-[color:var(--tms-badge-orange)]'
                         }
                       >
                         {' '}· {note}

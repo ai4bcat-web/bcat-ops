@@ -19,25 +19,25 @@ const num0 = (n: number) => new Intl.NumberFormat('en-US', { maximumFractionDigi
 const pct0 = (n: number | null | undefined) => n == null ? '—' : `${Math.round(n * 100)}%`
 const signed = (n: number) => (n > 0 ? '+' : n < 0 ? '−' : '') + usd0(Math.abs(n))
 
-const TH: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '8px 10px', textAlign: 'right', whiteSpace: 'nowrap', borderBottom: '1px solid var(--ds-border)' }
-const TD: React.CSSProperties = { fontSize: 13, color: 'var(--ds-t1)', padding: '8px 10px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', borderBottom: '1px solid var(--ds-border)' }
+const TH: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '8px 10px', textAlign: 'right', whiteSpace: 'nowrap', borderBottom: '1px solid var(--tms-border)' }
+const TD: React.CSSProperties = { fontSize: 13, color: 'var(--tms-text)', padding: '8px 10px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', borderBottom: '1px solid var(--tms-border)' }
 const TDL: React.CSSProperties = { ...TD, textAlign: 'left', whiteSpace: 'normal' }
-const GOOD = '#15803d', BAD = '#dc2626'
-const tone = (n: number | null | undefined) => n == null ? 'var(--ds-t2)' : n > 0 ? GOOD : n < 0 ? BAD : 'var(--ds-t2)'
+const GOOD = 'var(--tms-badge-green)', BAD = 'var(--tms-badge-red)'
+const tone = (n: number | null | undefined) => n == null ? 'var(--tms-text-2)' : n > 0 ? GOOD : n < 0 ? BAD : 'var(--tms-text-2)'
 
 function Card({ title, icon, children, aside }: { title: string; icon?: React.ReactNode; children: React.ReactNode; aside?: React.ReactNode }) {
   return (
-    <section style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 18px', borderBottom: '1px solid var(--ds-border)', flexWrap: 'wrap' }}>
-        {icon && <span style={{ color: 'var(--ds-t3)', display: 'inline-flex' }}>{icon}</span>}
-        <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', margin: 0, flex: 1 }}>{title}</h2>
+    <section style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 18px', borderBottom: '1px solid var(--tms-border)', flexWrap: 'wrap' }}>
+        {icon && <span style={{ color: 'var(--tms-muted)', display: 'inline-flex' }}>{icon}</span>}
+        <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)', margin: 0, flex: 1 }}>{title}</h2>
         {aside}
       </div>
       {children}
     </section>
   )
 }
-const Note = ({ children }: { children: React.ReactNode }) => <p style={{ fontSize: 12, color: 'var(--ds-t3)', margin: 0, padding: '10px 18px', lineHeight: 1.5 }}>{children}</p>
+const Note = ({ children }: { children: React.ReactNode }) => <p style={{ fontSize: 12, color: 'var(--tms-muted)', margin: 0, padding: '10px 18px', lineHeight: 1.5 }}>{children}</p>
 const Wrap = ({ children }: { children: React.ReactNode }) => <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>{children}</table></div>
 
 export function ProfitReviewPage() {
@@ -88,18 +88,18 @@ export function ProfitReviewPage() {
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: pad, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 240 }}>
-            <Link to="/finances" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ds-t3)', textDecoration: 'none', marginBottom: 6 }}><ArrowLeft size={12} /> Finances</Link>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Profit Review — Ivan Local</h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 3 }}>Month over month: what moved profit, why, and what to change. Updates as loads, fuel, pay and invoices come in.</p>
+            <Link to="/finances" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--tms-muted)', textDecoration: 'none', marginBottom: 6 }}><ArrowLeft size={12} /> Finances</Link>
+            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--tms-text)', margin: 0 }}>Profit Review — Ivan Local</h1>
+            <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', marginTop: 3 }}>Month over month: what moved profit, why, and what to change. Updates as loads, fuel, pay and invoices come in.</p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Window
-              <select id="pr-window" value={monthsBack} onChange={(e) => setMonthsBack(Number(e.target.value))} style={{ marginLeft: 6, fontSize: 12, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t1)' }}>
+            <label style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Window
+              <select id="pr-window" value={monthsBack} onChange={(e) => setMonthsBack(Number(e.target.value))} style={{ marginLeft: 6, fontSize: 12, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text)' }}>
                 {[3, 6, 9, 12].map((n) => <option key={n} value={n}>{n} months</option>)}
               </select>
             </label>
-            <label style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Baseline
-              <select id="pr-baseline" value={baselineKey} onChange={(e) => setBaselineKey(e.target.value)} style={{ marginLeft: 6, fontSize: 12, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t1)' }}>
+            <label style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Baseline
+              <select id="pr-baseline" value={baselineKey} onChange={(e) => setBaselineKey(e.target.value)} style={{ marginLeft: 6, fontSize: 12, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text)' }}>
                 <option value="auto">Best month{autoBaseline ? ` (${autoBaseline.label})` : ''}</option>
                 {finished.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
               </select>
@@ -107,8 +107,8 @@ export function ProfitReviewPage() {
           </div>
         </div>
 
-        {error && <div style={{ padding: '10px 14px', borderRadius: 8, background: '#fef2f2', color: BAD, fontSize: 13 }}>{error}</div>}
-        {loading && months.every((m) => m.revenue === 0) && <div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>}
+        {error && <div style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--tms-badge-red-tint)', color: BAD, fontSize: 13 }}>{error}</div>}
+        {loading && months.every((m) => m.revenue === 0) && <div style={{ fontSize: 13, color: 'var(--tms-muted)' }}>Loading…</div>}
 
         {/* Headline tiles */}
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 12 }}>
@@ -122,13 +122,13 @@ export function ProfitReviewPage() {
           {found.length === 0 ? <Note>Nothing stands out against the baseline. Costs, rate per mile and driver pay are all inside their normal range.</Note> : (
             <ol style={{ margin: 0, padding: 0, listStyle: 'none' }}>
               {found.map((f, i) => (
-                <li key={f.title} style={{ display: 'grid', gridTemplateColumns: '36px 1fr auto', gap: 12, padding: '12px 18px', borderBottom: i < found.length - 1 ? '1px solid var(--ds-border)' : undefined, alignItems: 'start' }}>
-                  <span style={{ fontSize: 20, fontWeight: 700, color: f.severity === 'high' ? BAD : f.severity === 'medium' ? '#b45309' : 'var(--ds-t3)', lineHeight: 1.1 }}>{i + 1}</span>
+                <li key={f.title} style={{ display: 'grid', gridTemplateColumns: '36px 1fr auto', gap: 12, padding: '12px 18px', borderBottom: i < found.length - 1 ? '1px solid var(--tms-border)' : undefined, alignItems: 'start' }}>
+                  <span style={{ fontSize: 20, fontWeight: 700, color: f.severity === 'high' ? BAD : f.severity === 'medium' ? 'var(--tms-badge-orange)' : 'var(--tms-muted)', lineHeight: 1.1 }}>{i + 1}</span>
                   <div>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>{f.title}</div>
-                    <div style={{ fontSize: 12.5, color: 'var(--ds-t2)', marginTop: 3, lineHeight: 1.5 }}>{f.detail}</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--tms-text)' }}>{f.title}</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--tms-text-2)', marginTop: 3, lineHeight: 1.5 }}>{f.detail}</div>
                   </div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{usd0(f.impact)}<div style={{ fontSize: 10, fontWeight: 500, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>a month</div></div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{usd0(f.impact)}<div style={{ fontSize: 10, fontWeight: 500, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>a month</div></div>
                 </li>
               ))}
             </ol>
@@ -138,7 +138,7 @@ export function ProfitReviewPage() {
         {/* Monthly P&L */}
         <Card title="Monthly P&L" icon={<TrendingUp size={15} />}>
           <Wrap>
-            <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Line</th>{months.map((m) => <th key={m.key} style={{ ...TH, background: baseline?.key === m.key ? 'var(--ds-bg)' : undefined }}>{m.label}{m.daysElapsed < m.daysInMonth ? ' (to date)' : ''}{m.incomplete ? ' (incomplete data)' : ''}{baseline?.key === m.key ? ' · baseline' : ''}</th>)}</tr></thead>
+            <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Line</th>{months.map((m) => <th key={m.key} style={{ ...TH, background: baseline?.key === m.key ? 'var(--tms-bg)' : undefined }}>{m.label}{m.daysElapsed < m.daysInMonth ? ' (to date)' : ''}{m.incomplete ? ' (incomplete data)' : ''}{baseline?.key === m.key ? ' · baseline' : ''}</th>)}</tr></thead>
             <tbody>
               <LineRow label="Revenue" months={months} get={(m) => m.revenue} bold />
               <LineRow label="Fuel" months={months} get={(m) => m.fuel} />
@@ -221,15 +221,15 @@ export function ProfitReviewPage() {
               <MetricRow label="Fleet miles per gallon (Motive)" months={months} metrics={metrics} get={(x) => x.mpg} fmt={(n) => n.toFixed(1)} />
               {baseline && (
                 <>
-                  <tr><td style={TDL}>Price effect vs {baseline.label}</td>{months.map((m) => { const s = m.key === baseline.key ? null : fuelSplit(m, baseline); return <td key={m.key} style={{ ...TD, color: s ? tone(-s.priceEffect) : 'var(--ds-t3)' }}>{s ? signed(-s.priceEffect) : '—'}</td> })}</tr>
-                  <tr><td style={TDL}>Volume effect vs {baseline.label}</td>{months.map((m) => { const s = m.key === baseline.key ? null : fuelSplit(m, baseline); return <td key={m.key} style={{ ...TD, color: s ? tone(-s.volumeEffect) : 'var(--ds-t3)' }}>{s ? signed(-s.volumeEffect) : '—'}</td> })}</tr>
+                  <tr><td style={TDL}>Price effect vs {baseline.label}</td>{months.map((m) => { const s = m.key === baseline.key ? null : fuelSplit(m, baseline); return <td key={m.key} style={{ ...TD, color: s ? tone(-s.priceEffect) : 'var(--tms-muted)' }}>{s ? signed(-s.priceEffect) : '—'}</td> })}</tr>
+                  <tr><td style={TDL}>Volume effect vs {baseline.label}</td>{months.map((m) => { const s = m.key === baseline.key ? null : fuelSplit(m, baseline); return <td key={m.key} style={{ ...TD, color: s ? tone(-s.volumeEffect) : 'var(--tms-muted)' }}>{s ? signed(-s.volumeEffect) : '—'}</td> })}</tr>
                 </>
               )}
             </tbody>
           </Wrap>
           {ref && (
             <>
-              <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{ref.label} by group</div>
+              <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{ref.label} by group</div>
               <Wrap>
                 <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Group</th><th style={{ ...TH, textAlign: 'left' }}>Trucks</th><th style={TH}>Revenue</th><th style={TH}>Miles</th><th style={TH}>Rev / mi</th><th style={TH}>Fuel</th><th style={TH}>Fuel / mi</th><th style={TH}>MPG</th><th style={TH}>Cost / mi</th><th style={TH}>Profit / mi</th></tr></thead>
                 <tbody>
@@ -238,9 +238,9 @@ export function ProfitReviewPage() {
                     const eco = ts.filter((t) => t.motiveMiles > 0 && t.motiveGallons > 0)
                     const em = eco.reduce((s, t) => s + t.motiveMiles, 0), eg = eco.reduce((s, t) => s + t.motiveGallons, 0)
                     return (
-                      <tr key={g.key} style={{ background: g.key === 'FLEET' ? 'var(--ds-bg)' : undefined }}>
+                      <tr key={g.key} style={{ background: g.key === 'FLEET' ? 'var(--tms-bg)' : undefined }}>
                         <td style={{ ...TDL, fontWeight: 700 }}>{g.label}</td>
-                        <td style={{ ...TDL, color: 'var(--ds-t3)', fontFamily: 'monospace', fontSize: 12 }}>{g.units.map((u) => `#${u}`).join('  ')}</td>
+                        <td style={{ ...TDL, color: 'var(--tms-muted)', fontFamily: 'monospace', fontSize: 12 }}>{g.units.map((u) => `#${u}`).join('  ')}</td>
                         <td style={TD}>{usd0(g.revenue)}</td><td style={TD}>{num0(g.miles)}</td><td style={TD}>{usd2(g.revPerMile)}</td>
                         <td style={TD}>{usd0(g.fuel)}</td><td style={TD}>{usd2(g.fuelPerMile)}</td><td style={TD}>{eg > 0 ? (em / eg).toFixed(1) : '—'}</td>
                         <td style={TD}>{usd2(g.costPerMile)}</td><td style={{ ...TD, color: tone(g.profitPerMile), fontWeight: 600 }}>{usd2(g.profitPerMile)}</td>
@@ -249,13 +249,13 @@ export function ProfitReviewPage() {
                   })}
                 </tbody>
               </Wrap>
-              <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{ref.label} fuel economy by truck</div>
+              <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{ref.label} fuel economy by truck</div>
               <Wrap>
                 <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Truck</th><th style={TH}>Miles (odometer)</th><th style={TH}>Gallons burned (Motive)</th><th style={TH}>MPG (Motive)</th><th style={TH}>Gallons bought</th><th style={TH}>Fuel / mi</th></tr></thead>
                 <tbody>
                   {[...ref.trucks].sort((a, b) => (b.miles > 0 ? b.fuel / b.miles : -1) - (a.miles > 0 ? a.fuel / a.miles : -1)).map((t) => (
                     <tr key={t.unitNumber}>
-                      <td style={TDL}><span style={{ fontFamily: 'monospace', fontWeight: 700 }}>#{t.unitNumber}</span> <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{LOCAL_SUBGROUP_LABELS[t.bucket]}</span></td>
+                      <td style={TDL}><span style={{ fontFamily: 'monospace', fontWeight: 700 }}>#{t.unitNumber}</span> <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>{LOCAL_SUBGROUP_LABELS[t.bucket]}</span></td>
                       <td style={TD}>{num0(t.miles)}</td><td style={TD}>{t.motiveGallons > 0 ? num0(t.motiveGallons) : '—'}</td>
                       <td style={TD}>{t.motiveMiles > 0 && t.motiveGallons > 0 ? (t.motiveMiles / t.motiveGallons).toFixed(1) : '—'}</td>
                       <td style={TD}>{num0(t.gallons)}</td>
@@ -294,9 +294,9 @@ export function ProfitReviewPage() {
                   return (
                     <tr key={unit}>
                       <td style={{ ...TDL, fontFamily: 'monospace', fontWeight: 700 }}>#{unit}</td>
-                      {months.map((m) => { const v = m.unitMaintenance.find((u) => u.unitNumber === unit)?.amount ?? 0; return <td key={m.key} style={{ ...TD, color: v === 0 ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>{v === 0 ? '—' : usd0(v)}</td> })}
+                      {months.map((m) => { const v = m.unitMaintenance.find((u) => u.unitNumber === unit)?.amount ?? 0; return <td key={m.key} style={{ ...TD, color: v === 0 ? 'var(--tms-muted)' : 'var(--tms-text)' }}>{v === 0 ? '—' : usd0(v)}</td> })}
                       <td style={{ ...TD, fontWeight: 700 }}>{usd0(total)}</td>
-                      <td style={{ ...TDL, fontSize: 12, color: 'var(--ds-t2)' }}>{big ? `${big.description} · ${usd0(big.amount)}` : '—'}</td>
+                      <td style={{ ...TDL, fontSize: 12, color: 'var(--tms-text-2)' }}>{big ? `${big.description} · ${usd0(big.amount)}` : '—'}</td>
                     </tr>
                   )
                 })
@@ -320,7 +320,7 @@ export function ProfitReviewPage() {
           </Wrap>
           {ref && (
             <>
-              <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{ref.label} by customer</div>
+              <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{ref.label} by customer</div>
               <Wrap>
                 <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Customer</th><th style={TH}>Loads</th><th style={TH}>Revenue</th><th style={TH}>Booked miles</th><th style={TH}>Rev / mi</th><th style={TH}>vs break-even {usd2(refM?.costPerMile)}/mi</th></tr></thead>
                 <tbody>
@@ -360,28 +360,28 @@ export function ProfitReviewPage() {
                   ] as const).map(([label, fmt]) => (
                     <tr key={label}>
                       <td style={TDL}>{label}</td>
-                      {months.map((m) => { const t = deadhead.byMonth.get(m.key); return <td key={m.key} style={{ ...TD, color: t ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{t ? fmt(t) : '—'}</td> })}
+                      {months.map((m) => { const t = deadhead.byMonth.get(m.key); return <td key={m.key} style={{ ...TD, color: t ? 'var(--tms-text)' : 'var(--tms-muted)' }}>{t ? fmt(t) : '—'}</td> })}
                       <td style={{ ...TD, fontWeight: 700 }}>{fmt(deadhead.all)}</td>
                     </tr>
                   ))}
                 </tbody>
               </Wrap>
-              <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>By driver</div>
+              <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>By driver</div>
               <Wrap>
                 <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Driver</th><th style={TH}>Days</th><th style={TH}>Loaded</th><th style={TH}>Empty</th><th style={TH}>Empty share</th><th style={TH}>Missing readings</th></tr></thead>
                 <tbody>
                   {deadhead.byDriver.map((d) => (
                     <tr key={d.driverId}>
                       <td style={TDL}>{d.driverName}</td><td style={TD}>{d.days}</td><td style={TD}>{num0(d.loadedMiles)}</td><td style={TD}>{num0(d.emptyMiles)}</td>
-                      <td style={{ ...TD, color: d.emptyShare != null && d.emptyShare > 0.4 ? BAD : 'var(--ds-t1)' }}>{pct0(d.emptyShare)}</td>
-                      <td style={{ ...TD, color: d.unknownLegs ? '#b45309' : 'var(--ds-t3)' }}>{d.unknownLegs || '—'}</td>
+                      <td style={{ ...TD, color: d.emptyShare != null && d.emptyShare > 0.4 ? BAD : 'var(--tms-text)' }}>{pct0(d.emptyShare)}</td>
+                      <td style={{ ...TD, color: d.unknownLegs ? 'var(--tms-badge-orange)' : 'var(--tms-muted)' }}>{d.unknownLegs || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
               </Wrap>
               {deadhead.byCustomer.length > 0 && (
                 <>
-                  <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Empty miles by the customer the truck was heading to</div>
+                  <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Empty miles by the customer the truck was heading to</div>
                   <Wrap>
                     <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Customer</th><th style={TH}>Empty legs</th><th style={TH}>Empty miles</th><th style={TH}>Cost at variable rate</th></tr></thead>
                     <tbody>
@@ -399,7 +399,7 @@ export function ProfitReviewPage() {
 
         {/* Projections */}
         <Card title="Profit at different rates per mile" icon={<Calculator size={15} />}>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: 12, padding: '14px 18px', borderBottom: '1px solid var(--ds-border)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: 12, padding: '14px 18px', borderBottom: '1px solid var(--tms-border)' }}>
             <Field id="pr-miles" label="Miles a month" value={proj.miles} onChange={setPMiles} step={500} hint={ref ? `${ref.label}: ${num0(ref.miles)}` : ''} />
             <Field id="pr-fixed" label="Fixed costs a month (insurance + fixed lines)" value={proj.fixedCost} onChange={setPFixed} step={100} prefix="$" hint={ref ? `${ref.label}: ${usd0(ref.insurance + ref.fixed)}` : ''} />
             <Field id="pr-var" label="Variable cost per mile (fuel + pay + maintenance)" value={proj.variableCostPerMile} onChange={setPVar} step={0.05} prefix="$" decimals={2} hint={refM?.variableCostPerMile != null ? `${ref!.label}: ${usd2(refM.variableCostPerMile)}` : ''} />
@@ -411,7 +411,7 @@ export function ProfitReviewPage() {
                 const isBE = breakEven != null && Math.abs(r.ratePerMile - breakEven) < 0.005
                 const isNow = refM?.revPerMile != null && Math.abs(r.ratePerMile - refM.revPerMile) < 0.005
                 return (
-                  <tr key={r.ratePerMile} style={{ background: isBE || isNow ? 'var(--ds-bg)' : undefined }}>
+                  <tr key={r.ratePerMile} style={{ background: isBE || isNow ? 'var(--tms-bg)' : undefined }}>
                     <td style={{ ...TDL, fontWeight: 600 }}>{usd2(r.ratePerMile)}{isBE && <Tag text="break-even" />}{isNow && ref && <Tag text={`${ref.label} actual`} />}</td>
                     <td style={TD}>{usd0(r.revenue)}</td><td style={TD}>{usd0(r.variableCost)}</td><td style={TD}>{usd0(r.fixedCost)}</td>
                     <td style={{ ...TD, fontWeight: 700, color: tone(r.net) }}>{usd0(r.net)}</td><td style={{ ...TD, color: tone(r.net) }}>{pct0(r.margin)}</td>
@@ -421,18 +421,18 @@ export function ProfitReviewPage() {
             </tbody>
           </Wrap>
           <Note>Break-even is the variable cost per mile plus fixed costs spread over the miles: {breakEven != null ? usd2(breakEven) : '—'} at these inputs. Every $0.25 a mile above it is worth {usd0(0.25 * proj.miles)} a month at {num0(proj.miles)} miles.</Note>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 18px', borderTop: '1px solid var(--ds-border)', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 18px', borderTop: '1px solid var(--tms-border)', flexWrap: 'wrap' }}>
             <Field id="pr-deadhead" label="Cost of a deadhead (miles; yard to Batory Chicago is 59)" value={deadheadMiles} onChange={(n) => setDeadheadMiles(n ?? 0)} step={5} compact />
-            <div style={{ fontSize: 13, color: 'var(--ds-t1)' }}>
+            <div style={{ fontSize: 13, color: 'var(--tms-text)' }}>
               <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{usd0(deadheadMiles * proj.variableCostPerMile)}</strong> one way at {usd2(proj.variableCostPerMile)}/mi
-              {refM && <span style={{ color: 'var(--ds-t3)' }}> · fuel {usd0(deadheadMiles * (refM.fuelPerMile ?? 0))}, driver {usd0(deadheadMiles * (refM.payPerMile ?? 0))}, wear {usd0(deadheadMiles * (refM.maintPerMile ?? 0))}</span>}
-              <span style={{ color: 'var(--ds-t3)' }}> · plus {usd0(deadheadMiles * (refM?.revPerMile ?? 0))} of revenue those miles could have earned</span>
+              {refM && <span style={{ color: 'var(--tms-muted)' }}> · fuel {usd0(deadheadMiles * (refM.fuelPerMile ?? 0))}, driver {usd0(deadheadMiles * (refM.payPerMile ?? 0))}, wear {usd0(deadheadMiles * (refM.maintPerMile ?? 0))}</span>}
+              <span style={{ color: 'var(--tms-muted)' }}> · plus {usd0(deadheadMiles * (refM?.revPerMile ?? 0))} of revenue those miles could have earned</span>
             </div>
           </div>
         </Card>
 
         {unattributedFuel.count > 0 && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, color: 'var(--tms-badge-orange)', background: 'var(--tms-badge-orange-tint)', border: '1px solid var(--tms-badge-orange)', borderRadius: 8, padding: '10px 14px' }}>
             <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0 }} />
             <span>{unattributedFuel.count} fuel purchases ({usd0(unattributedFuel.amount)}) in this window have no truck on file and are left out. Add the card number to the truck in Fleet.</span>
           </div>
@@ -453,20 +453,20 @@ function ladderWith(breakEven: number | null, actual: number | null): number[] {
 
 function Tile({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '14px 16px' }}>
-      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: color ?? 'var(--ds-t1)', marginTop: 4, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 4 }}>{sub}</div>}
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 10, padding: '14px 16px' }}>
+      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color: color ?? 'var(--tms-text)', marginTop: 4, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 4 }}>{sub}</div>}
     </div>
   )
 }
 
 function Tag({ text }: { text: string }) {
-  return <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ds-t2)', border: '1px solid var(--ds-border)', borderRadius: 4, padding: '1px 5px' }}>{text}</span>
+  return <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tms-text-2)', border: '1px solid var(--tms-border)', borderRadius: 4, padding: '1px 5px' }}>{text}</span>
 }
 
 function LineRow({ label, months, get, fmt = usd0, bold, muted }: { label: string; months: ReviewMonthInput[]; get: (m: ReviewMonthInput) => number; fmt?: (n: number) => string; bold?: boolean; muted?: boolean }) {
-  const color = muted ? 'var(--ds-t3)' : undefined
+  const color = muted ? 'var(--tms-muted)' : undefined
   return <tr><td style={{ ...TDL, fontWeight: bold ? 700 : 500, color, fontSize: muted ? 12 : undefined }}>{label}</td>{months.map((m) => <td key={m.key} style={{ ...TD, fontWeight: bold ? 700 : 500, color, fontSize: muted ? 12 : undefined }}>{fmt(get(m))}</td>)}</tr>
 }
 
@@ -474,21 +474,21 @@ function MetricRow({ label, months, metrics, get, fmt = (n) => usd2(n), bold, co
   return (
     <tr>
       <td style={{ ...TDL, fontWeight: bold ? 700 : 500 }}>{label}</td>
-      {months.map((m) => { const v = get(metrics.get(m.key)!); return <td key={m.key} style={{ ...TD, fontWeight: bold ? 700 : 500, color: v == null ? 'var(--ds-t3)' : colored ? tone(v) : 'var(--ds-t1)' }}>{v == null ? '—' : fmt(v)}</td> })}
+      {months.map((m) => { const v = get(metrics.get(m.key)!); return <td key={m.key} style={{ ...TD, fontWeight: bold ? 700 : 500, color: v == null ? 'var(--tms-muted)' : colored ? tone(v) : 'var(--tms-text)' }}>{v == null ? '—' : fmt(v)}</td> })}
     </tr>
   )
 }
 
 function Field({ id, label, value, onChange, step, prefix, decimals = 0, hint, compact }: { id: string; label: string; value: number; onChange: (n: number | null) => void; step: number; prefix?: string; decimals?: number; hint?: string; compact?: boolean }) {
   return (
-    <label htmlFor={id} style={{ display: 'flex', flexDirection: compact ? 'row' : 'column', gap: compact ? 8 : 4, alignItems: compact ? 'center' : 'stretch', fontSize: 12, color: 'var(--ds-t3)' }}>
+    <label htmlFor={id} style={{ display: 'flex', flexDirection: compact ? 'row' : 'column', gap: compact ? 8 : 4, alignItems: compact ? 'center' : 'stretch', fontSize: 12, color: 'var(--tms-muted)' }}>
       <span>{label}</span>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        {prefix && <span style={{ color: 'var(--ds-t3)' }}>{prefix}</span>}
+        {prefix && <span style={{ color: 'var(--tms-muted)' }}>{prefix}</span>}
         <input id={id} type="number" step={step} value={Number(value.toFixed(decimals))} onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
-          style={{ width: compact ? 90 : '100%', fontSize: 13, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }} />
+          style={{ width: compact ? 90 : '100%', fontSize: 13, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }} />
       </span>
-      {hint && <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{hint}</span>}
+      {hint && <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>{hint}</span>}
     </label>
   )
 }

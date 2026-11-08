@@ -15,6 +15,8 @@ export interface DirectoryCreateDialogProps {
   customers?: CustomerRecord[]
   divisions?: Division[]
   onClose: () => void
+  /** Opt in to the TMS theme (`tms-portal`); legacy call sites leave it off. */
+  tmsTheme?: boolean
   /** Locations carry the geocode token separately so it is never persisted on the record. */
   onSave: (record: CustomerRecord | LocationRecord, geocodeToken?: string) => void | Promise<void>
 }
@@ -39,6 +41,7 @@ export function DirectoryCreateDialog({
   customers = [],
   divisions = [],
   onClose,
+  tmsTheme,
   onSave,
 }: DirectoryCreateDialogProps) {
   const customerForm = useCustomerForm(type === 'customer' ? emptyCustomerRecord(initial) : null)
@@ -59,7 +62,7 @@ export function DirectoryCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className={`max-w-2xl${tmsTheme ? ' tms-portal' : ''}`}>
         <DialogHeader>
           <DialogTitle>{type === 'customer' ? 'Add customer' : 'Add location'}</DialogTitle>
         </DialogHeader>

@@ -20,9 +20,9 @@ const OTHER = 'Other'
 const PAGE_OPTIONS = [...new Set(NAV_ITEMS.map((i) => i.label)), OTHER]
 const SELECT_CLS = 'h-9 rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
 const STATUS_CLS: Record<FeedbackStatus, string> = {
-  NEW: 'bg-red-50 text-red-700 border-red-200',
-  IN_PROGRESS: 'bg-amber-50 text-amber-700 border-amber-200',
-  DONE: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  NEW: 'tms-badge-red',
+  IN_PROGRESS: 'tms-badge-orange',
+  DONE: 'tms-badge-green',
 }
 
 function StatusBadge({ status }: { status: FeedbackStatus }) {
@@ -114,7 +114,7 @@ function SubmitForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form onSubmit={submit} onPaste={onPaste} className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
+    <form onSubmit={submit} onPaste={onPaste} className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
       <h2 className="text-base font-semibold">Report something that is not working</h2>
       <div className="grid gap-3 md:grid-cols-[220px_1fr]">
         <label className="space-y-1 text-sm font-medium">Page
@@ -122,7 +122,7 @@ function SubmitForm({ onCreated }: { onCreated: () => void }) {
             {PAGE_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </label>
-        <label className="space-y-1 text-sm font-medium">What is not working <span className="text-red-600">*</span>
+        <label className="space-y-1 text-sm font-medium">What is not working <span className="text-destructive">*</span>
           <Textarea aria-label="What is not working" required value={summary} onChange={(e) => setSummary(e.target.value)} rows={2} />
         </label>
       </div>
@@ -140,7 +140,7 @@ function SubmitForm({ onCreated }: { onCreated: () => void }) {
             {files.map((f, i) => (
               <div key={f.url} className="relative">
                 <img src={f.url} alt={f.file.name} className="h-20 w-20 rounded-md border object-cover" />
-                <button type="button" aria-label="Remove screenshot" onClick={() => removeFile(i)} className="absolute -right-1.5 -top-1.5 rounded-full border bg-white p-0.5 shadow"><X className="size-3" /></button>
+                <button type="button" aria-label="Remove screenshot" onClick={() => removeFile(i)} className="absolute -right-1.5 -top-1.5 rounded-full border bg-card p-0.5 shadow"><X className="size-3" /></button>
               </div>
             ))}
           </div>
@@ -216,7 +216,7 @@ function GroupRows({ page, count, isCollapsed, onToggle, children }: {
 }) {
   return (
     <>
-      <tr className="cursor-pointer border-t bg-slate-100" onClick={onToggle}>
+      <tr className="cursor-pointer border-t bg-muted" onClick={onToggle}>
         <td colSpan={7} className="px-3 py-2 font-semibold">
           <span className="inline-flex items-center gap-1">{isCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}{page} ({count})</span>
         </td>
@@ -275,7 +275,7 @@ export function FeedbackPage() {
   const row = (f: FeedbackItem) => {
     const keys = screenshotsOf(f)
     return (
-      <tr key={f.id} className="cursor-pointer border-t hover:bg-slate-50" onClick={() => setOpenId(f.id)}>
+      <tr key={f.id} className="cursor-pointer border-t hover:bg-muted/50" onClick={() => setOpenId(f.id)}>
         <td className="whitespace-nowrap px-3 py-2">{fmtDate(f.createdAt)}</td>
         <td className="px-3 py-2">{f.page}</td>
         <td className="max-w-md px-3 py-2">{f.summary}</td>
@@ -283,7 +283,7 @@ export function FeedbackPage() {
         <td className="px-3 py-2"><StatusBadge status={statusOf(f)} /></td>
         <td className="px-3 py-2">
           {keys.length > 0 && (
-            <button type="button" className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+            <button type="button" className="inline-flex items-center gap-1 text-primary hover:underline"
               onClick={(e) => { e.stopPropagation(); setLightbox(keys) }}><ImageIcon className="size-3.5" />{keys.length}</button>
           )}
         </td>
@@ -311,9 +311,9 @@ export function FeedbackPage() {
           <label className="ml-auto flex items-center gap-2 text-sm"><input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} /> Group by page</label>
         </div>
 
-        <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+        <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-600">
+            <thead className="bg-muted text-muted-foreground">
               <tr>
                 <SortHead k="createdAt" active={sortKey} dir={sortDir} onSort={toggleSort}>Created</SortHead>
                 <SortHead k="page" active={sortKey} dir={sortDir} onSort={toggleSort}>Page</SortHead>

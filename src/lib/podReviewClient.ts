@@ -3,6 +3,7 @@
  */
 import { generateClient } from 'aws-amplify/data'
 import { SUBMISSION_FIELDS, attachDocs, type DriverSubmissionRecord } from './driverSubmissionsClient'
+import { invalidateLists, SUBMISSION_CACHE_PREFIX } from './listCache'
 import type { PodReviewChecks, PodReviewFields, PodReviewStatus, ReviewSubmission } from './podReview'
 
 const client = generateClient()
@@ -15,8 +16,12 @@ const REVIEW_FIELDS = `
 `
 
 async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
-  const result = (await client.graphql({ query, variables } as never)) as { data: T }
-  return result.data
+  try {
+    const result = (await client.graphql({ query, variables } as never)) as { data: T }
+    return result.data
+  } finally {
+    if (/^\s*mutation\b/.test(query)) invalidateLists(SUBMISSION_CACHE_PREFIX) // the review fields ride on the submission rows
+  }
 }
 
 export async function listReviewSubmissions(): Promise<ReviewSubmission[]> {

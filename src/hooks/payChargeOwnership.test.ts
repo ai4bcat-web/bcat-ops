@@ -30,14 +30,18 @@ const adjustments = [BEFORE, FIRST].flatMap((periodStart) => [
   { id: `debit-${periodStart}`, driverId: 'drv-1', periodStart, kind: 'DEBIT', label: 'Advance', amount: 50, createdAt: periodStart },
 ])
 
-vi.mock('@/lib/apiClient', async (orig) => ({
-  ...(await orig() as object),
+vi.mock('@/lib/apiClient', () => ({
+  listCustomers: () => Promise.resolve([]),
+  listLocations: () => Promise.resolve([]),
+  listFactoringItems: () => Promise.resolve([]),
   listAmazonTrips: () => Promise.resolve(trips),
-  listLoads: () => Promise.resolve(loads),
   listDriverPaySettings: () => Promise.resolve(settings),
   listDriverPayDeductions: () => Promise.resolve([]),
   listDriverPayCredits: () => Promise.resolve(adjustments),
 }))
+vi.mock('@/lib/driverSubmissionsClient', () => ({ listDriverSubmissions: () => Promise.resolve([]) }))
+vi.mock('@/lib/podsClient', () => ({ listPods: () => Promise.resolve({ items: [{ loadId: 'l1' }], nextToken: null }) }))
+vi.mock('@/hooks/useLoads', () => ({ useLoads: () => ({ loads }), useEnsureLoadRange: () => true }))
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers, updateDriver: vi.fn() }) }))
 vi.mock('@/hooks/useFuelTransactions', () => ({ useFuelTransactions: () => ({ transactions: [] }) }))
 

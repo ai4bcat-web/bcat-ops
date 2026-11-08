@@ -1,0 +1,2 @@
+Docs/tms-build/screenshots/as/AS01-carrier-sales-in-directory.png
+Docs/tms-build/screenshots/as/AS02-carrier-sales-not-in-directory-send-popover.png

@@ -1,13 +1,16 @@
+/**
+ * When renewal mail goes out about an expiring driver document.
+ *
+ * Only My Brokerage → Settings renders this, so it wears the MVMNT kit rather than the
+ * compliance pages' own `Card` chrome; the compliance pages themselves are untouched.
+ */
 import { useEffect, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, BellRing } from 'lucide-react'
 import { toast } from 'sonner'
-import { Switch } from '@/components/ui/switch'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { TmsBadge, TmsButton, TmsCard } from '@/features/tms/kit'
 import {
   listEscalationRules, seedDefaultEscalationRules, updateEscalationRule,
 } from '@/lib/complianceClient'
-import { Card } from './components'
 import type { EscalationRule } from '@/types'
 
 const RECIPIENT_LABEL: Record<string, string> = { DRIVER: 'Driver', MANAGER: 'Manager', BOTH: 'Driver + Manager' }
@@ -43,36 +46,44 @@ export function EscalationRulesCard() {
   }
 
   return (
-    <Card
-      title="Escalation rules"
-      sub="When to email about expiring documents"
-      right={rules.length === 0 ? <Button size="sm" variant="outline" style={{ paddingInline: 16 }} disabled={busy} onClick={seed}><Plus size={14} /> Seed defaults</Button> : undefined}
+    <TmsCard
+      title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><BellRing size={14} aria-hidden="true" />Escalation rules</span>}
+      actions={rules.length === 0
+        ? <TmsButton size="sm" disabled={busy} onClick={seed}><Plus size={14} /> Seed defaults</TmsButton>
+        : undefined}
     >
+      <p className="tms-field-hint" style={{ margin: '0 0 12px' }}>When to email about expiring documents</p>
       {loading ? (
-        <div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
+        <p className="tms-muted" style={{ margin: 0, fontSize: 14 }}>Loading…</p>
       ) : rules.length === 0 ? (
-        <div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>
+        <p className="tms-muted" style={{ margin: 0, fontSize: 14 }}>
           No rules yet. Seed the defaults (30-day notice, 7-day final warning, day-0 out-of-service).
-        </div>
+        </p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {rules.map((r) => (
             <div key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div>
-                <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--ds-t1)' }}>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>
                   {r.daysBeforeExpiration === 0 ? 'On/after expiration' : `${r.daysBeforeExpiration} days before`}
-                  {r.documentType !== 'ALL' && <Badge variant="secondary" className="ml-2">{r.documentType}</Badge>}
+                  {r.documentType !== 'ALL' && <span style={{ marginLeft: 8 }}><TmsBadge tone="gray">{r.documentType}</TmsBadge></span>}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{RECIPIENT_LABEL[r.recipients] ?? r.recipients} · {r.templateKey}</div>
+                <div className="tms-muted" style={{ fontSize: 12 }}>{RECIPIENT_LABEL[r.recipients] ?? r.recipients} · {r.templateKey}</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: r.active ? '#16a34a' : 'var(--ds-t3)' }}>{r.active ? 'Active' : 'Off'}</span>
-                <Switch checked={r.active} onCheckedChange={(v) => toggle(r, v)} />
-              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                <span className={r.active ? undefined : 'tms-muted'}>{r.active ? 'Active' : 'Off'}</span>
+                <input
+                  type="checkbox"
+                  aria-label={`Escalation rule ${r.daysBeforeExpiration} days active`}
+                  checked={r.active}
+                  onChange={(e) => toggle(r, e.target.checked)}
+                  style={{ accentColor: 'var(--tms-primary)', width: 15, height: 15 }}
+                />
+              </label>
             </div>
           ))}
         </div>
       )}
-    </Card>
+    </TmsCard>
   )
 }

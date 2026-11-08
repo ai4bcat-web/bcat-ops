@@ -1,12 +1,20 @@
-import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Switch } from '@/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useEffect, useState } from 'react'
+import { RepPicker, TeamPicker } from '@/components/RepPicker'
+import { TrackerPicker } from '@/components/TrackerPicker'
+import { TmsField, TmsInput, TmsSelect, TmsTabs, TmsTextarea } from '@/features/tms/kit'
+import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { MoneyField } from './MoneyField'
-import type { Division } from '@/types/tms'
+import { getTmsSettings } from '@/lib/apiClient'
+import type { Division, CustomerStatus, RemitTo, Team } from '@/types/tms'
+import { useZipAutofill } from '@/hooks/useZipAutofill'
 import type { CustomerFormValue } from './useCustomerForm'
-import { APPT_WORKFLOW_OPTIONS } from './useCustomerForm'
+import { APPT_WORKFLOW_OPTIONS, INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
+import { BillingMethodFields } from './BillingMethodFields'
+import { TrackingPrefsFields, type TrackingPrefsValue } from './TrackingPrefsFields'
+
+const STATUS_OPTIONS: CustomerStatus[] = ['NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING', 'PENDING', 'ACTIVE']
+
+const tabs = ['Overview', 'Billing', 'Credit & pricing', 'Settings']
 
 export function CustomerForm({
   value,
@@ -19,124 +27,265 @@ export function CustomerForm({
   errors: Record<string, string>
   divisions: Division[]
 }) {
+  const [tab, setTab] = useState('Overview')
+  const [teams, setTeams] = useState<Team[]>([])
+  const [factor, setFactor] = useState<RemitTo | null>(null)
+  useZipAutofill(value.billingAddressZip, value.billingAddressCity, value.billingAddressState, (f) => {
+    if (f.city) set('billingAddressCity', f.city)
+    if (f.state) set('billingAddressState', f.state)
+  })
+  const accountOwnerIds = value.accountOwnerIdsText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+
+  // The dialog that hosts this form has no settings of its own, and threading one read
+  // down through the directory page would buy nothing: the teams list is tiny and cached.
+  useEffect(() => {
+    let alive = true
+    getTmsSettings()
+      .then((s) => { if (alive) { setTeams(s?.teams ?? []); setFactor(s?.factorRemitTo ?? null) } })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+
   return (
-    <div className="space-y-4">
-      <div>
-        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Customer name *</Label>
-        <Input
-          value={value.name}
-          onChange={(e) => set('name', e.target.value)}
-          placeholder="BATORY FOODS"
-          className="h-9 text-sm"
-        />
-        {errors.name && <p className="text-xs text-destructive mt-1">{errors.name}</p>}
-      </div>
+    <div style={{ display: 'grid', gap: 16 }}>
+      <TmsTabs tabs={tabs.map((t) => ({ key: t, label: t }))} active={tab} onSelect={setTab} />
 
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">MC #</Label>
-          <Input value={value.mcNumber} onChange={(e) => set('mcNumber', e.target.value)} className="h-9 text-sm" />
+      {tab === 'Overview' && (
+        <div style={{ display: 'grid', gap: 16 }}>
+          <TmsField label="Customer name *" error={errors.name}>
+            <TmsInput value={value.name} onChange={(e) => set('name', e.target.value)} />
+          </TmsField>
+          <div className="tms-grid tms-grid-3">
+            <TmsField label="Status">
+              <TmsSelect
+                value={value.status || ''}
+                onChange={(e) => set('status', e.target.value as CustomerStatus | '')}
+                placeholder="— unset —"
+                options={STATUS_OPTIONS.map((s) => ({ value: s, label: s }))}
+              />
+            </TmsField>
+            <TmsField label="Lead source">
+              <TmsInput value={value.leadSource} onChange={(e) => set('leadSource', e.target.value)} />
+            </TmsField>
+            <TmsField label="Industry">
+              <TmsInput value={value.industry} onChange={(e) => set('industry', e.target.value)} />
+            </TmsField>
+          </div>
+          <div className="tms-grid tms-grid-3">
+            <TmsField label="Service tier">
+              <TmsInput value={value.serviceTier} onChange={(e) => set('serviceTier', e.target.value)} />
+            </TmsField>
+            <TmsField label="Website">
+              <TmsInput value={value.website} onChange={(e) => set('website', e.target.value)} />
+            </TmsField>
+            <TmsField label="Appt workflow">
+              <TmsSelect
+                value={value.apptWorkflow}
+                onChange={(e) => set('apptWorkflow', e.target.value as 'UNSET' | 'NONE' | 'BATORY')}
+                options={APPT_WORKFLOW_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+              />
+            </TmsField>
+          </div>
+          <div className="tms-grid tms-grid-3">
+            <TmsField label="MC #">
+              <TmsInput value={value.mcNumber} onChange={(e) => set('mcNumber', e.target.value)} />
+            </TmsField>
+            <TmsField label="DOT #">
+              <TmsInput value={value.dotNumber} onChange={(e) => set('dotNumber', e.target.value)} />
+            </TmsField>
+            <TmsField label="Payment terms (days)" error={errors.paymentTermsDays}>
+              <TmsInput type="number" min={0} value={value.paymentTermsDays} onChange={(e) => set('paymentTermsDays', e.target.value)} />
+            </TmsField>
+          </div>
+          <div className="tms-grid tms-grid-3">
+            <TmsField label="Contact name">
+              <TmsInput value={value.contactName} onChange={(e) => set('contactName', e.target.value)} />
+            </TmsField>
+            <TmsField label="Contact phone">
+              <TmsInput value={value.contactPhone} onChange={(e) => set('contactPhone', e.target.value)} />
+            </TmsField>
+            <TmsField label="Contact email">
+              <TmsInput value={value.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} />
+            </TmsField>
+          </div>
+          <TmsField label="Notes">
+            <TmsTextarea value={value.notes} onChange={(e) => set('notes', e.target.value)} />
+          </TmsField>
+          <TmsField label="Aliases">
+            <TmsTextarea value={value.aliasesText} onChange={(e) => set('aliasesText', e.target.value)} placeholder="One per line" />
+          </TmsField>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div className="tms-field-label">Tracking</div>
+            <TrackingPrefsFields
+              value={value}
+              onChange={(patch) => Object.entries(patch).forEach(([k, v]) => set(k as keyof TrackingPrefsValue, v as never))}
+              legacyHint
+            />
+          </div>
         </div>
-        <div>
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">DOT #</Label>
-          <Input value={value.dotNumber} onChange={(e) => set('dotNumber', e.target.value)} className="h-9 text-sm" />
-        </div>
-        <div>
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Appt workflow</Label>
-          <Select value={value.apptWorkflow} onValueChange={(v) => set('apptWorkflow', v as 'UNSET' | 'NONE' | 'BATORY')}>
-            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {APPT_WORKFLOW_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      )}
 
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Contact name</Label>
-          <Input value={value.contactName} onChange={(e) => set('contactName', e.target.value)} className="h-9 text-sm" />
+      {tab === 'Billing' && (
+        <div style={{ display: 'grid', gap: 16 }}>
+          <BillingMethodFields value={value} set={set} errors={errors} factor={factor} />
+          <div>
+            <div className="tms-field-label">Billing contact</div>
+            <div className="tms-grid tms-grid-3" style={{ marginTop: 6 }}>
+              <TmsInput value={value.billingContactName} onChange={(e) => set('billingContactName', e.target.value)} placeholder="Name" aria-label="Billing contact name" />
+              <TmsInput value={value.billingPhone} onChange={(e) => set('billingPhone', e.target.value)} placeholder="Phone" aria-label="Billing phone" />
+              <TmsInput value={value.billingEmail} onChange={(e) => set('billingEmail', e.target.value)} placeholder="Email" aria-label="Billing email" />
+            </div>
+          </div>
+          <div>
+            <div className="tms-field-label">Billing address</div>
+            <div className="tms-grid tms-grid-2" style={{ marginTop: 6 }}>
+              <TmsInput value={value.billingAddressStreet} onChange={(e) => set('billingAddressStreet', e.target.value)} placeholder="Street" aria-label="Billing street" />
+              <TmsInput value={value.billingAddressCity} onChange={(e) => set('billingAddressCity', e.target.value)} placeholder="City" aria-label="Billing city" />
+              <TmsInput value={value.billingAddressState} onChange={(e) => set('billingAddressState', e.target.value)} placeholder="State" aria-label="Billing state" />
+              <TmsInput value={value.billingAddressZip} onChange={(e) => set('billingAddressZip', e.target.value)} placeholder="ZIP" aria-label="Billing ZIP" />
+              <TmsInput value={value.billingAddressCountry} onChange={(e) => set('billingAddressCountry', e.target.value)} placeholder="Country" aria-label="Billing country" />
+            </div>
+          </div>
+          <div className="tms-grid tms-grid-2">
+            <TmsField label="Default division">
+              <TmsSelect
+                value={value.defaultDivisionKey || ''}
+                onChange={(e) => set('defaultDivisionKey', e.target.value)}
+                placeholder="— unset —"
+                options={divisions.map((d) => ({ value: d.key, label: d.name }))}
+              />
+            </TmsField>
+            <TmsField label="Default sales rep">
+              <TmsInput value={value.defaultSalesRepId} onChange={(e) => set('defaultSalesRepId', e.target.value)} />
+            </TmsField>
+          </div>
+          <TmsField label="Default tracker" hint="Tracks every new shipment for this customer unless changed.">
+            <TrackerPicker
+              value={value.defaultTrackerId || null}
+              onChange={(id) => set('defaultTrackerId', id ?? '')}
+              aria-label="Default tracker"
+            />
+          </TmsField>
+          <DocumentTypesField
+            label="Required for accounting release"
+            value={value.requiredDocs}
+            onChange={(next) => set('requiredDocs', next)}
+            help="Leave every box clear to use the organization default."
+          />
         </div>
-        <div>
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Contact phone</Label>
-          <Input value={value.contactPhone} onChange={(e) => set('contactPhone', e.target.value)} className="h-9 text-sm" />
-        </div>
-        <div>
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Contact email</Label>
-          <Input value={value.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} className="h-9 text-sm" />
-        </div>
-      </div>
+      )}
 
-      <div>
-        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Billing contact</Label>
-        <div className="grid grid-cols-3 gap-3 mt-1.5">
-          <Input value={value.billingContactName} onChange={(e) => set('billingContactName', e.target.value)} placeholder="Name" className="h-9 text-sm" />
-          <Input value={value.billingPhone} onChange={(e) => set('billingPhone', e.target.value)} placeholder="Phone" className="h-9 text-sm" />
-          <Input value={value.billingEmail} onChange={(e) => set('billingEmail', e.target.value)} placeholder="Email" className="h-9 text-sm" />
+      {tab === 'Credit & pricing' && (
+        <div style={{ display: 'grid', gap: 16 }}>
+          <div className="tms-grid tms-grid-3">
+            <MoneyField label="Credit limit ($)" value={value.creditLimitCents} onChange={(cents) => set('creditLimitCents', cents)} />
+            <TmsField label="Usage warning (bps)" error={errors.creditUsageWarningBps}>
+              <TmsInput type="number" min={0} max={10000} value={value.creditUsageWarningBps ?? ''} onChange={(e) => set('creditUsageWarningBps', e.target.value ? Number(e.target.value) : null)} />
+            </TmsField>
+            <TmsField label="Max days late" error={errors.maxDaysLate}>
+              <TmsInput type="number" min={0} value={value.maxDaysLate ?? ''} onChange={(e) => set('maxDaysLate', e.target.value ? Number(e.target.value) : null)} />
+            </TmsField>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+              <input type="checkbox" checked={value.freeCreditRequired === true} onChange={(e) => set('freeCreditRequired', e.target.checked)} />
+              Free credit required
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+              <input type="checkbox" checked={value.creditHoldFlag} onChange={(e) => set('creditHoldFlag', e.target.checked)} />
+              Credit hold
+            </label>
+          </div>
+          <TmsField label="GP split (bps)" error={errors.gpSplitBps}>
+            <TmsInput type="number" min={0} max={10000} value={value.gpSplitBps ?? ''} onChange={(e) => set('gpSplitBps', e.target.value ? Number(e.target.value) : null)} />
+          </TmsField>
+          <TmsField label="Rate con terms override">
+            <TmsTextarea value={value.rateConTerms} onChange={(e) => set('rateConTerms', e.target.value)} />
+          </TmsField>
         </div>
-      </div>
+      )}
 
-      <div>
-        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Billing address</Label>
-        <div className="grid grid-cols-2 gap-3 mt-1.5">
-          <Input value={value.billingAddressStreet} onChange={(e) => set('billingAddressStreet', e.target.value)} placeholder="Street" className="h-9 text-sm" />
-          <Input value={value.billingAddressCity} onChange={(e) => set('billingAddressCity', e.target.value)} placeholder="City" className="h-9 text-sm" />
-          <Input value={value.billingAddressState} onChange={(e) => set('billingAddressState', e.target.value)} placeholder="State" className="h-9 text-sm" />
-          <Input value={value.billingAddressZip} onChange={(e) => set('billingAddressZip', e.target.value)} placeholder="ZIP" className="h-9 text-sm" />
-          <Input value={value.billingAddressCountry} onChange={(e) => set('billingAddressCountry', e.target.value)} placeholder="Country" className="h-9 text-sm" />
+      {tab === 'Settings' && (
+        <div style={{ display: 'grid', gap: 16 }}>
+          <div className="tms-grid tms-grid-2">
+            <TmsField label="Invoice frequency">
+              <TmsSelect
+                value={value.invoiceFrequency || ''}
+                onChange={(e) => set('invoiceFrequency', e.target.value as typeof INVOICE_FREQUENCY_OPTIONS[number]['value'] | '')}
+                placeholder="— unset —"
+                options={INVOICE_FREQUENCY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+              />
+            </TmsField>
+            <div className="tms-field">
+              <span className="tms-field-label">Team key</span>
+              <TeamPicker
+                value={value.teamKey}
+                onChange={(v) => set('teamKey', v)}
+                teams={teams}
+                allowEmpty
+                className="h-9 text-sm"
+              />
+            </div>
+          </div>
+          <div className="tms-grid tms-grid-2">
+            <div className="tms-field">
+              <span className="tms-field-label">Operated by</span>
+              <RepPicker
+                role="CUSTOMER_REP"
+                allowUnknown
+                value={value.operatedById}
+                onChange={(v) => set('operatedById', v)}
+                placeholder="Pick who operates it…"
+              />
+            </div>
+            <div className="tms-field">
+              <span className="tms-field-label">Account owners</span>
+              <RepPicker
+                multiple
+                role="CUSTOMER_REP"
+                allowUnknown
+                value={accountOwnerIds}
+                onChange={(next) => set('accountOwnerIdsText', next.join('\n'))}
+                placeholder="Add an account owner…"
+              />
+            </div>
+          </div>
+          {/* The ids this customer has in another system; each is read by its own integration. */}
+          <div className="tms-grid tms-grid-2">
+            <TmsField label="project44 customer id" hint="Used when outbound status goes to this customer's project44 account.">
+              <TmsInput
+                aria-label="project44 customer id"
+                value={value.project44CustomerId}
+                onChange={(e) => set('project44CustomerId', e.target.value)}
+              />
+            </TmsField>
+            <TmsField label="HubSpot id" hint="The HubSpot company record this customer is.">
+              <TmsInput
+                aria-label="HubSpot id"
+                value={value.hubspotId}
+                onChange={(e) => set('hubspotId', e.target.value)}
+              />
+            </TmsField>
+          </div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <span className="tms-field-label">Visibility preferences</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={value.visibilityPrefs.milestoneEmails} onChange={(e) => set('visibilityPrefs', { ...value.visibilityPrefs, milestoneEmails: e.target.checked })} />
+                Milestone emails
+              </label>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={value.visibilityPrefs.sharedTrackingLink} onChange={(e) => set('visibilityPrefs', { ...value.visibilityPrefs, sharedTrackingLink: e.target.checked })} />
+                Shared tracking link
+              </label>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={value.visibilityPrefs.shipperPortal} onChange={(e) => set('visibilityPrefs', { ...value.visibilityPrefs, shipperPortal: e.target.checked })} />
+                Shipper portal
+              </label>
+            </div>
+          </div>
         </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Payment terms (days)</Label>
-          <Input type="number" min={0} value={value.paymentTermsDays} onChange={(e) => set('paymentTermsDays', e.target.value)} className="h-9 text-sm" />
-          {errors.paymentTermsDays && <p className="text-xs text-destructive mt-1">{errors.paymentTermsDays}</p>}
-        </div>
-        <MoneyField label="Credit limit ($)" value={value.creditLimitCents} onChange={(cents) => set('creditLimitCents', cents)} />
-        <div className="flex items-end pb-2 gap-2">
-          <Switch checked={value.creditHoldFlag} onCheckedChange={(checked) => set('creditHoldFlag', checked)} />
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer">Credit hold</Label>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Default division</Label>
-          <Select value={value.defaultDivisionKey || '__UNSET__'} onValueChange={(v) => set('defaultDivisionKey', v === '__UNSET__' ? '' : v)}>
-            <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select division" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__UNSET__">— unset —</SelectItem>
-              {divisions.map((d) => <SelectItem key={d.key} value={d.key}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Default sales rep</Label>
-          <Input value={value.defaultSalesRepId} onChange={(e) => set('defaultSalesRepId', e.target.value)} className="h-9 text-sm" />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Aliases (one per line)</Label>
-          <Textarea value={value.aliasesText} onChange={(e) => set('aliasesText', e.target.value)} rows={3} className="text-sm" />
-        </div>
-        <div>
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Required invoice docs</Label>
-          <Textarea value={value.requiredDocsText} onChange={(e) => set('requiredDocsText', e.target.value)} placeholder="POD&#10;BOL&#10;LUMPER_RECEIPT" rows={3} className="text-sm" />
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Switch checked={value.active} onCheckedChange={(checked) => set('active', checked)} />
-        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer">Active</Label>
-      </div>
-
-      <div>
-        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Notes</Label>
-        <Textarea value={value.notes} onChange={(e) => set('notes', e.target.value)} rows={2} className="text-sm" />
-      </div>
+      )}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import type { FleetGroup } from '@/types/equipment'
+import type { DriverFleet, FleetGroup } from '@/types/equipment'
 
 export const FLEET_GROUPS: FleetGroup[] = ['LOCAL', 'AMAZON', 'BOX_TRUCK']
 
@@ -6,6 +6,14 @@ export const FLEET_GROUP_LABELS: Record<FleetGroup, string> = {
   LOCAL:     'Local (Ivan)',
   AMAZON:    'Amazon',
   BOX_TRUCK: 'Box Truck',
+}
+
+/** Fleets a driver can be in — the truck fleets plus Owner Operator (driver-only). */
+export const DRIVER_FLEETS: DriverFleet[] = [...FLEET_GROUPS, 'OWNER_OPERATOR']
+
+export const DRIVER_FLEET_LABELS: Record<DriverFleet, string> = {
+  ...FLEET_GROUP_LABELS,
+  OWNER_OPERATOR: 'Owner Operator',
 }
 
 /**

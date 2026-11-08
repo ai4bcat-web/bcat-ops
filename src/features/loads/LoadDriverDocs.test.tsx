@@ -115,9 +115,12 @@ describe('LoadDriverDocs', () => {
   })
 
   it('surfaces a read failure instead of implying nothing was sent', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     listDriverSubmissions.mockRejectedValue(new Error('Network down'))
     render(<LoadDriverDocs loadId="load-1" proNumber="14538" kind="POD" />)
     expect(await screen.findByText('Network down')).toBeInTheDocument()
+    expect(errorSpy).toHaveBeenCalledWith('[useLoadDriverDocs] failed', expect.objectContaining({ message: 'Network down' }))
+    errorSpy.mockRestore()
   })
 })
 

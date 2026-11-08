@@ -68,17 +68,17 @@ export function useInsurance() {
   const itemsFor = useCallback((periodId: string) => items.filter((i) => i.periodId === periodId), [items])
 
   /*
-   * A truck marked inactive is off the road and off the policy, so its premium leaves the
-   * CURRENT period's totals (the line item is kept, so reactivating brings it back). Past
-   * periods are what was actually paid and are left alone.
+   * A truck or trailer marked inactive is off the road and off the policy, so its premium
+   * leaves the CURRENT period's totals (the line item is kept, so reactivating brings it
+   * back). Past periods are what was actually paid and are left alone.
    */
-  const inactiveTruckIds = useMemo(() => {
+  const inactiveUnitIds = useMemo(() => {
     const today = todayChicago()
-    return new Set(trucks.filter((t) => !truckActiveOn({ id: t.id, active: t.active, inactiveSince: t.inactiveSince }, today)).map((t) => t.id))
-  }, [trucks])
+    return new Set([...trucks, ...trailers].filter((t) => !truckActiveOn({ id: t.id, active: t.active, inactiveSince: t.inactiveSince }, today)).map((t) => t.id))
+  }, [trucks, trailers])
   const isParked = useCallback((periodId: string, i: InsuranceLineItem) =>
-    i.kind === 'TRUCK' && !!i.equipmentId && inactiveTruckIds.has(i.equipmentId) && periodId === currentPeriod?.id,
-  [inactiveTruckIds, currentPeriod])
+    (i.kind === 'TRUCK' || i.kind === 'TRAILER') && !!i.equipmentId && inactiveUnitIds.has(i.equipmentId) && periodId === currentPeriod?.id,
+  [inactiveUnitIds, currentPeriod])
 
   const summary = useCallback((periodId: string): CategoryTotals => {
     const list = itemsFor(periodId).filter((i) => !isParked(periodId, i))

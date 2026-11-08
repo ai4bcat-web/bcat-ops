@@ -184,13 +184,20 @@ function serializeApplicationInput(
 export async function listApplicationsByStatus(
   status: DriverApplicationRecord['status'],
 ): Promise<DriverApplicationRecord[]> {
-  const data = await gql<{ listDriverApplications: { items: Record<string, unknown>[] } }>(
-    `query ($filter: ModelDriverApplicationFilterInput) {
-      listDriverApplications(filter: $filter, limit: 1000) { items { ${APPLICATION_FIELDS} } }
-    }`,
-    { filter: { status: { eq: status } } },
-  )
-  return (data.listDriverApplications.items ?? []).map((r) => deserializeApplication(r)!).filter(Boolean)
+  // A filter applies AFTER each scan page, so page to exhaustion: one capped request can miss rows.
+  const rows: Record<string, unknown>[] = []
+  let nextToken: string | null | undefined
+  do {
+    const data: { listDriverApplications: { items: Record<string, unknown>[]; nextToken?: string | null } } = await gql(
+      `query ($filter: ModelDriverApplicationFilterInput, $nextToken: String) {
+        listDriverApplications(filter: $filter, limit: 1000, nextToken: $nextToken) { items { ${APPLICATION_FIELDS} } nextToken }
+      }`,
+      { filter: { status: { eq: status } }, nextToken },
+    )
+    rows.push(...(data.listDriverApplications.items ?? []))
+    nextToken = data.listDriverApplications.nextToken
+  } while (nextToken)
+  return rows.map((r) => deserializeApplication(r)!).filter(Boolean)
 }
 
 export async function getApplicationByDriver(
@@ -250,13 +257,20 @@ export async function listComplianceDocuments(
 export async function listComplianceDocumentsByStatus(
   status: ComplianceDocumentStatus,
 ): Promise<ComplianceDocument[]> {
-  const data = await gql<{ listComplianceDocuments: { items: ComplianceDocument[] } }>(
-    `query ($filter: ModelComplianceDocumentFilterInput) {
-      listComplianceDocuments(filter: $filter, limit: 1000) { items { ${DOCUMENT_FIELDS} } }
-    }`,
-    { filter: { status: { eq: status } } },
-  )
-  return data.listComplianceDocuments.items ?? []
+  // Same as listApplicationsByStatus: the filter runs after each page, so page to exhaustion.
+  const rows: ComplianceDocument[] = []
+  let nextToken: string | null | undefined
+  do {
+    const data: { listComplianceDocuments: { items: ComplianceDocument[]; nextToken?: string | null } } = await gql(
+      `query ($filter: ModelComplianceDocumentFilterInput, $nextToken: String) {
+        listComplianceDocuments(filter: $filter, limit: 1000, nextToken: $nextToken) { items { ${DOCUMENT_FIELDS} } nextToken }
+      }`,
+      { filter: { status: { eq: status } }, nextToken },
+    )
+    rows.push(...(data.listComplianceDocuments.items ?? []))
+    nextToken = data.listComplianceDocuments.nextToken
+  } while (nextToken)
+  return rows
 }
 
 export async function listAllComplianceDocuments(): Promise<ComplianceDocument[]> {

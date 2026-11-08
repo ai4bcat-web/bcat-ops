@@ -1,0 +1,26 @@
+.tms-spot-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: var(--tms-gap); }
+.tms-spot-strip-spacer { flex: 1; }
+.tms-spot-banner { margin-bottom: var(--tms-gap); }
+.tms-spot-banner-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.tms-spot-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tms-gap); }
+.tms-spot-from { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tms-spot-from-name { font-weight: 600; }
+.tms-spot-from-sub { color: var(--tms-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
+.tms-spot-section { display: flex; flex-direction: column; gap: 8px; padding: var(--tms-pad) 0; border-bottom: 1px solid var(--tms-border); }
+.tms-spot-section:last-child { border-bottom: 0; }
+.tms-spot-section-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tms-muted); margin: 0; }
+.tms-spot-excerpt { white-space: pre-wrap; font-size: 13px; background: var(--tms-bg-elevated); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); padding: 8px 10px; max-height: 240px; overflow: auto; margin: 0; }
+.tms-spot-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--tms-gap); }
+@media (max-width: 700px) { .tms-spot-fields { grid-template-columns: minmax(0, 1fr); } }
+.tms-spot-field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tms-spot-accessorials { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.tms-spot-price { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px var(--tms-gap); }
+.tms-spot-price-suggested { font-size: 20px; font-weight: 600; }
+.tms-spot-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tms-spot-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.tms-spot-reply { white-space: pre-wrap; font-size: 13px; background: var(--tms-bg-elevated); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); padding: 8px 10px; margin: 0; }
+.tms-spot-switch { display: flex; align-items: center; gap: 8px; }
+.tms-spot-gates { margin: 4px 0 8px; padding-left: 18px; }
+.tms-spot-gates li { margin: 2px 0; }
+.tms-spot-numbers { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tms-spot-grid-cards { display: grid; gap: var(--tms-gap); }

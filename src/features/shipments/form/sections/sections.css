@@ -1,0 +1,56 @@
+/* AH4 section bodies. Tokens only; scoped under .tms-ship-form so nothing leaks. */
+.tms-ship-form .ship-req-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 16px;
+  align-items: start;
+}
+.tms-ship-form .ship-req-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tms-ship-form .ship-req-boxes { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tms-ship-form .ship-req-box {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 8px;
+  border: 1px solid var(--tms-border); border-radius: 4px; padding: 6px 8px;
+}
+.tms-ship-form .ship-req-box .tms-field { flex: 1 1 90px; min-width: 70px; }
+.tms-ship-form .ship-flag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; align-content: start; }
+.tms-ship-form .ship-flag-col { display: flex; flex-direction: column; gap: 4px; }
+.tms-ship-form .ship-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--tms-text); white-space: nowrap; }
+.tms-ship-form .ship-check input { margin: 0; }
+.tms-ship-form .ship-check[data-disabled='true'] { color: var(--tms-text-muted); }
+.tms-ship-form .ship-hint { font-size: 11px; color: var(--tms-text-muted); }
+.tms-ship-form .ship-inline { display: flex; gap: 8px; align-items: flex-end; }
+.tms-ship-form .ship-inline > .tms-field { flex: 1 1 0; min-width: 0; }
+.tms-ship-form .ship-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tms-ship-form .ship-readonly { color: var(--tms-text-muted); }
+.tms-ship-form .ship-link { font-size: 12px; background: none; border: 0; padding: 0; color: var(--tms-link, var(--tms-text)); text-decoration: underline; cursor: pointer; }
+.tms-ship-form .ship-typeahead { position: relative; flex: 1 1 auto; min-width: 0; }
+.tms-ship-form .ship-typeahead-list {
+  position: absolute; z-index: 20; left: 0; right: 0; top: 100%; margin: 2px 0 0; padding: 2px; list-style: none;
+  background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: 4px; max-height: 220px; overflow: auto;
+}
+.tms-ship-form .ship-typeahead-list button {
+  display: block; width: 100%; text-align: left; font-size: 12px; padding: 4px 6px; background: none; border: 0;
+  color: var(--tms-text); cursor: pointer;
+}
+.tms-ship-form .ship-typeahead-list button:hover,
+.tms-ship-form .ship-typeahead-list button:focus-visible { background: var(--tms-surface-subtle); }
+.tms-ship-form .ship-name-row { display: flex; gap: 4px; align-items: flex-end; }
+.tms-ship-form .ship-picks-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tms-ship-form .ship-pick-row {
+  display: flex; align-items: center; gap: 6px; border: 1px solid var(--tms-border); border-radius: 4px; padding: 4px 6px;
+}
+.tms-ship-form .ship-pick-row[data-incomplete='true'] { border-color: var(--tms-badge-red); }
+.tms-ship-form .ship-pick-row[data-selected='true'] { background: var(--tms-surface-subtle); }
+.tms-ship-form .ship-pick-label { flex: 1 1 auto; min-width: 0; text-align: left; background: none; border: 0; color: var(--tms-text); font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tms-ship-form .ship-history-tabs { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.tms-ship-form .ship-history-tab { background: none; border: 0; padding: 0; font-size: 12px; color: var(--tms-badge-red); cursor: pointer; }
+.tms-ship-form .ship-history-tab[aria-pressed='true'] { color: var(--tms-text); font-weight: 600; }
+.tms-ship-form .ship-history-table { width: 100%; font-size: 12px; border-collapse: collapse; }
+.tms-ship-form .ship-history-table th { text-align: left; border-bottom: 1px solid var(--tms-border); padding: 2px 4px; }
+.tms-ship-form .ship-history-table td { padding: 2px 4px; }
+.tms-ship-form .ship-pick-num { width: 72px; flex: 0 0 72px; }
+.tms-ship-form .ship-billto { border-top: 1px solid var(--tms-border); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.tms-ship-form .ship-billto-list { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.tms-ship-form .ship-billto-row { display: flex; justify-content: space-between; gap: 8px; }
+.tms-ship-form .ship-billto-row dt { color: var(--tms-text-muted); }
+.tms-ship-form .ship-billto-row dd { margin: 0; text-align: right; overflow-wrap: anywhere; }

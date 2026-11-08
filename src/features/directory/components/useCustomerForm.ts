@@ -1,5 +1,21 @@
-import { useState } from 'react'
-import type { CustomerRecord } from '@/types/tms'
+import { useState, useMemo } from 'react'
+import type {
+  CustomerRecord,
+  CustomerContact,
+  BillToParty,
+  RequiredReference,
+  ChargeCodeOverride,
+  DefaultCharge,
+  PricingDefaults,
+  QuotingDefaults,
+  InvoiceFrequency,
+  VisibilityPrefs,
+  CustomerStatus,
+  CheckCallPlan,
+} from '@/types/tms'
+import { parseEmailList, validateBillingFields, type BillingMethod } from '@/lib/billingMethod'
+import type { AutomationPolicyPatch } from '@/lib/trackingAutomation'
+import { DEFAULT_DRIVER_SMS_TARGET, type DriverSmsTarget, type TrackingMethod, type TrackingMode } from '@/lib/trackingPrefs'
 
 function linesToArray(value: string): string[] {
   return value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
@@ -7,6 +23,38 @@ function linesToArray(value: string): string[] {
 
 function arrayToLines(value: string[] | null | undefined): string {
   return (value ?? []).join('\n')
+}
+
+function emptyVisibilityPrefs(initial?: VisibilityPrefs | null): VisibilityPrefs {
+  return {
+    milestoneEmails: initial?.milestoneEmails ?? false,
+    sharedTrackingLink: initial?.sharedTrackingLink ?? false,
+    shipperPortal: initial?.shipperPortal ?? false,
+  }
+}
+
+function emptyPricingDefaults(initial?: PricingDefaults | null): PricingDefaults {
+  return {
+    mode: initial?.mode ?? 'MARGIN',
+    defaultBps: initial?.defaultBps ?? null,
+    defaultProfitCents: initial?.defaultProfitCents ?? null,
+    minProfitCents: initial?.minProfitCents ?? null,
+    maxProfitCents: initial?.maxProfitCents ?? null,
+    singleChargeCode: initial?.singleChargeCode ?? null,
+    distribution: initial?.distribution ?? null,
+  }
+}
+
+function emptyQuotingDefaults(initial?: QuotingDefaults | null): QuotingDefaults {
+  return {
+    defaultMode: initial?.defaultMode ?? null,
+    hoursToQuote: initial?.hoursToQuote ?? null,
+    notes: initial?.notes ?? null,
+    portalLtlDispatchMode: initial?.portalLtlDispatchMode ?? null,
+    portalStatusMask: initial?.portalStatusMask ?? [],
+    blockedLtlCarrierIds: initial?.blockedLtlCarrierIds ?? [],
+    selfQuoteCarrierIds: initial?.selfQuoteCarrierIds ?? [],
+  }
 }
 
 export interface CustomerFormValue {
@@ -28,18 +76,79 @@ export interface CustomerFormValue {
   paymentTermsDays: string
   creditLimitCents: number | null
   creditHoldFlag: boolean
-  requiredDocsText: string
+  /** Stored strings, typed values plus anything that predates the vocabulary. */
+  requiredDocs: string[]
+  /** Step AP: null = the organization default. */
+  reviewRequirements: string[] | null
   defaultDivisionKey: string
   defaultSalesRepId: string
   aliasesText: string
   active: boolean
   apptWorkflow: 'UNSET' | 'NONE' | 'BATORY'
+
+  status: CustomerStatus | ''
+  leadSource: string
+  industry: string
+  serviceTier: string
+  website: string
+  freeCreditRequired: boolean | null
+  creditUsageWarningBps: number | null
+  maxDaysLate: number | null
+  invoiceFrequency: InvoiceFrequency | ''
+  visibilityPrefs: VisibilityPrefs
+  gpSplitBps: number | null
+  rateConTerms: string
+  teamKey: string
+  operatedById: string
+  accountOwnerIdsText: string
+  /** The ids this customer carries in another system; stored for the integration that uses them. */
+  project44CustomerId: string
+  hubspotId: string
+
+  contacts: CustomerContact[]
+  billToParties: BillToParty[]
+  requiredReferences: RequiredReference[]
+  chargeCodeOverrides: ChargeCodeOverride[]
+  defaultCharges: DefaultCharge[]
+  pricingDefaults: PricingDefaults
+  quotingDefaults: QuotingDefaults
+
+  // Step P3 — flow defaults overriding TmsSettings.
+  defaultCarrierTeamKey: string
+  defaultCarrierRepId: string
+  marginTargetBps: number | null
+  marginFloorBps: number | null
+  quoteAutoReply: boolean | null
+  requiredLoadFields: string[]
+  checkCallPlan: CheckCallPlan | null
+  defaultTrackerId: string
+  /** Customer layer of the tracking-automation policy; null = inherit everything. */
+  trackingAutomation: AutomationPolicyPatch | null
+  /** Step AJ/AK; '' = never chosen (legacy customer), left out of the saved record. */
+  trackingMode: TrackingMode | ''
+  trackingMethod: TrackingMethod | ''
+  driverSmsTarget: DriverSmsTarget | ''
+
+  // Step AW stage D — how the customer is billed.
+  billingMethod: BillingMethod | ''
+  apEmail: string
+  /** One address per line or comma separated; the always-copy list is added on send. */
+  invoiceCopyText: string
+  /** Why the import flagged the row; the server clears it when billing fields are saved. */
+  billingNeedsReview: string
 }
 
 const APPT_WORKFLOW_OPTIONS: { value: 'UNSET' | 'NONE' | 'BATORY'; label: string }[] = [
   { value: 'UNSET', label: 'Not set — decided by the customer name (Batory match)' },
   { value: 'NONE', label: 'None — ratecon confirms appointments' },
   { value: 'BATORY', label: 'Batory — E2Open + email proof ladder' },
+]
+
+const INVOICE_FREQUENCY_OPTIONS: { value: InvoiceFrequency; label: string }[] = [
+  { value: 'DAILY', label: 'Daily' },
+  { value: 'TWICE_WEEKLY', label: 'Twice weekly' },
+  { value: 'WEEKLY', label: 'Weekly' },
+  { value: 'MONTHLY', label: 'Monthly' },
 ]
 
 function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
@@ -62,13 +171,71 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     paymentTermsDays: initial?.paymentTermsDays != null ? String(initial.paymentTermsDays) : '',
     creditLimitCents: initial?.creditLimitCents ?? null,
     creditHoldFlag: initial?.creditHoldFlag ?? false,
-    requiredDocsText: arrayToLines(initial?.requiredDocsForInvoice),
+    requiredDocs: initial?.requiredDocsForInvoice ?? [],
+    reviewRequirements: initial?.reviewRequirements ?? null,
     defaultDivisionKey: initial?.defaultDivisionKey ?? '',
     defaultSalesRepId: initial?.defaultSalesRepId ?? '',
     aliasesText: arrayToLines(initial?.aliases),
     active: initial?.active ?? true,
     apptWorkflow: initial?.apptWorkflow ?? 'UNSET',
+
+    status: initial?.status ?? '',
+    leadSource: initial?.leadSource ?? '',
+    industry: initial?.industry ?? '',
+    serviceTier: initial?.serviceTier ?? '',
+    website: initial?.website ?? '',
+    freeCreditRequired: initial?.freeCreditRequired ?? null,
+    creditUsageWarningBps: initial?.creditUsageWarningBps ?? null,
+    maxDaysLate: initial?.maxDaysLate ?? null,
+    invoiceFrequency: initial?.invoiceFrequency ?? '',
+    visibilityPrefs: emptyVisibilityPrefs(initial?.visibilityPrefs),
+    gpSplitBps: initial?.gpSplitBps ?? null,
+    rateConTerms: initial?.rateConTerms ?? '',
+    teamKey: initial?.teamKey ?? '',
+    operatedById: initial?.operatedById ?? '',
+    accountOwnerIdsText: arrayToLines(initial?.accountOwnerIds),
+    project44CustomerId: initial?.project44CustomerId ?? '',
+    hubspotId: initial?.hubspotId ?? '',
+
+    contacts: initial?.contacts ?? [],
+    billToParties: initial?.billToParties ?? [],
+    requiredReferences: initial?.requiredReferences ?? [],
+    chargeCodeOverrides: initial?.chargeCodeOverrides ?? [],
+    defaultCharges: initial?.defaultCharges ?? [],
+    pricingDefaults: emptyPricingDefaults(initial?.pricingDefaults),
+    quotingDefaults: emptyQuotingDefaults(initial?.quotingDefaults),
+
+    defaultCarrierTeamKey: initial?.defaultCarrierTeamKey ?? '',
+    defaultCarrierRepId: initial?.defaultCarrierRepId ?? '',
+    marginTargetBps: initial?.marginTargetBps ?? null,
+    marginFloorBps: initial?.marginFloorBps ?? null,
+    quoteAutoReply: initial?.quoteAutoReply ?? null,
+    requiredLoadFields: initial?.requiredLoadFields ?? [],
+    checkCallPlan: initial?.checkCallPlan ?? null,
+    defaultTrackerId: initial?.defaultTrackerId ?? '',
+    trackingAutomation: initial?.trackingAutomation ?? null,
+    // A new customer is asked, never left null (D-AJ7); a legacy customer shows "Not set".
+    trackingMode: initial ? (initial.trackingMode ?? '') : 'AGENT',
+    trackingMethod: initial ? (initial.trackingMethod ?? '') : 'BOTH',
+    driverSmsTarget: initial ? (initial.driverSmsTarget ?? '') : DEFAULT_DRIVER_SMS_TARGET,
+
+    billingMethod: initial?.billingMethod ?? '',
+    apEmail: initial?.apEmail ?? '',
+    invoiceCopyText: arrayToLines(initial?.invoiceCopyEmails),
+    billingNeedsReview: initial?.billingNeedsReview ?? '',
   }
+}
+
+function parseOptionalCents(raw: number | null): number | null {
+  if (raw == null) return null
+  return Math.round(raw)
+}
+
+function parseOptionalBps(raw: number | null): number | null {
+  if (raw == null) return null
+  const n = Math.round(raw)
+  if (n < 0 || n > 10000) return null
+  return n
 }
 
 function validateCustomerForm(v: CustomerFormValue): Record<string, string> {
@@ -76,6 +243,37 @@ function validateCustomerForm(v: CustomerFormValue): Record<string, string> {
   if (!v.name.trim()) errors.name = 'Name is required'
   if (v.paymentTermsDays.trim() && (Number.isNaN(Number(v.paymentTermsDays)) || Number(v.paymentTermsDays) < 0)) {
     errors.paymentTermsDays = 'Enter a whole number of days'
+  }
+  const warnBps = v.creditUsageWarningBps
+  if (warnBps != null && (warnBps < 0 || warnBps > 10000)) {
+    errors.creditUsageWarningBps = 'Enter 0–10000 basis points'
+  }
+  const maxDaysLate = v.maxDaysLate
+  if (maxDaysLate != null && (maxDaysLate < 0 || !Number.isInteger(maxDaysLate))) {
+    errors.maxDaysLate = 'Enter a whole number of days'
+  }
+  const gpSplit = v.gpSplitBps
+  if (gpSplit != null && (gpSplit < 0 || gpSplit > 10000)) {
+    errors.gpSplitBps = 'Enter 0–10000 basis points'
+  }
+  const pricing = v.pricingDefaults
+  if (pricing.defaultBps != null && (pricing.defaultBps < 0 || pricing.defaultBps > 10000)) {
+    errors.pricingDefaultsDefaultBps = 'Enter 0–10000 basis points'
+  }
+  if (pricing.minProfitCents != null && pricing.maxProfitCents != null && pricing.minProfitCents > pricing.maxProfitCents) {
+    errors.pricingDefaultsProfitRange = 'Min profit must be ≤ max profit'
+  }
+
+  const targetBps = v.marginTargetBps
+  if (targetBps != null && (targetBps < 0 || targetBps > 9999)) {
+    errors.marginTargetBps = 'Enter 0–9999 basis points'
+  }
+  const floorBps = v.marginFloorBps
+  if (floorBps != null && (floorBps < 0 || floorBps > 9999)) {
+    errors.marginFloorBps = 'Enter 0–9999 basis points'
+  }
+  if (targetBps != null && floorBps != null && floorBps > targetBps) {
+    errors.marginFloorBps = 'Floor cannot be above the target margin'
   }
   return errors
 }
@@ -87,7 +285,11 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     setValue((p) => ({ ...p, [key]: v }))
   }
 
-  const toRecord = (): CustomerRecord => ({
+  const setPartial = (patch: Partial<CustomerFormValue>) => {
+    setValue((p) => ({ ...p, ...patch }))
+  }
+
+  const toRecord = (opts: { includeStatus?: boolean } = {}): CustomerRecord => ({
     id: initial?.id ?? '',
     createdAt: initial?.createdAt ?? new Date().toISOString(),
     updatedAt: initial?.updatedAt ?? new Date().toISOString(),
@@ -109,18 +311,77 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
       country: value.billingAddressCountry.trim() || null,
     },
     paymentTermsDays: value.paymentTermsDays.trim() ? Number(value.paymentTermsDays) : null,
-    creditLimitCents: value.creditLimitCents,
+    creditLimitCents: parseOptionalCents(value.creditLimitCents),
     creditHoldFlag: value.creditHoldFlag,
-    requiredDocsForInvoice: linesToArray(value.requiredDocsText),
+    requiredDocsForInvoice: value.requiredDocs,
+    reviewRequirements: value.reviewRequirements,
     defaultDivisionKey: value.defaultDivisionKey || null,
     defaultSalesRepId: value.defaultSalesRepId.trim() || null,
     aliases: linesToArray(value.aliasesText),
     active: value.active,
     apptWorkflow: value.apptWorkflow === 'UNSET' ? null : value.apptWorkflow,
+
+    status: opts.includeStatus !== false ? (value.status || null) : (initial?.status ?? null),
+    leadSource: value.leadSource.trim() || null,
+    industry: value.industry.trim() || null,
+    serviceTier: value.serviceTier.trim() || null,
+    website: value.website.trim() || null,
+    freeCreditRequired: value.freeCreditRequired,
+    creditUsageWarningBps: parseOptionalBps(value.creditUsageWarningBps),
+    maxDaysLate: value.maxDaysLate,
+    invoiceFrequency: value.invoiceFrequency || null,
+    visibilityPrefs: value.visibilityPrefs,
+    gpSplitBps: parseOptionalBps(value.gpSplitBps),
+    rateConTerms: value.rateConTerms.trim() || null,
+    teamKey: value.teamKey.trim() || null,
+    operatedById: value.operatedById.trim() || null,
+    accountOwnerIds: linesToArray(value.accountOwnerIdsText),
+    project44CustomerId: value.project44CustomerId.trim() || null,
+    hubspotId: value.hubspotId.trim() || null,
+
+    contacts: value.contacts.length ? value.contacts : null,
+    billToParties: value.billToParties.length ? value.billToParties : null,
+    requiredReferences: value.requiredReferences.length ? value.requiredReferences : null,
+    chargeCodeOverrides: value.chargeCodeOverrides.length ? value.chargeCodeOverrides : null,
+    defaultCharges: value.defaultCharges.length ? value.defaultCharges : null,
+    pricingDefaults: value.pricingDefaults,
+    quotingDefaults: value.quotingDefaults,
+
+    defaultCarrierTeamKey: value.defaultCarrierTeamKey.trim() || null,
+    defaultCarrierRepId: value.defaultCarrierRepId.trim() || null,
+    marginTargetBps: parseOptionalBps(value.marginTargetBps),
+    marginFloorBps: parseOptionalBps(value.marginFloorBps),
+    quoteAutoReply: value.quoteAutoReply,
+    requiredLoadFields: value.requiredLoadFields.length ? value.requiredLoadFields : null,
+    checkCallPlan: value.checkCallPlan,
+    defaultTrackerId: value.defaultTrackerId.trim() || null,
+    trackingAutomation: value.trackingAutomation && Object.keys(value.trackingAutomation).length ? value.trackingAutomation : null,
+    // '' = never chosen: leave the key off so a save of another field keeps what is stored.
+    ...(value.trackingMode ? { trackingMode: value.trackingMode } : {}),
+    ...(value.trackingMethod ? { trackingMethod: value.trackingMethod } : {}),
+    ...(value.driverSmsTarget ? { driverSmsTarget: value.driverSmsTarget } : {}),
+
+    billingMethod: value.billingMethod || null,
+    apEmail: value.apEmail.trim() || null,
+    invoiceCopyEmails: parseEmailList(value.invoiceCopyText),
+    billingNeedsReview: value.billingNeedsReview.trim() || null,
   })
 
-  const errors = validateCustomerForm(value)
-  return { value, set, toRecord, errors }
+  const errors = useMemo(() => {
+    const base = validateCustomerForm(value)
+    // Same rule as the server: billing fields are only checked once they change, so a flagged
+    // imported customer can still be edited for anything else.
+    const apEmail = value.apEmail.trim().toLowerCase()
+    const copy = parseEmailList(value.invoiceCopyText)
+    const changed =
+      (value.billingMethod || null) !== (initial?.billingMethod ?? null) ||
+      (apEmail || null) !== (initial?.apEmail?.trim().toLowerCase() || null) ||
+      copy.join(',') !== (initial?.invoiceCopyEmails ?? []).join(',')
+    return changed
+      ? { ...base, ...validateBillingFields({ billingMethod: value.billingMethod || null, apEmail, invoiceCopyEmails: copy }) }
+      : base
+  }, [value, initial])
+  return { value, set, setPartial, toRecord, errors }
 }
 
-export { APPT_WORKFLOW_OPTIONS }
+export { APPT_WORKFLOW_OPTIONS, INVOICE_FREQUENCY_OPTIONS }

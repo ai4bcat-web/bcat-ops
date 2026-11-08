@@ -2,6 +2,33 @@ export const TZ = 'America/Chicago'
 
 // ── Display formatters (all output in Chicago time) ──────────────────────────
 
+/**
+ * `Mar 9` — the board's short date. '' for a missing or invalid value: a grid cell
+ * says nothing when there is nothing to say, never "Invalid Date" and never a dash.
+ */
+export function formatBoardDate(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ, month: 'short', day: 'numeric',
+  }).format(d)
+}
+
+/**
+ * `Mar 9, 9:30 PM` — the board's short timestamp. A check call an hour from now and
+ * one tomorrow read alike without the date, and every board timestamp is Central no
+ * matter where the viewer sits.
+ */
+export function formatBoardDateTime(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  }).format(d)
+}
+
 export function formatTime(iso: string): string {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return iso  // return raw string (e.g. 'TBD') if not a valid date

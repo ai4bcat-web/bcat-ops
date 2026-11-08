@@ -4,7 +4,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { LocationRecord } from '@/types/tms'
 
 vi.mock('@vis.gl/react-google-maps', () => ({ APIProvider: ({ children }: { children: unknown }) => children, Map: () => null, AdvancedMarker: () => null }))
-vi.mock('@/store/useAppStore', () => ({ useAppStore: (sel: (s: { loads: unknown[] }) => unknown) => sel({ loads: [] }) }))
+// LocationDetail windows its visit history through useEnsureLoadRange, which reads these two.
+const store = { loads: [], loadedMonths: new Set<string>(), ensureLoadRange: () => Promise.resolve() }
+vi.mock('@/store/useAppStore', () => ({ useAppStore: (sel: (s: typeof store) => unknown) => sel(store) }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const { LocationDetail } = await import('./LocationDetail')

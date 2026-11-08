@@ -56,6 +56,8 @@ export function FactoringDocCell({
 }) {
   const input = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
+  // The identity table on purpose: the cell looks a load up by id to hang its documents on,
+  // and a voided load keeps both its id and its Pro #.
   const loads = useAppStore((s) => s.loads)
   const updateLoad = useAppStore((s) => s.updateLoad)
   const load: Load | undefined = loadId ? loads.find((l) => l.id === loadId) : undefined
@@ -176,15 +178,13 @@ export function FactoringDocCell({
               ? `Replace the ${LABEL[kind]}`
               : `Upload the ${LABEL[kind]} — OTR will not take the invoice without it`
         }
+        className={`tms-badge ${present ? 'tms-badge-green' : 'tms-badge-red'}`}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 4,
           height: 24, padding: '0 7px', borderRadius: 6,
           fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
           cursor: busy || noLoad ? 'default' : 'pointer',
           opacity: noLoad ? 0.5 : 1, whiteSpace: 'nowrap',
-          ...(present
-            ? { border: '1px solid #86efac', background: '#dcfce7', color: '#15803d' }
-            : { border: '1px solid #fca5a5', background: '#fee2e2', color: '#b91c1c' }),
         }}
       >
         {busy ? (
@@ -261,6 +261,6 @@ export function FactoringDocCell({
 const iconBtn: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
   width: 22, height: 22, borderRadius: 5, cursor: 'pointer',
-  border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
-  color: 'var(--ds-t2)', fontFamily: 'inherit',
+  border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
+  color: 'var(--tms-text)', fontFamily: 'inherit',
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
 import { listIntakeItems, updateIntakeItem, deleteIntakeItem, notifySlackStatusChange } from '@/lib/apiClient'
+import { startVisiblePoll } from '@/lib/visiblePoll'
 import type { IntakeItem, IntakeStatus } from '@/types'
 
 const POLL_MS = 30_000
@@ -40,8 +41,7 @@ export function useIntakeItems(filter?: { assignedTo?: string; source?: string }
   useEffect(() => {
     initialLoadRef.current = true
     void load()
-    const id = setInterval(load, POLL_MS)
-    return () => clearInterval(id)
+    return startVisiblePoll(() => void load(), POLL_MS)
   }, [load])
 
   const loading = loadedKey !== key

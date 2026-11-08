@@ -69,6 +69,8 @@ export interface TenderPrefill {
   pickupNumber?: string
   customer?: string
   weightLb?: number
+  /** A `SHIPMENT_TYPES` key the model read from the e-mail; the parser never sets it. */
+  shipmentType?: string
   stops: TenderStopPrefill[]
 }
 

@@ -31,6 +31,9 @@ export interface VendorPayable {
   fromEmail?: string | null
   emailBody?: string | null
   attachments: VendorApAttachment[]
+  /** Step AG: the AP-inbox e-mail that filled this row. */
+  apInboxItemId?: string | null
+  apInboxSourceUrl?: string | null
   receivedAt: string
   paymentMethod?: string | null
   paymentDate?: string | null

@@ -10,7 +10,7 @@
  * both represented: a Clearinghouse query or a policy acknowledgement is an audit item
  * with no file attached, and dropping those would lose the proof they happened.
  */
-import type { FleetGroup } from '@/types/equipment'
+import type { DriverFleet } from '@/types/equipment'
 import type { OnboardingTask, OnboardingTaskStatus } from '@/types'
 
 /** Statuses that mean the item needs nothing further. */
@@ -96,7 +96,7 @@ export interface ApplicationForm {
  * 391.21) — the fleet-specific questions are built out per form, and keying them
  * separately from the start means adding those never needs a data migration.
  */
-export const APPLICATION_FORMS: Record<FleetGroup, ApplicationForm> = {
+export const APPLICATION_FORMS: Record<DriverFleet, ApplicationForm> = {
   LOCAL: {
     key: 'application_local',
     label: 'Local (Ivan) driver application',
@@ -112,9 +112,14 @@ export const APPLICATION_FORMS: Record<FleetGroup, ApplicationForm> = {
     label: 'Amazon driver application',
     blurb: 'DOT employment application for Amazon Relay work, including lease details.',
   },
+  OWNER_OPERATOR: {
+    key: 'application_owner_operator',
+    label: 'Owner operator application',
+    blurb: 'DOT application for owner operators running their own truck, including lease details.',
+  },
 }
 
-export const applicationFormFor = (fleetGroup?: FleetGroup | null): ApplicationForm | null =>
+export const applicationFormFor = (fleetGroup?: DriverFleet | null): ApplicationForm | null =>
   fleetGroup ? APPLICATION_FORMS[fleetGroup] : null
 
 /**
@@ -122,7 +127,7 @@ export const applicationFormFor = (fleetGroup?: FleetGroup | null): ApplicationF
  * which form they get and which documents their file will ask for — inviting without
  * one produces a driver nobody can classify later.
  */
-export function canSendApplication(driver: { email?: string | null; fleetGroup?: FleetGroup | null }): {
+export function canSendApplication(driver: { email?: string | null; fleetGroup?: DriverFleet | null }): {
   ok: boolean
   reason?: string
 } {
@@ -207,7 +212,7 @@ export function statusAfterToggle(
  * that contradicted the fleet — the same duplicate-entry problem as the classification
  * field.
  */
-export const templateIdForFleet = (fleetGroup?: FleetGroup | null): string | null =>
+export const templateIdForFleet = (fleetGroup?: DriverFleet | null): string | null =>
   fleetGroup === 'AMAZON' ? 'amazon-driver-v1' : null
 
 

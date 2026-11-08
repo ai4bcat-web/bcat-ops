@@ -103,6 +103,16 @@ vi.mock('@aws-sdk/client-sesv2', () => ({
   }),
 }))
 
+const lambdaSendMock = vi.hoisted(() => vi.fn())
+vi.mock('@aws-sdk/client-lambda', () => ({
+  LambdaClient: vi.fn(function () {
+    return { send: lambdaSendMock }
+  }),
+  InvokeCommand: vi.fn(function (this: { input: unknown }, input: unknown) {
+    this.input = input
+  }),
+}))
+
 interface SlackResponse {
   ok: boolean
   ts?: string
@@ -134,6 +144,7 @@ vi.hoisted(() => {
   process.env.SES_FROM_ADDRESS = 'onboarding@bcatcorp.com'
   process.env.AWS_REGION = 'us-east-1'
   process.env.LOADS_INTAKE_SECRET = 'loads-intake-secret'
+  process.env.WORKFLOW_AGENT_FUNCTION_NAME = 'workflow-agent-test'
 })
 
 class ConditionalCheckFailedException extends Error {
@@ -329,6 +340,8 @@ beforeEach(() => {
   fetchMock.mockResolvedValue({ json: async () => ({ ok: true, ts: '1699999999.000100' }) })
   sesSendMock.mockReset()
   sesSendMock.mockResolvedValue({ MessageId: 'ses-msg-123' })
+  lambdaSendMock.mockReset()
+  lambdaSendMock.mockResolvedValue({})
   process.env.LOADS_INTAKE_SECRET = SECRET
   process.env.SES_FROM_ADDRESS = 'onboarding@bcatcorp.com'
   currentTables = defaultTables()
@@ -866,6 +879,46 @@ describe('email intake handler routes', () => {
 
       expect(sesSendMock).toHaveBeenCalled()
       expect(fetchMock).toHaveBeenCalledWith('https://slack.com/api/chat.postMessage', expect.anything())
+    })
+
+    it('hands the committed rate confirmation to the tender agent without touching its answer', async () => {
+      // Step K. The hand-off is fire-and-forget: a workflow agent that refuses the
+      // invoke must not turn a committed submission into a failure the bridge retries,
+      // which would re-notify dispatch for freight that is already in.
+      const committable = () => {
+        currentTables['DriverSubmission-test'][SUBMISSION_EMAIL_ID] = {
+          id: SUBMISSION_EMAIL_ID,
+          driverId: DRIVER_A_ID,
+          driverName: 'Jose Ramirez',
+          status: 'NEW',
+          source: 'EMAIL',
+          externalMessageId: GMAIL_ID,
+          pendingUploads: { RATECON: [] },
+        }
+        return baseEvent('/email-intake/commit', {
+          secret: SECRET,
+          gmailMessageId: GMAIL_ID,
+          submissionId: SUBMISSION_EMAIL_ID,
+          attachments: [
+            { fileName: 'rc.jpg', contentType: 'image/jpeg', byteSize: 2000, s3Key: `driver-docs/${DRIVER_A_ID}/${SUBMISSION_EMAIL_ID}/RATECON/12345-1.jpg` },
+          ],
+        })
+      }
+
+      const ok = await handler(committable())
+      expect(ok.statusCode).toBe(200)
+      expect(lambdaSendMock).toHaveBeenCalledTimes(1)
+      const invoke = lambdaSendMock.mock.calls[0][0] as { input: { FunctionName: string; InvocationType: string; Payload: Buffer } }
+      expect(invoke.input.FunctionName).toBe('workflow-agent-test')
+      expect(invoke.input.InvocationType).toBe('Event')
+      expect(JSON.parse(invoke.input.Payload.toString())).toEqual({
+        runFor: { sourceKind: 'DRIVER_SUBMISSION', sourceId: SUBMISSION_EMAIL_ID, inboxRole: 'TENDER', provider: 'GMAIL' },
+      })
+
+      lambdaSendMock.mockRejectedValue(new Error('AccessDeniedException'))
+      const stillOk = await handler(committable())
+      expect(stillOk.statusCode).toBe(200)
+      expect(JSON.parse(stillOk.body).ok).toBe(true)
     })
 
     it('is idempotent when the submission is already committed', async () => {

@@ -20,18 +20,21 @@ const drivers = [{ id: 'drv-1', name: 'Amazon Driver', type: 'driver', active: t
 
 const podState = vi.hoisted(() => ({ items: [] as { loadId?: string | null }[] }))
 
-vi.mock('@/lib/apiClient', async (orig) => ({
-  ...(await orig() as object),
-  listLoads: () => Promise.resolve(loads),
+vi.mock('@/lib/apiClient', () => ({
   listCustomers: () => Promise.resolve([]),
   listLocations: () => Promise.resolve([]),
   listDriverPaySettings: () => Promise.resolve(settings),
   listDriverPayDeductions: () => Promise.resolve([]),
   listDriverPayCredits: () => Promise.resolve([]),
+  listFactoringItems: () => Promise.resolve([]),
+}))
+vi.mock('@/lib/driverSubmissionsClient', () => ({
+  listDriverSubmissions: () => Promise.resolve([]),
 }))
 vi.mock('@/lib/podsClient', () => ({
   listPods: () => Promise.resolve({ items: podState.items, nextToken: null }),
 }))
+vi.mock('@/hooks/useLoads', () => ({ useLoads: () => ({ loads }), useEnsureLoadRange: () => true }))
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers, updateDriver: vi.fn() }) }))
 vi.mock('@/hooks/useFuelTransactions', () => ({ useFuelTransactions: () => ({ transactions: [] }) }))
 
@@ -52,6 +55,8 @@ describe('useOwnerOperatorPay', () => {
   it('carries the first owner-operator week’s expenses, charging them exactly once', async () => {
     // 9/27 is the first owner-operator period, so its charges settle here and NOT on the
     // Amazon statement — one driver-week's insurance must never hit both pages.
+    // The load has its POD, so it pays instead of being held off the check.
+    podState.items = [{ loadId: 'l1' }]
     const { result } = renderHook(() => useOwnerOperatorPay('2026-09-27'))
     await waitFor(() => expect(result.current.rows).toHaveLength(1))
     const row = result.current.rows[0]

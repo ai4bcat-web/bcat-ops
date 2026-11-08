@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useDriverAuth } from './useDriverAuth'
 import { InstallHintSection } from './InstallHintSection'
+import { TmsAlert } from '@/features/tms/kit/TmsAlert'
+import { useTmsTheme } from '@/features/tms/tmsTheme'
 
 type Mode = 'signin' | 'forgot' | 'reset'
 
@@ -58,6 +60,7 @@ function humanizeResetError(raw: string): string {
 }
 
 export default function DriverLoginPage() {
+  useTmsTheme()
   const navigate = useNavigate()
   const { signIn, forgotPassword, confirmForgotPassword } = useDriverAuth()
 
@@ -134,11 +137,11 @@ export default function DriverLoginPage() {
   }
 
   return (
-    <div className="dark min-h-screen bg-background text-foreground flex flex-col justify-center px-6 py-12">
+    <div className="tms-driver tms-driver-inset flex flex-col justify-center px-6 py-12">
       <div className="mx-auto w-full max-w-sm">
         <div className="mb-10 text-center">
-          <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1ea8f3]">
-            <span className="text-2xl font-bold text-white">BCAT</span>
+          <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-[color:var(--tms-primary)]">
+            <span className="text-2xl font-bold text-[color:var(--tms-on-primary)]">BCAT</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">
             {mode === 'signin' && 'Driver sign in'}
@@ -148,19 +151,15 @@ export default function DriverLoginPage() {
         </div>
 
         {error && (
-          <div className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {error}
-          </div>
+          <TmsAlert tone="red" className="mb-6">{error}</TmsAlert>
         )}
         {message && (
-          <div className="mb-6 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-            {message}
-          </div>
+          <TmsAlert tone="green" className="mb-6">{message}</TmsAlert>
         )}
 
         <form onSubmit={mode === 'signin' ? handleSignIn : mode === 'forgot' ? handleForgot : handleReset} className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="driver-email" className="text-sm font-medium text-slate-300">
+            <Label htmlFor="driver-email" className="text-sm font-medium text-foreground">
               Email
             </Label>
             <Input
@@ -171,14 +170,14 @@ export default function DriverLoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               disabled={loading}
-              className="h-14 rounded-xl border-slate-700 bg-slate-900/60 px-4 text-base text-white placeholder:text-slate-500 focus-visible:ring-[#1ea8f3]"
+              className="h-14 rounded-xl px-4 text-base"
             />
-            <p className="text-xs text-slate-400">Use the same email dispatch has on file.</p>
+            <p className="text-xs text-muted-foreground">Use the same email dispatch has on file.</p>
           </div>
 
           {mode === 'signin' && (
             <div className="space-y-2">
-              <Label htmlFor="driver-password" className="text-sm font-medium text-slate-300">
+              <Label htmlFor="driver-password" className="text-sm font-medium text-foreground">
                 Password
               </Label>
               <div className="relative">
@@ -190,13 +189,13 @@ export default function DriverLoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   disabled={loading}
-                  className="h-14 rounded-xl border-slate-700 bg-slate-900/60 px-4 pr-12 text-base text-white placeholder:text-slate-500 focus-visible:ring-[#1ea8f3]"
+                  className="h-14 rounded-xl px-4 pr-12 text-base"
                 />
                 <button
                   type="button"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                   onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-slate-400"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-muted-foreground"
                 >
                   {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
@@ -207,7 +206,7 @@ export default function DriverLoginPage() {
           {mode === 'reset' && (
             <>
               <div className="space-y-2">
-                <Label htmlFor="driver-code" className="text-sm font-medium text-slate-300">
+                <Label htmlFor="driver-code" className="text-sm font-medium text-foreground">
                   Verification code
                 </Label>
                 <Input
@@ -218,11 +217,11 @@ export default function DriverLoginPage() {
                   onChange={(e) => setCode(e.target.value)}
                   placeholder="123456"
                   disabled={loading}
-                  className="h-14 rounded-xl border-slate-700 bg-slate-900/60 px-4 text-center text-lg tracking-[0.5em] text-white placeholder:text-slate-500 focus-visible:ring-[#1ea8f3]"
+                  className="h-14 rounded-xl px-4 text-center text-lg tracking-[0.5em]"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="driver-new-password" className="text-sm font-medium text-slate-300">
+                <Label htmlFor="driver-new-password" className="text-sm font-medium text-foreground">
                   New password
                 </Label>
                 <Input
@@ -233,7 +232,7 @@ export default function DriverLoginPage() {
                   onChange={(e) => setNewPassword(e.target.value)}
                   placeholder="••••••••"
                   disabled={loading}
-                  className="h-14 rounded-xl border-slate-700 bg-slate-900/60 px-4 text-base text-white placeholder:text-slate-500 focus-visible:ring-[#1ea8f3]"
+                  className="h-14 rounded-xl px-4 text-base"
                 />
               </div>
             </>
@@ -254,17 +253,17 @@ export default function DriverLoginPage() {
         {mode === 'signin' && <InstallHintSection />}
 
         {mode === 'signin' && (
-          <div className="mt-6 flex flex-col gap-4 text-center text-sm text-slate-400">
+          <div className="mt-6 flex flex-col gap-4 text-center text-sm text-muted-foreground">
             <button
               type="button"
               onClick={() => { setMode('forgot'); setError(null); setMessage(null) }}
-              className="mx-auto font-medium text-[#1ea8f3] hover:underline"
+              className="mx-auto font-medium text-[color:var(--tms-primary)] hover:underline"
             >
               Forgot password?
             </button>
             <p>
               Need an account?{' '}
-              <Link to="/driver/signup" className="font-semibold text-[#1ea8f3] hover:underline">
+              <Link to="/driver/signup" className="font-semibold text-[color:var(--tms-primary)] hover:underline">
                 Sign up
               </Link>
             </p>
@@ -272,11 +271,11 @@ export default function DriverLoginPage() {
         )}
 
         {mode !== 'signin' && (
-          <div className="mt-8 text-center text-sm text-slate-400">
+          <div className="mt-8 text-center text-sm text-muted-foreground">
             <button
               type="button"
               onClick={() => { setMode('signin'); setError(null); setMessage(null) }}
-              className="font-medium text-[#1ea8f3] hover:underline"
+              className="font-medium text-[color:var(--tms-primary)] hover:underline"
             >
               Back to sign in
             </button>

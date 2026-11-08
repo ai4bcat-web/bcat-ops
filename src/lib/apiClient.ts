@@ -1,19 +1,129 @@
 import { generateClient } from 'aws-amplify/data'
+import { messageAttachments } from '@/lib/shipmentThread'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
+import outputs from '../../amplify_outputs.json'
+import { modelAvailable, modelsAvailable } from '@/lib/modelAvailability'
 import type { TimeOffType, TimeOffStatus } from './timeOff'
-import type { Load, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
+import type { Load, Stop, ApptType, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
+import type { McpPullState } from '@/lib/integrations/mcpPull'
+import type { McpReviewCard } from '@/lib/integrations/mcpReview'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
 import { fileContentType } from '@/lib/disputeFiles'
+import { fixOfRow, loadPingKey, type TrackingFix } from '@/lib/trackingPings'
 import type { FixedExpenseInput } from './driverPay'
 import type { DispatchConversation, DispatchMessage } from './dispatch'
 import type { VendorPayable, VendorApAttachment, VendorPayableDetails, VendorPayment } from '@/types/vendorAp'
-import type { CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion, LocationMergePreview, LocationMergeJob } from '@/types/tms'
+import type {
+  CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion,
+  LocationMergePreview, LocationMergeJob, ImportJob,
+  AljexImportJob, AljexMappingProfile, AljexProfileInput, AljexReportLink, AljexSampleRow, ApplyAljexImportInput,
+  AljexFileImportAction, AljexFileImportInput, AljexFileImportResult,
+  AljexCodeMapRecord, AljexCodeSummary, LegacyAljexRowResult, ReassignByRepCodeInput, ReassignByRepCodeResult,
+  SetAljexCodeMapInput,
+  CsvExportStartInput, DataExportJob, DataExportLinks, DataStatus, ImportReportSummary,
+  PlanAljexImportInput, PrepareAljexImportInput, PrepareAljexImportResult, SeedProCounterInput,
+  SeedProCounterResult, SyncImportedCarriersResult,
+  ShipmentRecord, OrderRecord, LoadCarrierRecord, LoadFinancialsRecord, LoadChargeRecord,
+  LoadChargeInput, ShipmentBundle, ShipmentLoadFields, ShipmentStatus, ShipmentMode,
+  LoadWorkflowStatus, AssignmentType,
+  CarrierRecord, CarrierContactRecord, CarrierPaymentMethodRecord, CarrierDocumentRecord,
+  CarrierBundle, CarrierStatus, CarrierStatusReason, CarrierContactType, CarrierDocumentType,
+  CarrierPaymentMethodKind, CarrierPayeeType, QuickPayTier,
+  ChargeSide, CheckCallNotifyChannel, CheckCallType, IncidentType, LoadCheckCallRecord,
+  TrackingContact, TrackingLinkRecord, CustomerNotification,
+  ShipmentDocumentRecord, ShipmentDocumentType, ShipmentDocumentAudience,
+  ShipmentNoticeRecord, DocGateResult,
+  InvoiceRecord, ArPaymentRecord, ArPaymentMethod, ArSettings, ArStatus,
+  BatchShipmentTask, BatchShipmentTaskResult,
+  PaymentApplication, CreditApplication,
+  ApStatus, CarrierBillRecord, ApPaymentRecord, ApPaymentMethod, ApPaymentApplication,
+  ApPayeeKind, ApRemitTo, ApSettings,
+  QuoteRecord, QuoteSettings, QuoteLostReason, QuoteSide, QuoteAcceptedVia,
+  LaneRateSampleRecord, OrderReference, RateType,
+  UserProfileRecord, RoleKey, CommissionRecord, CommissionPayPeriodRecord,
+  CommissionSettings, ShipmentSettings,
+  OwnershipDivisionRecord, OwnershipRuleRecord, ShipmentColumnTemplateRecord, RevTagSource,
+  WorkflowRunRecord, WorkflowAgentKey,
+} from '@/types/tms'
+import type { CreditSummary } from '@/lib/customerCredit'
+import type { QuotePricingResult } from '@/lib/quotes'
+import type { LaneIntelligence } from '@/lib/laneIntel'
+import type { ResolveContext, Resolution } from '@/lib/ownership'
+import type { ReleaseGateResult } from '@/lib/releaseGate'
+import type { LoadReviewReason } from '@/lib/loadReview'
+import type { AdapterResult, Capability, IntegrationRecord } from '@/lib/integrations/types'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
+import type {
+  IntakeFields, IntakeLoadRecord, IntakeStatus as IntakeLoadStatus,
+} from '@/types/intake'
+import { cachedList, invalidateLists } from '@/lib/listCache'
+import { parseTrackingPrefs, type TrackingPrefsOverride } from '@/lib/trackingPrefs'
+import { batchByIndex, batchByIndexPairs, batchGet, setDefaultGraphqlRunner } from '@/lib/aliasBatch'
+import { LOAD_WORKFLOW_STATUSES } from '@/lib/shipmentStatus'
 
 // Untyped client — our own types from src/types handle type safety
-const client = generateClient()
+const rawClient = generateClient()
+
+/**
+ * The one choke point every request passes through. A mutation clears the list cache (any
+ * write by this tab must be visible to the next cached read); the Lambda-backed ManageUsers
+ * *queries* with a non-list action are writes too and clear the profile list. Subscriptions
+ * (observables) and plain queries pass through untouched.
+ */
+/** Router mutations whose action only reads: the UPPER_SNAKE read verbs of the tms*Actions routers (optionally behind the SPOT_/CRM_ prefix) and the lowercase read actions of manageDispatch. */
+const READ_ROUTER_ACTION = /^(?:SPOT_|CRM_|CS_|AP_INBOX_)?(GET|LIST|SEARCH|FIND|READ|COUNT|PREVIEW|CHECK|LOOKUP|STATUS)(_|$)/
+const READ_DISPATCH_ACTIONS = new Set(['status', 'getSettings', 'listStaff', 'mediaUrl', 'slackUrl'])
+function isReadOnlyRouterCall(text: string, action: unknown): boolean {
+  if (typeof action !== 'string') return false
+  if (/^\s*mutation\s+ManageDispatch\b/.test(text)) return READ_DISPATCH_ACTIONS.has(action)
+  return /^\s*mutation\s+Tms\w*Actions\b/.test(text) && READ_ROUTER_ACTION.test(action)
+}
+function touchesWrite(opts: unknown): 'all' | 'profiles' | null {
+  const o = opts as { query?: unknown; variables?: { action?: unknown } } | null
+  const text = typeof o?.query === 'string' ? o.query : ''
+  if (/^\s*mutation\b/.test(text)) return isReadOnlyRouterCall(text, o?.variables?.action) ? null : 'all'
+  if (/^\s*query\s+ManageUsers\b/.test(text) && o?.variables?.action !== 'list') return 'profiles'
+  return null
+}
+const client: typeof rawClient = new Proxy(rawClient, {
+  get(target, prop, receiver) {
+    const value = Reflect.get(target, prop, receiver)
+    if (prop !== 'graphql' || typeof value !== 'function') return value
+    return (...args: unknown[]) => {
+      const out = (value as (...a: unknown[]) => unknown).apply(target, args)
+      const write = touchesWrite(args[0])
+      if (!write || !(out instanceof Promise)) return out
+      const clear = () => invalidateLists(write === 'all' ? undefined : 'directory:userProfiles')
+      return out.then((r) => { clear(); return r }, (e) => { clear(); throw e })
+    }
+  },
+})
+
+/** Shared by the cached directory lists below: fresh 1 min, served stale (and refreshed) for 10 more. */
+const DIRECTORY_CACHE = { ttlMs: 60_000, staleMs: 600_000 }
+/** Callers sort and filter what they get back, so each gets its own array over the shared rows. */
+async function cachedDirectory<T>(name: string, load: () => Promise<T[]>): Promise<T[]> {
+  return [...(await cachedList(`directory:${name}`, load, DIRECTORY_CACHE))]
+}
+
+/**
+ * Whole-table side lists that a dozen mounted hooks each read on their own (pay settings x7, fuel x5,
+ * expenses x4 on the legacy dashboard): readers inside this window share one request. Any write through
+ * the client above clears it, so this tab never reads its own stale rows.
+ */
+async function sharedRead<T>(key: string, load: () => Promise<T[]>, ttlMs = 15_000): Promise<T[]> {
+  return [...(await cachedList(`shared:${key}`, load, { ttlMs }))]
+}
+
+// aliasBatch speaks to AppSync through this same client (queries pass through untouched).
+setDefaultGraphqlRunner(async (query, variables) => {
+  const r = await client.graphql({ query, variables }) as { data: Record<string, unknown>; errors?: unknown[] }
+  // A partial answer (data plus errors) must not look like success: a half-hydrated board is worse than an error.
+  if (r.errors?.length) throw r
+  return r.data
+})
 
 // ── GraphQL fragments ─────────────────────────────────────────────────────────
 
@@ -45,7 +155,31 @@ let loadsHaveEldReview = true
 let loadsHavePaperworkLocation = true
 let loadsHaveTrailer = true
 let loadsHaveFreight = true
+// Step C's declared cargo value — read by the carrier booking gates.
+let loadsHaveCargoValue = true
 let loadsHavePodNotes = true
+// Step B's shipment layer: the link to Shipment/Order plus the carrier-side status
+// and assignment. One flag for the whole group — they deploy together, and step D's
+// tracking columns ride the same flag because they land in the same Load deploy.
+let loadsHaveShipment = true
+const LOAD_SHIPMENT_FIELDS = `
+  shipmentId orderId loadNumber leg status statusChangedAt statusChangedBy statusSource
+  carrierRepId assignmentType activeLoadCarrierId carrierName equipmentType divisionKey
+  trackingProvider nextCheckCallAt nextCheckCallNote checkCallOpen pickupMonth
+  lastCheckCallAt lastCheckCallType lastKnownAt lastKnownCity lastKnownState
+  lastKnownLat lastKnownLng lastKnownPreviousAt lastKnownPreviousCity lastKnownPreviousState
+  lastKnownPreviousLat lastKnownPreviousLng lastKnownSource openIncidentCount deliveredAt
+  checkCallDueNotifiedAt checkCallOverdueNotifiedAt checkCallPlan checkCallPlanStartedAt checkCallAwaitingSince checkCallEscalatedAt checkCallFlaggedAt checkCallFlagReason
+  carrierAssignmentStatus
+`
+// Step R's revenue tags, mirrored from the shipment so the fleet pages can group by
+// business without joining. Their own flag: they land one deploy after the shipment
+// group above, and one unhandled throw here blanks every load in the app.
+let loadsHaveRevTag = true
+const LOAD_REV_FIELDS = ' revDivision revSubdivision revTagSource revRuleId salesRepId'
+// The shipment's void, mirrored onto the load (Step R). Its own flag for the same
+// reason as the group above: it lands one deploy later than the code that reads it.
+let loadsHaveVoided = true
 const loadFields = () => {
   let f = LOAD_FIELDS
   if (loadsHaveHot) f += ' hot unscheduled'
@@ -57,6 +191,10 @@ const loadFields = () => {
   if (loadsHaveTrailer) f += ' trailerNumber'
   if (loadsHaveFreight) f += ' commodity weight pieces piecesUnit'
   if (loadsHavePodNotes) f += ' podNotes'
+  if (loadsHaveCargoValue) f += ' cargoValueCents'
+  if (loadsHaveShipment) f += LOAD_SHIPMENT_FIELDS
+  if (loadsHaveRevTag) f += LOAD_REV_FIELDS
+  if (loadsHaveVoided) f += ' voidedAt'
   return f
 }
 
@@ -125,7 +263,7 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; podNotes: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; cargoValue: boolean; podNotes: boolean; shipment: boolean; revTag: boolean; voided: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
@@ -137,11 +275,85 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     paperworkLocation: /'paperworkLocation'/i.test(msg),
     trailer: /'trailerNumber'/i.test(msg),
     freight: /'(commodity|weight|pieces|piecesUnit)'/i.test(msg),
+    cargoValue: /'cargoValueCents'/i.test(msg),
     podNotes: /'podNotes'/i.test(msg),
+    shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth|lastCheckCallAt|lastCheckCallType|lastKnownAt|lastKnownCity|lastKnownState|lastKnownLat|lastKnownLng|lastKnownPreviousAt|lastKnownPreviousCity|lastKnownPreviousState|lastKnownPreviousLat|lastKnownPreviousLng|lastKnownSource|openIncidentCount|deliveredAt|checkCallDueNotifiedAt|checkCallOverdueNotifiedAt|carrierAssignmentStatus)'/i.test(msg),
+    revTag: /'(revDivision|revSubdivision|revTagSource|revRuleId|salesRepId)'/i.test(msg),
+    voided: /'voidedAt'/i.test(msg),
   }
 }
 
-export async function listLoads(): Promise<Load[]> {
+/**
+ * Clears the flag of every Load field group the backend rejected in `err`. True when at least
+ * one flag changed, i.e. the same read is worth retrying with the narrower selection.
+ */
+function healLoadFields(err: unknown): boolean {
+  const u = undefinedLoadFields(err)
+  let changed = false
+  if (loadsHaveHot && u.hot) {
+    console.warn("[apiClient] backend has no 'hot' field yet — querying loads without it until deploy")
+    loadsHaveHot = false; changed = true
+  }
+  if (loadsHaveStops && u.stops) {
+    console.warn("[apiClient] backend has no 'stops' field yet — querying loads without it until deploy")
+    loadsHaveStops = false; changed = true
+  }
+  if (loadsHaveSortOrder && u.sortOrder) {
+    console.warn("[apiClient] backend has no 'sortOrder' field yet — querying loads without it until deploy")
+    loadsHaveSortOrder = false; changed = true
+  }
+  if (loadsHaveCustomerId && u.customerId) {
+    console.warn("[apiClient] backend has no 'customerId' field yet — querying loads without it until deploy")
+    loadsHaveCustomerId = false; changed = true
+  }
+  if (loadsHaveEldReview && u.eldReview) {
+    console.warn("[apiClient] backend has no ELD review fields yet — querying loads without them until deploy")
+    loadsHaveEldReview = false; changed = true
+  }
+  if (loadsHavePaperworkLocation && u.paperworkLocation) {
+    console.warn("[apiClient] backend has no paperworkLocation yet — querying loads without it until deploy")
+    loadsHavePaperworkLocation = false; changed = true
+  }
+  if (loadsHaveTrailer && u.trailer) {
+    console.warn("[apiClient] backend has no trailerNumber yet — querying loads without it until deploy")
+    loadsHaveTrailer = false; changed = true
+  }
+  if (loadsHaveFreight && u.freight) {
+    console.warn("[apiClient] backend has no freight fields yet — querying loads without them until deploy")
+    loadsHaveFreight = false; changed = true
+  }
+  if (loadsHaveCargoValue && u.cargoValue) {
+    console.warn("[apiClient] backend has no cargoValueCents yet — querying loads without it until deploy")
+    loadsHaveCargoValue = false; changed = true
+  }
+  if (loadsHavePodNotes && u.podNotes) {
+    console.warn("[apiClient] backend has no podNotes yet — querying loads without it until deploy")
+    loadsHavePodNotes = false; changed = true
+  }
+  if (loadsHaveShipment && u.shipment) {
+    console.warn('[apiClient] backend has no shipment fields on Load yet — querying loads without them until deploy')
+    loadsHaveShipment = false; changed = true
+  }
+  if (loadsHaveRevTag && u.revTag) {
+    console.warn('[apiClient] backend has no revenue tags on Load yet — querying loads without them until deploy')
+    loadsHaveRevTag = false; changed = true
+  }
+  if (loadsHaveVoided && u.voided) {
+    console.warn('[apiClient] backend has no voidedAt on Load yet — querying loads without it until deploy')
+    loadsHaveVoided = false; changed = true
+  }
+  return changed
+}
+
+/**
+ * Every load-plane page reads this: the calendar, dispatch, appointments, the
+ * schedule, the pay and profitability hooks. A voided shipment has left the
+ * working set by Ryne's rule, so its loads do not come back from here — the
+ * record is still readable through the Shipments board's Voided tab, the
+ * shipment's History tab and the audit log, and `includeVoided` is how a
+ * history view asks for them explicitly.
+ */
+export async function listLoads(opts?: { includeVoided?: boolean }): Promise<Load[]> {
   // Every page: one DynamoDB scan stops at 1 MB whatever the limit, and the Load table
   // passed that in Oct 2026 — the loads past the first page silently vanished app-wide.
   type LoadPage = { items: (Load & { rateConfirmKey?: string })[]; nextToken?: string | null }
@@ -167,49 +379,12 @@ export async function listLoads(): Promise<Load[]> {
     try { result = await run(); break }
     catch (err) {
       if (attempt >= 2) throw err
-      const u = undefinedLoadFields(err)
-      let changed = false
-      if (loadsHaveHot && u.hot) {
-        console.warn("[apiClient] backend has no 'hot' field yet — querying loads without it until deploy")
-        loadsHaveHot = false; changed = true
-      }
-      if (loadsHaveStops && u.stops) {
-        console.warn("[apiClient] backend has no 'stops' field yet — querying loads without it until deploy")
-        loadsHaveStops = false; changed = true
-      }
-      if (loadsHaveSortOrder && u.sortOrder) {
-        console.warn("[apiClient] backend has no 'sortOrder' field yet — querying loads without it until deploy")
-        loadsHaveSortOrder = false; changed = true
-      }
-      if (loadsHaveCustomerId && u.customerId) {
-        console.warn("[apiClient] backend has no 'customerId' field yet — querying loads without it until deploy")
-        loadsHaveCustomerId = false; changed = true
-      }
-      if (loadsHaveEldReview && u.eldReview) {
-        console.warn("[apiClient] backend has no ELD review fields yet — querying loads without them until deploy")
-        loadsHaveEldReview = false; changed = true
-      }
-      if (loadsHavePaperworkLocation && u.paperworkLocation) {
-        console.warn("[apiClient] backend has no paperworkLocation yet — querying loads without it until deploy")
-        loadsHavePaperworkLocation = false; changed = true
-      }
-      if (loadsHaveTrailer && u.trailer) {
-        console.warn("[apiClient] backend has no trailerNumber yet — querying loads without it until deploy")
-        loadsHaveTrailer = false; changed = true
-      }
-      if (loadsHaveFreight && u.freight) {
-        console.warn("[apiClient] backend has no freight fields yet — querying loads without them until deploy")
-        loadsHaveFreight = false; changed = true
-      }
-      if (loadsHavePodNotes && u.podNotes) {
-        console.warn("[apiClient] backend has no podNotes yet — querying loads without it until deploy")
-        loadsHavePodNotes = false; changed = true
-      }
-      if (!changed) throw err
+      if (!healLoadFields(err)) throw err
     }
   }
   await customersReady
-  const items = result.data.listLoads.items ?? []
+  const all = result.data.listLoads.items ?? []
+  const items = opts?.includeVoided ? all : all.filter((l) => !l.voidedAt)
   return Promise.all(items.map((l) => resolveRateConfirmUrl(withCustomerPolicy(l))))
 }
 
@@ -230,6 +405,38 @@ function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown; cu
     const { customerId: _drop, ...rest } = out as T & { customerId?: unknown }
     out = rest as T
   }
+  if (!loadsHaveRevTag) {
+    const {
+      revDivision: _rd, revSubdivision: _rs, revTagSource: _rt, revRuleId: _rr, salesRepId: _sr, ...rest
+    } = out as T & {
+      revDivision?: unknown; revSubdivision?: unknown; revTagSource?: unknown
+      revRuleId?: unknown; salesRepId?: unknown
+    }
+    out = rest as T
+  }
+  // Never from here. `voidedAt` is read-only to a signed-in client — VOID_SHIPMENT
+  // owns it — and a page that spreads a whole load into a write (the scheduler's
+  // duplicate does) would otherwise send the field and be refused outright, or write
+  // a NULL attribute onto a brand-new load.
+  if ('voidedAt' in (out as object)) {
+    const { voidedAt: _drop, ...rest } = out as T & { voidedAt?: unknown }
+    out = rest as T
+  }
+  // The same rule, for the same reason, on the three identity fields (and, since the
+  // Aljex import, on `legacyImported`/`legacySource`: only the import engine may flag a
+  // load as history, otherwise a client could flag a live load to dodge the gates). A PRO is claimed
+  // atomically and never released, so `aljexId` — and the `tmsId`/`pickupNumber` that
+  // fall back to it — became field-level read-only to clients when the claim landed; only
+  // SET_LOAD_PRO may move one. The drawer and the calendar both save a whole payload that
+  // still carries all three, and AppSync refuses the entire mutation with
+  // "Unauthorized on [aljexId]" when one is present, so every unrelated load save would
+  // fail. Dropping them here keeps the write to what the client may actually change.
+  for (const field of ['aljexId', 'tmsId', 'pickupNumber', 'legacyImported', 'legacySource'] as const) {
+    if (field in (out as object)) {
+      const { [field]: _drop, ...rest } = out as T & Record<typeof field, unknown>
+      out = rest as unknown as T
+    }
+  }
   if (!loadsHaveStops) {
     const { stops: _drop, ...rest } = out as T & { stops?: unknown }
     return rest as T
@@ -238,18 +445,10 @@ function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown; cu
   return { ...out, stops: JSON.stringify(out.stops) }
 }
 
+// There is no createLoad: Load's model auth grants the client `read` and `update` only.
+// Legs come into being inside CREATE_SHIPMENT, where the PRO claim is taken in the same
+// transaction as the shipment number.
 // `customerApptWorkflow` is resolved from the Customer at read time and never written.
-export async function createLoad(
-  input: Omit<Load, 'id' | 'createdAt' | 'updatedAt'>
-): Promise<Load> {
-  const { rateConfirmUrl: _skip, customerApptWorkflow: _policy, ...rest } = input as Load & { rateConfirmUrl?: string }
-  const result = await client.graphql({
-    query: `mutation CreateLoad($input: CreateLoadInput!) { createLoad(input: $input) { ${loadFields()} } }`,
-    variables: { input: serializeLoadInput(rest) },
-  }) as { data: { createLoad: Load } }
-  return normalizeLoadStops(withCustomerPolicy(result.data.createLoad))
-}
-
 export async function updateLoad(
   id: string,
   patch: Partial<Omit<Load, 'id' | 'createdAt'>>
@@ -262,12 +461,9 @@ export async function updateLoad(
   return resolveRateConfirmUrl(withCustomerPolicy(result.data.updateLoad))
 }
 
-export async function deleteLoad(id: string): Promise<void> {
-  await client.graphql({
-    query: `mutation DeleteLoad($input: DeleteLoadInput!) { deleteLoad(input: $input) { id } }`,
-    variables: { input: { id } },
-  })
-}
+// There is no deleteLoad: Ryne, 2026-10-28 — a PRO number is permanent, so the
+// `delete` and `onDelete` operations are disabled on the Load model itself and no
+// token can erase a load. The only exit is Void on the shipment.
 
 // ── Real-time subscriptions ───────────────────────────────────────────────────
 
@@ -279,7 +475,6 @@ interface Subscribable<T> {
 export function subscribeToLoadChanges(callbacks: {
   onCreate?: (load: Load) => void
   onUpdate?: (load: Load) => void
-  onDelete?: (id: string) => void
 }): () => void {
   const handles: SubscriptionHandle[] = []
 
@@ -306,20 +501,17 @@ export function subscribeToLoadChanges(callbacks: {
       (d) => { if (d.onUpdateLoad) cb(normalizeLoadStops(withCustomerPolicy(d.onUpdateLoad))) },
     )
   }
-  if (callbacks.onDelete) {
-    const cb = callbacks.onDelete
-    wire<{ onDeleteLoad: { id: string } }>(
-      `subscription OnDeleteLoad { onDeleteLoad { id } }`,
-      (d) => { if (d.onDeleteLoad?.id) cb(d.onDeleteLoad.id) },
-    )
-  }
+  // No onDelete: the subscription does not exist on the model any more.
 
   return () => handles.forEach((h) => h.unsubscribe())
 }
 
 // ── Drivers ───────────────────────────────────────────────────────────────────
 
-export async function listDrivers(): Promise<Driver[]> {
+export function listDrivers(): Promise<Driver[]> {
+  return cachedDirectory('drivers', fetchDrivers)
+}
+async function fetchDrivers(): Promise<Driver[]> {
   const run = async () => client.graphql({
     query: `query ListDrivers { listDrivers(limit: 1000) { items { ${driverFields()} } } }`,
   }) as Promise<{ data: { listDrivers: { items: Driver[] } } }>
@@ -460,14 +652,69 @@ export async function deleteDriver(id: string): Promise<void> {
 
 // ── Audit log ─────────────────────────────────────────────────────────────────
 
-export async function listAuditLogs(): Promise<AuditLogEntry[]> {
-  const result = await client.graphql({
-    query: `query ListAuditLogs { listAuditLogs(limit: 10000) { items { ${AUDIT_FIELDS} } } }`,
-  }) as { data: { listAuditLogs: { items: (Omit<AuditLogEntry, 'changes'> & { changes: string })[] } } }
-  return (result.data.listAuditLogs.items ?? []).map((e) => ({
-    ...e,
-    changes: JSON.parse(e.changes ?? '{}'),
-  }))
+/**
+ * The audit log, every page. The table has no index on `entityId`, so a read is a scan that
+ * DynamoDB cuts off at 1 MB: stopping at the first page returned an arbitrary slice that
+ * drops recent rows once the table is large. `entityIds` narrows it server-side to those
+ * records' rows.
+ */
+export async function listAuditLogs(entityIds?: string[]): Promise<AuditLogEntry[]> {
+  type Page = { data: { listAuditLogs: { items: (Omit<AuditLogEntry, 'changes'> & { changes: string })[]; nextToken?: string | null } } }
+  const filter = entityIds && entityIds.length > 0 ? { or: entityIds.map((id) => ({ entityId: { eq: id } })) } : null
+  const entries: AuditLogEntry[] = []
+  let nextToken: string | null = null
+  do {
+    const result = await client.graphql({
+      query: `query ListAuditLogs($filter: ModelAuditLogFilterInput, $nextToken: String) { listAuditLogs(filter: $filter, limit: 10000, nextToken: $nextToken) { items { ${AUDIT_FIELDS} } nextToken } }`,
+      variables: { filter, nextToken },
+    }) as Page
+    for (const e of result.data.listAuditLogs.items ?? []) entries.push({ ...e, changes: JSON.parse(e.changes ?? '{}') })
+    nextToken = result.data.listAuditLogs.nextToken ?? null
+  } while (nextToken)
+  return entries
+}
+
+/** Raw AuditLog row as the generated queries return it (`changes` is a JSON string). */
+type RawAuditLog = Omit<AuditLogEntry, 'changes'> & { changes: string | null }
+const parseAudit = (e: RawAuditLog): AuditLogEntry => ({ ...e, changes: JSON.parse(e.changes ?? '{}') })
+
+// Flipped off the first time the backend answers that the (entityType, entityId) index is not
+// there (frontend deployed ahead of the data stack); the old filtered scan then serves.
+let auditLogsHaveEntityIndex = true
+
+/**
+ * The audit rows of exactly these records, through the `AuditLog (entityType, entityId)` index:
+ * one aliased request per 100 records instead of a filtered scan of the whole table. Returns the
+ * same rows `listAuditLogs([ids])` returned for the same records (that call matched `entityId`
+ * alone; here the type is part of the key, as the writers always set both).
+ */
+export async function listAuditLogsFor(
+  entities: readonly { entityType: string; entityId: string }[],
+): Promise<AuditLogEntry[]> {
+  if (entities.length === 0) return []
+  if (auditLogsHaveEntityIndex) {
+    try {
+      const rows = await batchByIndexPairs<RawAuditLog>(
+        {
+          query: 'listAuditLogByEntityTypeAndEntityId',
+          keyArg: 'entityType', keyType: 'String!',
+          sortArg: 'entityId', sortType: 'String!',
+          fields: AUDIT_FIELDS,
+        },
+        entities.map((e) => ({ key: e.entityType, sort: e.entityId })),
+        { perAliasLimit: 1000 },
+      )
+      return rows.map(parseAudit)
+    } catch (err) {
+      if (!/listAuditLogByEntityTypeAndEntityId/.test(safeStringify(err))
+        || !/Cannot query field|FieldUndefined|not defined/i.test(safeStringify(err))) throw err
+      console.warn('[apiClient] backend has no AuditLog entity index yet — scanning until deploy')
+      auditLogsHaveEntityIndex = false
+    }
+  }
+  const wanted = new Set(entities.map((e) => `${e.entityType}\u0000${e.entityId}`))
+  const all = await listAuditLogs([...new Set(entities.map((e) => e.entityId))])
+  return all.filter((e) => wanted.has(`${e.entityType}\u0000${e.entityId}`))
 }
 
 export async function createAuditLog(entry: {
@@ -528,10 +775,12 @@ export async function listFuelTransactions(filter?: {
   endDate?: string
 }): Promise<FuelTransaction[]> {
   // Load all and filter client-side for simplicity (dataset is small enough)
-  const result = await client.graphql({
-    query: `query ListFuelTransactions { listFuelTransactions(limit: 10000) { items { ${FUEL_TX_FIELDS} } } }`,
-  }) as { data: { listFuelTransactions: { items: FuelTransaction[] } } }
-  let items = result.data.listFuelTransactions.items ?? []
+  let items = await sharedRead('fuelTransactions', async () => {
+    const result = await client.graphql({
+      query: `query ListFuelTransactions { listFuelTransactions(limit: 10000) { items { ${FUEL_TX_FIELDS} } } }`,
+    }) as { data: { listFuelTransactions: { items: FuelTransaction[] } } }
+    return result.data.listFuelTransactions.items ?? []
+  })
   if (filter?.truckId)   items = items.filter((t) => t.truckId === filter.truckId)
   if (filter?.cardNumber) items = items.filter((t) => t.cardNumber === filter.cardNumber)
   if (filter?.startDate) items = items.filter((t) => t.transactionDate >= filter.startDate!)
@@ -728,6 +977,24 @@ const FACTORING_ITEM_FIELDS = `
   otrDocsUploaded otrError
   customerId manualReason manualSteps apEmail manualInvoicedAt
 `
+// Step F's columns: a row this system raised from an issued invoice rather than one an
+// intake e-mail did. Its own flag, like every other generation here — one unhandled
+// throw on a backend that predates the deploy empties the whole factoring queue.
+const FACTORING_ITEM_V2_FIELDS = ['source', 'invoiceId', 'orderId', 'shipmentId']
+let factoringItemsHaveTms = true
+
+/** Every FactoringItem read or write, with step F's group dropped and retried pre-deploy. */
+async function readFactoring<T>(run: (fields: string) => Promise<T>): Promise<T> {
+  for (;;) {
+    try {
+      return await run(factoringItemsHaveTms ? `${FACTORING_ITEM_FIELDS} ${FACTORING_ITEM_V2_FIELDS.join(' ')}` : FACTORING_ITEM_FIELDS)
+    } catch (err) {
+      if (!factoringItemsHaveTms || !fieldNamed(FACTORING_ITEM_V2_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no TMS fields on FactoringItem yet — querying without them until deploy')
+      factoringItemsHaveTms = false
+    }
+  }
+}
 
 /**
  * AppSync hands an `a.json()` column back as a JSON *string*, so the three JSON columns
@@ -754,20 +1021,22 @@ function parseFactoringJson(item: FactoringItem): FactoringItem {
 
 /** Fetch every FactoringItem page so direct DynamoDB email inserts are never missed. */
 export async function listFactoringItems(): Promise<FactoringItem[]> {
-  const items: FactoringItem[] = []
-  let nextToken: string | null = null
-  do {
-    const result = await client.graphql({
-      query: `query ListFactoringItems($nextToken: String) { listFactoringItems(limit: 1000, nextToken: $nextToken) { items { ${FACTORING_ITEM_FIELDS} } nextToken } }`,
-      variables: { nextToken },
-    }) as { data: { listFactoringItems: { items: (FactoringItem | null)[]; nextToken?: string | null } } }
-    const page = result.data.listFactoringItems
-    for (const item of page.items ?? []) {
-      if (item) items.push(parseFactoringJson(item))
-    }
-    nextToken = page.nextToken ?? null
-  } while (nextToken)
-  return items
+  return readFactoring(async (fields) => {
+    const items: FactoringItem[] = []
+    let nextToken: string | null = null
+    do {
+      const result = await client.graphql({
+        query: `query ListFactoringItems($nextToken: String) { listFactoringItems(limit: 1000, nextToken: $nextToken) { items { ${fields} } nextToken } }`,
+        variables: { nextToken },
+      }) as { data: { listFactoringItems: { items: (FactoringItem | null)[]; nextToken?: string | null } } }
+      const page = result.data.listFactoringItems
+      for (const item of page.items ?? []) {
+        if (item) items.push(parseFactoringJson(item))
+      }
+      nextToken = page.nextToken ?? null
+    } while (nextToken)
+    return items
+  })
 }
 
 /** Staff may update status; email intake owns creation. */
@@ -775,11 +1044,13 @@ export async function updateFactoringItem(
   id: string,
   patch: { status: FactoringItemStatus },
 ): Promise<FactoringItem> {
-  const result = await client.graphql({
-    query: `mutation UpdateFactoringItem($input: UpdateFactoringItemInput!) { updateFactoringItem(input: $input) { ${FACTORING_ITEM_FIELDS} } }`,
-    variables: { input: { id, ...patch } },
-  }) as { data: { updateFactoringItem: FactoringItem } }
-  return parseFactoringJson(result.data.updateFactoringItem)
+  return readFactoring(async (fields) => {
+    const result = await client.graphql({
+      query: `mutation UpdateFactoringItem($input: UpdateFactoringItemInput!) { updateFactoringItem(input: $input) { ${fields} } }`,
+      variables: { input: { id, ...patch } },
+    }) as { data: { updateFactoringItem: FactoringItem } }
+    return parseFactoringJson(result.data.updateFactoringItem)
+  })
 }
 
 /**
@@ -802,11 +1073,13 @@ export async function setFactoringManualFields(
     const v = (value ?? '').trim()
     if (v) cleaned[key] = v
   }
-  const result = await client.graphql({
-    query: `mutation UpdateFactoringItem($input: UpdateFactoringItemInput!) { updateFactoringItem(input: $input) { ${FACTORING_ITEM_FIELDS} } }`,
-    variables: { input: { id, otrManualFields: JSON.stringify(cleaned) } },
-  }) as { data: { updateFactoringItem: FactoringItem } }
-  return parseFactoringJson(result.data.updateFactoringItem)
+  return readFactoring(async (selection) => {
+    const result = await client.graphql({
+      query: `mutation UpdateFactoringItem($input: UpdateFactoringItemInput!) { updateFactoringItem(input: $input) { ${selection} } }`,
+      variables: { input: { id, otrManualFields: JSON.stringify(cleaned) } },
+    }) as { data: { updateFactoringItem: FactoringItem } }
+    return parseFactoringJson(result.data.updateFactoringItem)
+  })
 }
 
 /** The model authorizes deletion only for the Cognito ADMIN group. */
@@ -822,7 +1095,7 @@ export async function deleteFactoringItem(id: string): Promise<void> {
 const VENDOR_PAYABLE_FIELDS = `
   id status source sourceInvoiceId sourceMessageId subject vendor invoiceNumber
   amount invoiceDate dueDate vendorEmail confirmationSentAt confirmationSentTo extractedAt extractionNote description fromEmail attachments receivedAt
-  paymentMethod paymentDate paymentReference paidBy paidAt createdAt updatedAt
+  paymentMethod paymentDate paymentReference paidBy paidAt apInboxItemId apInboxSourceUrl createdAt updatedAt
 `
 type VendorPayableRecord = Omit<VendorPayable, 'attachments'> & {
   attachments?: VendorApAttachment[] | string | null
@@ -1002,13 +1275,60 @@ export async function createApptMoveTask(args: {
 
 export type { CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion, LocationMergePreview, LocationMergeJob } from '@/types/tms'
 
-const CUSTOMER_FIELDS = `
+const CUSTOMER_FIELDS_BASE = `
   id name contactName contactEmail contactPhone notes
   mcNumber dotNumber factored billingEmail billingContactName billingPhone billingAddress
   paymentTermsDays creditLimitCents creditHoldFlag requiredDocsForInvoice
   defaultDivisionKey defaultSalesRepId aliases normalizedName active apptWorkflow mergedIntoId
   createdAt updatedAt
 `
+const CUSTOMER_V2_FIELDS = [
+  'status', 'statusReason', 'statusChangedAt', 'statusChangedBy', 'replacementCustomerId',
+  'leadSource', 'industry', 'serviceTier', 'website',
+  'freeCreditRequired', 'creditUsageWarningBps', 'maxDaysLate',
+  'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges',
+  'pricingDefaults', 'quotingDefaults',
+  'rateConTerms', 'teamKey', 'operatedById', 'accountOwnerIds',
+  'invoiceFrequency', 'visibilityPrefs', 'gpSplitBps',
+]
+// Step J's per-customer integration pointers. Its own flag, like the settings
+// generations above: a backend without them keeps serving every v2 field.
+const CUSTOMER_V3_FIELDS = ['project44CustomerId', 'hubspotId', 'ediSettings', 'haulpayDebtorId']
+// Step K's per-party AI memory. Its own flag again: a backend that predates the field
+// must keep serving every v3 field rather than losing the whole directory.
+const CUSTOMER_V4_FIELDS = ['aiMemory']
+// Step P3's flow defaults: the carrier queue, the margin, the required-field list and
+// the check-call plan a new load for this customer inherits. Its own flag again, so a
+// backend that predates Step P keeps serving every v4 field.
+const CUSTOMER_V5_FIELDS = [
+  'defaultCarrierTeamKey', 'defaultCarrierRepId', 'marginTargetBps', 'marginFloorBps',
+  'quoteAutoReply', 'requiredLoadFields', 'checkCallPlan',
+]
+// Step V: the default tracker a new shipment inherits and the automation policy override.
+const CUSTOMER_V6_FIELDS = ['defaultTrackerId', 'trackingAutomation', 'trackingMode', 'trackingMethod', 'driverSmsTarget']
+const CUSTOMER_JSON_FIELDS: (keyof CustomerRecord)[] = ['billingAddress', 'contacts', 'billToParties', 'requiredReferences', 'chargeCodeOverrides', 'defaultCharges', 'pricingDefaults', 'quotingDefaults', 'visibilityPrefs', 'ediSettings', 'aiMemory', 'checkCallPlan', 'trackingAutomation']
+let customersHaveV2 = true
+let customersHaveV3 = true
+let customersHaveV4 = true
+let customersHaveV5 = true
+let customersHaveV6 = true
+// Aljex-exit: the legacy flag (imported, terms/credit not reviewed yet).
+const CUSTOMER_V7_FIELDS = ['legacyImported', 'legacySource']
+let customersHaveV7 = true
+// Step AP: the per-customer Load Review requirements.
+const CUSTOMER_V8_FIELDS = ['reviewRequirements']
+let customersHaveV8 = true
+const customerFields = () => [
+  CUSTOMER_FIELDS_BASE,
+  customersHaveV2 ? CUSTOMER_V2_FIELDS.join(' ') : '',
+  customersHaveV3 ? CUSTOMER_V3_FIELDS.join(' ') : '',
+  customersHaveV4 ? CUSTOMER_V4_FIELDS.join(' ') : '',
+  customersHaveV5 ? CUSTOMER_V5_FIELDS.join(' ') : '',
+  customersHaveV6 ? CUSTOMER_V6_FIELDS.join(' ') : '',
+  customersHaveV7 ? CUSTOMER_V7_FIELDS.join(' ') : '',
+  customersHaveV8 ? CUSTOMER_V8_FIELDS.join(' ') : '',
+].filter(Boolean).join(' ')
+
 const LOCATION_FIELDS = `
   id name city customerName apptContactName apptContactEmail apptContactPhone notes
   street state zip country lat lng timezone geohash6 placeId geocodedAt geocodeExpiresAt
@@ -1018,10 +1338,138 @@ const LOCATION_FIELDS = `
 `
 const DIVISION_FIELDS = `
   id key name legalName mcNumber dotNumber scac remitToName remitToAddress remitToEmail
-  invoicePrefix fleetGroup active createdAt updatedAt
+  invoicePrefix fleetGroup active
+  taxId phone physicalAddress primaryContact billingContact payablesContact
+  termsUrl paymentInstructions invoiceVerbiage logoKey isPrimary
+  createdAt updatedAt
 `
-const TMS_SETTINGS_FIELDS = `id marginFloorBps defaultPaymentTermsDays accessorialCodes loadStatusRules invoiceNumberFormat autoClearPastAppts createdAt updatedAt`
+const DIVISION_JSON_FIELDS: (keyof Division)[] = ['remitToAddress', 'physicalAddress', 'primaryContact', 'billingContact', 'payablesContact', 'paymentInstructions']
+
+const TMS_SETTINGS_FIELDS_BASE = `id marginFloorBps defaultPaymentTermsDays accessorialCodes loadStatusRules invoiceNumberFormat autoClearPastAppts createdAt updatedAt`
+const TMS_SETTINGS_V2_FIELDS = [
+  'defaultCreditLimitCents', 'defaultFreeCreditRequired', 'defaultCreditUsageWarningBps', 'defaultMaxDaysLate',
+  'requireCustomerApproval', 'defaultRequiredDocs', 'defaultRequiredReferences', 'chargeCodes', 'rateConTerms',
+]
+// Step B's settings. A separate flag from V2 so a backend that has the credit fields
+// but not these keeps serving the credit ones instead of losing both.
+const TMS_SETTINGS_V3_FIELDS = [
+  'shipmentPrefix', 'nextShipmentNumber', 'cancelDeleteAdminOnly',
+  'arUnbilledStage', 'apInReviewStage', 'defaultMode',
+]
+// Step C's carrier booking settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V4_FIELDS = [
+  'allowedCarrierStatuses', 'requireCarrierApproval', 'requiredCarrierDocs',
+  'bookingRequiredFields', 'defaultCarrierTermsDays', 'quickPayTiers',
+  'rateConExpiryHours', 'rateConRequiredFields', 'insuranceWarnDays',
+]
+// Step D's tracking and check-call settings. Same treatment once more.
+const TMS_SETTINGS_V5_FIELDS = [
+  'checkCallDefaultIntervalHours', 'checkCallGraceMinutes', 'checkCallNotifyChannel',
+  'checkCallSlackChannelId', 'trackingLinkExpiryHours', 'customerLinkExpiryDays',
+  'customerLinkShowsCarrier', 'customerLinkShowsPosition', 'trackingContact', 'trackingSmsTemplate',
+]
+// Step E's document and notice settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V6_FIELDS = [
+  'milestoneNoticesEnabled', 'podRequestEnabled', 'requiredCarrierUploadTypes', 'uploadLinkExpiryDays',
+  'milestoneEmailTemplate', 'podRequestEmailTemplate', 'bolTerms', 'documentDeleteAdminOnly',
+]
+// Step F's AR settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V7_FIELDS = [
+  'nextInvoiceNumber', 'invoiceTerms', 'invoiceEmailTemplate', 'invoiceAttachTypes',
+  'factorRemitTo', 'arPostingAdminOnly', 'invoiceBatchEmail',
+]
+// Step G's AP settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V8_FIELDS = [
+  'apApprovalAdminOnly', 'apPostingAdminOnly', 'apRequireSignedRateCon',
+  'remittanceEmailTemplate', 'apBillDocsRequired',
+]
+// Step H's quotes & rates settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V9_FIELDS = [
+  'hoursToQuote', 'offerExpiryHours', 'quoteNumberFormat', 'nextQuoteNumber',
+  'quoteEmailTemplate', 'counterEmailTemplate', 'offerRequestEmailTemplate',
+  'quoteTermsText', 'quoteBelowMinMarginAdminOnly', 'quoteOffersCarrierSeesBookNow',
+]
+// Step I's teams, view limits and commission settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V10_FIELDS = [
+  'teams', 'limitCustomerRepView', 'limitCarrierRepView',
+  'commissionsEnabled', 'commissionTrigger', 'commissionPlans', 'commissionPaySchedule',
+  'commissionApprovalAdminOnly', 'commissionPayAdminOnly',
+]
+// Step J's integration settings: the shared tracking toggles nothing reads until a
+// tracking provider is live, the postal-code aliases the lane key consults, and the two
+// pointers the integration pages store. Its own flag again, for the same reason.
+const TMS_SETTINGS_V11_FIELDS = [
+  'trackByDefault', 'autoStatusFromGeofence', 'trackingIntervalMin', 'trackingDurationHours',
+  'postalCodeAliases', 'hubspotPortalId', 'integrationsNotifyChannel',
+]
+// Step K's AI agent settings: the one human-edited blob the workflow agent reads and
+// never writes. Its own flag again, for the same reason.
+const TMS_SETTINGS_V12_FIELDS = ['aiAgents']
+// Step P3's org defaults: the target margin (and its per-mode overrides), the required
+// fields a built load must carry, the org check-call plan and the demo seed's stamp.
+const TMS_SETTINGS_V13_FIELDS = [
+  'marginTargetBps', 'marginTargetBpsByMode', 'quoteAutoReplyDefault',
+  'defaultRequiredLoadFields', 'defaultCheckCallPlan', 'demoSeedVersion', 'demoSeededAt',
+]
+// My Brokerage (Step L): branding, customer settings, carrier documents,
+// consolidation, notifications, and org payment terms.
+const TMS_SETTINGS_V14_FIELDS = [
+  'brandLogoSquareKey', 'brandLogoWideKey', 'brandLogoDocumentKey', 'brandAccent', 'brandTheme',
+  'brandSenders', 'emailSignatureTemplate', 'whiteLabel', 'customerPortalDefaults', 'customerTags',
+  'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions',
+  'notificationWebhooks', 'notificationDefaults', 'paymentTerms',
+]
+// Step V: the tracking automation policy. Its own flag again, for the same reason.
+const TMS_SETTINGS_V15_FIELDS = ['trackingAutomation']
+// Step AP: the org default Load Review requirements. Its own flag again, for the same reason.
+const TMS_SETTINGS_V16_FIELDS = ['reviewRequirements']
+// Step AW: company-wide invoice always-copy list, the Aljex cutoff and sales rep by division. Its own flag again.
+const TMS_SETTINGS_V17_FIELDS = ['invoiceAlwaysCopyEmails', 'aljexCutoffAt', 'divisionSalesReps']
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan', 'brandSenders', 'whiteLabel', 'customerPortalDefaults', 'customerTags', 'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions', 'notificationWebhooks', 'notificationDefaults', 'paymentTerms', 'trackingAutomation', 'divisionSalesReps']
+let settingsHaveV2 = true
+let settingsHaveV3 = true
+let settingsHaveV4 = true
+let settingsHaveV5 = true
+let settingsHaveV6 = true
+let settingsHaveV7 = true
+let settingsHaveV8 = true
+let settingsHaveV9 = true
+let settingsHaveV10 = true
+let settingsHaveV11 = true
+let settingsHaveV12 = true
+let settingsHaveV13 = true
+let settingsHaveV14 = true
+let settingsHaveV15 = true
+let settingsHaveV16 = true
+let settingsHaveV17 = true
+const tmsSettingsFields = () => [
+  TMS_SETTINGS_FIELDS_BASE,
+  settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
+  settingsHaveV3 ? TMS_SETTINGS_V3_FIELDS.join(' ') : '',
+  settingsHaveV4 ? TMS_SETTINGS_V4_FIELDS.join(' ') : '',
+  settingsHaveV5 ? TMS_SETTINGS_V5_FIELDS.join(' ') : '',
+  settingsHaveV6 ? TMS_SETTINGS_V6_FIELDS.join(' ') : '',
+  settingsHaveV7 ? TMS_SETTINGS_V7_FIELDS.join(' ') : '',
+  settingsHaveV8 ? TMS_SETTINGS_V8_FIELDS.join(' ') : '',
+  settingsHaveV9 ? TMS_SETTINGS_V9_FIELDS.join(' ') : '',
+  settingsHaveV10 ? TMS_SETTINGS_V10_FIELDS.join(' ') : '',
+  settingsHaveV11 ? TMS_SETTINGS_V11_FIELDS.join(' ') : '',
+  settingsHaveV12 ? TMS_SETTINGS_V12_FIELDS.join(' ') : '',
+  settingsHaveV13 ? TMS_SETTINGS_V13_FIELDS.join(' ') : '',
+  settingsHaveV14 ? TMS_SETTINGS_V14_FIELDS.join(' ') : '',
+  settingsHaveV15 ? TMS_SETTINGS_V15_FIELDS.join(' ') : '',
+  settingsHaveV16 ? TMS_SETTINGS_V16_FIELDS.join(' ') : '',
+  settingsHaveV17 ? TMS_SETTINGS_V17_FIELDS.join(' ') : '',
+].filter(Boolean).join(' ')
+const fieldNamed = (names: string[], err: unknown) => {
+  const msg = safeStringify(err)
+  return names.some((f) => new RegExp(`['"]${f}['"]`).test(msg))
+}
 const MERGE_JOB_FIELDS = `id sourceId targetId status processedCount remainingCount error createdAt updatedAt`
+const IMPORT_JOB_FIELDS = `
+  id entity status fileName fileHash rowCount errorKey dryRun note createdBy appliedAt appliedBy createdAt updatedAt
+`
+const IMPORT_JOB_JSON_FIELDS: (keyof ImportJob)[] = ['mapping', 'counts']
 
 // Both custom-op wrappers rethrow AppSync's `{errors:[…]}` payload as an Error carrying
 // the Lambda's message, so every caller's toast shows the real reason, not `[object Object]`.
@@ -1036,6 +1484,22 @@ async function directoryAction<T>(action: string, input: unknown): Promise<T> {
     throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
   }
   const v = unwrapJson(r.data.tmsDirectoryActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+// Step N1: Aljex bulk import. Same error-rethrow contract as directoryAction.
+async function aljexImportAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsAljexImport: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsAljexImport($action: String!, $input: AWSJSON!) { tmsAljexImport(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsAljexImport: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsAljexImport)
   if (v == null) throw new Error(`${action} returned no result`)
   return v as T
 }
@@ -1077,9 +1541,59 @@ export function withCustomerPolicy<T extends Pick<Load, 'customerId' | 'customer
 
 /** Active customers only unless asked; archived and merged records stay out of pickers. */
 export async function listCustomers(opts?: { includeArchived?: boolean }): Promise<CustomerRecord[]> {
-  const rows = (await listAll<CustomerRecord>('listCustomers', CUSTOMER_FIELDS, 1000))
-    .map((c) => rememberCustomerPolicy(unwrapJsonFields(c, ['billingAddress'])))
+  // One fetch of the archived superset serves both views: the filter below is what the
+  // uncached read always did client-side.
+  const rows = await cachedDirectory('customers', fetchAllCustomers)
   return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
+}
+async function fetchAllCustomers(): Promise<CustomerRecord[]> {
+  const run = async () => (await listAll<CustomerRecord>('listCustomers', customerFields(), 1000))
+    .map((c) => rememberCustomerPolicy(unwrapJsonFields(c, CUSTOMER_JSON_FIELDS)))
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const rows = await run()
+      return rows
+    } catch (err) {
+      if (attempt >= 8) throw err
+      if (customersHaveV8 && fieldNamed(CUSTOMER_V8_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer review requirements yet — querying without them until deploy')
+        customersHaveV8 = false
+        continue
+      }
+      if (customersHaveV7 && fieldNamed(CUSTOMER_V7_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer legacy flag yet — querying without it until deploy')
+        customersHaveV7 = false
+        continue
+      }
+      if (customersHaveV6 && fieldNamed(CUSTOMER_V6_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer tracker/automation fields yet — querying without them until deploy')
+        customersHaveV6 = false
+        continue
+      }
+      if (customersHaveV5 && fieldNamed(CUSTOMER_V5_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer flow defaults yet — querying without them until deploy')
+        customersHaveV5 = false
+        continue
+      }
+      if (customersHaveV4 && fieldNamed(CUSTOMER_V4_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer AI memory yet — querying without it until deploy')
+        customersHaveV4 = false
+        continue
+      }
+      if (customersHaveV3 && fieldNamed(CUSTOMER_V3_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer integration fields yet — querying without them until deploy')
+        customersHaveV3 = false
+        continue
+      }
+      if (customersHaveV2 && fieldNamed(CUSTOMER_V2_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer v2 fields yet — querying without them until deploy')
+        customersHaveV2 = false
+        continue
+      }
+      throw err
+    }
+  }
 }
 export async function createCustomer(input: Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<CustomerRecord> {
   return rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', input))
@@ -1091,13 +1605,24 @@ export async function updateCustomer(id: string, patch: Partial<Omit<CustomerRec
 export async function archiveCustomer(id: string, expectedUpdatedAt: string): Promise<CustomerRecord> {
   return rememberCustomerPolicy(await directoryAction<CustomerRecord>('ARCHIVE_CUSTOMER', { id, expectedUpdatedAt }))
 }
+/** Status transitions go through a dedicated action so CAS and transition rules live server-side. */
+export async function setCustomerStatus(
+  id: string,
+  expectedUpdatedAt: string,
+  input: { status: CustomerRecord['status']; reason?: string; replacementCustomerId?: string },
+): Promise<CustomerRecord> {
+  return rememberCustomerPolicy(await directoryAction<CustomerRecord>('SET_CUSTOMER_STATUS', { id, expectedUpdatedAt, ...input }))
+}
 
 export async function listLocations(opts?: { includeArchived?: boolean }): Promise<LocationRecord[]> {
+  const rows = await cachedDirectory('locations', fetchAllLocations)
+  return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
+}
+async function fetchAllLocations(): Promise<LocationRecord[]> {
   // driverNotes is AWSJSON too: the driver app appends to it as a native list, and
   // AppSync hands that back as a JSON STRING. Left wrapped, the load drawer called
   // .map on it and blanked the page for every load touching that location.
-  const rows = (await listAll<LocationRecord>('listLocations', LOCATION_FIELDS, 1000)).map((l) => unwrapJsonFields(l, ['contacts', 'driverNotes']))
-  return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
+  return (await listAll<LocationRecord>('listLocations', LOCATION_FIELDS, 1000)).map((l) => unwrapJsonFields(l, ['contacts', 'driverNotes']))
 }
 /**
  * Coordinates are accepted only with the `geocodeToken` the tmsGeocode call returned for
@@ -1134,19 +1659,3160 @@ export async function listLocationMergeJobs(): Promise<LocationMergeJob[]> {
 
 // ── Divisions & TMS settings (ADMIN writes; nothing is seeded with guessed values) ──
 export async function listDivisions(): Promise<Division[]> {
-  return (await listAll<Division>('listDivisions', DIVISION_FIELDS, 1000)).map((d) => unwrapJsonFields(d, ['remitToAddress']))
+  return (await listAll<Division>('listDivisions', DIVISION_FIELDS, 1000)).map((d) => unwrapJsonFields(d, DIVISION_JSON_FIELDS))
 }
 export async function saveDivision(input: Omit<Division, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }, expectedUpdatedAt?: string): Promise<Division> {
   return directoryAction<Division>('SAVE_DIVISION', { expectedUpdatedAt, ...input })
 }
 export async function getTmsSettings(): Promise<TmsSettings | null> {
-  const r = await client.graphql({
-    query: `query GetTmsSettings { getTmsSettings(id: "default") { ${TMS_SETTINGS_FIELDS} } }`,
-  }) as { data: { getTmsSettings: TmsSettings | null } }
-  return r.data.getTmsSettings ? unwrapJsonFields(r.data.getTmsSettings, ['accessorialCodes', 'loadStatusRules']) : null
+  const run = async () => {
+    const r = await client.graphql({
+      query: `query GetTmsSettings { getTmsSettings(id: "default") { ${tmsSettingsFields()} } }`,
+    }) as { data: { getTmsSettings: TmsSettings | null } }
+    return r.data.getTmsSettings ? unwrapJsonFields(r.data.getTmsSettings, TMS_SETTINGS_JSON_FIELDS) : null
+  }
+
+  // Each generation drops on its own, so a backend missing only the newest group
+  // keeps serving every older one.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run()
+    } catch (err) {
+      if (attempt >= 16) throw err
+      if (settingsHaveV17 && fieldNamed(TMS_SETTINGS_V17_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Step AW billing settings yet — querying without them until deploy')
+        settingsHaveV17 = false
+        continue
+      }
+      if (settingsHaveV16 && fieldNamed(TMS_SETTINGS_V16_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Load Review requirement settings yet — querying without them until deploy')
+        settingsHaveV16 = false
+        continue
+      }
+      if (settingsHaveV15 && fieldNamed(TMS_SETTINGS_V15_FIELDS, err)) {
+        console.warn('[apiClient] backend has no tracking automation settings yet — querying without them until deploy')
+        settingsHaveV15 = false
+        continue
+      }
+      if (settingsHaveV14 && fieldNamed(TMS_SETTINGS_V14_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Step L My Brokerage fields yet — querying without them until deploy')
+        settingsHaveV14 = false
+        continue
+      }
+      if (settingsHaveV13 && fieldNamed(TMS_SETTINGS_V13_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Step P org defaults yet — querying without them until deploy')
+        settingsHaveV13 = false
+        continue
+      }
+      if (settingsHaveV12 && fieldNamed(TMS_SETTINGS_V12_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings AI agent fields yet — querying without them until deploy')
+        settingsHaveV12 = false
+        continue
+      }
+      if (settingsHaveV11 && fieldNamed(TMS_SETTINGS_V11_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings integration fields yet — querying without them until deploy')
+        settingsHaveV11 = false
+        continue
+      }
+      if (settingsHaveV10 && fieldNamed(TMS_SETTINGS_V10_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings commission fields yet — querying without them until deploy')
+        settingsHaveV10 = false
+        continue
+      }
+      if (settingsHaveV9 && fieldNamed(TMS_SETTINGS_V9_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings quote fields yet — querying without them until deploy')
+        settingsHaveV9 = false
+        continue
+      }
+      if (settingsHaveV8 && fieldNamed(TMS_SETTINGS_V8_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings AP fields yet — querying without them until deploy')
+        settingsHaveV8 = false
+        continue
+      }
+      if (settingsHaveV7 && fieldNamed(TMS_SETTINGS_V7_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings AR fields yet — querying without them until deploy')
+        settingsHaveV7 = false
+        continue
+      }
+      if (settingsHaveV6 && fieldNamed(TMS_SETTINGS_V6_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings document fields yet — querying without them until deploy')
+        settingsHaveV6 = false
+        continue
+      }
+      if (settingsHaveV5 && fieldNamed(TMS_SETTINGS_V5_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings tracking fields yet — querying without them until deploy')
+        settingsHaveV5 = false
+        continue
+      }
+      if (settingsHaveV4 && fieldNamed(TMS_SETTINGS_V4_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings carrier fields yet — querying without them until deploy')
+        settingsHaveV4 = false
+        continue
+      }
+      if (settingsHaveV3 && fieldNamed(TMS_SETTINGS_V3_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings shipment fields yet — querying without them until deploy')
+        settingsHaveV3 = false
+        continue
+      }
+      if (settingsHaveV2 && fieldNamed(TMS_SETTINGS_V2_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings v2 fields yet — querying without them until deploy')
+        settingsHaveV2 = false
+        continue
+      }
+      throw err
+    }
+  }
 }
-export async function saveTmsSettings(patch: Partial<Omit<TmsSettings, 'id' | 'createdAt' | 'updatedAt'>>, expectedUpdatedAt?: string): Promise<TmsSettings> {
+export async function saveTmsSettings(patch: Partial<Omit<TmsSettings, 'id' | 'createdAt' | 'updatedAt' | 'trackingAutomation'>>, expectedUpdatedAt?: string): Promise<TmsSettings> {
   return directoryAction<TmsSettings>('SAVE_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+}
+
+// ── My Brokerage (Step L) ───────────────────────────────────────────────────
+
+export type ImportEntity = 'CUSTOMER' | 'LOCATION' | 'CARRIER' | 'CARRIER_FACTOR' | 'CHARGE_CODE' | 'PAYMENT_TERM' | 'VENDOR_CONTACT'
+
+export interface PreviewImportInput {
+  entity: ImportEntity
+  fileName: string
+  fileHash: string
+  mapping: Record<string, string>
+  rows: unknown[]
+}
+
+export interface RunImportInput {
+  jobId: string
+  rows: unknown[]
+  page?: number
+}
+
+export interface AccountInfo {
+  stack: {
+    userPoolId: string
+    appSyncUrl: string
+    region: string
+    storageBucket: string
+  }
+  integrations: IntegrationRecord[]
+}
+
+export async function rotateWebhookSecret(webhookId: string): Promise<{ webhookId: string; secret: string }> {
+  return directoryAction<{ webhookId: string; secret: string }>('ROTATE_WEBHOOK_SECRET', { webhookId })
+}
+
+export interface AcademyArticleRef {
+  slug: string
+  title: string
+  content: string
+}
+
+export interface AcademyAnswer {
+  answer: string
+  citations: string[]
+}
+
+export async function askAcademy(question: string, articles: AcademyArticleRef[]): Promise<AcademyAnswer> {
+  return directoryAction<AcademyAnswer>('ASK_ACADEMY', { question, articles })
+}
+
+export async function previewImport(input: PreviewImportInput): Promise<ImportJob> {
+  return directoryAction<ImportJob>('PREVIEW_IMPORT', input)
+}
+
+export async function runImport(input: RunImportInput): Promise<ImportJob> {
+  return directoryAction<ImportJob>('RUN_IMPORT', input)
+}
+
+export async function listImportJobs(entity?: ImportEntity): Promise<ImportJob[]> {
+  const rows = await listAll<ImportJob>('listImportJobs', IMPORT_JOB_FIELDS, 1000)
+  const unwrapped = rows.map((j) => unwrapJsonFields(j, IMPORT_JOB_JSON_FIELDS))
+  return entity ? unwrapped.filter((j) => j.entity === entity) : unwrapped
+}
+
+// Aljex-exit Phase 0: import pipeline. Every call is owner/ADMIN only (enforced by the Lambda).
+export async function prepareAljexImport(input: PrepareAljexImportInput): Promise<PrepareAljexImportResult> {
+  return aljexImportAction<PrepareAljexImportResult>('IMPORT_PREPARE', input)
+}
+
+/** Starts STAGE on an uploaded file. Returns the job immediately; the worker continues in the background. */
+export async function stageAljexImport(jobId: string): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_STAGE', { jobId })
+  return r.job
+}
+
+export async function getAljexImport(jobId: string): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_GET', { jobId })
+  return r.job
+}
+
+export async function listAljexImports(): Promise<AljexImportJob[]> {
+  const r = await aljexImportAction<{ jobs: AljexImportJob[] }>('IMPORT_LIST', {})
+  return r.jobs ?? []
+}
+
+export async function getAljexProfile(layoutId: string): Promise<AljexMappingProfile | null> {
+  const r = await aljexImportAction<{ profile: AljexMappingProfile | null }>('IMPORT_GET_PROFILE', { layoutId })
+  return r.profile ?? null
+}
+
+export async function saveAljexProfile(input: AljexProfileInput): Promise<AljexMappingProfile> {
+  const r = await aljexImportAction<{ profile: AljexMappingProfile }>('IMPORT_SAVE_PROFILE', input)
+  return r.profile
+}
+
+export async function planAljexImport(input: PlanAljexImportInput): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_PLAN', input)
+  return r.job
+}
+
+export async function applyAljexImport(input: ApplyAljexImportInput): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_APPLY', input)
+  return r.job
+}
+
+export async function pauseAljexImport(jobId: string): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_PAUSE', { jobId })
+  return r.job
+}
+
+export async function resumeAljexImport(jobId: string): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_RESUME', { jobId })
+  return r.job
+}
+
+export async function cancelAljexImport(jobId: string): Promise<AljexImportJob> {
+  const r = await aljexImportAction<{ job: AljexImportJob }>('IMPORT_CANCEL', { jobId })
+  return r.job
+}
+
+export async function reconcileAljexImport(jobId: string): Promise<{ job: AljexImportJob; summary: ImportReportSummary | null }> {
+  return aljexImportAction('IMPORT_RECONCILE', { jobId })
+}
+
+export async function getAljexReportLinks(jobId: string): Promise<AljexReportLink[]> {
+  const r = await aljexImportAction<{ links: AljexReportLink[] }>('IMPORT_REPORT_LINKS', { jobId })
+  return r.links ?? []
+}
+
+// Step AW stage E3: Aljex reconciliation (report per entity, decisions, sign-off).
+import type { ReconEntity, ReconJobSummary, ReconPage, ReconOutcome } from './aljexReconcile'
+
+export async function startAljexReconcile(input: { entity: ReconEntity; sourceJobId: string; customersJobId?: string | null }): Promise<{ job: ReconJobSummary }> {
+  return aljexImportAction<{ job: ReconJobSummary }>('IMPORT_RECONCILE_ENTITY', input)
+}
+
+export async function listAljexReconcile(): Promise<{ jobs: ReconJobSummary[] }> {
+  return aljexImportAction<{ jobs: ReconJobSummary[] }>('IMPORT_RECONCILE_GET', {})
+}
+
+export async function getAljexReconcile(input: { jobId: string; kind?: string; state?: 'OPEN' | 'DECIDED' | 'ALL'; q?: string; offset?: number; limit?: number; exportCsv?: boolean }): Promise<ReconPage> {
+  return aljexImportAction<ReconPage>('IMPORT_RECONCILE_GET', input)
+}
+
+/** Needs the per-user `page-aljexSignoff` grant; the Lambda refuses everyone else, admins included. */
+export async function decideAljexReconcile(input: { jobId: string; keys: string[]; filter?: { kind?: string; q?: string }; outcome: ReconOutcome; reason: string }): Promise<{ job: ReconJobSummary; decided: number }> {
+  return aljexImportAction<{ job: ReconJobSummary; decided: number }>('IMPORT_DECIDE', input)
+}
+
+export async function signoffAljexReconcile(input: { jobId: string; note?: string }): Promise<{ job: ReconJobSummary }> {
+  return aljexImportAction<{ job: ReconJobSummary }>('IMPORT_SIGNOFF', input)
+}
+
+/** Mapped fields of up to 5 user-chosen data rows of the uploaded file; customer/carrier names masked unless `unmask`. */
+export async function sampleAljexImport(jobId: string, rows: number[], unmask = false): Promise<AljexSampleRow[]> {
+  const r = await aljexImportAction<{ rows: AljexSampleRow[] }>('IMPORT_SAMPLE', { jobId, rows, unmask })
+  return r.rows ?? []
+}
+
+export async function seedProCounter(input: SeedProCounterInput = {}): Promise<SeedProCounterResult> {
+  return aljexImportAction<SeedProCounterResult>('IMPORT_SEED_COUNTER', input)
+}
+
+/** Per-file Aljex imports (customers, carriers, AP, AR, active-shipments check): PLAN is a dry run, APPLY writes. Owner/ADMIN only. */
+export async function runAljexFileImport(action: AljexFileImportAction, input: AljexFileImportInput): Promise<AljexFileImportResult> {
+  return aljexImportAction<AljexFileImportResult>(action, input)
+}
+
+export async function syncImportedCarriers(jobId?: string | null): Promise<SyncImportedCarriersResult> {
+  return aljexImportAction<SyncImportedCarriersResult>('IMPORT_SYNC_CARRIERS', { jobId: jobId ?? null })
+}
+
+/** The lossless source row for a PRO: every non-empty Aljex column with its header (owner/ADMIN). */
+export async function getLegacyAljexRow(pro: string): Promise<LegacyAljexRowResult> {
+  return aljexImportAction<LegacyAljexRowResult>('IMPORT_LEGACY_ROW', { pro })
+}
+
+// Aljex code mapping (Settings > Users). Owner/ADMIN only (enforced by the Lambda).
+export async function listAljexCodes(): Promise<AljexCodeSummary[]> {
+  const r = await shipmentAction<{ codes: AljexCodeSummary[] }>('LIST_ALJEX_CODES', {})
+  return r.codes ?? []
+}
+
+/** Saves the code -> user crosswalk only; no shipment changes until a reassign runs. */
+export async function setAljexCodeMap(input: SetAljexCodeMapInput): Promise<AljexCodeMapRecord> {
+  const r = await shipmentAction<{ map: AljexCodeMapRecord }>('SET_ALJEX_CODE_MAP', input)
+  return r.map
+}
+
+/** Reassigns every shipment carrying the Aljex Salesrep code. Call again while `hasMore`. */
+export async function reassignShipmentsByRepCode(input: ReassignByRepCodeInput): Promise<ReassignByRepCodeResult> {
+  return shipmentAction<ReassignByRepCodeResult>('REASSIGN_SHIPMENTS_BY_REP_CODE', input)
+}
+
+// Aljex-exit Phase 0: data safety (PITR status, S3 export, export-everything CSV). Owner/ADMIN only.
+async function dataSafetyAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsDataSafety: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsDataSafety($action: String!, $input: AWSJSON!) { tmsDataSafety(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsDataSafety: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsDataSafety)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+export async function getDataStatus(): Promise<DataStatus> {
+  return dataSafetyAction<DataStatus>('DATA_STATUS', {})
+}
+
+export async function exportNow(): Promise<{ job: DataExportJob }> {
+  return dataSafetyAction<{ job: DataExportJob }>('EXPORT_NOW', {})
+}
+
+export async function startCsvExport(input: CsvExportStartInput): Promise<{ job: DataExportJob }> {
+  return dataSafetyAction<{ job: DataExportJob }>('CSV_EXPORT_START', input)
+}
+
+export async function getCsvExport(jobId: string): Promise<{ job: DataExportJob }> {
+  return dataSafetyAction<{ job: DataExportJob }>('CSV_EXPORT_STATUS', { jobId })
+}
+
+export async function getCsvExportLinks(jobId: string): Promise<DataExportLinks> {
+  return dataSafetyAction<DataExportLinks>('CSV_EXPORT_LINKS', { jobId })
+}
+
+export async function startAccountingExport(input: { from?: string; to?: string; status?: string } = {}): Promise<{ job: DataExportJob }> {
+  return dataSafetyAction<{ job: DataExportJob }>('ACCOUNTING_EXPORT', input)
+}
+
+export async function listExports(): Promise<{ jobs: DataExportJob[] }> {
+  return dataSafetyAction<{ jobs: DataExportJob[] }>('EXPORT_LIST', {})
+}
+
+export async function uploadBrandAsset(file: File, keyPrefix?: string): Promise<{ key: string; url: string }> {
+  let prefix = keyPrefix || 'brand/logos'
+  if (!prefix.startsWith('brand/')) prefix = `brand/${prefix}`
+  prefix = prefix.replace(/\/+$/, '')
+  const safeName = file.name.replace(/[^\w.-]+/g, '_').slice(-80) || 'asset'
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
+  const key = `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}.${ext}`
+  await uploadData({ path: key, data: file, options: { contentType: file.type || 'application/octet-stream' } }).result
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return { key, url: result.url.toString() }
+}
+
+export async function getAccountInfo(): Promise<AccountInfo> {
+  const rawOutputs = outputs as {
+    auth?: { user_pool_id?: string }
+    data?: { url?: string }
+    storage?: { aws_region?: string; bucket_name?: string }
+  }
+  const stack = {
+    userPoolId: rawOutputs.auth?.user_pool_id ?? '',
+    appSyncUrl: rawOutputs.data?.url ?? '',
+    region: rawOutputs.storage?.aws_region ?? '',
+    storageBucket: rawOutputs.storage?.bucket_name ?? '',
+  }
+  const integrations = await listIntegrations()
+  return { stack, integrations }
+}
+
+// ── Integrations (tmsDirectoryActions, owner/ADMIN) ──────────────────────────
+//
+// Every call is the same router the directory writes go through, so there is no new
+// Lambda and no new permission: the handler's `authorize` refuses anybody but the
+// owner and an ADMIN. No credential value ever comes back — a row carries last-4
+// masks and nothing else — and no action here can reach a Shipment, an Invoice or a
+// factoring row, which is what keeps the release gate the only door into AR.
+
+/** Every provider row, created from the registry on the first call. */
+export async function listIntegrations(): Promise<IntegrationRecord[]> {
+  if (!modelAvailable('Integration')) return []
+  return directoryAction<IntegrationRecord[]>('LIST_INTEGRATIONS', {})
+}
+/** PAGE providers only: the values go to SSM, the row gets the masks. */
+export async function connectIntegration(provider: string, credentials: Record<string, string>): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('CONNECT_INTEGRATION', { provider, credentials })
+}
+/** The one read call the descriptor declares; the answer is the row's health. */
+export async function validateIntegration(provider: string): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('VALIDATE_INTEGRATION', { provider })
+}
+
+/** Start (or resume) "Pull all monitored carriers" from MyCarrierPackets. Returns at once; poll getMcpPullStatus. */
+export async function startMcpPull(restart = false): Promise<void> {
+  await directoryAction<{ started: boolean }>('MYCARRIERPACKETS_PULL_START', { restart })
+}
+
+/** MyCarrierPackets pull progress: counts, cursor, unmatched both ways, last sync and error. Null before the first run. */
+export async function getMcpPullStatus(): Promise<McpPullState | null> {
+  return (await directoryAction<{ state: McpPullState | null }>('MYCARRIERPACKETS_PULL_STATUS', {})).state
+}
+
+/** Pull one carrier's full profile from MyCarrierPackets onto its row. */
+export async function pullMcpCarrier(carrierId: string): Promise<{ carrierId: string; result: 'SYNCED' | 'NO_PACKET' | null }> {
+  return directoryAction('MYCARRIERPACKETS_SYNC_CARRIER', { carrierId })
+}
+// ── Carriers › Find & Invite (tmsDirectoryActions; the MyCarrierPackets calls run in the Lambda) ──
+
+export type McpFindMode = 'LIVE' | 'STUB'
+
+export interface McpLookupResult {
+  mode: McpFindMode
+  /** Why the answer is a stub (no credentials, not validated...); null when LIVE. */
+  reason: string | null
+  card: McpReviewCard | null
+  notFound: boolean
+}
+
+export interface McpInviteResult {
+  mode: McpFindMode
+  sent: boolean
+  message: string
+  /** Step AS. The addresses the invitation went to. */
+  emails?: string[]
+  failed?: Array<{ email: string; error: string }>
+  mcpResponse?: { status: number; bodyKeys: string[]; message: string | null }
+  invitedAt?: string
+  /** Step AM. With `ensureCarrier`: the directory row the invitation created or matched. */
+  carrierId?: string | null
+  carrierCreated?: boolean
+  /** Set when the invitation went out but the PENDING row could not be made (no second invite needed). */
+  carrierError?: string | null
+  carrierLogged: boolean
+  threadLogged: boolean
+}
+
+/** PreviewCarrier: profile, FMCSA status, risk assessment, certificates, approved e-mails. */
+export async function mcpPreviewCarrier(ref: { mcNumber?: string; dotNumber?: string }): Promise<McpLookupResult> {
+  return directoryAction<McpLookupResult>('MCP_PREVIEW_CARRIER', ref)
+}
+/** GetCarrierData: the full record (packet, contacts, equipment, lanes, monitoring). */
+export async function mcpGetCarrier(ref: { mcNumber?: string; dotNumber?: string }): Promise<McpLookupResult> {
+  return directoryAction<McpLookupResult>('MCP_GET_CARRIER', ref)
+}
+/** EmailPacketInvitation; logs on the Carrier row, the audit and (from a load) the shipment thread. */
+export async function mcpSendInvite(input: {
+  mcNumber?: string
+  dotNumber?: string
+  /** One recipient (kept for compatibility); additive with `emails`. */
+  email?: string
+  /** Step AS. The recipients. Omit both `emails` and `email` for the default: every address MCP returns. */
+  emails?: string[]
+  carrierId?: string
+  carrierName?: string
+  shipmentId?: string
+  loadId?: string
+  /** Step AM. Create the PENDING Carrier row from MyCarrierPackets after the invitation is sent. */
+  ensureCarrier?: boolean
+}): Promise<McpInviteResult> {
+  return directoryAction<McpInviteResult>('MCP_SEND_INVITE', input)
+}
+/** Create the Carrier row from MyCarrierPackets (MCP values win; audited). Refused in STUB mode. */
+export async function mcpAddCarrier(ref: { mcNumber?: string; dotNumber?: string }): Promise<{ carrierId: string; created: boolean; matchedBy: string | null }> {
+  return directoryAction('MCP_ADD_CARRIER', ref)
+}
+export async function saveIntegrationSettings(
+  provider: string,
+  settings: Record<string, unknown>,
+  expectedVersion?: number,
+): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('SAVE_INTEGRATION_SETTINGS', { provider, settings, expectedVersion })
+}
+/** Deletes the stored credential. The row, its settings and its history are kept. */
+export async function disconnectIntegration(provider: string): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('DISCONNECT_INTEGRATION', { provider })
+}
+/**
+ * A stub run: the descriptor's sample in, a `STUB —` result out, one audit row written
+ * and no business record touched anywhere. There is no shipment argument on purpose.
+ */
+export async function runIntegrationStub(
+  provider: string,
+  capability: Capability,
+  sample?: Record<string, unknown>,
+): Promise<{ row: IntegrationRecord; result: AdapterResult }> {
+  return directoryAction<{ row: IntegrationRecord; result: AdapterResult }>('RUN_STUB', { provider, capability, sample })
+}
+/** Finishes Intuit's authorization-code redirect; the refresh token never leaves SSM. */
+export async function connectQuickBooks(input: { code: string; realmId: string; redirectUri: string }): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('CONNECT_QUICKBOOKS', input)
+}
+export async function refreshQuickBooks(): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('REFRESH_QUICKBOOKS', {})
+}
+/** Builds the QuickBooks payload and sends nothing — the answer is always `STUB`. */
+export async function previewQboSync(input: {
+  kind: 'INVOICE' | 'BILL' | 'PAYMENT'
+  record: Record<string, unknown>
+  mappings?: Record<string, unknown>
+}): Promise<{ payload: unknown; mode: 'STUB' }> {
+  return directoryAction<{ payload: unknown; mode: 'STUB' }>('PREVIEW_QBO_SYNC', input)
+}
+/** The secret is returned once and stored nowhere; only its hash is kept. */
+export async function issueApiClient(name: string, scopes: string[]): Promise<{ row: IntegrationRecord; clientId: string; secret: string }> {
+  return directoryAction<{ row: IntegrationRecord; clientId: string; secret: string }>('ISSUE_API_CLIENT', { name, scopes })
+}
+export async function revokeApiClient(clientId: string): Promise<IntegrationRecord> {
+  return directoryAction<IntegrationRecord>('REVOKE_API_CLIENT', { clientId })
+}
+
+// ── Shipments · Orders · Load money (tmsShipmentActions) ─────────────────────
+//
+// Reads come straight off the generated queries and their GSIs; every write goes
+// through the one Lambda, which owns the transaction across the five tables. The
+// board polls — these models have no subscriptions.
+
+export type {
+  ShipmentRecord, OrderRecord, LoadCarrierRecord, LoadFinancialsRecord, LoadChargeRecord,
+  LoadChargeInput, ShipmentBundle, ShipmentLoad, ShipmentStatus, LoadWorkflowStatus,
+  ShipmentMode, ArStatus, AssignmentType, ShipmentColumnTemplateRecord,
+} from '@/types/tms'
+
+const SHIPMENT_FIELDS = `
+  id number status previousStatus statusChangedAt statusChangedBy
+  holdReason cancelReason tenderRejectReason deletedAt deletedBy
+  customerId customerName mode parentShipmentId orderIds loadIds
+  pickupAppt deliveryAppt pickupMonth originCity destinationCity searchKey source
+  createdBy updatedBy version createdAt updatedAt
+`
+// Step E stamps the shipment when every load has delivered and remembers the last
+// notice it sent. Its own flag, like the settings generations above: one unhandled
+// throw on a pre-deploy backend empties the whole board.
+const SHIPMENT_DELIVERY_FIELDS = ['deliveredAt', 'lastNoticeAt', 'lastNoticeStatus']
+let shipmentsHaveDelivery = true
+// Step R's revenue tags, the Void stamp and the DAT post. One group, one flag, one
+// deploy — and the same reason as every generation above it: an unhandled throw on a
+// backend that predates them empties the whole board.
+const SHIPMENT_REV_FIELDS = [
+  'revDivision', 'revSubdivision', 'revTagSource', 'revRuleId', 'revTaggedBy', 'salesRepId',
+  'voidedAt', 'voidedBy', 'voidReason', 'datPostedAt',
+]
+let shipmentsHaveRevTag = true
+const SHIPMENT_COVERAGE_FIELDS = ['carrierRepId', 'carrierTeamKey']
+let shipmentsHaveCoverage = true
+// Step AM: the ladder rung mirrored onto the shipment. Own flag, same reason.
+const SHIPMENT_ASSIGNMENT_FIELDS = ['carrierAssignmentStatus']
+let shipmentsHaveAssignment = true
+// Step U: who reviewed the intake load this shipment was moved from. Own flag, same reason.
+const SHIPMENT_INTAKE_FIELDS = ['intakeLoadId', 'intakeReviewedBy', 'intakeReviewedAt']
+let shipmentsHaveIntake = true
+// Step V: the person tracking the shipment. Own flag, same reason.
+const SHIPMENT_TRACKER_FIELDS = ['trackerId']
+let shipmentsHaveTracker = true
+// Step AJ: the per-shipment tracking override (one JSON field). Own flag, same reason.
+const SHIPMENT_TRACKING_PREFS_FIELDS = ['trackingPrefs']
+let shipmentsHaveTrackingPrefs = true
+/** AppSync hands the AWSJSON back as a string, the Lambda bundle as an object: normalise both so consumers see `TrackingPrefsOverride | null`. */
+function withParsedPrefs<T>(result: T): T {
+  const fix = (row: unknown) => {
+    if (row && typeof row === 'object' && 'trackingPrefs' in row) {
+      row.trackingPrefs = parseTrackingPrefs(row.trackingPrefs)
+    }
+  }
+  if (Array.isArray(result)) result.forEach(fix)
+  else if (result instanceof Map) result.forEach(fix)
+  else fix(result)
+  return result
+}
+// Aljex-exit: verbatim Aljex codes (mapped to people in Settings > Users) and the OSD flag.
+const SHIPMENT_ALJEX_FIELDS = ['salesRepCode', 'createdByCode', 'serviceRepCode', 'dispatcherCode', 'osd']
+let shipmentsHaveAljexCodes = true
+// Step AP: the Load Review push stamp. Own flag, same reason.
+const SHIPMENT_REVIEW_PUSH_FIELDS = ['loadReviewPushedAt', 'loadReviewPushedBy']
+let shipmentsHaveReviewPush = true
+
+/** Every Shipment read, with each newer group dropped and retried if the backend predates it. */
+async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T> {
+  for (;;) {
+    try {
+      return withParsedPrefs(await run([
+        SHIPMENT_FIELDS,
+        shipmentsHaveDelivery ? SHIPMENT_DELIVERY_FIELDS.join(' ') : '',
+        shipmentsHaveTracker ? SHIPMENT_TRACKER_FIELDS.join(' ') : '',
+        shipmentsHaveTrackingPrefs ? SHIPMENT_TRACKING_PREFS_FIELDS.join(' ') : '',
+        shipmentsHaveRevTag ? SHIPMENT_REV_FIELDS.join(' ') : '',
+        shipmentsHaveCoverage ? SHIPMENT_COVERAGE_FIELDS.join(' ') : '',
+        shipmentsHaveAssignment ? SHIPMENT_ASSIGNMENT_FIELDS.join(' ') : '',
+        shipmentsHaveIntake ? SHIPMENT_INTAKE_FIELDS.join(' ') : '',
+        shipmentsHaveAljexCodes ? SHIPMENT_ALJEX_FIELDS.join(' ') : '',
+        shipmentsHaveReviewPush ? SHIPMENT_REVIEW_PUSH_FIELDS.join(' ') : '',
+      ].filter(Boolean).join(' ')))
+    } catch (err) {
+      if (shipmentsHaveReviewPush && fieldNamed(SHIPMENT_REVIEW_PUSH_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Load Review push stamp on Shipment yet — querying without it until deploy')
+        shipmentsHaveReviewPush = false
+        continue
+      }
+      if (shipmentsHaveAljexCodes && fieldNamed(SHIPMENT_ALJEX_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Aljex code fields on Shipment yet — querying without them until deploy')
+        shipmentsHaveAljexCodes = false
+        continue
+      }
+      if (shipmentsHaveTrackingPrefs && fieldNamed(SHIPMENT_TRACKING_PREFS_FIELDS, err)) {
+        shipmentsHaveTrackingPrefs = false
+        continue
+      }
+      if (shipmentsHaveTracker && fieldNamed(SHIPMENT_TRACKER_FIELDS, err)) {
+        shipmentsHaveTracker = false
+        continue
+      }
+      if (shipmentsHaveIntake && fieldNamed(SHIPMENT_INTAKE_FIELDS, err)) {
+        shipmentsHaveIntake = false
+        continue
+      }
+      if (shipmentsHaveAssignment && fieldNamed(SHIPMENT_ASSIGNMENT_FIELDS, err)) {
+        shipmentsHaveAssignment = false
+        continue
+      }
+      if (shipmentsHaveCoverage && fieldNamed(SHIPMENT_COVERAGE_FIELDS, err)) {
+        shipmentsHaveCoverage = false
+        continue
+      }
+      if (shipmentsHaveRevTag && fieldNamed(SHIPMENT_REV_FIELDS, err)) {
+        console.warn('[apiClient] backend has no revenue tags on Shipment yet — querying without them until deploy')
+        shipmentsHaveRevTag = false
+        continue
+      }
+      if (!shipmentsHaveDelivery || !fieldNamed(SHIPMENT_DELIVERY_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no delivery fields on Shipment yet — querying without them until deploy')
+      shipmentsHaveDelivery = false
+    }
+  }
+}
+const ORDER_FIELDS = `
+  id shipmentId customerId customerName customerContactId customerRepId billToId costCenter
+  mode rateType references equipmentType equipmentLengthFt specialRequirements freight
+  customerNotes internalNotes customerRateCents revenueCents
+  arStatus arStatusChangedAt invoiceId invoiceEarly readyToInvoiceAt pickupAppt
+  createdBy updatedBy version createdAt updatedAt
+`
+const ORDER_JSON_FIELDS: (keyof OrderRecord)[] = ['references', 'specialRequirements', 'freight']
+// Step E's cached verdict of the required-document gate. Same self-heal, same reason.
+const ORDER_DOC_FIELDS = [
+  'docsRequired', 'docsMissing', 'docsCheckedAt', 'docsOverrideAt', 'docsOverrideBy', 'docsOverrideNote',
+]
+let ordersHaveDocs = true
+// Step F's cached invoice facts, so a board row can show the number and what is still
+// owed without opening the Invoice. Its own flag and its own retry, one generation
+// later than the document fields above.
+const ORDER_AR_FIELDS = ['invoiceNumber', 'invoicedAt', 'paidAt', 'arBalanceCents', 'factoringItemId']
+let ordersHaveAr = true
+
+/** Every Order read, with each newer group dropped and retried if the backend predates it. */
+async function readOrders<T>(run: (fields: string) => Promise<T>): Promise<T> {
+  for (;;) {
+    try {
+      return await run([
+        ORDER_FIELDS,
+        ordersHaveDocs ? ORDER_DOC_FIELDS.join(' ') : '',
+        ordersHaveAr ? ORDER_AR_FIELDS.join(' ') : '',
+      ].filter(Boolean).join(' '))
+    } catch (err) {
+      if (ordersHaveAr && fieldNamed(ORDER_AR_FIELDS, err)) {
+        console.warn('[apiClient] backend has no AR fields on Order yet — querying without them until deploy')
+        ordersHaveAr = false
+        continue
+      }
+      if (!ordersHaveDocs || !fieldNamed(ORDER_DOC_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no document fields on Order yet — querying without them until deploy')
+      ordersHaveDocs = false
+    }
+  }
+}
+const LOAD_CARRIER_FIELDS = `
+  id loadId shipmentId kind status removalReason removedAt removedBy sequence
+  carrierId carrierName carrierMc carrierRepId dispatcherName dispatcherPhone dispatcherEmail
+  driverId driverName driverPhone driver2Name driver2Phone
+  truckId truckNumber trailerId trailerNumber plates vin sealNumber tripNumber
+  pickupEtaAt deliveryEtaAt priorDeliveryAt priorDeliveryNote
+  rateConSignedAt rateConKey chargesFinalizedAt
+  carrierRateCents costCents apStatus invoiceId createdBy updatedBy createdAt updatedAt
+`
+// Step C's booking layer on the assignment row: quick pay, the rate-con lifecycle and
+// dispatch. One flag for the whole group — they deploy together — and the same self-heal
+// as the settings generations, because one unhandled throw here blanks the shipment drawer.
+const LOAD_CARRIER_V2_FIELDS = [
+  'quickPay', 'quickPayDays', 'quickPayFeeBps', 'quickPayFeeCents', 'paymentTermsDays',
+  'rateConStatus', 'rateConToken', 'rateConSentAt', 'rateConSentTo', 'rateConExpiresAt',
+  'rateConDocumentId', 'rateConSignerName', 'rateConSignerIp', 'rateConVersion',
+  'bookedAt', 'bookingWarnings', 'dispatchedAt', 'dispatchNote', 'removalNote',
+  'assignmentStatus', 'assignmentTimes',
+]
+let loadCarriersHaveCarrierV2 = true
+// Step E's upload link, the carrier's outstanding paperwork and the rating the office
+// gave them. A third generation with its own flag, because it deploys after step C's.
+const LOAD_CARRIER_V3_FIELDS = [
+  'uploadLinkId', 'podRequestedAt', 'docsMissing', 'ratingStars', 'ratingNote', 'ratedAt', 'ratedBy',
+]
+let loadCarriersHaveDocuments = true
+// Step G's AP facts on the assignment: the sparse open marker, when the rung last moved,
+// what is still owed on it and when it was paid. A fourth generation with its own flag.
+const LOAD_CARRIER_V4_FIELDS = ['apOpen', 'apStatusChangedAt', 'apBalanceCents', 'apPaidAt']
+let loadCarriersHaveAp = true
+// AT-plan (several carriers on one load): the legs a carrier covers and its optional tracking
+// override. A fifth generation with its own flag, shipped with the schema.
+const LOAD_CARRIER_V5_FIELDS = ['legStopIds', 'trackingPrefs']
+let loadCarriersHaveLegs = true
+const loadCarrierFields = () => [
+  LOAD_CARRIER_FIELDS,
+  loadCarriersHaveCarrierV2 ? LOAD_CARRIER_V2_FIELDS.join(' ') : '',
+  loadCarriersHaveDocuments ? LOAD_CARRIER_V3_FIELDS.join(' ') : '',
+  loadCarriersHaveAp ? LOAD_CARRIER_V4_FIELDS.join(' ') : '',
+  loadCarriersHaveLegs ? LOAD_CARRIER_V5_FIELDS.join(' ') : '',
+].filter(Boolean).join(' ')
+
+/** Every LoadCarrier read, with a group dropped and retried if the backend predates it. */
+async function readLoadCarriers<T>(run: (fields: string) => Promise<T>): Promise<T> {
+  for (;;) {
+    try {
+      return withParsedPrefs(await run(loadCarrierFields()))
+    } catch (err) {
+      if (loadCarriersHaveLegs && fieldNamed(LOAD_CARRIER_V5_FIELDS, err)) {
+        console.warn('[apiClient] backend has no leg fields on LoadCarrier yet — querying without them until deploy')
+        loadCarriersHaveLegs = false
+        continue
+      }
+      if (loadCarriersHaveAp && fieldNamed(LOAD_CARRIER_V4_FIELDS, err)) {
+        console.warn('[apiClient] backend has no AP fields on LoadCarrier yet — querying without them until deploy')
+        loadCarriersHaveAp = false
+        continue
+      }
+      if (loadCarriersHaveDocuments && fieldNamed(LOAD_CARRIER_V3_FIELDS, err)) {
+        console.warn('[apiClient] backend has no document fields on LoadCarrier yet — querying without them until deploy')
+        loadCarriersHaveDocuments = false
+        continue
+      }
+      if (!loadCarriersHaveCarrierV2 || !fieldNamed(LOAD_CARRIER_V2_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no carrier booking fields on LoadCarrier yet — querying without them until deploy')
+      loadCarriersHaveCarrierV2 = false
+    }
+  }
+}
+
+/** The four index reads of the assignment table; `args` maps the generated arguments. */
+function listLoadCarriersByIndex(name: string, args: Record<string, string>): Promise<LoadCarrierRecord[]> {
+  return readLoadCarriers((fields) => listAllByIndex<LoadCarrierRecord>(name, args, fields, 1000))
+}
+const LOAD_FINANCIALS_FIELDS = `
+  id loadId shipmentId orderId customerRateCents revenueCents carrierRateCents costCents
+  profitCents marginBps topSpendCents targetBuyCents frozenAt frozenBy updatedBy version
+  createdAt updatedAt
+`
+const LOAD_CHARGE_FIELDS = `
+  id shipmentId side orderId loadId loadCarrierId code label calculatedBy
+  rateCents count amountCents isRate release sortOrder note createdBy createdAt updatedAt
+`
+
+/**
+ * Page a secondary-index query to the end. `args` maps the generated argument names to
+ * their values; most index keys are Strings, but an enum-backed key (Shipment.status) is
+ * generated as its own GraphQL type and AppSync rejects a `String!` variable there, so
+ * `argTypes` names the exception.
+ */
+async function listAllByIndex<T>(
+  name: string,
+  args: Record<string, string>,
+  fields: string,
+  limit: number,
+  argTypes: Record<string, string> = {},
+  /** A server-side filter: the generated `Model<X>FilterInput` type name and its value. */
+  filter?: { type: string; value: unknown },
+): Promise<T[]> {
+  const names = Object.keys(args)
+  const decls = names.map((n) => `$${n}: ${argTypes[n] ?? 'String!'}`).join(', ') + (filter ? `, $filter: ${filter.type}` : '')
+  const passed = names.map((n) => `${n}: $${n}`).join(', ') + (filter ? ', filter: $filter' : '')
+  const rows: T[] = []
+  let nextToken: string | null = null
+  do {
+    const r = await client.graphql({
+      query: `query ${name}(${decls}, $nextToken: String) { ${name}(${passed}, limit: ${limit}, nextToken: $nextToken) { items { ${fields} } nextToken } }`,
+      variables: { ...args, ...(filter ? { filter: filter.value } : {}), nextToken },
+    }) as { data: Record<string, { items: (T | null)[]; nextToken?: string | null }> }
+    const page = r.data[name]
+    for (const item of page.items) if (item) rows.push(item)
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return rows
+}
+
+/**
+ * Every shipment write. Same contract as `directoryAction`: the Lambda's own message
+ * is rethrown, so a refusal ("customer is on credit hold") reaches the toast intact
+ * instead of `[object Object]`.
+ */
+export async function shipmentAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsShipmentActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsShipmentActions($action: String!, $input: AWSJSON!) { tmsShipmentActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsShipmentActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsShipmentActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+// ── Writes ───────────────────────────────────────────────────────────────────
+// Every one takes the action's input object verbatim and returns the whole
+// ShipmentBundle, already parsed out of AWSJSON, so a caller swaps the response in
+// rather than re-reading the shipment. `expectedUpdatedAt` is the CAS token: the
+// record as the caller last saw it. It is optional only on the actions whose target
+// row the board does not hold a copy of.
+
+/**
+ * The one door freight comes in through.
+ *
+ * Exactly one of `customerId` / `customerName` is required. A resolved `customerId` runs
+ * the ACTIVE and free-credit checks exactly as it always has; `customerName` is the
+ * operator's typed text for a broker no directory record matched, and the shipment then
+ * carries no `customerId` at all until SET_SHIPMENT_CUSTOMER links one. No Customer
+ * record is ever created from here and no name is ever invented.
+ *
+ * `pro` is the PRO a legacy entrypoint already owns; absent, the leg takes the derived
+ * `<shipmentNumber>-<leg>`. Either way the server claims it, atomically and forever.
+ *
+ * `load` is a whitelisted leg bag — the server refuses anything outside it (notably
+ * `readyToInvoice`, which would walk straight past the release gate). `rateCents` becomes
+ * a CUSTOMER LINEHAUL charge priced through the shipment, never a raw `Load.rate`.
+ */
+export interface CreateShipmentLoadBag {
+  stops?: Stop[]
+  pickupAppt?: string
+  pickupApptEnd?: string
+  pickupApptType?: ApptType
+  deliveryAppt?: string
+  deliveryApptEnd?: string
+  deliveryApptType?: ApptType
+  originName?: string
+  originCity?: string
+  destinationName?: string
+  destinationCity?: string
+  pickupDriverId?: string | null
+  deliveryDriverId?: string | null
+  truckId?: string | null
+  tmsId?: string
+  pickupNumber?: string
+  commodity?: string
+  weight?: number
+  pieces?: number
+  piecesUnit?: string
+  cargoValueCents?: number
+  miles?: number
+  notes?: string
+  hot?: boolean
+  unscheduled?: boolean
+  equipmentType?: string
+  rateCents?: number
+}
+export interface CreateShipmentInput {
+  customerId?: string
+  customerName?: string
+  mode?: ShipmentMode
+  pro?: string
+  /** `TENDER` is a workflow proposal a person applied; the server opens it TENDER_PENDING. */
+  source?: 'MANUAL' | 'DUPLICATE' | 'FACTORING' | 'BACKFILL' | 'TENDER'
+  /** The WorkflowRun this came from. Read-only afterwards: only CREATE_SHIPMENT writes it. */
+  workflowRunId?: string
+  load?: CreateShipmentLoadBag
+}
+export async function createShipment(input: CreateShipmentInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('CREATE_SHIPMENT', input)
+}
+
+/**
+ * The only writer of customer identity on a shipment that was recorded with typed text.
+ *
+ * Runs the same ACTIVE and free-credit checks CREATE_SHIPMENT runs, then writes the
+ * Shipment, the Order and every Load together — the alternative, editing `Load.customer`
+ * in the leg drawer, left the shipment and the order unresolved while the calendar looked
+ * linked, and the gates then disagreed with what was on screen.
+ */
+export async function setShipmentCustomer(input: { shipmentId: string; customerId: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_SHIPMENT_CUSTOMER', input)
+}
+
+/**
+ * Move a leg's PRO. `aljexId` is field-level read-only to clients, so this is the only
+ * route: it claims the new PRO and never releases the old one, which is what makes a PRO
+ * permanent on edit as well as on create.
+ */
+export interface SetLoadProResult {
+  bundle: ShipmentBundle
+  load: Load
+}
+export async function setLoadPro(input: { loadId: string; pro: string; expectedUpdatedAt?: string }): Promise<SetLoadProResult> {
+  return shipmentAction<SetLoadProResult>('SET_LOAD_PRO', input)
+}
+
+export interface SaveOrderFormInput {
+  shipmentId: string
+  expectedUpdatedAt: string
+  order: Partial<Omit<OrderRecord, 'id' | 'shipmentId' | 'createdAt' | 'updatedAt'>>
+  stops?: Stop[]
+  charges?: LoadChargeInput[]
+  loadFields?: Partial<ShipmentLoadFields> & { miles?: number | null; notes?: string | null }
+}
+export async function saveOrderForm(input: SaveOrderFormInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SAVE_ORDER_FORM', input)
+}
+
+/** Read-only: what the customer owes today, and whether `projectedCents` would fit. */
+export interface CheckCreditInput {
+  customerId: string
+  projectedCents?: number
+}
+export async function checkCredit(input: CheckCreditInput): Promise<CreditSummary> {
+  return shipmentAction<CreditSummary>('CHECK_CREDIT', { projectedCents: 0, ...input })
+}
+
+export interface SubmitOrderInput {
+  shipmentId: string
+  expectedUpdatedAt: string
+  carrierRepId?: string
+}
+export async function submitOrder(input: SubmitOrderInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SUBMIT_ORDER', input)
+}
+
+/** UNCANCEL is its own verb: it restores `previousStatus`, it does not set one. */
+export type ShipmentStatusAction = 'ON_HOLD' | 'OPEN' | 'CANCELED' | 'UNCANCEL'
+export interface SetShipmentStatusInput {
+  shipmentId: string
+  expectedUpdatedAt: string
+  status: ShipmentStatusAction
+  reason?: string
+}
+export async function setShipmentStatus(input: SetShipmentStatusInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_SHIPMENT_STATUS', input)
+}
+
+export interface SetLoadStatusInput {
+  loadId: string
+  status: LoadWorkflowStatus
+  expectedUpdatedAt?: string
+}
+export async function setLoadStatus(input: SetLoadStatusInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_LOAD_STATUS', input)
+}
+
+/**
+ * Void — the ONLY way a shipment leaves the working set (Ryne, 2026-10-28).
+ *
+ * There is no delete and no restore: the row, its PRO number, its history and its
+ * documents all stay, the number is never reused, and a voided shipment can never
+ * be invoiced. Who may void is decided in the Lambda from the caller's identity,
+ * never from the UI.
+ */
+export async function voidShipment(input: { shipmentId: string; reason: string; expectedUpdatedAt?: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('VOID_SHIPMENT', input)
+}
+
+/** The only way back from a void. Owner/ADMIN only. */
+export async function unvoidShipment(input: { shipmentId: string; reason: string; expectedUpdatedAt?: string | null }): Promise<unknown> {
+  return shipmentAction<unknown>('UNVOID_SHIPMENT', input)
+}
+
+/** Re-point a linked shipment's customer. Owner/ADMIN only; throws INVOICED: when billed. */
+export async function repointShipmentCustomer(input: { shipmentId: string; customerId: string; reason: string; expectedUpdatedAt?: string | null }): Promise<unknown> {
+  return shipmentAction<unknown>('REPOINT_SHIPMENT_CUSTOMER', input)
+}
+
+/** Create a Shipment for a legacy Load that does not have one. Owner/ADMIN only. */
+export async function createShipmentForLoad(loadId: string): Promise<unknown> {
+  return shipmentAction<unknown>('BACKFILL_SHIPMENT', { loadIds: [loadId], dryRun: false })
+}
+
+/**
+ * The invoiced half of a re-point. Owner/ADMIN only, and the only path that may move
+ * freight whose customer has already been billed: it credits the original invoice —
+ * which is never edited — and puts the order back on the gate so the new customer is
+ * rebilled the normal way. `idempotencyKey` is minted once per dialog, so a double
+ * click cannot credit the same invoice twice.
+ */
+export async function repointInvoicedCustomer(
+  input: { shipmentId: string; customerId: string; reason: string; idempotencyKey: string; acknowledgePaid?: boolean },
+): Promise<unknown> {
+  return financeAction<unknown>('REPOINT_INVOICED_CUSTOMER', input)
+}
+
+/**
+ * Re-resolve one shipment's revenue tag from the rules as they read now. The
+ * invoiced half of a customer re-point runs in the finance Lambda, which cannot
+ * reach the ownership tables, and a rule that keys on the customer is wrong the
+ * moment the customer moves. A tag somebody set by hand still wins.
+ */
+export async function resolveRevTag(input: { shipmentId: string }): Promise<unknown> {
+  return shipmentAction<unknown>('RESOLVE_REV_TAG', input)
+}
+
+// ── Revenue tags (tmsShipmentActions) ────────────────────────────────────────
+
+/** Tag by hand. A hand tag beats the rules and survives a carrier or driver change. */
+export async function setRevTag(input: { shipmentId: string; divisionCode: string; subdivisionCode?: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_REV_TAG', input)
+}
+/** Drop the hand tag and let the rules answer again. */
+export async function clearRevTag(input: { shipmentId: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('CLEAR_REV_TAG', input)
+}
+/** `repId` is a Cognito username, or null to clear the rep. */
+export async function setSalesRep(input: { shipmentId: string; repId: string | null }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_SALES_REP', input)
+}
+
+export interface AssignTrackerResult { updated: string[]; skipped: { shipmentId: string; reason: string }[] }
+/** Assign (or clear, with null) the tracker of 1–100 shipments; one shape for single and bulk. */
+export async function assignTracker(input: { shipmentIds: string[]; trackerId: string | null }): Promise<AssignTrackerResult> {
+  return shipmentAction<AssignTrackerResult>('ASSIGN_TRACKER', input)
+}
+
+/** What a re-tag did, or would do: `dryRun` writes nothing and reports the same counts. */
+export interface RetagReport {
+  dryRun: boolean
+  scanned: number
+  changed: number
+  byDivision: Record<string, number>
+  bySubdivision: Record<string, number>
+  /** Left alone because somebody tagged them by hand. */
+  handTagged: number
+}
+/** Re-run the rules over every rule-tagged shipment. Admin only, server-side. */
+export async function retagShipments(input: { dryRun: boolean }): Promise<RetagReport> {
+  return shipmentAction<RetagReport>('RETAG_SHIPMENTS', input)
+}
+
+/** The rule editor's "test a shipment": what the rules say, and what the row holds now. */
+export interface OwnershipRuleTest {
+  context: ResolveContext
+  resolution: Resolution
+  current: { revDivision: string | null; revSubdivision: string | null; revTagSource: RevTagSource | null }
+}
+export async function testOwnershipRules(input: { shipmentId: string }): Promise<OwnershipRuleTest> {
+  return shipmentAction<OwnershipRuleTest>('TEST_OWNERSHIP_RULES', input)
+}
+
+// ── Revenue ownership & department views (Step R) ────────────────────────────
+/*
+ * Three small tables the whole app reads and only tmsDirectoryActions writes: the
+ * division tree (the sidebar's sections, the dashboard's grouping), the ordered
+ * rules that tag a shipment, and the saved Shipments views. Tens of rows each, so
+ * `list` is the read and there is no index.
+ *
+ * They all arrive with step R's deploy. Until then AppSync has no such query at
+ * all and the error names the QUERY, not a field, so the field-level self-heal
+ * cannot see it — the same bargain the quote models struck: degrade to "nothing
+ * configured" and let the caller fall back to the seed, rather than throwing on
+ * every page that renders a sidebar.
+ */
+const OWNERSHIP_DIVISION_FIELDS = `
+  id code name brand parentId color sortOrder active owners flows intakeEmail intakeEmailConfirmed
+  createdBy updatedBy version createdAt updatedAt
+`
+const OWNERSHIP_RULE_FIELDS = `
+  id name sortOrder active condition divisionCode
+  createdBy updatedBy version createdAt updatedAt
+`
+
+let ownershipModelsAvailable = modelsAvailable(['OwnershipDivision', 'OwnershipRule', 'ShipmentView'])
+const isMissingOwnershipModel = (err: unknown) =>
+  /[\\'"](get|list)(OwnershipDivision|OwnershipRule|ShipmentView)\w*[\\'"]|Unknown type [\\'"]+(OwnershipDivision|OwnershipRule|ShipmentView)/i
+    .test(safeStringify(err))
+
+/** False once a read proved the backend predates the ownership models. */
+export const ownershipModelsDeployed = () => ownershipModelsAvailable
+
+function forgetOwnershipModels(err: unknown): void {
+  if (!isMissingOwnershipModel(err)) throw err
+  console.warn('[apiClient] backend has no ownership models yet — using the seed taxonomy until deploy')
+  ownershipModelsAvailable = false
+}
+
+/** The division tree, active and archived. Empty = not configured (or not deployed). */
+export async function listOwnershipDivisions(): Promise<OwnershipDivisionRecord[]> {
+  if (!ownershipModelsAvailable) return []
+  return cachedDirectory('ownershipDivisions', async () => {
+    try {
+      const rows = await listAll<OwnershipDivisionRecord>('listOwnershipDivisions', OWNERSHIP_DIVISION_FIELDS, 200)
+      return rows.map((d) => unwrapJsonFields(d, ['owners', 'flows']))
+    } catch (err) {
+      forgetOwnershipModels(err)
+      return []
+    }
+  })
+}
+
+/** Every rule, in whatever order DynamoDB answers; `resolveDivision` sorts them. */
+export async function listOwnershipRules(): Promise<OwnershipRuleRecord[]> {
+  if (!ownershipModelsAvailable) return []
+  try {
+    const rows = await listAll<OwnershipRuleRecord>('listOwnershipRules', OWNERSHIP_RULE_FIELDS, 200)
+    return rows.map((r) => unwrapJsonFields(r, ['condition']))
+  } catch (err) {
+    forgetOwnershipModels(err)
+    return []
+  }
+}
+
+export type OwnershipDivisionInput =
+  Partial<Omit<OwnershipDivisionRecord, 'createdBy' | 'updatedBy' | 'version' | 'createdAt' | 'updatedAt'>>
+  // Required by callers; the server refuses an empty one on an active division (an
+  // archived division may send ''). Omitting the key keeps the stored address.
+  & { code: string; name: string; intakeEmail: string }
+
+export async function saveOwnershipDivision(input: OwnershipDivisionInput): Promise<OwnershipDivisionRecord> {
+  return directoryAction<OwnershipDivisionRecord>('SAVE_OWNERSHIP_DIVISION', input)
+}
+/** Archive, never delete: a division a shipment is tagged with has to stay resolvable. */
+export async function archiveOwnershipDivision(input: { id: string }): Promise<OwnershipDivisionRecord> {
+  return directoryAction<OwnershipDivisionRecord>('ARCHIVE_OWNERSHIP_DIVISION', input)
+}
+
+// ── Intake loads (Step U) ─────────────────────────────────────────────────────
+//
+// Partially built loads staged from tender e-mails. Read through the generated status
+// index; written only by tmsShipmentActions. Until the step-U deploy AppSync has no such
+// query, so reads degrade to "nothing waiting" rather than throwing on every shell render.
+
+const INTAKE_LOAD_FIELDS = `
+  id status divisionCode toAddress toAddresses runId sourceKey
+  subject fromEmail fromName receivedAt bodyText attachments
+  parseState parseNote format fields autoFields meta confirmed missingFields
+  shipmentId shipmentNumber reviewedBy reviewedAt lastEditedBy lastEditedAt
+  dismissedBy dismissedAt dismissReason createdBy updatedBy version createdAt updatedAt
+`
+const INTAKE_LOAD_JSON_FIELDS: (keyof IntakeLoadRecord)[] = ['attachments', 'fields', 'autoFields', 'meta']
+
+let intakeModelAvailable = modelAvailable('IntakeLoad')
+const isMissingIntakeModel = (err: unknown) =>
+  /[\\'"](get|list)IntakeLoad\w*[\\'"]|Unknown type [\\'"]+IntakeLoad/i.test(safeStringify(err))
+
+function forgetIntakeModel(err: unknown): void {
+  if (!isMissingIntakeModel(err)) throw err
+  console.warn('[apiClient] backend has no IntakeLoad model yet — intake stays empty until deploy')
+  intakeModelAvailable = false
+}
+
+function intakeRow(row: IntakeLoadRecord): IntakeLoadRecord {
+  const r = unwrapJsonFields(row, INTAKE_LOAD_JSON_FIELDS)
+  return { ...r, toAddresses: r.toAddresses ?? [], attachments: r.attachments ?? [], confirmed: r.confirmed ?? [], missingFields: r.missingFields ?? [], meta: r.meta ?? {} }
+}
+
+/** Loads in one status, newest first. Defaults to the OPEN worklist. */
+export async function listIntakeLoads(opts: { status?: IntakeLoadStatus; limit?: number } = {}): Promise<IntakeLoadRecord[]> {
+  if (!intakeModelAvailable) return []
+  try {
+    const rows = await listAllByIndex<IntakeLoadRecord>(
+      'listIntakeLoadByStatusAndReceivedAt', { status: opts.status ?? 'OPEN' }, INTAKE_LOAD_FIELDS, 200,
+      { status: 'IntakeLoadStatus!' },
+    )
+    const sorted = rows.map(intakeRow).sort((a, b) => (b.receivedAt ?? '').localeCompare(a.receivedAt ?? ''))
+    return opts.limit ? sorted.slice(0, opts.limit) : sorted
+  } catch (err) {
+    forgetIntakeModel(err)
+    return []
+  }
+}
+
+export async function getIntakeLoad(id: string): Promise<IntakeLoadRecord | null> {
+  if (!intakeModelAvailable) return null
+  try {
+    const r = await client.graphql({
+      query: `query GetIntakeLoad($id: ID!) { getIntakeLoad(id: $id) { ${INTAKE_LOAD_FIELDS} } }`,
+      variables: { id },
+    }) as { data: { getIntakeLoad: IntakeLoadRecord | null } }
+    return r.data.getIntakeLoad ? intakeRow(r.data.getIntakeLoad) : null
+  } catch (err) {
+    forgetIntakeModel(err)
+    return null
+  }
+}
+
+/** How many loads are waiting for review — the Intake badge. Selects only the key. */
+export async function countOpenIntakeLoads(): Promise<number> {
+  if (!intakeModelAvailable) return 0
+  try {
+    return (await listAllByIndex<{ id: string }>(
+      'listIntakeLoadByStatusAndReceivedAt', { status: 'OPEN' }, 'id', 1000, { status: 'IntakeLoadStatus!' },
+    )).length
+  } catch (err) {
+    forgetIntakeModel(err)
+    return 0
+  }
+}
+
+type IntakeFieldsPatch = Partial<Omit<IntakeFields, 'stops'>> & { stops?: Array<Partial<IntakeFields['stops'][number]>> }
+
+export async function saveIntakeDraft(input: {
+  intakeId: string
+  expectedVersion: number
+  fields: IntakeFieldsPatch
+  confirm?: { add: string[]; remove: string[] }
+}): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_SAVE_DRAFT', input))
+}
+
+export async function markIntakeReviewed(input: { intakeId: string; expectedVersion: number }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_MARK_REVIEWED', input))
+}
+export async function moveIntakeToActive(input: {
+  intakeId: string
+  expectedVersion: number
+}): Promise<{ intake: IntakeLoadRecord; shipmentId: string; shipmentNumber: string }> {
+  const r = await shipmentAction<{ intake: IntakeLoadRecord; shipmentId: string; shipmentNumber: string }>('INTAKE_MOVE_TO_ACTIVE', input)
+  return { ...r, intake: intakeRow(r.intake) }
+}
+
+/** Step AH: the create form built a shipment from this intake load's pre-fill; link them and mark the row MOVED. */
+export async function linkIntakeShipment(input: { intakeId: string; shipmentId: string }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_LINK_SHIPMENT', input))
+}
+
+export async function dismissIntake(input: { intakeId: string; expectedVersion: number; reason: string }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_DISMISS', input))
+}
+
+export type OwnershipRuleInput =
+  Omit<OwnershipRuleRecord, 'id' | 'createdBy' | 'updatedBy' | 'version' | 'createdAt' | 'updatedAt'>
+  & { id?: string }
+
+/**
+ * The whole ordered list, every time. Order IS the rule ("first match wins"), so it
+ * is saved as one array and the server assigns `sortOrder` from the array index —
+ * two editors cannot interleave their drags into a list nobody meant.
+ */
+export async function saveOwnershipRules(input: { rules: OwnershipRuleInput[] }): Promise<OwnershipRuleRecord[]> {
+  return directoryAction<OwnershipRuleRecord[]>('SAVE_OWNERSHIP_RULES', input)
+}
+
+// ── Shipment column templates (tmsDirectoryActions) ───────────────────────────
+//
+// Saved column sets are read by every authenticated client and written by the
+// directory Lambda. Like ownership views, they arrive with their own model; until
+// then the picker degrades to the default column set rather than failing.
+
+const SHIPMENT_COLUMN_TEMPLATE_FIELDS = `
+  id name columns widths pinned ownerEmail shared createdBy updatedBy version createdAt updatedAt
+`
+
+let shipmentColumnTemplateModelsAvailable = modelAvailable('ShipmentColumnTemplate')
+const isMissingShipmentColumnTemplateModel = (err: unknown) =>
+  /[\\'"](get|list)ShipmentColumnTemplate\w*[\\'"]|Unknown type [\\'"]+ShipmentColumnTemplate/i.test(safeStringify(err))
+
+function forgetShipmentColumnTemplates(err: unknown): void {
+  if (!isMissingShipmentColumnTemplateModel(err)) throw err
+  console.warn('[apiClient] backend has no ShipmentColumnTemplate model yet — column templates stay empty until deploy')
+  shipmentColumnTemplateModelsAvailable = false
+}
+
+/** Every reusable column set visible to the caller. */
+export async function listShipmentColumnTemplates(): Promise<ShipmentColumnTemplateRecord[]> {
+  if (!shipmentColumnTemplateModelsAvailable) return []
+  try {
+    const rows = await listAll<ShipmentColumnTemplateRecord>('listShipmentColumnTemplates', SHIPMENT_COLUMN_TEMPLATE_FIELDS, 200)
+    return rows.map((r) => unwrapJsonFields(r, ['columns', 'widths', 'pinned']))
+  } catch (err) {
+    forgetShipmentColumnTemplates(err)
+    return []
+  }
+}
+
+export interface SaveColumnTemplateInput {
+  id?: string
+  name: string
+  columns: string[]
+  widths?: Record<string, number>
+  pinned?: string[]
+  shared: boolean
+}
+
+export async function saveShipmentColumnTemplate(input: SaveColumnTemplateInput): Promise<unknown> {
+  return directoryAction('SAVE_COLUMN_TEMPLATE', input)
+}
+
+export async function deleteShipmentColumnTemplate(input: { id: string }): Promise<unknown> {
+  return directoryAction('DELETE_COLUMN_TEMPLATE', input)
+}
+
+/** Idempotent: writes the seed divisions, rules and views that are not there yet. */
+export async function ensureOwnershipSeed(): Promise<{ divisionsCreated: number; rulesCreated: number; viewsCreated: number }> {
+  return directoryAction('ENSURE_OWNERSHIP_SEED', {})
+}
+
+export interface TenderRespondInput {
+  shipmentId: string
+  expectedUpdatedAt: string
+  decision: 'ACCEPT' | 'REJECT' | 'RESET'
+  reason?: string
+}
+export async function tenderRespond(input: TenderRespondInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('TENDER_RESPOND', input)
+}
+
+export interface DuplicateShipmentCopy {
+  pickupAppt: string
+  deliveryAppt: string
+}
+export interface DuplicateShipmentInput {
+  shipmentId: string
+  copies: DuplicateShipmentCopy[]
+  /**
+   * Which leg to copy. Without it the server takes the shipment's first load, which is
+   * wrong when the operator right-clicked the second leg of a multi-leg shipment.
+   */
+  loadId?: string
+  /**
+   * Keep the source leg's driver and truck. `shiftStops` clears both and the copy is then
+   * written NEED_TO_COVER, which lands an own-fleet dispatcher's duplicate off the driver
+   * lane it was copied from.
+   */
+  keepDriver?: boolean
+}
+/**
+ * Returns the SOURCE shipment's bundle plus `created`, the new shipment ids in the order
+ * `copies` asked for them — `created[0]` is what a caller opens the detail on.
+ */
+export interface DuplicateShipmentResult extends ShipmentBundle {
+  created: string[]
+}
+export async function duplicateShipment(input: DuplicateShipmentInput): Promise<DuplicateShipmentResult> {
+  return shipmentAction<DuplicateShipmentResult>('DUPLICATE_SHIPMENT', input)
+}
+
+export interface AssignCarrierRepInput {
+  shipmentId: string
+  repId?: string | null
+  teamKey?: string | null
+  expectedUpdatedAt?: string
+}
+export async function assignCarrierRep(input: AssignCarrierRepInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('ASSIGN_CARRIER_REP', input)
+}
+
+export interface BatchShipmentTaskInput {
+  task: BatchShipmentTask
+  shipmentIds: string[]
+  params?: Record<string, unknown>
+}
+export async function batchShipmentTask(input: BatchShipmentTaskInput): Promise<BatchShipmentTaskResult> {
+  return shipmentAction<BatchShipmentTaskResult>('BATCH_SHIPMENT_TASK', input)
+}
+
+// ── Step AP — board push to Load Review, Load Review batch release ───────────
+// Both are BATCH_SHIPMENT_TASK rows with per-row results (`ok`, `message`, `reasons`).
+// The server refuses more than MAX_REVIEW_BATCH ids with a thrown error.
+/** Push shipments into Load Review. A row that misses the customer's requirements comes back `ok: false` with `reasons`. */
+export async function pushToLoadReview(shipmentIds: string[]): Promise<BatchShipmentTaskResult> {
+  return batchShipmentTask({ task: 'PUSH_TO_LOAD_REVIEW', shipmentIds })
+}
+/** Load Review's release to billing; the marker is what makes the server run the review gate. Reviewer grant only. */
+export async function releaseFromLoadReview(shipmentIds: string[]): Promise<BatchShipmentTaskResult> {
+  return batchShipmentTask({ task: 'RELEASE_TO_BILLING', shipmentIds, params: { review: { source: 'LOAD_REVIEW' } } })
+}
+
+export type StopOp =
+  | 'ADD' | 'REMOVE' | 'SWAP' | 'SET_APPT' | 'SET_REQUESTED'
+  | 'SET_TIMES' | 'SET_TYPE' | 'SET_REFS' | 'SET_LOCATION'
+export interface UpdateStopInput {
+  loadId: string
+  expectedUpdatedAt?: string
+  op: StopOp
+  stopId?: string
+  patch?: Partial<Stop> & { withStopId?: string }
+}
+export async function updateStop(input: UpdateStopInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('UPDATE_STOP', input)
+}
+
+/**
+ * Mirrors what `ASSIGN_ASSET` actually reads. The second driver is a nested object
+ * server-side — the Lambda flattens it onto `LoadCarrier.driver2Name/driver2Phone` —
+ * so sending flat `driver2Name` here would silently drop it.
+ */
+export interface AssignAssetInput {
+  loadId: string
+  expectedUpdatedAt?: string
+  driverId: string
+  flattenSplit?: boolean
+  payOverrideReason?: string | null
+  truckId?: string | null
+  truckNumber?: string | null
+  trailerId?: string | null
+  trailerNumber?: string | null
+  driver2?: { name?: string | null; phone?: string | null } | null
+}
+export async function assignAsset(input: AssignAssetInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('ASSIGN_ASSET', input)
+}
+
+/**
+ * Mirrors what `ASSIGN_CARRIER` actually reads. Equipment is the ORDER's (the customer
+ * agreed to it), not the assignment's, so it is edited on the order form and is not
+ * part of this call.
+ */
+export interface AssignCarrierInput {
+  loadId: string
+  expectedUpdatedAt?: string
+  carrierName: string
+  carrierMc?: string | null
+  dispatcherName?: string | null
+  dispatcherPhone?: string | null
+  dispatcherEmail?: string | null
+  driverName?: string | null
+  driverPhone?: string | null
+  truckNumber?: string | null
+  trailerNumber?: string | null
+  plates?: string | null
+  vin?: string | null
+  carrierRateCents?: number | null
+}
+export async function assignCarrier(input: AssignCarrierInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('ASSIGN_CARRIER', input)
+}
+
+/**
+ * A removal always has a reason — it is the carrier history the next booker reads. The
+ * reason is a code so the history is countable; anything the dispatcher wants to say in
+ * their own words goes in `note` (<=250 chars).
+ */
+export type RemoveLoadCarrierReason =
+  | 'CARRIER_CANNOT_TAKE' | 'GAVE_BACK' | 'REJECTED_RATE_CON'
+  | 'CUSTOMER_NOT_READY' | 'CONSIGNEE_NOT_READY' | 'FORGOT_TO_BOUNCE'
+  | 'OTHER'
+export interface RemoveLoadCarrierInput {
+  loadCarrierId: string
+  outcome: 'BOUNCED' | 'TONU'
+  reason: RemoveLoadCarrierReason
+  note?: string
+  /** Step AM. Optional, default off: put the freight back on DAT (the POST_LOAD path) after the carrier comes off. */
+  repostToDat?: boolean
+}
+/** `repost` is present only when `repostToDat` was asked for; a failed repost never undoes the removal. */
+export async function removeLoadCarrier(input: RemoveLoadCarrierInput): Promise<ShipmentBundle & { repost?: { ok: boolean; message: string } }> {
+  return shipmentAction<ShipmentBundle>('REMOVE_LOAD_CARRIER', input)
+}
+
+/** Full replace per side. `expectedVersion` is the LoadFinancials row's. */
+export interface RecalcChargesInput {
+  shipmentId: string
+  expectedVersion: number
+  charges: LoadChargeInput[]
+}
+export async function recalcCharges(input: RecalcChargesInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('RECALC_CHARGES', input)
+}
+
+/** UNPAID and PAID belong to step F's invoicing and are refused here. */
+export interface SetArStatusInput {
+  orderId: string
+  status: 'DOCS_NEEDED' | 'UNBILLED' | 'INVOICE_NOT_NEEDED'
+  expectedUpdatedAt?: string
+}
+export async function setArStatus(input: SetArStatusInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_AR_STATUS', input)
+}
+
+// ── Reads ────────────────────────────────────────────────────────────────────
+
+export async function listShipmentsByStatus(status: ShipmentStatus): Promise<ShipmentRecord[]> {
+  // The index key is the Shipment.status enum, so the variable must be declared as one.
+  return readShipments((fields) => listAllByIndex<ShipmentRecord>(
+    'listShipmentByStatusAndPickupAppt', { status }, fields, 1000, { status: 'ShipmentStatus!' },
+  ))
+}
+export async function listShipmentsByCustomer(customerId: string): Promise<ShipmentRecord[]> {
+  return readShipments((fields) => listAllByIndex<ShipmentRecord>('listShipmentByCustomerIdAndPickupAppt', { customerId }, fields, 1000))
+}
+/** `month` is 'YYYY-MM' — the board's default window. */
+export async function listShipmentsByMonth(month: string): Promise<ShipmentRecord[]> {
+  return readShipments((fields) => listAllByIndex<ShipmentRecord>('listShipmentByPickupMonthAndPickupAppt', { pickupMonth: month }, fields, 1000))
+}
+export async function listShipments(): Promise<ShipmentRecord[]> {
+  return readShipments((fields) => listAll<ShipmentRecord>('listShipments', fields, 1000))
+}
+
+export async function listOrders(): Promise<OrderRecord[]> {
+  const rows = await readOrders((fields) => listAll<OrderRecord>('listOrders', fields, 1000))
+  return rows.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
+}
+export async function listOrdersByCustomer(customerId: string): Promise<OrderRecord[]> {
+  const rows = await readOrders((fields) => listAllByIndex<OrderRecord>('listOrderByCustomerIdAndPickupAppt', { customerId }, fields, 1000))
+  return rows.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
+}
+
+/**
+ * Everything one shipment page renders, in one round trip's worth of parallel reads.
+ * LoadFinancials has no index — its `id` IS the load id, so each one is a GetItem.
+ */
+export async function getShipmentBundle(shipmentId: string): Promise<ShipmentBundle> {
+  const [shipment, orders, loads, loadCarriers, charges, documents] = await Promise.all([
+    getShipment(shipmentId),
+    readOrders((fields) => listAllByIndex<OrderRecord>('listOrderByShipmentId', { shipmentId }, fields, 1000)),
+    listAllByIndex<Load>('listLoadByShipmentId', { shipmentId }, loadFields(), 1000),
+    listLoadCarriersByIndex('listLoadCarrierByShipmentId', { shipmentId }),
+    listAllByIndex<LoadChargeRecord>('listLoadChargeByShipmentIdAndSortOrder', { shipmentId }, LOAD_CHARGE_FIELDS, 1000),
+    listShipmentDocuments(shipmentId),
+  ])
+  if (!shipment) throw new Error('Shipment not found')
+  const financials = (await Promise.all(loads.map((l) => getLoadFinancials(l.id))))
+    .filter((f): f is LoadFinancialsRecord => f != null)
+  return {
+    shipment,
+    orders: orders.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS)),
+    loads: loads.map((l) => unwrapJsonFields(l, ['stops'])),
+    loadCarriers,
+    charges,
+    financials,
+    documents,
+  }
+}
+
+export async function getShipment(id: string): Promise<ShipmentRecord | null> {
+  return readShipments(async (fields) => {
+    const r = await client.graphql({
+      query: `query GetShipment($id: ID!) { getShipment(id: $id) { ${fields} } }`,
+      variables: { id },
+    }) as { data: { getShipment: ShipmentRecord | null } }
+    return r.data.getShipment
+  })
+}
+
+export async function getLoadFinancials(loadId: string): Promise<LoadFinancialsRecord | null> {
+  const r = await client.graphql({
+    query: `query GetLoadFinancials($id: ID!) { getLoadFinancials(id: $id) { ${LOAD_FINANCIALS_FIELDS} } }`,
+    variables: { id: loadId },
+  }) as { data: { getLoadFinancials: LoadFinancialsRecord | null } }
+  return r.data.getLoadFinancials
+}
+
+// LoadFinancials lands with the shipment layer; until then the board leaves money empty.
+let loadFinancialsModelsAvailable = modelAvailable('LoadFinancials')
+const isMissingLoadFinancialsModel = (err: unknown) =>
+  /[\\'"](get|list)LoadFinancials\w*[\\'"]|Unknown type [\\'"]+LoadFinancials/i.test(safeStringify(err))
+
+function forgetLoadFinancials(err: unknown): void {
+  if (!isMissingLoadFinancialsModel(err)) throw err
+  console.warn('[apiClient] backend has no LoadFinancials model yet — board money stays empty until deploy')
+  loadFinancialsModelsAvailable = false
+}
+
+/** Every cached load total; the board aggregates these per shipment. */
+export async function listLoadFinancials(): Promise<LoadFinancialsRecord[]> {
+  if (!loadFinancialsModelsAvailable) return []
+  try {
+    return await listAll<LoadFinancialsRecord>('listLoadFinancials', LOAD_FINANCIALS_FIELDS, 10000)
+  } catch (err) {
+    forgetLoadFinancials(err)
+    return []
+  }
+}
+
+/**
+ * Just enough of every load to colour a board row: no stops detail beyond the stop
+ * list the STOPS column counts, no rate-con URLs.
+ *
+ * Step R widened it: the MVMNT shipments board shows CARRIER / DRIVER / TRUCK /
+ * STOPS / DIVISION, and the department views filter on tracking, so the summary
+ * carries the active assignment, the own-fleet driver and truck ids, the stop list
+ * and the mirrored revenue tags. Each newer group rides the flag it deploys with,
+ * so a frontend ahead of the backend still fills the board.
+ */
+export interface LoadBoardSummary {
+  id: string
+  shipmentId?: string | null
+  orderId?: string | null
+  status?: LoadWorkflowStatus | null
+  assignmentType?: AssignmentType | null
+  // Step D — what the board's Last update, Next check call and Exceptions columns read.
+  lastKnownAt?: string | null
+  lastKnownCity?: string | null
+  lastKnownState?: string | null
+  lastKnownLat?: number | null
+  lastKnownLng?: number | null
+  // Step P8 — prior ping for two-fix motion evidence on the tracking board.
+  lastKnownPreviousAt?: string | null
+  lastKnownPreviousCity?: string | null
+  lastKnownPreviousState?: string | null
+  lastKnownPreviousLat?: number | null
+  lastKnownPreviousLng?: number | null
+  lastCheckCallAt?: string | null
+  nextCheckCallAt?: string | null
+  checkCallOpen?: 'OPEN' | null
+  openIncidentCount?: number | null
+  // Step R — the MVMNT board's columns and the department views' tracking clause.
+  activeLoadCarrierId?: string | null
+  carrierName?: string | null
+  trackingProvider?: string | null
+  deliveredAt?: string | null
+  pickupAppt?: string | null
+  deliveryAppt?: string | null
+  pickupDriverId?: string | null
+  deliveryDriverId?: string | null
+  truckId?: string | null
+  stops?: Stop[] | null
+  customerId?: string | null
+  revDivision?: string | null
+  revSubdivision?: string | null
+  revTagSource?: string | null
+  revRuleId?: string | null
+  salesRepId?: string | null
+  // Step R2 — facets the board projects onto the shipment row.
+  carrierRepId?: string | null
+  statusChangedBy?: string | null
+  equipmentType?: string | null
+  commodity?: string | null
+  originName?: string | null
+  destinationName?: string | null
+  // A load with no `shipmentId` is still a row on the one Shipments list, so the
+  // board reads its own identifiers and facts off the load itself.
+  aljexId?: string | null
+  loadNumber?: string | null
+  customer?: string | null
+  rate?: number | null
+  originCity?: string | null
+  destinationCity?: string | null
+  createdAt?: string | null
+  voidedAt?: string | null
+  // Step R2 — the full catalog the column picker will need.
+  tmsId?: string | null
+  pickupNumber?: string | null
+  pickupApptEnd?: string | null
+  pickupApptType?: string | null
+  deliveryApptEnd?: string | null
+  deliveryApptType?: string | null
+  trailerNumber?: string | null
+  miles?: number | null
+  hot?: boolean | null
+  weight?: number | null
+  pieces?: number | null
+  piecesUnit?: string | null
+  paperworkLocation?: unknown | null
+  eldLogsReviewedAt?: string | null
+  eldLogsReviewedBy?: string | null
+  readyToInvoice?: boolean | null
+  rateConfirmKey?: string | null
+  divisionKey?: string | null
+  nextCheckCallNote?: string | null
+  lastCheckCallType?: string | null
+  lastKnownSource?: string | null
+  cargoValueCents?: number | null
+  notes?: string | null
+  podNotes?: string | null
+}
+const LOAD_SUMMARY_FIELDS = `
+  id shipmentId orderId status assignmentType
+  lastKnownAt lastKnownCity lastKnownState lastKnownLat lastKnownLng
+  lastKnownPreviousAt lastKnownPreviousCity lastKnownPreviousState lastKnownPreviousLat lastKnownPreviousLng
+  lastCheckCallAt
+  nextCheckCallAt checkCallOpen openIncidentCount
+  activeLoadCarrierId carrierName trackingProvider deliveredAt
+  pickupAppt deliveryAppt pickupDriverId deliveryDriverId truckId
+  loadNumber aljexId customer rate originName originCity destinationName destinationCity createdAt
+  carrierRepId statusChangedBy equipmentType commodity
+  tmsId pickupNumber pickupApptEnd pickupApptType deliveryApptEnd deliveryApptType
+  trailerNumber miles hot weight pieces piecesUnit paperworkLocation
+  eldLogsReviewedAt eldLogsReviewedBy readyToInvoice rateConfirmKey divisionKey
+  nextCheckCallNote lastCheckCallType lastKnownSource cargoValueCents notes podNotes
+`
+/**
+ * One load-summary read: the Load field groups a backend predates are dropped and the read
+ * retried (up to four attempts — `stops`, `customerId`, the revenue tags and the mirrored void
+ * each deploy on their own, and a board that drops one of them is better than a board with
+ * none). Empty while the shipment group itself is not deployed.
+ */
+async function readLoadSummaries<T>(run: (fields: string) => Promise<T[]>): Promise<T[]> {
+  if (!loadsHaveShipment) return []
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run([
+        LOAD_SUMMARY_FIELDS,
+        loadsHaveStops ? 'stops' : '',
+        loadsHaveCustomerId ? 'customerId' : '',
+        loadsHaveRevTag ? LOAD_REV_FIELDS : '',
+        loadsHaveVoided ? 'voidedAt' : '',
+      ].filter(Boolean).join(' '))
+    } catch (err) {
+      const u = undefinedLoadFields(err)
+      if (u.shipment) {
+        console.warn('[apiClient] backend has no shipment fields on Load yet — board facets stay empty until deploy')
+        loadsHaveShipment = false
+        return []
+      }
+      if (attempt >= 3) throw err
+      let changed = false
+      if (loadsHaveStops && u.stops) {
+        console.warn("[apiClient] backend has no 'stops' field yet — the board's STOPS column stays empty until deploy")
+        loadsHaveStops = false; changed = true
+      }
+      if (loadsHaveCustomerId && u.customerId) {
+        console.warn("[apiClient] backend has no 'customerId' on Load yet — querying load summaries without it until deploy")
+        loadsHaveCustomerId = false; changed = true
+      }
+      if (loadsHaveRevTag && u.revTag) {
+        console.warn('[apiClient] backend has no revenue tags on Load yet — querying load summaries without them until deploy')
+        loadsHaveRevTag = false; changed = true
+      }
+      if (loadsHaveVoided && u.voided) {
+        console.warn('[apiClient] backend has no voidedAt on Load yet — querying load summaries without it until deploy')
+        loadsHaveVoided = false; changed = true
+      }
+      if (!changed) throw err
+    }
+  }
+}
+
+const unwrapSummary = (l: LoadBoardSummary) => unwrapJsonFields(l, ['stops', 'paperworkLocation'])
+
+export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
+  return readLoadSummaries(async (fields) => (await listAll<LoadBoardSummary>('listLoads', fields, 10000)).map(unwrapSummary))
+}
+
+// ── Windowed board reads (PERF) ──────────────────────────────────────────────
+//
+// What `boardData.ts` and the legacy store read instead of whole tables. Every one reuses an
+// existing index; the joins are aliased batches (many lookups per request) so the cost follows
+// the window, not the table. They run through the same self-heal wrappers as the full reads.
+
+// Index batches stay at 100 aliases (200 x perAliasLimit 50 hits AppSync's 10k-item cap and 500 financials aliases fail: both "Unknown error", measured).
+const BOARD_BATCH = { chunk: 100, concurrency: 8 }
+const ID_BATCH = { chunk: 100, concurrency: 12 }
+/** The stage-2 check reads five scalar fields per id: 500 aliases measured at 0.75 s, a size refusal halves and retries. */
+/** `getLoadFinancials` rows are small: 250 aliases per request measured fine on a 761-shipment window, 500 was refused. */
+const FINANCIALS_BATCH = { chunk: 250, concurrency: 6 }
+const NARROW_ID_BATCH = { chunk: 500, concurrency: 4 }
+/** The server drops voided shipments; `deletedAt` stays client-side (a NULL-typed one would hide a live row). */
+const NOT_VOIDED = { type: 'ModelShipmentFilterInput', value: { voidedAt: { attributeExists: false } } }
+
+/** Several status partitions in ONE aliased request (paged per alias past 1000 rows); one index partition per status. */
+export async function listShipmentsByStatusesFiltered(
+  statuses: readonly ShipmentStatus[],
+  opts?: { includeVoided?: boolean },
+): Promise<ShipmentRecord[]> {
+  return readShipments(async (fields) => {
+    const byStatus = await batchByIndex<ShipmentRecord>(
+      {
+        query: 'listShipmentByStatusAndPickupAppt', keyArg: 'status', keyType: 'ShipmentStatus!', fields,
+        ...(!opts?.includeVoided && shipmentsHaveRevTag ? { filter: NOT_VOIDED } : {}),
+      },
+      statuses,
+      { chunk: 50, concurrency: 4, perAliasLimit: 1000 },
+    )
+    return [...byStatus.values()].flat()
+  })
+}
+
+/** One pickup month ('YYYY-MM'), voided rows excluded server-side unless asked for. */
+export async function listShipmentsByMonthFiltered(
+  month: string,
+  opts?: { includeVoided?: boolean },
+): Promise<ShipmentRecord[]> {
+  return readShipments((fields) => listAllByIndex<ShipmentRecord>(
+    'listShipmentByPickupMonthAndPickupAppt', { pickupMonth: month }, fields, 1000, {},
+    !opts?.includeVoided && shipmentsHaveRevTag ? NOT_VOIDED : undefined,
+  ))
+}
+
+/** Exact PRO lookup. The `number` index includes voided shipments (the PRO stays taken). */
+export async function listShipmentsByNumber(number: string): Promise<ShipmentRecord[]> {
+  if (!modelAvailable('Shipment')) return []
+  return readShipments((fields) => listAllByIndex<ShipmentRecord>('listShipmentByNumber', { number }, fields, 100))
+}
+
+/**
+ * Ids only of every shipment picked up in any of these months, voided ones dropped server-side unless asked for.
+ * The legacy store's window read uses the default: a month of import debris is thousands of voided shipments whose
+ * full loads nobody renders. Voided loads stay reachable by id / PRO on demand (`getLoads`, `proConflictAllHistory`).
+ */
+export async function listShipmentIdsByMonths(months: readonly string[], opts?: { includeVoided?: boolean }): Promise<string[]> {
+  const perMonth = await Promise.all([...new Set(months)].map((m) => (
+    readShipments(() => listAllByIndex<{ id: string }>(
+      'listShipmentByPickupMonthAndPickupAppt', { pickupMonth: m }, 'id', 1000, {},
+      !opts?.includeVoided && shipmentsHaveRevTag ? NOT_VOIDED : undefined,
+    ))
+  )))
+  return [...new Set(perMonth.flat().map((r) => r.id))]
+}
+
+/** Decoration + release-check fields; the flagged groups follow the same self-heal flags as the full read. */
+const narrowShipmentFields = () => [
+  'id number status customerId deletedAt',
+  shipmentsHaveDelivery ? 'deliveredAt' : '',
+  shipmentsHaveRevTag ? 'voidedAt' : '',
+].filter(Boolean).join(' ')
+
+/**
+ * Shipments by id, one aliased request per 100; an id that does not exist is absent. `narrow`
+ * reads just what the working-set check needs (`id status deletedAt voidedAt`).
+ */
+export async function getShipmentsBatch(ids: readonly string[], narrow = false): Promise<Map<string, ShipmentRecord>> {
+  return readShipments((fields) => batchGet<ShipmentRecord>(
+    { query: 'getShipment', fields: narrow ? narrowShipmentFields() : fields },
+    ids,
+    narrow ? NARROW_ID_BATCH : ID_BATCH,
+  ))
+}
+
+/** The narrow order row the working-set check reads. */
+export type DocsNeededOrder = Pick<OrderRecord, 'id' | 'shipmentId' | 'arStatus' | 'readyToInvoiceAt' | 'invoiceId'>
+
+/** Orders still waiting for documents (`arStatus` DOCS_NEEDED), just enough to test release. */
+export async function listDocsNeededOrdersNarrow(): Promise<DocsNeededOrder[]> {
+  if (!arModelsAvailable) return []
+  try {
+    // Shared: the shell's working set and the invoicing worklist ask for this list at the same page load.
+    return await sharedRead<DocsNeededOrder>('docsNeededOrdersNarrow', () => listAllByIndex<DocsNeededOrder>(
+      'listOrderByArStatusAndArStatusChangedAt', { arStatus: 'DOCS_NEEDED' },
+      'id shipmentId arStatus readyToInvoiceAt invoiceId', 5000, { arStatus: 'OrderArStatus!' },
+    ))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/** Every order of these shipments, in the shape `listOrders` returns. */
+export async function listOrdersByShipmentIds(ids: readonly string[]): Promise<OrderRecord[]> {
+  const byShipment = await readOrders((fields) => batchByIndex<OrderRecord>(
+    { query: 'listOrderByShipmentId', keyArg: 'shipmentId', keyType: 'String!', fields }, ids, BOARD_BATCH,
+  ))
+  return [...byShipment.values()].flat().map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
+}
+
+/** Board summaries of every load of these shipments, in the shape `listLoadSummaries` returns. */
+export async function listLoadSummariesByShipmentIds(ids: readonly string[]): Promise<LoadBoardSummary[]> {
+  const byShipment = await readLoadSummaries(async (fields) => [await batchByIndex<LoadBoardSummary>(
+    { query: 'listLoadByShipmentId', keyArg: 'shipmentId', keyType: 'String!', fields }, ids, BOARD_BATCH,
+  )])
+  return byShipment.flatMap((m) => [...m.values()].flat()).map(unwrapSummary)
+}
+
+/** Every assignment of these shipments, in the shape `listLoadCarriers` returns. */
+export async function listLoadCarriersByShipmentIds(ids: readonly string[]): Promise<LoadCarrierRecord[]> {
+  const byShipment = await readLoadCarriers((fields) => batchByIndex<LoadCarrierRecord>(
+    { query: 'listLoadCarrierByShipmentId', keyArg: 'shipmentId', keyType: 'String!', fields }, ids, BOARD_BATCH,
+  ))
+  return [...byShipment.values()].flat()
+}
+
+/** Cached load totals for these load ids (`LoadFinancials.id` is the load id). */
+export async function listLoadFinancialsByLoadIds(loadIds: readonly string[]): Promise<LoadFinancialsRecord[]> {
+  if (!loadFinancialsModelsAvailable) return []
+  try {
+    const rows = await batchGet<LoadFinancialsRecord>({ query: 'getLoadFinancials', fields: LOAD_FINANCIALS_FIELDS }, loadIds, FINANCIALS_BATCH)
+    return [...rows.values()]
+  } catch (err) {
+    forgetLoadFinancials(err)
+    return []
+  }
+}
+
+type RawLoad = Load & { rateConfirmKey?: string }
+
+/** The full-`Load` read: self-healing field groups, then the same customer-policy and rate-con post-processing as `listLoads`. Voided loads are included. */
+async function readFullLoads(fetch: (fields: string) => Promise<RawLoad[]>): Promise<Load[]> {
+  // The customer policy map must be current before loads are stamped with it.
+  const customersReady = listCustomers({ includeArchived: true })
+  let raw: RawLoad[]
+  for (;;) {
+    try { raw = await fetch(loadFields()); break }
+    catch (err) { if (!healLoadFields(err)) throw err }
+  }
+  await customersReady
+  return Promise.all(raw.map((l) => resolveRateConfirmUrl(withCustomerPolicy(l))))
+}
+
+/** Every load of these shipments, voided included, shaped exactly like `listLoads` rows. */
+export async function listLoadsByShipmentIds(ids: readonly string[]): Promise<Load[]> {
+  return readFullLoads(async (fields) => [...(await batchByIndex<RawLoad>(
+    { query: 'listLoadByShipmentId', keyArg: 'shipmentId', keyType: 'String!', fields }, ids, BOARD_BATCH,
+  )).values()].flat())
+}
+
+/** Loads by id (the factoring queue's lookups), shaped like `listLoads` rows. */
+export async function getLoads(ids: readonly string[]): Promise<Load[]> {
+  return readFullLoads(async (fields) => [...(await batchGet<RawLoad>({ query: 'getLoad', fields }, ids, ID_BATCH)).values()])
+}
+
+/** Every assignment of these loads, grouped by load (replaces one `listLoadCarriersByLoad` per load). */
+export async function listLoadCarriersByLoads(loadIds: readonly string[]): Promise<Map<string, LoadCarrierRecord[]>> {
+  if (!modelAvailable('LoadCarrier')) return new Map()
+  return readLoadCarriers((fields) => batchByIndex<LoadCarrierRecord>(
+    { query: 'listLoadCarrierByLoadId', keyArg: 'loadId', keyType: 'String!', fields }, loadIds, BOARD_BATCH,
+  ))
+}
+
+/** Every load of one customer (the `customerId` index), shaped like `listLoads` rows. */
+export async function listLoadsByCustomer(customerId: string): Promise<Load[]> {
+  return readFullLoads((fields) => listAllByIndex<RawLoad>('listLoadByCustomerId', { customerId }, fields, 1000))
+}
+
+/** Statuses at which a load is done as far as dispatch is concerned. */
+const CLOSED_LOAD_STATUSES: readonly LoadWorkflowStatus[] = ['DELIVERED', 'INVOICING', 'CANCELED']
+
+/** Every load that is not delivered/invoicing/canceled, all time (Dispatch, Appts, truck map). Voided included. */
+export async function listOpenLoads(): Promise<Load[]> {
+  const open = LOAD_WORKFLOW_STATUSES.filter((s) => !CLOSED_LOAD_STATUSES.includes(s))
+  return readFullLoads(async (fields) => (await Promise.all(open.map((status) => listAllByIndex<RawLoad>(
+    'listLoadByStatus', { status }, fields, 1000, { status: 'LoadStatus!' },
+  )))).flat())
+}
+
+// ── Carriers (tmsCarrierActions) ─────────────────────────────────────────────
+//
+// The outside-carrier directory: who we may book, what they are insured for, who to
+// pay and the paperwork behind it. Reads come off the generated queries and their
+// GSIs; every write goes through the one Lambda, which owns the dedupe, the status
+// table and the document protocol. No subscriptions — the board refreshes.
+
+export type {
+  CarrierRecord, CarrierContactRecord, CarrierPaymentMethodRecord, CarrierDocumentRecord,
+  CarrierBundle, CarrierType, CarrierStatus, CarrierStatusReason, CarrierInactiveReason,
+  CarrierDoNotUseReason, CarrierContactType, CarrierDocumentType, CarrierDocumentSource,
+  CarrierPaymentMethodKind, CarrierPayeeType, AuthorityStatus, SafetyRating,
+  ComplianceCheckStatus, CarrierEquipment, InsurancePolicy, InsurancePolicyType,
+  QuickPayTier, RateConStatus, RateConRequiredField, BookingRequiredField,
+} from '@/types/tms'
+
+const CARRIER_FIELDS_BASE = `
+  id name dbaName normalizedName type status statusReason statusNote statusChangedAt statusChangedBy
+  mcNumber dotNumber scac inFmcsa
+  authorityStatus authorityGrantedAt authorityExpiresAt
+  safetyRating safetyRatingAt reviewType reviewedAt
+  driverInspections driverOos vehicleInspections vehicleOos
+  insurancePolicies equipment cargoTypes powerUnits trailerCount driverCount
+  address phone email website dispatcherName dispatcherPhone dispatcherEmail
+  paymentTermsDays quickPayEligible defaultQuickPayDays factorPaymentMethodId
+  highwayStatus rmisStatus mcpStatus accountOwnerIds teamKey internalNotes
+  loadCount lastLoadAt createdBy updatedBy version createdAt updatedAt
+`
+// Step K's per-party AI memory. Its own flag, like the Customer group above: a backend
+// that predates the field must keep serving every other carrier field.
+const CARRIER_V2_FIELDS = ['aiMemory']
+let carriersHaveV2 = true
+// Step N2's MCP risk score. Dropped and retried if the backend predates the field.
+const CARRIER_V3_FIELDS = ['mcpRiskScore']
+let carriersHaveV3 = true
+// Aljex-exit: CA Intrastate / TX PUC numbers + expiries and the legacy flag; MyCarrierPackets review status, packet completion and last sync.
+const CARRIER_V4_FIELDS = ['caIntrastateNumber', 'caIntrastateExpiresAt', 'txPucNumber', 'txPucExpiresAt', 'legacyImported', 'legacySource', 'mcpReviewStatus', 'mcpPacketCompletedAt', 'mcpSyncedAt']
+let carriersHaveV4 = true
+// Encrypted tax-ID vault mirror (masked last four, type, when it went on file). Dropped and retried if the backend predates it.
+const CARRIER_V5_FIELDS = ['taxIdLast4', 'taxIdType', 'taxIdOnFileAt']
+let carriersHaveV5 = true
+const CARRIER_JSON_FIELDS: (keyof CarrierRecord)[] = ['insurancePolicies', 'address', 'aiMemory']
+const CARRIER_CONTACT_FIELDS = `
+  id carrierId name types email phone isPrimary rateConRecipient active
+  createdBy updatedBy createdAt updatedAt
+`
+const CARRIER_PAYMENT_METHOD_FIELDS = `
+  id carrierId method recipientType factorName factorAddress bankName accountName
+  accountLast4 routingLast4 bankDetailsKey payeeEmail remitToAddress isPreferred status
+  createdBy updatedBy createdAt updatedAt
+`
+const CARRIER_PAYMENT_METHOD_JSON_FIELDS: (keyof CarrierPaymentMethodRecord)[] = ['factorAddress', 'remitToAddress']
+const CARRIER_DOCUMENT_FIELDS = `
+  id carrierId type name s3Key contentType sizeBytes expiresAt loadCarrierId source
+  uploadedBy createdAt updatedAt
+`
+
+/** Every Carrier read, with the newest group dropped and retried if the backend predates it. */
+async function readCarriers<T>(run: (fields: string) => Promise<T>): Promise<T> {
+  for (;;) {
+    try {
+      return await run([
+        CARRIER_FIELDS_BASE,
+        carriersHaveV2 ? CARRIER_V2_FIELDS.join(' ') : '',
+        carriersHaveV3 ? CARRIER_V3_FIELDS.join(' ') : '',
+        carriersHaveV4 ? CARRIER_V4_FIELDS.join(' ') : '',
+        carriersHaveV5 ? CARRIER_V5_FIELDS.join(' ') : '',
+      ].filter(Boolean).join(' '))
+    } catch (err) {
+      if (carriersHaveV5 && fieldNamed(CARRIER_V5_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Carrier tax-ID mirror fields yet — querying without them until deploy')
+        carriersHaveV5 = false
+        continue
+      }
+      if (carriersHaveV4 && fieldNamed(CARRIER_V4_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Carrier compliance/legacy fields yet — querying without them until deploy')
+        carriersHaveV4 = false
+        continue
+      }
+      if (carriersHaveV3 && fieldNamed(CARRIER_V3_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Carrier MCP risk score yet — querying without it until deploy')
+        carriersHaveV3 = false
+        continue
+      }
+      if (!carriersHaveV2 || !fieldNamed(CARRIER_V2_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no Carrier AI memory yet — querying without it until deploy')
+      carriersHaveV2 = false
+    }
+  }
+}
+
+/**
+ * Every carrier write. Same contract as `directoryAction`: the Lambda's own message is
+ * rethrown, so a refusal ("MC 123456 already belongs to Acme Trucking") reaches the
+ * toast intact instead of `[object Object]`.
+ */
+export async function carrierAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsCarrierActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsCarrierActions($action: String!, $input: AWSJSON!) { tmsCarrierActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsCarrierActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsCarrierActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+// ── Carrier tax ID (encrypted vault; Docs/tms-build/AW_TAXID_DESIGN.md) ───────
+//
+// The number lives only in the Lambda-owned KMS vault. The Carrier row carries the masked mirror
+// (taxIdLast4/taxIdType/taxIdOnFileAt). The clear value exists in exactly two places: the argument
+// of setTaxId (typed by an ADMIN) and the revealTaxId response; callers keep it in component state,
+// and nothing here logs, caches or stores it.
+
+export interface TaxIdStatus {
+  onFile: boolean
+  last4?: string | null
+  type?: 'EIN' | 'SSN' | null
+  setAt?: string | null
+  source?: 'ALJEX' | 'MCP' | 'MANUAL' | null
+}
+export type SetTaxIdResult =
+  | { ok: true; last4: string; type: 'EIN' | 'SSN' }
+  | { ok: false; duplicateOf: string }
+
+export const getTaxIdStatus = (carrierId: string) => carrierAction<TaxIdStatus>('GET_TAX_ID_STATUS', { carrierId })
+export const setTaxId = (carrierId: string, value: string, type?: 'EIN' | 'SSN') =>
+  carrierAction<SetTaxIdResult>('SET_TAX_ID', { carrierId, value, ...(type ? { type } : {}) })
+export const revealTaxId = (carrierId: string, reason: string) =>
+  carrierAction<{ value: string; expiresInSeconds: number }>('REVEAL_TAX_ID', { carrierId, reason })
+export const clearTaxId = (carrierId: string, reason: string) =>
+  carrierAction<{ ok: true }>('CLEAR_TAX_ID', { carrierId, reason })
+
+// ── Reads ────────────────────────────────────────────────────────────────────
+
+export async function listCarriers(): Promise<CarrierRecord[]> {
+  if (!modelAvailable('Carrier')) return []
+  return cachedDirectory('carriers', async () => {
+    const rows = await readCarriers((fields) => listAll<CarrierRecord>('listCarriers', fields, 1000))
+    return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
+  })
+}
+export async function listCarriersByStatus(status: CarrierStatus): Promise<CarrierRecord[]> {
+  if (!modelAvailable('Carrier')) return []
+  // The index key is the Carrier.status enum, so the variable must be declared as one.
+  const rows = await readCarriers((fields) => listAllByIndex<CarrierRecord>(
+    'listCarrierByStatusAndName', { status }, fields, 1000, { status: 'CarrierStatus!' },
+  ))
+  return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
+}
+/** MC and DOT are the two numbers a broker dedupes on; both indexes answer with a list. */
+export async function carriersByMc(mcNumber: string): Promise<CarrierRecord[]> {
+  const rows = await readCarriers((fields) => listAllByIndex<CarrierRecord>('listCarrierByMcNumber', { mcNumber }, fields, 1000))
+  return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
+}
+export async function carriersByDot(dotNumber: string): Promise<CarrierRecord[]> {
+  const rows = await readCarriers((fields) => listAllByIndex<CarrierRecord>('listCarrierByDotNumber', { dotNumber }, fields, 1000))
+  return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
+}
+export async function getCarrier(id: string): Promise<CarrierRecord | null> {
+  const r = await readCarriers(async (fields) => await client.graphql({
+    query: `query GetCarrier($id: ID!) { getCarrier(id: $id) { ${fields} } }`,
+    variables: { id },
+  }) as { data: { getCarrier: CarrierRecord | null } })
+  return r.data.getCarrier ? unwrapJsonFields(r.data.getCarrier, CARRIER_JSON_FIELDS) : null
+}
+/** Every document in the system — the board's "missing required docs" filter reads it. */
+export async function listCarrierDocuments(): Promise<CarrierDocumentRecord[]> {
+  if (!modelAvailable('CarrierDocument')) return []
+  return listAll<CarrierDocumentRecord>('listCarrierDocuments', CARRIER_DOCUMENT_FIELDS, 1000)
+}
+
+/** Everything one carrier profile renders, in one round trip's worth of parallel reads. */
+export async function getCarrierBundle(id: string): Promise<CarrierBundle> {
+  const [carrier, contacts, paymentMethods, documents, loadCarriers] = await Promise.all([
+    getCarrier(id),
+    listAllByIndex<CarrierContactRecord>('listCarrierContactByCarrierId', { carrierId: id }, CARRIER_CONTACT_FIELDS, 1000),
+    listAllByIndex<CarrierPaymentMethodRecord>('listCarrierPaymentMethodByCarrierId', { carrierId: id }, CARRIER_PAYMENT_METHOD_FIELDS, 1000),
+    listAllByIndex<CarrierDocumentRecord>('listCarrierDocumentByCarrierIdAndType', { carrierId: id }, CARRIER_DOCUMENT_FIELDS, 1000),
+    listLoadCarriersByIndex('listLoadCarrierByCarrierId', { carrierId: id }),
+  ])
+  if (!carrier) throw new Error('Carrier not found')
+  return {
+    carrier,
+    contacts,
+    paymentMethods: paymentMethods.map((p) => unwrapJsonFields(p, CARRIER_PAYMENT_METHOD_JSON_FIELDS)),
+    documents,
+    loadCarriers,
+  }
+}
+
+// ── Writes ───────────────────────────────────────────────────────────────────
+// `expectedUpdatedAt` is the CAS token: the record as the caller last saw it. It is
+// absent on a create. The server derives normalizedName, the status audit stamps and
+// the load counters, so none of them are part of an input.
+
+export type UpsertCarrierInput = { id?: string; expectedUpdatedAt?: string } & Partial<Omit<
+  CarrierRecord,
+  'id' | 'createdAt' | 'updatedAt' | 'createdBy' | 'updatedBy' | 'version'
+  | 'normalizedName' | 'statusChangedAt' | 'statusChangedBy' | 'loadCount' | 'lastLoadAt'
+  | 'taxIdLast4' | 'taxIdType' | 'taxIdOnFileAt'
+>>
+export async function upsertCarrier(input: UpsertCarrierInput): Promise<CarrierRecord> {
+  return carrierAction<CarrierRecord>('UPSERT_CARRIER', input)
+}
+
+/** Status transitions go through a dedicated action so CAS and the transition table live server-side. */
+export interface SetCarrierStatusInput {
+  id: string
+  expectedUpdatedAt: string
+  status: CarrierStatus
+  reason?: CarrierStatusReason
+  note?: string
+}
+export async function setCarrierStatus(input: SetCarrierStatusInput): Promise<CarrierRecord> {
+  return carrierAction<CarrierRecord>('SET_CARRIER_STATUS', input)
+}
+
+export interface UpsertCarrierContactInput {
+  id?: string
+  carrierId: string
+  expectedUpdatedAt?: string
+  name: string
+  types?: CarrierContactType[]
+  email?: string | null
+  phone?: string | null
+  isPrimary?: boolean
+  rateConRecipient?: boolean
+  active?: boolean
+}
+export async function upsertCarrierContact(input: UpsertCarrierContactInput): Promise<CarrierContactRecord> {
+  return carrierAction<CarrierContactRecord>('UPSERT_CONTACT', input)
+}
+export async function archiveCarrierContact(input: { id: string; expectedUpdatedAt: string }): Promise<CarrierContactRecord> {
+  return carrierAction<CarrierContactRecord>('ARCHIVE_CONTACT', input)
+}
+
+/** Only the last four digits ever leave the browser — the full numbers live in `bankDetailsKey`. */
+export interface UpsertCarrierPaymentMethodInput {
+  id?: string
+  carrierId: string
+  expectedUpdatedAt?: string
+  method: CarrierPaymentMethodKind
+  recipientType: CarrierPayeeType
+  factorName?: string | null
+  factorAddress?: Record<string, unknown> | null
+  bankName?: string | null
+  accountName?: string | null
+  accountLast4?: string | null
+  routingLast4?: string | null
+  bankDetailsKey?: string | null
+  payeeEmail?: string | null
+  remitToAddress?: Record<string, unknown> | null
+  isPreferred?: boolean
+  status?: 'ACTIVE' | 'INACTIVE'
+}
+export async function upsertCarrierPaymentMethod(input: UpsertCarrierPaymentMethodInput): Promise<CarrierPaymentMethodRecord> {
+  return carrierAction<CarrierPaymentMethodRecord>('UPSERT_PAYMENT_METHOD', input)
+}
+export async function archiveCarrierPaymentMethod(input: { id: string; expectedUpdatedAt: string }): Promise<CarrierPaymentMethodRecord> {
+  return carrierAction<CarrierPaymentMethodRecord>('ARCHIVE_PAYMENT_METHOD', input)
+}
+
+/** Two steps, as in vendor-ap intake: presign, upload straight to S3, then commit the row. */
+export async function prepareCarrierDocument(input: {
+  carrierId: string
+  type: CarrierDocumentType
+  name: string
+  contentType: string
+  sizeBytes: number
+}): Promise<{ uploadUrl: string; s3Key: string }> {
+  return carrierAction<{ uploadUrl: string; s3Key: string }>('PREPARE_DOCUMENT', input)
+}
+export async function commitCarrierDocument(input: {
+  carrierId: string
+  type: CarrierDocumentType
+  name: string
+  s3Key: string
+  contentType: string
+  sizeBytes: number
+  expiresAt?: string | null
+}): Promise<CarrierDocumentRecord> {
+  return carrierAction<CarrierDocumentRecord>('COMMIT_DOCUMENT', input)
+}
+export async function deleteCarrierDocument(input: { id: string }): Promise<{ id: string }> {
+  return carrierAction<{ id: string }>('DELETE_DOCUMENT', input)
+}
+
+/** The nine booking fields on TmsSettings. Admin only, server-side. */
+export interface CarrierSettingsPatch {
+  allowedCarrierStatuses?: string[] | null
+  requireCarrierApproval?: boolean | null
+  requiredCarrierDocs?: string[] | null
+  bookingRequiredFields?: string[] | null
+  defaultCarrierTermsDays?: number | null
+  quickPayTiers?: QuickPayTier[] | null
+  rateConExpiryHours?: number | null
+  rateConRequiredFields?: string[] | null
+  insuranceWarnDays?: number | null
+}
+export async function saveCarrierSettings(patch: CarrierSettingsPatch, expectedUpdatedAt?: string): Promise<TmsSettings> {
+  return carrierAction<TmsSettings>('SAVE_CARRIER_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+}
+
+/** Upload to the presigned PUT from PREPARE_DOCUMENT. `contentType` must be the value the
+ *  URL was signed for (the browser's file.type may be empty) — so must the length. */
+export async function uploadCarrierDocumentFile(file: File, uploadUrl: string, contentType: string): Promise<void> {
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    body: file,
+    headers: { 'content-type': contentType, 'content-length': String(file.size) },
+  })
+  if (!res.ok) throw new Error(`Upload failed: ${res.status} ${res.statusText}`)
+}
+
+export async function getCarrierDocumentUrl(s3Key: string): Promise<string> {
+  return getRateConfirmUrl(s3Key) // same bucket, same presigned URL mechanism
+}
+
+// ── Booking · rate con · dispatch (tmsShipmentActions) ───────────────────────
+// These five live on the shipment Lambda, not the carrier one: they move load money
+// and load status inside its transaction, so they answer with the whole ShipmentBundle.
+
+export interface BookCarrierInput {
+  loadId: string
+  expectedUpdatedAt: string
+  carrierId: string
+  carrierRepId?: string | null
+  carrierRateCents: number
+  /** Extra CARRIER-side lines beside the LINEHAUL the rate itself creates. */
+  charges?: LoadChargeInput[]
+  contactId?: string | null
+  dispatcherName?: string | null
+  dispatcherPhone?: string | null
+  dispatcherEmail?: string | null
+  /** Ivan Cartage only (Step AQ): the roster driver id; a typed name is refused. */
+  driverId?: string | null
+  driverName?: string | null
+  driverPhone?: string | null
+  driver2Name?: string | null
+  driver2Phone?: string | null
+  truckNumber?: string | null
+  trailerNumber?: string | null
+  plates?: string | null
+  vin?: string | null
+  equipmentType?: string | null
+  trackingProvider?: string | null
+  quickPayDays?: number | null
+  paymentTermsDays?: number | null
+  /** The `key` of every warning the booker ticked off. Blocks can never be acknowledged. */
+  acknowledgeWarnings?: string[]
+}
+export async function bookCarrier(input: BookCarrierInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('BOOK_CARRIER', input)
+}
+
+/** AT-plan: another outside carrier next to the live ones (up to four). `legStopIds` empty/absent = all stops. */
+export type AddCarrierInput = BookCarrierInput & { legStopIds?: string[] }
+/** Books by directory carrier (`carrierId`); a typed carrier (`carrierName`) is the server's other branch. */
+export async function addCarrier(input: AddCarrierInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('ADD_CARRIER', input)
+}
+
+/** `quickPayDays: null` clears the election; any other value must match a configured tier. */
+export async function setQuickPay(input: { loadCarrierId: string; quickPayDays: number | null }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_QUICK_PAY', input)
+}
+
+/** The PDF is built in the browser (`buildRateConPdf`); a re-send voids the prior token. */
+export async function sendRateCon(input: {
+  loadCarrierId: string
+  pdfBase64: string
+  to: string[]
+  cc?: string[]
+  expiresHours?: number
+}): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SEND_RATE_CON', input)
+}
+export async function voidRateCon(input: { loadCarrierId: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('VOID_RATE_CON', input)
+}
+
+export interface DispatchLoadInput {
+  loadId: string
+  /** Required when the load has two or more carriers: the one that is rolling. */
+  loadCarrierId?: string | null
+  dispatchedAt: string
+  pickupEtaAt?: string | null
+  driverName?: string | null
+  driverPhone?: string | null
+  truckNumber?: string | null
+  trailerNumber?: string | null
+  trackingProvider?: string | null
+  nextCheckCallAt?: string | null
+  nextCheckCallNote?: string | null
+  note?: string | null
+}
+export async function dispatchLoad(input: DispatchLoadInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('DISPATCH_LOAD', input)
+}
+
+// ── Tracking & check calls (tmsTrackingActions) ──────────────────────────────
+//
+// Step D. The event log (LoadCheckCall) and the tokenised links (TrackingLink). The
+// writes split by what they touch: anything that moves a Load's status or its money
+// stays on the shipment router and returns the bundle; the link, text and settings
+// actions live on their own router because they reach Twilio, SES and Cognito.
+
+export type {
+  CheckCallType, CheckCallSource, IncidentType, LoadCheckCallRecord, TrackingLinkRecord,
+  TrackingLinkKind, TrackingLinkStatus, TrackingLinkChannel, TrackingContact,
+  CheckCallNotifyChannel, CheckCallChargeSnapshot,
+} from '@/types/tms'
+
+const LOAD_CHECK_CALL_FIELDS = `
+  id loadId shipmentId loadCarrierId stopId at type source
+  incidentType incidentOpen resolvedAt resolvedBy resolutionNote
+  statusBefore statusAfter city state lat lng accuracyM
+  personName note driverMessageId charges
+  nextCheckCallAt nextCheckCallNote pickupEtaAt deliveryEtaAt
+  createdBy createdAt updatedAt
+`
+const LOAD_CHECK_CALL_JSON_FIELDS: (keyof LoadCheckCallRecord)[] = ['charges']
+
+const TRACKING_LINK_FIELDS = `
+  id kind shipmentId shipmentNumber customerId customerName url notes loadId loadCarrierId status expiresAt
+  sentTo sentVia sentAt smsMessageId contactName contactEmail contactPhone
+  showCarrier showPosition openCount lastOpenedAt requestCount
+  pingCount lastPingAt lastPingLat lastPingLng lastPingAccuracyM
+  provider providerRef consentAt
+  revokedAt revokedBy createdBy createdAt updatedAt
+`
+// Step E's carrier upload portal counts its files on the link row. Its own flag, as
+// everywhere else: the tracking tab must still list links on a pre-deploy backend.
+const TRACKING_LINK_UPLOAD_FIELDS = ['uploadCount', 'lastUploadAt', 'neededTypes']
+let trackingLinksHaveUploads = true
+
+/**
+ * Every tracking write. Same contract as `carrierAction`: the Lambda's own refusal
+ * ("own trucks track through Motive and the driver app") reaches the toast intact.
+ */
+export async function trackingAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsTrackingActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsTrackingActions($action: String!, $input: AWSJSON!) { tmsTrackingActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsTrackingActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsTrackingActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+// ── Writes ───────────────────────────────────────────────────────────────────
+
+/** A charge an incident asks for. BOTH bills the customer and pays the carrier. */
+export interface CheckCallChargeInput {
+  side: ChargeSide | 'BOTH'
+  code: string
+  label?: string | null
+  rateCents: number
+  count?: number | null
+}
+
+export interface LogCheckCallInput {
+  loadId: string
+  /** The Load's `updatedAt` as the dialog read it. */
+  expectedUpdatedAt: string
+  at: string
+  type: CheckCallType
+  stopId?: string | null
+  incidentType?: IncidentType | null
+  city?: string | null
+  state?: string | null
+  lat?: number | null
+  lng?: number | null
+  personName?: string | null
+  note?: string | null
+  charges?: CheckCallChargeInput[]
+  /** `null` clears the reminder; omitted leaves it alone. */
+  nextCheckCallAt?: string | null
+  nextCheckCallNote?: string | null
+}
+
+/**
+ * Every check-call write answers the same way: the whole bundle, plus the LoadCheckCall
+ * row it wrote. `event` is null for the one action that schedules without logging.
+ */
+export interface CheckCallResult {
+  bundle: ShipmentBundle
+  event: LoadCheckCallRecord | null
+}
+
+export async function logCheckCall(input: LogCheckCallInput): Promise<CheckCallResult> {
+  return shipmentAction<CheckCallResult>('LOG_CHECK_CALL', input)
+}
+
+export async function resolveIncident(input: { checkCallId: string; note?: string | null }): Promise<CheckCallResult> {
+  return shipmentAction<CheckCallResult>('RESOLVE_INCIDENT', input)
+}
+
+/** The banner's Edit reminder / Snooze / No reminder. `nextCheckCallAt: null` clears it. */
+export async function setNextCheckCall(input: {
+  loadId: string
+  expectedUpdatedAt: string
+  nextCheckCallAt: string | null
+  note?: string | null
+}): Promise<CheckCallResult> {
+  return shipmentAction<CheckCallResult>('SET_NEXT_CHECK_CALL', input)
+}
+
+/** ETAs live on the ACTIVE assignment, so this is keyed by LoadCarrier, not Load. */
+export async function setEta(input: {
+  loadCarrierId: string
+  expectedUpdatedAt: string
+  pickupEtaAt?: string | null
+  deliveryEtaAt?: string | null
+  note?: string | null
+}): Promise<CheckCallResult> {
+  return shipmentAction<CheckCallResult>('SET_ETA', input)
+}
+
+/** What the server did with the text. `url` is copyable whatever the status says. */
+export type TrackingSmsStatus = 'SENT' | 'COPY' | 'NOT_CONFIGURED' | 'FAILED'
+export interface SendTrackingLinkResult {
+  link: TrackingLinkRecord
+  url: string
+  smsStatus: TrackingSmsStatus
+  smsError: string | null
+  messageId: string | null
+}
+export async function sendTrackingLink(input: {
+  loadCarrierId: string
+  to?: string | null
+  via: 'SMS' | 'COPY'
+  message?: string | null
+}): Promise<SendTrackingLinkResult> {
+  return trackingAction<SendTrackingLinkResult>('SEND_TRACKING_LINK', input)
+}
+
+export async function revokeTrackingLink(input: { trackingLinkId: string }): Promise<{ link: TrackingLinkRecord }> {
+  return trackingAction<{ link: TrackingLinkRecord }>('REVOKE_TRACKING_LINK', input)
+}
+
+export type CustomerLinkEmailStatus = 'SENT' | 'COPY' | 'NOT_SENT'
+export interface SendCustomerLinkResult {
+  link: TrackingLinkRecord
+  url: string
+  emailStatus: CustomerLinkEmailStatus
+  emailError: string | null
+  /** The patched shipment, so the next call's `expectedVersion` needs no refetch. */
+  shipment: ShipmentRecord
+}
+export async function sendCustomerLink(input: {
+  shipmentId: string
+  expectedVersion: number
+  expiresAt?: string
+  customerId?: string | null
+  notes?: string | null
+  to: string[]
+  cc?: string[]
+  message?: string | null
+  via: 'EMAIL' | 'COPY'
+  regenerate?: boolean
+}): Promise<SendCustomerLinkResult> {
+  return trackingAction<SendCustomerLinkResult>('SEND_CUSTOMER_LINK', input)
+}
+
+export async function revokeCustomerLink(input: { trackingLinkId: string }): Promise<{ link: TrackingLinkRecord }> {
+  return trackingAction<{ link: TrackingLinkRecord }>('REVOKE_CUSTOMER_LINK', input)
+}
+export async function extendCustomerLink(input: { trackingLinkId: string; expiresAt: string }): Promise<{ link: TrackingLinkRecord; url: string }> {
+  return trackingAction('EXTEND_CUSTOMER_LINK', input)
+}
+
+export async function listCustomerLinks(): Promise<TrackingLinkRecord[]> {
+  return listTrackingIndex<TrackingLinkRecord>({
+    name: 'listTrackingLinks',
+    decls: '$filter: ModelTrackingLinkFilterInput',
+    args: 'filter: $filter',
+    variables: { filter: { kind: { eq: 'CUSTOMER_VIEW' } } },
+    fields: TRACKING_LINK_FIELDS,
+    limit: 200,
+  })
+}
+
+/** The check-call dialog's "text this to the driver". Never undoes the check call. */
+export async function textDriver(input: { loadCarrierId: string; body: string }): Promise<{
+  messageId: string | null
+  smsStatus: TrackingSmsStatus
+  smsError: string | null
+}> {
+  return trackingAction<{ messageId: string | null; smsStatus: TrackingSmsStatus; smsError: string | null }>(
+    'TEXT_DRIVER', input,
+  )
+}
+
+/** The fourteen tracking fields on TmsSettings. Admin only, validated server-side. */
+export interface TrackingSettingsPatch {
+  checkCallDefaultIntervalHours?: number | null
+  checkCallGraceMinutes?: number | null
+  checkCallNotifyChannel?: CheckCallNotifyChannel | null
+  checkCallSlackChannelId?: string | null
+  trackingLinkExpiryHours?: number | null
+  customerLinkExpiryDays?: number | null
+  customerLinkShowsCarrier?: boolean | null
+  customerLinkShowsPosition?: boolean | null
+  trackingContact?: TrackingContact | null
+  trackingSmsTemplate?: string | null
+  /**
+   * Step J's shared tracking defaults. Stored and shown now, read by nothing until a
+   * tracking provider is live — the provider pages say so rather than implying a
+   * setting is in force.
+   */
+  trackByDefault?: boolean | null
+  autoStatusFromGeofence?: boolean | null
+  trackingIntervalMin?: number | null
+  trackingDurationHours?: number | null
+}
+export async function saveTrackingSettings(patch: TrackingSettingsPatch, expectedUpdatedAt?: string): Promise<TmsSettings> {
+  return trackingAction<TmsSettings>('SAVE_TRACKING_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+}
+
+// ── Reads ────────────────────────────────────────────────────────────────────
+
+/**
+ * Page a tracking index to the end. Separate from `listAllByIndex` because these
+ * queries need a sort direction and, for the Motive history, a key range — neither of
+ * which a map of scalar arguments can express.
+ */
+async function listTrackingIndex<T>(opts: {
+  name: string
+  /** Variable declarations without the paging token, e.g. `$loadId: String!`. */
+  decls: string
+  /** The arguments as the query passes them, e.g. `loadId: $loadId`. */
+  args: string
+  variables: Record<string, unknown>
+  fields: string
+  limit: number
+  sortDirection?: 'ASC' | 'DESC'
+}): Promise<T[]> {
+  const dir = opts.sortDirection ? `, sortDirection: ${opts.sortDirection}` : ''
+  const rows: T[] = []
+  let nextToken: string | null = null
+  do {
+    const r = await client.graphql({
+      query: `query ${opts.name}(${opts.decls}, $nextToken: String) {
+        ${opts.name}(${opts.args}, limit: ${opts.limit}${dir}, nextToken: $nextToken) {
+          items { ${opts.fields} } nextToken
+        }
+      }`,
+      variables: { ...opts.variables, nextToken },
+    }) as { data: Record<string, { items: (T | null)[]; nextToken?: string | null }> }
+    const page = r.data[opts.name]
+    for (const item of page.items) if (item) rows.push(item)
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return rows
+}
+
+/** One load's event log, newest first — the order the Tracking tab renders. */
+export async function listCheckCallsByLoad(loadId: string): Promise<LoadCheckCallRecord[]> {
+  const rows = await listTrackingIndex<LoadCheckCallRecord>({
+    name: 'listLoadCheckCallByLoadIdAndAt',
+    decls: '$loadId: String!',
+    args: 'loadId: $loadId',
+    variables: { loadId },
+    fields: LOAD_CHECK_CALL_FIELDS,
+    limit: 500,
+    sortDirection: 'DESC',
+  })
+  return rows.map((r) => unwrapJsonFields(r, LOAD_CHECK_CALL_JSON_FIELDS))
+}
+
+/** Every unresolved incident across the book, newest first. The sparse key is the filter. */
+export async function listOpenIncidents(): Promise<LoadCheckCallRecord[]> {
+  const rows = await listTrackingIndex<LoadCheckCallRecord>({
+    name: 'listLoadCheckCallByIncidentOpenAndAt',
+    decls: '$incidentOpen: String!',
+    args: 'incidentOpen: $incidentOpen',
+    variables: { incidentOpen: 'OPEN' },
+    fields: LOAD_CHECK_CALL_FIELDS,
+    limit: 500,
+    sortDirection: 'DESC',
+  })
+  return rows.map((r) => unwrapJsonFields(r, LOAD_CHECK_CALL_JSON_FIELDS))
+}
+
+export async function listTrackingLinksByShipment(shipmentId: string): Promise<TrackingLinkRecord[]> {
+  for (;;) {
+    const fields = trackingLinksHaveUploads
+      ? `${TRACKING_LINK_FIELDS} ${TRACKING_LINK_UPLOAD_FIELDS.join(' ')}`
+      : TRACKING_LINK_FIELDS
+    try {
+      return await listAllByIndex<TrackingLinkRecord>('listTrackingLinkByShipmentId', { shipmentId }, fields, 200)
+    } catch (err) {
+      if (!trackingLinksHaveUploads || !fieldNamed(TRACKING_LINK_UPLOAD_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no upload fields on TrackingLink yet — querying without them until deploy')
+      trackingLinksHaveUploads = false
+    }
+  }
+}
+
+/**
+ * Every ACTIVE carrier-ping link, for the Errors tab's "this truck has gone quiet" rule.
+ *
+ * This is a filtered list, not a query, and the cost is worth stating plainly:
+ * `TrackingLink` is indexed on `shipmentId` and `loadId` only, so there is no key that
+ * answers "which links are live" and the filter is applied by the server after it reads
+ * the table. What comes back is bounded — a ping link is minted when a load is dispatched
+ * and revoked or expired when it delivers, so the rows are the trucks currently rolling —
+ * but the read behind it is not, which is why both the rows kept and the pages walked are
+ * capped here and why the Errors tab asks once a minute rather than on every render.
+ *
+ * The alternative is one `listTrackingLinkByShipmentId` per in-transit shipment on every
+ * poll, which is a query per shipment instead of a request per poll — worse, and it grows
+ * with the board. The upload fields stay out of the selection, so this read needs none of
+ * `listTrackingLinksByShipment`'s pre-deploy flag.
+ */
+export async function listCarrierPingLinks(limit = 500): Promise<TrackingLinkRecord[]> {
+  const rows: TrackingLinkRecord[] = []
+  let nextToken: string | null = null
+  // A filtered page can come back empty with more behind it, so paging stops on the rows
+  // collected or on the page budget, never on an empty page.
+  for (let page = 0; page < 8; page += 1) {
+    const r = await client.graphql({
+      query: `query ListTrackingLinks($filter: ModelTrackingLinkFilterInput, $nextToken: String) {
+        listTrackingLinks(filter: $filter, limit: 1000, nextToken: $nextToken) {
+          items { ${TRACKING_LINK_FIELDS} } nextToken
+        }
+      }`,
+      variables: {
+        filter: { status: { eq: 'ACTIVE' }, kind: { eq: 'CARRIER_PING' } },
+        nextToken,
+      },
+    }) as { data: { listTrackingLinks: { items: (TrackingLinkRecord | null)[]; nextToken?: string | null } } }
+    const got = r.data.listTrackingLinks
+    for (const item of got.items) if (item) rows.push(item)
+    nextToken = got.nextToken ?? null
+    if (!nextToken || rows.length >= limit) break
+  }
+  return rows.length > limit ? rows.slice(0, limit) : rows
+}
+
+/** Motive breadcrumbs for one truck inside a window, oldest → newest. */
+export async function listTruckPositions(truckId: string, from: string, to: string): Promise<TruckLocation[]> {
+  return listTrackingIndex<TruckLocation>({
+    name: 'listTruckLocationHistoryByTruckIdAndLocatedAt',
+    decls: '$truckId: String!, $from: String!, $to: String!',
+    args: 'truckId: $truckId, locatedAt: { between: [$from, $to] }',
+    variables: { truckId, from, to },
+    fields: TRUCK_LOCATION_HISTORY_FIELDS,
+    limit: 1000,
+    sortDirection: 'ASC',
+  })
+}
+
+// ── Step AO block: load breadcrumbs, the planned route, provider tracking ───────
+
+/** The load-keyed columns Step AO adds to TruckLocationHistory. */
+const LOAD_BREADCRUMB_FIELDS = 'truckId unitNumber lat lon bearing speed locatedAt description source syncedAt loadId accuracyM approx'
+
+/**
+ * Every position filed against one load inside a window (driver link, shared pin,
+ * geocoded reply, provider), oldest → newest. Motive / Blue Ink rows are NOT here —
+ * they are read by the leg's truck through `listTruckPositions`.
+ */
+export async function listLoadBreadcrumbs(loadId: string, from: string, to: string): Promise<TrackingFix[]> {
+  const rows = await listTrackingIndex<Record<string, unknown>>({
+    name: 'listTruckLocationHistoryByTruckIdAndLocatedAt',
+    decls: '$truckId: String!, $from: String!, $to: String!',
+    args: 'truckId: $truckId, locatedAt: { between: [$from, $to] }',
+    variables: { truckId: loadPingKey(loadId), from, to },
+    fields: LOAD_BREADCRUMB_FIELDS,
+    limit: 1000,
+    sortDirection: 'ASC',
+  })
+  return rows.map(fixOfRow).filter((f): f is TrackingFix => f !== null)
+}
+
+export interface LoadRoute {
+  encoded: string | null; meters: number | null; seconds: number | null
+  source: 'ROUTES_API' | 'DIRECTIONS_LEGACY' | 'ESTIMATE' | 'NONE'
+  cached: boolean; fetchedAt: string | null
+  waypoints: Array<{ type: 'pickup' | 'delivery' | 'stop'; lat: number; lng: number; name: string | null }>
+  /** Why the route is an estimate / absent ("No server Maps key", "Delivery address has no coordinates", Google's status). */
+  reason: string | null
+}
+
+/** The load's planned route (server-side Routes API, cached per lane). Never throws for a Google problem. */
+export async function getLoadRoute(loadId: string): Promise<LoadRoute> {
+  return trackingAction<LoadRoute>('GET_LOAD_ROUTE', { loadId })
+}
+
+export async function startProviderTracking(input: { loadCarrierId: string; provider: string }): Promise<{ link: TrackingLinkRecord; mode: 'STUB' | 'LIVE'; message: string }> {
+  return trackingAction<{ link: TrackingLinkRecord; mode: 'STUB' | 'LIVE'; message: string }>('START_PROVIDER_TRACKING', input)
+}
+
+export async function stopProviderTracking(input: { linkId: string }): Promise<{ link: TrackingLinkRecord }> {
+  return trackingAction<{ link: TrackingLinkRecord }>('STOP_PROVIDER_TRACKING', input)
+}
+// ── end Step AO block ────────────────────────────────────────────────────────────
+
+/**
+ * Every load with a check call on the clock, soonest first. `checkCallOpen` is the
+ * sparse GSI key, so this reads only the loads that are actually being tracked.
+ */
+export async function listCheckCallWorklist(): Promise<Load[]> {
+  const rows = await listTrackingIndex<Load>({
+    name: 'listLoadByCheckCallOpenAndNextCheckCallAt',
+    decls: '$checkCallOpen: String!',
+    args: 'checkCallOpen: $checkCallOpen',
+    variables: { checkCallOpen: 'OPEN' },
+    fields: loadFields(),
+    limit: 1000,
+    sortDirection: 'ASC',
+  })
+  return rows.map((l) => unwrapJsonFields(l, ['stops']))
+}
+
+/** One load's assignments — the worklist reads the ACTIVE one for carrier and driver phone. */
+export async function listLoadCarriersByLoad(loadId: string): Promise<LoadCarrierRecord[]> {
+  return listLoadCarriersByIndex('listLoadCarrierByLoadId', { loadId })
+}
+
+/**
+ * Every assignment in the book. The shipments board reads the ACTIVE leg of each load
+ * for its CARRIER / DRIVER / TRUCK / AP columns, and the Brokerage dashboard groups by
+ * carrier; both need the whole table rather than one load's legs, and the bounced and
+ * TONU rows come with it because "who hauled it before" is part of that history.
+ */
+export async function listLoadCarriers(): Promise<LoadCarrierRecord[]> {
+  return readLoadCarriers((fields) => listAll<LoadCarrierRecord>('listLoadCarriers', fields, 10000))
+}
+
+// ── Documents & delivery (tmsShipmentActions · tmsTrackingActions) ───────────
+//
+// Step E. ShipmentDocument is the shipment's index of every file it has, wherever the
+// bytes live; ShipmentNotice is every e-mail the system tried to send, with the text it
+// rendered. The writes split the way step D's did: the rows and the AR gate belong to
+// the shipment router, the links and SES to the tracking router. Neither model has
+// subscriptions, so the Documents tab polls (src/hooks/useShipmentDocuments.ts).
+
+export type {
+  ShipmentDocumentRecord, ShipmentDocumentType, ShipmentDocumentSource, ShipmentDocumentAudience,
+  ShipmentDocumentStatus, ShipmentDocumentReviewStatus, ShipmentDocumentSection,
+  ShipmentNoticeRecord, ShipmentNoticeKind, ShipmentNoticeStatus, DocGateResult,
+} from '@/types/tms'
+
+const SHIPMENT_DOCUMENT_FIELDS = `
+  id shipmentId orderId loadId loadCarrierId stopId
+  type name s3Key contentType sizeBytes pages source sourceRef audience
+  status version supersedesId
+  reviewStatus reviewedAt reviewedBy reviewNote uploadLinkId
+  voidedAt voidedBy voidReason uploadedBy uploadedAt
+  createdBy createdAt updatedAt
+`
+const SHIPMENT_NOTICE_FIELDS = `
+  id shipmentId loadId loadCarrierId kind milestone channel
+  to cc subject body attachments status error messageId sentAt trackingLinkId
+  at createdBy createdAt updatedAt
+`
+const SHIPMENT_NOTICE_JSON_FIELDS: (keyof ShipmentNoticeRecord)[] = ['attachments']
+
+// Both models arrive with step E's deploy, and until it lands AppSync has no such
+// query at all — the error names the query, not a field, so the field-level self-heal
+// above cannot see it. Degrade to "this shipment has no documents" (the same bargain
+// `payCreditsDeployed` strikes) rather than failing every shipment page mid-deploy.
+let documentModelsAvailable = modelsAvailable(['ShipmentDocument', 'ShipmentNotice'])
+const isMissingDocumentModel = (err: unknown) =>
+  /Cannot query field ['"]listShipment(Document|Notice)|Unknown type ['"]ShipmentDocument/i.test(safeStringify(err))
+
+/** False once a read proved the backend predates the document models. */
+export const shipmentDocumentsDeployed = () => documentModelsAvailable
+
+function forgetDocumentModels(err: unknown): void {
+  if (!isMissingDocumentModel(err)) throw err
+  console.warn('[apiClient] backend has no document models yet — reading no documents until deploy')
+  documentModelsAvailable = false
+}
+
+/**
+ * One shipment's documents, oldest first — the order `ShipmentBundle.documents` comes
+ * back in from the Lambda, so a page that swaps a write's bundle in sees the same
+ * sequence it read. A view that wants newest first sorts its own copy.
+ */
+export async function listShipmentDocuments(shipmentId: string): Promise<ShipmentDocumentRecord[]> {
+  if (!documentModelsAvailable) return []
+  try {
+    return await listTrackingIndex<ShipmentDocumentRecord>({
+      name: 'listShipmentDocumentByShipmentIdAndUploadedAt',
+      decls: '$shipmentId: String!',
+      args: 'shipmentId: $shipmentId',
+      variables: { shipmentId },
+      fields: SHIPMENT_DOCUMENT_FIELDS,
+      limit: 500,
+      sortDirection: 'ASC',
+    })
+  } catch (err) {
+    forgetDocumentModels(err)
+    return []
+  }
+}
+
+/**
+ * Every carrier-portal upload still waiting on a person, oldest first: the queue is
+ * worked in the order the carriers sent them. The index is sparse — only CARRIER_PORTAL
+ * rows ever carry PENDING — so this reads exactly the worklist however big the book is.
+ */
+export async function listDocumentReviewQueue(): Promise<ShipmentDocumentRecord[]> {
+  if (!documentModelsAvailable) return []
+  try {
+    return await listTrackingIndex<ShipmentDocumentRecord>({
+      // The index key is the model's own enum, so the variable must be declared as one.
+      name: 'listShipmentDocumentByReviewStatusAndUploadedAt',
+      decls: '$reviewStatus: ShipmentDocumentReviewStatus!',
+      args: 'reviewStatus: $reviewStatus',
+      variables: { reviewStatus: 'PENDING' },
+      fields: SHIPMENT_DOCUMENT_FIELDS,
+      limit: 500,
+      sortDirection: 'ASC',
+    })
+  } catch (err) {
+    forgetDocumentModels(err)
+    return []
+  }
+}
+
+/** One shipment's e-mail history, newest first. A NOT_SENT row is still readable. */
+export async function listShipmentNotices(shipmentId: string): Promise<ShipmentNoticeRecord[]> {
+  if (!documentModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<ShipmentNoticeRecord>({
+      name: 'listShipmentNoticeByShipmentIdAndAt',
+      decls: '$shipmentId: String!',
+      args: 'shipmentId: $shipmentId',
+      variables: { shipmentId },
+      fields: SHIPMENT_NOTICE_FIELDS,
+      limit: 200,
+      sortDirection: 'DESC',
+    })
+    return rows.map((n) => unwrapJsonFields(n, SHIPMENT_NOTICE_JSON_FIELDS))
+  } catch (err) {
+    forgetDocumentModels(err)
+    return []
+  }
+}
+
+// ── Document writes (tmsShipmentActions) ─────────────────────────────────────
+
+export interface PrepareDocumentUploadInput {
+  shipmentId: string
+  type: ShipmentDocumentType
+  name: string
+  contentType: string
+  sizeBytes: number
+}
+/** A presigned PUT pinned to the type and the length, good for five minutes. */
+export interface PreparedDocumentUpload {
+  uploadUrl: string
+  s3Key: string
+  documentId: string
+}
+export async function prepareDocumentUpload(input: PrepareDocumentUploadInput): Promise<PreparedDocumentUpload> {
+  return shipmentAction<PreparedDocumentUpload>('PREPARE_DOCUMENT_UPLOAD', input)
+}
+
+/**
+ * Every document write answers the same way: the whole bundle (its `documents`, the
+ * order's re-cached `docsMissing`) plus the row it wrote, so a dialog swaps the
+ * response in rather than re-reading the shipment.
+ */
+export interface DocumentResult {
+  bundle: ShipmentBundle
+  document: ShipmentDocumentRecord
+}
+
+export interface CommitDocumentInput {
+  shipmentId: string
+  /** Both from the PREPARE_DOCUMENT_UPLOAD that signed the PUT. */
+  documentId: string
+  s3Key: string
+  type: ShipmentDocumentType
+  name: string
+  contentType: string
+  sizeBytes: number
+  /** Which section the row lands in: order → Customer, assignment → Carrier, neither → Shipment. */
+  orderId?: string | null
+  loadId?: string | null
+  loadCarrierId?: string | null
+  stopId?: string | null
+  /** Defaults to the type's own audience; INTERNAL keeps a file in the building. */
+  audience?: ShipmentDocumentAudience | null
+}
+export async function commitDocument(input: CommitDocumentInput): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('COMMIT_DOCUMENT', input)
+}
+
+export interface SaveGeneratedDocumentInput {
+  shipmentId: string
+  type: 'BOL' | 'LOAD_SUMMARY' | 'RATE_CON'
+  loadId?: string | null
+  loadCarrierId?: string | null
+  /** BOL only: one delivery stop's own BOL (its own version chain). */
+  stopId?: string | null
+  /** BOL only: a customer copy with rates; stored for the customer only, its own version chain. */
+  rated?: boolean
+  /** `[A-Za-z0-9-]{1,20}`; goes into the stored file name (e.g. `d2`, `rated`). */
+  referenceSuffix?: string | null
+  /** The PDF the browser built, base64 with no data: prefix. */
+  pdfBase64: string
+  filename: string
+}
+export async function saveGeneratedDocument(input: SaveGeneratedDocumentInput): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('SAVE_GENERATED_DOCUMENT', input)
+}
+
+export interface EmailBolInput {
+  shipmentId: string
+  /** A stored, ACTIVE, plain (not rated) BOL of this shipment. */
+  documentId: string
+  to: string[]
+  cc?: string[]
+  message?: string | null
+  party: 'CARRIER' | 'DISPATCHER' | 'DRIVER' | 'CUSTOMER'
+}
+export interface EmailBolResult {
+  message: ShipmentMessageRecord
+  emailStatus: 'SENT' | 'NOT_SENT'
+  emailError: string | null
+  /** Presigned link to the stored PDF, present when the e-mail was not sent. */
+  downloadUrl?: string | null
+}
+export async function emailBol(input: EmailBolInput): Promise<EmailBolResult> {
+  return shipmentAction<EmailBolResult>('EMAIL_BOL', input)
+}
+
+/** Points a shipment at a file the driver app already holds; the bytes are never copied. */
+export interface AttachDriverDocInput {
+  shipmentId: string
+  loadId: string
+  submissionDocId: string
+  type: 'POD' | 'PHOTO' | 'OTHER'
+}
+export async function attachDriverDoc(input: AttachDriverDocInput): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('ATTACH_DRIVER_DOC', input)
+}
+
+/** PENDING carrier-portal rows only. Nothing a carrier sent satisfies a gate until this. */
+export interface ReviewDocumentInput {
+  documentId: string
+  decision: 'ACCEPT' | 'REJECT'
+  /** ACCEPT may retype the upload, within what a carrier is allowed to send. */
+  type?: ShipmentDocumentType
+  audience?: ShipmentDocumentAudience
+  note?: string | null
+}
+export async function reviewDocument(input: ReviewDocumentInput): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('REVIEW_DOCUMENT', input)
+}
+
+/** ACTIVE rows that own their bytes; a generated row may change audience only. */
+export interface UpdateDocumentInput {
+  documentId: string
+  name?: string
+  type?: ShipmentDocumentType
+  audience?: ShipmentDocumentAudience
+  orderId?: string | null
+  loadCarrierId?: string | null
+}
+export async function updateDocument(input: UpdateDocumentInput): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('UPDATE_DOCUMENT', input)
+}
+
+/** The row goes VOID and stops counting; the file itself is never deleted. */
+export async function voidDocument(input: { documentId: string; reason: string }): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('VOID_DOCUMENT', input)
+}
+
+export interface ReadyToInvoiceInput {
+  review?: { source: 'LOAD_REVIEW' }
+  orderId: string
+  /** The Order's `updatedAt` as the page read it. */
+  expectedUpdatedAt: string
+  // No override: Ryne, 2026-10-28 — nothing may bypass the release gate, not an
+  // admin with a note, not batch invoicing, not the factoring hand-off.
+}
+/**
+ * `gate` is what the required-document check decided; `releaseGate` is the whole
+ * release-to-accounting verdict, with the exact sentence to show for each thing
+ * that is missing.
+ */
+export interface ReadyToInvoiceResult {
+  bundle: ShipmentBundle
+  gate: DocGateResult
+  releaseGate: ReleaseGateResult
+}
+export async function readyToInvoice(input: ReadyToInvoiceInput): Promise<ReadyToInvoiceResult> {
+  return shipmentAction<ReadyToInvoiceResult>('READY_TO_INVOICE', input)
+}
+export interface LoadReviewResult {
+  shipmentId: string
+  orderId: string
+  orderUpdatedAt: string
+  arStatus: string | null
+  releaseGate: ReleaseGateResult
+  extras: LoadReviewReason[]
+  salesRepId: string | null
+  revDivision: string | null
+  revSubdivision: string | null
+  legacyImported: boolean
+  pendingDocReviewCount?: number
+}
+
+export async function reviewLoad(input: { shipmentId: string }): Promise<LoadReviewResult> {
+  return shipmentAction<LoadReviewResult>('REVIEW_LOAD', input)
+}
+
+/** How the office rates the carrier once their load is done. One to five stars. */
+export async function rateCarrier(input: {
+  loadCarrierId: string
+  stars: number
+  note?: string
+}): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('RATE_CARRIER', input)
+}
+
+// ── Upload links & notices (tmsTrackingActions) ──────────────────────────────
+
+/** NOT_SENT is an honest outcome: the notice and its text exist, SES refused it. */
+export type NoticeEmailStatus = 'SENT' | 'COPY' | 'NOT_SENT'
+
+export interface SendUploadLinkInput {
+  loadCarrierId: string
+  /** Defaults to the assignment's dispatcher e-mail. */
+  to?: string[]
+  via: 'EMAIL' | 'COPY'
+  message?: string | null
+  /** Ask before the load has delivered; refused without it. */
+  early?: boolean
+  /** Revoke the assignment's link and mint a new token. */
+  regenerate?: boolean
+}
+export interface SendUploadLinkResult {
+  link: TrackingLinkRecord
+  /** Copyable whatever the e-mail did. */
+  url: string
+  /** Written before the send, so the text exists even when SES refused it. */
+  notice: ShipmentNoticeRecord
+  emailStatus: NoticeEmailStatus
+  emailError: string | null
+}
+export async function sendUploadLink(input: SendUploadLinkInput): Promise<SendUploadLinkResult> {
+  return trackingAction<SendUploadLinkResult>('SEND_UPLOAD_LINK', input)
+}
+
+export async function revokeUploadLink(input: { trackingLinkId: string }): Promise<{ link: TrackingLinkRecord }> {
+  return trackingAction<{ link: TrackingLinkRecord }>('REVOKE_UPLOAD_LINK', input)
+}
+
+/** The manual send of a milestone the stream has already passed, or never sent. */
+export interface SendMilestoneNoticeInput {
+  shipmentId: string
+  milestone: CustomerNotification
+  /** Defaults to the customer contacts subscribed to that milestone. */
+  to?: string[]
+  message?: string | null
+  via: 'EMAIL' | 'COPY'
+}
+export interface SendMilestoneNoticeResult {
+  notice: ShipmentNoticeRecord
+  /** Who the server actually addressed it to. */
+  to: string[]
+  emailStatus: NoticeEmailStatus
+  emailError: string | null
+  /** The patched shipment, so `lastNoticeAt` needs no refetch. */
+  shipment: ShipmentRecord
+}
+export async function sendMilestoneNotice(input: SendMilestoneNoticeInput): Promise<SendMilestoneNoticeResult> {
+  return trackingAction<SendMilestoneNoticeResult>('SEND_MILESTONE_NOTICE', input)
+}
+
+export interface EmailDocumentsInput {
+  shipmentId: string
+  documentIds: string[]
+  to: string[]
+  cc?: string[]
+  subject?: string | null
+  message?: string | null
+  /** Decides which audiences may go out; INTERNAL rows are refused either way. */
+  recipientKind: 'CUSTOMER' | 'CARRIER'
+}
+export interface EmailDocumentsResult {
+  notice: ShipmentNoticeRecord
+  emailStatus: NoticeEmailStatus
+  emailError: string | null
+  /** Empty on a send; one-hour presigned GETs to hand over when SES refused. */
+  downloads: { documentId: string; name: string; url: string }[]
+}
+export async function emailDocuments(input: EmailDocumentsInput): Promise<EmailDocumentsResult> {
+  return trackingAction<EmailDocumentsResult>('EMAIL_DOCUMENTS', input)
+}
+
+/** The eight document settings on TmsSettings. ADMIN only, validated server-side. */
+export interface DocumentSettingsPatch {
+  milestoneNoticesEnabled?: boolean | null
+  podRequestEnabled?: boolean | null
+  requiredCarrierUploadTypes?: string[] | null
+  uploadLinkExpiryDays?: number | null
+  milestoneEmailTemplate?: string | null
+  podRequestEmailTemplate?: string | null
+  bolTerms?: string | null
+  documentDeleteAdminOnly?: boolean | null
+}
+export async function saveDocumentSettings(patch: DocumentSettingsPatch, expectedUpdatedAt?: string): Promise<TmsSettings> {
+  return trackingAction<TmsSettings>('SAVE_DOCUMENT_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+}
+
+/**
+ * Send the bytes to a presigned PUT. Both the staff dialog and the public carrier
+ * portal upload through this one implementation: the Content-Type has to be exactly
+ * what the Lambda signed or S3 rejects the PUT, and Amplify's uploadData cannot be
+ * used here — the portal has no credentials at all.
+ */
+export async function putPresignedFile(uploadUrl: string, file: Blob, contentType: string): Promise<void> {
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    body: file,
+    headers: { 'Content-Type': contentType },
+  })
+  if (!res.ok) {
+    throw new Error(`Upload failed (${res.status}). The upload link may have expired — try again.`)
+  }
 }
 
 // ── Google geocoding proxy (tmsGeocode) — real upstream errors, no fallbacks ─────
@@ -1201,6 +4867,14 @@ export async function notifySlackStatusChange(args: {
   }
 }
 
+/**
+ * A signed GET for an intake-side object. The prefixes that reach here are
+ * `intake-pdfs/` (Slack and vendor-AP PDFs), `intake-attachments/` (files that came in on a
+ * tender) and, from Step K, `workflow-inbox/` — the agent's own copy of an inbox message and
+ * its attachments, which RunTrace links to. The allow-list itself is the `access` map in
+ * `amplify/storage/resource.ts`; this helper only mints the URL, so a prefix missing there
+ * fails at S3 rather than here.
+ */
 export async function getIntakePdfUrl(s3Key: string): Promise<string> {
   return getRateConfirmUrl(s3Key) // same bucket, same presigned URL mechanism
 }
@@ -1408,6 +5082,10 @@ export interface CognitoUser {
   status: string
   enabled: boolean
   createdAt: string
+  /** Step I: the `UserProfile` row the Lambda joined on, absent until the deploy lands. */
+  profile?: UserProfileRecord | null
+  /** The caller's Cognito groups, as the Lambda read them — `role-*`, `claim-*`, `page-*`. */
+  groups?: string[]
 }
 
 // AppSync AWSJSON round-trips can return a parsed value, a JSON string, or even a
@@ -1436,10 +5114,21 @@ export async function listCognitoUsers(): Promise<CognitoUser[]> {
   throw new Error(`manageUsers returned an unexpected shape (${typeof v}): ${JSON.stringify(v).slice(0, 300)}`)
 }
 
-export async function createCognitoUser(email: string): Promise<void> {
+/**
+ * Invite a user. `opts` is step I's addition: the role and teams the profile is created
+ * with, carried in the generic `input` payload so the plain one-argument call is untouched.
+ */
+export async function createCognitoUser(email: string, opts?: { name?: string; role?: RoleKey; teamKeys?: string[] }): Promise<void> {
+  if (!opts) {
+    await client.graphql({
+      query: `query ManageUsers($action: String!, $email: String) { manageUsers(action: $action, email: $email) }`,
+      variables: { action: 'create', email },
+    })
+    return
+  }
   await client.graphql({
-    query: `query ManageUsers($action: String!, $email: String) { manageUsers(action: $action, email: $email) }`,
-    variables: { action: 'create', email },
+    query: `query ManageUsers($action: String!, $email: String, $input: String) { manageUsers(action: $action, email: $email, input: $input) }`,
+    variables: { action: 'create', email, input: JSON.stringify(opts) },
   })
 }
 
@@ -1492,6 +5181,104 @@ export async function setUserAdmin(username: string, isAdmin: boolean): Promise<
   await client.graphql({
     query: `query ManageUsers($action: String!, $username: String, $isAdmin: Boolean) { manageUsers(action: $action, username: $username, isAdmin: $isAdmin) }`,
     variables: { action: 'setAdmin', username, isAdmin },
+  })
+}
+
+// ── Staff profiles & roles (Step I) ──────────────────────────────────────────
+//
+// A role is data on `UserProfile`, projected onto the Cognito groups; every write goes
+// through `manageUsers`, which owns both halves. The read below is the exception: it is
+// readable by any authenticated user because it is what every rep picker renders.
+
+export type { UserProfileRecord, RoleKey, ClaimKey, UserStatus, Team, TeamSenderAddresses } from '@/types/tms'
+
+const USER_PROFILE_FIELDS = `
+  id email name role teamKeys divisions managerId claims extraPages status
+  title phone datEmail invitedAt invitedBy lastRoleChangeAt lastRoleChangeBy
+  createdBy updatedBy version createdAt updatedAt
+`
+
+// UserProfile arrives with step I's deploy, and until then AppSync has no such query at
+// all — the error names the query, not a field, so the field-level self-heal cannot see
+// it. Degrade to "no staff" rather than breaking every picker on the page. The quoting
+// and the delimiters are the `quoteModelsAvailable` bargain, for the same reasons.
+let userProfilesAvailable = modelAvailable('UserProfile')
+const isMissingUserProfileModel = (err: unknown) =>
+  /[\\'"](get|list)UserProfile\w*[\\'"]|Unknown type [\\'"]+UserProfile/i.test(safeStringify(err))
+
+function forgetUserProfiles(err: unknown): void {
+  if (!isMissingUserProfileModel(err)) throw err
+  console.warn('[apiClient] backend has no UserProfile model yet — reading no staff until deploy')
+  userProfilesAvailable = false
+}
+
+/** Every staff login, for the rep and team pickers. Any authenticated user may read it. */
+export async function listUserProfiles(): Promise<UserProfileRecord[]> {
+  if (!userProfilesAvailable) return []
+  return cachedDirectory('userProfiles', async () => {
+    try {
+      return await listAll<UserProfileRecord>('listUserProfiles', USER_PROFILE_FIELDS, 1000)
+    } catch (err) {
+      forgetUserProfiles(err)
+      return []
+    }
+  })
+}
+
+/** Owner-only when `role` is ADMIN; the Lambda refuses a lock-out with its own message. */
+export async function setUserRole(username: string, role: RoleKey): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $role: String) { manageUsers(action: $action, username: $username, role: $role) }`,
+    variables: { action: 'setRole', username, role },
+  })
+}
+
+export async function setUserTeams(username: string, teamKeys: string[]): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'setTeams', username, input: JSON.stringify({ teamKeys }) },
+  })
+}
+
+/** Which businesses this person works in; a division-scoped Shipment view is matched against it. */
+export async function setUserDivisions(username: string, divisions: string[]): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'setDivisions', username, input: JSON.stringify({ divisions }) },
+  })
+}
+
+export async function setUserClaims(username: string, claims: string[]): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'setClaims', username, input: JSON.stringify({ claims }) },
+  })
+}
+
+/** The profile fields that carry no permission: everything else has its own action. */
+export async function updateUserProfile(
+  username: string,
+  patch: { name?: string; title?: string; phone?: string; managerId?: string; datEmail?: string },
+): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'updateProfile', username, input: JSON.stringify(patch) },
+  })
+}
+
+/** Re-send the invitation to a user who never signed in. */
+export async function reinviteUser(username: string): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'reinvite', username, input: JSON.stringify({ username }) },
+  })
+}
+
+/** Revoke every session: the next request with an old token is refused. */
+export async function forceSignOut(username: string): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $input: String) { manageUsers(action: $action, username: $username, input: $input) }`,
+    variables: { action: 'forceSignOut', username, input: JSON.stringify({ username }) },
   })
 }
 
@@ -1816,6 +5603,16 @@ export async function getRateConfirmUrl(key: string): Promise<string> {
   return result.url.toString()
 }
 
+/**
+ * Presigned GET for a shipment document's bytes. Deliberately keyed by the row's own
+ * `s3Key` rather than a prefix: a pointer row's bytes live where the driver app or the
+ * old rate-con store already put them, and the browser's read grant covers all three.
+ */
+export async function getShipmentDocumentUrl(key: string): Promise<string> {
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return result.url.toString()
+}
+
 export async function deleteRateConfirm(key: string): Promise<void> {
   await remove({ path: key })
 }
@@ -1919,10 +5716,12 @@ const EXPENSE_REC_FIELDS  = `id expenseTypeId allocationId amount periodMonth tr
 const RECURRING_FIELDS    = `id expenseTypeId allocationId monthlyAmount startMonth endMonth startDate endDate active notes createdAt updatedAt`
 
 export async function listExpenseTypes(): Promise<ExpenseTypeData[]> {
-  const result = await client.graphql({
-    query: `query ListExpenseTypes { listExpenseTypes(limit: 1000) { items { ${EXPENSE_TYPE_FIELDS} } } }`,
-  }) as { data: { listExpenseTypes: { items: ExpenseTypeData[] } } }
-  return result.data.listExpenseTypes.items ?? []
+  return sharedRead('listExpenseTypes', async () => {
+    const result = await client.graphql({
+      query: `query ListExpenseTypes { listExpenseTypes(limit: 1000) { items { ${EXPENSE_TYPE_FIELDS} } } }`,
+    }) as { data: { listExpenseTypes: { items: ExpenseTypeData[] } } }
+    return result.data.listExpenseTypes.items ?? []
+  })
 }
 
 export async function createExpenseType(input: Omit<ExpenseTypeData, 'id' | 'createdAt' | 'updatedAt'>): Promise<ExpenseTypeData> {
@@ -1949,10 +5748,12 @@ export async function deleteExpenseType(id: string): Promise<void> {
 }
 
 export async function listAllocations(): Promise<TruckExpenseAllocationData[]> {
-  const result = await client.graphql({
-    query: `query ListTruckExpenseAllocations { listTruckExpenseAllocations(limit: 1000) { items { ${ALLOCATION_FIELDS} } } }`,
-  }) as { data: { listTruckExpenseAllocations: { items: TruckExpenseAllocationData[] } } }
-  return result.data.listTruckExpenseAllocations.items ?? []
+  return sharedRead('listTruckExpenseAllocations', async () => {
+    const result = await client.graphql({
+      query: `query ListTruckExpenseAllocations { listTruckExpenseAllocations(limit: 1000) { items { ${ALLOCATION_FIELDS} } } }`,
+    }) as { data: { listTruckExpenseAllocations: { items: TruckExpenseAllocationData[] } } }
+    return result.data.listTruckExpenseAllocations.items ?? []
+  })
 }
 
 export async function createAllocation(input: Omit<TruckExpenseAllocationData, 'id' | 'createdAt' | 'updatedAt'>): Promise<TruckExpenseAllocationData> {
@@ -1979,10 +5780,12 @@ export async function deleteAllocation(id: string): Promise<void> {
 }
 
 export async function listExpenseRecords(): Promise<ExpenseRecordData[]> {
-  const result = await client.graphql({
-    query: `query ListExpenseRecords { listExpenseRecords(limit: 10000) { items { ${EXPENSE_REC_FIELDS} } } }`,
-  }) as { data: { listExpenseRecords: { items: ExpenseRecordData[] } } }
-  return result.data.listExpenseRecords.items ?? []
+  return sharedRead('listExpenseRecords', async () => {
+    const result = await client.graphql({
+      query: `query ListExpenseRecords { listExpenseRecords(limit: 10000) { items { ${EXPENSE_REC_FIELDS} } } }`,
+    }) as { data: { listExpenseRecords: { items: ExpenseRecordData[] } } }
+    return result.data.listExpenseRecords.items ?? []
+  })
 }
 
 export async function createExpenseRecord(input: Omit<ExpenseRecordData, 'id' | 'createdAt' | 'updatedAt'>): Promise<ExpenseRecordData> {
@@ -2009,10 +5812,12 @@ export async function deleteExpenseRecord(id: string): Promise<void> {
 }
 
 export async function listRecurringExpenses(): Promise<RecurringExpenseData[]> {
-  const result = await client.graphql({
-    query: `query ListRecurringExpenses { listRecurringExpenses(limit: 1000) { items { ${RECURRING_FIELDS} } } }`,
-  }) as { data: { listRecurringExpenses: { items: RecurringExpenseData[] } } }
-  return result.data.listRecurringExpenses.items ?? []
+  return sharedRead('listRecurringExpenses', async () => {
+    const result = await client.graphql({
+      query: `query ListRecurringExpenses { listRecurringExpenses(limit: 1000) { items { ${RECURRING_FIELDS} } } }`,
+    }) as { data: { listRecurringExpenses: { items: RecurringExpenseData[] } } }
+    return result.data.listRecurringExpenses.items ?? []
+  })
 }
 
 export async function createRecurringExpense(input: Omit<RecurringExpenseData, 'id' | 'createdAt' | 'updatedAt'>): Promise<RecurringExpenseData> {
@@ -2088,6 +5893,9 @@ export interface TruckConfig {
   complianceStatus?:      'COMPLIANT' | 'EXPIRING_SOON' | 'NON_COMPLIANT' | 'UNKNOWN' | null
   assignedFuelCardNumber?: string | null   // LAST 4 ONLY
   assignedPhone?:         string | null
+  /** Steps AJ/AK. The work phone in this truck, E.164; null = none. Not `assignedPhone` (DOT onboarding inventory). */
+  phone?:                 string | null
+  phoneLabel?:            string | null
   assignedTablet?:        string | null
   eldSerialNumber?:       string | null
   inServiceDate?:         string | null
@@ -2096,31 +5904,77 @@ export interface TruckConfig {
 }
 
 const TRUCK_CONFIG_FIELDS = `truckId unitNumber ownershipType motiveVehicleId motiveVehicleNumber onboardingStatus complianceStatus assignedFuelCardNumber assignedPhone assignedTablet eldSerialNumber inServiceDate createdAt updatedAt`
+// Steps AJ/AK: the work phone in the truck. Own flag, same reason as the other newer groups.
+const TRUCK_CONFIG_PHONE_FIELDS = ['phone', 'phoneLabel']
+let truckConfigsHavePhone = true
+const truckConfigFields = () => (truckConfigsHavePhone ? `${TRUCK_CONFIG_FIELDS} ${TRUCK_CONFIG_PHONE_FIELDS.join(' ')}` : TRUCK_CONFIG_FIELDS)
 
 export async function listTruckConfigs(): Promise<TruckConfig[]> {
-  const result = await client.graphql({
-    query: `query ListTruckConfigs { listTruckConfigs(limit: 100) { items { ${TRUCK_CONFIG_FIELDS} } } }`,
-  }) as { data: { listTruckConfigs: { items: TruckConfig[] } } }
-  return result.data.listTruckConfigs.items ?? []
+  for (;;) {
+    try {
+      return await listAll<TruckConfig>('listTruckConfigs', truckConfigFields(), 1000)
+    } catch (err) {
+      if (!truckConfigsHavePhone || !fieldNamed(TRUCK_CONFIG_PHONE_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no TruckConfig phone fields yet — querying without them until deploy')
+      truckConfigsHavePhone = false
+    }
+  }
 }
 
+/** `phone` is E.164 (`normalizeTruckPhone`); send `null` for `phone`/`phoneLabel` to clear. */
 export async function upsertTruckConfig(
   input: Pick<TruckConfig, 'truckId' | 'unitNumber'> & Partial<Omit<TruckConfig, 'truckId' | 'unitNumber' | 'createdAt' | 'updatedAt'>>,
 ): Promise<TruckConfig> {
   // Try update first; if it doesn't exist, create it
   try {
     const result = await client.graphql({
-      query: `mutation UpdateTruckConfig($input: UpdateTruckConfigInput!) { updateTruckConfig(input: $input) { ${TRUCK_CONFIG_FIELDS} } }`,
+      query: `mutation UpdateTruckConfig($input: UpdateTruckConfigInput!) { updateTruckConfig(input: $input) { ${truckConfigFields()} } }`,
       variables: { input },
     }) as { data: { updateTruckConfig: TruckConfig } }
     return result.data.updateTruckConfig
   } catch {
     const result = await client.graphql({
-      query: `mutation CreateTruckConfig($input: CreateTruckConfigInput!) { createTruckConfig(input: $input) { ${TRUCK_CONFIG_FIELDS} } }`,
+      query: `mutation CreateTruckConfig($input: CreateTruckConfigInput!) { createTruckConfig(input: $input) { ${truckConfigFields()} } }`,
       variables: { input },
     }) as { data: { createTruckConfig: TruckConfig } }
     return result.data.createTruckConfig
   }
+}
+
+// ── Company phones (Ivan local drivers) ─────────────────────────────────────────
+
+export interface CompanyPhone {
+  label: string
+  number?: string | null
+  assignedDriverId?: string | null
+  sortOrder?: number | null
+}
+
+const COMPANY_PHONE_FIELDS = `label number assignedDriverId sortOrder`
+
+export async function listCompanyPhones(): Promise<CompanyPhone[]> {
+  if (!modelAvailable('CompanyPhone')) return []
+  const result = await client.graphql({
+    query: `query ListCompanyPhones { listCompanyPhones(limit: 1000) { items { ${COMPANY_PHONE_FIELDS} } } }`,
+  }) as { data: { listCompanyPhones: { items: CompanyPhone[] } } }
+  return (result.data.listCompanyPhones.items ?? [])
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99) || a.label.localeCompare(b.label))
+}
+
+export async function createCompanyPhone(input: CompanyPhone): Promise<CompanyPhone> {
+  const result = await client.graphql({
+    query: `mutation CreateCompanyPhone($input: CreateCompanyPhoneInput!) { createCompanyPhone(input: $input) { ${COMPANY_PHONE_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createCompanyPhone: CompanyPhone } }
+  return result.data.createCompanyPhone
+}
+
+export async function updateCompanyPhone(input: Pick<CompanyPhone, 'label'> & Partial<CompanyPhone>): Promise<CompanyPhone> {
+  const result = await client.graphql({
+    query: `mutation UpdateCompanyPhone($input: UpdateCompanyPhoneInput!) { updateCompanyPhone(input: $input) { ${COMPANY_PHONE_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { updateCompanyPhone: CompanyPhone } }
+  return result.data.updateCompanyPhone
 }
 
 // ── Equipment (Fleet) ───────────────────────────────────────────────────────────
@@ -2679,10 +6533,13 @@ function normalizePaySetting(raw: DriverPaySetting & { fixedExpenses?: unknown; 
 }
 
 export async function listDriverPaySettings(): Promise<DriverPaySetting[]> {
-  const result = await client.graphql({
-    query: `query ListDriverPaySettings { listDriverPaySettings(limit: 1000) { items { ${PAY_SETTING_FIELDS} } } }`,
-  }) as { data: { listDriverPaySettings: { items: DriverPaySetting[] } } }
-  return (result.data.listDriverPaySettings.items ?? []).map(normalizePaySetting)
+  const rows = await sharedRead('driverPaySettings', async () => {
+    const result = await client.graphql({
+      query: `query ListDriverPaySettings { listDriverPaySettings(limit: 1000) { items { ${PAY_SETTING_FIELDS} } } }`,
+    }) as { data: { listDriverPaySettings: { items: DriverPaySetting[] } } }
+    return result.data.listDriverPaySettings.items ?? []
+  })
+  return rows.map(normalizePaySetting)
 }
 
 function serializePaySetting<T extends { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown; hourlyRateHistory?: unknown }>(input: T): T {
@@ -2992,7 +6849,7 @@ const DISPATCH_MESSAGE_FIELDS = `
 `
 
 export async function listDispatchConversations(): Promise<DispatchConversation[]> {
-  return listAll<DispatchConversation>('listDispatchConversations', DISPATCH_CONVERSATION_FIELDS, 1000)
+  return sharedRead('dispatchConversations', () => listAll<DispatchConversation>('listDispatchConversations', DISPATCH_CONVERSATION_FIELDS, 1000), 3_000) // the inbox polls every 10 s: this only merges the mounts of one page load
 }
 
 /** The thread for one conversation, oldest first. */
@@ -3046,4 +6903,2353 @@ export async function uploadDispatchMedia(file: File): Promise<string> {
   const key = `dispatch-media/out/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
   await uploadData({ path: key, data: file, options: { contentType: file.type || 'application/octet-stream' } }).result
   return key
+}
+
+// ── AR: invoicing & payments (tmsFinanceActions, Step F) ─────────────────────
+//
+// Money is posted by exactly one Lambda, the way the shipment layer is: every write is
+// an action on `tmsFinanceActions`, and the reads come straight off the Invoice and
+// ArPayment indexes. Both models arrive with step F's deploy — until it lands AppSync
+// has no such query at all, so the reads degrade to "no invoices" rather than failing
+// the page, the same bargain the document models strike above.
+
+export type {
+  InvoiceRecord, InvoiceLine, InvoiceStatus, InvoiceBillTo, InvoiceBatchEmailMode, RemitTo,
+  ArPaymentRecord, ArPaymentKind, ArPaymentMethod, PaymentApplication, CreditApplication,
+  ArSettings,
+} from '@/types/tms'
+
+const INVOICE_FIELDS = `
+  id number orderId shipmentId shipmentNumber customerId customerName billToId billTo
+  divisionKey status invoiceDate issuedAt issuedBy dueAt termsDays invoiceMonth
+  lines references subtotalCents totalCents paidCents writtenOffCents balanceCents
+  arOpen paidAt remitTo factored factoringItemId
+  pdfKey pdfSizeBytes pdfVersion attachDocumentIds
+  sentAt sentTo sentCount markedSentAt markedSentBy lastNoticeId aljexDueDate aljexTerms
+  voidedAt voidedBy voidReason note
+  createdBy updatedBy version createdAt updatedAt
+`
+const INVOICE_JSON_FIELDS: (keyof InvoiceRecord)[] = ['billTo', 'lines', 'references', 'remitTo']
+
+const AR_PAYMENT_FIELDS = `
+  id customerId kind receivedAt method reference
+  amountCents appliedCents unappliedCents applications creditApplications
+  invoiceId reversesPaymentId reversedByPaymentId note
+  createdBy createdAt updatedAt
+`
+const AR_PAYMENT_JSON_FIELDS: (keyof ArPaymentRecord)[] = ['applications', 'creditApplications']
+
+/**
+ * Parse the `a.json()` columns of one AR row, the way `parseFactoringJson` does for the
+ * factoring queue: AppSync hands them back as JSON *strings* (sometimes double-encoded,
+ * because the Lambda stringifies into the column), so nothing can read a property off
+ * `invoice.lines` until they are unwrapped.
+ *
+ * A column that is absent or will not parse comes back `null` rather than throwing or
+ * leaking the raw string: one malformed line snapshot must not blank the whole AR page,
+ * and a caller reading `lines ?? []` then sees an empty invoice instead of a crash.
+ */
+export function parseArJson<T extends object>(row: T, fields: readonly (keyof T)[]): T {
+  const out = { ...row }
+  for (const field of fields) {
+    const value: unknown = out[field]
+    if (value == null) {
+      out[field] = null as T[typeof field]
+      continue
+    }
+    if (typeof value !== 'string') continue
+    const parsed = unwrapJson(value)
+    if (typeof parsed === 'string') {
+      console.warn('[ar] could not parse', String(field), 'on', (row as { id?: string }).id)
+      out[field] = null as T[typeof field]
+      continue
+    }
+    out[field] = parsed as T[typeof field]
+  }
+  return out
+}
+
+// Invoice, ArPayment and the Order arStatus index all arrive with step F's deploy, and
+// until then the error names the *query*, not a field, so the field-level self-heal
+// cannot see it. Degrade to an empty book rather than throwing on every AR read.
+let arModelsAvailable = modelsAvailable(['Invoice', 'ArPayment', 'Order'])
+const isMissingArModel = (err: unknown) =>
+  /Cannot query field ['"](listInvoice|getInvoice|listArPayment|listOrderByArStatus)|Unknown type ['"](Invoice|ArPayment|ArStatus)/i
+    .test(safeStringify(err))
+
+/** False once a read proved the backend predates the AR models. */
+export const arModelsDeployed = () => arModelsAvailable
+
+function forgetArModels(err: unknown): void {
+  if (!isMissingArModel(err)) throw err
+  console.warn('[apiClient] backend has no AR models yet — reading no invoices until deploy')
+  arModelsAvailable = false
+}
+
+/**
+ * Every AR write. Same contract as `shipmentAction`: the Lambda's own refusal ("order
+ * is not UNBILLED", "payment exceeds the balance") is rethrown as the Error message, so
+ * the toast shows the real reason instead of `[object Object]`.
+ */
+export async function financeAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsFinanceActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsFinanceActions($action: String!, $input: AWSJSON!) { tmsFinanceActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsFinanceActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsFinanceActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+// ── AR reads ─────────────────────────────────────────────────────────────────
+
+export async function getInvoice(id: string): Promise<InvoiceRecord | null> {
+  if (!arModelsAvailable) return null
+  try {
+    const r = await client.graphql({
+      query: `query GetInvoice($id: ID!) { getInvoice(id: $id) { ${INVOICE_FIELDS} } }`,
+      variables: { id },
+    }) as { data: { getInvoice: InvoiceRecord | null } }
+    return r.data.getInvoice ? parseArJson(r.data.getInvoice, INVOICE_JSON_FIELDS) : null
+  } catch (err) {
+    forgetArModels(err)
+    return null
+  }
+}
+
+/** One customer's bills, newest issued first — the order the customer AR tab renders. */
+export async function listInvoicesByCustomer(customerId: string): Promise<InvoiceRecord[]> {
+  if (!arModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<InvoiceRecord>({
+      name: 'listInvoiceByCustomerIdAndIssuedAt',
+      decls: '$customerId: String!',
+      args: 'customerId: $customerId',
+      variables: { customerId },
+      fields: INVOICE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((inv) => parseArJson(inv, INVOICE_JSON_FIELDS))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/**
+ * The open book: every invoice still carrying a balance, oldest due date first.
+ *
+ * `arOpen` is the sparse marker 'OPEN' — carried only while ISSUED or PARTIAL — so this
+ * reads exactly the money outstanding however many invoices have ever been issued, and
+ * the aging report is this one query.
+ */
+export async function listOpenInvoices(): Promise<InvoiceRecord[]> {
+  if (!arModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<InvoiceRecord>({
+      name: 'listInvoiceByArOpenAndDueAt',
+      decls: '$arOpen: String!',
+      args: 'arOpen: $arOpen',
+      variables: { arOpen: 'OPEN' },
+      fields: INVOICE_FIELDS,
+      limit: 500,
+      sortDirection: 'ASC',
+    })
+    return rows.map((inv) => parseArJson(inv, INVOICE_JSON_FIELDS))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/** Everything issued in one 'YYYY-MM', newest first — the Paid/history tab's window. */
+export async function listInvoicesByMonth(month: string): Promise<InvoiceRecord[]> {
+  if (!arModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<InvoiceRecord>({
+      name: 'listInvoiceByInvoiceMonthAndIssuedAt',
+      decls: '$invoiceMonth: String!',
+      args: 'invoiceMonth: $invoiceMonth',
+      variables: { invoiceMonth: month },
+      fields: INVOICE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((inv) => parseArJson(inv, INVOICE_JSON_FIELDS))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/** One customer's cash rows — receipts, credits, write-offs, reversals — newest first. */
+export async function listArPaymentsByCustomer(customerId: string): Promise<ArPaymentRecord[]> {
+  if (!arModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<ArPaymentRecord>({
+      name: 'listArPaymentByCustomerIdAndReceivedAt',
+      decls: '$customerId: String!',
+      args: 'customerId: $customerId',
+      variables: { customerId },
+      fields: AR_PAYMENT_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((p) => parseArJson(p, AR_PAYMENT_JSON_FIELDS))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/**
+ * One rung of the AR ladder, oldest change first — the worklist tabs.
+ *
+ * The index key is the `ArStatus` enum, so the variable must be declared as one; the
+ * index is sparse on `arStatusChangedAt`, so an order nobody has moved is not a row.
+ */
+export async function listOrdersByArStatus(status: ArStatus): Promise<OrderRecord[]> {
+  if (!arModelsAvailable) return []
+  // The sidebar badge, the AR page's tabs and the shell counts read the same rung inside a second of each other: one request per window.
+  return [...(await cachedList(`ar:ordersByStatus:${status}`, () => readOrdersByArStatus(status), { ttlMs: 15_000 }))]
+}
+
+async function readOrdersByArStatus(status: ArStatus): Promise<OrderRecord[]> {
+  try {
+    const rows = await readOrders((fields) => listAllByIndex<OrderRecord>(
+      // Amplify names an inline model enum `<Model><Field>`, not `<Field>`: the
+      // deployed schema calls this one OrderArStatus, and a wrong name is a hard
+      // validation error rather than an empty list.
+      'listOrderByArStatusAndArStatusChangedAt', { arStatus: status }, fields, 1000, { arStatus: 'OrderArStatus!' },
+    ))
+    return rows.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
+  } catch (err) {
+    forgetArModels(err)
+    return []
+  }
+}
+
+/** Presigned GET for one invoice PDF under `invoices/*`. */
+export async function getInvoicePdfUrl(key: string): Promise<string> {
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return result.url.toString()
+}
+
+// ── AR writes (tmsFinanceActions) ────────────────────────────────────────────
+
+/** What `PREVIEW_INVOICE` shows before anybody commits a number. It writes nothing. */
+export interface InvoicePreview {
+  readiness: { ready: boolean; reasons: string[] }
+  gate: DocGateResult
+  /** The release-to-accounting verdict, with the sentence to show per blocker. */
+  releaseGate: ReleaseGateResult
+  /** The invoice as it would be issued — never persisted. */
+  snapshot: InvoiceRecord
+  recipients: { to: string[]; cc: string[] }
+  attachments: { id: string; type: string; name: string; sizeBytes: number }[]
+}
+
+export async function previewInvoice(input: {
+  orderId: string
+  invoiceDate?: string
+  billToId?: string
+}): Promise<InvoicePreview> {
+  return financeAction<InvoicePreview>('PREVIEW_INVOICE', input)
+}
+
+export async function generateInvoice(input: {
+  orderId: string
+  invoiceDate?: string
+  dueAt?: string
+  billToId?: string
+  attachDocumentIds?: string[]
+  note?: string
+}): Promise<{ invoice: InvoiceRecord; gate: DocGateResult }> {
+  return financeAction<{ invoice: InvoiceRecord; gate: DocGateResult }>('GENERATE_INVOICE', input)
+}
+
+/** One row per order: the invoice it issued, or the reason it refused. Nothing throws. */
+export async function batchGenerateInvoices(input: {
+  orderIds: string[]
+  invoiceDate?: string
+}): Promise<{ results: { orderId: string; invoiceId?: string; number?: string; totalCents?: number; error?: string; releaseGate?: ReleaseGateResult }[] }> {
+  return financeAction('BATCH_GENERATE', input)
+}
+
+export async function renderInvoicePdf(input: { invoiceId: string }): Promise<{ invoice: InvoiceRecord }> {
+  return financeAction<{ invoice: InvoiceRecord }>('RENDER_INVOICE_PDF', input)
+}
+
+/**
+ * What one invoice e-mail did — or did not do.
+ *
+ * SES is denied outside production, so `emailStatus` comes back NOT_SENT with the
+ * reason in `emailError` and the signed `downloads` to hand over by other means. The
+ * UI must say exactly that; a notice row is written either way.
+ */
+export interface InvoiceEmailResult {
+  notice: ShipmentNoticeRecord
+  emailStatus: 'SENT' | 'NOT_SENT' | 'COPY'
+  emailError: string | null
+  subject: string
+  body: string
+  to: string[]
+  cc: string[]
+  downloads: { name: string; url: string }[]
+}
+
+export async function emailInvoice(input: {
+  invoiceId: string
+  to?: string[]
+  cc?: string[]
+  message?: string
+  via?: 'EMAIL' | 'COPY'
+}): Promise<InvoiceEmailResult> {
+  return financeAction<InvoiceEmailResult>('EMAIL_INVOICE', input)
+}
+
+export async function batchEmailInvoices(input: {
+  invoiceIds: string[]
+}): Promise<{ results: { invoiceId: string; emailStatus?: string; emailError?: string | null; error?: string }[] }> {
+  return financeAction('BATCH_EMAIL', input)
+}
+
+/** "I sent this myself" — the note is required, because it is the only record of how. */
+export async function markInvoiceSent(input: { invoiceId: string; note: string }): Promise<{ invoice: InvoiceRecord }> {
+  return financeAction<{ invoice: InvoiceRecord }>('MARK_SENT', input)
+}
+
+export async function voidInvoice(input: { invoiceId: string; reason: string }): Promise<{ invoice: InvoiceRecord }> {
+  return financeAction<{ invoice: InvoiceRecord }>('VOID_INVOICE', input)
+}
+
+/**
+ * What a posted row leaves behind: the ArPayment itself and every invoice it moved.
+ *
+ * `duplicate` is true when the `clientRequestId` had already posted — a double click or
+ * a retried request returns the original row rather than taking the money twice.
+ */
+export interface PostedRow {
+  payment: ArPaymentRecord
+  invoices: InvoiceRecord[]
+  duplicate: boolean
+}
+
+export async function recordPayment(input: {
+  customerId: string
+  receivedAt: string
+  method: ArPaymentMethod
+  reference?: string
+  amountCents: number
+  applications: PaymentApplication[]
+  creditApplications: CreditApplication[]
+  note?: string
+  clientRequestId: string
+}): Promise<PostedRow> {
+  return financeAction<PostedRow>('RECORD_PAYMENT', input)
+}
+
+export async function createCredit(input: {
+  customerId: string
+  memoDate: string
+  reference?: string
+  amountCents: number
+  note: string
+  clientRequestId: string
+}): Promise<PostedRow> {
+  return financeAction<PostedRow>('CREATE_CREDIT', input)
+}
+
+export async function writeOffInvoice(input: {
+  invoiceId: string
+  amountCents: number
+  reason: string
+  clientRequestId: string
+}): Promise<PostedRow> {
+  return financeAction<PostedRow>('WRITE_OFF', input)
+}
+
+/** Nothing deletes a posted row; a mistake gets a REVERSAL that restores the balances. */
+export async function reversePayment(input: { paymentId: string; reason: string }): Promise<PostedRow> {
+  return financeAction<PostedRow>('REVERSE_PAYMENT', input)
+}
+
+/** What the factoring queue row would carry, and whether anything blocks writing it. */
+export async function previewFactor(input: { invoiceId: string }): Promise<{
+  ready: boolean
+  refusal: string | null
+  releaseGate: ReleaseGateResult
+  proNumber?: string
+  fields?: Record<string, string>
+  existing?: { id: string; status: string } | null
+}> {
+  return financeAction('PREVIEW_FACTOR', input)
+}
+
+/**
+ * Raise the OTR queue row for an issued invoice. This writes the row and prefills its
+ * typed fields; submitting it to OTR stays a separate human act on `/factoring`.
+ * `reused` is true when the invoice already had a row — it is never written twice.
+ */
+export async function sendToFactor(input: { invoiceId: string }): Promise<{
+  factoringItem: FactoringItem
+  invoice: InvoiceRecord
+  reused: boolean
+}> {
+  const result = await financeAction<{ factoringItem: FactoringItem; invoice: InvoiceRecord; reused: boolean }>('SEND_TO_FACTOR', input)
+  return { ...result, factoringItem: parseFactoringJson(result.factoringItem) }
+}
+
+export async function saveArSettings(input: Partial<ArSettings>): Promise<{ settings: TmsSettings }> {
+  return financeAction<{ settings: TmsSettings }>('SAVE_AR_SETTINGS', input)
+}
+
+// ── Step AW stage D: release to billing, send invoice, factoring-queue change sync ──
+// All three need the per-user `page-billingRelease` grant; the Lambda refuses everyone else, admins included.
+
+export interface ReleaseToBillingResult {
+  invoice: InvoiceRecord
+  factoringItem: FactoringItem | null
+  billingMethod: 'FACTOR' | 'MANUAL'
+  alreadyReleased: boolean
+  /** MANUAL only: the invoice is issued and waiting for Send invoice. */
+  readyToSend: boolean
+  /** e.g. OVER_CREDIT_LIMIT: shown, never blocking. */
+  warnings: string[]
+}
+
+export async function releaseToBilling(input: { orderId: string; clientRequestId?: string }): Promise<ReleaseToBillingResult> {
+  const result = await financeAction<ReleaseToBillingResult>('RELEASE_TO_BILLING', input)
+  return { ...result, factoringItem: result.factoringItem ? parseFactoringJson(result.factoringItem) : null }
+}
+
+/** E-mails the PDF to the customer's AP address, the customer copy list and the company always-copy list. */
+export async function sendInvoice(input: { invoiceId: string; message?: string }): Promise<InvoiceEmailResult> {
+  return financeAction<InvoiceEmailResult>('SEND_INVOICE', input)
+}
+
+/** A factoring-queue edit propagated to the invoice, order and charge; `changeReason` is required. */
+export async function syncFactoringChange(input: {
+  proNumber: string
+  changeReason: string
+  changes: { invoiceAmountCents?: number; poNumber?: string; otrManualFields?: Record<string, string> }
+}): Promise<{ invoice: InvoiceRecord; factoringItem: FactoringItem; order: Record<string, unknown>; changed: string[] }> {
+  const result = await financeAction<{ invoice: InvoiceRecord; factoringItem: FactoringItem; order: Record<string, unknown>; changed: string[] }>('SYNC_FACTORING_CHANGE', input)
+  return { ...result, factoringItem: parseFactoringJson(result.factoringItem) }
+}
+
+// ── AP: carrier bills & payments (tmsFinanceActions, Step G) ─────────────────
+//
+// The AP twin of the AR section above, and deliberately its shape: every write is an
+// action on `tmsFinanceActions`, and the reads come straight off the CarrierBill,
+// ApPayment and LoadCarrier indexes. Both models arrive with step G's deploy — until it
+// lands AppSync has no such query at all, so the reads degrade to "no bills" rather than
+// failing the page, the same bargain AR strikes above.
+
+export type {
+  CarrierBillRecord, CarrierBillLine, CarrierBillStatus, ApPayeeKind, ApRemitTo,
+  ApPaymentRecord, ApPaymentKind, ApPaymentMethod, ApPaymentApplication, ApSettings,
+} from '@/types/tms'
+
+const CARRIER_BILL_FIELDS = `
+  id loadCarrierId loadId shipmentId shipmentNumber loadNumber
+  carrierId carrierName carrierMc payeeKind paymentMethodId remitTo divisionKey
+  status billNumber billDate billMonth recordedAt recordedBy recordedEarly
+  dueAt termsDays quickPay quickPayDays quickPayFeeBps
+  lines grossCents quickPayFeeCents netCents billedCents varianceCents
+  paidCents creditedCents balanceCents apOpen documentId
+  approvedAt approvedBy approvalWarnings docsOverrideAt docsOverrideBy docsOverrideNote
+  paidAt voidedAt voidedBy voidReason note
+  apInboxItemId apInboxSourceUrl apInboxAppliedAt
+  createdBy updatedBy version createdAt updatedAt
+`
+const CARRIER_BILL_JSON_FIELDS: (keyof CarrierBillRecord)[] = ['remitTo', 'lines']
+
+const AP_PAYMENT_FIELDS = `
+  id carrierId payeeKind kind paidAt method reference
+  amountCents appliedCents unappliedCents applications creditApplications remitTo
+  loadCarrierId reversesPaymentId reversedByPaymentId
+  pdfKey pdfVersion remittanceSentAt remittanceSentTo remittanceCount
+  markedSentAt markedSentBy markedSentNote lastNoticeId note
+  createdBy createdAt updatedAt
+`
+const AP_PAYMENT_JSON_FIELDS: (keyof ApPaymentRecord)[] = ['applications', 'creditApplications', 'remitTo']
+
+// CarrierBill, ApPayment and the LoadCarrier apOpen index all arrive with step G's
+// deploy, and until then the error names the *query*, not a field, so the field-level
+// self-heal cannot see it. Degrade to an empty book rather than throwing on every AP read.
+let apModelsAvailable = modelsAvailable(['CarrierBill', 'ApPayment', 'LoadCarrier'])
+const isMissingApModel = (err: unknown) =>
+  /Cannot query field ['"](listCarrierBill|getCarrierBill|listApPayment|listLoadCarrierByApOpen)|Unknown type ['"](CarrierBill|ApPayment|LoadCarrierApStatus)/i
+    .test(safeStringify(err))
+
+/** False once a read proved the backend predates the AP models. */
+export const apModelsDeployed = () => apModelsAvailable
+
+function forgetApModels(err: unknown): void {
+  if (!isMissingApModel(err)) throw err
+  console.warn('[apiClient] backend has no AP models yet — reading no carrier bills until deploy')
+  apModelsAvailable = false
+}
+
+// ── AP reads ─────────────────────────────────────────────────────────────────
+// `parseArJson` is the AR parser by name only: the AWSJSON columns on a bill and on an
+// AP payment arrive double-encoded in exactly the same way, and one malformed line
+// snapshot must blank that column rather than the whole AP board.
+
+export async function getCarrierBill(id: string): Promise<CarrierBillRecord | null> {
+  if (!apModelsAvailable) return null
+  try {
+    const r = await client.graphql({
+      query: `query GetCarrierBill($id: ID!) { getCarrierBill(id: $id) { ${CARRIER_BILL_FIELDS} } }`,
+      variables: { id },
+    }) as { data: { getCarrierBill: CarrierBillRecord | null } }
+    return r.data.getCarrierBill ? parseArJson(r.data.getCarrierBill, CARRIER_BILL_JSON_FIELDS) : null
+  } catch (err) {
+    forgetApModels(err)
+    return null
+  }
+}
+
+/** One carrier's bills, newest recorded first — the order the carrier AP tab renders. */
+export async function listBillsByCarrier(carrierId: string): Promise<CarrierBillRecord[]> {
+  if (!apModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<CarrierBillRecord>({
+      name: 'listCarrierBillByCarrierIdAndRecordedAt',
+      decls: '$carrierId: String!',
+      args: 'carrierId: $carrierId',
+      variables: { carrierId },
+      fields: CARRIER_BILL_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((bill) => parseArJson(bill, CARRIER_BILL_JSON_FIELDS))
+  } catch (err) {
+    forgetApModels(err)
+    return []
+  }
+}
+
+/**
+ * Everything we still owe a carrier, oldest due date first — the pay run's working set.
+ *
+ * `apOpen` is the sparse marker 'OPEN', carried only while IN_REVIEW, TO_BE_PAID or
+ * PARTIAL, so this reads exactly the money outstanding however many bills have ever been
+ * recorded, and the AP aging is this one query.
+ */
+export async function listOpenBills(): Promise<CarrierBillRecord[]> {
+  if (!apModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<CarrierBillRecord>({
+      name: 'listCarrierBillByApOpenAndDueAt',
+      decls: '$apOpen: String!',
+      args: 'apOpen: $apOpen',
+      variables: { apOpen: 'OPEN' },
+      fields: CARRIER_BILL_FIELDS,
+      limit: 500,
+      sortDirection: 'ASC',
+    })
+    return rows.map((bill) => parseArJson(bill, CARRIER_BILL_JSON_FIELDS))
+  } catch (err) {
+    forgetApModels(err)
+    return []
+  }
+}
+
+/** Everything recorded in one 'YYYY-MM', newest first — the paid/history tab's window. */
+export async function listBillsByMonth(month: string): Promise<CarrierBillRecord[]> {
+  if (!apModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<CarrierBillRecord>({
+      name: 'listCarrierBillByBillMonthAndRecordedAt',
+      decls: '$billMonth: String!',
+      args: 'billMonth: $billMonth',
+      variables: { billMonth: month },
+      fields: CARRIER_BILL_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((bill) => parseArJson(bill, CARRIER_BILL_JSON_FIELDS))
+  } catch (err) {
+    forgetApModels(err)
+    return []
+  }
+}
+
+/** One carrier's money rows — payments, credits and reversals — newest paid first. */
+export async function listApPaymentsByCarrier(carrierId: string): Promise<ApPaymentRecord[]> {
+  if (!apModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<ApPaymentRecord>({
+      name: 'listApPaymentByCarrierIdAndPaidAt',
+      decls: '$carrierId: String!',
+      args: 'carrierId: $carrierId',
+      variables: { carrierId },
+      fields: AP_PAYMENT_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((p) => parseArJson(p, AP_PAYMENT_JSON_FIELDS))
+  } catch (err) {
+    forgetApModels(err)
+    return []
+  }
+}
+
+/**
+ * Every carrier assignment still owing money, oldest change first — the AP worklist.
+ *
+ * `apOpen` is sparse: a leg nobody has to pay (own fleet, a bounced booking, one already
+ * paid) is not a row, so the whole ladder is one query. `apStatus` narrows it to a single
+ * rung for a tab; it is not the index key, so it goes through a filter — and Amplify names
+ * an inline model enum `<Model><Field>`, so the deployed schema calls that argument's type
+ * LoadCarrierApStatus. A wrong name is a hard validation error, not an empty list.
+ */
+export async function listOpenApAssignments(apStatus?: ApStatus): Promise<LoadCarrierRecord[]> {
+  if (!apModelsAvailable) return []
+  try {
+    return await readLoadCarriers((fields) => listTrackingIndex<LoadCarrierRecord>({
+      name: 'listLoadCarrierByApOpenAndApStatusChangedAt',
+      decls: apStatus ? '$apOpen: String!, $apStatus: LoadCarrierApStatus' : '$apOpen: String!',
+      args: apStatus ? 'apOpen: $apOpen, filter: { apStatus: { eq: $apStatus } }' : 'apOpen: $apOpen',
+      variables: apStatus ? { apOpen: 'OPEN', apStatus } : { apOpen: 'OPEN' },
+      fields,
+      limit: 1000,
+      sortDirection: 'ASC',
+    }))
+  } catch (err) {
+    forgetApModels(err)
+    return []
+  }
+}
+
+/** Presigned GET for one remittance advice PDF under `remittances/*`. */
+export async function getRemittancePdfUrl(key: string): Promise<string> {
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return result.url.toString()
+}
+
+// ── AP writes (tmsFinanceActions) ────────────────────────────────────────────
+
+/** What `PREVIEW_BILL` shows before anybody records a bill. It writes nothing. */
+export interface BillPreview {
+  readiness: { ready: boolean; reasons: string[] }
+  /** The carrier-scope paperwork gate, evaluated live rather than off the cache. */
+  gate: DocGateResult
+  /** The bill as it would be recorded — never persisted. */
+  snapshot: CarrierBillRecord
+  payee: { kind: ApPayeeKind; paymentMethodId: string | null; remitTo: ApRemitTo | null }
+  /** This assignment's carrier-side documents, so the dialog can name the invoice. */
+  documents: { id: string; type: string; name: string; sizeBytes: number }[]
+}
+
+export async function previewBill(input: { loadCarrierId: string }): Promise<BillPreview> {
+  return financeAction<BillPreview>('PREVIEW_BILL', input)
+}
+
+/**
+ * Every bill write answers with the row it wrote, so a caller swaps the record it is
+ * showing rather than re-reading it. `RECORD_BILL` adds the live paperwork gate, because
+ * the review stage is where somebody has to see what is still missing.
+ */
+export async function recordBill(input: {
+  loadCarrierId: string
+  expectedUpdatedAt?: string
+  billNumber?: string
+  billDate?: string
+  billedCents?: number
+  dueAt?: string
+  documentId?: string
+  note?: string
+  /** Record and approve in one press — the server still runs every approval block. */
+  approve?: boolean
+}): Promise<{ bill: CarrierBillRecord; gate: DocGateResult }> {
+  return financeAction<{ bill: CarrierBillRecord; gate: DocGateResult }>('RECORD_BILL', input)
+}
+
+/**
+ * Move a reviewed bill to TO_BE_PAID.
+ *
+ * `acknowledgeWarnings` is the warning keys the approver ticked — the record of what
+ * they were told and signed off on; the blocks are not acknowledgeable at all.
+ * `docsOverrideNote` is required to approve past missing carrier paperwork, and is the
+ * only record of why.
+ */
+export async function approveBill(input: {
+  billId: string
+  acknowledgeWarnings?: string[]
+  docsOverrideNote?: string
+}): Promise<{ bill: CarrierBillRecord }> {
+  return financeAction<{ bill: CarrierBillRecord }>('APPROVE_BILL', input)
+}
+
+export async function unapproveBill(input: { billId: string; reason: string }): Promise<{ bill: CarrierBillRecord }> {
+  return financeAction<{ bill: CarrierBillRecord }>('UNAPPROVE_BILL', input)
+}
+
+export async function voidBill(input: { billId: string; reason: string }): Promise<{ bill: CarrierBillRecord }> {
+  return financeAction<{ bill: CarrierBillRecord }>('VOID_BILL', input)
+}
+
+/**
+ * What a posted AP row leaves behind: the ApPayment itself and every bill it moved.
+ *
+ * `duplicate` is true when the `clientRequestId` had already posted — a double click or a
+ * retried request returns the original row rather than paying the carrier twice.
+ */
+export interface ApPostedRow {
+  payment: ApPaymentRecord
+  bills: CarrierBillRecord[]
+  duplicate: boolean
+}
+
+export async function recordApPayment(input: {
+  carrierId: string
+  paidAt: string
+  method: ApPaymentMethod
+  reference?: string
+  amountCents: number
+  applications: ApPaymentApplication[]
+  creditApplications: CreditApplication[]
+  note?: string
+  clientRequestId: string
+}): Promise<ApPostedRow> {
+  return financeAction<ApPostedRow>('RECORD_AP_PAYMENT', input)
+}
+
+/** Money the carrier owes us back — a TONU adjustment, a claim — held against them. */
+export async function createApCredit(input: {
+  carrierId: string
+  memoDate: string
+  reference?: string
+  amountCents: number
+  reason: string
+  loadCarrierId?: string
+  clientRequestId: string
+}): Promise<ApPostedRow> {
+  return financeAction<ApPostedRow>('CREATE_AP_CREDIT', input)
+}
+
+/** Nothing deletes a posted row; a mistake gets a REVERSAL that restores the balances. */
+export async function reverseApPayment(input: { paymentId: string; reason: string }): Promise<ApPostedRow> {
+  return financeAction<ApPostedRow>('REVERSE_AP_PAYMENT', input)
+}
+
+/**
+ * What one remittance e-mail did — or did not do.
+ *
+ * SES is denied outside production, so `emailStatus` comes back NOT_SENT with the reason
+ * in `emailError` and the signed `downloads` to hand over by other means. The UI must say
+ * exactly that; a notice row is written either way.
+ */
+export interface RemittanceEmailResult {
+  payment: ApPaymentRecord
+  notice: ShipmentNoticeRecord
+  emailStatus: 'SENT' | 'NOT_SENT' | 'COPY'
+  emailError: string | null
+  subject: string
+  body: string
+  to: string[]
+  cc: string[]
+  downloads: { name: string; url: string }[]
+}
+
+export async function sendRemittance(input: {
+  paymentId: string
+  to?: string[]
+  cc?: string[]
+  message?: string
+  via?: 'EMAIL' | 'COPY'
+}): Promise<RemittanceEmailResult> {
+  return financeAction<RemittanceEmailResult>('SEND_REMITTANCE', input)
+}
+
+export async function renderRemittancePdf(input: { paymentId: string }): Promise<{ payment: ApPaymentRecord }> {
+  return financeAction<{ payment: ApPaymentRecord }>('RENDER_REMITTANCE_PDF', input)
+}
+
+/** "I sent this myself" — the note is required, because it is the only record of how. */
+export async function markRemittanceSent(input: { paymentId: string; note: string }): Promise<{ payment: ApPaymentRecord }> {
+  return financeAction<{ payment: ApPaymentRecord }>('MARK_REMITTANCE_SENT', input)
+}
+
+export async function saveApSettings(input: Partial<ApSettings>): Promise<{ settings: TmsSettings }> {
+  return financeAction<{ settings: TmsSettings }>('SAVE_AP_SETTINGS', input)
+}
+
+/**
+ * Edit the carrier side of a shipment's charges — the AP twin of the customer-side save,
+ * and a shipment write rather than a finance one: it moves LoadCharge rows and the cached
+ * cost. Refused once the assignment's charges are finalized, which recording a bill does.
+ */
+export async function updateCarrierCharges(input: {
+  loadCarrierId: string
+  expectedVersion: number
+  charges: LoadChargeInput[]
+}): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('UPDATE_CARRIER_CHARGES', input)
+}
+
+// ── Quotes, carrier offers & lane history (Step H) ───────────────────────────
+//
+// Sell-side quotes and buy-side carrier offers are one model with two sides, and every
+// write is an action on `tmsShipmentActions` — the same Lambda that owns conversion and
+// booking, so a quote becoming a shipment and an offer booking a carrier stay inside one
+// transaction. The reads come straight off the Quote and LaneRateSample indexes.
+//
+// Both models arrive with step H's deploy; until it lands AppSync has no such query at
+// all, so the reads degrade to "no quotes" rather than failing the page — the bargain
+// the AR and AP models strike above.
+
+export type {
+  QuoteRecord, QuoteSide, QuoteStatus, QuoteEvent, QuoteLostReason, QuoteResponseKind,
+  QuoteSettings, QuotePublicView, LaneRateSampleRecord, LaneStats, LaneStatsFilters,
+} from '@/types/tms'
+
+const QUOTE_FIELDS = `
+  id side status groupId quoteDate quoteMonth
+  customerId customerName contactName contactEmail customerRepId
+  carrierId carrierName carrierMc carrierEmail
+  shipmentId shipmentNumber orderId loadId loadNumber divisionKey
+  mode rateType equipmentType equipmentLengthFt stops laneKey laneKey3
+  pickupAppt deliveryAppt commodity weightLbs miles references lines
+  amountCents customerRateCents targetBuyCents topSpendCents marginBps
+  bookNowRateCents counterCents counterBy rounds expiresAt
+  linkToken linkVersion requestCount
+  sentAt sentTo sendCount lastSendStatus
+  respondedAt response responderName responderEmail responderIp acceptedVia
+  lostReason lostNote wonAt closedAt duplicatedFromId pricingWarnings quoteOpen
+  customerMessage internalNotes events
+  createdBy updatedBy version createdAt updatedAt
+`
+// `pricingWarnings` is a String list, not a json column: it needs no unwrapping.
+const QUOTE_JSON_FIELDS: (keyof QuoteRecord)[] = ['stops', 'references', 'lines', 'events']
+
+// LaneRateSample has no `a.json()` columns at all — every field is a scalar — so there
+// is no JSON list beside this one.
+const LANE_SAMPLE_FIELDS = `
+  id laneKey laneKey3 date loadId shipmentId shipmentNumber orderId
+  customerId customerName carrierId carrierName assignmentKind divisionKey
+  mode rateType equipmentType miles
+  customerRateCents revenueCents carrierRateCents costCents profitCents marginBps
+  loadStatus excluded source sampledAt version createdAt updatedAt
+`
+
+// Quote and LaneRateSample both arrive with step H's deploy, and until then the error
+// names the *query*, not a field, so the field-level self-heal cannot see it. Degrade to
+// an empty board rather than throwing on every quote read.
+//
+// Both wordings are matched because AppSync and graphql-js disagree: AppSync answers a
+// query it has never heard of with `Validation error of type FieldUndefined: Field
+// 'getQuote' in type 'Query' is undefined`, graphql-js with `Cannot query field
+// "getQuote"`. Either way the name is quoted, and the quote may have been escaped by
+// the `JSON.stringify` inside `safeStringify` — hence the backslash in the class. The
+// delimiters are what keep "Not Authorized to access getQuote" out: a permission
+// refusal is a real error and must still reach the caller.
+let quoteModelsAvailable = modelAvailable('Quote')
+const isMissingQuoteModel = (err: unknown) =>
+  /[\\'"](get|list)(Quote|LaneRateSample)\w*[\\'"]|Unknown type [\\'"]+(Quote|LaneRateSample)/i
+    .test(safeStringify(err))
+
+/** False once a read proved the backend predates the quote models. */
+export const quoteModelsDeployed = () => quoteModelsAvailable
+
+function forgetQuoteModels(err: unknown): void {
+  if (!isMissingQuoteModel(err)) throw err
+  console.warn('[apiClient] backend has no quote models yet — reading no quotes until deploy')
+  quoteModelsAvailable = false
+}
+
+// ── Quote reads ──────────────────────────────────────────────────────────────
+
+/** One quote by its number — the id *is* the number, so the detail page is a GetItem. */
+export async function getQuote(id: string): Promise<QuoteRecord | null> {
+  if (!quoteModelsAvailable) return null
+  try {
+    const r = await client.graphql({
+      query: `query GetQuote($id: ID!) { getQuote(id: $id) { ${QUOTE_FIELDS} } }`,
+      variables: { id },
+    }) as { data: { getQuote: QuoteRecord | null } }
+    return r.data.getQuote ? parseArJson(r.data.getQuote, QUOTE_JSON_FIELDS) : null
+  } catch (err) {
+    forgetQuoteModels(err)
+    return null
+  }
+}
+
+/** One customer's quotes, newest first — the customer profile's Quotes tab. */
+export async function listQuotesByCustomer(customerId: string): Promise<QuoteRecord[]> {
+  if (!quoteModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<QuoteRecord>({
+      name: 'listQuoteByCustomerIdAndQuoteDate',
+      decls: '$customerId: String!',
+      args: 'customerId: $customerId',
+      variables: { customerId },
+      fields: QUOTE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+/**
+ * Every offer ever made on one leg, newest first — open and closed both, because the
+ * card shows the round that booked beside the ones that did not.
+ */
+export async function listOffersByLoad(loadId: string): Promise<QuoteRecord[]> {
+  if (!quoteModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<QuoteRecord>({
+      name: 'listQuoteByLoadIdAndQuoteDate',
+      decls: '$loadId: String!',
+      args: 'loadId: $loadId',
+      variables: { loadId },
+      fields: QUOTE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+/**
+ * The whole open board — both sides — soonest to expire first.
+ *
+ * `quoteOpen` is the sparse marker 'OPEN', carried from DRAFT through RECEIVED_COUNTER
+ * and REMOVEd the moment a quote closes, so this reads exactly what is still live
+ * however many quotes have ever been priced. The sweep and the badge are this one query.
+ */
+export async function listOpenQuotes(): Promise<QuoteRecord[]> {
+  if (!quoteModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<QuoteRecord>({
+      name: 'listQuoteByQuoteOpenAndExpiresAt',
+      decls: '$quoteOpen: String!',
+      args: 'quoteOpen: $quoteOpen',
+      variables: { quoteOpen: 'OPEN' },
+      fields: QUOTE_FIELDS,
+      limit: 500,
+      sortDirection: 'ASC',
+    })
+    return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+/**
+ * Every quote ever priced, both sides. The shipments board needs it to know which
+ * shipments were sold off a quote (the Sales department view), and the Brokerage
+ * dashboard counts quotes by customer; neither can ride an index, because both ask
+ * about the whole book rather than one customer, lane or month.
+ */
+export async function listQuotes(): Promise<QuoteRecord[]> {
+  if (!quoteModelsAvailable) return []
+  return cachedDirectory('quotes', async () => {
+    try {
+      const rows = await listAll<QuoteRecord>('listQuotes', QUOTE_FIELDS, 2000)
+      return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
+    } catch (err) {
+      forgetQuoteModels(err)
+      return []
+    }
+  })
+}
+
+/** Everything quoted in one 'YYYY-MM', newest first — the Won / Lost tab's window. */
+export async function listQuotesByMonth(month: string): Promise<QuoteRecord[]> {
+  if (!quoteModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<QuoteRecord>({
+      name: 'listQuoteByQuoteMonthAndQuoteDate',
+      decls: '$quoteMonth: String!',
+      args: 'quoteMonth: $quoteMonth',
+      variables: { quoteMonth: month },
+      fields: QUOTE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((q) => parseArJson(q, QUOTE_JSON_FIELDS))
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+/**
+ * One lane's delivered history, newest first. `fromDate` is a 'YYYY-MM-DD' floor on the
+ * sort key, so a 90-day window is 90 days of rows off the wire rather than the lane's
+ * whole life filtered in the browser.
+ */
+export async function listLaneSamples(laneKey: string, fromDate?: string): Promise<LaneRateSampleRecord[]> {
+  if (!modelAvailable('LaneRateSample')) return []
+  if (!quoteModelsAvailable || !laneKey) return []
+  try {
+    return await listTrackingIndex<LaneRateSampleRecord>({
+      name: 'listLaneRateSampleByLaneKeyAndDate',
+      decls: fromDate ? '$laneKey: String!, $from: String!' : '$laneKey: String!',
+      args: fromDate ? 'laneKey: $laneKey, date: { ge: $from }' : 'laneKey: $laneKey',
+      variables: fromDate ? { laneKey, from: fromDate } : { laneKey },
+      fields: LANE_SAMPLE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+/** The ZIP3 neighbourhood's history — what the panel falls back to on a cold lane. */
+export async function listLaneSamplesByZip3(laneKey3: string, fromDate?: string): Promise<LaneRateSampleRecord[]> {
+  if (!modelAvailable('LaneRateSample')) return []
+  if (!quoteModelsAvailable || !laneKey3) return []
+  try {
+    return await listTrackingIndex<LaneRateSampleRecord>({
+      name: 'listLaneRateSampleByLaneKey3AndDate',
+      decls: fromDate ? '$laneKey3: String!, $from: String!' : '$laneKey3: String!',
+      args: fromDate ? 'laneKey3: $laneKey3, date: { ge: $from }' : 'laneKey3: $laneKey3',
+      variables: fromDate ? { laneKey3, from: fromDate } : { laneKey3 },
+      fields: LANE_SAMPLE_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+  } catch (err) {
+    forgetQuoteModels(err)
+    return []
+  }
+}
+
+// ── Quote writes (tmsShipmentActions) ────────────────────────────────────────
+//
+// Every one answers with the quote row it wrote, so a caller swaps the record it is
+// showing rather than re-reading it. `expectedVersion` is the CAS token: the row as the
+// caller last saw it, refused server-side when somebody else has moved it since.
+
+/** What a send-shaped action did — or did not do. */
+export interface QuoteSendResult {
+  quote: QuoteRecord
+  /** The public link, present even when SES refused: on dev it is the only delivery. */
+  link: string | null
+  sent: boolean
+  subject: string
+  body: string
+}
+
+export interface SaveQuoteInput {
+  /** Step AB: links the quote to its spot request; the server refuses a change once set. */
+  spotRequestId?: string | null
+  /** Absent on create: the number is minted server-side from the settings counter. */
+  quoteId?: string
+  expectedVersion?: number
+  side?: QuoteSide
+  /** An inbound request nobody has priced yet starts REQUESTED rather than DRAFT. */
+  intake?: boolean
+  customerId?: string | null
+  customerName?: string | null
+  contactName?: string | null
+  contactEmail?: string | null
+  customerRepId?: string | null
+  divisionKey?: string | null
+  stops?: Stop[]
+  pickupAppt?: string | null
+  deliveryAppt?: string | null
+  mode?: ShipmentMode | null
+  rateType?: RateType | null
+  equipmentType?: string | null
+  equipmentLengthFt?: number | null
+  commodity?: string | null
+  weightLbs?: number | null
+  miles?: number | null
+  references?: OrderReference[]
+  lines?: LoadChargeInput[]
+  targetBuyCents?: number | null
+  topSpendCents?: number | null
+  customerMessage?: string | null
+  internalNotes?: string | null
+  /** The WorkflowRun a person applied to raise this quote; the server stores it once. */
+  workflowRunId?: string
+}
+
+/** The saved row and what pricing made of it — the totals plus every warning raised. */
+export async function saveQuote(input: SaveQuoteInput): Promise<{ quote: QuoteRecord; pricing: QuotePricingResult }> {
+  return shipmentAction<{ quote: QuoteRecord; pricing: QuotePricingResult }>('SAVE_QUOTE', input)
+}
+
+export interface SendQuoteInput {
+  quoteId: string
+  expectedVersion?: number
+  /** Omitted: the server addresses the quote's own contact. */
+  to?: string[]
+  cc?: string[]
+  message?: string
+  /** COPY mints the link and writes the thread without asking SES to send anything. */
+  via?: 'EMAIL' | 'COPY'
+  /** The `key` of every pricing warning the sender ticked off. Blocks cannot be ticked. */
+  acknowledgeWarnings?: string[]
+}
+export async function sendQuote(input: SendQuoteInput): Promise<QuoteSendResult> {
+  return shipmentAction<QuoteSendResult>('SEND_QUOTE', input)
+}
+
+export interface CounterQuoteInput {
+  quoteId: string
+  expectedVersion?: number
+  /** Either the re-priced lines, or one number for `absorbCounter` to spread over them. */
+  lines?: LoadChargeInput[]
+  amountCents?: number
+  message?: string
+  to?: string[]
+  cc?: string[]
+  via?: 'EMAIL' | 'COPY'
+  acknowledgeWarnings?: string[]
+}
+export async function counterQuote(input: CounterQuoteInput): Promise<QuoteSendResult> {
+  return shipmentAction<QuoteSendResult>('COUNTER_QUOTE', input)
+}
+
+/** Take their number as ours: the lines absorb the counter and the quote becomes ours to convert. */
+export async function acceptCounter(input: { quoteId: string; expectedVersion?: number }): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('ACCEPT_COUNTER', input)
+}
+
+export async function markQuoteLost(input: {
+  quoteId: string
+  expectedVersion?: number
+  reason: QuoteLostReason
+  note?: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('MARK_QUOTE_LOST', input)
+}
+
+/** The rep's own word that the customer took a quote (no shipment yet; converting a quote is WON by itself). */
+export async function markQuoteWon(input: {
+  quoteId: string
+  expectedVersion?: number
+  note?: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('MARK_QUOTE_WON', input)
+}
+
+/** Back onto the board at QUOTED — without a link, which a lost round has already spent. */
+export async function restoreQuote(input: { quoteId: string; expectedVersion?: number }): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('RESTORE_QUOTE', input)
+}
+
+export async function cancelQuote(input: {
+  quoteId: string
+  expectedVersion?: number
+  reason?: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('CANCEL_QUOTE', input)
+}
+
+/** The buy side's "no truck": the carrier is out of this round, the load is not. */
+export async function passQuote(input: {
+  quoteId: string
+  expectedVersion?: number
+  note?: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('PASS_QUOTE', input)
+}
+
+/**
+ * Close every open quote past its expiry. Idempotent and conditioned server-side, so the
+ * board may fire it on every mount without racing another desk doing the same.
+ */
+export async function sweepExpiredQuotes(): Promise<{ expired: number }> {
+  return shipmentAction<{ expired: number }>('SWEEP_EXPIRED_QUOTES', {})
+}
+
+/**
+ * Copy one quote into `count` drafts — the multi-truck ask, priced once.
+ *
+ * `exposure` is what those drafts would add to the customer's open book against their
+ * credit limit: a warning on the dialog, and a block at conversion, never here.
+ */
+export interface DuplicateQuotesResult {
+  quotes: QuoteRecord[]
+  exposure: { projectedCents: number; creditLimitCents: number | null; overLimit: boolean }
+}
+export async function duplicateQuotes(input: {
+  quoteId: string
+  count: number
+  /** One pickup appointment per copy, when the trucks are not all the same day. */
+  pickupAppts?: (string | null)[]
+}): Promise<DuplicateQuotesResult> {
+  return shipmentAction<DuplicateQuotesResult>('DUPLICATE_QUOTE', input)
+}
+
+/** The won quote and the shipment it just became, in one transaction. */
+export async function convertQuote(input: {
+  quoteId: string
+  expectedVersion?: number
+  acceptedVia?: QuoteAcceptedVia
+  divisionKey?: string | null
+  customerRepId?: string | null
+}): Promise<{ quote: QuoteRecord; bundle: ShipmentBundle }> {
+  return shipmentAction<{ quote: QuoteRecord; bundle: ShipmentBundle }>('CONVERT_QUOTE', input)
+}
+
+/** The only way back out of WON: the shipment is undone and its quote is open again. */
+export async function revertToQuote(input: {
+  /** The shipment being undone, or the quote it came from — either names the pair. */
+  shipmentId?: string
+  quoteId?: string
+  reason: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('REVERT_TO_QUOTE', input)
+}
+
+// ── Carrier offers (buy side) ────────────────────────────────────────────────
+
+/** One REQUESTED offer per carrier, and what each send did. */
+export interface RequestOffersResult {
+  offers: QuoteRecord[]
+  sends: { quoteId: string; link: string | null; sent: boolean; subject: string; body: string; to: string[] }[]
+}
+export async function requestOffers(input: {
+  shipmentId?: string
+  loadId: string
+  carrierIds: string[]
+  message?: string
+  /** The number a carrier may accept outright on the link, when settings allow it. */
+  bookNowRateCents?: number | null
+  via?: 'EMAIL' | 'COPY'
+  /** Overrides `offerExpiryHours`; still capped at the first pickup appointment. */
+  expiryHours?: number
+}): Promise<RequestOffersResult> {
+  return shipmentAction<RequestOffersResult>('REQUEST_OFFERS', input)
+}
+
+/** A number that came in by phone: the offer row a carrier never clicked a link to make. */
+export async function logOffer(input: {
+  shipmentId?: string
+  loadId: string
+  carrierId: string
+  amountCents: number
+  note?: string
+  contactName?: string | null
+  carrierEmail?: string | null
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('LOG_OFFER', input)
+}
+
+export async function counterOffer(input: {
+  quoteId: string
+  expectedVersion?: number
+  amountCents: number
+  message?: string
+  via?: 'EMAIL' | 'COPY'
+}): Promise<QuoteSendResult> {
+  return shipmentAction<QuoteSendResult>('COUNTER_OFFER', input)
+}
+
+export async function rejectOffer(input: {
+  quoteId: string
+  expectedVersion?: number
+  reason?: QuoteLostReason
+  note?: string
+}): Promise<{ quote: QuoteRecord }> {
+  return shipmentAction<{ quote: QuoteRecord }>('REJECT_OFFER', input)
+}
+
+/**
+ * Book the carrier at their number. Everything `BOOK_CARRIER` demands is demanded here
+ * too — the same gate, the same refusals verbatim — and the offer's group closes in the
+ * booking transaction, so answering an offer can never leave a load double-covered.
+ */
+export type AcceptOfferInput = Omit<BookCarrierInput, 'carrierId' | 'carrierRateCents'> & {
+  quoteId: string
+  expectedVersion?: number
+  /** Omitted: the carrier is booked at the offer's own `amountCents`. */
+  carrierRateCents?: number
+}
+export async function acceptOffer(input: AcceptOfferInput): Promise<{ quote: QuoteRecord; bundle: ShipmentBundle }> {
+  return shipmentAction<{ quote: QuoteRecord; bundle: ShipmentBundle }>('ACCEPT_OFFER', input)
+}
+
+/** ADMIN only. Templates must carry `{link}` and the number format `{n}`; the server checks. */
+export async function saveQuoteSettings(input: Partial<QuoteSettings> & { expectedUpdatedAt?: string }): Promise<{ settings: TmsSettings }> {
+  return shipmentAction<{ settings: TmsSettings }>('SAVE_QUOTE_SETTINGS', input)
+}
+
+// ── Step P — the end-to-end demo flow ────────────────────────────────────────
+//
+// Every write below is an action on a Lambda that already owns the records it
+// touches: postings, the build gate, carrier offers, the demo seed and the market
+// rate go to `tmsShipmentActions`, which owns Shipment/Order/Load/Quote; the
+// shipment thread, the check-call agent and the POD review go to
+// `tmsTrackingActions`, which is the only Lambda wired to Twilio and SES for a
+// shipment. Nothing here writes a record from the browser.
+
+export type {
+  ShipmentPostingRecord, ShipmentMessageRecord, DemoRecordRow, ShipmentBuildState,
+  PostingStatus, ShipmentMessageChannel, ShipmentMessageKind, ShipmentMessageParty,
+  ShipmentMessageStatus, CheckCallPlan, CheckCallChannel, CheckCallMilestone, RateViewAnswer,
+} from '@/types/tms'
+import type {
+  ShipmentPostingRecord, ShipmentMessageRecord, DemoRecordRow, CheckCallPlan, RateViewAnswer, TrackingAutomationSettings,
+} from '@/types/tms'
+import type { DemoChecklistFacts } from '@/lib/demoFlow'
+export type { DemoChecklistFacts, DemoStepDef, DemoStepKey, DemoChecklistRow } from '@/lib/demoFlow'
+
+const POSTING_FIELDS = `
+  id shipmentId loadId provider status mode boardPostingId message
+  postedAt postedBy unpostedAt unpostedBy
+  originCity originState destinationCity destinationState pickupAppt
+  equipmentType lengthFt weightLbs rateCents contactEmail contactPhone note offerCount
+  createdBy updatedBy version createdAt updatedAt
+`
+
+const SHIPMENT_MESSAGE_FIELDS = `
+  id shipmentId threadKey loadId loadCarrierId direction channel kind party
+  to from cc subject body status error messageId inReplyTo providerRef
+  attachments documentIds trackingLinkId workflowRunId authorKind authorName at createdBy createdAt updatedAt
+`
+
+/** Every board this shipment is, or was, posted to — newest first. */
+export async function listShipmentPostings(shipmentId: string): Promise<ShipmentPostingRecord[]> {
+  const rows = await listAllByIndex<ShipmentPostingRecord>(
+    'listShipmentPostingByShipmentId', { shipmentId }, POSTING_FIELDS, 200,
+  )
+  return rows.sort((a, b) => String(b.postedAt ?? '').localeCompare(String(a.postedAt ?? '')))
+}
+
+/** Every live posting on the stack, for the Dispatch workstation's coverage column. */
+export async function listActivePostings(): Promise<ShipmentPostingRecord[]> {
+  return listAllByIndex<ShipmentPostingRecord>(
+    'listShipmentPostingByStatusAndPostedAt', { status: 'POSTED' }, POSTING_FIELDS, 200,
+  )
+}
+
+export interface PostLoadInput {
+  shipmentId: string
+  loadId?: string | null
+  providers: string[]
+  rateCents?: number | null
+  note?: string | null
+  contactEmail?: string | null
+  contactPhone?: string | null
+}
+
+/** Post to one or more boards. Refused while the shipment is still Building. */
+export async function postLoad(input: PostLoadInput): Promise<{ postings: ShipmentPostingRecord[] }> {
+  return shipmentAction<{ postings: ShipmentPostingRecord[] }>('POST_LOAD', input)
+}
+
+export async function unpostLoad(input: { shipmentId: string; providers: string[] }): Promise<{ postings: ShipmentPostingRecord[] }> {
+  return shipmentAction<{ postings: ShipmentPostingRecord[] }>('UNPOST_LOAD', input)
+}
+
+export interface PostQuoteLoadInput {
+  /** Post a customer quote's lane; or, with no quote yet, a spot request's (then the lane fields are required). */
+  quoteId?: string | null
+  spotRequestId?: string | null
+  providers?: string[]
+  rateCents?: number | null
+  note?: string | null
+  originCity?: string | null
+  originState?: string | null
+  destinationCity?: string | null
+  destinationState?: string | null
+  equipmentType?: string | null
+  pickupDate?: string | null
+  weightLbs?: number | null
+}
+
+/** Step AE: Push to DAT from a quote / spot request — the same board posting as a shipment's, with no shipment. */
+export async function postQuoteLoad(input: PostQuoteLoadInput): Promise<{ postings: ShipmentPostingRecord[] }> {
+  return shipmentAction<{ postings: ShipmentPostingRecord[] }>('POST_QUOTE_LOAD', input)
+}
+
+export async function unpostQuoteLoad(input: { quoteId?: string | null; spotRequestId?: string | null; providers?: string[] }): Promise<{ postings: ShipmentPostingRecord[] }> {
+  return shipmentAction<{ postings: ShipmentPostingRecord[] }>('UNPOST_QUOTE_LOAD', input)
+}
+
+export interface BuildGateResult {
+  shipment: ShipmentRecord
+  missingFields: string[]
+  requiredFields: string[]
+}
+
+/** Recompute the Needs: list and flip BUILDING → BUILT when nothing is missing. */
+export async function completeBuild(input: { shipmentId: string; expectedUpdatedAt?: string }): Promise<BuildGateResult> {
+  return shipmentAction<BuildGateResult>('COMPLETE_BUILD', input)
+}
+
+/** What this shipment still needs, without writing anything. */
+export async function checkBuildGate(shipmentId: string): Promise<BuildGateResult> {
+  return shipmentAction<BuildGateResult>('CHECK_BUILD_GATE', { shipmentId })
+}
+
+export interface MarketRateResult {
+  answer: RateViewAnswer
+  targetBps: number
+  floorBps: number
+  suggestedSellCents: number
+  belowFloor: boolean
+  floorSellCents: number
+  marginAtSuggested: number
+}
+
+/** Ask DAT (or the labelled stub) for this lane, and price it at the customer's margin. */
+export async function priceFromMarket(input: {
+  quoteId?: string | null
+  shipmentId?: string | null
+  customerId?: string | null
+  originCity: string
+  originState: string
+  destinationCity: string
+  destinationState: string
+  equipmentType: string
+  pickupDate?: string | null
+  miles?: number | null
+  mode?: string | null
+  save?: boolean
+  expectedUpdatedAt?: string
+}): Promise<MarketRateResult & { quote?: QuoteRecord }> {
+  return shipmentAction<MarketRateResult & { quote?: QuoteRecord }>('PRICE_FROM_MARKET', input)
+}
+
+/**
+ * Step AE. The Rate-intelligence panel's two history sections for one lane: what we ran it for
+ * (LaneRateSample, incl. the imported Aljex history) and what we quoted it for (Quote outcomes), last
+ * 24 months, computed server-side from indexed reads.
+ */
+export async function getLaneIntelligence(input: {
+  originCity?: string | null
+  originState?: string | null
+  originZip?: string | null
+  destinationCity?: string | null
+  destinationState?: string | null
+  destinationZip?: string | null
+  equipmentType?: string | null
+  /** The quote the panel sits on: it is not its own history. */
+  excludeQuoteId?: string | null
+}): Promise<LaneIntelligence> {
+  return shipmentAction<LaneIntelligence>('LANE_INTELLIGENCE', input)
+}
+
+/** Log a carrier's answer to a posting as a BUY-side offer on the shipment. */
+export async function recordCarrierOffer(input: {
+  shipmentId: string
+  carrierName: string
+  carrierMc?: string | null
+  carrierEmail?: string | null
+  contactName?: string | null
+  contactPhone?: string | null
+  amountCents: number
+  equipmentType?: string | null
+  availableAt?: string | null
+  source: 'EMAIL' | 'PHONE' | 'BOARD' | 'MANUAL'
+  postingId?: string | null
+  messageRef?: string | null
+  notes?: string | null
+}): Promise<{ quote: QuoteRecord; carrierId: string | null; vetting: CarrierOfferVetting }> {
+  return shipmentAction<{ quote: QuoteRecord; carrierId: string | null; vetting: CarrierOfferVetting }>(
+    'RECORD_CARRIER_OFFER', input,
+  )
+}
+
+export interface CarrierOfferVetting {
+  known: boolean
+  bookable: boolean
+  /** Why the carrier cannot be booked right now, in the gate's own words. */
+  blockers: string[]
+  warnings: string[]
+  status: string | null
+  mcpStatus: string | null
+}
+
+/** Step AL3: the carrier's directory risk, resolved server-side (nulls/false when the carrier is not in the directory). */
+export interface CarrierOfferRisk { mcpRiskScore: number | null; mcpStatus: string | null; packetComplete: boolean }
+export type CarrierOfferRow = QuoteRecord & { vetting: CarrierOfferVetting; carrierRisk?: CarrierOfferRisk }
+
+/** The offers on a shipment, with each carrier's standing resolved. */
+export async function listCarrierOffers(shipmentId: string): Promise<{ offers: CarrierOfferRow[] }> {
+  return shipmentAction<{ offers: CarrierOfferRow[] }>(
+    'LIST_CARRIER_OFFERS', { shipmentId },
+  )
+}
+
+/** MyCarrierPackets setup packet for an unknown or unvetted carrier (Step J adapter). */
+export async function sendSetupPacket(input: {
+  shipmentId: string
+  quoteId: string
+  email: string
+}): Promise<{ sent: boolean; mode: 'STUB' | 'LIVE'; message: string }> {
+  return shipmentAction<{ sent: boolean; mode: 'STUB' | 'LIVE'; message: string }>('SEND_SETUP_PACKET', input)
+}
+
+/** MyCarrierPackets setup packet sent directly from a carrier profile (Step N2). */
+export async function sendCarrierSetupPacket(input: {
+  carrierId: string
+  email: string
+}): Promise<{ sent: boolean; mode: 'STUB' | 'LIVE'; message: string }> {
+  return shipmentAction<{ sent: boolean; mode: 'STUB' | 'LIVE'; message: string }>('SEND_CARRIER_SETUP_PACKET', input)
+}
+
+// ── The shipment thread, the tracking agent and the POD (tmsTrackingActions) ──
+
+export async function listShipmentMessages(shipmentId: string): Promise<ShipmentMessageRecord[]> {
+  const rows = await listAllByIndex<ShipmentMessageRecord>(
+    'listShipmentMessageByShipmentIdAndAt', { shipmentId }, SHIPMENT_MESSAGE_FIELDS, 200,
+  )
+  return rows
+    .map((row) => ({ ...row, attachments: messageAttachments(row.attachments) }))
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)))
+}
+
+export async function sendShipmentMessage(input: {
+  shipmentId: string
+  channel: 'EMAIL' | 'SMS'
+  documentIds?: string[]
+  party?: 'DRIVER' | 'DISPATCHER'
+  kind?: string
+  to?: string | null
+  subject?: string | null
+  body: string
+  inReplyTo?: string | null
+  authorName?: string | null
+}): Promise<{ message: ShipmentMessageRecord }> {
+  return trackingAction<{ message: ShipmentMessageRecord }>('SEND_SHIPMENT_MESSAGE', input)
+}
+
+/** Run the check-call plan for one shipment now, and say what it did. */
+export async function runCheckCallPlan(input: { shipmentId: string }): Promise<{
+  action: string
+  reason: string
+  messages: ShipmentMessageRecord[]
+  nextDueAt: string | null
+}> {
+  return trackingAction<{ action: string; reason: string; messages: ShipmentMessageRecord[]; nextDueAt: string | null }>(
+    'RUN_CHECK_CALL_PLAN', input,
+  )
+}
+
+/** Save the cadence and channels for one load, overriding the customer's plan. Pass null to clear the override and fall back to inheritance. */
+export async function saveLoadCheckCallPlan(input: {
+  loadId: string
+  plan: CheckCallPlan | null
+  expectedUpdatedAt?: string
+}): Promise<{ plan: CheckCallPlan | null }> {
+  return trackingAction<{ plan: CheckCallPlan | null }>('SAVE_CHECK_CALL_PLAN', input)
+}
+
+export async function requestPod(input: { shipmentId: string }): Promise<{ messages: ShipmentMessageRecord[] }> {
+  return trackingAction<{ messages: ShipmentMessageRecord[] }>('REQUEST_POD', input)
+}
+
+export interface AutomationRunResult {
+  mode: 'AUTO' | 'MANUAL'
+  checked: number; acted: number; deferred: number; escalated: number; skipped: number; errors: number
+  pod: { checked: number; requested: number; skipped: number; deferred: number }
+  reasons: string[]
+}
+/** One sweep of the tracking automation: `AUTO` honours the policy switches, `MANUAL` (admin) ignores them. */
+export async function runTrackingAutomation(input?: { mode?: 'AUTO' | 'MANUAL'; shipmentIds?: string[] }): Promise<AutomationRunResult> {
+  return trackingAction<AutomationRunResult>('RUN_TRACKING_AUTOMATION', input ?? {})
+}
+
+/**
+ * Save the automation policy and/or the org check-call plan in one write (owner/ADMIN; CAS on
+ * `TmsSettings.updatedAt`). Omitted = keep, null = clear.
+ */
+export async function saveTrackingAutomation(input: {
+  expectedUpdatedAt: string
+  trackingAutomation?: TrackingAutomationSettings | null
+  defaultCheckCallPlan?: CheckCallPlan | null
+}): Promise<TmsSettings> {
+  return trackingAction<TmsSettings>('SAVE_TRACKING_AUTOMATION', input)
+}
+
+export interface PodReviewOutcome {
+  verdict: 'PASS' | 'FAIL'
+  reasons: string[]
+  attempt: number
+  /** True when the app has now asked twice and handed it to a person. */
+  flaggedForHuman: boolean
+}
+
+/** Review a POD already on the shipment: legibility, page count, signature and date. */
+export async function reviewShipmentPod(input: {
+  shipmentId: string
+  documentId: string
+}): Promise<PodReviewOutcome> {
+  return trackingAction<PodReviewOutcome>('REVIEW_SHIPMENT_POD', input)
+}
+
+// ── The demo seed and the Demo page (tmsShipmentActions) ─────────────────────
+
+export interface DemoState {
+  seedVersion: string | null
+  seededAt: string | null
+  devStack: boolean
+  records: DemoRecordRow[]
+  facts: DemoChecklistFacts
+}
+
+export async function getDemoState(): Promise<DemoState> {
+  return shipmentAction<DemoState>('GET_DEMO_STATE', {})
+}
+
+/** owner/ADMIN, dev stack only. Puts every seeded record back the way it started. */
+export async function resetDemoData(): Promise<{ counts: Record<string, number>; seedVersion: string }> {
+  return shipmentAction<{ counts: Record<string, number>; seedVersion: string }>('RESET_DEMO_DATA', {})
+}
+
+/** owner/ADMIN, dev stack only. Mints the P1 seed through the normal actions. */
+export async function seedDemoData(input: { reset?: boolean } = {}): Promise<{ counts: Record<string, number>; seedVersion: string }> {
+  return shipmentAction<{ counts: Record<string, number>; seedVersion: string }>('SEED_DEMO_DATA', input)
+}
+
+// ── Commissions (tmsFinanceActions, Step I) ──────────────────────────────────
+//
+// Same bargain as AR and AP: every write is an action on the one finance Lambda, which
+// owns the transaction across Commission, CommissionPayPeriod and the invoice it was
+// triggered by; the reads come straight off the Commission indexes. Nothing is computed,
+// written or shown until `commissionsEnabled` is on.
+
+export type {
+  CommissionRecord, CommissionPayPeriodRecord, CommissionPayPeriodRepRow, CommissionSettings,
+  CommissionStatus, CommissionKind, CommissionTrigger, CommissionPlan, CommissionPlanRole,
+  CommissionRoleName, CommissionPaySchedule, ShipmentSettings,
+} from '@/types/tms'
+
+const COMMISSION_FIELDS = `
+  id kind adjustsId orderId shipmentId shipmentNumber invoiceId invoiceNumber
+  customerId customerName carrierId carrierName divisionKey teamKey
+  repId repName managerId roleName planId planName
+  rateType rateBps rateCents tierLabel splitBps basis basisCents
+  revenueCents costCents profitCents marginBps
+  amountCents overrideCents overrideBy overrideNote netCents
+  basisNote needsReview costFinal status
+  counterCents counterBy counterNote approvedAt approvedBy cancelledAt cancelReason
+  trigger triggerAt commissionMonth payPeriodId paidAt paymentRef
+  source computedAt events
+  createdBy updatedBy version createdAt updatedAt
+`
+const COMMISSION_JSON_FIELDS: (keyof CommissionRecord)[] = ['events']
+
+const PAY_PERIOD_FIELDS = `
+  id periodStart periodEnd payDate status commissionCount totalCents byRep
+  submittedAt submittedBy approvedAt approvedBy paidAt paidBy paymentRef note
+  createdBy updatedBy version createdAt updatedAt
+`
+const PAY_PERIOD_JSON_FIELDS: (keyof CommissionPayPeriodRecord)[] = ['byRep']
+
+// Commission and CommissionPayPeriod both arrive with step I's deploy, and until then
+// the error names the *query*, not a field — the same blind spot the quote models have,
+// answered the same way: one flag for both models, an empty board instead of a throw.
+// The delimiters keep "Not Authorized to access listCommissions" out: a permission
+// refusal is a real error and must still reach the caller.
+let commissionModelsAvailable = modelsAvailable(['Commission', 'CommissionPayPeriod'])
+const isMissingCommissionModel = (err: unknown) =>
+  /[\\'"](get|list)Commission\w*[\\'"]|Unknown type [\\'"]+Commission/i.test(safeStringify(err))
+
+/** False once a read proved the backend predates the commission models. */
+export const commissionModelsDeployed = () => commissionModelsAvailable
+
+function forgetCommissionModels(err: unknown): void {
+  if (!isMissingCommissionModel(err)) throw err
+  console.warn('[apiClient] backend has no commission models yet — reading no commissions until deploy')
+  commissionModelsAvailable = false
+}
+
+// ── Commission reads ─────────────────────────────────────────────────────────
+//
+// The index query names below are Amplify's own derivations, which pluralise
+// irregularly: each one is verified against the deployed schema before use (the lead
+// confirms them post-deploy, the `66785d3` lesson).
+
+/** One rep's rows, newest first — the Mine tab. `month` is a 'YYYY-MM' window. */
+export async function listCommissionsByRep(repId: string, month?: string): Promise<CommissionRecord[]> {
+  if (!commissionModelsAvailable || !repId) return []
+  try {
+    const rows = await listTrackingIndex<CommissionRecord>({
+      name: 'listCommissionByRepIdAndCommissionMonth',
+      decls: month ? '$repId: String!, $month: String!' : '$repId: String!',
+      args: month ? 'repId: $repId, commissionMonth: { eq: $month }' : 'repId: $repId',
+      variables: month ? { repId, month } : { repId },
+      fields: COMMISSION_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((c) => unwrapJsonFields(c, COMMISSION_JSON_FIELDS))
+  } catch (err) {
+    forgetCommissionModels(err)
+    return []
+  }
+}
+
+/** Everything one invoice earned — the Commission card on the invoice detail. */
+export async function listCommissionsByInvoice(invoiceId: string): Promise<CommissionRecord[]> {
+  if (!commissionModelsAvailable || !invoiceId) return []
+  try {
+    const rows = await listTrackingIndex<CommissionRecord>({
+      name: 'listCommissionByInvoiceId',
+      decls: '$invoiceId: String!',
+      args: 'invoiceId: $invoiceId',
+      variables: { invoiceId },
+      fields: COMMISSION_FIELDS,
+      limit: 500,
+    })
+    return rows.map((c) => unwrapJsonFields(c, COMMISSION_JSON_FIELDS))
+  } catch (err) {
+    forgetCommissionModels(err)
+    return []
+  }
+}
+
+/** One 'YYYY-MM' across every rep, newest trigger first — the To approve and History tabs. */
+export async function listCommissionsByMonth(month: string): Promise<CommissionRecord[]> {
+  if (!commissionModelsAvailable || !month) return []
+  try {
+    const rows = await listTrackingIndex<CommissionRecord>({
+      name: 'listCommissionByCommissionMonthAndTriggerAt',
+      decls: '$month: String!',
+      args: 'commissionMonth: $month',
+      variables: { month },
+      fields: COMMISSION_FIELDS,
+      limit: 500,
+      sortDirection: 'DESC',
+    })
+    return rows.map((c) => unwrapJsonFields(c, COMMISSION_JSON_FIELDS))
+  } catch (err) {
+    forgetCommissionModels(err)
+    return []
+  }
+}
+
+/** Every row a pay period gathered — what the statement and the per-rep totals read. */
+export async function listCommissionsByPayPeriod(payPeriodId: string): Promise<CommissionRecord[]> {
+  if (!commissionModelsAvailable || !payPeriodId) return []
+  try {
+    const rows = await listTrackingIndex<CommissionRecord>({
+      name: 'listCommissionByPayPeriodId',
+      decls: '$payPeriodId: String!',
+      args: 'payPeriodId: $payPeriodId',
+      variables: { payPeriodId },
+      fields: COMMISSION_FIELDS,
+      limit: 1000,
+    })
+    return rows.map((c) => unwrapJsonFields(c, COMMISSION_JSON_FIELDS))
+  } catch (err) {
+    forgetCommissionModels(err)
+    return []
+  }
+}
+
+export async function listPayPeriods(): Promise<CommissionPayPeriodRecord[]> {
+  if (!commissionModelsAvailable) return []
+  try {
+    const rows = await listAll<CommissionPayPeriodRecord>('listCommissionPayPeriods', PAY_PERIOD_FIELDS, 500)
+    return rows.map((p) => unwrapJsonFields(p, PAY_PERIOD_JSON_FIELDS))
+  } catch (err) {
+    forgetCommissionModels(err)
+    return []
+  }
+}
+
+// Step I's six reporting columns, and step R's division/tracking/POD facts. Both
+// ride only on the month read — the lane panel does not need them — and step R's
+// group has its own flag so a dashboard opened before the deploy still charts the
+// money, just not the new series.
+const LANE_SAMPLE_REPORT_FIELDS = 'sampleMonth customerRepId carrierRepId teamKey invoiceId invoiceMonth'
+const LANE_SAMPLE_REV_FIELDS = [
+  'revDivision', 'revSubdivision', 'salesRepId', 'deliveredAt', 'podReceivedAt',
+  'trackingProvider', 'firstPingAt', 'datPostedAt', 'checkCallsDue', 'checkCallsMet',
+]
+let laneSamplesHaveRevTag = true
+
+/**
+ * Every delivered sample stamped with one 'YYYY-MM' — a report period is read month by
+ * month off the `sampleMonth` index rather than the whole lane history filtered here.
+ */
+export async function listLaneSamplesByMonth(ym: string): Promise<LaneRateSampleRecord[]> {
+  if (!modelAvailable('LaneRateSample')) return []
+  if (!quoteModelsAvailable || !ym) return []
+  for (;;) {
+    try {
+      return await listTrackingIndex<LaneRateSampleRecord>({
+        name: 'listLaneRateSampleBySampleMonthAndDate',
+        decls: '$sampleMonth: String!',
+        args: 'sampleMonth: $sampleMonth',
+        variables: { sampleMonth: ym },
+        fields: [
+          LANE_SAMPLE_FIELDS,
+          LANE_SAMPLE_REPORT_FIELDS,
+          laneSamplesHaveRevTag ? LANE_SAMPLE_REV_FIELDS.join(' ') : '',
+        ].filter(Boolean).join(' '),
+        limit: 1000,
+        sortDirection: 'ASC',
+      })
+    } catch (err) {
+      if (laneSamplesHaveRevTag && fieldNamed(LANE_SAMPLE_REV_FIELDS, err)) {
+        console.warn('[apiClient] backend has no division facts on LaneRateSample yet — charting without them until deploy')
+        laneSamplesHaveRevTag = false
+        continue
+      }
+      forgetQuoteModels(err)
+      return []
+    }
+  }
+}
+
+// ── Commission writes (tmsFinanceActions) ────────────────────────────────────
+
+/** What one invoice's re-run did, row by row: the counters `RUN_COMMISSIONS` answers with. */
+export interface CommissionRunReport {
+  invoiceId: string
+  puts: number
+  updates: number
+  adjustments: number
+  cancels: number
+  reversals: number
+  untouched: number
+  /** Set instead of the counters when the invoice was passed over, with the reason. */
+  skipped?: string
+}
+
+/** Compute (or recompute) one invoice's rows, or re-run a whole 'YYYY-MM'. */
+export async function runCommissions(input: { invoiceId?: string; month?: string }): Promise<{ reports: CommissionRunReport[] }> {
+  return financeAction<{ reports: CommissionRunReport[] }>('RUN_COMMISSIONS', input)
+}
+
+/**
+ * What the plans would pay on one order today — computed, never written. An order that
+ * is not invoiced yet answers with no `rows` and a `note` saying so.
+ */
+export interface CommissionPreview {
+  rows: CommissionRecord[]
+  /** The rows already written for the order, to compare the preview against. */
+  existing?: CommissionRecord[]
+  enabled?: boolean
+  note?: string
+}
+export async function previewCommissions(input: { orderId: string }): Promise<CommissionPreview> {
+  return financeAction<CommissionPreview>('PREVIEW_COMMISSIONS', input)
+}
+
+/** Manager/admin: pay a different number than the plan said. `amountCents` is the net. */
+export async function overrideCommission(input: { commissionId: string; amountCents: number; note: string }): Promise<{ commission: CommissionRecord }> {
+  return financeAction<{ commission: CommissionRecord }>('OVERRIDE_COMMISSION', input)
+}
+
+export async function approveCommission(input: { commissionId: string }): Promise<{ commission: CommissionRecord }> {
+  return financeAction<{ commission: CommissionRecord }>('APPROVE_COMMISSION', input)
+}
+
+/** The rep's own counter-offer; a manager accepts it with `acceptCommissionCounter`. */
+export async function counterCommission(input: { commissionId: string; amountCents: number; note: string }): Promise<{ commission: CommissionRecord }> {
+  return financeAction<{ commission: CommissionRecord }>('COUNTER_COMMISSION', input)
+}
+
+export async function acceptCommissionCounter(input: { commissionId: string }): Promise<{ commission: CommissionRecord }> {
+  return financeAction<{ commission: CommissionRecord }>('ACCEPT_COMMISSION_COUNTER', input)
+}
+
+export async function cancelCommission(input: { commissionId: string; reason: string }): Promise<{ commission: CommissionRecord }> {
+  return financeAction<{ commission: CommissionRecord }>('CANCEL_COMMISSION', input)
+}
+
+/** Open the next period. `periodStart` omitted: the schedule in settings picks it. */
+export async function openPayPeriod(input: { periodStart?: string }): Promise<{ payPeriod: CommissionPayPeriodRecord }> {
+  return financeAction<{ payPeriod: CommissionPayPeriodRecord }>('OPEN_PAY_PERIOD', input)
+}
+
+/** `claimed` is how many commission rows the period gathered as it closed. */
+export async function submitPayPeriod(input: { payPeriodId: string }): Promise<{ payPeriod: CommissionPayPeriodRecord; claimed: number }> {
+  return financeAction<{ payPeriod: CommissionPayPeriodRecord; claimed: number }>('SUBMIT_PAY_PERIOD', input)
+}
+
+export async function approvePayPeriod(input: { payPeriodId: string }): Promise<{ payPeriod: CommissionPayPeriodRecord }> {
+  return financeAction<{ payPeriod: CommissionPayPeriodRecord }>('APPROVE_PAY_PERIOD', input)
+}
+
+/** `paid` is how many rows were stamped paid with the reference. */
+export async function payPayPeriod(input: { payPeriodId: string; paidAt: string; reference: string }): Promise<{ payPeriod: CommissionPayPeriodRecord; paid: number }> {
+  return financeAction<{ payPeriod: CommissionPayPeriodRecord; paid: number }>('PAY_PAY_PERIOD', input)
+}
+
+/** One rep's statement for the period: the S3 key it was written to and a link to it. */
+export async function renderCommissionStatement(input: { payPeriodId: string; repId: string }): Promise<{ key: string; url: string; payPeriodId: string; repId: string }> {
+  return financeAction<{ key: string; url: string; payPeriodId: string; repId: string }>('RENDER_COMMISSION_STATEMENT', input)
+}
+
+/** ADMIN only, like the AR and AP settings beside it. */
+export async function saveCommissionSettings(patch: CommissionSettings): Promise<{ settings: TmsSettings }> {
+  return financeAction<{ settings: TmsSettings }>('SAVE_COMMISSION_SETTINGS', patch)
+}
+
+/** The shipment half of the settings row — numbering, the cancel gate, the AR/AP stages. */
+export async function saveShipmentSettings(patch: ShipmentSettings): Promise<{ settings: TmsSettings }> {
+  return shipmentAction<{ settings: TmsSettings }>('SAVE_SHIPMENT_SETTINGS', patch)
+}
+
+// ── Workflows & AI agents (tmsWorkflowActions, Step K) ───────────────────────
+//
+// One router again, the same contract as `shipmentAction`: the Lambda's own refusal
+// ("this run is already APPLIED") is rethrown as the Error message, so a toast shows the
+// real reason instead of `[object Object]`. Nothing here deletes a row — a run is
+// DISMISSED or RESOLVED — and no call applies a proposal: a person does that through
+// CREATE_SHIPMENT / SAVE_QUOTE / REVIEW_DOCUMENT with their own identity, and then links
+// the run with `linkWorkflowRun`.
+
+export type { WorkflowRunRecord, WorkflowAgentKey } from '@/types/tms'
+
+/**
+ * The round trip itself, kept separate from the null guard below: `GET_RUN` answers with
+ * `null` for an id nothing matches, which is an answer rather than a failure.
+ */
+async function callWorkflow(action: string, input: unknown): Promise<unknown> {
+  let r: { data: { tmsWorkflowActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsWorkflowActions($action: String!, $input: AWSJSON!) { tmsWorkflowActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsWorkflowActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  return unwrapJson(r.data.tmsWorkflowActions)
+}
+
+export async function workflowAction<T>(action: string, input: unknown): Promise<T> {
+  const v = await callWorkflow(action, input)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+/**
+ * Newest first. Without an agent the server merges one query per agent, so the cost is the
+ * same either way; `limit` above 200 is refused.
+ */
+export async function listWorkflowRuns(agent?: WorkflowAgentKey, limit?: number): Promise<WorkflowRunRecord[]> {
+  return workflowAction<WorkflowRunRecord[]>('LIST_RUNS', { agent, limit })
+}
+
+/** `null` is an id nothing matches — the trace page renders "run not found", not an error. */
+export async function getWorkflowRun(id: string): Promise<WorkflowRunRecord | null> {
+  const v = await callWorkflow('GET_RUN', { id })
+  return (v ?? null) as WorkflowRunRecord | null
+}
+
+/** Every run that touched one shipment, for the detail page's AI Agent tab. */
+export async function listWorkflowRunsForShipment(shipmentId: string): Promise<WorkflowRunRecord[]> {
+  return workflowAction<WorkflowRunRecord[]>('LIST_RUNS_FOR_SHIPMENT', { shipmentId })
+}
+
+/** The open AI exceptions, off the sparse `exceptionOpen` index. Capped at 200 server-side. */
+export async function listWorkflowExceptions(): Promise<WorkflowRunRecord[]> {
+  return workflowAction<WorkflowRunRecord[]>('LIST_EXCEPTIONS', { limit: 200 })
+}
+
+/**
+ * Run it again from the top. The server refuses a run that is not retryable — one already
+ * APPLIED, or past the five-attempt cap — and refuses a stale `expectedVersion`.
+ */
+export async function retryWorkflowRun(id: string, expectedVersion: number): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('RETRY_RUN', { id, expectedVersion })
+}
+
+/**
+ * Point a PROPOSED run at the shipment or quote a person just created from it. The server
+ * refuses any other outcome, a target that does not exist or is voided, and a stale version.
+ */
+export async function linkWorkflowRun(
+  id: string,
+  link: { shipmentId?: string; quoteId?: string },
+  expectedVersion: number,
+): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('LINK_RUN', { id, ...link, expectedVersion })
+}
+
+/**
+ * Name the party the matcher could not. The server refuses a run whose outcome is not
+ * UNKNOWN_PARTY; on success it clears the exception and re-runs from the match step on.
+ */
+export async function setWorkflowRunParty(
+  id: string,
+  party: { partyKind: string; partyId: string },
+  expectedVersion: number,
+): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('SET_RUN_PARTY', { id, ...party, expectedVersion })
+}
+
+/** The proposal is not wanted. The server refuses a blank reason and a stale version. */
+export async function dismissWorkflowRun(id: string, reason: string, expectedVersion: number): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('DISMISS_RUN', { id, reason, expectedVersion })
+}
+
+/** Clears `exceptionOpen` and nothing else: status and outcome are left as they were. */
+export async function resolveWorkflowException(id: string, reason?: string): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('RESOLVE_EXCEPTION', { id, reason })
+}
+
+/** Twenty entries per run; the server drops the oldest rather than refusing the write. */
+export async function saveWorkflowFeedback(id: string, rating: 'UP' | 'DOWN', text?: string): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('SAVE_FEEDBACK', { id, rating, text })
+}
+
+/**
+ * A real run against typed text, for the AI Agents settings page. Owner or ADMIN only —
+ * the server refuses everybody else — and it sends nothing: the result is a run row.
+ */
+export async function runWorkflowSample(input: {
+  agent: WorkflowAgentKey
+  subject: string
+  body: string
+  fromEmail: string
+}): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('RUN_SAMPLE', input)
+}
+
+// ── Step AB: spot quoter (tmsSpotActions) + CRM (tmsCrmActions) ──────────────
+//
+// Two routers with the `workflowAction` contract: the Lambda's own refusal ("Sending is
+// disabled on the dev stack…") is rethrown as the Error message. Neither call ever
+// carries a token or client secret; the browser only receives the Google authorization
+// URL and posts back the one-time `code`.
+
+import type { SpotActionName, SpotActionMap } from '@/lib/spot/types'
+import type { CrmActionName } from '@/lib/crm/types'
+
+export type { SpotActionName, SpotActionMap } from '@/lib/spot/types'
+export type { CrmActionName } from '@/lib/crm/types'
+
+async function callSpot(action: string, input: unknown): Promise<unknown> {
+  let r: { data: { tmsSpotActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsSpotActions($action: String!, $input: AWSJSON!) { tmsSpotActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsSpotActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  return unwrapJson(r.data.tmsSpotActions)
+}
+
+/** Typed door into `tmsSpotActions`. A `null` answer is an error except where the action's output type allows it. */
+export async function spotAction<A extends SpotActionName>(
+  action: A,
+  input: SpotActionMap[A]['input'],
+): Promise<SpotActionMap[A]['output']> {
+  const v = await callSpot(action, input)
+  return v as SpotActionMap[A]['output']
+}
+
+async function callCrm(action: string, input: unknown): Promise<unknown> {
+  let r: { data: { tmsCrmActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsCrmActions($action: String!, $input: AWSJSON!) { tmsCrmActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsCrmActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  return unwrapJson(r.data.tmsCrmActions)
+}
+
+/** Untyped CRM router; the slice that owns a response shape types its own helper over this. */
+export async function crmAction<T>(action: CrmActionName, input: unknown): Promise<T> {
+  const v = await callCrm(action, input)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+export const spotStatus = () => spotAction('SPOT_STATUS', {})
+export const spotOauthStart = (redirectUri: string) => spotAction('SPOT_OAUTH_START', { redirectUri })
+export const spotOauthFinish = (code: string, state: string, redirectUri: string) =>
+  spotAction('SPOT_OAUTH_FINISH', { code, state, redirectUri })
+export const spotConnectSimulated = () => spotAction('SPOT_CONNECT_SIMULATED', {})
+export const spotDisconnect = (purge = false) => spotAction('SPOT_DISCONNECT', { purge })
+export const spotSetPaused = (paused: boolean) => spotAction('SPOT_SET_PAUSED', { paused })
+export const spotPollNow = (o: SpotActionMap['SPOT_POLL_NOW']['input'] = {}) => spotAction('SPOT_POLL_NOW', o)
+export const spotListRequests = (o: SpotActionMap['SPOT_LIST_REQUESTS']['input'] = {}) =>
+  spotAction('SPOT_LIST_REQUESTS', o)
+export const spotGetRequest = (id: string) => spotAction('SPOT_GET_REQUEST', { id })
+export const spotCount = (userId?: string) => spotAction('SPOT_COUNT', userId ? { userId } : {})
+
+// ── Step AL: Carrier Sales inbound offers hub (append-only block) ────────────
+// `CS_*` rides the existing tmsSpotActions mutation (the read regex above knows the prefix, so
+// CS_STATUS does not wipe list caches). Assign/dismiss are tmsShipmentActions; the Unmatched
+// bucket is ShipmentMessage rows under shipmentId='UNMATCHED' read with a dedicated selection
+// that includes `offer` (the generic SHIPMENT_MESSAGE_FIELDS is deliberately not widened).
+import type { AssignInboundOfferInput, CsAction, DismissInboundOfferInput } from '@/lib/carrierInbox/types'
+import { UNMATCHED_SHIPMENT_ID } from '@/lib/carrierInbox/types'
+
+/** Untyped CS_* door; the slice that owns a response shape types its own helper over this. */
+export async function csAction<T>(action: CsAction, input: unknown = {}): Promise<T> {
+  const v = await callSpot(action, input)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+export const assignInboundOffer = (input: AssignInboundOfferInput) =>
+  shipmentAction<{ messageId: string; shipmentId: string; loadId: string | null; quoteId: string | null; outcome: 'FILED' | 'THREAD_ONLY' | 'COVERED_LATE' }>('ASSIGN_INBOUND_OFFER', input)
+export const dismissInboundOffer = (input: DismissInboundOfferInput) =>
+  shipmentAction<{ messageId: string; dismissed: true }>('DISMISS_INBOUND_OFFER', input)
+
+const UNMATCHED_MESSAGE_FIELDS = `${SHIPMENT_MESSAGE_FIELDS} offer ttlEpoch`
+/** The Unmatched bucket, newest first. Rows expire by TTL (default 30 days). */
+export async function listUnmatchedMessages(): Promise<ShipmentMessageRecord[]> {
+  const rows = await listAllByIndex<ShipmentMessageRecord>(
+    'listShipmentMessageByShipmentIdAndAt', { shipmentId: UNMATCHED_SHIPMENT_ID }, UNMATCHED_MESSAGE_FIELDS, 200,
+  )
+  return rows
+    .map((r) => unwrapJsonFields(r, ['offer', 'attachments']))
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)))
+}
+
+/** One load's CARRIER_OFFER thread (e-mail and call rows with the classified `offer`), oldest first. */
+export async function listOfferThread(shipmentId: string): Promise<ShipmentMessageRecord[]> {
+  const rows = await listAllByIndex<ShipmentMessageRecord>(
+    'listShipmentMessageByShipmentIdAndAt', { shipmentId }, UNMATCHED_MESSAGE_FIELDS, 200,
+  )
+  return rows
+    .filter((r) => r.kind === 'CARRIER_OFFER')
+    .map((r) => unwrapJsonFields(r, ['offer', 'attachments']))
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)))
+}
+
+/**
+ * Every rep's Gmail connection, for the org page (ADMIN only: the schema grants read to
+ * the ADMIN group and nobody else). The pending OAuth state is deliberately not selected.
+ */
+export async function listGmailConnections(): Promise<import('@/lib/spot/types').SpotConnectionView[]> {
+  const rows = await listAll<import('@/lib/spot/types').SpotConnectionView>(
+    'listGmailConnections',
+    'id userEmail mode status googleEmail connectedAt lastPollAt lastPollOk lastPollStats settings version',
+    1000,
+  )
+  return rows.map((r) => unwrapJsonFields(r, ['lastPollStats', 'settings']))
+}
+
+// ── Step AH — Aljex-parity create / edit shipment form (append-only block) ───
+
+/** `SAVE_ORDER_FORM` additions: Save draft skips only the equipment and required-reference rules; `shipmentFlags` writes Shipment.osd. */
+export interface SaveOrderFormInput {
+  draftSave?: boolean
+  shipmentFlags?: { osd?: boolean }
+}
+
+/** The `Load` columns `SAVE_ORDER_FORM` / `UPDATE_ORDER_DETAILS` write (present key written, `null` clears). */
+export interface OrderFormLoadFields {
+  miles?: number | null
+  weight?: number | null
+  commodity?: string | null
+  pieces?: number | null
+  piecesUnit?: string | null
+  cargoValueCents?: number | null
+  hot?: boolean | null
+  notes?: string | null
+}
+
+/** Order columns `UPDATE_ORDER_DETAILS` writes on a shipment that has left DRAFT. */
+export type OrderDetailsOrderPatch = Partial<Pick<OrderRecord,
+  'references' | 'equipmentType' | 'equipmentLengthFt' | 'specialRequirements' | 'freight'
+  | 'customerNotes' | 'internalNotes' | 'customerContactId' | 'costCenter' | 'billToId' | 'quoteId'>>
+
+export interface UpdateOrderDetailsInput {
+  shipmentId: string
+  expectedUpdatedAt: string
+  order?: OrderDetailsOrderPatch
+  loadFields?: OrderFormLoadFields
+  shipmentFlags?: { osd?: boolean }
+}
+/** Edit order extras after the draft stage (refused on a DRAFT: that is SAVE_ORDER_FORM). */
+export async function updateOrderDetails(input: UpdateOrderDetailsInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('UPDATE_ORDER_DETAILS', input)
+}
+
+export interface UpdateLoadCarrierDetailsInput {
+  loadCarrierId: string
+  /** The LoadCarrier row's own `updatedAt`. */
+  expectedUpdatedAt: string
+  dispatcherName?: string | null
+  dispatcherPhone?: string | null
+  dispatcherEmail?: string | null
+  /** Ivan Cartage only (Step AQ): the roster driver id; a typed name is refused. */
+  driverId?: string | null
+  driverName?: string | null
+  driverPhone?: string | null
+  driver2Name?: string | null
+  driver2Phone?: string | null
+  truckNumber?: string | null
+  trailerNumber?: string | null
+  plates?: string | null
+  vin?: string | null
+  sealNumber?: string | null
+  tripNumber?: string | null
+  /** The stops this carrier covers; `[]` or null = all stops. */
+  legStopIds?: string[] | null
+  /** Per-carrier tracking override; null clears it back to the shipment's. */
+  trackingPrefs?: TrackingPrefsOverride | null
+}
+/** Seal # and Carrier Ref # are not BOOK_CARRIER inputs; this is the only writer on an ACTIVE outside-carrier assignment. */
+export async function updateLoadCarrierDetails(input: UpdateLoadCarrierDetailsInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('UPDATE_LOAD_CARRIER_DETAILS', input)
+}
+
+/** `UPDATE_STOP` op `SET_DETAILS`: the three stop fields no other op sets. `null` clears. */
+export interface UpdateStopDetailsInput {
+  loadId: string
+  expectedUpdatedAt?: string
+  stopId: string
+  patch: { instructions?: string | null; pieces?: number | null; weightLbs?: number | null }
+}
+export async function updateStopDetails(input: UpdateStopDetailsInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('UPDATE_STOP', { ...input, op: 'SET_DETAILS' })
+}
+
+// ── Steps AJ/AK ───────────────────────────────────────────────────────────────
+
+/**
+ * Set (or clear, with null / all-inherit) the per-shipment tracking override, or with `loadCarrierId` that carrier's own (Step AT).
+ * Resolves against the customer at read time; see `effectiveTrackingPrefs`.
+ */
+export async function setTrackingPrefs(
+  input: { shipmentId: string; prefs: TrackingPrefsOverride | null; expectedUpdatedAt?: string; loadCarrierId?: string },
+): Promise<{ shipment: ShipmentRecord; loadCarrier?: LoadCarrierRecord }> {
+  const r = await shipmentAction<{ shipment: ShipmentRecord; loadCarrier?: LoadCarrierRecord }>('SET_TRACKING_PREFS', input)
+  return { shipment: withParsedPrefs(r.shipment), ...(r.loadCarrier ? { loadCarrier: withParsedPrefs(r.loadCarrier) } : {}) }
+}
+
+// ── Step AM · cover flow and the carrier assignment ladder ────────────────────
+
+export interface CoverCarrierInput extends BookCarrierInput {
+  /** The directory Carrier to assign. Not ACTIVE = assigned waiting on MyCarrierPackets setup (invite must have been sent). */
+  carrierId: string
+}
+/** Assign a carrier (ACTIVE or still in MCP setup) and cover the shipment. UNACCEPTABLE refuses; acknowledge `MCP_MODERATE`. */
+export async function coverCarrier(input: CoverCarrierInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('COVER_CARRIER', input)
+}
+
+/** The signed PDF is uploaded first (PREPARE_DOCUMENT_UPLOAD + COMMIT_DOCUMENT, type RATE_CON); `documentId` names it. */
+export async function markRateConSigned(input: { loadCarrierId: string; documentId: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('MARK_RATE_CON_SIGNED', input)
+}
+
+export interface EnterDriverInfoInput {
+  loadCarrierId: string
+  /** Ivan Cartage only (Step AQ): the roster driver; the server fills the rest from the record. */
+  driverId?: string
+  driverName: string
+  driverPhone: string
+  truckNumber: string
+  trailerNumber: string
+}
+/** All four are mandatory; dispatch is blocked until they are on the assignment. */
+export async function enterDriverInfo(input: EnterDriverInfoInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('ENTER_DRIVER_INFO', input)
+}
+
+// ── Step AG · Accounting > AP inbox (append-only block) ──────────────────────
+// `AP_INBOX_*` rides its own mutation; the read regex above knows the prefix so STATUS and
+// PREVIEW_LINK never wipe list caches. Typed helpers live in `features/ap/inbox/apInboxClient.ts`.
+import type { ApInboxAction } from '@/lib/apInbox/actions'
+import type { ApInboxItemRecord, ApInboxStatus } from '@/lib/apInbox/types'
+
+/** Untyped door into `tmsApInboxActions`; the Lambda's own refusal text is rethrown as the Error message. */
+export async function apInboxAction<T>(action: ApInboxAction, input: unknown = {}): Promise<T> {
+  let r: { data: { tmsApInboxActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsApInboxActions($action: String!, $input: AWSJSON!) { tmsApInboxActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsApInboxActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsApInboxActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+const AP_INBOX_ITEM_FIELDS = `
+  id messageId threadId mailbox mode receivedAt fromEmail fromName subject kind status reviewReason
+  extraction match target applied attachments sourceUrl runId resolvedAt resolvedBy dismissReason version
+`
+
+/** One status of the queue, newest first. `sinceIso` bounds `receivedAt` (the history chips look back 30 days). */
+export async function listApInboxItems(status: ApInboxStatus, sinceIso?: string): Promise<ApInboxItemRecord[]> {
+  if (!modelAvailable('ApInboxItem')) return []
+  const rows = await listAllByIndex<ApInboxItemRecord>(
+    'listApInboxItemByStatusAndReceivedAt', { status }, AP_INBOX_ITEM_FIELDS, 200, { status: 'ApInboxItemStatus!' },
+  )
+  const parsed = rows.map((r) => unwrapJsonFields(r, ['extraction', 'match', 'target', 'applied', 'attachments']))
+  return parsed
+    .filter((r) => !sinceIso || String(r.receivedAt) >= sinceIso)
+    .sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)))
+}
+
+// ── Step AI: conversational dashboards (rides tmsCrmActions) ─────────────────
+// Read-verb action names so the cache only clears on SAVE/ARCHIVE. Visibility is enforced
+// by the Lambda; these wrappers carry no data rules.
+import type {
+  DashChatInput, DashChatResult, DashOptions, DashRunResult, DashboardRecord, DashboardSpec,
+  DashboardSummary, DashboardWindow,
+} from '@/lib/dashboards/types'
+
+export type DashboardRunTarget =
+  | { spec: DashboardSpec; window?: DashboardWindow }
+  | { id: string; window?: DashboardWindow }
+  | { builtin: 'OVERVIEW'; window?: DashboardWindow }
+
+export interface DashboardSaveInput {
+  id?: string
+  spec: DashboardSpec
+  sharedWith?: { userIds: string[]; teamKeys: string[] }
+  expectedVersion?: number
+}
+
+/** One model turn; never throws for a model outage (`modelError` carries it). */
+export async function dashboardChat(input: DashChatInput): Promise<DashChatResult> {
+  return crmAction<DashChatResult>('PREVIEW_DASHBOARD_CHAT', input)
+}
+
+/** Runs a spec, a saved dashboard or the built-in Overview under the caller's own visibility. */
+export async function dashboardPreview(target: DashboardRunTarget): Promise<DashRunResult> {
+  return crmAction<DashRunResult>('PREVIEW_DASHBOARD', target)
+}
+
+export async function listDashboards(): Promise<{ company: DashboardSummary[]; mine: DashboardSummary[] }> {
+  return crmAction('LIST_DASHBOARDS', {})
+}
+
+export async function getDashboard(id: string): Promise<{ dashboard: DashboardRecord; canEdit: boolean }> {
+  return crmAction('GET_DASHBOARD', { id })
+}
+
+export async function dashboardOptions(): Promise<DashOptions> {
+  return crmAction<DashOptions>('GET_DASHBOARD_OPTIONS', {})
+}
+
+export async function saveDashboard(input: DashboardSaveInput): Promise<DashboardRecord> {
+  return crmAction<DashboardRecord>('SAVE_DASHBOARD', input)
+}
+
+export async function archiveDashboard(id: string, expectedVersion: number): Promise<{ id: string; archivedAt: string }> {
+  return crmAction('ARCHIVE_DASHBOARD', { id, expectedVersion })
 }

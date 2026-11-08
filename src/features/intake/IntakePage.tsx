@@ -1,14 +1,18 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   RefreshCw, ExternalLink, Paperclip, MessageSquare, User,
-  ChevronDown, Inbox, Clock, CheckCircle2, Archive, Loader2, Hash,
+  ChevronDown, Clock, CheckCircle2, Archive, Loader2, Hash,
 } from 'lucide-react'
+import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
+import { useResolveLoads } from '@/hooks/useResolveLoads'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
+import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDialog'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -112,7 +116,7 @@ export function ProNumberModal({
             Cancel
           </Button>
           <Button
-            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="flex-1 bg-[color:var(--tms-badge-green)] hover:bg-[color:var(--tms-badge-green)] text-[color:var(--tms-on-primary)]"
             onClick={handleConfirm}
             disabled={!proNumber.trim() || saving}
           >
@@ -141,7 +145,7 @@ export function AssigneeSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-6 pl-1.5 pr-5 text-[11px] rounded border border-slate-200 bg-white appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary text-foreground font-medium w-full"
+        className="h-6 pl-1.5 pr-5 text-[11px] rounded border border-border bg-card appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary text-foreground font-medium w-full"
         onClick={(e) => e.stopPropagation()}
       >
         {TEAM_MEMBERS.map((m) => (
@@ -178,7 +182,7 @@ function ThreadReply({ item }: { item: IntakeItem }) {
   return (
     <div className="flex items-start gap-2 rounded-lg bg-muted/50 px-2.5 py-2">
       {done ? (
-        <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600 mt-px" aria-label="Done" />
+        <CheckCircle2 className="size-3.5 shrink-0 text-[color:var(--tms-badge-green)] mt-px" aria-label="Done" />
       ) : (
         <MessageSquare className="size-3.5 shrink-0 text-muted-foreground mt-px" aria-hidden="true" />
       )}
@@ -234,12 +238,12 @@ export function QueueRow({
   return (
     <div
       className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-2.5 hover:bg-muted/40"
-      style={{ background: 'var(--ds-surface)' }}
+      style={{ background: 'var(--tms-card)' }}
     >
       {/* Done, at the left edge, so the column reads as a checklist. */}
       <div className="w-5 shrink-0">
         {done
-          ? <CheckCircle2 className="size-4 text-emerald-600" aria-label="Done" />
+          ? <CheckCircle2 className="size-4 text-[color:var(--tms-badge-green)]" aria-label="Done" />
           : <span className="block size-4 rounded-full border border-border" aria-label="Not done" />}
       </div>
 
@@ -340,7 +344,7 @@ export function QueueCard({
   const badge   = STATUS_BADGE[item.status]
 
   return (
-    <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', boxShadow: 'var(--sh-sm)', padding: 16, display: 'flex', flexDirection: 'column', gap: 12, transition: 'box-shadow 0.15s' }}>
+    <div style={{ background: 'var(--tms-card)', borderRadius: 12, border: '1px solid var(--tms-border)', boxShadow: 'var(--tms-shadow)', padding: 16, display: 'flex', flexDirection: 'column', gap: 12, transition: 'box-shadow 0.15s' }}>
       {/* Top row: subject + status badge */}
       <div className="flex items-start gap-2">
         <p className="flex-1 text-sm font-semibold text-foreground leading-snug line-clamp-2">
@@ -376,7 +380,7 @@ export function QueueCard({
           </span>
         )}
         {item.externalSource === 'slack' && (
-          <span className="flex items-center gap-1 text-sky-600">
+          <span className="flex items-center gap-1 text-[color:var(--tms-primary-ink)]">
             <MessageSquare className="size-3" /> Slack
           </span>
         )}
@@ -385,7 +389,7 @@ export function QueueCard({
             href={item.externalUrl}
             target="_blank"
             rel="noreferrer"
-            className="flex items-center gap-0.5 text-sky-600 hover:text-sky-700 font-medium"
+            className="flex items-center gap-0.5 text-[color:var(--tms-primary-ink)] hover:text-[color:var(--tms-primary-ink)] font-medium"
             onClick={(e) => e.stopPropagation()}
           >
             View <ExternalLink className="size-2.5" />
@@ -399,9 +403,9 @@ export function QueueCard({
           readOnly
           value={item.bodyText}
           style={{
-            fontSize: 11, color: 'var(--ds-t3)',
-            background: 'var(--ds-bg)', borderRadius: 6,
-            padding: '6px 8px', border: '1px solid var(--ds-border)',
+            fontSize: 11, color: 'var(--tms-muted)',
+            background: 'var(--tms-bg)', borderRadius: 6,
+            padding: '6px 8px', border: '1px solid var(--tms-border)',
             width: '100%', height: 120, resize: 'vertical',
             fontFamily: 'inherit', lineHeight: 1.5,
             outline: 'none', whiteSpace: 'pre-wrap',
@@ -433,7 +437,7 @@ export function QueueCard({
         ) : (
           <Button
             size="sm"
-            className="h-7 text-xs gap-1.5 flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="h-7 text-xs gap-1.5 flex-1 bg-[color:var(--tms-badge-green)] hover:bg-[color:var(--tms-badge-green)] text-[color:var(--tms-on-primary)]"
             onClick={() => onMarkDone(item)}
           >
             <CheckCircle2 className="size-3" />
@@ -455,7 +459,7 @@ export function QueueCard({
         )}
 
         <button
-          style={{ height: 28, width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: '1px solid var(--ds-border)', color: 'var(--ds-t3)', background: 'transparent', cursor: 'pointer', transition: 'background 0.15s' }}
+          style={{ height: 28, width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: '1px solid var(--tms-border)', color: 'var(--tms-muted)', background: 'transparent', cursor: 'pointer', transition: 'background 0.15s' }}
           title="Archive"
           onClick={() => onStatusChange(item.id, 'ARCHIVED')}
         >
@@ -477,11 +481,11 @@ function HistoryRow({
   loads: { id: string; aljexId: string }[]
   onAssigneeChange: (id: string, email: string) => void
 }) {
-  const badge = STATUS_BADGE[item.status] ?? { label: item.status, className: 'bg-slate-100 text-slate-600 border-slate-200' }
+  const badge = STATUS_BADGE[item.status] ?? { label: item.status, className: 'bg-muted text-muted-foreground border-border' }
   const builtLoad = item.builtLoadId ? loads.find((l) => l.id === item.builtLoadId) : null
 
   return (
-    <tr className="border-b border-slate-100 hover:bg-slate-50/60 transition-colors">
+    <tr className="border-b border-border hover:bg-muted transition-colors">
       <td className="px-4 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
         {formatDate(item.receivedAt)}
       </td>
@@ -489,8 +493,8 @@ function HistoryRow({
         <span className={cn(
           'inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded border',
           item.source === 'IVAN_CARTAGE'
-            ? 'bg-violet-50 text-violet-700 border-violet-200'
-            : 'bg-blue-50 text-blue-700 border-blue-200',
+            ? 'bg-[color:var(--tms-badge-purple-tint)] text-[color:var(--tms-badge-purple)] border-[color:var(--tms-badge-purple)]'
+            : 'bg-[color:var(--tms-primary-tint)] text-[color:var(--tms-primary-ink)] border-[color:var(--tms-primary)]',
         )}>
           {SOURCE_LABEL[item.source] ?? item.source}
         </span>
@@ -524,9 +528,9 @@ function HistoryRow({
       <td className="px-4 py-2.5 text-xs">
         {/* Ivan → built load link; BCAT → pro number */}
         {builtLoad ? (
-          <span className="font-medium text-emerald-700">{builtLoad.aljexId || builtLoad.id.slice(0, 8)}</span>
+          <span className="font-medium text-[color:var(--tms-badge-green)]">{builtLoad.aljexId || builtLoad.id.slice(0, 8)}</span>
         ) : item.proNumber ? (
-          <span className="font-medium text-slate-700 flex items-center gap-0.5">
+          <span className="font-medium text-foreground flex items-center gap-0.5">
             <Hash className="size-3" />{item.proNumber}
           </span>
         ) : (
@@ -539,7 +543,7 @@ function HistoryRow({
             href={item.externalUrl}
             target="_blank"
             rel="noreferrer"
-            className="flex items-center gap-0.5 text-xs text-sky-600 hover:text-sky-700 font-medium"
+            className="flex items-center gap-0.5 text-xs text-[color:var(--tms-primary-ink)] hover:text-[color:var(--tms-primary-ink)] font-medium"
           >
             <ExternalLink className="size-3" />
           </a>
@@ -560,12 +564,17 @@ const TABS = [
 
 export function IntakePage() {
   const { items, loading, refresh, updateItem } = useIntakeItems()
+  useResolveLoads(items.map((i) => i.builtLoadId))
   const { user } = useAuth()
   const setSelectedLoad      = useAppStore((s) => s.setSelectedLoad)
-  const setPendingIntakeItem = useAppStore((s) => s.setPendingIntakeItem)
+  const openNewShipment      = useAppStore((s) => s.openNewShipment)
+  const newShipmentPrefill   = useAppStore((s) => s.newShipmentPrefill)
+  const closeNewShipment     = useAppStore((s) => s.closeNewShipment)
+  // The identity table on purpose: a tender is matched by Pro #, and a voided load still
+  // owns its Pro # forever, so the match has to be able to land on one.
   const loads                = useAppStore((s) => s.loads)
   // Needed to bind the tender's broker to a real customer record (and so its MC).
-  const { customers }        = useDirectory()
+  const { customers }        = useDirectory({ locations: false })
 
   const actorEmail = user?.email ?? 'dispatch'
 
@@ -619,7 +628,6 @@ export function IntakePage() {
     if (item.status === 'NEW') {
       updateItem(item.id, { status: 'IN_PROGRESS' }, { actorName: actorEmail }).catch(() => {})
     }
-    setPendingIntakeItem(item.id)
     const tender = parseTender(item.subject, item.bodyText)
     /*
      * Bind the customer when the tender names one we already hold.
@@ -640,9 +648,14 @@ export function IntakePage() {
     // Carried even when nothing could be parsed: a tender with an unreadable body may still
     // have brought its rate con, and that document is the most useful thing in the email.
     const prefill = { ...tender, ...(rateConKey ? { rateConKey } : {}) }
-    setSelectedLoad(null, 'create', {
+    openNewShipment({
+      // The item travels with the form rather than through the store, so the shipment it
+      // creates is linked and marked DONE by the save that created it.
+      intakeItemId: item.id,
       driverId: null,
       dateStr: tender.stops.find((s) => s.type === 'pickup')?.dateStr ?? '',
+      ...(customer ? { customerId: customer.id } : {}),
+      ...(tender.customer ? { customerName: tender.customer } : {}),
       ...(tender.format || rateConKey
         ? { tender: customer ? { ...prefill, customer: customer.name, customerId: customer.id } : prefill }
         : {}),
@@ -696,15 +709,11 @@ export function IntakePage() {
   )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--ds-bg)' }}>
-      {/* Page header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.01em', margin: 0 }}>Load Intake</h1>
-          <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            Incoming loads from Ivan Cartage and BCAT Logistics
-          </p>
-        </div>
+    <TmsScrollPage
+      title="Load Intake"
+      subtitle="Incoming loads from Ivan Cartage and BCAT Logistics"
+      width="full"
+      actions={
         <Button
           variant="outline"
           size="sm"
@@ -715,12 +724,11 @@ export function IntakePage() {
           <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
           Refresh
         </Button>
-      </div>
-
-      {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto">
+      }
+    >
+      <div>
         {/* ── Section 1: Active Queue ───────────────────────────────────── */}
-        <section className="px-8 pt-6 pb-4">
+        <section className="pb-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
               Active Queue
@@ -733,7 +741,7 @@ export function IntakePage() {
           </div>
 
           {/* Tabs */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--ds-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--tms-border)' }}>
             {TABS.map(({ key, label }) => {
               const count = key === 'IVAN_CARTAGE' ? ivanCount : bcatCount
               const isActive = activeTab === key
@@ -745,8 +753,8 @@ export function IntakePage() {
                     display: 'flex', alignItems: 'center', gap: 8,
                     padding: '10px 16px', fontSize: 14, fontWeight: 500,
                     borderLeft: 'none', borderRight: 'none', borderTop: 'none',
-                    borderBottom: `2px solid ${isActive ? 'var(--ds-blue)' : 'transparent'}`,
-                    color: isActive ? 'var(--ds-blue)' : 'var(--ds-t3)',
+                    borderBottom: `2px solid ${isActive ? 'var(--tms-primary)' : 'transparent'}`,
+                    color: isActive ? 'var(--tms-primary)' : 'var(--tms-muted)',
                     background: 'transparent',
                     marginBottom: -1, cursor: 'pointer', transition: 'color 0.15s',
                   }}
@@ -757,8 +765,8 @@ export function IntakePage() {
                       fontSize: 10, fontWeight: 700, borderRadius: 999,
                       padding: '2px 6px', minWidth: 18, height: 18,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: isActive ? 'var(--ds-blue)' : 'var(--ds-border)',
-                      color: isActive ? '#fff' : 'var(--ds-t2)',
+                      background: isActive ? 'var(--tms-primary)' : 'var(--tms-border)',
+                      color: isActive ? 'var(--tms-on-primary)' : 'var(--tms-text-2)',
                     }}>
                       {count}
                     </span>
@@ -770,10 +778,7 @@ export function IntakePage() {
 
           {/* Cards grid */}
           {activeItems.length === 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 0', gap: 8, background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', color: 'var(--ds-t3)' }}>
-              <Inbox className="size-8 opacity-20" />
-              <p className="text-sm">No active items — all clear</p>
-            </div>
+            <TmsEmptyState title="No active items — all clear" message={null} />
           ) : (
             <div className="overflow-hidden rounded-xl border border-border">
               {activeItems.map((item) => (
@@ -792,7 +797,7 @@ export function IntakePage() {
         </section>
 
         {/* ── Section 2: History Table ──────────────────────────────────── */}
-        <section className="px-8 pt-2 pb-8">
+        <section className="pt-2 pb-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
               All Intake History
@@ -806,7 +811,7 @@ export function IntakePage() {
                 <select
                   value={historySource}
                   onChange={(e) => setHistorySource(e.target.value)}
-                  style={{ height: 32, paddingLeft: 10, paddingRight: 28, fontSize: 12, borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t1)', appearance: 'none', cursor: 'pointer', outline: 'none' }}
+                  style={{ height: 32, paddingLeft: 10, paddingRight: 28, fontSize: 12, borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text)', appearance: 'none', cursor: 'pointer', outline: 'none' }}
                 >
                   <option value="ALL">All Sources</option>
                   <option value="IVAN_CARTAGE">Ivan Cartage</option>
@@ -818,7 +823,7 @@ export function IntakePage() {
                 <select
                   value={historyStatus}
                   onChange={(e) => setHistoryStatus(e.target.value)}
-                  style={{ height: 32, paddingLeft: 10, paddingRight: 28, fontSize: 12, borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t1)', appearance: 'none', cursor: 'pointer', outline: 'none' }}
+                  style={{ height: 32, paddingLeft: 10, paddingRight: 28, fontSize: 12, borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text)', appearance: 'none', cursor: 'pointer', outline: 'none' }}
                 >
                   <option value="ALL">All Statuses</option>
                   <option value="NEW">New</option>
@@ -832,19 +837,16 @@ export function IntakePage() {
             </div>
           </div>
 
-          <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)' }}>
+          <div style={{ background: 'var(--tms-card)', borderRadius: 12, border: '1px solid var(--tms-border)', overflow: 'hidden', boxShadow: 'var(--tms-shadow)' }}>
             {historyItems.length === 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 0', gap: 8, color: 'var(--ds-t3)' }}>
-                <Inbox className="size-8 opacity-20" />
-                <p className="text-sm">No records match the current filters</p>
-              </div>
+              <TmsEmptyState compact title="No records match the current filters" message={null} />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
+                    <tr style={{ borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
                       {['Received', 'Source', 'Subject', 'Assignee', 'Status', 'Pro# / Load', 'Link'].map((col) => (
-                        <th key={col} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
+                        <th key={col} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
                           {col}
                         </th>
                       ))}
@@ -876,8 +878,16 @@ export function IntakePage() {
         />
       )}
 
-      {/* LoadDrawer — must be present for "Build Load" to work */}
+      {/* LoadDrawer — opened by "Update load" on an item that already built one. */}
       <LoadDrawer />
-    </div>
+
+      {/* "Build Load" raises this. Nothing is written until Save. */}
+      <NewShipmentDialog
+        open={newShipmentPrefill !== null}
+        prefill={newShipmentPrefill}
+        onClose={closeNewShipment}
+        onCreated={() => { closeNewShipment(); void refresh() }}
+      />
+    </TmsScrollPage>
   )
 }

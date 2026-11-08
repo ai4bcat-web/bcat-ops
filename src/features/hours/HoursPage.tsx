@@ -23,6 +23,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { TmsAlert } from '@/features/tms/kit/TmsAlert'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
 import { useHourlyRates } from '@/hooks/useHourlyRates'
@@ -195,17 +197,10 @@ export function HoursPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background px-8 py-5">
-        <div>
-          <h1 className="text-lg font-bold text-foreground">Employee hours</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Ivan drivers&rsquo; time cards, by fortnightly pay period. No overtime &mdash; hours
-            are hours, at forty and at eighty. Truck times are from Motive for context only
-            &mdash; drivers swap trucks, and a pre-trip or a slow dock puts the clock outside
-            the driving window quite legitimately.
-          </p>
-        </div>
+    <TmsScrollPage
+      title="Employee hours"
+      subtitle={<>Ivan drivers&rsquo; time cards, by fortnightly pay period. No overtime &mdash; hours are hours, at forty and at eighty. Truck times are from Motive for context only &mdash; drivers swap trucks, and a pre-trip or a slow dock puts the clock outside the driving window quite legitimately.</>}
+      actions={
         <div className="flex items-center gap-3 print:hidden">
           <details className="relative">
             <summary className="flex h-9 cursor-pointer select-none items-center rounded-md border border-input bg-background px-3 text-sm list-none">
@@ -238,23 +233,20 @@ export function HoursPage() {
             ))}
           </select>
         </div>
-      </div>
-
+      }
+    >
       {error && (
-        <div className="flex items-center gap-2 bg-red-500/10 px-8 py-2 text-sm text-red-700">
-          <AlertTriangle className="h-4 w-4" aria-hidden="true" /> {error}
-        </div>
+        <TmsAlert tone="red" icon={AlertTriangle}>{error}</TmsAlert>
       )}
 
       {ratesStatus === 'error' && (
-        <div role="alert" className="flex items-center gap-2 bg-red-500/10 px-8 py-2 text-sm text-red-700 print:hidden">
-          <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+        <TmsAlert tone="red" icon={AlertTriangle} className="print:hidden">
           Hourly rates could not be loaded{ratesError ? `: ${ratesError}` : ''}. Pay is not shown and rates cannot be edited until they load.
           <button type="button" className="ml-2 font-semibold underline" onClick={reloadRates}>Try again</button>
-        </div>
+        </TmsAlert>
       )}
 
-      <div className="flex-1 overflow-auto px-8 py-6 print:overflow-visible print:px-0">
+      <div className="mt-4">
         {byDriver.length === 0 ? (
           <p className="text-sm text-muted-foreground">{roster.length === 0 ? 'No Ivan drivers on the roster.' : 'Every driver is hidden — use the Drivers filter to show some.'}</p>
         ) : (
@@ -281,6 +273,6 @@ export function HoursPage() {
           />
         )}
       </div>
-    </div>
+    </TmsScrollPage>
   )
 }

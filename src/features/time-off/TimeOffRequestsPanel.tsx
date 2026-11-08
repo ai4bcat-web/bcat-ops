@@ -43,40 +43,40 @@ export function TimeOffRequestsPanel({ requests, driverName, onApprove, onDeny, 
   return (
     <section
       aria-label="Requests"
-      style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}
+      style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}
     >
-      <div style={{ padding: pending.length === 0 ? '10px 20px' : '14px 20px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: pending.length === 0 ? 'none' : '1px solid var(--ds-border)' }}>
-        <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>Requests</h2>
+      <div style={{ padding: pending.length === 0 ? '10px 20px' : '14px 20px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: pending.length === 0 ? 'none' : '1px solid var(--tms-border)' }}>
+        <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)', margin: 0 }}>Requests</h2>
         <span
           data-testid="requests-count"
-          style={{ fontSize: 11, fontWeight: 700, padding: '1px 8px', borderRadius: 10, background: pending.length ? '#fffbeb' : 'var(--ds-bg)', color: pending.length ? '#b45309' : 'var(--ds-t3)' }}
+          style={{ fontSize: 11, fontWeight: 700, padding: '1px 8px', borderRadius: 10, background: pending.length ? 'var(--tms-badge-orange-tint)' : 'var(--tms-bg)', color: pending.length ? 'var(--tms-badge-orange)' : 'var(--tms-muted)' }}
         >
           {pending.length}
         </span>
-        {pending.length === 0 && <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No requests waiting</span>}
+        {pending.length === 0 && <span style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>No requests waiting</span>}
       </div>
 
       {pending.map((r) => {
         const busy = busyId === r.id
         return (
-          <div key={r.id} data-testid="request-row" style={{ padding: '10px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div key={r.id} data-testid="request-row" style={{ padding: '10px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', minWidth: 130 }}>{driverName(r.driverId)}</span>
-              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 5, background: 'var(--ds-bg)', color: 'var(--ds-t2)' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', minWidth: 130 }}>{driverName(r.driverId)}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 5, background: 'var(--tms-bg)', color: 'var(--tms-text-2)' }}>
                 {TYPE_LABEL[r.type]}
               </span>
-              <span style={{ fontSize: 12.5, color: 'var(--ds-t2)', fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ fontSize: 12.5, color: 'var(--tms-text-2)', fontVariantNumeric: 'tabular-nums' }}>
                 {describeRange(r.startDate, r.endDate)}{r.time ? ` · ${r.time}` : ''}
               </span>
-              {r.hours != null && <span style={{ fontSize: 12.5, color: 'var(--ds-t2)', fontVariantNumeric: 'tabular-nums' }}>{r.hours}h</span>}
-              {r.note && <span style={{ fontSize: 12, color: 'var(--ds-t3)', flex: 1, minWidth: 80 }}>{r.note}</span>}
-              <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginLeft: 'auto' }}>requested {requestedOn(r.createdAt)}</span>
+              {r.hours != null && <span style={{ fontSize: 12.5, color: 'var(--tms-text-2)', fontVariantNumeric: 'tabular-nums' }}>{r.hours}h</span>}
+              {r.note && <span style={{ fontSize: 12, color: 'var(--tms-muted)', flex: 1, minWidth: 80 }}>{r.note}</span>}
+              <span style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginLeft: 'auto' }}>requested {requestedOn(r.createdAt)}</span>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => onApprove(r.id)}
-                  style={{ ...btn, border: 'none', background: '#15803d', color: '#fff', opacity: busy ? 0.5 : 1 }}
+                  style={{ ...btn, border: 'none', background: 'var(--tms-badge-green)', color: 'var(--tms-on-primary)', opacity: busy ? 0.5 : 1 }}
                 >
                   <Check size={13} /> Approve
                 </button>
@@ -84,7 +84,7 @@ export function TimeOffRequestsPanel({ requests, driverName, onApprove, onDeny, 
                   type="button"
                   disabled={busy}
                   onClick={() => { setDenying(r.id); setNote('') }}
-                  style={{ ...btn, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: '#b91c1c', opacity: busy ? 0.5 : 1 }}
+                  style={{ ...btn, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-badge-red)', opacity: busy ? 0.5 : 1 }}
                 >
                   <X size={13} /> Deny
                 </button>
@@ -100,17 +100,17 @@ export function TimeOffRequestsPanel({ requests, driverName, onApprove, onDeny, 
                   placeholder="Reason for denying (optional)"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  style={{ flex: 1, height: 30, padding: '0 9px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t1)', fontSize: 13, fontFamily: 'inherit' }}
+                  style={{ flex: 1, height: 30, padding: '0 9px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text)', fontSize: 13, fontFamily: 'inherit' }}
                 />
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => { onDeny(r.id, note.trim()); closeDeny() }}
-                  style={{ ...btn, border: 'none', background: '#b91c1c', color: '#fff', opacity: busy ? 0.5 : 1 }}
+                  style={{ ...btn, border: 'none', background: 'var(--tms-badge-red)', color: 'var(--tms-on-primary)', opacity: busy ? 0.5 : 1 }}
                 >
                   Confirm deny
                 </button>
-                <button type="button" onClick={closeDeny} style={{ ...btn, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)' }}>
+                <button type="button" onClick={closeDeny} style={{ ...btn, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text-2)' }}>
                   Cancel
                 </button>
               </div>

@@ -41,32 +41,32 @@ export function TrackingLinkCell({ equip, unit }: { equip: Equipment | undefined
     }
   }
 
-  if (!equip) return <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>—</span>
+  if (!equip) return <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>—</span>
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
       {url ? (
         <>
-          <button type="button" onClick={() => void copy(url)} title={url} style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ds-blue)', fontWeight: 600 }}>
+          <button type="button" onClick={() => void copy(url)} title={url} style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--tms-primary)', fontWeight: 600 }}>
             {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />} {copied ? 'Copied' : 'Copy link'}
           </button>
-          <a href={url} target="_blank" rel="noreferrer" title="Open the tracking page" style={{ display: 'inline-flex', color: 'var(--ds-t3)' }}><ExternalLink className="size-3.5" /></a>
+          <a href={url} target="_blank" rel="noreferrer" title="Open the tracking page" style={{ display: 'inline-flex', color: 'var(--tms-muted)' }}><ExternalLink className="size-3.5" /></a>
           {code ? (
             confirmRegen ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
-                <span style={{ color: '#b45309' }}>Kill the old link?</span>
-                <button type="button" onClick={() => void create(true)} style={{ all: 'unset', cursor: 'pointer', color: '#b45309', fontWeight: 700 }}>Yes</button>
-                <button type="button" onClick={() => setConfirmRegen(false)} style={{ all: 'unset', cursor: 'pointer', color: 'var(--ds-t3)' }}>No</button>
+                <span style={{ color: 'var(--tms-badge-orange)' }}>Kill the old link?</span>
+                <button type="button" onClick={() => void create(true)} style={{ all: 'unset', cursor: 'pointer', color: 'var(--tms-badge-orange)', fontWeight: 700 }}>Yes</button>
+                <button type="button" onClick={() => setConfirmRegen(false)} style={{ all: 'unset', cursor: 'pointer', color: 'var(--tms-muted)' }}>No</button>
               </span>
             ) : (
-              <button type="button" onClick={() => setConfirmRegen(true)} title="Regenerate: the current link stops working and a new one is copied" style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', color: 'var(--ds-t3)' }}><RefreshCw className="size-3.5" /></button>
+              <button type="button" onClick={() => setConfirmRegen(true)} title="Regenerate: the current link stops working and a new one is copied" style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', color: 'var(--tms-muted)' }}><RefreshCw className="size-3.5" /></button>
             )
           ) : (
-            <button type="button" onClick={() => void create(false)} title="Replace the pasted Motive link with a permanent BCAT link" style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: 'var(--ds-t3)' }}><Link2 className="size-3.5" /> BCAT link</button>
+            <button type="button" onClick={() => void create(false)} title="Replace the pasted Motive link with a permanent BCAT link" style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: 'var(--tms-muted)' }}><Link2 className="size-3.5" /> BCAT link</button>
           )}
         </>
       ) : (
-        <button type="button" onClick={() => void create(false)} title="Create this truck's permanent tracking link and copy it" style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ds-blue)', fontWeight: 600 }}>
+        <button type="button" onClick={() => void create(false)} title="Create this truck's permanent tracking link and copy it" style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--tms-primary)', fontWeight: 600 }}>
           <Link2 className="size-3.5" /> Create link
         </button>
       )}

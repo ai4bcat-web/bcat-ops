@@ -1,3 +1,5 @@
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
+import { TmsStatRow, type TmsStat } from '@/features/tms/kit/TmsStatRow'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '@/store/useAppStore'
@@ -134,7 +136,7 @@ function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
                 <Plus size={14} /> Add equipment
               </button>
               {parsed.length > 1 && (
-                <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>Total <strong style={{ color: 'var(--ds-t1)' }}>{formatCents(totalCents)}</strong> across {parsed.length}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>Total <strong style={{ color: 'var(--tms-text)' }}>{formatCents(totalCents)}</strong> across {parsed.length}</span>
               )}
             </div>
           )}
@@ -174,7 +176,7 @@ function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
 
 // ── Multi-select equipment scope (all / some / exclude) ─────────────────────────
 
-const linkBtnStyle: React.CSSProperties = { background: 'none', border: 'none', padding: 0, color: 'var(--ds-blue)', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }
+const linkBtnStyle: React.CSSProperties = { background: 'none', border: 'none', padding: 0, color: 'var(--tms-primary)', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }
 
 function EquipMultiSelect({ equipment, included, onChange }: {
   equipment: Equipment[]
@@ -206,28 +208,28 @@ function EquipMultiSelect({ equipment, included, onChange }: {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 34, padding: '0 12px', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 7, fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', cursor: 'pointer', minWidth: 168, justifyContent: 'space-between' }}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 34, padding: '0 12px', background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 7, fontSize: 12.5, color: 'var(--tms-text)', fontFamily: 'inherit', cursor: 'pointer', minWidth: 168, justifyContent: 'space-between' }}
       >
         <span>{label}</span>
-        <ChevronDown size={14} style={{ color: 'var(--ds-t3)' }} />
+        <ChevronDown size={14} style={{ color: 'var(--tms-muted)' }} />
       </button>
       {open && (
         <>
           <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
-          <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 41, width: 264, maxHeight: 340, background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, boxShadow: 'var(--sh-lg)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', gap: 12, padding: '10px 14px', borderBottom: '1px solid var(--ds-border)' }}>
+          <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 41, width: 264, maxHeight: 340, background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 10, boxShadow: 'var(--tms-shadow-pop)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', gap: 12, padding: '10px 14px', borderBottom: '1px solid var(--tms-border)' }}>
               <button type="button" onClick={() => onChange(null)} style={linkBtnStyle}>Select all</button>
-              <button type="button" onClick={() => onChange(new Set())} style={{ ...linkBtnStyle, color: 'var(--ds-t3)' }}>Clear</button>
-              <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--ds-t3)' }}>{selectedCount}/{total}</span>
+              <button type="button" onClick={() => onChange(new Set())} style={{ ...linkBtnStyle, color: 'var(--tms-muted)' }}>Clear</button>
+              <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--tms-muted)' }}>{selectedCount}/{total}</span>
             </div>
             <div style={{ overflowY: 'auto', padding: '4px 0' }}>
               {equipment.length === 0 ? (
-                <div style={{ padding: '12px 14px', fontSize: 12.5, color: 'var(--ds-t3)' }}>No equipment.</div>
+                <div style={{ padding: '12px 14px', fontSize: 12.5, color: 'var(--tms-muted)' }}>No equipment.</div>
               ) : equipment.map((e) => (
                 <label key={e.id} className="maint-row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 14px', cursor: 'pointer', fontSize: 13 }}>
-                  <input type="checkbox" checked={isChecked(e.id)} onChange={() => toggle(e.id)} style={{ width: 15, height: 15, accentColor: 'var(--ds-blue)', cursor: 'pointer', flexShrink: 0 }} />
-                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--ds-t1)' }}>#{e.unitNumber}</span>
-                  {e.nickname && <span style={{ color: 'var(--ds-t3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.nickname}</span>}
+                  <input type="checkbox" checked={isChecked(e.id)} onChange={() => toggle(e.id)} style={{ width: 15, height: 15, accentColor: 'var(--tms-primary)', cursor: 'pointer', flexShrink: 0 }} />
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--tms-text)' }}>#{e.unitNumber}</span>
+                  {e.nickname && <span style={{ color: 'var(--tms-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.nickname}</span>}
                 </label>
               ))}
             </div>
@@ -245,7 +247,6 @@ type InvSortKey = 'date' | 'equipment' | 'source' | 'vendor' | 'invoiceNumber' |
 
 export function InvoicesPage() {
   const isMobile = useIsMobile()
-  const padX = isMobile ? 14 : 32
   const { user, hasPageAccess } = useAuth()
   const navigate = useNavigate()
   const [sendingToAp, setSendingToAp] = useState<Set<string>>(new Set())
@@ -283,7 +284,7 @@ export function InvoicesPage() {
     const active = sortKey === k
     return (
       <th key={k} style={{ ...thBase, textAlign: align ?? 'left', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--ds-t1)' : undefined }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--tms-text)' : undefined }}>
           {label}
           {active && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
         </span>
@@ -324,7 +325,7 @@ export function InvoicesPage() {
     try {
       const result = await sendMaintenanceInvoiceToVendorAp(inv.id)
       toast.success(result.duplicate ? 'This invoice is already in Vendor AP' : 'Invoice sent to Vendor AP', {
-        action: hasPageAccess('vendorAp') ? { label: 'Open queue', onClick: () => navigate('/vendor-ap') } : undefined,
+        action: hasPageAccess('vendorAp') ? { label: 'Open queue', onClick: () => navigate('/tms/vendors') } : undefined,
       })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not send invoice to Vendor AP')
@@ -404,65 +405,51 @@ export function InvoicesPage() {
   const unpaid       = kpiInvoices.filter((i) => !i.paymentDate)
   const unpaidTotal  = unpaid.reduce((s, i) => s + i.amount, 0)
 
-  const KPIS = [
-    { label: 'Total Spend',  value: formatCents(totalSpend), color: '#a78bfa' },
-    { label: 'This Month',   value: formatCents(monthSpend), color: '#1ea8f3' },
+  const KPIS: TmsStat[] = [
+    { label: 'Total Spend',  value: formatCents(totalSpend) },
+    { label: 'This Month',   value: formatCents(monthSpend) },
     {
       label: unpaid.length === 1 ? 'Unpaid (1 invoice)' : `Unpaid (${unpaid.length} invoices)`,
       value: formatCents(unpaidTotal),
-      color: unpaid.length > 0 ? '#f59e0b' : '#22c55e',
+      tone: unpaid.length > 0 ? 'warn' : 'good',
     },
-    { label: 'Invoices',     value: String(invoiceCount),    color: '#22c55e' },
-    { label: 'Avg / Invoice', value: formatCents(avgInvoice), color: '#f59e0b' },
+    { label: 'Invoices',     value: String(invoiceCount) },
+    { label: 'Avg / Invoice', value: formatCents(avgInvoice) },
   ]
 
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
-
-      {/* Page header */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: `${isMobile ? 16 : 20}px ${padX}px 12px` }}>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Invoices</h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Repairs from repairs@bcatcorp.com land in the Review Queue · post to add them to the list</p>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, fontSize: 13, fontWeight: 500, color: 'var(--ds-t2)', cursor: 'pointer', fontFamily: 'inherit' }}>
-              Export
-            </button>
-            {tab === 'invoices' && (
-              <button
-                onClick={() => setNewOpen(true)}
-                disabled={equipment.length === 0}
-                title={equipment.length === 0 ? 'Add equipment in Fleet first' : undefined}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#fff', cursor: equipment.length === 0 ? 'not-allowed' : 'pointer', opacity: equipment.length === 0 ? 0.5 : 1, fontFamily: 'inherit' }}
-              >
-                <Plus size={14} /> New Invoice
-              </button>
-            )}
-          </div>
-        </div>
-
+    <TmsScrollPage
+      title="Invoices"
+      subtitle="Repairs from repairs@bcatcorp.com land in the Review Queue · post to add them to the list"
+      actions={<>
+        <button style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 8, fontSize: 13, fontWeight: 500, color: 'var(--tms-text-2)', cursor: 'pointer', fontFamily: 'inherit' }}>
+          Export
+        </button>
+        {tab === 'invoices' && (
+          <button
+            onClick={() => setNewOpen(true)}
+            disabled={equipment.length === 0}
+            title={equipment.length === 0 ? 'Add equipment in Fleet first' : undefined}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--tms-primary)', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--tms-on-primary)', cursor: equipment.length === 0 ? 'not-allowed' : 'pointer', opacity: equipment.length === 0 ? 0.5 : 1, fontFamily: 'inherit' }}
+          >
+            <Plus size={14} /> New Invoice
+          </button>
+        )}
+      </>}
+      toolbar={
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* Equipment scope for the totals below — multi-select (all / some / exclude) */}
-        <div style={{ padding: `0 ${padX}px 10px`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Totals for</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Totals for</span>
           <EquipMultiSelect equipment={equipment} included={includedEquip} onChange={setIncludedEquip} />
         </div>
 
         {/* KPI strip */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: isMobile ? 10 : 12, padding: `0 ${padX}px 12px` }}>
-          {KPIS.map((k) => (
-            <div key={k.label} style={{ position: 'relative', overflow: 'hidden', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 16px' }}>
-              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: k.color }} />
-              <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--ds-t3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginLeft: 4 }}>{k.label}</div>
-              <div style={{ fontSize: 28, fontWeight: 600, color: k.color, letterSpacing: '-0.02em', marginTop: 4, marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>{k.value}</div>
-            </div>
-          ))}
-        </div>
+        <TmsStatRow items={KPIS} columns={5} aria-label="Invoice totals" />
 
         {/* Tab bar */}
-        <div style={{ display: 'flex', padding: `0 ${padX}px`, gap: 0, overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: 0, overflowX: 'auto' }}>
           {[
             { key: 'invoices' as const, label: 'Invoices', Icon: Receipt, badge: 0 },
             { key: 'queue' as const, label: 'Review Queue', Icon: Inbox, badge: queueCount },
@@ -478,26 +465,28 @@ export function InvoicesPage() {
                   display: 'flex', alignItems: 'center', gap: 6,
                   padding: '10px 16px', fontSize: 13, fontWeight: 500, cursor: 'pointer',
                   background: 'none', border: 'none', fontFamily: 'inherit',
-                  borderBottom: `2px solid ${active ? 'var(--ds-blue)' : 'transparent'}`,
-                  color: active ? 'var(--ds-blue)' : 'var(--ds-t3)',
+                  borderBottom: `2px solid ${active ? 'var(--tms-primary)' : 'transparent'}`,
+                  color: active ? 'var(--tms-primary)' : 'var(--tms-muted)',
                   marginBottom: -1,
                 }}
               >
                 <Icon size={13} />{label}
                 {badge > 0 && (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, background: 'var(--ds-blue)', color: '#fff', fontSize: 11, fontWeight: 700 }}>{badge}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', fontSize: 11, fontWeight: 700 }}>{badge}</span>
                 )}
               </button>
             )
           })}
         </div>
       </div>
+      }
+    >
 
       <div style={{ padding: isMobile ? '16px 12px' : '24px 32px', maxWidth: 1200 }}>
         {/* Filters */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
           <div style={{ position: 'relative' }}>
-            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
+            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)', pointerEvents: 'none' }} />
             <input
               type="text"
               placeholder="Search…"
@@ -505,22 +494,22 @@ export function InvoicesPage() {
               onChange={(e) => setSearch(e.target.value)}
               style={{
                 width: 220, height: 34, paddingLeft: 30, paddingRight: 10, boxSizing: 'border-box',
-                background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 7,
-                fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none',
+                background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 7,
+                fontSize: 12.5, color: 'var(--tms-text)', fontFamily: 'inherit', outline: 'none',
               }}
             />
           </div>
         </div>
 
         {(tab === 'invoices' || tab === 'queue' || tab === 'archived') && (
-        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+        <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
               {tab === 'queue' ? <Inbox className="size-8 opacity-20" /> : tab === 'archived' ? <Archive className="size-8 opacity-20" /> : <FileText className="size-8 opacity-20" />}
               <p className="text-sm">
                 {tab === 'queue' ? 'Nothing to review.' : tab === 'archived' ? 'No archived invoices.' : 'No invoices found.'}
               </p>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-muted-foreground">
                 {tab === 'queue'
                   ? 'New invoices from repairs@bcatcorp.com land here for review before posting.'
                   : tab === 'archived'
@@ -558,25 +547,25 @@ export function InvoicesPage() {
                 <tbody>
                   {filtered.map((inv) => (
                     <tr key={inv.id} className="maint-row">
-                      <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{inv.date || '—'}</td>
+                      <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>{inv.date || '—'}</td>
                       <td style={tdBase}><span style={equipChipStyle}>{equipUnit(inv.equipmentId)}</span></td>
                       <td style={tdBase}>
                         {inv.source === 'MANUAL'
                           ? <Pill tone="neutral">Manual</Pill>
                           : inv.source === 'EMAIL'
                             ? <Pill tone="blue">Email</Pill>
-                            : <span style={{ color: 'var(--ds-muted-soft)', fontSize: 12.5 }}>—</span>}
+                            : <span style={{ color: 'var(--tms-disabled)', fontSize: 12.5 }}>—</span>}
                       </td>
                       <td style={tdBase}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inv.vendor || 'Unknown vendor'}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inv.vendor || 'Unknown vendor'}</div>
                       </td>
-                      <td style={{ ...tdBase, fontSize: 12.5, color: 'var(--ds-t3)', lineHeight: 1.45 }}>
-                        {inv.description ? inv.description : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                      <td style={{ ...tdBase, fontSize: 12.5, color: 'var(--tms-muted)', lineHeight: 1.45 }}>
+                        {inv.description ? inv.description : <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
                       </td>
-                      <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inv.invoiceNumber || '—'}</td>
-                      <td style={{ ...tdBase, fontSize: 12.5, color: 'var(--ds-t2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--tms-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inv.invoiceNumber || '—'}</td>
+                      <td style={{ ...tdBase, fontSize: 12.5, color: 'var(--tms-text-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {inv.paymentMethod ? <span style={{ textTransform: 'capitalize' }}>{inv.paymentMethod}</span> : '—'}
-                        {inv.paymentDate && <span style={{ color: 'var(--ds-muted-soft)', marginLeft: 5, fontSize: 11 }}>{inv.paymentDate}</span>}
+                        {inv.paymentDate && <span style={{ color: 'var(--tms-disabled)', marginLeft: 5, fontSize: 11 }}>{inv.paymentDate}</span>}
                       </td>
                       <td style={{ ...tdBase, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, whiteSpace: 'nowrap' }}>{formatCents(inv.amount)}</td>
                       <td style={{ ...tdBase, textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -587,24 +576,24 @@ export function InvoicesPage() {
                               title="Send this invoice row to Vendor AP for payment"
                               disabled={sendingToAp.has(inv.id)}
                               onClick={() => void sendToVendorAp(inv)}
-                              style={{ ...iconBtnStyle, color: 'var(--ds-blue)', opacity: sendingToAp.has(inv.id) ? 0.5 : 1 }}
+                              style={{ ...iconBtnStyle, color: 'var(--tms-primary)', opacity: sendingToAp.has(inv.id) ? 0.5 : 1 }}
                             >
                               {sendingToAp.has(inv.id) ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                             </button>
                           )}
                           {tab === 'queue' && (
-                            <button aria-label="Post invoice" title="Add to the list" onClick={() => postInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--ds-green)' }}><Check size={14} /></button>
+                            <button aria-label="Post invoice" title="Add to the list" onClick={() => postInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--tms-badge-green)' }}><Check size={14} /></button>
                           )}
                           {tab === 'archived' && (
-                            <button aria-label="Restore invoice" title="Restore to the list" onClick={() => restoreInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--ds-green)' }}><ArchiveRestore size={14} /></button>
+                            <button aria-label="Restore invoice" title="Restore to the list" onClick={() => restoreInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--tms-badge-green)' }}><ArchiveRestore size={14} /></button>
                           )}
                           {tab !== 'archived' && (
-                            <button aria-label="Edit invoice" title="Edit" onClick={() => setEditInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--ds-t3)' }}><Pencil size={13} /></button>
+                            <button aria-label="Edit invoice" title="Edit" onClick={() => setEditInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--tms-muted)' }}><Pencil size={13} /></button>
                           )}
                           {tab !== 'archived' && (
-                            <button aria-label="Archive invoice" title="Archive" onClick={() => archiveInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--ds-t3)' }}><Archive size={13} /></button>
+                            <button aria-label="Archive invoice" title="Archive" onClick={() => archiveInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--tms-muted)' }}><Archive size={13} /></button>
                           )}
-                          <button aria-label="Delete invoice" title="Delete permanently" onClick={() => { if (window.confirm('Delete this invoice permanently?')) { deleteMaintenanceInvoice(inv.id); toast.success('Invoice deleted') } }} style={{ ...iconBtnStyle, color: 'var(--ds-red)' }}><Trash2 size={13} /></button>
+                          <button aria-label="Delete invoice" title="Delete permanently" onClick={() => { if (window.confirm('Delete this invoice permanently?')) { deleteMaintenanceInvoice(inv.id); toast.success('Invoice deleted') } }} style={{ ...iconBtnStyle, color: 'var(--tms-badge-red)' }}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -612,11 +601,11 @@ export function InvoicesPage() {
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colSpan={7} style={{ padding: '13px 14px', background: 'var(--ds-bg-2)', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.08em', borderTop: '1px solid var(--ds-border)' }}>Total</td>
-                    <td style={{ padding: '13px 14px', background: 'var(--ds-bg-2)', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--ds-t1)', borderTop: '1px solid var(--ds-border)', whiteSpace: 'nowrap' }}>
+                    <td colSpan={7} style={{ padding: '13px 14px', background: 'var(--tms-surface)', fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', borderTop: '1px solid var(--tms-border)' }}>Total</td>
+                    <td style={{ padding: '13px 14px', background: 'var(--tms-surface)', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--tms-text)', borderTop: '1px solid var(--tms-border)', whiteSpace: 'nowrap' }}>
                       {formatCents(filtered.reduce((s, i) => s + i.amount, 0))}
                     </td>
-                    <td style={{ background: 'var(--ds-bg-2)', borderTop: '1px solid var(--ds-border)' }} />
+                    <td style={{ background: 'var(--tms-surface)', borderTop: '1px solid var(--tms-border)' }} />
                   </tr>
                 </tfoot>
               </table>
@@ -626,12 +615,12 @@ export function InvoicesPage() {
         )}
 
         {tab === 'history' && (
-        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+        <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
           {history.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
               <History className="size-8 opacity-20" />
               <p className="text-sm">No service history yet.</p>
-              <p className="text-xs text-slate-400">Completed tasks and repair invoices appear here per truck.</p>
+              <p className="text-xs text-muted-foreground">Completed tasks and repair invoices appear here per truck.</p>
             </div>
           ) : (
             <div style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', overflowX: 'auto' }}>
@@ -653,14 +642,14 @@ export function InvoicesPage() {
                 <tbody>
                   {history.map((r) => (
                     <tr key={r.id} className="maint-row">
-                      <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{r.date || '—'}</td>
+                      <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>{r.date || '—'}</td>
                       <td style={tdBase}><span style={equipChipStyle}>{equipUnit(r.equipmentId)}</span></td>
                       <td style={tdBase}>{r.kind === 'invoice' ? <Pill tone="violet">Repair</Pill> : <Pill tone="blue">Task</Pill>}</td>
                       <td style={tdBase}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
-                        {r.detail && <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.detail}</div>}
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
+                        {r.detail && <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.detail}</div>}
                       </td>
-                      <td style={{ ...tdBase, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: r.amount != null ? 'var(--ds-t1)' : 'var(--ds-muted-soft)', whiteSpace: 'nowrap' }}>
+                      <td style={{ ...tdBase, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: r.amount != null ? 'var(--tms-text)' : 'var(--tms-disabled)', whiteSpace: 'nowrap' }}>
                         {r.amount != null ? formatCents(r.amount) : '—'}
                       </td>
                     </tr>
@@ -690,6 +679,6 @@ export function InvoicesPage() {
           onClose={() => setEditInvoice(null)}
         />
       )}
-    </div>
+    </TmsScrollPage>
   )
 }

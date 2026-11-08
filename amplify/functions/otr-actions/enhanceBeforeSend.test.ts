@@ -22,6 +22,9 @@ const POD_FN = 'pod-actions-test'
 
 let tables: Record<string, Record<string, unknown>[]>
 let invokes: Record<string, unknown>[]
+let log: ReturnType<typeof vi.spyOn>
+let warn: ReturnType<typeof vi.spyOn>
+let error: ReturnType<typeof vi.spyOn>
 
 async function loadHandler() {
   process.env.POD_DOCUMENT_TABLE_NAME = POD_TABLE
@@ -54,6 +57,9 @@ beforeEach(() => {
   vi.useFakeTimers()
   tables = { [POD_TABLE]: [], [SUB_TABLE]: [], [DOC_TABLE]: [] }
   invokes = []
+  log = vi.spyOn(console, 'log').mockImplementation(() => {})
+  warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  error = vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(DynamoDBDocumentClient.prototype, 'send').mockImplementation(async (cmd: unknown) => {
     if (!(cmd instanceof ScanCommand)) return {}
     const rows = tables[cmd.input.TableName as string] ?? []
@@ -122,6 +128,7 @@ describe('the POD that reaches OTR', () => {
 
     await vi.advanceTimersByTimeAsync(2_000)
     expect((await pending)?.enhancedKey).toBe('driver-docs/sub-1/page-1-enhanced.jpg')
+    expect(log).toHaveBeenCalledWith('[otr-actions] sending the cleaned POD', { loadId: 'load-1', submissionId: 'sub-1' })
   })
 
   it('prefers the merged PDF when the scan combines several pages', async () => {
@@ -157,6 +164,7 @@ describe('the POD that reaches OTR', () => {
     const pod = await pending
     expect(pod?.originalKey).toBe('driver-docs/sub-1/page-1.jpg')
     expect(pod?.enhancedKey).toBeNull()
+    expect(warn).toHaveBeenCalledWith('[otr-actions] POD scan did not finish in time; sending the original', { loadId: 'load-1', submissionId: 'sub-1' })
   })
 
   it('sends the original when pod-actions cannot be reached at all', async () => {
@@ -164,6 +172,7 @@ describe('the POD that reaches OTR', () => {
     vi.spyOn(LambdaClient.prototype, 'send').mockRejectedValue(new Error('AccessDeniedException'))
     const pod = await podForSend()
     expect(pod?.originalKey).toBe('driver-docs/sub-1/page-1.jpg')
+    expect(error).toHaveBeenCalledWith('[otr-actions] could not ask for the scan; sending the original', { submissionId: 'sub-1', error: 'AccessDeniedException' })
   })
 
   it('leaves a JobsDone POD alone — there is no submission to re-scan', async () => {

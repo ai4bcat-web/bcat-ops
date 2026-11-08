@@ -1,0 +1,92 @@
+{
+  "_comment": "CUTOVER_PLAN NB-7. Single source of truth for scripts/smokeProdReadOnly.mjs (--list prints it) and the table in CUTOVER_PLAN. `steps` run with --read-only against the production AppSync URL: GraphQL queries (plus router reads whose action is GET/LIST/SEARCH/FIND/READ/COUNT/PREVIEW/CHECK/LOOKUP/STATUS), DOM reads, screenshots; zero mutations, asserted. `excluded` cannot run read-only; each refuses --read-only (Cognito client blocked, or an explicit refuseReadOnlyFlag) instead of ignoring it.",
+  "steps": [
+    {
+      "id": "RO-00",
+      "title": "Config + token check",
+      "kind": "static",
+      "does": "Validates --prod-url (plain AppSync host, never defaulted), BCAT_PROD_ID_TOKEN (an EXISTING smoke user's ID token, not expired, >5 min left, optional --expect-pool; the browser steps also need BCAT_PROD_ACCESS_TOKEN + BCAT_PROD_REFRESH_TOKEN), prints pool id, group names, minutes left. No network.",
+      "reuses": "scripts/lib/readOnlyGuard.mjs parseReadOnlyConfig"
+    },
+    {
+      "id": "RO-01",
+      "title": "Guard self-test",
+      "kind": "static",
+      "does": "On a separate guard with fake fetch / stub SDK clients: a mutation, a Cognito admin call and a DynamoDB PutItem each throw; a query passes. Proves the guard is armed before it is trusted. No network.",
+      "reuses": "scripts/lib/readOnlyGuard.mjs"
+    },
+    {
+      "id": "RO-02",
+      "title": "API aggregates",
+      "kind": "api",
+      "does": "Paged queries returning ids and status only: counts of Customer, Location, Division, Carrier, Shipment (+ status histogram), Invoice, CarrierBill, and whether TmsSettings 'default' exists. Aggregates are printed, never rows. Compare with the §5 reconcile numbers by hand.",
+      "reuses": "scripts/lib/tmsClient.mjs query shapes (listCustomers/listLocations/listDivisions/getTmsSettings)"
+    },
+    {
+      "id": "RO-03",
+      "title": "Route walk",
+      "kind": "browser",
+      "does": "Navigates every parameter-free page route of devVerifyAA AA_ROUTES and devVerifyS2 ROUTES (deduped; no /new form routes, no placeholder routes): shell renders, not bounced to login, no error text, no console exception or HTTP error, screenshot (light). Navigation + screenshots + DOM assertions only; no clicks.",
+      "reuses": "scripts/lib/aaRoutes.mjs AA_ROUTES, scripts/devVerifyS2.mjs ROUTES, scripts/lib/uiWalk.mjs createWalk"
+    },
+    {
+      "id": "RO-04",
+      "title": "Page timing (read paths)",
+      "kind": "browser",
+      "does": "Cold navigation of each devVerifyPerf PAGE_PATHS page: first rows, settled seconds, request count, MB, rows. Report-only against dev budgets (prod differs); FAILS only on timeout or a mutation in the page's own fetch log (G0).",
+      "reuses": "scripts/lib/perfProbe.mjs measurePage, scripts/lib/perfBudgets.mjs PAGE_PATHS"
+    },
+    {
+      "id": "RO-05",
+      "title": "Create-form render only",
+      "kind": "browser",
+      "does": "Opens /tms/shipments/new and /tms/rates/new, asserts the form and its submit control exist, screenshots. Never types, never clicks Create/Save; the request interceptor would block and count any mutation anyway.",
+      "reuses": "scripts/devVerifyAH.mjs form test ids (ship-form, ship-form-create)"
+    },
+    {
+      "id": "RO-99",
+      "title": "Zero-mutation assertion",
+      "kind": "static",
+      "does": "Prints `READ-ONLY ASSERT mutations=0 ...` (guard counters: queries, routerReads, sdkReads, third-party writes blocked) and exits non-zero if any mutation, Cognito/SSM/Lambda call or non-read SDK verb was attempted, even if swallowed.",
+      "reuses": "scripts/lib/readOnlyGuard.mjs assertZeroMutations"
+    }
+  ],
+  "excluded": [
+    { "script": "devVerifyAA.mjs", "why": "mints 5 staff identities, writes ZZ intake/division/audit fixtures; only its route table is reused (RO-03)" },
+    { "script": "devVerifyAB.mjs", "why": "per-rep Gmail spot quoter on a simulated inbox: mints identities, writes fixtures" },
+    { "script": "devVerifyAD.mjs", "why": "Find & Invite review calls MyCarrierPackets (external service): excluded by decision" },
+    { "script": "devVerifyAE.mjs", "why": "mints an identity; seeds quotes" },
+    { "script": "devVerifyAF.mjs", "why": "the only writer of the AF gate (on-write latency): writes loads" },
+    { "script": "devVerifyAG.mjs", "why": "AP inbox sync: writes bills/messages to a simulated mailbox" },
+    { "script": "devVerifyAH.mjs", "why": "steps AH08-AH14 create ZZ customer/carrier/locations/shipments; only the form render is reused (RO-05)" },
+    { "script": "devVerifyAI.mjs", "why": "conversational dashboards: calls an LLM and writes dashboards/claims" },
+    { "script": "devVerifyAJ.mjs", "why": "creates ZZ shipments and tracking prefs" },
+    { "script": "devVerifyAL.mjs", "why": "Carrier Sales hub: simulated mailbox fixtures" },
+    { "script": "devVerifyAM.mjs", "why": "Cover flow: assigns carriers on ZZ loads" },
+    { "script": "devVerifyAO.mjs", "why": "driver GPS pings and tap-to-share: writes tracking rows" },
+    { "script": "devVerifyAQ.mjs", "why": "creates ZZ drivers/loads" },
+    { "script": "devVerifyAljex.mjs", "why": "synthetic Aljex import: writes" },
+    { "script": "devVerifyAp.mjs", "why": "pushes ZZ loads to Load Review" },
+    { "script": "devVerifyAr.mjs", "why": "Step F live API verification: writes (refuseReadOnlyFlag)" },
+    { "script": "devVerifyCommissions.mjs", "why": "writes commission fixtures (refuseReadOnlyFlag)" },
+    { "script": "devVerifyEmail.mjs", "why": "sends REAL e-mails" },
+    { "script": "devVerifyP.mjs", "why": "SEED_DEMO_DATA / RESET_DEMO_DATA: the demo flow writes and resets data" },
+    { "script": "devVerifyPerf.mjs", "why": "mints an identity and measures against budgets tuned for dev; its page list and measurePage are reused (RO-04)" },
+    { "script": "devVerifyPerfApi.mts", "why": "G1/G2/G7 API gates mint an identity" },
+    { "script": "devVerifyQuotes.mjs", "why": "writes quotes (refuseReadOnlyFlag)" },
+    { "script": "devVerifyR2.mjs", "why": "writes (refuseReadOnlyFlag)" },
+    { "script": "devVerifyR2Followup.mjs", "why": "writes (refuseReadOnlyFlag)" },
+    { "script": "devVerifyS2.mjs", "why": "mints an identity, mints public tracking links (SEND_*_LINK writes), clicks through overlay states; only its parameter-free ROUTES are reused (RO-03)" },
+    { "script": "devVerifyS3.mjs", "why": "mints an identity; click-driven states" },
+    { "script": "devVerifyS4.mjs", "why": "mints an identity; Compliance document fixtures" },
+    { "script": "devVerifyStepJ.mjs", "why": "writes (refuseReadOnlyFlag)" },
+    { "script": "devVerifyStepK.mjs", "why": "writes (refuseReadOnlyFlag)" },
+    { "script": "devVerifyStepR.mjs", "why": "writes (refuseReadOnlyFlag)" },
+    { "script": "devVerifyU.mjs", "why": "mints an identity; ZZ shipments for the Active/All board" },
+    { "script": "devVerifyV.mjs", "why": "mints an identity; ZZ shipments for the tracker assignee tabs" },
+    { "script": "devVerifyW.mjs", "why": "mints an identity; own-fleet loads" },
+    { "script": "devShotsAC.mjs", "why": "mints an identity and seeds dense rows" },
+    { "script": "devShotsAC2.mjs", "why": "mints an identity and seeds dense rows" },
+    { "script": "auditDataExposure.mjs", "why": "reads only, but mints a dev identity to do it (blocked by the Cognito guard under --read-only)" }
+  ]
+}

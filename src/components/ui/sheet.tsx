@@ -16,7 +16,7 @@ const SheetOverlay = React.forwardRef<
     className={cn(
       // backdrop-blur only in the open state — applying it on the base class blurs
       // underlying content even while the overlay is closing/closed.
-      'fixed inset-0 z-50 bg-black/40 data-[state=open]:backdrop-blur-[2px] data-[state=closed]:backdrop-blur-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      'fixed inset-0 z-50 bg-[color:var(--tms-overlay)] data-[state=open]:backdrop-blur-[2px] data-[state=closed]:backdrop-blur-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
       className
     )}
     {...props}
@@ -33,7 +33,7 @@ const SheetContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed z-50 h-full w-[min(540px,94vw)] bg-white shadow-2xl flex flex-col',
+        'tms-portal fixed z-50 h-full w-[min(540px,94vw)] bg-card border-l border-border shadow-[var(--tms-shadow-modal)] flex flex-col',
         'data-[state=open]:animate-in data-[state=closed]:animate-out duration-200',
         side === 'right'
           ? 'right-0 top-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right'
@@ -51,7 +51,7 @@ SheetContent.displayName = 'SheetContent'
 function SheetHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn('flex items-center justify-between px-8 py-5 border-b border-slate-200 flex-shrink-0 min-h-[64px] bg-white', className)}
+      className={cn('flex items-center justify-between px-8 py-5 border-b border-border flex-shrink-0 min-h-[64px] bg-card', className)}
       {...props}
     />
   )
@@ -72,7 +72,7 @@ function SheetBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>
 function SheetFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn('flex items-center gap-3 px-8 py-5 border-t border-slate-200 bg-slate-50/50 flex-shrink-0 min-h-[72px]', className)}
+      className={cn('flex items-center gap-3 px-8 py-5 border-t border-border bg-muted flex-shrink-0 min-h-[72px]', className)}
       {...props}
     />
   )

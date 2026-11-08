@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   processInvoices,
@@ -57,6 +57,14 @@ describe('listAllInvoices', () => {
 })
 
 describe('processInvoices', () => {
+  // The importer reports every row (OK / DUPLICATE / FAIL) on stderr; keep that out of the run.
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('creates new EMAIL records with PENDING status and deterministic id', async () => {
     let created
     const ext = invoiceExternalId(sampleInvoice)
@@ -288,7 +296,10 @@ describe('processInvoices', () => {
 
 describe('CLI dry-run', () => {
   it('resolves equipment without network calls', () => {
-    const stdout = execFileSync('node', [scriptPath, '--dry-run', '--json', JSON.stringify([sampleInvoice])], { encoding: 'utf8' })
+    const run = spawnSync('node', [scriptPath, '--dry-run', '--json', JSON.stringify([sampleInvoice])], { encoding: 'utf8' })
+    expect(run.status).toBe(0)
+    expect(run.stderr).toContain('--dry-run: nothing written.')
+    const stdout = run.stdout
     const previews = stdout.split('\n').filter(Boolean).map((line) => JSON.parse(line))
 
     expect(previews).toHaveLength(1)

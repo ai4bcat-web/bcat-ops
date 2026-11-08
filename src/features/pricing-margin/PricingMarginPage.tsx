@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
-import { Percent, DollarSign, Calculator, Save, RotateCcw, TrendingUp } from 'lucide-react'
+import { Percent, DollarSign, Calculator, Save, RotateCcw } from 'lucide-react'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface MarginConfig {
@@ -34,16 +35,16 @@ void WP_PASS // referenced so tsc -b (noUnusedLocals) does not fail the Amplify 
 
 // ── Styles (consistent with the app's convention) ───────────────────────────
 const cardStyle: React.CSSProperties = {
-  background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
+  background: 'var(--tms-card)', border: '1px solid var(--tms-border)',
   borderRadius: 12, padding: '20px 22px',
 }
 const labelStyle: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)',
+  fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)',
   textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 5, display: 'block',
 }
 const inputStyle: React.CSSProperties = {
-  width: '100%', height: 38, padding: '0 12px', fontSize: 14, color: 'var(--ds-t1)',
-  background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8,
+  width: '100%', height: 38, padding: '0 12px', fontSize: 14, color: 'var(--tms-text)',
+  background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 8,
   fontFamily: 'inherit', boxSizing: 'border-box',
 }
 
@@ -160,76 +161,50 @@ export function PricingMarginPage() {
 
   if (loading) {
     return (
-      <div style={{ padding: 40, color: 'var(--ds-t3)' }}>
+      <div style={{ padding: 40, color: 'var(--tms-muted)' }}>
         Loading margin configuration…
       </div>
     )
   }
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
-      {/* Header */}
-      <div style={{
-        position: 'sticky', top: 0, zIndex: 10,
-        background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)',
-      }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 12, padding: '20px 32px', flexWrap: 'wrap',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{
-              width: 34, height: 34, borderRadius: 9,
-              background: 'linear-gradient(135deg, #e11d2a, #b91c1c)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <TrendingUp size={18} color="#fff" />
-            </div>
-            <div>
-              <h1 style={{
-                fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em',
-                color: 'var(--ds-t1)', margin: 0,
-              }}>
-                Pricing Margin Control
-              </h1>
-              <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
-                Best Care Auto Transport — adjusts the quote tool margin on bestcareautotransport.com
-              </p>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={calcExample} style={secondaryBtnStyle}>
-              <Calculator size={15} />
-              Show Example
-            </button>
-            <button onClick={saveConfig} disabled={saving} style={primaryBtnStyle(saving)}>
-              {saving ? (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <RotateCcw size={15} className="animate-spin" /> Saving…
-                </span>
-              ) : (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Save size={15} /> Save & Push
-                </span>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: 24, padding: '24px 32px 48px', flexWrap: 'wrap' }}>
+    <TmsScrollPage
+      title="Pricing Margin Control"
+      subtitle="Best Care Auto Transport — adjusts the quote tool margin on bestcareautotransport.com"
+      stickyHead
+      actions={
+        <>
+          <button onClick={calcExample} style={secondaryBtnStyle}>
+            <Calculator size={15} />
+            Show Example
+          </button>
+          <button onClick={saveConfig} disabled={saving} style={primaryBtnStyle(saving)}>
+            {saving ? (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <RotateCcw size={15} className="animate-spin" /> Saving…
+              </span>
+            ) : (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Save size={15} /> Save & Push
+              </span>
+            )}
+          </button>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
         {/* Left: Config form */}
         <div style={{ flex: '1 1 400px', minWidth: 320, display: 'flex', flexDirection: 'column', gap: 22 }}>
 
           {/* WP Auth */}
           <section style={cardStyle}>
             <h3 style={sectionTitleStyle}>WordPress Connection</h3>
-            <p style={{ fontSize: 13, color: 'var(--ds-t3)', margin: '0 0 12px' }}>
+            <p style={{ fontSize: 13, color: 'var(--tms-muted)', margin: '0 0 12px' }}>
               Margin config is stored on the Best Care WordPress site so the quote tool can read it.
               {wpPassLoaded && (
                 <span style={{
                   marginLeft: 8, padding: '2px 8px', borderRadius: 4,
-                  background: '#dcfce7', color: '#166534', fontSize: 11,
+                  background: 'var(--tms-badge-green-tint)', color: 'var(--tms-badge-green)', fontSize: 11,
                   fontWeight: 600,
                 }}>
                   ✓ Auto-loaded — enter once, persists forever on this device
@@ -264,7 +239,7 @@ export function PricingMarginPage() {
               </div>
             </div>
             {config.updatedAt && (
-              <p style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 10, marginBottom: 0 }}>
+              <p style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: 10, marginBottom: 0 }}>
                 Last saved: {new Date(config.updatedAt).toLocaleString()}
               </p>
             )}
@@ -280,9 +255,9 @@ export function PricingMarginPage() {
                   onClick={() => setConfig({ ...config, mode })}
                   style={{
                     flex: 1, height: 42, borderRadius: 9, border: '1px solid',
-                    borderColor: config.mode === mode ? '#e11d2a' : 'var(--ds-border)',
-                    background: config.mode === mode ? '#fef2f2' : 'var(--ds-bg)',
-                    color: config.mode === mode ? '#e11d2a' : 'var(--ds-t2)',
+                    borderColor: config.mode === mode ? 'var(--tms-primary)' : 'var(--tms-border)',
+                    background: config.mode === mode ? 'var(--tms-primary-tint)' : 'var(--tms-bg)',
+                    color: config.mode === mode ? 'var(--tms-primary)' : 'var(--tms-text-2)',
                     fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
                   }}
                 >
@@ -317,9 +292,9 @@ export function PricingMarginPage() {
                     value={config.percent}
                     onChange={(e) => setConfig({ ...config, percent: parseFloat(e.target.value) || 0 })}
                   />
-                  <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--ds-t2)' }}>%</span>
+                  <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--tms-text-2)' }}>%</span>
                 </div>
-                <p style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 6 }}>
+                <p style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: 6 }}>
                   Applied on top of the carrier rate from Super Dispatch. E.g. 15% on a $850 carrier rate = $127.50 margin.
                 </p>
               </div>
@@ -330,7 +305,7 @@ export function PricingMarginPage() {
                   Flat Amount ($ per quote)
                 </label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--ds-t2)' }}>$</span>
+                  <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--tms-text-2)' }}>$</span>
                   <input
                     type="number" min="0" max="2000" step="10"
                     style={inputStyle}
@@ -338,7 +313,7 @@ export function PricingMarginPage() {
                     onChange={(e) => setConfig({ ...config, flatAmount: parseFloat(e.target.value) || 0 })}
                   />
                 </div>
-                <p style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 6 }}>
+                <p style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: 6 }}>
                   Fixed dollar amount added to every quote regardless of distance or vehicle.
                 </p>
               </div>
@@ -349,8 +324,8 @@ export function PricingMarginPage() {
           {exampleQuote && (
             <section style={{
               ...cardStyle,
-              background: 'linear-gradient(135deg, #fef2f2 0%, #fff 100%)',
-              borderColor: '#fecaca',
+              background: 'linear-gradient(135deg, var(--tms-primary-tint) 0%, var(--tms-card) 100%)',
+              borderColor: 'var(--tms-border)',
             }}>
               <h3 style={{ ...sectionTitleStyle, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Calculator size={16} />
@@ -359,10 +334,10 @@ export function PricingMarginPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <ExRow label="Route" value={exampleQuote.route} />
                 <ExRow label="Distance" value={exampleQuote.distance} />
-                <div style={{ height: 1, background: '#fecaca', margin: '4px 0' }} />
+                <div style={{ height: 1, background: 'var(--tms-border)', margin: '4px 0' }} />
                 <ExRow label="Base carrier rate" value={`$${exampleQuote.baseCarrierRate.toLocaleString()}`} />
                 <ExRow label="Margin applied" value={exampleQuote.marginApplied} highlight />
-                <div style={{ height: 1, background: '#e11d2a', margin: '4px 0', opacity: 0.3 }} />
+                <div style={{ height: 1, background: 'var(--tms-primary)', margin: '4px 0', opacity: 0.3 }} />
                 <ExRow
                   label="Customer price"
                   value={`$${exampleQuote.customerPrice.toLocaleString()}`}
@@ -370,7 +345,7 @@ export function PricingMarginPage() {
                 />
               </div>
               <p style={{
-                fontSize: 11, color: 'var(--ds-t3)', marginTop: 14, marginBottom: 0,
+                fontSize: 11, color: 'var(--tms-muted)', marginTop: 14, marginBottom: 0,
                 lineHeight: 1.5,
               }}>
                 This is an illustrative example using a Chicago→Miami route at ~1,380 miles.
@@ -386,7 +361,7 @@ export function PricingMarginPage() {
           <section style={cardStyle}>
             <h3 style={sectionTitleStyle}>How Pricing Works</h3>
             <ol style={{
-              fontSize: 13.5, color: 'var(--ds-t2)', lineHeight: 1.8,
+              fontSize: 13.5, color: 'var(--tms-text-2)', lineHeight: 1.8,
               paddingLeft: 20, margin: 0,
             }}>
               <li>
@@ -414,7 +389,7 @@ export function PricingMarginPage() {
               <li>
                 <strong>Quote data is stored</strong> via the BCAT Booking plugin and
                 emailed to <code style={{
-                  background: 'var(--ds-bg)', padding: '1px 6px', borderRadius: 4,
+                  background: 'var(--tms-bg)', padding: '1px 6px', borderRadius: 4,
                   fontSize: 12,
                 }}>cars@bcatcorp.com</code>.
               </li>
@@ -438,20 +413,20 @@ export function PricingMarginPage() {
             </div>
           </section>
 
-          <section style={{ ...cardStyle, background: '#fefce8', borderColor: '#fde68a' }}>
-            <h3 style={{ ...sectionTitleStyle, color: '#92400e' }}>⚡ PHP Bridge Required (One-Time Setup)</h3>
-            <p style={{ fontSize: 13, color: '#92400e', margin: 0, lineHeight: 1.6 }}>
+          <section style={{ ...cardStyle, background: 'var(--tms-badge-orange-tint)', borderColor: 'var(--tms-badge-orange)' }}>
+            <h3 style={{ ...sectionTitleStyle, color: 'var(--tms-badge-orange)' }}>⚡ PHP Bridge Required (One-Time Setup)</h3>
+            <p style={{ fontSize: 13, color: 'var(--tms-badge-orange)', margin: 0, lineHeight: 1.6 }}>
               The config is live on the WordPress site at{' '}
-              <code style={{ background: '#fef3c7', padding: '1px 5px', borderRadius: 3 }}>/bcat-pricing-margin-config/</code>.
+              <code style={{ background: 'var(--tms-surface)', padding: '1px 5px', borderRadius: 3 }}>/bcat-pricing-margin-config/</code>.
               For the <strong>bcat-pricing-integration</strong> plugin to read it, upload the PHP bridge file
-              from <code style={{ background: '#fef3c7', padding: '1px 5px', borderRadius: 3 }}>bcat-ops/wordpress/bcat-pricing-margin-api.php</code>{' '}
+              from <code style={{ background: 'var(--tms-surface)', padding: '1px 5px', borderRadius: 3 }}>bcat-ops/wordpress/bcat-pricing-margin-api.php</code>{' '}
               to <strong>wp-content/mu-plugins/</strong> via GoDaddy cPanel → File Manager.
               Once uploaded, changes here take effect immediately on the live quote tool.
             </p>
           </section>
         </div>
       </div>
-    </div>
+    </TmsScrollPage>
   )
 }
 
@@ -462,11 +437,11 @@ function ExRow({ label, value, highlight, large }: {
 }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <span style={{ fontSize: large ? 15 : 13.5, color: 'var(--ds-t3)' }}>{label}</span>
+      <span style={{ fontSize: large ? 15 : 13.5, color: 'var(--tms-muted)' }}>{label}</span>
       <span style={{
         fontSize: large ? 18 : 14,
         fontWeight: large ? 700 : (highlight ? 600 : 500),
-        color: highlight ? '#e11d2a' : (large ? '#1F2329' : 'var(--ds-t1)'),
+        color: highlight ? 'var(--tms-primary)' : (large ? 'var(--tms-text)' : 'var(--tms-text)'),
         fontFamily: large ? "'SF Mono', 'Fira Code', monospace" : 'inherit',
       }}>
         {value}
@@ -479,30 +454,30 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
   return (
     <div style={{
       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      padding: '8px 0', borderBottom: '1px solid var(--ds-border)',
+      padding: '8px 0', borderBottom: '1px solid var(--tms-border)',
     }}>
-      <span style={{ fontSize: 13, color: 'var(--ds-t3)' }}>{label}</span>
-      <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>{value}</span>
+      <span style={{ fontSize: 13, color: 'var(--tms-muted)' }}>{label}</span>
+      <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--tms-text)' }}>{value}</span>
     </div>
   )
 }
 
 const sectionTitleStyle: React.CSSProperties = {
-  fontSize: 13, fontWeight: 700, color: 'var(--ds-t1)',
+  fontSize: 13, fontWeight: 700, color: 'var(--tms-text)',
   marginBottom: 14, letterSpacing: '-0.01em', marginTop: 0,
 }
 
 const primaryBtnStyle = (disabled: boolean): React.CSSProperties => ({
   display: 'flex', alignItems: 'center', gap: 7, height: 38, padding: '0 18px',
   borderRadius: 9, border: 'none',
-  background: disabled ? 'var(--ds-border)' : '#e11d2a',
-  color: '#fff', fontSize: 13.5, fontWeight: 600,
+  background: disabled ? 'var(--tms-border)' : 'var(--tms-primary)',
+  color: 'var(--tms-on-primary)', fontSize: 13.5, fontWeight: 600,
   cursor: disabled ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
 })
 
 const secondaryBtnStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 6, height: 38, padding: '0 16px',
-  borderRadius: 9, border: '1px solid var(--ds-border)',
-  background: 'var(--ds-bg)', color: 'var(--ds-t1)',
+  borderRadius: 9, border: '1px solid var(--tms-border)',
+  background: 'var(--tms-bg)', color: 'var(--tms-text)',
   fontSize: 13.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
 }

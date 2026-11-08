@@ -41,22 +41,22 @@ export function DraftDateField({ value, onSave, label, title, successMessage, cl
   }
 
   const inputStyle = compact
-    ? { height: 28, width: '100%', borderRadius: 6, padding: '0 6px', fontSize: 11.5, background: 'var(--ds-bg)' }
-    : { height: 34, borderRadius: 8, padding: '0 10px', fontSize: 13, background: 'var(--ds-surface)' }
+    ? { height: 28, width: '100%', borderRadius: 6, padding: '0 6px', fontSize: 11.5, background: 'var(--tms-bg)' }
+    : { height: 34, borderRadius: 8, padding: '0 10px', fontSize: 13, background: 'var(--tms-card)' }
   const btn = { height: compact ? 24 : 30, padding: '0 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' } as const
 
   return (
     <div>
       <input type="date" value={draft} onChange={(e) => setDraft(e.target.value)} title={title} aria-label={label} disabled={busy}
-        style={{ ...inputStyle, border: '1px solid var(--ds-border)', color: 'var(--ds-t1)', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+        style={{ ...inputStyle, border: '1px solid var(--tms-border)', color: 'var(--tms-text)', fontFamily: 'inherit', boxSizing: 'border-box' }} />
       {dirty && (
         <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
           <button type="button" onClick={() => void save()} disabled={busy}
-            style={{ ...btn, border: 'none', background: 'var(--ds-blue)', color: '#fff', opacity: busy ? 0.7 : 1 }}>
+            style={{ ...btn, border: 'none', background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', opacity: busy ? 0.7 : 1 }}>
             {busy ? 'Saving…' : 'Save'}
           </button>
           <button type="button" onClick={() => setDraft(saved)} disabled={busy}
-            style={{ ...btn, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)' }}>
+            style={{ ...btn, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)' }}>
             Cancel
           </button>
         </div>

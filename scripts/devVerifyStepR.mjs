@@ -1,0 +1,660 @@
+/**
+ * Step R live verification against the DEV stack.
+ *
+ * Throwaway, the sibling of `devVerifyCommissions.mjs`. It drives the deployed Lambdas
+ * through Ryne's Step R hard rules with real tokens, never through the UI:
+ *
+ *   - PRO permanence: the generated `deleteLoad` mutation is gone from the schema,
+ *     `DELETE_SHIPMENT` / `RESTORE_SHIPMENT` no longer resolve, a non-admin token
+ *     cannot void, an admin void keeps the PRO, the legs and the documents, and a
+ *     voided shipment refuses every write, cannot be invoiced, and leaves the driver's
+ *     calendar and settlement;
+ *   - the ownership taxonomy: the seed rows exist, booking Ivan Cartage (own fleet)
+ *     tags ASSETS + the driver's subsidiary on BOTH the Shipment and the mirrored Load,
+ *     an outside carrier tags BROKERAGE and clears the own-fleet marks, a hand tag
+ *     survives a carrier change, RETAG dry-runs without writing;
+ *   - the own-fleet mirror: the Load carries pickupDriverId / deliveryDriverId /
+ *     stops[].driverId / truckId exactly as a load booked on the calendar would;
+ *   - the release-to-accounting gate: READY_TO_INVOICE, SET_AR_STATUS, GENERATE_INVOICE,
+ *     BATCH_GENERATE, PREVIEW_INVOICE and SEND_TO_FACTOR all refuse with the exact
+ *     missing list (documents, references, open exceptions, unsettled carrier charges),
+ *     `override` no longer exists, and two concurrent GENERATE_INVOICE calls issue one
+ *     invoice.
+ *   - the cutover to one record: a client token can neither create a Load nor rename one
+ *     onto another PRO, a shipment can be created from typed customer text without a
+ *     Customer record being invented, that unresolved shipment is refused by the gates
+ *     until SET_SHIPMENT_CUSTOMER links one, a PRO is claimed forever (a voided one is
+ *     never reissued, two concurrent creates on one PRO yield one shipment, and
+ *     SET_LOAD_PRO never releases the old number), DUPLICATE_SHIPMENT keeps the driver,
+ *     and a factoring create lands on the LEGACY AR rung because that money is already
+ *     collected.
+ *
+ * Fixtures are retired by VOID (never deleted); the temporary identity is created with
+ * a randomised password that is never printed and removed in a `finally`. It refuses
+ * to run against anything but the dev API.
+ *
+ *   BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyStepR.mjs
+ *
+ * Without those variables it signs in a throwaway ADMIN minted in the dev pool (not the owner).
+ */
+import { STACK } from './lib/stackConfig.mjs'
+import { randomBytes, randomUUID } from 'node:crypto'
+import { devAdminSession } from './lib/devAdminSession.mjs'
+import { findActiveRepId, poReference, releaseForReview } from './lib/releaseFixture.mjs'
+import { refuseReadOnlyFlag } from './lib/readOnlyGuard.mjs'
+refuseReadOnlyFlag('devVerifyStepR.mjs')
+
+const DEV_API = STACK.apiUrl
+const DEV_POOL = STACK.staffPoolId
+const DEV_CLIENT = STACK.staffClientId
+const DEV_TABLE_SUFFIX = STACK.tableSuffix
+const region = 'us-east-1'
+
+const outputs = {
+  auth: { user_pool_id: DEV_POOL, user_pool_client_id: DEV_CLIENT, aws_region: region, username_attributes: ['email'] },
+  data: { url: DEV_API, aws_region: region, default_authorization_type: 'AMAZON_COGNITO_USER_POOLS' },
+  version: '1.3',
+}
+
+const results = []
+function ok(name, detail) { results.push({ ok: true, name, detail }); console.log(`PASS  ${name}${detail ? ` — ${detail}` : ''}`) }
+function bad(name, detail) { results.push({ ok: false, name, detail }); console.log(`FAIL  ${name} — ${detail}`) }
+function equals(name, actual, expected, note) {
+  if (actual === expected) ok(name, note ?? String(actual))
+  else bad(name, `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}${note ? ` (${note})` : ''}`)
+}
+async function refuses(name, pattern, run) {
+  try {
+    await run()
+    bad(name, 'it was allowed')
+  } catch (err) {
+    const message = String(err.message ?? err)
+    if (pattern.test(message)) ok(name, message.slice(0, 160))
+    else bad(name, `refused for the wrong reason: ${message.slice(0, 220)}`)
+  }
+}
+
+let token = ''
+async function gqlAs(authToken, query, variables) {
+  const res = await fetch(DEV_API, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: authToken },
+    body: JSON.stringify({ query, variables }),
+  })
+  const body = await res.json()
+  if (body.errors?.length) throw new Error(body.errors.map((e) => e.message).join('; '))
+  return body.data
+}
+const gql = (query, variables) => gqlAs(token, query, variables)
+const routerAs = (authToken, field) => async (action, input) => {
+  const data = await gqlAs(
+    authToken,
+    `mutation A($action: String!, $input: AWSJSON!) { ${field}(action: $action, input: $input) }`,
+    { action, input: JSON.stringify(input) },
+  )
+  return JSON.parse(data[field])
+}
+const shipAction = (action, input) => routerAs(token, 'tmsShipmentActions')(action, input)
+const finAction = (action, input) => routerAs(token, 'tmsFinanceActions')(action, input)
+const dirAction = (action, input) => routerAs(token, 'tmsDirectoryActions')(action, input)
+
+async function manageUsers(args) {
+  const names = Object.keys(args)
+  const typeOf = (k) => (k === 'isAdmin' ? 'Boolean' : 'String')
+  const decls = names.map((n) => `$${n}: ${typeOf(n)}${n === 'action' ? '!' : ''}`).join(', ')
+  const passed = names.map((n) => `${n}: $${n}`).join(', ')
+  const data = await gql(`query M(${decls}) { manageUsers(${passed}) }`, args)
+  let value = data.manageUsers
+  while (typeof value === 'string') {
+    try { value = JSON.parse(value) } catch { break }
+  }
+  return value
+}
+
+// ── temporary identity ───────────────────────────────────────────────────────
+function secret() { return `Aa1!${randomBytes(18).toString('base64url')}` }
+let poolClient = null
+async function cognitoAdmin() {
+  const sdk = await import('@aws-sdk/client-cognito-identity-provider')
+  poolClient ??= new sdk.CognitoIdentityProviderClient({ region })
+  return { sdk, client: poolClient }
+}
+async function setPoolPassword(username, password) {
+  const { sdk, client } = await cognitoAdmin()
+  await client.send(new sdk.AdminSetUserPasswordCommand({ UserPoolId: DEV_POOL, Username: username, Password: password, Permanent: true }))
+}
+async function deleteFromPool(username, profileId) {
+  const [{ sdk, client }, { DynamoDBClient, DeleteItemCommand }] =
+    await Promise.all([cognitoAdmin(), import('@aws-sdk/client-dynamodb')])
+  await new DynamoDBClient({ region }).send(new DeleteItemCommand({
+    TableName: `UserProfile-${DEV_TABLE_SUFFIX}`, Key: { id: { S: profileId ?? username } },
+  })).catch(() => {})
+  await client.send(new sdk.AdminDeleteUserCommand({ UserPoolId: DEV_POOL, Username: username })).catch(() => {})
+}
+
+// ── a legacy load, seeded the only way left ──────────────────────────────────
+/**
+ * Write a pre-Step-R Load straight into DynamoDB.
+ *
+ * The cutover closed the last client door: Load grants a signed-in token `read` and
+ * `update` and nothing else, so `createLoad` can no longer mint the orphan this script
+ * needs to prove BACKFILL_SHIPMENT on — which is exactly the rule check 1 of section 7c
+ * asserts. The fixture is therefore written the way every TMS migration writes one, a
+ * PutItem under the IAM credentials this script already uses for the temporary identity.
+ * Nothing about the row is special: it is a legacy load, with no shipmentId and no claim
+ * on its PRO, which is what the dev table was full of before Step R.
+ */
+let docClient = null
+async function seedLegacyLoad(fields) {
+  const [{ DynamoDBClient }, { DynamoDBDocumentClient, PutCommand }] =
+    await Promise.all([import('@aws-sdk/client-dynamodb'), import('@aws-sdk/lib-dynamodb')])
+  docClient ??= DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
+    marshallOptions: { removeUndefinedValues: true },
+  })
+  const now = new Date().toISOString()
+  const id = randomUUID()
+  await docClient.send(new PutCommand({
+    TableName: `Load-${DEV_TABLE_SUFFIX}`,
+    Item: {
+      id, __typename: 'Load', createdAt: now, updatedAt: now,
+      createdBy: 'script:devVerifyStepR', updatedBy: 'script:devVerifyStepR',
+      ...fields,
+    },
+  }))
+  return { id }
+}
+let amplifyAuth = null
+async function authModule() {
+  if (!amplifyAuth) {
+    const { Amplify } = await import('aws-amplify')
+    Amplify.configure(outputs)
+    amplifyAuth = await import('aws-amplify/auth')
+  }
+  return amplifyAuth
+}
+async function tokenFor(email, password) {
+  const auth = await authModule()
+  await auth.signOut().catch(() => {})
+  const attempt = await auth.signIn({ username: email, password })
+  if (!attempt.isSignedIn) {
+    const confirmed = await auth.confirmSignIn({ challengeResponse: secret() })
+    if (!confirmed.isSignedIn) throw new Error('the temporary identity could not finish signing in')
+  }
+  const session = await auth.fetchAuthSession({ forceRefresh: true })
+  const idToken = session.tokens?.idToken?.toString()
+  await auth.signOut().catch(() => {})
+  if (!idToken) throw new Error('no id token for the temporary identity')
+  return idToken
+}
+
+// ── documents: a tiny real PDF through PREPARE → PUT → COMMIT ───────────────
+const TINY_PDF = Buffer.from(
+  '%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n',
+)
+async function attachDocument(shipmentId, orderId, loadId, type) {
+  const name = `verify-${type.toLowerCase()}.pdf`
+  const prepared = await shipAction('PREPARE_DOCUMENT_UPLOAD', {
+    shipmentId, type, name, contentType: 'application/pdf', sizeBytes: TINY_PDF.length,
+  })
+  const put = await fetch(prepared.uploadUrl, { method: 'PUT', headers: { 'content-type': 'application/pdf' }, body: TINY_PDF })
+  if (!put.ok) throw new Error(`upload failed: ${put.status}`)
+  return shipAction('COMMIT_DOCUMENT', {
+    shipmentId, documentId: prepared.documentId, s3Key: prepared.s3Key, type, name,
+    contentType: 'application/pdf', sizeBytes: TINY_PDF.length,
+    ...(type === 'BOL' || type === 'POD' ? { loadId } : { orderId }),
+  })
+}
+const loadRow = async (id) => (await gql(
+  `query L($id: ID!) { getLoad(id: $id) { id aljexId tmsId pickupNumber customer customerId status assignmentType carrierName pickupDriverId deliveryDriverId truckId trailerNumber stops readyToInvoice revDivision revSubdivision revTagSource salesRepId voidedAt updatedAt } }`,
+  { id },
+)).getLoad
+const stopsOf = (load) => { try { return JSON.parse(load.stops ?? '[]') } catch { return [] } }
+
+async function main() {
+  const session = await devAdminSession('stepr')
+  token = session.token
+  const stamp = Date.now()
+  const today = new Date().toISOString().slice(0, 10)
+  const createdUsers = []
+  const fixtures = { shipmentIds: [], customerId: null }
+
+  try {
+    // ── 1. the schema no longer offers a delete ───────────────────────────
+    const schema = await gql(`query S { __schema { mutationType { fields { name } } subscriptionType { fields { name } } types { name } } }`)
+    const mutations = schema.__schema.mutationType.fields.map((f) => f.name)
+    const subs = schema.__schema.subscriptionType.fields.map((f) => f.name)
+    const types = schema.__schema.types.map((t) => t.name)
+    equals('deleteLoad is gone from the deployed schema', mutations.includes('deleteLoad'), false)
+    equals('onDeleteLoad is gone from the deployed schema', subs.includes('onDeleteLoad'), false)
+    equals('deleteShipment is gone from the deployed schema', mutations.includes('deleteShipment'), false)
+    equals('onDeleteShipment is gone from the deployed schema', subs.includes('onDeleteShipment'), false)
+    equals('updateLoad still exists (additive)', mutations.includes('updateLoad'), true)
+    for (const t of ['OwnershipDivision', 'OwnershipRule', 'ShipmentView']) equals(`${t} type is deployed`, types.includes(t), true)
+    await refuses('DELETE_SHIPMENT no longer resolves', /Unknown action/i, () => shipAction('DELETE_SHIPMENT', { shipmentId: 'x' }))
+    await refuses('RESTORE_SHIPMENT no longer resolves', /Unknown action/i, () => shipAction('RESTORE_SHIPMENT', { shipmentId: 'x' }))
+
+    // ── 2. the taxonomy seed ──────────────────────────────────────────────
+    const seed = await dirAction('ENSURE_OWNERSHIP_SEED', {})
+    ok('ENSURE_OWNERSHIP_SEED ran', JSON.stringify(seed))
+    const seedAgain = await dirAction('ENSURE_OWNERSHIP_SEED', {})
+    equals('a second seed creates nothing', (seedAgain.divisionsCreated ?? 0) + (seedAgain.rulesCreated ?? 0) + (seedAgain.viewsCreated ?? 0), 0)
+    const divisions = (await gql(`query D { listOwnershipDivisions(limit: 200) { items { id code name brand parentId active sortOrder } } }`)).listOwnershipDivisions.items
+    const rules = (await gql(`query R { listOwnershipRules(limit: 200) { items { id sortOrder active divisionCode } } }`)).listOwnershipRules.items
+    const views = (await gql(`query V { listShipmentViews(limit: 200) { items { id slug name active } } }`)).listShipmentViews.items
+    const codes = divisions.map((d) => d.code).sort()
+    ok('division rows', codes.join(' '))
+    for (const c of ['BROKERAGE', 'ASSETS', 'OWNER_OPERATOR', 'BOX_TRUCK', 'LOCAL', 'CAR_SHIPPING', 'COMPANY']) equals(`division ${c} seeded`, codes.includes(c), true)
+    equals('three ASSETS subsidiaries', divisions.filter((d) => d.parentId === 'ASSETS').length, 3)
+    // Step R2 reworked the seed: eight live rules (the dropped rule-seed-6 survives, deactivated).
+    equals('eight live seed rules', rules.filter((r) => r.id.startsWith('rule-seed-') && r.active !== false).length, 8)
+    const seedViewSlugs = ['active-shipments', 'my-queue', 'team-queue', 'brokerage-board', 'car-shipping-board', 'owner-operators', 'box-trucks', 'local-drivers']
+    const liveSlugs = new Set(views.filter((v) => v.active !== false).map((v) => v.slug))
+    equals('the eight seed views are live', seedViewSlugs.filter((slug) => !liveSlugs.has(slug)).join(',') || 'all', 'all')
+
+    // ── 3. a non-admin identity, from a real token ────────────────────────
+    const repEmail = `zz-r-rep-${stamp}@example.invalid`
+    const repPassword = secret()
+    const repCreated = await manageUsers({ action: 'create', email: repEmail, role: 'CUSTOMER_REP' })
+    createdUsers.push({ email: repEmail, profileId: repCreated.profile?.id ?? null })
+    await setPoolPassword(repEmail, repPassword)
+    const repToken = await tokenFor(repEmail, repPassword)
+    token = await session.relogin()
+    const repShip = routerAs(repToken, 'tmsShipmentActions')
+
+    // ── 4. fixtures: a customer that requires BOL + POD + a PO reference ──
+    const created = await dirAction('UPSERT_CUSTOMER', {
+      name: `ZZ Step R Verification ${stamp}`, status: 'ACTIVE', active: true,
+      mcNumber: `8${String(stamp).slice(-6)}`, billingEmail: 'r-verification@example.invalid',
+      creditLimitCents: 100000000, paymentTermsDays: 30,
+      requiredDocsForInvoice: ['BOL', 'POD'],
+      requiredReferences: [{ code: 'PO', label: 'PO number', level: 'ORDER', countOnNewOrder: 1 }],
+      notes: 'Dev-only Step R verification fixture. Voided at the end of the run.',
+    })
+    const customer = created.customer ?? created
+    fixtures.customerId = customer.id
+    console.log(`fixture customer: ${customer.name} (${customer.id})`)
+
+    const drivers = (await gql(`query Dr { listDrivers(limit: 1000) { items { id name active type fleetGroup driverType assignedTruckId } } }`)).listDrivers.items
+    const ivanDriver = drivers.find((d) => d.active && d.type !== 'broker' && d.fleetGroup === 'BOX_TRUCK')
+      ?? drivers.find((d) => d.active && d.type !== 'broker' && ['LOCAL', 'OWNER_OPERATOR'].includes(d.fleetGroup ?? ''))
+    if (!ivanDriver) throw new Error('no active Ivan driver with a fleet group on dev')
+    const expectedSub = ivanDriver.fleetGroup === 'BOX_TRUCK' ? 'BOX_TRUCK' : ivanDriver.fleetGroup === 'LOCAL' ? 'LOCAL' : 'OWNER_OPERATOR'
+    console.log(`Ivan driver for the proof: ${ivanDriver.name} (${ivanDriver.id}, ${ivanDriver.fleetGroup})`)
+
+    // `expenseCents` adds a carrier-side charge: the expense (and so profit) the Load Review asks for.
+    async function newShipment(label, { expenseCents = 0 } = {}) {
+      let bundle = await shipAction('CREATE_SHIPMENT', { customerId: customer.id })
+      const shipmentId = bundle.shipment.id
+      fixtures.shipmentIds.push(shipmentId)
+      bundle = await shipAction('SAVE_ORDER_FORM', {
+        shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt,
+        order: { mode: 'FTL', equipmentType: 'Dry Van', references: [poReference(`R-${label}-${stamp}`)] },
+        stops: [
+          { type: 'pickup', name: 'Verify Shipper', city: 'Chicago, IL', address: { city: 'Chicago', state: 'IL', zip: '60601' }, appt: `${today}T13:00:00.000Z` },
+          { type: 'delivery', name: 'Verify Receiver', city: 'Dallas, TX', address: { city: 'Dallas', state: 'TX', zip: '75201' }, appt: `${today}T21:00:00.000Z` },
+        ],
+        charges: [
+          { side: 'CUSTOMER', code: 'LINEHAUL', rateCents: 250000, count: 1 },
+          ...(expenseCents > 0 ? [{ side: 'CARRIER', code: 'LINEHAUL', rateCents: expenseCents, count: 1 }] : []),
+        ],
+      })
+      await shipAction('SUBMIT_ORDER', { shipmentId, expectedUpdatedAt: bundle.shipment.updatedAt })
+      bundle = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId })
+      console.log(`fixture shipment ${label}: ${bundle.shipment.number} (${shipmentId})`)
+      return bundle
+    }
+    const reload = (shipmentId) => shipAction('GET_SHIPMENT_BUNDLE', { shipmentId })
+    async function deliver(shipmentId) {
+      let bundle = await reload(shipmentId)
+      for (const status of ['DISPATCHED', 'LOADING', 'PICKED_UP', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
+        const load = bundle.loads[0]
+        try { await shipAction('SET_LOAD_STATUS', { loadId: load.id, status, expectedUpdatedAt: load.updatedAt }) } catch (err) { console.log(`  (load ${status} skipped: ${String(err.message).slice(0, 80)})`) }
+        bundle = await reload(shipmentId)
+      }
+      return bundle
+    }
+
+    // ── 5. shipment A: Ivan Cartage (own fleet) ───────────────────────────
+    let a = await newShipment('A', { expenseCents: 180000 })
+    const aId = a.shipment.id
+    const aOrderId = a.orders[0].id
+    const aLoadId = a.loads[0].id
+    equals('a fresh brokerage-booked shipment resolves BROKERAGE before a carrier is chosen', a.shipment.revDivision, 'BROKERAGE')
+    await shipAction('ASSIGN_ASSET', { loadId: aLoadId, driverId: ivanDriver.id, driverName: ivanDriver.name, truckId: ivanDriver.assignedTruckId ?? 'verify-truck', truckNumber: '3890' })
+    a = await reload(aId)
+    let aLoad = await loadRow(aLoadId)
+    equals('own fleet → Shipment.revDivision ASSETS', a.shipment.revDivision, 'ASSETS')
+    equals(`own fleet → Shipment.revSubdivision ${expectedSub}`, a.shipment.revSubdivision, expectedSub)
+    equals('the mirrored Load carries the same division', aLoad.revDivision, 'ASSETS')
+    equals('the mirrored Load carries the same subdivision', aLoad.revSubdivision, expectedSub)
+    equals('Load.pickupDriverId is the Ivan driver (calendar / dashboards read it)', aLoad.pickupDriverId, ivanDriver.id)
+    equals('Load.deliveryDriverId is the Ivan driver (settlements read it)', aLoad.deliveryDriverId, ivanDriver.id)
+    equals('every stop carries the driver (driver app reads it)', stopsOf(aLoad).every((s) => s.driverId === ivanDriver.id), true)
+    equals('Load.assignmentType OWN_ASSET', aLoad.assignmentType, 'OWN_ASSET')
+    equals('Load.truckId written', Boolean(aLoad.truckId), true, aLoad.truckId)
+    const test = await shipAction('TEST_OWNERSHIP_RULES', { shipmentId: aId })
+    equals('TEST_OWNERSHIP_RULES sees the own-fleet carrier', test.context?.carrierId, 'OWN_FLEET')
+    equals('TEST_OWNERSHIP_RULES resolves the same tag', test.resolution?.revDivision, 'ASSETS')
+
+    a = await deliver(aId)
+    equals('A delivered', a.shipment.status, 'DELIVERED')
+
+    // ── 6. the release gate on A ──────────────────────────────────────────
+    const exact = (parts) => new RegExp(parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*'))
+    await refuses('READY_TO_INVOICE refuses with the exact missing documents', exact(['Not ready for accounting', 'Missing document: BOL', 'Missing document: POD']), () =>
+      shipAction('READY_TO_INVOICE', { orderId: aOrderId, expectedUpdatedAt: a.orders[0].updatedAt }))
+    await refuses('READY_TO_INVOICE no longer accepts an override', /Not ready for accounting/, () =>
+      shipAction('READY_TO_INVOICE', { orderId: aOrderId, expectedUpdatedAt: a.orders[0].updatedAt, override: true, overrideNote: 'bypass attempt' }))
+    await refuses('SET_AR_STATUS UNBILLED is gated the same way', /Not ready for accounting.*Missing document: POD/, () =>
+      shipAction('SET_AR_STATUS', { orderId: aOrderId, status: 'UNBILLED', expectedUpdatedAt: a.orders[0].updatedAt }))
+    await refuses('GENERATE_INVOICE cannot jump the gate', /UNBILLED|Not ready for accounting/, () => finAction('GENERATE_INVOICE', { orderId: aOrderId }))
+    const previewA = await finAction('PREVIEW_INVOICE', { orderId: aOrderId })
+    equals('PREVIEW_INVOICE reports the gate', previewA.releaseGate?.ok, false, (previewA.releaseGate?.missing ?? []).map((m) => m.message).join(' | '))
+    const batch = await finAction('BATCH_GENERATE', { orderIds: [aOrderId] })
+    const batchRow = (batch.results ?? [])[0] ?? {}
+    equals('BATCH_GENERATE refuses the row with the gate reasons', Boolean(batchRow.error) && !batchRow.invoiceId, true, `${batchRow.error ?? ''} | ${(batchRow.releaseGate?.missing ?? []).map((m) => m.code).join(',')}`)
+
+    await attachDocument(aId, aOrderId, aLoadId, 'BOL')
+    await attachDocument(aId, aOrderId, aLoadId, 'POD')
+    a = await reload(aId)
+    // an open exception blocks it even with every document present
+    const incident = await shipAction('LOG_CHECK_CALL', {
+      loadId: aLoadId, expectedUpdatedAt: a.loads[0].updatedAt, at: new Date().toISOString(),
+      type: 'INCIDENT', incidentType: 'GENERAL_EXCEPTION', note: 'verification exception',
+    })
+    a = await reload(aId)
+    await refuses('an open exception blocks release', /Not ready for accounting.*open exception/, () =>
+      shipAction('READY_TO_INVOICE', { orderId: aOrderId, expectedUpdatedAt: a.orders[0].updatedAt }))
+    const incidentId = incident.event?.id
+    await shipAction('RESOLVE_INCIDENT', { checkCallId: incidentId, note: 'resolved for the proof' })
+    a = await reload(aId)
+    // The review's own facts: PO, charges and POD are on A; the rep and (already ASSETS) division come from the helper.
+    const released = await releaseForReview({ ship: shipAction, shipmentId: aId, repId: await findActiveRepId(gql) })
+    equals('with BOL + POD + PO + own-fleet leg + no exceptions the gate opens', released.releaseGate?.ok ?? (released.bundle?.orders?.[0]?.arStatus === 'UNBILLED'), true)
+    a = await reload(aId)
+    equals('order is UNBILLED', a.orders[0].arStatus, 'UNBILLED')
+
+    // concurrency: two GENERATE_INVOICE at once → exactly one invoice
+    const race = await Promise.allSettled([finAction('GENERATE_INVOICE', { orderId: aOrderId }), finAction('GENERATE_INVOICE', { orderId: aOrderId })])
+    const wins = race.filter((r) => r.status === 'fulfilled').length
+    equals('two concurrent GENERATE_INVOICE calls issue exactly one invoice', wins, 1, race.map((r) => r.status === 'rejected' ? String(r.reason.message).slice(0, 80) : 'ok').join(' / '))
+    a = await reload(aId)
+    equals('order is UNPAID with one invoice', a.orders[0].arStatus, 'UNPAID', a.orders[0].invoiceId)
+    const aInvoiceId = a.orders[0].invoiceId
+    await refuses('an invoiced shipment cannot be voided', /invoice/i, () =>
+      shipAction('VOID_SHIPMENT', { shipmentId: aId, reason: 'attempt on an invoiced shipment', expectedUpdatedAt: a.shipment.updatedAt }))
+
+    // ── 7. shipment B: outside carrier, hand tag, bounce, void ────────────
+    let b = await newShipment('B')
+    const bId = b.shipment.id
+    const bOrderId = b.orders[0].id
+    const bLoadId = b.loads[0].id
+    await shipAction('ASSIGN_ASSET', { loadId: bLoadId, driverId: ivanDriver.id, driverName: ivanDriver.name, truckId: ivanDriver.assignedTruckId ?? 'verify-truck' })
+    let bLoad = await loadRow(bLoadId)
+    equals('B booked to Ivan first (driver on the Load)', bLoad.deliveryDriverId, ivanDriver.id)
+    await shipAction('ASSIGN_CARRIER', { loadId: bLoadId, carrierName: `ZZ Verify Carrier ${stamp}`, carrierRateCents: 180000 })
+    b = await reload(bId)
+    bLoad = await loadRow(bLoadId)
+    equals('switching to an outside carrier clears pickupDriverId', bLoad.pickupDriverId, null)
+    equals('switching to an outside carrier clears deliveryDriverId', bLoad.deliveryDriverId, null)
+    equals('switching to an outside carrier clears truckId', bLoad.truckId, null)
+    equals('switching to an outside carrier clears every stop driver', stopsOf(bLoad).every((s) => !s.driverId), true)
+    equals('stops keep their appointments', stopsOf(bLoad).every((s) => Boolean(s.appt)), true)
+    equals('outside carrier → BROKERAGE on the Shipment', b.shipment.revDivision, 'BROKERAGE')
+    equals('outside carrier → BROKERAGE on the Load', bLoad.revDivision, 'BROKERAGE')
+    await refuses('a non-admin token (page-loads via CUSTOMER_REP) cannot void', /owner|ADMIN/i, () =>
+      repShip('VOID_SHIPMENT', { shipmentId: bId, reason: 'rep tries to void', expectedUpdatedAt: b.shipment.updatedAt }))
+    await shipAction('SET_REV_TAG', { shipmentId: bId, divisionCode: 'CAR_SHIPPING' })
+    b = await reload(bId)
+    equals('hand tag applied', `${b.shipment.revDivision}/${b.shipment.revTagSource}`, 'CAR_SHIPPING/HAND')
+    const activeLeg = b.loadCarriers.find((c) => c.status === 'ACTIVE')
+    await shipAction('REMOVE_LOAD_CARRIER', { loadCarrierId: activeLeg.id, outcome: 'BOUNCED', reason: 'OTHER', note: 'verification bounce' })
+    b = await reload(bId)
+    bLoad = await loadRow(bLoadId)
+    equals('a hand tag survives a bounce', `${b.shipment.revDivision}/${b.shipment.revTagSource}`, 'CAR_SHIPPING/HAND')
+    equals('the bounced Load is NEED_TO_COVER', bLoad.assignmentType, 'NEED_TO_COVER')
+    await shipAction('CLEAR_REV_TAG', { shipmentId: bId })
+    b = await reload(bId)
+    equals('clearing the hand tag hands it back to the rules', `${b.shipment.revDivision}/${b.shipment.revTagSource}`, 'BROKERAGE/RULE')
+    await shipAction('SET_SALES_REP', { shipmentId: bId, repId: createdUsers[0].profileId ?? repEmail })
+    b = await reload(bId)
+    bLoad = await loadRow(bLoadId)
+    equals('SET_SALES_REP mirrors to the Load', bLoad.salesRepId, b.shipment.salesRepId)
+
+    // the gate with an outside carrier whose bill is not recorded
+    await shipAction('ASSIGN_CARRIER', { loadId: bLoadId, carrierName: `ZZ Verify Carrier ${stamp}`, carrierRateCents: 180000 })
+    b = await deliver(bId)
+    await attachDocument(bId, bOrderId, bLoadId, 'BOL')
+    await attachDocument(bId, bOrderId, bLoadId, 'POD')
+    b = await reload(bId)
+    await refuses('an outside carrier without a recorded bill cannot be released', /Not ready for accounting.*(Carrier charges not settled|Missing document: RATE_CON)/, () =>
+      shipAction('READY_TO_INVOICE', { orderId: bOrderId, expectedUpdatedAt: b.orders[0].updatedAt }))
+    await refuses('SEND_TO_FACTOR needs an issued invoice, which only the gate produces', /Not ready for accounting|invoice/i, () =>
+      finAction('SEND_TO_FACTOR', { orderId: bOrderId, shipmentId: bId }))
+    const previewFactor = await finAction('PREVIEW_FACTOR', { orderId: bOrderId, shipmentId: bId })
+      .catch((err) => ({ error: String(err.message) }))
+    equals(
+      'PREVIEW_FACTOR runs the same gate and names what is missing',
+      previewFactor.error
+        ? /Not ready for accounting|invoice|RATE_CON|Carrier charges/i.test(previewFactor.error)
+        : (previewFactor.releaseGate?.missing ?? []).length > 0,
+      true,
+      previewFactor.error ?? JSON.stringify(previewFactor.releaseGate),
+    )
+
+    // void, from a real admin token
+    const voided = await shipAction('VOID_SHIPMENT', { shipmentId: bId, reason: 'Dev verification fixture — Step R proof', expectedUpdatedAt: b.shipment.updatedAt })
+    const vs = voided.shipment ?? voided.bundle?.shipment ?? (await reload(bId)).shipment
+    equals('VOID keeps the number (PRO)', vs.number, b.shipment.number)
+    equals('VOID stamps who', Boolean(vs.voidedBy), true, vs.voidedBy)
+    equals('VOID stamps when', Boolean(vs.voidedAt), true, vs.voidedAt)
+    equals('VOID stamps why', vs.voidReason, 'Dev verification fixture — Step R proof')
+    b = await reload(bId)
+    equals('the voided shipment keeps its legs', b.loadCarriers.length >= 2, true, `${b.loadCarriers.length} legs`)
+    equals('the voided shipment keeps its documents', b.documents.length >= 2, true, `${b.documents.length} documents`)
+    bLoad = await loadRow(bLoadId)
+    equals('the mirrored Load is CANCELED', bLoad.status, 'CANCELED')
+    equals('the voided Load pays nobody (deliveryDriverId cleared)', bLoad.deliveryDriverId, null)
+    equals('the void is mirrored onto the Load (it leaves every fleet working set)', bLoad.voidedAt, vs.voidedAt)
+    await refuses('a voided shipment refuses a second void', /voided/i, () => shipAction('VOID_SHIPMENT', { shipmentId: bId, reason: 'again', expectedUpdatedAt: b.shipment.updatedAt }))
+    await refuses('no token can write the void on a Load — only VOID_SHIPMENT can', /Unauthorized|not authorized|FieldUndefined|Validation/i, () =>
+      gql(`mutation U($id: ID!) { updateLoad(input: { id: $id, voidedAt: null }) { id voidedAt } }`, { id: bLoadId }))
+    await refuses('a voided shipment refuses edits', /voided/i, () =>
+      shipAction('SAVE_ORDER_FORM', { shipmentId: bId, expectedUpdatedAt: b.shipment.updatedAt, order: { customerNotes: 'x' } }))
+    await refuses('a voided shipment refuses a document upload', /voided/i, () =>
+      shipAction('PREPARE_DOCUMENT_UPLOAD', { shipmentId: bId, type: 'POD', name: 'x.pdf', contentType: 'application/pdf', sizeBytes: 10 }))
+    await refuses('a voided shipment cannot be released to accounting', /Voided|voided/, () =>
+      shipAction('SET_AR_STATUS', { orderId: bOrderId, status: 'UNBILLED', expectedUpdatedAt: b.orders[0].updatedAt }))
+    const previewB = await finAction('PREVIEW_INVOICE', { orderId: bOrderId }).catch((err) => ({ error: String(err.message) }))
+    equals('PREVIEW_INVOICE on a voided shipment says VOIDED', previewB.error ? /void/i.test(previewB.error) : previewB.releaseGate?.missing?.[0]?.code === 'VOIDED', true, previewB.error ?? JSON.stringify(previewB.releaseGate))
+    await refuses('a voided shipment cannot be invoiced', /void|UNBILLED/i, () => finAction('GENERATE_INVOICE', { orderId: bOrderId }))
+
+    // ── 7b. the legacy import does not hand freight to AR ─────────────────
+    // `BACKFILL_SHIPMENT` reads a legacy load's `readyToInvoice` as evidence that the
+    // work was done — but that flag is a checkbox on the old calendar, not the
+    // release gate, and Ryne's rule is that nothing reaches AR without the gate. The
+    // imported order must land on DOCS_NEEDED however the flag was left.
+    const legacyLoad = await seedLegacyLoad({
+      aljexId: `VR${stamp}`, tmsId: '', pickupNumber: `VR${stamp}`,
+      customer: customer.name, customerId: customer.id,
+      pickupAppt: `${today}T13:00:00.000Z`, deliveryAppt: `${today}T20:00:00.000Z`,
+      readyToInvoice: true, rate: 125000,
+    })
+    const imported = await shipAction('BACKFILL_SHIPMENT', { loadIds: [legacyLoad.id], dryRun: false })
+    equals('BACKFILL_SHIPMENT applied the one legacy load', imported.applied, 1)
+    equals('the import reads the flag as delivered', imported.planned?.[0]?.loadStatus, 'DELIVERED')
+    equals('the import never grants AR readiness — the gate owns that rung', imported.planned?.[0]?.arStatus, 'DOCS_NEEDED')
+    const importedShipmentId = imported.planned[0].shipmentId
+    fixtures.shipmentIds.push(importedShipmentId)
+    const importedBundle = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: importedShipmentId })
+    equals('and the written order says so', importedBundle.orders[0].arStatus, 'DOCS_NEEDED')
+    await refuses('the imported order still has to pass the gate', /Not ready for accounting/i, () =>
+      shipAction('READY_TO_INVOICE', { orderId: importedBundle.orders[0].id, expectedUpdatedAt: importedBundle.orders[0].updatedAt }))
+
+    // ── 7c. one record, one creation door, one PRO ────────────────────────
+    // Both client doors are shut, not aliased. Load grants a signed-in token `read`
+    // and `update` and nothing else, and aljexId / tmsId / pickupNumber are field-level
+    // read-only beside voidedAt — so a browser can neither bring freight into being nor
+    // rename an existing leg onto a voided or duplicate PRO. Were `update` left open on
+    // the PRO, the claim rule would hold on create and nowhere else.
+    await refuses('a client token can no longer create a Load at all', /Unauthorized|Not Authorized|FieldUndefined|Validation/i, () =>
+      gql(`mutation C($input: CreateLoadInput!) { createLoad(input: $input) { id } }`, { input: {
+        aljexId: `VRX${stamp}`, tmsId: '', pickupNumber: `VRX${stamp}`,
+        pickupAppt: `${today}T13:00:00.000Z`, deliveryAppt: `${today}T20:00:00.000Z`,
+        readyToInvoice: false, createdBy: 'script:devVerifyStepR', updatedBy: 'script:devVerifyStepR',
+      } }))
+    await refuses('a client token cannot write aljexId — SET_LOAD_PRO is the only way a PRO moves', /Unauthorized on \[aljexId\]|Unauthorized|not authorized/i, () =>
+      gql(`mutation U($id: ID!, $pro: String!) { updateLoad(input: { id: $id, aljexId: $pro }) { id aljexId } }`,
+        { id: legacyLoad.id, pro: `VRY${stamp}` }))
+
+    // An operator holding only typed customer text can still record the freight. No
+    // Customer record is invented and none is created: the text is kept verbatim and
+    // the shipment simply carries no customerId until somebody links one.
+    const typedCustomer = `ZZ Not A Customer Record ${stamp}`
+    const uBundle = await shipAction('CREATE_SHIPMENT', { customerName: typedCustomer, source: 'MANUAL' })
+    const uId = uBundle.shipment.id
+    fixtures.shipmentIds.push(uId)
+    console.log(`fixture shipment U (unresolved customer): ${uBundle.shipment.number} (${uId})`)
+    equals('CREATE_SHIPMENT from typed text leaves customerId absent', uBundle.shipment.customerId ?? null, null)
+    equals('and keeps the operator\'s text verbatim', uBundle.shipment.customerName, typedCustomer)
+    equals('the Order beside it is unresolved too (the AR worklist and credit math read it)', uBundle.orders[0].customerId ?? null, null)
+    const invented = (await gql(
+      `query C($name: String!) { listCustomers(filter: { name: { eq: $name } }, limit: 5) { items { id name } } }`,
+      { name: typedCustomer },
+    )).listCustomers.items
+    equals('no Customer record is invented for typed text', invented.length, 0)
+
+    // Refused by name, so the operator knows the next move is to link a customer.
+    const uOrder = uBundle.orders[0]
+    await refuses('READY_TO_INVOICE refuses an unresolved customer and names it', /^This shipment has no customer record linked/, () =>
+      shipAction('READY_TO_INVOICE', { orderId: uOrder.id, expectedUpdatedAt: uOrder.updatedAt }))
+
+    await shipAction('SET_SHIPMENT_CUSTOMER', { shipmentId: uId, customerId: customer.id })
+    const u = await reload(uId)
+    equals('SET_SHIPMENT_CUSTOMER links the record on the Shipment', u.shipment.customerId, customer.id)
+    equals('and on the Order', u.orders[0].customerId, customer.id)
+    equals('and on the Load, which dispatch and the driver app read', (await loadRow(u.loads[0].id)).customerId, customer.id)
+    // The customer is checked BEFORE the gate, never instead of it: with one linked the
+    // same call is refused again — now by the gate, naming its own missing list.
+    await refuses('with the customer linked the release gate still speaks for itself', /Not ready for accounting/i, () =>
+      shipAction('READY_TO_INVOICE', { orderId: u.orders[0].id, expectedUpdatedAt: u.orders[0].updatedAt }))
+
+    // A claim is never released — not on a void. The number a voided shipment carried
+    // can never be handed to another one, which is Ryne's rule where it cannot be
+    // bypassed rather than a check the duplicate and factoring paths used to skip.
+    const voidedPro = `VRV${stamp}`
+    const vBundle = await shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: voidedPro })
+    fixtures.shipmentIds.push(vBundle.shipment.id)
+    equals('a supplied PRO becomes the leg\'s aljexId', (await loadRow(vBundle.loads[0].id)).aljexId, voidedPro)
+    const vFresh = await reload(vBundle.shipment.id)
+    await shipAction('VOID_SHIPMENT', { shipmentId: vBundle.shipment.id, reason: 'Dev verification fixture — Step R proof', expectedUpdatedAt: vFresh.shipment.updatedAt })
+    await refuses('a voided PRO is never reissued', /has already been issued\. A PRO is never reused/, () =>
+      shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: voidedPro }))
+
+    // Mutual exclusion, not a read-then-write: the claim is a conditional put inside
+    // the shipment transaction, so two dispatchers in the same second cannot both win.
+    const racePro = `VRR${stamp}`
+    const raceCreates = await Promise.allSettled([
+      shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: racePro }),
+      shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: racePro }),
+    ])
+    for (const r of raceCreates) if (r.status === 'fulfilled') fixtures.shipmentIds.push(r.value.shipment.id)
+    equals(
+      'two concurrent CREATE_SHIPMENT calls on one PRO create exactly one shipment',
+      raceCreates.filter((r) => r.status === 'fulfilled').length, 1,
+      raceCreates.map((r) => (r.status === 'rejected' ? String(r.reason.message).slice(0, 80) : 'ok')).join(' / '),
+    )
+
+    // Editing a PRO claims the new number and keeps the old one claimed: a leg that
+    // moves off a number does not hand it back to the pool.
+    const firstPro = `VRP${stamp}`
+    const secondPro = `VRQ${stamp}`
+    const pBundle = await shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: firstPro })
+    fixtures.shipmentIds.push(pBundle.shipment.id)
+    await shipAction('SET_LOAD_PRO', { loadId: pBundle.loads[0].id, pro: secondPro, expectedUpdatedAt: pBundle.loads[0].updatedAt })
+    equals('SET_LOAD_PRO moves the leg onto the new PRO', (await loadRow(pBundle.loads[0].id)).aljexId, secondPro)
+    await refuses('the PRO it moved off is still claimed', /has already been issued\. A PRO is never reused/, () =>
+      shipAction('CREATE_SHIPMENT', { customerId: customer.id, pro: firstPro }))
+
+    // The scheduler's duplicate: `shiftStops` clears the driver and `buildLoadInput`
+    // writes NEED_TO_COVER, which would land an own-fleet dispatcher's copy off the
+    // driver lane it was made from.
+    const duplicated = await shipAction('DUPLICATE_SHIPMENT', {
+      shipmentId: aId, loadId: aLoadId, keepDriver: true,
+      copies: [{ pickupAppt: `${today}T13:00:00.000Z`, deliveryAppt: `${today}T21:00:00.000Z` }],
+    })
+    // The answer is the SOURCE bundle — the board re-reads itself off it — plus the
+    // ids it created, which is the only way to reach the copy.
+    const copyId = (duplicated.created ?? [])[0]
+    equals('DUPLICATE_SHIPMENT names the shipment it created', Boolean(copyId), true, String(copyId))
+    if (copyId) {
+      fixtures.shipmentIds.push(copyId)
+      const copy = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId: copyId })
+      equals('DUPLICATE_SHIPMENT with keepDriver leaves the copy on the driver\'s lane', (await loadRow(copy.loads[0].id)).pickupDriverId, ivanDriver.id)
+    }
+
+    // Factoring is money OTR has already bought: the Aljex invoice went out before the
+    // PRO was ever typed here. DOCS_NEEDED would put it in the AR worklist and into the
+    // customer's credit exposure; LEGACY is the rung that exists for exactly this.
+    const factored = await shipAction('CREATE_SHIPMENT', {
+      customerId: customer.id, source: 'FACTORING', pro: `VRF${stamp}`,
+      load: { tmsId: `PO-${stamp}`, rateCents: 125000 },
+    })
+    fixtures.shipmentIds.push(factored.shipment.id)
+    equals('a factoring create lands on the LEGACY AR rung, not in the worklist', factored.orders[0].arStatus, 'LEGACY')
+    equals('and keeps the factoring PO in tmsId instead of overwriting it with the PRO', (await loadRow(factored.loads[0].id)).tmsId, `PO-${stamp}`)
+
+    // ── 8. RETAG dry run writes nothing ───────────────────────────────────
+    const before = (await reload(aId)).shipment.updatedAt
+    // RETAG scans every shipment, order, load, leg and driver; on dev's copied data volume AppSync can cut it off at 30 s.
+    // That is reported as a skip, never as a pass.
+    const retag = await shipAction('RETAG_SHIPMENTS', { dryRun: true }).catch((err) => {
+      if (/timed out/i.test(String(err.message))) return null
+      throw err
+    })
+    if (!retag) console.log('SKIP  RETAG_SHIPMENTS dry run — AppSync timed out scanning the dev tables (not counted as a check)')
+    else ok('RETAG_SHIPMENTS dry run', `scanned ${retag.scanned} changed ${retag.changed} hand ${retag.handTagged} byDivision ${JSON.stringify(retag.byDivision)} bySubdivision ${JSON.stringify(retag.bySubdivision)}`)
+    if (retag) equals('the dry run wrote nothing', (await reload(aId)).shipment.updatedAt, before)
+
+    // ── 9. retire A by void (void the invoice first, which is the rule) ───
+    await finAction('VOID_INVOICE', { invoiceId: aInvoiceId, reason: 'Dev verification fixture — Step R proof' })
+    a = await reload(aId)
+    await shipAction('VOID_SHIPMENT', { shipmentId: aId, reason: 'Dev verification fixture — Step R proof', expectedUpdatedAt: a.shipment.updatedAt })
+    aLoad = await loadRow(aLoadId)
+    equals('A voided: the Ivan driver is off the Load (leaves calendar and settlement)', aLoad.deliveryDriverId, null)
+    ok('fixtures retired by VOID, nothing deleted', fixtures.shipmentIds.join(' '))
+  } finally {
+    // Whatever happened above, no fixture may stay live: void every shipment this run
+    // created that is not voided yet (PRO kept; nothing deleted).
+    for (const shipmentId of fixtures.shipmentIds) {
+      try {
+        const bundle = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId })
+        if (bundle.shipment.voidedAt) continue
+        for (const order of bundle.orders) {
+          if (order.invoiceId) await finAction('VOID_INVOICE', { invoiceId: order.invoiceId, reason: 'Dev verification fixture' }).catch(() => {})
+        }
+        const fresh = await shipAction('GET_SHIPMENT_BUNDLE', { shipmentId })
+        await shipAction('VOID_SHIPMENT', { shipmentId, reason: 'Dev verification fixture — Step R proof (cleanup)', expectedUpdatedAt: fresh.shipment.updatedAt })
+        console.log(`cleanup: voided ${bundle.shipment.number}`)
+      } catch (err) {
+        console.log(`cleanup: could not void ${shipmentId}: ${String(err.message).slice(0, 120)}`)
+      }
+    }
+    for (const u of createdUsers) {
+      try { await manageUsers({ action: 'delete', username: u.email }) } catch { await deleteFromPool(u.email, u.profileId) }
+    }
+    if (fixtures.customerId) {
+      try {
+        const row = (await gql('query C($id: ID!) { getCustomer(id: $id) { id updatedAt } }', { id: fixtures.customerId })).getCustomer
+        await dirAction('SET_CUSTOMER_STATUS', { id: fixtures.customerId, status: 'BLOCKED', reason: 'Dev verification fixture', expectedUpdatedAt: row.updatedAt })
+        console.log('cleanup: fixture customer BLOCKED')
+      } catch (e) { console.log(`(customer retire skipped: ${String(e.message).slice(0, 80)})`) }
+    }
+    if (!(await session.cleanup())) console.log('(temporary admin identity was not deleted)')
+    const passed = results.filter((r) => r.ok).length
+    console.log(`\n${passed}/${results.length} checks passed`)
+    if (passed !== results.length) process.exitCode = 1
+  }
+}
+
+main().catch((err) => { console.error(err); process.exitCode = 1 })

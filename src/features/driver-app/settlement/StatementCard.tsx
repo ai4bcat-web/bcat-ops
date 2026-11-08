@@ -59,7 +59,7 @@ export function StatementCard({ settlement, readOnly = false }: StatementCardPro
           </p>
           <p
             className={`mt-0.5 text-xl font-bold tabular-nums ${
-              checkPositive ? 'text-[var(--ds-green)]' : 'text-[var(--ds-red)]'
+              checkPositive ? 'text-[var(--tms-badge-green)]' : 'text-[var(--tms-badge-red)]'
             }`}
           >
             {money(settlement.checkAmount)}
@@ -98,7 +98,7 @@ export function StatementCard({ settlement, readOnly = false }: StatementCardPro
                     </span>
                     <span
                       className={`whitespace-nowrap text-sm font-semibold tabular-nums ${
-                        refund ? 'text-[var(--ds-green)]' : 'text-[var(--ds-red)]'
+                        refund ? 'text-[var(--tms-badge-green)]' : 'text-[var(--tms-badge-red)]'
                       }`}
                     >
                       {refund ? `+${money(-line.amount)}` : `(${money(line.amount)})`}
@@ -109,7 +109,7 @@ export function StatementCard({ settlement, readOnly = false }: StatementCardPro
             </div>
             <div className="mt-3 flex items-center justify-between gap-4 border-t border-border pt-2">
               <span className="text-sm font-semibold text-card-foreground">Total deductions</span>
-              <span className="text-sm font-bold tabular-nums text-[var(--ds-red)]">
+              <span className="text-sm font-bold tabular-nums text-[var(--tms-badge-red)]">
                 ({money(totalDeductions)})
               </span>
             </div>
@@ -129,7 +129,7 @@ export function StatementCard({ settlement, readOnly = false }: StatementCardPro
                   <span className="min-w-0 flex-1 truncate text-sm text-card-foreground">
                     {line.label}
                   </span>
-                  <span className="whitespace-nowrap text-sm font-semibold tabular-nums text-[var(--ds-green)]">
+                  <span className="whitespace-nowrap text-sm font-semibold tabular-nums text-[var(--tms-badge-green)]">
                     +{money(line.amount)}
                   </span>
                 </div>
@@ -137,7 +137,7 @@ export function StatementCard({ settlement, readOnly = false }: StatementCardPro
             </div>
             <div className="mt-3 flex items-center justify-between gap-4 border-t border-border pt-2">
               <span className="text-sm font-semibold text-card-foreground">Total credits</span>
-              <span className="text-sm font-bold tabular-nums text-[var(--ds-green)]">
+              <span className="text-sm font-bold tabular-nums text-[var(--tms-badge-green)]">
                 +{money(totalCredits)}
               </span>
             </div>
@@ -154,7 +154,7 @@ export function StatementCard({ settlement, readOnly = false }: StatementCardPro
                 <span className="min-w-0 flex-1 truncate text-sm text-card-foreground">
                   {line.label}
                 </span>
-                <span className="whitespace-nowrap text-sm font-semibold tabular-nums text-[var(--ds-red)]">
+                <span className="whitespace-nowrap text-sm font-semibold tabular-nums text-[var(--tms-badge-red)]">
                   −{money(line.amount)}
                 </span>
               </div>
@@ -162,7 +162,7 @@ export function StatementCard({ settlement, readOnly = false }: StatementCardPro
           </div>
           <div className="mt-3 flex items-center justify-between gap-4 border-t border-border pt-2">
             <span className="text-sm font-semibold text-card-foreground">Total debits</span>
-            <span className="text-sm font-bold tabular-nums text-[var(--ds-red)]">
+            <span className="text-sm font-bold tabular-nums text-[var(--tms-badge-red)]">
               −{money(totalDebits)}
             </span>
           </div>
@@ -176,7 +176,7 @@ export function StatementCard({ settlement, readOnly = false }: StatementCardPro
         </span>
         <span
           className={`text-2xl font-bold tabular-nums ${
-            checkPositive ? 'text-[var(--ds-green)]' : 'text-[var(--ds-red)]'
+            checkPositive ? 'text-[var(--tms-badge-green)]' : 'text-[var(--tms-badge-red)]'
           }`}
         >
           {money(settlement.checkAmount)}

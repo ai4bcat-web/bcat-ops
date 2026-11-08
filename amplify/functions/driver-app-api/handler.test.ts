@@ -112,6 +112,7 @@ vi.hoisted(() => {
   process.env.DRIVER_SUBMISSION_TABLE_NAME = 'DriverSubmission-test'
   process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME = 'DriverSubmissionDoc-test'
   process.env.DRIVER_TABLE_NAME = 'Driver-test'
+  process.env.TRUCK_CONFIG_TABLE_NAME = 'TruckConfig-test'
   process.env.DISPATCH_PARAM_PATH = '/bcat/dispatch/test'
   process.env.DRIVER_PAY_SETTING_TABLE_NAME = 'DriverPaySetting-test'
   process.env.AMAZON_TRIP_TABLE_NAME = 'AmazonTrip-test'
@@ -562,8 +563,22 @@ function matchesFilterExpression(
 /** The in-memory DynamoDB. Module-scoped so a test can seed an extra row. */
 let tables: ReturnType<typeof defaultTables>
 
+/** The handler narrates every request on the console; keep it out of the test output. */
+let logSpy: ReturnType<typeof vi.spyOn>
+let warnSpy: ReturnType<typeof vi.spyOn>
+let errorSpy: ReturnType<typeof vi.spyOn>
+
+afterEach(() => {
+  logSpy.mockRestore()
+  warnSpy.mockRestore()
+  errorSpy.mockRestore()
+})
+
 beforeEach(() => {
   vi.clearAllMocks()
+  logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   mockVerify.mockReset()
   mockVerify.mockResolvedValue({ email: EMAIL_A, email_verified: true })
   mockGetSignedUrl.mockResolvedValue('https://s3.test/presigned-url')
@@ -589,7 +604,7 @@ beforeEach(() => {
     const tableRecords = tables[table]
 
     if (cmd instanceof GetCommand) {
-      const id = input.Key?.id as string | undefined
+      const id = (input.Key?.id ?? input.Key?.truckId) as string | undefined
       return { Item: id && tableRecords?.[id] ? { ...tableRecords[id] } : undefined }
     }
 
@@ -697,6 +712,7 @@ describe('driver-app-api handler', () => {
         // No truck assigned to this fixture driver, so there is no PM to report.
         pm: null,
         truck: null,
+        workPhone: null,
         trailer: null,
         bobtail: false,
         dispatchPhone: '+12248756477',
@@ -706,6 +722,17 @@ describe('driver-app-api handler', () => {
         trailerRequired: false,
         ivanLocal: false,
       })
+    })
+
+    it('shows the work phone riding in the driver\'s assigned truck, and nothing for a truck without one', async () => {
+      tables['Driver-test'][DRIVER_A_ID].assignedTruckId = 'trk-12'
+      tables['TruckConfig-test'] = { 'trk-12': { truckId: 'trk-12', unitNumber: '12', phone: '(312) 555-0111', phoneLabel: 'Cab phone' } }
+      const withPhone = JSON.parse((await handler(baseEvent('/me'))).body)
+      expect(withPhone.workPhone).toEqual({ number: '+13125550111', label: 'Cab phone', truckNumber: '12' })
+
+      tables['TruckConfig-test']['trk-12'].phone = null
+      const without = JSON.parse((await handler(baseEvent('/me'))).body)
+      expect(without.workPhone).toBeNull()
     })
   })
 
@@ -1539,9 +1566,21 @@ describe('driver-app-api handler', () => {
   })
 
   describe('attaching a POD to a load', () => {
+    /*
+     * `/loads/recent` grades the fixtures against a 30-day window taken from the real
+     * clock, so without a pinned date these cases quietly stop testing anything the
+     * month after they were written — and then fail outright, which is what happened on
+     * 2026-10-29 when `load-c-1` (delivered 2026-09-29) aged out mid-suite.
+     */
     beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-10-05T12:00:00Z'))
       mockVerify.mockReset()
       mockVerify.mockResolvedValue({ email: EMAIL_C, email_verified: true })
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
     })
 
     /** A POD driver C sent with no load number. */

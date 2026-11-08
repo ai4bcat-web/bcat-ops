@@ -3,6 +3,8 @@ export type Ownership = 'owned' | 'leased' | 'rented' | 'financed'
 export type EldSource = 'motive' | 'manual' | 'blueink'
 export type OwnershipType = 'COMPANY' | 'OWNER_OPERATOR'
 export type FleetGroup = 'LOCAL' | 'AMAZON' | 'BOX_TRUCK'
+/** A driver's fleet: the truck fleets, plus owner operators who run their own truck. */
+export type DriverFleet = FleetGroup | 'OWNER_OPERATOR'
 export type TaskPriority = 'high' | 'med' | 'low'
 export type TaskStatus = 'upcoming' | 'complete'
 
@@ -20,7 +22,7 @@ export interface Equipment {
   ownership: Ownership
   insured: boolean
   active: boolean
-  /** The day the truck was marked inactive (YYYY-MM-DD). */
+  /** The day the truck or trailer was marked inactive (YYYY-MM-DD). */
   inactiveSince?: string | null
   dotInspectionDate?: string | null // YYYY-MM-DD; null clears it
   iftaExpirationDate?: string

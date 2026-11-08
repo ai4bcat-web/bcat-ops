@@ -25,13 +25,13 @@ export function DriverChip({ driver, size = 'sm', className }: DriverChipProps) 
         src={driver?.photoUrl}
         initials={initials || '?'}
         size={size === 'md' ? 'lg' : 'sm'}
-        style={{ background: color.avatarBg, color: '#ffffff' }}
+        style={{ background: color.avatarBg, color: 'var(--tms-on-primary)' }}
       />
       <span
         className={cn(
           'font-medium truncate',
           size === 'md' ? 'text-sm' : 'text-xs',
-          !driver && 'text-slate-400',
+          !driver && 'text-muted-foreground',
         )}
       >
         {name}

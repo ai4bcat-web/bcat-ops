@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 import { DynamoDBClient, ScanCommand } from '@aws-sdk/client-dynamodb'
 import type { PreSignUpTriggerEvent } from 'aws-lambda'
 import { handler } from './handler'
@@ -348,5 +348,67 @@ describe('Ivan drivers, who have no pay setting at all', () => {
   it('does NOT let an Amazon driver through on a missing pay setting', async () => {
     onlyDrivers([driverItem('drv-az', 'az@x.com', true, { fleetGroup: 'AMAZON' })])
     await expect(handler(signupEvent('az@x.com'))).rejects.toThrow(/No driver record matches/)
+  })
+})
+
+describe('refusal log (S4 D-S4-2)', () => {
+  const MESSAGE = 'No driver record matches this email. Contact dispatch.'
+  let puts: { Item: Record<string, { S?: string }>; ConditionExpression?: string }[]
+
+  beforeEach(() => {
+    process.env.DRIVER_TABLE_NAME = DRIVER_TABLE
+    process.env.DRIVER_PAY_SETTING_TABLE_NAME = PAY_SETTING_TABLE
+    process.env.AUDIT_LOG_TABLE_NAME = 'AuditLogTestTable'
+    puts = []
+    vi.spyOn(DynamoDBClient.prototype, 'send')
+      .mockReset()
+      .mockImplementation(async (command) => {
+        if (command instanceof ScanCommand) return { Items: [] }
+        puts.push(
+          (command as unknown as { input: (typeof puts)[number] }).input,
+        )
+        return undefined
+      })
+  })
+
+  afterEach(() => {
+    delete process.env.AUDIT_LOG_TABLE_NAME
+  })
+
+  it('records one deterministic AuditLog row for a refused e-mail and still throws the same message', async () => {
+    await expect(handler(signupEvent('Nobody@Example.com'))).rejects.toThrow(MESSAGE)
+    expect(puts).toHaveLength(1)
+    const item = puts[0].Item
+    expect(puts[0].ConditionExpression).toBe('attribute_not_exists(id)')
+    expect(item.entityType.S).toBe('DRIVER_SIGNUP')
+    expect(item.entityId.S).toBe('nobody@example.com')
+    expect(item.action.S).toBe('refused')
+    expect(JSON.parse(item.changes.S ?? '{}').reason).toBe('NO_DRIVER_RECORD')
+
+    await expect(handler(signupEvent('nobody@example.com'))).rejects.toThrow(MESSAGE)
+    expect(puts[1].Item.id.S).toBe(item.id.S)
+  })
+
+  it('refuses with the identical message when the log write fails', async () => {
+    vi.spyOn(DynamoDBClient.prototype, 'send').mockImplementation(async (command) => {
+      if (command instanceof ScanCommand) return { Items: [] }
+      throw new Error('ConditionalCheckFailedException')
+    })
+    await expect(handler(signupEvent('nobody@example.com'))).rejects.toThrow(MESSAGE)
+  })
+
+  it('writes nothing for an admitted driver', async () => {
+    vi.spyOn(DynamoDBClient.prototype, 'send').mockImplementation(async (command) => {
+      if (command instanceof ScanCommand) {
+        return command.input.TableName === DRIVER_TABLE
+          ? { Items: [driverItem('drv-1', 'ivan@bcatcorp.com', true)] }
+          : { Items: [paySettingItem('drv-1', 'ivan@bcatcorp.com', true, 'AMAZON')] }
+      }
+      puts.push((command as unknown as { input: (typeof puts)[number] }).input)
+      return undefined
+    })
+    const event = signupEvent('ivan@bcatcorp.com')
+    await expect(handler(event)).resolves.toBe(event)
+    expect(puts).toHaveLength(0)
   })
 })

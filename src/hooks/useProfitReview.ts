@@ -5,7 +5,7 @@ import { startOfMonth, endOfMonth, addMonths, format, getDaysInMonth } from 'dat
 import { useFleetProfitability } from './useFleetProfitability'
 import { useFleetFixedCosts } from './useFleetFixedCosts'
 import { useTrucks } from './useTrucks'
-import { useLoads } from './useLoads'
+import { useLoads, useEnsureLoadRange } from './useLoads'
 import { useDrivers } from './useDrivers'
 import { useAppStore } from '@/store/useAppStore'
 import { isPosted } from '@/lib/invoiceStatus'
@@ -35,6 +35,7 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
   const { contributionInRange, eldInRange } = useFleetFixedCosts()
   const { equipment } = useTrucks()
   const { loads } = useLoads()
+  useEnsureLoadRange(format(startOfMonth(addMonths(today, 1 - monthsBack)), 'yyyy-MM-dd'), format(endOfMonth(today), 'yyyy-MM-dd'))
   const { drivers } = useDrivers()
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
 

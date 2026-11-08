@@ -54,56 +54,56 @@ export function TruckOnboardingSection({ asset }: { asset: Equipment }) {
   // Nothing to show until someone starts it — an untouched truck shouldn't carry a
   // permanent 0% implying it's incomplete.
   const started = progress.applicable > 0
-  const barColor = progress.percent === 100 ? '#15803d' : progress.percent >= 50 ? '#1ea8f3' : '#b45309'
+  const barColor = progress.percent === 100 ? 'var(--tms-badge-green)' : progress.percent >= 50 ? 'var(--tms-badge-blue)' : 'var(--tms-badge-orange)'
 
   return (
     <div style={{ marginBottom: 22 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Onboarding</div>
+        <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Onboarding</div>
         {started && (
-          <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>{progress.done} of {progress.applicable} done</span>
+          <span style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>{progress.done} of {progress.applicable} done</span>
         )}
         <div style={{ flex: 1 }} />
         <button onClick={start} disabled={busy}
           title="Create (or top up) this asset's checklist from the requirement catalog"
-          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 26, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 11.5, fontWeight: 600, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 26, padding: '0 10px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', fontSize: 11.5, fontWeight: 600, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
           <Rocket size={12} /> {started ? 'Refresh checklist' : 'Start onboarding'}
         </button>
       </div>
 
       {loading ? (
-        <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>Loading…</div>
+        <div style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>Loading…</div>
       ) : !started ? (
-        <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>
+        <div style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>
           No checklist yet — start onboarding to track this asset into service.
         </div>
       ) : (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-            <div style={{ flex: 1, height: 8, borderRadius: 999, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', overflow: 'hidden' }}>
+            <div style={{ flex: 1, height: 8, borderRadius: 999, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', overflow: 'hidden' }}>
               <div style={{ width: `${progress.percent}%`, height: '100%', background: barColor, transition: 'width .2s' }} />
             </div>
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', minWidth: 42, textAlign: 'right' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums', minWidth: 42, textAlign: 'right' }}>
               {progress.percent}%
             </span>
           </div>
 
           {grouped.map(({ category, tasks: rows }) => (
             <div key={category} style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '6px 0 3px' }}>{category}</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '6px 0 3px' }}>{category}</div>
               {rows.map((t) => {
                 const done = t.status === 'COMPLETE' || t.status === 'WAIVED'
                 const na = t.status === 'NOT_APPLICABLE'
                 return (
                   <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 12.5, opacity: na ? 0.45 : 1 }}>
                     <button onClick={() => void toggle(t)} disabled={na}
-                      style={{ display: 'flex', background: 'none', border: 'none', padding: 0, cursor: na ? 'default' : 'pointer', color: done ? '#15803d' : 'var(--ds-t3)' }}>
+                      style={{ display: 'flex', background: 'none', border: 'none', padding: 0, cursor: na ? 'default' : 'pointer', color: done ? 'var(--tms-badge-green)' : 'var(--tms-muted)' }}>
                       {done ? <CircleCheck size={15} /> : <Circle size={15} />}
                     </button>
-                    <span style={{ flex: 1, color: done ? 'var(--ds-t3)' : 'var(--ds-t1)', textDecoration: done ? 'line-through' : undefined }}>
+                    <span style={{ flex: 1, color: done ? 'var(--tms-muted)' : 'var(--tms-text)', textDecoration: done ? 'line-through' : undefined }}>
                       {t.label}
                     </span>
-                    {na && <span style={{ fontSize: 10.5, color: 'var(--ds-t3)' }}>N/A</span>}
+                    {na && <span style={{ fontSize: 10.5, color: 'var(--tms-muted)' }}>N/A</span>}
                   </div>
                 )
               })}

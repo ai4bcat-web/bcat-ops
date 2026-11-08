@@ -66,9 +66,12 @@ describe('queueDriverDocScanAction', () => {
     // A cleanup that could not be queued is a document that stays as it arrived — which is
     // exactly what used to happen to every PDF. It is never a failed upload.
     send.mockRejectedValue(new Error('throttled'))
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const { queueDriverDocScanAction } = await import('./handler')
     const out = await queueDriverDocScanAction({ submissionId: 'sub-1', kind: 'POD' })
     expect(out).toMatchObject({ queued: false, error: 'throttled' })
+    expect(warn).toHaveBeenCalledWith('[pod-actions] could not queue the scan', expect.objectContaining({ submissionId: 'sub-1', message: 'throttled' }))
+    warn.mockRestore()
   })
 })
 
@@ -121,7 +124,10 @@ describe('the queued scan itself', () => {
     const { scanDriverDocsAction } = await import('./handler')
     const s = steps()
     s.clean.mockRejectedValue(new Error('tesseract fell over'))
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     await expect(scanDriverDocsAction('sub-1', 'POD', s)).resolves.toBeUndefined()
+    expect(warn).toHaveBeenCalledWith('[pod-actions] queued scan failed', expect.objectContaining({ submissionId: 'sub-1', error: 'tesseract fell over' }))
+    warn.mockRestore()
     expect(s.merge).not.toHaveBeenCalled()
   })
 })

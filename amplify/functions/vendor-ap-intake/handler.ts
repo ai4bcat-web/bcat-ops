@@ -19,6 +19,7 @@ import { marshall } from '@aws-sdk/util-dynamodb'
 import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
+import { extractPayload } from './extractPayload'
 
 const MAX_BODY_BYTES = 1 * 1024 * 1024
 const MAX_EMAIL_BODY_LENGTH = 50_000
@@ -409,7 +410,14 @@ async function handleCommit(payload: CommitPayload, dynamo: DynamoDBClient, s3: 
   console.log('[vendor-ap-intake] row created', { rowId, attachments: verified.length })
   if (EXTRACT_FUNCTION_NAME) {
     try {
-      await lambda.send(new InvokeCommand({ FunctionName: EXTRACT_FUNCTION_NAME, InvocationType: 'Event', Payload: Buffer.from(JSON.stringify({ id: rowId })) }))
+      // `VENDOR_AP_EXTRACT_FUNCTION_NAME` names vendor-ap-extract (`{ id }`) until the stage that
+      // creates WorkflowRun, then the workflow agent (run hand-off shape): see extractPayload.
+      // The duplicate path above returned already, so a vendor payable starts exactly one run.
+      await lambda.send(new InvokeCommand({
+        FunctionName: EXTRACT_FUNCTION_NAME,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify(extractPayload(process.env.VENDOR_AP_EXTRACT_TARGET, rowId))),
+      }))
     } catch (err) {
       console.warn('[vendor-ap-intake] extractor not invoked', String(err))
     }

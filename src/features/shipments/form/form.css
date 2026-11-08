@@ -1,0 +1,713 @@
+/*
+ * The shipment form, Step AR layout: header bar, five numbered cards, More tabs, sticky summary
+ * rail (bottom sheet under 1280 px). S1 tokens only; 8 px grid; 32 px inputs; 11 px caps labels;
+ * 16 px card padding; 1 px border, 8 px radius. Grid classes (never inline `repeat(3` styles — the
+ * phone rules match on the serialized attribute).
+ */
+
+.tms-shell .tms-ship-form {
+  --ship-gap: 12px;
+}
+
+.tms-shell .tms-ship-form-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background: var(--tms-surface-subtle);
+}
+
+.tms-shell .tms-ship-form .tms-ship-banner,
+.tms-shell .tms-ship-form .tms-ship-issues {
+  margin-bottom: 8px;
+}
+
+.tms-shell .tms-ship-form .tms-ship-draft {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-bottom: 8px;
+  padding: 4px 12px;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+  background: var(--tms-badge-blue-tint);
+  color: var(--tms-text-2);
+  font-size: 12px;
+}
+
+.tms-shell .tms-ship-form .tms-ship-issues button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* ── Header bar ───────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-ship-hdr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+  padding: 8px 16px;
+  background: var(--tms-card);
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-ship-hdr-title {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-ship-hdr-spacer {
+  flex: 1 1 auto;
+}
+
+.tms-shell .tms-ship-hdr-pro {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tms-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The delivery timeline sits in the right third; under 1400 px it drops to the strip's second row, right-aligned. */
+@media (max-width: 1399px) {
+  .tms-shell .tms-ship-hdr .tms-dt { order: 10; margin-left: auto; }
+}
+
+/* Header strip: Customer type-ahead, Bill To chip and the dropdown panel (feedback 7). */
+.tms-shell .tms-ship-hdr-customer-wrap { flex: 0 1 300px; min-width: 200px; }
+.tms-shell .tms-ship-hdr-ref-wrap { flex: 0 0 160px; min-width: 120px; }
+.tms-shell .tms-ship-hdr-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tms-shell .tms-ship-hdr-check { height: 32px; }
+
+.tms-shell .tms-ship-hdr-customer {
+  display: flex;
+  min-width: 0;
+}
+
+.tms-shell .tms-ship-billto-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-pill);
+  color: var(--tms-text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tms-shell .tms-ship-billto-chip[data-hold='true'] {
+  background: var(--tms-badge-orange-tint);
+  border-color: var(--tms-badge-orange);
+  color: var(--tms-badge-orange);
+}
+
+.tms-shell .tms-ship-billto-chip[data-empty='true'] {
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-ship-billto-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-ship-billto-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  font-weight: 600;
+  color: var(--tms-primary);
+}
+
+.tms-shell .tms-ship-billto-details svg {
+  transition: transform 120ms;
+}
+
+.tms-shell .tms-ship-billto-details svg[data-open='true'] {
+  transform: rotate(180deg);
+}
+
+.tms-shell .tms-ship-hdr-panel {
+  order: 1;
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-ship-hdr-panel[hidden] {
+  display: none;
+}
+
+.tms-shell .tms-ship-hdr-panel-h {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-ship-dirty {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-badge-orange);
+}
+
+.tms-shell .tms-ship-pill {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--tms-input-border);
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-input);
+  color: var(--tms-text);
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 200px;
+}
+
+.tms-shell .tms-ship-pill:disabled {
+  color: var(--tms-disabled);
+}
+
+/* ── Layout: main column + rail ───────────────────────────────────────────── */
+
+.tms-shell .tms-ship-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ship-gap);
+  align-items: start;
+}
+
+.tms-shell .tms-ship-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ship-gap);
+  min-width: 0;
+}
+
+@media (min-width: 1280px) {
+  .tms-shell .tms-ship-layout {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-ship-card {
+  min-width: 0;
+  padding: 16px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+}
+
+.tms-shell .tms-ship-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-ship-card-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.tms-shell .tms-ship-card-badge {
+  min-width: 18px;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-badge-red);
+  color: var(--tms-card);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.tms-shell .tms-ship-card-body {
+  min-width: 0;
+}
+
+/* ── Density: 32 px inputs, 11 px caps labels above ───────────────────────── */
+
+.tms-shell .tms-ship-form .tms-input,
+.tms-shell .tms-ship-form .tms-select {
+  height: 32px;
+  min-height: 32px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 13px;
+}
+
+.tms-shell .tms-ship-form .tms-field {
+  gap: 4px;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.tms-shell .tms-ship-form .tms-field-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tms-muted);
+}
+
+/* Required = green input (Ryne, item 1): no asterisks anywhere. Sections mark a required field with
+   the `tms-field-req` class on its TmsField (LField does it) or an aria-label ending "(required)". */
+.tms-shell .tms-ship-form .tms-field-req .tms-input,
+.tms-shell .tms-ship-form .tms-field-req .tms-select,
+.tms-shell .tms-ship-form .tms-field-req textarea,
+.tms-shell .tms-ship-form .tms-field-req input:not([type='checkbox']),
+.tms-shell .tms-ship-form [aria-label$='(required)'] {
+  border-color: var(--tms-badge-green);
+  background-color: var(--tms-badge-green-tint);
+}
+
+/* Fields pre-filled from an intake e-mail / rate confirmation (Ryne's feedback 7). */
+.tms-shell .tms-ship-form .tms-from-email {
+  margin-left: 6px; padding: 0 5px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 14px;
+  background: var(--tms-badge-blue-bg, var(--tms-surface-subtle)); color: var(--tms-badge-blue, var(--tms-primary-ink));
+}
+.tms-shell .tms-ship-form .tms-field-from-email .tms-input,
+.tms-shell .tms-ship-form .tms-field-from-email .tms-select {
+  box-shadow: inset 3px 0 0 var(--tms-badge-blue, var(--tms-primary-ink));
+}
+
+/* ── More tabs ────────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-ship-more {
+  min-width: 0;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+}
+
+.tms-shell .tms-ship-more-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-ship-more-tab {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 8px;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--tms-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tms-shell .tms-ship-more-tab:hover {
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-ship-more-tab[aria-selected='true'] {
+  color: var(--tms-text);
+  font-weight: 600;
+  border-bottom-color: var(--tms-primary);
+}
+
+.tms-shell .tms-ship-more-panel {
+  min-width: 0;
+  padding: 16px;
+}
+
+.tms-shell .tms-ship-more-panel[hidden] {
+  display: none;
+}
+
+/* ── Summary rail ─────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+}
+
+.tms-shell .tms-rail-sheetbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--tms-border);
+  color: var(--tms-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tms-shell .tms-rail-sheetbar-money {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.tms-shell .tms-rail-sheetbar-req {
+  color: var(--tms-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-rail-sheet-chev {
+  transition: transform 120ms;
+}
+
+.tms-shell .tms-rail[data-sheet='open'] .tms-rail-sheet-chev {
+  transform: rotate(180deg);
+}
+
+.tms-shell .tms-rail-body {
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.tms-shell .tms-rail[data-sheet='open'] .tms-rail-body {
+  display: flex;
+}
+
+.tms-shell .tms-rail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-rail-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-rail-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-rail-count[data-ready='true'] {
+  color: var(--tms-badge-green);
+}
+
+.tms-shell .tms-rail-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--tms-text-2);
+  overflow-wrap: anywhere;
+}
+
+.tms-shell .tms-rail-line-strong {
+  font-weight: 600;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-rail-money-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--tms-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-rail-net {
+  padding-top: 8px;
+  border-top: 1px solid var(--tms-border);
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-rail-net strong {
+  font-size: 16px;
+}
+
+.tms-shell .tms-rail-profit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tms-shell .tms-rail-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-muted);
+}
+
+.tms-shell .tms-rail-dot[data-tone='green'] { background: var(--tms-badge-green); }
+.tms-shell .tms-rail-dot[data-tone='amber'] { background: var(--tms-badge-orange); }
+.tms-shell .tms-rail-dot[data-tone='red'] { background: var(--tms-badge-red); }
+
+.tms-shell .tms-rail-reqs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tms-shell .tms-rail-req {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  background: none;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-pill);
+  color: var(--tms-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tms-shell .tms-rail-req[data-done='true'] {
+  color: var(--tms-badge-green);
+  border-color: transparent;
+}
+
+.tms-shell .tms-rail-req[data-missing='true'] {
+  color: var(--tms-badge-orange);
+  border-color: var(--tms-badge-orange);
+}
+
+.tms-shell .tms-rail-req:hover {
+  background: var(--tms-surface-hover);
+}
+
+.tms-shell .tms-rail-roles .ship-body {
+  gap: 8px;
+}
+
+/* Activity: stage chip + stepper, then dense one/two-line audit rows (12 px). */
+.tms-shell .tms-rail-link {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--tms-primary);
+  text-decoration: none;
+}
+
+.tms-shell .tms-rail-link:hover {
+  text-decoration: underline;
+}
+
+.tms-shell .tms-rail-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.tms-shell .tms-rail-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tms-shell .tms-rail-chip[data-terminal='true'] {
+  background: var(--tms-badge-red-tint);
+  color: var(--tms-badge-red);
+}
+
+.tms-shell .tms-rail-steps {
+  display: flex;
+  gap: 3px;
+  align-self: stretch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tms-shell .tms-rail-step {
+  flex: 1 1 0;
+  height: 4px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-border);
+}
+
+.tms-shell .tms-rail-step[data-state='done'] { background: var(--tms-badge-green); }
+.tms-shell .tms-rail-step[data-state='current'] { background: var(--tms-primary); }
+
+.tms-shell .tms-rail-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tms-shell .tms-rail-act {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--tms-text-2);
+  overflow-wrap: anywhere;
+}
+
+.tms-shell .tms-rail-act-time {
+  color: var(--tms-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-rail-act-actor {
+  font-weight: 600;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-rail-act[data-actor-kind='agent'] .tms-rail-act-actor {
+  color: var(--tms-badge-purple);
+}
+
+.tms-shell .tms-rail-act-detail {
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-rail-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-rail-more {
+  align-self: flex-start;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--tms-primary);
+  cursor: pointer;
+}
+
+@media (min-width: 1280px) {
+  /* The rail scrolls with the page (feedback 19): no pinned footer, so no height cap. */
+  .tms-shell .tms-rail {
+    position: static;
+    align-self: start;
+  }
+
+  .tms-shell .tms-rail-sheetbar {
+    display: none;
+  }
+
+  .tms-shell .tms-rail-body {
+    display: flex;
+    flex: 1 1 auto;
+    max-height: none;
+  }
+}
+
+.tms-shell .tms-hdr-unmatched {
+  display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: var(--tms-radius-pill);
+  background: var(--tms-badge-orange-tint); color: var(--tms-badge-orange); font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none;
+}
+
+/* ── Bottom action bar (feedback 19): always visible, sticky to the bottom, never over a field (the form's scroll area ends above it) ── */
+.tms-shell .tms-ship-form { --tms-actionbar-h: 48px; }
+.tms-shell .tms-ship-actionbar {
+  flex: 0 0 auto;
+  /* Pinned to the viewport bottom whichever element scrolls: in a height-fixed page it is the last flex row,
+     and where the page grows with the shell's own scroll the sticky offset holds it at the bottom edge. */
+  position: sticky;
+  bottom: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-sizing: border-box;
+  min-height: var(--tms-actionbar-h);
+  padding: 0 16px env(safe-area-inset-bottom);
+  background: var(--tms-card);
+  border-top: 1px solid var(--tms-border);
+}
+.tms-shell .tms-ship-actionbar-left, .tms-shell .tms-ship-actionbar-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tms-shell .tms-ship-actionbar-save { font-size: 12px; color: var(--tms-muted); white-space: nowrap; }
+.tms-shell .tms-ship-actionbar-save[data-dirty='true'] { color: var(--tms-badge-orange); }
+.tms-shell .tms-ship-actionbar-req {
+  padding: 0; background: none; border: 0; font: inherit; font-size: 12px; font-weight: 600; color: var(--tms-text-2);
+  font-variant-numeric: tabular-nums; cursor: pointer; white-space: nowrap;
+}
+.tms-shell .tms-ship-actionbar-req[data-ready='true'] { color: var(--tms-badge-green); }
+.tms-shell .tms-ship-actionbar [aria-disabled='true'][data-ready='false'] { opacity: 0.6; }
+@media (max-width: 767px) { .tms-shell .tms-ship-actionbar-save { display: none; } }

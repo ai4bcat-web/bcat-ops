@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
+import { isLoadVoided } from '@/lib/shipmentVoid'
+import { useEnsureLoadRange } from './useLoads'
 import type { Load } from '@/types'
 
 export interface MonthBucket {
@@ -43,9 +45,14 @@ function monthKey(d: Date): string {
  * Load date is `pickupAppt`; revenue is the sum of `rate` (cents).
  */
 export function useMonthlyMetrics(monthsBack = 6): MonthlyMetrics {
-  const loads     = useAppStore((s) => s.loads)
+  const allLoads  = useAppStore((s) => s.loads)
+  // Metrics measure work that happened, so the voided loads come out before anything is
+  // summed. The filter sits in its own memo: the selector must keep returning the store's
+  // array, or useSyncExternalStore would see a new reference on every render.
+  const loads     = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const drivers   = useAppStore((s) => s.drivers)
   const equipment = useAppStore((s) => s.equipment)
+  useEnsureLoadRange(`${monthKey(new Date(new Date().getFullYear(), new Date().getMonth() - monthsBack, 1))}-01`, `${monthKey(new Date())}-01`)
 
   return useMemo(() => {
     const now = new Date()

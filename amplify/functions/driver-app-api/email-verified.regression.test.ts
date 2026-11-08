@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type * as HandlerModule from './handler'
 
 const mockVerify = vi.hoisted(() => vi.fn())
@@ -83,10 +83,17 @@ function baseEvent(rawPath: string, token: string): Event {
 
 describe('driver-app-api email verification regression', () => {
   beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.clearAllMocks()
     mockVerify.mockReset()
     mockDynamoSend.mockReset()
     mockDynamoSend.mockResolvedValue({ Items: [] })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('rejects a verified email claim of false before touching roster data', async () => {

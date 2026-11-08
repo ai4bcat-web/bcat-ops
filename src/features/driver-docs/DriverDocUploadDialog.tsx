@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from 'react'
 import { Upload, X, FileText, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -130,6 +130,7 @@ export function DriverDocUploadDialog({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Upload driver document</DialogTitle>
+          <DialogDescription className="sr-only">Attach the pages of a driver document and file them against a driver.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
@@ -243,7 +244,7 @@ export function DriverDocUploadDialog({
               </div>
             )}
             {files.length >= DRIVER_DOC_MAX_PAGES && (
-              <p className="flex items-center gap-1 text-xs text-amber-600">
+              <p className="flex items-center gap-1 text-xs text-[color:var(--tms-badge-orange)]">
                 <AlertCircle className="h-3 w-3" /> Maximum {DRIVER_DOC_MAX_PAGES} pages reached.
               </p>
             )}

@@ -1,6 +1,9 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { ClipboardCheck, ChevronRight, CheckCircle2, Truck, Container } from 'lucide-react'
+import { ClipboardCheck, ChevronRight, Truck, Container } from 'lucide-react'
+import { TmsBadge } from '@/features/tms/kit/TmsBadge'
+import type { TmsTone } from '@/features/tms/kit/TmsBadge'
+import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc, addMonthsStr, statusFromExpiration, type DocState } from '@/lib/truckDocs'
@@ -8,10 +11,10 @@ import { TRUCK_DOC_SPECS, evaluateTruckDoc, addMonthsStr, statusFromExpiration, 
 const TRAILER_DOT_MONTHS = 12
 
 // Only the states that mean "needs attention", ranked worst-first.
-const STATE_META: Partial<Record<DocState, { label: string; bg: string; fg: string; rank: number }>> = {
-  EXPIRED:       { label: 'Overdue',      bg: '#fef2f2', fg: '#b91c1c', rank: 0 },
-  MISSING:       { label: 'No date',      bg: 'var(--ds-bg)', fg: 'var(--ds-t3)', rank: 1 },
-  EXPIRING_SOON: { label: 'Due soon',     bg: '#fffbeb', fg: '#b45309', rank: 2 },
+const STATE_META: Partial<Record<DocState, { label: string; tone: TmsTone; rank: number }>> = {
+  EXPIRED:       { label: 'Overdue',      tone: 'red', rank: 0 },
+  MISSING:       { label: 'No date',      tone: 'gray', rank: 1 },
+  EXPIRING_SOON: { label: 'Due soon',     tone: 'orange', rank: 2 },
 }
 
 function shortDate(d?: string | null): string {
@@ -65,29 +68,26 @@ export function DotDueWidget() {
   const overdue = rows.filter((r) => r.state === 'EXPIRED').length
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+    <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <ClipboardCheck size={16} style={{ color: rows.length ? '#b45309' : 'var(--ds-t3)' }} />
+          <ClipboardCheck size={16} style={{ color: rows.length ? 'var(--tms-badge-orange)' : 'var(--tms-muted)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>DOT Inspections Due / Overdue</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>DOT Inspections Due / Overdue</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>
               {rows.length === 0 ? 'All current' : `${rows.length} need${rows.length === 1 ? 's' : ''} attention${overdue ? ` · ${overdue} overdue` : ''}`}
             </div>
           </div>
         </div>
         {canTruckDocs && (
-          <Link to="/truck-docs" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+          <Link to="/truck-docs" style={{ fontSize: 12, color: 'var(--tms-primary)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
             Asset Documents <ChevronRight size={13} />
           </Link>
         )}
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-          <CheckCircle2 size={22} style={{ color: '#15803d', opacity: 0.7 }} />
-          No DOT inspections due or overdue
-        </div>
+        <TmsEmptyState compact title="No DOT inspections due or overdue" message={null} />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10, padding: 16 }}>
           {rows.map((r) => {
@@ -95,22 +95,22 @@ export function DotDueWidget() {
             const Icon = r.kind === 'truck' ? Truck : Container
             const row = (
               <>
-                <Icon size={15} style={{ color: 'var(--ds-t3)', flexShrink: 0 }} />
+                <Icon size={15} style={{ color: 'var(--tms-muted)', flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ds-t1)', fontFamily: 'var(--font-mono)' }}>{r.unit}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--tms-text)', fontFamily: 'var(--font-mono)' }}>{r.unit}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: 1 }}>
                     {r.state === 'MISSING' ? 'No DOT on file' : `${r.state === 'EXPIRED' ? 'Was due' : 'Due'} ${shortDate(r.nextDue)}`}
                   </div>
                 </div>
-                <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, background: meta.bg, color: meta.fg }}>{meta.label}</span>
+                <TmsBadge tone={meta.tone} style={{ flexShrink: 0 }}>{meta.label}</TmsBadge>
               </>
             )
             return canTruckDocs ? (
-              <Link key={r.id} to="/truck-docs" style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--ds-border)', borderRadius: 10, padding: '10px 12px', background: 'var(--ds-bg)', textDecoration: 'none' }}>
+              <Link key={r.id} to="/truck-docs" style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--tms-border)', borderRadius: 10, padding: '10px 12px', background: 'var(--tms-bg)', textDecoration: 'none' }}>
                 {row}
               </Link>
             ) : (
-              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--ds-border)', borderRadius: 10, padding: '10px 12px', background: 'var(--ds-bg)' }}>
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--tms-border)', borderRadius: 10, padding: '10px 12px', background: 'var(--tms-bg)' }}>
                 {row}
               </div>
             )

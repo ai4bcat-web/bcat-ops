@@ -11,7 +11,7 @@
  * either one.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import type { Load } from '@/types'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -31,6 +31,13 @@ vi.mock('@/store/useAppStore', () => ({
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ user: { email: 'ryne@bcatcorp.com' }, isAdmin: true, isOwner: true }),
   useAuthUser: () => ({ email: 'ryne@bcatcorp.com' }),
+}))
+
+// Staff submissions are fetched over the API; nothing here depends on them.
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {} }) }))  // clients build at import
+vi.mock('@/lib/driverSubmissionsClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/driverSubmissionsClient')>()),
+  listDriverSubmissions: () => Promise.resolve([]),
 }))
 
 vi.mock('@/features/pods/LoadPods', () => ({
@@ -53,155 +60,102 @@ const { LoadDrawer } = await import('./LoadDrawer')
 
 const baseState = (drawerMode: string | null) => ({
   loads: [load], drivers: [], equipment: [], selectedLoadId: 'l1', drawerMode,
-  createPreFill: null, setSelectedLoad: vi.fn(), pendingIntakeItemId: null,
-  setPendingIntakeItem: vi.fn(), updateLoad: vi.fn(), deleteLoad: vi.fn(), addLoad: vi.fn(),
+  setSelectedLoad: vi.fn(), updateLoad: vi.fn(), refreshCalendarData: vi.fn(),
   maintenanceInvoices: [], intakeItems: [],
 })
 
 beforeEach(() => { state = baseState(null) })
 
+// The drawer's data hooks resolve on a later tick; settle them inside act so the render is final.
+async function renderDrawer() {
+  const result = render(<LoadDrawer />)
+  await act(async () => {})
+  return result
+}
+
 describe('LoadDrawer visibility', () => {
-  it('renders NOTHING when no drawer is open', () => {
-    const { container } = render(<LoadDrawer />)
+  it('renders NOTHING when no drawer is open', async () => {
+    const { container } = await renderDrawer()
     expect(container.textContent).toBe('')
   })
 
-  it('opens on the load when drawerMode is set', () => {
+  it('opens on the load when drawerMode is set', async () => {
     state = baseState('view')
-    render(<LoadDrawer />)
+    await renderDrawer()
     expect(screen.getAllByText(/55501/).length).toBeGreaterThan(0)
   })
 })
 
-describe('LoadDrawer uses the shared panel, not its own chrome', () => {
-  it('is themed with the design tokens rather than a hardcoded white sheet', () => {
+describe('LoadDrawer uses the shared panel', () => {
+  it('renders as a named dialog with a Close control', async () => {
     state = baseState('view')
-    const { container } = render(<LoadDrawer />)
-    const html = container.innerHTML
-    // SidePanel paints --ds-surface; the old Sheet hardcoded bg-white / border-slate-200.
-    expect(html).toContain('var(--ds-surface)')
-    expect(html).not.toContain('border-slate-200')
+    await renderDrawer()
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.getAttribute('aria-labelledby')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
   })
 
-  it('shows the invoice status badge as a header action', () => {
+  it('shows the invoice status badge as a header action', async () => {
     state = baseState('view')
-    render(<LoadDrawer />)
+    await renderDrawer()
     // Appears twice by design: the header badge and the Status field in the body.
     expect(screen.getAllByText(/Ready to Invoice/i).length).toBeGreaterThanOrEqual(2)
   })
 
-  it('keeps the load number as the panel title and the customer as its subtitle', () => {
+  it('keeps the load number as the panel title and the customer as its subtitle', async () => {
     state = baseState('view')
-    render(<LoadDrawer />)
+    await renderDrawer()
     expect(screen.getAllByText('55501').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/Metz/).length).toBeGreaterThan(0)
   })
 
-  it('offers Delete and Edit Load in the pinned footer', () => {
+  // Ryne, 2026-10-28: a PRO number is permanent, so no screen may offer to delete a
+  // load. The drawer is the last place one was reachable from.
+  it('offers Edit Load in the pinned footer and no way to delete the load', async () => {
     state = baseState('view')
-    render(<LoadDrawer />)
-    expect(screen.getByRole('button', { name: /Delete load/i })).toBeTruthy()
+    await renderDrawer()
     expect(screen.getByText(/Edit Load/i)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /delete/i })).toBeNull()
   })
-})
-
-/**
- * Build Load prefills the stop details off the tender — but a Batory tender must arrive
- * with its appointments blank.
- *
- * Batory bookings go through the request-and-confirm ladder: Dennis asks for a time, the
- * shipper grants it, and two screenshots evidence it. A date lifted off the tender is a
- * time nobody agreed, sitting in the exact field that ladder exists to fill, and the load
- * reads as booked when nothing has been booked. The facility and city still prefill,
- * because that part is not in dispute — only the appointment and the facility
- * instructions, which the ladder also establishes by hand, are withheld.
- */
-const tenderFor = (customer: string) => ({
-  format: 'E2OPEN' as const,
-  reference: '208663813',
-  pickupNumber: 'SO-77',
-  customer,
-  stops: [
-    {
-      type: 'pickup' as const, name: "BATORY'S OAKLEY", street: '2234 W 43RD STREET',
-      city: 'CHICAGO', state: 'IL', zip: '60609', dateStr: '2026-10-09', time: '08:00',
-      instructions: 'Appointments required',
-    },
-    {
-      type: 'delivery' as const, name: 'MIDWEST FOODS', street: '1 MAIN ST',
-      city: 'DES MOINES', state: 'IA', zip: '50301', dateStr: '2026-10-10', time: '14:00',
-      instructions: '48 Hour Notice',
-    },
-  ],
-})
-
-const createWithTender = (customer: string) => ({
-  ...baseState('create'),
-  createPreFill: { dateStr: '2026-10-09', tender: tenderFor(customer) },
 })
 
 /*
- * Build Load is a Radix Dialog, so its fields are portalled to document.body — the render
- * container is empty, and a field's value lives on the DOM property, not in the markup.
- * Reading container.innerHTML would pass every one of these vacuously.
+ * The create-mode prefill coverage that used to live here moved with the behaviour: the
+ * drawer no longer creates anything, so the Batory-vs-everyone-else tender rules are
+ * pinned on the form that now owns them —
+ * src/features/shipments/components/NewShipmentDialog.test.tsx.
  */
-const fieldValues = (type: string) =>
-  [...document.body.querySelectorAll('input')].filter((el) => el.type === type).map((el) => el.value)
-
-const textValues = () => [
-  ...[...document.body.querySelectorAll('input')].filter((el) => el.type === 'text').map((el) => el.value),
-  ...[...document.body.querySelectorAll('textarea')].map((el) => el.value),
-]
-
-describe('Build Load prefill, Batory vs everyone else', () => {
-  it('prefills the booked appointment date and time for a non-Batory tender', () => {
-    state = createWithTender('Axle Logistics, LLC')
-    render(<LoadDrawer />)
-    // The appointment is a date input plus a time input, not one datetime field.
-    expect(fieldValues('date')).toEqual(expect.arrayContaining(['2026-10-09', '2026-10-10']))
-    expect(fieldValues('time')).toEqual(expect.arrayContaining(['08:00', '14:00']))
+describe('the drawer never creates a record', () => {
+  it('edits a leg and offers no way to mint one', async () => {
+    state = baseState('edit')
+    await renderDrawer()
+    expect(screen.getByRole('button', { name: /save changes/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /create load/i })).toBeNull()
   })
 
-  it('prefills the facility, city and instructions for a non-Batory tender', () => {
-    state = createWithTender('Axle Logistics, LLC')
-    render(<LoadDrawer />)
-    const values = textValues()
-    expect(values).toContain("BATORY'S OAKLEY")
-    expect(values).toContain('DES MOINES, IA')
-    expect(values.join('\n')).toContain('48 Hour Notice')
+  /*
+   * The customer belongs to the shipment. Editing it here wrote Load.customerId while the
+   * Shipment and the Order stayed unresolved, so the release gate and the AR worklist
+   * disagreed with what the calendar showed.
+   */
+  it('shows the customer read-only and points at the shipment detail', async () => {
+    state = baseState('edit')
+    await renderDrawer()
+    const customer = [...document.body.querySelectorAll('input')]
+      .find((el) => el.value === 'Metz Logistics')
+    expect(customer?.disabled).toBe(true)
+    expect(screen.getByText(/change the customer on the shipment detail/i)).toBeTruthy()
   })
 
-  it('leaves every appointment date and time blank for a Batory tender', () => {
-    state = createWithTender('BATORY FOODS INC')
-    render(<LoadDrawer />)
-    // Nothing carried over at all — not the tender's times, not even the plan date.
-    expect(fieldValues('date').filter(Boolean)).toEqual([])
-    expect(fieldValues('time').filter(Boolean)).toEqual([])
-  })
-
-  it('still prefills the Batory facility and city — only the appointment is withheld', () => {
-    state = createWithTender('BATORY FOODS INC')
-    render(<LoadDrawer />)
-    const values = textValues()
-    expect(values).toContain("BATORY'S OAKLEY")
-    expect(values).toContain('CHICAGO, IL')
-  })
-
-  it('withholds the facility instructions on a Batory tender', () => {
-    state = createWithTender('BATORY FOODS INC')
-    render(<LoadDrawer />)
-    expect(textValues().join('\n')).not.toContain('48 Hour Notice')
-  })
-
-  it('says why the Batory appointments are blank, so nobody hunts for the date', () => {
-    state = createWithTender('BATORY FOODS INC')
-    render(<LoadDrawer />)
-    expect(screen.getByText(/Batory load/i)).toBeTruthy()
-  })
-
-  it('says nothing about Batory on anyone else\'s tender', () => {
-    state = createWithTender('Axle Logistics, LLC')
-    render(<LoadDrawer />)
-    expect(screen.queryByText(/Batory load/i)).toBeNull()
+  /*
+   * `aljexId` is field-level read-only to clients now: the PRO claim owns it, so the only
+   * way to move one is SET_LOAD_PRO, which takes a new claim and never releases the old.
+   */
+  it('offers Pro # only through the claim action, never as an editable field', async () => {
+    state = baseState('edit')
+    await renderDrawer()
+    const proField = [...document.body.querySelectorAll('input')].find((el) => el.value === '55501')
+    expect(proField?.readOnly).toBe(true)
+    expect(screen.getByRole('button', { name: 'Change Pro #' })).toBeTruthy()
   })
 })

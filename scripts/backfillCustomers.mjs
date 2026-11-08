@@ -9,7 +9,8 @@
  *   exact unique matching. Ambiguous or unmatched rows are routed to review.
  * - Build a dry-run plan file with source fingerprints and environment.
  * - Apply mode executes the plan through `tmsDirectoryActions` only against an
- *   explicit non-production environment.
+ *   explicit non-production environment, or production via `--target prod` (the
+ *   shared gate in lib/prodGate.mjs: dated allow env, backups, typed confirmation).
  *
  * No automatic inference: Batory customers are flagged for reviewer approval.
  * The original `Load.customer` text is preserved; only `customerId` is added.
@@ -30,6 +31,8 @@ import {
   detectMode,
 } from './lib/tmsConfig.mjs';
 import { createPlan, loadPlan, savePlan, validatePlan, summarize } from './lib/tmsPlan.mjs';
+import { PROD_GATE_OPTIONS, PROD_GATE_USAGE, requireProd } from './lib/prodGate.mjs';
+import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -38,13 +41,19 @@ Usage: node scripts/backfillCustomers.mjs [options]
 
 Options:
   --help, -h        Show this offline help.
-  --outputs <path>  Required: path to amplify_outputs.json (repo-root production file refused).
+  --outputs <path>  Required: path to amplify_outputs.json (repo-root production file refused without --target prod).
   --plan <path>     (dry-run) write plan file; (apply) read plan file.
   --env <target>    Required with --apply: test / sandbox / local. Production blocked.
   --apply           Apply the reviewed plan.
+  --link-only       Create no customer: link loads to the customers that exist and
+                    report every name that has none, with its load count.
 
-Dry-run writes a JSON plan of proposed creates and load updates.
+Dry-run writes a JSON plan of proposed creates and load updates. A load that already
+carries a customerId is counted and left alone.
 Apply validates the plan's fingerprint, environment, and endpoint, then executes via AppSync.
+
+Production only through the shared gate (--outputs must then be the repo-root file; sign in with BCAT_EMAIL/BCAT_PASSWORD):
+${PROD_GATE_USAGE}
 `;
 
 
@@ -156,10 +165,12 @@ export function planCustomerActions(sources, existingCustomers) {
 
 /**
  * Build updateLoad actions for every load whose customer normalized name resolves.
+ * A load that already carries a `customerId` is the record of an earlier run or of a
+ * person's choice, and is left alone either way.
  * @param {any[]} loads
  * @param {any[]} existingCustomers
  * @param {Map<string, any>} sourcesFromPlan
- * @returns {any[]}
+ * @returns {{updates: any[], alreadyLinked: number}}
  */
 export function planLoadCustomerUpdates(loads, existingCustomers, sourcesFromPlan) {
   /** @type {Map<string, string>} */
@@ -174,12 +185,17 @@ export function planLoadCustomerUpdates(loads, existingCustomers, sourcesFromPla
   }
 
   const updates = [];
+  let alreadyLinked = 0;
   for (const load of loads) {
     const raw = String(load.customer ?? '').trim();
     if (!raw) continue;
     const normalizedName = normalizeCustomerName(raw);
     if (!normalizedName) continue;
     if (!sourcesFromPlan.has(normalizedName)) continue;
+    if (typeof load.customerId === 'string' && load.customerId) {
+      alreadyLinked += 1;
+      continue;
+    }
 
     const existingId = customerIdByNormalized.get(normalizedName);
     const source = sourcesFromPlan.get(normalizedName);
@@ -202,7 +218,7 @@ export function planLoadCustomerUpdates(loads, existingCustomers, sourcesFromPla
       },
     });
   }
-  return updates;
+  return { updates, alreadyLinked };
 }
 
 /**
@@ -210,8 +226,9 @@ export function planLoadCustomerUpdates(loads, existingCustomers, sourcesFromPla
  * @param {any} opts.client
  * @param {string} opts.env
  * @param {string} opts.endpoint
+ * @param {boolean} [opts.linkOnly] Create no customer: a name with no row is reported, not minted.
  */
-export async function buildCustomerPlan({ client, env, endpoint }) {
+export async function buildCustomerPlan({ client, env, endpoint, linkOnly = false }) {
   const [loads, customers] = await Promise.all([
     client.listLoads(),
     client.listCustomers(),
@@ -228,9 +245,9 @@ export async function buildCustomerPlan({ client, env, endpoint }) {
     }
   }
 
-  const loadUpdates = planLoadCustomerUpdates(loads, customers, sources);
-  const directoryActions = actions.filter((a) => a.action === 'UPSERT_CUSTOMER');
-  const loadActions = loadUpdates.map((u) => ({
+  const { updates: loadUpdates, alreadyLinked } = planLoadCustomerUpdates(loads, customers, sources);
+  let directoryActions = actions.filter((a) => a.action === 'UPSERT_CUSTOMER');
+  let loadActions = loadUpdates.map((u) => ({
     action: u.action,
     purpose: u.purpose,
     loadId: u.loadId,
@@ -238,6 +255,26 @@ export async function buildCustomerPlan({ client, env, endpoint }) {
     input: u.input,
     condition: u.condition,
   }));
+  if (linkOnly) {
+    // A load whose customer has no row cannot be linked without inventing one: it is
+    // counted against its name and left exactly as it is.
+    const unmatchedLoads = new Map();
+    for (const u of loadActions) {
+      if (u.input.customerId) continue;
+      unmatchedLoads.set(u.customerKey, (unmatchedLoads.get(u.customerKey) ?? 0) + 1);
+    }
+    for (const a of directoryActions) {
+      unresolved.push({
+        kind: 'NO_CUSTOMER_MATCH',
+        normalizedName: a.customerKey,
+        name: a.input.name,
+        loadCount: unmatchedLoads.get(a.customerKey) ?? 0,
+        reason: 'link-only: no active customer carries this name and none is created',
+      });
+    }
+    directoryActions = [];
+    loadActions = loadActions.filter((u) => u.input.customerId);
+  }
 
   const sourceRows = [...sources.values()].map((src) => ({
     normalizedName: src.normalizedName,
@@ -257,6 +294,9 @@ export async function buildCustomerPlan({ client, env, endpoint }) {
       distinctCustomers: sourceRows.length,
       newCustomers: directoryActions.length,
       loadsToUpdate: loadActions.length,
+      loadsAlreadyLinked: alreadyLinked,
+      unmatchedNames: unresolved.filter((u) => u.kind === 'NO_CUSTOMER_MATCH').length,
+      unmatchedLoads: unresolved.filter((u) => u.kind === 'NO_CUSTOMER_MATCH').reduce((n, u) => n + u.loadCount, 0),
       ambiguous: reviewables.filter((r) => r.kind === 'AMBIGUOUS_CUSTOMER').length,
       batoryToReview: reviewables.filter((r) => r.kind === 'BATORY_WORKFLOW_REVIEW').length,
     },
@@ -330,23 +370,25 @@ export async function applyCustomerPlan({ client, planPath, env, endpoint }) {
 }
 
 async function main() {
-  const args = parseTmsArgs();
+  const args = parseTmsArgs({ 'link-only': { type: 'boolean', default: false }, ...PROD_GATE_OPTIONS });
   if (args.values.help) {
     console.log(USAGE);
     process.exit(0);
   }
 
-  const { mode, env } = detectMode(args.values.apply, args.values.env);
-  const outputs = loadAmplifyOutputs(args.values.outputs);
+  const prod = await requireProd({ script: 'backfillCustomers', values: args.values, tables: PROD_WRITE_SETS.backfillCustomers.models });
+  const { mode, env } = detectMode(args.values.apply, args.values.env, prod);
+  const outputs = loadAmplifyOutputs(args.values.outputs, prod);
   const endpoint = outputs?.data?.url;
   if (!endpoint) {
     throw new Error('amplify_outputs.json missing data.url');
   }
 
+  const linkOnly = args.values['link-only'] === true;
   if (mode === 'dry-run') {
     const auth = await authenticateTmsUser(outputs);
     const client = createTmsClient({ endpoint: auth.endpoint, token: auth.token });
-    const plan = await buildCustomerPlan({ client, env, endpoint });
+    const plan = await buildCustomerPlan({ client, env, endpoint, linkOnly });
     const planPath = args.values.plan;
     if (planPath) {
       savePlan(plan, resolve(process.cwd(), planPath));

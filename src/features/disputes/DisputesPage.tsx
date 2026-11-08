@@ -43,10 +43,10 @@ const STATUS_LABEL: Record<DisputeStatus, string> = {
   PENDING: 'Pending', POSTED: 'Filed with Amazon', PAID: 'Paid', REJECTED: 'Rejected',
 }
 const STATUS_STYLE: Record<DisputeStatus, { bg: string; fg: string }> = {
-  PENDING:  { bg: 'var(--ds-amber-bg)', fg: 'var(--ds-amber)' },
-  POSTED:   { bg: 'var(--ds-blue-bg)',  fg: 'var(--ds-blue-dark)' },
-  PAID:     { bg: 'var(--ds-green-bg)', fg: 'var(--ds-green)' },
-  REJECTED: { bg: 'var(--ds-red-bg)',   fg: 'var(--ds-red)' },
+  PENDING:  { bg: 'var(--tms-badge-orange-tint)', fg: 'var(--tms-badge-orange)' },
+  POSTED:   { bg: 'var(--tms-badge-blue-tint)',  fg: 'var(--tms-badge-blue)' },
+  PAID:     { bg: 'var(--tms-badge-green-tint)', fg: 'var(--tms-badge-green)' },
+  REJECTED: { bg: 'var(--tms-badge-red-tint)',   fg: 'var(--tms-badge-red)' },
 }
 
 const SOURCE_LABEL: Record<DisputeSource, string> = {
@@ -349,7 +349,7 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: 12, borderRadius: 9,
-              background: 'var(--ds-red-bg)', color: 'var(--ds-red)',
+              background: 'var(--tms-badge-red-tint)', color: 'var(--tms-badge-red)',
               fontSize: 13, fontWeight: 500,
             }}
           >
@@ -360,7 +360,7 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
         {isEdit && portalFiles.length > 0 && (
           <FormSection title={`Driver Evidence (${portalFiles.length})`}>
             <EvidenceGallery evidence={portalFiles} />
-            <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 6 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: 6 }}>
               Uploaded by the driver — kept as filed.
             </div>
           </FormSection>
@@ -433,17 +433,17 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
                 </div>
               </Field>
               <Field label="Submitted">
-                <div style={{ display: 'flex', alignItems: 'center', height: 38, fontSize: 13, color: 'var(--ds-t2)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', height: 38, fontSize: 13, color: 'var(--tms-text-2)' }}>
                   {dispute.submittedAt ? new Date(dispute.submittedAt).toLocaleString() : '—'}
                 </div>
               </Field>
             </div>
             {dispute.amazonResponse && (
               <Field label="Amazon's Response">
-                <div style={{ fontSize: 12.5, color: 'var(--ds-t2)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                <div style={{ fontSize: 12.5, color: 'var(--tms-text-2)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
                   {dispute.amazonResponse}
                   {dispute.amazonResponseAt && (
-                    <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 4 }}>
+                    <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 4 }}>
                       Recorded {new Date(dispute.amazonResponseAt).toLocaleString()}
                       {dispute.amazonResponseBy ? ` by ${dispute.amazonResponseBy}` : ''}
                     </div>
@@ -453,7 +453,7 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
             )}
             {dispute.externalId && (
               <Field label="External ID">
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t3)' }}>{dispute.externalId}</div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--tms-muted)' }}>{dispute.externalId}</div>
               </Field>
             )}
           </FormSection>
@@ -664,10 +664,10 @@ export function DisputesPage() {
     .reduce((s, d) => s + (d.resolvedAmount ?? d.amountRequested ?? 0), 0)
 
   const KPIS = [
-    { label: 'Total Disputes', value: String(amazonDisputes.length), color: '#a78bfa' },
-    { label: 'Pending',        value: String(pendingCount),          color: '#f59e0b' },
-    { label: 'Open Requested', value: fmtMoney(openRequested),       color: '#1ea8f3' },
-    { label: 'Recovered',      value: fmtMoney(recovered),           color: '#22c55e' },
+    { label: 'Total Disputes', value: String(amazonDisputes.length), color: 'var(--tms-badge-purple)' },
+    { label: 'Pending',        value: String(pendingCount),          color: 'var(--tms-badge-orange)' },
+    { label: 'Open Requested', value: fmtMoney(openRequested),       color: 'var(--tms-badge-blue)' },
+    { label: 'Recovered',      value: fmtMoney(recovered),           color: 'var(--tms-badge-green)' },
   ]
 
   const FILTERS: StatusFilter[] = ['ALL', ...STATUS_ORDER]
@@ -676,15 +676,15 @@ export function DisputesPage() {
   const evidenceTarget = evidenceView && (amazonDisputes.find((d) => d.id === evidenceView.id) ?? evidenceView)
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
+    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--tms-bg)' }}>
       {/* Page header */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--tms-card)', borderBottom: '1px solid var(--tms-border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px 12px' }}>
           <div>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Amazon Disputes</h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
+            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--tms-text)', margin: 0 }}>Amazon Disputes</h1>
+            <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', marginTop: 2 }}>
               Driver-submitted pay disputes · arrive from the{' '}
-              <a href="/amazon-disputes" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--ds-blue)' }}>driver portal</a>
+              <a href="/amazon-disputes" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--tms-primary)' }}>driver portal</a>
               {' '}or the legacy Google Form
             </p>
           </div>
@@ -695,8 +695,8 @@ export function DisputesPage() {
               title="Refresh list"
               style={{
                 display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 12px',
-                background: 'var(--ds-surface)', border: '1px solid var(--ds-border-strong)',
-                borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)',
+                background: 'var(--tms-card)', border: '1px solid var(--tms-input-border)',
+                borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--tms-text)',
                 cursor: refreshing ? 'wait' : 'pointer', fontFamily: 'inherit',
               }}
             >
@@ -708,8 +708,8 @@ export function DisputesPage() {
               rel="noopener noreferrer"
               style={{
                 display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px',
-                background: 'var(--ds-surface)', border: '1px solid var(--ds-border-strong)',
-                borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)',
+                background: 'var(--tms-card)', border: '1px solid var(--tms-input-border)',
+                borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--tms-text)',
                 textDecoration: 'none', fontFamily: 'inherit',
               }}
             >
@@ -717,7 +717,7 @@ export function DisputesPage() {
             </a>
             <button
               onClick={() => setNewOpen(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--tms-primary)', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--tms-on-primary)', cursor: 'pointer', fontFamily: 'inherit' }}
             >
               <Plus size={14} /> New Dispute
             </button>
@@ -727,9 +727,9 @@ export function DisputesPage() {
         {/* KPI strip */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: '0 32px 12px' }}>
           {KPIS.map((k) => (
-            <div key={k.label} style={{ position: 'relative', overflow: 'hidden', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 16px' }}>
+            <div key={k.label} style={{ position: 'relative', overflow: 'hidden', background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 10, padding: '12px 16px' }}>
               <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: k.color }} />
-              <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--ds-t3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginLeft: 4 }}>{k.label}</div>
+              <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--tms-muted)', letterSpacing: '0.06em', textTransform: 'uppercase', marginLeft: 4 }}>{k.label}</div>
               <div style={{ fontSize: 28, fontWeight: 600, color: k.color, letterSpacing: '-0.02em', marginTop: 4, marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>{k.value}</div>
             </div>
           ))}
@@ -740,13 +740,13 @@ export function DisputesPage() {
         {/* Filters */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
           <div style={{ position: 'relative' }}>
-            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
+            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)', pointerEvents: 'none' }} />
             <input
               type="text"
               placeholder="Search driver, trip, description…"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-              style={{ width: 280, height: 34, paddingLeft: 30, paddingRight: 10, boxSizing: 'border-box', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 7, fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none' }}
+              style={{ width: 280, height: 34, paddingLeft: 30, paddingRight: 10, boxSizing: 'border-box', background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 7, fontSize: 12.5, color: 'var(--tms-text)', fontFamily: 'inherit', outline: 'none' }}
             />
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -756,7 +756,7 @@ export function DisputesPage() {
                 <button
                   key={f}
                   onClick={() => { setStatusF(f); setPage(1) }}
-                  style={{ height: 34, padding: '0 12px', borderRadius: 7, border: `1px solid ${active ? 'var(--ds-blue)' : 'var(--ds-border)'}`, background: active ? 'var(--ds-blue)' : 'var(--ds-surface)', color: active ? '#fff' : 'var(--ds-t2)', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}
+                  style={{ height: 34, padding: '0 12px', borderRadius: 7, border: `1px solid ${active ? 'var(--tms-primary)' : 'var(--tms-border)'}`, background: active ? 'var(--tms-primary)' : 'var(--tms-card)', color: active ? 'var(--tms-on-primary)' : 'var(--tms-text-2)', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}
                 >
                   {f === 'ALL' ? 'All' : STATUS_LABEL[f]}
                 </button>
@@ -765,12 +765,12 @@ export function DisputesPage() {
           </div>
         </div>
 
-        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+        <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
               <FileWarning className="size-8 opacity-20" />
               <p className="text-sm">No disputes found.</p>
-              <p className="text-xs text-slate-400">Disputes arrive automatically when a driver submits the portal or Google Form, or add one manually.</p>
+              <p className="text-xs text-muted-foreground">Disputes arrive automatically when a driver submits the portal or Google Form, or add one manually.</p>
             </div>
           ) : (
             <>
@@ -812,27 +812,27 @@ export function DisputesPage() {
                         <tr key={d.id} className="maint-row">
                           <td style={{ ...tdBase, verticalAlign: 'top' }}>
                             <Pill tone={SOURCE_TONE[src]}>{SOURCE_LABEL[src]}</Pill>
-                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ds-t3)', marginTop: 3 }}>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--tms-muted)', marginTop: 3 }}>
                               {(d.submittedAt ?? d.createdAt).slice(0, 10)}
                             </div>
                           </td>
-                          <td title={d.tripNumber ?? undefined} style={{ ...tdBase, verticalAlign: 'top', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.tripNumber || '—'}</td>
-                          <td style={{ ...tdBase, verticalAlign: 'top', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{d.shipmentDate || '—'}</td>
-                          <td title={d.payPeriod ? formatPayPeriod(d.payPeriod) : undefined} style={{ ...tdBase, verticalAlign: 'top', fontSize: 12, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <td title={d.tripNumber ?? undefined} style={{ ...tdBase, verticalAlign: 'top', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--tms-text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.tripNumber || '—'}</td>
+                          <td style={{ ...tdBase, verticalAlign: 'top', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>{d.shipmentDate || '—'}</td>
+                          <td title={d.payPeriod ? formatPayPeriod(d.payPeriod) : undefined} style={{ ...tdBase, verticalAlign: 'top', fontSize: 12, color: 'var(--tms-text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {d.payPeriod ? formatPayPeriod(d.payPeriod) : '—'}
                           </td>
-                          <td title={d.driverName} style={{ ...tdBase, verticalAlign: 'top', fontWeight: 600, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.driverName}</td>
+                          <td title={d.driverName} style={{ ...tdBase, verticalAlign: 'top', fontWeight: 600, color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.driverName}</td>
                           {/* Clamped to two lines so one wordy dispute can't stretch the
                               whole row; the full text is on hover and in the edit sheet. */}
-                          <td title={d.description ?? undefined} style={{ ...tdBase, verticalAlign: 'top', fontSize: 12.5, color: 'var(--ds-t3)', lineHeight: 1.45 }}>
+                          <td title={d.description ?? undefined} style={{ ...tdBase, verticalAlign: 'top', fontSize: 12.5, color: 'var(--tms-muted)', lineHeight: 1.45 }}>
                             {d.description
                               ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{d.description}</span>
-                              : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                              : <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
                           </td>
-                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountPaid)}</td>
-                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountRequested)}</td>
+                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountPaid)}</td>
+                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--tms-text)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountRequested)}</td>
                           {/* What Amazon actually sent back — blank until a recovery is keyed. */}
-                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 600, color: d.resolvedAmount ? 'var(--ds-green)' : 'var(--ds-muted-soft)', whiteSpace: 'nowrap' }}>
+                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 600, color: d.resolvedAmount ? 'var(--tms-badge-green)' : 'var(--tms-disabled)', whiteSpace: 'nowrap' }}>
                             {d.resolvedAmount ? fmtMoney(d.resolvedAmount) : '—'}
                           </td>
                           <td style={{ ...tdBase, verticalAlign: 'top' }}>
@@ -847,16 +847,16 @@ export function DisputesPage() {
                                   style={{
                                     display: 'inline-flex', alignItems: 'center', gap: 5, padding: 0,
                                     background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
-                                    color: 'var(--ds-blue)', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
+                                    color: 'var(--tms-primary)', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
                                   }}
                                 >
                                   <Paperclip size={13} /> {files.length} file{files.length === 1 ? '' : 's'}
                                 </button>
                               )}
                               {d.photoUrl && (
-                                <a href={d.photoUrl} target="_blank" rel="noreferrer" aria-label="View proof" title="Legacy Drive proof" style={{ color: 'var(--ds-blue)', display: 'inline-flex' }}><ExternalLink size={15} /></a>
+                                <a href={d.photoUrl} target="_blank" rel="noreferrer" aria-label="View proof" title="Legacy Drive proof" style={{ color: 'var(--tms-primary)', display: 'inline-flex' }}><ExternalLink size={15} /></a>
                               )}
-                              {files.length === 0 && !d.photoUrl && <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                              {files.length === 0 && !d.photoUrl && <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
                             </div>
                           </td>
                           <td style={{ ...tdBase, verticalAlign: 'top' }}>
@@ -864,7 +864,7 @@ export function DisputesPage() {
                             {d.settlementPeriodStart && (
                               <div
                                 title={`Paid out as a DISPUTE shipment on the ${weekLabelLong(d.settlementPeriodStart)} settlement`}
-                                style={{ fontSize: 11, color: 'var(--ds-green)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                style={{ fontSize: 11, color: 'var(--tms-badge-green)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                               >
                                 → {weekLabel(d.settlementPeriodStart)} settlement
                               </div>
@@ -876,11 +876,11 @@ export function DisputesPage() {
                               aria-label="Record Amazon response"
                               title={d.amazonResponse ? `Amazon: ${d.amazonResponse.slice(0, 160)}` : 'Record status, Amazon response and screenshot'}
                               onClick={() => setStatusEdit({ dispute: d, status: st })}
-                              style={{ ...iconBtnStyle, color: hasResponse ? 'var(--ds-blue)' : 'var(--ds-t3)' }}
+                              style={{ ...iconBtnStyle, color: hasResponse ? 'var(--tms-primary)' : 'var(--tms-muted)' }}
                             >
                               <MessageSquare size={13} />
                             </button>
-                            <button aria-label="Edit dispute" disabled={deletingId === d.id} onClick={() => setEditItem(d)} style={{ ...iconBtnStyle, color: 'var(--ds-t3)', opacity: deletingId === d.id ? 0.5 : 1 }}><Pencil size={13} /></button>
+                            <button aria-label="Edit dispute" disabled={deletingId === d.id} onClick={() => setEditItem(d)} style={{ ...iconBtnStyle, color: 'var(--tms-muted)', opacity: deletingId === d.id ? 0.5 : 1 }}><Pencil size={13} /></button>
                             <button
                               aria-label="Delete dispute"
                               disabled={deletingId === d.id}
@@ -891,7 +891,7 @@ export function DisputesPage() {
                                   .catch((err) => toast.error(`Couldn't delete: ${errorMessage(err)}`))
                                   .finally(() => setDeletingId(null))
                               }}
-                              style={{ ...iconBtnStyle, color: 'var(--ds-red)', opacity: deletingId === d.id ? 0.5 : 1, cursor: deletingId === d.id ? 'wait' : 'pointer' }}
+                              style={{ ...iconBtnStyle, color: 'var(--tms-badge-red)', opacity: deletingId === d.id ? 0.5 : 1, cursor: deletingId === d.id ? 'wait' : 'pointer' }}
                             >
                               <Trash2 size={13} />
                             </button>
@@ -904,8 +904,8 @@ export function DisputesPage() {
               </div>
 
               {pageCount > 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderTop: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-                  <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderTop: '1px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>
                     {filtered.length} dispute{filtered.length === 1 ? '' : 's'} · Page {safePage} of {pageCount}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -914,8 +914,8 @@ export function DisputesPage() {
                       disabled={safePage <= 1}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 4, height: 30, padding: '0 10px',
-                        borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
-                        color: 'var(--ds-t2)', fontSize: 12.5, fontFamily: 'inherit',
+                        borderRadius: 7, border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
+                        color: 'var(--tms-text-2)', fontSize: 12.5, fontFamily: 'inherit',
                         cursor: safePage <= 1 ? 'not-allowed' : 'pointer', opacity: safePage <= 1 ? 0.5 : 1,
                       }}
                     >
@@ -926,8 +926,8 @@ export function DisputesPage() {
                       disabled={safePage >= pageCount}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 4, height: 30, padding: '0 10px',
-                        borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
-                        color: 'var(--ds-t2)', fontSize: 12.5, fontFamily: 'inherit',
+                        borderRadius: 7, border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
+                        color: 'var(--tms-text-2)', fontSize: 12.5, fontFamily: 'inherit',
                         cursor: safePage >= pageCount ? 'not-allowed' : 'pointer', opacity: safePage >= pageCount ? 0.5 : 1,
                       }}
                     >

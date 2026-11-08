@@ -1,3 +1,4 @@
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 /**
  * Ivan Driver App — the staff side.
  *
@@ -10,7 +11,9 @@ import { TruckAssignSelect } from '@/components/TruckAssignSelect'
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Camera, FileWarning, Check, AlertTriangle, ArrowUpDown } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useEnsureLoadRange } from '@/hooks/useLoads'
 import { listDriverSubmissions, type SubmissionWithDocs } from '@/lib/driverSubmissionsClient'
+import { isLoadVoided } from '@/lib/shipmentVoid'
 import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
 import { IvanDriverWeek } from './IvanDriverWeek'
 import { Avatar } from '@/components/ui/avatar'
@@ -36,8 +39,8 @@ const apptLabel = (iso: string | null | undefined) =>
       })
     : '—'
 
-const TH: React.CSSProperties = { fontSize: 10, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }
-const TD: React.CSSProperties = { fontSize: 12.5, color: 'var(--ds-t1)', padding: '7px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+const TH: React.CSSProperties = { fontSize: 10, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }
+const TD: React.CSSProperties = { fontSize: 12.5, color: 'var(--tms-text)', padding: '7px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
 
 /**
  * When the POD arrived. Date AND time, because "the morning after" and "a fortnight
@@ -52,8 +55,8 @@ function podSentLabel(at: string | null): string {
 
 const navBtn: React.CSSProperties = {
   height: 32, width: 32, display: 'grid', placeItems: 'center', borderRadius: 8,
-  border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
-  color: 'var(--ds-t2)', cursor: 'pointer',
+  border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
+  color: 'var(--tms-text-2)', cursor: 'pointer',
 }
 
 interface SortState { key: IvanSortKey; direction: SortDirection }
@@ -76,7 +79,7 @@ function SortHeader({
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 3, background: 'none', border: 'none',
           padding: 0, font: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit',
-          color: active ? 'var(--ds-t1)' : 'inherit', cursor: 'pointer',
+          color: active ? 'var(--tms-text)' : 'inherit', cursor: 'pointer',
         }}
         aria-label={`Sort by ${label}`}
       >
@@ -91,20 +94,20 @@ function SortHeader({
 function PodChip({ row }: { row: IvanLoadRow }) {
   if (row.podState === 'MISSING') {
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, borderRadius: 999, padding: '2px 8px', fontSize: 12, fontWeight: 600, background: '#f59e0b22', color: '#b45309' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, borderRadius: 999, padding: '2px 8px', fontSize: 12, fontWeight: 600, background: 'var(--tms-badge-orange-tint)', color: 'var(--tms-badge-orange)' }}>
         <Camera size={13} /> POD missing
       </span>
     )
   }
   if (row.podState === 'ILLEGIBLE') {
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, borderRadius: 999, padding: '2px 8px', fontSize: 12, fontWeight: 600, background: '#ef444422', color: '#b91c1c' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, borderRadius: 999, padding: '2px 8px', fontSize: 12, fontWeight: 600, background: 'var(--tms-badge-red-tint)', color: 'var(--tms-badge-red)' }}>
         <FileWarning size={13} /> Not legible
       </span>
     )
   }
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, borderRadius: 999, padding: '2px 8px', fontSize: 12, fontWeight: 600, background: '#10b98122', color: '#047857' }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, borderRadius: 999, padding: '2px 8px', fontSize: 12, fontWeight: 600, background: 'var(--tms-badge-green-tint)', color: 'var(--tms-badge-green)' }}>
       <Check size={13} /> POD{row.podPages > 1 ? ` · ${row.podPages}p` : ''}
     </span>
   )
@@ -112,9 +115,13 @@ function PodChip({ row }: { row: IvanLoadRow }) {
 
 export function IvanDriverAppPage() {
   const drivers = useAppStore((s) => s.drivers)
-  const loads = useAppStore((s) => s.loads)
+  const allLoads = useAppStore((s) => s.loads)
+  // The driver's board is live work, so voided loads are filtered out here — in a memo on
+  // the store's array, never in the selector, which has to return a stable reference.
+  const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const equipment = useAppStore((s) => s.equipment)
   const [periodStart, setPeriodStart] = useState(() => sundayOf())
+  useEnsureLoadRange(periodStart, shiftWeek(periodStart, 1))
   // One driver at a time, picked from the chips at the top — as on the owner-operator page.
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null)
   // Where the trucks are, for today's route strips. Same feed the Dispatch page reads.
@@ -174,37 +181,36 @@ export function IvanDriverAppPage() {
   )
 
   return (
-    <div className="page-content" style={{ padding: 20 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--ds-t1)' }}>Ivan Driver App</h1>
-          <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
-            Deliveries by driver, Sun→Sat · {totals.loads} load{totals.loads === 1 ? '' : 's'}
-            {totals.missing > 0 && ` · ${totals.missing} POD${totals.missing === 1 ? '' : 's'} missing`}
-            {totals.illegible > 0 && ` · ${totals.illegible} not legible`}
-          </p>
-        </div>
+    <TmsScrollPage
+      title="Ivan Driver App"
+      subtitle={<>
+        Deliveries by driver, Sun→Sat · {totals.loads} load{totals.loads === 1 ? '' : 's'}
+        {totals.missing > 0 && ` · ${totals.missing} POD${totals.missing === 1 ? '' : 's'} missing`}
+        {totals.illegible > 0 && ` · ${totals.illegible} not legible`}
+      </>}
+      toolbar={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button style={navBtn} onClick={() => setPeriodStart((p) => shiftWeek(p, -1))} aria-label="Previous week"><ChevronLeft size={16} /></button>
           <button
             onClick={() => setPeriodStart(sundayOf())}
-            style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: isThisWeek ? 'var(--ds-bg)' : 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+            style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--tms-border)', background: isThisWeek ? 'var(--tms-bg)' : 'var(--tms-card)', color: 'var(--tms-text-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
           >
             This week
           </button>
           <button style={{ ...navBtn, opacity: isThisWeek ? 0.4 : 1 }} onClick={() => !isThisWeek && setPeriodStart((p) => shiftWeek(p, 1))} disabled={isThisWeek} aria-label="Next week"><ChevronRight size={16} /></button>
-          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', minWidth: 170, textAlign: 'right' }}>{weekLabelLong(periodStart)}</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>{weekLabelLong(periodStart)}</span>
         </div>
-      </div>
+      }
+    >
 
       {warning && (
-        <p style={{ marginBottom: 14, padding: 12, borderRadius: 8, background: '#f59e0b1a', color: '#b45309', fontSize: 13 }}>
+        <p style={{ marginBottom: 14, padding: 12, borderRadius: 8, background: 'var(--tms-badge-orange-tint)', color: 'var(--tms-badge-orange)', fontSize: 13 }}>
           {warning}
         </p>
       )}
 
       {rows.length === 0 && (
-        <p style={{ color: 'var(--ds-t3)', fontSize: 13.5 }}>
+        <p style={{ color: 'var(--tms-muted)', fontSize: 13.5 }}>
           No active Ivan drivers. A driver belongs here when their fleet is Local and they are not an owner operator.
         </p>
       )}
@@ -218,13 +224,13 @@ export function IvanDriverAppPage() {
             const outstanding = r.podsMissing + r.podsIllegible
             return (
               <button key={r.driver.id} onClick={() => setSelectedDriverId(r.driver.id)} title={r.driver.name} aria-pressed={active}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 10, border: `1px solid ${active ? 'var(--ds-blue)' : 'var(--ds-border)'}`, background: active ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)', cursor: 'pointer', fontFamily: 'inherit', boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
-                <Avatar src={r.driver.photoUrl} initials={getInitials(r.driver.name)} size="xs" style={{ background: color.avatarBg, color: '#fff' }} />
-                <span style={{ fontSize: 13, fontWeight: active ? 700 : 600, color: 'var(--ds-t1)' }}>{r.driver.name}</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: outstanding ? '#b45309' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 10, border: `1px solid ${active ? 'var(--tms-primary)' : 'var(--tms-border)'}`, background: active ? 'var(--tms-primary-tint)' : 'var(--tms-card)', cursor: 'pointer', fontFamily: 'inherit', boxShadow: active ? 'var(--tms-shadow)' : 'none' }}>
+                <Avatar src={r.driver.photoUrl} initials={getInitials(r.driver.name)} size="xs" style={{ background: color.avatarBg, color: 'var(--tms-on-primary)' }} />
+                <span style={{ fontSize: 13, fontWeight: active ? 700 : 600, color: 'var(--tms-text)' }}>{r.driver.name}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: outstanding ? 'var(--tms-badge-orange)' : 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums' }}>
                   {r.loads.length} load{r.loads.length === 1 ? '' : 's'}{outstanding ? ` · ${outstanding} POD` : ''}
                 </span>
-                {r.unclassified && <AlertTriangle size={12} style={{ color: '#b45309' }} aria-label="No fleet set" />}
+                {r.unclassified && <AlertTriangle size={12} style={{ color: 'var(--tms-badge-orange)' }} aria-label="No fleet set" />}
               </button>
             )
           })}
@@ -240,7 +246,7 @@ export function IvanDriverAppPage() {
           <IvanDriverWeek key={selectedRow.driver.id} driver={selectedRow.driver} loads={loads} weekStart={periodStart} today={chicagoDateStr(new Date(now))} truck={truckFixOf(selectedRow.driver)} now={now} onOpenLoad={(id) => setSelectedLoad(id, 'view')}
             podSentAt={new Map(selectedRow.loads.map((l) => [l.load.id, l.podUploadedAt]))} />
           {selectedRow.unclassified && (
-            <p style={{ display: 'flex', alignItems: 'flex-start', gap: 5, margin: '6px 2px 0', color: '#b45309', fontSize: 11.5 }}>
+            <p style={{ display: 'flex', alignItems: 'flex-start', gap: 5, margin: '6px 2px 0', color: 'var(--tms-badge-orange)', fontSize: 11.5 }}>
               <AlertTriangle size={12} style={{ marginTop: 2, flexShrink: 0 }} />
               <span>No fleet set — the app still shows {selectedRow.driver.name} a settlement. In Files → Drivers set the fleet to Local or Box truck, or switch on Ivan driver app.</span>
             </p>
@@ -248,18 +254,18 @@ export function IvanDriverAppPage() {
         </div>
       )}
 
-      {selectedRow && <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', margin: '0 0 8px' }}>{selectedRow.driver.name}&rsquo;s paperwork this week</p>}
+      {selectedRow && <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text-2)', margin: '0 0 8px' }}>{selectedRow.driver.name}&rsquo;s paperwork this week</p>}
       {/* The week, as one list. Driver is a column like any other. */}
       {flat.length === 0 ? (
         rows.length > 0 && (
-          <p style={{ color: 'var(--ds-t3)', fontSize: 13.5, padding: 14, border: '1px solid var(--ds-border)', borderRadius: 10 }}>
+          <p style={{ color: 'var(--tms-muted)', fontSize: 13.5, padding: 14, border: '1px solid var(--tms-border)', borderRadius: 10 }}>
             Nothing delivering this week for {selectedRow?.driver.name ?? 'this driver'}.
           </p>
         )
       ) : (
-        <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', overflowX: 'auto' }}>
+        <div style={{ border: '1px solid var(--tms-border)', borderRadius: 12, background: 'var(--tms-card)', overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 880 }}>
-            <thead><tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+            <thead><tr style={{ borderBottom: '1px solid var(--tms-border)' }}>
               <SortHeader label="Driver"   col="driver"    align="left" sort={sort} onSort={setSort} />
               <SortHeader label="PRO #"    col="reference" align="left" sort={sort} onSort={setSort} />
               <SortHeader label="Customer" col="customer"  align="left" sort={sort} onSort={setSort} />
@@ -271,31 +277,31 @@ export function IvanDriverAppPage() {
             </tr></thead>
             <tbody>
               {flat.map((r) => (
-                <tr key={r.load.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                <tr key={r.load.id} style={{ borderBottom: '1px solid var(--tms-border)' }}>
                   <td style={{ ...TD, textAlign: 'left', fontWeight: 600 }}>{r.driverName}</td>
                   <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600 }}>
                     <button
                       onClick={() => setSelectedLoad(r.load.id, 'view')}
-                      style={{ background: 'none', border: 'none', padding: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--ds-accent, #1ea8f3)', cursor: 'pointer', fontFamily: 'inherit' }}
+                      style={{ background: 'none', border: 'none', padding: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--tms-primary)', cursor: 'pointer', fontFamily: 'inherit' }}
                     >
                       {r.reference}
                     </button>
                   </td>
                   <td style={{ ...TD, textAlign: 'left', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.load.customer ?? '—'}</td>
-                  <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)' }}>
+                  <td style={{ ...TD, textAlign: 'left', color: 'var(--tms-text-2)' }}>
                     {r.load.originCity || '—'} → {r.load.destinationCity || '—'}
                   </td>
-                  <td style={{ ...TD, textAlign: 'left', color: paperworkShortLabel(r.load.paperworkLocation) === 'Missing' ? '#b91c1c' : paperworkShortLabel(r.load.paperworkLocation) ? 'var(--ds-t1)' : 'var(--ds-t3)' }} title={paperworkStatusLine(r.load.paperworkLocation) ?? 'Not filed yet'}>
+                  <td style={{ ...TD, textAlign: 'left', color: paperworkShortLabel(r.load.paperworkLocation) === 'Missing' ? 'var(--tms-badge-red)' : paperworkShortLabel(r.load.paperworkLocation) ? 'var(--tms-text)' : 'var(--tms-muted)' }} title={paperworkStatusLine(r.load.paperworkLocation) ?? 'Not filed yet'}>
                     {paperworkShortLabel(r.load.paperworkLocation) ?? '—'}
                   </td>
                   <td style={TD}>{apptLabel(r.load.deliveryAppt)}</td>
                   <td style={TD}><PodChip row={r} /></td>
-                  <td style={{ ...TD, color: 'var(--ds-t3)' }}>{podSentLabel(r.podUploadedAt)}</td>
+                  <td style={{ ...TD, color: 'var(--tms-muted)' }}>{podSentLabel(r.podUploadedAt)}</td>
                 </tr>
               ))}
               {flat.filter((r) => r.podNotes).map((r) => (
                 <tr key={`${r.load.id}-why`}>
-                  <td colSpan={8} style={{ ...TD, textAlign: 'left', color: '#b91c1c', paddingTop: 0, whiteSpace: 'normal' }}>
+                  <td colSpan={8} style={{ ...TD, textAlign: 'left', color: 'var(--tms-badge-red)', paddingTop: 0, whiteSpace: 'normal' }}>
                     {r.reference}: {r.podNotes}
                   </td>
                 </tr>
@@ -307,6 +313,6 @@ export function IvanDriverAppPage() {
 
       {/* Reads the selected load from the store, as on the settlements page. */}
       <LoadDrawer />
-    </div>
+    </TmsScrollPage>
   )
 }

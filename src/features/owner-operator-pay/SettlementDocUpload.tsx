@@ -82,7 +82,7 @@ export function SettlementDocUpload({
           style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             border: 'none', background: 'none', padding: 2, cursor: 'pointer',
-            color: '#15803d', fontFamily: 'inherit',
+            color: 'var(--tms-badge-green)', fontFamily: 'inherit',
           }}
         >
           <CheckCircle2 size={13} />
@@ -188,8 +188,8 @@ export function SettlementDocUpload({
           fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
           cursor: busy ? 'default' : 'pointer', whiteSpace: 'nowrap',
           ...(blocking
-            ? { border: '1px solid #fcd34d', background: '#fffbeb', color: '#b45309' }
-            : { border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)' }),
+            ? { border: '1px solid var(--tms-badge-orange)', background: 'var(--tms-badge-orange-tint)', color: 'var(--tms-badge-orange)' }
+            : { border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text-2)' }),
         }}
       >
         {busy ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}

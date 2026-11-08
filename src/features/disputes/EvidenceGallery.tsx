@@ -92,7 +92,7 @@ export function EvidenceGallery({ evidence, onRemove }: {
   }
 
   if (evidence.length === 0) {
-    return <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No files attached.</div>
+    return <div style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>No files attached.</div>
   }
 
   return (
@@ -105,8 +105,8 @@ export function EvidenceGallery({ evidence, onRemove }: {
             disabled={savingAll}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6, height: 28, padding: '0 10px',
-              borderRadius: 7, border: '1px solid var(--ds-border-strong)', background: 'var(--ds-surface)',
-              color: 'var(--ds-t1)', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+              borderRadius: 7, border: '1px solid var(--tms-input-border)', background: 'var(--tms-card)',
+              color: 'var(--tms-text)', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
               cursor: savingAll ? 'wait' : 'pointer',
             }}
           >
@@ -126,31 +126,31 @@ export function EvidenceGallery({ evidence, onRemove }: {
             key={`${item.s3Key}-${i}`}
             style={{
               display: 'flex', alignItems: 'center', gap: 12, padding: 10,
-              borderRadius: 9, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
+              borderRadius: 9, border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
             }}
           >
             <div style={{
               width: 56, height: 56, flexShrink: 0, borderRadius: 7, overflow: 'hidden',
-              border: '1px solid var(--ds-border)', background: 'var(--ds-bg)',
+              border: '1px solid var(--tms-border)', background: 'var(--tms-bg)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               {isBrowserRenderable(item) && url
                 ? <img src={url} alt={evidenceFileName(item)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                : <FileText size={20} style={{ color: 'var(--ds-t3)' }} />}
+                : <FileText size={20} style={{ color: 'var(--tms-muted)' }} />}
             </div>
 
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
                 <Pill tone={KIND_TONE[item.kind] ?? 'neutral'}>{KIND_LABEL[item.kind] ?? item.kind}</Pill>
-                {isPdfEvidence(item) && <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>PDF</span>}
+                {isPdfEvidence(item) && <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>PDF</span>}
               </div>
               <div
                 title={evidenceFileName(item)}
-                style={{ fontSize: 13, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                style={{ fontSize: 13, color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
               >
                 {evidenceFileName(item)}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{evidenceSizeLabel(item.size)}</div>
+              <div style={{ fontSize: 11, color: 'var(--tms-muted)' }}>{evidenceSizeLabel(item.size)}</div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -170,7 +170,7 @@ export function EvidenceGallery({ evidence, onRemove }: {
                 title="Download"
                 onClick={() => void download(item)}
                 disabled={busy}
-                style={{ ...iconAction, color: 'var(--ds-blue)' }}
+                style={{ ...iconAction, color: 'var(--tms-primary)' }}
               >
                 <Download size={15} />
               </button>
@@ -180,7 +180,7 @@ export function EvidenceGallery({ evidence, onRemove }: {
                   aria-label={`Remove ${evidenceFileName(item)}`}
                   title="Remove"
                   onClick={() => onRemove(item)}
-                  style={{ ...iconAction, color: 'var(--ds-red)' }}
+                  style={{ ...iconAction, color: 'var(--tms-badge-red)' }}
                 >
                   <Trash2 size={15} />
                 </button>
@@ -195,5 +195,5 @@ export function EvidenceGallery({ evidence, onRemove }: {
 
 const iconAction: React.CSSProperties = {
   background: 'none', border: 'none', padding: 6, borderRadius: 6,
-  cursor: 'pointer', color: 'var(--ds-t3)', display: 'inline-flex',
+  cursor: 'pointer', color: 'var(--tms-muted)', display: 'inline-flex',
 }

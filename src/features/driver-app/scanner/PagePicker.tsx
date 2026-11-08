@@ -169,7 +169,7 @@ export function PagePicker({ onDone, onCancel, initialPages = [], photos = false
       </div>
 
       {atMax && (
-        <p className="mt-3 text-sm text-amber-300">
+        <p className="mt-3 text-sm text-[color:var(--tms-badge-orange)]">
           That is the most pages we can send at once ({MAX_SCAN_PAGES}).
         </p>
       )}

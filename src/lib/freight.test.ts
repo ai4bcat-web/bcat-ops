@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { freightSummary, formatPieces, formatWeight, hasFreight } from './freight'
+vi.mock('./apiClient', () => ({ uploadRateConfirm: vi.fn(), parseRateConfirm: vi.fn() }))
+vi.mock('./driverSubmissionsClient', () => ({ staffUploadDriverDoc: vi.fn() }))
 
 describe('freightSummary', () => {
   it('reads pieces, weight, commodity in that order', () => {

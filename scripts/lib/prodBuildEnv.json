@@ -1,0 +1,7 @@
+{
+  "_comment": "LENGTHS ONLY (no values) of the Amplify build env vars backend.ts reads at synth: app-level plus the `main` branch override (aws amplify get-app / get-branch, 2026-11-04). prod-shape synth fills each with that many 'x' so plain env values weigh what they will on main.",
+  "PAYCHEX_COMPANY_ID": 8,
+  "GOOGLE_PLACES_API_KEY": 39,
+  "PORTAL_PROD_ORIGIN": 24,
+  "SLACK_GLOBAL_CHANNEL_ID": 11
+}

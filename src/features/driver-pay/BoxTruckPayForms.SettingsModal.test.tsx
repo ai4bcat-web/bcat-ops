@@ -13,6 +13,7 @@ import type { FixedExpenseInput } from '@/lib/driverPay'
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {} }) }))  // apiClient builds its client at import
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ user: { email: 'tester@bcatcorp.com' } }),
 }))

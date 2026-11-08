@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { X, Upload } from 'lucide-react'
+import { Upload } from 'lucide-react'
+import { PayModal } from '@/features/driver-pay/DriverPayForms'
 import type { Driver } from '@/types'
 import type { BoxTruckTrip, DriverPaySetting, DriverPayCredit, DriverPayCreditInput } from '@/hooks/useBoxTruckPay'
 import { parseBoxTruckRows, type RawBoxTruckRow } from '@/lib/boxTruckCsv'
@@ -10,35 +11,19 @@ import type { FixedExpenseInput } from '@/lib/driverPay'
 type TripInput = Omit<BoxTruckTrip, 'id' | 'createdAt' | 'updatedAt'>
 type SettingPatch = Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>
 
-const label: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }
-const input: React.CSSProperties = { height: 36, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)', boxSizing: 'border-box' }
+const label: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }
+const input: React.CSSProperties = { height: 36, width: '100%', borderRadius: 8, border: '1px solid var(--tms-border)', padding: '0 10px', fontSize: 13, background: 'var(--tms-card)', color: 'var(--tms-text)', boxSizing: 'border-box' }
 const num = (s: string): number | null => { const n = parseFloat(s.replace(/[$,\s]/g, '')); return isFinite(n) ? n : null }
 const numStr = (n: number | null | undefined) => (n == null ? '' : String(n))
 const moneyFmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
 
-function Modal({ title, sub, onClose, children, width = 520 }: { title: string; sub?: string; onClose: () => void; children: React.ReactNode; width?: number }) {
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)', padding: 16 }}>
-      <div style={{ background: 'var(--ds-surface)', borderRadius: 16, boxShadow: 'var(--sh-lg, 0 10px 40px rgba(0,0,0,0.2))', width: '100%', maxWidth: width, maxHeight: '90vh', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', position: 'sticky', top: 0, background: 'var(--ds-surface)' }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>{title}</div>
-            {sub && <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>{sub}</div>}
-          </div>
-          <button onClick={onClose} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
-        </div>
-        <div style={{ padding: 20 }}>{children}</div>
-      </div>
-    </div>
-  )
-}
 
 function Field({ children, l, half }: { children: React.ReactNode; l: string; half?: boolean }) {
   return <div style={{ display: 'flex', flexDirection: 'column', gap: 5, gridColumn: half ? 'span 1' : '1 / -1' }}><label style={label}>{l}</label>{children}</div>
 }
 
-const saveBtn: React.CSSProperties = { height: 36, padding: '0 16px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }
-const cancelBtn: React.CSSProperties = { height: 36, padding: '0 16px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }
+const saveBtn: React.CSSProperties = { height: 36, padding: '0 16px', borderRadius: 8, border: 'none', background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }
+const cancelBtn: React.CSSProperties = { height: 36, padding: '0 16px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }
 
 function Footer({ onClose, onSave, saving, disabled, label: lbl = 'Save' }: { onClose: () => void; onSave: () => void; saving?: boolean; disabled?: boolean; label?: string }) {
   return (
@@ -78,7 +63,7 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
   }
 
   return (
-    <Modal title={editing ? 'Edit shipment' : 'Add shipment'} sub="One shipment for this pay period" onClose={onClose}>
+    <PayModal title={editing ? 'Edit shipment' : 'Add shipment'} sub="One shipment for this pay period" onClose={onClose}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="Date" half><input type="date" style={input} value={f.date} onChange={(e) => set('date', e.target.value)} /></Field>
         <Field l="Aljex PRO #" half><input style={input} value={f.aljexPro} onChange={(e) => set('aljexPro', e.target.value)} placeholder="FR-407930" /></Field>
@@ -95,9 +80,9 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
           </select>
         </Field>
       </div>
-      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--tms-badge-red)', marginTop: 10 }}>{err}</div>}
       <Footer onClose={onClose} onSave={save} saving={saving} label={editing ? 'Save shipment' : 'Add shipment'} />
-    </Modal>
+    </PayModal>
   )
 }
 
@@ -152,7 +137,7 @@ export function CreditModal({ driverId, driverName, periodStart, periodLabel, in
   }
 
   return (
-    <Modal title={editing ? `Edit ${noun}` : `Add ${noun}`} sub={debit ? `Taken off ${driverName}'s ${periodLabel} check, after the net` : `Extra pay for ${driverName} on the ${periodLabel} check`} onClose={onClose} width={520}>
+    <PayModal title={editing ? `Edit ${noun}` : `Add ${noun}`} sub={debit ? `Taken off ${driverName}'s ${periodLabel} check, after the net` : `Extra pay for ${driverName} on the ${periodLabel} check`} onClose={onClose} width={520}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="Reason code *" half>
           <select style={input} value={f.reasonCode} onChange={(e) => set('reasonCode', e.target.value)}>
@@ -166,16 +151,16 @@ export function CreditModal({ driverId, driverName, periodStart, periodLabel, in
         <Field l="Internal note"><input style={input} value={f.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Approved by…" /></Field>
       </div>
 
-      <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', fontSize: 12.5, color: 'var(--ds-t2)' }}>
+      <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', fontSize: 12.5, color: 'var(--tms-text-2)' }}>
         {debit
           ? <>Debits come off the check <b>in full, after the net</b> — the driver's pay percentage is not applied.</>
           : <>Credits are added to the check <b>in full</b> — the driver's pay percentage is not applied.</>}
-        {amount != null && amount > 0 && <> This check goes {debit ? 'down' : 'up'} by <b style={{ color: debit ? '#dc2626' : '#15803d' }}>{moneyFmt(amount)}</b>.</>}
+        {amount != null && amount > 0 && <> This check goes {debit ? 'down' : 'up'} by <b style={{ color: debit ? 'var(--tms-badge-red)' : 'var(--tms-badge-green)' }}>{moneyFmt(amount)}</b>.</>}
       </div>
 
-      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--tms-badge-red)', marginTop: 10 }}>{err}</div>}
       <Footer onClose={onClose} onSave={save} saving={saving} label={editing ? `Save ${noun}` : `Add ${noun}`} />
-    </Modal>
+    </PayModal>
   )
 }
 
@@ -190,7 +175,7 @@ function rowToTrip(r: RawBoxTruckRow, driverId: string, periodStart: string): Tr
 
 function FilePick({ onText }: { onText: (t: string) => void }) {
   return (
-    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer', fontSize: 12.5, fontWeight: 600 }}>
+    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', cursor: 'pointer', fontSize: 12.5, fontWeight: 600 }}>
       <Upload size={14} /> Choose file…
       <input type="file" accept=".csv,.tsv,.txt,text/csv" style={{ display: 'none' }}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) f.text().then(onText); e.currentTarget.value = '' }} />
@@ -198,7 +183,7 @@ function FilePick({ onText }: { onText: (t: string) => void }) {
   )
 }
 
-const importTextarea: React.CSSProperties = { width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: 10, fontSize: 12, fontFamily: 'monospace', background: 'var(--ds-surface)', color: 'var(--ds-t1)', resize: 'vertical', boxSizing: 'border-box' }
+const importTextarea: React.CSSProperties = { width: '100%', borderRadius: 8, border: '1px solid var(--tms-border)', padding: 10, fontSize: 12, fontFamily: 'monospace', background: 'var(--tms-card)', color: 'var(--tms-text)', resize: 'vertical', boxSizing: 'border-box' }
 
 // ── Import shipments (paste or file) — filed to the selected period ──────────
 export function ImportModal({ driverId, periodStart, onImport, onClose }: { driverId: string; periodStart: string; onImport: (rows: TripInput[]) => Promise<void>; onClose: () => void }) {
@@ -208,20 +193,20 @@ export function ImportModal({ driverId, periodStart, onImport, onClose }: { driv
   const parsed = raw.map((r) => rowToTrip(r, driverId, periodStart))
 
   return (
-    <Modal title="Import shipments" sub="Upload or paste the Ivan Cartage spreadsheet — all rows file to the selected period" onClose={onClose} width={680}>
+    <PayModal title="Import shipments" sub="Upload or paste the Ivan Cartage spreadsheet — all rows file to the selected period" onClose={onClose} width={680}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
-        <div style={{ fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+        <div style={{ fontSize: 12, color: 'var(--tms-muted)', lineHeight: 1.5 }}>
           Columns auto-detected by name: <span style={{ fontFamily: 'monospace', fontSize: 11 }}>shipment_pro · customer name · sales rep name · shipment_load_des · shipment_gross_profit · shipment_status</span>.
           Pay is the sum of <b>gross profit</b>.
         </div>
         <FilePick onText={setText} />
       </div>
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={9} placeholder="Paste rows (including the header row) from the spreadsheet…" style={importTextarea} />
-      <div style={{ fontSize: 12.5, color: parsed.length ? '#15803d' : 'var(--ds-t3)', marginTop: 8 }}>
+      <div style={{ fontSize: 12.5, color: parsed.length ? 'var(--tms-badge-green)' : 'var(--tms-muted)', marginTop: 8 }}>
         {parsed.length ? `${parsed.length} shipment${parsed.length !== 1 ? 's' : ''} ready · gross profit total ${money(parsed.reduce((s, t) => s + (t.grossProfit || 0), 0))}` : 'Upload or paste rows to preview'}
       </div>
       <Footer onClose={onClose} onSave={async () => { setSaving(true); try { await onImport(parsed) } catch { setSaving(false) } }} saving={saving} label={`Import ${parsed.length || ''}`.trim()} />
-    </Modal>
+    </PayModal>
   )
 }
 
@@ -254,7 +239,7 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
   }
 
   return (
-    <Modal title={`${driver.name} — box-truck pay settings`} sub="How this driver's biweekly pay is calculated" onClose={onClose} width={560}>
+    <PayModal title={`${driver.name} — box-truck pay settings`} sub="How this driver's biweekly pay is calculated" onClose={onClose} width={560}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="Pay percent *" half><input style={input} value={percent} onChange={(e) => setPercent(e.target.value)} placeholder="50" /></Field>
         <Field l="Fuel card # (EFS)" half><input style={input} value={fuelCard} onChange={(e) => setFuelCard(e.target.value)} placeholder="00049" /></Field>
@@ -267,10 +252,10 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
           {[{ v: true, t: '% of net (after expenses)', hint: 'Zak, Chad' }, { v: false, t: '% of gross, then − expenses', hint: 'Lee, Mike, Roy' }].map((opt) => (
             <button key={String(opt.v)} type="button" onClick={() => setAfterExp(opt.v)}
               style={{ flex: 1, textAlign: 'left', padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
-                border: `1.5px solid ${afterExp === opt.v ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
-                background: afterExp === opt.v ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)' }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)' }}>{opt.t}</div>
-              <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 2 }}>e.g. {opt.hint}</div>
+                border: `1.5px solid ${afterExp === opt.v ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+                background: afterExp === opt.v ? 'var(--tms-primary-tint)' : 'var(--tms-card)' }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)' }}>{opt.t}</div>
+              <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 2 }}>e.g. {opt.hint}</div>
             </button>
           ))}
         </div>
@@ -287,13 +272,13 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
       </div>
 
       {fixedEditing && (
-        <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 8 }}>
           Finish or cancel the fixed-expense edit before saving settings.
         </div>
       )}
 
-      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 12 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--tms-badge-red)', marginTop: 12 }}>{err}</div>}
       <Footer onClose={onClose} onSave={save} saving={saving} disabled={fixedEditing} label="Save settings" />
-    </Modal>
+    </PayModal>
   )
 }

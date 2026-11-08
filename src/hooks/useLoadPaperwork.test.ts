@@ -3,10 +3,13 @@
  * already sent from their own app: it lives in a different store from the JobsDone ones,
  * and reading fewer than all three stores is what made it look missing.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { buildPodIndex } from '@/lib/podPresence'
 import { paperworkFor } from './useLoadPaperwork'
 import type { Load } from '@/types'
+
+// The real apiClient builds its Amplify client on import; stub the client so nothing needs Amplify.configure().
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
 
 const load = (over: Partial<Load> = {}): Load =>
   ({ id: 'l1', aljexId: '14517', ...over }) as Load

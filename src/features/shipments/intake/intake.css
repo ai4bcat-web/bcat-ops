@@ -1,0 +1,26 @@
+.tms-intake-banner { margin-bottom: var(--tms-gap); }
+.tms-intake-tabs { margin: var(--tms-gap) 0; }
+.tms-intake-chips { margin: 0 0 var(--tms-gap); }
+.tms-intake-from { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tms-intake-from-name { font-weight: 600; }
+.tms-intake-from-subject { color: var(--tms-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; }
+.tms-intake-completeness { white-space: nowrap; }
+.tms-intake-source-link { display: inline-flex; align-items: center; color: var(--tms-muted); }
+
+.tms-intake-group { display: flex; flex-direction: column; gap: 12px; }
+.tms-intake-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: end; }
+.tms-intake-row-status { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
+.tms-intake-confirm { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--tms-muted); white-space: nowrap; }
+.tms-intake-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--tms-gap); }
+@media (max-width: 700px) { .tms-intake-grid { grid-template-columns: minmax(0, 1fr); } }
+.tms-intake-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: var(--tms-gap); }
+.tms-intake-footer-spacer { flex: 1; }
+.tms-intake-needs { color: var(--tms-muted); margin-top: var(--tms-gap); }
+.tms-intake-review-line { color: var(--tms-muted); font-size: 12px; text-align: right; }
+.tms-intake-needs-list { margin: 4px 0 0; padding-left: 18px; }
+
+.tms-intake-email-body { white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto; border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); padding: 8px; }
+.tms-intake-email-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin-bottom: 12px; }
+.tms-intake-email-key { color: var(--tms-muted); }
+.tms-intake-attachments { margin: 8px 0 0; padding-left: 18px; }
+.tms-intake-row-actions { display: inline-flex; align-items: center; gap: 8px; }

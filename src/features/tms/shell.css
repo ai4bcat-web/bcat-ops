@@ -1,0 +1,807 @@
+/*
+ * The /tms/* app frame: a floating sidebar card, a floating top-bar card and the content
+ * column between them. Colours, radii and sizes come from the `--tms-*` tokens in
+ * theme.css; this file holds no colour literals so the light and dark themes both work.
+ * Every selector starts with `.tms-shell` so nothing leaks onto the legacy pages.
+ */
+
+/* ── Sidebar card ─────────────────────────────────────────────────────────── */
+
+.tms-shell .tms-sidebar {
+  position: fixed;
+  top: var(--tms-shell-gap);
+  left: var(--tms-shell-gap);
+  bottom: var(--tms-shell-gap);
+  z-index: 30;
+  width: var(--tms-sidebar-w);
+  background: var(--tms-sidebar);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  box-shadow: var(--tms-shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-sidebar {
+    width: var(--tms-sidebar-collapsed-w);
+  }
+}
+
+.tms-shell .tms-sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px;
+  flex: 0 0 auto;
+}
+
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-sidebar-head {
+    flex-direction: column;
+    padding: 12px 8px;
+  }
+}
+
+.tms-shell .tms-collapse-btn {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+  background: var(--tms-card);
+  color: var(--tms-muted);
+  cursor: pointer;
+}
+
+.tms-shell .tms-collapse-btn:hover {
+  color: var(--tms-text);
+  background: var(--tms-surface-hover);
+}
+
+/* Company switcher */
+
+.tms-shell .tms-company {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tms-shell .tms-company-card {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  background: var(--tms-card);
+  color: var(--tms-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tms-shell .tms-company-static {
+  flex: 1 1 auto;
+  cursor: default;
+}
+
+.tms-shell button.tms-company-card:hover {
+  background: var(--tms-surface-hover);
+}
+
+.tms-shell .tms-company-avatar,
+.tms-shell .tms-user-avatar {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--tms-radius-sm);
+  background: var(--tms-primary);
+  color: var(--tms-on-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tms-shell .tms-company-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tms-shell .tms-company-card svg {
+  flex: 0 0 auto;
+  color: var(--tms-muted);
+}
+
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-company-card {
+    justify-content: center;
+    padding: 4px;
+  }
+}
+
+.tms-shell .tms-company-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 100%;
+  width: max-content;
+  max-width: 280px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  box-shadow: var(--tms-shadow-pop);
+}
+
+.tms-shell .tms-company-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--tms-radius-sm);
+  font-size: 13px;
+  color: var(--tms-text);
+  cursor: pointer;
+}
+
+.tms-shell .tms-company-option:hover,
+.tms-shell .tms-company-option:focus-visible {
+  background: var(--tms-surface-hover);
+  outline: none;
+}
+
+.tms-shell .tms-company-option[aria-selected='true'] {
+  font-weight: 600;
+  color: var(--tms-primary-ink);
+}
+
+/* Nav */
+
+.tms-shell .tms-sidebar-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 12px 12px;
+}
+
+.tms-shell .tms-pinned {
+  padding-bottom: 8px;
+}
+
+.tms-shell .tms-section-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 8px 0 2px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--tms-radius-sm);
+  background: none;
+  color: var(--tms-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tms-shell .tms-section-head:hover {
+  background: var(--tms-surface-hover);
+  color: var(--tms-text-2);
+}
+
+.tms-shell .tms-section-brand {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.tms-shell .tms-nav-rowwrap {
+  position: relative;
+}
+
+.tms-shell .tms-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: var(--tms-radius);
+  color: var(--tms-text-2);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.tms-shell .tms-has-children > .tms-nav-row {
+  padding-right: 34px;
+}
+
+.tms-shell .tms-nav-row:hover {
+  background: var(--tms-surface-hover);
+  color: var(--tms-text);
+}
+
+/* A page whose tables are not deployed yet: drawn, readable, not a link. */
+.tms-shell .tms-nav-disabled,
+.tms-shell .tms-nav-disabled:hover {
+  background: transparent;
+  color: var(--tms-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.tms-shell .tms-nav-row.tms-active {
+  background: var(--tms-primary);
+  color: var(--tms-on-primary);
+}
+
+.tms-shell .tms-nav-icon {
+  flex: 0 0 auto;
+}
+
+.tms-shell .tms-nav-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-nav-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* The text pill (Academy "BETA"); numeric counts are `.tms-count-badge` as well. */
+.tms-shell span.tms-nav-badge:not(.tms-count-badge) {
+  padding: 1px 6px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.tms-shell .tms-nav-row.tms-active .tms-nav-badge {
+  background: var(--tms-card);
+  color: var(--tms-primary-ink);
+}
+
+.tms-shell .tms-nav-caret {
+  position: absolute;
+  top: 0;
+  right: 6px;
+  width: 26px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--tms-muted);
+  cursor: pointer;
+}
+
+.tms-shell .tms-nav-row.tms-active ~ .tms-nav-caret {
+  color: var(--tms-on-primary);
+}
+
+.tms-shell .tms-nav-caret:hover {
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-nav-row.tms-active ~ .tms-nav-caret:hover {
+  color: var(--tms-on-primary);
+}
+
+.tms-shell .tms-nav-children {
+  margin: 2px 0 6px 20px;
+  padding-left: 10px;
+  border-left: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-nav-childgroup {
+  margin-top: 8px;
+  padding: 4px 8px;
+  color: var(--tms-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tms-shell .tms-nav-childrow {
+  position: relative;
+}
+
+.tms-shell .tms-nav-childrow .tms-nav-caret {
+  right: 0;
+  height: 32px;
+}
+
+.tms-shell .tms-nav-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: var(--tms-radius-sm);
+  color: var(--tms-text-2);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.tms-shell .tms-nav-childrow:has(.tms-nav-caret) .tms-nav-child {
+  padding-right: 28px;
+}
+
+.tms-shell .tms-nav-child:hover {
+  background: var(--tms-surface-hover);
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-nav-child.tms-active {
+  background: var(--tms-primary-tint);
+  color: var(--tms-primary-ink);
+  font-weight: 600;
+}
+
+.tms-shell .tms-nav-child-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-nav-child-badge {
+  flex: 0 0 auto;
+}
+
+/* Sidebar foot */
+
+.tms-shell .tms-sidebar-foot {
+  flex: 0 0 auto;
+  margin: 0 12px 12px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--tms-surface);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+}
+
+.tms-shell .tms-user-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tms-shell .tms-user-avatar {
+  border-radius: var(--tms-radius-pill);
+}
+
+.tms-shell .tms-user-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tms-shell .tms-user-name,
+.tms-shell .tms-user-email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-shell .tms-user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-user-email {
+  font-size: 11px;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-sm);
+  background: var(--tms-card);
+  color: var(--tms-text-2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tms-shell .tms-foot-link {
+  text-decoration: none;
+}
+
+.tms-shell .tms-foot-link.active {
+  background: var(--tms-surface-hover);
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-logout:hover {
+  background: var(--tms-surface-hover);
+  color: var(--tms-text);
+}
+
+/* Collapsed rail: icons only. */
+
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-nav-label,
+  .tms-shell.tms-is-collapsed .tms-nav-badge,
+  .tms-shell.tms-is-collapsed .tms-nav-caret,
+  .tms-shell.tms-is-collapsed .tms-nav-children,
+  .tms-shell.tms-is-collapsed .tms-section-head,
+  .tms-shell.tms-is-collapsed .tms-user-text,
+  .tms-shell.tms-is-collapsed .tms-logout-label {
+    display: none;
+  }
+}
+
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-sidebar-scroll {
+    padding: 4px 8px 12px;
+  }
+}
+
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-nav-row {
+    justify-content: center;
+    padding: 0;
+  }
+}
+
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-sidebar-foot {
+    margin: 0 8px 8px;
+    padding: 6px;
+    align-items: center;
+  }
+}
+
+@media (min-width: 901px) {
+  .tms-shell.tms-is-collapsed .tms-logout {
+    width: 32px;
+    padding: 0;
+  }
+}
+
+/* ── Content column + top-bar card ────────────────────────────────────────── */
+
+.tms-shell .tms-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: calc(var(--tms-sidebar-w) + 2 * var(--tms-shell-gap));
+  padding: var(--tms-shell-gap) var(--tms-shell-gap) 0 0;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+}
+
+.tms-shell.tms-is-collapsed .tms-content {
+  margin-left: calc(var(--tms-sidebar-collapsed-w) + 2 * var(--tms-shell-gap));
+}
+
+.tms-shell .tms-topbar {
+  position: sticky;
+  top: var(--tms-shell-gap);
+  z-index: 20;
+  height: var(--tms-topbar-h);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px 0 16px;
+  background: var(--tms-topbar);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  box-shadow: var(--tms-shadow);
+}
+
+.tms-shell .tms-topbar-spacer {
+  flex: 1 1 auto;
+}
+
+.tms-shell .tms-topbar-icons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tms-shell .tms-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--tms-gutter) 0;
+}
+
+/* Breadcrumb */
+
+.tms-shell .tms-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--tms-muted);
+  white-space: nowrap;
+}
+
+.tms-shell .tms-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tms-shell .tms-crumb + .tms-crumb::before {
+  content: '/';
+  color: var(--tms-disabled);
+}
+
+.tms-shell .tms-crumb a {
+  display: inline-flex;
+  align-items: center;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-crumb a:hover {
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-crumb-current {
+  color: var(--tms-primary-ink);
+  font-weight: 600;
+}
+
+/* Search */
+
+.tms-shell .tms-search {
+  position: relative;
+  width: 280px;
+  /* gives way before the lifecycle strip does (Step AV): the strip keeps all six tabs in view at 1440 */
+  flex: 0 6 280px;
+  min-width: 160px;
+  margin: 0;
+}
+
+.tms-shell .tms-search-icon {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  color: var(--tms-muted);
+  pointer-events: none;
+}
+
+.tms-shell .tms-search input {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px 0 34px;
+  border: 1px solid var(--tms-input-border);
+  border-radius: var(--tms-radius);
+  background: var(--tms-input);
+  color: var(--tms-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.tms-shell .tms-search input::placeholder {
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-search input:focus {
+  outline: 2px solid var(--tms-primary);
+  outline-offset: 0;
+}
+
+/* Bell + theme toggle */
+
+.tms-shell .tms-topbar-icons .tms-icon-btn-sq {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--tms-radius);
+  text-decoration: none;
+}
+
+.tms-shell .tms-bell {
+  position: relative;
+}
+
+.tms-shell .tms-bell .tms-count-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+}
+
+/* ── Fill mode: legacy pages that own a fixed-height scroll container ───────── */
+
+.tms-shell.tms-fill {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tms-shell.tms-fill .tms-content {
+  height: 100dvh;
+  padding-bottom: var(--tms-shell-gap);
+}
+
+.tms-shell.tms-fill .tms-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--tms-shell-gap) 0 0;
+  display: flex;
+  gap: var(--tms-gap);
+}
+
+/* Same contract as the old `.page-content`: `height:100%` pages keep working. */
+.tms-shell .tms-legacy-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-aside {
+  flex: 0 0 400px;
+  min-height: 0;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  overflow: hidden;
+}
+
+/* The hamburger and its backdrop exist only on phones. */
+.tms-shell .tms-menu-btn {
+  display: none;
+}
+
+/* ── Narrow screens: off-canvas drawer ────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .tms-shell .tms-sidebar,
+  .tms-shell.tms-is-collapsed .tms-sidebar {
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(84vw, 300px);
+    border-radius: 0 var(--tms-radius-card) var(--tms-radius-card) 0;
+    transform: translateX(-110%);
+    transition: transform 0.2s ease;
+    z-index: 90;
+  }
+
+  .tms-shell.tms-nav-open .tms-sidebar {
+    transform: none;
+  }
+
+  .tms-shell .tms-nav-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--tms-overlay);
+    z-index: 80;
+  }
+
+  .tms-shell .tms-content,
+  .tms-shell.tms-is-collapsed .tms-content {
+    margin-left: 0;
+    padding-left: var(--tms-shell-gap);
+  }
+
+  .tms-shell .tms-menu-btn {
+    display: inline-flex;
+  }
+
+  /* The collapsed-rail preference is ignored on phones: the drawer always shows labels. */
+  .tms-shell .tms-collapse-btn {
+    display: none;
+  }
+
+  .tms-shell .tms-topbar {
+    gap: 8px;
+  }
+
+  .tms-shell .tms-search {
+    width: 140px;
+  }
+
+  .tms-shell .tms-breadcrumb .tms-crumb:not(.tms-crumb-current):not(:first-child) {
+    display: none;
+  }
+
+  .tms-shell .tms-legacy-host {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* The dispatch column is a desktop affordance. */
+  .tms-shell .tms-aside {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .tms-shell .tms-search {
+    display: none;
+  }
+}
+
+/* ── Dense list pages: icon rail + full-bleed content ─────────────────────── */
+
+@media (min-width: 901px) {
+  /* The rail stays the content's margin even while it is open over the page. */
+  .tms-shell.tms-dense .tms-content,
+  .tms-shell.tms-dense.tms-is-collapsed .tms-content {
+    margin-left: calc(var(--tms-sidebar-collapsed-w) + var(--tms-shell-gap) + 6px);
+    padding: 0;
+    height: 100dvh;
+  }
+
+  .tms-shell.tms-dense {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .tms-shell.tms-dense .tms-sidebar {
+    transition: width 0.12s ease;
+  }
+
+  .tms-shell.tms-dense:not(.tms-is-collapsed) .tms-sidebar {
+    box-shadow: var(--tms-shadow), 12px 0 24px -8px color-mix(in srgb, var(--tms-text) 25%, transparent);
+  }
+
+  .tms-shell.tms-dense .tms-topbar {
+    top: 0;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    border-top: 0;
+    box-shadow: none;
+  }
+
+  .tms-shell.tms-dense .tms-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 0;
+  }
+}

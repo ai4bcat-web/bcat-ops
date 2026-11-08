@@ -12,8 +12,8 @@ import type { AddressEntry, EmploymentEntry } from '@/lib/schemas'
 function Field({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
     <div>
-      <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-      <div style={{ fontSize: 13.5, color: 'var(--ds-t1)', marginTop: 2 }}>{value ?? '—'}</div>
+      <div style={{ fontSize: 10.5, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+      <div style={{ fontSize: 13.5, color: 'var(--tms-text)', marginTop: 2 }}>{value ?? '—'}</div>
     </div>
   )
 }
@@ -21,7 +21,7 @@ function Field({ label, value }: { label: string; value?: React.ReactNode }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 18 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ds-t2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10, paddingBottom: 6, borderBottom: '1px solid var(--ds-border)' }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tms-text-2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10, paddingBottom: 6, borderBottom: '1px solid var(--tms-border)' }}>
         {title}
       </div>
       {children}
@@ -49,8 +49,8 @@ export function DriverApplicationView({ driverId }: { driverId: string }) {
     return () => { active = false }
   }, [driverId])
 
-  if (loading) return <Card title="Employment application"><div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div></Card>
-  if (!app) return <Card title="Employment application"><div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>No application submitted yet.</div></Card>
+  if (loading) return <Card title="Employment application"><div style={{ fontSize: 13, color: 'var(--tms-muted)' }}>Loading…</div></Card>
+  if (!app) return <Card title="Employment application"><div style={{ fontSize: 13, color: 'var(--tms-muted)' }}>No application submitted yet.</div></Card>
 
   const addresses = (Array.isArray(app.addressHistory) ? app.addressHistory : []) as AddressEntry[]
   const employment = (Array.isArray(app.employmentHistory) ? app.employmentHistory : []) as EmploymentEntry[]
@@ -79,12 +79,12 @@ export function DriverApplicationView({ driverId }: { driverId: string }) {
         </Section>
 
         <Section title="Address history (3 yrs)">
-          {addresses.length === 0 ? <div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>None provided.</div> : (
+          {addresses.length === 0 ? <div style={{ fontSize: 13, color: 'var(--tms-muted)' }}>None provided.</div> : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {addresses.map((a, i) => (
-                <div key={i} style={{ fontSize: 13, color: 'var(--ds-t2)' }}>
+                <div key={i} style={{ fontSize: 13, color: 'var(--tms-text-2)' }}>
                   {a.street}, {a.city}, {a.state} {a.zip}
-                  <span style={{ color: 'var(--ds-t3)', marginLeft: 8 }}>({a.fromDate} – {a.toDate ?? 'present'})</span>
+                  <span style={{ color: 'var(--tms-muted)', marginLeft: 8 }}>({a.fromDate} – {a.toDate ?? 'present'})</span>
                 </div>
               ))}
             </div>
@@ -103,17 +103,17 @@ export function DriverApplicationView({ driverId }: { driverId: string }) {
         </Section>
 
         <Section title="Employment history">
-          {employment.length === 0 ? <div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>None provided.</div> : (
+          {employment.length === 0 ? <div style={{ fontSize: 13, color: 'var(--tms-muted)' }}>None provided.</div> : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {employment.map((e, i) => (
-                <div key={i} style={{ fontSize: 13, color: 'var(--ds-t2)', paddingBottom: 8, borderBottom: i < employment.length - 1 ? '1px dashed var(--ds-border)' : 'none' }}>
-                  <div style={{ fontWeight: 600, color: 'var(--ds-t1)' }}>{e.employerName} — {e.position}</div>
+                <div key={i} style={{ fontSize: 13, color: 'var(--tms-text-2)', paddingBottom: 8, borderBottom: i < employment.length - 1 ? '1px dashed var(--tms-border)' : 'none' }}>
+                  <div style={{ fontWeight: 600, color: 'var(--tms-text)' }}>{e.employerName} — {e.position}</div>
                   <div>{e.address} · {e.phone}</div>
-                  <div style={{ color: 'var(--ds-t3)' }}>
+                  <div style={{ color: 'var(--tms-muted)' }}>
                     {e.fromDate} – {e.toDate ?? 'present'} · FMCSR: {e.subjectToFMCSR ? 'Yes' : 'No'} · Safety-sensitive: {e.safetySensitive ? 'Yes' : 'No'}
                   </div>
                   {e.reasonForLeaving && <div>Reason left: {e.reasonForLeaving}</div>}
-                  {e.gapExplanation && <div style={{ color: '#b45309' }}>Gap: {e.gapExplanation}</div>}
+                  {e.gapExplanation && <div style={{ color: 'var(--tms-badge-orange)' }}>Gap: {e.gapExplanation}</div>}
                 </div>
               ))}
             </div>
@@ -126,7 +126,7 @@ export function DriverApplicationView({ driverId }: { driverId: string }) {
             <Field label="Signed at" value={app.signedAt ? new Date(app.signedAt).toLocaleString() : undefined} />
             <Field label="IP address" value={app.ipAddress} />
           </div>
-          {app.rejectionReason && <div style={{ marginTop: 10, fontSize: 13, color: '#b91c1c' }}>Rejection reason: {app.rejectionReason}</div>}
+          {app.rejectionReason && <div style={{ marginTop: 10, fontSize: 13, color: 'var(--tms-badge-red)' }}>Rejection reason: {app.rejectionReason}</div>}
         </Section>
       </div>
     </Card>

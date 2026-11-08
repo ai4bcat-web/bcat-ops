@@ -1,0 +1,124 @@
+/*
+ * Demo page (P11) and admin-page rules.
+ * Moved verbatim out of theme.css (S2 slice A); owned by S2 slice F from here on.
+ * Tokens live in ../theme.css; every selector stays under .tms-shell / .tms-portal. No colour literals.
+ */
+
+/* ── Demo page (Step P11) ─────────────────────────────────────────────────── */
+.tms-shell .tms-demo-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.tms-shell .tms-demo-actions { display: flex; align-items: center; gap: 8px; }
+.tms-shell .tms-demo-list { display: flex; flex-direction: column; gap: 10px; }
+.tms-shell .tms-demo-step { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 16px; padding: 14px 16px; background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: 6px; }
+.tms-shell .tms-demo-step-main { min-width: 0; }
+.tms-shell .tms-demo-step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.tms-shell .tms-demo-step-title { font-size: 14px; font-weight: 600; color: var(--tms-text); }
+.tms-shell .tms-demo-step-see { font-size: 13px; color: var(--tms-muted); }
+.tms-shell .tms-demo-step-missing { font-size: 12px; color: var(--tms-badge-orange); font-style: italic; }
+.tms-shell .tms-demo-evidence { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--tms-muted); }
+.tms-shell .tms-demo-tick { width: 18px; height: 18px; border-radius: 999px; background: var(--tms-primary); color: var(--tms-on-primary); display: inline-flex; align-items: center; justify-content: center; }
+.tms-shell .tms-demo-tick.tms-demo-tick-off { background: var(--tms-border); color: var(--tms-muted); }
+.tms-shell .tms-demo-empty { padding: 40px; text-align: center; color: var(--tms-muted); }
+.tms-shell .tms-demo-reason { font-size: 13px; color: var(--tms-muted); font-style: italic; }
+.tms-shell .tms-demo-title { font-size: 16px; font-weight: 600; margin: 0; }
+
+.tms-shell .tms-due { color: var(--tms-badge-orange); font-weight: 500; }
+
+/* ── Settings kit (settings/settingsKit.tsx) — one edit restyles ~25 cards ─── */
+.tms-shell .tms-title-icon { display: inline-flex; align-items: center; gap: 8px; }
+.tms-shell .tms-settings-desc { margin: 0 0 12px; }
+.tms-shell .tms-flush, .tms-portal .tms-flush { margin: 0; font-size: 14px; }
+.tms-shell .tms-field-hint.tms-flush, .tms-portal .tms-field-hint.tms-flush,
+.tms-shell .tms-field-error.tms-flush, .tms-portal .tms-field-error.tms-flush { font-size: inherit; }
+.tms-shell .tms-stack, .tms-portal .tms-stack { display: flex; flex-direction: column; gap: 12px; }
+.tms-shell .tms-grid-stack { display: grid; gap: 16px; }
+.tms-shell .tms-grid-1 { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.tms-shell .tms-panel, .tms-portal .tms-panel {
+  display: flex; flex-direction: column; gap: 12px; padding: 14px;
+  background: var(--tms-surface-subtle); border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
+}
+.tms-shell .tms-group-label, .tms-portal .tms-group-label {
+  margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--tms-muted);
+}
+.tms-shell .tms-check-row, .tms-portal .tms-check-row { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+.tms-shell .tms-check-row-start, .tms-portal .tms-check-row-start { align-items: flex-start; }
+.tms-shell .tms-check-row-disabled, .tms-portal .tms-check-row-disabled { cursor: default; color: var(--tms-muted); }
+.tms-shell .tms-check-row input[type="checkbox"], .tms-portal .tms-check-row input[type="checkbox"] {
+  accent-color: var(--tms-primary); width: 15px; height: 15px; flex: 0 0 auto; margin: 0;
+}
+.tms-shell .tms-check-row-start input[type="checkbox"], .tms-portal .tms-check-row-start input[type="checkbox"] { margin-top: 3px; }
+
+/* Multi-select toggle (Users teams / divisions / pages) — not a tab strip */
+.tms-shell .tms-chip-toggle {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 999px;
+  border: 1px solid var(--tms-border); background: var(--tms-card); color: var(--tms-muted);
+  font-size: 12px; font-weight: 500; cursor: pointer;
+}
+.tms-shell .tms-chip-toggle:hover:not(:disabled) { background: var(--tms-surface-hover); color: var(--tms-text); }
+.tms-shell .tms-chip-toggle:disabled { opacity: .6; cursor: default; }
+.tms-shell .tms-chip-toggle.tms-chip-toggle-on { background: var(--tms-primary-tint); border-color: var(--tms-primary); color: var(--tms-primary-ink); }
+
+/* ── Users ──────────────────────────────────────────────────────────────── */
+.tms-shell .tms-user-card { background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-card); overflow: hidden; }
+.tms-shell .tms-user-body { display: flex; flex-direction: column; gap: 20px; padding: 16px 20px; border-top: 1px solid var(--tms-border); }
+.tms-shell .tms-user-access { text-align: right; }
+.tms-shell .tms-user-access-value { font-size: 12px; margin-top: 2px; }
+
+/* ── Approval rows (commissions) ────────────────────────────────────────── */
+.tms-shell .tms-approval-sub { font-size: 14px; font-weight: 400; margin-left: 8px; }
+.tms-shell .tms-approval-amount { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--tms-text); }
+.tms-shell .tms-approval-flagged { border-color: var(--tms-badge-orange); }
+
+/* ── Code / payload blocks (Academy, Audit, Integrations) ───────────────── */
+.tms-shell .tms-code, .tms-portal .tms-code {
+  margin: 0 0 12px; padding: 12px; overflow-x: auto; font-size: 12px; line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--tms-surface); color: var(--tms-text);
+  border: 1px solid var(--tms-border); border-radius: var(--tms-radius);
+}
+.tms-shell .tms-code-compact { margin: 6px 0 0; padding: 8px; font-size: 10px; max-width: 360px; }
+.tms-shell code.tms-code-inline {
+  padding: 1px 5px; margin: 0; font-size: .92em; border-radius: 4px; background: var(--tms-surface);
+  border: 1px solid var(--tms-border); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.tms-shell .tms-code code { font-family: inherit; }
+.tms-shell .tms-details-summary { cursor: pointer; }
+
+/* ── Academy ────────────────────────────────────────────────────────────── */
+.tms-shell .tms-academy-body { font-size: 14px; line-height: 1.6; color: var(--tms-text); }
+.tms-shell .tms-academy-body h2 { margin: 24px 0 8px; font-size: 20px; font-weight: 600; line-height: 1.3; }
+.tms-shell .tms-academy-body h3 { margin: 20px 0 8px; font-size: 16px; font-weight: 600; line-height: 1.3; }
+.tms-shell .tms-academy-body h4 { margin: 16px 0 6px; font-size: 14px; font-weight: 600; }
+.tms-shell .tms-academy-body > :first-child { margin-top: 0; }
+.tms-shell .tms-academy-body p { margin: 0 0 10px; }
+.tms-shell .tms-academy-body ul, .tms-shell .tms-academy-body ol { margin: 0 0 12px; padding-left: 22px; }
+.tms-shell .tms-academy-body ul { list-style: disc; }
+.tms-shell .tms-academy-body ol { list-style: decimal; }
+.tms-shell .tms-academy-body li { margin-bottom: 4px; }
+.tms-shell .tms-academy-body a { color: var(--tms-primary-ink); text-decoration: underline; text-underline-offset: 2px; }
+.tms-shell .tms-academy-body table { margin-bottom: 12px; }
+.tms-shell .tms-academy-lede { margin: 0 0 14px; }
+.tms-shell .tms-academy-ask-actions { margin-top: 12px; }
+.tms-shell .tms-academy-error { margin-top: 12px; }
+.tms-shell .tms-academy-answer { margin-top: 16px; padding: 14px 16px; background: var(--tms-surface); border-radius: var(--tms-radius); }
+.tms-shell .tms-academy-answer p { margin: 0; line-height: 1.6; white-space: pre-wrap; }
+.tms-shell .tms-academy-cited { margin-top: 10px; font-size: 12px; color: var(--tms-muted); }
+.tms-shell .tms-academy-cited a, .tms-shell .tms-academy-link { color: var(--tms-primary-ink); }
+.tms-shell .tms-academy-back { margin-top: 12px; }
+.tms-shell .tms-academy-index { display: grid; gap: 16px; }
+.tms-shell .tms-academy-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.tms-shell .tms-academy-link { font-weight: 600; }
+.tms-shell .tms-academy-category { margin-left: 8px; font-size: 12px; }
+.tms-shell .tms-academy-summary { margin-top: 2px; line-height: 1.5; }
+
+/* ── Divisions: tree + rule list read as table rows ─────────────────────── */
+.tms-shell .tms-division-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--tms-border); border-radius: var(--tms-radius); overflow: hidden; }
+.tms-shell .tms-division-row, .tms-shell .tms-rule-row {
+  display: flex; gap: 8px; padding: 10px 14px; background: var(--tms-card); border-bottom: 1px solid var(--tms-border);
+}
+.tms-shell .tms-division-row { align-items: center; min-height: 44px; }
+.tms-shell .tms-rule-row { align-items: flex-start; }
+.tms-shell .tms-division-row:last-child, .tms-shell .tms-rule-row:last-child { border-bottom: 0; }
+.tms-shell .tms-division-row:hover { background: var(--tms-surface-hover); }
+
+/* ── Shipment views editor ──────────────────────────────────────────────── */
+.tms-shell .tms-view-desc textarea, .tms-portal .tms-view-desc textarea { min-height: 72px; }

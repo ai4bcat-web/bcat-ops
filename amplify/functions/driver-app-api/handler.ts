@@ -26,7 +26,7 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { DynamoDBClient as DispatchDynamo } from '@aws-sdk/client-dynamodb'
 import { DispatchStore, tablesFromEnv as dispatchTablesFromEnv, recordDriverStatus } from '../_shared/dispatchStore'
-import { dispatcherContactFor } from '../../../src/lib/dispatch'
+import { dispatcherContactFor, toE164Strict } from '../../../src/lib/dispatch'
 import { slackClient } from '../_shared/slackApi'
 import { mirrorInbound, slackMirrorEnabled } from '../_shared/slackDispatch'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
@@ -44,7 +44,8 @@ import {
 } from './settlement'
 import { weekStartOfISO } from '../../../src/features/driver-pay/week'
 import { splitCityState, normalizeZip } from '../../../src/lib/otrInvoice'
-import { buildPodIndex, loadHasPod, normalizePro, type PodIndex } from '../../../src/lib/podPresence'
+import { buildPodIndex, loadHasPod, type PodIndex } from '../../../src/lib/podPresence'
+import { normalizePro } from '../../../src/lib/proNumber'
 import {
   currentLoadForDriver,
   driverIsOnLoad,
@@ -177,6 +178,8 @@ const DRIVER_SUBMISSION_TABLE = process.env.DRIVER_SUBMISSION_TABLE_NAME!
 const DRIVER_SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME!
 /** pod-actions runs the scan cleanup. Absent in stacks where PODs are not wired. */
 const POD_FUNCTION_NAME = process.env.POD_FUNCTION_NAME ?? ''
+/** Step K. The workflow agent a committed rate confirmation is handed to. */
+const WORKFLOW_AGENT_FUNCTION_NAME = process.env.WORKFLOW_AGENT_FUNCTION_NAME ?? ''
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
 const DRIVER_LOAD_TIME_TABLE = process.env.DRIVER_LOAD_TIME_TABLE_NAME ?? ''
 const DRIVER_PAY_SETTING_TABLE = process.env.DRIVER_PAY_SETTING_TABLE_NAME!
@@ -186,6 +189,8 @@ const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? ''
 const LOCATION_TABLE_NAME = process.env.LOCATION_TABLE_NAME ?? ''
 const POD_DOCUMENT_TABLE_NAME = process.env.POD_DOCUMENT_TABLE_NAME ?? ''
 const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME ?? ''
+/** Step AK: the truck's work phone. Unset = the app simply shows no work-phone line. */
+const TRUCK_CONFIG_TABLE = process.env.TRUCK_CONFIG_TABLE_NAME ?? ''
 const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME ?? ''
 const MAINTENANCE_TASK_TABLE = process.env.MAINTENANCE_TASK_TABLE_NAME ?? ''
 const MOTIVE_API_KEY = process.env.MOTIVE_API_KEY ?? ''
@@ -1438,7 +1443,7 @@ async function requestScanCleanup(
  * two half-PODs for one shipment and the app showed whichever it happened to find first.
  *
  * Matched on the PRO the driver typed, by the same rule the office matches on (normalizePro
- * in src/lib/podPresence.ts). Without a reference there is nothing to match on and a new
+ * in src/lib/proNumber.ts). Without a reference there is nothing to match on and a new
  * submission is the only honest answer — a loose POD belongs to whatever load staff assign
  * it to, not to the last one this driver happened to send.
  */
@@ -1844,6 +1849,25 @@ async function truckForDriver(driver: DriverRow): Promise<{ id: string; unitNumb
     return truck ? { id: truck.id, unitNumber: String(truck.unitNumber ?? '').trim() } : null
   } catch (err) {
     console.error('[driver-app-api] could not read the driver\'s truck', { truckId, err })
+    return null
+  }
+}
+
+/**
+ * The work phone in the driver's truck (`TruckConfig.phone`), for the app's header. Display-only:
+ * dispatch texts this number, the driver does not edit it. Null without a truck, a number, or the table.
+ */
+async function workPhoneForDriver(driver: DriverRow): Promise<{ number: string; label: string | null; truckNumber: string | null } | null> {
+  const truckId = (driver.assignedTruckId ?? '').trim()
+  if (!truckId || !TRUCK_CONFIG_TABLE) return null
+  try {
+    const config = (await ddb.send(new GetCommand({ TableName: TRUCK_CONFIG_TABLE, Key: { truckId } }))).Item as
+      { phone?: string | null; phoneLabel?: string | null; unitNumber?: string | null } | undefined
+    const number = toE164Strict(config?.phone)
+    if (!number) return null
+    return { number, label: config?.phoneLabel?.trim() || null, truckNumber: config?.unitNumber?.trim() || null }
+  } catch (err) {
+    console.error('[driver-app-api] could not read the truck work phone', { truckId, err })
     return null
   }
 }
@@ -2480,6 +2504,25 @@ async function handleEmailIntakeCommit(event: FnUrlEvent) {
   )
 
   const result = await completeSubmission(submission.driverId, submissionId, 'RATECON')
+
+  // Step K. The rate confirmation just committed is the tender agent's input. The
+  // endpoint's answer is unchanged: this is fire-and-forget, and a hand-off that
+  // throws must never turn a committed submission into a 500 the bridge retries.
+  if (WORKFLOW_AGENT_FUNCTION_NAME) {
+    try {
+      await new LambdaClient({}).send(
+        new InvokeCommand({
+          FunctionName: WORKFLOW_AGENT_FUNCTION_NAME,
+          InvocationType: 'Event',
+          Payload: Buffer.from(JSON.stringify({
+            runFor: { sourceKind: 'DRIVER_SUBMISSION', sourceId: submissionId, inboxRole: 'TENDER', provider: 'GMAIL' },
+          })),
+        }),
+      )
+    } catch (err) {
+      console.warn('[driver-app-api] workflow agent not invoked', String(err))
+    }
+  }
   return reply(200, { ok: true, notified: !result.error, error: result.error })
 }
 
@@ -2647,6 +2690,8 @@ export const handler = async (event: FnUrlEvent) => {
         pm: await pmForDriver(driver),
         // The truck they are in — what the ELD fix, the PM line and dispatch all key on.
         truck: await truckForDriver(driver),
+        // The work phone riding in that truck (Step AK), display-only. null when there is none.
+        workPhone: await workPhoneForDriver(driver),
         // The trailer they said they started the day with, if asked.
         trailer: await trailerForDriver(driver),
         // Said they started the day bobtailing; a trailer on file always wins over a stale flag.

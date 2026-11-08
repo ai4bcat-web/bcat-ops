@@ -21,8 +21,8 @@ const PAY_COLS = 'grid grid-cols-[28px_minmax(150px,1.6fr)_repeat(4,minmax(70px,
 
 function Hours({ minutes, tone }: { minutes: number; tone?: 'pto' | 'holiday' | 'total' }) {
   const chip =
-    tone === 'pto' && minutes > 0 ? 'bg-blue-500/10 text-blue-700'
-      : tone === 'holiday' && minutes > 0 ? 'bg-amber-500/15 text-amber-700'
+    tone === 'pto' && minutes > 0 ? 'bg-[color:var(--tms-badge-blue-tint)] text-[color:var(--tms-badge-blue)]'
+      : tone === 'holiday' && minutes > 0 ? 'bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)]'
         : tone === 'total' ? 'font-bold text-foreground'
           : 'text-foreground'
   return (
@@ -75,8 +75,8 @@ function WeekSubtotal({ week, label }: { week: WeekTotal; label: string }) {
     <tr className="border-b border-border bg-muted/40 text-xs font-semibold tabular-nums">
       <td className="px-3 py-1.5 text-muted-foreground" colSpan={3}>{label} subtotal</td>
       <td className="px-3 py-1.5 text-right">{hm(week.workedMinutes)}</td>
-      <td className="px-3 py-1.5 text-right text-blue-700">{hm(week.ptoMinutes)}</td>
-      <td className="px-3 py-1.5 text-right text-amber-700">{hm(week.holidayMinutes)}</td>
+      <td className="px-3 py-1.5 text-right text-[color:var(--tms-badge-blue)]">{hm(week.ptoMinutes)}</td>
+      <td className="px-3 py-1.5 text-right text-[color:var(--tms-badge-orange)]">{hm(week.holidayMinutes)}</td>
       <td className="px-3 py-1.5 text-right text-foreground">{hm(week.totalMinutes)}</td>
       <td colSpan={3} />
     </tr>
@@ -122,7 +122,7 @@ function DriverDays({ row, motive, editing, setEditing, saving, onStartEdit, onS
               <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
                 {dayLabel(day.date)}
                 {warn && (
-                  <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                  <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-[color:var(--tms-badge-red-tint)] px-1.5 py-0.5 text-[10px] font-semibold text-[color:var(--tms-badge-red)]">
                     <AlertTriangle className="h-3 w-3" aria-hidden="true" /> {warn === 'open' ? 'on the clock' : 'check times'}
                   </span>
                 )}
@@ -142,8 +142,8 @@ function DriverDays({ row, motive, editing, setEditing, saving, onStartEdit, onS
                 )}
               </td>
               <td className="px-3 py-2 text-right tabular-nums">{day.open ? <span className="text-muted-foreground">on the clock</span> : hm(day.workedMinutes)}</td>
-              <td className={`px-3 py-2 text-right tabular-nums ${day.ptoMinutes ? 'font-semibold text-blue-700' : 'text-muted-foreground'}`}>{hm(day.ptoMinutes)}</td>
-              <td className={`px-3 py-2 text-right tabular-nums ${day.holidayMinutes ? 'font-semibold text-amber-700' : 'text-muted-foreground'}`}>{hm(day.holidayMinutes)}</td>
+              <td className={`px-3 py-2 text-right tabular-nums ${day.ptoMinutes ? 'font-semibold text-[color:var(--tms-badge-blue)]' : 'text-muted-foreground'}`}>{hm(day.ptoMinutes)}</td>
+              <td className={`px-3 py-2 text-right tabular-nums ${day.holidayMinutes ? 'font-semibold text-[color:var(--tms-badge-orange)]' : 'text-muted-foreground'}`}>{hm(day.holidayMinutes)}</td>
               <td className="px-3 py-2 text-right font-semibold tabular-nums">{hm(day.totalMinutes)}</td>
               <td className="px-3 py-2 text-xs"><TruckTime truck={truck} edges={clockEdges(day, truck)} /></td>
               <td className="px-3 py-2 text-xs text-muted-foreground">{day.rows.map((r) => r.note).filter(Boolean).join(' · ')}</td>
@@ -210,7 +210,7 @@ function RateEditor({ name, currentFrom, defaultFrom, initialRate, onSave, onCan
         A change ends the old rate on this date and keeps it for earlier days, so periods already paid do not change.
         {currentFrom ? ` The current rate began ${currentFrom}.` : ''}
       </p>
-      {error && <p role="alert" className="basis-full text-xs text-red-700">{error}</p>}
+      {error && <p role="alert" className="basis-full text-xs text-[color:var(--tms-badge-red)]">{error}</p>}
     </div>
   )
 }
@@ -255,9 +255,9 @@ export function HoursPeriodView({
         <Stat label="Drivers" value={String(totals.drivers)} />
         <Stat label="Total hours" value={hm(totals.totalMinutes)} sub={`${decimalHours(totals.totalMinutes)} h`} />
         <Stat label="Worked" value={hm(totals.workedMinutes)} sub={`${decimalHours(totals.workedMinutes)} h`} />
-        <Stat label="Total PTO" value={hm(totals.ptoMinutes)} sub={`${decimalHours(totals.ptoMinutes)} h`} tone="text-blue-700" />
-        <Stat label="Total holiday" value={hm(totals.holidayMinutes)} sub={`${decimalHours(totals.holidayMinutes)} h`} tone="text-amber-700" />
-        {showPay && <Stat label="Total pay" value={money(totalPay)} sub={periodLabel} tone="text-emerald-700" />}
+        <Stat label="Total PTO" value={hm(totals.ptoMinutes)} sub={`${decimalHours(totals.ptoMinutes)} h`} tone="text-[color:var(--tms-badge-blue)]" />
+        <Stat label="Total holiday" value={hm(totals.holidayMinutes)} sub={`${decimalHours(totals.holidayMinutes)} h`} tone="text-[color:var(--tms-badge-orange)]" />
+        {showPay && <Stat label="Total pay" value={money(totalPay)} sub={periodLabel} tone="text-[color:var(--tms-badge-green)]" />}
         <div className="ml-auto flex items-end gap-2 print:hidden">
           <Button variant="outline" size="sm" onClick={() => setOpen(allOpen ? new Set() : new Set(rows.map((r) => r.driverId)))}>
             {allOpen ? 'Collapse all' : 'Expand all'}
@@ -296,7 +296,7 @@ export function HoursPeriodView({
                   <span className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">
                     {ptoDays && <span>PTO used {ptoYear}: {ptoDays[row.driverId] ?? 0} days</span>}
                     {warnDays > 0 && (
-                      <span className="inline-flex items-center gap-1 font-semibold text-red-700">
+                      <span className="inline-flex items-center gap-1 font-semibold text-[color:var(--tms-badge-red)]">
                         <AlertTriangle className="h-3 w-3" aria-hidden="true" /> {warnDays} {warnDays === 1 ? 'day' : 'days'} to check
                       </span>
                     )}
@@ -333,9 +333,9 @@ export function HoursPeriodView({
                 )}
                 {showPay && row.pay && (
                   <div className="text-right">
-                    <span className="text-lg font-bold tabular-nums text-emerald-700">{money(ratesReady ? row.pay.pay : null)}</span>
+                    <span className="text-lg font-bold tabular-nums text-[color:var(--tms-badge-green)]">{money(ratesReady ? row.pay.pay : null)}</span>
                     {ratesReady && (row.pay.partial || (row.pay.rate == null && info?.rate != null && row.period.totalMinutes > 0)) && (
-                      <div className="text-[11px] text-amber-700">some days have no rate</div>
+                      <div className="text-[11px] text-[color:var(--tms-badge-orange)]">some days have no rate</div>
                     )}
                   </div>
                 )}
@@ -375,7 +375,7 @@ export function HoursPeriodView({
           <Hours minutes={totals.holidayMinutes} tone="holiday" />
           <Hours minutes={totals.totalMinutes} tone="total" />
           {showPay && <span />}
-          {showPay && <span className="text-right text-lg font-bold tabular-nums text-emerald-700">{money(totalPay)}</span>}
+          {showPay && <span className="text-right text-lg font-bold tabular-nums text-[color:var(--tms-badge-green)]">{money(totalPay)}</span>}
         </div>
       </div>
     </div>

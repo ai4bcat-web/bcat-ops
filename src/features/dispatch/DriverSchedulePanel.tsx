@@ -10,9 +10,9 @@ import { routeProgress, routeProgressForStops, type LatLng } from '@/lib/routePr
 import { RouteStrip } from './RouteStrip'
 
 export function StateIcon({ state }: { state: StopState | LoadState }) {
-  if (state === 'DONE' || state === 'COMPLETED') return <CheckCircle2 className="size-3.5 shrink-0" style={{ color: 'var(--ds-green)' }} />
-  if (state === 'IN_PROGRESS') return <CircleDot className="size-3.5 shrink-0" style={{ color: 'var(--ds-amber)' }} />
-  return <Circle className="size-3.5 shrink-0" style={{ color: 'var(--ds-t3)' }} />
+  if (state === 'DONE' || state === 'COMPLETED') return <CheckCircle2 className="size-3.5 shrink-0" style={{ color: 'var(--tms-badge-green)' }} />
+  if (state === 'IN_PROGRESS') return <CircleDot className="size-3.5 shrink-0" style={{ color: 'var(--tms-badge-orange)' }} />
+  return <Circle className="size-3.5 shrink-0" style={{ color: 'var(--tms-muted)' }} />
 }
 
 function time(iso: string | null | undefined): string {
@@ -29,10 +29,10 @@ export function Progress({ done, total, color }: { done: number; total: number; 
   const pct = total ? Math.round((done / total) * 100) : 0
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--ds-bg-3)', overflow: 'hidden' }}>
+      <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--tms-surface-hover)', overflow: 'hidden' }}>
         <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width .2s' }} />
       </div>
-      <span style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{done} of {total}</span>
+      <span style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>{done} of {total}</span>
     </div>
   )
 }
@@ -73,46 +73,46 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, no
     : (week!.loads.length ? `${week!.completed} delivered · ${week!.inProgress} under way · ${week!.upcoming} to go` : 'No shipments this week')
 
   return (
-    <div style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)' }}>
+    <div style={{ borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-card)' }}>
       <button type="button" onClick={() => setOpen((o) => !o)} style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, width: '100%', boxSizing: 'border-box', padding: '8px 14px' }}>
-        {open ? <ChevronDown className="size-3.5" style={{ color: 'var(--ds-t3)' }} /> : <ChevronRight className="size-3.5" style={{ color: 'var(--ds-t3)' }} />}
-        <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ds-t3)' }}>{title}</span>
-        <span style={{ fontSize: 12, color: 'var(--ds-t2)' }}>{summary}</span>
+        {open ? <ChevronDown className="size-3.5" style={{ color: 'var(--tms-muted)' }} /> : <ChevronRight className="size-3.5" style={{ color: 'var(--tms-muted)' }} />}
+        <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tms-muted)' }}>{title}</span>
+        <span style={{ fontSize: 12, color: 'var(--tms-text-2)' }}>{summary}</span>
       </button>
       {open ? (
         <div style={{ padding: '0 14px 10px', display: 'grid', gap: 6 }}>
           {ivan ? (
             updates.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--ds-t3)', padding: '2px 0 4px' }}>No updates from the app yet today.</div>
+              <div style={{ fontSize: 12, color: 'var(--tms-muted)', padding: '2px 0 4px' }}>No updates from the app yet today.</div>
             ) : (
               <div style={{ display: 'grid', gap: 4 }}>
                 {updates.map((m) => (
                   <div key={m.id} style={{ display: 'grid', gridTemplateColumns: '64px 1fr', gap: 10, alignItems: 'baseline', fontSize: 12 }}>
-                    <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t3)', whiteSpace: 'nowrap', textAlign: 'right' }}>{time(m.at)}</span>
-                    <span style={{ color: 'var(--ds-t1)', overflowWrap: 'anywhere' }}>{(m.body ?? '').trim()}</span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--tms-muted)', whiteSpace: 'nowrap', textAlign: 'right' }}>{time(m.at)}</span>
+                    <span style={{ color: 'var(--tms-text)', overflowWrap: 'anywhere' }}>{(m.body ?? '').trim()}</span>
                   </div>
                 ))}
               </div>
             )
           ) : week ? (
             <>
-              {route ? <div style={{ padding: '4px 0 8px', borderBottom: '1px solid var(--ds-border-soft)', marginBottom: 4 }}><RouteStrip progress={route} title={routeTitle} /></div> : null}
-              {week.loads.length ? <Progress done={week.completed} total={week.loads.length} color="var(--ds-blue)" /> : null}
+              {route ? <div style={{ padding: '4px 0 8px', borderBottom: '1px solid var(--tms-border)', marginBottom: 4 }}><RouteStrip progress={route} title={routeTitle} /></div> : null}
+              {week.loads.length ? <Progress done={week.completed} total={week.loads.length} color="var(--tms-primary)" /> : null}
               {week.loads.map(({ load, state, startsAt, stopsDone, stopsTotal }) => (
-                <div key={load.id} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 8, alignItems: 'center', fontSize: 12, color: state === 'COMPLETED' ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+                <div key={load.id} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 8, alignItems: 'center', fontSize: 12, color: state === 'COMPLETED' ? 'var(--tms-muted)' : 'var(--tms-text)' }}>
                   <StateIcon state={state} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     <span style={{ fontWeight: 600 }}>PRO {load.aljexId || '—'}</span> {laneLabel(load)}
-                    <span style={{ color: 'var(--ds-t3)' }}> · {state === 'COMPLETED' ? 'delivered' : state === 'IN_PROGRESS' ? `under way · ${stopsDone}/${stopsTotal} stops` : 'not started'}</span>
+                    <span style={{ color: 'var(--tms-muted)' }}> · {state === 'COMPLETED' ? 'delivered' : state === 'IN_PROGRESS' ? `under way · ${stopsDone}/${stopsTotal} stops` : 'not started'}</span>
                   </span>
-                  <span style={{ color: 'var(--ds-t3)', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: 'var(--tms-muted)', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     {day(startsAt)}
                     {state !== 'COMPLETED' && onMarkDelivered ? (
                       <button
                         type="button"
                         onClick={() => onMarkDelivered(load)}
                         title="Record that this shipment was delivered. The driver still owes the POD."
-                        style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-blue)', background: 'none', border: '1px solid var(--ds-border)', borderRadius: 6, padding: '1px 6px', cursor: 'pointer' }}
+                        style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-primary)', background: 'none', border: '1px solid var(--tms-border)', borderRadius: 6, padding: '1px 6px', cursor: 'pointer' }}
                       >
                         Mark delivered
                       </button>

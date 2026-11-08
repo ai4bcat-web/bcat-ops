@@ -1,142 +1,465 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Plus, Pencil, Search, Building2, MapPin, RefreshCw, Archive, Merge, ChevronDown, ChevronUp } from 'lucide-react'
+import { PossibleDuplicateBadge } from './components/PossibleDuplicateBadge'
+import { buildDuplicateIndex } from '@/lib/customerDuplicates'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Archive, MessageSquarePlus, Merge, Pencil, Search, Settings2, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
-import { useIsMobile } from '@/hooks/useIsMobile'
+import { useStaff } from '@/hooks/useStaff'
+import { useCrmAccounts } from '@/features/crm/useCrmAccounts'
+import { isCrmManager, isOverdue, kindLabel, relativeDay } from '@/features/crm/format'
 import { useDirectory, type CustomerRecord, type LocationRecord } from '@/hooks/useDirectory'
-import { driverNotesSummary, isActiveDirectoryRecord } from '@/lib/tmsDirectory'
-import { graphqlErrorText, listDivisions, previewLocationMerge, startLocationMerge, resumeLocationMerge, listLocationMergeJobs } from '@/lib/apiClient'
-import type { Division, LocationMergeJob, LocationMergePreview } from '@/types/tms'
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import {
+  TmsBadge,
+  TmsButton,
+  TmsCard,
+  TmsDialog,
+  TmsField,
+  TmsIconButton,
+  TmsInput,
+  TmsListPage,
+  TmsSelect,
+} from '@/features/tms/kit'
+import type { ColumnDef, TmsTone } from '@/features/tms/kit'
+import { TmsSegmentedTabs } from '@/features/tms/kit'
+import { DenseGrid } from '@/features/tms/grid/DenseGrid'
+import { ClearFiltersButton, ColumnsButton, DensityToggle, DenseKpiStrip, SummaryToggle } from '@/features/tms/grid/DenseControls'
+import {
+  activeFilterCount,
+  filterRows,
+  nextSort,
+  reorderKeys,
+  sortDenseRows,
+  type DenseColumn,
+  type DenseColumnFilter,
+  type DenseFilters,
+} from '@/features/tms/grid/denseGridModel'
+import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
+import type { CrmListAccountRow } from '@/lib/crm/types'
+import {
+  graphqlErrorText,
+  listDivisions,
+  previewLocationMerge,
+  startLocationMerge,
+  resumeLocationMerge,
+  listLocationMergeJobs,
+  getTmsSettings,
+  saveTmsSettings,
+} from '@/lib/apiClient'
+import { effectiveCustomerStatus, boardTab } from '@/lib/customerCredit'
+import { driverNotesSummary } from '@/lib/tmsDirectory'
+import type { Division, LocationMergeJob, LocationMergePreview, TmsSettings, ChargeCodeDef, CustomerStatus } from '@/types/tms'
 import { CustomerForm } from './components/CustomerForm'
 import { useCustomerForm } from './components/useCustomerForm'
 import { LocationForm } from './components/LocationForm'
 import { useLocationForm } from './components/useLocationForm'
 import { LocationDetail } from './components/LocationDetail'
-
-function PageShell({ title, sub, icon, count, query, setQuery, onAdd, onRefresh, children }: {
-  title: string; sub: string; icon: React.ReactNode; count: number
-  query: string; setQuery: (q: string) => void; onAdd: () => void; onRefresh: () => void
-  children: React.ReactNode
-}) {
-  const isMobile = useIsMobile()
-  return (
-    <div className="h-full overflow-y-auto">
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: isMobile ? '16px 12px' : '24px 32px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>{icon}{title}<span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t3)' }}>{count}</span></h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 3 }}>{sub}</p>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <div style={{ position: 'relative', minWidth: 220 }}>
-              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" aria-label={`Search ${title.toLowerCase()}`}
-                style={{ height: 34, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px 0 30px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)', boxSizing: 'border-box' }} />
-            </div>
-            <button onClick={onRefresh} title="Refresh" style={{ height: 34, width: 34, borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><RefreshCw size={14} /></button>
-            <button onClick={onAdd} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', borderRadius: 8, border: 'none', background: 'var(--ds-blue, #2563eb)', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}><Plus size={14} /> Add</button>
-          </div>
-        </div>
-        {children}
-      </div>
-    </div>
-  )
-}
-
-const cardStyle: React.CSSProperties = { background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', padding: '12px 16px', display: 'flex', gap: 12, alignItems: 'flex-start' }
+import { CustomerProfile } from './components/CustomerProfile'
+import { CustomerOrgDefaults } from './components/CustomerOrgDefaults'
+import { AddNoteDialog } from './components/AddNoteDialog'
 
 function stripRecord<T extends { id: string; createdAt: string; updatedAt: string }>(record: T): Omit<T, 'id' | 'createdAt' | 'updatedAt'> {
   const { id, createdAt, updatedAt, ...rest } = record
   return rest as Omit<T, 'id' | 'createdAt' | 'updatedAt'>
 }
 
+const statusTones: Record<CustomerStatus, TmsTone> = {
+  NEW: 'gray',
+  CONTACTED: 'blue',
+  QUALIFIED: 'turquoise',
+  QUOTED: 'purple',
+  NURTURING: 'pink',
+  PENDING: 'orange',
+  ACTIVE: 'green',
+  DORMANT: 'orange',
+  CLOSED: 'gray',
+  BLOCKED: 'red',
+}
+
+const CUSTOMER_STATUSES: CustomerStatus[] = ['NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING', 'PENDING', 'ACTIVE', 'DORMANT', 'CLOSED', 'BLOCKED']
+
+/** A hundred rows a page; the grid virtualises them, so the DOM holds only the rows in view. */
+const PAGE_SIZE = 100
+
+type BoardTab = 'leads' | 'active' | 'inactive'
+
+interface CustomerRow {
+  record: CustomerRecord
+  effective: CustomerStatus
+  tab: BoardTab
+  crm: CrmListAccountRow | undefined
+  ownerName: string
+  teamName: string
+  divisionName: string
+}
+
+const dollars = (cents: number) => `$${Math.round(cents / 100).toLocaleString('en-US')}`
+/** How many distinct billing addresses the customer has on file (the field holds a comma or semicolon list). */
+const billingEmailCount = (c: CustomerRecord) => (c.billingEmail ?? '').split(/[\s,;]+/).filter((s) => s.includes('@')).length
+const yesNo = (v: boolean | null | undefined) => (v === true ? 'Yes' : 'No')
+const opt = (v: string | null | undefined) => (v ? [{ value: v, label: v }] : [])
+
+const DEFAULT_COLUMNS = ['name', 'status', 'owner', 'lastTouch', 'nextStep', 'credit', 'terms', 'contact', 'city']
+/** Columns fed by CRM_LIST_ACCOUNTS `withActivity`. */
+const ACTIVITY_COLUMN_KEYS = ['openAr', 'lastShipment']
+const ALL_COLUMN_KEYS = [
+  ...DEFAULT_COLUMNS,
+  'team', 'billingEmails', 'factored', 'email', 'state',
+  'division', 'stage', 'nextDue', 'openTasks', 'phone', 'mc', 'dot', 'archived', 'aljexCode', 'industry', 'leadSource', 'created',
+  ...ACTIVITY_COLUMN_KEYS,
+]
+const ACTIONS_KEY = 'actions'
+
+const gridCatalog: Array<DenseColumn<CustomerRow>> = [
+    { key: 'name', header: 'Customer', group: 'Account', text: (r) => r.record.name },
+    {
+      key: 'status', header: 'Status', group: 'Account', text: (r) => r.record.status ?? '', filter: 'multi',
+      fixedOptions: CUSTOMER_STATUSES.map((s) => ({ value: s, label: s })), optionsOf: (r) => opt(r.record.status),
+    },
+    { key: 'owner', header: 'Owner', group: 'Account', text: (r) => r.ownerName, filter: 'multi', optionsOf: (r) => opt(r.ownerName) },
+    { key: 'team', header: 'Team', group: 'Account', text: (r) => r.teamName, filter: 'multi', optionsOf: (r) => opt(r.teamName) },
+    { key: 'division', header: 'Division', group: 'Account', text: (r) => r.divisionName, filter: 'multi', optionsOf: (r) => opt(r.divisionName) },
+    { key: 'stage', header: 'CRM stage', group: 'Account', text: (r) => r.crm?.stage ?? '', filter: 'multi', optionsOf: (r) => opt(r.crm?.stage) },
+    { key: 'archived', header: 'Archived', group: 'Account', text: (r) => yesNo(r.record.active === false), filter: 'multi' },
+    { key: 'aljexCode', header: 'Aljex #', group: 'Account', text: (r) => r.record.aljexCode ?? '' },
+    { key: 'industry', header: 'Industry', group: 'Account', text: (r) => r.record.industry ?? '', filter: 'multi', optionsOf: (r) => opt(r.record.industry) },
+    { key: 'leadSource', header: 'Lead source', group: 'Account', text: (r) => r.record.leadSource ?? '', filter: 'multi', optionsOf: (r) => opt(r.record.leadSource) },
+    { key: 'created', header: 'Created', group: 'Account', text: (r) => r.record.createdAt.slice(0, 10), filter: 'date', dateOf: (r) => r.record.createdAt, sortValue: (r) => r.record.createdAt },
+    {
+      key: 'lastTouch', header: 'Last touch', group: 'CRM',
+      text: (r) => (r.crm?.lastTouchAt ? `${kindLabel(r.crm.lastTouchKind)} · ${relativeDay(r.crm.lastTouchAt)}` : ''),
+      filter: 'date', dateOf: (r) => r.crm?.lastTouchAt ?? null, sortValue: (r) => r.crm?.lastTouchAt ?? null,
+    },
+    {
+      key: 'nextStep', header: 'Next step', group: 'CRM',
+      text: (r) => (r.crm?.nextStep ? `${r.crm.nextStep}${r.crm.nextStepDueAt ? ` · ${r.crm.nextStepDueAt.slice(0, 10)}` : ''}` : ''),
+      sortValue: (r) => r.crm?.nextStep ?? null,
+    },
+    {
+      key: 'nextDue', header: 'Next step due', group: 'CRM', text: (r) => r.crm?.nextStepDueAt?.slice(0, 10) ?? '',
+      filter: 'date', dateOf: (r) => r.crm?.nextStepDueAt ?? null, sortValue: (r) => r.crm?.nextStepDueAt ?? null,
+    },
+    { key: 'openTasks', header: 'Open tasks', group: 'CRM', text: (r) => String(r.crm?.openTaskCount ?? 0), filter: 'number', numberOf: (r) => r.crm?.openTaskCount ?? 0, align: 'right' },
+    {
+      key: 'credit', header: 'Credit limit', group: 'Billing', text: (r) => (r.record.creditLimitCents != null ? dollars(r.record.creditLimitCents) : ''),
+      filter: 'number', numberOf: (r) => (r.record.creditLimitCents != null ? r.record.creditLimitCents / 100 : null), numberUnit: '$', align: 'right',
+    },
+    {
+      key: 'terms', header: 'Terms', group: 'Billing', text: (r) => (r.record.paymentTermsDays != null ? `Net ${r.record.paymentTermsDays}` : ''),
+      filter: 'number', numberOf: (r) => r.record.paymentTermsDays ?? null, numberUnit: 'days', align: 'right',
+    },
+    {
+      key: 'billingEmails', header: 'Billing e-mails', group: 'Billing', text: (r) => String(billingEmailCount(r.record)),
+      filter: 'number', numberOf: (r) => billingEmailCount(r.record), align: 'right',
+    },
+    {
+      key: 'openAr', header: 'Open AR', group: 'Billing', text: (r) => (r.crm?.openArCents != null ? dollars(r.crm.openArCents) : ''),
+      filter: 'number', numberOf: (r) => (r.crm?.openArCents != null ? r.crm.openArCents / 100 : null), numberUnit: '$', align: 'right',
+    },
+    {
+      key: 'lastShipment', header: 'Last shipment', group: 'Activity', text: (r) => r.crm?.lastShipmentAt?.slice(0, 10) ?? '',
+      filter: 'date', dateOf: (r) => r.crm?.lastShipmentAt ?? null, sortValue: (r) => r.crm?.lastShipmentAt ?? null,
+    },
+    { key: 'factored', header: 'Factored', group: 'Billing', text: (r) => yesNo(r.record.factored), filter: 'multi' },
+    { key: 'contact', header: 'Contact', group: 'Contact', text: (r) => r.record.contactName ?? '' },
+    { key: 'email', header: 'E-mail', group: 'Contact', text: (r) => r.record.contactEmail ?? '' },
+    { key: 'phone', header: 'Phone', group: 'Contact', text: (r) => r.record.contactPhone ?? '' },
+    { key: 'city', header: 'City', group: 'Contact', text: (r) => r.record.billingAddress?.city ?? '' },
+    { key: 'state', header: 'State', group: 'Contact', text: (r) => r.record.billingAddress?.state ?? '', filter: 'multi', optionsOf: (r) => opt(r.record.billingAddress?.state) },
+    { key: 'mc', header: 'MC', group: 'Authority', text: (r) => r.record.mcNumber ?? '' },
+    { key: 'dot', header: 'DOT', group: 'Authority', text: (r) => r.record.dotNumber ?? '' },
+    { key: ACTIONS_KEY, header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 110 },
+]
+
 export function CustomersPage() {
-  const dir = useDirectory()
-  const { isAdmin } = useAuth()
+  const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
+  const profileId = params.get('customer')
+  // The directory's 3,000+ locations are only read by the profile's "Shipping locations" tab.
+  const dir = useDirectory({ includeArchived: true, locations: profileId != null })
+  const auth = useAuth()
+  const { isAdmin, user } = auth
+  const isManager = isCrmManager(auth)
+  // Managers and admins can narrow to their own accounts; everyone else is always on their own (§5.6).
+  const [scope, setScope] = useState<'mine' | 'all'>('all')
+  const prefs = useDenseGridPrefs({
+    gridId: 'customers',
+    email: user?.email,
+    defaultColumns: DEFAULT_COLUMNS,
+    validKeys: ALL_COLUMN_KEYS,
+    defaultSort: { key: 'name', dir: 'asc' },
+  })
+  // Open AR and Last shipment cost server queries, so they are fetched only while a column shows them.
+  const withActivity = prefs.columns.some((k) => ACTIVITY_COLUMN_KEYS.includes(k))
+  const crm = useCrmAccounts(isManager ? scope : 'mine', withActivity)
+  const { nameOf } = useStaff(user?.email)
+  const [noteFor, setNoteFor] = useState<CustomerRecord | null>(null)
   const [query, setQuery] = useState('')
+  const [filters, setFilters] = useState<DenseFilters>({})
   const [editing, setEditing] = useState<CustomerRecord | 'new' | null>(null)
+  // `?customer=<id>` owns which profile is open (Settings → Tracking automation links here), the way `?doc=` does elsewhere.
+  const setProfileId = useCallback((id: string | null) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (id) next.set('customer', id); else next.delete('customer')
+      return next
+    }, { replace: true })
+  }, [setParams])
   const [divisions, setDivisions] = useState<Division[]>([])
+  const [settings, setSettings] = useState<TmsSettings | null>(null)
+  const [showDefaults, setShowDefaults] = useState(false)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE)
 
   useEffect(() => {
     listDivisions().then(setDivisions).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load divisions'))
+    getTmsSettings()
+      .then((s) => setSettings(s))
+      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load settings'))
   }, [])
 
-  const rows = useMemo(() => {
+  const catalog = useMemo<ChargeCodeDef[]>(() => settings?.chargeCodes ?? [], [settings])
+
+  const teamNames = useMemo(() => new Map((settings?.teams ?? []).map((t) => [t.key, t.name])), [settings])
+  const divisionNames = useMemo(() => new Map(divisions.map((d) => [d.key, d.name])), [divisions])
+  // "Possible duplicate": accounts of different Aljex Account # that share a normalised name (display only, nothing is merged).
+  const duplicates = useMemo(() => buildDuplicateIndex(dir.customers.filter((c) => c.active !== false)), [dir.customers])
+
+  const rowsWithStatus = useMemo<CustomerRow[]>(() => {
     const q = query.trim().toLowerCase()
-    return dir.customers.filter((c) =>
-      !q || [c.name, c.contactName, c.contactEmail, c.mcNumber, c.dotNumber].some((v) => (v ?? '').toLowerCase().includes(q))
-    )
-  }, [dir.customers, query])
+    const visibleOnly = crm.loaded && (!isManager || scope === 'mine')
+    const now = new Date().toISOString()
+    return dir.customers
+      .filter((c) => !visibleOnly || crm.byCustomer.has(c.id))
+      .filter((c) =>
+        !q || [c.name, c.contactName, c.contactEmail, c.mcNumber, c.dotNumber].some((v) => (v ?? '').toLowerCase().includes(q))
+      )
+      .map((c) => {
+        const effective = effectiveCustomerStatus(c, null, now)
+        const row = crm.byCustomer.get(c.id)
+        return {
+          record: c,
+          effective,
+          tab: boardTab(effective),
+          crm: row,
+          ownerName: row?.ownerId ? nameOf(row.ownerId) : '',
+          teamName: c.teamKey ? (teamNames.get(c.teamKey) ?? c.teamKey) : '',
+          divisionName: c.defaultDivisionKey ? (divisionNames.get(c.defaultDivisionKey) ?? c.defaultDivisionKey) : '',
+        }
+      })
+  }, [dir.customers, query, crm.loaded, crm.byCustomer, isManager, scope, nameOf, teamNames, divisionNames])
+
+  const counts = useMemo(() => ({
+    leads: rowsWithStatus.filter((r) => r.tab === 'leads').length,
+    active: rowsWithStatus.filter((r) => r.tab === 'active').length,
+    inactive: rowsWithStatus.filter((r) => r.tab === 'inactive').length,
+  }), [rowsWithStatus])
+
+  const [activeTab, setActiveTab] = useState<BoardTab>('active')
+
+  const gridColumns = useMemo(
+    () => [
+      ...prefs.columns.map((k) => gridCatalog.find((c) => c.key === k)).filter((c) => c != null),
+      ...gridCatalog.filter((c) => c.key === ACTIONS_KEY),
+    ],
+    [prefs.columns],
+  )
+  const tabRows = useMemo(() => rowsWithStatus.filter((r) => r.tab === activeTab), [rowsWithStatus, activeTab])
+  const filteredRows = useMemo(() => filterRows(tabRows, gridCatalog, filters), [tabRows, filters])
+  const sortedRows = useMemo(() => sortDenseRows(filteredRows, gridCatalog, prefs.sort), [filteredRows, prefs.sort])
+  const pageRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
+  const setColumnFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
+    setPageSize(PAGE_SIZE)
+    setFilters((prev) => {
+      const copy = { ...prev }
+      if (next) copy[key] = next
+      else delete copy[key]
+      return copy
+    })
+  }, [])
+  const kpis = useMemo(() => [
+    { label: 'Customers', value: sortedRows.length },
+    { label: 'Next step overdue', value: sortedRows.filter((r) => r.crm?.nextStep && isOverdue(r.crm.nextStepDueAt)).length, tone: 'bad' as const },
+    { label: 'No owner', value: sortedRows.filter((r) => !r.ownerName).length, tone: 'warn' as const },
+    { label: 'Factored', value: sortedRows.filter((r) => r.record.factored === true).length },
+  ], [sortedRows])
 
   useEffect(() => { if (dir.error) toast.error(dir.error) }, [dir.error])
 
+  const profileCustomer = useMemo(() => dir.customers.find((c) => c.id === profileId) ?? null, [dir.customers, profileId])
+
+  // A link to a customer that no longer exists (or that this user cannot see) must not leave a dead param behind.
+  useEffect(() => {
+    if (profileId && !dir.loading && !dir.error && !profileCustomer) {
+      toast.error('That customer was not found')
+      setProfileId(null)
+    }
+  }, [profileId, profileCustomer, dir.loading, dir.error, setProfileId])
+
   const archive = async (c: CustomerRecord) => {
-    if (!window.confirm(`Archive customer "${c.name}"?\n\nLoads keep their customer name; only the directory entry is marked inactive.`)) return
+    if (!window.confirm(`Archive customer "${c.name}"?\n\nShipments keep their customer name; only the directory entry is marked inactive.`)) return
     try { await dir.archiveCustomer(c); toast.success('Customer archived') } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
   }
 
-  return (
-    <PageShell title="Customers" icon={<Building2 size={18} />} count={dir.customers.filter(isActiveDirectoryRecord).length}
-      sub="Customers with billing contacts, terms, credit limits, aliases and default division/sales rep."
-      query={query} setQuery={setQuery} onAdd={() => setEditing('new')} onRefresh={dir.refresh}>
-      {dir.loading && rows.length === 0 ? <div style={{ padding: 24, textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>Loading…</div>
-        : rows.length === 0 ? <div style={{ ...cardStyle, justifyContent: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>No customers yet — add the first one.</div>
-        : rows.map((c) => (
-          <div key={c.id} style={cardStyle}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ds-t1)' }}>
-                {c.name}
-                {c.apptWorkflow === 'BATORY' && <span style={{ fontSize: 10, fontWeight: 600, marginLeft: 8, padding: '1px 6px', borderRadius: 5, background: '#eff6ff', color: '#0369a1' }}>BATORY</span>}
-                {c.active === false && <span style={{ fontSize: 10, fontWeight: 600, marginLeft: 8, padding: '1px 6px', borderRadius: 5, background: '#f3f4f6', color: '#6b7280' }}>ARCHIVED</span>}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--ds-t2)', marginTop: 3 }}>
-                {c.contactName || <span style={{ color: 'var(--ds-t3)' }}>no contact yet</span>}
-                {c.contactEmail && <span style={{ color: 'var(--ds-t3)' }}> · {c.contactEmail}</span>}
-                {c.contactPhone && <span style={{ color: 'var(--ds-t3)' }}> · {c.contactPhone}</span>}
-                {c.mcNumber && <span style={{ color: 'var(--ds-t3)' }}> · MC {c.mcNumber}</span>}
-                {c.dotNumber && <span style={{ color: 'var(--ds-t3)' }}> · DOT {c.dotNumber}</span>}
-              </div>
-              {/*
-                * Factored or not, and the booking rules that follow from it.
-                *
-                * Only a factored customer's loads reach OTR, and only OTR needs an MC and
-                * origin/destination ZIPs. Marking a customer here is what decides whether
-                * booking one of their loads demands that paperwork — so it sits on the row
-                * rather than behind the edit dialog, where nobody would find it.
-                */}
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 5, fontSize: 11.5, color: c.factored ? '#047857' : 'var(--ds-t3)', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={c.factored === true}
-                  onChange={(e) => void dir.saveCustomer(c, { factored: e.target.checked })}
-                  aria-label={`${c.name} is factored`}
-                />
-                {c.factored
-                  ? 'Factored — loads need an MC and both ZIPs'
-                  : 'Not factored — no MC or ZIP needed to book'}
-              </label>
-              {(c.billingEmail || c.billingAddress?.city) && (
-                <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>
-                  Billing: {[c.billingContactName, c.billingEmail, c.billingAddress?.city].filter(Boolean).join(' · ')}
-                </div>
-              )}
-              {c.aliases && c.aliases.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>Aliases: {c.aliases.join(', ')}</div>}
-              {c.notes && <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>{c.notes}</div>}
-            </div>
-            <button onClick={() => setEditing(c)} title="Edit" style={{ background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer' }}><Pencil size={14} /></button>
+  const saveSettings = async (patch: Parameters<typeof saveTmsSettings>[0]) => {
+    if (!isAdmin) throw new Error('Admin only')
+    const next = await saveTmsSettings(patch, settings?.updatedAt)
+    setSettings(next)
+    toast.success('Org defaults saved')
+  }
+
+  const renderCell = (row: CustomerRow, key: string) => {
+    const { record: c, effective, crm: crmRow } = row
+    switch (key) {
+      case 'name':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontWeight: 600 }}>{c.name}</span>
+            {c.apptWorkflow === 'BATORY' && <TmsBadge tone="blue">BATORY</TmsBadge>}
+            {c.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
+            <PossibleDuplicateBadge info={duplicates.get(c.id)} />
+          </span>
+        )
+      case 'status':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {c.status ? <TmsBadge tone={statusTones[c.status]}>{c.status}</TmsBadge> : <span className="tms-muted">—</span>}
+            {c.status && effective !== c.status && <span className="tms-muted" style={{ fontSize: 11 }}>(effective {effective})</span>}
+          </span>
+        )
+      case 'owner':
+        return row.ownerName || <span className="tms-muted">—</span>
+      case 'lastTouch':
+        return crmRow?.lastTouchAt
+          ? <span data-testid={`crm-last-touch-${c.id}`}>{kindLabel(crmRow.lastTouchKind)} · {relativeDay(crmRow.lastTouchAt)}</span>
+          : <span className="tms-muted">—</span>
+      case 'nextStep': {
+        if (!crmRow?.nextStep) return <span className="tms-muted">—</span>
+        const overdue = isOverdue(crmRow.nextStepDueAt)
+        return (
+          <span data-testid={`crm-next-step-${c.id}`} data-overdue={overdue ? 'true' : undefined}>
+            {crmRow.nextStep}{crmRow.nextStepDueAt ? ` · ${crmRow.nextStepDueAt.slice(0, 10)}` : ''}
+            {overdue && <> <TmsBadge tone="red">overdue</TmsBadge></>}
+          </span>
+        )
+      }
+      case 'factored':
+        return (
+          <label
+            title={c.factored ? 'Factored — shipments need an MC and both ZIPs' : 'Not factored — no MC or ZIP needed to book'}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={c.factored === true}
+              onChange={(e) => void dir.saveCustomer(c, { factored: e.target.checked })}
+              aria-label={`${c.name} is factored`}
+            />
+            {c.factored ? 'Yes' : 'No'}
+          </label>
+        )
+      case ACTIONS_KEY:
+        return (
+          <span style={{ display: 'inline-flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+            <TmsIconButton shape="plain" aria-label={`Add note to ${c.name}`} title="Add note" onClick={() => setNoteFor(c)}><MessageSquarePlus size={14} /></TmsIconButton>
+            <TmsIconButton shape="plain" aria-label={`Edit ${c.name}`} title="Edit" onClick={() => setEditing(c)}><Pencil size={14} /></TmsIconButton>
             {isAdmin && (
-              <button onClick={() => archive(c)} title="Archive" style={{ background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer' }}><Archive size={14} /></button>
+              <TmsIconButton shape="plain" aria-label={`Archive ${c.name}`} title="Archive" onClick={() => void archive(c)}><Archive size={14} /></TmsIconButton>
             )}
-          </div>
-        ))}
+          </span>
+        )
+      default:
+        return gridCatalog.find((col) => col.key === key)?.text(row) || <span className="tms-muted">—</span>
+    }
+  }
+
+  return (
+    <>
+      <div className="tms-dense-page">
+        <div className="tms-dense-bar">
+          <span className="tms-dense-title"><Users size={18} aria-hidden="true" /> Customers</span>
+          <Search size={14} className="tms-muted" aria-hidden="true" />
+          <TmsInput
+            placeholder="Search customers"
+            aria-label="Search customers"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setPageSize(PAGE_SIZE) }}
+            className="tms-dense-search"
+          />
+          <TmsSegmentedTabs
+            aria-label="Customer board"
+            size="sm"
+            tabs={[
+              { key: 'leads', label: 'Prospects', count: counts.leads },
+              { key: 'active', label: 'Active', count: counts.active },
+              { key: 'inactive', label: 'Inactive', count: counts.inactive },
+            ]}
+            active={activeTab}
+            onSelect={(key) => { setActiveTab(key as BoardTab); setPageSize(PAGE_SIZE) }}
+          />
+          {isManager && (
+            <span role="group" aria-label="Account scope" style={{ display: 'inline-flex', gap: 4 }} data-testid="crm-scope">
+              <TmsButton size="sm" variant={scope === 'mine' ? 'primary' : undefined} aria-pressed={scope === 'mine'} onClick={() => setScope('mine')} data-testid="crm-scope-mine">Mine</TmsButton>
+              <TmsButton size="sm" variant={scope === 'all' ? 'primary' : undefined} aria-pressed={scope === 'all'} onClick={() => setScope('all')} data-testid="crm-scope-all">All</TmsButton>
+            </span>
+          )}
+          <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => { setFilters({}); setPageSize(PAGE_SIZE) }} />
+          <span className="tms-dense-spacer" />
+          <TmsButton size="sm" variant="secondary" onClick={() => void dir.refresh()}>Refresh</TmsButton>
+          <ColumnsButton
+            catalog={gridCatalog}
+            columns={prefs.columns}
+            widths={prefs.widths}
+            pinned={prefs.pinned}
+            onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })}
+          />
+          <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
+          <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
+          {isAdmin && (
+            <TmsIconButton aria-label="Organization defaults" title="Organization defaults" onClick={() => setShowDefaults(true)}>
+              <Settings2 size={16} />
+            </TmsIconButton>
+          )}
+          <TmsButton size="sm" variant="secondary" onClick={() => navigate('/tms/customers/billing-setup')}>Billing setup</TmsButton>
+          <TmsButton size="sm" variant="primary" onClick={() => setEditing('new')}>Customer</TmsButton>
+        </div>
+        <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+        <div className="tms-dense-body">
+          <DenseGrid<CustomerRow>
+            aria-label="Customers"
+            recentKey={`tms:customers:recent:${user?.email ?? 'anon'}`}
+            resetKey={`${activeTab}|${scope}|${query}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+            columns={gridColumns}
+            rows={pageRows}
+            fitRows={tabRows}
+            rowKey={(r) => r.record.id}
+            renderCell={renderCell}
+            density={prefs.density}
+            userWidths={prefs.widths}
+            stickyCount={Math.max(1, prefs.pinned.length)}
+            sort={prefs.sort}
+            onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
+            filters={filters}
+            onFilterChange={setColumnFilter}
+            onReorder={(from, to) => prefs.setColumns(reorderKeys(prefs.columns, from, to))}
+            onResize={prefs.setWidth}
+            onRowClick={(r) => setProfileId(r.record.id)}
+            empty={dir.loading ? 'Loading customers…' : 'No customers match this tab and these filters.'}
+          />
+          {sortedRows.length > pageRows.length && (
+            <div className="tms-dense-bar" data-testid="customers-more">
+              <span className="tms-muted">Showing {pageRows.length} of {sortedRows.length}</span>
+              <TmsButton size="sm" variant="secondary" onClick={() => setPageSize((s) => s + PAGE_SIZE)}>Show next {PAGE_SIZE}</TmsButton>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {noteFor && <AddNoteDialog customerId={noteFor.id} customerName={noteFor.name} onClose={() => setNoteFor(null)} onSaved={() => void crm.refresh()} />}
+
+      {showDefaults && <CustomerOrgDefaults settings={settings} onSave={saveSettings} onClose={() => setShowDefaults(false)} />}
 
       <CustomerModal
-        // The form hook seeds its state once; remount per record so Edit shows that record
-        // (a stale form would otherwise overwrite it with blanks on Save).
         key={editing === null ? 'closed' : editing === 'new' ? 'new' : editing.id}
         open={editing !== null}
         initial={editing === 'new' ? undefined : editing ?? undefined}
@@ -153,7 +476,29 @@ export function CustomersPage() {
           setEditing(null)
         }}
       />
-    </PageShell>
+
+      {profileCustomer && (
+        <CustomerProfile
+          customer={profileCustomer}
+          divisions={divisions}
+          locations={dir.locations}
+          settings={settings}
+          catalog={catalog}
+          isAdmin={isAdmin}
+          currentUser={user?.email ?? ''}
+          activeCustomers={dir.customers.filter((c) => c.id !== profileCustomer.id && c.active !== false && c.status !== 'BLOCKED')}
+          onClose={() => { setProfileId(null); void crm.refresh() }}
+          onSave={async (current, next) => {
+            await dir.saveCustomer(current, next)
+            toast.success('Customer saved')
+          }}
+          onStatusChange={async (current, input) => {
+            await dir.setCustomerStatus(current, input)
+            toast.success('Status updated')
+          }}
+        />
+      )}
+    </>
   )
 }
 
@@ -171,96 +516,219 @@ function CustomerModal({ open, initial, divisions, onClose, onSave }: {
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>{initial ? 'Edit customer' : 'Add customer'}</DialogTitle></DialogHeader>
-        <CustomerForm value={value} set={set} errors={errors} divisions={divisions} />
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <TmsDialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose() }}
+      className="tms-dialog-wide"
+      title={initial ? 'Edit customer' : 'Add customer'}
+      footer={
+        <>
+          <TmsButton onClick={onClose}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</TmsButton>
+        </>
+      }
+    >
+      <CustomerForm value={value} set={set} errors={errors} divisions={divisions} />
+    </TmsDialog>
   )
 }
+
+interface LocationFilters {
+  facilityType: string
+  apptRule: string
+  archived: '' | 'yes' | 'no'
+}
+
+const EMPTY_LOCATION_FILTERS: LocationFilters = { facilityType: '', apptRule: '', archived: '' }
+const FACILITY_TYPES = ['SHIPPER', 'RECEIVER', 'BOTH', 'YARD', 'TRUCK_STOP', 'OTHER']
+const APPT_RULES = ['FCFS', 'APPT', 'EITHER']
 
 export function LocationsPage() {
   const dir = useDirectory()
   const { isAdmin } = useAuth()
   const [query, setQuery] = useState('')
+  const [filters, setFilters] = useState<LocationFilters>(EMPTY_LOCATION_FILTERS)
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [editing, setEditing] = useState<LocationRecord | 'new' | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
+  const [pageSize, setPageSize] = useState(50)
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return dir.locations.filter((l) =>
-      !q || [l.name, l.city, l.state, l.customerName, l.apptContactEmail, l.street, l.zip].some((v) => (v ?? '').toLowerCase().includes(q))
-    )
-  }, [dir.locations, query])
+    return dir.locations
+      .filter((l) =>
+        !q || [l.name, l.city, l.state, l.customerName, l.apptContactEmail, l.street, l.zip].some((v) => (v ?? '').toLowerCase().includes(q))
+      )
+      .filter((l) => (filters.facilityType ? l.facilityType === filters.facilityType : true))
+      .filter((l) => (filters.apptRule ? l.apptRule === filters.apptRule : true))
+      .filter((l) => (filters.archived ? (l.active === false) === (filters.archived === 'yes') : true))
+  }, [dir.locations, query, filters])
+
+  const pageRows = useMemo(() => rows.slice(0, pageSize), [rows, pageSize])
 
   useEffect(() => { if (dir.error) toast.error(dir.error) }, [dir.error])
 
+  const open = useMemo(() => dir.locations.find((l) => l.id === openId) ?? null, [dir.locations, openId])
+
   const archive = async (l: LocationRecord) => {
-    if (!window.confirm(`Archive location "${l.name}"?\n\nLoads keep their stop address; only the directory entry is marked inactive.`)) return
+    if (!window.confirm(`Archive location "${l.name}"?\n\nShipments keep their stop address; only the directory entry is marked inactive.`)) return
     try { await dir.archiveLocation(l); toast.success('Location archived') } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
   }
 
+  const columns: Array<ColumnDef<LocationRecord>> = [
+    {
+      key: 'name',
+      header: 'FACILITY',
+      width: 240,
+      render: (l) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontWeight: 600 }}>{l.name}</span>
+          {l.facilityType && <TmsBadge tone="blue">{l.facilityType}</TmsBadge>}
+          {l.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
+        </span>
+      ),
+    },
+    {
+      key: 'address',
+      header: 'ADDRESS',
+      width: 280,
+      render: (l) =>
+        [l.street, [l.city, l.state].filter(Boolean).join(', '), l.zip, l.country].filter(Boolean).join(' · ') || (
+          <span className="tms-muted">no address yet</span>
+        ),
+    },
+    { key: 'appt', header: 'APPT RULE', width: 120, render: (l) => l.apptRule ?? '—' },
+    { key: 'lead', header: 'LEAD TIME', width: 110, render: (l) => (l.apptLeadTimeHours != null ? `${l.apptLeadTimeHours}h` : '—') },
+    { key: 'hours', header: 'HOURS', width: 160, render: (l) => l.hours ?? '—' },
+    {
+      key: 'contact',
+      header: 'APPT CONTACT',
+      width: 220,
+      render: (l) => [l.apptContactName, l.apptContactEmail, l.apptContactPhone].filter(Boolean).join(' · ') || '—',
+    },
+    {
+      key: 'customers',
+      header: 'CUSTOMERS',
+      width: 220,
+      render: (l) => (l.customerIds && l.customerIds.length > 0
+        ? l.customerIds.map((id) => dir.customers.find((c) => c.id === id)?.name ?? id).join(', ')
+        : '—'),
+    },
+    {
+      key: 'driverNotes',
+      header: 'DRIVER NOTES',
+      width: 130,
+      render: (l) => {
+        const { count, newestAt } = driverNotesSummary(l.driverNotes)
+        return count ? (
+          <span title="Comments drivers left from the driver app">
+            <b>{count}</b>{newestAt ? ` · ${new Date(newestAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+          </span>
+        ) : '—'
+      },
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: 80,
+      render: (l) => (
+        <span style={{ display: 'inline-flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+          <TmsIconButton shape="plain" aria-label={`Edit ${l.name}`} title="Edit" onClick={() => setEditing(l)}><Pencil size={14} /></TmsIconButton>
+          {isAdmin && (
+            <TmsIconButton shape="plain" aria-label={`Archive ${l.name}`} title="Archive" onClick={() => void archive(l)}><Archive size={14} /></TmsIconButton>
+          )}
+        </span>
+      ),
+    },
+  ]
+
   return (
-    <PageShell title="Locations" icon={<MapPin size={18} />} count={dir.locations.filter(isActiveDirectoryRecord).length}
-      sub="Facilities with full address, geocode, contacts, hours, appointment rules and linked customers."
-      query={query} setQuery={setQuery} onAdd={() => setEditing('new')} onRefresh={dir.refresh}>
-      {dir.loading && rows.length === 0 ? <div style={{ padding: 24, textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>Loading…</div>
-        : rows.length === 0 ? <div style={{ ...cardStyle, justifyContent: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>No locations yet — add the first one.</div>
-        : rows.map((l) => (
-          <div key={l.id} style={{ ...cardStyle, flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ds-t1)' }}>
-                {l.name}
-                {l.city && <span style={{ fontWeight: 500, color: 'var(--ds-t3)' }}> — {l.city}</span>}
-                {l.facilityType && <span style={{ fontSize: 10.5, fontWeight: 700, marginLeft: 8, padding: '1px 6px', borderRadius: 5, background: '#eff6ff', color: '#0369a1' }}>{l.facilityType}</span>}
-                {l.active === false && <span style={{ fontSize: 10, fontWeight: 600, marginLeft: 8, padding: '1px 6px', borderRadius: 5, background: '#f3f4f6', color: '#6b7280' }}>ARCHIVED</span>}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--ds-t2)', marginTop: 3 }}>
-                {[l.street, [l.city, l.state].filter(Boolean).join(', '), l.zip, l.country].filter(Boolean).join(' · ') || <span style={{ color: 'var(--ds-t3)' }}>no address yet</span>}
-              </div>
-              <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>
-                Appt: {l.apptRule ?? '—'}
-                {l.apptLeadTimeHours != null && <span> · Lead time {l.apptLeadTimeHours}h</span>}
-                {l.hours && <span> · Hours {l.hours}</span>}
-              </div>
-              {l.apptContactEmail && (
-                <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>
-                  Appt contact: {[l.apptContactName, l.apptContactEmail, l.apptContactPhone].filter(Boolean).join(' · ')}
-                </div>
-              )}
-              {l.customerIds && l.customerIds.length > 0 && (
-                <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>
-                  Customers: {l.customerIds.map((id) => dir.customers.find((c) => c.id === id)?.name ?? id).join(', ')}
-                </div>
-              )}
-              {l.aliases && l.aliases.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>Aliases: {l.aliases.join(', ')}</div>}
+    <>
+      <TmsListPage<LocationRecord>
+        title="Locations"
+        primaryAction={{ label: 'Location', onClick: () => setEditing('new') }}
+        actions={isAdmin ? (
+          <TmsIconButton aria-label="Merge locations" title="Merge locations" onClick={() => setMergeOpen(true)}>
+            <Merge size={16} />
+          </TmsIconButton>
+        ) : null}
+        search={{ value: query, onChange: setQuery, placeholder: 'Search locations' }}
+        onRefresh={dir.refresh}
+        filterChips={[
+          { key: 'facility', label: 'Facility type is', value: filters.facilityType || null, onClick: () => setFiltersOpen(true) },
+          { key: 'appt', label: 'Appt rule is', value: filters.apptRule || null, onClick: () => setFiltersOpen(true) },
+          { key: 'archived', label: 'Archived is', value: filters.archived ? (filters.archived === 'yes' ? 'Yes' : 'No') : null, onClick: () => setFiltersOpen(true) },
+        ]}
+        onAddFilter={() => setFiltersOpen(true)}
+        columns={columns}
+        rows={pageRows}
+        rowKey={(l) => l.id}
+        onRowClick={(l) => setOpenId(l.id)}
+        page={{ from: pageRows.length === 0 ? 0 : 1, to: pageRows.length, total: rows.length, pageSize, onPageSize: setPageSize }}
+        emptyText={dir.loading ? 'Loading locations…' : 'No locations match these filters.'}
+        onClearFilters={() => { setQuery(''); setFilters(EMPTY_LOCATION_FILTERS) }}
+      />
+
+      <TmsDialog
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        title="Filter locations"
+        footer={
+          <>
+            <TmsButton onClick={() => setFilters(EMPTY_LOCATION_FILTERS)}>Clear</TmsButton>
+            <TmsButton variant="primary" onClick={() => setFiltersOpen(false)}>Done</TmsButton>
+          </>
+        }
+      >
+        <div style={{ display: 'grid', gap: 14 }}>
+          <TmsField label="Facility type is">
+            <TmsSelect
+              value={filters.facilityType}
+              onChange={(e) => setFilters({ ...filters, facilityType: e.target.value })}
+              placeholder="Any"
+              options={FACILITY_TYPES.map((t) => ({ value: t, label: t }))}
+            />
+          </TmsField>
+          <TmsField label="Appointment rule is">
+            <TmsSelect
+              value={filters.apptRule}
+              onChange={(e) => setFilters({ ...filters, apptRule: e.target.value })}
+              placeholder="Any"
+              options={APPT_RULES.map((t) => ({ value: t, label: t }))}
+            />
+          </TmsField>
+          <TmsField label="Archived is">
+            <TmsSelect
+              value={filters.archived}
+              onChange={(e) => setFilters({ ...filters, archived: e.target.value as '' | 'yes' | 'no' })}
+              placeholder="Any"
+              options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]}
+            />
+          </TmsField>
+        </div>
+      </TmsDialog>
+
+      {open && (
+        <TmsDialog
+          open
+          onOpenChange={(v) => { if (!v) setOpenId(null) }}
+          className="tms-dialog-wide"
+          title={open.name}
+          footer={
+            <>
+              <TmsButton onClick={() => setOpenId(null)}>Close</TmsButton>
+              <TmsButton variant="primary" onClick={() => { setEditing(open); setOpenId(null) }}>Edit</TmsButton>
+            </>
+          }
+        >
+          <TmsCard title="Map and shipment history" flush>
+            <div style={{ padding: 12 }}>
+              <LocationDetail location={open} onRemoveNote={async (note) => { await dir.removeDriverNote(open, note); toast.success('Driver note removed') }} />
             </div>
-            {(() => {
-              const { count, newestAt } = driverNotesSummary(l.driverNotes)
-              return (
-                <div title="Comments drivers left from the driver app" style={{ fontSize: 11.5, textAlign: 'right', minWidth: 96, color: count ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ds-t3)' }}>Driver notes</div>
-                  {count ? <span><b>{count}</b>{newestAt ? ` · ${new Date(newestAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}</span> : '—'}
-                </div>
-              )
-            })()}
-            <button onClick={() => setOpenId(openId === l.id ? null : l.id)} title={openId === l.id ? 'Hide details' : 'Map and load history'} style={{ background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer' }}>{openId === l.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
-            <button onClick={() => setEditing(l)} title="Edit" style={{ background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer' }}><Pencil size={14} /></button>
-            {isAdmin && (
-              <>
-                <button onClick={() => archive(l)} title="Archive" style={{ background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer' }}><Archive size={14} /></button>
-                <button onClick={() => setMergeOpen(true)} title="Merge" style={{ background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer' }}><Merge size={14} /></button>
-              </>
-            )}
-            {openId === l.id && <div style={{ flexBasis: '100%' }}><LocationDetail location={l} onRemoveNote={async (note) => { await dir.removeDriverNote(l, note); toast.success('Driver note removed') }} /></div>}
-          </div>
-        ))}
+          </TmsCard>
+        </TmsDialog>
+      )}
 
       <LocationModal
         key={editing === null ? 'closed' : editing === 'new' ? 'new' : editing.id}
@@ -282,7 +750,7 @@ export function LocationsPage() {
       />
 
       {isAdmin && <MergeLocationDialog open={mergeOpen} onClose={() => setMergeOpen(false)} locations={dir.locations} />}
-    </PageShell>
+    </>
   )
 }
 
@@ -300,16 +768,20 @@ function LocationModal({ open, initial, customers, onClose, onSave }: {
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>{initial ? 'Edit location' : 'Add location'}</DialogTitle></DialogHeader>
-        <LocationForm value={value} set={set} setAddressField={setAddressField} errors={errors} customers={customers} />
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <TmsDialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose() }}
+      className="tms-dialog-wide"
+      title={initial ? 'Edit location' : 'Add location'}
+      footer={
+        <>
+          <TmsButton onClick={onClose}>Cancel</TmsButton>
+          <TmsButton variant="primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</TmsButton>
+        </>
+      }
+    >
+      <LocationForm value={value} set={set} setAddressField={setAddressField} errors={errors} customers={customers} />
+    </TmsDialog>
   )
 }
 
@@ -364,78 +836,58 @@ function MergeLocationDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>Merge locations (admin only)</DialogTitle></DialogHeader>
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Source</Label>
-              <select value={sourceId} onChange={(e) => { setSourceId(e.target.value); setPreview(null) }} className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
-                <option value="">Select source</option>
-                {candidates.map((l) => <option key={l.id} value={l.id}>{l.name} · {l.city ?? '—'}</option>)}
-              </select>
-            </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Target</Label>
-              <select value={targetId} onChange={(e) => { setTargetId(e.target.value); setPreview(null) }} className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
-                <option value="">Select target</option>
-                {candidates.map((l) => <option key={l.id} value={l.id}>{l.name} · {l.city ?? '—'}</option>)}
-              </select>
-            </div>
+    <TmsDialog open={open} onOpenChange={(v) => { if (!v) onClose() }} title="Merge locations (admin only)">
+      <div style={{ display: 'grid', gap: 16 }}>
+        <div className="tms-grid tms-grid-2">
+          <TmsField label="Source">
+            <TmsSelect
+              value={sourceId}
+              onChange={(e) => { setSourceId(e.target.value); setPreview(null) }}
+              placeholder="Select source"
+              options={candidates.map((l) => ({ value: l.id, label: `${l.name} · ${l.city ?? '—'}` }))}
+            />
+          </TmsField>
+          <TmsField label="Target">
+            <TmsSelect
+              value={targetId}
+              onChange={(e) => { setTargetId(e.target.value); setPreview(null) }}
+              placeholder="Select target"
+              options={candidates.map((l) => ({ value: l.id, label: `${l.name} · ${l.city ?? '—'}` }))}
+            />
+          </TmsField>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <TmsButton size="sm" onClick={runPreview} disabled={!canPreview || previewing}>
+            {previewing ? '…' : 'Preview'}
+          </TmsButton>
+          <TmsButton variant="primary" size="sm" onClick={runMerge} disabled={!canPreview || previewing}>
+            Start merge
+          </TmsButton>
+        </div>
+
+        {preview && (
+          <div className="tms-card">
+            <div className="tms-card-body" style={{ fontSize: 13 }}>Shipment count: {preview.loadCount}</div>
           </div>
+        )}
 
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" size="sm" className="h-9" onClick={runPreview} disabled={!canPreview || previewing}>
-              {previewing ? '…' : 'Preview'}
-            </Button>
-            <Button type="button" size="sm" className="h-9" onClick={runMerge} disabled={!canPreview || previewing}>
-              Start merge
-            </Button>
+        <div style={{ borderTop: '1px solid var(--tms-border)', paddingTop: 12, display: 'grid', gap: 8 }}>
+          <span className="tms-field-label">Resume job</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <TmsInput value={jobIdInput} onChange={(e) => setJobIdInput(e.target.value)} placeholder="Job ID" aria-label="Job ID" />
+            <TmsButton size="sm" onClick={runResume}>Resume</TmsButton>
           </div>
-
-          {preview && (
-            <div className="rounded-md border p-3 text-sm">
-              <p className="font-medium">{preview.loadCount} load(s) will point to the target.</p>
-              <p className="text-muted-foreground mt-1">Source {preview.sourceId} → target {preview.targetId}</p>
-            </div>
-          )}
-
-          {job && (
-            <div className="rounded-md border p-3 text-sm">
-              <p className="font-medium">Merge job {job.id}</p>
-              <p className="text-muted-foreground mt-1">Status: {job.status}</p>
-              <p className="text-muted-foreground">Processed: {job.processedCount}{job.remainingCount != null ? ` / ${job.processedCount + job.remainingCount}` : ''}</p>
-              {job.error && <p className="text-destructive mt-1">{job.error}</p>}
-            </div>
-          )}
-
-          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Resume existing job</Label>
-              <Input value={jobIdInput} onChange={(e) => setJobIdInput(e.target.value)} placeholder="Job ID" className="h-9 text-sm" />
-            </div>
-            <Button type="button" variant="outline" size="sm" className="h-9" onClick={runResume} disabled={!jobIdInput.trim()}>
-              Resume
-            </Button>
-          </div>
-
+          {job && <p className="tms-muted" style={{ fontSize: 12 }}>Job {job.id}: {job.status}</p>}
           {jobs.length > 0 && (
-            <div className="rounded-md border p-3 space-y-1 text-sm">
-              <p className="font-medium">Recent jobs</p>
-              {jobs.slice(0, 5).map((j) => (
-                <div key={j.id} className="flex justify-between text-xs text-muted-foreground">
-                  <span>{j.id} · {j.status}</span>
-                  <span>{j.processedCount}</span>
-                </div>
+            <div style={{ maxHeight: 128, overflowY: 'auto', display: 'grid', gap: 4 }}>
+              {jobs.map((j) => (
+                <div key={j.id} className="tms-muted" style={{ fontSize: 12 }}>{j.id} · {j.status} · {j.processedCount}</div>
               ))}
             </div>
           )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </TmsDialog>
   )
 }

@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react'
+import { TmsTimeline } from '@/features/tms/kit'
 import { toast } from 'sonner'
 import { APIProvider, Map as GoogleMap, AdvancedMarker } from '@vis.gl/react-google-maps'
 import { useAppStore } from '@/store/useAppStore'
+import { isLoadVoided } from '@/lib/shipmentVoid'
 import { getStops } from '@/lib/stops'
 import { dwellMinutes } from '@/lib/tmsDirectory'
-import { formatDateTime } from '@/lib/date'
+import { formatDateTime, chicagoDateStr } from '@/lib/date'
+import { useEnsureLoadRange } from '@/hooks/useLoads'
 import type { LocationRecord } from '@/types/tms'
 import type { Load, Stop } from '@/types'
 
@@ -13,14 +16,21 @@ const MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefine
 
 /**
  * Everything the directory knows about one facility beyond its form fields: the pin
- * (only a real Google map on real, unexpired coordinates), and the loads that were
+ * (only a real Google map on real, unexpired coordinates), and the shipments that were
  * booked here. Dwell is shown only from recorded arrival/departure events; an
  * appointment time is never turned into a dwell figure.
  */
 export function LocationDetail({ location, onRemoveNote }: { location: LocationRecord; onRemoveNote?: (note: { at: string; driverId?: string }) => Promise<void> }) {
   const [removing, setRemoving] = useState<string | null>(null)
   const [openedAt] = useState(() => Date.now())
-  const loads = useAppStore((s) => s.loads)
+  const allLoads = useAppStore((s) => s.loads)
+  // The history lists the newest 50 visits; the store holds only windowed loads, so ask for
+  // the past year plus the coming month.
+  const DAY = 86_400_000
+  useEnsureLoadRange(chicagoDateStr(new Date(openedAt - 365 * DAY)), chicagoDateStr(new Date(openedAt + 30 * DAY)))
+  // This facility's visit history is real work done there, so voided loads drop out. The
+  // filter lives in a memo because the selector must return the store's own array.
+  const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const history = useMemo(() => {
     const rows: { load: Load; stop: Stop }[] = []
     for (const load of loads) {
@@ -35,8 +45,8 @@ export function LocationDetail({ location, onRemoveNote }: { location: LocationR
   // Unwrapped at the client, but a string must never reach .map here.
   const driverNotes = Array.isArray(location.driverNotes) ? location.driverNotes : []
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, marginTop: 10 }}>
-      <div style={{ minHeight: 180, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--ds-border, #e5e7eb)' }}>
+    <div className="tms-grid tms-grid-2" style={{ marginTop: 10 }}>
+      <div style={{ minHeight: 180, borderRadius: 'var(--tms-radius)', overflow: 'hidden', border: '1px solid var(--tms-border)' }}>
         {!hasPin ? (
           <Note>No geocoded pin yet — search the address in the location form to geocode it.</Note>
         ) : !pinFresh ? (
@@ -60,73 +70,71 @@ export function LocationDetail({ location, onRemoveNote }: { location: LocationR
       </div>
       <div>
         {/* What drivers said, newest first. Written from the driver app; read here. */}
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ds-t2)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          Driver comments · {driverNotes.length}
-        </div>
+        <div className="tms-field-label">Driver comments · {driverNotes.length}</div>
         {driverNotes.length === 0 ? (
           <Note>No driver has left a note about this place yet. They can, from a stop in the driver app.</Note>
         ) : (
-          <ul style={{ margin: '6px 0 12px', padding: 0, listStyle: 'none', fontSize: 12 }}>
-            {[...driverNotes].reverse().map((n, i) => (
-              <li key={i} style={{ padding: '4px 0', borderTop: '1px solid var(--ds-border, #e5e7eb)', color: 'var(--ds-t2)' }}>
-                <span style={{ fontWeight: 600, color: 'var(--ds-t1)' }}>{n.by}</span>
-                <span style={{ color: 'var(--ds-t3)' }}> · {formatDateTime(n.at)}</span>
-                <div>{n.text}</div>
-                {onRemoveNote && (
-                  <button type="button" disabled={removing === n.at}
-                    onClick={async () => {
-                      if (!window.confirm(`Remove ${n.by}'s note?\n\n"${n.text}"`)) return
-                      setRemoving(n.at)
-                      try { await onRemoveNote({ at: n.at, driverId: n.driverId }) }
-                      catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
-                      finally { setRemoving(null) }
-                    }}
-                    style={{ background: 'none', border: 'none', padding: 0, fontSize: 11, color: '#b91c1c', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}>
-                    {removing === n.at ? 'Removing…' : 'Remove'}
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <TmsTimeline
+            compact
+            className="mb-3"
+            ariaLabel="Driver comments"
+            items={[...driverNotes].reverse().map((n, i) => ({
+              id: String(i),
+              title: n.by,
+              at: formatDateTime(n.at),
+              description: n.text,
+              tone: 'gray' as const,
+              tag: onRemoveNote ? (
+                <button type="button" disabled={removing === n.at}
+                  onClick={async () => {
+                    if (!window.confirm(`Remove ${n.by}'s note?\n\n"${n.text}"`)) return
+                    setRemoving(n.at)
+                    try { await onRemoveNote({ at: n.at, driverId: n.driverId }) }
+                    catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+                    finally { setRemoving(null) }
+                  }}
+                  style={{ background: 'none', border: 'none', padding: 0, fontSize: 11, color: 'var(--tms-badge-red)', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}>
+                  {removing === n.at ? 'Removing…' : 'Remove'}
+                </button>
+              ) : undefined,
+            }))}
+          />
         )}
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ds-t2)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          Load history · {history.length}
-        </div>
+        <div className="tms-field-label">Shipment history · {history.length}</div>
         {history.length === 0 ? (
-          <Note>No loads have a stop linked to this location yet.</Note>
+          <Note>No shipments have a stop linked to this location yet.</Note>
         ) : (
-          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 6 }}>
-            <thead>
-              <tr style={{ color: 'var(--ds-t3)', textAlign: 'left' }}>
-                <th style={th}>Pro #</th><th style={th}>Customer</th><th style={th}>Stop</th><th style={th}>Appt</th><th style={th}>Dwell</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.slice(0, 50).map(({ load, stop }) => {
-                const dwell = dwellMinutes(stop)
-                return (
-                  <tr key={`${load.id}:${stop.id}`} style={{ borderTop: '1px solid var(--ds-border, #e5e7eb)' }}>
-                    <td style={td}>{load.aljexId}</td>
-                    <td style={td}>{load.customer ?? '—'}</td>
-                    <td style={td}>{stop.type === 'pickup' ? 'PU' : 'DEL'}</td>
-                    <td style={td}>{stop.appt ? formatDateTime(stop.appt) : '—'}</td>
-                    <td style={td} title={dwell === null ? 'Dwell needs recorded arrival and departure times' : undefined}>
-                      {dwell === null ? '—' : `${Math.round(dwell)} min`}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <div className="tms-table-wrap" style={{ marginTop: 6 }}>
+            <table className="tms-table">
+              <thead>
+                <tr>
+                  <th scope="col">PRO #</th><th scope="col">Customer</th><th scope="col">Stop</th><th scope="col">Appt</th><th scope="col">Dwell</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.slice(0, 50).map(({ load, stop }) => {
+                  const dwell = dwellMinutes(stop)
+                  return (
+                    <tr key={`${load.id}:${stop.id}`}>
+                      <td>{load.aljexId}</td>
+                      <td>{load.customer ?? '—'}</td>
+                      <td>{stop.type === 'pickup' ? 'PU' : 'DEL'}</td>
+                      <td>{stop.appt ? formatDateTime(stop.appt) : '—'}</td>
+                      <td title={dwell === null ? 'Dwell needs recorded arrival and departure times' : undefined}>
+                        {dwell === null ? '—' : `${Math.round(dwell)} min`}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
   )
 }
 
-const th: React.CSSProperties = { padding: '4px 6px', fontWeight: 600 }
-const td: React.CSSProperties = { padding: '4px 6px', color: 'var(--ds-t2)' }
-
 function Note({ children }: { children: React.ReactNode }) {
-  return <div style={{ padding: 12, fontSize: 12, color: 'var(--ds-t3)' }}>{children}</div>
+  return <div className="tms-muted" style={{ padding: 12, fontSize: 12 }}>{children}</div>
 }

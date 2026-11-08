@@ -1,13 +1,20 @@
+/**
+ * The Phase-1 division keys: the legal / remit-to identities an invoice is raised under.
+ *
+ * Step R introduced `OwnershipDivision` — the editable tree that tags every shipment
+ * with the business that owns it, on My Brokerage → Divisions & ownership. These rows
+ * are a different, older thing: the `Division` record carries the MC/DOT/SCAC and the
+ * remit-to block printed on paperwork, and existing loads still reference it by key.
+ * It is labelled "Legacy division keys" so nobody edits it expecting the sidebar or a
+ * dashboard grouping to change.
+ */
 import { useEffect, useState } from 'react'
 import { Plus, Pencil, Save, X, Building2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TmsButton, TmsField, TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { listDivisions, saveDivision } from '@/lib/apiClient'
 import type { Division } from '@/types/tms'
+import { CheckRow, Loading, Panel, SettingsCard, Stack } from './settingsKit'
 
 const FLEET_OPTIONS: { value: NonNullable<Division['fleetGroup']>; label: string }[] = [
   { value: 'LOCAL', label: 'Local' },
@@ -39,9 +46,6 @@ export function DivisionCard() {
       .finally(() => setLoading(false))
   }, [])
 
-  const startEdit = (d: Division) => { setEditing(d); setForm({ ...d }) }
-  const startNew = () => { setEditing('new'); setForm(emptyDivision()) }
-
   const set = <K extends keyof Division>(k: K, v: Division[K]) => setForm((p) => ({ ...p, [k]: v }))
 
   const save = async () => {
@@ -60,107 +64,105 @@ export function DivisionCard() {
   }
 
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <Building2 size={16} style={{ color: 'var(--ds-t3)' }} />
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Divisions</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Revenue divisions and legal / remit-to details. Leave unknown fields empty.</div>
-          </div>
-        </div>
-        <Button type="button" variant="outline" size="sm" className="h-8 gap-1" onClick={startNew}>
-          <Plus className="size-3.5" /> Add division
-        </Button>
-      </div>
+    <SettingsCard
+      icon={Building2}
+      title="Legacy division keys"
+      description="The legal and remit-to identity an invoice is raised under. Shipment ownership — which business a shipment belongs to — is edited under Divisions & ownership; these keys are only the paperwork. Leave unknown fields empty."
+      actions={
+        <TmsButton size="sm" onClick={() => { setEditing('new'); setForm(emptyDivision()) }}>
+          <Plus size={14} /> Add division
+        </TmsButton>
+      }
+    >
+      <Stack>
+        {editing && (
+          <Panel>
+            <div className="tms-grid tms-grid-2">
+              <TmsField label="Key *">
+                <TmsInput value={form.key} onChange={(e) => set('key', e.target.value)} placeholder="BCAT_LOGISTICS" />
+              </TmsField>
+              <TmsField label="Name *">
+                <TmsInput value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="BCAT Logistics" />
+              </TmsField>
+              <TmsField label="Legal name">
+                <TmsInput value={form.legalName ?? ''} onChange={(e) => set('legalName', e.target.value || null)} />
+              </TmsField>
+              <TmsField label="Fleet group">
+                <TmsSelect
+                  value={form.fleetGroup ?? ''}
+                  onChange={(e) => set('fleetGroup', (e.target.value || null) as Division['fleetGroup'])}
+                >
+                  <option value="">— unset —</option>
+                  {FLEET_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </TmsSelect>
+              </TmsField>
+              <TmsField label="MC #">
+                <TmsInput value={form.mcNumber ?? ''} onChange={(e) => set('mcNumber', e.target.value || null)} />
+              </TmsField>
+              <TmsField label="DOT #">
+                <TmsInput value={form.dotNumber ?? ''} onChange={(e) => set('dotNumber', e.target.value || null)} />
+              </TmsField>
+              <TmsField label="SCAC">
+                <TmsInput value={form.scac ?? ''} onChange={(e) => set('scac', e.target.value || null)} />
+              </TmsField>
+              <TmsField label="Invoice prefix">
+                <TmsInput value={form.invoicePrefix ?? ''} onChange={(e) => set('invoicePrefix', e.target.value || null)} placeholder="BL" />
+              </TmsField>
+            </div>
 
-      {editing && (
-        <div className="border rounded-lg p-3 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Key *</Label>
-              <Input value={form.key} onChange={(e) => set('key', e.target.value)} placeholder="BCAT_LOGISTICS" className="h-9 text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Name *</Label>
-              <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="BCAT Logistics" className="h-9 text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Legal name</Label>
-              <Input value={form.legalName ?? ''} onChange={(e) => set('legalName', e.target.value || null)} className="h-9 text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Fleet group</Label>
-              <Select value={form.fleetGroup ?? '__UNSET__'} onValueChange={(v) => set('fleetGroup', (v === '__UNSET__' ? null : v) as Division['fleetGroup'])}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="— unset —" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__UNSET__">— unset —</SelectItem>
-                  {FLEET_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">MC #</Label>
-              <Input value={form.mcNumber ?? ''} onChange={(e) => set('mcNumber', e.target.value || null)} className="h-9 text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">DOT #</Label>
-              <Input value={form.dotNumber ?? ''} onChange={(e) => set('dotNumber', e.target.value || null)} className="h-9 text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">SCAC</Label>
-              <Input value={form.scac ?? ''} onChange={(e) => set('scac', e.target.value || null)} className="h-9 text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Invoice prefix</Label>
-              <Input value={form.invoicePrefix ?? ''} onChange={(e) => set('invoicePrefix', e.target.value || null)} placeholder="BL" className="h-9 text-sm" />
-            </div>
-          </div>
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Remit-to name</Label>
-            <Input value={form.remitToName ?? ''} onChange={(e) => set('remitToName', e.target.value || null)} className="h-9 text-sm" />
-          </div>
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Remit-to email</Label>
-            <Input value={form.remitToEmail ?? ''} onChange={(e) => set('remitToEmail', e.target.value || null)} className="h-9 text-sm" />
-          </div>
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Remit-to address</Label>
-            <div className="grid grid-cols-2 gap-3 mt-1.5">
-              <Input value={form.remitToAddress?.street ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, street: e.target.value || null })} placeholder="Street" className="h-9 text-sm" />
-              <Input value={form.remitToAddress?.city ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, city: e.target.value || null })} placeholder="City" className="h-9 text-sm" />
-              <Input value={form.remitToAddress?.state ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, state: e.target.value || null })} placeholder="State" className="h-9 text-sm" />
-              <Input value={form.remitToAddress?.zip ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, zip: e.target.value || null })} placeholder="ZIP" className="h-9 text-sm" />
-              <Input value={form.remitToAddress?.country ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, country: e.target.value || null })} placeholder="Country" className="h-9 text-sm" />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch checked={form.active} onCheckedChange={(v) => set('active', v)} />
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer">Active</Label>
-          </div>
-          <div className="flex gap-2">
-            <Button type="button" size="sm" className="h-8 gap-1" onClick={save}><Save className="size-3.5" /> Save</Button>
-            <Button type="button" variant="outline" size="sm" className="h-8 gap-1" onClick={() => setEditing(null)}><X className="size-3.5" /> Cancel</Button>
-          </div>
-        </div>
-      )}
+            <TmsField label="Remit-to name">
+              <TmsInput value={form.remitToName ?? ''} onChange={(e) => set('remitToName', e.target.value || null)} />
+            </TmsField>
+            <TmsField label="Remit-to email">
+              <TmsInput value={form.remitToEmail ?? ''} onChange={(e) => set('remitToEmail', e.target.value || null)} />
+            </TmsField>
 
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-2">
-          {divisions.sort((a, b) => a.name.localeCompare(b.name)).map((d) => (
-            <div key={d.id} className="flex items-center justify-between border rounded-lg p-2 text-sm">
-              <div>
-                <span className="font-medium">{d.name}</span>
-                <span className="text-muted-foreground ml-2">{d.key}</span>
-                {d.active === false && <span className="ml-2 text-xs text-muted-foreground">(inactive)</span>}
+            <TmsField label="Remit-to address">
+              <div className="tms-grid tms-grid-2">
+                <TmsInput aria-label="Remit-to street" value={form.remitToAddress?.street ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, street: e.target.value || null })} placeholder="Street" />
+                <TmsInput aria-label="Remit-to city" value={form.remitToAddress?.city ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, city: e.target.value || null })} placeholder="City" />
+                <TmsInput aria-label="Remit-to state" value={form.remitToAddress?.state ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, state: e.target.value || null })} placeholder="State" />
+                <TmsInput aria-label="Remit-to ZIP" value={form.remitToAddress?.zip ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, zip: e.target.value || null })} placeholder="ZIP" />
+                <TmsInput aria-label="Remit-to country" value={form.remitToAddress?.country ?? ''} onChange={(e) => set('remitToAddress', { ...form.remitToAddress, country: e.target.value || null })} placeholder="Country" />
               </div>
-              <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => startEdit(d)}>
-                <Pencil className="size-3.5" />
-              </Button>
+            </TmsField>
+
+            <CheckRow label="Active" ariaLabel="Division active" checked={form.active} onChange={(v) => set('active', v)} />
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <TmsButton variant="primary" size="sm" onClick={save}><Save size={14} /> Save</TmsButton>
+              <TmsButton size="sm" onClick={() => setEditing(null)}><X size={14} /> Cancel</TmsButton>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
+          </Panel>
+        )}
+
+        {loading ? <Loading /> : (
+          <Stack gap={8}>
+            {divisions.slice().sort((a, b) => a.name.localeCompare(b.name)).map((d) => (
+              <div
+                key={d.id}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: '6px 10px', fontSize: 14,
+                }}
+              >
+                <div>
+                  <span style={{ fontWeight: 500 }}>{d.name}</span>
+                  <span className="tms-muted" style={{ marginLeft: 8 }}>{d.key}</span>
+                  {d.active === false && <span className="tms-muted" style={{ marginLeft: 8, fontSize: 12 }}>(inactive)</span>}
+                </div>
+                <TmsIconButton
+                  shape="plain"
+                  aria-label={`Edit ${d.name}`}
+                  onClick={() => { setEditing(d); setForm({ ...d }) }}
+                >
+                  <Pencil size={14} />
+                </TmsIconButton>
+              </div>
+            ))}
+          </Stack>
+        )}
+      </Stack>
+    </SettingsCard>
   )
 }

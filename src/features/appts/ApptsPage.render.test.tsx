@@ -7,7 +7,7 @@
  * and delivery status on each row.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, within, fireEvent, waitFor, act } from '@testing-library/react'
 import { fromDateInput, fromDateTimeInput } from '@/lib/date'
 import type { AuditLogEntry, Load } from '@/types'
 
@@ -23,20 +23,23 @@ vi.mock('@/hooks/useDrivers', () => ({
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }))
 vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [], locations: [], loading: false }) }))
 vi.mock('@/lib/rateconUpload', () => ({ uploadRateconAndApply: vi.fn().mockResolvedValue(true) }))
-const auditLog = vi.fn<() => AuditLogEntry[]>(() => [])
-vi.mock('@/hooks/useAuditLog', () => ({ useAuditLog: () => ({ entries: auditLog() }) }))
+const listAuditLogsFor = vi.fn<(keys: unknown) => Promise<AuditLogEntry[]>>(() => Promise.resolve([]))
+const sessionAudit = vi.fn<() => AuditLogEntry[]>(() => [])
+const ensureLoadMonths = vi.fn().mockResolvedValue(undefined)
+const ensureLoadRange = vi.fn().mockResolvedValue(undefined)
 // The drawer pulls in the whole load-editing tree; the queue is what's under test.
 vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
 
 const setSelectedLoad = vi.fn()
 vi.mock('@/store/useAppStore', () => ({
   useAppStore: (sel: (s: unknown) => unknown) =>
-    sel({ setSelectedLoad, currentUserEmail: 'ryne@bcatcorp.com' }),
+    sel({ setSelectedLoad, currentUserEmail: 'ryne@bcatcorp.com', ensureLoadMonths, ensureLoadRange, auditLog: sessionAudit() }),
 }))
 
 const notifyApptNeeded = vi.fn().mockResolvedValue('1699999999.000100')
 vi.mock('@/lib/apiClient', () => ({
   notifyApptNeeded: (a: unknown) => notifyApptNeeded(a),
+  listAuditLogsFor: (k: unknown) => listAuditLogsFor(k),
   uploadApptProof: vi.fn().mockResolvedValue('appt-proofs/x'),
   getApptProofUrl: vi.fn().mockResolvedValue('https://example.com/x.jpg'),
   deleteApptProof: vi.fn().mockResolvedValue(undefined),
@@ -76,7 +79,8 @@ const pair = (over: Partial<Load> = {}) => load({
 beforeEach(() => {
   vi.clearAllMocks()
   loads.mockReturnValue([])
-  auditLog.mockReturnValue([])
+  sessionAudit.mockReturnValue([])
+  listAuditLogsFor.mockResolvedValue([])
   /*
    * The page now opens on Batory shipments only, and almost every fixture below is some
    * other customer — several deliberately so, to prove the non-Batory ladder. Turning the
@@ -86,42 +90,50 @@ beforeEach(() => {
   window.localStorage.setItem('bcat.appts.batoryOnly', 'false')
 })
 
+// The page fires async mount fetches (settings, audit logs); mount inside an async act so
+// they settle before the test body asserts (and before it can end) instead of landing outside act.
+const mount = async () => {
+  let result!: ReturnType<typeof render>
+  await act(async () => { result = render(<ApptsPage />) })
+  return result
+}
+
 describe('ApptsPage', () => {
   it('mounts and sections the queue by pickup day', async () => {
     loads.mockReturnValue([pair({ id: 'l1' })])
-    render(<ApptsPage />)
+    await mount()
     expect(await screen.findByRole('heading', { name: 'Appts' })).toBeTruthy()
     // 2099-01-01 is a Thursday; the section is titled by weekday because that is how a
     // dispatcher scans the page.
     expect(screen.getByText(/Thu, Jan 1, 2099/)).toBeTruthy()
   })
 
-  it('groups two loads picking up the same day into ONE section', () => {
+  it('groups two loads picking up the same day into ONE section', async () => {
     loads.mockReturnValue([pair({ id: 'l1' }), pair({ id: 'l2' })])
-    render(<ApptsPage />)
+    await mount()
     expect(screen.getAllByRole('table')).toHaveLength(1)
   })
 
-  it('gives each pickup day its own section', () => {
+  it('gives each pickup day its own section', async () => {
     loads.mockReturnValue([
       pair({ id: 'l1' }),
       load({ id: 'l2', stops: [stop({ id: 'p', appt: fromDateInput('2099-02-02') })] }),
     ])
-    render(<ApptsPage />)
+    await mount()
     expect(screen.getAllByRole('table')).toHaveLength(2)
   })
 
-  it('says so plainly when there is nothing to show', () => {
-    render(<ApptsPage />)
+  it('says so plainly when there is nothing to show', async () => {
+    await mount()
     expect(screen.getByText(/No shipments yet/i)).toBeTruthy()
   })
 
-  it('lists a shipment with the detail needed to make the call', () => {
+  it('lists a shipment with the detail needed to make the call', async () => {
     loads.mockReturnValue([load({
       customer: 'Acme Freight',
       stops: [stop({ name: 'Dock 4', city: 'Joliet, IL', driverId: 'd1' })],
     })])
-    render(<ApptsPage />)
+    await mount()
 
     expect(screen.getByText('12345')).toBeTruthy()
     expect(screen.getByText('PU-1')).toBeTruthy()
@@ -130,13 +142,13 @@ describe('ApptsPage', () => {
     expect(screen.getByText('Zak Pace')).toBeTruthy()
   })
 
-  it('shows the Batory ladder statuses inside the time cells — PU and Del separately', () => {
+  it('shows the Batory ladder statuses inside the time cells — PU and Del separately', async () => {
     loads.mockReturnValue([
       load({ id: 'l1', aljexId: 'NEEDED', customer: 'Batory Foods', stops: [
         stop(), stop({ id: 'd', type: 'delivery', apptType: 'tbd', sequence: 1 }),
       ] }),
     ])
-    render(<ApptsPage />)
+    await mount()
     const table = screen.getAllByRole('table')[0]
     const row = within(table).getByText('NEEDED').closest('tr')!
     // children[0] is the toggles cell; PU time cell children[1], Del children[2].
@@ -144,9 +156,9 @@ describe('ApptsPage', () => {
     expect(row.children[2].textContent).toContain('NEED RUBEN')
   })
 
-  it('a booked Batory stop without confirm screenshots grandfathers to REQUESTED', () => {
+  it('a booked Batory stop without confirm screenshots grandfathers to REQUESTED', async () => {
     loads.mockReturnValue([pair({ customer: 'Batory Foods' })])
-    render(<ApptsPage />)
+    await mount()
     const table = screen.getAllByRole('table')[0]
     const row = within(table).getByText('12345').closest('tr')!
     expect(row.children[2].textContent).toContain('REQUESTED')
@@ -154,7 +166,7 @@ describe('ApptsPage', () => {
     expect(row.getAttribute('data-outstanding')).toBe('true')
   })
 
-  it('hides settled past rows AND auto-clears open work overdue 5+ days', () => {
+  it('hides settled past rows AND auto-clears open work overdue 5+ days', async () => {
     const recent = new Date(); recent.setDate(recent.getDate() - 2)
     const recentIso = recent.toISOString().slice(0, 10)
     loads.mockReturnValue([
@@ -163,7 +175,7 @@ describe('ApptsPage', () => {
       load({ id: 'p2', aljexId: 'STALEOPEN', stops: [stop({ appt: fromDateInput('2020-01-01') })] }),
       load({ id: 'p3', aljexId: 'FRESHOVERDUE', stops: [stop({ appt: fromDateInput(recentIso) })] }),
     ])
-    render(<ApptsPage />)
+    await mount()
     expect(screen.queryByText('OLDDONE')).toBeNull()
     // Over 5 days past → cleared from view, no longer open.
     expect(screen.queryByText('STALEOPEN')).toBeNull()
@@ -171,21 +183,21 @@ describe('ApptsPage', () => {
     expect(screen.getByText('FRESHOVERDUE')).toBeTruthy()
   })
 
-  it('offers to show the past ones rather than dropping them silently', () => {
+  it('offers to show the past ones rather than dropping them silently', async () => {
     loads.mockReturnValue([load({ aljexId: 'OLD', rateConfirmKey: 'rc',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2020-01-01T09:00') })] } as Partial<Load>)])
-    render(<ApptsPage />)
+    await mount()
 
     const toggle = screen.getByText(/Show 1 past \/ cleared shipment/)
     fireEvent.click(toggle)
     expect(screen.getByText('OLD')).toBeTruthy()
   })
 
-  it('sorts a column on click and reverses it on a second click', () => {
+  it('sorts a column on click and reverses it on a second click', async () => {
     const row = (id: string, aljexId: string) =>
       load({ id, aljexId, stops: [stop({ appt: fromDateInput('2099-01-01') })] })
     loads.mockReturnValue([row('l1', '300'), row('l2', '100'), row('l3', '200')])
-    render(<ApptsPage />)
+    await mount()
 
     // history, PU, Del, Pro #, ... → Pro # is children[3].
     const proIds = () =>
@@ -199,64 +211,64 @@ describe('ApptsPage', () => {
     expect(proIds()).toEqual(['300', '200', '100'])
   })
 
-  it('a booked non-Batory shipment without a ratecon shows RATECON NEEDED and stays open', () => {
+  it('a booked non-Batory shipment without a ratecon shows RATECON NEEDED and stays open', async () => {
     loads.mockReturnValue([load({
       aljexId: 'BOOKED',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
     })])
-    render(<ApptsPage />)
+    await mount()
     const row = screen.getByText('BOOKED').closest('tr')!
     expect(row.getAttribute('data-outstanding')).toBe('true')
     expect(row.children[1].textContent).toContain('RATECON NEEDED')
   })
 
-  it('a non-Batory booking confirms from the RATECON on the load', () => {
+  it('a non-Batory booking confirms from the RATECON on the load', async () => {
     loads.mockReturnValue([load({
       aljexId: 'ONESHOT', customer: 'Acme Freight', rateConfirmKey: 'rate-confirms/x',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
     } as Partial<Load>)])
-    render(<ApptsPage />)
+    await mount()
     const row = screen.getByText('ONESHOT').closest('tr')!
     expect(row.children[1].textContent).toContain('CONFIRMED')
     expect(row.children[1].textContent).toContain('09:30')
     expect(row.getAttribute('data-outstanding')).toBe('false')
   })
 
-  it('non-Batory shipments have NO screenshot camera at all', () => {
+  it('non-Batory shipments have NO screenshot camera at all', async () => {
     loads.mockReturnValue([pair({ id: 'l7b', aljexId: 'NOCAM', customer: 'Acme Freight' })])
-    render(<ApptsPage />)
+    await mount()
     expect(screen.queryByLabelText('Show booking screenshots for NOCAM')).toBeNull()
   })
 
-  it('Batory shows CONFIRMED once both confirm screenshots are on file', () => {
+  it('Batory shows CONFIRMED once both confirm screenshots are on file', async () => {
     loads.mockReturnValue([load({
       aljexId: 'PROVEN', customer: 'Batory Foods',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
                      apptProofs: { e2open: 'appt-proofs/a', email: 'appt-proofs/b' } })],
     })])
-    render(<ApptsPage />)
+    await mount()
     const row = screen.getByText('PROVEN').closest('tr')!
     expect(row.children[1].textContent).toContain('CONFIRMED')
     expect(row.children[1].querySelector('[data-state]')!.getAttribute('data-state')).toBe('confirmed')
   })
 
-  it('one screenshot is not enough for Batory — REQUESTED, not confirmed', () => {
+  it('one screenshot is not enough for Batory — REQUESTED, not confirmed', async () => {
     loads.mockReturnValue([load({
       aljexId: 'HALFPROOF', customer: 'Batory Foods',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
                      apptProofs: { e2open: 'appt-proofs/a' } })],
     })])
-    render(<ApptsPage />)
+    await mount()
     expect(screen.getByText('HALFPROOF').closest('tr')!.children[1].textContent).toContain('REQUESTED')
   })
 
-  it('"Open only" hides the settled rows and shows the open count', () => {
+  it('"Open only" hides the settled rows and shows the open count', async () => {
     loads.mockReturnValue([
       load({ id: 'l1', aljexId: 'BOOKED', rateConfirmKey: 'rc',
         stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })] } as Partial<Load>),
       pair({ id: 'l2', aljexId: 'OPEN' }),
     ])
-    render(<ApptsPage />)
+    await mount()
     expect(screen.getByText('BOOKED')).toBeTruthy()
     fireEvent.click(screen.getByText(/All shipments · 1 open/))
     expect(screen.queryByText('BOOKED')).toBeNull()
@@ -264,13 +276,13 @@ describe('ApptsPage', () => {
     expect(screen.getByText('Open only (1)')).toBeTruthy()
   })
 
-  it('opens a booking history row from the audit log', () => {
+  it('fetches a load\'s audit trail only when its history row is opened', async () => {
     const booked = load({
       id: 'l9', aljexId: 'HIST',
       stops: [stop({ id: 'p', apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
     })
     loads.mockReturnValue([booked])
-    auditLog.mockReturnValue([{
+    listAuditLogsFor.mockResolvedValue([{
       id: 'a1', entityType: 'Load', entityId: 'l9', action: 'update', user: 'ryne@bcatcorp.com',
       createdAt: '2026-08-28T15:00:00.000Z',
       changes: { stops: {
@@ -278,18 +290,20 @@ describe('ApptsPage', () => {
         to: booked.stops,
       } },
     }])
-    render(<ApptsPage />)
+    await mount()
+    expect(listAuditLogsFor).not.toHaveBeenCalled()
     fireEvent.click(screen.getByLabelText('Show appointment history for HIST'))
-    const hist = screen.getByTestId('appt-history')
+    expect(listAuditLogsFor).toHaveBeenCalledWith([{ entityType: 'Load', entityId: 'l9' }])
+    const hist = await screen.findByTestId('appt-history')
+    await waitFor(() => expect(hist.textContent).toContain('booked'))
     expect(hist.textContent).toContain('Jan 1, 2099 · NEED')
     expect(hist.textContent).toContain('Jan 1, 2099 · 09:30')
-    expect(hist.textContent).toContain('booked')
     expect(hist.textContent).toContain('ryne@bcatcorp.com')
   })
 
-  it('shows the status-labelled pickup and delivery times as the FIRST two columns', () => {
+  it('shows the status-labelled pickup and delivery times as the FIRST two columns', async () => {
     loads.mockReturnValue([pair({ customer: 'Batory Foods' })])
-    render(<ApptsPage />)
+    await mount()
 
     const headers = screen.getAllByRole('table')[0].querySelectorAll('th')
     // Columns: [toggles], PU time, Delivery time, Pro #, PU #, Customer, Location, Date, Driver
@@ -304,7 +318,7 @@ describe('ApptsPage', () => {
 
   it('sets a time in place and writes it to the right stop', async () => {
     loads.mockReturnValue([pair({ id: 'l5' })])
-    render(<ApptsPage />)
+    await mount()
 
     fireEvent.click(screen.getAllByTitle(/Set this time/)[0])
     fireEvent.change(screen.getByLabelText('Appointment date'), { target: { value: '2099-03-04' } })
@@ -323,7 +337,7 @@ describe('ApptsPage', () => {
 
   it('books the stop when Exact is chosen with the time', async () => {
     loads.mockReturnValue([pair({ id: 'l6' })])
-    render(<ApptsPage />)
+    await mount()
 
     fireEvent.click(screen.getAllByTitle(/Set this time/)[0])
     fireEvent.change(screen.getByLabelText('Appointment date'), { target: { value: '2099-03-04' } })
@@ -346,7 +360,7 @@ describe('ApptsPage', () => {
         stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'exact', appt: fromDateTimeInput('2099-01-02T14:30') }),
       ],
     })])
-    render(<ApptsPage />)
+    await mount()
 
     // Flag the already-booked pickup back to NEED (Dennis work) and clear the time
     // so the shared popover writes a real TBD stop instead of keeping the typed time.
@@ -367,7 +381,7 @@ describe('ApptsPage', () => {
       stop({ id: 'p', type: 'pickup', apptType: 'tbd', apptThreadTs: 'TS-123',
              appt: fromDateInput('2099-01-01') }),
     ] })])
-    render(<ApptsPage />)
+    await mount()
 
     fireEvent.click(screen.getAllByTitle(/Set this time/)[0])
     fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '09:15' } })
@@ -380,17 +394,17 @@ describe('ApptsPage', () => {
     expect(arg.apptLabel).toContain('09:15')
   })
 
-  it('does not open the drawer when a time cell is clicked', () => {
+  it('does not open the drawer when a time cell is clicked', async () => {
     loads.mockReturnValue([pair()])
-    render(<ApptsPage />)
+    await mount()
 
     fireEvent.click(screen.getAllByTitle(/Set this time/)[0])
     expect(setSelectedLoad).not.toHaveBeenCalled()
   })
 
-  it('opens the load for editing when a row is clicked', () => {
+  it('opens the load for editing when a row is clicked', async () => {
     loads.mockReturnValue([load({ id: 'l7', stops: [stop()] })])
-    render(<ApptsPage />)
+    await mount()
 
     screen.getByText('12345').closest('tr')!.click()
     // 'edit' — booking the time is the whole reason the row was clicked.
@@ -398,9 +412,9 @@ describe('ApptsPage', () => {
   })
 })
 describe('booking screenshots', () => {
-  it('opens the proof panel with E2Open + email slots for both stops (Batory)', () => {
+  it('opens the proof panel with E2Open + email slots for both stops (Batory)', async () => {
     loads.mockReturnValue([pair({ id: 'l7', aljexId: 'PROOFS', customer: 'Batory Foods' })])
-    render(<ApptsPage />)
+    await mount()
     fireEvent.click(screen.getByLabelText('Show booking screenshots for PROOFS'))
     const panel = screen.getByTestId('appt-proofs')
     expect(within(panel).getByText('Pickup')).toBeTruthy()
@@ -409,7 +423,7 @@ describe('booking screenshots', () => {
     expect(within(panel).getAllByText('Email confirmation')).toHaveLength(2)
   })
 
-  it('shows the completeness count once screenshots exist', () => {
+  it('shows the completeness count once screenshots exist', async () => {
     loads.mockReturnValue([load({
       id: 'l8', aljexId: 'HALF', customer: 'Batory Foods',
       stops: [
@@ -418,42 +432,42 @@ describe('booking screenshots', () => {
         stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'exact', appt: fromDateTimeInput('2099-01-02T14:30') }),
       ],
     })])
-    render(<ApptsPage />)
+    await mount()
     expect(screen.getByLabelText('Show booking screenshots for HALF').textContent).toContain('2/6')
   })
 })
 
 describe('ladder time labels', () => {
-  it('a fresh Batory pickup reads NEED 12:00 PM until it is actually requested', () => {
+  it('a fresh Batory pickup reads NEED 12:00 PM until it is actually requested', async () => {
     loads.mockReturnValue([load({
       aljexId: 'FRESH', customer: 'Batory Foods',
       stops: [stop({ apptType: 'tbd', appt: fromDateInput('2099-01-01') })],
     })])
-    render(<ApptsPage />)
+    await mount()
     const cell = screen.getByText('FRESH').closest('tr')!.children[1]
     expect(cell.textContent).toContain('NEED DENNIS')
     expect(cell.textContent).toContain('NEED 12:00 PM')
     expect(cell.textContent).not.toContain('requested')
   })
 
-  it('REQUESTED shows the stamped requested time, never a default', () => {
+  it('REQUESTED shows the stamped requested time, never a default', async () => {
     loads.mockReturnValue([load({
       aljexId: 'STAMPED', customer: 'Batory Foods',
       stops: [stop({ apptType: 'tbd', appt: fromDateInput('2099-01-01'),
                      apptStatus: 'requested', apptRequestedFor: fromDateTimeInput('2099-01-01T12:00') })],
     })])
-    render(<ApptsPage />)
+    await mount()
     const cell = screen.getByText('STAMPED').closest('tr')!.children[1]
     expect(cell.textContent).toContain('REQUESTED')
     expect(cell.textContent).toContain('requested 12:00 PM')
   })
 
-  it('a legacy requested stop with no stamp shows no invented time', () => {
+  it('a legacy requested stop with no stamp shows no invented time', async () => {
     loads.mockReturnValue([load({
       aljexId: 'LEGACYREQ', customer: 'Batory Foods',
       stops: [stop({ apptType: 'tbd', appt: fromDateInput('2099-01-01'), apptStatus: 'requested' })],
     })])
-    render(<ApptsPage />)
+    await mount()
     const cell = screen.getByText('LEGACYREQ').closest('tr')!.children[1]
     expect(cell.textContent).toContain('REQUESTED')
     expect(cell.textContent).not.toContain('12:00')
@@ -461,9 +475,9 @@ describe('ladder time labels', () => {
 })
 
 describe('notes column', () => {
-  it('shows the load notes (same field the calendar shows) as the last column', () => {
+  it('shows the load notes (same field the calendar shows) as the last column', async () => {
     loads.mockReturnValue([pair({ id: 'ln1', aljexId: 'NOTED', notes: 'liftgate required — call ahead' } as Partial<Load>)])
-    render(<ApptsPage />)
+    await mount()
     const headers = screen.getAllByRole('table')[0].querySelectorAll('th')
     expect(headers[headers.length - 1].textContent).toContain('Notes')
     expect(screen.getByText('liftgate required — call ahead')).toBeTruthy()
@@ -471,7 +485,7 @@ describe('notes column', () => {
 })
 
 describe('NEED DENNIS handoff', () => {
-  it('a delivery whose time Ruben picked reads NEED DENNIS', () => {
+  it('a delivery whose time Ruben picked reads NEED DENNIS', async () => {
     loads.mockReturnValue([load({
       aljexId: 'HANDOFF', customer: 'Batory Foods',
       stops: [
@@ -480,7 +494,7 @@ describe('NEED DENNIS handoff', () => {
                appt: fromDateTimeInput('2099-01-02T14:00'), apptStatus: 'need_request' }),
       ],
     })])
-    render(<ApptsPage />)
+    await mount()
     const row = screen.getByText('HANDOFF').closest('tr')!
     expect(row.children[2].textContent).toContain('NEED DENNIS')
   })
@@ -502,13 +516,13 @@ describe('NEED RUBEN handoff visibility', () => {
     updateLoad.mockImplementationOnce(async (_id, patch) => {
       loads.mockReturnValue([{ ...shipment, ...patch }])
     })
-    const { rerender } = render(<ApptsPage />)
+    const { rerender } = await mount()
     fireEvent.change(screen.getByLabelText('Filter appointments'), { target: { value: '14340' } })
     const pickup = screen.getByText('14340').closest('tr')!.children[1] as HTMLElement
     fireEvent.click(within(pickup).getByTitle('Toggle appointment status'))
     fireEvent.click(within(pickup).getByRole('button', { name: 'CONFIRMED' }))
     await waitFor(() => expect(updateLoad).toHaveBeenCalled())
-    rerender(<ApptsPage />)
+    await act(async () => { rerender(<ApptsPage />) })
 
     const row = screen.getByText('14340').closest('tr')!
     expect(row.children[1].textContent).toContain('CONFIRMED')
@@ -522,7 +536,7 @@ describe('NEED RUBEN handoff visibility', () => {
     expect(screen.getByText('14340')).toBeTruthy()
   })
 
-  it('keeps a mixed load but the NEED RUBEN delivery is not actionable', () => {
+  it('keeps a mixed load but the NEED RUBEN delivery is not actionable', async () => {
     loads.mockReturnValue([load({
       id: 'lr2', aljexId: 'MIXED', customer: 'Batory Foods',
       stops: [
@@ -530,7 +544,7 @@ describe('NEED RUBEN handoff visibility', () => {
         stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'tbd', appt: fromDateInput('2099-01-02') }),
       ],
     })])
-    render(<ApptsPage />)
+    await mount()
     const row = screen.getByText('MIXED').closest('tr')!
     expect(row.children[2].textContent).toContain('NEED RUBEN')
     expect(row.children[2].textContent).toContain('Awaiting Calendar time')
@@ -538,7 +552,7 @@ describe('NEED RUBEN handoff visibility', () => {
     expect(within(row.children[2] as HTMLElement).queryByTitle('Set this time — same as editing it on the calendar')).toBeNull()
   })
 
-  it('shows a delivery after Ruben sends it to Dennis as NEED DENNIS with the chosen time', () => {
+  it('shows a delivery after Ruben sends it to Dennis as NEED DENNIS with the chosen time', async () => {
     loads.mockReturnValue([load({
       id: 'lr3', aljexId: 'RUBENSENT', customer: 'Batory Foods',
       stops: [
@@ -547,7 +561,7 @@ describe('NEED RUBEN handoff visibility', () => {
                appt: fromDateTimeInput('2099-01-02T14:00'), apptStatus: 'need_request' }),
       ],
     })])
-    render(<ApptsPage />)
+    await mount()
     const row = screen.getByText('RUBENSENT').closest('tr')!
     expect(row.children[2].textContent).toContain('NEED DENNIS')
     expect(row.children[2].textContent).toContain('14:00')
@@ -555,12 +569,12 @@ describe('NEED RUBEN handoff visibility', () => {
 })
 
 describe('non-Batory ratecon-only prompt', () => {
-  it('the chip asks for ONE document — the ratecon — never the Batory screenshots', () => {
+  it('the chip asks for ONE document — the ratecon — never the Batory screenshots', async () => {
     loads.mockReturnValue([load({
       aljexId: 'RCONLY', customer: 'Acme Freight',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
     })])
-    render(<ApptsPage />)
+    await mount()
     const row = screen.getByText('RCONLY').closest('tr')!
     fireEvent.click(within(row.children[1] as HTMLElement).getByText('RATECON NEEDED'))
     fireEvent.click(screen.getByText('CONFIRMED'))
@@ -575,7 +589,7 @@ describe('per-day Clear (Ryne/Ruben only)', () => {
     // store mock signs in as ryne@bcatcorp.com — a permitted clearer.
     loads.mockReturnValue([pair({ id: 'cd1', aljexId: 'CLEARME' })])
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    render(<ApptsPage />)
+    await mount()
     fireEvent.click(screen.getByText('Clear day'))
     await waitFor(() => expect(updateLoad).toHaveBeenCalled())
     const [, patch] = updateLoad.mock.calls[0]
@@ -600,20 +614,20 @@ describe('Batory only', () => {
 
   it('shows Batory shipments and hides everyone else by default', async () => {
     loads.mockReturnValue([batory({ id: 'l1', aljexId: '14569' }), other({ id: 'l2', aljexId: '99999' })])
-    render(<ApptsPage />)
+    await mount()
     expect(await screen.findByText('14569')).toBeTruthy()
     expect(screen.queryByText('99999')).toBeNull()
   })
 
   it('says how many it is holding back, so the number is never a surprise', async () => {
     loads.mockReturnValue([batory({ id: 'l1' }), other({ id: 'l2' }), other({ id: 'l3' })])
-    render(<ApptsPage />)
+    await mount()
     expect(await screen.findByRole('button', { name: /Batory only · 2 hidden/ })).toBeTruthy()
   })
 
   it('brings everyone back when switched off', async () => {
     loads.mockReturnValue([batory({ id: 'l1', aljexId: '14569' }), other({ id: 'l2', aljexId: '99999' })])
-    render(<ApptsPage />)
+    await mount()
     fireEvent.click(await screen.findByRole('button', { name: /Batory only/ }))
     expect(await screen.findByText('99999')).toBeTruthy()
     expect(screen.getByText('14569')).toBeTruthy()
@@ -621,11 +635,11 @@ describe('Batory only', () => {
 
   it('remembers the choice, because re-hiding it every morning is the same as not having it', async () => {
     loads.mockReturnValue([batory({ id: 'l1' }), other({ id: 'l2' })])
-    const first = render(<ApptsPage />)
+    const first = await mount()
     fireEvent.click(await screen.findByRole('button', { name: /Batory only/ }))
     first.unmount()
 
-    render(<ApptsPage />)
+    await mount()
     expect(await screen.findByRole('button', { name: 'All customers' })).toBeTruthy()
   })
 
@@ -633,14 +647,14 @@ describe('Batory only', () => {
     // A count that included shipments the page was not showing would read as a broken
     // filter — the same trap the loads grid KPI tiles sit in.
     loads.mockReturnValue([batory({ id: 'l1' }), other({ id: 'l2' }), other({ id: 'l3' })])
-    render(<ApptsPage />)
+    await mount()
     expect(await screen.findByRole('button', { name: /All shipments · 1 open/ })).toBeTruthy()
   })
 
   it('explains an empty page rather than claiming there is no work', async () => {
     // "No shipments yet" over freight sitting behind a toggle reads as data gone missing.
     loads.mockReturnValue([other({ id: 'l2' }), other({ id: 'l3' })])
-    render(<ApptsPage />)
+    await mount()
     expect(await screen.findByText(/No Batory shipments/)).toBeTruthy()
     expect(screen.getByText(/2 other customers. shipments hidden/)).toBeTruthy()
   })
@@ -651,7 +665,7 @@ describe('Batory only', () => {
     loads.mockReturnValue([
       pair({ id: 'l1', aljexId: '14569', customer: 'BF Inc', customerApptWorkflow: 'BATORY' }),
     ])
-    render(<ApptsPage />)
+    await mount()
     expect(await screen.findByText('14569')).toBeTruthy()
   })
 })

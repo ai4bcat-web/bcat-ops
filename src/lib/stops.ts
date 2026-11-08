@@ -85,8 +85,10 @@ export function deriveLegacyFields(stops: Stop[]): LegacyLoadFields {
 
 /**
  * If `patch.stops` is present, merge in the derived legacy mirror fields so any write
- * that sets stops automatically keeps the legacy fields in sync. Called in the store's
- * add/updateLoad write path — the single place dual-write is enforced.
+ * that sets stops automatically keeps the legacy fields in sync. Every client write path
+ * that touches stops goes through this — the store's `updateLoad` and, since the Step R
+ * cutover closed `addLoad`, the new-shipment dialog's own post-create writes. A write
+ * that sets stops without it leaves the calendar reading stale appointment columns.
  */
 export function withDerivedLegacy<T extends Partial<Load>>(patch: T): T {
   if (!patch.stops || patch.stops.length === 0) return patch

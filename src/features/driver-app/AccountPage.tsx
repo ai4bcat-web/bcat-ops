@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react'
-import { LogOut, User } from 'lucide-react'
+import { useOutletContext } from 'react-router-dom'
+import { LogOut, Moon, Sun, User } from 'lucide-react'
+import type { TmsTheme } from '@/features/tms/tmsTheme'
 import { Button } from '@/components/ui/button'
 import { fetchMe, type DriverProfile } from './driverApi'
 import { useDriverAuth } from './useDriverAuth'
 import { TruckLine } from './TruckPicker'
 import { TrailerLine } from './TrailerPicker'
 
+/** What DriverApp hands down through <Outlet context>: its single theme instance. */
+export interface DriverThemeContext {
+  theme: TmsTheme
+  toggleTheme: () => void
+}
+
 export function AccountPage() {
+  // Absent when a page is rendered outside the driver shell (e.g. the staff preview frame).
+  const themeControl = useOutletContext<DriverThemeContext | undefined>()
   const { signOut } = useDriverAuth()
   const [profile, setProfile] = useState<DriverProfile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -81,12 +91,28 @@ export function AccountPage() {
               </div>
               <div className="flex items-center justify-between gap-4">
                 <dt className="text-sm text-muted-foreground">Status</dt>
-                <dd className="text-sm font-semibold text-[var(--ds-green)]">
+                <dd className="text-sm font-semibold text-[var(--tms-badge-green)]">
                   {profile.active ? 'Active' : 'Inactive'}
                 </dd>
               </div>
             </dl>
           </div>
+
+          {themeControl && (
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card p-4 shadow-sm">
+              <span className="text-sm text-muted-foreground">Appearance</span>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={themeControl.toggleTheme}
+                aria-label={themeControl.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                className="h-10 gap-2"
+              >
+                {themeControl.theme === 'dark' ? <Sun className="h-4 w-4" aria-hidden="true" /> : <Moon className="h-4 w-4" aria-hidden="true" />}
+                {themeControl.theme === 'dark' ? 'Light' : 'Dark'}
+              </Button>
+            </div>
+          )}
 
           <div className="rounded-lg border border-border bg-secondary/50 p-4">
             <p className="text-sm leading-relaxed text-secondary-foreground">

@@ -1,0 +1,594 @@
+/**
+ * `/tms/dashboard` — the one company-wide dashboard.
+ *
+ * MVMNT's anatomy (`MVMNT_UI_REFERENCE.md` §3): title row with the Views selector and the
+ * yellow chart picker, the filter row of italic chips, a KPI strip per business above the
+ * chart grid, then the 17 Classic cards followed by the brokerage cards Ryne asked for.
+ * The page opens on every division and this month; the division chip narrows to one business
+ * and every card obeys the same filter.
+ *
+ * Everything on screen is read from the dev data. A card or strip with nothing to show says so.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ArrowLeftRight, ChevronDown, CircleDollarSign, Download, Eye, Plus, ReceiptText, RotateCw, Save, TrendingUp, Wallet, XCircle,
+} from 'lucide-react'
+import { TmsButton, TmsDialog, TmsFilterChip, TmsIconButton, TmsInput, TmsKpiCard, TmsPage } from '@/features/tms/kit'
+import { useTmsCompany } from '@/features/tms/tmsCompany'
+import { useAuth } from '@/hooks/useAuth'
+import { useOnVisible } from '@/hooks/useOnVisible'
+import { listUserProfiles } from '@/lib/apiClient'
+import type { UserProfileRecord } from '@/lib/apiClient'
+import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
+import { personName } from '@/lib/roles'
+import { indexOf } from '@/lib/dashboardCharts'
+import { formatCents } from '@/lib/invoiceBuild'
+import { LazyChartCard, ChartPlaceholder } from './LazyChartCard'
+import { BROKERAGE_CHARTS } from './brokerageCards'
+import { CLASSIC_CHARTS } from './classicCharts'
+import { hasFacetFilter, useDashboardKpis } from './useDashboardKpis'
+import { WelcomeHeader } from './WelcomeHeader'
+import { useBrokerageDashboard } from './useBrokerageDashboard'
+import {
+  CLASSIC_VIEW, DATE_PRESETS, GROUP_BY_OPTIONS, chartsToCsv, dateChipLabel, defaultFilters,
+  presetRange, readDashboardViews, writeDashboardViews,
+  type DatePresetKey, type SavedDashboardView,
+} from './dashboardViews'
+import type { ChartDef, DashboardData, DashboardFilters, DashboardGroupBy } from './types'
+import './dashboard.css'
+
+const ALL_CHARTS: ChartDef[] = [...CLASSIC_CHARTS, ...BROKERAGE_CHARTS]
+
+/**
+ * The strips count whatever statuses the window actually holds, so the key is a plain
+ * string; the label table is keyed by the enum. A status with no label prints itself.
+ */
+function statusLabel(status: string): string {
+  return (SHIPMENT_STATUS_LABELS as Record<string, string>)[status] ?? status
+}
+
+/** Browser-local hh:mm of an ISO time. */
+function asOfLabel(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+/** Which filter panel is open. `add` is the "+ Filter" chooser. */
+type ChipKey = 'date' | 'division' | 'mode' | 'status' | 'customer' | 'carrier' | 'rep' | 'add'
+
+/** The chips that are one value out of a list of what the window actually holds. */
+type ListChipKey = Exclude<ChipKey, 'date' | 'division' | 'add'>
+
+const LIST_CHIPS: { key: ListChipKey; label: string }[] = [
+  { key: 'mode', label: 'Mode' },
+  { key: 'status', label: 'Status' },
+  { key: 'customer', label: 'Customer' },
+  { key: 'carrier', label: 'Carrier' },
+  { key: 'rep', label: 'Customer Rep' },
+]
+
+interface Option { value: string; label: string }
+
+/** The values actually present in the window's data — never a hard-coded menu. */
+function optionsFrom(data: DashboardData | null): Record<ListChipKey, Option[]> {
+  if (!data) return { mode: [], status: [], customer: [], carrier: [], rep: [] }
+  const index = indexOf(data)
+  const modes = new Map<string, string>()
+  const statuses = new Map<string, string>()
+  const customers = new Map<string, string>()
+  const carriers = new Map<string, string>()
+  const reps = new Map<string, string>()
+  for (const shipment of data.shipments) {
+    if (shipment.voidedAt) continue
+    modes.set(shipment.mode, shipment.mode.replace(/_/g, ' '))
+    statuses.set(shipment.status, SHIPMENT_STATUS_LABELS[shipment.status] ?? shipment.status)
+    if (shipment.customerId) customers.set(shipment.customerId, shipment.customerName ?? shipment.customerId)
+    const rep = shipment.salesRepId ?? index.orderByShipmentId.get(shipment.id)?.customerRepId ?? null
+    if (rep) reps.set(rep, index.repLabel(rep))
+  }
+  for (const leg of data.loadCarriers) {
+    if (leg.carrierId) carriers.set(leg.carrierId, leg.carrierName ?? leg.carrierId)
+  }
+  for (const sample of data.samples) {
+    if (sample.carrierId) carriers.set(sample.carrierId, sample.carrierName ?? sample.carrierId)
+  }
+  const sorted = (map: Map<string, string>): Option[] =>
+    [...map].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label))
+  return {
+    mode: sorted(modes),
+    status: sorted(statuses),
+    customer: sorted(customers),
+    carrier: sorted(carriers),
+    rep: sorted(reps),
+  }
+}
+
+export function DashboardPage() {
+  const { user } = useAuth()
+  const email = user?.email ?? ''
+  const [now] = useState(() => new Date().toISOString())
+  const { company } = useTmsCompany()
+
+  const [filters, setFilters] = useState<DashboardFilters>(() => ({
+    ...defaultFilters(now),
+    divisions: company ? [company] : [],
+  }))
+  // The shell's company switcher is a scope preference: follow it live while mounted.
+  const [seenCompany, setSeenCompany] = useState(company)
+  if (seenCompany !== company) {
+    setSeenCompany(company)
+    setFilters((current) => ({ ...current, divisions: company ? [company] : [], subdivisions: [] }))
+  }
+  const [groupBy, setGroupBy] = useState<DashboardGroupBy | null>('DIVISION')
+  const [visibleKeys, setVisibleKeys] = useState<string[]>(() => ALL_CHARTS.map((chart) => chart.key))
+  const [overrides, setOverrides] = useState<Record<string, DashboardGroupBy | null | undefined>>({})
+  const [views, setViews] = useState<SavedDashboardView[]>(() => readDashboardViews(email))
+  const [viewName, setViewName] = useState(CLASSIC_VIEW)
+  const [openChip, setOpenChip] = useState<ChipKey | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [saveOpen, setSaveOpen] = useState(false)
+  const [saveName, setSaveName] = useState('')
+
+  // Refresh always runs the exact path (and re-reads the rollup afterwards); the window it was pressed on stays "live".
+  const windowKey = `${filters.from}|${filters.to}`
+  const [refreshedWindow, setRefreshedWindow] = useState<string | null>(null)
+  // The KPI strip paints from the rollup; the exact bundle (charts, filter options, Export) is read only once something needs it:
+  // the chart grid is within 150 px of the viewport (the first card row sits ~1,390 px down at 1440x900, so a normal viewport does not read it at mount; a wider look-ahead did), a filter chip is open, Export was pressed, or the KPIs themselves need the exact path.
+  const [gridRef, gridNear] = useOnVisible<HTMLDivElement>('150px')
+  const [exportWanted, setExportWanted] = useState(false)
+  const [kpisNeedExact, setKpisNeedExact] = useState(false)
+  const exactEnabled = gridNear || (openChip !== null && openChip !== 'date' && openChip !== 'division' && openChip !== 'add') || exportWanted || kpisNeedExact || refreshedWindow === windowKey || hasFacetFilter(filters)
+  const { data, final, error, failedMonths, refresh: refreshExact } = useBrokerageDashboard(filters, exactEnabled)
+  const [profiles, setProfiles] = useState<UserProfileRecord[]>([])
+  useEffect(() => { void listUserProfiles().then(setProfiles, () => {}) }, [])
+  const kpis = useDashboardKpis(filters, { data, final, error }, refreshedWindow === windowKey)
+  const refresh = useCallback(() => { setRefreshedWindow(windowKey); refreshExact() }, [windowKey, refreshExact])
+  const { strips, totals } = kpis
+  if (kpis.needsExact && !kpisNeedExact) setKpisNeedExact(true) // sticky: the rollup could not serve this view, the exact bundle is read
+  const kpiSignature = kpis.state === 'loading' ? null : JSON.stringify(totals)
+  const kpiFlips = useRef({ signature: null as string | null, flips: 0 })
+  const kpiNode = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const seen = kpiFlips.current
+    if (kpiSignature === null) { seen.signature = null; seen.flips = 0 } else {
+      if (seen.signature !== null && seen.signature !== kpiSignature) seen.flips += 1
+      seen.signature = kpiSignature
+    }
+    kpiNode.current?.setAttribute('data-kpi-flips', String(seen.flips))
+  }, [kpiSignature])
+
+  const options = useMemo(() => optionsFrom(data), [data])
+  const divisionOptions = useMemo<Option[]>(
+    () => (data?.divisions ?? kpis.divisions ?? [])
+      .filter((division) => division.active !== false)
+      .map((division) => ({ value: division.code, label: division.brand ? `${division.name} [${division.brand}]` : division.name })),
+    [data, kpis.divisions],
+  )
+
+  const firstName = useMemo(() => {
+    const profile = profiles.find((candidate) => candidate.email?.toLowerCase() === email.toLowerCase())
+    return personName({ name: profile?.name, email }).split(/\s+/)[0]
+  }, [profiles, email])
+
+  const selectDivision = useCallback((code: string) => {
+    setFilters((current) =>
+      current.divisions.length === 1 && current.divisions[0] === code
+        ? { ...current, divisions: [], subdivisions: [] }
+        : { ...current, divisions: [code], subdivisions: [] },
+    )
+  }, [])
+
+  const visible = useMemo(
+    () => ALL_CHARTS.filter((chart) => visibleKeys.includes(chart.key)),
+    [visibleKeys],
+  )
+
+  const setFilter = useCallback(<K extends keyof DashboardFilters>(key: K, value: DashboardFilters[K]) => {
+    setFilters((current) => ({ ...current, [key]: value }))
+  }, [])
+
+  const applyPreset = useCallback((preset: DatePresetKey) => {
+    if (preset === 'custom') return
+    const range = presetRange(preset, now)
+    setFilters((current) => ({ ...current, ...range }))
+  }, [now])
+
+  const clearAll = useCallback(() => {
+    setFilters(defaultFilters(now))
+    setGroupBy('DIVISION')
+    setOverrides({})
+    setVisibleKeys(ALL_CHARTS.map((chart) => chart.key))
+    setViewName(CLASSIC_VIEW)
+    setOpenChip(null)
+  }, [now])
+
+  const exportNow = useCallback(() => {
+    // The cards compute as they scroll into view, so the export computes its own copy of every chart.
+    const rows = data
+      ? visible.map((def) => {
+          const override = overrides[def.key]
+          return { title: def.title, series: def.compute(data, filters, override === undefined ? groupBy : override) }
+        })
+      : []
+    const csv = chartsToCsv(rows)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `dashboard-${filters.from}-to-${filters.to}.csv`
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }, [data, visible, overrides, groupBy, filters])
+  // Export needs every card's data: press it before the bundle is read and it reads it, then downloads.
+  const exportRequested = useRef(false)
+  const exportCsv = useCallback(() => {
+    if (final) exportNow()
+    else { exportRequested.current = true; setExportWanted(true) }
+  }, [final, exportNow])
+  useEffect(() => {
+    if (exportRequested.current && final) { exportRequested.current = false; exportNow() }
+  }, [final, exportNow])
+
+  const selectView = useCallback((name: string) => {
+    setViewName(name)
+    if (name === CLASSIC_VIEW) {
+      setVisibleKeys(ALL_CHARTS.map((chart) => chart.key))
+      return
+    }
+    const view = views.find((candidate) => candidate.name === name)
+    if (!view) return
+    setVisibleKeys(view.chartKeys)
+    setFilters(view.filters)
+    setGroupBy(view.groupBy)
+  }, [views])
+
+  const saveView = useCallback(() => {
+    const name = saveName.trim()
+    if (!name) return
+    const next = [...views.filter((view) => view.name !== name), { name, chartKeys: visibleKeys, filters, groupBy }]
+    setViews(next)
+    writeDashboardViews(email, next)
+    setViewName(name)
+    setSaveOpen(false)
+    setSaveName('')
+  }, [saveName, views, visibleKeys, filters, groupBy, email])
+
+  const divisionValue = filters.divisions.length === 0
+    ? 'All divisions'
+    : filters.divisions.map((code) => divisionOptions.find((option) => option.value === code)?.label ?? code).join(', ')
+
+  const labelFor = (list: Option[], value: string | null) =>
+    (value ? list.find((option) => option.value === value)?.label ?? value : null)
+
+  const title = (
+    <span className="tms-dash-title">
+      <ArrowLeftRight size={22} aria-hidden="true" />
+      Dashboard
+    </span>
+  )
+
+  const actions = (
+    <>
+      <label className="tms-dash-views">
+        <Eye size={14} aria-hidden="true" />
+        <select
+          className="tms-select tms-dash-view-select"
+          aria-label="Views"
+          value={viewName}
+          onChange={(event) => selectView(event.target.value)}
+        >
+          <option value={CLASSIC_VIEW}>{CLASSIC_VIEW}</option>
+          {views.map((view) => <option key={view.name} value={view.name}>{view.name}</option>)}
+        </select>
+      </label>
+      {kpis.asOf && kpis.source !== 'live' ? (
+        <span
+          className={`tms-dash-asof${kpis.state === 'stale' ? ' tms-dash-asof-stale' : ''}`}
+          data-testid="dash-asof"
+          title="Refreshed within 5 minutes of any change; click Refresh for the exact figures"
+        >
+          {`as of ${asOfLabel(kpis.asOf)}`}
+        </span>
+      ) : null}
+      <TmsIconButton aria-label="Refresh" onClick={refresh}><RotateCw size={15} /></TmsIconButton>
+      <TmsIconButton aria-label="Clear filters" onClick={clearAll}><XCircle size={15} /></TmsIconButton>
+      <TmsIconButton aria-label="Save view" onClick={() => setSaveOpen(true)}><Save size={15} /></TmsIconButton>
+      <TmsButton variant="primary" onClick={exportCsv}><Download size={15} aria-hidden="true" /> Export CSV</TmsButton>
+      <button
+        type="button"
+        className="tms-dash-picker-btn"
+        aria-expanded={pickerOpen}
+        onClick={() => setPickerOpen((open) => !open)}
+      >
+        {`${visible.length} charts`}
+        <ChevronDown size={14} aria-hidden="true" />
+      </button>
+    </>
+  )
+
+  return (
+    <TmsPage title={title} eyebrow={<WelcomeHeader name={firstName} />} actions={actions} className="tms-dash">
+      {pickerOpen ? (
+        <div className="tms-dash-panel tms-dash-picker">
+          {ALL_CHARTS.map((chart) => (
+            <label key={chart.key} className="tms-dash-check">
+              <input
+                type="checkbox"
+                checked={visibleKeys.includes(chart.key)}
+                onChange={(event) => setVisibleKeys((current) => (event.target.checked
+                  ? [...current, chart.key]
+                  : current.filter((key) => key !== chart.key)))}
+              />
+              {chart.title}
+            </label>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="tms-dash-filters">
+        <TmsIconButton aria-label="Reload data" onClick={refresh}><RotateCw size={14} /></TmsIconButton>
+        <TmsFilterChip label="Pick Up" value={dateChipLabel(filters, now)} onClick={() => setOpenChip((open) => (open === 'date' ? null : 'date'))} />
+        <TmsFilterChip label="Division is" value={divisionValue} onClick={() => setOpenChip((open) => (open === 'division' ? null : 'division'))} />
+        <TmsFilterChip label="Mode is" value={labelFor(options.mode, filters.mode)} onClick={() => setOpenChip((open) => (open === 'mode' ? null : 'mode'))} />
+        <TmsFilterChip label="Status is" value={labelFor(options.status, filters.status)} onClick={() => setOpenChip((open) => (open === 'status' ? null : 'status'))} />
+        <TmsFilterChip label="Customer is" value={labelFor(options.customer, filters.customerId)} onClick={() => setOpenChip((open) => (open === 'customer' ? null : 'customer'))} />
+        <TmsFilterChip label="Carrier is" value={labelFor(options.carrier, filters.carrierId)} onClick={() => setOpenChip((open) => (open === 'carrier' ? null : 'carrier'))} />
+        <TmsFilterChip label="Customer Rep is" value={labelFor(options.rep, filters.repId)} onClick={() => setOpenChip((open) => (open === 'rep' ? null : 'rep'))} />
+        <button type="button" className="tms-add-filter" onClick={() => setOpenChip((open) => (open === 'add' ? null : 'add'))}>
+          <Plus size={13} aria-hidden="true" /> Filter
+        </button>
+        <label className="tms-dash-groupby">
+          Group by
+          <select
+            className="tms-select"
+            aria-label="Group by"
+            value={groupBy ?? 'NONE'}
+            onChange={(event) => setGroupBy(event.target.value === 'NONE' ? null : event.target.value as DashboardGroupBy)}
+          >
+            <option value="NONE">Nothing</option>
+            {GROUP_BY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {openChip === 'date' ? (
+        <div className="tms-dash-panel">
+          {DATE_PRESETS.filter((preset) => preset.key !== 'custom').map((preset) => (
+            <TmsButton key={preset.key} size="sm" onClick={() => applyPreset(preset.key)}>{preset.label}</TmsButton>
+          ))}
+          <label className="tms-dash-date">
+            From
+            <TmsInput type="date" value={filters.from} onChange={(event) => setFilter('from', event.target.value)} />
+          </label>
+          <label className="tms-dash-date">
+            To
+            <TmsInput type="date" value={filters.to} onChange={(event) => setFilter('to', event.target.value)} />
+          </label>
+        </div>
+      ) : null}
+
+      {openChip === 'division' ? (
+        <div className="tms-dash-panel tms-dash-divisions">
+          <label className="tms-dash-check">
+            <input
+              type="checkbox"
+              checked={filters.divisions.length === 0}
+              onChange={() => setFilters((current) => ({ ...current, divisions: [], subdivisions: [] }))}
+            />
+            All divisions
+          </label>
+          {divisionOptions.map((option) => (
+            <label key={option.value} className="tms-dash-check">
+              <input
+                type="checkbox"
+                checked={filters.divisions.includes(option.value)}
+                onChange={(event) => setFilters((current) => ({
+                  ...current,
+                  divisions: event.target.checked
+                    ? [...current.divisions, option.value]
+                    : current.divisions.filter((code) => code !== option.value),
+                }))}
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+      ) : null}
+
+      {openChip === 'add' ? (
+        <div className="tms-dash-panel">
+          <span className="tms-dash-date">Filter on</span>
+          <TmsButton size="sm" onClick={() => setOpenChip('date')}>Pick up window</TmsButton>
+          <TmsButton size="sm" onClick={() => setOpenChip('division')}>Division</TmsButton>
+          {LIST_CHIPS.map((chip) => (
+            <TmsButton key={chip.key} size="sm" onClick={() => setOpenChip(chip.key)}>{chip.label}</TmsButton>
+          ))}
+        </div>
+      ) : null}
+
+      {openChip && openChip !== 'date' && openChip !== 'division' && openChip !== 'add' ? (
+        <div className="tms-dash-panel">
+          <select
+            className="tms-select"
+            aria-label={`${openChip} filter`}
+            value={(openChip === 'mode' ? filters.mode
+              : openChip === 'status' ? filters.status
+                : openChip === 'customer' ? filters.customerId
+                  : openChip === 'carrier' ? filters.carrierId
+                    : filters.repId) ?? ''}
+            onChange={(event) => {
+              const value = event.target.value || null
+              if (openChip === 'mode') setFilter('mode', value)
+              else if (openChip === 'status') setFilter('status', value)
+              else if (openChip === 'customer') setFilter('customerId', value)
+              else if (openChip === 'carrier') setFilter('carrierId', value)
+              else setFilter('repId', value)
+            }}
+          >
+            <option value="">Anything</option>
+            {options[openChip].map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </div>
+      ) : null}
+
+      <div
+        ref={kpiNode}
+        className="tms-grid tms-grid-4 tms-dash-kpis"
+        data-testid="dash-kpis"
+        data-state={kpis.state}
+        data-source={kpis.source ?? undefined}
+        data-asof={kpis.asOf ?? undefined}
+        data-kpi-flips="0"
+      >
+        {kpis.state === 'loading' ? (
+          ['Revenue', 'Profit', 'Open AR', 'Open AP'].map((label) => (
+            <div key={label} className="tms-kpi-card tms-kpi-skeleton" aria-busy="true" aria-label={`${label} loading`}>
+              <span className="tms-kpi-skeleton-label">{label}</span>
+            </div>
+          ))
+        ) : (
+          <>
+            <TmsKpiCard
+              label="Revenue"
+              icon={CircleDollarSign}
+              value={totals?.revenueCents != null ? formatCents(totals.revenueCents) : null}
+              sub={totals?.shipmentCount != null ? `${totals.shipmentCount} shipments` : null}
+            />
+            <TmsKpiCard
+              label="Profit"
+              icon={TrendingUp}
+              value={totals?.profitCents != null ? formatCents(totals.profitCents) : null}
+              sub={totals?.marginBps != null ? `${(totals.marginBps / 100).toFixed(1)}% margin` : null}
+            />
+            <TmsKpiCard
+              label="Open AR"
+              icon={ReceiptText}
+              value={totals?.arOpenCents != null ? formatCents(totals.arOpenCents) : null}
+              positiveIsGood={false}
+              sub="outstanding invoices"
+            />
+            <TmsKpiCard
+              label="Open AP"
+              icon={Wallet}
+              value={totals?.apOpenCents != null ? formatCents(totals.apOpenCents) : null}
+              positiveIsGood={false}
+              sub="outstanding carrier bills"
+            />
+          </>
+        )}
+      </div>
+      {kpis.source && kpis.source !== 'live' && kpis.asOf ? (
+        <p className="tms-dash-footnote" data-testid="dash-kpis-note">
+          {`KPIs as of ${asOfLabel(kpis.asOf)}; the charts below are live.`}
+        </p>
+      ) : null}
+
+      {error ? <p className="tms-dash-error">{error}</p> : null}
+      {failedMonths.length > 0 ? (
+        <p className="tms-dash-error">
+          {`These months could not be read, so they are missing from the numbers: ${failedMonths.map((month) => month.month).join(', ')}`}
+        </p>
+      ) : null}
+      {strips.length > 0 ? (
+        <div className="tms-business-strips">
+          {strips.map((strip) => {
+            const active = filters.divisions.includes(strip.code)
+            return (
+              <div key={strip.code} className={`tms-business-strip${active ? ' tms-strip-active' : ''}`}>
+                <button
+                  type="button"
+                  className="tms-strip-heading"
+                  aria-pressed={active}
+                  onClick={() => selectDivision(strip.code)}
+                >
+                  <span className="tms-strip-name">{strip.name}</span>
+                  {strip.brand && strip.brand !== strip.name ? (
+                    <span className="tms-strip-brand">{strip.brand}</span>
+                  ) : null}
+                </button>
+                <div className="tms-strip-statuses">
+                  {Object.entries(strip.shipmentsByStatus).map(([status, count]) => (
+                    <span key={status} className="tms-strip-pill" title={statusLabel(status)}>
+                      {count} {statusLabel(status)}
+                    </span>
+                  ))}
+                </div>
+                <dl className="tms-strip-metrics">
+                  <div><dt>Revenue</dt><dd>{strip.revenueCents != null ? formatCents(strip.revenueCents) : '—'}</dd></div>
+                  <div><dt>Profit</dt><dd>{strip.profitCents != null ? formatCents(strip.profitCents) : '—'}</dd></div>
+                  <div><dt>Margin</dt><dd>{strip.marginBps != null ? `${(strip.marginBps / 100).toFixed(1)}%` : '—'}</dd></div>
+                  <div><dt>AR</dt><dd>{strip.arOpenCents != null ? formatCents(strip.arOpenCents) : '—'}</dd></div>
+                  <div><dt>AP</dt><dd>{strip.apOpenCents != null ? formatCents(strip.apOpenCents) : '—'}</dd></div>
+                  <div><dt>Tracked</dt><dd>{strip.trackedCount != null ? strip.trackedCount : '—'}</dd></div>
+                  <div><dt>PODs</dt><dd>{strip.podNeededCount != null ? strip.podNeededCount : '—'}</dd></div>
+                </dl>
+                {strip.subdivisions.length > 0 ? (
+                  <div className="tms-strip-subdivisions">
+                    {strip.subdivisions.map((sub) => (
+                      <div key={sub.code} className="tms-strip-sub">
+                        <div className="tms-strip-sub-head">
+                          <span className="tms-strip-sub-name">{sub.name}</span>
+                          <span className="tms-strip-sub-statuses">
+                            {Object.entries(sub.shipmentsByStatus).map(([status, count]) => (
+                              <span key={status} className="tms-strip-pill" title={statusLabel(status)}>
+                                {count} {statusLabel(status)}
+                              </span>
+                            ))}
+                          </span>
+                        </div>
+                        <dl className="tms-strip-sub-metrics">
+                          <div><dt>Revenue</dt><dd>{sub.revenueCents != null ? formatCents(sub.revenueCents) : '—'}</dd></div>
+                          <div><dt>Profit</dt><dd>{sub.profitCents != null ? formatCents(sub.profitCents) : '—'}</dd></div>
+                          <div><dt>Margin</dt><dd>{sub.marginBps != null ? `${(sub.marginBps / 100).toFixed(1)}%` : '—'}</dd></div>
+                          <div><dt>AR</dt><dd>{sub.arOpenCents != null ? formatCents(sub.arOpenCents) : '—'}</dd></div>
+                          <div><dt>AP</dt><dd>{sub.apOpenCents != null ? formatCents(sub.apOpenCents) : '—'}</dd></div>
+                          <div><dt>Tracked</dt><dd>{sub.trackedCount != null ? sub.trackedCount : '—'}</dd></div>
+                          <div><dt>PODs</dt><dd>{sub.podNeededCount != null ? sub.podNeededCount : '—'}</dd></div>
+                        </dl>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
+
+      <div className="tms-dash-cards" ref={gridRef}>
+        {visible.map((def) => {
+          const override = overrides[def.key]
+          return data ? (
+            <LazyChartCard
+              key={def.key}
+              def={def}
+              data={data}
+              filters={filters}
+              groupBy={override === undefined ? groupBy : override}
+              override={override}
+              onOverride={(next) => setOverrides((current) => ({ ...current, [def.key]: next }))}
+            />
+          ) : <ChartPlaceholder key={def.key} def={def} />
+        })}
+      </div>
+
+      <TmsDialog
+        open={saveOpen}
+        onOpenChange={setSaveOpen}
+        title="Save this dashboard view"
+        description="The window, the filters, the grouping and the visible charts are saved for you on this browser."
+        footer={<TmsButton variant="primary" onClick={saveView}>Save</TmsButton>}
+      >
+        <TmsInput
+          aria-label="View name"
+          placeholder="e.g. Brokerage month end"
+          value={saveName}
+          onChange={(event) => setSaveName(event.target.value)}
+        />
+      </TmsDialog>
+    </TmsPage>
+  )
+}
+
+export default DashboardPage

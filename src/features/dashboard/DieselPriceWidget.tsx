@@ -33,11 +33,11 @@ const navBtn = (disabled: boolean): React.CSSProperties => ({
   display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26,
   borderRadius: 6, border: 'none', background: 'transparent', padding: 0,
   cursor: disabled ? 'default' : 'pointer',
-  color: disabled ? 'var(--ds-t3)' : 'var(--ds-t1)', opacity: disabled ? 0.4 : 1,
+  color: disabled ? 'var(--tms-muted)' : 'var(--tms-text)', opacity: disabled ? 0.4 : 1,
 })
 
-const TH: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '8px 16px', textAlign: 'right', whiteSpace: 'nowrap' }
-const TD: React.CSSProperties = { fontSize: 13, color: 'var(--ds-t1)', padding: '9px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+const TH: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '8px 16px', textAlign: 'right', whiteSpace: 'nowrap' }
+const TD: React.CSSProperties = { fontSize: 13, color: 'var(--tms-text)', padding: '9px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
 
 type View = 'week' | 'month'
 type Mode = 'graph' | 'table'
@@ -159,13 +159,13 @@ export function DieselPriceWidget({ perTruck = false }: { perTruck?: boolean } =
   )
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+    <div className="tms-card">
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Fuel size={16} style={{ color: 'var(--ds-blue)' }} />
+          <Fuel size={16} style={{ color: 'var(--tms-primary)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Diesel price{perTruck && truckId !== 'all' ? ` · #${equipment.find((e) => e.id === truckId)?.unitNumber ?? ''}` : ''}</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Diesel price{perTruck && truckId !== 'all' ? ` · #${equipment.find((e) => e.id === truckId)?.unitNumber ?? ''}` : ''}</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>
               {truckId === 'all' ? 'Fleet average' : 'Truck average'} $/gal · last {view === 'week' ? WEEKS : MONTHS} {view}s{offset > 0 ? ' (history)' : ''}
             </div>
           </div>
@@ -176,7 +176,7 @@ export function DieselPriceWidget({ perTruck = false }: { perTruck?: boolean } =
               value={truckId}
               onChange={(e) => { setTruckId(e.target.value); setOffset(0) }}
               aria-label="Filter by truck"
-              style={{ height: 30, borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontSize: 12.5, padding: '0 8px', fontFamily: 'inherit', cursor: 'pointer' }}
+              style={{ height: 30, borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text)', fontSize: 12.5, padding: '0 8px', fontFamily: 'inherit', cursor: 'pointer' }}
             >
               <option value="all">All fleet trucks</option>
               {trucks.map((t) => (
@@ -186,12 +186,12 @@ export function DieselPriceWidget({ perTruck = false }: { perTruck?: boolean } =
           )}
           {current != null && (
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em', lineHeight: 1 }}>
-                {perGal.format(current)}<span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', letterSpacing: 0 }}>/gal</span>
+              <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em', lineHeight: 1 }}>
+                {perGal.format(current)}<span style={{ fontSize: 12, fontWeight: 600, color: 'var(--tms-muted)', letterSpacing: 0 }}>/gal</span>
               </div>
               {delta != null && Math.abs(delta) >= 0.001 && (
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 12, fontWeight: 600, marginTop: 2, color: delta < 0 ? '#15803d' : '#dc2626' }}>
-                  {delta < 0 ? <ArrowDown size={13} /> : <ArrowUp size={13} />}{perGal.format(Math.abs(delta))} <span style={{ fontWeight: 500, color: 'var(--ds-t3)' }}>{view === 'week' ? 'wk/wk' : 'mo/mo'}</span>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 12, fontWeight: 600, marginTop: 2, color: delta < 0 ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)' }}>
+                  {delta < 0 ? <ArrowDown size={13} /> : <ArrowUp size={13} />}{perGal.format(Math.abs(delta))} <span style={{ fontWeight: 500, color: 'var(--tms-muted)' }}>{view === 'week' ? 'wk/wk' : 'mo/mo'}</span>
                 </div>
               )}
             </div>
@@ -200,11 +200,11 @@ export function DieselPriceWidget({ perTruck = false }: { perTruck?: boolean } =
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {offset > 0 && (
               <button onClick={() => setOffset(0)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--ds-blue)', fontFamily: 'inherit', padding: '0 2px' }}>
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--tms-primary)', fontFamily: 'inherit', padding: '0 2px' }}>
                 Now
               </button>
             )}
-            <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+            <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', borderRadius: 8, padding: 2 }}>
               <button onClick={() => setOffset((o) => o + 1)} aria-label="Earlier periods" style={navBtn(false)}>
                 <ChevronLeft size={15} />
               </button>
@@ -214,26 +214,26 @@ export function DieselPriceWidget({ perTruck = false }: { perTruck?: boolean } =
             </div>
           </div>
           {/* Week / month period */}
-          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', borderRadius: 8, padding: 2 }}>
             {(['week', 'month'] as View[]).map((v) => {
               const active = view === v
               return (
                 <button key={v} onClick={() => changeView(v)}
                   style={{ padding: '5px 10px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
-                    background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)', boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                    background: active ? 'var(--tms-card)' : 'transparent', color: active ? 'var(--tms-text)' : 'var(--tms-text-2)', boxShadow: active ? 'var(--tms-shadow)' : 'none' }}>
                   {v}
                 </button>
               )
             })}
           </div>
           {/* Graph / table view */}
-          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', borderRadius: 8, padding: 2 }}>
             {([['table', Table2], ['graph', LineChartIcon]] as const).map(([m, Icon]) => {
               const active = mode === m
               return (
                 <button key={m} onClick={() => setMode(m)} aria-label={m === 'table' ? 'Table view' : 'Graph view'}
                   style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
-                    background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)', boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                    background: active ? 'var(--tms-card)' : 'transparent', color: active ? 'var(--tms-text)' : 'var(--tms-text-2)', boxShadow: active ? 'var(--tms-shadow)' : 'none' }}>
                   <Icon size={13} /> {m}
                 </button>
               )
@@ -243,19 +243,19 @@ export function DieselPriceWidget({ perTruck = false }: { perTruck?: boolean } =
       </div>
 
       {loading && current == null ? (
-        <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
+        <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--tms-muted)' }}>Loading…</div>
       ) : current == null ? (
-        <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>No fleet diesel purchases recorded for this window.</div>
+        <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--tms-muted)' }}>No fleet diesel purchases recorded for this window.</div>
       ) : mode === 'graph' ? (
         <div style={{ padding: '12px 12px 6px' }}>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={series} margin={{ top: 8, right: 20, bottom: 4, left: 4 }}>
-              <CartesianGrid stroke="rgba(15,23,42,0.05)" strokeDasharray="3 4" vertical={false} />
-              <XAxis dataKey="period" tick={{ fill: '#6b7588', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tickFormatter={(v) => perGal2.format(Number(v))} domain={['auto', 'auto']} tick={{ fill: '#6b7588', fontSize: 11 }} axisLine={false} tickLine={false} width={56} />
+              <CartesianGrid stroke="var(--tms-chart-grid)" strokeDasharray="3 4" vertical={false} />
+              <XAxis dataKey="period" tick={{ fill: 'var(--tms-chart-axis)', fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={(v) => perGal2.format(Number(v))} domain={['auto', 'auto']} tick={{ fill: 'var(--tms-chart-axis)', fontSize: 11 }} axisLine={false} tickLine={false} width={56} />
               <Tooltip formatter={(v) => [perGal.format(Number(v)), 'Avg $/gal']}
-                contentStyle={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, boxShadow: 'var(--sh-md)' }} />
-              <Line type="monotone" dataKey="price" name="Avg $/gal" stroke="#1ea8f3" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                contentStyle={{ background: 'var(--tms-card)', color: 'var(--tms-text)', border: '1px solid var(--tms-border)', borderRadius: 8, fontSize: 12, boxShadow: 'var(--tms-shadow-pop)' }} />
+              <Line type="monotone" dataKey="price" name="Avg $/gal" stroke="var(--tms-chart-1)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -263,7 +263,7 @@ export function DieselPriceWidget({ perTruck = false }: { perTruck?: boolean } =
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+              <tr style={{ borderBottom: '1px solid var(--tms-border)' }}>
                 <th style={{ ...TH, textAlign: 'left' }}>{view === 'week' ? 'Week of' : 'Month'}</th>
                 <th style={TH}>Gallons</th>
                 {perTruck && <th style={TH}>Spend</th>}
@@ -273,12 +273,12 @@ export function DieselPriceWidget({ perTruck = false }: { perTruck?: boolean } =
             </thead>
             <tbody>
               {rows.map((r, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                <tr key={i} style={{ borderBottom: '1px solid var(--tms-border)' }}>
                   <td style={{ ...TD, textAlign: 'left', fontWeight: 600 }}>{r.period}</td>
-                  <td style={{ ...TD, color: r.gallons ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{r.gallons ? Math.round(r.gallons).toLocaleString('en-US') : '—'}</td>
-                  {perTruck && <td style={{ ...TD, color: r.spend ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{r.spend ? usd0.format(r.spend) : '—'}</td>}
-                  <td style={{ ...TD, fontWeight: 600, color: r.price == null ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>{r.price == null ? '—' : perGal.format(r.price)}</td>
-                  <td style={{ ...TD, color: r.change == null || Math.abs(r.change) < 0.001 ? 'var(--ds-t3)' : r.change < 0 ? '#15803d' : '#dc2626' }}>
+                  <td style={{ ...TD, color: r.gallons ? 'var(--tms-text)' : 'var(--tms-muted)' }}>{r.gallons ? Math.round(r.gallons).toLocaleString('en-US') : '—'}</td>
+                  {perTruck && <td style={{ ...TD, color: r.spend ? 'var(--tms-text)' : 'var(--tms-muted)' }}>{r.spend ? usd0.format(r.spend) : '—'}</td>}
+                  <td style={{ ...TD, fontWeight: 600, color: r.price == null ? 'var(--tms-muted)' : 'var(--tms-text)' }}>{r.price == null ? '—' : perGal.format(r.price)}</td>
+                  <td style={{ ...TD, color: r.change == null || Math.abs(r.change) < 0.001 ? 'var(--tms-muted)' : r.change < 0 ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)' }}>
                     {r.change == null || Math.abs(r.change) < 0.001 ? '—' : `${r.change < 0 ? '−' : '+'}${perGal.format(Math.abs(r.change))}`}
                   </td>
                 </tr>

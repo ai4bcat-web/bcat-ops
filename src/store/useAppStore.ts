@@ -7,11 +7,12 @@ import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equ
 import type { Expense } from '@/types/expense'
 import type { AmazonDispute } from '@/types/dispute'
 import { getMondayOf } from '@/lib/date'
+import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import * as api from '@/lib/apiClient'
+import { inactiveChanges } from '@/lib/fleetActive'
 import { withDerivedLegacy, withStopsFromLegacy } from '@/lib/stops'
-import { requiresApptProofs } from '@/lib/apptQueue'
 import { errorMessage } from '@/lib/utils/errorMessage'
-import type { TenderPrefill } from '@/lib/intakeTender'
+import type { NewShipmentPrefill } from '@/features/shipments/components/NewShipmentDialog'
 
 // ── Equipment seed data (imported from bcat-command-center PostgreSQL) ─────────
 const SEED_EQUIPMENT: Equipment[] = [
@@ -318,6 +319,8 @@ const SEED_EXPENSES: Expense[] = [
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 let _invSeq = 0
+/** The in-flight or settled `loadReferenceData` fetch; reset on failure so it can retry. */
+let referenceLoad: Promise<void> | null = null
 function nowIso(): string { return new Date().toISOString() }
 function initWeekStart(): string {
   return getMondayOf(new Date()).toISOString().slice(0, 10)
@@ -337,14 +340,76 @@ function diffChanges<T extends object>(
   return changes
 }
 
+// ── Load windowing ────────────────────────────────────────────────────────────
+
+type StoreSet = (fn: (s: AppState) => Partial<AppState>) => void
+
+/** One in-flight fetch per month, so two pages asking for the same month share a request. */
+const monthFetches = new Map<string, Promise<void>>()
+
+/**
+ * Merge fetched loads into the held ones by id, keeping order. A copy the store already
+ * holds that is NEWER than the fetched one (a save that landed while the read was in
+ * flight) wins, so a slow window read can never roll a just-saved load back.
+ */
+export function mergeLoads(held: Load[], incoming: Load[]): Load[] {
+  if (incoming.length === 0) return held
+  const incomingById = new Map(incoming.map((l) => [l.id, l]))
+  const seen = new Set<string>()
+  const out = held.map((l) => {
+    const next = incomingById.get(l.id)
+    if (!next) return l
+    seen.add(l.id)
+    return (l.updatedAt ?? '') > (next.updatedAt ?? '') ? l : next
+  })
+  for (const l of incoming) if (!seen.has(l.id)) out.push(l)
+  return out
+}
+
+/**
+ * The loads of these pickup months: shipment ids by the month index (ids only, voided
+ * shipments excluded server-side), then every leg of those shipments with the
+ * full load field set, so every legacy consumer sees the same `Load` shape as before.
+ * `refresh` re-reads months that are already loaded and does not touch `loadedMonths`.
+ */
+function fetchMonths(months: string[], set: StoreSet, refresh = false): Promise<void> {
+  const p = (async () => {
+    const ids = await api.listShipmentIdsByMonths(months)
+    const loads = await api.listLoadsByShipmentIds(ids)
+    set((s) => ({
+      loads: mergeLoads(s.loads, loads),
+      loadedMonths: refresh ? s.loadedMonths : new Set([...s.loadedMonths, ...months]),
+    }))
+  })()
+  if (!refresh) {
+    for (const m of months) monthFetches.set(m, p)
+    const clear = () => { for (const m of months) if (monthFetches.get(m) === p) monthFetches.delete(m) }
+    p.then(clear, clear)
+  }
+  return p
+}
+
 // ── State interface ───────────────────────────────────────────────────────────
 
 interface AppState {
   // ── Data (loaded from API) ─────────────────────────────────────────────────
   drivers: Driver[]
+  /**
+   * The loads this session has windowed in: the months `ensureLoadMonths` has fetched
+   * (padded) plus every all-time open load. NOT the whole table — a page that needs a
+   * date range asks for it with `ensureLoadRange` before it reads `loads`.
+   */
   loads: Load[]
+  /** The 'YYYY-MM' (shipment pickup month) windows already merged into `loads`. */
+  loadedMonths: ReadonlySet<string>
+  /**
+   * Session audit trail only: entries this tab wrote, mirrored locally. The server log
+   * is read per entity (`useAuditLog`), never loaded in bulk.
+   */
   auditLog: AuditLogEntry[]
   isLoading: boolean
+  /** True once this session's fleet read finished (success or fallback); before it, `equipment` is the persisted/seed copy. */
+  fleetLoaded: boolean
   error: string | null
   currentUserEmail: string
 
@@ -362,17 +427,23 @@ interface AppState {
   viewMode: ViewMode
   weekStart: string
   selectedLoadId: string | null
-  drawerMode: 'view' | 'edit' | 'create' | null
   /*
-   * Seed values for the next load the drawer opens in create mode.
+   * The leg drawer is an EDITOR, never a creator. A load comes into being inside
+   * CREATE_SHIPMENT and nowhere else, so there is no 'create' here any more: the New
+   * Shipment form below is what every "+" opens.
+   */
+  drawerMode: 'view' | 'edit' | null
+  /*
+   * Seed values for the next shipment the New Shipment form opens with, and the fact that
+   * it is open at all — non-null means open.
    *
    * `driverId`/`dateStr` come from clicking an empty calendar cell. `tender` is everything
-   * intake could read out of the tender email, so a load built from an intake item starts
-   * with its references, both addresses and the planned dates already filled in instead of
-   * being re-typed off the email (see src/lib/intakeTender.ts).
+   * intake could read out of the tender email, so a shipment built from an intake item
+   * starts with its references, both addresses and the planned dates already filled in
+   * instead of being re-typed off the email (see src/lib/intakeTender.ts), and
+   * `intakeItemId` is the item that gets linked and marked DONE once the shipment exists.
    */
-  createPreFill: { driverId: string | null; dateStr: string; tender?: TenderPrefill } | null
-  pendingIntakeItemId: string | null
+  newShipmentPrefill: NewShipmentPrefill | null
   filterDriverId: string | null
   searchQuery: string
   filters: { readyToInvoice: boolean; notReadyToInvoice: boolean; split: boolean; unassigned: boolean; needsAppt: boolean }
@@ -381,8 +452,22 @@ interface AppState {
   setCurrentUser: (email: string) => void
   // Lightweight re-fetch of the calendar's shared data (loads + drivers) — used by the
   // periodic calendar poll so every client converges on the same server state. Does NOT
-  // re-run initializeData (which would re-open subscriptions).
-  refreshCalendarData: () => Promise<void>
+  // re-run initializeData (which would re-open subscriptions). Re-reads the loaded months
+  // inside `range` (every loaded month with no argument) plus the open set; the calendar
+  // poll passes its visible range so only those months are re-read.
+  refreshCalendarData: (range?: { from: string; to: string }) => Promise<void>
+  // Fetch + merge the loads of these 'YYYY-MM' pickup months unless already loaded.
+  // Idempotent; concurrent callers for the same month share one request.
+  ensureLoadMonths: (months: string[]) => Promise<void>
+  // Same for an inclusive 'YYYY-MM-DD' date range, widened one month each side so a
+  // UTC-vs-local month edge can never leave a boundary load out of a page's window.
+  ensureLoadRange: (from: string, to: string) => Promise<void>
+  // The all-time open set (every non-terminal load): Dispatch, Appts, the truck map.
+  loadOpenLoads: () => Promise<void>
+  // The fleet roster (drivers + equipment) only — no loads, no subscriptions. For /tms pages
+  // and the shell's bell, which run without the legacy runtime's initializeData. Fetches at
+  // most once per session, and not at all when drivers are already loaded.
+  loadReferenceData: () => Promise<void>
 
   // ── Driver actions ─────────────────────────────────────────────────────────
   addDriver: (d: Omit<Driver, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Driver>
@@ -393,9 +478,12 @@ interface AppState {
   assignTruckToDriver: (equipmentId: string, driverId: string | null) => Promise<void>
 
   // ── Load actions ───────────────────────────────────────────────────────────
-  addLoad: (l: Omit<Load, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Load>
+  // No addLoad: Load's model auth grants the client `read` and `update` only, and a leg
+  // comes into being inside CREATE_SHIPMENT so its PRO is claimed in the same transaction
+  // as the shipment number.
   updateLoad: (id: string, patch: Partial<Omit<Load, 'id' | 'createdAt'>>) => Promise<void>
-  deleteLoad: (id: string) => Promise<void>
+  // No deleteLoad: a PRO number is permanent (Ryne, 2026-10-28). The Load model has
+  // no delete operation at all; a shipment leaves the working set by being voided.
 
   // ── Equipment actions (optimistic local update + write-through to backend) ──
   addEquipment: (e: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>) => Equipment
@@ -427,12 +515,10 @@ interface AppState {
   // ── UI actions ─────────────────────────────────────────────────────────────
   setViewMode: (m: ViewMode) => void
   setWeekStart: (d: string) => void
-  setSelectedLoad: (
-    id: string | null,
-    mode?: 'view' | 'edit' | 'create',
-    preFill?: { driverId: string | null; dateStr: string; tender?: TenderPrefill }
-  ) => void
-  setPendingIntakeItem: (id: string | null) => void
+  setSelectedLoad: (id: string | null, mode?: 'view' | 'edit') => void
+  /** Raise the New Shipment form. Nothing is written until Save — see NewShipmentDialog. */
+  openNewShipment: (prefill?: NewShipmentPrefill) => void
+  closeNewShipment: () => void
   setFilterDriver: (id: string | null) => void
   setSearchQuery: (q: string) => void
   toggleFilter: (f: keyof AppState['filters']) => void
@@ -468,8 +554,10 @@ export const useAppStore = create<AppState>()(
       // ── Initial state ──────────────────────────────────────────────────────
       drivers: [],
       loads: [],
+      loadedMonths: new Set<string>(),
       auditLog: [],
       isLoading: false,
+      fleetLoaded: false,
       error: null,
       currentUserEmail: 'dispatch@bcat.local',
 
@@ -484,8 +572,7 @@ export const useAppStore = create<AppState>()(
       weekStart: initWeekStart(),
       selectedLoadId: null,
       drawerMode: null,
-      createPreFill: null,
-      pendingIntakeItemId: null,
+      newShipmentPrefill: null,
       filterDriverId: null,
       searchQuery: '',
       filters: { readyToInvoice: false, notReadyToInvoice: false, split: false, unassigned: false, needsAppt: false },
@@ -495,56 +582,72 @@ export const useAppStore = create<AppState>()(
 
       initializeData: async (userEmail) => {
         set({ isLoading: true, error: null, currentUserEmail: userEmail })
-        try {
-          const [loads, drivers, auditLog] = await Promise.all([
-            api.listLoads(),
-            api.listDrivers(),
-            api.listAuditLogs(),
-          ])
-          set({ loads, drivers, auditLog, isLoading: false })
-        } catch (err) {
-          console.error('[store] initializeData failed', err)
-          set({ isLoading: false, error: errorMessage(err) })
-          return
-        }
 
         // ── Fleet (Equipment + Maintenance) ─────────────────────────────────
         // Separate + non-fatal: if the backend models aren't deployed yet, keep the
         // local/seed fleet so the page still works until the Amplify deploy lands.
-        try {
-          const [equipment, maintenanceTasks, maintenanceInvoices] = await Promise.all([
-            api.listEquipment(),
-            api.listMaintenanceTasks(),
-            api.listMaintenanceInvoices(),
-          ])
-          if (equipment.length === 0 && !get().fleetSeeded) {
-            // First run against a fresh backend — migrate the current local fleet up
-            // (includes any edits made before deploy) so nothing is lost.
-            const localEquip = get().equipment
-            const localTasks = get().maintenanceTasks
-            const localInv   = get().maintenanceInvoices
-            await Promise.all([
-              ...localEquip.map((e) => api.createEquipment(e).catch((err) => console.warn('[store] seed equipment failed', e.id, err))),
-              ...localTasks.map((t) => api.createMaintenanceTask(t).catch((err) => console.warn('[store] seed task failed', t.id, err))),
-              ...localInv.map((i) => api.createMaintenanceInvoice(i).catch((err) => console.warn('[store] seed invoice failed', i.id, err))),
+        const loadFleet = async () => {
+          try {
+            const [equipment, maintenanceTasks, maintenanceInvoices] = await Promise.all([
+              api.listEquipment(),
+              api.listMaintenanceTasks(),
+              api.listMaintenanceInvoices(),
             ])
-            set({ fleetSeeded: true })
-          } else {
-            set({ equipment, maintenanceTasks, maintenanceInvoices, fleetSeeded: true })
+            if (equipment.length === 0 && !get().fleetSeeded) {
+              // First run against a fresh backend — migrate the current local fleet up
+              // (includes any edits made before deploy) so nothing is lost.
+              const localEquip = get().equipment
+              const localTasks = get().maintenanceTasks
+              const localInv   = get().maintenanceInvoices
+              await Promise.all([
+                ...localEquip.map((e) => api.createEquipment(e).catch((err) => console.warn('[store] seed equipment failed', e.id, err))),
+                ...localTasks.map((t) => api.createMaintenanceTask(t).catch((err) => console.warn('[store] seed task failed', t.id, err))),
+                ...localInv.map((i) => api.createMaintenanceInvoice(i).catch((err) => console.warn('[store] seed invoice failed', i.id, err))),
+              ])
+              set({ fleetSeeded: true })
+            } else {
+              set({ equipment, maintenanceTasks, maintenanceInvoices, fleetSeeded: true })
+            }
+          } catch (err) {
+            console.warn('[store] Fleet backend unavailable — using local data until the Amplify deploy', err)
+          } finally {
+            set({ fleetLoaded: true })
           }
-        } catch (err) {
-          console.warn('[store] Fleet backend unavailable — using local data until the Amplify deploy', err)
         }
 
         // ── Amazon disputes ─────────────────────────────────────────────────
         // Non-fatal: if the AmazonDispute model isn't deployed yet, keep the page
         // usable (empty) until the Amplify deploy lands.
-        try {
-          const amazonDisputes = await api.listAmazonDisputes()
-          set({ amazonDisputes })
-        } catch (err) {
-          console.warn('[store] AmazonDispute backend unavailable — disputes empty until deploy', err)
+        const loadDisputes = async () => {
+          try {
+            const amazonDisputes = await api.listAmazonDisputes()
+            set({ amazonDisputes })
+          } catch (err) {
+            console.warn('[store] AmazonDispute backend unavailable — disputes empty until deploy', err)
+          }
         }
+
+        // The tiny tables ride in the same wave as the load window: nothing here waits
+        // on the loads, and the loads no longer wait on a table scan.
+        const small = Promise.all([loadFleet(), loadDisputes()])
+        try {
+          // The window read leaves voided shipments out (a month of import debris is thousands of
+          // them). A voided load is still found when somebody asks for it: by id (`useResolveLoads`,
+          // the drawer, the queues) and by PRO (`proConflictAllHistory`, voided included). What the
+          // store holds is the current month ±1 plus every open load; a page needing more calls
+          // `ensureLoadRange`.
+          const [drivers] = await Promise.all([
+            api.listDrivers(),
+            get().ensureLoadMonths(monthsCovering(currentMonth(new Date()), currentMonth(new Date()), 1)),
+            get().loadOpenLoads(),
+          ])
+          set({ drivers, isLoading: false })
+        } catch (err) {
+          console.error('[store] initializeData failed', err)
+          set({ isLoading: false, error: errorMessage(err) })
+          return
+        }
+        await small
 
         // ── Real-time subscriptions — keep all clients in sync ──────────────
         api.subscribeToLoadChanges({
@@ -558,21 +661,78 @@ export const useAppStore = create<AppState>()(
           onUpdate: (load) => set((s) => ({
             loads: s.loads.map((l) => l.id === load.id ? load : l),
           })),
-          onDelete: (id) => set((s) => ({
-            loads: s.loads.filter((l) => l.id !== id),
-          })),
+          // No onDelete: loads are never deleted, so the subscription does not exist.
         })
       },
 
+      ensureLoadMonths: (months) => {
+        const wanted = [...new Set(months)]
+        const pending: Promise<void>[] = []
+        const missing: string[] = []
+        for (const m of wanted) {
+          if (get().loadedMonths.has(m)) continue
+          const inflight = monthFetches.get(m)
+          if (inflight) pending.push(inflight)
+          else missing.push(m)
+        }
+        if (missing.length > 0) pending.push(fetchMonths(missing, set))
+        return Promise.all(pending).then(() => undefined)
+      },
+
+      ensureLoadRange: (from, to) =>
+        get().ensureLoadMonths(monthsCovering(from, to, 1)),
+
+      loadOpenLoads: async () => {
+        const open = await api.listOpenLoads()
+        set((s) => ({ loads: mergeLoads(s.loads, open) }))
+      },
+
       // Poll-friendly refetch of the calendar's shared data. Non-fatal on error so a
-      // transient network blip doesn't blank the calendar.
-      refreshCalendarData: async () => {
+      // transient network blip doesn't blank the calendar. Reads only the months the
+      // caller can see (and only if already windowed in) plus the open set — never the
+      // table.
+      refreshCalendarData: async (range) => {
         try {
-          const [loads, drivers] = await Promise.all([api.listLoads(), api.listDrivers()])
-          set({ loads, drivers })
+          const { loadedMonths } = get()
+          const months = range
+            ? monthsCovering(range.from, range.to, 1).filter((m) => loadedMonths.has(m))
+            : [...loadedMonths]
+          // Same window rule as initializeData: voided shipments are fetched on demand, not in bulk.
+          const [drivers] = await Promise.all([
+            api.listDrivers(),
+            months.length > 0 ? fetchMonths(months, set, true) : Promise.resolve(),
+            get().loadOpenLoads(),
+          ])
+          set({ drivers })
         } catch (err) {
           console.warn('[store] refreshCalendarData failed', err)
         }
+      },
+
+      loadReferenceData: () => {
+        if (get().drivers.length > 0 && get().fleetLoaded) return Promise.resolve()
+        referenceLoad ??= (async () => {
+          try {
+            const drivers = await api.listDrivers()
+            // initializeData may have landed first with the same table; never overwrite it.
+            if (get().drivers.length === 0) set({ drivers })
+          } catch (err) {
+            referenceLoad = null
+            console.warn('[store] loadReferenceData: drivers failed', err)
+            // Retryable, but whoever waits on the fleet must not wait on the roster.
+            set({ fleetLoaded: true })
+            return
+          }
+          try {
+            const equipment = await api.listEquipment()
+            if (equipment.length > 0) set({ equipment })
+          } catch (err) {
+            console.warn('[store] loadReferenceData: equipment unavailable', err)
+          } finally {
+            set({ fleetLoaded: true })
+          }
+        })()
+        return referenceLoad
       },
 
       // ── Drivers ────────────────────────────────────────────────────────────
@@ -632,45 +792,6 @@ export const useAppStore = create<AppState>()(
       },
 
       // ── Loads ──────────────────────────────────────────────────────────────
-      addLoad: async (l) => {
-        // New BATORY loads enter the appointment ladder immediately: pickup NEED TO
-        // DENNIS (standing 12pm rule) and delivery NEED RUBEN (Ruben picks
-        // the time). Statuses ride the stops; the two tasks are created after the save.
-        l = api.withCustomerPolicy(l)
-        const isBatory = requiresApptProofs(l)
-        if (isBatory && Array.isArray(l.stops)) {
-          l = { ...l, stops: l.stops.map((s) => ({
-            ...s,
-            apptStatus: s.apptStatus ?? (s.type === 'delivery' ? 'need_book' : 'need_request'),
-          })) }
-        }
-        // If stops are set, derive the legacy pickup/delivery mirror fields (single
-        // source of derivation). No-op for loads created without stops.
-        const load = await api.createLoad(withDerivedLegacy(l))
-        set((s) => ({ loads: [...s.loads, load] }))
-        writeAudit(get().currentUserEmail, 'Load', load.id, 'create', {
-          _snapshot: { from: null, to: load },
-        })
-        if (isBatory) {
-          // Fire-and-forget — a task hiccup must not fail the load save.
-          const ref = [load.aljexId ? `Pro# ${load.aljexId}` : null, load.customer].filter(Boolean).join(' · ')
-          const puDate = load.pickupAppt ? load.pickupAppt.slice(0, 10) : 'the pickup date'
-          void api.createApptTask({
-            loadId: load.id, kind: 'request_pickup', assignee: 'dennis@bcatcorp.com',
-            subject: `Request pickup appt for 12:00 PM — ${ref || 'Batory load'}`,
-            bodyText: `New Batory load built. Email the pickup facility to request a 12:00 PM appointment for ${puDate}, then upload the request-email screenshot to move it to REQUESTED.`,
-            aljexId: load.aljexId ?? null,
-          }).catch((err) => console.error('[addLoad] pickup task failed', err))
-          void api.createApptTask({
-            loadId: load.id, kind: 'pick_delivery_time', assignee: 'ruben@bcatcorp.com',
-            subject: `Pick delivery appt time — ${ref || 'Batory load'}`,
-            bodyText: `New Batory load built. Choose the delivery time you want booked (set it on the delivery stop); Dennis is then tasked to book it.`,
-            aljexId: load.aljexId ?? null,
-          }).catch((err) => console.error('[addLoad] delivery task failed', err))
-        }
-        return load
-      },
-
       updateLoad: async (id, patch) => {
         const before = get().loads.find((l) => l.id === id)
         if (!before) return
@@ -685,16 +806,6 @@ export const useAppStore = create<AppState>()(
         }, before)))
         set((s) => ({ loads: s.loads.map((l) => (l.id === id ? after : l)) }))
         writeAudit(get().currentUserEmail, 'Load', id, 'update', diffChanges(before, after))
-      },
-
-      deleteLoad: async (id) => {
-        const before = get().loads.find((l) => l.id === id)
-        if (!before) return
-        await api.deleteLoad(id)
-        set((s) => ({ loads: s.loads.filter((l) => l.id !== id) }))
-        writeAudit(get().currentUserEmail, 'Load', id, 'delete', {
-          _snapshot: { from: before, to: null },
-        })
       },
 
       // ── Equipment ──────────────────────────────────────────────────────────
@@ -716,9 +827,13 @@ export const useAppStore = create<AppState>()(
         return item
       },
       updateEquipment: (id, patch) => {
+        const before = get().equipment.find((e) => e.id === id)
         set((s) => ({ equipment: s.equipment.map((e) => e.id === id ? { ...e, ...patch, updatedAt: nowIso() } : e) }))
         api.updateEquipment(id, patch as Partial<Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>>)
           .catch((err) => console.error('[store] updateEquipment failed', err))
+        // Parking / reactivating a truck or trailer is a fleet decision worth a trail.
+        const changes = before ? inactiveChanges(before, patch) : {}
+        if (Object.keys(changes).length > 0) writeAudit(get().currentUserEmail, 'Equipment', id, 'update', changes)
       },
       deleteEquipment: (id) => {
         const { maintenanceTasks, maintenanceInvoices } = get()
@@ -858,13 +973,10 @@ export const useAppStore = create<AppState>()(
       // ── UI ─────────────────────────────────────────────────────────────────
       setViewMode: (m) => set({ viewMode: m }),
       setWeekStart: (d) => set({ weekStart: d }),
-      setSelectedLoad: (id, mode = 'view', preFill) =>
-        set({
-          selectedLoadId: id,
-          drawerMode: id === null && mode !== 'create' ? null : mode,
-          createPreFill: preFill ?? null,
-        }),
-      setPendingIntakeItem: (id) => set({ pendingIntakeItemId: id }),
+      setSelectedLoad: (id, mode = 'view') =>
+        set({ selectedLoadId: id, drawerMode: id === null ? null : mode }),
+      openNewShipment: (prefill) => set({ newShipmentPrefill: prefill ?? {} }),
+      closeNewShipment: () => set({ newShipmentPrefill: null }),
       setFilterDriver: (id) => set({ filterDriverId: id }),
       setSearchQuery: (q) => set({ searchQuery: q }),
       toggleFilter: (f) =>

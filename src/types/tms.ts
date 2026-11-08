@@ -1,3 +1,48 @@
+// `Stop` lives in ./index, which imports Address and the step-B stop fields from
+// here. Type-only in both directions, so the cycle never reaches runtime.
+import type { Stop, StopType } from './index'
+import type { PostalAlias } from '../lib/integrations/postalAliases'
+// `TenderPrefill` is the shape a tender proposal carries. Type-only, so the cycle
+// through `../lib/intakeTender` (which reads `CustomerRecord` from here) never runs.
+import type { TenderPrefill } from '../lib/intakeTender'
+// The check-call plan is the shape the customer, the load and the org default all
+// store. It lives beside the ladder that reads it, and is re-exported here so
+// feature code keeps importing the TMS vocabulary from one place.
+import type { CheckCallPlan } from '../lib/checkCallPlan'
+export type { CheckCallChannel, CheckCallMilestone, CheckCallPlan } from '../lib/checkCallPlan'
+import type { CarrierAssignmentStatus } from '../lib/carrierAssignment'
+export type { CarrierAssignmentStatus } from '../lib/carrierAssignment'
+import type { AutomationPolicyPatch, TrackingAutomationSettings } from '../lib/trackingAutomation'
+export type {
+  AutomationChannel, AutomationPolicy, AutomationPolicyPatch, AutomationTemplates, DivisionAutomation,
+  QuietHours, TrackingAutomationSettings,
+} from '../lib/trackingAutomation'
+import type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
+export type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
+export type { RateViewAnswer } from '../lib/integrations/rateView'
+// Step AL: the Carrier Sales inbox shapes ride ShipmentMessage.offer and SpotSettings. Type-only cycle.
+import type { CarrierInboxConfig, CarrierInboxState, InboundOfferRecord } from '../lib/carrierInbox/types'
+
+// ── Integrations (Step J) ────────────────────────────────────────────────────
+// The integration contract lives in `src/lib/integrations/types`, which the Lambdas
+// bundle by relative path; it is re-exported here so feature code imports the TMS
+// vocabulary from one place, as it does for every other step.
+export type { PostalAlias }
+export type {
+  CredentialMaskEntry,
+  CredentialSource,
+  IntegrationBadge,
+  IntegrationCategory,
+  IntegrationEvent,
+  IntegrationHealthReason,
+  IntegrationHealthStatus,
+  IntegrationMode,
+  IntegrationRecord,
+  IntegrationStatus,
+  ProviderDescriptor,
+  ProviderKey,
+} from '../lib/integrations/types'
+
 export interface Address {
   street?: string | null
   city?: string | null
@@ -10,8 +55,136 @@ export interface Address {
   geocodeExpiresAt?: string | null
 }
 
+export type CustomerStatus =
+  | 'NEW'
+  | 'CONTACTED'
+  | 'QUALIFIED'
+  | 'QUOTED'
+  | 'NURTURING'
+  | 'PENDING'
+  | 'ACTIVE'
+  | 'DORMANT'
+  | 'CLOSED'
+  | 'BLOCKED'
+
+export type CustomerContactType =
+  | 'PRIMARY'
+  | 'BILLING'
+  | 'OPERATIONS'
+  | 'SALES'
+  | 'CLAIMS'
+  | 'OTHER'
+
+export type CustomerNotification =
+  | 'APPT_SCHEDULED'
+  | 'LOADING'
+  | 'PICKED_UP'
+  | 'IN_TRANSIT'
+  | 'OUT_FOR_DELIVERY'
+  | 'UNLOADING'
+  | 'DELIVERED'
+  | 'INVOICE_SENT'
+
+export interface CustomerContact {
+  id: string
+  name: string
+  email?: string | null
+  phone?: string | null
+  title?: string | null
+  types: CustomerContactType[]
+  billToId?: string | null
+  notifications: CustomerNotification[]
+  active: boolean
+}
+
+export interface BillToParty {
+  id: string
+  name: string
+  address?: Address | null
+  email?: string | null
+  phone?: string | null
+  paymentTermsDays?: number | null
+  isDefault: boolean
+}
+
+export type ReferenceLevel = 'ORDER' | 'HANDLING_UNIT' | 'PACKAGE' | 'STOP'
+
+export interface RequiredReference {
+  code: string
+  label?: string | null
+  level: ReferenceLevel
+  display: boolean
+  countOnNewOrder: number
+}
+
+export type ChargeCalc = 'FLAT' | 'PER_MILE' | 'PER_CWT' | 'PERCENT'
+
+export type ChargeCodeVisibility = 'INTERNAL' | 'CUSTOMER' | 'CARRIER'
+
+/** Org catalog entry. Stored on TmsSettings.chargeCodes. */
+export interface ChargeCodeDef {
+  code: string
+  label: string
+  category?: string | null
+  calculatedBy: ChargeCalc
+  defaultAmountCents?: number | null
+  visibility?: ChargeCodeVisibility | null
+}
+
+export interface ChargeCodeOverride {
+  code: string
+  display: boolean
+  customerCode?: string | null
+  label?: string | null
+  category?: string | null
+  calculatedBy?: ChargeCalc | null
+  defaultAmountCents?: number | null
+}
+
+export interface DefaultCharge {
+  code: string
+  amountCents: number
+  count?: number | null
+}
+
+export type PricingMode = 'MARGIN' | 'MARKUP' | 'PROFIT'
+
+export interface PricingDefaults {
+  mode: PricingMode
+  defaultBps?: number | null
+  defaultProfitCents?: number | null
+  minProfitCents?: number | null
+  maxProfitCents?: number | null
+  singleChargeCode?: string | null
+  distribution?: string | null
+}
+
+export interface QuotingDefaults {
+  defaultMode?: string | null
+  hoursToQuote?: number | null
+  notes?: string | null
+  portalLtlDispatchMode?: string | null
+  portalStatusMask?: string[] | null
+  blockedLtlCarrierIds?: string[] | null
+  selfQuoteCarrierIds?: string[] | null
+}
+
+export type InvoiceFrequency =
+  | 'DAILY'
+  | 'TWICE_WEEKLY'
+  | 'WEEKLY'
+  | 'MONTHLY'
+
+export interface VisibilityPrefs {
+  milestoneEmails: boolean
+  sharedTrackingLink: boolean
+  shipperPortal: boolean
+}
+
 export interface CustomerRecord {
   id: string
+  /** Aljex `Customer Account #` (Phase 0 import). */
+  aljexCode?: string | null
   name: string
   contactName?: string | null
   contactEmail?: string | null
@@ -26,6 +199,14 @@ export interface CustomerRecord {
    */
   factored?: boolean | null
   billingEmail?: string | null
+  /** Step AW: how this customer is billed. Unset = release to billing is refused. */
+  billingMethod?: 'FACTOR' | 'MANUAL' | null
+  /** The customer's accounts-payable address; required for MANUAL. */
+  apEmail?: string | null
+  /** Per-customer "copy on invoices" list (the company-wide always-copy list is added on send). */
+  invoiceCopyEmails?: string[] | null
+  /** Why the billing row needs a human look; cleared when a person saves the billing fields. */
+  billingNeedsReview?: string | null
   billingContactName?: string | null
   billingPhone?: string | null
   billingAddress?: Address | null
@@ -33,6 +214,8 @@ export interface CustomerRecord {
   creditLimitCents?: number | null
   creditHoldFlag?: boolean | null
   requiredDocsForInvoice?: string[] | null
+  /** Step AP: Load Review requirements for this customer; null = the org default. */
+  reviewRequirements?: string[] | null
   defaultDivisionKey?: string | null
   defaultSalesRepId?: string | null
   aliases?: string[] | null
@@ -40,6 +223,93 @@ export interface CustomerRecord {
   active?: boolean | null
   apptWorkflow?: 'NONE' | 'BATORY' | null
   mergedIntoId?: string | null
+
+  // Status ladder
+  status?: CustomerStatus | null
+  statusReason?: string | null
+  statusChangedAt?: string | null
+  statusChangedBy?: string | null
+  replacementCustomerId?: string | null
+
+  // Account / lead profile
+  leadSource?: string | null
+  /** Imported from Aljex and not yet reviewed here (terms, credit, factoring are not in the export). */
+  legacyImported?: boolean | null
+  legacySource?: LegacySource | null
+  industry?: string | null
+  serviceTier?: string | null
+  website?: string | null
+
+  // Credit controls (customer overrides; org defaults live on TmsSettings)
+  freeCreditRequired?: boolean | null
+  creditUsageWarningBps?: number | null
+  maxDaysLate?: number | null
+
+  // Billing / communication preferences
+  invoiceFrequency?: InvoiceFrequency | null
+  visibilityPrefs?: VisibilityPrefs | null
+  gpSplitBps?: number | null
+
+  // Structured JSON arrays
+  contacts?: CustomerContact[] | null
+  billToParties?: BillToParty[] | null
+  requiredReferences?: RequiredReference[] | null
+  chargeCodeOverrides?: ChargeCodeOverride[] | null
+  defaultCharges?: DefaultCharge[] | null
+  pricingDefaults?: PricingDefaults | null
+  quotingDefaults?: QuotingDefaults | null
+
+  rateConTerms?: string | null
+  teamKey?: string | null
+  operatedById?: string | null
+  accountOwnerIds?: string[] | null
+
+  // ── Integrations (Step J) ──────────────────────────────────────────────────
+  /** The customer's own project44 account id, for outbound status. */
+  project44CustomerId?: string | null
+  hubspotId?: string | null
+  /** Per-customer EDI identifiers and the three Orderful behaviour toggles. */
+  ediSettings?: {
+    isaId?: string | null
+    gsId?: string | null
+    autoAccept?: boolean | null
+    skip210?: boolean | null
+    skip997?: boolean | null
+  } | null
+  /** Stored for a future HaulPay factor; null until BCAT factors outside OTR. */
+  haulpayDebtorId?: string | null
+
+  // ── Workflows & AI agents (Step K) ─────────────────────────────────────────
+  /** Human-edited notes the agents read for this customer. Never agent-written. */
+  aiMemory?: PartyAiMemory | null
+
+  // ── Flow defaults (Step P3) ────────────────────────────────────────────────
+  // Each is an override of the org default in TmsSettings; null means "use the
+  // org's answer". `resolveMargin` / `resolveRequiredFields` / `resolveCheckCallPlan`
+  // in src/lib/flowDefaults.ts are the only readers that matter.
+  /** Step I team key: new loads for this customer land in that team's queue. */
+  defaultCarrierTeamKey?: string | null
+  /** Optional rep inside that team (Cognito username). */
+  defaultCarrierRepId?: string | null
+  /** Target margin, basis points. Org default 2000 (20%). */
+  marginTargetBps?: number | null
+  /** Refuse-below margin, basis points. Never above the target. */
+  marginFloorBps?: number | null
+  /** true = the quoting agent sends the reply; false = a human presses Send. */
+  quoteAutoReply?: boolean | null
+  /** Adds to the org's required-field list; it can never take one away. */
+  requiredLoadFields?: string[] | null
+  /** Cadence and channels for this customer's loads, overridable per load. */
+  checkCallPlan?: CheckCallPlan | null
+  /** Step V. UserProfile id copied onto new shipments as the tracker. */
+  defaultTrackerId?: string | null
+  /** Step V. Auto check calls / POD / quiet hours / templates; a field-level patch over division and global. */
+  trackingAutomation?: AutomationPolicyPatch | null
+  /** Steps AJ/AK. null = legacy: Step V switches decide / plan channels as configured / work phone then personal. */
+  trackingMode?: TrackingMode | null
+  trackingMethod?: TrackingMethod | null
+  driverSmsTarget?: DriverSmsTarget | null
+
   createdAt: string
   updatedAt: string
 }
@@ -61,6 +331,7 @@ export interface LocationDriverNote {
 
 export interface LocationRecord extends Address {
   id: string
+  aljexCode?: string | null
   name: string
   customerName?: string | null
   apptContactName?: string | null
@@ -108,6 +379,20 @@ export interface Division {
   invoicePrefix?: string | null
   fleetGroup?: 'LOCAL' | 'AMAZON' | 'BOX_TRUCK' | null
   active: boolean
+
+  // ── My Brokerage billing entity fields (Step L)
+  taxId?: string | null
+  phone?: string | null
+  physicalAddress?: Address | null
+  primaryContact?: DivisionContact | null
+  billingContact?: DivisionContact | null
+  payablesContact?: DivisionContact | null
+  termsUrl?: string | null
+  paymentInstructions?: PaymentInstructions | null
+  invoiceVerbiage?: string | null
+  logoKey?: string | null
+  isPrimary?: boolean | null
+
   createdAt: string
   updatedAt: string
 }
@@ -121,9 +406,1091 @@ export interface TmsSettings {
   invoiceNumberFormat?: string | null
   /** Past days leave the appointment queue's working list on their own. See splitPastAppts. */
   autoClearPastAppts?: boolean | null
+  /** Step AW: company-wide copy list added to every manual invoice e-mail (never to factored bills). */
+  invoiceAlwaysCopyEmails?: string[] | null
+  /** Step AW: the Aljex export cutoff (24-month history window is measured back from it). */
+  aljexCutoffAt?: string | null
+  /** Step AW: division key -> sales rep user id. */
+  divisionSalesReps?: Record<string, string> | null
+
+  // Org defaults for customer credit controls
+  defaultCreditLimitCents?: number | null
+  defaultFreeCreditRequired?: boolean | null
+  defaultCreditUsageWarningBps?: number | null
+  defaultMaxDaysLate?: number | null
+
+  requireCustomerApproval?: boolean | null
+
+  defaultRequiredDocs?: string[] | null
+  /** Step AP: org default Load Review requirements; null = the built-in seven. */
+  reviewRequirements?: string[] | null
+  defaultRequiredReferences?: RequiredReference[] | null
+  chargeCodes?: ChargeCodeDef[] | null
+  rateConTerms?: string | null
+
+  // Step B — shipment numbering and workflow toggles
+  /** Prefix for generated shipment numbers; `nextShipmentNumber` is the atomic counter. */
+  shipmentPrefix?: string | null
+  nextShipmentNumber?: number | null
+  /** Aljex-exit Phase 0. `NUMERIC` mints plain numeric PROs (no prefix, no padding); `DERIVED` (default) is `<prefix><n>-1`. */
+  proScheme?: ProScheme | null
+  /** Aljex-exit Phase 0. First number of the new invoice series; `nextInvoiceNumber` is set to `start - 1`. */
+  invoiceSeriesStart?: number | null
+  invoiceSeriesStartedAt?: string | null
+  /** Written by the Aljex import: highest numeric invoice number it created. Null when nothing was imported. */
+  maxImportedInvoiceNumber?: number | null
+  /** Cancel / delete a shipment is an ADMIN-only action when true. */
+  cancelDeleteAdminOnly?: boolean | null
+  /** Whether the optional AR "Unbilled" and AP "In review" stages are in use. */
+  arUnbilledStage?: boolean | null
+  apInReviewStage?: boolean | null
+  /** Mode a new shipment starts in when the customer has no default. */
+  defaultMode?: ShipmentMode | null
+
+  // Step C — carrier approval gates, booking checks and quick pay
+  /** Carrier statuses a load may be booked to. Default `['ACTIVE']`. */
+  allowedCarrierStatuses?: string[] | null
+  /** A new carrier starts PENDING and an admin must approve it before it may be booked. */
+  requireCarrierApproval?: boolean | null
+  /** Document types a carrier is warned about when missing. Default COI_CARGO/COI_AUTO/W9/CARRIER_AGREEMENT. */
+  requiredCarrierDocs?: string[] | null
+  /** Load fields booking warns about when blank. See `BookingRequiredField`. */
+  bookingRequiredFields?: string[] | null
+  /** Payment terms a new carrier starts with. */
+  defaultCarrierTermsDays?: number | null
+  /** Quick-pay ladder, ascending by days; a longer wait never costs more. */
+  quickPayTiers?: QuickPayTier[] | null
+  /** How long a sent rate confirmation stays signable. */
+  rateConExpiryHours?: number | null
+  /** Fields the carrier must fill in before signing. See `RateConRequiredField`. */
+  rateConRequiredFields?: string[] | null
+  /** How many days ahead an expiring insurance policy starts warning. Default 30. */
+  insuranceWarnDays?: number | null
+
+  // Step D — tracking and check calls
+  /** Hours to the next check call when nobody picks a time. Default 4. */
+  checkCallDefaultIntervalHours?: number | null
+  /** How long a due check call has before it counts as overdue. Default 15. */
+  checkCallGraceMinutes?: number | null
+  checkCallNotifyChannel?: CheckCallNotifyChannel | null
+  /** Slack channel the due / overdue notices also post to. */
+  checkCallSlackChannelId?: string | null
+  /** How long a carrier ping link lives past the last delivery appointment. Default 72. */
+  trackingLinkExpiryHours?: number | null
+  /** How long a customer tracking link lives. Default 14. */
+  customerLinkExpiryDays?: number | null
+  /** Whether the customer page names the carrier. Default false. */
+  customerLinkShowsCarrier?: boolean | null
+  /** Whether the customer page shows the last known position. Default true. */
+  customerLinkShowsPosition?: boolean | null
+  /** Who the customer page says to call. */
+  trackingContact?: TrackingContact | null
+  /** Body of the carrier ping text. Must contain `{url}`. */
+  trackingSmsTemplate?: string | null
+
+  // Step E — documents and delivery
+  /** Master switch for milestone e-mails; a customer still has to opt in. */
+  milestoneNoticesEnabled?: boolean | null
+  /** Ask the carrier for paperwork automatically when their load delivers. */
+  podRequestEnabled?: boolean | null
+  /** What a carrier upload link asks for. Default POD + CARRIER_INVOICE. */
+  requiredCarrierUploadTypes?: string[] | null
+  /** How long an upload link lives past delivery. Default 30. */
+  uploadLinkExpiryDays?: number | null
+  /** Bodies of the two outgoing e-mails. Both must contain `{url}`. */
+  milestoneEmailTemplate?: string | null
+  podRequestEmailTemplate?: string | null
+  /** Terms printed on every generated bill of lading. */
+  bolTerms?: string | null
+  /** Voiding a document is an ADMIN-only action when true. Default true. */
+  documentDeleteAdminOnly?: boolean | null
+
+  // Step F — AR: invoicing and payments
+  /** Taken with an atomic ADD. A failed generation skips a number, never reuses one. */
+  nextInvoiceNumber?: number | null
+  /** Terms printed at the foot of every invoice. */
+  invoiceTerms?: string | null
+  /** Body of the invoice e-mail. Must contain `{number}`. */
+  invoiceEmailTemplate?: string | null
+  /** Attached on top of the customer's required documents. Default POD + BOL. */
+  invoiceAttachTypes?: string[] | null
+  /** Where a factored customer pays. Printed instead of the division's remit-to. */
+  factorRemitTo?: RemitTo | null
+  /** Void, payment, credit, write-off and reversal are owner/ADMIN when true. Default true. */
+  arPostingAdminOnly?: boolean | null
+  /** One e-mail per invoice, or one per customer + bill-to. Default PER_INVOICE. */
+  invoiceBatchEmail?: InvoiceBatchEmailMode | null
+
+  // Step G — AP: carrier bills and payments
+  /** Only owner/ADMIN may approve a bill when true. Default true. */
+  apApprovalAdminOnly?: boolean | null
+  /** Payment, credit, reversal and void are owner/ADMIN when true. Default true. */
+  apPostingAdminOnly?: boolean | null
+  /** An unsigned rate con blocks approval when true. Default true. */
+  apRequireSignedRateCon?: boolean | null
+  /** Body of the remittance e-mail. Must contain `{reference}`. */
+  remittanceEmailTemplate?: string | null
+  /** Carrier paperwork a bill needs before approval. Defaults to `requiredCarrierUploadTypes`. */
+  apBillDocsRequired?: string[] | null
+
+  // ── Quotes & rates (Step H) ────────────────────────────────────────────────
+  /** Hours a customer gets to answer a quote, when the customer has not said. Default 24. */
+  hoursToQuote?: number | null
+  /** Hours a carrier gets to answer an offer, capped at the first pickup. Default 24. */
+  offerExpiryHours?: number | null
+  /** `Q{n:6}` — the quote number is the quote's id, so this is read once, at mint. */
+  quoteNumberFormat?: string | null
+  nextQuoteNumber?: number | null
+  /** Each must contain `{link}`: a quote e-mail with no link is not a quote. */
+  quoteEmailTemplate?: string | null
+  counterEmailTemplate?: string | null
+  offerRequestEmailTemplate?: string | null
+  quoteTermsText?: string | null
+  /** A below-floor or below-min-margin quote needs owner/ADMIN to send. Default true. */
+  quoteBelowMinMarginAdminOnly?: boolean | null
+  /** Whether the carrier's offer link shows the book-now rate. Default true. */
+  quoteOffersCarrierSeesBookNow?: boolean | null
+
+  // ── Roles, teams, commissions (Step I) ─────────────────────────────────────
+  /** `Team[]`, the brokerage's teams and their sender addresses. */
+  teams?: Team[] | null
+  /** Default the "Mine" board filter on for customer reps. A filter, not a boundary. */
+  limitCustomerRepView?: boolean | null
+  limitCarrierRepView?: boolean | null
+  /** Nothing is computed, written or shown until this is on. Default false. */
+  commissionsEnabled?: boolean | null
+  commissionTrigger?: CommissionTrigger | null
+  commissionPlans?: CommissionPlan[] | null
+  commissionPaySchedule?: CommissionPaySchedule | null
+  /** False — a manager may approve. True — owner/ADMIN only. */
+  commissionApprovalAdminOnly?: boolean | null
+  /** True — only owner/ADMIN submit, approve or pay a period. */
+  commissionPayAdminOnly?: boolean | null
+
+  // ── Integrations (Step J) ──────────────────────────────────────────────────
+  /** Shared tracking toggles. Stored now; read once a tracking provider is live. */
+  trackByDefault?: boolean | null
+  autoStatusFromGeofence?: boolean | null
+  /** MacroPoint-shaped defaults for whichever tracking provider connects first. */
+  trackingIntervalMin?: number | null
+  trackingDurationHours?: number | null
+  /** ZIP → city/state the brokerage prefers, applied by `laneKeyFor`. */
+  postalCodeAliases?: PostalAlias[] | null
+  hubspotPortalId?: string | null
+  /** Slack channel for integration health changes. Stored by J, used by K. */
+  integrationsNotifyChannel?: string | null
+
+  // ── Workflows & AI agents (Step K) ─────────────────────────────────────────
+  /** Human-edited agent configuration. The agent reads it and never writes it. */
+  aiAgents?: AiAgentsSettings | null
+
+  // ── My Brokerage (Step L) ──────────────────────────────────────────────────
+  brandLogoSquareKey?: string | null
+  brandLogoWideKey?: string | null
+  brandLogoDocumentKey?: string | null
+  brandAccent?: BrandAccent | null
+  brandTheme?: BrandTheme | null
+  brandSenders?: BrandSenders | null
+  emailSignatureTemplate?: string | null
+  whiteLabel?: WhiteLabelConfig | null
+  customerPortalDefaults?: CustomerPortalDefaults | null
+  customerTags?: CustomerTag[] | null
+  rateConTemplate?: RateConTemplate | null
+  carrierAgreementTemplate?: CarrierAgreementTemplate | null
+  consolidationRules?: ConsolidationRules | null
+  notificationSubscriptions?: NotificationSubscription[] | null
+  notificationWebhooks?: NotificationWebhook[] | null
+  notificationDefaults?: NotificationDefaults | null
+  paymentTerms?: PaymentTerm[] | null
+
+  // ── Flow defaults (Step P3) ────────────────────────────────────────────────
+  /** Target margin for every mode, basis points. Ryne's org default is 2000. */
+  marginTargetBps?: number | null
+  /** Per-mode overrides, e.g. `{ FTL: 2000, LTL: 2500 }`. */
+  marginTargetBpsByMode?: Record<string, number> | null
+  /** Whether a customer with no opinion gets automatic quote replies. */
+  quoteAutoReplyDefault?: boolean | null
+  /** Pickup address, delivery address, bill-to, sales rep, revenue division. */
+  defaultRequiredLoadFields?: string[] | null
+  /** The org's check-call cadence and channels. */
+  defaultCheckCallPlan?: CheckCallPlan | null
+  /** Step V. Global policy plus per-division overrides; saved through `saveTrackingAutomation`. */
+  trackingAutomation?: TrackingAutomationSettings | null
+  /** The P1 seed's version stamp, so the Demo page can say what it is looking at. */
+  demoSeedVersion?: string | null
+  demoSeededAt?: string | null
+
   createdAt?: string
   updatedAt?: string
 }
+
+// ── My Brokerage (Step L) ───────────────────────────────────────────────────
+
+export type BrandAccent = 'YELLOW' | 'BLUE' | 'TEAL' | 'RED' | 'PURPLE' | 'ORANGE'
+export type BrandTheme = 'DARK' | 'LIGHT' | 'SYSTEM'
+
+export interface BrandSenders {
+  shipment?: string | null
+  rateCon?: string | null
+  quoteReply?: string | null
+  customerInvoice?: string | null
+  remittance?: string | null
+}
+
+export interface WhiteLabelConfig {
+  domain: string
+  status: 'PENDING' | 'VERIFIED' | 'FAILED'
+  records: WhiteLabelDnsRecord[]
+  checkedAt?: string | null
+}
+
+export interface WhiteLabelDnsRecord {
+  type: 'CNAME' | 'TXT'
+  host: string
+  value: string
+  purpose: string
+}
+
+export interface CustomerPortalDefaults {
+  ltlQuoting?: 'OFF' | 'RATE_CARD' | 'SMC3' | null
+  portalDispatchMode?: 'OFF' | 'QUOTE_ONLY' | 'FULL' | null
+  portalStatusMask?: string[] | null
+  blockedLtlCarrierIds?: string[] | null
+  defaultQuoteNotes?: string | null
+}
+
+export interface CustomerTag {
+  key: string
+  label: string
+  color: string
+}
+
+export interface RateConTemplate {
+  overrideDefaultTerms?: boolean | null
+  extraTerms?: Array<{ title: string; text: string }> | null
+  termsHtml?: string | null
+  hideRep?: boolean | null
+  legalPageBreak?: boolean | null
+  requiredDocs?: string[] | null
+  requiredFields?: string[] | null
+}
+
+export interface CarrierAgreementTemplate {
+  bodyMarkdown?: string | null
+  requiredDocs?: string[] | null
+  signatureBlock?: string | null
+  version?: number | null
+  updatedAt?: string | null
+  updatedBy?: string | null
+}
+
+export type ConsolidationSeverity = 'BLOCK' | 'WARN' | 'OFF'
+export type ConsolidationHazmatMode = 'NEVER' | 'SAME_CLASS' | 'ALLOW'
+export type ConsolidationOnHold = 'BLOCK' | 'WARN'
+export type ConsolidationCategory =
+  | 'CUSTOMER_MISMATCH'
+  | 'TEMPERATURE'
+  | 'WEIGHT_TOTAL'
+  | 'STOP_COUNT'
+  | 'PICKUP_WINDOW_DAYS'
+  | 'EQUIPMENT_MISMATCH'
+  | 'HAZMAT'
+  | 'ON_HOLD'
+
+export interface ConsolidationRule {
+  category: ConsolidationCategory
+  severity: ConsolidationSeverity
+  threshold?: number | null
+  unit?: string | null
+}
+
+export interface ConsolidationRules {
+  rules: ConsolidationRule[]
+  hazmatMode: ConsolidationHazmatMode
+  onHold: ConsolidationOnHold
+}
+
+export interface ConsolidationResult {
+  ok: boolean
+  reasons: string[]
+}
+
+export type NotificationChannel = 'EMAIL' | 'IN_APP' | 'WEBHOOK'
+export type NotificationAudienceKind = 'ROLE' | 'TEAM' | 'USER'
+
+export interface NotificationAudience {
+  kind: NotificationAudienceKind
+  value: string
+}
+
+export interface NotificationSubscription {
+  event: string
+  channel: NotificationChannel
+  audience: NotificationAudience
+  enabled: boolean
+}
+
+export interface NotificationWebhook {
+  id: string
+  url: string
+  events: string[]
+  secretRef?: string | null
+  secretLast4?: string | null
+  active: boolean
+  createdAt: string
+  createdBy: string
+  lastDeliveryAt?: string | null
+  lastStatus?: string | null
+  failureCount: number
+}
+
+export interface NotificationDefaults {
+  pauseAll?: boolean | null
+}
+
+export interface PaymentTerm {
+  key: string
+  name: string
+  days: number
+  description?: string | null
+  quickPayFeeBps?: number | null
+  apOnly?: boolean | null
+  doNotUse?: boolean | null
+}
+
+export interface DivisionContact {
+  name?: string | null
+  title?: string | null
+  email?: string | null
+  phone?: string | null
+}
+
+export interface PaymentInstructions {
+  US?: { ach?: string | null; wire?: string | null; check?: string | null }
+  CA?: { eft?: string | null; check?: string | null }
+  MX?: { spei?: string | null; check?: string | null }
+}
+
+export interface ImportJob {
+  id: string
+  entity:
+    | 'CUSTOMER'
+    | 'LOCATION'
+    | 'CARRIER'
+    | 'CARRIER_FACTOR'
+    | 'CHARGE_CODE'
+    | 'PAYMENT_TERM'
+    | 'VENDOR_CONTACT'
+  status: 'DRAFT' | 'VALIDATED' | 'DRY_RUN' | 'APPLIED' | 'FAILED'
+  fileName?: string | null
+  fileHash?: string | null
+  mapping?: Record<string, string> | null
+  rowCount?: number | null
+  counts?: { created: number; updated: number; skipped: number; errored: number } | null
+  errorKey?: string | null
+  dryRun?: boolean | null
+  note?: string | null
+  createdBy: string
+  appliedAt?: string | null
+  appliedBy?: string | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+// ── Aljex-exit Phase 0: import, legacy flag, data safety ─────────────────────
+// Shared contract between the library (src/lib/aljex), the engine
+// (amplify/functions/tms-aljex-import/engine), the router, the data-safety
+// Lambda, apiClient and the UI. Pure types: no AWS imports.
+
+/** `TmsSettings.proScheme`. DERIVED = `<prefix><n>-1` (default); NUMERIC = the plain number. */
+export type ProScheme = 'DERIVED' | 'NUMERIC'
+
+/**
+ * `legacySource` on Shipment/Load. Only LOAD rows become shipments; the Aljex AR memo rows
+ * (blank status, Type of Shipment CRED/DEBT) are invoice adjustments (never voided shipments).
+ */
+export type LegacySource = 'ALJEX'
+
+/** The pair the engine writes on every imported Shipment/Load (names fixed). */
+export interface LegacyFields {
+  legacyImported: true
+  legacySource: LegacySource
+}
+
+export type AljexEntity =
+  | 'LOAD'
+  | 'MEMO_DEBT'
+  | 'MEMO_CRED'
+  | 'CUSTOMER'
+  | 'CARRIER'
+  | 'LOCATION'
+  | 'INVOICE'
+  | 'AR_PAYMENT'
+  | 'BILL'
+  | 'AP_PAYMENT'
+
+export type AljexImportKind = 'IMPORT' | 'MCP_SYNC' | 'RECONCILE'
+
+export type AljexImportStatus =
+  | 'DRY_RUN'
+  | 'APPLIED'
+  | 'FAILED'
+  | 'STAGING'
+  | 'READY'
+  | 'PLANNING'
+  | 'PLANNED'
+  | 'RUNNING'
+  | 'PAUSED'
+  | 'CANCELED'
+
+/** Which pass of the pipeline the job is in (§4.1). */
+export type AljexImportPhase =
+  | 'UPLOAD'
+  | 'STAGE'
+  | 'PLAN'
+  | 'CUSTOMER'
+  | 'CARRIER'
+  | 'LOCATION'
+  | 'LOAD'
+  | 'AR_LEDGER'
+  | 'AP_LEDGER'
+  | 'FINALIZE'
+  | 'RECONCILE'
+  | 'DONE'
+
+export type AljexImportTarget = 'LIVE' | 'REHEARSAL'
+
+/** Resume point written after every batch of <= 100 PROs. */
+export interface AljexImportCursor {
+  phase: AljexImportPhase
+  entity?: string | null
+  chunk?: number | null
+  offset?: number | null
+  [extra: string]: unknown
+}
+
+/** outcome counts per entity; the invariant staged = created+matched+enriched+skipped+conflicts+errors is asserted. */
+export interface EntityCount {
+  staged: number
+  created: number
+  matched: number
+  enriched: number
+  skipped: number
+  conflicts: number
+  errors: number
+}
+
+export type AljexEntityCounts = Partial<Record<AljexEntity, EntityCount>>
+
+/** Options typed on the Plan / Apply step. No date is ever defaulted from the wall clock (DECIDED-3). */
+export interface AljexImportOptions {
+  target?: AljexImportTarget
+  /** Rehearsal table suffix: tables are `<Model>-<devSuffix>-rh<tag>` (`^[a-z0-9]{3,12}$`). */
+  targetTag?: string | null
+  /** Typed by the owner to confirm a LIVE apply; recorded in the job and the AuditLog. */
+  liveTag?: string | null
+  synthetic?: boolean
+  cutoffDate?: string | null
+  carrierCutoffDate?: string | null
+  carrierWindowMonths?: number | null
+  unbilledLegacyBefore?: string | null
+  asOf?: string | null
+  /** The UI sends the row count it saw; the server refuses on mismatch. */
+  expectedRows?: number | null
+  /** Dev-only fault injection (honoured only on the dev stack with `synthetic`). */
+  faultAfterRows?: number | null
+  /** Every Nth data row (rehearsal slices). */
+  sliceEvery?: number | null
+  [extra: string]: unknown
+}
+
+export interface AljexImportJob {
+  /** `aljexrun:<ulid>` (a run). Old rows keep `aljex:<fileHash>`. */
+  id: string
+  kind?: AljexImportKind | null
+  status: AljexImportStatus
+  phase?: AljexImportPhase | null
+  cursor?: AljexImportCursor | null
+  heartbeatAt?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
+  fileName?: string | null
+  fileHash?: string | null
+  stageHash?: string | null
+  layoutId?: string | null
+  profileVersion?: number | null
+  target?: AljexImportTarget | null
+  targetTag?: string | null
+  liveTag?: string | null
+  options?: AljexImportOptions | null
+  entityCounts?: AljexEntityCounts | null
+  reportPrefix?: string | null
+  error?: string | null
+  parentJobId?: string | null
+  synthetic?: boolean | null
+  /** Attached by IMPORT_GET / IMPORT_STAGE / IMPORT_PLAN (read from S3); never stored on the row. */
+  stage?: AljexStageSummary | null
+  plan?: AljexPlanSummary | null
+  rehearsalGate?: AljexRehearsalGate | null
+  /** Attached by IMPORT_GET when the reconcile report exists. */
+  summary?: ImportReportSummary | null
+  rowCount?: number | null
+  /** RECONCILE jobs: JSON text of `ReconDecision[]` (or `{ spilledTo, keys }` once above the item-size budget). */
+  decisions?: string | Record<string, unknown> | unknown[] | null
+  /** Legacy (pre-Phase-0) fields; still present on old rows. */
+  mapping?: Record<string, string> | null
+  counts?: Record<string, number> | null
+  errorKey?: string | null
+  dryRun?: boolean | null
+  note?: string | null
+  createdBy: string
+  appliedAt?: string | null
+  appliedBy?: string | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface DistinctValueCount {
+  value: string
+  count: number
+}
+
+/** STAGE result: written by the engine to `imports/jobs/<rootJobId>/stage-summary.json`, attached to the job by the router. */
+export interface AljexStageSummary {
+  rows: number
+  loads: number
+  memos: number
+  junkDates: number
+  duplicatePros: number
+  raggedRows: number
+  parseErrors: number
+  layoutMatches?: boolean | null
+  /** Distinct values of every categorical column the profile maps, with counts. */
+  distinct: {
+    status?: DistinctValueCount[]
+    typeOfShipment?: DistinctValueCount[]
+    safetyRating?: DistinctValueCount[]
+    stopMarkers?: DistinctValueCount[]
+    salesreps?: DistinctValueCount[]
+    dispatchers?: DistinctValueCount[]
+    [column: string]: DistinctValueCount[] | undefined
+  }
+  /** Distinct values with no mapping; a non-empty list blocks APPLY. */
+  unmapped?: Array<{ column: string; value: string; count: number }>
+}
+
+/** PLAN result: `imports/jobs/<rootJobId>/plan-summary.json`. */
+export interface AljexPlanSummary {
+  classes: { CREATE: number; ENRICH: number; LINK: number; AMBIGUOUS: number; CONFLICT: number }
+  warnings: string[]
+  bridge?: ImportBridgeLine[]
+}
+
+/** Computed by the router: may a LIVE APPLY start? (real data needs a RECONCILED rehearsal with the same stageHash+profileVersion.) */
+export interface AljexRehearsalGate {
+  ok: boolean
+  reason?: string
+}
+
+/** One row of the masked sample: mapped fields only. */
+export interface AljexSampleRow {
+  rowNumber: number
+  fields: Record<string, string | number | null>
+}
+
+/** Computed in the UI: RUNNING with a heartbeat older than this is shown as Stalled. */
+export const ALJEX_STALLED_AFTER_MS = 3 * 60 * 1000
+
+/** Persisted per layout fingerprint (§4.2). `profile` is the editable body. */
+export interface AljexMappingProfileBody {
+  statusMap?: Record<string, string>
+  modeMap?: Record<string, string>
+  divisionRules?: Array<Record<string, unknown>>
+  repMap?: Record<string, string>
+  dispatcherMap?: Record<string, string>
+  chargeMap?: Record<string, string>
+  paymentMethodMap?: Record<string, string>
+  safetyRatingMap?: Record<string, string>
+  dateWindow?: { start: string | null; end: string | null }
+  carrierWindow?: { months: number | null; cutoffDate: string | null }
+  ownerOperatorCarrierIds?: string[]
+  policies?: Record<string, unknown>
+  /** Values the owner explicitly accepted as "use the default", as `<column>:<value>` (e.g. `status:CONSIGNEE`). */
+  acceptedUnmapped?: string[]
+  [extra: string]: unknown
+}
+
+export interface AljexMappingProfile {
+  /** = layoutId */
+  id: string
+  fingerprint: string
+  headerCount: number
+  version: number
+  profile: AljexMappingProfileBody
+  createdBy: string
+  updatedBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** One row of the bridge: file value, BCAT value, difference (all cents). */
+export interface ImportBridgeLine {
+  key: string
+  label: string
+  fileCents: number | null
+  bcatCents: number | null
+  diffCents: number | null
+}
+
+export interface ImportReportSummary {
+  jobId: string
+  generatedAt: string
+  entities: AljexEntityCounts
+  /** False when the staged = created+... invariant failed for any entity. */
+  conservationOk: boolean
+  bridge: ImportBridgeLine[]
+  openArCents: number | null
+  unappliedCreditCents: number | null
+  openApCents: number | null
+  findings: Record<string, number>
+  reconciled: boolean
+  files: string[]
+  /** AR memo rows (blank status) applied as invoice adjustment lines (never shipments). */
+  memos?: ImportMemoSummary | null
+  /** Per warning category: row count and example PROs (PROs only, never names or values). */
+  warnings?: Record<string, { count: number; examplePros: string[] }> | null
+}
+
+/** Aljex AR memos (CRED/DEBT): adjustment lines on the invoice a memo's Reference # (a load PRO) names. */
+export interface ImportMemoSummary {
+  total: number
+  credits: number
+  debits: number
+  creditCents: number
+  debitCents: number
+  /** Memos whose Reference # matched an invoice and became an adjustment line on it. */
+  applied: number
+  /** Memos whose reference has no invoice: reported, never silently dropped. */
+  unmatched: number
+  unmatchedPros: string[]
+}
+
+export interface AljexReportLink {
+  name: string
+  key: string
+  url: string
+  bytes?: number | null
+}
+
+/**
+ * Reference codes the import writes on `Order.references` (visibility INTERNAL unless the engine
+ * says otherwise). Fixed names so the UI can label them.
+ */
+export const ALJEX_REFERENCE_CODES = {
+  quote: 'QUOTE_NUMBER',
+  manifest: 'MANIFEST',
+  container: 'CONTAINER',
+  customerRef: 'CUSTOMER_REF',
+  pickupRef: 'PICKUP_REF',
+  consigneeRef: 'CONSIGNEE_REF',
+  /** `ADDITIONAL_REF_1` .. `ADDITIONAL_REF_8` */
+  additionalPrefix: 'ADDITIONAL_REF_',
+  typeOfShipment: 'ALJEX_TYPE',
+  revenueType: 'ALJEX_REV_TYPE',
+} as const
+
+/** `LoadCharge` (side CARRIER) codes for the Aljex Advance Fees / Quick Pay Fees columns. */
+export const ALJEX_FEE_CHARGE_CODES = { advance: 'ADVANCE_FEE', quickPay: 'QUICKPAY_FEE' } as const
+
+/**
+ * `LegacyAljexRow.fields`: every non-empty cell of the source row, keyed `c<1-based column
+ * position>` (the same numbering as CanonicalRow.nonEmpty), each with its header text and trimmed
+ * value. Sparse: empty cells are absent.
+ */
+export type LegacyAljexFields = Record<string, { h: string; v: string }>
+
+export interface LegacyAljexRowRecord {
+  /** `aljex:<pro>` or `aljex:memo:<pro>` */
+  id: string
+  pro: string
+  kind: 'LOAD' | 'MEMO_DEBT' | 'MEMO_CRED'
+  shipmentId?: string | null
+  importRunId?: string | null
+  sourceSha256?: string | null
+  rowNumber?: number | null
+  fields: LegacyAljexFields
+  importedAt?: string | null
+}
+
+/** One surfaced source column, in file order. */
+export interface LegacyAljexColumn {
+  position: number
+  header: string
+  value: string
+}
+
+export interface LegacyAljexRowResult {
+  rows: LegacyAljexRowRecord[]
+  /** The columns of `rows[0]` (the LOAD row when there is one), sorted by position. */
+  columns: LegacyAljexColumn[]
+}
+
+// ── Aljex code mapping (Settings > Users) ────────────────────────────────────
+
+/** SALES_REP = Salesrep ID. STAFF = Created by / Service Rep / Assigned Dispatcher codes (one crosswalk). */
+export type AljexCodeKind = 'SALES_REP' | 'STAFF'
+
+/** `AljexCodeMap`: id `<kind>:<code>`. Written only by tmsShipmentActions. */
+export interface AljexCodeMapRecord {
+  id: string
+  kind: AljexCodeKind
+  code: string
+  /** UserProfile id; null = not mapped yet. */
+  userId?: string | null
+  userName?: string | null
+  lastAppliedAt?: string | null
+  lastAppliedBy?: string | null
+  lastAppliedCount?: number | null
+  updatedBy?: string | null
+  updatedAt?: string | null
+}
+
+/** One row of the mapping table: a code found on shipments (or already mapped) with its counts. */
+export interface AljexCodeSummary {
+  kind: AljexCodeKind
+  code: string
+  /** Shipments carrying the code (SALES_REP: salesRepCode; STAFF: any of createdByCode / serviceRepCode / dispatcherCode). */
+  shipmentCount: number
+  /** SALES_REP only: shipments with the code whose salesRepId is not the mapped user (what a reassign would change). */
+  pendingCount: number
+  userId: string | null
+  userName: string | null
+  lastAppliedAt: string | null
+  lastAppliedBy: string | null
+  lastAppliedCount: number | null
+}
+
+export interface SetAljexCodeMapInput {
+  kind: AljexCodeKind
+  code: string
+  /** UserProfile id, or null to clear the mapping. Never touches shipments. */
+  userId: string | null
+}
+
+export interface ReassignByRepCodeInput {
+  /** The Aljex Salesrep code (`Shipment.salesRepCode`). */
+  code: string
+  /** UserProfile id (must exist). Also saved as the code's mapping. */
+  repId: string
+  /** Count what would change; write nothing. */
+  dryRun?: boolean
+}
+
+export interface ReassignByRepCodeResult {
+  code: string
+  repId: string
+  dryRun: boolean
+  /** Shipments carrying the code. */
+  matched: number
+  /** Changed (or, with dryRun, would change). */
+  updated: number
+  skippedAlreadyAssigned: number
+  skippedVoided: number
+  /** True when the Lambda stopped at its time budget with shipments left; call again (idempotent). */
+  hasMore: boolean
+  failed: Array<{ shipmentId: string; reason: string }>
+}
+
+// ── Router (tmsAljexImport) action inputs / results ──────────────────────────
+
+export type AljexImportAction =
+  | 'IMPORT_PREPARE'
+  | 'IMPORT_STAGE'
+  | 'IMPORT_GET'
+  | 'IMPORT_LIST'
+  | 'IMPORT_SAVE_PROFILE'
+  | 'IMPORT_GET_PROFILE'
+  | 'IMPORT_PLAN'
+  | 'IMPORT_APPLY'
+  | 'IMPORT_PAUSE'
+  | 'IMPORT_RESUME'
+  | 'IMPORT_CANCEL'
+  | 'IMPORT_RECONCILE'
+  | 'IMPORT_RECONCILE_ENTITY'
+  | 'IMPORT_RECONCILE_GET'
+  | 'IMPORT_DECIDE'
+  | 'IMPORT_SIGNOFF'
+  | 'IMPORT_REPORT_LINKS'
+  | 'IMPORT_SEED_COUNTER'
+  | 'IMPORT_SYNC_CARRIERS'
+  | 'IMPORT_SAMPLE'
+  | 'IMPORT_STEP'
+  | 'IMPORT_WORK'
+  | 'IMPORT_LEGACY_ROW'
+  | 'IMPORT_CUSTOMERS_MASTER'
+  | 'IMPORT_CARRIERS_MASTER'
+  | 'IMPORT_AP_FILES'
+  | 'IMPORT_AR_FILE'
+  | 'IMPORT_ACTIVE_SHIPMENTS_CHECK'
+
+export interface PrepareAljexImportInput {
+  /** The layout the browser detected (e.g. `aljex-full-486-v1`); the engine re-detects at STAGE. */
+  layoutId?: string | null
+  fileName: string
+  /** sha256 hex of the file, computed in the browser. */
+  fileHash: string
+  sizeBytes: number
+  /** Header cell count the browser saw. */
+  headerCount?: number | null
+}
+
+export interface PrepareAljexImportResult {
+  job: AljexImportJob
+  /** Presigned PUT (15 min) into the DataSafety bucket, `imports/source/<jobId>/<fileName>`. */
+  uploadUrl: string
+  uploadKey: string
+}
+
+export interface AljexProfileInput {
+  layoutId: string
+  fingerprint?: string
+  headerCount?: number
+  profile: AljexMappingProfileBody
+  /** Optimistic concurrency: the version the editor loaded. */
+  expectedVersion?: number | null
+}
+
+export interface PlanAljexImportInput {
+  jobId: string
+  options?: AljexImportOptions
+}
+
+export interface ApplyAljexImportInput {
+  /** The PLANNED job being applied. */
+  jobId: string
+  options?: AljexImportOptions
+}
+
+/** The per-file import actions (everything but the big export): customers, carriers, AP aging + expected, AR, active-shipments check. */
+export type AljexFileImportAction = 'IMPORT_CUSTOMERS_MASTER' | 'IMPORT_CARRIERS_MASTER' | 'IMPORT_AP_FILES' | 'IMPORT_AR_FILE' | 'IMPORT_ACTIVE_SHIPMENTS_CHECK'
+
+export interface AljexFileImportInput {
+  /** PLAN = dry run (writes nothing); APPLY needs `options.liveTag` and a PLANNED job. */
+  mode: 'PLAN' | 'APPLY'
+  /** The uploaded, staged file's job (every action but IMPORT_AP_FILES). */
+  jobId?: string
+  /** IMPORT_AP_FILES: either or both of the uploaded AP jobs. */
+  agingJobId?: string
+  expectedJobId?: string
+  /** YYYY-MM-DD; defaults to Settings > Data cutoff. */
+  cutoffDate?: string
+  options?: AljexImportOptions
+}
+
+export interface AljexFileImportResult {
+  job: AljexImportJob
+  mode: 'PLAN' | 'APPLY'
+  /** An APPLY on a job that was already applied (the engine changed nothing it had already written). */
+  rerun: boolean
+  reportPrefix: string
+  result: {
+    /** Numbers only. */
+    summary: Record<string, unknown>
+    counts: AljexEntityCounts
+    /** AP / AR tie-out after the run: counts, bridge lines to the cent, allMatched. */
+    reconcile: Record<string, unknown> | null
+    files: string[]
+    review: Array<{ key: string; reason: string }>
+    reviewTotal: number
+  }
+}
+
+export interface SeedProCounterInput {
+  apply?: boolean
+  enableNumericScheme?: boolean
+  jobId?: string | null
+}
+
+export interface SeedProCounterResult {
+  current: number | null
+  target: number
+  wouldChange: boolean
+  applied: boolean
+  schemeEnabled: boolean
+}
+
+export interface SyncImportedCarriersResult {
+  ready: boolean
+  reason?: string | null
+  job?: AljexImportJob | null
+}
+
+// ── Engine contract (B2 implements, B3 drives) ───────────────────────────────
+
+export type EngineRow = Record<string, unknown>
+
+/** Logical table name -> physical table name. Reads of reference tables always go to live. */
+export interface TableSet {
+  shipment: string
+  order: string
+  load: string
+  loadCarrier: string
+  loadFinancials: string
+  loadCharge: string
+  customer: string
+  location: string
+  carrier: string
+  invoice: string
+  arPayment: string
+  carrierBill: string
+  apPayment: string
+  proClaim: string
+  settings: string
+  auditLog: string
+  legacyAljexRow: string
+  aljexImportJob: string
+  aljexMappingProfile: string
+  // reference tables (read only)
+  factoringItem: string
+  driver: string
+  userProfile: string
+  ownershipDivision: string
+  ownershipRule: string
+  division: string
+  integration: string
+}
+
+export type EngineTable = keyof TableSet
+
+export interface TxCondition {
+  expression: string
+  names?: Record<string, string>
+  values?: Record<string, unknown>
+}
+
+export type TxItem =
+  | { op: 'put'; table: EngineTable; item: EngineRow; ifNotExists?: boolean; condition?: TxCondition }
+  | {
+      op: 'update'
+      table: EngineTable
+      id: string
+      set?: EngineRow
+      remove?: string[]
+      add?: Record<string, number>
+      condition?: TxCondition
+    }
+  | { op: 'check'; table: EngineTable; id: string; condition: TxCondition }
+
+export type TxResult =
+  | { ok: true }
+  | { ok: false; reason: 'CONDITION' | 'THROTTLED' | 'ERROR'; failedIndex?: number; message?: string }
+
+/**
+ * Set ONLY by the offline CLI after the production gate passed (scripts/lib/prodGate.mjs). The deployed worker never
+ * sets it, so the Lambda keeps refusing everything but the dev stack. See `productionPolicy` in engine/tables.ts.
+ */
+export interface EngineTargetPolicy {
+  readSuffix: string
+  writeSuffix: string
+  production: true
+}
+
+export interface EngineStore {
+  now(): string
+  tables: TableSet
+  targetPolicy?: EngineTargetPolicy
+  getMany(table: EngineTable, ids: string[]): Promise<EngineRow[]>
+  scanAll(table: EngineTable, projection?: string[]): AsyncIterable<EngineRow[]>
+  transact(items: TxItem[], label: string): Promise<TxResult>
+  batchPut(table: EngineTable, rows: EngineRow[]): Promise<void>
+  update(table: EngineTable, id: string, patch: EngineRow, cond?: TxCondition): Promise<boolean>
+  putJob(job: AljexImportJob): Promise<void>
+  putObject(key: string, body: Uint8Array | string): Promise<void>
+  getObject(key: string): AsyncIterable<Uint8Array>
+}
+
+export interface RunSliceResult {
+  done: boolean
+  job: AljexImportJob
+}
+
+// ── Data safety (tmsDataSafety) ──────────────────────────────────────────────
+
+export type DataSafetyAction =
+  | 'DATA_STATUS'
+  | 'EXPORT_NOW'
+  | 'CSV_EXPORT_START'
+  | 'CSV_EXPORT_STATUS'
+  | 'CSV_EXPORT_LINKS'
+  | 'EXPORT_LIST'
+  | 'ACCOUNTING_EXPORT'
+
+export type DataExportKind = 'NIGHTLY' | 'NIGHTLY_CHECK' | 'S3_EXPORT' | 'CSV_ALL' | 'ACCOUNTING'
+export type DataExportStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'PARTIAL'
+export type DataExportScope = 'TMS' | 'ALL'
+
+export interface DataExportTableProgress {
+  table: string
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'SKIPPED_NO_PITR'
+  exportArn?: string | null
+  rows?: number | null
+  bytes?: number | null
+  files?: number | null
+  pii?: boolean
+  error?: string | null
+}
+
+export interface DataExportJob {
+  id: string
+  kind: DataExportKind
+  status: DataExportStatus
+  scope?: DataExportScope | null
+  tables?: DataExportTableProgress[] | null
+  prefix?: string | null
+  cursor?: Record<string, unknown> | null
+  heartbeatAt?: string | null
+  includesPii?: boolean | null
+  startedBy?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
+  error?: string | null
+}
+
+export interface DataStatus {
+  bucketName: string
+  tableCount: number
+  pitrEnabledCount: number
+  pitrDisabled: string[]
+  earliestRestorableTime: string | null
+  latestNightly: DataExportJob | null
+  nightlyEnabled: boolean
+  s3SyncCommand: string
+}
+
+export interface CsvExportStartInput {
+  scope: DataExportScope
+  tables?: string[]
+  acknowledgePii: boolean
+  /** Must be `EXPORT ALL` when scope is ALL. */
+  confirmText?: string
+}
+
+export interface DataExportFileLink {
+  name: string
+  key: string
+  url: string
+  bytes?: number | null
+  sha256?: string | null
+  pii?: boolean
+}
+
+export interface DataExportLinks {
+  jobId: string
+  expiresInSeconds: number
+  files: DataExportFileLink[]
+  manifestUrl: string | null
+}
+
 
 export interface GeocodeResult extends Address {
   lat: number
@@ -157,4 +1524,3499 @@ export interface LocationMergeJob {
   error?: string | null
   createdAt?: string
   updatedAt?: string
+}
+
+// ── Step B — Shipment · Order · Load ─────────────────────────────────────────
+//
+// Three records describe one movement: the Shipment is the movement itself and
+// carries the single customer-facing status, the Order is the sell side (what the
+// customer bought and owes), and the existing Load is the buy side (who hauls a leg
+// and what that costs). Money is integer cents, percentages basis points, timestamps
+// ISO 8601. Enum values are the wire values AppSync stores; short board labels live
+// in src/lib/shipmentStatus.ts.
+
+/** Shipment movement status (spec §6.8). Truckload uses BOOKED→LOADING→UNLOADING;
+ *  LTL / forwarding uses PLANNED→PICKED_UP→RECOVERED→OUT_FOR_DELIVERY. */
+export type ShipmentStatus =
+  | 'DRAFT'
+  | 'TENDER_PENDING'
+  | 'TENDER_REJECTED'
+  | 'OPEN'
+  | 'ON_HOLD'
+  | 'BOOKED'
+  | 'PLANNED'
+  | 'DISPATCHED'
+  | 'LOADING'
+  | 'PICKED_UP'
+  | 'IN_TRANSIT'
+  | 'RECOVERED'
+  | 'ARRIVED_AT_DELIVERY_TERMINAL'
+  | 'OUT_FOR_DELIVERY'
+  | 'UNLOADING'
+  | 'DELIVERED'
+  | 'CANCELED'
+
+/**
+ * Load status: every shipment movement label plus the two the buy side owns —
+ * SOURCING (needs a carrier) and INVOICING (delivered, carrier invoice in review).
+ * Named `LoadWorkflowStatus` because `LoadStatusId` in src/lib/loadStatus.ts is the
+ * *derived* own-fleet status and the two are read side by side on the board.
+ */
+export type LoadWorkflowStatus =
+  | 'SOURCING'
+  | 'BOOKED'
+  | 'PLANNED'
+  | 'DISPATCHED'
+  | 'LOADING'
+  | 'PICKED_UP'
+  | 'IN_TRANSIT'
+  | 'RECOVERED'
+  | 'ARRIVED_AT_DELIVERY_TERMINAL'
+  | 'OUT_FOR_DELIVERY'
+  | 'UNLOADING'
+  | 'DELIVERED'
+  | 'INVOICING'
+  | 'CANCELED'
+
+export type ShipmentMode =
+  | 'FTL'
+  | 'PTL'
+  | 'BULK'
+  | 'DRAYAGE'
+  | 'INTERMODAL'
+  | 'RLTL'
+  | 'LTL'
+  | 'AIR'
+  | 'OCEAN'
+  | 'RAIL'
+
+/** How the shipment came to exist. BACKFILL marks rows minted from legacy loads. */
+export type ShipmentSource = 'MANUAL' | 'TENDER' | 'DUPLICATE' | 'BACKFILL'
+
+/**
+ * Who moved a load's status last — the driver app and check calls write their own.
+ * SYSTEM is load-tracking-projector reflecting a stop time that something other
+ * than a person or the driver app stamped (POD close, dispatch MMS auto-POD).
+ */
+export type LoadStatusSource = 'USER' | 'DRIVER_APP' | 'CHECK_CALL' | 'BACKFILL' | 'SYSTEM'
+
+export type AssignmentType = 'OWN_ASSET' | 'CARRIER' | 'NEED_TO_COVER'
+
+export type TrackingProvider = 'NONE' | 'MANUAL' | 'LINK' | 'DRIVER_APP' | 'MOTIVE'
+
+export type LoadCarrierKind = 'OWN_ASSET' | 'CARRIER'
+
+/** BOUNCED = the carrier fell off and kept nothing; TONU = truck ordered not used, paid. */
+export type LoadCarrierStatus = 'ACTIVE' | 'BOUNCED' | 'TONU'
+
+/**
+ * LEGACY is an Aljex-era order whose bill went out before this system existed: it is
+ * never a worklist row, and its credit exposure falls back to the load rule.
+ */
+export type ArStatus =
+  | 'DOCS_NEEDED'
+  | 'UNBILLED'
+  | 'UNPAID'
+  | 'PAID'
+  | 'INVOICE_NOT_NEEDED'
+  | 'LEGACY'
+
+export type ApStatus = 'AWAITING_INVOICE' | 'IN_REVIEW' | 'TO_BE_PAID' | 'PAID'
+
+export type RateType = 'SPOT' | 'CONTRACT'
+
+export type ChargeSide = 'CUSTOMER' | 'CARRIER'
+
+export type ReferenceVisibility = 'INTERNAL' | 'CUSTOMER' | 'CARRIER' | 'ALL'
+
+export type HandlingUnit =
+  | 'PALLET'
+  | 'SKID'
+  | 'CRATE'
+  | 'BOX'
+  | 'DRUM'
+  | 'TOTE'
+  | 'BUNDLE'
+  | 'ROLL'
+  | 'OTHER'
+
+/** Who asked for the appointment window on a stop. */
+export type ApptRequestedBy = 'CUSTOMER' | 'CARRIER' | 'BROKER'
+
+/**
+ * One reference number on an order (PO, BOL, pickup number…). `level` says what it
+ * identifies and `visibility` who may see it; a STOP-level reference names its stop.
+ */
+export interface OrderReference {
+  code: string
+  label?: string | null
+  value: string
+  level: ReferenceLevel
+  stopId?: string | null
+  visibility: ReferenceVisibility
+}
+
+/** Same shape, stored on the stop rather than the order. */
+export type StopReference = OrderReference
+
+export interface FreightDimensions {
+  l: number
+  w: number
+  h: number
+  unit: 'IN' | 'CM'
+}
+
+export interface FreightHazmat {
+  un: string
+  hazClass: string
+  packingGroup?: string | null
+  emergencyContact: string
+}
+
+/** One line of what is on the truck. */
+export interface FreightItem {
+  id: string
+  handlingUnit: HandlingUnit
+  qty: number
+  description?: string | null
+  dims?: FreightDimensions | null
+  weightLbs?: number | null
+  freightClass?: string | null
+  nmfc?: string | null
+  hazmat?: FreightHazmat | null
+  stackable?: boolean | null
+  highValue?: boolean | null
+}
+
+export interface TemperatureRange {
+  target: number
+  min: number
+  max: number
+}
+
+export interface SpecialRequirements {
+  team?: boolean | null
+  tarps?: boolean | null
+  straps?: boolean | null
+  liftgate?: boolean | null
+  hazmat?: boolean | null
+  tempF?: TemperatureRange | null
+  other?: string[] | null
+  /** Aljex Escort / Over Size / Permit / Blind / Seal (flag, not a seal number) / Temp Control (no range). */
+  escort?: boolean | null
+  oversize?: boolean | null
+  permit?: boolean | null
+  blind?: boolean | null
+  sealRequired?: boolean | null
+  tempControl?: boolean | null
+  /** Aljex Customs Bond (text as exported). */
+  customsBond?: string | null
+  /** Aljex Plt In / Plt Out (counts). */
+  palletsIn?: number | null
+  palletsOut?: number | null
+}
+
+/** Who to hand paperwork to at a stop. */
+export interface StopDocumentContact {
+  name?: string | null
+  phone?: string | null
+  email?: string | null
+}
+
+/** P5. A shipment the automation built is BUILDING until every required field is filled. */
+export type ShipmentBuildState = 'BUILDING' | 'BUILT'
+
+export type PostingStatus = 'POSTED' | 'UNPOSTED' | 'FAILED'
+
+/**
+ * P6. One row per board a shipment is — or was — posted to.
+ *
+ * `mode` is the Step J adapter's own answer. A STUB posting is labelled STUB
+ * everywhere it is shown, because `stub:…` is not a board id.
+ */
+export interface ShipmentPostingRecord {
+  id: string
+  shipmentId: string
+  loadId?: string | null
+  provider: string
+  status: PostingStatus
+  mode: 'STUB' | 'LIVE'
+  boardPostingId?: string | null
+  /** The provider's own answer, verbatim. */
+  message?: string | null
+  postedAt?: string | null
+  postedBy?: string | null
+  unpostedAt?: string | null
+  unpostedBy?: string | null
+  originCity?: string | null
+  originState?: string | null
+  destinationCity?: string | null
+  destinationState?: string | null
+  pickupAppt?: string | null
+  equipmentType?: string | null
+  lengthFt?: number | null
+  weightLbs?: number | null
+  rateCents?: number | null
+  contactEmail?: string | null
+  contactPhone?: string | null
+  note?: string | null
+  offerCount?: number | null
+  createdBy: string
+  updatedBy: string
+  version?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type ShipmentMessageChannel = 'EMAIL' | 'SMS' | 'VOICE'
+export type ShipmentMessageKind =
+  | 'RATE_CON' | 'CHECK_CALL' | 'CHECK_CALL_REPLY' | 'POD_REQUEST' | 'POD_REPLY'
+  | 'ESCALATION' | 'CARRIER_OFFER' | 'QUOTE' | 'TENDER' | 'NOTE' | 'OTHER'
+export type ShipmentMessageParty = 'DRIVER' | 'DISPATCHER' | 'CARRIER' | 'CUSTOMER' | 'INTERNAL'
+export type ShipmentMessageStatus = 'SENT' | 'NOT_SENT' | 'FAILED' | 'RECEIVED'
+
+/**
+ * P8 / N4. One e-mail or text on a shipment's thread.
+ *
+ * On dev SES is denied and Twilio is unset, so an outbound row lands `NOT_SENT`
+ * carrying the exact message it would have sent. `VOICE` exists in the channel
+ * vocabulary and nothing writes it: voice is deferred, declared and disabled.
+ */
+export interface ShipmentMessageRecord {
+  id: string
+  shipmentId: string
+  threadKey: string
+  loadId?: string | null
+  loadCarrierId?: string | null
+  direction: 'IN' | 'OUT'
+  channel: ShipmentMessageChannel
+  kind: ShipmentMessageKind
+  party?: ShipmentMessageParty | null
+  to?: string | null
+  from?: string | null
+  cc?: string | null
+  subject?: string | null
+  body?: string | null
+  status: ShipmentMessageStatus
+  error?: string | null
+  messageId?: string | null
+  inReplyTo?: string | null
+  providerRef?: string | null
+  attachments?: { name: string; contentType?: string | null; sizeBytes?: number | null; s3Key?: string | null }[] | null
+  documentIds?: string[] | null
+  trackingLinkId?: string | null
+  workflowRunId?: string | null
+  /** Whether a person or the agent wrote it; the signature is appended from this. */
+  authorKind?: 'AGENT' | 'PERSON' | null
+  authorName?: string | null
+  at: string
+  createdBy: string
+  /** Step AL: the classified inbound offer. Null on every other message. */
+  offer?: InboundOfferRecord | null
+  /** Step AL: epoch seconds; set only on shipmentId='UNMATCHED' bucket rows. */
+  ttlEpoch?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** P1/P11. The seed's own index, so a reset can only ever touch what the seed made. */
+export interface DemoRecordRow {
+  id: string
+  kind: string
+  demoKey: string
+  recordId: string
+  seedVersion: string
+  step?: string | null
+  label?: string | null
+  detail?: Record<string, unknown> | null
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ShipmentRecord {
+  id: string
+  /** Aljex-exit Phase 0. Imported history: waives paperwork and driver gates. Written only by the import engine. */
+  legacyImported?: boolean | null
+  legacySource?: LegacySource | null
+  importRunId?: string | null
+  /** Step AP: set when the shipment was pushed into Load Review from the board. */
+  loadReviewPushedAt?: string | null
+  loadReviewPushedBy?: string | null
+  /**
+   * Aljex codes stored verbatim by the import so Settings > Users can map them to people later
+   * (`AljexCodeMap`). `salesRepId` stays null until a mapping is applied.
+   */
+  salesRepCode?: string | null
+  createdByCode?: string | null
+  serviceRepCode?: string | null
+  dispatcherCode?: string | null
+  /** Aljex OSD (over, short, damaged) flag. */
+  osd?: boolean | null
+  /** `shipmentPrefix` + padded counter; backfilled rows keep `L<aljexId>`. */
+  number: string
+  status: ShipmentStatus
+  /** What ON_HOLD / CANCELED interrupted, so un-hold and un-cancel can put it back. */
+  previousStatus?: ShipmentStatus | null
+  statusChangedAt?: string | null
+  statusChangedBy?: string | null
+  holdReason?: string | null
+  cancelReason?: string | null
+  tenderRejectReason?: string | null
+  deletedAt?: string | null
+  deletedBy?: string | null
+  /**
+   * Step R cutover. Null means the customer is not resolved to a record yet — the
+   * shipment was created from typed text and nobody has matched it. `customerName`
+   * carries that text verbatim; no name is ever invented. Readiness is derived from
+   * this being null, never from status, because a backfilled row can be DELIVERED
+   * and still unresolved. SET_SHIPMENT_CUSTOMER is the only writer.
+   */
+  customerId: string | null
+  customerName?: string | null
+  mode: ShipmentMode
+  /** Consolidation parent. Always null in step B. */
+  parentShipmentId?: string | null
+  orderIds?: string[] | null
+  loadIds?: string[] | null
+  // Mirrors of the first pickup / last delivery, kept so the board sorts and filters
+  // without reading every load.
+  pickupAppt?: string | null
+  deliveryAppt?: string | null
+  pickupMonth?: string | null
+  originCity?: string | null
+  destinationCity?: string | null
+  /** Lower-cased number · customer · cities · reference values, for board search. */
+  searchKey?: string | null
+  source: ShipmentSource
+  // Step D — the customer tracking link, one stable token per shipment
+  customerLinkId?: string | null
+  customerLinkSentAt?: string | null
+  // Step E — delivery and the notices it triggered
+  /** Stamped when every load of the shipment has delivered. */
+  deliveredAt?: string | null
+  lastNoticeAt?: string | null
+  lastNoticeStatus?: string | null
+  // Step R — revenue ownership, Void and the DAT board
+  /** Top-level `OwnershipDivision` code this shipment's revenue belongs to. */
+  revDivision?: string | null
+  /** The matched descendant division, when the rule resolved deeper than the top. */
+  revSubdivision?: string | null
+  /** `HAND` beats the rules and survives a carrier or driver change. */
+  revTagSource?: RevTagSource | null
+  /** The `OwnershipRule` that resolved the tag, when `revTagSource` is `RULE`. */
+  revRuleId?: string | null
+  /** Who set a `HAND` tag; null while the rules decide. */
+  revTaggedBy?: string | null
+  /** Cognito username of the rep who sold it. */
+  salesRepId?: string | null
+  /** Step V. UserProfile id of the person tracking the shipment; null = unassigned. */
+  trackerId?: string | null
+  /** Step I. Cognito username of the rep covering the shipment; mirrored onto every load. */
+  carrierRepId?: string | null
+  /** Step AM. Ladder rung of the active carrier assignment; null when nobody is assigned. */
+  carrierAssignmentStatus?: CarrierAssignmentStatus | null
+  /** Step I. Team assigned to cover the shipment. */
+  carrierTeamKey?: string | null
+  /** Void is the only exit: the PRO, the history and the documents all stay. */
+  voidedAt?: string | null
+  voidedBy?: string | null
+  voidReason?: string | null
+  /** When the load was posted to the DAT board (written in step J). */
+  datPostedAt?: string | null
+  /**
+   * The WorkflowRun a person applied to create this shipment. Read-only to a client
+   * (the `voidedAt` pattern): CREATE_SHIPMENT writes it, nothing else.
+   */
+  workflowRunId?: string | null
+  /** Step U. The IntakeLoad this shipment was moved from, and who reviewed it, when. */
+  intakeLoadId?: string | null
+  intakeReviewedBy?: string | null
+  intakeReviewedAt?: string | null
+
+  // ── The demo flow (Step P) ─────────────────────────────────────────────────
+  /**
+   * P5. BUILDING while a required field the customer asks for is still empty.
+   * Nothing downstream — posting, dispatch, release to billing — accepts a
+   * shipment that is still BUILDING.
+   */
+  buildState?: ShipmentBuildState | null
+  /** The "Needs: …" list, recomputed on every write that could fill one. */
+  missingFields?: string[] | null
+  /** P6. Boards this shipment is live on right now. */
+  postedBoards?: string[] | null
+  /** P8. `tracking+<shipmentId>` — the key every message on the thread carries. */
+  threadKey?: string | null
+  threadOpenedAt?: string | null
+  /** P7. Literal 'OPEN' while a carrier offer is waiting on a human. */
+  carrierOfferOpen?: string | null
+  /** P9. The app refused a POD twice and asked for a person. */
+  podFlaggedAt?: string | null
+  podFlagReason?: string | null
+  /** P8. The tracking agent's own flag, shown on the Tracking page. */
+  trackingFlaggedAt?: string | null
+  trackingFlagReason?: string | null
+  /** Step AJ. Per-shipment tracking override; absent/null = inherit the customer (`effectiveTrackingPrefs`). */
+  trackingPrefs?: TrackingPrefsOverride | null
+  createdBy: string
+  updatedBy: string
+  version?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface OrderRecord {
+  id: string
+  shipmentId: string
+  /** Null for the same reason as `ShipmentRecord.customerId`; the two move together. */
+  customerId: string | null
+  customerName?: string | null
+  customerContactId?: string | null
+  customerRepId?: string | null
+  billToId?: string | null
+  costCenter?: string | null
+  mode: ShipmentMode
+  rateType?: RateType | null
+  references?: OrderReference[] | null
+  equipmentType?: string | null
+  equipmentLengthFt?: number | null
+  specialRequirements?: SpecialRequirements | null
+  freight?: FreightItem[] | null
+  customerNotes?: string | null
+  internalNotes?: string | null
+  /** Cached from the CUSTOMER charge lines: rate = linehaul + FSC, revenue = all lines. */
+  customerRateCents?: number | null
+  revenueCents?: number | null
+  arStatus?: ArStatus | null
+  arStatusChangedAt?: string | null
+  invoiceId?: string | null
+  /** Lets AR move ahead of delivery for customers that bill on pickup. */
+  invoiceEarly?: boolean | null
+  readyToInvoiceAt?: string | null
+  // Step F — cached from the Invoice, so no board cell has to read the invoice row
+  invoiceNumber?: string | null
+  invoicedAt?: string | null
+  paidAt?: string | null
+  /** What is still owed on this order. Null before it is invoiced. */
+  arBalanceCents?: number | null
+  /** The OTR queue row Send to Factor wrote for this order's invoice. */
+  factoringItemId?: string | null
+  // Step E — what the required-document gate decided last time anything changed
+  docsRequired?: string[] | null
+  /** `[]` means complete. The board's Docs column reads this. */
+  docsMissing?: string[] | null
+  docsCheckedAt?: string | null
+  docsOverrideAt?: string | null
+  docsOverrideBy?: string | null
+  docsOverrideNote?: string | null
+  pickupAppt?: string | null
+  createdBy: string
+  updatedBy: string
+  version?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * One assignment of a load to somebody who can haul it — our own driver and truck, or
+ * an outside carrier. Bounces and TONUs keep their row; only one is ACTIVE at a time.
+ */
+export interface LoadCarrierRecord {
+  id: string
+  loadId: string
+  shipmentId: string
+  kind: LoadCarrierKind
+  status: LoadCarrierStatus
+  removalReason?: string | null
+  removedAt?: string | null
+  removedBy?: string | null
+  /** 1-based order of assignment attempts on this load. */
+  sequence?: number | null
+  carrierId?: string | null
+  carrierName?: string | null
+  carrierMc?: string | null
+  carrierRepId?: string | null
+  dispatcherName?: string | null
+  dispatcherPhone?: string | null
+  dispatcherEmail?: string | null
+  driverId?: string | null
+  driverName?: string | null
+  driverPhone?: string | null
+  driver2Name?: string | null
+  driver2Phone?: string | null
+  truckId?: string | null
+  truckNumber?: string | null
+  trailerId?: string | null
+  trailerNumber?: string | null
+  plates?: string | null
+  vin?: string | null
+  sealNumber?: string | null
+  tripNumber?: string | null
+  pickupEtaAt?: string | null
+  deliveryEtaAt?: string | null
+  priorDeliveryAt?: string | null
+  priorDeliveryNote?: string | null
+  rateConSignedAt?: string | null
+  rateConKey?: string | null
+  chargesFinalizedAt?: string | null
+  /** Cached from the CARRIER charge lines for this assignment. */
+  carrierRateCents?: number | null
+  costCents?: number | null
+  apStatus?: ApStatus | null
+  invoiceId?: string | null
+  // Step G — AP: what the assignment still owes and when its rung last moved
+  /** Sparse `'OPEN'` while the leg owes a carrier money; absent once PAID or bounced. */
+  apOpen?: string | null
+  apStatusChangedAt?: string | null
+  apBalanceCents?: number | null
+  apPaidAt?: string | null
+  // Step C — quick pay, the rate confirmation and the booking trail
+  /** Free text behind `removalReason`, which is an enum. */
+  removalNote?: string | null
+  quickPay?: boolean | null
+  quickPayDays?: number | null
+  quickPayFeeBps?: number | null
+  /** The AP deduction, cached at booking. Never a CARRIER charge line. */
+  quickPayFeeCents?: number | null
+  paymentTermsDays?: number | null
+  rateConStatus?: RateConStatus | null
+  /** Opaque token in the signing link; looked up by scan, so it is never a key. */
+  rateConToken?: string | null
+  rateConSentAt?: string | null
+  rateConSentTo?: string | null
+  rateConExpiresAt?: string | null
+  rateConDocumentId?: string | null
+  rateConSignerName?: string | null
+  rateConSignerIp?: string | null
+  rateConVersion?: number | null
+  bookedAt?: string | null
+  /** Findings the booker acknowledged, kept as the record of what they were told. */
+  bookingWarnings?: string[] | null
+  dispatchedAt?: string | null
+  dispatchNote?: string | null
+  // Step D — the carrier ping link
+  /** The ACTIVE CARRIER_PING TrackingLink, while one is out. */
+  trackingLinkId?: string | null
+  trackingStartedAt?: string | null
+  trackingStoppedAt?: string | null
+  // AT-plan MC0 — several carriers on one load
+  /** `Stop.id`s of the load this carrier covers. Absent/empty = every stop. */
+  legStopIds?: string[] | null
+  /** Per-carrier override of the shipment's tracking prefs; absent = inherit. */
+  trackingPrefs?: TrackingPrefsOverride | null
+  // Step E — the carrier upload portal and the carrier's paperwork
+  uploadLinkId?: string | null
+  podRequestedAt?: string | null
+  /** Carrier-scope paperwork still outstanding, cached for step G. Blocks nothing in E. */
+  docsMissing?: string[] | null
+  ratingStars?: number | null
+  ratingNote?: string | null
+  ratedAt?: string | null
+  ratedBy?: string | null
+  // Step AM — the assignment ladder (src/lib/carrierAssignment.ts)
+  assignmentStatus?: CarrierAssignmentStatus | null
+  /** JSON string map status -> ISO time; read with `parseAssignmentTimes`. */
+  assignmentTimes?: string | Partial<Record<CarrierAssignmentStatus, string>> | null
+  createdBy: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Cached money for one load. `id` is the load id, so there is exactly one per load. */
+export interface LoadFinancialsRecord {
+  id: string
+  loadId: string
+  shipmentId: string
+  orderId?: string | null
+  customerRateCents: number
+  revenueCents: number
+  carrierRateCents: number
+  costCents: number
+  profitCents: number
+  marginBps: number
+  /** Most we may pay a carrier before booking warns; null when no floor is configured. */
+  topSpendCents?: number | null
+  targetBuyCents?: number | null
+  /** Set once invoicing freezes the numbers (step F); recalculation is refused after. */
+  frozenAt?: string | null
+  frozenBy?: string | null
+  updatedBy: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** MVMNT's FinancialLineItem: one charge on one side of one shipment. */
+export interface LoadChargeRecord {
+  id: string
+  shipmentId: string
+  side: ChargeSide
+  orderId?: string | null
+  loadId?: string | null
+  loadCarrierId?: string | null
+  code: string
+  label?: string | null
+  calculatedBy: ChargeCalc
+  rateCents: number
+  count?: number | null
+  amountCents: number
+  /** LINEHAUL and FSC only — these sum to the Customer Rate / Carrier Rate. */
+  isRate: boolean
+  release?: string | null
+  sortOrder: number
+  note?: string | null
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** What RECALC_CHARGES accepts: the stored row minus everything the server derives. */
+export interface LoadChargeInput {
+  id?: string | null
+  side: ChargeSide
+  orderId?: string | null
+  loadId?: string | null
+  loadCarrierId?: string | null
+  code: string
+  label?: string | null
+  calculatedBy: ChargeCalc
+  rateCents: number
+  count?: number | null
+  isRate: boolean
+  release?: string | null
+  sortOrder: number
+  note?: string | null
+}
+
+/** Everything one shipment page needs, returned by every shipment mutation. */
+export interface ShipmentBundle {
+  shipment: ShipmentRecord
+  orders: OrderRecord[]
+  loads: ShipmentLoad[]
+  loadCarriers: LoadCarrierRecord[]
+  charges: LoadChargeRecord[]
+  financials: LoadFinancialsRecord[]
+  /** Step E: the shipment's typed document index, newest last. */
+  documents: ShipmentDocumentRecord[]
+}
+
+export type BatchShipmentTask =
+  | 'RELEASE_TO_BILLING'
+  | 'SET_SALES_REP'
+  | 'SET_REV_DIVISION'
+  | 'SET_CARRIER_REP'
+  | 'SET_STATUS'
+  | 'ASSIGN_DRIVER'
+  | 'PUSH_TO_LOAD_REVIEW'
+
+export interface BatchShipmentTaskRowResult {
+  shipmentId: string
+  number: string | null
+  ok: boolean
+  message: string | null
+  /** Step AP: per-row reasons a push or release was refused (one sentence each); absent on success. */
+  reasons?: string[]
+}
+
+export interface BatchShipmentTaskResult {
+  results: BatchShipmentTaskRowResult[]
+}
+
+/**
+ * The Load fields the shipment layer added. Declared here (not only on `Load`) so the
+ * Lambda and the backfill script can talk about a load without importing the whole
+ * own-fleet Load type.
+ */
+export interface ShipmentLoadFields {
+  /** Aljex-exit Phase 0. Read-only to clients; written only by the import engine. */
+  legacyImported?: boolean | null
+  legacySource?: LegacySource | null
+  shipmentId?: string | null
+  orderId?: string | null
+  /** `<shipment number>-<leg>`. */
+  loadNumber?: string | null
+  leg?: number | null
+  /** Absent on legacy rows that predate the shipment layer. */
+  status?: LoadWorkflowStatus | null
+  statusChangedAt?: string | null
+  statusChangedBy?: string | null
+  statusSource?: LoadStatusSource | null
+  carrierRepId?: string | null
+  assignmentType?: AssignmentType | null
+  activeLoadCarrierId?: string | null
+  carrierName?: string | null
+  /** Step AM. Mirror of the active assignment's ladder rung; null when nobody is assigned. */
+  carrierAssignmentStatus?: CarrierAssignmentStatus | null
+  equipmentType?: string | null
+  divisionKey?: string | null
+  trackingProvider?: TrackingProvider | null
+  nextCheckCallAt?: string | null
+  nextCheckCallNote?: string | null
+  /** Sparse GSI key: literally `'OPEN'` while a check call is due, otherwise absent. */
+  checkCallOpen?: 'OPEN' | null
+  /** `YYYY-MM` of the first pickup, for the board's month GSI. */
+  pickupMonth?: string | null
+  // Step D — tracking and check calls
+  lastCheckCallAt?: string | null
+  lastCheckCallType?: CheckCallType | null
+  lastKnownAt?: string | null
+  lastKnownCity?: string | null
+  lastKnownState?: string | null
+  lastKnownLat?: number | null
+  lastKnownLng?: number | null
+  // Step P8 — prior ping, additive.
+  lastKnownPreviousAt?: string | null
+  lastKnownPreviousCity?: string | null
+  lastKnownPreviousState?: string | null
+  lastKnownPreviousLat?: number | null
+  lastKnownPreviousLng?: number | null
+  lastKnownSource?: LastKnownSource | null
+  /** Unresolved INCIDENT check calls on this load. */
+  openIncidentCount?: number | null
+  deliveredAt?: string | null
+  /** When the notice for the CURRENT `nextCheckCallAt` went out; a reschedule re-arms both. */
+  checkCallDueNotifiedAt?: string | null
+  checkCallOverdueNotifiedAt?: string | null
+  // ── The check-call plan this leg runs on (Step P8) ─────────────────────────
+  /**
+   * The customer's plan copied onto the load when the carrier is assigned, so a
+   * dispatcher may change the cadence for one load without touching the customer.
+   * The tracking agent reads only this field.
+   */
+  checkCallPlan?: CheckCallPlan | null
+  checkCallPlanStartedAt?: string | null
+  /** The reply clock behind the 30-minute escalation; cleared by any inbound reply. */
+  checkCallAwaitingSince?: string | null
+  checkCallEscalatedAt?: string | null
+  /** The Tracking-page flag the deferred voice ladder falls through to. */
+  checkCallFlaggedAt?: string | null
+  checkCallFlagReason?: string | null
+}
+
+/**
+ * The shipment layer's view of a load: identity, schedule mirrors, the shipment
+ * fields, and the stops the drawer renders. A `Load` satisfies it, so the bundle
+ * can carry whichever subset the query selected.
+ */
+export interface ShipmentLoad extends ShipmentLoadFields {
+  id: string
+  aljexId?: string | null
+  pickupAppt?: string | null
+  deliveryAppt?: string | null
+  originCity?: string | null
+  destinationCity?: string | null
+  customer?: string | null
+  rate?: number | null
+  miles?: number | null
+  /** What is on the truck, as the booking gates read it. */
+  commodity?: string | null
+  weight?: number | null
+  cargoValueCents?: number | null
+  freightDescription?: string | null
+  stops?: Stop[] | null
+  updatedAt?: string | null
+}
+
+// ── Step C — carriers ───────────────────────────────────────────────────────
+
+export type CarrierType = 'TL' | 'LTL' | 'CARTAGE' | 'LINEHAUL' | 'AIR' | 'OCEAN' | 'RAIL' | 'AGENT'
+export type CarrierStatus = 'PENDING' | 'REVIEW' | 'ACTIVE' | 'INACTIVE' | 'DO_NOT_USE'
+export type CarrierInactiveReason =
+  | 'EXPIRED_INSURANCE'
+  | 'INACTIVE_AUTHORITY'
+  | 'INACTIVE_AGREEMENT'
+  | 'SAFETY_ISSUES'
+  | 'OTHER'
+export type CarrierDoNotUseReason =
+  | 'DOUBLE_BROKERING'
+  | 'CARGO_CLAIM'
+  | 'THEFT'
+  | 'FRAUD'
+  | 'SUSPICIOUS_ACTIVITY'
+export type CarrierStatusReason = CarrierInactiveReason | CarrierDoNotUseReason
+export type AuthorityStatus = 'ACTIVE' | 'INACTIVE' | 'NONE' | 'UNKNOWN'
+export type SafetyRating = 'SATISFACTORY' | 'CONDITIONAL' | 'UNSATISFACTORY' | 'NONE' | 'UNKNOWN'
+export type ComplianceCheckStatus = 'PASS' | 'FAIL' | 'INCOMPLETE' | 'PARTIAL' | 'NONE'
+export type CarrierEquipment =
+  | 'CONTAINER'
+  | 'FLATBED'
+  | 'POWER_ONLY'
+  | 'REEFER'
+  | 'SPECIALIZED'
+  | 'TANKER'
+  | 'VAN'
+export type InsurancePolicyType =
+  | 'AUTO_LIABILITY'
+  | 'CARGO'
+  | 'GENERAL_LIABILITY'
+  | 'WORKERS_COMP'
+  | 'OTHER'
+export type CarrierContactType =
+  | 'ACCOUNTING'
+  | 'AFTER_HOURS'
+  | 'CLAIMS'
+  | 'DISPATCH'
+  | 'DRIVER'
+  | 'EMERGENCY'
+  | 'MANAGER'
+  | 'OWNER'
+export type CarrierPaymentMethodKind = 'ACH' | 'WIRE' | 'CHECK' | 'ZELLE' | 'VENMO' | 'EFT'
+export type CarrierPayeeType = 'CARRIER' | 'FACTOR'
+export type CarrierDocumentType =
+  | 'AUTHORITY'
+  | 'COI_AUTO'
+  | 'COI_CARGO'
+  | 'COI_GENERAL'
+  | 'W9'
+  | 'CARRIER_AGREEMENT'
+  | 'FACTOR_NOA'
+  | 'CDL'
+  | 'RATE_CON'
+  | 'OTHER'
+export type CarrierDocumentSource = 'UPLOAD' | 'GENERATED' | 'SIGNED'
+export type RateConStatus =
+  | 'NOT_SENT'
+  | 'SENT'
+  | 'OPENED'
+  | 'SIGNED'
+  | 'DECLINED'
+  | 'VOIDED'
+  | 'EXPIRED'
+export type RateConRequiredField =
+  | 'DRIVER_NAME'
+  | 'DRIVER_PHONE'
+  | 'TRUCK_NUMBER'
+  | 'TRAILER_NUMBER'
+  | 'PICKUP_ETA'
+  | 'PLATES'
+  | 'VIN'
+export type BookingRequiredField = 'COMMODITY' | 'DESCRIPTION' | 'VALUE' | 'WEIGHT'
+
+/** One certificate of insurance, as the carrier record stores it. */
+export interface InsurancePolicy {
+  id: string
+  type: InsurancePolicyType
+  company?: string | null
+  policyNumber?: string | null
+  agentName?: string | null
+  agentPhone?: string | null
+  limitCents?: number | null
+  deductibleCents?: number | null
+  effectiveAt?: string | null
+  expiresAt?: string | null
+  exclusions?: string | null
+}
+
+/** One rung of the quick-pay ladder: pay in `days`, keep `feeBps` of the rate. */
+export interface QuickPayTier {
+  days: number
+  feeBps: number
+}
+
+/**
+ * An outside carrier. `status` is what somebody set; what booking actually reads is
+ * `effectiveCarrierStatus`, which can demote an ACTIVE carrier whose cargo insurance
+ * has run out. Compliance portals (Highway, RMIS, MCP) are typed in by hand for now.
+ */
+export interface CarrierRecord {
+  id: string
+  /** Aljex `Line Haul Carrier ID` (Phase 0 import). */
+  aljexCode?: string | null
+  name: string
+  dbaName?: string | null
+  normalizedName?: string | null
+  type: CarrierType
+  status: CarrierStatus
+  statusReason?: CarrierStatusReason | null
+  statusNote?: string | null
+  statusChangedAt?: string | null
+  statusChangedBy?: string | null
+  mcNumber?: string | null
+  dotNumber?: string | null
+  scac?: string | null
+  /** Encrypted-vault mirror (read-only to clients): the number itself is never on the Carrier row. */
+  taxIdLast4?: string | null
+  taxIdType?: 'EIN' | 'SSN' | null
+  taxIdOnFileAt?: string | null
+  inFmcsa?: boolean | null
+  authorityStatus?: AuthorityStatus | null
+  authorityGrantedAt?: string | null
+  authorityExpiresAt?: string | null
+  safetyRating?: SafetyRating | null
+  safetyRatingAt?: string | null
+  reviewType?: string | null
+  reviewedAt?: string | null
+  driverInspections?: number | null
+  driverOos?: number | null
+  vehicleInspections?: number | null
+  vehicleOos?: number | null
+  insurancePolicies?: InsurancePolicy[] | null
+  /** Aljex Carrier CA Intrastate / TX PUC numbers and expiries (YYYY-MM-DD). */
+  caIntrastateNumber?: string | null
+  caIntrastateExpiresAt?: string | null
+  txPucNumber?: string | null
+  txPucExpiresAt?: string | null
+  /** Imported from Aljex and never reviewed here; carrier compliance data still PENDING. */
+  legacyImported?: boolean | null
+  legacySource?: LegacySource | null
+  /** MyCarrierPackets sync (McpAdapter). */
+  mcpReviewStatus?: string | null
+  mcpPacketCompletedAt?: string | null
+  mcpSyncedAt?: string | null
+  mcpSyncRunId?: string | null
+  /** Step AD: the last packet invitation sent from Find & Invite. */
+  mcpInvitedAt?: string | null
+  mcpInvitedTo?: string | null
+  mcpInvitedBy?: string | null
+  /** Human-edited notes the agents read for this carrier. Never agent-written. */
+  aiMemory?: PartyAiMemory | null
+  equipment?: string[] | null
+  cargoTypes?: string[] | null
+  powerUnits?: number | null
+  trailerCount?: number | null
+  driverCount?: number | null
+  address?: Record<string, unknown> | null
+  phone?: string | null
+  email?: string | null
+  website?: string | null
+  dispatcherName?: string | null
+  dispatcherPhone?: string | null
+  dispatcherEmail?: string | null
+  paymentTermsDays?: number | null
+  quickPayEligible?: boolean | null
+  defaultQuickPayDays?: number | null
+  factorPaymentMethodId?: string | null
+  highwayStatus?: ComplianceCheckStatus | null
+  rmisStatus?: ComplianceCheckStatus | null
+  mcpStatus?: string | null
+  /** Numeric MCP risk assessment points; used with maxRiskAssessmentPoints to block MODERATE carriers. */
+  mcpRiskScore?: number | null
+  accountOwnerIds?: string[] | null
+  teamKey?: string | null
+  internalNotes?: string | null
+  loadCount?: number | null
+  lastLoadAt?: string | null
+  createdBy: string
+  updatedBy: string
+  version?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** A person at the carrier. At most one is `isPrimary`. */
+export interface CarrierContactRecord {
+  id: string
+  carrierId: string
+  name: string
+  types?: CarrierContactType[] | null
+  email?: string | null
+  phone?: string | null
+  isPrimary?: boolean | null
+  rateConRecipient?: boolean | null
+  active?: boolean | null
+  createdBy: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Where the carrier's money goes. Only the last four digits are ever stored here. */
+export interface CarrierPaymentMethodRecord {
+  id: string
+  carrierId: string
+  method: CarrierPaymentMethodKind
+  recipientType: CarrierPayeeType
+  factorName?: string | null
+  factorAddress?: Record<string, unknown> | null
+  bankName?: string | null
+  accountName?: string | null
+  accountLast4?: string | null
+  routingLast4?: string | null
+  bankDetailsKey?: string | null
+  payeeEmail?: string | null
+  remitToAddress?: Record<string, unknown> | null
+  isPreferred?: boolean | null
+  status?: 'ACTIVE' | 'INACTIVE' | null
+  createdBy: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** A file on the carrier — uploaded by us, or generated and signed by them. */
+export interface CarrierDocumentRecord {
+  id: string
+  carrierId: string
+  type: CarrierDocumentType
+  name: string
+  s3Key: string
+  contentType: string
+  sizeBytes: number
+  expiresAt?: string | null
+  loadCarrierId?: string | null
+  source: CarrierDocumentSource
+  uploadedBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Everything one carrier page needs, returned by every carrier mutation. */
+export interface CarrierBundle {
+  carrier: CarrierRecord
+  contacts: CarrierContactRecord[]
+  paymentMethods: CarrierPaymentMethodRecord[]
+  documents: CarrierDocumentRecord[]
+  loadCarriers: LoadCarrierRecord[]
+}
+
+// ── Step D — tracking and check calls ───────────────────────────────────────
+//
+// One event log (LoadCheckCall) and one token table (TrackingLink) carry every
+// tracking fact: what somebody was told on the phone, what the driver app stamped,
+// what a tapped link pinged. The rules that read them are pure and live in
+// src/lib/checkCalls.ts, src/lib/trackingTimeline.ts and src/lib/trackingLink.ts.
+
+export type CheckCallType =
+  | 'DISPATCH'
+  | 'LOCATION_UPDATE'
+  | 'ARRIVED'
+  | 'DEPARTED'
+  | 'ETA_UPDATE'
+  | 'INCIDENT'
+  | 'NOTE'
+  | 'TRACKING_LINK_SENT'
+  | 'TRACKING_PING'
+
+/** The two events that stamp a stop clock, and so can move a load's status. */
+export type StopEventType = 'ARRIVED' | 'DEPARTED'
+
+export type CheckCallSource = 'MANUAL' | 'DRIVER_APP' | 'LINK' | 'SYSTEM'
+
+/** Where `Load.lastKnown*` came from. Motive fixes never become check calls. */
+export type LastKnownSource = 'MANUAL' | 'DRIVER_APP' | 'LINK' | 'MOTIVE' | 'SYSTEM'
+
+/** MVMNT's `LoadCheckCallIncidentType`, verbatim (spec §6.1). */
+export type IncidentType =
+  | 'ACCIDENT'
+  | 'ACTUAL_CLAIM'
+  | 'ATTEMPTED_DELIVERY'
+  | 'BREAKDOWN'
+  | 'DELAY'
+  | 'DELIVERY_NOT_COMPLETED'
+  | 'DETENTION'
+  | 'FRAUD'
+  | 'GENERAL_EXCEPTION'
+  | 'LAYOVER'
+  | 'LOAD_LOCK_ALERT'
+  | 'OVERAGE_SHORTAGE'
+  | 'PICKUP_EXCEPTION'
+  | 'POTENTIAL_CLAIM'
+  | 'REFUSED_BY_CONSIGNEE'
+  | 'REJECTION'
+  | 'SHIPMENT_CANCELLED'
+  | 'SHIPMENT_DAMAGED'
+  | 'SHIPMENT_DELAYED'
+  | 'SHIPMENT_RECONSIGNED'
+  | 'SHIPMENT_RETURNED_TO_SHIPPER'
+  | 'STORAGE_IN_TRANSIT'
+  | 'TONU'
+
+export type CheckCallNotifyChannel = 'IN_APP' | 'SLACK' | 'BOTH'
+
+/** Who the customer tracking page says to call: the order's rep, or a fixed desk. */
+export interface TrackingContact {
+  mode: 'CUSTOMER_REP' | 'FIXED'
+  name?: string | null
+  email?: string | null
+  phone?: string | null
+}
+
+/** What an incident charged, snapshotted on the check call that raised it. */
+export interface CheckCallChargeSnapshot {
+  side: ChargeSide
+  code: string
+  amountCents: number
+  chargeId?: string | null
+}
+
+/**
+ * One row of a load's tracking log. Stop events use the deterministic id
+ * `evt:<loadId>:<stopId>:<ARRIVED|DEPARTED>` so the staff action and the driver-app
+ * projector can never count the same stamp twice; everything else is a UUID.
+ */
+export interface LoadCheckCallRecord {
+  id: string
+  loadId: string
+  shipmentId: string
+  loadCarrierId?: string | null
+  stopId?: string | null
+  /** When it happened. `createdAt` is when it was logged. */
+  at: string
+  type: CheckCallType
+  source: CheckCallSource
+  incidentType?: IncidentType | null
+  /** Sparse GSI key: literally `'OPEN'` while the incident is unresolved. */
+  incidentOpen?: 'OPEN' | null
+  resolvedAt?: string | null
+  resolvedBy?: string | null
+  resolutionNote?: string | null
+  statusBefore?: LoadWorkflowStatus | null
+  /** Null when the call moved nothing. */
+  statusAfter?: LoadWorkflowStatus | null
+  city?: string | null
+  state?: string | null
+  lat?: number | null
+  lng?: number | null
+  accuracyM?: number | null
+  personName?: string | null
+  note?: string | null
+  /** DispatchMessage id, when the note was also texted to the driver. */
+  driverMessageId?: string | null
+  charges?: CheckCallChargeSnapshot[] | null
+  /** What this call scheduled. */
+  nextCheckCallAt?: string | null
+  nextCheckCallNote?: string | null
+  pickupEtaAt?: string | null
+  deliveryEtaAt?: string | null
+  /** Staff e-mail · `driver:<id>` · `link:<token8>` · `system`. */
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type TrackingLinkKind = 'CARRIER_PING' | 'CUSTOMER_VIEW' | 'CARRIER_UPLOAD' | 'PROVIDER_TRACK'
+export type TrackingLinkStatus = 'ACTIVE' | 'REVOKED' | 'EXPIRED'
+export type TrackingLinkChannel = 'SMS' | 'EMAIL' | 'COPY'
+
+/**
+ * A tokenised public link. The `id` **is** the token (24 random bytes base64url), so
+ * the public Lambda reads it by primary key and no token index exists anywhere.
+ */
+export interface TrackingLinkRecord {
+  id: string
+  kind: TrackingLinkKind
+  shipmentId: string
+  shipmentNumber?: string | null
+  customerId?: string | null
+  customerName?: string | null
+  url?: string | null
+  notes?: string | null
+  loadId?: string | null
+  loadCarrierId?: string | null
+  status: TrackingLinkStatus
+  expiresAt: string
+  /** E.164 phone, or comma-joined e-mails. */
+  sentTo?: string | null
+  sentVia?: TrackingLinkChannel | null
+  sentAt?: string | null
+  smsMessageId?: string | null
+  contactName?: string | null
+  contactEmail?: string | null
+  contactPhone?: string | null
+  /** Settings snapshot, so later setting changes never widen a link already sent. */
+  showCarrier?: boolean | null
+  showPosition?: boolean | null
+  openCount?: number | null
+  lastOpenedAt?: string | null
+  /** Request budget, so a leaked link cannot be scraped forever. */
+  requestCount?: number | null
+  pingCount?: number | null
+  lastPingAt?: string | null
+  lastPingLat?: number | null
+  lastPingLng?: number | null
+  lastPingAccuracyM?: number | null
+  revokedAt?: string | null
+  revokedBy?: string | null
+  /** CARRIER_UPLOAD only: the link's file budget and what it was minted asking for. */
+  uploadCount?: number | null
+  lastUploadAt?: string | null
+  neededTypes?: string[] | null
+  // ── Step AO block ──────────────────────────────────────────────────────
+  /** PROVIDER_TRACK: registry key, e.g. 'MACROPOINT'. */
+  provider?: string | null
+  /** PROVIDER_TRACK: the provider's id for the subscription ('stub:<token8>' while STUB). */
+  providerRef?: string | null
+  /** CARRIER_PING: when the driver ticked the consent box (server clock). */
+  consentAt?: string | null
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** A reference number a tracking page is allowed to print. */
+export interface TrackingViewReference {
+  code: string
+  label: string | null
+  value: string
+}
+
+/** One stop as a tracking page renders it: the appointment and the clock, nothing else. */
+export interface TrackingViewStop {
+  id: string
+  type: StopType
+  sequence: number
+  name: string | null
+  city: string | null
+  state: string | null
+  appt: string | null
+  apptEnd: string | null
+  arrivedAt: string | null
+  departedAt: string | null
+  references: TrackingViewReference[]
+}
+
+export interface TrackingViewPosition {
+  lat: number
+  lng: number
+  at: string
+  description: string | null
+  /** Step AO: a guess from a text reply, not a GPS reading. The page says "near", with no precision claim. */
+  approx?: true
+}
+
+export interface TrackingViewContact {
+  name: string | null
+  email: string | null
+  phone: string | null
+}
+
+/**
+ * What the Customer Link shows. Everything a customer must not see — rates, margin,
+ * the carrier, driver and dispatcher phones, internal references — is absent from the
+ * shape itself, so there is nothing to forget to strip.
+ */
+export interface CustomerTrackingView {
+  broker: { name: string }
+  number: string
+  status: ShipmentStatus
+  statusLabel: string
+  stops: TrackingViewStop[]
+  references: TrackingViewReference[]
+  eta: string | null
+  /** Rounded to three decimals (~100 m). Absent when the link hides position. */
+  position?: TrackingViewPosition
+  /** Step AO. Present only when the link shows position: stops, cached route, thinned trail. */
+  map?: CustomerTrackingMap
+  lastUpdate: { at: string; type: CheckCallType } | null
+  /** Name only, and only when the link was minted with `showCarrier`. */
+  carrier?: { name: string }
+  contact: TrackingViewContact | null
+  generatedAt: string
+}
+
+export interface TrackingViewPing {
+  at: string
+  lat: number | null
+  lng: number | null
+  accuracyM: number | null
+}
+
+/** Step AO: the customer's map. 3 dp, thinned, no source / accuracy / speed anywhere. */
+export interface CustomerTrackingMap {
+  stops: Array<{ type: 'pickup' | 'delivery' | 'stop'; lat: number; lng: number }>
+  /** Encoded polyline from the cached route row; null when never computed. */
+  route: string | null
+  trail: Array<{ lat: number; lng: number; at: string; approx?: true }>
+}
+
+/** Step AO: what the driver's page needs to share location with consent. */
+export interface CarrierShareView {
+  everyMin: number
+  consentRequired: boolean
+  consentVersion: string
+  consentText: string
+  /** False once the load is closed. */
+  active: boolean
+  lastPingAt: string | null
+  pingCount: number
+}
+
+/** What the driver's ping link shows. No customer, no money. */
+export interface CarrierTrackingView {
+  loadNumber: string
+  status: LoadWorkflowStatus
+  statusLabel: string
+  stops: TrackingViewStop[]
+  nextStop: TrackingViewStop | null
+  /** The pings this link itself sent, so the driver sees the tap landed. */
+  pings: TrackingViewPing[]
+  /** Step AO. */
+  share?: CarrierShareView
+  contactPhone: string | null
+  generatedAt: string
+}
+
+// ── Step E — documents and delivery ─────────────────────────────────────────
+//
+// One index table (ShipmentDocument) carries every file a shipment has, wherever
+// the bytes live: uploads and generated PDFs under `shipment-docs/{shipmentId}/`,
+// driver-app PODs and legacy rate cons as pointer rows into the stores that
+// already hold them. One notice table (ShipmentNotice) records every e-mail the
+// system tried to send with the text it rendered, so a send that SES refuses is
+// still a readable, copyable artifact. The rules that read them are pure and live
+// in src/lib/shipmentDocuments.ts, src/lib/shipmentNotices.ts and
+// src/lib/uploadPortal.ts.
+
+export type ShipmentDocumentType =
+  | 'BOL'
+  | 'POD'
+  | 'RATE_CON'
+  | 'CUSTOMER_RATE_CON'
+  | 'LOAD_SUMMARY'
+  | 'LUMPER_RECEIPT'
+  | 'WEIGHT_TICKET'
+  | 'TEMP_LOG'
+  | 'INSPECTION_REPORT'
+  | 'CUSTOMS'
+  | 'PACKING_LIST'
+  | 'CARRIER_INVOICE'
+  | 'INVOICE'
+  | 'PHOTO'
+  | 'OTHER'
+
+/** Where the bytes came from. DRIVER_APP and LEGACY rows point at another store. */
+export type ShipmentDocumentSource =
+  | 'UPLOAD'
+  | 'CARRIER_PORTAL'
+  | 'GENERATED'
+  | 'DRIVER_APP'
+  | 'LEGACY'
+
+/** Who may receive the file outside the company. INTERNAL never leaves. */
+export type ShipmentDocumentAudience = 'CUSTOMER' | 'CARRIER' | 'ALL' | 'INTERNAL'
+
+export type ShipmentDocumentStatus = 'ACTIVE' | 'SUPERSEDED' | 'VOID'
+
+/** Sparse: only CARRIER_PORTAL rows ever carry PENDING, which is the review queue. */
+export type ShipmentDocumentReviewStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED'
+
+/** Which block of the Documents tab a row belongs to. */
+export type ShipmentDocumentSection = 'CUSTOMER' | 'CARRIER' | 'SHIPMENT'
+
+/**
+ * One file attached to one shipment. `id` is `sdoc-<uuid>` for anything this system
+ * writes, and deterministic (`drv:<submissionDocId>`, `rck:<loadId>`) for pointer
+ * rows, so a backfill re-run or a stream retry can never list the same file twice.
+ */
+export interface ShipmentDocumentRecord {
+  id: string
+  shipmentId: string
+  /** Set → the Customer section. */
+  orderId?: string | null
+  loadId?: string | null
+  /** Set → the Carrier section, under that assignment. */
+  loadCarrierId?: string | null
+  stopId?: string | null
+  type: ShipmentDocumentType
+  name: string
+  s3Key: string
+  contentType: string
+  sizeBytes: number
+  pages?: number | null
+  source: ShipmentDocumentSource
+  /** The DriverSubmissionDoc / Load id a pointer row points at. */
+  sourceRef?: string | null
+  audience: ShipmentDocumentAudience
+  status: ShipmentDocumentStatus
+  /** Per shipment + type + loadId. A regenerated BOL is v2, not a rewrite of v1. */
+  version: number
+  supersedesId?: string | null
+  reviewStatus?: ShipmentDocumentReviewStatus | null
+  reviewedAt?: string | null
+  reviewedBy?: string | null
+  reviewNote?: string | null
+  uploadLinkId?: string | null
+  voidedAt?: string | null
+  voidedBy?: string | null
+  voidReason?: string | null
+  /** Staff e-mail · `link:<token8>` · `driver:<id>` · `migration:<script>`. */
+  uploadedBy: string
+  /** When the file was attached; the sort key of both indexes. */
+  uploadedAt: string
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type ShipmentNoticeKind =
+  | 'MILESTONE'
+  | 'POD_REQUEST'
+  | 'DOCUMENTS'
+  | 'INVOICE'
+  | 'REMITTANCE'
+  /** Step H: an offer request sent to a carrier on this load. */
+  | 'CARRIER_OFFER'
+
+export type ShipmentNoticeChannel = 'EMAIL' | 'COPY'
+
+/** NOT_SENT is an honest dev outcome: the row and its body exist, SES refused. */
+export type ShipmentNoticeStatus = 'SENT' | 'NOT_SENT' | 'FAILED' | 'COPY'
+
+export interface ShipmentNoticeAttachment {
+  documentId: string
+  name: string
+  sizeBytes: number
+}
+
+/**
+ * Every e-mail step E tries to send, with the text it rendered. Milestone rows use
+ * the deterministic id `ms:<shipmentId>:<milestone>` and the first POD request
+ * `pod:<loadCarrierId>`, so a second leg or a stream retry never sends twice.
+ */
+export interface ShipmentNoticeRecord {
+  id: string
+  shipmentId: string
+  loadId?: string | null
+  loadCarrierId?: string | null
+  kind: ShipmentNoticeKind
+  milestone?: CustomerNotification | null
+  channel: ShipmentNoticeChannel
+  /** Comma-joined. */
+  to: string
+  cc?: string | null
+  subject: string
+  body: string
+  attachments?: ShipmentNoticeAttachment[] | null
+  status: ShipmentNoticeStatus
+  error?: string | null
+  messageId?: string | null
+  sentAt?: string | null
+  trackingLinkId?: string | null
+  /** When the send was attempted; the sort key of the shipment index. */
+  at: string
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** What the required-document gate decided for one scope. */
+export interface DocGateResult {
+  /** True when the document requirement was waived because the shipment is an imported legacy record. */
+  legacy?: boolean
+  required: ShipmentDocumentType[]
+  present: ShipmentDocumentType[]
+  missing: ShipmentDocumentType[]
+  ready: boolean
+  /** Free-text entries nobody could map to a type; they never block. */
+  unrecognised: string[]
+}
+
+/** One line of the carrier portal's "we still need" checklist. */
+export interface UploadNeededType {
+  type: ShipmentDocumentType
+  label: string
+  satisfied: boolean
+}
+
+export interface UploadPortalStop {
+  type: StopType
+  name: string | null
+  city: string | null
+  state: string | null
+  appt: string | null
+}
+
+export interface UploadPortalUpload {
+  id: string
+  type: ShipmentDocumentType
+  name: string
+  sizeBytes: number
+  uploadedAt: string
+  reviewStatus: ShipmentDocumentReviewStatus
+}
+
+/**
+ * What the carrier upload portal shows. The customer, the money and every reference
+ * are absent from the shape itself, so there is nothing to forget to strip.
+ */
+export interface CarrierUploadView {
+  broker: { name: string }
+  loadNumber: string
+  carrierName: string | null
+  stops: UploadPortalStop[]
+  needed: UploadNeededType[]
+  /** Only the rows this link itself uploaded. */
+  uploads: UploadPortalUpload[]
+  expiresAt: string
+  acceptedTypes: string[]
+  maxBytes: number
+  contactPhone: string | null
+  generatedAt: string
+}
+
+// ── AR: invoicing & payments (Step F) ────────────────────────────────────────
+
+export type InvoiceStatus = 'ISSUED' | 'PARTIAL' | 'PAID' | 'VOID'
+
+export type InvoiceBatchEmailMode = 'PER_INVOICE' | 'PER_BILL_TO'
+
+/** Where the money is sent. The division's own, or the factor's for a factored customer. */
+export interface RemitTo {
+  name: string
+  address?: Address | null
+  email?: string | null
+  /** The assignment notice a factor requires on the face of the invoice. */
+  noticeText?: string | null
+}
+
+/** Who is billed, frozen at issue. A later edit to the bill-to does not move it. */
+export interface InvoiceBillTo {
+  name: string
+  address?: Address | null
+  email?: string | null
+}
+
+/** One charge line, copied off the order's CUSTOMER LoadCharge rows at issue. */
+export interface InvoiceLine {
+  chargeId: string
+  loadId?: string | null
+  code: string
+  label?: string | null
+  calculatedBy?: ChargeCalc | null
+  rateCents: number
+  count: number
+  amountCents: number
+}
+
+/**
+ * One issued bill for one order. `id` is the invoice number.
+ *
+ * Everything printed on it is a snapshot: lines, references, bill-to, remit-to, terms
+ * and due date are taken once and never re-read from the order. A mistake is voided
+ * and re-issued, never edited.
+ */
+export interface InvoiceRecord {
+  id: string
+  number: string
+  orderId: string
+  shipmentId: string
+  shipmentNumber?: string | null
+  customerId: string
+  customerName?: string | null
+  billToId?: string | null
+  billTo?: InvoiceBillTo | null
+  divisionKey?: string | null
+  status: InvoiceStatus
+  /** YYYY-MM-DD. */
+  invoiceDate: string
+  issuedAt: string
+  issuedBy: string
+  /** YYYY-MM-DD. */
+  dueAt: string
+  termsDays: number
+  /** The terms text as printed. Snapshotted so a re-render reproduces the sent bill. */
+  termsText?: string | null
+  /** 'YYYY-MM' of invoiceDate. */
+  invoiceMonth: string
+  lines?: InvoiceLine[] | null
+  references?: OrderReference[] | null
+  subtotalCents: number
+  totalCents: number
+  paidCents: number
+  writtenOffCents: number
+  balanceCents: number
+  /** Sparse `'OPEN'` while ISSUED or PARTIAL; absent once PAID or VOID. */
+  arOpen?: string | null
+  paidAt?: string | null
+  remitTo?: RemitTo | null
+  factored?: boolean | null
+  factoringItemId?: string | null
+  pdfKey?: string | null
+  pdfSizeBytes?: number | null
+  pdfVersion?: number | null
+  attachDocumentIds?: string[] | null
+  sentAt?: string | null
+  /** Comma-joined, like `ShipmentNotice.to`. */
+  sentTo?: string | null
+  sentCount?: number | null
+  /** Step AW: the Aljex due date / customer terms kept as a reference when a carried-over invoice is redated (Danisco 120 days). */
+  aljexDueDate?: string | null
+  aljexTerms?: number | null
+  markedSentAt?: string | null
+  markedSentBy?: string | null
+  markedSentNote?: string | null
+  lastNoticeId?: string | null
+  voidedAt?: string | null
+  voidedBy?: string | null
+  voidReason?: string | null
+  note?: string | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type ArPaymentKind = 'PAYMENT' | 'CREDIT_MEMO' | 'WRITE_OFF' | 'REVERSAL'
+
+export type ArPaymentMethod = 'CHECK' | 'ACH' | 'WIRE' | 'CARD' | 'FACTOR' | 'OTHER'
+
+/** Money from this row put against one invoice. */
+export interface PaymentApplication {
+  invoiceId: string
+  amountCents: number
+}
+
+/** Unapplied money on an earlier row spent by this one. */
+export interface CreditApplication {
+  paymentId: string
+  amountCents: number
+}
+
+/**
+ * One posted cash row: a receipt, a credit memo, a write-off or a reversal.
+ *
+ * Immutable once written, except `unappliedCents` — spent down by a later payment with
+ * a conditional ADD — and `reversedByPaymentId`. Nothing deletes one; a mistake gets a
+ * REVERSAL row that restores the balances it took.
+ */
+export interface ArPaymentRecord {
+  id: string
+  customerId: string
+  kind: ArPaymentKind
+  /** The typed date at noon UTC, so a timezone cannot slide a receipt into last month. */
+  receivedAt: string
+  method?: ArPaymentMethod | null
+  reference?: string | null
+  amountCents: number
+  appliedCents: number
+  unappliedCents: number
+  applications?: PaymentApplication[] | null
+  creditApplications?: CreditApplication[] | null
+  /** WRITE_OFF names the invoice it clears. */
+  invoiceId?: string | null
+  reversesPaymentId?: string | null
+  reversedByPaymentId?: string | null
+  note?: string | null
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** The AR half of `TmsSettings`, as the settings card edits it. */
+export interface ArSettings {
+  invoiceNumberFormat?: string | null
+  nextInvoiceNumber?: number | null
+  /** Aljex-exit Phase 0. Input: moves the counter forward so the next invoice is this number. */
+  invoiceSeriesStart?: number | null
+  /** Input only: sets the number format to `{n}` in the same write. */
+  usePlainInvoiceNumbers?: boolean
+  invoiceSeriesStartedAt?: string | null
+  maxImportedInvoiceNumber?: number | null
+  invoiceTerms?: string | null
+  invoiceEmailTemplate?: string | null
+  invoiceAttachTypes?: string[] | null
+  factorRemitTo?: RemitTo | null
+  arPostingAdminOnly?: boolean | null
+  invoiceBatchEmail?: InvoiceBatchEmailMode | null
+  defaultPaymentTermsDays?: number | null
+  invoiceAlwaysCopyEmails?: string[] | null
+  aljexCutoffAt?: string | null
+}
+
+// ── AP: carrier bills & payments (Step G) ────────────────────────────────────
+
+export type CarrierBillStatus = 'IN_REVIEW' | 'TO_BE_PAID' | 'PARTIAL' | 'PAID' | 'VOID'
+
+/** Who is owed is always the carrier; this says where the money is sent. */
+export type ApPayeeKind = 'CARRIER' | 'FACTOR'
+
+export type ApPaymentKind = 'PAYMENT' | 'CREDIT_MEMO' | 'REVERSAL'
+
+export type ApPaymentMethod = 'ACH' | 'WIRE' | 'CHECK' | 'ZELLE' | 'VENMO' | 'EFT' | 'OTHER'
+
+/**
+ * Where a carrier's money goes, snapshotted onto the bill at Record.
+ *
+ * Never carries `bankDetailsKey`: the account itself stays in S3 behind the carrier
+ * directory, and a bill is read by anyone who can read the AP board.
+ */
+export interface ApRemitTo {
+  name: string
+  factorName?: string | null
+  method?: ApPaymentMethod | null
+  accountLast4?: string | null
+  payeeEmail?: string | null
+  address?: Address | null
+}
+
+/** One charge line, copied off the assignment's CARRIER LoadCharge rows at Record. */
+export interface CarrierBillLine {
+  chargeId: string
+  code: string
+  label?: string | null
+  calculatedBy?: ChargeCalc | null
+  rateCents: number
+  count: number
+  amountCents: number
+}
+
+/**
+ * One recorded bill for one carrier assignment.
+ *
+ * Lines, fee, terms and remit-to are a snapshot taken at RECORD_BILL in the same
+ * transaction that finalizes the assignment's charges. A mistake is voided and
+ * re-recorded, never edited.
+ */
+export interface CarrierBillRecord {
+  id: string
+  loadCarrierId: string
+  loadId: string
+  shipmentId: string
+  shipmentNumber?: string | null
+  loadNumber?: string | null
+  carrierId: string
+  carrierName?: string | null
+  carrierMc?: string | null
+  payeeKind: ApPayeeKind
+  paymentMethodId?: string | null
+  remitTo?: ApRemitTo | null
+  divisionKey?: string | null
+  status: CarrierBillStatus
+  /** The carrier's own invoice number. */
+  billNumber?: string | null
+  /** YYYY-MM-DD. */
+  billDate: string
+  /** 'YYYY-MM' of billDate. */
+  billMonth: string
+  recordedAt: string
+  recordedBy: string
+  /** Recorded before the load delivered — approval says so out loud. */
+  recordedEarly?: boolean | null
+  /** YYYY-MM-DD. */
+  dueAt: string
+  termsDays: number
+  quickPay?: boolean | null
+  quickPayDays?: number | null
+  quickPayFeeBps?: number | null
+  lines?: CarrierBillLine[] | null
+  grossCents: number
+  quickPayFeeCents: number
+  /** gross − fee. What we actually pay. */
+  netCents: number
+  /** What the carrier's invoice says. */
+  billedCents: number
+  /** billed − gross. Must be zero before the bill can be approved. */
+  varianceCents: number
+  paidCents: number
+  creditedCents: number
+  /** net − paid − credited. */
+  balanceCents: number
+  /** Sparse `'OPEN'` while IN_REVIEW, TO_BE_PAID or PARTIAL; absent once PAID or VOID. */
+  apOpen?: string | null
+  documentId?: string | null
+  approvedAt?: string | null
+  approvedBy?: string | null
+  approvalWarnings?: string[] | null
+  docsOverrideAt?: string | null
+  docsOverrideBy?: string | null
+  docsOverrideNote?: string | null
+  /** Step AG: set when an AP-inbox e-mail wrote the invoice number/dates. */
+  apInboxItemId?: string | null
+  apInboxSourceUrl?: string | null
+  apInboxAppliedAt?: string | null
+  paidAt?: string | null
+  voidedAt?: string | null
+  voidedBy?: string | null
+  voidReason?: string | null
+  note?: string | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+/**
+ * Money from one AP payment put against one bill.
+ *
+ * `creditCents` is the slice of it that came out of an AP credit rather than out of
+ * the bank, recorded at post so a reversal restores exactly what it took.
+ */
+export interface ApPaymentApplication {
+  billId: string
+  amountCents: number
+  creditCents?: number
+}
+
+/**
+ * One posted AP row: a payment we sent, a credit we hold against a carrier, or a
+ * reversal. Immutable once written, except `unappliedCents` — spent down by a later
+ * payment with a conditional ADD — and `reversedByPaymentId`.
+ */
+export interface ApPaymentRecord {
+  id: string
+  carrierId: string
+  payeeKind?: ApPayeeKind | null
+  kind: ApPaymentKind
+  /** The typed date at noon UTC, so a timezone cannot slide a payment into last month. */
+  paidAt: string
+  method?: ApPaymentMethod | null
+  reference?: string | null
+  amountCents: number
+  appliedCents: number
+  unappliedCents: number
+  applications?: ApPaymentApplication[] | null
+  creditApplications?: CreditApplication[] | null
+  remitTo?: ApRemitTo | null
+  /** A credit raised against one assignment (a TONU adjustment, a claim). */
+  loadCarrierId?: string | null
+  reversesPaymentId?: string | null
+  reversedByPaymentId?: string | null
+  pdfKey?: string | null
+  pdfVersion?: number | null
+  remittanceSentAt?: string | null
+  remittanceSentTo?: string | null
+  remittanceCount?: number | null
+  markedSentAt?: string | null
+  markedSentBy?: string | null
+  markedSentNote?: string | null
+  lastNoticeId?: string | null
+  note?: string | null
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** The AP half of `TmsSettings`, as the settings card edits it. */
+export interface ApSettings {
+  apApprovalAdminOnly?: boolean | null
+  apPostingAdminOnly?: boolean | null
+  apRequireSignedRateCon?: boolean | null
+  remittanceEmailTemplate?: string | null
+  apBillDocsRequired?: string[] | null
+  defaultCarrierTermsDays?: number | null
+}
+
+// ── Step H — quotes, carrier offers and lane history ─────────────────────────
+
+/** A customer quote (SELL) or a carrier offer (BUY). One model, two sides. */
+export type QuoteSide = 'SELL' | 'BUY'
+
+/**
+ * The rungs. `REQUESTED` is "somebody asked and we have not priced it" (a sell-side
+ * intake, or an offer request sitting with a carrier); `QUOTED` is "our number is
+ * with them"; the two RECEIVED_* rungs are "their move landed, it is ours now".
+ * WON is written only at conversion (SELL) or booking (BUY).
+ */
+export type QuoteStatus =
+  | 'DRAFT'
+  | 'REQUESTED'
+  | 'QUOTED'
+  | 'SENT_COUNTER'
+  | 'RECEIVED_REPLY'
+  | 'RECEIVED_COUNTER'
+  | 'WON'
+  | 'LOST'
+  | 'PASS'
+  | 'CANCELED'
+
+export type QuoteResponseKind = 'ACCEPTED' | 'COUNTERED' | 'DECLINED' | 'PASSED'
+
+export type QuoteLostReason =
+  | 'EXPIRED'
+  | 'NO_RESPONSE'
+  | 'TOO_HIGH'
+  | 'TOO_SLOW'
+  | 'TRUCK_NOT_AVAILABLE'
+  | 'WITHDRAWN'
+  | 'OTHER'
+  | 'NO_REASON'
+
+export type QuoteAcceptedVia = 'LINK' | 'PHONE' | 'EMAIL'
+
+export type QuoteCounterBy = 'US' | 'THEM'
+
+export type QuoteSendStatus = 'SENT' | 'NOT_SENT'
+
+/** One line of the quote's thread: what happened, when, and at what number. */
+export interface QuoteEvent {
+  at: string
+  by: string
+  kind: string
+  amountCents?: number | null
+  note?: string | null
+}
+
+/**
+ * One priced thing. `id` is the quote number (`Q000012`), minted from a settings
+ * counter, so a staff URL carries no secret and a lookup by number is a GetItem.
+ * `linkToken` is the public secret; it is rotated every round and REMOVEd the
+ * moment the other side answers.
+ */
+export interface QuoteRecord {
+  id: string
+  /** Step AB: the spot request this quote answers (`sr:<userId>:<messageId>`); immutable once set. */
+  spotRequestId?: string | null
+  side: QuoteSide
+  status: QuoteStatus
+  /** A sell quote and its duplicates, or one request round across carriers. */
+  groupId?: string | null
+  quoteDate: string
+  quoteMonth: string
+  customerId?: string | null
+  customerName?: string | null
+  contactName?: string | null
+  contactEmail?: string | null
+  customerRepId?: string | null
+  carrierId?: string | null
+  carrierName?: string | null
+  carrierMc?: string | null
+  carrierEmail?: string | null
+  shipmentId?: string | null
+  shipmentNumber?: string | null
+  orderId?: string | null
+  loadId?: string | null
+  loadNumber?: string | null
+  divisionKey?: string | null
+  mode?: ShipmentMode | null
+  rateType?: RateType | null
+  equipmentType?: string | null
+  equipmentLengthFt?: number | null
+  stops?: Stop[] | null
+  laneKey?: string | null
+  laneKey3?: string | null
+  pickupAppt?: string | null
+  deliveryAppt?: string | null
+  commodity?: string | null
+  weightLbs?: number | null
+  miles?: number | null
+  references?: OrderReference[] | null
+  /** SELL: the CUSTOMER lines. BUY: one CARRIER rate line. */
+  lines?: LoadChargeInput[] | null
+  /** SELL: Σ lines = revenue. BUY: the carrier's number. */
+  amountCents: number
+  customerRateCents?: number | null
+  targetBuyCents?: number | null
+  topSpendCents?: number | null
+  marginBps?: number | null
+  /** BUY only: the number a carrier may accept outright on the link. */
+  bookNowRateCents?: number | null
+  counterCents?: number | null
+  counterBy?: QuoteCounterBy | null
+  rounds: number
+  expiresAt?: string | null
+  /** Sparse and indexed; present only while the current round's link is live. */
+  linkToken?: string | null
+  linkVersion?: number | null
+  requestCount?: number | null
+  sentAt?: string | null
+  sentTo?: string | null
+  sendCount?: number | null
+  lastSendStatus?: QuoteSendStatus | null
+  respondedAt?: string | null
+  response?: QuoteResponseKind | null
+  responderName?: string | null
+  responderEmail?: string | null
+  responderIp?: string | null
+  acceptedVia?: QuoteAcceptedVia | null
+  lostReason?: QuoteLostReason | null
+  lostNote?: string | null
+  wonAt?: string | null
+  closedAt?: string | null
+  duplicatedFromId?: string | null
+  pricingWarnings?: string[] | null
+  /** Sparse `'OPEN'` from DRAFT through RECEIVED_COUNTER; REMOVEd when it closes. */
+  quoteOpen?: string | null
+  customerMessage?: string | null
+  internalNotes?: string | null
+  events?: QuoteEvent[] | null
+  /** The WorkflowRun a person applied to save this quote. SAVE_QUOTE writes it. */
+  workflowRunId?: string | null
+
+  // ── Step P4: what the market said, and whether it was real ─────────────────
+  /** The RateView answer the sell rate was built from. */
+  marketRateCents?: number | null
+  marketSource?: string | null
+  /** True when the adapter ran in stub mode. Printed beside the number, always. */
+  marketStub?: boolean | null
+  marketAt?: string | null
+  marketDetail?: Record<string, unknown> | null
+  /** The margin the sell rate was built with. */
+  marginTargetBps?: number | null
+  /** True when the agent sent the reply without a human pressing Send. */
+  autoReplied?: boolean | null
+
+  // ── Step P7: a carrier's answer to a posting ───────────────────────────────
+  /** PHONE exists in the model and in the UI as a manually-logged call today. */
+  offerSource?: 'EMAIL' | 'PHONE' | 'BOARD' | 'MANUAL' | null
+  offerContactName?: string | null
+  offerContactPhone?: string | null
+  offerAvailableAt?: string | null
+  /** The `ShipmentPosting` this answered. */
+  offerPostingId?: string | null
+  /** The `ShipmentMessage` it came from. */
+  offerMessageRef?: string | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type LaneAssignmentKind = 'OWN_ASSET' | 'CARRIER'
+
+export type LaneSampleSource = 'LOAD' | 'BACKFILL' | 'LEGACY_LOAD'
+
+/**
+ * One delivered load, priced, keyed by lane. The only thing the Historical Rates
+ * panel reads. `id` is `lrs:<loadId>`, so a re-price overwrites rather than doubles.
+ */
+export interface LaneRateSampleRecord {
+  id: string
+  /** `'CHICAGO|IL>DANVILLE|IL'`. */
+  laneKey: string
+  /** `'606>618'`. */
+  laneKey3?: string | null
+  date: string
+  loadId: string
+  shipmentId: string
+  shipmentNumber?: string | null
+  orderId?: string | null
+  customerId?: string | null
+  customerName?: string | null
+  carrierId?: string | null
+  carrierName?: string | null
+  assignmentKind?: LaneAssignmentKind | null
+  divisionKey?: string | null
+  mode?: ShipmentMode | null
+  rateType?: RateType | null
+  equipmentType?: string | null
+  miles?: number | null
+  customerRateCents?: number | null
+  revenueCents?: number | null
+  carrierRateCents?: number | null
+  costCents?: number | null
+  profitCents?: number | null
+  marginBps?: number | null
+  loadStatus?: string | null
+  /** Canceled or TONU'd after the sample was taken: kept, never counted. */
+  excluded?: boolean | null
+  source: LaneSampleSource
+  sampledAt: string
+  version: number
+  /** `'YYYY-MM'` of `date` — the reporting index's hash key (Step I). */
+  sampleMonth?: string | null
+  customerRepId?: string | null
+  carrierRepId?: string | null
+  teamKey?: string | null
+  invoiceId?: string | null
+  /** `'YYYY-MM'` of the order's `invoicedAt`. */
+  invoiceMonth?: string | null
+  // Step R — the Brokerage dashboard's grouping and its tracking / POD history
+  revDivision?: string | null
+  revSubdivision?: string | null
+  salesRepId?: string | null
+  deliveredAt?: string | null
+  /** When the POD document landed; with `deliveredAt` this is POD collection time. */
+  podReceivedAt?: string | null
+  trackingProvider?: string | null
+  /** First position report of any kind, for "time to first ping". */
+  firstPingAt?: string | null
+  datPostedAt?: string | null
+  /** Check calls the schedule asked for, and how many landed — compliance share. */
+  checkCallsDue?: number | null
+  checkCallsMet?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** The quotes half of `TmsSettings`, as the settings card edits it. */
+export interface QuoteSettings {
+  hoursToQuote?: number | null
+  offerExpiryHours?: number | null
+  quoteNumberFormat?: string | null
+  nextQuoteNumber?: number | null
+  quoteEmailTemplate?: string | null
+  counterEmailTemplate?: string | null
+  offerRequestEmailTemplate?: string | null
+  quoteTermsText?: string | null
+  quoteBelowMinMarginAdminOnly?: boolean | null
+  quoteOffersCarrierSeesBookNow?: boolean | null
+}
+
+/** One stop, as the public quote page is allowed to see it. */
+export interface QuotePublicStop {
+  type: string
+  city?: string | null
+  state?: string | null
+  appt?: string | null
+  apptType?: string | null
+  sequence: number
+}
+
+/** One priced line, as a customer sees it: a label and an amount, nothing else. */
+export interface QuotePublicLine {
+  label: string
+  amountCents: number
+}
+
+/**
+ * What the public page may say. Built by an allow-list in `quotePublicView`, never
+ * by deleting fields off the row: a field added to `QuoteRecord` tomorrow cannot
+ * leak by being forgotten here.
+ */
+export interface QuotePublicView {
+  side: QuoteSide
+  quoteNumber: string
+  status: QuoteStatus
+  brokerName: string
+  expiresAt?: string | null
+  expired: boolean
+  /** Whose move it is, in the public page's words. */
+  awaiting: 'YOU' | 'US' | 'NONE'
+  stops: QuotePublicStop[]
+  mode?: string | null
+  equipmentType?: string | null
+  equipmentLengthFt?: number | null
+  commodity?: string | null
+  weightLbs?: number | null
+  miles?: number | null
+  /** SELL: our price to the customer. BUY: what we offer the carrier. */
+  amountCents: number
+  /** SELL only: the lines behind the amount. */
+  lines: QuotePublicLine[]
+  /** BUY only: the number the carrier may accept outright, when enabled. */
+  bookNowRateCents?: number | null
+  /** BUY only: the carrier's own last number, so they see what they said. */
+  theirAmountCents?: number | null
+  message?: string | null
+  terms?: string | null
+  rounds: number
+  generatedAt: string
+}
+
+/** One side's statistics over a lane's samples. */
+export interface LaneStatsSide {
+  count: number
+  lowCents: number | null
+  medianCents: number | null
+  avgCents: number | null
+  highCents: number | null
+  /** Average cents per mile, over the samples that carry miles. */
+  perMileCents: number | null
+}
+
+export interface LaneStatsMonth {
+  month: string
+  customerAvgCents: number | null
+  carrierAvgCents: number | null
+  count: number
+}
+
+export interface LaneStats {
+  customer: LaneStatsSide
+  carrier: LaneStatsSide
+  marginAvgBps: number | null
+  milesAvg: number | null
+  byMonth: LaneStatsMonth[]
+  lastAt: string | null
+}
+
+export type LaneStatsWindow = 90 | 180 | 365 | 'ALL'
+
+export interface LaneStatsFilters {
+  windowDays?: LaneStatsWindow
+  equipmentType?: string | null
+  rateType?: RateType | null
+  /** Own-fleet legs carry `costCents: 0`; counting them would drag a lane to zero. */
+  includeOwnFleetCost?: boolean
+}
+
+// ── Step I — staff, roles, teams, commissions and reporting ──────────────────
+
+/** The six TMS roles plus NONE (own-fleet-only staff, and anyone not assigned yet). */
+export type RoleKey =
+  | 'ADMIN'
+  | 'MANAGER'
+  | 'CUSTOMER_REP'
+  | 'CARRIER_REP'
+  | 'AR_AP'
+  | 'COMPLIANCE'
+  | 'NONE'
+
+/** Per-user "additional permissions". Only some of these are enforced server-side. */
+export type ClaimKey =
+  | 'CREDIT_LIMIT_EDIT'
+  | 'AR_POSTING'
+  | 'AP_POSTING'
+  | 'AP_APPROVAL'
+  | 'CARRIER_STATUS_EDIT'
+  | 'AR_CHARGES'
+  | 'AP_CHARGES'
+  | 'CARRIER_INSURANCE_EDIT'
+  | 'NO_AR_INVOICE'
+  | 'DASHBOARDS_CREATE'
+  | 'DASHBOARDS_PUBLISH_COMPANY'
+  | 'VIEW_ALL'
+
+export type UserStatus = 'PENDING' | 'ACTIVE' | 'INACTIVE'
+
+/**
+ * One staff login. `id` IS the Cognito username (the e-mail for everyone invited
+ * through the Users page), which is what every rep field on an order, load,
+ * customer or carrier already holds.
+ */
+export interface UserProfileRecord {
+  id: string
+  email: string
+  name?: string | null
+  role?: RoleKey | null
+  teamKeys?: string[] | null
+  /** OwnershipDivision codes — the businesses this person works in. */
+  divisions?: string[] | null
+  managerId?: string | null
+  claims?: string[] | null
+  /** Page keys granted on top of the role — the mirror of the `page-*` groups. */
+  extraPages?: string[] | null
+  status?: UserStatus | null
+  title?: string | null
+  phone?: string | null
+  datEmail?: string | null
+  hubspotId?: string | null
+  /** When this rep last authorised Truckstop; null until a live OAuth exists. */
+  truckstopAuthorizedAt?: string | null
+  invitedAt?: string | null
+  invitedBy?: string | null
+  lastRoleChangeAt?: string | null
+  lastRoleChangeBy?: string | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** The five sender slots a team can own (stored now, wired to SES in J/L). */
+export interface TeamSenderAddresses {
+  shipment?: string | null
+  rateCon?: string | null
+  quoteReply?: string | null
+  customerInvoice?: string | null
+  remittance?: string | null
+}
+
+export interface Team {
+  key: string
+  name: string
+  memberIds: string[]
+  senderAddresses?: TeamSenderAddresses | null
+  /** Print the team's contact on the public tracking page instead of the rep's. */
+  showContactOnTracking?: boolean | null
+  active?: boolean | null
+}
+
+// ── Commissions ──────────────────────────────────────────────────────────────
+
+/** Who gets paid, resolved from the people already named on the records. */
+export type CommissionRoleName =
+  | 'PRIMARY_ACCOUNT_OWNER'
+  | 'SECONDARY_ACCOUNT_OWNER'
+  | 'PRIMARY_CARRIER_REP'
+  | 'SECONDARY_CARRIER_REP'
+  | 'PRIMARY_OPERATED_BY'
+  | 'SECONDARY_OPERATED_BY'
+  | 'CARRIER_BOOKING_REP'
+  | 'CREATED_BY'
+  | 'MANAGER'
+  | 'SPECIFIC_USER'
+
+export type CommissionRateType = 'FIXED' | 'PERCENT_PROFIT' | 'PERCENT_REVENUE'
+
+/**
+ * READY_TO_INVOICE is deliberately not offered: at UNBILLED nothing is frozen,
+ * and a commission on a number that can still change is a number that will be wrong.
+ */
+export type CommissionTrigger = 'GENERATE_INVOICE' | 'INVOICE_PAID'
+
+export type CommissionTierType = 'PER_LOAD_MARGIN_BPS' | 'PER_LOAD_PROFIT_CENTS'
+
+export type CommissionStatus =
+  | 'UN_APPROVED'
+  | 'REP_COUNTERED'
+  | 'MANAGER_COUNTERED'
+  | 'MANAGER_APPROVED'
+  | 'FULLY_APPROVED'
+  | 'PAID'
+  | 'CANCELLED'
+
+export type CommissionKind = 'EARNED' | 'ADJUSTMENT' | 'REVERSAL'
+
+export type CommissionBasisKind = 'REVENUE' | 'PROFIT' | 'FIXED'
+
+export type CommissionSource = 'RUN' | 'RERUN' | 'VOID' | 'WRITE_OFF' | 'OVERRIDE'
+
+export interface CommissionTier {
+  /** Lower bound of the band, in the tier type's own unit. Ascending, first is 0. */
+  fromBps?: number | null
+  fromCents?: number | null
+  rateBps?: number | null
+  rateCents?: number | null
+  label?: string | null
+}
+
+export interface CommissionPlanRole {
+  roleName: CommissionRoleName
+  rateType: CommissionRateType
+  rateBps?: number | null
+  rateCents?: number | null
+  /** Share of the role's amount for each person when a role resolves to several. */
+  splitBps?: number | null
+  /** Named people, for SPECIFIC_USER. */
+  userIds?: string[] | null
+  tierType?: CommissionTierType | null
+  /** True: each band pays its own rate on its own slice. False: one rate on the whole. */
+  graduated?: boolean | null
+  tiers?: CommissionTier[] | null
+}
+
+export interface CommissionPlanScope {
+  userIds?: string[] | null
+  customerIds?: string[] | null
+  teamKeys?: string[] | null
+}
+
+export interface CommissionPlan {
+  id: string
+  name: string
+  active?: boolean | null
+  effectiveFrom?: string | null
+  effectiveTo?: string | null
+  /** Which date decides whether an order falls in the plan's window. */
+  dateField?: 'INVOICED' | 'DELIVERED' | null
+  scope?: CommissionPlanScope | null
+  roles: CommissionPlanRole[]
+}
+
+export type PayScheduleFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMI_MONTHLY' | 'MONTHLY'
+
+export interface CommissionPaySchedule {
+  frequency: PayScheduleFrequency
+  /** 0–6 for WEEKLY/BIWEEKLY (0 = Sunday); 1–28 for MONTHLY; ignored for SEMI_MONTHLY. */
+  payDay?: number | null
+  /** Days after the period ends before it is paid. */
+  daysUntilPay?: number | null
+  /** The Monday a BIWEEKLY cadence counts from. */
+  anchorDate?: string | null
+}
+
+/** One entry in a commission row's own history. */
+export interface CommissionEvent {
+  at: string
+  by: string
+  action: string
+  note?: string | null
+  amountCents?: number | null
+}
+
+export interface CommissionRecord {
+  id: string
+  kind?: CommissionKind | null
+  /** The EARNED row an ADJUSTMENT or REVERSAL answers. */
+  adjustsId?: string | null
+  orderId: string
+  shipmentId?: string | null
+  shipmentNumber?: string | null
+  invoiceId: string
+  invoiceNumber?: string | null
+  customerId?: string | null
+  customerName?: string | null
+  carrierId?: string | null
+  carrierName?: string | null
+  divisionKey?: string | null
+  teamKey?: string | null
+  repId: string
+  repName?: string | null
+  managerId?: string | null
+  roleName: CommissionRoleName
+  planId?: string | null
+  planName?: string | null
+  rateType?: CommissionRateType | null
+  rateBps?: number | null
+  rateCents?: number | null
+  tierLabel?: string | null
+  splitBps?: number | null
+  basis?: CommissionBasisKind | null
+  basisCents: number
+  revenueCents: number
+  costCents: number
+  profitCents: number
+  marginBps?: number | null
+  /** What the plan says. Never erased by an override or a counter. */
+  amountCents: number
+  overrideCents?: number | null
+  overrideBy?: string | null
+  overrideNote?: string | null
+  /** What is actually owed: override ?? accepted counter ?? amount. */
+  netCents: number
+  /** e.g. `'OWN_FLEET_NO_COST'` or `'NO_PERSON'`. */
+  basisNote?: string | null
+  needsReview?: boolean | null
+  /** Every carrier assignment is finalized (or own-asset), so the cost cannot move. */
+  costFinal?: boolean | null
+  status?: CommissionStatus | null
+  counterCents?: number | null
+  counterBy?: string | null
+  counterNote?: string | null
+  approvedAt?: string | null
+  approvedBy?: string | null
+  cancelledAt?: string | null
+  cancelReason?: string | null
+  trigger?: CommissionTrigger | null
+  triggerAt: string
+  commissionMonth: string
+  payPeriodId?: string | null
+  paidAt?: string | null
+  paymentRef?: string | null
+  source?: CommissionSource | null
+  computedAt: string
+  events?: CommissionEvent[] | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type CommissionPayPeriodStatus = 'OPEN' | 'PENDING_APPROVAL' | 'APPROVED' | 'PAID'
+
+export interface CommissionPayPeriodRepRow {
+  repId: string
+  repName?: string | null
+  count: number
+  amountCents: number
+  statementKey?: string | null
+}
+
+export interface CommissionPayPeriodRecord {
+  id: string
+  periodStart: string
+  periodEnd: string
+  payDate: string
+  status?: CommissionPayPeriodStatus | null
+  commissionCount?: number | null
+  totalCents?: number | null
+  byRep?: CommissionPayPeriodRepRow[] | null
+  submittedAt?: string | null
+  submittedBy?: string | null
+  approvedAt?: string | null
+  approvedBy?: string | null
+  paidAt?: string | null
+  paidBy?: string | null
+  paymentRef?: string | null
+  note?: string | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** The commissions half of `TmsSettings`, as the settings card edits it. */
+export interface CommissionSettings {
+  commissionsEnabled?: boolean | null
+  commissionTrigger?: CommissionTrigger | null
+  commissionPlans?: CommissionPlan[] | null
+  commissionPaySchedule?: CommissionPaySchedule | null
+  commissionApprovalAdminOnly?: boolean | null
+  commissionPayAdminOnly?: boolean | null
+}
+
+/** The shipment half of `TmsSettings`, as the settings card edits it. */
+export interface ShipmentSettings {
+  shipmentPrefix?: string | null
+  nextShipmentNumber?: number | null
+  proScheme?: ProScheme | null
+  cancelDeleteAdminOnly?: boolean | null
+  defaultMode?: ShipmentMode | null
+  arUnbilledStage?: string | null
+  apInReviewStage?: string | null
+}
+
+// ── Reporting ────────────────────────────────────────────────────────────────
+
+export type ReportGroupBy =
+  | 'REP'
+  | 'CUSTOMER'
+  | 'CARRIER'
+  | 'DIVISION'
+  | 'TEAM'
+  | 'MODE'
+  | 'EQUIPMENT'
+  | 'MONTH'
+
+export interface ReportFilters {
+  divisionKey?: string | null
+  teamKey?: string | null
+  repId?: string | null
+  customerId?: string | null
+  carrierId?: string | null
+  mode?: string | null
+  equipmentType?: string | null
+}
+
+export interface ReportRow {
+  key: string
+  label: string
+  loads: number
+  revenueCents: number
+  costCents: number
+  profitCents: number
+  marginBps: number | null
+  miles: number
+  rpmCents: number | null
+  cpmCents: number | null
+  /** Loads run on our own trucks: counted in revenue, their cost lives in settlements. */
+  ownFleet: number
+}
+
+export interface ProfitReport {
+  rows: ReportRow[]
+  totals: ReportRow
+  /** Samples skipped because they were canceled or TONU'd. */
+  excluded: number
+}
+
+// ── Revenue ownership & department views (Step R) ─────────────────────────────
+/*
+ * Who owns a shipment is data, not code: an admin edits the division tree and the
+ * ordered rules that tag a shipment, so BCAT can add a business or a subsidiary —
+ * or another company can define its own parties — without a deploy.
+ */
+
+/** A hand tag beats every rule and survives a carrier, driver or customer change. */
+export type RevTagSource = 'HAND' | 'RULE'
+
+/** Which party owns each part of a division's work. Null = inherit from the parent. */
+export interface OwnershipOwners {
+  building?: string | null
+  booking?: string | null
+  tracking?: string | null
+  invoicing?: string | null
+  carrierPay?: string | null
+  settlements?: string | null
+}
+
+/** Which existing views a division's shipments flow into. */
+export interface OwnershipFlows {
+  calendar?: boolean
+  dispatch?: boolean
+  driverApp?: boolean
+  driverPay?: boolean
+  fleetDashboards?: boolean
+  carShipping?: boolean
+}
+
+/** One business or subsidiary. `id` is the code, so a rename never orphans a shipment. */
+export interface OwnershipDivisionRecord {
+  id: string
+  code: string
+  name: string
+  /** Shown in brackets beside the section name in the sidebar. */
+  brand: string | null
+  /** Null = a top-level business; set = a subsidiary, at any depth. */
+  parentId: string | null
+  color: string | null
+  sortOrder: number
+  active: boolean
+  owners: OwnershipOwners | null
+  flows: OwnershipFlows | null
+  /** Step U. Where tender e-mails for this division arrive; lower-cased. Required when saving an active division. */
+  intakeEmail?: string | null
+  /** Phase 0. False/absent = placeholder address nobody has confirmed (the Divisions page badges it UNCONFIRMED). */
+  intakeEmailConfirmed?: boolean | null
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type OwnershipConditionKind =
+  | 'ALWAYS'
+  | 'CARRIER_IS'
+  | 'DRIVER_FLEET_GROUP_IS'
+  | 'DRIVER_TYPE_IS'
+  | 'DRIVER_PROGRAM_IS'
+  | 'CUSTOMER_IS'
+  | 'EQUIPMENT_IS'
+  | 'MODE_IS'
+  | 'LOAD_SOURCE_IS'
+  | 'REFERENCE_MATCHES'
+
+/**
+ * `CARRIER_IS`: a Carrier id, or the reserved `OWN_FLEET` (there is no Carrier row
+ * for the own fleet — it is `LoadCarrier.kind === 'OWN_ASSET'`).
+ * `CUSTOMER_IS`: a customer id. `REFERENCE_MATCHES`: a regex source, matched
+ * case-insensitively against every order reference value. `ALWAYS`: value null.
+ */
+export interface OwnershipCondition {
+  kind: OwnershipConditionKind
+  value: string | null
+}
+
+/** An ordered rule. First active rule whose condition matches wins. */
+export interface OwnershipRuleRecord {
+  id: string
+  name: string | null
+  sortOrder: number
+  active: boolean
+  condition: OwnershipCondition
+  divisionCode: string
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type ShipmentViewPickupWindow =
+  | 'today'
+  | 'tomorrow'
+  | 'today_tomorrow'
+  | 'this_week'
+  | 'this_month'
+  | 'last_30_days'
+
+export type BoardStatusKey =
+  | 'OPEN'
+  | 'COVERED'
+  | 'DISPATCHED'
+  | 'ARRIVED'
+  | 'DEPARTED'
+  | 'DELIVERED'
+  | 'HOLD'
+  | 'RESERVED'
+  | 'VOIDED'
+
+export type BoardDetailKey =
+  | 'customer'
+  | 'carrier'
+  | 'pickupName'
+  | 'consigneeName'
+  | 'fromStates'
+  | 'toStates'
+  | 'revenueType'
+  | 'equipment'
+  | 'office'
+  | 'fromRegion'
+  | 'toRegion'
+  | 'salesRep'
+  | 'serviceRep'
+  | 'dispatcherAssigned'
+  | 'dispatcherActual'
+
+export interface BoardDetailFilter {
+  values: string[]
+  exclude: boolean
+}
+
+export interface BoardDateFilter {
+  mode: 'FIXED' | 'RANGE'
+  date?: string | null
+  from?: string | null
+  to?: string | null
+}
+
+export interface BoardFilterSet {
+  statuses: BoardStatusKey[]
+  details: Partial<Record<BoardDetailKey, BoardDetailFilter>>
+  dates: Partial<Record<'ship' | 'pickup' | 'delivery' | 'created', BoardDateFilter>>
+  flags?: {
+    checkCallDue?: boolean
+    checkCallOverdue?: boolean
+    openExceptions?: boolean
+    docsMissing?: boolean
+  }
+}
+
+export type ShipmentViewCarrierType = 'OWN_FLEET' | 'CARRIER' | 'NEED_TO_COVER'
+
+export type ShipmentViewDocsState = 'POD_MISSING' | 'DOCS_NEEDED' | 'COMPLETE'
+
+export type ShipmentViewTrackingState = 'TRACKED' | 'UNTRACKED' | 'OVERDUE'
+
+/** Every clause is optional; an absent clause filters nothing. */
+export interface ShipmentViewFilters {
+  divisions?: string[]
+  subdivisions?: string[]
+  statuses?: ShipmentStatus[]
+  carrierType?: ShipmentViewCarrierType | null
+  repId?: string | null
+  pickupWindow?: ShipmentViewPickupWindow | null
+  docsState?: ShipmentViewDocsState | null
+  trackingState?: ShipmentViewTrackingState | null
+  arStatuses?: ArStatus[]
+  apStatuses?: ApStatus[]
+  quoteToBooked?: boolean
+  search?: string | null
+  /** The R2 board's left-panel filters, stored inside a saved view so it round-trips. */
+  board?: BoardFilterSet | null
+}
+
+/** Null or empty means everyone who can open Shipments. */
+export interface ShipmentViewAudience {
+  groups?: string[]
+  roles?: string[]
+  /**
+   * The businesses the view belongs to. Unlike the other two facets this one narrows:
+   * naming divisions hides the view from anybody whose profile works in none of them.
+   */
+  divisions?: string[]
+}
+
+export interface ShipmentViewSort {
+  key: string
+  dir: 'asc' | 'desc'
+}
+
+/** A saved slice of the Shipments page. `id` is the slug. */
+export interface ShipmentViewRecord {
+  id: string
+  slug: string
+  name: string
+  department: string | null
+  description: string | null
+  filters: ShipmentViewFilters
+  columns: string[] | null
+  sort: ShipmentViewSort | null
+  isDefault: boolean
+  audience: ShipmentViewAudience | null
+  sortOrder: number
+  active: boolean
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** A reusable set of column keys and widths for the shipments board. */
+export interface ShipmentColumnTemplateRecord {
+  id: string
+  name: string
+  columns: string[]
+  widths: Record<string, number> | null
+  pinned: string[] | null
+  ownerEmail: string
+  shared: boolean
+  createdBy: string
+  updatedBy: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * The row shape a view's filters read. The Shipments page maps its own rows onto
+ * it, so the filter code never has to know how a board row is assembled.
+ */
+export interface ShipmentViewRow {
+  id: string
+  status: ShipmentStatus
+  revDivision: string | null
+  revSubdivision: string | null
+  assignmentType: AssignmentType | null
+  salesRepId: string | null
+  customerRepId: string | null
+  pickupAppt: string | null
+  docsMissing: string[]
+  arStatus: ArStatus | 'LEGACY' | null
+  apStatus: ApStatus | null
+  trackingProvider: string | null
+  nextCheckCallAt: string | null
+  lastCheckCallAt: string | null
+  quoteId: string | null
+  searchKey: string | null
+  voidedAt: string | null
+  // Board facets projected from the shipment/order/load so a saved view's board
+  // filters can be applied to the flat shape as well as to a full ShipmentRow.
+  customerId?: string | null
+  carrierName?: string | null
+  /** Step AT — every live carrier when there are two or more, so a carrier facet matches ANY of them. */
+  carriers?: { name: string; apStatus: ApStatus | null; costCents: number | null }[] | null
+  pickupName?: string | null
+  consigneeName?: string | null
+  fromState?: string | null
+  toState?: string | null
+  equipmentType?: string | null
+  officeTeamKeys?: string[] | null
+  dispatcherAssignedId?: string | null
+  dispatcherActualId?: string | null
+  shipDate?: string | null
+  deliveryAppt?: string | null
+  createdAt?: string | null
+  stops?: Stop[] | null
+  revenueCents?: number | null
+  costCents?: number | null
+  profitCents?: number | null
+  marginBps?: number | null
+  customerReference?: string | null
+  commodity?: string | null
+}
+
+// ── Workflows & AI agents (Step K) ───────────────────────────────────────────
+
+export type WorkflowAgentKey = 'QUOTE' | 'TENDER' | 'AP' | 'CAPACITY' | 'WEBHOOK'
+
+/** Every agent a human can configure. WEBHOOK has no inbox and no instructions. */
+export type AiAgentKey = Exclude<WorkflowAgentKey, 'WEBHOOK'>
+
+/** Machine progress. COMPLETED is not approval — that is `outcome`. */
+export type WorkflowRunStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED'
+
+/** Human disposition. APPLIED is the only one that means a person acted on it. */
+export type WorkflowOutcome =
+  | 'PROPOSED'
+  | 'APPLIED'
+  | 'DISMISSED'
+  | 'NOTED'
+  | 'UNKNOWN_PARTY'
+  | 'IGNORED'
+  | 'NO_ACTION'
+
+export type WorkflowSourceKind =
+  | 'INTAKE_ITEM'
+  | 'VENDOR_PAYABLE'
+  | 'DRIVER_SUBMISSION'
+  | 'INBOX'
+  | 'WEBHOOK'
+
+export type WorkflowProposalKind =
+  | 'TENDER'
+  | 'QUOTE'
+  | 'CARRIER_BILL'
+  | 'VENDOR_BILL'
+  | 'CAPACITY'
+  | 'NONE'
+
+export type WorkflowPartyKind = 'CUSTOMER' | 'CARRIER' | 'VENDOR' | 'UNKNOWN'
+
+export type WorkflowMatchHow = 'EMAIL' | 'DOMAIN' | 'NAME' | 'NONE'
+
+export type WorkflowStepStatus = 'RUNNING' | 'DONE' | 'SKIPPED' | 'FAILED'
+
+/** How sure the model said it was. Lower-case because that is what the schema asks for. */
+export type WorkflowConfidence = 'low' | 'medium' | 'high'
+
+/** One entry on a run's steps rail. `detail` is redacted before it is stored. */
+export interface WorkflowStep {
+  key: string
+  status: WorkflowStepStatus
+  startedAt?: string | null
+  endedAt?: string | null
+  ms?: number | null
+  note?: string | null
+  detail?: string | null
+}
+
+/** An attachment the run read. The bytes stay in S3; the row only points at them. */
+export interface WorkflowDocumentRef {
+  s3Key: string
+  name: string
+  contentType: string
+  size: number
+}
+
+/**
+ * A party the matcher could not rule out. Candidates are shown to a person; only a
+ * single exact e-mail hit is ever promoted to the run's party.
+ */
+export interface WorkflowPartyCandidate {
+  kind: 'CUSTOMER' | 'CARRIER'
+  id: string
+  name: string
+  how: 'EMAIL' | 'DOMAIN' | 'NAME'
+}
+
+export interface WorkflowFeedback {
+  at: string
+  by: string
+  rating: 'UP' | 'DOWN'
+  text?: string | null
+}
+
+/**
+ * A block of human-written markdown with a revision counter. The counter moves only
+ * when the text actually changes, so a run can record exactly which words it read.
+ */
+export interface AgentMemory {
+  markdown: string
+  revision: number
+  updatedAt: string
+  updatedBy: string
+}
+
+export interface AgentSettings {
+  enabled?: boolean | null
+  /** The address this agent's mail arrives on. Display only; routing is by inbox role. */
+  inbox?: string | null
+  /** How this agent is told to behave. Human-written, agent-read-only, revisioned. */
+  instructions?: AgentMemory | null
+  /**
+   * The spec's Memory card: what the desk has learnt about this kind of mail. Kept
+   * apart from `instructions` so editing one does not bump the other's revision —
+   * a run stamps both, and the trace has to be able to say which text it read.
+   */
+  memory?: AgentMemory | null
+}
+
+export type AiAgentsSettings = {
+  general?: AgentMemory | null
+  dailyRunCap?: number | null
+} & { [K in AiAgentKey]?: AgentSettings | null }
+
+export type PartyAiMemory = {
+  general?: AgentMemory | null
+} & { [K in AiAgentKey]?: AgentMemory | null }
+
+/** What a person would type into New shipment, nothing more. */
+export interface TenderProposal {
+  kind: 'TENDER'
+  tender: TenderPrefill
+  customerName?: string | null
+  confidence?: WorkflowConfidence | null
+}
+
+export interface QuoteProposalPlace {
+  city?: string | null
+  state?: string | null
+  zip?: string | null
+}
+
+export interface QuoteProposal {
+  kind: 'QUOTE'
+  customerName?: string | null
+  origin?: QuoteProposalPlace | null
+  destination?: QuoteProposalPlace | null
+  pickupDate?: string | null
+  deliveryDate?: string | null
+  equipmentType?: string | null
+  commodity?: string | null
+  weightLbs?: number | null
+  /** The number the customer named, when they named one. Never a number we invented. */
+  targetRateCents?: number | null
+  notes?: string | null
+  /** The memory line that shaped the read, so a reviewer can see why. */
+  memoryHint?: string | null
+  confidence?: WorkflowConfidence | null
+}
+
+export interface CarrierBillProposal {
+  kind: 'CARRIER_BILL'
+  invoiceNumber?: string | null
+  amountCents: number | null
+  invoiceDate?: string | null
+  dueDate?: string | null
+  loadCarrierId?: string | null
+  carrierId?: string | null
+  carrierName?: string | null
+  shipmentId?: string | null
+  shipmentNumber?: string | null
+  confidence?: WorkflowConfidence | null
+}
+
+export interface VendorBillProposal {
+  kind: 'VENDOR_BILL'
+  vendorPayableId?: string | null
+  vendorName?: string | null
+  invoiceNumber?: string | null
+  amountCents: number | null
+  invoiceDate?: string | null
+  dueDate?: string | null
+  confidence?: WorkflowConfidence | null
+}
+
+export interface CapacityProposal {
+  kind: 'CAPACITY'
+  carrierName?: string | null
+  /** Normalised to the `Carrier.equipment` vocabulary, or null when unrecognised. */
+  equipment?: string | null
+  originCity?: string | null
+  originState?: string | null
+  destinationCity?: string | null
+  destinationState?: string | null
+  availableDate?: string | null
+  trucks?: number | null
+  notes?: string | null
+  confidence?: WorkflowConfidence | null
+}
+
+export type WorkflowProposal =
+  | TenderProposal
+  | QuoteProposal
+  | CarrierBillProposal
+  | VendorBillProposal
+  | CapacityProposal
+
+/**
+ * One agent run. Never deleted: a run is DISMISSED or RESOLVED, and the trace of what
+ * the agent read and proposed stays on file either way.
+ */
+export interface WorkflowRunRecord {
+  id: string
+  agent: WorkflowAgentKey
+  /** The inbox the mail actually arrived on, even when CLASSIFY_EMAIL re-routed it. */
+  inboxRole?: string | null
+  status: WorkflowRunStatus
+  outcome?: WorkflowOutcome | null
+  currentStep?: string | null
+  errorCode?: string | null
+  /** Redacted, <= 1 KB. */
+  error?: string | null
+  /** Sparse index key: literally `'OPEN'` while the exception is unresolved. */
+  exceptionOpen?: string | null
+  sourceKind?: WorkflowSourceKind | null
+  sourceId: string
+  sourceKey?: string | null
+  provider?: string | null
+  subject?: string | null
+  fromEmail?: string | null
+  fromName?: string | null
+  fromDomain?: string | null
+  receivedAt?: string | null
+  /** <= 500 chars. */
+  bodyPreview?: string | null
+  partyKind?: WorkflowPartyKind | null
+  partyId?: string | null
+  partyName?: string | null
+  partyMatchHow?: WorkflowMatchHow | null
+  partyCandidates?: WorkflowPartyCandidate[] | null
+  shipmentId?: string | null
+  shipmentNumber?: string | null
+  quoteId?: string | null
+  documentIds?: string[] | null
+  proposalKind?: WorkflowProposalKind | null
+  proposal?: WorkflowProposal | null
+  steps?: WorkflowStep[] | null
+  documents?: WorkflowDocumentRef[] | null
+  attempts?: number | null
+  lastAttemptAt?: string | null
+  startedAt?: string | null
+  endedAt?: string | null
+  durationMs?: number | null
+  model?: string | null
+  modelCalls?: number | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  memoryRevisions?: WorkflowMemoryRevisions | null
+  feedback?: WorkflowFeedback[] | null
+  appliedAt?: string | null
+  appliedBy?: string | null
+  dismissedAt?: string | null
+  dismissedBy?: string | null
+  dismissReason?: string | null
+  resolvedAt?: string | null
+  resolvedBy?: string | null
+  createdBy: string
+  updatedBy: string
+  version?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** Which revision of each memory block the run read. Null where there was none. */
+export interface WorkflowMemoryRevisions {
+  org: number | null
+  orgAgent: number | null
+  orgAgentMemory: number | null
+  party: number | null
+  partyAgent: number | null
+}
+
+// ── Step AB: per-rep Gmail spot quoter + CRM bones ───────────────────────────
+//
+// Row shapes for the seven AB tables (amplify/data/resource.ts, "Step AB" block).
+// `GmailConnection`, `SpotRequest` and `CrmActivity` are ADMIN-read only at the schema
+// level and reach the browser exclusively through tmsSpotActions / tmsCrmActions, which
+// enforce owner/manager visibility. No token or client secret is ever part of any of
+// these shapes.
+
+export type GmailConnectionMode = 'GOOGLE' | 'SIMULATED'
+export type GmailConnectionStatus = 'PENDING' | 'CONNECTED' | 'PAUSED' | 'NEEDS_RECONNECT' | 'DISCONNECTED'
+
+/** Per-rep behaviour, `GmailConnection.settings`. Defaults live in `src/lib/spot/settings.ts`. */
+export interface GmailRepSettings {
+  watchLabel: string | null
+  lookbackDays: number
+  signature: string
+  replyTemplateId: string
+  notifyNew: boolean
+}
+
+/** Numbers only — `lastPollStats` never holds message content. */
+export interface SpotPollStats {
+  listed: number
+  stage1Rejected: number
+  stage2Rejected: number
+  modelCalls: number
+  stored: number
+  attached: number
+  errors: number
+}
+
+export interface GmailConnectionRecord {
+  id: string
+  userEmail: string
+  mode: GmailConnectionMode
+  status: GmailConnectionStatus
+  googleEmail?: string | null
+  scopes?: string[] | null
+  connectedAt?: string | null
+  disconnectedAt?: string | null
+  historyId?: string | null
+  lastPollAt?: string | null
+  lastPollStartedAt?: string | null
+  lastPollOk?: boolean | null
+  lastPollStats?: SpotPollStats | null
+  lastError?: string | null
+  /** Present on the row only; the Lambda strips both before a connection reaches a browser. */
+  pendingState?: string | null
+  pendingStateExp?: string | null
+  settings?: GmailRepSettings | null
+  autoSendChangedAt?: string | null
+  autoSendChangedBy?: string | null
+  modelCallsDay?: string | null
+  modelCallsToday?: number | null
+  autoSendDay?: string | null
+  autoSendCount?: number | null
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface SpotSettingsRecord {
+  id: string
+  enabled?: boolean | null
+  retentionDays?: number | null
+  dismissedRetentionDays?: number | null
+  allowAutoSend?: boolean | null
+  autoSendDailyCapPerRep?: number | null
+  autoSendDailyCapPerCustomer?: number | null
+  autoSendMinSamples?: number | null
+  modelCallsPerRepPerDay?: number | null
+  maxMessagesPerRepPerRun?: number | null
+  updatedBy?: string | null
+  version?: number | null
+  /** Step AL: only on the row id='carrier-sales'. Nothing secret (hashes only). */
+  carrierInbox?: CarrierInboxConfig | null
+  carrierInboxState?: CarrierInboxState | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type SpotRequestStatus =
+  | 'NEW' | 'NEEDS_INFO' | 'DRAFTED' | 'AUTO_PENDING' | 'SENT' | 'WON' | 'LOST' | 'DISMISSED'
+
+export type SpotRequestMode = 'FTL' | 'LTL' | 'PARTIAL' | 'DRAYAGE' | 'OTHER'
+
+export type SpotEquipmentCode =
+  | 'VAN' | 'REEFER' | 'FLATBED' | 'STEPDECK' | 'POWER_ONLY' | 'CONESTOGA'
+  | 'BOX_TRUCK' | 'SPRINTER' | 'OTHER'
+
+export interface SpotStop {
+  type: 'PICKUP' | 'DELIVERY'
+  name: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+  dateStr: string | null
+  time: string | null
+}
+
+/** What the model read out of a quote-request mail, after `normalize.ts`. */
+export interface SpotExtraction {
+  customerName: string | null
+  contactName: string | null
+  contactPhone: string | null
+  /** In route order, at least two for a priceable request. */
+  stops: SpotStop[]
+  /** YYYY-MM-DD */
+  pickupDate: string | null
+  deliveryDate: string | null
+  /** As written in the mail. */
+  equipment: string | null
+  equipmentType: SpotEquipmentCode | null
+  lengthFt: number | null
+  mode: SpotRequestMode | null
+  weightLbs: number | null
+  pieces: number | null
+  commodity: string | null
+  temperatureF: string | null
+  hazmat: 'YES' | 'NO' | null
+  /** Vocabulary codes (LIFTGATE, …) or `ACCESSORIAL:<text>`. */
+  accessorials: string[]
+  targetRateDollars: number | null
+  notes: string | null
+}
+
+export type SpotFieldSource = 'MODEL' | 'HEADER' | 'DIRECTORY' | 'DEFAULT' | 'REP'
+export type SpotFieldConfidence = 'high' | 'low'
+export interface SpotFieldMetaEntry {
+  source: SpotFieldSource
+  confidence: SpotFieldConfidence
+  /** True once a validator rejected the value. */
+  invalid?: boolean
+  /** True once the rep edited or ticked the field. */
+  confirmed?: boolean
+}
+export type SpotFieldMeta = Record<string, SpotFieldMetaEntry>
+
+export type SpotMatchHow = 'EMAIL' | 'DOMAIN' | 'NONE' | 'AMBIGUOUS'
+export type SpotSentVia = 'REP_GMAIL' | 'APP' | 'AUTO'
+export type SpotReplyIntent = 'ACCEPT' | 'DECLINE' | 'COUNTER' | 'QUESTION' | 'OTHER'
+
+export interface SpotThreadEntry {
+  id: string
+  at: string
+  dir: 'IN' | 'OUT'
+  /** ≤ 200 chars */
+  snippet: string
+}
+
+export interface SpotClassification {
+  kind: 'QUOTE_REQUEST' | 'FOLLOW_UP' | 'NOT_A_REQUEST'
+  confidence: 'high' | 'medium' | 'low'
+  reason: string
+}
+
+export interface SpotAutoDecision {
+  decision: 'SENT' | 'SKIPPED' | 'DEV_SUPPRESSED' | 'FAILED'
+  reasons: string[]
+  at: string
+  wouldSend?: boolean
+  error?: string | null
+}
+
+export interface SpotMatchCandidate {
+  customerId: string
+  name?: string | null
+  how?: 'EMAIL' | 'DOMAIN' | 'NAME'
+}
+
+export interface SpotRequestRecord {
+  /** `sr:<userId>:<gmailMessageId>` (`sr:<userId>:manual-<sha16>` for a pasted request). */
+  id: string
+  userId: string
+  mode?: GmailConnectionMode | null
+  gmailMessageId: string
+  gmailThreadId: string
+  receivedAt: string
+  fromEmail?: string | null
+  fromName?: string | null
+  replyTo?: string | null
+  subject?: string | null
+  /** ≤ 8 000 chars; only the owner, a manager or ADMIN receives it (SPOT_GET_REQUEST). */
+  bodyText?: string | null
+  attachments?: { name: string; contentType?: string; size?: number }[] | null
+  status: SpotRequestStatus
+  classification?: SpotClassification | null
+  extraction?: SpotExtraction | null
+  fieldMeta?: SpotFieldMeta | null
+  missingFields?: string[] | null
+  customerId?: string | null
+  contactEmail?: string | null
+  matchHow?: SpotMatchHow | null
+  matchCandidates?: SpotMatchCandidate[] | null
+  /** Last computed `SpotSuggestion` snapshot (src/lib/spot/types.ts). */
+  suggestion?: unknown
+  quoteId?: string | null
+  quoteNumber?: string | null
+  quoteStatus?: string | null
+  draftId?: string | null
+  draftMessageId?: string | null
+  draftedAt?: string | null
+  sentAt?: string | null
+  sentVia?: SpotSentVia | null
+  autoDecision?: SpotAutoDecision | null
+  thread?: SpotThreadEntry[] | null
+  customerReplyAt?: string | null
+  replyIntent?: SpotReplyIntent | null
+  needsAttention?: boolean | null
+  shipmentId?: string | null
+  shipmentNumber?: string | null
+  dismissedAt?: string | null
+  dismissedBy?: string | null
+  dismissedReason?: string | null
+  /** DynamoDB TTL, epoch seconds. */
+  ttlEpoch: number
+  version: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type CrmContactSource = 'MANUAL' | 'SPOT_REQUEST' | 'BACKFILL' | 'CUSTOMER_JSON'
+export type CrmDomainSource = 'MANUAL' | 'SPOT_REQUEST' | 'BACKFILL' | 'WEBSITE'
+export type CrmActivityKind =
+  | 'EMAIL_IN' | 'EMAIL_OUT' | 'QUOTE_DRAFTED' | 'QUOTE_SENT' | 'CALL' | 'TEXT' | 'NOTE' | 'TASK'
+
+export interface CrmContactRecord {
+  /** Lower-case e-mail address. */
+  id: string
+  customerId?: string | null
+  name?: string | null
+  title?: string | null
+  phone?: string | null
+  ownerId?: string | null
+  source?: CrmContactSource | null
+  status?: 'ACTIVE' | 'ARCHIVED' | null
+  createdBy?: string | null
+  updatedBy?: string | null
+  version?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface CrmDomainRecord {
+  /** Registrable domain, lower-case. */
+  id: string
+  customerId?: string | null
+  source?: CrmDomainSource | null
+  conflict?: boolean | null
+  conflictCustomerIds?: string[] | null
+  claimedBy?: string | null
+  claimedAt?: string | null
+  version?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface CrmActivityRefs {
+  spotRequestId?: string | null
+  quoteId?: string | null
+  shipmentId?: string | null
+  gmailThreadId?: string | null
+}
+
+export interface CrmActivityRecord {
+  /** `act:<ISO>:<rand6>` */
+  id: string
+  customerId?: string | null
+  contactEmail?: string | null
+  ownerId: string
+  kind: CrmActivityKind
+  direction?: 'IN' | 'OUT' | null
+  at: string
+  /** ≤ 120 chars; e-mail kinds only, null (with `restricted`) for viewers who may not see it. */
+  subject?: string | null
+  /** ≤ 2 000 chars; NOTE / CALL / TEXT / TASK. */
+  summary?: string | null
+  refs?: CrmActivityRefs | null
+  assigneeId?: string | null
+  dueAt?: string | null
+  doneAt?: string | null
+  doneBy?: string | null
+  createdBy: string
+  version?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface CrmAccountRecord {
+  /** = Customer.id */
+  id: string
+  lastTouchAt?: string | null
+  lastTouchKind?: CrmActivityKind | null
+  lastTouchBy?: string | null
+  nextStep?: string | null
+  nextStepDueAt?: string | null
+  nextStepBy?: string | null
+  openTaskCount?: number | null
+  updatedBy?: string | null
+  version?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+// ── Step AH — Aljex-parity create / edit shipment form ───────────────────────
+// Additive declaration merges only (no schema change): `Order.specialRequirements` is a
+// json column, so the new typed flags and the namespaced `form` extras live inside it.
+
+/** Optional second street line on a stop's free `address` record. */
+export interface Address {
+  street2?: string | null
+}
+
+/** Order columns that exist in the schema but were not yet on the client type. */
+export interface OrderRecord {
+  quoteId?: string | null
+  quoteNumber?: string | null
+  quoteAmountCents?: number | null
+}
+
+export type AljexCustomerRateKind = 'FLAT' | 'PER_MILE' | 'PER_HOUR' | 'PER_CWT'
+
+/**
+ * Everything Aljex's form has that Order has no column for. Stored under
+ * `Order.specialRequirements.form` (namespaced, versioned). Access it only through
+ * `readExtras` / `withExtras` in `src/features/shipments/form/model.ts`.
+ */
+export interface AljexFormExtras {
+  v: 1
+  /** Step AR feedback 7: the chosen shipment type key (`src/lib/shipmentTypes.ts`); `Order.mode` stays derived from it. */
+  shipmentType?: string
+  ship?: {
+    truckMiles?: number
+    footage?: number
+    billableWeightLbs?: number
+    disableMileage?: boolean
+    freightClass?: string
+    tarpSize?: string
+    temp?: { unit: 'F' | 'C'; min?: number; max?: number; preCool?: number }
+  }
+  customer?: { hours?: string; emails?: string[] }
+  roles?: { serviceRepId?: string; tariff?: string }
+  instructions?: { special?: string; rateCon?: string }
+  rates?: {
+    customerRateType?: AljexCustomerRateKind
+    customerHours?: number
+    smrCents?: number
+    maxRateCents?: number
+    carrierDraft?: { rateType: string; hours?: number; lhRateCents?: number; payPct?: number; maxRateCents?: number }
+  }
+  carrier?: {
+    loadCarrierId?: string
+    originCity?: string
+    originState?: string
+    emptyMiles?: number
+    driverEmail1?: string
+    driverEmail2?: string
+  }
+  /**
+   * AT-plan: one entry per carrier slot of the form. Slot 0 is also written to `carrier` and
+   * `rates.carrierDraft` (the legacy keys a load with one carrier reads); this list carries every slot.
+   */
+  carriers?: {
+    slot: string
+    loadCarrierId?: string
+    draft?: { rateType: string; hours?: number; lhRateCents?: number; payPct?: number; maxRateCents?: number }
+    originCity?: string
+    originState?: string
+    emptyMiles?: number
+    driverEmail1?: string
+    driverEmail2?: string
+  }[]
+}
+
+export interface SpecialRequirements {
+  /** Typed Aljex flags added by Step AH (`inside` is tri-state: null = N/A). */
+  fsma?: boolean | null
+  noBroker?: boolean | null
+  labor?: boolean | null
+  highRisk?: boolean | null
+  massRelease?: boolean | null
+  palletExchange?: boolean | null
+  inside?: boolean | null
+  form?: AljexFormExtras | null
+}
+
+/** Load columns the form reads that the shipment-load view type did not declare. */
+export interface ShipmentLoad {
+  hot?: boolean | null
+  pieces?: number | null
+  piecesUnit?: string | null
+  tmsId?: string | null
+  pickupNumber?: string | null
+  notes?: string | null
 }

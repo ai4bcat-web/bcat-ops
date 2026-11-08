@@ -25,7 +25,7 @@ export function DayLogs({ loads, date, isToday = true }: { loads: PaperworkLoad[
 
   if (state === 'NOT_REQUIRED') {
     return (
-      <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-400/40 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+      <div className="mb-4 flex items-center gap-2 rounded-xl border border-[color:var(--tms-badge-green)]/30 bg-[color:var(--tms-badge-green-tint)] p-3 text-sm text-[color:var(--tms-badge-green)]">
         <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span>
           <span className="font-bold">No ELD logs needed {day}.</span>
@@ -38,7 +38,7 @@ export function DayLogs({ loads, date, isToday = true }: { loads: PaperworkLoad[
   }
 
   const required = state === 'REQUIRED'
-  const tone = required ? 'border-sky-400/40 bg-sky-500/10 text-sky-100' : 'border-amber-400/40 bg-amber-500/10 text-amber-100'
+  const tone = required ? 'border-[color:var(--tms-badge-blue)]/30 bg-[color:var(--tms-badge-blue-tint)] text-[color:var(--tms-badge-blue)]' : 'border-[color:var(--tms-badge-orange)]/30 bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)]'
   return (
     <div className={`mb-4 rounded-xl border p-4 ${tone}`}>
       <p className="flex items-center gap-2 text-base font-bold">

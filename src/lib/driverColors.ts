@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- data colour: per-driver identity palette */
 import type { ColorKey } from '@/types'
 
 export interface DriverColor {
@@ -32,7 +33,7 @@ export const UNASSIGNED_COLOR: DriverColor = {
   bg: 'rgba(203,213,225,0.10)',
   text: '#64748b',
   dot: '#cbd5e1',
-  avatarBg: '#e2e8f0',
+  avatarBg: '#64748b', // white initials on this need >= 4.5:1; #e2e8f0 gave 1.2:1
 }
 
 export function getColor(colorKey?: ColorKey | null): DriverColor {

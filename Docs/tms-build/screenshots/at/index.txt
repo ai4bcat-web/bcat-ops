@@ -1,0 +1,9 @@
+Docs/tms-build/screenshots/at/04-own-fleet-no-add-carrier.png
+Docs/tms-build/screenshots/at/06-carrier-tab-two-blocks.png
+Docs/tms-build/screenshots/at/07-load-review-two-carrier-blocked.png
+Docs/tms-build/screenshots/at/10-board-two-carriers.png
+Docs/tms-build/screenshots/at/08a-load-review-before-record-all.png
+Docs/tms-build/screenshots/at/08b-load-review-after-record-all.png
+Docs/tms-build/screenshots/at/09a-ap-payable.png
+Docs/tms-build/screenshots/at/09b-shipment-carrier-pay-two-cards.png
+Docs/tms-build/screenshots/at/11-single-carrier-unchanged.png

@@ -12,20 +12,51 @@ import { googleReviews } from '../functions/google-reviews/resource'
 import { apptNeedNotifier } from '../functions/appt-need-notifier/resource'
 import { vendorApActions } from '../functions/vendor-ap-actions/resource'
 import { tmsDirectoryActions } from '../functions/tms-directory-actions/resource'
+import { tmsShipmentActions } from '../functions/tms-shipment-actions/resource'
 import { tmsGeocode } from '../functions/tms-geocode/resource'
 import { podActions } from '../functions/pod-actions/resource'
 import { otrActions } from '../functions/otr-actions/resource'
 import { dispatchActions } from '../functions/dispatch-actions/resource'
+import { tmsCarrierActions } from '../functions/tms-carrier-actions/resource'
+import { tmsTrackingActions } from '../functions/tms-tracking-actions/resource'
+import { tmsFinanceActions } from '../functions/tms-finance-actions/resource'
+import { workflowAgent } from '../functions/workflow-agent/resource'
+import { tmsAljexImport } from '../functions/tms-aljex-import/resource'
+import { tmsDataSafety } from '../functions/tms-data-safety/resource'
+import { tmsSpotQuoter } from '../functions/tms-spot-quoter/resource'
+import { tmsApInbox } from '../functions/tms-ap-inbox/resource'
+import { tmsCrmActions } from '../functions/tms-crm-actions/resource'
+import { FINAL_STAGE, currentSchemaStage, modelPresent } from './stages'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
 
-const schema = a.schema({
+// Staged deploy (amplify/data/stages.ts): BCAT_SCHEMA_STAGE=k synthesizes only the models present at
+// stage k. Unset (dev, every existing deploy) keeps everything. The authored object stays whole so
+// `Schema` (and the frontend) are identical at every stage; only the runtime schema is filtered.
+// Custom operations have no `fields` and always stay. No model relates to another by a.hasMany/
+// a.belongsTo/a.ref, so dropping a model leaves no dangling reference.
+function stageTypes<T extends Record<string, unknown>>(types: T): T {
+  const stage = currentSchemaStage()
+  if (stage >= FINAL_STAGE) return types
+  const isModel = (def: unknown): boolean => Boolean((def as { data?: { fields?: unknown } }).data?.fields)
+  return Object.fromEntries(
+    Object.entries(types).filter(([name, def]) => !isModel(def) || modelPresent(name, stage)),
+  ) as T
+}
+
+const schema = a.schema(stageTypes({
   Load: a
     .model({
-      aljexId:         a.string().required(),
-      tmsId:           a.string().required(),
-      pickupNumber:    a.string().required(),
+      // Step R cutover. The PRO and the two identity columns beside it are read-only
+      // to a signed-in client, the `voidedAt` precedent below. A PRO is permanent and
+      // is claimed forever by a ProClaim row; left client-writable, `updateLoad` would
+      // let any token rename an existing leg onto a voided or duplicate PRO, so the
+      // rule would hold on create and nowhere else. CREATE_SHIPMENT writes them, and
+      // SET_LOAD_PRO is the only way one ever changes.
+      aljexId:         a.string().required().authorization((allow) => [allow.authenticated().to(['read'])]),
+      tmsId:           a.string().required().authorization((allow) => [allow.authenticated().to(['read'])]),
+      pickupNumber:    a.string().required().authorization((allow) => [allow.authenticated().to(['read'])]),
       originName:      a.string(),
       originCity:      a.string(),
       destinationName: a.string(),
@@ -76,20 +107,121 @@ const schema = a.schema({
       // derived from stops (first pickup → pickup*, last delivery → delivery*).
       stops:           a.json(),
 
-      // ── Shipment / Order / Load (Step B): the lookup-index key fields only ─
-      // GSI prep. The four attributes below are the keys of the three new Load indexes,
-      // copied verbatim from the TMS tree so the later merge has no schema conflict. They
-      // are additive and nullable; nothing on main reads or writes them yet.
+      // ── Shipment / Order / Load (Step B) ─────────────────────────────────
+      // Additive only. A Load with no `status` is a legacy own-fleet row: the
+      // calendar, /loads, settlements, the driver app, PODs and factoring all keep
+      // reading `rate`/`readyToInvoice`/`stops`/the driver fields above untouched.
       shipmentId:      a.string(),   // parent Shipment (movement)
+      orderId:         a.string(),   // the Order this leg bills against
+      loadNumber:      a.string(),   // `<shipment number>-<leg>`
+      leg:             a.integer(),  // 1-based leg within the shipment
       status: a.enum([
         'SOURCING', 'BOOKED', 'PLANNED', 'DISPATCHED', 'LOADING', 'PICKED_UP',
         'IN_TRANSIT', 'RECOVERED', 'ARRIVED_AT_DELIVERY_TERMINAL', 'OUT_FOR_DELIVERY',
         'UNLOADING', 'DELIVERED', 'INVOICING', 'CANCELED',
       ]),
+      statusChangedAt: a.datetime(),
+      statusChangedBy: a.string(),
+      // SYSTEM: a stop time stamped by something that is not a person and not the
+      // driver app — the POD close, the dispatch MMS auto-POD — projected onto
+      // status by load-tracking-projector (Step D).
+      statusSource:    a.enum(['USER', 'DRIVER_APP', 'CHECK_CALL', 'BACKFILL', 'SYSTEM']),
+      carrierRepId:    a.string(),   // Cognito username of the rep covering the load
+      assignmentType:  a.enum(['OWN_ASSET', 'CARRIER', 'NEED_TO_COVER']),
+      activeLoadCarrierId: a.string(),  // the ACTIVE LoadCarrier row, if any
+      carrierName:     a.string(),   // snapshot of the active carrier's name
+      // Step AM. Mirror of the active assignment's ladder rung (src/lib/carrierAssignment.ts); read-only to a client.
+      carrierAssignmentStatus: a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      equipmentType:   a.string(),
+      divisionKey:     a.string(),
+      trackingProvider: a.enum(['NONE', 'MANUAL', 'LINK', 'DRIVER_APP', 'MOTIVE']),
       nextCheckCallAt: a.datetime(),
+      nextCheckCallNote: a.string(),
       // Sparse marker: the literal 'OPEN' only while a check call is outstanding, so
       // the checkCallOpen index holds the worklist and nothing else.
       checkCallOpen:   a.string(),
+      pickupMonth:     a.string(),   // 'YYYY-MM' of the first pickup, for month boards
+      // What the freight is worth. Checked against the carrier's cargo policy
+      // limit when a load is booked out — cents, like every other money field.
+      cargoValueCents: a.integer(),
+
+      // ── Tracking & check calls (Step D) ─────────────────────────────────
+      // Denormalised "last update" strip for the board and the Tracking tab, so
+      // neither has to read the LoadCheckCall log to say where the freight is.
+      lastCheckCallAt:   a.datetime(),
+      lastCheckCallType: a.string(),
+      lastKnownAt:       a.datetime(),
+      lastKnownCity:     a.string(),
+      lastKnownState:    a.string(),
+      lastKnownLat:      a.float(),
+      lastKnownLng:      a.float(),
+      // Step P8 — the prior ping so the board can prove movement (or a stop) from
+      // two fixes without reading the whole check-call log. Additive: null when
+      // only one ping has ever been recorded.
+      lastKnownPreviousAt:    a.datetime(),
+      lastKnownPreviousCity:  a.string(),
+      lastKnownPreviousState: a.string(),
+      lastKnownPreviousLat:   a.float(),
+      lastKnownPreviousLng:   a.float(),
+      lastKnownSource:   a.enum(['MANUAL', 'DRIVER_APP', 'LINK', 'MOTIVE', 'SYSTEM']),
+      // Open INCIDENT rows on this load. F reads it; D only keeps it honest.
+      openIncidentCount: a.integer(),
+      deliveredAt:       a.datetime(),
+      // Stamped by check-call-notifier so one schedule nags once per state.
+      // Rescheduling moves nextCheckCallAt past them and re-arms both.
+      checkCallDueNotifiedAt:     a.datetime(),
+      checkCallOverdueNotifiedAt: a.datetime(),
+      // ── The check-call plan this leg runs on (Step P8) ───────────────────
+      // The customer's plan, copied onto the load when the carrier is assigned, so
+      // a dispatcher may change the cadence for one load without touching the
+      // customer. The tracking agent reads only this field.
+      checkCallPlan:              a.json(),      // CheckCallPlan
+      checkCallPlanStartedAt:     a.datetime(),  // when the agent took the leg
+      // The reply clock behind the 30-minute escalation: set when a request goes
+      // out, cleared by any inbound reply or ping.
+      checkCallAwaitingSince:     a.datetime(),
+      checkCallEscalatedAt:       a.datetime(),
+      checkCallFlaggedAt:         a.datetime(),  // the Tracking-page flag
+      checkCallFlagReason:        a.string(),
+
+      // ── Revenue ownership (Step R) ───────────────────────────────────────
+      // Mirrored from the Shipment so everything that already reads Load —
+      // settlements, the fleet dashboards, the driver app — can be grouped by
+      // business without joining. Codes, not enums: divisions are data an admin
+      // edits (OwnershipDivision), so a new subsidiary needs no deploy.
+      revDivision:     a.string(),   // top-level OwnershipDivision code
+      revSubdivision:  a.string(),   // the matched descendant, when deeper
+      revTagSource:    a.string(),   // 'HAND' | 'RULE' — a hand tag beats the rules
+      revRuleId:       a.string(),   // the OwnershipRule that resolved it
+      salesRepId:      a.string(),   // Cognito username of the rep who sold it
+
+      // ── Void snapshot (Step R) ──────────────────────────────────────────
+      // What the void changed, recorded on the load so UNVOID_SHIPMENT can put
+      // it back exactly. A load the void did not cancel carries no status snapshot
+      // and is left completely alone. Read-only to clients: the Lambda writes these
+      // through the schema's resource grant, same as `voidedAt`.
+      previousStatus:        a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      previousReadyToInvoice: a.boolean().authorization((allow) => [allow.authenticated().to(['read'])]),
+
+      // ── Void, mirrored (Step R) ─────────────────────────────────────────
+      // Void lives on the Shipment, but the fleet reads the Load table: the
+      // calendar, dispatch, appointments, settlements and the pay hooks never
+      // join a shipment. Stamping the void here is what takes voided freight
+      // out of the live working set everywhere at once; the row, its PRO and
+      // its history stay, so the Voided tab and the History tab still read it.
+      //
+      // Read-only to a signed-in client. Every other Load field is client-writable
+      // and always has been, but this one carries the void: left open, any token
+      // could take a load out of every working set with no owner/ADMIN check, no
+      // reason and no audit row, or clear the mirror and put voided freight back on
+      // the calendar and in the settlements. VOID_SHIPMENT writes it through the
+      // schema's `allow.resource(tmsShipmentActions)` grant.
+      voidedAt:        a.datetime().authorization((allow) => [allow.authenticated().to(['read'])]),
+      // Aljex-exit Phase 0. Imported history: waives the paperwork and Step W driver
+      // gates. Read-only to a client (the `voidedAt` pattern) so nobody can flag a live
+      // load to dodge a gate; only the import engine writes them, over IAM.
+      legacyImported:  a.boolean().authorization((allow) => [allow.authenticated().to(['read'])]),
+      legacySource:    a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
@@ -103,10 +235,51 @@ const schema = a.schema({
       index('status'),
       index('checkCallOpen').sortKeys(['nextCheckCallAt']),
     ])
+    // Ryne, 2026-10-28: a PRO number is permanent. No delete mutation and no
+    // onDelete subscription exist on Load, so no token can erase a load and its
+    // PRO; the only exit is Void on the shipment. onCreate/onUpdate stay — the
+    // calendar subscribes to them.
+    .disableOperations(['delete', 'onDelete'])
     .authorization((allow) => [
-      // Phase 1: Load remains userPool-editable; merge repoints use schema-level IAM auth.
-      allow.authenticated(),
+      // Step R cutover. A Load is born only inside tmsShipmentActions, beneath the
+      // Shipment it belongs to, with its PRO claimed in the same transaction. Dropping
+      // `create` here closes the last client door: there is no longer any way for a
+      // browser token to mint freight that belongs to no record. The Lambda still
+      // creates legs through the schema-level `allow.resource(tmsShipmentActions)`
+      // grant, and onCreate — which the calendar subscribes to — still fires.
+      allow.authenticated().to(['read', 'update']),
     ]),
+
+  /**
+   * Step R cutover. One row per PRO number ever issued, and the rule that a PRO is
+   * never reused.
+   *
+   * `id` is the NORMALIZED PRO — trimmed, inner whitespace collapsed, upper-cased.
+   * Normalization is the point: the live Load table stores PROs padded ('14547  ')
+   * and every resolver trims before comparing, so a raw equality check would miss
+   * them and hand the number out twice.
+   *
+   * The claim is written with a conditional `attribute_not_exists(id)` put inside
+   * the same transaction that writes the Shipment, so two dispatchers creating the
+   * same PRO in the same second cannot both win — a read-then-write across two
+   * Lambda invocations has no mutual exclusion and an index read is eventually
+   * consistent besides.
+   *
+   * A claim is NEVER released: not when a create rolls back, not when the shipment
+   * is voided. A voided PRO stays claimed forever, which is exactly Ryne's rule.
+   * Hence no delete operation, and writes only through the schema-level
+   * `allow.resource(tmsShipmentActions)` grant.
+   */
+  ProClaim: a
+    .model({
+      loadId:     a.string().required(),
+      shipmentId: a.string(),
+      claimedAt:  a.datetime().required(),
+      claimedBy:  a.string().required(),
+      origin:     a.enum(['CREATE', 'DUPLICATE', 'BACKFILL', 'SET_LOAD_PRO', 'LEGACY']),
+    })
+    .disableOperations(['delete', 'onDelete', 'subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
 
   Driver: a
     .model({
@@ -126,7 +299,8 @@ const schema = a.schema({
       bobtail:            a.boolean(),
       // Which fleet this driver runs in. Mirrors DriverPaySetting.payGroup so the two
       // agree, and decides which documents their file requires (see src/lib/fileHub.ts).
-      fleetGroup:         a.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']),
+      // OWNER_OPERATOR is a driver-only value: trucks stay LOCAL/AMAZON/BOX_TRUCK.
+      fleetGroup:         a.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK', 'OWNER_OPERATOR']),
       // Compliance & profile fields
       email:              a.string(),   // invite target; required for new drivers (enforced in Zod)
       cdl:                a.string(),   // CDL number e.g. "CDL-A IL-8823901"
@@ -723,7 +897,13 @@ const schema = a.schema({
   // Writes are routed through tmsDirectoryActions so links and archives stay valid.
   Customer: a
     .model({
+      // Step AW stage D: how this customer is billed (Docs/tms-build/AW-CDE-plan.md D.1). Unset = release to billing is refused.
+      billingMethod:        a.enum(['FACTOR', 'MANUAL']),
+      apEmail:              a.string(),
+      invoiceCopyEmails:    a.string().array(),
+      billingNeedsReview:   a.string(),
       name:         a.string().required(),   // e.g. "BATORY FOODS" — matched against Load.customer
+      aljexCode:    a.string(),              // Aljex `Customer Account #` (Phase 0 import); no index
       contactName:  a.string(),
       contactEmail: a.string(),
       contactPhone: a.string(),
@@ -759,6 +939,7 @@ const schema = a.schema({
       creditLimitCents:  a.integer(),          // non-negative integer cents
       creditHoldFlag:    a.boolean(),
       requiredDocsForInvoice: a.string().array(), // ['POD','BOL','LUMPER_RECEIPT']
+      reviewRequirements: a.string().array(),    // Step AP: per-customer Load Review requirements; null = org default
       defaultDivisionKey:  a.string(),
       defaultSalesRepId:   a.string(),           // Cognito username
       aliases:        a.string().array(),        // ratecon names that resolve here
@@ -766,6 +947,79 @@ const schema = a.schema({
       active:         a.boolean(),
       apptWorkflow:   a.enum(['NONE', 'BATORY']), // replaces /batory/i regex
       mergedIntoId:   a.string(),                // soft-merge pointer (customer merge future)
+
+      // ── Customer v2 (Step A) ───────────────────────────────────────────────
+      status: a.enum([
+        'NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING',
+        'PENDING', 'ACTIVE', 'DORMANT', 'CLOSED', 'BLOCKED',
+      ]),
+      statusReason: a.string(),
+      statusChangedAt: a.datetime(),
+      statusChangedBy: a.string(),
+      replacementCustomerId: a.string(),         // successor named on BLOCKED
+
+      // Account / lead profile
+      leadSource: a.string(),
+      // Aljex-exit: imported from Aljex and not reviewed here. Written only by the import Lambda.
+      legacyImported: a.boolean(),
+      legacySource:   a.string(),
+      industry: a.string(),
+      serviceTier: a.string(),
+      website: a.string(),
+
+      // Credit policy (customer value ?? org default ?? null/false)
+      freeCreditRequired: a.boolean(),           // null = use org default
+      creditUsageWarningBps: a.integer(),        // 0..10000 basis points
+      maxDaysLate: a.integer(),                  // ≥0
+
+      // Directory JSON arrays (validated element-by-element in tmsDirectoryActions)
+      contacts: a.json(),                        // CustomerContact[]
+      billToParties: a.json(),                   // BillToParty[]
+      requiredReferences: a.json(),              // RequiredReference[]
+      chargeCodeOverrides: a.json(),             // ChargeCodeOverride[]
+      defaultCharges: a.json(),                  // DefaultCharge[]
+      aiMemory: a.json(),                        // PartyAiMemory — human-edited, agent-read
+
+      // Pricing / quoting defaults
+      pricingDefaults: a.json(),                 // PricingDefaults (mode MARGIN/MARKUP/PROFIT)
+      quotingDefaults: a.json(),                 // QuotingDefaults
+      invoiceFrequency: a.enum(['DAILY', 'TWICE_WEEKLY', 'WEEKLY', 'MONTHLY']),
+      gpSplitBps: a.integer(),                 // 0..10000 basis points
+
+      // Document / portal preferences
+      rateConTerms: a.string(),                  // override of TmsSettings.rateConTerms
+      visibilityPrefs: a.json(),                 // { milestoneEmails, sharedTrackingLink, shipperPortal }
+
+      // Ownership
+      teamKey: a.string(),
+      operatedById: a.string(),                  // Cognito username
+      accountOwnerIds: a.string().array(),       // [0] is primary owner
+
+      // ── Integrations (Step J) ──────────────────────────────────────────────
+      // External ids this customer is known by. Stored now; the outbound syncs that
+      // read them are stubs until the providers are live.
+      project44CustomerId: a.string(),
+      hubspotId:           a.string(),
+      haulpayDebtorId:     a.string(),
+      ediSettings:         a.json(),           // { isaId, gsId, autoAccept, skip210, skip997 }
+
+      // ── Flow defaults (Step P3) ───────────────────────────────────────────
+      // What a new load for this customer inherits, and what the quoting and
+      // tracking agents read before they act. Each is an override of the org
+      // default in TmsSettings; null means "use the org's answer".
+      defaultCarrierTeamKey: a.string(),       // Step I team key — new loads land in its queue
+      defaultCarrierRepId:   a.string(),       // optional rep inside that team (Cognito username)
+      marginTargetBps:       a.integer(),      // target margin, basis points (org default 2000)
+      marginFloorBps:        a.integer(),      // refuse-below margin, basis points
+      quoteAutoReply:        a.boolean(),      // true = the agent sends; false = a human presses Send
+      requiredLoadFields:    a.string().array(), // adds to TmsSettings.defaultRequiredLoadFields
+      checkCallPlan:         a.json(),         // CheckCallPlan — cadence + channels, overridable per load
+      defaultTrackerId:      a.string(),       // Step V. UserProfile id copied onto new shipments as the tracker (blank = unassigned)
+      trackingAutomation:    a.json(),         // Step V. AutomationPolicyPatch — auto check calls / POD / quiet hours / templates
+      // Steps AJ/AK. null = legacy (Step V switches decide / plan channels as configured / WORK_THEN_PERSONAL).
+      trackingMode:          a.enum(['AGENT', 'MANUAL']),
+      trackingMethod:        a.enum(['EMAIL', 'SMS', 'BOTH']),
+      driverSmsTarget:       a.enum(['WORK_THEN_PERSONAL', 'WORK_ONLY', 'PERSONAL']),
     })
     .secondaryIndexes((index) => [index('normalizedName')])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
@@ -776,6 +1030,7 @@ const schema = a.schema({
   Location: a
     .model({
       name:             a.string().required(),  // facility, e.g. "BATORY'S OAKLEY CHICAGO"
+      aljexCode:        a.string(),             // unused by the import for now (no location id in the export)
       city:             a.string(),             // "CHICAGO, IL"
       customerName:     a.string(),             // legacy mirror of first linked customer
       apptContactName:  a.string(),
@@ -840,6 +1095,19 @@ const schema = a.schema({
       invoicePrefix:  a.string(),
       fleetGroup:     a.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']),
       active:         a.boolean().required(),
+
+      // ── My Brokerage billing entity fields (Step L) ───────────────────────
+      taxId:             a.string(),   // EIN / tax id
+      phone:             a.string(),
+      physicalAddress:   a.json(),     // Address (distinct from remitTo)
+      primaryContact:    a.json(),     // { name, title, email, phone }
+      billingContact:    a.json(),     // { name, title, email, phone }
+      payablesContact:   a.json(),     // { name, title, email, phone }
+      termsUrl:          a.string(),   // T&C URL printed on every invoice
+      paymentInstructions: a.json(),   // { US: {...}, CA: {...}, MX: {...} }
+      invoiceVerbiage:   a.string(),   // printed under the instructions
+      logoKey:           a.string(),   // S3 key under brand/
+      isPrimary:         a.boolean(),  // exactly one Division should be primary
     })
     .identifier(['key'])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
@@ -850,7 +1118,15 @@ const schema = a.schema({
   // Singleton TMS configuration. id='default'. Admin write via tmsDirectoryActions.
   TmsSettings: a
     .model({
+      // Step AW: company-wide always-copy on manual invoices, the Aljex snapshot cutoff, and sales rep by division.
+      invoiceAlwaysCopyEmails: a.string().array(),
+      aljexCutoffAt:         a.datetime(),
+      divisionSalesReps:     a.json(),
       marginFloorBps:        a.integer(),
+      // Step AG: AP-inbox config and machine state. Read ONLY through tmsApInboxActions; written
+      // only by tms-ap-inbox with UpdateItem SET (never touches updatedAt).
+      apInbox:               a.json(),
+      apInboxState:          a.json(),
       defaultPaymentTermsDays: a.integer(),
       accessorialCodes:      a.json(),          // accessorial code objects
       loadStatusRules:       a.json(),
@@ -864,10 +1140,792 @@ const schema = a.schema({
        * turning it back off restores every row — nothing is written to the loads.
        */
       autoClearPastAppts:    a.boolean(),
+
+      // ── Customer v2 org defaults (Step A) ──────────────────────────────────
+      defaultCreditLimitCents: a.integer(),       // ≥0
+      defaultFreeCreditRequired: a.boolean(),
+      defaultCreditUsageWarningBps: a.integer(),  // 0..10000
+      defaultMaxDaysLate: a.integer(),            // ≥0
+      requireCustomerApproval: a.boolean(),       // non-admin creates land on PENDING
+      defaultRequiredDocs: a.string().array(),    // e.g. ['POD','BOL']
+      reviewRequirements: a.string().array(),     // Step AP: org default Load Review requirements (ReviewRequirement[])
+      defaultRequiredReferences: a.json(),        // RequiredReference[]
+      chargeCodes: a.json(),                      // ChargeCodeDef[]
+      rateConTerms: a.string(),                   // default rate-con terms
+
+      // ── Shipment / Order / Load org defaults (Step B) ──────────────────────
+      shipmentPrefix: a.string(),                 // 'S' → S000001
+      // Counter behind the shipment number. Incremented with an atomic ADD so two
+      // dispatchers building loads at the same second cannot land on one number.
+      nextShipmentNumber: a.integer(),
+      // Aljex-exit Phase 0. DERIVED (default/absent) = `<prefix><n>-1`; NUMERIC = the plain
+      // number. Flipped only by IMPORT_SEED_COUNTER / saveShipmentSettings.
+      proScheme: a.enum(['DERIVED', 'NUMERIC']),
+      // New invoice series (DECIDED-6). `nextInvoiceNumber` is set to start - 1 in the same
+      // conditional write; `maxImportedInvoiceNumber` is written by the import's FINALIZE.
+      invoiceSeriesStart: a.integer(),
+      invoiceSeriesStartedAt: a.datetime(),
+      maxImportedInvoiceNumber: a.integer(),
+      cancelDeleteAdminOnly: a.boolean(),         // cancel/delete restricted to owner/ADMIN
+      arUnbilledStage: a.string(),                // label for the UNBILLED AR stage
+      apInReviewStage: a.string(),                // label for the IN_REVIEW AP stage
+      defaultMode: a.enum([
+        'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
+      ]),
+
+      // ── Carrier booking org defaults (Step C) ─────────────────────────────
+      allowedCarrierStatuses:  a.string().array(),  // defaults to ['ACTIVE']
+      requireCarrierApproval:  a.boolean(),         // non-admin creates land on PENDING
+      requiredCarrierDocs:     a.string().array(),  // ['COI_CARGO','COI_AUTO','W9','CARRIER_AGREEMENT']
+      bookingRequiredFields:   a.string().array(),  // COMMODITY | DESCRIPTION | VALUE | WEIGHT
+      defaultCarrierTermsDays: a.integer(),
+      // QuickPayTier[] — [{ days, feeBps }], longest wait first and never more
+      // expensive than a shorter one. Validated on save, not here.
+      quickPayTiers:           a.json(),
+      rateConExpiryHours:      a.integer(),         // how long a signing link lives (48)
+      rateConRequiredFields:   a.string().array(),  // what the carrier must type to sign
+      insuranceWarnDays:       a.integer(),         // expiring-soon window (30)
+
+      // ── Tracking & check calls org defaults (Step D) ──────────────────────
+      checkCallDefaultIntervalHours: a.integer(),   // 4
+      checkCallGraceMinutes:         a.integer(),   // 15 — DUE becomes OVERDUE after this
+      checkCallNotifyChannel:        a.enum(['IN_APP', 'SLACK', 'BOTH']),
+      checkCallSlackChannelId:       a.string(),
+      trackingLinkExpiryHours:       a.integer(),   // 72, counted from the last delivery appointment
+      customerLinkExpiryDays:        a.integer(),   // 14
+      customerLinkShowsCarrier:      a.boolean(),   // false
+      customerLinkShowsPosition:     a.boolean(),   // true
+      // { mode: 'CUSTOMER_REP' | 'FIXED', name?, email?, phone? } — whose details
+      // the public customer page prints as "who to call".
+      trackingContact:               a.json(),
+      trackingSmsTemplate:           a.string(),    // must contain {url}
+
+      // ── Documents & delivery org defaults (Step E) ────────────────────────
+      milestoneNoticesEnabled:  a.boolean(),      // true; a customer still has to opt in
+      podRequestEnabled:        a.boolean(),      // true — ask the carrier on delivery
+      requiredCarrierUploadTypes: a.string().array(), // ['POD','CARRIER_INVOICE']
+      uploadLinkExpiryDays:     a.integer(),      // 30, counted from delivery
+      milestoneEmailTemplate:   a.string(),       // must contain {url}
+      podRequestEmailTemplate:  a.string(),       // must contain {url}
+      bolTerms:                 a.string(),       // printed on every generated BOL
+      documentDeleteAdminOnly:  a.boolean(),      // true — voiding a document is an admin act
+
+      // ── AR: invoicing & payments org defaults (Step F) ────────────────
+      // Taken with an atomic ADD, exactly like nextShipmentNumber: a failed
+      // generation skips a number rather than handing the same one out twice.
+      nextInvoiceNumber:        a.integer(),
+      invoiceTerms:             a.string(),      // printed at the foot of every invoice
+      invoiceEmailTemplate:     a.string(),      // must contain {number}
+      invoiceAttachTypes:       a.string().array(),  // ['POD','BOL'] on top of the customer's required docs
+      factorRemitTo:            a.json(),        // { name, address, email, noticeText }
+      arPostingAdminOnly:       a.boolean(),     // true — void/payment/credit/write-off/reversal
+      invoiceBatchEmail:        a.enum(['PER_INVOICE', 'PER_BILL_TO']),
+
+      // ── AP: carrier bills & payments org defaults (Step G) ────────────
+      apApprovalAdminOnly:      a.boolean(),     // true — only owner/ADMIN approve a bill
+      apPostingAdminOnly:       a.boolean(),     // true — payment/credit/reversal/void
+      apRequireSignedRateCon:   a.boolean(),     // true — unsigned blocks approval
+      remittanceEmailTemplate:  a.string(),      // must contain {reference}
+      apBillDocsRequired:       a.string().array(), // defaults to requiredCarrierUploadTypes
+
+      // ── Quotes & rates org defaults (Step H) ──────────────────────────────
+      hoursToQuote:             a.integer(),     // 24 — how long a customer quote lives
+      offerExpiryHours:         a.integer(),     // 24, capped at the first pickup appointment
+      quoteNumberFormat:        a.string(),      // 'Q{n:6}' → Q000012
+      // Counter behind the quote number. Taken with an atomic ADD, exactly like
+      // nextShipmentNumber: a failed save skips a number, never repeats one.
+      nextQuoteNumber:          a.integer(),
+      quoteEmailTemplate:       a.string(),      // must contain {link}
+      counterEmailTemplate:     a.string(),      // must contain {link}
+      offerRequestEmailTemplate: a.string(),     // must contain {link}
+      quoteTermsText:           a.string(),      // printed on every public quote page
+      quoteBelowMinMarginAdminOnly: a.boolean(), // true — only owner/ADMIN send under the floor
+      quoteOffersCarrierSeesBookNow: a.boolean(), // true — the offer link may show a book-now rate
+
+      // ── Roles, teams, commissions (Step I) ───────────────────────────────
+      // Team[] — [{ key, name, memberIds[], senderAddresses{...}, showContactOnTracking, active }].
+      // Configuration an admin edits, a handful of rows: JSON on the singleton, not a table.
+      teams:                    a.json(),
+      limitCustomerRepView:     a.boolean(),     // false — a board filter, never a read boundary
+      limitCarrierRepView:      a.boolean(),     // false — same
+      commissionsEnabled:       a.boolean(),     // false — nothing is computed until this is on
+      commissionTrigger:        a.enum(['GENERATE_INVOICE', 'INVOICE_PAID']),
+      commissionPlans:          a.json(),        // CommissionPlan[] — validated on save
+      commissionPaySchedule:    a.json(),        // { frequency, payDay, daysUntilPay }
+      commissionApprovalAdminOnly: a.boolean(),  // false — managers approve
+      commissionPayAdminOnly:   a.boolean(),     // true — only owner/ADMIN pay a period
+
+      // ── Integrations (Step J) ──────────────────────────────────────────────
+      // The shared tracking toggles row J asks for. Stored and shown now; read by
+      // nothing until a carrier-tracking provider is live (TMS_DESIGN §4.16).
+      trackByDefault:           a.boolean(),     // true
+      autoStatusFromGeofence:   a.boolean(),     // false
+      trackingIntervalMin:      a.integer(),     // 30
+      trackingDurationHours:    a.integer(),     // 72
+      // [{ zip, city, state }] — a ZIP whose carrier-facing city differs from the
+      // postal one, applied when a lane key is built.
+      postalCodeAliases:        a.json(),
+      hubspotPortalId:          a.string(),
+      // Slack channel health changes are posted to. Stored by J, used by K.
+      integrationsNotifyChannel: a.string(),
+
+      // ── Workflows & AI agents (Step K) ────────────────────────────────────
+      // { general: Memory, dailyRunCap, QUOTE|TENDER|AP|CAPACITY: AgentSettings }
+      // Human-edited; the agent reads it and never writes it.
+      aiAgents:                 a.json(),
+
+      // ── My Brokerage (Step L) ─────────────────────────────────────────────
+      // Branding
+      brandLogoSquareKey:    a.string(),   // S3 key under brand/
+      brandLogoWideKey:      a.string(),   // S3 key under brand/
+      brandLogoDocumentKey:  a.string(),   // S3 key under brand/
+      brandAccent:           a.string(),   // YELLOW | BLUE | TEAL | RED | PURPLE | ORANGE
+      brandTheme:            a.string(),   // DARK | LIGHT | SYSTEM
+      brandSenders:          a.json(),     // { shipment?, rateCon?, quoteReply?, customerInvoice?, remittance? }
+      emailSignatureTemplate: a.string(),  // HTML/markdown template for outbound e-mail
+      whiteLabel:            a.json(),     // { domain, status, records, checkedAt }
+      // Customer settings
+      customerPortalDefaults: a.json(),    // { ltlQuoting, portalDispatchMode, portalStatusMask[], blockedLtlCarrierIds[], defaultQuoteNotes }
+      customerTags:          a.json(),     // [{ key, label, color }]
+      // Carrier documents
+      rateConTemplate:       a.json(),     // { overrideDefaultTerms, extraTerms[], termsHtml, hideRep, legalPageBreak, requiredDocs[], requiredFields[] }
+      carrierAgreementTemplate: a.json(),  // { bodyMarkdown, requiredDocs[], signatureBlock, version, updatedAt, updatedBy }
+      // Consolidation
+      consolidationRules:    a.json(),     // { rules[], hazmatMode, onHold }
+      // Notifications
+      notificationSubscriptions: a.json(), // [{ event, channel, audience, enabled }]
+      notificationWebhooks:  a.json(),     // [{ id, url, events[], secretRef, secretLast4, active, ... }]
+      notificationDefaults:  a.json(),     // { pauseAll, ... }
+      // Billing
+      paymentTerms:          a.json(),     // [{ key, name, days, description, quickPayFeeBps, apOnly, doNotUse }]
+
+      // ── The demo flow's org defaults (Step P3) ────────────────────────────
+      // Ryne, 2026-10-29: target margin 20%, configurable by mode (FTL vs LTL),
+      // overridable per customer. Floor falls back to `marginFloorBps` above.
+      marginTargetBps:          a.integer(),     // 2000 — the org default for every mode
+      marginTargetBpsByMode:    a.json(),        // { FTL: 2000, LTL: 2500, … } — overrides per mode
+      quoteAutoReplyDefault:    a.boolean(),     // false — a human presses Send unless a customer says otherwise
+      // Ryne: pickup address, delivery address, bill-to, sales rep, revenue division.
+      defaultRequiredLoadFields: a.string().array(),
+      // { intervalHours: 4, channels: ['SMS','EMAIL'], milestones: [...], escalateAfterMinutes: 30 }
+      defaultCheckCallPlan:     a.json(),
+      // Step V. { global: AutomationPolicyPatch, divisions: { [code]: { policy?, plan? } } }
+      trackingAutomation:       a.json(),
+      // The P1 seed's version stamp, so the Demo page can say what it is looking at.
+      demoSeedVersion:          a.string(),
+      demoSeededAt:             a.datetime(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step J — one row per integration provider, plus one per BCAT API client and
+   * one per received webhook event.
+   *
+   * `id` is the provider key ('DAT'), `api:<clientId>` for an issued API client,
+   * or `evt:<PROVIDER>:<eventId>` for a webhook receipt — so a conditional put on
+   * `attribute_not_exists(id)` is both the first-list seed and the idempotency
+   * guard, and no index is needed: `list` is the only read.
+   *
+   * No credential value is ever stored here. `credentialRef` is a pointer (the SSM
+   * parameter name, or the comma-joined Amplify secret names) and `credentialMask`
+   * is `[{ key, last4 }]` — the only part of a secret that leaves SSM.
+   *
+   * Written only by tmsDirectoryActions, and by trackingApi for an API client's
+   * `lastUsedAt` and a webhook receipt. There is no delete: a provider is
+   * DISCONNECTED and an API client carries `revokedAt`.
+   */
+  Integration: a
+    .model({
+      provider:         a.string().required(),
+      kind:             a.enum(['PROVIDER', 'API_CLIENT', 'WEBHOOK_EVENT']),
+      category:         a.string(),
+      mode:             a.enum(['STUB', 'LIVE']),
+      credentialSource: a.enum(['NONE', 'STACK', 'PAGE', 'BRIDGE', 'SCRIPT', 'OWN']),
+      credentialRef:    a.string(),            // parameter name or secret names — pointers only
+      credentialMask:   a.json(),              // CredentialMaskEntry[] — [{ key, last4 }]
+      status:           a.enum(['NOT_CONNECTED', 'CONNECTED', 'DISCONNECTED']),
+      health:           a.enum(['UNKNOWN', 'OK', 'INVALID_CREDENTIALS', 'UNABLE_TO_VERIFY']),
+      healthReason:     a.string(),
+      healthDetail:     a.string(),            // redacted before it is written
+      lastCheckAt:      a.datetime(),
+      lastOkAt:         a.datetime(),
+      lastCheckBy:      a.string(),
+      settings:         a.json(),              // the behaviour card, validated against the descriptor
+      capabilities:     a.string().array(),
+      lastStubAt:       a.datetime(),
+      stubCount:        a.integer(),
+      connectedAt:      a.datetime(),
+      disconnectedAt:   a.datetime(),
+      connectedBy:      a.string(),
+      disconnectedBy:   a.string(),
+      // API clients (kind API_CLIENT). The secret itself is never here: only its
+      // SHA-256 hash, which lives in the OPENAPI parameter.
+      name:             a.string(),
+      scopes:           a.string().array(),
+      lastUsedAt:       a.datetime(),
+      expiresAt:        a.datetime(),
+      revokedAt:        a.datetime(),
+      // Inbound webhooks: the receipt row's stamp, and the counter on the provider row.
+      lastWebhookAt:    a.datetime(),
+      webhookCount:     a.integer(),
+      // DynamoDB TTL on a WEBHOOK_EVENT receipt: epoch SECONDS, ≈10 minutes out.
+      // `expiresAt` above cannot serve — it is an ISO datetime an API client uses,
+      // and TTL only reads a Number. Ten rather than five minutes because a
+      // redelivery is accepted anywhere in the ±300 s signature window, so a
+      // duplicate of a delivery first accepted at the far edge can land a full
+      // window later and must still find its receipt.
+      ttlEpoch:         a.integer(),
+      events:           a.json(),              // IntegrationEvent[], newest first, capped at 50
+      createdBy:        a.string(),
+      updatedBy:        a.string(),
+      version:          a.integer(),
+    })
+    // No GSI: ≤ 40 providers and a handful of clients, and `list` is the only read.
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    // `delete` is dropped too — nothing in step J removes an integration row.
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Step AB: per-rep Gmail spot quoter + CRM bones ───────────────────────────
+  //
+  // Seven additive tables. tms-spot-quoter owns SpotSettings, GmailConnection and
+  // SpotRequest; tms-crm-actions owns CrmContact, CrmDomain, CrmActivity and CrmAccount
+  // (the spot Lambda also writes the four CRM tables through _shared/crmStore.ts). Both
+  // use the DynamoDB SDK directly — no schema-level `allow.resource` grant. The models
+  // that carry e-mail (GmailConnection, SpotRequest, CrmActivity) are ADMIN-read only;
+  // reps reach them through the Lambdas, which enforce owner / manager visibility.
+  // No token or client secret is ever an attribute of any of them.
+
+  // Org knobs for the spot quoter. id='default'.
+  SpotSettings: a
+    .model({
+      enabled:                     a.boolean(),
+      retentionDays:               a.integer(),
+      dismissedRetentionDays:      a.integer(),
+      allowAutoSend:               a.boolean(),
+      autoSendDailyCapPerRep:      a.integer(),
+      autoSendDailyCapPerCustomer: a.integer(),
+      autoSendMinSamples:          a.integer(),
+      modelCallsPerRepPerDay:      a.integer(),
+      maxMessagesPerRepPerRun:     a.integer(),
+      updatedBy:                   a.string(),
+      version:                     a.integer(),
+      // Step AL: the carrier-sales inbox rides row id='carrier-sales'. Nothing secret in either
+      // attribute (hashes only); the AB reader reads only id='default'.
+      carrierInbox:                a.json(),
+      carrierInboxState:           a.json(),
+    })
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // One row per rep who connected (or simulated) a mailbox. `id` is UserProfile.id.
+  // Metadata only: the refresh token lives in SSM under /bcat/gmail/<poolId>/users/<id>.
+  GmailConnection: a
+    .model({
+      userEmail:          a.string().required(),
+      mode:               a.enum(['GOOGLE', 'SIMULATED']),
+      status:             a.enum(['PENDING', 'CONNECTED', 'PAUSED', 'NEEDS_RECONNECT', 'DISCONNECTED']),
+      googleEmail:        a.string(),
+      scopes:             a.string().array(),
+      connectedAt:        a.datetime(),
+      disconnectedAt:     a.datetime(),
+      historyId:          a.string(),
+      lastPollAt:         a.datetime(),
+      lastPollStartedAt:  a.datetime(),
+      lastPollOk:         a.boolean(),
+      lastPollStats:      a.json(),
+      lastError:          a.string(),
+      pendingState:       a.string(),
+      pendingStateExp:    a.datetime(),
+      settings:           a.json(),
+      autoSendChangedAt:  a.datetime(),
+      autoSendChangedBy:  a.string(),
+      modelCallsDay:      a.string(),
+      modelCallsToday:    a.integer(),
+      autoSendDay:        a.string(),
+      autoSendCount:      a.integer(),
+      version:            a.integer().required(),
+    })
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.groups(['ADMIN']).to(['read'])]),
+
+  // A mail the classifier called a quote request, and nothing else from the mailbox.
+  // `id` is `sr:<userId>:<gmailMessageId>` so a conditional put is the idempotency guard.
+  // DynamoDB TTL on `ttlEpoch` (epoch SECONDS) enabled in backend.ts.
+  SpotRequest: a
+    .model({
+      userId:          a.string().required(),
+      mode:            a.enum(['GOOGLE', 'SIMULATED']),
+      gmailMessageId:  a.string().required(),
+      gmailThreadId:   a.string().required(),
+      receivedAt:      a.datetime().required(),
+      fromEmail:       a.string(),
+      fromName:        a.string(),
+      replyTo:         a.string(),
+      subject:         a.string(),
+      bodyText:        a.string(),
+      attachments:     a.json(),
+      status:          a.enum(['NEW', 'NEEDS_INFO', 'DRAFTED', 'AUTO_PENDING', 'SENT', 'WON', 'LOST', 'DISMISSED']),
+      classification:  a.json(),
+      extraction:      a.json(),
+      fieldMeta:       a.json(),
+      missingFields:   a.string().array(),
+      customerId:      a.string(),
+      contactEmail:    a.string(),
+      matchHow:        a.enum(['EMAIL', 'DOMAIN', 'NONE', 'AMBIGUOUS']),
+      matchCandidates: a.json(),
+      suggestion:      a.json(),
+      quoteId:         a.string(),
+      quoteNumber:     a.string(),
+      quoteStatus:     a.string(),
+      draftId:         a.string(),
+      draftMessageId:  a.string(),
+      draftedAt:       a.datetime(),
+      sentAt:          a.datetime(),
+      sentVia:         a.enum(['REP_GMAIL', 'APP', 'AUTO']),
+      autoDecision:    a.json(),
+      thread:          a.json(),
+      customerReplyAt: a.datetime(),
+      replyIntent:     a.string(),
+      needsAttention:  a.boolean(),
+      shipmentId:      a.string(),
+      shipmentNumber:  a.string(),
+      dismissedAt:     a.datetime(),
+      dismissedBy:     a.string(),
+      dismissedReason: a.string(),
+      ttlEpoch:        a.integer().required(),
+      version:         a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('userId').sortKeys(['receivedAt']),
+      index('gmailThreadId'),
+      index('status').sortKeys(['receivedAt']),
+    ])
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.groups(['ADMIN']).to(['read'])]),
+
+  // Step AG: an invoice / credit-memo e-mail the AP-inbox classifier found, and nothing else
+  // from the mailbox. `id` is `apin:<gmailMessageId>` (`apin:sim:<id>` for the simulated inbox), so
+  // a conditional put is the idempotency guard. DynamoDB TTL on `ttlEpoch` (epoch SECONDS)
+  // enabled in backend.ts. Written only by tms-ap-inbox; clients read.
+  ApInboxItem: a
+    .model({
+      messageId:      a.string().required(),
+      threadId:       a.string(),
+      mailbox:        a.string(),
+      mode:           a.enum(['GOOGLE', 'SIMULATED']),
+      receivedAt:     a.datetime().required(),
+      fromEmail:      a.string(),
+      fromName:       a.string(),
+      subject:        a.string(),
+      kind:           a.enum(['INVOICE', 'CREDIT_MEMO']),
+      status:         a.enum(['NEEDS_REVIEW', 'APPLIED', 'LINKED', 'CREATED', 'DISMISSED']),
+      reviewReason:   a.string(),
+      extraction:     a.json(),
+      match:          a.json(),
+      target:         a.json(),
+      applied:        a.json(),
+      attachments:    a.json(),
+      sourceUrl:      a.string(),
+      runId:          a.string(),
+      resolvedAt:     a.datetime(),
+      resolvedBy:     a.string(),
+      dismissReason:  a.string(),
+      ttlEpoch:       a.integer(),
+      version:        a.integer().required(),
+    })
+    .secondaryIndexes((index) => [index('status').sortKeys(['receivedAt'])])
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // One person at a customer. `id` is the lower-case e-mail address.
+  CrmContact: a
+    .model({
+      customerId: a.string(),
+      name:       a.string(),
+      title:      a.string(),
+      phone:      a.string(),
+      ownerId:    a.string(),
+      source:     a.enum(['MANUAL', 'SPOT_REQUEST', 'BACKFILL', 'CUSTOMER_JSON']),
+      status:     a.enum(['ACTIVE', 'ARCHIVED']),
+      createdBy:  a.string(),
+      updatedBy:  a.string(),
+      version:    a.integer(),
+    })
+    .secondaryIndexes((index) => [index('customerId')])
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Registrable domain -> account. `id` is the domain.
+  CrmDomain: a
+    .model({
+      customerId:          a.string(),
+      source:              a.enum(['MANUAL', 'SPOT_REQUEST', 'BACKFILL', 'WEBSITE']),
+      conflict:            a.boolean(),
+      conflictCustomerIds: a.string().array(),
+      claimedBy:           a.string(),
+      claimedAt:           a.datetime(),
+      version:             a.integer(),
+    })
+    .secondaryIndexes((index) => [index('customerId')])
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Timeline rows: notes, tasks, calls, texts, e-mail and quote-draft metadata.
+  // `id` is `act:<ISO>:<rand6>`.
+  CrmActivity: a
+    .model({
+      customerId:   a.string(),
+      contactEmail: a.string(),
+      ownerId:      a.string().required(),
+      kind:         a.enum(['EMAIL_IN', 'EMAIL_OUT', 'QUOTE_DRAFTED', 'QUOTE_SENT', 'CALL', 'TEXT', 'NOTE', 'TASK']),
+      direction:    a.enum(['IN', 'OUT']),
+      at:           a.datetime().required(),
+      subject:      a.string(),
+      summary:      a.string(),
+      refs:         a.json(),
+      assigneeId:   a.string(),
+      dueAt:        a.datetime(),
+      doneAt:       a.datetime(),
+      doneBy:       a.string(),
+      createdBy:    a.string().required(),
+      version:      a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('customerId').sortKeys(['at']),
+      index('ownerId').sortKeys(['at']),
+      index('assigneeId').sortKeys(['dueAt']),
+    ])
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.groups(['ADMIN']).to(['read'])]),
+
+  // Last touch and next step per account. `id` is Customer.id.
+  CrmAccount: a
+    .model({
+      lastTouchAt:    a.datetime(),
+      lastTouchKind:  a.string(),
+      lastTouchBy:    a.string(),
+      nextStep:       a.string(),
+      nextStepDueAt:  a.datetime(),
+      nextStepBy:     a.string(),
+      openTaskCount:  a.integer(),
+      updatedBy:      a.string(),
+      version:        a.integer(),
+    })
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step L. One row per spreadsheet import job: mapping, validation, dry run,
+   * and applied execution.
+   *
+   * `id` is `imp:<sha20(fileHash)>:<entity>` — a deterministic hash of the
+   * uploaded bytes plus the entity, so a conditional put on `id` makes re-running
+   * the same file against the same entity a no-op that returns the first job.
+   * `fileHash` is the sha256 of the uploaded bytes and serves as the idempotency
+   * key together with `entity`.
+   *
+   * No delete: a job is superseded by a later run, never removed.
+   */
+  ImportJob: a
+    .model({
+      id:        a.id(),
+      entity:    a.enum([
+        'CUSTOMER', 'LOCATION', 'CARRIER', 'CARRIER_FACTOR', 'CHARGE_CODE',
+        'PAYMENT_TERM', 'VENDOR_CONTACT',
+      ]),
+      status:    a.enum(['DRAFT', 'VALIDATED', 'DRY_RUN', 'APPLIED', 'FAILED']),
+      fileName:  a.string(),
+      fileHash:  a.string(),   // sha256 of uploaded bytes; part of idempotency key
+      mapping:   a.json(),     // { sheetHeader: fieldName }
+      rowCount:  a.integer(),
+      counts:    a.json(),     // { created, updated, skipped, errored }
+      errorKey:  a.string(),   // S3 key of per-row error CSV under imports/
+      dryRun:    a.boolean(),
+      note:      a.string(),
+      createdBy: a.string().required(),
+      appliedAt: a.datetime(),
+      appliedBy: a.string(),
+    })
+    // No GSI: list by createdAt is a scan of a small table; reads are by id.
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    // `delete` is dropped — an import job is never removed.
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step N1. One row per uploaded Aljex CSV file. Idempotency key is the file
+   * hash: `id = aljex:{fileHash}`. Re-running the same file returns the first job.
+   */
+  AljexImportJob: a
+    .model({
+      decisions:   a.json(),     // Step AW: reconciliation decisions { OPEN_BALANCE | APPROVED, by, at, reason }
+      id:          a.id(),
+      // DRY_RUN/APPLIED/FAILED are the pre-Phase-0 members; the rest drive the pipeline.
+      status:      a.enum(['DRY_RUN', 'APPLIED', 'FAILED', 'STAGING', 'READY', 'PLANNING', 'PLANNED', 'RUNNING', 'PAUSED', 'CANCELED']),
+      kind:        a.enum(['IMPORT', 'MCP_SYNC', 'RECONCILE']),
+      phase:       a.string(),
+      cursor:      a.json(),     // { phase, entity, chunk, offset }
+      heartbeatAt: a.datetime(),
+      startedAt:   a.datetime(),
+      finishedAt:  a.datetime(),
+      stageHash:   a.string(),
+      layoutId:    a.string(),
+      profileVersion: a.integer(),
+      target:      a.enum(['LIVE', 'REHEARSAL']),
+      targetTag:   a.string(),
+      liveTag:     a.string(),
+      options:     a.json(),
+      entityCounts: a.json(),    // Partial<Record<AljexEntity, EntityCount>>
+      reportPrefix: a.string(),
+      error:       a.string(),
+      parentJobId: a.string(),
+      synthetic:   a.boolean(),
+      fileName:    a.string(),
+      fileHash:    a.string(),
+      mapping:     a.json(),     // legacy: { sheetHeader: fieldName }
+      rowCount:    a.integer(),
+      counts:      a.json(),     // legacy AljexImportCounts
+      errorKey:    a.string(),   // S3 key of per-row error CSV under imports/errors/
+      dryRun:      a.boolean(),
+      note:        a.string(),
+      createdBy:   a.string().required(),
+      appliedAt:   a.datetime(),
+      appliedBy:   a.string(),
+    })
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Aljex-exit Phase 0. The persisted, versioned mapping profile for one export layout
+   * (`id` = layoutId). Written by tmsAljexImport only.
+   */
+  AljexMappingProfile: a
+    .model({
+      id:          a.id(),
+      fingerprint: a.string(),
+      headerCount: a.integer(),
+      version:     a.integer(),
+      profile:     a.json(),
+      createdBy:   a.string().required(),
+      updatedBy:   a.string().required(),
+    })
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Aljex-exit Phase 0. The lossless copy of one imported source row (`aljex:<pro>` /
+   * `aljex:memo:<pro>`): every non-empty column keyed `c<index>`. As sensitive as Customer.
+   */
+  LegacyAljexRow: a
+    .model({
+      id:           a.id(),
+      pro:          a.string().required(),
+      kind:         a.enum(['LOAD', 'MEMO_DEBT', 'MEMO_CRED']),
+      shipmentId:   a.string(),
+      importRunId:  a.string(),
+      sourceSha256: a.string(),
+      rowNumber:    a.integer(),
+      fields:       a.json(),
+      importedAt:   a.datetime(),
+    })
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Aljex-exit. Settings > Users crosswalk: an Aljex code (Salesrep ID, or a staff code from
+   * Created by / Service Rep / Assigned Dispatcher) to a UserProfile. id = `<kind>:<code>`.
+   * Written only by tmsShipmentActions (owner/ADMIN); the client reads.
+   */
+  AljexCodeMap: a
+    .model({
+      id:               a.id(),
+      kind:             a.enum(['SALES_REP', 'STAFF']),
+      code:             a.string().required(),
+      userId:           a.string(),
+      userName:         a.string(),
+      lastAppliedAt:    a.datetime(),
+      lastAppliedBy:    a.string(),
+      lastAppliedCount: a.integer(),
+      updatedBy:        a.string(),
+    })
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Aljex-exit Phase 0. One nightly / manual S3 export or export-everything CSV job.
+   * Written only by tms-data-safety over DynamoDB.
+   */
+  DataExportJob: a
+    .model({
+      id:           a.id(),
+      kind:         a.string(),     // NIGHTLY | NIGHTLY_CHECK | S3_EXPORT | CSV_ALL | ACCOUNTING
+      status:       a.string(),
+      scope:        a.string(),
+      tables:       a.json(),
+      prefix:       a.string(),
+      cursor:       a.json(),
+      heartbeatAt:  a.datetime(),
+      includesPii:  a.boolean(),
+      startedBy:    a.string(),
+      startedAt:    a.datetime(),
+      finishedAt:   a.datetime(),
+      error:        a.string(),
+    })
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step K. One row per piece of work an AI agent did: an inbound e-mail, a
+   * vendor payable, a driver submission, a provider webhook.
+   *
+   * `id` is `wf:<AGENT>:<sha20(sourceKey)>` — a deterministic hash of the source,
+   * not a random ULID, so the conditional put `attribute_not_exists(id)` IS the
+   * dedupe. Two bridges handing the same message over (a Slack retry, a Gmail
+   * redelivery) collide on the primary key and the second one does no work.
+   *
+   * `delete` is dropped: a run is DISMISSED or RESOLVED, never removed — it is
+   * the audit trail for what the model was shown and what it proposed, and a
+   * row linked from a Shipment must outlive the inbox it came from.
+   * `subscriptions` are dropped for the TMS_DESIGN §12 reason the Integration
+   * model above gives: no client subscribes, and three fewer resolvers keeps a
+   * fresh stack create under the CloudFormation resource cap. The trace view
+   * polls instead.
+   *
+   * Three indexes, one per screen:
+   *   byAgent        — the AI Agents tab's per-agent list, newest first, and the
+   *                    daily-cap count the pipeline takes before any model call.
+   *   byShipment     — a shipment's AI Agent tab: the runs that touched this load.
+   *   exceptionOpen  — the Errors queue. Sparse on the literal 'OPEN', the
+   *                    `Load.checkCallOpen` precedent: the index holds the open
+   *                    worklist and nothing else, so the queue never pays for the
+   *                    runs that already succeeded.
+   */
+  WorkflowRun: a
+    .model({
+      agent:        a.enum(['QUOTE', 'TENDER', 'AP', 'CAPACITY', 'WEBHOOK']),
+      inboxRole:    a.string(),
+      status:       a.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED', 'FAILED']),
+      outcome:      a.enum(['PROPOSED', 'APPLIED', 'DISMISSED', 'NOTED', 'UNKNOWN_PARTY', 'IGNORED', 'NO_ACTION']),
+      currentStep:  a.string(),
+      errorCode:    a.string(),
+      error:        a.string(),            // redacted, <= 1 KB
+      exceptionOpen: a.string(),           // sparse: literal 'OPEN' while unresolved
+      sourceKind:   a.enum(['INTAKE_ITEM', 'VENDOR_PAYABLE', 'DRIVER_SUBMISSION', 'INBOX', 'WEBHOOK']),
+      sourceId:     a.string().required(),
+      sourceKey:    a.string(),
+      provider:     a.string(),
+      subject:      a.string(),
+      fromEmail:    a.string(),
+      fromName:     a.string(),
+      fromDomain:   a.string(),
+      receivedAt:   a.datetime(),
+      bodyPreview:  a.string(),            // <= 500 chars
+      partyKind:    a.enum(['CUSTOMER', 'CARRIER', 'VENDOR', 'UNKNOWN']),
+      partyId:      a.string(),
+      partyName:    a.string(),
+      partyMatchHow: a.enum(['EMAIL', 'DOMAIN', 'NAME', 'NONE']),
+      partyCandidates: a.json(),           // <= 3 { kind, id, name, how }
+      shipmentId:   a.string(),
+      shipmentNumber: a.string(),
+      quoteId:      a.string(),
+      documentIds:  a.string().array(),
+      proposalKind: a.enum(['TENDER', 'QUOTE', 'CARRIER_BILL', 'VENDOR_BILL', 'CAPACITY', 'NONE']),
+      proposal:     a.json(),
+      steps:        a.json(),              // <= 12 WorkflowStep
+      documents:    a.json(),              // WorkflowDocumentRef[]
+      attempts:     a.integer(),
+      lastAttemptAt: a.datetime(),
+      startedAt:    a.datetime(),
+      endedAt:      a.datetime(),
+      durationMs:   a.integer(),
+      model:        a.string(),
+      modelCalls:   a.integer(),
+      inputTokens:  a.integer(),
+      outputTokens: a.integer(),
+      memoryRevisions: a.json(),           // { org, orgAgent, party, partyAgent }
+      feedback:     a.json(),              // <= 20 { at, by, rating, text }
+      appliedAt:    a.datetime(),
+      appliedBy:    a.string(),
+      dismissedAt:  a.datetime(),
+      dismissedBy:  a.string(),
+      dismissReason: a.string(),
+      resolvedAt:   a.datetime(),
+      resolvedBy:   a.string(),
+      /*
+       * The sort key of all three indexes. Amplify reserves `updatedAt` as a system
+       * field and refuses it as a sort key, so the agent stamps its own copy on every
+       * write — the `Quote.expiresAt` precedent. Newest-first on this is what makes
+       * "the last 200 runs" and the exception queue one query apiece.
+       */
+      runUpdatedAt: a.datetime(),
+      createdBy:    a.string().required(),
+      updatedBy:    a.string().required(),
+      version:      a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('agent').sortKeys(['runUpdatedAt']),
+      index('shipmentId').sortKeys(['runUpdatedAt']),
+      index('exceptionOpen').sortKeys(['runUpdatedAt']),
+    ])
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step U. A tender e-mail that arrived at a division's intake address, staged as a
+   * partially built load a person reviews before it becomes an Active shipment. It is
+   * deliberately NOT a Shipment: every Shipment burns a permanent PRO, and a load nobody
+   * has confirmed yet must be able to be dismissed without one. `id` is `il:` + the
+   * WorkflowRun id, so the conditional put `attribute_not_exists(id)` makes staging
+   * idempotent (one e-mail, one intake). workflow-agent creates rows; tmsShipmentActions
+   * edits, promotes and dismisses them. No client write, no subscriptions (TMS_DESIGN
+   * §12), and `delete` is dropped: a row is MOVED or DISMISSED, never removed.
+   */
+  IntakeLoad: a
+    .model({
+      id:            a.id(),
+      status:        a.enum(['OPEN', 'PROMOTING', 'MOVED', 'DISMISSED']),
+      divisionCode:  a.string(),             // null = Unrouted
+      toAddress:     a.string(),             // the address that matched a division
+      toAddresses:   a.string().array(),     // every recipient the bridge reported
+      runId:         a.string().required(),
+      sourceKey:     a.string(),
+      subject:       a.string(),
+      fromEmail:     a.string(),
+      fromName:      a.string(),
+      receivedAt:    a.datetime(),           // sort key of the status index
+      bodyText:      a.string(),             // <= 20 000 chars
+      attachments:   a.json(),               // [{ name, contentType, size, key }]
+      parseState:    a.enum(['PARSED', 'NOT_PARSED', 'FAILED']),
+      parseNote:     a.string(),
+      format:        a.string(),
+      fields:        a.json(),               // IntakeFields — the draft the reviewer edits
+      autoFields:    a.json(),               // immutable snapshot of what automation built
+      meta:          a.json(),               // per-field { source, confidence }
+      confirmed:     a.string().array(),
+      missingFields: a.string().array(),
+      shipmentId:    a.string(),             // set the moment createShipment returns
+      shipmentNumber: a.string(),
+      reviewedBy:    a.string(),
+      reviewedAt:    a.datetime(),
+      lastEditedBy:  a.string(),
+      lastEditedAt:  a.datetime(),
+      dismissedBy:   a.string(),
+      dismissedAt:   a.datetime(),
+      dismissReason: a.string(),
+      createdBy:     a.string().required(),
+      updatedBy:     a.string().required(),
+      version:       a.integer().required(),  // CAS token for every write
+    })
+    .secondaryIndexes((index) => [
+      index('status').sortKeys(['receivedAt']),
+    ])
+    .disableOperations(['subscriptions', 'delete'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
   // Long-running (but synchronous in pieces) location merge job. Lambdas move it through.
@@ -882,6 +1940,1738 @@ const schema = a.schema({
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Shipment / Order / Load (Step B) ───────────────────────────────────────
+  // Three records describe one piece of freight: the Shipment is the movement and
+  // owns the single customer-facing status, the Order is the sell side (and AR),
+  // and the existing Load is the buy side — one row per leg, with LoadCarrier
+  // assignment rows, cached LoadFinancials, and LoadCharge line items.
+  //
+  // Every one of them is written by tmsShipmentActions only: the client reads, and
+  // the Lambda owns the transactions that keep the five tables agreeing with each
+  // other. Subscriptions are dropped (see TMS_DESIGN §12) — the board polls.
+
+  Shipment: a
+    .model({
+      // `TmsSettings.shipmentPrefix` + the zero-padded counter, or 'L<aljexId>'
+      // for the rows the backfill created from legacy loads.
+      number:          a.string().required(),
+      status: a.enum([
+        'DRAFT', 'TENDER_PENDING', 'TENDER_REJECTED', 'OPEN', 'ON_HOLD',
+        'BOOKED', 'PLANNED', 'DISPATCHED', 'LOADING', 'PICKED_UP', 'IN_TRANSIT',
+        'RECOVERED', 'ARRIVED_AT_DELIVERY_TERMINAL', 'OUT_FOR_DELIVERY',
+        'UNLOADING', 'DELIVERED', 'CANCELED',
+      ]),
+      // What to go back to when a hold is lifted or a cancel is undone.
+      previousStatus:  a.string(),
+      statusChangedAt: a.datetime(),
+      statusChangedBy: a.string(),
+      holdReason:      a.string(),
+      cancelReason:    a.string(),
+      tenderRejectReason: a.string(),
+      // Soft delete: a deleted shipment keeps its row so the number is never reused.
+      deletedAt:       a.datetime(),
+      deletedBy:       a.string(),
+      // Step R cutover. Optional: a shipment may exist with its customer not yet
+      // resolved to a record — a legacy entrypoint often has only typed text, and
+      // inventing a Customer is worse than saying so. The attribute is OMITTED on
+      // such a row (never '' and never NULL, either of which a sparse GSI hash key
+      // refuses), so the row is simply absent from the index below. Readiness is
+      // derived from this being null, never from status. SET_SHIPMENT_CUSTOMER is
+      // the only writer of customer identity.
+      customerId:      a.string(),
+      customerName:    a.string(),           // booked-name snapshot
+      mode: a.enum([
+        'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
+      ]),
+      parentShipmentId: a.string(),          // consolidation parent (unused in B)
+      orderIds:        a.string().array(),
+      loadIds:         a.string().array(),
+      // Mirrors of the first pickup / last delivery across the shipment's loads.
+      pickupAppt:      a.string(),
+      deliveryAppt:    a.string(),
+      pickupMonth:     a.string(),           // 'YYYY-MM'
+      originCity:      a.string(),
+      destinationCity: a.string(),
+      // Lower-cased number · customer · cities · reference values, so the board can
+      // answer "find me 12345" without scanning five tables.
+      searchKey:       a.string(),
+      source:          a.enum(['MANUAL', 'TENDER', 'DUPLICATE', 'BACKFILL', 'FACTORING']),
+      // ── Tracking & check calls (Step D) ─────────────────────────────────
+      // The one ACTIVE CUSTOMER_VIEW TrackingLink for this shipment. Stable
+      // across re-sends; Regenerate revokes it and mints a new token.
+      customerLinkId:   a.string(),
+      customerLinkSentAt: a.datetime(),
+      // ── Documents & delivery (Step E) ───────────────────────────────────
+      // Stamped when every load of the shipment has delivered.
+      deliveredAt:      a.datetime(),
+      lastNoticeAt:     a.datetime(),
+      lastNoticeStatus: a.string(),
+
+      // ── Revenue ownership, Void and DAT (Step R) ────────────────────────
+      // Which business earned this shipment. Resolved through OwnershipRule
+      // unless somebody tagged it by hand, and mirrored onto the Load.
+      revDivision:     a.string(),   // top-level OwnershipDivision code
+      revSubdivision:  a.string(),   // the matched descendant, when deeper
+      revTagSource:    a.string(),   // 'HAND' | 'RULE'
+      revRuleId:       a.string(),   // the OwnershipRule that resolved it
+      revTaggedBy:     a.string(),   // who set a HAND tag; null while the rules decide
+      salesRepId:      a.string(),   // Cognito username of the rep who sold it
+      trackerId:       a.string(),   // Step V. UserProfile id of the person tracking it (null = unassigned)
+      carrierRepId:    a.string(),   // Step I. rep covering the shipment, mirrored onto every load
+      carrierTeamKey:  a.string(),   // Step I. team assigned to cover the shipment
+      // Step AM. Mirror of the active carrier assignment's ladder rung; null when nobody is assigned.
+      carrierAssignmentStatus: a.string(),
+      // Ryne, 2026-10-28: Void is the only way a shipment leaves the working
+      // set. The row, the PRO, the history and the documents all stay; the
+      // number is never reused and the shipment can never be invoiced again.
+      voidedAt:        a.datetime(),
+      voidedBy:        a.string(),
+      voidReason:      a.string(),
+      // Aljex-exit Phase 0: imported history. Shipment is client-read-only, so only the
+      // import engine writes these. `legacySource` is ALJEX (AR memos are invoice adjustments, never shipments).
+      legacyImported:  a.boolean(),
+      legacySource:    a.string(),
+      importRunId:     a.string(),
+      // Step AP: Load Review push. Written by tms-shipment-actions PUSH_TO_LOAD_REVIEW only.
+      loadReviewPushedAt: a.datetime(),
+      loadReviewPushedBy: a.string(),
+      // Aljex codes kept verbatim so Settings > Users (AljexCodeMap) can map them to people
+      // later without a re-import. `salesRepId` stays null until a mapping is applied.
+      salesRepCode:    a.string(),
+      createdByCode:   a.string(),
+      serviceRepCode:  a.string(),
+      dispatcherCode:  a.string(),
+      osd:             a.boolean(),  // Aljex OSD (over, short, damaged)
+      // When the load was posted to the DAT board. Written in step J; the
+      // Brokerage dashboard's "posted to DAT" chart reads it from here.
+      datPostedAt:     a.datetime(),
+      // The WorkflowRun a person applied to create this shipment. Read-only to a
+      // client (the `voidedAt` pattern above): CREATE_SHIPMENT writes it, nothing else.
+      workflowRunId:   a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      // Step U. The IntakeLoad this shipment was moved from and who reviewed it, when.
+      // Read-only to a client (the `workflowRunId` pattern): INTAKE_MOVE_TO_ACTIVE writes them.
+      intakeLoadId:     a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      intakeReviewedBy: a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      intakeReviewedAt: a.datetime().authorization((allow) => [allow.authenticated().to(['read'])]),
+
+      // ── The demo flow (Step P) ──────────────────────────────────────────
+      // P5. A shipment the automation built from an e-mail is BUILDING until every
+      // required field the customer asks for is filled; nothing downstream —
+      // posting, dispatch, release to billing — accepts one that is still BUILDING.
+      buildState:      a.enum(['BUILDING', 'BUILT']),
+      missingFields:   a.string().array(),   // the "Needs: …" list, recomputed on every write
+      // P6. Which load boards this shipment is live on right now, so the board row
+      // can say "Posted" without reading every ShipmentPosting.
+      postedBoards:    a.string().array(),
+      // P8. The per-shipment e-mail thread opened by the rate confirmation.
+      threadKey:       a.string(),           // `tracking+<shipmentId>` local part
+      threadOpenedAt:  a.datetime(),
+      // P7. Sparse marker: literal 'OPEN' while a carrier offer is waiting on a human.
+      carrierOfferOpen: a.string(),
+      // P9. A human was asked to look at a POD the app refused twice.
+      podFlaggedAt:    a.datetime(),
+      podFlagReason:   a.string(),
+      // P8. The tracking agent raised a flag the Tracking page shows.
+      trackingFlaggedAt: a.datetime(),
+      trackingFlagReason: a.string(),
+      // Step AJ. Per-shipment override { mode?, method?, driverSms? }; null/absent = inherit the customer.
+      trackingPrefs:   a.json(),
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('number'),
+      index('status').sortKeys(['pickupAppt']),
+      index('customerId').sortKeys(['pickupAppt']),
+      index('pickupMonth').sortKeys(['pickupAppt']),
+    ])
+    // Ryne, 2026-10-28: a PRO can never be deleted through any path. The client was
+    // already read-only here; dropping the delete resolver means no identity — not
+    // even a Lambda's IAM role — can reach `deleteShipment`. Void is the only exit.
+    .disableOperations(['subscriptions', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // The sell side of a shipment: what the customer ordered and what they owe.
+  Order: a
+    .model({
+      shipmentId:      a.string().required(),
+      // Step R cutover. Optional for the same reason as Shipment.customerId above,
+      // and it has to move with it: an Order is written beside every Shipment, and a
+      // null in a `String!` field makes AppSync null out the whole row — the order
+      // card, the AR worklist and the credit math would lose it entirely.
+      customerId:      a.string(),
+      customerName:    a.string(),
+      customerContactId: a.string(),
+      customerRepId:   a.string(),           // Cognito username
+      billToId:        a.string(),           // Customer.billToParties[].id
+      costCenter:      a.string(),
+      mode: a.enum([
+        'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
+      ]),
+      rateType:        a.enum(['SPOT', 'CONTRACT']),
+      references:      a.json(),             // OrderReference[]
+      equipmentType:   a.string(),
+      equipmentLengthFt: a.integer(),
+      specialRequirements: a.json(),         // SpecialRequirements
+      freight:         a.json(),             // FreightItem[]
+      customerNotes:   a.string(),           // travels onto customer paperwork
+      internalNotes:   a.string(),           // never leaves the office
+      // Cached from LoadCharge CUSTOMER lines by RECALC_CHARGES.
+      customerRateCents: a.integer(),
+      revenueCents:    a.integer(),
+      // Invoicing and payment are never inferred: B writes DOCS_NEEDED, UNBILLED
+      // and INVOICE_NOT_NEEDED only. UNPAID is written only by GENERATE_INVOICE and
+      // PAID only by RECORD_PAYMENT/WRITE_OFF, both inside tmsFinanceActions (step F).
+      // LEGACY (step F) is an Aljex-era order whose invoice went out before this system
+      // existed: it is never a worklist row and its credit falls back to the load rule.
+      arStatus:        a.enum(['DOCS_NEEDED', 'UNBILLED', 'UNPAID', 'PAID', 'INVOICE_NOT_NEEDED', 'LEGACY']),
+      arStatusChangedAt: a.datetime(),
+      invoiceId:       a.string(),
+      invoiceEarly:    a.boolean(),          // bill before delivery
+      readyToInvoiceAt: a.datetime(),
+      // ── AR (Step F) ─────────────────────────────────────────────────────
+      // Cached from the Invoice so the board, the credit math and the shipment
+      // card never have to read the invoice row to colour one cell.
+      invoiceNumber:   a.string(),
+      invoicedAt:      a.datetime(),
+      paidAt:          a.datetime(),
+      arBalanceCents:  a.integer(),          // what is still owed on this order
+      factoringItemId: a.string(),           // the OTR queue row Send to Factor wrote
+      // ── Documents & delivery (Step E) ───────────────────────────────────
+      // What the required-document gate decided last time anything changed.
+      // `docsMissing: []` means complete; the board's Docs column reads it so
+      // the list never has to open five tables to colour one cell.
+      docsRequired:    a.string().array(),
+      docsMissing:     a.string().array(),
+      docsCheckedAt:   a.datetime(),
+      // An admin may invoice over a missing document, with a note, on the record.
+      docsOverrideAt:  a.datetime(),
+      docsOverrideBy:  a.string(),
+      docsOverrideNote: a.string(),
+      pickupAppt:      a.string(),           // mirror, sort key of the customer index
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer(),
+      // ── Quotes & rates (Step H) ──────────────────────────────────────────
+      // The quote this order was converted from, and the number it was won at.
+      quoteId:         a.string(),
+      quoteNumber:     a.string(),
+      quoteAmountCents: a.integer(),
+      quoteNotes:      a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index('shipmentId'),
+      index('customerId').sortKeys(['pickupAppt']),
+      // Step F worklists: Docs needed / To invoice / Unpaid are each one query.
+      // Sparse by design — an order with no arStatusChangedAt is not a worklist row.
+      index('arStatus').sortKeys(['arStatusChangedAt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Who is pulling one leg. A bounce or a TONU does not erase the row: it is marked
+  // and a new ACTIVE row is written, so the history of who dropped a load survives.
+  LoadCarrier: a
+    .model({
+      loadId:          a.string().required(),
+      shipmentId:      a.string().required(),
+      kind:            a.enum(['OWN_ASSET', 'CARRIER']),
+      status:          a.enum(['ACTIVE', 'BOUNCED', 'TONU']),
+      removalReason:   a.string(),
+      // Whatever the dispatcher typed alongside the reason code (<=250 chars).
+      removalNote:     a.string(),
+      removedAt:       a.datetime(),
+      removedBy:       a.string(),
+      sequence:        a.integer(),          // 1-based assignment attempt
+      carrierId:       a.string(),           // directory Carrier (step C)
+      carrierName:     a.string(),
+      carrierMc:       a.string(),
+      carrierRepId:    a.string(),
+      dispatcherName:  a.string(),
+      dispatcherPhone: a.string(),
+      dispatcherEmail: a.string(),
+      driverId:        a.string(),           // own-fleet Driver.id
+      driverName:      a.string(),
+      driverPhone:     a.string(),
+      driver2Name:     a.string(),
+      driver2Phone:    a.string(),
+      truckId:         a.string(),
+      truckNumber:     a.string(),
+      trailerId:       a.string(),
+      trailerNumber:   a.string(),
+      plates:          a.string(),
+      vin:             a.string(),
+      sealNumber:      a.string(),
+      tripNumber:      a.string(),
+      pickupEtaAt:     a.datetime(),
+      deliveryEtaAt:   a.datetime(),
+      priorDeliveryAt: a.datetime(),
+      priorDeliveryNote: a.string(),
+      rateConSignedAt: a.datetime(),
+      rateConKey:      a.string(),           // S3 key of the signed rate confirmation
+      chargesFinalizedAt: a.datetime(),
+      // Cached from LoadCharge CARRIER lines by RECALC_CHARGES.
+      carrierRateCents: a.integer(),
+      costCents:       a.integer(),
+      // B writes AWAITING_INVOICE; G moves it the rest of the way. `invoiceId` is
+      // the CarrierBill id once one is recorded.
+      apStatus:        a.enum(['AWAITING_INVOICE', 'IN_REVIEW', 'TO_BE_PAID', 'PAID']),
+      invoiceId:       a.string(),
+      // ── AP (Step G) ──────────────────────────────────────────────────────
+      // The sparse 'OPEN' marker that makes "every outside-carrier assignment we
+      // still owe money on" one query. Carried on CARRIER rows that are ACTIVE or
+      // TONU from booking until the bill is PAID, and REMOVEd — never nulled, a
+      // NULL in an index key is rejected outright — on PAID and on a BOUNCE.
+      apOpen:            a.string(),
+      apStatusChangedAt: a.datetime(),
+      apBalanceCents:    a.integer(),
+      apPaidAt:          a.datetime(),
+
+      // ── Carriers & booking (Step C) ──────────────────────────────────────
+      // Quick pay: what we keep for paying early. Cached as both the bps the
+      // tier charged and the cents it works out to, so AP, the rate con and
+      // the booking screen can never disagree about the number.
+      quickPay:          a.boolean(),
+      quickPayDays:      a.integer(),
+      quickPayFeeBps:    a.integer(),
+      quickPayFeeCents:  a.integer(),
+      paymentTermsDays:  a.integer(),
+      // The rate confirmation the carrier signs. `rateConToken` is the one-time
+      // secret in the emailed link, cleared the moment it is used or voided;
+      // the public sign API finds the row by scanning for it. There is
+      // deliberately no index on it — DynamoDB allows one new GSI per table
+      // update, and carrierId below is the one the directory cannot do without.
+      rateConStatus: a.enum([
+        'NOT_SENT', 'SENT', 'OPENED', 'SIGNED', 'DECLINED', 'VOIDED', 'EXPIRED',
+      ]),
+      rateConToken:      a.string(),
+      rateConSentAt:     a.datetime(),
+      rateConSentTo:     a.string(),          // comma-joined recipients
+      rateConExpiresAt:  a.datetime(),
+      rateConDocumentId: a.string(),          // CarrierDocument holding the PDF
+      rateConSignerName: a.string(),
+      rateConSignerIp:   a.string(),
+      rateConVersion:    a.integer(),         // bumped on every re-send
+      bookedAt:          a.datetime(),
+      // The eligibility findings whoever booked this carrier acknowledged, kept
+      // as the record of what was waived — and appended to when a carrier's
+      // status changes underneath a load that is already covered.
+      bookingWarnings:   a.string().array(),
+      dispatchedAt:      a.datetime(),
+      dispatchNote:      a.string(),
+      // ── Tracking & check calls (Step D) ─────────────────────────────────
+      // The ACTIVE CARRIER_PING TrackingLink texted to this carrier's driver.
+      trackingLinkId:    a.string(),
+      trackingStartedAt: a.datetime(),
+      trackingStoppedAt: a.datetime(),
+      // ── Multiple carriers per load (AT-plan MC0) ───────────────────────
+      // Stop.id values from Load.stops this carrier covers. Absent/empty = all stops.
+      legStopIds:        a.string().array(),
+      // Optional per-carrier override of Shipment.trackingPrefs (absent = inherit).
+      trackingPrefs:     a.json(),
+      // ── Documents & delivery (Step E) ───────────────────────────────────
+      // The ACTIVE CARRIER_UPLOAD TrackingLink e-mailed to this carrier.
+      uploadLinkId:      a.string(),
+      podRequestedAt:    a.datetime(),
+      // Carrier-scope paperwork still outstanding, cached for step G's AP gate.
+      // Nothing in step E blocks a payment with it.
+      docsMissing:       a.string().array(),
+      ratingStars:       a.integer(),         // 1–5, set once the load delivered
+      ratingNote:        a.string(),
+      ratedAt:           a.datetime(),
+      ratedBy:           a.string(),
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      // The carrier offer this assignment was booked from (Step H).
+      quoteId:         a.string(),
+      // ── Assignment ladder (Step AM) ──────────────────────────────────────
+      // ASSIGNED_SETUP_PENDING | ASSIGNED_SETUP_COMPLETE | RATE_CON_SENT | RATE_CON_SIGNED |
+      // DRIVER_INFO_ENTERED (src/lib/carrierAssignment.ts). `assignmentTimes` is a JSON map status -> ISO.
+      assignmentStatus: a.string(),
+      assignmentTimes:  a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index('loadId'),
+      index('shipmentId'),
+      index('carrierId'),
+      index('apOpen').sortKeys(['apStatusChangedAt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Cached totals for one load. `id` IS the load id, so a bundle read is a GetItem
+  // and the row can never drift onto a second record for the same load.
+  LoadFinancials: a
+    .model({
+      // The row's `id` IS the load id — set explicitly on write, never generated.
+      loadId:          a.string().required(),
+      shipmentId:      a.string().required(),
+      orderId:         a.string(),
+      customerRateCents: a.integer().required(),
+      revenueCents:    a.integer().required(),
+      carrierRateCents: a.integer().required(),
+      costCents:       a.integer().required(),
+      profitCents:     a.integer().required(),
+      marginBps:       a.integer().required(),
+      topSpendCents:   a.integer(),
+      targetBuyCents:  a.integer(),
+      // Set once the money is committed (step F). RECALC_CHARGES refuses after this.
+      frozenAt:        a.datetime(),
+      frozenBy:        a.string(),
+      updatedBy:       a.string().required(),
+      version:         a.integer().required(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // One financial line item — MVMNT's FinancialLineItem. CUSTOMER lines sum into the
+  // order's revenue, CARRIER lines into the assignment's cost.
+  LoadCharge: a
+    .model({
+      shipmentId:      a.string().required(),
+      side:            a.enum(['CUSTOMER', 'CARRIER']),
+      orderId:         a.string(),           // CUSTOMER lines
+      loadId:          a.string(),
+      loadCarrierId:   a.string(),           // CARRIER lines
+      code:            a.string().required(),
+      label:           a.string(),
+      calculatedBy:    a.enum(['FLAT', 'PER_MILE', 'PER_CWT', 'PERCENT']),
+      rateCents:       a.integer().required(),
+      count:           a.integer().default(1),
+      amountCents:     a.integer().required(),
+      // LINEHAUL and FSC are the rate: they are what "Customer Rate" and "Carrier
+      // Rate" mean, and they are the base a PERCENT line is taken from.
+      isRate:          a.boolean().required(),
+      release:         a.string(),
+      sortOrder:       a.integer().required(),
+      note:            a.string(),
+      createdBy:       a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('shipmentId').sortKeys(['sortOrder'])])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── AR: invoicing & payments (Step F) ──────────────────────────────────────
+  /*
+   * One issued bill for one order.
+   *
+   * The row's `id` IS the invoice number — put with `attribute_not_exists(id)`, the
+   * FactoringItem precedent — so two generations racing on the same counter cannot
+   * both land. `lines`, `references`, `billTo` and `remitTo` are a SNAPSHOT taken at
+   * issue: the charges may move afterwards (they cannot — generation freezes the
+   * load's financials — but the invoice does not care either way). Nothing re-reads
+   * them. A mistake is voided and re-issued, never edited.
+   *
+   * `arOpen` is the sparse marker 'OPEN', carried while ISSUED or PARTIAL and REMOVEd
+   * (never nulled — a NULL in an index key is rejected outright) on PAID or VOID, so
+   * the open book and the aging report are one query.
+   */
+  Invoice: a
+    .model({
+      aljexDueDate:  a.string(),    // Step AW: the Aljex due date (YYYY-MM-DD) kept as a reference when a carried-over invoice is redated (Danisco 120 days)
+      aljexTerms:    a.integer(),   // Step AW: the Aljex customer terms days kept as a reference
+      number:          a.string().required(),   // same value as `id`
+      orderId:         a.string().required(),
+      shipmentId:      a.string().required(),
+      shipmentNumber:  a.string(),
+      customerId:      a.string().required(),
+      customerName:    a.string(),
+      billToId:        a.string(),
+      billTo:          a.json(),                // { name, address, email }
+      divisionKey:     a.string(),
+      status:          a.enum(['ISSUED', 'PARTIAL', 'PAID', 'VOID']),
+      invoiceDate:     a.string().required(),   // YYYY-MM-DD
+      issuedAt:        a.datetime().required(),
+      issuedBy:        a.string().required(),
+      dueAt:           a.string().required(),   // YYYY-MM-DD
+      termsDays:       a.integer().required(),
+      // The terms text as it was printed. Snapshotted, so re-rendering an old invoice
+      // reproduces the bill that was sent rather than today's settings.
+      termsText:       a.string(),
+      invoiceMonth:    a.string().required(),   // 'YYYY-MM' of invoiceDate
+      lines:           a.json(),                // InvoiceLine[] — the order's CUSTOMER charges
+      references:      a.json(),                // CUSTOMER|ALL OrderReference[] only
+      subtotalCents:   a.integer().required(),
+      totalCents:      a.integer().required(),
+      paidCents:       a.integer().required(),
+      writtenOffCents: a.integer().required(),
+      balanceCents:    a.integer().required(),
+      arOpen:          a.string(),              // sparse 'OPEN'
+      paidAt:          a.datetime(),
+      remitTo:         a.json(),                // { name, address, email, noticeText }
+      factored:        a.boolean(),
+      factoringItemId: a.string(),
+      pdfKey:          a.string(),
+      pdfSizeBytes:    a.integer(),
+      pdfVersion:      a.integer(),
+      attachDocumentIds: a.string().array(),
+      sentAt:          a.datetime(),
+      sentTo:          a.string(),              // comma-joined, like ShipmentNotice.to
+      sentCount:       a.integer(),
+      markedSentAt:    a.datetime(),
+      markedSentBy:    a.string(),
+      markedSentNote:  a.string(),
+      lastNoticeId:    a.string(),
+      voidedAt:        a.datetime(),
+      voidedBy:        a.string(),
+      voidReason:      a.string(),
+      note:            a.string(),
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('customerId').sortKeys(['issuedAt']),
+      index('arOpen').sortKeys(['dueAt']),
+      index('invoiceMonth').sortKeys(['issuedAt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Every cash receipt, credit memo, write-off and reversal, with its allocations.
+   *
+   * One model rather than four tables: each would otherwise need its own customer
+   * index, and `unappliedCents` — an overpayment kept as credit, or an unspent credit
+   * memo — is the same idea in all of them. A posted row is IMMUTABLE except for
+   * `unappliedCents` (spent down by a later payment, with a conditional ADD) and
+   * `reversedByPaymentId`. Nothing deletes one: a mistake gets a REVERSAL row.
+   */
+  ArPayment: a
+    .model({
+      customerId:      a.string().required(),
+      kind:            a.enum(['PAYMENT', 'CREDIT_MEMO', 'WRITE_OFF', 'REVERSAL']),
+      // The typed date at noon UTC, so the customer index sorts by the day the money
+      // arrived and a timezone cannot slide a receipt into the previous month.
+      receivedAt:      a.datetime().required(),
+      method:          a.enum(['CHECK', 'ACH', 'WIRE', 'CARD', 'FACTOR', 'OTHER']),
+      reference:       a.string(),
+      amountCents:     a.integer().required(),
+      appliedCents:    a.integer().required(),
+      unappliedCents:  a.integer().required(),
+      applications:    a.json(),                // [{ invoiceId, amountCents }]
+      creditApplications: a.json(),             // [{ paymentId, amountCents }]
+      invoiceId:       a.string(),              // WRITE_OFF names its invoice
+      reversesPaymentId:   a.string(),
+      reversedByPaymentId: a.string(),
+      note:            a.string(),
+      createdBy:       a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('customerId').sortKeys(['receivedAt'])])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── AP: carrier bills & payments (Step G) ──────────────────────────────────
+  /*
+   * One recorded bill for one carrier assignment.
+   *
+   * The row's `id` is `cb:<loadCarrierId>:<n>` and is put with
+   * `attribute_not_exists(id)`, so two Record presses racing cannot both land.
+   * `lines`, `remitTo`, the fee and the terms are a SNAPSHOT taken at RECORD_BILL,
+   * in the same transaction that stamps `LoadCarrier.chargesFinalizedAt`. Nothing
+   * re-reads them; a mistake is voided and re-recorded, never edited.
+   *
+   * `apOpen` is the sparse marker 'OPEN', carried while IN_REVIEW, TO_BE_PAID or
+   * PARTIAL and REMOVEd (never nulled) on PAID or VOID.
+   *
+   * Own-fleet legs never get a row here: they are paid through driver settlements.
+   */
+  CarrierBill: a
+    .model({
+      aljexPayMethod:        a.string(),   // Step AW: Aljex Check/Draft code (C = check, D = direct deposit)
+      aljexVendorInvoiceRef: a.string(),   // Step AW: Aljex 'Vend Invoice #' kept as a reference only
+      loadCarrierId:   a.string().required(),
+      loadId:          a.string().required(),
+      shipmentId:      a.string().required(),
+      shipmentNumber:  a.string(),
+      loadNumber:      a.string(),
+      carrierId:       a.string().required(),
+      carrierName:     a.string(),
+      carrierMc:       a.string(),
+      // Who is owed is always the carrier; a FACTOR payee only says where the
+      // money goes — and carries no quick-pay fee.
+      payeeKind:       a.enum(['CARRIER', 'FACTOR']),
+      paymentMethodId: a.string(),
+      // { name, factorName, method, accountLast4, payeeEmail, address } — never
+      // `bankDetailsKey`: a read of this table can not leak a bank account.
+      remitTo:         a.json(),
+      divisionKey:     a.string(),
+      status:          a.enum(['IN_REVIEW', 'TO_BE_PAID', 'PARTIAL', 'PAID', 'VOID']),
+      billNumber:      a.string(),             // the carrier's own invoice number
+      billDate:        a.string().required(),  // YYYY-MM-DD
+      billMonth:       a.string().required(),  // 'YYYY-MM' of billDate
+      recordedAt:      a.datetime().required(),
+      recordedBy:      a.string().required(),
+      recordedEarly:   a.boolean(),            // recorded before the load delivered
+      dueAt:           a.string().required(),  // YYYY-MM-DD
+      termsDays:       a.integer().required(),
+      quickPay:        a.boolean(),
+      quickPayDays:    a.integer(),
+      quickPayFeeBps:  a.integer(),
+      // [{ chargeId, code, label, calculatedBy, rateCents, count, amountCents }]
+      lines:           a.json(),
+      grossCents:      a.integer().required(), // Σ the assignment's CARRIER lines
+      quickPayFeeCents: a.integer().required(),
+      netCents:        a.integer().required(), // gross − fee; what we actually pay
+      billedCents:     a.integer().required(), // what the carrier's invoice says
+      varianceCents:   a.integer().required(), // billed − gross; must be 0 to approve
+      paidCents:       a.integer().required(),
+      creditedCents:   a.integer().required(),
+      balanceCents:    a.integer().required(), // net − paid − credited
+      apOpen:          a.string(),             // sparse 'OPEN'
+      documentId:      a.string(),             // the accepted CARRIER_INVOICE
+      approvedAt:      a.datetime(),
+      approvedBy:      a.string(),
+      approvalWarnings: a.string().array(),
+      docsOverrideAt:  a.datetime(),
+      docsOverrideBy:  a.string(),
+      docsOverrideNote: a.string(),
+      paidAt:          a.datetime(),
+      voidedAt:        a.datetime(),
+      voidedBy:        a.string(),
+      voidReason:      a.string(),
+      note:            a.string(),
+      // Step AG: provenance of an AP-inbox update (only tms-ap-inbox writes these).
+      apInboxItemId:   a.string(),
+      apInboxSourceUrl: a.string(),
+      apInboxAppliedAt: a.datetime(),
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('carrierId').sortKeys(['recordedAt']),
+      index('apOpen').sortKeys(['dueAt']),
+      index('billMonth').sortKeys(['recordedAt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Every payment sent to a carrier, every AP credit and every reversal, with its
+   * allocations — the AP twin of ArPayment, and immutable in the same way: a posted
+   * row only ever changes `unappliedCents` (spent down with a conditional ADD) and
+   * `reversedByPaymentId`. Nothing deletes one; a mistake gets a REVERSAL row.
+   */
+  ApPayment: a
+    .model({
+      carrierId:       a.string().required(),
+      payeeKind:       a.enum(['CARRIER', 'FACTOR']),
+      kind:            a.enum(['PAYMENT', 'CREDIT_MEMO', 'REVERSAL']),
+      // The typed date at noon UTC, so the carrier index sorts by the day the money
+      // left and a timezone cannot slide a payment into the previous month.
+      paidAt:          a.datetime().required(),
+      method:          a.enum(['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT', 'OTHER']),
+      reference:       a.string(),
+      amountCents:     a.integer().required(),
+      appliedCents:    a.integer().required(),
+      unappliedCents:  a.integer().required(),
+      applications:    a.json(),               // [{ billId, amountCents }]
+      creditApplications: a.json(),            // [{ paymentId, amountCents }]
+      remitTo:         a.json(),               // snapshot at send
+      /**
+       * Every attempt, sent or not. `remittanceCount` only counts the ones SES
+       * accepted, and the notice log keys on a deterministic id — so numbering the
+       * notice by the successes would reuse `remit:<payment>:1` after a refused send
+       * and make every later attempt a silent no-op.
+       */
+      remittanceAttempts: a.integer(),
+      loadCarrierId:   a.string(),             // a credit raised against one leg
+      reversesPaymentId:   a.string(),
+      reversedByPaymentId: a.string(),
+      pdfKey:          a.string(),
+      pdfVersion:      a.integer(),
+      remittanceSentAt: a.datetime(),
+      remittanceSentTo: a.string(),            // comma-joined
+      remittanceCount: a.integer(),
+      markedSentAt:    a.datetime(),
+      markedSentBy:    a.string(),
+      markedSentNote:  a.string(),
+      lastNoticeId:    a.string(),
+      note:            a.string(),
+      createdBy:       a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('carrierId').sortKeys(['paidAt'])])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Tracking & check calls (Step D) ────────────────────────────────────────
+  // One row per thing that happened to a load in transit: a check call somebody
+  // logged, a stop the driver app stamped, a ping off the carrier's SMS link, the
+  // dispatch itself, an ETA change, an incident. The Tracking tab is this table
+  // read newest-first; Motive fixes are NOT copied in here (six an hour per truck
+  // would swamp it) — they are merged in memory from TruckLocationHistory.
+  //
+  // Written by tmsShipmentActions, tmsTrackingActions, load-tracking-projector and
+  // the public tracking-api; the client only reads.
+  LoadCheckCall: a
+    .model({
+      loadId:        a.string().required(),
+      shipmentId:    a.string().required(),
+      loadCarrierId: a.string(),
+      stopId:        a.string(),
+      // When it happened. `createdAt` is when somebody typed it in.
+      at:            a.datetime().required(),
+      type: a.enum([
+        'DISPATCH', 'LOCATION_UPDATE', 'ARRIVED', 'DEPARTED', 'ETA_UPDATE',
+        'INCIDENT', 'NOTE', 'TRACKING_LINK_SENT', 'TRACKING_PING',
+      ]),
+      source:        a.enum(['MANUAL', 'DRIVER_APP', 'LINK', 'SYSTEM']),
+      incidentType: a.enum([
+        'ACCIDENT', 'ACTUAL_CLAIM', 'ATTEMPTED_DELIVERY', 'BREAKDOWN', 'DELAY',
+        'DELIVERY_NOT_COMPLETED', 'DETENTION', 'FRAUD', 'GENERAL_EXCEPTION', 'LAYOVER',
+        'LOAD_LOCK_ALERT', 'OVERAGE_SHORTAGE', 'PICKUP_EXCEPTION', 'POTENTIAL_CLAIM',
+        'REFUSED_BY_CONSIGNEE', 'REJECTION', 'SHIPMENT_CANCELLED', 'SHIPMENT_DAMAGED',
+        'SHIPMENT_DELAYED', 'SHIPMENT_RECONSIGNED', 'SHIPMENT_RETURNED_TO_SHIPPER',
+        'STORAGE_IN_TRANSIT', 'TONU',
+      ]),
+      // Sparse marker: the literal 'OPEN' only while an incident is unresolved,
+      // so the incidentOpen index holds the exceptions queue and nothing else.
+      incidentOpen:   a.string(),
+      resolvedAt:     a.datetime(),
+      resolvedBy:     a.string(),
+      resolutionNote: a.string(),
+      // Null when the event moved nothing.
+      statusBefore:   a.string(),
+      statusAfter:    a.string(),
+      city:           a.string(),
+      state:          a.string(),
+      lat:            a.float(),
+      lng:            a.float(),
+      accuracyM:      a.integer(),
+      personName:     a.string(),
+      note:           a.string(),
+      // The DispatchMessage id when the note was texted to the driver.
+      driverMessageId: a.string(),
+      // Snapshot of the charge lines this event created: { side, code, amountCents, chargeId }[]
+      charges:        a.json(),
+      // What this call scheduled next, kept so the timeline reads back honestly.
+      nextCheckCallAt:   a.datetime(),
+      nextCheckCallNote: a.string(),
+      pickupEtaAt:    a.datetime(),
+      deliveryEtaAt:  a.datetime(),
+      // staff e-mail · `driver:<id>` · `link:<token8>` · `system`
+      createdBy:      a.string().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('loadId').sortKeys(['at']),
+      index('shipmentId').sortKeys(['at']),
+      index('incidentOpen').sortKeys(['at']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // A tokenised public link. The row's `id` IS the token (24 random bytes,
+  // base64url) — the public Lambda does a GetItem on it, so there is no token
+  // index anywhere and a guess has to hit a 192-bit primary key.
+  TrackingLink: a
+    .model({
+      kind:           a.enum(['CARRIER_PING', 'CUSTOMER_VIEW', 'CARRIER_UPLOAD', 'PROVIDER_TRACK']),
+      shipmentId:     a.string().required(),
+      shipmentNumber: a.string(),
+      customerId:     a.string(),
+      customerName:   a.string(),
+      url:            a.string(),
+      notes:         a.string(),
+      loadId:        a.string(),
+      loadCarrierId: a.string(),
+      status:        a.enum(['ACTIVE', 'REVOKED', 'EXPIRED']),
+      expiresAt:     a.datetime().required(),
+      sentTo:        a.string(),            // E.164, or comma-joined e-mails
+      sentVia:       a.enum(['SMS', 'EMAIL', 'COPY']),
+      sentAt:        a.datetime(),
+      smsMessageId:  a.string(),
+      // Snapshot of who the customer page says to call, taken when the link was minted.
+      contactName:   a.string(),
+      contactEmail:  a.string(),
+      contactPhone:  a.string(),
+      showCarrier:   a.boolean(),
+      showPosition:  a.boolean(),
+      openCount:     a.integer(),
+      lastOpenedAt:  a.datetime(),
+      // Rate limits, bumped with an atomic ADD by the public Lambda.
+      requestCount:  a.integer(),
+      pingCount:     a.integer(),
+      lastPingAt:        a.datetime(),
+      lastPingLat:       a.float(),
+      lastPingLng:       a.float(),
+      lastPingAccuracyM: a.integer(),
+      revokedAt:     a.datetime(),
+      revokedBy:     a.string(),
+      // ── Documents & delivery (Step E) ───────────────────────────────────
+      // A CARRIER_UPLOAD link's budget and what it was minted asking for.
+      uploadCount:   a.integer(),
+      lastUploadAt:  a.datetime(),
+      neededTypes:   a.string().array(),
+      // ── Step AO ─────────────────────────────────────────────────────────
+      provider:      a.string(),      // PROVIDER_TRACK: registry key, e.g. 'MACROPOINT'
+      providerRef:   a.string(),      // PROVIDER_TRACK: the provider's id ('stub:<token8>' while STUB)
+      consentAt:     a.datetime(),    // CARRIER_PING: when the driver ticked the consent box (server clock)
+      createdBy:     a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('shipmentId'), index('loadId')])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Documents & delivery (Step E) ──────────────────────────────────────────
+  // One typed row per file a shipment has, wherever the bytes live. Staff uploads,
+  // carrier-portal uploads and generated PDFs sit under `shipment-docs/{shipmentId}/`;
+  // a driver-app POD or a legacy rate con is a POINTER row whose `s3Key` is the key
+  // the other store already uses, so nothing is ever copied and the driver app's
+  // own records stay the truth about what a driver sent.
+  //
+  // Written by tmsShipmentActions and the public tracking-api; the client reads.
+  // The public role may only ever Put a PENDING CARRIER_PORTAL row — nothing it
+  // writes satisfies a requirement until a person accepts it.
+  ShipmentDocument: a
+    .model({
+      shipmentId:    a.string().required(),
+      // orderId set → the Customer section; loadCarrierId set → the Carrier
+      // section, under that assignment; neither → the Shipment section.
+      orderId:       a.string(),
+      loadId:        a.string(),
+      loadCarrierId: a.string(),
+      stopId:        a.string(),
+      type: a.enum([
+        'BOL', 'POD', 'RATE_CON', 'CUSTOMER_RATE_CON', 'LOAD_SUMMARY',
+        'LUMPER_RECEIPT', 'WEIGHT_TICKET', 'TEMP_LOG', 'INSPECTION_REPORT',
+        'CUSTOMS', 'PACKING_LIST', 'CARRIER_INVOICE', 'INVOICE', 'PHOTO', 'OTHER',
+      ]),
+      name:          a.string().required(),
+      s3Key:         a.string().required(),
+      contentType:   a.string().required(),
+      sizeBytes:     a.integer().required(),
+      pages:         a.integer(),
+      source:        a.enum(['UPLOAD', 'CARRIER_PORTAL', 'GENERATED', 'DRIVER_APP', 'LEGACY']),
+      // The DriverSubmissionDoc / Load id a pointer row points at.
+      sourceRef:     a.string(),
+      // Who may receive this file outside the company. INTERNAL never leaves.
+      audience:      a.enum(['CUSTOMER', 'CARRIER', 'ALL', 'INTERNAL']),
+      // A regenerated document supersedes its predecessor; the old bytes stay.
+      status:        a.enum(['ACTIVE', 'SUPERSEDED', 'VOID']),
+      version:       a.integer(),
+      supersedesId:  a.string(),
+      // Sparse: only CARRIER_PORTAL rows carry PENDING, so the reviewStatus index
+      // holds exactly the review worklist and nothing else.
+      reviewStatus:  a.enum(['PENDING', 'ACCEPTED', 'REJECTED']),
+      reviewedAt:    a.datetime(),
+      reviewedBy:    a.string(),
+      reviewNote:    a.string(),
+      uploadLinkId:  a.string(),
+      voidedAt:      a.datetime(),
+      voidedBy:      a.string(),
+      voidReason:    a.string(),
+      // staff e-mail · `link:<token8>` · `driver:<id>` · `migration:<script>`
+      uploadedBy:    a.string().required(),
+      // When the file was attached. Amplify's own createdAt cannot be a sort key.
+      uploadedAt:    a.datetime().required(),
+      createdBy:     a.string().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('shipmentId').sortKeys(['uploadedAt']),
+      index('reviewStatus').sortKeys(['uploadedAt']),
+    ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Every e-mail step E tries to send, with the text it rendered. The row is written
+  // BEFORE the send and patched with the outcome, so a send SES refuses is still a
+  // readable, copyable artifact rather than a silent nothing. Milestone rows use the
+  // deterministic id `ms:<shipmentId>:<milestone>` and the first POD request
+  // `pod:<loadCarrierId>`, so a second leg or a stream retry never sends twice.
+  ShipmentNotice: a
+    .model({
+      shipmentId:    a.string().required(),
+      loadId:        a.string(),
+      loadCarrierId: a.string(),
+      kind:          a.enum(['MILESTONE', 'POD_REQUEST', 'DOCUMENTS', 'INVOICE', 'REMITTANCE', 'CARRIER_OFFER']),
+      // The CustomerNotification vocabulary; null on POD_REQUEST and DOCUMENTS.
+      milestone:     a.string(),
+      channel:       a.enum(['EMAIL', 'COPY']),
+      to:            a.string().required(),   // comma-joined
+      cc:            a.string(),
+      subject:       a.string().required(),
+      body:          a.string().required(),
+      // { documentId, name, sizeBytes }[]
+      attachments:   a.json(),
+      status:        a.enum(['SENT', 'NOT_SENT', 'FAILED', 'COPY']),
+      error:         a.string(),
+      messageId:     a.string(),
+      sentAt:        a.datetime(),
+      trackingLinkId: a.string(),
+      createdBy:     a.string().required(),
+      // When the send was attempted. Amplify's own createdAt cannot be a sort key.
+      at:            a.datetime().required(),
+    })
+    .secondaryIndexes((index) => [index('shipmentId').sortKeys(['at'])])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Postings, threads and the demo seed (Step P) ───────────────────────────
+  /*
+   * Step P6 — one row per board a shipment is (or was) posted to.
+   *
+   * `id` is `post:<shipmentId>:<PROVIDER>`, so posting the same shipment to the
+   * same board twice updates one row instead of growing a history of duplicates,
+   * and un-posting is a status change rather than a delete — "where has this been
+   * offered?" is a question the Postings section has to answer after the fact.
+   *
+   * `mode` is the Step J adapter's own answer: a STUB posting is labelled STUB
+   * everywhere it is shown, because a board id of `stub:…` is not a board id.
+   */
+  ShipmentPosting: a
+    .model({
+      shipmentId:    a.string().required(),
+      loadId:        a.string(),
+      provider:      a.string().required(),      // 'DAT' | 'TRUCKSTOP' | any Step J board key
+      status:        a.enum(['POSTED', 'UNPOSTED', 'FAILED']),
+      mode:          a.enum(['STUB', 'LIVE']),
+      boardPostingId: a.string(),                // the provider's own id, `stub:…` on a stub
+      message:       a.string(),                 // the provider's own answer, verbatim
+      postedAt:      a.datetime(),
+      postedBy:      a.string(),
+      unpostedAt:    a.datetime(),
+      unpostedBy:    a.string(),
+      // The snapshot that was offered — a posting is a statement about a lane at a
+      // price, and the lane may move underneath it.
+      originCity:    a.string(),
+      originState:   a.string(),
+      destinationCity:  a.string(),
+      destinationState: a.string(),
+      pickupAppt:    a.datetime(),
+      equipmentType: a.string(),
+      lengthFt:      a.integer(),
+      weightLbs:     a.integer(),
+      rateCents:     a.integer(),                // what we offered to pay
+      contactEmail:  a.string(),
+      contactPhone:  a.string(),
+      note:          a.string(),
+      offerCount:    a.integer(),                // carrier answers that quoted this posting
+      createdBy:     a.string().required(),
+      updatedBy:     a.string().required(),
+      version:       a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('shipmentId'),
+      index('status').sortKeys(['postedAt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step P8 / N4 — one e-mail or text per row on a shipment's thread.
+   *
+   * The rate confirmation opens the thread; every later message carries the same
+   * `threadKey` (`tracking+<shipmentId>`) so an inbound reply can be matched to a
+   * shipment by its reply address alone. `messageId` / `inReplyTo` are the real
+   * RFC-5322 headers, so a mail client threads our messages the way it threads
+   * anybody's.
+   *
+   * `channel` carries VOICE deliberately: Ryne's answer defers voice, and the UI
+   * shows the leg greyed out rather than pretending it is not part of the plan.
+   * Nothing writes a VOICE row today.
+   */
+  ShipmentMessage: a
+    .model({
+      shipmentId:  a.string().required(),
+      threadKey:   a.string().required(),
+      loadId:      a.string(),
+      loadCarrierId: a.string(),
+      direction:   a.enum(['IN', 'OUT']),
+      channel:     a.enum(['EMAIL', 'SMS', 'VOICE']),
+      kind:        a.enum([
+        'RATE_CON', 'CHECK_CALL', 'CHECK_CALL_REPLY', 'POD_REQUEST', 'POD_REPLY',
+        'ESCALATION', 'CARRIER_OFFER', 'QUOTE', 'TENDER', 'NOTE', 'OTHER',
+      ]),
+      party:       a.enum(['DRIVER', 'DISPATCHER', 'CARRIER', 'CUSTOMER', 'INTERNAL']),
+      to:          a.string(),
+      from:        a.string(),
+      cc:          a.string(),
+      subject:     a.string(),
+      body:        a.string(),
+      // What actually happened. On dev SES is denied and Twilio is unset, so a send
+      // lands NOT_SENT with the exact message it would have sent kept in `body`.
+      status:      a.enum(['SENT', 'NOT_SENT', 'FAILED', 'RECEIVED']),
+      error:       a.string(),
+      messageId:   a.string(),
+      inReplyTo:   a.string(),
+      providerRef: a.string(),                 // Twilio SID / SES message id
+      attachments: a.json(),                   // [{ name, contentType, sizeBytes, s3Key }]
+      documentIds: a.string().array(),         // ShipmentDocument rows this message produced
+      trackingLinkId: a.string(),
+      workflowRunId: a.string(),
+      // Ryne, 2026-10-29 18:30: the receiver must always be able to tell whether a
+      // person or the agent wrote to them, and so must the thread. The signature is
+      // appended server-side from these two fields, never typed by the sender.
+      authorKind:  a.enum(['AGENT', 'PERSON']),
+      authorName:  a.string(),
+      at:          a.datetime().required(),
+      createdBy:   a.string().required(),
+      // Step AL: classified inbound offer (InboundOfferRecord); ttlEpoch only on UNMATCHED rows.
+      offer:       a.json(),
+      ttlEpoch:    a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('shipmentId').sortKeys(['at']),
+      index('threadKey').sortKeys(['at']),
+      index('messageId'),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step P1/P11 — the demo seed's own index.
+   *
+   * `id` is `demo:<kind>:<key>`, which is how the seed stays idempotent without
+   * inventing ids for records the normal actions mint: the seed asks this table
+   * what it already made before it makes anything. Reset reads the same rows to
+   * find exactly what it owns, so a reset can never touch a record a person made.
+   *
+   * Dev only. The seed refuses to run against a production table suffix and the
+   * reset action refuses unless the stack is the dev stack.
+   */
+  DemoRecord: a
+    .model({
+      kind:        a.string().required(),    // 'SHIPMENT' | 'CUSTOMER' | 'CARRIER' | 'QUOTE' | 'USER' | …
+      demoKey:     a.string().required(),    // the seed's stable name for this record
+      recordId:    a.string().required(),    // the real row's id
+      seedVersion: a.string().required(),
+      step:        a.string(),               // which demo step opens on it ('P4', 'P9', …)
+      label:       a.string(),               // what the Demo page calls it
+      detail:      a.json(),
+      createdBy:   a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('kind').sortKeys(['demoKey'])])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Quotes & rates (Step H) ────────────────────────────────────────────────
+  /*
+   * One priced thing, on either side of the deal: `side` SELL is a customer
+   * quote, BUY is an offer out to a carrier. Both walk the same ten-rung ladder,
+   * so the board, the expiry sweep and the public link are written once.
+   *
+   * The row's `id` IS the quote number ('Q000012'), minted from
+   * `TmsSettings.nextQuoteNumber` and put with `attribute_not_exists(id)`: a
+   * staff URL carries no secret and a lookup by number is a GetItem.
+   *
+   * `linkToken` is the public secret behind /q/<token> — 32 base64url
+   * characters, sparse and indexed, rotated every round and REMOVEd the moment
+   * the other side answers, so a spent link can never be replayed.
+   *
+   * `quoteOpen` is the sparse marker 'OPEN', carried from DRAFT through
+   * RECEIVED_COUNTER and REMOVEd — never nulled, a NULL in an index key is
+   * rejected outright — on WON, LOST, PASS or CANCELED.
+   *
+   * `stops`, `references` and `lines` are a SNAPSHOT of what we said at the
+   * time: converting a quote copies them onto the shipment, never the reverse.
+   *
+   * The enums below cannot carry .required() — Amplify Gen 2 enum fields take
+   * no modifiers. tmsShipmentActions demands them.
+   */
+  Quote: a
+    .model({
+      side:   a.enum(['SELL', 'BUY']),
+      status: a.enum([
+        'DRAFT', 'REQUESTED', 'QUOTED', 'SENT_COUNTER', 'RECEIVED_REPLY',
+        'RECEIVED_COUNTER', 'WON', 'LOST', 'PASS', 'CANCELED',
+      ]),
+      // A sell quote and its duplicates, or one request round across carriers.
+      groupId:         a.string(),
+      quoteDate:       a.string().required(),   // YYYY-MM-DD
+      quoteMonth:      a.string().required(),   // 'YYYY-MM' of quoteDate
+      customerId:      a.string(),
+      customerName:    a.string(),
+      contactName:     a.string(),
+      contactEmail:    a.string(),
+      customerRepId:   a.string(),              // Cognito username
+      carrierId:       a.string(),              // BUY only
+      carrierName:     a.string(),
+      carrierMc:       a.string(),
+      carrierEmail:    a.string(),
+      shipmentId:      a.string(),              // written at conversion
+      shipmentNumber:  a.string(),
+      orderId:         a.string(),
+      loadId:          a.string(),              // BUY: the leg being covered
+      loadNumber:      a.string(),
+      divisionKey:     a.string(),
+      mode: a.enum([
+        'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
+      ]),
+      rateType:        a.enum(['SPOT', 'CONTRACT']),
+      equipmentType:   a.string(),
+      equipmentLengthFt: a.integer(),
+      stops:           a.json(),                // Stop[] — the Load.stops shape
+      laneKey:         a.string(),              // 'CHICAGO|IL>DANVILLE|IL'
+      laneKey3:        a.string(),              // '606>618'
+      pickupAppt:      a.datetime(),
+      deliveryAppt:    a.datetime(),
+      commodity:       a.string(),
+      weightLbs:       a.integer(),
+      miles:           a.integer(),
+      references:      a.json(),                // OrderReference[]
+      // SELL: the CUSTOMER lines. BUY: the one CARRIER rate line.
+      lines:           a.json(),                // LoadChargeInput[]
+      // SELL: Σ lines = revenue. BUY: the carrier's number.
+      amountCents:     a.integer().required(),
+      customerRateCents: a.integer(),
+      targetBuyCents:  a.integer(),
+      topSpendCents:   a.integer(),
+      marginBps:       a.integer(),
+      // BUY only: the number a carrier may accept outright on the link.
+      bookNowRateCents: a.integer(),
+      counterCents:    a.integer(),
+      counterBy:       a.enum(['US', 'THEM']),
+      rounds:          a.integer().required(),  // how many numbers have crossed
+      expiresAt:       a.datetime(),
+      // The current round's public secret. Sparse and indexed; gone once spent.
+      linkToken:       a.string(),
+      linkVersion:     a.integer(),             // bumped on every rotation
+      requestCount:    a.integer(),             // public reads, rate-limited
+      sentAt:          a.datetime(),
+      sentTo:          a.string(),              // comma-joined recipients
+      sendCount:       a.integer(),
+      lastSendStatus:  a.enum(['SENT', 'NOT_SENT']),
+      respondedAt:     a.datetime(),
+      response:        a.enum(['ACCEPTED', 'COUNTERED', 'DECLINED', 'PASSED']),
+      responderName:   a.string(),
+      responderEmail:  a.string(),
+      responderIp:     a.string(),
+      acceptedVia:     a.enum(['LINK', 'PHONE', 'EMAIL']),
+      lostReason: a.enum([
+        'EXPIRED', 'NO_RESPONSE', 'TOO_HIGH', 'TOO_SLOW', 'TRUCK_NOT_AVAILABLE',
+        'WITHDRAWN', 'OTHER', 'NO_REASON',
+      ]),
+      lostNote:        a.string(),
+      wonAt:           a.datetime(),
+      closedAt:        a.datetime(),
+      duplicatedFromId: a.string(),
+      // What pricing complained about when the number was last saved.
+      pricingWarnings: a.string().array(),
+      // Sparse 'OPEN' from DRAFT through RECEIVED_COUNTER; REMOVEd when it closes.
+      quoteOpen:       a.string(),
+      customerMessage: a.string(),              // travels onto the public page
+      internalNotes:   a.string(),              // never leaves the office
+      events:          a.json(),                // QuoteEvent[] — the thread
+      // The WorkflowRun a person applied to create this quote. Read-only to a
+      // client (the `voidedAt` pattern): SAVE_QUOTE writes it, nothing else.
+      workflowRunId:   a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+
+      // ── Step P4: what the market said, and whether it was real ────────────
+      // The DAT RateView answer the sell rate was built from. `marketStub` is true
+      // when the adapter ran in stub mode, and the quote says so wherever it shows
+      // the number — a stub price must never read like a quoted one.
+      marketRateCents: a.integer(),
+      marketSource:    a.string(),              // 'DAT_RATEVIEW' | 'LANE_HISTORY' | 'MANUAL'
+      marketStub:      a.boolean(),
+      marketAt:        a.datetime(),
+      marketDetail:    a.json(),                // { low, high, average, fuel, days, reports }
+      marginTargetBps: a.integer(),             // the margin the sell rate was built with
+      autoReplied:     a.boolean(),             // true when the agent sent it without a human
+
+      // ── Step P7: a carrier's answer to a posting ──────────────────────────
+      // A BUY-side quote that came in from a posting rather than from our asking.
+      // PHONE exists in the model and in the UI as a manually-logged call today;
+      // it is what the deferred voice agent will write later.
+      offerSource:       a.enum(['EMAIL', 'PHONE', 'BOARD', 'MANUAL']),
+      offerContactName:  a.string(),
+      offerContactPhone: a.string(),
+      offerAvailableAt:  a.datetime(),
+      offerPostingId:    a.string(),            // the ShipmentPosting it answered
+      offerMessageRef:   a.string(),            // the ShipmentMessage / e-mail it came from
+
+      // ── Step AB: the spot request this quote answers ─────────────────────
+      // `sr:<userId>:<gmailMessageId>`; set once by SAVE_QUOTE, never changed.
+      spotRequestId:     a.string(),
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('customerId').sortKeys(['quoteDate']),
+      index('loadId').sortKeys(['quoteDate']),
+      // Sparse by design: the open board and the expiry sweep are one query each.
+      index('quoteOpen').sortKeys(['expiresAt']),
+      index('quoteMonth').sortKeys(['quoteDate']),
+      // The public link's only door in — a GetItem is impossible, the token is
+      // not the key, and a Scan from a public Lambda is out of the question.
+      index('linkToken'),
+    ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * One delivered load, priced, keyed by lane: the whole of what the Historical
+   * Rates panel reads when somebody asks "what has this lane paid before?".
+   *
+   * The row's `id` is `lrs:<loadId>`, so a re-price overwrites the sample rather
+   * than doubling the lane's history. A load canceled or TONU'd after the sample
+   * was taken is marked `excluded` and kept — the record of what happened stays,
+   * the statistics simply stop counting it.
+   */
+  LaneRateSample: a
+    .model({
+      laneKey:         a.string().required(),   // 'CHICAGO|IL>DANVILLE|IL'
+      laneKey3:        a.string(),              // '606>618'
+      date:            a.string().required(),   // YYYY-MM-DD the load delivered
+      loadId:          a.string().required(),
+      shipmentId:      a.string().required(),
+      shipmentNumber:  a.string(),
+      orderId:         a.string(),
+      customerId:      a.string(),
+      customerName:    a.string(),
+      carrierId:       a.string(),
+      carrierName:     a.string(),
+      assignmentKind:  a.enum(['OWN_ASSET', 'CARRIER']),
+      divisionKey:     a.string(),
+      mode: a.enum([
+        'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
+      ]),
+      rateType:        a.enum(['SPOT', 'CONTRACT']),
+      equipmentType:   a.string(),
+      miles:           a.integer(),
+      customerRateCents: a.integer(),
+      revenueCents:    a.integer(),
+      carrierRateCents: a.integer(),
+      costCents:       a.integer(),
+      profitCents:     a.integer(),
+      marginBps:       a.integer(),
+      loadStatus:      a.string(),
+      // Canceled or TONU'd after the sample was taken: kept, never counted.
+      excluded:        a.boolean(),
+      // Where the sample came from: a live load, the backfill, or a legacy load.
+      source:          a.enum(['LOAD', 'BACKFILL', 'LEGACY_LOAD']),
+      sampledAt:       a.datetime().required(),
+      version:         a.integer().required(),
+
+      // ── Reporting fact fields (Step I) ───────────────────────────────────
+      // This row already is one delivered, priced load; the classic dashboard
+      // reads it by month instead of scanning Load + LoadFinancials.
+      sampleMonth:     a.string(),              // 'YYYY-MM' of `date`
+      customerRepId:   a.string(),              // Order.customerRepId
+      carrierRepId:    a.string(),              // LoadCarrier.carrierRepId ?? Load.carrierRepId
+      teamKey:         a.string(),              // the customer's team at sample time
+      invoiceId:       a.string(),
+      invoiceMonth:    a.string(),              // 'YYYY-MM' of Order.invoicedAt
+
+      // ── Brokerage dashboard facts (Step R) ───────────────────────────────
+      // Grouping by business, and the tracking / POD-timing history the
+      // Brokerage dashboard charts, all written by the sample refresh so no
+      // chart has to scan Load, LoadCheckCall and ShipmentDocument per month.
+      revDivision:     a.string(),              // Shipment.revDivision at sample time
+      revSubdivision:  a.string(),
+      salesRepId:      a.string(),
+      deliveredAt:     a.datetime(),            // Load.deliveredAt
+      podReceivedAt:   a.datetime(),            // the POD document's createdAt
+      trackingProvider: a.string(),             // how this load was tracked
+      firstPingAt:     a.datetime(),            // first position report of any kind
+      datPostedAt:     a.datetime(),
+      checkCallsDue:   a.integer(),             // check calls the schedule asked for
+      checkCallsMet:   a.integer(),             // how many actually landed on time
+    })
+    .secondaryIndexes((index) => [
+      index('laneKey').sortKeys(['date']),
+      index('laneKey3').sortKeys(['date']),
+      // The reporting read: every delivered load in a month, newest first.
+      index('sampleMonth').sortKeys(['date']),
+    ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * Step AF. Pre-aggregated dashboard figures: one row per calendar month
+   * ('M:YYYY-MM'), one legacy-KPI row per month ('LG:YYYY-MM') and one live row for
+   * open AR/AP ('L:CURRENT'), plus the Lambda's own dirty markers ('D:<rowId>') and
+   * leases ('K:<rowId>'). ~100 rows, read by id, so no secondary index. Only the
+   * tms-dashboard-rollup Lambda writes (SDK, IAM); clients read.
+   */
+  DashboardRollup: a
+    .model({
+      id:            a.id(),                 // 'M:2026-11' | 'LG:2026-11' | 'L:CURRENT' | 'D:<rowId>' | 'K:<rowId>' | 'DASH:<uuid>' | 'DASH:INDEX' (Step AI dashboard specs; never rollup data)
+      kind:          a.string().required(),  // 'M' | 'LG' | 'L' | 'D' | 'K'
+      periodKey:     a.string().required(),  // '2026-11' | 'CURRENT'
+      schemaVersion: a.integer(),
+      payload:       a.json(),
+      computedAt:    a.datetime(),
+      computeMs:     a.integer(),
+      sourceCounts:  a.json(),
+      dirtyAt:       a.datetime(),
+      leaseUntil:    a.integer(),            // K rows: epoch seconds
+      version:       a.integer().required(),
+    })
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Revenue ownership & department views (Step R) ──────────────────────────
+  /*
+   * Ryne, 2026-10-28: who owns a shipment is DATA, not code. BCAT runs three
+   * businesses today (BCAT Logistics, Ivan Cartage with its three subsidiaries,
+   * Best Care Auto Transport) and must be able to add a fourth — or hand the TMS
+   * to a company with entirely different parties — without a deploy.
+   *
+   * All three tables are tiny (tens of rows), read with one `list`, and written
+   * only by tmsDirectoryActions. No secondary indexes, no subscriptions.
+   */
+
+  // One business or subsidiary. `id` IS the code ('BROKERAGE', 'BOX_TRUCK'), so a
+  // Shipment/Load carrying the code resolves with a GetItem and survives a rename.
+  OwnershipDivision: a
+    .model({
+      id:          a.id(),
+      code:        a.string().required(),  // same value as `id`
+      name:        a.string().required(),
+      brand:       a.string(),             // shown in brackets in the sidebar
+      parentId:    a.string(),             // null = top-level business; any depth
+      color:       a.string(),             // '#f4c50c'
+      sortOrder:   a.integer().required(),
+      active:      a.boolean().required(),
+      // Which party owns each part of this division's work:
+      // { building, booking, tracking, invoicing, carrierPay, settlements }.
+      owners:      a.json(),
+      // Which existing views its shipments flow into:
+      // { calendar, dispatch, driverApp, driverPay, fleetDashboards, carShipping }.
+      flows:       a.json(),
+      // Step U. The address tender e-mails for this division arrive at, lower-cased.
+      // Optional here (seed rows have none); SAVE_OWNERSHIP_DIVISION requires it on an
+      // active division and keeps it unique across active divisions.
+      intakeEmail: a.string(),
+      // Phase 0: false/absent = placeholder nobody confirmed (UNCONFIRMED badge in the UI).
+      intakeEmailConfirmed: a.boolean(),
+      createdBy:   a.string().required(),
+      updatedBy:   a.string().required(),
+      version:     a.integer().required(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // An ordered rule that tags a shipment with a division. First match wins; a hand
+  // tag (Shipment.revTagSource 'HAND') beats every rule.
+  OwnershipRule: a
+    .model({
+      name:        a.string(),
+      sortOrder:   a.integer().required(),
+      active:      a.boolean().required(),
+      // { kind: CARRIER_IS | DRIVER_FLEET_GROUP_IS | DRIVER_TYPE_IS |
+      //         DRIVER_PROGRAM_IS | CUSTOMER_IS | EQUIPMENT_IS | MODE_IS |
+      //         LOAD_SOURCE_IS | REFERENCE_MATCHES | ALWAYS, value }
+      condition:   a.json(),
+      divisionCode: a.string().required(),
+      createdBy:   a.string().required(),
+      updatedBy:   a.string().required(),
+      version:     a.integer().required(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // A saved slice of the Shipments page — one per department. `id` IS the slug, so
+  // `/tms/shipments/view/<slug>` resolves without an index.
+  ShipmentView: a
+    .model({
+      id:          a.id(),
+      slug:        a.string().required(),  // same value as `id`
+      name:        a.string().required(),
+      department:  a.string(),
+      description: a.string(),
+      // ShipmentViewFilters: divisions, subdivisions, statuses, carrierType, repId,
+      // pickupWindow, docsState, trackingState, arStatuses, apStatuses,
+      // quoteToBooked, search.
+      filters:     a.json(),
+      columns:     a.string().array(),
+      columnTemplateId: a.string(),
+      sort:        a.json(),               // { key, dir }
+      isDefault:   a.boolean(),
+      // { groups, roles, divisions } — empty or null means everyone who can open
+      // Shipments; `divisions` groups the view, it never hides it.
+      audience:    a.json(),
+      sortOrder:   a.integer().required(),
+      active:      a.boolean().required(),
+      createdBy:   a.string().required(),
+      updatedBy:   a.string().required(),
+      version:     a.integer().required(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // A saved column set for the R2 board. Written only by tms-directory-actions;
+  // the client reads directly and never writes.
+  ShipmentColumnTemplate: a
+    .model({
+      id:          a.id(),
+      name:        a.string().required(),
+      columns:     a.string().array().required(),
+      widths:      a.json(),
+      pinned:      a.string().array(),
+      ownerEmail:  a.string().required(),
+      shared:      a.boolean().required(),
+      createdBy:   a.string().required(),
+      updatedBy:   a.string().required(),
+      version:     a.integer().required(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Staff, roles & commissions (Step I) ────────────────────────────────────
+  /*
+   * One row per staff login. `id` IS the Cognito username, which is the e-mail for
+   * everybody created through the Users page — the same value every rep field on
+   * Order/Load/Customer/Carrier already holds, so a picker resolves a name with a
+   * GetItem and no index.
+   *
+   * The role is data here and is PROJECTED onto Cognito groups by userManagement:
+   * nothing reads this table to authorize. Access stays `cognito:groups` in the
+   * token, so a role change costs no table read per request.
+   */
+  UserProfile: a
+    .model({
+      email:        a.string().required(),
+      name:         a.string(),
+      role: a.enum([
+        'ADMIN', 'MANAGER', 'CUSTOMER_REP', 'CARRIER_REP', 'AR_AP', 'COMPLIANCE', 'NONE',
+      ]),
+      teamKeys:     a.string().array(),
+      // Which businesses this person works in (OwnershipDivision codes). A saved
+      // Shipment view can name the divisions that see it, and this is what that
+      // audience is matched against; empty means the division facet never admits
+      // them, the same way an unlisted group does not.
+      divisions:    a.string().array(),
+      managerId:    a.string(),
+      claims:       a.string().array(),     // UserClaim keys; only a few are enforced
+      extraPages:   a.string().array(),     // page keys granted beyond the role
+      status:       a.enum(['PENDING', 'ACTIVE', 'INACTIVE']),
+      title:        a.string(),
+      phone:        a.string(),
+      datEmail:     a.string(),             // the rep's own DAT login, listed on the DAT page
+      // ── Integrations (Step J) ──────────────────────────────────────────────
+      hubspotId:    a.string(),
+      // Per-user Truckstop OAuth. Null until Truckstop is live; stamped by nothing yet.
+      truckstopAuthorizedAt: a.datetime(),
+      invitedAt:    a.string(),
+      invitedBy:    a.string(),
+      lastRoleChangeAt: a.string(),
+      lastRoleChangeBy: a.string(),
+      createdBy:    a.string().required(),
+      updatedBy:    a.string().required(),
+      version:      a.integer().required(),
+    })
+    // No GSI: a staff table is tens of rows and `list` is the only read.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * One immutable row per order × commission role × rep. Written only by
+   * tmsFinanceActions, and only once the money is frozen (invoice generated, or
+   * invoice paid when that is the trigger).
+   *
+   * An unapproved row is a proposal and is recomputed in place; from
+   * MANAGER_APPROVED on it is a liability and every later change arrives as an
+   * ADJUSTMENT or a REVERSAL, exactly as the AR and AP ledgers already work.
+   */
+  Commission: a
+    .model({
+      kind:          a.enum(['EARNED', 'ADJUSTMENT', 'REVERSAL']),
+      adjustsId:     a.string(),
+      orderId:       a.string().required(),
+      shipmentId:    a.string(),
+      shipmentNumber: a.string(),
+      invoiceId:     a.string().required(),
+      invoiceNumber: a.string(),
+      customerId:    a.string(),
+      customerName:  a.string(),
+      carrierId:     a.string(),
+      carrierName:   a.string(),
+      divisionKey:   a.string(),
+      teamKey:       a.string(),
+      repId:         a.string().required(),
+      repName:       a.string(),
+      managerId:     a.string(),
+      roleName:      a.string().required(),   // CommissionRoleName
+      planId:        a.string(),
+      planName:      a.string(),
+      rateType:      a.enum(['FIXED', 'PERCENT_PROFIT', 'PERCENT_REVENUE']),
+      rateBps:       a.integer(),
+      rateCents:     a.integer(),
+      tierLabel:     a.string(),
+      splitBps:      a.integer(),
+      basis:         a.enum(['REVENUE', 'PROFIT', 'FIXED']),
+      basisCents:    a.integer().required(),
+      revenueCents:  a.integer().required(),
+      costCents:     a.integer().required(),
+      profitCents:   a.integer().required(),
+      marginBps:     a.integer(),
+      amountCents:   a.integer().required(),  // the computed number, never erased
+      overrideCents: a.integer(),
+      overrideBy:    a.string(),
+      overrideNote:  a.string(),
+      netCents:      a.integer().required(),  // override ?? counter ?? amount
+      basisNote:     a.string(),              // e.g. 'OWN_FLEET_NO_COST'
+      needsReview:   a.boolean(),
+      costFinal:     a.boolean(),
+      status: a.enum([
+        'UN_APPROVED', 'REP_COUNTERED', 'MANAGER_COUNTERED', 'MANAGER_APPROVED',
+        'FULLY_APPROVED', 'PAID', 'CANCELLED',
+      ]),
+      counterCents:  a.integer(),
+      counterBy:     a.string(),
+      counterNote:   a.string(),
+      approvedAt:    a.string(),
+      approvedBy:    a.string(),
+      cancelledAt:   a.string(),
+      cancelReason:  a.string(),
+      trigger:       a.enum(['GENERATE_INVOICE', 'INVOICE_PAID']),
+      triggerAt:     a.string().required(),
+      commissionMonth: a.string().required(),  // 'YYYY-MM' of triggerAt
+      payPeriodId:   a.string(),
+      paidAt:        a.string(),
+      paymentRef:    a.string(),
+      source:        a.enum(['RUN', 'RERUN', 'VOID', 'WRITE_OFF', 'OVERRIDE']),
+      computedAt:    a.string().required(),
+      events:        a.json(),                 // ≤ 50 entries, the Quote precedent
+      createdBy:     a.string().required(),
+      updatedBy:     a.string().required(),
+      version:       a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('repId').sortKeys(['commissionMonth']),
+      index('invoiceId'),
+      index('payPeriodId'),
+      index('commissionMonth').sortKeys(['triggerAt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  /*
+   * A commission pay period. `id` is `cpp:<periodStart>`. Paying a period records
+   * that payroll happened elsewhere — no money leaves this stack, the same way
+   * MARK_SENT records an invoice that a person e-mailed.
+   */
+  CommissionPayPeriod: a
+    .model({
+      periodStart:  a.string().required(),   // YYYY-MM-DD
+      periodEnd:    a.string().required(),
+      payDate:      a.string().required(),
+      status:       a.enum(['OPEN', 'PENDING_APPROVAL', 'APPROVED', 'PAID']),
+      commissionCount: a.integer(),
+      totalCents:   a.integer(),
+      byRep:        a.json(),                // [{repId, repName, count, amountCents, statementKey}]
+      submittedAt:  a.string(),
+      submittedBy:  a.string(),
+      approvedAt:   a.string(),
+      approvedBy:   a.string(),
+      paidAt:       a.string(),
+      paidBy:       a.string(),
+      paymentRef:   a.string(),
+      note:         a.string(),
+      createdBy:    a.string().required(),
+      updatedBy:    a.string().required(),
+      version:      a.integer().required(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Carriers (Step C) ──────────────────────────────────────────────────────
+  // Outside carriers only: a row here is somebody we pay by the load. The own
+  // fleet stays Driver + Equipment and books through the existing ASSIGN_ASSET
+  // picker, so nothing on the calendar, settlements or the driver app changes.
+  //
+  // All four carrier models are written by tmsCarrierActions alone — the client
+  // reads. Subscriptions are dropped (see TMS_DESIGN §12); the directory polls.
+  //
+  // `type`, `status` and the rest of the enums below cannot carry .required():
+  // Amplify Gen 2 enum fields take no modifiers. The Lambda demands them.
+  Carrier: a
+    .model({
+      aljexAliases:   a.string().array(),   // Step AW: Aljex Carrier IDs of merged duplicate rows
+      name:           a.string().required(),
+      aljexCode:      a.string(),            // Aljex `Line Haul Carrier ID` (Phase 0 import); no index
+      dbaName:        a.string(),
+      normalizedName: a.string(),            // dedupe key (lower, strip punctuation)
+      type: a.enum(['TL', 'LTL', 'CARTAGE', 'LINEHAUL', 'AIR', 'OCEAN', 'RAIL', 'AGENT']),
+      status: a.enum(['PENDING', 'REVIEW', 'ACTIVE', 'INACTIVE', 'DO_NOT_USE']),
+      // One list, both halves: the first five reasons belong to INACTIVE, the
+      // last five to DO_NOT_USE. Which ones a status may use is a lib decision
+      // (src/lib/carrierStatus.ts), not a schema one.
+      statusReason: a.enum([
+        'EXPIRED_INSURANCE', 'INACTIVE_AUTHORITY', 'INACTIVE_AGREEMENT', 'SAFETY_ISSUES', 'OTHER',
+        'DOUBLE_BROKERING', 'CARGO_CLAIM', 'THEFT', 'FRAUD', 'SUSPICIOUS_ACTIVITY',
+      ]),
+      statusNote:      a.string(),
+      statusChangedAt: a.datetime(),
+      statusChangedBy: a.string(),
+
+      // Authority and identity
+      mcNumber:   a.string(),
+      dotNumber:  a.string(),
+      scac:       a.string(),
+      // Tax ID (EIN/SSN): the number itself is NEVER a Carrier field. It lives encrypted in the Lambda-only
+      // CarrierTaxVault (AW_TAXID_DESIGN.md). These three are the read-only mirror the UI shows as "on file ••••1234";
+      // only tmsCarrierActions / mcpSync write them, in the same transaction as the vault item.
+      taxIdLast4:    a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      taxIdType:     a.string().authorization((allow) => [allow.authenticated().to(['read'])]),   // EIN | SSN
+      taxIdOnFileAt: a.datetime().authorization((allow) => [allow.authenticated().to(['read'])]),
+      inFmcsa:    a.boolean(),
+      authorityStatus: a.enum(['ACTIVE', 'INACTIVE', 'NONE', 'UNKNOWN']),
+      authorityGrantedAt: a.datetime(),
+      authorityExpiresAt: a.datetime(),
+
+      // Safety profile, typed in from SAFER until J brings an integration.
+      safetyRating: a.enum(['SATISFACTORY', 'CONDITIONAL', 'UNSATISFACTORY', 'NONE', 'UNKNOWN']),
+      safetyRatingAt:     a.datetime(),
+      reviewType:         a.string(),
+      reviewedAt:         a.datetime(),
+      driverInspections:  a.integer(),
+      driverOos:          a.integer(),
+      vehicleInspections: a.integer(),
+      vehicleOos:         a.integer(),
+
+      // InsurancePolicy[] — validated element-by-element in tmsCarrierActions,
+      // capped at 50. Expiry against the pickup date is what blocks a booking.
+      insurancePolicies: a.json(),
+      aiMemory: a.json(),                    // PartyAiMemory — human-edited, agent-read
+      equipment:    a.string().array(),      // CONTAINER | FLATBED | POWER_ONLY | REEFER | SPECIALIZED | TANKER | VAN
+      cargoTypes:   a.string().array(),
+      powerUnits:   a.integer(),
+      trailerCount: a.integer(),
+      driverCount:  a.integer(),
+
+      address:  a.json(),                    // { street, city, state, zip, country }
+      phone:    a.string(),
+      email:    a.string(),
+      website:  a.string(),
+      // Mirror of the primary DISPATCH contact, so booking a load does not have
+      // to read the contact table to fill in who answers the phone.
+      dispatcherName:  a.string(),
+      dispatcherPhone: a.string(),
+      dispatcherEmail: a.string(),
+
+      paymentTermsDays:      a.integer(),
+      quickPayEligible:      a.boolean(),
+      defaultQuickPayDays:   a.integer(),
+      factorPaymentMethodId: a.string(),     // CarrierPaymentMethod the factor is paid through
+
+      // Manual compliance status until the Highway / RMIS / MyCarrierPackets
+      // integrations land in J. MCP is free text — their statuses are theirs.
+      highwayStatus: a.enum(['PASS', 'FAIL', 'INCOMPLETE', 'PARTIAL', 'NONE']),
+      rmisStatus:    a.enum(['PASS', 'FAIL', 'INCOMPLETE', 'PARTIAL', 'NONE']),
+      mcpStatus:     a.string(),
+      mcpRiskScore:  a.integer(),   // Step N2 — MyCarrierPackets risk assessment points
+      // Aljex Carrier CA Intrastate / TX PUC numbers + expiries (YYYY-MM-DD).
+      caIntrastateNumber:    a.string(),
+      caIntrastateExpiresAt: a.string(),
+      txPucNumber:           a.string(),
+      txPucExpiresAt:        a.string(),
+      // Aljex-exit: imported from Aljex, compliance still PENDING. Written only by the import Lambda.
+      legacyImported:        a.boolean(),
+      legacySource:          a.string(),
+      // MyCarrierPackets sync.
+      mcpReviewStatus:       a.string(),
+      mcpPacketCompletedAt:  a.datetime(),
+      mcpSyncedAt:           a.datetime(),
+      mcpSyncRunId:          a.string(),
+      // Step AD: the last MyCarrierPackets packet invitation sent from Find & Invite.
+      mcpInvitedAt:          a.datetime(),
+      mcpInvitedTo:          a.string(),
+      mcpInvitedBy:          a.string(),
+
+      accountOwnerIds: a.string().array(),   // [0] is primary owner
+      teamKey:         a.string(),
+      internalNotes:   a.string(),
+      loadCount:       a.integer(),          // cached by BOOK_CARRIER
+      lastLoadAt:      a.datetime(),
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('normalizedName'),
+      index('status').sortKeys(['name']),
+      index('mcNumber'),
+      index('dotNumber'),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Who to call at a carrier. One row may wear several hats (`types`), and at
+  // most one row per carrier is `isPrimary` — enforced in the Lambda, which
+  // demotes the previous primary in the same write.
+  CarrierContact: a
+    .model({
+      carrierId: a.string().required(),
+      name:      a.string().required(),
+      types:     a.string().array(),         // ACCOUNTING | AFTER_HOURS | CLAIMS | DISPATCH | DRIVER | EMERGENCY | MANAGER | OWNER
+      email:     a.string(),
+      phone:     a.string(),
+      isPrimary: a.boolean(),
+      rateConRecipient: a.boolean(),         // defaulted into the rate-con To: line
+      active:    a.boolean(),
+      createdBy: a.string().required(),
+      updatedBy: a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('carrierId')])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Where the money goes. Full account and routing numbers are never stored on
+  // the item — only the last four and a `bankDetailsKey` pointing at the
+  // document in S3 — so a read of this table can never leak a bank account.
+  CarrierPaymentMethod: a
+    .model({
+      carrierId:     a.string().required(),
+      method:        a.enum(['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT']),
+      // A factored carrier is paid through its factor, not through itself.
+      recipientType: a.enum(['CARRIER', 'FACTOR']),
+      factorName:    a.string(),
+      factorAddress: a.json(),               // Address
+      bankName:      a.string(),
+      accountName:   a.string(),
+      accountLast4:  a.string(),
+      routingLast4:  a.string(),
+      bankDetailsKey: a.string(),            // carrier-docs/{carrierId}/private/…
+      payeeEmail:    a.string(),
+      remitToAddress: a.json(),              // Address
+      isPreferred:   a.boolean(),            // at most one per carrier
+      status:        a.enum(['ACTIVE', 'INACTIVE']),
+      source:        a.string(),             // 'MCP' when MyCarrierPackets wrote it
+      createdBy:     a.string().required(),
+      updatedBy:     a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('carrierId')])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // A carrier's paperwork: the packet they send us (authority, COIs, W9, the
+  // signed agreement) plus every rate confirmation we generate for them. The
+  // bytes live under carrier-docs/{carrierId}/; this row is the index of them.
+  CarrierDocument: a
+    .model({
+      carrierId: a.string().required(),
+      type: a.enum([
+        'AUTHORITY', 'COI_AUTO', 'COI_CARGO', 'COI_GENERAL', 'W9', 'CARRIER_AGREEMENT',
+        'FACTOR_NOA', 'CDL', 'RATE_CON', 'OTHER',
+      ]),
+      name:        a.string().required(),
+      s3Key:       a.string().required(),
+      contentType: a.string().required(),
+      sizeBytes:   a.integer().required(),
+      expiresAt:   a.datetime(),             // COIs expire; a missing date is "never checked"
+      loadCarrierId: a.string(),             // RATE_CON rows only
+      // UPLOAD is a file somebody sent us, GENERATED is a rate con we built,
+      // SIGNED is the copy that came back with a signature on it.
+      source:      a.enum(['UPLOAD', 'GENERATED', 'SIGNED']),
+      uploadedBy:  a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('carrierId').sortKeys(['type'])])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -1008,6 +3798,12 @@ const schema = a.schema({
       otrDocsUploaded: a.json(), // { pod?: string, rateConfirmation?: string }
       // Last failure from OTR, surfaced on the row rather than only in logs.
       otrError:        a.string(),
+      // ── Step F: a row this system raised, rather than one an intake e-mail did.
+      // `source` null reads as EMAIL, so every existing row is untouched.
+      source:          a.enum(['EMAIL', 'TMS']),
+      invoiceId:       a.string(),
+      orderId:         a.string(),
+      shipmentId:      a.string(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1046,6 +3842,10 @@ const schema = a.schema({
       paymentReference: a.string(),
       paidBy: a.string(),
       paidAt: a.datetime(),
+      // Step AG: set when an AP-inbox mail was attached to / filled blanks on this payable.
+      apInboxItemId: a.string(),
+      apInboxSourceUrl: a.string(),
+      apInboxAppliedAt: a.datetime(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1306,6 +4106,9 @@ const schema = a.schema({
       complianceStatus:       a.enum(['COMPLIANT', 'EXPIRING_SOON', 'NON_COMPLIANT', 'UNKNOWN']), // cached, updated by scanner
       assignedFuelCardNumber: a.string(),   // LAST 4 DIGITS ONLY — never store full card numbers
       assignedPhone:          a.string(),
+      // Steps AJ/AK. The work phone physically in this truck (E.164, +1XXXXXXXXXX); null = none.
+      phone:                  a.string(),
+      phoneLabel:             a.string(),   // free label, e.g. "Cab phone"
       assignedTablet:         a.string(),
       eldSerialNumber:        a.string(),
       inServiceDate:          a.date(),
@@ -1313,6 +4116,22 @@ const schema = a.schema({
     .identifier(['truckId'])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // ── Company phones handed to Ivan's local drivers ─────────────────────────
+  // One row per device ("Ivan Cartage #1", "Ivan Cartage Ipad"), keyed by that name so a
+  // device can never be entered twice. The number belongs to the device, not the driver:
+  // when a phone changes hands its number goes with it. The driver's own number stays on
+  // Driver.phone.
+  CompanyPhone: a
+    .model({
+      label:            a.string().required(),
+      number:           a.string(),
+      assignedDriverId: a.string(),   // Driver.id; null = in the office
+      sortOrder:        a.integer(),
+    })
+    .identifier(['label'])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
@@ -1417,17 +4236,25 @@ const schema = a.schema({
       bearing:     a.float(),
       speed:       a.float(),
       description: a.string(),
-      source:      a.string().required(),   // 'motive'
+      source:      a.string().required(),   // 'motive' · 'blueink' · load pings: 'link' 'sms-share' 'sms-geocode' 'provider:<key>'
       syncedAt:    a.datetime().required(),
+      // ── Step AO: load-keyed breadcrumbs share this table (truckId = 'load:<loadId>') ──
+      loadId:      a.string(),    // set on load-keyed rows; null on Motive / Blue Ink rows
+      accuracyM:   a.integer(),   // reported horizontal accuracy; for approx fixes, the radius of the guess
+      approx:      a.boolean(),   // true = geocoded from free text, never a GPS reading
+      refId:       a.string(),    // provider event id / Twilio MessageSid — audit and idempotency, never shown
+      ttlEpoch:    a.integer(),   // epoch SECONDS; DynamoDB TTL (backend.ts). Absent on Motive / Blue Ink rows
+      payload:     a.json(),      // route-cache rows only: { encoded, meters, seconds, source, fetchedAt, key, waypoints }
     })
     .identifier(['truckId', 'locatedAt'])
     .secondaryIndexes((index) => [
       index('truckId').sortKeys(['locatedAt']),
     ])
-    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
-    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
-    .disableOperations(['subscriptions'])
-    .authorization((allow) => [allow.authenticated()]),
+    // Nothing writes this model through GraphQL (the sync Lambdas and the public tracking
+    // Lambda use the DynamoDB SDK), and a customer-visible breadcrumb must not be forgeable
+    // by a signed-in user: no subscriptions and no create/update/delete resolvers.
+    .disableOperations(['subscriptions', 'create', 'update', 'delete'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
 
   // ── Open engine fault codes (DTCs) from Motive ────────────────────────────
   // One record per truck per open Motive fault code, refreshed hourly by the
@@ -1820,6 +4647,11 @@ const schema = a.schema({
     .query()
     .arguments({
       action:   a.string().required(),
+      // Step I: the role/team/claim/profile actions. `input` is a JSON string
+      // carrying whatever the action needs beyond these scalars — one argument
+      // instead of a dozen, the way every TMS router already takes its input.
+      role:     a.string(),
+      input:    a.string(),
       email:    a.string(),
       username: a.string(),
       pages:    a.string(),
@@ -2061,6 +4893,12 @@ const schema = a.schema({
   // Actions: UPSERT_CUSTOMER, UPSERT_LOCATION, ARCHIVE_CUSTOMER, ARCHIVE_LOCATION,
   // SAVE_DIVISION, SAVE_SETTINGS, PREVIEW_MERGE_LOCATIONS, MERGE_LOCATIONS, RESUME_MERGE.
   // Loads stay on the generated mutations; the merge repoint is the only Load write here.
+  // Step J adds the integration framework: LIST_INTEGRATIONS, CONNECT_INTEGRATION,
+  // VALIDATE_INTEGRATION, SAVE_INTEGRATION_SETTINGS, DISCONNECT_INTEGRATION, RUN_STUB,
+  // CONNECT_QUICKBOOKS, REFRESH_QUICKBOOKS, PREVIEW_QBO_SYNC, ISSUE_API_CLIENT,
+  // REVOKE_API_CLIENT — owner/ADMIN only. They write the Integration table and SSM
+  // under /bcat/integrations/<poolId>/; this Lambda holds no grant on Shipment,
+  // Order, Load, Invoice or FactoringItem, so no integration can reach AR.
   tmsDirectoryActions: a
     .mutation()
     .arguments({
@@ -2070,6 +4908,119 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(tmsDirectoryActions)),
+
+  // Step B: every Shipment / Order / Load-carrier / charge write goes through this
+  // Lambda. Actions: CREATE_SHIPMENT, SAVE_ORDER_FORM, CHECK_CREDIT, SUBMIT_ORDER,
+  // SET_SHIPMENT_STATUS, SET_LOAD_STATUS, DELETE_SHIPMENT, RESTORE_SHIPMENT,
+  // TENDER_RESPOND, DUPLICATE_SHIPMENT, UPDATE_STOP, ASSIGN_ASSET, ASSIGN_CARRIER,
+  // REMOVE_LOAD_CARRIER, RECALC_CHARGES, SET_AR_STATUS, GET_SHIPMENT_BUNDLE.
+  // Load itself is written with the generated updateLoad mutation so the calendar's
+  // subscriptions still fire.
+  tmsShipmentActions: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsShipmentActions)),
+
+  // Step K: every workflow/AI-agent read and disposition goes through this Lambda.
+  // Actions: LIST_RUNS, GET_RUN, LIST_RUNS_FOR_SHIPMENT, LIST_EXCEPTIONS, RETRY_RUN,
+  // LINK_RUN, SET_RUN_PARTY, DISMISS_RUN, RESOLVE_EXCEPTION, SAVE_FEEDBACK,
+  // RUN_SAMPLE, BACKFILL_AP, SWEEP_STALLED. None of them creates freight: applying a
+  // proposal is still CREATE_SHIPMENT / SAVE_QUOTE / RECORD_BILL under the person's
+  // own identity.
+  tmsWorkflowActions: a
+    .mutation()
+    .arguments({ action: a.string().required(), input: a.json() })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(workflowAgent)),
+
+  // Step AB: the per-rep Gmail spot quoter. Actions: SPOT_STATUS, SPOT_OAUTH_START,
+  // SPOT_OAUTH_FINISH, SPOT_CONNECT_SIMULATED, SPOT_DISCONNECT, SPOT_SET_PAUSED,
+  // SPOT_PURGE_MINE, SPOT_SAVE_MY_SETTINGS, SPOT_POLL_NOW, SPOT_LIST_REQUESTS,
+  // SPOT_GET_REQUEST, SPOT_COUNT, SPOT_ADD_MANUAL, SPOT_UPDATE_FIELDS, SPOT_SET_CUSTOMER,
+  // SPOT_SUGGEST_RESPONSE, SPOT_LOG_COPIED, SPOT_MARK_SENT, SPOT_DISMISS, SPOT_MARK_OUTCOME,
+  // SPOT_SAVE_SETTINGS, SPOT_ADMIN_DISCONNECT and the dev-only SPOT_SIM_*. The same
+  // Lambda answers the five-minute poll rule. The mailbox is READ-ONLY: a reply is a
+  // suggested text the rep copies; nothing is drafted or sent.
+  tmsSpotActions: a
+    .mutation()
+    .arguments({ action: a.string().required(), input: a.json() })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsSpotQuoter)),
+
+  // Step AG: the Accounting AP inbox (Lambda tms-ap-inbox). Actions: AP_INBOX_STATUS,
+  // AP_INBOX_PREVIEW_LINK, AP_INBOX_SYNC_NOW, AP_INBOX_LINK, AP_INBOX_MARK_CREATED,
+  // AP_INBOX_CREATE_VENDOR_BILL, AP_INBOX_DISMISS, AP_INBOX_REVERT, AP_INBOX_SAVE_SETTINGS,
+  // AP_INBOX_OAUTH_*, and the dev-only AP_INBOX_SIM_*. The same Lambda answers the hourly rule.
+  // The mailbox is READ-ONLY; nothing is sent, drafted, approved or paid.
+  tmsApInboxActions: a
+    .mutation()
+    .arguments({ action: a.string().required(), input: a.json() })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsApInbox)),
+
+  // Step AB: CRM bones. Actions: CRM_GET_ACCOUNT, CRM_LIST_ACCOUNTS, CRM_ADD_ACTIVITY,
+  // CRM_ADD_TASK, CRM_COMPLETE_TASK, CRM_SET_NEXT_STEP, CRM_LIST_FOLLOWUPS,
+  // CRM_UPSERT_CONTACT, CRM_CLAIM_DOMAIN, CRM_ASSIGN_OWNER, CRM_BACKFILL.
+  tmsCrmActions: a
+    .mutation()
+    .arguments({ action: a.string().required(), input: a.json() })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsCrmActions)),
+
+  // Step C: every carrier-directory write goes through this Lambda. Actions:
+  // UPSERT_CARRIER, SET_CARRIER_STATUS, UPSERT_CONTACT, ARCHIVE_CONTACT,
+  // UPSERT_PAYMENT_METHOD, ARCHIVE_PAYMENT_METHOD, PREPARE_DOCUMENT,
+  // COMMIT_DOCUMENT, DELETE_DOCUMENT, SAVE_CARRIER_SETTINGS.
+  // Booking a carrier onto a load is tmsShipmentActions' BOOK_CARRIER — that is
+  // where the transaction across the shipment tables already lives.
+  tmsCarrierActions: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsCarrierActions)),
+
+  // Step D: tracking links and the texts/e-mails that carry them. Kept off
+  // tmsShipmentActions so Twilio, SES, Cognito and the dispatch tables stay off
+  // that router's role. Actions: SEND_TRACKING_LINK, REVOKE_TRACKING_LINK,
+  // SEND_CUSTOMER_LINK, REVOKE_CUSTOMER_LINK, TEXT_DRIVER, SAVE_TRACKING_SETTINGS.
+  // Logging a check call moves Load status and money, so it stays in tmsShipmentActions.
+  tmsTrackingActions: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsTrackingActions)),
+
+  // Step F: everything that posts money against a customer — generate/e-mail/void an
+  // invoice, receive a payment, issue a credit, write off, reverse, hand an invoice to
+  // the factor. Its own router because tmsShipmentActions admits anyone with
+  // `page-loads`, and a ledger is not a dispatch board: this one is gated to
+  // owner / ADMIN / `page-invoicing`, with every posting action admin-only by default.
+  tmsFinanceActions: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsFinanceActions)),
 
   // Phase 1: server-side geocoding, Places autocomplete, and place details.
   tmsGeocode: a
@@ -2181,6 +5132,30 @@ const schema = a.schema({
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
+  // Step N1: bulk import from Aljex CSV. Owner/ADMIN only. Idempotent by file hash;
+  // dry-run preview; per-row error CSV uploaded to S3.
+  tmsAljexImport: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsAljexImport)),
+
+  // Aljex-exit Phase 0: backup status, S3 export and export-everything CSV. Owner/ADMIN
+  // only (the Lambda checks). The Lambda reads DynamoDB directly, so it holds no schema grant.
+  tmsDataSafety: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsDataSafety)),
+
   // Dispatch router: send, start, markRead, assign, link, archive, reopen, note,
   // mediaUrl, status, getSettings, saveSettings. Requires the page-dispatch group.
   manageDispatch: a
@@ -2192,10 +5167,28 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(dispatchActions)),
-}).authorization((allow) => [
+})).authorization((allow) => [
   // Phase 1: tmsDirectoryActions Lambda invokes the AppSync API via IAM auth
   // (generated mutations for Load, plus queries for Customer/Location/Division/etc.).
   allow.resource(tmsDirectoryActions).to(['query', 'mutate']),
+  // Step B: tmsShipmentActions writes Load through the generated updateLoad mutation
+  // for the same reason (subscriptions), and reads Customer/TmsSettings/Driver.
+  allow.resource(tmsShipmentActions).to(['query', 'mutate']),
+  // Step C: tmsCarrierActions owns the four carrier tables through the SDK and
+  // reaches the generated queries over IAM for the rows it only reads.
+  allow.resource(tmsCarrierActions).to(['query', 'mutate']),
+  // Step D: tmsTrackingActions owns TrackingLink through the SDK and reads
+  // Shipment/Order/Load/LoadCarrier/Customer over IAM.
+  allow.resource(tmsTrackingActions).to(['query', 'mutate']),
+  // Step F: tmsFinanceActions owns Invoice and ArPayment through the SDK and reads
+  // Order/Shipment/Load/LoadCharge/Customer/Division over IAM.
+  allow.resource(tmsFinanceActions).to(['query', 'mutate']),
+  // Step N1: tmsAljexImport writes Shipment/Order/Load/LoadFinancials/LoadCharge
+  // and reads Customer/Location/Division/TmsSettings over IAM.
+  allow.resource(tmsAljexImport).to(['query', 'mutate']),
+  // Step K: workflowAgent deliberately holds NO schema grant — it reads its tables
+  // directly over DynamoDB, so an appsync:GraphQL grant on every Query field (Invoice
+  // and FactoringItem reads included) would be authority nothing exercises.
 ])
 
 export type Schema = ClientSchema<typeof schema>

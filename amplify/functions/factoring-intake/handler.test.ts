@@ -1,5 +1,5 @@
 import type { AttributeValue } from '@aws-sdk/client-dynamodb'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
 
 const { send } = vi.hoisted(() => {
@@ -25,8 +25,23 @@ type MockCommand = {
   }
 }
 
+// The handler narrates every decision through console; capture it so the output is
+// asserted where it is the contract, not dumped into the test run.
+let log: ReturnType<typeof vi.spyOn>
+let warn: ReturnType<typeof vi.spyOn>
+let error: ReturnType<typeof vi.spyOn>
+
 beforeEach(() => {
   vi.clearAllMocks()
+  log = vi.spyOn(console, 'log').mockImplementation(() => {})
+  warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  error = vi.spyOn(console, 'error').mockImplementation(() => {})
+})
+
+afterEach(() => {
+  log.mockRestore()
+  warn.mockRestore()
+  error.mockRestore()
 })
 
 function event(payload: Record<string, unknown>, method = 'POST') {
@@ -130,6 +145,7 @@ describe('factoring-intake handler', () => {
     )
     expect(res.statusCode).toBe(401)
     expect(JSON.parse(res.body)).toMatchObject({ error: 'unauthorized' })
+    expect(warn).toHaveBeenCalledWith('[factoring-intake] 401 — bad secret')
   })
 
   it('rejects wrong secret', async () => {
@@ -143,6 +159,7 @@ describe('factoring-intake handler', () => {
     )
     expect(res.statusCode).toBe(401)
     expect(JSON.parse(res.body)).toMatchObject({ error: 'unauthorized' })
+    expect(warn).toHaveBeenCalledWith('[factoring-intake] 401 — bad secret')
   })
 
   it('rejects non-string messageId', async () => {
@@ -244,6 +261,7 @@ describe('factoring-intake handler', () => {
       proNumber: '012345',
       duplicate: false,
     })
+    expect(log).toHaveBeenCalledWith('[factoring-intake] row created', { proNumber: '012345', messageId: 'msg-001' })
 
     expect(send).toHaveBeenCalledTimes(1)
     const command = send.mock.calls[0][0] as MockCommand
@@ -287,6 +305,7 @@ describe('factoring-intake handler', () => {
       proNumber: '012345',
       duplicate: true,
     })
+    expect(log).toHaveBeenCalledWith('[factoring-intake] duplicate PRO, skipping', { proNumber: '012345', messageId: 'msg-002' })
     expect(send).toHaveBeenCalledTimes(1)
   })
 })

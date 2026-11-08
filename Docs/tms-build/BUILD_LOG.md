@@ -1,0 +1,3129 @@
+# TMS build log
+
+## 2026-11-07 - Step AW stages B-F status (rehearsal2 + dev)
+- **B (rehearsal):** a one-shot deploy of the merged schema FAILS on CloudFormation's 2,500-resources-per-operation cap (rehearsal jobs 1 and 3), so the production merge must be staged. Built `BCAT_SCHEMA_STAGE` (amplify/data/stages.ts, `Docs/tms-build/AW_STAGED_DEPLOY.md`, `scripts/stageDeployCheck.mjs`, `scripts/stageRun.sh`): six stages, deltas 427 / 121 / 588 / 533 / 453 / 3 resources. Rehearsal2 grown from a 60-model baseline: baseline job 2 SUCCEED, stage 0 job 3 SUCCEED in 42 min, stages 1-5 running. At risk for Monday: total wall clock (see GO_NO_GO.md).
+- **C/D/E/F built** (see GO_NO_GO.md "Built in this stage batch"). Full gate green on commit 5f45cf75: 920 files / 11,074 tests, tsc x3, eslint 0 warnings, build; data stack 968,472 B / 460 resources. Pushed `merge/main-into-dev` and dev (job 211 running). Nothing applied to production; nothing run live on the rehearsal yet (data load + devVerifyAW pending stage 5).
+
+## 2026-11-08 - Step AW stage A: origin/main merged into dev (branch `merge/main-into-dev`, not pushed to dev)
+- Merge `51c769c`: 16 main-only commits (78 files) into dev; 16 conflicted files resolved keeping both feature sets (directory/Locations driver notes, driver-app trailer/bobtail, files DOT/doc dates, Hours period view + hourly rates, time-off/PTO, fleet dashboard). `resource.ts`, `backend.ts`, `App.tsx`, `navSections.ts` auto-merged cleanly (Feedback page was already on dev). main's new files were re-tokenised to `--tms-*` (dev's S3 palette rule). One main test edited (`LocationDetail.test.tsx` store mock gained `loadedMonths`/`ensureLoadRange`; assertions untouched). Full gate green: tsc x3, eslint 0 warnings, 844 files / 10,420 tests, build.
+- Inventory: `Docs/tms-build/MERGE_REGRESSION.md` (78 features: 38 covered, 30 partial, 10 gap; 64 Lambdas, 15 with no test). Schema/size: `Docs/tms-build/AW_SCHEMA_DIFF.md` (no blockers; Load +3 GSIs, AuditLog +1; data stack 968,579 B / 460 of 500 on the prod shape). PRO link findings: `Docs/tms-build/AW_PRO_LINK_FINDINGS.md`.
+
+## 2026-11-06 - Step AV deployed (job 202): lifecycle tabs Quote / Build / View / Book / Track / Review
+
+Dev only, commit 5e7ad1a. Live runs against dev with throwaway identities (all deleted and confirmed gone). Screenshots at 1440x900: `Docs/tms-build/screenshots/av/` (index.txt there); DEMO_WALKTHROUGH.md now narrates Quote > Build > View > Book > Track > Review and the short sidebar.
+
+Evidence
+- New `node scripts/devVerifyAV.mjs`: 29/29 PASS. Six tabs with the right one lit on /tms/rates (quote), /tms/shipments/intake, /new and /<id>/edit (build), /tms/shipments and /<id> (view), /tms/carrier-sales (book), /tms/tracking (track), /tms/load-review (review) at 1440 and 1280, no horizontal page scroll; badges render; Alt+1..6 land on rates, intake, shipments, carrier-sales, tracking, load-review; sidebar rail is Company Dashboard, Active shipments, Customers, Carriers, Locations, Accounting, Settings (plus the division sections); a page-loadReview-only user sees one tab (Review), /tms/load-review opens, and /tms/rates, /shipments, /carrier-sales, /tracking, /shipments/new all land back on /tms/load-review.
+- `devVerifyAE.mjs` 7/7 PASS (1m39). `devVerifyAH.mjs --only=AH05` 6/6 PASS (create form opens). `devVerifyAC2.mjs --only=shipments-active` 18 passed, 0 failed, 1 skipped.
+- `devVerifyAJ.mjs`: 18 PASS, 1 FAIL, 1 SKIPPED (AJ13 allowed) on the first run; AJ03 was a stale harness (see below); AJ03 re-run alone now PASS (8/8 with its gates).
+- `devVerifyAA.mjs` full (before harness fixes): 55 pass / 33 fail. Every fail triaged:
+  - 22 x "unstyled classes: tms-lifecycle-label" (all light/dark/phone walks): REAL cosmetic defect, the label span had no CSS rule. Fixed in tree (`kit.css` `.tms-lifecycle-label`), needs redeploy; the live site still reports it.
+  - 4 x stale AA harness vs sidebar: Carriers child row and Settings > Carrier Sales were missing from `AA_SIDEBAR`; "Step T card" check removed (card gone since Step AL); lifecycle-row check now ignores the per-division `/tms/shipments/intake?division=CODE` rows. Fixed in `scripts/lib/aaRoutes.mjs` and `scripts/devVerifyAA.mjs`; `--only=AA01-sidebar` PASS 7/7 afterwards.
+  - Remaining, NOT Step AV and not fixed: AA03 Load Review fixtures (AA03-list "100224 not under Looks ready" light/dark, drawer-ready, legacy-excluded 8969, move-to-billing / batch-refusal "No expense entered; Profit not available") and AA07-intake-edit-clears-review ("confirm shipmentType"). They come from later gates (Step AT per-carrier bills / expense gate, intake shipmentType confirmation) that the AA fixtures predate. Harness needs a refresh in a separate pass.
+  - AA05 personas (loadReview one tab, tms six tabs, compliance) all PASS light and dark.
+- AJ harness: AJ03 expected "Customer tracking is manual" but a new unconfirmed load now answers "Tracking mode not confirmed for this load" (Step feedback 9); harness accepts either and confirms the load's mode via SET_TRACKING_PREFS {confirmed:true} before the AGENT leg.
+
+Defects (files)
+- `src/features/tms/kit/kit.css`: `.tms-lifecycle-label` rule (redeploy).
+- `src/features/tms/shell.css`: at 1440 the strip lost Track/Review behind the 280px search (strip scrolls inside itself but gives no cue); `.tms-search` now `flex: 0 6 280px; min-width: 160px` so search gives way first. UNVERIFIED live (needs redeploy, then re-run `devVerifyAV.mjs` and look at strip-build-new-1440.png).
+
+Deviations from STEP_AV_LIFECYCLE_TABS.md
+- The post-login landing redirect and the breadcrumb pool now include the lifecycle tabs, so a single-grant user (e.g. loadReview only, with no sidebar rows) keeps a landing page and a breadcrumb; the sidebar alone no longer decides them.
+- Intake badge source: the Build tab's badge is the open Intake count (same source as the former sidebar Intake badge); Quote / Book / Track / Review badges reuse the existing shell badge counts.
+- Division sections in the sidebar (ASSETS etc.) keep their own Intake row (`?division=`); the brokerage rail itself is trimmed as specced.
+
+
+- **Step AV feedback 3 deployed (job 208, commit 024f6f8, dev):** Build / Intake opens on **All loads**; **By rev division** and **By customer** are sibling tabs with a sub-tab per division (Unassigned for rows with none) or per customer (most rows first, Not matched last), counts derived from the loaded queue (no extra reads), URL-backed (`?view=all|division|customer&group=<id>`; legacy `?division=` links still map). The last non-default view is remembered per user (`tms:intake:view:<email>`) but a bare URL always opens on All loads. Live: `devVerifyAV` 38 pass / 0 fail incl. AV13 (All selected by default, division and customer counts sum to the All count, URL reflects the view, reload keeps `?view=customer`). Not green: `devVerifyU --only=intake` (6 fail): the U05 steps look for the ZZ division fixture the full U run creates (absent when run with `--only`), and U07 compares the collapsed intake rail to the dashboard's expanded sidebar; neither was diagnosed beyond that, and a full U run was not done. Gate: tsc x3, eslint 0 warnings, 828 files / 10,287 tests, build.
+
+### 2026-11-06 - Step AV feedback 1-2 deployed (job 205)
+
+Dev only, commit 8f23058 (Amplify job 205). Live runs against dev, throwaway identities deleted and confirmed gone. Screenshots (1440x900 and 1280x800) in `Docs/tms-build/screenshots/av/` (index.txt there; stale strip shots replaced, `quote-tabs-1440`, `carriers-tabs-1440`, `sidebar-1280` added).
+
+Evidence
+- `node scripts/devVerifyAV.mjs`: 37/37 PASS. All six lifecycle tabs fully inside the viewport (Review not clipped) and the right tab lit on every route at 1440 and 1280; no horizontal page scroll; Alt+1..6; Load Review-only persona. New checks: Quote page tabs Quote inbox first (selected from the Quote lifecycle tab, /tms/rates/spot) then Quotes (/tms/rates), strip Quote badge = 2; Carriers tabs Find & Invite first (/tms/carriers/find) then Carrier list (/tms/carriers), sidebar one Carriers entry lit on /find, list and /tms/carriers/<id>, no Find & Invite child; Customers sidebar has no Follow-ups and /tms/customers/follow-ups lands on /tms/customers.
+- `devVerifyAA.mjs --only=AA01`: 14/14 PASS. `devVerifyAM.mjs --walk`: 85 pass, 0 fail, 2 skipped (opt-in). `devVerifyAD.mjs --read`: 32/32 PASS after a harness fix (AD03 clicked the removed `mcp-send-invite`; now `find-lookup-card-send`). `devVerifyAB.mjs --only=AB11`: spot inbox, org settings, customers and the Follow-ups redirect PASS; AB11-customer-card cannot run alone (its prospect fixture is made by AB10, which needs the full chain), not a Step AV defect.
+- `devVerifyAE.mjs --only=AE04`: 0/1, "quoted table lists PENDING (expected LOST)": quote-data assertion, not navigation, untouched by Step AV.
+- Harness: `scripts/devVerifyAV.mjs` extended (AV09-AV12, 1280 pass at 1280x800, new shots); `scripts/devVerifyAD.mjs` AD03 selector.
+
+Defects: none found in the app; nothing to redeploy.
+
+## 2026-11-05 - Step AT deployed (job 197): multiple carriers per shipment (Ryne feedback 15)
+
+Slices MC0..MC6 live on dev (commit bd28ffb). Dev live run `node scripts/devVerifyMC.mjs` (ZZ MC fixtures, temp admin identity, e-mail only to `ai4bcat+zz-mc-...@gmail.com`; bills voided, shipments voided, carriers INACTIVE, customer archived, identity deleted and confirmed gone). Screenshots: `Docs/tms-build/screenshots/at/`.
+
+- Two carriers on one load: `BOOK_CARRIER` carrier A (legs: stop 1) then `ADD_CARRIER` carrier B (legs: stop 2): two ACTIVE rows, two tagged LINEHAUL lines, both AWAITING_INVOICE, pointer on A, Load BOOKED, `LoadFinancials.costCents` 800.00.
+- Paid to: LUMPER $25 to A and DETENTION $50 to B (the customer's own $150 DETENTION is paid to nobody): A 625.00, B 250.00, margin 275.00 on gross. An untagged CARRIER line is refused with two live ("must name the carrier it is paid to").
+- Refusals: duplicate carrier without separate stops, `BOOK_CARRIER` on a covered load ("Remove a carrier first or use ADD_CARRIER"), 5th carrier ("A load can have at most 4 carriers"), own fleet beside outside carriers ("Own fleet cannot share a load with outside carriers"; Add carrier hidden on an own-fleet load).
+- Per-carrier tracking override: carrier B MANUAL, A inherits. Two rate cons sent: two tokens; each panel totals only its own lines (625.00 / 250.00). The untagged-line include in `RateConPanel` is fixed (untagged lines print on the sole or primary carrier only); the download name carries the carrier when two are live.
+- Load Review: side-by-side Carrier bills panel (one column per live carrier: rate, accessorials, total, rate con signed, bill state; margin line) and "Record all bills" (sequential `RECORD_BILL`, stops at the first error naming the carrier, idempotent re-run). The gate names the carrier: "Carrier rate missing: <carrier>", per-carrier unsigned rate con ("Missing document: RATE_CON — <carrier>"), per-carrier "bill not recorded". Both bills recorded (two distinct `cb:` ids, a second bill for the same carrier refused), then released with the Load Review marker: `arStatus UNBILLED`.
+- AP: two cards on the Carrier Pay tab plus a per-carrier bill-state strip; board Carrier column reads "2 carriers" with the hover list `name · rung · $cost`. Single-carrier shipment: no block chrome, no legs, gate sentences unchanged.
+- Fixed in tree after the live run (needs a redeploy): the Load Review drawer re-read the board row after "Record all bills", which remounted the drawer and wiped the per-carrier result list; it now re-reads only the review in place.
+
+Decision needed (Ryne): D2 own fleet beside outside carriers is refused in v1 (driver pay is a % of the whole `Load.rate`, driver on every stop); allowing it needs a pay-base field (`LoadCarrier.legRevenueCents`), a settlement change and his revenue-split rule. D3 bill-before-release kept: bills are recorded by a person ("Record all bills" is one click, not automatic) and release is refused until every carrier has a rate, a recorded bill and a signed rate con. D4 every carrier's rate con must be signed (a signed one never waives another's); single-carrier wording unchanged. D7 cap is 4 carriers per load.
+
+## 2026-11-05 - Step AU deployed (job 197): Documents "Generate" row, BOL generation (Ryne feedback 16)
+
+Dev live run `node scripts/devVerifyAU.mjs`: 11/11 PASS (ZZ AU fixtures, temp admin identity, e-mail only to ai4bcat@gmail.com; all shipments voided, documents voided, customers/locations archived, carrier INACTIVE, identity deleted). Screenshots (1440, plus a 1280 row shot): `Docs/tms-build/screenshots/au/`.
+
+- Documents card Generate row: Generate BOL (primary), Rate Con, Send Info. Create mode: all disabled with a reason. After Create the shipment is DRAFT and Generate BOL is enabled; an unsaved edit disables it with "Save first"; Save re-enables it. Rate Con / Send Info stay disabled with "Cover a carrier first" until a carrier is covered. `FormCtx.dirty` added.
+- BolDialog: master and per-stop BOLs on a 2-delivery fixture (distinct `stopId`, master untouched), include rates No/Yes, PDF read back with pdftotext (PRO, refs, signature blocks, no dollar amounts on the plain BOL).
+- Stored BOL: audience ALL, source GENERATED, v1; regenerate gives v2 ACTIVE and v1 SUPERSEDED with `supersedesId`; "Show superseded" lists v1. Download: presigned `%PDF-`, size = row `sizeBytes` = Content-Length.
+- Rated BOL: stored audience CUSTOMER, does not supersede the plain chain, EMAIL_BOL refuses it, the dialog shows the customer-copy hint instead of the e-mail panel.
+- E-mail: picker, nothing preselected, sent only to ai4bcat@gmail.com. A ShipmentMessage row (OUT, OTHER, documentIds, `[ref]` subject) is written. Dev SES denies `ses:SendRawEmail`, so the row ends NOT_SENT with a download link (same as rate con on dev).
+- Checklist: BOL row ticks "generated v1"; required for customer A ("Signed BOL"), required for customer B via the org default (an empty customer list falls back to the org default, which includes BOL; the optional label shows only when neither requires it). Stale chip ("BOL vN predates the last edit: regenerate") appears after editing a saved shipment.
+- Not live-run: opening the Rate Con / Send Info dialogs (needs a covered carrier; unit-tested), seal / INTERNAL-ref / hazmat-item read-back.
+
+**Decision needed (Ryne):**
+1. D5: a BOL may be generated on a DRAFT shipment (before Submit order). Built as allowed; say if it should wait for Submit.
+2. A generated, unsigned BOL satisfies the "BOL required" release gate, including for customers who list "Signed BOL" (risk R2). Unchanged; needs a call.
+3. Multi-carrier BOL pairing (AU5, per-carrier BOL scope and Rate Con carrier menu) is NOT built yet.
+
+## 2026-11-05 - Step AR deployed (job 197): feedback 3-19 (More strip, roles trim, Activity, header strip, Shipment type, one Division field, per-load tracking mode, symmetrical grid, Customer ref, delivery timeline)
+
+- Feedback 3: More strip sits under Carrier. Feedback 4: Roles shows Sales Representative, Service Representative, Dispatcher Assigned only; Tariff, Quote and Dispatcher Actual stay in the model, mapping, validation and draft (values round-trip untouched on save; quote conversion still links the Quote row on its own path).
+- Feedback 5: rail ACTIVITY block between Required and Roles. Stage chip + compact stepper from ONE pure mapper (`src/lib/shipmentStage.ts`, built on `boardStatusOf`, `isReleasedToInvoicing` and `ArStatus`; Voided and Canceled are red terminals; create shows "Draft, not created yet"). Last 8 AuditLog rows, newest first (5 shown, "Show more" for the rest): relative time (`auditActivity.ts`), actor (`auditActors.ts`: person display name from the UserProfile cache, `AI agent · <name>` for the Lambdas' automation actors, `System` for scheduled jobs; the shared `system@bcatcorp.com` caller is named from the audit action), plain-language action table from the real Lambda action strings, first changed field as `field: value` (old value on hover; bodies / tokens / secrets hidden, PII keys masked). Read through `listAuditLogsFor` (the `(entityType, entityId)` index, one aliased request for shipment + order + loads + load carriers + intake item), cached 15 s via `listCache`, re-read when a save hands the form a new bundle. "Full history" opens `/tms/brokerage/audit?entity=<shipment id>` (AuditPage now reads `?entity=`).
+- Feedback 6/7: header strip holds Division, the Customer type-ahead and a Bill To chip (name · terms · factored · available credit, amber on credit hold) whose Details chevron drops the full Bill To panel (collapsed by default; detail + a Customer contact column with Ref #, contact, phone, two e-mails); focusing a field inside it (issue link, rail) opens it. Customer and Bill To left the main column: Freight, Route, Rates, Rate history, Carrier, More strip, Tracking, Documents (numbered 1-7). Mode left the header: **Shipment type** is the required first field of Freight (25 types from `src/lib/shipmentTypes.ts`, default per division, picking one fills default equipment / chips only where still empty). `Order.mode` is derived (`legacyModeOf`), the key is stored in `specialRequirements.form.shipmentType`; orders without it show the type their mode implies. No schema or backend change.
+- Feedback 8: Division and Revenue Type were the same value (`ship.revDivision` / `revSubdivision`; the Freight select already wrote both, the header pill only the top level). One required field, **Division**, is now the first field of Freight (hierarchical picker over the active ownership divisions, "Revenue Type" kept as its help text); the header Division pill and the second select are gone. Rail row `Division` replaces `Revenue type`. Mapping, SET_REV_TAG pipeline, Carrier card variant and the Shipment type default (only while the type is untouched) read the same values as before; no backend change.
+- Feedback 9: tracking mode is chosen PER LOAD at booking. One shared `TrackingModeControl` (`src/features/shipments/trackingModeControl/`): Mode Automated / Manual / None, and for Automated the method (SMS to driver / e-mail thread / both), check-call cadence (hours) and tracking assignee. It writes the EXISTING per-load fields through the existing actions: `SET_TRACKING_PREFS` (`Shipment.trackingPrefs`, now also `mode: NONE` and a server-stamped `confirmedAt` / `confirmedBy` via `confirmed: true`; the client can never send those two keys), `SAVE_CHECK_CALL_PLAN` for the cadence, `ASSIGN_TRACKER` for the assignee. No schema change. The customer default is only the pre-selected suggestion (greyed "Suggested") until Confirm. `effectiveTrackingPrefs` now returns `confirmed`; `allowsAutoRequests` / `autoRequestBlock` stop automation (check-call agent and POD automation) for MANUAL, NONE and an UNCONFIRMED load. Legacy rule (code + tests): a shipment created before `TRACKING_CONFIRMATION_STARTS_AT` (2026-11-06T00:00Z; adjust at deploy), or with a pinned mode, or with no `createdAt`, counts as confirmed, so live tracking is not silenced. A booked, unconfirmed load shows the amber "Tracking mode not set" chip on the Shipments board status cell, the Load Tracking status cell and drawer prefs row, the carrier ladder card and the form card; the rate con is never blocked. Carrier and Tracking merged into one card, "Carrier & Tracking" (key `carrier`, testids kept): carrier block, the control (read-only until a carrier is booked), then the tracking read; before booking it says "Tracking is chosen when the carrier is booked" with the suggestion greyed. The Tracking card is gone: Freight, Route, Rates, Rate history, Carrier & Tracking, More strip, Documents (1-6). AMUI wires the same control into the Carrier Sales cover step.
+- Feedback 10 (symmetry): ONE shared field grid, `src/features/shipments/form/fieldGrid/` (`FieldGrid`, `Field` with `span` 1-12 and an optional `narrow` span, pure `rowsOf` / `spread` / `narrowSpanOf`). `LField` renders through it, so every card, the header strip, the Bill To panel and the rail roles use the same rhythm: one-line 16 px label (11 px caps, never wraps) -> 32 px control -> nothing under it. Helper copy moved into an ⓘ tooltip on the label plus a `title` (the text stays in the DOM, visually hidden); an error is a red outline plus the tooltip (text visually hidden, `role=alert`); the only element under a control is the fixed-height counter on the three notes textareas. Parentheticals are gone from labels and options ("Truckload", "Division"); labels shortened (Billable wt, Declared value, Freight class, Special instructions). Chips wrap with 8 px gaps; Calculate totals / Disable mileage are one right-aligned 32 px toolbar. Freight rows at 1440: [Division 3, Shipment type 3, Equipment 3, Weight 3] / [Billable wt 3, Pieces 3, Footage 3, Freight class 3] / [Description 9, Declared value 3] / chips / toolbar. Route stop cards, Rates (spans from `spread(n)` so hours / pay % keep rows flush), Carrier & Tracking, More tabs, Roles, Bill To panel and the header strip are on it. Breakpoint rule: below 760 px of card width a 2-4 span becomes a half and 6+ fills the row (or the field's own `narrow`), via a container query; `fieldGrid.test.tsx` runs `rowsOf` on the real DOM of each card at both widths and asserts the rhythm.
+- Feedback 11: a Customer ref (PO) input sits in the header strip right after Customer and before the Bill To chip. It is the same `customer.refNo` value (testid `f-customer-refNo`, REF_PO mapping untouched), removed from Freight (and from the Bill To panel). Green and blocking at Create when the customer demands a PO: its `requiredReferences` list a PO, or a review-requirements list somebody SET (the customer's own, else the org's) includes `referenceNumber` (`customerRef.ts`); the rail row is "Customer ref" and focuses the header input. The built-in default list alone does not count, or every customer's PO would become mandatory.
+- Feedback 12: delivery timeline in the header strip (`DeliveryTimeline.tsx`, pure `src/lib/deliveryPhase.ts`): On site (pickup) / Departed / In transit / On site (delivery) / Delivered, reached dots and segments green, truck on the line at the current phase, amber for late or an open exception (reason on hover), struck through when voided, "Not dispatched" / "Draft" parked states, `role=img` summary ("In transit, stop 2 of 4"). Evidence order: delivered, then the stop's `arrivedAt` / `departedAt`, then the shipment status. Also an optional Shipments board column "Delivery" (not in the default layout; the row's own stop projection, no new reads).
+- **Live run on job 197** (Amplify job 197, commit bd28ffb; `node scripts/devVerifyAH.mjs`, ZZ fixtures, temp admin and page-tms identities, everything voided / archived / deleted and confirmed): **44 PASS / 0 FAIL** (AH01-AH21 and AR01-AR18, including AR12 Activity / Roles / Shipment type, AR14 grid symmetry and delivery timeline, AR15 3-stop miles, AR16 inline new location, AR17 inline new customer, AR18 action bar). Other harnesses on the same build: `devVerifyAQ --walk` **31 / 0**, `devQaFlows --only=S2` **17 PASS / 0 FAIL / 1 PARTIAL** (S2.07, server rule, unchanged), `qaUiCreate.mjs` **all PASS except one FAIL**: "auto miles from the stop addresses" (it picks two real prod-refreshed locations, which carry no coordinates, and dev's geocoder does not answer: miles stay 0; AH17 / AR15 prove auto miles on ZZ locations with coordinates). The job 196 failures AR12, AR14, AR15, AR17 were all diagnosed from the live DOM:
+  - AR12 (Activity rows without `field: value`) and AR14 (rows not flush in Roles / Miles grid): both passed on job 197, so the two product fixes made after job 196 (`auditDetail` AWSJSON-string unwrap in `src/lib/auditActivity.ts`; Roles block grid in `RolesSection.tsx`, which `.ship-body` had turned into a flex column) were the live causes. The live run reads 3 activity rows after a save with the actor's display name and `field: value`, and flush rows in Roles and Miles at 1440 and 1280.
+  - AR15: harness defects, not product. `fillRequired` re-typed the pickup name that an earlier step had already picked; an unchanged value fires no change, so the suggestion list never opens (the step timed out on `f-pickup-name-option`); it now skips the pick when the field already holds the name. Then the Joliet middle stop lies on the Chicago-Dallas line, so the detour rounded to the same miles; the middle stop is Waco now (966 mi direct, 1168 mi with the middle stop, both written to the load and to `form.ship.truckMiles`).
+  - AR17: harness defects, not product. The unique name `ZZ AR Customer <ts>` shares three of four words with the fixture `ZZ AH Customer <ts>`, the picker's fuzzy match (Jaccard 0.6 >= 0.4) kept offering that customer, so the `+ Add` row (shown only when nothing matches) never appeared; the step now types one unique token (`ZZ ARNewCo<ts>`). Second: the header input already shows the typed text while the save runs, so the step read the Customer table before the row existed; it now waits for the dialog to close and polls for the row. Result: 1 Customer row created, selected in the header, archived in cleanup.
+  - Earlier harness fixes (job 196 run, kept): the `+ Add as a new customer` row is excluded from the customer option selector in AH and qaUiCreate; AR13 reads the upper-cased title; AR16 types city / state when the geocoder does not answer.
+  - Real product defects found live on job 197: none new. No `src/` file was changed in this pass; the fixes above are in `scripts/devVerifyAH.mjs` only. The job 196 tree fixes (`auditActivity.ts`, `RolesSection.tsx`) are deployed in job 197 and proven live.
+- Screenshots: fresh `ar-*.png` in `Docs/tms-build/aljex-create/` from the job 197 run at 1440 and 1280 (create brokered, create Ivan Cartage with driver, edit, Carrier & Tracking card, rate history in the rail, action bar, inline add location, 3-stop Miles, delivery timeline header, grids per card, first screens at 1440x900 and 1280x800, sheet open / closed at 1100); the three new names (`ar-inline-add-location-1440`, `ar-three-stop-miles-1440`, `ar-delivery-timeline-1440`) are written by AR16, AR15 and AR14. `DEMO_WALKTHROUGH.md` has the new create-shipment section (A2) with click paths.
+- Proof earlier: vitest (src/features/shipments, src/features/audit, src/lib: 350 files / 4596 tests), tsc and eslint clean; `node scripts/devVerifyAH.mjs --inventory` passes (gates 1-5).
+- Deviations: Delivered-vs-Load Review follows `loadReviewPushedAt` / released-to-billing (a delivered shipment nobody pushed still reads Delivered); tracking method is the existing E-mail / SMS / Both (tracking link, Motive and carrier check calls are not separate methods in the model, so they are not offered); the "auto e-mail / text toggles" are that method, since per-load storage for the Step V policy switches does not exist; delivery timeline limits: no geofence derivation (no existing helper), a stop caption only for three or more stops, status-only loads carry no stop caption, and a board row has no tracking ETA; feedback 13-18 deviations: no live run yet (AR15-AR17 are new); the rail's Rate history reuses the card body with CSS compaction rather than a rebuilt 5-row table, so its DAT block shows the card's own lines; the unmatched-customer chip reads "not matched" (the label already says Customer); intake-prefill of a stop opens the add form only after the locations list has loaded; feedback 19: the bar is in flow rather than `position: fixed` (a fixed full-width bar would cover the shell sidebar, and in flow it needs no padding var); `--tms-actionbar-h` is defined on the form; the rail no longer pins, so AR02's pinned-rail check became an action-bar-stays-put check; the intake extractor writes no audit rows, so a pre-filled create shows one synthetic "extracted N fields from the e-mail" entry from the intake row; Full history filters by the shipment id only (the audit lookup is per id); auto-transport "pieces = vehicle count" is not implemented (no vehicle count exists on the form). Deviations from Ryne's feedback 4-19, as built: **rate history** (feedback 17) reuses the existing Rate history card body, mounted collapsible in the rail rather than as its own main-column card (so the lane history, 30 / 90 day averages and the DAT block are the same component and data, DAT stub shows "DAT not connected" with no numbers); **delivery caption rules** (feedback 12): "Draft" before the shipment exists, "Not dispatched" parked, an exception reason on hover, a stop caption only for three or more stops, none for status-only loads, no geofence evidence; **action bar placement** (feedback 19): one 48 px bar in flow at the foot of the form (visible without scrolling at 1440x900 and 1280x800, at the foot after scrolling, overlapping neither Roles nor the last card), the rail carries no actions footer; a stop with no directory match offers the inline **+ Add as a new location** form with a **Use once** option, an unknown customer the **+ Add as a new customer** directory dialog (both only for users allowed to create directory records).
+- Zip autofill fix (feedback 14, after job 197): root cause on dev: the inline add-location form called `tmsGeocode GEOCODE` with the bare zip and swallowed the error; the dev `tms-geocode` Lambda answers `Missing server configuration: GOOGLE_MAPS_API_KEY is not set`. Its env var names exist (`GOOGLE_MAPS_API_KEY`, `GEOCODE_TOKEN_SECRET`, `AMPLIFY_SSM_ENV_CONFIG`) but the SSM paths `/amplify/d3dejqzs77khq6/dev-branch-f0946a5a1f/` and `/amplify/shared/d3dejqzs77khq6/` hold neither secret (only `VITE_GOOGLE_MAPS_API_KEY` is shared), so dev has no server Maps key and no geocode token secret (no Save pin and no Distance Matrix on dev until someone sets them; nothing was written). Fix needs no key: offline US zip table `src/lib/usZipCities.json` (GeoNames postal codes, CC BY 4.0, 40,979 zips, run-length encoded, lazy-loaded chunk) read by `src/lib/zipLookup.ts`; hook `src/hooks/useZipAutofill.ts` fills only blank city / state (re-checked when the lookup lands; keyed on the zip so clearing a city does not refill; short / unknown / non-US zip does nothing; Save never blocked). Wired into the stop-card `NewLocationForm`, the directory `LocationForm` (Locations page and create dialog) and `CustomerForm` billing address. Tests: `zipLookup.test.ts`, `useZipAutofill.test.tsx`; `StopCard.newLocation.test.tsx` no longer mocks the geocoder for autofill. AR16 now types 60435 and asserts Joliet, IL (typed-city fallback removed). Needs a frontend deploy to be seen live; no Lambda change. Orphan customer `ZZ ARNewCo1793943589080` archived on dev (active=false re-read).
+  - Deployed as Amplify job 199 (commit e97aad1, dev). Live: `node scripts/devVerifyAH.mjs --only=AR16` passes (zip 60435 fills Joliet, IL with no typing; Save location creates one row; offered on the consignee stop) on 2 of 3 runs; the one failing run missed the consignee-stop reuse check (a timing miss, not the zip fill). Orphan customer `ZZ ARNewCo1793943589080` archived on dev. Dev still lacks `GOOGLE_MAPS_API_KEY` / `GEOCODE_TOKEN_SECRET` values (Ryne: only needed for geocoding/miles via Distance Matrix; the offline zip table does not need them). No cutover item was started.
+
+## 2026-11-05 - Step AR deployed (job 182)
+
+- Create / edit shipment is the Step AR layout on dev (Amplify job 182, commit fe0ad15; first cut 179, nine-card cut 180, fixes 181/182). Header (title, Division and Mode pills, Draft chip, read-only PRO preview), **nine numbered cards** in build order, an Instructions / References / Items / Notes strip, and the sticky 360 px summary rail (bottom sheet under 1280 px). Feedback 2 (Ryne) made the structure nine cards instead of five: **Bill To** (own read-only card), **Rate history** (what we ran the lane for + DAT RateView, stub shows "DAT not connected" and no numbers), **Tracking** (read-only pull from Load Tracking; planned setup on create; Updates feed in edit mode, replaces the AH Check Calls preview) and **Documents** (own card, usable on create: attachments held in memory and written on Create, Public / Private, Required-for-release checklist). The More strip lost Documents, Rate history, Check calls and Updates.
+- Evidence: `node scripts/devVerifyAH.mjs` on job 182 = **37 PASS / 0 FAIL** (AH01-AH21 rewritten for the cards + AR01-AR11: Ctrl/Cmd+Enter and Ctrl+S, Esc, rail click-to-focus, rail N / M equals the Create gate, sticky rail, bottom sheet at 1100, route add / reorder / delete+undo, requirement chips reveal sub-fields, Ivan Cartage roster picker, no horizontal scroll at 1280 / 1440, first screen at 1440x900, Intake board and board buttons, documents on create, Bill To + Rate history cards). `devVerifyAQ --walk` 31/31, `devQaFlows --only=S2` 17 PASS / 1 PARTIAL (S2.07, server rule, unchanged), `qaUiCreate.mjs` rewritten for the nine cards. Targeted vitest `src/features/shipments src/features/tms` 1168 pass, tsc app clean, eslint 0 warnings. Screenshots: `Docs/tms-build/aljex-create/ar-*.png` (create brokered and Ivan Cartage with driver at 1440 and 1280, edit 1440 / 1280, first screen, sheet, rail, route, documents, Bill To, rate history); `DEMO_WALKTHROUGH.md` steps 3-4 refreshed.
+- Real defects found live and fixed: the type-ahead let a stale recent location / customer outrank the exact name typed (wrong stop, same-city lane, no miles; `rankWithRecents`); a rail row or issue link aimed at the Customer type-ahead group focused nothing; stop address fields were hidden for e-mail-prefilled stops (chips vanished); autosave ran every 0.8 s instead of 10 s; the Ivan Cartage division card showed the generic carrier block instead of the roster driver + truck picker; Create fell below the first screen at 1440x900 (rail height, draft banners, Bill To chips, card gaps).
+- Deviations: no duplicate breadcrumb in the header (the shell's top bar already shows Shipments / New shipment); PRO preview is prefix + the settings counter (the number is minted on Create); transit estimate = ceil(customer miles / 500) days, minimum 1 (a rule of thumb, not a carrier ETA); "Cover" gating is unchanged (needs a saved SOURCING truckload) but Cover now opens the Step AM ladder prefilled with the carrier picked on the form and the carrier rate typed in Rates; Documents attached on create live in memory only (not in the browser draft); Customer Hours was removed from the form; Revenue Type stays in Freight while the header Division pill edits the same top-level `revDivision`.
+- Known rough edges: the Intake board harness stages its row as Unrouted, so it clicks that tab; one ZZ location from an aborted harness run ("ZZ AH Shipper 1793902108821") may remain active in dev (the harness now uses a unique street per run); `scripts/qaUiCreate.mjs` is read-only and still uses the real Locations board for its miles check.
+- Dead code removed: the AH CustomerSection, StopSection, PicksAndStopsSection, ShippingRequirementsSection, HistoricalRatesSection and BillToBlock sections and their tests (coverage re-homed to the cards' tests). Needs no further deploy.
+
+## 2026-11-05 - Step AS deployed (job 179)
+
+- Deployed with Step AR as Amplify job 179 (commit 736c752, dev). `node scripts/devVerifyAS.mjs --read`: 15 PASS / 0 FAIL, screenshots in `Docs/tms-build/screenshots/as/` (AS01, AS02): a directory carrier (ACTIVE, packet ACCEPTABLE) leads with `Set up with us · ACTIVE` + `Packet complete`; MC1000003 (not in the dev directory) shows `Not in directory`, 1 MCP e-mail listed, Send setup packet enabled, the recipient checklist all ticked, never confirmed.
+- Spec deviation found live: **MC 274623 (Ivan Cartage) is not in the dev directory** (no carrier name containing "artage" nor MC 274623 exists), so the harness's in-directory case reads any real dev directory carrier with an MC instead. No product bug; harness fixed.
+- Live invitation (`--live-invite`, once): MC 274623, MCP returned 1 address (MCP_APPROVED, not ai4bcat), so the default list was NOT used and only `ai4bcat@gmail.com` was named; nothing went to MCP's own address. MCP HTTP 200, sent. `ensureCarrier` made the PENDING Ivan Cartage row (mcpStatus INVITED). Read back through the API: carrier row stamped (invitedTo only ai4bcat), audit `MCP_SEND_INVITE` on the carrier (emails only ai4bcat), one thread note to ai4bcat only. Details in `EMAIL_LIVE_TEST.md`.
+- Honest gaps: the harness's own post-send read-back crashed after the send (GraphQL variable type `ID!` vs `String!`, and an audit scan that only looked at the first 1000 rows); both fixed in `devVerifyAS.mjs`, not re-run (a second invitation is not allowed), the read-back was done by hand instead. The default-list send to all MCP addresses is proven by unit tests only. Side effect on dev: a PENDING Ivan Cartage carrier row and one thread note on the first listed dev shipment.
+- Demo screenshots refreshed at 1440x900, e-mails and phones masked (`scripts/devDemoAS.mjs`): `08-carrier-sales-needs-cover`, `08a-find-and-invite-lookup-read-only`, `08b-cover-dialog-lookup` in `screenshots/demo/` with updated `index.txt` captions.
+- Needs no further deploy.
+
+## 2026-11-05 - Step AS built (not deployed): Carrier Sales MC lookup, directory standing, setup packet to MCP's addresses
+
+- Shared **CarrierLookupCard** (`src/features/carriers/lookup/`, decisions in pure `lookupModel.ts`): first line `Set up with us · <STATUS>` / `Not in directory`, packet standing (`Packet complete` / `Packet invited <date>` / `No packet` / `Stub, no MCP call`), MCP vetting badges (expired or cancelled cover, inactive authority, red risk, non-coop, fraud), one green line `Active with us — ready to cover` (status ACTIVE and packet complete), directory contacts we hold, MCP's name / DBA / address / phone / insurance / safety / risk and the e-mails MCP returns. Actions: **Send setup packet** (enabled whenever MCP is live and returns at least one e-mail; becomes **Re-send packet** when INVITED over 3 days; recipient checklist defaulted to ALL MCP addresses, additive hand-typed address, send disabled with nothing ticked), **Cover with this carrier**, **Open carrier** / **Add to directory** (creates the Pending row without inviting); every disabled action has a reason title (stub, no MCP record, no e-mail, Do not use, status).
+- Surfaces: new Carrier lookup box on Carrier Sales (`CarrierLookup.tsx` + `CarrierLookupPanel.tsx`, mounted on every tab), Offers hub (an offer's Send setup packet opens the card; `setup()` and the `q.carrierEmail` requirement are gone), CoverCarrierDialog (card above the directory block; `initialQuery` prop; MCP preview now read for ACTIVE carriers too, gating nothing), CarrierLadderCard, FindInvitePage (card replaces the Already-in-directory alert and the two action buttons). `InviteDialog` is now the recipient checklist (a modal confirmation, not a popover).
+- MCP e-mails: `buildReviewCard` adds `emails: [{address, source: MCP_APPROVED | MCP_PROFILE | MCP_CONTACT, label}]` (approved e-mails, FMCSA / profile e-mail, dispatch / claims / owner contacts, the carrier's own remit e-mail; lower-cased, deduped; stub = none); merge keeps both. `approvedEmails` kept (now keeps the described duplicate).
+- `MCP_SEND_INVITE` (`mcpFind.ts`): accepts `emails[]` (plus `email`, additive), default = MCP's preview list, every address through `validateInviteEmail`, an empty explicit list throws before any call. **The Integration Guide's EmailPacketInvitation takes ONE `carrierEmail` per call (section 1.1.1), so one call per address.** One MCP rejection does not undo the others (reported in `failed`, not logged as invited). All sent addresses logged on the Carrier row (`mcpInvitedTo`), the audit (`emails`) and the shipment thread. `apiClient.mcpSendInvite` input: `email?`, `emails?`; result: `emails`, `failed`. Stub: nothing sent, `emails: []`.
+- Tests: `lookupModel.test.ts` (directory active / inactive / pending / none x packet complete / invited / none / stub matrix, send / cover enablement and reasons, 3-day re-send, default list, unticked, additive typed, empty), `mcpFind.test.ts` (default list, unticked, additive, empty list, no MCP e-mail, invalid, partial failure), `mcpReview.test.ts` (emails), `CarrierLookup.test.tsx`, `OffersHub.test.tsx`, FindInvite and Cover render tests rewritten for the card. `devVerifyAS.mjs` + `scripts/lib/asLive.mjs` (guards, tested): default run is inventory; `--read` is read-only (never confirms, never calls MCP_SEND_INVITE, masks e-mails / phones before screenshots to `Docs/tms-build/screenshots/as/`); `--live-invite` is the one guarded real invitation (MC 274623, ai4bcat only).
+- Not claimed: nothing deployed, `--read` and `--live-invite` not run (need the dev deploy). `tms-shipment-actions` `SEND_SETUP_PACKET` and `apiClient.sendSetupPacket` are untouched (still used by the shipment Carrier Offers section; single e-mail). Directory line shows the carrier's total `loadCount`, not loads in 12 months (no such field on Carrier).
+- Needs: frontend + `tms-directory-actions` deploy (no schema, env or IAM change).
+
+## 2026-11-05 - Demo state re-verified after P reset
+
+- devVerifyP's reset only renumbered the seeded demo shipments (now 99865-99880; was 99655-99670). Walkthrough records 99671, 99672, invoice 20006 and the MOVED intake item are intact, so no re-run was needed; walkthrough numbers updated. I re-ran RESET_DEMO_DATA with real staff ids; the demo staff accounts (created 10-30) were left, since the seed and walkthrough depend on them: nothing was deleted.
+- Spot inbox (job 175): the caller error is fixed; captured connect-simulated, suggested response, Copy response, Open in Gmail, rate intelligence, Mark sent/lost. 64 screenshots.
+
+## 2026-11-05 - Load Review is the only gate (READY_TO_INVOICE closed) (dev tree edits; not committed or deployed by this entry)
+
+- Rule (Ryne): release to billing happens ONLY in Load Review. Closed the last door: single-shipment `READY_TO_INVOICE` (ArCard "Ready to invoice", Documents-tab strip, AR page "Release to billing") released without Load Review.
+- Server (`tms-shipment-actions`): `READY_TO_INVOICE` without `review: { source: 'LOAD_REVIEW' }` and a hand-set `SET_AR_STATUS` UNBILLED are refused with `Release happens in Load Review: push this shipment to Load Review and release it there`. The release gate still speaks first (a load that is not ready hears exactly why). Exempt: imported Aljex history (`Shipment.legacyImported`, set only by the import engine); already-released/invoiced orders never reach the check (they stop at the `already UNBILLED/UNPAID` refusal); no ADMIN data-fix exists and none was added. The batch path was already marker-only.
+- `tms-tracking-actions`: an accepted POD (`REVIEW_SHIPMENT_POD`, inbound auto-review) used to call `READY_TO_INVOICE`; it now only accepts the document. The load is in the Load Review queue once delivered. `readyForBilling` dep removed from `podReview.ts`.
+- UI: new `PushToLoadReview` (the same `PUSH_TO_LOAD_REVIEW`, per-customer requirements, per-row reasons, then "Open in Load Review") on ArCard and the Documents strip; AR "Ready for billing" tab rows are an "Open in Load Review" link and `useReadyForBilling` no longer releases; `ReleaseGateCard` points at Load Review. ArCard keeps "Ready to invoice" only for imported history.
+- Tests: handler tests re-pointed (success paths carry the marker; added refused-without-marker for DISPATCHER and ADMIN, marker-less refusal still lists the gate first, legacy exempt for READY_TO_INVOICE and SET_AR_STATUS); POD-review test now asserts acceptance does not release; ArCard / DocumentsSection / ArPage tests assert no Ready-to-invoice button and Push to Load Review shows reasons. Harnesses: `devVerifyAr/Commissions/Email/P/R2/StepR` success paths send the marker (not re-run), `devVerifyAp` static checks, QA flow S1.11 asserts the refusal.
+- Also recorded in `QA_FLOWS_SWEEP.md`: own-fleet dispatch needing only the driver is accepted (the roster driver carries truck #/trailer #/phone); no code change.
+- Needs: frontend + `tms-shipment-actions` + `tms-tracking-actions` deploy (no schema, env or IAM change). Not claimed: no deploy was made; the harness changes were not run against dev.
+
+## 2026-11-05 - Flows QA sweep (job 174) (dev tree edits; not committed or deployed by this entry)
+
+- Checklist: `Docs/tms-build/QA_FLOWS_SWEEP.md`; harness `node scripts/devQaFlows.mjs [--only=S1..S7]` (`scripts/lib/qaFlows/`), dev only, ZZ fixtures and 5 temporary identities (admin, page-loads, page-loadReview only, page-tms, none) all removed and proven gone. Every behaviour rule of Ryne's 2026-11-03/04 feedback was driven through the deployed routers and the browser on job 174: Load Review sole release gate and Push (cap 9, per-customer lists, chips), Ivan Cartage driver pickers and server refusals, trucks/trailers Active/Inactive, read-only spot quoter (scope + source scan, Copy response clipboard, Open in Gmail URL, outcomes, Mark won/lost, Push to DAT STUB), carrier rules (MCP-only, ACTIVE gate, rate con, cover rules), driver pay banner / Vendors / invoice 20000+ / numeric PRO / legacy flag, and an auth sweep of 78 nav routes (0 auth errors; about 5,165 requests carried the ACCESS token, 1 `/hours` Function-URL call uses the ID token).
+- Real defects: (1) `TrucksPage` DetailPanel white-screened the whole app on a unit with no `ownership` (job 174 bundle; fixed with a null guard + regression test; **needs a frontend deploy**). (2) `tms-spot-quoter/resource.ts` header still said it "creates REPLY DRAFTS" (comment only; both `measureDataTemplate` guards exit 0).
+- Open decisions for Ryne: single `READY_TO_INVOICE` (ArCard, Documents tab, AR page "Release to billing") still releases outside Load Review; own-fleet dispatch needs only the driver, not truck #/trailer #/phone. Not changed.
+- Not claimed: no deploy was made; a successful end-to-end Load Review release and an EXPIRED outcome on a live quote were not re-run on 174 (unit-tested; demo job 171).
+
+## 2026-11-05 - Suite cleanup (dev tree edits; not committed or deployed by this entry)
+
+- Before (clean tree at 423d4bc): tsc app/root/amplify 0 errors; vitest 781 files / 9799 tests passed but 1 unhandled rejection (FactoringPage NoCredentials via real `useDirectory`) on all 3 runs, and ~1,050 stderr/stdout noise blocks across 156 files (act warnings, 'Amplify has not been configured', recharts 0x0, Radix DialogTitle/Description, handler console logs); eslint 3 warnings (`useReadyForBilling` exhaustive-deps, `ScanPage` handleSubmit deps, `DriverDrawer` react-hook-form `watch` incompatible-library). The LoadDriverDocs rules-of-hooks error and the other earlier flakes (AuthContext, PaperworkPage, driver-app-api, ShippingRequirementsSection) did not reproduce on this tree.
+- After: `eslint . --max-warnings=0` 0 problems; tsc x3 0 errors; `npm run build` ok; `measureDataTemplate --branch dev` and `--prod-shape` exit 0 (no backend/resource change); vitest 781 files / 9800 tests, 0 failures, 0 unhandled errors, 0 stderr/stdout blocks, in default TZ, `TZ=UTC`, `TZ=America/Chicago`, `TZ=America/Los_Angeles` (default reporter with `AGENT= CI=` to expose console output); amplify_outputs.json untouched.
+- Product fixes: `useReadyForBilling` reads ids from the memoised `rowIds`; `ScanPage` deps; `DriverDrawer` uses `useWatch`, derives photo state during render, `randomDriverColor` at module level (React Compiler purity); DialogTitle/Description added in `LoadDrawer`, `NewShipmentDialog`, `DriverDocUploadDialog`, `TruckPicker`, `ReportIssue`; `OwnerOperatorPayPage` DriverAppLink span (div-in-p).
+- Test fixes (~110 files, no global suppression, no skips): `aws-amplify/data`/apiClient/clients mocked instead of real Amplify, async renders/clicks settled in `act`, recharts given fixed size, expected console output spied and asserted, missing mock exports added (e.g. `fetchPaperwork`, `createApptTask`), FactoringPage mocks `useDirectory`. Two OwnerOperatorPay tests were passing by accident (unconfigured POD lookup) and now give the fixture a POD.
+
+## 2026-11-05 - UI QA sweep (job 174) (dev tree edits; not committed or deployed by this entry)
+
+- Checklist: `Docs/tms-build/QA_UI_SWEEP.md`; harnesses `scripts/qaUiSweep.mjs` and `scripts/qaUiCreate.mjs` (read-only), plus `devVerifyAC2.mjs` re-run: 114 pass, 0 fail, 4 skip. Screenshots `Docs/tms-build/screenshots/qa/`.
+- PASS on job 174: no side filter panels, icon rail, header filters, sort, sticky header/column, two-pane Columns dialog (36px rows, sticky groups, search, select-all, grip/width/pin/remove, Reset widths), widths >= 72 px, collapsible KPI strip, 100-row page with virtualisation, default columns fit 1440 and 1920 on all six boards, popovers inside the window; tracking drawer (inline prefs, collapsible map, two panes, 5 check calls, ends at 892 of 900 px); ONE Load Tracking row without children at owner/admin, page-loads-only and viewer roles, Feedback for all; 26 old URLs; dashboard KPIs 1.7-2.4 s cold with 'as of'; New dashboard only with the claim; dark and 390 px: no horizontal page overflow on 6 pages.
+- Defects fixed in the tree (need a frontend deploy): Shipments rows were 41 px in both densities because the row-action icon button was 40 px tall (`dense-grid.css`); an unmeasurable route now says "Could not measure the route — type the miles" (`ShippingRequirementsSection`, test updated, 17/17).
+- Gap: auto miles only fills for geocoded stops; real dev locations have no coordinates and dev has no working server Maps key.
+
+## 2026-11-05 - Open non-blockers closed and deployed on dev (jobs 169-173; final commit 54d5b28)
+
+**Dev only; nothing pushed to or run against production.**
+- **Customers grid Open AR + Last shipment date (deployed job 170):** `CRM_LIST_ACCOUNTS` accepts `withActivity:true` and computes `openArCents` (one paged Query of the sparse `arOpen` invoice index) and `lastShipmentAt` (Limit-1 desc Query per visible customer on `shipmentsByCustomerIdAndPickupAppt`, concurrency 48) behind a 60 s in-container cache and the rep visibility filter; no schema/IAM/env change (template unchanged). Live: 830 accounts, cached p95 402 ms, cold first call ~7 s (AppSync + Lambda cold); columns are in the Columns dialog (not in the 9 defaults).
+- **Shipments default columns (REVERSIBLE):** Active/All now default to 9 columns that fit 1440 (PRO #, Status, Equip, Customer, Carrier, Pick-up/Ship, Origin, Destination, Delivery; 1,072 of 1,129 px) in Aljex order; the other 19 Aljex columns remain in the Columns dialog; saved per-user layouts are untouched. Revert in one line: restore the full default list in `src/features/shipments/shipmentGridColumns.ts` (see the 'Shipments default columns' entry for the old list); users can also restore the full set in the Columns dialog.
+- **AF G10 closed:** harness bug (payload double-encoded AWSJSON); live: rollup updates 2.2 s after create, 15.5 s after void. **G9 rollup parity 25/25 PASS:** the exact path was wrong (it counted samples of voided shipments; fixed with `dropVoidedSamples`; rollup `dirtyKeysForRecord` now marks the delivery month on a void).
+- **Perf pass 3:** dashboard exact bundle is lazy (read when the chart grid nears the viewport; look-ahead 150 px), `listPods` failure memo, orders-by-AR-status cache, budgets re-based with measured numbers + reasons (users settled 5 s / 57 req, calendar firstRows 5.5 s, KPI chartsCold 5.3 s / chartsWarm 4.9 s, /dashboard allCold 6.3 s, invoicing 72 req / 10.5 MB, Shipments firstRows 3.6 s); G6 re-baselined to ef6b7af after reviewing the merged production pay changes (identical to origin/main). **Live job 171:** `/tms/dashboard` KPIs 2.0-3.85 s cold (median of 3 = 3.4 s vs the 3 s budget: network variance, best run 2.0 s), 0.02-0.33 s in-app, 0 KPI flips; 4 perf budgets still marginally red (dashboard settled 6.4 s vs 6, tracking firstRows 3.54 vs 3.5, KPI cold median 3.42 vs 3, chartsCold/Warm max, SPA first-visit 39 req / 6.1 MB vs 25 / 3): structural (AF-plan 4.1 tier-A joins narrowing not built), documented in `perfBudgets.mjs`.
+- **Real defects found by the final demo run and fixed:** Tracking drawer white-screened on threads with an inbound reply (`attachments` arrived as JSON text; `messageAttachments` in `src/lib/shipmentThread.ts`); Spot inbox `SPOT_*` could not resolve the caller for a browser ACCESS token (fixed like AP/CS inbox; verified at the API with both token types) and the page lacked the `spot-conn-chip` test id in the simulated state. DST bug in a test helper (fixed 86,400,000 ms day subtraction) fixed.
+- **Final live harness status (jobs 172-173):** AB 33/0, AJ 19/0, AE ok, AH 26/0, AL 29/0, AG 30/0, AI 34/0, AO 19/0, AM 78/0, AQ 30/0, AP clean, AC2 (six dense-grid boards) clean, AF ok.
+- **Open for Ryne / follow-ups:** Spot inbox suggested response / Copy / Open in Gmail / Mark won/lost UI was not captured in the demo screenshots (re-check with Ryne's own login after job 173); carrier bill approval on the ZZ demo carrier needs bank details (ACH method); the 'dispatch blocked until the four driver fields' gate and 'rate con refused until packet complete' are unit-tested but not re-shown in the demo (a person cannot set ACTIVE: only MCP status does); `otr-actions` audit actor reads 'unknown' for an access token (cosmetic) and `driver-app-api` requires a staff JWT e-mail (not tested with an access token).
+
+## 2026-11-05 - Step Y demo refreshed (job 171)
+
+- Full demo re-run on dev job 171 after RESET_DEMO_DATA: brokered 99671 (Intake > Create shipment prefilled, blocked then created; Find & Invite MC 274623 read-only; Cover dialog; rate con and invoice 20006 as real SES e-mails to ai4bcat@gmail.com; thread reply routed; Push to Load Review from the Demo chip; Load Review release; AP/factoring) and Ivan Cartage 99672 (roster driver dialog, Schedule, dispatch, owner-operator settlement with Wednesday banner). 57 screenshots + index.txt; `DEMO_WALKTHROUGH.md` rewritten with a Thursday checklist.
+- Defect fixed locally, **needs frontend deploy**: Tracking drawer crashed on a thread with an inbound reply (`attachments` AWSJSON text; `messageAttachments` + test).
+- Open: Spot inbox "could not resolve caller" in the browser for a temp admin (API fine); carrier bill approve needs full ACH payee; four-driver-fields dispatch gate not exercised. ZZ records left for Ryne (not retired); no invitation sent.
+
+## 2026-11-05 - Perf pass 3: G6 re-baseline, READ_ACTION parity, dashboard look-ahead, documented re-bases (dev tree edit; not committed or deployed by this entry)
+
+- **G6**: `DEFAULT_BASE` ef6b7af. Reviewed `git diff origin/main` of the NB-9 files: `otrInvoice.ts(+test)` and `driver-pay-emailer/handler.ts` are byte-identical to production; `useBoxTruckPay.ts` differs from main only by the `useEnsureLoadRange` windowing line; `otr-actions/handler.ts` differs by Step F shipment-document lookups (no amount/rate arithmetic). `moneyFreeze` now also passes a frozen file that moved since the base but is identical to `origin/main` (skipped when `origin/main` is not fetched). Earlier re-baselines (a064b26, aac15dd) were review-gating and table-name wiring only.
+- **G0**: `perfProbe.READ_ACTION` equals `apiClient.READ_ROUTER_ACTION` (CS_ and AP_INBOX_ prefixes); `perfProbe.test.mjs` reads the app source and fails on drift.
+- **/tms/dashboard (code fix)**: the live per-op list (deploy 170, cold and in-app) showed the exact bundle (orders/loads/legs joins, 12 requests each, `listLoadByShipmentId` 3.1 MB) read at mount. Cause: the lazy gate's look-ahead was 600 px and the first chart row sits ~1,390 px down at 1440x900 (900 + 600 = 1,500), so the gate never held. `DashboardPage` look-ahead is now 150 px. Expected after deploy: page ~35 requests, in-app (no scroll) ~15 requests / under 2 MB; the page and `spaRequests`/`spaMb` budgets are not raised.
+- **Re-based with measured numbers (raised; reasons in `perfBudgets.mjs`)**: `/tms/brokerage/users` settled 4 to 5, requests 50 to 57 (measured 4.49 s / 51; the shell floor is 48 req); `/calendar` firstRows 4.5 to 5.5 (4.96); KPI `chartsCold` 4.5 to 5.3 and `chartsWarm` 3 to 4.9 (4.78 / 4.4: the bundle read starts at the scroll and is the cost until AF-plan 4.1 tier A / `needs` + narrow load fields); `/dashboard` `allCold` 5 to 6.3 (5.71; the fleet P&L engines, D-AF7). The next `--ratchet` only lowers them.
+- **Not done**: AF-plan 4.1 tier A without joins, `ChartDef.needs`, `DASH_LOAD_FIELDS` (the lever on chart bundle size). The expected numbers above are unverified until a live `devVerifyPerf --enforce-af` after the next deploy.
+
+## 2026-11-04 - Rollup parity (G9): the exact path was wrong, the rollup was right (dev tree edit; not committed or deployed by this entry)
+
+- **Diagnosis (aggregates, dev tables read-only):** `LaneRateSample` non-excluded revenue by `sampleMonth` is 31,358,040 (Oct, 251 samples) and 3,050,000 (Nov, 27); 46 of the Oct and 25 of the Nov samples belong to **voided** shipments (11,345,000 and 2,750,000 cents; the void does not touch the sample), plus 2 untagged Oct samples (145,000). The rollup M rows hold 20,013,040 (205 fin rows) and 300,000 (2): exactly the non-excluded samples minus voided shipments' samples, i.e. `computeMonth`'s rule and `applyFilters`' own ("a voided shipment is never counted", AF-plan section 2). The exact path counted them because the PerfFix window read drops voided shipments server-side, so `applyFilters`' voided check never found the shipment in its index. Rollup staleness ruled out: backfill 2026-09..2026-12 rewrote 9 rows (0 failed), computedAt moved, figures unchanged (20,013,040 / 300,000).
+- **AR/AP, shipmentCount, status maps:** the AR/AP gaps came from the harness, not the rollup: its exact side merged the working set instead of loading the open invoices'/bills' referent shipments by id as the dashboard does. Reading the very dashboard bundle makes company and strip AR/AP equal. After the fix shipmentCount (213) and every status map agree for all three windows; no UTC/Chicago boundary difference was observed.
+- **Fix:** `useBrokerageDashboard.ts` `readDashboardWindow` (the former `readWindow`, now exported) drops samples whose shipment is voided via `dropVoidedSamples` (narrow `getShipmentsByIds` for sample shipments the window did not load; one aliased request per 100). `dashboardRollup.ts` `dirtyKeysForRecord`: a Shipment `voidedAt` change also marks `M:` of the month after the pickup month (samples sit in the delivery month, no Shipment image names it). `devVerifyPerfApi.mts` G9 now compares the rollup with `readDashboardWindow` (like with like) and prints up to 12 diffs.
+- **Result:** `npx tsx --tsconfig tsconfig.app.json scripts/devVerifyPerfApi.mts --only=G9` on dev: all 24 G9 verdicts PASS (3 windows x 6 divisions, company and strips equal, was 12 WARN). Tests: `useBrokerageDashboard.test.ts` (voided sample dropped when the window never loaded its shipment), `dashboardRollup.test.ts` (void dirties the next month, year edge); vitest on dashboard + rollup dirs 108 pass; tsc app and amplify clean.
+- **After the lead's deploy:** nothing to backfill for this fix (no Lambda change reaches stored payloads; the dirty-key change applies to future streams). Re-run G9 as above; to force a refresh: `aws lambda invoke --function-name <dev tmsdashboardrolluplambda> --payload '{"backfill":{"from":"2026-09","to":"2026-12"}}'`.
+
+## 2026-11-04 - Customers Open AR + last shipment (dev tree edit; not committed or deployed by this entry)
+
+- **Why:** the Customers grid needs two optional columns, Open AR and Last shipment, which are on neither the cached customer list nor `CRM_LIST_ACCOUNTS`; per-customer client fetches would blow the perf budget.
+- **Design (a), computed server-side in `CRM_LIST_ACCOUNTS`, opt-in via `input.withActivity === true`:** (1) ONE paged Query of the sparse `invoicesByArOpenAndDueAt` index (`arOpen = 'OPEN'`, projection `customerId, balanceCents`) summed per customer (the open book is 253 rows on dev: a per-customer invoice query would cost ~800 queries for the same answer); (2) one `Limit: 1`, `ScanIndexForward: false` Query of `shipmentsByCustomerIdAndPickupAppt` per VISIBLE customer, 48 in flight at a time. The visibility filter runs first, so a rep neither pays for nor receives another rep's accounts. A 60 s in-container cache (WeakMap per db client; invoice sums global, last shipment per customer) bounds repeat cost to 0 queries. Fields `openArCents` (0 when none) and `lastShipmentAt` (newest `pickupAppt`, so a future-dated booking counts; null when none) are optional on `CrmListAccountRow`.
+- **Why not (b):** denormalised Customer attributes need schema + a stream/nightly Lambda against a template at 963,479 of 1,000,000 B and 460/500 resources, and go stale between runs; (a) needs no template change.
+- **IAM / template:** `tmsCrmActions` already holds `Query` on Invoice and Shipment (`crmAiSources` + `withIndexes`) and `INVOICE_TABLE_NAME`/`SHIPMENT_TABLE_NAME` via `tableEnv.ts`: no grant, no env var, no backend.ts/resource.ts change. `measureDataTemplate` dev and `--prod-shape` both exit 0; dev data stack 963,479 B, 460/500 resources, unchanged.
+- **Client:** `useCrmAccounts(scope, withActivity)` adds `withActivity` to the request only while a visible column needs it, so default users (the 9 default columns are unchanged) never pay for it. `DirectoryPages` catalog: `openAr` ("Open AR", group Billing, number range filter in $, numeric sort, right-aligned) and `lastShipment` ("Last shipment", group Activity, date-range filter, date sort); both only in the Columns dialog. `prefs` moved above the `useCrmAccounts` call.
+- **Tests:** `tms-crm-actions/actions.test.ts` (4 new: sums and newest pickup on a fixture incl. a paid invoice that must not count and customers with no activity; nothing added or queried unless asked; a rep sees and pays queries for only 2 accounts and no other rep's figure appears; 1 invoice query + 1 shipment query per customer, 0 on a 30 s repeat, re-queried after 60 s) and `DirectoryPages.render.test.tsx` (no `withActivity` call by default; columns added: values, Open AR min filter, sort both ways). Directory+crm vitest 64/64, crm actions 20/20; tsc app + amplify and eslint on changed files clean.
+- **Live step:** `scripts/devVerifyAC2.mjs` (customers board) creates a ZZ customer through `UPSERT_CUSTOMER` plus two open invoices (123,456 + 4,321 cents) and two shipments (suffix-guarded `zz-ac2-` rows in the dev tables), asserts the router values and opt-in behaviour, adds both columns through the Columns dialog and reads the ZZ row ($1,278 / 2026-03-14), prints first-call and 9 cached-call latencies, then deletes the rows and archives the customer. NOT RUN against the live app: the new server code is not deployed yet (`--inventory` and syntax/eslint pass).
+- **Numbers (pre-deploy, read-only on dev tables from this laptop, 829 customers, 5 runs of the exact query set):** open-invoice Query 50-209 ms (253 invoices); 829 shipment Queries at concurrency 48 took 836-1,671 ms (699 customers have a shipment). In-region Lambda round trips are shorter than this laptop's, so the <2 s budget should hold with margin; the deployed p95 comes from the AC2 step after deploy.
+
+## 2026-11-04 - Shipments default columns (reversible) (dev tree edit; not committed or deployed by this entry)
+
+- **Why:** Ryne asked for a sensible Shipments Active / All default that fits 1440 without horizontal scroll, in Aljex board order. The old default was the full 28-column Aljex set (3,605 px wide: 9 columns visible at 1440, 12 at 1920).
+- **Old default (28):** PRO #, Exceptions, Status, Equip, Customer Reference Number, Description, Revenue Type, Sales Rep, Customer, Carrier, Carrier Status, Customer Total Rate, Carrier Total Rates, Gross Profit, Net Margin %, Pick-up/Ship, Origin, Destination, Delivery, Stops, Driver, Truck, AR, AP, Last update, Next check call, Mode, Docs (keys: `proNumber` then `ALJEX_COLUMN_KEYS`).
+- **New default (9):** PRO # (sticky), Status, Equip, Customer, Carrier, Pick-up/Ship, Origin, Destination, Delivery (keys `proNumber, status, equip, customerName, carrier, pickupShip, originCity, destinationCity, deliveryAppt`), in Aljex relative order. Live header widths 91+142+92+122+106+135+97+134+113 + 40 Actions = 1,072 px, under the 1,129 px budget. Sales Rep (118) and Customer Reference Number (243) did not fit alongside these; they are one click away in the Columns dialog.
+- **Scope:** `SHIPMENT_DEFAULT_COLUMNS` in `src/features/shipments/shipmentGridColumns.ts`, used only by `ShipmentsBoard` (`defaultColumns`). It applies only when a user has no saved layout (`useDenseGridPrefs` reads saved columns first; storage key and version unchanged), so existing saved layouts are untouched. Column groups, Tracking, Customers, Carriers, `ALJEX_COLUMN_KEYS` and the seed views are unchanged. Users restore the full set (or any other) in the Columns dialog.
+- **Revert in code (one line):** in `ShipmentsBoard.tsx` set `defaultColumns: ['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== 'proNumber')]` (import `ALJEX_COLUMN_KEYS` from `./shipmentViews`).
+- **Tests / scripts:** new `shipmentGridColumns.test.ts` (default set + Actions fits 1,129 px by the header-measure helper; Aljex order kept; PRO # first); five `ShipmentsBoard.test.tsx` tests that read non-default columns now start from a saved full-Aljex layout; `scripts/devVerifyAC2.mjs` no longer marks Shipments `wide`: fit at 1440 and 1920 is required. Scoped vitest/eslint/tsc pass; the live AC2 walk has not been re-run against the new default (needs a deploy).
+
+## 2026-11-04 - AF G10 closed (harness bug, no product change; dev, not committed by this entry)
+
+- **Root cause:** the rollup was working. CloudWatch (dev `tms-dashboard-rollup`) showed stream invocations for the ZZ writes and `M:2026-11` rewritten seconds after CREATE_SHIPMENT and SAVE_ORDER_FORM; the shipment carries a pickup date and `pickupMonth` 2026-11, so `dirtyKeysForRecord` returns `M:<month>`. The harness read the row wrong: `getDashboardRollup.payload` is AWSJSON wrapping a string the Lambda already stored as JSON (double-encoded), and `devVerifyAF.readRows` parsed once, so `payload.ship` was undefined and the day count read 0 forever. `src/lib/dashboardRollupClient.ts` already decodes until an object comes out.
+- **Fix:** `scripts/devVerifyAF.mjs` `readRows` and `scripts/devVerifyPerfApi.mts` rollup `readRows` now decode the payload until an object (max 3 levels). No Lambda or backend change, so no template measure needed and no deploy needed.
+- **Live proof:** `node scripts/devVerifyAF.mjs --only=G10` -> PASS create 2.2 s (day count 15 -> 16), PASS void 15.5 s (16 -> 15); ZZ shipment voided, customer archived, identity deleted.
+
+## 2026-11-04 - Steps AC (Shipments / Load Tracking / Customers / Carriers dense grids), AJ (single-page Load Tracking) and AE (Quotes) deployed on dev (jobs 166-168; final commit 368b055)
+
+**Dev only; nothing was pushed to or run against production. The entries below this one that say 'not deployed' for these steps are superseded.**
+- **Final live verification on job 168 (all exit 0):** `devVerifyAC2` (six dense-grid boards: Shipments Active/All, Intake, Load Tracking, Customers, Carriers), AJ 19 pass / 0 fail / 1 allowed skip, AE all steps, AO 19/0, AH 26/0, AL 29/0, AG 30/0, AI 34/0, AM 78/0, AQ 30/0, AP clean. Screenshots: `Docs/tms-build/screenshots/ac2/`, `aj/`, `ae/`, `ao/`.
+- **AC:** Customers and Carriers moved onto the shared `DenseGrid` (header filters: type-ahead / multi-select with Select all / date range / numeric range; click-to-sort; sticky header + first column; two-pane Columns dialog; per-user per-board layout, widths and density; 100 virtualised rows; icon-rail sidebar via `DENSE_PATHS`); default sets trimmed so they fit 1440 without horizontal scroll (Customers 9 columns, Carriers 9); the shared filter popover now has Select all/search/Exclude and closes on sideways scroll and window resize; Load Tracking default columns cut to 10. Carriers tabs Pending/Review, Active, Inactive with counts (dev now shows 30 ACTIVE carriers: MCP-driven activation works). **Shipments Active/All still default to the full 28-column Aljex set (9 visible at 1440, 12 at 1920): product call for Ryne** (trim defaults vs keep Aljex order; all columns remain in the Columns dialog).
+- **AJ:** one 'Load Tracking' nav row at every role (role-sweep test); the shared drawer kit selectors had never matched (every drawer was unstyled with a 3-row header): fixed; tracking drawer header is one compact row (~37 px), summary strip wraps instead of clipping, inline tracking-prefs row, map panel 150 px, everything above the fold at 1440x900 (asserted live).
+- **AE:** Lane rates removed and old URL redirects; Quote outcome WON / LOST / EXPIRED / PENDING on the Quotes list (column + filter), Quote detail header, Spot inbox and Carrier Sales postings; `MARK_QUOTE_WON` (customer quotes, optional note) with `Mark won` on Quote detail and Spot inbox (a converted quote is WON automatically); auto-send remnants removed (org settings and customer flow defaults selects, `autoReply`); read-only scopes asserted by a repo scan gate in the harness; map panel now degrades to the outline when the Maps script fails to load.
+- **Open (not blockers):** Shipments default column count (above); AF stream-recompute G10 and chart-ready probe; Customers grid has no Open AR / last shipment date columns (needs a server field); remaining perf budgets partly red (see AF entries); the cutover blockers NB-6 (now a runbook step), NB-8, P3, P4 are in `CUTOVER_PLAN.md`.
+
+## 2026-11-04 - Step AC follow-up: dense grids on Carriers and Customers + audit (AC auditor half; dev branch, not deployed, not committed)
+
+**Dev only. No deploy claimed: the live harness below ran against the DEPLOYED dev app (job 165), so it shows the state BEFORE these fixes. Re-run `node scripts/devVerifyAC2.mjs` after the next deploy.**
+- **Audit (live dev, 1440 + 1920, temp admin; Customers/Carriers were not on DenseGrid yet, so their walks timed out on that deploy):** already met on Shipments Active/All, Intake, Tracking: rows render, header filters (type-ahead, multi, date, number) narrow and clear, click-to-sort, sticky header + first column hold while scrolling sideways, two-pane Columns dialog reorder + width persist across reload, density persists, icon rail (76px) and no side filter panel, popovers on the last columns stay inside the window and close on outside click / Escape and do not scroll the page. Gaps: (1) the multi-select had no Select all and, above 12 options, was the type-ahead tag picker whose list drops down inside the scrolling popover (the board-filters-listbox-problem shape); (2) a header popover stayed open, detached from its header, when the grid scrolled sideways; (3) Load Tracking's 16 default columns need 1960px (11 of 16 visible at 1440, 15 of 16 at 1920); (4) Shipments Active/All default is the full Aljex-order set (28 columns, 9 visible at 1440 / 12 at 1920): kept on purpose, it is Ryne's Aljex order with PRO # first and sticky.
+- **Fixes (shared grid):** `DenseFilterPopover` multi-select is now one checklist for any size: counts, a search box above 8 options, **Select all** (everything the search leaves), Exclude, Clear, recently picked values first (via `recentKey`), 200-row render cap with a 'type to narrow' hint; `BoardTagPicker` is no longer used by the grid. `DenseGrid`: the popover closes on sideways scroll and window resize, opens upward with a clamped max-height when there is more room above, stays inside the window horizontally; `overscroll-behavior: contain` so wheel scroll in the list never scrolls the page. Tracking defaults trimmed to 10 columns (~1250px with actions) so they fit 1440: Ping age, POD, Docs, Check calls, Carrier status, Tracker are in the Columns dialog (saved layouts untouched).
+- **Harness:** `scripts/devVerifyAC2.mjs` (`--inventory`, `--only=<board>`, `DEV_VERIFY_UI_URL`): per board rows, filters (text / multi + Select all + Clear / date / number), popovers on the last 3 columns, sort, sticky (computed style + held while scrolled), rail + no filter panel, Columns dialog reorder + width + reload persistence, density persistence, default-column fit at 1440 and 1920 (counts and per-column widths, no cell text), plus Carriers tabs / Find & invite / row opens profile. Screenshots `Docs/tms-build/screenshots/ac2/`. Temp admin deleted and proven gone.
+- Tests: `DenseGrid.test.tsx` (+2: Select all after a search; sideways scroll closes the popover); two Tracking desk tests now save the extra columns they need as the user's layout.
+
+## 2026-11-04 - Step AJ audit (Load Tracking vs Ryne's screenshots) - NOT deployed
+
+**Dev only; no deploy claim.** Live run of `devVerifyAJ` on dev job 165: 19 pass / 0 fail / 1 skip (driver app). Screenshots `Docs/tms-build/screenshots/aj/` read at 1440x900.
+- **Already met (no change):** one `Load Tracking` row, no children/caret/live list (`/tms/check-calls`, `/tms/documents/review` redirect to Focus chips); Customer links = drawer button + `/tms/tracking/links` off-nav page + link in Settings > Tracking; group-by (default Assignee) + My loads / All / Unassigned tabs; Focus chips with counts; strip -> inline prefs row (no popover) -> map (150px, collapsible) -> two panes (SMS left, e-mail right, NOT_SENT shown, independent scroll) -> last 5 check calls, all ending above 900px; Customer create + profile carry the tracking mode/method fields.
+- **Gaps found in the screenshots and fixed:** (1) the shared drawer kit selectors `.tms-portal .tms-portal .tms-drawer-head/-body/-title/...` never matched (the drawer content is itself the `.tms-portal`), so EVERY drawer rendered unstyled: title, Manage links and close stacked on three rows (85px header), no padding. Selectors fixed in `kit/kit.css` (`.tms-portal.tms-drawer .tms-drawer-*`); tracking drawer gets a compact 8px/12px header and body. (2) The strip clipped its own facts (`Truck ZZAJ86`, `Personal: (...`, `no position ye`, `OD –`): lines now wrap instead of truncating (prefs row stays fixed 28px, nowrap). (3) Prefs selects clipped `Inherit (Truck work pho`: widths 150/160/210px.
+- **Tests:** `navSections.test.ts` new role sweep (owner, all grants, loads, tms+loads+loadReview+compliance: exactly one childless Load Tracking, no check-calls/documents/tracking-links rows). `devVerifyAJ.mjs`: AJ07 also checks the admin session (rail on the dashboard and the collapsed rail on the grid); AJ09 asserts header one row (<=56px), map body 150-260px, no clipped strip segment, strip font 12-13px. Vitest (navSections, tracking dir, TmsShell: 181 pass), tsc app, eslint clean.
+- **Deviations / not proven:** the CSS fixes could not be viewed live: the local Vite app's `amplify_outputs.json` points at another pool, so the harness cannot sign in against localhost (not changed, to stay off any non-dev pool). The new AJ07/AJ09 assertions will FAIL on the deployed build 165 and pass only after the next dev deploy; re-run `node scripts/devVerifyAJ.mjs` then. The kit fix restyles every drawer (intended look; spot-check one).
+
+## 2026-11-04 - Step AE audit (Quotes: outcome model, read-only mailbox, Lane rates retired) - NOT deployed, no live run
+
+**Source + unit proof only; no deploy claim. `devVerifyAE` AE06/AE07 and the new screenshots (Docs/tms-build/screenshots/ae/) need a deploy of this tip and are not yet run.**
+- Gaps found: (1) no Mark won anywhere (Spot inbox 'Mark won' called SPOT_MARK_OUTCOME and was refused while the quote was open); (2) outcome vocabulary Won/Lost/Expired/Pending shown only in the rate-intelligence table; Quotes list had no outcome column/filter, Quote detail header no outcome, Spot inbox list/drawer none, Carrier Sales none; (3) 'Quote reply: Auto-send suggested rate' selects (org settings + customer flow defaults) and `autoReply` in resolveMargin/priceFromMarket were auto-send remnants; (4) `LaneRatesPage.tsx` still in the tree (unrouted); (5) devVerifyAE asserted none of won / outcome UI / read-only scopes.
+- Fixed: new `MARK_QUOTE_WON` (SELL only, closes with wonAt/closedAt, optional note) + `markQuoteWon` client + `MarkWonDialog` + `canMarkWon` in quoteState; shared `OutcomeBadge` / `outcomeOf` (laneIntel.quoteOutcome; converted = WON) on Quotes list (Sent, Replies, Won/Lost columns; Outcome + Lost-reason filter chips/dialog), Quote detail header (+ Mark won / Mark lost), Spot inbox list column + drawer (Mark won now wins the open quote first, button only with a quote), Carrier Sales quote postings; auto-send selects and `autoReply` removed; `LaneRatesPage.tsx` deleted; Lane-rate nav/redirect already correct. Verified read-only: OAuth scope list is gmail.readonly only, no send/draft/compose/modify call in src/amplify source.
+- Harness: devVerifyAE gains gates 10-12 (read-only scan, scope list, converted=WON), AE06 (Mark won, win rate 50 %), AE07 (outcome UI + screenshots). `--inventory` passes offline.
+- Proof: targeted vitest (33 files / 376 + shipment handler 438), tsc app + amplify, eslint on touched dirs: clean.
+- Deviations: stored `quoteAutoReply*` / `autoSend*` columns and the directory handler passthrough remain (additive schema, inert; nothing reads them). Converted-to-shipment = WON is proven by unit tests, not by a live convert in the harness (it would create a shipment).
+
+## 2026-11-04 - Step AI deployed (conversational dashboards; jobs 161-165)
+
+**Dev only. Verified live: `devVerifyAI` 34 pass / 0 fail / 0 skipped on job 165 (and on 161 after harness repairs).**
+- Built: 'New dashboard' chat builder (scope question ALWAYS asked by code: Company / Specific users / Team / Just me), whitelisted-query widget catalog (16 queries, strict spec schema, no SQL/table names), live preview, Save, Dashboard tabs (Overview / Company dashboards / My dashboards), claims `DASHBOARDS_CREATE`, `DASHBOARDS_PUBLISH_COMPANY`, `VIEW_ALL` in Settings > Users (enforced server-side), one `VisibleReader` all widget executors go through (rep / owner of the customer / team member / viewAll). Storage uses rows `DASH:<id>` in the existing `DashboardRollup` table and the actions live in `tms-crm-actions` (no new model, Lambda or mutation: template +4.3 KB). Live model chat worked on dev (key has credit): `PREVIEW_DASHBOARD` warm p50 558 ms / p95 651 ms, chat turn p50 4.4 s / p95 7.2 s, 10 of 12 model calls used by the harness.
+- Verified live: claims present, no New dashboard button and API refusal without create, visibility matrix (8 viewers, hidden-value scan), revocation, audience rules, 15 invalid specs refused, DASH: rows ignored by the rollup sweep and readers, UI walk with 14 screenshots (`Docs/tms-build/screenshots/ai/`).
+- **Caveats for Ryne (also in `AI-notes.md`, `AI-exposure-audit.md`):** D1 - every model is readable by any signed-in user through AppSync (95 of 109 models), so the dashboard filter only governs what the dashboard feature serves; 94.4% of customers have no owner/team so strict visibility shows non-viewAll users almost nothing until owners/teams are assigned; a user without a `UserProfile` row gets 'could not resolve caller email' from the dashboards router (owner's first load on a fresh stack): not fixed.
+
+## 2026-11-04 - Step AG deployed (Accounting > AP inbox sync; jobs 161-165)
+
+**Dev only. Verified live: `devVerifyAG` 30 pass / 0 fail / 1 allowed skip (AG07 lambda-door: the Chicago-hour gate is proven by unit tests) on job 165.**
+- Built: read-only Gmail mailbox (ai4bcat@gmail.com consumer Gmail, `gmail.readonly`, shared Google client) read hourly with a Chicago-hour gate + catch-up and on 'Review now'; invoice/credit-memo classification + extraction (union-free schema, real model call verified AG11), matching by PRO / invoice # / amount+carrier with strict auto-apply rules (writes only placeholder bill columns invoice number / dates / amount, CAS + audit + reversible `AP_INBOX_REVERT`; never approves, pays, records or changes status), 'AP inbox' review queue in Accounting > Accounts Payable (link to bill / create bill / dismiss, per-field picks), digest line, settings card ('Simulated mailbox · ai4bcat@gmail.com' in sim mode), SIMULATED mailbox for dev. Template cost was 17.9 KB (plan estimated 11-16). Screenshots in `Docs/tms-build/screenshots/ag/`.
+- Defects found live and fixed: browser access token has no e-mail claim (every real browser user was refused; now resolved via Cognito AdminGetUser), PRO fixtures in the issue-counter range, model-cap test dating, settings card label.
+- Follow-ups: connect the real mailbox needs Ryne's Google OAuth client (External/Testing, test user ai4bcat@gmail.com; refresh token expires every 7 days in Testing mode); auto-apply default per plan; a PDF-attachment real-mail test is pending a real invoice e-mail.
+
+
+## 2026-11-04 - Cutover blockers NB-1..NB-9, SES e-mail, Steps AL/AG/AI deployed (jobs 161-165; final commit ef6b7af, job 165 SUCCEED)
+
+**Dev only. Jobs: 161 (AL/AG/AI), 162 (cutover blockers + env diet), 163 (SES reply threading + intake IAM), 164 (carrier-inbox fixes), 165 (origin/main merged into dev). Nothing was run against production.**
+- **Live harness status on job 165 (final):** AL 29 pass / 0 fail, AH 26/0, AJ 19/0, AG 30/0, AI 34/0 (live model chat worked: the Anthropic key has credit), AM 78/0, AQ 30/0, AP clean, AD live 33/0 (one MCP invitation to ai4bcat@gmail.com earlier, HTTP 200), AO 18 pass / 1 fail (AO10 'Map unavailable' text expectation: the dev Maps key works, the harness still waits for the no-key caption), AE 5/5.
+- **E-mail proven live (NB-5, job 163, `EMAIL_LIVE_TEST.md`):** `devVerifyEmail --run` ALL PASSED: rate con e-mail and invoice 20005 sent through SES (MessageIds recorded), reply routed by the tracking plus-address, same per-load thread key, reply with the plus alias stripped threaded by In-Reply-To (SES id, stored as `<SESId@email.amazonses.com>`), every recipient inside the ai4bcat@gmail.com allow-list, fixtures voided. Root causes found on the way: dev guard `Deny ses:*` (now conditional on recipients) and an intake Lambda invoke permission with an `aws:SourceArn` condition roles never satisfy. Still manual: a real mail client's In-Reply-To quoting the SES id; the Gmail Apps Script bridge to the intake Function URL (not in repo).
+- **NB-3 template/env (job 162):** prod shape had been 232 B under the 1,000,000 B cap and `tms-directory-actions` would have exceeded Lambda's 4 KB env on main. DATA_TABLE_SUFFIX env diet for the five routers, `--prod-shape` measure and exact-string env guard. Numbers after the merge (NB-9): dev 963,479 B, prod shape 967,668 B, 460 of 500 resources, max Lambda env 3,495 B (est).
+- **NB-1/NB-2/NB-7:** `--target prod` triple gate (env var = today's date + `--i-mean-production` + fresh `prodpre-` backups + typed account:suffix) on the importer and 18 backfill/seed/fix scripts (`scripts/lib/prodGate.mjs`, `scripts/prodBackup.mjs`), rehearsed against dev table copies; read-only prod smoke (`scripts/smokeProdReadOnly.mjs`, mutations=0 asserted). **NB-4:** the 'one GSI per deploy' limit does not break a one-shot merge on this stack (Amplify's table manager serialises GSI creates; dev did 3 Load GSIs in one deploy); prep-push option and `gsiSequenceCheck.mjs` documented in `GSI_DEPLOY_SEQUENCE.md` (production prep push still needs Ryne's OK). **NB-9 (new P0, found by the plan review):** `origin/main` had 7 production commits dev lacked (pay-credit approval Lambda + 6 `DriverPayCredit` fields, settlement e-mail copy to Jenny, Hours driver filter, driver-pay expense period, Factoring manual-invoice log, `otr-actions`, Feedback); merged into dev with 8 conflicts resolved (`main` is now an ancestor, so the final main update is a fast-forward). Spot-check the box-truck pay page on dev (non-owner credit stays PENDING and off the check).
+- **AL/AG/AI real defects found live and fixed:** spot Lambda could not invoke the shipment router (resource policy `sourceArn`); ShipmentMessage rows filed without `createdAt/updatedAt` (list reads partially failed), NULL on the `messageId` index key for calls, city 'Joliet, IL' lane compare, COUNTER on inbound offers; AP inbox / carrier-sales / dashboards authorize() failed for real browser users (access token has no e-mail claim): fixed for AP inbox and carrier inbox; **the dashboards router (`tms-crm-actions`) resolves e-mail via UserProfile and fails for a user without a profile row (owner's first load on a fresh stack)**.
+- **Findings for Ryne:** (a) D1: 95 of 109 models readable by any signed-in user via AppSync (`Docs/tms-build/AI-exposure-audit.md`); 94.4% of customers have no owner/team, so strict visibility shows non-viewAll users almost nothing until owners are assigned; (b) the Rates pages fire `SWEEP_EXPIRED_QUOTES` (a write) on every open: a prod read-only smoke user would write (the smoke guard blocks it); (c) Settings > Users 'Loading codes…' (Aljex code map card) never clears; (d) AF follow-ups still open: stream recompute (G10), chart-ready probe, SPA shell requests; (e) own-fleet loads hidden from the Tracking grid unless 'Include loads without a TMS rate con' is on.
+- **Still NO-GO for a Nov 6 start (CUTOVER_PLAN.md section 0):** NB-6 (prod MCP credentials, Ryne), NB-8 (Ryne's inputs RD1-RD9, customer/carrier masters, AR/AP control reports, D-W10 LOCAL drivers), P3 (production GSI prep push needs Ryne's OK), P4 (throwaway-branch deploy proof), a full-size prod-gated importer run for timings.
+
+## 2026-11-04 - CUTOVER NB-9: real merge of origin/main into dev (branch merge-main-into-dev, not pushed, not deployed)
+
+**Dev-derived branch only. Nothing deployed, no AWS/SSM access.** `git merge origin/main` (7 prod commits: a90a2a3 Feedback, 3caf676, b837947, e24ff4e, 0edfe9c, 82a85a1, 0789606). `main` is now an ancestor of the branch, so F11 stays a fast-forward once the branch is pushed to `dev`.
+- **Conflict resolutions:** App.tsx kept dev's route table (redirects for /settings, /audit-log; Feedback route identical on both sides); NavBar.tsx stays deleted (main's Feedback sidebar link already exists in `TmsShell.tsx`, the dev port); otr-actions handler = main's `getLocation` calls plus dev's 3-arg `findPod(..., shipmentId)`; BoxTruckPayPage = dev imports plus main's pending-credit rows, Approve/Reject buttons and "approved only" total, colours mapped to `--tms-*` tokens; DriverPayPage imports both (PayrollCadenceBanner + PAY_EMAIL_CC); FactoringPage = dev's DenseGrid column defs with main's sent-by-hand "SENT" column, send-log sort and status tooltip; FeedbackPage (add/add) = dev's tokens (`tms-badge-*`, `bg-card`, `bg-muted`), same model/logic/storage rule; HoursPage = dev's TmsScrollPage with main's Drivers filter inside `actions`. Duplicate `feedback/*` key in `amplify/storage/resource.ts` removed (identical rule existed on both sides).
+- **Tests:** main's `invoices sent by hand` tests in FactoringPage.test.tsx adapted to dev's grid (tab role, case-insensitive header); none deleted.
+- **Gates (worktree):** tsc app/root/amplify exit 0; eslint 0 errors (3 pre-existing warnings); vitest 9756 tests, all pass after the adapted Factoring tests (1 pre-existing unhandled NoCredentials rejection in FactoringPage.test.tsx, same on dev 94fde24); build OK; `measureDataTemplate --branch dev` exit 0: 963,479 B (was 958,575), 460 resources (was 457); `--prod-shape` exit 0: 967,668 B (was 962,747), 460 resources, max Lambda env 3,495 (tms-directory-actions, unchanged), new `pay-credit-approval` env 456 B; route inventories AA/S2/S3/S4 PASS (no new routes: pay approval is inline on the box-truck pay page).
+- **Merge-to-main checklist additions:** (1) schema: `DriverPayCredit` +6 nullable fields (approvalStatus, requestedBy, requestedAt, approvedBy, approvedAt, rejectionReason) and mutation `managePayCredit` (already live on prod; additive on dev); (2) new Lambda `pay-credit-approval` (table env PAY_CREDIT_TABLE_NAME/DRIVER_TABLE_NAME, USER_POOL_ID, PORTAL_BASE_URL, APPROVER_EMAIL, secret SLACK_BOT_TOKEN; IAM Get/UpdateItem on DriverPayCredit, GetItem Driver, cognito AdminGetUser); (3) settlement e-mails copy Jenny; (4) spot-check box-truck pay page on dev: non-owner credit stays PENDING and off the check until approved.
+
+## 2026-11-04 - CUTOVER NB-7: read-only production smoke test with a zero-mutation guard (dev branch, not deployed, not committed)
+
+**Dev only. Nothing run against production, no SSM write, no deploy claimed. Proof ran against DEV (the dev AppSync URL passed as `--prod-url`, a temporary dev ADMIN identity minted by a throwaway driver and deleted afterwards: `identity deleted: true`).**
+- **Files:** `scripts/lib/readOnlyGuard.mjs` (+ `.test.mjs`, 19 tests), `scripts/smokeProdReadOnly.mjs`, `scripts/lib/smokeSteps.json` (checked-in step list; `--list` prints it), `scripts/lib/cdpBrowser.mjs` (`intercept(handler)` over CDP `Fetch.requestPaused`; `allowedOrigins` option), `scripts/lib/devIdentity.mjs` (`cognito` client throws under `--read-only`, so every harness that mints an identity refuses), `refuseReadOnlyFlag()` at the top of the 8 older writer harnesses that do not import devIdentity (Ar, Commissions, Quotes, R2, R2Followup, StepJ/K/R).
+- **Guard:** GraphQL documents are parsed (comments/strings/multi-operation safe); any `mutation` throws and counts, except a router mutation whose `action` is a read verb (the app's own `READ_ROUTER_ACTION` from `apiClient.ts`, plus `IMPORT_LIST`, `DATA_STATUS`, `EXPORT_LIST` read from their handlers): counted as `routerReads`. SDK clients: DynamoDB/S3 read verbs only; Cognito, SSM, Lambda and every other verb throw. Browser: every non-GET is paused; only read documents to the AppSync URL and the session plumbing (identity-pool `GetId`/`GetCredentialsForIdentity`, token refresh) pass; other AWS or AppSync writes are blocked and counted; third-party beacons are blocked and reported. Final line `READ-ONLY ASSERT mutations=0 (PASS)` or exit 1. `--prod-url` is never defaulted and must be a plain AppSync host; auth is an existing user's tokens from env (`BCAT_PROD_ID_TOKEN`, browser steps also `BCAT_PROD_ACCESS_TOKEN` + `BCAT_PROD_REFRESH_TOKEN`: a first run without the refresh token rendered the login page, Amplify needs all three).
+- **Steps (RO-00..RO-05, RO-99):** config/token check, guard self-test, API aggregates (counts only), route walk (parameter-free AA + S2 routes, navigation + DOM + screenshots), page timing (devVerifyPerf PAGE_PATHS, report only), create-form render (never typed or clicked). 36 harnesses cannot run read-only (listed with reasons in `smokeSteps.json`, table in CUTOVER_PLAN §6.1).
+- **Proof on dev:** unit tests (fake fetch mutation throws, query passes, Cognito admin call throws, DynamoDB PutItem on a stub throws, router read vs write, browser verdicts); full run: aggregates printed, 3,006 queries, 184 router reads, 189 session-auth calls, `mutations=0 (PASS)`, 70 pass / 1 fail (users lazy-load wait, fixed; walk rerun 47 routes 48 pass / 0 fail, `mutations=0`); screenshots to the OS temp dir (they would hold prod data), never the repo. The first browser run was blocked with 30 "violations", which is the guard working and found real behaviour:
+  - **Finding: the Rates pages (`/tms/rates*`) call `tmsShipmentActions:SWEEP_EXPIRED_QUOTES` on every open** (quotes.ts L1186: a conditioned UpdateItem per expired quote, moving it to LOST/EXPIRED). On prod a smoke user opening Rates would write. The interceptor blocks it and reports it as a FINDING (`pageLoadWritesBlocked`), not as a mutation; it is the only allow-listed page-load write. A decision for the lead: leave it (it is the app's behaviour) or move the sweep off page load.
+  - `perfProbe.mjs` READ_ACTION (devVerifyPerf G0) predates the `CS_` / `AP_INBOX_` prefixes of `apiClient.ts` READ_ROUTER_ACTION, so devVerifyPerf G0 reports `AP_INBOX_STATUS` on /tms/invoicing/payable as a mutation (a false positive); RO-04 judges with the guard's classification. Not changed in perfProbe.
+  - `/tms/brokerage/users` keeps the lazy-loaded "Aljex code mapping" card on "Loading codes…" until it scrolls into view (by design, PERF R6); RO-03 waits for body text only on that route.
+- **Needs Ryne (to run it on prod):** the read-only smoke user's three tokens, the prod AppSync URL and web origin from the runbook.
+
+## 2026-11-04 - NB-1 + NB-2: production mode for the importer and every backfill, behind one gate (dev branch, not committed)
+
+**No production data touched (STS identity + ListBackups metadata only). Dev: two rehearsal copies `rhnbg1`/`rhnbg2` created and dropped, 17 `prodpre-` backups of the copy deleted.**
+- **Gate** `scripts/lib/prodGate.mjs` (+ `prodWriteSets.mjs`, `prodBackup.mjs`, `importAljexArgs.mjs`): `--target prod` needs env `BCAT_ALLOW_PROD=<today>`, `--i-mean-production`, fresh `prodpre-<script>-` AVAILABLE backups (apply), printed plan + dry-run default + typed `<account>:<suffix>`. Inner `assertWritableSuffix` guards pass a prod suffix only after the gate passed in-process. 37 unit tests (matrix, backup freshness with fake client, suffix detection, seam cannot name prod).
+- **Engine**: `productionPolicy()`/`tableSetFor()`/`assertTargets(..., policy)` in `engine/tables.ts`, `CliContext.prod` in `cli.ts` (production = LIVE job, exact table set, no rehearsal tables, dev tooling commands refused); Lambda worker unchanged (still dev-only). Engine tests added in `units.test.ts`; 2 files pass; tsc clean for aljex-import.
+- **Scripts gated** (18): see CUTOVER_PLAN NB-2. `backfillDriverDocScans` used to default to PROD; fixed. `seedRevDivisions` now strict parseArgs.
+- **Rehearsal (seam `--prod-mode-rehearsal-suffix=<dev>-rhnbg2`, real engine, dev copy)**: refusals without env / env=1 / no flag / no backups / wrong typed confirm all closed; prodBackup created 17 backups; real-file slice `every:8` plan+apply ran (plan 24 s, apply 35 s, 988 loads: 951 matched, 37 conflicts, 0 errors; copy already held the full import, so reconcile payments differ by the pre-existing rows: expected, not a defect); synthetic apply 183 loads/170 invoices/154 bills created, rollback dry-run then apply removed them; seed-counter dry run 99357; resume/pitr without --apply stop after the plan.
+- **Caveat**: prod apply plan+apply happen in one invocation; review the plan from the dry run first (stageHash is deterministic).
+
+## 2026-11-04 - NB-3: data-stack template and Lambda env measured in PROD shape, over the limits, fixed (dev branch, not deployed, not committed)
+
+**Synth only: no deploy, no AWS write, no SSM value read (names via `ssm describe-parameters`; Amplify env var lengths via `get-app`/`get-branch`; dev Lambda env sizes by `jq` byte counts). Plan blocker NB-3.**
+- **New `node scripts/measureDataTemplate.mjs --prod-shape`:** branch `main`, `BCAT_DEV_STACK`/`BCAT_ISOLATED_PREVIEW` unset (no secret stripping, rules enabled, no SES deny), Amplify build-env LENGTHS from `scripts/lib/prodBuildEnv.json` filled with `x` (`--no-build-env` skips), secret names cross-checked against `scripts/lib/prodSecretNames.json` (11 names under `/amplify/shared/d3dejqzs77khq6`, nothing under the main branch path). Reports data-stack bytes vs 1,000,000, resources vs 500, every Lambda env with its real secret count. Exit 2 over the cap, 3 env over 3,900, 4 over the 995,000 guard, 5 over 500 resources. The plain `--branch main` is still refused.
+- **Before (same working tree):** prod shape **999,768 B** (232 under the cap, 4,768 over the guard), 457 resources; `tms-directory-actions` 13 secrets, exact strings + estimated tokens 4,218 raw, **~4,103 B real = over the 4,096 cap** (the old guard printed 3,796 OK: it multiplied the whole total by 0.9, but strings are exact). Dev shape was 1,003,211 B. Prod is SMALLER than dev by ~3.4 KB (dev adds a SES deny statement and `BCAT_DEV_STACK` to every Lambda); the secrets come back as env (+~1.1 KB on directory-actions) not as template.
+- **Fix 1, `DATA_TABLE_SUFFIX` (the directory-actions pattern):** `tms-shipment-actions` (33 table names), `tms-tracking-actions` (23), `tms-finance-actions` (23), `tms-crm-actions` (15), `tms-aljex-import` (26). Each `<X>_TABLE_NAME` cost ~300 B of template (Select/Split over the table ARN). `amplify/functions/_shared/dataTableEnv.ts` + one `tableEnv.ts` per Lambda (the env name -> model map, generated from the synthesized prod template; first import of each `handler.ts`; an explicit env value still wins). `backend.ts` `passDataTableSuffix(fn, MAP)` throws at synth if a model is missing and adds the one suffix. IAM grants unchanged. Checked: all 105 names equal `<Model>-<suffix>` in the deployed dev Lambdas.
+- **Fix 2, secret placeholder:** Amplify ships every `secret()` variable as `<value will be resolved during runtime>` (39 B; 89 Lambda x secret pairs); its shim overwrites `process.env[name]` from SSM at cold start regardless. One Aspect in `backend.ts` (replaces the dev-only one) now ships `''`; the dev pin `disabled-on-dev` and its SSM-config removal are unchanged and win. Side effect: a secret SSM does not hold (`GOOGLE_MAPS_API_KEY`, `GEOCODE_TOKEN_SECRET` on prod) reads as unset instead of as the placeholder text.
+- **Fix 3, estimator:** `checkLambdaEnvSize.mjs` counts strings exactly and scales only CloudFormation tokens (x0.8; measured 0.71). Calibration vs deployed dev, estimate vs real: directory 2,881/2,787, shipment 3,596/3,397, tracking 3,360/3,239, finance 2,780/2,645, aljex 2,974/2,823 (always above). Prints secrets per Lambda.
+- **After:** prod shape **961,649 B** (38,351 under the cap, 33,351 under the guard), **457/500** resources, max env `tms-directory-actions` **3,495 est (3,555 raw)**, then `driver-app-api` 2,798, `workflow-agent` 1,872; shipment 1,135, tracking 1,549, finance and aljex-import ~1.1 KB. Dev shape 966,455 B, dev pin intact (32 `disabled-on-dev`, 0 placeholders), prod shape has 21/21 rules ENABLED, no `BCAT_DEV_STACK`.
+- **Tests:** `_shared/dataTableEnv.test.ts`, `scripts/checkLambdaEnvSize.test.mjs` (a string-heavy env is not hidden by a whole-total discount; secrets list), `trackingReadBundleIam.test.ts` retargeted from a source-text match to the table map; the five routers' handler tests, `devRuleGuard`, `bundle.test.ts` pass; `tsc -p amplify` clean, eslint clean on the touched files.
+- **Remaining risk:** the template is still only a synth number; the P4 throwaway-branch deploy is what proves CloudFormation and Lambda accept it. 43 resources of headroom. Growth: each new table-name env costs ~300 B on any Lambda not on the suffix; each new secret ~230 B env + ~560 B IAM. `GOOGLE_MAPS_API_KEY` and `GEOCODE_TOKEN_SECRET` are still absent from prod SSM (degrades, not a deploy failure). NB-4 (Load GSIs) is separate. Re-run `--prod-shape` at F3.
+
+## 2026-11-04 - NB-4: prod Load/AuditLog GSIs - the one-GSI-per-update premise is wrong for this stack; sequence + check tool (analysis only, nothing deployed)
+
+**Read-only: local synth and CloudFormation `list-stack-resources`/`get-template` on the prod data stack, CloudWatch/CFN reads on dev. No prod write, no push, no branch touched.** Docs `GSI_DEPLOY_SEQUENCE.md`, CUTOVER_PLAN NB-4/P3 updated; tool `scripts/gsiSequenceCheck.mjs`.
+- **Mechanism:** Amplify Gen2 tables are `Custom::AmplifyDynamoDBTable` run by the AmplifyTableManager (one `UpdateTable` per `isComplete` poll, waits ACTIVE, 360 x 10 s per table). Prod's handler asset equals dev's. Dev Step B (`ee5b2cd`) already added 3 Load GSIs in one commit: serial creates 05:26:18 / 05:34:52 / 05:43:13, done 05:51:36 on 10-28 `[M]`; AuditLog GSI on 38.6k rows 8.5 min `[M]`.
+- **Delta main -> dev (synth vs prod deployed, main synth == prod with 0 diffs):** Load +3 GSI (`loadsByShipmentId`, `loadsByStatus`, `loadsByCheckCallOpenAndNextCheckCallAt`), AuditLog +1 (`auditLogsByEntityTypeAndEntityId`), 49 new tables, PITR ON for all 60 existing tables, TTL `ttlEpoch` on `TruckLocationHistory`. No key-schema/attribute-type/GSI-key change, no removed table, no `defineData` change: **no replacement risk**.
+- **Readers:** main reads none. No Load GSI reader has a fallback (only AuditLog does, and only for "schema field missing"); CloudFormation ordering (resolvers and the 66 data-stack Lambdas depend on the Load nested stack, which completes only when GSIs are ACTIVE) means none can run early.
+- **Plan:** P3 becomes ONE schema-only prep push with all four GSIs (~40 min), fallback three one-GSI-per-table commits (~24 min each, exact diffs in the doc). After a prep push main is not an ancestor of dev: merge with `git merge -s ours origin/main` (checks in the doc).
+- **Check tool:** `node scripts/gsiSequenceCheck.mjs synth|prod|diff|sequence|simulate` (exit 2 replacement risk, 3 >N GSI ops per table per step). Ran prod -> step1 -> step2 -> step3 -> dev on `git archive` checkouts: every step <= 1 GSI per table, exit 0; direct prod -> dev exits 3; `simulate` replays the real handler (Load 3 serial creates). Checkouts live in `.gsiseq-tmp/` (deleted).
+- **Not proven:** the whole thing on prod volumes inside Amplify (P3/P4 do that); the +8.5 min/GSI is a dev measurement.
+
+## 2026-11-04 - Step AI: conversational dashboards - chat-built, permissioned, per-viewer filtered (dev branch, not deployed, not committed)
+
+**Dev only. No deploy claimed (the lead gates and deploys), no SSM write, no production access, no model call from the build. Plan `AI-plan.md`, runbook `AI-notes.md`, exposure evidence `AI-exposure-audit.md`.**
+- **What it is:** Dashboard > New dashboard opens a chat builder. The assistant ALWAYS asks "Is this dashboard for the whole company, or for specific users/teams?" (appended by code, not the model) and builds no spec until the scope chip is clicked. The model only picks whitelisted queries (`QUERY_CATALOG`, 16 ids) and filters; every spec is parsed by the strict `parseSpec` on client and server (unknown query, extra param, limit, widget count, window span are refused). Saved dashboards appear under Company dashboards / My dashboards; each viewer runs a dashboard on THEIR OWN visibility (rep = sales rep or customer owner or team member; viewAll sees all), so the same COMPANY dashboard shows two people different numbers.
+- **No new model, table or Lambda:** the seven actions (`PREVIEW_DASHBOARD_CHAT`, `PREVIEW_DASHBOARD`, `LIST_DASHBOARDS`, `GET_DASHBOARD`, `GET_DASHBOARD_OPTIONS`, `SAVE_DASHBOARD`, `ARCHIVE_DASHBOARD`) are on the existing `tmsCrmActions` router; specs are `DASH:<uuid>` rows plus a `DASH:INDEX` row in the existing `DashboardRollup` table (kind `DASH`; the rollup sweep and the client rollup reader ignore them). Three claims: `DASHBOARDS_CREATE`, `DASHBOARDS_PUBLISH_COMPANY`, `VIEW_ALL` (Settings > Users, enforced).
+- **D1 caveat (read this before telling reps it is secure):** the visibility rule is enforced for everything the dashboards feature serves, but it is NOT an access boundary. `scripts/auditDataExposure.mjs` (read-only, a temporary identity with no group) found on dev that **95 of 109 models are readable by any signed-in user straight from AppSync** - Shipment (10,903 rows), Invoice (7,526), Customer (744), LaneRateSample (931), Quote (108), CarrierBill, Order, Load and DashboardRollup among them. A hand-written `listShipments` returns every row regardless of role or claim. Closing that is a separate costed step (decision D1). Coverage on dev (counts only): 94.4 % of customers have no owner, default rep or team (so a non-viewAll rep sees almost nothing until owners/teams are assigned); 34.2 % of last-90-day shipments have no `salesRepId`.
+- **Harness (not yet run):** `scripts/devVerifyAI.mjs` AI00-AI14 (ten temporary identities, ZZ customers/shipments/samples/quotes/invoices owned by different reps/teams through guarded SDK writes, a temporary `ZZAI` team in `TmsSettings.teams` restored and asserted equal): claims in Settings > Users, refusals without create/page/publish, scope gate (honest when the model is down), the visibility matrix on one COMPANY dashboard run by 8 viewers with fixture arithmetic and a hidden-value scan, revocation on the next run, audience vs data, 15 invalid specs, `DASH:` rows, live chat (SKIP: MODEL_UNAVAILABLE with the provider message when the key lacks credit), timing p50/p95, the UI walk (14 screenshots to `screenshots/ai/`), a sweep-untouched proof, cleanup. At most 12 model calls. `--inventory` passes offline.
+- **Needs Ryne:** D1 (how far "hard rule" reaches), D2 (who is viewAll: owner, ADMIN, role AR_AP, claim VIEW_ALL; MANAGER is not), assign owners/teams to customers before reps rely on dashboards, and Anthropic credit on the dev key (live chat only).
+- **Merge-to-main checklist, Step AI (additive, no backfill):** three new claims (`DASHBOARDS_CREATE`, `DASHBOARDS_PUBLISH_COMPANY`, `VIEW_ALL`) reach tokens at next sign-in and nobody holds them until an admin ticks them (owner/ADMIN implicit); `DASH:` rows share the existing `DashboardRollup` table (no new model - confirm nothing else lists that table without the `DASH:` filter); `tmsCrmActions` gains seven actions, the `ANTHROPIC_API_KEY` secret and `DASHBOARD_ROLLUP_TABLE_NAME` (same secret `tms-directory-actions` uses - confirm it exists for `main`); roles other than owner/ADMIN/AR_AP see the scoped Overview instead of the classic page the day this merges - tell Ryne first; re-run `measureDataTemplate.mjs`; re-run `auditDataExposure.mjs` and the coverage table against production data before reps use dashboards; decide D1/D2.
+
+## 2026-11-04 - Step AL: Carrier Sales inbound offers hub - e-mail and call offers filed on the right load, Unmatched bucket, Settings > Carrier Sales (dev branch, not deployed, not committed)
+
+**Dev only. No deploy claimed (the lead gates and deploys), no SSM write, no production access, no live Google or Anthropic call from the build. Plan `AL-plan.md`, runbook `AL-notes.md`.**
+- **No new model, table or Lambda:** a "carrier offer" is a BUY `Quote`; the per-load thread and the Unmatched bucket are `ShipmentMessage` rows (bucket = `shipmentId 'UNMATCHED'` with `ttlEpoch`); config and state are the `carrier-sales` row of `SpotSettings`. The listener is a third door in `tms-spot-quoter` (`carrierInbox/`); only `tms-shipment-actions` writes Quote/ShipmentMessage (`FILE_INBOUND_OFFER` system caller only, `ASSIGN_INBOUND_OFFER`, `DISMISS_INBOUND_OFFER`).
+- **Matching:** exact load reference / posting reference / reply thread auto-files at >= 0.85; lane + date alone is capped at 0.80 and never auto-files; ambiguity, medium confidence and no reference go to Unmatched with up to 3 suggestions. Covered load = `COVERED_LATE` thread message, no Quote. Nothing auto-accepts, counters or rejects; the mailbox is read-only.
+- **UI:** Carrier Sales tabs Needs cover / Offers (hub by load ID: carrier, MC, rate, source, time, packet, risk, Accept / Counter / Reject, per-load e-mail + call thread) / Unmatched (one-click assign, assign with edits, dismiss) / Covered; Settings > Carrier Sales (`/tms/brokerage/carrier-sales`, admin; mailboxes, voice agent secret, rules, SIMULATED INBOX dev panel). Route registered in `aaRoutes.mjs` (AA inventory gates pass), `devVerifyS2.mjs` row 39b, `AA_ROUTE_INVENTORY.md`.
+- **Voice:** Function URL `CarrierCallFunctionUrl` on the spot Lambda, hashed shared secret; the Cowtown payload contract is in `AL-notes.md`.
+- **Harness (not yet run):** `scripts/devVerifyAL.mjs` AL00-AL10 (temp identities, ZZ fixtures per `AL_FIXTURE_REFS`, sim mail/calls, tiers, assign/dismiss, existing offer actions, read-only/authority, UI L+D with screenshots to `Docs/tms-build/screenshots/al/`, cleanup); `--inventory` passes with `node --check`.
+- **Needs Ryne:** Google OAuth client under Integrations and the Google app published (consumer Gmail in Testing mode expires the refresh token every 7 days); the distribution address and how it reaches `ai4bcat@gmail.com`; someone to point the Cowtown agent at the webhook.
+- **Merge-to-main checklist, Step AL (additive, no backfill):** `ShipmentMessage` gains optional `offer` (json) and `ttlEpoch` (int) **and DynamoDB TTL on `ttlEpoch`** (a one-time table update at the first prod deploy; existing rows have no `ttlEpoch` and are never expired); `SpotSettings` gains optional `carrierInbox` / `carrierInboxState` (json); one new Lambda Function URL + `CarrierCallFunctionUrl` output on the spot Lambda (copy the URL into the voice agent after the prod deploy; create the secret in Settings first); `SHIPMENT_ACTIONS_FUNCTION_NAME` env on the spot Lambda and the `CarrierInboxInvoke` resource-policy permission on `tms-shipment-actions`; everything ships OFF (`enabled:false`, `voice.enabled:false`, no mailbox) until an admin switches it on. Check `node scripts/measureDataTemplate.mjs` before the push.
+
+
+## 2026-11-04 - Step AD deployed (job 159, commit d41e774; live MCP test run)
+
+**Dev only. Find & Invite at `/tms/carriers/find` (Carriers > Find & Invite; launch points: Carriers header, Carrier Sales, Cover/assign dialog).**
+- **Verified live on dev (`node scripts/devVerifyAD.mjs --live`, 33 pass / 0 fail):** MCP provider mode LIVE; PreviewCarrier for **MC 274623 (Ivan Cartage)** returned the review card (IVAN CARTAGE COMPANY, risk 3000, insurance rows 4, approved e-mails 1; GetCarrierData: no record, packet status none); invite dialog opens; launch points present. **Exactly ONE real `EmailPacketInvitation` was sent, to ai4bcat@gmail.com only: MCP HTTP 200**, response body has no keys. The harness hard-allows that single address and that single MC. MCP response status/keys logged in `Docs/tms-build/MCP_LIVE_TEST.md`. Screenshots: `Docs/tms-build/screenshots/ad/` (AD01-find-card, AD02-invite-dialog, AD03-carrier-sales-launch). The Ivan Cartage directory row was not updated by the invite (it is not a directory carrier yet: carriers enter ONLY through MCP preview/invite/packet).
+- Follow-ups: MCP has no name search (name search covers our directory only); packet status stays 'none' until the carrier completes the packet; Ryne to confirm the e-mail arrived at ai4bcat@gmail.com.
+
+## 2026-11-04 - Step AH deployed (jobs 158-160)
+
+**Dev only. Job 158 FAILED (tms-directory-actions Lambda environment 4,122 B > 4 KB; fixed with a DATA_TABLE_SUFFIX diet + a permanent per-Lambda env-size guard in `measureDataTemplate.mjs`); 159 and 160 SUCCEED.**
+- **Verified live (`devVerifyAH` on job 160): 26 pass / 0 fail**, including Ryne's 7 feedback items: required inputs green with no asterisks, 2 customer e-mail fields only, read-only Bill To block (terms, factor, billing e-mails, credit limit + available), miles auto-calc (est. straight line x 1.2 when Distance Matrix does not answer; typed override sticks), Check Calls = read-only Load Tracking preview with 'Open in Load Tracking', one-page layout, Intake row -> Create shipment prefilled from the e-mail with 'from e-mail' chips. Screenshots at 1440: `Docs/tms-build/screenshots/ah2/` (18) and `Docs/tms-build/screenshots/ah/` (34).
+- Follow-ups: a stop without coordinates gets no auto-miles (server returns null; real directory locations have coordinates); the Distance Matrix key is unverified (estimate path proven).
+
+## 2026-11-04 - Steps AK and AJ layout fix deployed (jobs 157-160)
+
+- **AK (per-truck work phones):** `TruckConfig.phone/phoneLabel`, `workPhoneFor`, SMS to the truck phone with personal fallback, Fleet phone column, 'Trucks without a phone' report. Dev seed applied: John Brittich's truck 530 phone set (number only in the seed run). Verified live (`devVerifyAJ`): AJ03/AJ05 SMS routing to the truck phone, AJ09 drawer shows work/personal. Report count mismatch (Fleet 5 vs Settings 11) was a never-clearing loading flag: fixed in `useAppStore.loadReferenceData`.
+- **AJ layout fix (Ryne's tracking drawer feedback):** the Mode / Method / Driver SMS controls are now an inline `TrackingPrefsRow` in the summary strip (no popover, no reflow). On job 160 `devVerifyAJ` still failed AJ08 (own-fleet fixture row not mounted by the virtualised grid: harness now searches first) and AJ09 (drawer ended at 968 px with the new 232 px map): map reduced to 150 px (expected ~886 px, **not yet re-measured live**).
+
+## 2026-11-04 - Step AN deployed (job 159)
+
+- Trailers share the trucks' Mark inactive / Reactivate flow (`src/lib/fleetActive.ts`, Inactive tab on both lists, audit entries, inactive units excluded from pickers, counts, map, insurance day counting). **Unit tests only (26 files / 194 tests); no live harness for AN.** Parked trucks now appear only under the Inactive tab. Merge-to-main: additive, no backfill.
+
+## 2026-11-04 - Step AP deployed (job 159)
+
+- Shipments board chips with live counts (Missing reference #, Missing sales rep, Missing rev division, Missing documents, Check call overdue LAST; 'Open exceptions' removed); batch bar with ONLY 'Push to Load Review' (max 9, per-customer requirements `Customer.reviewRequirements`, org default in `TmsSettings.reviewRequirements`, per-row failure reasons); **Release exists only on Load Review** (batch, 9 max, server requires the Load Review marker; Intake grid push-only). `devVerifyAP --walk` exit 0 on job 159. Screenshots `Docs/tms-build/screenshots/ap/`.
+- Follow-up decision for Ryne: shipment-detail `ArCard` 'Ready to invoice' and `ReleaseGateCard` still exist (plain READY_TO_INVOICE path, not Load Review); removing them changes the AR workflow.
+
+## 2026-11-04 - Step AM deployed (jobs 159-160)
+
+- Cover flow + carrier assignment ladder (ASSIGNED_SETUP_PENDING -> SETUP_COMPLETE -> RATE_CON_SENT -> RATE_CON_SIGNED -> DRIVER_INFO_ENTERED), MCP-driven `Carrier.status` (no manual setup-complete; lapse flips INACTIVE), rate con blocked until ACTIVE, dispatch blocked until the four driver fields, Remove carrier with optional DAT repost, manual Add carrier removed (admin data fix only), chips in Carrier Sales / boards / header / Load Tracking. **Verified live (`devVerifyAM --walk` on job 160): 78 pass / 0 fail / 1 skipped (AM02 MCP preview is opt-in).** Screenshots `Docs/tms-build/screenshots/am/` (15). The Cover directory lookup queued while the directory loaded (the earlier AM01 timeout).
+
+## 2026-11-04 - Step AO deployed (job 160)
+
+- Driver GPS map in the tracking drawer (Motive own-asset pings, tap-to-share consent page, shared-location SMS parsing, check-call text geocode, MacroPoint / Trucker Tools provider slot (STUB), server-side Routes API route cache, customer-page reuse); reuses `TruckLocationHistory` (no new table). **First live run `devVerifyAO` on job 160: 16 pass / 3 fail / 1 skipped**; fixes (harness: dev Maps key works so google mode accepted; dialog count excludes the drawer itself; dots polled) are in the working tree and **not yet re-verified live**. Screenshots `Docs/tms-build/screenshots/ao/` (4 so far). Runbook `Docs/tms-build/AO-notes.md`.
+
+## 2026-11-04 - Steps AE, AQ and Feedback deployed (jobs 159-160)
+
+- **AE:** Lane rates removed (redirects to /tms/rates), Rate intelligence panel (DAT live/STUB, what we ran this lane for, what we quoted + win rate), Push to DAT (ShipmentPosting, STUB label, Unpost, Carrier Sales postings list). `devVerifyAE` **5/5 on dev, two consecutive runs** (lane-intel freshness fix: current month no longer cached).
+- **AQ:** Ivan Cartage own-fleet driver pickers come only from active Driver records (shared `OwnFleetDriverPicker`; server refuses typed drivers on Ivan Cartage legs). `devVerifyAQ --walk`: **30 pass / 0 fail** (roster 14 active drivers; counts only). Gap: the server fills truck/trailer unit numbers from the caller (adding an Equipment table env to tms-shipment-actions was skipped to protect its 4 KB env limit).
+- **Feedback page** ported from main commit a90a2a3 (model + storage rule identical; footer link in the shell rail for every signed-in user; palette classes swapped for dev's tokens).
+
+## 2026-11-04 - Verification status and open risks (after job 160)
+
+- Data stack template 991,153 B of 1,000,000 B after AG (AG cost 17.9 KB, not the planned 11-16 KB); per-Lambda env sizes (estimated): tms-directory-actions ~3.1 KB real, tms-shipment-actions 3.6 KB, tms-tracking-actions 3.3 KB. AI uses the DashboardRollup table + tms-crm-actions (no new model/Lambda).
+- AF follow-ups still open: stream-driven rollup recompute (G10), chart-ready probe, SPA shell trimming; perf G6 re-baselined after review (no money math changed).
+- Decisions for Ryne: shell floor budget 45 -> 48; Anthropic credit for live classification; own-fleet loads hidden from the Tracking grid unless 'Include loads without a TMS rate con' is on (default scope question); D1 (any signed-in user can read every model via AppSync: dashboard visibility is enforced only for what the dashboard feature serves).
+
+## 2026-11-04 - Step AG: Accounting > AP inbox sync (read-only Gmail mailbox, auto-update of invoice number/dates, review queue) (dev branch, not deployed, not committed)
+
+**Dev only. No deploy claimed (the lead gates and deploys), no SSM write, no production access, no live Google call. Plan `AG-plan.md`, runbook `AG-notes.md`.**
+- **What it does:** `ai4bcat@gmail.com` (consumer Gmail, `gmail.readonly`, Google client from Settings > Integrations > Google) is read daily (Chicago run hour, catch-up) and on **Review now**. Mail the model classifies as an invoice or credit memo is cross-referenced to open Accounts Payable; a strong match fills the bill's invoice number / dates (and the amount on a placeholder `IN_REVIEW` bill) with a CAS write, an audit row with the Gmail link and a reversible `AP_INBOX_REVERT`; everything else lands in the **AP inbox** tab (link to a bill / create a bill / dismiss). It never approves, pays, records or changes the status of a bill.
+- **Pieces:** `src/lib/apInbox/*` (pure contracts, matching, apply plan, digest), Lambda `tms-ap-inbox` (hourly + Review-now doors, router actions `AP_INBOX_*`), `ApInboxItem` model (+ TTL) and additive fields, AP tab + digest line + settings card, `SpotCallbackPage` routes the `ap.` OAuth state.
+- **Needs Ryne:** Google client entered under Integrations > Google with `ai4bcat@gmail.com` as a test user; while the Google app is in Testing the connection expires every 7 days (AG-notes section 3); Anthropic credit for live extraction.
+- **Harness (not yet run):** `scripts/devVerifyAG.mjs` (AG00-AG13 on the SIMULATED mailbox, temp identities, ZZ data and cleanup; `--inventory` passes offline) with `scripts/lib/apInboxFixtures.mjs` (hand-built PDFs + the 15-entry mail corpus, tested).
+- **Merge-to-main checklist, Step AG:** new `ApInboxItem` table with DynamoDB TTL on `ttlEpoch`; additive nullable fields on `CarrierBill`/`VendorPayable` (`apInboxItemId`, `apInboxSourceUrl`, `apInboxAppliedAt`) and `TmsSettings` (`apInbox`, `apInboxState`), no backfill; Lambda `tms-ap-inbox` with an hourly EventBridge rule and the `ANTHROPIC_API_KEY` secret; one new SSM parameter name (`/bcat/gmail/<pool>/users/ap-inbox`, created only by the app's connect flow); re-run `scripts/measureDataTemplate.mjs` (data stack was near the 1 MB limit); confirm no production caller writes the AP columns the Lambda owns.
+
+## 2026-11-04 - Step AO: driver GPS map in the Load Tracking drawer, tap-to-share driver page, text-shared pins, provider slot (STUB), cached route, inline tracking-prefs row (dev branch, not deployed, not committed)
+
+**Dev only. No deploy claimed (the lead gates and deploys), no SSM write, no production access, no live MacroPoint / Trucker Tools call. Plan `AO-plan.md`, runbook `AO-notes.md`.**
+- **One position list, six sources:** every load position (Motive / Blue Ink ELD, the driver's phone link, a pin shared in a text, a place named in a text (approximate), a provider delivery, a manual check call) is a `TrackingFix` (`src/lib/trackingPings.ts`); load-keyed rows live in `TruckLocationHistory` (`truckId='load:<id>'`, 90-day `ttlEpoch`), Motive rows are read as before and never copied. Newest fix wins, except that a newer approximate fix never replaces a precise one under 4 h old (it is an overlay circle).
+- **Drawer map:** a collapsible panel between the strip and the panes (remembered per browser): Google map when `VITE_GOOGLE_MAPS_API_KEY` works, else an offline state-outline SVG with pins, the route, breadcrumb dots, the current marker and the approximate circle (no key / rejected key / failed chunk degrade with a caption; blocked outline data degrades to text). The same panel is on the full-page Tracking tab; `TrackingDetailMap` is deleted.
+- **Driver page (`/track/l/:token`):** explicit versioned consent (`ao-1`, server text, "I agree" required, no geolocation call before the tap), a post every 5 minutes while the page is open, Stop sharing, a 410 "Delivery complete" state once the load is delivered; a ping from a link with no consent is a 403 and writes nothing; cap 1,500 pings per link.
+- **Customer page (`/track/s/:token`):** the shared map in public mode: thinned trail (15 min apart, 3 decimals, at most 96 points, inside the tracking window), the cached route, the approximate fix flagged; never the source, accuracy, speed, heading, refId or carrier; `showPosition:false` links carry neither map nor position.
+- **Texts:** an Apple / Google Maps link, raw coordinates or a vCard becomes an exact pin; "just passed Gary IN" is geocoded as an approximate fix (radius 2-50 km); "Thanks" costs no geocoder call; short links resolve only through an https allow-list (3 s, 3 hops).
+- **Route:** `GET_LOAD_ROUTE` (server Routes API, one call per lane per 30 days, legacy Directions retry, straight-line `ESTIMATE` with a reason when neither works). **Needs Ryne:** enable Routes API on the server key `GOOGLE_MAPS_API_KEY`; confirm `VITE_GOOGLE_MAPS_API_KEY` (referrer-restricted browser key) and `VITE_GOOGLE_MAPS_MAP_ID` on the Amplify branch (AO-notes section 6).
+- **Provider slot, STUB only:** `START_PROVIDER_TRACKING` / `STOP_PROVIDER_TRACKING`, a `PROVIDER_TRACK` link row as the subscription record, the webhook consumer behind the existing HMAC + replay receipt; the stub port subscribes nothing and accepts only the SIM delivery shape; `liveCapabilities` still excludes `track`. STUB -> LIVE steps are in AO-notes section 5 (blocked on the provider's contract and credentials).
+- **AJ follow-up:** the tracking-prefs popover is replaced by an always-visible 28 px `TrackingPrefsRow` inside the strip (three selects, Save / Reset, "In force" read-out, customised dot); `TrackingPrefsPopover` and its test are deleted. `scripts/devVerifyAJ.mjs` (AJ09 and its plan-file list) and `scripts/lib/verifyTrackingUi.mjs` (the Tracking tab now carries `tracking-map-panel`, not `tracking-detail-map`) moved to the new test ids.
+- **Harness (not yet run):** `scripts/devVerifyAO.mjs` (AO01-AO14: sim pings, public ping + consent, shared SMS, check-call text, own-asset Motive rows, provider STUB, cached route, customer JSON, drawer UI, prefs row with a 0 px reflow check, driver page under Chrome geolocation emulation, customer page, Google branch only with `DEV_VERIFY_MAPS=1`; 18 screenshots to `Docs/tms-build/screenshots/ao/`), `setGeolocation` / `grantGeolocation` / `blockUrls` added to `scripts/lib/cdpBrowser.mjs`. `--inventory` and `node --check` pass; the live run happens after the deploy. No route is new (`/track/l/:token`, `/track/s/:token` are already in `aaRoutes` / `AA_ROUTE_INVENTORY.md`).
+- **Merge-to-main checklist, Step AO (additive, no backfill):** `TruckLocationHistory` gains optional `loadId`, `accuracyM`, `approx`, `refId`, `ttlEpoch`, `payload` and **DynamoDB TTL on `ttlEpoch`** (a one-time table update at the first prod deploy; one TTL change per hour; rows without `ttlEpoch`, i.e. every existing Motive / Blue Ink row, are never touched), and its GraphQL create / update / delete / subscriptions are disabled (nothing client-side wrote it; confirm no prod caller). `TrackingLink` gains `kind` value `PROVIDER_TRACK` plus optional `provider`, `providerRef`, `consentAt` (the public Lambda also writes an unmodelled `lastLogPingAt` attribute; the schema does not declare it). No existing row changes and nothing to backfill; the 90-day retention starts with the first ping. Set the Amplify branch env `VITE_GOOGLE_MAPS_API_KEY` / `VITE_GOOGLE_MAPS_MAP_ID` and enable Routes API on the server key (otherwise the map shows the outline and routes are estimates). Data stack size: measure with `node scripts/measureDataTemplate.mjs --branch dev` after the final AO schema (AO-plan R4 stop-line +2 KB).
+
+## 2026-11-04 - Step AQ: an Ivan Cartage driver is always one of our Driver records (dev branch, not deployed, not committed)
+
+**Dev only. No deploy claimed, no SSM write, no production access.**
+- **One helper, one picker:** `src/lib/ownFleetDrivers.ts` (pure, shared with the Lambda by relative import: `buildOwnFleetRoster` = active non-broker drivers sorted by name with truck # / trailer # (active units only) and the phone through `workPhoneFor`, so the truck's work phone is preferred over the driver's own number (Step AK); `ownFleetFill`, `ownFleetOptionLabel`, `ownFleetDriverByName`, `isIvanCartageName`, `resolveOwnFleetDriver`), `src/hooks/useOwnFleetRoster.ts` and `src/components/OwnFleetDriverPicker.tsx` (a select, no text input, so a typed name cannot get in).
+- **Used everywhere a driver is named for own fleet (clean cutover, the duplicated roster selects are gone):** `AssignDriverDialog` (Book Ivan Cartage / Change driver; truck + trailer pre-filled from the record), the shipment form Carrier Information Driver 1 (a pick fills phone, Truck # and Trailer #, all read-only), `DriverInfoDialog` (Step AM ladder step, when the carrier is Ivan Cartage the three other fields are read-only and the driver id is sent), `BookCarrierDialog` (when the picked directory carrier is Ivan Cartage the four free-text fields become the picker). The Cover dialog and the tracking drawer have no driver input of their own (Cover assigns, the ladder's Enter driver info takes the driver; the drawer only displays), so they are covered through `DriverInfoDialog`. Brokered carriers keep free-text driver fields everywhere.
+- **Ivan-named leg on the form and Dispatch:** a directory carrier named Ivan Cartage locks the typed driver / truck / trailer fields on the Carrier Information section and `carrierDetailsPatch` leaves them out; `DispatchDialog` treats it like an own-asset leg (driver read-only); the typed "Assign carrier" dialog refuses an Ivan Cartage name with the Step W sentence.
+- **Server (`tms-shipment-actions`):** `ASSIGN_ASSET` fills truck / trailer from `Driver.assignedTruckId/assignedTrailerId` when omitted (a number the caller sent wins) and refuses a typed `driver2` (a second driver must be a roster `driver2.driverId`); `ENTER_DRIVER_INFO`, `UPDATE_LOAD_CARRIER_DETAILS` and `BOOK_CARRIER` / `COVER_CARRIER` on an Ivan Cartage carrier require `driverId` of an active Driver (inactive / broker / unknown refused with the Step W sentences), refuse a typed name with `OWN_ASSET_MESSAGES.freeTextDriver`, and fill name / phone / truck # / trailer # from the record when omitted; `DISPATCH_LOAD` no longer takes a typed driver on an Ivan-named leg. `UPDATE_LOAD_CARRIER_DETAILS` accepts `driverId` only on an Ivan Cartage leg (`orderForm.validateCarrierDetails` passes it through; every other leg still refuses it). Own-fleet legs (`kind OWN_ASSET`) were already refused by ENTER_DRIVER_INFO / UPDATE_LOAD_CARRIER_DETAILS.
+- **Needs one backend wiring step (not done here, `backend.ts` belongs to another agent):** the Lambda reads `Equipment` through the optional `EQUIPMENT_TABLE_NAME` to turn an assigned truck / trailer id into a unit number. Until `shipmentActionsFn.addEnvironment('EQUIPMENT_TABLE_NAME', <Equipment table>)` and a `dynamodb:GetItem` grant on that table are added, the server fills the truck / trailer **ids** and phone from the record but takes unit **numbers** only from what the caller sent (the UI always sends them). Adding the env without the grant would make ASSIGN_ASSET fail on a driver with an assigned truck.
+- **Proof:** targeted vitest (`ownFleetDrivers.test.ts`; `AssignDriverDialog`, `CarrierInformationSection`, `CarrierLadder` (Ivan driver-info), `BookCarrierDialog.render` (Ivan picker, no typed driver, id sent, brokered unchanged); handler tests `Step AQ` (typed name refused, record fills phone, inactive / broker / unknown refused, second driver refused, brokered still free text)), `tsc` app / root / amplify, eslint on the touched files, `node --check` and `--inventory` on `scripts/devVerifyAQ.mjs`. The `--walk` (real prod-refresh roster, temp ADMIN identity, counts and field presence only, no screenshots, nothing assigned) runs after the deploy.
+
+## 2026-11-04 - Feedback page ported from main (a90a2a3) (dev branch, not deployed, not committed)
+
+**Dev only. Same Feedback model and `feedback/*` storage rule as main; no schema divergence.**
+- **Verbatim from main:** the `Feedback` model in `amplify/data/resource.ts` (placed before Fuel transactions; same name, fields, `disableOperations(['subscriptions'])`, `allow.authenticated()` create/read/update), the `feedback/*` rule in `amplify/storage/resource.ts`, `src/lib/feedbackClient.ts`, `src/features/feedback/feedbackLogic.ts` and its test. `FeedbackPage.tsx` differs only in colour classes: dev's lint bans Tailwind palette classes, so status chips use `tms-badge-red/orange/green` and surfaces use `bg-card` / `bg-muted` / `text-destructive` / `text-primary`; behaviour is unchanged.
+- **Route + nav (dev shape):** `/feedback` is a plain `<Route>` in `src/App.tsx` (no page grant: any signed-in user submits; the triage controls show for `isAdmin` only, as on main). Main's NavBar link has no home on dev, so the AA shell rail footer (`TmsShell`, above Log out) carries a Feedback link for every signed-in user. It is deliberately not a Settings child: that would show the Settings group (and the Brokerage business) to users with no page grants. Registered in `scripts/lib/aaRoutes.mjs` (AA_HOMES off-nav, AA_OLD_URLS), `scripts/lib/s4Routes.mjs` (S06) and `AA_ROUTE_INVENTORY.md`. Breadcrumb is the title-cased fallback.
+- **Template:** `node scripts/measureDataTemplate.mjs --branch dev`: data stack 971,487 bytes (28,513 under the 1,000,000 cap); Lambda env-size check passes.
+- **Merge to main:** the model and storage rule are byte-identical on both branches, so the dev -> main merge has no schema conflict; expect conflicts only in `src/App.tsx` (take dev's file plus the one Feedback import/route) and `NavBar.tsx` (main-only legacy nav, dropped with the AA shell).
+- **Proof:** vitest (feedbackLogic, TmsShell incl. new "Feedback reachable with no grants" test, TmsLayout, navSections), `devVerifyAA.mjs --inventory`, tsc, eslint on touched files.
+
+## 2026-11-04 - Step AM (UI half): Cover flow, carrier assignment ladder chips and buttons (dev branch, not deployed, not committed)
+
+**Dev only. UI half only; the backend half is in AM-notes.md. No deploy claimed, no live MCP call or invitation, no SSM write.**
+- **Cover dialog** (`src/features/carriers/cover/`): from Carrier Sales (Needs cover), the shipment Carrier tab (empty state), the Overview Actions menu and a board row action. MC / DOT -> our directory first (packet status shown); an ACTIVE carrier is assigned at once with no MCP call; any other carrier is previewed on MCP (review card) and assigned only after its setup packet is sent (`MCP_SEND_INVITE` with `ensureCarrier`, then `COVER_CARRIER`). UNACCEPTABLE blocks, MODERATE needs an acknowledgement (`MCP_MODERATE`), STUB assigns nothing.
+- **Ladder UI** (`carrierLadder.ts`, `CarrierAssignmentChip`, `CarrierLadderCard`): five-rung card on the Carrier tab with times and buttons (Send setup packet, Send / Resend rate con, Mark signed with an uploaded PDF, Enter driver info (four mandatory fields), Remove carrier with an optional Re-post to DAT, off by default). Dispatch is disabled until the four driver fields are on the assignment. The rate con panel also waits for Carrier ACTIVE.
+- **Chips and columns:** Carrier Sales Covered tab (column + status filter), Shipments board (`carrierAssignment` column, in the Aljex default layout, multi filter), shipment header, Load Tracking grid (default column). Once driver info is in and the shipment is moving, the shipment status takes over the chip.
+- **No rogue carriers:** Carriers page manual add is admin-only ("Carrier (admin data fix)"); Find & Invite lost "Add to carriers" and its invite now creates the Pending row; the Overview "Assign carrier (name only)" is admin-only; the carrier status dialog no longer offers Active by hand until MCP reports the packet complete (Aljex-imported carriers excepted).
+- **Public signing page:** a "Driver and truck" card for the four fields, showing what the rep already entered.
+- **Proof:** targeted vitest (shipments, carriers, carrierSales, shipmentViewDefs: 79 files / 757 tests), `tsc -p tsconfig.app.json`, eslint on the touched trees, `node --check` and `--inventory` on `scripts/devVerifyAM.mjs` (the `--walk` screenshots to `Docs/tms-build/screenshots/am/` run after the deploy).
+
+## 2026-11-04 - Step AN: ACTIVE / INACTIVE for trucks and trailers (dev branch, not deployed, not committed)
+
+**Dev only. Frontend only, no schema change (the data stack stays at 967,607 B, `resource.ts` untouched). No deploy claimed.**
+- **One selector:** `src/lib/fleetActive.ts` (`isUnitActive`, `activeUnits`, `inactiveUnits`, `unitsInTab`, `fleetCounts`, `driversHoldingTrailer`, `reactivatePatch`, `inactiveChanges`). A unit is inactive when `active === false`; a missing flag is active.
+- **Mark inactive / Reactivate for trailers:** the Fleet list row and the expanded drawer both carry the button for trucks and trailers. `MarkInactiveDialog` is shared: a trailer skips the plates/ELD questions and shows only the insurance note. Date defaults to today; reactivating sets `active: true, inactiveSince: null`.
+- **Assigned-trailer rule (mirrors nothing in the truck flow, which had no rule):** a trailer still set as a driver's `assignedTrailerId` cannot be marked inactive. The dialog lists the drivers, disables the save and offers an Unassign button per driver. Loads name their trailer as a typed number, so open loads are not checked.
+- **Fleet list tabs:** All / Trucks / Trailers show active units only; a new Inactive tab (with a count) lists every parked truck and trailer. KPI tiles count active units.
+- **Excluded when inactive:** driver trailer picker (`DriverDrawer`), file panel trailer picker (`EntityFilePanel`), the trailer pre-filled when booking a driver at shipment creation and in the batch driver action (`NewShipmentDialog`, `ShipmentsBoard`; the assign dialog already filtered), the trailer shown on the Truck map line (`trailerOnDriver`), Fleet Manager dashboard counts, and insurance: a parked trailer leaves the shared trailer total (`computeInsuranceAllocation` / `insuranceRangeByTruckDated` take an optional `trailers` list and cut the range at the trailer's inactive date; `useInsurance` summary and the Insurance page mark the row 'inactive, not counted').
+- **Audit:** `updateEquipment` writes an `AuditLog` row (`entityType: 'Equipment'`, action `update`, only the `active` / `inactiveSince` changes) whenever those change, for trucks and trailers; the Audit page id lookup includes `Equipment`.
+- **Not applicable:** the shipment form's trailer field (`CarrierInformationSection`) is a free-text trailer number, not a picker, so there is nothing to filter there.
+- **Proof:** `fleetActive.test.ts` (selector, tabs, assigned-driver lookup, audit diff, trailer insurance days, map line), `TrucksPage.test.tsx` (Inactive tab, mark inactive writes the day + audit and updates counts, reactivate clears, assigned trailer blocks until Unassign). The old phone-prompt test no longer expects the parked truck in the default list.
+
+## 2026-11-04 - Step AD: Carriers > Find & Invite, the MyCarrierPackets review-and-invite page (dev branch, not deployed, not committed)
+
+**Dev only. No deploy claimed: `MCP_*` actions, the `mcp-sync` `ADD_CARRIER` kind, three additive Carrier fields (`mcpInvitedAt/To/By`) and one IAM grant (PutItem on ShipmentMessage for tms-directory-actions) need the next backend deploy. No live MCP call, no invitation, no SSM write was made during the build; everything MCP-facing was tested against a mock `fetch`.**
+- **Route + nav:** `/tms/carriers/find` (page keys carriers / loads / tms), Carriers now has two nav children (Carriers, Find & Invite) and a breadcrumb. Launch points: Carriers header button, Carrier Sales banner link (every tab, so it sits on the offers card too), and 'Find & invite a carrier' on step 1 of the cover/assign dialog (`BookCarrierDialog`), which carries `shipmentId`, `loadId` and the typed search.
+- **Page:** search by MC / DOT / docket (`MC 274623`, `DOT 123`, bare digits = MC); a name searches OUR directory only because MyCarrierPackets' API has no name search (stated on the page). PreviewCarrier answers first and fills the card, GetCarrierData folds in. Card (`McpReviewCardView`): header with name / DBA / MC / DOT and chips (operating status, authority, safety, packet stage, monitored, blocked, fraud flags), risk gauge + per-category points and infractions + review details, insurance table (limit, expiry, active / expired / cancelled), authority and event timeline, FMCSA facts, contacts, approved e-mails, packet history, equipment, lanes, cargo, modes.
+- **Invite:** 'Send packet invitation' opens an e-mail picker (MCP-approved addresses + 'Another address...'), validated in the browser and again on the server (`validateInviteEmail`). Sending logs on the Carrier row (`mcpInvitedAt/To/By`, `mcpStatus` -> INVITED only while the packet had not started), an AuditLog row (status + response key names only) and, when launched from a load, a NOTE on that shipment's thread.
+- **Add to carriers:** `mcp-sync` kind `ADD_CARRIER` -> `addCarrierFromMcp` (same row / contacts / payment / `MCP_CREATE` audit as the backfill, MCP values win, status PENDING); a carrier that already matches (MC, DOT, exact name) is returned untouched. The caller is audited separately (`MCP_ADD_CARRIER`).
+- **Already in directory:** matched client-side on MC, DOT then unique name; shows packet status on our row, last invitation and a profile link, and hides Add.
+- **STUB:** when the integration is not LIVE (no credentials, neutered, Validate not green) the server answers a labelled fixture built by the SAME mapper (`stubReviewCard`), says why, never calls MCP, never invites (`sent:false`) and refuses Add.
+- **Server:** `MCP_PREVIEW_CARRIER`, `MCP_GET_CARRIER`, `MCP_SEND_INVITE`, `MCP_ADD_CARRIER` in `tms-directory-actions/mcpFind.ts` (credentials read in the Lambda via the Integration gate, never returned or logged); authz owner / ADMIN / page-carriers / page-loads / page-tms (the Integrations actions stay owner / ADMIN).
+- **Harness:** `node scripts/devVerifyAD.mjs` (inventory, no network), `--read` (dev walk, lookups for MC 274623 only, screenshots to `Docs/tms-build/screenshots/ad/`), `--live` (as `--read`, then exactly ONE invitation to ai4bcat@gmail.com; guards in `scripts/lib/adLive.mjs`: MC 274623 by MC only, the card must be Ivan Cartage, allow-list of one address, one send per run; status + body keys appended to `Docs/tms-build/MCP_LIVE_TEST.md`).
+- **Proof:** targeted vitest (mcpReview mapping / stub / picker / directory match, addCarrierFromMcp, mcpFind actions, directory handler authz, page render, three launch points, nav, adLive guards), `tsc` app / root / amplify, eslint on touched files, `node --check` on the harness.
+- **Not done / notes:** names are not searchable on MCP; the live screenshots and `MCP_LIVE_TEST.md` exist only after the lead deploys and runs `--live`. An existing unrelated failure remains in `tms-directory-actions/handler.test.ts` ('SAVE_OWNERSHIP_DIVISION > intake e-mail > refuses ai4bcat@gmail.com').
+
+## 2026-11-04 - Step AE: Quotes cleanup + Rate intelligence panel (dev branch, not deployed, not committed)
+
+**Dev only. No deploy claimed: the new `LANE_INTELLIGENCE` action needs the next backend deploy; run `node scripts/devVerifyAE.mjs` afterwards.** No schema change (additive or otherwise): the `Quote` model already carries WON / LOST / PASS status, `lostReason`, `lostNote`, `closedAt`, `shipmentId`, so win/loss was already recorded and 'Mark lost' (with a required coded reason) already existed on the Quote detail page.
+- **Lane rates retired:** the nav row, breadcrumb, the 'Lane rates' button on Quotes and the route are gone; `/tms/rates/lanes` and the legacy `/rates` redirect to `/tms/rates` (`src/lib/retiredRoutes.ts`, `ParamRedirect` extracted to `src/components/ParamRedirect.tsx`). `LaneRatesPage.tsx`, `LaneRateSample` and `LaneHistoryPanel` are kept (unrouted). `scripts/lib/aaRoutes.mjs` and `devVerifyAA` updated for the removed row.
+- **Shared lane matching** `src/lib/laneMatch.ts` (pure): city/state normalisation (St./Saint, state names, punctuation), ZIP3 fallback, opt-in radius (needs coordinates on both places), both ends must match, tier CITY / ZIP3 / RADIUS; equipment aliases (Dry Van = V = VAN). `src/lib/laneIntel.ts` (pure): history rows + count / avg / low / high (own-asset legs are a null cost, not free), quote outcome mapping (converted or WON = WON; LOST/PASS = LOST; EXPIRED reason or sent quote past its clock = EXPIRED; open = PENDING; drafts and canceled are not lane history), win rate = won / (won + lost + expired).
+- **Backend `LANE_INTELLIGENCE`** (tms-shipment-actions `laneIntel.ts`, authorised for the quote desk or dispatch like PRICE_FROM_MARKET, read-only): lane samples by `laneKey` and `laneKey3` GSIs with the 24-month floor in the key condition (max 6 pages each), quotes by the `quoteMonth` GSI one Query per month (25 parallel bounded reads; Quote has no lane index and adding one would spend template headroom), past months memoised 10 min per container; the current month and the lane samples are always read fresh (a 60 s answer cache hid just-written quotes: found by devVerifyAE on job 159, removed). Imported Aljex history (source BACKFILL) is read through the same samples. Measured budget (< 2 s) is gated by devVerifyAE AE01 on dev.
+- **Panel** `RateIntelligencePanel` on the Spot inbox request (between Pricing and Suggested response; reuses the page's DAT answer so one request is one market call) and on the Quote detail aside: (a) DAT RateView LIVE or labelled STUB, (b) what we ran this lane for (date, customer, carrier cost, customer rate, margin; count/avg/low/high; ZIP3-area rows badged), (c) what we quoted this lane for (date, customer, quoted, outcome badge, win rate). The quote's own row is excluded from its own history.
+- **Spot 'Mark lost'** now takes a coded reason (same list as Quote 'Mark lost') plus a note and also closes the request's open quote with it, so the quote history records the loss instead of leaving it PENDING.
+- **Proof:** targeted vitest (laneMatch, laneIntel, laneIntel server action, RateIntelligencePanel, MarkLostDialog, retired-route redirect, Spot inbox incl. panel + lost, QuoteDetail panel wiring, navSections), `tsc` app / node / amplify, eslint on touched files, `node --check` and `--inventory` on `scripts/devVerifyAE.mjs`. Screenshots (`Docs/tms-build/screenshots/ae/`) are produced by devVerifyAE AE04 after the deploy.
+- **Push to DAT (Ryne addition):** `POST_QUOTE_LOAD` / `UNPOST_QUOTE_LOAD` (tms-shipment-actions `postings.ts`; same quote/dispatch authorisation as the offer actions). A load board posting needs no shipment, so a quote (or a spot request with no quote yet, from its own lane) is posted through the SAME Step J DAT adapter and the SAME `ShipmentPosting` rows as POST_LOAD, with **no schema change** (nothing for the template-size limit): the row's `shipmentId` carries the subject key `quote:<quoteId>` / `spot:<requestId>`, id `post:<key>:DAT`, and the quote<->spot link rides in `note`. Live when DAT credentials exist, otherwise the adapter's STUB answer is recorded and labelled STUB; refused for closed, converted (post it from the shipment) or buy-side quotes and for a lane without cities / equipment; rate offered = rep's number, else the quote's topSpend/targetBuy. UI: `PushToDatCard` on Quote detail and the Spot request drawer (status LIVE/STUB, POSTED/UNPOSTED/FAILED, Push / Update / Unpost), and `QuotePostingsCard` in Carrier Sales (active postings from quotes with Unpost). devVerifyAE AE05 proves it live on dev (skips the post if DAT is LIVE). `scripts/measureDataTemplate.mjs` not run: resource.ts / backend.ts untouched. The earlier amplify tsc error at handler.ts(7863) was my LANE_INTELLIGENCE return type and is fixed.
+- **Not done / notes:** the radius option is in the lib and tested but not wired to the server read (samples carry no coordinates); `src/features/tms/TmsShell.test.tsx` still uses 'Lane rates' as a fixture label for the generic `exclude` mechanism.
+
+## 2026-11-04 - Steps AF, AH, AJ, AK, AC2 deployed on dev (Amplify jobs 154, 156, 157; 155 failed on a CDK synth error, fixed)
+
+**Dev only. Commits a8e320e (154), 8c2969b (155, FAILED: SSM parameter name was a token), 2d677d9 (156), f3ae503 (157).** Gate now includes `node scripts/measureDataTemplate.mjs --branch dev` (real synth): data stack 967,607 B of the 1,000,000 B cap (446 of 500 resources): little headroom left.
+- **AF company dashboard (Ryne: 'really slow'):** baseline (dev, 1440px, medians): `/tms/dashboard` KPIs visible cold 4.48 s / reload 4.07 s / in-app 2.96 s, 75 req / 10.75 MB; legacy `/dashboard` numbers stable 3.9 s cold, settled 6.1 s, 160 req / 30.2 MB. Root causes found: shell `SPOT_COUNT` poll classified as a write wiped the whole list cache every minute (fixed, read-classification regex + table test), page waited on stage-2 joins and unused financials, legacy dashboard computed over whole loads. Built: DashboardRollup model + `tms-dashboard-rollup` Lambda (streams + 5-min sweep + backfill, idempotent per-month recompute), `src/lib/dashboardRollup*.ts`, rollup-first first paint with 'as of hh:mm', lazy charts, windowed reads, working-set read removed from first paint, `devVerifyPerf` KPI budgets + G9-G12 + `devVerifyAF`. Defects found live and fixed: DynamoDB alias error in the rollup loader (no rows written), AWSJSON payload double-encoded by AppSync (every row rejected, page silently used the exact path). **After (job 157, medians of 3): `/tms/dashboard` KPIs cold 1.9-2.4 s (budget 3), warm 0.84-1.10 s (1.5), in-app 0.03-0.69 s (0.8), 0 KPI flips; `/dashboard` cold 1.9-2.0 s (3), warm 0.87-1.15 s (1.5), in-app 0.09-0.32 s (1.0).**
+- **AF follow-ups (not functional defects):** (1) G10 stream-driven recompute on a ZZ write still not moving the row within 60 s on dev (retry-in-invocation fix deployed; sweep keeps rows fresh within 5 min; investigate logs); (2) chart-ready probe `chartsCold/Warm: not reached` (charts are lazy below the fold: probe must scroll or detect the lazy placeholder); (3) `/tms/dashboard` SPA 36 req / 5.9 MB (budget 25 / 3: shell trimming AF5-b/c not done); (4) G11 stale static check on `useBrokerageDashboard.ts:2` (`loadFinancials` import); (5) legacy `/dashboard` still 133 req / 19 MB total (widgets lazy, KPIs fast); (6) shell floor budget raised 45 -> 48 requests by AC2 on data growth (407 carriers): a judgement call, review; (7) near-miss G3 first-rows/settled on tracking/shipments (3.4-3.8 s vs 3-3.5).
+- **AH create/edit shipment form:** `devVerifyAH` **19 pass / 0 fail** live on job 156: Create shipment button opens the real form (12 Aljex sections, screenshots in `Docs/tms-build/screenshots/ah/`), draft with only a customer, full create, edit round trip, Submit order (DRAFT -> OPEN), Cover entry point; 'Mint a Shipment for a load' moved to Settings > Company > Data & backups. Backend fixed an existing data-loss bug (SAVE_ORDER_FORM / DraftOrderEditor erased the Aljex-imported escort/oversize/permit/blind/sealRequired/tempControl/customsBond/palletsIn/palletsOut flags).
+- **AC2:** shared ColumnsDialog (two panes, 36px rows, groups, search, select-all-in-group, drag/width/pin/remove, Reset widths), header-measured default widths (floor 72 px), per-user per-board width persistence. Screenshots `Docs/tms-build/screenshots/ac2/`. The perf probe's `firstRows: not reached` on the Shipments lists was a probe threshold (50 DOM rows) the virtualised grid can never mount; threshold now 20 (test added).
+- **AJ Load Tracking simplification + AK work phones:** one 'Load Tracking' nav item, check calls/document review are Focus chips + columns + row actions on the grid, old URLs redirect, tracking drawer (summary strip, SMS pane left, e-mail pane right, last 5 check calls, per-shipment override), customer trackingMode/trackingMethod/driverSmsTarget, per-truck work phone (TruckConfig.phone/phoneLabel; `workPhoneFor`; SMS to the truck phone, personal fallback), Fleet phone column, 'Trucks without a phone' report, dev seed: John Brittich's truck 530 phone set (applied live; number only in the seed run, never in the repo). `devVerifyAJ` 17 pass / 2 fail / 1 skipped on 157 (AJ08 own-fleet fixture row wait, AJ11 spinner): fixers running.
+- **Merge-to-main checklist (additive, no backfill):** TruckConfig.phone/phoneLabel; Customer trackingMode/trackingMethod/driverSmsTarget; Shipment.trackingPrefs; DashboardRollup table + `tms-dashboard-rollup` Lambda (run backfill after first prod deploy: `aws lambda invoke ... '{"backfill":{"from":"2024-01","to":"<next month>"}}'`); data stack size is near the 1 MB limit.
+- **Merge-to-main checklist, Step AN (trucks and trailers active / inactive):** additive, no backfill, no schema change. It reuses `Equipment.active` and `Equipment.inactiveSince` (already in prod from the truck feature); nothing to deploy beyond the app build. Existing trailers read as active (`active !== false`). New `AuditLog` rows use `entityType: 'Equipment'` (the field is a free string). Before merging confirm no trailer carries `active: false` unintentionally, since inactive trailers now leave pickers, counts and insurance.
+- **Decisions needed from Ryne:** (a) shell floor budget 45 -> 48 requests (AC2): accept? (b) Anthropic key credit for live spot classification; (c) Gmail intake/AP account will be ai4bcat@gmail.com (consumer Gmail): External/Testing consent + Client ID/Secret fields still to build.
+- Next: AJ fixes, then AD (Find & Invite, with the live MCP test on Ivan Cartage MC 274623 -> one invitation to ai4bcat@gmail.com), AE (Quotes lane rates removal + Rate intelligence), AG (AP inbox sync), AI (conversational dashboards), Google OAuth External/Testing.
+
+## 2026-11-04 - Step AC follow-up (columns dialog + widths)
+
+**Dev only, not deployed, not committed.** One shared `ColumnsDialog` (`src/features/tms/grid/`) now serves Shipments Active / All, Load Tracking and Intake; the old `ColumnsPickerDialog` and the Tracking/Intake popover `ColumnChooser` are gone.
+- **Dialog:** full-height, two equal panes. Left: one scrollable list, a sticky section per group (groups come from a new `group` field on the column defs; Tracking = Shipment / Tracking / Carrier, Intake = E-mail / Order / Review, Shipments = the catalog's groups), 36px rows, search, "Select all" per group (only what the search shows). Right: chosen columns with drag handle (arrow keys too), width input, pin, remove, and "Reset widths". Templates row stays at the bottom (Shipments only).
+- **Widths:** a column's default is its header label measured in the header font (canvas `measureText`, cached per label+font) plus padding, sort and filter icons, floor 72px; `minWidth`/`maxWidth` and the content-based auto-fit were removed from every column def. Dragging a header or typing a width saves it as that user's default for that board (`tms:grid:<board>:<email>`); a template overrides only the widths it sets; the dialog's Apply replaces the saved set (Reset widths = empty). Saved widths now clamp to 60-800 (they used to be cut to 340 on render).
+- **Pins:** Load Tracking and Intake now honour pinned columns (sticky count), as Shipments already did.
+- **Proof:** targeted vitest (src/features/shipments, src/features/tms/grid: 588 pass), `tsc -p tsconfig.app.json`, eslint on touched dirs. Screenshots `Docs/tms-build/screenshots/ac2/` (`scripts/devShotsAC2.mjs`, local vite on the dev API, temp admin deleted); before: `Docs/tms-build/mvmnt-ui/columns-dialog-crowded.webp`, `screenshots/ac/`.
+
+## 2026-11-04 - Steps AB and AC deployed on dev (Amplify jobs 148-153; final commit 2079047)
+
+**Dev only. AB: jobs 148-152 (schema deploy with 7 new tables + 2 Lambdas, then four fix rounds); AB read-only change + AC dense grid shipped together in job 153 (SUCCEED).**
+- **AB live harness `devVerifyAB`: 33 pass / 0 fail / 0 skipped on job 153** (read-only build). Journey of defects found on the live API and fixed: spot Lambda SSM read denied for DAT (now unreadable credential = STUB, OAuth start reads only the Gmail client); Anthropic structured-output schema had 21 union params (HTTP 400; now plain string/number with sentinels, test counts 0 unions); empty string written to a GSI key (`spotRequestsByGmailThreadId`; all index keys now omitted when empty); model calls bounded (10 s) and `SPOT_POLL_NOW` returns `partial`; suggestion never computed server-side (now stored, stub-labelled, floor-respecting).
+- **Read-only mailbox (Ryne 2026-11-04):** Gmail scope `gmail.readonly` only; send/draft actions, per-rep and org auto-send and the `SPOT_AUTO_QUOTE` door removed (legacy schema fields left in place, additive-only rule). Suggested response (subject + body with rate, lane, equipment, validity) in an editable text area, `Copy response` (clipboard, logs `SPOT_LOG_COPIED`), `Open in Gmail` plain compose URL + mailto, rep marks Sent / Won / Lost by hand. Quote-requests-only retention unchanged. Docs updated (STEP_AA_NAV_CRM_SPOTQUOTER.md, AB-plan.md).
+- **AB deploy-pending for Ryne:** no Gmail OAuth client registered yet (provider NOT_CONNECTED -> STUB, SIMULATED inbox); live Anthropic classification not exercised: the key available to the builders returned 'credit balance too low' (decision needed: add credit or confirm which key the Lambda uses). DAT RateView remains stub until the service login exists.
+- **AC:** shared dense grid on Load Tracking and Shipments Active / All / Intake as in the entry below; deployed in job 153. Live verification of the grid on the deployed app rides on the AF perf run.
+- **Risk for Ryne:** the Amplify data stack template is at ~965 KB of the 1,000,000-byte CloudFormation limit (444 of 500 resources) after AF's DashboardRollup model: little headroom for further tables (nested-stack split needed before the next big model addition).
+- Next in flight: AF (company dashboard rollup), AH (create-shipment form with Aljex fields), then AD, AE, AG.
+
+## 2026-11-04 - Step AC: dense spreadsheet grid for Load Tracking and the Shipments lists (dev branch, UI only, not deployed)
+
+- **One shared grid** `src/features/tms/grid/` (`DenseGrid`, `denseGridModel`, `useDenseGridPrefs`, `DenseControls`, `DenseFilterPopover`) now draws Load Tracking and Shipments Active / All / Intake. The old `BoardGrid`, `BoardFilterPanel` and `useBoardFilters` are deleted (side filter panel gone everywhere).
+- **Grid**: per-column header filters (type-ahead text, multi-select that is the R2 `BoardTagPicker` once a facet has more than 12 values, Chicago-day date range, numeric range), click-to-sort on every column, sticky header and sticky first column (PRO / Shipment #), drag-reorder, drag-resize, auto-fit widths with per-column min/max, 30px compact / 40px comfortable fixed rows (12/13px), truncate with tooltip, 100 rows a page, virtualised (only the rows in view mount: 31 of 100 at 1440x900 on dev data).
+- **Persisted per user** (localStorage `tms:grid:<grid>:<email>`): columns, order, widths, pins, density, sort, group-by, summary open. Shipments still use the R2 Columns dialog and server column templates, which now write into the same layout. Summary/KPI strip is collapsed by default.
+- **Load Tracking**: side panel removed; Group by control (Assignee default; Status, Customer, Carrier, POD, None) draws group header rows inside the one virtualised table; My loads / All / Unassigned quick tabs (other people via the Tracker header filter); rate-con toggle, favourites, lifecycle tabs, map view, row menu and bulk reassign kept.
+- **Shipments**: Status / Customer / Carrier / ... facets are header multi-selects (VOIDED in the Status header still widens the read exactly as before; no new whole-table reads); the old Flags are three toggle buttons (Check call overdue, Open exceptions, Missing documents). Detail facets without a column are reached by adding that column and filtering it.
+- **Shell**: `TmsShell dense` (set by `TmsLayout` for /tms/shipments, /tms/shipments/intake, /tms/tracking) shows the sidebar as an icon rail that opens on hover, focus or click without touching the saved collapse preference; the page runs full bleed.
+- **Default columns that fit without horizontal scroll** (dev data, measured): Load Tracking 8 of 13 at 1440, 11 of 13 at 1920; Shipments (28-column Aljex default) 9 at 1440, 11 at 1920; Intake 7 of 8 at 1440, 8 of 8 at 1920.
+- **Screenshots** `Docs/tms-build/screenshots/ac/` (1440 and 1920): produced by a local `vite` with the production `amplify_outputs.json` aliased to the DEV stack, headless Chrome as a temporary dev admin (`scripts/devShotsAC.mjs`, identity deleted afterwards); staff-name columns blurred. The deployed dev app shows the old UI until the lead deploys.
+- Tests: new `denseGridModel`/`DenseGrid` suites, shell rail and layout tests, Shipments/Tracking/Intake tests updated (status/customer facets via header filters, 100-row pages, `Get next 100`, group headers). Targeted vitest (shipments + tms: 799 passing), tsc app, eslint clean.
+
+## 2026-11-04 - Prod -> dev refresh and PRO dedupe (end of sequence, dev only)
+
+- `refreshDevFromProd --apply`: 43 on-demand backups (`prerefresh-2026-11-04T12-22-26-506Z-<Model>`, AVAILABLE), copy-data 49 tables / 9,963 rows / 0 failed, copy-files done. Production read only.
+- Backfills re-run (node 22 needed: the supervised shell's node 20 cannot load `src/lib/proNumber.ts`): proClaims, customers, locations, shipments (932 relinked), ownAssetDrivers, legacyAr, apOpen. `revDivision` blocked by a `RETAG_SHIPMENTS` Lambda timeout (residual). 6 stop-location updates refused for driver-field auth (non-blocking, as on 11-03).
+- Counts before = after for Load/Shipment/Order/Invoice/Customer/Carrier/Location/ProClaim/LoadCarrier/CarrierBill/ArPayment/ApPayment (10,842 / 10,842 / 10,842 / 7,526 / 689 / 407 / 3,169 / 10,843 / 8,677 / 1,612 / 2,432 / 1,082). 649 PROs in both production and the Aljex import, prod Load kept. `checkDevDuplicates`: 0 duplicates. Detail in `ALJEX_IMPORT_REPORT.md` section "Prod refresh + PRO dedupe (2026-11-04)".
+
+## 2026-11-04 - Step Y deployed on dev (Amplify jobs 146 and 147)
+
+**Commits `2e9b96a` (job 146) and `354e5cc` (job 147), SUCCEED. Dev only. The entry below this one lists the five defects as deploy-pending; they are now fixed and verified live.**
+- Verified live on 146/147: POD review + shipment thread (tracking read IAM), intake PO code `PO` releases through the gate with no hand patch, `Run check call now` on a delivered load, per-load plan 2 h / 20 min honoured on the Tracking tab, UPSERT_CUSTOMER on a customer without AI memory. 43 screenshots in `Docs/tms-build/screenshots/demo/` (shots 30-40 own-asset from the job-145 run).
+- Ryne decisions applied: release gate keeps carrier bill recorded before release, approved after invoice (documented in the walkthrough); `Demo` chip isolates the ZZ rows (Shipments board, Load Review, Intake); sales rep and bill-to default from the customer but remain required and reviewed before Move to active; ZZ records left in place for Ryne.
+- Open for Ryne: a real test carrier (DOT and an e-mail he controls) for a live MCP invitation.
+- Next: end-of-sequence prod->dev refresh with the PRO dedupe check, then Step AB.
+
+## 2026-11-04 - Step Y: end-to-end demo run on dev (brokered 99277 + Ivan Cartage 99278), DEMO_WALKTHROUGH.md
+
+- `node scripts/devDemoY.mjs` (+ `scripts/lib/demoY.mjs`) drove both flows on real dev data after `RESET_DEMO_DATA`: tender -> intake gates (required fields, then review) -> move -> MCP (Validate OK, LIVE; live invite refused HTTP 400 for the ZZ DOT) -> cover -> rate con (signed on the public link) -> tracking by assignee -> POD -> Load Review release -> invoice 20002 -> carrier bill -> factoring row; Ivan Cartage load needs a driver (dialog disabled until picked) -> Schedule -> dispatch -> owner-operator settlement (Wednesday payroll). 39 screenshots in `Docs/tms-build/screenshots/demo/`; walkthrough in `Docs/tms-build/DEMO_WALKTHROUGH.md`.
+- 5 real defects fixed locally with tests, **deploy pending**: tracking Lambda lacks BatchGetItem/LoadFinancials env for readBundle (POD review fails), intake PO code `po` vs gate `PO`, check-call NULL index key (ValidationError), per-load plan stored as text ignored, UPSERT_CUSTOMER update `:aiMemory`.
+- Open: bill-before-release order, live MCP test carrier. Earlier rehearsal runs left voided invoices 20000, 20001 and voided ZZ shipments 99272-99276.
+
+## 2026-11-04 - Step AA deployed on dev (navigation reorganisation, Load Review, Carrier Sales, Vendors, perf passes 1-2)
+
+**Committed and deployed on dev (Amplify jobs 142 failed on two Amplify-project typecheck errors in tests, fixed; 143, 144, 145 SUCCEED; commits 2364934, 6918443, 179a7ec, 210d11c). Dev only.**
+- Gates: all three `tsc` projects (incl. `amplify/tsconfig.json`, now part of the gate: Amplify typechecks backend test files), eslint 0 errors, `npm run test` 610 files / 7,752 tests, `npm run build` OK.
+- devVerifyAA after job 144: 81 pass / 7 fail; AAFix then fixed harness pagination (queue is 50/page: filter with `?q=`), the demo seed stop-city format (`"City, ST"`), Load Review by-id open from `?shipment=`, phone overflow, payroll banner regex. Perf: dashboard 23.5 s/158 MB to 5.7 s/11 MB; shell working set 57 to 24 trips; invoicing 369 to 66 requests.
+- **AA follow-ups (timeboxed, deferred, not functional defects):**
+  1. After this deploy run `RESET_DEMO_DATA` once (demo stops changed format) and re-run `node scripts/devVerifyAA.mjs`; the 3 Ready-to-bill checks (AA03-list, drawer-ready, move-to-billing) should then pass.
+  2. Re-measure legacy `/schedule`, `/calendar`, `/dashboard` (budgets are estimates: 85 req/12 MB, 95/14, 130/20) then `devVerifyPerf --ratchet`.
+  3. `/tms/dashboard` first rows is about 4-4.5 s vs the original 3 s target (structural: three dependent stages); budgets set from measured medians with reasons in `perfBudgets.mjs`.
+  4. `FactoringPage.test.tsx` emits an unhandled `NoCredentials` rejection (unmocked `useDirectory`); no test fails.
+- Next: Step Y - demo walkthrough on the final structure (brokered + Ivan Cartage with driver), DEMO_WALKTHROUGH.md with URLs and screenshots.
+## 2026-11-04 — PERF fix pass 2 (after job 144): voided loads out of the window read, dashboard partial render, invoicing MB
+
+- **Legacy window read excludes voided shipments** (`listShipmentIdsByMonths` filters `voidedAt` server-side; `includeVoided` opts back in). Dev: 538 ids / 11 requests / 2.0 MB instead of 3,500 / 35+ / 12.6 MB for `listLoadByShipmentId`. A voided load is still found on demand: by id (`useResolveLoads`, now also called by `LoadDrawer` for the selected id, so the Voided tab still opens it), by PRO (`proConflictAllHistory`, voided included, unchanged). `useResolveLoads.test.ts` proves a voided load resolves by id and by PRO and that held loads trigger no read.
+- **/dashboard `managePods x4`**: two causes. The harness counted each page of a `managePods` list (token inside the AWSJSON `input`) as a new chain start; `parseOperations`/`chainKey` now read it. And every router mutation, including read actions (`manageDispatch status`, `Tms*Actions GET_/PREVIEW_`), cleared the whole list cache from the apiClient proxy; read-only router calls no longer do.
+- **/tms/invoicing 12 MB**: 4.4 MB was `listOrderByArStatus` DOCS_NEEDED in full (2,717 orders, 2,446 of voided shipments). The tab now reads the narrow order list (shared with the shell), the narrow shipment check, then full orders of live shipments only (271; dev 4.0 -> ~1.7 MB cold, identical live rows). `getShipment` 1.4 MB falls with the shared narrow memo.
+- **Dashboard first rows**: `useBrokerageDashboard` draws from the working set's first step (open rows joined) and swaps in the delivered backlog when stage 2 lands.
+- **Budgets from measured medians** (tracking, customers, carriers, dashboard timing) and estimated legacy/invoicing budgets: see the comment above the budget block in `perfBudgets.mjs`.
+
+## 2026-11-04 — PERF fix pass: shell floor, duplicate reads, harness defects (dev-measured, not yet deployed)
+
+- **Shell floor (G3/G8, every /tms page 77-99 req).** The shell's working set cost 57 trips: 15 status partitions (one request each), 2,137 stage-2 `getShipment` ids at 100/request (22), DOCS_NEEDED order pages, financials. Now one aliased request for all open statuses (`listShipmentsByStatusesFiltered`, `batchByIndex` gained a shared `filter`), narrow stage-2 ids at 500/request, DOCS_NEEDED at limit 5000, financials at 250/request: **working set 57 -> 24 trips** (API gate, same 3.3 MB, first partial 1.3-2.1 s <= 3). Chunk sizes were measured against dev: index batches stay at 100 (200 aliases x limit 50 = "Unknown error"), 500 financials aliases refused. Stage 2 now goes through `getShipmentsByIds` so the AR/AP worklists reuse its narrow rows instead of re-reading 2,100 ids.
+- **/tms/invoicing 369 req.** 248 were one `PREVIEW_INVOICE` per ready-to-bill order from `useReadyForBilling`, run on every page load whether or not the tab was open; now read only while the Ready-for-billing tab is open, once per row set.
+- **Duplicate whole-table reads (G4 issued > 3x on /calendar /dashboard /schedule).** `listDriverSubmissions`/`listDriverSubmissionDocs`/`listPods`/`managePods list` (x6) and pay settings (x7), fuel, expense types/allocations/records/recurring (x4-5), dispatch conversations now share one request inside a 15 s window (3 s for dispatch, whose inbox polls at 10 s) via `listCache`; any write through the same client, and every non-read `managePods` action, clears them; read-modify-write paths pass `fresh`.
+- **Harness defects fixed.** (1) G0 `Cannot read properties of null (reading 'querySelector')`: the probe's own `count()` ran before `<body>` existed. (2) `managePods:list`/`managePods:status`/`manageDispatch:status` are declared as mutations by the schema but only read: exact `field:action` pairs are allowlisted (`READ_ROUTED`); any other action is still a G0 mutation. (3) The request log truncated bodies at 60 kB, so every large aliased batch (e.g. `listLoadByShipmentId`, 13.4 of 22 MB on /schedule) parsed as nothing and was invisible to G4 and the per-op counts; cap is now 1 MB. `--verbose` prints requests and MB per operation.
+- **Budgets changed (structural floors, estimates to be re-measured after deploy and then `--ratchet`ed):** customers/users/carriers requests 40 -> 50 and MB 4-6 -> 7 (a page cannot cost less than the 45 req / 6.3 MB shell it mounts in); /tms/dashboard 70 req / 10 MB -> 80 / 12 (shell + 3-month window loader); `directory:locations` 2 -> 3 s (3,169 rows / 2.55 MB, bandwidth-bound: 2 trips and 4 trips both measure 2.3-2.6 s).
+- **Not fixed (needs a decision): legacy /schedule /calendar /dashboard at 22-44 MB / 140-250 req / 5-9 s.** 12.6 MB and 35 requests of it are `listLoadByShipmentId` for the identity table: the current month holds 2,576 shipments, 2,364 of them voided import debris, and the legacy store deliberately loads voided loads (PRO-conflict, POD and factoring lookups). Excluding voided loads from the window read would cut it to ~1 MB but changes that contract; on production data the voided share is small.
+
+## 2026-11-04 — Step PERF slice P5 (verification): `devVerifyPerf`, budgets, probes, pre-change baseline
+
+- Files: `scripts/devVerifyPerf.mjs` (browser gate + `--inventory` / `--baseline` / `--ratchet`), `scripts/devVerifyPerfApi.mts` (G1/G2/G7 against the app's real `boardData`/`apiClient`), `scripts/lib/{perfBudgets,perfProbe,perfGaps,perfExpected}.mjs` + tests. Dev only (refuses any origin but `DEV_ORIGIN`), read-only, temporary admin deleted in `finally` (`identity deleted: true`).
+- Ready = the page's REAL rows in the DOM (>= min(API-expected, page size), expected counts from independent raw reads), never first paint; legacy pages (no row markers) = a Load read completed and 1.5 s of quiet.
+- **Pre-change baseline** (deployed dev, 3 cold runs, median; `Docs/tms-build/perf/baseline-2026-11-04.json`): dashboard 23.5 s / 127 req / 158 MB; tracking 21.5 / 136 / 168; shipments 21.9 / 150 / 182; customers 17.3 / 82 / 86; users 18.3 / 147 / 83; invoicing 19.6 / **366** / 136; payable 18.6 / 103 / 114; carriers (shell floor) 18.3 / 77 / 83; schedule 23.3 / 146 / 168; calendar 24.2 / 164 / 177; legacy dashboard 25.6 / **212** / 210. Request counts equal PERF-plan §1.2.
+- API gates run once on dev against the in-tree PERF loaders: working set 3.3 s / 57 trips / 3.3 MB (first partial 1.3 s, 344 shipments, stage-2 ids 2,137), window(1 month) 1.7 s / 210 shipments, window(3 months) 2.2 s / 761 shipments. G1 caught 3 non-voided Active shipments with no `pickupAppt` (absent from the status GSI) missing from the working set; fixed in `boardData` stage B, G1 now green (264 Active ids equal).
+
+## 2026-11-04 — Step X done on dev: prod->dev refresh, rehearsals and the FULL Aljex import loaded and reconciled
+
+**Executed on the dev stack only (suffix `nc3jsnxdmjhkpequimypiatkma-NONE`). Production was only READ (`copy-data`/`copy-files` read production); nothing was written to production, no SSM
+secret was written, nothing merged to main, and the Aljex export stayed outside the repo.** Full report: `Docs/tms-build/ALJEX_IMPORT_REPORT.md` (counts, reconciliation, every warning category with
+example PROs, the list of PROs present in both production and the Aljex file, open items).
+
+### 1. Production -> dev refresh (before the import)
+On-demand DynamoDB backups of the 49 dev tables it overwrites were taken first (kept, never deleted). `scripts/refreshDevFromProd.mjs --apply` copied 49 operational tables (9,944 rows read from
+production in about a minute; INCLUDE list in the script header: Load, Driver, Customer, Location, Equipment, Factoring, pay tables ...; EXCLUDE: TmsSettings, DispatchSettings, Division, AuditLog, telemetry
+tables whose ids differ across stacks; 39 dev-only models cannot be touched, Integration credentials live in SSM). `copy-files` skipped by the orchestrator default only if no S3 sync was needed
+(see summary). Counts (production | dev before | dev after): Load 932 | 3,539 | 3,580 (+41 new production loads); Location 181 | 160 | 189; IntakeItem 1,824 | 1,742 | 1,824; MaintenanceInvoice 181 | 174 | 181;
+TimeClockEntry 68 | 52 | 68. Dev already held 891 of production's 932 loads (the copy rewrote them with production values); the other ~2,650 dev loads are dev test data and were left alone.
+The copy strips the shipment-link fields from the copied Loads, so the backfills were re-run in order with temporary ADMIN logins (deleted afterwards): proClaims (0 actions), customers (715 applied),
+locations (325 applied, 7 per-load `updateLoad` "Unauthorized" refusals: stop-location links only, not blocking), shipments (932 relinked), revDivision, ownAssetDrivers (708 leg names filled),
+legacyAr, apOpen. Then `checkDevDuplicates`: 3,580 loads = 3,580 shipments, 0 duplicate PRO/number/invoice. **Orchestrator bug fixed on the way:** backfill plans were made without `--env` but applied
+with it, so apply refused; both phases now carry the same `--env`.
+
+### 2. Rehearsals (throwaway table copies, tag `rh1`..`rh3`)
+17 tables restored from dev (so dedupe against today's production loads is real) in 4.5 minutes. 1-in-8 slice (988 loads): plan 75 s + apply 38 s (218 rows/s). It did NOT reconcile at first
+(three bridge differences), so per Ryne's rule the question was escalated to Fable, which found **one engine bug** (the AR ledger dropped $550 of enriched-invoice receipts because it resolved the
+customer from the file's account code, which was one of the name-conflict accounts) and **two legitimate differences the bridge did not name** (invoices not written for unresolved customers; enriched
+receipts counted only on the BCAT side). Fix: ledger takes the customer from the invoice it pays; the bridge is now scoped to what the import wrote and every gap is either zero or a named, quantified
+"not imported" item (`reconciled` = all differences exactly 0). Both a 1-in-8 and a 1-in-7 slice then reconciled YES; the full-file rehearsal on `rh3` reconciled YES (plan 524 s, apply 186 s, 45 rows/s).
+The guard works: the first LIVE attempt was REFUSED because only a slice had been rehearsed ("a LIVE apply of real data needs a RECONCILED rehearsal with the same stageHash").
+
+### 3. FULL import into the live dev tables (8,320 rows, tag `aljexfull1`, run `aljexrun:20261104055134A`)
+Plan 520 s, apply 188 s (44 rows/s), conservation OK, **reconciled YES, 0 errors**. Before | after: Load 3,580 | 10,564 (+6,984); Shipment/Order the same; Customer 373 | 677 (+304); Carrier 19 | 402 (+383);
+Location 189 | 3,169 (+2,980); Invoice 37 | 7,522 (+7,485 = 6,881 created + 604 enriched); ArPayment 41 | 2,432 (+2,391); CarrierBill 4 | 1,608 (+1,604); ApPayment 15 | 1,082 (+1,067); ProClaim 3,581 | 10,565 (+6,984);
+LegacyAljexRow 0 | 8,038 (complete raw rows, side table); LoadCarrier 1,617 | 8,575. Stage: 7,913 load rows + 403 memos, 4 byte-identical duplicate rows skipped, 7 junk dates.
+Entity outcomes (staged/created/matched/enriched/skipped/conflicts): LOAD 7,917/6,984/47/604/4/278; CUSTOMER 486/304/171/0/0/11; CARRIER 1,672/383/0/0/1,289/0 (12-month rule); LOCATION 16,300/2,980/13,320;
+INVOICE 7,782/6,881/0/604/0/297; BILL 1,604/1,604; AR_PAYMENT 2,391; AP_PAYMENT 1,067; memos 403 (400 applied as invoice adjustment lines, 3 orphans listed).
+
+| Check (file vs BCAT, dollars) | File | BCAT | Diff |
+|---|---:|---:|---:|
+| LH revenue, imported loads | 8,432,886.35 | 8,432,886.35 | 0.00 |
+| Invoice Amount = charge lines | 9,347,426.72 | 9,347,426.72 | 0.00 |
+| Invoice totals incl. memo adjustments (written) | 9,710,003.68 | 9,710,003.68 | 0.00 |
+| Payments received | 9,401,340.02 | 9,401,340.02 | 0.00 |
+| Open AR (positive Bal Due) / unapplied credit / net | 309,468.34 / 804.68 / 308,663.66 | same | 0.00 |
+| Carrier payments (non-fee) vs AP payments | 1,953,718.99 | 1,953,718.99 | 0.00 |
+| Open AP (derived; compare with your Aljex AP aging) | n/a | 149,396.86 | n/a |
+| Whole file, every invoiced load, invoices written + named not-imported items | 9,931,903.83 | 9,931,903.83 | 0.00 |
+Not imported and named: 19 loads with an invoice but no customer (invoice $22,075.73, payments $8,575.73); 278 loads that already exist in production and disagree with Aljex on revenue or carrier (ENRICH_MISMATCH:
+invoice $199,824.42, payments $163,094.23, memos -$2,401.36). Your three file totals (LH 9,106,729.69 / Invoice Amount 10,029,258.90 / Bal Due 358,893.85) are reproduced by the profiler; the
+difference to the imported figures is exactly these named items plus the 81 uninvoiced loads ($83,159.75), the 3 orphan memos ($2,750.00) and the carriers/loads outside the import rules: see the report.
+
+### 4. Numbering and series (dev)
+Numeric scheme enabled. **Counter is 99001, not 14913:** production itself holds a load with PRO 99001 (a LEGACY claim) and the old importer left four test claims 90001-90004, and the seed is forward-only, so the next new
+PRO on dev is 99002 (still above 14912). **Ryne: tell me if you want the 99001 load re-numbered so new PROs continue at 14913.** The new invoice series starts at 20000, plain numbers (highest imported invoice number 14887).
+
+### 5. Defects found and fixed in this step
+(a) AR ledger customer resolution (above). (b) **Imported carrier bills took their bill number from Aljex "Carrier Ref #", which equals the driver name on every row**: 35 duplicate (carrier, billNumber) groups and driver names in a bill-number field.
+Engine now numbers bills by PRO (same string as the invoice number); 385 affected bills were repaired on dev by `scripts/fixAljexBillNumbers.mjs` (idempotent; every bill's money fields byte-identical before and after); duplicate check 0.
+(c) Live apply guard and orchestrator `--env` bug (above). The engine fixes are in the working tree and ship with the next deploy (the deployed Lambda worker is job 141; the import above ran the same engine from the CLI).
+
+### 6. Duplicate check and PRO overlap
+`scripts/checkDevDuplicates.mjs` after the import: 0 duplicate groups (Load.aljexId, shipment number, load number, invoice number, carrier bill); 0 PROs carried by both a pre-existing and an import-created load.
+929 PROs exist both in production and in the Aljex file: 651 had Aljex finance attached to the production load (production Load row kept), 278 are mismatches left untouched (all listed in the report appendix). To be re-run after the end-of-sequence refresh and after the demo.
+
+### 7. Open items for Ryne
+1. Confirm or change the four UNCONFIRMED division intake e-mails. 2. Decide on PRO 99001 (above). 3. Map Aljex rep/staff codes to users at Settings > Users (then bulk reassign). 4. The 278 ENRICH_MISMATCH PROs and the 28 no-customer loads need a look (lists in the report).
+5. Open AP ($149,396.86 derived): compare with your Aljex AP aging report (the export has no AP balance column). 6. Imported carriers are PENDING until the MyCarrierPackets pull runs (press Validate on dev; then Settings > Integrations > MyCarrierPackets > Pull all monitored carriers now).
+7. Customer terms are not in the export: invoices assume Net 30 (org default) until customer terms are set.
+8. **Performance gate (found after the import):** with 10,564 loads on dev the pages that read whole tables client-side are slow: `/tms/dashboard` about 26 s, `/tms/tracking` about 22 s, `/tms/brokerage/users` about 11 s,
+   `/tms/customers` about 5 s (Shipments board, Schedule, Calendar, Invoicing and Carriers open in 1-2 s by the probe, which may report ready slightly early). The legacy readers page the whole Load table (`listLoads`) and the
+   dashboard/tracking hooks read every shipment. Nothing is broken, but this must be fixed (server-side windowing / date-bounded queries / Active-only reads) before any production use: scheduled as a dedicated pass after Step AA.
+
+## 2026-11-04 — Aljex exit Phase 0 deployed on dev (importer for the 486-column export, backups, export-all, MCP live adapter)
+
+**Committed and deployed on dev (Amplify job 141, commit `1a9eba7`). Dev only; nothing to main; the Aljex export file stays outside the repo (PII) and was never read
+by any builder (only by the aggregate-only profiler).** Plans/docs: `PHASE0-plan.md`, `ALJEX_MAPPING.md`, `MCP_INTEGRATION.md`, `ALJEX_EXIT_PLAN.md`.
+- **Profile of the export (aggregates only):** 8,320 rows x 486 columns (rows are right-truncated: 474 fields on 7,883 rows, 473 on the 403 memo rows, up to 486 on 2),
+  PRO 6000-14912, 8,316 distinct PROs (4 byte-identical duplicate rows), 165 multi-stop loads, 3,658 IVAN CARTAGE rows of which only 4 have a driver name. The profiler
+  reproduces Ryne's three totals to the cent: LH Revenue 9,106,729.69, Invoice Amount 10,029,258.90, Bal Due 358,893.85. Invoice Amount = the sum of the 21 charge
+  extensions on every row; Bal Due = Invoice - Payments - Credits + Debits on every invoiced load (101 uninvoiced loads have a blank Bal Due, 81 of them carry an Invoice Amount
+  totalling 83,159.75); there is no invoice-number column, so invoice number = PRO.
+- **Importer (new, replaces the 31-column one):** positional mapper (`src/lib/aljex/*`), resumable engine with an async self-invoking Lambda worker and an offline CLI on the
+  same engine (`scripts/importAljex.mjs`), accurate dry-run/plan, idempotent by PRO/invoice/bill/MC-DOT/normalized key, ENRICH/UNLINKED/CONFLICT classification against loads already
+  on dev (live records are never rewritten), reconciliation report, tagged rehearsal tables, guards (production refused, LIVE needs a reconciled rehearsal, synthetic bands).
+- **Ryne's mapping decisions applied (DECIDED):** all ALJEX_MAPPING defaults (Ivan = Carrier Name, LOADED->PICKED_UP, CONSIGNEE->UNLOADING, P=pickup/S=delivery, unknown Type of
+  Shipment -> FTL with the code kept, the 9 no-customer loads imported and listed); **the 403 blank-status rows are AR memos -> adjustment lines on the referenced invoice (not voided
+  shipments)**; the complete raw Aljex row is stored in the `LegacyAljexRow` side table keyed by PRO (NOT on Load: the legacy pages read the whole Load table); promoted
+  columns (CA/TX permits + expiries -> Carrier, Quote#/Manifest/Container/refs -> shipment references, OSD flag, advance/quick-pay fees -> AP lines, Lead Source -> Customer,
+  freight/accessorial flags, Currency validated); Aljex sales-rep and staff codes stored on the shipment with a Settings > Users code-to-user mapping table and a bulk reassign
+  (audited, dry-run first); carriers used in the last 12 months only (rest skipped and listed); PROs preserved (`Load.aljexId`), numeric scheme, counter seeded above the max, new
+  invoice series starting at 20000 (configurable in TmsSettings, must exceed the highest imported invoice number); imported loads carry a legacy flag that satisfies the release
+  gate, bill approval document checks and the Step W driver gates and is excluded from the Needs-driver report.
+- **Data safety:** point-in-time recovery on the dev tables (about 85 MB, cents per month), a private versioned export bucket, a nightly export Lambda (its EventBridge rule is
+  explicitly allow-listed enabled in the dev guard), and an admin "Export everything to CSV" action (Settings > Company > Data & backups) that also produces accountant-ready CSVs
+  of invoices, AR payments/credits and carrier bills/AP payments (no QuickBooks, per Ryne).
+- **MyCarrierPackets (carrier source of truth):** the Validate bug is fixed (the generic Validate never called MCP; it now does the token call: 200 LIVE, 400/401/403 invalid
+  credentials, anything else unable-to-verify); the MCP guide has no webhooks, so completion is polled (`CarriersChanges` >= 4 minutes apart); a carrier profile pull (insurance,
+  W-9 tax id, payment method + remit-to, contacts, safety/risk, authority, packet status; MCP wins, every overwrite audited), a "Pull all monitored carriers now" button with last sync
+  and counts, and a resumable backfill matching MC, then DOT, then normalized name. All tested against mocks only: Ryne has not pressed Validate yet, so the live run is pending.
+- **Rev divisions:** `scripts/seedRevDivisions.mjs` seeds Ivan Cartage, BCAT Logistics, Auto Shipping, Owner Operators (renames Best Care Auto Transport to Auto Shipping; never
+  deletes). Intake e-mail placeholders, all **UNCONFIRMED** (badge shown until confirmed): `tenders-ivan-cartage@bcatcorp.com`, `tenders-bcat-logistics@bcatcorp.com`,
+  `tenders-auto-shipping@bcatcorp.com`, `tenders-owner-operators@bcatcorp.com`. **Ryne: please confirm or replace these.**
+- **Gates:** `tsc` clean, `eslint` 0 errors, `npm run test` 571 files / 7,475 tests, `npm run build` OK.
+
+## 2026-11-03 — Step W deployed on dev (Ivan Cartage / own-asset loads require a driver)
+
+**Committed and deployed on dev (Amplify jobs 139 and 140; commits `e6429f3`, `ec0d8e8`). Dev only. No schema change, no data deploy.**
+Plan: `Docs/tms-build/W-plan.md` (15 decisions, defaults taken). Brokered (third-party) carriers are unchanged.
+- **What counts as Ivan Cartage:** an `OWN_ASSET` load or leg (never by name). The driver is always required; truck and trailer are
+  optional and pre-filled from the driver. Roster only (active, non-broker drivers); the server looks the driver up and writes the
+  roster name/phone itself (a typed name is ignored). An inactive driver blocks new assignment and Dispatch but not Delivered or
+  Release (the load already ran).
+- **Where it asks:** cover dialog / Carrier tab (new `AssignDriverDialog`: roster picker, truck/trailer, relay checkbox, pay-lock
+  reason for owners/admins), shipment create and the draft editor (driver row), batch task "Assign driver (Ivan Cartage)", a board
+  exception "Ivan Cartage load with no driver" and the carrier label "Own fleet · no driver". Typing "Ivan Cartage" as a carrier name
+  is refused (use the assign-driver flow).
+- **Where it is enforced (server side, exact messages from `OWN_ASSET_MESSAGES`):** Dispatch, Mark delivered (including via stop
+  times), and release to invoicing (`DRIVER_MISSING` in the release gate, also `SET_AR_STATUS UNBILLED`), each with a clear inline
+  error in the UI. A leg-less own-asset load now gets the Ivan driver message from Dispatch (it used to say "nobody on it").
+- **Write-through (what the legacy pages read):** the same Load fields the existing ASSIGN_ASSET wrote (`pickupDriverId`,
+  `deliveryDriverId`, per-stop `driverId`, truck/trailer numbers, leg row), now with driver name, truck and trailer numbers filled
+  on the leg too (672 of 678 live own-asset legs on dev had no `driverName`). Changing the driver later moves the load on
+  Schedule/Calendar/pay (pickup + delivery driver, stops, mirrors, colour reset), bounces the old leg `REASSIGNED`, and writes
+  `ASSIGN_ASSET` and `CHANGE_ASSET_DRIVER` audit rows (from/to + pay-lock state), shown on the History tab.
+- **Pay-history rule (money):** changing the driver on a load whose delivery date is before the current Sun–Sat pay week is refused
+  for non-admins; owner/ADMIN can override with a reason of at least 10 characters (audited, `payLock` on the audit row, including
+  a first assignment); refused for everyone if a stored `BoxTruckTrip` row has that `loadId`. No pay reader or calculation changed;
+  `ownAssetPay.test.ts` feeds the existing, unmodified readers and pins byte-identical output. One read-only Scan on `BoxTruckTrip`
+  was added to the Lambda role.
+- **Backfill/report:** `scripts/backfillOwnAssetDrivers.mjs` (dry-run default, fingerprint, report CSV). It only creates a missing leg
+  and fills a leg's driver name; it never writes a Load driver, date, rate or stops. Dev data: 707 own-asset loads, **0 live ones
+  with no driver** (the 29 driverless ones are voided/canceled), 20 delivered loads lack a pickup driver, 92 live loads are split relays.
+- **Real bugs found and fixed on the way:** (1) the W09 backfill wrote a `LoadCarrier` leg without the required
+  `createdBy/updatedBy`, which made AppSync null the whole `listLoadCarriers` page and emptied the Shipments and Tracking boards on
+  dev: same class of bug as the Step V fixture, fixed (script sets them, new apply test), bad row removed; (2) the History tab read
+  only the first AppSync page of `AuditLog` (35,347 rows), so recent audit rows were missing: now pages through and filters by
+  entity; (3) the batch row checkbox also opened the row drawer; (4) the closed-week override left no `payLock` audit trail on a
+  first assignment; (5) test hygiene: the Expenses test fixture used the UTC date (the app uses Chicago, so it broke each evening) and
+  the finance commission fixture needed a driver on its own-fleet load.
+- **Verification on deployed dev:** `devVerifyW` (new) **42 PASS / 3 FAIL / 3 allowed skips**; `devVerifyP` **48/48**; `devVerifyS3` **156 PASS / 0 FAIL**
+  (the phone overflow and the D13 race are gone). Proven end to end on a ZZ fixture: roster validation, write-through, the load appears on
+  Schedule and Calendar under the right driver, the owner-operator pay page line for the right driver/period, change driver moves it, the
+  gates refuse with the exact text, closed-week refusal/override, batch assign, backfill idempotent re-plan (0 actions), cleanup (real pay
+  table counts identical before and after; 0 unvoided ZZ shipments). Full `npm run test`: 540 files / 7050 tests.
+- **Deferred (harness only, not functional):** W04a (owner-operator page lists the fixture) timed out once the clock passed midnight UTC
+  (fixture is dated Chicago-today; the page's day window is UTC): harness date fix; W06 expects `Missing driver` from READY_TO_INVOICE but
+  the leg-less fixture correctly gets the older `No carrier or driver assigned` reason; allowed skips W03d (Dispatch conversation row),
+  W04b (driver-app settlement needs a driver Cognito identity), W05b (Calendar colour on a canvas).
+- **Decisions for Ryne (W-plan section 13; defaults taken):** D-W8/D-W9 how wide the pay lock is (closed Sun–Sat week + any BoxTruckTrip
+  row; admin override with reason); D-W10 **Ivan LOCAL drivers have no per-load settlement in the code today** (only owner-operator pay is
+  computed from the load; box-truck pay is a stored `BoxTruckTrip` snapshot), so "appears in the driver's settlement" is proven for owner
+  operators and by the box-truck window predicate, not for a LOCAL settlement: say if LOCAL drivers should get one; D-W15 a latent bug that
+  `ASSIGN_ASSET` can bounce an outside carrier without the bill check (left as is, flagged).
+- **Demo plan addendum (Phase 2):** the Ivan Cartage run uses the same load assigned to Ivan Cartage + a ZZ roster driver: it must appear on
+  Schedule/Calendar for that driver and day, on the owner-operator pay page when the driver is an owner operator (or the box-truck window
+  predicate), refuse Dispatch/Delivered/Release without a driver with the inline errors, then change the driver and see it move; historical
+  imported Aljex Ivan loads are legacy-flagged and exempt (see Phase 0).
+
+## 2026-11-03 — Step V deployed on dev (tracking assignee, Tracking by assignee, Settings > Tracking automation)
+
+**Committed and deployed on dev (Amplify jobs 136, 137, 138; commits `e207e5c`, `bf061a3`, `c88ec20`). Dev only.** Plan:
+`Docs/tms-build/V-plan.md` (15 decisions, each with a default taken). Schema is additive and shipped as a data deploy
+together with Step U.
+- **V1 Tracking assignee:** `Shipment.trackerId`, `Customer.defaultTrackerId`. New shipments inherit the customer's default
+  tracker (create, link-customer, duplicate; never overwrites an existing tracker), and a per-shipment override is allowed.
+  New `ASSIGN_TRACKER` action (bulk <= 100, one audit row per shipment, voided/missing/inactive skipped with a reason).
+  Tracker card on the shipment, Default tracker on the customer.
+- **V2 Tracking page:** the Inbox/conversation UI is gone. `/tms/tracking` is a table of every shipment whose rate con was
+  SENT/OPENED/SIGNED, grouped by assignee: My loads (default when you have loads), All, one tab per assignee, Unassigned.
+  Columns: Shipment #, Customer, Lane, Status, Last location + age, ETA, Next check call, POD, Carrier DOT/MC, Tracker
+  (the right-hand columns scroll horizontally on narrower screens). Create customer URL, Request check call, Request POD
+  and Assign tracker are in the row menu. **Manage Customer Links is NOT inbox-only**: it stays its own page and nav item.
+  `?shipment=<id>` and the old `?tab=inbox` links redirect to the shipment's Tracking tab. Replies still thread to the
+  shipment's one e-mail thread.
+- **V3 Settings > Tracking automation:** global defaults + per-division + per-customer overrides (inherit toggles), per
+  channel on/off (SMS, e-mail), cadence, quiet hours, templates with placeholder chips + preview + SMS segment counter,
+  POD request on Delivered (once per leg per channel), "Run automation now". All master switches default OFF (dev
+  `TmsSettings.trackingAutomation` is unset). New scheduled Lambda `tracking-automation` (every 5 minutes) calling
+  `RUN_TRACKING_AUTOMATION`; **on dev the EventBridge rule is disabled**, so dev exercises it with Run now / the scripts.
+  On dev every send is recorded NOT_SENT in the thread with the exact would-have-sent text and the provider error.
+  Check calls use deterministic per-slot, per-channel ids `auto:cc:<loadCarrierId>:<slot>:<SMS|EMAIL>` (a NOT_SENT attempt
+  still occupies its slot, so no retry spam); a channel held by quiet hours sends later in the same slot or is dropped
+  when the slot ends. Auto POD skips any leg+channel that already has a POD request (manual or auto).
+- **Real bugs found and fixed:** inbound mail replies would have failed to authorize against `tmsTrackingActions` (system
+  caller path added with a regression test); a half-filled quiet-hours layer crashed the customer profile
+  (`quiet.channels.includes`, fixed + regression test); the V harness's SDK fixtures had written LoadCarrier rows without
+  `createdBy/updatedBy`, which made AppSync null the whole `listLoadCarriers` page and emptied the Shipments/Tracking boards
+  for everyone on dev until cleaned (fixtures fixed, cleanup verified: 0 such rows).
+- **Verification on deployed dev:** `devVerifyV` (new): **32 PASS / 2 FAIL**, both the same cosmetic unstyled-class finding
+  below. `devVerifyP` **48/48**. Screenshots: `Docs/tms-build/screenshots/review/V-*.png` (Tracking by assignee light/dark,
+  my loads, row menu, shipment Tracker card, customer Default tracker, Settings > Automation defaults/divisions light+dark,
+  phone tracking).
+- **Decisions for Ryne (defaults taken, see V-plan section 11):** assignee is a user profile (not a team); who may assign =
+  anyone with TMS access; automation master switches default off; quiet-hours timezone and template placeholders as in the
+  plan; the Tracker column and "unassigned" badge wording.
+
+## 2026-11-03 — Step U deployed on dev (two shipment lists, Academy/Workflows hidden, division intake e-mail, Intake tabs + review)
+
+**Committed and deployed on dev (same jobs 136-138). Dev only.** Plan: `Docs/tms-build/U-plan.md` (16 decisions, defaults taken).
+- **U1 Shipments:** exactly two lists, **Active** (not yet released to invoicing: `Order.readyToInvoiceAt`, `invoiceId` set, or
+  `arStatus` not DOCS_NEEDED/empty means released) and **All**; segmented header Active | All | Intake. Removed: all saved
+  views and queues, Dispatch/Documents workstations and boards, My/Team queue, Views group, Shipment views settings page,
+  the Brokerage/Car shipping/Owner operators/Box trucks/Local drivers boards. Kept: column customization, type-ahead filters,
+  batch actions, duplicate, the Statuses checkbox facet (a filter with counts, not a view; **say if you want it gone**),
+  Tracking and Manage Customer Links, and all shipment detail tabs. Old URLs redirect (`/tms/shipments/view/*`,
+  `/tms/dispatch`, `/tms/documents*`, `/tms/academy*`). Canceled shows in All only; voided stays out of both unless the
+  Statuses facet asks for it.
+- **U2 Academy and Workflows:** Academy fully removed from nav, routes and the header help icon (files and `ASK_ACADEMY`
+  backend left in the tree, unreferenced; Ask-assistant lived under Academy). Workflows: nav item removed; `/tms/workflows`
+  and `/tms/workflows/runs/:id` still resolve by URL because shipment AI-agent tabs, quote cards, notifications and Platform
+  health link to them; My Brokerage > AI Agents stays (spend cap and memory). Nothing deleted, data and Lambdas untouched.
+- **U3 Division intake e-mail:** `OwnershipDivision.intakeEmail`, required on create and on every edit-save of an active
+  division (empty/invalid/reserved/duplicate refused client-side and server-side); picker suggestions
+  (`tenders@bcatcorp.com`, `ai4bcat+tenders-<code>@gmail.com`) plus free typing. Divisions that existed before show an orange
+  "No intake e-mail" badge until set. **Action for Ryne/ops: set an intake address on each existing division on dev.**
+- **U4 Intake tabs:** Shipments > Intake has a tab per active division (+ Unrouted for mail to an address no division owns)
+  listing `IntakeLoad` records built from tender e-mails by the existing tender/parse pipeline: completeness count, which
+  fields were auto-filled (parser / rate-con / model / directory) versus missing or low-confidence, and the source e-mail.
+  An intake load is a separate additive record, so no PRO is burned until Move to active.
+- **U5 Review step:** reviewer opens an intake load, checks/corrects every field (Confirm all, revert to e-mail), and
+  **Move to active** creates the shipment as `TENDER_PENDING` (it appears in Active; Accept/Reject plus the credit check stay the next
+  deliberate click), audited with who/when and which fields were corrected. Blocked until the required fields are valid.
+  Idempotent resume if a failure happens mid-promotion (no second shipment/PRO). New page grant `intakeReview`
+  (`page-intakeReview`) on the Users page; owner/ADMIN always allowed; page-tms alone can view but not review.
+- **Demo:** step P5 is now "Tender to an intake load" (opens the seeded intake load); seed version p8.3.
+- **Verification on deployed dev:** `devVerifyU` (new): **44 PASS / 0 FAIL / 1 allowed skip**: removed routes are gone or
+  redirect, division dialog refusals, intake ingest of seeded ZZ tender e-mails through the real staging path, review, Move to
+  active (shipment appears in Active), permission matrix, light + dark + phone. Cleanup re-scan: 0 IntakeLoad,
+  OwnershipDivision, AuditLog residue; shipments created are voided. Screenshots: `screenshots/review/U-*.png` (Active, All,
+  Intake tabs light/dark, review, review needs-list, division dialog error + filled, divisions badge, Active after move).
+- **Real bug found and fixed:** the demo scan on `IntakeLoad` was missing from the `tmsShipmentActions` IAM grant (mocked tests
+  cannot see IAM); fixed in `backend.ts` (job 137), after which the demo seeds again.
+- **IMPORTANT, intake mail is not live on dev (and I could not make it live):** SES inbound is not used anywhere in this repo.
+  Tender e-mail reaches the pipeline through the existing Google Apps Script Gmail bridge, `scripts/agentEmailBridge.gs`.
+  It was changed (recipient addresses, an `intakeAddresses` lookup, tests) but **a person must redeploy it in Ryne's Google
+  account** for division routing to work; until then intake is exercised on dev through the same staging path with seeded e-mails.
+  Also note: the `INTAKE_WEBHOOK_SECRET` the bridge/ingest uses is an **app-shared** Amplify parameter
+  (`/amplify/shared/<app>/INTAKE_WEBHOOK_SECRET`), i.e. production's agent resolves the same value. Not printed or copied.
+- **Decisions for Ryne (U-plan section 13; defaults taken):** D-U1 separate IntakeLoad record; D-U2 Workflows URL kept; D-U3
+  definition of "released to invoicing"; D-U4 canceled in All only; D-U5 every active division needs an address; D-U6 Move to
+  active lands `TENDER_PENDING`; D-U7 page grant not a new role; D-U8 unrouted mail staged under Unrouted; D-U9 Statuses facet
+  kept; D-U10 mailbox picker = suggestions + typing (no mailbox settings table).
+
+## 2026-11-03 — Step S4 deployed on dev (six added features), re-verified after the U/V deploys
+
+**Committed and deployed on dev (job 135, `ba7c536`; fixes in jobs 136-138). Dev only. No schema change in S4.** Plan: `S4-plan.md`.
+Compliance > Document overview (`/compliance`: approve/reject, expiring-soon queue, MCP sync heartbeat), User management overview
+with New registrations (blocked sign-ups are now logged by the driver pre-sign-up gate; its refusal message/success path
+byte-identical), Financial operations (`/financial-operations`), Expenses overview (`/expenses`), Platform health
+(`/platform-health`, admin only, dev banner, NEUTERED_ON_DEV not counted as failing), and the Notifications bell + drawer.
+Kit additions: TmsPeriodToggle, TmsGauge, TmsPillBarChart, TmsDocumentFrame. Real defects found by `devVerifyS4` and fixed:
+`/tms` routes never loaded the driver/equipment reference data (driver names showed as ids; expiring driver documents were
+missing from the bell), notification rows had no CSS, sr-only chart tables stretched the page, and the page-actions row
+overflowed phones (693px > 390px on `/dashboard` and the bell drawer; fixed once for every page head). Verified on deployed dev:
+`devVerifyS4` **58 PASS / 0 FAIL**; `devVerifyS3` **155 PASS** (the single FAIL, D13 Hours tab, was a harness timing race:
+it passes 3/3 once the check waits for the driver profile); `devVerifyS2` **200 PASS / 0 FAIL / 18 skips** (states with no data on
+dev: invoice, bill, workflow run; plus harness triggers 14a-send and the P3/P4 token mints). Screenshots: `review/S4-*.png`.
+
+### Deferred cosmetic items (not functional; not blocking)
+- `.tms-thread-to` had no CSS rule (found by devVerifyV): rule added locally in `styles/conversation.css`, **committed locally
+  and not pushed so far** (no doc/cosmetic-only deploys); it ships with the next code deploy.
+- Settings > Tracking automation shows a template problem both inline in the editor and in the card-level error list.
+- Intake division tab strip clips the last tab at narrow widths (no scroll affordance); Tracking table's right-hand columns
+  need horizontal scroll below ~1700 px.
+- `devVerifyV` prints "TmsSettings ... NOT confirmed restored" at cleanup although the dev settings row is verified clean
+  (`trackingAutomation` unset): the harness comparison is too strict.
+- Customer deep link `/tms/customers?customer=<id>` now opens the profile (was dead); the harness still opens it by search.
+- Open follow-ups from the V engine: a manual REQUEST_POD followed by auto POD is deduped; a partially quiet tick drops that
+  slot's quiet channel (documented in V-plan risks).
+
+## 2026-11-03 — PLAN: the two dev-only tests after S4 (big import, then full demo shipment); main is Ryne's call afterwards
+
+Everything stays on dev. No main merge or merge-to-main prep is planned or done. Order: (1) big data import on dev,
+(2) one demo shipment start to finish, then Ryne decides about main. Findings are from a read-only recon of the repo.
+
+**Addendum after Steps U and V (the demo shipment must exercise them):** the full-shipment run now starts with an e-mail
+tender: a ZZ tender e-mail staged for a division's intake address (through the staging path, since inbound mail is not live on
+dev) -> Intake tab -> review/correct -> Move to active (shipment lands `TENDER_PENDING`, appears in Active) -> Accept + credit
+check -> price -> post -> cover -> rate con (the carrier must have a completed MCP packet) -> the shipment inherits the customer's
+default tracker (check it appears in Tracking under that person; reassign once) -> Tracking by assignee -> automation Run now
+(NOT_SENT check-call rows in the thread with the exact text; quiet hours; one slot only) -> Delivered -> automatic POD request
+(once per leg per channel) -> POD upload + review -> Release (shipment leaves Active, stays in All) -> invoice -> collect -> carrier
+bill -> pay. The big import must also provide a `trackerId`/default-tracker mapping or leave trackers unassigned, route each row to
+a division (so Intake and Active make sense), and must not require an intake e-mail on existing divisions. Needs from Ryne
+(unchanged): the source system and a sample file, volumes, whether documents come along, whether legacy PROs must be kept.
+
+### Test 1 — big data import on dev
+**What exists today (none of it takes a large external dataset):**
+- `node scripts/devStack.mjs copy-data|copy-files`: prod → dev copy (read-only on prod, overwrite by key, 4 table workers,
+  BatchWrite 25, no Lambda/AppSync ceiling). `copy-files` is `aws s3 sync` and creates no `ShipmentDocument` rows.
+- Aljex CSV importer (`/tms/brokerage/company/aljex-import`, Lambda `tms-aljex-import`, owner/ADMIN): the ONLY path that
+  writes the new Shipment/Order/Load model from a file. UTF-8 CSV (BOM stripped) uploaded to S3, 31 target columns with header
+  aliases (Pro #, Customer, Customer MC, origin/destination name+city+state+zip, pickup/delivery date, equipment, weight,
+  miles, customer/carrier rate, carrier + MC, invoice #/date/paid date/amount, bill #/amount, status). One TransactWrite per
+  row (ProClaim, Shipment, Load, LoadFinancials, 2 LoadCharge, optional Invoice, optional LoadCarrier + CarrierBill).
+  Idempotent by file hash and PRO claim. Rows run serially inside a 30 s AppSync / 60 s Lambda window: about 150-400 rows per
+  call [INFERENCE], and the job row is written only at the end, so a timeout leaves no job record.
+- Directory CSV import (`/tms/brokerage/company/import`): max 500 rows per call, apply only for CUSTOMER and LOCATION.
+  Location natural key is the normalized name alone, so two same-named sites collapse into one.
+- `scripts/backfill*.mjs` re-link rows already in dev; `scripts/importCarriers.mjs` is production-cutover only (refuses dev by policy).
+
+**Gaps for a realistic large load (assume 50k shipments, 5k customers, 2k carriers, 20k locations, documents):**
+1. No bulk carrier path on dev (Aljex rows never create a Carrier; bills get a synthetic `imported-<mc|name>` id, no MCP status,
+   insurance or payment method). 2. No documents path: imported shipments sit at DOCS_NEEDED and the release gate can never pass.
+3. Throughput shape is wrong: serial rows, no resumable cursor, customer/location resolvers are linear scans (needs a Map index);
+   needs client-side chunking with an offset, an async worker, or an offline script writing to DynamoDB directly.
+4. Preview over-counts new customers/locations (they are not added to the preview state); a changed column mapping on the same
+   file is ignored (job cached by hash). 5. Importer-created customers/locations lack `normalizedName`/aliases/geocode, so they
+   later look unmatched or duplicate; Shipment `status` is hard-coded DRAFT; stops are pickup/delivery only, date at T00:00Z;
+   no division/rep/references/accessorials; invoices get Net 0 so aging is wrong. 6. Shipment numbers: every row consumes a
+   `nextShipmentNumber` (no collisions, but 50k imports burn 50k numbers ahead of live ones and it is one hot settings item);
+   there is no option to preserve legacy PROs, and a legacy PRO shaped like `S000123-1` could collide with the derived-PRO regex.
+   7. Shipments cannot be deleted (void only), so a bad import is permanent: tag fixtures (ZZ prefix or a `source` marker) and
+   rehearse on a throwaway dev table copy. 8. `devStack copy-data --to` is not validated against the production suffix
+   (add `to !== PROD_SUFFIX`); the Aljex and directory importers rely only on which deployment they run in.
+
+**Needs from Ryne:** the actual source and file format (Aljex export? MVMNT export? other TMS), a representative sample file with
+columns, expected volumes per entity, whether documents come with it, and whether legacy PRO numbers must be preserved.
+**Proposed build (after S4):** a streaming import script reusing the Aljex mapper that creates Carrier/Customer/Location (with
+normalized keys) through the Lambda actions in parallel batches, indexed resolvers, a document-stub strategy, a 1k-row timed
+dry run, then the full run on a dev table copy.
+
+### Test 2 — one demo shipment, create to invoice (and carrier bill/pay)
+**Steps and the actions behind them:** create (`CREATE_SHIPMENT`, `SAVE_ORDER_FORM`, `CHECK_CREDIT`) → submit (`SUBMIT_ORDER`,
+build gate) → price (`PRICE_FROM_MARKET`, DAT is a STUB) → post (`POST_LOAD`, STUB) → cover (`RECORD_CARRIER_OFFER`,
+`ACCEPT_OFFER`, `BOOK_CARRIER`) → rate con (`SEND_RATE_CON`) → track (`SEND_TRACKING_LINK`, `SAVE_CHECK_CALL_PLAN`,
+`INGEST_SHIPMENT_MESSAGE`) → POD (`REQUEST_POD`, upload, `REVIEW_SHIPMENT_POD`) → release (`READY_TO_INVOICE`) → invoice
+(`GENERATE_INVOICE`, `RENDER_INVOICE_PDF`) → collect (`RECORD_PAYMENT`) → carrier bill (`RECORD_BILL`, `APPROVE_BILL`) → pay
+(`RECORD_AP_PAYMENT`).
+**Already proved by scripts:** `devVerifyP` covers seed, price, build gate, post, offer, rate con, tracking, POD review and release
+(48/48); `devVerifyAr` and `devVerifyAp` cover invoice/payment/credit/factoring and bill/approve/pay, but on throwaway fixtures that are
+voided afterwards (that is why dev shows no invoices or bills). **No script or UI run chains one shipment through all steps.**
+**Blockers for a click-through today:** (1) email/SMS are not live on dev (SES rejects: message NOT_SENT with the MIME in CloudWatch;
+Twilio/OTR/Motive keys neutered), so rate-con signing links, invoice emails and remittances work by copy/download; the portal link
+works on the Amplify branch URL, not `ops-dev.bcatcorp.com`. (2) MyCarrierPackets/DAT/Truckstop/Maps are stubs, and rate con now
+requires a completed MCP packet: use the seeded `carr-demo-vetted` or set `mcpStatus` on a test carrier; a new carrier also needs
+insurance and a `CarrierPaymentMethod` to be bookable/payable. (3) Release gate and bill approval need BOL/POD/RATE_CON documents
+(upload through the Documents tab) and carrier paperwork or an admin override note. (4) Money steps need owner/ADMIN. (5) Customer
+needs a credit limit when free credit is required and a billing contact for the invoice email. (6) Shipments cannot be deleted: use
+ZZ-prefixed customer/carrier and void afterwards. (7) Older dev stacks need `RESET_DEMO` then `SEED_DEMO` for seed p8.2.
+**Proposed build (after S4):** `scripts/devVerifyFlow.mjs` that runs the 14 steps on ONE shipment with a temp ADMIN identity, ZZ
+fixtures and cleanup, plus a manual click-through checklist for the UI. **Needs from Ryne:** whether to keep email/SMS stubbed or
+turn on a real SES/Twilio sandbox for the run, and which customer/carrier to use for the demo.
+
+## 2026-11-03 — Steps S2 + S3 + rate-con changes deployed on dev (Amplify jobs 133 and 134)
+
+**Committed and deployed on dev. Dev only; nothing near main.** Ryne approved S1; the S1 nits (welcome name,
+Owner Operators clipping, empty Company card) shipped in `5c52438`. S4 (six added features) is next.
+
+**S2 — every `/tms/*` page on the S1 kit** (`5c52438`, job 133; plan `S2-plan.md`). New kit pieces: StatRow,
+SegmentedTabs, MetaList, DetailSplit, ProfileHeader, Timeline, ApprovalCard, Alert, SegmentedBar, Drawer, Toaster,
+PublicFrame. theme.css split into `styles/*.css`. Inbox is three-pane (list, chat with header + quick-action bar +
+location card, closable Info panel with driver card and status timeline). Public pages on `TmsPublicFrame`.
+
+**S3 — everything else** (`ccb52ba`, job 134; plan `S3-plan.md`): `--tms-*` tokens promoted to `:root`, ~3,700
+`--ds-*` references codemodded over 183 files, legacy routes render inside the same `TmsShell` (fill mode, phone
+drawer, company switcher, theme toggle, log out), old `components/layout/*` deleted, login, TrackPage, files, PODs,
+disputes, driver portal, hand-built modals on TmsDialog/TmsDrawer, driver PWA on the same tokens (light default,
+dark toggle on Account; manifest theme/background colours updated), hex-literal lint guard over all UI source.
+Plan defaults taken for D-1..D-7 (see `S3-plan.md` top): driver PWA light default; Best Care e-mail NOT recoloured
+(only HTML mail in the repo, different brand); off-canvas phone drawer for both shells; PWA icon artwork stays blue;
+dropped legacy-only chrome (Quick Add, Live ticker, topbar-to-Calendar filter, duplicate Users link); customer PDFs
+untouched; iOS status bar style. **Decision needed (Ryne):** confirm or change any of those.
+
+**Rate-con (4 items, in job 133; plan `RATECON-plan.md`):** (a) PDF header draws the revenue division's logo
+(`Division.logoKey`, PNG/JPEG, 2 MB cap, 5 s timeout) and falls back to the name text; never fails a send;
+(b) `SEND_RATE_CON` adds the caller to cc (deduped, validated); (c) rate-con panel has a recipient picker
+(carrier's emails + typed address, validated); (d) only carriers with a completed MyCarrierPackets packet can be sent
+a rate con, server-side refusal before any side effect plus UI disable with the reason. "Completed" = `mcpStatus` in
+`PENDING_REVIEW | ACCEPTABLE | MODERATE | UNACCEPTABLE | UNACCEPTABLE_REVIEW` (literal reading; **Decision needed:**
+exclude UNACCEPTABLE/UNACCEPTABLE_REVIEW and/or PENDING_REVIEW? one constant in `src/lib/mcpPacket.ts`). **Effect
+on dev data: all 19 dev carriers have a blank `mcpStatus`, so none can be sent a rate con until their packet
+completes.** Demo seed p8.2 marks `carr-demo-vetted` ACCEPTABLE; `carr-demo-lapsed`/`carr-demo-nobuy` stay blank as the
+live refusal examples. Not built, per Ryne: multi-carrier-at-once covering.
+
+**Real bug fixed on the way:** `readBundle` read loads only from `shipment.loadIds` (BatchGet), so a second leg
+missing from `loadIds` was invisible and `REVERT_TO_QUOTE`'s single-load guard / `DUPLICATE_SHIPMENT`'s leg pick
+would act on a multi-leg shipment. It now unions the BatchGet with the shipment index. The two tests that caught it
+had been hidden for days: Vite resolves `.js` before `.ts`, so stale gitignored compiled copies (311 files removed
+this session) were being tested instead of the source. After this, local `npm run test` runs the real sources.
+
+**Gates:** `tsc` (app + root) clean; `eslint` 0 errors (3 pre-existing warnings); `npm run test` 508 files /
+6674 tests pass; `npm run build` OK. `scripts/devVerifyP.mjs` **48/48** against deployed dev after job 133.
+`scripts/devVerifyS2.mjs` (new; every /tms route, tab, drawer, dialog, public page; light + dark; asserts no legacy
+tokens, unstyled classes, console errors, failed requests) after job 134: **206 PASS / 0 FAIL / 17 SKIPPED**; skips
+are states with no data on dev (no invoice, carrier bill, workflow run, integration link, countered quote or active
+customer link yet; the full demo-shipment test after S4 covers invoice/bill) plus four harness triggers/tokens not
+found (02a-filterset, 14a-send, P3 upload token, P4 rate-con token). `scripts/devVerifyS3.mjs` (new; non-/tms routes,
+login, driver PWA with real temp driver identities, phone viewport + shell drawer): **153 PASS / 6 FAIL = 2 real
+defects.** (1) white-on-light-grey avatar initials for unassigned colours (contrast 1.2): fixed in
+`src/lib/driverColors.ts` (committed, ships with the S4 deploy). (2) `/dashboard` at 390px reported horizontal overflow
+(scrollWidth 693): NOT reproducible in a direct re-probe (scrollWidth 390 after 12 s and 35 s); left unchanged,
+re-check on the next devVerifyS3 run. Not covered by S3 verification: driver screens D11/D12/D14 and the overlay-state
+probes. All temp identities (staff and driver pools) deleted; no `zz-*` users remain.
+
+**Process notes:** S2Triage hung (no edits for 30+ min) and was cancelled; its harness fixes (public-audit crash,
+hook-class allow-list) had landed and the harness passed afterwards. Screenshots: curated set in
+`Docs/tms-build/screenshots/review/` (light/dark dashboard, shipments, tracking tab, Inbox, carriers, My Brokerage,
+login, driver login/account at phone size, legacy dashboard/calendar/dispatch, phone drawer); full S2/S3 sets are
+regenerated by the two devVerify scripts and gitignored.
+
+## 2026-11-02 — Step S1 (UI redesign: tokens + kit + shell + company dashboard) deployed on dev — AWAITING RYNE'S REVIEW
+
+**Committed and deployed on dev. Stopped at the review gate: S2 (TMS pages), S3 (legacy ops) and S4
+(added features) are NOT started.** Spec `Docs/tms-build/REDESIGN_UI_REFERENCE.md`; plan (Fable)
+`Docs/tms-build/S1-plan.md`; built as three disjoint-ownership slices.
+
+- Commit `b8daa47`; Amplify dev job `131` SUCCEED (2026-11-02 22:21 UTC-6).
+- **Tokens:** `--tms-*` names kept and re-valued — light is the default, dark is a persisted
+  variant (`data-tms-theme` on `<html>`, localStorage `tms-theme`; Radix portals render outside the
+  shell, hence `<html>`). Every existing TMS page therefore picks up the new look from one sheet;
+  S2 is verification + per-page polish. Green `#1DB36A` primary, white 14px cards, canvas `#F3F6F4`.
+- **Shell:** company switcher (scope preference only: collapses other businesses' sections and
+  presets the dashboard division filter — no navigation/permission/data change), filled-green active
+  pill, Tracking group with count badge, breadcrumb top bar, bell with live check-call-due count,
+  working theme toggle, user card + Log out.
+- **Kit:** `TmsKpiCard`, `TmsCountBadge`, `TmsChartCard` icon, `TmsPage` eyebrow, `TmsBadge` as Pill.
+  Deferred until a stage needs them: StatRow, SegmentedTabs, Timeline, KPI deltas (need a prior-window read).
+- **Company dashboard:** welcome header, 4-card KPI strip (Revenue, Profit, Open AR, Open AP), restyled
+  business strips and charts; views/filters/charts picker/export unchanged.
+- Gates: `tsc` clean, `eslint` 0 errors (3 pre-existing warnings), `npm run test` 478 files / 6498 tests pass
+  (`theme.scope.test.ts` token pins retargeted; 13 new behavioural tests across theme, company, kit).
+- Proof: authenticated dev browser, screenshots `Docs/tms-build/screenshots/S1-shell-dashboard-light.png`
+  and `...-dark.png` (toggle verified, persists). Temporary ADMIN identity deleted; no `zz-*` users remain.
+- Known nits for review: Ivan Cartage strip numbers clip at narrow card width; the welcome line shows
+  the e-mail local part for users without a staff profile (real staff show their name).
+
+Decision needed (Ryne): approve the look, or list changes, before S2 starts.
+
+## 2026-11-02 — Demo walk finished: tender → POD → release verified on dev
+
+**Committed and deployed on dev.** Walking the seeded demo in a real browser found one more
+bug: opening *Carrier answers the posting* showed `Cannot return null for non-nullable type:
+'AWSDateTime' within parent 'ShipmentPosting' (createdAt/updatedAt)`. The demo seed wrote
+`ShipmentPosting`, BUY `Quote` offers and `LoadCheckCall` rows without the Amplify-managed
+`createdAt`/`updatedAt`, which `putTx` does not add.
+
+- Commit `4a515a9` (`amplify/functions/tms-shipment-actions/demo.ts`): stamps `createdAt`/`updatedAt`
+  on postings, offers and check calls (`updatedBy` on check calls). Amplify dev job `130` SUCCEED.
+- Reseeded via `scripts/devVerifyP.mjs` (the UI Reset hits AppSync's 30 s ceiling and leaves the
+  seed half-written): **48/48 PASS**. Full `npm run test`: 474 files / 6458 tests pass.
+- Browser proof on dev (temporary ADMIN identity, deleted afterwards; no `zz-*` users remain):
+  Carrier tab shows 3 offers + DAT/TRUCKSTOP postings with no error; Tracking, POD (two refused
+  PODs, Ready-to-invoice disabled) and Release (gate satisfied, Ready-to-invoice enabled) open on
+  real records with no errors.
+- Removed 88 stale gitignored `amplify/**/*.test.js` tsc-emit duplicates that made local vitest
+  run old copies of tests (they were the source of the 4 "finance" failures after the clock pin).
+
+Next: Step S1 (tokens + kit + shell + company dashboard), then stop for Ryne's review.
+
+## 2026-11-02 — Demo page Open buttons fixed on dev
+
+**Committed and deployed on dev.** The "Seeded record not found" rows on My Brokerage → Demo
+were not missing lifecycle states (Steps B–N were already deployed and proved, see the
+2026-10-30 entries): the page matched `record.kind` against the lower-cased `opensOn` prefix
+(`shipment`) while the backend writes `SHIPMENT` / `CUSTOMER` / `QUOTE`, so every Open button
+was disabled. The page test's fixture used lower-cased kinds and masked it.
+
+- Commit `56a1180` (DemoPage matches by `demoKey`; fixture mirrors the backend; new test asserts
+  Open is enabled and navigates to the seeded in-transit shipment's tracking tab). The new test
+  fails on the previous DemoPage and passes on this one.
+- Amplify dev job `127` for `56a1180` **SUCCEEDED** at 2026-11-02 20:46:55 UTC-6.
+- Deployed Demo page checked in a headless browser with a temporary ADMIN identity (removed
+  afterwards): 11 steps, 0 "Seeded record not found" rows, 9 Open buttons enabled (P2–P10) and
+  2 disabled (P1, P11); P8 Open landed on `/tms/shipments/<seeded id>?tab=tracking`.
+  Screenshot: `Docs/tms-build/screenshots/demo-page-open-buttons.png`.
+- `scripts/devVerifyP.mjs` against the deployed dev stack: **48/48 PASS** (P8-UI screenshots refreshed).
+- `npx vitest run` on the working tree: 8,283 pass; the only 4 failures were
+  `tms-finance-actions` commissions tests that depended on the wall clock (see below), fixed in
+  the follow-up commit. `npx eslint` on touched files clean; `npx tsc --noEmit -p tsconfig.app.json` clean.
+
+### Follow-up in the same unit of work
+
+- `amplify/functions/tms-finance-actions/handler.test.ts` now pins `Date` to 2026-10-22 for every
+  test. The fixture lives in October 2026 and the two pay-period tests open the October period,
+  but a commission's `triggerAt` is stamped from "now" at invoicing, so from 1 November the
+  period stopped claiming the row. After the pin: 132/132 in the finance suites.
+- Removed 8 leftover temporary dev identities (`zz-debug-*`, `zz-screenshot-admin`, `zz-test-*`,
+  `zz-p-admin-*`, `zz-r-rep-*` at `@example.invalid`) from the dev user pool and the one orphan
+  `UserProfile` row they left; no `zz-p-walk-*` identity remained. Seeded `demo-*` staff kept.
+- Academy: `Docs/academy/the-demo-flow.md` already describes the intended behaviour (each row
+  opens the exact seeded record); no article change needed.
+- Follow-up commit `05a847f` (finance-suite clock pin, this entry, refreshed screenshots):
+  Amplify dev job `128` **SUCCEEDED** at 2026-11-02 21:08:03 UTC-6.
+
+## 2026-11-02 — Step DEMO-WALK fixes deployed on dev
+
+**Committed and deployed on dev.** Click-by-click polish on the customer-facing demo flow.
+
+- Commits: `d6c4ee3` (DEMO-WALK tracking + inbox + customer-link polish), `9f41700` (remove stale `conversationIdRef`).
+- Amplify dev job `125` for `9f41700` **SUCCEEDED** at 2026-11-02 20:15:49 UTC-5.
+- `scripts/devVerifyP.mjs` run against the deployed dev stack: **48/48 PASS**
+  (P8-UI browser verification refreshed screenshots).
+- `npx vitest run amplify/functions/tms-shipment-actions/handler.test.ts amplify/functions/tms-tracking-actions/handler.test.ts`: **363/363 PASS**.
+- `npm run lint`: 0 errors, 3 pre-existing warnings.
+
+### What changed
+
+- Tracking board now defaults to **Motion** sort (Moving first) with a recent-ping tiebreaker,
+  so seeded in-transit shipments with pings surface at the top of the Active tab.
+- `useShipments` projects `lastKnownLat`/`lastKnownLng` onto the row; the Next Stop cell can
+  now render miles + ETA.
+- `TrackingLink` gained `shipmentNumber` and `customerName` snapshot fields; the backend
+  writes them when sending a customer link.
+- Manage Customer Links page displays the snapshot fields and hides verification-user test
+  artifacts (`zz-p-admin-*` / `tms-verify*`).
+- `RESET_DEMO_DATA` purges verification-created `TrackingLink` rows.
+- Inbox composer signs with the staff display name and sends `authorName` to the thread Lambda.
+- Seeded in-transit threads include a dispatcher email and a person-sent message so the
+  Agent vs Person badges are visible.
+- React Compiler lint cleanups in `InboxPanel`, `TrackingDetailPanel`, and `TrackingDetailMap`.
+
+### Next
+
+Continue the walk through tender → cover → rate con → tracking → POD → release, then begin
+Step S1 (redesign tokens + kit + shell + company dashboard) and **stop before S2** for
+Ryne's screenshot review.
+
+## 2026-10-30 — devVerifyP stability fixes deployed on dev
+
+**Committed and deployed on dev.** Follow-up to the Step P verification harness.
+
+- Commit: `8fb3baf`.
+- Amplify dev job `122` for `092a751` (build-log update atop `8fb3baf`) **SUCCEEDED** at 2026-10-30 16:17:09 UTC-5.
+- `scripts/devVerifyP.mjs` run against the deployed dev stack: **48/48 PASS** (includes P8-UI
+  browser verification with refreshed screenshots).
+- `npm run test` on the working tree: **562 files / 8,286 tests PASS**.
+- `npx eslint amplify/functions/tms-shipment-actions/demo.ts scripts/lib/verifyTrackingUi.mjs` — clean.
+
+### What changed
+
+- `scripts/lib/verifyTrackingUi.mjs`: removed a redundant first CDP `socket.on('message')`
+  handler that could resolve/reject a pending request before the main handler had registered
+  the response, and hardened the P8 inbox-composer existence check.
+- `amplify/functions/tms-shipment-actions/demo.ts`: removed a temporary debug check added
+  while diagnosing a `Customer not found` failure; the root cause was a concurrent
+  `devVerifyP.mjs` run resetting the stack mid-test, not the seed logic.
+- Refreshed `Docs/tms-build/screenshots/P8-UI-*.png` artifacts.
+
+### Note
+
+Two concurrent `node scripts/devVerifyP.mjs` processes were observed racing and voiding each
+other's seeded shipments. The surviving process passed 48/48. Only one devVerifyP run should
+be active at a time.
+
+## 2026-10-30 — Build complete — Steps A–N on dev
+
+All planned TMS build steps **A through N** are now committed, deployed, and verified on the
+`dev` branch. No feature work remains before a merge-to-main decision. Steps **R, R2, and P**
+were also delivered as part of this build; their detailed entries follow below.
+
+### Proof-by-step (Amplify dev app `d3dejqzs77khq6`, branch `dev`)
+
+| Step | Final commit(s) | Proof job | Status |
+|---|---|---|---|
+| A Customer v2 | `36858b9` | job `7` | SUCCEED |
+| B Shipment/Order/Load | `ee5b2cd` | job `11` | SUCCEED |
+| C Carriers & booking | `b570b86` + fixes | job `15` | SUCCEED |
+| D Tracking & check calls | `a2b4b10` | job `17` | SUCCEED |
+| E Documents & delivery | `eef2fae` + `661b21f` | job `20` | SUCCEED |
+| F Accounts receivable | `3d50186` + fixes | job `24` | SUCCEED |
+| G Accounts payable | `1684273` + follow-up | job `35` | SUCCEED |
+| H Quotes & rates | `49bbaa5` + fixes | job `38` | SUCCEED |
+| I Settings/roles/teams/commissions | `50787c3`, `3da9683` | job `42` | SUCCEED |
+| J Integration framework | `71dc8a5` + `16b155d` + `f6d3143` | job `56` | SUCCEED |
+| K Workflows & AI agents | `9ae0a09` + `361a859` | job `59` | SUCCEED |
+| L My Brokerage settings | `f6817f2` | job `85` | SUCCEED |
+| M Academy Ask assistant | `3925a4c` | job `87` | SUCCEED |
+| N1 Aljex bulk import | `0e941ac` (final cleanup) | job `95` | SUCCEED |
+| N2 MyCarrierPackets sync | `4bd552f` | job `96` | SUCCEED |
+| N3/N4 Rate-con/BOL e-mail + tracking thread | `197b4b7` | job `97` | SUCCEED |
+
+Latest full-suite gate: **475 files / 6,459 tests PASS**, `npx eslint .` **0 errors**
+(3 pre-existing warnings), both `npx tsc --noEmit` clean.
+
+### Known stubs and what Ryne must supply for each
+
+| Capability | Where it lives | What Ryne supplies | Current behavior |
+|---|---|---|---|
+| **DAT load posting / RateView** | `Integrations → DAT` | Service-account e-mail, password, rate-view tier; per-rep DAT e-mails | Stub returns deterministic realistic rates labelled `STUB — no DAT call was made.` |
+| **Truckstop posting** | `Integrations → Truckstop` | `clientId`, `clientSecret` | Stub labelled on row and UI |
+| **MyCarrierPackets vetting + sync** | `Integrations → MyCarrierPackets` and carrier profile | `username`, `password`, `webhookSigningSecret` | Live adapter runs in stub mode; Validate/Test button reports `STUB/UNABLE_TO_VERIFY` honestly |
+| **Google Maps server APIs** | Geocode Lambda, Places Autocomplete, Distance Matrix | An **unrestricted server key** for `GOOGLE_MAPS_API_KEY` (the browser referrer key is rejected server-side) | Dev key returns `Invalid credentials`; address geocoding is broken on dev |
+| **Voice agent / VOICE channel** | `ShipmentMessage.channel` enum, workflow agent | Decision whether to build voice at all; if yes, provider + phone numbers | `VOICE` is declared but never written; deferred |
+
+These are the only items called out in the brief as intentionally stubbed pending credentials
+or a decision. All other providers in the integration registry (39 total) are similarly wired
+for live-or-stub; their credential list is in the Step J entry below.
+
+### MERGE-TO-MAIN CHECKLIST
+
+**Before the merge**
+
+- [ ] **Schema / table diff review.** `amplify/data/resource.ts` adds **24 new models**
+  (`Shipment`, `Order`, `LoadCarrier`, `LoadFinancials`, `LoadCharge`, `Carrier`,
+  `CarrierContact`, `CarrierPaymentMethod`, `CarrierDocument`, `LoadCheckCall`, `TrackingLink`,
+  `ShipmentDocument`, `ShipmentNotice`, `Invoice`, `ArPayment`, `CarrierBill`, `ApPayment`,
+  `Quote`, `LaneRateSample`, `UserProfile`, `Commission`, `CommissionPayPeriod`, `Integration`,
+  `WorkflowRun`, `ImportJob`, `AljexImportJob`) and extends ~10 existing models
+  (`Load`, `Customer`, `TmsSettings`, `Division`, `FactoringItem`). All changes are additive;
+  no field is renamed/removed/retyped. Verify against the production table suffix
+  (`5ucwdyvwivelbo4k4jomvrwel4-NONE`).
+- [ ] **Data-stack size.** Latest measured template is ~785 KB, leaving ~215 KB under the
+  1 MB CloudFormation hard cap (`scripts/measureDataTemplate.mjs`).
+- [ ] **Build-time env vars.** Confirm these are set for `main`:
+  `CDK_CONTEXT_JSON`, `PORTAL_PROD_ORIGIN`, `BCAT_DEV_STACK=false`, `BCAT_ISOLATED_PREVIEW=false`,
+  `INTAKE_IVAN_CHANNEL_ID`, `LOADS_EMAIL_TO`, `INTAKE_PODS_CHANNEL_ID`, `SES_FROM_ADDRESS`,
+  `SLACK_GLOBAL_CHANNEL_ID`, `APPT_REQUEST_FROM_ADDRESS`, `APPTS_IVAN_CHANNEL_ID`,
+  `TWO_FA_SLACK_CHANNEL`, `GOOGLE_PLACES_API_KEY`, `GOOGLE_PLACE_ID`, `GOOGLE_PLACE_QUERY`,
+  `GOOGLE_REVIEWS_URL`, `DRIVER_PAY_FROM_ADDRESS`, `QUOTE_FROM_ADDRESS`, `QUOTE_CC_ADDRESS`,
+  `QUOTE_BCC_ADDRESS`, `PAYCHEX_COMPANY_ID`, `BROKER_DRIVER_NAME`, `BROKER_DRIVER_ID`.
+- [ ] **Amplify secrets.** Rotate/review: `OTR_USERNAME`, `OTR_PASSWORD`, `OTR_SUBSCRIPTION_KEY`,
+  `MOTIVE_API_KEY`, `BLUE_INK_TECH_API_KEY`, `GOOGLE_MAPS_API_KEY`, `GEOCODE_TOKEN_SECRET`,
+  `ANTHROPIC_API_KEY`, `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_CHANNEL_MAPPING`,
+  `PAYCHEX_CLIENT_ID`, `PAYCHEX_CLIENT_SECRET`, and the shared `INTAKE_WEBHOOK_SECRET` family.
+- [ ] **SSM provider credentials.** For each live provider, enter credentials via the
+  `Integrations` page; they are stored as `/bcat/integrations/<userPoolId>/<PROVIDER>` SecureStrings.
+- [ ] **DNS / SES sender.** Verify `bcatcorp.com` SES identity and add DKIM CNAMEs, SPF TXT, and
+  DMARC TXT records as documented in `Docs/SES-ONBOARDING-DNS.md`. Note: the identity is managed
+  out-of-band, not by CloudFormation; read DKIM tokens from the SES console, not stack outputs.
+  Request SES production access if not already granted.
+- [ ] **Amplify domain.** Production `https://ops.bcatcorp.com` association must exist; dev is
+  already at `https://ops-dev.bcatcorp.com`. No Wix/Route53 changes are required.
+- [ ] **Cognito.** Staff pool is vanilla with `ADMIN`/`DISPATCHER` groups. Driver pool is custom
+  (`bcat-driver-pool`) with `PRE_SIGN_UP` → `driver-signup-gate` and `POST_CONFIRMATION` →
+  `driver-welcome` triggers; verify production SES sender `noreply@bcatcorp.com`.
+- [ ] **Steps AJ/AK additive fields.** `Customer.trackingMode` / `trackingMethod` /
+  `driverSmsTarget`, `Shipment.trackingPrefs`, `TruckConfig.phone` / `phoneLabel` — all six
+  nullable, **no backfill**, no migration script; verify against the production table suffix
+  (`5ucwdyvwivelbo4k4jomvrwel4-NONE`) and re-run `scripts/measureDataTemplate.mjs` (six scalar
+  attributes). Until someone sets a value behaviour is unchanged: every SMS still goes to the
+  personal number and Step V decides automation. After the deploy confirm `tms-tracking-actions`
+  has `TRUCK_CONFIG_TABLE_NAME` and `DRIVER_TABLE_NAME`, and `driver-app-api` and
+  `dispatch-twilio-webhook` have `TRUCK_CONFIG_TABLE_NAME`.
+
+**After the merge / deploy to production**
+
+Run these backfills **in order** against the production tables:
+
+1. `scripts/seedDivisions.mjs`
+2. `scripts/backfillCustomers.mjs`
+3. `scripts/backfillLocations.mjs`
+4. `scripts/backfillShipments.mjs`
+5. `scripts/backfillShipmentDocuments.mjs`
+6. `scripts/backfillLegacyAr.mjs`
+7. `scripts/backfillApOpen.mjs`
+8. `scripts/backfillLaneSamples.mjs`
+9. `scripts/backfillProClaims.mjs`
+10. `scripts/backfillRevDivision.mjs`
+11. `scripts/backfillUserProfiles.mjs`
+12. `scripts/importCarriers.mjs --apply --env production --outputs <file> BCAT_CUTOVER_CONFIRM=<fingerprint>`
+    (production cutover only; never point at dev).
+
+**Operational follow-ups after prod deploy**
+
+- [ ] Enable EventBridge rules on production (they are disabled on dev by `BCAT_DEV_STACK`):
+  appointment report, cash check-in, recurring expenses, Motive/Blue Ink syncs, compliance
+  scanner, intake reconcile, workflow stalled-sweep, MCP 30-min sync, Paychex weekly.
+- [ ] Paste Function URLs into external bridges: `ShipmentEmailIntakeFunctionUrl` into the Gmail
+  Apps Script project, `WorkflowAgentFunctionUrl` into `scripts/agentEmailBridge.gs`, and the
+  dispatch Twilio webhook into Twilio.
+- [ ] Replace the neutered dev keys with production credentials for OTR, Slack, Paychex,
+  Blue Ink Tech, Motive, and MyCarrierPackets.
+- [ ] Verify Google Maps server key works for geocoding/Places/Distance Matrix.
+- [ ] Confirm `backfillDriverDocScans.mjs` is **not** run accidentally: it defaults to the
+  production table suffix and has no production guard.
+- [ ] Run `scripts/devVerifyP.mjs` against prod in read-only mode before announcing cut-over.
+- [ ] Enter each truck's work phone on Fleet (`/trucks`); Settings › Truck work phones lists the
+  gaps. Do **NOT** run `scripts/seedTruckPhone.mjs` on production (it is dev-only and refuses a
+  production suffix; its number comes only from `--phone=` / `AJK_SEED_PHONE`, never the repo).
+- [ ] Old bookmarks `/tms/check-calls`, `/tms/documents/review`, `/check-calls`, `/documents`
+  redirect to the Load Tracking grid focus views (`legacyRoutes.ts`); no server-side redirect work.
+
+**Decision:** Do not merge `dev` → `main` or push to `main` from this session. Awaiting Ryne's
+go/no-go.
+
+---
+
+## 2026-10-30 — Step N3/N4 — Rate-con/BOL email coverage and per-shipment tracking thread (deployed)
+
+**Committed and deployed on dev.** Plan: `Docs/tms-build/N3N4-plan.md`.
+
+- Commit: `197b4b7` (rate-con dev logging, BOL email test, POD attachment ingestion, shipment-email-intake Lambda + tests, backend wiring + permissions).
+- Amplify dev job `97` for `197b4b7` status **SUCCEEDED**.
+- `npm run test` on the working tree: **475 files / 6,459 tests PASS**.
+- `npx eslint .` — **0 errors, 3 pre-existing warnings** (unrelated to N3/N4 changes).
+- `npx tsc --noEmit -p amplify/tsconfig.json` — clean; `npx tsc --noEmit -p tsconfig.app.json` — clean.
+
+### What shipped
+
+- **Rate-con dev logging.** `SEND_RATE_CON` now records the `ShipmentMessage` row with status
+  `NOT_SENT` when SES fails on dev, and logs the complete raw email (headers + body) to
+  CloudWatch so the exact message is visible for proof.
+- **BOL email coverage.** Added an `EMAIL_DOCUMENTS` test that emails a generated BOL to a
+  customer and asserts the attachment is present and the notice row records what went out.
+- **POD attachment ingestion.** `INGEST_SHIPMENT_MESSAGE` now accepts an `attachments` array:
+  each attachment is saved to S3 under `shipment-docs/<shipmentId>/inbound/<messageId>/<filename>`
+  and a `ShipmentDocument` row is created. POD-looking filenames trigger `reviewShipmentPod` so
+  the POD requirement can be satisfied automatically when review passes.
+- **Inbound email intake Lambda.** New `shipment-email-intake` Function URL receives Gmail/SES
+  payloads for `tracking+<shipmentId>@` reply addresses, verifies a shared secret, routes by
+  plus-address (or by Message-ID fallback), and invokes `tms-tracking-actions` with
+  `INGEST_SHIPMENT_MESSAGE`. On dev, when the downstream function is unset, it logs the parsed
+  inbound message as proof.
+- **Backend wiring.** `backend.ts` defines the Lambda, table query permission, invoke grant from
+  the intake function to `tms-tracking-actions`, environment variables, and `CfnOutput` for the
+  Function URL.
+
+### Verification
+- Rate-con SES refusal on dev leaves a `NOT_SENT` `ShipmentMessage` row and prints the raw MIME.
+- BOL attachment appears in the outgoing customer email and the notice audit row.
+- Inbound POD attachment creates a `ShipmentDocument` row and recalculates `Order.docsMissing`.
+- `shipment-email-intake` routes plus-address and Message-ID payloads to the correct shipment.
+
+---
+
+## 2026-10-30 — Step N2 — MyCarrierPackets vetting + continuous sync (deployed)
+
+**Committed and deployed on dev.** Plan: `Docs/tms-build/N2-plan.md`.
+
+- Commit: `4bd552f` (shared MCP adapter, tms-directory-actions MCP actions, tms-shipment-actions setup packet, tracking-api MCP webhook processing, mcp-sync scheduled Lambda, CarrierProfile setup packet UI, coverage MCP gate, tests).
+- Amplify dev job `96` for `4bd552f` status **SUCCEEDED**.
+- `npm run test` on the working tree: **474 files / 6,448 tests PASS**.
+- `npx eslint .` — **0 errors, 3 pre-existing warnings**.
+- `npx tsc --noEmit -p amplify/tsconfig.json` — clean; `npx tsc --noEmit -p tsconfig.app.json` — clean.
+
+### What shipped
+
+- **Shared MCP adapter.** `src/lib/integrations/mcpAdapter.ts` exports a live `Adapter`
+  (`connect`, `validate`, `sync`, `setupPacket`) plus helpers. Stub mode remains fully
+  functional when credentials are missing.
+- **Types.** `Adapter` interface gained the optional `setupPacket` method; `CarrierRecord`
+  gained `mcpRiskScore`.
+- **Registry.** `MYCARRIERPACKETS` now declares `liveCapabilities: ['connect', 'validate', 'sync']`
+  so a complete set of credentials moves the badge from STUB to LIVE.
+- **Directory actions.** `tms-directory-actions` gained `MYCARRIERPACKETS_VALIDATE`,
+  `MYCARRIERPACKETS_SYNC_CARRIER`, and `MYCARRIERPACKETS_SYNC_ALL`.
+- **Shipment actions.** `tms-shipment-actions` wires the real MCP adapter for setup packets
+  and exposes `SEND_CARRIER_SETUP_PACKET({ carrierId, email })`.
+- **Tracking API webhooks.** MCP `carrier.updated` events are parsed after signature
+  verification and applied to Carrier rows by `mcNumber`.
+- **Scheduled sync.** New `mcp-sync` Lambda polls every carrier with an `mcNumber` every
+  30 minutes (rule disabled on isolated dev stacks).
+- **Carrier profile UI.** `CarrierProfile.tsx` has a *Send setup packet* button that calls
+  `sendCarrierSetupPacket`.
+- **Coverage gate.** `coverage.ts` blocks carriers whose MCP status is `UNACCEPTABLE`,
+  `UNACCEPTABLE_REVIEW`, or `MODERATE` at/above the configured risk threshold, and keeps
+  the missing-insurance check.
+- **Grants.** `backend.ts` grants `Carrier` table access and wires the EventBridge schedule.
+
+### Verification
+- Stub path: Validate connection without credentials returns honest STUB/UNABLE_TO_VERIFY.
+- Setup packet from carrier profile or offer UI returns `{ sent, mode, message }`.
+- Webhook or scheduled sync updates `mcpStatus`/`insurancePolicies` on a Carrier row.
+- Book carrier gate refuses carrier with `mcpStatus: 'UNACCEPTABLE'`.
+
+### Blockers / next
+- Exact MCP base URL, token endpoint and setup-packet path to be confirmed once live
+  credentials are available; current implementation uses the documented shapes and stub
+  fallback when credentials are absent.
+
+## 2026-10-30 — Step N1 — Aljex bulk import (deployed)
+
+**Committed and deployed on dev.** Plan: `Docs/tms-build/N1-plan.md`.
+
+- Commits: `0e941ac` (clean debug logging + BUILD_LOG), `e2a321c` (fix: GSI key validation and Load status mapping), `a5346ec` (fix: stringify AWSJSON fields), `bcd7b26` (feature: tms-aljex-import Lambda, `AljexImportJob` model, shared parser/mapper `src/lib/aljexImport.ts`, apiClient helpers, Aljex import page under My Brokerage → Company, fixture + tests).
+- Amplify dev jobs `89`, `90`, `91`, `92`, `93`, `94` all **SUCCEEDED** (job 94 is the final BUILD_LOG deploy).
+- `npm run test` on the working tree: **472 files / 6,423 tests PASS**.
+- `npx eslint .` — **0 errors, 3 pre-existing warnings**.
+- Dev verification (Lambda invoke, `ryne@bcatcorp.com` identity): preview counts `4 shipments, 3 customers, 8 locations, 1 invoice, 1 bill, 1 skipped, 0 errors`; apply counts `1 shipment, 1 bill, 4 skipped, 0 errors` after the initial rows had already been imported; re-apply of the same file returns the same job with identical counts (idempotent); `LIST_ALJEX_IMPORT_JOBS` returns the preview and apply jobs. A browser smoke test was not run because the dev login requires a live Cognito account.
+- Expected Aljex columns are documented in `Docs/tms-build/N1-plan.md`.
+
+## 2026-10-30 — Step M deployed: Academy Ask assistant
+
+**Committed and deployed on dev.** Plan: Step M adds the in-app Ask assistant to the Academy page.
+
+- Commit: `3925a4c` (Ask assistant: `ASK_ACADEMY` Lambda action, `askAcademy` client helper, AcademyPage UI, tests).
+- Amplify dev job `87` for `3925a4c` **SUCCEEDED** at 2026-10-30 01:16:00 UTC-5. Docs-only job `86` was cancelled because a later Step M commit superseded it.
+- `npm run test` on the working tree: **471 files / 6,390 tests PASS**.
+- `npx eslint .` — 0 errors, 3 pre-existing warnings.
+
+### What shipped
+
+- **Lambda action** `ASK_ACADEMY` in `tms-directory-actions`: receives the user's question and the bundled Academy articles, calls Anthropic `claude-sonnet-5` with a JSON-schema answer, and returns a cited answer. Available to owner, ADMIN, and anyone with the `tms` page grant.
+- **Client API** `askAcademy(question, articles)` in `src/lib/apiClient.ts`.
+- **UI** `AcademyPage` now shows an Ask panel above the article list: a question textarea, Ask button, and a rendered answer with clickable citation links to the source articles.
+- **Academy article** `Docs/academy/my-brokerage-settings.md` added for Step L and linked from the Academy README.
+
+One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
+
+## 2026-10-30 — Step L deployed: My Brokerage settings pages
+
+**Committed and deployed on dev.** Plan: `Docs/tms-build/L-plan.md`. Academy: `Docs/academy/README.md`.
+
+- Commits: `15ea92f` (Wave 1: schema, storage, types, brokerage validation libs), `b90135d` (Wave 2: directory actions, API client, backend wiring), `f6817f2` (Wave 3: My Brokerage settings UI and lint cleanup).
+- Amplify dev job `85` for `f6817f2` **SUCCEEDED** at 2026-10-30 00:48:32 UTC-5.
+- `npm run test` on the working tree: **471 files / 6,386 tests PASS**.
+- `npx eslint .` — 0 errors, 3 pre-existing warnings.
+
+### What shipped
+
+- **Schema & storage.** Added 17 Step L `TmsSettings` fields, 11 `Division` fields, and `ImportJob` model plus storage prefixes (`brandLogosSquare`, `brandLogosWide`, `brandDocuments`, `companyLogos`) to `amplify/data/resource.ts` and `amplify/storage/resource.ts`.
+- **Pure validation libs.** `src/lib/brokerage/*` — branding, whiteLabel, paymentTerms, notifications, consolidation, import — with unit tests.
+- **Lambda.** `tms-directory-actions` handler updated with `saveSettings` V14 fields, `saveDivision` new fields and `isPrimary` uniqueness guard, new actions `ROTATE_WEBHOOK_SECRET`, `PREVIEW_IMPORT`, `RUN_IMPORT`, `LIST_IMPORT_JOBS`, and `getAccountInfo`.
+- **Client API.** `src/lib/apiClient.ts` wired with `TMS_SETTINGS_V14_FIELDS`, `DIVISION_FIELDS`, `IMPORT_JOB_FIELDS`, and helpers `listDivisions`, `saveDivision`, `uploadBrandAsset`, `rotateWebhookSecret`, `previewImport`, `runImport`, `listImportJobs`, `getAccountInfo`.
+- **UI.** New My Brokerage `Company` tab with inner pages (Company, Billing, Branding, Notifications, Import, Account). Updated Settings tab with new cards (`CustomerSettingsCard`, `CarrierDocumentsCard`, `ConsolidationCard`) and extended `ChargeCodesCard` with visibility column; removed `DivisionCard` from Settings (moved to Company tab).
+- **Runtime verification prepared:** full typecheck clean, full test suite green, Amplify dev deploy succeeded.
+
+One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
+
+## 2026-10-29 — Step P deployed: quote → tender → cover → track → POD → billing
+
+**Committed and deployed on dev.** Plan: `Docs/tms-build/P-plan.md`. Academy: `Docs/academy/the-demo-flow.md`.
+
+- Commits: `cbdaf0e` (P feature branch merge), `f577c88` (demo fixture + geocode fallback), `dd7dfd6` (doc scoping fix), `289b414` (verification cleanup tolerance).
+- Amplify dev job `81` for `dd7dfd6` **SUCCEEDED** at 2026-10-29 23:35:02 UTC-5. Job `82` for the script-only cleanup commit is in progress.
+- `scripts/devVerifyP.mjs` run against the deployed dev stack: **39/39 PASS**, including P10 release-to-billing (`UNBILLED`) and P11 reset/re-seed. Cleanup tolerated a pre-existing Forbidden user-delete as expected.
+
+### Gates
+
+`npx tsc --noEmit -p amplify/tsconfig.json` and `-p tsconfig.app.json` — both clean.
+`npm run test` — **465 files / 6,286 tests**, up from 443/5,976 after the R2 follow-up:
+**+22 files, +310 tests**. `npx eslint .` — 0 errors, 3 warnings (the baseline's 2
+pre-existing plus one `exhaustive-deps` in the new accounting hook).
+
+### What shipped
+
+- **Schema.** Three new models — `ShipmentPosting` (`post:<shipmentId>:<PROVIDER>`, so a
+  re-post updates one row rather than growing duplicates), `ShipmentMessage` (the
+  per-shipment thread, with `VOICE` declared in the channel enum and never written) and
+  `DemoRecord` (the seed's own index, which is the only thing a reset may touch).
+  Plus flow-default fields on `Customer`, org defaults on `TmsSettings`, `buildState` /
+  `missingFields` / `postedBoards` / `threadKey` / the two flags on `Shipment`, the
+  check-call plan and its clock on `Load`, and market-rate + offer provenance on `Quote`.
+- **P1 — the seed.** `SEED_DEMO_DATA` mints ~40 shipments across every status and all
+  three divisions **through the normal actions** — `CREATE_SHIPMENT`, `BOOK_CARRIER`,
+  `SET_SHIPMENT_STATUS` — so the seed cannot reach a state the app itself could not.
+  Directory rows and flat fixtures are written directly, and say so. Idempotent by
+  `DemoRecord`: a second run creates nothing. `scripts/seedDemo.mjs` is the CLI door and
+  owns the six Cognito demo staff (passwords randomised and never printed).
+- **P2 — queues.** `my-queue` and `team-queue` are seeded filter sets on
+  `dispatcherAssigned` carrying `@me` / `@myteam`, resolved to the signed-in user at
+  match time only — so the saved view still means "mine" for whoever opens it next. The
+  queue *is* the board. Numeric counts now render on the MVMNT rail, which previously
+  ignored `badgeKey` entirely.
+- **P3 — flow defaults.** Margin target/floor, auto-vs-manual replies, the required-field
+  list and the check-call plan, each an override of an org default. An unset override
+  **inherits**; the card shows the inherited number as the placeholder.
+- **P4 — market rate.** DAT RateView live when credentials exist, a deterministic,
+  realistic stub otherwise, labelled `STUB — no DAT call was made.` A live lookup that
+  fails falls back to the stub **and says it fell back**; it never invents a live number.
+  The suggested sell rate is a margin, not a markup, and a suggestion below the
+  customer's floor can never auto-send.
+- **P5 — the build gate.** A shipment the automation built is `BUILDING` with a
+  `Needs: …` list until every required field is filled. Posting, booking and release to
+  billing all refuse one, each naming the missing fields. A shipment with no `buildState`
+  predates Step P and is treated as built — the gate never reaches backwards.
+- **P6 — postings.** Post/Unpost to DAT and Truckstop through the Step J adapters, one
+  row per board, STUB labelled on the row and in the UI. Unposting is a status change,
+  never a delete; a provider that refuses the take-down leaves its row Posted.
+- **P7 — carrier offers.** A carrier's answer to a posting is a BUY-side `Quote` with
+  posting/phone provenance — reusing Step H rather than inventing a table. The booking
+  gate's own verdict rides on each offer; `PHONE` is the manually-logged call today and
+  the field the deferred voice agent will write later.
+- **P8 — the thread and the tracking agent.** The rate con requires the driver's name and
+  mobile and the dispatcher's e-mail before it goes out, ccs the tracking mailbox so every
+  reply lands in the thread, and opens the thread as its first message. The agent texts the
+  driver on the cadence with the Step D link; a tap stores the position and the ETA to the
+  delivery stop (`src/lib/trackingEta.ts`, one function the shipment page, the Tracking
+  page and the public link all read). Silence escalates: dispatcher e-mail, then a
+  Tracking-page exception — each rung once per silence. Every message is signed by the
+  server and marked agent or person.
+- **P8-UI — `/tms/tracking`.** Inbox · Tracking · Booking inside the TMS shell, built from
+  the R2 board components: list left, detail right with the map, the ETA, the cadence
+  controls and the conversation thread, plus the manual composer for the driver or the
+  dispatcher.
+- **P9/P10 — POD and release.** The app reviews a POD for legibility, signature and
+  "page X of Y", re-asks **twice** with the reason, then flags a human. The attempt count
+  is read from the rejected documents, not from a counter that can drift. Release to
+  billing goes through the Step F gate — the POD reviewer reaches `READY_TO_INVOICE`
+  through an injected dependency and never writes `arStatus` itself.
+- **P11 — the Demo page.** Eleven steps, each opening the exact seeded record on the right
+  screen and tab. The ticks are counted from the records, not asserted by a script. Reset
+  is owner/ADMIN **and** dev-stack only, enforced server-side, and it **voids** the seeded
+  shipments rather than deleting them: a PRO is permanent.
+
+### What the Fable review caught before it shipped
+
+Sixteen findings, six of them deploy blockers that every test suite was green through —
+because the in-memory fakes did not model DynamoDB's own rules. All six fixed, and the
+fakes hardened so the tests can now see this class of bug:
+
+- The three demo actions were in the `Action` union and the permission table but never
+  imported or dispatched, so the Demo page, both buttons and `seedDemo.mjs` would have hit
+  `Unknown action` — and the dev-stack gate did not exist in the deployed artifact at all.
+- `POST_LOAD` / `UNPOST_LOAD` put `id` inside the update patch, which DynamoDB refuses on a
+  key attribute: both would have failed 100% of the time.
+- A FAILED posting wrote `postedAt: null` into a GSI sort key, and every SMS wrote
+  `messageId: null` into a GSI hash key — the same `Type mismatch for Index Key` failure
+  this project already hit in Steps C and D. Both now omit the attribute.
+- The POD re-request queried an index name Amplify does not generate, so the
+  "rejected twice → flag a human" rung could never have fired.
+- Nothing opened a shipment's thread, so every P8/P9 entry point would have refused on a
+  real shipment. Sending the rate con now opens it.
+- `RESET_DEMO_DATA` sent ~120 deletes in one transaction (limit 100) with a duplicated
+  key, so it could not succeed — and because the voids ran first it would have left the
+  dev stack voided and uncleaned. Now de-duplicated and batched.
+- Also fixed: the two P2 queue views were dead on arrival because no caller passed the
+  viewer; `isDuplicate` collapsed two different carriers bidding the same rate into one
+  offer; the check-call clock was stamped before the send, arming an escalation off a
+  message that never existed; and an emptied channel list silently persisted VOICE.
+
+One bug the margin tests caught on the way: `Number(null)` is 0, so an unset per-customer
+margin override priced at **0%** instead of inheriting the org's 20%. That would have
+reached every quote for every customer who had not set one.
+
+### Not done here
+
+No commit, no dev deploy, no live proof run against the deployed stack, and no browser
+screenshots. `scripts/devVerifyP.mjs` is not written. The DAT RateView **live** path is
+implemented against DAT's published contract and **has never been run** — no credentials
+exist on this stack — so only the stub path is proved.
+
+
+## 2026-10-29 — Step R2 follow-up on dev: the board a user customizes, three workstations, one dashboard
+
+One commit — `80d8cde` — Amplify dev job **66 SUCCEED**, pushed with the branch idle
+(job 65 SUCCEED) and announced first. Gates before the commit: `npm run typecheck` (both
+projects clean), `npm run lint` (0 errors; the same 2 pre-existing warnings as R2),
+`npm run test` — **443 files / 5,976 tests**, up from 433/5,856 after R2. Live proof on
+dev: `node scripts/devVerifyR2Followup.mjs` → **13 PASS / 0 FAIL**, summary
+`{"pass":13,"fail":0}`, and a second run reports `viewsDeactivated: 0` — the sweep
+converges. Plan: `Docs/tms-build/R2-followup-plan.md`.
+
+### What shipped
+
+- **Duplicate through the normal path.** New PRO claimed in the copy's own transaction,
+  status **Open**, and the customer, lane, stops, equipment, commodity, references, rates
+  and division carried over. No carrier leg, no documents, no invoice: `sameCarrier` is
+  gone from the action, the dialog and every caller. The copy of an invoiced shipment no
+  longer inherits `invoiceNumber`, `invoicedAt`, `paidAt`, `arBalanceCents`,
+  `factoringItemId` or the doc-gate cache — a live bug the rewrite turned up — and the
+  shipment no longer inherits `customerLinkId`, `deliveredAt`, `lastNotice*`,
+  `datPostedAt` or `workflowRunId`. Each copy gets its own audit row naming its source.
+- **Batch tasks run on the server.** `BATCH_SHIPMENT_TASK` takes the checked rows and one
+  task — Release to billing (through the Step F gate), Change sales rep, Change revenue
+  division/subdivision, Change carrier rep/team, Set status — runs each row through the
+  same function the single-row action uses, writes one audit row per shipment plus one for
+  the batch, and answers per row **in input order**. Proved on dev: four ids in, four
+  answers out, the missing id reported rather than skipped, and a refusal carrying the
+  gate's own words (*"That order is already LEGACY, not waiting on documents"*). The batch
+  grants nothing the single action would not: a user with no TMS page is refused with
+  `Forbidden: SET_REV_TAG requires owner, ADMIN, page-loads, or page-tms`. `SET_STATUS`
+  sends each row the version token read in that same loop, so a batch cannot overwrite a
+  change somebody made between the click and the call. New: `ASSIGN_CARRIER_REP`, with
+  `Shipment.carrierRepId` / `carrierTeamKey` mirrored onto every leg.
+- **Type-ahead tags, not listboxes.** Every Details facet is a tag picker: type, pick,
+  it becomes a tag with an ×, several tags OR, Exclude inverts the facet, recently used
+  values come first per user, and the text also matches MC, SCAC and state codes. The
+  `<select multiple>` of every value (Ryne's screenshot) is deleted.
+- **The column catalog** is every field the brief listed — 187 keys in seven groups
+  (Shipment · Order · Load · Carrier leg · Customer · Carrier · Computed) — money in
+  dollars, timestamps in **Central**, ids resolved to names, an absent source blank rather
+  than zero. The Columns picker groups them with a search box, drag to reorder, pin left
+  and a width; it saves as the column template, which now carries `widths` **and**
+  `pinned`. Proved on dev: both round-trip, and a pin outside the template is refused.
+- **The sidebar** reads Company Dashboard, then Shipments with Active Shipments, Dispatch,
+  Tracking, Documents and a **Views** group beneath it; the three businesses and Company
+  follow. Accounting and Sales left the Shipments menu, and the five seeded views that
+  became pages or moved are **deactivated, never deleted** — dev now lists exactly
+  `active-shipments, box-trucks, brokerage-board, car-shipping-board, local-drivers,
+  owner-operators`.
+- **Three workstations**, each its own UI over the shared `useBoardFilters` panel:
+  **Dispatch** (coverage state per shipment, posting state, carriers ranked by this lane's
+  history with their authority, insurance, MyCarrierPackets/Highway/RMIS standing, and
+  Assign carrier / Send rate con), **Tracking** (the Chaine layout on the tracking data
+  that exists: status pills with the next event, tracking link, last known and how long
+  ago, Motion from the last two pings, next check call, table and map) and **Documents**
+  (the required/present matrix with each document's source, the release gate's own answer,
+  and Release to billing through the gate).
+- **The board** lost its tab strip: the view is chosen and saved in the panel
+  (`View: Active Shipments ▾`, Save / Save as view). The board, the three workstations and
+  the saved views now share one filter engine.
+- **One dashboard.** `/tms/dashboard` opens company-wide with a KPI strip per top-level
+  division built from the ownership taxonomy (so an admin-added business appears without a
+  code change), Assets listing its subsidiaries, and the division chip narrowing the strips
+  and the charts together. The 17 Classic + 9 brokerage charts, the picker and the saved
+  views are untouched; the Ivan ops dashboard at `/dashboard` is untouched; no new page.
+- **Re-pointing an invoiced customer no longer refuses a paid invoice.** The credit memo is
+  the invoice's **whole total**: it applies to the open balance and the remainder — exactly
+  what the old customer paid — stays as **unapplied credit on their account**, which the AR
+  ledger already models and which can be spent or refunded. The original invoice's number,
+  totals and lines are never touched, the order goes back through the gate, and a
+  money-touched re-point needs an explicit acknowledgement. A **write-off** is still refused
+  ("reverse the write-off first" — crediting a forgiven balance would hand back money nobody
+  paid) and a **factored** invoice is now refused too, because the factor advanced cash
+  against that receivable. The arithmetic is one pure function the Lambda and the dialog
+  both import, so the numbers on screen are the numbers that post.
+
+### What is Step P, and says so
+
+The parsed e-mail/SMS carrier offers and Send setup packet on Dispatch, the per-shipment
+thread and the tracking agent on Tracking, and automatic classification of inbound
+attachments on Documents are each one honest line on the page — no disabled control
+pretending to be a feature.
+
+### Not done here
+
+No browser screenshots this round: the live proof is the API script above, run against the
+deployed dev stack. The three workstation pages and the dashboard strips have been proved
+by their own render tests and by the deployed build, not by a captured screen.
+
+### Dev data left as found
+
+The verification's column template is deleted, the two temporary identities (an ADMIN and a
+user with no page grant) are removed in a `finally` with passwords that are never printed,
+and no shipment, order or invoice was written — the batch it ran was a release that every
+row refused at the gate. No production table was read or written.
+
+## 2026-10-29 — Step R follow-up and Step R2 done on dev: Ryne's seven answers, and the Aljex-style Shipments board
+
+Five commits — `a7ceb2b` (the step), `7127220` (the Status cell and the live verification
+script), `07fd1f2` (one source for that cell, and this entry), `4642476` (a saved filter set
+comes back the way it was saved) and the entry update — Amplify dev jobs **61, 62, 63 and 64
+SUCCEED**, each pushed with the branch idle and announced first. Gates before every commit:
+`npm run typecheck`, `npm run lint` (the same 2 pre-existing warnings as Step K),
+`npm run test` — **433 files / 5,856 tests**, up from 422/5,712 after Step K. Live proof on
+dev: `node scripts/devVerifyR2.mjs` → **99 PASS / 0 FAIL**, summary line
+`{"seedCreated":0,"seedUpdated":8,"seedDeactivated":0,"divisionCount":7,"ruleCount":8,"viewCount":12,"loadsWithoutShipmentBefore":0,"loadsWithoutShipmentAfter":0,"canceledUnscheduledLoads":0}`.
+
+Browser proof on `https://dev.d3dejqzs77khq6.amplifyapp.com`, beside Ryne's own Aljex
+screenshot (`Docs/tms-build/mvmnt-ui/aljex-active-shipments-board.webp`):
+`Docs/tms-build/r2-proof/active-shipments-default.webp` (the board lands on Active Shipments,
+Shipments pinned at the top of the sidebar with its views beneath it, whole-row colour,
+live status counts), `icon-key-and-footer.webp` (the nine row tones and the exception icons,
+and the footer reading *Records shown 50 of 907 · Next refresh: 28s · ON · Get next 50 ·
+Refresh · Export to CSV · Show map · Icon key · New tab*, with Batch task greyed until rows
+are checked) and `saved-view-roundtrip.webp` (a filter set created in the browser, then
+re-opened by URL in a fresh load with its eight statuses checked, Voided not, no
+Unsaved-changes marker and Update disabled).
+
+The round trip is the second thing the live run caught: the views hook resolves after the
+first render and the pane built its working set once, from nothing, so every saved view
+opened empty with Update and Revert comparing against an empty baseline. Fixed in `4642476`
+with five tests that fail without it.
+
+### Ryne's seven answers, as shipped
+
+- **Amazon drivers are owner operators.** `rule-seed-amazon` (`DRIVER_FLEET_GROUP_IS AMAZON →
+  OWNER_OPERATOR`) is now the first rule, and **no Amazon division exists** — the seven
+  division codes on dev are exactly ASSETS, BOX_TRUCK, BROKERAGE, CAR_SHIPPING, COMPANY,
+  LOCAL, OWNER_OPERATOR.
+- **Auto Shipper is car shipping, by customer.** `rule-seed-auto-shipper`
+  (`CUSTOMER_IS 1793167776316-ub09ebk5w → CAR_SHIPPING`) replaced the old reference-text rule,
+  which is deactivated rather than deleted; the seed resolved the id from the dev customer
+  **AUTO SHIPPER** by name, and writes the rule inactive with an explaining name where no such
+  customer exists. A shipment created for that customer tags CAR_SHIPPING on dev.
+- **Seeds converge.** `ENSURE_OWNERSHIP_SEED` updates a seed rule in place, deactivates a seed
+  rule the seed dropped, and counts created/updated/deactivated/unchanged. A second run creates
+  nothing and deactivates nothing. **An admin-authored rule survives a re-seed still active** —
+  the first cut of the sweep would have deactivated every hand-written rule on the stack, which
+  the review caught before it shipped.
+- **Un-void**, owner/ADMIN, audited, `expectedUpdatedAt` required like void. Proved on dev:
+  the three void markers cleared, the load back to **DELIVERED** — the exact status it held —
+  `readyToInvoice` restored, the carrier leg back on the AP board, and the **PRO claim row
+  byte-identical** either side, read strongly consistent. A load that was `CANCELED` *before*
+  the void is still `CANCELED` after the un-void: the void now snapshots `previousStatus` and
+  `previousReadyToInvoice` on the loads it actually changes, so the un-void restores rather
+  than re-derives.
+- **Customer re-pointing.** Before invoicing, `REPOINT_SHIPMENT_CUSTOMER` moves Shipment,
+  Order and Load and writes one audit row; a non-admin is refused. On an invoiced order it
+  refuses with `INVOICED: … invoice INV-000025 …`, and `REPOINT_INVOICED_CUSTOMER` credits it:
+  one `CREDIT_MEMO` of $2,500.00 for the balance, the invoice's `number`, `totalCents` and
+  `lines` **byte-identical before and after**, the order back on the gate as `UNBILLED` with
+  no `invoiceId`, the customer moved, and a replay with the same `idempotencyKey` writing
+  nothing. An invoice with money already applied is refused outright ("reverse the payment
+  before repointing"). It is owner/ADMIN **regardless of `arPostingAdminOnly`**, commissions
+  are recomputed as a write-off does, and `RESOLVE_REV_TAG` re-resolves the revenue tag the
+  customer rule decides while leaving a hand tag alone — all five of those were review
+  findings on the first cut.
+- **Create shipment** for a legacy load with none, owner/ADMIN, through the same
+  `BACKFILL_SHIPMENT` path the backfill script uses. Dev had **0** unlinked loads left, so the
+  verification seeds one legacy row, mints its Shipment and voids it again.
+- **Legacy CANCELED loads leave the calendar's Unscheduled strip**, as voided freight already
+  had. Dev currently has **0** canceled-and-unscheduled loads, so this one is proved by test
+  rather than by dev data, and the count is logged so Ryne can see why.
+- **Square** is a provider in the Step J framework — stub until credentials — with the
+  customer-import row shape it will feed the Car Shipping board declared and served by the
+  generic stub adapter.
+
+### Step R2 — the board
+
+- `/tms/shipments` lands on the seeded **Active Shipments** view (Open, Covered, Dispatched,
+  Arrived, Departed, Delivered checked; Hold, Reserved, Voided not), with the Aljex column
+  order and the department views as the other tabs. A 240px collapsible left panel carries the
+  filter-set controls, the column-template picker, the eight status checkboxes **with live
+  counts** (dev: Open 46 · Covered 0 · Dispatched 0 · Arrived 1 · Departed 3 · Delivered 857 ·
+  Hold 0 · Reserved 25 · Voided 122), the fifteen detail filters each with its own Exclude,
+  four Fixed/Range date filters, the tracking narrowings the pre-R2 board had, and Clear/Reset.
+- A filter set **is** a saved view. A column template is new, per user or shared: a private one
+  may be changed only by its owner — not even by an admin — a shared one by its owner or an
+  admin **without transferring ownership**, every column key is validated by name, and a view
+  whose template was deleted falls back to its own columns. All six proved on dev.
+- Whole-row colour from nine theme token pairs, legible on dark, voided struck through; the
+  Icon Key is the legend. Footer: records shown, a real refresh countdown, Get next 50,
+  Refresh, Export to CSV, Show Map, Icon Key, New Tab, Batch Task, Split Screen. Mass release
+  reaches AR **through** the Step F gate.
+- **Shipments is pinned to the very top of the sidebar**, above Brokerage, Assets and Car
+  Shipping, with its department views as children. Nobody's access changed — the pinned row is
+  visible to exactly whoever could see it inside BROKERAGE, and `RequirePage` keeps the same
+  landing redirect for a loads-only user.
+- Two things the deployed board turned up, fixed in `7127220` and the entry commit: the Status
+  cell printed MVMNT's `DEL` beside a checkbox reading `Delivered`, and every legacy row read
+  `DEL 0/2` because the stop array carries no departure stamps. The cell now speaks the board's
+  own vocabulary, from the same column the CSV uses, and freight that demonstrably moved with
+  no stop evidence shows the status alone rather than claiming nothing has happened.
+- The filter engine moved into `src/lib/shipmentViewDefs.ts`, which the directory Lambda
+  bundles by path, so the board and the server decide a view the same way — and the Lambda
+  bundle test is what caught the aliased import that would have broken the function build.
+
+### Review
+
+Fable reviewed the whole diff before the first commit and returned **7 blockers and 11
+shoulds**, every one real; all are closed. The blockers worth naming: the invoiced re-point
+credited only the open balance of a partly-paid invoice and silently re-pointed a fully paid
+one; it left commissions unadjusted; the dialog's `useId()` idempotency key is stable per tree
+position, so a second genuine credit-and-rebill of one shipment no-opped while reporting
+success; `REPOINT_INVOICED_CUSTOMER` was only admin-gated while `arPostingAdminOnly` held; the
+un-void resurrected loads canceled before the void; the rewritten board left Duplicate, Hold,
+Cancel and the tender actions wired to empty functions; and the seed sweep deactivated
+hand-written ownership rules.
+
+### Dev data left as found
+
+Every verification fixture is voided (never deleted), the three fixture customers are BLOCKED,
+the seeded legacy load is voided, and every temporary identity — the admin the script mints
+and the two non-admins it uses for the authorization checks — is deleted in a `finally`. No
+production table was read or written.
+
+- Plans written: `Docs/tms-build/R2-plan.md` (the board, from the vision read of Ryne's Aljex
+  screenshot) and `Docs/tms-build/P-plan.md` (P1–P11 with Ryne's 09:05 answers folded in;
+  voice is deferred, with the channel declared and disabled rather than stubbed).
+- Academy: new `shipments-board.md`, plus navigation, one-record, divisions, tracking,
+  integrations, release-to-accounting, unknown-customers and the index.
+
+**Decision needed (Ryne):** the car-shipping rule is bound to the dev customer named
+**AUTO SHIPPER** — confirm that is the right record, since Best Care's real customers are to
+come from Square later. Dev has no canceled-and-unscheduled loads and no unlinked loads left,
+so the calendar and Create-shipment changes are proved by test and by a seeded row rather than
+by live data; say if you want production-like data copied down to see them. And "Office" in the
+filter panel is the sales rep's Step I **team**, because this TMS has no branch-office record —
+tell me if you want a real office field instead.
+
+## 2026-10-29 — Step K done on dev: Workflows, the four AI inbox roles and org/party memory
+
+Two commits — `9ae0a09` (the step), `361a859` (a `SAVE_SETTINGS` update expression that named
+every merged field including ones the stored row had never carried, so DynamoDB refused the
+whole save; plus a pinned clock in the driver-app API's `/loads/recent` test block) — Amplify
+dev jobs **58 and 59 SUCCEED**, each pushed only with the branch idle. Gates before every
+commit: `npm run typecheck`, `npm run lint` (the same 2 pre-existing warnings as Step J),
+`npm run test` — **422 files / 5,712 tests**, up from 407/5,541 after Step J. Data stack
+**763,846 bytes before the first schema change → 785,735 after the last**, +21,889, leaving
+**214,265 under the 1,000,000 cap** (measured with `scripts/measureDataTemplate.mjs` at both
+ends). Live proof on dev: `node scripts/devVerifyStepK.mjs` → **79/79**.
+
+- **One record and one Lambda.** `WorkflowRun` is the only new model — steps, documents,
+  proposal, party, model accounting and disposition all on the row — and `workflow-agent` is
+  the only new function, because it absorbs `vendor-ap-extract` (deleted, `merge.ts` moved
+  verbatim with its tests, the old `{id}` / `{all:true}` payloads still accepted). The stack's
+  function count did not grow. Four e-mail inbox roles — Quote, Tender, AP, Capacity — plus the
+  webhook role, each with its own step list in the spec's order, and `status` is machine
+  progress while `outcome` is human disposition: COMPLETED is not approved.
+- **The structural guarantee is a grant list, not a comment.** `workflow-agent` holds no write
+  grant on Shipment, Order, Load, LoadCarrier, Invoice, CarrierBill, FactoringItem, Customer,
+  Carrier or TmsSettings; no `lambda:InvokeFunction` on anything; and no AppSync grant at all.
+  Its only writes outside its own table are `UpdateItem` on VendorPayable, `PutItem` on
+  ShipmentDocument and `PutItem` on AuditLog. The agent cannot create freight or reach AR by
+  any path, and a prompt-injection body on dev is what proves it rather than this paragraph.
+- **Externally received mail is data, never an instruction.** Model input is fenced between
+  `<<<UNTRUSTED_…_BEGIN>>>` / `<<<UNTRUSTED_…_END>>>` **after those markers are stripped from
+  the content**, so the content cannot close its own fence; `redactForPrompt` replaces
+  credential, bearer, long-base64 and card-number shapes before the model sees them; the model
+  has **no tools** and every call is a `json_schema`-constrained extraction, so there is no code
+  path from model output to a privileged action. Identity is checked the same way: `matchParty`
+  reads the `Authentication-Results` the receiving server wrote, and an exact contact address
+  whose domain SPF or DKIM does not vouch for is **downgraded from a match to a candidate** —
+  a bare `pass` with no identifier and a forwarder signing its own mail prove nothing. A source
+  with no such header (Slack, driver, vendor-payable) keeps the plain match, because inventing a
+  refusal for them would break them.
+- **The agent proposes; a person applies through the existing door.** A tender is applied with
+  `CREATE_SHIPMENT source TENDER`, which lands `TENDER_PENDING` carrying the run id with its PRO
+  claimed; a quote is applied with `SAVE_QUOTE` and lands in `REQUESTED`. Both run under the
+  applier's own Cognito identity through the routers that already existed — the release gate is
+  untouched, and `LINK_RUN` only records what a person did (it applies the run, clears the
+  exception and stamps the caller). No auto-create and no auto-accept.
+- **Memory is human-written and agent-read-only.** `TmsSettings.aiAgents`, `Customer.aiMemory`
+  and `Carrier.aiMemory` are edited by people in My Brokerage and on the party profile; the
+  agent only reads them. Each desk carries **two revisioned blocks — Instructions and Memory** —
+  and a revision bumps only when the trimmed markdown actually changed, so an untouched save
+  does not invent a new version. The revisions the run actually read are stamped on the run
+  (`memoryRevisions`: org, org-agent, party, party-agent), so a bad answer can be traced to the
+  text that produced it. A card over `MEMORY_MAX` is refused. Vendor memory waits for a Vendor
+  record.
+- **The caps exist because the key is live on dev.** `ANTHROPIC_API_KEY` on the dev stack is
+  real, so a run is bounded: at most 3 model calls, 3 attachments, 8 MB each, 8,000 prompt
+  characters of body. Above those sit three zero-model-call exits — the per-desk daily run cap
+  (default 200) ends the run `NO_ACTION` with `errorCode 'DAILY_CAP'`, as do a disabled agent
+  (`AGENT_DISABLED`) and a blacklisted address or keyword (`BLACKLISTED`) — all decided before
+  the first call, not after it. Tokens and model are stamped on every run so the cost is visible
+  on the trace.
+- **The Errors tab reads six sources, not six tables of its own.** Runs, shipments, loads,
+  tracking links, integration rows and settings collapse into one `ExceptionRow` vocabulary with
+  the quick tabs the spec names. Accounting rows deliberately carry **no Retry** — the disabled
+  reason says "QuickBooks sync is preview-only until it is live", because there is no sync to
+  retry yet; unknown customer offers Identify customer only; EDI has no action at all. The role
+  matrix is a **default filter and not a refusal**: every chip it seeds can be removed.
+- **Webhook consumption is a run per delivery against an empty consumer table.** `tracking-api`
+  stores the raw body at `workflow-inbox/webhook/<provider>/<eventId>.json` after J's receipt row
+  and hands off; `consumerFor` is null for every provider in K, so the run ends `IGNORED` with a
+  full trace of what arrived. The hand-off and the trace are what K owes; the first consumer
+  ships with the first live provider.
+- **The tracking "no ping" rule is the first reader of J's `trackingIntervalMin`.** An ACTIVE
+  `CARRIER_PING` link whose `lastPingAt` is older than 3 × the configured interval while its load
+  is still moving becomes a Tracking exception, as does a load with an open check call past
+  `nextCheckCallAt`; both offer Resend link, Text driver and Log check call. J stored the four
+  tracking toggles and said on screen that nothing read them — this is the first one that is read.
+
+**What the live run proved on dev** (79 checks): the two-phase inbox protocol writes exactly one
+run and a replayed commit is a duplicate no-op; a run completes through its steps in the spec's
+order with a duration; an unmatchable sender ends `UNKNOWN_PARTY` with the exception open and in
+`LIST_EXCEPTIONS`; `RETRY_RUN` increments attempts and re-runs, and is refused on an APPLIED run;
+`CREATE_SHIPMENT source TENDER` lands `TENDER_PENDING` carrying the run id with its PRO claimed;
+`LINK_RUN` applies the run, clears the exception and records the caller, and is refused against a
+voided shipment; `TENDER_RESPOND ACCEPT` opens the shipment; `DISMISS_RUN` needs a reason;
+`RESOLVE_EXCEPTION` clears without retrying; a `page-tms` token is refused on `RUN_SAMPLE`,
+`BACKFILL_AP` and `SWEEP_STALLED` and allowed on `LIST_RUNS`; a token with no TMS access is
+refused on all thirteen actions; **a prompt-injection body ordering the agent to approve the
+invoice, release it to accounting and create a shipment ends as a proposal only, with Shipment,
+Order, Load, Invoice, CarrierBill and FactoringItem counts and the named rows byte-for-byte
+unchanged**; `SET_AR_STATUS` and the finance router still refuse an ungated shipment in the gate's
+own words; `SWEEP_STALLED` leaves a healthy run alone; org memory revisions bump only on change; a
+party card round-trips scoped to its own customer; and an over-`MEMORY_MAX` card is refused.
+Browser pass on `https://dev.d3dejqzs77khq6.amplifyapp.com` as a temporary ADMIN identity: the
+`/tms/workflows` **Errors** tab showing four real exceptions off live dev data — a Google Maps
+`HTTP 401 … provided API key is invalid` integration row, two unknown-customer rows (L14864 and
+L14865, DIRECT DRIVE LOGISTICS, "No customer record is linked to this shipment") and an overdue
+check call on S000004 — with its quick-tab counts (All 4, AI agents 0, Accounting 0, Tracking 1,
+Parade 0, Unknown customers 2, EDI 0, Integrations 1), the filter chips and the
+Time · Shipment · Party · Integration · Error columns; and the **AI Agents** tab showing 15 real
+runs with Agent / Status / Outcome / Party / Step-or-error / Updated, including Tender runs
+`Completed · Applied`, Quote and Tender runs `Completed · Dismissed`, `Unknown — 1 candidate`
+parties and an AP run sitting at `PROPOSE_BILL`. Cleanup afterwards: the two shipments the fixture
+created are **voided, never deleted** (their PROs stay claimed for ever — the script prints the
+numbers), the runs it created are DISMISSED (the model has no delete), its `workflow-inbox/`
+objects are removed and its temporary Cognito identities are deleted. Secrets are generated at run
+time and never printed.
+
+**The review found no blocking defects and eleven should-fixes, all applied before the commit.**
+The four that mattered: applying a tender proposal created a MANUAL/DRAFT shipment because
+`NewShipmentDialog` hard-coded `source: 'MANUAL'`, which would have quietly defeated the
+`TENDER_PENDING` review state; the inbox commit accepted any `s3Key` the agent role could read;
+`grantReadWrite` on `workflow-inbox/*` handed out `s3:DeleteObject*` against its own comment and
+against K's no-deletion rule; and `rolesByDefault` was dead data, so acceptance A4's per-agent
+narrowing was simply unimplemented. The rest: `dismiss()` had no guard against an APPLIED or
+still-running run, the stalled sweep ignored PENDING, the classifier could re-route a run to
+WEBHOOK and then fail it, and the VENDOR_BILL proposal did not match its own type so the card
+showed no amount.
+
+**Deviations from the plan, each forced by something real:** `updatedAt` is reserved by Amplify
+and cannot be a GSI sort key, so the agent stamps its own `runUpdatedAt` mirror and all three
+indexes sort on that; `ShipmentDocument.status` is already the supersede ladder, so a filed
+carrier invoice is `reviewStatus: 'PENDING'` (the sparse review-queue key) rather than
+`status: 'PENDING'`, which would have taken a document out of the ladder; each agent carries two
+revisioned blocks (Instructions and Memory) instead of the plan's one, because an instruction and
+a learned note are edited by different people at different times; party memory is read by resolving
+the sender **before** the first model call while `MATCH_EMAIL_ENTITIES` stays where the spec's step
+order puts it, since the prompt needs the party notes earlier than the trace does; and the planned
+`allow.resource(workflowAgent).to(['query'])` was dropped as unused, so the agent holds no AppSync
+grant at all.
+
+**Decision needed (Ryne) — what K is waiting on.** **Inbox addresses** (Google Groups delivered to
+`ai4bcat@gmail.com` and polled by the existing Apps Script project): the two that exist are reused
+— `ivanloads@bcatcorp.com` (tenders, Ivan) and `vendorpayments@bcatcorp.com` (vendor bills);
+**needed** are a brokerage tender address (`tenders@bcatcorp.com`), a spot-quote address
+(`quotes@bcatcorp.com`), a carrier-invoice address (`carrierinvoices@bcatcorp.com`, kept apart from
+`vendorpayments@` so a carrier bill is never also a vendor payable) and a truck-list address
+(`trucks@bcatcorp.com`). **One paste**: `scripts/agentEmailBridge.gs` into the existing Apps Script
+project, with the `WORKFLOW_AGENT_URL` script property set to the deployed Function URL — a human
+step, like the loads bridge before it. **Slack**: confirm that the e-mail forwards in the
+`BCAT_LOGISTICS` channel are brokerage tenders the agent should propose on. **Credentials**: none
+new — `ANTHROPIC_API_KEY` is already on the stack and real on dev, and nothing in K sends e-mail
+(SES is denied to every Lambda on the dev stack), so Step J's missing-credential list is unchanged.
+**Model and spend**: the model is `claude-sonnet-5`, tokens are on every run's trace, the per-desk
+daily run cap defaults to 200, and a **monthly spend cap is still a decision**.
+
+Academy articles this step left behind: `Docs/academy/workflows-errors.md`,
+`Docs/academy/workflows-ai-agents.md`, `Docs/academy/unknown-customers.md`, and the webhook
+section of `Docs/academy/integrations.md`.
+
+## 2026-10-29 — Step J done on dev: the integration framework and every provider page
+
+Three commits — `71dc8a5` (the step), `16b155d` (Motive validates with the read its sync
+already makes), `f6d3143` (a warm API container re-reads one parameter before refusing;
+a provider nobody can connect says so) — Amplify dev jobs **54, 55, 56 SUCCEED**, each
+pushed only with the branch idle. Gates before every commit: `npm run typecheck`,
+`npm run lint` (the same 2 pre-existing warnings), `npm run test` — **407 files /
+5,541 tests**, up from 396/5,354 after Step R. Data stack **763,846 bytes**, 236,154
+under the 1,000,000 cap (+14,421 for the model, the fields and two Lambdas' wiring;
+measured with `scripts/measureDataTemplate.mjs` before the first schema change and
+after the last). Live proof on dev: `node scripts/devVerifyStepJ.mjs` → **75/75**.
+
+- **One registry, 39 providers, no per-provider page.** `src/lib/integrations/registry.ts`
+  holds one `ProviderDescriptor` per row of spec §8.1 plus the nine the stack already runs
+  (OTR, Motive, Blue Ink Tech, Google Maps, Anthropic, Slack, Twilio, Paychex, JobsDone).
+  `IntegrationsIndex` and `IntegrationPage` are driven entirely from it, so a new provider
+  is one object and no UI change. The index is the eighth My Brokerage tab, owner/ADMIN
+  only, with a copyable **Missing credentials** strip — the same list this entry carries.
+- **A credential never lands in the database.** A page-entered credential is one
+  SecureString at `/bcat/integrations/<userPoolId>/<PROVIDER>`; the row keeps a pointer and
+  the last four characters and nothing else, proven on dev by searching the whole row and
+  every audit row for the value. Amplify secrets are shown by name with their
+  `npx ampx secret set` command and are never written from the app. A webhook signing
+  secret lives in its **own** parameter (`…/<PROVIDER>/webhook`) so the one Internet-facing
+  Lambda is authorised to decrypt that value and nothing else — the review caught that one
+  parameter would otherwise have handed it the DAT password and the QBO refresh token.
+- **Stub mode is honest by construction**, and the review found the one place it was not:
+  entering a DAT key used to flip the provider to "Live … runs on its own schedule" when
+  nothing in BCAT calls DAT. `liveCapabilities` now names, per provider, the capabilities
+  this repo actually implements; everything else stays a stub however many credentials are
+  stored. A stub result is `mode STUB`, `STUB — …`, `externalId stub:<uuid>`, writes exactly
+  one `AuditLog` row and touches no business record — asserted on dev against the live
+  tables: shipment count, load count and the named shipment byte-for-byte unchanged,
+  `datPostedAt` still null.
+- **Health is what the provider said.** 401/403 → invalid credentials; anything else that is
+  not a 2xx → unable to verify with the code; `disabled-on-dev` → "Live on main · neutered
+  on dev", never OK and never invalid. A 2xx body is deliberately **not** stored: Motive's
+  reply carries driver names and positions and HubSpot's a real contact.
+- **The public API.** `POST /api/token` (client credentials, one-hour token, the secret shown
+  once and stored only as a SHA-256 hash) and `GET /api/v1/shipments/<number>` — a
+  purpose-built view with no `*Cents` key and nothing named `order`. A voided PRO answers
+  **200 `VOIDED`**, never 404. Wrong secret, unknown client and revoked client all answer one
+  401 wording.
+- **Inbound webhooks, verified.** `POST /api/webhooks/<provider>`: HMAC-SHA256 over
+  `t.body` with a ±300 s replay window, and a conditional `evt:<PROVIDER>:<eventId>` receipt
+  row that makes a redelivery a 200 no-op. **Receipt only in J** — no business record is
+  written; consumption is Step K. Receipts carry `ttlEpoch` and DynamoDB TTL is enabled on
+  the table, and `LIST_INTEGRATIONS` filters them out of its scan.
+- **Postal-code aliases are real, narrowly.** `laneKeyFor(stops, aliases)` is fed from
+  `aliasMap(settings.postalCodeAliases)` in the two writers that mint lane keys — `saveQuote`
+  and the carrier-offer row. Stored lane history is not rewritten and `laneKey3` is ZIP-based
+  and unaffected. The four shared tracking toggles are stored and say on screen that nothing
+  reads them until a tracking provider is live.
+- **Step R's invariants are untouched.** Nothing in J creates a `Load`, reaches AR, or offers
+  a second factoring path: the only factor affordance anywhere is a link to F's gated
+  `SEND_TO_FACTOR`. `tmsDirectoryActions` gained no grant on Shipment, Order, Load, Invoice
+  or FactoringItem, and no J action issues a DynamoDB `Delete`.
+
+**What the live run proved on dev** (75 checks): all 39 rows created once and never
+recreated; Motive and Anthropic validate **OK** against the stack's real keys; OTR, Slack and
+Blue Ink answer **NEUTERED_ON_DEV**; Twilio is **NOT_CONNECTED** (dev's pool has no dispatch
+config, as planned); Convoy answers **NOT_APPLICABLE**; a page credential round-trips through
+SSM as a SecureString with only a last-4 mask on the row; the DAT refresh rule refuses 17 and
+accepts 20 and a stale version is refused; a `page-tms` token is refused on all eight actions;
+a stack-managed provider refuses connect and disconnect with its rotation command; the token
+endpoint, the shipment read, the voided answer, the revoked client, the signature, the replay
+and the idempotent redelivery all behave; disconnect deletes the parameter and keeps the row
+and its settings. Browser pass on `https://dev.d3dejqzs77khq6.amplifyapp.com`: the index with
+its 39 rows and category counts, the DAT page running a stub inline under the orange **Stub**
+badge with "No call was made to DAT.", the Motive page showing a secret **name** and its
+events, issuing an API client (secret shown once) and revoking it, and the shipment's
+collapsed **Integrations** card grouped by capability. Both temporary dev identities and every
+parameter the run wrote were removed afterwards.
+
+**Two real gaps the step surfaced** (neither is a J defect):
+
+1. **The dev stack's `GOOGLE_MAPS_API_KEY` is rejected by Google server-side.** The page badges
+   it **Invalid credentials**, and the existing `tms-geocode` Lambda fails identically on dev
+   ("The provided API key is invalid"), so address geocoding is already broken on the dev
+   stack. Production is unaffected by anything here, but the dev key needs replacing or
+   un-restricting.
+2. **`/v1/users/me` is not a Motive org-API-key route** — it answers 400 "id is invalid". The
+   check now uses `GET /v1/vehicle_locations?per_page=1`, the same read the hourly location
+   sync makes.
+
+**Deviations from the J plan, each deliberate:** three categories beyond the plan's sixteen
+(EMAIL, PAYROLL, DOCUMENTS — forcing Paychex into ACCOUNTING or Gmail into MESSAGING would have
+made a page lie about what it is); `liveCapabilities` added to the descriptor after the review
+(the plan's `mode` alone could not tell "credentialled" from "implemented"); the webhook
+receiver added on Ryne's explicit requirement for signature/replay/idempotency, which the plan
+had deferred; JobsDone listed as externally managed and linked to `/pods` rather than given a
+second credential form; WEX EFS kept as one PAGE row with both halves explained, because a
+BRIDGE row could not take the money-code credential it needs; and the template grew 14,421
+bytes against a planned 12,000 ceiling — with 236,154 still free and K's `WorkflowRun`
+(≈ 5 KB) and M's assistant (≈ 12 KB) costed, the drop order was not worth paying.
+
+**Decision needed (Ryne) — the credentials J is waiting on.** 26 providers cannot leave stub
+mode until these arrive, entered on each provider's own page (they are written encrypted to
+`/bcat/integrations/us-east-1_UKhMNVAG1/<PROVIDER>` on dev and never shown again):
+DAT `{serviceAccountEmail (no `+` address), serviceAccountPassword, rateViewTier}` plus each
+rep's own DAT e-mail · Truckstop `{clientId, clientSecret}` · Parade `{apiKey}` (+ webhook
+signing secret) · Trucker Tools `{apiKey}` · MacroPoint `{partnerId, apiPassword}` · Load
+Market `{clientKey}` · project44 `{clientId, clientSecret}` + per-customer p44 ids · Highway
+`{apiKey}` (ask Highway — no self-service) · MyCarrierPackets `{username, password,
+webhookSigningSecret}` · RMIS `{clientId, clientPassword}` · LoadBoardNetwork `{customerKey}` ·
+Greenscreens `{clientId, clientSecret}` · HaulPay `{apiKey}` · Denim `{apiKey}` · ArtisPay
+`{identityToken, password}` (only if BCAT ever factors outside OTR) · QuickBooks Online
+`{clientId, clientSecret}` from an Intuit developer app plus Ryne's consent click · WEX EFS
+`{apiUsername, apiPassword}` (a data-sharing request; fuel **usage** already arrives through
+the e-mailed report bridge) · Loadsure `{apiKey}` · 7L Freight `{username, password}` · SMC3
+per-LTL-carrier `{username, password, licenseKey}` · EDI/Orderful `{apiKey}` + trading-partner
+setup · Outlook `{tenantId, clientId, clientSecret}` (only if BCAT uses Microsoft 365) ·
+HubSpot `{privateAppToken}`. Rotated in the Amplify console, not here: `OTR_USERNAME`,
+`OTR_PASSWORD`, `OTR_SUBSCRIPTION_KEY`, `BLUE_INK_TECH_API_KEY`, `SLACK_BOT_TOKEN`,
+`PAYCHEX_CLIENT_ID`, `PAYCHEX_CLIENT_SECRET` (all neutered on dev by design) and
+`GOOGLE_MAPS_API_KEY` (gap 1 above). Decisions still open: whether to buy a Twilio number for
+the dev pool or leave dev texting inert (the badge says inert today); whether BCAT uses
+Microsoft 365 at all; and whether JobsDone should be configured on the dev pool.
+
+Next: Step K — Workflows (Errors + AI Agents), `WorkflowRun`, the four e-mail agent inbox
+roles, org/party AI memory. Plan: `Docs/tms-build/K-plan.md`.
+
+## 2026-10-29 — Step R cutover: one record is a Shipment, and a PRO is claimed forever
+
+The previous entry closed Step R's acceptance gaps but left the real one open: three
+entrypoints still minted a `Load` with no shipment, and the board labelled the result
+**"Unlinked load"** and opened a second detail surface for it. That is a second record
+vocabulary. This entry removes it. One commit, `6c6437b` (70 files, +6,038 / −2,391),
+after `npm run typecheck`, `npm run lint` (the same 2 pre-existing warnings) and
+`npm run test` — **396 files / 5,354 tests** — pushed with no job running → job
+**52 SUCCEED**. Data stack **749,425 bytes**, 250,575 under the cap (+3,839 for one model,
+measured with `scripts/measureDataTemplate.mjs` before the push).
+
+- **Unresolved customer is now a state a Shipment can be in.** `Shipment.customerId` and
+  `Order.customerId` are optional and the attribute is **omitted** — never `''`, never
+  `NULL`, either of which a sparse GSI hash key refuses — so such a row simply stays out of
+  the customer index. `customerName` keeps the operator's typed text verbatim: **no customer
+  name is ever invented and no Customer record is created.** Readiness is derived from
+  `customerId` alone and never from status, because the backfill sets status from the stop
+  clock and an unresolved row can arrive `DELIVERED`; a "DRAFT means unresolved" rule would
+  have waved it through to AR. `src/lib/customerResolution.ts` is the one predicate the
+  board, the detail and the Lambda's refusals all share, so the wording matches exactly.
+- **One creation door.** `CREATE_SHIPMENT` takes the PRO a legacy entrypoint already owns, a
+  whitelisted leg bag, and an optional source. `readyToInvoice`, `status` and the identity
+  columns are refused outright — `loadFromFactoringItem` sets `readyToInvoice: true`, and
+  honouring it would walk straight past `evaluateReleaseGate`. A supplied rate becomes a
+  CUSTOMER LINEHAUL charge pinned to **FLAT**, so `Order.revenueCents`, `LoadFinancials` and
+  `Load.rate` agree instead of a $0 order under a $X load; without the pin a customer whose
+  linehaul is PER_MILE turned a $2,500 invoice into $2,500 × miles. A factoring create lands
+  on the **LEGACY** AR rung — money OTR already bought does not enter the AR worklist — and
+  keeps its PO in `tmsId` rather than having the PRO overwrite it.
+- **A PRO is claimed, not merely checked.** A `ProClaim` row keyed by the normalized PRO
+  (`src/lib/proNumber.ts`, moved out of `podPresence` because PRO identity is no longer a POD
+  detail) is written with a conditional put **inside the shipment transaction**, so two
+  dispatchers racing on one number cannot both win. A GSI could not have done this job: the
+  live table stores PROs padded (`'14547  '`) so an equality query would miss them, and an
+  index read is eventually consistent besides. **The claim is never released** — not on
+  rollback, not on void. `proConflict` stays as the fast browser answer but is no longer the
+  rule.
+- **Both client doors are shut.** `Load` model auth is `read`/`update` only, so no browser
+  token can mint freight; `aljexId`, `tmsId` and `pickupNumber` join `voidedAt` as
+  field-level read-only, so `updateLoad` can no longer rename a leg onto a dead PRO.
+  `SET_LOAD_PRO` is the only way a PRO moves. `apiClient.createLoad` and `useAppStore.addLoad`
+  are deleted, not wrapped.
+- **The entrypoints kept their affordance.** `NewShipmentDialog` is the one creation form and
+  writes **once on Save, never on open** — a shipment number is permanent and an abandoned
+  form must not burn one. `LoadDrawer` lost create mode and stays what it legitimately is, the
+  editor for a leg. The scheduler duplicate goes through `DUPLICATE_SHIPMENT` with the clicked
+  leg and `keepDriver`, which also kills an old bug: it spread `shipmentId` through, so a
+  shipment-born load duplicated under the old code became a phantom extra leg on the *source*
+  shipment. The side effects that hung off `addLoad` moved with it — the Batory appointment
+  ladder, intake linking, directory stop filing and the Slack appointment notices — and now
+  write through the API rather than the store, which the `onCreateLoad` subscription used to
+  outrun, silently dropping the tender PDF and the #appts-ivan thread.
+
+### Counts on dev, after job 52
+
+- **PRO claims:** scanned **970 loads**, **41 of them voided** (their PROs are claimed too —
+  that is the point), **970 claims written**, **0 failures**, **0 collisions**, **0
+  unclaimable**. A re-plan reports **0 left to write**. Every PRO on the board is unique once
+  normalized, so the invariant was enforceable with no data cleanup.
+- **The orphans are migrated, not labelled.** `BACKFILL_SHIPMENT` no longer skips a load whose
+  customer matches nobody. The two DIRECT DRIVE LOGISTICS loads became `L14864` (IN_TRANSIT)
+  and `L14865` (BOOKED), each carrying `customerName: DIRECT DRIVE LOGISTICS` with **no
+  `customerId` attribute at all** — verified on the row, not inferred. **Loads with no
+  shipment on dev: 2 → 0.** 977 were already linked and were not touched.
+- **Void mirror backfill applied:** **38 mirrored**, 0 already, 0 failures, **0 rows deleted**;
+  the re-plan reports **0 remaining**. After the cutover the same plan still reports 0 for
+  every pass — mirror, legacy voids, retag, sales reps — over **979 shipments**, 50 voided,
+  0 untagged.
+- **Live proof:** `scripts/devVerifyStepR.mjs` **110/110** against job 52 (was 90/90), the 20
+  new checks covering: a client token can no longer create a Load (`Not Authorized to access
+  createLoad`) or write `aljexId` (`Unauthorized on [aljexId]`); a typed-text create leaves
+  `customerId` absent and invents no Customer; `READY_TO_INVOICE` refuses it by name and, once
+  linked, the release gate still speaks for itself; a voided PRO is refused; two concurrent
+  creates on one PRO yield exactly one shipment; `SET_LOAD_PRO` moves a leg and the PRO it
+  moved off is **still claimed**; `keepDriver` leaves a duplicate on the driver's lane; and a
+  factoring create lands on LEGACY with its PO intact.
+- **Browser pass (authenticated, job 52).** The board shows `L14864` as an ordinary row with
+  its real `IN_TRANSIT` status, cities and dates, the typed customer text and a **Not linked**
+  badge; "Unlinked load" appears nowhere. Its detail is the **Shipment** detail with the full
+  tab row (Stops, Carrier/Driver, Tracking, Documents, Financials, Invoicing, Carrier Pay,
+  History) — not a second drawer — carrying the shared refusal sentence and a **Link customer**
+  control. The calendar's button now reads **New Shipment** and opens the dialog with the
+  explicit "No matching customer — record the name for now" branch and a PRO field
+  ("Blank: the shipment numbers its own leg"). Four saved views render 20 rows each with no
+  errors. Factoring loads clean with no "Create load" affordance left.
+- **Restricted audience proved, not assumed.** `viewsVisibleTo` lets owner/ADMIN past the
+  audience by design (`shipmentViewDefs.ts:205`), so an admin session could not show this. A
+  temporary **non-admin** identity (`page-loads` only, no division) was used: with
+  `box-trucks` narrowed to `CAR_SHIPPING` the view **disappeared** from its board while
+  Owner operators, Local drivers, Dispatch and Accounting stayed. The narrowing was then
+  reverted and the row is back to `Everyone`.
+- **Identities.** Both temporary dev identities were created with a suppressed invite and a
+  random password held only in memory, and **both were deleted at the end**; 0 `stepr-verify`
+  users remain in the pool. No production stack was touched: the repo-root
+  `amplify_outputs.json` is production and every script refuses it.
+
+**Decision needed (Ryne).** Resolving a shipment's customer is a one-way act today:
+`SET_SHIPMENT_CUSTOMER` refuses a shipment that already has one, because re-pointing freight
+at a different customer is a correction with money attached, not a data fix. If you want that
+re-point, say under what conditions and whether an invoiced order may ever move.
+
+## 2026-10-29 — Step R acceptance gaps closed: the gate has no back door, a void leaves every working set, and no load is invisible
+
+The four items the previous entry listed as **Decisions needed (Ryne) 4–6** are hard rules in
+the brief, not choices, so they are closed rather than asked about. Two commits, each after
+`npm run typecheck`, `npm run lint` (the same 2 pre-existing warnings) and `npm run test`,
+pushed one at a time with no job running:
+`21bc173` (31 files, 391 / 5,291 tests) → job **49 SUCCEED**;
+`abba9ac` (21 files, 392 / 5,297 tests) → job **50 SUCCEED**.
+
+- **`BACKFILL_SHIPMENT` no longer mints AR readiness.** It read a legacy load's
+  `readyToInvoice` — a checkbox on the old calendar any `page-loads` user can tick — and wrote
+  `arStatus: 'UNBILLED'` straight onto the new order, which is the one rung the release gate
+  exists to guard. An imported order now lands on `DOCS_NEEDED` however that flag was left; the
+  flag still decides the load's *status*, because delivery is what it is evidence of.
+  `scripts/backfillLegacyAr.mjs` stays the way Aljex-era bills reach `LEGACY`.
+  **Reconciliation on dev: nothing to repair.** Scanned all 964 orders: every one of the 892
+  whose shipment carries `source BACKFILL` is already `LEGACY`, and **0** imported orders sit on
+  `UNBILLED` with or without an invoice. The 11 live `UNBILLED` orders are all `source MANUAL`
+  Step-R verification shipments (S000021, S000026, S000028–29, S000053, S000057, S000061,
+  S000063, S000066, S000068, S000071); 10 of the 11 are already voided and therefore off every
+  worklist. No invoice, payment or AR rung was rewritten.
+- **The void now reaches the fleet.** Void lives on the Shipment, but the calendar, dispatch,
+  the appointment queue, the schedule, the settlements and the pay hooks read the **Load** table
+  and never join a shipment — which is exactly why the calendar's Unscheduled strip still listed
+  voided freight. `Load.voidedAt` (additive, and **read-only to a signed-in client**: only
+  `VOID_SHIPMENT` writes it) is mirrored by the void; `listLoads()` returns the working set and
+  `listLoads({ includeVoided: true })` the identity table. **The store keeps the identity
+  table** — `proConflict` in `LoadDrawer` is the only Pro #-uniqueness check there is, and a
+  voided PRO must stay claimed forever — while `useLoads()` is the working set; ten readers that
+  are working sets take the filtered list and four that match a PRO or a load id (Intake, PODs,
+  the factoring queue and its document cell) keep the whole table. History is untouched: the
+  Voided tab, the shipment's History tab and the audit log still read every voided row.
+- **A load with no shipment is on the Shipments page again.** Step R retired `/loads`, and a
+  Load whose typed customer matched no record never got a Shipment, so it belonged to no list at
+  all — and the new-load form, the scheduler's duplicate and "create load from factoring item"
+  still mint such loads, so it is a live hole, not only the two rows the Step B backfill left.
+  It rides the one list as an **Unlinked load** row carrying only what it actually has (its own
+  PRO, the typed customer text, appointments, cities, rate), on **All** only (and **Voided** when
+  the load itself is voided), claimed by no status/mode/customer chip, no saved view and no
+  pipeline rung, and it opens the `LoadDrawer`. On dev that is the two DIRECT DRIVE LOGISTICS
+  loads, `14864` and `14865`.
+- **A saved view's `audience.divisions` hides the view** instead of being decoration, matched
+  against a new additive `UserProfile.divisions` edited on the Users page; the sidebar stopped
+  passing `role: null`, which had made the roles facet dead there too. Checked on dev first:
+  **0 of the 10 ShipmentView rows carry `audience.divisions`**, so nothing disappeared for
+  anybody. From here a division-scoped view needs the people who should see it tagged on
+  My Brokerage → Users.
+- **Basic KPIs** no longer prints "No data for these filters." under a strip of real figures: a
+  tiles-only card has no series rows by design.
+- **Found by Fable's review of the first commit and fixed in the second**, each one a way the
+  mirror had made things worse: the blinded Pro #-uniqueness check above; `Load.voidedAt` being
+  client-writable (a void in everything but name, with no owner/ADMIN check, no reason and no
+  audit row — now read-only, and the client never sends the field, so the scheduler's duplicate
+  cannot write a NULL over it); `BACKFILL_SHIPMENT` re-linking a refreshed load onto a shipment
+  somebody had voided (now skipped as `SHIPMENT_VOIDED`); and the mirror pass reading a stored
+  NULL `voidedAt` as an existing void.
+- **Proof carried by the suites, each verified to fail without its fix:** the Unscheduled strip
+  and the appointment day drop a voided load and its count reads 1 not 2
+  (`PlannerView.test.tsx`); Basic KPIs renders no empty state under its tiles
+  (`DashboardPage.test.tsx`); an imported `readyToInvoice` load is DELIVERED and `DOCS_NEEDED`
+  and a relink onto a voided shipment is refused (`tms-shipment-actions/handler.test.ts`, 246);
+  the void is mirrored onto the load in the same step as the void; a voided load is absent from
+  `useLoads()` and present where the duplicate-PRO check looks (`useLoads.test.ts`); the
+  unlinked row lists, searches, opens the drawer and stays off the live tabs when voided
+  (`ShipmentsBoard.unlinked.test.tsx`); division audience hides and admits
+  (`shipmentViewDefs.test.ts`, `TmsLayout.test.tsx`).
+- **Schema:** additive only — `Load.voidedAt`, `UserProfile.divisions`. Synthesized locally
+  before pushing (`scripts/measureDataTemplate.mjs`): data stack **745,586 bytes**, 254,414
+  under the 1,000,000-byte cap, unchanged by the two fields (model fields live in the GraphQL
+  asset, not the template).
+- **Still to run on dev, and the only thing outstanding:** `scripts/backfillRevDivision.mjs`
+  gained a sixth **MIRROR** pass that stamps `voidedAt` on the loads of shipments that were
+  already voided before the field existed. Scanned on dev: **38 voided/soft-deleted shipments,
+  38 mirrored loads, 0 stamped**, and **23 of those loads are not even CANCELED** (10 DELIVERED,
+  11 SOURCING, 2 BOOKED) — the pre-R soft deletes whose loads were never cancelled, which is the
+  freight Ryne was seeing. Until the pass is applied those 23 keep their calendar rows on data
+  older than this deploy; every void from job 49 onward mirrors itself. The pass is
+  plan→apply→re-plan like every other, writes under `attribute_not_exists(voidedAt) OR
+  voidedAt = :nothing`, and never overwrites a real void. `scripts/devVerifyStepR.mjs` likewise
+  gained the live checks (import lands on DOCS_NEEDED and still has to pass the gate;
+  `PREVIEW_FACTOR` runs the same gate as invoicing; the void is mirrored onto the load; no token
+  can write `Load.voidedAt`) and has not been run against job 50 — both need
+  `BCAT_EMAIL`/`BCAT_PASSWORD`, which this session did not have.
+- **Step J plan refreshed** (`Docs/tms-build/J-plan.md`): it had been written before Step R and
+  said so. It now targets the `tms` shell and kit, mounts Integrations as the eighth
+  `BrokeragePage` tab at `/tms/brokerage/integrations`, carries the measured template budget,
+  has every file:line citation re-checked, and adds a section on the Step R invariants J must
+  keep — a factoring adapter runs the same release gate and is not a second door into AR, no
+  adapter writes `Load.voidedAt`, no adapter introduces a delete path, and every provider list
+  that reads loads must say whether it wants the working set or the identity table. Nothing of
+  Step J is implemented.
+- **Decisions needed (Ryne):** (1) The three Step R questions that really are choices still
+  stand: an Amazon row under Ivan Cartage; no un-void exists; CAR_SHIPPING has no data signal.
+  (2) A legacy `CANCELED` load that was never voided still shows on the calendar — only *voided*
+  freight is hidden now. Hide cancelled loads there too? (3) Nothing in the app mints a Shipment
+  for an unlinked load: the row tells the user to set its customer and an admin then runs
+  `scripts/backfillShipments.mjs`. Should the board offer that as a button for owner/ADMIN?
+
+## 2026-10-29 — Step R done on dev: MVMNT UI, one Shipment record, three-business sidebar, Brokerage dashboard, Void, the accounting gate
+
+- **Deployed, in order, each after `npm run typecheck`, `npm run lint` (2 pre-existing warnings) and
+  `npm run test`:** `9cdab14` (the step, 387 files / 5,237 tests) → job **45 SUCCEED**; `de215c5`
+  (Fable's review fixes, 389 / 5,262) → job **46 SUCCEED**; `a895d1c` (calendar crash on a
+  Shipment-page load, section titles; 389 / 5,263) → job **47 SUCCEED**. The first R commit carries
+  Ryne's brief changes; the reference doc and the two MVMNT screenshots were already in `740e8a3`.
+  Deploys serialized; nothing pushed while a job ran. Data-stack template 732,260 → 745,586 bytes
+  (+13,326: three models, no GSI; the `delete` resolvers on Shipment and Load removed).
+- **What shipped** (plan `R-plan.md` + its Addendum; page mapping `R-nav-mapping.md`):
+  `src/features/tms` shell + kit (theme scoped to `.tms-shell` / `.tms-portal`, Inter, 175px
+  sidebar, 38px top bar, the list/filter/table/empty-state/footer anatomy, chart cards); every A–I
+  page re-skinned under `/tms/*` (Dashboard, Shipments, Rates, Invoicing with Receivable/Payable
+  tabs, Carriers, Factors, Customers, Locations, Vendors, Workflows, Academy, My Brokerage with
+  Settings/Users/Commissions/Reports/Audit/Divisions & ownership/Shipment views) with every old path
+  redirecting; the sidebars read one config grouped by the division tree: **BROKERAGE [BCAT
+  Logistics]**, **ASSETS [Ivan Cartage]**, **CAR SHIPPING [Best Care Auto Transport]**, **COMPANY**
+  (Users, Settings, Finances, Profit Review, Weekly Cash Check-in, Reddit Queue). Existing pages
+  keep their look; `/loads` (GridPage) is gone and redirects to `/tms/shipments`; new grant `tms`.
+  Workflows says it arrives in Step K; Academy renders `Docs/academy` and says the assistant
+  arrives in Step M — neither pretends to be more.
+- **One record.** The Shipments list carries driver, truck, division chip and sales rep; no
+  "Order" wording anywhere a user reads; `revDivision` / `revSubdivision` / `salesRepId` mirrored on
+  Shipment and Load. Booking Ivan Cartage writes the Load's pickup/delivery driver, stops[].driverId,
+  truck and dates (`src/lib/loadMirror.ts`); an outside carrier or a bounce clears them. Department
+  views (`ShipmentView`, 10 seeded) are sidebar children and board tabs; "Save as view" for owner/ADMIN.
+- **Taxonomy as data.** `OwnershipDivision` (any depth, ownership + flow settings), `OwnershipRule`
+  (ordered, first match wins, hand tag beats rules, `ALWAYS` catch-all), seeded by
+  `ENSURE_OWNERSHIP_SEED`; admin editors with drag ordering, "Test a shipment" and "Re-tag all".
+  Own fleet is `CARRIER_IS OWN_FLEET` (there is no Carrier row for Ivan Cartage — plan Addendum).
+- **PRO permanence.** `deleteLoad`, `onDeleteLoad` and `deleteShipment` no longer exist in the
+  deployed schema (introspected); `DELETE_SHIPMENT` / `RESTORE_SHIPMENT` resolve to "Unknown
+  action"; every delete button is gone (GridPage, SchedulerView, LoadDrawer, the board, the
+  detail). **Audit of what A–I exposed:** the generated `deleteLoad` mutation (hard delete,
+  client-writable Load, three UIs), `DELETE_SHIPMENT` + `RESTORE_SHIPMENT` (soft), the quote
+  revert's quiet soft delete, the convert-failure rollback and the CREATE_SHIPMENT rollback that
+  `Delete`d the Shipment/Order/Financials rows. All replaced by **VOID_SHIPMENT** (owner/ADMIN from
+  the token, reason required, PRO/legs/documents/history kept, Load CANCELED with its driver marks
+  cleared, apOpen/check-call cleared, audited, no un-void). 27 legacy soft deletes on dev became
+  voids. Void reaches every reader: credit exposure, AR aging, AR/AP worklists, invoice preview,
+  the tracking router, the notifier, carrier bills (TONU only).
+- **Release-to-accounting gate** (`src/lib/releaseGate.ts`, `_shared/releaseGateInput.ts`):
+  delivered, required documents (BOL, POD always; RATE_CON with an outside-carrier leg; the
+  customer's list), required references, carrier bill recorded or own-fleet leg, no open
+  exceptions. Enforced in READY_TO_INVOICE, SET_AR_STATUS, PREVIEW/GENERATE/BATCH invoicing,
+  PREVIEW/SEND_TO_FACTOR; the documents override and `invoiceEarly` admission are gone; the UI
+  prints the exact `missing[].message` list (Invoicing tab, AR card, batch refusals).
+- **Dashboard** `/tms/dashboard`: the 17 Classic charts in MVMNT order plus Ryne's nine
+  (status counts, DAT, AR/AP by rep, rep leaderboard, live tracking, tracking history, PODs
+  needed, POD timing p50/p90 by carrier), opening on `Division is BCAT Logistics` + this month,
+  group-by division/subdivision/rep/customer/carrier/status/month, chart picker, Classic +
+  saved views, CSV export. Real data only: with this month's window the Brokerage slice is a
+  true zero on dev (October pickups are own-fleet); widened to all divisions it reads 257 shipments
+  / $198,580.40 revenue grouped Ivan Cartage vs BCAT Logistics (`r-proof/dashboard-all-divisions.webp`).
+- **Backfills on dev** (plan → apply → second plan = no-op): `backfillRevDivision` seeded 7
+  divisions / 7 rules / 10 views, re-tagged **927 shipments: ASSETS 676 (LOCAL 490, BOX_TRUCK 108,
+  OWNER_OPERATOR 37), BROKERAGE 251, CAR_SHIPPING 0** (nothing in the data marks a car-shipping
+  load — plan Addendum), untagged 0, hand-tagged 0, 35 voided; sales reps: 918 orders carry no
+  rep, 9 name the deleted Step I proof identities and were left alone; the two DIRECT DRIVE
+  LOGISTICS loads without a shipment reported, not invented. `backfillLaneSamples --refresh`:
+  846 samples rewritten with the Step R facts + 13 live samples patched; second plan 0.
+- **Live proof** `scripts/devVerifyStepR.mjs` → **82/82** against job 47 with a temporary ADMIN
+  (suppressed invite, password never printed, deleted after) and a CUSTOMER_REP token minted
+  through the Users API: schema has no delete; seed idempotent; Ivan booking tags ASSETS/BOX_TRUCK
+  on Shipment AND Load and writes pickupDriverId / deliveryDriverId / stops[].driverId / truckId;
+  switching to an outside carrier clears them and tags BROKERAGE; hand tag survives a bounce;
+  CLEAR returns to the rules; SET_SALES_REP mirrors; the gate refuses with the exact list
+  (`Missing document: BOL; Missing document: POD`, `1 open exception`, `Missing document:
+  RATE_CON; Carrier charges not settled: …`), `override` is ignored, SET_AR_STATUS / GENERATE /
+  BATCH / PREVIEW all gated, two concurrent GENERATE_INVOICE calls issue one invoice, an invoiced
+  shipment cannot be voided, the rep token is refused (`requires owner or ADMIN`), the admin void
+  keeps the PRO, 3 legs and 2 documents, cancels the Load and clears its driver, refuses every
+  write afterwards and reads VOIDED in the invoice preview; RETAG dry run writes nothing.
+- **Browser pass** (temporary admin, dev URL): Shipments list and view tabs, shipment detail
+  (Division card "Ivan Cartage · Box Trucks, tagged by rule Box truck driver"; Carrier/Driver tab
+  "On the calendar · in Dispatch · pays through driver settlements"), `/calendar` showing the
+  Ivan-booked proof shipment S000070 on Zak Pace, **`/driver-pay-box-trucks` "Pull from calendar"
+  listing S000070-1 at $950.00 gross on Zak Pace's check** (then cleared and the shipment voided —
+  the Load's driver is null again), Divisions & ownership, Invoicing. Screenshots without customer
+  data in `Docs/tms-build/r-proof/`.
+- **Found and fixed on the way:** the Day calendar crashed on any Shipment-page load
+  (`pickupApptType` null → `toUpperCase`), regression test added; Fable's review (one BLOCKER:
+  voided shipments still consumed credit; three MAJOR; five MINOR) all fixed in `de215c5`.
+- **Decisions needed (Ryne):** (1) AMAZON drivers tag ASSETS with no subsidiary — add an Amazon
+  row under Ivan Cartage? (2) No un-void exists; a mistaken void stays voided. (3) CAR_SHIPPING
+  has no data signal; the seed rule matches references containing vehicle / auto transport /
+  car shipping — name the customers instead? (4) The legacy calendar's "Unscheduled" strip still
+  lists CANCELED loads (voided shipments' loads among them) — hide canceled loads there?
+  (5) `BACKFILL_SHIPMENT` still maps a legacy load's readyToInvoice → UNBILLED without the gate
+  (legacy import only; `backfillLegacyAr` turns them LEGACY). (6) The Basic KPIs card prints
+  "No data" under its tiles when the by-month series is empty — cosmetic.
+- **Step R done.** Next: Step J (`Docs/tms-build/J-plan.md`).
+
+## 2026-10-28 — Step I proved live on dev (47/47); every backfill rerun on the refreshed data; R next
+
+- **Step I done.** Amplify dev jobs `41` and `42` both **SUCCEEDED**.
+- **Deployed.** `50787c3` → job **41 SUCCEED**, `3da9683` → job **42 SUCCEED**, `edf1f43` (the
+  proof script) with this entry. Each commit passed `npm run typecheck`, `npm run lint` (3
+  pre-existing warnings) and `npm run test` (**365 files / 4,895 tests**, up from 4,890). Deploys
+  were serialized: nothing was pushed while a job was RUNNING.
+- **The live proof did not wait for `BCAT_EMAIL`.** A temporary ADMIN was minted in the dev pool
+  (`us-east-1_UKhMNVAG1`) with a suppressed invite and a randomised permanent password that was
+  never printed, used for the script and the browser pass, and deleted afterwards; the script's
+  two temporary identities are created through the Users API (the path under test), given a
+  password straight in the pool, live at `example.invalid` so the invite reaches nobody, and are
+  removed from the pool and the `UserProfile` table in a `finally`. No `zz-` login or profile
+  remains; the only profile row is Ryne's. **`node scripts/devVerifyCommissions.mjs` → 47/47**
+  against job 42: a rep's token gets through `page-commissions` and is refused on
+  `SAVE_SHIPMENT_SETTINGS` / `SAVE_COMMISSION_SETTINGS` / `setAdmin` / `list`; a roleless token
+  is refused at the commission door; the owner's role cannot be changed; **a non-owner admin
+  cannot delete a user**; $2,500 / $1,800 → profit $700 → primary $70.00, lone secondary $70.00
+  (a `splitBps` is a weight over the role's pot, the review's semantics — alone, the secondary
+  takes the whole pot); a rerun writes nothing (`puts 0 updates 0 adjustments 0 untouched 2`);
+  the rep counters their own row (REP_COUNTERED) and cannot approve it or counter another's;
+  the manager's accept settles $90.00 with $70.00 kept beside it; a $500 write-off leaves the
+  approved row at $70.00 and lands **−$50.00 as its own UN_APPROVED adjustment**; revenue
+  $1,000.15 against a $0.10 booking lands on profit $1,000.05 and **10 % rounds once, away from
+  zero, to $100.01** on both rows; an own-fleet order pays 0 with `OWN_FLEET_NO_COST` and
+  `needsReview`; a void cancels the open row (`INVOICE_VOIDED`) and **reverses the approved one
+  (−$100.00) without rewriting it**; a pay period goes open → submit (6 rows, $520.00) → approve
+  → paid under a payroll reference, refusing the manager, the unapproved period and the missing
+  reference on the way, with a statement PDF stored under `commissions/<rep>/cpp_2026-11-01.pdf`;
+  the reporting index answers 2026-10 and the ledger answers by month.
+- **Browser pass**, signed in as the temporary admin: `/commissions` (switched-off state, as the
+  settings are restored after each run), `/reports` (after the lane-sample refresh: 514 loads
+  Aug–Oct, revenue, cost, margin, RPM/CPM, the own-fleet caveat, the customer table), `/users`
+  (totals, invite form with the seven roles, the owner-only note, the cards) and `/settings`.
+- **Bugs the proof found, fixed at the source, each with a test that fails without the fix:**
+  - `userManagement` ran on the **3 s default timeout**; `create` on a cold start timed out after
+    the login had been made (`Task timed out after 3.00 seconds`, read off the dev log group).
+    30 s, like the other routers. The stray login that run left behind was removed.
+  - **The pool names people by a generated id, not the e-mail.** Ryne's own profile is keyed by
+    one. `create` keyed the new profile by the e-mail, so `list` never joined it and an invited
+    rep showed as "No role" with a CUSTOMER_REP profile nobody read; `commissionState` decided
+    "own row" by e-mail while RepPicker stores the username, so a rep could never counter the
+    row attributed to them. Profiles are keyed by the username Cognito returns; the caller
+    carries its username (`sub` in the Lambda, `userId` on the page) and a row names them by
+    either; Mine reads both. The two comments that said the opposite are corrected.
+- **Backfills rerun on the refreshed dev tables** (Load 941 = 892 production + 49 dev fixtures;
+  TMS tables kept). Every plan → review → `--apply` → second plan, in this order, with the
+  second plan a no-op in each case:
+  - `backfillShipments` (B): **888 loads had lost `shipmentId` while their Shipment survived**.
+    `BACKFILL_SHIPMENT` decided on the link alone and would have read them as 757 "no customer
+    match" and 131 fresh ledgers. It now treats the Shipment under the load's deterministic id as
+    the record and only re-points the load (its order, number, customer; the leg really on it
+    sets `assignmentType` / `activeLoadCarrierId`). Applied **890: 888 relinked, 2 created** (the
+    two new BATORY FOODS loads), **2 skipped NO_CUSTOMER_MATCH** (DIRECT DRIVE LOGISTICS — no
+    row carries that name and none was invented). Second plan: 0 relink / 0 create / 2 skipped.
+    Shipment 937 → **939, no duplicate** (892 BACKFILL = 890 + 2); `erasedButShipmentExists` 0.
+  - `backfillCustomers` (P1): it proposed a write for every load, linked ones included, and
+    would have minted 23 customers. A linked load is now counted and left alone, and the new
+    `--link-only` links to the customers that exist and reports the rest. Applied **696 loads
+    linked** (176 already); second plan 0. Left honestly unlinked: **67 loads — 56 with no
+    customer text, 8 under 13 ambiguous names, 3 under names with no row** (DIRECT DRIVE ×2,
+    TRINITY LOGISTICS ×1). 23 names have no customer; none was created or renamed.
+  - `backfillLocations` (P1): **331 loads** had their stops linked to existing Locations;
+    second plan 0; **683 stop keys match no Location** and none was created.
+  - `backfillShipmentDocuments` (E): 3 `rck:` rate-con pointers, 40 order gates recached; second
+    plan 0; 1 submission and 2 loads left (no shipment).
+  - `backfillLegacyAr` (F) — never applied until now: **892 BACKFILL orders → `LEGACY`**
+    (841 were UNBILLED, 51 DOCS_NEEDED; none carried an invoice); second plan 0 / 892 already.
+  - `backfillApOpen` (G): would have put the carrier legs of **five deleted verification
+    shipments back on the AP board** — DELETE_SHIPMENT takes the marker off on purpose. It now
+    reads Shipment `deletedAt` and skips them, counted. Plan over dev: **0 actions** (676 own
+    legs clear, 5 open, 5 skipped deleted, 1 bounced).
+  - `backfillLaneSamples` (H, I's refresh): **846 samples written** (844 BACKFILL, 2 LEGACY_LOAD)
+    with the six reporting fields; second plan 0 / 846 current; 95 loads not sampled (76 below
+    delivered, 18 no lane key, 1 live sample wins); `Load.rate` proved cents on 922 of 922.
+  - `backfillUserProfiles` (I): after the temporary identities were gone, plan and apply wrote
+    **0** — the owner's profile already exists; second plan 0.
+  - Not run, on purpose: `seedDivisions` (operator JSON input; Division has 0 rows on dev and
+    nothing is invented), `importCarriers` (the production cutover, refuses dev apply).
+    **Risk for Ryne:** `scripts/backfillDriverDocScans.mjs` predates the TMS build, has no
+    production guard and its default suffix *is* production; it was not touched or run.
+- **Nothing production was read or written**; no `main` deploy. The new direction docs
+  (`TMS_BUILD_BRIEF.md` changes, `MVMNT_UI_REFERENCE.md`, the images) are left uncommitted for
+  the first R commit, as asked.
+- **Next:** Step R — `Docs/tms-build/R-plan.md`.
+
+## 2026-10-28 — Step I is live on dev; J planned
+
+- **Deployed.** Commit `2a645b0` pushed to `origin dev`; Amplify job **`39` SUCCEED**. All three
+  new tables are **ACTIVE on dev with exactly the indexes the plan named**, read off the live
+  tables rather than assumed: `Commission` →
+  `commissionsByRepIdAndCommissionMonth`, `commissionsByInvoiceId`, `commissionsByPayPeriodId`,
+  `commissionsByCommissionMonthAndTriggerAt`; `CommissionPayPeriod` and `UserProfile` → none, as
+  planned; `LaneRateSample` → its two Step H indexes plus the new
+  `laneRateSamplesBySampleMonthAndDate`. The **generated GraphQL query names were checked against
+  the deployed schema** (`aws appsync get-introspection-schema`), which is the `66785d3` lesson:
+  `listCommissionByInvoiceId`, `listCommissionByRepIdAndCommissionMonth`,
+  `listCommissionByCommissionMonthAndTriggerAt`, `listCommissionByPayPeriodId`,
+  `listCommissionPayPeriods`, `listUserProfiles` and `listLaneRateSampleBySampleMonthAndDate` all
+  exist verbatim as `apiClient.ts` asks for them.
+- **Template budget.** Measured with `scripts/measureDataTemplate.mjs` before the first schema
+  change and after the last: **718,390 → 732,259 bytes, +13,869** for three models, five GSIs,
+  their read resolvers and the new table ARNs — **267,741 under the cap** and well inside the
+  plan's 25,000-byte ceiling, so nothing from the drop order was needed. No other template in the
+  88-template assembly exceeds 128,503 bytes.
+- **What shipped.** A role is **data on `UserProfile` projected onto Cognito groups**, so the five
+  server-side `authorize()`s and `hasPageAccess` still read the token and a role change costs no
+  table read per call. `userManagement` moved from owner-only to **owner or ADMIN**, with
+  `setAdmin`, `delete` and granting the ADMIN role still owner-only, the lock-out guards (owner,
+  self, last admin) and its first test file. `Commission` and `CommissionPayPeriod` are a real
+  ledger written only by `tmsFinanceActions` (`commissions.ts`, thirteen actions behind a new
+  `page-commissions` key); `src/lib/commission.ts` holds the arithmetic. `LaneRateSample` became
+  the reporting fact table. New pages `/commissions` and `/reports`, a rebuilt `/users` under a
+  new `RequireAdmin`, five settings cards (shipments, charge codes, teams, roles & pages,
+  commissions), `RepPicker`/`TeamPicker` replacing the free-text rep inputs,
+  `scripts/backfillUserProfiles.mjs`, and three Academy articles.
+- Gates before the commit: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` — **365 files / 4,890 tests**, up from 351 / 4,598.
+- **Fable review (`reviewer`, once, on the full staged diff) found two blockers, seven majors and
+  three minors. Every one is fixed, each with a test that fails without the fix.** The two
+  blockers were both deploy-breaking: a REVERSAL row spread `payPeriodId: null` onto a row whose
+  `payPeriodId` is a GSI hash key, so **every `VOID_INVOICE` over an approved commission would
+  have been refused outright** by `Type mismatch … Actual: NULL` — the Step C lesson, in a new
+  place; and the ladder had **no rung out of `MANAGER_APPROVED`**, so under the shipped default
+  (managers approve) every row a manager approved was locked, unclaimable and never payable. The
+  majors: an explicit `splitBps` paid each person that percentage of the pot independently, so two
+  owners at 50 % of an odd pot **invented a cent** (splits are weights through `allocateCents`
+  now); reversal and adjustment ids were minted at `:1` regardless of what already existed, so a
+  second rerun or a cancelled adjustment would have failed **every later run of that invoice**; an
+  adjustment or reversal inherited the original `triggerAt`, so a late difference landed in a
+  closed period and **could never be netted off a rep's pay** (they are stamped with the moment
+  they are computed, and `SUBMIT_PAY_PERIOD` now sweeps stragglers back three months);
+  `userManagement` was missing `dynamodb:DeleteItem`, so deleting a user would have removed the
+  login and then thrown; `setAdmin` bypassed the role machinery, which let a non-owner's later
+  claim edit silently grant or revoke ADMIN; and a manager could **approve, override and accept
+  their own commission** — nobody signs off their own number now.
+- **Runtime verification on the deployed dev stack.** The gates and the tests are not the proof;
+  these are, taken by invoking the deployed Lambdas with real identity claims:
+  - `page-loads` alone on `RUN_COMMISSIONS` → *"Forbidden: RUN_COMMISSIONS requires owner, ADMIN,
+    or page-commissions"*; `page-invoicing` alone on `OPEN_PAY_PERIOD` → the same refusal. Billing
+    a customer does not put anybody on the commission ladder.
+  - A `role-CUSTOMER_REP` holder on `SAVE_COMMISSION_SETTINGS` → *"Forbidden:
+    SAVE_COMMISSION_SETTINGS requires owner or ADMIN"*; on `SAVE_SHIPMENT_SETTINGS` (the shipment
+    router) → *"Forbidden: SAVE_SHIPMENT_SETTINGS requires owner or ADMIN"*.
+  - The same rep on `RUN_COMMISSIONS` **gets through the door** and is stopped by the real
+    settings read: *"Commissions are turned off. Switch them on in Settings → Commissions first."*
+    — which also proves the Lambda's new table grants and env are wired, since it reached
+    `getSettings`.
+  - `manageUsers list` as a customer rep → *"Forbidden: managing users requires owner or ADMIN."*;
+    as the owner it returns the real pool joined to profiles and **mints the owner's `UserProfile`
+    row on first read**, exactly as planned.
+- **What is NOT yet verified, and why.** `scripts/devVerifyCommissions.mjs` is written and
+  committed — it builds its own customer, carrier and shipments, creates two temporary identities
+  with randomised passwords that are never printed, signs them in for real, and asserts the whole
+  of Step I end to end (the exact cents on a $2,500 / $1,800 order, an idempotent rerun, a rep's
+  counter and a manager's accept, an approved row adjusted rather than rewritten, half-cent
+  rounding, an own-fleet zero row, a void cancelling and reversing, a pay period open → paid with
+  a statement PDF, and the reporting index) and deletes every identity in a `finally`. **It has
+  not been run**: it signs in through Cognito with `BCAT_EMAIL` / `BCAT_PASSWORD`, and those
+  credentials are not present in this environment. The browser pass over `/commissions`,
+  `/reports`, `/users` and the five settings cards is blocked on the same credential. Both are a
+  single command once Ryne supplies it:
+  `BCAT_EMAIL=… BCAT_PASSWORD=… node scripts/devVerifyCommissions.mjs`.
+- **Migration.** `scripts/backfillUserProfiles.mjs` (plan → review → `--apply`) writes one profile
+  per Cognito login: the ADMIN group becomes `role ADMIN`, **everybody else becomes NONE** and
+  keeps every page they already hold as an extra grant — no role is inferred from a page grant,
+  because `page-invoicing` + `page-carrierPay` looks like AR/AP and might be a manager who also
+  bills. `scripts/backfillLaneSamples.mjs` now emits the six reporting fields and counts a sample
+  missing `sampleMonth` as stale, so the 835 Step H samples are refreshed rather than called
+  current; a third pass over refreshed rows is 0 actions. Neither has been applied to dev yet —
+  both need the same dev credential path as above, and both refuse the production suffix before a
+  single read.
+- **No commission is backfilled.** Pre-I invoices carry no plan, and a plan with an
+  `effectiveFrom` in the past would compute rows for money that was already paid out elsewhere.
+  The Academy article says to set `effectiveFrom` to the go-live date.
+- **Nothing claims an e-mail was sent.** Step I sends nothing: the five team sender addresses are
+  stored and unused until J/L, and SES is still denied on dev.
+- **Decisions needed (Ryne):** Step I shipped every default its plan proposed — roles as data
+  projected onto `role-*`/`page-*` groups; the role → pages table as the plan listed it; owner or
+  ADMIN manage users, owner alone grants ADMIN and deletes; own-fleet page keys stay per-user
+  extras outside every role; only credit-limit edit, AR/AP posting, AP approval and carrier status
+  are enforced claims and the rest are recorded; teams and commission plans as JSON on
+  `TmsSettings`; sender addresses stored now and used in J/L; the rep view limits as board filters
+  rather than read restrictions; the trigger offering GENERATE_INVOICE and INVOICE_PAID only, with
+  READY_TO_INVOICE dropped; basis = invoice total − write-offs with credit memos ignored;
+  own-fleet profit rows at 0 + needs-review; half-away-from-zero rounding and largest-remainder
+  splits; unapproved rows recomputed in place and approved rows only adjusted or reversed;
+  managers approve by default and admin-only pay; period tiers, draws and deductions deferred; no
+  commission backfill; `LaneRateSample` as the fact table; no chart builder in I; no new Lambda.
+  Two the review forced and which are worth confirming: **an admin now has to close a row a
+  manager approved** before it can be paid (a manager's approval is the first rung, not the last),
+  and **nobody — manager or admin — may approve, override or accept their own commission row**.
+- **Next:** Step J — the integration framework and every provider settings page. The plan is
+  `Docs/tms-build/J-plan.md`.
+
+## 2026-10-28 — Step H is live on dev, verified end to end; I planned
+
+- **Step H done.** Amplify dev job `37` **SUCCEEDED**.
+- **Deployed.** Commit `49bbaa5` pushed to `origin dev`; Amplify dev job `37` SUCCEED —
+  BUILD, DEPLOY and VERIFY. This entry's own commit carries the three money and layout
+  fixes the browser pass turned up, and is job `38`. Both `Quote` and `LaneRateSample` are
+  ACTIVE on dev with exactly the five and two indexes the plan named —
+  `quotesByCustomerIdAndQuoteDate`,
+  `quotesByLoadIdAndQuoteDate`, `quotesByQuoteOpenAndExpiresAt`, `quotesByQuoteMonthAndQuoteDate`,
+  `quotesByLinkToken`, `laneRateSamplesByLaneKeyAndDate`, `laneRateSamplesByLaneKey3AndDate`
+  (read off the live tables, not assumed — `quotesByLinkToken` is the one `tracking-api`
+  queries, so it was worth checking before the public link went out).
+- **Template budget.** Measured on the build's own synth path with
+  `scripts/measureDataTemplate.mjs` (new, and the script the G entry's measurement was done
+  by hand): the dev data stack went **708,014 → 717,616 bytes**, +9,602 for two models,
+  seven GSIs, their read resolvers and the new table ARNs — **282,384 bytes under the cap**,
+  and the asset key moves, which is what forces the real upload. Well under the plan's
+  740,000-byte trigger, so the `quoteMonth` GSI stays. No other template in the 85-template
+  assembly exceeds 128,503 bytes.
+- **What shipped.** One `Quote` model for both sides (`side SELL` a customer quote,
+  `side BUY` a carrier offer) with its thread, its lines and its public-link token on the
+  row, and one `LaneRateSample` per delivered load; thirteen sell-side and five buy-side
+  actions inside `tmsShipmentActions` behind a new `page-quotes` key (`quotes.ts`,
+  `offers.ts`, `laneSamples.ts` — no new Lambda, judgement 1); `GET /q/<token>` and
+  `POST /q/<token>/respond` on the existing `tracking-api`; `src/lib/quotes.ts`,
+  `quoteNotices.ts`, `laneKey.ts`, `laneStats.ts`, `quoteLinkClient.ts`; `/quotes`,
+  `/quotes/:id`, `/rates`, the public `/quote/:token`, the Carrier-tab offers card, the
+  Financials and quote-form lane panels, the customer's Quotes tab and the settings card;
+  `scripts/backfillLaneSamples.mjs`; `Docs/academy/quotes-and-lane-rates.md`.
+- Gates before each commit: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` — **351 files / 4598 tests**, up from 342 / 4347.
+- **Fable review (`reviewer`, once, on the full diff) found two blockers and six majors,
+  every one fixed before the commit with a test that fails without the fix.** The two
+  blockers were both money or data loss: `COUNTER_OFFER` wrote our counter into
+  `amountCents` and the carrier's ask into `counterCents`, the inverse of the convention
+  `ourOfferCents`, `numberOnTheTable` and `carrierLastNumber` all read, so a $1,750 counter
+  on a $1,900 ask would have shown the carrier "our offer: $1,900" and booked the load at
+  it; and `REVERT_TO_QUOTE` SET `loadId: null` on a GSI hash key **after** soft-deleting the
+  shipment, which DynamoDB rejects — in production every revert would have deleted the
+  freight and then thrown, stranding the quote at WON with no way back. The majors:
+  `ACCEPT_OFFER` booked at `amountCents` even from RECEIVED_COUNTER, ignoring the number the
+  carrier actually agreed to; the public respond route stored `events` as a JSON string while
+  the staff router stores a list, so the first staff action after any public answer threw the
+  whole thread away; `absorbCounter` summed CARRIER lines into a customer total, so a quote
+  carrying a buy estimate could never take a counter; a sample with no ZIPs put `laneKey3:
+  NULL` on an index key and was silently dropped; a customer-less quote put `customerId: NULL`
+  on one and could not be saved at all; and `REQUEST_OFFERS` copied the book-now rate into
+  `amountCents`, so turning `quoteOffersCarrierSeesBookNow` off hid nothing.
+- **The NULL-on-an-index-key class is now caught by the test harness, not by production.**
+  `handler.test.ts`'s in-memory engine rejects a NULL on any index hash key the way DynamoDB
+  does. Adding that guard immediately failed 36 existing tests on a **pre-existing** bug:
+  `ASSIGN_CARRIER` wrote `carrierId: NULL` on every call, so every assignment of an
+  off-directory carrier would have been refused on the live table. Fixed here.
+- **A second pre-existing bug, found while wiring the quote e-mail's brokerage name:**
+  `Division` is identified by `key`, not `id` (`resource.ts:913`), but `tms-finance-actions`
+  read it through `getById`, which keys on `id`. DynamoDB answers that with a
+  `ValidationException`, so **any invoice, carrier bill or remittance on a row carrying a
+  `divisionKey` would have failed outright** — Step F and G never hit it because their
+  fixtures had no division. `store.ts` now has one `getDivision(key)` and the three call
+  sites use it; the finance harness honours the key schema so the regression test is real.
+- **Runtime verification on the deployed dev stack: `scripts/devVerifyQuotes.mjs`, 83 of 83
+  checks.** It builds its own two customers (one on a credit hold) and two insured carriers
+  and drives the real AppSync router and the real public Function URL: quote minted and
+  priced (Σ CUSTOMER lines, the CARRIER estimate excluded) → sent (NOT_SENT on dev, with a
+  copyable body carrying the link) → the customer's lead stage moves NEW → QUOTED → the
+  public page → counter → **the same POST again is 410 and the link is then 404** → our
+  counter on a fresh link → their accept → convert, where the Order's revenue equals the
+  quote's amount and carries `quoteId`/`quoteNumber`/`quoteAmountCents` → a second convert
+  refused → revert → re-convert leaving exactly one live shipment. The held customer's
+  convert is **blocked** and its quote is re-read and asserted unchanged. Duplicates, restore
+  (back at QUOTED with **no** token), cancel, pass, accept-counter, two sweeps proving
+  idempotency, and a link whose hour has passed answering 404 while the row is written
+  LOST/EXPIRED. On the buy side: one REQUESTED row per carrier under one `groupId`, a
+  `CARRIER_OFFER` notice recorded NOT_SENT, the carrier naming a price on the link, our
+  counter, their accept — **with the load still SOURCING, because a carrier's accept never
+  books** — then `ACCEPT_OFFER` booking at the rate they agreed to with `LoadCarrier.quoteId`
+  set and the sibling offer closed, and a plain `BOOK_CARRIER` cancelling the offers still
+  open on another load. Lane history: a delivered load writes `lrs:<loadId>` with the money
+  off `LoadFinancials`, a re-price refreshes that same row rather than duplicating it, and the
+  lane carries exactly one sample for the load.
+- **Nothing leaks, asserted by value rather than by eye.** The quote e-mail body and the
+  public page were searched for the target buy, the top spend, the margin, the buy estimate
+  and the internal note — as raw cents, as formatted dollars and as a key at any depth — and
+  for the carrier's name; the carrier's page was searched the same way for the customer's name
+  and rate. Nothing found, in the script and again in the browser.
+- **Migration.** `scripts/backfillLaneSamples.mjs` planned (934 loads read) → reviewed →
+  applied: **835 samples written, 0 failures**. A second plan over the same tables returns
+  **0 actions, 835 already current** — idempotent against the live data. The legacy class was
+  proved rather than assumed: the script compared `Load.rate` with `LoadFinancials.revenueCents`
+  across **919** loads that carry both, found 919 matching cents and none matching dollars, and
+  prints the arithmetic; no load needed the legacy path in the end, and a sample whose money had
+  to be guessed is never written. The one live sample the verification run had already written
+  was left exactly as it was and reported as needing a person.
+- **Browser pass on `https://dev.d3dejqzs77khq6.amplifyapp.com`**, signed in as a temporary
+  dev admin: `/quotes` with its six tabs, per-tab counts and the totals strip (open $, won this
+  month, win rate, median hours to reply); the Replies tab showing ours against theirs with the
+  responder's name; `/quotes/Q000014` with the thread, the priced lines and the lane panel;
+  `/rates` answering a real lane off the backfill with two samples and saying *"Every load in
+  this window ran on our own trucks"* rather than printing a zero carrier cost; the shipment's
+  Carrier tab offers card and its Financials lane panel; the customer's Quotes tab with a win
+  rate; and the settings card. **The public forms were driven by hand, not only by the script**:
+  a customer countered $2,950 on Q000014 through the page and the board showed it within the
+  minute, a reload of the spent link said *"This quote link is no longer active"*, and a carrier
+  quoted $1,925 on Q000015 — after which the row carries both the staff `REQUESTED` event and
+  the public `QUOTED_ON_LINK` one, which is the proof that the events-as-a-list fix holds across
+  the two writers.
+- Three things the browser pass turned up, fixed in the follow-up commit: the lane panel, the
+  offers card and the customer's Quotes tab printed money through the directory's `formatCents`,
+  which has no thousands separator, so a lane read `$2500.00` beside a board reading `$2,500.00`;
+  and the lane panel's five-column stat grid sized itself to the viewport, so inside the narrow
+  shipment column the labels overlapped — it now sizes to its own container.
+- **Nothing claims an e-mail was sent.** SES is denied on dev, so every send came back
+  `NOT_SENT` with the link and the body to copy, and the offer requests are
+  `ShipmentNotice` rows of kind `CARRIER_OFFER` marked `NOT_SENT`. No row anywhere on dev is
+  `SENT`. Separately, `PORTAL_ORIGIN` on dev is `https://ops-dev.bcatcorp.com`, which is still
+  **not in DNS** (the Step D entry raised this), so the link the Lambda writes into the body is
+  not reachable on dev; the same token works on the branch URL, which is what the browser pass
+  used. That is an environment gap, not a code one, and it disappears on production.
+- The temporary dev admin identity was created with a suppressed invite and a randomised
+  password that was never printed, and was deleted afterwards.
+- Dev-only rows left behind: customers *ZZ Quote Verification* and *ZZ Quote Credit Hold*,
+  carriers *ZZ Quote Carrier A* and *ZZ Quote Carrier B*, quotes `Q000001`–`Q000015`, and
+  shipments `S000041`–`S000047` (the verification ones soft-deleted, `S000047` left live
+  because its open offer is what the browser pass answered). Quotes are never deleted by the
+  script, as nothing else deletes a priced record.
+- **Decisions needed (Ryne):** Step H shipped every default its plan proposed — quotes inside
+  `tmsShipmentActions` under `page-quotes` rather than a new Lambda; the public link as
+  `/q/<token>` on `tracking-api`, one use per round; one `Quote` model for both sides with
+  `groupId` and `events` instead of `QuoteGroup`/`QuoteAction` tables; the ten-value status
+  enum with `SENT_REPLY`/`CREATED` dropped and `NOT_A_QUOTE` left to K; a carrier's accept on
+  the link never books — a dispatcher clicks Accept; WON written only at convert (sell) and at
+  booking (buy), with `REVERT_TO_QUOTE` the only way back; the quote id **is** the quote number,
+  `Q{n:6}`; below-floor and below-min-profit sends blocked for a rep and acknowledged by an
+  admin, toggled by `quoteBelowMinMarginAdminOnly`; expiry lazy plus a board sweep, no
+  scheduler; duplicates capped at 10 with exposure as a warning and a credit block only at
+  convert; lane samples written at DELIVERED+ with financials, re-put on reprice, own-fleet
+  legs out of carrier cost by default; no quote PDF until I. Confirm or change any of these.
+  Two further things to decide that the code surfaced: only the two `adminOnly` pricing
+  warnings gate a send — over-max-profit and over-top-spend are advisory — and a DISPATCHED
+  load may still be shopped for offers, only past dispatch is refused.
+- **Next:** Step I — settings, roles, teams, commissions, reporting. The plan is
+  `Docs/tms-build/I-plan.md`.
+
+## 2026-10-28 — Step G is live on dev, verified end to end; H planned
+
+- **Step G done.** Amplify dev jobs `34` and `35` both **SUCCEEDED**.
+- **Deployed.** Job `34` (`1684273`) SUCCEED — BUILD, DEPLOY and VERIFY — the first dev
+  deploy since job `25`. The data stack template published at **709,127 bytes** under a
+  new asset key `bfe5c4ce…`, 290,873 bytes under the cap. Job `35` (`122a874`) SUCCEED
+  too. Dev is now serving Step G's backend.
+- **Migration.** `scripts/backfillApOpen.mjs` planned (676 LoadCarrier rows: 670
+  OWN_ASSET, 6 CARRIER), was reviewed in `plans/g-ap-open.json`, then applied:
+  **670 cleared, 5 opened, 0 failures, 0 reviewables, 0 unresolved**. A second plan over
+  the same table returns **0 actions** (670 already clear, 5 already open) — idempotent
+  against the live data, not only in a fixture. `scripts/backfillApOpen.test.mjs` pins the
+  classifier on isolated fixtures: one row per branch, the `apStatusChangedAt → bookedAt →
+  createdAt` precedence, what it reports rather than guesses, and that its own applied plan
+  leaves it nothing to do.
+- **The AP lifecycle, on the deployed stack.** `scripts/devVerifyAp.mjs` — **35/35 checks**.
+  It builds its own customer, carrier (with real auto-liability and cargo cover, because
+  those are hard blocks on `BOOK_CARRIER`) and two shipments, then walks: book → the leg
+  opens on the board → `PREVIEW_BILL` → `RECORD_BILL` into review and the assignment to
+  IN_REVIEW in one transaction → the second bill and the charge edit both refused →
+  approve → part payment → the retry that posts once → the over-application refused →
+  credit memo → cash + credit settles the bill and closes the board → remittance
+  (NOT_SENT on dev, with the PDF to download) → `MARK_REMITTANCE_SENT` → reversal that
+  restores the balance and gives the credit back → the second reversal refused → void,
+  which puts the assignment back on the board unbilled and unfreezes the charges.
+  The own-driver path is its own fixture: an OWN_ASSET leg is created with no AP rung and
+  no board marker, `PREVIEW_BILL` refuses it in readiness without throwing, and
+  `RECORD_BILL` and `UPDATE_CARRIER_CHARGES` both refuse it outright.
+- Two of the script's own assertions were wrong and were corrected, not the product: a
+  bill recorded before delivery is marked `recordedEarly`, which by design turns the
+  "has not delivered" block into the RECORDED_EARLY warning (`carrierBill.ts:338-345`),
+  and `UPDATE_CARRIER_CHARGES` takes the **shipment's** version as its CAS token.
+- **Found by opening `/ap`, not by a test** (`122a874`): the worklist was listing carrier
+  legs of shipments that had been canceled and soft-deleted — S000004 among them. Delete
+  already refuses under a live carrier bill, so no money was at stake; what survived was
+  the sparse `apOpen` marker. `DELETE_SHIPMENT` now REMOVEs it in the transaction that
+  stamps `deletedAt`, and `RESTORE_SHIPMENT` puts it back on the legs that still qualify.
+  Regression test fails before the fix and passes after. The three stale rows were cleared
+  on dev through the fixed path itself (restore → delete); the board went 8 rows → 5, and
+  the browser confirms it.
+- **Browser pass over `/ap`:** six tabs with live counts (Awaiting invoice 5, the rest 0),
+  the open/approved strip, the worklist with its carrier, delivered, rate-con, paperwork
+  and cost columns, the quick-pay chip and the paperwork chips, and Record bill per row.
+  No load error anywhere — the Step F failure mode (an index query the deployed schema
+  rejects) does not recur here.
+- Gates before each commit: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` — **342 files / 4347 tests**, up from 341 / 4338.
+- The temporary dev identity used for the live runs was created with a suppressed invite
+  and **removed afterwards**. No production write, no main deploy.
+- **Next:** `Docs/tms-build/H-plan.md` is written — Quotes & rates: one additive `Quote`
+  model for both sides, the quote actions inside `tmsShipmentActions` under a new
+  `page-quotes` key rather than a new Lambda (template budget), the public
+  accept/counter/decline link served by the existing `tracking-api` as `/q/<token>`, and
+  lane history from a `LaneRateSample` written at the points where a lane's price becomes
+  a fact. Its **Decisions needed (Ryne)** block is the thing to read first.
+
+## 2026-10-28 — the 1 MB template cap: why five fixes changed nothing, and the fix
+
+- **Root cause, with evidence.** The minification worked all along. It never reached
+  CloudFormation, because a nested stack's asset key is hashed from the template's
+  *content*, not from the bytes of the file. Synthesizing this branch twice — once
+  indented, once suppressed — produces two files, 1,010,618 and 714,287 bytes, under
+  **the same** asset key `8882f04e…json`. `cdk-assets` finds that key already in S3,
+  skips the upload as unchanged, and CloudFormation re-reads the original. The S3
+  staging bucket confirms it: the only template object over 1 MB that has ever existed
+  is `da134f11…json`, 1,010,720 bytes, written `18:33:08Z` by job `26` — the Step G
+  commit itself. Jobs `27`, `28` and `32` uploaded **no new object at all**, and job
+  `32` then failed against job `26`'s bytes. That is why `cdk.json`, `CDK_CONTEXT_JSON`
+  and the `_suppressTemplateIndentation` field each "worked locally, did nothing in the
+  build": all three leave the template's content identical, so the key never moves.
+- **The fix** (`amplify/backend.ts`, above `defineBackend`): two documented CDK context
+  keys merged into `CDK_CONTEXT_JSON`, which is where the Amplify toolkit hands the App
+  its context and which it leaves writable — only `CDK_CONTEXT` and `CDK_OUTDIR` are
+  frozen during synth, which is why the earlier attempt looked like it was "replaced".
+  - `@aws-cdk/core:suppressTemplateIndentation` — same resources, no indentation.
+  - `@aws-cdk/aws-iam:minimizePolicies` — CDK's own IAM minimisation. Statements that
+    agree on their actions have their resources unioned and vice versa; equality on one
+    axis is required before the other is unioned, so no principal gains an action on a
+    resource it did not already have. It also moves the content, which is what forces
+    the new asset key and the real upload.
+  The private-field hack from job `32` is gone — one mechanism, and a supported one.
+- **Measured on the build's own synth path** (`toolkit.fromAssemblyBuilder` +
+  `tsImport('amplify/backend.ts')` + `amplifySynth`, dev branch context, dev branch env):
+  data stack **1,010,618 → 709,025 bytes**, 291 KB under the cap, and the asset key moves
+  `8882f04e… → 0490d397…`. No other template in the 83-template assembly exceeds 129 KB.
+- **Proved unchanged, not assumed:** across all 83 templates, 3,029 resources identical
+  (same logical id and type) and 4,104 atomic grants identical, where a grant is one
+  (principal set, effect, action, resource, condition) tuple — compared per *role*,
+  because minimisation changes where CDK splits a long role policy into its Overflow
+  policy. Zero wildcard DynamoDB table resources before and after. No schema change, no
+  second API, no `resourceGroupName` move (jobs `29`–`31` showed why).
+- Gates before the commit: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` — 341 files / 4338 tests.
+- This supersedes the **Decision needed** in the entry below: none of the three options
+  was taken. Per-table least privilege on dev is intact.
+
+## 2026-10-28 — Step G built and reviewed; dev deploy BLOCKED on the 1 MB template cap
+
+- Step G (AP — carrier bills & payments) is code-complete and committed on `dev`:
+  `5c2a995` (the step) plus `6f3c8ee`, `bf90954`, `43fa92c`, `fa61053`, `5d21f8b`,
+  `98893c4` (five attempts at the deploy blocker below). **It is not deployed.**
+- What shipped in the commit: `CarrierBill` + `ApPayment` models, `LoadCarrier.apOpen`
+  and its index, the `TmsSettings` AP block, `ShipmentNotice` kind `REMITTANCE`,
+  `remittances/*`; twelve AP actions on `tmsFinanceActions` behind `page-carrierPay`
+  with separate approval/posting admin switches; `UPDATE_CARRIER_CHARGES` and the AP
+  state writes on `tmsShipmentActions`; `src/lib/carrierBill.ts` and
+  `remittancePdf.ts`; `paymentApply` refactored to a party/document vocabulary serving
+  both ledgers; `/ap` with six tabs, `/ap/bills/:id`, six dialogs, the shipment AP
+  card, the carrier AP tab, the AP settings card and the nav badge;
+  `scripts/backfillApOpen.mjs`; `Docs/academy/ap-carrier-bills-and-payments.md`.
+- Required gates passed before the commit: `npm run typecheck`, `npm run lint`
+  (3 pre-existing warnings), `npm run test` — **341 files / 4338 tests**, up from
+  336 / 4212. The migration script was never run: it has nothing to migrate until the
+  schema is live.
+- Fable review (`reviewer`, once, on the full diff) found two blockers and three
+  majors, all fixed before the commit, with a regression test added where one was
+  missing: a credit-funded payment could never be reversed (the planner was shown the
+  cash column alone and refused to take back more than it saw); "Record and approve"
+  skipped the admin-only approval switch and the warning acknowledgements; a colliding
+  `:version` placeholder froze the bill's version and made its CAS a tautology; a
+  payment could land on a bill somebody had just unapproved; and the remittance notice
+  id was numbered by successful sends, so every attempt after a refused one was a
+  silent no-op.
+- **Blocker (platform, not code).** Dev jobs `26`, `27`, `28`, `31` and `32` all failed
+  with `Template may not exceed 1000000 bytes in size` on the `data` nested stack: with
+  G's two models it synthesizes to 1,007,296 bytes. Jobs `29` and `30` failed with
+  `CloudformationStackCircularDependencyError` instead. Every one rolled back cleanly —
+  **dev is still serving job `25`'s backend (Step F), unchanged and working.**
+  What was tried, in order:
+  1. `cdk.json` with `@aws-cdk/core:suppressTemplateIndentation` — works under the CDK
+     CLI locally (1,007,304 → 713,837 bytes); `ampx pipeline-deploy` never reads
+     `cdk.json` (job 27).
+  2. The same flag through `CDK_CONTEXT_JSON`, merged in `backend.ts` before
+     `defineBackend` — verified on a programmatic synth locally (642,092 bytes), no
+     effect in the Amplify build, which replaces that variable (job 28).
+  3. `resourceGroupName: 'tms'` on the four TMS routers — circular dependency: a Lambda
+     AppSync calls must live beside the API (job 29). Reverted.
+  4. `resourceGroupName: 'ops'` on seventeen stream/scheduled/import Lambdas — data
+     stack down to 684,996 bytes, but still circular: the data stack references some of
+     them too (jobs 30, 31). Reverted.
+  5. Setting `_suppressTemplateIndentation` on the data stack after `defineBackend`
+     (CDK reads it at synth and assigns it only in the constructor) — 642,092 bytes on
+     the build's own synth path locally; the build still reported 1,007,296 (job 32).
+     This one is still in `backend.ts`, commented with everything above, because it is
+     correct locally and harmless; it is not what will fix the build.
+  The next move is bigger than a step's tail: the `data` stack carries ~97 model
+  nested-stack references, every Lambda AppSync calls, and an IAM policy per router
+  naming every table it touches. Either the TMS models move to a second `defineData`
+  API, or the routers' grants stop naming tables individually, or a newer Amplify that
+  splits model stacks differently is adopted. None of those belong inside Step G.
+- **Decision needed (Ryne):** which of those three the build takes. The cheapest is
+  collapsing each router's IAM policy to one wildcard statement over the dev table
+  prefix — roughly 150 KB back, at the cost of per-table least privilege on dev. The
+  durable one is a second data API for the TMS models, which is a migration of its own.
+- Not done because the schema is not live: the dev AP lifecycle (record → approve →
+  pay → remittance → reverse → void, including the own-driver path), the browser pass
+  over `/ap`, running `scripts/backfillApOpen.mjs`, and the H plan. No temporary dev
+  identity was created, so there is none to remove.
+
+## 2026-10-28 — Step F done on dev
+
+- Commit `3d50186` pushed to `origin dev` (Invoice + ArPayment models, `tms-finance-actions`
+  router, invoiceBuild/invoicePdf/paymentApply/arAging/factorHandoff, `/ar` with six tabs +
+  invoice detail + six dialogs, ArCard on the shipment, customer AR tab, AR settings card,
+  additive ShipmentDocument lookup in `otr-actions`, two refusals in `tms-shipment-actions`,
+  `scripts/backfillLegacyAr.mjs`, Academy article). Amplify dev job `22` status `SUCCEED`.
+  Two follow-up commits, both found by opening the page on the deployed stack rather than
+  by a test, and both deployed and re-checked in the browser: `66785d3` (dev job `23`) —
+  the AR worklist failed to load because the index query declared its enum argument as
+  `ArStatus!` while Amplify names an inline model enum `<Model><Field>`, so the deployed
+  schema calls it `OrderArStatus` and AppSync refused the whole document; and `8c747fa`
+  (dev job `24`) — the Unpaid and Aging tabs failed with "Field 'paidCents' in type
+  'Invoice' is undefined", because a mis-ranged edit while adding `markedSentNote` had
+  deleted `paidCents` from the model. Nothing caught either one: the Lambda's in-memory
+  test engine never validates a row against the GraphQL schema, and the client's field
+  list is a plain string. After both, `/ar` loads with To invoice 845 · Docs needed 4 and
+  no error anywhere on the page.
+- Required gates passed before each commit: `npm run typecheck`, `npm run lint` (3
+  pre-existing warnings), `npm run test` (336 files, 4212 tests — 232 more than Step E's
+  3980).
+- Fable review ran once on the full staged diff and found two money blockers, both fixed and
+  both now covered by a test that fails without the fix. (1) The generate transaction
+  conditioned the order update on `attribute_not_exists(invoiceId)`, but `tms-shipment-actions`
+  creates every order with `invoiceId: null` and DynamoDB counts a NULL attribute as existing
+  — every Generate on a TMS-born order would have been refused *after* burning an invoice
+  number. The in-memory test engine had been treating null as absent; it now follows DynamoDB,
+  which is what turned the finding into a failing test. (2) `REVERSE_PAYMENT` stamped
+  `reversedByPaymentId` but left `unappliedCents` intact, so a reversed credit memo could be
+  spent again and under-bill the customer; the reversal now zeroes it under its own CAS, the
+  planner refuses a reversed credit by name, and the dialog and the customer AR total no
+  longer count one. Seven more findings fixed: void releases the order's `factoringItemId`
+  and releases (not just archives) the queue row, Send to Factor refuses a PRO already
+  billing another invoice and revives an archived row, MARK_SENT no longer writes `sentAt`
+  (it would have made the shipment card claim an e-mail nobody sent) and keeps its note in
+  its own field, a retried WRITE_OFF answers with the row it posted instead of "already
+  settled", RENDER_INVOICE_PDF refuses a void invoice, attachments are re-checked against
+  `canEmailTo` at send time, generation refuses a factored customer with no factor remit-to
+  configured and Send to Factor refuses a bill whose face says to pay us, and
+  `SAVE_AR_SETTINGS` validates the factor remit-to shape. Posting is also idempotent against
+  a *simultaneous* duplicate now, not only a sequential retry.
+- Verified against the deployed dev stack with a temporary admin identity (randomised
+  password, never printed, since deleted) and an isolated fixture — a dev-only customer
+  "ZZ AR Verification …" and its own shipment, so no copied customer, load or invoice was
+  touched. `scripts/devVerifyAr.mjs`, **37/37 checks passed**:
+  - Generate refused the order while it was DOCS_NEEDED and named the missing POD;
+    `READY_TO_INVOICE` with an override moved it to UNBILLED; `PREVIEW_INVOICE` reported
+    ready and wrote nothing.
+  - `GENERATE_INVOICE` issued `INV-000002` for $2,500.00 due 2026-11-27, stored
+    `invoices/<customer>/INV-000002-v1.pdf` (2,587 bytes), moved the order to UNPAID with
+    `arBalanceCents` 250000 and froze the load's financials — one transaction. A second
+    generate, a `RECALC_CHARGES`, a hand `SET_AR_STATUS` and a cancel were each refused with
+    the sentence they should have ("void the invoice first", "financials are frozen").
+  - `EMAIL_INVOICE` came back `NOT_SENT` with the IAM denial verbatim and a one-hour
+    download, and left `sentAt`/`sentCount` untouched — SES is denied on dev and nothing
+    claims otherwise.
+  - $1,000.00 left the invoice PARTIAL and the order UNPAID; the same request id posted once
+    (`duplicate=true` on the retry); $2,000.00 against a $1,500.00 balance was refused by the
+    figures; a $500.00 credit memo plus $1,000.00 cash settled it, removed `arOpen` and took
+    the order to PAID; voiding it then was refused ("reverse the payment first").
+  - The reversal restored the $1,500.00 balance, reopened the invoice, returned the $500.00
+    credit and was refused a second time; reversing the credit memo itself then made it
+    unspendable by name.
+  - A write-off settled the remainder as written-off rather than paid, and its retry answered
+    with the posted row.
+  - Void kept the PDF, cleared the order's invoice fields and unfroze the charges; the order
+    was re-invoiced as `INV-000003` (never the old number). `SEND_TO_FACTOR` wrote queue row
+    PRO `S000029-1`, `source TMS`, `messageId tms:INV-000003`, status NEED_TO_FACTOR with the
+    OTR fields prefilled (`InvoiceNo INV-000003`, `2500.00`, Chicago/IL → Dallas/TX) and no
+    `otrInvoiceId` — submitting to OTR stays a person's step on `/factoring`. A second press
+    reused the row (`reused=true`); nothing was double-factored.
+- Browser on `https://dev.d3dejqzs77khq6.amplifyapp.com/ar`: **Accounts Receivable** is in the
+  Operations nav, the page renders its six tabs with counts and the open-AR strip. That run is
+  what exposed the enum-name bug above; after the fix the worklist loads.
+- Dev data left as found: every verification shipment (`S000022`–`S000029`) is soft-deleted,
+  the four `ZZ AR Verification` fixture customers are archived, and the temporary identity is
+  deleted. No copied customer, load, invoice or factoring row was touched, and no production
+  table, bucket or branch was read or written.
+- Migration: `scripts/backfillLegacyAr.mjs` is written and refuses the production suffix
+  outright, but has **not been applied** — the 890 backfilled orders are still DOCS_NEEDED /
+  UNBILLED. Run it (plan → review → `--apply`) before anyone works the To-invoice tab on dev,
+  or that tab is the whole Aljex era.
+- Step G plan written: `Docs/tms-build/G-plan.md` (AP — carrier bills, AP payments and
+  remittance). It spends `LoadCarrier`'s one free GSI on a sparse `apOpen` +
+  `apStatusChangedAt` worklist, extends `tms-finance-actions` behind a new `carrierPay`
+  page key rather than adding a sibling router, and names three things in the existing code
+  that G has to correct: `ASSIGN_ASSET` and the backfill stamp `apStatus AWAITING_INVOICE`
+  on own-fleet assignments that must never reach an AP worklist; `LoadCarrier
+  .chargesFinalizedAt` is refused on but never written; and `GENERATE_INVOICE` freezes the
+  carrier-side lines too, so a carrier accessorial arriving after the customer was billed
+  needs its own action.
+- **Decisions needed (Ryne):** Step F shipped its plan's defaults — `{prefix}{n:6}` from 1
+  with the division's prefix; one invoice per order, no consolidation; one e-mail per invoice;
+  owner/ADMIN for void/payment/credit/write-off/reversal and `page-invoicing` for
+  generate/e-mail/send-to-factor, under the new `invoicing` page key; a factored invoice stays
+  open until someone records a FACTOR payment; all eleven OTR fields prefilled from the issued
+  invoice and still editable on the queue row; legacy backfilled orders become `LEGACY`;
+  overpayment kept as credit by default; a duplicate payment reference warns but does not
+  block; terms fall back bill-to → customer → org → 30 days; default attachments are the
+  customer's required documents plus POD and BOL; cancel/delete of an invoiced shipment is
+  refused until void. Confirm or change any of these. Also: the `arUnbilledStage` skip was
+  not built, and no factor remit-to is configured yet, so a factored customer cannot be
+  invoiced until one is set in AR settings.
+
+
+
+## 2026-10-28 — Step E done on dev; backfill applied; Step F planned
+
+- Commit `eef2fae` pushed to `origin dev` (ShipmentDocument + ShipmentNotice models,
+  `TrackingLink.kind CARRIER_UPLOAD` with `uploadCount`/`lastUploadAt`/`neededTypes`, additive
+  fields on `TmsSettings`/`Shipment`/`Order`/`LoadCarrier`, storage prefix `shipment-docs/*`
+  browser-read-only; nine document actions on `tms-shipment-actions` (new `documents.ts`,
+  `inputs.ts`); `SEND_UPLOAD_LINK` / `REVOKE_UPLOAD_LINK` / `SEND_MILESTONE_NOTICE` /
+  `EMAIL_DOCUMENTS` / `SAVE_DOCUMENT_SETTINGS` on `tms-tracking-actions`; `GET /u/<token>` and
+  the presign/commit pair on `tracking-api`; new `shipment-notifier` on the Load stream;
+  `_shared/shipmentNotices.ts`; `shipmentDocuments` / `shipmentNotices` / `uploadPortal` /
+  `documentData` libs and the browser BOL and load-summary PDFs; Documents tab with the
+  required-document strip, four dialogs, delivery card, `/documents` review queue + nav badge,
+  board Docs column and filters, settings card, public `/track/u/:token` page;
+  `scripts/backfillShipmentDocuments.mjs`; Academy article
+  `Docs/academy/documents-and-delivery.md`). Amplify dev job `19` `SUCCEED`.
+- Follow-up commit `661b21f` (`tracking-api` needed `dynamodb:GetItem` on LoadCarrier and Load —
+  it held Query-on-index only, which the customer page needs but the upload view does not;
+  `GET /u/<token>` answered 500 until this landed). Amplify dev job `20` `SUCCEED`.
+- Required gates passed before each commit: `npm run typecheck`, `npm run lint` (3 pre-existing
+  warnings), `npm run test` — **3980 tests passed** across 325 files, up from 3840 at Step D.
+- Backfill: `node scripts/backfillShipmentDocuments.mjs --plan …` then `--apply`. Applied
+  **273 document rows** (60 `drv:` driver-app POD pointers, 213 `rck:` legacy CUSTOMER_RATE_CON
+  pointers — no bytes copied) and cached the gate on **894 orders**. 1 approved submission was
+  skipped because its load is not on a shipment; no row was invented for it. Required-doc lists
+  were already inside the new vocabulary, so nothing was rewritten and nothing is unrecognised.
+  A second plan run produced **0 actions**, proving the deterministic ids make it idempotent.
+- Fable reviewed the full diff; every real finding was fixed before the commit: the public role's
+  S3 grant narrowed off `grantReadWrite` (which carries `s3:DeleteObject*` and bucket `s3:List*`)
+  to `PutObject`+`GetObject` on the one prefix; the 20-file link budget enforced on commit as well
+  as presign; the presigned PUT actually pinned to its content type with `signableHeaders` (the
+  SDK treats `content-type` as unsignable by default, so the old comment was wrong); voiding a
+  PENDING upload now leaves the review queue and a non-ACTIVE row can no longer be accepted; a
+  merged multi-page POD files one document instead of one per page; and a non-final leg's carrier
+  is now asked for paperwork when their own leg lands, while the customer's DELIVERED notice still
+  waits for the last leg. One reported blocker was a false positive — `BUCKET_NAME` is already set
+  on `tmsTrackingActions` by the dispatch loop (`backend.ts:749`).
+- **Runtime verification on dev (38 of 38 checks passed)**, driven through the real AppSync
+  mutations and the real public Function URL against shipment **S000021**, built end to end by the
+  real Lambdas (create → order → submit → charges → book an outside carrier → dispatch → four
+  check calls to DELIVERED). Proven live: `READY_TO_INVOICE` refuses with *"This order still needs
+  Proof of delivery, Bill of lading"*; the presigned PUT is rejected (HTTP 403) when the PUT claims
+  a different content type; `COMMIT_DOCUMENT` refuses a foreign prefix and a size mismatch and is
+  idempotent on the key; committing the BOL drops it from `Order.docsMissing`; regenerating a load
+  summary mints v2, flips v1 to SUPERSEDED and keeps its bytes under a different key; a load
+  summary is filed INTERNAL and `EMAIL_DOCUMENTS` refuses to send it to a customer; the portal
+  refuses a disallowed type and an oversized file; a carrier upload lands PENDING attributed to
+  `link:<token8>`, leaves the gate still wanting a POD, appears in the review queue, and clears the
+  gate only once staff accept it; `READY_TO_INVOICE` then moves the order to UNBILLED; the rating
+  and the upload-link pointer are stored; a revoked link answers 404. The portal view was asserted
+  to contain no customer name, no money and no references.
+- **Nothing claims an e-mail was sent.** Dev denies `ses:*`, so the notice log for S000021 holds
+  `pod:<loadCarrierId>` written automatically by `shipment-notifier` when the leg delivered, plus
+  an `ntc-…` row for the manual re-send — both `NOT_SENT`, both carrying the 340-character body
+  that an operator copies. No row anywhere on dev is `SENT`.
+- Browser check of the public portal at `/track/u/<token>`: broker header, load `S000021-1`, both
+  stops with appointments, a "We still need" list showing Proof of delivery satisfied (struck
+  through) and Carrier invoice outstanding, the type select, a PDF/PNG/JPG picker with the 15 MB
+  hint, the expiry line and the dispatch note — and no customer, money or reference anywhere.
+- Temporary dev ADMIN identities (randomised passwords, never printed) were deleted in a `finally`
+  on every run. Verification scripts were throwaway and are removed.
+- Dev-only records left behind by the verification runs: shipments `S000005`–`S000021` (several
+  DRAFT, one DELIVERED) and one carrier *STEP E VERIFICATION CARRIER* (MC 987654). Left in place
+  rather than deleted — the brief forbids broad data cleanup, and they are harmless dev rows.
+- **Decisions needed (Ryne):** every Step E default shipped as the plan proposed — a customer's
+  required-doc list *replaces* the org default rather than unioning with it; a carrier-portal
+  upload needs staff acceptance before it satisfies the gate; an admin may invoice over a missing
+  document with a note, recorded on the order; milestone e-mails stay off per customer until
+  `visibilityPrefs.milestoneEmails` is switched on, and cover the six status transitions only;
+  a POD request goes to the carrier's dispatcher automatically on delivery asking for POD +
+  carrier invoice; upload links last 30 days from delivery and take 20 files of 15 MB, PDF/JPG/PNG;
+  the carrier may upload but never download; voiding a document is admin-only and keeps the file;
+  a BOL is numbered after its shipment with `-v{n}`; a rate con saved without e-sign does not count
+  as SIGNED. Confirm or change any of these.
+- Next: Step F — AR. The plan is `Docs/tms-build/F-plan.md`.
+
+## 2026-10-28 — Step D done on dev; Step E planned
+
+- Commit `a2b4b10` pushed to `origin dev` (LoadCheckCall + TrackingLink models, additive fields on
+  Load/LoadCarrier/Shipment/TmsSettings, `Load.statusSource` + `SYSTEM`; LOG_CHECK_CALL /
+  RESOLVE_INCIDENT / SET_NEXT_CHECK_CALL / SET_ETA on `tms-shipment-actions` with
+  UPDATE_STOP / DISPATCH_LOAD / REMOVE_LOAD_CARRIER extended; new `tms-tracking-actions`,
+  `load-tracking-projector`, `check-call-notifier`; `tracking-api` gained `GET /s/<token>`,
+  `GET /l/<token>`, `POST /l/<token>/ping`; `_shared/shipmentStore.ts`; `checkCalls` /
+  `trackingTimeline` / `trackingLink` libs; Tracking tab, three dialogs, `/check-calls`
+  worklist + nav badge, board columns and filters, settings card, two public pages;
+  Academy article `Docs/academy/tracking-and-check-calls.md`). Amplify dev job `17` `SUCCEED`.
+- Required gates passed before the commit: `npm run typecheck`, `npm run lint` (3 pre-existing
+  warnings), `npm run test` (316 files, 3834 tests). A second commit carries the fixes the
+  live run turned up; gates re-run green (3840 tests).
+- Fable review before commit found two deploy blockers and one money bug, all fixed with a test
+  that fails without the fix: `tracking-api` queried `truckLocationHistoryByTruckIdAndLocatedAt`
+  but Amplify pluralises the model (`truckLocationHistoriesBy…`), so every Customer Link on an
+  own-fleet leg would have 500'd; `load-tracking-projector` lacked `dynamodb:BatchGetItem`
+  although `rederiveShipmentStatus` → `readBundle` issues it, so every driver-app stamp would
+  have died with AccessDenied *after* moving the load; and LOG_CHECK_CALL committed the charge
+  lines and the event row before the Load CAS was enforced, so a concurrent write left money
+  billed and an orphan `evt:` row that then blocked the stop from ever being stamped. The
+  transaction now opens with a `conditionCheckUpdatedAtTx` on the Load, as BOOK_CARRIER does.
+- Verified against the deployed dev stack with a temporary admin identity (randomised password,
+  since deleted), using the same actions the UI calls:
+  create → edit → submit (`S000004`, OPEN), customer rate $2,500.00, booking the dev-only Step C
+  carrier at $1,800.00 → rev $2,500.00 / cost $1,800.00 / profit $700.00 / 2800 bps. Booking first
+  refused the carrier outright for missing insurance, then demanded every warning be acknowledged.
+  DISPATCH_LOAD wrote a `DISPATCH` row and armed the reminder; the sparse worklist index returned
+  the load. Five LOG_CHECK_CALL refusals fired (future `at`, ARRIVED with no stop, INCIDENT with no
+  type, a system-only type, a stale CAS token). ARRIVED → LOADING, DEPARTED → IN_TRANSIT with
+  `statusSource CHECK_CALL`; re-logging the same ARRIVED was stored as a LOCATION_UPDATE and the
+  stamp was left alone. A DETENTION incident with a BOTH-sided $75.00 × 2 charge produced one
+  CUSTOMER and one CARRIER line, moved revenue and cost by $150.00 each and left profit at
+  $700.00; a negative carrier amount was refused; RESOLVE_INCIDENT took the open count back to 0
+  and refused a second time.
+- Links, end to end on the public Function URL: `GET /l/<token>` 200 with no customer name and no
+  money; a ping accepted, a second inside a minute 429, an imprecise fix 409, an out-of-range fix
+  400, and the ping stored as `TRACKING_PING/LINK` by `link:<token8>`. The customer link is stable
+  across re-sends and `regenerate` mints a new one; `GET /s/<token>` 200 with no carrier name, no
+  driver phone, no money and no INTERNAL reference. Revoked → 404, expired → 404 (and the row flips
+  to EXPIRED), unknown and malformed tokens → the same 404 wording.
+- Projector proven side-effect-safe before anything relied on it: writing `stops[]` straight to the
+  dev Load table the way `driver-app-api` does produced exactly two `evt:` rows (`source SYSTEM`),
+  moved the load IN_TRANSIT → DELIVERED with `deliveredAt`, re-derived the shipment
+  (version 20 → 21), and touched nothing else; six seconds later neither `updatedAt` nor the row
+  count had moved again, so it does not feed itself.
+- `check-call-notifier` invoked by hand on dev (its EventBridge rule is disabled there):
+  `{"checked":1,"due":0,"overdue":1,"sent":0,"failed":1}` — it found the overdue load, could not
+  reach Slack because the dev token is neutered, and correctly stamped nothing.
+- Browser on `https://dev.d3dejqzs77khq6.amplifyapp.com`: the Shipments board shows Last update /
+  Next check call / Exceptions, the Summary tab shows both new facts and $2,650.00 / $1,950.00 /
+  $700.00 (26.4%), the Tracking tab renders the whole merged timeline with status chips and the
+  resolved incident, and `/check-calls` shows Overdue 1 · Due 0 · Scheduled 0 · Exceptions 0 with
+  the driver's number as a `tel:` link.
+- Two things the live run turned up, fixed in the follow-up commit: the Tracking tab labelled every
+  TrackingLink row "sent", including links that were only copied (dev has no Twilio and SES is
+  denied) — it now says what actually happened; and `PORTAL_ORIGINS` contained only localhost and
+  `PORTAL_PROD_ORIGIN`, which on dev is `https://ops-dev.bcatcorp.com` — a name that is **not in
+  DNS**. The only reachable dev origin is the Amplify branch URL, so every public page (the truck
+  link, the rate-con signing page and now the customer tracking link) was blocked by CORS on dev.
+  The branch URL is now allowed when `BCAT_DEV_STACK=true`.
+- Dev data left as found: the four verification shipments (`S000001`–`S000004`) are soft-deleted,
+  the dev-only Step C carrier is back to INACTIVE with its insurance list cleared, and every
+  temporary identity is deleted. No legacy load, customer or booked snapshot was touched, and no
+  customer records were created.
+- Step E plan written: `Docs/tms-build/E-plan.md` (documents & delivery).
+- **Decisions needed (Ryne):** Step D shipped its plan's defaults — customer link stable per
+  shipment with an explicit Regenerate; the customer page shows the last position rounded to ~100 m
+  and hides the carrier name; 4 h interval and 15 min grace; in-app plus a Slack DM to the carrier
+  rep, never SMS or e-mail to staff; driver-app stop events move TMS status automatically; a link
+  ping updates Last known but does not satisfy a due check call; links expire at the last delivery
+  appointment + 72 h (carrier) and 14 days (customer). Confirm or change any of these. Separately:
+  `ops-dev.bcatcorp.com` does not resolve — if dev is meant to have that hostname it needs a DNS
+  record, which is outside what I may change.
+
+## 2026-10-28 — Step C done on dev; Step D planned
+
+- Commit `b570b86` pushed to `origin dev` (Carrier/CarrierContact/CarrierPaymentMethod/CarrierDocument,
+  `tms-carrier-actions`, BOOK_CARRIER/SET_QUICK_PAY/SEND_RATE_CON/VOID_RATE_CON/DISPATCH_LOAD on
+  `tms-shipment-actions`, public `rate-con-sign-api` Function URL, carrierEligibility/quickPay/
+  carrierStatus/carrierRateCon, /carriers directory and profile, BookCarrierDialog, RateConPanel,
+  /sign/rate-con/:token, carrier booking settings card, Academy Step C article, importCarriers.mjs).
+  Amplify dev job `13` status `SUCCEED`.
+- Two follow-up commits, both found by verifying against the deployed stack rather than by tests:
+  `32d3eec` stops a DynamoDB NULL reaching a Carrier index key — editing a carrier without
+  re-supplying its DOT number, and creating a carrier with neither MC nor DOT, both failed outright
+  with `Type mismatch for Index Key … Actual: NULL`. Job `14` `SUCCEED`. `c0dcf89` grants
+  `dynamodb:ConditionCheckItem`, without which every BOOK_CARRIER was refused by IAM. Job `15` `SUCCEED`.
+  The Lambda had shipped with no test file; it now has 31 tests, and the fixes were proven by
+  reverting each one and watching the suite fail.
+- Required gates passed: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` (304 files, 3680 tests). Fable review ran before commit and found one money
+  blocker — BOOK_CARRIER wrote whole-load totals onto the per-carrier LoadCarrier row, so a rebook
+  after a TONU would have shown the previous carrier's pay on the new carrier's rate confirmation
+  and public signing page — plus a sign/decline race and a stale cached quick-pay fee. All fixed
+  before commit. LoadCarrier money is per-carrier; LoadFinancials money is whole-load.
+- Verification against dev with a temporary admin, since removed: booking gates refuse an uninsured
+  carrier and then require every warning acknowledged; quick pay 250 bps of $1,000.00 cached as
+  $25.00; TONU at $1,000.00 then rebook at $1,500.00 leaves the new LoadCarrier carrying $1,500.00
+  while LoadFinancials carries $2,500.00; duplicate MC/DOT, stale CAS, missing status reason,
+  FACTOR without a factor name and a full account number are all refused; the public sign endpoint
+  answers 404 on a bogus token and sets no CORS headers of its own. Browser on
+  `https://dev.d3dejqzs77khq6.amplifyapp.com/carriers`: tabs with counts, search, admin CSV,
+  profile with status pill, live insurance chips, seven tabs, and the load history off the new
+  `carrierId` index. The test load and its charge lines were restored to their original state;
+  the two verification carrier records are parked INACTIVE and are dev-only.
+- No dev migration: Step C adds no data that existing rows need. `scripts/importCarriers.mjs` is
+  written for the production cutover only and refuses to apply without a matching plan fingerprint.
+- Step D plan written: `Docs/tms-build/D-plan.md` (tracking, check calls, customer link). It needs
+  no new index on any existing table.
+- **Decisions needed (Ryne):** quick-pay tiers shipped as planned (21d/1.5% · 15d/2% · 7d/2.5% ·
+  1d/3%) with the fee as an AP deduction cached on LoadCarrier, not a rate-con charge line;
+  `allowedCarrierStatuses` defaults to ACTIVE only; rate-con required fields default to driver
+  name/phone + truck number; DO_NOT_USE may return to INACTIVE but only for an admin;
+  Highway/RMIS/MyCarrierPackets stay manual fields until Step J. Confirm or change any of these.
+
+## 2026-10-28 — Step B done on dev; backfill complete
+
+- Commit `ee5b2cd` pushed to `origin dev` (Shipment/Order/Load model, board, draft editor,
+  status axes, financial line items, Lambda router, backfill script, Academy Step B article).
+  Amplify dev job `11` status `SUCCEED`.
+- Required gates passed: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` (3528 tests passed). Fable review blockers fixed before commit.
+- Backfill: all 890 copied loads now linked to Shipment/Order. Initial run applied 698;
+  192 unmatched by name. Created 117 dev-only Customer records for unique unmatched names,
+  1 "Legacy Unmatched" fallback for loads with no booked customer, and patched 60 loads.
+  Final counts: Shipment 890, Order 890, LoadCarrier 670, LoadFinancials 890, LoadCharge 889.
+- Verification: authenticated dev browser at `https://dev.d3dejqzs77khq6.amplifyapp.com/shipments`
+  shows 890 shipments, status tabs (All/Draft/Tender/Open/On hold/Booked/In transit/Delivered/Canceled),
+  customer/origin/destination columns, search and filters. Temporary backfill admin identity removed.
+- Next: Step C — Carriers & booking.
+
+## 2026-10-28 — Step A done; log update deployed; Step B starting
+
+- Step A log-only update commit `46d2943` pushed to `origin dev`. Amplify dev job `8` status `SUCCEED`.
+- Next: Step B — Shipment/Order/Load model and board, with backfill for existing loads.
+
+## 2026-10-27 — Step A deployed successfully on dev
+
+- Commit `36858b9` pushed to `origin dev` (Customer v2 — status ladder, credit controls, contacts/billing/quoting defaults). Amplify dev job `7` for commit `36858b9acf023815a23ea1d229ab3391741cfe1a` status `SUCCEED`.
+- Required gates passed: `npm run typecheck`, `npm run lint` (3 pre-existing warnings), `npm run test` (3290 tests passed). Final Fable review blockers fixed before commit.
+- Verification: authenticated dev browser Customers board, profile tabs, org-default editor, status actions, and credit exposure verified against 98 copied customers. Temporary dev identity removed.
+- **Decision needed:** harness has no registered `plan` agent. Main approved the same Fable model through `reviewer` with a planning-only assignment; continue that mapping per step. Customer hard-delete/merge remains a future decision; inactive records are retained.
+
+## 2026-10-27 — Step A implementation in progress (not shipped)
+
+- Fable architecture plan: `Docs/tms-build/A-plan.md`; additive Customer/TmsSettings extension, status/credit actions, typed client and customer board/profile. Lead corrections retain all legacy exposure, forbid inferred invoicing/payment, and include markup and contact/quoting defaults.
+- Shared types/math/client slice landed in six files. Lead fixed legacy-name matching when normalizedName is absent and strengthened the attribution fixture. Lead ran `npx vitest run src/lib/customerCredit.test.ts`: **47 passed**. Backend/schema and UI slices completed with scoped proof.
+- Baseline: existing ahead commit `5f8aeb6` contains only brief/log. Amplify dev job `6`, commit `37de60b`, reached `SUCCEED`. Count-only dev scans confirmed 98 copied customers and 890 loads; no refresh needed.
+- Runtime verification prepared: authenticated dev browser displays Customers 98 and Loads 890; authenticated dev AppSync schema introspection succeeded against the dev API. A temporary suppressed-invite dev test identity is retained only for smoke checks and will be removed afterward. No production writes or PII-file access.

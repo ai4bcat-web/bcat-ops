@@ -77,18 +77,18 @@ export function FuelWidget({ transactions, loading }: Props) {
     <div
       onClick={canFuel ? () => navigate('/fuel?range=this-week') : undefined}
       className={cn(
-        'rounded-xl border border-slate-200/60 bg-white shadow-sm p-6 space-y-4',
+        'rounded-xl border border-border bg-card shadow-sm p-6 space-y-4',
         canFuel && 'cursor-pointer hover:shadow-md transition-shadow',
       )}
     >
       <div className="flex items-start justify-between">
-        <div className="size-10 rounded-lg bg-amber-50 flex items-center justify-center">
-          <Fuel className="size-5 text-amber-600" />
+        <div className="size-10 rounded-lg bg-[color:var(--tms-badge-orange-tint)] flex items-center justify-center">
+          <Fuel className="size-5 text-[color:var(--tms-badge-orange)]" />
         </div>
         {pctChange !== null && (
           <span className={cn(
             'flex items-center gap-0.5 text-xs font-semibold',
-            pctChange > 0 ? 'text-red-500' : pctChange < 0 ? 'text-emerald-600' : 'text-slate-400',
+            pctChange > 0 ? 'text-[color:var(--tms-badge-red)]' : pctChange < 0 ? 'text-[color:var(--tms-badge-green)]' : 'text-muted-foreground',
           )}>
             {pctChange > 0
               ? <ArrowUp className="size-3" />
@@ -102,18 +102,18 @@ export function FuelWidget({ transactions, loading }: Props) {
 
       <div>
         <div className="text-3xl font-semibold tracking-tight text-foreground">
-          {loading ? <span className="text-slate-300">—</span> : fmtMoney(thisSpend)}
+          {loading ? <span className="text-[color:var(--tms-disabled)]">—</span> : fmtMoney(thisSpend)}
         </div>
-        <div className="text-sm text-slate-500 mt-0.5">Fuel This Week</div>
+        <div className="text-sm text-muted-foreground mt-0.5">Fuel This Week</div>
         {thisGal > 0 && (
-          <div className="text-xs text-slate-400 mt-0.5">
+          <div className="text-xs text-muted-foreground mt-0.5">
             {thisGal.toFixed(0)} gal
           </div>
         )}
       </div>
 
       {truckSpend.length > 0 && (
-        <div className="space-y-1.5 pt-1 border-t border-slate-100">
+        <div className="space-y-1.5 pt-1 border-t border-border">
           {truckSpend.map(({ label, spend }) => (
             <div key={label} className="flex items-center justify-between text-xs">
               <span className="font-medium text-foreground">{label}</span>

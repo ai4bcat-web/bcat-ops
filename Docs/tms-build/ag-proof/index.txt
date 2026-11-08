@@ -1,0 +1,10 @@
+Docs/tms-build/ag-proof/AG12a-ap-digest-L.png
+Docs/tms-build/ag-proof/AG12b-ap-inbox-queue-L.png
+Docs/tms-build/ag-proof/AG12c-link-dialog-L.png
+Docs/tms-build/ag-proof/AG12d-bill-source-strip-L.png
+Docs/tms-build/ag-proof/AG12e-settings-card-L.png
+Docs/tms-build/ag-proof/AG12a-ap-digest-D.png
+Docs/tms-build/ag-proof/AG12b-ap-inbox-queue-D.png
+Docs/tms-build/ag-proof/AG12c-link-dialog-D.png
+Docs/tms-build/ag-proof/AG12d-bill-source-strip-D.png
+Docs/tms-build/ag-proof/AG12e-settings-card-D.png

@@ -8,7 +8,7 @@
  * is about making sure a driver always has a way out.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { ScanCamera } from './ScanCamera'
 
@@ -42,7 +42,7 @@ describe('ScanCamera — getting a picture at all', () => {
   it('says so when the camera sends no picture, instead of showing black forever', async () => {
     render(<ScanCamera onCapture={vi.fn()} onClose={vi.fn()} remaining={3} />)
     await waitFor(() => expect(getUserMedia).toHaveBeenCalled())
-    vi.advanceTimersByTime(5200)
+    act(() => { vi.advanceTimersByTime(5200) })
     expect(await screen.findByText(/sent no picture/i)).toBeInTheDocument()
     expect(screen.getByText(/Use Upload instead/i)).toBeInTheDocument()
   })
@@ -50,7 +50,7 @@ describe('ScanCamera — getting a picture at all', () => {
   it('releases the camera when it gives up, rather than leaving the light on', async () => {
     render(<ScanCamera onCapture={vi.fn()} onClose={vi.fn()} remaining={3} />)
     await waitFor(() => expect(getUserMedia).toHaveBeenCalled())
-    vi.advanceTimersByTime(5200)
+    act(() => { vi.advanceTimersByTime(5200) })
     await screen.findByText(/sent no picture/i)
     expect(track.stop).toHaveBeenCalled()
   })

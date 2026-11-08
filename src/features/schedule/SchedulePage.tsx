@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react'
 import { Copy, Check, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react'
+import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
+import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { Avatar } from '@/components/ui/avatar'
-import { useLoads } from '@/hooks/useLoads'
+import { useLoads, useEnsureLoadRange } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { chicagoDateStr, addDays, apptTimeLabel } from '@/lib/date'
 import { getColor } from '@/lib/driverColors'
@@ -43,9 +45,9 @@ function CopyButton({ text, label = 'Copy', small }: { text: string; label?: str
       style={{
         display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
         height: small ? 26 : 32, padding: small ? '0 9px' : '0 12px',
-        borderRadius: 8, border: '1px solid var(--ds-border)', cursor: 'pointer',
-        background: copied ? '#f0fdf4' : 'var(--ds-surface)',
-        color: copied ? '#15803d' : 'var(--ds-t2)',
+        borderRadius: 8, border: '1px solid var(--tms-border)', cursor: 'pointer',
+        background: copied ? 'var(--tms-badge-green-tint)' : 'var(--tms-card)',
+        color: copied ? 'var(--tms-badge-green)' : 'var(--tms-text-2)',
         fontSize: small ? 11.5 : 13, fontWeight: 600, fontFamily: 'inherit',
       }}
     >
@@ -62,9 +64,9 @@ function ApptLine({ kind, time, location }: { kind: 'PU' | 'DE'; time: string; l
   const need = time.startsWith('NEED')
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12.5, lineHeight: 1.5 }}>
-      <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.04em', color: isPickup ? 'var(--ds-blue)' : '#7c3aed', width: 18, flexShrink: 0 }}>{kind}</span>
-      <span style={{ flex: 1, minWidth: 0, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{location || <span style={{ color: 'var(--ds-t3)' }}>TBD</span>}</span>
-      <span style={{ flexShrink: 0, fontWeight: need ? 700 : 500, color: need ? '#dc2626' : 'var(--ds-t2)', fontVariantNumeric: 'tabular-nums' }}>{time}</span>
+      <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.04em', color: isPickup ? 'var(--tms-primary)' : 'var(--tms-badge-purple)', width: 18, flexShrink: 0 }}>{kind}</span>
+      <span style={{ flex: 1, minWidth: 0, color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{location || <span style={{ color: 'var(--tms-muted)' }}>TBD</span>}</span>
+      <span style={{ flexShrink: 0, fontWeight: need ? 700 : 500, color: need ? 'var(--tms-badge-red)' : 'var(--tms-text-2)', fontVariantNumeric: 'tabular-nums' }}>{time}</span>
     </div>
   )
 }
@@ -84,19 +86,19 @@ function DriverCard({ driver, dateStr, loads }: {
   const hasHot = loads.some((l) => l.hot)
 
   return (
-    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
+    <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', overflow: 'hidden', boxShadow: 'var(--tms-shadow)', background: 'var(--tms-card)' }}>
       {/* Header — circle avatar + name */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: '1px solid var(--ds-border)' }}>
-        <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="lg" style={{ background: color.avatarBg, color: '#fff' }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: '1px solid var(--tms-border)' }}>
+        <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="lg" style={{ background: color.avatarBg, color: 'var(--tms-on-primary)' }} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{driver.name}</span>
+            <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--tms-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{driver.name}</span>
             {hasHot && <span title="Has a hot load">🔥</span>}
             {isBroker && (
-              <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ds-t3)', border: '1px solid var(--ds-border)', borderRadius: 5, padding: '1px 6px' }}>Broker</span>
+              <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tms-muted)', border: '1px solid var(--tms-border)', borderRadius: 5, padding: '1px 6px' }}>Broker</span>
             )}
           </div>
-          <div style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
+          <div style={{ fontSize: 12.5, color: 'var(--tms-muted)', marginTop: 2 }}>
             {count} load{count !== 1 ? 's' : ''} · {formatShortDate(dateStr)}
           </div>
         </div>
@@ -119,15 +121,15 @@ function DriverCard({ driver, dateStr, loads }: {
       </div>
 
       {/* SMS-ready caption */}
-      <div style={{ borderTop: '1px solid var(--ds-border)', padding: '12px 16px', background: 'var(--ds-bg)' }}>
+      <div style={{ borderTop: '1px solid var(--tms-border)', padding: '12px 16px', background: 'var(--tms-bg)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ds-t3)' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--tms-muted)' }}>
             <MessageSquare size={12} /> Text message
           </span>
           <CopyButton text={sms} label="Copy" small />
         </div>
-        <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, borderTopLeftRadius: 3, padding: '10px 12px' }}>
-          <pre style={{ margin: 0, fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.55, color: 'var(--ds-t1)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', userSelect: 'text' }}>{sms}</pre>
+        <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, borderTopLeftRadius: 3, padding: '10px 12px' }}>
+          <pre style={{ margin: 0, fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.55, color: 'var(--tms-text)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', userSelect: 'text' }}>{sms}</pre>
         </div>
       </div>
     </div>
@@ -142,12 +144,12 @@ function ScheduleRow({ index, hot, accent, proId, puNum, tmsId, children }: {
   children: React.ReactNode
 }) {
   return (
-    <div style={{ display: 'flex', gap: 10, padding: '11px 16px', borderBottom: '1px solid var(--ds-border)', borderLeft: `3px solid ${hot ? '#dc2626' : accent}`, background: hot ? 'rgba(220,38,38,0.04)' : undefined }}>
-      <span style={{ width: 20, height: 20, borderRadius: 999, flexShrink: 0, marginTop: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, background: hot ? '#fee2e2' : 'var(--ds-bg)', color: hot ? '#b91c1c' : 'var(--ds-t2)', border: '1px solid var(--ds-border)' }}>{index}</span>
+    <div style={{ display: 'flex', gap: 10, padding: '11px 16px', borderBottom: '1px solid var(--tms-border)', borderLeft: `3px solid ${hot ? 'var(--tms-badge-red)' : accent}`, background: hot ? 'var(--tms-badge-red-tint)' : undefined }}>
+      <span style={{ width: 20, height: 20, borderRadius: 999, flexShrink: 0, marginTop: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, background: hot ? 'var(--tms-badge-red-tint)' : 'var(--tms-bg)', color: hot ? 'var(--tms-badge-red)' : 'var(--tms-text-2)', border: '1px solid var(--tms-border)' }}>{index}</span>
       <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {hot && <span style={{ fontSize: 10, fontWeight: 700, color: '#b91c1c' }}>🔥 HOT</span>}
+        {hot && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--tms-badge-red)' }}>🔥 HOT</span>}
         {children}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 11, color: 'var(--ds-t3)', fontFamily: 'var(--font-mono, monospace)', marginTop: 2 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 11, color: 'var(--tms-muted)', fontFamily: 'var(--font-mono, monospace)', marginTop: 2 }}>
           {proId && <span>Pro# {proId}</span>}
           {tmsId && <span>TMS {tmsId}</span>}
           {puNum && <span>PU# {puNum}</span>}
@@ -170,6 +172,7 @@ export function SchedulePage() {
   const { loads } = useLoads()
   const { drivers } = useDrivers()
   const [dateStr, setDateStr] = useState(todayStr)
+  useEnsureLoadRange(dateStr, dateStr)
 
   const activeDrivers = drivers.filter((d) => d.active)
 
@@ -195,39 +198,31 @@ export function SchedulePage() {
 
   const allSms = driversWithWork.map((w) => w.sms).join('\n\n' + '─'.repeat(40) + '\n\n')
 
-  const navBtn: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer' }
+  const navBtn: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', cursor: 'pointer' }
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
-      {/* ── Page header ──────────────────────────────────────────────────── */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '20px 32px 12px', flexWrap: 'wrap' }}>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Schedules</h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Per-driver daily run sheets &amp; ready-to-send texts</p>
+    <TmsScrollPage
+      title="Schedules"
+      subtitle="Per-driver daily run sheets & ready-to-send texts"
+      stickyHead
+      actions={
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button style={navBtn} onClick={prevDay} aria-label="Previous day"><ChevronLeft size={16} /></button>
+            <button onClick={goToday} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--tms-border)', background: isToday ? 'var(--tms-primary)' : 'var(--tms-card)', color: isToday ? 'var(--tms-on-primary)' : 'var(--tms-text-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Today</button>
+            <button style={navBtn} onClick={nextDay} aria-label="Next day"><ChevronRight size={16} /></button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <button style={navBtn} onClick={prevDay} aria-label="Previous day"><ChevronLeft size={16} /></button>
-              <button onClick={goToday} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: isToday ? 'var(--ds-blue)' : 'var(--ds-surface)', color: isToday ? '#fff' : 'var(--ds-t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Today</button>
-              <button style={navBtn} onClick={nextDay} aria-label="Next day"><ChevronRight size={16} /></button>
-            </div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', minWidth: 140, textAlign: 'right' }}>{formatShortDate(dateStr)}</span>
-            {driversWithWork.length > 0 && <CopyButton text={allSms} label="Copy all" />}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Content ──────────────────────────────────────────────────────── */}
-      <div style={{ padding: '20px 32px 32px' }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)', minWidth: 140, textAlign: 'right' }}>{formatShortDate(dateStr)}</span>
+          {driversWithWork.length > 0 && <CopyButton text={allSms} label="Copy all" />}
+        </>
+      }
+    >
+      <div>
         {driversWithWork.length === 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '80px 0', color: 'var(--ds-t3)' }}>
-            <MessageSquare size={40} style={{ opacity: 0.2 }} />
-            <p style={{ fontSize: 14, fontWeight: 500 }}>No loads scheduled for {formatShortDate(dateStr)}</p>
-          </div>
+          <TmsEmptyState title={`No loads scheduled for ${formatShortDate(dateStr)}`} message={null} />
         ) : (
           <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>
+            <p style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>
               {driversWithWork.length} driver{driversWithWork.length !== 1 ? 's' : ''} scheduled
               {driversWithoutWork.length > 0 && ` · ${driversWithoutWork.map((d) => d.name.split(' ')[0]).join(', ')} off`}
             </p>
@@ -237,6 +232,6 @@ export function SchedulePage() {
           </div>
         )}
       </div>
-    </div>
+    </TmsScrollPage>
   )
 }

@@ -14,7 +14,7 @@ function Avatar({ initials, src, size = 'md', className, ...props }: AvatarProps
   return (
     <div
       className={cn(
-        'rounded-full flex items-center justify-center font-semibold text-white shrink-0 select-none overflow-hidden ring-2 ring-white shadow-sm',
+        'rounded-full flex items-center justify-center font-semibold text-[color:var(--tms-on-primary)] shrink-0 select-none overflow-hidden ring-2 ring-card shadow-sm',
         size === 'xs' ? 'size-6 text-[10px]' :
         size === 'sm' ? 'size-8 text-xs' :
         size === 'lg' ? 'size-10 text-sm' :

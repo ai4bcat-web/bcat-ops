@@ -15,6 +15,7 @@ import { driverGroupOf } from '@/lib/driverFilter'
 import { getColor } from '@/lib/driverColors'
 import { errorText } from '@/lib/errorText'
 import { useAppStore } from '@/store/useAppStore'
+import { useLoads, useEnsureLoadRange } from '@/hooks/useLoads'
 import { formatApptTime } from '@/lib/date'
 import { PerMileKpis } from './PerMileKpis'
 
@@ -30,14 +31,15 @@ const money0 = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency'
 const hours1 = (n: number) => `${n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} h`
 const fmtMD = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' })
 
-const MEDALS = ['#d4a017', '#9ca3af', '#b87333'] // gold, silver, bronze
+// gold, silver, bronze
+const MEDALS = ['var(--tms-chart-4)', 'var(--tms-chart-9)', 'var(--tms-chart-11)']
 const MAX_ROWS = 12
 
 const navBtn = (disabled: boolean): React.CSSProperties => ({
   display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26,
   borderRadius: 6, border: 'none', background: 'transparent', padding: 0,
   cursor: disabled ? 'default' : 'pointer',
-  color: disabled ? 'var(--ds-t3)' : 'var(--ds-t1)', opacity: disabled ? 0.4 : 1,
+  color: disabled ? 'var(--tms-muted)' : 'var(--tms-text)', opacity: disabled ? 0.4 : 1,
 })
 
 /**
@@ -62,7 +64,11 @@ export function DriverLeaderboardWidget() {
   // Gross is what is BOOKED for the period (every load delivering in it, by rate), not what
   // has been settled — a settlement only counts loads whose POD is in, which hid most of
   // the week until Friday.
-  const loads = useAppStore((s) => s.loads)
+  // The live working set: a voided load pays nobody, so it never reaches a board.
+  const { loads } = useLoads()
+  const ooEnd = shiftDays(ooWeek, 6)
+  const boxEnd = shiftDays(boxPeriod, 13)
+  useEnsureLoadRange(ooWeek < boxPeriod ? ooWeek : boxPeriod, ooEnd > boxEnd ? ooEnd : boxEnd)
   // Real, active drivers only — test accounts stay off the board.
   const real = useMemo(() => drivers.filter((d) => d.active !== false && d.type !== 'broker' && !/\btest\b/i.test(d.name)), [drivers])
   const ownerOps = useMemo(() => real.filter((d) => driverGroupOf(d) === 'OWNER_OP'), [real])
@@ -142,13 +148,13 @@ export function DriverLeaderboardWidget() {
   ]
 
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+    <div className="tms-card">
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Trophy size={16} style={{ color: 'var(--ds-blue)' }} />
+          <Trophy size={16} style={{ color: 'var(--tms-primary)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Driver leaderboard</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Driver leaderboard</div>
+            <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>
               {offset === 0 ? 'This week' : offset === 1 ? 'Last week' : `${offset} weeks ago`} · hours for Ivan local, gross booked (every load delivering in the period, POD or not) for owner-operators and box truck
             </div>
           </div>
@@ -156,11 +162,11 @@ export function DriverLeaderboardWidget() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {offset > 0 && (
             <button onClick={() => setOffset(0)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--ds-blue)', fontFamily: 'inherit', padding: '0 2px' }}>
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--tms-primary)', fontFamily: 'inherit', padding: '0 2px' }}>
               Now
             </button>
           )}
-          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', borderRadius: 8, padding: 2 }}>
             <button onClick={() => setOffset((o) => o + 1)} aria-label="Previous week" style={navBtn(false)}><ChevronLeft size={15} /></button>
             <button onClick={() => setOffset((o) => Math.max(0, o - 1))} disabled={offset === 0} aria-label="Next week" style={navBtn(offset === 0)}><ChevronRight size={15} /></button>
           </div>
@@ -169,22 +175,22 @@ export function DriverLeaderboardWidget() {
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))' }}>
         {boards.map((b, i) => (
-          <div key={b.key} style={{ padding: '12px 16px 14px', borderLeft: !isMobile && i > 0 ? '1px solid var(--ds-border)' : undefined, borderTop: isMobile && i > 0 ? '1px solid var(--ds-border)' : undefined }}>
+          <div key={b.key} style={{ padding: '12px 16px 14px', borderLeft: !isMobile && i > 0 ? '1px solid var(--tms-border)' : undefined, borderTop: isMobile && i > 0 ? '1px solid var(--tms-border)' : undefined }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ds-t1)' }}>{b.title}</div>
-              <div style={{ fontSize: 11, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{b.period}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tms-text)' }}>{b.title}</div>
+              <div style={{ fontSize: 11, color: 'var(--tms-muted)', whiteSpace: 'nowrap' }}>{b.period}</div>
             </div>
             {/* The group's gross booked for the period so far — every load delivering in it, POD or not. */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid var(--ds-border)' }}>
-              <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Gross booked so far</span>
-              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{money0(totals[b.key].gross)} <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--ds-t3)' }}>· {totals[b.key].loads} {totals[b.key].loads === 1 ? 'load' : 'loads'}</span></span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid var(--tms-border)' }}>
+              <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>Gross booked so far</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--tms-text)', fontVariantNumeric: 'tabular-nums' }}>{money0(totals[b.key].gross)} <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--tms-muted)' }}>· {totals[b.key].loads} {totals[b.key].loads === 1 ? 'load' : 'loads'}</span></span>
             </div>
             {b.error ? (
-              <div style={{ padding: '18px 0', fontSize: 12, color: '#dc2626' }}>{b.error}</div>
+              <div style={{ padding: '18px 0', fontSize: 12, color: 'var(--tms-badge-red)' }}>{b.error}</div>
             ) : b.loading ? (
-              <div style={{ padding: '18px 0', textAlign: 'center', fontSize: 12, color: 'var(--ds-t3)' }}>Loading…</div>
+              <div style={{ padding: '18px 0', textAlign: 'center', fontSize: 12, color: 'var(--tms-muted)' }}>Loading…</div>
             ) : b.rows.length === 0 ? (
-              <div style={{ padding: '18px 0', textAlign: 'center', fontSize: 12, color: 'var(--ds-t3)' }}>{b.empty}</div>
+              <div style={{ padding: '18px 0', textAlign: 'center', fontSize: 12, color: 'var(--tms-muted)' }}>{b.empty}</div>
             ) : (
               <Board rows={b.rows} unit={b.unit} detail={
                 b.key === 'oo' ? (r) => { const a = emptyAt.get(r.driverId); return a ? `Empty ${emptyLabel(a)}` : 'No appointment booked' }
@@ -214,26 +220,26 @@ function Board({ rows, unit, detail }: { rows: LeaderRow[]; unit: 'hours' | 'gro
         const initials = r.name.split(/\s+/).map((p) => p[0] ?? '').join('').slice(0, 2).toUpperCase()
         return (
           <div key={r.driverId} style={{ display: 'grid', gridTemplateColumns: '18px 28px minmax(0, 1fr) auto', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: medal ? MEDALS[i] : 'var(--ds-t3)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.value > 0 ? i + 1 : '–'}</div>
-            <Avatar initials={initials} size="xs" style={color ? { background: color.avatarBg, color: '#fff' } : undefined} />
+            <div style={{ fontSize: 12, fontWeight: 700, color: medal ? MEDALS[i] : 'var(--tms-muted)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.value > 0 ? i + 1 : '–'}</div>
+            <Avatar initials={initials} size="xs" style={color ? { background: color.avatarBg, color: 'var(--tms-on-primary)' } : undefined} />
             <div style={{ minWidth: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                <span style={{ fontSize: 13, color: 'var(--ds-t1)', fontWeight: i === 0 ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
-                <span style={{ fontSize: 11, color: r.live ? '#15803d' : 'var(--ds-t3)', whiteSpace: 'nowrap', fontWeight: r.live ? 600 : 400 }}>{r.live ? 'on the clock · ' : ''}{r.count} {unit === 'hours' ? (r.count === 1 ? 'day' : 'days') : (r.count === 1 ? 'load' : 'loads')}</span>
+                <span style={{ fontSize: 13, color: 'var(--tms-text)', fontWeight: i === 0 ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                <span style={{ fontSize: 11, color: r.live ? 'var(--tms-badge-green)' : 'var(--tms-muted)', whiteSpace: 'nowrap', fontWeight: r.live ? 600 : 400 }}>{r.live ? 'on the clock · ' : ''}{r.count} {unit === 'hours' ? (r.count === 1 ? 'day' : 'days') : (r.count === 1 ? 'load' : 'loads')}</span>
               </div>
               {detail && (
-                <div style={{ fontSize: 11, color: 'var(--ds-t2)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail(r)}</div>
+                <div style={{ fontSize: 11, color: 'var(--tms-text-2)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail(r)}</div>
               )}
-              <div style={{ height: 4, borderRadius: 2, background: 'var(--ds-bg)', marginTop: 3, overflow: 'hidden' }}>
-                <div style={{ width: `${max > 0 && r.value > 0 ? Math.max(4, (r.value / max) * 100) : 0}%`, height: '100%', borderRadius: 2, background: medal ? MEDALS[i] : 'var(--ds-blue)', opacity: medal ? 1 : 0.55 }} />
+              <div style={{ height: 4, borderRadius: 2, background: 'var(--tms-bg)', marginTop: 3, overflow: 'hidden' }}>
+                <div style={{ width: `${max > 0 && r.value > 0 ? Math.max(4, (r.value / max) * 100) : 0}%`, height: '100%', borderRadius: 2, background: medal ? MEDALS[i] : 'var(--tms-primary)', opacity: medal ? 1 : 0.55 }} />
               </div>
             </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: r.value > 0 ? 'var(--ds-t1)' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmt(r.value)}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: r.value > 0 ? 'var(--tms-text)' : 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmt(r.value)}</div>
           </div>
         )
       })}
       {rows.length > MAX_ROWS && (
-        <div style={{ fontSize: 11, color: 'var(--ds-t3)', paddingLeft: 54 }}>+{rows.length - MAX_ROWS} more</div>
+        <div style={{ fontSize: 11, color: 'var(--tms-muted)', paddingLeft: 54 }}>+{rows.length - MAX_ROWS} more</div>
       )}
     </div>
   )

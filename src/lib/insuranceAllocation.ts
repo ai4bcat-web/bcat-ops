@@ -46,10 +46,13 @@ export function computeInsuranceAllocation(
   items: InsItem[],
   trucks: TruckLite[],
   drivers: DriverLite[],
+  // Trailers on the policy: a parked one drops out of the shared trailer total.
+  trailers: Pick<TruckLite, 'id' | 'active'>[] = [],
 ): InsuranceAllocation {
   const activeTrucks = trucks.filter((t) => t.active)
   const activeTruckIds = new Set(activeTrucks.map((t) => t.id))
   const n = activeTrucks.length
+  const parkedTrailerIds = new Set(trailers.filter((t) => !t.active).map((t) => t.id))
 
   // Per-truck premium (annual $) — only trucks that are active count toward live profit.
   const perTruckPremium: Record<string, number> = {}
@@ -68,7 +71,9 @@ export function computeInsuranceAllocation(
   // Trailers → even split across every truck that runs, including box trucks. Box trucks
   // aren't Fleet equipment, so their share simply isn't added to any P&L truck (it's
   // recouped from box-truck settlements); it still shrinks each real truck's share.
-  const trailerTotal = items.filter((i) => i.kind === 'TRAILER').reduce((s, i) => s + c2d(i.annualCents), 0)
+  const trailerTotal = items
+    .filter((i) => i.kind === 'TRAILER' && !(i.equipmentId && parkedTrailerIds.has(i.equipmentId)))
+    .reduce((s, i) => s + c2d(i.annualCents), 0)
   const splitUnits = n + boxTruckCount
   const trailerSharePerTruck = splitUnits > 0 ? trailerTotal / splitUnits : 0
 
@@ -157,15 +162,17 @@ export function insuranceRangeByTruckDated(
   trucks: TruckLite[],
   drivers: DriverLite[],
   range: { start: string; end: string },
+  trailers: TruckLite[] = [],
 ): Record<string, number> {
-  const cuts = [...new Set(trucks.map((t) => t.inactiveSince).filter((d): d is string => !!d && d > range.start && d <= range.end))].sort()
+  const cuts = [...new Set([...trucks, ...trailers].map((t) => t.inactiveSince).filter((d): d is string => !!d && d > range.start && d <= range.end))].sort()
   const out: Record<string, number> = {}
   let from = range.start
   for (const cut of [...cuts, nextDay(range.end)]) {
     const to = cut > range.end ? range.end : (() => { const d = new Date(`${cut}T12:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10) })()
     if (from <= to) {
       const live = trucks.map((t) => ({ id: t.id, active: truckActiveOn(t, from) }))
-      const piece = insuranceRangeByTruck(computeInsuranceAllocation(items, live, drivers).byTruck, { start: from, end: to })
+      const liveTrailers = trailers.map((t) => ({ id: t.id, active: truckActiveOn(t, from) }))
+      const piece = insuranceRangeByTruck(computeInsuranceAllocation(items, live, drivers, liveTrailers).byTruck, { start: from, end: to })
       for (const [id, v] of Object.entries(piece)) out[id] = (out[id] ?? 0) + v
     }
     from = cut

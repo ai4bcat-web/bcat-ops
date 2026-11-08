@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { FakeDispatchStore } from './dispatchFakeStore'
 import { SlackError, type SlackClient } from './slackApi'
 import {
@@ -83,6 +83,7 @@ describe('channel lifecycle', () => {
   beforeEach(() => { store = new FakeDispatchStore() })
 
   it('creates the channel, sets the topic, invites by email, posts the recap and records the id', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const c = await store.createConversation({ phone: '+18475550100', driverName: 'Jason Smith' })
     await store.putMessage({ conversationId: c.id, phone: c.phone, direction: 'IN', kind: 'SMS', at: '2026-10-10T15:00:00Z', body: 'Here' })
     const slack = fakeSlack({
@@ -93,6 +94,8 @@ describe('channel lifecycle', () => {
     expect(out.slackChannelId).toBe('C9')
     expect(out.slackChannelName).toBe('drv-jason-smith')
     expect(notInvited).toEqual(['nobody@bcatcorp.com'])
+    expect(warn).toHaveBeenCalledWith('[slack-dispatch] no Slack user for', 'nobody@bcatcorp.com', expect.stringContaining('users_not_found'))
+    warn.mockRestore()
     expect(slack.calls.map((x) => x.method)).toEqual(['conversations.create', 'conversations.setTopic', 'users.lookupByEmail', 'users.lookupByEmail', 'conversations.invite', 'chat.postMessage'])
     expect(slack.calls[0].params).toMatchObject({ name: 'drv-jason-smith', is_private: false })
     expect(slack.calls[4].params).toMatchObject({ channel: 'C9', users: 'U1' })

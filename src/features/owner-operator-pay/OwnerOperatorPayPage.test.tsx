@@ -23,13 +23,34 @@ vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ user: { email: 'staff@example.com' } }),
 }))
 
-vi.mock('@/lib/apiClient', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/apiClient')>()
-  return {
-    ...actual,
-    payCreditsDeployed: () => true,
-  }
-})
+vi.mock('@/lib/apiClient', () => ({
+  payCreditsDeployed: () => true,
+  sendDriverPayEmail: vi.fn(),
+  parseTripScreenshot: vi.fn(),
+  graphqlErrorMessage: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+}))
+
+// The drawer is a separate surface with its own data hooks; this page only mounts it.
+vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
+
+// No document lookups: presigning real attachments needs Amplify.
+vi.mock('@/hooks/useLoadDriverDocs', () => ({
+  useLoadDriverDocs: () => ({ pods: [], ratecons: [], refresh: vi.fn() }),
+}))
+
+vi.mock('@/lib/complianceClient', () => ({
+  createOnboardingInvite: vi.fn(),
+  generateInviteToken: vi.fn(),
+  inviteExpiry: vi.fn(),
+  sendDriverAppInvite: vi.fn(),
+}))
+vi.mock('@/lib/driverSubmissionsClient', () => ({
+  staffUploadDriverDoc: vi.fn(),
+  removeDriverDocs: vi.fn(),
+  replaceDriverDocs: vi.fn(),
+  driverDocValidationError: () => null,
+  DRIVER_DOC_ACCEPT: 'application/pdf,image/*',
+}))
 
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
 

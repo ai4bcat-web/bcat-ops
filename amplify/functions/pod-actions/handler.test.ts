@@ -452,6 +452,9 @@ beforeEach(() => {
   memory.mappings.clear()
   resetConnectionConfigCache()
   vi.clearAllMocks()
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.stubGlobal('fetch', mockFetch)
   mockFetch.mockImplementation(async () => new Response(JSON.stringify({ error: 'not configured' }), { status: 503 }))
   mockLambda.mockResolvedValue({})
@@ -461,6 +464,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.mocked(console.log).mockRestore()
+  vi.mocked(console.warn).mockRestore()
+  vi.mocked(console.error).mockRestore()
 })
 
 // ── input parser ───────────────────────────────────────────────────────────

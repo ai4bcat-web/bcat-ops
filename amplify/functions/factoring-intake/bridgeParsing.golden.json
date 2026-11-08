@@ -1,0 +1,98 @@
+{
+ "pro": [
+  [
+   "Invoice for PRO #01234",
+   "01234"
+  ],
+  [
+   "Fwd: Invoice for PRO #01234",
+   "01234"
+  ],
+  [
+   "Invoice for PRO#01234",
+   "01234"
+  ],
+  [
+   "PRO #945143JJ",
+   "945143JJ"
+  ],
+  [
+   "14589",
+   "14589"
+  ],
+  [
+   "Fwd: 14589",
+   "14589"
+  ],
+  [
+   "SUBMIT TO TRANSFLO Pro # 14589 Ref # 2284206",
+   "14589"
+  ],
+  [
+   "Invoice for PRO #123-45",
+   "123-45"
+  ],
+  [
+   "Invoice for PRO #01234-",
+   "01234"
+  ],
+  [
+   "Invoice for PRO 01234",
+   "01234"
+  ],
+  [
+   "Invoice for PO #01234",
+   null
+  ],
+  [
+   "Invoice for PRO #ABC",
+   null
+  ],
+  [
+   "Invoice for PRO #01234 and Invoice for PRO #56789",
+   null
+  ],
+  [
+   "Random subject",
+   null
+  ],
+  [
+   "",
+   null
+  ]
+ ],
+ "addresses": [
+  [
+   "Ivan <IvanFactoring@bcatcorp.com>",
+   [
+    "ivanfactoring@bcatcorp.com"
+   ],
+   true
+  ],
+  [
+   "a@x.test, <b@x.test>",
+   [
+    "a@x.test",
+    "b@x.test"
+   ],
+   false
+  ],
+  [
+   "plain@x.test",
+   [
+    "plain@x.test"
+   ],
+   false
+  ],
+  [
+   "no address here",
+   [],
+   false
+  ],
+  [
+   "",
+   [],
+   false
+  ]
+ ]
+}

@@ -53,7 +53,7 @@ function Row({
         display: 'flex', alignItems: 'center', gap: 8, width: '100%',
         padding: '6px 8px', borderRadius: 6, border: 'none', background: 'none',
         cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5,
-        color: 'var(--ds-t1)', textAlign: 'left',
+        color: 'var(--tms-text)', textAlign: 'left',
       }}
     >
       <span
@@ -61,9 +61,9 @@ function Row({
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 15, height: 15, borderRadius: 4, flexShrink: 0,
-          border: `1px solid ${checked ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
-          background: checked ? 'var(--ds-blue)' : 'transparent',
-          color: '#fff',
+          border: `1px solid ${checked ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+          background: checked ? 'var(--tms-primary)' : 'transparent',
+          color: 'var(--tms-on-primary)',
         }}
       >
         {checked && <Check size={10} strokeWidth={3} />}
@@ -110,8 +110,8 @@ export function DriverFilterMenu({ drivers, visibleDriverIds, onChange }: Props)
           style={{
             display: 'flex', alignItems: 'center', gap: 6,
             height: 30, padding: '0 10px', borderRadius: 20,
-            border: '1px solid var(--ds-border)', background: 'var(--ds-bg)',
-            color: 'var(--ds-t2)', cursor: 'pointer', fontFamily: 'inherit',
+            border: '1px solid var(--tms-border)', background: 'var(--tms-bg)',
+            color: 'var(--tms-text-2)', cursor: 'pointer', fontFamily: 'inherit',
             fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0,
           }}
         >
@@ -164,7 +164,7 @@ export function DriverFilterMenu({ drivers, visibleDriverIds, onChange }: Props)
         })}
 
         {all.length === 0 && (
-          <p style={{ margin: 0, padding: '8px 10px', fontSize: 12.5, color: 'var(--ds-t3)' }}>
+          <p style={{ margin: 0, padding: '8px 10px', fontSize: 12.5, color: 'var(--tms-muted)' }}>
             No active drivers to filter.
           </p>
         )}
@@ -175,6 +175,6 @@ export function DriverFilterMenu({ drivers, visibleDriverIds, onChange }: Props)
 
 const quickBtn: React.CSSProperties = {
   flex: 1, height: 26, borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
-  fontSize: 11.5, fontWeight: 600, color: 'var(--ds-t2)',
-  border: '1px solid var(--ds-border)', background: 'var(--ds-bg)',
+  fontSize: 11.5, fontWeight: 600, color: 'var(--tms-text-2)',
+  border: '1px solid var(--tms-border)', background: 'var(--tms-bg)',
 }

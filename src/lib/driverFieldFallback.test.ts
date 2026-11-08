@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { isTrailerFieldUndefined } from './apiClient'
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) })) // apiClient builds its client at import
+
 /**
  * Regression guard: a missed detection here doesn't just disable the trailer picker —
  * listDrivers throws, initializeData bails on the first failure, and the whole driver

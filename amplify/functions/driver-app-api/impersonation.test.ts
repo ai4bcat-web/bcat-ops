@@ -6,7 +6,7 @@
  * away from quietly not holding, and the failure mode is an admin acting as a driver with
  * the driver's name on the record.
  */
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 
 vi.hoisted(() => {
   process.env.DRIVER_USER_POOL_ID = 'us-east-1_driverpool'
@@ -57,6 +57,9 @@ const SETTING = { driverId: 'drv-1', payGroup: 'OWNER_OPERATOR', active: true, p
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  vi.spyOn(console, 'error').mockImplementation(() => {})
   staffVerify.mockResolvedValue({ email: 'ryne@bcatcorp.com', email_verified: true })
   driverVerify.mockRejectedValue(new Error('not a driver token'))
   send.mockImplementation(async (cmd: { constructor: { name: string }; input: Record<string, unknown> }) => {
@@ -67,6 +70,10 @@ beforeEach(() => {
     }
     return {}
   })
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 const event = (method: string, path: string, headers: Record<string, string>) => ({

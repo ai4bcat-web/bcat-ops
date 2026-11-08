@@ -1,5 +1,6 @@
-import { DynamoDBClient, ScanCommand } from '@aws-sdk/client-dynamodb'
-import { unmarshall } from '@aws-sdk/util-dynamodb'
+import { createHash } from 'node:crypto'
+import { DynamoDBClient, PutItemCommand, ScanCommand } from '@aws-sdk/client-dynamodb'
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import type { PreSignUpTriggerEvent } from 'aws-lambda'
 
 // The gate and the driver API MUST agree on who may sign in; a second copy of this list
@@ -30,6 +31,62 @@ interface PaySettingItem {
 }
 
 const client = new DynamoDBClient({})
+
+export type RefusalReason =
+  | 'NO_DRIVER_RECORD'
+  | 'DRIVER_INACTIVE'
+  | 'INELIGIBLE_PAY_GROUP'
+
+const REFUSAL_LOG_TIMEOUT_MS = 1500
+
+/*
+ * Best-effort audit trail of a refused sign-up so staff can see it (S4 D-S4-2). One row per
+ * e-mail per day (deterministic id + attribute_not_exists) bounds what an unauthenticated
+ * caller can make us write. It NEVER throws and never waits past REFUSAL_LOG_TIMEOUT_MS:
+ * the outcome of the gate must not depend on whether the log landed.
+ */
+async function recordRefusal(email: string, reason: RefusalReason): Promise<void> {
+  const tableName = process.env.AUDIT_LOG_TABLE_NAME
+  if (!tableName) return
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const now = new Date()
+    const iso = now.toISOString()
+    const id = `dsg:${createHash('sha256').update(email).digest('hex').slice(0, 20)}:${iso.slice(0, 10)}`
+    const write = client
+      .send(
+        new PutItemCommand({
+          TableName: tableName,
+          Item: marshall({
+            id,
+            __typename: 'AuditLog',
+            entityType: 'DRIVER_SIGNUP',
+            entityId: email,
+            action: 'refused',
+            user: 'cognito-presignup',
+            changes: JSON.stringify({ reason, at: iso }),
+            createdAt: iso,
+            updatedAt: iso,
+          }),
+          ConditionExpression: 'attribute_not_exists(id)',
+        }),
+      )
+      .catch(() => undefined)
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, REFUSAL_LOG_TIMEOUT_MS)
+    })
+    await Promise.race([write, timeout])
+  } catch {
+    // swallowed on purpose; see above
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function refuse(email: string, reason: RefusalReason): Promise<never> {
+  await recordRefusal(email, reason)
+  throw new Error(REJECTION_MESSAGE)
+}
 
 export const handler = async (
   event: PreSignUpTriggerEvent,
@@ -101,7 +158,7 @@ export const handler = async (
   }
 
   if (!driverId || !driverActive) {
-    throw new Error(REJECTION_MESSAGE)
+    return refuse(email, driverId ? 'DRIVER_INACTIVE' : 'NO_DRIVER_RECORD')
   }
 
   /*
@@ -126,14 +183,14 @@ export const handler = async (
         payGroup: null,
       }) === 'PAPERWORK'
     if (!onPaperwork) {
-      throw new Error(REJECTION_MESSAGE)
+      return refuse(email, 'INELIGIBLE_PAY_GROUP')
     }
     return event
   }
 
   // isEligiblePayGroup keeps the null-payGroup default in one place.
   if (!isEligiblePayGroup(setting.payGroup)) {
-    throw new Error(REJECTION_MESSAGE)
+    return refuse(email, 'INELIGIBLE_PAY_GROUP')
   }
 
   return event

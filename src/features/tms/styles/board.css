@@ -1,0 +1,252 @@
+/*
+ * Shipments board family: board frame, filter panel, grid, dispatch workstation, POD review, board dialogs.
+ * Moved verbatim out of theme.css (S2 slice A); owned by S2 slice B from here on.
+ * Tokens live in ../theme.css; every selector stays under .tms-shell / .tms-portal. No colour literals.
+ */
+
+/* ── Shipments board extras (division chip, chip filter panel, check-call tones) ── */
+.tms-shell .tms-division-chip { display: inline-block; padding: 1px 8px; border: 1px solid var(--tms-border); border-radius: 999px; font-size: 12px; line-height: 18px; white-space: nowrap; }
+.tms-shell .tms-filter-panel { margin: 0 0 8px; padding: 12px; }
+.tms-shell .tms-filter-panel-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.tms-shell .tms-filter-toggles, .tms-portal .tms-filter-toggles { display: flex; flex-wrap: wrap; gap: 12px; }
+.tms-shell .tms-check, .tms-portal .tms-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--tms-text); }
+.tms-shell .tms-overdue { color: var(--tms-badge-red); font-weight: 500; }
+
+/* ── Aljex-style shipments board (R2) ─────────────────────────────────────── */
+
+/* Layout: the board is a single white card frame on the canvas */
+.tms-shell .tms-board-shell { background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-card); box-shadow: var(--tms-shadow); overflow: hidden; min-height: 0; }
+.tms-shell .tms-board-toolbar { background: var(--tms-card); border-color: var(--tms-border); font-size: 14px; }
+.tms-shell .tms-board-exception { color: var(--tms-badge-red); font-weight: 500; }
+.tms-shell .tms-board-tag-input { width: 100%; }
+.tms-shell .tms-board-check-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--tms-text); cursor: pointer; }
+.tms-portal .tms-board-batch-rows { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+.tms-portal .tms-board-key-section { display: flex; flex-direction: column; gap: 8px; }
+.tms-shell .tms-board-create-list, .tms-portal .tms-board-create-list { display: flex; flex-direction: column; gap: 6px; }
+.tms-shell .tms-link, .tms-portal .tms-link { font-weight: 600; color: var(--tms-primary-ink); background: none; border: 0; padding: 0; cursor: pointer; font-size: inherit; text-decoration: none; }
+.tms-shell .tms-link:hover, .tms-portal .tms-link:hover { text-decoration: underline; background: none; }
+.tms-shell .tms-board-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+.tms-shell .tms-board { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; }
+.tms-shell .tms-board-main { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
+.tms-shell .tms-board-content { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
+
+/* Section headings (the Columns dialog) */
+.tms-shell .tms-board-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tms-shell .tms-board-section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--tms-text); }
+.tms-shell .tms-board-section-hint { font-size: 12px; color: var(--tms-badge-orange); font-style: italic; }
+
+
+.tms-shell .tms-board-detail-label { font-size: 12px; color: var(--tms-muted); }
+
+
+/* Shared small controls */
+.tms-shell .tms-board-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--tms-text); }
+.tms-shell .tms-board-check-input { width: 16px; height: 16px; accent-color: var(--tms-primary); cursor: pointer; }
+
+/* View tabs */
+.tms-shell .tms-board-tabs { display: flex; align-items: center; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--tms-border); overflow-x: hidden; }
+.tms-shell .tms-board-tab { position: relative; display: inline-flex; align-items: center; gap: 4px; height: 36px; padding: 0 12px; background: none; border: 0; color: var(--tms-muted); font-size: 14px; cursor: pointer; white-space: nowrap; }
+.tms-shell .tms-board-tab:hover { color: var(--tms-text); }
+.tms-shell .tms-board-tab.tms-active { color: var(--tms-text); box-shadow: inset 0 -2px 0 0 var(--tms-primary); }
+.tms-shell .tms-board-tab-dup { width: 20px; height: 20px; }
+.tms-shell .tms-board-tab-overflow { position: relative; }
+.tms-shell .tms-board-tab-overflow-menu { display: none; position: absolute; top: 100%; right: 0; z-index: 30; min-width: 160px; background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: 6px; box-shadow: var(--tms-shadow-pop); }
+.tms-shell .tms-board-tab-overflow:hover .tms-board-tab-overflow-menu,
+.tms-shell .tms-board-tab-overflow:focus-within .tms-board-tab-overflow-menu { display: block; }
+.tms-shell .tms-board-overflow-item { display: block; width: 100%; padding: 8px 12px; background: none; border: 0; color: var(--tms-text); text-align: left; cursor: pointer; font-size: 13px; }
+.tms-shell .tms-board-overflow-item:hover { background: var(--tms-surface-hover); }
+
+/* Grid */
+
+/* Footer */
+.tms-shell .tms-board-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--tms-border); font-size: 13px; color: var(--tms-muted); }
+.tms-shell .tms-board-footer-count strong { color: var(--tms-text); font-weight: 600; }
+.tms-shell .tms-board-footer-refresh { display: inline-flex; align-items: center; gap: 6px; }
+.tms-shell .tms-board-footer-toggle { padding: 2px 6px; background: var(--tms-input); border: 1px solid var(--tms-input-border); border-radius: 4px; color: var(--tms-text); font-size: 12px; cursor: pointer; }
+.tms-shell .tms-board-footer-toggle.tms-active { background: var(--tms-primary); color: var(--tms-on-primary); border-color: var(--tms-primary); }
+.tms-shell .tms-board-footer-badge { margin-left: 4px; padding: 1px 5px; border-radius: 999px; background: var(--tms-primary); color: var(--tms-on-primary); font-size: 10px; font-weight: 700; }
+
+/* Map view */
+.tms-shell .tms-board-map { flex: 1 1 auto; min-height: 300px; }
+.tms-shell .tms-board-map-empty { display: flex; align-items: center; justify-content: center; padding: 40px; color: var(--tms-muted); border: 1px dashed var(--tms-border); border-radius: 6px; }
+
+/* Icon key dialog */
+.tms-portal .tms-board-key-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.tms-portal .tms-board-key-heading { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+.tms-portal .tms-board-key-list { display: flex; flex-direction: column; gap: 8px; }
+.tms-portal .tms-board-key-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.tms-portal .tms-board-key-swatch { width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--tms-border); }
+.tms-portal .tms-board-key-swatch-delivered { background: var(--tms-row-delivered); }
+.tms-portal .tms-board-key-swatch-dispatched { background: var(--tms-row-dispatched); }
+.tms-portal .tms-board-key-swatch-departed { background: var(--tms-row-departed); }
+.tms-portal .tms-board-key-swatch-arrived { background: var(--tms-row-arrived); }
+.tms-portal .tms-board-key-swatch-covered { background: var(--tms-row-covered); }
+.tms-portal .tms-board-key-swatch-open { background: var(--tms-row-open); }
+.tms-portal .tms-board-key-swatch-hold { background: var(--tms-row-hold); }
+.tms-portal .tms-board-key-swatch-reserved { background: var(--tms-row-reserved); }
+.tms-portal .tms-board-key-swatch-voided { background: var(--tms-row-voided); }
+.tms-portal .tms-board-key-name { min-width: 90px; font-weight: 500; color: var(--tms-text); }
+.tms-portal .tms-board-key-statuses { color: var(--tms-muted); }
+.tms-portal .tms-board-key-icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: var(--tms-text); }
+
+/* Save dialogs (column template / filter set) */
+.tms-portal .tms-board-save-dialog { display: flex; flex-direction: column; gap: 12px; }
+.tms-portal .tms-board-save-label { font-size: 12px; color: var(--tms-muted); }
+.tms-portal .tms-board-save-scope { padding: 8px; border: 1px solid var(--tms-border); border-radius: 4px; }
+.tms-portal .tms-board-column-list { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
+.tms-portal .tms-board-column-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 4px; }
+.tms-portal .tms-board-column-row:hover { background: var(--tms-surface-hover); }
+.tms-portal .tms-board-column-off { opacity: 0.6; }
+.tms-portal .tms-board-column-order { display: flex; align-items: center; gap: 2px; }
+.tms-portal .tms-board-confirm { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--tms-text); }
+
+/* ── Dispatch workstation (P6/P7) ─────────────────────────────────────────── */
+
+.tms-shell .tms-dispatch-posting-row,
+.tms-shell .tms-dispatch-offer-row {
+  border-color: var(--tms-border);
+  background: var(--tms-card);
+  border-radius: var(--tms-radius);
+}
+
+.tms-shell .tms-text-destructive {
+  color: var(--tms-badge-red);
+}
+
+.tms-shell .tms-badge-stub {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--tms-count-bg);
+  color: var(--tms-count-ink);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* ── POD review (P9) ─────────────────────────────────────────────────────── */
+.tms-shell .tms-pod-flag {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--tms-badge-red);
+  border-radius: 6px;
+  background: var(--tms-badge-red-tint);
+  color: var(--tms-text);
+  margin-bottom: 12px;
+}
+
+.tms-shell .tms-pod-flag-title,
+.tms-shell .tms-pod-flag strong {
+  color: var(--tms-badge-red);
+}
+
+.tms-shell .tms-pod-request-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.tms-shell .tms-pod-doc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tms-shell .tms-pod-doc {
+  border: 1px solid var(--tms-border);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.tms-shell .tms-pod-doc-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tms-shell .tms-pod-reject-reason {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--tms-badge-red);
+}
+
+.tms-shell .tms-pod-outcome {
+  margin-top: 10px;
+  padding: 8px;
+  background: var(--tms-surface-subtle);
+  border-radius: 4px;
+}
+
+.tms-shell .tms-pod-outcome-reasons {
+  margin-top: 6px;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--tms-text);
+}
+
+/* ── Document preview dialog (TmsDialog xl) ──────────────────────────────── */
+/* The stage is the page/PDF/image matte: intentionally paper-white in both themes (data-tms-paper). */
+.tms-portal .tms-docprev-stage { min-height: 320px; max-height: 70vh; overflow: auto; background: var(--tms-paper); border: 1px solid var(--tms-border); border-radius: var(--tms-radius); }
+.tms-portal .tms-docprev-frame { display: block; width: 100%; height: 66vh; border: 0; background: var(--tms-paper); }
+.tms-portal .tms-docprev-img { display: block; max-width: 100%; margin: 0 auto; background: var(--tms-paper); }
+.tms-portal .tms-docprev-center { display: grid; place-items: center; align-content: center; min-height: 320px; gap: 8px; color: var(--tms-muted); }
+.tms-portal .tms-docprev-unsupported { padding: 24px; text-align: center; gap: 10px; background: var(--tms-card); }
+.tms-portal .tms-docprev-unsupported p { max-width: 420px; margin: 0; }
+.tms-portal .tms-docprev-open { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; }
+.tms-portal .tms-docprev-file { display: none; }
+
+/* ── Public pages (tokenised links): content classes inside TmsPublicFrame (frame itself lives in kit.css) ── */
+.tms-portal .tms-public-stack { display: grid; gap: 12px; }
+.tms-portal .tms-public-sub { font-size: 13px; color: var(--tms-muted); margin-top: 2px; }
+.tms-portal .tms-public-strong { font-size: 15px; font-weight: 600; color: var(--tms-text); }
+.tms-portal .tms-public-caption { padding: 12px 18px; font-size: 13px; color: var(--tms-muted); border-top: 1px solid var(--tms-border); }
+.tms-portal .tms-public-contact { display: flex; align-items: center; gap: 12px; }
+.tms-portal .tms-public-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
+.tms-portal .tms-public-footer-line { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; color: var(--tms-muted); }
+.tms-portal .tms-public-footer-line a { color: var(--tms-primary-ink); font-weight: 600; }
+.tms-portal .tms-public-cta { width: 100%; justify-content: center; gap: 10px; padding: 18px; font-size: 18px; font-weight: 700; border-radius: var(--tms-radius-card); }
+.tms-portal .tms-public-loading { padding: 48px 16px; text-align: center; color: var(--tms-muted); }
+.tms-portal .tms-public-section { padding: 16px 18px; display: grid; gap: 12px; }
+.tms-portal .tms-public-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--tms-muted); }
+.tms-portal .tms-public-field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--tms-muted); margin-top: 12px; }
+.tms-portal .tms-public-section .tms-public-field { margin-top: 0; }
+.tms-portal .tms-public-field .tms-input, .tms-portal .tms-public-field .tms-select, .tms-portal .tms-public-field .tms-textarea { width: 100%; font-size: 16px; }
+.tms-portal .tms-public-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.tms-portal .tms-public-grid-2 .tms-public-field { margin-top: 12px; }
+@media (max-width: 520px) { .tms-portal .tms-public-grid-2 { grid-template-columns: 1fr; } }
+.tms-portal .tms-public-checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.tms-portal .tms-public-check { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.tms-portal .tms-public-check-box { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--tms-input-border); background: var(--tms-card); color: var(--tms-on-primary); }
+.tms-portal .tms-public-check[data-done="true"] .tms-public-check-box { background: var(--tms-primary); border-color: var(--tms-primary); }
+.tms-portal .tms-public-check-label { font-weight: 600; color: var(--tms-text); }
+.tms-portal .tms-public-check[data-done="true"] .tms-public-check-label { font-weight: 500; color: var(--tms-muted); text-decoration: line-through; }
+.tms-portal .tms-public-file { padding: 10px 12px; }
+.tms-portal .tms-public-progress { height: 6px; border-radius: 3px; background: var(--tms-surface); overflow: hidden; }
+.tms-portal .tms-public-progress > div { height: 100%; background: var(--tms-primary); }
+.tms-portal .tms-public-intro { margin: 0 0 12px; color: var(--tms-muted); font-size: 14px; }
+.tms-portal .tms-public-countdown { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; }
+.tms-portal .tms-public-doc-title { display: inline-flex; align-items: center; gap: 6px; }
+.tms-portal .tms-public-paper { background: var(--tms-paper); }
+.tms-portal .tms-public-pdf { display: block; width: 100%; height: 520px; border: 0; background: var(--tms-paper); }
+.tms-portal .tms-public-agree { display: flex; align-items: flex-start; gap: 10px; margin-top: 12px; font-size: 14px; color: var(--tms-text); cursor: pointer; }
+.tms-portal .tms-public-agree input { margin-top: 3px; accent-color: var(--tms-primary); }
+.tms-portal .tms-public-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
+.tms-portal .tms-public-decline { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--tms-border); }
+.tms-portal .tms-public-decline .tms-textarea { width: 100%; margin-top: 6px; }
+.tms-portal .tms-public-stops { margin: 0 0 12px; padding-left: 18px; font-size: 14px; display: grid; gap: 4px; }
+.tms-portal .tms-public-stop-type { text-transform: capitalize; font-weight: 600; }
+.tms-portal .tms-public-price { width: 100%; }
+.tms-portal .tms-public-price td { padding: 8px 16px; }
+.tms-portal .tms-public-amount { text-align: right; font-variant-numeric: tabular-nums; }
+.tms-portal .tms-public-total td { font-weight: 600; border-top: 1px solid var(--tms-border); }
+.tms-portal .tms-public-message { margin: 0; white-space: pre-wrap; font-size: 14px; }
+.tms-portal .tms-public-choices { display: flex; flex-wrap: wrap; gap: 10px; }
+.tms-portal .tms-public-choice-active { outline: 2px solid var(--tms-primary); outline-offset: 2px; }
+.tms-portal .tms-public-terms { margin: 0; white-space: pre-wrap; font-size: 12px; color: var(--tms-muted); }

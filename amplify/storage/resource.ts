@@ -43,6 +43,19 @@ export const storage = defineStorage({
       allow.authenticated.to(['read']),
       allow.groups(STAFF_GROUPS).to(['read']),
     ],
+    /*
+     * The AI agents' inbox (Step K): the e-mail bodies and attachments a bridge hands
+     * over, keyed workflow-inbox/{runId}/…, plus parked webhook bodies.
+     *
+     * Read only from the browser, the `intake-pdfs/*` rule above: every byte here is
+     * written by workflow-agent's own role through a presigned PUT it signed and then
+     * HEAD-verified, and the run trace only ever shows what arrived. No delete — the
+     * message is the evidence for what the model was given.
+     */
+    'workflow-inbox/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read']),
+    ],
     // Appointment-confirmation screenshots (E2Open update + email confirmation),
     // pasted/uploaded per stop from the Appts page. Keyed appt-proofs/{loadId}/{stopId}/…
     'appt-proofs/*': [
@@ -102,6 +115,68 @@ export const storage = defineStorage({
      */
     'driver-docs/*': [
       allow.authenticated.to(['read', 'write']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
+    /*
+     * Carrier paperwork (Step C): authority, COIs, W9, the signed agreement, and
+     * every rate confirmation we generate or get back signed. Staff upload with
+     * a presigned PUT from tms-carrier-actions; the public signing Lambda writes
+     * the countersigned PDF with its own role.
+     *
+     * No delete for authenticated: DELETE_DOCUMENT removes the row and leaves
+     * the object, so what a carrier actually sent us survives a mis-click.
+     */
+    'carrier-docs/*': [
+      allow.authenticated.to(['read', 'write']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
+    /*
+     * Shipment paperwork (Step E): BOLs, PODs, load summaries, lumper receipts and
+     * whatever else a shipment collects, keyed shipment-docs/{shipmentId}/…
+     *
+     * Read only from the browser, deliberately. Every byte that lands here arrives
+     * through a presigned PUT the Lambda signed — pinned to a content type and a
+     * length it already validated — so there is no path for a logged-in page to put
+     * an arbitrary object next to a shipment's documents, and no delete at all:
+     * voiding a document marks the row and keeps the file as the record of what
+     * actually arrived.
+     */
+    'shipment-docs/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read']),
+    ],
+    /*
+     * Issued invoice PDFs (Step F), keyed invoices/{customerId}/{number}-v{n}.pdf.
+     *
+     * Written only by tms-finance-actions, with its own role, from bytes it rendered
+     * itself; the browser reads and never writes. Nothing is ever deleted — a voided
+     * invoice keeps its PDF, because somebody out there already has a copy of it.
+     */
+    'invoices/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read']),
+    ],
+    /*
+     * Remittance advices (Step G), keyed remittances/{carrierId}/{paymentId}-v{n}.pdf.
+     *
+     * Written only by tms-finance-actions from bytes it rendered itself; the browser
+     * reads and never writes, and nothing is ever deleted — a reversed payment keeps
+     * the advice the carrier was sent.
+     */
+    'remittances/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read']),
+    ],
+    // Brand assets (Step L): logos for square, wide, and document headers.
+    // Staff upload through presigned PUTs; authenticated users read for preview.
+    'brand/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
+    // Spreadsheet imports (Step L): uploaded sheets and per-row error CSVs.
+    // Staff upload and manage; authenticated users can read their own jobs' files.
+    'imports/*': [
+      allow.authenticated.to(['read']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
     ],
   })

@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Trash2 } from 'lucide-react'
+import { TmsButton } from '@/features/tms/kit/TmsButton'
+import { TmsDialog } from '@/features/tms/kit/TmsDialog'
 import { useAuth } from '@/hooks/useAuth'
 import type { Driver } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
@@ -86,31 +88,38 @@ export function TimeOffFormModal({ drivers, editing, onClose, onCreate, onUpdate
 
   const inputStyle: React.CSSProperties = {
     height: 34, padding: '0 9px', borderRadius: 6,
-    border: '1px solid var(--ds-border)', background: 'var(--ds-bg)',
-    color: 'var(--ds-t1)', fontSize: 13, fontFamily: 'inherit', width: '100%',
+    border: '1px solid var(--tms-border)', background: 'var(--tms-bg)',
+    color: 'var(--tms-text)', fontSize: 13, fontFamily: 'inherit', width: '100%',
   }
   const labelStyle: React.CSSProperties = {
-    fontSize: 11, fontWeight: 600, color: 'var(--ds-t2)',
+    fontSize: 11, fontWeight: 600, color: 'var(--tms-text-2)',
     textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 5,
   }
 
   return (
-    <div
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}
-      onMouseDown={onClose}
-    >
-      <div
-        style={{ background: 'var(--ds-surface)', borderRadius: 10, border: '1px solid var(--ds-border)', boxShadow: '0 8px 32px rgba(0,0,0,0.22)', width: 460, maxWidth: '92vw', maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>{isEdit ? 'Edit time off' : 'Add time off'}</span>
-          <button onClick={onClose} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--ds-t3)', lineHeight: 1, padding: '0 2px' }}>✕</button>
+    <TmsDialog
+      open
+      onOpenChange={(o) => { if (!o) onClose() }}
+      title={isEdit ? 'Edit time off' : 'Add time off'}
+      footer={
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%' }}>
+          {isEdit ? (
+            <TmsButton variant="destructive" onClick={handleDelete} disabled={deleting || saving}>
+              <Trash2 size={14} /> {deleting ? 'Removing…' : 'Remove'}
+            </TmsButton>
+          ) : <span />}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <TmsButton variant="secondary" onClick={onClose}>Cancel</TmsButton>
+            {!readOnly && (
+              <TmsButton variant="primary" onClick={handleSave} disabled={saving || deleting || !canSubmit}>
+                {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add'}
+              </TmsButton>
+            )}
+          </div>
         </div>
-
-        {/* Form */}
-        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
+      }
+    >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
             <label style={labelStyle}>Driver</label>
             <select aria-label="Driver" value={driverId} onChange={(e) => setDriverId(e.target.value)} disabled={readOnly} style={inputStyle}>
@@ -168,39 +177,8 @@ export function TimeOffFormModal({ drivers, editing, onClose, onCreate, onUpdate
             <label style={labelStyle}>Note (optional)</label>
             <input type="text" aria-label="Note" placeholder="e.g. Doctor appointment" value={note} disabled={readOnly} onChange={(e) => setNote(e.target.value)} style={inputStyle} />
           </div>
-          {error && <div role="alert" style={{ fontSize: 12.5, color: '#b91c1c' }}>{error}</div>}
+          {error && <div role="alert" style={{ fontSize: 12.5, color: 'var(--tms-badge-red)' }}>{error}</div>}
         </div>
-
-        {/* Footer */}
-        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexShrink: 0 }}>
-          {isEdit ? (
-            <button
-              onClick={handleDelete}
-              disabled={deleting || saving}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 12px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: '#dc2626', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: deleting ? 0.5 : 1 }}
-            >
-              <Trash2 size={14} /> {deleting ? 'Removing…' : 'Remove'}
-            </button>
-          ) : <span />}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={onClose}
-              style={{ height: 34, padding: '0 14px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}
-            >
-              Cancel
-            </button>
-            {!readOnly && (
-              <button
-                onClick={handleSave}
-                disabled={saving || deleting || !canSubmit}
-                style={{ height: 34, padding: '0 18px', borderRadius: 6, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: canSubmit ? 'pointer' : 'default', opacity: (!canSubmit || saving) ? 0.5 : 1 }}
-              >
-                {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add'}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+    </TmsDialog>
   )
 }

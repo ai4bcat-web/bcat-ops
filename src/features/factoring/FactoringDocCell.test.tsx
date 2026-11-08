@@ -81,11 +81,16 @@ describe('attaching a document to a factoring row', () => {
   it('still reports the upload as done when readiness cannot be rebuilt', async () => {
     // The document is attached either way, and the row has its own Refresh. A failure to
     // rebuild a cache must never read as a failed upload.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     assembleInvoice.mockRejectedValueOnce(new Error('network'))
     const onUploaded = vi.fn()
     const input = renderCell('POD', onUploaded)
     fireEvent.change(input, { target: { files: [file('pod.jpg', 'image/jpeg')] } })
 
     await waitFor(() => expect(onUploaded).toHaveBeenCalled())
+    expect(warn).toHaveBeenCalledWith(
+      '[factoring] could not rebuild readiness after the upload', '14538', expect.any(Error),
+    )
+    warn.mockRestore()
   })
 })

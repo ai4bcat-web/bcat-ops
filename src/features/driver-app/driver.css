@@ -1,0 +1,27 @@
+/*
+ * Driver PWA root. The colour tokens come from theme.css (the `.tms-driver` selector sits in
+ * its token blocks and shadcn bridge); this file only owns the page frame. No colour
+ * literals here: every colour is a var(--tms-*) token, so the light/dark toggle in Account
+ * needs nothing else.
+ */
+.tms-driver {
+  min-height: 100dvh;
+  background: var(--tms-bg);
+  color: var(--tms-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Full-screen pages that own both edges (login, signup, loading, profile error). The app
+   shell does not use this: its tab bar owns the bottom inset. */
+.tms-driver-inset {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* The app shell: exactly one viewport, the <main> scrolls inside it. */
+.tms-driver-app {
+  height: 100dvh;
+  min-height: 0;
+  padding-top: env(safe-area-inset-top);
+}

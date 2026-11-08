@@ -20,6 +20,7 @@
  * someone to link it by hand: compare only normalized PRO strings of at least three
  * characters, and never fall back to a partial or fuzzy match.
  */
+import { normalizePro } from './proNumber'
 
 /**
  * Where a document actually lives, so a screen can open the thing rather than only say
@@ -95,21 +96,6 @@ export interface PodIndex {
    * is already there.
    */
   podPages: { byLoadId: Map<string, number>; byPro: Map<string, number> }
-}
-
-/**
- * Normalize a PRO for comparison. The live table stores them padded ("14452  "), and
- * a driver may type "PRO 13364" or "pro#13364" for the same load, so strip to
- * alphanumerics and upper-case. Returns null for anything too short to be a real PRO.
- */
-export function normalizePro(value: string | null | undefined): string | null {
-  const raw = (value ?? '').trim()
-  if (!raw) return null
-  if (raw.toUpperCase() === 'N/A') return null
-  // Drop a leading "PRO" label if the person typed one, then keep alphanumerics.
-  const stripped = raw.replace(/^\s*pro\s*#?\s*/i, '')
-  const key = stripped.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
-  return key.length >= 3 ? key : null
 }
 
 /** Build the lookup once per page load, then ask it per trip. */

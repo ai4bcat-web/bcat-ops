@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { useLoads } from '@/hooks/useLoads'
+import { useLoads, useEnsureLoadRange } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useDriverAvailability } from '@/hooks/useDriverAvailability'
 import { CalendarToolbar } from './CalendarToolbar'
 import { PlannerView } from './PlannerView'
 import { GridCalendarView } from './GridCalendarView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
+import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDialog'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { CalendarPaperworkProvider } from './CalendarPaperwork'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
@@ -25,14 +26,21 @@ const VIEW_CONFIG: Record<ViewMode, { navDays: number }> = {
 }
 
 const STATUS_LEGEND = [
-  { label: 'Ready',       color: '#22c55e' },
-  { label: 'In Progress', color: '#1ea8f3' },
-  { label: 'Needs Action',color: '#f59e0b' },
+  { label: 'Ready',       color: 'var(--tms-primary)' },
+  { label: 'In Progress', color: 'var(--tms-primary)' },
+  { label: 'Needs Action',color: 'var(--tms-badge-orange)' },
 ]
+
+/** Local calendar day as 'YYYY-MM-DD' (the board navigates in the system timezone). */
+function ymd(d: Date): string {
+  return `${String(d.getFullYear()).padStart(4, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 export function CalendarPage() {
   const searchQuery = useAppStore((s) => s.searchQuery)
   const filters     = useAppStore((s) => s.filters)
+  const newShipmentPrefill = useAppStore((s) => s.newShipmentPrefill)
+  const closeNewShipment   = useAppStore((s) => s.closeNewShipment)
 
   const { loads }   = useLoads()
   const { drivers } = useDrivers()
@@ -80,6 +88,11 @@ export function CalendarPage() {
     return []
   }, [currentView, startDate])
 
+  // The days the board shows; the store windows these (±1 month) in and the poll refreshes only them.
+  const visibleFrom = ymd(currentView === 'month' ? startDate : cols[0])
+  const visibleTo   = ymd(currentView === 'month' ? new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0) : cols[cols.length - 1])
+  useEnsureLoadRange(visibleFrom, visibleTo)
+
   const dateLabel = useMemo(() => {
     if (currentView === 'month') {
       return startDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
@@ -125,7 +138,7 @@ export function CalendarPage() {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); useAppStore.getState().setSelectedLoad(null, 'create') }
+      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); useAppStore.getState().openNewShipment() }
       if (e.key === 'ArrowLeft')  { e.preventDefault(); setStartDate((d) => addDays(d, -navDays)) }
       if (e.key === 'ArrowRight') { e.preventDefault(); setStartDate((d) => addDays(d, navDays))  }
       if (e.key === 'Escape')     { useAppStore.getState().setFilterDriver(null) }
@@ -135,13 +148,13 @@ export function CalendarPage() {
   }, [navDays])
 
   // ── Periodic refresh ────────────────────────────────────────────────────────
-  // Real-time subscriptions keep clients in sync, but a periodic full refetch is a
+  // Real-time subscriptions keep clients in sync, but a periodic refetch of the visible window is a
   // safety net so every open calendar converges on the current server state even if a
   // subscription event was missed (sleep/wake, dropped socket, etc.). Pauses while the
   // tab is hidden and does an immediate catch-up refresh when it becomes visible again.
   useEffect(() => {
     const REFRESH_MS = 60_000
-    const refreshAll = () => { void useAppStore.getState().refreshCalendarData(); void refreshAvailability() }
+    const refreshAll = () => { void useAppStore.getState().refreshCalendarData({ from: visibleFrom, to: visibleTo }); void refreshAvailability() }
     let timer = window.setInterval(refreshAll, REFRESH_MS)
     const onVisibility = () => {
       window.clearInterval(timer)
@@ -152,7 +165,7 @@ export function CalendarPage() {
     }
     document.addEventListener('visibilitychange', onVisibility)
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [refreshAvailability])
+  }, [refreshAvailability, visibleFrom, visibleTo])
 
   // ── Filter loads ──────────────────────────────────────────────────────────
 
@@ -193,14 +206,14 @@ export function CalendarPage() {
       {/* ── Page header ────────────────────────────────────────────────────── */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '14px 24px', borderBottom: '1px solid var(--ds-border)',
-        background: 'var(--ds-surface)', flexShrink: 0, gap: 16, flexWrap: 'wrap',
+        padding: '14px 24px', borderBottom: '1px solid var(--tms-border)',
+        background: 'var(--tms-card)', flexShrink: 0, gap: 16, flexWrap: 'wrap',
       }}>
         <div>
-          <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>
+          <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--tms-text)', margin: 0 }}>
             Calendar
           </h1>
-          <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
+          <p style={{ fontSize: 12.5, color: 'var(--tms-muted)', marginTop: 2 }}>
             {dateLabel} · BCAT freight movements
           </p>
         </div>
@@ -208,14 +221,14 @@ export function CalendarPage() {
         {/* Status legend + availability button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {STATUS_LEGEND.map(({ label, color }) => (
-            <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t3)' }}>
+            <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tms-muted)' }}>
               <span style={{ width: 8, height: 8, background: color, borderRadius: 2, display: 'inline-block', flexShrink: 0 }} />
               {label}
             </span>
           ))}
           <button
             onClick={() => setShowAvailModal(true)}
-            style={{ height: 30, padding: '0 12px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0 }}
+            style={{ height: 30, padding: '0 12px', borderRadius: 6, border: '1px solid var(--tms-border)', background: 'var(--tms-bg)', color: 'var(--tms-text-2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0 }}
           >
             Driver Availability
           </button>
@@ -240,9 +253,9 @@ export function CalendarPage() {
         flex: 1, overflow: 'hidden',
         margin: '12px 16px 16px',
         borderRadius: 12,
-        border: '1px solid var(--ds-border)',
-        boxShadow: 'var(--sh-sm)',
-        background: 'var(--ds-surface)',
+        border: '1px solid var(--tms-border)',
+        boxShadow: 'var(--tms-shadow)',
+        background: 'var(--tms-card)',
       }}>
         <CalendarErrorBoundary>
           {/* Mobile uses the SAME day/week/month views as desktop (they scroll
@@ -270,6 +283,18 @@ export function CalendarPage() {
       </div>
 
       <LoadDrawer />
+
+      {/*
+        Every "+" on this page — the toolbar button, the day columns, the 'n' key and the
+        scheduler's drag-create — raises this form. It writes nothing until Save, which is
+        the point: a shipment number is permanent and can only be voided.
+      */}
+      <NewShipmentDialog
+        open={newShipmentPrefill !== null}
+        prefill={newShipmentPrefill}
+        onClose={closeNewShipment}
+        onCreated={closeNewShipment}
+      />
 
       {showAvailModal && (
         <DriverAvailabilityModal

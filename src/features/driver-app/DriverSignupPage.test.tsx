@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom/vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import DriverSignupPage from './DriverSignupPage'
 
@@ -66,7 +66,7 @@ async function submitForm() {
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: EMAIL } })
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: PASSWORD } })
   fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: PASSWORD } })
-  fireEvent.click(screen.getByRole('button', { name: /sign up/i }))
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /sign up/i })) })
 }
 
 beforeEach(() => {

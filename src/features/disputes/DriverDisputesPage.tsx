@@ -18,6 +18,8 @@ import { fileContentType } from '@/lib/disputeFiles'
 import { addDays, formatPayPeriod, formatWeekLabel, toLocalDateString } from '@/lib/payPeriod'
 import { FileDrop } from './FileDrop'
 import { staffSupportingFileRejection, MAX_EVIDENCE_FILES } from './disputeEvidence'
+import { TmsBadge, type TmsTone } from '@/features/tms/kit/TmsBadge'
+import { TmsPublicFrame } from '@/features/tms/kit/TmsPublicFrame'
 
 const TITLE_BASE = 'Ivan Cartage — Amazon Dispute Portal'
 const CONTACT_EMAIL = 'help@bcatcorp.com'
@@ -37,18 +39,18 @@ const PAY_PERIOD_WEEKS = 104
 const POLL_MS = 30000
 const DRIVER_NOT_LISTED = '__not_listed__'
 
-const STATUS_META: Record<BoardItem['status'], { label: string; bg: string; fg: string }> = {
-  PENDING: { label: 'Pending', bg: 'var(--ds-amber-bg)', fg: 'var(--ds-amber)' },
-  POSTED: { label: 'Filed with Amazon', bg: 'var(--ds-blue-bg)', fg: 'var(--ds-blue-dark)' },
-  PAID: { label: 'Paid', bg: 'var(--ds-green-bg)', fg: 'var(--ds-green)' },
-  REJECTED: { label: 'Rejected', bg: 'var(--ds-red-bg)', fg: 'var(--ds-red)' },
+const STATUS_META: Record<BoardItem['status'], { label: string; tone: TmsTone }> = {
+  PENDING: { label: 'Pending', tone: 'orange' },
+  POSTED: { label: 'Filed with Amazon', tone: 'blue' },
+  PAID: { label: 'Paid', tone: 'green' },
+  REJECTED: { label: 'Rejected', tone: 'red' },
 }
 
 const cardStyle: CSSProperties = {
-  background: 'var(--ds-surface)',
-  border: '1px solid var(--ds-border)',
+  background: 'var(--tms-card)',
+  border: '1px solid var(--tms-border)',
   borderRadius: 12,
-  boxShadow: 'var(--sh-sm)',
+  boxShadow: 'var(--tms-shadow)',
   padding: 14,
 }
 
@@ -61,8 +63,8 @@ const btnPrimary: CSSProperties = {
   padding: '11px 22px',
   fontSize: 14,
   fontWeight: 600,
-  background: 'var(--ds-blue)',
-  color: '#fff',
+  background: 'var(--tms-primary)',
+  color: 'var(--tms-on-primary)',
   border: 'none',
   cursor: 'pointer',
   minHeight: 44,
@@ -71,16 +73,16 @@ const btnPrimary: CSSProperties = {
 const inputStyle: CSSProperties = {
   width: '100%',
   borderRadius: 9,
-  border: '1px solid var(--ds-border)',
+  border: '1px solid var(--tms-border)',
   padding: '10px 12px',
   fontSize: 14,
-  background: 'var(--ds-surface)',
-  color: 'var(--ds-t1)',
+  background: 'var(--tms-card)',
+  color: 'var(--tms-text)',
   outline: 'none',
   minHeight: 44,
 }
 
-const inputClass = 'focus:border-[var(--ds-blue)] focus:ring-2 focus:ring-[var(--ds-blue)] focus:outline-none'
+const inputClass = 'focus:border-[var(--tms-primary)] focus:ring-2 focus:ring-[var(--tms-primary)] focus:outline-none'
 
 const chipBase: CSSProperties = {
   display: 'inline-flex',
@@ -98,7 +100,7 @@ const sectionLabel: CSSProperties = {
   fontWeight: 700,
   textTransform: 'uppercase',
   letterSpacing: '0.05em',
-  color: 'var(--ds-t3)',
+  color: 'var(--tms-muted)',
 }
 
 // Centered content column — matches DriverPortalPage (720px, generous padding).
@@ -398,16 +400,16 @@ export function DriverDisputesPage() {
     return (
       <Shell driverName={driverName}>
         <div className="max-w-md text-center" style={{ marginLeft: 'auto', marginRight: 'auto', paddingLeft: 16, paddingRight: 16, paddingTop: 64, paddingBottom: 64 }}>
-          <AlertTriangle size={40} style={{ color: 'var(--ds-amber)', marginLeft: 'auto', marginRight: 'auto', marginBottom: 16 }} />
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--ds-t1)', marginBottom: 8 }}>
+          <AlertTriangle size={40} style={{ color: 'var(--tms-badge-orange)', marginLeft: 'auto', marginRight: 'auto', marginBottom: 16 }} />
+          <h1 className="text-xl font-semibold" style={{ color: 'var(--tms-text)', marginBottom: 8 }}>
             Dispute portal unavailable
           </h1>
-          <p className="text-sm" style={{ color: 'var(--ds-t2)' }}>
+          <p className="text-sm" style={{ color: 'var(--tms-text-2)' }}>
             This page can't connect right now. The endpoint is not configured on this preview.
           </p>
-          <p className="text-sm" style={{ color: 'var(--ds-muted-soft)', marginTop: 16 }}>
+          <p className="text-sm" style={{ color: 'var(--tms-disabled)', marginTop: 16 }}>
             Staff can reach us at{' '}
-            <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: 'var(--ds-blue)' }}>
+            <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: 'var(--tms-primary)' }}>
               {CONTACT_EMAIL}
             </a>
           </p>
@@ -421,9 +423,9 @@ export function DriverDisputesPage() {
     borderRadius: 9,
     fontSize: 14,
     fontWeight: 600,
-    border: `1px solid ${active ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
-    background: active ? 'var(--ds-blue)' : 'var(--ds-surface)',
-    color: active ? '#fff' : 'var(--ds-t2)',
+    border: `1px solid ${active ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
+    background: active ? 'var(--tms-primary)' : 'var(--tms-card)',
+    color: active ? 'var(--tms-on-primary)' : 'var(--tms-text-2)',
     cursor: 'pointer',
     fontFamily: 'inherit',
   })
@@ -432,9 +434,9 @@ export function DriverDisputesPage() {
     borderRadius: 999,
     fontSize: 13,
     fontWeight: 600,
-    border: `1px solid ${active ? 'var(--ds-blue-dark)' : 'var(--ds-border)'}`,
-    background: active ? 'var(--ds-blue-bg)' : 'var(--ds-surface)',
-    color: active ? 'var(--ds-blue-dark)' : 'var(--ds-t2)',
+    border: `1px solid ${active ? 'var(--tms-primary-ink)' : 'var(--tms-border)'}`,
+    background: active ? 'var(--tms-primary-tint)' : 'var(--tms-card)',
+    color: active ? 'var(--tms-primary-ink)' : 'var(--tms-text-2)',
     cursor: 'pointer',
     fontFamily: 'inherit',
   })
@@ -448,7 +450,7 @@ export function DriverDisputesPage() {
           </button>
           <button type="button" role="tab" aria-selected={view === 'board'} onClick={() => setView('board')} style={tabStyle(view === 'board')}>
             Status board
-            <span style={{ ...chipBase, marginLeft: 8, background: view === 'board' ? 'rgba(255,255,255,0.22)' : 'var(--ds-bg-2)', color: view === 'board' ? '#fff' : 'var(--ds-t2)' }}>
+            <span style={{ ...chipBase, marginLeft: 8, background: view === 'board' ? 'var(--tms-primary-tint)' : 'var(--tms-surface)', color: view === 'board' ? 'var(--tms-primary-ink)' : 'var(--tms-text-2)' }}>
               {filterCounts.all}
             </span>
           </button>
@@ -456,10 +458,10 @@ export function DriverDisputesPage() {
 
         {view === 'submit' && (<>
         <div style={{ marginBottom: 20 }}>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--ds-t1)' }}>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--tms-text)' }}>
             Submit an Amazon pay dispute
           </h1>
-          <p className="text-sm" style={{ color: 'var(--ds-t3)', marginTop: 4 }}>
+          <p className="text-sm" style={{ color: 'var(--tms-muted)', marginTop: 4 }}>
             If Amazon paid less than expected, fill this out and upload your trip confirmation email.
             Amounts and evidence remain staff-only.
           </p>
@@ -474,7 +476,7 @@ export function DriverDisputesPage() {
             <div
               role="status"
               className="flex items-center gap-2 rounded-lg text-sm font-medium"
-              style={{ background: 'var(--ds-green-bg)', color: 'var(--ds-green)', marginBottom: 12, padding: 12 }}
+              style={{ background: 'var(--tms-badge-green-tint)', color: 'var(--tms-badge-green)', marginBottom: 12, padding: 12 }}
             >
               <CheckCircle2 size={16} />
               <span>
@@ -487,7 +489,7 @@ export function DriverDisputesPage() {
             <div
               role="alert"
               className="flex items-center gap-2 rounded-lg text-sm font-medium"
-              style={{ background: 'var(--ds-red-bg)', color: 'var(--ds-red)', marginBottom: 12, padding: 12 }}
+              style={{ background: 'var(--tms-badge-red-tint)', color: 'var(--tms-badge-red)', marginBottom: 12, padding: 12 }}
             >
               <AlertTriangle size={16} />
               <span>{submitError}</span>
@@ -542,7 +544,7 @@ export function DriverDisputesPage() {
                         type="button"
                         onClick={() => { setDriverNotListed(false); setDriverName('') }}
                         className="text-xs font-medium"
-                        style={{ marginTop: 6, color: 'var(--ds-blue)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                        style={{ marginTop: 6, color: 'var(--tms-primary)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
                       >
                         Back to the driver list
                       </button>
@@ -592,7 +594,7 @@ export function DriverDisputesPage() {
                   required
                 />
                 {selectedPeriod && (
-                  <span className="block text-xs" style={{ color: 'var(--ds-t3)', marginTop: 4 }}>
+                  <span className="block text-xs" style={{ color: 'var(--tms-muted)', marginTop: 4 }}>
                     Must be between{' '}
                     <span className="font-mono">{toLocalDateString(selectedPeriod.start)}</span> and{' '}
                     <span className="font-mono">{toLocalDateString(selectedPeriod.end)}</span>.
@@ -656,7 +658,7 @@ export function DriverDisputesPage() {
             <div style={{ ...sectionLabel, marginBottom: 12 }}>
               Evidence
             </div>
-            <div className="rounded-xl" style={{ display: 'flex', flexDirection: 'column', gap: 16, background: 'var(--ds-bg-2)', padding: 12 }}>
+            <div className="rounded-xl" style={{ display: 'flex', flexDirection: 'column', gap: 16, background: 'var(--tms-surface)', padding: 12 }}>
               <FileDrop
                 id="evidence"
                 label="Trip confirmation email and any other photos for proof *"
@@ -693,7 +695,7 @@ export function DriverDisputesPage() {
             </button>
           </div>
 
-          <p className="text-xs" style={{ color: 'var(--ds-muted-soft)', marginTop: 12 }}>
+          <p className="text-xs" style={{ color: 'var(--tms-disabled)', marginTop: 12 }}>
             Submission ID (kept across retries): <span className="font-mono">{submissionId}</span>
           </p>
         </section>
@@ -704,10 +706,10 @@ export function DriverDisputesPage() {
         <section aria-labelledby="board-title" style={cardStyle}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" style={{ marginBottom: 12 }}>
             <div className="flex items-center gap-2">
-              <h2 id="board-title" className="text-base font-semibold" style={{ color: 'var(--ds-t1)' }}>
+              <h2 id="board-title" className="text-base font-semibold" style={{ color: 'var(--tms-text)' }}>
                 Shared dispute status board
               </h2>
-              <span style={{ ...chipBase, background: 'var(--ds-bg-2)', color: 'var(--ds-t2)' }}>
+              <span style={{ ...chipBase, background: 'var(--tms-surface)', color: 'var(--tms-text-2)' }}>
                 {filteredItems.length}
               </span>
             </div>
@@ -716,7 +718,7 @@ export function DriverDisputesPage() {
                 <Search
                   size={15}
                   className="absolute left-2.5 top-1/2 -translate-y-1/2"
-                  style={{ color: 'var(--ds-muted-soft)' }}
+                  style={{ color: 'var(--tms-disabled)' }}
                 />
                 <input
                   type="text"
@@ -737,7 +739,7 @@ export function DriverDisputesPage() {
                 }}
                 disabled={boardLoading}
                 className="inline-flex items-center gap-1.5 rounded-lg border text-sm font-medium"
-                style={{ borderColor: 'var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8 }}
+                style={{ borderColor: 'var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8 }}
               >
                 <RefreshCw size={15} className={boardLoading ? 'animate-spin' : ''} /> Refresh
               </button>
@@ -762,7 +764,7 @@ export function DriverDisputesPage() {
             <div
               role="alert"
               className="flex items-center gap-2 rounded-lg text-sm font-medium"
-              style={{ background: 'var(--ds-red-bg)', color: 'var(--ds-red)', marginBottom: 12, padding: 12 }}
+              style={{ background: 'var(--tms-badge-red-tint)', color: 'var(--tms-badge-red)', marginBottom: 12, padding: 12 }}
             >
               <AlertTriangle size={16} />
               <span>{boardError}</span>
@@ -772,13 +774,13 @@ export function DriverDisputesPage() {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                <tr style={{ borderBottom: '1px solid var(--tms-border)' }}>
                   <th
                     className="uppercase"
                     style={{
                       textAlign: 'left',
                       padding: '8px 6px',
-                      color: 'var(--ds-t3)',
+                      color: 'var(--tms-muted)',
                       fontSize: 11,
                       fontWeight: 700,
                       letterSpacing: '0.05em',
@@ -791,7 +793,7 @@ export function DriverDisputesPage() {
                     style={{
                       textAlign: 'left',
                       padding: '8px 6px',
-                      color: 'var(--ds-t3)',
+                      color: 'var(--tms-muted)',
                       fontSize: 11,
                       fontWeight: 700,
                       letterSpacing: '0.05em',
@@ -804,7 +806,7 @@ export function DriverDisputesPage() {
                     style={{
                       textAlign: 'left',
                       padding: '8px 6px',
-                      color: 'var(--ds-t3)',
+                      color: 'var(--tms-muted)',
                       fontSize: 11,
                       fontWeight: 700,
                       letterSpacing: '0.05em',
@@ -817,7 +819,7 @@ export function DriverDisputesPage() {
                     style={{
                       textAlign: 'left',
                       padding: '8px 6px',
-                      color: 'var(--ds-t3)',
+                      color: 'var(--tms-muted)',
                       fontSize: 11,
                       fontWeight: 700,
                       letterSpacing: '0.05em',
@@ -830,7 +832,7 @@ export function DriverDisputesPage() {
                     style={{
                       textAlign: 'left',
                       padding: '8px 6px',
-                      color: 'var(--ds-t3)',
+                      color: 'var(--tms-muted)',
                       fontSize: 11,
                       fontWeight: 700,
                       letterSpacing: '0.05em',
@@ -843,7 +845,7 @@ export function DriverDisputesPage() {
                     style={{
                       textAlign: 'right',
                       padding: '8px 6px',
-                      color: 'var(--ds-t3)',
+                      color: 'var(--tms-muted)',
                       fontSize: 11,
                       fontWeight: 700,
                       letterSpacing: '0.05em',
@@ -856,7 +858,7 @@ export function DriverDisputesPage() {
               <tbody>
                 {filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>
+                    <td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--tms-muted)', fontSize: 13 }}>
                       {boardLoading ? (
                         <span className="inline-flex items-center gap-2">
                           <Loader2 size={16} className="animate-spin" /> Loading disputes…
@@ -868,30 +870,30 @@ export function DriverDisputesPage() {
                   </tr>
                 ) : (
                   filteredItems.map((item) => (
-                    <tr key={item.id} style={{ borderBottom: '1px solid var(--ds-border-soft)' }}>
-                      <td style={{ padding: '10px 6px', color: 'var(--ds-t1)' }} className="font-medium">
+                    <tr key={item.id} style={{ borderBottom: '1px solid var(--tms-border)' }}>
+                      <td style={{ padding: '10px 6px', color: 'var(--tms-text)' }} className="font-medium">
                         {item.driverName}
                       </td>
                       <td
                         style={{
                           padding: '10px 6px',
-                          color: 'var(--ds-t2)',
+                          color: 'var(--tms-text-2)',
                           fontFamily: 'var(--font-mono, monospace)',
                         }}
                       >
                         {item.tripNumber ?? '—'}
                       </td>
-                      <td style={{ padding: '10px 6px', color: 'var(--ds-t2)' }}>
+                      <td style={{ padding: '10px 6px', color: 'var(--tms-text-2)' }}>
                         {item.payPeriod ? formatPayPeriod(item.payPeriod) : '—'}
                       </td>
-                      <td style={{ padding: '10px 6px', color: 'var(--ds-t2)' }}>
+                      <td style={{ padding: '10px 6px', color: 'var(--tms-text-2)' }}>
                         {item.shipmentDate ? formatDisplayDate(item.shipmentDate) : '—'}
                       </td>
                       <td style={{ padding: '10px 6px' }}>{statusPill(item.status)}</td>
                       <td
                         style={{
                           padding: '10px 6px',
-                          color: 'var(--ds-t2)',
+                          color: 'var(--tms-text-2)',
                           textAlign: 'right',
                           fontVariantNumeric: 'tabular-nums',
                         }}
@@ -908,17 +910,17 @@ export function DriverDisputesPage() {
         )}
 
         {/* Footer help card */}
-        <div style={{ ...cardStyle, marginTop: 24, padding: '16px 18px', background: 'var(--ds-bg)' }}>
-          <div className="text-sm font-semibold" style={{ color: 'var(--ds-t1)' }}>
+        <div style={{ ...cardStyle, marginTop: 24, padding: '16px 18px', background: 'var(--tms-bg)' }}>
+          <div className="text-sm font-semibold" style={{ color: 'var(--tms-text)' }}>
             Need a hand?
           </div>
-          <div className="text-sm" style={{ color: 'var(--ds-t3)', marginTop: 4 }}>
+          <div className="text-sm" style={{ color: 'var(--tms-muted)', marginTop: 4 }}>
             Questions about a dispute? Our team is happy to help.
           </div>
           <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm" style={{ marginTop: 8 }}>
             <a
               href={`mailto:${CONTACT_EMAIL}`}
-              style={{ color: 'var(--ds-blue)', fontWeight: 600, textDecoration: 'none' }}
+              style={{ color: 'var(--tms-primary)', fontWeight: 600, textDecoration: 'none' }}
             >
               {CONTACT_EMAIL}
             </a>
@@ -934,65 +936,35 @@ export function DriverDisputesPage() {
 function Shell({ children, driverName }: { children: React.ReactNode; driverName?: string }) {
   const initials = initialsOf(driverName ?? '')
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--ds-bg)', display: 'flex', flexDirection: 'column' }}>
-      {/* Black sticky top bar — carrier identity, always visible while the driver scrolls. */}
-      <header
-        style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 20,
-          background: '#0e1116',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
-        }}
-      >
-        <div className="flex w-full items-center gap-3" style={{ ...PORTAL_MAXW, marginLeft: 'auto', marginRight: 'auto', paddingLeft: 16, paddingRight: 16, height: 60 }}>
+    <TmsPublicFrame brand="IVAN CARTAGE" subtitle="Amazon dispute portal" width="lg">
+      <div className="flex items-center gap-3" style={{ justifyContent: 'flex-end' }}>
+        <a
+          href="/disputes"
+          className="text-sm font-semibold hover:underline"
+          style={{ color: 'var(--tms-primary-ink)', textDecoration: 'none' }}
+        >
+          Staff view
+        </a>
+        {initials && (
           <div
-            className="flex h-9 w-9 items-center justify-center rounded-lg"
-            style={{ background: 'linear-gradient(135deg, var(--ds-blue) 0%, var(--ds-blue-dark) 100%)' }}
+            className="flex items-center justify-center"
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: '50%',
+              background: 'var(--tms-primary-tint)',
+              color: 'var(--tms-primary-ink)',
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+            title={driverName}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M5 4h7a4 4 0 0 1 0 8H5z M5 12h8a4 4 0 0 1 0 8H5z" fill="white" />
-            </svg>
+            {initials}
           </div>
-          <div>
-            <div className="text-sm font-bold" style={{ color: '#fff', letterSpacing: '0.02em' }}>
-              IVAN <span style={{ color: 'var(--ds-blue)' }}>CARTAGE</span>
-            </div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 1 }}>Amazon dispute portal</div>
-          </div>
-          <div className="flex items-center gap-3" style={{ marginLeft: 'auto' }}>
-            <a
-              href="/disputes"
-              className="text-sm font-semibold hover:underline"
-              style={{ color: 'var(--ds-blue)', textDecoration: 'none' }}
-            >
-              Staff view
-            </a>
-            {initials && (
-              <div
-                className="flex items-center justify-center"
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: '50%',
-                  background: 'rgba(255,255,255,0.12)',
-                  color: '#fff',
-                  fontSize: 13,
-                  fontWeight: 600,
-                }}
-                title={driverName}
-              >
-                {initials}
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-      {/* Center the content on the page — vertically + horizontally — and scroll when it's tall. */}
-      <main style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
-        <div style={{ width: '100%', maxWidth: 720 }}>{children}</div>
-      </main>
-    </div>
+        )}
+      </div>
+      {children}
+    </TmsPublicFrame>
   )
 }
 
@@ -1009,7 +981,7 @@ function Field({
 }) {
   return (
     <div style={style}>
-      <label htmlFor={htmlFor} className="block text-sm font-medium" style={{ color: 'var(--ds-t1)', marginBottom: 4 }}>
+      <label htmlFor={htmlFor} className="block text-sm font-medium" style={{ color: 'var(--tms-text)', marginBottom: 4 }}>
         {label}
       </label>
       {children}
@@ -1028,9 +1000,5 @@ function formatCurrency(dollars: number): string {
 
 function statusPill(status: BoardItem['status']) {
   const meta = STATUS_META[status] ?? STATUS_META.PENDING
-  return (
-    <span style={{ ...chipBase, background: meta.bg, color: meta.fg }}>
-      {meta.label}
-    </span>
-  )
+  return <TmsBadge tone={meta.tone}>{meta.label}</TmsBadge>
 }

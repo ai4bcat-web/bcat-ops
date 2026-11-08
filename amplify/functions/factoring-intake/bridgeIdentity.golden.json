@@ -1,0 +1,463 @@
+{
+ "canonical invoice": {
+  "statusCode": 200,
+  "body": {
+   "ok": true,
+   "id": "01234",
+   "proNumber": "01234",
+   "duplicate": false
+  },
+  "puts": [
+   {
+    "TableName": "FactoringItem-guard",
+    "ConditionExpression": "attribute_not_exists(id)",
+    "Item": {
+     "id": "01234",
+     "__typename": "FactoringItem",
+     "proNumber": "01234",
+     "status": "NEED_TO_FACTOR",
+     "subject": "Invoice for PRO #01234",
+     "fromEmail": "Billing <billing@example.test>",
+     "toEmails": [
+      "ivanfactoring@bcatcorp.com"
+     ],
+     "receivedAt": "2026-11-06T10:00:00.000Z",
+     "messageId": "msg-guard-1",
+     "createdAt": "2026-11-07T15:00:00.000Z",
+     "updatedAt": "2026-11-07T15:00:00.000Z"
+    }
+   }
+  ],
+  "enrichment": [
+   {
+    "FunctionName": "otr-actions-guard",
+    "InvocationType": "Event",
+    "Payload": {
+     "arguments": {
+      "action": "assemble",
+      "input": "{\"id\":\"01234\"}"
+     }
+    }
+   }
+  ]
+ },
+ "no receivedAt defaults to now": {
+  "statusCode": 200,
+  "body": {
+   "ok": true,
+   "id": "01234",
+   "proNumber": "01234",
+   "duplicate": false
+  },
+  "puts": [
+   {
+    "TableName": "FactoringItem-guard",
+    "ConditionExpression": "attribute_not_exists(id)",
+    "Item": {
+     "id": "01234",
+     "__typename": "FactoringItem",
+     "proNumber": "01234",
+     "status": "NEED_TO_FACTOR",
+     "subject": "Invoice for PRO #01234",
+     "fromEmail": "Billing <billing@example.test>",
+     "toEmails": [
+      "ivanfactoring@bcatcorp.com"
+     ],
+     "receivedAt": "2026-11-07T15:00:00.000Z",
+     "messageId": "msg-guard-2",
+     "createdAt": "2026-11-07T15:00:00.000Z",
+     "updatedAt": "2026-11-07T15:00:00.000Z"
+    }
+   }
+  ],
+  "enrichment": [
+   {
+    "FunctionName": "otr-actions-guard",
+    "InvocationType": "Event",
+    "Payload": {
+     "arguments": {
+      "action": "assemble",
+      "input": "{\"id\":\"01234\"}"
+     }
+    }
+   }
+  ]
+ },
+ "recipients as a raw header string with display names": {
+  "statusCode": 200,
+  "body": {
+   "ok": true,
+   "id": "01234",
+   "proNumber": "01234",
+   "duplicate": false
+  },
+  "puts": [
+   {
+    "TableName": "FactoringItem-guard",
+    "ConditionExpression": "attribute_not_exists(id)",
+    "Item": {
+     "id": "01234",
+     "__typename": "FactoringItem",
+     "proNumber": "01234",
+     "status": "NEED_TO_FACTOR",
+     "subject": "Invoice for PRO #01234",
+     "fromEmail": "Billing <billing@example.test>",
+     "toEmails": [
+      "ivanfactoring@bcatcorp.com",
+      "o@example.test"
+     ],
+     "receivedAt": "2026-11-06T10:00:00.000Z",
+     "messageId": "msg-guard-3",
+     "createdAt": "2026-11-07T15:00:00.000Z",
+     "updatedAt": "2026-11-07T15:00:00.000Z"
+    }
+   }
+  ],
+  "enrichment": [
+   {
+    "FunctionName": "otr-actions-guard",
+    "InvocationType": "Event",
+    "Payload": {
+     "arguments": {
+      "action": "assemble",
+      "input": "{\"id\":\"01234\"}"
+     }
+    }
+   }
+  ]
+ },
+ "alphanumeric PRO is upper-cased": {
+  "statusCode": 200,
+  "body": {
+   "ok": true,
+   "id": "A98765B",
+   "proNumber": "A98765B",
+   "duplicate": false
+  },
+  "puts": [
+   {
+    "TableName": "FactoringItem-guard",
+    "ConditionExpression": "attribute_not_exists(id)",
+    "Item": {
+     "id": "A98765B",
+     "__typename": "FactoringItem",
+     "proNumber": "A98765B",
+     "status": "NEED_TO_FACTOR",
+     "subject": "Fwd: Invoice for PRO #a98765b",
+     "fromEmail": "Billing <billing@example.test>",
+     "toEmails": [
+      "ivanfactoring@bcatcorp.com"
+     ],
+     "receivedAt": "2026-11-06T10:00:00.000Z",
+     "messageId": "msg-guard-4",
+     "createdAt": "2026-11-07T15:00:00.000Z",
+     "updatedAt": "2026-11-07T15:00:00.000Z"
+    }
+   }
+  ],
+  "enrichment": [
+   {
+    "FunctionName": "otr-actions-guard",
+    "InvocationType": "Event",
+    "Payload": {
+     "arguments": {
+      "action": "assemble",
+      "input": "{\"id\":\"A98765B\"}"
+     }
+    }
+   }
+  ]
+ },
+ "Transflo template": {
+  "statusCode": 200,
+  "body": {
+   "ok": true,
+   "id": "14589",
+   "proNumber": "14589",
+   "duplicate": false
+  },
+  "puts": [
+   {
+    "TableName": "FactoringItem-guard",
+    "ConditionExpression": "attribute_not_exists(id)",
+    "Item": {
+     "id": "14589",
+     "__typename": "FactoringItem",
+     "proNumber": "14589",
+     "status": "NEED_TO_FACTOR",
+     "subject": "SUBMIT TO TRANSFLO Pro # 14589 Ref # 2284206 Attached",
+     "fromEmail": "Billing <billing@example.test>",
+     "toEmails": [
+      "ivanfactoring@bcatcorp.com"
+     ],
+     "receivedAt": "2026-11-06T10:00:00.000Z",
+     "messageId": "msg-guard-5",
+     "createdAt": "2026-11-07T15:00:00.000Z",
+     "updatedAt": "2026-11-07T15:00:00.000Z"
+    }
+   }
+  ],
+  "enrichment": [
+   {
+    "FunctionName": "otr-actions-guard",
+    "InvocationType": "Event",
+    "Payload": {
+     "arguments": {
+      "action": "assemble",
+      "input": "{\"id\":\"14589\"}"
+     }
+    }
+   }
+  ]
+ },
+ "old bridge with no recipients is accepted": {
+  "statusCode": 200,
+  "body": {
+   "ok": true,
+   "id": "01234",
+   "proNumber": "01234",
+   "duplicate": false
+  },
+  "puts": [
+   {
+    "TableName": "FactoringItem-guard",
+    "ConditionExpression": "attribute_not_exists(id)",
+    "Item": {
+     "id": "01234",
+     "__typename": "FactoringItem",
+     "proNumber": "01234",
+     "status": "NEED_TO_FACTOR",
+     "subject": "Invoice for PRO #01234",
+     "fromEmail": "Billing <billing@example.test>",
+     "receivedAt": "2026-11-06T10:00:00.000Z",
+     "messageId": "msg-guard-6",
+     "createdAt": "2026-11-07T15:00:00.000Z",
+     "updatedAt": "2026-11-07T15:00:00.000Z"
+    }
+   }
+  ],
+  "enrichment": [
+   {
+    "FunctionName": "otr-actions-guard",
+    "InvocationType": "Event",
+    "Payload": {
+     "arguments": {
+      "action": "assemble",
+      "input": "{\"id\":\"01234\"}"
+     }
+    }
+   }
+  ]
+ },
+ "wrong recipient is 422": {
+  "statusCode": 422,
+  "body": {
+   "error": "not addressed to ivanfactoring@bcatcorp.com"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "group only quoted in a subject is not a recipient": {
+  "statusCode": 422,
+  "body": {
+   "error": "not addressed to ivanfactoring@bcatcorp.com"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "no PRO in subject is 422": {
+  "statusCode": 422,
+  "body": {
+   "error": "no invoice PRO number"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "empty subject is 422": {
+  "statusCode": 422,
+  "body": {
+   "error": "no invoice PRO number"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "two different PROs is 422": {
+  "statusCode": 422,
+  "body": {
+   "error": "no invoice PRO number"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "bad secret is 401": {
+  "statusCode": 401,
+  "body": {
+   "error": "unauthorized"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "missing secret is 401": {
+  "statusCode": 401,
+  "body": {
+   "error": "unauthorized"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "missing messageId is 400": {
+  "statusCode": 400,
+  "body": {
+   "error": "messageId required"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "non-string from is 400": {
+  "statusCode": 400,
+  "body": {
+   "error": "from must be a string"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "invalid JSON is 400": {
+  "statusCode": 400,
+  "body": {
+   "error": "invalid JSON body"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "JSON null is 400": {
+  "statusCode": 400,
+  "body": {
+   "error": "invalid JSON body"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "GET is 405": {
+  "statusCode": 405,
+  "body": {
+   "error": "method not allowed"
+  },
+  "puts": [],
+  "enrichment": []
+ },
+ "base64 body decodes": {
+  "statusCode": 200,
+  "body": {
+   "ok": true,
+   "id": "01234",
+   "proNumber": "01234",
+   "duplicate": false
+  },
+  "puts": [
+   {
+    "TableName": "FactoringItem-guard",
+    "ConditionExpression": "attribute_not_exists(id)",
+    "Item": {
+     "id": "01234",
+     "__typename": "FactoringItem",
+     "proNumber": "01234",
+     "status": "NEED_TO_FACTOR",
+     "subject": "Invoice for PRO #01234",
+     "fromEmail": "Billing <billing@example.test>",
+     "toEmails": [
+      "ivanfactoring@bcatcorp.com"
+     ],
+     "receivedAt": "2026-11-06T10:00:00.000Z",
+     "messageId": "msg-guard-7",
+     "createdAt": "2026-11-07T15:00:00.000Z",
+     "updatedAt": "2026-11-07T15:00:00.000Z"
+    }
+   }
+  ],
+  "enrichment": [
+   {
+    "FunctionName": "otr-actions-guard",
+    "InvocationType": "Event",
+    "Payload": {
+     "arguments": {
+      "action": "assemble",
+      "input": "{\"id\":\"01234\"}"
+     }
+    }
+   }
+  ]
+ },
+ "duplicate PRO is skipped, not retried": {
+  "statusCode": 200,
+  "body": {
+   "ok": true,
+   "id": "01234",
+   "proNumber": "01234",
+   "duplicate": true
+  },
+  "puts": [
+   {
+    "TableName": "FactoringItem-guard",
+    "ConditionExpression": "attribute_not_exists(id)",
+    "Item": {
+     "id": "01234",
+     "__typename": "FactoringItem",
+     "proNumber": "01234",
+     "status": "NEED_TO_FACTOR",
+     "subject": "Invoice for PRO #01234",
+     "fromEmail": "Billing <billing@example.test>",
+     "toEmails": [
+      "ivanfactoring@bcatcorp.com"
+     ],
+     "receivedAt": "2026-11-06T10:00:00.000Z",
+     "messageId": "msg-guard-1",
+     "createdAt": "2026-11-07T15:00:00.000Z",
+     "updatedAt": "2026-11-07T15:00:00.000Z"
+    }
+   }
+  ],
+  "enrichment": []
+ },
+ "enrichment failure never loses the row": {
+  "statusCode": 200,
+  "body": {
+   "ok": true,
+   "id": "01234",
+   "proNumber": "01234",
+   "duplicate": false
+  },
+  "puts": [
+   {
+    "TableName": "FactoringItem-guard",
+    "ConditionExpression": "attribute_not_exists(id)",
+    "Item": {
+     "id": "01234",
+     "__typename": "FactoringItem",
+     "proNumber": "01234",
+     "status": "NEED_TO_FACTOR",
+     "subject": "Invoice for PRO #01234",
+     "fromEmail": "Billing <billing@example.test>",
+     "toEmails": [
+      "ivanfactoring@bcatcorp.com"
+     ],
+     "receivedAt": "2026-11-06T10:00:00.000Z",
+     "messageId": "msg-guard-1",
+     "createdAt": "2026-11-07T15:00:00.000Z",
+     "updatedAt": "2026-11-07T15:00:00.000Z"
+    }
+   }
+  ],
+  "enrichment": [
+   {
+    "FunctionName": "otr-actions-guard",
+    "InvocationType": "Event",
+    "Payload": {
+     "arguments": {
+      "action": "assemble",
+      "input": "{\"id\":\"01234\"}"
+     }
+    }
+   }
+  ]
+ }
+}

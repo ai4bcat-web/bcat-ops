@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useLoads } from './useLoads'
+import { useLoads, useEnsureLoadRange } from './useLoads'
 import { useDrivers } from './useDrivers'
 import { listTimeClockEntries } from '@/lib/apiClient'
 import { getStops } from '@/lib/stops'
@@ -59,6 +59,7 @@ export function useDeadhead(fromRequested: string, to: string): DeadheadData {
   // Nothing before the effective date counts, whatever window the page asks for.
   const from = fromRequested > DEADHEAD_START ? fromRequested : DEADHEAD_START
   const { loads } = useLoads()
+  useEnsureLoadRange(from, to)
   const { drivers } = useDrivers()
   // The fetched window is keyed so "loading" is derived (a new range has no result yet)
   // rather than flipped inside the effect.

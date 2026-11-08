@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { generateClient } from 'aws-amplify/data'
 import { useTrucks } from './useTrucks'
-import { useLoads } from './useLoads'
+import { useLoads, useEnsureLoadRange } from './useLoads'
 import { useDrivers } from './useDrivers'
 import {
+  addDays,
   buildOdometerWeek,
   truckWeekRevenue,
   revenuePerMile,
@@ -65,6 +66,7 @@ export async function fetchOdometerDays(weekStart: string): Promise<TruckOdomete
 export function useTruckOdometer(weekStart: string): TruckOdometerHookResult {
   const { trucks: equipment } = useTrucks()
   const { loads } = useLoads()
+  const ready = useEnsureLoadRange(weekStart, addDays(weekStart, 6))
   const { drivers } = useDrivers()
   const [rows, setRows] = useState<TruckOdometerDay[]>([])
   // Derived: true until a fetch for the CURRENT week has settled.
@@ -113,5 +115,5 @@ export function useTruckOdometer(weekStart: string): TruckOdometerHookResult {
       .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }))
   }, [equipment, rows, weekStart, loads, drivers])
 
-  return { trucks: data, loading: loadedFor !== weekStart, error, refresh }
+  return { trucks: data, loading: loadedFor !== weekStart || !ready, error, refresh }
 }

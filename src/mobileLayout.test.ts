@@ -78,8 +78,9 @@ describe('the phone layout reaches the inline styles', () => {
   })
 
   it('lets the page scroll, which is what made the rest reachable at all', () => {
-    expect(mobileBlock).toContain('.page-content')
-    expect(mobileBlock).toMatch(/\.page-content\s*\{[^}]*overflow:\s*auto/)
+    // The host the legacy pages render in (shell.css) is overflow:hidden on a desktop.
+    const shellCss = readFileSync(join(process.cwd(), 'src/features/tms/shell.css'), 'utf8')
+    expect(shellCss).toMatch(/@media \(max-width: 900px\)[\s\S]*\.tms-legacy-host\s*\{[^}]*overflow:\s*auto/)
   })
 
   it('leaves the desktop alone', () => {

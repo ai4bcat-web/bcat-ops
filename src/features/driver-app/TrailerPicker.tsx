@@ -62,7 +62,7 @@ function TrailerList({ onClose, onPicked }: { onClose: () => void; onPicked?: ()
     <ul className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
       <li>
         <button type="button" disabled={busy !== null} onClick={() => void pick(null)} aria-label="No trailer"
-          className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${bobtail ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}>
+          className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${bobtail ? 'border-primary bg-[color:var(--tms-primary-tint)]' : 'border-border bg-card'}`}>
           <X className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="text-base font-semibold text-foreground">No trailer (bobtail)</span>
           {busy === 'none' && <Loader2 className="ml-auto h-4 w-4 animate-spin" aria-hidden="true" />}
@@ -73,7 +73,7 @@ function TrailerList({ onClose, onPicked }: { onClose: () => void; onPicked?: ()
         return (
           <li key={t.id}>
             <button type="button" disabled={busy !== null} onClick={() => void pick(t)} aria-label={`Trailer ${t.unitNumber}${on ? ' (your current trailer)' : ''}`}
-              className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${on ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}>
+              className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${on ? 'border-primary bg-[color:var(--tms-primary-tint)]' : 'border-border bg-card'}`}>
               <Container className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
               <span className="min-w-0 flex-1">
                 <span className="block text-lg font-bold tabular-nums text-foreground">{t.unitNumber}</span>
@@ -111,8 +111,8 @@ export function TrailerLine() {
           <Button variant="outline" size="sm" className="h-9" aria-label="Change trailer" onClick={() => setOpen(true)}>Change</Button>
         </div>
       ) : (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-400/50 bg-amber-500/15 px-4 py-3">
-          <p className="text-sm font-semibold text-amber-100">Which trailer are you hooked to?</p>
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[color:var(--tms-badge-orange)]/50 bg-[color:var(--tms-badge-orange-tint)] px-4 py-3">
+          <p className="text-sm font-semibold text-[color:var(--tms-badge-orange)]">Which trailer are you hooked to?</p>
           <Button size="sm" className="h-9 font-bold" onClick={() => setOpen(true)}>Pick your trailer</Button>
         </div>
       )}

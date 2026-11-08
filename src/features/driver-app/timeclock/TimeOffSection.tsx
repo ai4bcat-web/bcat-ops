@@ -25,9 +25,9 @@ const TYPE_LABEL: Record<TimeOffType, string> = {
 }
 
 const STATUS_BADGE: Record<TimeOffStatus, { label: string; cls: string }> = {
-  PENDING: { label: 'Pending', cls: 'bg-amber-500/20 text-amber-200' },
-  APPROVED: { label: 'Approved', cls: 'bg-emerald-500/20 text-emerald-200' },
-  DENIED: { label: 'Denied', cls: 'bg-red-500/20 text-red-200' },
+  PENDING: { label: 'Pending', cls: 'bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)]' },
+  APPROVED: { label: 'Approved', cls: 'bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)]' },
+  DENIED: { label: 'Denied', cls: 'bg-[color:var(--tms-badge-red-tint)] text-[color:var(--tms-badge-red)]' },
 }
 
 const FIELD = 'h-11 w-full rounded-md border border-border bg-background px-3 text-base text-foreground disabled:opacity-60'
@@ -178,7 +178,7 @@ export function TimeOffSection({ today, readOnly, refreshKey }: {
           />
         </div>
 
-        {formError && <p role="alert" className="text-sm text-red-300">{formError}</p>}
+        {formError && <p role="alert" className="text-sm text-[color:var(--tms-badge-red)]">{formError}</p>}
         {readOnly && <p className="text-xs text-muted-foreground">Read-only while viewing as a driver</p>}
 
         <Button type="submit" className="h-12" disabled={locked}>

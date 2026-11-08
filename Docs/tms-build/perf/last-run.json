@@ -1,0 +1,391 @@
+{
+  "at": "2026-11-05T06:49:20.418Z",
+  "summary": {
+    "/tms/dashboard": {
+      "label": "Brokerage dashboard (this month)",
+      "firstRowsS": 1.4901000003814697,
+      "settledS": 6.36360000038147,
+      "requests": 49,
+      "mb": 6.763957,
+      "p95": {
+        "firstRows": 2.7117999992370607,
+        "settled": 7.46489999961853,
+        "requests": 86,
+        "mb": 12.811079
+      },
+      "rowsAtEnd": [
+        0,
+        0,
+        0
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 4,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": [
+        "213 shipments",
+        "213 shipments",
+        "213 shipments"
+      ]
+    },
+    "/tms/tracking": {
+      "label": "Load tracking",
+      "firstRowsS": 3.5382999992370605,
+      "settledS": 5.2045,
+      "requests": 48,
+      "mb": 6.745441,
+      "p95": {
+        "firstRows": 3.8552999992370607,
+        "settled": 5.512699998855591,
+        "requests": 48,
+        "mb": 6.745441
+      },
+      "rowsAtEnd": [
+        5,
+        5,
+        5
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 3,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    },
+    "/tms/shipments": {
+      "label": "Shipments board (Active)",
+      "firstRowsS": 3.4685,
+      "settledS": 5.549699998855591,
+      "requests": 54,
+      "mb": 9.368875,
+      "p95": {
+        "firstRows": 4.409,
+        "settled": 5.58960000038147,
+        "requests": 54,
+        "mb": 9.368875
+      },
+      "rowsAtEnd": [
+        34,
+        34,
+        34
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 4,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    },
+    "/tms/shipments?list=all": {
+      "label": "Shipments board (All, month window)",
+      "firstRowsS": 3.22110000038147,
+      "settledS": 5.37489999961853,
+      "requests": 68,
+      "mb": 10.831174,
+      "p95": {
+        "firstRows": 3.86760000038147,
+        "settled": 6.356300001144409,
+        "requests": 68,
+        "mb": 10.831174
+      },
+      "rowsAtEnd": [
+        34,
+        34,
+        34
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 4,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    },
+    "/tms/customers": {
+      "label": "Customers",
+      "firstRowsS": 2.1853999996185305,
+      "settledS": 4.49660000038147,
+      "requests": 50,
+      "mb": 6.868109,
+      "p95": {
+        "firstRows": 2.5455,
+        "settled": 4.65410000038147,
+        "requests": 50,
+        "mb": 6.905577
+      },
+      "rowsAtEnd": [
+        37,
+        37,
+        37
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 3,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    },
+    "/tms/brokerage/users": {
+      "label": "Users",
+      "firstRowsS": 0.8035999984741211,
+      "settledS": 3.6302999992370606,
+      "requests": 51,
+      "mb": 6.733911,
+      "p95": {
+        "firstRows": 0.9412000007629394,
+        "settled": 4.311600000381469,
+        "requests": 51,
+        "mb": 6.733975
+      },
+      "rowsAtEnd": [
+        7,
+        7,
+        7
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 3,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    },
+    "/tms/invoicing": {
+      "label": "Invoicing (AR)",
+      "firstRowsS": 2.1768999996185303,
+      "settledS": 4.70539999961853,
+      "requests": 68,
+      "mb": 9.414555,
+      "p95": {
+        "firstRows": 2.1993999996185303,
+        "settled": 5.321699998855591,
+        "requests": 68,
+        "mb": 9.441414
+      },
+      "rowsAtEnd": [
+        1,
+        1,
+        2
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 3,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    },
+    "/tms/invoicing/payable": {
+      "label": "Invoicing (payable)",
+      "firstRowsS": 1.6867000007629394,
+      "settledS": 3.866,
+      "requests": 58,
+      "mb": 7.260243,
+      "p95": {
+        "firstRows": 2.2099000015258787,
+        "settled": 4.752400001525879,
+        "requests": 58,
+        "mb": 7.260243
+      },
+      "rowsAtEnd": [
+        21,
+        21,
+        21
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 3,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    },
+    "/tms/carriers": {
+      "label": "Carriers (shell floor probe)",
+      "firstRowsS": 1.417,
+      "settledS": 3.6037999992370606,
+      "requests": 48,
+      "mb": 6.752088,
+      "p95": {
+        "firstRows": 1.595,
+        "settled": 4.4095,
+        "requests": 48,
+        "mb": 6.754645
+      },
+      "rowsAtEnd": [
+        32,
+        32,
+        32
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 3,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    },
+    "/schedule": {
+      "label": "Schedule (legacy)",
+      "firstRowsS": 4.31089999961853,
+      "settledS": 4.31089999961853,
+      "requests": 78,
+      "mb": 10.450066,
+      "p95": {
+        "firstRows": 4.380700000762939,
+        "settled": 4.380700000762939,
+        "requests": 78,
+        "mb": 10.450066
+      },
+      "rowsAtEnd": [
+        0,
+        0,
+        0
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 4,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    },
+    "/calendar": {
+      "label": "Calendar (legacy)",
+      "firstRowsS": 4.51080000114441,
+      "settledS": 4.51080000114441,
+      "requests": 84,
+      "mb": 13.069632,
+      "p95": {
+        "firstRows": 4.676,
+        "settled": 4.676,
+        "requests": 84,
+        "mb": 13.069632
+      },
+      "rowsAtEnd": [
+        0,
+        0,
+        0
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 4,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    },
+    "/dashboard": {
+      "label": "Dashboard (legacy)",
+      "firstRowsS": 0.8176000003814697,
+      "settledS": 6.061200000762939,
+      "requests": 133,
+      "mb": 19.726443,
+      "p95": {
+        "firstRows": 1.7917999992370606,
+        "settled": 6.603199998855591,
+        "requests": 133,
+        "mb": 19.726443
+      },
+      "rowsAtEnd": [
+        3,
+        3,
+        3
+      ],
+      "fullTableOps": [],
+      "mutations": [],
+      "maxChainDepth": 4,
+      "repeated": [],
+      "problems": [],
+      "dashboardKpi": []
+    }
+  },
+  "kpi": {
+    "/tms/dashboard": {
+      "medians": {
+        "cold": 3.4245,
+        "warm": 0.7571000003814697,
+        "spa": 0.041700000762939456,
+        "chartsCold": 6.31870000076294,
+        "chartsWarm": 4.443,
+        "allCold": 3.548800001144409,
+        "chartsRequests": 86,
+        "chartsMb": 12.820454,
+        "spaRequests": 2,
+        "spaMb": 0.022725,
+        "kpiFlips": 0
+      },
+      "p95": {
+        "cold": 3.85439999961853,
+        "warm": 1.9812999992370606,
+        "spa": 0.33260000038146975,
+        "chartsCold": 8.72839999961853,
+        "chartsWarm": 10.407100000381469,
+        "chartsRequests": 86,
+        "chartsMb": 12.820454,
+        "allCold": 4.25310000038147,
+        "spaRequests": 39,
+        "spaMb": 6.070686,
+        "kpiFlips": 1
+      },
+      "sources": {
+        "cold": [
+          "rollup",
+          "rollup",
+          "rollup"
+        ],
+        "warm": [
+          "cache",
+          "cache",
+          "cache"
+        ],
+        "spa": [
+          "rollup",
+          "cache",
+          "cache"
+        ]
+      },
+      "mutations": []
+    },
+    "/dashboard": {
+      "medians": {
+        "cold": 2.0337999992370603,
+        "warm": 0.9641999988555908,
+        "spa": 0.097,
+        "chartsCold": 2.0772000007629394,
+        "chartsWarm": 1.0185999984741212,
+        "allCold": 6.680300001144409,
+        "chartsRequests": 133,
+        "chartsMb": 19.742118,
+        "spaRequests": 87,
+        "spaMb": 12.992223,
+        "kpiFlips": 0
+      },
+      "p95": {
+        "cold": 2.5343999996185302,
+        "warm": 1.0638999996185303,
+        "spa": 0.416,
+        "chartsCold": 2.5343999996185302,
+        "chartsWarm": 1.1185,
+        "chartsRequests": 135,
+        "chartsMb": 19.742118,
+        "allCold": 7.44269999885559,
+        "spaRequests": 88,
+        "spaMb": 13.000815,
+        "kpiFlips": 0
+      },
+      "sources": {
+        "cold": [
+          "rollup",
+          "rollup",
+          "rollup"
+        ],
+        "warm": [
+          "cache",
+          "cache",
+          "cache"
+        ],
+        "spa": [
+          "rollup",
+          "cache",
+          "cache"
+        ]
+      },
+      "mutations": []
+    }
+  }
+}

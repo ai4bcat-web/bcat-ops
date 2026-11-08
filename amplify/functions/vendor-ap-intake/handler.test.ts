@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, type MockedFunction } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type MockedFunction } from 'vitest'
 
 process.env.TABLE_NAME = 'VendorPayable-table'
 process.env.BUCKET_NAME = 'bcat-bucket'
@@ -56,9 +56,16 @@ function lastCall(commandMock: MockCommand): Record<string, unknown> {
 describe('vendor-ap-intake handler', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
     DynamoDBClientMock.mockImplementation(function () { return { send: dynamoSend } })
     S3ClientMock.mockImplementation(function () { return { send: s3Send } })
     getSignedUrlMock.mockResolvedValue('https://signed.url')
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   describe('prepare', () => {

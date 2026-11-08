@@ -1,3 +1,4 @@
+import { PER_USER_GRANT_PAGES, holdsPerUserGrant } from '@/lib/navItems'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import {
   signIn, signOut, getCurrentUser, fetchAuthSession,
@@ -109,8 +110,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // The owner and the Cognito ADMIN group (the Users page "Make admin" toggle)
       // bypass page grants. The legacy email allowlist behind `isAdmin` does not:
       // those accounts still need explicit `page-*` grants.
+      // billingRelease and aljexSignoff are per-user grants (Step AW): no role, not even ADMIN or the owner, implies them.
       hasPageAccess: (pageKey: string) =>
-        isOwner || (user?.groups.includes('ADMIN') ?? false) || (user?.groups.includes(`page-${pageKey}`) ?? false),
+        PER_USER_GRANT_PAGES.includes(pageKey)
+          ? holdsPerUserGrant(user?.groups, pageKey)
+          : isOwner || (user?.groups.includes('ADMIN') ?? false) || (user?.groups.includes(`page-${pageKey}`) ?? false),
     }}>
       {children}
     </AuthContext.Provider>

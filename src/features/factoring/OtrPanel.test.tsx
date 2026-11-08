@@ -16,6 +16,7 @@ const assembleInvoice = vi.hoisted(() => vi.fn())
 const setBrokerMc = vi.hoisted(() => vi.fn())
 const uploadOtrDocs = vi.hoisted(() => vi.fn().mockResolvedValue({ documentErrors: [] }))
 
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))  // clients build at import
 vi.mock('@/lib/apiClient', () => ({}))
 vi.mock('@/lib/otrClient', () => ({
   assembleInvoice,
@@ -188,8 +189,9 @@ describe('OtrPanel', () => {
     const { container } = render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
 
     const label = screen.getByText('Destination ZIP')
-    expect(label.className).toMatch(/text-red-700/)
-    expect(container.querySelector('.bg-red-50')).not.toBeNull()
+    // The gap is coloured with the kit's danger token and the row itself is marked.
+    expect(label.className).toMatch(/tms-badge-red/)
+    expect(container.querySelector('[data-gap="true"]')).not.toBeNull()
   })
 
   it('asks for the customer in red when the row has none', () => {

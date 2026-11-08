@@ -1,0 +1,40 @@
+import { applyDataTableSuffix } from '../_shared/dataTableEnv'
+
+/** Every `<X>_TABLE_NAME` this Lambda reads and the model behind it; backend.ts passes DATA_TABLE_SUFFIX instead of the names. */
+export const SHIPMENT_ACTIONS_TABLES = {
+  ALJEX_CODE_MAP_TABLE_NAME: 'AljexCodeMap',
+  BOX_TRUCK_TRIP_TABLE_NAME: 'BoxTruckTrip',
+  SHIPMENT_TABLE_NAME: 'Shipment',
+  ORDER_TABLE_NAME: 'Order',
+  LOAD_CARRIER_TABLE_NAME: 'LoadCarrier',
+  LOAD_FINANCIALS_TABLE_NAME: 'LoadFinancials',
+  LOAD_CHARGE_TABLE_NAME: 'LoadCharge',
+  LOAD_TABLE_NAME: 'Load',
+  CUSTOMER_TABLE_NAME: 'Customer',
+  SETTINGS_TABLE_NAME: 'TmsSettings',
+  AUDIT_LOG_TABLE_NAME: 'AuditLog',
+  DRIVER_TABLE_NAME: 'Driver',
+  LOAD_CHECK_CALL_TABLE_NAME: 'LoadCheckCall',
+  TRACKING_LINK_TABLE_NAME: 'TrackingLink',
+  SHIPMENT_NOTICE_TABLE_NAME: 'ShipmentNotice',
+  OWNERSHIP_DIVISION_TABLE_NAME: 'OwnershipDivision',
+  OWNERSHIP_RULE_TABLE_NAME: 'OwnershipRule',
+  PRO_CLAIM_TABLE_NAME: 'ProClaim',
+  USER_PROFILE_TABLE_NAME: 'UserProfile',
+  INTAKE_LOAD_TABLE_NAME: 'IntakeLoad',
+  CARRIER_TABLE_NAME: 'Carrier',
+  CARRIER_DOCUMENT_TABLE_NAME: 'CarrierDocument',
+  DIVISION_TABLE_NAME: 'Division',
+  CARRIER_CONTACT_TABLE_NAME: 'CarrierContact',
+  QUOTE_TABLE_NAME: 'Quote',
+  LANE_RATE_SAMPLE_TABLE_NAME: 'LaneRateSample',
+  SHIPMENT_DOCUMENT_TABLE_NAME: 'ShipmentDocument',
+  DRIVER_SUBMISSION_TABLE_NAME: 'DriverSubmission',
+  DRIVER_SUBMISSION_DOC_TABLE_NAME: 'DriverSubmissionDoc',
+  SHIPMENT_POSTING_TABLE_NAME: 'ShipmentPosting',
+  DEMO_RECORD_TABLE_NAME: 'DemoRecord',
+  SHIPMENT_MESSAGE_TABLE_NAME: 'ShipmentMessage',
+  INTEGRATION_TABLE_NAME: 'Integration',
+} as const
+
+applyDataTableSuffix(SHIPMENT_ACTIONS_TABLES)

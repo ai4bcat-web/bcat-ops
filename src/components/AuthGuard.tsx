@@ -11,10 +11,10 @@ export function AuthGuard({ children }: AuthGuardProps) {
   if (loading) {
     return (
       <div
-        className="min-h-screen flex items-center justify-center"
-        style={{ background: '#07122b' }}
+        className="tms-portal min-h-screen flex items-center justify-center"
+        style={{ background: 'var(--tms-bg)' }}
       >
-        <div className="text-sm text-muted-foreground">Loading…</div>
+        <div className="text-sm" style={{ color: 'var(--tms-muted)' }}>Loading…</div>
       </div>
     )
   }

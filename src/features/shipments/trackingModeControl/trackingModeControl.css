@@ -1,0 +1,23 @@
+/* Amber "Tracking mode not set" chip: shared by the form, both boards and the ladder. Tokens only. */
+.tms-shell .tms-trk-notset {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-badge-orange-tint);
+  border: 1px solid var(--tms-badge-orange);
+  color: var(--tms-badge-orange);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tms-shell .tms-trk-notset-row { height: 18px; }
+.tms-shell .tms-trkctl { display: flex; flex-direction: column; gap: 8px; }
+.tms-shell .tms-trkctl[data-disabled='true'] { opacity: 0.6; }
+.tms-shell .tms-trkctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.tms-shell .tms-trkctl-modes { display: flex; gap: 6px; }
+.tms-shell .tms-trkctl-fields { align-items: flex-end; }
+.tms-shell .tms-trkctl-field { display: flex; flex-direction: column; gap: 2px; min-width: 150px; }
+.tms-shell .tms-trkctl-actions { display: flex; align-items: center; gap: 8px; }
+.tms-shell .tms-trkctl[data-compact='true'] { gap: 6px; }

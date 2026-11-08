@@ -21,25 +21,34 @@ export interface ExpenseSnapshot {
 }
 
 /**
- * Mark a truck inactive. Insurance stops counting from the date; plates and ELD are asked
- * about one by one, because they usually keep billing after the truck is parked.
+ * Mark a truck or trailer inactive. Insurance stops counting from the date. For a truck,
+ * plates and ELD are asked about one by one, because they usually keep billing after the
+ * truck is parked; a trailer has neither, so those inputs are skipped. A trailer still
+ * assigned to a driver cannot be parked until it is unassigned (`heldBy` lists them).
  */
 export function MarkInactiveDialog(props: {
   truck: Equipment
   insuranceAnnual: number
   expenses: ExpenseSnapshot
+  /** Drivers still holding this trailer; any of them blocks the save. */
+  heldBy?: { id: string; name: string }[]
+  onUnassign?: (driverId: string) => void
   onDone: (patch: Pick<Equipment, 'active' | 'inactiveSince'>) => void
   onClose: () => void
 }) {
+  const isTrailer = props.truck.type === 'trailer'
+  const noun = isTrailer ? 'trailer' : 'truck'
   const [date, setDate] = useState(todayChicago())
   const costs = useMemo(
-    () => platesAndEldFor(props.truck.id, date, props.expenses.recurring, props.expenses.allocations, props.expenses.expenseTypes),
-    [props.truck.id, date, props.expenses],
+    () => (isTrailer ? [] : platesAndEldFor(props.truck.id, date, props.expenses.recurring, props.expenses.allocations, props.expenses.expenseTypes)),
+    [isTrailer, props.truck.id, date, props.expenses],
   )
   // Assume they keep billing unless told otherwise.
   const [keep, setKeep] = useState<Record<string, boolean>>({})
   const keeps = (id: string) => keep[id] ?? true
   const [saving, setSaving] = useState(false)
+  const heldBy = props.heldBy ?? []
+  const blocked = heldBy.length > 0
 
   const submit = async () => {
     setSaving(true)
@@ -49,12 +58,12 @@ export function MarkInactiveDialog(props: {
       }
       props.onDone({ active: false, inactiveSince: date })
       const held = costs.filter((c) => keeps(c.recurring.id)).length
-      toast.success(`Unit ${props.truck.unitNumber} is inactive from ${date}`, {
+      toast.success(`${isTrailer ? 'Trailer' : 'Unit'} ${props.truck.unitNumber} is inactive from ${date}`, {
         description: held ? `${held} cost${held === 1 ? '' : 's'} moved to the holding area` : undefined,
       })
       props.onClose()
     } catch (err) {
-      toast.error(graphqlErrorText(err) || 'Could not mark the truck inactive')
+      toast.error(graphqlErrorText(err) || `Could not mark the ${noun} inactive`)
     } finally {
       setSaving(false)
     }
@@ -64,8 +73,8 @@ export function MarkInactiveDialog(props: {
     <Dialog open onOpenChange={(o) => { if (!o) props.onClose() }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Mark unit #{props.truck.unitNumber} inactive</DialogTitle>
-          <DialogDescription>Costs change from this date. Months before it are not touched.</DialogDescription>
+          <DialogTitle>Mark {noun} #{props.truck.unitNumber} inactive</DialogTitle>
+          <DialogDescription>{isTrailer ? 'Insurance changes from this date. Months before it are not touched.' : 'Costs change from this date. Months before it are not touched.'}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <label className="block text-sm">
@@ -78,11 +87,11 @@ export function MarkInactiveDialog(props: {
             <p className="text-muted-foreground mt-0.5">
               {props.insuranceAnnual > 0
                 ? `${money(props.insuranceAnnual)}/yr comes out of the totals from ${date}.`
-                : 'No insurance premium on file for this truck.'}
+                : `No insurance premium on file for this ${noun}.`}
             </p>
           </div>
 
-          {costs.length === 0 && (
+          {!isTrailer && costs.length === 0 && (
             <p className="text-sm text-muted-foreground">No plates or ELD cost is on file for this truck.</p>
           )}
           {costs.map((c) => (
@@ -101,10 +110,24 @@ export function MarkInactiveDialog(props: {
               </div>
             </div>
           ))}
+          {blocked && (
+            <div role="alert" className="rounded-md border border-destructive/40 p-3 text-sm">
+              <div className="font-semibold">Still assigned to a driver</div>
+              <p className="text-muted-foreground mt-0.5">Unassign this trailer before marking it inactive.</p>
+              <ul className="mt-2 space-y-1">
+                {heldBy.map((d) => (
+                  <li key={d.id} className="flex items-center justify-between gap-2">
+                    <span>{d.name}</span>
+                    <button type="button" onClick={() => props.onUnassign?.(d.id)} className="h-7 px-2 rounded-md border text-xs">Unassign</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2">
             <button onClick={props.onClose} disabled={saving} className="h-9 px-3 rounded-md border text-sm">Cancel</button>
-            <button onClick={submit} disabled={saving} className="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold disabled:opacity-50">
+            <button onClick={submit} disabled={saving || blocked} className="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-foreground text-background text-sm font-semibold disabled:opacity-50">
               {saving ? <Loader2 size={14} className="animate-spin" /> : <PauseCircle size={14} />} Mark inactive
             </button>
           </div>
@@ -157,10 +180,10 @@ export function HoldingArea(props: {
 
   const monthlyTotal = props.held.reduce((s, h) => s + h.monthlyAmount, 0)
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', marginBottom: 16 }}>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Holding area</span>
-        <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>
+    <div style={{ border: '1px solid var(--tms-border)', borderRadius: 12, background: 'var(--tms-card)', marginBottom: 16 }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--tms-border)', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tms-text)' }}>Holding area</span>
+        <span style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>
           Plates and ELD still being paid for on inactive trucks · {money(monthlyTotal)}/mo, still counted in expenses
         </span>
       </div>

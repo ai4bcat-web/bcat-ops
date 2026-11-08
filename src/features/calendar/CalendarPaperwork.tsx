@@ -73,10 +73,10 @@ export function PodMark({ load, size = 14 }: { load: Load; size?: number }) {
   const { index, openPod } = useContext(CalendarPaperworkContext)
   const cell = paperworkFor(index, load).pod
   if (cell.has === null) {
-    return <span aria-label="POD: still loading" title="POD: still loading" style={{ color: 'var(--ds-t3)', fontSize: 11 }}>—</span>
+    return <span aria-label="POD: still loading" title="POD: still loading" style={{ color: 'var(--tms-muted)', fontSize: 11 }}>—</span>
   }
   if (!cell.has) {
-    return <XCircle aria-label="POD missing" style={{ width: size, height: size, color: '#dc2626', flexShrink: 0 }} />
+    return <XCircle aria-label="POD missing" style={{ width: size, height: size, color: 'var(--tms-badge-red)', flexShrink: 0 }} />
   }
   const pages = cell.pages && cell.pages > 1 ? ` · ${cell.pages} pages` : ''
   const label = `POD on file${pages}${cell.ref ? ' — click to view' : ''}`
@@ -89,9 +89,9 @@ export function PodMark({ load, size = 14 }: { load: Load; size?: number }) {
       onClick={(e) => { e.stopPropagation(); openPod(load, cell) }}
       style={{ all: 'unset', cursor: cell.ref ? 'pointer' : 'default', display: 'inline-flex', alignItems: 'center', gap: 2, lineHeight: 1 }}
     >
-      <CheckCircle2 style={{ width: size, height: size, color: '#16a34a', flexShrink: 0 }} />
+      <CheckCircle2 style={{ width: size, height: size, color: 'var(--tms-badge-green)', flexShrink: 0 }} />
       {cell.pages && cell.pages > 1 ? (
-        <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>{cell.pages}p</span>
+        <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums' }}>{cell.pages}p</span>
       ) : null}
     </button>
   )

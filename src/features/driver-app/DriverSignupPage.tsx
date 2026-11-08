@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useDriverAuth } from './useDriverAuth'
 import { InstallHintSection } from './InstallHintSection'
+import { TmsAlert } from '@/features/tms/kit/TmsAlert'
+import { useTmsTheme } from '@/features/tms/tmsTheme'
 import {
   isAlreadyRegistered,
   needsSignupConfirmInstead,
@@ -17,6 +19,7 @@ import {
 type Step = 'form' | 'confirm' | 'done'
 
 export default function DriverSignupPage() {
+  useTmsTheme()
   const navigate = useNavigate()
   const [search] = useSearchParams()
   const {
@@ -159,11 +162,11 @@ export default function DriverSignupPage() {
   }
 
   return (
-    <div className="dark min-h-screen bg-background text-foreground flex flex-col justify-center px-6 py-12">
+    <div className="tms-driver tms-driver-inset flex flex-col justify-center px-6 py-12">
       <div className="mx-auto w-full max-w-sm">
         <div className="mb-10 text-center">
-          <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1ea8f3]">
-            <span className="text-2xl font-bold text-white">BCAT</span>
+          <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-[color:var(--tms-primary)]">
+            <span className="text-2xl font-bold text-[color:var(--tms-on-primary)]">BCAT</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">
             {step === 'form' && 'Driver sign up'}
@@ -172,22 +175,20 @@ export default function DriverSignupPage() {
           </h1>
           {step === 'confirm' && (
             <>
-              <p className="mt-2 text-sm text-slate-400">{codeSentMessage(codeKind, email)}</p>
-              <p className="mt-2 text-xs text-slate-500">{codeNotArrivedHint()}</p>
+              <p className="mt-2 text-sm text-muted-foreground">{codeSentMessage(codeKind, email)}</p>
+              <p className="mt-2 text-xs text-muted-foreground">{codeNotArrivedHint()}</p>
             </>
           )}
         </div>
 
         {error && (
-          <div className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {error}
-          </div>
+          <TmsAlert tone="red" className="mb-6">{error}</TmsAlert>
         )}
 
         {step === 'form' && (
           <form onSubmit={handleSubmitForm} className="space-y-5">
             <div className="space-y-2">
-              <Label htmlFor="driver-signup-email" className="text-sm font-medium text-slate-300">
+              <Label htmlFor="driver-signup-email" className="text-sm font-medium text-foreground">
                 Email
               </Label>
               <Input
@@ -198,12 +199,12 @@ export default function DriverSignupPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 disabled={loading}
-                className="h-14 rounded-xl border-slate-700 bg-slate-900/60 px-4 text-base text-white placeholder:text-slate-500 focus-visible:ring-[#1ea8f3]"
+                className="h-14 rounded-xl px-4 text-base"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="driver-signup-password" className="text-sm font-medium text-slate-300">
+              <Label htmlFor="driver-signup-password" className="text-sm font-medium text-foreground">
                 Password
               </Label>
               <div className="relative">
@@ -215,13 +216,13 @@ export default function DriverSignupPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   disabled={loading}
-                  className="h-14 rounded-xl border-slate-700 bg-slate-900/60 px-4 pr-12 text-base text-white placeholder:text-slate-500 focus-visible:ring-[#1ea8f3]"
+                  className="h-14 rounded-xl px-4 pr-12 text-base"
                 />
                 <button
                   type="button"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                   onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-slate-400"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-muted-foreground"
                 >
                   {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
@@ -229,7 +230,7 @@ export default function DriverSignupPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="driver-signup-confirm" className="text-sm font-medium text-slate-300">
+              <Label htmlFor="driver-signup-confirm" className="text-sm font-medium text-foreground">
                 Confirm password
               </Label>
               <Input
@@ -240,7 +241,7 @@ export default function DriverSignupPage() {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="••••••••"
                 disabled={loading}
-                className="h-14 rounded-xl border-slate-700 bg-slate-900/60 px-4 text-base text-white placeholder:text-slate-500 focus-visible:ring-[#1ea8f3]"
+                className="h-14 rounded-xl px-4 text-base"
               />
             </div>
 
@@ -253,15 +254,9 @@ export default function DriverSignupPage() {
 
         {step === 'done' && (
           <div className="space-y-5">
-            <div className="flex items-start gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
-              <div className="text-sm text-emerald-100">
-                <p className="font-semibold">Password set and signed in as {email}.</p>
-                <p className="mt-1 text-emerald-200/90">
-                  Your scans, loads and settlement history are all here.
-                </p>
-              </div>
-            </div>
+            <TmsAlert tone="green" title={`Password set and signed in as ${email}.`}>
+              Your scans, loads and settlement history are all here.
+            </TmsAlert>
 
             {/* The one thing left that the driver has to do on their own device. Shown
                 here because this is the moment they are holding the phone. */}
@@ -280,7 +275,7 @@ export default function DriverSignupPage() {
         {step === 'confirm' && (
           <form onSubmit={handleConfirm} className="space-y-5">
             <div className="space-y-2">
-              <Label htmlFor="driver-signup-code" className="text-sm font-medium text-slate-300">
+              <Label htmlFor="driver-signup-code" className="text-sm font-medium text-foreground">
                 Verification code
               </Label>
               <Input
@@ -291,7 +286,7 @@ export default function DriverSignupPage() {
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="123456"
                 disabled={loading}
-                className="h-14 rounded-xl border-slate-700 bg-slate-900/60 px-4 text-center text-lg tracking-[0.5em] text-white placeholder:text-slate-500 focus-visible:ring-[#1ea8f3]"
+                className="h-14 rounded-xl px-4 text-center text-lg tracking-[0.5em]"
               />
             </div>
 
@@ -305,7 +300,7 @@ export default function DriverSignupPage() {
               variant="outline"
               disabled={loading}
               onClick={handleResend}
-              className="h-14 w-full rounded-xl border-slate-700 bg-transparent text-base font-semibold text-slate-200 hover:bg-slate-800 hover:text-white"
+              className="h-14 w-full rounded-xl text-base font-semibold"
             >
               Resend code
             </Button>
@@ -315,10 +310,10 @@ export default function DriverSignupPage() {
         {/* Only on the first screen. Once a code is in flight, "already have an account?"
             is both answered and the wrong thing to act on. */}
         {step === 'form' && (
-          <div className="mt-8 text-center text-sm text-slate-400">
+          <div className="mt-8 text-center text-sm text-muted-foreground">
             <p>
               Already have an account?{' '}
-              <Link to="/driver/login" className="font-semibold text-[#1ea8f3] hover:underline">
+              <Link to="/driver/login" className="font-semibold text-[color:var(--tms-primary)] hover:underline">
                 Sign in
               </Link>
             </p>

@@ -9,6 +9,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useDispatch } from '@/hooks/useDispatch'
 import { useDrivers } from '@/hooks/useDrivers'
+import { useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
 import { whereaboutsOf, whereaboutsLine, statusLine, unitLine } from './driverWhereabouts'
@@ -22,7 +23,7 @@ import { getStops } from '@/lib/stops'
 import { markAllStopsDone } from '@/lib/stopEvents'
 import { staffUploadDriverDoc } from '@/lib/driverSubmissionsClient'
 import type { DispatchMedia } from '@/lib/dispatch'
-import type { Load } from '@/types'
+import type { Driver, Load } from '@/types'
 import { staffName } from './dispatchUi'
 import { FilterDialog } from './FilterDialog'
 import { applyFilters, readFilters, writeFilters, filterCount, type DispatchFilters } from './dispatchFilters'
@@ -33,6 +34,14 @@ import { useLoadPaperwork } from '@/hooks/useLoadPaperwork'
 import { loadHasPod } from '@/lib/podPresence'
 import { chicagoDateStr } from '@/lib/date'
 import { weekStartOfISO } from '@/features/driver-pay/week'
+import { DriverPhones } from '@/components/DriverPhones'
+import { useDriverPhones } from '@/hooks/useTruckConfigs'
+
+/** Both numbers on file for the driver in the open conversation (reference only: the Call/Text links above are the conversation's own number). */
+function SelectedDriverPhones({ driver, unitNumber }: { driver: Driver; unitNumber: string | null }) {
+  const phones = useDriverPhones(driver, { unitNumber })
+  return <span data-testid="dispatch-driver-phones" style={{ minWidth: 0 }}><DriverPhones phones={phones} variant="inline" /></span>
+}
 
 type Tab = 'OPEN' | 'UNREAD' | 'MINE' | 'ARCHIVED'
 const TABS: { key: Tab; label: string }[] = [
@@ -64,8 +73,9 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
   const [now, setNow] = useState(() => new Date())
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t) }, [])
   // Where each truck is, for the location line under a driver: refreshed every minute.
-  const loads = useAppStore((s) => s.loads)
-  const updateLoad = useAppStore((s) => s.updateLoad)
+  // The live working set: a voided load is not dispatchable work, so it gives no driver a
+  // location line and shows up in no POD-filing picker here.
+  const { loads, updateLoad } = useLoads()
   /** An inbound attachment being filed as a POD, while the load picker is open. */
   const [filingPod, setFilingPod] = useState<DispatchMedia | null>(null)
   const equipment = useAppStore((s) => s.equipment)
@@ -200,12 +210,12 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
   const showThread = !narrow || !!selected
 
   const header = (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: `12px ${padX}px`, borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: `12px ${padX}px`, borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-card)', flexShrink: 0 }}>
       <div style={{ minWidth: 0 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.01em', margin: 0 }}>Dispatch</h1>
-        <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--tms-text)', letterSpacing: '-0.01em', margin: 0 }}>Dispatch</h1>
+        <p style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 2 }}>
           {d.status?.dispatchNumber
-            ? <>Drivers text and call <strong style={{ color: 'var(--ds-t2)' }}>{prettyPhone(d.status.dispatchNumber)}</strong>{d.status.ringing ? ` · calls ring ${d.status.ringing} phone${d.status.ringing === 1 ? '' : 's'}` : ' · calls go to voicemail'}</>
+            ? <>Drivers text and call <strong style={{ color: 'var(--tms-text-2)' }}>{prettyPhone(d.status.dispatchNumber)}</strong>{d.status.ringing ? ` · calls ring ${d.status.ringing} phone${d.status.ringing === 1 ? '' : 's'}` : ' · calls go to voicemail'}</>
             : 'One number the whole team texts and calls drivers from.'}
         </p>
       </div>
@@ -218,37 +228,37 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
   )
 
   const banner = !configured ? (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: `8px ${padX}px`, background: 'var(--ds-amber-bg)', color: 'var(--ds-t1)', fontSize: 13, borderBottom: '1px solid var(--ds-border)' }}>
-      <AlertTriangle className="size-4" style={{ color: 'var(--ds-amber)' }} />
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: `8px ${padX}px`, background: 'var(--tms-badge-orange-tint)', color: 'var(--tms-text)', fontSize: 13, borderBottom: '1px solid var(--tms-border)' }}>
+      <AlertTriangle className="size-4" style={{ color: 'var(--tms-badge-orange)' }} />
       Twilio is not connected yet, so texts cannot be sent. Ask Ryne to run the Dispatch setup (scripts/dispatchTwilioSetup.mjs).
     </div>
   ) : null
 
   const list = (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, width: narrow ? '100%' : 340, borderRight: narrow ? 'none' : '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
-      <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--ds-border-soft)', display: 'grid', gap: 8 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, width: narrow ? '100%' : 340, borderRight: narrow ? 'none' : '1px solid var(--tms-border)', background: 'var(--tms-card)', flexShrink: 0 }}>
+      <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--tms-border)', display: 'grid', gap: 8 }}>
         <div style={{ position: 'relative' }}>
-          <Search className="size-3.5" style={{ position: 'absolute', left: 10, top: 10, color: 'var(--ds-t3)' }} />
+          <Search className="size-3.5" style={{ position: 'absolute', left: 10, top: 10, color: 'var(--tms-muted)' }} />
           <Input id="dispatch-search" placeholder="Search name, number, text" value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 pl-8" />
         </div>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           {TABS.map((t) => (
             <button key={t.key} type="button" onClick={() => setTab(t.key)}
-              style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: 'none', cursor: 'pointer', background: tab === t.key ? 'var(--ds-bg-3)' : 'transparent', color: tab === t.key ? 'var(--ds-t1)' : 'var(--ds-t3)', fontWeight: tab === t.key ? 600 : 500 }}>
-              {t.label}{counts[t.key] ? <span style={{ marginLeft: 4, fontVariantNumeric: 'tabular-nums', color: t.key === 'UNREAD' && counts.UNREAD ? 'var(--ds-blue)' : undefined }}>{counts[t.key]}</span> : null}
+              style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: 'none', cursor: 'pointer', background: tab === t.key ? 'var(--tms-surface-hover)' : 'transparent', color: tab === t.key ? 'var(--tms-text)' : 'var(--tms-muted)', fontWeight: tab === t.key ? 600 : 500 }}>
+              {t.label}{counts[t.key] ? <span style={{ marginLeft: 4, fontVariantNumeric: 'tabular-nums', color: t.key === 'UNREAD' && counts.UNREAD ? 'var(--tms-primary)' : undefined }}>{counts[t.key]}</span> : null}
             </button>
           ))}
           <button type="button" onClick={() => setFilterOpen(true)} title="Filter by driver type or driver"
-            style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--ds-border)', cursor: 'pointer', background: filterCount(filters) ? 'var(--ds-blue-bg)' : 'transparent', color: filterCount(filters) ? 'var(--ds-blue)' : 'var(--ds-t3)', fontWeight: 600 }}>
+            style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--tms-border)', cursor: 'pointer', background: filterCount(filters) ? 'var(--tms-primary-tint)' : 'transparent', color: filterCount(filters) ? 'var(--tms-primary)' : 'var(--tms-muted)', fontWeight: 600 }}>
             <SlidersHorizontal className="size-3.5" /> Filter{filterCount(filters) ? ` · ${filterCount(filters)}` : ''}
           </button>
         </div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {d.loading && d.conversations.length === 0 ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 32, color: 'var(--ds-t3)' }}><Loader2 className="size-5 animate-spin" /></div>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 32, color: 'var(--tms-muted)' }}><Loader2 className="size-5 animate-spin" /></div>
         ) : d.error && d.conversations.length === 0 ? (
-          <div style={{ padding: 16, fontSize: 13, color: 'var(--ds-red)' }}>{d.error}</div>
+          <div style={{ padding: 16, fontSize: 13, color: 'var(--tms-badge-red)' }}>{d.error}</div>
         ) : (
           <ConversationList rows={rows} selectedId={d.selectedId} onSelect={d.select} now={now} subline={subline} statusOf={statusOf} />
         )}
@@ -257,31 +267,32 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
   )
 
   const thread = selected ? (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, background: 'var(--ds-bg)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--ds-border)', borderTop: `3px solid ${selectedColor?.border ?? 'transparent'}`, background: 'var(--ds-surface)', flexWrap: narrow ? 'wrap' : 'nowrap' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, background: 'var(--tms-bg)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--tms-border)', borderTop: `3px solid ${selectedColor?.border ?? 'transparent'}`, background: 'var(--tms-card)', flexWrap: narrow ? 'wrap' : 'nowrap' }}>
         {narrow ? <Button variant="ghost" size="icon" className="size-8" aria-label="Back to conversations" onClick={() => d.select(null)}><ArrowLeft className="size-4" /></Button> : null}
-        <span aria-hidden="true" style={{ width: 36, height: 36, borderRadius: 18, background: selectedColor?.avatarBg, color: '#fff', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initialsOf(conversationTitle(selected))}</span>
+        <span aria-hidden="true" style={{ width: 36, height: 36, borderRadius: 18, background: selectedColor?.avatarBg, color: 'var(--tms-on-primary)', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initialsOf(conversationTitle(selected))}</span>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: selectedColor?.text ?? 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conversationTitle(selected)}</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: 'var(--ds-t2)' }}>{prettyPhone(selected.phone)}</span>
-            <a href={`tel:${selected.phone}`} title="Call from your phone" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><Phone className="size-3" />Call</a>
-            <a href={`sms:${selected.phone}`} title="Text from your own phone (not the dispatch number)" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><MessageSquare className="size-3" />Text</a>
+          <div style={{ fontSize: 15, fontWeight: 600, color: selectedColor?.text ?? 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conversationTitle(selected)}</div>
+          <div style={{ fontSize: 12, color: 'var(--tms-muted)', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: 'var(--tms-text-2)' }}>{prettyPhone(selected.phone)}</span>
+            <a href={`tel:${selected.phone}`} title="Call from your phone" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--tms-primary)', fontWeight: 600 }}><Phone className="size-3" />Call</a>
+            <a href={`sms:${selected.phone}`} title="Text from your own phone (not the dispatch number)" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--tms-primary)', fontWeight: 600 }}><MessageSquare className="size-3" />Text</a>
+            {selectedDriver ? <SelectedDriverPhones driver={selectedDriver} unitNumber={equipment.find((e) => e.id === selectedDriver.assignedTruckId)?.unitNumber ?? null} /> : null}
             {selectedDriver ? <span>{selectedDriver.fleetGroup === 'AMAZON' ? 'Owner operator' : selectedDriver.fleetGroup === 'BOX_TRUCK' ? 'Box truck' : selectedDriver.fleetGroup === 'LOCAL' ? 'Ivan local' : 'Driver'}{selectedDriver.active ? '' : ' · inactive'}</span> : <span>Not a driver on file</span>}
             {selectedDriver ? (
               unitTypeEditable(selectedDriver) ? (
                 <button type="button" onClick={() => { const next = nextUnitType(selectedDriver.unitType); void updateDriver(selectedDriver.id, { unitType: next }); toast.success(`${selectedDriver.name}: ${UNIT_TYPE_LABEL[next]}`) }}
                   title="Tap to change: dry van → flatbed → power only"
-                  style={{ all: 'unset', cursor: 'pointer', fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: unitTypeOf(selectedDriver) ? 'var(--ds-t1)' : 'var(--ds-amber)', background: 'var(--ds-bg-2)', border: '1px solid var(--ds-border)', borderRadius: 4, padding: '1px 6px' }}>
+                  style={{ all: 'unset', cursor: 'pointer', fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: unitTypeOf(selectedDriver) ? 'var(--tms-text)' : 'var(--tms-badge-orange)', background: 'var(--tms-surface)', border: '1px solid var(--tms-border)', borderRadius: 4, padding: '1px 6px' }}>
                   {unitKindLabel(unitTypeOf(selectedDriver))} ⇄
                 </button>
-              ) : <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t2)', background: 'var(--ds-bg-2)', borderRadius: 4, padding: '1px 6px' }}>{unitKindLabel(unitTypeOf(selectedDriver))}</span>
+              ) : <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--tms-text-2)', background: 'var(--tms-surface)', borderRadius: 4, padding: '1px 6px' }}>{unitKindLabel(unitTypeOf(selectedDriver))}</span>
             ) : null}
-            {selectedStatus ? <span style={{ color: 'var(--ds-t2)', fontWeight: 600 }}>Last status: {selectedStatus}</span> : null}
-            {selectedUnits ? <span title="The truck on their file and the trailer on the load they are hauling" style={{ color: 'var(--ds-t2)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>🚛 {selectedUnits}</span> : null}
+            {selectedStatus ? <span style={{ color: 'var(--tms-text-2)', fontWeight: 600 }}>Last status: {selectedStatus}</span> : null}
+            {selectedUnits ? <span title="The truck on their file and the trailer on the load they are hauling" style={{ color: 'var(--tms-text-2)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>🚛 {selectedUnits}</span> : null}
             {/* Staff can move the driver to the right truck from here when they picked the wrong one. */}
             {selectedDriver && selectedDriver.fleetGroup !== 'AMAZON' ? <TruckAssignSelect driverId={selectedDriver.id} label="Truck" compact /> : null}
-            {selectedWhere ? <span style={{ color: 'var(--ds-green)', fontWeight: 600 }}>📍 {selectedWhere}</span> : null}
+            {selectedWhere ? <span style={{ color: 'var(--tms-badge-green)', fontWeight: 600 }}>📍 {selectedWhere}</span> : null}
             {(() => {
               const primary = selected.assignedTo || selectedDispatchers[0] || null
               const backup = selected.assignedBackup || selectedDispatchers[1] || null
@@ -313,7 +324,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
             {selected.status === 'ARCHIVED' ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
           </Button>
           {canManage ? (
-            <Button variant="outline" size="sm" className="h-8 text-red-600" title="Delete this conversation and every message in it (admins only)"
+            <Button variant="outline" size="sm" className="h-8 text-[color:var(--tms-badge-red)]" title="Delete this conversation and every message in it (admins only)"
               onClick={() => {
                 if (!window.confirm(`Delete the conversation with ${conversationTitle(selected)}?\n\nEvery text, note and status in it is removed for good. The driver's Slack channel, if any, is left for you to archive in Slack.`)) return
                 void act('delete the conversation', () => d.remove(selected.id))
@@ -325,8 +336,8 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
       </div>
       {/* Any conversation without a channel gets the prompt: started by the driver or by us. */}
       {d.status?.slackBridge && !selected.slackChannelId ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: 'var(--ds-blue-bg)', borderBottom: '1px solid var(--ds-border)', fontSize: 13 }}>
-          <Hash className="size-4" style={{ color: 'var(--ds-blue)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: 'var(--tms-primary-tint)', borderBottom: '1px solid var(--tms-border)', fontSize: 13 }}>
+          <Hash className="size-4" style={{ color: 'var(--tms-primary)' }} />
           <span style={{ flex: 1 }}>{conversationTitle(selected)} has no Slack channel yet. Create one so the team can answer from Slack.</span>
           <Button size="sm" className="h-7" onClick={() => void openSlackWizard(selected)}>Set up channel</Button>
         </div>
@@ -358,17 +369,17 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
       />
     </div>
   ) : (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ds-t3)', fontSize: 13, background: 'var(--ds-bg)' }}>
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tms-muted)', fontSize: 13, background: 'var(--tms-bg)' }}>
       Pick a conversation, or start a new message.
     </div>
   )
 
   const compactBar = (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--tms-border)', background: 'var(--tms-card)', flexShrink: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-        <MessageSquare className="size-4" style={{ color: 'var(--ds-blue)' }} />
-        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)' }}>Dispatch</span>
-        {counts.UNREAD ? <span style={{ minWidth: 18, height: 18, borderRadius: 9, background: 'var(--ds-blue)', color: '#fff', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{counts.UNREAD}</span> : null}
+        <MessageSquare className="size-4" style={{ color: 'var(--tms-primary)' }} />
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--tms-text)' }}>Dispatch</span>
+        {counts.UNREAD ? <span style={{ minWidth: 18, height: 18, borderRadius: 9, background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{counts.UNREAD}</span> : null}
       </div>
       <div style={{ display: 'flex', gap: 4 }}>
         <Button size="sm" variant="outline" className="h-7 gap-1" onClick={() => setNewOpen(true)} title="New message"><MessageSquarePlus className="size-3.5" /></Button>

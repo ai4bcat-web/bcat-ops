@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  listCustomers, createCustomer, updateCustomer, archiveCustomer,
+  listCustomers, createCustomer, updateCustomer, archiveCustomer, setCustomerStatus as setCustomerStatusAction,
   listLocations, createLocation, updateLocation, archiveLocation, removeLocationDriverNote,
 } from '@/lib/apiClient'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
@@ -14,8 +14,10 @@ const byName = <T extends { name: string }>(rows: T[]) => [...rows].sort((a, b) 
  * One hook for both lists; either page (and the drawer's pickers) reads it. A failed
  * load is reported through `error`, never rendered as an empty directory.
  */
-export function useDirectory(opts?: { includeArchived?: boolean }) {
+export function useDirectory(opts?: { includeArchived?: boolean; locations?: boolean }) {
   const includeArchived = opts?.includeArchived ?? false
+  // Locations are 3,000+ rows (17 pages): only the callers that read them pay for them.
+  const withLocations = opts?.locations ?? true
   const [customers, setCustomers] = useState<CustomerRecord[]>([])
   const [locations, setLocations] = useState<LocationRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -24,11 +26,14 @@ export function useDirectory(opts?: { includeArchived?: boolean }) {
   // No synchronous setState before the first await (react-hooks/set-state-in-effect):
   // every state write lives in the promise chain. `refresh` sets loading itself.
   const load = useCallback(() =>
-    Promise.all([listCustomers({ includeArchived }), listLocations({ includeArchived })])
+    Promise.all([
+      listCustomers({ includeArchived }),
+      withLocations ? listLocations({ includeArchived }) : Promise.resolve([] as LocationRecord[]),
+    ])
       .then(([c, l]) => { setCustomers(byName(c)); setLocations(byName(l)); setError(null) })
       .catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Directory failed to load') })
       .finally(() => setLoading(false)),
-  [includeArchived])
+  [includeArchived, withLocations])
   useEffect(() => { load() }, [load])
   const refresh = useCallback(() => { setLoading(true); return load() }, [load])
   const replaceCustomer = (c: CustomerRecord) =>
@@ -48,6 +53,12 @@ export function useDirectory(opts?: { includeArchived?: boolean }) {
     archiveCustomer: async (current: CustomerRecord) => {
       const c = await archiveCustomer(current.id, current.updatedAt)
       if (includeArchived) replaceCustomer(c); else setCustomers((p) => p.filter((x) => x.id !== c.id))
+      return c
+    },
+    /** Status transitions are CAS-checked server-side; here we just refresh the local row. */
+    setCustomerStatus: async (current: CustomerRecord, input: Parameters<typeof setCustomerStatusAction>[2]) => {
+      const c = await setCustomerStatusAction(current.id, current.updatedAt, input)
+      replaceCustomer(c)
       return c
     },
     addLocation: async (input: Parameters<typeof createLocation>[0]) => {

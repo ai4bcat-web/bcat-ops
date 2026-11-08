@@ -33,7 +33,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
-      className={cn('h-8 rounded-md border border-slate-200 px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-slate-300', className)}
+      className={cn('h-8 rounded-md border border-border px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring', className)}
       {...props}
     />
   )
@@ -42,7 +42,7 @@ function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInputEleme
 function Select({ className, children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement> & { children: React.ReactNode }) {
   return (
     <select
-      className={cn('h-8 rounded-md border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white', className)}
+      className={cn('h-8 rounded-md border border-border px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring bg-card', className)}
       {...props}
     >
       {children}
@@ -104,7 +104,7 @@ function ExpenseTypesTab({ data }: { data: ExpenseDataState }) {
       </div>
 
       {(adding || editId) && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-border bg-muted p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
           <Field label="Name">
             <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Liability Insurance" />
           </Field>
@@ -136,9 +136,9 @@ function ExpenseTypesTab({ data }: { data: ExpenseDataState }) {
         </div>
       )}
 
-      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'auto' }}>
+      <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'auto' }}>
         <table className="w-full text-xs">
-          <thead className="bg-slate-50">
+          <thead className="bg-muted">
             <tr>
               {['Name','Category','Entry Method','Active','Notes',''].map((h) => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">{h}</th>
@@ -150,20 +150,20 @@ function ExpenseTypesTab({ data }: { data: ExpenseDataState }) {
               <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground text-xs">No expense types yet</td></tr>
             )}
             {sorted.map((t) => (
-              <tr key={t.id} className={cn('border-t border-slate-100', editId === t.id && 'bg-slate-50')}>
+              <tr key={t.id} className={cn('border-t border-border', editId === t.id && 'bg-muted')}>
                 <td className="px-4 py-3 font-medium">{t.name}</td>
                 <td className="px-4 py-3 text-muted-foreground">{t.category}</td>
                 <td className="px-4 py-3 text-muted-foreground">{t.defaultEntryMethod}</td>
                 <td className="px-4 py-3">
-                  <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium', t.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500')}>
+                  <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium', t.active ? 'bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)]' : 'bg-muted text-muted-foreground')}>
                     {t.active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate">{t.notes || '—'}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5 justify-end">
-                    <button aria-label="Edit expense type" onClick={() => openEdit(t)} className="p-1 rounded hover:bg-slate-100 text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
-                    <button aria-label="Delete expense type" onClick={() => del(t.id)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"><Trash2 className="size-3.5" /></button>
+                    <button aria-label="Edit expense type" onClick={() => openEdit(t)} className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
+                    <button aria-label="Delete expense type" onClick={() => del(t.id)} className="p-1 rounded hover:bg-[color:var(--tms-badge-red-tint)] text-muted-foreground hover:text-[color:var(--tms-badge-red)] transition-colors"><Trash2 className="size-3.5" /></button>
                   </div>
                 </td>
               </tr>
@@ -252,7 +252,7 @@ function AllocationsTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
       </div>
 
       {(adding || editId) && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+        <div className="rounded-xl border border-border bg-muted p-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Field label="Expense Type">
               <Select value={form.expenseTypeId} onChange={(e) => setForm((f) => ({ ...f, expenseTypeId: e.target.value }))}>
@@ -279,9 +279,9 @@ function AllocationsTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px',
                   borderRadius: 20, border: '1px solid', fontSize: 12, cursor: 'pointer', userSelect: 'none',
-                  background: form.truckIds.includes(t.id) ? 'var(--ds-blue)' : 'var(--ds-bg)',
-                  borderColor: form.truckIds.includes(t.id) ? 'var(--ds-blue)' : 'var(--ds-border)',
-                  color: form.truckIds.includes(t.id) ? '#fff' : 'var(--ds-t2)',
+                  background: form.truckIds.includes(t.id) ? 'var(--tms-primary)' : 'var(--tms-bg)',
+                  borderColor: form.truckIds.includes(t.id) ? 'var(--tms-primary)' : 'var(--tms-border)',
+                  color: form.truckIds.includes(t.id) ? 'var(--tms-on-primary)' : 'var(--tms-text-2)',
                 }}
               >
                   <input type="checkbox" className="sr-only" checked={form.truckIds.includes(t.id)} onChange={() => toggleTruck(t.id)} />
@@ -299,9 +299,9 @@ function AllocationsTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
         </div>
       )}
 
-      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'auto' }}>
+      <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'auto' }}>
         <table className="w-full text-xs">
-          <thead className="bg-slate-50">
+          <thead className="bg-muted">
             <tr>
               {['Expense Type','Method','Trucks','Notes',''].map((h) => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-muted-foreground">{h}</th>
@@ -313,13 +313,13 @@ function AllocationsTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
               <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground text-xs">No allocations yet</td></tr>
             )}
             {sorted.map((a) => (
-              <tr key={a.id} className={cn('border-t border-slate-100', editId === a.id && 'bg-slate-50')}>
+              <tr key={a.id} className={cn('border-t border-border', editId === a.id && 'bg-muted')}>
                 <td className="px-4 py-3 font-medium">{typeMap.get(a.expenseTypeId)?.name ?? a.expenseTypeId}</td>
                 <td className="px-4 py-3 text-muted-foreground">{a.allocationMethod === 'SPLIT_EVEN' ? 'Split Evenly' : 'Direct'}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
                     {(a.truckIds ?? []).map((id) => (
-                      <span key={id} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-mono">
+                      <span key={id} className="px-1.5 py-0.5 rounded bg-muted text-foreground text-[10px] font-mono">
                         #{truckMap.get(id)?.unitNumber ?? id.slice(-4)}
                       </span>
                     ))}
@@ -329,8 +329,8 @@ function AllocationsTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
                 <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate">{a.notes || '—'}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5 justify-end">
-                    <button aria-label="Edit allocation" onClick={() => openEdit(a)} className="p-1 rounded hover:bg-slate-100 text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
-                    <button aria-label="Delete allocation" onClick={() => del(a.id)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"><Trash2 className="size-3.5" /></button>
+                    <button aria-label="Edit allocation" onClick={() => openEdit(a)} className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
+                    <button aria-label="Delete allocation" onClick={() => del(a.id)} className="p-1 rounded hover:bg-[color:var(--tms-badge-red-tint)] text-muted-foreground hover:text-[color:var(--tms-badge-red)] transition-colors"><Trash2 className="size-3.5" /></button>
                   </div>
                 </td>
               </tr>
@@ -432,7 +432,7 @@ function RecurringTab({ data }: { data: ExpenseDataState }) {
       </div>
 
       {(adding || editId) && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="rounded-xl border border-border bg-muted p-4 grid grid-cols-2 md:grid-cols-3 gap-3">
           <Field label="Expense Type">
             <Select value={form.expenseTypeId} onChange={(e) => setForm((f) => ({ ...f, expenseTypeId: e.target.value }))}>
               <option value="">Select type…</option>
@@ -472,9 +472,9 @@ function RecurringTab({ data }: { data: ExpenseDataState }) {
         </div>
       )}
 
-      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'auto' }}>
+      <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'auto' }}>
         <table className="w-full text-xs">
-          <thead className="bg-slate-50">
+          <thead className="bg-muted">
             <tr>
               {['Expense Type','Allocation','$/Month','Start','End','Active','Notes',''].map((h) => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">{h}</th>
@@ -486,7 +486,7 @@ function RecurringTab({ data }: { data: ExpenseDataState }) {
               <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground text-xs">No recurring expenses yet</td></tr>
             )}
             {sorted.map((r) => (
-              <tr key={r.id} className={cn('border-t border-slate-100', editId === r.id && 'bg-slate-50')}>
+              <tr key={r.id} className={cn('border-t border-border', editId === r.id && 'bg-muted')}>
                 <td className="px-4 py-3 font-medium">{typeMap.get(r.expenseTypeId)?.name ?? '—'}</td>
                 <td className="px-4 py-3 text-muted-foreground">
                   {allocMap.get(r.allocationId) ? `${allocMap.get(r.allocationId)!.allocationMethod}` : '—'}
@@ -495,15 +495,15 @@ function RecurringTab({ data }: { data: ExpenseDataState }) {
                 <td className="px-4 py-3 text-muted-foreground font-mono">{r.startMonth}</td>
                 <td className="px-4 py-3 text-muted-foreground font-mono">{r.endMonth ?? 'ongoing'}</td>
                 <td className="px-4 py-3">
-                  <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium', r.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500')}>
+                  <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium', r.active ? 'bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)]' : 'bg-muted text-muted-foreground')}>
                     {r.active ? 'Active' : 'Paused'}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-muted-foreground max-w-[140px] truncate">{r.notes || '—'}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5 justify-end">
-                    <button aria-label="Edit recurring expense" onClick={() => openEdit(r)} className="p-1 rounded hover:bg-slate-100 text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
-                    <button aria-label="Delete recurring expense" onClick={() => del(r.id)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"><Trash2 className="size-3.5" /></button>
+                    <button aria-label="Edit recurring expense" onClick={() => openEdit(r)} className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
+                    <button aria-label="Delete recurring expense" onClick={() => del(r.id)} className="p-1 rounded hover:bg-[color:var(--tms-badge-red-tint)] text-muted-foreground hover:text-[color:var(--tms-badge-red)] transition-colors"><Trash2 className="size-3.5" /></button>
                   </div>
                 </td>
               </tr>
@@ -595,7 +595,7 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
         <p className="text-xs text-muted-foreground">Record a one-off cost not covered by recurring or fuel import</p>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 grid grid-cols-2 md:grid-cols-3 gap-3 max-w-2xl">
+      <div className="rounded-xl border border-border bg-muted p-4 grid grid-cols-2 md:grid-cols-3 gap-3 max-w-2xl">
         <Field label="Expense Type">
           <Select value={form.expenseTypeId} onChange={(e) => pickType(e.target.value)}>
             <option value="">Select type…</option>
@@ -641,7 +641,7 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
           <Button className="h-8 gap-1.5" disabled={saving} onClick={submit}>
             {saving ? <RefreshCw className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} Add Record
           </Button>
-          {saved && <span className="text-xs text-emerald-600 font-medium flex items-center gap-1"><Check className="size-3.5" /> Saved</span>}
+          {saved && <span className="text-xs text-[color:var(--tms-badge-green)] font-medium flex items-center gap-1"><Check className="size-3.5" /> Saved</span>}
         </div>
       </div>
 
@@ -649,9 +649,9 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
       {data.records.filter((r) => r.source === 'manual-entry').length > 0 && (
         <div>
           <p className="text-xs text-muted-foreground font-medium mb-2">Recent manual entries</p>
-          <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'auto' }}>
+          <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'auto' }}>
             <table className="w-full text-xs">
-              <thead className="bg-slate-50">
+              <thead className="bg-muted">
                 <tr>
                   {['Type','Amount','Period/Date','Truck','Notes',''].map((h) => (
                     <th key={h} className="text-left px-4 py-3 font-medium text-muted-foreground">{h}</th>
@@ -666,14 +666,14 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
                     const typeName = data.expenseTypes.find((t) => t.id === r.expenseTypeId)?.name ?? '—'
                     const truckNum = trucks.find((t) => t.id === r.directTruckId)?.unitNumber
                     return (
-                      <tr key={r.id} className="border-t border-slate-100">
+                      <tr key={r.id} className="border-t border-border">
                         <td className="px-4 py-3 font-medium">{typeName}</td>
                         <td className="px-4 py-3 tabular-nums">{fmtMoney(r.amount)}</td>
                         <td className="px-4 py-3 font-mono text-muted-foreground">{r.periodMonth ?? r.transactionDate ?? '—'}</td>
                         <td className="px-4 py-3 text-muted-foreground">{truckNum ? `#${truckNum}` : '—'}</td>
                         <td className="px-4 py-3 text-muted-foreground max-w-[140px] truncate">{r.notes || '—'}</td>
                         <td className="px-4 py-3">
-                          <button aria-label="Delete record" onClick={() => { if (confirm('Delete?')) data.deleteRecord(r.id) }} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors">
+                          <button aria-label="Delete record" onClick={() => { if (confirm('Delete?')) data.deleteRecord(r.id) }} className="p-1 rounded hover:bg-[color:var(--tms-badge-red-tint)] text-muted-foreground hover:text-[color:var(--tms-badge-red)] transition-colors">
                             <Trash2 className="size-3.5" />
                           </button>
                         </td>
@@ -706,7 +706,7 @@ export function ExpenseManageView({ data, trucks }: { data: ExpenseDataState; tr
   return (
     <div className="space-y-5">
       {/* Sub-tab bar */}
-      <div style={{ display: 'flex', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, gap: 2 }}>
+      <div style={{ display: 'flex', background: 'var(--tms-bg)', border: '1px solid var(--tms-border)', borderRadius: 9, padding: 3, gap: 2 }}>
         {MANAGE_TABS.map((t) => {
           const active = tab === t.value
           return (
@@ -716,9 +716,9 @@ export function ExpenseManageView({ data, trucks }: { data: ExpenseDataState; tr
               style={{
                 padding: '4px 14px', borderRadius: 7, border: 'none', cursor: 'pointer',
                 fontSize: 12.5, fontWeight: active ? 600 : 500, fontFamily: 'inherit',
-                background: active ? '#fff' : 'transparent',
-                color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
-                boxShadow: active ? 'var(--sh-sm)' : 'none',
+                background: active ? 'var(--tms-card)' : 'transparent',
+                color: active ? 'var(--tms-text)' : 'var(--tms-muted)',
+                boxShadow: active ? 'var(--tms-shadow)' : 'none',
                 whiteSpace: 'nowrap',
               }}
             >

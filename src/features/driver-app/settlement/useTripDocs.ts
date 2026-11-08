@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { fetchSubmissions, type SubmissionKind, type SubmissionSummary, type SubmissionDocument } from '../driverApi'
-import { normalizePro } from '@/lib/podPresence'
+import { normalizePro } from '@/lib/proNumber'
 
 export interface TripDoc {
   submissionId: string

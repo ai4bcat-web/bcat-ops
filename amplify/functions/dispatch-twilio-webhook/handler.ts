@@ -19,9 +19,13 @@ import { autoFilePod, type AutoPodStore } from '../_shared/dispatchAutoPod'
 import { DynamoDBDocumentClient, ScanCommand as DocScanCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 import { randomUUID } from 'node:crypto'
 import { getStops } from '../../../src/lib/stops'
-import { normalizePro } from '../../../src/lib/podPresence'
+import { normalizePro } from '../../../src/lib/proNumber'
 import type { Load, Stop } from '../../../src/types'
 import { matchDriverByPhone, conversationTitle, callPlan, type DispatchMedia, type DispatchDriver, type DispatchConversation, type DispatchMessage } from '../../../src/lib/dispatch'
+import { bridgeToShipment, type ShipmentBridgeDeps } from './shipmentBridge'
+import { textOfVcard } from '../../../src/lib/locationShare'
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
+import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm'
 
 const dynamo = new DynamoDBClient({})
 const s3 = new S3Client({})
@@ -44,6 +48,10 @@ interface Deps {
   now: () => Date
   /** Files a texted picture as the POD on the driver's open load; absent in a stack without the load tables. */
   autoPod?: AutoPodStore
+  /** truckId → TruckConfig.phone; absent in a stack without the table. */
+  truckPhones?: () => Promise<Record<string, string>>
+  /** Carries a driver's text into their shipment thread; absent without the tracking function or load tables. */
+  shipmentBridge?: ShipmentBridgeDeps
 }
 
 /** Mirror into the driver's Slack channel when the bridge is on and the channel exists. Never fatal. */
@@ -68,9 +76,12 @@ const text = (body: string, statusCode = 200): Reply => ({ statusCode, headers: 
 let driverCache: { at: number; rows: DispatchDriver[] } | null = null
 const DRIVER_CACHE_MS = 60_000
 
-async function drivers(store: DispatchStore, now: number): Promise<DispatchDriver[]> {
+async function drivers(store: DispatchStore, now: number, truckPhones?: Deps['truckPhones']): Promise<DispatchDriver[]> {
   if (driverCache && now - driverCache.at < DRIVER_CACHE_MS) return driverCache.rows
-  const rows = await store.listDrivers()
+  const listed = await store.listDrivers()
+  // Step AK: a text from the work phone in a driver's truck is that driver. A failed lookup only costs the work-phone match.
+  const phones = truckPhones ? await truckPhones().catch((err) => { console.warn('[dispatch-webhook] truck phones failed', String(err)); return {} as Record<string, string> }) : {}
+  const rows = listed.map((d) => (d.assignedTruckId && phones[d.assignedTruckId] ? { ...d, workPhone: phones[d.assignedTruckId] } : d))
   driverCache = { at: now, rows }
   return rows
 }
@@ -141,10 +152,13 @@ async function inboundSms(p: Record<string, string>, deps: Deps): Promise<Reply>
   if (await store.findMessageByTwilioSid(sid)) return xml(EMPTY_TWIML)   // Twilio retry
 
   const nowMs = deps.now().getTime()
-  const roster = await drivers(store, nowMs)
+  const roster = await drivers(store, nowMs, deps.truckPhones)
   const { conversation, created } = await store.ensureConversation(from, roster, matchDriverByPhone)
 
   const media: DispatchMedia[] = []
+  // Step AO: an iPhone "Share My Location" arrives as a vCard attachment; its map URL / GEO line
+  // is what the shipment bridge reads. The stored message and S3 object are unchanged.
+  let vcardText: string | null = null
   const n = Math.min(Number(p.NumMedia ?? 0) || 0, MAX_INBOUND_MEDIA)
   for (let i = 0; i < n; i += 1) {
     const url = p[`MediaUrl${i}`]
@@ -155,6 +169,9 @@ async function inboundSms(p: Record<string, string>, deps: Deps): Promise<Reply>
       const key = `${MEDIA_PREFIX}/in/${conversation.id}/${sid}-${i}.${extensionFor(contentType)}`
       await deps.putObject(key, got.bytes, contentType)
       media.push({ key, contentType })
+      if (!vcardText && /^text\/(?:x-)?vcard\b/i.test(contentType)) {
+        vcardText = textOfVcard(new TextDecoder().decode(got.bytes))
+      }
     } catch (err) {
       console.error('[dispatch-webhook] media download failed', { sid, i, err: String(err) })
     }
@@ -193,6 +210,16 @@ async function inboundSms(p: Record<string, string>, deps: Deps): Promise<Reply>
     }
   }
 
+  // A text from a driver also lands in their shipment's thread when exactly one shipment is theirs to answer.
+  const bridgeBody = body || vcardText || ''
+  if (deps.shipmentBridge && updated.driverId && bridgeBody) {
+    try {
+      const bridged = await bridgeToShipment(deps.shipmentBridge, { driverId: updated.driverId, from, body: bridgeBody, sid })
+      if (bridged) console.log('[dispatch-webhook] text bridged to shipment thread', { driverId: updated.driverId, shipmentId: bridged.shipmentId })
+    } catch (err) {
+      console.error('[dispatch-webhook] shipment bridge failed', { sid, err: String(err) })
+    }
+  }
   const settings = await store.getSettings().catch(() => null)
   if (settings?.slackChannelId && deps.slack) {
     const who = conversationTitle(updated)
@@ -448,6 +475,50 @@ function autoPodStore(): AutoPodStore | undefined {
   }
 }
 
+// ── Work phones and the shipment bridge (Steps AJ/AK) ───────────────────────
+
+const TRUCK_CONFIG_TABLE = process.env.TRUCK_CONFIG_TABLE_NAME ?? ''
+const TRACKING_ACTIONS_PARAM = process.env.TRACKING_ACTIONS_PARAM_NAME ?? ''
+
+/** truckId → work phone, from TruckConfig. Undefined when the stack lacks the table (the roster then matches personal numbers only). */
+function truckPhonesLoader(): (() => Promise<Record<string, string>>) | undefined {
+  if (!TRUCK_CONFIG_TABLE) return undefined
+  const doc = DynamoDBDocumentClient.from(dynamo)
+  return async () => {
+    const rows = await scanAll<{ truckId: string; phone?: string | null }>(doc, TRUCK_CONFIG_TABLE)
+    const out: Record<string, string> = {}
+    for (const r of rows) if (r.truckId && r.phone) out[r.truckId] = r.phone
+    return out
+  }
+}
+
+/**
+ * The tracking router, invoked as a system caller. Its function name is read from SSM at run
+ * time rather than passed as an env var: the tracking stack already references this stack (the
+ * status-callback URL), so a name reference the other way would be a CloudFormation cycle.
+ * Undefined (the bridge off) without the parameter name or the load tables.
+ */
+function shipmentBridgeDeps(config: DispatchConfig, autoPod: AutoPodStore | undefined): ShipmentBridgeDeps | undefined {
+  if (!TRACKING_ACTIONS_PARAM || !autoPod) return undefined
+  const lambda = new LambdaClient({})
+  const ssm = new SSMClient({})
+  let functionName: string | null = null
+  return {
+    loadsForDriver: autoPod.loadsForDriver,
+    dispatchNumber: config.dispatchNumber,
+    invokeTracking: async (args) => {
+      functionName ??= (await ssm.send(new GetParameterCommand({ Name: TRACKING_ACTIONS_PARAM }))).Parameter?.Value ?? null
+      if (!functionName) throw new Error('tracking function name is not published')
+      const out = await lambda.send(new InvokeCommand({
+        FunctionName: functionName,
+        InvocationType: 'RequestResponse',
+        Payload: Buffer.from(JSON.stringify({ arguments: args, systemCaller: 'dispatch-twilio-webhook' })),
+      }))
+      if (out.FunctionError) throw new Error(`tracking router failed: ${out.FunctionError}`)
+    },
+  }
+}
+
 // ── Lambda entry ────────────────────────────────────────────────────────────
 
 export const handler = async (event: FnUrlEvent) => {
@@ -457,6 +528,7 @@ export const handler = async (event: FnUrlEvent) => {
     return text('dispatch not configured', 503)
   }
   const store = new DispatchStore(dynamo, tablesFromEnv())
+  const autoPod = autoPodStore()
   const deps: Deps = {
     store,
     config,
@@ -483,7 +555,9 @@ export const handler = async (event: FnUrlEvent) => {
       await sendMessage(config, { to, from: config.dispatchNumber, body })
     },
     now: () => new Date(),
-    autoPod: autoPodStore(),
+    autoPod,
+    truckPhones: truckPhonesLoader(),
+    shipmentBridge: shipmentBridgeDeps(config, autoPod),
   }
   try {
     return await handleEvent(event, deps)

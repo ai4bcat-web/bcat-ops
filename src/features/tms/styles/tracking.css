@@ -1,0 +1,340 @@
+/*
+ * Tracking workstation (table by assignee), shipment thread / check-call plan.
+ * Moved verbatim out of theme.css (S2 slice A); owned by S2 slice C from here on.
+ * Tokens live in ../theme.css; every selector stays under .tms-shell / .tms-portal. No colour literals.
+ */
+
+/* ── Tracking workstation (P8-UI) ─────────────────────────────────────────── */
+
+.tms-shell .tms-tracking-board {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tms-shell .tms-tracking-recent-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.tms-shell .tms-tracking-recent-label {
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-tracking-recent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: 999px;
+}
+
+.tms-shell .tms-tracking-recent-pro {
+  background: none;
+  border: 0;
+  color: var(--tms-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tms-shell .tms-tracking-recent-pro:hover {
+  color: var(--tms-primary-ink);
+}
+
+.tms-shell .tms-tracking-view-toggle {
+  align-self: flex-start;
+}
+
+.tms-shell .tms-tracking-error {
+  padding: 8px 12px;
+  color: var(--tms-badge-red);
+  font-size: 13px;
+}
+
+.tms-shell .tms-tracking-empty {
+  padding: 24px;
+  color: var(--tms-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.tms-shell .tms-tracking-shipment-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tms-shell .tms-tracking-pro {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--tms-text);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tms-shell .tms-tracking-pro:hover {
+  color: var(--tms-primary-ink);
+  text-decoration: underline;
+}
+
+.tms-shell .tms-tracking-favorited {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--tms-primary-ink);
+  cursor: pointer;
+}
+
+.tms-shell .tms-tracking-cell-muted {
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+.tms-shell .tms-tracking-nextstop-cell {
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tms-shell .tms-tracking-status-cell {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+
+.tms-shell .tms-tracking-next-event {
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+.tms-shell .tms-tracking-tracking-cell {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+
+.tms-shell .tms-tracking-last-place {
+  color: var(--tms-text);
+  font-size: 12px;
+}
+
+.tms-shell .tms-tracking-team-cell {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+/* Per-row hover menu (open shipment, customer URL). */
+.tms-shell .tms-tracking-rowmenu {
+  position: relative;
+  display: inline-flex;
+}
+
+.tms-shell .tms-tracking-rowmenu-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 180px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: 6px;
+  box-shadow: var(--tms-shadow-pop);
+}
+
+.tms-shell .tms-tracking-rowmenu:hover .tms-tracking-rowmenu-menu,
+.tms-shell .tms-tracking-rowmenu:focus-within .tms-tracking-rowmenu-menu {
+  display: block;
+}
+
+.tms-shell .tms-tracking-rowmenu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: 0;
+  color: var(--tms-text);
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tms-shell .tms-tracking-rowmenu-item:hover {
+  background: var(--tms-surface-hover);
+}
+
+.tms-shell .tms-tracking-rowmenu-item:disabled {
+  color: var(--tms-disabled);
+  cursor: not-allowed;
+}
+
+.tms-shell .tms-tracking-rowmenu-item:disabled:hover {
+  background: none;
+}
+
+.tms-shell .tms-tracking-rowmenu.tms-open .tms-tracking-rowmenu-menu {
+  display: block;
+}
+
+.tms-shell .tms-tracking-rowmenu-picker {
+  padding: 8px 12px;
+  border-top: 1px solid var(--tms-border);
+}
+
+.tms-shell .tms-tracking-group-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-tracking-group-count {
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+.tms-shell .tms-tracking-group-reassign {
+  margin-left: auto;
+  min-width: 220px;
+}
+
+.tms-shell .tms-tracking-detail-tracker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tms-shell .tms-icon-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--tms-text-2);
+  background: var(--tms-surface);
+  border: 1px solid var(--tms-border);
+  border-radius: 50%;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.tms-shell .tms-icon-link:hover { color: var(--tms-text); background: var(--tms-surface-hover); }
+.tms-shell .tms-icon-link[aria-pressed="true"] { color: var(--tms-primary-ink); background: var(--tms-primary-tint); border-color: var(--tms-primary); }
+/* Driver card */
+.tms-shell .tms-driver-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius); }
+.tms-shell .tms-driver-card-main { display: flex; align-items: center; gap: 10px; }
+.tms-shell .tms-driver-card-id { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.tms-shell .tms-driver-card-name { font-size: 13px; font-weight: 600; color: var(--tms-text); }
+.tms-shell .tms-driver-card-sub { font-size: 12px; color: var(--tms-muted); }
+.tms-shell .tms-driver-card-dispatcher { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; border-top: 1px solid var(--tms-border); }
+.tms-shell .tms-driver-card-label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tms-muted); }
+.tms-shell .tms-driver-card-contact { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+.tms-shell .tms-driver-card-contact a { display: inline-flex; align-items: center; gap: 4px; color: var(--tms-primary-ink); text-decoration: none; }
+.tms-shell .tms-driver-card-contact a:hover { text-decoration: underline; }
+
+.tms-shell .tms-tracking-detail {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tms-shell .tms-tracking-detail-empty {
+  padding: 24px;
+  color: var(--tms-muted);
+  font-size: 13px;
+}
+
+.tms-shell .tms-tracking-detail-eta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--tms-border);
+  font-size: 13px;
+}
+
+.tms-shell .tms-tracking-detail-eta-label {
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-tracking-detail-eta-value {
+  color: var(--tms-text);
+  font-weight: 600;
+}
+
+.tms-shell .tms-tracking-detail-source {
+  margin: 0;
+  color: var(--tms-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.tms-shell .tms-thread-signature-preview {
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+.tms-shell .tms-thread-composer-error {
+  margin: 0;
+  color: var(--tms-badge-red);
+  font-size: 12px;
+}
+
+.tms-portal .tms-board-batch { display: flex; flex-direction: column; gap: 14px; }
+.tms-portal .tms-board-batch-results { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }
+.tms-portal .tms-board-batch-result { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; background: var(--tms-badge-green-tint); color: var(--tms-text); font-size: 13px; }
+.tms-portal .tms-board-batch-failed { background: var(--tms-badge-red-tint); }
+.tms-portal .tms-board-batch-label { font-weight: 500; }
+.tms-portal .tms-board-batch-message { margin-left: auto; color: var(--tms-muted); font-size: 13px; }
+.tms-portal .tms-board-batch-empty { display: inline-flex; align-items: center; gap: 8px; color: var(--tms-muted); font-size: 13px; }
+
+/* Shipment thread and check-call plan (P8) */
+.tms-shell .tms-thread-panel { display: flex; flex-direction: column; gap: 12px; }
+.tms-shell .tms-thread-flag { display: flex; gap: 10px; padding: 10px 12px; border: 1px solid var(--tms-badge-red); border-radius: var(--tms-radius); background: var(--tms-badge-red-tint); color: var(--tms-text); font-size: 13px; }
+.tms-shell .tms-thread-flag p { margin: 2px 0 0; }
+.tms-shell .tms-checkcall-editor { display: flex; flex-direction: column; gap: 14px; }
+.tms-shell .tms-checkcall-channels { display: flex; flex-wrap: wrap; gap: 10px; }
+.tms-shell .tms-checkcall-channel { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius); font-size: 13px; cursor: pointer; }
+.tms-shell .tms-checkcall-channel-disabled { opacity: 0.55; cursor: not-allowed; background: var(--tms-input); }
+.tms-shell .tms-checkcall-channel input { margin: 0; accent-color: var(--tms-primary); }
+.tms-shell .tms-checkcall-channel-reason { color: var(--tms-muted); font-size: 11px; }
+.tms-shell .tms-checkcall-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.tms-shell .tms-checkcall-result { padding: 8px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius); background: var(--tms-card); font-size: 13px; }
+.tms-shell .tms-thread-list { display: flex; flex-direction: column; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.tms-shell .tms-thread-row { display: flex; }
+.tms-shell .tms-thread-out { justify-content: flex-end; }
+.tms-shell .tms-thread-in { justify-content: flex-start; }
+.tms-shell .tms-thread-not-sent { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--tms-border); color: var(--tms-muted); font-size: 12px; }
+.tms-shell .tms-thread-not-sent p { margin: 4px 0 0; }
+.tms-shell .tms-thread-channel-reason { white-space: nowrap; }
+.tms-shell .tms-checkcall-source { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tms-shell .tms-checkcall-source .tms-field-label { margin: 0; }
+.tms-shell .tms-thread-author-kind { color: var(--tms-muted); font-size: 11px; text-transform: lowercase; }
+
+/* Tracking tab: composer sits inside a card, so no footer padding or divider. */
+.tms-shell .tms-tracking-detail .tms-thread-composer { padding: 12px 0 0; margin-top: 12px; }
+.tms-shell .tms-tracking-detail-header { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
+.tms-shell .tms-tracking-detail-title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.tms-shell .tms-tracking-eta { padding: 12px; font-size: 13px; }
+.tms-shell .tms-timeline-icon { display: inline-block; margin-right: 6px; vertical-align: -2px; color: var(--tms-muted); }
+.tms-shell .tms-timeline-status-move { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--tms-muted); }

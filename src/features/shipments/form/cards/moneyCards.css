@@ -1,0 +1,62 @@
+/*
+ * Step AR cards 4-5 and the More tabs. Tokens only; every rule is scoped under .tms-shell.
+ * Grids size to content (no empty halves) and never force horizontal scroll.
+ */
+
+
+/* Rates ------------------------------------------------------------- */
+.tms-shell .tms-card-rates { display: flex; flex-direction: column; gap: 12px; }
+
+.tms-shell .tms-card-rate-row { display: flex; flex-direction: column; gap: 8px; }
+
+.tms-shell .tms-card-rate-row-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-card-rate-note { margin: 0; font-size: 12px; color: var(--tms-badge-orange); }
+
+.tms-shell .tms-card-lines { display: flex; flex-direction: column; gap: 6px; }
+
+.tms-shell .tms-card-line {
+  display: grid;
+  grid-template-columns: minmax(64px, 1fr) minmax(72px, 1.2fr) minmax(96px, 1.6fr) minmax(80px, 1fr) minmax(80px, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.tms-shell .tms-card-line-head {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-card-line > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Carrier card ------------------------------------------------------- */
+.tms-shell .tms-card-carrier-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tms-shell .tms-card-carrier-empty-text { flex: 1 1 auto; color: var(--tms-muted); font-size: 14px; }
+
+.tms-shell .tms-card-carrier-grid { display: flex; flex-direction: column; gap: 8px; }
+
+.tms-shell .tms-card-carrier-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
+.tms-shell .tms-card-carrier-matches { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tms-shell .tms-card-carrier-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* More tabs ---------------------------------------------------------- */
+.tms-shell .tms-card-more-pane { display: flex; flex-direction: column; gap: 8px; }
+.tms-shell .tms-card-more-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.tms-shell .tms-card-counter { font-size: 12px; color: var(--tms-muted); }
+.tms-shell .tms-card-counter[data-over='true'] { color: var(--tms-badge-red); }

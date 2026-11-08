@@ -9,7 +9,7 @@ import {
 } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
-import { useLoads } from './useLoads'
+import { useLoads, useEnsureLoadRange } from './useLoads'
 import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { creditCounts } from '@/lib/payCreditApproval'
@@ -94,6 +94,7 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
   useEffect(() => { void load() }, [load])
 
   const end = periodEnd(periodStart)
+  useEnsureLoadRange(periodStart, end)
 
   // Drivers flagged as brokers/3PL never count — their covered loads aren't box-truck runs.
   const brokerIds = useMemo(

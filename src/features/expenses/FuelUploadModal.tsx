@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
-import { Upload, X, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Upload, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react'
+import { TmsDialog } from '@/features/tms/kit/TmsDialog'
+import { TmsButton } from '@/features/tms/kit/TmsButton'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { parseEfsTransactionReport, fuelTxDedupKey } from '@/lib/parsers/efsTransactionReport'
@@ -204,25 +205,32 @@ export function FuelUploadModal({ trucks, onImported, onChanged, onClose }: Prop
   }, [preview, duplicateCount, onImported])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100 shrink-0">
-          <h2 className="text-base font-semibold">Import EFS Fuel Report</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X className="size-4" />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto">
+    <TmsDialog
+      open
+      onOpenChange={(o) => { if (!o) onClose() }}
+      title="Import EFS Fuel Report"
+      className="tms-dialog-wide"
+      footer={
+        <>
+          <TmsButton variant="secondary" onClick={onClose}>
+            {step === 'done' ? 'Close' : 'Cancel'}
+          </TmsButton>
+          {step === 'preview' && preview.length > 0 && (
+            <TmsButton variant="primary" onClick={handleConfirm}>
+              Import {preview.length} transaction{preview.length !== 1 ? 's' : ''}
+            </TmsButton>
+          )}
+        </>
+      }
+    >
+        <div>
           {/* Step: select */}
           {step === 'select' && (
             <div className="p-6">
               <label
                 className={cn(
                   'flex flex-col items-center justify-center gap-4 p-12 rounded-xl border-2 border-dashed transition-colors cursor-pointer',
-                  dragOver ? 'border-primary bg-sky-50' : 'border-slate-200 hover:border-slate-300',
+                  dragOver ? 'border-primary bg-[color:var(--tms-primary-tint)]' : 'border-border hover:border-input',
                 )}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
                 onDragLeave={() => setDragOver(false)}
@@ -236,14 +244,14 @@ export function FuelUploadModal({ trucks, onImported, onChanged, onClose }: Prop
                 <input type="file" accept=".txt" className="sr-only" onChange={handleFileInput} />
               </label>
               {parseError && (
-                <div className="mt-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 flex gap-2">
+                <div className="mt-4 p-3 rounded-lg bg-[color:var(--tms-badge-red-tint)] border border-[color:var(--tms-badge-red)] text-sm text-[color:var(--tms-badge-red)] flex gap-2">
                   <AlertTriangle className="size-4 shrink-0 mt-0.5" />
                   <pre className="whitespace-pre-wrap font-sans">{parseError}</pre>
                 </div>
               )}
 
               {/* Maintenance: one-click duplicate cleanup */}
-              <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
+              <div className="mt-5 pt-4 border-t border-border flex items-center justify-between gap-3">
                 <div className="text-xs text-muted-foreground">
                   Already imported the same report twice? Remove duplicate fills.
                   {cleanupMsg && <span className="block mt-1 text-foreground font-medium">{cleanupMsg}</span>}
@@ -251,7 +259,7 @@ export function FuelUploadModal({ trucks, onImported, onChanged, onClose }: Prop
                 <button
                   onClick={runCleanup}
                   disabled={cleaning}
-                  className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                  className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-60"
                 >
                   {cleaning ? <Loader2 className="size-3.5 animate-spin" /> : <AlertTriangle className="size-3.5" />}
                   {cleaning ? 'Cleaning…' : 'Remove duplicates'}
@@ -265,16 +273,16 @@ export function FuelUploadModal({ trucks, onImported, onChanged, onClose }: Prop
             <div className="p-6 space-y-4">
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-sm text-foreground font-medium">{fileName}</span>
-                <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-2 py-0.5 font-medium">
+                <span className="text-xs bg-[color:var(--tms-badge-green-tint)] text-[color:var(--tms-badge-green)] border border-[color:var(--tms-badge-green)] rounded-full px-2 py-0.5 font-medium">
                   {preview.length} new
                 </span>
                 {duplicateCount > 0 && (
-                  <span className="text-xs bg-slate-100 text-slate-600 border border-slate-200 rounded-full px-2 py-0.5 font-medium">
+                  <span className="text-xs bg-muted text-muted-foreground border border-border rounded-full px-2 py-0.5 font-medium">
                     {duplicateCount} duplicate{duplicateCount !== 1 ? 's' : ''} skipped
                   </span>
                 )}
                 {unmappedCards.length > 0 && (
-                  <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2 py-0.5 font-medium flex items-center gap-1">
+                  <span className="text-xs bg-[color:var(--tms-badge-orange-tint)] text-[color:var(--tms-badge-orange)] border border-[color:var(--tms-badge-orange)] rounded-full px-2 py-0.5 font-medium flex items-center gap-1">
                     <AlertTriangle className="size-3" />
                     Unmapped: {unmappedCards.join(', ')}
                   </span>
@@ -286,9 +294,9 @@ export function FuelUploadModal({ trucks, onImported, onChanged, onClose }: Prop
                   All transactions in this file already exist — nothing to import.
                 </div>
               ) : (
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <div className="overflow-x-auto rounded-lg border border-border">
                   <table className="w-full text-xs">
-                    <thead className="bg-slate-50">
+                    <thead className="bg-muted">
                       <tr>
                         {['Truck', 'Date', 'Invoice', 'Location', 'Type', 'Gal', '$/gal', 'Fees', 'Total'].map((h) => (
                           <th key={h} className="text-left px-4 py-2.5 font-medium text-muted-foreground whitespace-nowrap">{h}</th>
@@ -297,10 +305,10 @@ export function FuelUploadModal({ trucks, onImported, onChanged, onClose }: Prop
                     </thead>
                     <tbody>
                       {preview.map((row) => (
-                        <tr key={row.key} className={cn('border-t border-slate-100', row.unmapped && 'bg-amber-50/50')}>
+                        <tr key={row.key} className={cn('border-t border-border', row.unmapped && 'bg-[color:var(--tms-badge-orange-tint)]')}>
                           <td className="px-4 py-2.5 font-medium whitespace-nowrap">
                             {row.unmapped
-                              ? <span className="text-amber-600">{row.truckLabel}</span>
+                              ? <span className="text-[color:var(--tms-badge-orange)]">{row.truckLabel}</span>
                               : row.truckLabel}
                           </td>
                           <td className="px-4 py-2.5 font-mono whitespace-nowrap">{row.transactionDate}</td>
@@ -309,7 +317,7 @@ export function FuelUploadModal({ trucks, onImported, onChanged, onClose }: Prop
                           <td className="px-4 py-2.5">
                             <span className={cn(
                               'px-1.5 py-0.5 rounded font-medium',
-                              row.fuelType === 'ULSD' ? 'bg-sky-50 text-sky-700' : 'bg-violet-50 text-violet-700',
+                              row.fuelType === 'ULSD' ? 'bg-[color:var(--tms-primary-tint)] text-[color:var(--tms-primary-ink)]' : 'bg-[color:var(--tms-badge-purple-tint)] text-[color:var(--tms-badge-purple)]',
                             )}>
                               {row.fuelType}
                             </span>
@@ -334,7 +342,7 @@ export function FuelUploadModal({ trucks, onImported, onChanged, onClose }: Prop
             <div className="p-12 flex flex-col items-center gap-4">
               <Loader2 className="size-8 animate-spin text-primary" />
               <p className="text-sm text-foreground font-medium">Importing transactions…</p>
-              <div className="w-64 h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div className="w-64 h-2 bg-muted rounded-full overflow-hidden">
                 <div
                   className="h-full bg-primary transition-all duration-200"
                   style={{ width: `${importProgress}%` }}
@@ -347,24 +355,11 @@ export function FuelUploadModal({ trucks, onImported, onChanged, onClose }: Prop
           {/* Step: done */}
           {step === 'done' && (
             <div className="p-12 flex flex-col items-center gap-3">
-              <CheckCircle2 className="size-10 text-emerald-500" />
+              <CheckCircle2 className="size-10 text-[color:var(--tms-badge-green)]" />
               <p className="text-sm font-medium text-foreground">Import complete</p>
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 shrink-0">
-          <Button variant="outline" onClick={onClose}>
-            {step === 'done' ? 'Close' : 'Cancel'}
-          </Button>
-          {step === 'preview' && preview.length > 0 && (
-            <Button onClick={handleConfirm}>
-              Import {preview.length} transaction{preview.length !== 1 ? 's' : ''}
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
+    </TmsDialog>
   )
 }

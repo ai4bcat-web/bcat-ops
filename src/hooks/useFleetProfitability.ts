@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react'
-import { useLoads } from './useLoads'
+import { useLoads, useEnsureLoadRange } from './useLoads'
 import { useDrivers } from './useDrivers'
 import { useTrucks } from './useTrucks'
 import { useFuelTransactions, type FuelTransaction } from './useFuelTransactions'
@@ -43,6 +43,7 @@ export interface FleetProfitabilityHookResult {
  */
 export function useFleetProfitability(range: DateRange, group: FleetGroup): FleetProfitabilityHookResult {
   const { loads } = useLoads()
+  const ready = useEnsureLoadRange(range.start, range.end)
   const { drivers } = useDrivers()
   const { equipment } = useTrucks()
   const fuel = useFuelTransactions()
@@ -57,7 +58,7 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
   // attribute them by card number so the P&L counts every gallon.
   const fuelTxs = useMemo(() => withResolvedTruckIds(fuel.transactions, equipment), [fuel.transactions, equipment])
 
-  const loading = fuel.loading || exp.loading || mileage.loading || pay.loading
+  const loading = fuel.loading || exp.loading || mileage.loading || pay.loading || !ready
   const error = fuel.error || exp.error || mileage.error || pay.error || null
 
   const refresh = useMemo(

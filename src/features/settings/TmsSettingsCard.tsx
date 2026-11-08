@@ -1,12 +1,32 @@
-import { useEffect, useState } from 'react'
+/**
+ * TMS defaults: margin floor, payment terms, accessorial codes, invoice format,
+ * and Step P3 — the org-level flow defaults that every customer inherits.
+ *
+ * `saveTmsSettings` uses "keep" semantics: undefined leaves a field alone, null
+ * clears it, and a value replaces it. This card sends every field it owns on every
+ * save, so edits never erase fields in other tabs.
+ */
+import { useEffect, useMemo, useState } from 'react'
 import { Save, Cog } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import { TmsButton, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import { getTmsSettings, saveTmsSettings } from '@/lib/apiClient'
 import type { TmsSettings } from '@/types/tms'
+import { REQUIRED_FIELD_CATALOG } from '@/lib/flowDefaults'
+import { CheckRow, ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from './settingsKit'
+
+function percentOfBps(bps: number | null | undefined): string {
+  if (bps == null) return ''
+  return (bps / 100).toFixed(2)
+}
+
+function bpsOfPercent(text: string): number | null {
+  const n = Number(text)
+  if (text === '' || Number.isNaN(n)) return null
+  return Math.round(n * 100)
+}
+
+const REQUIRED_GROUPS = [...new Set(REQUIRED_FIELD_CATALOG.map((f) => f.group))]
 
 export function TmsSettingsCard() {
   const [settings, setSettings] = useState<TmsSettings | null>(null)
@@ -17,6 +37,13 @@ export function TmsSettingsCard() {
   const [defaultPaymentTermsDays, setDefaultPaymentTermsDays] = useState('')
   const [accessorialCodes, setAccessorialCodes] = useState('')
   const [invoiceNumberFormat, setInvoiceNumberFormat] = useState('')
+
+  // Step P3 org defaults.
+  const [marginTargetBps, setMarginTargetBps] = useState('')
+  const [marginTargetBpsByMode, setMarginTargetBpsByMode] = useState({ FTL: '', LTL: '' })
+  const [quoteAutoReplyDefault, setQuoteAutoReplyDefault] = useState<boolean | null>(null)
+  const [defaultRequiredLoadFields, setDefaultRequiredLoadFields] = useState<string[]>([])
+
   const [error, setError] = useState<string | null>(null)
 
   // State is written only inside the promise chain (react-hooks/set-state-in-effect).
@@ -26,43 +53,76 @@ export function TmsSettingsCard() {
         setSettings(s)
         setMarginFloorBps(s?.marginFloorBps != null ? String(s.marginFloorBps) : '')
         setDefaultPaymentTermsDays(s?.defaultPaymentTermsDays != null ? String(s.defaultPaymentTermsDays) : '')
-        // Same shape the field parses back: one code per line.
         setAccessorialCodes(Array.isArray(s?.accessorialCodes) ? s.accessorialCodes.map(String).join('\n') : '')
         setInvoiceNumberFormat(s?.invoiceNumberFormat ?? '')
+
+        setMarginTargetBps(s?.marginTargetBps != null ? String(s.marginTargetBps) : '')
+        const byMode = s?.marginTargetBpsByMode && typeof s.marginTargetBpsByMode === 'object'
+          ? s.marginTargetBpsByMode as Record<string, number>
+          : {}
+        setMarginTargetBpsByMode({ FTL: String(byMode.FTL ?? ''), LTL: String(byMode.LTL ?? '') })
+        setQuoteAutoReplyDefault(s?.quoteAutoReplyDefault ?? null)
+        setDefaultRequiredLoadFields(Array.isArray(s?.defaultRequiredLoadFields) ? s.defaultRequiredLoadFields as string[] : [])
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not load settings'))
       .finally(() => setLoading(false))
   }, [])
 
+  const typedMarginTarget = useMemo(() => bpsOfPercent(marginTargetBps), [marginTargetBps])
+  const typedMarginFloor = useMemo(() => bpsOfPercent(marginFloorBps), [marginFloorBps])
+  const typedByMode = useMemo(
+    () => ({
+      FTL: bpsOfPercent(marginTargetBpsByMode.FTL),
+      LTL: bpsOfPercent(marginTargetBpsByMode.LTL),
+    }),
+    [marginTargetBpsByMode],
+  )
+
   const save = async () => {
     setError(null)
-    let parsedAccessorialCodes: unknown[] | null = null
 
-    if (accessorialCodes.trim()) {
-      try {
-        const parsed = parseTextArray(accessorialCodes)
-        parsedAccessorialCodes = parsed
-      } catch { setError('Accessorial codes must be one value per line'); return }
-    }
+    const parsedAccessorialCodes = accessorialCodes.trim()
+      ? accessorialCodes.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+      : null
 
-
-    let margin: number | null = null
     if (marginFloorBps.trim()) {
-      margin = Number(marginFloorBps)
-      if (Number.isNaN(margin) || margin < 0) { setError('Margin floor must be a non-negative number'); return }
+      if (typedMarginFloor == null) { setError('Margin floor must be a non-negative number'); return }
     }
-    let terms: number | null = null
     if (defaultPaymentTermsDays.trim()) {
-      terms = Number(defaultPaymentTermsDays)
+      const terms = Number(defaultPaymentTermsDays)
       if (Number.isNaN(terms) || terms < 0) { setError('Default payment terms must be a non-negative number'); return }
     }
+    if (marginTargetBps.trim() && typedMarginTarget == null) {
+      setError('Margin target must be a non-negative number')
+      return
+    }
+    if (typedMarginTarget != null && typedMarginFloor != null && typedMarginFloor > typedMarginTarget) {
+      setError('Margin floor cannot be above the margin target')
+      return
+    }
+    for (const mode of ['FTL', 'LTL'] as const) {
+      const v = marginTargetBpsByMode[mode]
+      if (v.trim() && bpsOfPercent(v) == null) {
+        setError(`Margin target for ${mode} must be a non-negative number`)
+        return
+      }
+    }
+
+    const marginTargetBpsByModeOut: Record<string, number> | null = {}
+    if (marginTargetBpsByMode.FTL.trim() && typedByMode.FTL != null) marginTargetBpsByModeOut.FTL = typedByMode.FTL
+    if (marginTargetBpsByMode.LTL.trim() && typedByMode.LTL != null) marginTargetBpsByModeOut.LTL = typedByMode.LTL
+    const finalByMode = Object.keys(marginTargetBpsByModeOut).length ? marginTargetBpsByModeOut : null
 
     const patch: Parameters<typeof saveTmsSettings>[0] = {
-      ...(margin !== null ? { marginFloorBps: margin } : { marginFloorBps: null }),
-      ...(terms !== null ? { defaultPaymentTermsDays: terms } : { defaultPaymentTermsDays: null }),
-      ...(accessorialCodes.trim() ? { accessorialCodes: parsedAccessorialCodes } : { accessorialCodes: null }),
-      // loadStatusRules is not operator-facing in Phase 1 (nothing consumes it yet) and is left untouched.
-      ...(invoiceNumberFormat.trim() ? { invoiceNumberFormat: invoiceNumberFormat.trim() } : { invoiceNumberFormat: null }),
+      marginFloorBps: marginFloorBps.trim() ? typedMarginFloor : null,
+      defaultPaymentTermsDays: defaultPaymentTermsDays.trim() ? Number(defaultPaymentTermsDays) : null,
+      accessorialCodes: parsedAccessorialCodes,
+      invoiceNumberFormat: invoiceNumberFormat.trim() || null,
+      // Step P3 org defaults.
+      marginTargetBps: marginTargetBps.trim() && typedMarginTarget != null ? typedMarginTarget : null,
+      marginTargetBpsByMode: finalByMode,
+      quoteAutoReplyDefault,
+      defaultRequiredLoadFields: defaultRequiredLoadFields.length ? defaultRequiredLoadFields : null,
     }
 
     setSaving(true)
@@ -75,47 +135,107 @@ export function TmsSettingsCard() {
     } finally { setSaving(false) }
   }
 
+
   return (
-    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 16, boxShadow: 'var(--sh-sm)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="flex items-center gap-2.5">
-        <Cog size={16} style={{ color: 'var(--ds-t3)' }} />
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>TMS defaults</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Margin floor, payment terms, accessorial codes, invoice format. Leave unknown fields empty — nothing is guessed.</div>
-        </div>
-      </div>
+    <SettingsCard
+      icon={Cog}
+      title="TMS defaults"
+      description="Margin floor, payment terms, accessorial codes, invoice format and the flow defaults every customer inherits."
+    >
+      {loading ? <Loading /> : (
+        <Stack>
+          <Panel>
+            <GroupLabel>General</GroupLabel>
+            <div className="tms-grid tms-grid-2">
+              <TmsField label="Margin floor (basis points)">
+                <TmsInput value={marginFloorBps} onChange={(e) => setMarginFloorBps(e.target.value)} placeholder="e.g. 1500 for 15%" />
+              </TmsField>
+              <TmsField label="Default payment terms (days)">
+                <TmsInput value={defaultPaymentTermsDays} onChange={(e) => setDefaultPaymentTermsDays(e.target.value)} placeholder="e.g. 30" />
+              </TmsField>
+            </div>
+            <TmsField label="Accessorial codes (one per line)">
+              <TmsTextarea value={accessorialCodes} onChange={(e) => setAccessorialCodes(e.target.value)} placeholder="LINEHAUL&#10;FSC&#10;DETENTION" rows={4} />
+            </TmsField>
+            <TmsField label="Invoice number format">
+              <TmsInput value={invoiceNumberFormat} onChange={(e) => setInvoiceNumberFormat(e.target.value)} placeholder="e.g. BL{YYYY}-{SEQ:0000}" />
+            </TmsField>
+          </Panel>
 
-      {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Margin floor (basis points)</Label>
-              <Input value={marginFloorBps} onChange={(e) => setMarginFloorBps(e.target.value)} placeholder="e.g. 1500 for 15%" className="h-9 text-sm" />
+          <Panel>
+            <GroupLabel>Default margin</GroupLabel>
+            <div className="tms-grid tms-grid-3">
+              <TmsField label="Target margin %" hint="Used when there is no per-mode override.">
+                <TmsInput
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={99.99}
+                  value={percentOfBps(typedMarginTarget)}
+                  onChange={(e) => setMarginTargetBps(e.target.value)}
+                />
+              </TmsField>
+              <TmsField label="FTL target %" hint="Overrides the general target for FTL.">
+                <TmsInput
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={99.99}
+                  value={marginTargetBpsByMode.FTL}
+                  onChange={(e) => setMarginTargetBpsByMode((p) => ({ ...p, FTL: e.target.value }))}
+                />
+              </TmsField>
+              <TmsField label="LTL target %" hint="Overrides the general target for LTL.">
+                <TmsInput
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={99.99}
+                  value={marginTargetBpsByMode.LTL}
+                  onChange={(e) => setMarginTargetBpsByMode((p) => ({ ...p, LTL: e.target.value }))}
+                />
+              </TmsField>
             </div>
-            <div>
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Default payment terms (days)</Label>
-              <Input value={defaultPaymentTermsDays} onChange={(e) => setDefaultPaymentTermsDays(e.target.value)} placeholder="e.g. 30" className="h-9 text-sm" />
-            </div>
-          </div>
+          </Panel>
+
+          <Panel>
+            <GroupLabel>Required fields for a fully built load</GroupLabel>
+            {REQUIRED_GROUPS.map((group) => (
+              <div key={group}>
+                <p className="tms-field-label" style={{ margin: '8px 0 6px', fontSize: 12 }}>{group}</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {REQUIRED_FIELD_CATALOG.filter((f) => f.group === group).map((field) => (
+                    <CheckRow
+                      key={field.key}
+                      checked={defaultRequiredLoadFields.includes(field.key)}
+                      onChange={() => {
+                        setDefaultRequiredLoadFields((prev) =>
+                          prev.includes(field.key)
+                            ? prev.filter((k) => k !== field.key)
+                            : [...prev, field.key],
+                        )
+                      }}
+                      label={field.label}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </Panel>
+
+          <Panel>
+            <GroupLabel>Check-call plan</GroupLabel>
+            <Hint>The default check-call plan, automatic check calls and POD requests now live in the Tracking automation card.</Hint>
+          </Panel>
+
+          {error && <ErrorText>{error}</ErrorText>}
           <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Accessorial codes (one per line)</Label>
-            <Textarea value={accessorialCodes} onChange={(e) => setAccessorialCodes(e.target.value)} placeholder="LINEHAUL&#10;FSC&#10;DETENTION" rows={4} className="text-sm" />
+            <TmsButton variant="primary" size="sm" onClick={save} disabled={saving}>
+              <Save size={14} /> Save settings
+            </TmsButton>
           </div>
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Invoice number format</Label>
-            <Input value={invoiceNumberFormat} onChange={(e) => setInvoiceNumberFormat(e.target.value)} placeholder="e.g. BL{YYYY}-{SEQ:0000}" className="h-9 text-sm" />
-          </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button type="button" size="sm" className="h-8 gap-1" onClick={save} disabled={saving}>
-            <Save className="size-3.5" /> Save settings
-          </Button>
-        </div>
+        </Stack>
       )}
-    </div>
+    </SettingsCard>
   )
-}
-
-
-function parseTextArray(text: string): string[] {
-  return text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
 }

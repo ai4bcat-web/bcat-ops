@@ -201,6 +201,10 @@ export interface DispatchDriver {
   /** Dedicated dispatcher and backup (staff emails), when set on the driver. */
   dispatcherPrimary?: string | null
   dispatcherBackup?: string | null
+  /** The driver's assigned truck (Step AK), so the roster can learn the truck's work phone. */
+  assignedTruckId?: string | null
+  /** The work phone in the driver's truck (`TruckConfig.phone`, Step AK). A text from it is the driver. */
+  workPhone?: string | null
 }
 
 /** The people who should see a driver's conversation by default: dispatcher, then backup. */
@@ -220,9 +224,10 @@ export function dispatchersOf(d: Pick<DispatchDriver, 'dispatcherPrimary' | 'dis
 export function matchDriverByPhone<D extends DispatchDriver>(drivers: readonly D[], phone: string): D | null {
   const want = phoneDigits(phone)
   if (!want) return null
-  const hits = drivers.filter((d) => phoneDigits(d.phone) === want)
-  if (hits.length === 0) return null
-  return hits.find((d) => d.active !== false) ?? hits[0]
+  const pick = (hits: D[]): D | null => hits.find((d) => d.active !== false) ?? hits[0] ?? null
+  // A personal number outranks a work phone: if the two ever collide, the person who owns the number wins.
+  return pick(drivers.filter((d) => phoneDigits(d.phone) === want))
+    ?? pick(drivers.filter((d) => phoneDigits(d.workPhone) === want))
 }
 
 // ── Display ──────────────────────────────────────────────────────────────────

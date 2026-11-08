@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { indexLatest, isMoreCurrent, groupByEntity, docKey } from './complianceDocStore'
 import type { ComplianceDocument } from '@/types'
+
+vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
 
 const doc = (over: Partial<ComplianceDocument>): ComplianceDocument => ({
   id: 'd1', entityType: 'TRUCK', entityId: 't1', documentType: 'insurance_cert',

@@ -1,5 +1,6 @@
 import { generateClient } from 'aws-amplify/data'
 import { graphqlErrorText } from '@/lib/apiClient'
+import { cachedList, invalidateLists, SUBMISSION_CACHE_PREFIX } from '@/lib/listCache'
 import type { PodConnectionStatus, PodDocument, PodPage, PodAssets, PodSenderMapping } from '@/types/pods'
 
 const client = generateClient()
@@ -17,7 +18,34 @@ function unwrapJson(raw: unknown): unknown {
   return v
 }
 
+/**
+ * `managePods` is a mutation field, so every call looks like a write to the cache layer; these
+ * actions only read. Anything else clears the pod lists and the driver submission/document lists
+ * the scan and assign actions change.
+ */
+const READ_ACTIONS = new Set(['status', 'list', 'assets', 'senderMappings'])
+export const POD_CACHE_PREFIX = 'pods:'
+const POD_CACHE = { ttlMs: 15_000 }
+
+/**
+ * A failed list is remembered for the same window as a good one (listCache never stores a rejection): while the POD connection is
+ * unconfigured or down, every mounted paperwork/pay hook would otherwise re-issue the failing request (dev: 4 per page). A pod write
+ * (configure included) clears it with the lists.
+ */
+const listFailures = new Map<string, { error: unknown; at: number }>()
+
 async function podAction<T>(action: string, input: unknown): Promise<T> {
+  if (READ_ACTIONS.has(action)) return runPodAction<T>(action, input)
+  try {
+    return await runPodAction<T>(action, input)
+  } finally {
+    listFailures.clear()
+    invalidateLists(POD_CACHE_PREFIX)
+    invalidateLists(SUBMISSION_CACHE_PREFIX)
+  }
+}
+
+async function runPodAction<T>(action: string, input: unknown): Promise<T> {
   let r: { data: { managePods: unknown } }
   try {
     r = await client.graphql({
@@ -41,8 +69,15 @@ export async function configurePods(input: { apiKey: string; clientId: string })
   return podAction<PodConnectionStatus>('configure', input)
 }
 
-export async function listPods(input?: { loadId?: string; nextToken?: string | null }): Promise<PodPage> {
-  return podAction<PodPage>('list', { ...(input ?? {}) })
+/** One request per page inside the window: the paperwork hooks on a page each list the same pods. */
+export function listPods(input?: { loadId?: string; nextToken?: string | null }): Promise<PodPage> {
+  const key = `${POD_CACHE_PREFIX}list:${input?.loadId ?? ''}|${input?.nextToken ?? ''}`
+  const failed = listFailures.get(key)
+  if (failed && Date.now() - failed.at < POD_CACHE.ttlMs) return Promise.reject(failed.error)
+  return cachedList(key, () => podAction<PodPage>('list', { ...(input ?? {}) }), POD_CACHE).catch((error: unknown) => {
+    listFailures.set(key, { error, at: Date.now() })
+    throw error
+  })
 }
 
 export async function backfillPods(): Promise<{ queued: true }> {

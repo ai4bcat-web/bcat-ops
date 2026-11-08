@@ -17,7 +17,7 @@
 
 import { TRUCK_DOC_SPECS, specsForAssetType, evaluateTruckDoc } from './truckDocs'
 import { DRIVER_REQUIREMENTS } from './complianceRequirements'
-import type { Equipment, FleetGroup } from '@/types/equipment'
+import type { DriverFleet, Equipment, FleetGroup } from '@/types/equipment'
 import type { ComplianceDocument, Driver } from '@/types'
 
 export type FileSlotKind = 'document' | 'photo'
@@ -127,13 +127,13 @@ const catalogSlot = (req: (typeof DRIVER_REQUIREMENTS)[number]): FileSlot => ({
 /**
  * Which DOT classification a fleet implies.
  *
- * Local (Ivan) and Box Truck drivers are company employees; Amazon drivers run as
- * owner-operators. Deriving it from the fleet keeps one source of truth — the
+ * Local (Ivan) and Box Truck drivers are company employees; Amazon drivers and the
+ * Owner Operator fleet run as owner-operators. Deriving it from the fleet keeps one source of truth — the
  * alternative is a separate driverType that can silently disagree and put lease and
  * escrow paperwork on a company driver's file.
  */
-export const classificationForFleet = (fleetGroup?: FleetGroup | null): 'COMPANY' | 'OWNER_OPERATOR' =>
-  fleetGroup === 'AMAZON' ? 'OWNER_OPERATOR' : 'COMPANY'
+export const classificationForFleet = (fleetGroup?: DriverFleet | null): 'COMPANY' | 'OWNER_OPERATOR' =>
+  fleetGroup === 'AMAZON' || fleetGroup === 'OWNER_OPERATOR' ? 'OWNER_OPERATOR' : 'COMPANY'
 
 /** Every driver slot across all fleets — used for "is this key slotted?" checks. */
 export const DRIVER_FILE_SLOTS: readonly FileSlot[] = DRIVER_REQUIREMENTS
@@ -148,7 +148,7 @@ export const DRIVER_FILE_SLOTS: readonly FileSlot[] = DRIVER_REQUIREMENTS
  * An unclassified driver is treated as a company driver: the safe default, since
  * showing owner-operator paperwork to an employee is worse than the reverse.
  */
-export const slotsForDriver = (fleetGroup?: FleetGroup | null): readonly FileSlot[] => {
+export const slotsForDriver = (fleetGroup?: DriverFleet | null): readonly FileSlot[] => {
   const classification = classificationForFleet(fleetGroup)
   return DRIVER_REQUIREMENTS
     .filter((r) => r.requiresDocument && (r.appliesTo as readonly string[]).includes(classification))

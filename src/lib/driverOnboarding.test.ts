@@ -66,12 +66,17 @@ describe('tasksByCategory', () => {
 })
 
 describe('application forms', () => {
-  it('has a distinct form for each of the three fleets', () => {
+  it('has a distinct form for each of the four driver fleets', () => {
     const keys = Object.values(APPLICATION_FORMS).map((f) => f.key)
-    expect(new Set(keys).size).toBe(3)
+    expect(new Set(keys).size).toBe(4)
     expect(applicationFormFor('LOCAL')?.key).toBe('application_local')
     expect(applicationFormFor('BOX_TRUCK')?.key).toBe('application_box_truck')
     expect(applicationFormFor('AMAZON')?.key).toBe('application_amazon')
+    expect(applicationFormFor('OWNER_OPERATOR')?.key).toBe('application_owner_operator')
+  })
+
+  it('gives owner operators the standard (not Amazon phased) checklist', () => {
+    expect(templateIdForFleet('OWNER_OPERATOR')).toBeNull()
   })
 
   it('has none for an unclassified driver', () => {

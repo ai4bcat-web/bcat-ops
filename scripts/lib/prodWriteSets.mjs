@@ -1,0 +1,38 @@
+/**
+ * The DynamoDB models each production-gated script writes, in one place, because two things need the same list:
+ * the script's own gate (`requireProd` checks a fresh backup of exactly these tables) and
+ * `scripts/prodBackup.mjs` (creates those backups). A script that writes a table not listed here would be
+ * writing without a backup; keep this list in step with the script.
+ *
+ * `readOnly: true` scripts write nothing and need no backup.
+ * Names are the `__typename` model names; the table is `<Model>-<suffix>`.
+ */
+
+/** Every table the Aljex importer writes (engine WRITTEN_TABLES). */
+export const ALJEX_IMPORT_MODELS = [
+  'Shipment', 'Order', 'Load', 'LoadCarrier', 'LoadFinancials', 'LoadCharge', 'Customer', 'Location', 'Carrier',
+  'Invoice', 'ArPayment', 'CarrierBill', 'ApPayment', 'ProClaim', 'TmsSettings', 'AuditLog', 'LegacyAljexRow',
+];
+
+/** @type {Record<string, {models: string[], readOnly?: boolean}>} */
+export const PROD_WRITE_SETS = {
+  importAljex: { models: ALJEX_IMPORT_MODELS },
+  backfillApOpen: { models: ['LoadCarrier', 'AuditLog'] },
+  backfillLegacyAr: { models: ['Order', 'AuditLog'] },
+  backfillLaneSamples: { models: ['LaneRateSample', 'AuditLog'] },
+  backfillOwnAssetDrivers: { models: ['LoadCarrier', 'Load', 'AuditLog'] },
+  backfillShipmentDocuments: { models: ['ShipmentDocument', 'Customer', 'TmsSettings', 'Order', 'AuditLog'] },
+  backfillCrm: { models: ['CrmAccount', 'CrmContact', 'CrmDomain', 'AuditLog'] },
+  backfillProClaims: { models: ['ProClaim'] },
+  backfillRevDivision: { models: ['OwnershipDivision', 'OwnershipRule', 'ShipmentView', 'Shipment', 'Load', 'AuditLog'] },
+  backfillUserProfiles: { models: ['UserProfile', 'AuditLog'] },
+  fixAljexBillNumbers: { models: ['Load', 'CarrierBill', 'AuditLog'] },
+  checkDevDuplicates: { models: [], readOnly: true },
+  seedTruckPhone: { models: ['TruckConfig'] },
+  backfillCustomers: { models: ['Customer', 'Load'] },
+  backfillLocations: { models: ['Load'] },
+  backfillShipments: { models: ['Shipment', 'Order', 'Load', 'LoadCarrier', 'LoadFinancials', 'LoadCharge', 'ProClaim', 'AuditLog'] },
+  seedDivisions: { models: ['Division', 'TmsSettings'] },
+  seedRevDivisions: { models: ['OwnershipDivision', 'AuditLog'] },
+  backfillDriverDocScans: { models: ['DriverSubmissionDoc', 'DriverSubmission'] },
+};

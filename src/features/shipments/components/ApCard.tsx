@@ -1,0 +1,440 @@
+/**
+ * The AP corner of a shipment: what each leg of it costs us, where that cost sits on the
+ * payables ladder, and the one action that moves it from here.
+ *
+ * Three rules shape it.
+ *
+ * 1. **One card per assignment, not per shipment.** AR asks one question of an order; AP
+ *    asks it again of every carrier that touched the freight. A rebooked load has two
+ *    rows and the bounced one is not among them — a carrier that never hauled is not
+ *    owed. A TONU'd one is: truck ordered, truck arrived, nothing to load, still paid.
+ * 2. **Own-fleet legs are not AP at all.** A driver on our payroll is paid on their
+ *    settlement, so the own-asset card draws no ladder and offers no Record: it says
+ *    where that money really is and links to the pay week it lands in.
+ * 3. **Nothing here is recomputed.** The readiness reasons come from `billReadiness`,
+ *    the net, the balance and the aging from `billData` — the same functions the Lambda
+ *    and the AP board read, so a leg cannot look payable here and be refused there.
+ */
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Ban, Banknote, CheckCircle2, FileText, Pencil, Truck } from 'lucide-react'
+import { toast } from 'sonner'
+import { useDrivers } from '@/hooks/useDrivers'
+import { TmsBadge, TmsButton, TmsCard, TmsMetaList, TmsStatRow } from '@/features/tms/kit'
+import { getCarrier, getCarrierBill, voidBill } from '@/lib/apiClient'
+import { billData, billLinesFor, billReadiness } from '@/lib/carrierBill'
+import { AGING_BUCKET_LABEL, type AgingBucket } from '@/lib/arAging'
+import { formatCents } from '@/lib/invoiceBuild'
+import { cn } from '@/lib/utils'
+import { weekLabel, weekStartOfISO } from '@/features/driver-pay/week'
+import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
+import { RecordBillDialog } from '@/features/ap/components/RecordBillDialog'
+import { ApproveBillDialog } from '@/features/ap/components/ApproveBillDialog'
+import { UpdateCarrierChargesDialog } from '@/features/ap/components/UpdateCarrierChargesDialog'
+import { PayCarrierDialog } from '@/features/ap/components/PayCarrierDialog'
+import { settlementPathFor } from './ownFleet'
+import type {
+  ApStatus, CarrierBillRecord, CarrierRecord, LoadCarrierRecord, ShipmentBundle, ShipmentLoad,
+} from '@/types/tms'
+
+/** The walk, in order — `LoadCarrier.apStatus` and nothing else. */
+const RUNGS = [
+  { key: 'AWAITING_INVOICE', label: 'Awaiting invoice' },
+  { key: 'IN_REVIEW', label: 'In review' },
+  { key: 'TO_BE_PAID', label: 'To be paid' },
+  { key: 'PAID', label: 'Paid' },
+] as const satisfies readonly { key: ApStatus; label: string }[]
+
+/** Late money gets a loud chip; everything inside terms is quiet. */
+const BUCKET_TONE: Record<AgingBucket, 'gray' | 'orange' | 'red'> = {
+  CURRENT: 'gray',
+  D1_30: 'orange',
+  D31_60: 'orange',
+  D61_90: 'red',
+  D91_PLUS: 'red',
+}
+
+type ApDialog = { kind: 'record' } | { kind: 'charges' } | { kind: 'approve' } | { kind: 'pay' } | { kind: 'void' } | null
+
+export interface ApCardProps {
+  bundle: ShipmentBundle
+  /** Re-read the shipment: every write here moves the assignment's AP fields. */
+  onReload: () => Promise<void>
+}
+
+export function ApCard({ bundle, onReload }: ApCardProps) {
+  // A bounced carrier is owed nothing, so it has no AP card at all.
+  const assignments = bundle.loadCarriers.filter((row) => row.status !== 'BOUNCED')
+  const billIds = assignments.map((row) => row.invoiceId).filter((id): id is string => !!id).join(',')
+  const carrierIds = [...new Set(
+    assignments.filter((row) => row.kind === 'CARRIER').map((row) => row.carrierId).filter((id): id is string => !!id),
+  )].join(',')
+
+  const [bills, setBills] = useState<Record<string, CarrierBillRecord>>({})
+  /** `null` until the directory answers: an unread carrier must not read as a missing one. */
+  const [carriers, setCarriers] = useState<Record<string, CarrierRecord | null> | null>(null)
+
+  // No synchronous setState before the first await; a failed read keeps what we had.
+  useEffect(() => {
+    let live = true
+    const ids = billIds ? billIds.split(',') : []
+    Promise.all(ids.map((id) => getCarrierBill(id).catch(() => null)))
+      .then((rows) => {
+        if (!live) return
+        const next: Record<string, CarrierBillRecord> = {}
+        for (const row of rows) if (row) next[row.id] = row
+        setBills(next)
+      })
+      .catch(() => { /* the card falls back to the assignment's cached numbers */ })
+    return () => { live = false }
+  }, [billIds])
+
+  useEffect(() => {
+    let live = true
+    const ids = carrierIds ? carrierIds.split(',') : []
+    Promise.all(ids.map((id) => getCarrier(id).catch(() => null)))
+      .then((rows) => {
+        if (!live) return
+        const next: Record<string, CarrierRecord | null> = {}
+        ids.forEach((id, i) => { next[id] = rows[i] ?? null })
+        setCarriers(next)
+      })
+      .catch(() => { /* the cards stay on "checking the directory" */ })
+    return () => { live = false }
+  }, [carrierIds])
+
+  /**
+   * Every write moves the assignment, so the shipment and its bills are both re-read.
+   * Left unmemoized on purpose: `billIds` is derived from the bundle prop, and the
+   * React compiler refuses to preserve a manual memo keyed on that.
+   */
+  const refresh = async () => {
+    await onReload()
+    const ids = billIds ? billIds.split(',') : []
+    const rows = await Promise.all(ids.map((id) => getCarrierBill(id).catch(() => null)))
+    const next: Record<string, CarrierBillRecord> = {}
+    for (const row of rows) if (row) next[row.id] = row
+    setBills(next)
+  }
+
+  if (assignments.length === 0) return null
+
+  const billable = assignments.filter((row) => row.kind === 'CARRIER')
+
+  return (
+    <div className="space-y-3">
+      {billable.length > 1 && (
+        <ul className="flex flex-wrap gap-2" data-testid="ap-bill-states">
+          {billable.map((row) => (
+            <li key={row.id} data-testid={`ap-bill-state-${row.id}`} className="flex items-center gap-1 text-xs">
+              <span className="font-medium">{row.carrierName ?? 'Carrier'}</span>
+              <TmsBadge tone={row.invoiceId ? 'green' : 'gray'}>{row.invoiceId ? 'Bill recorded' : 'No bill yet'}</TmsBadge>
+              <TmsBadge tone="gray">{RUNGS.find((rung) => rung.key === (row.apStatus ?? 'AWAITING_INVOICE'))?.label}</TmsBadge>
+            </li>
+          ))}
+        </ul>
+      )}
+      {assignments.map((loadCarrier) => (
+        <AssignmentCard
+          key={loadCarrier.id}
+          bundle={bundle}
+          loadCarrier={loadCarrier}
+          bill={loadCarrier.invoiceId ? bills[loadCarrier.invoiceId] ?? null : null}
+          carrier={carriers ? carriers[loadCarrier.carrierId ?? ''] ?? null : null}
+          directoryRead={carriers !== null}
+          onRefresh={refresh}
+        />
+      ))}
+    </div>
+  )
+}
+
+function AssignmentCard({ bundle, loadCarrier, bill, carrier, directoryRead, onRefresh }: {
+  bundle: ShipmentBundle
+  loadCarrier: LoadCarrierRecord
+  bill: CarrierBillRecord | null
+  carrier: CarrierRecord | null
+  directoryRead: boolean
+  onRefresh: () => Promise<void>
+}) {
+  const [dialog, setDialog] = useState<ApDialog>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = bundle.loads.find((row) => row.id === loadCarrier.loadId) ?? null
+  const legName = load?.loadNumber ?? bundle.shipment.number
+
+  if (loadCarrier.kind === 'OWN_ASSET') {
+    return <OwnAssetCard loadCarrier={loadCarrier} load={load} legName={legName} />
+  }
+
+  const run = async (label: string, fn: () => Promise<unknown>) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await fn()
+      await onRefresh()
+      toast.success(label)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `${label} failed`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const apStatus: ApStatus = loadCarrier.apStatus ?? 'AWAITING_INVOICE'
+  const view = bill
+    ? billData({ bill, bundle: { shipment: bundle.shipment, loads: bundle.loads }, carrier })
+    : null
+  const readiness = bill
+    ? null
+    : billReadiness({
+        loadCarrier,
+        load,
+        carrier,
+        charges: bundle.charges,
+        existingBills: [],
+      })
+  const grossCents = bill ? view?.totals.grossCents ?? 0 : billLinesFor(bundle.charges, loadCarrier.id).grossCents
+  const voided = view?.status === 'VOID'
+  const payee = view
+    ? view.payee.kind === 'FACTOR'
+      ? `${view.payee.factorName ?? view.payee.name} (factor)`
+      : view.payee.name
+    : null
+
+  return (
+    <TmsCard
+      title={<span>Accounts payable · {legName} · {loadCarrier.carrierName ?? 'Carrier'}</span>}
+      actions={
+        <>
+          {loadCarrier.status === 'TONU' && <TmsBadge tone="orange" data-testid="ap-tonu">TONU — owed anyway</TmsBadge>}
+          <ol className="flex flex-wrap items-center gap-1" data-testid="ap-ladder">
+            {RUNGS.map((rung) => {
+              const lit = rung.key === apStatus
+              return (
+                <li
+                  key={rung.key}
+                  data-testid={`ap-rung-${rung.key}`}
+                  aria-current={lit ? 'step' : undefined}
+                  className={cn(
+                    'rounded-full border px-2 py-0.5 text-[11px]',
+                    lit
+                      ? 'border-[color:var(--tms-primary)] bg-[color:var(--tms-primary-tint)] font-medium text-[color:var(--tms-primary-ink)]'
+                      : 'border-[color:var(--tms-border)] text-[color:var(--tms-muted)]',
+                  )}
+                >
+                  {rung.label}
+                </li>
+              )
+            })}
+          </ol>
+        </>
+      }
+    >
+      <div className="space-y-3" data-testid="ap-card" data-assignment={loadCarrier.id}>
+
+      {view ? (
+        <>
+          <TmsStatRow
+            compact
+            columns={2}
+            aria-label="Bill amounts"
+            items={[
+              { key: 'net', label: 'Net', value: formatCents(view.totals.netCents) },
+              { key: 'balance', label: 'Balance', value: formatCents(view.totals.balanceCents) },
+            ]}
+          />
+          <TmsMetaList
+            columns={2}
+            items={[
+              {
+                label: 'Bill',
+                value: (
+                  <>
+                    <Link to={`/tms/invoicing/payable/bills/${view.id}`} className="underline underline-offset-2">
+                      {view.billNumber ?? view.id}
+                    </Link>
+                    {voided && <TmsBadge tone="red">void</TmsBadge>}
+                  </>
+                ),
+              },
+              {
+                label: 'Due',
+                value: (
+                  <span className="flex flex-wrap items-center gap-1">
+                    {view.aging.dueAt}
+                    {view.aging.open && (
+                      <TmsBadge tone={BUCKET_TONE[view.aging.bucket]}>
+                        {view.aging.bucket === 'CURRENT'
+                          ? AGING_BUCKET_LABEL[view.aging.bucket]
+                          : `${AGING_BUCKET_LABEL[view.aging.bucket]} days late`}
+                      </TmsBadge>
+                    )}
+                  </span>
+                ),
+              },
+              {
+                label: 'Paid to',
+                wide: true,
+                value: (
+                  <span data-testid="ap-payee">
+                    {payee || '—'}
+                    {view.totals.quickPayFeeCents > 0 && (
+                      <span className="tms-muted ml-1 text-xs">
+                        quick pay · {formatCents(view.totals.quickPayFeeCents)} deducted
+                      </span>
+                    )}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </>
+      ) : (
+        <div className="space-y-1 text-sm" data-testid="ap-readiness">
+          <p className="tms-muted">
+            Carrier charges {formatCents(grossCents)} · no bill recorded yet.
+          </p>
+          {!directoryRead && <p className="tms-muted text-xs">Checking the carrier directory…</p>}
+          {directoryRead && readiness && !readiness.ready && (
+            <ul className="tms-muted list-disc space-y-0.5 pl-4 text-xs">
+              {readiness.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {!bill && (
+          <>
+            <TmsButton
+              variant="primary"
+              size="sm"
+              disabled={busy || !directoryRead || !readiness?.ready}
+              onClick={() => setDialog({ kind: 'record' })}
+            >
+              <FileText size={13} className="mr-1" />Record bill
+            </TmsButton>
+            <TmsButton size="sm" disabled={busy} onClick={() => setDialog({ kind: 'charges' })}>
+              <Pencil size={13} className="mr-1" />Edit carrier charges
+            </TmsButton>
+          </>
+        )}
+        {view && !voided && (
+          <>
+            {view.status === 'IN_REVIEW' && (
+              <TmsButton variant="primary" size="sm" disabled={busy} onClick={() => setDialog({ kind: 'approve' })}>
+                <CheckCircle2 size={13} className="mr-1" />Approve
+              </TmsButton>
+            )}
+            {(view.status === 'TO_BE_PAID' || view.status === 'PARTIAL') && view.totals.balanceCents > 0 && (
+              <TmsButton size="sm" disabled={busy} onClick={() => setDialog({ kind: 'pay' })}>
+                <Banknote size={13} className="mr-1" />Pay carrier
+              </TmsButton>
+            )}
+            {view.status !== 'PAID' && (
+              <TmsButton variant="destructive" size="sm" disabled={busy} onClick={() => setDialog({ kind: 'void' })}>
+                <Ban size={13} className="mr-1" />Void
+              </TmsButton>
+            )}
+          </>
+        )}
+      </div>
+
+      {error && <p className="tms-field-error">{error}</p>}
+
+      {dialog?.kind === 'record' && (
+        <RecordBillDialog
+          open
+          loadCarrierId={loadCarrier.id}
+          onOpenChange={(open) => { if (!open) setDialog(null) }}
+          onDone={() => { setDialog(null); void onRefresh() }}
+        />
+      )}
+      {dialog?.kind === 'charges' && (
+        <UpdateCarrierChargesDialog
+          open
+          loadCarrierId={loadCarrier.id}
+          shipmentId={bundle.shipment.id}
+          onOpenChange={(open) => { if (!open) setDialog(null) }}
+          onDone={() => { setDialog(null); void onRefresh() }}
+        />
+      )}
+      {dialog?.kind === 'approve' && bill && (
+        <ApproveBillDialog
+          open
+          bill={bill}
+          onOpenChange={(open) => { if (!open) setDialog(null) }}
+          onDone={() => { setDialog(null); void onRefresh() }}
+        />
+      )}
+      {dialog?.kind === 'pay' && bill && (
+        <PayCarrierDialog
+          open
+          carrierId={bill.carrierId}
+          preselectBillIds={[bill.id]}
+          onOpenChange={(open) => { if (!open) setDialog(null) }}
+          onDone={() => { setDialog(null); void onRefresh() }}
+        />
+      )}
+      {dialog?.kind === 'void' && bill && (
+        <ReasonDialog
+          title={`Void bill ${bill.billNumber ?? bill.id}`}
+          description="The assignment goes back to Awaiting invoice and its charges unfreeze. A voided bill is never edited or reused."
+          label="Reason"
+          confirmLabel="Void bill"
+          busy={busy}
+          onClose={() => setDialog(null)}
+          onConfirm={(reason) => {
+            void run('Bill voided', () => voidBill({ billId: bill.id, reason })).then(() => setDialog(null))
+          }}
+        />
+      )}
+      </div>
+    </TmsCard>
+  )
+}
+
+/**
+ * An own-fleet leg has no bill, no rungs and no Record: the driver is paid on their
+ * settlement, so the only honest thing this card can do is say so and point at the pay
+ * week the leg lands in.
+ */
+function OwnAssetCard({ loadCarrier, load, legName }: {
+  loadCarrier: LoadCarrierRecord
+  load: ShipmentLoad | null
+  legName: string | undefined
+}) {
+  const { drivers } = useDrivers()
+  const driver = loadCarrier.driverId ? drivers.find((d) => d.id === loadCarrier.driverId) ?? null : null
+  const settledOn = load?.deliveredAt ?? load?.deliveryAppt ?? load?.pickupAppt ?? loadCarrier.bookedAt ?? null
+  const week = settledOn ? weekStartOfISO(settledOn.slice(0, 10)) : null
+  const query = new URLSearchParams()
+  if (week) query.set('week', week)
+  if (loadCarrier.driverId) query.set('driver', loadCarrier.driverId)
+  const search = query.toString()
+  // Each fleet group settles on its own page, so the link lands where this driver's
+  // money actually is rather than on the one page that happens to be called driver pay.
+  const base = settlementPathFor(driver?.fleetGroup)
+  const href = search ? `${base}?${search}` : base
+
+  return (
+    <TmsCard
+      title={<span>Accounts payable · {legName} · {loadCarrier.driverName ?? 'Own asset'}</span>}
+      actions={
+        <TmsBadge tone="turquoise" data-testid="ap-own-asset" className="inline-flex items-center gap-1">
+          <Truck size={11} />Settled through driver pay
+        </TmsBadge>
+      }
+    >
+      <p className="tms-muted text-xs" data-testid="ap-card" data-assignment={loadCarrier.id}>
+        An own-fleet leg never enters AP — there is no carrier bill to record and nothing to approve.{' '}
+        <Link to={href} className="underline underline-offset-2" data-testid="ap-settlement-link">
+          {week ? `Pay week ${weekLabel(week)}` : 'Driver pay'}
+        </Link>
+        {loadCarrier.driverName ? ` is where ${loadCarrier.driverName} is paid for it.` : ' is where the driver is paid for it.'}
+      </p>
+    </TmsCard>
+  )
+}
