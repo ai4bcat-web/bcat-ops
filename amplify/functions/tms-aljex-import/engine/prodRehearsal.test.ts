@@ -75,6 +75,8 @@ function fakeDb(backups: FakeBackup[], opts: { existing?: string[]; restoredItem
     restored,
     deleted,
     tables,
+    // The DynamoDB command/response shapes of this in-memory fake are intentionally loose.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async send(cmd: { constructor: { name: string }; input: Record<string, any> }): Promise<any> {
       const i = cmd.input
       switch (cmd.constructor.name) {
