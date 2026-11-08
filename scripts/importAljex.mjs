@@ -32,6 +32,12 @@
  *   Test-only rehearsal seam: add --prod-mode-rehearsal-suffix=<dev suffix | dev suffix-rhTAG> to run the same gated path on dev tables.
  *   add --memory to any run against an in-memory table set (no AWS): smoke tests with a synthetic file.
  *
+ * Production REHEARSAL on COPIES of the production tables (same gate; nothing live is written; --tag must equal the target's tag):
+ *   ... rehearsal-create --tag <t> --target prod-rehearsal:<t> --i-mean-production [--apply] [--reuse]   # restore <live>-rh<t> from the newest prodpre-importAljex-* backups
+ *   ... run --source <csv> --target prod-rehearsal:<t> --i-mean-production [--apply]                      # stage + plan + apply + reconcile on the copies
+ *   ... resume --run <jobId> --target prod-rehearsal:<t> --i-mean-production --apply
+ *   ... rehearsal-drop --tag <t> --target prod-rehearsal:<t> --i-mean-production [--apply]              # deletes only the -rh<t> copies
+ *
  * `--slice every:N` keeps data rows 1, N+1, 2N+1, ... (1-based, header excluded); the profiler's slice
  * selector must use the same rule so expected values are computed on the same rows.
  */
@@ -41,7 +47,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { splitProdArgs } from './lib/importAljexArgs.mjs'
-import { requireProd } from './lib/prodGate.mjs'
+import { PROD_SUFFIX, requireProd } from './lib/prodGate.mjs'
 import { STACK, isRehearsal } from './lib/stackConfig.mjs'
 import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs'
 
@@ -82,6 +88,11 @@ let gate = null;
 try {
   split = splitProdArgs(process.argv.slice(2))
   if (split.prod) {
+    if (split.rehearsalTag) {
+      const t = split.rehearsalTag
+      console.log(`── PRODUCTION REHEARSAL ${t}: ${split.command} against the -rh${t} COPIES of the production tables (restored from prodpre-importAljex-* backups).`)
+      console.log('   No live data table is written. Job rows (REHEARSAL, stageHash/profileVersion/reconciled) stay in the LOCAL job book (os.tmpdir()/aljex-cli-jobs.json); NOTHING is written to the production AljexImportJob table.')
+    }
     gate = await requireProd({
       script: split.command === 'reconcile-entity' ? 'importAljexRecon' : 'importAljex',
       values: split.values,
@@ -89,6 +100,7 @@ try {
       readOnly: split.readOnly,
     })
     if (gate.rehearsal === false && split.synthetic) throw new Error('--synthetic is never allowed against production')
+    if (split.rehearsalTag && gate.suffix !== PROD_SUFFIX) throw new Error('--target prod-rehearsal always targets the production table suffix')
   }
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))
@@ -107,6 +119,7 @@ if (gate && split.stopAfterPlan) {
   console.log(`dry run: ${split.command} writes; nothing was done. Add --apply to run it.`)
 } else {
   const outfile = await bundle()
-  const { main, productionPolicy } = await import(pathToFileURL(outfile).href)
-  process.exitCode = await main(split.cliArgv, undefined, gate ? { prod: productionPolicy(gate.suffix) } : {})
+  const { main, productionPolicy, productionRehearsalPolicy } = await import(pathToFileURL(outfile).href)
+  const prod = !gate ? undefined : split.rehearsalTag ? productionRehearsalPolicy(split.rehearsalTag) : productionPolicy(gate.suffix)
+  process.exitCode = await main(split.cliArgv, undefined, prod ? { prod } : {})
 }

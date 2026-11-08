@@ -143,6 +143,22 @@ export function productionPolicy(writeSuffix: string): EngineTargetPolicy {
 }
 
 /**
+ * PRODUCTION REHEARSAL (an extension of the allowed set, never a loosening of LIVE): the offline CLI builds this only after the
+ * production gate passed for `--target prod-rehearsal:<tag>`. A REHEARSAL job with this tag writes ONLY the `-rh<tag>` siblings of
+ * the production WRITTEN tables (restored copies of production backups); every other table (job/profile/reference) is the live
+ * production table and is read only. LIVE jobs never run under this policy and REHEARSAL jobs never run under `productionPolicy`.
+ */
+export function productionRehearsalPolicy(tag: string): EngineTargetPolicy {
+  if (!TAG_PATTERN.test(tag)) throw new TargetRefused('A production rehearsal needs a tag of 3-12 lowercase letters/digits')
+  return { readSuffix: PROD_SUFFIX, writeSuffix: PROD_SUFFIX, production: true, rehearsalTag: tag }
+}
+
+/** Production tables with the WRITTEN ones replaced by their `-rh<tag>` copies (reference/job tables stay on the live names). */
+export function productionRehearsalTables(tag: string): TableSet {
+  return resolveTables(tableSetFor(PROD_SUFFIX, PROD_SUFFIX), { target: 'REHEARSAL', targetTag: tag })
+}
+
+/**
  * Runs before every phase. Throws `TargetRefused` unless the write set is safe for this job:
  * 0. with a production `policy` (offline CLI only, after the production gate) the table set must be exactly the policy's;
  * 1. no table (read or write) names production, and every table ends with the dev suffix (optionally `-rh<tag>`);
@@ -150,6 +166,17 @@ export function productionPolicy(writeSuffix: string): EngineTargetPolicy {
  * (The synthetic-data and reconciled-rehearsal gates need staged data / other jobs and live in `runSlice`.)
  */
 export function assertTargets(live: TableSet, written: TableSet, job: Pick<AljexImportJob, 'target' | 'targetTag' | 'liveTag'>, policy?: EngineTargetPolicy, env: Record<string, string | undefined> = process.env): void {
+  if (policy?.production === true && policy.rehearsalTag !== undefined) {
+    // Production rehearsal: exactly the -rh<tag> copies as written tables, production reference/job tables, a REHEARSAL job of this tag.
+    const tag = policy.rehearsalTag
+    if (!TAG_PATTERN.test(tag) || policy.readSuffix !== PROD_SUFFIX || policy.writeSuffix !== PROD_SUFFIX) throw new TargetRefused('Malformed production rehearsal policy')
+    const want = productionRehearsalTables(tag)
+    for (const key of Object.keys(want) as EngineTable[]) {
+      if (written[key] !== want[key]) throw new TargetRefused(`Production rehearsal must use ${want[key]} for ${key}, got ${written[key]}`)
+    }
+    if (job.target !== 'REHEARSAL' || job.targetTag !== tag) throw new TargetRefused(`Production rehearsal runs REHEARSAL jobs tagged ${tag} only`)
+    return
+  }
   if (policy?.production === true) {
     // Production mode: exactly the policy's table set, a LIVE job, the owner's live tag. No rehearsal tables, no mixing.
     const want = tableSetFor(policy.readSuffix, policy.writeSuffix)

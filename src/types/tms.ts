@@ -1393,6 +1393,8 @@ export interface EngineTargetPolicy {
   readSuffix: string
   writeSuffix: string
   production: true
+  /** Set (with both suffixes = production) only for a production REHEARSAL: written tables are the `-rh<tag>` copies. See `productionRehearsalPolicy`. */
+  rehearsalTag?: string
 }
 
 export interface EngineStore {

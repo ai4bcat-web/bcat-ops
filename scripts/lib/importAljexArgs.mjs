@@ -49,9 +49,11 @@ export function splitProdArgs(argv) {
     }
   }
   const gateFlagGiven = GATE_FLAGS.some((f) => values[f] !== undefined);
+  const isRehearsalCopies = target !== null && /^prod-rehearsal(:|$)/.test(target);
   const isProd = target !== null && /^prod(:|$)/.test(target);
+  if (isRehearsalCopies) return splitRehearsalCopies(command, kept, values, target);
   if (!isProd) {
-    if (gateFlagGiven) throw new Error('--i-mean-production, --confirm-prod and --prod-mode-rehearsal-suffix only apply together with --target prod:<liveTag>');
+    if (gateFlagGiven) throw new Error('--i-mean-production, --confirm-prod and --prod-mode-rehearsal-suffix only apply together with --target prod:<liveTag> or --target prod-rehearsal:<tag>');
     return { prod: false, cliArgv: [command, ...kept] };
   }
   if (!PROD_COMMANDS.includes(command)) {
@@ -79,6 +81,53 @@ export function splitProdArgs(argv) {
     // A dry run of the per-file commands reads only (no backup demanded); their --apply writes and needs the fresh backups.
     readOnly: READ_ONLY.includes(command) || (DRY_IS_READ_ONLY.includes(command) && !apply),
     stopAfterPlan: NEEDS_APPLY_TO_ACT.includes(command) && !apply,
+    synthetic: kept.includes('--synthetic'),
+  };
+}
+
+/** Commands that may run against production REHEARSAL COPIES (`<live>-rh<tag>` siblings restored from the prodpre- backups). */
+export const PROD_REHEARSAL_COMMANDS = ['run', 'resume', 'rehearsal-create', 'rehearsal-drop'];
+const REHEARSAL_TAG = /^[a-z0-9]{3,12}$/;
+
+/**
+ * `--target prod-rehearsal:<tag>`: the engine's `rehearsal:<tag>` target aimed at the production COPIES. Same gate as production
+ * (env date, --i-mean-production, typed confirmation, dry run unless --apply) but no live table is written, so no fresh backup is
+ * demanded (`readOnly` for the gate); the engine itself restores only from existing prodpre- backups.
+ */
+function splitRehearsalCopies(command, kept, values, target) {
+  if (!PROD_REHEARSAL_COMMANDS.includes(command)) {
+    throw new Error(`--target prod-rehearsal:<tag> runs ${PROD_REHEARSAL_COMMANDS.join(' | ')} only (got "${command}")`);
+  }
+  if (values['prod-mode-rehearsal-suffix'] !== undefined) throw new Error('--prod-mode-rehearsal-suffix does not combine with --target prod-rehearsal');
+  if (kept.includes('--memory')) throw new Error('--memory is not available in production mode');
+  const tag = target.includes(':') ? target.slice(target.indexOf(':') + 1) : '';
+  if (!REHEARSAL_TAG.test(tag)) throw new Error('--target prod-rehearsal:<tag> needs a tag of 3-12 lowercase letters/digits');
+  const apply = kept.includes('--apply');
+  const cliArgv = [command];
+  let tagFlag = null;
+  const copies = command === 'rehearsal-create' || command === 'rehearsal-drop';
+  for (let i = 0; i < kept.length; i++) {
+    if (kept[i] === '--target') {
+      if (!copies) cliArgv.push('--target', `rehearsal:${tag}`);
+      i += 1;
+    } else if (kept[i] === '--tag') {
+      tagFlag = kept[i + 1];
+      cliArgv.push('--tag', kept[i + 1]);
+      i += 1;
+    } else cliArgv.push(kept[i]);
+  }
+  if (tagFlag !== null && tagFlag !== tag) throw new Error(`--tag ${tagFlag} does not match --target prod-rehearsal:${tag}`);
+  if (copies && tagFlag === null) cliArgv.push('--tag', tag);
+  if (command === 'run' && !apply) cliArgv.push('--no-apply');
+  return {
+    prod: true,
+    command,
+    liveTag: null,
+    rehearsalTag: tag,
+    values: { ...values, target: 'prod', apply },
+    cliArgv,
+    readOnly: true,
+    stopAfterPlan: command === 'resume' && !apply,
     synthetic: kept.includes('--synthetic'),
   };
 }

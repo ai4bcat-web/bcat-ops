@@ -27,6 +27,7 @@ import {
   ListBackupsCommand,
   ListTablesCommand,
   RestoreTableFromBackupCommand,
+  ScanCommand,
   RestoreTableToPointInTimeCommand,
 } from '@aws-sdk/client-dynamodb'
 import { marshall } from '@aws-sdk/util-dynamodb'
@@ -39,9 +40,9 @@ import { runSlice } from './runSlice'
 import { seedProCounter } from './seedCounter'
 import { evalCondition } from './stamp'
 import { readStageData } from './stage'
-import { assertTargets, DEV_SUFFIX, MODEL_NAME, ownStackSuffix, productionPolicy, PROD_SUFFIX, resolveTables, TAG_PATTERN, tableSetFor, WRITTEN_TABLES } from './tables'
+import { assertTargets, DEV_SUFFIX, MODEL_NAME, ownStackSuffix, productionPolicy, productionRehearsalPolicy, productionRehearsalTables, PROD_SUFFIX, resolveTables, TAG_PATTERN, tableSetFor, WRITTEN_TABLES } from './tables'
 
-export { productionPolicy }
+export { productionPolicy, productionRehearsalPolicy }
 import { stableId } from './util'
 import { detectFileKind, FILE_KIND_LABEL, FILE_KIND_LAYOUT_ID, refusedHeaders, stripRefusedColumns, type FileKind } from '../../../../src/lib/aljex/fileKinds'
 import { parseCsvRows } from '../../../../src/lib/aljex/layouts/apAging'
@@ -393,6 +394,126 @@ async function rehearsalDrop(db: DynamoDBClient, tag: string, io: CliIo): Promis
   } while (token)
 }
 
+// ── production rehearsal copies (scripts/importAljex.mjs --target prod-rehearsal:<tag>, after the production gate) ─────────────
+
+/** Backups taken by scripts/prodBackup.mjs before the production import write; the only restore source for the copies. */
+export const PRODPRE_BACKUP_PREFIX = 'prodpre-importAljex-'
+
+type DbLike = Pick<DynamoDBClient, 'send'>
+
+/** Production WRITTEN table -> its `-rh<tag>` sibling. Every name is checked: the copy is never a live table. */
+export function prodRehearsalPairs(tag: string): Array<{ model: string; source: string; target: string }> {
+  assertTag(tag)
+  const live = tableSetFor(PROD_SUFFIX, PROD_SUFFIX)
+  return WRITTEN_TABLES.map((t) => {
+    const source = live[t]
+    const target = `${source}-rh${tag}`
+    if (!source.endsWith(`-${PROD_SUFFIX}`) || !target.includes(PROD_SUFFIX) || !target.endsWith(`-rh${tag}`) || target === source) throw new Error(`refusing ${target}`)
+    return { model: MODEL_NAME[t], source, target }
+  })
+}
+
+/** The newest AVAILABLE `prodpre-importAljex-*` on-demand backup of `source`, or null. */
+export async function newestProdpreBackup(db: DbLike, source: string, prefix: string = PRODPRE_BACKUP_PREFIX): Promise<{ arn: string; name: string; created: Date } | null> {
+  let best: { arn: string; name: string; created: Date } | null = null
+  let token: string | undefined
+  do {
+    const r = await db.send(new ListBackupsCommand({ TableName: source, BackupType: 'USER', ExclusiveStartBackupArn: token }))
+    for (const b of r.BackupSummaries ?? []) {
+      if (b.TableName !== source || !b.BackupName?.startsWith(prefix) || b.BackupStatus !== 'AVAILABLE' || !b.BackupArn || !b.BackupCreationDateTime) continue
+      const created = new Date(b.BackupCreationDateTime)
+      if (!best || created > best.created) best = { arn: b.BackupArn, name: b.BackupName, created }
+    }
+    token = r.LastEvaluatedBackupArn
+  } while (token)
+  return best
+}
+
+async function countItems(db: DbLike, table: string): Promise<number> {
+  let n = 0
+  let key: Record<string, unknown> | undefined
+  do {
+    const r = await db.send(new ScanCommand({ TableName: table, Select: 'COUNT', ExclusiveStartKey: key as never }))
+    n += r.Count ?? 0
+    key = r.LastEvaluatedKey
+  } while (key)
+  return n
+}
+
+function assertProdRehearsalTag(policyTag: string, tag: string): void {
+  assertTag(tag)
+  if (tag !== policyTag) throw new Error(`--tag ${tag} does not match --target prod-rehearsal:${policyTag}`)
+}
+
+/**
+ * Restore COPIES of the production WRITTEN tables from their newest `prodpre-importAljex-*` backups into NEW tables
+ * `<live>-rh<tag>`. Never touches a live table; refuses an existing target unless `reuse`. Prints counts only.
+ */
+export async function prodRehearsalCreate(
+  db: DbLike,
+  policyTag: string,
+  tag: string,
+  opts: { apply: boolean; reuse?: boolean; acceptCountMismatch?: boolean; backupPrefix?: string },
+  io: CliIo,
+  now: () => number = Date.now,
+): Promise<void> {
+  assertProdRehearsalTag(policyTag, tag)
+  const prefix = opts.backupPrefix ?? PRODPRE_BACKUP_PREFIX
+  if (!prefix.trim()) throw new Error('--backup-prefix must not be empty')
+  const plan: Array<{ model: string; source: string; target: string; arn: string; name: string; created: Date; items: number | null; exists: boolean }> = []
+  const missing: string[] = []
+  for (const p of prodRehearsalPairs(tag)) {
+    const b = await newestProdpreBackup(db, p.source, prefix)
+    if (!b) {
+      missing.push(p.model)
+      continue
+    }
+    const d = await db.send(new DescribeBackupCommand({ BackupArn: b.arn }))
+    plan.push({ ...p, ...b, items: d.BackupDescription?.SourceTableDetails?.ItemCount ?? null, exists: await tableExists(db as DynamoDBClient, p.target) })
+  }
+  if (missing.length) throw new Error(`no AVAILABLE ${prefix}* backup for: ${missing.join(', ')} (create them with scripts/prodBackup.mjs)`)
+  io.out(`PRODUCTION REHEARSAL COPIES ${tag}: restore ${plan.length} tables from the newest ${prefix}* backups into NEW <live>-rh${tag} siblings; no live table is touched`)
+  for (const p of plan) {
+    io.out(`  ${p.model.padEnd(15)} ${p.name} (${p.created.toISOString()}, ${Math.round((now() - p.created.getTime()) / 60000)} min old, ${p.items ?? 'n/a'} items) -> ${p.target}${p.exists ? '  [ALREADY EXISTS]' : ''}`)
+  }
+  const clash = plan.filter((p) => p.exists)
+  if (clash.length && !opts.reuse) throw new Error(`refusing: ${clash.map((p) => p.target).join(', ')} already exist (rehearsal-drop first, or pass --reuse to keep them as they are)`)
+  if (!opts.apply) {
+    io.out('dry run: nothing was restored. Add --apply to restore.')
+    return
+  }
+  for (const p of plan.filter((x) => !x.exists)) {
+    await db.send(new RestoreTableFromBackupCommand({ TargetTableName: p.target, BackupArn: p.arn }))
+    io.out(`restore started: ${p.target}`)
+  }
+  for (const p of plan) await waitActive(db as DynamoDBClient, p.target, io)
+  const bad: string[] = []
+  for (const p of plan) {
+    const n = await countItems(db, p.target)
+    io.out(`  ${p.model.padEnd(15)} copy ${n} items, backup ${p.items ?? 'n/a'}${n === p.items ? '  ok' : '  MISMATCH'}`)
+    if (n !== p.items) bad.push(`${p.model} ${n} vs ${p.items ?? 'n/a'}`)
+  }
+  if (bad.length && !opts.acceptCountMismatch) throw new Error(`item counts differ from the backup (copy vs backup): ${bad.join('; ')}. Copies are left in place; rehearsal-drop them or pass --accept-count-mismatch after reviewing (DescribeBackup counts are documented as approximate).`)
+  io.out(`rehearsal copies ${tag} ready: ${plan.length} tables${bad.length ? ' (count mismatch ACCEPTED)' : ', counts match their backups'}`)
+}
+
+/** Delete the `-rh<tag>` production COPIES only (never a live table, never a backup). */
+export async function prodRehearsalDrop(db: DbLike, policyTag: string, tag: string, opts: { apply: boolean }, io: CliIo): Promise<void> {
+  assertProdRehearsalTag(policyTag, tag)
+  const pairs = prodRehearsalPairs(tag)
+  const present: string[] = []
+  for (const p of pairs) if (await tableExists(db as DynamoDBClient, p.target)) present.push(p.target)
+  io.out(`PRODUCTION REHEARSAL COPIES ${tag}: ${present.length}/${pairs.length} copy tables exist${present.length ? `: ${present.join(', ')}` : ''}; live tables and backups are never deleted`)
+  if (!opts.apply) {
+    io.out('dry run: nothing was deleted. Add --apply to delete the copies listed above.')
+    return
+  }
+  for (const name of present) {
+    await db.send(new DeleteTableCommand({ TableName: name }))
+    io.out(`deleted ${name}`)
+  }
+}
+
 async function pitrRestore(db: DynamoDBClient, model: string, time: string, as: string, io: CliIo, policy?: EngineTargetPolicy): Promise<void> {
   const suffix = policy ? policy.writeSuffix : ownStackSuffix() ?? DEV_SUFFIX
   const source = `${model}-${suffix}`
@@ -416,8 +537,10 @@ function runDirOf(id: string): string {
 }
 
 async function openStore(a: Args, spec: TargetSpec, runId: string, sourcePath: string | null, ctx: CliContext): Promise<RunSetup> {
-  if (ctx.prod && spec.target !== 'LIVE') throw new Error('production mode runs --target live:<liveTag> jobs only (no rehearsal tables)')
-  const tables = ctx.prod ? tableSetFor(ctx.prod.readSuffix, ctx.prod.writeSuffix) : resolveTables(liveTableSet(), { target: spec.target, targetTag: spec.targetTag })
+  if (ctx.prod?.rehearsalTag !== undefined) {
+    if (spec.target !== 'REHEARSAL' || spec.targetTag !== ctx.prod.rehearsalTag) throw new Error(`production rehearsal runs --target rehearsal:${ctx.prod.rehearsalTag} jobs only`)
+  } else if (ctx.prod && spec.target !== 'LIVE') throw new Error('production mode runs --target live:<liveTag> jobs only (no rehearsal tables)')
+  const tables = ctx.prod?.rehearsalTag !== undefined ? productionRehearsalTables(ctx.prod.rehearsalTag) : ctx.prod ? tableSetFor(ctx.prod.readSuffix, ctx.prod.writeSuffix) : resolveTables(liveTableSet(), { target: spec.target, targetTag: spec.targetTag })
   const objects = new LocalObjects(runDirOf(runId), sourcePath)
   if (a.flags.has('memory')) {
     const book = new JobBook(null)
@@ -476,6 +599,10 @@ async function cmdRun(a: Args, io: CliIo, ctx: CliContext): Promise<number> {
     createdBy: 'importAljex-cli',
   }
   book.put(base as unknown as EngineRow)
+  if (ctx.prod?.rehearsalTag !== undefined) {
+    io.out(`PRODUCTION REHEARSAL ${ctx.prod.rehearsalTag}: writes ONLY the -rh${ctx.prod.rehearsalTag} copies of the production tables; reads production reference tables; NOTHING live is written.`)
+    io.out(`  job rows (REHEARSAL, with stageHash/profileVersion/reconciled) live in the local job book ${JOBS_FILE}, NOT in the production AljexImportJob table: that file is how a later LIVE run on this machine finds the reconciled rehearsal.`)
+  }
   io.out(`run ${rootId} target ${ctx.prod ? `PRODUCTION-GATED ${ctx.prod.writeSuffix} ` : ''}${spec.target}${spec.targetTag ? `:${spec.targetTag}` : ''} ${synthetic ? '(synthetic)' : '(real data)'}${sliceEvery ? ` slice every:${sliceEvery}` : ''}`)
 
   const t0 = Date.now()
@@ -802,7 +929,11 @@ async function cmdReconcile(a: Args, io: CliIo, ctx: CliContext): Promise<number
 export async function main(argv: string[], io: CliIo = consoleIo, ctx: CliContext = {}): Promise<number> {
   try {
     const a = parseArgs(argv)
-    if (ctx.prod && !['run', 'resume', 'seed-counter', 'rollback', 'pitr-restore', 'file', 'stage', 'reconcile-entity'].includes(a.command)) {
+    if (ctx.prod?.rehearsalTag !== undefined) {
+      if (!['run', 'resume', 'rehearsal-create', 'rehearsal-drop'].includes(a.command)) {
+        throw new Error(`--target prod-rehearsal:<tag> runs run | resume | rehearsal-create | rehearsal-drop only; "${a.command}" is not available against production rehearsal copies`)
+      }
+    } else if (ctx.prod && !['run', 'resume', 'seed-counter', 'rollback', 'pitr-restore', 'file', 'stage', 'reconcile-entity'].includes(a.command)) {
       throw new Error(`production mode runs run | resume | seed-counter | rollback | pitr-restore | file | stage | reconcile-entity only; "${a.command}" is dev tooling (backups: scripts/prodBackup.mjs)`)
     }
     const aws = () => new DynamoDBClient({ region: REGION })
@@ -822,6 +953,10 @@ export async function main(argv: string[], io: CliIo = consoleIo, ctx: CliContex
       case 'rollback':
         return await cmdRollback(a, io, ctx)
       case 'rehearsal-create': {
+        if (ctx.prod?.rehearsalTag !== undefined) {
+          await prodRehearsalCreate(aws(), ctx.prod.rehearsalTag, need(a, 'tag'), { apply: a.flags.has('apply'), reuse: a.flags.has('reuse'), acceptCountMismatch: a.flags.has('accept-count-mismatch'), backupPrefix: flag(a, 'backup-prefix') }, io)
+          return 0
+        }
         const only = flag(a, 'tables')?.split(',') ?? null
         await backupCreate(aws(), need(a, 'tag'), only, io)
         await backupRestore(aws(), need(a, 'tag'), only, io)
@@ -835,6 +970,10 @@ export async function main(argv: string[], io: CliIo = consoleIo, ctx: CliContex
         return 0
       case 'rehearsal-drop':
       case 'drop-copy':
+        if (ctx.prod?.rehearsalTag !== undefined) {
+          await prodRehearsalDrop(aws(), ctx.prod.rehearsalTag, need(a, 'tag'), { apply: a.flags.has('apply') }, io)
+          return 0
+        }
         await rehearsalDrop(aws(), need(a, 'tag'), io)
         return 0
       case 'pitr-restore':
