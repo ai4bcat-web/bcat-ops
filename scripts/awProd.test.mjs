@@ -118,7 +118,7 @@ describe('dry run', () => {
 })
 
 describe('log hygiene', () => {
-  const CANARIES = ['jane.doe@example.com', '312-555-0187', '12-3456789', '123-45-6789', '9876543210123', 'Hunter2Password!', '0b8a6c3e-1d2f-4a5b-8c9d-0e1f2a3b4c5d']
+  const CANARIES = ['jane.doe@example.com', '312-555-0187', '07-0000003', '666-12-3456', '9876543210123', 'Hunter2Password!', '0b8a6c3e-1d2f-4a5b-8c9d-0e1f2a3b4c5d']
   it('scrub removes e-mails, phones, tax ids, long digits, uuids and secret key/values', () => {
     const line = scrub(`contact ${CANARIES[0]} ${CANARIES[1]} ${CANARIES[2]} ${CANARIES[3]} acct ${CANARIES[4]} ${CANARIES[6]} password=${CANARIES[5]}`)
     for (const c of CANARIES) expect(line).not.toContain(c)
