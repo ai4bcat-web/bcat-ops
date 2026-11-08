@@ -358,3 +358,11 @@ Restores always create a NEW table (`-RESTORED`); compare, then copy back or swa
 ## Reconcile-with-ProdWrapper notes (open)
 - `awProd.mjs` names used here are ProdWrapper's final surface: settings, jenny, backfill, customers, carriers, ap-aging, ap-expected, ar, stage-export, loads, tax-ids, reconcile, verify. Missing from the wrapper (done by UI/other scripts here): Settings 1b, ownership seed, prodBackup for `prodpre-importAljex-*`, active-check.
 - Items asked of ProdWrapper: print backfill afterCutoff count; refuse/warn `backfill --apply` before `loads`.
+
+## awProd.mjs behaviour (final, from ProdWrapper; supersedes any conflicting line above)
+- customers/carriers/ap-aging/ap-expected/ar/stage-export: the DEFAULT dry run is LOCAL ONLY (parses the file, prints row counts and stripped columns; no login, no upload). Add `--plan` to log in (BCAT_EMAIL/BCAT_PASSWORD) and run the Lambda PLAN (writes one AljexImportJob row + one S3 object, no business table): THIS is the dry run whose numbers you compare to "Expect" before `--apply --live-tag TAG` (which does PLAN then APPLY). Re-applying the same file is skipped via the checkpoint.
+- backfill: logs beforeWindow/afterCutoff and a loud WARNING if afterCutoff>0 (stop condition). `--evaluate` logs in and runs the BACKFILL_SHIPMENT dry run to list refusals. `--apply` is REFUSED while the Shipment table is empty (override `--allow-empty-shipments`: NEVER use it): run `loads` first.
+- Confirm token: `AW_PROD_CONFIRM=$(date +%F)-<step>`, e.g. `AW_PROD_CONFIRM=$(date +%F)-loads`.
+- Resume after a crash: re-run the same command (checkpoint); `--fresh` ignores the checkpoint.
+- `tax-ids` dry run prints counts and how many rows resolve to a carrier. `verify` prints table count vs 110, per-table ItemCount, series/Jenny/vault flags.
+- The UI settings (SAVE_AR_SETTINGS, divisionSalesReps, ENSURE_OWNERSHIP_SEED) are NOT wrapped: step 1b stays UI.

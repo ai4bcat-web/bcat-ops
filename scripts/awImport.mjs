@@ -118,7 +118,7 @@ export function makeApi(client) {
   return { call }
 }
 
-async function uploadFile(api, core, kind, path) {
+export async function uploadFile(api, core, kind, path) {
   const raw = readFileSync(resolve(process.cwd(), path), 'utf8')
   if (kind === 'CARRIERS_MASTER') {
     // Header-column row counts of the columns about to be dropped (how many rows had a value); no value is ever printed.
@@ -139,7 +139,7 @@ async function uploadFile(api, core, kind, path) {
   return staged
 }
 
-async function runFiles(api, core, name, v) {
+export async function runFiles(api, core, name, v) {
   const spec = COMMANDS[name]
   const jobs = {}
   for (const [kind, flag] of spec.files) {
@@ -161,7 +161,7 @@ async function runFiles(api, core, name, v) {
 }
 
 /** Uploads the big export untouched (it carries none of the refused columns; STAGE refuses it otherwise) and waits for READY. */
-async function stageExport(api, path) {
+export async function stageExport(api, path) {
   const body = readFileSync(resolve(process.cwd(), path))
   const { job, uploadUrl } = await api.call('IMPORT_PREPARE', { fileName: path.split('/').pop(), fileHash: createHash('sha256').update(body).digest('hex'), sizeBytes: body.length })
   const put = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'text/csv' }, body })
@@ -179,7 +179,7 @@ async function stageExport(api, path) {
   throw new Error('staging did not finish in 15 minutes')
 }
 
-async function runReconcile(api, v) {
+export async function runReconcile(api, v) {
   if (!v.entity || !v['source-job']) throw new Error('reconcile needs --entity and --source-job')
   const started = await api.call('IMPORT_RECONCILE_ENTITY', { entity: v.entity, sourceJobId: v['source-job'], ...(v['customers-job'] ? { customersJobId: v['customers-job'] } : {}), ...(v.cutoff ? { cutoffDate: v.cutoff } : {}) })
   const id = started.job.id
