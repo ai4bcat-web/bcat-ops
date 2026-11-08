@@ -34,7 +34,7 @@ vi.mock('@/features/tms/carrierSales/carrierSalesQueue', () => ({ needsCoverCoun
 
 import { useShellBadgeCounts } from './useShellBadgeCounts'
 
-describe('useShellBadgeCounts with the stage 2-4 tables missing', () => {
+describe('useShellBadgeCounts with the stage 1-3 tables missing', () => {
   it('answers 0 (no badge) for every count that reads them, and keeps the production counts', async () => {
     const { result } = renderHook(() => useShellBadgeCounts({ shipments: [] }))
     await Promise.resolve()

@@ -6,10 +6,11 @@
  * then checks, against the previous stage (stage 0 against the production baseline):
  *   - the GraphQL schema is a strict superset (models, fields and their types, @index, enums)
  *   - created + updated + deleted CloudFormation resources <= 1,500 (the cap is 2,500 per operation)
- *   - nothing is deleted
+ *   - nothing is deleted, and in particular no stage ever deletes a DynamoDB table
+ *     (Custom::AmplifyDynamoDBTable / AWS::DynamoDB::Table): that is data loss
  *   - no existing table gains more than one GSI
- *   - an existing DynamoDB table changes only in the PITR stage and the TTL stage, and the TTL
- *     stage changes nothing but TruckLocationHistory
+ *   - an existing DynamoDB table changes only in the TTL stage, and the TTL stage changes nothing
+ *     but TruckLocationHistory (point-in-time recovery is not a stage: see pitrEnabled in stages.ts)
  *   - the staged-out sentinel never reaches a template
  * and that stage 0 has exactly the baseline's models and indexes (fields may only be added).
  *
@@ -71,7 +72,7 @@ const { values } = parseArgs({
 
 const root = process.cwd()
 const stages = await tsImport(pathToFileURL(resolve(root, 'amplify/data/stages.ts')).toString(), import.meta.url)
-const { FINAL_STAGE, PITR_STAGE, TTL_STAGE, STAGE_ENV, VENDOR_AP_EXTRACT_RETIRED_STAGE } = stages
+const { FINAL_STAGE, TTL_STAGE, STAGE_ENV, VENDOR_AP_EXTRACT_RETIRED_STAGE } = stages
 const wanted = values.stages ? values.stages.split(',').map(Number) : Array.from({ length: FINAL_STAGE + 1 }, (_, k) => k)
 
 function synth(cwd, stage) {
@@ -156,6 +157,8 @@ for (const k of wanted) {
 
   for (const v of supersetViolations(prev.schema, schema, tag)) fail(v)
   if (delta.total > DELTA_LIMIT) fail(`${tag}${delta.total} resources > ${DELTA_LIMIT}`)
+  const tableDeletes = delta.changed.filter((c) => c.kind === 'deleted' && TABLE_TYPES.has(c.type))
+  if (tableDeletes.length > 0) fail(`${tag}${tableDeletes.length} DynamoDB table(s) deleted (data loss): ${tableDeletes.slice(0, 5).map((c) => `${c.file}#${c.id}`).join(', ')}`)
   const unexpected = delta.changed.filter((c) => c.kind === 'deleted'
     && !(k === wanted[0] && prev.name === 'baseline' && KNOWN_STAGE0_REMOVALS.some((re) => re.test(c.id)))
     && !(k === VENDOR_AP_EXTRACT_RETIRED_STAGE && prev.name === `stage ${k - 1}` && /^vendorapextractlambda/.test(c.id)))
@@ -170,13 +173,8 @@ for (const k of wanted) {
     if (extra.length > 0 || existingTableChanges.length !== 1) {
       fail(`${tag}TTL stage must change only the TruckLocationHistory table; changed: ${JSON.stringify(delta.byType)}`)
     }
-  } else if (k === PITR_STAGE) {
-    // A Lambda whose bundle hash moved between two synths of the same tree has shown up here once
-    // (1 resource, not reproducible); tolerate updated Lambda functions, nothing else.
-    const extra = nonStack.filter((c) => !TABLE_TYPES.has(c.type) && !(c.kind === 'updated' && c.type === 'AWS::Lambda::Function'))
-    if (extra.length > 0 || delta.created > 0) fail(`${tag}PITR stage must only update tables; changed: ${JSON.stringify(delta.byType)}`)
   } else if (existingTableChanges.length > 0) {
-    fail(`${tag}${existingTableChanges.length} existing table(s) changed outside the PITR/TTL stages (e.g. ${existingTableChanges[0].file}#${existingTableChanges[0].id})`)
+    fail(`${tag}${existingTableChanges.length} existing table(s) changed outside the TTL stage (e.g. ${existingTableChanges[0].file}#${existingTableChanges[0].id})`)
   }
 
   const leaks = sentinelLeaks(run.outdir, SENTINEL)

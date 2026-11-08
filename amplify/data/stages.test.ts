@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   FINAL_STAGE, LAST_MODEL_STAGE, MODEL_STAGE, PRODUCTION_MODELS, TRIGGER_MODELS, TTL_STAGE, VENDOR_AP_EXTRACT_RETIRED_STAGE,
-  modelPresent, parseSchemaStage, triggerEnabled, vendorApExtractLegacy, type TriggerName,
+  modelPresent, parseSchemaStage, pitrEnabled, triggerEnabled, vendorApExtractLegacy, type TriggerName,
 } from './stages'
 
 describe('parseSchemaStage', () => {
@@ -43,11 +43,11 @@ describe('modelPresent', () => {
 
 describe('triggerEnabled', () => {
   const expectedStage: Record<TriggerName, number> = {
-    workflowSweep: 4,
-    spotQuoterPoll: 2,
-    mcpSync: 2,
-    dataSafetyNightly: 4,
-    trackingAutomation: 3,
+    workflowSweep: 3,
+    spotQuoterPoll: 1,
+    mcpSync: 1,
+    dataSafetyNightly: 3,
+    trackingAutomation: 2,
   }
 
   it.each(Object.entries(expectedStage))('%s is off below stage %i and on from it', (name, stage) => {
@@ -68,5 +68,24 @@ describe('vendorApExtractLegacy', () => {
     expect(vendorApExtractLegacy(VENDOR_AP_EXTRACT_RETIRED_STAGE - 1)).toBe(true)
     expect(vendorApExtractLegacy(VENDOR_AP_EXTRACT_RETIRED_STAGE)).toBe(false)
     expect(vendorApExtractLegacy(FINAL_STAGE)).toBe(false)
+  })
+})
+
+describe('pitrEnabled', () => {
+  it('production main (no env) never flips PITR, at any stage', () => {
+    for (const stage of [0, 1, LAST_MODEL_STAGE, FINAL_STAGE]) expect(pitrEnabled({}, stage)).toBe(false)
+  })
+
+  it('the dev stack turns it on only at the final stage', () => {
+    expect(pitrEnabled({ BCAT_DEV_STACK: 'true' }, FINAL_STAGE)).toBe(true)
+    expect(pitrEnabled({ BCAT_DEV_STACK: 'true' }, FINAL_STAGE - 1)).toBe(false)
+  })
+
+  it('an explicit false wins over the dev stack (staged rehearsal mirrors production)', () => {
+    expect(pitrEnabled({ BCAT_DEV_STACK: 'true', BCAT_ENABLE_PITR: 'false' }, FINAL_STAGE)).toBe(false)
+  })
+
+  it('an explicit true turns it on anywhere', () => {
+    expect(pitrEnabled({ BCAT_ENABLE_PITR: 'true' }, 0)).toBe(true)
   })
 })

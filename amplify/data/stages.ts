@@ -49,50 +49,53 @@ export const PRODUCTION_MODELS: ReadonlySet<string> = new Set([
 
 /** Models the merge added. Anything absent from this table is in LAST_MODEL_STAGE. */
 export const MODEL_STAGE: Readonly<Record<string, number>> = {
-  // Stage 2: carrier registry, ownership/directory, commissions, user profile, integrations, CRM.
-  Carrier: 2, CarrierContact: 2, CarrierPaymentMethod: 2, CarrierDocument: 2, CompanyPhone: 2,
-  OwnershipDivision: 2, OwnershipRule: 2, ShipmentView: 2, ShipmentColumnTemplate: 2,
-  UserProfile: 2, Commission: 2, CommissionPayPeriod: 2,
-  Integration: 2, SpotSettings: 2, GmailConnection: 2, SpotRequest: 2, ApInboxItem: 2,
-  CrmContact: 2, CrmDomain: 2, CrmActivity: 2, CrmAccount: 2,
-  // Stage 3: the shipment core (shipment, order, assignment, charges, check calls, links, documents).
-  ProClaim: 3, Shipment: 3, Order: 3, LoadCarrier: 3, LoadFinancials: 3, LoadCharge: 3,
-  LoadCheckCall: 3, TrackingLink: 3, ShipmentDocument: 3, ShipmentNotice: 3, ShipmentPosting: 3,
-  ShipmentMessage: 3, IntakeLoad: 3, Quote: 3,
-  // Stage 4: billing, the Aljex import engine, workflow, rollups, demo/lane data.
-  Invoice: 4, ArPayment: 4, CarrierBill: 4, ApPayment: 4,
-  ImportJob: 4, AljexImportJob: 4, AljexMappingProfile: 4, LegacyAljexRow: 4, AljexCodeMap: 4,
-  DataExportJob: 4, WorkflowRun: 4, DemoRecord: 4, LaneRateSample: 4, DashboardRollup: 4,
+  // Stage 1: carrier registry, ownership/directory, commissions, user profile, integrations, CRM.
+  Carrier: 1, CarrierContact: 1, CarrierPaymentMethod: 1, CarrierDocument: 1, CompanyPhone: 1,
+  OwnershipDivision: 1, OwnershipRule: 1, ShipmentView: 1, ShipmentColumnTemplate: 1,
+  UserProfile: 1, Commission: 1, CommissionPayPeriod: 1,
+  Integration: 1, SpotSettings: 1, GmailConnection: 1, SpotRequest: 1, ApInboxItem: 1,
+  CrmContact: 1, CrmDomain: 1, CrmActivity: 1, CrmAccount: 1,
+  // Stage 2: the shipment core (shipment, order, assignment, charges, check calls, links, documents).
+  ProClaim: 2, Shipment: 2, Order: 2, LoadCarrier: 2, LoadFinancials: 2, LoadCharge: 2,
+  LoadCheckCall: 2, TrackingLink: 2, ShipmentDocument: 2, ShipmentNotice: 2, ShipmentPosting: 2,
+  ShipmentMessage: 2, IntakeLoad: 2, Quote: 2,
+  // Stage 3: billing, the Aljex import engine, workflow, rollups, demo/lane data.
+  Invoice: 3, ArPayment: 3, CarrierBill: 3, ApPayment: 3,
+  ImportJob: 3, AljexImportJob: 3, AljexMappingProfile: 3, LegacyAljexRow: 3, AljexCodeMap: 3,
+  DataExportJob: 3, WorkflowRun: 3, DemoRecord: 3, LaneRateSample: 3, DashboardRollup: 3,
 }
 
-/**
- * Stage that flips point-in-time recovery on from "conditional" to "always on" for every table.
- * It rewrites the table resource in all 60 existing nested stacks, so it is a stage of its own.
- * The comparison is `>=`, so tables created later get it at creation.
- */
-export const PITR_STAGE = 1
-
 /** The last stage that creates tables; models not in MODEL_STAGE land here. */
-export const LAST_MODEL_STAGE = 4
+export const LAST_MODEL_STAGE = 3
 
 /**
  * TruckLocationHistory timeToLiveAttribute (null -> ttlEpoch) on the EXISTING production table.
  * DynamoDB allows one TTL change per table per hour, so a stage that fails after this change
  * cannot roll back cleanly (UPDATE_ROLLBACK_FAILED). It is the only change in its stage.
  */
-export const TTL_STAGE = 5
+export const TTL_STAGE = 4
 
 /** Stages are 0..FINAL_STAGE; FINAL_STAGE (and above, and unset) is the whole schema. */
 export const FINAL_STAGE = TTL_STAGE
 
+/**
+ * Point-in-time recovery is NOT driven by the schema stage (incident 2026-11-07: flipping it on
+ * 60 existing tables in one stage was throttled by UpdateContinuousBackups, "Rate exceeded").
+ * On when BCAT_ENABLE_PITR=true, or (unless BCAT_ENABLE_PITR=false) on the dev stack at the
+ * final stage. Production main sets neither, so it never flips PITR.
+ */
+export function pitrEnabled(env: Readonly<Record<string, string | undefined>>, stage: number): boolean {
+  if (env.BCAT_ENABLE_PITR === 'true') return true
+  return env.BCAT_ENABLE_PITR !== 'false' && env.BCAT_DEV_STACK === 'true' && stage >= FINAL_STAGE
+}
+
 /*
  * STAGE_NOTES: what each stage changes (resources = created + updated + deleted, measured).
  *   0  production shape + additive fields on existing models + new Lambdas/functions   (see doc)
- *   1  PITR always-on, all existing tables                                              (see doc)
- *   2  models: carriers, ownership, commissions, user profile, integrations, CRM        (see doc)
- *   3  models: shipment core                                                            (see doc)
- *   4  models: billing, Aljex import, workflow, rollups                                 (see doc)
- *   5  TruckLocationHistory TTL, alone                                                  (see doc)
+ *   1  models: carriers, ownership, commissions, user profile, integrations, CRM        (see doc)
+ *   2  models: shipment core                                                            (see doc)
+ *   3  models: billing, Aljex import, workflow, rollups                                 (see doc)
+ *   4  TruckLocationHistory TTL, alone                                                  (see doc)
  */
 
 /** The stage this synth builds. Unset, empty or unparsable means "everything". */

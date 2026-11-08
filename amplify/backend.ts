@@ -18,7 +18,7 @@ import {
 import { createHash } from 'node:crypto'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
-import { FINAL_STAGE, PITR_STAGE, TTL_STAGE, currentSchemaStage, modelPresent, triggerEnabled, vendorApExtractLegacy } from './data/stages'
+import { FINAL_STAGE, TTL_STAGE, currentSchemaStage, modelPresent, pitrEnabled, triggerEnabled, vendorApExtractLegacy } from './data/stages'
 import { storage } from './storage/resource'
 import { userManagement } from './functions/userManagement/resource'
 import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
@@ -2364,9 +2364,12 @@ stageCfnTables['Integration'].timeToLiveAttribute = {
 // Amplify-managed table. PITR keeps 35 days and is also what makes
 // ExportTableToPointInTime (the nightly export) and RestoreTableToPointInTime (restore to
 // a new table) usable. Shared file: this lands on production tables too when dev merges.
-// Staged deploy: flipping it on all 60 existing tables rewrites every existing model stack, so it is a
-// stage of its own (PITR_STAGE); tables created at a later stage get it at creation.
-if (SCHEMA_STAGE >= PITR_STAGE) {
+// NOT driven by the schema stage (incident 2026-11-07: a stage that flipped it on all 60 existing tables was
+// throttled, "Rate exceeded", and its rollback failed). Production main sets no env, so it never flips PITR and the
+// deployed tables keep their existing form; tables created at a later stage are created WITHOUT it (on-demand
+// backups cover the cutover). Dev (BCAT_DEV_STACK=true) at the final stage keeps it on; a staged rehearsal sets
+// BCAT_ENABLE_PITR=false to mirror production. See pitrEnabled and AW_STAGED_DEPLOY.md "PITR (deferred...)".
+if (pitrEnabled(process.env, SCHEMA_STAGE)) {
   for (const table of Object.values(stageCfnTables)) {
     table.pointInTimeRecoveryEnabled = true
   }
@@ -2792,9 +2795,9 @@ backend.storage.resources.bucket.grantReadWrite(carrierActionsFn, 'carrier-docs/
 // two function roles, and the table grants attach to those roles from this stack. Nothing in the data stack
 // references this stack, so the dependency runs one way (TaxVault -> data) and there is no cycle.
 // Keys and table are RETAIN: deleting this stack never loses ciphertext, and a key is never deleted quietly.
-// Stage 0 (the production shape) must create no table: the vault is created at stage 2, with the Carrier model it serves,
-// and never changes afterwards. Below stage 2 the tax actions answer with a clear 'not available yet' error.
-const TAX_VAULT_STAGE = 2
+// Stage 0 (the production shape) must create no table: the vault is created at stage 1, with the Carrier model it serves,
+// and never changes afterwards. Below stage 1 the tax actions answer with a clear 'not available yet' error.
+const TAX_VAULT_STAGE = 1
 if (SCHEMA_STAGE >= TAX_VAULT_STAGE) {
   const vaultStack = backend.createStack('TaxVault')
   // The API id the data stack already exports (no new output, no stage dependence). Nothing in the data stack

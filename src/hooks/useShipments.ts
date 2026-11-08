@@ -240,7 +240,7 @@ interface Slot {
   error: string | null
 }
 
-/** The board reads these; all four are the shipment core (schema stage 3). */
+/** The board reads these; all four are the shipment core (schema stage 2). */
 const SHIPMENT_MODELS = ['Shipment', 'Order', 'LoadCarrier', 'LoadFinancials'] as const
 
 const EMPTY_BUNDLE: BoardBundle = { shipments: [], orders: [], loads: [], loadCarriers: [], loadFinancials: [] }
