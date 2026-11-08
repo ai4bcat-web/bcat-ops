@@ -127,6 +127,14 @@ export function buildChecks({ date, reportsDir, tmp = tmpdir(), exportDir = EXPO
     if (existsSync(unresolved)) for (const r of parseCsv(readFileSync(unresolved, 'utf8')).slice(1)) add('open AR gap', r[0], `in the Aljex AR report (${dollars(Math.round(Number(r[2]) * 100))} open, account ${r[1] || '(none)'}) but BCAT has no matching open invoice: ${r[3]}`, 'Link the PRO/customer or invoice it');
   } else add('open AR gap', '(none yet)', 'AR and reconcile have not both run', 'run AR + reconcile first');
 
+  // 5b. AP bills in the Aljex AP aging that BCAT cannot place (no carrier leg, or the leg has another carrier)
+  const apUnresolved = newestRunFile(tmp, 'runs', 'ap-aging-unresolved.csv', (p) => parseCsv(readFileSync(p, 'utf8')).length);
+  if (apUnresolved) {
+    for (const r of parseCsv(readFileSync(apUnresolved, 'utf8')).slice(1)) {
+      add('AP_UNRESOLVED', r[0], `in the Aljex AP aging (${dollars(Math.round(Number(r[2]) * 100))}, vendor ${r[1]}) but BCAT cannot place it: ${r[3]}`, 'Assign the carrier leg on the load and enter the bill');
+    }
+  } else add('AP_UNRESOLVED', '(none yet)', 'ap-aging has not been planned or applied', 'run ap-aging first');
+
   // 6-9. customers export and master reports
   const custPath = customersFile ?? join(exportDir, readdirSyncSafe(exportDir).filter((n) => /^aljex-customers-.*\.csv$/.test(n)).sort().pop() ?? 'aljex-customers.csv');
   if (existsSync(custPath)) {

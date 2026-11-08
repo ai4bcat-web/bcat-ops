@@ -19,8 +19,17 @@ describe('awPostLoadChecks', () => {
   it('without any earlier step it still lists every category with a "run it first" row, never silently empty', () => {
     const rows = buildChecks(opts(sandbox()));
     const cats = new Set(rows.map((r) => r[0]));
-    for (const c of ['revenue difference', 'identical duplicate PRO', 'junk date', 'unmatched memo', 'open AR gap', 'duplicate customer name', 'billing method needs review', 'name match not linked', 'same name, different carrier']) expect(cats.has(c), c).toBe(true);
+    for (const c of ['revenue difference', 'identical duplicate PRO', 'junk date', 'unmatched memo', 'open AR gap', 'AP_UNRESOLVED', 'duplicate customer name', 'billing method needs review', 'name match not linked', 'same name, different carrier']) expect(cats.has(c), c).toBe(true);
     expect(rows.find((r) => r[0] === 'open AR gap')[3]).toBe('run AR + reconcile first');
+  });
+
+  it('lists each unresolved AP aging bill as AP_UNRESOLVED with the carrier-leg action', () => {
+    const sb = sandbox();
+    sb.put('tmp/aljex-run-aljexrun-3/imports/runs/aljexrun:3/ap-aging-unresolved.csv', 'pro,vendor_id,amount,reason\n14576,300002301,700.00,NO_CARRIER_LEG\n14563,300002104,125.00,LEG_CARRIER_DIFFERS\n');
+    const rows = buildChecks(opts(sb)).filter((r) => r[0] === 'AP_UNRESOLVED');
+    expect(rows.map((r) => r[1])).toEqual(['14576', '14563']);
+    expect(rows[0][2]).toContain('$700.00');
+    expect(rows[0][3]).toBe('Assign the carrier leg on the load and enter the bill');
   });
 
   it('lists review-CSV revenue rows, one junk-date row per PRO, memo orphans, and the importer name-match / billing review split', () => {
