@@ -60,10 +60,12 @@ export interface InvoiceMath {
  * Invoice = Invoice Amount + memo adjustments (+ a reported residual when Bal Due is not explained by
  * them, so the invoice always ties to Aljex's open balance to the cent).
  */
-export function invoiceMath(row: CanonicalRow, adjustmentCents: number): InvoiceMath {
+export function invoiceMath(row: CanonicalRow, adjustmentCents: number, opts: { paidAmount?: boolean } = {}): InvoiceMath {
   const m = row.money
   const base = m.invoiceAmountCents + adjustmentCents
-  const residualCents = m.balDueCents == null ? 0 : m.balDueCents + m.paymentsReceivedCents - base
+  // paidAmount (revenue differs, fully paid per the AR report): the invoice shows the money actually received, Bal Due 0.
+  const balDue = opts.paidAmount ? 0 : m.balDueCents
+  const residualCents = balDue == null ? 0 : balDue + m.paymentsReceivedCents - base
   const totalCents = base + residualCents
   const paymentsCents = m.paymentsReceivedCents
   const surplusCents = Math.max(0, paymentsCents - Math.max(totalCents, 0))

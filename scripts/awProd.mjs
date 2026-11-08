@@ -14,7 +14,7 @@
  *                                              PLAN then APPLY; --live-tag TAG on apply; --plan runs the PLAN. AWS credentials only, no staff password
  *   ap-aging|ap-expected --file f.csv --cutoff D   same, AP aging / AP expected
  *   stage-export --file big.csv                stages the big export LOCALLY (importAljex.mjs stage); nothing is uploaded or written
- *   loads --source big.csv --live-tag TAG [--resume JOBID]   the Aljex load (importAljex.mjs run --target prod:TAG)
+ *   loads --source big.csv --live-tag TAG [--ar-file aljex-ar.csv] [--resume JOBID]   the Aljex load (importAljex.mjs run --target prod:TAG)
  *   tax-ids --source carriers.csv              Fed/SS # -> encrypted vault via tms-carrier-actions IMPORT_TAX_IDS, 100-row batches
  *   reconcile --entity E --source-job ID [--customers-job ID] --cutoff D   offline report (importAljex.mjs reconcile-entity); --apply publishes the RECONCILE job + report files
  *   verify                                     read-only: every table's ItemCount, settings, Jenny, vault
@@ -49,7 +49,7 @@ const STAFF_CLIENT = '1qr651dshigrv8a6c338d4f709'
 
 const OPTIONS = {
   suffix: { type: 'string' }, apply: { type: 'boolean' }, help: { type: 'boolean', short: 'h' }, fresh: { type: 'boolean' },
-  file: { type: 'string' }, source: { type: 'string' }, 'live-tag': { type: 'string' }, resume: { type: 'string' }, plan: { type: 'boolean' },
+  file: { type: 'string' }, source: { type: 'string' }, 'ar-file': { type: 'string' }, 'live-tag': { type: 'string' }, resume: { type: 'string' }, plan: { type: 'boolean' },
   cutoff: { type: 'string' }, 'export-keys': { type: 'string' }, batch: { type: 'string' }, evaluate: { type: 'boolean' },
   'allow-empty-shipments': { type: 'boolean' }, entity: { type: 'string' }, 'source-job': { type: 'string' }, 'customers-job': { type: 'string' },
 }
@@ -315,6 +315,8 @@ async function stepLoads(ctx) {
   const args = values.resume
     ? ['scripts/importAljex.mjs', 'resume', '--run', values.resume]
     : ['scripts/importAljex.mjs', 'run', '--source', values.source]
+  // The open AR report (Pro # only, read locally, never printed): decides which revenue-difference invoices carry the paid amount (revenueBasis.ts). Without it every such row keeps the Aljex amount and stays on the review list.
+  if (values['ar-file'] && !values.resume) args.push('--ar-file', resolve(process.cwd(), values['ar-file']))
   args.push('--target', `prod:${values['live-tag']}`, '--i-mean-production')
   if (apply) args.push('--apply', '--confirm-prod', `${account}:${PROD_SUFFIX}`)
   const env = { ...process.env, BCAT_ALLOW_PROD: localDate(now) }
@@ -442,7 +444,7 @@ export async function runAwProd({ argv, env = process.env, now = new Date(), dep
       out(failures.length ? `Dry run. An apply would currently be refused:\n  - ${failures.join('\n  - ')}` : `Dry run. An apply would pass the guards; add --apply and AW_PROD_CONFIRM=${confirmTokenFor(step, now)}`)
     }
     const models = STEPS[step].writes
-    const ckpt = createCheckpoint(step, step === 'verify' ? 'verify' : sha(JSON.stringify([step, values.file ? fileFingerprintSafe(values.file) : null, values.source ? fileFingerprintSafe(values.source) : null, values['live-tag'] ?? null, values.resume ?? null, values['export-keys'] ? fileFingerprintSafe(values['export-keys']) : null])), { ...(logDir ? { dir: logDir } : {}), fresh: values.fresh === true })
+    const ckpt = createCheckpoint(step, step === 'verify' ? 'verify' : sha(JSON.stringify([step, values.file ? fileFingerprintSafe(values.file) : null, values.source ? fileFingerprintSafe(values.source) : null, values['ar-file'] ? fileFingerprintSafe(values['ar-file']) : null, values['live-tag'] ?? null, values.resume ?? null, values['export-keys'] ? fileFingerprintSafe(values['export-keys']) : null])), { ...(logDir ? { dir: logDir } : {}), fresh: values.fresh === true })
     if (ckpt.size() > 0) log.info(`resuming: ${ckpt.size()} completed chunk(s) in the checkpoint will be skipped`)
     const before = models.length ? await snapshotTables(deps, models, PROD_SUFFIX, { exact: apply }) : {}
     const handler = deps.handlers?.[step] ?? HANDLERS[step]

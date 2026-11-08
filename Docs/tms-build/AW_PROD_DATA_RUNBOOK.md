@@ -249,6 +249,19 @@ AW_PROD_CONFIRM=$STAMP-backfill node scripts/awProd.mjs backfill --suffix $SFX -
 ```
 Writes `Shipment/Order/Load[link fields]/LoadCarrier/LoadFinancials/LoadCharge/ProClaim/AuditLog` for the linked-by-ID bucket only (stage >= 2). Exit 2 on conflicts. Idempotent: a second run reports 0. **Expect** applied = linked-by-ID count; after: every in-window Load linked. **Rollback:** the same tables; deterministic ids `stableId('shp'|'ord'|'chg', loadId)`: delete those Shipment/Order/LoadCharge items and their ProClaim (origin BACKFILL), and `REMOVE shipmentId, orderId, loadNumber, leg` from the Load; or restore from the backup. **Log:** `$LOGS/backfill-<ts>.log`.
 
+#### 4c-rev. Revenue differences on PROs already in BCAT (Ryne's Option 1, decided 2026-11-08)
+
+A PRO already in BCAT (the 958 backfilled Loads) whose `Order.revenueCents` differs from the Aljex Invoice Amount is **no longer a conflict**: the Invoice is written, the finding `ENRICH_REVENUE_DIFFERS` is recorded, the row counts as ENRICHED. **Never written:** `Order.revenueCents`, `Load.rate`, and any Load, Shipment, LoadFinancials or LoadCharge field (ENRICH writes only invoice, order AR fields, auditLog, carrierBill, loadCarrier AP fields, legacyAljexRow; a test pins the Load row byte-identical). The carrier-MC mismatch and every other conflict type stay hard stops.
+
+Which amount the Invoice carries (engine/revenueBasis.ts; the only decision):
+
+- **Fully paid** = the PRO is NOT in the open AR report (`--ar-file`, the `Pro #` column only, read locally, never printed; `awProdRun.sh` passes `aljex-ar-2026-11-07.csv`) **and** the big export shows money received (`Payments Received` = Paid Amount 1..3 = the AR_PAYMENT rows the importer creates) > 0. The Invoice then carries **the amount actually paid** (total = paid, balance 0, status PAID; short pay and overpay alike). The difference is an internal finding only (state PAID, basis PAID_AMOUNT, with `paidCents`/`invoiceCents`) and is **not** on `revenue-differences-<date>.csv`.
+- **Outstanding / partial** = the PRO is in the open AR report (OPEN, or PARTIAL when part was paid): the Invoice carries the Aljex amount and the row **is** on the review CSV (columns: PRO, BCAT value, Aljex invoice, difference, higher/lower, open balance, due date, state, customer, bill-to, suggested action, Ryne note, Status; sorted by absolute difference, descending).
+- Not in the AR report but nothing received, or **no `--ar-file`**: safe fallback, the Aljex amount wins, the row stays on the review CSV and a WARNING is printed. A missing file can never drop a row from the review list.
+- Reconcile: invoices carrying the paid amount differ from the Aljex invoice amount by design; the bridge shows them as the explained item `explained:PAID_AMOUNT_USED:invoiceTotal` (exact only when the written invoice total equals the paid amount, so a true mismatch still fails).
+
+Plan output lines (parsed by the runner): `revenueDifferences: total N, paid ...` (plus `revenueDifferencesAll` and `paidAmountUsed`). The CLI writes `revenue-differences-<date>.csv` at APPLY (preview in the local run dir at PLAN) into `/Users/adminoid/aljex-export/reports/` (dir 700, files 600, PII; only paths and counts are printed). `scripts/awPostLoadChecks.mjs` writes `post-load-checks-<date>.csv` there (after the loads apply and after reconcile; also standalone: `node scripts/awPostLoadChecks.mjs [--date D]`; categories documented in its header).
+
 ### 4d. AP aging
 ```sh
 node scripts/awProd.mjs ap-aging --suffix $SFX --file $FILES/aljex-ap-aging-2026-11-08.csv

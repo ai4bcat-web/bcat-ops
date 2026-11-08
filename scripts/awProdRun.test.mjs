@@ -34,8 +34,9 @@ if (step === 'verify') logline.push('verify tables: tables=110 expected=110', 'v
 if (step === 'tax-ids') L('tax-ids: rows=2462 withValue=2353 resolvable=2353 unresolvable=0')
 if (process.env.FAKE_LEAK) L('debug leak ' + process.env.BCAT_PASSWORD + ' ' + process.env.BCAT_EMAIL)
 if (step === 'backfill') {
-  const done = loadsDone
-  L('backfill before: matchedByPro=' + (done ? 0 : 957) + ' linkedById=1 ambiguous=0 unmappable=0 alreadyLinked=' + (done ? 957 : 0) + ' loads=958 beforeWindow=0 afterCutoff=' + bad('backfill-check', 'afterCutoff', 0, 3) + ' carriedOver=17 totalLoads=958')
+  // Default = the real state since the emergency backfill: all 958 Loads linked. FAKE_BACKFILL_PENDING=1 simulates the old pending state.
+  const done = loadsDone || process.env.FAKE_BACKFILL_PENDING !== '1'
+  L('backfill before: matchedByPro=' + (done ? 0 : 957) + ' linkedById=' + (process.env.FAKE_BACKFILL_PENDING === '1' ? 1 : 0) + ' ambiguous=0 unmappable=0 alreadyLinked=' + (done ? (process.env.FAKE_BACKFILL_PENDING === '1' ? 957 : 958) : 0) + ' loads=958 beforeWindow=0 afterCutoff=' + bad('backfill-check', 'afterCutoff', 0, 3) + ' carriedOver=17 totalLoads=958')
   L('table Shipment: before ' + (done ? 958 : 0) + ', after ' + (done ? 958 : 0) + ', delta 0')
   if (!evaluate) L('backfill refusals not evaluated (add --evaluate)')
   if (apply) { L('backfill after: matchedByPro=0 linkedById=0 ambiguous=0 unmappable=0 alreadyLinked=958 loads=958') }
@@ -79,9 +80,12 @@ for (const mode of modes) {
 if (step === 'stage-export') { if (apply) L('\\n== big export staged: job aljexrun:abcStage, 8347 rows, stage hash 0123456789ab (no table was written)'); else L('stage-export local check: bytes=100') }
 if (step === 'loads') {
   L('run aljexrun:x target PRODUCTION-GATED'); L('STAGE 1.0s: 8347 rows (7940 loads, 403 memos, 4 identical duplicates, 7 junk dates, 8345 ragged)'); L('PLAN 3.0s')
-  ent('LOAD', 7944, 27, 5299, 13, 2605, 0, 0); ent('CUSTOMER', 487, 1, 486, 0, 0, 0, 0)
+  ent('LOAD', 7944, 4384, 40, 915, 2605, 0, 0); ent('CUSTOMER', 487, 1, 486, 0, 0, 0, 0); ent('INVOICE', 5231, 4316, 0, 915, 0, 0, 0); ent('BILL', 2365, 2365, 0, 0, 0, 0, 0)
+  L('revenueDifferences: total 283, paid 227 (absCents 162191, shortCount 18, shortCents 106974, overCount 11, overCents 55217), partial 0 (absCents 0), outstanding 56 (absCents 286949), onReviewCsv 56')
+  L('revenueDifferencesAll: count 283, absCents 1508301, netCents 1076189, higher 160, lower 123, open 55, paid 228')
+  L('paidAmountUsed: invoices 227, explainedCents -39750')
   if (process.env.FAKE_GATE === '1' && apply) { console.error('a LIVE apply of real data needs a RECONCILED rehearsal run with the same stageHash and profileVersion'); process.exit(1) }
-  if (apply) { L('APPLY 9.0s'); L('  conservation OK  reconciled YES  open AR 357753.44'); L('table Load: before 958, after 985, delta 27') }
+  if (apply) { L('APPLY 9.0s'); L('  conservation OK  reconciled YES  open AR 357753.44'); L('revenue-differences report: 56 row(s) -> ' + dir + '/reports/revenue-differences-x.csv (0600; PII, outside the repo)'); L('table Load: before 958, after 5342, delta 4384') }
 }
 if (step === 'reconcile') {
   const e = rest[rest.indexOf('--entity') + 1]
@@ -136,7 +140,7 @@ function sandbox() {
 function run(sb, { args = [], input = '', env = {} } = {}) {
   const r = spawnSync('bash', [SCRIPT, '--files-dir', sb.files, ...args], {
     input, encoding: 'utf8', timeout: 120000,
-    env: { PATH: `${sb.bin}:${process.env.PATH}`, HOME: sb.home, AWPROD_SCRIPTS_DIR: sb.scripts, FAKE_DIR: sb.dir, FAKE_PW: CANARY, AW_PROD_NONINTERACTIVE: '1', BCAT_EMAIL: 'ryne.test@example.com', BCAT_PASSWORD: CANARY, ...env },
+    env: { PATH: `${sb.bin}:${process.env.PATH}`, HOME: sb.home, AWPROD_SCRIPTS_DIR: sb.scripts, FAKE_DIR: sb.dir, AW_REPORTS_DIR: join(sb.dir, 'reports'), FAKE_PW: CANARY, AW_PROD_NONINTERACTIVE: '1', BCAT_EMAIL: 'ryne.test@example.com', BCAT_PASSWORD: CANARY, ...env },
   })
   const logs = join(sb.home, 'bcat-ops-backups', 'aw-prod-logs')
   const runDirs = existsSync(logs) ? readdirSync(logs).filter((n) => n.startsWith('run-')) : []
@@ -168,10 +172,10 @@ describe('awProdRun.sh', () => {
   })
 
   it('carriedOver 17 with afterCutoff 0 passes (the cutoff means BOOKED); afterCutoff > 0 fails the hard row', () => {
-    const ok = run(sandbox(), { input: yes(20) })
+    const ok = run(sandbox(), { input: yes(20), env: { FAKE_BACKFILL_PENDING: '1' } })
     expect(ok.results).toMatch(/backfill-check\tbackfill_before\.afterCutoff\t0\t0\tPASS/)
     expect(ok.results).toMatch(/backfill-check\tbackfill_before\.carriedOver\t17\t17\tPASS/)
-    const bad = run(sandbox(), { input: yes(20), env: { FAKE_BREAK: 'backfill-check:afterCutoff' } })
+    const bad = run(sandbox(), { input: yes(20), env: { FAKE_BREAK: 'backfill-check:afterCutoff', FAKE_BACKFILL_PENDING: '1' } })
     expect(bad.results).toMatch(/backfill-check\tbackfill_before\.afterCutoff\t0\t3\tFAIL/)
     expect(bad.results).toMatch(/backfill-check\tbackfill_before\.carriedOver\t17\t17\tPASS/)
   })
@@ -185,7 +189,19 @@ describe('awProdRun.sh', () => {
     const ok = run(sb2, { input: yes(40) })
     expect(ok.status).toBe(0)
     const today = new Date().toLocaleDateString('sv-SE')
-    for (const s of ['settings', 'customers', 'carriers', 'stage-export', 'loads', 'backfill', 'ap-aging', 'ap-expected', 'ar', 'reconcile']) expect(ok.applies).toContain(`${s} confirm=${today}-${s}`)
+    for (const s of ['settings', 'customers', 'carriers', 'stage-export', 'loads', 'ap-aging', 'ap-expected', 'ar', 'reconcile']) expect(ok.applies).toContain(`${s} confirm=${today}-${s}`)
+    // The emergency backfill linked all 958 Loads: the dry probe says so and the backfill apply is never re-run.
+    expect(ok.stdout).toMatch(/backfill already applied: skipped/)
+    // The loads step prints the dollar totals computed from the plan output, and the two review files (path + row count only).
+    expect(ok.stdout).toMatch(/revenue differences \(plan\): 283 PROs\. All: abs \$15083\.01, net \$10761\.89, 160 Aljex higher \/ 123 lower/)
+    expect(ok.stdout).toMatch(/paid .*: 227, short 18 = \$1069\.74, over 11 = \$552\.17; explained in reconcile: \$-397\.50/)
+    expect(ok.stdout).toMatch(/revenue-differences report: 56 row\(s\) -> /)
+    expect(ok.stdout).toMatch(/post-load checks: \d+ row\(s\) -> .*post-load-checks-\d{4}-\d{2}-\d{2}\.csv/)
+    expect(ok.stdout).toMatch(/Review files \(names inside/)
+    expect(ok.results).toMatch(/loads\tLOAD\.enriched\t915\t915\tPASS/)
+    expect(ok.results).toMatch(/loads\trevdiff\.total\t283\t283\tPASS/)
+    expect(ok.results).toMatch(/loads\tLOAD\.conflicts\t0\t0\tPASS/)
+    expect(ok.applies).not.toMatch(/backfill/)
     expect(ok.stdout).toMatch(/Jenny signs off in the app/)
   })
 
@@ -246,7 +262,7 @@ describe('awProdRun.sh', () => {
     expect(run(sb, { args: ['--suffix', PROD, '--target', 'dev'], input: 'PRODUCTION\n' }).status).toBe(2)
     const typo = run(sb, { input: 'production\n' })
     expect(typo.status).toBe(2); expect(typo.applies).toBe('')
-    const badLogin = run(sb, { args: ['--only', 'backfill-check'], input: 'PRODUCTION\n', env: { BCAT_PASSWORD: 'wrong' } })
+    const badLogin = run(sb, { args: ['--only', 'backfill-check'], input: 'PRODUCTION\n', env: { BCAT_PASSWORD: 'wrong', FAKE_BACKFILL_PENDING: '1' } })
     expect(badLogin.status).toBe(1); expect(badLogin.stdout).toMatch(/Login failed/)
     // The offline per-file steps never ask for or check the staff password: a wrong one does not stop customers.
     const offline = run(sb, { args: ['--only', 'customers', '--dry-only'], input: 'PRODUCTION\n', env: { BCAT_PASSWORD: 'wrong' } })
@@ -330,7 +346,7 @@ esac
     if (approval !== undefined) { writeFileSync(approvalPath(sb), approval); chmodSync(approvalPath(sb), mode) }
     const r = spawnSync('bash', [SCRIPT, '--files-dir', sb.files, ...(unattended ? ['--unattended'] : []), ...args], {
       input: '', encoding: 'utf8', timeout: 120000,
-      env: { PATH: path ?? `${sb.bin}:${process.env.PATH}`, HOME: sb.home, AWPROD_SCRIPTS_DIR: sb.scripts, FAKE_DIR: sb.dir, FAKE_PW: SEC_PW, ...env },
+      env: { PATH: path ?? `${sb.bin}:${process.env.PATH}`, HOME: sb.home, AWPROD_SCRIPTS_DIR: sb.scripts, FAKE_DIR: sb.dir, AW_REPORTS_DIR: join(sb.dir, 'reports'), FAKE_PW: SEC_PW, ...env },
     })
     const logs = join(sb.home, 'bcat-ops-backups', 'aw-prod-logs')
     const runDirs = existsSync(logs) ? readdirSync(logs).filter((n) => n.startsWith('run-')) : []
@@ -391,12 +407,13 @@ esac
     const sb = usb()
     const r = runU(sb, { approval: OK('all'), env: { FAKE_VAULT: '1' } })
     expect(r.status).toBe(0)
-    for (const s of ['settings', 'customers', 'carriers', 'stage-export', 'loads', 'backfill', 'ap-aging', 'ap-expected', 'ar', 'reconcile']) expect(r.applies).toContain(`${s} confirm=${today()}-${s}`)
+    for (const s of ['settings', 'customers', 'carriers', 'stage-export', 'loads', 'ap-aging', 'ap-expected', 'ar', 'reconcile']) expect(r.applies).toContain(`${s} confirm=${today()}-${s}`)
+    expect(r.applies).not.toMatch(/backfill/)
     expect(r.applies).not.toMatch(/tax-ids/)
     expect(r.stdout).toMatch(/\[tax-ids\] skipped \(default NO/)
     expect(r.argv).toMatch(/prodBackup .* allow=\d{4}-\d{2}-\d{2}/)
     expect(existsSync(approvalPath(sb))).toBe(false); expect(r.used).toHaveLength(1)
-    const emergency = runU(usb(), { approval: OK('all'), args: ['--only', 'backfill-emergency'] })
+    const emergency = runU(usb(), { approval: OK('all'), args: ['--only', 'backfill-emergency'], env: { FAKE_BACKFILL_PENDING: '1' } })
     expect(emergency.status).toBe(2); expect(emergency.applies).toBe('')
     const listed = runU(usb(), { approval: OK('all,tax-ids'), args: ['--only', 'tax-ids'], env: { FAKE_VAULT: '1' } })
     expect(listed.status).toBe(0); expect(listed.applies).toContain(`tax-ids confirm=${today()}-tax-ids`)
@@ -437,7 +454,7 @@ esac
 
   it('the Keychain canaries never reach a file, a log, results.tsv, the transcript or any fake argv', () => {
     const sb = usb()
-    const r = runU(sb, { approval: OK('backfill-emergency'), args: ['--only', 'backfill-emergency'], env: { FAKE_LEAK: '1' } })
+    const r = runU(sb, { approval: OK('backfill-emergency'), args: ['--only', 'backfill-emergency'], env: { FAKE_LEAK: '1', FAKE_BACKFILL_PENDING: '1' } })
     expect(r.status).toBe(0)
     expect(r.stdout + r.stderr).not.toContain(SEC_PW); expect(r.stdout + r.stderr).not.toContain(SEC_ACCT)
     const files = [...allFiles(join(sb.home, 'bcat-ops-backups')), ...['argv.log', 'aws.log', 'security.log', 'applies.log'].map((n) => join(sb.dir, n)).filter(existsSync)]
@@ -448,19 +465,19 @@ esac
   })
 
   it('backfill-emergency: dry run, then the exact apply command under an approval; stops on afterCutoff', () => {
-    const dry = runU(usb(), { args: ['--only', 'backfill-emergency', '--dry-only'] })
+    const dry = runU(usb(), { args: ['--only', 'backfill-emergency', '--dry-only'], env: { FAKE_BACKFILL_PENDING: '1' } })
     expect(dry.status).toBe(0); expect(dry.applies).toBe('')
     expect(dry.results).toMatch(/backfill-emergency\tbackfill_before\.afterCutoff\t0\t0\tPASS/)
     expect(dry.results).toMatch(/backfill-emergency\tbackfill_before\.totalLoads\t958\t958\tPASS/)
     expect(dry.results).toMatch(/backfill-emergency\tbackfill_before\.carriedOver\t17\t17\tPASS/)
     const sb = usb()
-    const r = runU(sb, { approval: OK('backfill-emergency'), args: ['--only', 'backfill-emergency'] })
+    const r = runU(sb, { approval: OK('backfill-emergency'), args: ['--only', 'backfill-emergency'], env: { FAKE_BACKFILL_PENDING: '1' } })
     expect(r.status).toBe(0)
     expect(r.applies).toContain(`backfill confirm=${today()}-backfill`)
     expect(r.argv).toContain(`backfill --suffix ${PROD} --cutoff 2026-11-07 --allow-empty-shipments --apply`)
     expect(r.results).toMatch(/backfill-emergency\tbackfill_after\.unmappable\t0\t0\tPASS/)
     expect(r.state).toMatch(/backfill-emergency\tDONE/)
-    const stop = runU(usb(), { approval: OK('backfill-emergency'), args: ['--only', 'backfill-emergency'], env: { FAKE_BREAK: 'backfill-check:afterCutoff' } })
+    const stop = runU(usb(), { approval: OK('backfill-emergency'), args: ['--only', 'backfill-emergency'], env: { FAKE_BREAK: 'backfill-check:afterCutoff', FAKE_BACKFILL_PENDING: '1' } })
     expect(stop.status).toBe(1); expect(stop.applies).toBe('')
     expect(runU(usb(), { approval: OK('backfill-emergency'), args: ['--only', 'backfill'] }).applies).toBe('')
   })

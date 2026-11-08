@@ -7,6 +7,7 @@ import { conservation, reconcile } from './reconcile'
 import { seedProCounter, SeedRefused } from './seedCounter'
 import { DEV_SUFFIX, MODEL_NAME, PROD_SUFFIX } from './tables'
 import { readAll } from './util'
+import { arOpenKey, revenueDifferencesCsv, summarizeRevenueDifferences, summaryLines, type RevenueDifference } from './revenueBasis'
 import { normalizePro } from '../../../../src/lib/proNumber'
 
 interface Oracle {
@@ -672,7 +673,7 @@ describe('reconciliation scope', () => {
     // A paid invoice of a customer that has other invoiced loads in the file.
     const enrichInv = invoices.find((i) => typeof i.paidCents === 'number' && i.paidCents > 0 && invoicesOf(i.customerId).length > 1)!
     const others = invoices.filter((i) => i.id !== enrichInv.id && i.customerId !== enrichInv.customerId)
-    const [mismatchInv, invoicedInv] = others
+    const [mismatchInv, invoicedInv, carrierInv] = others
     const store = makeStore()
     // The live copy of an invoice's PRO: a shipment/order/load without finance, claimed by a backfill.
     const seedLive = (inv: EngineRow, n: number, tweak: (order: EngineRow) => void): string => {
@@ -691,6 +692,11 @@ describe('reconciliation scope', () => {
     const enrichOrder = seedLive(enrichInv, 1, () => {})
     seedLive(mismatchInv, 2, (o) => { o.revenueCents = (o.revenueCents as number) + 100 })
     seedLive(invoicedInv, 3, (o) => { o.invoiceId = 'prod-invoice-3' })
+    // A live leg whose carrier MC is not the Aljex row's: still a hard ENRICH_MISMATCH (revenue alone no longer is).
+    const carrierOrderId = seedLive(carrierInv, 4, () => {})
+    const carrierLeg = table(clean, 'loadCarrier').find((l) => l.loadId === table(clean, 'load').find((x) => x.orderId === carrierInv.orderId)!.id)!
+    store.seed('loadCarrier', [{ ...carrierLeg, id: 'live-leg-4', loadId: 'live-load-4', carrierMc: '9999991', kind: 'CARRIER', carrierId: 'live-carrier-4' } as EngineRow])
+    store.seed('load', [{ ...table(store, 'load').find((l) => l.id === 'live-load-4')!, activeLoadCarrierId: 'live-leg-4' } as EngineRow])
     // Two directory customers share the enriched invoice's customer name: the import cannot pick one, so the
     // account stays unresolved while the live order already carries its own customer.
     const customerName = table(clean, 'customer').find((c) => c.id === enrichInv.customerId)!.name as string
@@ -714,6 +720,11 @@ describe('reconciliation scope', () => {
     for (const code of ['INVOICE_NO_CUSTOMER', 'ENRICH_MISMATCH', 'EXISTING_INVOICE']) {
       expect(byKey.get(`notImported:${code}:invoiceTotal`)?.fileCents, code).toBeGreaterThan(0)
     }
+    // A differing revenue no longer blocks the invoice: the Aljex amount is written, the order's revenue stays.
+    const mismatchOrder = table(store, 'order').find((o) => o.id === 'live-order-2')!
+    expect(mismatchOrder.invoiceId).toBeTruthy()
+    expect(table(store, 'invoice').find((i) => i.id === mismatchOrder.invoiceId)!.totalCents).toBe(mismatchInv.totalCents)
+    expect(table(store, 'order').find((o) => o.id === carrierOrderId)!.invoiceId).toBeUndefined()
     // The written scope and the not-imported items add up to every invoiced load of the file.
     const written = byKey.get('invoiceTotal')!
     const all = byKey.get('invoiceTotalAll')!
@@ -722,6 +733,87 @@ describe('reconciliation scope', () => {
     // PLAN shows the same bridge before anything is written.
     const plannedBridge = (JSON.parse(await readAll(store.getObject('imports/jobs/aljexrun:SC/plan-summary.json'))) as { bridge: Array<{ key: string; diffCents: number | null }> }).bridge
     for (const b of plannedBridge) if (b.diffCents != null) expect({ key: b.key, diff: b.diffCents }).toEqual({ key: b.key, diff: 0 })
+  })
+})
+
+describe('revenue differences (Option 1: the Aljex invoice wins, nothing live is rewritten)', () => {
+  /** A live (backfilled) copy of one invoiced PRO whose BCAT revenue differs by 4321; runs stage/plan/apply with the given open-AR PRO set. */
+  async function run(pick: (i: EngineRow) => boolean, arOpen: 'none' | 'open' | 'closed', tag: string) {
+    const clean = makeStore()
+    await fullRun(clean, fixture.csv, `R${tag}`)
+    const inv = table(clean, 'invoice').find(pick)!
+    expect(inv).toBeTruthy()
+    const order = table(clean, 'order').find((o) => o.id === inv.orderId)!
+    const shipment = table(clean, 'shipment').find((s) => s.id === order.shipmentId)!
+    const load = table(clean, 'load').find((l) => l.shipmentId === shipment.id)!
+    const store = makeStore()
+    const liveOrder = { ...order, id: 'prod-order', shipmentId: 'prod-shp', arStatus: 'DOCS_NEEDED', revenueCents: (order.revenueCents as number) + 4321 } as EngineRow
+    for (const k of ['invoiceId', 'invoiceNumber', 'invoicedAt', 'arBalanceCents']) delete liveOrder[k]
+    const prodLoad = { ...load, id: 'prod-load', shipmentId: 'prod-shp', orderId: 'prod-order', rate: 123456, sortOrder: 7, stops: '[]', driverId: 'drv-1', status: 'DELIVERED', leg: 1, loadNumber: load.aljexId } as EngineRow
+    store.seed('order', [liveOrder])
+    store.seed('shipment', [{ ...shipment, id: 'prod-shp', status: 'DELIVERED', legacySource: undefined, legacyImported: undefined, importRunId: undefined, loadIds: ['prod-load'], orderIds: ['prod-order'] } as EngineRow])
+    store.seed('load', [prodLoad])
+    store.seed('proClaim', [{ id: normalizePro(load.aljexId as string)!, loadId: 'prod-load', claimedAt: FIXED_NOW, claimedBy: 'backfill', origin: 'BACKFILL' }])
+    const before = JSON.stringify(table(store, 'load').find((l) => l.id === 'prod-load'))
+    const stageId = `aljexrun:RD${tag}`
+    if (arOpen !== 'none') await store.putObject(arOpenKey(stageId), JSON.stringify(arOpen === 'open' ? [normalizePro(load.aljexId as string)] : []))
+    await stage(store, fixture.csv, stageId)
+    await plan(store, stageId)
+    const done = await apply(store, stageId, `${stageId}A`)
+    expect(done.status).toBe('APPLIED')
+    const after = table(store, 'order').find((o) => o.id === 'prod-order')!
+    const findings = (await readAll(store.getObject(`imports/runs/${done.id}/findings.csv`))).split('\n')
+    expect(findings.filter((l) => l.startsWith('ENRICH_MISMATCH'))).toEqual([])
+    const differs = findings.filter((l) => l.startsWith('ENRICH_REVENUE_DIFFERS'))
+    expect(differs).toHaveLength(1)
+    const detail = JSON.parse(differs[0].slice(differs[0].indexOf('{')).replace(/"$/, '').replace(/""/g, '"'))
+    const invoice = table(store, 'invoice').find((i) => i.id === after.invoiceId)!
+    // Never rewritten: the Load row is byte-identical, the Order keeps BCAT's revenue.
+    expect(JSON.stringify(table(store, 'load').find((l) => l.id === 'prod-load'))).toBe(before)
+    expect(after.revenueCents).toBe(liveOrder.revenueCents)
+    expect(detail).toMatchObject({ pro: load.aljexId, bcatCents: liveOrder.revenueCents, aljexCents: (liveOrder.revenueCents as number) - 4321, diffCents: -4321, paidCents: inv.paidCents })
+    expect(typeof detail.customer).toBe('string')
+    expect(typeof detail.billTo).toBe('string')
+    return { inv, invoice, detail, store, done, planned: JSON.parse(await readAll(store.getObject(`imports/jobs/${stageId}/plan-revenue-differences.json`))) as Array<{ pro: string; basis: string }> }
+  }
+
+  it('without an AR report the Aljex amount is invoiced and the row stays on the review list', async () => {
+    const r = await run((i) => (i.totalCents as number) > 0, 'none', 'A')
+    expect(r.invoice.totalCents).toBe(r.inv.totalCents)
+    expect(r.detail.basis).toBe('ALJEX_AMOUNT')
+    expect(r.planned.map((p) => p.pro)).toEqual([r.detail.pro])
+  })
+
+  it('an outstanding PRO (in the open AR report) is invoiced at the Aljex amount and stays on the review list', async () => {
+    const r = await run((i) => (i.paidCents as number) > 0 && (i.balanceCents as number) > 0, 'open', 'O')
+    expect(r.invoice.totalCents).toBe(r.inv.totalCents)
+    expect(r.invoice.balanceCents).toBe(r.inv.balanceCents)
+    expect(r.detail).toMatchObject({ basis: 'ALJEX_AMOUNT', state: 'PARTIAL' })
+  })
+
+  it('a fully paid PRO (not in the open AR report) carries the amount actually paid, is not on the review list and reconciles as an explained item', async () => {
+    const r = await run((i) => (i.paidCents as number) > 0 && (i.balanceCents as number) > 0, 'closed', 'P')
+    expect(r.invoice).toMatchObject({ totalCents: r.inv.paidCents, paidCents: r.inv.paidCents, balanceCents: 0, status: 'PAID' })
+    expect(r.detail).toMatchObject({ basis: 'PAID_AMOUNT', state: 'PAID', invoiceCents: r.detail.aljexCents })
+    expect(revenueDifferencesCsv([r.detail]).rows).toBe(0)
+    const summary = await reconcile(r.store, r.done.id)
+    const byKey = new Map(summary.bridge.map((b) => [b.key, b]))
+    expect(byKey.get('explained:PAID_AMOUNT_USED:invoiceTotal')?.fileCents).toBe(r.inv.balanceCents)
+    for (const b of summary.bridge) if (b.diffCents != null) expect({ key: b.key, diff: b.diffCents }).toEqual({ key: b.key, diff: 0 })
+  })
+})
+
+describe('revenue-difference summary and review CSV', () => {
+  const d = (pro: string, diffCents: number, basis: 'PAID_AMOUNT' | 'ALJEX_AMOUNT', state: 'OPEN' | 'PARTIAL' | 'PAID', paidCents = 0): RevenueDifference => ({ pro, bcatCents: 100_00, aljexCents: 100_00 + diffCents, diffCents, invoiceCents: 100_00 + diffCents, paidCents, balanceCents: basis === 'PAID_AMOUNT' ? 0 : 50_00, dueDate: '2026-12-01', state, basis, customer: 'ZZ Cust', billTo: 'ZZ Bill' })
+  const list = [d('1', 5_00, 'ALJEX_AMOUNT', 'OPEN'), d('2', -30_00, 'ALJEX_AMOUNT', 'PARTIAL', 10_00), d('3', 7_00, 'PAID_AMOUNT', 'PAID', 100_00), d('4', 2_00, 'PAID_AMOUNT', 'PAID', 110_00), d('5', 400_00, 'ALJEX_AMOUNT', 'OPEN')]
+
+  it('splits paid (short/over), partial and outstanding and lists only review rows, absolute difference descending', () => {
+    const s = summarizeRevenueDifferences(list)
+    expect(s).toMatchObject({ total: 5, onReviewCsv: 3, paid: { count: 2, absCents: 15_00, shortCount: 1, shortCents: 7_00, overCount: 1, overCents: 8_00 }, partial: { count: 1, absCents: 30_00 }, outstanding: { count: 2, absCents: 405_00 } })
+    expect(summaryLines(s, 0)[0]).toMatch(/^revenueDifferences: total 5, paid 2 \(absCents 1500, shortCount 1, shortCents 700, overCount 1, overCents 800\), partial 1 \(absCents 3000\), outstanding 2 \(absCents 40500\), onReviewCsv 3$/)
+    const { csv, rows } = revenueDifferencesCsv(list)
+    expect(rows).toBe(3)
+    expect(csv.split('\n').slice(1, 4).map((l) => l.split(',')[0])).toEqual(['5', '2', '1'])
   })
 })
 

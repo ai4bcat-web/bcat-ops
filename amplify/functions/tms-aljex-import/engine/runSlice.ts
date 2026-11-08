@@ -22,6 +22,7 @@ import { seedProCounter } from './seedCounter'
 import { readChunk, readStageData, runStage, stageKey, type StageData } from './stage'
 import { assertTargets, liveTablesOf, TargetRefused } from './tables'
 import { IMPORT_ACTOR, emptyCount, type Counts, type Finding } from './types'
+import { collectRevenueDifferences, planRevenueKey, readArOpen } from './revenueBasis'
 import { stableId } from './util'
 
 export class FaultInjected extends Error {}
@@ -174,7 +175,7 @@ async function planPhase(store: EngineStore, job: AljexImportJob, root: string):
   await runCustomers(env)
   await runCarriers(env)
   await locationPhase(overlay, root, stage, counts)
-  const loadEnv = await buildLoadEnv(overlay, job.id, stage, profile)
+  const loadEnv = await buildLoadEnv(overlay, job.id, stage, profile, await readArOpen(store, root))
   await runLoadPhase({
     store: overlay,
     job,
@@ -199,6 +200,8 @@ async function planPhase(store: EngineStore, job: AljexImportJob, root: string):
   const plan: AljexPlanSummary = { classes, warnings, bridge: summaryReport.bridge }
   await writeLinkReport(store, root, job.id)
   await store.putObject(stageKey(root, 'plan-summary.json'), JSON.stringify(plan))
+  // Every ENRICH_REVENUE_DIFFERS detail of the plan (the review list preview); an apply recomputes it from its own findings.
+  await store.putObject(planRevenueKey(root), JSON.stringify(collectRevenueDifferences(findings)))
   const patch: EngineRow = { status: 'PLANNED', phase: 'PLAN', entityCounts: counts, cursor: { phase: 'PLAN' }, error: null }
   if (!(await saveJob(store, job, patch))) return { done: true, job: await readJob(store, job.id) }
   return { done: true, job }
@@ -252,7 +255,7 @@ async function applyPhase(store: EngineStore, job: AljexImportJob, root: string,
     } else if (phase === 'LOCATION') {
       await locationPhase(store, root, stage, counts)
     } else if (phase === 'LOAD') {
-      const loadEnv = await buildLoadEnv(store, job.id, stage, profile)
+      const loadEnv = await buildLoadEnv(store, job.id, stage, profile, await readArOpen(store, root))
       const res = await runLoadPhase({
         store,
         job,
