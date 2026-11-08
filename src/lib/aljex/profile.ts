@@ -109,6 +109,7 @@ export const DEFAULT_ALJEX_PROFILE: AljexProfile = {
     COVERED: S('BOOKED', 'BOOKED', { inFlight: true }),
     DISPATCHED: S('DISPATCHED', 'DISPATCHED', { inFlight: true }),
     LOADED: S('PICKED_UP', 'PICKED_UP', { inFlight: true }),
+    PICKUP: S('PICKED_UP', 'PICKED_UP', { inFlight: true }), // 1 row in the 2026-11-07 export (PRO 14917): picked up, not delivered
     CONSIGNEE: S('UNLOADING', 'UNLOADING', { inFlight: true }),
     DELIVERED: S('DELIVERED', 'DELIVERED', { delivered: true }),
     VOID: S('CANCELED', 'CANCELED', { void: true }),
