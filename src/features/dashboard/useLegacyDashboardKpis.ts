@@ -3,7 +3,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { monthsCovering } from '@/lib/shipmentWindows'
 import { chicagoDateStr } from '@/lib/date'
 import { readRollupRows, ROLLUP_MAX_AGE_MS, ROLLUP_STALE_MS, type RawRollupRow } from '@/lib/dashboardRollupClient'
-import { ROLLUP_SCHEMA_VERSION } from '@/lib/dashboardRollup'
+import { ROLLUP_SCHEMA_VERSION, rollupSourceEmpty } from '@/lib/dashboardRollup'
 import { reduceLegacy, type LegacyKpis, type LegacyMonthPayload } from '@/lib/dashboardRollupLegacy'
 import { legacyKpisFromLoads, legacyWindow, type DateRangeKey } from './legacyKpiMath'
 
@@ -68,6 +68,9 @@ export function usableLegacyRows(rows: RawRollupRow[], months: string[], now: nu
     if (!row || row.schemaVersion !== ROLLUP_SCHEMA_VERSION) return null
     const p = row.payload as Partial<LegacyMonthPayload> | null
     if (!p || p.v !== 1 || typeof p.days !== 'object' || p.days === null) return null
+    // A month row with no counted loads (or computed from an empty source) is never trusted: the
+    // exact path computes zero loads for the month itself instead of painting a cached zero.
+    if (Object.keys(p.days).length === 0 || rollupSourceEmpty(row.sourceCounts)) return null
     if (month >= hotFrom) {
       const at = row.computedAt ? Date.parse(row.computedAt) : NaN
       if (!Number.isFinite(at) || now - at > ROLLUP_MAX_AGE_MS) return null

@@ -174,6 +174,7 @@ describe('the dashboard KPI strip from the rollup', () => {
     ['a missing row', () => hoisted.rows.delete('L:CURRENT')],
     ['a row older than 30 minutes', () => { for (const row of hoisted.rows.values()) row.computedAt = new Date(Date.now() - 31 * 60_000).toISOString() }],
     ['an unknown schema version', () => { for (const row of hoisted.rows.values()) row.schemaVersion = 99 }],
+    ['one month row computed from an empty source', () => { [...hoisted.rows.values()].find((row) => row.kind === 'M')!.sourceCounts = JSON.stringify({ shipments: 0, samples: 0, loads: 0 }) }],
   ])('falls back to the exact path on %s', async (_name, spoil) => {
     await seedRows(60_000)
     spoil()

@@ -47,6 +47,21 @@ export interface RollupWindow {
   live: RollupRow<LivePayload> | null
 }
 
+/**
+ * True when a row's `sourceCounts` says every counted source returned zero rows: the row was
+ * computed from an empty table and describes nothing. Absent / unparsable counts (old rows) are
+ * NOT empty, so they stay usable. Non-numeric entries (e.g. `tooLarge`) are ignored.
+ */
+export function rollupSourceEmpty(sourceCounts: unknown): boolean {
+  let value = sourceCounts
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value) } catch { return false }
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const counts = Object.values(value).filter((n): n is number => typeof n === 'number')
+  return counts.length > 0 && counts.every((n) => n === 0)
+}
+
 type Maybe<T> = T | null | undefined
 
 export interface ShipmentLite {
