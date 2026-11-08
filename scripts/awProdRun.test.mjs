@@ -57,7 +57,7 @@ for (const mode of modes) {
   }
   if (step === 'ap-aging') {
     L('  uploaded AP_AGING: job aljexrun:abcAp, 67 rows'); header('ap', mode); ent('BILL', 67, 67, 0, 0, 0, 0, 0)
-    L('  apAging: rows 67, bills 67, totalCents $83,407.20, payToDiffers 40, created 0, matchedExisting 59, unresolved 8, unresolvedCents $6,025.00, rejected 0')
+    L('  apAging: rows 67, bills 67, totalCents $83,407.20, payToDiffers 40, created 0, matchedExisting 59, unresolved ' + (process.env.FAKE_AP_UNRESOLVED || 8) + ', unresolvedCents $6,025.00, rejected 0')
     L('  tie-out apAgingTotal       file $83,407.20  BCAT $' + (mode === 'APPLY' ? '83,407.20' : '0.00') + '  diff $' + (mode === 'APPLY' ? '0.00' : '-83,407.20'))
     L('  tie-out apBucket:D0_30     file $66,642.20  BCAT $0.00  diff $-66,642.20'); L('  tie-out apBucket:D31_60    file $16,765.00  BCAT $0.00  diff $-16,765.00'); L('  tie-out apBucket:D61_90    file $0.00  BCAT $0.00  diff $0.00')
     if (mode === 'APPLY') L('table CarrierBill: before 0, after 67, delta 67')
@@ -286,6 +286,15 @@ describe('carriers sensitive-column counts the importer scrubs to [hidden]', () 
     expect(r.stdout).not.toMatch(/STOP: carriers failed/)
     expect(r.results).not.toMatch(/rowsWith(FedSs|BankAccount|Routing)\t[^\t]*\t[^\t]*\tFAIL/)
     expect(r.results).toMatch(/derived\.strippedAll\tyes\tyes\tPASS/)
+  })
+})
+
+describe('tie-out differences and unresolved rows are INFO, never a stop', () => {
+  it('ap-aging dry run passes with any unresolved count and prints it as INFO', () => {
+    const sb = sandbox()
+    const r = run(sb, { args: ['--dry-only', '--only', 'ap-aging'], input: 'PRODUCTION\n', env: { FAKE_AP_UNRESOLVED: '12' } })
+    expect(r.results).toMatch(/ap-aging\tapAging.unresolved\t-\t12\tINFO/)
+    expect(r.results).not.toMatch(/ap-aging\t.*\tFAIL/)
   })
 })
 

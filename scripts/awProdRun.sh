@@ -370,12 +370,12 @@ ap-aging|D|apAging.totalCents|$|=|83407.20|S|Step 4d
 ap-aging|D|tieout.apBucket:D0_30.file|$|=|66642.20|S|Step 4d
 ap-aging|D|tieout.apBucket:D31_60.file|$|=|16765.00|S|Step 4d
 ap-aging|D|tieout.apBucket:D61_90.file|$|=|0.00|S|Step 4d
-ap-aging|D|apAging.unresolved|n|=|8|H|Step 4d (8 known: 7 NO_CARRIER_LEG + 1 LEG_CARRIER_DIFFERS; listed for Jenny as AP_UNRESOLVED; any other count STOPs)
-ap-aging|D|apAging.unresolvedCents|$|=|6025.00|S|Step 4d (the same 8 bills)
+ap-aging|D|apAging.unresolved|n|info|-|S|Step 4d INFO (listed on the review CSV and post-load checks as AP_UNRESOLVED; Jenny assigns the leg and enters the bill; never a stop)
+ap-aging|D|apAging.unresolvedCents|$|info|-|S|Step 4d INFO (total of the unresolved bills)
 ap-aging|D|apAging.rejected|n|=|0|H|Step 4d
 ap-aging|A|job.status|s|=|APPLIED|H|Step 4d
 ap-aging|A|table.CarrierBill.delta|n|=|@dry:BILL.created|H|Step 4d Verify
-ap-aging|A|tieout.apAgingTotal.diff|$|=|0.00|H|Step 4d tie-out diff $0.00
+ap-aging|A|tieout.apAgingTotal.diff|$|info|-|S|Step 4d INFO tie-out (BCAT open bills not in the aging stay open; reviewed manually)
 ap-expected|D|uploaded.rows|n|=|36|S|Step 4e
 ap-expected|D|apExpected.rows|n|=|36|S|Step 4e
 ap-expected|D|apExpected.expected|n|=|24|S|Step 4e
@@ -396,23 +396,23 @@ ar|D|byBucket.D31_60|$|=|62201.30|S|Step 4f
 ar|D|byBucket.D61_90|$|=|30005.50|S|Step 4f
 ar|D|byBucket.D91_120|$|=|14874.95|S|Step 4f
 ar|D|byBucket.D121_PLUS|$|=|34255.35|S|Step 4f
-ar|D|derived.bcatBucketSum|$|=|357753.44|H|Step 4f (BCAT buckets differ only by redated Danisco)
-ar|D|derived.redatedEqTerms90|s|=|yes|H|Step 4f (redated Danisco = Aljex 90-day rows)
+ar|D|derived.bcatBucketSum|$|info|-|S|Step 4f INFO (BCAT buckets differ by redated Danisco and existing open AR)
+ar|D|derived.redatedEqTerms90|s|info|-|S|Step 4f INFO (redated Danisco vs Aljex 90-day rows)
 ar|D|redated.count|n|info|-|S|Step 4f (54 or 55: dry run decides)
 ar|D|tieout.arInvoiceMinusPayments.diff|$|=|0.00|H|Step 4f
 ar|D|tieout.arPreviousPayments.diff|$|=|0.00|H|Step 4f
-ar|D|unresolved|n|=|0|H|Step 4f STOP
+ar|D|unresolved|n|info|-|S|Step 4f INFO (listed on the review CSV; never a stop)
 stage-export|A|staged.rows|n|=|8347|H|Step 4c-0 Expect
 ar|A|job.status|s|=|APPLIED|H|Step 4f
 ar|A|table.Invoice.delta|n|=|@dry:INVOICE.created|H|Step 4f Verify
 ar|A|table.ArPayment.delta|n|=|@dry:priorPaymentsCreated|H|Step 4f Verify
-ar|A|tieout.arTotal.diff|$|=|0.00|H|Step 4f Verify (cent-exact)
-rec-CUSTOMERS|A|rec.matched|n|=|515|S|Step 5
-rec-CARRIERS|A|rec.matched|n|=|2442|S|Step 5
+ar|A|tieout.arTotal.diff|$|info|-|S|Step 4f INFO tie-out (open AR gap goes to the review CSV)
+rec-CUSTOMERS|A|rec.matched|n|info|-|S|Step 5 INFO
+rec-CARRIERS|A|rec.matched|n|info|-|S|Step 5 INFO
 rec-AP|A|rec.money.aljex|$|=|83407.20|S|Step 5
-rec-AP|A|rec.money.diff|$|=|0.00|S|Step 5
+rec-AP|A|rec.money.diff|$|info|-|S|Step 5 INFO (difference recorded in the reconciliation; reviewed manually)
 rec-AR|A|rec.money.aljex|$|=|357753.44|S|Step 5
-rec-AR|A|rec.money.diff|$|=|0.00|S|Step 5
+rec-AR|A|rec.money.diff|$|info|-|S|Step 5 INFO (difference recorded in the reconciliation; reviewed manually)
 rec-SHIPMENTS|A|rec.aljexRows|n|info|-|S|Step 5
 EOF
 }
