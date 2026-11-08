@@ -366,6 +366,20 @@ esac
     expect(none.status).toBe(2); expect(none.stderr).toMatch(/'security' tool is missing/); expect(none.applies).toBe('')
   })
 
+  it('offline-only: never reads the Keychain, runs an offline step, and refuses (exit 2) a step that needs the staff login', () => {
+    const sb = usb()
+    const ok = runU(sb, { approval: OK('customers'), args: ['--only', 'customers'], env: { AW_PROD_OFFLINE_ONLY: '1', FAKE_SEC: 'missing' } })
+    expect(ok.status).toBe(0)
+    expect(existsSync(join(sb.dir, 'security.log'))).toBe(false)
+    const sb2 = usb()
+    const refused = runU(sb2, { approval: OK('backfill-check'), args: ['--only', 'backfill-check'], env: { AW_PROD_OFFLINE_ONLY: '1', FAKE_BACKFILL_PENDING: '1' } })
+    expect(refused.status).toBe(2)
+    expect(refused.stdout + refused.stderr).toMatch(/offline-only run.*staff login/)
+    expect(existsSync(join(sb2.dir, 'security.log'))).toBe(false)
+    expect(refused.applies).toBe('')
+    expect(refused.argv).not.toMatch(/--password|BCAT_PASSWORD/)
+  })
+
   it.each([
     ['no approval file', undefined, 0o600, /no approval file/],
     ['wrong date', `APPROVED ${yesterday()} steps=all by=ryne\n`, 0o600, /for today/],

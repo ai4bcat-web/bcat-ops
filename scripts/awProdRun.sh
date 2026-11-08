@@ -176,7 +176,8 @@ if [ "$UNATTENDED" = 1 ]; then
   fi
   unset BCAT_EMAIL BCAT_PASSWORD
   trap 'unset BCAT_PASSWORD BCAT_EMAIL' EXIT INT TERM
-  load_keychain
+  # AW_PROD_OFFLINE_ONLY=1: the remaining steps (loads, ap, ar, reconcile) use AWS credentials only; no staff login, no Keychain.
+  if [ "${AW_PROD_OFFLINE_ONLY:-}" = 1 ]; then :; else load_keychain; fi
 else
   if [ ! -t 0 ] && [ "${AW_PROD_NONINTERACTIVE:-}" != 1 ]; then
     echo "Refusing: stdin is not a terminal. Run this in your own terminal (tests only: AW_PROD_NONINTERACTIVE=1)." >&2; exit 2
@@ -681,6 +682,7 @@ if [ "$TARGET" != prod ]; then node "$SCRIPTS/awProdRunHelper.mjs" dev-outputs "
 LOGGED_IN=0
 need_login() {
   [ "$LOGGED_IN" = 1 ] && return 0
+  if [ "${AW_PROD_OFFLINE_ONLY:-}" = 1 ]; then say "${RED}REFUSED (offline-only run): this step needs the staff login. Nothing was done.${RST}"; print_summary; exit 2; fi
   if [ "$UNATTENDED" = 1 ]; then :   # credentials came from the Keychain at start; there is nothing to ask
   elif [ "${AW_PROD_NONINTERACTIVE:-}" != 1 ]; then
     printf 'Admin e-mail (production staff pool; needed by backfill only): ' >&2; read -r BCAT_EMAIL
