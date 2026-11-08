@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { AssignDriverDialog } from './components/AssignDriverDialog'
 import { OWN_ASSET_MESSAGES } from '@/lib/ownAssetDriver'
@@ -52,6 +52,8 @@ function renderDialog(over: Partial<React.ComponentProps<typeof AssignDriverDial
 const select = () => screen.getByTestId('assign-driver-select') as HTMLSelectElement
 const confirm = () => screen.getByRole('button', { name: /Book own fleet|Change driver/ }) as HTMLButtonElement
 
+// The pay-week lock reads today's date: pin it so the suite does not depend on the real clock (it failed once the real date passed the base load's pay week).
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-03T12:00:00.000Z')) })
 afterEach(() => { vi.useRealTimers() })
 
 describe('AssignDriverDialog', () => {
