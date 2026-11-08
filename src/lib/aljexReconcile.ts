@@ -13,7 +13,7 @@
  */
 import { AGING_BUCKETS, AGING_BUCKET_LABEL, ageOpenItems, type AgingBucket } from './arAging'
 import type { CanonicalRow } from './aljex/canonical'
-import { addDays, addMonths, parseAljexDate } from './aljex/dates'
+import { addMonths, parseAljexDate } from './aljex/dates'
 import { parseMoney } from './aljex/money'
 import { dueDate, resolveTermsDays } from './aljex/terms'
 import { normalizePro } from './proNumber'
@@ -512,9 +512,9 @@ export function reconCsv(report: ReconReport, decisions: ReconDecision[]): strin
 
 // ── The Aljex side from the exports ─────────────────────────────────────────
 
-/** Window used for shipments: ship dates from `cutoff - 24 months` up to (excluding) the cutoff day. */
-export function historyWindow(cutoffDate: string, months = 24): { start: string; end: string } {
-  return { start: addMonths(cutoffDate, -months), end: addDays(cutoffDate, -1) }
+/** Window used for shipments: ship dates from `cutoff - 24 months`, no upper bound (the cutoff means BOOKED: loads shipping after it are carried and imported). */
+export function historyWindow(cutoffDate: string, months = 24): { start: string } {
+  return { start: addMonths(cutoffDate, -months) }
 }
 
 const hdr = (s: string): string => s.replace(/^\uFEFF/, '').trim().toLowerCase()
@@ -723,7 +723,7 @@ export function arItemsFromCanonical(rows: CanonicalRow[], facts: (r: CanonicalR
   return { items, excluded }
 }
 
-export function shipmentSideFromCanonical(rows: CanonicalRow[], facts: (r: CanonicalRow) => CanonicalFacts, window: { start: string; end: string }): { rows: ReconSideRow[]; excluded: Record<string, number> } {
+export function shipmentSideFromCanonical(rows: CanonicalRow[], facts: (r: CanonicalRow) => CanonicalFacts, window: { start: string }): { rows: ReconSideRow[]; excluded: Record<string, number> } {
   const out: ReconSideRow[] = []
   const excluded: Record<string, number> = {}
   const seen = new Set<string>()
@@ -734,7 +734,6 @@ export function shipmentSideFromCanonical(rows: CanonicalRow[], facts: (r: Canon
     if (seen.has(key)) { bump(excluded, 'duplicate PRO'); continue }
     const date = r.dates.ship ?? r.dates.invoice ?? r.dates.created
     if (date && date < window.start) { bump(excluded, 'before the 24-month window'); continue }
-    if (date && date > window.end) { bump(excluded, 'after the cutoff'); continue }
     seen.add(key)
     const f = facts(r)
     const lh = r.charges.find((c) => c.line === 1)?.extensionCents ?? r.money.lhRevenueCents

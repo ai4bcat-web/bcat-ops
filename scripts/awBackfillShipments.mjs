@@ -8,9 +8,14 @@
  * What it does
  *   1. Reads Load / Shipment / ProClaim / TmsSettings of ONE explicit non-production stack (DynamoDB scans,
  *      projected to ids, PRO, dates and link fields only: nothing sensitive is ever read).
- *   2. Keeps the Loads inside the history window: ship date from (cutoff - 24 months) up to, not including, the
- *      cutoff day. A Load outside it is counted and left alone. The cutoff is `--cutoff YYYY-MM-DD`, else
- *      `TmsSettings.aljexCutoffAt` (Chicago day), else 2026-11-07.
+ *   2. Keeps the Loads inside the history window. THE CUTOFF MEANS BOOKED: Aljex is final as of the cutoff, so a Load
+ *      created before it but shipping on/after it is CARRIED (it is Monday's work) and stays in the window. The window
+ *      is the ship date (first pickup, else delivery, else creation) on or after (cutoff - 24 months), with NO upper
+ *      bound; a Load before the lower bound is counted (`beforeWindow`) and left alone. Of the Loads kept, those that
+ *      ship on/after the cutoff are counted as `carriedOver` (informational). A Load CREATED on or after the cutoff
+ *      (`Load.createdAt` day >= cutoff; without createdAt: ship date >= cutoff) is `afterCutoff`: it is NOT classified or
+ *      linked, and it is a STOP condition (exit code 3 here, runner afterCutoff=0): it was booked after Aljex was final.
+ *      The cutoff is `--cutoff YYYY-MM-DD`, else `TmsSettings.aljexCutoffAt` (Chicago day), else 2026-11-07.
  *   3. Classifies every in-window Load with `classifyLinkCandidates` (src/lib/shipmentLink.ts):
  *        matched-by-PRO     PRO is in the Aljex export (`--export-keys`, one PRO per line): the importer LINKs it
  *        linked-by-ID       no Shipment by PRO: BACKFILL_SHIPMENT links/creates it by Load id (a Load with no PRO
@@ -131,17 +136,26 @@ export function resolveCutoff({ cutoff, settings } = {}) {
   return at ?? DEFAULT_ALJEX_CUTOFF;
 }
 
+/** The YYYY-MM-DD prefix of an ISO date/time, else null. */
+function dayOf(v) {
+  const m = typeof v === 'string' ? /^(\d{4}-\d{2}-\d{2})/.exec(v) : null;
+  return m ? m[1] : null;
+}
+
 /** Ship date of a Load as YYYY-MM-DD: first pickup appointment, else delivery appointment, else creation. */
 export function loadShipDate(load) {
   for (const v of [load.pickupAppt, load.deliveryAppt, load.createdAt]) {
-    const m = typeof v === 'string' ? /^(\d{4}-\d{2}-\d{2})/.exec(v) : null;
-    if (m) return m[1];
+    const d = dayOf(v);
+    if (d) return d;
   }
   return null;
 }
 
 /**
- * Split Loads by the history window [cutoff - 24 months, cutoff). An undated Load is kept (it cannot be excluded).
+ * Split Loads by the history window: ship date on or after (cutoff - 24 months), no upper bound (the cutoff means
+ * BOOKED). Order: ship date before the lower bound = beforeWindow; created on or after the cutoff (createdAt day, else
+ * the ship date when there is no createdAt) = afterCutoff (STOP, not classified); everything else is inWindow, and
+ * those whose ship date is on/after the cutoff are also listed in carriedOver. An undated Load is kept.
  * @param {any[]} loads
  * @param {string} cutoff
  */
@@ -150,13 +164,18 @@ export function partitionByWindow(loads, cutoff) {
   const inWindow = [];
   const beforeWindow = [];
   const afterCutoff = [];
+  const carriedOver = [];
   for (const l of loads) {
     const d = loadShipDate(l);
+    const created = dayOf(l.createdAt);
     if (d && d < start) beforeWindow.push(l);
-    else if (d && d >= cutoff) afterCutoff.push(l);
-    else inWindow.push(l);
+    else if (created ? created >= cutoff : d && d >= cutoff) afterCutoff.push(l);
+    else {
+      inWindow.push(l);
+      if (d && d >= cutoff) carriedOver.push(l);
+    }
   }
-  return { inWindow, beforeWindow, afterCutoff, windowStart: start };
+  return { inWindow, beforeWindow, afterCutoff, carriedOver, windowStart: start };
 }
 
 /**
@@ -185,7 +204,7 @@ export function buildLinkReport({ source, cutoff, exportKeys = new Set(), backfi
     exportKeys,
     backfillSkips,
   });
-  return { report, window: { start: win.windowStart, cutoff, outOfWindow: { beforeWindow: win.beforeWindow.length, afterCutoff: win.afterCutoff.length }, totalLoads: source.Load.length } };
+  return { report, window: { start: win.windowStart, cutoff, outOfWindow: { beforeWindow: win.beforeWindow.length, afterCutoff: win.afterCutoff.length }, carriedOver: win.carriedOver.length, totalLoads: source.Load.length } };
 }
 
 /**
@@ -204,7 +223,7 @@ export function renderMarkdown({ report, window }, { skipsEvaluated }) {
     linkReportMarkdown(report),
     '',
     `## History window`,
-    `- Window: ship date ${window.start} up to (not including) ${window.cutoff}. Loads in the table: ${window.totalLoads}; before the window: ${w.beforeWindow}; on or after the cutoff: ${w.afterCutoff}; classified above: ${report.counts.loads}.`,
+    `- Window: ship date on or after ${window.start}, no upper bound (the cutoff ${window.cutoff} means BOOKED). Loads in the table: ${window.totalLoads}; before the window: ${w.beforeWindow}; carried over (booked before the cutoff, shipping on/after it, classified above): ${window.carriedOver}; created on or after the cutoff (STOP, not classified): ${w.afterCutoff}; classified above: ${report.counts.loads}.`,
     skipsEvaluated ? '- Backfill refusals evaluated with a BACKFILL_SHIPMENT dry run.' : '- Backfill refusals NOT evaluated (no --outputs): unmappable may be under-reported.',
     '',
   ].join('\n');
@@ -304,7 +323,16 @@ export async function run({ read, client, apply = false, cutoff, exportKeys = ne
 /** What goes to stdout / link-summary.json: counts only, no rows. */
 export function summaryOf(result) {
   const c = (r) => r.report.counts;
-  return { cutoff: result.cutoff, windowStart: result.before.window.start, outOfWindow: result.before.window.outOfWindow, before: c(result.before), applied: result.applied && { applied: result.applied.applied, skipped: result.applied.skipped.length, missing: result.applied.missing.length, conflicts: result.applied.conflicts.length }, after: result.after && c(result.after) };
+  return { cutoff: result.cutoff, windowStart: result.before.window.start, outOfWindow: result.before.window.outOfWindow, carriedOver: result.before.window.carriedOver, before: c(result.before), applied: result.applied && { applied: result.applied.applied, skipped: result.applied.skipped.length, missing: result.applied.missing.length, conflicts: result.applied.conflicts.length }, after: result.after && c(result.after) };
+}
+
+/**
+ * The STOP condition: Loads created on or after the cutoff were booked after Aljex was final and are never classified.
+ * @returns {string | null} the message, or null when there is none
+ */
+export function stopReason(result) {
+  const n = result.before.window.outOfWindow.afterCutoff;
+  return n > 0 ? `STOP: ${n} Load(s) were created on or after the cutoff ${result.cutoff} (booked after Aljex was final); they are NOT linked: report to Ryne.` : null;
 }
 
 async function main() {
@@ -342,6 +370,10 @@ async function main() {
   if (v.apply) {
     console.log(JSON.stringify(summaryOf(result), null, 2));
     if (result.applied.conflicts.length > 0) process.exit(2);
+  }
+  if (stopReason(result)) {
+    console.error(stopReason(result));
+    process.exitCode = 3;
   }
 }
 

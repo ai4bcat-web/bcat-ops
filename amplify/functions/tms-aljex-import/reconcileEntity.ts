@@ -198,6 +198,6 @@ export async function buildReconReport(store: EngineStore, io: ReconIo, p: Recon
     legs.set(k, [...(legs.get(k) ?? []), l])
   }
   const r = compareRecords(side.rows, bcatShipmentRows(shipments, ordersByShipment, legs), FIELD_SPECS.SHIPMENTS!)
-  notes.push(`Aljex rows are limited to ship dates ${window.start} to ${window.end} (24 months before the ${p.cutoffDate} cutoff).`)
+  notes.push(`Aljex rows are limited to ship dates on or after ${window.start} (24 months before the ${p.cutoffDate} cutoff); loads shipping after the cutoff were booked before it and are included.`)
   return assembleReport({ ...base, ...r, money: null, excluded: side.excluded, notes })
 }

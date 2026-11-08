@@ -209,9 +209,9 @@ async function stepBackfill(ctx) {
   const client = apply || values.evaluate ? await deps.apiClient() : undefined
   const first = await m.run({ read, client, apply: false, cutoff: values.cutoff, exportKeys, batchSize })
   const counts = first.before.report.counts
-  log.counts('backfill before', { ...counts, ...first.before.window.outOfWindow, totalLoads: first.before.window.totalLoads })
+  log.counts('backfill before', { ...counts, ...first.before.window.outOfWindow, carriedOver: first.before.window.carriedOver, totalLoads: first.before.window.totalLoads })
   const after = first.before.window.outOfWindow.afterCutoff
-  if (after > 0) log.info(`WARNING: ${after} Load(s) have a ship date on/after the cutoff ${first.cutoff}; they are NOT linked by this step`)
+  if (after > 0) log.info(`WARNING: ${after} Load(s) were created on or after the cutoff ${first.cutoff} (booked after Aljex was final); they are NOT linked by this step: STOP`)
   if (!client) log.info('backfill refusals not evaluated (add --evaluate to log in and run the BACKFILL_SHIPMENT dry run)')
   if (!apply) return { status: 'dry-run' }
   const shipments = (await deps.doc.send(new ScanCommand({ TableName: `Shipment-${PROD_SUFFIX}`, Select: 'COUNT', Limit: 1000 }))).Count ?? 0

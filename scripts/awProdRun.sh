@@ -129,7 +129,10 @@ backfill-check|D|backfill_before.ambiguous|n|=|0|H|Step 3a STOP
 backfill-check|D|backfill_before.unmappable|n|=|0|H|Step 3a STOP
 backfill-check|D|backfill_before.alreadyLinked|n|=|0|S|Step 3 Facts
 backfill-check|D|backfill_before.beforeWindow|n|=|0|S|Step 3a
-backfill-check|D|backfill_before.afterCutoff|n|=|0|H|Step 3a STOP
+# CUTOFF RULE (2026-11-08, CutoffRule): the cutoff means BOOKED. afterCutoff = Loads CREATED on/after the cutoff (still a STOP, must be 0);
+# carriedOver = Loads booked before it that ship on/after it (17 on 2026-11-08: PRO 14811..14939), kept in the window and linked.
+backfill-check|D|backfill_before.afterCutoff|n|=|0|H|Step 3a STOP (created on/after the cutoff)
+backfill-check|D|backfill_before.carriedOver|n|=|17|S|Step 3a (booked before the cutoff, shipping on/after it; informational)
 backfill-check|D|derived.bucketsSum|s|=|yes|H|Step 3a
 backfill-check|D|derived.evaluated|s|=|yes|H|Step 3a --evaluate
 backfill-check|D|derived.dryEqualsEvaluate|s|=|yes|H|Step 3a
@@ -166,7 +169,12 @@ tax-ids|D|tax-ids.rows|n|=|2462|S|Step 4b-tax
 tax-ids|D|tax-ids.withValue|n|info|-|S|Step 4b-tax (counts only)
 tax-ids|D|tax-ids.resolvable|n|info|-|S|Step 4b-tax
 tax-ids|D|tax-ids.unresolvable|n|info|-|S|Step 4b-tax
+# Loads rows below recomputed for the cutoff-means-BOOKED rule (no upper bound on ship date) from aljex-full-export-2026-11-07.csv with the real
+# STAGE + PLAN on an empty dev store: 8347 rows = 7944 LOAD + 403 memo; LOAD skipped = 2601 older than 2024-11-07 + 4 identical duplicates = 2605
+# (was 2626 with the 21 rows shipping on/after 2026-11-07 skipped); LOAD created+matched = 7944 - 2605 = 5339 (was 5318).
 loads|D|stage.rows|n|=|8347|H|Step 4c Stop (rows)
+loads|D|LOAD.staged|n|=|7944|S|Step 4c (7944 LOAD rows)
+loads|D|LOAD.skipped|n|=|2605|S|Step 4c (2601 before 2024-11-07 + 4 duplicates; the 21 shipping after the cutoff are KEPT)
 loads|D|stage.duplicatePros|n|=|4|S|Step 4c (4 repeated PROs)
 loads|D|LOAD.conflicts|n|=|0|H|Step 4c Stop (AMBIGUOUS/CONFLICT)
 loads|D|derived.loadSum|s|=|yes|H|Step 4c
@@ -181,7 +189,8 @@ backfill|D|backfill_before.matchedByPro|n|=|0|S|Step 4c-bis
 backfill|D|backfill_before.linkedById|n|info|-|S|Step 4c-bis (about 1)
 backfill|D|backfill_before.ambiguous|n|=|0|H|Step 4c-bis
 backfill|D|backfill_before.unmappable|n|=|0|H|Step 4c-bis
-backfill|D|backfill_before.afterCutoff|n|=|0|H|Step 4c-bis
+backfill|D|backfill_before.afterCutoff|n|=|0|H|Step 4c-bis (created on/after the cutoff)
+backfill|D|backfill_before.carriedOver|n|info|-|S|Step 4c-bis (17 carried over)
 backfill|D|derived.bucketsSum|s|=|yes|H|Step 4c-bis
 backfill|D|table.Shipment.before|n|>=|1|H|Step 4c-bis (run loads first)
 backfill|A|backfill_after.linkedById|n|=|0|H|Step 4c-bis Expect
@@ -679,7 +688,7 @@ step_backfill_check() {
   cli_run "$ev" backfill --cutoff $CUTOFF --export-keys "$PROS" --evaluate || { FAIL_LIST=" evaluate exited $LAST_RC"; [ "$DRY_ONLY" = 1 ] || stop_fail backfill-check; }
   cli_run "$dry" backfill --cutoff $CUTOFF --export-keys "$PROS" || true
   parse_out "$ev" "$RUN_DIR/backfill-check.eval.metrics"; parse_out "$dry" "$RUN_DIR/backfill-check.dry.metrics"
-  local same=yes k; for k in matchedByPro linkedById ambiguous unmappable afterCutoff; do
+  local same=yes k; for k in matchedByPro linkedById ambiguous unmappable afterCutoff carriedOver; do
     [ "$(metric_of "$RUN_DIR/backfill-check.eval.metrics" backfill_before.$k)" = "$(metric_of "$RUN_DIR/backfill-check.dry.metrics" backfill_before.$k)" ] || same=no; done
   { cat "$RUN_DIR/backfill-check.eval.metrics"; printf 'derived.dryEqualsEvaluate\t%s\n' "$same"; } > "$RUN_DIR/backfill-check.dry2.metrics"
   compare backfill-check D "$RUN_DIR/backfill-check.dry2.metrics" || true

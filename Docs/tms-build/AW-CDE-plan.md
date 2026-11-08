@@ -95,7 +95,8 @@ Load fields the calendar (`PlannerView`), dispatch (`driverWhereabouts`) and `GE
   branch removed); `Load.carrierRepId` is never set from the dispatcher columns; `AljexCodeMap` reassignment loop becomes a no-op.
 - **24-month window, cutoff 2026-11-07 00:00 America/Chicago** (R19, R20): `TmsSettings.aljexCutoffAt` is written once by the admin
   (Settings > Company > Data) and read by every stage-E layout: loads/invoices/bills with ship date < cutoff − 24 months are
-  skipped and counted (`history-skipped.csv`), nothing after the cutoff is imported (delta import is OPEN-19). Carried-over marking
+  skipped and counted (`history-skipped.csv`); there is no upper bound: the cutoff means BOOKED (2026-11-08, Ryne), so loads booked
+  before it but shipping after it are carried over (delta import is OPEN-19). Carried-over marking
   (R21) uses existing fields: `legacyImported:true`, `legacySource:'ALJEX'`, `importRunId`, and on Invoice/CarrierBill
   `markedSentAt = issuedAt`, `markedSentNote = 'Carried over from Aljex (cutoff 2026-11-07)'`. Shipment/Invoice/Bill pages show a
   "Carried over" badge from those; the Send/queue actions refuse carried-over invoices (`whyNotFactorable` + `emailInvoice` guard).

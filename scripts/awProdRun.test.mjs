@@ -32,7 +32,7 @@ if (step === 'settings') L('settings plan: SET (counter -> 19999, NUMERIC; first
 if (step === 'verify') logline.push('verify tables: tables=110 expected=110', 'verify settings: seriesAt19999=' + (existsSync(dir + '/applied-settings') ? 1 : 0) + ' numeric=1')
 if (step === 'backfill') {
   const done = loadsDone
-  L('backfill before: matchedByPro=' + (done ? 0 : 957) + ' linkedById=1 ambiguous=0 unmappable=0 alreadyLinked=' + (done ? 957 : 0) + ' loads=958 beforeWindow=0 afterCutoff=' + bad('backfill-check', 'afterCutoff', 0, 3) + ' totalLoads=958')
+  L('backfill before: matchedByPro=' + (done ? 0 : 957) + ' linkedById=1 ambiguous=0 unmappable=0 alreadyLinked=' + (done ? 957 : 0) + ' loads=958 beforeWindow=0 afterCutoff=' + bad('backfill-check', 'afterCutoff', 0, 3) + ' carriedOver=17 totalLoads=958')
   L('table Shipment: before ' + (done ? 958 : 0) + ', after ' + (done ? 958 : 0) + ', delta 0')
   if (!evaluate) L('backfill refusals not evaluated (add --evaluate)')
   if (apply) { L('backfill after: matchedByPro=0 linkedById=0 ambiguous=0 unmappable=0 alreadyLinked=958 loads=958') }
@@ -76,14 +76,14 @@ for (const mode of modes) {
 if (step === 'stage-export') { if (apply) L('\\n== big export staged: job aljexrun:abcStage, 8347 rows, stage hash 0123456789ab (no table was written)'); else L('stage-export local check: bytes=100') }
 if (step === 'loads') {
   L('run aljexrun:x target PRODUCTION-GATED'); L('STAGE 1.0s: 8347 rows (7940 loads, 403 memos, 4 identical duplicates, 7 junk dates, 8345 ragged)'); L('PLAN 3.0s')
-  ent('LOAD', 7944, 27, 7900, 13, 4, 0, 0); ent('CUSTOMER', 487, 1, 486, 0, 0, 0, 0)
+  ent('LOAD', 7944, 27, 5299, 13, 2605, 0, 0); ent('CUSTOMER', 487, 1, 486, 0, 0, 0, 0)
   if (process.env.FAKE_GATE === '1' && apply) { console.error('a LIVE apply of real data needs a RECONCILED rehearsal run with the same stageHash and profileVersion'); process.exit(1) }
   if (apply) { L('APPLY 9.0s'); L('  conservation OK  reconciled YES  open AR 357753.44'); L('table Load: before 958, after 985, delta 27') }
 }
 if (step === 'reconcile') {
   const e = rest[rest.indexOf('--entity') + 1]
   L('\\n== reconcile ' + e + ' job x')
-  const m = { CUSTOMERS: 515, CARRIERS: 2442, AP: 67, AR: 296, SHIPMENTS: 7940 }[e]
+  const m = { CUSTOMERS: 515, CARRIERS: 2442, AP: 67, AR: 296, SHIPMENTS: 5339 }[e]
   L('  Aljex rows ' + m + '  BCAT rows ' + m + '  matched ' + m + '  Aljex-only 0  BCAT-only 0  mismatched 0  differences 0')
   if (e === 'AP') L('  money: Aljex $83,407.20  BCAT $83,407.20  diff $0.00'); if (e === 'AR') L('  money: Aljex $357,753.44  BCAT $357,753.44  diff $0.00')
 }
@@ -161,6 +161,15 @@ describe('awProdRun.sh', () => {
     expect(r.status).toBe(1)
     expect(r.stdout).toMatch(/STOP: backfill-check failed/)
     expect(r.applies).not.toMatch(/customers|carriers|loads|backfill/)
+  })
+
+  it('carriedOver 17 with afterCutoff 0 passes (the cutoff means BOOKED); afterCutoff > 0 fails the hard row', () => {
+    const ok = run(sandbox(), { input: yes(20) })
+    expect(ok.results).toMatch(/backfill-check\tbackfill_before\.afterCutoff\t0\t0\tPASS/)
+    expect(ok.results).toMatch(/backfill-check\tbackfill_before\.carriedOver\t17\t17\tPASS/)
+    const bad = run(sandbox(), { input: yes(20), env: { FAKE_BREAK: 'backfill-check:afterCutoff' } })
+    expect(bad.results).toMatch(/backfill-check\tbackfill_before\.afterCutoff\t0\t3\tFAIL/)
+    expect(bad.results).toMatch(/backfill-check\tbackfill_before\.carriedOver\t17\t17\tPASS/)
   })
 
   it('does not apply without a typed y, and applies with y; each apply carries the dated confirm token', () => {

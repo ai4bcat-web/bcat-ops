@@ -589,26 +589,38 @@ describe('history window and carried-over marks (Step AW R19-R21)', () => {
     return out.sort()
   }
 
-  it('skips and counts loads older than cutoff - 24 months and loads on or after the cutoff, and lists them', async () => {
+  it('keeps loads shipping on or after the cutoff (the cutoff means BOOKED) and skips + lists loads older than cutoff - 24 months', async () => {
     const store = makeStore()
     await stage(store, fixture.csv, 'aljexrun:H0')
     const dates = await shipDates(store, 'aljexrun:H0')
     expect(dates.length).toBeGreaterThan(10)
-    // Cutoff on the newest ship day: that day (and only it) is "after the cutoff".
+    type Idx = { history: { cutoffDate: string; windowStart: string; beforeWindow: number; afterCutoff?: number }; stagedSkips: Record<string, number>; maxProNumber: number }
+    const readIdx = async (root: string) => JSON.parse(await readAll(store.getObject(`imports/jobs/${root}/stage-index.json`))) as Idx
+
+    // Cutoff on the newest ship day: that day is "on or after the cutoff" and is kept, nothing is skipped.
     const cutoff = dates[dates.length - 1]
-    const afterExpected = dates.filter((d) => d >= cutoff).length
-    const s = await stage(store, fixture.csv, 'aljexrun:H1', { options: { cutoffDate: cutoff } })
-    const idx = JSON.parse(await readAll(store.getObject('imports/jobs/aljexrun:H1/stage-index.json'))) as { history: { cutoffDate: string; windowStart: string; beforeWindow: number; afterCutoff: number }; stagedSkips: Record<string, number>; maxProNumber: number }
-    expect(s.status).toBe('READY')
-    expect(idx.history.afterCutoff).toBe(afterExpected)
-    expect(idx.history.windowStart).toBe(`${Number(cutoff.slice(0, 4)) - 2}${cutoff.slice(4)}`.replace(/-02-29$/, '-02-28'))
+    expect((await stage(store, fixture.csv, 'aljexrun:H1', { options: { cutoffDate: cutoff } })).status).toBe('READY')
+    const idx = await readIdx('aljexrun:H1')
     expect(idx.history.beforeWindow).toBe(dates.filter((d) => d < idx.history.windowStart).length)
-    const csv = (await readAll(store.getObject('imports/jobs/aljexrun:H1/history-skipped.csv'))).split('\n').filter(Boolean)
-    expect(csv).toHaveLength(1 + idx.history.afterCutoff + idx.history.beforeWindow)
+    expect(idx.history.afterCutoff).toBeUndefined()
+    expect(idx.stagedSkips.AFTER_CUTOFF).toBeUndefined()
+    expect(await shipDates(store, 'aljexrun:H1')).toEqual(dates.filter((d) => d >= idx.history.windowStart))
+    expect(dates.filter((d) => d >= cutoff).length).toBeGreaterThan(0)
+
+    // Cutoff 24 months after the newest day: everything older than the newest day is before the window.
+    const late = `${Number(cutoff.slice(0, 4)) + 2}${cutoff.slice(4)}`.replace(/-02-29$/, '-02-28')
+    expect((await stage(store, fixture.csv, 'aljexrun:H3', { options: { cutoffDate: late } })).status).toBe('READY')
+    const idx3 = await readIdx('aljexrun:H3')
+    expect(idx3.history.windowStart).toBe(cutoff)
+    expect(idx3.history.beforeWindow).toBe(dates.filter((d) => d < cutoff).length)
+    expect(idx3.history.beforeWindow).toBeGreaterThan(0)
+    const csv = (await readAll(store.getObject('imports/jobs/aljexrun:H3/history-skipped.csv'))).split('\n').filter(Boolean)
+    expect(csv).toHaveLength(1 + idx3.history.beforeWindow)
     expect(csv[0]).toBe('pro,ship_date,reason')
+    expect(csv.slice(1).every((l) => l.endsWith(',BEFORE_WINDOW'))).toBe(true)
     // A skipped PRO still raises the numbering floor.
-    const plain = JSON.parse(await readAll(store.getObject('imports/jobs/aljexrun:H0/stage-index.json'))) as { maxProNumber: number }
-    expect(idx.maxProNumber).toBe(plain.maxProNumber)
+    const plain = await readIdx('aljexrun:H0')
+    expect(idx3.maxProNumber).toBe(plain.maxProNumber)
   })
 
   it('takes the cutoff from TmsSettings.aljexCutoffAt (Chicago day) when the job gives none', async () => {
