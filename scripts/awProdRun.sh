@@ -7,9 +7,12 @@
 #   scripts/awProdRun.sh [--suffix 5ucwdyvwivelbo4k4jomvrwel4] [--target dev|rehearsal] [--yes-if-all-pass] [--from STEP]
 #                        [--only STEP] [--dry-only] [--files-dir DIR] [--resume] [--fresh-step STEP]
 #                        [--expect STEP.METRIC=VALUE]   (restates a SOFT expected number on purpose; recorded in results.tsv)
+#                        [--unattended]   (no prompts: Keychain item bcat-migration + ~/bcat-ops-backups/APPROVAL.production-load; see the guide)
+#                        [--status]       (prints run state + approval file state; no credentials, no network)
 # Test-only: AW_PROD_NONINTERACTIVE=1 reads answers from stdin and credentials from BCAT_EMAIL/BCAT_PASSWORD;
 #            AWPROD_SCRIPTS_DIR points at a directory holding awProd.mjs + awProdRunHelper.mjs (fakes).
 set -o pipefail
+set +x   # never trace: the unattended mode holds the staff password in a variable
 umask 077
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -19,9 +22,12 @@ DEV_SFX=nc3jsnxdmjhkpequimypiatkma
 APP=d3dejqzs77khq6
 CUTOFF=2026-11-07
 ALL_STEPS="preflight settings backfill-check customers carriers tax-ids loads backfill ap-aging ap-expected ar reconcile"
+ALL_APPLY_STEPS="settings customers carriers loads backfill ap-aging ap-expected ar reconcile"
+FULL_STEPS="$ALL_STEPS backfill-emergency"   # backfill-emergency is selectable (--only/--from) and never part of the default walk
 
 SUFFIX="" ; TARGET=prod ; YES_ALL=0 ; FROM="" ; ONLY="" ; DRY_ONLY=0 ; FILES_DIR=/Users/adminoid/aljex-export
 FRESH_STEPS=" " ; EXPECTS=" "
+UNATTENDED=0 ; STATUS=0 ; AP_LINE="" ; AP_STEPS="" ; AP_HASH="" ; AP_ERR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --suffix) SUFFIX=$2; shift 2 ;;
@@ -34,10 +40,115 @@ while [ $# -gt 0 ]; do
     --resume) shift ;;
     --fresh-step) FRESH_STEPS="$FRESH_STEPS$2 "; shift 2 ;;
     --expect) EXPECTS="$EXPECTS$2 "; shift 2 ;;
-    -h|--help) sed -n 2,14p "$0"; exit 0 ;;
+    --unattended) UNATTENDED=1; shift ;;
+    --status) STATUS=1; shift ;;
+    -h|--help) sed -n '2,/^set /p' "$0" | sed '$d'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+BACKUPS=$HOME/bcat-ops-backups
+LOGS=$BACKUPS/aw-prod-logs
+APPROVAL=$BACKUPS/APPROVAL.production-load
+CONSUMED=$LOGS/APPROVAL.consumed
+TODAY=$(date +%F)   # local timezone: the approval date and every AW_PROD_CONFIRM token use this one value
+
+# ---- unattended helpers: Keychain credentials + approval file (never echoed, never in argv, never written) ----
+if [ "$(uname)" = Darwin ]; then
+  stat_owner() { stat -f %u "$1" 2>/dev/null; }; stat_mode() { stat -f %Lp "$1" 2>/dev/null; }
+else
+  stat_owner() { stat -c %u "$1" 2>/dev/null; }; stat_mode() { stat -c %a "$1" 2>/dev/null; }
+fi
+hash_line() { # stdout: sha256 of the argument (printf is a builtin: nothing in argv of another process)
+  if command -v shasum >/dev/null 2>&1; then printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then printf '%s' "$1" | sha256sum | awk '{print $1}'
+  else return 1; fi
+}
+load_keychain() { # sets BCAT_PASSWORD / BCAT_EMAIL from the Keychain item bcat-migration (exit 2 on any problem)
+  local pw acct attrs
+  command -v security >/dev/null 2>&1 || { echo "Refusing (unattended): the macOS 'security' tool is missing (this mode needs the macOS Keychain)." >&2; exit 2; }
+  pw=$(security find-generic-password -s bcat-migration -w 2>/dev/null) || pw=""
+  [ -n "$pw" ] || { echo "Refusing (unattended): Keychain item 'bcat-migration' is missing or has an empty password (guide: Unattended run, one-time setup)." >&2; exit 2; }
+  attrs=$(security find-generic-password -s bcat-migration 2>/dev/null) || attrs=""
+  acct=$(printf '%s\n' "$attrs" | sed -n 's/^[[:space:]]*"acct"<blob>="\(.*\)"$/\1/p' | sed -n 1p)
+  attrs=""
+  [ -n "$acct" ] || { echo "Refusing (unattended): Keychain item 'bcat-migration' has no account name (the account name is the sign-in e-mail)." >&2; exit 2; }
+  BCAT_PASSWORD=$pw; BCAT_EMAIL=$acct; pw=""; acct=""
+  export BCAT_EMAIL BCAT_PASSWORD
+}
+approval_inspect() { # sets AP_LINE AP_STEPS AP_HASH or AP_ERR. rc 0 usable, 1 not usable, 3 internal
+  AP_ERR=""; AP_LINE=""; AP_STEPS=""; AP_HASH=""
+  if [ ! -e "$APPROVAL" ] && [ ! -L "$APPROVAL" ]; then AP_ERR="no approval file ($APPROVAL)"; return 1; fi
+  if [ ! -f "$APPROVAL" ] || [ -L "$APPROVAL" ]; then AP_ERR="the approval file is not a regular file"; return 1; fi
+  [ "$(stat_owner "$APPROVAL")" = "$(id -u)" ] || { AP_ERR="the approval file is not owned by the current user"; return 1; }
+  local m t; m=$(stat_mode "$APPROVAL")
+  case "$m" in ""|*[!0-7]*) AP_ERR="cannot read the approval file mode"; return 1 ;; esac
+  [ $(( 8#$m & 18 )) -eq 0 ] || { AP_ERR="the approval file is group/world-writable (chmod 600 it)"; return 1; }
+  AP_LINE=$(awk -v d="$TODAY" '/^APPROVED [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] steps=[A-Za-z0-9,-]+ by=ryne$/ && $2 == d { print; exit }' "$APPROVAL")
+  [ -n "$AP_LINE" ] || { AP_ERR="no line 'APPROVED $TODAY steps=<list|all> by=ryne' for today in the approval file"; return 1; }
+  AP_STEPS=$(printf '%s\n' "$AP_LINE" | awk '{ sub(/^steps=/, "", $3); print $3 }')
+  if [ -z "$(printf '%s' "$AP_STEPS" | tr -d ,)" ]; then AP_ERR="the approval line lists no step"; AP_LINE=""; return 1; fi
+  for t in $(printf '%s' "$AP_STEPS" | tr ',' ' '); do
+    case " all $FULL_STEPS " in *" $t "*) : ;; *) AP_ERR="unknown step '$t' in the approval line"; AP_LINE=""; return 1 ;; esac
+  done
+  AP_HASH=$(hash_line "$AP_LINE") && [ -n "$AP_HASH" ] || { AP_ERR="no sha256 tool (shasum/sha256sum)"; AP_LINE=""; return 3; }
+  return 0
+}
+ap_listed() { # step: listed explicitly, or covered by `all` (all never covers tax-ids or backfill-emergency)
+  local t
+  for t in $(printf '%s' "$AP_STEPS" | tr ',' ' '); do
+    [ "$t" = "$1" ] && return 0
+    if [ "$t" = all ]; then case "$1" in tax-ids|backfill-emergency) : ;; *) return 0 ;; esac; fi
+  done
+  return 1
+}
+ap_consumed() { [ -f "$CONSUMED" ] && awk -F'\t' -v s="$1" -v h="$AP_HASH" '$1==s && $3==h {f=1} END{exit f?0:1}' "$CONSUMED"; }
+refuse_run() { say "${RED}REFUSED: $*${RST}"; print_summary; exit 2; }
+unattended_authorize() { # approval-step action: the ONLY door to an apply in --unattended (stop conditions were already checked by the caller)
+  ap_listed "$1" || refuse_run "step $1 is not listed in the approval file (steps=$AP_STEPS). Nothing was applied for it."
+  if ap_consumed "$2"; then refuse_run "this approval line was already used to apply $2 (consumed). Write a new approval line to run it again."; fi
+  printf '%s\t%s\t%s\n' "$2" "$(now_iso)" "$AP_HASH" >> "$CONSUMED"
+}
+maybe_retire() { # rename the approval file once every listed step is DONE
+  [ "$UNATTENDED" = 1 ] && [ "$DRY_ONLY" != 1 ] && [ -n "$AP_LINE" ] && [ -f "$APPROVAL" ] || return 0
+  local t s
+  for t in $(printf '%s' "$AP_STEPS" | tr ',' ' '); do
+    if [ "$t" = all ]; then for s in $ALL_APPLY_STEPS; do [ "$(get_state "$s")" = DONE ] || return 0; done
+    else [ "$(get_state "$t")" = DONE ] || return 0; fi
+  done
+  if mv "$APPROVAL" "$APPROVAL.used-$(date +%Y%m%dT%H%M%S)"; then say "approval file retired (every listed step is DONE)"; fi
+}
+show_status() {
+  local gs=$LOGS/STATE.tsv d lastrun="" rf="" s line st ts shown p f u
+  echo "awProdRun status (local files only: no credentials, no network)"
+  echo "log directory: $LOGS"
+  for d in "$LOGS"/run-*; do [ -d "$d" ] && lastrun=$d; done
+  echo "latest run dir: ${lastrun:-none}"
+  [ -n "$lastrun" ] && rf=$lastrun/results.tsv
+  printf '  %-17s %-18s %-22s %s\n' STEP STATE "LAST UPDATE" "PASS/FAIL (latest run)"
+  for s in $FULL_STEPS; do
+    line=$(awk -F'\t' -v s="$s" '$1==s{v=$2;t=$3} END{print v "|" t}' "$gs" 2>/dev/null)
+    st=${line%%|*}; ts=${line#*|}
+    case "$st" in DONE) shown=DONE ;; FAILED) shown=FAILED ;; "") shown=pending ;; *) shown="pending ($st)" ;; esac
+    p=0; f=0
+    if [ -n "$rf" ] && [ -f "$rf" ]; then set -- $(awk -F'\t' -v s="$s" '$1==s { if ($5=="PASS") p++; else if ($5=="FAIL") f++ } END { printf "%d %d\n", p, f }' "$rf"); p=$1; f=$2; fi
+    printf '  %-17s %-18s %-22s PASS=%s FAIL=%s\n' "$s" "$shown" "${ts:--}" "$p" "$f"
+  done
+  echo "approval file: $APPROVAL"
+  if [ -e "$APPROVAL" ]; then echo "  present: yes"; else echo "  present: no"; fi
+  if approval_inspect; then
+    echo "  usable: yes (owned by you, not group/world-writable, line dated $TODAY)"
+    echo "  steps listed: $AP_STEPS"
+    u=$([ -f "$CONSUMED" ] && awk -F'\t' -v h="$AP_HASH" '$3==h {printf "%s ", $1}' "$CONSUMED")
+    echo "  consumed under this line: ${u:-none}"
+  else
+    echo "  usable: no ($AP_ERR)"
+  fi
+  u=""; for d in "$APPROVAL".used-*; do [ -f "$d" ] && u=$d; done
+  [ -n "$u" ] && echo "  last retired approval: $u"
+  return 0
+}
+[ "$STATUS" = 1 ] && { show_status; exit 0; }
 
 if [ "$(id -u)" = 0 ]; then echo "Refusing to run as root." >&2; exit 2; fi
 case "$TARGET" in
@@ -52,22 +163,32 @@ case "$TARGET" in
         BRANCH=dev; [ "$TARGET" = rehearsal ] && BRANCH=rh ;;
   *) echo "Refusing: --target must be dev or rehearsal (production is the default, no flag)." >&2; exit 2 ;;
 esac
-if [ ! -t 0 ] && [ "${AW_PROD_NONINTERACTIVE:-}" != 1 ]; then
-  echo "Refusing: stdin is not a terminal. Run this in your own terminal (tests only: AW_PROD_NONINTERACTIVE=1)." >&2; exit 2
-fi
-if [ "${AW_PROD_NONINTERACTIVE:-}" = 1 ] && { [ -z "${BCAT_EMAIL:-}" ] || [ -z "${BCAT_PASSWORD:-}" ]; }; then
-  echo "Refusing: AW_PROD_NONINTERACTIVE=1 needs BCAT_EMAIL and BCAT_PASSWORD in the environment." >&2; exit 2
+if [ "$UNATTENDED" = 1 ]; then
+  [ "$TARGET" = prod ] || { echo "Refusing: --unattended is for the production target only." >&2; exit 2; }
+  if [ "$DRY_ONLY" != 1 ]; then
+    approval_inspect; rc=$?
+    if [ "$rc" != 0 ]; then echo "Refusing (unattended): $AP_ERR. Nothing was done." >&2; [ "$rc" = 3 ] && exit 3; exit 2; fi
+  fi
+  unset BCAT_EMAIL BCAT_PASSWORD
+  trap 'unset BCAT_PASSWORD BCAT_EMAIL' EXIT INT TERM
+  load_keychain
+else
+  if [ ! -t 0 ] && [ "${AW_PROD_NONINTERACTIVE:-}" != 1 ]; then
+    echo "Refusing: stdin is not a terminal. Run this in your own terminal (tests only: AW_PROD_NONINTERACTIVE=1)." >&2; exit 2
+  fi
+  if [ "${AW_PROD_NONINTERACTIVE:-}" = 1 ] && { [ -z "${BCAT_EMAIL:-}" ] || [ -z "${BCAT_PASSWORD:-}" ]; }; then
+    echo "Refusing: AW_PROD_NONINTERACTIVE=1 needs BCAT_EMAIL and BCAT_PASSWORD in the environment." >&2; exit 2
+  fi
 fi
 case "$FROM$ONLY" in ""|*) : ;; esac
-for s in $FROM $ONLY; do case " $ALL_STEPS " in *" $s "*) : ;; *) echo "unknown step: $s" >&2; exit 2 ;; esac; done
+for s in $FROM $ONLY; do case " $FULL_STEPS " in *" $s "*) : ;; *) echo "unknown step: $s" >&2; exit 2 ;; esac; done
 
 trap 'unset BCAT_PASSWORD BCAT_EMAIL' EXIT INT TERM
 [ "$TARGET" = prod ] && unset BCAT_STACK || export BCAT_STACK=$TARGET
 
 # ---- run dir, transcript, state ------------------------------------------------------------------
-LOGS=$HOME/bcat-ops-backups/aw-prod-logs
 RUN_DIR=$LOGS/run-$(date +%Y%m%dT%H%M%S)
-mkdir -p "$RUN_DIR" && chmod 700 "$LOGS" "$RUN_DIR"
+mkdir -p "$RUN_DIR" && chmod 700 "$LOGS" "$RUN_DIR" || { echo "internal error: cannot create $RUN_DIR" >&2; exit 3; }
 TRANSCRIPT=$RUN_DIR/transcript.log
 RESULTS=$RUN_DIR/results.tsv
 RUN_STATE=$RUN_DIR/state.tsv
@@ -93,6 +214,7 @@ if [ -t 1 ]; then GREEN=$(tput setaf 2 2>/dev/null); RED=$(tput setaf 1 2>/dev/n
 
 ask_yn() { # prompt -> 0 if y
   local a=""
+  [ "$UNATTENDED" = 1 ] && { say "[unattended] a prompt was needed and refused: $1"; return 1; }
   printf '%s ' "$1" >&2
   read -r a || a=""
   printf '%s %s\n' "$1" "answer: $a" | scrub >> "$TRANSCRIPT"
@@ -196,6 +318,19 @@ backfill|D|table.Shipment.before|n|>=|1|H|Step 4c-bis (run loads first)
 backfill|A|backfill_after.linkedById|n|=|0|H|Step 4c-bis Expect
 backfill|A|backfill_after.matchedByPro|n|=|0|H|Step 4c-bis Expect
 backfill|A|backfill_after.ambiguous|n|=|0|H|Step 4c-bis Expect
+# backfill-emergency (selectable only): the same backfill engine through the same login, for the booked-before-cutoff window
+backfill-emergency|D|backfill_before.afterCutoff|n|=|0|H|Emergency STOP (created on/after the cutoff)
+backfill-emergency|D|backfill_before.unmappable|n|=|0|H|Emergency STOP
+backfill-emergency|D|backfill_before.ambiguous|n|=|0|H|Emergency STOP
+backfill-emergency|D|derived.bucketsSum|s|=|yes|H|Emergency STOP
+backfill-emergency|D|backfill_before.totalLoads|n|=|958|S|Emergency (958 Loads)
+backfill-emergency|D|backfill_before.carriedOver|n|=|17|S|Emergency (17 carried over)
+backfill-emergency|D|backfill_before.matchedByPro|n|info|-|S|Emergency
+backfill-emergency|D|backfill_before.linkedById|n|info|-|S|Emergency
+backfill-emergency|A|backfill_after.ambiguous|n|=|0|H|Emergency verify (backfill_after counts)
+backfill-emergency|A|backfill_after.unmappable|n|=|0|H|Emergency verify
+backfill-emergency|A|backfill_after.matchedByPro|n|=|0|H|Emergency verify
+backfill-emergency|A|backfill_after.linkedById|n|=|0|H|Emergency verify
 ap-aging|D|uploaded.rows|n|=|67|S|Step 4d
 ap-aging|D|apAging.bills|n|=|67|S|Step 4d
 ap-aging|D|apAging.totalCents|$|=|83407.20|S|Step 4d
@@ -393,9 +528,10 @@ section_for() { case "$1" in
 
 # ---- summary / stop ---------------------------------------------------------------------------------
 print_summary() {
+  maybe_retire
   say ""; say "================ SUMMARY ================"
   local s st
-  for s in $ALL_STEPS; do
+  for s in $FULL_STEPS; do
     st=$(awk -F'\t' -v s="$s" '$1==s{v=$2} END{print v}' "$RUN_STATE")
     if [ -z "$st" ] && is_done "$s"; then st="DONE (earlier run)"; fi
     [ -z "$st" ] && st="not run"
@@ -462,7 +598,7 @@ dev_cli() { # test mode translation of an awProd step line to the non-production
     *) echo "test mode: unknown step $step" >&2; return 2 ;;
   esac
 }
-TODAY=$(date +%F) ; MMDD=$(date +%m%d)
+MMDD=$(date +%m%d)
 LIVE_TAG=AW-PROD-$MMDD ; LOADS_TAG=awprod$MMDD
 
 # ---- environment re-check (between steps) ---------------------------------------------------------
@@ -488,7 +624,9 @@ recheck_env() { # step
 
 # ---- credentials -------------------------------------------------------------------------------------
 say "awProdRun: target=$TARGET suffix=$SUFFIX run dir=$RUN_DIR"
-if [ "$TARGET" = prod ]; then
+if [ "$TARGET" = prod ] && [ "$UNATTENDED" = 1 ]; then
+  say "This is PRODUCTION (Amplify app $APP, branch main), --unattended: approval file $APPROVAL"
+elif [ "$TARGET" = prod ]; then
   say "This is PRODUCTION (Amplify app $APP, branch main)."
   printf 'Type the word PRODUCTION to continue: ' >&2
   read -r word || word=""
@@ -501,15 +639,16 @@ if [ "$TARGET" != prod ]; then node "$SCRIPTS/awProdRunHelper.mjs" dev-outputs "
 LOGGED_IN=0
 need_login() {
   [ "$LOGGED_IN" = 1 ] && return 0
-  if [ "${AW_PROD_NONINTERACTIVE:-}" != 1 ]; then
+  if [ "$UNATTENDED" = 1 ]; then :   # credentials came from the Keychain at start; there is nothing to ask
+  elif [ "${AW_PROD_NONINTERACTIVE:-}" != 1 ]; then
     printf 'Admin e-mail (production staff pool; needed by backfill only): ' >&2; read -r BCAT_EMAIL
     printf 'Password (hidden): ' >&2; read -rs BCAT_PASSWORD; printf '\n' >&2
   fi
   export BCAT_EMAIL BCAT_PASSWORD
-  say "credentials entered (not logged)"
+  if [ "$UNATTENDED" = 1 ]; then say "credentials loaded from the Keychain (not logged)"; else say "credentials entered (not logged)"; fi
   CURRENT=login
   if ! node "$SCRIPTS/awProdRunHelper.mjs" login "$TARGET" 2>&1 | scrub | tee -a "$TRANSCRIPT" | grep -q 'login: OK'; then
-    say "${RED}Login failed: check the e-mail/password (an ADMIN of the staff pool). Nothing was done.${RST}"; exit 1
+    say "${RED}Login failed: check the e-mail/password (an ADMIN of the staff pool). Nothing was done.${RST}"; [ "$UNATTENDED" = 1 ] && exit 2; exit 1
   fi
   LOGGED_IN=1
 }
@@ -527,6 +666,7 @@ trap 'rm -f "$PROS"; unset BCAT_PASSWORD BCAT_EMAIL' EXIT INT TERM
 should_run() { # step
   local s=$1
   [ "$s" = stage-export ] && s=loads
+  if [ "$s" = backfill-emergency ]; then [ "$ONLY" = backfill-emergency ] || [ "$FROM" = backfill-emergency ]; return; fi
   if [ -n "$ONLY" ]; then [ "$ONLY" = "$s" ] && return 0; [ "$s" = preflight ] && return 0; return 1; fi
   if [ -n "$FROM" ] && [ "$s" != preflight ]; then
     case " $ALL_STEPS " in *" $FROM "*) : ;; esac
@@ -559,6 +699,7 @@ step_preflight() {
   elif [ "$DRY_ONLY" = 1 ]; then pf "backup stamp age (min)" "<= 360" "${age:-missing}" INFO; say "  (dry-only: an apply would be refused until the stamp is fresh)"
   else
     pf "backup stamp age (min)" "<= 360" "${age:-missing}" FAIL
+    if [ "$UNATTENDED" = 1 ]; then say "  REFUSED (unattended): the backup stamp is missing/stale; this mode never creates it (make the backup, then stamp it yourself)."; print_summary; exit 2; fi
     say "  If you have just finished a fresh backup, type its exact path (a directory made in the last 6 h) to stamp it, or press Enter to stop."
     printf 'Backup path: ' >&2; read -r bp || bp=""
     if [ -n "$bp" ] && [ -d "$bp" ] && [ $(( $(date +%s) - $(mtime_of "$bp") )) -le 21600 ]; then
@@ -601,7 +742,13 @@ step_preflight() {
 # ---- generic step engine ---------------------------------------------------------------------------------
 # run_step <state name> <awProd step> <extra args for dry (without --apply)> ; apply args appended after
 APPLY_EXTRA=""
-confirm_apply() { # step -> 0 yes
+confirm_apply() { # label -> 0 yes. --unattended: the approval file is the ONLY yes (the caller already passed every number)
+  if [ "$UNATTENDED" = 1 ]; then
+    local ap=$1 act=$1
+    case "$1" in stage-export) ap=loads ;; "reconcile "*) ap=reconcile; act=reconcile:${1#reconcile } ;; esac
+    unattended_authorize "$ap" "$act"
+    say "[$1] all numbers PASS: auto-applied under the approval file (--unattended)"; return 0
+  fi
   if [ "$YES_ALL" = 1 ]; then say "[$1] all numbers PASS: auto-applied (--yes-if-all-pass)"; return 0; fi
   ask_yn "Apply $1? [y/N]"
 }
@@ -719,12 +866,15 @@ step_tax_ids() {
   say "  encrypted tax-ID vault deployed: $vault"
   if [ "$vault" = no ] || [ "$TARGET" != prod ]; then say "[tax-ids] skipped (vault not deployed or test mode)"; set_state tax-ids SKIPPED; return 0; fi
   [ "$DRY_ONLY" = 1 ] && { say "[tax-ids] dry-only: skipped"; return 0; }
-  if ! ask_yn "Import tax IDs now? [y/N] (default N, even with --yes-if-all-pass)"; then say "[tax-ids] skipped by choice"; set_state tax-ids SKIPPED; return 0; fi
+  if [ "$UNATTENDED" = 1 ]; then
+    if ! ap_listed tax-ids; then say "[tax-ids] skipped (default NO: only applied when tax-ids is listed explicitly in the approval file; 'all' does not include it)"; set_state tax-ids SKIPPED; return 0; fi
+  elif ! ask_yn "Import tax IDs now? [y/N] (default N, even with --yes-if-all-pass)"; then say "[tax-ids] skipped by choice"; set_state tax-ids SKIPPED; return 0; fi
   local dry=$RUN_DIR/tax-ids.dry.out
   cli_run "$dry" tax-ids --source "$F_CARR"; parse_out "$dry" "$RUN_DIR/tax-ids.dry.metrics"
   compare tax-ids D "$RUN_DIR/tax-ids.dry.metrics" || true
   [ "$CMP_FAILS" -gt 0 ] && stop_fail tax-ids
-  ask_yn "Apply tax-ids (values go encrypted to the vault)? [y/N]" || { say "[tax-ids] not applied"; set_state tax-ids SKIPPED; return 0; }
+  if [ "$UNATTENDED" = 1 ]; then unattended_authorize tax-ids tax-ids
+  elif ! ask_yn "Apply tax-ids (values go encrypted to the vault)? [y/N]"; then say "[tax-ids] not applied"; set_state tax-ids SKIPPED; return 0; fi
   export AW_PROD_CONFIRM=$TODAY-tax-ids
   cli_run "$RUN_DIR/tax-ids.apply.out" tax-ids --source "$F_CARR" --apply; local rc=$LAST_RC
   unset AW_PROD_CONFIRM
@@ -738,7 +888,7 @@ backup_gate() { # prodpre-importAljex(+Recon) backups needed by the offline file
   [ "$BACKUP_ASKED" = 1 ] && return 0
   BACKUP_ASKED=1
   say "  The importAljex gate needs fresh prodpre-importAljex-* on-demand backups (runbook 4c-1)."
-  if ask_yn "Create/refresh those backups now (production CreateBackup, non-destructive)? [y/N]"; then
+  if [ "$UNATTENDED" = 1 ] || ask_yn "Create/refresh those backups now (production CreateBackup, non-destructive)? [y/N]"; then
     BCAT_ALLOW_PROD=$TODAY node "$SCRIPTS/prodBackup.mjs" --target prod --i-mean-production --script importAljex,importAljexRecon --apply 2>&1 | scrub | tee -a "$TRANSCRIPT" | tail -5
   fi
 }
@@ -748,6 +898,7 @@ step_loads() {
   already_done loads && return 0
   say ""; say "== STEP loads (stage-export, then the importAljex plan and live pass) =="
   standard_step stage-export stage-export -- --file "$F_BIG"
+  [ "$UNATTENDED" = 1 ] && [ "$DRY_ONLY" != 1 ] && { ap_listed loads || refuse_run "step loads is not listed in the approval file (steps=$AP_STEPS): the loads plan needs the production backups, which only an approved step may create."; }
   [ "$DRY_ONLY" = 1 ] || backup_gate
   recheck_env || stop_fail loads
   CURRENT=loads
@@ -789,6 +940,7 @@ step_reconcile() {
   say ""; say "== STEP reconcile (reports only; writes RECONCILE jobs) =="
   if [ "$DRY_ONLY" = 1 ]; then say "[reconcile] dry-only: needs applied import jobs; skipped"; return 0; fi
   local ent src cust sj
+  [ "$UNATTENDED" = 1 ] && { ap_listed reconcile || refuse_run "step reconcile is not listed in the approval file (steps=$AP_STEPS)."; }
   backup_gate
   cust=$(get_job customers)
   for ent in CUSTOMERS CARRIERS AP AR SHIPMENTS; do
@@ -839,6 +991,7 @@ standard_step ap-aging ap-aging -- --file "$F_APA" --cutoff $CUTOFF --plan
 standard_step ap-expected ap-expected -- --file "$F_APE" --cutoff $CUTOFF --plan
 standard_step ar ar -- --file "$F_AR" --cutoff $CUTOFF --plan
 step_reconcile
+standard_step backfill-emergency backfill -- --cutoff $CUTOFF --allow-empty-shipments
 final_checks
 print_summary
 if [ "$ANYFAIL" = 1 ]; then say "Result: NOT all numbers passed${DRY_FAIL_NOTES:+ (dry-only walk would stop at:$DRY_FAIL_NOTES)}"; exit 1; fi

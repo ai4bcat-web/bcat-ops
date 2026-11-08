@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -19,6 +19,7 @@ const apply = rest.includes('--apply')
 const evaluate = rest.includes('--evaluate')
 const brk = (process.env.FAKE_BREAK || '').split(':')
 const bad = (s, m, good, wrong) => (brk[0] === s && brk[1] === m ? wrong : good)
+appendFileSync(dir + '/argv.log', process.argv.slice(2).join(' ') + '\\n')
 if (apply) { appendFileSync(dir + '/applies.log', step + ' confirm=' + process.env.AW_PROD_CONFIRM + '\\n'); writeFileSync(dir + '/applied-' + step, '1') }
 const loadsDone = existsSync(dir + '/applied-loads')
 const log = dir + '/' + step + '.log'
@@ -30,6 +31,8 @@ const modes = apply && ['customers','carriers','ar','ap-aging','ap-expected'].in
 const logline = []
 if (step === 'settings') L('settings plan: SET (counter -> 19999, NUMERIC; first PRO 20000)')
 if (step === 'verify') logline.push('verify tables: tables=110 expected=110', 'verify settings: seriesAt19999=' + (existsSync(dir + '/applied-settings') ? 1 : 0) + ' numeric=1')
+if (step === 'tax-ids') L('tax-ids: rows=2462 withValue=2353 resolvable=2353 unresolvable=0')
+if (process.env.FAKE_LEAK) L('debug leak ' + process.env.BCAT_PASSWORD + ' ' + process.env.BCAT_EMAIL)
 if (step === 'backfill') {
   const done = loadsDone
   L('backfill before: matchedByPro=' + (done ? 0 : 957) + ' linkedById=1 ambiguous=0 unmappable=0 alreadyLinked=' + (done ? 957 : 0) + ' loads=958 beforeWindow=0 afterCutoff=' + bad('backfill-check', 'afterCutoff', 0, 3) + ' carriedOver=17 totalLoads=958')
@@ -124,6 +127,7 @@ function sandbox() {
   for (const d of [dir, bin, files, scripts, join(home, 'bcat-ops-backups')]) mkdirSync(d, { recursive: true })
   writeFileSync(join(scripts, 'awProd.mjs'), FAKE_AWPROD); writeFileSync(join(scripts, 'awProdRunHelper.mjs'), FAKE_HELPER)
   writeFileSync(join(bin, 'aws'), FAKE_AWS); chmodSync(join(bin, 'aws'), 0o755)
+  writeFileSync(join(scripts, 'prodBackup.mjs'), "import { appendFileSync } from 'node:fs'\nappendFileSync(process.env.FAKE_DIR + '/argv.log', 'prodBackup ' + process.argv.slice(2).join(' ') + ' allow=' + process.env.BCAT_ALLOW_PROD + '\\n')\nconsole.log('backup ok')\n")
   for (const f of ['aljex-customers-2026-11-08.csv', 'aljex-carriers-2026-11-08.csv', 'aljex-ap-aging-2026-11-08.csv', 'aljex-ap-expected-2026-11-08.csv', 'aljex-ar-2026-11-07.csv', 'aljex-full-export-2026-11-07.csv']) writeFileSync(join(files, f), 'x\n')
   writeFileSync(join(home, 'bcat-ops-backups', 'LATEST_BACKUP_STAMP'), new Date().toISOString())
   return { home, dir, bin, files, scripts }
@@ -290,5 +294,193 @@ describe('awProdRunHelper csv counting', () => {
     expect(parseCsv(csv)).toHaveLength(3)
     expect(describeCsv(csv, 'customers')).toEqual({ rows: 2, sensitive: true })
     expect(describeCsv('A,B\n1,2\n', 'ar')).toEqual({ rows: 1, sensitive: false })
+  })
+})
+
+describe('unattended', () => {
+  const SEC_PW = 'Kc-Pw-Canary-7Vq!2m'
+  const SEC_ACCT = 'migration-canary@leak.example.org'
+  const today = () => new Date().toLocaleDateString('sv-SE')
+  const yesterday = () => new Date(Date.now() - 86400000).toLocaleDateString('sv-SE')
+  const OK = (steps = 'all') => `APPROVED ${today()} steps=${steps} by=ryne\n`
+  const FAKE_SECURITY = `#!/bin/bash
+echo "$*" >> "$FAKE_DIR/security.log"
+[ "$FAKE_SEC" = missing ] && exit 44
+case "$*" in
+  *" -w"*) [ "$FAKE_SEC" = empty ] && exit 0; printf '%s\\n' '${SEC_PW}' ;;
+  *) printf 'keychain: "login.keychain-db"\\nattributes:\\n    "acct"<blob>="${SEC_ACCT}"\\n    "svce"<blob>="bcat-migration"\\n' ;;
+esac
+`
+  const usb = () => {
+    const sb = sandbox()
+    writeFileSync(join(sb.bin, 'security'), FAKE_SECURITY); chmodSync(join(sb.bin, 'security'), 0o755)
+    return sb
+  }
+  const approvalPath = (sb) => join(sb.home, 'bcat-ops-backups', 'APPROVAL.production-load')
+  function lean(sb) { // a PATH with the fake aws and the system tools the runner needs, but no `security`
+    const d = join(sb.home, 'lean'); mkdirSync(d, { recursive: true })
+    for (const t of ['bash', 'node', 'awk', 'sed', 'grep', 'date', 'stat', 'tee', 'tput', 'sort', 'head', 'tr', 'cat', 'rm', 'mkdir', 'chmod', 'id', 'dirname', 'uname', 'mv', 'tail', 'wc', 'shasum', 'sha256sum', 'cut', 'uniq', 'touch', 'sleep', 'basename', 'env']) {
+      const p = spawnSync('sh', ['-c', `command -v ${t}`], { encoding: 'utf8' }).stdout.trim()
+      if (p && !existsSync(join(d, t))) symlinkSync(p, join(d, t))
+    }
+    symlinkSync(join(sb.bin, 'aws'), join(d, 'aws'))
+    return d
+  }
+  function runU(sb, { args = [], approval, mode = 0o600, env = {}, path, unattended = true } = {}) {
+    if (approval !== undefined) { writeFileSync(approvalPath(sb), approval); chmodSync(approvalPath(sb), mode) }
+    const r = spawnSync('bash', [SCRIPT, '--files-dir', sb.files, ...(unattended ? ['--unattended'] : []), ...args], {
+      input: '', encoding: 'utf8', timeout: 120000,
+      env: { PATH: path ?? `${sb.bin}:${process.env.PATH}`, HOME: sb.home, AWPROD_SCRIPTS_DIR: sb.scripts, FAKE_DIR: sb.dir, FAKE_PW: SEC_PW, ...env },
+    })
+    const logs = join(sb.home, 'bcat-ops-backups', 'aw-prod-logs')
+    const runDirs = existsSync(logs) ? readdirSync(logs).filter((n) => n.startsWith('run-')) : []
+    const runDir = runDirs.length ? join(logs, runDirs.sort().pop()) : null
+    const read = (f) => (existsSync(f) ? readFileSync(f, 'utf8') : '')
+    const used = readdirSync(join(sb.home, 'bcat-ops-backups')).filter((n) => n.startsWith('APPROVAL.production-load.used-'))
+    return { ...r, logs, runDir, used, applies: read(join(sb.dir, 'applies.log')), argv: read(join(sb.dir, 'argv.log')), consumed: read(join(logs, 'APPROVAL.consumed')), results: runDir ? read(join(runDir, 'results.tsv')) : '', state: read(join(logs, 'STATE.tsv')) }
+  }
+
+  it('refuses (exit 2) without the Keychain item, with an empty password, and without the security tool', () => {
+    const sb = usb()
+    const missing = runU(sb, { approval: OK(), env: { FAKE_SEC: 'missing' } })
+    expect(missing.status).toBe(2); expect(missing.stderr).toMatch(/bcat-migration/); expect(missing.applies).toBe('')
+    const empty = runU(sb, { approval: OK(), env: { FAKE_SEC: 'empty' } })
+    expect(empty.status).toBe(2); expect(empty.stderr).toMatch(/empty password/)
+    const none = runU(sb, { approval: OK(), path: lean(sb) })
+    expect(none.status).toBe(2); expect(none.stderr).toMatch(/'security' tool is missing/); expect(none.applies).toBe('')
+  })
+
+  it.each([
+    ['no approval file', undefined, 0o600, /no approval file/],
+    ['wrong date', `APPROVED ${yesterday()} steps=all by=ryne\n`, 0o600, /for today/],
+    ['malformed line', `APPROVED ${today()} steps=all\n`, 0o600, /for today/],
+    ['missing by=ryne', `APPROVED ${today()} steps=all by=bob\n`, 0o600, /for today/],
+    ['only comments', `# APPROVED ${today()} steps=all by=ryne\n`, 0o600, /for today/],
+    ['unknown step name', `APPROVED ${today()} steps=customers,bogus by=ryne\n`, 0o600, /unknown step/],
+    ['group-writable file', `APPROVED ${today()} steps=all by=ryne\n`, 0o664, /group\/world-writable/],
+    ['world-writable file', `APPROVED ${today()} steps=all by=ryne\n`, 0o666, /group\/world-writable/],
+  ])('refuses before any apply: %s', (_n, approval, mode, msg) => {
+    const sb = usb()
+    const r = runU(sb, { approval, mode, args: ['--only', 'customers'] })
+    expect(r.status).toBe(2); expect(r.stderr).toMatch(msg); expect(r.applies).toBe('')
+    expect(r.consumed).toBe('')
+  })
+
+  it('a step that is not listed is refused after its dry run (no apply); dry-only needs no approval', () => {
+    const sb = usb()
+    const r = runU(sb, { approval: OK('ar'), args: ['--only', 'customers'] })
+    expect(r.status).toBe(2); expect(r.stdout).toMatch(/REFUSED: step customers is not listed/)
+    expect(r.results).toMatch(/customers\tCUSTOMER\.errors\t0\t0\tPASS/); expect(r.applies).toBe('')
+    const dry = runU(usb(), { args: ['--only', 'customers', '--dry-only'] })
+    expect(dry.status).toBe(0); expect(dry.applies).toBe('')
+  })
+
+  it('applies only the listed steps, needs no TTY and no stdin, and carries the dated confirm token', () => {
+    const sb = usb()
+    const r = runU(sb, { approval: OK('customers,carriers'), args: ['--from', 'customers'] })
+    expect(r.stderr).not.toMatch(/not a terminal/)
+    expect(r.status).toBe(2)
+    expect(r.applies).toContain(`customers confirm=${today()}-customers`)
+    expect(r.applies).toContain(`carriers confirm=${today()}-carriers`)
+    expect(r.applies).not.toMatch(/stage-export|loads|backfill|ap-aging|^ar /m)
+    expect(r.stdout).toMatch(/REFUSED: step loads is not listed/)
+    expect(existsSync(approvalPath(sb))).toBe(false); expect(r.used).toHaveLength(1) // every listed step is DONE: retired
+  })
+
+  it('"all" covers every step but tax-ids and backfill-emergency, finishes with exit 0 and retires the file', () => {
+    const sb = usb()
+    const r = runU(sb, { approval: OK('all'), env: { FAKE_VAULT: '1' } })
+    expect(r.status).toBe(0)
+    for (const s of ['settings', 'customers', 'carriers', 'stage-export', 'loads', 'backfill', 'ap-aging', 'ap-expected', 'ar', 'reconcile']) expect(r.applies).toContain(`${s} confirm=${today()}-${s}`)
+    expect(r.applies).not.toMatch(/tax-ids/)
+    expect(r.stdout).toMatch(/\[tax-ids\] skipped \(default NO/)
+    expect(r.argv).toMatch(/prodBackup .* allow=\d{4}-\d{2}-\d{2}/)
+    expect(existsSync(approvalPath(sb))).toBe(false); expect(r.used).toHaveLength(1)
+    const emergency = runU(usb(), { approval: OK('all'), args: ['--only', 'backfill-emergency'] })
+    expect(emergency.status).toBe(2); expect(emergency.applies).toBe('')
+    const listed = runU(usb(), { approval: OK('all,tax-ids'), args: ['--only', 'tax-ids'], env: { FAKE_VAULT: '1' } })
+    expect(listed.status).toBe(0); expect(listed.applies).toContain(`tax-ids confirm=${today()}-tax-ids`)
+  })
+
+  it('a stop condition overrides the approval: no apply when a number fails (exit 1)', () => {
+    const sb = usb()
+    const r = runU(sb, { approval: OK('all'), env: { FAKE_BREAK: 'customers:needsReview' } })
+    expect(r.status).toBe(1); expect(r.stdout).toMatch(/STOP: customers failed/)
+    expect(r.applies).not.toMatch(/customers|carriers/)
+    const cut = runU(usb(), { approval: OK('all'), env: { FAKE_BREAK: 'backfill-check:afterCutoff' } })
+    expect(cut.status).toBe(1); expect(cut.applies).not.toMatch(/customers|loads/)
+  })
+
+  it('refuses (exit 2) instead of prompting when the backup stamp is stale, and never creates it', () => {
+    const sb = usb()
+    const stamp = join(sb.home, 'bcat-ops-backups', 'LATEST_BACKUP_STAMP')
+    const old = new Date(Date.now() - 8 * 3600 * 1000); utimesSync(stamp, old, old)
+    const r = runU(sb, { approval: OK('all'), args: ['--only', 'customers'] })
+    expect(r.status).toBe(2); expect(r.stdout).toMatch(/never creates it/); expect(r.applies).toBe('')
+    expect(statSync(stamp).mtimeMs).toBeLessThan(Date.now() - 7 * 3600 * 1000)
+    const gone = usb(); rmSync(join(gone.home, 'bcat-ops-backups', 'LATEST_BACKUP_STAMP'))
+    expect(runU(gone, { approval: OK('all'), args: ['--only', 'customers'] }).status).toBe(2)
+    expect(existsSync(join(gone.home, 'bcat-ops-backups', 'LATEST_BACKUP_STAMP'))).toBe(false)
+  })
+
+  it('an approval line is consumed once: a second run under the same line does not re-apply', () => {
+    const sb = usb()
+    const first = runU(sb, { approval: OK('customers'), args: ['--only', 'customers'] })
+    expect(first.status).toBe(0); expect(first.used).toHaveLength(1)
+    expect(first.consumed).toMatch(/^customers\t\S+\t[0-9a-f]{64}\n$/)
+    const second = runU(sb, { approval: OK('customers'), args: ['--only', 'customers', '--fresh-step', 'customers'] })
+    expect(second.status).toBe(2); expect(second.stdout).toMatch(/already used to apply customers/)
+    expect(second.applies.match(/^customers /gm)).toHaveLength(1)
+    const third = runU(sb, { approval: OK('customers,carriers'), args: ['--only', 'customers', '--fresh-step', 'customers'] })
+    expect(third.status).toBe(0); expect(third.applies.match(/^customers /gm)).toHaveLength(2)
+  })
+
+  it('the Keychain canaries never reach a file, a log, results.tsv, the transcript or any fake argv', () => {
+    const sb = usb()
+    const r = runU(sb, { approval: OK('backfill-emergency'), args: ['--only', 'backfill-emergency'], env: { FAKE_LEAK: '1' } })
+    expect(r.status).toBe(0)
+    expect(r.stdout + r.stderr).not.toContain(SEC_PW); expect(r.stdout + r.stderr).not.toContain(SEC_ACCT)
+    const files = [...allFiles(join(sb.home, 'bcat-ops-backups')), ...['argv.log', 'aws.log', 'security.log', 'applies.log'].map((n) => join(sb.dir, n)).filter(existsSync)]
+    expect(files.some((f) => f.endsWith('transcript.log'))).toBe(true)
+    for (const f of files) { const t = readFileSync(f, 'utf8'); expect(t, f).not.toContain(SEC_PW); expect(t, f).not.toContain(SEC_ACCT) }
+    expect(readFileSync(join(r.runDir, 'transcript.log'), 'utf8')).toMatch(/debug leak \[hidden\] \[email\]/)
+    expect(readFileSync(join(sb.dir, 'security.log'), 'utf8')).toMatch(/find-generic-password -s bcat-migration/)
+  })
+
+  it('backfill-emergency: dry run, then the exact apply command under an approval; stops on afterCutoff', () => {
+    const dry = runU(usb(), { args: ['--only', 'backfill-emergency', '--dry-only'] })
+    expect(dry.status).toBe(0); expect(dry.applies).toBe('')
+    expect(dry.results).toMatch(/backfill-emergency\tbackfill_before\.afterCutoff\t0\t0\tPASS/)
+    expect(dry.results).toMatch(/backfill-emergency\tbackfill_before\.totalLoads\t958\t958\tPASS/)
+    expect(dry.results).toMatch(/backfill-emergency\tbackfill_before\.carriedOver\t17\t17\tPASS/)
+    const sb = usb()
+    const r = runU(sb, { approval: OK('backfill-emergency'), args: ['--only', 'backfill-emergency'] })
+    expect(r.status).toBe(0)
+    expect(r.applies).toContain(`backfill confirm=${today()}-backfill`)
+    expect(r.argv).toContain(`backfill --suffix ${PROD} --cutoff 2026-11-07 --allow-empty-shipments --apply`)
+    expect(r.results).toMatch(/backfill-emergency\tbackfill_after\.unmappable\t0\t0\tPASS/)
+    expect(r.state).toMatch(/backfill-emergency\tDONE/)
+    const stop = runU(usb(), { approval: OK('backfill-emergency'), args: ['--only', 'backfill-emergency'], env: { FAKE_BREAK: 'backfill-check:afterCutoff' } })
+    expect(stop.status).toBe(1); expect(stop.applies).toBe('')
+    expect(runU(usb(), { approval: OK('backfill-emergency'), args: ['--only', 'backfill'] }).applies).toBe('')
+  })
+
+  it('--status prints step state, PASS/FAIL counts, the approval state and the log directory without credentials', () => {
+    const sb = usb()
+    runU(sb, { approval: OK('customers'), args: ['--only', 'customers'] })
+    const awsBefore = readFileSync(join(sb.dir, 'aws.log'), 'utf8')
+    const none = runU(sb, { args: ['--status'], env: { FAKE_SEC: 'missing' }, path: lean(sb), unattended: false })
+    expect(none.status).toBe(0)
+    expect(none.stdout).toMatch(/log directory: .*aw-prod-logs/)
+    expect(none.stdout).toMatch(/customers\s+DONE\s+\S+\s+PASS=\d+ FAIL=0/)
+    expect(none.stdout).toMatch(/carriers\s+pending\s+-\s+PASS=0 FAIL=0/)
+    expect(none.stdout).toMatch(/present: no/); expect(none.stdout).toMatch(/last retired approval:/)
+    expect(readFileSync(join(sb.dir, 'aws.log'), 'utf8')).toBe(awsBefore)
+    const present = runU(sb, { approval: OK('ar,customers'), args: ['--status'], unattended: false })
+    expect(present.stdout).toMatch(/present: yes/); expect(present.stdout).toMatch(/steps listed: ar,customers/)
+    expect(present.stdout).toMatch(/consumed under this line: none/)
+    const bad = runU(sb, { approval: OK('ar'), mode: 0o666, args: ['--status'], unattended: false })
+    expect(bad.stdout).toMatch(/usable: no \(the approval file is group\/world-writable/)
+    expect(present.stdout + bad.stdout + none.stdout).not.toContain(SEC_PW)
   })
 })

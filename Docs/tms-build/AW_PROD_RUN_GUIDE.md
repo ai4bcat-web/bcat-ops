@@ -14,7 +14,7 @@ cd /Users/adminoid/bcat-ops
 scripts/awProdRun.sh --suffix 5ucwdyvwivelbo4k4jomvrwel4
 ```
 Options: `--yes-if-all-pass` (apply automatically when every number of a step passes; the table is still printed and the log says `auto-applied`; tax IDs still ask, default N), `--dry-only` (dry runs and the summary, never applies; safe any time), `--from <step>`, `--only <step>`, `--files-dir <dir>`, `--fresh-step <step>` (re-run one step), `--resume` (default), `--expect <step>.<metric>=<value>` (restate a soft expected number on purpose; recorded in results.tsv; stop conditions cannot be restated).
-Steps: `preflight settings backfill-check customers carriers tax-ids loads backfill ap-aging ap-expected ar reconcile`.
+Steps: `preflight settings backfill-check customers carriers tax-ids loads backfill ap-aging ap-expected ar reconcile`, plus the selectable `backfill-emergency` (usable with `--only backfill-emergency` / `--from backfill-emergency`; never part of the default walk, and `steps=all` does not cover it).
 
 ## What you see
 1. `Type the word PRODUCTION to continue:`, then admin e-mail (visible) and password (hidden). They live only in `BCAT_EMAIL` / `BCAT_PASSWORD` of the child processes and are unset on exit. A sign-in is checked; wrong credentials stop the run.
@@ -29,6 +29,36 @@ Just start it again: DONE steps are skipped (state file or the awProd checkpoint
 
 ## Safety
 Refuses root, a non-tty stdin, any suffix but the production one, and anything but the typed word PRODUCTION. Every apply needs the dry run of the same invocation to have passed and sets `AW_PROD_CONFIRM=$(date +%F)-<step>` itself. Test mode for rehearsal checks only: `--target dev|rehearsal` (dry-only is the supported use; applies only for the per-file steps). Test-only `AW_PROD_NONINTERACTIVE=1` reads answers from stdin and credentials from the environment; Ryne uses the prompt.
+
+## Unattended run
+`--unattended` is ADDITIVE: the interactive run above is unchanged. It runs with no TTY and no prompt: credentials come from the macOS Keychain and every "yes" comes from an approval file only you create. Production only (`--target` is refused).
+
+**One-time setup (Ryne).** The Keychain account name IS the sign-in e-mail, and it must be an admin staff user of the production pool (the runner's login), in the page-billingRelease-agnostic admin group (any admin; it needs no billing-release page group):
+```sh
+security add-generic-password -s bcat-migration -a migration-bot@bcatcorp.com -w   # prompts for the password, hidden
+```
+**Approval file (create it only when you approve; the runner never creates it).** One line, today's date in your local timezone; other lines and `#` comments are ignored:
+```sh
+printf 'APPROVED %s steps=all by=ryne\n' "$(date +%F)" > ~/bcat-ops-backups/APPROVAL.production-load && chmod 600 ~/bcat-ops-backups/APPROVAL.production-load
+# only specific steps, e.g. the emergency backfill:
+printf 'APPROVED %s steps=backfill-emergency by=ryne\n' "$(date +%F)" > ~/bcat-ops-backups/APPROVAL.production-load && chmod 600 ~/bcat-ops-backups/APPROVAL.production-load
+```
+`steps=` is a comma list of the runner's step names or `all` (= `settings customers carriers loads backfill ap-aging ap-expected ar reconcile`; `all` never includes `tax-ids` or `backfill-emergency`: list them explicitly, e.g. `steps=all,tax-ids`). `loads` also covers its `stage-export` part.
+
+**Launch.**
+```sh
+scripts/awProdRun.sh --suffix 5ucwdyvwivelbo4k4jomvrwel4 --unattended [--only STEP | --from STEP]
+scripts/awProdRun.sh --status        # run state, PASS/FAIL counts, approval file state, log dir; no credentials, no network; exit 0
+```
+**What it enforces (nothing is weakened).**
+- A missing/empty Keychain item, a missing `security` tool, or a missing/invalid approval is a refusal: exit 2, before any apply (`--dry-only` still works without an approval). The approval must be owned by you and not group/world-writable (`chmod 600`), dated today, with `by=ryne`; any deviation refuses.
+- A STOP CONDITION ALWAYS OVERRIDES THE FILE: the dry run must pass first and every PASS/FAIL expected number is compared exactly as in the interactive run; an approved step with a failing number is not applied (exit 1). `--unattended` only replaces the `y` of `--yes-if-all-pass` for approved steps. `tax-ids` is applied only when listed explicitly AND all numbers pass.
+- It supplies the dated `AW_PROD_CONFIRM` tokens, `BCAT_ALLOW_PROD` and `--confirm-prod` programmatically from today's date, but never creates `LATEST_BACKUP_STAMP`: a missing/stale stamp is a refusal (exit 2). The `prodpre-importAljex*` backups are created automatically only after an approved `customers/carriers/loads/ap-*/ar/reconcile` step needs them.
+- Consumption: each apply is recorded in `~/bcat-ops-backups/aw-prod-logs/APPROVAL.consumed` (step, timestamp, sha256 of the approval line) BEFORE it runs, so a step is applied under one approval line at most once (a crash mid-apply therefore needs a new approval line; re-use the importer/awProd checkpoint to resume). A re-created file with the identical line is still consumed: write the line differently (e.g. another step order). When every listed step is DONE the file is renamed `APPROVAL.production-load.used-<timestamp>`.
+- The password is read into a variable only (`security ... -w`), exported to the child processes only, unset on exit, never put in argv, a file or a log; the transcript scrubber still hides it and the e-mail. `set -x` is turned off.
+- Exit codes: 0 every approved step done and PASS; 1 a stop condition / failed number / failed final check; 2 refusal (credential, approval, backup stamp or sign-in); 3 internal error.
+
+**`backfill-emergency`.** `scripts/awProdRun.sh --suffix 5ucwdyvwivelbo4k4jomvrwel4 --unattended --only backfill-emergency` runs the backfill dry run, then (approved, numbers passing) `node scripts/awProd.mjs backfill --suffix 5ucwdyvwivelbo4k4jomvrwel4 --cutoff 2026-11-07 --allow-empty-shipments --apply` with `AW_PROD_CONFIRM=<today>-backfill`, through the same login. Expected: afterCutoff 0, unmappable 0, ambiguous 0 (hard STOPs); totalLoads 958, carriedOver 17 (soft); verified by the `backfill_after` counts. Resumable via the awProd checkpoint. Afterwards the normal `backfill` step tolerates the already-linked Loads (`alreadyLinked`), and the `loads` step may report ENRICH instead of LINK for them (engine rules are unchanged).
 
 ## UI-only steps (not scripted; verified against `src/App.tsx`, `src/lib/navSections.ts` and the pages)
 Sidebar: Settings = `/tms/brokerage`. Do these signed in as ADMIN, in this order around the load:
