@@ -84,7 +84,7 @@ describe('route wrapping', () => {
     const page: DormantPageKey | null = dormantPageForPath(r.full)
     const wrappedBy = /<DormantPage page="(\w+)"/.exec(r.text)?.[1] ?? null
     if (page) {
-      expect(wrappedBy, `${r.full} needs a stage 2-4 model: wrap it in <DormantPage page="${page}">`).toBe(page)
+      expect(wrappedBy, `${r.full} needs a stage 1-3 model: wrap it in <DormantPage page="${page}">`).toBe(page)
       return
     }
     expect(wrappedBy, `${r.full} is not in the dormant table but is wrapped`).toBeNull()

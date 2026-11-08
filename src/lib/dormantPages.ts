@@ -19,7 +19,7 @@ export interface DormantPageDef {
   /** The models the page reads on load. */
   models: readonly string[]
   /** The schema stage that deploys the last of them. */
-  stage: 2 | 3 | 4
+  stage: 1 | 2 | 3
   /** Where the empty state's link goes; default is the Company Dashboard. */
   back?: { to: string; label: string }
 }
@@ -29,30 +29,30 @@ const SHIPMENT_CORE = ['Shipment', 'Order', 'LoadCarrier', 'LoadFinancials'] as 
 const PRODUCTION_DASHBOARD = { to: '/dashboard', label: 'Open the Dashboard' } as const
 
 export const DORMANT_PAGES = {
-  dashboard: { area: 'Company Dashboard', models: [...SHIPMENT_CORE, 'Invoice', 'CarrierBill', 'DashboardRollup'], stage: 4, back: PRODUCTION_DASHBOARD },
-  shipments: { area: 'Shipments', models: SHIPMENT_CORE, stage: 3 },
-  intake: { area: 'Intake', models: ['IntakeLoad', 'Shipment'], stage: 3 },
-  carrierSales: { area: 'Carrier Sales', models: ['Shipment', 'LoadCarrier', 'Quote', 'Carrier'], stage: 3 },
-  tracking: { area: 'Load Tracking', models: ['Shipment', 'LoadCarrier', 'TrackingLink', 'LoadCheckCall'], stage: 3 },
-  loadReview: { area: 'Load Review', models: ['Shipment', 'Order', 'LoadFinancials'], stage: 3 },
-  quotes: { area: 'Quotes', models: ['Quote'], stage: 3 },
-  invoicingAr: { area: 'Accounts Receivable', models: ['Shipment', 'Order', 'Invoice', 'ArPayment'], stage: 4 },
-  invoicingAp: { area: 'Accounts Payable', models: ['Shipment', 'LoadCarrier', 'CarrierBill', 'ApPayment'], stage: 4 },
-  carriers: { area: 'Carriers', models: ['Carrier', 'CarrierContact', 'CarrierPaymentMethod', 'CarrierDocument'], stage: 2 },
-  carrierProfile: { area: 'Carriers', models: ['Carrier', 'CarrierContact', 'CarrierPaymentMethod', 'CarrierDocument', 'LoadCarrier'], stage: 3 },
-  billingSetup: { area: 'Billing setup', models: ['Shipment', 'Order'], stage: 3 },
-  workflows: { area: 'Workflows', models: ['WorkflowRun', 'Shipment', 'TrackingLink'], stage: 4 },
-  commissions: { area: 'Commissions', models: ['Commission', 'CommissionPayPeriod'], stage: 2 },
-  reports: { area: 'Reports', models: [...SHIPMENT_CORE, 'Invoice', 'CarrierBill', 'Commission', 'LaneRateSample'], stage: 4 },
-  divisions: { area: 'Divisions & ownership', models: ['OwnershipDivision', 'OwnershipRule'], stage: 2 },
-  integrations: { area: 'Integrations', models: ['Integration'], stage: 2 },
-  aiAgents: { area: 'AI agents', models: ['WorkflowRun'], stage: 4 },
-  spotQuoter: { area: 'Spot quoter & e-mail', models: ['SpotSettings', 'GmailConnection', 'SpotRequest'], stage: 2 },
-  demo: { area: 'Demo', models: ['DemoRecord'], stage: 4 },
-  dataImport: { area: 'Data import', models: ['ImportJob'], stage: 4 },
-  aljexImport: { area: 'Aljex import', models: ['AljexImportJob', 'AljexMappingProfile', 'LegacyAljexRow', 'AljexCodeMap'], stage: 4 },
-  aljexReconciliation: { area: 'Aljex reconciliation', models: ['AljexImportJob', 'LegacyAljexRow', 'AljexCodeMap'], stage: 4 },
-  dataSafety: { area: 'Data safety', models: ['DataExportJob'], stage: 4 },
+  dashboard: { area: 'Company Dashboard', models: [...SHIPMENT_CORE, 'Invoice', 'CarrierBill', 'DashboardRollup'], stage: 3, back: PRODUCTION_DASHBOARD },
+  shipments: { area: 'Shipments', models: SHIPMENT_CORE, stage: 2 },
+  intake: { area: 'Intake', models: ['IntakeLoad', 'Shipment'], stage: 2 },
+  carrierSales: { area: 'Carrier Sales', models: ['Shipment', 'LoadCarrier', 'Quote', 'Carrier'], stage: 2 },
+  tracking: { area: 'Load Tracking', models: ['Shipment', 'LoadCarrier', 'TrackingLink', 'LoadCheckCall'], stage: 2 },
+  loadReview: { area: 'Load Review', models: ['Shipment', 'Order', 'LoadFinancials'], stage: 2 },
+  quotes: { area: 'Quotes', models: ['Quote'], stage: 2 },
+  invoicingAr: { area: 'Accounts Receivable', models: ['Shipment', 'Order', 'Invoice', 'ArPayment'], stage: 3 },
+  invoicingAp: { area: 'Accounts Payable', models: ['Shipment', 'LoadCarrier', 'CarrierBill', 'ApPayment'], stage: 3 },
+  carriers: { area: 'Carriers', models: ['Carrier', 'CarrierContact', 'CarrierPaymentMethod', 'CarrierDocument'], stage: 1 },
+  carrierProfile: { area: 'Carriers', models: ['Carrier', 'CarrierContact', 'CarrierPaymentMethod', 'CarrierDocument', 'LoadCarrier'], stage: 2 },
+  billingSetup: { area: 'Billing setup', models: ['Shipment', 'Order'], stage: 2 },
+  workflows: { area: 'Workflows', models: ['WorkflowRun', 'Shipment', 'TrackingLink'], stage: 3 },
+  commissions: { area: 'Commissions', models: ['Commission', 'CommissionPayPeriod'], stage: 1 },
+  reports: { area: 'Reports', models: [...SHIPMENT_CORE, 'Invoice', 'CarrierBill', 'Commission', 'LaneRateSample'], stage: 3 },
+  divisions: { area: 'Divisions & ownership', models: ['OwnershipDivision', 'OwnershipRule'], stage: 1 },
+  integrations: { area: 'Integrations', models: ['Integration'], stage: 1 },
+  aiAgents: { area: 'AI agents', models: ['WorkflowRun'], stage: 3 },
+  spotQuoter: { area: 'Spot quoter & e-mail', models: ['SpotSettings', 'GmailConnection', 'SpotRequest'], stage: 1 },
+  demo: { area: 'Demo', models: ['DemoRecord'], stage: 3 },
+  dataImport: { area: 'Data import', models: ['ImportJob'], stage: 3 },
+  aljexImport: { area: 'Aljex import', models: ['AljexImportJob', 'AljexMappingProfile', 'LegacyAljexRow', 'AljexCodeMap'], stage: 3 },
+  aljexReconciliation: { area: 'Aljex reconciliation', models: ['AljexImportJob', 'LegacyAljexRow', 'AljexCodeMap'], stage: 3 },
+  dataSafety: { area: 'Data safety', models: ['DataExportJob'], stage: 3 },
 } as const satisfies Record<string, DormantPageDef>
 
 export type DormantPageKey = keyof typeof DORMANT_PAGES

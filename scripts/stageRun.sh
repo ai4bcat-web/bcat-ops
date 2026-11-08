@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Grow an Amplify branch's schema stage by stage (Docs/tms-build/AW_STAGED_DEPLOY.md).
-# usage: scripts/stageRun.sh <branch> <fromStage> <toStage>   (e.g. rehearsal2 2 5)
+# usage: scripts/stageRun.sh <branch> <fromStage> <toStage>   (e.g. rehearsal2 1 4)
 # Waits for any running job first, then for each k: sets BCAT_SCHEMA_STAGE=k (preserving the other branch env vars),
 # starts a RELEASE job, waits for SUCCEED, prints the elapsed time. Stops at the first failure. Never lowers a stage.
 # DEV/REHEARSAL BRANCHES ONLY: refuses `main`.

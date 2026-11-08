@@ -1,6 +1,6 @@
 # AW: dormant pages while the schema stages deploy
 
-Production receives the merged frontend at `BCAT_SCHEMA_STAGE=0` (see `AW_STAGED_DEPLOY.md`). Until stage 2, 3 and 4 deploy, their models are not in the AppSync schema, and a query on one is a GraphQL validation error. Ryne's rule: a page whose tables do not exist yet shows a clear empty state, never an error screen, and every production page keeps working exactly as today.
+Production receives the merged frontend at `BCAT_SCHEMA_STAGE=0` (see `AW_STAGED_DEPLOY.md`). Until stages 1, 2 and 3 deploy, their models are not in the AppSync schema, and a query on one is a GraphQL validation error. Ryne's rule: a page whose tables do not exist yet shows a clear empty state, never an error screen, and every production page keeps working exactly as today.
 
 ## How it works
 
@@ -13,30 +13,30 @@ Production receives the merged frontend at `BCAT_SCHEMA_STAGE=0` (see `AW_STAGED
 
 | Key | Page (routes) | Models | Stage |
 |---|---|---|---|
-| dashboard | Company Dashboard (`/tms/dashboard`, `d/:id`, `new`, `d/:id/edit`) | Shipment, Order, LoadCarrier, LoadFinancials, Invoice, CarrierBill, DashboardRollup | 4 |
-| shipments | Shipments board, new, edit, detail (`/tms/shipments`, `new`, `:id`, `:id/edit`) | Shipment, Order, LoadCarrier, LoadFinancials | 3 |
-| intake | Intake board and review (`/tms/shipments/intake[/:id]`) | IntakeLoad, Shipment | 3 |
-| carrierSales | Carrier Sales (`/tms/carrier-sales`) | Shipment, LoadCarrier, Quote, Carrier | 3 |
-| tracking | Load Tracking, Customer links (`/tms/tracking[/links]`) | Shipment, LoadCarrier, TrackingLink, LoadCheckCall | 3 |
-| loadReview | Load Review (`/tms/load-review`) | Shipment, Order, LoadFinancials | 3 |
-| quotes | Quotes, Spot inbox, callback, new, detail (`/tms/rates/*`) | Quote | 3 |
-| invoicingAr | Accounts Receivable, invoice detail (`/tms/invoicing[/invoices/:id]`) | Shipment, Order, Invoice, ArPayment | 4 |
-| invoicingAp | Accounts Payable, bill detail (`/tms/invoicing/payable[/bills/:id]`) | Shipment, LoadCarrier, CarrierBill, ApPayment | 4 |
-| carriers | Carrier list, Find and invite (`/tms/carriers`, `/find`) | Carrier, CarrierContact, CarrierPaymentMethod, CarrierDocument | 2 |
-| carrierProfile | Carrier profile (`/tms/carriers/:id`) | the four above + LoadCarrier | 3 |
-| billingSetup | Customers > Billing setup (`/tms/customers/billing-setup`) | Shipment, Order | 3 |
-| workflows | Workflows and run trace (`/tms/workflows[/runs/:id]`) | WorkflowRun, Shipment, TrackingLink | 4 |
-| commissions | Settings > Commissions | Commission, CommissionPayPeriod | 2 |
-| reports | Settings > Reports | shipment core, Invoice, CarrierBill, Commission, LaneRateSample | 4 |
-| divisions | Settings > Divisions & ownership | OwnershipDivision, OwnershipRule | 2 |
-| integrations | Settings > Integrations | Integration | 2 |
-| aiAgents | Settings > AI agents | WorkflowRun | 4 |
-| spotQuoter | Settings > Spot quoter & e-mail | SpotSettings, GmailConnection, SpotRequest | 2 |
-| demo | Settings > Demo | DemoRecord | 4 |
-| dataImport | Settings > Company > Import | ImportJob | 4 |
-| aljexImport | Settings > Company > Aljex import | AljexImportJob, AljexMappingProfile, LegacyAljexRow, AljexCodeMap | 4 |
-| aljexReconciliation | Settings > Company > Data > Aljex reconciliation | AljexImportJob, LegacyAljexRow, AljexCodeMap | 4 |
-| dataSafety | Settings > Company > Data & backups | DataExportJob | 4 |
+| dashboard | Company Dashboard (`/tms/dashboard`, `d/:id`, `new`, `d/:id/edit`) | Shipment, Order, LoadCarrier, LoadFinancials, Invoice, CarrierBill, DashboardRollup | 3 |
+| shipments | Shipments board, new, edit, detail (`/tms/shipments`, `new`, `:id`, `:id/edit`) | Shipment, Order, LoadCarrier, LoadFinancials | 2 |
+| intake | Intake board and review (`/tms/shipments/intake[/:id]`) | IntakeLoad, Shipment | 2 |
+| carrierSales | Carrier Sales (`/tms/carrier-sales`) | Shipment, LoadCarrier, Quote, Carrier | 2 |
+| tracking | Load Tracking, Customer links (`/tms/tracking[/links]`) | Shipment, LoadCarrier, TrackingLink, LoadCheckCall | 2 |
+| loadReview | Load Review (`/tms/load-review`) | Shipment, Order, LoadFinancials | 2 |
+| quotes | Quotes, Spot inbox, callback, new, detail (`/tms/rates/*`) | Quote | 2 |
+| invoicingAr | Accounts Receivable, invoice detail (`/tms/invoicing[/invoices/:id]`) | Shipment, Order, Invoice, ArPayment | 3 |
+| invoicingAp | Accounts Payable, bill detail (`/tms/invoicing/payable[/bills/:id]`) | Shipment, LoadCarrier, CarrierBill, ApPayment | 3 |
+| carriers | Carrier list, Find and invite (`/tms/carriers`, `/find`) | Carrier, CarrierContact, CarrierPaymentMethod, CarrierDocument | 1 |
+| carrierProfile | Carrier profile (`/tms/carriers/:id`) | the four above + LoadCarrier | 2 |
+| billingSetup | Customers > Billing setup (`/tms/customers/billing-setup`) | Shipment, Order | 2 |
+| workflows | Workflows and run trace (`/tms/workflows[/runs/:id]`) | WorkflowRun, Shipment, TrackingLink | 3 |
+| commissions | Settings > Commissions | Commission, CommissionPayPeriod | 1 |
+| reports | Settings > Reports | shipment core, Invoice, CarrierBill, Commission, LaneRateSample | 3 |
+| divisions | Settings > Divisions & ownership | OwnershipDivision, OwnershipRule | 1 |
+| integrations | Settings > Integrations | Integration | 1 |
+| aiAgents | Settings > AI agents | WorkflowRun | 3 |
+| spotQuoter | Settings > Spot quoter & e-mail | SpotSettings, GmailConnection, SpotRequest | 1 |
+| demo | Settings > Demo | DemoRecord | 3 |
+| dataImport | Settings > Company > Import | ImportJob | 3 |
+| aljexImport | Settings > Company > Aljex import | AljexImportJob, AljexMappingProfile, LegacyAljexRow, AljexCodeMap | 3 |
+| aljexReconciliation | Settings > Company > Data > Aljex reconciliation | AljexImportJob, LegacyAljexRow, AljexCodeMap | 3 |
+| dataSafety | Settings > Company > Data & backups | DataExportJob | 3 |
 
 A page flips on at the stage of its last model. Not in the table (production models only, they keep rendering): Customers, Locations, Vendors, Factoring, Settings (general), Users, Audit, Company / Billing / Branding / Notifications / Account, Carrier Sales settings, and every non-`/tms` production page (Dispatch, Calendar, Driver info, Hours, Time off, Files, Fleet, Fuel, Maintenance, Insurance, Appts, Tasks, Reddit queue, Feedback, Compliance, Finances, ...).
 
@@ -54,4 +54,4 @@ A page flips on at the stage of its last model. Not in the table (production mod
 
 ## How it flips on
 
-Nothing to do by hand. Each stage's build regenerates `amplify_outputs.json`, whose `data.model_introspection.models` then lists that stage's models; the new bundle's `modelsAvailable` answers true, the empty states give way to the real pages, the sidebar rows and lifecycle steps enable themselves, and the seeded flags read the tables. Stage 2 enables Carriers (list/find), Divisions, Integrations, Commissions and Spot quoter settings; stage 3 the shipment lifecycle (Quote to Review), Carrier profile and Billing setup; stage 4 the Company Dashboard, AR/AP, Workflows, Reports, AI agents, Demo and the import/Aljex/data pages. A browser tab opened before the stage deployed picks it up through the existing update banner.
+Nothing to do by hand. Each stage's build regenerates `amplify_outputs.json`, whose `data.model_introspection.models` then lists that stage's models; the new bundle's `modelsAvailable` answers true, the empty states give way to the real pages, the sidebar rows and lifecycle steps enable themselves, and the seeded flags read the tables. Stage 1 enables Carriers (list/find), Divisions, Integrations, Commissions and Spot quoter settings; stage 2 the shipment lifecycle (Quote to Review), Carrier profile and Billing setup; stage 3 the Company Dashboard, AR/AP, Workflows, Reports, AI agents, Demo and the import/Aljex/data pages. A browser tab opened before the stage deployed picks it up through the existing update banner.
