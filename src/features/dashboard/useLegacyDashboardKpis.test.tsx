@@ -29,7 +29,7 @@ vi.mock('./ComplianceAlertsWidget', () => { return { ComplianceAlertsWidget: () 
 vi.mock('./RepairInvoicesWidget', () => { return { RepairInvoicesWidget: () => <div data-testid="widget-RepairInvoicesWidget" /> } })
 
 const { useAppStore } = await import('@/store/useAppStore')
-const { useLegacyDashboardKpis } = await import('./useLegacyDashboardKpis')
+const { useLegacyDashboardKpis, usableLegacyRows } = await import('./useLegacyDashboardKpis')
 const { DashboardPage } = await import('./DashboardPage')
 
 const drivers = [
@@ -42,7 +42,7 @@ const drivers = [
 // Midday UTC: the same calendar day in Chicago and in the browser's zone, so the store
 // arithmetic (local days) and the rollup (Chicago days) are comparable in any CI zone.
 const PICKUPS = [
-  '2026-09-28T17:00:00Z', '2026-10-05T17:00:00Z', '2026-10-27T17:00:00Z', '2026-10-30T17:00:00Z',
+  '2026-07-14T17:00:00Z', '2026-08-18T17:00:00Z', '2026-09-28T17:00:00Z', '2026-10-05T17:00:00Z', '2026-10-27T17:00:00Z', '2026-10-30T17:00:00Z',
   '2026-11-02T17:00:00Z', '2026-11-03T17:00:00Z', '2026-11-04T17:00:00Z', '2026-11-12T17:00:00Z',
 ]
 const PAIRS: Array<[string | null, string | null]> = [['ivan', 'ivan'], ['oo', null], [null, 'box'], ['brk', 'ivan'], [null, 'brk'], [null, null]]
@@ -195,6 +195,48 @@ describe('useLegacyDashboardKpis', () => {
     const second = renderHook(() => useLegacyDashboardKpis('this-month'))
     expect(second.result.current.source).toBe('cache')
     expect(second.result.current.kpis).toEqual(legacyKpisFromLoads(rows.loads, drivers, win))
+  })
+})
+
+describe('empty LG rows (the stage-3 incident)', () => {
+  const emptyRow = (m: string): RawRollupRow => ({
+    id: `LG:${m}`, kind: 'LG', periodKey: m, schemaVersion: 1, computedAt: NOW,
+    payload: { v: 1, days: {} }, sourceCounts: { shipments: 0 },
+  })
+
+  it('rows computed from an empty Shipment table are not trusted: exact path shows the store loads, not zeros', async () => {
+    const rows = fixture()
+    const win = legacyWindow('this-month', new Date(NOW))
+    const months = monthsCovering(win.prevFrom, win.to, 0)
+    readRollupRows.mockReturnValue({ fresh: Promise.resolve(months.map(emptyRow)) })
+    seedStore({ loads: rows.loads, loadedMonths: new Set(monthsCovering(win.prevFrom, win.to, 1)) })
+    const { result } = renderHook(() => useLegacyDashboardKpis('this-month'))
+    await waitFor(() => expect(result.current.source).toBe('live'))
+    const exact = legacyKpisFromLoads(rows.loads, drivers, win)
+    expect(exact.totalLoads).toBeGreaterThan(0)
+    expect(result.current.kpis).toEqual(exact)
+    expect(result.current.kpis?.totalLoads).not.toBe(0)
+  })
+})
+
+describe('usableLegacyRows', () => {
+  const NOW_MS = Date.parse(NOW)
+  const lg = (month: string, extra: Partial<RawRollupRow> = {}): RawRollupRow => ({
+    id: `LG:${month}`, kind: 'LG', periodKey: month, schemaVersion: 1, computedAt: NOW,
+    payload: { v: 1, days: { [`${month}-02`]: {} } }, ...extra,
+  })
+
+  it('a month with no counted days is not trusted, however it was computed', () => {
+    expect(usableLegacyRows([lg('2026-10', { payload: { v: 1, days: {} } })], ['2026-10'], NOW_MS)).toBeNull()
+  })
+
+  it('a month with days stays usable, with or without sourceCounts', () => {
+    expect(usableLegacyRows([lg('2026-10')], ['2026-10'], NOW_MS)?.payloads).toHaveLength(1)
+    expect(usableLegacyRows([lg('2026-10', { sourceCounts: { shipments: 3, loads: 4 } })], ['2026-10'], NOW_MS)?.payloads).toHaveLength(1)
+  })
+
+  it('an empty-source row is not trusted even when its payload has days', () => {
+    expect(usableLegacyRows([lg('2026-10', { sourceCounts: { shipments: 0 } })], ['2026-10'], NOW_MS)).toBeNull()
   })
 })
 

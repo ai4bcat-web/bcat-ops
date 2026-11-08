@@ -10,6 +10,7 @@ import {
   recomputeKey,
   runBackfill,
   runSweep,
+  libComputes,
   type Computes,
   type RollupDeps,
 } from './handler'
@@ -52,7 +53,7 @@ function harness(opts: { store?: ReturnType<typeof fakeStore>; computes?: Partia
   const computes: Computes = {
     month: vi.fn(async (_s, month) => monthPayload(month)),
     live: vi.fn(async () => ({ v: 1 as const, ar: { '|': { n: 1, c: 100 } }, ap: {} })),
-    legacy: vi.fn(async () => ({ v: 1 as const, days: {} })),
+    legacy: vi.fn(async (_s, month) => ({ v: 1 as const, days: { [`${month}-02`]: { 'a|b': { n: 1, rev: 100, rated: 1 } } } })),
     ...opts.computes,
   }
   const deps: RollupDeps = {
@@ -150,6 +151,75 @@ describe('recomputeKey', () => {
     const { deps } = harness({ store })
     expect(await recomputeKey(deps, 'M:2026-11', { respectMinInterval: true })).toBe('throttled')
     expect(await recomputeKey(deps, 'M:2026-11', { respectMinInterval: false })).toBe('written')
+  })
+})
+
+describe('empty source (the stage-3 incident: rows computed from an empty Shipment table)', () => {
+  const emptySource: RollupSource = {
+    shipments: async () => [],
+    loadsOf: async () => [],
+    samples: async () => [],
+    deliveredOrders: async () => [],
+    openInvoices: async () => [],
+    openBills: async () => [],
+    shipmentsByIds: async () => [],
+  } as unknown as RollupSource
+  const withRealComputes = (store: ReturnType<typeof fakeStore>, source: RollupSource) => {
+    const { deps } = harness({ store })
+    return { ...deps, source, computes: libComputes }
+  }
+  const existingRow = (id: string): RollupRow => ({ id, kind: id.split(':')[0]!, periodKey: id.split(':')[1]!, schemaVersion: 1, payload: '{"old":true}', computedAt: '2026-11-01T00:00:00.000Z', version: 3 })
+
+  it.each(['M:2026-11', 'LG:2026-11', 'L:CURRENT'])('%s: writes nothing, clears the marker, releases the lease, leaves an existing row alone', async (key) => {
+    const store = fakeStore([existingRow(key)])
+    await store.markDirty(key, '2026-11-04T14:59:00.000Z')
+    const deps = withRealComputes(store, emptySource)
+    expect(await recomputeKey(deps, key, { respectMinInterval: false })).toBe('empty-source')
+    expect(store.rows.get(key)).toEqual(existingRow(key))
+    expect(store.rows.has(`D:${key}`)).toBe(false)
+    expect(await store.acquireLease(key, Math.floor(NOW.getTime() / 1000), 120)).toBe(true)
+  })
+
+  it('writes no row at all when none existed', async () => {
+    const store = fakeStore()
+    const deps = withRealComputes(store, emptySource)
+    for (const key of ['M:2026-11', 'LG:2026-11', 'L:CURRENT']) await recomputeKey(deps, key, { respectMinInterval: false })
+    expect([...store.rows.keys()].filter((id) => !id.startsWith('K:') && !id.startsWith('D:'))).toEqual([])
+  })
+
+  it('an LG month with shipments but no loads is not written; a month with a load is', async () => {
+    const ship = { id: 's1', pickupAppt: '2026-11-03T17:00:00Z', pickupMonth: '2026-11', status: 'BOOKED' }
+    const noLoads = { ...emptySource, shipments: async () => [ship] } as unknown as RollupSource
+    const store = fakeStore()
+    expect(await recomputeKey(withRealComputes(store, noLoads), 'LG:2026-11', { respectMinInterval: false })).toBe('empty-source')
+    expect(store.rows.has('LG:2026-11')).toBe(false)
+
+    const withLoad = { ...noLoads, loadsOf: async () => [{ id: 'l1', shipmentId: 's1', pickupAppt: '2026-11-03T17:00:00Z', rate: 100_000 }] } as unknown as RollupSource
+    expect(await recomputeKey(withRealComputes(store, withLoad), 'LG:2026-11', { respectMinInterval: false })).toBe('written')
+    expect(JSON.parse(store.rows.get('LG:2026-11')!.payload as string).days).not.toEqual({})
+  })
+
+  it('a month with shipments is still written, with its sourceCounts', async () => {
+    const ship = { id: 's1', pickupAppt: '2026-11-03T17:00:00Z', pickupMonth: '2026-11', status: 'BOOKED' }
+    const source = { ...emptySource, shipments: async () => [ship] } as unknown as RollupSource
+    const store = fakeStore()
+    expect(await recomputeKey(withRealComputes(store, source), 'M:2026-11', { respectMinInterval: false })).toBe('written')
+    expect(JSON.parse(store.rows.get('M:2026-11')!.sourceCounts as string).shipments).toBe(1)
+  })
+
+  it('is counted as skipped, not written and not failed, in the sweep and backfill summaries', async () => {
+    const store = fakeStore()
+    const deps = withRealComputes(store, emptySource)
+    const summary = await runBackfill(deps, { from: '2026-10', to: '2026-11' })
+    expect(summary.written).toEqual([])
+    expect(summary.failed).toEqual([])
+    expect(summary.skipped.map((s) => s.why)).toEqual(Array(5).fill('empty-source'))
+    const sweep = await runSweep(deps)
+    expect(sweep.failed).toEqual([])
+    expect(sweep.written).toEqual([])
+    // One pass per key, bounded: the sweep walks each month once however many stay empty.
+    expect(sweep.skipped.length).toBeLessThan(2 * 40 + 2)
+    expect(new Set(sweep.skipped.map((s) => s.key)).size).toBe(sweep.skipped.length)
   })
 })
 

@@ -5,7 +5,7 @@ import { batchGet } from '@/lib/aliasBatch'
 import { modelAvailable } from '@/lib/modelAvailability'
 import { peekList, readList } from '@/lib/listCache'
 import {
-  LIVE_ROW_ID, ROLLUP_SCHEMA_VERSION, rollupMonthsFor,
+  LIVE_ROW_ID, ROLLUP_SCHEMA_VERSION, rollupMonthsFor, rollupSourceEmpty,
   type DivisionInput, type LivePayload, type MonthPayload, type RollupRow, type RollupWindow,
 } from '@/lib/dashboardRollup'
 
@@ -15,7 +15,7 @@ export const ROLLUP_MAX_AGE_MS = 30 * 60 * 1000
 export const ROLLUP_STALE_MS = 10 * 60 * 1000
 
 const CACHE_OPTS = { ttlMs: 60_000, staleMs: 600_000 }
-const FIELDS = 'id kind periodKey schemaVersion payload computedAt'
+const FIELDS = 'id kind periodKey schemaVersion payload computedAt sourceCounts'
 
 /** One stored row as read: the payload already parsed, nothing validated. */
 export interface RawRollupRow {
@@ -25,9 +25,11 @@ export interface RawRollupRow {
   schemaVersion: number | null
   payload: unknown
   computedAt: string | null
+  /** Per-source row counts the Lambda computed the row from (parsed; absent on old rows). */
+  sourceCounts?: unknown
 }
 
-type WireRow = Omit<RawRollupRow, 'payload'> & { payload: unknown }
+type WireRow = Omit<RawRollupRow, 'payload' | 'sourceCounts'> & { payload: unknown; sourceCounts?: unknown }
 
 /** AWSJSON arrives as a JSON string, and the Lambda stores a string already: decode until an object comes out. */
 function parsePayload(payload: unknown): unknown {
@@ -46,7 +48,7 @@ async function fetchRows(ids: string[]): Promise<RawRollupRow[]> {
   if (!modelAvailable('DashboardRollup')) return []
   const rows = await batchGet<WireRow>({ query: 'getDashboardRollup', fields: FIELDS }, ids)
   // 'DASH:' rows are conversational-dashboard specs (Step AI) sharing this table: never rollup data.
-  return [...rows.values()].filter((row) => !row.id.startsWith('DASH:')).map((row) => ({ ...row, payload: parsePayload(row.payload) }))
+  return [...rows.values()].filter((row) => !row.id.startsWith('DASH:')).map((row) => ({ ...row, payload: parsePayload(row.payload), sourceCounts: parsePayload(row.sourceCounts) }))
 }
 
 /**
@@ -59,9 +61,10 @@ export function readRollupRows(ids: string[]): { value?: RawRollupRow[]; fresh: 
   return readList(rowsKey(sorted), () => fetchRows(sorted), CACHE_OPTS)
 }
 
-/** Known schema, a payload and a parseable `computedAt` no older than 30 minutes. */
+/** Known schema, a payload, computed from a non-empty source, and a parseable `computedAt` no older than 30 minutes. */
 export function isUsableRow(row: RawRollupRow, now = Date.now()): boolean {
   if (row.schemaVersion !== ROLLUP_SCHEMA_VERSION || !row.payload || typeof row.payload !== 'object') return false
+  if (rollupSourceEmpty(row.sourceCounts)) return false
   const at = row.computedAt ? Date.parse(row.computedAt) : NaN
   return Number.isFinite(at) && now - at <= ROLLUP_MAX_AGE_MS
 }
@@ -92,7 +95,7 @@ export function windowFromRows(rows: readonly RawRollupRow[], from: string, to: 
       if (month > current) continue
       return null
     }
-    const known = row.schemaVersion === ROLLUP_SCHEMA_VERSION && !!row.payload && typeof row.payload === 'object'
+    const known = row.schemaVersion === ROLLUP_SCHEMA_VERSION && !!row.payload && typeof row.payload === 'object' && !rollupSourceEmpty(row.sourceCounts)
     if (!known || (recent.has(month) && !isUsableRow(row, now)) || !row.computedAt) return null
     months.push({ id: row.id, schemaVersion: row.schemaVersion as number, computedAt: row.computedAt, payload: row.payload as MonthPayload })
   }
