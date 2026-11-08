@@ -127,13 +127,46 @@ export function buildChecks({ date, reportsDir, tmp = tmpdir(), exportDir = EXPO
     if (existsSync(unresolved)) for (const r of parseCsv(readFileSync(unresolved, 'utf8')).slice(1)) add('open AR gap', r[0], `in the Aljex AR report (${dollars(Math.round(Number(r[2]) * 100))} open, account ${r[1] || '(none)'}) but BCAT has no matching open invoice: ${r[3]}`, 'Link the PRO/customer or invoice it');
   } else add('open AR gap', '(none yet)', 'AR and reconcile have not both run', 'run AR + reconcile first');
 
-  // 5b. AP bills in the Aljex AP aging that BCAT cannot place (no carrier leg, or the leg has another carrier)
-  const apUnresolved = newestRunFile(tmp, 'runs', 'ap-aging-unresolved.csv', (p) => parseCsv(readFileSync(p, 'utf8')).length);
-  if (apUnresolved) {
-    for (const r of parseCsv(readFileSync(apUnresolved, 'utf8')).slice(1)) {
-      add('AP_UNRESOLVED', r[0], `in the Aljex AP aging (${dollars(Math.round(Number(r[2]) * 100))}, vendor ${r[1]}) but BCAT cannot place it: ${r[3]}`, 'Assign the carrier leg on the load and enter the bill');
-    }
+  // 5b. AP bills in the Aljex AP aging that BCAT cannot place (no carrier leg, or the leg has another carrier).
+  // The reports file (named, with carrier and suggested action) wins; the importer's run file is the fallback.
+  const apUnresolvedReport = readdirSyncSafe(reportsDir).filter((n) => /^ap-unresolved-.*\.csv$/.test(n)).sort().pop();
+  const apUnresolvedRun = newestRunFile(tmp, 'runs', 'ap-aging-unresolved.csv', (p) => parseCsv(readFileSync(p, 'utf8')).length);
+  const apSuggested = 'Assign the carrier leg on the load and enter the bill';
+  if (apUnresolvedReport) {
+    const [h, ...body] = parseCsv(readFileSync(join(reportsDir, apUnresolvedReport), 'utf8'));
+    const ix = (n) => h.indexOf(n);
+    for (const r of body) add('AP_UNRESOLVED', r[ix('PRO')], `in the Aljex AP aging (${dollars(Math.round(Number(r[ix('amount')]) * 100))}, ${r[ix('carrier')]}) but BCAT cannot place it: ${r[ix('reason')]}`, r[ix('suggested action')] || apSuggested);
+  } else if (apUnresolvedRun) {
+    for (const r of parseCsv(readFileSync(apUnresolvedRun, 'utf8')).slice(1)) add('AP_UNRESOLVED', r[0], `in the Aljex AP aging (${dollars(Math.round(Number(r[2]) * 100))}, vendor ${r[1]}) but BCAT cannot place it: ${r[3]}`, apSuggested);
   } else add('AP_UNRESOLVED', '(none yet)', 'ap-aging has not been planned or applied', 'run ap-aging first');
+
+  // 5c. open BCAT bills that are on no Aljex list (reconcile-ap BCAT_ONLY rows), split by the dropped stale expected rows
+  const apRecon = newestRunFile(tmp, 'runs', 'reconcile-ap.csv', (p) => parseCsv(readFileSync(p, 'utf8')).length);
+  if (apRecon) {
+    const staleFile = join(exportDir, readdirSyncSafe(exportDir).filter((n) => /^ap-expected-stale-.*\.csv$/.test(n)).sort().pop() ?? 'ap-expected-stale.csv');
+    const keyOf = (pro) => String(pro ?? '').replace(/\D/g, '').replace(/^0+/, '');
+    const stale = new Set(existsSync(staleFile) ? parseCsv(readFileSync(staleFile, 'utf8')).slice(1).map((r) => keyOf(r[2])) : []);
+    const expectedFile = join(exportDir, readdirSyncSafe(exportDir).filter((n) => /^aljex-ap-expected-.*\.csv$/.test(n)).sort().pop() ?? 'aljex-ap-expected.csv');
+    const expected = new Set(existsSync(expectedFile) ? parseCsv(readFileSync(expectedFile, 'utf8')).slice(1).map((r) => keyOf(r[2])).filter((k) => !stale.has(k)) : []);
+    const [h, ...body] = parseCsv(readFileSync(apRecon, 'utf8'));
+    const ix = (n) => h.indexOf(n);
+    const tally = { expected: [0, 0], stale: [0, 0], none: [0, 0] };
+    for (const r of body) {
+      if (r[ix('outcome')] !== 'BCAT_ONLY') continue;
+      const k = keyOf(r[ix('pro')]);
+      const t = expected.has(k) ? tally.expected : stale.has(k) ? tally.stale : tally.none;
+      t[0] += 1; t[1] += Math.round(Number(r[ix('bcat_balance')]) * 100);
+    }
+    add('AP open gap', 'total', `open BCAT bills not in the AP aging: ${tally.expected[0]} on the AP expected list (${dollars(tally.expected[1])}), ${tally.stale[0]} on dropped stale expected rows (${dollars(tally.stale[1])}), ${tally.none[0]} on no Aljex list (${dollars(tally.none[1])}); all stay OPEN`, 'Explains BCAT open AP being higher than the AP aging total; the 8 AP_UNRESOLVED bills are the other side');
+    for (const r of body) {
+      if (r[ix('outcome')] !== 'BCAT_ONLY') continue;
+      const k = keyOf(r[ix('pro')]);
+      if (expected.has(k)) continue; // on the AP expected list: the ap-expected step marks it
+      const what = `${r[ix('carrier')]}, ${dollars(Math.round(Number(r[ix('bcat_balance')]) * 100))} open, due ${r[ix('bcat_due')]}`;
+      if (stale.has(k)) add('AP_STALE_EXPECTED', r[ix('pro')], `open in BCAT, on an AP expected row that was dropped as stale (${what})`, 'Confirm with the carrier whether it is still owed; pay or close it');
+      else add('AP_NOT_IN_ALJEX_LISTS', r[ix('pro')], `open in BCAT, on no Aljex AP list (${what})`, 'Confirm it is really unpaid (Aljex shows it paid or never listed it); pay, close, or leave open');
+    }
+  } else add('AP_NOT_IN_ALJEX_LISTS', '(none yet)', 'the AP reconcile has not run', 'run reconcile first');
 
   // 6-9. customers export and master reports
   const custPath = customersFile ?? join(exportDir, readdirSyncSafe(exportDir).filter((n) => /^aljex-customers-.*\.csv$/.test(n)).sort().pop() ?? 'aljex-customers.csv');

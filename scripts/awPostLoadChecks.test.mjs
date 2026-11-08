@@ -19,7 +19,7 @@ describe('awPostLoadChecks', () => {
   it('without any earlier step it still lists every category with a "run it first" row, never silently empty', () => {
     const rows = buildChecks(opts(sandbox()));
     const cats = new Set(rows.map((r) => r[0]));
-    for (const c of ['revenue difference', 'identical duplicate PRO', 'junk date', 'unmatched memo', 'open AR gap', 'AP_UNRESOLVED', 'duplicate customer name', 'billing method needs review', 'name match not linked', 'same name, different carrier']) expect(cats.has(c), c).toBe(true);
+    for (const c of ['revenue difference', 'identical duplicate PRO', 'junk date', 'unmatched memo', 'open AR gap', 'AP_UNRESOLVED', 'AP_NOT_IN_ALJEX_LISTS', 'duplicate customer name', 'billing method needs review', 'name match not linked', 'same name, different carrier']) expect(cats.has(c), c).toBe(true);
     expect(rows.find((r) => r[0] === 'open AR gap')[3]).toBe('run AR + reconcile first');
   });
 
@@ -30,6 +30,17 @@ describe('awPostLoadChecks', () => {
     expect(rows.map((r) => r[1])).toEqual(['14576', '14563']);
     expect(rows[0][2]).toContain('$700.00');
     expect(rows[0][3]).toBe('Assign the carrier leg on the load and enter the bill');
+  });
+
+  it('splits open BCAT-only AP bills into stale-expected and on-no-Aljex-list, and skips the ones on the expected list', () => {
+    const sb = sandbox();
+    sb.put('tmp/aljex-run-aljexrun-4/imports/runs/aljexrun:4/reconcile-ap.csv', 'outcome,pro,vendor_id,carrier,bill_number,file_amount,bcat_balance,difference,file_due,bcat_due,file_pay_to,bcat_pay_to,notes\nMATCHED,100,1,A,9,10.00,10.00,0.00,,,,,\nBCAT_ONLY,200,,CAR B,,,50.00,,,2026-12-01,,,x\nBCAT_ONLY,300,,CAR C,,,70.00,,,2026-12-02,,,x\nBCAT_ONLY,400,,CAR D,,,90.00,,,2026-12-03,,,x\n');
+    sb.put('export/ap-expected-stale-2026-11-08.csv', 'Vendor,Pay to,Pro #,Amount\nCAR C,CAR C,300,70.00\n');
+    sb.put('export/aljex-ap-expected-2026-11-08.csv', 'Vendor,Pay to,Pro #,Amount\nCAR B,CAR B,200,50.00\nCAR C,CAR C,300,70.00\n');
+    const rows = buildChecks(opts(sb));
+    expect(rows.filter((r) => r[0] === 'AP_STALE_EXPECTED').map((r) => r[1])).toEqual(['300']);
+    expect(rows.filter((r) => r[0] === 'AP_NOT_IN_ALJEX_LISTS').map((r) => r[1])).toEqual(['400']);
+    expect(rows.find((r) => r[0] === 'AP open gap')[2]).toContain('1 on the AP expected list ($50.00), 1 on dropped stale expected rows ($70.00), 1 on no Aljex list ($90.00)');
   });
 
   it('lists review-CSV revenue rows, one junk-date row per PRO, memo orphans, and the importer name-match / billing review split', () => {
