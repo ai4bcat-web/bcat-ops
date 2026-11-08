@@ -48,7 +48,7 @@ for (const mode of modes) {
   if (step === 'carriers') {
     L('  rows with a value in the columns that are NOT imported: Fed/SS # 2353, Bank Account 442, Routing # 442'); L('  stripped before upload: Account #, Fed/SS #, Bank Account, Routing #')
     L('  uploaded CARRIERS_MASTER: job aljexrun:abcCarriers, 2462 rows'); header('carriers', mode); ent('CARRIER', 2442, 2442, 0, 0, 0, 0, 0)
-    for (const [k, v] of Object.entries({ otherVendorsSkipped: 19, inactive: 252, withFactorId: 183, quickPay: 14, rowsWithFedSs: 0, rowsWithBankAccount: 0, rowsWithRouting: 0 })) L('  ' + k + ': ' + (process.env.FAKE_HIDE_SENSITIVE && /^rowsWith/.test(k) ? '[hidden]' : v))
+    for (const [k, v] of Object.entries({ otherVendorsSkipped: 19, inactive: 252, withFactorId: 183, quickPay: 14, rowsWithFedSs: 0, rowsWithBankAccount: 0, rowsWithRouting: 0 })) L(process.env.FAKE_HIDE_SENSITIVE && /^rowsWith/.test(k) ? '  ' + k + '=[hidden]' : '  ' + k + ': ' + v)
     if (mode === 'APPLY') L('table Carrier: before 0, after 2442, delta 2442')
   }
   if (step === 'ap-aging') {
