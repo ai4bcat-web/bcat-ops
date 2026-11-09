@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { analyze, applyActivate, applyBilling, applyDelete, carriersGate, conservation, SUB_MODELS, writeExport } from './awCarriers.mjs';
+import { analyze, applyActivate, applyBilling, applyDelete, applyInactivate, applyRestore, carriersGate, conservation, readExport, SUB_MODELS, writeExport } from './awCarriers.mjs';
 import {
-  buildExport, classifyShipments, deletedByPreDelete, exportableCarrier, indexShipDates, matchMasters, parseShipDate, planBilling, referenceMap,
+  buildExport, classifyShipments, exportableChild, deletedByPreDelete, exportableCarrier, indexShipDates, matchMasters, parseShipDate, planBilling, referenceMap,
   planCarriers, refusalFor, verifyExport,
 } from './lib/carrierPlan.mjs';
 import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 import { indexShipDates as preIndex, planPreDelete, selectShipments } from './lib/preDelete.mjs';
 import { resolveScripts } from './prodBackup.mjs';
 import { ALLOW_ENV, PROD_SUFFIX, DEV_SUFFIX, tableName } from './lib/prodGate.mjs';
-import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -122,21 +122,36 @@ describe('activate: used since the cutoff, from retained rows only', () => {
 
 describe('delete: never a carrier anything retained still references', () => {
   const data = () => baseData({
-    carriers: [car('free'), car('gone', 'INACTIVE'), car('bill'), car('pay'), car('dnu', 'DO_NOT_USE'), car('kid'), car('ll', 'PENDING', { lastLoadAt: '2026-01-01T00:00:00Z' })],
+    carriers: [car('free'), car('gone', 'INACTIVE'), car('bill'), car('pay'), car('dnu', 'DO_NOT_USE'), car('kid', 'PENDING', { mcpSyncedAt: 'T' }), car('ll', 'PENDING', { lastLoadAt: '2026-01-01T00:00:00Z' })],
     loadCarriers: [lc('a', 's1', 'gone')],
     bills: [{ id: 'b2', shipmentId: 's5', loadCarrierId: 'zz', loadId: 'l-s5', carrierId: 'bill', status: 'TO_BE_PAID', balanceCents: 100 }],
     apPayments: [{ id: 'p', carrierId: 'pay', applications: [], unappliedCents: 50 }],
-    children: { CarrierContact: new Map([['kid', 1]]) },
+    children: { CarrierContact: new Map([['kid', [{ id: 'k1', carrierId: 'kid' }]]]) },
     others: { Quote: [], LaneRateSample: [], Commission: [] },
   });
-  it('deletes unreferenced carriers incl. INACTIVE ones; a carrier referenced only by to-be-deleted rows waits for awPreDelete', () => {
+  it('deletes unreferenced carriers incl. INACTIVE ones and ones with child rows; a carrier referenced only by to-be-deleted rows waits for awPreDelete', () => {
     const { plan } = run(data());
-    expect(plan.delete.map((d) => [d.id, d.blockedNow]).sort()).toEqual([['free', false], ['gone', true]]);
+    expect(plan.delete.map((d) => [d.id, d.blockedNow]).sort()).toEqual([['free', false], ['gone', true], ['kid', false]]);
   });
-  it('keeps referenced, DO_NOT_USE, child-row and lastLoadAt carriers, each with the reason', () => {
+  it('class A = never MCP-synced, class B = MCP-synced; the child rows are counted with the carrier', () => {
+    const { plan } = run(data());
+    expect(Object.fromEntries(plan.delete.map((d) => [d.id, d.cls]))).toEqual({ free: 'A', gone: 'A', kid: 'B' });
+    expect(plan.delete.find((d) => d.id === 'kid').children).toEqual({ CarrierContact: 1 });
+  });
+  it('keeps referenced, DO_NOT_USE and lastLoadAt carriers, each with the reason', () => {
     const { plan } = run(data());
     const why = Object.fromEntries(plan.keep.map((k) => [k.id, k.reasons.map((r) => r.table)]));
-    expect(why).toEqual({ bill: ['CarrierBill'], pay: ['ApPayment'], dnu: ['Carrier.status'], kid: ['CarrierContact'], ll: ['Carrier.lastLoadAt'] });
+    expect(why).toEqual({ bill: ['CarrierBill'], pay: ['ApPayment'], dnu: ['Carrier.status'], ll: ['Carrier.lastLoadAt'] });
+  });
+  it('referenced + never synced -> INACTIVE (kept, never deleted); synced, DO_NOT_USE and already-INACTIVE ones are not written', () => {
+    const d = baseData({
+      carriers: [car('ns'), car('nsOld', 'INACTIVE'), car('nsDnu', 'DO_NOT_USE'), car('syn', 'PENDING', { mcpSyncedAt: 'T' }), car('free')],
+      loadCarriers: [lc('a', 's2', 'ns'), lc('b', 's4', 'nsOld'), lc('c', 's5', 'nsDnu'), lc('e', 's2', 'syn')],
+    });
+    const { plan } = run(d);
+    expect(plan.neverSyncedReferenced.sort()).toEqual(['ns', 'nsOld']);
+    expect(plan.inactivate.map((a) => [a.id, a.previousStatus])).toEqual([['ns', 'PENDING']]);
+    expect(plan.delete.map((x) => x.id)).toEqual(['free']);
   });
   it('--ignore-lastloadat / --include-do-not-use release those two classes', () => {
     const { plan } = run(data(), { protectLastLoad: false, keepDoNotUse: false });
@@ -171,7 +186,7 @@ describe('delete: never a carrier anything retained still references', () => {
     const d = data();
     const a = run(d);
     const proof = conservation({ ...d, vaultIds: ['free', 'gone', 'bill'] }, a, a.plan.delete.map((x) => x.id));
-    expect(proof).toMatchObject({ carriersBefore: 7, carriersAfter: 5, vaultRowsBefore: 3, vaultRowsAfter: 1, ok: true, openApCentsRetained: 100 });
+    expect(proof).toMatchObject({ carriersBefore: 7, carriersAfter: 4, vaultRowsBefore: 3, vaultRowsAfter: 1, ok: true, openApCentsRetained: 100 });
     expect(proof.rows.CarrierBill).toEqual({ retained: 1, resolvedBefore: 1, resolvedAfter: 1 });
   });
   it('refusalFor refuses on any live reference, at apply time', () => {
@@ -180,16 +195,23 @@ describe('delete: never a carrier anything retained still references', () => {
   });
 });
 
-/** A fake DynamoDB document client that records commands and answers index queries from `refs`. */
-const fakeDoc = ({ refs = {}, failCondition = false } = {}) => {
+/** A fake DynamoDB document client that records commands, answers money-table index queries from `refs` and child index queries from `kids`. */
+const fakeDoc = ({ refs = {}, kids = {}, failCondition = false, failTx = false, existing = new Set() } = {}) => {
   const sent = [];
   return {
     sent,
     send: async (cmd) => {
       const name = cmd.constructor.name;
       sent.push({ name, input: cmd.input });
-      if (name === 'QueryCommand') return { Count: refs[cmd.input.TableName.split('-')[0]] ?? 0 };
+      if (name === 'QueryCommand') {
+        const table = cmd.input.TableName.split('-')[0];
+        if (kids[table]) return { Items: kids[table].map((id) => ({ id })) };
+        if (cmd.input.ProjectionExpression === 'id') return { Items: [] };
+        return { Count: refs[table] ?? 0 };
+      }
+      if (failTx && name === 'TransactWriteCommand') { const e = new Error('x'); e.name = 'TransactionCanceledException'; throw e; }
       if (failCondition && (name === 'UpdateCommand' || name === 'DeleteCommand')) { const e = new Error('x'); e.name = 'ConditionalCheckFailedException'; throw e; }
+      if (name === 'PutCommand' && existing.has(`${cmd.input.TableName.split('-')[0]}:${cmd.input.Item.id}`)) { const e = new Error('x'); e.name = 'ConditionalCheckFailedException'; throw e; }
       return {};
     },
   };
@@ -203,16 +225,39 @@ describe('apply helpers', () => {
     expect(r.refused).toMatch(/CarrierBill/);
     expect(doc.sent.every((s) => s.name === 'QueryCommand')).toBe(true);
   });
-  it('delete is conditional on the row not having changed, removes the vault row and writes one audit row without sensitive data', async () => {
-    const doc = fakeDoc();
-    const r = await applyDelete({ doc, suffix: DEV_SUFFIX, entry: { id: 'c1', status: 'INACTIVE' }, carrier: car('c1', 'INACTIVE', { updatedAt: 'T', taxIdLast4: '9999' }), hasVault: true, exportName: 'stamp' });
-    expect(r).toEqual({ deleted: true });
-    const [carrierDel, vaultDel] = written(doc, 'DeleteCommand');
-    expect(carrierDel.input.ConditionExpression).toContain('updatedAt = :u');
-    expect(vaultDel.input.TableName).toBe(`CarrierTaxVault-${DEV_SUFFIX.replace(/-NONE$/, '')}`);
-    const audit = JSON.stringify(written(doc, 'PutCommand')[0].input.Item);
+  it('delete is ONE transaction: conditional carrier delete + its child rows + vault row + audit row without sensitive data', async () => {
+    const doc = fakeDoc({ kids: { CarrierContact: ['k1', 'k2'], CarrierPaymentMethod: ['m1'] } });
+    const children = { CarrierContact: [{ id: 'k1' }, { id: 'k2' }], CarrierPaymentMethod: [{ id: 'm1' }] };
+    const r = await applyDelete({ doc, suffix: DEV_SUFFIX, entry: { id: 'c1', status: 'INACTIVE', cls: 'B' }, carrier: car('c1', 'INACTIVE', { updatedAt: 'T', taxIdLast4: '9999', mcpSyncedAt: 'T' }), children, hasVault: true, exportName: 'stamp' });
+    expect(r).toEqual({ deleted: true, children: { CarrierContact: 2, CarrierPaymentMethod: 1, CarrierDocument: 0 } });
+    expect(written(doc, 'DeleteCommand')).toHaveLength(0); // nothing outside the transaction
+    const items = written(doc, 'TransactWriteCommand')[0].input.TransactItems;
+    expect(items[0].Delete.ConditionExpression).toContain('updatedAt = :u');
+    expect(items.filter((i) => i.Delete).map((i) => i.Delete.TableName.split('-')[0]).sort()).toEqual(['Carrier', 'CarrierContact', 'CarrierContact', 'CarrierPaymentMethod', 'CarrierTaxVault']);
+    expect(items.find((i) => i.Delete?.TableName.startsWith('CarrierTaxVault')).Delete.TableName).toBe(`CarrierTaxVault-${DEV_SUFFIX.replace(/-NONE$/, '')}`);
+    const audit = JSON.stringify(items.find((i) => i.Put).Put.Item);
     expect(audit).toContain('AW_CARRIER_DELETE');
     expect(audit).not.toContain('9999');
+  });
+  it('delete refuses a carrier that grew a child row after the scan, or changed (transaction cancelled): nothing is half-deleted', async () => {
+    const grew = fakeDoc({ kids: { CarrierContact: ['k1', 'new'] } });
+    const r = await applyDelete({ doc: grew, suffix: DEV_SUFFIX, entry: { id: 'c1', status: 'PENDING' }, carrier: car('c1'), children: { CarrierContact: [{ id: 'k1' }] }, hasVault: false });
+    expect(r.refused).toMatch(/appeared since the scan/);
+    expect(written(grew, 'TransactWriteCommand')).toHaveLength(0);
+    const changed = fakeDoc({ failTx: true });
+    expect((await applyDelete({ doc: changed, suffix: DEV_SUFFIX, entry: { id: 'c1', status: 'PENDING' }, carrier: car('c1'), hasVault: false })).refused).toMatch(/changed since the scan/);
+  });
+  it('inactivate is conditional on the previous status and on never having synced; a lost race writes no audit row', async () => {
+    const lost = fakeDoc({ failCondition: true });
+    expect(await applyInactivate({ doc: lost, suffix: DEV_SUFFIX, entry: { id: 'c1', previousStatus: 'PENDING' } })).toBe(false);
+    expect(written(lost, 'PutCommand')).toHaveLength(0);
+    const ok = fakeDoc();
+    expect(await applyInactivate({ doc: ok, suffix: DEV_SUFFIX, entry: { id: 'c1', previousStatus: 'PENDING', previousReason: null } })).toBe(true);
+    const u = written(ok, 'UpdateCommand')[0].input;
+    expect(u.ConditionExpression).toContain('#s = :prev');
+    expect(u.ConditionExpression).toContain('attribute_not_exists(mcpSyncedAt)');
+    expect(u.ExpressionAttributeValues[':inactive']).toBe('INACTIVE');
+    expect(JSON.stringify(written(ok, 'PutCommand')[0].input.Item)).toContain('AW_CARRIER_INACTIVATE');
   });
   it('activate is conditional on the previous status; a lost race writes no audit row', async () => {
     const lost = fakeDoc({ failCondition: true });
@@ -244,7 +289,7 @@ describe('export has no sensitive columns', () => {
   });
   it('manifest carries counts + sha256 and detects tampering; files 0600 in a 0700 directory', () => {
     const { files, manifest } = buildExport({ carriers: [row], vaultCarrierIds: ['c1'], suffix: 'sfx', now: new Date('2026-11-08T10:00:00Z') });
-    expect(manifest.counts).toEqual({ carriers: 1, inactive: 1, vaultRows: 1 });
+    expect(manifest.counts).toEqual({ carriers: 1, inactive: 1, vaultRows: 1, CarrierContact: 0, CarrierPaymentMethod: 0, CarrierDocument: 0 });
     expect(verifyExport(manifest, (n) => files[n])).toBe(true);
     expect(verifyExport(manifest, (n) => `${files[n]} `)).toBe(false);
     expect(JSON.stringify(files)).not.toMatch(/9999|123456789|bankAccount|routingNumber/);
@@ -253,6 +298,37 @@ describe('export has no sensitive columns', () => {
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     for (const n of readdirSync(target)) expect(statSync(join(target, n)).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(target, 'carriers.jsonl'), 'utf8')).not.toContain('9999');
+  });
+});
+
+describe('child rows export and restore', () => {
+  const pm = { id: 'm1', carrierId: 'c1', method: 'CHECK', payeeEmail: 'a@b.test', bankName: 'Fake Bank', accountName: 'Holder', accountLast4: '7777', routingLast4: '8888', bankDetailsKey: 'carrier-docs/c1/private/x', remitToAddress: { city: 'Dayton' } };
+  const contact = { id: 'k1', carrierId: 'c1', name: 'Sam', email: 's@b.test', types: ['DISPATCH'] };
+  const doc1 = { id: 'd1', carrierId: 'c1', type: 'W9', name: 'w9.pdf', s3Key: 'carrier-docs/c1/w9.pdf' };
+  it('drops bank / account / routing attributes from child rows, keeps the rest', () => {
+    const out = exportableChild(pm);
+    expect(Object.keys(out).sort()).toEqual(['carrierId', 'id', 'method', 'payeeEmail', 'remitToAddress']);
+  });
+  it('export carries every child row; restore from the export is put-if-absent and audited', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awc-'));
+    const row = car('c1', 'PENDING', { mcNumber: '700001' });
+    const { target, manifest } = writeExport({ dir, carriers: [row], children: { CarrierContact: [contact], CarrierPaymentMethod: [pm], CarrierDocument: [doc1] }, vaultCarrierIds: ['c1'], suffix: 'sfx' });
+    expect(manifest.counts).toMatchObject({ carriers: 1, CarrierContact: 1, CarrierPaymentMethod: 1, CarrierDocument: 1 });
+    expect(Object.keys(readdirSync(target)).length).toBe(6);
+    expect(readFileSync(join(target, 'carrier-payment-methods.jsonl'), 'utf8')).not.toMatch(/7777|8888|Fake Bank|Holder|private/);
+    const back = readExport(target);
+    expect(back.carriers.map((c) => c.id)).toEqual(['c1']);
+    const doc = fakeDoc({ existing: new Set(['CarrierContact:k1']) });
+    const r = await applyRestore({ doc, suffix: DEV_SUFFIX, carrier: back.carriers[0], children: back.children, exportName: 'stamp' });
+    expect(r).toEqual({ carrier: 1, CarrierContact: 0, CarrierPaymentMethod: 1, CarrierDocument: 1 });
+    expect(written(doc, 'PutCommand').every((p) => p.input.ConditionExpression === 'attribute_not_exists(id)' || p.input.TableName.startsWith('AuditLog'))).toBe(true);
+    expect(JSON.stringify(written(doc, 'PutCommand').at(-1).input.Item)).toContain('AW_CARRIER_RESTORE');
+  });
+  it('a tampered export is refused', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'awc-'));
+    const { target } = writeExport({ dir, carriers: [car('c1')], vaultCarrierIds: [], suffix: 'sfx' });
+    writeFileSync(join(target, 'carriers.jsonl'), '{"id":"evil"}\n');
+    expect(() => readExport(target)).toThrow(/manifest sha256/);
   });
 });
 

@@ -54,9 +54,10 @@ export const PROD_WRITE_SETS = {
   // `awDeletePayables.mjs --apply`: the 23 OPEN 2025 CarrierBill rows are deleted, ApPayment rows that paid them are edited/deleted (awPreDelete rule),
   // their LoadCarrier legs are released (AWAITING_INVOICE, no bill), one AuditLog row per bill. Never AR/Invoice/Load/Shipment/Order.
   awDeletePayables: { models: ['CarrierBill', 'ApPayment', 'LoadCarrier', 'AuditLog'] },
-  // `awCarriers.mjs activate|billing|delete --apply` (union; each subcommand's own subset is SUB_MODELS in the script):
-  // Carrier.status / billing fields / delete, CarrierPaymentMethod (billing), CarrierTaxVault (delete; NOT an Amplify model: `CarrierTaxVault-<apiId>`), one AuditLog row per carrier.
-  awCarriers: { models: ['Carrier', 'CarrierPaymentMethod', 'CarrierTaxVault', 'AuditLog'] },
+  // `awCarriers.mjs activate|billing|inactivate|delete|restore --apply` (union; each subcommand's own subset is SUB_MODELS in the script):
+  // Carrier.status / billing fields / delete, CarrierPaymentMethod (billing, delete), CarrierContact + CarrierDocument (delete: child rows go with the carrier),
+  // CarrierTaxVault (delete; NOT an Amplify model: `CarrierTaxVault-<apiId>`), one AuditLog row per carrier.
+  awCarriers: { models: ['Carrier', 'CarrierContact', 'CarrierPaymentMethod', 'CarrierDocument', 'CarrierTaxVault', 'AuditLog'] },
   // `awRestoreDeleted.mjs --apply`: put-if-absent of the rows DELETE_SHIPMENTS exported (the models it deletes) + one AuditLog row per restored shipment.
   awRestoreDeleted: { models: ['ArPayment', 'ApPayment', 'LegacyAljexRow', 'Commission', 'FactoringItem', 'Invoice', 'CarrierBill', 'LaneRateSample', 'LoadFinancials', 'LoadCharge', 'LoadCheckCall', 'TrackingLink', 'ShipmentDocument', 'ShipmentNotice', 'ShipmentPosting', 'ShipmentMessage', 'LoadCarrier', 'Load', 'Order', 'Shipment', 'AuditLog'] },
   // `awLocationRename.mjs --apply`: the approved Location renames (name/street/city/state/zip + normalizedName/normalizedAddress, geocode cleared) + one AuditLog row per row;
