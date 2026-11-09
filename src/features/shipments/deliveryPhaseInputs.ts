@@ -32,6 +32,7 @@ export function phaseInputOfBundle(bundle: ShipmentBundle | null, nowMs: number)
     voided: Boolean(shipment.voidedAt ?? shipment.deletedAt),
     status: shipment.status as ShipmentStatus,
     covered: bundle.loadCarriers.some((c) => c.status === 'ACTIVE'),
+    assignment: bundle.loadCarriers.find((c) => c.status === 'ACTIVE')?.assignmentStatus ?? null,
     deliveredAt: shipment.deliveredAt ?? load?.deliveredAt,
     stops: stopsOf(load?.stops),
     carriers: liveCarriersOf(bundle.loadCarriers.filter((c) => c.loadId === load?.id)),
@@ -47,7 +48,9 @@ export function phaseInputOfRow(row: ShipmentRow, nowMs: number): PhaseInput {
   return {
     voided: Boolean(row.voidedAt ?? row.deletedAt),
     status: row.status,
-    covered: Boolean(row.carrierAssignmentStatus) || Boolean(row.assignmentType),
+    // An open load (NEED_TO_COVER) is not covered; a carrier or our own truck on it is.
+    covered: Boolean(row.carrierAssignmentStatus) || row.assignmentType === 'CARRIER' || row.assignmentType === 'OWN_ASSET',
+    assignment: row.carrierAssignmentStatus ?? null,
     deliveredAt: row.deliveredAt,
     stops: stopsOf(row.stops),
     lastFix: row.lastKnownAt ? { at: row.lastKnownAt, place: place || null } : null,

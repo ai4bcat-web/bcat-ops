@@ -74,8 +74,9 @@ describe('ActivityBlock', () => {
     expect(asked).toContainEqual({ entityType: 'INTAKE_LOAD', entityId: 'in-1' })
     expect(rows.map((r) => within(r).getByTestId('rail-activity-actor').textContent)).toEqual(['Dee Dispatch', 'AI agent · Workflow agent', 'Dee Dispatch'])
     expect(rows[0]!.textContent).toContain('2m ago')
-    expect(within(rows[0]!).getByTestId('rail-activity-detail').textContent).toContain('equipment type: Reefer')
-    expect(within(rows[0]!).getByTestId('rail-activity-detail').getAttribute('title')).toBe('was Dry Van')
+    // High level on the row (who, what, when); the field detail is the row's hover.
+    expect(within(rows[0]!).queryByTestId('rail-activity-detail')).toBeNull()
+    expect(rows[0]!.getAttribute('title')).toBe('was Dry Van')
   })
 
   it('keeps eight rows, five visible until Show more', async () => {
@@ -99,7 +100,7 @@ describe('ActivityBlock', () => {
     await act(async () => { rerender(<MemoryRouter><ActivityBlock bundle={bundle({ updatedAt: 'later' })} staff={staff} /></MemoryRouter>) })
     await waitFor(() => expect(screen.getAllByTestId('rail-activity-row')).toHaveLength(2))
     expect(listAuditLogsFor).toHaveBeenCalledTimes(2)
-    expect(screen.getAllByTestId('rail-activity-row')[0]!.textContent).toContain('status: BOOKED')
+    expect(screen.getAllByTestId('rail-activity-row')[0]!.textContent).not.toContain('status: BOOKED')
   })
 
   it('an intake pre-fill on create shows the extractor entry', async () => {
@@ -108,7 +109,7 @@ describe('ActivityBlock', () => {
     const rows = await screen.findAllByTestId('rail-activity-row')
     expect(rows[0]!.textContent).toContain('AI agent · Intake extractor')
     expect(rows[0]!.textContent).toContain('extracted the fields from the e-mail')
-    expect(rows[0]!.textContent).toContain('fields: 3 fields')
+    expect(rows[0]!.textContent).not.toContain('fields: 3 fields')
     expect(listAuditLogsFor).toHaveBeenCalledWith([{ entityType: 'INTAKE_LOAD', entityId: 'in-9' }])
   })
 })

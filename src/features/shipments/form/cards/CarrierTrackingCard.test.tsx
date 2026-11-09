@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, it, expect, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { CarrierTrackingCard } from './CarrierTrackingCard'
 import { emptyValues, NO_LOCKS } from '../model'
@@ -66,7 +66,7 @@ describe('CarrierTrackingCard edit mode', () => {
     expect(screen.getByTestId('strip-next-check')).toBeTruthy()
     expect(screen.getByTestId('strip-pod')).toBeTruthy()
     expect(screen.getByTestId('card-tracking-open').getAttribute('href')).toBe('/tms/tracking?shipment=shp-1')
-    expect(within(screen.getByTestId('card-tracking-updates')).getByTestId('history-feed')).toBeTruthy()
+    expect(screen.getByTestId('card-tracking-updates').textContent).toContain('Activity list on the right')
   })
 
   it('says Unassigned with no tracker and offers no entry form', () => {

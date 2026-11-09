@@ -12,9 +12,13 @@ describe('deliveryPhase: parked states', () => {
     const r = run({ create: true, covered: false, stops: [] })
     expect(r).toMatchObject({ phase: 'DRAFT', caption: 'Draft', tone: 'grey', reachedCount: 0, truckAt: 0, summary: 'Draft' })
   })
-  it('not covered and covered-but-not-dispatched both read "Not dispatched"', () => {
-    expect(run({ covered: false, status: 'OPEN' })).toMatchObject({ phase: 'NOT_COVERED', caption: 'Not dispatched', tone: 'grey', reachedCount: 0 })
-    expect(run({ status: 'BOOKED' })).toMatchObject({ phase: 'NOT_DISPATCHED', caption: 'Not dispatched', tone: 'grey' })
+  it('before the truck moves it reads Not covered, Covered, RC sent or Dispatched from the carrier ladder', () => {
+    expect(run({ covered: false, status: 'OPEN' })).toMatchObject({ phase: 'NOT_COVERED', caption: 'Not covered', tone: 'grey', reachedCount: 0 })
+    expect(run({ status: 'BOOKED' })).toMatchObject({ phase: 'COVERED', caption: 'Covered', tone: 'grey' })
+    expect(run({ status: 'BOOKED', assignment: 'RATE_CON_SENT' })).toMatchObject({ phase: 'RC_SENT', caption: 'RC sent' })
+    // Signed but no driver details yet is still RC sent; signed with the driver details in is Dispatched.
+    expect(run({ status: 'BOOKED', assignment: 'RATE_CON_SIGNED' })).toMatchObject({ phase: 'RC_SENT' })
+    expect(run({ status: 'BOOKED', assignment: 'DRIVER_INFO_ENTERED' })).toMatchObject({ phase: 'DISPATCHED', caption: 'Dispatched', tone: 'green' })
   })
   it('voided is red and nothing else', () => {
     expect(run({ voided: true, status: 'DELIVERED', deliveredAt: iso(-5) })).toMatchObject({ phase: 'VOIDED', tone: 'red', reachedCount: 0 })
@@ -112,7 +116,7 @@ describe('deliveryPhaseText', () => {
     expect(deliveryPhaseText(run({ status: 'IN_TRANSIT' }))).toBe('In transit') // status alone cannot name the stop
     expect(deliveryPhaseText(run({ stops: [pu({ arrivedAt: iso(-100), departedAt: iso(-60) }), de(), de()] }))).toBe('In transit · Stop 2/3')
     expect(deliveryPhaseText(run({ stops: [pu({ arrivedAt: iso(-100), departedAt: iso(-60) }), de()] }))).toBe('In transit')
-    expect(deliveryPhaseText(run({ covered: false }))).toBe('Not dispatched')
+    expect(deliveryPhaseText(run({ covered: false }))).toBe('Not covered')
     expect(deliveryPhaseText(run({ create: true }))).toBe('Draft')
   })
 })

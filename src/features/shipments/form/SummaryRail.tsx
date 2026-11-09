@@ -60,7 +60,7 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
         <section className="tms-rail-hero" data-testid="rail-hero" aria-label="At a glance">
           <div className="tms-rail-hero-main">
             <span className="tms-rail-hero-label">Net profit</span>
-            <strong className="tms-rail-hero-big" data-testid="rail-hero-net">{net === dash ? dash : `$${net}`}</strong>
+            <strong className="tms-rail-hero-big" data-testid="rail-hero-net">{net}</strong>
             <span className="tms-rail-hero-sub">{money.priced ? `${pct} margin · ${TONE_WORD[money.tone]}` : 'Price the load to see the margin'}</span>
           </div>
           <div className="tms-rail-ring" role="img" aria-label={`${done} of ${total} required fields done`} style={{ ['--ring' as string]: `${total > 0 ? Math.round((done / total) * 100) : 0}%` }}>
@@ -72,8 +72,8 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
             <span className="tms-rail-bar-profit" data-tone={money.tone} />
           </div>
           <div className="tms-rail-bar-legend">
-            <span><i className="tms-rail-key tms-rail-key-cost" />Carrier {money.carrierTotalCents > 0 ? `$${formatCents(money.carrierTotalCents)}` : dash}</span>
-            <span><i className="tms-rail-key tms-rail-key-profit" />Customer {money.priced ? `$${formatCents(money.customerTotalCents)}` : dash}</span>
+            <span><i className="tms-rail-key tms-rail-key-profit" />Customer {money.priced ? formatCents(money.customerTotalCents) : dash}</span>
+            <span><i className="tms-rail-key tms-rail-key-cost" />Carrier {money.carrierTotalCents > 0 ? formatCents(money.carrierTotalCents) : dash}</span>
           </div>
         </section>
 

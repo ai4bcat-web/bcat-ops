@@ -8,7 +8,7 @@
  * voided row keeps its PRO, and rows that were soft-deleted before Void existed are
  * read as voided for exactly the same reason — the PRO never leaves the book.
  */
-import { deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
+import { PHASE_LABEL, deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
 import { phaseInputOfRow } from './deliveryPhaseInputs'
 import { rateConStatusText } from '@/lib/rateConLabel'
 import type { Stop } from '@/types'
@@ -659,8 +659,14 @@ export function statusLabel(row: ShipmentRow): string {
  * A row with no stop evidence shows the status alone.
  */
 function statusWithProgress(row: ShipmentRow): string {
-  const label = isVoided(row) ? 'VOIDED' : displayStatusOf(row)
+  let label: string = isVoided(row) ? 'VOIDED' : displayStatusOf(row)
   if (label === RELEASED_LABEL) return label
+  // A brokerage load that is covered but not moving yet reads where it stands on the carrier ladder (Ryne 2026-11-09):
+  // COVERED, RC SENT (rate con out), DISPATCHED (rate con signed and the driver details in).
+  if (label === 'COVERED' && row.revDivision === 'BROKERAGE') {
+    const phase = deliveryPhase(phaseInputOfRow(row, Date.now())).phase
+    if (phase === 'RC_SENT' || phase === 'DISPATCHED') label = PHASE_LABEL[phase].toUpperCase()
+  }
   const { done, total } = stopProgressOf(row)
   if (total === 0) return label
   return `${label} ${done}/${total}`
