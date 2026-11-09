@@ -70,4 +70,6 @@ export const PROD_WRITE_SETS = {
   awCustomerEmail: { models: ['Customer', 'AuditLog'] },
   // `awTruckFleet.mjs box-truck|owner-operator|rollback --apply`: Equipment.fleetGroup only (one truck per driver, conditional on the expected old value) + one AuditLog row per truck.
   awTruckFleet: { models: ['Equipment', 'AuditLog'] },
+  // `awShipmentNumber.mjs --apply`: renumber post-cutover shipments (99xxx -> 20000...) in every table awRenumberL moves + TmsSettings.nextShipmentNumber.
+  awShipmentNumber: { models: ['Shipment', 'Load', 'Invoice', 'CarrierBill', 'SpotRequest', 'WorkflowRun', 'IntakeLoad', 'TrackingLink', 'Quote', 'LaneRateSample', 'Commission', 'AuditLog', 'TmsSettings'] },
 };
