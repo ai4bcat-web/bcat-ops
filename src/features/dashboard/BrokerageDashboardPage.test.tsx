@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
-import { BrokerageDashboardPage } from './BrokerageDashboardPage'
+import { BrokerageSection } from './BrokerageDashboardPage'
 import type { MonthPayload, RollupRow, RollupWindow } from '@/lib/dashboardRollup'
 
 const NOW = new Date('2026-11-09T15:00:00Z')
@@ -37,7 +37,7 @@ function row(month: string, over: Partial<MonthPayload> = {}): RollupRow<MonthPa
 }
 const window = (months: RollupRow<MonthPayload>[]): RollupWindow => ({ months, live: null })
 
-describe('BrokerageDashboardPage', () => {
+describe('Brokerage cards under the Dashboard', () => {
   beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW); fetchRollup.mockReset(); fetchRep.mockReset() })
   afterEach(() => { vi.useRealTimers() })
 
@@ -49,7 +49,7 @@ describe('BrokerageDashboardPage', () => {
   it('draws the month table with a totals row and the rep table that ties to it', async () => {
     fetchRollup.mockResolvedValue(window(['2026-09', '2026-10', '2026-11'].map((m) => row(m))))
     fetchRep.mockResolvedValue({ scope: 'ALL', repKey: null, months: ['2026-09', '2026-10', '2026-11'].map(repMonth) })
-    render(<BrokerageDashboardPage />)
+    render(<BrokerageSection />)
 
     const monthTable = await screen.findByTestId('brokerage-month-table')
     expect(within(screen.getByTestId('brokerage-month-total')).getAllByRole('cell').map((c) => c.textContent)).toEqual(['Total', '6', '$9,000', '$7,200', '$1,800', '20.0%'])
@@ -70,7 +70,7 @@ describe('BrokerageDashboardPage', () => {
       scope: 'OWN', repKey: 'i:ryne@bcatcorp.com',
       months: ['2026-10', '2026-11'].map((month) => ({ month, computedAt: '2026-11-09T14:50:00Z', rep: { 'BROKERAGE|': { 'i:ryne@bcatcorp.com': fin(1, 100_000, 60_000) } } })),
     })
-    render(<BrokerageDashboardPage />)
+    render(<BrokerageSection />)
     expect(await screen.findByTestId('brokerage-month-table')).toBeInTheDocument()
     expect(fetchRollup).not.toHaveBeenCalled()
     expect(within(screen.getByTestId('brokerage-month-total')).getAllByRole('cell').map((c) => c.textContent)).toEqual(['Total', '2', '$2,000', '$1,200', '$800', '40.0%'])
@@ -81,7 +81,7 @@ describe('BrokerageDashboardPage', () => {
   it('shows a dash for profit % where a month has no revenue', async () => {
     fetchRollup.mockResolvedValue(window([row('2026-10', { fin: {} })]))
     fetchRep.mockResolvedValue({ scope: 'ALL', repKey: null, months: [{ month: '2026-10', computedAt: '2026-11-09T14:50:00Z', rep: {} }] })
-    render(<BrokerageDashboardPage />)
+    render(<BrokerageSection />)
     const total = await screen.findByTestId('brokerage-month-total')
     expect(within(total).getAllByRole('cell')[5]).toHaveTextContent('—')
     expect(screen.getByTestId('brokerage-total-profit-pct')).toHaveTextContent('—')
@@ -90,7 +90,7 @@ describe('BrokerageDashboardPage', () => {
   it('says the rep split is not ready when a month has no per-rep object yet, and keeps the month view', async () => {
     fetchRollup.mockResolvedValue(window([row('2026-10')]))
     fetchRep.mockResolvedValue({ scope: 'ALL', repKey: null, months: [] })
-    render(<BrokerageDashboardPage />)
+    render(<BrokerageSection />)
     expect(await screen.findByTestId('brokerage-month-table')).toBeInTheDocument()
     expect(screen.getByTestId('brokerage-rep-widget')).toHaveTextContent('sales-rep split is not ready')
   })
@@ -98,7 +98,7 @@ describe('BrokerageDashboardPage', () => {
   it('draws no figures when the rollup is not trustworthy (empty source, stale or missing rows)', async () => {
     fetchRollup.mockResolvedValue(null)
     fetchRep.mockResolvedValue({ scope: 'ALL', repKey: null, months: [] })
-    render(<BrokerageDashboardPage />)
+    render(<BrokerageSection />)
     expect(await screen.findByTestId('brokerage-unavailable')).toBeInTheDocument()
     expect(screen.queryByTestId('brokerage-month-table')).not.toBeInTheDocument()
   })

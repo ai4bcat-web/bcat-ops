@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { monthRows, monthRowsFromRep, monthsBetween, repRows, trailingMonths } from '@/lib/brokerageRevenue'
 import { TZ } from '@/lib/date'
 import { BrokerageMonthWidget } from './BrokerageMonthWidget'
@@ -23,10 +22,11 @@ const REP_PRESETS: Preset[] = [
 const asOfLabel = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: TZ })
 
 /**
- * Brokerage (BCAT Logistics) revenue, expense, profit and profit % by month and by sales rep. Same page grant as
- * the Operations Dashboard (`dashboard`); figures read from the DashboardRollup rows the other dashboards read.
+ * Brokerage (BCAT Logistics) revenue, expense, profit and profit % by month and by sales rep, as cards under the main
+ * Dashboard (not a page of its own). Same page grant as the Dashboard (`dashboard`); figures read from the
+ * DashboardRollup rows the other dashboards read.
  */
-export function BrokerageDashboardPage() {
+export function BrokerageSection() {
   const current = new Date().toISOString().slice(0, 7)
   const [monthRange, setMonthRange] = useState<MonthRange>(() => clampRange(MONTH_PRESETS[0].range(current), current))
   const [repRange, setRepRange] = useState<MonthRange>(() => clampRange(REP_PRESETS[1].range(current), current))
@@ -53,11 +53,14 @@ export function BrokerageDashboardPage() {
   const repReady = own || repMonths.every((m) => !data.rows.some((r) => r.payload.month === m) || data.repMonths.some((r) => r.month === m))
 
   return (
-    <TmsScrollPage
-      title="Brokerage Dashboard"
-      subtitle={`BCAT Logistics${own ? ' · your loads' : ''}${data.asOf ? ` · as of ${asOfLabel(data.asOf)}` : ''}`}
-    >
+    <section aria-label="Brokerage" data-testid="brokerage-section">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--tms-text)' }}>Brokerage</h2>
+          <span style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>
+            {`BCAT Logistics${own ? ' · your loads' : ''}${data.asOf ? ` · as of ${asOfLabel(data.asOf)}` : ''}`}
+          </span>
+        </div>
         <details className="tms-card" data-testid="brokerage-help" style={{ padding: '10px 16px', fontSize: 12.5, color: 'var(--tms-text-2)' }}>
           <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--tms-text)' }}>How these figures are counted</summary>
           <ul style={{ margin: '8px 0 0', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -102,6 +105,6 @@ export function BrokerageDashboardPage() {
           </>
         )}
       </div>
-    </TmsScrollPage>
+    </section>
   )
 }
