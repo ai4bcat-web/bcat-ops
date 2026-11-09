@@ -22,7 +22,7 @@ function setup(over: Partial<FormCtx> = {}, seed?: (v: ShipmentFormValues) => Sh
 }
 
 describe('RolesSection', () => {
-  it('shows exactly Sales Representative, Service Representative and Dispatcher Assigned', () => {
+  it('shows exactly Sales Representative, Carrier Sales and Tracking', () => {
     setup()
     const labels = [...document.querySelectorAll('[data-testid^="f-roles-"]')].map((n) => n.getAttribute('data-testid'))
     expect(labels).toEqual(['f-roles-salesRepId', 'f-roles-serviceRepId', 'f-roles-dispatcherAssignedId'])

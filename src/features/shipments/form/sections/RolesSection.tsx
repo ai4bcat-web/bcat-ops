@@ -1,5 +1,5 @@
 /**
- * Section 6: Roles. Sales / Service representative and Dispatcher Assigned rep pickers. Tariff,
+ * Section 6: Roles. Sales Representative, Carrier Sales and Tracking pickers (assigned by hand per customer; the sales rep defaults by division). Tariff,
  * Quote and Dispatcher Actual stay in the model and mapping (values round-trip untouched on save)
  * but are no longer shown on the form (feedback 4).
  */

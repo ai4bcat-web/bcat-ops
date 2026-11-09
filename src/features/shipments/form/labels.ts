@@ -139,8 +139,8 @@ export const LABEL = {
   },
   roles: {
     salesRepId: def('roles', 'salesRepId', 'Sales Representative'),
-    serviceRepId: def('roles', 'serviceRepId', 'Service Representative'),
-    dispatcherAssignedId: def('roles', 'dispatcherAssignedId', 'Dispatcher Assigned'),
+    serviceRepId: def('roles', 'serviceRepId', 'Carrier Sales'),
+    dispatcherAssignedId: def('roles', 'dispatcherAssignedId', 'Tracking'),
     dispatcherActual: def('roles', 'dispatcherActual', 'Dispatcher Actual', { help: 'Who last moved the load' }),
     tariff: def('roles', 'tariff', 'Tariff'),
     quoteId: def('roles', 'quoteId', 'Quote'),
