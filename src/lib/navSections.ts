@@ -317,7 +317,16 @@ export function buildNavSections({
 }): NavSectionsResult {
   // Null means "the divisions have not loaded (or the table is not deployed yet)". The
   // seeds are the same four the Lambda writes, so the rail looks right either way.
-  const all: DivisionLike[] = divisions ?? SEED_DIVISIONS
+  // The COMPANY section (Finances, Financial operations, Profit Review, Reddit Queue) is the company itself, not a
+  // business a user can retire: it must show whether or not an OwnershipDivision row for it exists or is active.
+  const loaded: DivisionLike[] = divisions ?? SEED_DIVISIONS
+  const company = loaded.find((d) => d.code === COMPANY_DIVISION)
+  const all: DivisionLike[] = company?.active && !company.parentId
+    ? loaded
+    : [
+        ...loaded.filter((d) => d.code !== COMPANY_DIVISION),
+        { id: COMPANY_DIVISION, code: COMPANY_DIVISION, name: company?.name ?? 'Company', brand: company?.brand ?? null, parentId: null, sortOrder: company?.sortOrder ?? 99, active: true },
+      ]
   const everything = isOwner || isAdmin
   const canOpenTms = everything || hasPageAccess(TMS_PAGE_KEY)
   const visible = (def: { pageKey: string; tms?: boolean; adminOnly?: boolean }): boolean =>
