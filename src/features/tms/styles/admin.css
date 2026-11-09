@@ -122,3 +122,21 @@
 
 /* ── Shipment views editor ──────────────────────────────────────────────── */
 .tms-shell .tms-view-desc textarea, .tms-portal .tms-view-desc textarea { min-height: 72px; }
+
+/* Users page: the add-user form beside the list on wide screens, stacked on narrow ones, so the list is never squeezed. */
+.tms-shell .tms-users-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (min-width: 1180px) { .tms-shell .tms-users-layout { grid-template-columns: 340px minmax(0, 1fr); } }
+.tms-shell .tms-users-claims { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+.tms-shell .tms-users-pagebar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+.tms-shell .tms-users-pagebar > :first-child { max-width: 280px; }
+.tms-shell .tms-users-pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; }
+.tms-shell .tms-users-page {
+  display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 10px; cursor: pointer;
+  border: 1px solid var(--tms-border); border-radius: var(--tms-radius); background: var(--tms-card); font-size: 13px;
+}
+.tms-shell .tms-users-page:hover { background: var(--tms-surface-hover); }
+.tms-shell .tms-users-page-on { border-color: var(--tms-primary); background: var(--tms-primary-tint); }
+.tms-shell .tms-users-page-role { cursor: default; opacity: .85; }
+.tms-shell .tms-users-page input { accent-color: var(--tms-primary); width: 15px; height: 15px; flex: 0 0 auto; margin: 0; }
+.tms-shell .tms-users-page-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.tms-shell .tms-users-page-tag { flex: 0 0 auto; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--tms-muted); }
