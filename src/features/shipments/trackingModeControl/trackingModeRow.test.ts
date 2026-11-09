@@ -14,3 +14,12 @@ describe('tracking mode chip rows', () => {
     expect(TRACKING_SET_PATH('shp-1')).toBe('/tms/shipments/shp-1/edit?focus=tracking')
   })
 })
+
+import { isCoveredAndLive as coveredLive } from './trackingModeRow'
+describe('Ivan Cartage loads need no tracking link', () => {
+  it('are never "covered and live" for the chip, brokerage and car shipping are', () => {
+    expect(coveredLive({ assignmentType: 'CARRIER', status: 'BOOKED', revDivision: 'ASSETS' })).toBe(false)
+    expect(coveredLive({ assignmentType: 'CARRIER', status: 'BOOKED', revDivision: 'BROKERAGE' })).toBe(true)
+    expect(coveredLive({ assignmentType: 'CARRIER', status: 'BOOKED', revDivision: 'CAR_SHIPPING' })).toBe(true)
+  })
+})

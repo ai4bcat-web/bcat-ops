@@ -33,7 +33,7 @@ export function TrackingModeNotSetChip({ shipment, hasCarrier, className }: {
  * either or both) or mark tracking not required. A load marked not required shows a gray "Tracking not required" pill instead.
  */
 export function TrackingModeNotSetRowChip({ row }: {
-  row: { id?: string; number?: string | null; trackingPrefs?: unknown; createdAt?: string | null; assignmentType?: string | null; status?: string | null; voidedAt?: string | null }
+  row: { id?: string; revDivision?: string | null; number?: string | null; trackingPrefs?: unknown; createdAt?: string | null; assignmentType?: string | null; status?: string | null; voidedAt?: string | null }
 }) {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
