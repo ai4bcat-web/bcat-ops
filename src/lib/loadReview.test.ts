@@ -17,6 +17,7 @@ import {
 import { RELEASE_GATE_ERROR_PREFIX, releaseGateOf, type ReleaseGateReasonCode, type ReleaseGateResult } from './releaseGate'
 
 const delivered = (over: Partial<LoadReviewRow> = {}): LoadReviewRow => ({
+  loadReviewPushedAt: '2026-11-03T00:00:00Z', // in the queue: Load Review membership is the push stamp
   id: 's1',
   number: 'S-1',
   status: 'DELIVERED',
@@ -45,9 +46,13 @@ const gate = (...missing: Array<[ReleaseGateReasonCode, string]>): ReleaseGateRe
 })
 
 describe('inLoadReviewQueue', () => {
-  it('lists delivered, unreleased loads', () => {
+  it('lists only loads that were released to review, however they stand', () => {
     expect(inLoadReviewQueue(delivered())).toBe(true)
-    expect(inLoadReviewQueue(delivered({ status: 'IN_TRANSIT', deliveredAt: null, loadStatus: 'DELIVERED' }))).toBe(true)
+    // Delivered is not enough on its own (Aljex: a load enters Load Review when it is released to it).
+    expect(inLoadReviewQueue(delivered({ loadReviewPushedAt: null }))).toBe(false)
+    expect(inLoadReviewQueue(delivered({ loadReviewPushedAt: null, loadStatus: 'DELIVERED' }))).toBe(false)
+    // A pushed load stays in the queue whatever the delivery clock says.
+    expect(inLoadReviewQueue(delivered({ status: 'IN_TRANSIT', deliveredAt: null }))).toBe(true)
   })
 
   it('drops every released form', () => {
@@ -56,55 +61,26 @@ describe('inLoadReviewQueue', () => {
     expect(inLoadReviewQueue(delivered({ arStatus: 'UNBILLED' }))).toBe(false)
   })
 
-  it('drops imported history, voided, deleted and canceled', () => {
-    expect(inLoadReviewQueue(delivered({ legacyImported: true }))).toBe(false)
+  it('keeps imported history that was pushed, and drops voided, deleted and canceled', () => {
+    expect(inLoadReviewQueue(delivered({ legacyImported: true }))).toBe(true)
+    expect(inLoadReviewQueue(delivered({ legacyImported: true, loadReviewPushedAt: null }))).toBe(false)
     expect(inLoadReviewQueue(delivered({ voidedAt: '2026-11-02T00:00:00Z' }))).toBe(false)
     expect(inLoadReviewQueue(delivered({ deletedAt: '2026-11-02T00:00:00Z' }))).toBe(false)
     expect(inLoadReviewQueue(delivered({ status: 'CANCELED' }))).toBe(false)
   })
 
-  it('keeps a delivered load with no order and flags it', () => {
+  it('keeps a pushed load with no order and flags it', () => {
     const row = delivered({ arStatus: null })
     expect(inLoadReviewQueue(row)).toBe(true)
     const verdict = evaluateLoadReview({ row })
     expect(verdict.ok).toBe(false)
     expect(verdict.checks.details.reasons.map((r) => r.code)).toContain('NO_ORDER')
   })
-
-  it('does not list a load that has not delivered', () => {
-    expect(inLoadReviewQueue(delivered({ status: 'IN_TRANSIT', deliveredAt: null }))).toBe(false)
-  })
-
-  describe('early POD', () => {
-    const early = (over: Partial<LoadReviewRow> = {}) =>
-      delivered({ status: 'OUT_FOR_DELIVERY', deliveredAt: null, ...over })
-
-    it('enters when POD is required and on file', () => {
-      expect(inLoadReviewQueue(early({ docsMissing: [] }))).toBe(true)
-      expect(inLoadReviewQueue(early({ status: 'UNLOADING', docsMissing: ['BOL'] }))).toBe(true)
-    })
-
-    it('does not enter when POD is still missing', () => {
-      expect(inLoadReviewQueue(early({ docsMissing: ['POD'] }))).toBe(false)
-    })
-
-    it('does not enter when the customer does not require POD', () => {
-      expect(inLoadReviewQueue(early({ docsRequired: ['BOL'], docsMissing: [] }))).toBe(false)
-    })
-
-    it('does not enter when docs have not been checked', () => {
-      expect(inLoadReviewQueue(early({ docsMissing: null }))).toBe(false)
-    })
-
-    it('does not apply to statuses before the delivery terminal', () => {
-      expect(inLoadReviewQueue(early({ status: 'IN_TRANSIT' }))).toBe(false)
-    })
-  })
 })
 
 describe('loadReviewCount', () => {
   it('counts only queued rows', () => {
-    const rows = [delivered(), delivered({ id: 's2' }), delivered({ id: 's3', arStatus: 'UNBILLED' }), delivered({ id: 's4', legacyImported: true })]
+    const rows = [delivered(), delivered({ id: 's2' }), delivered({ id: 's3', arStatus: 'UNBILLED' }), delivered({ id: 's4', loadReviewPushedAt: null })]
     expect(loadReviewCount(rows)).toBe(2)
   })
 })
