@@ -6,7 +6,7 @@ import {
 import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 import { resolveScripts } from './prodBackup.mjs';
 import { ALLOW_ENV, PROD_SUFFIX } from './lib/prodGate.mjs';
-import { normalizeEquipment } from '../src/lib/laneMatch.ts';
+import { normalizeEquipment, sameEquipment } from '../src/lib/laneMatch.ts';
 
 const src = (rows) => indexSources(rows.map(([pro, equipment, rep]) => ({ pro, equipment, rep }))).byPro;
 const ship = (o = {}) => ({ id: 's1', number: '12345', revDivision: 'ASSETS', ...o });
@@ -45,10 +45,20 @@ describe('equipment mapping', () => {
     expect(() => parseAlsoMap('ZAK=Van')).toThrow(/driver/);
     expect(() => parseAlsoMap('V=Van')).toThrow(/already/);
   });
-  it('FTL/OCN have no app value and unknown codes stay blank; --also-map opts a code in', () => {
-    expect(classifyEquipmentCode('FTL').kind).toBe('NO_APP_VALUE');
-    expect(classifyEquipmentCode('PO').kind).toBe('UNKNOWN');
-    expect(classifyEquipmentCode('FTL', parseAlsoMap('FTL=Full Truckload'))).toMatchObject({ kind: 'EQUIPMENT', value: 'Full Truckload' });
+  it('FTL and TL both map to the literal FTL; LTL, OCN, CRGO map to LTL / Ocean / Cargo Van and the app tolerates them', () => {
+    for (const [code, value] of [['FTL', 'FTL'], ['tl', 'FTL'], ['LTL', 'LTL'], ['OCN', 'Ocean'], ['CRGO', 'Cargo Van'], ['STRA', 'Box Truck']]) {
+      expect(classifyEquipmentCode(code)).toMatchObject({ kind: 'EQUIPMENT', value });
+    }
+    for (const v of ['FTL', 'LTL', 'Ocean', 'Cargo Van']) {
+      expect(normalizeEquipment(v)).toBe(v.toUpperCase());
+      expect(sameEquipment(v, v.toLowerCase())).toBe(true);
+      expect(sameEquipment('VAN', v)).toBe(false);
+    }
+  });
+  it('unknown codes stay blank; --also-map still opts an unknown code in but cannot remap a mapped one', () => {
+    for (const c of ['PO', 'VM', 'FT', 'VH', 'SD']) expect(classifyEquipmentCode(c).kind).toBe('UNKNOWN');
+    expect(classifyEquipmentCode('XYZ', parseAlsoMap('XYZ=Hotshot'))).toMatchObject({ kind: 'EQUIPMENT', value: 'Hotshot' });
+    expect(() => parseAlsoMap('LTL=Van')).toThrow(/already/);
   });
 });
 
@@ -69,7 +79,7 @@ describe('planShipment: enrich only', () => {
     expect(all.equipment.status).toBe('ALREADY_SET');
   });
   it('ZAK and unknown codes write no equipment but keep the rep', () => {
-    for (const code of ['ZAK', 'PO', 'FTL']) {
+    for (const code of ['ZAK', 'PO', 'VM']) {
       const p = plan({ src: src([['12345', code, 'RYNE BANDOLIK']]).get('12345') });
       expect(p.writes.map((w) => w.field)).toEqual(['salesRepCode']);
     }

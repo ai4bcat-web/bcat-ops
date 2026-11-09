@@ -15,7 +15,7 @@
  * Scope: shipments whose Ship Date in the full export (joined by PRO; `L<pro>` originals match their numeric PRO) is >= 2025-01-01.
  * Writes ONLY, each only while the target is still empty (conditional update; never overwrites): Load.equipmentType,
  * Order.equipmentType, Shipment.salesRepCode, plus one AuditLog row per changed shipment with the previous values. Never a money
- * or status field, never a notice / e-mail / message. ZAK (a driver name), unknown codes and codes the app has no value for are
+ * or status field, never a notice / e-mail / message. ZAK (a driver name) and unknown codes (PO, VM, FT, VH, SD...) are
  * never written; division group names (IVAN CARTAGE CO / BCAT / OWNER OPERATORS) are compared with Shipment.revDivision and reported only.
  * Re-runnable and idempotent; progress is checkpointed to ~/bcat-ops-backups/aw-equip-rep-<suffix>.checkpoint.json.
  * PII: names only go into the 0600 CSVs, stdout carries aggregated counts (and distinct rep names with counts).
@@ -225,6 +225,9 @@ async function main() {
   console.log(`PRODUCTION shipments ${shipments.length}: in scope ${scoped.length}; EXCLUDED older ${results.filter((r) => r.scope === 'OLDER').length}; no ship date ${results.filter((r) => r.scope === 'NO_SHIP_DATE').length}; not in full export ${results.filter((r) => r.scope === 'NOT_IN_EXPORT').length}; voided ${results.filter((r) => r.scope === 'VOIDED').length}`);
   console.log('EQUIPMENT (in scope) by status', JSON.stringify(histogram(scoped, (r) => r.equipment.status)));
   console.log('EQUIPMENT to set per app value', JSON.stringify(histogram(scoped.filter((r) => r.equipment.status === 'TO_SET'), (r) => `${r.equipment.code}->${r.equipment.value}`)));
+  console.log('EQUIPMENT already set (skipped) per code', JSON.stringify(histogram(scoped.filter((r) => r.equipment.status === 'ALREADY_SET'), (r) => `${r.equipment.code}->${r.equipment.value}`)));
+  console.log('EQUIPMENT would write per code/table (empty fields only)', JSON.stringify(histogram(scoped.filter((r) => r.equipment.status === 'TO_SET').flatMap((r) => r.writes.filter((w) => w.field === 'equipmentType').map((w) => ({ code: r.equipment.code, table: w.table }))), (x) => `${x.code}->${EQUIPMENT_MAP[x.code]} ${x.table}`)));
+  console.log('EQUIPMENT no Load/Order target (not written) per code', JSON.stringify(histogram(scoped.filter((r) => r.equipment.status === 'NO_TARGET'), (r) => r.equipment.code)));
   console.log(`ZAK (driver, never equipment) ${scoped.filter((r) => r.equipment.status === 'DRIVER').length}`);
   console.log('no app equipment value (left blank) by code', JSON.stringify(histogram(scoped.filter((r) => r.equipment.status === 'NO_APP_VALUE'), (r) => r.equipment.code)));
   console.log('unknown codes (left blank) by code', JSON.stringify(histogram(scoped.filter((r) => r.equipment.status === 'UNKNOWN_CODE'), (r) => r.equipment.code)));

@@ -16,18 +16,26 @@ import { normalizePro } from '../../src/lib/proNumber.ts';
 
 export const SCOPE_FROM = '2025-01-01';
 
-/** Equipment codes with a real app value. The app's own form suggestions (EQUIPMENT_SUGGESTIONS) are the stored spelling. */
+/**
+ * Equipment codes with a stored value. V/R/F/STRA use the app's own form suggestions (EQUIPMENT_SUGGESTIONS); the mode / vehicle
+ * class codes (Ryne's decision) are stored as the literal free-text values 'FTL' (both FTL and TL), 'LTL', 'Ocean', 'Cargo Van'.
+ * The app treats equipment as free text everywhere; laneMatch.normalizeEquipment upper-cases unknown text ('FTL', 'LTL', 'OCEAN',
+ * 'CARGO VAN'), so these never match a VAN/REEFER/FLATBED lane filter but nothing crashes or drops them.
+ */
 export const EQUIPMENT_MAP = Object.freeze({
   V: 'Dry Van',
   R: 'Reefer',
   F: 'Flatbed',
   STRA: 'Box Truck', // closest app value to a straight truck
+  FTL: 'FTL',
+  TL: 'FTL',
+  LTL: 'LTL',
+  OCN: 'Ocean',
+  CRGO: 'Cargo Van',
 });
 
-/** Ryne's codes the app has no equipment value for (they are modes / vehicle classes). Left blank and listed unless --also-map. */
-export const NO_APP_VALUE = Object.freeze({
-  FTL: 'Full Truckload', TL: 'Truckload', LTL: 'Less than truckload', OCN: 'Ocean', CRGO: 'Cargo van',
-});
+/** Codes known to have no app value (code -> Aljex meaning). Left blank and listed unless --also-map. Currently none. */
+export const NO_APP_VALUE = Object.freeze({});
 
 /** A DRIVER name typed into the equipment field. Never equipment. */
 export const DRIVER_CODES = Object.freeze(['ZAK']);
