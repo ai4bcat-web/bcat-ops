@@ -2812,6 +2812,19 @@ describe('SAVE_COLUMN_TEMPLATE and DELETE_COLUMN_TEMPLATE', () => {
     expect(tables.templates.has('shipments-team-default')).toBe(true)
   })
 
+  it('saves the team default with nothing pinned: an empty pinned list is valid (regression: it failed as "columns cannot be empty")', async () => {
+    const tables = columnTemplateTables()
+    const saved = (await handler(event('SAVE_COLUMN_TEMPLATE', {
+      id: 'shipments-team-default', name: 'Shipments team default', columns: ['status', 'proNumber', 'equip'], widths: { status: 120 }, pinned: [], shared: true,
+    }, ADMIN))) as Record<string, unknown>
+    expect(saved).toMatchObject({ shared: true, version: 1 })
+    expect(saved.pinned).toEqual([])
+    expect(tables.templates.get('shipments-team-default')).toMatchObject({ columns: ['status', 'proNumber', 'equip'], pinned: [] })
+    // Still refused: an empty columns list, and a pin that is not a chosen column.
+    await expect(handler(event('SAVE_COLUMN_TEMPLATE', { id: 'shipments-team-default', name: 'x', columns: [], pinned: [] }, ADMIN))).rejects.toThrow('columns cannot be empty')
+    await expect(handler(event('SAVE_COLUMN_TEMPLATE', { id: 'shipments-team-default', name: 'x', columns: ['status'], pinned: ['equip'] }, ADMIN))).rejects.toThrow('is pinned but is not one of')
+  })
+
   it('lets an admin update a shared template', async () => {
     const tables = columnTemplateTables({ 'ShipmentColumnTemplate-test': [template({ id: 't-shared', shared: true })] })
     const result = (await handler(event('SAVE_COLUMN_TEMPLATE', { id: 't-shared', name: 'Updated', columns: ['status'] }, ADMIN))) as Record<string, unknown>
