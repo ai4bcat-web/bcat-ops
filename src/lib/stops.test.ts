@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Load, Stop } from '@/types'
-import { getStops, deriveLegacyFields, withDerivedLegacy, withStopsFromLegacy, makeStop, updateStop, reorderStops } from './stops'
+import { getStops, deriveLegacyFields, withDerivedLegacy, withoutUnchangedDriverMirrors, withStopsFromLegacy, makeStop, updateStop, reorderStops } from './stops'
 
 function legacyLoad(over: Partial<Load> = {}): Load {
   return {
@@ -177,5 +177,15 @@ describe('withStopsFromLegacy — the inverse dual-write', () => {
     const back = deriveLegacyFields(synced.stops!)
     expect(back.pickupAppt).toBe('T1')
     expect(back.deliveryAppt).toBe('T2')
+  })
+})
+
+describe('withoutUnchangedDriverMirrors', () => {
+  it('leaves out the driver mirrors a stops save did not change, keeps one that did, and keeps one the caller set', () => {
+    const before = { pickupDriverId: null, deliveryDriverId: 'd-1' } as never
+    const derived = { pickupDriverId: null, deliveryDriverId: 'd-1', originCity: 'X' } as never
+    expect(withoutUnchangedDriverMirrors(derived, before, { stops: [] } as never)).toEqual({ originCity: 'X' })
+    expect(withoutUnchangedDriverMirrors({ pickupDriverId: null, deliveryDriverId: 'd-2' } as never, before, {} as never)).toEqual({ deliveryDriverId: 'd-2' })
+    expect(withoutUnchangedDriverMirrors({ pickupDriverId: null } as never, before, { pickupDriverId: null } as never)).toEqual({ pickupDriverId: null })
   })
 })

@@ -3232,6 +3232,13 @@ const dataSafetyBucket = new Bucket(dataSafetyStack, 'DataSafetyBucket', {
 })
 // Owner-only shipment delete/restore: private export bytes, never permission to delete S3 objects.
 shipmentActionsFn.addEnvironment('DATA_SAFETY_BUCKET_NAME', dataSafetyBucket.bucketName)
+// Brokerage per-rep rollup objects (rollups/brokerage/<YYYY-MM>.json): written by tms-dashboard-rollup, read only
+// through the caller-filtered BROKERAGE_REP_ROLLUP action. Without these the Brokerage cards said "could not be loaded".
+financeActionsFn.addEnvironment('DATA_SAFETY_BUCKET_NAME', dataSafetyBucket.bucketName)
+financeActionsFn.addToRolePolicy(new PolicyStatement({
+  actions: ['s3:GetObject'],
+  resources: [`${dataSafetyBucket.bucketArn}/rollups/brokerage/*`],
+}))
 shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions: ['s3:PutObject', 's3:GetObject'],
   resources: [`${dataSafetyBucket.bucketArn}/deletes/*`],
@@ -4327,6 +4334,11 @@ if (tableOrNull('DashboardRollup')) {
   rollupFn.addEnvironment('LANE_RATE_SAMPLE_TABLE_NAME', rollupSources.LaneRateSample.tableName)
   rollupFn.addEnvironment('INVOICE_TABLE_NAME',          rollupSources.Invoice.tableName)
   rollupFn.addEnvironment('CARRIER_BILL_TABLE_NAME',     rollupSources.CarrierBill.tableName)
+  rollupFn.addEnvironment('DATA_SAFETY_BUCKET_NAME',     dataSafetyBucket.bucketName)
+  rollupFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['s3:PutObject'],
+    resources: [`${dataSafetyBucket.bucketArn}/rollups/brokerage/*`],
+  }))
   // Read/write: its own table only (rows, dirty markers, leases).
   rollupFn.addToRolePolicy(new PolicyStatement({
     actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan'],
