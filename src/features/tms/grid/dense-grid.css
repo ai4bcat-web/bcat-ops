@@ -253,7 +253,7 @@
 .tms-shell .tms-dg-table tbody tr {
   height: var(--dg-row-h);
   --tms-row-bg: var(--tms-row-open);
-  --tms-row-fg: var(--tms-row-open-text);
+  --tms-row-fg: var(--tms-row-ink);
 }
 
 .tms-shell .tms-dg-table tbody tr.tms-dg-spacer {
@@ -266,15 +266,18 @@
   background: transparent;
 }
 
-.tms-shell .tms-dg-table tbody tr[data-tone='delivered'] { --tms-row-bg: var(--tms-row-delivered); --tms-row-fg: var(--tms-row-delivered-text); }
-.tms-shell .tms-dg-table tbody tr[data-tone='dispatched'] { --tms-row-bg: var(--tms-row-dispatched); --tms-row-fg: var(--tms-row-dispatched-text); }
-.tms-shell .tms-dg-table tbody tr[data-tone='departed'] { --tms-row-bg: var(--tms-row-departed); --tms-row-fg: var(--tms-row-departed-text); }
-.tms-shell .tms-dg-table tbody tr[data-tone='arrived'] { --tms-row-bg: var(--tms-row-arrived); --tms-row-fg: var(--tms-row-arrived-text); }
-.tms-shell .tms-dg-table tbody tr[data-tone='covered'] { --tms-row-bg: var(--tms-row-covered); --tms-row-fg: var(--tms-row-covered-text); }
-.tms-shell .tms-dg-table tbody tr[data-tone='hold'] { --tms-row-bg: var(--tms-row-hold); --tms-row-fg: var(--tms-row-hold-text); }
-.tms-shell .tms-dg-table tbody tr[data-tone='reserved'] { --tms-row-bg: var(--tms-row-reserved); --tms-row-fg: var(--tms-row-reserved-text); }
+.tms-shell .tms-dg-table tbody tr[data-tone='delivered'] { --tms-row-bg: var(--tms-row-delivered); --tms-row-fg: var(--tms-row-ink); }
+.tms-shell .tms-dg-table tbody tr[data-tone='dispatched'] { --tms-row-bg: var(--tms-row-dispatched); --tms-row-fg: var(--tms-row-ink); }
+.tms-shell .tms-dg-table tbody tr[data-tone='departed'] { --tms-row-bg: var(--tms-row-departed); --tms-row-fg: var(--tms-row-ink); }
+.tms-shell .tms-dg-table tbody tr[data-tone='arrived'] { --tms-row-bg: var(--tms-row-arrived); --tms-row-fg: var(--tms-row-ink); }
+.tms-shell .tms-dg-table tbody tr[data-tone='covered'] { --tms-row-bg: var(--tms-row-covered); --tms-row-fg: var(--tms-row-ink); }
+.tms-shell .tms-dg-table tbody tr[data-tone='hold'] { --tms-row-bg: var(--tms-row-hold); --tms-row-fg: var(--tms-row-ink); }
+.tms-shell .tms-dg-table tbody tr[data-tone='reserved'] { --tms-row-bg: var(--tms-row-reserved); --tms-row-fg: var(--tms-row-ink); }
 .tms-shell .tms-dg-table tbody tr[data-tone='voided'],
-.tms-shell .tms-dg-table tbody tr[data-tone='canceled'] { --tms-row-bg: var(--tms-row-voided); --tms-row-fg: var(--tms-row-voided-text); }
+.tms-shell .tms-dg-table tbody tr[data-tone='canceled'] { --tms-row-bg: var(--tms-row-voided); --tms-row-fg: var(--tms-row-ink); }
+
+/* Every row's text is the same ink (black in the light theme), whatever the row's status color: links included. */
+.tms-shell .tms-dg-table tbody tr[data-tone] td a { color: inherit; }
 
 .tms-shell .tms-dg-table tbody tr:not(.tms-dg-group):not(.tms-dg-spacer) td {
   height: var(--dg-row-h);
