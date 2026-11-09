@@ -275,7 +275,7 @@ import {
 } from './proScheme'
 import { customerDefaultsOf } from '../../../src/lib/intakeLoad'
 import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseGate'
-import { isEmailAddress } from '../../../src/lib/emailAddress'
+import { dedupeEmails, isEmailAddress } from '../../../src/lib/emailAddress'
 import { mcpPacketStanding, rateConMcpRefusal } from '../../../src/lib/mcpPacket'
 import { composeRateConCc } from './rateConRecipients'
 import { assertBolEmailable, bolEmailBody, bolEmailSubject, deliveryLabel, parseEmailBolInput } from './bolEmail'
@@ -5969,6 +5969,9 @@ function firstNameFromEmail(email: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1)
 }
 
+/** Always on CC for every rate confirmation (Ryne 2026-11-09). */
+const ALWAYS_CC_TRACKING = 'tracking@bcatcorp.com'
+
 function trackingMailbox(): string {
   const [local, domain] = THREAD_MAILBOX.split('@')
   return `${local}+tracking@${domain}`
@@ -6043,7 +6046,10 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
       if (!requiredKeys.includes(key)) requiredKeys.push(key)
     }
   }
-  const missing = missingRateConSendFields(carrier, requiredKeys)
+  // The dispatcher e-mail defaults to the address the rate con is going to (the carrier's MyCarrierPackets / FMCSA e-mail unless the
+  // sender typed another): a blank one no longer stops the send, and it is saved on the assignment.
+  const dispatcherEmailDefault = !optionalString(carrier.dispatcherEmail, 200) && toInput.length > 0 ? toInput[0] : null
+  const missing = missingRateConSendFields(dispatcherEmailDefault ? { ...carrier, dispatcherEmail: dispatcherEmailDefault } : carrier, requiredKeys)
   if (missing.length) {
     throw new Error(`Add the ${formatMissingFields(missing)} before sending the rate confirmation.`)
   }
@@ -6077,7 +6083,8 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   const messageId = newMessageId(shipmentId, version)
   const composed = composeRateConCc({
     to: toInput,
-    extraCc: inputCc,
+    // Tracking is always on CC: the shared tracking address plus the mailbox the thread machinery reads.
+    extraCc: dedupeEmails([ALWAYS_CC_TRACKING, ...inputCc]),
     tracking: trackingMailbox(),
     sender: isEmailAddress(caller.email) ? caller.email : null,
   })
@@ -6151,6 +6158,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
     }),
     updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, {
       rateConStatus: 'SENT',
+      ...(dispatcherEmailDefault ? { dispatcherEmail: dispatcherEmailDefault } : {}),
       rateConToken: token,
       rateConSentAt: now,
       rateConSentTo: to.join(', '),

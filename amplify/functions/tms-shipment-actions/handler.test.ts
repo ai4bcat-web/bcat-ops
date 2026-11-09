@@ -3012,10 +3012,10 @@ describe('carrier booking', () => {
       const { loadCarrierId } = await booked()
       await send(loadCarrierId)
       const { raw, cc } = rawMime()
-      expect(raw).toContain('Cc: ai4bcat+tracking@gmail.com, dispatch@bcatcorp.com')
-      expect(cc).toEqual(['ai4bcat+tracking@gmail.com', 'dispatch@bcatcorp.com'])
+      expect(raw).toContain('Cc: ai4bcat+tracking@gmail.com, tracking@bcatcorp.com, dispatch@bcatcorp.com')
+      expect(cc).toEqual(['ai4bcat+tracking@gmail.com', 'tracking@bcatcorp.com', 'dispatch@bcatcorp.com'])
       const message = [...table(TABLES.message).values()][0]
-      expect(message.cc).toBe('ai4bcat+tracking@gmail.com, dispatch@bcatcorp.com')
+      expect(message.cc).toBe('ai4bcat+tracking@gmail.com, tracking@bcatcorp.com, dispatch@bcatcorp.com')
       expect(sendAudit()).toMatchObject({ senderCc: 'dispatch@bcatcorp.com', mcpStatus: 'ACCEPTABLE' })
     })
 
@@ -3024,13 +3024,13 @@ describe('carrier booking', () => {
       await send(loadCarrierId, {
         cc: ['Dispatch@BCATCorp.com', 'x@y.com', 'X@Y.COM', 'ai4bcat+tracking@gmail.com'],
       })
-      expect(rawMime().cc).toEqual(['ai4bcat+tracking@gmail.com', 'Dispatch@BCATCorp.com', 'x@y.com'])
+      expect(rawMime().cc).toEqual(['ai4bcat+tracking@gmail.com', 'tracking@bcatcorp.com', 'Dispatch@BCATCorp.com', 'x@y.com'])
     })
 
     it('does not cc anyone who is already a to recipient', async () => {
       const { loadCarrierId } = await booked()
       await send(loadCarrierId, { to: ['dispatch@swift.com', 'Dispatch@bcatcorp.com'], cc: ['DISPATCH@swift.com', 'x@y.com'] })
-      expect(rawMime().cc).toEqual(['ai4bcat+tracking@gmail.com', 'x@y.com'])
+      expect(rawMime().cc).toEqual(['ai4bcat+tracking@gmail.com', 'tracking@bcatcorp.com', 'x@y.com'])
       expect(sendAudit().senderCc).toBeNull()
     })
 
@@ -3045,7 +3045,7 @@ describe('carrier booking', () => {
       const { loadCarrierId } = await booked()
       const odd = { ...DISPATCHER, claims: { ...DISPATCHER.claims, email: 'ops@localhost' } }
       await send(loadCarrierId, {}, odd)
-      expect(rawMime().cc).toEqual(['ai4bcat+tracking@gmail.com'])
+      expect(rawMime().cc).toEqual(['ai4bcat+tracking@gmail.com', 'tracking@bcatcorp.com'])
       expect(sendAudit().senderCc).toBeNull()
       warn.mockRestore()
     })
@@ -3063,10 +3063,13 @@ describe('carrier booking', () => {
     expect(table(TABLES.carrier).get(id1)!.rateConStatus).toBe('SENT')
     await call('REMOVE_LOAD_CARRIER', { loadCarrierId: id1, outcome: 'BOUNCED', reason: 'OTHER', note: 'test' })
 
+    // A booking with no dispatcher e-mail no longer stops the send: the address the rate con goes to becomes the dispatcher e-mail
+    // (the carrier's MyCarrierPackets / FMCSA address unless the sender typed another) and is saved on the assignment.
     table(TABLES.carrierDirectory).get('car-1')!.dispatcherEmail = null
     await book(loadId)
     const id2 = String(activeCarrier().id)
-    await expect(call('SEND_RATE_CON', { loadCarrierId: id2, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })).rejects.toThrow(/dispatcher email/)
+    await call('SEND_RATE_CON', { loadCarrierId: id2, pdfBase64: PDF_BASE64, to: ['fmcsa@swift.com'] })
+    expect(table(TABLES.carrier).get(id2)!.dispatcherEmail).toBe('fmcsa@swift.com')
   })
 
   it('a tenant can still require the driver before send through rateConRequiredFields', async () => {
