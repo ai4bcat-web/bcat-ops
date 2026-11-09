@@ -3,6 +3,7 @@
  * strip (Instructions, References, Items, Notes), and the sticky summary rail. Route element for `/tms/shipments/new` (mode "create") and
  * `/tms/shipments/:id/edit` (mode "edit"). Fields, mapping, pipelines and validation are Step AH's.
  */
+import { findCustomerMatches } from '@/lib/tmsDirectory'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -159,7 +160,13 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     const row = intake.row
     if (!intakeId || !row || directory.loading || seededFor.current === intakeId) return
     seededFor.current = intakeId
-    const pre = intakePrefill(row, row.fields.customerId ? directory.customers.find((c) => c.id === row.fields.customerId) ?? null : null)
+    // The e-mail's customer is matched by exact name when the intake review did not pick one, so a built shipment is
+    // never left on a typed name with no customer record (no bill-to, no sales rep, nothing to submit).
+    const typedName = typeof row.fields.customerName === 'string' ? row.fields.customerName : ''
+    const picked = row.fields.customerId
+      ? directory.customers.find((c) => c.id === row.fields.customerId) ?? null
+      : findCustomerMatches(typedName, directory.customers).find((m) => m.score === 1)?.record ?? null
+    const pre = intakePrefill(row, picked)
     seedValues(pre.values, true)
     setFromEmail(new Set(pre.fromEmail))
   }, [intakeId, intake.row, directory.loading, directory.customers, seedValues])

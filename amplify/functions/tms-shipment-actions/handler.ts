@@ -875,6 +875,8 @@ function isActionAuthorized(action: Action, caller: Caller): boolean {
   if (OFFER_ACTIONS[action]) {
     return groups.includes(LOADS_PAGE_GROUP) || groups.includes(QUOTES_PAGE_GROUP) || tms
   }
+  // Whoever builds a shipment from an intake load can tie the two together: the link is the end of the build, not a review step.
+  if (action === 'INTAKE_LINK_SHIPMENT') return groups.includes(INTAKE_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (INTAKE_REVIEW_ACTIONS[action]) return groups.includes(INTAKE_REVIEW_PAGE_GROUP)
   if (LOAD_REVIEW_ACTIONS[action]) return groups.includes(LOAD_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (ADMIN_ONLY_ACTIONS[action]) return false

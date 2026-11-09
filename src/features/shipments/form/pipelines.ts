@@ -7,7 +7,7 @@
  */
 import {
   addCarrier, assignAsset, assignCarrierRep, clearRevTag, commitDocument, createLocation, createShipment, getShipmentBundle,
-  prepareDocumentUpload, putPresignedFile, recalcCharges, saveOrderForm, setEta, setRevTag, setSalesRep,
+  prepareDocumentUpload, putPresignedFile, recalcCharges, saveOrderForm, setEta, setRevTag, setSalesRep, setShipmentCustomer,
   submitOrder, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
   type UpdateLoadCarrierDetailsInput,
 } from '@/lib/apiClient'
@@ -152,6 +152,13 @@ async function linkedValues(values: ShipmentFormValues, ctx: PipelineCtx): Promi
 }
 
 async function saveDraftBody(r: Runner, values: ShipmentFormValues, ctx: PipelineCtx, draftSave: boolean, skipTag = false): Promise<void> {
+  // A shipment built with only a typed customer name has no customer record. Picking one in the form must LINK it
+  // (SET_SHIPMENT_CUSTOMER also fills the blank bill-to and sales rep from the customer). Without this the pick was
+  // never written, the next reload dropped it, and Submit kept saying Bill to / Sales rep were missing.
+  const chosen = values.customer.useTyped ? '' : values.customer.id
+  if (chosen && !(r.bundle!.orders[0]?.customerId || r.bundle!.shipment.customerId)) {
+    await r.run('customer', () => setShipmentCustomer({ shipmentId: r.bundle!.shipment.id, customerId: chosen }))
+  }
   await r.run('save', () => saveOrderForm(toSaveOrderFormInput(values, r.bundle!, { draftSave, ladder: ctx.isBatory })))
   await applyRoles(r, values, skipTag)
 }
