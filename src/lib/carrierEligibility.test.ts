@@ -259,6 +259,13 @@ describe('evaluateCarrierBooking — advisory warnings', () => {
     expect(keys(outside.warnings)).toEqual([])
   })
 
+  it('a completed MyCarrierPackets packet stands in for the certificates, W-9 and agreement', () => {
+    const done = evaluateCarrierBooking(input({ carrier: { ...carrier(), mcpStatus: 'ACCEPTABLE' } as never, documents: [] }))
+    expect(keys(done.warnings).filter((k) => k.startsWith('MISSING_DOC'))).toEqual([])
+    const started = evaluateCarrierBooking(input({ carrier: { ...carrier(), mcpStatus: 'IN_PROGRESS' } as never, documents: [] }))
+    expect(keys(started.warnings).filter((k) => k.startsWith('MISSING_DOC')).length).toBeGreaterThan(0)
+  })
+
   it('warns about a required document that is missing or expired', () => {
     const missing = evaluateCarrierBooking(
       input({ documents: [doc('COI_CARGO'), doc('COI_AUTO'), doc('W9')] }),

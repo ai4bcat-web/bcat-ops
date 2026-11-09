@@ -29,6 +29,7 @@ import {
 } from '@/lib/apiClient'
 import type { UpsertCarrierInput } from '@/lib/apiClient'
 import { insuranceState, oosBps } from '@/lib/carrierEligibility'
+import { MCP_PACKET_COMPLETED_STATUSES, normalizeMcpStatus } from '@/lib/mcpPacket'
 import {
   CARRIER_STATUS_LABELS, CARRIER_STATUS_REASON_LABELS, effectiveCarrierStatus,
 } from '@/lib/carrierStatus'
@@ -245,6 +246,15 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                 {carrier?.highwayStatus && <TmsBadge tone="gray">Highway {carrier.highwayStatus}</TmsBadge>}
                 {carrier?.rmisStatus && <TmsBadge tone="gray">RMIS {carrier.rmisStatus}</TmsBadge>}
                 {carrier?.mcpStatus && <TmsBadge tone="gray">MCP {carrier.mcpStatus}</TmsBadge>}
+                {carrier && (() => {
+                  const st = normalizeMcpStatus(carrier.mcpStatus)
+                  const has = st != null && (MCP_PACKET_COMPLETED_STATUSES as readonly string[]).includes(st)
+                  return (
+                    <TmsBadge tone={has ? 'green' : 'gray'} data-testid="mcp-paperwork" title="Certificates, W-9 and carrier agreement are stored in MyCarrierPackets and can be exported from there.">
+                      Paperwork on file (MyCarrierPackets): {has ? 'Yes' : 'No'}
+                    </TmsBadge>
+                  )
+                })()}
                 {carrier?.legacyImported === true && <TmsBadge tone="gray" title="Imported from Aljex; compliance data not yet reviewed here">Legacy (Aljex)</TmsBadge>}
                 {carrier && (carrier.insurancePolicies ?? []).map((policy, index) => {
                   const state = insuranceState(policy, now, warnDays)
