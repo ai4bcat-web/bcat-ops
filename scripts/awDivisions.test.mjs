@@ -10,8 +10,9 @@ import { SUB_MODELS, applyDriver, divisionsGate, exportDivision, readExport, ret
 
 const d = (id, name, o = {}) => ({ id, name, type: 'driver', active: true, ...o });
 const roster = () => [
-  d('chad', 'Chad Salerno', { driverType: 'COMPANY', fleetGroup: 'AMAZON' }),
-  d('mike', 'Michael Bodle', { fleetGroup: 'AMAZON' }),
+  d('chad', 'Chad Salerno', { driverType: 'COMPANY', fleetGroup: 'OWNER_OPERATOR' }),
+  d('mike', 'Michael Bodle', { fleetGroup: 'OWNER_OPERATOR' }),
+  d('lee', 'Lee Lara', { driverType: 'OWNER_OPERATOR', fleetGroup: 'OWNER_OPERATOR' }),
   d('john', 'John Brittich', { driverType: 'COMPANY', fleetGroup: 'LOCAL' }),
   d('jason', 'Jason Smith', { driverType: 'COMPANY', fleetGroup: 'LOCAL' }),
   d('dan', 'Daniel Palmer', { fleetGroup: 'LOCAL' }),
@@ -25,26 +26,34 @@ const roster = () => [
 const divisions = SEED_DIVISIONS.map((x) => ({ ...x }));
 const rules = SEED_RULES.map((x) => ({ ...x }));
 
-describe('driver type plan', () => {
-  it('writes only the rows whose type differs, and never Charles Best', () => {
-    const { entries, problems } = planDriverTypes(roster());
-    expect(problems).toEqual([]);
-    const writes = Object.fromEntries(entries.filter((e) => e.status === 'WRITE').map((e) => [e.id.slice(0, 4), `${e.prev}->${e.next}`]));
-    expect(writes).toEqual({ chad: 'COMPANY->OWNER_OPERATOR', mike: 'null->OWNER_OPERATOR', dan: 'null->COMPANY', eul: 'null->COMPANY', josh: 'null->COMPANY', d8a3: 'null->COMPANY' });
-    expect(entries.some((e) => e.id === 'charles')).toBe(false);
+describe('driver type plan: fleetGroup is the truth, driverType is written only where it contradicts it', () => {
+  it('writes Chad (COMPANY on an OWNER_OPERATOR fleet) and nobody else; blanks are left alone', () => {
+    const { entries } = planDriverTypes(roster());
+    const writes = Object.fromEntries(entries.filter((e) => e.status === 'WRITE').map((e) => [e.id, `${e.prev}->${e.next}`]));
+    expect(writes).toEqual({ chad: 'COMPANY->OWNER_OPERATOR' });
+    const blanks = entries.filter((e) => e.status === 'BLANK_LEFT').map((e) => e.id).sort();
+    expect(blanks).toEqual(['charles', 'd8a330f5-d927-4ffc-b60f-53d71e9348b4', 'dan', 'eul', 'josh', 'mike']);
   });
 
-  it('a broker row sharing a name is ignored; two real matches are ambiguous and not written', () => {
+  it('writes the other direction too: a LOCAL or BOX_TRUCK driver typed OWNER_OPERATOR becomes COMPANY', () => {
+    const rows = [d('a', 'A One', { fleetGroup: 'LOCAL', driverType: 'OWNER_OPERATOR' }), d('b', 'B Two', { fleetGroup: 'BOX_TRUCK', driverType: 'OWNER_OPERATOR' }), d('c', 'C Three', { fleetGroup: 'AMAZON', driverType: 'COMPANY' })];
+    const writes = planDriverTypes(rows).entries.filter((e) => e.status === 'WRITE').map((e) => `${e.id}:${e.prev}->${e.next}`);
+    expect(writes).toEqual(['a:OWNER_OPERATOR->COMPANY', 'b:OWNER_OPERATOR->COMPANY', 'c:COMPANY->OWNER_OPERATOR']);
+  });
+
+  it('a driver with no fleet group, and a broker row, are never planned', () => {
+    const rows = [d('nofleet', 'No Fleet', { driverType: 'OWNER_OPERATOR' }), { id: 'b1', name: 'BROKER', type: 'broker', fleetGroup: 'LOCAL', driverType: 'OWNER_OPERATOR' }];
+    expect(planDriverTypes(rows).entries).toEqual([]);
+  });
+
+  it('Ryne\'s roster: a broker row sharing a name is ignored; two real matches are ambiguous', () => {
     expect(matchDrivers(roster()).matched.get('chad-salerno').id).toBe('chad');
-    const dup = [...roster(), d('chad2', 'Chad Salerno')];
-    const r = planDriverTypes(dup);
-    expect(r.problems).toEqual([{ key: 'chad-salerno', reason: 'AMBIGUOUS_2' }]);
-    expect(r.entries.some((e) => e.key === 'chad-salerno')).toBe(false);
+    expect(matchDrivers([...roster(), d('chad2', 'Chad Salerno')]).problems).toEqual([{ key: 'chad-salerno', reason: 'AMBIGUOUS_2' }]);
   });
 
   it("Zak is matched by his id AND name: the id on a different name is refused", () => {
     const rows = roster().map((x) => (x.name === 'Zak Pace' ? { ...x, name: 'Someone Else' } : x));
-    expect(planDriverTypes(rows).problems).toEqual([{ key: 'zak-pace', reason: 'id matches but name does not' }]);
+    expect(matchDrivers(rows).problems).toEqual([{ key: 'zak-pace', reason: 'id matches but name does not' }]);
   });
 });
 
@@ -60,9 +69,16 @@ describe('derived division with the real resolver', () => {
   it('a type label alone never moves a division here', () => {
     expect(rows.every((r) => r.topUnchanged)).toBe(true);
   });
-  it('flags Zak\'s truck sitting in the LOCAL fleet group and Chad staying on the Amazon pay group', () => {
+  it('a LOCAL driver with a stray OWNER_OPERATOR type stays in LOCAL (the fleet outranks the type rule)', () => {
+    const [r] = reviewDrivers({ drivers: [d('x', 'Stray One', { fleetGroup: 'LOCAL', driverType: 'OWNER_OPERATOR' })], paySettings: [], equipment: [], divisions, rules });
+    expect(r.before).toBe('ASSETS/LOCAL');
+    expect(r.after).toBe('ASSETS/LOCAL');
+  });
+  it('flags Zak\'s truck sitting in the LOCAL fleet group, and a fleet that is not what Ryne listed', () => {
     expect(by.d8a3.flags).toContain('BOX_TRUCK_DRIVER_TRUCK_NOT_BOX_TRUCK_GROUP');
-    expect(by.chad.flags.some((f) => f.startsWith('OWNER_OP_ON_AMAZON'))).toBe(true);
+    expect(by.chad.flags.some((f) => f.startsWith('FLEET_NOT_AS_RYNE_LISTED'))).toBe(false);
+    const [wrong] = reviewDrivers({ drivers: [d('m', 'Michael Bodle', { fleetGroup: 'LOCAL' })], paySettings: [], equipment: [], divisions, rules });
+    expect(wrong.flags).toContain('FLEET_NOT_AS_RYNE_LISTED LOCAL');
   });
 });
 

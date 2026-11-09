@@ -22,6 +22,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { DriverDocUploadDialog } from '@/features/driver-docs'
+import { isOwnerOperator } from '@/lib/driverOwnership'
 import { normalizePro } from '@/lib/proNumber'
 import { useResolveLoads } from '@/hooks/useResolveLoads'
 import { formatDateTime } from '@/lib/date'
@@ -119,7 +120,8 @@ export function PodsPage() {
       .filter((s) => tab === 'ALL' || reviewStatusOf(s) === tab)
       .filter((s) => {
         if (app === 'ALL') return true
-        const oo = driverFor(s)?.driverType === 'OWNER_OPERATOR'
+        const d = driverFor(s)
+        const oo = d ? isOwnerOperator(d) : false
         return app === 'OO' ? oo : !oo
       })
       .filter((s) => !q || [s.driverName, s.referenceNumber, loadFor(s)?.aljexId, loadFor(s)?.customer]

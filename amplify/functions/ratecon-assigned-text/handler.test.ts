@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { driversOnLoad, newlyAssigned, type LoadImage } from './handler'
+import { driversOnLoad, isRateconOwnerOperator, newlyAssigned, type LoadImage } from './handler'
 
 const OO = new Set(['lee', 'roy'])
 const isOO = (id: string) => OO.has(id)
@@ -43,5 +43,21 @@ describe('newlyAssigned', () => {
   it('texts an owner operator added on a stop', () => {
     const stops = JSON.stringify([{ driverId: 'company' }, { driverId: 'roy' }])
     expect(newlyAssigned({ id: '1', stops, rateConfirmKey: 'rc.pdf' }, { id: '1', stops: JSON.stringify([{ driverId: 'company' }]), rateConfirmKey: 'rc.pdf' }, isOO)).toEqual(['roy'])
+  })
+})
+
+describe('isRateconOwnerOperator: the fleet group decides, as on the profile Type column', () => {
+  it.each([
+    ['Chad: fleet OWNER_OPERATOR, driverType COMPANY', { fleetGroup: 'OWNER_OPERATOR', driverType: 'COMPANY' }, false, true],
+    ['Michael: fleet OWNER_OPERATOR, no driverType', { fleetGroup: 'OWNER_OPERATOR', driverType: null }, false, true],
+    ['legacy AMAZON fleet', { fleetGroup: 'AMAZON' }, false, true],
+    ['Ivan local with a stray OWNER_OPERATOR type', { fleetGroup: 'LOCAL', driverType: 'OWNER_OPERATOR' }, false, false],
+    ['Ivan local even when settled as an owner operator', { fleetGroup: 'LOCAL' }, true, false],
+    ['box truck', { fleetGroup: 'BOX_TRUCK' }, false, false],
+    ['no fleet, driverType OWNER_OPERATOR', { driverType: 'OWNER_OPERATOR' }, false, true],
+    ['no fleet, settled as an owner operator', {}, true, true],
+    ['no fleet, nothing else', {}, false, false],
+  ])('%s', (_name, driver, settled, texted) => {
+    expect(isRateconOwnerOperator(driver, settled)).toBe(texted)
   })
 })

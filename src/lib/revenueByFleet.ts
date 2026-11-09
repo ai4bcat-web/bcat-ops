@@ -19,6 +19,7 @@
  *
  * Pure: no store, no clock.
  */
+import { isOwnerOperator } from './driverOwnership'
 import type { Driver, Load } from '../types'
 
 export type FleetBucket = 'OWNER_OP' | 'IVAN' | 'BOX_TRUCK' | 'BROKER' | 'UNASSIGNED'
@@ -41,15 +42,14 @@ export type FleetDriver = Pick<Driver, 'id' | 'fleetGroup' | 'driverType' | 'typ
  * and the whole reason this breakdown exists; folding them into either neighbour would
  * leave the question that was asked unanswered.
  *
- * Otherwise this matches driverGroupOf in driverFilter.ts: `fleetGroup: 'AMAZON'` OR
- * `driverType: 'OWNER_OPERATOR'` means owner operator. Either is enough — they are meant
- * to agree, and one driver on file today says AMAZON and COMPANY at once.
+ * Otherwise this is driverGroupOf in driverFilter.ts: `driverOwnershipKind` says owner
+ * operator (fleet group first, `driverType` only when the fleet is empty).
  */
 export function fleetBucketOf(driver: FleetDriver | undefined): FleetBucket {
   if (!driver) return 'UNASSIGNED'
   if (driver.type === 'broker') return 'BROKER'
   if (driver.fleetGroup === 'BOX_TRUCK') return 'BOX_TRUCK'
-  if (driver.fleetGroup === 'AMAZON' || driver.driverType === 'OWNER_OPERATOR') return 'OWNER_OP'
+  if (isOwnerOperator(driver)) return 'OWNER_OP'
   return 'IVAN'
 }
 

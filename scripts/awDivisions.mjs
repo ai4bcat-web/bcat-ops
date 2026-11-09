@@ -13,8 +13,9 @@
  *     BCAT_ALLOW_PROD=$(date +%F) AW_PROD_CONFIRM=$(date +%F)-divisions node scripts/awDivisions.mjs retire-company --apply <same gate flags>
  *   restore the division row from its export:  ... awDivisions.mjs restore --from ~/bcat-ops-backups/pre-delete-company-division/<stamp> --apply <same gate flags>
  *
- * drivers         Driver.driverType ONLY, one conditional UpdateItem per driver (the stored value must still be the one the plan read), one
- *                 AuditLog row per driver with the previous value. Never fleetGroup / pay group / equipment (those are reported).
+ * drivers         Driver.driverType ONLY, and ONLY where it contradicts Driver.fleetGroup (the source of truth: Chad COMPANY -> OWNER_OPERATOR today). One
+ *                 conditional UpdateItem per driver (the stored value must still be the one the plan read), one AuditLog row per driver with the previous
+ *                 value. Blank driverTypes are reported, never written. Never fleetGroup / pay group / equipment.
  * retire-company  Exports the COMPANY OwnershipDivision row (JSONL + manifest with sha256, dir 0700 / files 0600; no PII) then deletes it with a
  *                 conditional delete. Refuses while ANY row still references the code (live re-check of every table that can name a division).
  * restore         Put-if-absent of the exported division row (+ audit row).
@@ -34,7 +35,7 @@ import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 
 register('./lib/tsExtensionlessHooks.mjs', import.meta.url);
 const plan = await import('./lib/divisionPlan.mjs');
-const { COMPANY_CODE, COMPANY_REF_SPECS, AUDIT_USER, planDriverTypes, planRetire, reviewDrivers, untypedDrivers } = plan;
+const { COMPANY_CODE, COMPANY_REF_SPECS, AUDIT_USER, planDriverTypes, planRetire, reviewDrivers } = plan;
 
 export const SCRIPT = 'awDivisions';
 export const SUBCOMMANDS = ['report', 'drivers', 'retire-company', 'restore'];
@@ -118,7 +119,7 @@ export async function applyDriver({ doc, suffix, entry, now = new Date() }) {
     TableName: `AuditLog-${suffix}`,
     Item: {
       id: randomUUID(), __typename: 'AuditLog', entityType: 'DRIVER', entityId: entry.id, action: AUDIT_ACTIONS.drivers, user: AUDIT_USER,
-      changes: JSON.stringify({ field: 'driverType', previous: entry.prev, next: entry.next, source: 'Ryne 2026-11-09', key: entry.key }),
+      changes: JSON.stringify({ field: 'driverType', previous: entry.prev, next: entry.next, source: 'driverType contradicted fleetGroup (Ryne 2026-11-09: fleetGroup is the truth)', key: entry.key }),
       createdAt: nowIso, updatedAt: nowIso,
     },
   }));
@@ -251,14 +252,14 @@ async function main() {
   ]);
 
   if (sub === 'report' || sub === 'drivers') {
-    const { entries, problems } = planDriverTypes(drivers);
+    const { entries } = planDriverTypes(drivers);
     const review = reviewDrivers({ drivers, paySettings, equipment, divisions, rules });
     const toWrite = entries.filter((e) => e.status === 'WRITE');
-    console.log(`DRIVERS ${drivers.length} rows (${review.length} roster drivers). Targets matched ${entries.length}/${plan.DRIVER_TARGETS.length}; problems ${JSON.stringify(problems)}`);
-    console.log(`DRIVER TYPE WRITES ${toWrite.length} (field Driver.driverType only): ${JSON.stringify(toWrite.map((e) => `${e.id.slice(0, 8)} ${e.key.split('-')[0]} ${e.prev ?? 'blank'}->${e.next}`))}`);
-    console.log(`NOOP ${JSON.stringify(entries.filter((e) => e.status === 'NOOP').map((e) => `${e.id.slice(0, 8)} ${e.key.split('-')[0]} ${e.next}`))}`);
-    console.log(`NO TYPE FROM RYNE (not set, listed for him): ${JSON.stringify(untypedDrivers(drivers).map((d) => `${d.id.slice(0, 8)} ${String(d.name).split(' ')[0]} type=${d.driverType ?? 'blank'}`))}`);
-    console.log(`DIVISION RESOLVER before->after ${JSON.stringify(histogram(review.filter((r) => r.status !== 'NOT_TARGET'), (r) => `${r.before}->${r.after}`))}; changed ${review.filter((r) => !r.topUnchanged).length}`);
+    const listed = plan.matchDrivers(drivers);
+    console.log(`DRIVERS ${drivers.length} rows (${review.length} roster drivers; ${entries.length} with a fleet group). Ryne's roster matched ${listed.matched.size}/${plan.DRIVER_TARGETS.length}; problems ${JSON.stringify(listed.problems)}`);
+    console.log(`DRIVER TYPE WRITES ${toWrite.length} (field Driver.driverType only, ONLY where it contradicts the fleet group): ${JSON.stringify(toWrite.map((e) => `${e.key} fleet ${e.fleetGroup}: ${e.prev}->${e.next}`))}`);
+    console.log(`AGREE (no write) ${entries.filter((e) => e.status === 'NOOP').length}; BLANK driverType left alone (fleet group is read first) ${JSON.stringify(entries.filter((e) => e.status === 'BLANK_LEFT').map((e) => `${e.key} fleet ${e.fleetGroup}`))}`);
+    console.log(`DIVISION RESOLVER before->after ${JSON.stringify(histogram(review, (r) => `${r.before}->${r.after}`))}; changed ${review.filter((r) => !r.topUnchanged).length}`);
     for (const r of review.filter((x) => x.flags.length)) console.log(`  ${r.id.slice(0, 8)} ${r.firstName}: ${r.flags.join('; ')}`);
     const csv = join(values['report-dir'] ?? join(homedir(), 'aljex-export', 'reports'), `driver-profile-review-${localDate(new Date())}.csv`);
     writeReviewCsv(csv, review);

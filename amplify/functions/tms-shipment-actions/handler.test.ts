@@ -1816,6 +1816,10 @@ describe('ownership tagging', () => {
       [{ driverType: 'OWNER_OPERATOR' }, 'ASSETS', 'OWNER_OPERATOR'],
       [{ fleetGroup: 'BOX_TRUCK' }, 'ASSETS', 'BOX_TRUCK'],
       [{ fleetGroup: 'LOCAL' }, 'ASSETS', 'LOCAL'],
+      // The profile Type (fleetGroup) wins over a driverType that contradicts it (Chad: OWNER_OPERATOR fleet, COMPANY type).
+      [{ fleetGroup: 'OWNER_OPERATOR', driverType: 'COMPANY' }, 'ASSETS', 'OWNER_OPERATOR'],
+      [{ fleetGroup: 'LOCAL', driverType: 'OWNER_OPERATOR' }, 'ASSETS', 'LOCAL'],
+      [{ fleetGroup: 'BOX_TRUCK', driverType: 'OWNER_OPERATOR' }, 'ASSETS', 'BOX_TRUCK'],
       // Our truck, a driver in no program: Ivan Cartage, no subsidiary.
       [{}, 'ASSETS', null],
     ]

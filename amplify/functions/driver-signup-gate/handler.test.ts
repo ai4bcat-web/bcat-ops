@@ -340,9 +340,18 @@ describe('Ivan drivers, who have no pay setting at all', () => {
 
   it('does NOT let an owner operator through on a missing pay setting', async () => {
     onlyDrivers([
-      driverItem('drv-oo', 'oo@x.com', true, { fleetGroup: 'LOCAL', driverType: 'OWNER_OPERATOR' }),
+      driverItem('drv-oo', 'oo@x.com', true, { fleetGroup: 'OWNER_OPERATOR', driverType: 'COMPANY' }),
+      driverItem('drv-oo2', 'oo2@x.com', true, { driverType: 'OWNER_OPERATOR' }),
     ])
     await expect(handler(signupEvent('oo@x.com'))).rejects.toThrow(/No driver record matches/)
+    await expect(handler(signupEvent('oo2@x.com'))).rejects.toThrow(/No driver record matches/)
+  })
+
+  it('the fleet group outranks a stray driverType: an Ivan local driver typed OWNER_OPERATOR is let through', async () => {
+    onlyDrivers([
+      driverItem('drv-ivan', 'ivan@x.com', true, { fleetGroup: 'LOCAL', driverType: 'OWNER_OPERATOR' }),
+    ])
+    await expect(handler(signupEvent('ivan@x.com'))).resolves.toBeDefined()
   })
 
   it('does NOT let an Amazon driver through on a missing pay setting', async () => {

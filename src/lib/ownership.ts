@@ -20,6 +20,7 @@
  * tmsDirectoryActions Lambdas bundle this file by path, so a `@/` alias would
  * break the function build.
  */
+import { effectiveDriverType } from './driverOwnership'
 import { driverProgramOf } from './driverProgram'
 import type { DriverProgram, ProgramInputs } from './driverProgram'
 import { normalizeIntakeEmail } from './intakeMail'
@@ -355,7 +356,9 @@ export function shipmentContextFor(input: ShipmentContextInput): ResolveContext 
   return {
     carrierId,
     driverFleetGroup: driver?.fleetGroup ?? null,
-    driverType: driver?.driverType ?? null,
+    // Fleet-first (driverOwnership.ts): a DRIVER_TYPE_IS rule must not outrank the fleet rules above it
+    // for a driver whose stored driverType contradicts their fleet group.
+    driverType: driver ? effectiveDriverType(driver) : null,
     driverProgram: driver ? driverProgramOf(driver) : null,
     customerId: shipment?.customerId ?? order?.customerId ?? load?.customerId ?? null,
     equipment: order?.equipmentType ?? load?.equipmentType ?? null,

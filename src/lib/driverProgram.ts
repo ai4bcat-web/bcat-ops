@@ -1,3 +1,5 @@
+import { driverOwnershipKind } from './driverOwnership'
+
 /**
  * Which app a driver gets: a settlement, or paperwork only.
  *
@@ -37,14 +39,14 @@ export interface ProgramInputs {
 export function driverProgramOf(driver: ProgramInputs): DriverProgram {
   // Staff said so: anyone can be put on the Ivan app regardless of fleet.
   if (driver.ivanApp === true) return 'PAPERWORK'
-  // Box truck drivers run the Ivan paperwork app too (no settlement, no clock by default).
-  if (driver.fleetGroup === 'BOX_TRUCK') return 'PAPERWORK'
-  // Either field naming an owner operator settles it, as on the dispatch board.
-  if (driver.fleetGroup === 'AMAZON' || driver.fleetGroup === 'OWNER_OPERATOR') return 'SETTLEMENT'
-  if (driver.driverType === 'OWNER_OPERATOR') return 'SETTLEMENT'
+  // The fleet group decides (driverOwnership.ts): box truck and Ivan local are the Ivan paperwork
+  // app, an owner operator (OWNER_OPERATOR, legacy AMAZON) settles. A stray driverType never
+  // overrides the fleet; it is read only when the fleet is empty.
+  const kind = driverOwnershipKind(driver)
+  if (kind === 'BOX_TRUCK' || kind === 'LOCAL') return 'PAPERWORK'
+  if (kind === 'OWNER_OPERATOR') return 'SETTLEMENT'
 
-  // Positive evidence of Ivan's own fleet, from the driver record or the pay setting.
-  if (driver.fleetGroup === 'LOCAL') return 'PAPERWORK'
+  // No fleet and no owner-operator type: the pay setting is the remaining evidence of Ivan's own fleet.
   if (driver.payGroup === 'LOCAL') return 'PAPERWORK'
 
   // Unstated: keep the settlement. Never silently remove someone's pay page.
