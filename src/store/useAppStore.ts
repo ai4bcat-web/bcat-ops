@@ -11,6 +11,7 @@ import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import * as api from '@/lib/apiClient'
 import { inactiveChanges } from '@/lib/fleetActive'
 import { withDerivedLegacy, withoutUnchangedDriverMirrors, withStopsFromLegacy } from '@/lib/stops'
+import { changedApptStops, loadWideDriverChange, takesRosterDriver } from '@/lib/loadShipmentSync'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import type { NewShipmentPrefill } from '@/features/shipments/components/NewShipmentDialog'
 
@@ -548,6 +549,29 @@ function writeAudit(
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
+/** Date and driver changes of a shipment's load, applied through UPDATE_STOP / ASSIGN_ASSET. Returns what is left for the direct write. */
+async function syncThroughShipment(before: Load, payload: Partial<Load>): Promise<Partial<Load>> {
+  const rest: Partial<Load> = { ...payload }
+  let expectedUpdatedAt = before.updatedAt
+  for (const change of changedApptStops(before.stops ?? [], payload.stops)) {
+    const bundle = await api.updateStop({
+      loadId: before.id,
+      ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
+      op: 'SET_APPT',
+      stopId: change.stopId,
+      patch: { appt: change.appt, apptEnd: change.apptEnd ?? undefined, apptType: (change.apptType ?? undefined) as never },
+    })
+    expectedUpdatedAt = bundle.loads[0]?.updatedAt ?? expectedUpdatedAt
+  }
+  const driverId = takesRosterDriver(before) ? loadWideDriverChange(before, payload) : null
+  if (driverId) {
+    await api.assignAsset({ loadId: before.id, ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}), driverId })
+    delete rest.pickupDriverId
+    delete rest.deliveryDriverId
+  }
+  return rest
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -800,10 +824,14 @@ export const useAppStore = create<AppState>()(
         // projected into `stops` (withStopsFromLegacy), then any `stops` write re-derives
         // the legacy mirrors (withDerivedLegacy). Together they keep the canonical array
         // and its mirrors from ever disagreeing, whichever side the caller wrote.
-        const after = await api.updateLoad(id, withoutUnchangedDriverMirrors(withDerivedLegacy(withStopsFromLegacy({
+        const derived = withoutUnchangedDriverMirrors(withDerivedLegacy(withStopsFromLegacy({
           ...patch,
           updatedBy: get().currentUserEmail,
-        }, before)), before, patch))
+        }, before)), before, patch)
+        // A load that belongs to a shipment: its date and driver changes go through the shipment actions so the Shipment, Order and
+        // carrier assignment change with it (the calendar and the Shipments page are one record); only the rest is written here.
+        const payload = before.shipmentId ? await syncThroughShipment(before, derived) : derived
+        const after = await api.updateLoad(id, payload)
         set((s) => ({ loads: s.loads.map((l) => (l.id === id ? after : l)) }))
         writeAudit(get().currentUserEmail, 'Load', id, 'update', diffChanges(before, after))
       },

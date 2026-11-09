@@ -100,10 +100,12 @@ export function withDerivedLegacy<T extends Partial<Load>>(patch: T): T {
  * for some signed-in users ("Unauthorized on [deliveryDriverId, pickupDriverId]" when Dennis set an appointment to NEED),
  * so a write that did not set them and would not change them leaves them out.
  */
-export function withoutUnchangedDriverMirrors<T extends Partial<Load>>(payload: T, before: Partial<Load>, patch: Partial<Load>): T {
+export function withoutUnchangedDriverMirrors<T extends Partial<Load>>(payload: T, before: Partial<Load>, _patch?: Partial<Load>): T {
   const out = { ...payload }
   for (const field of ['pickupDriverId', 'deliveryDriverId'] as const) {
-    if (field in patch) continue
+    // Unchanged is left out even when the caller sent it: the load drawer sends the whole derived mirror set on every save, and a
+    // user without driver-field write permission was refused ("Unauthorized on [deliveryDriverId, pickupDriverId]") on a save that
+    // changed nothing about the driver.
     if ((out[field] ?? null) === (before[field] ?? null)) delete out[field]
   }
   return out
