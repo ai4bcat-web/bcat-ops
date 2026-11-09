@@ -39,4 +39,6 @@ export const PROD_WRITE_SETS = {
   backfillDriverDocScans: { models: ['DriverSubmissionDoc', 'DriverSubmission'] },
   // `awRelease.mjs --apply`: Order release fields (arStatus, arStatusChangedAt, readyToInvoiceAt, updatedBy/At, version) + one AuditLog row per shipment.
   awRelease: { models: ['Order', 'AuditLog'] },
+  // `awEquipRep.mjs --apply`: enrich-only Load.equipmentType, Order.equipmentType, Shipment.salesRepCode + one AuditLog row per shipment.
+  awEquipRep: { models: ['Shipment', 'Load', 'Order', 'AuditLog'] },
 };
