@@ -6,6 +6,7 @@
 import { optionsOfRow, type DenseColumn, type DenseOption } from '@/features/tms/grid/denseGridModel'
 import { customerDisplayName } from '@/lib/customerResolution'
 import { LADDER_FILTER_OPTIONS, assignmentChipText } from './carrierLadder'
+import { boardStatusOf } from '@/lib/shipmentViewDefs'
 import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, rowShipmentType, type ShipmentRow } from './shipmentViews'
 import { SHIPMENT_TYPES, shipmentTypeLabel } from '@/lib/shipmentTypes'
 
@@ -21,6 +22,15 @@ export function sentence(value: string): string {
 const STATUS_COLUMN = BOARD_COLUMNS.find((c) => c.key === 'status')
 export function statusCellText(row: ShipmentRow): string {
   return STATUS_COLUMN ? STATUS_COLUMN.value(row) : ''
+}
+
+/**
+ * Status sorts A→Z with OPEN loads (nothing covering them yet) first, soonest pickup first, so what must be
+ * covered next is at the top. Everything else follows alphabetically by status. Sorting Z→A reverses it.
+ */
+export function statusSortKey(row: ShipmentRow): string {
+  if (boardStatusOf(row) === 'OPEN') return `0|${row.pickupAppt ?? '9999'}`
+  return `1|${statusCellText(row)}`
 }
 
 /** Facets: a header multi-select instead of a free-text box. */
@@ -83,7 +93,7 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
         const status = displayStatusOf(row)
         return [{ value: status, label: sentence(status) }]
       },
-      sortValue: statusCellText,
+      sortValue: statusSortKey,
     }
   }
   if (col.key === 'carrierAssignment') {

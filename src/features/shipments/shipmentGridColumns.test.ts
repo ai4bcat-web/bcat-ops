@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { defaultColumnWidth } from '@/features/tms/grid/denseGridModel'
 import { ALJEX_COLUMN_KEYS } from './shipmentViews'
 import { matchesColumnFilter } from '@/features/tms/grid/denseGridModel'
-import { ACTIONS_COLUMN, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS, SHIPMENT_GRID_COLUMNS } from './shipmentGridColumns'
+import { statusSortKey, ACTIONS_COLUMN, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS, SHIPMENT_GRID_COLUMNS } from './shipmentGridColumns'
 
 /** The scroller at 1440 wide: the default set plus the Actions column must not scroll sideways. */
 const SCROLLER_1440_PX = 1129
@@ -37,5 +37,18 @@ describe('Carrier column with several carriers', () => {
     expect(matchesColumnFilter(base, col, { values: ['Alpha'] })).toBe(false)
     expect(col.optionsOf!(base).map((o) => o.value)).toEqual(['Beta'])
     expect(col.sortValue!(multi)).toBe('Alpha, Beta')
+  })
+})
+
+describe('Status sort', () => {
+  const r = (over: Record<string, unknown>) => ({ status: 'BOOKED', assignmentType: null, pickupAppt: null, ...over }) as never
+  it('puts OPEN loads first, soonest pickup first, then the rest by status', () => {
+    const rows = [
+      r({ id: 'covered', assignmentType: 'CARRIER' }),
+      r({ id: 'open-later', pickupAppt: '2026-11-12T10:00:00.000Z' }),
+      r({ id: 'open-today', pickupAppt: '2026-11-09T18:00:00.000Z' }),
+    ] as Array<{ id: string }>
+    const sorted = [...rows].sort((a, b) => statusSortKey(a as never).localeCompare(statusSortKey(b as never)))
+    expect(sorted.map((x) => x.id)).toEqual(['open-today', 'open-later', 'covered'])
   })
 })
