@@ -113,7 +113,7 @@ describe('UsersPage', () => {
     fireEvent.click(toggles[1])
 
     const dashboardButton = (await waitFor(() => screen.getAllByTestId('user-page-toggle'))).find(
-      (b) => b.textContent?.includes('Dashboard'),
+      (b) => b.getAttribute('aria-label')?.includes('Dashboard'),
     )
     expect(dashboardButton).toBeInTheDocument()
 
@@ -219,17 +219,17 @@ describe('UsersPage', () => {
 
     const pages = await waitFor(() => screen.getAllByTestId('user-page-toggle'))
     // The `loads` grant is labelled "Shipments" — one list, one word (Step R).
-    const loads = pages.find((b) => b.textContent?.startsWith('Shipments'))!
-    const dashboard = pages.find((b) => b.textContent?.startsWith('Dashboard'))!
+    const loads = pages.find((b) => b.getAttribute('aria-label')?.startsWith('Shipments'))!
+    const dashboard = pages.find((b) => b.getAttribute('aria-label')?.startsWith('Dashboard'))!
 
-    expect(loads).toHaveTextContent('from role')
+    expect(loads.closest('label')).toHaveTextContent('from role')
     expect(loads).toBeDisabled()
     fireEvent.click(loads)
     expect(mocks.setUserPageGroups).not.toHaveBeenCalled()
 
     fireEvent.click(dashboard)
     await waitFor(() => expect(mocks.setUserPageGroups).toHaveBeenCalledWith('u-1', ['dashboard']))
-    expect(dashboard).toHaveTextContent('extra')
+    expect(dashboard.closest('label')).toHaveTextContent('extra')
   })
 
   it('invites with the chosen role', async () => {
@@ -262,8 +262,8 @@ describe('UsersPage', () => {
     fireEvent.click(screen.getByLabelText('Toggle permissions'))
 
     const pageButtons = await waitFor(() => screen.getAllByTestId('user-page-toggle'))
-    const dashboardButton = pageButtons.find((b) => b.textContent?.includes('Dashboard'))
-    const loadsButton = pageButtons.find((b) => b.textContent?.includes('Shipments'))
+    const dashboardButton = pageButtons.find((b) => b.getAttribute('aria-label')?.includes('Dashboard'))
+    const loadsButton = pageButtons.find((b) => b.getAttribute('aria-label')?.includes('Shipments'))
 
     expect(dashboardButton).toBeDefined()
     expect(loadsButton).toBeDefined()
@@ -310,11 +310,11 @@ describe('UsersPage', () => {
     const aDashboard = await waitFor(() =>
       within(cards[0])
         .getAllByTestId('user-page-toggle')
-        .find((b) => b.textContent?.includes('Dashboard')),
+        .find((b) => b.getAttribute('aria-label')?.includes('Dashboard')),
     )
     const bDashboard = within(cards[1])
       .getAllByTestId('user-page-toggle')
-      .find((b) => b.textContent?.includes('Dashboard'))
+      .find((b) => b.getAttribute('aria-label')?.includes('Dashboard'))
 
     expect(aDashboard).toBeDefined()
     expect(bDashboard).toBeDefined()

@@ -158,6 +158,7 @@ function UserCard({
   busyAdminId, resettingId, togglingId, savingPermissions,
 }: UserCardProps) {
   const [expanded, setExpanded] = useState(false)
+  const [pageFilter, setPageFilter] = useState('')
   const admin = isUserAdmin(user)
   const name = displayName({ email: user.email, name: user.profile?.name, username: user.username })
   const role = roleOf(user)
@@ -325,7 +326,7 @@ function UserCard({
           {/* Claims */}
           <div>
             <SectionLabel>Additional permissions</SectionLabel>
-            <div className="tms-grid tms-grid-3">
+            <div className="tms-users-claims">
               {CLAIMS.map((claim) => {
                 const on = claims.includes(claim)
                 const enforced = isEnforcedClaim(claim)
@@ -390,35 +391,36 @@ function UserCard({
               </div>
             ) : (
               <>
-                <div className="tms-grid tms-grid-4">
-                  {PAGE_OPTIONS.map(({ key, label }) => {
+                <div className="tms-users-pagebar">
+                  <TmsInput
+                    aria-label={`Filter pages for ${user.email}`}
+                    placeholder="Filter pages"
+                    value={pageFilter}
+                    onChange={(e) => setPageFilter(e.target.value)}
+                  />
+                  <span className="tms-muted" style={{ fontSize: 12 }}>{grantedCount} of {TOTAL_PAGES} pages</span>
+                </div>
+                <div className="tms-users-pages">
+                  {PAGE_OPTIONS.filter(({ label }) => label.toLowerCase().includes(pageFilter.trim().toLowerCase())).map(({ key, label }) => {
                     const fromRole = rolePages.includes(key)
                     const on = fromRole || extraPages.includes(key)
                     return (
-                      <button
+                      <label
                         key={key}
-                        type="button"
-                        data-testid="user-page-toggle"
-                        onClick={() => onTogglePage(user, key)}
-                        disabled={savingPermissions || fromRole}
+                        className={`tms-users-page${on ? ' tms-users-page-on' : ''}${fromRole ? ' tms-users-page-role' : ''}`}
                         title={fromRole ? `Granted by the ${ROLE_LABELS[role]} role — change the role to remove it` : undefined}
-                        style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
-                          height: 36, padding: '0 10px', borderRadius: 'var(--tms-radius)',
-                          border: `1px solid ${on ? 'var(--tms-primary)' : 'var(--tms-border)'}`,
-                          background: 'transparent',
-                          color: on ? 'var(--tms-primary)' : 'var(--tms-muted)',
-                          fontSize: 12, fontWeight: 500,
-                          cursor: fromRole ? 'not-allowed' : 'pointer',
-                        }}
                       >
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {on && <Check size={13} style={{ flex: '0 0 auto' }} />}{label}
-                        </span>
-                        <span style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em', opacity: 0.7, flex: '0 0 auto' }}>
-                          {fromRole ? 'from role' : on ? 'extra' : ''}
-                        </span>
-                      </button>
+                        <input
+                          type="checkbox"
+                          data-testid="user-page-toggle"
+                          aria-label={label}
+                          checked={on}
+                          disabled={savingPermissions || fromRole}
+                          onChange={() => onTogglePage(user, key)}
+                        />
+                        <span className="tms-users-page-label">{label}</span>
+                        {fromRole ? <span className="tms-users-page-tag">from role</span> : on ? <span className="tms-users-page-tag">extra</span> : null}
+                      </label>
                     )
                   })}
                 </div>
@@ -737,7 +739,7 @@ export function UsersPage() {
 
       <TmsStatRow items={KPIS.map((k) => ({ key: k.label, label: k.label, value: String(k.value) }))} columns={4} aria-label="User totals" />
 
-      <div className="tms-grid" style={{ gridTemplateColumns: '360px minmax(0, 1fr)', gap: 20, alignItems: 'start' }}>
+      <div className="tms-users-layout">
         {/* Invite card */}
         <TmsCard title="Invite New User">
           <p className="tms-field-hint" style={{ margin: '0 0 12px' }}>They&rsquo;ll receive an email with a temporary password.</p>
