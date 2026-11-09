@@ -2,6 +2,7 @@
  * The form's state (AH-plan §3.3, §7, §8, §9): one values object, dirty flag, issues from
  * `validateForm`, local-draft autosave, and the pipeline runner (one at a time).
  */
+import { repForDivision } from '@/lib/divisionSalesRep'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { requiresApptProofs } from '@/lib/apptQueue'
@@ -96,8 +97,8 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
 
   // `update` never changes identity (sections are memoised on their handlers); it reads the
   // latest bundle / directory / staff through this ref.
-  const live = useRef({ bundle, customerOf, staff })
-  useEffect(() => { live.current = { bundle, customerOf, staff } })
+  const live = useRef<{ bundle: ShipmentBundle | null; customerOf: (id: string) => CustomerRecord | null; staff: UserProfileRecord[]; divisionReps: unknown }>({ bundle, customerOf, staff, divisionReps: settings?.divisionSalesReps ?? null })
+  useEffect(() => { live.current = { bundle, customerOf, staff, divisionReps: settings?.divisionSalesReps ?? null } })
 
   const update = useCallback((fn: (prev: ShipmentFormValues) => ShipmentFormValues) => {
     const { bundle: current, customerOf: customerById, staff: staffRows } = live.current
@@ -108,6 +109,13 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
     next = syncCarrierSlots(prev, next)
     if (next.customer.id !== prev.customer.id && !current) {
       next = applyCustomerDefaults(next, next.customer.id ? customerById(next.customer.id) : null)
+    }
+    // New shipment: the division picks the sales rep (TmsSettings.divisionSalesReps) unless a person already chose another one.
+    if (!current && next.ship.revDivision !== prev.ship.revDivision) {
+      const map = live.current.divisionReps
+      const before = repForDivision(map, prev.ship.revDivision)
+      const want = repForDivision(map, next.ship.revDivision)
+      if (want && (!next.roles.salesRepId || next.roles.salesRepId === before)) next = { ...next, roles: { ...next.roles, salesRepId: want } }
     }
     if (next.roles.salesRepId !== prev.roles.salesRepId && next.ship.officeLabel === prev.ship.officeLabel) {
       next = { ...next, ship: { ...next.ship, officeLabel: officeLabelOf(staffRows, next.roles.salesRepId) } }

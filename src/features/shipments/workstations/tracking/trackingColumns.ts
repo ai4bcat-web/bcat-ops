@@ -147,11 +147,12 @@ function checkCallsText(row: ShipmentRow, nowMs: number): string {
 
 export function trackingColumns({ nowMs, nameOf, prefsOf }: TrackingColumnContext): DenseColumn<ShipmentRow>[] {
   return [
-    { key: 'shipment', header: 'Shipment #', group: 'Shipment', text: (r) => r.number },
+    { key: 'shipment', header: 'Shipment #', group: 'Shipment', text: (r) => r.number, extraPx: 70 }, // the star and flag icons beside the number
     {
       key: 'status',
       header: 'Status',
       group: 'Shipment',
+      extraPx: 150, // the Tracking link not set chip beside the status text
       text: (r) => [boardStatusOf(r), nextEventText(r, nowMs), r.trackingFlaggedAt ? 'Tracking flag' : null].filter(Boolean).join(' · '),
       filter: 'multi',
       optionsOf: (r) => [statusOptionOf(r)],
@@ -186,6 +187,7 @@ export function trackingColumns({ nowMs, nameOf, prefsOf }: TrackingColumnContex
       key: 'lastLocation',
       header: 'Last location',
       group: 'Tracking',
+      extraPx: 40, // the motion dot
       text: (r) => [r.lastUpdatePlace ?? r.lastKnownCity ?? '', motionText(r, nowMs)].filter(Boolean).join(' · '),
       sortValue: (r) => lastLocationSort(r, nowMs),
     },
@@ -203,6 +205,7 @@ export function trackingColumns({ nowMs, nameOf, prefsOf }: TrackingColumnContex
       key: 'eta',
       header: 'ETA',
       group: 'Tracking',
+      extraPx: 30, // icons and chips the cell prints beside the text
       text: (r) => {
         const eta = etaOf(r, nowMs)
         return eta ? `${formatBoardDateTime(eta.at)}${eta.estimated ? ' est.' : ''}${eta.lateMinutes ? ` late ${durationText(eta.lateMinutes)}` : ''}` : ''
@@ -214,6 +217,7 @@ export function trackingColumns({ nowMs, nameOf, prefsOf }: TrackingColumnContex
       key: 'nextCheck',
       header: 'Next check',
       group: 'Tracking',
+      extraPx: 30, // icons and chips the cell prints beside the text
       text: (r) => nextCheckText(r, nowMs),
       filter: 'number',
       numberOf: (r) => nextCheckMinutes(r, nowMs),
@@ -264,6 +268,7 @@ export function trackingColumns({ nowMs, nameOf, prefsOf }: TrackingColumnContex
       key: 'carrier',
       header: 'Carrier DOT/MC',
       group: 'Carrier',
+      extraPx: 60, // icons and chips the cell prints beside the text
       text: (r) => (r.carrierName || r.carrierMc || r.carrierDot ? `${r.carrierName ?? '—'} · DOT ${r.carrierDot ?? '—'} · MC ${r.carrierMc ?? '—'}` : ''),
       filter: 'multi',
       optionsOf: (r) => (r.carrierName ? [{ value: r.carrierName, label: r.carrierName }] : []),
