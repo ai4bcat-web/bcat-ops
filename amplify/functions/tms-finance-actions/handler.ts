@@ -45,6 +45,7 @@ import {
   sendRemittance,
 } from './apPayments'
 import { repointInvoicedCustomer } from './repoint'
+import { brokerageRepRollup } from './brokerageRep'
 import {
   acceptCommissionCounter,
   approveCommission,
@@ -118,6 +119,7 @@ type Action =
   | 'RELEASE_TO_BILLING'
   | 'SEND_INVOICE'
   | 'SYNC_FACTORING_CHANGE'
+  | 'BROKERAGE_REP_ROLLUP'
 
 /** The actions that move money and are owner/ADMIN while `arPostingAdminOnly` holds. */
 const POSTING_ACTIONS: Record<string, true> = {
@@ -282,6 +284,8 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
   const action = event.arguments.action as Action
+  // Its own door, decided by brokerageAccessOf inside the action (owner/ADMIN/page-dashboard or a sales rep), never by the AR page rule.
+  if (action === 'BROKERAGE_REP_ROLLUP') return brokerageRepRollup(event.identity, parseInput(event.arguments.input))
   const caller = await authorize(action, event.identity)
   const input = parseInput(event.arguments.input)
 
