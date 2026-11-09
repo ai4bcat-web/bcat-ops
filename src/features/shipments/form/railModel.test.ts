@@ -67,6 +67,8 @@ describe('railSummary / proPreview', () => {
 
   it('previews the next PRO from the counter, blank until settings load', () => {
     expect(proPreview(null)).toBe('')
-    expect(proPreview({ shipmentPrefix: 'S', nextShipmentNumber: 14913 } as never)).toBe('S014913')
+    expect(proPreview({ shipmentPrefix: 'S', nextShipmentNumber: 14913 } as never)).toBe('S014914')
+    // Production: the numeric scheme shows the plain next number (the counter holds the last one issued).
+    expect(proPreview({ proScheme: 'NUMERIC', nextShipmentNumber: 20000 } as never)).toBe('20001')
   })
 })

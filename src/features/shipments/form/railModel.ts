@@ -127,8 +127,13 @@ export function railSummary(values: ShipmentFormValues, customer: CustomerRecord
   return { customerLine, laneLine, freightLine, money: ratesSummary(values, customer, settings) }
 }
 
-/** The PRO the next create would mint (prefix + counter, padded to six); '' until settings arrive. The number is minted on Create. */
+/**
+ * The PRO the next create would mint; '' until settings arrive. The counter holds the LAST number issued and Create adds one,
+ * so the next PRO is counter + 1. Under the NUMERIC scheme (production) it is the plain number; otherwise prefix + six digits.
+ */
 export function proPreview(settings: TmsSettings | null): string {
   if (settings?.nextShipmentNumber == null) return ''
-  return `${(settings.shipmentPrefix ?? '').trim() || 'S'}${String(settings.nextShipmentNumber || 1).padStart(6, '0')}`
+  const next = (settings.nextShipmentNumber || 0) + 1
+  if (settings.proScheme === 'NUMERIC') return String(next)
+  return `${(settings.shipmentPrefix ?? '').trim() || 'S'}${String(next).padStart(6, '0')}`
 }
