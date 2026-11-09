@@ -44,4 +44,7 @@ export const PROD_WRITE_SETS = {
   // `awPreDelete.mjs --apply`: pre-2025 (Ship Date < 2025-01-01) migrated Aljex shipments and their children are deleted,
   // mixed ArPayment/ApPayment rows are edited, one AuditLog row per shipment is added. Never FactoringItem / TmsSettings.
   awPreDelete: { models: ['Shipment', 'Order', 'Load', 'LoadCarrier', 'LoadFinancials', 'LoadCharge', 'Invoice', 'CarrierBill', 'ProClaim', 'LegacyAljexRow', 'ArPayment', 'ApPayment', 'AuditLog'] },
+  // `awCarriers.mjs activate|billing|delete --apply` (union; each subcommand's own subset is SUB_MODELS in the script):
+  // Carrier.status / billing fields / delete, CarrierPaymentMethod (billing), CarrierTaxVault (delete; NOT an Amplify model: `CarrierTaxVault-<apiId>`), one AuditLog row per carrier.
+  awCarriers: { models: ['Carrier', 'CarrierPaymentMethod', 'CarrierTaxVault', 'AuditLog'] },
 };
