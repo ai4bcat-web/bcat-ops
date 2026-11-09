@@ -289,6 +289,14 @@ describe('carriers sensitive-column counts the importer scrubs to [hidden]', () 
   })
 })
 
+describe('import job ids survive the log scrub', () => {
+  it('the runner scrub masks long digit runs but keeps aljexrun:<id> whole, so a later step can look the job up', () => {
+    const awk = readFileSync(SCRIPT, 'utf8').match(/SCRUB_AWK='([\s\S]*?)\n\}'/)[1] + '\n}'
+    const r = spawnSync('awk', [awk], { input: 'job aljexrun:20261108142351lpqaxn n 123456789012 a@b.org\n', encoding: 'utf8' })
+    expect(r.stdout.trim()).toBe('job aljexrun:20261108142351lpqaxn n [digits] [email]')
+  })
+})
+
 describe('tie-out differences and unresolved rows are INFO, never a stop', () => {
   it('ap-aging dry run passes with any unresolved count and prints it as INFO', () => {
     const sb = sandbox()

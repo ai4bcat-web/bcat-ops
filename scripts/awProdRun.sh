@@ -206,12 +206,16 @@ FAILS=0 ; ANYFAIL=0 ; DRY_FAIL_NOTES=""
 SCRUB_AWK='
 BEGIN { p = ENVIRON["BCAT_PASSWORD"]; e = ENVIRON["BCAT_EMAIL"] }
 {
+  # Import job ids (aljexrun:<timestamp><suffix>) are not sensitive and later steps look them up: keep them whole.
+  nj = 0
+  while (match($0, /aljexrun:[0-9]+/)) { nj++; keepj[nj] = substr($0, RSTART, RLENGTH); $0 = substr($0, 1, RSTART - 1) "@@JOB" nj "@@" substr($0, RSTART + RLENGTH) }
   if (p != "") while ((i = index($0, p)) > 0) $0 = substr($0, 1, i - 1) "[hidden]" substr($0, i + length(p))
   if (e != "") while ((i = index($0, e)) > 0) $0 = substr($0, 1, i - 1) "[email]" substr($0, i + length(e))
   gsub(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z][A-Za-z]+/, "[email]")
   gsub(/\(?[0-9][0-9][0-9]\)?[ .-][0-9][0-9][0-9][ .-][0-9][0-9][0-9][0-9]/, "[phone]")
   gsub(/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]+/, "[digits]")
   if (match($0, /[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]/)) $0 = substr($0, 1, RSTART - 1) "password[hidden]"
+  for (k = 1; k <= nj; k++) { if (i = index($0, "@@JOB" k "@@")) $0 = substr($0, 1, i - 1) keepj[k] substr($0, i + length("@@JOB" k "@@")) }
   print; fflush()
 }'
 scrub() { awk "$SCRUB_AWK"; }
