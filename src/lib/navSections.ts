@@ -72,6 +72,8 @@ export interface NavItemDef {
   /** Labeled sub-lists under the row (e.g. Payroll under Accounting). */
   childGroups?: Array<{ label: string; children: NavChildDef[] }>
   children?: NavChildDef[]
+  /** Sub-pages are a top-bar tab strip, not a sidebar list. */
+  tabs?: boolean
   /** Path prefixes that also light this row when its own `to` is not their prefix. */
   matches?: string[]
 }
@@ -96,8 +98,8 @@ export interface NavSectionsResult {
 const ACCOUNTING_CHILDREN: NavChildDef[] = [
   { to: '/tms/invoicing', label: 'Accounts Receivable', pageKey: 'invoicing', tms: true, badgeKey: 'arToInvoice', exclude: ['/tms/invoicing/payable'] },
   { to: '/tms/invoicing/payable', label: 'Accounts Payable', pageKey: 'carrierPay', tms: true, badgeKey: 'apToReview' },
-  { to: '/tms/vendors', label: 'Vendors', pageKey: 'vendorAp', tms: true },
   { to: '/tms/factors', label: 'Factoring', pageKey: 'factoring', tms: true },
+  { to: '/tms/vendors', label: 'Vendors', pageKey: 'vendorAp', tms: true },
 ]
 
 /** Settlements and time cards: the pages the sidebar used to list under Ivan Cartage. Same paths and page grants. */
@@ -172,8 +174,8 @@ export const PINNED_ITEMS: NavItemDef[] = [
   // Dispatch and Calendar are pages of their own, listed right under Active shipments (for people who see the freight list).
   { to: '/dispatch', label: 'Dispatch', icon: MessageSquare, pageKey: 'dispatch', section: BROKERAGE, badgeKey: 'dispatch', showWithPath: SHIPMENTS_PATH },
   { to: '/calendar', label: 'Calendar', icon: CalendarDays, pageKey: 'calendar', section: BROKERAGE, children: CALENDAR_CHILDREN },
-  { to: '/tms/customers', label: 'Profiles', icon: Building2, pageKey: 'tms', section: BROKERAGE, group: true, children: PROFILES_CHILDREN },
-  { to: '/fleet-dashboard', label: 'Fleet manager', icon: Gauge, pageKey: 'fleetManagerDashboard', section: BROKERAGE, group: true, children: FLEET_MANAGER_CHILDREN },
+  { to: '/tms/customers', label: 'Profiles', icon: Building2, pageKey: 'tms', section: BROKERAGE, group: true, tabs: true, children: PROFILES_CHILDREN },
+  { to: '/fleet-dashboard', label: 'Fleet manager', icon: Gauge, pageKey: 'fleetManagerDashboard', section: BROKERAGE, group: true, tabs: true, children: FLEET_MANAGER_CHILDREN },
   {
     to: '/tms/invoicing',
     label: 'Accounting',
@@ -182,6 +184,7 @@ export const PINNED_ITEMS: NavItemDef[] = [
     section: BROKERAGE,
     group: true,
     badgeKey: 'accounting',
+    tabs: true,
     children: ACCOUNTING_CHILDREN,
     childGroups: [{ label: 'Payroll', children: PAYROLL_CHILDREN }],
   },
@@ -415,6 +418,7 @@ export function buildNavSections({
       children: children.length > 0 ? children : undefined,
       childGroups: groups.length > 0 ? groups : undefined,
       group: def.group,
+      tabs: def.tabs,
       matches: def.matches,
     })
   }

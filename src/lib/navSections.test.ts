@@ -69,7 +69,7 @@ describe('buildNavSections', () => {
     expect(kids('Calendar')).toEqual(['Driver info', 'Appts', 'Time off'])
     expect(kids('Profiles')).toEqual(['Customers', 'Carriers', 'Locations'])
     expect(kids('Fleet manager').slice(0, 5)).toEqual(['Fleet manager dashboard', 'Maintenance', 'Invoices', 'Asset documents', 'Fuel'])
-    expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Vendors', 'Factoring'])
+    expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Factoring', 'Vendors'])
     expect(kids('Settings')).toEqual([
       'General & automation', 'Company', 'Divisions & ownership', 'Users & roles', 'Integrations', 'AI agents',
       'Spot quoter & e-mail', 'Carrier Sales', 'Commissions', 'Reports', 'Audit log', 'Compliance', 'Platform health', 'Demo',
@@ -301,6 +301,16 @@ describe('buildNavSections', () => {
     const { sections } = buildNavSections({ divisions: null, hasPageAccess: () => true })
     // The Company section is always built (it does not depend on a Company division row).
     expect(sections.map((s) => s.key)).toEqual(['CAR_SHIPPING', 'COMPANY'])
+  })
+
+  it('a tabbed section lists only the tabs the person may open', () => {
+    const { pinned } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('customers', 'locations') })
+    const profiles = pinned.find((i) => i.label === 'Profiles')
+    expect(profiles?.tabs).toBe(true)
+    expect(labels(profiles?.children)).toEqual(['Customers', 'Locations'])
+    // Nobody with none of a section's pages sees the section at all.
+    expect(labels(buildNavSections({ divisions: FOUR, hasPageAccess: grants('loads') }).pinned)).not.toContain('Profiles')
+    expect(labels(buildNavSections({ divisions: FOUR, hasPageAccess: grants('loads') }).pinned)).not.toContain('Fleet manager')
   })
 
   it('has a route behind every nav row (a row with no route is a dead link)', () => {

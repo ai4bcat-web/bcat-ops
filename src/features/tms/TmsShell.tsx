@@ -55,6 +55,8 @@ export interface TmsNavItem {
   /** Explicit sub-items, already gated per user by `buildNavSections`. */
   children?: TmsNavChild[]
   childGroups?: TmsNavChildGroup[]
+  /** Sub-pages show as a tab strip under the top bar instead of a list in the sidebar (Profiles, Fleet manager, Accounting). */
+  tabs?: boolean
   /** A header row with no page of its own: `to` is its first visible child and only a child lights it. */
   group?: boolean
   /** Path prefixes that also light this row when `to` is not their prefix (a page whose default tab lives deeper). */
@@ -214,7 +216,8 @@ function NavRow({
   const setOpen = (next: boolean) => setToggle({ path: activePath, open: next })
 
   const Icon = item.icon
-  const hasKids = items.length > 0 || groups.length > 0
+  // A tabbed section keeps its sub-pages in the top-bar strip: the sidebar row is one plain link.
+  const hasKids = !item.tabs && (items.length > 0 || groups.length > 0)
   const count = item.badgeKey != null ? (badgeCounts?.[item.badgeKey] ?? 0) : 0
 
   const rowContent = (
@@ -275,6 +278,32 @@ function NavRow({
         </div>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * The sub-pages of a tabbed sidebar section (Profiles, Fleet manager, Accounting) as a tab strip under the top bar, in the same
+ * style as the shipment lifecycle strip. It shows while a page of that section is open, whichever tab is lit.
+ */
+function SectionTabs({ item, activePath, activeSearch, badgeCounts }: { item: TmsNavItem; activePath: string; activeSearch: string; badgeCounts?: Record<string, number> }) {
+  const tabs = [...(item.children ?? []), ...(item.childGroups ?? []).flatMap((g) => g.children)]
+  return (
+    <nav className="tms-lifecycle" aria-label={item.label} data-testid="section-tabs">
+      <ol className="tms-lifecycle-list">
+        {tabs.map((tab) => {
+          const active = isChildActive(activePath, activeSearch, tab)
+          const count = tab.badgeKey != null ? (badgeCounts?.[tab.badgeKey] ?? 0) : 0
+          return (
+            <li key={tab.to} className="tms-lifecycle-item">
+              <NavLink to={tab.to} className={`tms-lifecycle-tab${active ? ' tms-active' : ''}`} aria-current={active ? 'page' : undefined} title={tab.label}>
+                <span className="tms-lifecycle-label">{tab.label}</span>
+                {count > 0 ? <TmsCountBadge count={count} /> : null}
+              </NavLink>
+            </li>
+          )
+        })}
+      </ol>
+    </nav>
   )
 }
 
@@ -454,6 +483,8 @@ export function TmsShell({
   const { company: storedCompany, setCompany } = useTmsCompany()
   // A stored business that is no longer offered behaves as All businesses.
   const company = companies.find((c) => c.code === storedCompany) ?? null
+  // The tabbed section whose page is open: its sub-pages are the strip under the top bar.
+  const sectionTabs = pinned.find((item) => item.tabs === true && [...(item.children ?? []), ...(item.childGroups ?? []).flatMap((g) => g.children)].some((c) => isChildActive(activePath, activeSearch, c))) ?? null
 
 
   useEffect(() => {
@@ -593,9 +624,10 @@ export function TmsShell({
               })}
             </ol>
           </nav>
-          {canOpenPage && activePath.startsWith('/tms') ? (
+          {canOpenPage && activePath.startsWith('/tms') && !sectionTabs ? (
             <LifecycleTabs pathname={activePath} canOpenPage={canOpenPage} badgeCounts={badgeCounts} />
           ) : null}
+          {sectionTabs ? <SectionTabs item={sectionTabs} activePath={activePath} activeSearch={activeSearch} badgeCounts={badgeCounts} /> : null}
           <div className="tms-topbar-spacer" />
           <form
             className="tms-search"
