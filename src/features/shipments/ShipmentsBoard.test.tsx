@@ -400,7 +400,7 @@ describe('ShipmentsBoard', () => {
     ])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
     expect(document.querySelectorAll('[title="Ivan Cartage load with no driver"]')).toHaveLength(1)
-    expect(screen.getAllByText('Own fleet · no driver')).toHaveLength(1)
+    expect(screen.getAllByText('Ivan Cartage · no driver')).toHaveLength(1)
     expect(screen.getAllByText('Dana Driver').length).toBeGreaterThan(0)
   })
 

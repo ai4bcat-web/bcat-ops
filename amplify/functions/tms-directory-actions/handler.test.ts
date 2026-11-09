@@ -2850,9 +2850,9 @@ describe('SAVE_COLUMN_TEMPLATE and DELETE_COLUMN_TEMPLATE', () => {
     const tables = columnTemplateTables()
     const result = (await handler(event('SAVE_COLUMN_TEMPLATE', {
       name: 'Extended',
-      columns: ['number', 'pickupAppt', 'salesRepId', 'division'],
+      columns: ['number', 'pickupAppt', 'salesRepId', 'revenueType'],
     }, TMS_CALLER))) as Record<string, unknown>
-    expect(result.columns).toEqual(['number', 'pickupAppt', 'salesRepId', 'division'])
+    expect(result.columns).toEqual(['number', 'pickupAppt', 'salesRepId', 'revenueType'])
     expect(tables.templates.size).toBe(1)
   })
 

@@ -26,7 +26,7 @@ export function statusCellText(row: ShipmentRow): string {
 /** Facets: a header multi-select instead of a free-text box. */
 const MULTI_KEYS = new Set([
   'status', 'customerName', 'carrier', 'revenueType', 'salesRep', 'tracker', 'equip', 'mode', 'arStatus',
-  'apStatus', 'driver', 'truck', 'division', 'originState', 'destinationState', 'salesRepId',
+  'apStatus', 'driver', 'truck', 'originState', 'destinationState', 'salesRepId',
 ])
 
 /** Date columns and the row field each one reads. */

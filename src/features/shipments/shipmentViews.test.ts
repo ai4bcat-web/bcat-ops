@@ -13,6 +13,7 @@ import {
   boardStatusOf,
   carrierHoverText,
   carrierLabel,
+  setFleetDrivers,
   carrierSortKey,
   detailOptions,
   divisionLabel,
@@ -88,7 +89,7 @@ describe('columns', () => {
   it('defaults to MVMNT’s thirteen, in MVMNT’s order', () => {
     expect(DEFAULT_COLUMN_KEYS).toEqual([
       'number', 'status', 'originCity', 'destinationCity', 'pickupAppt', 'deliveryAppt',
-      'stops', 'salesRepId', 'customerName', 'carrier', 'division', 'driver',
+      'stops', 'salesRepId', 'customerName', 'carrier', 'revenueType', 'driver',
     ])
   })
 
@@ -110,23 +111,38 @@ describe('columns', () => {
   it('names who is hauling it, or says nobody is', () => {
     expect(carrierLabel(row('1', { assignmentType: 'CARRIER', carrierName: 'Bay Logistics' }))).toBe('Bay Logistics')
     expect(carrierLabel(row('2', { assignmentType: 'OWN_ASSET', driverId: 'drv-9', driverName: 'Pavel K', truckNumber: '117' })))
-      .toBe('Pavel K · Truck 117')
+      .toBe('Ivan Cartage')
     expect(carrierLabel(row('3', { assignmentType: 'NEED_TO_COVER' }))).toBe('Need to cover')
   })
 
   it('says an own-fleet shipment has no driver, but only while it is live', () => {
-    expect(carrierLabel(row('1', { assignmentType: 'OWN_ASSET', driverId: null }))).toBe('Own fleet · no driver')
-    expect(carrierLabel(row('2', { assignmentType: 'OWN_ASSET', driverId: 'drv-1' }))).toBe('Own fleet')
-    expect(carrierLabel(row('3', { assignmentType: 'OWN_ASSET', driverId: null, voidedAt: '2026-02-01T00:00:00Z' }))).toBe('Own fleet')
-    expect(carrierLabel(row('4', { assignmentType: 'OWN_ASSET', driverId: null, status: 'CANCELED' }))).toBe('Own fleet')
+    expect(carrierLabel(row('1', { assignmentType: 'OWN_ASSET', driverId: null }))).toBe('Ivan Cartage · no driver')
+    expect(carrierLabel(row('2', { assignmentType: 'OWN_ASSET', driverId: 'drv-1' }))).toBe('Ivan Cartage')
+    expect(carrierLabel(row('3', { assignmentType: 'OWN_ASSET', driverId: null, voidedAt: '2026-02-01T00:00:00Z' }))).toBe('Ivan Cartage')
+    expect(carrierLabel(row('4', { assignmentType: 'OWN_ASSET', driverId: null, status: 'CANCELED' }))).toBe('Ivan Cartage')
     expect(needsDriver(row('5', { assignmentType: 'NEED_TO_COVER', driverId: null }))).toBe(false)
     expect(needsDriver(row('6', { assignmentType: 'OWN_ASSET' }))).toBe(true)
+  })
+
+  it('names the Ivan Cartage group from the driver files, and a driver-named carrier is Ivan Cartage', () => {
+    setFleetDrivers([
+      { id: 'd-1', name: 'Lee Lara', fleetGroup: 'OWNER_OPERATOR' },
+      { id: 'd-2', name: 'Zak Pace', fleetGroup: 'BOX_TRUCK' },
+    ])
+    try {
+      expect(carrierLabel(row('1', { assignmentType: 'OWN_ASSET', driverId: 'd-1', driverName: 'Lee Lara' }))).toBe('Ivan Cartage (Owner Operators)')
+      // Carrier typed as the driver's name on a non-own-fleet row: the driver belongs in the Driver column only.
+      expect(carrierLabel(row('2', { assignmentType: 'BROKERED', carrierName: 'Zak Pace', driverName: 'Zak Pace' }))).toBe('Ivan Cartage (Box Trucks)')
+      expect(carrierLabel(row('3', { assignmentType: 'BROKERED', carrierName: 'Some Carrier LLC' }))).toBe('Some Carrier LLC')
+    } finally {
+      setFleetDrivers([])
+    }
   })
 
   it('keeps imported Aljex history out of Needs-driver and labels it as history', () => {
     const history = row('7', { assignmentType: 'OWN_ASSET', driverId: null, legacyImported: true, status: 'DELIVERED' })
     expect(needsDriver(history)).toBe(false)
-    expect(carrierLabel(history)).toBe('Own fleet (history)')
+    expect(carrierLabel(history)).toBe('Ivan Cartage (history)')
   })
 
   it('puts the subdivision in brackets behind the division name', () => {

@@ -46,3 +46,26 @@ export function resolveTeamLayout(
   const pinned = Array.isArray(saved.pinned) ? saved.pinned.filter((k) => columns.includes(k)) : []
   return { columns, widths, pinned }
 }
+
+/** Pixels per character and the cell padding the fit adds; the clamp keeps a note column from taking the screen. */
+const FIT_PX_PER_CHAR = 7.5
+const FIT_PADDING_PX = 36
+const FIT_MIN_PX = 60
+const FIT_MAX_PX = 520
+
+/**
+ * Each column's width to fit its longest value (or its header, if that is longer): the longest text
+ * among `rows`, by character count. Used by "Fit widths" while editing the team layout.
+ */
+export function fitColumnWidths<T>(
+  columns: readonly { key: string; header: string; text?: (row: T) => string | null | undefined }[],
+  rows: readonly T[],
+): Record<string, number> {
+  const widths: Record<string, number> = {}
+  for (const col of columns) {
+    let longest = col.header.length
+    if (col.text) for (const row of rows) longest = Math.max(longest, String(col.text(row) ?? '').length)
+    widths[col.key] = Math.min(FIT_MAX_PX, Math.max(FIT_MIN_PX, Math.round(longest * FIT_PX_PER_CHAR + FIT_PADDING_PX)))
+  }
+  return widths
+}
