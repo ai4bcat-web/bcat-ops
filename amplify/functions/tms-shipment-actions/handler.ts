@@ -367,7 +367,7 @@ const ALJEX_CODE_MAP_TABLE_NAME = process.env.ALJEX_CODE_MAP_TABLE_NAME ?? ''
 const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
 const CARRIER_DOCUMENT_TABLE_NAME = process.env.CARRIER_DOCUMENT_TABLE_NAME ?? ''
 const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
-const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'tracking@bcatcorp.com'
+const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'notifications@bcatcorp.com'
 const PORTAL_ORIGIN = process.env.PORTAL_ORIGIN ?? ''
 // Step D tables. The tracking log is written here and by the projector, the public
 // tracking Lambda and tms-tracking-actions; the link table is only read here, to

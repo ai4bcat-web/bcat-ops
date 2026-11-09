@@ -2654,7 +2654,7 @@ shipmentActionsFn.addToRolePolicy(
 shipmentActionsFn.addEnvironment('BUCKET_NAME',                 backend.storage.resources.bucket.bucketName)
 // Sent from the verified bcatcorp.com domain (DKIM-aligned), not from a gmail.com address: mail from ai4bcat@gmail.com through SES
 // fails alignment and lands in spam or is dropped (the 20002 rate con never showed up in anyone's inbox). Replies still go to the thread mailbox.
-shipmentActionsFn.addEnvironment('FROM_ADDRESS',                'tracking@bcatcorp.com')
+shipmentActionsFn.addEnvironment('FROM_ADDRESS',                'notifications@bcatcorp.com')
 // The signing link in the email points at the app, not at the Function URL.
 shipmentActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_ORIGIN)
 // The rate con is sent as raw MIME with the PDF attached (SESv2 Content.Raw
