@@ -537,7 +537,7 @@ export function CustomersPage() {
 function CustomerModal({ open, initial, divisions, onClose, onSave }: {
   open: boolean; initial?: CustomerRecord; divisions: Division[]; onClose: () => void; onSave: (record: CustomerRecord) => Promise<void>
 }) {
-  const { value, set, toRecord, errors } = useCustomerForm(initial ?? null)
+  const { value, set, toRecord, errors, isNew, missing } = useCustomerForm(initial ?? null)
   const [saving, setSaving] = useState(false)
 
   const save = async () => {
@@ -555,12 +555,13 @@ function CustomerModal({ open, initial, divisions, onClose, onSave }: {
       title={initial ? 'Edit customer' : 'Add customer'}
       footer={
         <>
+          {missing && <span role="status" data-testid="customer-missing" className="tms-field-error" style={{ marginRight: 'auto' }}>{missing}</span>}
           <TmsButton onClick={onClose}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</TmsButton>
+          <TmsButton variant="primary" onClick={save} disabled={saving || (isNew && Object.keys(errors).length > 0)}>{saving ? 'Saving…' : 'Save'}</TmsButton>
         </>
       }
     >
-      <CustomerForm value={value} set={set} errors={errors} divisions={divisions} />
+      <CustomerForm value={value} set={set} errors={errors} divisions={divisions} isNew={isNew} />
     </TmsDialog>
   )
 }

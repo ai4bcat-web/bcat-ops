@@ -276,8 +276,20 @@ interface TestEvent {
   identity?: TestIdentity | null
 }
 
-function event(action: string, input?: Record<string, unknown>, id?: TestIdentity): TestEvent {
+function rawEvent(action: string, input?: Record<string, unknown>, id?: TestIdentity): TestEvent {
   return { arguments: { action, input }, identity: id ?? identity() }
+}
+
+/** A create the New Customer rules accept; tests about other fields start from it. */
+const VALID_NEW_CUSTOMER = {
+  billingAddress: { street: '1 Main St', city: 'Chicago', state: 'IL', zip: '60601' },
+  billingMethod: 'MANUAL',
+  apEmail: 'ap@acme.example',
+}
+
+function event(action: string, input?: Record<string, unknown>, id?: TestIdentity): TestEvent {
+  const isCreate = action === 'UPSERT_CUSTOMER' && input && input.id === undefined && Object.keys(input).length > 0
+  return rawEvent(action, isCreate ? { ...VALID_NEW_CUSTOMER, ...input } : input, id)
 }
 
 // ── DynamoDB response helpers ─────────────────────────────────────────────────
@@ -594,7 +606,7 @@ describe('UPSERT_CUSTOMER', () => {
     let put: MockPutCommand['input'] | undefined
     send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
       if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
-      if (cmd.__type === 'Put') { put = cmd.input; return Promise.resolve({}) }
+      if (cmd.__type === 'Put') { if (String(cmd.input.TableName).includes('Customer')) put = cmd.input; return Promise.resolve({}) }
       throw new Error('unexpected')
     }))
     await handler(event(
@@ -888,7 +900,7 @@ describe('UPSERT_CUSTOMER', () => {
         if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
         throw new Error('unexpected')
       }))
-      await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme', billingMethod: 'MANUAL' }))).rejects.toThrow(/AP e-mail/)
+      await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme', billingMethod: 'MANUAL', apEmail: '' }))).rejects.toThrow(/AP e-mail/)
       await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme', billingMethod: 'MANUAL', apEmail: 'ap@acme.com', invoiceCopyEmails: ['nope'] }))).rejects.toThrow('Not a valid e-mail: nope')
       await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme', billingMethod: 'CHECK' }))).rejects.toThrow(/billingMethod must be one of/)
     })
@@ -904,11 +916,99 @@ describe('UPSERT_CUSTOMER', () => {
       const result = await handler(event('UPSERT_CUSTOMER', {
         name: 'Acme', billingMethod: 'MANUAL', apEmail: ' AP@Acme.com ', invoiceCopyEmails: ['A@x.com', 'a@x.com', 'b@x.com'],
       }))
-      expect(result).toMatchObject({ billingMethod: 'MANUAL', apEmail: 'ap@acme.com', invoiceCopyEmails: ['a@x.com', 'b@x.com'] })
+      expect(result).toMatchObject({ billingMethod: 'MANUAL', apEmail: 'ap@acme.com', invoiceCopyEmails: ['invoices@bcatcorp.com', 'a@x.com', 'b@x.com'] })
       const rows = audits(cmds)
       expect(rows).toHaveLength(1)
       expect(rows[0].action.S).toBe('BILLING_METHOD_SET')
       expect(JSON.parse(rows[0].changes.S)).toMatchObject({ before: { billingMethod: null }, after: { billingMethod: 'MANUAL', apEmail: 'ap@acme.com' } })
+    })
+
+    describe('New Customer rules (create only)', () => {
+      const putOf = () => {
+        const box: { item?: Record<string, { S?: string; N?: string; BOOL?: boolean; L?: Array<{ S: string }> }> } = {}
+        send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+          if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+          if (cmd.__type === 'Put') { if (String(cmd.input.TableName).includes('Customer')) box.item = cmd.input.Item as never; return Promise.resolve({}) }
+          return Promise.resolve({})
+        }))
+        return box
+      }
+      const create = (over: Record<string, unknown>, id?: TestIdentity) =>
+        handler(rawEvent('UPSERT_CUSTOMER', { name: 'Acme', ...VALID_NEW_CUSTOMER, ...over }, id))
+
+      it.each([
+        ['name', { name: ' ' }, /name/i],
+        ['address', { billingAddress: { street: '1 Main', city: 'Chicago', state: 'IL', zip: '' } }, /Address/],
+        ['billing method', { billingMethod: undefined }, /Billing method/],
+        ['AP e-mail 1', { apEmail: undefined }, /AP e-mail 1/],
+        ['AP e-mail 1 format', { apEmail: 'not-an-email' }, /valid e-mail/],
+        ['FACTOR still needs the AP e-mail', { billingMethod: 'FACTOR', apEmail: undefined }, /AP e-mail 1/],
+        ['copy-to e-mail format', { invoiceCopyEmails: ['ok@x.com', 'nope'] }, /Not a valid e-mail: nope/],
+        ['an unknown division', { defaultDivisionKey: 'NOPE' }, /top-level division/],
+      ])('refuses a create with %s', async (_label, over, message) => {
+        const box = putOf()
+        await expect(create(over)).rejects.toThrow(message)
+        expect(box.item).toBeUndefined()
+      })
+
+      it('refuses a subsidiary as the default rev division', async () => {
+        putOf()
+        send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+          if (cmd.__type === 'Scan' && String(cmd.input.TableName ?? '').includes('OwnershipDivision')) {
+            return Promise.resolve({ Items: [division({ code: 'ASSETS' }), division({ code: 'BOX_TRUCK', parentId: 'ASSETS' })].map((d) => marshall(d, { removeUndefinedValues: true })), LastEvaluatedKey: undefined })
+          }
+          if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+          return Promise.resolve({})
+        }))
+        await expect(create({ defaultDivisionKey: 'BOX_TRUCK' })).rejects.toThrow(/top-level division/)
+      })
+
+      it('defaults the division to ASSETS, the credit limit to $1,000,000 and Active on', async () => {
+        const box = putOf()
+        const result = await create({})
+        expect(result).toMatchObject({ defaultDivisionKey: 'ASSETS', creditLimitCents: 100_000_000, active: true, status: 'ACTIVE' })
+        expect(box.item?.defaultDivisionKey).toEqual({ S: 'ASSETS' })
+      })
+
+      it('keeps invoices@bcatcorp.com in the stored copy list however the client sent it, with the extras', async () => {
+        for (const sent of [undefined, [], ['Extra@x.com'], ['extra@x.com', 'INVOICES@bcatcorp.com']]) {
+          putOf()
+          const result = await create({ invoiceCopyEmails: sent })
+          const stored = result.invoiceCopyEmails as string[]
+          expect(stored[0]).toBe('invoices@bcatcorp.com')
+          expect(stored.filter((e) => e === 'invoices@bcatcorp.com')).toHaveLength(1)
+          expect(stored).toEqual(expect.arrayContaining((sent ?? []).map((e) => e.toLowerCase())))
+        }
+      })
+
+      it('lets a caller without the credit claim create with the default limit, but not another one', async () => {
+        putOf()
+        await expect(create({ creditLimitCents: 100_000_000 })).resolves.toMatchObject({ creditLimitCents: 100_000_000 })
+        await expect(create({ creditLimitCents: 5_000_000 })).rejects.toThrow('Forbidden: creditLimitCents requires owner or ADMIN')
+      })
+
+      it('creates inactive when Active is switched off', async () => {
+        putOf()
+        await expect(create({ active: false })).resolves.toMatchObject({ active: false, status: 'CLOSED' })
+      })
+
+      it('does not hold a lead-stage create (the spot-quote prospect) to the billing rules', async () => {
+        putOf()
+        const result = await handler(rawEvent('UPSERT_CUSTOMER', { name: 'Prospect Co', status: 'NEW', leadSource: 'SPOT_QUOTE' }))
+        expect(result).toMatchObject({ status: 'NEW', billingMethod: null })
+        expect(result.invoiceCopyEmails).toBeNull()
+      })
+
+      it('does not apply to edits: an old customer without the new fields saves another field', async () => {
+        const old = makeDynamoItem({ id: 'c-9', name: 'Old Co', normalizedName: 'old co', active: true, status: 'ACTIVE', createdAt: '2020-01-01', updatedAt: '2025-01-02' })
+        send.mockImplementation(withSettingsGet((cmd: MockCommand) => {
+          if (cmd.__type === 'Get') return Promise.resolve({ Item: old })
+          if (cmd.__type === 'Scan') return Promise.resolve({ Items: [old], LastEvaluatedKey: undefined })
+          if (cmd.__type === 'Update') return Promise.resolve({ Attributes: old })
+          return Promise.resolve({})
+        }))
+        await expect(handler(rawEvent('UPSERT_CUSTOMER', { id: 'c-9', expectedUpdatedAt: '2025-01-02', name: 'Old Co', mcNumber: '123' }))).resolves.toBeDefined()
+      })
     })
 
     it('lets a flagged customer be saved for another field, keeps the flag, and clears it when a person fixes billing', async () => {

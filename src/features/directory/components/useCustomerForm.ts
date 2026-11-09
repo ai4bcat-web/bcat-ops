@@ -14,6 +14,14 @@ import type {
   CheckCallPlan,
 } from '@/types/tms'
 import { parseEmailList, validateBillingFields, type BillingMethod } from '@/lib/billingMethod'
+import {
+  DEFAULT_NEW_CUSTOMER_CREDIT_LIMIT_CENTS,
+  DEFAULT_NEW_CUSTOMER_DIVISION,
+  REQUIRED_INVOICE_COPY_EMAIL,
+  missingSummary,
+  newCustomerProblems,
+  withRequiredCopyEmail,
+} from '@/lib/newCustomerRules'
 import type { AutomationPolicyPatch } from '@/lib/trackingAutomation'
 import { DEFAULT_DRIVER_SMS_TARGET, type DriverSmsTarget, type TrackingMethod, type TrackingMode } from '@/lib/trackingPrefs'
 
@@ -152,6 +160,8 @@ const INVOICE_FREQUENCY_OPTIONS: { value: InvoiceFrequency; label: string }[] = 
 ]
 
 function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
+  // A new customer (no record yet, or only a typed name) starts with the form's defaults.
+  const isNew = !initial?.id
   return {
     name: initial?.name ?? '',
     contactName: initial?.contactName ?? '',
@@ -169,11 +179,11 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     billingAddressZip: initial?.billingAddress?.zip ?? '',
     billingAddressCountry: initial?.billingAddress?.country ?? '',
     paymentTermsDays: initial?.paymentTermsDays != null ? String(initial.paymentTermsDays) : '',
-    creditLimitCents: initial?.creditLimitCents ?? null,
+    creditLimitCents: isNew ? DEFAULT_NEW_CUSTOMER_CREDIT_LIMIT_CENTS : initial?.creditLimitCents ?? null,
     creditHoldFlag: initial?.creditHoldFlag ?? false,
     requiredDocs: initial?.requiredDocsForInvoice ?? [],
     reviewRequirements: initial?.reviewRequirements ?? null,
-    defaultDivisionKey: initial?.defaultDivisionKey ?? '',
+    defaultDivisionKey: initial?.defaultDivisionKey ?? (isNew ? DEFAULT_NEW_CUSTOMER_DIVISION : ''),
     defaultSalesRepId: initial?.defaultSalesRepId ?? '',
     aliasesText: arrayToLines(initial?.aliases),
     active: initial?.active ?? true,
@@ -221,7 +231,7 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
 
     billingMethod: initial?.billingMethod ?? '',
     apEmail: initial?.apEmail ?? '',
-    invoiceCopyText: arrayToLines(initial?.invoiceCopyEmails),
+    invoiceCopyText: isNew ? REQUIRED_INVOICE_COPY_EMAIL : arrayToLines(initial?.invoiceCopyEmails),
     billingNeedsReview: initial?.billingNeedsReview ?? '',
   }
 }
@@ -280,6 +290,7 @@ function validateCustomerForm(v: CustomerFormValue): Record<string, string> {
 
 export function useCustomerForm(initial?: CustomerRecord | null) {
   const [value, setValue] = useState<CustomerFormValue>(() => emptyCustomerForm(initial))
+  const isNew = !initial?.id
 
   const set = <K extends keyof CustomerFormValue>(key: K, v: CustomerFormValue[K]) => {
     setValue((p) => ({ ...p, [key]: v }))
@@ -363,12 +374,33 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
 
     billingMethod: value.billingMethod || null,
     apEmail: value.apEmail.trim() || null,
-    invoiceCopyEmails: parseEmailList(value.invoiceCopyText),
+    // A new customer's list always carries the company copy address; the server forces it too.
+    invoiceCopyEmails: isNew ? withRequiredCopyEmail(parseEmailList(value.invoiceCopyText)) : parseEmailList(value.invoiceCopyText),
     billingNeedsReview: value.billingNeedsReview.trim() || null,
   })
 
+  // New customers: the required-field rules shared with the Lambda. Existing ones only
+  // re-check the billing fields the user changes (below), so an old record still saves.
+  const problems = useMemo(() => {
+    if (!isNew) return []
+    return newCustomerProblems({
+      name: value.name,
+      billingAddress: { street: value.billingAddressStreet, city: value.billingAddressCity, state: value.billingAddressState, zip: value.billingAddressZip },
+      billingMethod: value.billingMethod,
+      defaultDivisionKey: value.defaultDivisionKey,
+      apEmail: value.apEmail,
+      invoiceCopyEmails: parseEmailList(value.invoiceCopyText),
+    })
+  }, [isNew, value])
+  const missing = useMemo(() => missingSummary(problems), [problems])
+
   const errors = useMemo(() => {
     const base = validateCustomerForm(value)
+    if (isNew) {
+      const out = { ...base }
+      for (const p of problems) out[p.field] = p.message
+      return out
+    }
     // Same rule as the server: billing fields are only checked once they change, so a flagged
     // imported customer can still be edited for anything else.
     const apEmail = value.apEmail.trim().toLowerCase()
@@ -380,8 +412,8 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     return changed
       ? { ...base, ...validateBillingFields({ billingMethod: value.billingMethod || null, apEmail, invoiceCopyEmails: copy }) }
       : base
-  }, [value, initial])
-  return { value, set, setPartial, toRecord, errors }
+  }, [value, initial, isNew, problems])
+  return { value, set, setPartial, toRecord, errors, isNew, missing }
 }
 
 export { APPT_WORKFLOW_OPTIONS, INVOICE_FREQUENCY_OPTIONS }
