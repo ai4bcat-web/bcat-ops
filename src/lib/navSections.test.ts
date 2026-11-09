@@ -60,7 +60,11 @@ describe('buildNavSections', () => {
       'Dashboard', 'Active shipments', 'Customers', 'Carriers', 'Locations', 'Accounting', 'Settings',
     ])
     const kids = (label: string) => labels(pinned.find((i) => i.label === label)?.children)
-    expect(pinned.find((i) => i.label === 'Active shipments')?.children).toBeUndefined()
+    // Dispatch and Calendar live under Active shipments; the Payroll pages are a labeled group under Accounting.
+    expect(kids('Active shipments')).toEqual(['Dispatch', 'Calendar'])
+    expect(pinned.find((i) => i.label === 'Accounting')?.childGroups?.map((g) => [g.label, g.children.map((c) => c.label)])).toEqual([
+      ['Payroll', ['Box Truck Settlements', 'Amazon Settlements', 'Owner Operator Settlements', 'Employee Hours']],
+    ])
     // Customers and Carriers are single rows: Carriers' two tabs live on its page, Follow-ups is gone.
     expect(pinned.find((i) => i.label === 'Customers')?.children).toBeUndefined()
     const carriers = pinned.find((i) => i.label === 'Carriers')
@@ -73,7 +77,7 @@ describe('buildNavSections', () => {
       'Spot quoter & e-mail', 'Carrier Sales', 'Commissions', 'Reports', 'Audit log', 'Compliance', 'Platform health', 'Demo',
     ])
     // Every child lands somewhere different.
-    const childTargets = pinned.flatMap((i) => (i.children ?? []).map((c) => c.to))
+    const childTargets = pinned.flatMap((i) => [...(i.children ?? []), ...(i.childGroups ?? []).flatMap((g) => g.children)].map((c) => c.to))
     expect(new Set(childTargets).size).toBe(childTargets.length)
 
     // No BROKERAGE section and no "Intake · BCAT" fallback; the business is still offered.
@@ -281,8 +285,16 @@ describe('buildNavSections', () => {
     const { sections, businesses } = buildNavSections({ divisions, hasPageAccess: () => true })
     expect(sections.map((s) => s.key)).toEqual(['ASSETS', 'COMPANY'])
     expect(businesses.map((b) => b.key)).toEqual(['BROKERAGE', 'ASSETS'])
-    // The subsidiary is not a section of its own; its pages belong to the fleet.
-    expect(sections.find((s) => s.key === 'ASSETS')?.items.map((i) => i.label)).toContain('Owner Operator Settlements')
+    // The subsidiary is not a section of its own; its pages belong to the fleet. (Its settlements are under Accounting > Payroll.)
+    expect(sections.find((s) => s.key === 'ASSETS')?.items.map((i) => i.label)).toContain('Driver info')
+  })
+
+  it('keeps Dispatch, Calendar and the settlements in the fleet section for a person who cannot see the pinned rows', () => {
+    const grants = new Set(['dispatch', 'calendar', 'driverPay', 'hours'])
+    const { pinned, sections } = buildNavSections({ divisions: null, hasPageAccess: (k) => grants.has(k) })
+    expect(pinned).toEqual([])
+    const labels = sections.find((s) => s.key === 'ASSETS')?.items.map((i) => i.label) ?? []
+    expect(labels).toEqual(expect.arrayContaining(['Dispatch', 'Calendar', 'Amazon Settlements', 'Employee Hours']))
   })
 
   it('falls back to the seed divisions before the table has loaded', () => {

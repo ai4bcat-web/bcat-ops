@@ -88,10 +88,11 @@ describe('page grants and nav rows', () => {
   it('shows each guarded production page in the owner\'s sidebar', () => {
     const { pinned, sections } = buildNavSections({ divisions: null, hasPageAccess: () => false, isOwner: true })
     const shown = new Set<string>()
-    const walk = (items: Array<{ to?: string; children?: Array<{ to?: string }> }> | undefined) => {
+    const walk = (items: Array<{ to?: string; children?: Array<{ to?: string }>; childGroups?: Array<{ children: Array<{ to?: string }> }> }> | undefined) => {
       for (const it of items ?? []) {
         if (it.to) shown.add(it.to)
         walk(it.children)
+        for (const g of it.childGroups ?? []) walk(g.children)
       }
     }
     walk(pinned)

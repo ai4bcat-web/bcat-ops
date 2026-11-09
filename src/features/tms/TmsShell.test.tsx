@@ -225,13 +225,26 @@ describe('TmsShell', () => {
   })
 
   it('remembers the collapsed sidebar in localStorage', () => {
-    const { unmount } = renderShell()
+    const { unmount } = renderShell('/tms/customers')
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
     expect(window.localStorage.getItem('tms-sidebar-collapsed')).toBe('1')
     unmount()
 
-    renderShell()
+    renderShell('/tms/customers')
     expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
+  })
+
+  it('opens the lifecycle pages (Quote, Build, View, Book, Track, Review) with the sidebar collapsed', () => {
+    for (const path of ['/tms/shipments', '/tms/shipments/new']) {
+      window.localStorage.setItem('tms-sidebar-collapsed', '0')
+      const { unmount } = renderShell(path)
+      expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
+      // Expanding there lasts for the session and does not rewrite the stored preference.
+      fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+      expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument()
+      expect(window.localStorage.getItem('tms-sidebar-collapsed')).toBe('0')
+      unmount()
+    }
   })
 
   it('dense pages show the sidebar as an icon rail that opens on hover and closes on leave, without touching the saved preference', () => {
