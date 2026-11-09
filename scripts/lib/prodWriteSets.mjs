@@ -68,4 +68,6 @@ export const PROD_WRITE_SETS = {
   // delete of the COMPANY OwnershipDivision row (exported first, refuses while referenced) + restore of it.
   awDivisions: { models: ['Driver', 'OwnershipDivision', 'AuditLog'] },
   awCustomerEmail: { models: ['Customer', 'AuditLog'] },
+  // `awTruckFleet.mjs box-truck|owner-operator|rollback --apply`: Equipment.fleetGroup only (one truck per driver, conditional on the expected old value) + one AuditLog row per truck.
+  awTruckFleet: { models: ['Equipment', 'AuditLog'] },
 };
