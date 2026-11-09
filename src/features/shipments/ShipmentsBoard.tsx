@@ -232,6 +232,9 @@ function toneRows(): BoardToneKey[] {
   ]
 }
 
+/** Columns locked to the left edge of the grid, whatever the team layout says. */
+const LOCKED_KEYS = ['status', 'proNumber']
+
 export function ShipmentsBoard() {
   const { isAdmin, isOwner, user } = useAuth()
   const navigate = useNavigate()
@@ -585,10 +588,16 @@ function BoardPane({
   // The "Demo" chip: only the ZZ DEMO walkthrough rows. It lives in the URL (`?demo=1`)
   // so the isolated view can be bookmarked or handed over as a link.
   const demoOnly = params.get('demo') === '1'
-  const gridColumns = useMemo(() => {
-    const chosen = columnKeys.map((k) => COLUMN_BY_KEY[k]).filter((c) => c != null)
-    return [...chosen, ACTIONS_COLUMN]
+  // Status and PRO # are locked to the left of the grid: they stay put while the rest scrolls sideways.
+  const lockedFirst = useMemo(() => {
+    const locked = columnKeys.filter((k) => LOCKED_KEYS.includes(k))
+    return [...locked, ...columnKeys.filter((k) => !LOCKED_KEYS.includes(k))]
   }, [columnKeys])
+  const lockedCount = useMemo(() => columnKeys.filter((k) => LOCKED_KEYS.includes(k)).length, [columnKeys])
+  const gridColumns = useMemo(() => {
+    const chosen = lockedFirst.map((k) => COLUMN_BY_KEY[k]).filter((c) => c != null)
+    return [...chosen, ACTIONS_COLUMN]
+  }, [lockedFirst])
 
   // List scope, then search, then the quick toggles, then voided rows (hidden unless the Status
   // header asks for them), then every header filter. `fitRows` is the list before the header
@@ -1088,7 +1097,7 @@ function BoardPane({
             renderCell={renderCellWithActions}
             density={prefs.density}
             userWidths={layout.widths}
-            stickyCount={Math.max(1, layout.pinned.length)}
+            stickyCount={Math.max(1, lockedCount, layout.pinned.length)}
             sort={prefs.sort}
             onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
             filters={filters}
