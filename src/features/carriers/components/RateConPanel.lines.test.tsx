@@ -16,6 +16,7 @@ const filename = vi.hoisted(() => vi.fn((load: string, version: number) => `rate
 vi.mock('@/lib/apiClient', () => ({
   listUserProfiles: vi.fn(async () => []),
   getRateConfirmUrl: vi.fn(async () => ''),
+  getTrackingMailbox: vi.fn(async () => ({ tracking: 'threads+tracking@bcatcorp.com', thread: 'threads+x@bcatcorp.com' })),
 }))
 vi.mock('@/lib/carrierRateCon', () => ({
   buildRateConPdf: build,
@@ -81,14 +82,14 @@ describe('RateConPanel lines with several carriers', () => {
       </MemoryRouter>,
     )
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Preview/ })) })
-    await screen.findByText('Download a copy')
+    await screen.findByText('Download PDF')
     expect(filename).toHaveBeenCalledWith('S1-1-heartland', 1)
   })
 
   it('one carrier prints every CARRIER line it has, the untagged one included, under the plain load number', async () => {
     const input = await previewOf(A, bundleOf([A]))
     expect(input.charges.map((c) => c.label)).toEqual(['LINEHAUL', 'DETENTION', 'FSC'])
-    await screen.findByText('Download a copy')
+    await screen.findByText('Download PDF')
     expect(filename).toHaveBeenCalledWith('S1-1', 1)
   })
 })

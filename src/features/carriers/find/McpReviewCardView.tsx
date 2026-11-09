@@ -12,8 +12,8 @@ import { refLabel, type McpReviewCard, type ReviewTone } from '@/lib/integration
 
 const BADGE: Record<ReviewTone, TmsTone> = { green: 'green', amber: 'orange', red: 'red', gray: 'gray' }
 const GAUGE: Record<ReviewTone, 'default' | 'good' | 'warn' | 'bad'> = { green: 'good', amber: 'warn', red: 'bad', gray: 'default' }
-/** Points at which the gauge reads full. MCP publishes no ceiling: this is only the dial's scale. */
-const GAUGE_FULL_SCALE = 1000
+/** Points at which the gauge reads full: 10,000 (Ryne 2026-11-09). MCP publishes no ceiling; this is only the dial's scale. */
+const GAUGE_FULL_SCALE = 10000
 
 const day = (iso: string | undefined): string => (iso ? iso.slice(0, 10) : '—')
 

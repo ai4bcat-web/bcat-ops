@@ -10,6 +10,7 @@ import type { CarrierContactRecord, CarrierRecord, LoadCarrierRecord, ShipmentBu
 vi.mock('@/lib/apiClient', () => ({
   listUserProfiles: vi.fn(async () => []),
   getRateConfirmUrl: vi.fn(async () => ''),
+  getTrackingMailbox: vi.fn(async () => ({ tracking: 'threads+tracking@bcatcorp.com', thread: 'threads+x@bcatcorp.com' })),
 }))
 vi.mock('@/lib/carrierRateCon', () => ({
   buildRateConPdf: vi.fn(async () => new Uint8Array([1, 2, 3])),
@@ -56,21 +57,21 @@ async function setup(opts: { carrier?: CarrierRecord | null; rateConVersion?: nu
   return onSend
 }
 
-const sendButton = () => screen.getByRole('button', { name: /^(Send|Re-send)$/ })
+const sendButton = () => screen.getByRole('button', { name: /^(Send|Re-send) for e-signature$/ })
 const addBox = () => screen.getByLabelText('Add another address')
 
 describe('RateConPanel recipients', () => {
-  it('sends to the default recipients when the user just clicks Send', async () => {
+  it('sends to the default recipient (the MCP / FMCSA e-mail on file) when the user just clicks Send', async () => {
     const onSend = await setup()
     fireEvent.click(sendButton())
     await waitFor(() => expect(onSend).toHaveBeenCalled())
-    expect(onSend.mock.calls[0][0].to).toEqual(['dana@swift.com'])
+    expect(onSend.mock.calls[0][0].to).toEqual(['main@swift.com'])
   })
 
   it('sends only the addresses still ticked', async () => {
     const onSend = await setup()
     fireEvent.click(screen.getByLabelText(/pat@swift\.com/))
-    fireEvent.click(screen.getByLabelText(/dana@swift\.com/))
+    fireEvent.click(screen.getByLabelText(/main@swift\.com/))
     fireEvent.click(sendButton())
     await waitFor(() => expect(onSend).toHaveBeenCalled())
     expect(onSend.mock.calls[0][0].to).toEqual(['pat@swift.com'])
@@ -81,7 +82,7 @@ describe('RateConPanel recipients', () => {
     fireEvent.change(addBox(), { target: { value: 'New@Carrier.com' } })
     fireEvent.click(sendButton())
     await waitFor(() => expect(onSend).toHaveBeenCalled())
-    expect(onSend.mock.calls[0][0].to).toEqual(['dana@swift.com', 'New@Carrier.com'])
+    expect(onSend.mock.calls[0][0].to).toEqual(['main@swift.com', 'New@Carrier.com'])
   })
 
   it('blocks the send when the pending address is invalid', async () => {
@@ -107,20 +108,23 @@ describe('RateConPanel recipients', () => {
 
   it('disables Send when nothing is selected', async () => {
     await setup()
-    fireEvent.click(screen.getByLabelText(/dana@swift\.com/))
+    fireEvent.click(screen.getByLabelText(/main@swift\.com/))
     expect(sendButton()).toBeDisabled()
   })
 
   it('tells the sender they are copied automatically', async () => {
     await setup()
-    expect(screen.getByText(/dispatch@bcatcorp\.com/)).toHaveTextContent('copied automatically')
+    const routing = screen.getByTestId('rate-con-routing')
+    expect(routing).toHaveTextContent('dispatch@bcatcorp.com')
+    expect(routing).toHaveTextContent('CC added automatically')
+    expect(routing).toHaveTextContent('tracking mailbox') // the address itself loads with a real shipment
   })
 })
 
 describe('RateConPanel MyCarrierPackets gate', () => {
   it('blocks Send and Re-send with a notice and a profile link, but keeps Preview', async () => {
     const onSend = await setup({ carrier: carrier('INVITED'), rateConVersion: 1 })
-    expect(sendButton()).toHaveTextContent('Re-send')
+    expect(sendButton()).toHaveTextContent('Re-send for e-signature')
     expect(sendButton()).toBeDisabled()
     expect(screen.getByRole('status')).toHaveTextContent('Swift')
     expect(screen.getByRole('link', { name: /open carrier profile/i })).toHaveAttribute('href', '/tms/carriers/car-1')

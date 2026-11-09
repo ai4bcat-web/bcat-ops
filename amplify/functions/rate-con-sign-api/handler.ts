@@ -31,6 +31,7 @@ import { advanceTarget, driverInfoGaps, isCarrierAssignmentStatus, ladderPatch }
 import { buildSignedRateCon } from '../../../src/lib/rateConSigned'
 import { cleanName, normalizeFieldValue, signErrors } from '../../../src/lib/rateConSignValidation'
 import { generatedKey } from '../../../src/lib/shipmentDocuments'
+import { threadKeyFor } from '../../../src/lib/shipmentThread'
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 const s3 = new S3Client({})
@@ -43,6 +44,7 @@ const SHIPMENT_DOCUMENT_TABLE = process.env.SHIPMENT_DOCUMENT_TABLE_NAME!
 const DIVISION_TABLE = process.env.DIVISION_TABLE_NAME!
 const SETTINGS_TABLE = process.env.SETTINGS_TABLE_NAME!
 const AUDIT_TABLE = process.env.AUDIT_LOG_TABLE_NAME!
+const SHIPMENT_MESSAGE_TABLE = process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? ''
 const BUCKET = process.env.BUCKET_NAME!
 
 const IDX_DOCUMENTS_BY_SHIPMENT = 'shipmentDocumentsByShipmentIdAndUploadedAt'
@@ -611,6 +613,29 @@ export const handler = async (event: FnUrlEvent) => {
             await ddb.send(UpdateCommandFromObject(LOAD_TABLE, { id: row.loadId }, mirror))
           } catch (err) {
             console.error('[rate-con-sign-api] ladder mirror failed', row.id, err instanceof Error ? err.message : String(err))
+          }
+        }
+        // The signature goes on the shipment's e-mail thread (the one the rate con e-mail opened), so the thread shows who signed
+        // and when, with the signed copy attached. A row write only: this public Lambda sends no mail. Never fails the signing.
+        if (SHIPMENT_MESSAGE_TABLE && row.shipmentId) {
+          try {
+            await ddb.send(new PutCommand({
+              TableName: SHIPMENT_MESSAGE_TABLE,
+              Item: {
+                id: `msg:${row.shipmentId}:${randomUUID()}`, __typename: 'ShipmentMessage',
+                shipmentId: row.shipmentId, threadKey: threadKeyFor(String(row.shipmentId)), loadId: row.loadId, loadCarrierId: row.id,
+                direction: 'IN', channel: 'EMAIL', kind: 'RATE_CON', party: 'CARRIER',
+                to: null, from: signerName, cc: null,
+                subject: `Rate confirmation signed — load ${pro}`,
+                body: `${signerName} e-signed the rate confirmation (version ${version}) on ${now}. The signed copy is in the load's documents.`,
+                status: 'RECEIVED', error: null, messageId: `<signed-${randomUUID()}@bcat>`, inReplyTo: null, providerRef: null,
+                attachments: null, documentIds: [filedDoc.documentId], trackingLinkId: null, workflowRunId: null,
+                authorKind: 'PERSON', authorName: signerName,
+                at: now, createdBy: 'rate-con-sign-api', createdAt: now, updatedAt: now,
+              },
+            }))
+          } catch (err) {
+            console.error('[rate-con-sign-api] thread log failed', row.id, err instanceof Error ? err.message : String(err))
           }
         }
         await audit(row.id, 'rate_con_signed', {
