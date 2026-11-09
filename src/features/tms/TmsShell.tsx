@@ -1,4 +1,3 @@
-import { activeLifecycleTab } from '@/lib/lifecycleTabs'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, NavLink } from 'react-router-dom'
@@ -121,19 +120,10 @@ export interface TmsShellProps {
   children?: ReactNode
 }
 
-const COLLAPSE_KEY = 'tms-sidebar-collapsed'
 export const SHIPMENTS_PATH = '/tms/shipments'
 
 const COMPANY_GROUP = 'COMPANY'
 const ALL_BUSINESSES = 'All businesses'
-
-function readCollapsed(): boolean {
-  try {
-    return window.localStorage.getItem(COLLAPSE_KEY) === '1'
-  } catch {
-    return false
-  }
-}
 
 function initialsOf(name: string): string {
   const words = name.split(/\s+/).filter(Boolean)
@@ -447,16 +437,12 @@ export function TmsShell({
   aside,
   children,
 }: TmsShellProps) {
-  const [storedCollapsed, setCollapsed] = useState(readCollapsed)
-  // Dense pages show the rail until the pointer, keyboard focus or a click opens the full sidebar over the page.
+  // Every page: the sidebar is an icon rail until the pointer or keyboard focus reaches it (it then opens over the page with full
+  // labels), or a click on the toggle pins it open. The page's left margin stays the rail's width either way.
   const [railHover, setRailHover] = useState(false)
   const [railPinned, setRailPinned] = useState(false)
   const railOpen = railHover || railPinned
-  // The six lifecycle pages (Quote, Build, View, Book, Track, Review) open with the sidebar collapsed; expanding it there
-  // lasts for the session and never changes the stored preference the other pages use.
-  const onLifecycle = activeLifecycleTab(activePath) !== null
-  const [lifecycleOpen, setLifecycleOpen] = useState(false)
-  const collapsed = dense ? !railOpen : onLifecycle ? !lifecycleOpen : storedCollapsed
+  const collapsed = !railOpen
   // The phone drawer is open for one path only: navigating anywhere closes it without an effect.
   const [navOpenFor, setNavOpenFor] = useState<string | null>(null)
   const navOpen = navOpenFor === activePath
@@ -469,13 +455,6 @@ export function TmsShell({
   // A stored business that is no longer offered behaves as All businesses.
   const company = companies.find((c) => c.code === storedCompany) ?? null
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(COLLAPSE_KEY, storedCollapsed ? '1' : '0')
-    } catch {
-      /* private mode: the sidebar just forgets between sessions */
-    }
-  }, [storedCollapsed])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -516,14 +495,14 @@ export function TmsShell({
 
   return (
     <div
-      className={`tms-shell${collapsed ? ' tms-is-collapsed' : ''}${fill ? ' tms-fill' : ''}${dense ? ' tms-dense' : ''}${navOpen ? ' tms-nav-open' : ''}`}
+      className={`tms-shell${collapsed ? ' tms-is-collapsed' : ''}${fill ? ' tms-fill' : ''}${dense ? ' tms-dense' : ''} tms-hover-rail${navOpen ? ' tms-nav-open' : ''}`}
     >
       <aside
         className="tms-sidebar"
-        onMouseEnter={dense ? () => setRailHover(true) : undefined}
-        onMouseLeave={dense ? () => setRailHover(false) : undefined}
-        onFocus={dense ? () => setRailHover(true) : undefined}
-        onBlur={dense ? (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setRailHover(false) } : undefined}
+        onMouseEnter={() => setRailHover(true)}
+        onMouseLeave={() => setRailHover(false)}
+        onFocus={() => setRailHover(true)}
+        onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setRailHover(false) }}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest('a')) {
             setNavOpen(false)
@@ -540,7 +519,7 @@ export function TmsShell({
             className="tms-collapse-btn"
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-expanded={!collapsed}
-            onClick={() => (dense ? setRailPinned((v) => !v) : onLifecycle ? setLifecycleOpen((v) => !v) : setCollapsed((v) => !v))}
+            onClick={() => setRailPinned((v) => !v)}
           >
             {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
           </button>

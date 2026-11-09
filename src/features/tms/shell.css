@@ -804,4 +804,19 @@
     min-height: 0;
     padding: 0;
   }
+
+  /* Every page: the sidebar is an icon rail that opens over the page on hover/focus (or a pinned click). */
+  .tms-shell.tms-hover-rail .tms-content,
+  .tms-shell.tms-hover-rail.tms-is-collapsed .tms-content {
+    margin-left: calc(var(--tms-sidebar-collapsed-w) + var(--tms-shell-gap) + 6px);
+  }
+
+  .tms-shell.tms-hover-rail .tms-sidebar {
+    transition: width 0.12s ease;
+  }
+
+  .tms-shell.tms-hover-rail:not(.tms-is-collapsed) .tms-sidebar {
+    box-shadow: var(--tms-shadow), 12px 0 24px -8px color-mix(in srgb, var(--tms-text) 25%, transparent);
+    z-index: 30;
+  }
 }
