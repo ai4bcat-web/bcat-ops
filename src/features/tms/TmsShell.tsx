@@ -117,6 +117,8 @@ export interface TmsShellProps {
    * hover, focus or click, and the page runs edge to edge with no gutters.
    */
   dense?: boolean
+  /** Dense chrome, but the content column scrolls itself (pages built for the padded layout: Quote, Book, Review). */
+  scrollMain?: boolean
   /** A column to the right of the page (the dispatch drawer on legacy routes); `fill` only. */
   aside?: ReactNode
   children?: ReactNode
@@ -463,6 +465,7 @@ export function TmsShell({
   onSearch,
   fill = false,
   dense = false,
+  scrollMain = false,
   aside,
   children,
 }: TmsShellProps) {
@@ -526,7 +529,7 @@ export function TmsShell({
 
   return (
     <div
-      className={`tms-shell${collapsed ? ' tms-is-collapsed' : ''}${fill ? ' tms-fill' : ''}${dense ? ' tms-dense' : ''} tms-hover-rail${navOpen ? ' tms-nav-open' : ''}`}
+      className={`tms-shell${collapsed ? ' tms-is-collapsed' : ''}${fill ? ' tms-fill' : ''}${dense ? ' tms-dense' : ''}${dense && scrollMain ? ' tms-scroll-main' : ''} tms-hover-rail${navOpen ? ' tms-nav-open' : ''}`}
     >
       <aside
         className="tms-sidebar"

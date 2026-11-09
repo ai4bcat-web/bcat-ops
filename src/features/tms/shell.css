@@ -820,3 +820,11 @@
     z-index: 30;
   }
 }
+
+/* Quote, Book and Review inside the dense chrome: the content column scrolls and keeps the page padding they were built with. */
+@media (min-width: 901px) {
+  .tms-shell.tms-dense.tms-scroll-main .tms-main {
+    overflow-y: auto;
+    padding: var(--tms-shell-gap);
+  }
+}

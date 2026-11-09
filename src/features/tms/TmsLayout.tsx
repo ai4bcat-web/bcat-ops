@@ -28,6 +28,15 @@ function isDensePath(pathname: string): boolean {
   return DENSE_PATHS.has(path) || /^\/tms\/shipments\/[^/]+\/edit$/.test(path) || /^\/tms\/carriers\/(?!find$)[^/]+$/.test(path)
 }
 
+/**
+ * The lifecycle tabs are one family: Quote, Build, View, Book, Track and Review all use the dense chrome, so moving between them
+ * never shifts the top bar or the page. Quote, Book and Review are built for a padded, scrolling page and keep that inside it.
+ */
+function isScrollingTabPath(pathname: string): boolean {
+  const path = pathname.replace(/\/+$/, '')
+  return path === '/tms/rates' || path.startsWith('/tms/rates/') || path === '/tms/carrier-sales' || path === '/tms/load-review'
+}
+
 function LegacyRuntime() {
   const { user } = useAuth()
   const initializeData = useAppStore((s) => s.initializeData)
@@ -82,7 +91,8 @@ export function TmsLayout() {
   // Every route that is not under /tms is a legacy page: same shell, but the content area is
   // a fixed-height host (the pages scroll themselves) with the dispatch column beside it.
   const legacy = !location.pathname.startsWith('/tms')
-  const dense = isDensePath(location.pathname)
+  const scrollMain = isScrollingTabPath(location.pathname)
+  const dense = isDensePath(location.pathname) || scrollMain
   const initial = personName({ name: me?.name, email }, 'Team member').charAt(0).toUpperCase()
   return (
     <TmsShell
@@ -102,6 +112,7 @@ export function TmsLayout() {
       onSearch={(q) => navigate(`/tms/shipments?q=${encodeURIComponent(q)}`)}
       fill={legacy}
       dense={dense}
+      scrollMain={scrollMain}
       aside={legacy ? <LegacyAside /> : undefined}
     >
       {legacy ? (

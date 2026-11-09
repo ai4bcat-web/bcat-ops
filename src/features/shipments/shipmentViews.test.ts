@@ -13,6 +13,7 @@ import {
   boardStatusOf,
   carrierHoverText,
   carrierLabel,
+  driverNamesOf,
   setFleetDrivers,
   carrierSortKey,
   detailOptions,
@@ -636,5 +637,12 @@ describe('multiple carriers on one shipment', () => {
       { name: 'Alpha Lines', apStatus: null, costCents: null },
       { name: 'Beta Freight', apStatus: null, costCents: null },
     ] }))).toBe('Alpha Lines, Beta Freight')
+  })
+})
+
+describe('driverNamesOf', () => {
+  it('lists the pickup and delivery drivers once each, and nothing when nobody is assigned', () => {
+    expect(driverNamesOf(row('1', { pickupDriverName: 'Zak Pace', deliveryDriverName: 'Lee Lara', driverName: 'Zak Pace' }))).toEqual(['Zak Pace', 'Lee Lara'])
+    expect(driverNamesOf(row('2', { assignmentType: 'OWN_ASSET', driverName: null }))).toEqual([])
   })
 })
