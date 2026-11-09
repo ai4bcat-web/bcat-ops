@@ -1,6 +1,6 @@
 /**
  * The Aljex cutoff: the moment the export was taken. The 24-month import window is
- * counted back from it and nothing after it is imported. Wall time is America/Chicago;
+ * counted back from it; there is no upper bound (the cutoff means booked). Wall time is America/Chicago;
  * stored as the matching UTC instant on TmsSettings.aljexCutoffAt via `SAVE_AR_SETTINGS`.
  */
 import { useEffect, useState } from 'react'
@@ -42,7 +42,7 @@ export function AljexCutoffCard() {
     <SettingsCard
       icon={CalendarClock}
       title="Aljex cutoff"
-      description="When the Aljex export was taken. Loads, invoices and bills older than 24 months before this moment are skipped; nothing after it is imported."
+      description="When the Aljex export was taken: Aljex is final as of this moment (the cutoff means booked). Loads, invoices and bills with a ship date older than 24 months before it are skipped; loads booked before it but shipping after it are carried over."
       actions={<TmsButton size="sm" onClick={save} disabled={saving || loading}><Save size={13} /> Save</TmsButton>}
     >
       {loading ? <Loading /> : (

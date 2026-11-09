@@ -1121,7 +1121,7 @@ async function main() {
     const needsBrowser = !only || /W03|W04|W05|W10/.test(only)
     if (needsBrowser) {
       b = await launchBrowser({ origin, storage: admin.storage, profilePrefix: 'bcat-w-', purpose: 'W verification', viewport: { width: 1600, height: 1000, deviceScaleFactor: 1 } })
-      await b.navigate('/tms/dashboard')
+      await b.navigate('/dashboard')
       await waitLoaded(b).catch(() => {})
       await b.poll(() => b.evaluate(`!!document.querySelector('.tms-sidebar')`), 'shell sidebar mounted', 45_000)
     }

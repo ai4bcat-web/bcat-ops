@@ -170,6 +170,11 @@ describe('invoice math with memo adjustments (DECIDED-1)', () => {
     expect(r).toMatchObject({ balanceCents: 0, surplusCents: 30_00, paidAppliedCents: 100_00, status: 'PAID' })
   })
 
+  it('paidAmount: the invoice shows the money actually received, whatever Bal Due says (short pay and overpay)', () => {
+    expect(invoiceMath(load({ invoice: 100_00, paid: 80_00, bal: 20_00 }), 0, { paidAmount: true })).toMatchObject({ totalCents: 80_00, residualCents: -20_00, balanceCents: 0, surplusCents: 0, status: 'PAID' })
+    expect(invoiceMath(load({ invoice: 100_00, paid: 130_00, bal: -30_00 }), 0, { paidAmount: true })).toMatchObject({ totalCents: 130_00, balanceCents: 0, surplusCents: 0, status: 'PAID' })
+  })
+
   it('does not invent a residual when the load has no Bal Due', () => {
     expect(invoiceMath(load({ invoice: 100_00, paid: 0, bal: null }), 10_00)).toMatchObject({ residualCents: 0, totalCents: 110_00, balanceCents: 110_00 })
   })

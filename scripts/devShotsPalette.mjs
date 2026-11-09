@@ -20,7 +20,7 @@ import { launchBrowser } from './lib/cdpBrowser.mjs'
 import { mintIdentity, deleteIdentity } from './lib/devIdentity.mjs'
 
 export const PAGES = [
-  ['tms-dashboard', '/tms/dashboard'],
+  ['tms-dashboard', '/dashboard'],
   ['tms-shipments', '/tms/shipments'],
   ['tms-shipments-new', '/tms/shipments/new'],
   ['tms-carrier-sales', '/tms/carrier-sales'],

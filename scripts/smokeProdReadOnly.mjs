@@ -119,7 +119,7 @@ async function withBrowser(cfg, origin, guard, outDir, fn) {
   try {
     await b.intercept((req) => guard.decideBrowserRequest(req))
     // preflight: a rejected or incomplete session renders the login form; stop here instead of failing every route
-    await b.navigate('/tms/dashboard')
+    await b.navigate('/dashboard')
     await b.poll(() => b.evaluate(`!!document.querySelector('.tms-main, input[type="password"]')`), 'the app shell or the login form', 60_000)
     if (await b.evaluate(`!!document.querySelector('input[type="password"]')`)) throw new Error('the browser session is not signed in: check BCAT_PROD_ID_TOKEN / ACCESS / REFRESH belong to one live session of the smoke user')
     return await fn(b)

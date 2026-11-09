@@ -9,7 +9,7 @@
 import { validateCarrierAdd, validateLegs } from '@/lib/carrierLegs'
 import { fromDateTimeInput } from '@/lib/date'
 import {
-  missingRequiredFields, requiredFieldLabel, resolveRequiredFields, type RequiredFieldSubject,
+  hasBillToParties, missingRequiredFields, requiredFieldLabel, resolveRequiredFields, type RequiredFieldSubject,
 } from '@/lib/flowDefaults'
 import type { CustomerRecord, TmsSettings } from '@/types/tms'
 import { TRUCKLOAD_MODES } from '../orderDraft'
@@ -72,6 +72,7 @@ export function toRequiredFieldSubject(values: ShipmentFormValues, customer: Cus
       type: s.type, address: { city: s.city, state: s.state }, city: s.city, state: s.state, appt: iso(s),
     })),
     billToId: values.customer.billToId,
+    billToApplicable: customer ? hasBillToParties(customer.billToParties) : undefined,
     salesRepId: values.roles.salesRepId,
     revDivision: values.ship.revDivision,
     carrierRepId: values.roles.dispatcherAssignedId,

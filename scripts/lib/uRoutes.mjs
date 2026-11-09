@@ -31,8 +31,8 @@ export const U_REDIRECTS = [
   ['/tms/dispatch', '/tms/dispatch', '/tms/carrier-sales'],
   ['/tms/documents/*', '/tms/documents', '/tms/tracking'],
   ['/tms/documents/*', '/tms/documents/view/zz-x', '/tms/tracking'],
-  ['/tms/academy/*', '/tms/academy', '/tms/dashboard'],
-  ['/tms/academy/*', '/tms/academy/zz-x', '/tms/dashboard'],
+  ['/tms/academy/*', '/tms/academy', '/dashboard'],
+  ['/tms/academy/*', '/tms/academy/zz-x', '/dashboard'],
 ]
 
 /**
@@ -45,8 +45,8 @@ export const U_GONE = [
   { path: '/tms/dispatch', routePath: 'dispatch', component: 'DispatchWorkstation', target: '/tms/carrier-sales', markers: ['Covering now', 'No freight needs coverage'] },
   { path: '/tms/documents', routePath: 'documents/*', component: 'DocumentsWorkstation', target: '/tms/tracking', markers: ['Documents on this shipment'] },
   { path: '/tms/documents/view/zz-x', routePath: 'documents/*', component: 'DocumentsWorkstation', target: '/tms/tracking', markers: ['Documents on this shipment'] },
-  { path: '/tms/academy', routePath: 'academy/*', component: 'AcademyPage', target: '/tms/dashboard', markers: ['Ask the Academy'] },
-  { path: '/tms/academy/zz-x', routePath: 'academy/*', component: 'AcademyPage', target: '/tms/dashboard', markers: ['Ask the Academy'] },
+  { path: '/tms/academy', routePath: 'academy/*', component: 'AcademyPage', target: '/dashboard', markers: ['Ask the Academy'] },
+  { path: '/tms/academy/zz-x', routePath: 'academy/*', component: 'AcademyPage', target: '/dashboard', markers: ['Ask the Academy'] },
   { path: '/tms/brokerage/views', routePath: null, component: 'ShipmentViewsPage', target: null, markers: ['Shipment views'] },
 ]
 

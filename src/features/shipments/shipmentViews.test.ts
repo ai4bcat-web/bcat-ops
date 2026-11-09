@@ -25,6 +25,7 @@ import {
   toViewRow,
   visibleColumns,
   type ShipmentRow,
+  displayStatusOf,
 } from './shipmentViews'
 import { applyViewFilters } from '@/lib/shipmentViewDefs'
 
@@ -193,6 +194,28 @@ describe('board status mapping', () => {
   it('makes VOIDED win over every other status, including CANCELED', () => {
     expect(boardStatusOf(row('void-delivered', { status: 'DELIVERED', voidedAt: '2026-01-01T00:00:00.000Z' }))).toBe('VOIDED')
     expect(boardStatusOf(row('void-canceled', { status: 'CANCELED', voidedAt: '2026-01-01T00:00:00.000Z' }))).toBe('VOIDED')
+  })
+})
+
+describe('Status column for released shipments', () => {
+  const status = visibleColumns(['status'])[0]!
+  const stops = [
+    { type: 'pickup', departedAt: '2026-01-02T00:00:00Z' },
+    { type: 'delivery', departedAt: '2026-01-03T00:00:00Z' },
+  ] as unknown as ShipmentRow['stops']
+
+  it('reads RELEASED for a delivered shipment whose order left DOCS_NEEDED, and keeps the stored status', () => {
+    const released = row('r', { status: 'DELIVERED', arStatus: 'UNBILLED', stops })
+    expect(status.value(released)).toBe('RELEASED')
+    expect(displayStatusOf(released)).toBe('RELEASED')
+    expect(boardStatusOf(released)).toBe('DELIVERED')
+    expect(status.value(row('i', { status: 'DELIVERED', invoiceId: 'inv-1' }))).toBe('RELEASED')
+  })
+
+  it('leaves unreleased, non-delivered and voided rows as they were', () => {
+    expect(status.value(row('u', { status: 'DELIVERED', arStatus: 'DOCS_NEEDED', stops }))).toBe('DELIVERED 2/2')
+    expect(status.value(row('o', { status: 'OPEN', arStatus: 'UNBILLED' }))).toBe('OPEN')
+    expect(status.value(row('v', { status: 'DELIVERED', arStatus: 'UNBILLED', voidedAt: '2026-02-01T00:00:00.000Z' }))).toBe('VOIDED')
   })
 })
 

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PRODUCTION } from './lib/stackConfig.mjs';
-import { assertOutputsMatch, buildLinkReport, parseExportKeys, partitionByWindow, resolveCutoff, resolveTarget, run, summaryOf } from './awBackfillShipments.mjs';
+import { assertOutputsMatch, buildLinkReport, parseExportKeys, partitionByWindow, resolveCutoff, resolveTarget, run, stopReason, summaryOf } from './awBackfillShipments.mjs';
 
 const STACK = { name: 'rehearsal', tableSuffix: 'abc123-NONE', apiUrl: 'https://api.example/graphql' };
 
@@ -56,11 +56,34 @@ describe('history window', () => {
     expect(resolveCutoff({})).toBe('2026-11-07');
     expect(() => resolveCutoff({ cutoff: '11/07/2026' })).toThrow();
   });
-  it('keeps [cutoff - 24 months, cutoff) and the undated, drops the rest', () => {
-    const p = partitionByWindow([L('a', '1', { pickupAppt: '2024-11-06' }), L('b', '2', { pickupAppt: '2024-11-07' }), L('c', '3', { pickupAppt: '2026-11-06' }), L('d', '4', { pickupAppt: '2026-11-07' }), { id: 'e' }], '2026-11-07');
+  it('lower bound only: ship date on/after cutoff - 24 months is kept, the undated is kept, older is out', () => {
+    const early = { createdAt: '2026-06-01T00:00:00.000Z' };
+    const p = partitionByWindow([L('a', '1', { pickupAppt: '2024-11-06', ...early }), L('b', '2', { pickupAppt: '2024-11-07', ...early }), L('c', '3', { pickupAppt: '2026-11-06', ...early }), L('d', '4', { pickupAppt: '2026-11-07', ...early }), { id: 'e' }], '2026-11-07');
     expect(p.beforeWindow.map((l) => l.id)).toEqual(['a']);
-    expect(p.afterCutoff.map((l) => l.id)).toEqual(['d']);
-    expect(p.inWindow.map((l) => l.id)).toEqual(['b', 'c', 'e']);
+    expect(p.afterCutoff).toEqual([]);
+    expect(p.inWindow.map((l) => l.id)).toEqual(['b', 'c', 'd', 'e']);
+  });
+  it('the cutoff means BOOKED: 17 Loads created before it and shipping 11-07..11-16 are carried over, not afterCutoff', async () => {
+    const carried = Array.from({ length: 17 }, (_, i) => L(`c${i}`, String(900 + i), { pickupAppt: `2026-11-${String(7 + (i % 10)).padStart(2, '0')}T08:00`, createdAt: '2026-11-06T22:00:00.000Z' }));
+    const loads = [L('l1', '100', { createdAt: '2026-06-01T00:00:00.000Z' }), L('old', '600', { pickupAppt: '2024-11-06', createdAt: '2024-11-01T00:00:00.000Z' }), ...carried];
+    const r = await run({ read: world(loads).read, cutoff: '2026-11-07' });
+    expect(r.before.window.carriedOver).toBe(17);
+    expect(r.before.window.outOfWindow).toEqual({ beforeWindow: 1, afterCutoff: 0 });
+    expect(r.before.report.counts.loads).toBe(18);
+    expect(summaryOf(r).carriedOver).toBe(17);
+    expect(stopReason(r)).toBeNull();
+  });
+  it('a Load created on or after the cutoff is afterCutoff: not classified, and STOP', async () => {
+    const loads = [L('l1', '100', { createdAt: '2026-06-01T00:00:00.000Z' }), L('late', '200', { pickupAppt: '2026-11-09T08:00', createdAt: '2026-11-07T01:00:00.000Z' })];
+    const r = await run({ read: world(loads).read, cutoff: '2026-11-07' });
+    expect(r.before.window.outOfWindow.afterCutoff).toBe(1);
+    expect(r.before.window.carriedOver).toBe(0);
+    expect(r.before.report.counts.loads).toBe(1);
+    expect(stopReason(r)).toMatch(/^STOP: 1 Load/);
+  });
+  it('without createdAt the ship date decides: on/after the cutoff is afterCutoff', () => {
+    const p = partitionByWindow([{ id: 'x', pickupAppt: '2026-11-08' }], '2026-11-07');
+    expect(p.afterCutoff.map((l) => l.id)).toEqual(['x']);
   });
 });
 

@@ -11,14 +11,14 @@ import { Info } from 'lucide-react'
 import { DORMANT_PAGES, type DormantPageKey } from '@/lib/dormantPages'
 import { modelsAvailable } from '@/lib/modelAvailability'
 
-const HOME = { to: '/tms/dashboard', label: 'Back to Company Dashboard' }
+const HOME = { to: '/dashboard', label: 'Back to Dashboard' }
 
 export interface RequireModelsProps {
   /** Every model the page needs; one missing is enough to switch the page off. */
   models: readonly string[]
   /** "<Area> turns on during the merge". */
   area: string
-  /** The way out; default is the Company Dashboard. */
+  /** The way out; default is the Dashboard. */
   back?: { to: string; label: string }
   children: ReactNode
 }
@@ -41,8 +41,8 @@ export function RequireModels({ models, area, back = HOME, children }: RequireMo
 
 /** A route body guarded by its row in the page -> models table. */
 export function DormantPage({ page, children }: { page: DormantPageKey; children: ReactNode }) {
-  const def: { area: string; models: readonly string[]; back?: { to: string; label: string } } = DORMANT_PAGES[page]
-  return <RequireModels area={def.area} models={def.models} back={def.back}>{children}</RequireModels>
+  const def: { area: string; models: readonly string[] } = DORMANT_PAGES[page]
+  return <RequireModels area={def.area} models={def.models}>{children}</RequireModels>
 }
 
 export default RequireModels

@@ -73,7 +73,7 @@ export function classifyPro(row: CanonicalRow, existing: ExistingIndex): ProDeci
   return { klass: 'LINK', liveKey }
 }
 
-export async function buildLoadEnv(store: EngineStore, runId: string, stage: StageData, profile: AljexProfile): Promise<LoadEnv> {
+export async function buildLoadEnv(store: EngineStore, runId: string, stage: StageData, profile: AljexProfile, arOpen: ReadonlySet<string> | null): Promise<LoadEnv> {
   const [customers, carriers, loc] = await Promise.all([loadCustomerLookup(store), loadCarrierLookup(store), loadLocationMaps(store)])
   const [settingsRow] = await store.getMany('settings', ['default'])
   const factoringIds = new Set<string>()
@@ -101,6 +101,7 @@ export async function buildLoadEnv(store: EngineStore, runId: string, stage: Sta
     factoringIds,
     drivers: { byName: drivers },
     invoiceOwners,
+    arOpen,
     cutoffDate: stage.index.history?.cutoffDate ?? null,
     memos: stage.masters.memos?.byInvoice ?? {},
     memoOrphans: new Map((stage.masters.memos?.orphans ?? []).map((o) => [o.memoPro, o])),

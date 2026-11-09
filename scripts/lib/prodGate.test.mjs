@@ -191,6 +191,20 @@ describe('importAljex prod argv', () => {
     expect(splitProdArgs(['resume', '--run', 'r', '--target', 'prod:T']).stopAfterPlan).toBe(true);
     expect(splitProdArgs(['pitr-restore', '--table', 'Load', '--target', 'prod']).readOnly).toBe(true);
   });
+  it('prod-rehearsal: rewrites to the engine rehearsal target, gates read-only, plans without --apply, never combines with the seam', () => {
+    const run = splitProdArgs(['run', '--source', 'f.csv', '--target', 'prod-rehearsal:rhprod', '--i-mean-production']);
+    expect(run).toMatchObject({ prod: true, rehearsalTag: 'rhprod', liveTag: null, readOnly: true, cliArgv: ['run', '--source', 'f.csv', '--target', 'rehearsal:rhprod', '--no-apply'] });
+    expect(splitProdArgs(['run', '--source', 'f', '--target', 'prod-rehearsal:rhprod', '--apply']).cliArgv).not.toContain('--no-apply');
+    expect(splitProdArgs(['rehearsal-create', '--target', 'prod-rehearsal:rhprod']).cliArgv).toEqual(['rehearsal-create', '--tag', 'rhprod']);
+    expect(splitProdArgs(['rehearsal-drop', '--tag', 'rhprod', '--target', 'prod-rehearsal:rhprod', '--apply']).cliArgv).toEqual(['rehearsal-drop', '--tag', 'rhprod', '--apply']);
+    expect(splitProdArgs(['resume', '--run', 'r', '--target', 'prod-rehearsal:rhprod']).stopAfterPlan).toBe(true);
+    expect(() => splitProdArgs(['rehearsal-drop', '--tag', 'other', '--target', 'prod-rehearsal:rhprod'])).toThrow(/does not match/);
+    expect(() => splitProdArgs(['seed-counter', '--target', 'prod-rehearsal:rhprod'])).toThrow(/run \| resume/);
+    expect(() => splitProdArgs(['run', '--target', 'prod-rehearsal'])).toThrow(/needs a tag/);
+    expect(() => splitProdArgs(['run', '--target', 'prod-rehearsal:A!'])).toThrow(/needs a tag/);
+    expect(() => splitProdArgs(['run', '--memory', '--target', 'prod-rehearsal:rhprod'])).toThrow(/--memory/);
+    expect(() => splitProdArgs(['run', '--target', 'prod-rehearsal:rhprod', `--prod-mode-rehearsal-suffix=${DEV_SUFFIX}`])).toThrow(/does not combine/);
+  });
 });
 
 it('confirmation string is account:suffix', () => {

@@ -583,7 +583,7 @@ const drawerTabs = (b) => b.evaluate(`[...document.querySelectorAll('[role="dial
 async function bellFlow(b, ctx, theme) {
   const light = theme === 'light'
   await step(`S06a-bell-drawer-${theme}`, async () => {
-    await b.navigate('/tms/dashboard')
+    await b.navigate('/dashboard')
     await waitLoaded(b)
     await b.poll(async () => (await bellCount(b)) !== null, 'bell button', 30_000)
     await pause(3500)
@@ -640,7 +640,7 @@ async function bellFlow(b, ctx, theme) {
   })
   if (light) {
     await step('S06d-bell-links-resolve', async () => {
-      await b.navigate('/tms/dashboard')
+      await b.navigate('/dashboard')
       await waitLoaded(b)
       await pause(3000)
       await b.click('button.tms-bell, button[aria-label^="Notifications"]')
@@ -668,7 +668,7 @@ async function bellFlow(b, ctx, theme) {
       return `${targets.length} group(s) visited: ${targets.map(([l]) => l).join(', ')}`
     })
     await step('S06e-bell-escape', async () => {
-      await b.navigate('/tms/dashboard')
+      await b.navigate('/dashboard')
       await waitLoaded(b)
       await b.poll(async () => (await bellCount(b)) !== null, 'bell', 20_000)
       await b.click('button.tms-bell, button[aria-label^="Notifications"]')
@@ -701,7 +701,7 @@ async function phonePass(b, ctx) {
   const id = 'PH-S06-bell-drawer'
   if (matches(id) || matches('phone')) {
     const failures = []
-    await b.navigate('/tms/dashboard')
+    await b.navigate('/dashboard')
     await waitLoaded(b).catch((e) => failures.push(e.message))
     await pause(3500)
     b.mark()
@@ -970,7 +970,7 @@ async function main() {
 
     const b = await launchBrowser({ origin, storage: admin.storage, profilePrefix: 'bcat-s4-', purpose: 'S4 verification', viewport: { width: 1600, height: 1000, deviceScaleFactor: 1 } })
     try {
-      await b.navigate('/tms/dashboard')
+      await b.navigate('/dashboard')
       await waitLoaded(b).catch(() => {})
       // the deployed site restores the session asynchronously; waitLoaded can return before the shell mounts
       await b.poll(() => b.evaluate(`!!document.querySelector('.tms-sidebar')`), 'shell sidebar mounted', 45_000).catch(() => {})
@@ -982,7 +982,7 @@ async function main() {
 
       await redirectStep(b)
       for (const theme of flag('no-dark') ? ['light'] : ['light', 'dark']) {
-        await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+        await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
         await setTheme(b, theme).catch(() => {})
         const ref = refs[theme]
         for (const route of S4_ROUTES) await auditRoute(b, route, theme, ref)
@@ -993,7 +993,7 @@ async function main() {
         await healthFlow(b, ctx, theme)
         await bellFlow(b, ctx, theme)
       }
-      await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+      await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
       await setTheme(b, 'light').catch(() => {})
       await phonePass(b, ctx)
     } finally { await b.close() }

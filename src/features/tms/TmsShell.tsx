@@ -591,7 +591,7 @@ export function TmsShell({
           <nav aria-label="Breadcrumb">
             <ol className="tms-breadcrumb">
               <li className="tms-crumb">
-                <Link to="/tms/dashboard" aria-label="Dashboard home">
+                <Link to="/dashboard" aria-label="Dashboard home">
                   <LayoutGrid size={16} aria-hidden="true" />
                 </Link>
               </li>

@@ -6,6 +6,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ShipmentsBoard } from './ShipmentsBoard'
 import { ALJEX_COLUMN_KEYS } from '@/lib/shipmentViewDefs'
 import type { ShipmentRow } from './shipmentViews'
+import { chicagoYear } from '@/lib/date'
 import { useAppStore } from '@/store/useAppStore'
 
 // Force the tab strip to show every tab; its ResizeObserver would otherwise collapse
@@ -25,7 +26,7 @@ function row(id: string, patch: Partial<ShipmentRow> = {}): ShipmentRow {
     source: 'MANUAL',
     createdBy: 'a@b.c',
     updatedBy: 'a@b.c',
-    createdAt: '2026-01-01T00:00:00.000Z',
+    createdAt: `${chicagoYear()}-01-01T12:00:00.000Z`,
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...patch,
   } as ShipmentRow
@@ -224,12 +225,12 @@ describe('ShipmentsBoard', () => {
     await waitFor(() => expect(windows().some((w) => w.months.length > 0 && w.includeVoided === true)).toBe(true))
   })
 
-  it('the All list asks for the period window without voided rows', async () => {
+  it('the All list asks for the twelve months of the current year without voided rows', async () => {
     renderBoard('/tms/shipments?list=all', [row('S001')])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
     const asked = (__views as Array<{ kind: string; months?: string[]; includeVoided?: boolean }>).filter((v) => v.kind === 'window' && v.months!.length > 0)
     expect(asked.length).toBeGreaterThan(0)
-    expect(asked.every((w) => w.months!.length === 1 && !w.includeVoided)).toBe(true)
+    expect(asked.every((w) => w.months!.length === 12 && w.months![0] === `${chicagoYear()}-01` && !w.includeVoided)).toBe(true)
   })
 
   it('narrows rows by the Status header filter and keeps its option counts from the unfiltered list', async () => {
@@ -849,6 +850,37 @@ describe('ShipmentsBoard', () => {
       await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
       expect(screen.getByText('S001')).toBeTruthy()
       expect(screen.getByRole('tab', { name: /^All/ })).toHaveAttribute('aria-selected', 'true')
+    })
+
+    it('lists a released delivered shipment as Released on All, and keeps Delivered for an unreleased one', async () => {
+      renderBoard('/tms/shipments?list=all', [unreleased, released])
+      await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
+      expect(within(screen.getByText('S002').closest('tr')!).getByText(/^RELEASED/)).toBeTruthy()
+      expect(within(screen.getByText('S001').closest('tr')!).getByText(/^DELIVERED/)).toBeTruthy()
+    })
+
+    it('All defaults to this year, lists every year found, and All years shows the rest', async () => {
+      const year = chicagoYear()
+      const old = deliveredRow('S900', { arStatus: 'UNBILLED', createdAt: `${year - 2}-03-01T12:00:00.000Z`, pickupMonth: `${year - 2}-03` })
+      const current = deliveredRow('S901', { arStatus: 'UNBILLED', pickupMonth: `${year}-02` })
+      renderBoard('/tms/shipments?list=all', [old, current])
+      await waitFor(() => expect(screen.getByText('S901')).toBeTruthy())
+      expect(screen.queryByText('S900')).toBeNull()
+      const select = screen.getByRole('combobox', { name: 'Year' }) as HTMLSelectElement
+      expect([...select.options].map((o) => o.text)).toEqual(['All years', String(year), String(year - 2)])
+      expect(select.value).toBe(String(year))
+      expect(screen.getByRole('tab', { name: /^All/ })).toHaveTextContent(/1$/)
+
+      fireEvent.change(select, { target: { value: 'all' } })
+      await waitFor(() => expect(screen.getByText('S900')).toBeTruthy())
+      expect(screen.getByText('S901')).toBeTruthy()
+      expect((__views as Array<{ kind: string }>).some((v) => v.kind === 'all')).toBe(true)
+      expect(screen.getByRole('tab', { name: /^All/ })).toHaveTextContent(/2$/)
+
+      fireEvent.change(select, { target: { value: String(year - 2) } })
+      await waitFor(() => expect(screen.queryByText('S901')).toBeNull())
+      expect(screen.getByText('S900')).toBeTruthy()
+      expect([...select.options].map((o) => o.text)).toContain(String(year))
     })
 
     it('falls back to Active on an unknown ?list=', async () => {

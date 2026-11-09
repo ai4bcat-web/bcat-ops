@@ -80,7 +80,6 @@ export async function runStage(store: EngineStore, job: AljexImportJob, root: st
   const windowStart = cutoff ? addMonths(cutoff, -HISTORY_MONTHS) : null
   const historySkipped: string[] = []
   let beforeWindow = 0
-  let afterCutoff = 0
   let newestAnyPro = 0
   const sourceKey = typeof job.options?.sourceKey === 'string' ? job.options.sourceKey : `imports/source/${root}/${job.fileName ?? ''}`
   const sliceEvery = typeof job.options?.sliceEvery === 'number' && job.options.sliceEvery > 1 ? job.options.sliceEvery : null
@@ -171,14 +170,13 @@ export async function runStage(store: EngineStore, job: AljexImportJob, root: st
     }
     seen.set(key, { sig, rowNumber })
     const ship = row.kind === 'LOAD' && /^\d{4}-\d{2}-\d{2}$/.test(row.dates.ship ?? '') ? (row.dates.ship as string) : null
-    if (cutoff && windowStart && ship && (ship < windowStart || ship >= cutoff)) {
-      const before = ship < windowStart
-      if (before) beforeWindow += 1
-      else afterCutoff += 1
+    // The cutoff means BOOKED: the file is a snapshot taken at the cutoff, so every row was booked before it and a ship
+    // date on or after the cutoff is carried (Monday's work), never skipped. Only the lower bound applies.
+    if (cutoff && windowStart && ship && ship < windowStart) {
+      beforeWindow += 1
       bump(stageCounts, entity, 'skipped')
-      const code = before ? 'HISTORY_BEFORE_WINDOW' : 'AFTER_CUTOFF'
-      stagedSkips[code] = (stagedSkips[code] ?? 0) + 1
-      historySkipped.push(`${row.pro},${ship},${before ? 'BEFORE_WINDOW' : 'AFTER_CUTOFF'}`)
+      stagedSkips.HISTORY_BEFORE_WINDOW = (stagedSkips.HISTORY_BEFORE_WINDOW ?? 0) + 1
+      historySkipped.push(`${row.pro},${ship},BEFORE_WINDOW`)
       return
     }
     rows.push(row)
@@ -340,7 +338,7 @@ export async function runStage(store: EngineStore, job: AljexImportJob, root: st
     distinct: distinctValues,
     syntheticOk: syntheticOk && rowNumber > 0,
     maxProNumber: Math.max(maxProNumber, newestAnyPro),
-    history: { cutoffDate: cutoff, windowStart, beforeWindow, afterCutoff },
+    history: { cutoffDate: cutoff, windowStart, beforeWindow },
   }
   const memoIndex = resolveStagedMemos(rows, profile, window)
   const masters: StagedMasters = { customers, carriers, memos: memoIndex, newestShip, window, chunkCount, rowsPerChunk: ROWS_PER_CHUNK }

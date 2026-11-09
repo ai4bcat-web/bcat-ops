@@ -243,7 +243,7 @@ async function nav(admin, loadsOnly, viewerTms) {
   const a = await navFor('owner/admin', admin, { tracking: true })
   const want = AA_SIDEBAR.filter((r) => r[2] === 0).map((r) => r[0])
   const got = a.rows.filter((r) => r.depth === 0 && r.section === null).map((r) => r.label)
-  rec('nav', 'admin: top-level order = Company Dashboard / Active shipments / Customers / Carriers / Locations / Accounting / Settings (lifecycle pages are the top-bar strip)', JSON.stringify(got) === JSON.stringify(want) ? 'PASS' : 'FAIL', `got ${JSON.stringify(got)}`)
+  rec('nav', 'admin: top-level order = Dashboard / Active shipments / Customers / Carriers / Locations / Accounting / Settings (lifecycle pages are the top-bar strip)', JSON.stringify(got) === JSON.stringify(want) ? 'PASS' : 'FAIL', `got ${JSON.stringify(got)}`)
   const kids = Object.fromEntries(['Accounting'].map((p) => [p, a.rows.filter((r, i) => r.depth === 1 && a.rows.slice(0, i).reverse().find((x) => x.depth === 0)?.label === p).map((r) => r.label)]))
   rec('nav', 'admin: Accounting children incl. Vendors; Shipments group is gone', kids.Accounting.includes('Vendors') && !a.rows.some((r) => r.label === 'Shipments') ? 'PASS' : 'FAIL', JSON.stringify(kids))
   await navFor('page-loads only', loadsOnly, { tracking: true })
@@ -288,7 +288,7 @@ async function kpiTimes(admin) {
     const b = await open(admin.storage)
     try {
       const t0 = Date.now()
-      await b.navigate('/tms/dashboard')
+      await b.navigate('/dashboard')
       let ready = false
       while (Date.now() - t0 < 40_000 && !ready) {
         ready = await b.evaluate(`(() => { const k = document.querySelector('[data-testid="dash-kpis"]'); if (!k || k.querySelector('.tms-kpi-skeleton')) return false; const t = k.innerText; return (t.match(/\\$[\\d,]+/g) || []).length >= 4 && /\\d+ shipments?/.test(t) })()`)
@@ -306,12 +306,12 @@ async function dashboard(admin, tmsPlain, claim) {
   const ok = times.filter((t) => t != null)
   const sorted = [...ok].sort((x, y) => x - y)
   const median = sorted[Math.floor(sorted.length / 2)]
-  rec('dashboard', 'Company Dashboard KPIs < 3 s cold', ok.length === 3 && median < 3000 ? 'PASS' : (ok.length && sorted[0] < 3000 ? 'PARTIAL' : 'FAIL'), `3 cold loads (fresh profile each): ${JSON.stringify(times)} ms; median ${median} ms; best ${sorted[0]} ms`)
+  rec('dashboard', 'Dashboard KPIs < 3 s cold', ok.length === 3 && median < 3000 ? 'PASS' : (ok.length && sorted[0] < 3000 ? 'PARTIAL' : 'FAIL'), `3 cold loads (fresh profile each): ${JSON.stringify(times)} ms; median ${median} ms; best ${sorted[0]} ms`)
   rec('dashboard', "'as of' label", asof ? 'PASS' : 'FAIL', `data-testid=dash-asof present: ${!!asof}${asof ? ` ("${asof.replace(/\d/g, '#')}")` : ''}`)
   for (const [label, who, expect] of [['admin', admin, true], ['page-tms without the claim', tmsPlain, false], ['page-tms with claim-DASHBOARDS_CREATE', claim, true]]) {
     const b = await open(who.storage)
     try {
-      await b.navigate('/tms/dashboard'); await waitShell(b)
+      await b.navigate('/dashboard'); await waitShell(b)
       await b.poll(() => b.evaluate(`!!document.querySelector('.dash-home-bar')`), 'dash bar', 40_000).catch(() => {})
       await pause(1500)
       const has = await b.evaluate(`!!document.querySelector('[data-testid="dash-new"]') || [...document.querySelectorAll('button')].some((x) => /New dashboard/.test(x.textContent))`)
@@ -322,7 +322,7 @@ async function dashboard(admin, tmsPlain, claim) {
 }
 
 // ───────────────────────────── dark theme + phone ─────────────────────────────
-const KEY_PAGES = ['/tms/dashboard', '/tms/shipments', '/tms/tracking?assignee=all', '/tms/customers', '/tms/shipments/new', '/tms/invoicing']
+const KEY_PAGES = ['/dashboard', '/tms/shipments', '/tms/tracking?assignee=all', '/tms/customers', '/tms/shipments/new', '/tms/invoicing']
 async function theme(admin) {
   for (const [mode, width, height] of [['dark-1440', 1440, 900], ['light-390', 390, 844], ['dark-390', 390, 844]]) {
     const dark = mode.startsWith('dark')

@@ -20,6 +20,7 @@ import {
   computeMonth,
   dirtyKeysForRecord,
   ROLLUP_SCHEMA_VERSION,
+  rollupSourceEmpty,
   type LivePayload,
   type MonthPayload,
   type RollupSourceTable,
@@ -52,7 +53,7 @@ export const BACKFILL_FLOOR = '2024-01'
 /** What one recompute is expected to cost at most; a key is not started when less time is left. */
 const KEY_RESERVE_MS = 12_000
 
-export type RecomputeOutcome = 'written' | 'too-large' | 'throttled' | 'leased'
+export type RecomputeOutcome = 'written' | 'too-large' | 'throttled' | 'leased' | 'empty-source'
 
 interface StreamRecord {
   eventSourceARN?: string
@@ -178,6 +179,16 @@ export async function recomputeKey(
     else if (kind === 'LG') payload = await deps.computes.legacy(src, period)
     else if (kind === 'L') payload = await deps.computes.live(src)
     else throw new Error(`not a computable rollup key: ${rowId}`)
+
+    // A row computed from an empty source describes nothing, and a reader would paint it as
+    // zeros: write nothing (an existing row is left alone), but the key has nothing to recompute.
+    const emptySource = kind === 'LG'
+      ? Object.keys((payload as LegacyMonthPayload).days ?? {}).length === 0
+      : rollupSourceEmpty(tally)
+    if (emptySource) {
+      if (seenDirty) await store.clearDirty(rowId, seenDirty)
+      return 'empty-source'
+    }
 
     const json = JSON.stringify(payload)
     const stamp = deps.now().toISOString()

@@ -577,7 +577,7 @@ async function main() {
     const b = await launchBrowser({ origin, storage: identity.storage, profilePrefix: 'bcat-s3-', purpose: 'S3 verification', viewport: { width: 1600, height: 1000, deviceScaleFactor: 1 } })
     try {
       // reference shell geometry on /tms/dashboard
-      await b.navigate('/tms/dashboard')
+      await b.navigate('/dashboard')
       await waitLoaded(b).catch(() => {})
       const sidebarOk = await b.evaluate(`(() => { const e = document.querySelector('.tms-sidebar'); if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 })()`)
       if (!sidebarOk) throw new Error('.tms-sidebar not visible on /tms/dashboard: the dev identity is not signed in (wrong origin/pool?)')
@@ -590,11 +590,11 @@ async function main() {
 
       await redirects(b)
       for (const theme of flag('no-dark') ? ['light'] : ['light', 'dark']) {
-        await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+        await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
         await setTheme(b, theme).catch(() => {})
         for (const route of ROUTES) await runRoute(b, route, data, theme, refs[theme])
       }
-      await b.navigate('/tms/dashboard'); await waitLoaded(b).catch(() => {})
+      await b.navigate('/dashboard'); await waitLoaded(b).catch(() => {})
       await setTheme(b, 'light').catch(() => {})
       await phonePass(b, data)
       await themeToggleReload(b)

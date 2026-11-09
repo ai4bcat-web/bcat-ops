@@ -200,6 +200,12 @@ export function resolveCheckCallPlan(
 export interface RequiredFieldSubject {
   stops?: { type?: string | null; address?: unknown; city?: string | null; state?: string | null; appt?: string | null }[] | null
   billToId?: string | null
+  /**
+   * False when the customer record has no bill-to party to choose, so `billToId` can never be filled:
+   * the customer itself is billed, and requiring a bill-to would block Submit and Built forever. Left
+   * unset when there is no customer record to ask (an unresolved shipment still needs one).
+   */
+  billToApplicable?: boolean | null
   salesRepId?: string | null
   revDivision?: string | null
   carrierRepId?: string | null
@@ -208,6 +214,13 @@ export interface RequiredFieldSubject {
   equipmentType?: string | null
   references?: Record<string, unknown> | null
   freight?: { commodity?: string | null; weightLbs?: number | null } | null
+}
+
+/** Whether a customer record lists at least one bill-to party (stored as an array or as its JSON text). */
+export function hasBillToParties(raw: unknown): boolean {
+  let parties = raw
+  if (typeof parties === 'string') { try { parties = JSON.parse(parties) } catch { parties = null } }
+  return Array.isArray(parties) && parties.length > 0
 }
 
 function hasAddress(stop: RequiredFieldSubject['stops'] extends (infer S)[] | null | undefined ? S : never): boolean {
@@ -253,7 +266,7 @@ export function missingRequiredFields(subject: RequiredFieldSubject, required: r
         if (!deliveries.length || !deliveries.every((s) => String(s?.appt ?? '').trim())) missing.push(key)
         break
       case 'billTo':
-        if (!String(subject.billToId ?? '').trim()) missing.push(key)
+        if (subject.billToApplicable !== false && !String(subject.billToId ?? '').trim()) missing.push(key)
         break
       case 'salesRep':
         if (!String(subject.salesRepId ?? '').trim()) missing.push(key)

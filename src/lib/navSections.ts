@@ -120,7 +120,8 @@ const SETTINGS_CHILDREN: NavChildDef[] = [
  * old paths used, so an existing grant still opens the re-homed page.
  */
 export const PINNED_ITEMS: NavItemDef[] = [
-  { to: '/tms/dashboard', label: 'Company Dashboard', icon: LayoutDashboard, pageKey: 'tms', section: BROKERAGE, tms: true },
+  // The production (ASSETS) Dashboard. Its own grant, no `tms` flag: a Brokerage-only user never sees it.
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, pageKey: 'dashboard', section: BROKERAGE },
   // The lifecycle pages (Quote · Build · View · Book · Track · Review) are the top-bar strip
   // (`LIFECYCLE_TABS`); the sidebar keeps the one list people return to all day.
   { to: SHIPMENTS_PATH, label: 'Active shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true },
@@ -154,7 +155,7 @@ export const PINNED_ITEMS: NavItemDef[] = [
  * Every page-bearing nav def once, in sidebar order: top-level rows and their children,
  * group headers excluded (they open nothing of their own).
  */
-export function flatNavDefs(): Array<Pick<NavItemDef, 'to' | 'label' | 'pageKey'>> {
+export function flatNavDefs(): Array<Pick<NavItemDef, 'to' | 'label' | 'pageKey' | 'adminOnly'>> {
   return PINNED_ITEMS.flatMap((item) => [...(item.group ? [] : [item]), ...(item.children ?? [])])
 }
 

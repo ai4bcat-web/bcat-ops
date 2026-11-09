@@ -41,6 +41,7 @@ import { DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { boardStatusOf, detailValuesFor, type BoardCarrier } from '@/lib/shipmentViewDefs'
 import { assignmentChipText } from './carrierLadder'
+import { isReleasedToInvoicing } from '@/lib/shipmentLists'
 import { effectiveShipmentType, shipmentTypeLabel } from '@/lib/shipmentTypes'
 export { ALJEX_COLUMN_KEYS, boardStatusOf, matchesBoardFilters } from '@/lib/shipmentViewDefs'
 
@@ -284,6 +285,15 @@ export function voidedAtOf(row: ShipmentRow): string | null {
 
 export function isVoided(row: ShipmentRow): boolean {
   return voidedAtOf(row) != null
+}
+
+/** What a delivered shipment already released to invoicing reads as. Display only: the stored status stays DELIVERED. */
+export const RELEASED_LABEL = 'RELEASED'
+
+/** The board status as the person reads it: DELIVERED becomes RELEASED once the order left DOCS_NEEDED. */
+export function displayStatusOf(row: ShipmentRow): BoardStatusKey | 'CANCELED' | typeof RELEASED_LABEL {
+  const status = boardStatusOf(row)
+  return status === 'DELIVERED' && isReleasedToInvoicing(row) ? RELEASED_LABEL : status
 }
 
 // ── R2 board status, tone and stop progress ─────────────────────────────────
@@ -608,7 +618,8 @@ export function statusLabel(row: ShipmentRow): string {
  * A row with no stop evidence shows the status alone.
  */
 function statusWithProgress(row: ShipmentRow): string {
-  const label = isVoided(row) ? 'VOIDED' : boardStatusOf(row)
+  const label = isVoided(row) ? 'VOIDED' : displayStatusOf(row)
+  if (label === RELEASED_LABEL) return label
   const { done, total } = stopProgressOf(row)
   if (total === 0) return label
   return `${label} ${done}/${total}`

@@ -263,6 +263,14 @@ describe('evaluateBuild', () => {
     expect(result.missingFields).toContain('billTo')
   })
 
+  it('a customer with no bill-to party to choose is not asked for one; one with parties still is', async () => {
+    const order = { id: 'ord:test', shipmentId: 'shp:test', customerId: 'cus:test', billToId: null, customerRateCents: 100_00, equipmentType: 'VAN', references: [], freight: [] }
+    const none = makeFixture({ orders: [order], customer: { id: 'cus:test', billToParties: [] } })
+    expect((await evaluateBuild(none.deps, 'shp:test')).missingFields).not.toContain('billTo')
+    const listed = makeFixture({ orders: [order], customer: { id: 'cus:test', billToParties: JSON.stringify([{ id: 'bt-1', name: 'Bill', isDefault: false }]) } })
+    expect((await evaluateBuild(listed.deps, 'shp:test')).missingFields).toContain('billTo')
+  })
+
   it('detects a missing sales rep', async () => {
     const { deps } = makeFixture({ shipment: { salesRepId: null } })
     const result = await evaluateBuild(deps, 'shp:test')

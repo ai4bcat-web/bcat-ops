@@ -75,7 +75,8 @@ import { checkCallState } from '@/lib/checkCalls'
 import { formatCents } from '@/lib/invoiceBuild'
 import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { displayName } from '@/lib/roles'
-import { inShipmentList, parseShipmentList, shipmentListCounts, type ShipmentList } from '@/lib/shipmentLists'
+import { inShipmentList, monthsOfYear, parseShipmentList, shipmentListCounts, shipmentYears, type ShipmentList, type ShipmentYear } from '@/lib/shipmentLists'
+import { chicagoYear } from '@/lib/date'
 import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import { SEED_DIVISIONS } from '@/lib/ownership'
 import { cn } from '@/lib/utils'
@@ -261,10 +262,19 @@ export function ShipmentsBoard() {
   const wantsAllList = visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'all')
   const wantsVoided = visiblePanes.some((pane) => reports[pane].voided)
   const needWindow = wantsAllList || wantsVoided
+  // The All list is scoped by year (default: this Chicago year). A specific year reads that year's
+  // twelve pickup months; All years reads the whole table. The month period only serves a VOIDED
+  // facet on panes that do not list All.
+  const [year, setYear] = useState<ShipmentYear>(() => chicagoYear())
+  const [seenYears, setSeenYears] = useState<number[]>(() => [chicagoYear()])
   const months = useMemo(() => periodMonths(period, thisMonth), [period, thisMonth])
+  const windowMonths = !needWindow ? [] : wantsAllList ? (year === 'all' ? [] : monthsOfYear(year)) : months
   const { shipments: windowRows, loading: windowLoading, partial: windowPartial, error: windowError, refresh: refreshWindow } = useShipments({
-    kind: 'window', months: needWindow ? months : [], includeVoided: wantsVoided,
+    kind: 'window', months: windowMonths, includeVoided: wantsVoided,
   })
+  const { shipments: allYearsRows, loading: allYearsLoading, error: allYearsError, refresh: refreshAllYears } = useShipments(
+    wantsAllList && year === 'all' ? { kind: 'all' } : { kind: 'ids', ids: [] },
+  )
 
   // An exact PRO typed on an All pane adds that row from the number index, voided or
   // not; the status facet still decides whether it shows. Debounced: one read per pause.
@@ -281,13 +291,13 @@ export function ShipmentsBoard() {
     return () => { live = false; clearTimeout(timer) }
   }, [typedPro])
   const { shipments: proRows, refresh: refreshPro } = useShipments({ kind: 'ids', ids: typedPro && proIds.query === typedPro ? proIds.ids : [] })
-  const loading = workingLoading || windowLoading
+  const loading = workingLoading || windowLoading || allYearsLoading
   const partial = workingPartial || windowPartial
-  const error = workingError ?? windowError
+  const error = workingError ?? windowError ?? allYearsError
 
   const refresh = useCallback(async () => {
-    await Promise.all([refreshWorking(), refreshWindow(), refreshPro()])
-  }, [refreshWorking, refreshWindow, refreshPro])
+    await Promise.all([refreshWorking(), refreshWindow(), refreshAllYears(), refreshPro()])
+  }, [refreshWorking, refreshWindow, refreshAllYears, refreshPro])
 
   const loadTemplates = useCallback(() => {
     listShipmentColumnTemplates()
@@ -301,11 +311,19 @@ export function ShipmentsBoard() {
   // lists All (or asks for VOIDED), plus an exact PRO match. One row per shipment id.
   const allRows = useMemo<ShipmentRow[]>(() => {
     const byId = new Map<string, ShipmentRow>()
-    for (const set of [workingRows, windowRows, proRows]) for (const r of set) byId.set(r.id, r as ShipmentRow)
+    for (const set of [workingRows, windowRows, allYearsRows, proRows]) for (const r of set) byId.set(r.id, r as ShipmentRow)
     return [...byId.values()]
-  }, [workingRows, windowRows, proRows])
+  }, [workingRows, windowRows, allYearsRows, proRows])
 
-  const counts = useMemo(() => shipmentListCounts(allRows), [allRows])
+  const counts = useMemo(() => shipmentListCounts(allRows, year), [allRows, year])
+
+  // Every year the data has shown so far, kept after a narrower year is picked so the selector does not shrink.
+  const foundYears = useMemo(() => shipmentYears(allRows), [allRows])
+  if (foundYears.some((y) => !seenYears.includes(y))) setSeenYears([...new Set([...seenYears, ...foundYears])].sort((a, b) => b - a))
+  const yearOptions = useMemo(
+    () => [{ value: 'all', label: 'All years' }, ...seenYears.map((y) => ({ value: String(y), label: String(y) }))],
+    [seenYears],
+  )
 
   return (
     <div className="tms-dense-page">
@@ -313,9 +331,18 @@ export function ShipmentsBoard() {
         <div className="flex items-center gap-3">
           <Truck size={18} />
           <span className="font-semibold">View · Active shipments</span>
-          <ShipmentsSectionTabs current={list} activeCount={counts.active} allCount={needWindow && !windowLoading ? counts.all : undefined} />
+          <ShipmentsSectionTabs current={list} activeCount={counts.active} allCount={needWindow && !windowLoading && !allYearsLoading ? counts.all : undefined} />
           {partial && <TmsBadge tone="gray">Adding delivered loads…</TmsBadge>}
-          {needWindow && (
+          {wantsAllList && (
+            <TmsSelect
+              aria-label="Year"
+              className="tms-dense-select"
+              value={String(year)}
+              onChange={(e) => setYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+              options={yearOptions}
+            />
+          )}
+          {needWindow && !wantsAllList && (
             <div className="flex items-center gap-1" role="group" aria-label="Period">
               <TmsButton size="sm" variant="ghost" aria-label="Previous month" onClick={() => setPeriod({ key: 'month', month: shiftMonth(months[0], -1) })}>‹</TmsButton>
               <TmsSegmentedTabs
@@ -345,6 +372,7 @@ export function ShipmentsBoard() {
           key={`left-${list}`}
           pane="left"
           list={list}
+          year={year}
           allRows={allRows}
           loading={loading}
           error={error}
@@ -367,6 +395,7 @@ export function ShipmentsBoard() {
             key={`right-${rightList}`}
             pane="right"
             list={rightList}
+            year={year}
             onListChange={setRightList}
             allRows={allRows}
             loading={loading}
@@ -406,6 +435,8 @@ interface PaneReport {
 interface BoardPaneProps {
   pane: 'left' | 'right'
   list: ShipmentList
+  /** The All list's year; Active ignores it. */
+  year: ShipmentYear
   /** Only the split-screen's right pane picks its own list; the left one follows the URL. */
   onListChange?: (list: ShipmentList) => void
   allRows: ShipmentRow[]
@@ -429,6 +460,7 @@ interface BoardPaneProps {
 function BoardPane({
   pane,
   list,
+  year,
   onListChange,
   allRows,
   refresh,
@@ -483,7 +515,7 @@ function BoardPane({
     [urlQuery, setParams, setPageSize],
   )
 
-  const listRows = useMemo(() => allRows.filter((r) => inShipmentList(r, list)), [allRows, list])
+  const listRows = useMemo(() => allRows.filter((r) => inShipmentList(r, list, year)), [allRows, list, year])
 
   // Columns, widths, density, sort and the summary strip persist per user and per pane.
   const prefs = useDenseGridPrefs({

@@ -72,7 +72,7 @@ try {
     await b.navigate('/tms/shipments'); const s0 = await strip(b)
     line(s0.badges.length >= 1, 'AV02 badges', `badges rendered: ${s0.badges.join(' ') || 'none (all counts zero)'}`)
     // Alt+1..6
-    await b.navigate('/tms/dashboard'); await pause(2500)
+    await b.navigate('/dashboard'); await pause(2500)
     const expected = ['/tms/rates/spot', '/tms/shipments/intake', '/tms/shipments', '/tms/carrier-sales', '/tms/tracking', '/tms/load-review']
     const seen = []
     for (let i = 1; i <= 6; i++) {
@@ -83,7 +83,7 @@ try {
     }
     line(seen.join() === expected.join(), 'AV03 Alt+1..6', `landed on ${seen.join(' ')}`)
     // feedback 1/2: the Quote page is one page, Quote inbox tab first (default from the strip), Quotes second, URL-backed
-    await b.navigate('/tms/dashboard'); await pause(2500)
+    await b.navigate('/dashboard'); await pause(2500)
     await b.evaluate(`document.querySelector('[data-testid="lifecycle-tab-quote"]')?.click()`); await pause(3000)
     const qTabs = await b.evaluate(`[...document.querySelectorAll('.tms-main [role="tab"]')].slice(0, 2).map((t) => ({ text: t.textContent.trim().replace(/[0-9]+$/, ''), sel: t.getAttribute('aria-selected') }))`)
     const qPath = await b.evaluate('location.pathname')
@@ -136,12 +136,12 @@ try {
       `default All selected ${iv0.all}, url "${iv0.search}"; division sub-tab counts sum ${sumOf(ivD)} vs All ${allOf(ivD)}, url ${ivD.search}; customer sum ${sumOf(ivC)} vs All ${allOf(ivC)}, url ${ivC.search}; reload ${ivR.search} keeps customer ${ivR.customer}`,
     )
     // sidebar
-    await b.navigate('/tms/dashboard'); await pause(3000)
+    await b.navigate('/dashboard'); await pause(3000)
     const rail = await b.evaluate(`[...document.querySelectorAll('.tms-nav-rowwrap, .tms-section-head')].map((e) => e.textContent.trim().split('\\n')[0].slice(0, 40))`)
     console.log('       brokerage rail:', JSON.stringify(rail.slice(0, 12)))
     const brokerage = rail.slice(0, rail.findIndex((x) => /^ASSETS/.test(x)) < 0 ? rail.length : rail.findIndex((x) => /^ASSETS/.test(x)))   // the Ivan Cartage assets section below is a different division's rail
     const all = brokerage.join(' | ')
-    const hasAll = ['Company Dashboard', 'Active shipments', 'Accounting', 'Settings'].every((x) => all.includes(x))
+    const hasAll = ['Dashboard', 'Active shipments', 'Accounting', 'Settings'].every((x) => all.includes(x))
     const gone = ['Quotes', 'Intake', 'Carrier Sales', 'Load Tracking', 'Load Review', 'New shipment'].filter((x) => all.includes(x))
     line(hasAll && gone.length === 0, 'AV04 sidebar', `has the kept rows: ${hasAll}; lifecycle rows still in rail: ${gone.join(', ') || 'none'}`)
     await b.screenshot(join(SHOTS, 'sidebar-1440.png'))
@@ -149,12 +149,12 @@ try {
     await b.screenshot(join(SHOTS, 'sidebar-1280.png'))
     index.push('sidebar-1280.png — sidebar at 1280x800 (admin, dashboard)')
     await b.setViewport(1440, 900); await pause(1000)
-    index.push('sidebar-1440.png — sidebar: Company Dashboard, Active shipments, directories, Accounting, Settings (1440x900, admin, dashboard)')
+    index.push('sidebar-1440.png — sidebar: Dashboard, Active shipments, directories, Accounting, Settings (1440x900, admin, dashboard)')
   } finally { await b.close() }
 
   const l = await open('lr', lr.storage)
   try {
-    await l.navigate('/tms/dashboard'); await pause(4000)
+    await l.navigate('/dashboard'); await pause(4000)
     const s = await strip(l)
     line(s.tabs.map((t) => t.key).join() === 'review', 'AV05 loadReview persona strip', `tabs [${s.tabs.map((t) => t.key)}] at ${s.path}`)
     await l.navigate('/tms/load-review'); await pause(3000)

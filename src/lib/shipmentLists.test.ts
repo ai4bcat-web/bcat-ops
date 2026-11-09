@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   inShipmentList,
+  inShipmentYear,
+  monthsOfYear,
+  shipmentYearOf,
+  shipmentYears,
   isReleasedToInvoicing,
   parseShipmentList,
   shipmentListCounts,
@@ -84,5 +88,43 @@ describe('parseShipmentList', () => {
     expect(parseShipmentList('active')).toBe('active')
     expect(parseShipmentList('bogus')).toBe('active')
     expect(parseShipmentList(null)).toBe('active')
+  })
+})
+
+describe('year facet', () => {
+  it('dates a row by pickup month, then pickup appointment, then creation', () => {
+    expect(shipmentYearOf(row({ pickupMonth: '2024-12', pickupAppt: '2025-01-01T00:00:00Z', createdAt: '2026-01-01T00:00:00Z' }))).toBe(2024)
+    expect(shipmentYearOf(row({ pickupAppt: '2025-01-01T00:00:00Z', createdAt: '2026-01-01T00:00:00Z' }))).toBe(2025)
+    expect(shipmentYearOf(row({ createdAt: '2026-01-01T00:00:00Z' }))).toBe(2026)
+    expect(shipmentYearOf(row())).toBeNull()
+  })
+
+  it('narrows All to one year, never hides an undated row, and leaves Active alone', () => {
+    const y24 = row({ pickupMonth: '2024-05' })
+    const y26 = row({ pickupMonth: '2026-05' })
+    expect(inShipmentList(y24, 'all', 2026)).toBe(false)
+    expect(inShipmentList(y26, 'all', 2026)).toBe(true)
+    expect(inShipmentList(y24, 'all', 'all')).toBe(true)
+    expect(inShipmentYear(row(), 2026)).toBe(true)
+    expect(inShipmentList(y24, 'active', 2026)).toBe(true)
+  })
+
+  it('lists years newest first and a year as twelve months', () => {
+    expect(shipmentYears([row({ pickupMonth: '2024-01' }), row({ pickupMonth: '2026-01' }), row({ pickupMonth: '2024-07' }), row()])).toEqual([2026, 2024])
+    expect(monthsOfYear(2026)).toHaveLength(12)
+    expect(monthsOfYear(2026)[0]).toBe('2026-01')
+    expect(monthsOfYear(2026)[11]).toBe('2026-12')
+  })
+
+  it('counts All inside the year while Active counts are year-free', () => {
+    const rows = [
+      row({ pickupMonth: '2026-01' }),
+      row({ status: 'DELIVERED', arStatus: 'PAID', pickupMonth: '2026-02' }),
+      row({ status: 'DELIVERED', arStatus: 'PAID', pickupMonth: '2024-02' }),
+      row({ pickupMonth: '2024-03' }),
+    ]
+    expect(shipmentListCounts(rows, 2026)).toEqual({ active: 2, all: 2 })
+    expect(shipmentListCounts(rows, 'all')).toEqual({ active: 2, all: 4 })
+    expect(shipmentListCounts(rows)).toEqual({ active: 2, all: 4 })
   })
 })

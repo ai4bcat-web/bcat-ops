@@ -12,8 +12,9 @@ export BCAT_EMAIL=<an ADMIN user of the rehearsal pool>  BCAT_PASSWORD=...   # n
 OUT=~/aw-rehearsal/amplify_outputs.json           # the REHEARSAL branch's outputs file, not the repo-root one
 FILES=/Users/adminoid/aljex-export
 ```
-- Set the cutoff first: Settings > Data > Aljex cutoff = **2026-11-07 00:00** (Chicago). The 24-month window then starts
-  **2024-11-07**; older loads/invoices are not imported.
+- Set the cutoff first: Settings > Data > Aljex cutoff = **2026-11-07 00:00** (Chicago). **The cutoff means BOOKED**: Aljex is final as
+  of then, so loads booked before it but shipping after it are carried over (never skipped). The 24-month window starts
+  **2024-11-07** and applies to ship date only (lower bound); older loads/invoices are not imported; there is no upper bound.
 - The wizard (My Brokerage > Company > Aljex import) does the same per-file steps as the commands below: choose the CSV, upload,
   **Dry run**, then **Apply** (type a live tag). Use whichever is easier; both call the same router actions
   (`IMPORT_CUSTOMERS_MASTER`, `IMPORT_CARRIERS_MASTER`, `IMPORT_AP_FILES`, `IMPORT_AR_FILE`, `IMPORT_ACTIVE_SHIPMENTS_CHECK`).
@@ -32,7 +33,7 @@ Run in this order (later steps read what earlier ones wrote). `<TAG>` is a typed
 |---|------|---------|--------|
 | 1 | Customers | `node scripts/awImport.mjs customers --file $FILES/aljex-customers-2026-11-08.csv --outputs $OUT [--apply --live-tag <TAG>]` | **761 rows, 516 active** in the file. Verified on the real file with the parser (counts only): **515 customers** (TEST CUSTOMER 100003 excluded: 1), **245 Status N rows become Locations**, 479 FACTOR / 36 MANUAL by the e-billing address, 10 flagged "needs review", 32 duplicate-name groups listed (all imported), 2 Danisco accounts at 120 days. `customersCreated + customersMatched + customersEnriched` = 515 on a first run into an empty target. |
 | 2 | Carriers | `node scripts/awImport.mjs carriers --file $FILES/aljex-carriers-2026-11-08.csv --outputs $OUT ...` | **2,462 rows** (19 other vendors skipped; the repeated MC merges two rows into one: **2,442 carriers**, 252 inactive, 183 with a Factor Id, 14 Quick Pay, 12 with terms). Match order MC/DOT, then Aljex Carrier ID, never name. The repeated MC merges; its other Aljex ids go to `aljexAliases`. The CLI prints how many rows carried a value in Fed/SS #, Bank Account and Routing # before it strips those columns (counts only); none is imported. |
-| 3 | Big export (loads) | see 1a below | **8,347 rows, PRO 6000..14939**, 4 repeated PROs (reported), 24-month window from the 2026-11-07 cutoff (ship dates from 2024-11-07). |
+| 3 | Big export (loads) | see 1a below | **8,347 rows, PRO 6000..14939**, 4 repeated PROs (reported), 24-month window from the 2026-11-07 cutoff (ship dates from 2024-11-07, **no upper bound**: the 21 rows shipping on/after the cutoff were booked before it and are kept). Real file: LOAD staged 7,944, **skipped 2,605** (2,601 older than the window + 4 duplicates), created + matched **5,339**. |
 | 4 | AP aging | `node scripts/awImport.mjs ap --aging-file $FILES/aljex-ap-aging-2026-11-08.csv --outputs $OUT ...` | **67 bills, $83,407.20** (0-30 $66,642.20; 31-60 $16,765.00; nothing older). Key PRO + Vendor ID, bill number `<PRO>-<vendor>`, `Amount Paid` ignored (it is the bill amount), C = check, D = direct deposit, carried over (never resent). The tie-out lines print `diff $0.00` when every bill resolves; a bill whose PRO or carrier is not in BCAT is listed (`unresolved`) and shows as Aljex-only. |
 | 5 | AP expected | `node scripts/awImport.mjs ap --expected-file $FILES/aljex-ap-expected-2026-11-08.csv --outputs $OUT ...` | **36 rows, $35,269.18**; the **12 stale 2024/2025 rows ($7,562.71) are dropped** (Ryne), leaving 24 rows / $27,706.47; PRO 6269 (3 rows) kept once, listed. Never payables: matching legs get `apStatus AWAITING_INVOICE`. |
 | 6 | AR | `node scripts/awImport.mjs ar --file $FILES/aljex-ar-2026-11-07.csv --outputs $OUT ...` | **296 open invoices, $357,753.44** (0-30 $216,416.34; 31-60 $62,201.30; 61-90 $30,005.50; 91-120 $14,874.95; 120+ $34,255.35). Open amount = the five aging columns (never `Balance Due`, `Total Exposure`, `Unbilled`); 3 partial payments ($3,450.00) become ArPayments; 62 invoices bill another party; 50 factored $40,553.06 / 246 manual $317,200.38; 8 invoices from 2024 ($25,786.91). Carried over, Aljex due dates kept (the Danisco 120-day rule is in the AR report line "redated"). |
@@ -72,7 +73,7 @@ marks the rehearsal reconciled. Decide/sign-off are the only actions that need t
 
 ## 2. Authorization and safety recap
 - Import actions: ADMIN (or the owner) only. Decide / sign-off: the `aljexSignoff` grant only.
-- The Lambda writes only its own stack's tables and refuses any production table; APPLY needs the typed live tag.
+- The Lambda writes only its own stack's tables and refuses any production table (`router.ts assertNotProduction`, every mode); APPLY needs the typed live tag. PRODUCTION runs the same engine functions offline: `node scripts/importAljex.mjs file --kind customers|carriers|ap|ar|active-check ... --target prod:<tag>`, `stage`, `reconcile-entity` (same gate as `loads`: BCAT_ALLOW_PROD, --i-mean-production, fresh prodpre-importAljex backups, typed confirmation; dry run default, nothing written). `scripts/awProd.mjs` and `awProdRun.sh` drive them.
 - A dry run reads the target and writes no table; report files go to the DataSafety bucket under `imports/runs/<job>[-plan]/`.
 - Source files live at `imports/source/<job>/<file>` in the same bucket. A file with a refused column is blanked at STAGE.
 

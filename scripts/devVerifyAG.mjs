@@ -889,7 +889,7 @@ async function main() {
       if (id === 'AG09') await step('AG09-objects', () => ag09Objects(ctx))
     }
     if (b) {
-      await b.navigate('/tms/dashboard')
+      await b.navigate('/dashboard')
       await waitLoaded(b).catch(() => {})
       await b.poll(() => b.evaluate(`!!document.querySelector('.tms-sidebar')`), 'shell sidebar mounted', 45_000)
       const themes = flag('no-dark') ? ['light'] : ['light', 'dark']
