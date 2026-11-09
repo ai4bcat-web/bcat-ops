@@ -6,7 +6,7 @@
 import { optionsOfRow, type DenseColumn, type DenseOption } from '@/features/tms/grid/denseGridModel'
 import { customerDisplayName } from '@/lib/customerResolution'
 import { LADDER_FILTER_OPTIONS, assignmentChipText } from './carrierLadder'
-import { BOARD_COLUMNS, boardStatusOf, carrierSortKey, rowShipmentType, type ShipmentRow } from './shipmentViews'
+import { BOARD_COLUMNS, displayStatusOf, carrierSortKey, rowShipmentType, type ShipmentRow } from './shipmentViews'
 import { SHIPMENT_TYPES, shipmentTypeLabel } from '@/lib/shipmentTypes'
 
 export function sentence(value: string): string {
@@ -50,7 +50,7 @@ const NUMBER_FIELDS: Record<string, { value: (row: ShipmentRow) => number | null
   openIncidentCount: { value: (r) => r.openIncidentCount ?? 0, unit: '' },
 }
 
-const BOARD_STATUS_ORDER = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED', 'DELIVERED', 'HOLD', 'RESERVED', 'VOIDED']
+const BOARD_STATUS_ORDER = ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED', 'DELIVERED', 'RELEASED', 'HOLD', 'RESERVED', 'VOIDED']
 
 export const STATUS_OPTIONS: DenseOption[] = BOARD_STATUS_ORDER.map((s) => ({ value: s, label: sentence(s) }))
 
@@ -80,7 +80,7 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
       filter: 'multi',
       fixedOptions: STATUS_OPTIONS,
       optionsOf: (row) => {
-        const status = boardStatusOf(row)
+        const status = displayStatusOf(row)
         return [{ value: status, label: sentence(status) }]
       },
       sortValue: statusCellText,

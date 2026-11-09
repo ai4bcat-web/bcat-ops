@@ -208,6 +208,11 @@ export function chicagoDateStr(iso: string | Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d)
 }
 
+/** The calendar year in Chicago at `now`. */
+export function chicagoYear(now: Date = new Date()): number {
+  return Number(chicagoDateStr(now).slice(0, 4))
+}
+
 /** Get the Monday of the week containing `date` (using system timezone for calendar navigation) */
 export function getMondayOf(date: Date): Date {
   const d = new Date(date)
