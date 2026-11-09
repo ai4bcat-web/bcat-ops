@@ -57,7 +57,7 @@ describe('buildNavSections', () => {
   it('gives the owner the whole rail in order: the pinned freight list, then Assets, Car shipping, Company', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     expect(labels(pinned)).toEqual([
-      'Dashboard', 'Brokerage Dashboard', 'Active shipments', 'Dispatch', 'Calendar', 'Customers', 'Carriers', 'Locations', 'Accounting', 'Settings',
+      'Dashboard', 'Active shipments', 'Dispatch', 'Calendar', 'Customers', 'Carriers', 'Locations', 'Accounting', 'Settings',
     ])
     const kids = (label: string) => labels(pinned.find((i) => i.label === label)?.children)
     // Dispatch and Calendar are pages of their own right under Active shipments; the Payroll pages are a labeled group under Accounting.
@@ -105,13 +105,12 @@ describe('buildNavSections', () => {
   it('hides the Dashboard row from everybody without the dashboard grant, tms included', () => {
     for (const keys of [['tms'], ['loads'], ['calendar'], ['fleetManagerDashboard']]) {
       expect(labels(pinnedOf(...keys)), keys.join()).not.toContain('Dashboard')
-      expect(labels(pinnedOf(...keys)), keys.join()).not.toContain('Brokerage Dashboard')
     }
   })
 
   it('shows the Dashboard first, at /dashboard, to a dashboard grant, an admin and the owner', () => {
     const granted = pinnedOf('dashboard')
-    expect(labels(granted)).toEqual(['Dashboard', 'Brokerage Dashboard'])
+    expect(labels(granted)).toEqual(['Dashboard'])
     expect(granted[0].to).toBe('/dashboard')
     for (const flags of [{ isAdmin: true }, { isOwner: true }]) {
       const { pinned } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, ...flags })
@@ -123,7 +122,8 @@ describe('buildNavSections', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     const hrefs = [...pinned, ...pinned.flatMap((i) => i.children ?? []), ...sections.flatMap((s) => s.items)].map((i) => i.to)
     expect(hrefs.filter((to) => to === '/dashboard')).toHaveLength(1)
-    expect(hrefs.filter((to) => to === '/brokerage-dashboard')).toHaveLength(1)
+    // The Brokerage cards sit under the Dashboard: there is no sidebar row of their own.
+    expect(hrefs).not.toContain('/brokerage-dashboard')
     expect(hrefs).not.toContain('/tms/dashboard')
   })
 

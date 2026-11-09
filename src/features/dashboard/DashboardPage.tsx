@@ -22,6 +22,7 @@ import { useTmsTokens } from '@/features/tms/tmsTokens'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { useLegacyDashboardKpis, type DateRangeKey } from './useLegacyDashboardKpis'
 import { useBatoryApptCount } from './useBatoryApptCount'
+import { BrokerageSection } from './BrokerageDashboardPage'
 import { LazyWidget } from './LazyWidget'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -537,6 +538,9 @@ export function DashboardPage() {
 
         {/* ── Current diesel price (fleet average, week-over-week) ──────────── */}
         <LazyWidget enabled={kpiFinal} minHeight={160} label="diesel-price"><DieselPriceWidget /></LazyWidget>
+
+        {/* ── Brokerage (BCAT Logistics): revenue, expense, profit by month and by sales rep ─ */}
+        <LazyWidget enabled={kpiFinal} minHeight={420} label="brokerage"><BrokerageSection /></LazyWidget>
 
         {/* ── Compliance alerts + recent repair invoices ────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: col1 ?? '1fr 1fr', gap: 16 }}>
