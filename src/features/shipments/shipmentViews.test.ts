@@ -177,7 +177,7 @@ describe('board status mapping', () => {
     const cases: Array<[AssignmentType | null, BoardStatusKey | 'CANCELED']> = [
       [null, 'OPEN'],
       ['CARRIER', 'COVERED'],
-      ['OWN_ASSET', 'RESERVED'],
+      ['OWN_ASSET', 'COVERED'], // our own fleet counts as covered, as in Aljex
     ]
     for (const [assignmentType, expected] of cases) {
       expect(boardStatusOf(row('r', { status: 'BOOKED', assignmentType }))).toBe(expected)
@@ -387,8 +387,8 @@ describe('board status counts', () => {
     ]
     const counts = boardStatusCounts(rows)
     expect(counts.OPEN).toBe(1)
-    expect(counts.COVERED).toBe(1)
-    expect(counts.RESERVED).toBe(1)
+    expect(counts.COVERED).toBe(2) // an outside carrier and our own fleet
+    expect(counts.RESERVED).toBe(0)
     expect(counts.DISPATCHED).toBe(1)
     expect(counts.ARRIVED).toBe(1)
     expect(counts.DEPARTED).toBe(1)

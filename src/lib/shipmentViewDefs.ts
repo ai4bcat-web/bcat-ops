@@ -160,7 +160,8 @@ export function boardStatusOf(row: {
   if (['PICKED_UP', 'IN_TRANSIT', 'RECOVERED'].includes(row.status)) return 'DEPARTED'
   if (['DISPATCHED', 'LOADING'].includes(row.status)) return 'DISPATCHED'
   if (['BOOKED', 'PLANNED'].includes(row.status)) {
-    if (row.assignmentType === 'OWN_ASSET') return 'RESERVED'
+    // Aljex calls a load covered whether an outside carrier or our own fleet (Ivan Cartage) has it: so does BCAT.
+    if (row.assignmentType === 'OWN_ASSET') return 'COVERED'
     if (row.assignmentType === 'CARRIER') return 'COVERED'
     return 'OPEN'
   }
@@ -553,7 +554,7 @@ export const MY_TEAM_SENTINEL = '@myteam'
 
 export const SEED_VIEWS: ShipmentViewSeed[] = [
   seed('active-shipments', 'Active Shipments', 'Shipments',
-    'The default Aljex-style board: open, covered, in transit and delivered (Hold and Reserved off).', 0,
+    'The default Aljex-style board: open, covered, in transit and delivered (Hold off).', 0,
     {
       board: {
         statuses: ['OPEN', 'COVERED', 'DISPATCHED', 'ARRIVED', 'DEPARTED', 'DELIVERED'],
