@@ -17,7 +17,7 @@ import type { ShipmentStatus } from '../types/tms'
 import { carrierPhase, type CarrierPhase } from './carrierLegs'
 
 export type DeliveryPhase =
-  | 'DRAFT' | 'NOT_COVERED' | 'NOT_DISPATCHED' | 'EN_ROUTE_PICKUP'
+  | 'DRAFT' | 'NOT_COVERED' | 'COVERED' | 'RC_SENT' | 'DISPATCHED' | 'NOT_DISPATCHED' | 'EN_ROUTE_PICKUP'
   | 'AT_PICKUP' | 'DEPARTED' | 'IN_TRANSIT' | 'AT_DELIVERY' | 'DELIVERED' | 'VOIDED'
 
 export type CheckpointKey = 'AT_PICKUP' | 'DEPARTED' | 'IN_TRANSIT' | 'AT_DELIVERY' | 'DELIVERED'
@@ -32,7 +32,12 @@ export const CHECKPOINTS: readonly { key: CheckpointKey; label: string }[] = [
 
 export const PHASE_LABEL: Record<DeliveryPhase, string> = {
   DRAFT: 'Draft',
-  NOT_COVERED: 'Not dispatched',
+  NOT_COVERED: 'Not covered',
+  // Before the truck moves (Ryne 2026-11-09): Covered (a carrier is on it), RC sent (the rate con went out), Dispatched (the rate con is signed and the
+  // driver info is in).
+  COVERED: 'Covered',
+  RC_SENT: 'RC sent',
+  DISPATCHED: 'Dispatched',
   NOT_DISPATCHED: 'Not dispatched',
   EN_ROUTE_PICKUP: 'Heading to pickup',
   AT_PICKUP: 'On site (pickup)',
@@ -65,6 +70,8 @@ export interface PhaseInput {
   status?: ShipmentStatus | null
   /** A carrier or own asset is assigned. */
   covered: boolean
+  /** The carrier assignment ladder rung (RATE_CON_SENT, RATE_CON_SIGNED, DRIVER_INFO_ENTERED, ...), when known. */
+  assignment?: string | null
   deliveredAt?: string | null
   /** In route order. */
   stops: readonly PhaseStop[]
@@ -172,11 +179,11 @@ const STATUS_PHASE: Partial<Record<ShipmentStatus, DeliveryPhase>> = {
 
 /** The truck stands on the checkpoint, or between two while moving; 0 = parked at the left end. */
 const TRUCK_AT: Record<DeliveryPhase, number> = {
-  DRAFT: 0, NOT_COVERED: 0, NOT_DISPATCHED: 0, EN_ROUTE_PICKUP: 0, AT_PICKUP: 0, DEPARTED: 1, IN_TRANSIT: 2,
+  DRAFT: 0, NOT_COVERED: 0, COVERED: 0, RC_SENT: 0, DISPATCHED: 0, NOT_DISPATCHED: 0, EN_ROUTE_PICKUP: 0, AT_PICKUP: 0, DEPARTED: 1, IN_TRANSIT: 2,
   AT_DELIVERY: 3, DELIVERED: 4, VOIDED: 0,
 }
 const REACHED: Record<DeliveryPhase, number> = {
-  DRAFT: 0, NOT_COVERED: 0, NOT_DISPATCHED: 0, EN_ROUTE_PICKUP: 0, AT_PICKUP: 1, DEPARTED: 2, IN_TRANSIT: 3,
+  DRAFT: 0, NOT_COVERED: 0, COVERED: 0, RC_SENT: 0, DISPATCHED: 0, NOT_DISPATCHED: 0, EN_ROUTE_PICKUP: 0, AT_PICKUP: 1, DEPARTED: 2, IN_TRANSIT: 3,
   AT_DELIVERY: 4, DELIVERED: 5, VOIDED: 0,
 }
 
@@ -253,7 +260,11 @@ function phaseOfStops(i: PhaseInput, stops: readonly PhaseStop[]): PhaseResult {
     ?? (i.status && STATUS_PHASE[i.status] ? { phase: STATUS_PHASE[i.status]!, stop: 0, fromStatus: true } : null)
 
   if (!ev) {
-    return i.covered ? done('NOT_DISPATCHED', 0, 'Not dispatched', 'grey', null) : done('NOT_COVERED', 0, 'Not dispatched', 'grey', null)
+    if (!i.covered) return done('NOT_COVERED', 0, 'Not covered', 'grey', null)
+    // Signed with the driver's details in = Dispatched; the rate con sent (or signed, still waiting on the driver details) = RC sent.
+    if (i.assignment === 'DRIVER_INFO_ENTERED') return done('DISPATCHED', 0, 'Dispatched', 'green', null)
+    if (i.assignment === 'RATE_CON_SENT' || i.assignment === 'RATE_CON_SIGNED') return done('RC_SENT', 0, 'RC sent', 'grey', null)
+    return done('COVERED', 0, 'Covered', 'grey', null)
   }
   // Status alone cannot say WHICH stop: no stop caption without stop events.
   const stopCaption = stopCount > 2 && ev.phase !== 'DELIVERED' && !ev.fromStatus ? `Stop ${ev.stop + 1} of ${stopCount}` : ''
@@ -266,6 +277,6 @@ function phaseOfStops(i: PhaseInput, stops: readonly PhaseStop[]): PhaseResult {
 
 /** Compact board text: "In transit · Stop 1/2". Parked states are just their caption. */
 export function deliveryPhaseText(r: PhaseResult): string {
-  if (r.phase === 'DRAFT' || r.phase === 'VOIDED' || r.phase === 'NOT_COVERED' || r.phase === 'NOT_DISPATCHED') return r.label
+  if (r.phase === 'DRAFT' || r.phase === 'VOIDED' || r.phase === 'NOT_COVERED' || r.phase === 'COVERED' || r.phase === 'RC_SENT' || r.phase === 'DISPATCHED' || r.phase === 'NOT_DISPATCHED') return r.label
   return r.stopCount > 2 && r.phase !== 'DELIVERED' ? `${r.label} · Stop ${r.stopIndex + 1}/${r.stopCount}` : r.label
 }

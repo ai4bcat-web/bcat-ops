@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, it, expect, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { CarrierTrackingCard } from './CarrierTrackingCard'
 import { emptyValues, NO_LOCKS } from '../model'

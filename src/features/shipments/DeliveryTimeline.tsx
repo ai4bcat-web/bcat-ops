@@ -19,7 +19,7 @@ const PARKED_X = 10
 
 /** Where the truck is drawn: parked left of the first dot until the load is at the pickup. */
 function truckX(r: PhaseResult): number {
-  if (r.phase === 'DRAFT' || r.phase === 'NOT_COVERED' || r.phase === 'NOT_DISPATCHED' || r.phase === 'EN_ROUTE_PICKUP' || r.phase === 'VOIDED') return PARKED_X
+  if (r.phase === 'DRAFT' || r.phase === 'NOT_COVERED' || r.phase === 'COVERED' || r.phase === 'RC_SENT' || r.phase === 'DISPATCHED' || r.phase === 'NOT_DISPATCHED' || r.phase === 'EN_ROUTE_PICKUP' || r.phase === 'VOIDED') return PARKED_X
   return dotX(r.truckAt)
 }
 
@@ -34,7 +34,7 @@ function DeliveryTimelineImpl({ result: r }: { result: PhaseResult }) {
   const x = truckX(r)
   const moving = r.phase === 'IN_TRANSIT' || r.phase === 'DEPARTED'
   const caption = r.caption ? `${r.caption}` : r.label
-  const showPhase = r.caption && !/^(Draft|Not dispatched|Voided)$/.test(r.caption)
+  const showPhase = r.caption && !/^(Draft|Not covered|Covered|RC sent|Dispatched|Not dispatched|Voided)$/.test(r.caption)
   return (
     <div className="tms-dt" data-testid="delivery-timeline" data-phase={r.phase} data-tone={r.tone} data-voided={r.phase === 'VOIDED'}>
       <span className="tms-fg-label" data-testid="delivery-caption">

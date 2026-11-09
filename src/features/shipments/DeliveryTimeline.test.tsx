@@ -20,9 +20,9 @@ describe('DeliveryTimeline', () => {
     expect(reached()).toEqual([])
     expect(screen.getByTestId('delivery-timeline').dataset.tone).toBe('grey')
   })
-  it('not covered: "Not dispatched", nothing reached', () => {
+  it('not covered: "Not covered", nothing reached', () => {
     show({ covered: false })
-    expect(screen.getByTestId('delivery-caption').textContent).toBe('Not dispatched')
+    expect(screen.getByTestId('delivery-caption').textContent).toBe('Not covered')
     expect(reached()).toEqual([])
   })
   it('in transit on a four-stop load: summary, caption, reached dots and green segments', () => {
@@ -63,6 +63,6 @@ describe('DeliveryTimeline', () => {
   })
   it('the svg is one role=img with a text summary', () => {
     show()
-    expect(screen.getByRole('img', { name: /Not dispatched|Heading|Departed|transit|site|Delivered|Draft/ })).toBeTruthy()
+    expect(screen.getByRole('img', { name: /Not covered|Covered|RC sent|Dispatched|Not dispatched|Heading|Departed|transit|site|Delivered|Draft/ })).toBeTruthy()
   })
 })
