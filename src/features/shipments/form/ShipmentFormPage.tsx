@@ -173,6 +173,16 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     setFromEmail(new Set(pre.fromEmail))
   }, [intakeId, intake.row, directory.loading, directory.customers, seedValues])
 
+  // The Tracking mode chip on the board links here: land on the Carrier & Tracking card's dispatcher field, once the shipment has loaded.
+  const [innerSearch] = useSearchParams()
+  const focusTracking = innerSearch.get('focus') === 'tracking'
+  const trackingFocused = useRef(false)
+  useEffect(() => {
+    if (!focusTracking || trackingFocused.current || mode !== 'edit' || !bundle) return
+    trackingFocused.current = true
+    focusField(LABEL.carrier.dispatcher.testId)
+  }, [focusTracking, mode, bundle, focusField])
+
   const { actions, dialogs, busy } = useFormActions({
     values, update, bundle, setBundle: form.setBundle, busy: pipelineBusy, settings, carriers, isAdmin, brokerName: 'BCAT Logistics',
   })

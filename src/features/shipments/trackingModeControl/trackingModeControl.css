@@ -21,3 +21,12 @@
 .tms-shell .tms-trkctl-field { display: flex; flex-direction: column; gap: 2px; min-width: 150px; }
 .tms-shell .tms-trkctl-actions { display: flex; align-items: center; gap: 8px; }
 .tms-shell .tms-trkctl[data-compact='true'] { gap: 6px; }
+
+.tms-shell a.tms-trk-notset-link { text-decoration: none; cursor: pointer; }
+.tms-shell a.tms-trk-notset-link:hover { text-decoration: underline; }
+
+button.tms-trk-notset-link { border: 0; font: inherit; cursor: pointer; }
+.tms-shell .tms-trk-notreq {
+  display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 9px; font-size: 10.5px; font-weight: 600;
+  white-space: nowrap; background: var(--tms-badge-gray-bg, var(--tms-surface-subtle)); color: var(--tms-muted); border: 1px solid var(--tms-border);
+}
