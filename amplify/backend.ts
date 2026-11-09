@@ -3930,6 +3930,23 @@ otrActionsFn.addToRolePolicy(
   }),
 )
 
+// Moving a row onto the manual path also clears Invoice.factored (and returning sets it
+// back), and every such move writes an AuditLog row. Invoice: read + update only.
+otrActionsFn.addEnvironment('INVOICE_TABLE_NAME', stageTables['Invoice'].tableName)
+otrActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME', stageTables['AuditLog'].tableName)
+otrActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+    resources: [stageTables['Invoice'].tableArn],
+  }),
+)
+otrActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:PutItem'],
+    resources: [stageTables['AuditLog'].tableArn],
+  }),
+)
+
 // Locations, PODs, driver submissions and shipment documents are read-only here. The
 // shipment documents are reached only by Query on the shipmentId index, so the index ARN
 // is the one that matters.

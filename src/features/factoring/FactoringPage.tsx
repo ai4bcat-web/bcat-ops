@@ -31,6 +31,9 @@ import { uploadOtrDocs, resolveLoad, assembleInvoice } from '@/lib/otrClient'
 import { loadFromFactoringItem } from './loadFromInvoice'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 import { manualSentInfo } from '@/lib/manualInvoice'
+import { noBuyInfo } from '@/lib/noBuy'
+import { BILLING_RELEASE_PAGE, holdsPerUserGrant } from '@/lib/navItems'
+import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
 
 // ── Status labels ────────────────────────────────────────────────────────────
 
@@ -277,13 +280,24 @@ const STATUS_TONE: Record<FactoringItemStatus, TmsTone> = {
   ARCHIVED: 'gray',
 }
 
-/** OTR knows this broker and will not buy its paper. Said on the row, not only in the panel. */
+/**
+ * Rows the Invoice manually button applies to: anything still in the OTR queue, and a No
+ * buy row that already sits under Invoice manually (the button then finishes the move:
+ * Invoice.factored and the customer's default). Repeating it changes nothing.
+ */
+function canMoveManually(item: FactoringItem): boolean {
+  return item.status === 'NEED_TO_FACTOR' || item.status === 'PENDING_WITH_OTR' || (item.status === 'MANUAL_INVOICE' && noBuyInfo(item).noBuy)
+}
+
+/** OTR will not buy this paper. Said on the row, with OTR's reason, not only in the panel. */
 function NoBuyFlag({ item }: { item: FactoringItem }) {
-  if (item.brokerCheckResult !== 'NO_BUY') return null
+  const { noBuy, reason } = noBuyInfo(item)
+  if (!noBuy) return null
   return (
-    <TmsBadge tone="pink" title={`OTR will not buy from MC ${item.brokerMcChecked ?? ''} — invoice manually`}>
-      NO BUY
-    </TmsBadge>
+    <>
+      <TmsBadge tone="pink" title={reason ?? undefined}>No buy</TmsBadge>
+      {reason && <span className="max-w-[18rem] truncate text-xs tms-muted" title={reason}>{reason}</span>}
+    </>
   )
 }
 
@@ -413,6 +427,8 @@ export function FactoringPage() {
    * turned a queue of twenty PROs into a page nobody could scan.
    */
   const [openId, setOpenId] = useState<string | null>(null)
+  /** The row whose Invoice manually confirmation is open. */
+  const [manualMoveId, setManualMoveId] = useState<string | null>(null)
 
   // Deleting a row drops the record that a PRO was ever sent for factoring, so it is
   // limited to the two people who run factoring rather than every admin.
@@ -497,6 +513,7 @@ export function FactoringPage() {
     [filtered, safePage, perPage],
   )
 
+  const manualMoveItem = manualMoveId ? items.find((i) => i.id === manualMoveId) ?? null : null
   const openItem = openId ? items.find((i) => i.id === openId) ?? null : null
   const manualPanel = openItem?.status === 'MANUAL_INVOICE' || openItem?.status === 'INVOICED_MANUALLY'
 
@@ -684,22 +701,35 @@ export function FactoringPage() {
         </div>
       ),
     },
-    ...(canDelete
-      ? [{
-        key: 'actions',
-        header: 'ACTIONS',
-        render: (item: FactoringItem) => (
-          <TmsIconButton
-            aria-label={`Delete queue row for PRO ${item.proNumber}`}
-            title="Delete queue row"
-            disabled={pendingIds.has(item.id)}
-            onClick={() => handleDelete(item)}
-          >
-            <Trash2 size={14} />
-          </TmsIconButton>
-        ),
-      }]
-      : []),
+    {
+      key: 'actions',
+      header: 'ACTIONS',
+      render: (item: FactoringItem) => (
+        <div className="flex items-center gap-2 whitespace-nowrap">
+          {canMoveManually(item) && (
+            <TmsButton
+              size="sm"
+              variant="ghost"
+              aria-label={`Invoice manually for PRO ${item.proNumber}`}
+              disabled={pendingIds.has(item.id)}
+              onClick={() => setManualMoveId(item.id)}
+            >
+              Invoice manually
+            </TmsButton>
+          )}
+          {canDelete && (
+            <TmsIconButton
+              aria-label={`Delete queue row for PRO ${item.proNumber}`}
+              title="Delete queue row"
+              disabled={pendingIds.has(item.id)}
+              onClick={() => handleDelete(item)}
+            >
+              <Trash2 size={14} />
+            </TmsIconButton>
+          )}
+        </div>
+      ),
+    },
   ]
 
   return (
@@ -811,6 +841,16 @@ export function FactoringPage() {
             ? <ManualInvoicePanel item={openItem} onChanged={refresh} />
             : <OtrPanel item={openItem} onChanged={refresh} />}
         </TmsDialog>
+      )}
+
+      {manualMoveItem && (
+        <InvoiceManuallyDialog
+          item={manualMoveItem}
+          customer={customers.find((c) => c.id === manualMoveItem.customerId) ?? null}
+          canChangeDefault={holdsPerUserGrant(user?.groups, BILLING_RELEASE_PAGE)}
+          onClose={() => setManualMoveId(null)}
+          onDone={refresh}
+        />
       )}
 
       {/* Opened by the PRO column — the leg editor, for the documents on it. */}

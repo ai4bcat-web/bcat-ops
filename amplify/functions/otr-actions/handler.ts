@@ -19,6 +19,7 @@ import {
   PutCommand,
   QueryCommand,
   ScanCommand,
+  TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb'
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
@@ -32,6 +33,7 @@ import {
   type RateConExtract,
   type OtrReadiness,
 } from '../../../src/lib/otrInvoice'
+import { StaleError, manualInvoiceMove, returnToFactoring, type MoveStore } from './manualMove'
 import { normalizeName } from '../../../src/lib/tmsDirectory'
 import { isManualStepId, manualProgress, withManualStep } from '../../../src/lib/manualInvoice'
 import type { ManualInvoiceSteps } from '../../../src/types'
@@ -117,6 +119,8 @@ export function parseArgsInput(input: Args['input']): Row {
 }
 
 const nowIso = () => new Date().toISOString()
+const INVOICE_TABLE = process.env.INVOICE_TABLE_NAME
+const AUDIT_LOG_TABLE = process.env.AUDIT_LOG_TABLE_NAME
 /** YYYY-MM-DD in UTC — OTR's InvoiceDate is the date submitted. */
 const today = () => nowIso().slice(0, 10)
 
@@ -683,12 +687,13 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
  * What a No Buy verdict does to a row: moves it out of the OTR queue to be invoiced by
  * hand, once. A row already with OTR, or already being worked by hand, is left where it is.
  */
-function noBuyFlag(item: Row, decision: string | null): Record<string, unknown> {
+function noBuyFlag(item: Row, decision: string | null, mc?: string, message?: string): Record<string, unknown> {
   if (decision !== 'NO BUY') return {}
   // Not yet sent, or sent and now refused: either way it is billed by hand from here.
   // A paid invoice is left alone, and one already being worked by hand keeps its steps.
   if (item.status !== 'NEED_TO_FACTOR' && item.status !== 'PENDING_WITH_OTR') return {}
-  return { status: 'MANUAL_INVOICE', manualReason: 'NO_BUY' }
+  // The reason stays on the row (otrError) so the queue can show it next to "No buy".
+  return { status: 'MANUAL_INVOICE', manualReason: 'NO_BUY', otrError: `OTR will not buy${mc ? ` from MC ${mc}` : ''} (No Buy)${message ? `: ${message}` : ''}` }
 }
 
 async function updateItem(id: string, fields: Record<string, unknown>) {
@@ -858,13 +863,105 @@ async function uploadInvoiceDocuments(
   return { uploaded, errors }
 }
 
+/** The DynamoDB side of manualMove.ts: conditional writes that surface a lost race as StaleError. */
+const moveStore: MoveStore = {
+  getItem: getFactoringItem,
+  async getInvoice(id) {
+    if (!INVOICE_TABLE) return null
+    const r = await ddb.send(new GetCommand({ TableName: INVOICE_TABLE, Key: { id } }))
+    return (r.Item as Row) ?? null
+  },
+  getCustomer: getCustomer,
+  async getLoadCustomerId(loadId) {
+    const r = await ddb.send(new GetCommand({ TableName: LOAD_TABLE, Key: { id: loadId }, ProjectionExpression: 'customerId' }))
+    return trim((r.Item as Row | undefined)?.customerId) || null
+  },
+  async writeItemAndInvoice(w) {
+    const now = nowIso()
+    const transact: NonNullable<ConstructorParameters<typeof TransactWriteCommand>[0]['TransactItems']> = []
+    const entries = Object.entries(w.itemPatch).filter(([, v]) => v !== undefined)
+    if (entries.length) {
+      transact.push({
+        Update: {
+          TableName: FACTORING_TABLE,
+          Key: { id: w.itemId },
+          UpdateExpression: `SET ${entries.map((_, i) => `#f${i} = :v${i}`).join(', ')}, updatedAt = :now`,
+          ConditionExpression: '#status = :expect',
+          ExpressionAttributeNames: { ...Object.fromEntries(entries.map(([k], i) => [`#f${i}`, k])), '#status': 'status' },
+          ExpressionAttributeValues: { ...Object.fromEntries(entries.map(([, v], i) => [`:v${i}`, v])), ':now': now, ':expect': w.expectItemStatus },
+        },
+      })
+    }
+    if (w.invoice) {
+      transact.push({
+        Update: {
+          TableName: INVOICE_TABLE!,
+          Key: { id: w.invoice.id },
+          UpdateExpression: 'SET factored = :f, updatedAt = :now, version = :ver',
+          ConditionExpression: 'attribute_exists(id) AND #st <> :void',
+          ExpressionAttributeNames: { '#st': 'status' },
+          ExpressionAttributeValues: { ':f': w.invoice.factored, ':now': now, ':ver': w.invoice.version + 1, ':void': 'VOID' },
+        },
+      })
+    }
+    if (!transact.length) return
+    try {
+      await ddb.send(new TransactWriteCommand({ TransactItems: transact }))
+    } catch (e) {
+      if (e instanceof Error && e.name === 'TransactionCanceledException') throw new StaleError(e.message)
+      throw e
+    }
+  },
+  async writeCustomer(w) {
+    try {
+      await ddb.send(
+        new UpdateCommand({
+          TableName: CUSTOMER_TABLE,
+          Key: { id: w.id },
+          UpdateExpression: 'SET billingMethod = :m, apEmail = :ap, updatedAt = :u',
+          ConditionExpression: `${w.expectMethod ? 'billingMethod = :em' : 'attribute_not_exists(billingMethod)'} AND ${w.expectApEmail ? 'apEmail = :ea' : '(attribute_not_exists(apEmail) OR apEmail = :empty OR apEmail = :null)'}`,
+          ExpressionAttributeValues: {
+            ':m': w.method, ':ap': w.apEmail, ':u': nowIso(),
+            ...(w.expectMethod ? { ':em': w.expectMethod } : {}),
+            ...(w.expectApEmail ? { ':ea': w.expectApEmail } : { ':empty': '', ':null': null }),
+          },
+        }),
+      )
+    } catch (e) {
+      if (e instanceof Error && e.name === 'ConditionalCheckFailedException') throw new StaleError(e.message)
+      throw e
+    }
+  },
+  async audit(entityType, entityId, action, user, changes) {
+    if (!AUDIT_LOG_TABLE) return
+    const now = nowIso()
+    try {
+      await ddb.send(
+        new PutCommand({
+          TableName: AUDIT_LOG_TABLE,
+          Item: { id: randomUUID(), __typename: 'AuditLog', entityType, entityId, action, user, changes: JSON.stringify(changes), createdAt: now, updatedAt: now },
+        }),
+      )
+    } catch (err) {
+      // Best effort, like every other audit write here: the move itself stands.
+      console.warn('[otr-actions] audit log write failed:', String(err))
+    }
+  },
+  now: nowIso,
+}
+
 const ok = (data: unknown) => JSON.stringify({ ok: true, data })
 const fail = (error: string) => JSON.stringify({ ok: false, error })
 
-export const handler = async (event: { arguments: Args; identity?: { claims?: { email?: string } } }) => {
+export const handler = async (event: { arguments: Args; identity?: { claims?: Record<string, unknown> } }) => {
   const { action } = event.arguments
   const input = parseArgsInput(event.arguments.input)
-  const actor = event.identity?.claims?.email ?? 'unknown'
+  const actor = String(event.identity?.claims?.email ?? 'unknown')
+  const rawGroups = event.identity?.claims?.['cognito:groups']
+  const groups = Array.isArray(rawGroups)
+    ? rawGroups.filter((g): g is string => typeof g === 'string')
+    : typeof rawGroups === 'string' ? rawGroups.split(',').map((g) => g.trim()).filter(Boolean) : []
+  const caller = { email: actor, groups }
 
   try {
     switch (action) {
@@ -1052,8 +1149,8 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
           ...(check
             ? { brokerMcChecked: mc, brokerCheckResult: check.decision.replace(' ', '_'), brokerCheckedAt: nowIso() }
             : {}),
-          ...noBuyFlag(item, check?.decision ?? null),
           otrError: null,
+          ...noBuyFlag(item, check?.decision ?? null, mc, check?.message),
         })
 
         await setManualField(String(item.id), 'BrokerMC', mc)
@@ -1066,38 +1163,26 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
       }
 
       /**
-       * Take a row out of the OTR queue to be billed by hand — the choice, where No Buy
-       * is the automatic version of the same move.
+       * Take a row out of the OTR queue to be billed by hand — the choice, where No Buy is
+       * the automatic version of the same move. Ordering and idempotency live in manualMove.ts:
+       * invoice move first (conditional, with Invoice.factored), then the customer default.
        */
       case 'manualInvoice': {
-        const item = await getFactoringItem(String(input.id))
-        if (!item) return fail('factoring item not found')
-        if (item.status === 'FACTORED') return fail('OTR has already paid this invoice')
-        /*
-         * A submitted invoice OTR then refused — their board says Issue, the portal or an
-         * email says No Buy, and the API carries no reason — is moved by the person who
-         * read the refusal. The OTR invoice id stays on the row for the record.
-         */
-        const reason = trim(input.reason) === 'NO_BUY' ? 'NO_BUY' : (item.manualReason === 'NO_BUY' ? 'NO_BUY' : 'MANUAL')
-        await updateItem(String(item.id), {
-          status: 'MANUAL_INVOICE',
-          manualReason: reason,
-          ...(reason === 'NO_BUY' ? { brokerCheckResult: 'NO_BUY', brokerCheckedAt: nowIso() } : {}),
-          ...(trim(input.apEmail) ? { apEmail: trim(input.apEmail) } : {}),
-          otrError: null,
-        })
-        return ok({ status: 'MANUAL_INVOICE', reason })
+        const r = await manualInvoiceMove(moveStore, {
+          id: String(input.id),
+          reason: trim(input.reason),
+          changeCustomerDefault: input.changeCustomerDefault === true,
+          customerApEmail: trim(input.customerApEmail),
+          apEmail: trim(input.apEmail),
+          confirmSubmitted: input.confirmSubmitted === true,
+        }, caller)
+        return r.ok ? ok(r.data) : fail(r.error)
       }
 
-      /** Back into the OTR queue — a row routed by hand, or a No Buy that OTR reversed. */
+      /** Back into the OTR queue — a row routed by hand, or a No Buy that OTR reversed. Refused once sent. */
       case 'returnToOtr': {
-        const item = await getFactoringItem(String(input.id))
-        if (!item) return fail('factoring item not found')
-        if (item.status !== 'MANUAL_INVOICE' && item.status !== 'INVOICED_MANUALLY') {
-          return fail('this row is not being invoiced manually')
-        }
-        await updateItem(String(item.id), { status: 'NEED_TO_FACTOR', manualReason: null, manualInvoicedAt: null })
-        return ok({ status: 'NEED_TO_FACTOR' })
+        const r = await returnToFactoring(moveStore, { id: String(input.id) }, caller)
+        return r.ok ? ok(r.data) : fail(r.error)
       }
 
       /** The broker's AP address — where the manual invoice is sent. */
@@ -1107,6 +1192,9 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         const apEmail = trim(input.apEmail)
         if (apEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(apEmail)) return fail('that does not look like an email address')
         await updateItem(String(item.id), { apEmail: apEmail || null })
+        await moveStore.audit('FactoringItem', String(item.id), 'SET_AP_EMAIL', actor, {
+          by: actor, at: nowIso(), proNumber: item.proNumber ?? null, oldApEmail: item.apEmail ?? null, newApEmail: apEmail || null,
+        })
         return ok({ apEmail: apEmail || null })
       }
 
@@ -1132,6 +1220,10 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
           manualSteps: steps,
           status: progress.complete ? 'INVOICED_MANUALLY' : 'MANUAL_INVOICE',
           manualInvoicedAt: progress.complete ? nowIso() : null,
+        })
+        await moveStore.audit('FactoringItem', String(item.id), 'MANUAL_STEP', actor, {
+          by: actor, at: nowIso(), proNumber: item.proNumber ?? null, step, done,
+          status: progress.complete ? 'INVOICED_MANUALLY' : 'MANUAL_INVOICE',
         })
         return ok({ steps, progress, status: progress.complete ? 'INVOICED_MANUALLY' : 'MANUAL_INVOICE' })
       }
@@ -1189,8 +1281,8 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
           brokerMcChecked: mc,
           brokerCheckResult: decision.replace(' ', '_'),
           brokerCheckedAt: nowIso(),
-          ...noBuyFlag(item, decision),
           otrError: null,
+          ...noBuyFlag(item, decision, mc, message),
         })
 
         // Re-assemble so the queue picks up a name the check just supplied.
@@ -1479,6 +1571,8 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         for (const id of ids) {
           const item = await getFactoringItem(id)
           if (!item?.otrInvoiceId) continue
+          // Taken out of the queue by hand: OTR's board no longer decides where the row lives.
+          if (item.status === 'MANUAL_INVOICE' || item.status === 'INVOICED_MANUALLY') continue
           try {
             const d = await client.getInvoice(String(item.otrInvoiceId))
             /*

@@ -72,6 +72,8 @@ export const handler = async () => {
     // Approved, Dead and Duplicate are OTR's last words on an invoice. Asking again costs
     // a paid API call to be told the same thing.
     if (otrStatusMeta(row.otrStatus as string | undefined)?.terminal) continue
+    // Taken out of the queue by hand: OTR's board no longer decides where the row lives.
+    if (row.status === 'MANUAL_INVOICE' || row.status === 'INVOICED_MANUALLY') continue
     try {
       const d = await client.getInvoice(invoiceId)
       // Nothing moved — skip the write so updatedAt stays meaningful.

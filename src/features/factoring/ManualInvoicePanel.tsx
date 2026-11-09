@@ -24,6 +24,8 @@ export function ManualInvoicePanel({ item, onChanged }: { item: FactoringItem; o
   const [apDraft, setApDraft] = useState(item.apEmail ?? '')
   const steps = item.manualSteps ?? null
   const progress = manualProgress(steps)
+  // Once e-mailed (or the row is finished) the server refuses the return; say so up front.
+  const sent = Boolean(steps?.emailed) || item.status === 'INVOICED_MANUALLY'
   const customer = ((item.otrReadiness as { customerName?: string } | null)?.customerName ?? '').trim()
 
   async function run(key: string, fn: () => Promise<unknown>, okMsg: string) {
@@ -58,7 +60,8 @@ export function ManualInvoicePanel({ item, onChanged }: { item: FactoringItem; o
         <TmsButton
           variant="ghost"
           size="sm"
-          disabled={busy !== null}
+          disabled={busy !== null || sent}
+          title={sent ? 'Already sent to the customer — it cannot go back to factoring' : undefined}
           onClick={() => run('return', () => returnToOtrQueue(item.id), 'Back in the OTR queue')}
         >
           <RotateCcw className="size-3.5" /> Send back to OTR queue
