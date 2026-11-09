@@ -57,6 +57,26 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
       </button>
 
       <div id="rail-body" className="tms-rail-body">
+        <section className="tms-rail-hero" data-testid="rail-hero" aria-label="At a glance">
+          <div className="tms-rail-hero-main">
+            <span className="tms-rail-hero-label">Net profit</span>
+            <strong className="tms-rail-hero-big" data-testid="rail-hero-net">{net === dash ? dash : `$${net}`}</strong>
+            <span className="tms-rail-hero-sub">{money.priced ? `${pct} margin · ${TONE_WORD[money.tone]}` : 'Price the load to see the margin'}</span>
+          </div>
+          <div className="tms-rail-ring" role="img" aria-label={`${done} of ${total} required fields done`} style={{ ['--ring' as string]: `${total > 0 ? Math.round((done / total) * 100) : 0}%` }}>
+            <span className="tms-rail-ring-num">{done}<small>/{total}</small></span>
+            <span className="tms-rail-ring-cap">required</span>
+          </div>
+          <div className="tms-rail-bar" data-testid="rail-hero-bar" aria-hidden="true">
+            <span className="tms-rail-bar-cost" style={{ width: `${money.priced && money.customerTotalCents > 0 ? Math.min(100, Math.round((money.carrierTotalCents / money.customerTotalCents) * 100)) : 0}%` }} />
+            <span className="tms-rail-bar-profit" data-tone={money.tone} />
+          </div>
+          <div className="tms-rail-bar-legend">
+            <span><i className="tms-rail-key tms-rail-key-cost" />Carrier {money.carrierTotalCents > 0 ? `$${formatCents(money.carrierTotalCents)}` : dash}</span>
+            <span><i className="tms-rail-key tms-rail-key-profit" />Customer {money.priced ? `$${formatCents(money.customerTotalCents)}` : dash}</span>
+          </div>
+        </section>
+
         <section className="tms-rail-block" data-testid="rail-summary">
           <h2 className="tms-rail-h">Summary</h2>
           <p className="tms-rail-line tms-rail-line-strong" data-testid="rail-customer">{summary.customerLine || dash}</p>
