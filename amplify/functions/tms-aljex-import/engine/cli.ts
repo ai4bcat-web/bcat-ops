@@ -13,7 +13,7 @@
  * Output is aggregates only (counts, sums, timings). Anything row-level goes to a 0700 directory under the
  * OS temp dir, outside the repo, and is the operator's to delete after review.
  */
-import { chmodSync, createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -160,7 +160,7 @@ class LocalObjects {
 }
 
 /** Jobs of CLI runs are kept in a local file, never in the live AljexImportJob table (a rehearsal must not write live). */
-class JobBook {
+export class JobBook {
   private jobs = new Map<string, EngineRow>()
   constructor(private path: string | null) {
     if (path && existsSync(path)) for (const r of JSON.parse(readFileSync(path, 'utf8')) as EngineRow[]) this.jobs.set(String(r.id), r)
@@ -189,6 +189,34 @@ class JobBook {
     writeFileSync(this.path, JSON.stringify([...this.jobs.values()]), { mode: 0o600 })
     chmodSync(this.path, 0o600)
   }
+}
+
+/** Other places a job book of an earlier session may live: the temp dir of another shell (macOS /var/folders/<a>/<b>/T), /tmp. Read-only candidates, newest file first. */
+export function siblingJobBooks(own: string, root = '/var/folders', extra: string[] = ['/tmp', '/private/tmp']): string[] {
+  const dirs = [...extra]
+  try {
+    for (const a of readdirSync(root)) for (const b of readdirSync(join(root, a))) dirs.push(join(root, a, b, 'T'))
+  } catch {
+    /* no /var/folders on this platform */
+  }
+  const found = dirs.map((d) => join(d, 'aljex-cli-jobs.json')).filter((f) => f !== own && existsSync(f))
+  return found.sort((x, y) => statSync(y).mtimeMs - statSync(x).mtimeMs)
+}
+
+/** A job of an earlier offline step that this session's book lacks: found in a sibling book and adopted (copied) into `book`. Null when no book has it. */
+export function adoptJobFromSiblings(book: JobBook, id: string, own: string, siblings = siblingJobBooks(own)): EngineRow | null {
+  for (const f of siblings) {
+    try {
+      const row = (JSON.parse(readFileSync(f, 'utf8')) as EngineRow[]).find((r) => String(r.id) === id)
+      if (row) {
+        book.put(row)
+        return row
+      }
+    } catch {
+      /* unreadable book: next */
+    }
+  }
+  return null
 }
 
 const NOT_S3 = {} as unknown as S3Client
@@ -928,8 +956,16 @@ async function cmdReconcile(a: Args, io: CliIo, ctx: CliContext): Promise<number
   const apply = a.flags.has('apply')
   const book = new JobBook(JOBS_FILE)
   const jobOf = (id: string): AljexImportJob => {
-    const [row] = book.get([id])
-    if (!row) throw new Error(`no such job ${id} in ${JOBS_FILE} (jobs of the offline file steps / stage-export live there)`)
+    let [row] = book.get([id])
+    if (!row) {
+      // The job was recorded by an earlier session whose temp dir differs from this one: adopt it from that book.
+      const adopted = adoptJobFromSiblings(book, id, JOBS_FILE)
+      if (adopted) {
+        io.out(`  job ${id} was not in ${JOBS_FILE}; adopted from an earlier session's job book`)
+        row = adopted
+      }
+    }
+    if (!row) throw new Error(`no such job ${id} in ${JOBS_FILE} or any other job book on this machine (jobs of the offline file steps / stage-export live there)`)
     return row as unknown as AljexImportJob
   }
   const source = jobOf(need(a, 'source-job'))
