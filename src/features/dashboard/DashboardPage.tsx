@@ -428,7 +428,7 @@ export function DashboardPage() {
           <IconBtn label="Refresh"><RefreshCw size={13} /> Refresh</IconBtn>
           {hasPageAccess('loads') && (
             <button
-              onClick={() => navigate('/tms/shipments')}
+              onClick={() => navigate('/tms/shipments/new')}
               style={{
                 display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7,
                 background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', border: 'none', cursor: 'pointer',
