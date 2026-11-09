@@ -55,8 +55,12 @@ describe('equipment mapping', () => {
       expect(sameEquipment('VAN', v)).toBe(false);
     }
   });
+  it('PO maps to Power Only; VM, FT, VH, SD, CONE, DD, HAND, TORD, VZ map to the literal FTL', () => {
+    expect(classifyEquipmentCode('po')).toMatchObject({ kind: 'EQUIPMENT', value: 'Power Only' });
+    for (const c of ['VM', 'FT', 'VH', 'SD', 'CONE', 'DD', 'HAND', 'TORD', 'VZ']) expect(classifyEquipmentCode(c)).toMatchObject({ kind: 'EQUIPMENT', value: 'FTL' });
+  });
   it('unknown codes stay blank; --also-map still opts an unknown code in but cannot remap a mapped one', () => {
-    for (const c of ['PO', 'VM', 'FT', 'VH', 'SD']) expect(classifyEquipmentCode(c).kind).toBe('UNKNOWN');
+    for (const c of ['XYZ', 'ABC', 'TRK']) expect(classifyEquipmentCode(c).kind).toBe('UNKNOWN');
     expect(classifyEquipmentCode('XYZ', parseAlsoMap('XYZ=Hotshot'))).toMatchObject({ kind: 'EQUIPMENT', value: 'Hotshot' });
     expect(() => parseAlsoMap('LTL=Van')).toThrow(/already/);
   });
@@ -79,7 +83,7 @@ describe('planShipment: enrich only', () => {
     expect(all.equipment.status).toBe('ALREADY_SET');
   });
   it('ZAK and unknown codes write no equipment but keep the rep', () => {
-    for (const code of ['ZAK', 'PO', 'VM']) {
+    for (const code of ['ZAK', 'XYZ']) {
       const p = plan({ src: src([['12345', code, 'RYNE BANDOLIK']]).get('12345') });
       expect(p.writes.map((w) => w.field)).toEqual(['salesRepCode']);
     }

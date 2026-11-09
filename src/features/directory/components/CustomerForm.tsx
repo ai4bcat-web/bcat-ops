@@ -10,6 +10,7 @@ import { useZipAutofill } from '@/hooks/useZipAutofill'
 import type { CustomerFormValue } from './useCustomerForm'
 import { APPT_WORKFLOW_OPTIONS, INVOICE_FREQUENCY_OPTIONS } from './useCustomerForm'
 import { BillingMethodFields } from './BillingMethodFields'
+import { NewCustomerRequiredFields } from './NewCustomerRequiredFields'
 import { TrackingPrefsFields, type TrackingPrefsValue } from './TrackingPrefsFields'
 
 const STATUS_OPTIONS: CustomerStatus[] = ['NEW', 'CONTACTED', 'QUALIFIED', 'QUOTED', 'NURTURING', 'PENDING', 'ACTIVE']
@@ -21,11 +22,14 @@ export function CustomerForm({
   set,
   errors,
   divisions,
+  isNew = false,
 }: {
   value: CustomerFormValue
   set: <K extends keyof CustomerFormValue>(key: K, v: CustomerFormValue[K]) => void
   errors: Record<string, string>
   divisions: Division[]
+  /** A customer being created: the required fields lead the form and are not repeated in the tabs. */
+  isNew?: boolean
 }) {
   const [tab, setTab] = useState('Overview')
   const [teams, setTeams] = useState<Team[]>([])
@@ -48,13 +52,16 @@ export function CustomerForm({
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
+      {isNew && <NewCustomerRequiredFields value={value} set={set} errors={errors} />}
       <TmsTabs tabs={tabs.map((t) => ({ key: t, label: t }))} active={tab} onSelect={setTab} />
 
       {tab === 'Overview' && (
         <div style={{ display: 'grid', gap: 16 }}>
-          <TmsField label="Customer name *" error={errors.name}>
-            <TmsInput value={value.name} onChange={(e) => set('name', e.target.value)} />
-          </TmsField>
+          {!isNew && (
+            <TmsField label="Customer name *" error={errors.name}>
+              <TmsInput value={value.name} onChange={(e) => set('name', e.target.value)} />
+            </TmsField>
+          )}
           <div className="tms-grid tms-grid-3">
             <TmsField label="Status">
               <TmsSelect
@@ -127,7 +134,7 @@ export function CustomerForm({
 
       {tab === 'Billing' && (
         <div style={{ display: 'grid', gap: 16 }}>
-          <BillingMethodFields value={value} set={set} errors={errors} factor={factor} />
+          {!isNew && <BillingMethodFields value={value} set={set} errors={errors} factor={factor} />}
           <div>
             <div className="tms-field-label">Billing contact</div>
             <div className="tms-grid tms-grid-3" style={{ marginTop: 6 }}>
@@ -139,22 +146,24 @@ export function CustomerForm({
           <div>
             <div className="tms-field-label">Billing address</div>
             <div className="tms-grid tms-grid-2" style={{ marginTop: 6 }}>
-              <TmsInput value={value.billingAddressStreet} onChange={(e) => set('billingAddressStreet', e.target.value)} placeholder="Street" aria-label="Billing street" />
-              <TmsInput value={value.billingAddressCity} onChange={(e) => set('billingAddressCity', e.target.value)} placeholder="City" aria-label="Billing city" />
-              <TmsInput value={value.billingAddressState} onChange={(e) => set('billingAddressState', e.target.value)} placeholder="State" aria-label="Billing state" />
-              <TmsInput value={value.billingAddressZip} onChange={(e) => set('billingAddressZip', e.target.value)} placeholder="ZIP" aria-label="Billing ZIP" />
+              {!isNew && <TmsInput value={value.billingAddressStreet} onChange={(e) => set('billingAddressStreet', e.target.value)} placeholder="Street" aria-label="Billing street" />}
+              {!isNew && <TmsInput value={value.billingAddressCity} onChange={(e) => set('billingAddressCity', e.target.value)} placeholder="City" aria-label="Billing city" />}
+              {!isNew && <TmsInput value={value.billingAddressState} onChange={(e) => set('billingAddressState', e.target.value)} placeholder="State" aria-label="Billing state" />}
+              {!isNew && <TmsInput value={value.billingAddressZip} onChange={(e) => set('billingAddressZip', e.target.value)} placeholder="ZIP" aria-label="Billing ZIP" />}
               <TmsInput value={value.billingAddressCountry} onChange={(e) => set('billingAddressCountry', e.target.value)} placeholder="Country" aria-label="Billing country" />
             </div>
           </div>
           <div className="tms-grid tms-grid-2">
-            <TmsField label="Default division">
-              <TmsSelect
-                value={value.defaultDivisionKey || ''}
-                onChange={(e) => set('defaultDivisionKey', e.target.value)}
-                placeholder="— unset —"
-                options={divisions.map((d) => ({ value: d.key, label: d.name }))}
-              />
-            </TmsField>
+            {!isNew && (
+              <TmsField label="Default division">
+                <TmsSelect
+                  value={value.defaultDivisionKey || ''}
+                  onChange={(e) => set('defaultDivisionKey', e.target.value)}
+                  placeholder="— unset —"
+                  options={divisions.map((d) => ({ value: d.key, label: d.name }))}
+                />
+              </TmsField>
+            )}
             <TmsField label="Default sales rep">
               <TmsInput value={value.defaultSalesRepId} onChange={(e) => set('defaultSalesRepId', e.target.value)} />
             </TmsField>
@@ -178,7 +187,7 @@ export function CustomerForm({
       {tab === 'Credit & pricing' && (
         <div style={{ display: 'grid', gap: 16 }}>
           <div className="tms-grid tms-grid-3">
-            <MoneyField label="Credit limit ($)" value={value.creditLimitCents} onChange={(cents) => set('creditLimitCents', cents)} />
+            {!isNew && <MoneyField label="Credit limit ($)" value={value.creditLimitCents} onChange={(cents) => set('creditLimitCents', cents)} />}
             <TmsField label="Usage warning (bps)" error={errors.creditUsageWarningBps}>
               <TmsInput type="number" min={0} max={10000} value={value.creditUsageWarningBps ?? ''} onChange={(e) => set('creditUsageWarningBps', e.target.value ? Number(e.target.value) : null)} />
             </TmsField>

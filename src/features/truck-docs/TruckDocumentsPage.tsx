@@ -19,7 +19,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
 import { formatVin } from '@/lib/utils'
-import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 import { TRUCK_DOC_SPECS, specsForAssetType, evaluateTruckDoc, type DocState } from '@/lib/truckDocs'
 import { slotsForAsset, readyScore, truckSlotState, visibleSlots, type ReadyScore } from '@/lib/fileHub'
 import { EntityFilePanel } from '@/features/files/EntityFilePanel'
@@ -86,6 +86,7 @@ function DocCell({ asset, specKey, hub }: { asset: Equipment; specKey: string; h
 }
 
 export function TruckDocumentsPage() {
+  const { fleetGroupLabel } = useDriverTypes()
   const equipment = useAppStore((s) => s.equipment)
   const drivers = useAppStore((s) => s.drivers)
   const storeLoading = useAppStore((s) => s.isLoading)
@@ -216,7 +217,7 @@ export function TruckDocumentsPage() {
                     <td style={{ ...TD, fontWeight: 600, whiteSpace: 'nowrap' }}>
                       #{a.unitNumber}
                       {a.fleetGroup && (
-                        <span style={{ fontSize: 10.5, color: 'var(--tms-muted)', marginLeft: 6 }}>{FLEET_GROUP_LABELS[a.fleetGroup]}</span>
+                        <span style={{ fontSize: 10.5, color: 'var(--tms-muted)', marginLeft: 6 }}>{fleetGroupLabel(a.fleetGroup)}</span>
                       )}
                     </td>
                     <td style={{ ...TD, color: 'var(--tms-text-2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5 }}>{formatVin(a.vin) || '—'}</td>

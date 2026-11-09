@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  RENAMES, applyOne, countNameCopies, countReferences, locationRenameGate, looksLikeAddressName, normalizeAddress, normalizeName, planRenames,
+  RENAMES, applyOne, applyStopCopies, countNameCopies, countReferences, locationRenameGate, looksLikeAddressName, normalizeAddress, normalizeName, planRenames, planStopCopies,
 } from './awLocationRename.mjs';
 import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 import { resolveScripts } from './prodBackup.mjs';
@@ -9,18 +9,23 @@ import { normalizeAddress as tsAddress, normalizeName as tsName } from '../ampli
 
 const austell = { id: 'loc-fd3cce822772a242', name: '6000 DR. LUKE GLENN GA', street: 'NORFOLK SOUTHERN RAIL', city: 'AUSTELL', state: 'GA', zip: '30106', country: 'US', active: true };
 const rochelle = { id: 'loc-7c0af6dc3158d390', name: '100 4TH AVE', city: 'ROCHELLE', state: 'IL', zip: '61068', country: 'US', active: true };
+const fixture = (key) => {
+  const e = RENAMES.find((x) => x.key === key);
+  return { id: e.idPrefix.length > 12 ? e.idPrefix : `${e.idPrefix}0000`, ...e.old, country: 'US', active: true };
+};
 const other = { id: 'loc-other', name: 'ACME', street: '1 MAIN ST', city: 'X', state: 'IL', zip: '1', active: true };
 
 describe('planRenames', () => {
-  it('plans exactly the two approved rows, with normalized keys the app would store', () => {
+  it('plans the approved rows, with normalized keys the app would store', () => {
     const plan = planRenames([austell, rochelle, other]);
-    expect(plan.map((p) => p.status)).toEqual(['TO_RENAME', 'TO_RENAME']);
+    expect(plan.map((p) => p.status).slice(0, 2)).toEqual(['TO_RENAME', 'TO_RENAME']);
+    expect(plan.slice(2).every((p) => p.status === 'NO_MATCH')).toBe(true);
     expect(plan[0].after).toMatchObject({ name: 'Norfolk Southern Austell Intermodal', city: 'Austell', normalizedName: 'norfolk southern austell intermodal' });
     expect(plan[1].after).toMatchObject({ name: "Roy's Transfer, Inc.", street: '100 E 4th Ave', city: 'ROCHELLE', normalizedAddress: '100 e 4th ave rochelle il 61068 us' });
   });
   it('refuses a row whose name/city/street has changed since the approval, and a missing row', () => {
     const plan = planRenames([{ ...austell, name: 'SOMETHING ELSE' }, { ...rochelle, city: 'DIXON' }]);
-    expect(plan.map((p) => p.status)).toEqual(['NO_MATCH', 'NO_MATCH']);
+    expect(plan.slice(0, 2).map((p) => p.status)).toEqual(['NO_MATCH', 'NO_MATCH']);
     expect(planRenames([other])[0].status).toBe('NO_MATCH');
   });
   it('is idempotent: an already renamed row plans nothing', () => {
@@ -30,6 +35,37 @@ describe('planRenames', () => {
   it('refuses a merged/archived row and a rename that would duplicate another active location', () => {
     expect(planRenames([{ ...austell, active: false }])[0].status).toBe('MERGED_OR_ARCHIVED');
     expect(planRenames([austell, { id: 'x', name: 'Norfolk Southern Austell Intermodal', city: 'Austell', active: true }])[0].status).toBe('COLLISION');
+  });
+});
+
+describe('the 5 added renames', () => {
+  const keys = ['romulus', 'walker', 'hartford', 'lapeer', 'stcharles'];
+  const rows = keys.map(fixture);
+  it('plans each against its stored old values, fixing Wacker and filling an empty street with the address', () => {
+    const plan = planRenames(rows);
+    const byKey = Object.fromEntries(plan.map((p) => [p.entry.key, p]));
+    for (const k of keys) expect(byKey[k].status).toBe('TO_RENAME');
+    expect(byKey.hartford.after).toMatchObject({ name: 'CDM Tool & Mfg. Co., LLC', street: '749 N Wacker Dr', normalizedName: 'cdm tool mfg', normalizedAddress: '749 n wacker dr hartford wi 53027 us' });
+    expect(byKey.lapeer.after).toMatchObject({ name: 'Gestamp North America - Lapeer Plant', street: '100 E Fair St' });
+    expect(byKey.walker.after.street).toBe('3200 FRUIT RIDGE AVE NW');
+    expect(byKey.romulus.after).toMatchObject({ name: 'Forward Air, Inc.', street: '11651 Hannan Rd' });
+    expect(byKey.stcharles.entry.note).toMatch(/LOWER CONFIDENCE/);
+  });
+  it('refuses when the street was edited meanwhile, and a row that would duplicate another active location', () => {
+    expect(planRenames([{ ...fixture('hartford'), street: '749 N WACKER DR' }]).find((p) => p.entry.key === 'hartford').status).toBe('NO_MATCH');
+    const clash = { id: 'x', name: 'Challenge Manufacturing', city: 'GRAND RAPIDS', active: true };
+    expect(planRenames([fixture('walker'), clash]).find((p) => p.entry.key === 'walker').status).toBe('COLLISION');
+  });
+  it('writes no field that does not change, and still guards on the old value of an empty field', async () => {
+    const sent = [];
+    const doc = { send: async (c) => { sent.push(c); return {}; } };
+    const item = planRenames([fixture('lapeer')]).find((p) => p.entry.key === 'lapeer');
+    await applyOne({ doc, suffix: 'dev-x-NONE', item });
+    const u = sent[0].input;
+    expect(u.UpdateExpression).not.toMatch(/#f[234] =/);
+    expect(Object.values(u.ExpressionAttributeValues)).toContain('100 E Fair St');
+    expect(u.ConditionExpression).toMatch(/attribute_not_exists\(#f1\)/);
+    expect(u.ExpressionAttributeValues[':n3']).toBeUndefined();
   });
 });
 
@@ -65,6 +101,53 @@ describe('denormalized copy counts', () => {
   });
 });
 
+describe('stop-name copies (phase 2)', () => {
+  const plan = planRenames([austell, rochelle]);
+  const loads = [
+    { id: 'l1', updatedAt: 't1', stops: JSON.stringify([{ locationId: austell.id, name: austell.name, city: 'Austell' }, { locationId: 'z', name: 'Z' }]), originName: austell.name, originCity: 'Austell' },
+    { id: 'l2', updatedAt: 't2', stops: [{ locationId: rochelle.id, name: rochelle.name }, { locationId: rochelle.id, name: 'MANUALLY EDITED' }] },
+    { id: 'l3', stops: [{ locationId: 'other', name: austell.name }], originName: austell.name, originCity: 'Austell' },
+    { id: 'l4', stops: [{ locationId: austell.id, name: 'Already edited by hand' }] },
+    { id: 'l5', stops: 'not json' },
+  ];
+  const items = planStopCopies(plan, loads);
+  it('plans only stops with the renamed locationId AND the old name; mirrors only when the load holds that location', () => {
+    expect(items.map((i) => i.loadId)).toEqual(['l1', 'l2']);
+    const l1 = items[0];
+    expect(JSON.parse(l1.newStops)).toEqual([{ locationId: austell.id, name: 'Norfolk Southern Austell Intermodal', city: 'Austell' }, { locationId: 'z', name: 'Z' }]);
+    expect(l1.next.originName).toBe('Norfolk Southern Austell Intermodal');
+    expect(items[1].newStops).toEqual([{ locationId: rochelle.id, name: "Roy's Transfer, Inc." }, { locationId: rochelle.id, name: 'MANUALLY EDITED' }]);
+    expect(items[1].next.originName).toBeUndefined();
+  });
+  it('also covers a rename that phase 1 already applied, and is idempotent once the copies are rewritten', () => {
+    const done = planRenames([{ ...austell, ...RENAMES[0].next }]);
+    expect(planStopCopies(done, loads).map((i) => i.loadId)).toEqual(['l1']);
+    const after = loads.map((l, i) => (i === 0 ? { ...l, stops: items[0].newStops, originName: items[0].next.originName } : l));
+    expect(planStopCopies(plan.slice(0, 1), after)).toEqual([]);
+  });
+  it('writes one conditional Load update + one AuditLog with the previous values; a lost condition writes no audit', async () => {
+    const sent = [];
+    const mk = (err) => ({ send: async (c) => { sent.push(c); if (err && c.constructor.name === 'UpdateCommand') throw Object.assign(new Error('x'), { name: err }); return {}; } });
+    expect(await applyStopCopies({ doc: mk(), suffix: 'dev-x-NONE', item: items[0] })).toBe('written');
+    const [u, a] = sent;
+    expect(u.input.TableName).toBe('Load-dev-x-NONE');
+    expect(u.input.ConditionExpression).toContain('#ou = :ou');
+    expect(u.input.ExpressionAttributeValues[':ou']).toBe('t1');
+    expect(u.input.ExpressionAttributeValues[':os']).toBe(loads[0].stops);
+    expect(Object.keys(u.input.ExpressionAttributeNames).sort()).toEqual(['#on', '#ou', '#st', '#ua', '#ub']);
+    expect(JSON.parse(a.input.Item.changes).previous.stops[0].name).toBe(austell.name);
+    expect(a.input.Item).toMatchObject({ entityType: 'LOAD', entityId: 'l1' });
+    sent.length = 0;
+    expect(await applyStopCopies({ doc: mk('ConditionalCheckFailedException'), suffix: 'dev-x-NONE', item: items[0] })).toBe('lost');
+    expect(sent.map((c) => c.constructor.name)).toEqual(['UpdateCommand']);
+  });
+  it('refuses a stop that is not a renamed location and the production suffix without the gate', async () => {
+    const bad = { load: { id: 'l' }, previous: { stops: [{ locationId: 'zzz' }] }, next: {} };
+    await expect(applyStopCopies({ doc: { send: async () => ({}) }, suffix: 'dev-x-NONE', item: bad })).rejects.toThrow(/not a renamed location/);
+    await expect(applyStopCopies({ doc: { send: async () => ({}) }, suffix: PROD_SUFFIX, item: items[0] })).rejects.toThrow();
+  });
+});
+
 describe('applyOne guard', () => {
   const item = () => planRenames([austell, rochelle])[0];
   const mk = (err) => { const sent = []; return { sent, doc: { send: async (c) => { sent.push(c.constructor.name); if (err && c.constructor.name === 'UpdateCommand') throw Object.assign(new Error('x'), { name: err }); return {}; } } }; };
@@ -84,8 +167,8 @@ describe('applyOne guard', () => {
 });
 
 describe('write set and gate', () => {
-  it('backs up exactly Location + AuditLog and prodBackup knows the script', () => {
-    expect([...PROD_WRITE_SETS.awLocationRename.models].sort()).toEqual(['AuditLog', 'Location']);
+  it('backs up exactly Location + Load + AuditLog and prodBackup knows the script', () => {
+    expect([...PROD_WRITE_SETS.awLocationRename.models].sort()).toEqual(['AuditLog', 'Load', 'Location']);
     expect(resolveScripts('awLocationRename')).toEqual(['awLocationRename']);
   });
   const prodValues = { target: 'prod', 'i-mean-production': true, apply: true, 'confirm-prod': `273354631837:${PROD_SUFFIX}` };

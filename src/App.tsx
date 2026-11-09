@@ -8,6 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from '@/context/AuthContext'
 import { AuthGuard } from '@/components/AuthGuard'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
+import { BrokerageDashboardPage } from '@/features/dashboard/BrokerageDashboardPage'
 import { CalendarPage } from '@/features/calendar/CalendarPage'
 import { TmsToaster } from '@/features/tms/kit/TmsToaster'
 import { TmsLayout } from '@/features/tms/TmsLayout'
@@ -190,6 +191,7 @@ export default function App() {
                 </Route>
               <Route index element={<LandingRedirect />} />
               <Route path="/dashboard" element={<RequirePage page="dashboard"><DashboardPage /></RequirePage>} />
+              <Route path="/brokerage-dashboard" element={<RequirePage page="dashboard"><BrokerageDashboardPage /></RequirePage>} />
               <Route path="/calendar" element={<RequirePage page="calendar"><CalendarPage /></RequirePage>} />
               <Route path="/driver-info" element={<RequirePage page="dispatch"><DriverInfoPage /></RequirePage>} />
               {/* The loads grid is retired: a Load lives on its Shipment. /loads and any bookmarked

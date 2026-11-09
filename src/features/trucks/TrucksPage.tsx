@@ -39,6 +39,7 @@ import { cn, formatVin } from '@/lib/utils'
 import { driverForTruck } from '@/lib/assignments'
 import { isPosted } from '@/lib/invoiceStatus'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice, EquipmentType, Ownership, EldSource, FleetGroup, TaskPriority, TaskStatus } from '@/types/equipment'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -180,6 +181,12 @@ interface EquipmentFormProps {
 }
 
 function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: EquipmentFormProps) {
+  const { options: driverTypes, fleetGroupLabel } = useDriverTypes()
+  // Truck fleets: the division-named ones (Local, Box Trucks) plus Amazon, which is truck-only. Keeps a stored value that is none of these.
+  const truckFleetOptions = [
+    ...driverTypes.filter((o) => o.value === 'LOCAL' || o.value === 'BOX_TRUCK'),
+    { value: 'AMAZON', label: fleetGroupLabel('AMAZON') },
+  ]
   const [form, setForm] = useState({
     type:                    (initial?.type ?? 'truck') as EquipmentType,
     unitNumber:              initial?.unitNumber ?? '',
@@ -345,8 +352,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                       <Field label="Fleet Group">
                         <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-card" value={form.fleetGroup} onChange={(e) => set('fleetGroup', e.target.value)}>
                           <option value="">— Unassigned —</option>
-                          <option value="LOCAL">Local (Ivan)</option>
-                          <option value="AMAZON">Amazon</option>
+                          {truckFleetOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </select>
                       </Field>
                       <Field label="Fuel Card # (EFS prefix)">

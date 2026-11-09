@@ -16,7 +16,7 @@
  * one of its children does.
  */
 import {
-  LayoutDashboard, Package, Truck, Banknote, Building2,
+  BarChart3, LayoutDashboard, Package, Truck, Banknote, Building2,
   MapPin, SlidersHorizontal, type LucideIcon,
 } from 'lucide-react'
 import { NAV_ITEMS } from '@/lib/navItems'
@@ -138,6 +138,8 @@ const SETTINGS_CHILDREN: NavChildDef[] = [
 export const PINNED_ITEMS: NavItemDef[] = [
   // The production (ASSETS) Dashboard. Its own grant, no `tms` flag: a Brokerage-only user never sees it.
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, pageKey: 'dashboard', section: BROKERAGE },
+  // Brokerage (BCAT Logistics) revenue / expense / profit by month and sales rep. Same grant as the Dashboard above; its own path so the Dashboard row is not lit for it.
+  { to: '/brokerage-dashboard', label: 'Brokerage Dashboard', icon: BarChart3, pageKey: 'dashboard', section: BROKERAGE },
   // The lifecycle pages (Quote · Build · View · Book · Track · Review) are the top-bar strip
   // (`LIFECYCLE_TABS`); the sidebar keeps the one list people return to all day.
   { to: SHIPMENTS_PATH, label: 'Active shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true, children: ACTIVE_SHIPMENT_CHILDREN },

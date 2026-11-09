@@ -3,7 +3,8 @@ import { ChevronLeft, ChevronRight, Plus, TrendingUp, AlertCircle, Trash2 } from
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
 import { useDriverPay } from '@/hooks/useDriverPay'
 import { useDrivers } from '@/hooks/useDrivers'
-import { FLEET_GROUPS, FLEET_GROUP_LABELS, isCombinedPayDriverId } from '@/lib/fleetGroups'
+import { FLEET_GROUPS, isCombinedPayDriverId } from '@/lib/fleetGroups'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 import type { FleetGroup } from '@/types/equipment'
 import type { DateRange } from '@/lib/fleetProfitability'
 import { aggregateLocalSubgroups, type SubgroupRow } from '@/lib/localSubgroups'
@@ -43,6 +44,7 @@ type SectionTab = FleetGroup | 'OWNER_OPERATOR'
  * passed (e.g. embedded in the Expenses tab) it uses that range and hides the stepper.
  */
 export function FleetProfitabilitySection({ externalRange }: { externalRange?: DateRange } = {}) {
+  const { fleetGroupLabel } = useDriverTypes()
   const [weekOffset, setWeekOffset] = useState(0)
   const [group, setGroup] = useState<SectionTab>('LOCAL')
   const [showPayForm, setShowPayForm] = useState(false)
@@ -79,7 +81,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
   }
 
   const driverName = (id: string) =>
-    isCombinedPayDriverId(id) ? `All ${FLEET_GROUP_LABELS[group as FleetGroup]} drivers (combined)` : (drivers.find((d) => d.id === id)?.name ?? id)
+    isCombinedPayDriverId(id) ? `All ${fleetGroupLabel(group as FleetGroup)} drivers (combined)` : (drivers.find((d) => d.id === id)?.name ?? id)
 
   return (
     <div style={{ background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 12, boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
@@ -107,7 +109,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
                   style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
                     background: active ? 'var(--tms-card)' : 'transparent', color: active ? 'var(--tms-text)' : 'var(--tms-text-2)',
                     boxShadow: active ? 'var(--tms-shadow)' : 'none' }}>
-                  {FLEET_GROUP_LABELS[g]}
+                  {fleetGroupLabel(g)}
                 </button>
               )
             })}
@@ -171,7 +173,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
               <tr><td colSpan={5} style={{ ...TD, textAlign: 'center', color: 'var(--tms-muted)', padding: '24px' }}>Loading…</td></tr>
             )}
             {!loading && trucks.length === 0 && (
-              <tr><td colSpan={5} style={{ ...TD, textAlign: 'center', color: 'var(--tms-muted)', padding: '24px' }}>No trucks in this fleet group yet. Set a truck's fleet group to “{FLEET_GROUP_LABELS[group]}” in Fleet.</td></tr>
+              <tr><td colSpan={5} style={{ ...TD, textAlign: 'center', color: 'var(--tms-muted)', padding: '24px' }}>No trucks in this fleet group yet. Set a truck's fleet group to “{fleetGroupLabel(group)}” in Fleet.</td></tr>
             )}
             {subgroups.map((g) => <SubgroupRevenueRow key={g.key} g={g} />)}
             {r && trucks.length > 0 && (

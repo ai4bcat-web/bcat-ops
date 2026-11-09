@@ -20,6 +20,7 @@
  * tmsDirectoryActions Lambdas bundle this file by path, so a `@/` alias would
  * break the function build.
  */
+import { effectiveDriverType } from './driverOwnership'
 import { driverProgramOf } from './driverProgram'
 import type { DriverProgram, ProgramInputs } from './driverProgram'
 import { normalizeIntakeEmail } from './intakeMail'
@@ -355,7 +356,9 @@ export function shipmentContextFor(input: ShipmentContextInput): ResolveContext 
   return {
     carrierId,
     driverFleetGroup: driver?.fleetGroup ?? null,
-    driverType: driver?.driverType ?? null,
+    // Fleet-first (driverOwnership.ts): a DRIVER_TYPE_IS rule must not outrank the fleet rules above it
+    // for a driver whose stored driverType contradicts their fleet group.
+    driverType: driver ? effectiveDriverType(driver) : null,
     driverProgram: driver ? driverProgramOf(driver) : null,
     customerId: shipment?.customerId ?? order?.customerId ?? load?.customerId ?? null,
     equipment: order?.equipmentType ?? load?.equipmentType ?? null,
@@ -367,9 +370,11 @@ export function shipmentContextFor(input: ShipmentContextInput): ResolveContext 
 }
 
 // ── Seed rows ────────────────────────────────────────────────────────────────
-// The three businesses, Ivan's three driver subsidiaries and the Company group are
+// The three businesses and Ivan's three driver subsidiaries are
 // SEED DATA, not constants: ENSURE_OWNERSHIP_SEED writes them once and an admin
 // edits, archives or adds to them from Divisions & ownership afterwards.
+// There is no 'Company' division: Ryne retired it (2026-11-09) in favour of Ivan Cartage, and a
+// seed row would bring it back the next time an admin runs Ensure seed.
 
 const owners = (party: string, overrides: Partial<OwnershipOwners> = {}): OwnershipOwners => ({
   building: party,
@@ -467,18 +472,6 @@ export const SEED_DIVISIONS: OwnershipDivisionSeed[] = [
     active: true,
     owners: owners('Best Care Auto Transport'),
     flows: flows({ carShipping: true }),
-  },
-  {
-    id: 'COMPANY',
-    code: 'COMPANY',
-    name: 'Company',
-    brand: null,
-    parentId: null,
-    color: null,
-    sortOrder: 40,
-    active: true,
-    owners: null,
-    flows: null,
   },
 ]
 

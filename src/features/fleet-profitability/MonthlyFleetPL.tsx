@@ -8,7 +8,8 @@ import { useOwnerOperatorProfitability, aggregateOwnerOperator } from '@/hooks/u
 import { useFleetFixedCosts, type FleetFixedCostKey } from '@/hooks/useFleetFixedCosts'
 import { useTrucks } from '@/hooks/useTrucks'
 import { useAppStore } from '@/store/useAppStore'
-import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { FLEET_GROUPS } from '@/lib/fleetGroups'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 import type { FleetGroup } from '@/types/equipment'
 import { computeFleetMonthlyLines } from '@/lib/fleetMonthlyPL'
 import { monthRange, monthLabel } from './monthRange'
@@ -90,6 +91,7 @@ function EditableCostRow({ label, amount, onCommit }: { label: string; amount: n
 type ProfitTab = FleetGroup | 'OWNER_OPERATOR'
 
 export function MonthlyFleetPL() {
+  const { fleetGroupLabel } = useDriverTypes()
   const [monthOffset, setMonthOffset] = useState(0)
   const [group, setGroup] = useState<ProfitTab>('LOCAL')
 
@@ -159,7 +161,7 @@ export function MonthlyFleetPL() {
                   style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
                     background: active ? 'var(--tms-card)' : 'transparent', color: active ? 'var(--tms-text)' : 'var(--tms-text-2)',
                     boxShadow: active ? 'var(--tms-shadow)' : 'none' }}>
-                  {FLEET_GROUP_LABELS[g]}
+                  {fleetGroupLabel(g)}
                 </button>
               )
             })}

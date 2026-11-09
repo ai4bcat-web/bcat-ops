@@ -179,7 +179,7 @@ describe('topLevelOf and divisionTree', () => {
 
   it('nests the three Ivan subsidiaries under Ivan Cartage in sort order', () => {
     const tree = divisionTree(divisions)
-    expect(tree.map((n) => n.division.code)).toEqual(['BROKERAGE', 'ASSETS', 'CAR_SHIPPING', 'COMPANY'])
+    expect(tree.map((n) => n.division.code)).toEqual(['BROKERAGE', 'ASSETS', 'CAR_SHIPPING'])
     const assets = tree.find((n) => n.division.code === 'ASSETS')
     expect(assets?.children.map((c) => c.division.code)).toEqual(['OWNER_OPERATOR', 'BOX_TRUCK', 'LOCAL'])
   })

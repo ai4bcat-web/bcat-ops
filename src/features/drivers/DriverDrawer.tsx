@@ -21,7 +21,7 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
 import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
 import { COLOR_MAP } from '@/lib/driverColors'
-import { DRIVER_FLEETS, DRIVER_FLEET_LABELS } from '@/lib/fleetGroups'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 import { classificationForFleet, driverExpiry } from '@/lib/fileHub'
 import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
 import type { ColorKey } from '@/types'
@@ -89,6 +89,7 @@ function ReadOnly({ label, value, from }: { label: string; value: string; from: 
 }
 
 export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawerProps) {
+  const { optionsFor } = useDriverTypes()
   // The prop is a snapshot from when Edit was clicked; anything uploaded or changed
   // since would be invisible. Prefer the live record.
   const liveDrivers = useAppStore((s) => s.drivers)
@@ -360,7 +361,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                     render={({ field }) => (
                       <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || null)} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
                         <option value="">— Unclassified —</option>
-                        {DRIVER_FLEETS.map((g) => <option key={g} value={g}>{DRIVER_FLEET_LABELS[g]}</option>)}
+                        {optionsFor(field.value).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                       </select>
                     )}
                   />

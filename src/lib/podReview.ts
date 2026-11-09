@@ -14,6 +14,7 @@
  * the notes, which also land on the load.
  */
 import type { DriverSubmissionDocRecord, DriverSubmissionRecord, SubmissionWithDocs } from './driverSubmissionsClient'
+import { isOwnerOperator } from './driverOwnership'
 import type { Driver } from '@/types'
 
 export type PodReviewStatus = 'PENDING' | 'APPROVED' | 'NEEDS_REPLACEMENT'
@@ -160,8 +161,8 @@ export function replacementText(input: {
 }
 
 /** Ivan's own drivers or an owner operator — the two apps PODs arrive from. */
-export function appLabel(driver: Pick<Driver, 'driverType'> | null | undefined): 'Owner operator app' | 'Ivan driver app' {
-  return driver?.driverType === 'OWNER_OPERATOR' ? 'Owner operator app' : 'Ivan driver app'
+export function appLabel(driver: Pick<Driver, 'fleetGroup' | 'driverType'> | null | undefined): 'Owner operator app' | 'Ivan driver app' {
+  return driver && isOwnerOperator(driver) ? 'Owner operator app' : 'Ivan driver app'
 }
 
 /** The PRO a submission is for: the load's, or what the driver typed. */

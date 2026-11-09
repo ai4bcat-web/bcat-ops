@@ -15,7 +15,7 @@
  * Scope: shipments whose Ship Date in the full export (joined by PRO; `L<pro>` originals match their numeric PRO) is >= 2025-01-01.
  * Writes ONLY, each only while the target is still empty (conditional update; never overwrites): Load.equipmentType,
  * Order.equipmentType, Shipment.salesRepCode, plus one AuditLog row per changed shipment with the previous values. Never a money
- * or status field, never a notice / e-mail / message. ZAK (a driver name) and unknown codes (PO, VM, FT, VH, SD...) are
+ * or status field, never a notice / e-mail / message. ZAK (a driver name) and any code outside EQUIPMENT_MAP are
  * never written; division group names (IVAN CARTAGE CO / BCAT / OWNER OPERATORS) are compared with Shipment.revDivision and reported only.
  * Re-runnable and idempotent; progress is checkpointed to ~/bcat-ops-backups/aw-equip-rep-<suffix>.checkpoint.json.
  * PII: names only go into the 0600 CSVs, stdout carries aggregated counts (and distinct rep names with counts).

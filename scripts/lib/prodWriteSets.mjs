@@ -43,6 +43,8 @@ export const PROD_WRITE_SETS = {
   awEquipRep: { models: ['Shipment', 'Load', 'Order', 'AuditLog'] },
   // `awSalesRepId.mjs --apply`: enrich-only Shipment.salesRepId + Order.customerRepId (where empty) + one AuditLog row per shipment.
   awSalesRepId: { models: ['Shipment', 'Order', 'AuditLog'] },
+  // `awSalesRepFill.mjs --apply`: enrich-only Shipment.salesRepCode / salesRepId + Order.customerRepId on shipments with NO rep (from the Aljex Salesrep ID) + one AuditLog row per shipment.
+  awSalesRepFill: { models: ['Shipment', 'Order', 'AuditLog'] },
   // `awZakDriver.mjs --apply`: LoadCarrier.driverId/driverName/driverPhone on the own-asset leg of ZAK-coded PROs, only while empty + one AuditLog row per leg.
   awZakDriver: { models: ['LoadCarrier', 'AuditLog'] },
   awRenumberL: { models: ['Shipment', 'Load', 'Invoice', 'CarrierBill', 'SpotRequest', 'WorkflowRun', 'IntakeLoad', 'TrackingLink', 'Quote', 'LaneRateSample', 'Commission', 'AuditLog'] },
@@ -52,13 +54,24 @@ export const PROD_WRITE_SETS = {
   // `awDeletePayables.mjs --apply`: the 23 OPEN 2025 CarrierBill rows are deleted, ApPayment rows that paid them are edited/deleted (awPreDelete rule),
   // their LoadCarrier legs are released (AWAITING_INVOICE, no bill), one AuditLog row per bill. Never AR/Invoice/Load/Shipment/Order.
   awDeletePayables: { models: ['CarrierBill', 'ApPayment', 'LoadCarrier', 'AuditLog'] },
-  // `awCarriers.mjs activate|billing|delete --apply` (union; each subcommand's own subset is SUB_MODELS in the script):
-  // Carrier.status / billing fields / delete, CarrierPaymentMethod (billing), CarrierTaxVault (delete; NOT an Amplify model: `CarrierTaxVault-<apiId>`), one AuditLog row per carrier.
-  awCarriers: { models: ['Carrier', 'CarrierPaymentMethod', 'CarrierTaxVault', 'AuditLog'] },
+  // `awCarriers.mjs activate|billing|inactivate|delete|restore --apply` (union; each subcommand's own subset is SUB_MODELS in the script):
+  // Carrier.status / billing fields / delete, CarrierPaymentMethod (billing, delete), CarrierContact + CarrierDocument (delete: child rows go with the carrier),
+  // CarrierTaxVault (delete; NOT an Amplify model: `CarrierTaxVault-<apiId>`), one AuditLog row per carrier.
+  awCarriers: { models: ['Carrier', 'CarrierContact', 'CarrierPaymentMethod', 'CarrierDocument', 'CarrierTaxVault', 'AuditLog'] },
   // `awRestoreDeleted.mjs --apply`: put-if-absent of the rows DELETE_SHIPMENTS exported (the models it deletes) + one AuditLog row per restored shipment.
   awRestoreDeleted: { models: ['ArPayment', 'ApPayment', 'LegacyAljexRow', 'Commission', 'FactoringItem', 'Invoice', 'CarrierBill', 'LaneRateSample', 'LoadFinancials', 'LoadCharge', 'LoadCheckCall', 'TrackingLink', 'ShipmentDocument', 'ShipmentNotice', 'ShipmentPosting', 'ShipmentMessage', 'LoadCarrier', 'Load', 'Order', 'Shipment', 'AuditLog'] },
-  // `awLocationRename.mjs --apply`: the two approved Location renames (name/street/city/state/zip + normalizedName/normalizedAddress, geocode cleared) + one AuditLog row per row.
-  awLocationRename: { models: ['Location', 'AuditLog'] },
+  // `awLocationRename.mjs --apply`: the approved Location renames (name/street/city/state/zip + normalizedName/normalizedAddress, geocode cleared) + one AuditLog row per row;
+  // `--with-stop-copies`: Load.stops[].name / originName / destinationName copies of the old name + one AuditLog row per Load.
+  awLocationRename: { models: ['Location', 'Load', 'AuditLog'] },
   // `awCustomerEmail.mjs --apply`: enrich-only Customer.apEmail / invoiceCopyEmails / contactEmail (where empty) + one AuditLog row per customer.
+  // `awDivisions.mjs drivers|retire-company|restore --apply` (union; per-subcommand subsets are SUB_MODELS in the script): Driver.driverType only (one AuditLog row per driver),
+  // delete of the COMPANY OwnershipDivision row (exported first, refuses while referenced) + restore of it.
+  awDivisions: { models: ['Driver', 'OwnershipDivision', 'AuditLog'] },
   awCustomerEmail: { models: ['Customer', 'AuditLog'] },
+  // `awTruckFleet.mjs box-truck|owner-operator|rollback --apply`: Equipment.fleetGroup only (one truck per driver, conditional on the expected old value) + one AuditLog row per truck.
+  awTruckFleet: { models: ['Equipment', 'AuditLog'] },
+  // `awShipmentNumber.mjs --apply`: renumber post-cutover shipments (99xxx -> 20000...) in every table awRenumberL moves + TmsSettings.nextShipmentNumber.
+  // `awCustomerBilling.mjs --apply`: Customer.billingMethod / apEmail / paymentTermsDays (conditional per customer) + one AuditLog row per customer.
+  awCustomerBilling: { models: ['Customer', 'AuditLog'] },
+  awShipmentNumber: { models: ['Shipment', 'Load', 'Invoice', 'CarrierBill', 'SpotRequest', 'WorkflowRun', 'IntakeLoad', 'TrackingLink', 'Quote', 'LaneRateSample', 'Commission', 'AuditLog', 'TmsSettings'] },
 };

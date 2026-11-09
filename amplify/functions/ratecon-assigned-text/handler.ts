@@ -18,6 +18,7 @@ import { sendMessage } from '../_shared/twilio'
 import { sendDispatchText, type SendDeps } from '../_shared/dispatchSend'
 import { slackClient } from '../_shared/slackApi'
 import { mirrorOutbound, slackMirrorEnabled } from '../_shared/slackDispatch'
+import { isOwnerOperator as isOwnerOperatorByFleet } from '../../../src/lib/driverOwnership'
 import { toE164Strict, dispatchersOf, type DispatchConversation } from '../../../src/lib/dispatch'
 
 const dynamo = new DynamoDBClient({})
@@ -80,7 +81,20 @@ export function newlyAssigned(next: LoadImage, prev: LoadImage | undefined, isOw
   return [...driversOnLoad(next)].filter((id) => isOwnerOperator(id) && !before.has(id) && !texted.has(id))
 }
 
-/** Owner operators: marked so on the driver, or settled as one. Cached per container briefly. */
+/**
+ * Owner operator by the one shared rule (src/lib/driverOwnership.ts): the fleet group decides, so Chad (fleet
+ * OWNER_OPERATOR, driverType COMPANY) and Michael (fleet OWNER_OPERATOR, no driverType) are texted and a LOCAL driver
+ * with a stray driverType is not. Only a driver with NO fleet falls back to driverType, then to being settled as one.
+ */
+export function isRateconOwnerOperator(
+  driver: { fleetGroup?: string | null; driverType?: string | null },
+  settledAsOwnerOp: boolean,
+): boolean {
+  if (driver.fleetGroup) return isOwnerOperatorByFleet(driver)
+  return isOwnerOperatorByFleet(driver) || settledAsOwnerOp
+}
+
+/** Owner operators: by fleet (else type / pay setting). Cached per container briefly. */
 let rosterCache: { at: number; rows: Map<string, OwnerOperator> } | null = null
 async function ownerOperators(tables: DispatchTables): Promise<Map<string, OwnerOperator>> {
   if (rosterCache && Date.now() - rosterCache.at < 60_000) return rosterCache.rows
@@ -100,7 +114,7 @@ async function ownerOperators(tables: DispatchTables): Promise<Map<string, Owner
   for (const d of drivers) {
     const id = String(d.id)
     if (d.active === false) continue
-    if (d.driverType === 'OWNER_OPERATOR' || settledAsOwnerOp.has(id)) rows.set(id, d as unknown as OwnerOperator)
+    if (isRateconOwnerOperator(d as { fleetGroup?: string | null; driverType?: string | null }, settledAsOwnerOp.has(id))) rows.set(id, d as unknown as OwnerOperator)
   }
   rosterCache = { at: Date.now(), rows }
   return rows

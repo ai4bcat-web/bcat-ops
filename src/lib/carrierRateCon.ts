@@ -1,46 +1,83 @@
 /**
- * Carrier rate confirmation — the document a booked carrier signs.
+ * Carrier rate confirmation - the document a booked carrier signs, laid out to match BCAT's
+ * reference rate con (PRO 14832) page for page: the logo and remit-from block, the FROM /
+ * CARRIER boxes, equipment strip, CHARGES + DISPATCH NOTES, numbered PICK / STOP blocks, the
+ * fixed legal terms (`carrierRateConTerms.ts`) and the signature / date footer on every page.
  *
- * Built in the browser from the shipment bundle, mailed as a PDF attachment by
- * SEND_RATE_CON, and stamped with the typed signature by the public signing page.
- * The header carries the division logo (on a white plate) when it has a PNG/JPEG one.
- * The layout follows the driver-pay statement (`src/lib/payPdf.ts`): jsPDF in
- * points on letter stock, a black header band, `jspdf-autotable` for the grids.
+ * Built in the browser from the shipment bundle, mailed by SEND_RATE_CON, and stamped with the
+ * typed signature by the public signing page (`stampSignature`, below, which appends one page and
+ * never touches these). Pure pdf-lib and `Intl`: no `node:*`, DOM or canvas, so a Lambda may
+ * bundle it. Imports are relative for the same reason.
  *
- * Browser only — the Lambdas never import this file, so `@/` paths are fine here
- * (unlike the shared pure libs, which must stay relative for the esbuild bundle).
+ * Every string is folded to ASCII before it is drawn: the standard PDF fonts encode WinAnsi and
+ * throw on anything outside it.
  *
- * Only CARRIER-side money and CARRIER-visible references belong on this page: the
- * carrier must never read what the customer pays. Callers filter before handing the
- * stops and charges over.
+ * Only CARRIER-side money and CARRIER-visible references belong on this page: the carrier must
+ * never read what the customer pays. Callers filter before handing the stops and charges over.
  */
-import jsPDF from 'jspdf'
-import autoTable from 'jspdf-autotable'
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
-import type { CarrierRecord, Division, LoadCarrierRecord, RateConRequiredField } from '@/types/tms'
-import { fetchDivisionLogoDataUrl } from '@/lib/divisionLogo'
-import { drawLetterhead, resolveLetterhead } from '@/lib/pdfLetterhead'
-import type { HeaderLogo } from '@/lib/pdfLetterhead'
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib'
+import type { CarrierRecord, LoadCarrierRecord } from '../types/tms'
+import { RATE_CON_LOGO_HEIGHT, RATE_CON_LOGO_PNG_BASE64, RATE_CON_LOGO_WIDTH } from './carrierRateConLogo'
+import { RATE_CON_TERMS } from './carrierRateConTerms'
 
-/** `jspdf-autotable` writes the finished table's geometry back onto the doc it drew into. */
-interface AutoTabled { lastAutoTable: { finalY: number } }
-
-const money = (n: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
-const cents = (n: number) => money(n / 100)
-
+const PAGE_W = 612
+const PAGE_H = 792
+/** The y a page's body starts at, just under the header box (flow coordinates run down from the top). */
+const BODY_TOP = 189.6
+/** Nothing but the footer may sit below this. */
+const CONTENT_BOTTOM = 715
+const ROW = 12
+/** Air between the bottom of the CHARGES / NOTES boxes and the first PICK rule. */
+const SECTION_GAP = 11.1
+/** Left margin of the appended acceptance page (`stampSignature`). */
 const M = 40
-const FOOT_ROOM = 56
+const MONO_ROW = 9
+const COURIER = 0.6
 
-const REQUIRED_FIELD_LABELS: Record<RateConRequiredField, string> = {
-  DRIVER_NAME: 'Driver name',
-  DRIVER_PHONE: 'Driver phone',
-  TRUCK_NUMBER: 'Truck number',
-  TRAILER_NUMBER: 'Trailer number',
-  PICKUP_ETA: 'Pickup ETA',
-  PLATES: 'Plates',
-  VIN: 'VIN',
+/** Appointments are stored as Chicago wall clock (see `src/lib/date.ts`). */
+const APPT_TZ = 'America/Chicago'
+/** The reference prints its issue stamp in Eastern time and labels it EST all year. */
+const STAMP_TZ = 'America/New_York'
+
+const ink = rgb(0, 0, 0)
+const soft = rgb(0.33, 0.33, 0.33)
+const hatch = rgb(0.82, 0.82, 0.82)
+const white = rgb(1, 1, 1)
+
+/** Punctuation the standard fonts cannot encode, mapped to what a printer reads the same. */
+const FOLD: Record<string, string> = {
+  '\u2013': '-', '\u2014': '-', '\u2212': '-', '\u00b7': '-', '\u2022': '*',
+  '\u2018': "'", '\u2019': "'", '\u201a': ',', '\u201c': '"', '\u201d': '"',
+  '\u2026': '...', '\u00a0': ' ', '\u2044': '/', '\u20ac': 'EUR', '\u00a3': 'GBP',
 }
+
+/** ASCII only: accents stripped to their base letter, typographic punctuation folded, the rest dropped. */
+export function foldAscii(text: string): string {
+  let out = ''
+  for (const ch of text.normalize('NFKD')) {
+    const code = ch.codePointAt(0) ?? 0
+    if (code >= 0x20 && code <= 0x7e) out += ch
+    else if (FOLD[ch] !== undefined) out += FOLD[ch]
+    else if (code === 0x09 || code === 0x0a || code === 0x0d) out += ' '
+  }
+  return out
+}
+
+/**
+ * Where the carrier signs: the footer line every page carries. pdf-lib coordinates (points, origin
+ * bottom-left), so a stamper can draw a typed signature on `page: 'last'` without re-parsing the PDF.
+ * `y` is the line itself; text sits just above it. The date is three segments (M / D / Y).
+ */
+export const RATE_CON_SIGNATURE_ANCHOR = {
+  page: 'last',
+  signatureLine: { x: 105.6, y: 792 - 759.2, width: 216.1 },
+  dateLine: { x: 390, y: 792 - 759.2, width: 143.4 },
+  dateSegments: [
+    { x: 390, width: 44 },
+    { x: 439.7, width: 44 },
+    { x: 489.4, width: 44 },
+  ],
+} as const
 
 export interface RateConStop {
   kind: 'PICKUP' | 'DELIVERY'
@@ -54,27 +91,81 @@ export interface RateConStop {
   apptType?: string | null
   /** CARRIER-visible references only. */
   references?: { label: string; value: string }[]
+  /** Printed as "Appt Notes". */
   instructions?: string | null
+  /** Dock hours, printed as "Hours : ...". */
+  hours?: string | null
+}
+
+/** The BCAT person the carrier calls: the FROM box. */
+export interface RateConRep {
+  name?: string | null
+  phone?: string | null
+  email?: string | null
 }
 
 export interface RateConInput {
-  division: Division | null
-  carrier: Pick<CarrierRecord, 'name' | 'mcNumber' | 'dotNumber' | 'phone' | 'email'>
-  loadCarrier: LoadCarrierRecord
+  /** The carrier profile; `fax` prints when the profile has one. */
+  carrier: Pick<CarrierRecord, 'name' | 'mcNumber' | 'dotNumber' | 'phone'> & { fax?: string | null }
+  /** The assignment: truck, trailer and driver come from it. */
+  loadCarrier: Pick<LoadCarrierRecord, 'truckNumber' | 'trailerNumber' | 'driverName' | 'driverPhone'>
+  rep?: RateConRep | null
+  /** Printed as the PRO #. */
   loadNumber: string
+  /** The stamp under the title; now when omitted. */
+  issuedAt?: Date
   equipmentType?: string | null
   commodity?: string | null
   weightLbs?: number | null
+  miles?: number | null
+  pieces?: number | null
   stops: RateConStop[]
   /** CARRIER-side charge lines only. */
   charges: { label: string; amountCents: number }[]
   totalCents: number
-  quickPay?: { days: number; feeBps: number; feeCents: number; netCents: number } | null
-  paymentTermsDays?: number | null
-  terms: string
-  /** Order special instructions + rate-con notes (Step AH), printed above Terms. */
+  /** Order special instructions + rate-con notes, printed in DISPATCH NOTES. */
   notes?: string
-  requiredFields: RateConRequiredField[]
+}
+
+/** BCAT's main line: the FROM box prints it when the rep has no number of their own. */
+export const RATE_CON_COMPANY_PHONE = '(847) 450-0899'
+
+/**
+ * The FROM box: the booked rep (assignment first, then the load), else whoever is building the
+ * document. Each identifier is a Cognito username or an e-mail; the first one that names a person
+ * wins. Name and phone come from the user directory (matched on e-mail or profile id); an
+ * identifier that is an e-mail but not in the directory still prints, bare.
+ */
+export function rateConRepOf(
+  profiles: readonly { id?: string | null; email: string; name?: string | null; phone?: string | null }[],
+  ...ids: (string | null | undefined)[]
+): RateConRep | null {
+  for (const raw of ids) {
+    const key = raw?.trim()
+    if (!key) continue
+    const lower = key.toLowerCase()
+    const profile = profiles.find((p) => p.email.toLowerCase() === lower || (p.id != null && p.id === key))
+    if (profile) return { name: profile.name ?? null, phone: profile.phone ?? null, email: key.includes('@') ? key : profile.email }
+    if (key.includes('@')) return { name: null, phone: null, email: key }
+  }
+  return null
+}
+
+/**
+ * Aljex stores a charge's four-letter code in the label (`MAC`, `LHS`, `DETN`). The carrier reads
+ * the words; an unknown label prints as typed, never cut.
+ */
+const CHARGE_LABELS: Record<string, string> = {
+  MAC: 'MACROPOINT ACCEPTANCE', LHS: 'LINE HAUL SERVICE', CHAS: 'CHASSIS', STOR: 'STORAGE', WRHS: 'WAREHOUSING',
+  DETN: 'DETENTION', DTL: 'DETENTION LOADING', DTU: 'DETENTION UNLOADING', PRPL: 'PRE-PULL',
+  TORD: 'TRUCK ORDERED NOT USED', MISC: 'MISCELLANEOUS', STOP: 'STOP OFF', LATE: 'LATE DELIVERY',
+  SCAL: 'SCALE', LAYO: 'LAYOVER', LUMP: 'LUMPER', PERM: 'PERMIT', DEMU: 'DEMURRAGE', TARP: 'TARP',
+  RAMP: 'RAMP', GATE: 'GATE FEE', LABR: 'LABOR', DOCK: 'DOCK FEE',
+}
+
+export function rateConChargeLabel(label: string): string {
+  const text = foldAscii(label).replace(/\s+/g, ' ').trim().toUpperCase()
+  return CHARGE_LABELS[text] ?? text
 }
 
 /** The two free-text order fields the rate con prints, blank-safe and in print order. */
@@ -87,333 +178,403 @@ export function rateConFilename(loadNumber: string, version: number): string {
   return `rate-con-${loadNumber}-v${version}.pdf`
 }
 
-/** Base64 (no data-URI prefix) of a built doc — for emailing and for the sign API. */
-export function rateConPdfBase64(doc: jsPDF): string {
-  return doc.output('datauristring').split('base64,')[1] ?? ''
-}
-
-/**
- * Split the stops into legs. A leg ends at its last delivery: the next pickup after a
- * delivery starts a new one. Multi-pick / multi-drop stays one leg. An empty stop list
- * still yields one (empty) leg so the document always has exactly one page per leg.
- */
-function legsOf(stops: RateConStop[]): RateConStop[][] {
-  const legs: RateConStop[][] = []
-  let current: RateConStop[] = []
-  let delivered = false
-  for (const stop of stops) {
-    if (stop.kind === 'PICKUP' && delivered) {
-      legs.push(current)
-      current = []
-      delivered = false
-    }
-    if (stop.kind === 'DELIVERY') delivered = true
-    current.push(stop)
+/** Base64 (no data-URI prefix) of a built doc - for emailing and for the sign API. */
+export function rateConPdfBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
   }
-  legs.push(current)
-  return legs
+  return btoa(binary)
 }
 
-function addressOf(stop: RateConStop): string {
-  const cityLine = [stop.city, [stop.state, stop.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
-  return [stop.name, stop.address, cityLine].filter(Boolean).join('\n') || '—'
+// -- formatting ---------------------------------------------------------------------------------
+
+const money = (cents: number) =>
+  (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** `(847) 450-0899 (p)`; anything that is not ten digits prints as typed. */
+function phoneOf(raw: string | null | undefined, tag: 'p' | 'f' | null): string {
+  const text = foldAscii(raw ?? '').trim()
+  if (!text) return ''
+  const digits = text.replace(/\D/g, '')
+  const ten = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits
+  const pretty = ten.length === 10 ? `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}` : text
+  return tag ? `${pretty} (${tag})` : pretty
 }
 
+function zonedParts(at: Date, timeZone: string): Record<string, string> {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, year: '2-digit', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(at)
+  return Object.fromEntries(parts.map((p) => [p.type, p.value]))
+}
+
+/** `10/26/26 13:34:25` in Eastern time. */
+function stampOf(at: Date): string {
+  const p = zonedParts(at, STAMP_TZ)
+  return `${p.month}/${p.day}/${p.year} ${p.hour}:${p.minute}:${p.second}`
+}
+
+/** `10/29/26 @ 11:00`, `10/29/26` (date-only), `10/29/26 @ 08:00 - 12:00`, `10/29/26 FCFS`, `TBD`. */
 function apptOf(stop: RateConStop): string {
-  if (!stop.apptAt) return stop.apptType ? `${stop.apptType} — TBD` : 'TBD'
-  const at = new Date(stop.apptAt)
-  if (Number.isNaN(at.getTime())) return 'TBD'
-  const date = at.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  const time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-  const end = stop.apptEnd ? new Date(stop.apptEnd) : null
-  const window = end && !Number.isNaN(end.getTime())
-    ? `${time} – ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
-    : time
-  return [date, window, stop.apptType].filter(Boolean).join('\n')
-}
-
-function brokerLines(division: Division | null): { name: string; ids: string; remit: string[] } {
-  const name = division?.legalName || division?.name || 'Broker'
-  const ids = [
-    division?.mcNumber ? `MC ${division.mcNumber}` : '',
-    division?.dotNumber ? `DOT ${division.dotNumber}` : '',
-  ].filter(Boolean).join('  ·  ')
-  const addr = division?.remitToAddress ?? null
-  const cityLine = addr
-    ? [addr.city, [addr.state, addr.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
-    : ''
-  const remit = [
-    division?.remitToName || name,
-    addr?.street ?? '',
-    cityLine,
-    division?.remitToEmail ?? '',
-  ].filter(Boolean)
-  return { name, ids, remit }
-}
-
-export interface BuildRateConOptions {
-  /** Resolves a Division.logoKey to a PNG/JPEG data URL, or null. Defaults to the S3 loader. */
-  loadLogo?: (logoKey: string) => Promise<string | null>
-}
-
-/** Black band at the top of every page: who is tendering, which load, which leg. */
-function drawHeader(doc: jsPDF, input: RateConInput, legIndex: number, legCount: number, logo: HeaderLogo | null): void {
-  const broker = brokerLines(input.division)
-  drawLetterhead(doc, {
-    legalName: broker.name,
-    ids: broker.ids,
-    title: 'RATE CONFIRMATION',
-    subtitle: legCount > 1
-      ? `Load ${input.loadNumber}  ·  Leg ${legIndex + 1} of ${legCount}`
-      : `Load ${input.loadNumber}`,
-    logo,
-  })
-}
-
-/** Remit-to on the left, the carrier we booked on the right. Returns the next y. */
-function drawParties(doc: jsPDF, input: RateConInput): number {
-  const W = doc.internal.pageSize.getWidth()
-  const broker = brokerLines(input.division)
-  const right = W / 2 + 10
-  let y = 100
-
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9)
-  doc.setTextColor(107, 114, 128)
-  doc.text('REMIT TO', M, y)
-  doc.text('CARRIER', right, y)
-  y += 14
-
-  const carrierIds = [
-    input.carrier.mcNumber ? `MC ${input.carrier.mcNumber}` : '',
-    input.carrier.dotNumber ? `DOT ${input.carrier.dotNumber}` : '',
-  ].filter(Boolean).join('  ·  ')
-  const carrierLines = [
-    input.carrier.name,
-    carrierIds,
-    input.carrier.phone ?? '',
-    input.carrier.email ?? '',
-  ].filter(Boolean)
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.setTextColor(55, 65, 81)
-  const rows = Math.max(broker.remit.length, carrierLines.length)
-  for (let i = 0; i < rows; i++) {
-    if (broker.remit[i]) doc.text(broker.remit[i], M, y + i * 13)
-    if (carrierLines[i]) doc.text(carrierLines[i], right, y + i * 13)
+  if (!stop.apptAt) return stop.apptType === 'tbd' ? 'TBD' : ''
+  const start = new Date(stop.apptAt)
+  if (Number.isNaN(start.getTime())) return ''
+  const s = zonedParts(start, APPT_TZ)
+  const date = `${s.month}/${s.day}/${s.year}`
+  if (stop.apptType === 'tbd') return `${date} TBD`
+  if (stop.apptType === 'fcfs') return `${date} FCFS`
+  const time = `${s.hour}:${s.minute}`
+  if (time === '00:00') return date
+  const end = stop.apptType === 'range' && stop.apptEnd ? new Date(stop.apptEnd) : null
+  if (end && !Number.isNaN(end.getTime())) {
+    const e = zonedParts(end, APPT_TZ)
+    return `${date} @ ${time} - ${e.hour}:${e.minute}`
   }
-  return y + rows * 13 + 10
+  return `${date} @ ${time}`
 }
 
-function drawStops(doc: jsPDF, leg: RateConStop[], startY: number): number {
-  const W = doc.internal.pageSize.getWidth()
-  autoTable(doc, {
-    startY,
-    head: [['Stop', 'Location', 'Appointment', 'References', 'Instructions']],
-    body: leg.map((s, i) => [
-      `${i + 1}. ${s.kind === 'PICKUP' ? 'Pickup' : 'Delivery'}`,
-      addressOf(s),
-      apptOf(s),
-      (s.references ?? []).map((r) => `${r.label}: ${r.value}`).join('\n') || '—',
-      s.instructions || '—',
-    ]),
-    theme: 'striped',
-    headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8.5, halign: 'left' },
-    bodyStyles: { fontSize: 8.5, textColor: [31, 41, 55], valign: 'top' },
-    columnStyles: { 0: { cellWidth: 62, fontStyle: 'bold' }, 2: { cellWidth: 92 }, 3: { cellWidth: 92 } },
-    margin: { left: M, right: M },
-    tableWidth: W - M * 2,
+/** Greedy word wrap on a monospaced column count; a word wider than the box is broken. Blank lines are kept. */
+function wrapMono(text: string, cols: number): string[] {
+  const out: string[] = []
+  for (const raw of text.replace(/\r\n?/g, '\n').split('\n')) {
+    const paragraph = foldAscii(raw).replace(/\s+/g, ' ')
+    const words = paragraph.trim().split(' ').filter(Boolean)
+    if (!words.length) { out.push(''); continue }
+    let line = ''
+    for (let word of words) {
+      while (word.length > cols) {
+        if (line) { out.push(line); line = '' }
+        out.push(word.slice(0, cols))
+        word = word.slice(cols)
+      }
+      const next = line ? `${line} ${word}` : word
+      if (next.length <= cols) line = next
+      else { out.push(line); line = word }
+    }
+    if (line) out.push(line)
+  }
+  while (out.length && out[out.length - 1] === '') out.pop()
+  return out
+}
+
+// -- drawing ------------------------------------------------------------------------------------
+
+interface Fonts {
+  helv: PDFFont
+  helvBold: PDFFont
+  mono: PDFFont
+  monoBold: PDFFont
+  monoBoldOblique: PDFFont
+}
+
+interface Ctx {
+  pdf: PDFDocument
+  fonts: Fonts
+  logo: PDFImage
+  input: RateConInput
+  stamp: string
+  page: PDFPage
+  /** Flow cursor: distance from the top of the page. */
+  y: number
+}
+
+/** Text with its top edge at `top` (distance from the page top, as a text extractor reports it). */
+function put(
+  page: PDFPage, text: string, x: number, top: number, font: PDFFont, size: number,
+  opts: { color?: ReturnType<typeof rgb>; align?: 'left' | 'right' | 'center' } = {},
+): void {
+  const s = foldAscii(text)
+  if (!s) return
+  const width = font.widthOfTextAtSize(s, size)
+  const left = opts.align === 'right' ? x - width : opts.align === 'center' ? x - width / 2 : x
+  page.drawText(s, { x: left, y: PAGE_H - top - size * (font.name.startsWith('Courier') ? 0.63 : 0.72), size, font, color: opts.color ?? ink })
+}
+
+function hline(page: PDFPage, x1: number, x2: number, y: number, thickness = 0.45): void {
+  page.drawLine({ start: { x: x1, y: PAGE_H - y }, end: { x: x2, y: PAGE_H - y }, thickness, color: ink })
+}
+
+function box(page: PDFPage, x1: number, y1: number, x2: number, y2: number, fill?: ReturnType<typeof rgb>): void {
+  page.drawRectangle({
+    x: x1, y: PAGE_H - y2, width: x2 - x1, height: y2 - y1,
+    borderColor: ink, borderWidth: 0.45, ...(fill ? { color: fill } : {}),
   })
-  return (doc as jsPDF & AutoTabled).lastAutoTable.finalY + 22
+}
+
+/** Shrink a mono string to fit `maxW`, then cut it. */
+function fitMono(text: string, maxW: number, size: number): { text: string; size: number } {
+  const s = foldAscii(text)
+  let sz = size
+  while (sz > 7 && s.length * COURIER * sz > maxW) sz -= 0.5
+  const cols = Math.floor(maxW / (COURIER * sz))
+  return { text: s.length > cols ? s.slice(0, cols) : s, size: sz }
+}
+
+/** Value text in the left-hand strip: centred in a narrow box when it fits, else left-aligned at the box start. */
+function stripValue(page: PDFPage, text: string, x0: number, boxW: number, top: number, font: PDFFont): void {
+  const s = foldAscii(text)
+  if (!s) return
+  const w = font.widthOfTextAtSize(s, 8)
+  put(page, s, w <= boxW ? x0 + (boxW - w) / 2 : x0, top, font, 8)
+}
+
+function drawFooter(ctx: Ctx): void {
+  const { page, fonts, input } = ctx
+  put(page, 'Carrier Signature', 26.6, 751.7, fonts.helv, 10)
+  hline(page, 105.6, 321.7, 759.2, 0.5)
+  put(page, 'Date', 366, 751.7, fonts.helv, 10)
+  hline(page, 390, 434, 759.2, 0.5)
+  hline(page, 439.7, 483.7, 759.2, 0.5)
+  hline(page, 489.4, 533.4, 759.2, 0.5)
+  put(page, '/', 436.8, 751.7, fonts.helv, 10)
+  put(page, '/', 486.5, 751.7, fonts.helv, 10)
+  put(page, 'M', 409.9, 761.1, fonts.helv, 7)
+  put(page, 'D', 457.7, 761.1, fonts.helv, 7)
+  put(page, 'Send Carrier Bills to the Address Above', 60, 769.7, fonts.helvBold, 10)
+  put(page, 'PRO #', 306, 769.7, fonts.helvBold, 10)
+  put(page, input.loadNumber, 351.6, 767.8, fonts.mono, 10)
+  put(page, 'must appear on all Invoices', 414, 769.7, fonts.helvBold, 10)
+}
+
+/** Everything that repeats on every page above the body: title, logo, remit-from, FROM and CARRIER boxes. */
+function drawHeader(ctx: Ctx): void {
+  const { page, fonts, input } = ctx
+  const { helvBold, mono, monoBold } = fonts
+
+  put(page, 'PRO #', 306, 15, helvBold, 12)
+  put(page, input.loadNumber, 366, 13, monoBold, 17)
+  put(page, 'Rate Confirmation', 450, 12, helvBold, 15 * (139 / helvBold.widthOfTextAtSize('Rate Confirmation', 15)))
+  put(page, ctx.stamp, 450, 29, mono, 10)
+  put(page, '(EST)', 564, 29, mono, 10)
+
+  page.drawImage(ctx.logo, { x: 25, y: PAGE_H - 33 - 72, width: 191, height: 72 })
+  put(page, 'BCAT LOGISTICS', 30, 137, mono, 10)
+  put(page, '1193 E HIGGINS RD', 30, 149, mono, 10)
+  put(page, 'ELK GROVE VILLAGE IL 60007', 30, 173, mono, 10)
+
+  box(page, 306, 45, 594, 105)
+  box(page, 306, 45, 594, 189)
+  hline(page, 18, 306, 189)
+  ;[...'FROM'].forEach((ch, i) => put(page, ch, 294, 51 + i * 12, helvBold, 10, { align: 'center' }))
+  ;[...'CARRIER'].forEach((ch, i) => put(page, ch, 294, 109 + i * 10.85, helvBold, 10, { align: 'center' }))
+
+  const rep = input.rep
+  // Name and phone are the point of the box: without a directory name the box still says who, and
+  // without a number it gives the company line.
+  const repName = fitMono(foldAscii(rep?.name?.trim() || 'BCAT Logistics').toUpperCase(), 276, 10)
+  put(page, repName.text, 312, 53, mono, repName.size)
+  put(page, phoneOf(rep?.phone?.trim() || RATE_CON_COMPANY_PHONE, 'p'), 312, 65, mono, 10)
+  const repEmail = fitMono(rep?.email ?? '', 276, 10)
+  put(page, repEmail.text, 312, 89, mono, repEmail.size)
+
+  const carrier = fitMono(foldAscii(input.carrier.name).toUpperCase(), 276, 10)
+  put(page, carrier.text, 312, 113, mono, carrier.size)
+  put(page, phoneOf(input.carrier.phone, 'p'), 312, 125, mono, 10)
+  put(page, phoneOf(input.carrier.fax, 'f'), 312, 137, mono, 10)
+  put(page, 'MC #', 311, 149, helvBold, 9)
+  put(page, input.carrier.mcNumber ?? '', 354, 149, mono, 10)
+  put(page, 'DOT', 311, 161, helvBold, 9)
+  put(page, input.carrier.dotNumber ?? '', 348, 161, mono, 10)
+  put(page, 'Driver', 311, 173, helvBold, 9)
+  const driver = fitMono(foldAscii(input.loadCarrier.driverName ?? '').toUpperCase(), 96, 10)
+  put(page, driver.text, 348, 173, mono, driver.size)
+  put(page, 'Truck #', 488, 149, helvBold, 9.6, { align: 'right' })
+  put(page, 'Trailer #', 488, 161, helvBold, 9.6, { align: 'right' })
+  put(page, 'Cell #', 488, 173, helvBold, 9.6, { align: 'right' })
+  put(page, fitMono(input.loadCarrier.truckNumber ?? '', 98, 10).text, 494, 149, mono, 10)
+  put(page, fitMono(input.loadCarrier.trailerNumber ?? '', 98, 10).text, 494, 161, mono, 10)
+  put(page, phoneOf(input.loadCarrier.driverPhone, null), 494, 173, mono, 10)
+}
+
+function newPage(ctx: Ctx): void {
+  ctx.page = ctx.pdf.addPage([PAGE_W, PAGE_H])
+  drawHeader(ctx)
+  drawFooter(ctx)
+  ctx.y = BODY_TOP
+}
+
+/** The equipment strip, CHARGES and DISPATCH NOTES. A notes box too long for the page continues on the next. */
+function drawDetails(ctx: Ctx): void {
+  const { fonts, input } = ctx
+  const label = (text: string, right: number, top: number) => put(ctx.page, text, right, top, fonts.helvBold, 9.3, { align: 'right' })
+  label('Size & Type:', 96, 194)
+  label('Pieces:', 95, 206)
+  label('Description:', 300, 194)
+  label('Weight:', 300, 206)
+  put(ctx.page, 'Miles:', 430, 194, fonts.helvBold, 10)
+  stripValue(ctx.page, (input.equipmentType ?? '').toUpperCase(), 109, 34, 196, fonts.mono)
+  stripValue(ctx.page, input.pieces != null ? String(input.pieces) : '', 109, 34, 208, fonts.mono)
+  stripValue(ctx.page, (input.commodity ?? '').toUpperCase(), 306, 34, 196, fonts.mono)
+  stripValue(ctx.page, input.weightLbs != null ? String(input.weightLbs) : '', 306, 34, 208, fonts.mono)
+  stripValue(ctx.page, input.miles != null ? String(input.miles) : '', 474, 18, 196, fonts.mono)
+
+  const size = 8.5
+  const chargeLines = input.charges.map((c) => ({
+    label: wrapMono(rateConChargeLabel(c.label), 25),
+    amount: money(c.amountCents),
+  }))
+  const chargeRows = chargeLines.reduce((n, c) => n + Math.max(1, c.label.length), 0)
+  const notes = wrapMono(input.notes ?? '', 70)
+
+  let top = 218.5
+  const lead = (): void => {
+    box(ctx.page, 20.4, top, 595.3, top + 8.8, hatch)
+  }
+  // First chunk: both boxes. `room` is what the page leaves for the rows between the bars.
+  const rowsRoom = Math.floor((CONTENT_BOTTOM - top - 8.8 - 10.7 - 17.5) / MONO_ROW)
+  const firstNotes = Math.max(chargeRows, Math.min(notes.length, rowsRoom))
+  const rowsFirst = Math.max(chargeRows, firstNotes, 1)
+  lead()
+  put(ctx.page, 'CHARGES', 123.7, 219, fonts.helvBold, 8, { align: 'center' })
+  put(ctx.page, 'DISPATCH NOTES', 411, 219, fonts.helvBold, 8, { align: 'center' })
+  const bodyTop = top + 8.8
+  const bodyBottom = bodyTop + rowsFirst * MONO_ROW + 10.7
+  box(ctx.page, 20.4, bodyTop, 227, bodyBottom)
+  hline(ctx.page, 161.6, 161.6, bodyTop) // no-op anchor kept out of the way; the divider is a rule below
+  ctx.page.drawLine({ start: { x: 161.6, y: PAGE_H - bodyTop }, end: { x: 161.6, y: PAGE_H - bodyBottom }, thickness: 0.45, color: ink })
+  box(ctx.page, 227, bodyTop, 595.3, bodyBottom)
+  let rowTop = bodyTop + 8.7
+  for (const c of chargeLines) {
+    c.label.forEach((l, i) => put(ctx.page, l, 28, rowTop + i * MONO_ROW, fonts.mono, size))
+    put(ctx.page, c.amount, 224.4, rowTop, fonts.mono, size, { align: 'right' })
+    rowTop += Math.max(1, c.label.length) * MONO_ROW
+  }
+  notes.slice(0, firstNotes).forEach((l, i) => put(ctx.page, l, 235, bodyTop + 8.7 + i * MONO_ROW, fonts.mono, size))
+
+  const totalTop = bodyBottom
+  box(ctx.page, 20.4, totalTop, 227, totalTop + 17.5)
+  ctx.page.drawLine({ start: { x: 161.6, y: PAGE_H - totalTop }, end: { x: 161.6, y: PAGE_H - totalTop - 17.5 }, thickness: 0.45, color: ink })
+  put(ctx.page, 'TOTAL RATE', 28, totalTop + 4.5, fonts.mono, size)
+  put(ctx.page, money(input.totalCents), 224.4, totalTop + 4.5, fonts.mono, size, { align: 'right' })
+  ctx.y = totalTop + 17.5 + SECTION_GAP
+
+  let rest = notes.slice(firstNotes)
+  while (rest.length) {
+    newPage(ctx)
+    top = ctx.y + 4
+    box(ctx.page, 227, top, 595.3, top + 8.8, hatch)
+    put(ctx.page, 'DISPATCH NOTES (CONT.)', 411, top + 0.5, fonts.helvBold, 8, { align: 'center' })
+    const room = Math.floor((CONTENT_BOTTOM - top - 8.8 - 10.7) / MONO_ROW)
+    const chunk = rest.slice(0, room)
+    rest = rest.slice(room)
+    const bottom = top + 8.8 + chunk.length * MONO_ROW + 10.7
+    box(ctx.page, 227, top + 8.8, 595.3, bottom)
+    chunk.forEach((l, i) => put(ctx.page, l, 235, top + 8.8 + 8.7 + i * MONO_ROW, fonts.mono, size))
+    ctx.y = bottom + SECTION_GAP
+  }
+}
+
+/** `STOP_REF` (a stored reference code) prints as the reference's own "Ref #"; other codes lose their underscores. */
+function refLabelOf(label: string): string {
+  const text = foldAscii(label).replace(/_/g, ' ').trim()
+  return !text || /^(stop )?ref$/i.test(text) ? 'Ref' : text
+}
+
+/** One PICK n / STOP n block: facility on the left, appointment / refs / notes on the right. */
+function drawStop(ctx: Ctx, stop: RateConStop, ordinal: number): void {
+  const { fonts } = ctx
+  const left = [
+    stop.name ?? '',
+    stop.address ?? '',
+    [stop.city, [stop.state, stop.zip].filter(Boolean).join(' ')].filter(Boolean).join(' '),
+  ].map((l) => foldAscii(l).toUpperCase()).filter(Boolean)
+  if (stop.hours?.trim()) left.push(`Hours : ${foldAscii(stop.hours).trim()}`)
+
+  const right: { label: string; value: string; valueX: number }[] = []
+  const appt = apptOf(stop)
+  if (appt) right.push({ label: 'Appointment', value: appt, valueX: 376 })
+  for (const ref of stop.references ?? []) {
+    right.push({ label: `${refLabelOf(ref.label)} #`, value: foldAscii(ref.value), valueX: 456 })
+  }
+  const notes = foldAscii(stop.instructions ?? '').replace(/\s+/g, ' ').trim()
+  const noteLines = notes ? wrapMono(notes, 50) : []
+  noteLines.forEach((l, i) => right.push({ label: i === 0 ? 'Appt Notes:' : '', value: l, valueX: 456 }))
+
+  const lines = Math.max(left.length, right.length ? right.length + 1 : 0, 1)
+  const height = 18.4 + lines * ROW + 5.6
+  if (ctx.y + height > CONTENT_BOTTOM) newPage(ctx)
+  const rule = ctx.y
+  hline(ctx.page, 18, 592.1, rule)
+  const pick = stop.kind === 'PICKUP'
+  if (!pick) ctx.page.drawRectangle({ x: 18, y: PAGE_H - rule - 17.4, width: 47.6, height: 17.4, color: ink })
+  const labelColor = pick ? ink : white
+  put(ctx.page, pick ? 'PICK' : 'STOP', 23, rule + 5.4, fonts.helvBold, 11, { color: labelColor })
+  put(ctx.page, String(ordinal), pick ? 57 : 55, rule + 5.4, fonts.mono, 10, { color: labelColor })
+
+  left.forEach((l, i) => put(ctx.page, l, 68, rule + 18.4 + i * ROW, fonts.mono, 8.5))
+  right.forEach((r, i) => {
+    const top = rule + 18.4 + (i + 1) * ROW
+    if (r.label) put(ctx.page, r.label, r.valueX - 4, top, fonts.monoBold, 8.5, { align: 'right' })
+    put(ctx.page, r.value, r.valueX, top, fonts.mono, 8.5, { color: soft })
+  })
+  ctx.y = rule + height
+}
+
+/** The legal terms, flowed line by line from wherever the stops ended, across as many pages as it takes. */
+function drawTerms(ctx: Ctx): void {
+  const { fonts } = ctx
+  hline(ctx.page, 18, 592.1, ctx.y)
+  let top = ctx.y + 6.5
+  let printedHere = 0
+  for (const line of RATE_CON_TERMS) {
+    if (top + 10.8 > CONTENT_BOTTOM) {
+      if (printedHere > 0) {
+        put(ctx.page, '(Rate Confirmation Details on Next Page)', 306, 726.5, fonts.monoBold, 12, { align: 'center' })
+      }
+      newPage(ctx)
+      top = 196.1
+      printedHere = 0
+    }
+    put(ctx.page, line, 66, top, fonts.monoBoldOblique, 10)
+    top += 10.8
+    printedHere += 1
+  }
 }
 
 /**
- * Build the rate confirmation. One page per leg; the money, terms and signature follow
- * the last leg's stop table on that same page (a long terms block spills onto a
- * continuation page rather than being clipped).
+ * Build the rate confirmation as PDF bytes.
  *
- * Throws when `totalCents` disagrees with the charge lines — a rate con whose printed
- * total is not the sum of what it lists is the one document we may never send.
+ * Throws when `totalCents` disagrees with the charge lines - a rate con whose printed total is
+ * not the sum of what it lists is the one document we may never send.
  */
-export async function buildRateConPdf(input: RateConInput, options: BuildRateConOptions = {}): Promise<jsPDF> {
+export async function buildRateConPdf(input: RateConInput): Promise<Uint8Array> {
   const summed = input.charges.reduce((total, c) => total + c.amountCents, 0)
   if (summed !== input.totalCents) {
     throw new Error(
-      `Rate confirmation total ${cents(input.totalCents)} does not match its charge lines (${cents(summed)})`,
+      `Rate confirmation total ${money(input.totalCents)} does not match its charge lines (${money(summed)})`,
     )
   }
-
-  const doc = new jsPDF({ unit: 'pt', format: 'letter' })
-  const logo = await resolveLetterhead(doc, input.division, options.loadLogo ?? fetchDivisionLogoDataUrl)
-  const W = doc.internal.pageSize.getWidth()
-  const H = doc.internal.pageSize.getHeight()
-  const legs = legsOf(input.stops)
-
-  let y = 0
-  for (let i = 0; i < legs.length; i++) {
-    if (i > 0) doc.addPage()
-    drawHeader(doc, input, i, legs.length, logo)
-    y = drawParties(doc, input)
-    y = drawStops(doc, legs[i], y)
+  const pdf = await PDFDocument.create()
+  const fonts: Fonts = {
+    helv: await pdf.embedFont(StandardFonts.Helvetica),
+    helvBold: await pdf.embedFont(StandardFonts.HelveticaBold),
+    mono: await pdf.embedFont(StandardFonts.Courier),
+    monoBold: await pdf.embedFont(StandardFonts.CourierBold),
+    monoBoldOblique: await pdf.embedFont(StandardFonts.CourierBoldOblique),
   }
-
-  /** Reserve `h` points on the current page, continuing onto a fresh one if they are gone. */
-  const room = (h: number) => {
-    if (y + h <= H - FOOT_ROOM) return
-    doc.addPage()
-    drawHeader(doc, input, legs.length - 1, legs.length, logo)
-    y = 100
+  const logo = await pdf.embedPng(RATE_CON_LOGO_PNG_BASE64)
+  if (logo.width !== RATE_CON_LOGO_WIDTH || logo.height !== RATE_CON_LOGO_HEIGHT) {
+    throw new Error('Rate confirmation logo asset does not match its declared size')
   }
-
-  // ── Equipment · commodity · weight ──────────────────────────────────────────
-  const freight = [
-    input.equipmentType ? `Equipment: ${input.equipmentType}` : '',
-    input.commodity ? `Commodity: ${input.commodity}` : '',
-    input.weightLbs != null ? `Weight: ${input.weightLbs.toLocaleString()} lbs` : '',
-  ].filter(Boolean)
-  if (freight.length) {
-    room(30)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
-    doc.setTextColor(107, 114, 128)
-    doc.text('FREIGHT', M, y)
-    y += 14
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    doc.setTextColor(55, 65, 81)
-    doc.text(freight.join('     '), M, y)
-    y += 22
+  const ctx: Ctx = {
+    pdf, fonts, logo, input,
+    stamp: stampOf(input.issuedAt ?? new Date()),
+    page: pdf.addPage([PAGE_W, PAGE_H]),
+    y: BODY_TOP,
   }
+  drawHeader(ctx)
+  drawFooter(ctx)
+  drawDetails(ctx)
 
-  // ── Carrier pay ─────────────────────────────────────────────────────────────
-  room(60)
-  autoTable(doc, {
-    startY: y,
-    head: [['Carrier pay', 'Amount']],
-    body: input.charges.map((c) => [c.label, cents(c.amountCents)]),
-    foot: [['TOTAL', cents(input.totalCents)]],
-    theme: 'striped',
-    headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8.5, halign: 'right' },
-    footStyles: { fillColor: [243, 244, 246], textColor: [17, 24, 39], fontStyle: 'bold', halign: 'right' },
-    bodyStyles: { fontSize: 9, textColor: [31, 41, 55] },
-    columnStyles: { 0: { halign: 'left' }, 1: { halign: 'right', cellWidth: 110 } },
-    margin: { left: M, right: M },
-    tableWidth: W - M * 2,
-  })
-  y = (doc as jsPDF & AutoTabled).lastAutoTable.finalY + 16
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9)
-  if (input.paymentTermsDays != null) {
-    room(16)
-    doc.setTextColor(107, 114, 128)
-    doc.text(`Payment terms: net ${input.paymentTermsDays} days from receipt of a complete invoice packet.`, M, y)
-    y += 14
+  let picks = 0
+  let drops = 0
+  for (const stop of input.stops) {
+    drawStop(ctx, stop, stop.kind === 'PICKUP' ? ++picks : ++drops)
   }
-  // The quick-pay fee is an AP deduction off the settlement, never a charge line on this
-  // page — printing it as one would make the agreed rate read as a lower number.
-  if (input.quickPay) {
-    room(30)
-    doc.setTextColor(55, 65, 81)
-    const q = input.quickPay
-    doc.text(
-      `Quick pay elected: ${q.days} day${q.days === 1 ? '' : 's'} at ${(q.feeBps / 100).toFixed(2)}% — fee ${cents(q.feeCents)}, net payable ${cents(q.netCents)}.`,
-      M, y,
-    )
-    y += 12
-    doc.setTextColor(107, 114, 128)
-    doc.text('Informational only. The fee is deducted at settlement; the agreed rate above is unchanged.', M, y)
-    y += 18
-  }
-
-  // ── Blanks the carrier fills in before signing ──────────────────────────────
-  if (input.requiredFields.length) {
-    room(34)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
-    doc.setTextColor(107, 114, 128)
-    doc.text('REQUIRED BEFORE DISPATCH', M, y)
-    y += 18
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    const colWidth = (W - M * 2) / 2
-    input.requiredFields.forEach((field, i) => {
-      const col = i % 2
-      if (col === 0) room(26)
-      const x = M + col * colWidth
-      doc.setTextColor(55, 65, 81)
-      doc.text(`${REQUIRED_FIELD_LABELS[field]}:`, x, y)
-      doc.setDrawColor(156, 163, 175)
-      doc.line(x + 92, y + 2, x + colWidth - 20, y + 2)
-      if (col === 1 || i === input.requiredFields.length - 1) y += 22
-    })
-    y += 4
-  }
-
-  // ── Notes (special instructions / rate con notes) ───────────────────────────
-  if (input.notes?.trim()) {
-    const lines = doc.splitTextToSize(input.notes.trim(), W - M * 2) as string[]
-    room(26 + lines.length * 10)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
-    doc.setTextColor(107, 114, 128)
-    doc.text('NOTES', M, y)
-    y += 14
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(75, 85, 99)
-    doc.text(lines, M, y)
-    y += lines.length * 10 + 12
-  }
-
-  // ── Terms ───────────────────────────────────────────────────────────────────
-  if (input.terms.trim()) {
-    const lines = doc.splitTextToSize(input.terms.trim(), W - M * 2) as string[]
-    room(26 + lines.length * 10)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
-    doc.setTextColor(107, 114, 128)
-    doc.text('TERMS', M, y)
-    y += 14
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(75, 85, 99)
-    doc.text(lines, M, y)
-    y += lines.length * 10 + 12
-  }
-
-  // ── Signature ───────────────────────────────────────────────────────────────
-  room(76)
-  doc.setDrawColor(229, 231, 235)
-  doc.line(M, y, W - M, y)
-  y += 20
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(9)
-  doc.setTextColor(107, 114, 128)
-  doc.text('CARRIER ACCEPTANCE', M, y)
-  y += 20
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.setTextColor(55, 65, 81)
-  const half = (W - M * 2) / 2
-  doc.setDrawColor(107, 114, 128)
-  doc.line(M, y + 2, M + half - 20, y + 2)
-  doc.line(M + half, y + 2, W - M, y + 2)
-  y += 14
-  doc.setFontSize(8)
-  doc.setTextColor(107, 114, 128)
-  doc.text('Signature / printed name', M, y)
-  doc.text('Date', M + half, y)
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8)
-  doc.setTextColor(156, 163, 175)
-  doc.text(
-    `${brokerLines(input.division).name} — rate confirmation for load ${input.loadNumber}`,
-    M, H - 28,
-  )
-  return doc
+  drawTerms(ctx)
+  return pdf.save()
 }
 
 export interface RateConSignature {

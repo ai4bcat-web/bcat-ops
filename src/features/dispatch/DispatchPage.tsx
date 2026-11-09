@@ -12,6 +12,7 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
+import { isOwnerOperator } from '@/lib/driverOwnership'
 import { whereaboutsOf, whereaboutsLine, statusLine, unitLine } from './driverWhereabouts'
 import { cn } from '@/lib/utils'
 import { conversationTitle, prettyPhone, sortConversations, conversationMatches, dispatchersOf, type DispatchConversation } from '@/lib/dispatch'
@@ -278,7 +279,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
             <a href={`tel:${selected.phone}`} title="Call from your phone" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--tms-primary)', fontWeight: 600 }}><Phone className="size-3" />Call</a>
             <a href={`sms:${selected.phone}`} title="Text from your own phone (not the dispatch number)" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--tms-primary)', fontWeight: 600 }}><MessageSquare className="size-3" />Text</a>
             {selectedDriver ? <SelectedDriverPhones driver={selectedDriver} unitNumber={equipment.find((e) => e.id === selectedDriver.assignedTruckId)?.unitNumber ?? null} /> : null}
-            {selectedDriver ? <span>{selectedDriver.fleetGroup === 'AMAZON' ? 'Owner operator' : selectedDriver.fleetGroup === 'BOX_TRUCK' ? 'Box truck' : selectedDriver.fleetGroup === 'LOCAL' ? 'Ivan local' : 'Driver'}{selectedDriver.active ? '' : ' · inactive'}</span> : <span>Not a driver on file</span>}
+            {selectedDriver ? <span>{isOwnerOperator(selectedDriver) ? 'Owner operator' : selectedDriver.fleetGroup === 'BOX_TRUCK' ? 'Box truck' : selectedDriver.fleetGroup === 'LOCAL' ? 'Ivan local' : 'Driver'}{selectedDriver.active ? '' : ' · inactive'}</span> : <span>Not a driver on file</span>}
             {selectedDriver ? (
               unitTypeEditable(selectedDriver) ? (
                 <button type="button" onClick={() => { const next = nextUnitType(selectedDriver.unitType); void updateDriver(selectedDriver.id, { unitType: next }); toast.success(`${selectedDriver.name}: ${UNIT_TYPE_LABEL[next]}`) }}
@@ -291,7 +292,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
             {selectedStatus ? <span style={{ color: 'var(--tms-text-2)', fontWeight: 600 }}>Last status: {selectedStatus}</span> : null}
             {selectedUnits ? <span title="The truck on their file and the trailer on the load they are hauling" style={{ color: 'var(--tms-text-2)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>🚛 {selectedUnits}</span> : null}
             {/* Staff can move the driver to the right truck from here when they picked the wrong one. */}
-            {selectedDriver && selectedDriver.fleetGroup !== 'AMAZON' ? <TruckAssignSelect driverId={selectedDriver.id} label="Truck" compact /> : null}
+            {selectedDriver && !isOwnerOperator(selectedDriver) ? <TruckAssignSelect driverId={selectedDriver.id} label="Truck" compact /> : null}
             {selectedWhere ? <span style={{ color: 'var(--tms-badge-green)', fontWeight: 600 }}>📍 {selectedWhere}</span> : null}
             {(() => {
               const primary = selected.assignedTo || selectedDispatchers[0] || null

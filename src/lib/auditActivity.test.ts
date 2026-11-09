@@ -22,6 +22,13 @@ describe('relativeTime', () => {
 })
 
 describe('actionSentence', () => {
+  it('words every rate-con e-sign action, not the raw action name', () => {
+    for (const action of ['SEND_RATE_CON', 'rate_con_opened', 'rate_con_signed', 'rate_con_declined', 'rate_con_link_superseded', 'rate_con_document_superseded', 'rate_con_link_rejected', 'rate_con_sign_rejected']) {
+      expect(actionSentence(action), action).not.toBe(action.toLowerCase().replace(/_/g, ' '))
+    }
+    expect(actionSentence('rate_con_document_superseded')).toBe('replaced the previous signed rate confirmation in Documents')
+  })
+
   it('speaks the real Lambda actions in plain words', () => {
     expect(actionSentence('CREATE_SHIPMENT')).toBe('created the shipment')
     expect(actionSentence('ASSIGN_CARRIER')).toBe('covered the load with a carrier')

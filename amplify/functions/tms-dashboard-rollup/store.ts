@@ -5,6 +5,7 @@
  * (`<models>By<Key>And<Sort>`), the same ones the other handlers query.
  */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import {
   DeleteCommand,
   DynamoDBDocumentClient,
@@ -21,12 +22,28 @@ import type {
   LoadLite,
   MonthSource,
   OrderLite,
+  RepMonthObject,
   SampleLite,
   ShipmentLite,
 } from '../../../src/lib/dashboardRollup'
 import type { LegacyLoadLite, LegacyMonthSource } from '../../../src/lib/dashboardRollupLegacy'
 
 export type Row = Record<string, unknown>
+
+/** Private per-rep month objects: `rollups/brokerage/<YYYY-MM>.json`, served only by the caller-filtered Brokerage action. */
+export interface RepSink { put(object: RepMonthObject): Promise<void> }
+
+export const repObjectKey = (month: string): string => `rollups/brokerage/${month}.json`
+
+export function repSinkS3(bucket: string, client: S3Client = new S3Client({})): RepSink {
+  return {
+    async put(object) {
+      await client.send(new PutObjectCommand({
+        Bucket: bucket, Key: repObjectKey(object.month), Body: JSON.stringify(object), ContentType: 'application/json',
+      }))
+    },
+  }
+}
 
 /** A table row as the rollup stores it (AWSJSON fields travel as strings). */
 export interface RollupRow extends Row {
@@ -162,9 +179,9 @@ export interface SourceTables {
   carrierBill: string
 }
 
-const SHIPMENT_FIELDS = ['id', 'status', 'pickupAppt', 'pickupMonth', 'revDivision', 'revSubdivision', 'voidedAt', 'deletedAt']
+const SHIPMENT_FIELDS = ['id', 'status', 'pickupAppt', 'pickupMonth', 'revDivision', 'revSubdivision', 'voidedAt', 'deletedAt', 'salesRepId', 'salesRepCode']
 const LOAD_FIELDS = ['id', 'shipmentId', 'status', 'pickupAppt', 'revDivision', 'revSubdivision', 'voidedAt', 'pickupDriverId', 'deliveryDriverId', 'rate']
-const SAMPLE_FIELDS = ['shipmentId', 'date', 'excluded', 'revenueCents', 'costCents', 'profitCents', 'revDivision', 'revSubdivision', 'podReceivedAt']
+const SAMPLE_FIELDS = ['shipmentId', 'date', 'excluded', 'revenueCents', 'costCents', 'profitCents', 'revDivision', 'revSubdivision', 'podReceivedAt', 'salesRepId']
 
 const names = (fields: string[]): Record<string, string> => Object.fromEntries(fields.map((f) => [`#${f}`, f]))
 const projection = (fields: string[]): string => fields.map((f) => `#${f}`).join(', ')

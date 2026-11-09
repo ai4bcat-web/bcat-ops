@@ -30,6 +30,21 @@ export type ScopeKey = string
 
 export interface DayScope { st: Record<string, number>; ld: number; trk: number; pod: number }
 export interface FinScope { n: number; rev: number; cost: number; prof: number }
+/**
+ * `i:<salesRepId>` (a profile id, group reps included), `c:<salesRepCode>` (a rep name with no login yet) or
+ * `''` (no sales rep). The id wins when a shipment carries both.
+ */
+export type RepKey = string
+export const NO_REP_KEY: RepKey = ''
+
+/**
+ * The counted samples of a month split by sales rep: scope -> rep -> figures. Every sample `fin` counts is counted
+ * here exactly once. NOT part of the DashboardRollup row (any signed-in user can read that table): the rollup
+ * Lambda writes it to a private S3 object that only the caller-filtered Brokerage action serves.
+ */
+export type RepSplit = Record<ScopeKey, Record<RepKey, FinScope>>
+export interface RepMonthObject { v: 1; month: string; computedAt: string; rep: RepSplit }
+
 export interface MonthPayload {
   v: 1
   month: string
@@ -73,6 +88,8 @@ export interface ShipmentLite {
   revSubdivision?: Maybe<string>
   voidedAt?: Maybe<string>
   deletedAt?: Maybe<string>
+  salesRepId?: Maybe<string>
+  salesRepCode?: Maybe<string>
 }
 export interface LoadLite {
   id: string
@@ -94,6 +111,7 @@ export interface SampleLite {
   revDivision?: Maybe<string>
   revSubdivision?: Maybe<string>
   podReceivedAt?: Maybe<string>
+  salesRepId?: Maybe<string>
 }
 export interface InvoiceLite { id: string; orderId?: Maybe<string>; shipmentId?: Maybe<string>; balanceCents?: Maybe<number> }
 export interface BillLite { id: string; loadId?: Maybe<string>; shipmentId?: Maybe<string>; balanceCents?: Maybe<number> }
@@ -128,6 +146,14 @@ function monthOfValue(value: Maybe<string>): string | null {
   return day ? day.slice(0, 7) : null
 }
 
+/** The rep a counted sample belongs to: the sample's (Load's) rep id, else the shipment's, else the shipment's rep name. */
+export function repKeyOf(sample: Maybe<{ salesRepId?: Maybe<string> }>, shipment: Maybe<{ salesRepId?: Maybe<string>; salesRepCode?: Maybe<string> }>): RepKey {
+  const id = (sample?.salesRepId ?? shipment?.salesRepId ?? '').trim()
+  if (id) return `i:${id}`
+  const code = (shipment?.salesRepCode ?? '').trim()
+  return code ? `c:${code}` : NO_REP_KEY
+}
+
 export function scopeKey(division: Maybe<string>, subdivision: Maybe<string>): ScopeKey {
   return `${division ?? ''}|${subdivision ?? ''}`
 }
@@ -151,7 +177,8 @@ function chunk<T>(items: T[], size: number): T[][] {
 
 // ── Compute (Lambda side) ────────────────────────────────────────────────────
 
-export async function computeMonth(src: MonthSource, month: string): Promise<MonthPayload> {
+/** `repOut`, when given, is filled with the month's per-rep split (see `RepSplit`). */
+export async function computeMonth(src: MonthSource, month: string, repOut?: RepSplit): Promise<MonthPayload> {
   const payload: MonthPayload = { v: 1, month, ship: {}, fin: {} }
 
   const monthShipments = await src.shipments(month)
@@ -203,6 +230,13 @@ export async function computeMonth(src: MonthSource, month: string): Promise<Mon
     fin.rev += sample.revenueCents ?? 0
     fin.cost += sample.costCents ?? 0
     fin.prof += sample.profitCents ?? 0
+    if (repOut) {
+      const repFin = bump(bump(repOut, scope, () => ({})), repKeyOf(sample, shipment), () => ({ n: 0, rev: 0, cost: 0, prof: 0 }))
+      repFin.n += 1
+      repFin.rev += sample.revenueCents ?? 0
+      repFin.cost += sample.costCents ?? 0
+      repFin.prof += sample.profitCents ?? 0
+    }
   }
 
   // POD needed: delivered shipments without a POD.
@@ -263,10 +297,10 @@ export const ROLLUP_SOURCE_TABLES: readonly RollupSourceTable[] = ['Shipment', '
 export const LIVE_ROW_ID = 'L:CURRENT'
 
 const COMPARED: Record<RollupSourceTable, readonly string[]> = {
-  Shipment: ['status', 'pickupAppt', 'pickupMonth', 'revDivision', 'revSubdivision', 'voidedAt', 'deletedAt'],
+  Shipment: ['status', 'pickupAppt', 'pickupMonth', 'revDivision', 'revSubdivision', 'voidedAt', 'deletedAt', 'salesRepId', 'salesRepCode'],
   Order: ['docsMissing', 'shipmentId', 'pickupAppt'],
   Load: ['status', 'pickupAppt', 'pickupMonth', 'shipmentId', 'revDivision', 'revSubdivision', 'pickupDriverId', 'deliveryDriverId', 'rate', 'voidedAt'],
-  LaneRateSample: ['excluded', 'date', 'sampleMonth', 'revenueCents', 'costCents', 'profitCents', 'revDivision', 'revSubdivision', 'podReceivedAt', 'shipmentId'],
+  LaneRateSample: ['excluded', 'date', 'sampleMonth', 'revenueCents', 'costCents', 'profitCents', 'revDivision', 'revSubdivision', 'podReceivedAt', 'shipmentId', 'salesRepId'],
   Invoice: ['arOpen', 'balanceCents', 'shipmentId', 'status'],
   CarrierBill: ['apOpen', 'balanceCents', 'loadId', 'status'],
 }
@@ -318,6 +352,13 @@ export function dirtyKeysForRecord(table: RollupSourceTable, oldImage: unknown, 
     if (!month) continue
     keys.add(`M:${month}`)
     if (table === 'Shipment' || table === 'Load') keys.add(`LG:${month}`)
+  }
+  // A rep change on a shipment moves its samples between rep rows, and they sit in the delivery month (often the next).
+  if (table === 'Shipment' && before && after && (JSON.stringify(before.salesRepId) !== JSON.stringify(after.salesRepId) || JSON.stringify(before.salesRepCode) !== JSON.stringify(after.salesRepCode))) {
+    for (const image of [before, after]) {
+      const month = monthOfImage(table, image)
+      if (month) keys.add(`M:${nextMonth(month)}`)
+    }
   }
   // A void / unvoid moves the shipment's samples in or out of the revenue figures, and a sample sits in
   // the month it was delivered (usually the pickup month or the next), which no Shipment image names.

@@ -51,6 +51,7 @@ import { UploadDocumentDialog } from './UploadDocumentDialog'
 import { GeneratedDocumentDialog, type GeneratedKind } from './GeneratedDocumentDialog'
 import { BolDialog } from './BolDialog'
 import { EmailDocumentsDialog } from './EmailDocumentsDialog'
+import { rateConStatusText } from '@/lib/rateConLabel'
 import type {
   ChargeCodeDef, CustomerRecord, DocGateResult, InvoiceRecord, LoadCarrierRecord, LocationRecord, ShipmentBundle,
   ShipmentDocumentAudience, ShipmentDocumentRecord, ShipmentDocumentSource, ShipmentDocumentType, TmsSettings,
@@ -615,8 +616,7 @@ function RateConLine({ assignment }: { assignment: LoadCarrierRecord }) {
     <div className="flex flex-wrap items-center gap-2 rounded-[var(--tms-radius)] border border-[color:var(--tms-border)] p-2 text-sm">
       <TmsBadge tone="gray" className="text-[10px]">Rate confirmation</TmsBadge>
       <span className="min-w-0 flex-1 truncate">
-        {status.replace(/_/g, ' ').toLowerCase()}
-        {assignment.rateConVersion ? ` · v${assignment.rateConVersion}` : ''}
+        Rate con: {rateConStatusText(status, assignment.rateConVersion)}
         {assignment.rateConSignedAt ? ` · signed ${formatDateTime(assignment.rateConSignedAt)}` : ''}
       </span>
       {assignment.rateConDocumentId && (

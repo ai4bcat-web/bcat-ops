@@ -6,14 +6,14 @@
  * passes `resume` to re-run only what did not finish.
  */
 import {
-  addCarrier, assignCarrierRep, clearRevTag, commitDocument, createLocation, createShipment, getShipmentBundle,
+  addCarrier, assignAsset, assignCarrierRep, clearRevTag, commitDocument, createLocation, createShipment, getShipmentBundle,
   prepareDocumentUpload, putPresignedFile, recalcCharges, saveOrderForm, setEta, setRevTag, setSalesRep,
   submitOrder, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
   type UpdateLoadCarrierDetailsInput,
 } from '@/lib/apiClient'
 import { apptNotices } from '@/lib/apptNotify'
 import { fromDateTimeInput } from '@/lib/date'
-import { isIvanCartageName } from '@/lib/ownFleetDrivers'
+import { isIvanCartageName, ownFleetDriverByName, type OwnFleetDriverOption } from '@/lib/ownFleetDrivers'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import type { Stop } from '@/types'
 import type { CustomerRecord, LoadCarrierRecord, LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
@@ -23,11 +23,12 @@ import {
   toUpdateOrderDetailsInput,
 } from './mapping'
 import {
-  activeLoadCarrier, carrierSlotsOf, liveCarriers, lockedFields, valuesFromBundle, type CarrierSlot, type ShipmentFormValues,
+  activeLoadCarrier, carrierSlotsOf, isCustomerDefaultDivision, liveCarriers, lockedFields, valuesFromBundle, type CarrierSlot, type ShipmentFormValues,
 } from './model'
 import { blockingIssues, issueSummary, validateForm, type ValidationLevel } from './validation'
 
 export interface PipelineCtx {
+  ownFleetRoster?: readonly OwnFleetDriverOption[]
   customer: CustomerRecord | null
   locations: LocationRecord[]
   /** Resolves the full directory (loaded on first need); linking stops to it must see every location, never a partial list. */
@@ -105,8 +106,9 @@ function precheck(values: ShipmentFormValues, ctx: PipelineCtx, level: Validatio
   return blocking.length > 0 ? issueSummary(blocking) : null
 }
 
-async function applyRoles(r: Runner, values: ShipmentFormValues): Promise<void> {
+async function applyRoles(r: Runner, values: ShipmentFormValues, skipTag = false): Promise<void> {
   await r.run('revTag', async () => {
+    if (skipTag) return
     const s = r.bundle!.shipment
     const div = values.ship.revDivision
     const sub = values.ship.revSubdivision
@@ -149,12 +151,12 @@ async function linkedValues(values: ShipmentFormValues, ctx: PipelineCtx): Promi
   }
 }
 
-async function saveDraftBody(r: Runner, values: ShipmentFormValues, ctx: PipelineCtx, draftSave: boolean): Promise<void> {
+async function saveDraftBody(r: Runner, values: ShipmentFormValues, ctx: PipelineCtx, draftSave: boolean, skipTag = false): Promise<void> {
   await r.run('save', () => saveOrderForm(toSaveOrderFormInput(values, r.bundle!, { draftSave, ladder: ctx.isBatory })))
-  await applyRoles(r, values)
+  await applyRoles(r, values, skipTag)
 }
 
-const CREATE_STEPS = ['create', 'save', 'revTag', 'salesRep', 'dispatcher', 'effects', 'documents']
+const CREATE_STEPS = ['create', 'save', 'revTag', 'salesRep', 'dispatcher', 'effects', 'documents', 'assignDriver']
 
 /** Create shipment (strict) / Save draft (lenient) in create mode. */
 export async function runCreate(
@@ -163,7 +165,7 @@ export async function runCreate(
   const problem = precheck(values, ctx, o.draftSave ? 'draft' : 'create', 'create')
   if (problem) return fail(problem)
   const done = new Set(o.resume?.done ?? [])
-  const r = new Runner(null, done, CREATE_STEPS)
+  const r = new Runner(null, done, CREATE_STEPS.filter((step) => step !== 'documents'))
   let working = values
   let createdId = o.resume?.shipmentId
   if (createdId) {
@@ -175,7 +177,9 @@ export async function runCreate(
     if (!createdId) return r.result()
   }
   if (!done.has('save') && r.bundle) working = rebaseCharges(working, r.bundle)
-  await saveDraftBody(r, working, ctx, o.draftSave)
+  // A driver to assign: the division is the server's to derive (a HAND tag would win over the rules), unless the user chose it.
+  const assigning = working.carrier.isOwnFleet && working.carrier.driver1.name.trim() !== ''
+  await saveDraftBody(r, working, ctx, o.draftSave, assigning && isCustomerDefaultDivision(working, ctx.customer))
   await r.run('effects', async () => {
     const load = r.bundle?.loads[0]
     if (!r.bundle || !load) return
@@ -193,6 +197,23 @@ export async function runCreate(
     const bad = steps.find((s) => !s.ok)
     r.steps.push(...steps)
     if (bad) { r.failed.push('documents'); r.message = bad.message }
+  }
+  if (assigning) {
+    await r.run('assignDriver', async () => {
+      const driver = ownFleetDriverByName(ctx.ownFleetRoster ?? [], working.carrier.driver1.name)
+      if (!driver) throw new Error('The selected driver is no longer available. Pick a driver using Cover.')
+      const load = r.bundle!.loads[0]
+      if (!load) throw new Error('The shipment has no load to assign.')
+      return assignAsset({
+        loadId: load.id,
+        driverId: driver.id,
+        truckId: driver.truckId ?? undefined,
+        truckNumber: driver.truckNumber || undefined,
+        trailerId: driver.trailerId ?? undefined,
+        trailerNumber: driver.trailerNumber || undefined,
+      })
+    })
+    if (r.failed.includes('assignDriver')) r.message = `Shipment created, driver assignment failed: ${r.message}. Retry using Cover.`
   }
   return r.result({ createdShipmentId: createdId })
 }

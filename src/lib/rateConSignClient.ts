@@ -19,9 +19,14 @@ export const rateConSignAvailable = !!RATE_CON_SIGN_API_URL
 
 export class RateConSignError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  /** `REPLACED` = a newer version was sent; `INVALID` = the server refused the values (see `fieldErrors`). */
+  code?: string
+  fieldErrors?: Record<string, string>
+  constructor(status: number, message: string, code?: string, fieldErrors?: Record<string, string>) {
     super(message)
     this.status = status
+    this.code = code
+    this.fieldErrors = fieldErrors
   }
 }
 
@@ -37,7 +42,12 @@ export interface RateConSignState {
   /** Step AM: what the rep already entered, to prefill the form (never contains a required, still-empty field). */
   driverInfo?: { driverName?: string | null; driverPhone?: string | null; truckNumber?: string | null; trailerNumber?: string | null }
   totalCents: number
+  /** Empty once signed: there is nothing left to read or sign. */
   pdfUrl: string
+  version?: number
+  /** Present when status is SIGNED. */
+  signedAt?: string | null
+  signerName?: string | null
 }
 
 function extractMessage(data: unknown, fallback: string): string {
@@ -45,6 +55,13 @@ function extractMessage(data: unknown, fallback: string): string {
     return data.error
   }
   return fallback
+}
+
+function extractFieldErrors(data: unknown): Record<string, string> | undefined {
+  if (data && typeof data === 'object' && 'fieldErrors' in data && data.fieldErrors && typeof data.fieldErrors === 'object') {
+    return data.fieldErrors as Record<string, string>
+  }
+  return undefined
 }
 
 // The token rides at the top level of the body, beside the action: the endpoint has no
@@ -60,7 +77,8 @@ async function post<T>(action: string, token: string, payload?: unknown): Promis
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new RateConSignError(res.status, extractMessage(data, res.statusText))
+    const code = data && typeof data === 'object' && 'code' in data && typeof data.code === 'string' ? data.code : undefined
+    throw new RateConSignError(res.status, extractMessage(data, res.statusText), code, extractFieldErrors(data))
   }
   return data as T
 }
@@ -70,12 +88,13 @@ export async function getRateCon(token: string): Promise<RateConSignState> {
   return post('get', token)
 }
 
+/** The server stamps the PDF itself; the browser sends only the typed name, the agreement and the field values. */
 export async function submitRateCon(input: {
   token: string
   signerName: string
+  agreed: boolean
   fields: Record<string, string>
-  pdfBase64: string
-}): Promise<{ ok: true }> {
+}): Promise<{ ok: true; alreadySigned: boolean; signedAt: string | null; signerName: string | null; version: number }> {
   const { token, ...payload } = input
   return post('submit', token, payload)
 }

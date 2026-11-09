@@ -9,6 +9,8 @@ export function MoneyField({
   error,
   placeholder = '0.00',
   disabled,
+  grouped,
+  prefix,
 }: {
   label?: string
   value?: number | null
@@ -16,6 +18,10 @@ export function MoneyField({
   error?: string
   placeholder?: string
   disabled?: boolean
+  /** Show thousands separators while the field is not being edited: 1,000,000.00. */
+  grouped?: boolean
+  /** A leading symbol next to the input, e.g. `$`. */
+  prefix?: string
 }) {
   const [draft, setDraft] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
@@ -38,13 +44,19 @@ export function MoneyField({
     }
   }
 
-  const display = draft || (value != null ? formatCents(value) : '')
+  const shownValue = (v: number): string => {
+    const text = formatCents(v)
+    if (!grouped) return text
+    const [whole, fraction] = text.split('.')
+    return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${fraction}`
+  }
+  const display = draft || (value != null ? shownValue(value) : '')
 
-  const field = (
+  const input = (
     <TmsInput
       type="text"
       inputMode="decimal"
-      aria-label={label ? undefined : 'Amount'}
+      aria-label={label && !prefix ? undefined : (label ?? 'Amount')}
       value={display}
       placeholder={placeholder}
       onFocus={() => {
@@ -55,6 +67,12 @@ export function MoneyField({
       disabled={disabled}
     />
   )
+  const field = prefix ? (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span aria-hidden="true">{prefix}</span>
+      {input}
+    </div>
+  ) : input
 
   if (!label) {
     return (

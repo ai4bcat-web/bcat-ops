@@ -285,8 +285,27 @@ describe('invoicing by hand', () => {
     expect(screen.queryByText('B2')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: /^Invoice manually/ }))
     expect(screen.getByText('B2')).toBeInTheDocument()
-    expect(screen.getByText('NO BUY')).toBeInTheDocument()
+    expect(screen.getByText('No buy')).toBeInTheDocument()
+    expect(screen.getByText(/OTR will not buy from MC 592002/)).toBeInTheDocument()
     expect(screen.queryByText('A1')).not.toBeInTheDocument()
+  })
+
+  it('shows OTR\u2019s own reason next to No buy, and offers Invoice manually only where it applies', async () => {
+    await setup([
+      item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR' }),
+      item({ id: 'c', proNumber: 'C3', status: 'FACTORED' }),
+    ])
+    expect(screen.getByRole('button', { name: 'Invoice manually for PRO A1' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /^Factored/ }))
+    expect(screen.queryByRole('button', { name: /Invoice manually for PRO C3/ })).not.toBeInTheDocument()
+  })
+
+  it('shows the No buy reason OTR gave and the button on a No buy row', async () => {
+    await setup([item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY', brokerCheckResult: 'NO_BUY', otrError: 'OTR will not buy from MC 592002 (No Buy): not approved' })])
+    fireEvent.click(screen.getByRole('tab', { name: /^Invoice manually/ }))
+    expect(screen.getByText('No buy')).toBeInTheDocument()
+    expect(screen.getByText(/not approved/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Invoice manually for PRO B2' })).toBeInTheDocument()
   })
 
   it('opens a manual row to its checklist, not the OTR editor', async () => {

@@ -88,6 +88,12 @@ describe('CustomerPicker — typed name, lock', () => {
     expect(screen.getByTestId('f-customer-addRow').textContent).toBe('+ Add ZZ Brand New Co as a new customer')
     fireEvent.keyDown(screen.getByTestId('f-customer-name-input'), { key: 'Enter' })
     const dialog = await screen.findByRole('dialog')
+    // The dialog is the New Customer form: Save stays disabled until the required fields are filled.
+    expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
+    for (const [label, value] of [
+      ['Street', '1 Main St'], ['City', 'Chicago'], ['State', 'IL'], ['ZIP', '60601'],
+      ['Billing method', 'FACTOR'], ['Accounts payable e-mail 1', 'ap@zz.test'],
+    ] as const) fireEvent.change(within(dialog).getByLabelText(label), { target: { value } })
     fireEvent.click(within(dialog).getByRole('button', { name: /save|create|add/i }))
     await waitFor(() => expect(addCustomer).toHaveBeenCalledTimes(1))
     expect(addCustomer.mock.calls[0]![0]).toMatchObject({ name: 'ZZ Brand New Co' })

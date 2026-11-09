@@ -115,6 +115,8 @@ export function deletedByPreDelete({ shipmentInfo, loads, loadCarriers, bills, a
 /** Table names the carrier-reference scan covers (each has a `carrierId`). Children are checked separately. */
 export const REF_TABLES = ['LoadCarrier', 'CarrierBill', 'ApPayment', 'Quote', 'LaneRateSample', 'Commission'];
 export const CHILD_TABLES = ['CarrierContact', 'CarrierPaymentMethod', 'CarrierDocument'];
+/** Carrier.mcpSyncedAt / mcpSyncRunId are stamped by the MCP pull (src/lib/integrations/mcpPull.ts applyProfileToCarrier / newCarrierRow) on every carrier it saw. */
+export const isMcpSynced = (c) => !blank(c.mcpSyncedAt) || !blank(c.mcpSyncRunId);
 
 /** Carrier ids named inside a Customer.quotingDefaults / TmsSettings.customerPortalDefaults JSON (blocked / self-quote lists). */
 export function carrierIdsInJson(value) {
@@ -184,18 +186,20 @@ export function referenceMap({ carriers, rows, shipmentInfo, loads, deleted, jso
 const lastLoadDay = (c) => (/^\d{4}-\d{2}-\d{2}/.exec(str(c.lastLoadAt)) ?? [null])[0];
 
 /**
- * The three decisions, from carriers + references + children.
+ * The decisions, from carriers + references + children (`children[table]`: Map carrierId -> rows).
  *  activate: used (retained LoadCarrier/Bill with ship >= cutoff, or undated when `undatedUsed`) and status PENDING/REVIEW/INACTIVE.
- *            DO_NOT_USE is never activated (listed as a conflict); ACTIVE is already done.
- *  delete:   not used, no retained reference, no child rows, not DO_NOT_USE, not alias-linked to a kept carrier.
+ *            DO_NOT_USE is never activated (listed as a conflict); ACTIVE is already done. (Not part of the 2026-11-09 cleanup: MCP decides ACTIVE.)
+ *  delete:   not used, no retained reference, not DO_NOT_USE, not alias-linked to a kept carrier. Child rows (contacts, payment methods,
+ *            documents) go WITH the carrier. Class A = never MCP-synced; class B = MCP-synced (filled in by the pull).
  *            Carriers whose own lastLoadAt is >= cutoff but that no retained row names are KEPT for review (protectLastLoad).
  *            `blockedNow` = still referenced today by rows awPreDelete deletes: apply refuses until that delete ran.
- *  keep:     everything else, with the reasons (referencing table, children, DO_NOT_USE, alias link).
+ *  inactivate: referenced (any retained reference) and never MCP-synced and not already INACTIVE / DO_NOT_USE -> status INACTIVE.
+ *  keep:     everything else not used, with the reasons (referencing table, DO_NOT_USE, alias link, lastLoadAt).
  */
 export function planCarriers({ carriers, refs, children = {}, undatedUsed = true, keepDoNotUse = true, protectLastLoad = true }) {
-  const out = { activate: [], alreadyActive: [], doNotUseUsed: [], delete: [], keep: [], keepNotUsed: [], usedIds: new Set(), lastLoadAt: { both: [], onlyUsed: [], onlyLastLoadAt: [] } };
+  const out = { activate: [], alreadyActive: [], doNotUseUsed: [], delete: [], keep: [], keepNotUsed: [], inactivate: [], neverSyncedReferenced: [], usedIds: new Set(), lastLoadAt: { both: [], onlyUsed: [], onlyLastLoadAt: [] } };
   const byId = new Map(carriers.map((c) => [c.id, c]));
-  const childCount = (id) => CHILD_TABLES.reduce((acc, t) => { const n = children[t]?.get(id) ?? 0; if (n) acc[t] = n; return acc; }, {});
+  const childCount = (id) => CHILD_TABLES.reduce((acc, t) => { const n = children[t]?.get(id)?.length ?? 0; if (n) acc[t] = n; return acc; }, {});
   const used = new Set();
   for (const c of carriers) {
     const r = refs.get(c.id);
@@ -228,19 +232,24 @@ export function planCarriers({ carriers, refs, children = {}, undatedUsed = true
     }
     return false;
   };
+  const retainedTotal = (r) => Object.values(r?.retained ?? {}).reduce((a, b) => a + b, 0);
 
   for (const c of carriers) {
+    // referenced + never synced by MCP: kept, marked INACTIVE (used or not; MCP never decides these)
+    if (!isMcpSynced(c) && c.status !== 'DO_NOT_USE' && retainedTotal(refs.get(c.id)) > 0) {
+      out.neverSyncedReferenced.push(c.id);
+      if (c.status !== 'INACTIVE') out.inactivate.push({ id: c.id, previousStatus: c.status ?? null, previousReason: c.statusReason ?? null });
+    }
     if (used.has(c.id)) continue;
     const r = refs.get(c.id);
     const reasons = [];
     for (const [t, n] of Object.entries(r?.retained ?? {})) if (n > 0) reasons.push({ table: t, count: n });
-    for (const [t, n] of Object.entries(childCount(c.id))) reasons.push({ table: t, count: n });
     if (keepDoNotUse && c.status === 'DO_NOT_USE') reasons.push({ table: 'Carrier.status', count: 1, why: 'DO_NOT_USE blocklist entry' });
     if (protectLastLoad && (lastLoadDay(c) ?? '') >= CUTOFF) reasons.push({ table: 'Carrier.lastLoadAt', count: 1, why: `lastLoadAt >= ${CUTOFF} but no retained load row names it (review)` });
     if (aliasLinked(c)) reasons.push({ table: 'Carrier.aljexAliases', count: 1, why: 'alias shared with a kept carrier' });
     const live = Object.values(r?.live ?? {}).reduce((a, b) => a + b, 0);
     if (reasons.length) out.keep.push({ id: c.id, status: c.status ?? null, reasons });
-    else out.delete.push({ id: c.id, status: c.status ?? null, blockedNow: live > 0, liveRefs: r?.live ?? {} });
+    else out.delete.push({ id: c.id, status: c.status ?? null, cls: isMcpSynced(c) ? 'B' : 'A', blockedNow: live > 0, liveRefs: r?.live ?? {}, children: childCount(c.id) });
   }
   return out;
 }
@@ -360,22 +369,39 @@ export function matchMasters(carriers, masters, digitsOf = (s) => str(s).replace
 
 export const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 
+/** A child row (contact / payment method / document) without any bank, account, routing, tax or secret attribute (and tax-shaped text in notes). */
+const CHILD_SENSITIVE_KEY = /taxid|bank|routing|account|\bssn|\bein\b|fedss|secret|password|fingerprint|cipher/i;
+export function exportableChild(row) {
+  const out = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (CHILD_SENSITIVE_KEY.test(k)) continue;
+    out[k] = typeof v === 'string' && /notes?$/i.test(k) ? scrubText(v) : v;
+  }
+  return out;
+}
+
+/** File name of each child table inside an export directory. */
+export const CHILD_FILES = { CarrierContact: 'carrier-contacts.jsonl', CarrierPaymentMethod: 'carrier-payment-methods.jsonl', CarrierDocument: 'carrier-documents.jsonl' };
+
 /**
- * The restore copy of the carriers about to be deleted: carriers.jsonl (scrubbed Carrier rows), vault-carrier-ids.json
- * (WHICH carriers had a vault row; never a value) and a manifest with counts + sha256.
+ * The restore copy of the carriers about to be deleted: carriers.jsonl (scrubbed Carrier rows), one jsonl per child table
+ * (`children[table]`: array of rows, scrubbed), vault-carrier-ids.json (WHICH carriers had a vault row; never a value) and a
+ * manifest with counts + sha256.
  */
-export function buildExport({ carriers, vaultCarrierIds, suffix, now = new Date() }) {
-  const lines = carriers.map((c) => JSON.stringify(exportableCarrier(c))).join('\n');
-  const files = {
-    'carriers.jsonl': lines ? `${lines}\n` : '',
-    'vault-carrier-ids.json': `${JSON.stringify([...vaultCarrierIds].sort(), null, 1)}\n`,
-  };
+export function buildExport({ carriers, children = {}, vaultCarrierIds, suffix, now = new Date() }) {
+  const jsonl = (rows, f) => { const lines = rows.map((r) => JSON.stringify(f(r))).join('\n'); return lines ? `${lines}\n` : ''; };
+  const files = { 'carriers.jsonl': jsonl(carriers, exportableCarrier) };
+  for (const t of CHILD_TABLES) files[CHILD_FILES[t]] = jsonl(children[t] ?? [], exportableChild);
+  files['vault-carrier-ids.json'] = `${JSON.stringify([...vaultCarrierIds].sort(), null, 1)}\n`;
   const manifest = {
     createdAt: now.toISOString(),
     suffix,
-    counts: { carriers: carriers.length, inactive: carriers.filter((c) => c.status === 'INACTIVE').length, vaultRows: vaultCarrierIds.length },
+    counts: {
+      carriers: carriers.length, inactive: carriers.filter((c) => c.status === 'INACTIVE').length, vaultRows: vaultCarrierIds.length,
+      ...Object.fromEntries(CHILD_TABLES.map((t) => [t, (children[t] ?? []).length])),
+    },
     files: Object.entries(files).map(([name, text]) => ({ name, sha256: sha256(text), bytes: Buffer.byteLength(text) })),
-    note: 'Carrier rows without tax-id mirror / bank / routing attributes. Vault ciphertext is NOT exported: restore it from the on-demand CarrierTaxVault backup.',
+    note: 'Carrier and child rows without tax-id mirror / bank / account / routing attributes. Vault ciphertext is NOT exported: restore it from the on-demand CarrierTaxVault backup (prodBackup --script awCarriers). The full-fidelity copy of every Carrier / child row is that same backup.',
   };
   return { files, manifest };
 }

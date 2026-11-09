@@ -6,7 +6,7 @@ import { Rocket, Send, Copy, Check, CircleCheck, Circle, Clock } from 'lucide-re
 import { useDriverOnboarding } from '@/hooks/useDriverOnboarding'
 import { applicationFormFor, canSendApplication, driverStatus, showsOnboardingPercent, DRIVER_STATUS_LABELS, statusAfterToggle } from '@/lib/driverOnboarding'
 import { useAppStore } from '@/store/useAppStore'
-import { DRIVER_FLEET_LABELS } from '@/lib/fleetGroups'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 import type { Driver, OnboardingTask } from '@/types'
 
 /**
@@ -17,6 +17,7 @@ import type { Driver, OnboardingTask } from '@/types'
  * OnboardingTask data the Compliance pages use — a different view, not a second list.
  */
 export function DriverOnboardingSection({ driver }: { driver: Driver }) {
+  const { driverTypeLabel } = useDriverTypes()
   const { grouped, progress, loading, busy, start, sendApplication, toggleTask } = useDriverOnboarding(driver)
   const [portalUrl, setPortalUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -76,7 +77,7 @@ export function DriverOnboardingSection({ driver }: { driver: Driver }) {
         <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Onboarding</div>
         <TmsBadge tone={status === 'ACTIVE' ? 'green' : status === 'ONBOARDING' ? 'orange' : 'gray'}>{DRIVER_STATUS_LABELS[status]}</TmsBadge>
         {driver.fleetGroup && (
-          <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>{DRIVER_FLEET_LABELS[driver.fleetGroup]}</span>
+          <span style={{ fontSize: 11, color: 'var(--tms-muted)' }}>{driverTypeLabel(driver.fleetGroup)}</span>
         )}
         <div style={{ flex: 1 }} />
         {/* You control active vs inactive. Onboarding is not selectable — a driver sits
@@ -133,7 +134,7 @@ export function DriverOnboardingSection({ driver }: { driver: Driver }) {
         </button>
 
         <TmsButton variant="primary" onClick={handleSend} disabled={busy || !canSend.ok}
-          title={canSend.ok ? `Send ${form?.label}` : canSend.reason}>
+          title={canSend.ok ? `Send ${driver.fleetGroup ? driverTypeLabel(driver.fleetGroup) : ''} application` : canSend.reason}>
           <Send size={13} /> Send application
         </TmsButton>
       </div>
@@ -151,7 +152,7 @@ export function DriverOnboardingSection({ driver }: { driver: Driver }) {
         <div style={{ fontSize: 11.5, color: 'var(--tms-badge-orange)', marginBottom: 10 }}>{canSend.reason}</div>
       )}
       {form && canSend.ok && (
-        <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginBottom: 10 }}>{form.label} — {form.blurb}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginBottom: 10 }}>{driverTypeLabel(driver.fleetGroup ?? '')} application — {form.blurb}</div>
       )}
 
       {portalUrl && (

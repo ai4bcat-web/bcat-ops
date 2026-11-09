@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react'
+import { truckInFleet } from '@/lib/fleetGroups'
 import { useExpenseData } from './useExpenseData'
 import { useTrucks } from './useTrucks'
 import { getFleetExpenses } from '@/lib/expenseAllocation'
@@ -35,7 +36,7 @@ export function useFleetFixedCosts() {
   const { equipment } = useTrucks()
 
   const localTruckIds = useMemo(
-    () => equipment.filter((e) => e.type === 'truck' && e.fleetGroup === 'LOCAL').map((e) => e.id),
+    () => equipment.filter((e) => e.type === 'truck' && truckInFleet(e.fleetGroup, 'LOCAL')).map((e) => e.id),
     [equipment],
   )
 

@@ -6,10 +6,9 @@
  * (the Amazon fleet) bring their own work and are settled from the owner-operator page.
  *
  * "Ivan driver" is not a stored flag. It is everyone who is not an owner-operator, and
- * two fields can say someone is: `fleetGroup: 'AMAZON'` and
- * `driverType: 'OWNER_OPERATOR'`. Either is enough — they are meant to agree, and when
- * they disagree the safer read is OWNER_OP, because a stray owner-operator load on the
- * dispatch board is less confusing than an Ivan load silently missing from it.
+ * that is decided by `driverOwnershipKind` (driverOwnership.ts): the fleet group is the
+ * truth (OWNER_OPERATOR, or the legacy AMAZON) and `driverType` is read only when the
+ * fleet is empty. A stale `driverType` never moves a driver whose fleet says otherwise.
  *
  * Both pages that filter by this now open on EVERYBODY. The calendar used to open on
  * Ivan's drivers alone — reasoned from what dispatch does most — and that kept producing
@@ -21,6 +20,7 @@
  * which is guarded and falls back to "nothing chosen".
  */
 import { getStops } from './stops'
+import { isOwnerOperator } from './driverOwnership'
 import type { Driver, Load, Stop } from '../types'
 
 export type DriverGroup = 'IVAN' | 'OWNER_OP' | 'BROKER'
@@ -41,8 +41,7 @@ export function driverGroupOf(driver: Pick<Driver, 'fleetGroup' | 'driverType' |
   // BROKER COVERED / BROKER NEED TO COVER are pseudo-drivers, not people. They are still
   // the only thing carrying these loads, so they get a group rather than being discarded.
   if (driver.type === 'broker') return 'BROKER'
-  if (driver.fleetGroup === 'AMAZON') return 'OWNER_OP'
-  if (driver.driverType === 'OWNER_OPERATOR') return 'OWNER_OP'
+  if (isOwnerOperator(driver)) return 'OWNER_OP'
   return 'IVAN'
 }
 

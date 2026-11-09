@@ -8,6 +8,7 @@
  * and the aging chip are AR's helpers imported outright, because a bill 31 days late and
  * an invoice 31 days late have to read the same.
  */
+import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { approvalReadiness, type ApprovalWarning } from '@/lib/carrierBill'
 import { daysLate } from '@/lib/arAging'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
@@ -121,9 +122,11 @@ export interface ToBePaidFilters {
   /** '' is every due date. */
   due: '' | 'OVERDUE' | 'WEEK' | 'LATER'
   payeeKind: '' | ApPayeeKind
+  /** Only the bills Ryne has not paid although Aljex says paid (static PRO list). */
+  verifyPayment: boolean
 }
 
-export const EMPTY_TO_BE_PAID_FILTERS: ToBePaidFilters = { carrierId: '', due: '', payeeKind: '' }
+export const EMPTY_TO_BE_PAID_FILTERS: ToBePaidFilters = { carrierId: '', due: '', payeeKind: '', verifyPayment: false }
 
 export function applyToBePaidFilters(
   bills: readonly CarrierBillRecord[],
@@ -133,6 +136,7 @@ export function applyToBePaidFilters(
   return bills.filter((bill) => {
     if (filters.carrierId && bill.carrierId !== filters.carrierId) return false
     if (filters.payeeKind && bill.payeeKind !== filters.payeeKind) return false
+    if (filters.verifyPayment && !isVerifyPaymentBill(bill)) return false
     if (filters.due) {
       const late = daysLate(bill.dueAt, asOf)
       if (filters.due === 'OVERDUE' && late <= 0) return false

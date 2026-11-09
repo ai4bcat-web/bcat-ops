@@ -15,16 +15,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { FileText, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog } from '@/features/tms/kit'
-import { getTmsSettings, listCheckCallsByLoad, listDivisions, saveGeneratedDocument } from '@/lib/apiClient'
+import { listCheckCallsByLoad, listUserProfiles, saveGeneratedDocument } from '@/lib/apiClient'
 import { loadSummaryData } from '@/lib/documentData'
 import { buildLoadSummaryPdf, loadSummaryFilename } from '@/lib/loadSummaryPdf'
-import { buildRateConPdf, joinRateConNotes, type RateConInput, type RateConStop } from '@/lib/carrierRateCon'
+import { buildRateConPdf, joinRateConNotes, rateConPdfBase64, rateConRepOf, type RateConInput, type RateConStop } from '@/lib/carrierRateCon'
 import { readExtras } from '../form/model'
 import { generatedFilename, nextVersion, DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
-import { quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import type {
-  ChargeCodeDef, CustomerRecord, Division, LoadCheckCallRecord, LocationRecord, RateConRequiredField,
-  ShipmentBundle, TmsSettings,
+  ChargeCodeDef, CustomerRecord, LoadCheckCallRecord, LocationRecord,
+  ShipmentBundle, UserProfileRecord,
 } from '@/types/tms'
 
 export type GeneratedKind = 'LOAD_SUMMARY' | 'RATE_CON'
@@ -34,8 +33,6 @@ const TITLES: Record<GeneratedKind, string> = {
   RATE_CON: 'Save a copy of the rate confirmation',
 }
 
-/** Same default the rate con panel uses when settings have never been filled in. */
-const DEFAULT_REQUIRED_FIELDS: RateConRequiredField[] = ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER']
 
 export function GeneratedDocumentDialog({
   kind, bundle, customer, locations, catalog, onClose, onSaved,
@@ -49,8 +46,7 @@ export function GeneratedDocumentDialog({
   /** The row landed: the tab re-reads its documents. */
   onSaved: () => void
 }) {
-  const [divisions, setDivisions] = useState<Division[]>([])
-  const [settings, setSettings] = useState<TmsSettings | null>(null)
+  const [profiles, setProfiles] = useState<UserProfileRecord[]>([])
   const [checkCalls, setCheckCalls] = useState<LoadCheckCallRecord[]>([])
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [base64, setBase64] = useState<string | null>(null)
@@ -80,28 +76,23 @@ export function GeneratedDocumentDialog({
   useEffect(() => {
     let live = true
     Promise.all([
-      listDivisions().catch(() => [] as Division[]),
-      getTmsSettings().catch(() => null),
+      listUserProfiles().catch(() => [] as UserProfileRecord[]),
       kind === 'LOAD_SUMMARY' && load?.id
         ? listCheckCallsByLoad(load.id).catch(() => [] as LoadCheckCallRecord[])
         : Promise.resolve([] as LoadCheckCallRecord[]),
-    ]).then(([d, s, calls]) => {
+    ]).then(([p, calls]) => {
       if (!live) return
-      setDivisions(d)
-      setSettings(s)
+      setProfiles(p)
       setCheckCalls(calls)
     })
     return () => { live = false }
   }, [kind, load?.id])
 
-  const division = divisions.find((d) => d.key === load?.divisionKey) ?? divisions[0] ?? null
-
   /*
    * The rate confirmation is assembled here rather than reused from `RateConPanel`,
    * whose builder is private to the panel that sends one. A saved copy has to print
    * the same figures the carrier signed, so the assembly is the same: the assignment's
-   * own snapshot of the carrier, this assignment's CARRIER charge lines, and the terms
-   * and required fields in force now.
+   * own snapshot of the carrier, and this assignment's CARRIER charge lines.
    */
   const rateConInput = (): RateConInput => {
     if (!assignment) throw new Error('A rate confirmation needs the carrier that is currently on the load')
@@ -109,21 +100,21 @@ export function GeneratedDocumentDialog({
       .filter((c) => c.side === 'CARRIER' && (c.loadCarrierId == null || c.loadCarrierId === assignment.id))
       .map((c) => ({ label: c.label || c.code, amountCents: c.amountCents }))
     const totalCents = charges.reduce((sum, c) => sum + c.amountCents, 0)
-    const tier = assignment.quickPayDays ? tierFor(assignment.quickPayDays, quickPayTiersOf(settings)) : null
     return {
-      division,
       carrier: {
         name: assignment.carrierName ?? 'Carrier',
         mcNumber: assignment.carrierMc ?? null,
         dotNumber: null,
         phone: assignment.dispatcherPhone ?? null,
-        email: assignment.dispatcherEmail ?? null,
       },
       loadCarrier: assignment,
+      rep: rateConRepOf(profiles, assignment.carrierRepId, load?.carrierRepId),
       loadNumber,
       equipmentType: load?.equipmentType ?? null,
-      commodity: load?.commodity ?? null,
+      commodity: load?.commodity ?? load?.freightDescription ?? null,
       weightLbs: load?.weight ?? null,
+      miles: load?.miles ?? null,
+      pieces: load?.pieces ?? null,
       stops: (load?.stops ?? []).map<RateConStop>((s) => ({
         kind: s.type === 'pickup' ? 'PICKUP' : 'DELIVERY',
         name: s.name ?? null,
@@ -137,25 +128,15 @@ export function GeneratedDocumentDialog({
         references: (s.refs ?? [])
           .filter((r) => r.visibility === 'CARRIER' || r.visibility === 'ALL')
           .map((r) => ({ label: r.label || r.code, value: r.value })),
-        instructions: s.stopNotes ?? null,
+        instructions: [s.apptNote, s.stopNotes].filter(Boolean).join(' - ') || null,
+        hours: s.contact?.hours ?? null,
       })),
       charges,
       totalCents,
-      quickPay: tier && assignment.quickPayFeeCents != null
-        ? {
-          days: tier.days,
-          feeBps: tier.feeBps,
-          feeCents: assignment.quickPayFeeCents,
-          netCents: (assignment.carrierRateCents ?? totalCents) - assignment.quickPayFeeCents,
-        }
-        : null,
-      paymentTermsDays: assignment.paymentTermsDays ?? settings?.defaultCarrierTermsDays ?? null,
-      terms: settings?.rateConTerms ?? '',
       notes: joinRateConNotes(
         readExtras(bundle.orders[0])?.instructions?.special,
         readExtras(bundle.orders[0])?.instructions?.rateCon,
       ),
-      requiredFields: (settings?.rateConRequiredFields as RateConRequiredField[] | null) ?? DEFAULT_REQUIRED_FIELDS,
     }
   }
 
@@ -166,20 +147,22 @@ export function GeneratedDocumentDialog({
     let live = true
     let url: string | null = null
 
-    const build = async () => {
+    // Base64 with no data-URI prefix is what SAVE_GENERATED_DOCUMENT expects.
+    const build = async (): Promise<{ blob: Blob; base64: string }> => {
       if (kind === 'LOAD_SUMMARY') {
-        return buildLoadSummaryPdf(loadSummaryData(bundle, customer, catalog, checkCalls))
+        const doc = await buildLoadSummaryPdf(loadSummaryData(bundle, customer, catalog, checkCalls))
+        return { blob: doc.output('blob'), base64: doc.output('datauristring').split('base64,')[1] ?? '' }
       }
-      return buildRateConPdf(rateConInput())
+      const bytes = await buildRateConPdf(rateConInput())
+      return { blob: new Blob([bytes as BlobPart], { type: 'application/pdf' }), base64: rateConPdfBase64(bytes) }
     }
 
     build()
-      .then((doc) => {
+      .then(({ blob, base64: encoded }) => {
         if (!live) return
-        url = URL.createObjectURL(doc.output('blob'))
+        url = URL.createObjectURL(blob)
         setPreviewUrl(url)
-        // Base64 with no data-URI prefix — what SAVE_GENERATED_DOCUMENT expects.
-        setBase64(doc.output('datauristring').split('base64,')[1] ?? '')
+        setBase64(encoded)
         setError(null)
       })
       .catch((err: unknown) => {
@@ -195,7 +178,7 @@ export function GeneratedDocumentDialog({
     // The builders read the whole bundle; re-running on every field of it would rebuild
     // the PDF on each poll, so the inputs that actually change the page are listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, bundle.documents, division, settings, checkCalls, customer, locations, catalog])
+  }, [kind, bundle.documents, profiles, checkCalls, customer, locations, catalog])
 
   const save = async () => {
     if (!base64) { setError('There is nothing built to save yet.'); return }

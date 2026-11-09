@@ -105,6 +105,8 @@ vi.mock('@/lib/carrierRateCon', () => ({
   buildRateConPdf: vi.fn(),
   rateConPdfBase64: vi.fn(() => ''),
   rateConFilename: vi.fn(() => 'rate-con.pdf'),
+  rateConRepOf: vi.fn(() => null),
+  joinRateConNotes: vi.fn(() => ''),
 }))
 vi.mock('@/hooks/useCarriers', () => ({
   useCarriers: () => ({ carriers: [], loading: false, error: null, refresh: vi.fn(), replace: vi.fn() }),

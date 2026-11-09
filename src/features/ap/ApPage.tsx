@@ -46,6 +46,8 @@ import {
   selectionCarrierId, sharedProLabel, sharedProIndex, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
+import { VerifyPaymentBadge } from './components/VerifyPaymentBadge'
+import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { PayCarrierDialog } from './components/PayCarrierDialog'
 import { RecordBillDialog, type RecordBillPrefill } from './components/RecordBillDialog'
@@ -176,6 +178,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const approved = useMemo(() => billsToPay(open.bills), [open.bills])
   const payRows = useMemo(() => applyToBePaidFilters(approved, filters, asOf), [approved, filters, asOf])
   const settled = useMemo(() => paidBills(monthBills), [monthBills])
+  const [verifyOnlyPaid, setVerifyOnlyPaid] = useState(false)
+  const settledShown = useMemo(() => (verifyOnlyPaid ? settled.filter(isVerifyPaymentBill) : settled), [settled, verifyOnlyPaid])
   const awaitingTotals = useMemo(() => awaitingInvoiceTotals(awaiting.rows), [awaiting.rows])
   // One bill per carrier per load: a load with several carriers shows up as several rows on
   // one PRO, and each row says so.
@@ -351,7 +355,10 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     })
     : tab === 'paid' ? paidView({
       banner: errorBanner,
-      bills: settled,
+      bills: settledShown,
+      verifyOnly: verifyOnlyPaid,
+      verifyCount: settled.filter(isVerifyPaymentBill).length,
+      onVerifyOnly: setVerifyOnlyPaid,
       shared,
       months,
       month,
@@ -649,7 +656,7 @@ function reviewView({
       key: 'bill',
       header: 'BILL',
       render: (bill) => (
-        <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>
+        <><Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link><VerifyPaymentBadge bill={bill} /></>
       ),
     },
     { key: 'carrier', header: 'CARRIER', render: (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</> },
@@ -777,6 +784,7 @@ function toBePaidView({
         <>
           <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>
           {bill.status === 'PARTIAL' && <> <TmsBadge tone="gray">{BILL_STATUS_LABEL.PARTIAL}</TmsBadge></>}
+          <VerifyPaymentBadge bill={bill} />
         </>
       ),
     },
@@ -838,6 +846,12 @@ function toBePaidView({
           value: filters.payeeKind ? AP_PAYEE_KIND_LABEL[filters.payeeKind] : null,
           onClick: onToggleFilters,
         },
+        {
+          key: 'verifyPayment',
+          label: 'Verify payment',
+          value: filters.verifyPayment ? 'only' : null,
+          onClick: () => onFilters({ ...filters, verifyPayment: !filters.verifyPayment }),
+        },
     ],
     onAddFilter: onToggleFilters,
     banner: (
@@ -879,6 +893,16 @@ function toBePaidView({
                     <option value="FACTOR">{AP_PAYEE_KIND_LABEL.FACTOR}</option>
                   </TmsSelect>
                 </TmsField>
+                <TmsField label="Verify payment">
+                  <TmsSelect
+                    aria-label="Filter verify payment"
+                    value={filters.verifyPayment ? 'only' : ''}
+                    onChange={(e) => onFilters({ ...filters, verifyPayment: e.target.value === 'only' })}
+                  >
+                    <option value="">All bills</option>
+                    <option value="only">Verify payment only ({allBills.filter(isVerifyPaymentBill).length})</option>
+                  </TmsSelect>
+                </TmsField>
               </div>
             </TmsCard>
           )}
@@ -895,7 +919,7 @@ function toBePaidView({
 
 /* ── Paid ────────────────────────────────────────────────────────────────── */
 
-function paidView({ banner, bills, shared, months, month, loading, onMonth }: {
+function paidView({ banner, bills, shared, months, month, loading, onMonth, verifyOnly, verifyCount, onVerifyOnly }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
   shared: SharedProIndex
@@ -903,12 +927,15 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth }: {
   month: string
   loading: boolean
   onMonth: (ym: string) => void
+  verifyOnly: boolean
+  verifyCount: number
+  onVerifyOnly: (on: boolean) => void
 }): ListView {
   const columns: ColumnDef<CarrierBillRecord>[] = [
     {
       key: 'bill',
       header: 'BILL',
-      render: (bill) => <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>,
+      render: (bill) => <><Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link><VerifyPaymentBadge bill={bill} /></>,
     },
     { key: 'carrier', header: 'CARRIER', render: (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</> },
     { key: 'billDate', header: 'BILL DATE', render: (bill) => formatDay(bill.billDate) },
@@ -928,6 +955,14 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth }: {
         <TmsSelect aria-label="Bill month" value={month} onChange={(e) => onMonth(e.target.value)}>
           {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
         </TmsSelect>
+        <TmsButton
+          size="sm"
+          variant={verifyOnly ? 'primary' : 'secondary'}
+          aria-pressed={verifyOnly}
+          onClick={() => onVerifyOnly(!verifyOnly)}
+        >
+          Verify payment ({verifyCount})
+        </TmsButton>
         {loading && <span className="text-sm tms-muted">Loading…</span>}
       </>
     ),

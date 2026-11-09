@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BOARD_FLAGS, BOARD_FLAG_LABELS, flagCounts, matchesFlags, type BoardFlag } from './boardChips'
+import { BOARD_FLAGS, BOARD_FLAG_LABELS, flagCounts, matchesFlags, needsSalesRep, type BoardFlag } from './boardChips'
 import type { ShipmentRow } from './shipmentViews'
 
 const NOW = Date.parse('2026-11-04T12:00:00Z')
@@ -14,9 +14,10 @@ describe('board chips', () => {
     expect(labels).not.toContain('Open exceptions')
     expect(labels).toEqual([
       'Missing reference #',
-      'Missing sales rep',
+      'Needs sales rep',
       'Missing rev division',
       'Missing documents',
+      'Review billing',
       'Check call overdue',
     ])
   })
@@ -34,8 +35,18 @@ describe('board chips', () => {
       missingSalesRep: 2,
       missingRevDivision: 1,
       docsMissing: 1,
+      reviewBilling: 0,
       checkCallOverdue: 1,
     })
+  })
+
+  it('Review billing flags pre-cutover shipments still in Docs needed, never a new one or one past that rung', () => {
+    const old = row('o', { arStatus: 'DOCS_NEEDED', legacyImported: true })
+    const original = row('p', { arStatus: 'DOCS_NEEDED', source: 'BACKFILL' })
+    const fresh = row('q', { arStatus: 'DOCS_NEEDED', source: 'MANUAL' })
+    const billed = row('r', { arStatus: 'UNPAID', legacyImported: true })
+    expect(flagCounts([old, original, fresh, billed], NOW).reviewBilling).toBe(2)
+    expect(matchesFlags(fresh, new Set<BoardFlag>(['reviewBilling']), NOW)).toBe(false)
   })
 
   it('pressed chips narrow together (a row must miss every pressed thing)', () => {
@@ -44,5 +55,15 @@ describe('board chips', () => {
     const pressed = new Set<BoardFlag>(['missingReference', 'missingSalesRep'])
     expect(matchesFlags(both, pressed, NOW)).toBe(true)
     expect(matchesFlags(one, pressed, NOW)).toBe(false)
+  })
+
+  it('Needs sales rep reads salesRepId OR salesRepCode: a name kept as text is a rep, blanks are not', () => {
+    expect(needsSalesRep({ salesRepId: null, salesRepCode: null })).toBe(true)
+    expect(needsSalesRep({ salesRepId: '', salesRepCode: '  ' })).toBe(true)
+    expect(needsSalesRep({ salesRepId: undefined, salesRepCode: undefined })).toBe(true)
+    expect(needsSalesRep({ salesRepId: null, salesRepCode: 'BCAT' })).toBe(false)
+    expect(needsSalesRep({ salesRepId: 'u-ryne', salesRepCode: null })).toBe(false)
+    const rows = [row('a', { salesRepId: null, salesRepCode: 'PERLA LOPEZ' }), row('b', { salesRepId: null }), row('c', { salesRepId: null, salesRepCode: null })]
+    expect(flagCounts(rows, NOW).missingSalesRep).toBe(2)
   })
 })
