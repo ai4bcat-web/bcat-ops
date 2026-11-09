@@ -58,7 +58,7 @@ async function readMonth(bucket: string, month: string): Promise<BrokerageRepMon
     if (!parsed || typeof parsed !== 'object' || !('rep' in parsed) || !parsed.rep || typeof parsed.rep !== 'object') return null
     const computedAt = 'computedAt' in parsed ? String(parsed.computedAt ?? '') : ''
     // The object is written by tms-dashboard-rollup in exactly this shape; filterRepMonth only walks it.
-    const rep: BrokerageRepMonth['rep'] = parsed.rep
+    const rep = Object.fromEntries(Object.entries(parsed.rep))
     return { month, computedAt, rep }
   } catch (err) {
     if (err instanceof Error && (err.name === 'NoSuchKey' || err.name === 'NotFound')) return null

@@ -11,7 +11,11 @@
  *           (`c:<name>`/`i:<group id>` rows) is not a person and never belongs to a caller.
  */
 import { OWNER_EMAIL } from './crm/visibility'
-import type { FinScope, RepKey, ScopeKey } from './dashboardRollup'
+
+/** `i:<salesRepId>` | `c:<salesRepCode>` | '' (no rep); the key shape tms-dashboard-rollup writes. */
+export type RepKey = string
+/** Loads counted and revenue / cost / profit in cents for one rep in one scope and month. */
+export interface RepFigures { n: number; rev: number; cost: number; prof: number }
 
 export const DASHBOARD_PAGE_GROUP = 'page-dashboard'
 export const SALES_REP_ROLE = 'CUSTOMER_REP'
@@ -56,7 +60,7 @@ export function brokerageAccessOf(caller: BrokerageCaller, profile: BrokeragePro
 }
 
 /** One month's stored rep split: scope (`division|subdivision`) -> rep key -> figures. */
-export type RepSplit = Record<ScopeKey, Record<RepKey, FinScope>>
+export type RepSplit = Record<string, Record<RepKey, RepFigures>>
 
 export interface BrokerageRepMonth {
   month: string
