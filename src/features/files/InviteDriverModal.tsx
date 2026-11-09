@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth'
 import {
   createOnboardingInvite, generateInviteToken, inviteExpiry, buildPortalUrl, writeComplianceAudit,
 } from '@/lib/complianceClient'
-import { DRIVER_FLEETS, DRIVER_FLEET_LABELS } from '@/lib/fleetGroups'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 import { applicationFormFor, templateIdForFleet } from '@/lib/driverOnboarding'
 import { classificationForFleet } from '@/lib/fileHub'
 import { generateChecklist, generateTemplateChecklist, resolveOnboardingTemplate } from '@/lib/complianceClient'
@@ -28,6 +28,7 @@ import { TmsInput } from '@/features/tms/kit/TmsInput'
  * classify afterwards.
  */
 export function InviteDriverModal({ onClose }: { onClose: () => void }) {
+  const { options } = useDriverTypes()
   const { user } = useAuth()
   const addDriver = useAppStore((s) => s.addDriver)
   const updateDriverRecord = useAppStore((s) => s.updateDriver)
@@ -168,7 +169,7 @@ export function InviteDriverModal({ onClose }: { onClose: () => void }) {
             <label style={label}>Fleet *</label>
             <select className="tms-select" value={fleetGroup} onChange={(e) => setFleetGroup(e.target.value as DriverFleet | '')}>
               <option value="">Select a fleet…</option>
-              {DRIVER_FLEETS.map((g) => <option key={g} value={g}>{DRIVER_FLEET_LABELS[g]}</option>)}
+              {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             <div style={{ fontSize: 11, color: 'var(--tms-muted)', marginTop: 4 }}>
               Decides their application, their documents, and their onboarding flow

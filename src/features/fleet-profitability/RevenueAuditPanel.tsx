@@ -7,7 +7,7 @@ import { isLoadVoided } from '@/lib/shipmentVoid'
 import { auditFleetRevenue, type AuditBucket, type RevenueAudit } from '@/lib/revenueAudit'
 import type { DateRange } from '@/lib/fleetProfitability'
 import type { FleetGroup } from '@/types/equipment'
-import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -67,6 +67,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
   group: FleetGroup
   expectedRevenue: number
 }) {
+  const { fleetGroupLabel } = useDriverTypes()
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState<Set<AuditBucket>>(new Set(['noTruck', 'unattributed']))
   const [q, setQ] = useState('')
@@ -147,7 +148,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
       >
         {open ? <ChevronDown size={14} style={{ color: 'var(--tms-muted)' }} /> : <ChevronRight size={14} style={{ color: 'var(--tms-muted)' }} />}
         <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--tms-text)' }}>Revenue audit</span>
-        <span style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>· what’s in {FLEET_GROUP_LABELS[group]}’s {money(expectedRevenue)}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--tms-muted)' }}>· what’s in {fleetGroupLabel(group)}’s {money(expectedRevenue)}</span>
       </button>
 
       {open && (
@@ -198,7 +199,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
                     {(b.key === 'unattributed' || b.key === 'noTruck') && unassignedDrivers.length > 0 && (
                       <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--tms-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {fleetTrucks.length === 0 ? (
-                          <div style={{ fontSize: 11.5, color: 'var(--tms-badge-orange)' }}>No {FLEET_GROUP_LABELS[group]} trucks to assign — add or tag a truck to this fleet on the Fleet page first.</div>
+                          <div style={{ fontSize: 11.5, color: 'var(--tms-badge-orange)' }}>No {fleetGroupLabel(group)} trucks to assign — add or tag a truck to this fleet on the Fleet page first.</div>
                         ) : unassignedDrivers.map((d) => (
                           <div key={d.driverId} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                             <Wrench size={13} style={{ color: 'var(--tms-muted)', flexShrink: 0 }} />

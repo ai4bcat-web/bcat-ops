@@ -4,7 +4,8 @@ import { DollarSign, ChevronRight } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
-import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { FLEET_GROUPS } from '@/lib/fleetGroups'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 import { isPosted } from '@/lib/invoiceStatus'
 import type { FleetGroup } from '@/types/equipment'
 import { useTmsTokens } from '@/features/tms/tmsTokens'
@@ -46,6 +47,7 @@ const MAX_BARS = 24
  * the Maintenance page; fleet is resolved from each truck's Equipment.fleetGroup.
  */
 export function RepairSpendWidget() {
+  const { fleetGroupLabel } = useDriverTypes()
   const { hasPageAccess } = useAuth()
   const canInvoices = hasPageAccess('invoices')
   const invoices = useAppStore((s) => s.maintenanceInvoices)
@@ -147,7 +149,7 @@ export function RepairSpendWidget() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <span style={labelStyle}>Fleet</span>
           <div style={{ display: 'flex', gap: 2, background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 8, padding: 2 }}>
-            {([['all', 'All'], ...FLEET_GROUPS.map((g) => [g, FLEET_GROUP_LABELS[g].replace(' (Ivan)', '').replace('Local', 'Ivan')] as [string, string])] as [string, string][]).map(([key, lbl]) => {
+            {([['all', 'All'], ...FLEET_GROUPS.map((g) => [g, fleetGroupLabel(g)] as [string, string])] as [string, string][]).map(([key, lbl]) => {
               const active = fleet === key
               return (
                 <button

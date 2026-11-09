@@ -86,35 +86,30 @@ export function tasksByCategory(tasks: OnboardingTask[]): { category: string; ta
 export interface ApplicationForm {
   /** Stored on the invite so the portal knows which form to render. */
   key:   string
-  label: string
   /** What the driver is told they're filling in. */
   blurb: string
 }
 
 /**
- * One application per fleet. All three currently render the DOT application (49 CFR
+ * One application per fleet (its display name is the driver type's division name — see driverTypeLabel). All three currently render the DOT application (49 CFR
  * 391.21) — the fleet-specific questions are built out per form, and keying them
  * separately from the start means adding those never needs a data migration.
  */
 export const APPLICATION_FORMS: Record<DriverFleet, ApplicationForm> = {
   LOCAL: {
     key: 'application_local',
-    label: 'Local (Ivan) driver application',
     blurb: 'DOT employment application — 3 years of employment history, 10 if you hold a CDL.',
   },
   BOX_TRUCK: {
     key: 'application_box_truck',
-    label: 'Box truck driver application',
     blurb: 'DOT employment application for box-truck work.',
   },
   AMAZON: {
     key: 'application_amazon',
-    label: 'Amazon driver application',
     blurb: 'DOT employment application for Amazon Relay work, including lease details.',
   },
   OWNER_OPERATOR: {
     key: 'application_owner_operator',
-    label: 'Owner operator application',
     blurb: 'DOT application for owner operators running their own truck, including lease details.',
   },
 }

@@ -6,17 +6,11 @@ import { useEnsureLoadRange } from '@/hooks/useLoads'
 import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
 import { useOwnerOperatorProfitability, aggregateOwnerOperator } from '@/hooks/useOwnerOperatorProfitability'
 import { sundayOf, shiftWeek } from '@/features/driver-pay/week'
-import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 import { weekRange } from './weekRange'
 import { useTmsTokens } from '@/features/tms/tmsTokens'
 
 type TrendTab = 'LOCAL' | 'AMAZON' | 'OWNER_OPERATOR' | 'COMBINED'
-const TABS: { key: TrendTab; label: string }[] = [
-  { key: 'LOCAL',          label: FLEET_GROUP_LABELS.LOCAL },
-  { key: 'AMAZON',         label: FLEET_GROUP_LABELS.AMAZON },
-  { key: 'OWNER_OPERATOR', label: 'Owner operators' },
-  { key: 'COMBINED',       label: 'Combined' },
-]
 
 const WEEKS = 8
 const CHART_TOKENS = ['--tms-chart-5', '--tms-badge-red', '--tms-chart-1', '--tms-chart-axis', '--tms-chart-grid'] as const
@@ -33,6 +27,13 @@ function weekTickLabel(startIso: string): string {
  * across the last {WEEKS} weeks, computed from the same engine as the P&L cards.
  */
 export function FleetPLTrendChart() {
+  const { fleetGroupLabel } = useDriverTypes()
+  const TABS: { key: TrendTab; label: string }[] = [
+    { key: 'LOCAL',          label: fleetGroupLabel('LOCAL') },
+    { key: 'AMAZON',         label: fleetGroupLabel('AMAZON') },
+    { key: 'OWNER_OPERATOR', label: fleetGroupLabel('OWNER_OPERATOR') },
+    { key: 'COMBINED',       label: 'Combined' },
+  ]
   const tok = useTmsTokens(CHART_TOKENS)
   const [tab, setTab] = useState<TrendTab>('LOCAL')
   const { computeForRange } = useFleetProfitability(weekRange(0), 'LOCAL')

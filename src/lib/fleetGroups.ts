@@ -1,19 +1,70 @@
-import type { DriverFleet, FleetGroup } from '@/types/equipment'
+import type { FleetGroup } from '@/types/equipment'
+import { SEED_DIVISIONS } from '@/lib/ownership'
 
 export const FLEET_GROUPS: FleetGroup[] = ['LOCAL', 'AMAZON', 'BOX_TRUCK']
 
-export const FLEET_GROUP_LABELS: Record<FleetGroup, string> = {
-  LOCAL:     'Local (Ivan)',
-  AMAZON:    'Amazon',
-  BOX_TRUCK: 'Box Truck',
+/**
+ * Driver types ARE the subsidiaries of Ivan Cartage (OwnershipDivision rows whose parent is
+ * ASSETS): the stored `Driver.fleetGroup` equals the division id, and the label is the division
+ * name, so renaming a division relabels Files, the type selects and the dashboards together.
+ * Nothing here hard-codes a label; `SEED_DIVISIONS` is only the fallback before divisions load.
+ */
+export const DRIVER_TYPE_PARENT_ID = 'ASSETS'
+
+/** The slice of an OwnershipDivision this module needs (record and seed rows both satisfy it). */
+export interface DriverTypeDivision {
+  id: string
+  name: string
+  parentId: string | null
+  sortOrder: number
+  active: boolean
 }
 
-/** Fleets a driver can be in — the truck fleets plus Owner Operator (driver-only). */
-export const DRIVER_FLEETS: DriverFleet[] = [...FLEET_GROUPS, 'OWNER_OPERATOR']
+export interface DriverTypeOption {
+  /** The value stored in Driver.fleetGroup (the division id). */
+  value: string
+  /** The division name. */
+  label: string
+}
 
-export const DRIVER_FLEET_LABELS: Record<DriverFleet, string> = {
-  ...FLEET_GROUP_LABELS,
-  OWNER_OPERATOR: 'Owner Operator',
+/** Legacy fleet value that means the owner-operator type (see driverOwnershipKind). */
+const LEGACY_DRIVER_TYPE_ALIAS: Record<string, string> = { AMAZON: 'OWNER_OPERATOR' }
+
+function driverTypeDivisions(divisions?: readonly DriverTypeDivision[] | null): DriverTypeDivision[] {
+  const pick = (rows: readonly DriverTypeDivision[]) =>
+    rows.filter((d) => d.parentId === DRIVER_TYPE_PARENT_ID && d.active).sort((a, b) => a.sortOrder - b.sortOrder)
+  const loaded = divisions ? pick(divisions) : []
+  return loaded.length > 0 ? loaded : pick(SEED_DIVISIONS)
+}
+
+/** The selectable driver types: the active subsidiaries of Ivan Cartage, in division order. */
+export function driverTypeOptions(divisions?: readonly DriverTypeDivision[] | null): DriverTypeOption[] {
+  return driverTypeDivisions(divisions).map((d) => ({ value: d.id, label: d.name }))
+}
+
+/**
+ * The options for a select whose current value may not be a division (a legacy AMAZON driver, or
+ * an id whose division was deactivated): that value is appended so the form never blanks it.
+ */
+export function driverTypeOptionsFor(current: string | null | undefined, divisions?: readonly DriverTypeDivision[] | null): DriverTypeOption[] {
+  const options = driverTypeOptions(divisions)
+  if (current && !options.some((o) => o.value === current)) options.push({ value: current, label: driverTypeLabel(current, divisions) })
+  return options
+}
+
+/** Display name for a stored driver fleetGroup. Legacy AMAZON reads as the owner-operator type; an unknown value is shown raw. */
+export function driverTypeLabel(value: string, divisions?: readonly DriverTypeDivision[] | null): string {
+  const id = LEGACY_DRIVER_TYPE_ALIAS[value] ?? value
+  return driverTypeDivisions(divisions).find((d) => d.id === id)?.name ?? value
+}
+
+/**
+ * Display name for a TRUCK's fleet group. LOCAL and BOX_TRUCK are divisions and follow their
+ * names. AMAZON is a truck-only fleet (profitability, Amazon pay) with no division of its own,
+ * so it keeps its name.
+ */
+export function fleetGroupLabel(group: string, divisions?: readonly DriverTypeDivision[] | null): string {
+  return group === 'AMAZON' ? 'Amazon' : driverTypeLabel(group, divisions)
 }
 
 /**
