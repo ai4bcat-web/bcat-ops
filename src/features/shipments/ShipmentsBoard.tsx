@@ -95,6 +95,7 @@ import {
   boardStatusOf,
   carrierHoverText,
   carrierLabel,
+  driverNamesOf,
   setFleetDrivers,
   matchesQuery,
   needsDriver,
@@ -237,6 +238,14 @@ function toneRows(): BoardToneKey[] {
 
 /** Columns locked to the left edge of the grid, whatever the team layout says. */
 const LOCKED_KEYS = ['status', 'proNumber']
+
+/** Status carries the tracking pill and Customer the Not linked badge beside their text: Fit widths leaves room for them. */
+function withChipRoom(widths: Record<string, number>): Record<string, number> {
+  const out = { ...widths }
+  if (out.status != null) out.status = Math.max(out.status, 240)
+  if (out.customerName != null) out.customerName = Math.max(out.customerName, 240)
+  return out
+}
 
 /** The carrier profile a row's Carrier cell links to: by MC number, else by exact name. Own fleet and multi-carrier rows have none. */
 function carrierIdOfRow(row: ShipmentRow, carriers: readonly { id: string; name: string; mcNumber?: string | null }[]): string | null {
@@ -860,6 +869,11 @@ function BoardPane({
           </span>
         )
       }
+      if (columnKey === 'driver') {
+        const names = driverNamesOf(row)
+        if (names.length === 0) return null
+        return <span className="flex flex-wrap items-center gap-1">{names.map((n) => <TmsBadge key={n} tone="gray">{n}</TmsBadge>)}</span>
+      }
       if (columnKey === 'carrier') {
         const label = carrierLabel(row)
         const carrierId = carrierIdOfRow(row, directoryCarriers)
@@ -1075,7 +1089,7 @@ function BoardPane({
             </TmsButton>
             <TmsButton
               size="sm" variant="secondary" title="Set every column to the width of its longest value"
-              onClick={() => setLayoutDraft((d) => (d ? { ...d, widths: fitColumnWidths(gridColumns.filter((c) => d.columns.includes(c.key)), filteredRows) } : d))}
+              onClick={() => setLayoutDraft((d) => (d ? { ...d, widths: withChipRoom(fitColumnWidths(gridColumns.filter((c) => d.columns.includes(c.key)), filteredRows)) } : d))}
             >
               Fit widths
             </TmsButton>

@@ -567,6 +567,21 @@ export function needsDriver(row: ShipmentRow): boolean {
  * Who is hauling it, in MVMNT's words: the outside carrier's name, our own driver and
  * truck when the fleet has it, and "Need to cover" while nobody does.
  */
+/**
+ * Every driver on the load, once each: the one who picks up and the one who delivers can differ, and the active leg's driver
+ * may be either. Nobody assigned reads as an empty list (never "own fleet" or a carrier name).
+ */
+export function driverNamesOf(row: ShipmentRow): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const name of [row.pickupDriverName, row.driverName, row.deliveryDriverName]) {
+    const trimmed = (name ?? '').trim()
+    const key = trimmed.toLowerCase()
+    if (trimmed && !seen.has(key)) { seen.add(key); out.push(trimmed) }
+  }
+  return out
+}
+
 const FLEET_GROUP_LABEL: Record<string, string> = {
   OWNER_OPERATOR: 'Owner Operators', BOX_TRUCK: 'Box Trucks', LOCAL: 'Local Drivers', AMAZON: 'Amazon',
 }
@@ -763,7 +778,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     value: (r) => ((r.openIncidentCount ?? 0) > 0 ? String(r.openIncidentCount) : ''),
     width: 90,
   },
-  { key: 'status', label: 'Status', group: 'Shipment', value: statusWithProgress, sortKey: 'status', width: 130 },
+  { key: 'status', label: 'Status', group: 'Shipment', value: statusWithProgress, sortKey: 'status', width: 240 },
   // Optional (not in the default layout): where the load is in its delivery, from the stop projection the row already carries. No extra reads.
   { key: 'delivery', label: 'Delivery', group: 'Computed', value: deliveryText, width: 170 },
   { key: 'proNumber', label: 'PRO #', group: 'Shipment', value: (r) => r.number ?? '', sortKey: 'number', width: 120 },
@@ -775,7 +790,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'tracker', label: 'Tracker', group: 'Shipment', value: (r) => r.trackerName ?? '', width: 140 },
   // The typed text when there is one, "Customer not linked" when the row carries nothing:
   // a blank cell would read as "no customer needed" rather than "nobody matched one yet".
-  { key: 'customerName', label: 'Customer', group: 'Customer', value: customerDisplayName, sortKey: 'customerName', width: 180 },
+  { key: 'customerName', label: 'Customer', group: 'Customer', value: customerDisplayName, sortKey: 'customerName', width: 240 },
   { key: 'carrier', label: 'Carrier', group: 'Carrier leg', value: carrierLabel, width: 180 },
   { key: 'customerTotalRate', label: 'Customer Total Rate', group: 'Order', value: (r) => formatCentsOrEmpty(r.revenueCents), width: 150 },
   { key: 'carrierTotalRates', label: 'Carrier Total Rates', group: 'Carrier leg', value: (r) => formatCentsOrEmpty(r.costCents), width: 150 },
@@ -789,7 +804,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'deliveryAppt', label: 'Delivery', group: 'Shipment', value: (r) => formatBoardDate(r.deliveryAppt), sortKey: 'deliveryAppt', width: 100 },
   { key: 'stops', label: 'Stops', group: 'Computed', value: (r) => (r.stopCount == null ? '' : String(r.stopCount)), width: 70 },
   { key: 'salesRepId', label: 'Customer rep', group: 'Order', value: (r) => r.salesRepName ?? r.customerRepName ?? r.salesRepId ?? r.customerRepId ?? r.salesRepCode ?? '', width: 140 },
-  { key: 'driver', label: 'Driver', group: 'Load', value: (r) => r.driverName ?? '', width: 150 },
+  { key: 'driver', label: 'Driver', group: 'Load', value: (r) => driverNamesOf(r).join(', '), width: 190 },
   { key: 'truck', label: 'Truck', group: 'Load', value: (r) => r.truckNumber ?? '', width: 100 },
   { key: 'arStatus', label: 'AR', group: 'Order', value: (r) => enumLabel(r.arStatus), width: 120 },
   { key: 'apStatus', label: 'AP', group: 'Carrier leg', value: (r) => enumLabel(r.apStatus), width: 120 },
