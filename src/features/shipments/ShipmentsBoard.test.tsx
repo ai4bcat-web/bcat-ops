@@ -107,6 +107,9 @@ vi.mock('@/hooks/useAuth', async (importOriginal) => ({
   useAuthUser: () => ({ email: 'ryne@bcatcorp.com', userId: 'ryne', groups: ['ADMIN'] }),
 }))
 
+vi.mock('@/hooks/useCarriers', () => ({
+  useCarriers: () => ({ carriers: [], loading: false, error: null }),
+}))
 vi.mock('@/hooks/useDirectory', () => ({
   useDirectory: () => ({ customers, locations: [] }),
 }))

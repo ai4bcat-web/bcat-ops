@@ -13,7 +13,7 @@ import { phaseInputOfRow } from './deliveryPhaseInputs'
 import './deliveryTimeline.css'
 import { TrackingModeNotSetRowChip } from './trackingModeControl/TrackingModeNotSetChip'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   Clock,
@@ -55,6 +55,7 @@ import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
+import { useCarriers } from '@/hooks/useCarriers'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
 import { useShipments } from '@/hooks/useShipments'
@@ -236,6 +237,15 @@ function toneRows(): BoardToneKey[] {
 
 /** Columns locked to the left edge of the grid, whatever the team layout says. */
 const LOCKED_KEYS = ['status', 'proNumber']
+
+/** The carrier profile a row's Carrier cell links to: by MC number, else by exact name. Own fleet and multi-carrier rows have none. */
+function carrierIdOfRow(row: ShipmentRow, carriers: readonly { id: string; name: string; mcNumber?: string | null }[]): string | null {
+  if (row.assignmentType === 'OWN_ASSET' || (row.carriers && row.carriers.length >= 2) || !row.carrierName) return null
+  const mc = (row.carrierMc ?? '').trim()
+  const byMc = mc ? carriers.find((c) => (c.mcNumber ?? '').trim() === mc) : undefined
+  const name = row.carrierName.trim().toLowerCase()
+  return (byMc ?? carriers.find((c) => c.name.trim().toLowerCase() === name))?.id ?? null
+}
 
 export function ShipmentsBoard() {
   const { isAdmin, isOwner, user } = useAuth()
@@ -487,6 +497,7 @@ function BoardPane({
   const { staff: staffProfiles } = staff
   const divisions = useOwnershipDivisions().divisions ?? SEED_DIVISIONS
   const { drivers } = useDrivers()
+  const { carriers: directoryCarriers } = useCarriers()
   // Set during render so the Carrier column's text, sort and filter all see the mapping on the first paint.
   useMemo(() => setFleetDrivers(drivers), [drivers])
   const { equipment } = useTrucks()
@@ -502,7 +513,6 @@ function BoardPane({
     [staffProfiles],
   )
 
-  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const urlQuery = params.get('q')
   const [typed, setTyped] = useState('')
@@ -828,6 +838,9 @@ function BoardPane({
           </span>
         )
       }
+      if (columnKey === 'proNumber') {
+        return <Link className="tms-link tms-board-link" to={`/tms/shipments/${row.id}/edit`} onClick={(e) => e.stopPropagation()}>{row.number ?? ''}</Link>
+      }
       if (columnKey === 'status') {
         return <span className="flex items-center gap-1"><span className="font-medium">{statusCellText(row)}</span><TrackingModeNotSetRowChip row={row} /></span>
       }
@@ -836,6 +849,9 @@ function BoardPane({
         return <span className="tms-dt-text" data-tone={r.tone} title={r.reason ?? undefined}>{deliveryPhaseText(r)}</span>
       }
       if (columnKey === 'customerName') {
+        if (!isCustomerUnresolved(row) && row.customerId) {
+          return <Link className="tms-link tms-board-link" to={`/tms/customers?customer=${encodeURIComponent(row.customerId)}`} onClick={(e) => e.stopPropagation()}>{customerDisplayName(row)}</Link>
+        }
         if (!isCustomerUnresolved(row)) return <>{customerDisplayName(row)}</>
         return (
           <span className="flex items-center gap-1">
@@ -845,7 +861,12 @@ function BoardPane({
         )
       }
       if (columnKey === 'carrier') {
-        return <span className={cn(carrierLabel(row) === 'Need to cover' && 'tms-muted')} title={carrierHoverText(row)}>{carrierLabel(row)}</span>
+        const label = carrierLabel(row)
+        const carrierId = carrierIdOfRow(row, directoryCarriers)
+        if (carrierId) {
+          return <Link className="tms-link tms-board-link" to={`/tms/carriers/${carrierId}`} title={carrierHoverText(row)} onClick={(e) => e.stopPropagation()}>{label}</Link>
+        }
+        return <span className={cn(label === 'Need to cover' && 'tms-muted')} title={carrierHoverText(row)}>{label}</span>
       }
       if (columnKey === 'arStatus' || columnKey === 'apStatus') {
         const value = columnKey === 'arStatus' ? row.arStatus : row.apStatus
@@ -882,7 +903,7 @@ function BoardPane({
       const col = BOARD_COLUMNS.find((c) => c.key === columnKey)
       return col ? col.value(row) : null
     },
-    [],
+    [directoryCarriers],
   )
 
   const rowHandlers = useCallback(
@@ -1127,8 +1148,6 @@ function BoardPane({
               setSelectedIds(next.ids)
               setCapRefusal(next.refusal)
             }}
-            onRowClick={(row) => setOpenDrawerId(row.id)}
-            onRowDoubleClick={(row) => navigate(`/tms/shipments/${row.id}`)}
             empty="No shipments match."
           />
         )}
