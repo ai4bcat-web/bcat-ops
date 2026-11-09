@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { PDFDocument, PDFRawStream, PDFArray, PDFRef, decodePDFRawStream } from 'pdf-lib'
 import {
-  buildRateConPdf, foldAscii, joinRateConNotes, rateConFilename, rateConRepOf, stampSignature,
+  buildRateConPdf, foldAscii, joinRateConNotes, rateConChargeLabel, rateConFilename, rateConRepOf, stampSignature,
   RATE_CON_SIGNATURE_ANCHOR,
 } from './carrierRateCon'
 import type { RateConInput, RateConStop } from './carrierRateCon'
@@ -162,6 +162,22 @@ describe('buildRateConPdf', () => {
     })))
     expect(text).not.toMatch(/null|undefined/)
   })
+
+  it('shows a short Aljex charge code as words, never cut', async () => {
+    const text = await allText(await buildRateConPdf(input({
+      charges: [{ label: 'MAC', amountCents: 10000 }, { label: 'Some Unknown Accessorial', amountCents: 5000 }],
+      totalCents: 15000,
+    })))
+    expect(text).toContain('MACROPOINT ACCEPTANCE')
+    expect(rateConChargeLabel('detn')).toBe('DETENTION')
+    expect(rateConChargeLabel('Weird thing')).toBe('WEIRD THING')
+  })
+
+  it('gives the FROM box the company phone and name when the rep has neither', async () => {
+    const text = await allText(await buildRateConPdf(input({ rep: { name: null, phone: null, email: 'ryne@bcatcorp.com' } })))
+    expect(text).toContain('(847) 450-0899 (p)')
+    expect(text).toContain('ryne@bcatcorp.com')
+  })
 })
 
 describe('rateConRepOf', () => {
@@ -174,6 +190,12 @@ describe('rateConRepOf', () => {
   it('keeps the bare e-mail for an unknown user and is null with nobody', () => {
     expect(rateConRepOf(profiles, 'new@bcatcorp.com')).toEqual({ name: null, phone: null, email: 'new@bcatcorp.com' })
     expect(rateConRepOf(profiles, undefined, '')).toBeNull()
+  })
+  it('finds the rep by profile id when the load stores a Cognito username', () => {
+    const withId = [{ id: 'u-123', email: 'rep@bcatcorp.com', name: 'Rae Rep', phone: '8475550101' }]
+    expect(rateConRepOf(withId, 'u-123', 'someone@x.test')).toEqual({ name: 'Rae Rep', phone: '8475550101', email: 'rep@bcatcorp.com' })
+    expect(rateConRepOf(withId, 'u-unknown', 'rep@bcatcorp.com')?.name).toBe('Rae Rep')
+    expect(rateConRepOf(withId, 'u-unknown')).toBeNull()
   })
 })
 

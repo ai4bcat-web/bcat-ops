@@ -77,7 +77,7 @@ export async function readLoad({ client, suffix, pro, fallbackRep }) {
   // The app falls back to whoever is building the document; a script has no session, so --rep stands in.
   const repEmail = loadCarrier.carrierRepId ?? load.carrierRepId ?? fallbackRep ?? null
   const profiles = repEmail
-    ? await scan(client, t('UserProfile'), { FilterExpression: 'email = :e', ExpressionAttributeValues: { ':e': { S: repEmail } } })
+    ? await scan(client, t('UserProfile'), { FilterExpression: 'email = :e OR id = :e', ExpressionAttributeValues: { ':e': { S: repEmail } } })
     : []
   const orders = load.orderId
     ? await scan(client, t('Order'), { FilterExpression: 'id = :o', ExpressionAttributeValues: { ':o': { S: load.orderId } } })

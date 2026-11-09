@@ -127,18 +127,45 @@ export interface RateConInput {
   notes?: string
 }
 
+/** BCAT's main line: the FROM box prints it when the rep has no number of their own. */
+export const RATE_CON_COMPANY_PHONE = '(847) 450-0899'
+
 /**
  * The FROM box: the booked rep (assignment first, then the load), else whoever is building the
- * document. Name and phone come from the user directory when the e-mail is in it.
+ * document. Each identifier is a Cognito username or an e-mail; the first one that names a person
+ * wins. Name and phone come from the user directory (matched on e-mail or profile id); an
+ * identifier that is an e-mail but not in the directory still prints, bare.
  */
 export function rateConRepOf(
-  profiles: readonly { email: string; name?: string | null; phone?: string | null }[],
-  ...emails: (string | null | undefined)[]
+  profiles: readonly { id?: string | null; email: string; name?: string | null; phone?: string | null }[],
+  ...ids: (string | null | undefined)[]
 ): RateConRep | null {
-  const email = emails.map((e) => e?.trim()).find(Boolean)
-  if (!email) return null
-  const profile = profiles.find((p) => p.email.toLowerCase() === email.toLowerCase())
-  return { name: profile?.name ?? null, phone: profile?.phone ?? null, email }
+  for (const raw of ids) {
+    const key = raw?.trim()
+    if (!key) continue
+    const lower = key.toLowerCase()
+    const profile = profiles.find((p) => p.email.toLowerCase() === lower || (p.id != null && p.id === key))
+    if (profile) return { name: profile.name ?? null, phone: profile.phone ?? null, email: key.includes('@') ? key : profile.email }
+    if (key.includes('@')) return { name: null, phone: null, email: key }
+  }
+  return null
+}
+
+/**
+ * Aljex stores a charge's four-letter code in the label (`MAC`, `LHS`, `DETN`). The carrier reads
+ * the words; an unknown label prints as typed, never cut.
+ */
+const CHARGE_LABELS: Record<string, string> = {
+  MAC: 'MACROPOINT ACCEPTANCE', LHS: 'LINE HAUL SERVICE', CHAS: 'CHASSIS', STOR: 'STORAGE', WRHS: 'WAREHOUSING',
+  DETN: 'DETENTION', DTL: 'DETENTION LOADING', DTU: 'DETENTION UNLOADING', PRPL: 'PRE-PULL',
+  TORD: 'TRUCK ORDERED NOT USED', MISC: 'MISCELLANEOUS', STOP: 'STOP OFF', LATE: 'LATE DELIVERY',
+  SCAL: 'SCALE', LAYO: 'LAYOVER', LUMP: 'LUMPER', PERM: 'PERMIT', DEMU: 'DEMURRAGE', TARP: 'TARP',
+  RAMP: 'RAMP', GATE: 'GATE FEE', LABR: 'LABOR', DOCK: 'DOCK FEE',
+}
+
+export function rateConChargeLabel(label: string): string {
+  const text = foldAscii(label).replace(/\s+/g, ' ').trim().toUpperCase()
+  return CHARGE_LABELS[text] ?? text
 }
 
 /** The two free-text order fields the rate con prints, blank-safe and in print order. */
@@ -334,9 +361,11 @@ function drawHeader(ctx: Ctx): void {
   ;[...'CARRIER'].forEach((ch, i) => put(page, ch, 294, 109 + i * 10.85, helvBold, 10, { align: 'center' }))
 
   const rep = input.rep
-  const repName = fitMono(foldAscii(rep?.name ?? '').toUpperCase(), 276, 10)
+  // Name and phone are the point of the box: without a directory name the box still says who, and
+  // without a number it gives the company line.
+  const repName = fitMono(foldAscii(rep?.name?.trim() || 'BCAT Logistics').toUpperCase(), 276, 10)
   put(page, repName.text, 312, 53, mono, repName.size)
-  put(page, phoneOf(rep?.phone, 'p'), 312, 65, mono, 10)
+  put(page, phoneOf(rep?.phone?.trim() || RATE_CON_COMPANY_PHONE, 'p'), 312, 65, mono, 10)
   const repEmail = fitMono(rep?.email ?? '', 276, 10)
   put(page, repEmail.text, 312, 89, mono, repEmail.size)
 
@@ -383,7 +412,7 @@ function drawDetails(ctx: Ctx): void {
 
   const size = 8.5
   const chargeLines = input.charges.map((c) => ({
-    label: wrapMono(c.label.toUpperCase(), 25),
+    label: wrapMono(rateConChargeLabel(c.label), 25),
     amount: money(c.amountCents),
   }))
   const chargeRows = chargeLines.reduce((n, c) => n + Math.max(1, c.label.length), 0)

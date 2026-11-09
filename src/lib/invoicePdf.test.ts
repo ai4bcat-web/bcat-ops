@@ -179,6 +179,13 @@ describe('buildInvoicePdf', () => {
     expect(await textOf({ accountNumber: '  ' })).not.toContain('ACCOUNT NUMBER')
   })
 
+  it('prints the stored due date, not a recomputed one, and keeps commas in names', async () => {
+    const text = await textOf({ invoiceDate: '2026-11-02', dueAt: '2027-03-02', termsDays: 120, billTo: { name: 'Danisco US,  Inc.', address: null } })
+    const lines = text.split('\n')
+    expect(lines).toContain('03/02/27')
+    expect(lines).toContain('DANISCO US, INC.')
+  })
+
   it('folds accents and typographic punctuation to ASCII', async () => {
     const text = await textOf({
       billTo: { name: 'Caf\u00e9 \u201cNo\u00ebl\u201d \u2013 Z\u00fcrich', address: { street: '1 Rue \u00c9lys\u00e9e', city: 'Montr\u00e9al', state: 'QC', zip: 'H2X 1Y4' } },

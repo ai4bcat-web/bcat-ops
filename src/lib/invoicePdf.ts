@@ -109,8 +109,11 @@ function ascii(text: string): string {
   return out
 }
 
-/** ASCII, upper-cased: the reference invoices print every pulled name and address in capitals. */
-const caps = (text: string | null | undefined): string => ascii(text ?? '').trim().toUpperCase()
+/**
+ * ASCII, upper-cased, runs of blanks collapsed: the reference invoices print every pulled name and
+ * address in capitals, and Aljex names arrive with a double space where its export dropped a comma.
+ */
+const caps = (text: string | null | undefined): string => ascii(text ?? '').replace(/ {2,}/g, ' ').trim().toUpperCase()
 
 /** `MM/DD/YY` from `YYYY-MM-DD`, without going through `Date`. */
 function shortDate(iso: string | null | undefined): string {

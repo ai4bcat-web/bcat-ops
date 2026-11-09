@@ -139,6 +139,21 @@ describe('dueDateFor', () => {
   })
 })
 
+describe('invoice due date = invoice date + the customer terms', () => {
+  const due = (customerDays: number | null, orgDays: number | null) =>
+    dueDateFor('2026-11-02', invoiceTermsDays({ paymentTermsDays: customerDays }, null, { defaultPaymentTermsDays: orgDays }))
+
+  it('uses the customer profile terms', () => {
+    expect(due(45, 30)).toBe('2026-12-17')
+    expect(due(120, 30)).toBe('2027-03-02')
+  })
+
+  it('uses the org default when the customer has no terms, and Net 30 when neither does', () => {
+    expect(due(null, 60)).toBe('2027-01-01')
+    expect(due(null, null)).toBe('2026-12-02')
+  })
+})
+
 describe('formatInvoiceNumber', () => {
   it('zero-pads the counter to the requested width', () => {
     expect(formatInvoiceNumber(DEFAULT_INVOICE_NUMBER_FORMAT, { prefix: 'INV-', n: 42, date: '2026-03-20' }))
