@@ -55,7 +55,7 @@ export interface TmsNavItem {
   /** Explicit sub-items, already gated per user by `buildNavSections`. */
   children?: TmsNavChild[]
   childGroups?: TmsNavChildGroup[]
-  /** Sub-pages show as a tab strip under the top bar instead of a list in the sidebar (Profiles, Fleet manager, Accounting). */
+  /** Sub-pages also show as a tab strip under the top bar (Profiles, Fleet manager, Accounting); the sidebar lists them as well. */
   tabs?: boolean
   /** A header row with no page of its own: `to` is its first visible child and only a child lights it. */
   group?: boolean
@@ -218,8 +218,8 @@ function NavRow({
   const setOpen = (next: boolean) => setToggle({ path: activePath, open: next })
 
   const Icon = item.icon
-  // A tabbed section keeps its sub-pages in the top-bar strip: the sidebar row is one plain link.
-  const hasKids = !item.tabs && (items.length > 0 || groups.length > 0)
+  // A tabbed section lists its sub-pages in the sidebar too, so each tab is a direct link from either place.
+  const hasKids = items.length > 0 || groups.length > 0
   const count = item.badgeKey != null ? (badgeCounts?.[item.badgeKey] ?? 0) : 0
 
   const rowContent = (

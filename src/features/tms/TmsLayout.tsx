@@ -35,6 +35,8 @@ function isDensePath(pathname: string): boolean {
 function isScrollingTabPath(pathname: string): boolean {
   const path = pathname.replace(/\/+$/, '')
   return path === '/tms/rates' || path.startsWith('/tms/rates/') || path === '/tms/carrier-sales' || path === '/tms/load-review'
+    // Profiles: Customers and Carriers are dense already; Locations joins them so the three tabs never shift the page.
+    || path === '/tms/locations' || path.startsWith('/tms/locations/')
 }
 
 function LegacyRuntime() {

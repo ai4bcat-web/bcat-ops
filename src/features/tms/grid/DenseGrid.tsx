@@ -36,6 +36,7 @@ import {
   type DenseDensity,
   type DenseFilters,
   type DenseSort,
+  CAPS_WIDTH_FACTOR,
 } from './denseGridModel'
 import { DenseFilterPopover } from './DenseFilterPopover'
 import './dense-grid.css'
@@ -48,6 +49,8 @@ const FALLBACK_VIEWPORT = 720
 const POPOVER_WIDTH = 280
 
 export interface DenseGridProps<T> {
+  /** The page shows every word in capitals: auto-fit widths allow for the wider letters. */
+  uppercase?: boolean
   /** The visible columns, in order. */
   columns: DenseColumn<T>[]
   /** The rows to draw: already filtered, sorted and paged. */
@@ -138,6 +141,7 @@ export function DenseGrid<T>({
   recentKey,
   'aria-label': ariaLabel,
   testId,
+  uppercase = false,
 }: DenseGridProps<T>) {
   const rowHeight = ROW_HEIGHT[density]
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -150,9 +154,9 @@ export function DenseGrid<T>({
 
   const fit = fitRows ?? rows
   const widths = useMemo(() => {
-    const base = columnWidths(columns, userWidths)
+    const base = columnWidths(columns, userWidths, fit, uppercase ? CAPS_WIDTH_FACTOR : 1)
     return { ...base, ...liveWidths }
-  }, [columns, userWidths, liveWidths])
+  }, [columns, userWidths, liveWidths, fit, uppercase])
 
   const items = useMemo(() => buildItems(rows, groupKeyOf), [rows, groupKeyOf])
   const win = virtualWindow(items.length, rowHeight, topRow * rowHeight, viewport, OVERSCAN)

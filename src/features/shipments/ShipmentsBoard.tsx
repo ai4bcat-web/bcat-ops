@@ -353,7 +353,7 @@ export function ShipmentsBoard() {
   )
 
   return (
-    <div className="tms-dense-page">
+    <div className="tms-dense-page tms-caps">
       <div className="tms-dense-bar">
         <div className="flex items-center gap-3">
           <Truck size={18} />
@@ -1132,6 +1132,7 @@ function BoardPane({
           />
         ) : (
           <DenseGrid<ShipmentRow>
+            uppercase
             aria-label="Shipments"
             recentKey={`tms:shipments:recent:${email}`}
             resetKey={`${query}|${flags.size}|${demoOnly}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}

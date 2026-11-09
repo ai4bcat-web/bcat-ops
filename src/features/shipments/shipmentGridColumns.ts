@@ -94,6 +94,7 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
         return [{ value: status, label: sentence(status) }]
       },
       sortValue: statusSortKey,
+      extraPx: 110, // the tracking pill beside the status text
     }
   }
   if (col.key === 'carrierAssignment') {
@@ -131,7 +132,7 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
     }
   }
   if (col.key === 'customerName') {
-    return { ...base, filter: 'multi', text: customerDisplayName, sortValue: customerDisplayName }
+    return { ...base, filter: 'multi', text: customerDisplayName, sortValue: customerDisplayName, extraPx: 90 } // the Not linked badge
   }
   if (MULTI_KEYS.has(col.key)) return { ...base, filter: 'multi' }
   return base
