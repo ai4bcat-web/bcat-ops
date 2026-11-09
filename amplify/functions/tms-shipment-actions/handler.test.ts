@@ -5448,7 +5448,7 @@ describe('BACKFILL_SHIPMENT', () => {
     }
     expect(report.dryRun).toBe(true)
     expect(report.applied).toBe(0)
-    expect(report.planned[0]).toMatchObject({ number: 'L14589', loadStatus: 'BOOKED', assignmentType: 'OWN_ASSET' })
+    expect(report.planned[0]).toMatchObject({ number: '14589', loadStatus: 'BOOKED', assignmentType: 'OWN_ASSET' })
     expect(table(TABLES.shipment).size).toBe(0)
     expect(table(TABLES.load).get('lod-legacy')!.shipmentId).toBeUndefined()
   })
@@ -5459,7 +5459,7 @@ describe('BACKFILL_SHIPMENT', () => {
 
     const shipment = [...table(TABLES.shipment).values()][0]
     expect(shipment).toMatchObject({
-      number: 'L14589',
+      number: '14589',
       source: 'BACKFILL',
       status: 'BOOKED',
       customerId: 'cus-1',
@@ -5477,11 +5477,43 @@ describe('BACKFILL_SHIPMENT', () => {
       shipmentId: shipment.id,
       orderId: order.id,
       leg: 1,
-      loadNumber: 'L14589-1',
+      loadNumber: '14589-1',
       status: 'BOOKED',
       statusSource: 'BACKFILL',
       assignmentType: 'OWN_ASSET',
     })
+  })
+
+  it('numbers a padded or labelled Aljex id by the bare trimmed PRO, never the raw string', async () => {
+    seedLegacyLoad('lod-padded', { aljexId: '14334  ' })
+    seedLegacyLoad('lod-label', { aljexId: 'Pro# 14045' })
+    await call('BACKFILL_SHIPMENT', { loadIds: ['lod-padded', 'lod-label'], dryRun: false }, ADMIN)
+    const numbers = [...table(TABLES.shipment).values()].map((s) => s.number).sort()
+    expect(numbers).toEqual(['14045', '14334'])
+    expect(table(TABLES.load).get('lod-padded')!.loadNumber).toBe('14334-1')
+    expect(String([...table(TABLES.shipment).values()].find((s) => s.number === '14334')!.searchKey)).toMatch(/^14334 /)
+  })
+
+  it('falls back to L<pro> only when another shipment already holds the bare PRO', async () => {
+    table(TABLES.shipment).set('shp-other', { id: 'shp-other', number: '14589', status: 'OPEN' })
+    seedLegacyLoad('lod-legacy')
+    await call('BACKFILL_SHIPMENT', { loadIds: ['lod-legacy'], dryRun: false }, ADMIN)
+    expect(table(TABLES.shipment).get('shp-other')!.number).toBe('14589')
+    const mine = [...table(TABLES.shipment).values()].find((s) => s.id !== 'shp-other')!
+    expect(mine.number).toBe('L14589')
+    expect(table(TABLES.load).get('lod-legacy')!.loadNumber).toBe('L14589-1')
+  })
+
+  it('keeps a not-yet-renumbered L<pro> shipment as it is when a refreshed load is relinked (identity is the load id, not the number)', async () => {
+    seedLegacyLoad('lod-legacy')
+    await call('BACKFILL_SHIPMENT', { loadIds: ['lod-legacy'], dryRun: false }, ADMIN)
+    const shipmentId = String(table(TABLES.load).get('lod-legacy')!.shipmentId)
+    table(TABLES.shipment).set(shipmentId, { ...table(TABLES.shipment).get(shipmentId)!, number: 'L14589  ' })
+    seedLegacyLoad('lod-legacy')
+    const report = (await call('BACKFILL_SHIPMENT', { loadIds: ['lod-legacy'], dryRun: false }, ADMIN)) as { applied: number }
+    expect(report.applied).toBe(1)
+    expect(table(TABLES.shipment).size).toBe(1)
+    expect(table(TABLES.shipment).get(shipmentId)!.number).toBe('L14589  ')
   })
 
   it('re-running changes nothing', async () => {

@@ -260,6 +260,7 @@ import {
 } from '../../../src/lib/customerResolution'
 import { topLevelOf } from '../../../src/lib/ownership'
 import { normalizePro } from '../../../src/lib/proNumber'
+import { backfillShipmentNumber, digitsOnlyPro } from '../../../src/lib/legacyShipmentNumber'
 import type { ProScheme } from '../../../src/types/tms'
 import {
   MAX_COUNTER_SKIPS,
@@ -422,6 +423,7 @@ const IDX_CARRIERS_BY_LOAD = 'loadCarriersByLoadId'
 const IDX_CARRIERS_BY_CARRIER_ID = 'loadCarriersByCarrierId'
 const IDX_CARRIER_DOCS_BY_CARRIER = 'carrierDocumentsByCarrierIdAndType'
 const IDX_CHECK_CALLS_BY_LOAD = 'loadCheckCallsByLoadIdAndAt'
+const IDX_SHIPMENTS_BY_NUMBER = 'shipmentsByNumber'
 
 /** DUPLICATE_SHIPMENT ceiling — one transaction per copy, and 20 is the plan's cap. */
 const MAX_DUPLICATE_COPIES = 20
@@ -7879,8 +7881,10 @@ interface BackfillPlan {
 /**
  * Map one legacy load onto a Shipment/Order/Load trio.
  *
- * Nothing here invents history: the number keeps the Aljex id the office already
- * says out loud, and the status comes from the stop clock.
+ * Nothing here invents history: the number is the bare PRO the office already says
+ * out loud (the trimmed Aljex id; `L<pro>` only when that PRO is not all digits or
+ * another shipment already holds it), and the status comes from the stop clock.
+ * Re-runs and relinks find the shipment by the load id, never by this number.
  *
  * An imported order starts on DOCS_NEEDED and nowhere else. The legacy
  * `readyToInvoice` flag is a dispatcher in Aljex saying the work was done — it is
@@ -7908,6 +7912,8 @@ function planBackfill(
   brokerDriverIds: Set<string>,
   customerId: string | null,
   existing: Row | null,
+  /** Another shipment already holds exactly the bare PRO as its number (checked by `backfillShipments`). */
+  numberTaken: boolean,
   /** The ProClaim already standing on this load's PRO, when there is one. */
   claim: Row | null,
 ): BackfillPlan {
@@ -7941,7 +7947,7 @@ function planBackfill(
     loadId,
     shipmentId: stableId('shp', loadId),
     orderId: existingOrderId ?? stableId('ord', loadId),
-    number: (relink ? optionalString(existing.number, 40) : null) ?? `L${String(load.aljexId ?? loadId)}`,
+    number: (relink ? optionalString(existing.number, 40) : null) ?? backfillShipmentNumber(load.aljexId as string | null | undefined, loadId, numberTaken),
     customerId: (relink ? optionalString(existing.customerId, 100) : null) ?? customerId,
     customerName: optionalString(load.customer, 200),
     pro,
@@ -7992,7 +7998,13 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
     const existing = load.shipmentId ? null : await getById(SHIPMENT_TABLE_NAME, stableId('shp', loadId))
     const existingPro = normalizePro(optionalString(load.aljexId, 120))
     const claim = existingPro ? await getById(PRO_CLAIM_TABLE_NAME, existingPro) : null
-    const plan = planBackfill(load, brokerDriverIds, resolveBackfillCustomerId(load, customersByName), existing, claim)
+    // The bare PRO is the number unless another shipment already holds it. Only a
+    // fresh shipment needs the answer: a relink keeps the number it already has.
+    const barePro = digitsOnlyPro(load.aljexId as string | null | undefined)
+    const numberTaken = !existing && barePro != null
+      && (await queryIndex(SHIPMENT_TABLE_NAME, IDX_SHIPMENTS_BY_NUMBER, 'number', barePro))
+        .some((s) => String(s.id) !== stableId('shp', loadId))
+    const plan = planBackfill(load, brokerDriverIds, resolveBackfillCustomerId(load, customersByName), existing, numberTaken, claim)
     planned.push(plan)
     if (dryRun || plan.skipped) continue
 
