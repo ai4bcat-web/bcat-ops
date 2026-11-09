@@ -22,6 +22,7 @@ import {
   type Row,
 } from '../_shared/shipmentStore'
 import {
+  hasBillToParties,
   missingRequiredFields,
   needsLine,
   requiredFieldLabel,
@@ -165,7 +166,10 @@ export async function evaluateBuild(
   ])
 
   const requiredFields = resolveRequiredFields(settings, customer)
-  const subject = buildSubject(bundle)
+  const subject: RequiredFieldSubject = {
+    ...buildSubject(bundle),
+    billToApplicable: customer ? hasBillToParties(customer.billToParties) : undefined,
+  }
   const missingFields = missingRequiredFields(subject, requiredFields)
   const buildState = missingFields.length > 0 ? 'BUILDING' : 'BUILT'
 

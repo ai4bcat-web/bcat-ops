@@ -59,6 +59,14 @@ describe('required fields by action', () => {
     expect(blockingIssues(validateForm(ltl, { ...base, level: 'submit', customer: CUSTOMER })).map((i) => i.id)).toContain('shipping:shipmentType:submit')
   })
 
+  it('Submit does not ask for a bill-to when the customer has none to choose, and still does when it has some', () => {
+    const v = filledValues(); v.customer.billToId = ''
+    const ids = (customer: typeof CUSTOMER) => blockingIssues(validateForm(v, { ...base, level: 'submit', customer })).map((i) => i.id)
+    expect(ids({ ...CUSTOMER, billToParties: [] })).not.toContain('customer:needs:billTo')
+    expect(ids({ ...CUSTOMER, billToParties: undefined })).not.toContain('customer:needs:billTo')
+    expect(ids(CUSTOMER)).toContain('customer:needs:billTo')
+  })
+
   it('a shipment type is required for Create and Submit, and a draft only warns', () => {
     const v = filledValues(); v.shipmentType = ''
     expect(blockingIssues(validateForm(v, { ...base, level: 'create', customer: CUSTOMER })).map((i) => i.id)).toEqual(['shipping:shipmentType'])
