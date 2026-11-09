@@ -675,17 +675,20 @@
 }
 
 .tms-shell .tms-lifecycle-chev {
-  flex: 0 0 auto;
-  margin: 0 1px;
-  color: var(--tms-disabled);
+  display: none; /* tabs, not a stepper: no arrows between them */
 }
 
+/* Real tabs: each page is its own tab; the lit one is joined to the page below with an accent underline. */
 .tms-shell .tms-lifecycle-tab {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 9px;
-  border-radius: var(--tms-radius-pill);
+  gap: 6px;
+  padding: 7px 16px;
+  margin-right: 2px;
+  border: 1px solid var(--tms-border);
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+  background: var(--tms-surface-hover);
   color: var(--tms-text-2);
   font-size: 14px;
   font-weight: 600;
@@ -698,7 +701,7 @@
 }
 
 .tms-shell .tms-lifecycle-tab:hover {
-  background: var(--tms-surface-hover);
+  background: var(--tms-surface);
   color: var(--tms-text);
 }
 
@@ -711,15 +714,19 @@
   opacity: 0.6;
 }
 
+/* Earlier steps are ordinary tabs now (no "done" tint). */
 .tms-shell .tms-lifecycle-tab.tms-lifecycle-done {
-  background: var(--tms-primary-tint);
-  color: var(--tms-primary-ink);
+  background: var(--tms-surface-hover);
+  color: var(--tms-text-2);
 }
 
 .tms-shell .tms-lifecycle-tab.tms-active,
 .tms-shell .tms-lifecycle-tab.tms-active:hover {
-  background: var(--tms-primary);
-  color: var(--tms-on-primary);
+  background: var(--tms-surface);
+  color: var(--tms-primary-ink);
+  border-color: var(--tms-border);
+  border-bottom-color: var(--tms-primary);
+  font-weight: 700;
 }
 
 .tms-shell .tms-lifecycle-caption {
@@ -729,11 +736,11 @@
 }
 
 .tms-shell .tms-lifecycle-tab.tms-active .tms-lifecycle-caption {
-  color: var(--tms-on-primary);
+  color: var(--tms-primary-ink);
 }
 
 .tms-shell .tms-lifecycle-tab.tms-lifecycle-done .tms-lifecycle-caption {
-  color: var(--tms-primary-ink);
+  color: var(--tms-muted);
 }
 
 /* The strip owns the top bar: the breadcrumb trail drops to its home icon (the page h1 names the page). */

@@ -1,3 +1,4 @@
+import { activeLifecycleTab } from '@/lib/lifecycleTabs'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, NavLink } from 'react-router-dom'
@@ -451,7 +452,11 @@ export function TmsShell({
   const [railHover, setRailHover] = useState(false)
   const [railPinned, setRailPinned] = useState(false)
   const railOpen = railHover || railPinned
-  const collapsed = dense ? !railOpen : storedCollapsed
+  // The six lifecycle pages (Quote, Build, View, Book, Track, Review) open with the sidebar collapsed; expanding it there
+  // lasts for the session and never changes the stored preference the other pages use.
+  const onLifecycle = activeLifecycleTab(activePath) !== null
+  const [lifecycleOpen, setLifecycleOpen] = useState(false)
+  const collapsed = dense ? !railOpen : onLifecycle ? !lifecycleOpen : storedCollapsed
   // The phone drawer is open for one path only: navigating anywhere closes it without an effect.
   const [navOpenFor, setNavOpenFor] = useState<string | null>(null)
   const navOpen = navOpenFor === activePath
@@ -535,7 +540,7 @@ export function TmsShell({
             className="tms-collapse-btn"
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-expanded={!collapsed}
-            onClick={() => (dense ? setRailPinned((v) => !v) : setCollapsed((v) => !v))}
+            onClick={() => (dense ? setRailPinned((v) => !v) : onLifecycle ? setLifecycleOpen((v) => !v) : setCollapsed((v) => !v))}
           >
             {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
           </button>

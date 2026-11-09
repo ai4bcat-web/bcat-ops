@@ -67,6 +67,8 @@ export interface NavItemDef {
   /** A header row with no page of its own: visible while a child is, `to` is the first visible child. */
   group?: boolean
   /** Sub-items rendered under this row. */
+  /** Labeled sub-lists under the row (e.g. Payroll under Accounting). */
+  childGroups?: Array<{ label: string; children: NavChildDef[] }>
   children?: NavChildDef[]
   /** Path prefixes that also light this row when its own `to` is not their prefix. */
   matches?: string[]
@@ -94,6 +96,20 @@ const ACCOUNTING_CHILDREN: NavChildDef[] = [
   { to: '/tms/invoicing/payable', label: 'Accounts Payable', pageKey: 'carrierPay', tms: true, badgeKey: 'apToReview' },
   { to: '/tms/vendors', label: 'Vendors', pageKey: 'vendorAp', tms: true },
   { to: '/tms/factors', label: 'Factoring', pageKey: 'factoring', tms: true },
+]
+
+/** Settlements and time cards: the pages the sidebar used to list under Ivan Cartage. Same paths and page grants. */
+const PAYROLL_CHILDREN: NavChildDef[] = [
+  { to: '/driver-pay-box-trucks', label: 'Box Truck Settlements', pageKey: 'driverPayBoxTrucks' },
+  { to: '/driver-pay', label: 'Amazon Settlements', pageKey: 'driverPay' },
+  { to: '/owner-operator-pay', label: 'Owner Operator Settlements', pageKey: 'ownerOperatorPay' },
+  { to: '/hours', label: 'Employee Hours', pageKey: 'hours' },
+]
+
+/** Dispatch and Calendar live under Active shipments. */
+const ACTIVE_SHIPMENT_CHILDREN: NavChildDef[] = [
+  { to: '/dispatch', label: 'Dispatch', pageKey: 'dispatch', badgeKey: 'dispatch' },
+  { to: '/calendar', label: 'Calendar', pageKey: 'calendar' },
 ]
 
 const SETTINGS_CHILDREN: NavChildDef[] = [
@@ -124,7 +140,7 @@ export const PINNED_ITEMS: NavItemDef[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, pageKey: 'dashboard', section: BROKERAGE },
   // The lifecycle pages (Quote · Build · View · Book · Track · Review) are the top-bar strip
   // (`LIFECYCLE_TABS`); the sidebar keeps the one list people return to all day.
-  { to: SHIPMENTS_PATH, label: 'Active shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true },
+  { to: SHIPMENTS_PATH, label: 'Active shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true, children: ACTIVE_SHIPMENT_CHILDREN },
   { to: '/tms/customers', label: 'Customers', icon: Building2, pageKey: 'customers', section: BROKERAGE, tms: true },
   // One Carriers page with two tabs (Find & Invite first, then the Carrier list); the row opens
   // the default tab and stays lit on the list and on a carrier's own page.
@@ -139,6 +155,7 @@ export const PINNED_ITEMS: NavItemDef[] = [
     group: true,
     badgeKey: 'accounting',
     children: ACCOUNTING_CHILDREN,
+    childGroups: [{ label: 'Payroll', children: PAYROLL_CHILDREN }],
   },
   {
     to: '/tms/brokerage',
@@ -156,7 +173,7 @@ export const PINNED_ITEMS: NavItemDef[] = [
  * group headers excluded (they open nothing of their own).
  */
 export function flatNavDefs(): Array<Pick<NavItemDef, 'to' | 'label' | 'pageKey' | 'adminOnly'>> {
-  return PINNED_ITEMS.flatMap((item) => [...(item.group ? [] : [item]), ...(item.children ?? [])])
+  return PINNED_ITEMS.flatMap((item) => [...(item.group ? [] : [item]), ...(item.children ?? []), ...(item.childGroups ?? []).flatMap((g) => g.children)])
 }
 
 /** A division code as a section header: `CAR_SHIPPING` reads `CAR SHIPPING`. */
@@ -335,17 +352,29 @@ export function buildNavSections({
   // Pinned items are never part of a business section; they render first and are gated
   // exactly like any other page, so a shared-loads grant keeps seeing Shipments.
   const pinned: NavSectionItem[] = []
+  const toChild = (c: NavChildDef): TmsNavChild => ({
+    to: c.to,
+    label: c.label,
+    badgeKey: c.badgeKey,
+    exact: c.exact,
+    exclude: c.exclude,
+    params: c.params,
+  })
+  // Paths drawn under a pinned row (Dispatch and Calendar under Active shipments, the Payroll pages under Accounting): they are
+  // not drawn a second time in their old section. A person who cannot see the parent row keeps them where they were.
+  const movedUnderPinned = new Set<string>()
   for (const def of PINNED_ITEMS) {
-    const children = (def.children ?? []).filter(visible).map<TmsNavChild>((c) => ({
-      to: c.to,
-      label: c.label,
-      badgeKey: c.badgeKey,
-      exact: c.exact,
-      exclude: c.exclude,
-      params: c.params,
-    }))
-    // A group is only as visible as its children; a page with children is visible by its own gate.
-    if (def.group ? children.length === 0 : !visible(def)) continue
+    const ownVisible = !def.group && visible(def)
+    // A row that is a page in its own right only lists its children when the person can open that page.
+    const children = (def.group || ownVisible ? def.children ?? [] : []).filter(visible).map<TmsNavChild>(toChild)
+    // A group (Accounting) lists its labeled sub-lists only when one of its plain children shows: the Payroll pages ride on that access.
+    const groups = (def.group && children.length === 0 ? [] : def.childGroups ?? [])
+      .map((g) => ({ label: g.label, children: g.children.filter(visible).map<TmsNavChild>(toChild) }))
+      .filter((g) => g.children.length > 0)
+    // A group is only as visible as its children; a page is visible by its own gate.
+    if (def.group ? children.length === 0 : !ownVisible) continue
+    for (const c of children) movedUnderPinned.add(c.to)
+    for (const g of groups) for (const c of g.children) movedUnderPinned.add(c.to)
     pinned.push({
       to: def.group ? children[0].to : def.to,
       label: def.label,
@@ -354,6 +383,7 @@ export function buildNavSections({
       pageKey: def.pageKey,
       badgeKey: def.badgeKey,
       children: children.length > 0 ? children : undefined,
+      childGroups: groups.length > 0 ? groups : undefined,
       group: def.group,
       matches: def.matches,
     })
@@ -363,6 +393,7 @@ export function buildNavSections({
   // business that owns it, so it rolls up to the top-level division's section.
   const byTopLevel = new Map<string, NavItemDef[]>()
   for (const def of ITEM_POOL) {
+    if (movedUnderPinned.has(def.to)) continue
     const top = topLevelOf(all, def.section) ?? def.section
     const bucket = byTopLevel.get(top)
     if (bucket) bucket.push(def)
