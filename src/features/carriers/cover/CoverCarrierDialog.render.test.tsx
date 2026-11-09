@@ -13,6 +13,8 @@ if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => 
 
 const mocks = vi.hoisted(() => ({
   preview: vi.fn(),
+  byMc: vi.fn(),
+  pull: vi.fn(),
   invite: vi.fn(),
   cover: vi.fn(),
   add: vi.fn(),
@@ -26,6 +28,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/apiClient', () => ({
   mcpPreviewCarrier: mocks.preview,
   mcpSendInvite: mocks.invite,
+  carriersByMc: mocks.byMc,
+  carriersByDot: vi.fn(async () => []),
+  pullMcpCarrier: mocks.pull,
   coverCarrier: mocks.cover,
   addCarrier: mocks.add,
   getShipmentBundle: mocks.bundle,
@@ -83,6 +88,8 @@ function enterRate(value = '1500') {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.byMc.mockResolvedValue([])
+  mocks.pull.mockResolvedValue({ carrierId: 'car-1', result: 'SYNCED' })
   mocks.carriers = []
   mocks.loading = false
   mocks.preview.mockResolvedValue(live())
@@ -123,6 +130,16 @@ describe('CoverCarrierDialog', () => {
 
     await waitFor(() => expect(mocks.cover).toHaveBeenCalledTimes(2))
     expect(mocks.cover.mock.calls[1][0]).toMatchObject({ carrierId: 'car-1', acknowledgeWarnings: ['NO_CARGO_CERT', 'NO_W9'] })
+  })
+
+  it('a carrier invited but not Active yet is pulled from MyCarrierPackets on lookup and shows Active at once', async () => {
+    const pending = carrierRow({ status: 'PENDING', mcpInvitedAt: '2026-11-09T20:29:16.000Z', mcpStatus: 'ACCEPTABLE' })
+    mocks.carriers = [pending]
+    mocks.byMc.mockResolvedValueOnce([pending]).mockResolvedValueOnce([{ ...pending, status: 'ACTIVE' }])
+    renderDialog()
+    await lookUp('MC 900001')
+    await waitFor(() => expect(mocks.pull).toHaveBeenCalledWith('car-1'))
+    expect((await screen.findByTestId('cover-lookup-card-active')).textContent).toBe('Active with us — ready to cover')
   })
 
   it('a load that already has a live carrier gets another one through addCarrier, with the legs the rep ticks, never a replacement', async () => {

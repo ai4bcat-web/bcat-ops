@@ -21,7 +21,7 @@ import { CarrierLookupCard } from '@/features/carriers/lookup/CarrierLookupCard'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsInput, TmsMetaList } from '@/features/tms/kit'
 import { useCarriers } from '@/hooks/useCarriers'
 import { CoverTrackingStep } from './CoverTrackingStep'
-import { addCarrier, carriersByDot, carriersByMc, coverCarrier, getShipmentBundle, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
+import { addCarrier, carriersByDot, carriersByMc, coverCarrier, getShipmentBundle, pullMcpCarrier, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
 import type { McpLookupResult } from '@/lib/apiClient'
 import { CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
 import { formatDateTime } from '@/lib/date'
@@ -132,9 +132,16 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
     // packet not sent"). Re-read this one carrier straight from the server and use that row.
     void (async () => {
       try {
-        const rows = parsed.mcNumber ? await carriersByMc(parsed.mcNumber) : parsed.dotNumber ? await carriersByDot(parsed.dotNumber) : []
-        const row = rows[0]
-        if (row) setSelected((cur) => (cur == null || cur.id === row.id ? row : cur))
+        const read = async () => (parsed.mcNumber ? await carriersByMc(parsed.mcNumber) : parsed.dotNumber ? await carriersByDot(parsed.dotNumber) : [])[0]
+        let row = await read()
+        if (row) setSelected((cur) => (cur == null || cur.id === row!.id ? row! : cur))
+        // Invited but not Active yet: ask MyCarrierPackets right now (full profile + the status rule), so a carrier that just finished
+        // its packet is Active, filled in and assignable the moment someone looks it up, not at the next scheduled sync.
+        if (row && row.status !== 'ACTIVE' && row.mcpInvitedAt) {
+          await pullMcpCarrier(row.id)
+          const fresh = await read()
+          if (fresh) { row = fresh; setSelected((cur) => (cur == null || cur.id === fresh.id ? fresh : cur)) }
+        }
       } catch { /* the cached row stays */ }
     })()
   }

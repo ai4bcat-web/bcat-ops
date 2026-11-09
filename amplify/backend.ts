@@ -2478,11 +2478,11 @@ mcpSyncFn.addToRolePolicy(
   }),
 )
 // The rule is created enabled. The dev-stack guard later disables schedules, so
-// dev still deploys but does not poll MCP by itself. 30 minutes is well over the
-// 4-minute minimum MCP's guide sets between polling calls.
+// dev still deploys but does not poll MCP by itself. Every 5 minutes (Ryne 2026-11-09: a carrier that finishes its packet must become
+// Active and fill its profile right away): just over the 4-minute minimum MCP's guide sets between polling calls.
 if (triggerEnabled('mcpSync', SCHEMA_STAGE)) {
   const mcpSyncRule = new Rule(mcpSyncFn.stack, 'McpSyncRule', {
-    schedule: Schedule.rate(Duration.minutes(30)),
+    schedule: Schedule.rate(Duration.minutes(5)),
   })
   mcpSyncRule.addTarget(new EventsLambdaTarget(mcpSyncFn))
 }
