@@ -54,7 +54,7 @@ export async function equipRepGate(values, deps = {}) {
   return gate;
 }
 
-async function scanAll(doc, table, projection) {
+export async function scanAll(doc, table, projection) {
   const items = [];
   let key;
   do {
@@ -107,7 +107,7 @@ export function sourcePaths({ files, dir }) {
   return [...new Set(out)];
 }
 
-const writeCsv = (path, head, lines) => {
+export const writeCsv = (path, head, lines) => {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${[head.join(','), ...lines.map((l) => l.map(csvCell).join(','))].join('\n')}\n`, { mode: 0o600 });
   chmodSync(path, 0o600);
