@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Trash2, Upload, ExternalLink, ImagePlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { getStops, updateStop } from '@/lib/stops'
-import { uploadApptProof, getApptProofUrl, deleteApptProof, sendApptRequestEmail, type ApptProofSlot } from '@/lib/apiClient'
+import { graphqlErrorText, uploadApptProof, getApptProofUrl, deleteApptProof, sendApptRequestEmail, type ApptProofSlot } from '@/lib/apiClient'
 import { useDirectory } from '@/hooks/useDirectory'
 import { formatDateShort, apptTimeLabel } from '@/lib/date'
 import { BATORY_PICKUP_REQUEST_TIME, defaultRequestedFor } from '@/lib/apptStatus'
@@ -103,6 +103,14 @@ function ProofSlot({ label, s3Key, onUpload, onRemove }: {
   )
 }
 
+/** A readable reason from an Error, a GraphQL error bundle or an Amplify storage error (name + message), never just "unknown". */
+function errorDetail(e: unknown): string {
+  const text = graphqlErrorText(e)
+  const name = (e as { name?: string } | null)?.name
+  if (text) return name && name !== 'Error' && !text.includes(name) ? `${name}: ${text}` : text
+  return name || (typeof e === 'object' ? JSON.stringify(e)?.slice(0, 200) : String(e)) || 'no detail from the server'
+}
+
 export function ApptProofPanel({ load, updateLoad }: {
   load: Load
   updateLoad: (id: string, patch: Partial<Load>) => Promise<unknown>
@@ -128,10 +136,11 @@ export function ApptProofPanel({ load, updateLoad }: {
 
   const upload = (stop: Stop, slot: ApptProofSlot) => async (file: Blob) => {
     try {
-      const key = await uploadApptProof(load.id, stop.id, slot, file)
-      await save(stop, slot, key)
+      let key: string
+      try { key = await uploadApptProof(load.id, stop.id, slot, file) } catch (e) { throw new Error(`upload to storage failed (${errorDetail(e)})`, { cause: e }) }
+      try { await save(stop, slot, key) } catch (e) { throw new Error(`attaching it to the load failed (${errorDetail(e)})`, { cause: e }) }
       toast.success('Screenshot saved')
-    } catch (e) { toast.error(`Couldn't save the screenshot: ${e instanceof Error ? e.message : 'unknown error'}`) }
+    } catch (e) { toast.error(`Couldn't save the screenshot: ${errorDetail(e)}`) }
   }
   const removeProof = (stop: Stop, slot: ApptProofSlot) => async () => {
     const key = stop.apptProofs?.[slot]

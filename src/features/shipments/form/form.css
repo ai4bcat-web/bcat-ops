@@ -296,13 +296,14 @@
   color: var(--tms-muted);
 }
 
-/* Required = green input (Ryne, item 1): no asterisks anywhere. Sections mark a required field with
-   the `tms-field-req` class on its TmsField (LField does it) or an aria-label ending "(required)". */
-.tms-shell .tms-ship-form .tms-field-req .tms-input,
-.tms-shell .tms-ship-form .tms-field-req .tms-select,
-.tms-shell .tms-ship-form .tms-field-req textarea,
-.tms-shell .tms-ship-form .tms-field-req input:not([type='checkbox']),
-.tms-shell .tms-ship-form [aria-label$='(required)'] {
+/* Required = green input while it is EMPTY (Ryne): once filled it is a normal white field. No asterisks anywhere.
+   Sections mark a required field with the `tms-field-req` class on its TmsField (LField does it) or an aria-label ending
+   "(required)"; useRequiredEmptyMarks sets data-empty on the control from its live value. */
+.tms-shell .tms-ship-form .tms-field-req .tms-input[data-empty='true'],
+.tms-shell .tms-ship-form .tms-field-req .tms-select[data-empty='true'],
+.tms-shell .tms-ship-form .tms-field-req textarea[data-empty='true'],
+.tms-shell .tms-ship-form .tms-field-req input[data-empty='true']:not([type='checkbox']),
+.tms-shell .tms-ship-form [aria-label$='(required)'][data-empty='true'] {
   border-color: var(--tms-badge-green);
   background-color: var(--tms-badge-green-tint);
 }

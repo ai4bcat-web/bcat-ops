@@ -3,6 +3,7 @@
  * strip (Instructions, References, Items, Notes), and the sticky summary rail. Route element for `/tms/shipments/new` (mode "create") and
  * `/tms/shipments/:id/edit` (mode "edit"). Fields, mapping, pipelines and validation are Step AH's.
  */
+import { useRequiredEmptyMarks } from './useRequiredEmptyMarks'
 import { findCustomerMatches } from '@/lib/tmsDirectory'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -153,6 +154,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     onBlocked: (issues) => { if (issues[0]) focusField(issues[0].fieldKey) },
   })
   const { values, update, getValues, bundle, mode, busy: pipelineBusy } = form
+  useRequiredEmptyMarks(values)
 
   // Pre-fill once, when the intake row and the customer directory have both arrived.
   const { seedValues } = form
