@@ -224,30 +224,27 @@ describe('TmsShell', () => {
     expect(onSearch).toHaveBeenCalledWith('BCAT1042')
   })
 
-  it('remembers the collapsed sidebar in localStorage', () => {
-    const { unmount } = renderShell('/tms/customers')
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
-    expect(window.localStorage.getItem('tms-sidebar-collapsed')).toBe('1')
-    unmount()
-
-    renderShell('/tms/customers')
-    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
-  })
-
-  it('opens the lifecycle pages (Quote, Build, View, Book, Track, Review) with the sidebar collapsed', () => {
-    for (const path of ['/tms/shipments', '/tms/shipments/new']) {
-      window.localStorage.setItem('tms-sidebar-collapsed', '0')
-      const { unmount } = renderShell(path)
+  it('opens every page with the sidebar collapsed, and opens it on hover', () => {
+    for (const path of ['/tms/customers', '/tms/shipments', '/tms/shipments/new']) {
+      const { unmount, container } = renderShell(path)
       expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
-      // Expanding there lasts for the session and does not rewrite the stored preference.
-      fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+      expect(container.querySelector('.tms-shell')?.className).toContain('tms-is-collapsed')
+      // Hover (or keyboard focus) opens it over the page with full labels.
+      fireEvent.mouseEnter(container.querySelector('.tms-sidebar') as Element)
       expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument()
-      expect(window.localStorage.getItem('tms-sidebar-collapsed')).toBe('0')
+      fireEvent.mouseLeave(container.querySelector('.tms-sidebar') as Element)
+      expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
       unmount()
     }
   })
 
-  it('dense pages show the sidebar as an icon rail that opens on hover and closes on leave, without touching the saved preference', () => {
+  it('pins the sidebar open when the toggle is clicked', () => {
+    renderShell('/tms/customers')
+    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+    expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument()
+  })
+
+  it('dense pages show the sidebar as an icon rail that opens on hover and closes on leave', () => {
     const { container } = renderShell('/tms/shipments', undefined, { dense: true })
     const shell = container.querySelector('.tms-shell') as HTMLElement
     const sidebar = container.querySelector('.tms-sidebar') as HTMLElement
@@ -258,7 +255,6 @@ describe('TmsShell', () => {
     expect(shell).not.toHaveClass('tms-is-collapsed')
     fireEvent.mouseLeave(sidebar)
     expect(shell).toHaveClass('tms-is-collapsed')
-    expect(window.localStorage.getItem('tms-sidebar-collapsed')).toBe('0')
   })
 
   it('a click on the rail button pins the full sidebar open on a dense page', () => {
