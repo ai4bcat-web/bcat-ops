@@ -2812,7 +2812,8 @@ describe('carrier booking', () => {
 
   it('needs every warning acknowledged by key before it books', async () => {
     const { loadId } = await bookableLoad()
-    seedCarrier()
+    // No completed MyCarrierPackets packet: the paperwork is then asked for.
+    seedCarrier({ mcpStatus: null })
 
     await expect(book(loadId)).rejects.toThrow(/Acknowledge these before booking/)
 

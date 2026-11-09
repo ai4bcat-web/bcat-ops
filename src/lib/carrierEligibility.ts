@@ -108,6 +108,9 @@ const DEFAULT_REQUIRED_DOCS: readonly string[] = [
 ]
 const DEFAULT_INSURANCE_WARN_DAYS = 30
 
+/** The paperwork a completed MyCarrierPackets packet covers. */
+export const MCP_PACKET_DOCS: ReadonlySet<string> = new Set(['COI_CARGO', 'COI_AUTO', 'COI_GENERAL', 'W9', 'CARRIER_AGREEMENT'])
+
 const INSURANCE_LABELS: Record<InsurancePolicyType, string> = {
   AUTO_LIABILITY: 'auto liability',
   CARGO: 'cargo',
@@ -292,9 +295,14 @@ export function evaluateCarrierBooking(input: CarrierBookingInput): CarrierBooki
   const requiredDocs = settings?.requiredCarrierDocs?.length
     ? settings.requiredCarrierDocs
     : DEFAULT_REQUIRED_DOCS
+  // A completed MyCarrierPackets packet IS the carrier's certificates, W-9 and agreement (Ryne 2026-11-10): MCP stores the files and
+  // they can be exported from there, so BCAT Ops only records that the carrier has them and does not ask for a second copy.
+  const packetStatus = normalizeMcpStatus((carrier as { mcpStatus?: string | null }).mcpStatus)
+  const packetDone = packetStatus != null && (MCP_PACKET_COMPLETED_STATUSES as readonly string[]).includes(packetStatus)
   for (const type of requiredDocs) {
     const label = DOCUMENT_LABELS[type as CarrierDocumentType] ?? type
     const ofType = documents.filter((d) => d?.type === type)
+    if (ofType.length === 0 && packetDone && MCP_PACKET_DOCS.has(type)) continue
     if (ofType.length === 0) {
       add('MISSING_DOC', `MISSING_DOC:${type}`, `No ${label} is on file for this carrier.`, {
         block: false,
