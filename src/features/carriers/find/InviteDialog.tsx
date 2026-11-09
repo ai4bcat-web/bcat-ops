@@ -1,12 +1,10 @@
 /**
- * "Send packet invitation": a checklist of every address MyCarrierPackets returns for the carrier, all
- * ticked by default, plus an "add another address" field. Typed addresses are additive: the default
- * is always MCP's own list. Each address is validated here and again on the server.
+ * "Send packet invitation": pick ONE of the addresses MyCarrierPackets returns for the carrier (nothing is pre-selected), or add
+ * another address and pick that. The invitation goes to the chosen address only. Each address is validated here and again on the server.
  */
 import { useState } from 'react'
 import { TmsButton, TmsDialog, TmsField, TmsInput } from '@/features/tms/kit'
 import { validateInviteEmail } from '@/lib/integrations/mcpReview'
-import { chosenRecipients } from '@/features/carriers/lookup/lookupModel'
 
 export function InviteDialog({ carrierName, candidates, stub, busy, onClose, onSend }: {
   carrierName: string
@@ -17,27 +15,18 @@ export function InviteDialog({ carrierName, candidates, stub, busy, onClose, onS
   onClose: () => void
   onSend: (emails: string[]) => void
 }) {
-  const [unticked, setUnticked] = useState<ReadonlySet<string>>(new Set())
+  const [selected, setSelected] = useState<string | null>(null)
   const [typedList, setTypedList] = useState<string[]>([])
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | undefined>()
 
   const known = new Set(candidates.map((c) => c.address))
-  const ticked = [...candidates.map((c) => c.address), ...typedList].filter((a) => !unticked.has(a))
-  const recipients = chosenRecipients(ticked, [])
-
-  const toggle = (address: string) => setUnticked((prev) => {
-    const next = new Set(prev)
-    if (next.has(address)) next.delete(address)
-    else next.add(address)
-    return next
-  })
 
   const add = () => {
     const check = validateInviteEmail(draft, [])
     if (!check.ok) { setError(check.error); return }
     if (!known.has(check.email) && !typedList.includes(check.email)) setTypedList((l) => [...l, check.email])
-    setUnticked((prev) => { const next = new Set(prev); next.delete(check.email); return next })
+    setSelected(check.email)
     setDraft('')
     setError(undefined)
   }
@@ -47,28 +36,28 @@ export function InviteDialog({ carrierName, candidates, stub, busy, onClose, onS
       open
       onOpenChange={(open) => { if (!open) onClose() }}
       title="Send packet invitation"
-      description={`MyCarrierPackets e-mails ${carrierName} a link to its packet, to every address ticked below.${stub ? ' Stub, no MCP call: nothing will actually be sent.' : ''}`}
+      description={`MyCarrierPackets e-mails ${carrierName} a link to its packet, to the one address you pick below.${stub ? ' Stub, no MCP call: nothing will actually be sent.' : ''}`}
       footer={
         <>
           <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
           <TmsButton
             variant="primary"
             data-testid="mcp-invite-send"
-            disabled={busy || recipients.length === 0}
-            title={recipients.length === 0 ? 'Tick at least one address, or add one' : undefined}
-            onClick={() => onSend(recipients)}
+            disabled={busy || selected == null}
+            title={selected == null ? 'Pick the address to send to, or add one' : undefined}
+            onClick={() => { if (selected) onSend([selected]) }}
           >
-            {busy ? 'Sending…' : `Send invitation${recipients.length > 1 ? ` to ${recipients.length} addresses` : ''}`}
+            {busy ? 'Sending…' : selected ? `Send invitation to ${selected}` : 'Send invitation'}
           </TmsButton>
         </>
       }
     >
       <div className="flex flex-col gap-3">
-        <ul className="flex flex-col gap-1" style={{ listStyle: 'none', padding: 0, margin: 0 }} data-testid="mcp-invite-recipients">
+        <ul className="flex flex-col gap-1" style={{ listStyle: 'none', padding: 0, margin: 0 }} data-testid="mcp-invite-recipients" role="radiogroup" aria-label="Send the invitation to">
           {candidates.map((c) => (
             <li key={c.address}>
               <label className="flex items-center gap-2">
-                <input type="checkbox" checked={!unticked.has(c.address)} onChange={() => toggle(c.address)} aria-label={c.address} />
+                <input type="radio" name="mcp-invite-recipient" checked={selected === c.address} onChange={() => setSelected(c.address)} aria-label={c.address} />
                 <span>{c.address}</span>
                 <span className="tms-muted" style={{ fontSize: 12 }}>{c.label}</span>
               </label>
@@ -77,7 +66,7 @@ export function InviteDialog({ carrierName, candidates, stub, busy, onClose, onS
           {typedList.map((a) => (
             <li key={a}>
               <label className="flex items-center gap-2">
-                <input type="checkbox" checked={!unticked.has(a)} onChange={() => toggle(a)} aria-label={a} />
+                <input type="radio" name="mcp-invite-recipient" checked={selected === a} onChange={() => setSelected(a)} aria-label={a} />
                 <span>{a}</span>
                 <span className="tms-muted" style={{ fontSize: 12 }}>Added by you</span>
               </label>

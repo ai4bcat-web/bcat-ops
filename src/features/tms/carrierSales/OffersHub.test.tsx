@@ -99,7 +99,7 @@ describe('OffersHub', () => {
     expect(mocks.listCarrierOffers).not.toHaveBeenCalled()
   })
 
-  it('an offer from a carrier outside the directory cannot be accepted (the gate’s own words); Send setup packet needs no e-mail on the offer: the card lists MCP’s addresses and sends to all of them', async () => {
+  it('an offer from a carrier outside the directory cannot be accepted (the gate’s own words); Send setup packet needs no e-mail on the offer: the card lists MCP’s addresses and sends to the one picked of them', async () => {
     mocks.listCarrierOffers.mockResolvedValue({
       offers: [offer('Q2', { carrierMc: '999999', carrierEmail: null, vetting: { known: false, bookable: false, blockers: ['Carrier is not in the directory.'], warnings: [], status: null, mcpStatus: null }, carrierRisk: undefined })],
     })
@@ -118,9 +118,10 @@ describe('OffersHub', () => {
     expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toMatch(/^Not in directory/)
     expect(within(card).getByTestId('cs-lookup-card-emails').textContent).toMatch(/dispatch@hauler.example, owner@hauler.example/)
     fireEvent.click(within(card).getByTestId('cs-lookup-card-send'))
+    fireEvent.click(await screen.findByLabelText('dispatch@hauler.example')) // nothing is pre-selected
     fireEvent.click(await screen.findByTestId('mcp-invite-send'))
     await waitFor(() => expect(mocks.mcpSendInvite).toHaveBeenCalledWith({
-      mcNumber: '999999', emails: ['dispatch@hauler.example', 'owner@hauler.example'], carrierId: undefined, carrierName: 'Hauler LLC', shipmentId: 's-1', loadId: undefined, ensureCarrier: true,
+      mcNumber: '999999', emails: ['dispatch@hauler.example'], carrierId: undefined, carrierName: 'Hauler LLC', shipmentId: 's-1', loadId: undefined, ensureCarrier: true,
     }))
   })
 

@@ -120,7 +120,7 @@ describe('FindInvitePage', () => {
     expect((within(card).getByTestId('find-lookup-card-add') as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('the setup packet defaults to ALL of MCP’s addresses; from a load the carrier id, shipment and load go with it', async () => {
+  it('nothing is pre-selected; the invitation goes to the one address picked; from a load the carrier id, shipment and load go with it', async () => {
     mocks.carriers = [carrierRow()]
     mocks.invite.mockResolvedValue({ mode: 'LIVE', sent: true, message: 'Packet invitation sent to dispatch@zephyr.example, owner@zephyr.example.', carrierLogged: true, threadLogged: true })
     renderPage('/tms/carriers/find?shipmentId=ship-1&loadId=load-1')
@@ -128,21 +128,26 @@ describe('FindInvitePage', () => {
     fireEvent.click(screen.getByTestId('find-lookup-card-send'))
 
     const list = await screen.findByTestId('mcp-invite-recipients')
-    expect(within(list).getAllByRole('checkbox').map((c) => (c as HTMLInputElement).checked)).toEqual([true, true])
+    expect(within(list).getAllByRole('radio').map((c) => (c as HTMLInputElement).checked)).toEqual([false, false])
+    expect((screen.getByTestId('mcp-invite-send') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(within(list).getByLabelText('dispatch@zephyr.example'))
+    fireEvent.click(within(list).getByLabelText('owner@zephyr.example'))
+    expect(within(list).getAllByRole('radio').map((c) => (c as HTMLInputElement).checked)).toEqual([false, true])
+    fireEvent.click(within(list).getByLabelText('dispatch@zephyr.example'))
     fireEvent.click(screen.getByTestId('mcp-invite-send'))
 
     await waitFor(() => expect(mocks.invite).toHaveBeenCalledTimes(1))
     expect(mocks.invite).toHaveBeenCalledWith({
-      mcNumber: 'MC900001', emails: ['dispatch@zephyr.example', 'owner@zephyr.example'], carrierId: 'car-1', carrierName: 'Zephyr Test Freight LLC', shipmentId: 'ship-1', loadId: 'load-1', ensureCarrier: true,
+      mcNumber: 'MC900001', emails: ['dispatch@zephyr.example'], carrierId: 'car-1', carrierName: 'Zephyr Test Freight LLC', shipmentId: 'ship-1', loadId: 'load-1', ensureCarrier: true,
     })
     expect((await screen.findByTestId('mcp-invite-result')).textContent).toMatch(/Noted on the shipment thread.*Logged on the carrier/)
   })
 
-  it('an unticked address is left out and a typed address is added to the list, validated first', async () => {
+  it('a typed address is validated first, then added and selected on its own', async () => {
     renderPage()
     await search('MC 900001')
     fireEvent.click(screen.getByTestId('find-lookup-card-send'))
-    fireEvent.click(await screen.findByLabelText('owner@zephyr.example'))
+    await screen.findByLabelText('owner@zephyr.example')
 
     fireEvent.change(screen.getByLabelText('Add another address'), { target: { value: 'not-an-email' } })
     fireEvent.click(screen.getByTestId('mcp-invite-add'))
@@ -152,15 +157,14 @@ describe('FindInvitePage', () => {
     fireEvent.change(screen.getByLabelText('Add another address'), { target: { value: 'New@Carrier.com' } })
     fireEvent.click(screen.getByTestId('mcp-invite-add'))
     fireEvent.click(screen.getByTestId('mcp-invite-send'))
-    await waitFor(() => expect(mocks.invite).toHaveBeenCalledWith(expect.objectContaining({ emails: ['dispatch@zephyr.example', 'new@carrier.com'], mcNumber: 'MC900001' })))
+    await waitFor(() => expect(mocks.invite).toHaveBeenCalledWith(expect.objectContaining({ emails: ['new@carrier.com'], mcNumber: 'MC900001' })))
   })
 
-  it('unticking every address disables the send: an empty list never invites', async () => {
+  it('send stays disabled until one address is picked: nothing is pre-selected', async () => {
     renderPage()
     await search('MC 900001')
     fireEvent.click(screen.getByTestId('find-lookup-card-send'))
-    fireEvent.click(await screen.findByLabelText('dispatch@zephyr.example'))
-    fireEvent.click(screen.getByLabelText('owner@zephyr.example'))
+    await screen.findByLabelText('dispatch@zephyr.example')
     expect((screen.getByTestId('mcp-invite-send') as HTMLButtonElement).disabled).toBe(true)
     expect(mocks.invite).not.toHaveBeenCalled()
   })

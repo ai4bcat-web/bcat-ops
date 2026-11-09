@@ -189,6 +189,7 @@ describe('CoverCarrierDialog', () => {
     enterRate()
     expect(screen.queryByTestId('cover-assign')).toBeNull()
     fireEvent.click(screen.getByTestId('cover-send-packet'))
+    fireEvent.click(await screen.findByLabelText('dispatch@zephyr.example')) // nothing is pre-selected
     fireEvent.click(await screen.findByTestId('mcp-invite-send'))
 
     await waitFor(() => expect(mocks.invite).toHaveBeenCalledTimes(1))

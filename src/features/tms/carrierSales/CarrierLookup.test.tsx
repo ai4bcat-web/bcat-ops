@@ -60,7 +60,7 @@ describe('Carrier Sales MC lookup', () => {
     expect(dialog.dataset).toMatchObject({ shipment: 's-1', query: 'MC 274623' })
   })
 
-  it('a carrier not in the directory says Not in directory, lists MCP’s e-mails, and the send is enabled and sends to all of them', async () => {
+  it('a carrier not in the directory says Not in directory, lists MCP’s e-mails, and the invitation goes to the one address picked', async () => {
     mocks.preview.mockResolvedValue({ mode: 'LIVE', reason: null, notFound: false, card: cardFor('MC900001', 'Small Hauler LLC', ['a@small.example', 'b@small.example']) })
     mocks.invite.mockResolvedValue({ mode: 'LIVE', sent: true, message: 'sent', carrierLogged: false, threadLogged: false })
     renderLookup()
@@ -72,8 +72,9 @@ describe('Carrier Sales MC lookup', () => {
     expect(send.disabled).toBe(false)
     expect((within(card).getByTestId('cs-lookup-card-cover') as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(send)
+    fireEvent.click(await screen.findByLabelText('b@small.example')) // nothing is pre-selected
     fireEvent.click(await screen.findByTestId('mcp-invite-send'))
-    await waitFor(() => expect(mocks.invite).toHaveBeenCalledWith(expect.objectContaining({ mcNumber: 'MC900001', emails: ['a@small.example', 'b@small.example'], ensureCarrier: true })))
+    await waitFor(() => expect(mocks.invite).toHaveBeenCalledWith(expect.objectContaining({ mcNumber: 'MC900001', emails: ['b@small.example'], ensureCarrier: true })))
   })
 
   it('Add to directory creates the Pending row without inviting', async () => {
