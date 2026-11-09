@@ -37,4 +37,6 @@ export const PROD_WRITE_SETS = {
   seedDivisions: { models: ['Division', 'TmsSettings'] },
   seedRevDivisions: { models: ['OwnershipDivision', 'AuditLog'] },
   backfillDriverDocScans: { models: ['DriverSubmissionDoc', 'DriverSubmission'] },
+  // `awRelease.mjs --apply`: Order release fields (arStatus, arStatusChangedAt, readyToInvoiceAt, updatedBy/At, version) + one AuditLog row per shipment.
+  awRelease: { models: ['Order', 'AuditLog'] },
 };
