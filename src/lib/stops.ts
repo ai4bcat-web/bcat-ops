@@ -95,6 +95,20 @@ export function withDerivedLegacy<T extends Partial<Load>>(patch: T): T {
   return { ...patch, ...deriveLegacyFields(patch.stops) }
 }
 
+/**
+ * A stops save re-derives pickupDriverId / deliveryDriverId even when no driver changed. Writing those two fields is refused
+ * for some signed-in users ("Unauthorized on [deliveryDriverId, pickupDriverId]" when Dennis set an appointment to NEED),
+ * so a write that did not set them and would not change them leaves them out.
+ */
+export function withoutUnchangedDriverMirrors<T extends Partial<Load>>(payload: T, before: Partial<Load>, patch: Partial<Load>): T {
+  const out = { ...payload }
+  for (const field of ['pickupDriverId', 'deliveryDriverId'] as const) {
+    if (field in patch) continue
+    if ((out[field] ?? null) === (before[field] ?? null)) delete out[field]
+  }
+  return out
+}
+
 /** Re-number sequence 0..n after add/remove/reorder. */
 export function reorderStops(stops: Stop[]): Stop[] {
   return stops.map((s, i) => ({ ...s, sequence: i }))

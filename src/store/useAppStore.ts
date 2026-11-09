@@ -10,7 +10,7 @@ import { getMondayOf } from '@/lib/date'
 import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import * as api from '@/lib/apiClient'
 import { inactiveChanges } from '@/lib/fleetActive'
-import { withDerivedLegacy, withStopsFromLegacy } from '@/lib/stops'
+import { withDerivedLegacy, withoutUnchangedDriverMirrors, withStopsFromLegacy } from '@/lib/stops'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import type { NewShipmentPrefill } from '@/features/shipments/components/NewShipmentDialog'
 
@@ -800,10 +800,10 @@ export const useAppStore = create<AppState>()(
         // projected into `stops` (withStopsFromLegacy), then any `stops` write re-derives
         // the legacy mirrors (withDerivedLegacy). Together they keep the canonical array
         // and its mirrors from ever disagreeing, whichever side the caller wrote.
-        const after = await api.updateLoad(id, withDerivedLegacy(withStopsFromLegacy({
+        const after = await api.updateLoad(id, withoutUnchangedDriverMirrors(withDerivedLegacy(withStopsFromLegacy({
           ...patch,
           updatedBy: get().currentUserEmail,
-        }, before)))
+        }, before)), before, patch))
         set((s) => ({ loads: s.loads.map((l) => (l.id === id ? after : l)) }))
         writeAudit(get().currentUserEmail, 'Load', id, 'update', diffChanges(before, after))
       },

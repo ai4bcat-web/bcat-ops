@@ -530,6 +530,9 @@ export function DashboardPage() {
           </Cell>
         </div>
 
+        {/* ── Brokerage (BCAT Logistics): right under the top cards ─ */}
+        <LazyWidget enabled={kpiFinal} minHeight={420} label="brokerage"><BrokerageSection /></LazyWidget>
+
         {/* ── The year so far: combined profit, month over month by source ─── */}
         <LazyWidget enabled={kpiFinal} minHeight={320} label="year-profit"><YearProfitWidget /></LazyWidget>
 
@@ -538,9 +541,6 @@ export function DashboardPage() {
 
         {/* ── Current diesel price (fleet average, week-over-week) ──────────── */}
         <LazyWidget enabled={kpiFinal} minHeight={160} label="diesel-price"><DieselPriceWidget /></LazyWidget>
-
-        {/* ── Brokerage (BCAT Logistics): revenue, expense, profit by month and by sales rep ─ */}
-        <LazyWidget enabled={kpiFinal} minHeight={420} label="brokerage"><BrokerageSection /></LazyWidget>
 
         {/* ── Compliance alerts + recent repair invoices ────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: col1 ?? '1fr 1fr', gap: 16 }}>
