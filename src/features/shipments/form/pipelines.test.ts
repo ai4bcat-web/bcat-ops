@@ -4,7 +4,7 @@ import { CUSTOMER, filledValues, storedBundle } from './testFixtures'
 import { emptyValues, valuesFromBundle } from './model'
 
 const api = vi.hoisted(() => ({
-  createShipment: vi.fn(), saveOrderForm: vi.fn(), getShipmentBundle: vi.fn(), setRevTag: vi.fn(), clearRevTag: vi.fn(),
+  assignAsset: vi.fn(), createShipment: vi.fn(), saveOrderForm: vi.fn(), getShipmentBundle: vi.fn(), setRevTag: vi.fn(), clearRevTag: vi.fn(),
   setSalesRep: vi.fn(), assignCarrierRep: vi.fn(), submitOrder: vi.fn(), updateOrderDetails: vi.fn(), updateStop: vi.fn(),
   updateStopDetails: vi.fn(), recalcCharges: vi.fn(), updateLoadCarrierDetails: vi.fn(), setEta: vi.fn(),
   prepareDocumentUpload: vi.fn(), commitDocument: vi.fn(), putPresignedFile: vi.fn(), createLocation: vi.fn(),
@@ -45,6 +45,71 @@ describe('create pipeline', () => {
     expect(api.setRevTag.mock.calls[0][0]).toMatchObject({ divisionCode: 'BCAT', subdivisionCode: 'FOOD' })
     expect(api.setSalesRep.mock.calls[0][0]).toMatchObject({ repId: 'rep-1' })
     expect(api.assignCarrierRep).not.toHaveBeenCalled()
+    expect(api.assignAsset).not.toHaveBeenCalled()
+  })
+
+  const driver = { id: 'driver-1', name: 'Test Driver', email: '', phone: '', workPhone: '', truckId: 'truck-1', truckNumber: '12', trailerId: 'trailer-1', trailerNumber: 'R7' }
+
+  it('assigns the selected own-fleet driver once after saving the shipment', async () => {
+    const v = filledValues()
+    v.carrier.isOwnFleet = true
+    v.carrier.driver1.name = driver.name
+    const saved = wireCreate(v)
+    const assigned = { ...saved, loads: saved.loads.map((load) => ({ ...load, status: 'BOOKED' as const })) }
+    api.assignAsset.mockResolvedValue(assigned)
+    const res = await runCreate(v, { ...ctx, ownFleetRoster: [driver] }, { draftSave: false })
+    expect(res.ok).toBe(true)
+    expect(res.bundle).toBe(assigned)
+    expect(api.assignAsset).toHaveBeenCalledExactlyOnceWith({ loadId: saved.loads[0].id, driverId: driver.id, truckId: driver.truckId, truckNumber: '12', trailerId: driver.trailerId, trailerNumber: 'R7' })
+    expect(api.saveOrderForm.mock.invocationCallOrder[0]).toBeLessThan(api.assignAsset.mock.invocationCallOrder[0])
+  })
+
+  it('keeps the saved draft and reports the server assignment error with a Cover retry', async () => {
+    const v = filledValues()
+    v.carrier.isOwnFleet = true
+    v.carrier.driver1.name = driver.name
+    wireCreate(v)
+    api.assignAsset.mockRejectedValue(new Error('Pay week is locked'))
+    const res = await runCreate(v, { ...ctx, ownFleetRoster: [driver] }, { draftSave: true })
+    expect(res.ok).toBe(false)
+    expect(res.bundle?.shipment.id).toBe('shp-1')
+    expect(res.createdShipmentId).toBe('shp-1')
+    expect(res.failedSteps).toEqual(['assignDriver'])
+    expect(res.message).toContain('Shipment created, driver assignment failed: Pay week is locked')
+    expect(res.message).toContain('Cover')
+    expect(api.createShipment).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the division to the server rules when a driver is assigned and the division is only the customer default', async () => {
+    const v = filledValues()
+    v.carrier.isOwnFleet = true
+    v.carrier.driver1.name = driver.name
+    v.ship.revDivision = 'BCAT'; v.ship.revSubdivision = ''
+    wireCreate(v)
+    api.assignAsset.mockResolvedValue(storedBundle(v))
+    await runCreate(v, { ...ctx, customer: { ...CUSTOMER, defaultDivisionKey: 'BCAT' }, ownFleetRoster: [driver] }, { draftSave: false })
+    expect(api.setRevTag).not.toHaveBeenCalled()
+    expect(api.assignAsset).toHaveBeenCalledTimes(1)
+  })
+
+  it('an explicitly chosen division still wins as a tag alongside the driver', async () => {
+    const v = filledValues()
+    v.carrier.isOwnFleet = true
+    v.carrier.driver1.name = driver.name
+    v.ship.revDivision = 'ASSETS'; v.ship.revSubdivision = ''
+    wireCreate(v)
+    api.assignAsset.mockResolvedValue(storedBundle(v))
+    await runCreate(v, { ...ctx, customer: { ...CUSTOMER, defaultDivisionKey: 'BCAT' }, ownFleetRoster: [driver] }, { draftSave: false })
+    expect(api.setRevTag.mock.calls[0][0]).toMatchObject({ divisionCode: 'ASSETS' })
+  })
+
+  it('does not assign when own fleet has no selected driver', async () => {
+    const v = filledValues()
+    v.carrier.isOwnFleet = true
+    wireCreate(v)
+    const res = await runCreate(v, { ...ctx, ownFleetRoster: [driver] }, { draftSave: true })
+    expect(res.ok).toBe(true)
+    expect(api.assignAsset).not.toHaveBeenCalled()
   })
 
   it('Save draft sends draftSave and survives with only a typed customer', async () => {

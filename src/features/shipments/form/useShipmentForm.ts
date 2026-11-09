@@ -169,7 +169,11 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
     if (next) setBundle(next)
     if (!result.ok) {
       if (next) reseed(valuesRef.current, true)
-      if (result.createdShipmentId && next) {
+      if (result.createdShipmentId && next && result.failedSteps.length === 1 && result.failedSteps[0] === 'assignDriver') {
+        // Cover owns assignment retries, including relay confirmations and pay overrides.
+        setPartial(null)
+        deleteDraft(email, clientDraftId.current)
+      } else if (result.createdShipmentId && next) {
         setPartial({
           shipmentId: result.createdShipmentId,
           number: next.shipment.number,

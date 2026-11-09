@@ -14,6 +14,7 @@ import { useCarriers } from '@/hooks/useCarriers'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useShipment } from '@/hooks/useShipment'
 import { useStaff } from '@/hooks/useStaff'
+import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
 import { getShipmentBundle, getTmsSettings, linkIntakeShipment, listLocations } from '@/lib/apiClient'
 import { useIntakeLoad } from '../intake/useIntakeLoads'
 import type { LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
@@ -86,6 +87,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const ensureLocations = useCallback(() => { void loadLocations().catch(() => { locationsRead.current = null }) }, [loadLocations])
   const { carriers } = useCarriers()
   const { staff } = useStaff(email)
+  const ownFleetRoster = useOwnFleetRoster()
   const { divisions } = useOwnershipDivisions()
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   useEffect(() => {
@@ -101,13 +103,14 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const rootRef = useRef<HTMLDivElement>(null)
 
   const pipelineCtx = useMemo(() => ({
+    ownFleetRoster,
     locations,
     loadLocations,
     settings,
     actorName: email,
     refreshDirectory: () => { locationsRead.current = null; void directory.refresh() },
     onNotice: (msg: string) => { toast.message(msg) },
-  }), [directory, locations, loadLocations, settings, email])
+  }), [directory, locations, loadLocations, settings, email, ownFleetRoster])
 
   // Scroll to and focus the control whose `data-testid` is `fieldKey`, opening its More tab first.
   const focusField = useCallback((fieldKey: string) => {
