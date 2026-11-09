@@ -367,9 +367,11 @@ export function shipmentContextFor(input: ShipmentContextInput): ResolveContext 
 }
 
 // ── Seed rows ────────────────────────────────────────────────────────────────
-// The three businesses, Ivan's three driver subsidiaries and the Company group are
+// The three businesses and Ivan's three driver subsidiaries are
 // SEED DATA, not constants: ENSURE_OWNERSHIP_SEED writes them once and an admin
 // edits, archives or adds to them from Divisions & ownership afterwards.
+// There is no 'Company' division: Ryne retired it (2026-11-09) in favour of Ivan Cartage, and a
+// seed row would bring it back the next time an admin runs Ensure seed.
 
 const owners = (party: string, overrides: Partial<OwnershipOwners> = {}): OwnershipOwners => ({
   building: party,
@@ -467,18 +469,6 @@ export const SEED_DIVISIONS: OwnershipDivisionSeed[] = [
     active: true,
     owners: owners('Best Care Auto Transport'),
     flows: flows({ carShipping: true }),
-  },
-  {
-    id: 'COMPANY',
-    code: 'COMPANY',
-    name: 'Company',
-    brand: null,
-    parentId: null,
-    color: null,
-    sortOrder: 40,
-    active: true,
-    owners: null,
-    flows: null,
   },
 ]
 

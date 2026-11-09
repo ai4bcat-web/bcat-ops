@@ -64,5 +64,8 @@ export const PROD_WRITE_SETS = {
   // `--with-stop-copies`: Load.stops[].name / originName / destinationName copies of the old name + one AuditLog row per Load.
   awLocationRename: { models: ['Location', 'Load', 'AuditLog'] },
   // `awCustomerEmail.mjs --apply`: enrich-only Customer.apEmail / invoiceCopyEmails / contactEmail (where empty) + one AuditLog row per customer.
+  // `awDivisions.mjs drivers|retire-company|restore --apply` (union; per-subcommand subsets are SUB_MODELS in the script): Driver.driverType only (one AuditLog row per driver),
+  // delete of the COMPANY OwnershipDivision row (exported first, refuses while referenced) + restore of it.
+  awDivisions: { models: ['Driver', 'OwnershipDivision', 'AuditLog'] },
   awCustomerEmail: { models: ['Customer', 'AuditLog'] },
 };
