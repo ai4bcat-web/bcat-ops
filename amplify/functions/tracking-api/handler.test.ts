@@ -364,7 +364,7 @@ describe('POST /l/<token>/ping', () => {
     const res = await post(`/l/${TOKEN}/ping`, fix)
     expect(res.statusCode).toBe(200)
     const body = json(res)
-    expect(body).toMatchObject({ ok: true, nextInMin: 5 })
+    expect(body).toMatchObject({ ok: true, nextInMin: 15 })
     expect(body.eta).toMatchObject({ at: expect.stringMatching(/^\d{4}-/), miles: expect.any(Number), driveMinutes: expect.any(Number) })
 
     const crumb = puts(TABLES.history)
@@ -523,7 +523,7 @@ describe('GET /l/<token> share', () => {
   it('asks for consent until the link has one, then stops asking', async () => {
     route({ link: carrierLink(), load: LOAD, division: { key: 'BCAT_LOGISTICS', name: 'BCAT Logistics', active: true } })
     const fresh = json(await get(`/l/${TOKEN}`)).share as Record<string, unknown>
-    expect(fresh).toMatchObject({ everyMin: 5, consentRequired: true, consentVersion: 'ao-1', active: true, pingCount: 0, lastPingAt: null })
+    expect(fresh).toMatchObject({ everyMin: 15, consentRequired: true, consentVersion: 'ao-1', active: true, pingCount: 0, lastPingAt: null })
     expect(String(fresh.consentText)).toContain('BCAT Logistics will receive this phone')
     expect(String(fresh.consentText)).toContain('load S-1001-1')
 

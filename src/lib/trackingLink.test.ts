@@ -366,7 +366,7 @@ describe('carrierView share', () => {
 
   it('asks for consent until the server has recorded it, and names the broker and load', () => {
     const fresh = run(link)
-    expect(fresh).toMatchObject({ consentRequired: true, consentVersion: 'ao-1', everyMin: 5, active: true })
+    expect(fresh).toMatchObject({ consentRequired: true, consentVersion: 'ao-1', everyMin: 15, active: true })
     expect(fresh.consentText).toBe(consentText('Acme Brokerage', 'S-1001-1'))
     expect(run({ ...link, consentAt: '2026-03-02T17:00:00.000Z' }).consentRequired).toBe(false)
   })
