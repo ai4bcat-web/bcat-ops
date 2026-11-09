@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Navigation, Phone, Square } from 'lucide-react'
-import { fetchCarrierTracking, postTrackingPing, TrackingError, type CarrierTrackingView } from '@/lib/trackingClient'
+import { fetchCarrierTracking, postTrackingPing, postTrackingStatus, TrackingError, type CarrierTrackingView, type DriverStatusKey } from '@/lib/trackingClient'
 import { haversineMiles } from '@/lib/polyline'
 import { TmsAlert, TmsButton, TmsCard, TmsMetaList, TmsPublicFrame } from '@/features/tms/kit'
 
@@ -17,6 +17,13 @@ function geoMessage(err: GeolocationPositionError): string {
 /** A phone that has moved this far since the last post sends a fix without waiting out the cadence. */
 const MOVED_MILES = 3
 /** How often a quiet watch is checked against the cadence; a stationary phone raises no position events. */
+const DRIVER_STATUS_BUTTONS: { key: DriverStatusKey; label: string }[] = [
+  { key: 'EN_ROUTE', label: 'I am en route to pickup' },
+  { key: 'ON_SITE_PICKUP', label: 'On site at pickup' },
+  { key: 'DEPARTED_PICKUP', label: 'Departed pickup, in transit' },
+  { key: 'ON_SITE_DELIVERY', label: 'On site at delivery' },
+  { key: 'DELIVERED', label: 'Delivered' },
+]
 const CHECK_MS = 30_000
 const MINUTE_MS = 60_000
 
@@ -40,6 +47,9 @@ export function CarrierPingPage() {
   const [now, setNow] = useState(() => Date.now())
   const [pingError, setPingError] = useState<string | null>(null)
   const [keepAwake, setKeepAwake] = useState(false)
+  const [eta, setEta] = useState('')
+  const [statusBusy, setStatusBusy] = useState(false)
+  const [statusSent, setStatusSent] = useState<DriverStatusKey | null>(null)
 
   const watchId = useRef<number | null>(null)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -157,6 +167,18 @@ export function CarrierPingPage() {
     }
   }, [maybePost, stopWatching, keepAwake])
 
+  const tapStatus = useCallback(async (key: DriverStatusKey) => {
+    setStatusBusy(true)
+    try {
+      await postTrackingStatus(token, key, key === 'EN_ROUTE' && eta ? new Date(eta).toISOString() : null)
+      setStatusSent(key)
+      setPingError(null)
+      if (key === 'DELIVERED') void refresh()
+    } catch (e) {
+      setPingError(e instanceof TrackingError ? e.message : 'Could not send your status. Try again.')
+    } finally { setStatusBusy(false) }
+  }, [token, eta, refresh])
+
   const stop = useCallback(() => {
     stopWatching()
     setSharing(false)
@@ -247,6 +269,21 @@ export function CarrierPingPage() {
                 Start sharing
               </TmsButton>
             </>
+          )}
+
+          {!closed && sharing && (
+            <TmsCard title="Update your status">
+              <label className="tms-public-sub" htmlFor="driver-eta">ETA to pickup (optional)</label>
+              <input id="driver-eta" type="datetime-local" value={eta} onChange={(e) => setEta(e.target.value)} data-testid="driver-eta" />
+              <div className="tms-public-stack">
+                {DRIVER_STATUS_BUTTONS.map(({ key, label }) => (
+                  <TmsButton key={key} variant={statusSent === key ? 'primary' : 'secondary'} className="tms-public-cta" disabled={statusBusy} data-testid={`driver-status-${key}`} onClick={() => void tapStatus(key)}>
+                    {label}
+                  </TmsButton>
+                ))}
+              </div>
+              {statusSent && <p className="tms-public-sub">Sent: {DRIVER_STATUS_BUTTONS.find((b) => b.key === statusSent)?.label}</p>}
+            </TmsCard>
           )}
 
           {pingError && <TmsAlert tone="red">{pingError}</TmsAlert>}

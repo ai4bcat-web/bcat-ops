@@ -45,6 +45,7 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { randomBytes, randomUUID } from 'crypto'
+import { threadKeyFor } from '../../../src/lib/shipmentThread'
 
 import {
   IDX_CARRIERS_BY_SHIPMENT,
@@ -955,6 +956,23 @@ async function sendTrackingLink(input: Row, caller: Caller): Promise<Row> {
       ...(sms.messageId ? { driverMessageId: sms.messageId } : {}),
       updatedAt: nowIso(),
     })
+  }
+
+  // The shipment thread shows that a link went out (and by which route), next to the texts.
+  if (SHIPMENT_MESSAGE_TABLE_NAME) {
+    const at = nowIso()
+    try {
+      await putItem(SHIPMENT_MESSAGE_TABLE_NAME, {
+      id: `msg:${shipmentId}:${randomUUID()}`, __typename: 'ShipmentMessage', shipmentId, threadKey: threadKeyFor(shipmentId), loadId, loadCarrierId,
+      direction: 'OUT', channel: 'SMS', kind: 'OTHER', party: 'DRIVER', to: phone ?? null, from: caller.email, cc: null, subject: null,
+      body: via === 'COPY' ? 'Tracking link created to copy' : sms.status === 'SENT' ? `Tracking link texted to ${phone}` : `Tracking link could not be texted to ${phone}`,
+      status: sms.status === 'SENT' || via === 'COPY' ? 'SENT' : 'FAILED', error: sms.error ?? null, messageId: null, inReplyTo: null, providerRef: null,
+      attachments: null, documentIds: null, trackingLinkId: token, workflowRunId: null, authorKind: 'PERSON', authorName: caller.email,
+      at, createdBy: caller.email, createdAt: at, updatedAt: at,
+    }, null)
+    } catch (err) {
+      console.error('[tracking] link thread log failed', err instanceof Error ? err.message : String(err))
+    }
   }
 
   await writeAudit('TRACKING_LINK', token, 'SEND_TRACKING_LINK', caller, {
