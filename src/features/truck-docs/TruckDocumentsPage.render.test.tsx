@@ -35,13 +35,14 @@ vi.mock('@/store/useAppStore', () => {
   return { useAppStore }
 })
 
+import { MemoryRouter } from 'react-router-dom'
 import { TruckDocumentsPage } from './TruckDocumentsPage'
 
 afterEach(cleanup)
 
 describe('TruckDocumentsPage renders', () => {
   it('shows the heading, tabs and the truck row', () => {
-    render(<TruckDocumentsPage />)
+    render(<MemoryRouter><TruckDocumentsPage /></MemoryRouter>)
     expect(screen.getByRole('heading', { name: 'Asset Documents' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Trucks/ })).toBeTruthy()
     expect(screen.getByText('#214')).toBeTruthy()
@@ -49,14 +50,14 @@ describe('TruckDocumentsPage renders', () => {
   })
 
   it('Trailers tab swaps the rows', () => {
-    render(<TruckDocumentsPage />)
+    render(<MemoryRouter><TruckDocumentsPage /></MemoryRouter>)
     fireEvent.click(screen.getByRole('button', { name: /Trailers/ }))
     expect(screen.getByText('#77')).toBeTruthy()
     expect(screen.queryByText('#214')).toBeNull()
   })
 
   it('search with no match shows the empty state', () => {
-    render(<TruckDocumentsPage />)
+    render(<MemoryRouter><TruckDocumentsPage /></MemoryRouter>)
     fireEvent.change(screen.getByPlaceholderText('Search unit #, VIN, plate, make'), { target: { value: 'zzz' } })
     expect(screen.getByText('Nothing matches "zzz".')).toBeTruthy()
   })

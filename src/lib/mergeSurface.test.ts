@@ -97,7 +97,9 @@ describe('page grants and nav rows', () => {
     }
     walk(pinned)
     for (const s of sections) walk(s.items)
-    const missing = PRODUCTION_PAGES.filter((p) => p.to).filter((p) => !shown.has(p.to)).map((p) => p.to)
+    // Fleet (/trucks) is the second view of Asset documents (AssetPagesSwitch), not a sidebar row of its own.
+    const MERGED_INTO_ASSET_DOCS = new Set(['/trucks'])
+    const missing = PRODUCTION_PAGES.filter((p) => p.to).filter((p) => !shown.has(p.to) && !MERGED_INTO_ASSET_DOCS.has(p.to)).map((p) => p.to)
     expect(missing).toEqual([])
   })
 })

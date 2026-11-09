@@ -16,8 +16,8 @@
  * one of its children does.
  */
 import {
-  CalendarDays, LayoutDashboard, MessageSquare, Package, Truck, Banknote, Building2,
-  MapPin, SlidersHorizontal, type LucideIcon,
+  CalendarDays, LayoutDashboard, MessageSquare, Package, Banknote, Building2,
+  SlidersHorizontal, Gauge, type LucideIcon,
 } from 'lucide-react'
 import { NAV_ITEMS } from '@/lib/navItems'
 import { LIFECYCLE_TABS } from '@/lib/lifecycleTabs'
@@ -108,6 +108,38 @@ const PAYROLL_CHILDREN: NavChildDef[] = [
   { to: '/hours', label: 'Employee Hours', pageKey: 'hours' },
 ]
 
+/** Under Calendar, in this order (Ryne 2026-11-09). */
+const CALENDAR_CHILDREN: NavChildDef[] = [
+  { to: '/driver-info', label: 'Driver info', pageKey: 'dispatch' },
+  { to: '/appts', label: 'Appts', pageKey: 'appts', badgeKey: 'appts' },
+  { to: '/time-off', label: 'Time off', pageKey: 'timeOff' },
+]
+
+/** Customers, Carriers and Locations: one Profiles section. Carriers opens the Carrier list; Find & Invite is its other tab. */
+const PROFILES_CHILDREN: NavChildDef[] = [
+  { to: '/tms/customers', label: 'Customers', pageKey: 'customers', tms: true },
+  { to: '/tms/carriers', label: 'Carriers', pageKey: 'carriers', tms: true },
+  { to: '/tms/locations', label: 'Locations', pageKey: 'locations', tms: true },
+]
+
+/**
+ * The fleet manager's pages, replacing the old Assets / Ivan Cartage section. The five asked for come first; the rest of what that
+ * section held follows so no page loses its link. Fleet (trucks) is a tab of Asset documents.
+ */
+const FLEET_MANAGER_CHILDREN: NavChildDef[] = [
+  { to: '/fleet-dashboard', label: 'Fleet manager dashboard', pageKey: 'fleetManagerDashboard' },
+  { to: '/maintenance', label: 'Maintenance', pageKey: 'maintenance', badgeKey: 'maintenance' },
+  { to: '/invoices', label: 'Invoices', pageKey: 'invoices' },
+  { to: '/truck-docs', label: 'Asset documents', pageKey: 'truckDocs', badgeKey: 'truckDocs' },
+  { to: '/fuel', label: 'Fuel', pageKey: 'fuel' },
+  { to: '/files', label: 'Files', pageKey: 'files' },
+  { to: '/pods', label: 'PODs', pageKey: 'pods' },
+  { to: '/ivan-driver-app', label: 'Ivan driver app', pageKey: 'ivanDriverApp' },
+  { to: '/disputes', label: 'Amazon disputes', pageKey: 'disputes' },
+  { to: '/expenses', label: 'Expenses', pageKey: 'finances' },
+  { to: '/insurance', label: 'Insurance', pageKey: 'insurance' },
+]
+
 const SETTINGS_CHILDREN: NavChildDef[] = [
   { to: '/tms/brokerage', label: 'General & automation', pageKey: 'settings', tms: true, exact: true },
   { to: '/tms/brokerage/company', label: 'Company', pageKey: 'tms', adminOnly: true },
@@ -139,12 +171,9 @@ export const PINNED_ITEMS: NavItemDef[] = [
   { to: SHIPMENTS_PATH, label: 'Active shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true },
   // Dispatch and Calendar are pages of their own, listed right under Active shipments (for people who see the freight list).
   { to: '/dispatch', label: 'Dispatch', icon: MessageSquare, pageKey: 'dispatch', section: BROKERAGE, badgeKey: 'dispatch', showWithPath: SHIPMENTS_PATH },
-  { to: '/calendar', label: 'Calendar', icon: CalendarDays, pageKey: 'calendar', section: BROKERAGE, showWithPath: SHIPMENTS_PATH },
-  { to: '/tms/customers', label: 'Customers', icon: Building2, pageKey: 'customers', section: BROKERAGE, tms: true },
-  // One Carriers page with two tabs (Find & Invite first, then the Carrier list); the row opens
-  // the default tab and stays lit on the list and on a carrier's own page.
-  { to: '/tms/carriers/find', label: 'Carriers', icon: Truck, pageKey: 'carriers', section: BROKERAGE, tms: true, matches: ['/tms/carriers'] },
-  { to: '/tms/locations', label: 'Locations', icon: MapPin, pageKey: 'locations', section: BROKERAGE, tms: true },
+  { to: '/calendar', label: 'Calendar', icon: CalendarDays, pageKey: 'calendar', section: BROKERAGE, children: CALENDAR_CHILDREN },
+  { to: '/tms/customers', label: 'Profiles', icon: Building2, pageKey: 'tms', section: BROKERAGE, group: true, children: PROFILES_CHILDREN },
+  { to: '/fleet-dashboard', label: 'Fleet manager', icon: Gauge, pageKey: 'fleetManagerDashboard', section: BROKERAGE, group: true, children: FLEET_MANAGER_CHILDREN },
   {
     to: '/tms/invoicing',
     label: 'Accounting',
@@ -409,6 +438,8 @@ export function buildNavSections({
   for (const division of tops) {
     // The brokerage is the pinned block above: no section, no intake fallback link.
     if (division.code === BROKERAGE) continue
+    // Assets / Ivan Cartage has no section of its own any more: its pages sit under Calendar, Accounting > Payroll and Fleet manager.
+    if (division.code === 'ASSETS') continue
     const defs = byTopLevel.get(division.code) ?? []
     if (defs.length === 0) {
       // A division nobody has written pages for yet still has freight: its shipments.
