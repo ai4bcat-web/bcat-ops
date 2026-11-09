@@ -290,7 +290,7 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
       </div>
       <dl className="tms-grid tms-grid-2 text-xs" data-testid="rate-con-routing">
         <Fact label="From" value={user?.email ? `${user.email} (sent through BCAT Tracking; replies come back to the shipment thread)` : 'BCAT Tracking'} />
-        <Fact label="CC added automatically" value={[mailboxes?.tracking ?? 'The tracking mailbox', user?.email].filter(Boolean).join(', ')} />
+        <Fact label="Always on CC" value={['tracking@bcatcorp.com', mailboxes?.tracking, user?.email].filter(Boolean).join(', ')} />
       </dl>
       <p className="text-xs tms-muted">
         The carrier gets an e-mail with a link to review and e-sign this rate confirmation. The e-mail starts the shipment's tracking thread,
