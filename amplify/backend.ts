@@ -2652,7 +2652,9 @@ shipmentActionsFn.addToRolePolicy(
 // stores the generated PDF and emails it to the carrier with SES.
 // Step H: the quote board, the offer thread and the lane history.
 shipmentActionsFn.addEnvironment('BUCKET_NAME',                 backend.storage.resources.bucket.bucketName)
-shipmentActionsFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
+// Sent from the verified bcatcorp.com domain (DKIM-aligned), not from a gmail.com address: mail from ai4bcat@gmail.com through SES
+// fails alignment and lands in spam or is dropped (the 20002 rate con never showed up in anyone's inbox). Replies still go to the thread mailbox.
+shipmentActionsFn.addEnvironment('FROM_ADDRESS',                'tracking@bcatcorp.com')
 // The signing link in the email points at the app, not at the Function URL.
 shipmentActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_ORIGIN)
 // The rate con is sent as raw MIME with the PDF attached (SESv2 Content.Raw
