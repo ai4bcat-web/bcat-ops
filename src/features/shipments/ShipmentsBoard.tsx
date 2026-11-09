@@ -228,7 +228,6 @@ function toneRows(): BoardToneKey[] {
     { key: 'covered', label: 'Covered', statuses: ['COVERED'] },
     { key: 'open', label: 'Open', statuses: ['OPEN'] },
     { key: 'hold', label: 'Hold', statuses: ['HOLD'] },
-    { key: 'reserved', label: 'Reserved', statuses: ['RESERVED'] },
     { key: 'voided', label: 'Voided', statuses: ['VOIDED'] },
   ]
 }
