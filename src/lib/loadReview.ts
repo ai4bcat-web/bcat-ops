@@ -110,25 +110,14 @@ export interface LoadReviewRow {
   loadReviewPushedAt?: string | null
 }
 
-const EARLY_POD_STATUSES: readonly string[] = ['ARRIVED_AT_DELIVERY_TERMINAL', 'OUT_FOR_DELIVERY', 'UNLOADING']
-
-/** POD on file before the status says delivered — the "and/or POD received" half of the definition. */
-function podInBeforeDelivery(row: LoadReviewRow): boolean {
-  return EARLY_POD_STATUSES.includes(row.status)
-    && row.docsRequired?.includes('POD') === true
-    && Array.isArray(row.docsMissing)
-    && !row.docsMissing.includes('POD')
-}
-
-/** Delivered or POD'd, not released, not void, not imported history. */
+/**
+ * A load is in Load Review only once it has been released to review (the push stamp), as in Aljex: a delivered load is not in the
+ * queue just because it is delivered. Not void, not released. Imported history qualifies when it was pushed (Ryne 2026-11-09).
+ */
 export function inLoadReviewQueue(row: LoadReviewRow): boolean {
   if (row.voidedAt || row.deletedAt || row.status === 'CANCELED') return false
-  if (row.legacyImported === true) return false
   if (isReleasedToInvoicing(row)) return false
-  // Pushed from the board: in the queue whatever the delivery clock says.
-  if (row.loadReviewPushedAt) return true
-  return row.status === 'DELIVERED' || row.deliveredAt != null || row.loadStatus === 'DELIVERED'
-    || podInBeforeDelivery(row)
+  return Boolean(row.loadReviewPushedAt)
 }
 
 /** The released half of the lookback: not legacy, not void, released within `days`. */

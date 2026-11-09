@@ -43,7 +43,7 @@ vi.mock('@/lib/apiClient', async (importOriginal) => ({
 const DAY = 86_400_000
 function shipment(id: string, over: Record<string, unknown> = {}) {
   return {
-    id, number: id.toUpperCase(), status: 'DELIVERED', customerId: 'c-1', customerName: 'Acme',
+    id, number: id.toUpperCase(), status: 'DELIVERED', loadReviewPushedAt: '2026-11-03T00:00:00Z', customerId: 'c-1', customerName: 'Acme',
     deliveredAt: new Date(Date.now() - 2 * DAY).toISOString(), arStatus: 'DOCS_NEEDED',
     assignmentType: 'OWN_ASSET', docsRequired: ['POD'], docsMissing: [], salesRepId: 'rep-1', revDivision: 'DRY', reference: 'PO-1',
     orderRevenueCents: 120_000, costCents: 90_000, openIncidentCount: 0, orderIds: [`o-${id}`],
@@ -57,9 +57,9 @@ const ROWS = [
   shipment('s-1', { deliveredAt: new Date(Date.now() - 5 * DAY).toISOString() }),
   shipment('s-2'),
   shipment('s-3', { docsMissing: ['POD'] }),
-  shipment('s-4', { legacyImported: true }),
+  shipment('s-4', { loadReviewPushedAt: null }), // delivered but never released to review
   shipment('s-5', { readyToInvoiceAt: new Date().toISOString(), arStatus: 'UNBILLED' }),
-  shipment('s-6', { status: 'BOOKED', deliveredAt: null }),
+  shipment('s-6', { status: 'BOOKED', deliveredAt: null, loadReviewPushedAt: null }),
   shipment('s-7', { voidedAt: new Date().toISOString() }),
 ]
 
