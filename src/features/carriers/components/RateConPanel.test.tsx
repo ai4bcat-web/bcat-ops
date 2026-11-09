@@ -116,8 +116,8 @@ describe('RateConPanel recipients', () => {
     await setup()
     const routing = screen.getByTestId('rate-con-routing')
     expect(routing).toHaveTextContent('dispatch@bcatcorp.com')
-    expect(routing).toHaveTextContent('CC added automatically')
-    expect(routing).toHaveTextContent('tracking mailbox') // the address itself loads with a real shipment
+    expect(routing).toHaveTextContent('Always on CC')
+    expect(routing).toHaveTextContent('tracking@bcatcorp.com')
   })
 })
 
