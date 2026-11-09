@@ -32,10 +32,17 @@ export function stageArgs(values) {
   return ['scripts/importAljex.mjs', 'stage', '--source', values.file, '--target', `prod:${values['live-tag'] ?? 'stage'}`, '--i-mean-production']
 }
 
+/** The production files bucket (the one the tmsAljexImport Lambda gets as DATA_SAFETY_BUCKET), found without the Lambda: exactly one `<prefix>-datasafetybucket*` S3 bucket. */
+export function pickDataSafetyBucket(names, prefix) {
+  const hits = names.filter((n) => n.toLowerCase().startsWith(`${prefix.toLowerCase()}-datasafetybucket`))
+  if (hits.length !== 1) throw new AwProdRefusal(`expected exactly one production data-safety bucket ${prefix}-datasafetybucket*, found ${hits.length}`)
+  return hits[0]
+}
+
 export function reconcileArgs(values, { account, bucket }) {
   if (!values.entity || !values['source-job']) throw new AwProdRefusal('reconcile needs --entity and --source-job')
   if (!values.cutoff) throw new AwProdRefusal('reconcile needs --cutoff YYYY-MM-DD')
-  if (!bucket) throw new AwProdRefusal('the production files bucket could not be read from the tmsAljexImport lambda configuration')
+  if (!bucket) throw new AwProdRefusal('the production files bucket could not be determined')
   return [
     'scripts/importAljex.mjs', 'reconcile-entity', '--entity', values.entity, '--source-job', values['source-job'],
     ...(values['customers-job'] ? ['--customers-job', values['customers-job']] : []),

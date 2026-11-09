@@ -168,6 +168,18 @@ export function buildChecks({ date, reportsDir, tmp = tmpdir(), exportDir = EXPO
     }
   } else add('AP_NOT_IN_ALJEX_LISTS', '(none yet)', 'the AP reconcile has not run', 'run reconcile first');
 
+  // 5d. open BCAT invoices that are not in the Aljex AR report (and amount differences), from the named AR gap report
+  const arGapReport = readdirSyncSafe(reportsDir).filter((n) => /^ar-open-gap-.*\.csv$/.test(n)).sort().pop();
+  if (arGapReport) {
+    const [h, ...body] = parseCsv(readFileSync(join(reportsDir, arGapReport), 'utf8'));
+    const ix = (n) => h.indexOf(n);
+    for (const r of body) {
+      const cat = r[ix('category')];
+      if (cat === 'AR_PRO_NOT_IN_BCAT') continue; // already listed above as open AR gap rows (from the importer's unresolved file)
+      add(cat, r[ix('PRO')], `${r[ix('customer')]}, BCAT ${r[ix('BCAT balance')] ? `$${r[ix('BCAT balance')]}` : 'n/a'} vs Aljex ${r[ix('Aljex amount')] ? `$${r[ix('Aljex amount')]}` : 'n/a'}, invoice date ${r[ix('invoice date')]} (${r[ix('age days')]} days): ${r[ix('what to check')]}`, r[ix('suggested action')]);
+    }
+  }
+
   // 6-9. customers export and master reports
   const custPath = customersFile ?? join(exportDir, readdirSyncSafe(exportDir).filter((n) => /^aljex-customers-.*\.csv$/.test(n)).sort().pop() ?? 'aljex-customers.csv');
   if (existsSync(custPath)) {

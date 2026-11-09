@@ -35,7 +35,7 @@ import { register } from 'node:module'
 import { LambdaClient } from '@aws-sdk/client-lambda'
 import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, PutCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
-import { fileArgs, reconcileArgs, stageArgs } from './lib/awProdOffline.mjs'
+import { fileArgs, pickDataSafetyBucket, reconcileArgs, stageArgs } from './lib/awProdOffline.mjs'
 import {
   AwProdRefusal, PROD_API_ID, PROD_SUFFIX, REGION, STEPS, STEP_NAMES, checkBackupStamp, confirmTokenFor, createCheckpoint, createLog,
   defaultAws, evaluateRun, localDate, logTableDiff, maskPro, readProdState, resolveProdSuffix, scrub, sha, snapshotTables,
@@ -298,9 +298,9 @@ async function stepReconcile(ctx) {
   const { deps, log, apply, values } = ctx
   if (!values.entity || !values['source-job']) throw new AwProdRefusal('reconcile needs --entity and --source-job')
   if (!apply) { log.info(`reconcile ${values.entity}: would start a reconciliation job (writes AljexImportJob/report files)`); return { status: 'dry-run' } }
-  const fn = await deps.lambdaName('tmsaljeximport')
-  const bucket = await deps.aws(['lambda', 'get-function-configuration', '--function-name', fn, '--query', 'Environment.Variables.DATA_SAFETY_BUCKET'])
-  const args = reconcileArgs(values, { account: await deps.accountId(), bucket: typeof bucket === 'string' ? bucket : '' })
+  // The tmsAljexImport Lambda is not deployed to production yet: take the files bucket from S3, not from the Lambda.
+  const buckets = ((await deps.aws(['s3api', 'list-buckets'])).Buckets ?? []).map((b) => b.Name)
+  const args = reconcileArgs(values, { account: await deps.accountId(), bucket: pickDataSafetyBucket(buckets, LAMBDA_PREFIX) })
   log.info(`reconcile ${values.entity}: offline report via importAljex reconcile-entity; publishes a RECONCILE job and the report files`)
   const code = await (deps.importAljex ?? spawnImportAljex)(ctx, args)
   if (code !== 0) { process.exitCode = code ?? 1; return { status: 'failed' } }

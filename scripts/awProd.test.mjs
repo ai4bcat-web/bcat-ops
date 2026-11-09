@@ -186,7 +186,7 @@ describe('evaluateRun is pure', () => {
 })
 
 // ── the offline per-file route (the Lambda refuses production tables in every mode) ─────────────
-import { fileArgs, reconcileArgs, stageArgs } from './lib/awProdOffline.mjs'
+import { fileArgs, pickDataSafetyBucket, reconcileArgs, stageArgs } from './lib/awProdOffline.mjs'
 import { splitProdArgs } from './lib/importAljexArgs.mjs'
 import { PROD_SUFFIX as OFFLINE_PROD_SUFFIX } from './lib/awProdGuard.mjs'
 
@@ -200,6 +200,14 @@ describe('offline file steps route through importAljex with the production gate'
     expect(apply).toEqual(expect.arrayContaining(['--kind', 'ap', '--expected-file', '/x/c.csv', '--target', 'prod:AW-PROD-1108', '--apply', '--confirm-prod', `111:${OFFLINE_PROD_SUFFIX}`]))
     expect(() => fileArgs('ar', { ...v, 'live-tag': undefined }, { apply: true, account: '111' })).toThrow(/live-tag/)
     expect(() => fileArgs('ar', { file: 'x' }, { apply: false, account: null })).toThrow(/cutoff/)
+  })
+
+  it('finds the production files bucket without the Lambda: exactly one data-safety bucket of the production stack, never another stack\'s', () => {
+    const P = 'amplify-d3dejqzs77khq6-ma'
+    const names = [`${P}-datasafetybuckete30ffee8-prod`, 'amplify-d3dejqzs77khq6-de-datasafetybuckete30ffee8-dev', `${P}-bcatrateconfirmsbucketf4-x`]
+    expect(pickDataSafetyBucket(names, P)).toBe(`${P}-datasafetybuckete30ffee8-prod`)
+    expect(() => pickDataSafetyBucket(names.slice(1), P)).toThrow(/found 0/)
+    expect(() => pickDataSafetyBucket([...names, `${P}-datasafetybucket-other`], P)).toThrow(/found 2/)
   })
 
   it('stage and reconcile are gated the same way; reconcile needs the bucket and a cutoff', () => {

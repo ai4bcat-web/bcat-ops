@@ -43,6 +43,14 @@ describe('awPostLoadChecks', () => {
     expect(rows.find((r) => r[0] === 'AP open gap')[2]).toContain('1 on the AP expected list ($50.00), 1 on dropped stale expected rows ($70.00), 1 on no Aljex list ($90.00)');
   });
 
+  it('lists open BCAT invoices that are not in the Aljex AR report from the named gap report, without repeating the AR_PRO_NOT_IN_BCAT rows', () => {
+    const sb = sandbox();
+    sb.put('reports/ar-open-gap-2026-11-08.csv', 'category,PRO,customer,Aljex amount,BCAT balance,difference,invoice date,age days,what to check,suggested action,Ryne note,Status\nAR_PRO_NOT_IN_BCAT,111,ACME,10.00,,,2026-01-01,300,in the Aljex AR report,Link\nAR_BCAT_ONLY_OPEN,222,BETA,,52.50,,2026-03-13,239,open in BCAT,Confirm it is really unpaid,,\n');
+    const rows = buildChecks(opts(sb));
+    expect(rows.filter((r) => r[0] === 'AR_BCAT_ONLY_OPEN').map((r) => r[1])).toEqual(['222']);
+    expect(rows.some((r) => r[1] === '111')).toBe(false);
+  });
+
   it('lists review-CSV revenue rows, one junk-date row per PRO, memo orphans, and the importer name-match / billing review split', () => {
     const sb = sandbox();
     sb.put('reports/revenue-differences-2026-11-09.csv', 'PRO,BCAT value ($),Aljex invoice ($),difference ($),Aljex higher/lower,open balance ($),due date,invoice state,customer,bill-to,suggested action,Ryne note,Status\n15001,100.00,110.00,10.00,Aljex higher,110.00,2026-12-01,OPEN,"ZZ, Inc",ZZ,x,,\n');
