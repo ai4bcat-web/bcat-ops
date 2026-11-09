@@ -17,6 +17,7 @@
  * function here runs.
  */
 import { assertString, optionalString, assertRecord, type Caller } from '../_shared/actionInputs'
+import { assertNotSquareInvoiced } from '../../../src/lib/invoiceDelivery'
 import { emailInvoice, generateInvoice, assertCustomerResolved, readOrderContext } from './invoices'
 import { sendToFactor } from './factor'
 import type { CustomerRecord, InvoiceRecord, OrderRecord } from '../../../src/types/tms'
@@ -90,6 +91,7 @@ export async function releaseToBilling(input: Row, caller: Caller): Promise<Row>
   const clientRequestId = optionalString(input.clientRequestId, 128)
 
   const context = await readOrderContext(orderId)
+  assertNotSquareInvoiced(context.shipment, 'releasing it to billing')
   assertCustomerResolved(context, 'releasing it to billing')
   const { order, shipment, customer } = context
   const method = methodOf(customer)

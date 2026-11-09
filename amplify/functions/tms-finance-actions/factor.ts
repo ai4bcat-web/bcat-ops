@@ -19,6 +19,7 @@ import {
   releaseGateError,
   type ReleaseGateResult,
 } from '../../../src/lib/releaseGate'
+import { assertNotSquareInvoiced } from '../../../src/lib/invoiceDelivery'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
 import type { FactoringItem, Stop } from '../../../src/types'
@@ -123,6 +124,7 @@ export async function sendToFactor(input: Row, caller: Caller): Promise<Row> {
   if (!orderRow) throw new Error(`Order not found: ${invoice.orderId}`)
   if (!shipmentRow) throw new Error(`Shipment not found: ${invoice.shipmentId}`)
   if (!customerRow) throw new Error(`Customer not found: ${invoice.customerId}`)
+  assertNotSquareInvoiced(shipmentRow as unknown as { revDivision?: string | null }, 'sending it to the factor')
 
   const order = orderRow as unknown as OrderRecord
   const shipment = shipmentRow as unknown as ShipmentRecord

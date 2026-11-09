@@ -54,6 +54,14 @@ import {
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
 import { canEmailTo, evaluateDocGate, gateLoadIds } from '../../../src/lib/shipmentDocuments'
+import {
+  assertNotSquareInvoiced,
+  customerPacketDocuments,
+  customerPacketIds,
+  SQUARE_INVOICED_CODE,
+  SQUARE_INVOICED_MESSAGE,
+  SquareInvoicedError,
+} from '../../../src/lib/invoiceDelivery'
 import type {
   BillToParty,
   CustomerRecord,
@@ -292,8 +300,13 @@ function buildSnapshot(
         email: customer?.billingEmail ?? null,
       }
 
-  const attachDocumentIds = args.attachDocumentIds
-    ?? defaultInvoiceAttachments(context.documents, { id: order.id, loadIds: context.gateLoadIds }, customer, settings)
+  // Only what the customer may see, in packet order: invoice, rate con, POD, scale
+  // tickets, lumper receipts, other. An explicit list is filtered the same way.
+  const attachDocumentIds = customerPacketIds(
+    context.documents,
+    args.attachDocumentIds
+      ?? defaultInvoiceAttachments(context.documents, { id: order.id, loadIds: context.gateLoadIds }, customer, settings),
+  )
 
   const invoice: InvoiceRecord = {
     id: args.number,
@@ -340,6 +353,7 @@ export async function previewInvoice(input: Row, caller: Caller): Promise<Row> {
   const billToId = optionalString(input.billToId, 64)
 
   const context = await readOrderContext(orderId)
+  assertNotSquareInvoiced(context.shipment, 'invoicing it')
   assertCustomerResolved(context, 'invoicing it')
   const gate = docGateFor(context)
   const releaseGate = await releaseGateFor(context)
@@ -366,8 +380,9 @@ export async function previewInvoice(input: Row, caller: Caller): Promise<Row> {
     gate,
     snapshot: invoice as unknown as Row,
     recipients: { to, cc },
-    attachments: context.documents
-      .filter((doc) => attachDocumentIds.includes(doc.id))
+    attachments: attachDocumentIds
+      .map((id) => context.documents.find((doc) => doc.id === id))
+      .filter((doc): doc is ShipmentDocumentRecord => doc != null)
       .map((doc) => ({ id: doc.id, type: doc.type, name: doc.name, sizeBytes: doc.sizeBytes })),
   }
 }
@@ -393,6 +408,7 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
         assertString(item, `attachDocumentIds[${index}]`), 20)
 
   const context = await readOrderContext(orderId)
+  assertNotSquareInvoiced(context.shipment, 'invoicing it')
   assertCustomerResolved(context, 'invoicing it')
   const gate = docGateFor(context)
   const readiness = invoiceReadiness({
@@ -417,8 +433,8 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
       if (!doc) throw new Error(`Document ${id} does not belong to this shipment`)
       if (doc.status === 'VOID') throw new Error(`${doc.name} is void and cannot be attached`)
       if (doc.audience === 'INTERNAL') throw new Error(`${doc.name} is internal and cannot be sent to a customer`)
-      if (doc.reviewStatus === 'PENDING' || doc.reviewStatus === 'REJECTED') {
-        throw new Error(`${doc.name} has not been accepted yet`)
+      if (!canEmailTo(doc, 'CUSTOMER')) {
+        throw new Error(`${doc.name} is not customer-visible (audience ${doc.audience}, review ${doc.reviewStatus ?? 'n/a'}) and cannot be attached`)
       }
     }
   }
@@ -536,6 +552,7 @@ export async function renderInvoicePdf(input: Row, caller: Caller): Promise<Row>
   if (row.status === 'VOID') throw new Error('That invoice is void; its PDF is the record of what was sent')
   const invoice = row as unknown as InvoiceRecord
   const context = await readOrderContext(invoice.orderId)
+  assertNotSquareInvoiced(context.shipment, 're-rendering its invoice')
   const stored = await storePdf(invoice, context, caller)
   if (!stored.pdfKey) throw new Error('The invoice PDF could not be rendered; try again')
   return { invoice: stored as unknown as Row }
@@ -555,12 +572,17 @@ export async function batchGenerate(input: Row, caller: Caller): Promise<Row> {
   const invoiceDate = optionalString(input.invoiceDate, 10)
 
   const results: Row[] = []
+  const skipped: Row[] = []
   for (const orderId of orderIds) {
     try {
       const done = await generateInvoice({ orderId, ...(invoiceDate ? { invoiceDate } : {}) }, caller)
       const invoice = done.invoice as unknown as InvoiceRecord
       results.push({ orderId, invoiceId: invoice.id, number: invoice.number, totalCents: invoice.totalCents })
     } catch (err) {
+      if (err instanceof SquareInvoicedError) {
+        skipped.push({ orderId, code: SQUARE_INVOICED_CODE, reason: SQUARE_INVOICED_MESSAGE })
+        continue
+      }
       const refused = releaseGateOf(err)
       results.push({
         orderId,
@@ -569,7 +591,7 @@ export async function batchGenerate(input: Row, caller: Caller): Promise<Row> {
       })
     }
   }
-  return { results }
+  return { results, skipped }
 }
 
 // ── sending ─────────────────────────────────────────────────────────────────
@@ -583,12 +605,12 @@ async function attachmentsFor(invoice: InvoiceRecord, documents: ShipmentDocumen
       key: invoice.pdfKey,
     })
   }
-  for (const id of invoice.attachDocumentIds ?? []) {
-    const doc = documents.find((row) => row.id === id)
-    if (!doc?.s3Key) continue
-    // Re-checked at SEND time, not only at issue: a document voided, retyped or made
-    // INTERNAL after the invoice was raised must not go out with a resend.
-    if (!canEmailTo(doc, 'CUSTOMER')) continue
+  // Re-checked at SEND time, not only at issue: a document voided, retyped or made
+  // INTERNAL after the invoice was raised must not go out with a resend. The packet
+  // order is recomputed here too, so a stored list in another order still sends right.
+  const attachIds = new Set(invoice.attachDocumentIds ?? [])
+  for (const doc of customerPacketDocuments(documents.filter((row) => attachIds.has(row.id)))) {
+    if (!doc.s3Key) continue
     keys.push({ name: doc.name, contentType: doc.contentType ?? 'application/pdf', key: doc.s3Key })
   }
   for (const entry of keys) {
@@ -630,6 +652,7 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
   if (isCarriedOver(row)) throw new Error(CARRIED_OVER_MESSAGE)
 
   const context = await readOrderContext(invoice.orderId)
+  assertNotSquareInvoiced(context.shipment, 'e-mailing its invoice')
   const to = emailList(input.to, 'to').length > 0
     ? emailList(input.to, 'to')
     : billingRecipients(context.customer, invoice.billToId)
@@ -696,10 +719,11 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
     : await Promise.all(
         (invoice.pdfKey ? [{ name: invoiceFilename(invoice.number, invoice.pdfVersion ?? 1), key: invoice.pdfKey }] : [])
           .concat(
-            (invoice.attachDocumentIds ?? [])
-              .map((id) => context.documents.find((doc) => doc.id === id))
-              .filter((doc): doc is ShipmentDocumentRecord => doc != null && Boolean(doc.s3Key))
-              .map((doc) => ({ name: doc.name, key: String(doc.s3Key) })),
+            customerPacketDocuments(
+              (invoice.attachDocumentIds ?? [])
+                .map((id) => context.documents.find((doc) => doc.id === id))
+                .filter((doc): doc is ShipmentDocumentRecord => doc != null && Boolean(doc.s3Key)),
+            ).map((doc) => ({ name: doc.name, key: String(doc.s3Key) })),
           )
           .map(async (entry) => ({ name: entry.name, url: await signedDownload(entry.key) })),
       )
@@ -721,15 +745,20 @@ export async function batchEmail(input: Row, caller: Caller): Promise<Row> {
   const invoiceIds = assertArrayOf<string>(input.invoiceIds, 'invoiceIds', (item, index) =>
     assertString(item, `invoiceIds[${index}]`), MAX_BATCH)
   const results: Row[] = []
+  const skipped: Row[] = []
   for (const invoiceId of invoiceIds) {
     try {
       const sent = await emailInvoice({ invoiceId }, caller)
       results.push({ invoiceId, emailStatus: sent.emailStatus, emailError: sent.emailError })
     } catch (err) {
+      if (err instanceof SquareInvoicedError) {
+        skipped.push({ invoiceId, code: SQUARE_INVOICED_CODE, reason: SQUARE_INVOICED_MESSAGE })
+        continue
+      }
       results.push({ invoiceId, error: err instanceof Error ? err.message : String(err) })
     }
   }
-  return { results }
+  return { results, skipped }
 }
 
 export async function markInvoiceSent(input: Row, caller: Caller): Promise<Row> {

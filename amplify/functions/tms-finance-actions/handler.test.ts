@@ -970,6 +970,123 @@ describe('EMAIL_INVOICE', () => {
 
 // ── voiding ─────────────────────────────────────────────────────────────────
 
+describe('CAR_SHIPPING invoices through Square, not the standard template', () => {
+  const asCarShipping = () =>
+    table(TABLES.shipment).set(SHIPMENT_ID, { ...table(TABLES.shipment).get(SHIPMENT_ID)!, revDivision: 'CAR_SHIPPING' })
+
+  it('refuses to preview, generate, release or render, and writes nothing', async () => {
+    asCarShipping()
+    await expect(call('PREVIEW_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/SQUARE_INVOICED: Invoiced in Square \(coming\)/)
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/Invoiced in Square \(coming\)/)
+    await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID })).rejects.toThrow(/Invoiced in Square \(coming\)/)
+    expect(table(TABLES.invoice).size).toBe(0)
+    expect(table(TABLES.order).get(ORDER_ID)!.arStatus).toBe('UNBILLED')
+  })
+
+  it('lists the skipped order in a batch instead of invoicing it, and still invoices the rest', async () => {
+    seedSecondOrder('ord-2')
+    asCarShipping()
+    // ord-2 shares the shipment, so both are CAR_SHIPPING; a different shipment is the control.
+    const out = (await call('BATCH_GENERATE', { orderIds: [ORDER_ID, 'ord-2'] })) as { results: Row[]; skipped: Row[] }
+    expect(out.results).toEqual([])
+    expect(out.skipped).toEqual([
+      { orderId: ORDER_ID, code: 'SQUARE_INVOICED', reason: 'Invoiced in Square (coming)' },
+      { orderId: 'ord-2', code: 'SQUARE_INVOICED', reason: 'Invoiced in Square (coming)' },
+    ])
+    expect(table(TABLES.invoice).size).toBe(0)
+  })
+
+  it('never e-mails an existing invoice for a CAR_SHIPPING shipment, single or batch', async () => {
+    seedMethod('MANUAL')
+    const { invoiceId } = await generate()
+    asCarShipping()
+    sesSend.mockClear()
+    await expect(call('EMAIL_INVOICE', { invoiceId })).rejects.toThrow(/Invoiced in Square \(coming\)/)
+    await expect(call('SEND_INVOICE', { invoiceId })).rejects.toThrow(/Invoiced in Square \(coming\)/)
+    const out = (await call('BATCH_EMAIL', { invoiceIds: [invoiceId] })) as { results: Row[]; skipped: Row[] }
+    expect(out.results).toEqual([])
+    expect(out.skipped).toEqual([{ invoiceId, code: 'SQUARE_INVOICED', reason: 'Invoiced in Square (coming)' }])
+    expect(sesSend).not.toHaveBeenCalled()
+  })
+
+  it('leaves every other division on the standard template', async () => {
+    table(TABLES.shipment).set(SHIPMENT_ID, { ...table(TABLES.shipment).get(SHIPMENT_ID)!, revDivision: 'BROKERAGE' })
+    const { invoiceId } = await generate()
+    expect(((await call('EMAIL_INVOICE', { invoiceId })) as Row).emailStatus).toBe('SENT')
+  })
+})
+
+describe('invoice documents packet', () => {
+  const doc = (id: string, type: string, over: Row = {}) =>
+    table(TABLES.document).set(id, {
+      id,
+      shipmentId: SHIPMENT_ID,
+      orderId: ORDER_ID,
+      loadId: LOAD_ID,
+      type,
+      name: `${id}.pdf`,
+      s3Key: `shipment-docs/${SHIPMENT_ID}/${id}.pdf`,
+      contentType: 'application/pdf',
+      sizeBytes: 1024,
+      status: 'ACTIVE',
+      reviewStatus: 'ACCEPTED',
+      audience: 'ALL',
+      uploadedAt: '2026-10-21T10:00:00.000Z',
+      ...over,
+    })
+  const attachTypes = ['POD', 'BOL', 'CUSTOMER_RATE_CON', 'WEIGHT_TICKET', 'LUMPER_RECEIPT', 'OTHER']
+  const noticeNames = () =>
+    [...table(TABLES.notice).values()].flatMap((n) => (n.attachments as { name: string }[]).map((a) => a.name))
+
+  beforeEach(() => {
+    seed({ settings: { invoiceAttachTypes: attachTypes } })
+    doc('doc-lumper', 'LUMPER_RECEIPT')
+    doc('doc-other', 'OTHER')
+    doc('doc-scale', 'WEIGHT_TICKET')
+    doc('doc-ratecon', 'CUSTOMER_RATE_CON')
+    doc('doc-private-lumper', 'LUMPER_RECEIPT', { audience: 'INTERNAL' })
+    doc('doc-private-other', 'OTHER', { audience: 'INTERNAL' })
+    doc('doc-carrier-only', 'RATE_CON', { audience: 'CARRIER' })
+  })
+
+  it('attaches invoice, rate con, POD, scale tickets, lumper receipts, other — public documents only', async () => {
+    const { invoiceId } = await generate()
+    const stored = table(TABLES.invoice).get(invoiceId)!.attachDocumentIds as string[]
+    // BOL (rank other) sits with OTHER, after the lumper receipt, ordered by upload time then id.
+    expect(stored).toEqual(['doc-ratecon', 'doc-seed-pod', 'doc-scale', 'doc-lumper', 'doc-other', 'doc-seed-bol'])
+    expect(stored).not.toContain('doc-private-lumper')
+    expect(stored).not.toContain('doc-private-other')
+    expect(stored).not.toContain('doc-carrier-only')
+
+    await call('EMAIL_INVOICE', { invoiceId })
+    const names = noticeNames()
+    expect(names[0]).toMatch(/^INV-000001/)
+    expect(names.slice(1)).toEqual(['doc-ratecon.pdf', 'pod-seed.pdf', 'doc-scale.pdf', 'doc-lumper.pdf', 'doc-other.pdf', 'bol-seed.pdf'])
+    expect(names).not.toContain('doc-private-lumper.pdf')
+  })
+
+  it('refuses to attach a private or carrier-only document by explicit id', async () => {
+    for (const id of ['doc-private-lumper', 'doc-carrier-only']) {
+      await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID, attachDocumentIds: [id] })).rejects.toThrow(/cannot be/)
+    }
+    expect(table(TABLES.invoice).size).toBe(0)
+  })
+
+  it('drops a document made private after the invoice was raised, on send and on the SES-refused download list', async () => {
+    const { invoiceId } = await generate()
+    table(TABLES.document).set('doc-scale', { ...table(TABLES.document).get('doc-scale')!, audience: 'INTERNAL' })
+    sesSend.mockRejectedValue(new Error('Access denied: ses:SendEmail'))
+    const sent = (await call('EMAIL_INVOICE', { invoiceId })) as { downloads: { name: string }[] }
+    expect(sent.downloads.map((d) => d.name)).not.toContain('doc-scale.pdf')
+    expect(noticeNames()).not.toContain('doc-scale.pdf')
+  })
+
+  it('previews the same public-only, ordered list', async () => {
+    const preview = (await call('PREVIEW_INVOICE', { orderId: ORDER_ID })) as { attachments: { id: string }[] }
+    expect(preview.attachments.map((a) => a.id)).toEqual(['doc-ratecon', 'doc-seed-pod', 'doc-scale', 'doc-lumper', 'doc-other', 'doc-seed-bol'])
+  })
+})
+
 describe('VOID_INVOICE', () => {
   it('puts the order back to UNBILLED, unfreezes the load and leaves the open book', async () => {
     const { invoiceId } = await generate()
