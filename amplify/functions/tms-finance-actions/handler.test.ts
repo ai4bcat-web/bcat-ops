@@ -428,7 +428,7 @@ const DISPATCHER = { sub: 'sub-dis', username: 'dis', claims: { email: 'dis@bcat
 
 // Step AW: releasing, sending and queueing an invoice are per-user grants with no role bypass.
 const JENNY = { sub: 'sub-jen', username: 'jenny', claims: { email: 'jenny@bcatcorp.com', 'cognito:groups': ['page-billingRelease', 'page-invoicing'] } }
-const GRANT_ACTIONS = ['RELEASE_TO_BILLING', 'SEND_INVOICE', 'SYNC_FACTORING_CHANGE', 'EMAIL_INVOICE', 'BATCH_EMAIL', 'SEND_TO_FACTOR', 'MARK_SENT']
+const GRANT_ACTIONS = ['GENERATE_INVOICE', 'BATCH_GENERATE', 'RELEASE_TO_BILLING', 'SEND_INVOICE', 'SYNC_FACTORING_CHANGE', 'EMAIL_INVOICE', 'BATCH_EMAIL', 'SEND_TO_FACTOR', 'MARK_SENT']
 
 function call(action: string, input: Row, identity: unknown = GRANT_ACTIONS.includes(action) ? JENNY : ADMIN): Promise<Row> {
   return handler({ arguments: { action, input: JSON.stringify(input) }, identity } as never)
@@ -577,7 +577,7 @@ function seed(over: { order?: Row; customer?: Row; settings?: Row } = {}): void 
   }
 }
 
-async function generate(identity: unknown = ADMIN): Promise<{ invoiceId: string; number: string }> {
+async function generate(identity: unknown = JENNY): Promise<{ invoiceId: string; number: string }> {
   const result = (await call('GENERATE_INVOICE', { orderId: ORDER_ID }, identity)) as { invoice: Row }
   return { invoiceId: String(result.invoice.id), number: String(result.invoice.number) }
 }
@@ -673,7 +673,7 @@ describe('authorization', () => {
   })
 
   it('lets page-invoicing issue a bill but not post money against it', async () => {
-    const { invoiceId } = await generate(BILLER)
+    const { invoiceId } = await generate()
     await expect(
       call('RECORD_PAYMENT', { customerId: CUSTOMER_ID, receivedAt: '2026-10-25', method: 'CHECK', amountCents: 1, applications: [{ invoiceId, amountCents: 1 }], creditApplications: [] }, BILLER),
     ).rejects.toThrow(/requires owner or ADMIN/)
@@ -681,7 +681,7 @@ describe('authorization', () => {
 
   it('lets page-invoicing post once the org turns the admin-only rule off', async () => {
     table(TABLES.settings).set('default', { ...table(TABLES.settings).get('default')!, arPostingAdminOnly: false })
-    const { invoiceId } = await generate(BILLER)
+    const { invoiceId } = await generate()
     const posted = (await call(
       'RECORD_PAYMENT',
       { customerId: CUSTOMER_ID, receivedAt: '2026-10-25', method: 'CHECK', amountCents: 1000, applications: [{ invoiceId, amountCents: 1000 }], creditApplications: [] },
@@ -858,7 +858,7 @@ describe('release to accounting', () => {
       docsOverrideBy: 'admin@bcatcorp.com',
       docsOverrideNote: 'bills on the BOL',
     })
-    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID }, ADMIN)).rejects.toThrow(/Missing document: POD/)
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID }, JENNY)).rejects.toThrow(/Missing document: POD/)
     expect(table(TABLES.invoice).size).toBe(0)
   })
 
@@ -2891,7 +2891,7 @@ describe('SEND_INVOICE', () => {
 })
 
 describe('billingRelease grant', () => {
-  it.each(['RELEASE_TO_BILLING', 'SEND_INVOICE', 'EMAIL_INVOICE', 'BATCH_EMAIL', 'SEND_TO_FACTOR', 'MARK_SENT', 'SYNC_FACTORING_CHANGE'])(
+  it.each(['GENERATE_INVOICE', 'BATCH_GENERATE', 'RELEASE_TO_BILLING', 'SEND_INVOICE', 'EMAIL_INVOICE', 'BATCH_EMAIL', 'SEND_TO_FACTOR', 'MARK_SENT', 'SYNC_FACTORING_CHANGE'])(
     '%s is refused for ADMIN, the owner and invoicing users without the grant',
     async (action) => {
       seedMethod('MANUAL')
@@ -2908,6 +2908,17 @@ describe('billingRelease grant', () => {
     seedMethod('MANUAL')
     const onlyGrant = { sub: 'g', username: 'g', claims: { email: 'g@bcatcorp.com', 'cognito:groups': ['page-billingRelease'] } }
     await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID }, onlyGrant)).resolves.toMatchObject({ billingMethod: 'MANUAL' })
+  })
+
+  it('lets a user holding only the grant post (generate) an invoice, and nobody else', async () => {
+    const onlyGrant = { sub: 'g', username: 'g', claims: { email: 'g@bcatcorp.com', 'cognito:groups': ['page-billingRelease'] } }
+    const { invoiceId } = await generate(onlyGrant)
+    expect(table(TABLES.invoice).get(invoiceId)).toBeDefined()
+    // Ruben-shaped users: broad page access, ADMIN or not, but no grant => cannot issue another.
+    seedSecondOrder('ord-2')
+    const broad = { sub: 'r', username: 'r', claims: { email: 'r@bcatcorp.com', 'cognito:groups': ['page-invoicing', 'page-tms', 'page-finances', 'page-customers'] } }
+    await expect(call('BATCH_GENERATE', { orderIds: ['ord-2'] }, broad)).rejects.toThrow(/requires the page-billingRelease grant/)
+    await expect(call('GENERATE_INVOICE', { orderId: 'ord-2' }, ADMIN)).rejects.toThrow(/requires the page-billingRelease grant/)
   })
 })
 

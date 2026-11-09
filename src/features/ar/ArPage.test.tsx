@@ -17,6 +17,11 @@ const worklistMock = vi.hoisted(() => vi.fn())
 const openInvoicesMock = vi.hoisted(() => vi.fn())
 const customerArMock = vi.hoisted(() => vi.fn())
 const invoiceMock = vi.hoisted(() => vi.fn())
+const authGroups = vi.hoisted(() => ({ current: [] as string[] }))
+vi.mock('@/hooks/useAuth', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/useAuth')>()),
+  useAuthUser: () => ({ userId: 'u', email: 'x@bcatcorp.com', groups: authGroups.current }),
+}))
 
 vi.mock('@/hooks/useArWorklist', () => ({ useArWorklist: worklistMock }))
 vi.mock('@/hooks/useOpenInvoices', () => ({ useOpenInvoices: openInvoicesMock }))
@@ -254,6 +259,42 @@ describe('the AR board', () => {
     expect((generate as HTMLButtonElement).disabled).toBe(true)
     const select = screen.getByRole('checkbox', { name: 'Select S-1001' })
     expect((select as HTMLInputElement).disabled).toBe(true)
+  })
+
+  it('badges pre-cutover shipments in Docs needed and filters to them', async () => {
+    const old = worklistRow({
+      orderId: 'o-old', shipmentId: 's-old', shipmentNumber: '8501', docsReady: false,
+      order: order({ id: 'o-old', arStatus: 'DOCS_NEEDED' }),
+      shipment: shipment({ id: 's-old', number: '8501', legacyImported: true, source: 'BACKFILL' } as Partial<ShipmentRecord>),
+    })
+    const fresh = worklistRow({
+      orderId: 'o-new', shipmentId: 's-new', shipmentNumber: 'S-2002', docsReady: false,
+      order: order({ id: 'o-new', arStatus: 'DOCS_NEEDED' }),
+      shipment: shipment({ id: 's-new', number: 'S-2002' }),
+    })
+    await setup({ DOCS_NEEDED: [old, fresh] })
+    fireEvent.click(screen.getByRole('tab', { name: /^Docs needed/ }))
+    await settle()
+    expect(screen.getAllByText('Review billing').length).toBe(1)
+    expect(screen.getByText('S-2002')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Review billing \(1\)/ }))
+    await settle()
+    expect(screen.queryByText('S-2002')).toBeNull()
+    expect(screen.getByText('8501')).toBeTruthy()
+  })
+
+  // "Only Jenny and Ryne post invoices": posting is the page-billingRelease grant alone, never a role.
+  it.each([
+    ['ADMIN', ['ADMIN', 'page-invoicing', 'page-tms'], true],
+    ['page-billingRelease', ['page-billingRelease'], false],
+  ])('Generate and Batch generate are %s-gated: disabled=%s', async (_label, groups, disabled) => {
+    authGroups.current = groups
+    await setup({ UNBILLED: [worklistRow()] })
+    const generate = screen.getByRole('button', { name: 'Generate invoice for S-1001' }) as HTMLButtonElement
+    const batch = screen.getByRole('button', { name: 'Batch generate invoices' }) as HTMLButtonElement
+    expect(generate.disabled).toBe(disabled)
+    expect(batch.title === '').toBe(!disabled)
+    authGroups.current = []
   })
 
   it('shows the release gate verdict on the Ready for billing tab', async () => {

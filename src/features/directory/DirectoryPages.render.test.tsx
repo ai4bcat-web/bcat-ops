@@ -196,6 +196,24 @@ describe('DirectoryPages', () => {
     }
   })
 
+  it('flags customers with no billing method as their own badge and filter, apart from the e-mail flag', async () => {
+    const previous = customers.map((c) => ({ billingMethod: c.billingMethod, apEmail: c.apEmail }))
+    customers.forEach((c) => { c.apEmail = 'ap@example.test'; c.billingMethod = 'MANUAL' })
+    customers[0].billingMethod = null
+    customers[1].billingMethod = undefined
+    customers[2].billingMethod = 'FACTOR'
+    try {
+      renderCustomers()
+      fireEvent.click(await screen.findByRole('button', { name: 'Billing method not set (2)' }))
+      expect(screen.getByText('Lead Co')).toBeTruthy()
+      expect(screen.getByText('Active Co')).toBeTruthy()
+      expect(screen.queryByText('Pending Co')).toBeNull()
+      expect(screen.getAllByText('Billing method not set').length).toBe(2)
+    } finally {
+      customers.forEach((c, i) => Object.assign(c, previous[i]))
+    }
+  })
+
   describe('CRM columns and scope (§5.6, §7.4)', () => {
     const rowFor = (customerId: string, extra: Record<string, unknown> = {}) => ({
       customerId, ownerId: 'dana@bcatcorp.com', stage: 'ACTIVE', lastTouchAt: PAST, lastTouchKind: 'CALL',

@@ -295,6 +295,8 @@ beforeEach(() => {
 // ── identities ──────────────────────────────────────────────────────────────
 const ADMIN = { sub: 'sub-admin', username: 'admin', claims: { email: 'admin@bcatcorp.com', 'cognito:groups': ['ADMIN'] } }
 
+const POSTER = { sub: 'sub-post', username: 'poster', claims: { email: 'poster@bcatcorp.com', 'cognito:groups': ['page-billingRelease'] } }
+
 function call(action: string, input: Row, identity: unknown = ADMIN): Promise<Row> {
   return handler({ arguments: { action, input: JSON.stringify(input) }, identity } as never)
 }
@@ -323,7 +325,7 @@ function seed(orderOver: Row = {}): void {
   }
 }
 
-async function generate(identity: unknown = ADMIN): Promise<{ invoiceId: string; number: string }> {
+async function generate(identity: unknown = POSTER): Promise<{ invoiceId: string; number: string }> {
   const result = await call('GENERATE_INVOICE', { orderId: ORDER_ID }, identity) as { invoice: Row }
   return { invoiceId: String(result.invoice.id), number: String(result.invoice.number) }
 }

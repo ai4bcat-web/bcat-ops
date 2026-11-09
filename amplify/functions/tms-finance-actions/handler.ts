@@ -200,8 +200,15 @@ const COMMISSION_ACTIONS: Record<string, true> = {
  * Step AW: release to billing, sending, queueing for the factor and marking sent are
  * granted per user (`page-billingRelease`) and to nobody else: no ADMIN, owner or
  * `page-tms`/`page-invoicing` bypass. Checked before every other rule.
+ *
+ * Posting an invoice is the same act: issuing it (GENERATE_INVOICE / BATCH_GENERATE turn
+ * UNBILLED into UNPAID and take the next invoice number) is behind the same grant, so
+ * "who may post" is exactly the members of `page-billingRelease` (Jenny and Ryne). Holding
+ * `page-invoicing` or `page-tms`, or ADMIN, opens the AR screens but never posts.
  */
 const BILLING_RELEASE_ACTIONS: Record<string, true> = {
+  GENERATE_INVOICE: true,
+  BATCH_GENERATE: true,
   RELEASE_TO_BILLING: true,
   SEND_INVOICE: true,
   SYNC_FACTORING_CHANGE: true,

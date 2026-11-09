@@ -5,16 +5,18 @@
  * Order is the display order: Check call overdue closes the row.
  */
 import { checkCallState } from '@/lib/checkCalls'
+import { needsBillingReview, REVIEW_BILLING_LABEL } from '@/lib/reviewBilling'
 import { reviewFactsOfRow } from './batchReview'
 import type { ShipmentRow } from './shipmentViews'
 
-export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'checkCallOverdue'
+export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'reviewBilling' | 'checkCallOverdue'
 
 export const BOARD_FLAGS: readonly BoardFlag[] = [
   'missingReference',
   'missingSalesRep',
   'missingRevDivision',
   'docsMissing',
+  'reviewBilling',
   'checkCallOverdue',
 ]
 
@@ -23,6 +25,7 @@ export const BOARD_FLAG_LABELS: Record<BoardFlag, string> = {
   missingSalesRep: 'Needs sales rep',
   missingRevDivision: 'Missing rev division',
   docsMissing: 'Missing documents',
+  reviewBilling: REVIEW_BILLING_LABEL,
   checkCallOverdue: 'Check call overdue',
 }
 
@@ -43,6 +46,7 @@ export function matchesFlag(row: ShipmentRow, flag: BoardFlag, nowMs: number): b
     case 'missingSalesRep': return needsSalesRep(row)
     case 'missingRevDivision': return !row.revDivision
     case 'docsMissing': return (row.docsMissing?.length ?? 0) > 0
+    case 'reviewBilling': return needsBillingReview(row)
     case 'checkCallOverdue': return checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, nowMs) === 'OVERDUE'
   }
 }

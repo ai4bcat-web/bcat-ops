@@ -110,6 +110,7 @@ import {
   statusCellText,
 } from './shipmentGridColumns'
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
+import { REVIEW_BILLING_LABEL, needsBillingReview, reviewBillingNote } from '@/lib/reviewBilling'
 import { BOARD_FLAGS, BOARD_FLAG_LABELS, flagCounts, matchesFlags, type BoardFlag } from './boardChips'
 import { BatchActionBar } from './board/BatchActionBar'
 import {
@@ -838,7 +839,14 @@ function BoardPane({
       if (columnKey === 'arStatus' || columnKey === 'apStatus') {
         const value = columnKey === 'arStatus' ? row.arStatus : row.apStatus
         if (!value) return null
-        return <TmsBadge tone={statusTone(value)}>{sentence(value)}</TmsBadge>
+        return (
+          <>
+            <TmsBadge tone={statusTone(value)}>{sentence(value)}</TmsBadge>
+            {columnKey === 'arStatus' && needsBillingReview(row) && (
+              <> <TmsBadge tone="orange" title={reviewBillingNote(row)}>{REVIEW_BILLING_LABEL}</TmsBadge></>
+            )}
+          </>
+        )
       }
       if (columnKey === 'docsMissing') {
         if (row.docsMissing == null) return null

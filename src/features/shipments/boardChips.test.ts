@@ -17,6 +17,7 @@ describe('board chips', () => {
       'Needs sales rep',
       'Missing rev division',
       'Missing documents',
+      'Review billing',
       'Check call overdue',
     ])
   })
@@ -34,8 +35,18 @@ describe('board chips', () => {
       missingSalesRep: 2,
       missingRevDivision: 1,
       docsMissing: 1,
+      reviewBilling: 0,
       checkCallOverdue: 1,
     })
+  })
+
+  it('Review billing flags pre-cutover shipments still in Docs needed, never a new one or one past that rung', () => {
+    const old = row('o', { arStatus: 'DOCS_NEEDED', legacyImported: true })
+    const original = row('p', { arStatus: 'DOCS_NEEDED', source: 'BACKFILL' })
+    const fresh = row('q', { arStatus: 'DOCS_NEEDED', source: 'MANUAL' })
+    const billed = row('r', { arStatus: 'UNPAID', legacyImported: true })
+    expect(flagCounts([old, original, fresh, billed], NOW).reviewBilling).toBe(2)
+    expect(matchesFlags(fresh, new Set<BoardFlag>(['reviewBilling']), NOW)).toBe(false)
   })
 
   it('pressed chips narrow together (a row must miss every pressed thing)', () => {

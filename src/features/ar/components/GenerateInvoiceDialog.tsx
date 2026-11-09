@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useBillingGrant, BILLING_GRANT_MESSAGE } from '../useBillingGrant'
 import { TmsButton, TmsDialog, TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import {
   generateInvoice,
@@ -117,7 +118,8 @@ export function GenerateInvoiceDialog({ orderId, busy, onClose, onDone }: {
   const reasons = preview?.readiness.reasons ?? []
   const ready = preview?.readiness.ready === true
   const missingDocs = preview?.gate.missing ?? []
-  const disabled = busy === true || posting || loading
+  const canPost = useBillingGrant()
+  const disabled = busy === true || posting || loading || !canPost
 
   const total = useMemo(() => (preview ? formatCents(preview.snapshot.totalCents) : '—'), [preview])
 
@@ -159,8 +161,8 @@ export function GenerateInvoiceDialog({ orderId, busy, onClose, onDone }: {
       className="tms-dialog-xl"
       footer={
         <>
-          <p className="mr-auto text-xs tms-muted">
-            Generate — moves the shipment to Unpaid and freezes its charges
+          <p className="mr-auto text-xs tms-muted" role={canPost ? undefined : 'note'}>
+            {canPost ? 'Generate — moves the shipment to Unpaid and freezes its charges' : BILLING_GRANT_MESSAGE}
           </p>
           <TmsButton variant="ghost" onClick={onClose} disabled={posting}>Cancel</TmsButton>
           <TmsButton variant="primary" onClick={submit} disabled={disabled || !ready}>
