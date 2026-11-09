@@ -11,11 +11,9 @@
  * untouched); a payment applied ONLY to deleted bills is DELETED, unless it carries unapplied credit / credit applications,
  * in which case it is kept with amount = unapplied credit.
  *
- * LoadCarrier: the app's own VOID_BILL (amplify/functions/tms-finance-actions/bills.ts voidBill) releases the leg to
- * apStatus AWAITING_INVOICE, clears invoiceId + apBalanceCents and REMOVEs chargesFinalizedAt. This script does the same and
- * additionally REMOVEs apOpen (and apPaidAt): the voided bill's leg stays on the live AP worklist in the app because a fresh
- * booking owes money, but a 2025 migrated leg whose payable Ryne deleted must not resurface as "awaiting invoice" in the AP
- * ledger. That is exactly the shape the Aljex AP import gives an "expected, no bill yet" leg (AWAITING_INVOICE, no apOpen).
+ * LoadCarrier: exactly the app's own VOID_BILL (amplify/functions/tms-finance-actions/bills.ts voidBill): apStatus ->
+ * AWAITING_INVOICE, apStatusChangedAt/updatedAt/updatedBy set, invoiceId and apBalanceCents cleared, chargesFinalizedAt REMOVEd.
+ * apOpen and apPaidAt are left as they are, as VOID_BILL leaves them.
  */
 import { splitPayment, toJsonLine, sha256, dollars } from './preDelete.mjs';
 
@@ -70,9 +68,9 @@ export function assertHardGuarantees(selection) {
 
 /** Fields a leg release writes or removes; the conditional patch pins every one of them to the value the plan read. */
 export const LEG_FIELDS = ['apStatus', 'apStatusChangedAt', 'invoiceId', 'apOpen', 'apBalanceCents', 'chargesFinalizedAt', 'apPaidAt', 'updatedAt', 'updatedBy'];
-const LEG_REMOVED = ['invoiceId', 'apOpen', 'apBalanceCents', 'chargesFinalizedAt', 'apPaidAt'];
+const LEG_REMOVED = ['invoiceId', 'apBalanceCents', 'chargesFinalizedAt'];
 
-/** The leg as it looks with no bill (the app's VOID_BILL shape, plus apOpen/apPaidAt cleared). */
+/** The leg as it looks with no bill (the app's VOID_BILL shape). */
 export function releasedLeg(leg, now) {
   const iso = now.toISOString();
   const after = { ...leg, apStatus: 'AWAITING_INVOICE', apStatusChangedAt: iso, updatedAt: iso, updatedBy: AUDIT_USER };

@@ -95,7 +95,8 @@ describe('plan: mixed payments and legs', () => {
     expect(p.modifies.LoadCarrier.map((x) => x.before.id)).toEqual(['lc-b1', 'lc-b2']);
     const after = p.modifies.LoadCarrier[0].after;
     expect(after).toMatchObject({ id: 'lc-b1', apStatus: 'AWAITING_INVOICE', apStatusChangedAt: NOW.toISOString(), updatedBy: 'aw-delete-payables' });
-    for (const f of ['invoiceId', 'apOpen', 'apBalanceCents', 'chargesFinalizedAt', 'apPaidAt']) expect(after).not.toHaveProperty(f);
+    for (const f of ['invoiceId', 'apBalanceCents', 'chargesFinalizedAt']) expect(after).not.toHaveProperty(f);
+    expect(after.apOpen).toBe('OPEN'); // VOID_BILL leaves apOpen
     expect(after.kind).toBe('CARRIER');
   });
   it('a leg that points at a different bill is left alone, and a retained bill on a released leg blocks', () => {
@@ -269,7 +270,7 @@ describe('apply + restore against an in-memory table', () => {
     expect(t(doc, 'ApPayment').get('pay-retained')).toEqual(data.ApPayment.find((x) => x.id === 'pay-retained'));
     const l1 = t(doc, 'LoadCarrier').get('lc-b1');
     expect(l1).toMatchObject({ apStatus: 'AWAITING_INVOICE', kind: 'CARRIER' });
-    expect(l1).not.toHaveProperty('apOpen');
+    expect(l1.apOpen).toBe('OPEN');
     expect(l1).not.toHaveProperty('apBalanceCents');
     expect(t(doc, 'LoadCarrier').get('lc-b3')).toEqual(data.LoadCarrier.find((x) => x.id === 'lc-b3'));
     expect(t(doc, 'LoadCarrier').get('lc-b4')).toEqual(data.LoadCarrier.find((x) => x.id === 'lc-b4'));
