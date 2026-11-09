@@ -175,17 +175,19 @@ export async function liveRateView(
   req: RateViewRequest,
   creds: RateViewCredentials,
   fetchImpl: typeof fetch = fetch,
+  /** Why a live answer was not produced (HTTP status or step), so the caller can show it instead of a silent stub. */
+  onFail: (reason: string) => void = () => {},
 ): Promise<RateViewAnswer | null> {
-  if (!creds.serviceAccountEmail || !creds.serviceAccountPassword) return null
+  if (!creds.serviceAccountEmail || !creds.serviceAccountPassword) { onFail('the service account e-mail or password is empty'); return null }
   try {
     const auth = await fetchImpl(DAT_AUTH_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username: creds.serviceAccountEmail, password: creds.serviceAccountPassword }),
     })
-    if (!auth.ok) return null
+    if (!auth.ok) { onFail(`DAT sign-in was refused (HTTP ${auth.status}); check the service account e-mail and password`); return null }
     const token = (await auth.json() as { accessToken?: string }).accessToken
-    if (!token) return null
+    if (!token) { onFail('DAT sign-in returned no access token'); return null }
 
     const lookup = await fetchImpl(DAT_RATEVIEW_URL, {
       method: 'POST',
@@ -199,7 +201,7 @@ export async function liveRateView(
         targetEscalation: { escalationType: 'BEST_FIT' },
       }]),
     })
-    if (!lookup.ok) return null
+    if (!lookup.ok) { onFail(`the DAT RateView lookup was refused (HTTP ${lookup.status}); the account may not include RateView`); return null }
     const body = await lookup.json() as {
       rateResponses?: { response?: { rate?: {
         averageFuelSurchargePerTripUsd?: number
@@ -210,7 +212,7 @@ export async function liveRateView(
       } } }[]
     }
     const rate = body.rateResponses?.[0]?.response?.rate
-    if (!rate?.perTrip?.rateUsd) return null
+    if (!rate?.perTrip?.rateUsd) { onFail('DAT had no rate for this lane'); return null }
     const miles = Math.round(rate.mileage ?? req.miles ?? estimateMiles(req.originState, req.destinationState))
     const fuelCents = Math.round((rate.averageFuelSurchargePerTripUsd ?? 0) * 100)
     const averageCents = Math.round(rate.perTrip.rateUsd * 100) + fuelCents
@@ -227,7 +229,8 @@ export async function liveRateView(
       source: 'DAT_RATEVIEW',
       message: 'DAT RateView, 15-day spot average.',
     }
-  } catch {
+  } catch (err) {
+    onFail(`the call to DAT failed (${err instanceof Error ? err.message : 'network error'})`)
     return null
   }
 }

@@ -151,7 +151,8 @@ describe('priceFromMarket', () => {
     })
     const result = (await priceFromMarket(d, baseInput, caller)) as { answer: RateViewAnswer }
     assertStub(result.answer)
-    expect(result.answer.message).toMatch(/falling back/i)
+    // The reason is the point: connected, but DAT refused the sign-in (HTTP 401), not "not connected".
+    expect(result.answer.message).toMatch(/DAT is connected but no live rate came back: DAT sign-in was refused \(HTTP 401\)/)
   })
 
   it('applies the customer margin override over the org default', async () => {

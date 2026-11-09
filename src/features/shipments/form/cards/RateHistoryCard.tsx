@@ -238,8 +238,9 @@ function DatBlock({ read, ready, missingEquipment, onRetry }: {
   if (answer.stub) {
     return (
       <div className="tms-card-rh-row" data-testid="card-rateHistory-dat-stub">
-        <TmsBadge tone="gray">DAT not connected</TmsBadge>
+        <TmsBadge tone="gray" title={answer.message}>{answer.message?.startsWith('DAT is connected') ? 'DAT: no live rate' : 'DAT not connected'}</TmsBadge>
         <Link className="ship-link" to={DAT_SETTINGS_PATH} data-testid="card-rateHistory-dat-settings">Settings &gt; Integrations</Link>
+        {answer.message?.startsWith('DAT is connected') && <p className="tms-card-rh-muted" data-testid="card-rateHistory-dat-reason">{answer.message.split('. ')[0]}.</p>}
       </div>
     )
   }
