@@ -20,6 +20,7 @@ vi.mock('@/lib/apiClient', () => ({
   getInvoicePdfUrl: vi.fn(async () => 'https://example.com/invoice.pdf'),
   getTmsSettings: vi.fn(async () => ({ bolTerms: 'Terms X' })),
   listDivisions: vi.fn(async () => []),
+  listUserProfiles: vi.fn(async () => []),
   listTrackingLinksByShipment: vi.fn(async () => []),
   listCheckCallsByLoad: vi.fn(async () => []),
   getShipmentDocumentUrl: vi.fn(async () => 'https://example.com/doc'),
@@ -56,7 +57,9 @@ vi.mock('./BolDialog', () => ({
 vi.mock('@/lib/loadSummaryPdf', () => ({
   buildLoadSummaryPdf: vi.fn(), loadSummaryFilename: vi.fn(() => 'load-summary.pdf'),
 }))
-vi.mock('@/lib/carrierRateCon', () => ({ buildRateConPdf: vi.fn() }))
+vi.mock('@/lib/carrierRateCon', () => ({
+  buildRateConPdf: vi.fn(), rateConPdfBase64: vi.fn(() => ''), rateConRepOf: vi.fn(() => null), joinRateConNotes: vi.fn(() => ''),
+}))
 vi.mock('@/features/loads/LoadDriverDocs', () => ({
   LoadDriverDocs: ({ kind }: { kind: string }) => <div>docs:{kind}</div>,
 }))
