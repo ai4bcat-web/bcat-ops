@@ -5592,7 +5592,8 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
   const acknowledgedKeys = new Set(acknowledged)
   const unacknowledged = warnings.filter((w) => !acknowledgedKeys.has(w.key))
   if (unacknowledged.length > 0) {
-    throw new Error(`Acknowledge these before booking: ${unacknowledged.map((w) => w.detail).join(' ')}`)
+    // The trailing [ack:KEY,KEY] is machine-readable: the Cover dialog turns it into a checkbox and sends those keys back.
+    throw new Error(`Acknowledge these before booking: ${unacknowledged.map((w) => w.detail).join(' ')} [ack:${unacknowledged.map((w) => w.key).join(',')}]`)
   }
   // Defence in depth: an admin-only finding is already a block for everybody else,
   // so a non-admin arriving here having ticked one is not to be taken at their word.

@@ -107,6 +107,24 @@ describe('CoverCarrierDialog', () => {
     expect(onCovered).toHaveBeenCalled()
   })
 
+  it('missing certificates / W-9 / agreement come back as a checkbox; ticking it and assigning again sends their keys', async () => {
+    mocks.carriers = [carrierRow({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })]
+    mocks.cover.mockRejectedValueOnce(new Error('Acknowledge these before booking: No cargo certificate is on file for this carrier. No W-9 is on file for this carrier. [ack:NO_CARGO_CERT,NO_W9]'))
+    renderDialog()
+    await lookUp('MC 900001')
+    enterRate()
+    fireEvent.click(screen.getByTestId('cover-assign'))
+
+    const warn = await screen.findByTestId('cover-server-warning')
+    expect(warn.textContent).toMatch(/No cargo certificate is on file/)
+    expect(screen.queryByTestId('cover-error')).toBeNull()
+    fireEvent.click(screen.getByLabelText('Acknowledge the missing documents'))
+    fireEvent.click(screen.getByTestId('cover-assign'))
+
+    await waitFor(() => expect(mocks.cover).toHaveBeenCalledTimes(2))
+    expect(mocks.cover.mock.calls[1][0]).toMatchObject({ carrierId: 'car-1', acknowledgeWarnings: ['NO_CARGO_CERT', 'NO_W9'] })
+  })
+
   it('a load that already has a live carrier gets another one through addCarrier, with the legs the rep ticks, never a replacement', async () => {
     mocks.carriers = [carrierRow({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })]
     const stops = [{ id: 'st-1', type: 'pickup', city: 'Dallas' }, { id: 'st-2', type: 'delivery', city: 'Austin' }]
