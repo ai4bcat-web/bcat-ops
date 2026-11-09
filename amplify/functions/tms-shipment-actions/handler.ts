@@ -163,7 +163,7 @@ import {
   type ShipmentTag,
 } from './ownershipResolve'
 import { assertNotVoided, isVoided } from '../_shared/voided'
-import { deleteShipments, restoreDeleted } from './shipmentDelete'
+import { deleteShipments, latestDeleteExport, restoreDeleted } from './shipmentDelete'
 import { shipmentDeleteStore } from './shipmentDeleteStore'
 import { SHIPMENT_ACTIONS_TABLES } from './tableEnv'
 import { parseTrackingPrefs, validateTrackingPrefsOverride, type TrackingPrefsOverride } from '../../../src/lib/trackingPrefs'
@@ -603,6 +603,7 @@ type Action =
   | 'VOID_SHIPMENT'
   | 'DELETE_SHIPMENTS'
   | 'RESTORE_DELETED_SHIPMENTS'
+  | 'LATEST_DELETE_EXPORT'
   | 'UNVOID_SHIPMENT'
   | 'REPOINT_SHIPMENT_CUSTOMER'
   // Step R. Who earns the shipment: the rules' answer, a person's answer, and the
@@ -863,7 +864,7 @@ function getGroups(identity?: AppSyncIdentity | null): string[] {
  * batch row.
  */
 function isActionAuthorized(action: Action, caller: Caller): boolean {
-  if (action === 'DELETE_SHIPMENTS' || action === 'RESTORE_DELETED_SHIPMENTS') return caller.email === OWNER_EMAIL
+  if (action === 'DELETE_SHIPMENTS' || action === 'RESTORE_DELETED_SHIPMENTS' || action === 'LATEST_DELETE_EXPORT') return caller.email === OWNER_EMAIL
   if (caller.isAdmin) return true
   const groups = caller.groups
   const tms = groups.includes(TMS_PAGE_GROUP)
@@ -905,7 +906,7 @@ export async function authorize(action: Action, identity?: AppSyncIdentity | nul
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
   const caller: Caller = { email, sub: identity.sub, groups, isAdmin }
   if (!isActionAuthorized(action, caller)) {
-    if (action === 'DELETE_SHIPMENTS' || action === 'RESTORE_DELETED_SHIPMENTS') throw new Error(`Forbidden: ${action} requires the owner`)
+    if (action === 'DELETE_SHIPMENTS' || action === 'RESTORE_DELETED_SHIPMENTS' || action === 'LATEST_DELETE_EXPORT') throw new Error(`Forbidden: ${action} requires the owner`)
     if (ADMIN_ONLY_ACTIONS[action] || QUOTE_ADMIN_ONLY_ACTIONS[action]) {
       throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
     }
@@ -2682,7 +2683,7 @@ async function checkCredit(input: Row): Promise<Row> {
 
 // ── Shipment status ──────────────────────────────────────────────────────────
 
-/** The org's "only an admin cancels" switch. Void has its own, harder rule above. */
+/** The org's "only an admin cancels or voids" switch (TmsSettings.cancelDeleteAdminOnly). Owner/ADMIN always pass. */
 async function requireAdminForCancel(action: string, caller: Caller, settings: Row | null): Promise<void> {
   if (settings?.cancelDeleteAdminOnly === true && !caller.isAdmin) {
     throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
@@ -2960,6 +2961,7 @@ async function voidShipment(input: Row, caller: Caller): Promise<Row> {
   if (isVoided(shipment)) {
     throw new Error(`Shipment ${String(shipment.number ?? shipmentId)} is already voided`)
   }
+  await requireAdminForCancel('VOID', caller, await getSettings())
   await assertNoInvoicedOrders(shipmentId, 'void')
 
   const { apBoardLegsClosed, loadsCanceled } = await applyVoid(shipment, caller, reason, expectedUpdatedAt)
@@ -8579,9 +8581,11 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
 
   switch (action) {
     case 'DELETE_SHIPMENTS':
+    case 'LATEST_DELETE_EXPORT':
     case 'RESTORE_DELETED_SHIPMENTS': {
       const tables = Object.fromEntries(Object.entries(SHIPMENT_ACTIONS_TABLES).map(([key, model]) => [model, process.env[key] ?? '']))
       const store = shipmentDeleteStore(dynamo, s3, tables, process.env.DATA_SAFETY_BUCKET_NAME ?? '')
+      if (action === 'LATEST_DELETE_EXPORT') return latestDeleteExport(store, caller)
       return action === 'DELETE_SHIPMENTS'
         ? { ...(await deleteShipments(store, input, caller)) }
         : { ...(await restoreDeleted(store, input, caller)) }

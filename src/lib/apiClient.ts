@@ -2708,6 +2708,11 @@ export async function deleteShipments(input: DeleteShipmentsInput): Promise<Dele
   return shipmentAction<DeleteShipmentsResponse>('DELETE_SHIPMENTS', input)
 }
 
+/** Finds the caller's last verified export even if the delete request did not return. */
+export async function latestDeleteExport(): Promise<{ exportPrefix: string | null; createdAt: string | null }> {
+  return shipmentAction('LATEST_DELETE_EXPORT', {})
+}
+
 export interface RestoreDeletedShipmentsResponse {
   dryRun: boolean
   exportPrefix: string

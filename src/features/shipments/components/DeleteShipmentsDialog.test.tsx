@@ -4,13 +4,15 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { DeleteShipmentsResponse } from '@/lib/apiClient'
 
-const { deleteShipments, restoreDeletedShipments } = vi.hoisted(() => ({
+const { deleteShipments, latestDeleteExport, restoreDeletedShipments } = vi.hoisted(() => ({
   deleteShipments: vi.fn(),
   restoreDeletedShipments: vi.fn(),
+  latestDeleteExport: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => ({
   deleteShipments,
   restoreDeletedShipments,
+  latestDeleteExport,
   graphqlErrorText: () => '',
 }))
 
@@ -114,9 +116,23 @@ describe('DeleteShipmentsDialog', () => {
   })
 
   it('refuses a selection over the Lambda batch cap without calling it', () => {
-    const many = Array.from({ length: 51 }, (_, i) => ({ id: `s${i}`, number: `S${i}` }))
+    const many = Array.from({ length: 11 }, (_, i) => ({ id: String(i), number: String(i) }))
     render(<DeleteShipmentsDialog shipments={many} onClose={vi.fn()} onDeleted={vi.fn()} />)
-    expect(screen.getByText(/at most 50/)).toBeTruthy()
+    expect(screen.getByText(/at most 10/)).toBeTruthy()
     expect(deleteShipments).not.toHaveBeenCalled()
+  })
+  it('recovers the export after a timeout instead of inviting another delete', async () => {
+    deleteShipments.mockResolvedValueOnce(preview()).mockRejectedValueOnce(new Error('AppSync timeout'))
+    latestDeleteExport.mockResolvedValueOnce({ exportPrefix: 'deletes/recovered/', createdAt: new Date().toISOString() })
+    render(<DeleteShipmentsDialog shipments={targets} onClose={vi.fn()} onDeleted={vi.fn()} />)
+    await screen.findByLabelText('Billing on S002')
+    fireEvent.change(screen.getByLabelText('Type DELETE to confirm'), { target: { value: 'DELETE' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Delete 1 shipment$/ }))
+    expect((await screen.findByTestId('export-prefix')).textContent).toBe('deletes/recovered/')
+    expect(screen.getByText(/Delete outcome unknown/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Delete 1 shipment$/ })).toBeNull()
+    restoreDeletedShipments.mockResolvedValueOnce({ dryRun: false, exportPrefix: 'deletes/recovered/', shipments: [], tables: {} })
+    fireEvent.click(screen.getByRole('button', { name: 'Restore deleted' }))
+    await waitFor(() => expect(restoreDeletedShipments).toHaveBeenCalledWith({ exportPrefix: 'deletes/recovered/', dryRun: false }))
   })
 })

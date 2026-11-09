@@ -103,7 +103,8 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
   // Same optional read as `useAuthUser`: row menus render in lists, drawers and tests
   // that do not always sit under AuthProvider, and the router is the real gate.
   const auth = useContext(AuthContext)
-  // Void is every staff member's; unvoid, re-point and delete are not (the Lambda decides each).
+  // Void is every staff member's unless the org switched cancel/void to admin-only (the Lambda decides);
+  // unvoid, re-point and delete are not (the Lambda decides each).
   const mayManage = isAdmin || (auth?.isOwner ?? false)
   const mayDelete = (auth?.isOwner ?? false) && onDeleted != null
 
@@ -191,7 +192,7 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
               <RotateCcw size={14} className="mr-2" />Unvoid shipment…
             </DropdownMenuItem>
           )}
-          {!voided && (
+          {!voided && (mayCancel || mayManage) && (
             <DropdownMenuItem
               className="text-[color:var(--tms-badge-red)]"
               onSelect={() => setDialog({ kind: 'void' })}
@@ -241,7 +242,7 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
           onDeleted={(outcome) => onDeleted?.(outcome)}
         />
       )}
-      {dialog?.kind === 'void' && (
+      {dialog?.kind === 'void' && !voided && (mayCancel || mayManage) && (
         <VoidShipmentDialog
           shipment={{ id: shipment.id, number: shipment.number, updatedAt: shipment.updatedAt }}
           open

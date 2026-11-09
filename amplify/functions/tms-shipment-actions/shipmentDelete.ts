@@ -1,8 +1,8 @@
 /**
  * DELETE_SHIPMENTS / RESTORE_DELETED_SHIPMENTS — the owner-only hard delete and its way back.
  *
- * Void (voidShipment in handler.ts) is what every staff member uses: the shipment, its PRO and
- * everything under it stay readable behind the Voided tab. Delete is Ryne's alone (the owner, by
+ * Void (voidShipment in handler.ts) is the normal exit, subject to cancelDeleteAdminOnly: the
+ * shipment, its PRO and everything under it stay readable behind the Voided tab. Delete is Ryne's alone (the owner, by
  * email, from the verified token — never "any ADMIN") and exists for freight that should never have
  * been on the books. The rules, in the order they are applied:
  *
@@ -31,8 +31,15 @@ import type { Row } from '../_shared/shipmentStore'
 
 export const DELETE_CONFIRM_WORD = 'DELETE'
 export const FORCE_CONFIRM_WORD = 'FORCE'
-/** One Lambda run reads ~14 tables per shipment and scans the billing tables once; keep it humane. */
-export const MAX_DELETE_BATCH = 50
+/**
+ * AppSync stops waiting at 30 s, before this Lambda's 120 s limit. A normal shipment needs
+ * 10 parallel GSI Queries, up to 12 consistent BatchGets, and one final transaction plus a
+ * conditional delete per child. Ten (rather than fifty) caps that discovery at 100 Queries /
+ * 120 BatchGets before pagination, leaving headroom for export verification and deletes.
+ * Unindexed billing scans and high child counts remain variable: recovery is mandatory,
+ * not a claim that any batch size can guarantee an AppSync response deadline.
+ */
+export const MAX_DELETE_BATCH = 10
 export const EXPORT_PREFIX_ROOT = 'deletes/'
 
 /** Tables whose rows hang off a shipment through a `shipmentId` GSI. */
@@ -85,15 +92,17 @@ export interface DeleteStore {
   getRow: (model: 'Shipment', id: string) => Promise<Row | null>
   queryByShipment: (model: ShipmentIndexedModel, shipmentId: string) => Promise<Row[]>
   getRows: (model: StoreModel, ids: string[]) => Promise<Row[]>
-  /** Every row of a table, `id` plus the named fields only. */
-  scanProjected: (model: BillingModel | ReferencedModel | 'BoxTruckTrip' | 'LegacyAljexRow', fields: string[]) => Promise<Row[]>
-  /** Idempotent: an id that is already gone is fine. */
+  /** Project candidate ids/link fields; only tables without a usable relationship index scan. */
+  scanProjected: (model: BillingModel | ReferencedModel | 'BoxTruckTrip' | 'LegacyAljexRow', fields: string[], matches?: Record<string, string[]>) => Promise<Row[]>
+  /** Compare-and-delete against the exported snapshot; a changed/missing row refuses deletion. */
   deleteRows: (model: DeletedModel, ids: string[]) => Promise<void>
   finishDelete: (shipment: Row, caller: Caller, changes: Row) => Promise<void>
   putIfAbsent: (model: DeletedModel, row: Row) => Promise<'put' | 'exists'>
   putObject: (key: string, body: string) => Promise<void>
   getObject: (key: string) => Promise<string>
   writeAudit: (entityType: string, entityId: string, action: string, caller: Caller, changes: Row) => Promise<void>
+  /** The caller's newest verified export marker, published before the first delete. */
+  latestExportMarker: (userEmail: string) => Promise<Row | null>
   now: () => string
   randomId: () => string
 }
@@ -182,8 +191,11 @@ function emptyBilling(): BillingSummary {
 
 /**
  * Read everything that hangs off the requested shipments, and sort the billing rows onto the shipment
- * that owns them. Read-only. The billing tables have no shipment index, so each is scanned ONCE for the
- * whole request with a projection of the key fields (full rows are fetched only for the matches).
+ * that owns them. Read-only. The shipment-keyed child tables are read through their `shipmentId` GSI
+ * (store.queryByShipment). The billing tables (Invoice, CarrierBill, Commission, FactoringItem,
+ * LegacyAljexRow, ArPayment, ApPayment, BoxTruckTrip) have no shipmentId/orderId index in the data
+ * model, so each is scanned ONCE for the whole request with a projection of the key fields (full rows
+ * are fetched only for the matches).
  */
 export async function planDeletes(store: DeleteStore, shipmentIds: string[]): Promise<ShipmentPlan[]> {
   const base = await inChunks(shipmentIds, 8, async (shipmentId) => {
@@ -215,7 +227,8 @@ export async function planDeletes(store: DeleteStore, shipmentIds: string[]): Pr
   }
 
   const matchedIds = async (model: BillingModel | 'BoxTruckTrip' | 'LegacyAljexRow', fields: string[], keys: string[]) => {
-    const scanned = live.length === 0 ? [] : await store.scanProjected(model, fields)
+    const matches = Object.fromEntries(fields.map((field) => [field, field === 'shipmentId' ? [...wanted] : [...shipmentOf.keys()]]))
+    const scanned = live.length === 0 ? [] : await store.scanProjected(model, fields, matches)
     const byShipment = new Map<string, string[]>()
     for (const r of scanned) {
       const owner = ownerOf(r, keys)
@@ -465,7 +478,13 @@ export async function deleteShipments(store: DeleteStore, input: Row, caller: Ca
   if (!dryRun && eligible.length > 0) {
     let exported: { prefix: string; manifest: ExportManifest } | null = null
     try {
-      exported = await writeExport(store, caller, eligible, force)
+      const verified = await writeExport(store, caller, eligible, force)
+      // Publish recovery before any destructive write. A failed marker also fails closed.
+      await store.writeAudit(
+        'DELETE_SHIPMENTS', `${verified.manifest.createdAt}#${verified.prefix}`,
+        'DELETE_EXPORT_WRITTEN', caller, { exportPrefix: verified.prefix, shipmentIds },
+      )
+      exported = verified
     } catch (err) {
       // Fail closed: nothing was deleted, and nothing will be.
       const message = `Nothing deleted: the export could not be written (${err instanceof Error ? err.message : String(err)})`
@@ -509,6 +528,14 @@ export async function deleteShipments(store: DeleteStore, input: Row, caller: Ca
     })
   }
   return { dryRun, force, exportPrefix: prefix, results, deleted, failed: dryRun ? 0 : results.length - deleted }
+}
+
+export async function latestDeleteExport(store: DeleteStore, caller: Caller): Promise<{ exportPrefix: string | null; createdAt: string | null }> {
+  assertOwner(store, caller, 'LATEST_DELETE_EXPORT')
+  const marker = await store.latestExportMarker(caller.email)
+  if (!marker) return { exportPrefix: null, createdAt: null }
+  const changes = typeof marker.changes === 'string' ? JSON.parse(marker.changes) as Row : marker.changes as Row
+  return { exportPrefix: str(changes?.exportPrefix), createdAt: str(marker.createdAt) }
 }
 
 // ── restore ──────────────────────────────────────────────────────────────────

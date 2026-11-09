@@ -1,6 +1,6 @@
 /**
  * Delete — the owner's hard delete, for freight that should never have been on the books
- * (anyone else voids). It opens on a server-side preview (`dryRun`) that lists the billing
+ * (other staff void when the org permits). It opens on a server-side preview (`dryRun`) that lists the billing
  * each shipment carries row for row, because a delete that takes an invoice with it must be
  * read, not guessed. Billing is refused unless the separate Force box is ticked AND FORCE is
  * typed, on top of the typed DELETE. After a delete the export prefix is shown and the
@@ -10,14 +10,14 @@
 import { useEffect, useState } from 'react'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsField, TmsInput } from '@/features/tms/kit'
 import {
-  deleteShipments, graphqlErrorText, restoreDeletedShipments,
+  deleteShipments, graphqlErrorText, latestDeleteExport, restoreDeletedShipments,
   type DeleteBillingSummary, type DeleteShipmentResult, type DeleteShipmentsResponse,
   type RestoreDeletedShipmentsResponse,
 } from '@/lib/apiClient'
 import { formatCents } from '@/lib/tmsDirectory'
 
 /** The Lambda refuses a bigger batch; the dialog says so up front. */
-export const MAX_DELETE_SELECTION = 50
+export const MAX_DELETE_SELECTION = 10
 
 export interface DeleteTarget { id: string; number: string }
 
@@ -45,7 +45,7 @@ type Phase =
   | { kind: 'preview'; response: DeleteShipmentsResponse }
   | { kind: 'done'; response: DeleteShipmentsResponse }
   | { kind: 'failed'; message: string }
-
+  | { kind: 'unknown'; startedAt: number; exportPrefix: string | null }
 export function DeleteShipmentsDialog({ shipments, onClose, onDeleted }: {
   shipments: DeleteTarget[]
   onClose: () => void
@@ -84,10 +84,22 @@ export function DeleteShipmentsDialog({ shipments, onClose, onDeleted }: {
   const typedOk = confirm === 'DELETE' && (!force || forceConfirm === 'FORCE')
   const canDelete = phase.kind === 'preview' && !busy && deletable.length > 0 && typedOk
 
+  const recover = async (startedAt: number) => {
+    setBusy(true)
+    try {
+      const found = await latestDeleteExport()
+      const current = found.createdAt != null && Date.parse(found.createdAt) >= startedAt - 5000
+      setPhase({ kind: 'unknown', startedAt, exportPrefix: current ? found.exportPrefix : null })
+    } catch {
+      setError('Could not look up the export. Check recovery again before retrying the delete.')
+    } finally { setBusy(false) }
+  }
+
   const submit = async () => {
     if (!canDelete) return
     setBusy(true)
     setError(null)
+    const startedAt = Date.now()
     try {
       const response = await deleteShipments({
         shipmentIds: ids,
@@ -98,7 +110,9 @@ export function DeleteShipmentsDialog({ shipments, onClose, onDeleted }: {
       })
       setPhase({ kind: 'done', response })
     } catch (err) {
-      setError(graphqlErrorText(err) || (err instanceof Error ? err.message : 'Delete failed'))
+      setPhase({ kind: 'unknown', startedAt, exportPrefix: null })
+      setError(`Delete outcome unknown: ${graphqlErrorText(err) || (err instanceof Error ? err.message : 'request interrupted')}. The server may still be running; do not retry deletion.`)
+      await recover(startedAt)
     } finally {
       setBusy(false)
     }
@@ -117,10 +131,11 @@ export function DeleteShipmentsDialog({ shipments, onClose, onDeleted }: {
   }
 
   const done = phase.kind === 'done' ? phase.response : null
+  const exportPrefix = done?.exportPrefix ?? (phase.kind === 'unknown' ? phase.exportPrefix : null)
   const restoreFailed = restored ? Object.values(restored.tables).reduce((n, table) => n + table.failed, 0) : 0
   const close = () => {
     onClose()
-    if (done?.exportPrefix) onDeleted({ restored: restored != null && restoreFailed === 0 })
+    if (done?.exportPrefix || phase.kind === 'unknown') onDeleted({ restored: restored != null && restoreFailed === 0 })
   }
   const label = shipments.length === 1 ? `shipment ${shipments[0].number}` : `${shipments.length} shipments`
 
@@ -134,10 +149,11 @@ export function DeleteShipmentsDialog({ shipments, onClose, onDeleted }: {
         'Delete is permanent and not the same as void: the shipment and its rows leave the system '
         + '(its PRO is never reused). Every row is exported first and can be restored.'
       )}
-      footer={done ? (
+      footer={done || phase.kind === 'unknown' ? (
         <>
-          {done.exportPrefix && (!restored || restoreFailed > 0) && (
-            <TmsButton variant="secondary" disabled={busy} onClick={() => { void restore(done.exportPrefix as string) }}>
+          {phase.kind === 'unknown' && <TmsButton disabled={busy} onClick={() => { void recover(phase.startedAt) }}>Check recovery</TmsButton>}
+          {exportPrefix && (!restored || restoreFailed > 0) && (
+            <TmsButton variant="secondary" disabled={busy} onClick={() => { void restore(exportPrefix) }}>
               {busy ? 'Restoring…' : 'Restore deleted'}
             </TmsButton>
           )}
@@ -209,12 +225,20 @@ export function DeleteShipmentsDialog({ shipments, onClose, onDeleted }: {
           </>
         )}
 
-        {done && (
+        {phase.kind === 'unknown' && (
+          <TmsAlert tone="orange">
+            The delete did not return a result. Some rows may have been deleted. Wait at least two minutes
+            after submitting before restoring, so the original server operation has stopped.
+            {exportPrefix ? <p>Recovery export: <code data-testid="export-prefix">{exportPrefix}</code>.</p>
+              : <p>No current export found yet. Use Check recovery; do not assume nothing was deleted.</p>}
+          </TmsAlert>
+        )}
+        {(done || phase.kind === 'unknown') && (
           <>
-            <TmsAlert tone={done.failed > 0 ? 'orange' : 'green'}>
+            {done && <TmsAlert tone={done.failed > 0 ? 'orange' : 'green'}>
               {done.deleted} deleted{done.failed > 0 ? `, ${done.failed} not deleted` : ''}.
-            </TmsAlert>
-            {done.exportPrefix && (
+            </TmsAlert>}
+            {done?.exportPrefix && (
               <p className="text-sm">
                 Exported to <code data-testid="export-prefix">{done.exportPrefix}</code>. Restore puts these rows back.
               </p>

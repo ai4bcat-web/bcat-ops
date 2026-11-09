@@ -2591,6 +2591,8 @@ shipmentActionsFn.addToRolePolicy(
       `${shipmentQuoteTable.tableArn}/index/*`,
       `${shipmentLaneSampleTable.tableArn}/index/*`,
       `${shipmentNoticeTable.tableArn}/index/*`,
+      // Delete recovery uses the existing entityType/entityId AuditLog index (no schema change).
+      `${shipmentAuditLogTable.tableArn}/index/*`,
     ],
   }),
 )

@@ -1350,8 +1350,29 @@ function repointCall(shipmentId: string, customerId: string, reason = 'Customer 
 }
 
 describe('VOID_SHIPMENT', () => {
-  it('allows shipments staff to void and records their identity', async () => {
+  it('allows shipments staff to void when unrestricted and records their identity', async () => {
+    seedSettings({ cancelDeleteAdminOnly: false })
     for (const identity of [DISPATCHER, TMS_USER, ADMIN, OWNER]) {
+      const { shipmentId } = await createDraft()
+      const result = await voidCall(shipmentId, identity) as { shipment: Row }
+      expect(result.shipment.voidedAt).toBeTruthy()
+      expect(result.shipment.voidedBy).toBe(identity.claims.email)
+    }
+  })
+
+  it('refuses staff voids without changing the shipment when the org requires an admin', async () => {
+    seedSettings({ cancelDeleteAdminOnly: true })
+    for (const identity of [DISPATCHER, TMS_USER]) {
+      const { shipmentId } = await createDraft()
+      const before = { ...table(TABLES.shipment).get(shipmentId)! }
+      await expect(voidCall(shipmentId, identity)).rejects.toThrow(/Forbidden/)
+      expect(table(TABLES.shipment).get(shipmentId)).toEqual(before)
+    }
+  })
+
+  it('allows ADMIN and OWNER to void when the org requires an admin', async () => {
+    seedSettings({ cancelDeleteAdminOnly: true })
+    for (const identity of [ADMIN, OWNER]) {
       const { shipmentId } = await createDraft()
       const result = await voidCall(shipmentId, identity) as { shipment: Row }
       expect(result.shipment.voidedAt).toBeTruthy()

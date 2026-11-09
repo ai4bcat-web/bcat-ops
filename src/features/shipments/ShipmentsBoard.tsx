@@ -905,14 +905,14 @@ function BoardPane({
           <ShipmentRowActions
             shipment={row}
             isAdmin={isAdmin}
-            cancelDeleteAdminOnly={false}
+            cancelDeleteAdminOnly={settings?.cancelDeleteAdminOnly === true}
             handlers={rowHandlers(row)}
           />
         )
       }
       return renderCell(row, key)
     },
-    [renderCell, rowHandlers, isAdmin],
+    [renderCell, rowHandlers, isAdmin, settings?.cancelDeleteAdminOnly],
   )
 
   const [openDrawerId, setOpenDrawerId] = useState<string | null>(null)

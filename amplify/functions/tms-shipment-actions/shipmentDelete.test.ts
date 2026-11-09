@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DELETE_ORDER, SHIPMENT_INDEXED_MODELS, deleteShipments, restoreDeleted, type DeleteStore, type StoreModel } from './shipmentDelete'
+import { DELETE_ORDER, MAX_DELETE_BATCH, SHIPMENT_INDEXED_MODELS, deleteShipments, latestDeleteExport, restoreDeleted, type DeleteStore, type StoreModel } from './shipmentDelete'
 import type { Row } from '../_shared/shipmentStore'
 import { authorize } from './handler'
 
@@ -41,7 +41,8 @@ function fixture(billing = false) {
     },
     putObject: async (key, body) => { events.push(`export:${key}`); objects.set(key, body) },
     getObject: async (key) => { events.push(`verify:${key}`); const body = objects.get(key); if (body == null) throw new Error('missing'); return body },
-    writeAudit: async (entityType, entityId, action, _actor, changes) => { audit.push({ entityType, entityId, action, changes }) },
+    writeAudit: async (entityType, entityId, action, actor, changes) => { audit.push({ entityType, entityId, action, changes, user: actor.email, createdAt: store.now() }) },
+    latestExportMarker: async (email) => [...audit].reverse().find((r) => r.action === 'DELETE_EXPORT_WRITTEN' && r.user === email) ?? null,
     now: () => '2026-11-09T12:00:00.000Z', randomId: () => 'abcdef',
   }
   return { db, store, objects, events, audit }
@@ -113,5 +114,39 @@ describe('owner-only shipment deletion', () => {
     expect(result.results.map((r) => r.outcome)).toEqual(['DELETED', 'NOT_FOUND', 'FAILED'])
     expect(result.exportPrefix).toMatch(/^deletes\//)
     expect(f.db.Shipment.map((r) => r.id)).toEqual(['s2'])
+  })
+  it('caps requests before discovery, and permits the cap', async () => {
+    const f = fixture()
+    await expect(deleteShipments(f.store, { ...input, shipmentIds: Array.from({ length: MAX_DELETE_BATCH + 1 }, (_, i) => String(i)) }, owner)).rejects.toThrow('at most 10')
+    expect(f.events).toEqual([])
+    const result = await deleteShipments(f.store, { ...input, dryRun: true, shipmentIds: Array.from({ length: MAX_DELETE_BATCH }, (_, i) => String(i)) }, owner)
+    expect(result.results.every((r) => r.outcome === 'NOT_FOUND')).toBe(true)
+  })
+
+  it('a child guard failure preserves Shipment and exposes the verified export before deletion', async () => {
+    const f = fixture()
+    f.store.deleteRows = async () => {
+      expect((await latestDeleteExport(f.store, owner)).exportPrefix?.startsWith('deletes/')).toBe(true)
+      throw new Error('ConditionalCheckFailedException: stale updatedAt')
+    }
+    const result = await deleteShipments(f.store, input, owner)
+    expect(result.deleted).toBe(0)
+    expect(f.db.Shipment[0].id).toBe('s')
+    expect(result.results[0].message).toContain(result.exportPrefix)
+    expect(await latestDeleteExport(f.store, owner)).toMatchObject({ exportPrefix: result.exportPrefix })
+    await expect(latestDeleteExport(f.store, admin)).rejects.toThrow('owner')
+  })
+
+  it('fails closed if the recovery marker cannot be recorded', async () => {
+    const f = fixture()
+    const audit = f.store.writeAudit
+    f.store.writeAudit = async (...args) => {
+      if (args[2] === 'DELETE_EXPORT_WRITTEN') throw new Error('Audit unavailable')
+      await audit(...args)
+    }
+    const result = await deleteShipments(f.store, input, owner)
+    expect(result.deleted).toBe(0)
+    expect(f.events.some((e) => e.startsWith('delete:'))).toBe(false)
+    expect(f.db.Shipment[0].id).toBe('s')
   })
 })
