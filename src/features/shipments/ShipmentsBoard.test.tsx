@@ -917,6 +917,7 @@ describe('ShipmentsBoard', () => {
         'Needs sales rep (1)',
         'Missing rev division (1)',
         'Missing documents (0)',
+        'Review billing (0)',
         'Check call overdue (0)',
       ])
       expect(screen.queryByRole('button', { name: /Open exceptions/ })).toBeNull()
