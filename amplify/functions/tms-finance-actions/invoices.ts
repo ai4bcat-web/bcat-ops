@@ -36,6 +36,7 @@ import {
   invoiceLinesFor,
   invoiceNumberFormatError,
   invoiceReadiness,
+  invoiceStopLocationIds,
   invoiceTermsDays,
   remitToFor,
 } from '../../../src/lib/invoiceBuild'
@@ -57,6 +58,7 @@ import type {
   BillToParty,
   CustomerRecord,
   Division,
+  LocationRecord,
   DocGateResult,
   InvoiceBillTo,
   InvoiceRecord,
@@ -71,6 +73,7 @@ import type {
 } from '../../../src/types/tms'
 import {
   CUSTOMER_TABLE_NAME,
+  LOCATION_TABLE_NAME,
   FACTORING_ITEM_TABLE_NAME,
   FROM_ADDRESS,
   IDX_CARRIERS_BY_SHIPMENT,
@@ -133,6 +136,8 @@ interface OrderContext {
   documents: ShipmentDocumentRecord[]
   customer: CustomerRecord | null
   division: Division | null
+  /** The directory rows the stops point at, for the street and zip a booked stop does not carry. */
+  locations: LocationRecord[]
   settings: TmsSettings
   /** The loads this order bills for, as the document gate counts them. */
   gateLoadIds: string[]
@@ -163,6 +168,9 @@ export async function readOrderContext(orderId: string): Promise<OrderContext> {
   const loads = allLoads.filter((load) => gateIds.includes(load.id))
   const divisionKey = loads.find((load) => load.divisionKey)?.divisionKey ?? null
   const division = divisionKey ? ((await getDivision(divisionKey)) as unknown as Division | null) : null
+  const locationRows = await Promise.all(
+    invoiceStopLocationIds(loads).map((id) => getById(LOCATION_TABLE_NAME, id)),
+  )
 
   return {
     order,
@@ -177,6 +185,7 @@ export async function readOrderContext(orderId: string): Promise<OrderContext> {
       ? ({ ...customerRow, ...(customerRow.billingMethod === 'FACTOR' ? { factored: true } : {}) } as unknown as CustomerRecord)
       : null,
     division,
+    locations: locationRows.filter((row): row is Row => row != null) as unknown as LocationRecord[],
     settings: settings as unknown as TmsSettings,
     gateLoadIds: gateIds,
   }
@@ -424,7 +433,7 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
   const dryRun = buildSnapshot(context, { number: 'DRAFT', invoiceDate, dueAt, billToId, note, attachDocumentIds }, caller, now)
   await buildInvoicePdf(invoiceData({
     invoice: dryRun.invoice,
-    bundle: { shipment: context.shipment, loads: context.loads },
+    bundle: { shipment: context.shipment, loads: context.loads, orders: context.orders, loadCarriers: context.loadCarriers, locations: context.locations },
     customer: context.customer,
     division: context.division,
     settings: context.settings,
@@ -494,7 +503,7 @@ async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: C
   try {
     const bytes = await buildInvoicePdf(invoiceData({
       invoice,
-      bundle: { shipment: context.shipment, loads: context.loads },
+      bundle: { shipment: context.shipment, loads: context.loads, orders: context.orders, loadCarriers: context.loadCarriers, locations: context.locations },
       customer: context.customer,
       division: context.division,
       settings: context.settings,

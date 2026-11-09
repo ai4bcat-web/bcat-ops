@@ -454,9 +454,9 @@ describe('invoiceData', () => {
     expect(data.broker.mcNumber).toBe('MC123456')
     expect(data.remitTo.name).toBe('BCAT Corp')
     expect(data.billTo.name).toBe('Acme Freight AP')
-    expect(data.stops).toEqual([
-      { kind: 'PICKUP', name: 'Acme Plant', city: 'Elgin', state: 'IL', apptAt: '2026-03-18T13:00:00.000Z' },
-      { kind: 'DELIVERY', name: 'Acme DC', city: 'Columbus', state: 'OH', apptAt: '2026-03-19T15:00:00.000Z' },
+    expect(data.stops.map((stop) => [stop.kind, stop.name, stop.city, stop.state, stop.apptAt])).toEqual([
+      ['PICKUP', 'Acme Plant', 'Elgin', 'IL', '2026-03-18T13:00:00.000Z'],
+      ['DELIVERY', 'Acme DC', 'Columbus', 'OH', '2026-03-19T15:00:00.000Z'],
     ])
     expect(data.references.map((ref) => ref.code)).toEqual(['PO'])
     expect(data.subtotalCents).toBe(120000)

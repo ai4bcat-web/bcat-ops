@@ -3070,6 +3070,7 @@ const financeLoadCarrierTbl = stageTables['LoadCarrier']
 const financeFinancialsTbl  = stageTables['LoadFinancials']
 const financeChargeTable    = stageTables['LoadCharge']
 const financeCustomerTable  = stageTables['Customer']
+const financeLocationTable  = stageTables['Location']
 const financeDivisionTable  = stageTables['Division']
 const financeSettingsTable  = stageTables['TmsSettings']
 const financeAuditLogTable  = stageTables['AuditLog']
@@ -3116,6 +3117,8 @@ financeActionsFn.addToRolePolicy(
       financeCarrierPayTbl.tableArn,
       financeCarrierCntTbl.tableArn,
       financeCustomerTable.tableArn,
+      // Read-only: the street and zip a directory-booked stop prints on the invoice.
+      financeLocationTable.tableArn,
       financeDivisionTable.tableArn,
       shipmentDocumentTable.tableArn,
       commissionTable.tableArn,

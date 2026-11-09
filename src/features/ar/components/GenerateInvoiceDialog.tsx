@@ -25,17 +25,19 @@ import {
   graphqlErrorText,
   listCustomers,
   listDivisions,
+  listLocations,
   previewInvoice,
   type InvoicePreview,
 } from '@/lib/apiClient'
 import { formatCents, invoiceData } from '@/lib/invoiceBuild'
 import { buildInvoicePdf } from '@/lib/invoicePdf'
 import { DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
-import type { CustomerRecord, Division, ShipmentBundle, TmsSettings } from '@/types/tms'
+import type { CustomerRecord, Division, LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 
 /** Everything the PDF needs that the preview snapshot does not carry itself. */
 interface PdfContext {
-  bundle: Pick<ShipmentBundle, 'shipment' | 'loads'> | null
+  bundle: Pick<ShipmentBundle, 'shipment' | 'loads' | 'orders' | 'loadCarriers'> | null
+  locations: LocationRecord[]
   customer: CustomerRecord | null
   division: Division | null
   settings: TmsSettings | null
@@ -65,8 +67,8 @@ export function GenerateInvoiceDialog({ orderId, busy, onClose, onDone }: {
     const input: { orderId: string; invoiceDate?: string; billToId?: string } = { orderId }
     if (date) input.invoiceDate = date
     if (billTo) input.billToId = billTo
-    return Promise.all([previewInvoice(input), listCustomers(), listDivisions(), getTmsSettings()])
-      .then(([result, customers, divisions, settings]) =>
+    return Promise.all([previewInvoice(input), listCustomers(), listDivisions(), getTmsSettings(), listLocations()])
+      .then(([result, customers, divisions, settings, locations]) =>
         // The route on the bill comes off the shipment's stops; the preview snapshot
         // carries the money, not the geography.
         getShipmentBundle(result.snapshot.shipmentId).then((bundle) => {
@@ -80,6 +82,7 @@ export function GenerateInvoiceDialog({ orderId, busy, onClose, onDone }: {
             customer: customers.find((row) => row.id === result.snapshot.customerId) ?? null,
             division: divisions.find((row) => row.key === result.snapshot.divisionKey) ?? null,
             settings,
+            locations,
           })
           setError(null)
         }))
@@ -97,7 +100,13 @@ export function GenerateInvoiceDialog({ orderId, busy, onClose, onDone }: {
     let dropped = false
     buildInvoicePdf(invoiceData({
       invoice: snapshot,
-      bundle: { shipment: context.bundle?.shipment ?? null, loads: context.bundle?.loads ?? null },
+      bundle: {
+        shipment: context.bundle?.shipment ?? null,
+        loads: context.bundle?.loads ?? null,
+        orders: context.bundle?.orders ?? null,
+        loadCarriers: context.bundle?.loadCarriers ?? null,
+        locations: context.locations,
+      },
       customer: context.customer,
       division: context.division,
       settings: context.settings,
