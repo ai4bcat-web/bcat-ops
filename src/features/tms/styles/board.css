@@ -250,3 +250,8 @@
 .tms-portal .tms-public-choices { display: flex; flex-wrap: wrap; gap: 10px; }
 .tms-portal .tms-public-choice-active { outline: 2px solid var(--tms-primary); outline-offset: 2px; }
 .tms-portal .tms-public-terms { margin: 0; white-space: pre-wrap; font-size: 12px; color: var(--tms-muted); }
+
+/* Links in the Shipments grid read as blue hyperlinks (PRO, customer, carrier). */
+.tms-shell .tms-board-link { color: var(--tms-primary-ink); font-weight: 500; text-decoration: none; }
+.tms-shell .tms-board-link:hover { text-decoration: underline; }
+.tms-shell .tms-dg-table tbody tr[data-tone] td a.tms-board-link { color: var(--tms-primary-ink); }

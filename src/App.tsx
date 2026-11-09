@@ -46,7 +46,6 @@ import { DriverAppViewPage } from '@/features/owner-operator-pay/DriverAppViewPa
 import { IvanDriverAppPage } from '@/features/ivan-driver-app/IvanDriverAppPage'
 import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
 import { InvoicesPage } from '@/features/invoices/InvoicesPage'
-import { IntakePage } from '@/features/intake/IntakePage'
 import { TasksPage } from '@/features/tasks/TasksPage'
 import { DriverPortalPage } from '@/features/driver-portal/DriverPortalPage'
 import { VehicleQuotePage } from '@/features/vehicle-quote/VehicleQuotePage'
@@ -249,7 +248,7 @@ export default function App() {
               <Route path="/settings/integrations" element={<ParamRedirect to="/tms/brokerage/integrations" />} />
               <Route path="/settings/integrations/:provider" element={<ParamRedirect to="/tms/brokerage/integrations/:provider" />} />
               <Route path="/audit-log" element={<ParamRedirect to="/tms/brokerage/audit" />} />
-              <Route path="/intake"   element={<RequirePage page="intake"><IntakePage /></RequirePage>} />
+              <Route path="/intake"   element={<Navigate to="/tms/shipments/intake" replace />} />
               <Route path="/pods"     element={<RequirePage page="pods"><PodsPage /></RequirePage>} />
               <Route path="/tasks"   element={<RequirePage page="tasks"><TasksPage /></RequirePage>} />
               <Route path="/users" element={<ParamRedirect to="/tms/brokerage/users" />} />
