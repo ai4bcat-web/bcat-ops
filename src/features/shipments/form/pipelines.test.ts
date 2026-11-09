@@ -5,7 +5,7 @@ import { emptyValues, valuesFromBundle } from './model'
 
 const api = vi.hoisted(() => ({
   assignAsset: vi.fn(), createShipment: vi.fn(), saveOrderForm: vi.fn(), getShipmentBundle: vi.fn(), setRevTag: vi.fn(), clearRevTag: vi.fn(),
-  setSalesRep: vi.fn(), assignCarrierRep: vi.fn(), submitOrder: vi.fn(), updateOrderDetails: vi.fn(), updateStop: vi.fn(),
+  setSalesRep: vi.fn(), setShipmentCustomer: vi.fn(), assignCarrierRep: vi.fn(), submitOrder: vi.fn(), updateOrderDetails: vi.fn(), updateStop: vi.fn(),
   updateStopDetails: vi.fn(), recalcCharges: vi.fn(), updateLoadCarrierDetails: vi.fn(), setEta: vi.fn(),
   prepareDocumentUpload: vi.fn(), commitDocument: vi.fn(), putPresignedFile: vi.fn(), createLocation: vi.fn(),
 }))
@@ -188,6 +188,26 @@ describe('edit pipelines', () => {
     expect(res.ok).toBe(true)
     expect(api.saveOrderForm.mock.calls[0][0].draftSave).toBe(true)
     expect(api.createShipment).not.toHaveBeenCalled()
+  })
+
+  it('a DRAFT built on a typed customer name links the customer that is picked later, before it saves (regression: the pick was dropped)', async () => {
+    const unlinked = filledValues(); unlinked.customer.id = ''; unlinked.customer.useTyped = true; unlinked.customer.typedName = 'Typed Co'
+    const typed = storedBundle(unlinked, { status: 'DRAFT' })
+    const picked = filledValues()
+    api.setShipmentCustomer.mockResolvedValue(at(typed, 'u-link', { customerId: CUSTOMER.id }))
+    api.saveOrderForm.mockResolvedValue(at(typed, 'u-save', { customerId: CUSTOMER.id }))
+    const res = await runEditSave(picked, ctx, typed)
+    expect(res.ok).toBe(true)
+    expect(api.setShipmentCustomer).toHaveBeenCalledExactlyOnceWith({ shipmentId: typed.shipment.id, customerId: CUSTOMER.id })
+    expect(api.setShipmentCustomer.mock.invocationCallOrder[0]).toBeLessThan(api.saveOrderForm.mock.invocationCallOrder[0])
+    expect(api.saveOrderForm.mock.calls[0][0].expectedUpdatedAt).toBe('u-link')
+  })
+
+  it('an already linked DRAFT never calls the link action', async () => {
+    const linked = storedBundle(filledValues(), { status: 'DRAFT' })
+    api.saveOrderForm.mockResolvedValue(at(linked, 'u-save'))
+    await runEditSave(valuesFromBundle(linked, { customer: CUSTOMER }), ctx, linked)
+    expect(api.setShipmentCustomer).not.toHaveBeenCalled()
   })
 
   it('a non-DRAFT edit never calls SAVE_ORDER_FORM and skips every empty diff', async () => {

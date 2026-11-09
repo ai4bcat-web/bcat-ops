@@ -730,6 +730,19 @@ describe('intake authorization', () => {
   })
 })
 
+describe('INTAKE_LINK_SHIPMENT authorization', () => {
+  // Whoever builds a shipment from an intake load can link it: the link ends the build. (Regression: page-tms builders
+  // were refused, so a built load stayed in the intake queue.)
+  it('lets anyone who can build shipments reach it, and refuses a caller with no grant', async () => {
+    const loads = { sub: 's', username: 'l', claims: { email: 'l@bcatcorp.com', 'cognito:groups': ['page-loads'] } }
+    const none = { sub: 's2', username: 'n', claims: { email: 'n@bcatcorp.com', 'cognito:groups': [] } }
+    for (const who of [OWNER, ADMIN, TMS_USER, loads]) {
+      await expect(call('INTAKE_LINK_SHIPMENT', { intakeId: 'il:none', shipmentId: 'shp-x' }, who)).rejects.toThrow(/Intake load not found/)
+    }
+    await expect(call('INTAKE_LINK_SHIPMENT', { intakeId: 'il:none', shipmentId: 'shp-x' }, none)).rejects.toThrow(/Forbidden: INTAKE_LINK_SHIPMENT/)
+  })
+})
+
 // ── CREATE_SHIPMENT ──────────────────────────────────────────────────────────
 
 describe('CREATE_SHIPMENT', () => {
