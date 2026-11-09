@@ -18,6 +18,8 @@ import {
 } from '@/lib/apiClient'
 import { requiredFieldLabel } from '@/lib/flowDefaults'
 import { formatDateTime } from '@/lib/date'
+import { findCustomerMatches } from '@/lib/tmsDirectory'
+import { Typeahead, type TypeaheadItem } from '@/features/shipments/form/cards/Typeahead'
 import { SHIPMENT_TYPES } from '@/lib/shipmentTypes'
 import { canMarkReviewed, canMoveToActive, fieldStatusOf, intakeFieldKeys, intakeRequired, patchIntakeFields, withCustomerDefaults } from '@/lib/intakeLoad'
 import type { CustomerRecord, TmsSettings } from '@/types/tms'
@@ -65,6 +67,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
   const { divisions } = useOwnershipDivisions()
   const [work, setWork] = useState<Work>({ fields: row.fields, meta: row.meta, confirmed: row.confirmed })
   const [busy, setBusy] = useState(false)
+  const [customerQuery, setCustomerQuery] = useState<string | null>(null)
   const [dismissOpen, setDismissOpen] = useState(false)
   const [reason, setReason] = useState('')
 
@@ -242,6 +245,17 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
 
   const candidates = row.autoFields.customerCandidates ?? []
   const customerOptions = customers.filter((c) => c.active !== false)
+  // Search as you type: names that contain what was typed first, then the directory's fuzzy matches.
+  const customerItems = useMemo<TypeaheadItem[]>(() => {
+    const q = (customerQuery ?? '').trim().toLowerCase()
+    const toItem = (c: CustomerRecord): TypeaheadItem => ({ id: c.id, label: c.name })
+    if (!q) return customerOptions.slice(0, 30).map(toItem)
+    const words = q.split(/\s+/).filter(Boolean)
+    const contains = customerOptions.filter((c) => words.every((w) => `${c.name} ${(c.aliases ?? []).join(' ')}`.toLowerCase().includes(w)))
+    const seen = new Set(contains.map((c) => c.id))
+    const fuzzy = findCustomerMatches(customerQuery ?? '', customerOptions).map((m) => m.record).filter((c) => !seen.has(c.id))
+    return [...contains, ...fuzzy].slice(0, 30).map(toItem)
+  }, [customerQuery, customerOptions])
   const readOnlyReason = row.status !== 'OPEN'
     ? `This load is ${row.status.toLowerCase()}.`
     : !canReview ? 'You can look but not change intake loads.' : null
@@ -254,15 +268,17 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
           {fieldRow(
             'customerId',
             'Customer',
-            <TmsSelect
-              aria-label="Customer"
+            <Typeahead
+              ariaLabel="Customer"
+              inputTestId="intake-customer"
               disabled={!editable}
-              value={work.fields.customerId ?? ''}
-              onChange={(e) => pickCustomer(e.target.value || null, work.fields.customerName)}
-            >
-              <option value="">{work.fields.customerName ? `Not matched: ${work.fields.customerName}` : '— choose customer —'}</option>
-              {customerOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </TmsSelect>,
+              placeholder={work.fields.customerName ? `Not matched: ${work.fields.customerName}` : 'Type to search customers'}
+              value={customerQuery ?? customer?.name ?? ''}
+              onValueChange={setCustomerQuery}
+              items={customerItems}
+              onPick={(id) => { setCustomerQuery(null); pickCustomer(id || null, work.fields.customerName) }}
+              onBlur={() => setCustomerQuery(null)}
+            />,
           )}
           {!work.fields.customerId && candidates.length > 0 ? (
             <p className="tms-field-hint">
