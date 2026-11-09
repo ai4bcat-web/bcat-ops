@@ -103,17 +103,18 @@ function isComplete(creds: Record<string, string>): creds is { serviceAccountEma
 
 async function fetchAnswer(deps: MarketRateDeps, req: RateViewRequest): Promise<RateViewAnswer> {
   const creds = await deps.credentialsFor('DAT')
+  let reason = ''
   if (isComplete(creds)) {
-    const live = await liveRateView(req, creds as RateViewCredentials, deps.fetchImpl)
+    const live = await liveRateView(req, creds as RateViewCredentials, deps.fetchImpl, (r) => { reason = r })
     if (live) return live
   }
   const stub = stubRateView(req)
+  const tried = creds.serviceAccountEmail || creds.serviceAccountPassword
   return {
     ...stub,
-    message:
-      creds.serviceAccountEmail || creds.serviceAccountPassword
-        ? `DAT RateView was unreachable or refused — falling back to stub. ${stub.message}`
-        : stub.message,
+    message: tried
+      ? `DAT is connected but no live rate came back: ${reason || 'DAT RateView was unreachable or refused'}. ${stub.message}`
+      : stub.message,
   }
 }
 

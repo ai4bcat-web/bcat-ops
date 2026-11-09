@@ -3239,6 +3239,12 @@ financeActionsFn.addToRolePolicy(new PolicyStatement({
   actions: ['s3:GetObject'],
   resources: [`${dataSafetyBucket.bucketArn}/rollups/brokerage/*`],
 }))
+// A month with no rollup object yet must read as "missing" (NoSuchKey), not AccessDenied: S3 only says NoSuchKey to a caller that may list.
+financeActionsFn.addToRolePolicy(new PolicyStatement({
+  actions: ['s3:ListBucket'],
+  resources: [dataSafetyBucket.bucketArn],
+  conditions: { StringLike: { 's3:prefix': ['rollups/brokerage/*'] } },
+}))
 shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions: ['s3:PutObject', 's3:GetObject'],
   resources: [`${dataSafetyBucket.bucketArn}/deletes/*`],
