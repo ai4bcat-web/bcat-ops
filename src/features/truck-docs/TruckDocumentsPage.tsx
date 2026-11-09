@@ -8,6 +8,7 @@
  * uploaded on either page appears on the other immediately, and the two can never show
  * a different status for the same truck.
  */
+import { AssetPagesSwitch } from './AssetPagesSwitch'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Search, Truck as TruckIcon, Container, FileStack } from 'lucide-react'
@@ -165,6 +166,7 @@ export function TruckDocumentsPage() {
       stickyHead
       toolbar={
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <AssetPagesSwitch active="documents" />
           {tabBtn('truck', 'Trucks', TruckIcon)}
           {tabBtn('trailer', 'Trailers', Container)}
           <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: 320 }}>

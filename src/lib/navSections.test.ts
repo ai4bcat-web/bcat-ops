@@ -12,7 +12,7 @@ import { render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { createElement } from 'react'
-import { buildNavSections, companyOptions, flatNavDefs, PINNED_ITEMS, tmsBreadcrumb } from './navSections'
+import { buildNavSections, companyOptions, flatNavDefs, tmsBreadcrumb } from './navSections'
 import { PERMISSION_PAGES } from './navItems'
 import { TmsShell } from '@/features/tms/TmsShell'
 import type { OwnershipDivisionRecord } from '@/types/tms'
@@ -57,7 +57,7 @@ describe('buildNavSections', () => {
   it('gives the owner the whole rail in order: the pinned freight list, then Assets, Car shipping, Company', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     expect(labels(pinned)).toEqual([
-      'Dashboard', 'Active shipments', 'Dispatch', 'Calendar', 'Customers', 'Carriers', 'Locations', 'Accounting', 'Settings',
+      'Dashboard', 'Active shipments', 'Dispatch', 'Calendar', 'Profiles', 'Fleet manager', 'Accounting', 'Settings',
     ])
     const kids = (label: string) => labels(pinned.find((i) => i.label === label)?.children)
     // Dispatch and Calendar are pages of their own right under Active shipments; the Payroll pages are a labeled group under Accounting.
@@ -65,12 +65,10 @@ describe('buildNavSections', () => {
     expect(pinned.find((i) => i.label === 'Accounting')?.childGroups?.map((g) => [g.label, g.children.map((c) => c.label)])).toEqual([
       ['Payroll', ['Box Truck Settlements', 'Amazon Settlements', 'Owner Operator Settlements', 'Employee Hours']],
     ])
-    // Customers and Carriers are single rows: Carriers' two tabs live on its page, Follow-ups is gone.
-    expect(pinned.find((i) => i.label === 'Customers')?.children).toBeUndefined()
-    const carriers = pinned.find((i) => i.label === 'Carriers')
-    expect(carriers?.children).toBeUndefined()
-    expect(carriers?.to).toBe('/tms/carriers/find')
-    expect(carriers?.matches).toEqual(['/tms/carriers'])
+    // Calendar carries Driver info, Appts and Time off in that order; Profiles holds Customers, Carriers and Locations.
+    expect(kids('Calendar')).toEqual(['Driver info', 'Appts', 'Time off'])
+    expect(kids('Profiles')).toEqual(['Customers', 'Carriers', 'Locations'])
+    expect(kids('Fleet manager').slice(0, 5)).toEqual(['Fleet manager dashboard', 'Maintenance', 'Invoices', 'Asset documents', 'Fuel'])
     expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Vendors', 'Factoring'])
     expect(kids('Settings')).toEqual([
       'General & automation', 'Company', 'Divisions & ownership', 'Users & roles', 'Integrations', 'AI agents',
@@ -81,21 +79,21 @@ describe('buildNavSections', () => {
     expect(new Set(childTargets).size).toBe(childTargets.length)
 
     // No BROKERAGE section and no "Intake · BCAT" fallback; the business is still offered.
-    expect(sections.map((s) => s.key)).toEqual(['ASSETS', 'CAR_SHIPPING', 'COMPANY'])
-    expect(businesses.map((b) => b.key)).toEqual(['BROKERAGE', 'ASSETS', 'CAR_SHIPPING'])
-    expect(labels(sections[2].items)).toEqual([
+    // Assets / Ivan Cartage has no section of its own any more.
+    expect(sections.map((s) => s.key)).toEqual(['CAR_SHIPPING', 'COMPANY'])
+    expect(businesses.map((b) => b.key)).toEqual(['BROKERAGE', 'CAR_SHIPPING'])
+    expect(labels(sections[1].items)).toEqual([
       'Financial operations', 'Finances', 'Profit Review', 'Weekly Cash Check-in', 'Reddit Queue',
     ])
     // The header reads as a business name, not as a code: `CAR SHIPPING [Best Care Auto Transport]`.
-    expect(sections[1].name).toBe('CAR SHIPPING')
-    expect(sections[1].brand).toBe('Best Care Auto Transport')
+    expect(sections[0].name).toBe('CAR SHIPPING')
+    expect(sections[0].brand).toBe('Best Care Auto Transport')
   })
 
   it('opens the whole freight list on the one `tms` grant, minus the admin-only rows and the Dashboard', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
-    expect(pinned.map((i) => i.to)).toEqual(
-      PINNED_ITEMS.filter((i) => i.pageKey !== 'dashboard' && !i.showWithPath).map((i) => (i.group ? i.children?.find((c) => c.adminOnly !== true)?.to : i.to)),
-    )
+    // The tms grant opens the freight pages; Calendar, Dispatch and the Fleet manager pages have their own grants.
+    expect(labels(pinned)).toEqual(['Active shipments', 'Profiles', 'Accounting', 'Settings'])
     const settings = pinned.find((i) => i.label === 'Settings')
     expect(labels(settings?.children)).toEqual(['General & automation', 'Commissions', 'Reports', 'Audit log', 'Demo'])
     expect(sections).toEqual([])
@@ -143,9 +141,9 @@ describe('buildNavSections', () => {
 
   it('shows a carriers-only grant Carriers and nothing else', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('carriers') })
-    expect(labels(pinned)).toEqual(['Carriers'])
-    expect(pinned[0].children).toBeUndefined()
-    expect(pinned[0].to).toBe('/tms/carriers/find')
+    expect(labels(pinned)).toEqual(['Profiles'])
+    expect(labels(pinned[0].children)).toEqual(['Carriers'])
+    expect(pinned[0].to).toBe('/tms/carriers')
     expect(sections).toEqual([])
   })
 
@@ -205,10 +203,10 @@ describe('buildNavSections', () => {
 
   it('keeps a fleet user out of the freight list and the Brokerage business', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('calendar', 'trucks') })
-    expect(pinned).toEqual([])
-    expect(sections.map((s) => s.key)).toEqual(['ASSETS'])
-    expect(labels(sections[0].items)).toEqual(['Calendar', 'Fleet'])
-    expect(businesses).toEqual([{ key: 'ASSETS' }])
+    // Calendar is a page of its own now; the Assets section is gone and Fleet is a view of Asset documents.
+    expect(labels(pinned)).toEqual(['Calendar'])
+    expect(sections).toEqual([])
+    expect(businesses).toEqual([{ key: 'BROKERAGE' }])
   })
 
   it('renders Active shipments as one plain row, with no Active / All / Intake children', () => {
@@ -237,7 +235,7 @@ describe('buildNavSections', () => {
     }
   })
 
-  it('lights the one Carriers row on the list, the Find & Invite tab and a carrier page, and links it to Find & Invite', () => {
+  it('lights the one Carriers row under Profiles on the list, the Find & Invite tab and a carrier page', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
     for (const path of ['/tms/carriers', '/tms/carriers/find', '/tms/carriers/CAR-7']) {
       const view = render(
@@ -248,7 +246,7 @@ describe('buildNavSections', () => {
         ),
       )
       const row = screen.getByRole('link', { name: /^Carriers$/ })
-      expect(row, path).toHaveAttribute('href', '/tms/carriers/find')
+      expect(row, path).toHaveAttribute('href', '/tms/carriers')
       expect(row, path).toHaveClass('tms-active')
       expect(screen.getByRole('link', { name: /^Customers$/ })).not.toHaveClass('tms-active')
       view.unmount()
@@ -285,24 +283,24 @@ describe('buildNavSections', () => {
       division({ code: 'OWNER_OPERATOR', name: 'Owner Operators', parentId: 'ASSETS', sortOrder: 21 }),
     ]
     const { sections, businesses } = buildNavSections({ divisions, hasPageAccess: () => true })
-    expect(sections.map((s) => s.key)).toEqual(['ASSETS', 'COMPANY'])
-    expect(businesses.map((b) => b.key)).toEqual(['BROKERAGE', 'ASSETS'])
-    // The subsidiary is not a section of its own; its pages belong to the fleet. (Its settlements are under Accounting > Payroll.)
-    expect(sections.find((s) => s.key === 'ASSETS')?.items.map((i) => i.label)).toContain('Driver info')
+    expect(sections.map((s) => s.key)).toEqual(['COMPANY'])
+    expect(businesses.map((b) => b.key)).toEqual(['BROKERAGE'])
+    // The subsidiary is not a section of its own, and the Assets section is gone: Driver info sits under Calendar.
+    expect(sections.find((s) => s.key === 'ASSETS')).toBeUndefined()
   })
 
-  it('keeps Dispatch, Calendar and the settlements in the fleet section for a person who cannot see the pinned rows', () => {
-    const grants = new Set(['dispatch', 'calendar', 'driverPay', 'hours'])
+  it('lists Calendar with its Driver info child for a person who cannot see Active shipments', () => {
+    const grants = new Set(['dispatch', 'calendar'])
     const { pinned, sections } = buildNavSections({ divisions: null, hasPageAccess: (k) => grants.has(k) })
-    expect(pinned).toEqual([])
-    const labels = sections.find((s) => s.key === 'ASSETS')?.items.map((i) => i.label) ?? []
-    expect(labels).toEqual(expect.arrayContaining(['Dispatch', 'Calendar', 'Amazon Settlements', 'Employee Hours']))
+    expect(sections).toEqual([])
+    expect(labels(pinned)).toEqual(['Calendar'])
+    expect(labels(pinned[0].children)).toEqual(['Driver info'])
   })
 
   it('falls back to the seed divisions before the table has loaded', () => {
     const { sections } = buildNavSections({ divisions: null, hasPageAccess: () => true })
     // The Company section is always built (it does not depend on a Company division row).
-    expect(sections.map((s) => s.key)).toEqual(['ASSETS', 'CAR_SHIPPING', 'COMPANY'])
+    expect(sections.map((s) => s.key)).toEqual(['CAR_SHIPPING', 'COMPANY'])
   })
 
   it('has a route behind every nav row (a row with no route is a dead link)', () => {

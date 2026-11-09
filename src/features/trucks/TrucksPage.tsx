@@ -1,3 +1,4 @@
+import { AssetPagesSwitch } from '@/features/truck-docs/AssetPagesSwitch'
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/useAppStore'
@@ -1242,6 +1243,7 @@ export function TrucksPage() {
         </>
       }
     >
+      <div style={{ marginBottom: 12 }}><AssetPagesSwitch active="fleet" /></div>
       <TmsStatRow items={FLEET_KPIS} columns={5} />
 
       <div style={{ marginTop: 16 }}>
