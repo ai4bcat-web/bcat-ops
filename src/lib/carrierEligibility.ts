@@ -390,7 +390,7 @@ function packetStarted(carrier: CoverCarrierFacts): boolean {
  * REVIEW and only after the setup packet was sent; for it the insurance and paperwork findings are not
  * judged yet (MyCarrierPackets collects them) — they are judged by the rate-con gate once it is ACTIVE.
  */
-export function applyCoverRules(carrier: CoverCarrierFacts, result: CarrierBookingResult): CarrierBookingResult & { setupPending: boolean } {
+export function applyCoverRules(carrier: CoverCarrierFacts, result: CarrierBookingResult, opts: { isAdmin?: boolean } = {}): CarrierBookingResult & { setupPending: boolean } {
   const status = carrier.status ?? 'PENDING'
   const setupPending = status !== 'ACTIVE'
   const finding = (reason: BookingReason, detail: string): BookingFinding => ({ reason, key: reason, detail, adminOnly: false })
@@ -407,7 +407,10 @@ export function applyCoverRules(carrier: CoverCarrierFacts, result: CarrierBooki
   }
   const mcp = normalizeMcpStatus(carrier.mcpStatus)
   if (mcp === 'UNACCEPTABLE' || mcp === 'UNACCEPTABLE_REVIEW') {
-    blocks = [...blocks, finding('MCP_UNACCEPTABLE', 'MyCarrierPackets rates this carrier UNACCEPTABLE; it cannot be assigned.')]
+    // Ryne 2026-11-09: an ADMIN may assign past MyCarrierPackets' UNACCEPTABLE rating after acknowledging it (the server requires the
+    // acknowledgement key and records it in the audit trail). Everyone else stays blocked.
+    if (opts.isAdmin) warnings = [...warnings, { ...finding('MCP_UNACCEPTABLE', 'MyCarrierPackets rates this carrier UNACCEPTABLE.'), adminOnly: true }]
+    else blocks = [...blocks, finding('MCP_UNACCEPTABLE', 'MyCarrierPackets rates this carrier UNACCEPTABLE; it cannot be assigned.')]
   } else if (mcp === 'MODERATE') {
     warnings = [...warnings, finding('MCP_MODERATE', 'MyCarrierPackets rates this carrier MODERATE risk.')]
   }

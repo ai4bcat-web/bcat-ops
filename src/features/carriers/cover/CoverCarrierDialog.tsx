@@ -10,6 +10,7 @@
  *
  * There is deliberately no "add to carriers" here: a carrier only enters our directory through MyCarrierPackets.
  */
+import { useAuth } from '@/hooks/useAuth'
 import { useEffect, useState } from 'react'
 import { Search } from 'lucide-react'
 import { toast } from 'sonner'
@@ -29,7 +30,7 @@ import type { McpCarrierStatus } from '@/lib/integrations/mcpAdapter'
 import { normalizeMcpStatus } from '@/lib/mcpPacket'
 import type { CarrierRecord, ShipmentBundle } from '@/types/tms'
 import { liveCarriersOf } from '@/lib/carrierTotals'
-import { MODERATE_ACK_KEY, coverGate, coverRoute, findByNumber } from './coverModel'
+import { MODERATE_ACK_KEY, UNACCEPTABLE_ACK_KEY, coverGate, coverRoute, findByNumber } from './coverModel'
 
 type Ref = { mcNumber?: string; dotNumber?: string }
 
@@ -86,7 +87,8 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   const card = preview?.card ?? null
   const stub = preview?.mode === 'STUB'
   const route = coverRoute(selected)
-  const gate = coverGate(selected ? selected.mcpStatus : card?.packet.status, selected?.status)
+  const { isAdmin: callerIsAdmin, isOwner: callerIsOwner } = useAuth()
+  const gate = coverGate(selected ? selected.mcpStatus : card?.packet.status, selected?.status, callerIsAdmin || callerIsOwner)
   const needsMcp = !selected || selected.status !== 'ACTIVE'
   const rateOk = rateCents != null && rateCents > 0
   const ackOk = !gate.warning || acked
@@ -137,7 +139,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
       expectedUpdatedAt: load.updatedAt ?? fresh.shipment.updatedAt,
       carrierId,
       carrierRateCents: rateCents ?? 0,
-      ...(gate.warning && acked ? { acknowledgeWarnings: [MODERATE_ACK_KEY] } : {}),
+      ...(gate.warning && acked ? { acknowledgeWarnings: [gate.ackKey ?? MODERATE_ACK_KEY] } : {}),
     }
     // A load that already has a live carrier gets another one (default: every stop), never a replacement.
     const covered = liveCarriersOf(fresh.loadCarriers, load.id).length > 0
@@ -358,7 +360,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
             <div className="flex flex-col gap-2" data-testid="cover-assign-panel">
               {gate.blocked && <TmsAlert tone="red" title="Cannot be assigned" role="alert"><span data-testid="cover-blocked">{gate.blocked}</span></TmsAlert>}
               {gate.warning && (
-                <TmsAlert tone="orange" title="Moderate risk" role="status">
+                <TmsAlert tone="orange" title={gate.ackKey === UNACCEPTABLE_ACK_KEY ? 'Unacceptable rating: admin override' : 'Moderate risk'} role="status">
                   <label className="flex items-start gap-2" data-testid="cover-warning">
                     <input type="checkbox" checked={acked} onChange={(e) => setAcked(e.target.checked)} aria-label="Acknowledge moderate risk" />
                     <span>{gate.warning} I have reviewed it and want to assign this carrier.</span>

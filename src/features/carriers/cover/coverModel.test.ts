@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseSearch } from '@/lib/integrations/mcpReview'
-import { coverGate, coverRoute, findByNumber } from './coverModel'
+import { UNACCEPTABLE_ACK_KEY, coverGate, coverRoute, findByNumber } from './coverModel'
 
 describe('coverGate', () => {
   it('blocks an UNACCEPTABLE packet, however MyCarrierPackets spells the review', () => {
@@ -9,8 +9,18 @@ describe('coverGate', () => {
     expect(coverGate('Unacceptable-Review').blocked).toMatch(/unacceptable/)
   })
 
+  it('an admin may assign past an UNACCEPTABLE packet, after acknowledging it; a non-admin never may', () => {
+    const admin = coverGate('UNACCEPTABLE_REVIEW', 'PENDING', true)
+    expect(admin.blocked).toBeNull()
+    expect(admin.ackKey).toBe(UNACCEPTABLE_ACK_KEY)
+    expect(admin.warning).toMatch(/unacceptable/)
+    expect(coverGate('UNACCEPTABLE', 'PENDING', false).blocked).toMatch(/unacceptable/)
+    // Do not use stays blocked for everyone.
+    expect(coverGate('UNACCEPTABLE', 'DO_NOT_USE', true).blocked).toMatch(/Do not use/)
+  })
+
   it('MODERATE is allowed with a warning that needs acknowledging', () => {
-    expect(coverGate('MODERATE')).toEqual({ blocked: null, warning: expect.stringMatching(/moderate risk/) })
+    expect(coverGate('MODERATE')).toEqual({ blocked: null, warning: expect.stringMatching(/moderate risk/), ackKey: 'MCP_MODERATE' })
   })
 
   it('a clean, unknown or missing status is neither blocked nor warned', () => {

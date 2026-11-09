@@ -12,24 +12,30 @@ import { matchDirectoryCarrier, type DirectoryCarrierLike, type ParsedSearch } f
 
 /** The acknowledgement key COVER_CARRIER expects for a MODERATE packet. */
 export const MODERATE_ACK_KEY = 'MCP_MODERATE'
+export const UNACCEPTABLE_ACK_KEY = 'MCP_UNACCEPTABLE'
 
 export interface CoverGate {
   /** Assignment is refused: the sentence to show. */
   blocked: string | null
   /** Assignment is allowed once acknowledged: the sentence to show beside the checkbox. */
   warning: string | null
+  /** The acknowledgement key the server expects for this warning. */
+  ackKey?: string
 }
 
-export function coverGate(mcpStatus: string | null | undefined, carrierStatus?: string | null): CoverGate {
+export function coverGate(mcpStatus: string | null | undefined, carrierStatus?: string | null, isAdmin = false): CoverGate {
   const status = normalizeMcpStatus(mcpStatus)
   if (carrierStatus === 'DO_NOT_USE') {
     return { blocked: 'This carrier is marked Do not use in our directory and cannot be assigned.', warning: null }
+  }
+  if ((status === 'UNACCEPTABLE' || status === 'UNACCEPTABLE_REVIEW') && isAdmin) {
+    return { blocked: null, warning: 'MyCarrierPackets rates this carrier’s packet unacceptable. As an admin you can assign it anyway; the override is recorded.', ackKey: UNACCEPTABLE_ACK_KEY }
   }
   if (status === 'UNACCEPTABLE' || status === 'UNACCEPTABLE_REVIEW') {
     return { blocked: 'MyCarrierPackets rates this carrier’s packet unacceptable. It cannot be assigned to a load.', warning: null }
   }
   if (status === 'MODERATE') {
-    return { blocked: null, warning: 'MyCarrierPackets rates this carrier’s packet moderate risk. Assigning it needs your acknowledgement.' }
+    return { blocked: null, warning: 'MyCarrierPackets rates this carrier’s packet moderate risk. Assigning it needs your acknowledgement.', ackKey: MODERATE_ACK_KEY }
   }
   return { blocked: null, warning: null }
 }
