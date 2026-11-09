@@ -3233,7 +3233,8 @@ async function saveColumnTemplate(
   const widths = optionalJsonObject(input.widths) ?? {}
   // Pins are part of the layout, not a second list of columns: a pinned key that is
   // not among the chosen columns would render nowhere, so it is refused here.
-  const pinned = input.pinned == null ? [] : assertColumnTemplateColumns(input.pinned)
+  // No pins is normal (nothing is locked): an empty list is valid here, unlike `columns`.
+  const pinned = input.pinned == null || (Array.isArray(input.pinned) && input.pinned.length === 0) ? [] : assertColumnTemplateColumns(input.pinned)
   for (const key of pinned) {
     if (!columns.includes(key)) throw new Error(`"${key}" is pinned but is not one of the template's columns`)
   }
