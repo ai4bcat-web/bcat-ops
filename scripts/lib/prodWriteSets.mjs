@@ -41,4 +41,7 @@ export const PROD_WRITE_SETS = {
   awRelease: { models: ['Order', 'AuditLog'] },
   // `awEquipRep.mjs --apply`: enrich-only Load.equipmentType, Order.equipmentType, Shipment.salesRepCode + one AuditLog row per shipment.
   awEquipRep: { models: ['Shipment', 'Load', 'Order', 'AuditLog'] },
+  // `awPreDelete.mjs --apply`: pre-2025 (Ship Date < 2025-01-01) migrated Aljex shipments and their children are deleted,
+  // mixed ArPayment/ApPayment rows are edited, one AuditLog row per shipment is added. Never FactoringItem / TmsSettings.
+  awPreDelete: { models: ['Shipment', 'Order', 'Load', 'LoadCarrier', 'LoadFinancials', 'LoadCharge', 'Invoice', 'CarrierBill', 'ProClaim', 'LegacyAljexRow', 'ArPayment', 'ApPayment', 'AuditLog'] },
 };

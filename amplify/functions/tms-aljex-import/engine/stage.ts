@@ -26,6 +26,20 @@ export const ROWS_PER_CHUNK = 500
 export const HISTORY_MONTHS = 24
 const MAX_FINDINGS = 20_000
 
+/**
+ * Hard floor for every Aljex re-run (Ryne, 2026-11-08): a row whose Ship Date is before this day is never imported, with or
+ * without a cutoff. Applies only where the file carries a plausible ship date (a missing or junk date, e.g. 01/01/70, is
+ * not excluded here); the 24-month HISTORY_MONTHS window stays as it was. The pre-2025 rows already in production are
+ * removed by scripts/awPreDelete.mjs, this keeps a re-run from bringing them back. A job's `options.minShipDate` replaces the
+ * day (a YYYY-MM-DD string); the empty string turns the floor off (the synthetic-fixture tests only: the fixture spans years).
+ */
+export const ALJEX_MIN_SHIP_DATE = '2025-01-01'
+
+const minShipDateOf = (job: AljexImportJob): string | null => {
+  const v = job.options?.minShipDate
+  return typeof v === 'string' ? (v === '' ? null : v) : ALJEX_MIN_SHIP_DATE
+}
+
 export const stageKey = (root: string, name: string): string => `imports/jobs/${root}/${name}`
 
 /** The Chicago calendar day of an instant (TmsSettings.aljexCutoffAt is 00:00 America/Chicago). */
@@ -78,8 +92,10 @@ export async function runStage(store: EngineStore, job: AljexImportJob, root: st
   const { profile } = await loadProfile(store, job)
   const cutoff = await resolveCutoff(store, job)
   const windowStart = cutoff ? addMonths(cutoff, -HISTORY_MONTHS) : null
+  const minShipDate = minShipDateOf(job)
   const historySkipped: string[] = []
   let beforeWindow = 0
+  let beforeMinShipDate = 0
   let newestAnyPro = 0
   const sourceKey = typeof job.options?.sourceKey === 'string' ? job.options.sourceKey : `imports/source/${root}/${job.fileName ?? ''}`
   const sliceEvery = typeof job.options?.sliceEvery === 'number' && job.options.sliceEvery > 1 ? job.options.sliceEvery : null
@@ -170,6 +186,13 @@ export async function runStage(store: EngineStore, job: AljexImportJob, root: st
     }
     seen.set(key, { sig, rowNumber })
     const ship = row.kind === 'LOAD' && /^\d{4}-\d{2}-\d{2}$/.test(row.dates.ship ?? '') ? (row.dates.ship as string) : null
+    if (minShipDate && ship && ship < minShipDate) {
+      beforeMinShipDate += 1
+      bump(stageCounts, entity, 'skipped')
+      stagedSkips.EXCLUDED_BEFORE_MIN_SHIP_DATE = (stagedSkips.EXCLUDED_BEFORE_MIN_SHIP_DATE ?? 0) + 1
+      historySkipped.push(`${row.pro},${ship},BEFORE_MIN_SHIP_DATE`)
+      return
+    }
     // The cutoff means BOOKED: the file is a snapshot taken at the cutoff, so every row was booked before it and a ship
     // date on or after the cutoff is carried (Monday's work), never skipped. Only the lower bound applies.
     if (cutoff && windowStart && ship && ship < windowStart) {
@@ -338,11 +361,11 @@ export async function runStage(store: EngineStore, job: AljexImportJob, root: st
     distinct: distinctValues,
     syntheticOk: syntheticOk && rowNumber > 0,
     maxProNumber: Math.max(maxProNumber, newestAnyPro),
-    history: { cutoffDate: cutoff, windowStart, beforeWindow },
+    history: { cutoffDate: cutoff, windowStart, beforeWindow, minShipDate: minShipDate ?? undefined, beforeMinShipDate },
   }
   const memoIndex = resolveStagedMemos(rows, profile, window)
   const masters: StagedMasters = { customers, carriers, memos: memoIndex, newestShip, window, chunkCount, rowsPerChunk: ROWS_PER_CHUNK }
-  if (cutoff) await store.putObject(stageKey(root, 'history-skipped.csv'), `pro,ship_date,reason\n${historySkipped.join('\n')}${historySkipped.length ? '\n' : ''}`)
+  if (cutoff || historySkipped.length) await store.putObject(stageKey(root, 'history-skipped.csv'), `pro,ship_date,reason\n${historySkipped.join('\n')}${historySkipped.length ? '\n' : ''}`)
   await store.putObject(stageKey(root, 'masters.json'), JSON.stringify(masters))
   await store.putObject(stageKey(root, 'stage-index.json'), JSON.stringify(index))
 

@@ -34,7 +34,7 @@ export function makeStore(extra: { crashAtTransact?: number; tables?: TableSet }
 }
 
 export function baseJob(id: string, over: Partial<AljexImportJob> = {}): AljexImportJob {
-  return { id, kind: 'IMPORT', status: 'STAGING', phase: 'STAGE', fileName: 'synthetic.csv', target: 'LIVE', liveTag: 'ZZ-TEST', synthetic: true, options: {}, createdBy: 'test', ...over }
+  return { id, kind: 'IMPORT', status: 'STAGING', phase: 'STAGE', fileName: 'synthetic.csv', target: 'LIVE', liveTag: 'ZZ-TEST', synthetic: true, options: { minShipDate: '' }, createdBy: 'test', ...over }
 }
 
 export async function putJob(store: MemoryStore, job: AljexImportJob): Promise<void> {

@@ -351,6 +351,24 @@ Tolerance for every documented count = **exact (0)** unless stated:
 
 **None. No deploys while loading.** Do not push to `main`, do not click Redeploy, do not set `BCAT_SCHEMA_STAGE`, do not run `ampx secret set`. If one starts anyway: stop applying, wait for SUCCEED/FAILED, re-run step 0, resume from the checkpoint (`<step>.checkpoint.json`). A failed deploy: follow AW_STAGED_DEPLOY.md "A stage failed" (never lower the stage).
 
+## Pre-2025 delete (`scripts/awPreDelete.mjs`): Ship Date < 2025-01-01 (Ryne approved 2026-11-08; apply ONLY after his reconcile run is done and he says so)
+
+Scope: migrated Aljex shipments (numeric `Shipment.number`, `legacyImported`) whose Aljex **Ship Date** (big export, mm/dd/yy, joined by PRO) is before 2025-01-01. A two-digit year uses the importer's pivot (`70` = 1970, so the 01/01/70 placeholder rows count as old). **Kept:** shipments with no / conflicting ship date (listed in `~/aljex-export/reports/predelete-review-<date>.csv`), every `L<pro>` original (hard guarantee, asserted), every row dated 2025-01-01 or later. Production dry run 2026-11-08: **441 shipments** (434 shipped Nov-Dec 2024, 7 are 01/01/70 placeholders), 9 kept for no ship date; **438 invoices** ($727,431.49, all paid, $0 open), **272 CarrierBills** (265 PAID, 5 PARTIAL, 2 TO_BE_PAID, open $2,838.04); Order/Load/ProClaim/LegacyAljexRow/LoadFinancials 441 each, LoadCarrier 439, LoadCharge 1,146; ArPayment 142 deleted + 9 mixed edited, ApPayment 238 deleted + 14 edited (5 mixed, 9 old-only with unapplied credit kept).
+
+Payments: a payment that also pays a retained invoice/bill is never deleted: the old application lines go, `amountCents` and `appliedCents` drop by exactly the removed application dollars, `unappliedCents` is untouched (applied + unapplied = amount still holds). A payment whose only applications are old but which carries unapplied credit keeps that credit. Never touched: FactoringItem (a reference blocks the run), TmsSettings (PRO counter), notices/messages, S3 documents, AuditLog (kept; one `AW_PREDELETE` row per shipment is added), DashboardRollup (the Lambda recomputes; re-open the dashboards after).
+
+```bash
+# 1. dry run (read-only; prints per-table counts, dollars, before/after conservation proof, deviations from Ryne's numbers)
+BCAT_ALLOW_PROD=$(date +%F) node scripts/awPreDelete.mjs --export $FILES/aljex-full-export-2026-11-07.csv --target prod --i-mean-production [--cross-check /tmp/old_by_shipdate.json]
+# 2. backup of exactly the tables it writes (< 6 h before the apply)
+BCAT_ALLOW_PROD=$(date +%F) node scripts/prodBackup.mjs --script awPreDelete --target prod --i-mean-production --apply
+# 3. apply: exports every row first to ~/bcat-ops-backups/pre-delete-2025/ (dir 0700, files 0600, manifest.json with counts + sha256, verified), then edits payments, then deletes children before parents
+BCAT_ALLOW_PROD=$(date +%F) AW_PROD_CONFIRM=$(date +%F)-predelete node scripts/awPreDelete.mjs --export $FILES/aljex-full-export-2026-11-07.csv --target prod --i-mean-production --apply --confirm-prod <account id>:5ucwdyvwivelbo4k4jomvrwel4-NONE
+# restore (put-if-absent for deleted rows, conditional revert for edited payments; dry unless --apply; same gate)
+BCAT_ALLOW_PROD=$(date +%F) node scripts/awPreDelete.mjs --restore ~/bcat-ops-backups/pre-delete-2025 --target prod --i-mean-production [--apply ...]
+```
+Apply refuses on: any blocker, a failed conservation proof, any deviation from the numbers above (unless `--accept-deviations` after Ryne confirms), a stale backup, a missing/unverifiable export. It is idempotent and resumable (every delete is conditional on the planned key, the export is reused and re-verified, `apply.checkpoint.json` records the finished steps). **Importer rule:** a later Aljex re-run skips every row with a plausible ship date before 2025-01-01 (`ALJEX_MIN_SHIP_DATE`, AW_IMPORT_RUNBOOK.md). That changes the expected numbers of a re-run only (the existing runner's numbers are for the first load and are unchanged): loads skipped rise and created+matched fall by the rows shipped 2024-11-07..2024-12-31 (449 rows in the 2026-11-07 file, so roughly skipped 2,605 -> 3,054 and created+matched 5,339 -> 4,890; the 7 placeholder-dated PROs would be re-created because the importer carries a junk date as no date), and invoices/bills/payments/ProClaims of those PROs are not recreated.
+
 ## Whole-load rollback summary (per table)
 
 | Step | Tables touched | Undo |
