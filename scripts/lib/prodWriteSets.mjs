@@ -59,4 +59,6 @@ export const PROD_WRITE_SETS = {
   awRestoreDeleted: { models: ['ArPayment', 'ApPayment', 'LegacyAljexRow', 'Commission', 'FactoringItem', 'Invoice', 'CarrierBill', 'LaneRateSample', 'LoadFinancials', 'LoadCharge', 'LoadCheckCall', 'TrackingLink', 'ShipmentDocument', 'ShipmentNotice', 'ShipmentPosting', 'ShipmentMessage', 'LoadCarrier', 'Load', 'Order', 'Shipment', 'AuditLog'] },
   // `awLocationRename.mjs --apply`: the two approved Location renames (name/street/city/state/zip + normalizedName/normalizedAddress, geocode cleared) + one AuditLog row per row.
   awLocationRename: { models: ['Location', 'AuditLog'] },
+  // `awCustomerEmail.mjs --apply`: enrich-only Customer.apEmail / invoiceCopyEmails / contactEmail (where empty) + one AuditLog row per customer.
+  awCustomerEmail: { models: ['Customer', 'AuditLog'] },
 };
