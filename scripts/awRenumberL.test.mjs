@@ -68,6 +68,11 @@ describe('awRenumberL', () => {
     expect(doc.rows.get('Shipment-test/s').number).toBe('L14334  ');
     expect([...doc.rows.keys()].filter((k) => k.startsWith('AuditLog'))).toHaveLength(0);
   });
+  it('rolls back an interrupted apply without changing shipments never applied', async () => {
+    const tables = fixture(); const doc = new FakeDoc(tables); const before = new Map(doc.rows);
+    expect(await applyEntry(doc, 'test', planRenumber(tables).entries[0], true)).toBe('not-applied');
+    expect(doc.rows).toEqual(before);
+  });
   it('reports collisions and duplicates, and stops if a ProClaim needs a primary-key change', () => {
     const t = fixture(); t.Shipment.push({ id: 'other', number: '14334' });
     expect(planRenumber(t).summary.collisions).toBe(1);

@@ -99,6 +99,13 @@ export async function applyEntry(doc, suffix, entry, rollback = false) {
     }
     return 'already-done';
   }
+  if (rollback && !(await doc.send(new GetCommand({ TableName: auditTable, Key: { id: auditId.replace(':ROLLBACK:', ':APPLY:') }, ConsistentRead: true }))).Item) {
+    for (const w of entry.writes) {
+      const row = (await doc.send(new GetCommand({ TableName: `${w.model}-${suffix}`, Key: { id: w.id }, ConsistentRead: true }))).Item;
+      if (Object.entries(w.before).some(([f, value]) => row?.[f] !== value)) throw new Error('Unapplied shipment has changed; refusing rollback');
+    }
+    return 'not-applied';
+  }
   const tx = entry.writes.map((w) => {
     const from = rollback ? w.after : w.before; const to = rollback ? w.before : w.after;
     const fields = Object.keys(to); const names = {}; const values = {};
