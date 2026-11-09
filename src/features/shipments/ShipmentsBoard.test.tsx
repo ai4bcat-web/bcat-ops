@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, within, fireEvent, waitFor, act, cleanup } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import type { ShipmentColumnTemplateRecord } from '@/types/tms'
 import { ShipmentsBoard } from './ShipmentsBoard'
 import { ALJEX_COLUMN_KEYS } from '@/lib/shipmentViewDefs'
 import type { ShipmentRow } from './shipmentViews'
@@ -200,9 +201,18 @@ function pickFacet(header: string, option: string) {
   fireEvent.click(screen.getByRole('checkbox', { name: `${header}: ${option}` }))
 }
 
-/** A user whose saved layout shows the full Aljex set: the default set is the short one, so tests of other columns opt in. */
+/** The team default shows the full Aljex set: the built-in default is the short one, so tests of other columns opt in. */
 function saveFullColumnLayout() {
-  localStorage.setItem('tms:grid:shipments-left:ryne@bcatcorp.com:v1', JSON.stringify({ columns: ['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== 'proNumber')] }))
+  vi.mocked(listShipmentColumnTemplates).mockResolvedValue([
+    teamTemplate(['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== 'proNumber')]),
+  ])
+}
+
+function teamTemplate(columns: string[], widths: Record<string, number> = {}, pinned: string[] = []): ShipmentColumnTemplateRecord {
+  return {
+    id: 'shipments-team-default', name: 'Shipments team default', columns, widths, pinned, ownerEmail: 'ryne@bcatcorp.com',
+    shared: true, createdBy: 'ryne@bcatcorp.com', updatedBy: 'ryne@bcatcorp.com', version: 1, createdAt: '', updatedAt: '',
+  }
 }
 
 describe('ShipmentsBoard', () => {
@@ -210,6 +220,7 @@ describe('ShipmentsBoard', () => {
     localStorage.clear()
     vi.clearAllMocks()
     __views.length = 0
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([])
     auth.isAdmin = true
     auth.isOwner = false
   })
@@ -969,5 +980,74 @@ describe('ShipmentsBoard', () => {
       expect(failed.textContent).toContain('Missing reference #')
       expect(screen.getByTestId('batch-results').textContent).toContain('1 of 2 done, 1 not done')
     })
+  })
+})
+
+describe('ShipmentsBoard team column layout', () => {
+  const headers = () => screen.getAllByRole('columnheader').map((h) => h.textContent ?? '')
+
+  beforeEach(() => {
+    localStorage.clear()
+    vi.clearAllMocks()
+    __views.length = 0
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([])
+    auth.isAdmin = true
+    auth.isOwner = false
+  })
+
+  it('shows the saved team default to everyone, ignoring a personal layout in localStorage', async () => {
+    auth.isAdmin = false
+    localStorage.setItem('tms:grid:shipments-left:ryne@bcatcorp.com:v1', JSON.stringify({ columns: ['proNumber', 'destinationCity'] }))
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'originCity'])])
+    renderBoard('/tms/shipments', [row('S001')])
+    await waitFor(() => expect(headers().join('|')).toContain('Origin'))
+    expect(headers().join('|')).not.toContain('Destination')
+  })
+
+  it('falls back to the built-in default columns when no team default exists', async () => {
+    renderBoard('/tms/shipments', [row('S001')])
+    await screen.findByText('S001')
+    expect(headers().join('|')).toContain('Destination')
+    expect(headers().join('|')).toContain('Origin')
+  })
+
+  it('a non-admin gets no layout editing at all', async () => {
+    auth.isAdmin = false
+    renderBoard('/tms/shipments', [row('S001')])
+    await screen.findByText('S001')
+    expect(screen.queryByRole('button', { name: /Edit layout/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Columns$/ })).toBeNull()
+    expect(screen.queryByLabelText('Column template')).toBeNull()
+  })
+
+  it('an admin edits the layout and saves it as the team default', async () => {
+    vi.mocked(saveShipmentColumnTemplate).mockResolvedValue({})
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'originCity'])])
+    renderBoard('/tms/shipments', [row('S001')])
+    await screen.findByText('S001')
+    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Columns$/ }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Destination' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save as team default' }))
+    await waitFor(() => expect(saveShipmentColumnTemplate).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(saveShipmentColumnTemplate).mock.calls[0][0]).toMatchObject({
+      id: 'shipments-team-default',
+      shared: true,
+      columns: ['proNumber', 'originCity', 'destinationCity'],
+    })
+  })
+
+  it('Cancel drops the unsaved layout edit', async () => {
+    renderBoard('/tms/shipments', [row('S001')])
+    await screen.findByText('S001')
+    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Columns$/ }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Destination' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(headers().join('|')).not.toContain('Destination')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(headers().join('|')).toContain('Destination')
+    expect(saveShipmentColumnTemplate).not.toHaveBeenCalled()
   })
 })
