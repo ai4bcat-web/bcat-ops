@@ -16,7 +16,7 @@
  * one of its children does.
  */
 import {
-  BarChart3, LayoutDashboard, Package, Truck, Banknote, Building2,
+  BarChart3, CalendarDays, LayoutDashboard, MessageSquare, Package, Truck, Banknote, Building2,
   MapPin, SlidersHorizontal, type LucideIcon,
 } from 'lucide-react'
 import { NAV_ITEMS } from '@/lib/navItems'
@@ -67,6 +67,8 @@ export interface NavItemDef {
   /** A header row with no page of its own: visible while a child is, `to` is the first visible child. */
   group?: boolean
   /** Sub-items rendered under this row. */
+  /** Shown only when the pinned row with this path shows: otherwise the page stays in its own section. */
+  showWithPath?: string
   /** Labeled sub-lists under the row (e.g. Payroll under Accounting). */
   childGroups?: Array<{ label: string; children: NavChildDef[] }>
   children?: NavChildDef[]
@@ -106,12 +108,6 @@ const PAYROLL_CHILDREN: NavChildDef[] = [
   { to: '/hours', label: 'Employee Hours', pageKey: 'hours' },
 ]
 
-/** Dispatch and Calendar live under Active shipments. */
-const ACTIVE_SHIPMENT_CHILDREN: NavChildDef[] = [
-  { to: '/dispatch', label: 'Dispatch', pageKey: 'dispatch', badgeKey: 'dispatch' },
-  { to: '/calendar', label: 'Calendar', pageKey: 'calendar' },
-]
-
 const SETTINGS_CHILDREN: NavChildDef[] = [
   { to: '/tms/brokerage', label: 'General & automation', pageKey: 'settings', tms: true, exact: true },
   { to: '/tms/brokerage/company', label: 'Company', pageKey: 'tms', adminOnly: true },
@@ -142,7 +138,10 @@ export const PINNED_ITEMS: NavItemDef[] = [
   { to: '/brokerage-dashboard', label: 'Brokerage Dashboard', icon: BarChart3, pageKey: 'dashboard', section: BROKERAGE },
   // The lifecycle pages (Quote · Build · View · Book · Track · Review) are the top-bar strip
   // (`LIFECYCLE_TABS`); the sidebar keeps the one list people return to all day.
-  { to: SHIPMENTS_PATH, label: 'Active shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true, children: ACTIVE_SHIPMENT_CHILDREN },
+  { to: SHIPMENTS_PATH, label: 'Active shipments', icon: Package, pageKey: 'loads', section: BROKERAGE, tms: true },
+  // Dispatch and Calendar are pages of their own, listed right under Active shipments (for people who see the freight list).
+  { to: '/dispatch', label: 'Dispatch', icon: MessageSquare, pageKey: 'dispatch', section: BROKERAGE, badgeKey: 'dispatch', showWithPath: SHIPMENTS_PATH },
+  { to: '/calendar', label: 'Calendar', icon: CalendarDays, pageKey: 'calendar', section: BROKERAGE, showWithPath: SHIPMENTS_PATH },
   { to: '/tms/customers', label: 'Customers', icon: Building2, pageKey: 'customers', section: BROKERAGE, tms: true },
   // One Carriers page with two tabs (Find & Invite first, then the Carrier list); the row opens
   // the default tab and stays lit on the list and on a carrier's own page.
@@ -367,6 +366,7 @@ export function buildNavSections({
   const movedUnderPinned = new Set<string>()
   for (const def of PINNED_ITEMS) {
     const ownVisible = !def.group && visible(def)
+    if (def.showWithPath && !pinned.some((p) => p.to === def.showWithPath)) continue
     // A row that is a page in its own right only lists its children when the person can open that page.
     const children = (def.group || ownVisible ? def.children ?? [] : []).filter(visible).map<TmsNavChild>(toChild)
     // A group (Accounting) lists its labeled sub-lists only when one of its plain children shows: the Payroll pages ride on that access.
@@ -375,6 +375,7 @@ export function buildNavSections({
       .filter((g) => g.children.length > 0)
     // A group is only as visible as its children; a page is visible by its own gate.
     if (def.group ? children.length === 0 : !ownVisible) continue
+    if (def.showWithPath) movedUnderPinned.add(def.to)
     for (const c of children) movedUnderPinned.add(c.to)
     for (const g of groups) for (const c of g.children) movedUnderPinned.add(c.to)
     pinned.push({

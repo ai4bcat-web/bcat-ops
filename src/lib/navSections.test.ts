@@ -57,11 +57,11 @@ describe('buildNavSections', () => {
   it('gives the owner the whole rail in order: the pinned freight list, then Assets, Car shipping, Company', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     expect(labels(pinned)).toEqual([
-      'Dashboard', 'Brokerage Dashboard', 'Active shipments', 'Customers', 'Carriers', 'Locations', 'Accounting', 'Settings',
+      'Dashboard', 'Brokerage Dashboard', 'Active shipments', 'Dispatch', 'Calendar', 'Customers', 'Carriers', 'Locations', 'Accounting', 'Settings',
     ])
     const kids = (label: string) => labels(pinned.find((i) => i.label === label)?.children)
-    // Dispatch and Calendar live under Active shipments; the Payroll pages are a labeled group under Accounting.
-    expect(kids('Active shipments')).toEqual(['Dispatch', 'Calendar'])
+    // Dispatch and Calendar are pages of their own right under Active shipments; the Payroll pages are a labeled group under Accounting.
+    expect(pinned.find((i) => i.label === 'Active shipments')?.children).toBeUndefined()
     expect(pinned.find((i) => i.label === 'Accounting')?.childGroups?.map((g) => [g.label, g.children.map((c) => c.label)])).toEqual([
       ['Payroll', ['Box Truck Settlements', 'Amazon Settlements', 'Owner Operator Settlements', 'Employee Hours']],
     ])
@@ -94,7 +94,7 @@ describe('buildNavSections', () => {
   it('opens the whole freight list on the one `tms` grant, minus the admin-only rows and the Dashboard', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
     expect(pinned.map((i) => i.to)).toEqual(
-      PINNED_ITEMS.filter((i) => i.pageKey !== 'dashboard').map((i) => (i.group ? i.children?.find((c) => c.adminOnly !== true)?.to : i.to)),
+      PINNED_ITEMS.filter((i) => i.pageKey !== 'dashboard' && !i.showWithPath).map((i) => (i.group ? i.children?.find((c) => c.adminOnly !== true)?.to : i.to)),
     )
     const settings = pinned.find((i) => i.label === 'Settings')
     expect(labels(settings?.children)).toEqual(['General & automation', 'Commissions', 'Reports', 'Audit log', 'Demo'])
