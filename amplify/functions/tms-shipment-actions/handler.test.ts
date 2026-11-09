@@ -1350,19 +1350,34 @@ function repointCall(shipmentId: string, customerId: string, reason = 'Customer 
 }
 
 describe('VOID_SHIPMENT', () => {
-  it('refuses every page key and accepts only the owner or ADMIN', async () => {
-    const a = await createDraft()
-    await expect(voidCall(a.shipmentId, DISPATCHER)).rejects.toThrow(/requires owner or ADMIN/)
-    await expect(voidCall(a.shipmentId, TMS_USER)).rejects.toThrow(/requires owner or ADMIN/)
-    expect(table(TABLES.shipment).get(a.shipmentId)!.voidedAt).toBeUndefined()
+  it('allows shipments staff to void when unrestricted and records their identity', async () => {
+    seedSettings({ cancelDeleteAdminOnly: false })
+    for (const identity of [DISPATCHER, TMS_USER, ADMIN, OWNER]) {
+      const { shipmentId } = await createDraft()
+      const result = await voidCall(shipmentId, identity) as { shipment: Row }
+      expect(result.shipment.voidedAt).toBeTruthy()
+      expect(result.shipment.voidedBy).toBe(identity.claims.email)
+    }
+  })
 
-    const byAdmin = (await voidCall(a.shipmentId, ADMIN)) as { shipment: Row }
-    expect(byAdmin.shipment.voidedAt).toBeTruthy()
-    expect(byAdmin.shipment.voidedBy).toBe('admin@bcatcorp.com')
+  it('refuses staff voids without changing the shipment when the org requires an admin', async () => {
+    seedSettings({ cancelDeleteAdminOnly: true })
+    for (const identity of [DISPATCHER, TMS_USER]) {
+      const { shipmentId } = await createDraft()
+      const before = { ...table(TABLES.shipment).get(shipmentId)! }
+      await expect(voidCall(shipmentId, identity)).rejects.toThrow(/Forbidden/)
+      expect(table(TABLES.shipment).get(shipmentId)).toEqual(before)
+    }
+  })
 
-    const b = await createDraft()
-    const byOwner = (await voidCall(b.shipmentId, OWNER)) as { shipment: Row }
-    expect(byOwner.shipment.voidedBy).toBe('ryne@bcatcorp.com')
+  it('allows ADMIN and OWNER to void when the org requires an admin', async () => {
+    seedSettings({ cancelDeleteAdminOnly: true })
+    for (const identity of [ADMIN, OWNER]) {
+      const { shipmentId } = await createDraft()
+      const result = await voidCall(shipmentId, identity) as { shipment: Row }
+      expect(result.shipment.voidedAt).toBeTruthy()
+      expect(result.shipment.voidedBy).toBe(identity.claims.email)
+    }
   })
 
   it('records the reason and refuses an empty one', async () => {
@@ -5448,7 +5463,7 @@ describe('BACKFILL_SHIPMENT', () => {
     }
     expect(report.dryRun).toBe(true)
     expect(report.applied).toBe(0)
-    expect(report.planned[0]).toMatchObject({ number: 'L14589', loadStatus: 'BOOKED', assignmentType: 'OWN_ASSET' })
+    expect(report.planned[0]).toMatchObject({ number: '14589', loadStatus: 'BOOKED', assignmentType: 'OWN_ASSET' })
     expect(table(TABLES.shipment).size).toBe(0)
     expect(table(TABLES.load).get('lod-legacy')!.shipmentId).toBeUndefined()
   })
@@ -5459,7 +5474,7 @@ describe('BACKFILL_SHIPMENT', () => {
 
     const shipment = [...table(TABLES.shipment).values()][0]
     expect(shipment).toMatchObject({
-      number: 'L14589',
+      number: '14589',
       source: 'BACKFILL',
       status: 'BOOKED',
       customerId: 'cus-1',
@@ -5477,11 +5492,43 @@ describe('BACKFILL_SHIPMENT', () => {
       shipmentId: shipment.id,
       orderId: order.id,
       leg: 1,
-      loadNumber: 'L14589-1',
+      loadNumber: '14589-1',
       status: 'BOOKED',
       statusSource: 'BACKFILL',
       assignmentType: 'OWN_ASSET',
     })
+  })
+
+  it('numbers a padded or labelled Aljex id by the bare trimmed PRO, never the raw string', async () => {
+    seedLegacyLoad('lod-padded', { aljexId: '14334  ' })
+    seedLegacyLoad('lod-label', { aljexId: 'Pro# 14045' })
+    await call('BACKFILL_SHIPMENT', { loadIds: ['lod-padded', 'lod-label'], dryRun: false }, ADMIN)
+    const numbers = [...table(TABLES.shipment).values()].map((s) => s.number).sort()
+    expect(numbers).toEqual(['14045', '14334'])
+    expect(table(TABLES.load).get('lod-padded')!.loadNumber).toBe('14334-1')
+    expect(String([...table(TABLES.shipment).values()].find((s) => s.number === '14334')!.searchKey)).toMatch(/^14334 /)
+  })
+
+  it('falls back to L<pro> only when another shipment already holds the bare PRO', async () => {
+    table(TABLES.shipment).set('shp-other', { id: 'shp-other', number: '14589', status: 'OPEN' })
+    seedLegacyLoad('lod-legacy')
+    await call('BACKFILL_SHIPMENT', { loadIds: ['lod-legacy'], dryRun: false }, ADMIN)
+    expect(table(TABLES.shipment).get('shp-other')!.number).toBe('14589')
+    const mine = [...table(TABLES.shipment).values()].find((s) => s.id !== 'shp-other')!
+    expect(mine.number).toBe('L14589')
+    expect(table(TABLES.load).get('lod-legacy')!.loadNumber).toBe('L14589-1')
+  })
+
+  it('keeps a not-yet-renumbered L<pro> shipment as it is when a refreshed load is relinked (identity is the load id, not the number)', async () => {
+    seedLegacyLoad('lod-legacy')
+    await call('BACKFILL_SHIPMENT', { loadIds: ['lod-legacy'], dryRun: false }, ADMIN)
+    const shipmentId = String(table(TABLES.load).get('lod-legacy')!.shipmentId)
+    table(TABLES.shipment).set(shipmentId, { ...table(TABLES.shipment).get(shipmentId)!, number: 'L14589  ' })
+    seedLegacyLoad('lod-legacy')
+    const report = (await call('BACKFILL_SHIPMENT', { loadIds: ['lod-legacy'], dryRun: false }, ADMIN)) as { applied: number }
+    expect(report.applied).toBe(1)
+    expect(table(TABLES.shipment).size).toBe(1)
+    expect(table(TABLES.shipment).get(shipmentId)!.number).toBe('L14589  ')
   })
 
   it('re-running changes nothing', async () => {

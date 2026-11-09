@@ -2591,6 +2591,8 @@ shipmentActionsFn.addToRolePolicy(
       `${shipmentQuoteTable.tableArn}/index/*`,
       `${shipmentLaneSampleTable.tableArn}/index/*`,
       `${shipmentNoticeTable.tableArn}/index/*`,
+      // Delete recovery uses the existing entityType/entityId AuditLog index (no schema change).
+      `${shipmentAuditLogTable.tableArn}/index/*`,
     ],
   }),
 )
@@ -3200,6 +3202,16 @@ const dataSafetyBucket = new Bucket(dataSafetyStack, 'DataSafetyBucket', {
     maxAge: 3000,
   }],
 })
+// Owner-only shipment delete/restore: private export bytes, never permission to delete S3 objects.
+shipmentActionsFn.addEnvironment('DATA_SAFETY_BUCKET_NAME', dataSafetyBucket.bucketName)
+shipmentActionsFn.addToRolePolicy(new PolicyStatement({
+  actions: ['s3:PutObject', 's3:GetObject'],
+  resources: [`${dataSafetyBucket.bucketArn}/deletes/*`],
+}))
+shipmentActionsFn.addToRolePolicy(new PolicyStatement({
+  actions: ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:DeleteItem'],
+  resources: ['Invoice', 'CarrierBill', 'ArPayment', 'ApPayment', 'Commission', 'FactoringItem', 'LegacyAljexRow'].map((model) => stageTables[model].tableArn),
+}))
 
 // The Phase 0 Lambdas may touch only this stack's tables: `<Model>-<apiId>-NONE`. The API id
 // is cut out of a table name rather than read off the API construct, because a policy that

@@ -168,6 +168,34 @@ describe('DirectoryPages', () => {
     })
   })
 
+  it('counts actionable invoice flags separately, includes factored only on request, and shows the detail badge', async () => {
+    const previous = customers.map((c) => ({ billingMethod: c.billingMethod, apEmail: c.apEmail }))
+    customers.forEach((c) => { c.apEmail = 'ap@example.test' })
+    customers[0].apEmail = ' '
+    customers[1].apEmail = null
+    customers[1].billingMethod = 'FACTOR'
+    customers[2].apEmail = 'invalid'
+    customers[2].billingMethod = 'MANUAL'
+    try {
+      renderCustomers()
+      fireEvent.click(await screen.findByRole('button', { name: 'Missing invoice e-mail (2)' }))
+      expect(screen.getByText('Lead Co')).toBeTruthy()
+      expect(screen.getByText('Pending Co')).toBeTruthy()
+      expect(screen.queryByText('Active Co')).toBeNull()
+      fireEvent.click(screen.getByLabelText('Include factored'))
+      expect(screen.getByRole('button', { name: 'Missing invoice e-mail (3)' })).toBeTruthy()
+      expect(screen.getByText('Active Co')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Factored: queue only (1)' }))
+      expect(screen.queryByText('Lead Co')).toBeNull()
+      expect(screen.getByText('Factored: queue only').className).toContain('gray')
+      fireEvent.click(screen.getByText('Active Co'))
+      const detail = await screen.findByRole('dialog', { name: 'Customer profile' })
+      expect(within(detail).getByText('Factored: queue only')).toBeTruthy()
+    } finally {
+      customers.forEach((c, i) => Object.assign(c, previous[i]))
+    }
+  })
+
   describe('CRM columns and scope (§5.6, §7.4)', () => {
     const rowFor = (customerId: string, extra: Record<string, unknown> = {}) => ({
       customerId, ownerId: 'dana@bcatcorp.com', stage: 'ACTIVE', lastTouchAt: PAST, lastTouchKind: 'CALL',
@@ -220,7 +248,7 @@ describe('DirectoryPages', () => {
   })
 
   describe('dense grid', () => {
-    const names = () => Array.from(document.querySelectorAll('tbody tr:not(.tms-dg-spacer) td:first-child')).map((td) => td.textContent)
+    const names = () => Array.from(document.querySelectorAll('tbody tr:not(.tms-dg-spacer) td:first-child')).map((td) => customers.find((c) => within(td as HTMLElement).queryByText(c.name, { exact: true }))?.name)
     const header = (name: string) => screen.getByRole('columnheader', { name: new RegExp(`^${name}`) })
 
     it('lists every active customer sorted by name, with the Customers columns', async () => {

@@ -1,3 +1,4 @@
+import { InvoiceEmailBadge } from './EmailReadinessBadge'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
@@ -217,6 +218,7 @@ export function CustomerProfile({
             <>
               {customer.status ? <TmsBadge tone={statusTones[customer.status]}>{customer.status}</TmsBadge> : null}
               <PossibleDuplicateBadge info={duplicates.get(customer.id)} />
+              <InvoiceEmailBadge customer={customer} />
             </>
           }
           actions={

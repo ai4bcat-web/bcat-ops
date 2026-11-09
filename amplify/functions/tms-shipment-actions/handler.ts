@@ -163,6 +163,9 @@ import {
   type ShipmentTag,
 } from './ownershipResolve'
 import { assertNotVoided, isVoided } from '../_shared/voided'
+import { deleteShipments, latestDeleteExport, restoreDeleted } from './shipmentDelete'
+import { shipmentDeleteStore } from './shipmentDeleteStore'
+import { SHIPMENT_ACTIONS_TABLES } from './tableEnv'
 import { parseTrackingPrefs, validateTrackingPrefsOverride, type TrackingPrefsOverride } from '../../../src/lib/trackingPrefs'
 import {
   buildPostInvoiceEntry, cleanGuardedInput, diffSnapshots, isInvoicedOrder, isPostInvoiceGuarded, POST_INVOICE_ACTION,
@@ -260,6 +263,7 @@ import {
 } from '../../../src/lib/customerResolution'
 import { topLevelOf } from '../../../src/lib/ownership'
 import { normalizePro } from '../../../src/lib/proNumber'
+import { backfillShipmentNumber, digitsOnlyPro } from '../../../src/lib/legacyShipmentNumber'
 import type { ProScheme } from '../../../src/types/tms'
 import {
   MAX_COUNTER_SKIPS,
@@ -422,6 +426,7 @@ const IDX_CARRIERS_BY_LOAD = 'loadCarriersByLoadId'
 const IDX_CARRIERS_BY_CARRIER_ID = 'loadCarriersByCarrierId'
 const IDX_CARRIER_DOCS_BY_CARRIER = 'carrierDocumentsByCarrierIdAndType'
 const IDX_CHECK_CALLS_BY_LOAD = 'loadCheckCallsByLoadIdAndAt'
+const IDX_SHIPMENTS_BY_NUMBER = 'shipmentsByNumber'
 
 /** DUPLICATE_SHIPMENT ceiling — one transaction per copy, and 20 is the plan's cap. */
 const MAX_DUPLICATE_COPIES = 20
@@ -594,9 +599,11 @@ type Action =
   // to every client token now, so this is the only way one ever changes.
   | 'SET_SHIPMENT_CUSTOMER'
   | 'SET_LOAD_PRO'
-  // Step R. Void is the only exit a shipment has; DELETE_SHIPMENT and
-  // RESTORE_SHIPMENT are gone, and nothing replaces them. A PRO is permanent.
+  // Staff void; the owner alone may perform an exported hard delete or restore. PRO claims remain reserved.
   | 'VOID_SHIPMENT'
+  | 'DELETE_SHIPMENTS'
+  | 'RESTORE_DELETED_SHIPMENTS'
+  | 'LATEST_DELETE_EXPORT'
   | 'UNVOID_SHIPMENT'
   | 'REPOINT_SHIPMENT_CUSTOMER'
   // Step R. Who earns the shipment: the rules' answer, a person's answer, and the
@@ -760,10 +767,8 @@ const OFFER_ACTIONS: Record<string, true> = {
 /**
  * Org defaults are an admin act in every router here.
  *
- * Step R adds REVERT_TO_QUOTE: it un-makes freight, and the only way to un-make
- * freight is to void the shipment it became (`voidShipmentForQuote` below). Void is
- * owner/ADMIN by Ryne's PRO rule, read from the token, so the action that performs
- * one has to be too — a quote-desk rep may no longer revert.
+ * Reverting quote conversion remains owner/ADMIN work, independently of staff's
+ * permission to void shipments.
  */
 const QUOTE_ADMIN_ONLY_ACTIONS: Record<string, true> = { SAVE_QUOTE_SETTINGS: true, REVERT_TO_QUOTE: true }
 
@@ -772,14 +777,11 @@ const QUOTE_ADMIN_ONLY_ACTIONS: Record<string, true> = { SAVE_QUOTE_SETTINGS: tr
  * own branch below, above the loads-page rule a dispatcher would otherwise pass:
  * the settings card lives on the loads page, the defaults behind it do not.
  *
- * Step R: VOID_SHIPMENT is here because Ryne's rule says so in exactly these words
- * — "only the owner or a member of the ADMIN group may void, enforced in the Lambda
- * from the caller's identity (not from the UI)". RETAG_SHIPMENTS rewrites the tag on
- * every shipment in the company, which is the same kind of act.
+ * Retagging and configuration remain admin-only. VOID_SHIPMENT follows shipment page grants.
+ * Hard delete and restore have a stricter owner predicate ahead of the ADMIN bypass.
  */
 const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   SAVE_SHIPMENT_SETTINGS: true,
-  VOID_SHIPMENT: true,
   UNVOID_SHIPMENT: true,
   REPOINT_SHIPMENT_CUSTOMER: true,
   RESOLVE_REV_TAG: true,
@@ -862,6 +864,7 @@ function getGroups(identity?: AppSyncIdentity | null): string[] {
  * batch row.
  */
 function isActionAuthorized(action: Action, caller: Caller): boolean {
+  if (action === 'DELETE_SHIPMENTS' || action === 'RESTORE_DELETED_SHIPMENTS' || action === 'LATEST_DELETE_EXPORT') return caller.email === OWNER_EMAIL
   if (caller.isAdmin) return true
   const groups = caller.groups
   const tms = groups.includes(TMS_PAGE_GROUP)
@@ -903,6 +906,7 @@ export async function authorize(action: Action, identity?: AppSyncIdentity | nul
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
   const caller: Caller = { email, sub: identity.sub, groups, isAdmin }
   if (!isActionAuthorized(action, caller)) {
+    if (action === 'DELETE_SHIPMENTS' || action === 'RESTORE_DELETED_SHIPMENTS' || action === 'LATEST_DELETE_EXPORT') throw new Error(`Forbidden: ${action} requires the owner`)
     if (ADMIN_ONLY_ACTIONS[action] || QUOTE_ADMIN_ONLY_ACTIONS[action]) {
       throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
     }
@@ -2679,7 +2683,7 @@ async function checkCredit(input: Row): Promise<Row> {
 
 // ── Shipment status ──────────────────────────────────────────────────────────
 
-/** The org's "only an admin cancels" switch. Void has its own, harder rule above. */
+/** The org's "only an admin cancels or voids" switch (TmsSettings.cancelDeleteAdminOnly). Owner/ADMIN always pass. */
 async function requireAdminForCancel(action: string, caller: Caller, settings: Row | null): Promise<void> {
   if (settings?.cancelDeleteAdminOnly === true && !caller.isAdmin) {
     throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
@@ -2820,10 +2824,8 @@ async function setLoadStatus(input: Row, caller: Caller): Promise<Row> {
 // ── VOID ─────────────────────────────────────────────────────────────────────
 
 /**
- * Ryne, 2026-10-28 — "the most important thing": a PRO number is permanent. There
- * is no delete here any more, soft or otherwise. DELETE_SHIPMENT, RESTORE_SHIPMENT
- * and the quote rollback's quiet soft delete are all one action now, VOID_SHIPMENT,
- * and there is no un-void.
+ * A PRO claim is permanent. Void retains freight history; owner hard delete and
+ * export restoration are separate actions in shipmentDelete.ts.
  */
 
 /** A void reason is a sentence for whoever reads this PRO in two years. */
@@ -2945,9 +2947,8 @@ async function applyVoid(
 }
 
 /**
- * VOID_SHIPMENT. Owner or ADMIN only — enforced in `authorize` from the caller's
- * token, never from the UI — and refused on a shipment that has been invoiced or
- * that is already voided. The PRO, the number and everything under them survive.
+ * VOID_SHIPMENT. Shipment page access is required by authorize. Billing and repeat
+ * voids are refused; the PRO and all freight history survive.
  */
 async function voidShipment(input: Row, caller: Caller): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
@@ -2960,6 +2961,7 @@ async function voidShipment(input: Row, caller: Caller): Promise<Row> {
   if (isVoided(shipment)) {
     throw new Error(`Shipment ${String(shipment.number ?? shipmentId)} is already voided`)
   }
+  await requireAdminForCancel('VOID', caller, await getSettings())
   await assertNoInvoicedOrders(shipmentId, 'void')
 
   const { apBoardLegsClosed, loadsCanceled } = await applyVoid(shipment, caller, reason, expectedUpdatedAt)
@@ -7879,8 +7881,10 @@ interface BackfillPlan {
 /**
  * Map one legacy load onto a Shipment/Order/Load trio.
  *
- * Nothing here invents history: the number keeps the Aljex id the office already
- * says out loud, and the status comes from the stop clock.
+ * Nothing here invents history: the number is the bare PRO the office already says
+ * out loud (the trimmed Aljex id; `L<pro>` only when that PRO is not all digits or
+ * another shipment already holds it), and the status comes from the stop clock.
+ * Re-runs and relinks find the shipment by the load id, never by this number.
  *
  * An imported order starts on DOCS_NEEDED and nowhere else. The legacy
  * `readyToInvoice` flag is a dispatcher in Aljex saying the work was done — it is
@@ -7908,6 +7912,8 @@ function planBackfill(
   brokerDriverIds: Set<string>,
   customerId: string | null,
   existing: Row | null,
+  /** Another shipment already holds exactly the bare PRO as its number (checked by `backfillShipments`). */
+  numberTaken: boolean,
   /** The ProClaim already standing on this load's PRO, when there is one. */
   claim: Row | null,
 ): BackfillPlan {
@@ -7941,7 +7947,7 @@ function planBackfill(
     loadId,
     shipmentId: stableId('shp', loadId),
     orderId: existingOrderId ?? stableId('ord', loadId),
-    number: (relink ? optionalString(existing.number, 40) : null) ?? `L${String(load.aljexId ?? loadId)}`,
+    number: (relink ? optionalString(existing.number, 40) : null) ?? backfillShipmentNumber(load.aljexId as string | null | undefined, loadId, numberTaken),
     customerId: (relink ? optionalString(existing.customerId, 100) : null) ?? customerId,
     customerName: optionalString(load.customer, 200),
     pro,
@@ -7992,7 +7998,13 @@ async function backfillShipments(input: Row, caller: Caller): Promise<Row> {
     const existing = load.shipmentId ? null : await getById(SHIPMENT_TABLE_NAME, stableId('shp', loadId))
     const existingPro = normalizePro(optionalString(load.aljexId, 120))
     const claim = existingPro ? await getById(PRO_CLAIM_TABLE_NAME, existingPro) : null
-    const plan = planBackfill(load, brokerDriverIds, resolveBackfillCustomerId(load, customersByName), existing, claim)
+    // The bare PRO is the number unless another shipment already holds it. Only a
+    // fresh shipment needs the answer: a relink keeps the number it already has.
+    const barePro = digitsOnlyPro(load.aljexId as string | null | undefined)
+    const numberTaken = !existing && barePro != null
+      && (await queryIndex(SHIPMENT_TABLE_NAME, IDX_SHIPMENTS_BY_NUMBER, 'number', barePro))
+        .some((s) => String(s.id) !== stableId('shp', loadId))
+    const plan = planBackfill(load, brokerDriverIds, resolveBackfillCustomerId(load, customersByName), existing, numberTaken, claim)
     planned.push(plan)
     if (dryRun || plan.skipped) continue
 
@@ -8568,6 +8580,16 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
   if (isPostInvoiceGuarded(action)) return runPostInvoiceGuarded(action, input, caller)
 
   switch (action) {
+    case 'DELETE_SHIPMENTS':
+    case 'LATEST_DELETE_EXPORT':
+    case 'RESTORE_DELETED_SHIPMENTS': {
+      const tables = Object.fromEntries(Object.entries(SHIPMENT_ACTIONS_TABLES).map(([key, model]) => [model, process.env[key] ?? '']))
+      const store = shipmentDeleteStore(dynamo, s3, tables, process.env.DATA_SAFETY_BUCKET_NAME ?? '')
+      if (action === 'LATEST_DELETE_EXPORT') return latestDeleteExport(store, caller)
+      return action === 'DELETE_SHIPMENTS'
+        ? { ...(await deleteShipments(store, input, caller)) }
+        : { ...(await restoreDeleted(store, input, caller)) }
+    }
     case 'CREATE_SHIPMENT':
       return createShipment(input, caller)
     case 'INTAKE_SAVE_DRAFT':

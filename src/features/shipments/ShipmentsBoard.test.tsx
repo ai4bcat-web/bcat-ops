@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, within, fireEvent, waitFor, act, cleanup } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ShipmentsBoard } from './ShipmentsBoard'
@@ -215,14 +215,28 @@ describe('ShipmentsBoard', () => {
   })
 
 
-  it('reads only the working set until the VOIDED facet or the All list asks for a month window', async () => {
-    renderBoard('/tms/shipments', [row('S001', { status: 'OPEN' }), row('S002', { status: 'VOIDED' as ShipmentRow['status'], voidedAt: '2026-01-02T00:00:00Z' })])
+  it('reads only the working set until the Voided list or the All list asks for a month window', async () => {
+    renderBoard('/tms/shipments', [row('S001', { status: 'OPEN' })])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
     const windows = () => __views.filter((v) => (v as { kind: string }).kind === 'window') as Array<{ months: string[]; includeVoided?: boolean }>
     expect(windows().every((w) => w.months.length === 0)).toBe(true)
 
-    pickFacet('Status', 'Voided')
+    fireEvent.click(screen.getByRole('tab', { name: /Voided/ }))
     await waitFor(() => expect(windows().some((w) => w.months.length > 0 && w.includeVoided === true)).toBe(true))
+  })
+
+  it('the Voided list reads a period with voided rows included and lists only voided shipments', async () => {
+    renderBoard('/tms/shipments?list=voided', [row('S001', { status: 'OPEN' }), row('S002', { status: 'OPEN', voidedAt: '2026-01-02T00:00:00Z' })])
+    await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
+    expect(screen.queryByText('S001')).toBeNull()
+    const windows = __views.filter((v) => (v as { kind: string }).kind === 'window') as Array<{ months: string[]; includeVoided?: boolean }>
+    expect(windows.some((w) => w.months.length > 0 && w.includeVoided === true)).toBe(true)
+  })
+
+  it('All and Active never list a voided shipment, even when the status facet is asked for it', async () => {
+    renderBoard('/tms/shipments?list=all', [row('S001', { status: 'OPEN' }), row('S002', { status: 'OPEN', voidedAt: '2026-01-02T00:00:00Z' })])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    expect(screen.queryByText('S002')).toBeNull()
   })
 
   it('the All list asks for the twelve months of the current year without voided rows', async () => {
@@ -285,9 +299,9 @@ describe('ShipmentsBoard', () => {
 
     const deliveredRowEl = screen.getByText('S001').closest('tr')!
     expect(deliveredRowEl).toHaveAttribute('data-tone', 'delivered')
+    cleanup()
 
-    // Show the voided row by asking the Status header for VOIDED.
-    pickFacet('Status', 'Voided')
+    renderBoard('/tms/shipments?list=voided', shipments)
     await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
 
     const voidedRowEl = screen.getByText('S002').closest('tr')!
@@ -425,10 +439,7 @@ describe('ShipmentsBoard', () => {
 
   it('Unvoid requires a reason', async () => {
     const shipments = [row('S001', { status: 'CANCELED', voidedAt: '2026-02-01T00:00:00Z', voidedBy: 'admin', voidReason: 'test' })]
-    renderBoard('/tms/shipments', shipments)
-
-    // Make voided rows visible by selecting VOIDED.
-    pickFacet('Status', 'Voided')
+    renderBoard('/tms/shipments?list=voided', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })
@@ -509,9 +520,7 @@ describe('ShipmentsBoard', () => {
 
   it('Unvoid surfaces a stale-token refusal as a readable message', async () => {
     const shipments = [row('S001', { status: 'CANCELED', voidedAt: '2026-02-01T00:00:00.000Z', voidedBy: 'admin', voidReason: 'test' })]
-    renderBoard('/tms/shipments', shipments)
-
-    pickFacet('Status', 'Voided')
+    renderBoard('/tms/shipments?list=voided', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
     fireEvent.pointerDown(screen.getByLabelText('Shipment actions'), { button: 0, pointerType: 'mouse' })

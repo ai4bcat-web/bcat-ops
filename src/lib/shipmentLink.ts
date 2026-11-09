@@ -26,8 +26,8 @@ export function linkKeyForShipmentNumber(number: string | null | undefined, ship
   if (!key) return null
   if (isDerivedPro(number ?? '', shipmentPrefix)) return null
   if (key.startsWith('L')) {
-    const rest = key.slice(1)
-    if (rest.length >= 3) return rest
+    const rest = normalizePro((number ?? '').trim().slice(1))
+    if (rest) return rest
   }
   return key
 }

@@ -110,7 +110,7 @@ export interface StageIndex {
   /** Staged outcome counts that never reach the apply phases (skips decided at stage time). */
   stagedSkips: Record<string, number>
   /** Step AW history window: the cutoff and window start applied at STAGE (null = no window), and how many rows fell before the start. There is no upper bound: the cutoff means BOOKED, so rows shipping on/after it are carried. */
-  history?: { cutoffDate: string | null; windowStart: string | null; beforeWindow: number }
+  history?: { cutoffDate: string | null; windowStart: string | null; beforeWindow: number; minShipDate?: string; beforeMinShipDate?: number }
 }
 
 export interface PhaseContext {

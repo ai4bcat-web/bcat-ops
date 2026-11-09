@@ -19,6 +19,12 @@ describe('link keys', () => {
     expect(linkKeyForShipmentNumber('L12')).toBe('L12')
   })
 
+  it('gives the renumbered digits-only shipment and its old L<pro> spelling (padded or labelled) the same key as the Load', () => {
+    const key = linkKeyForLoad('14334  ')
+    expect(key).toBe('14334')
+    for (const number of ['14334', 'L14334', 'L14334  ', 'LPro# 14334']) expect(linkKeyForShipmentNumber(number)).toBe(key)
+  })
+
   it('gives counter shapes no PRO identity', () => {
     expect(linkKeyForShipmentNumber('S000123-1')).toBeNull()
     expect(linkKeyForShipmentNumber('X000123-2', 'X')).toBeNull()

@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PRODUCTION } from './lib/stackConfig.mjs';
 import { assertOutputsMatch, buildLinkReport, parseExportKeys, partitionByWindow, resolveCutoff, resolveTarget, run, stopReason, summaryOf } from './awBackfillShipments.mjs';
+import { backfillShipmentNumber } from '../src/lib/legacyShipmentNumber.ts';
 
 const STACK = { name: 'rehearsal', tableSuffix: 'abc123-NONE', apiUrl: 'https://api.example/graphql' };
 
-/** In-memory tables + a BACKFILL_SHIPMENT stand-in that links by Load id and mints `L<pro>` shipments. */
+/** In-memory tables + a BACKFILL_SHIPMENT stand-in linked by Load id. */
 function world(loads, shipments = [], claims = [], settings = null) {
   const t = { Load: loads.map((l) => ({ ...l })), Shipment: shipments.map((s) => ({ ...s })), ProClaim: claims.map((c) => ({ ...c })), settings };
   const calls = [];
@@ -22,7 +23,7 @@ function world(loads, shipments = [], claims = [], settings = null) {
         if (l.voidedTarget) { r.skipped.push({ loadId: id, reason: 'SHIPMENT_VOIDED' }); continue; }
         if (dryRun) continue;
         l.shipmentId = `shp-${id}`;
-        t.Shipment.push({ id: `shp-${id}`, number: `L${l.aljexId ?? id}`, loadIds: [id] });
+        t.Shipment.push({ id: `shp-${id}`, number: backfillShipmentNumber(l.aljexId, id, false), loadIds: [id] });
         r.applied += 1;
       }
       return r;

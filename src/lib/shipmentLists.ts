@@ -1,9 +1,10 @@
 /**
- * The Shipments page's two lists, as pure functions of facts already on the board row.
+ * The Shipments page's three lists, as pure functions of facts already on the board row.
  *
- *   Active = not released to invoicing and not canceled.
- *   All    = every row (the Statuses facet still decides VOIDED / CANCELED visibility),
+ *   Active = not released to invoicing, not canceled, not voided.
+ *   All    = every row that is not voided (the Statuses facet still decides CANCELED visibility),
  *            narrowed to one year or all years. A released shipment is listed here and only here.
+ *   Voided = voided shipments and nothing else. A voided row is listed here and NEVER in Active or All.
  *
  * Released to invoicing = the order has left DOCS_NEEDED: `readyToInvoiceAt` or
  * `invoiceId` is set, or `arStatus` is any other rung (UNBILLED, UNPAID, PAID,
@@ -14,7 +15,7 @@
 import type { ArStatus, ShipmentStatus } from '../types/tms'
 import { boardStatusOf } from './shipmentViewDefs'
 
-export type ShipmentList = 'active' | 'all'
+export type ShipmentList = 'active' | 'all' | 'voided'
 
 export interface ListRow {
   status: ShipmentStatus
@@ -66,7 +67,7 @@ export function monthsOfYear(year: number): string[] {
 
 /** `?list=` value to list; anything unknown is the default, Active. */
 export function parseShipmentList(value: string | null | undefined): ShipmentList {
-  return value === 'all' ? 'all' : 'active'
+  return value === 'all' || value === 'voided' ? value : 'active'
 }
 
 export function isReleasedToInvoicing(row: ListRow): boolean {
@@ -76,11 +77,14 @@ export function isReleasedToInvoicing(row: ListRow): boolean {
 
 /** The scope applied BEFORE matchesBoardFilters. */
 export function inShipmentList(row: ListRow, list: ShipmentList, year: ShipmentYear = 'all'): boolean {
+  const voided = boardStatusOf(row) === 'VOIDED'
+  if (list === 'voided') return voided
+  if (voided) return false
   if (list === 'all') return inShipmentYear(row, year)
   return !isReleasedToInvoicing(row) && boardStatusOf(row) !== 'CANCELED'
 }
 
-/** Voided rows are excluded from both counts (the Statuses facet opts them in). `year` narrows the All count the way the All tab narrows its rows. */
+/** Voided rows are excluded from both counts (they live on the Voided list). `year` narrows the All count the way the All tab narrows its rows. */
 export function shipmentListCounts(rows: readonly ListRow[], year: ShipmentYear = 'all'): { active: number; all: number } {
   let active = 0
   let all = 0

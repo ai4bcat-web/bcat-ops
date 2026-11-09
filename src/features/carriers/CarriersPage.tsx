@@ -10,6 +10,8 @@
  * `/tms/carriers/:id` renders the same board with that carrier's profile already open, so
  * a link to a carrier lands somewhere you can keep working from.
  */
+import { RemitEmailBadge } from '@/features/directory/components/EmailReadinessBadge'
+import { carrierRemitEmailState, groupRemitMethods, type RemitEmailFields } from '@/lib/emailReadiness'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Download, RefreshCw, Search, Truck } from 'lucide-react'
@@ -29,7 +31,7 @@ import {
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useAuth } from '@/hooks/useAuth'
 import { useCarriers } from '@/hooks/useCarriers'
-import { getTmsSettings, graphqlErrorText, upsertCarrier } from '@/lib/apiClient'
+import { getTmsSettings, graphqlErrorText, upsertCarrier, listCarrierRemitEmails } from '@/lib/apiClient'
 import { effectiveCarrierStatus } from '@/lib/carrierStatus'
 import { CarrierProfile } from './components/CarrierProfile'
 import { CARRIER_TYPES } from './components/carrierFormModel'
@@ -50,7 +52,19 @@ export function CarriersPage() {
   const { isAdmin, user } = useAuth()
   const { carriers, loading, error, refresh, replace } = useCarriers()
   const [settings, setSettings] = useState<TmsSettings | null>(null)
-  const [tab, setTab] = useState<CarrierTabKey>('active')
+  const [tab, setTab] = useState<CarrierTabKey | 'all'>('active')
+  const [methods, setMethods] = useState<RemitEmailFields[] | null>(null)
+  const [methodsError, setMethodsError] = useState<string | null>(null)
+  const [methodsVersion, setMethodsVersion] = useState(0)
+  useEffect(() => {
+    let live = true
+    listCarrierRemitEmails().then((rows) => { if (live) { setMethods(rows); setMethodsError(null) } })
+      .catch(() => { if (live) { setMethods(null); setMethodsError('Remittance e-mail flags unavailable — refresh to retry.') } })
+    return () => { live = false }
+  }, [methodsVersion])
+  const methodsByCarrier = useMemo(() => methods === null ? null : groupRemitMethods(methods), [methods])
+  const remitState = useCallback((row: CarrierRow) => methodsByCarrier === null ? null : carrierRemitEmailState(row, methodsByCarrier.get(row.id) ?? []), [methodsByCarrier])
+  const missingRemitCount = useMemo(() => methodsByCarrier === null ? null : carriers.filter((row) => { const state = remitState(row); return state === 'MISSING' || state === 'INVALID' }).length, [carriers, methodsByCarrier, remitState])
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<DenseFilters>({})
   const [newCarrierOpen, setNewCarrierOpen] = useState(false)
@@ -62,7 +76,7 @@ export function CarriersPage() {
 
   useEffect(() => { getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [])
 
-  const catalog = useMemo(() => carrierGridColumns(now), [now])
+  const catalog = useMemo(() => carrierGridColumns(now, remitState), [now, remitState])
   const prefs = useDenseGridPrefs({
     gridId: 'carriers',
     email: user?.email,
@@ -77,7 +91,7 @@ export function CarriersPage() {
 
   const counts = useMemo(() => carrierTabCounts(carriers, now), [carriers, now])
   const tabRows = useMemo(
-    () => carriers.filter((row) => carrierTab(row, now) === tab && matchesCarrierQuery(row, query)),
+    () => carriers.filter((row) => (tab === 'all' || carrierTab(row, now) === tab) && matchesCarrierQuery(row, query)),
     [carriers, tab, query, now],
   )
   const filteredRows = useMemo(() => filterRows(tabRows, catalog, filters), [tabRows, catalog, filters])
@@ -104,6 +118,8 @@ export function CarriersPage() {
   const renderCell = (row: CarrierRow, key: string) => {
     const col = catalog.find((c) => c.key === key)
     const text = col?.text(row) ?? ''
+    if (key === 'name' && !prefs.columns.includes('remitEmail')) { const state = remitState(row); return <span>{text}{state && state !== 'OK' && <> <RemitEmailBadge state={state} suggestion={row.email} /></>}</span> }
+    if (key === 'remitEmail') { const state = remitState(row); return state ? <RemitEmailBadge state={state} suggestion={row.email} /> : text }
     if (key === 'status') return <TmsBadge tone={STATUS_TONE[effectiveCarrierStatus(row, now).status]}>{text}</TmsBadge>
     if (key === 'packet') return <TmsBadge tone="gray">{text}</TmsBadge>
     return text
@@ -111,6 +127,7 @@ export function CarriersPage() {
 
   const profileId = params.id ?? openId
   const closeProfile = () => {
+    setMethodsVersion((v) => v + 1)
     setOpenId(null)
     if (params.id) navigate('/tms/carriers')
   }
@@ -143,10 +160,11 @@ export function CarriersPage() {
           <TmsSegmentedTabs
             aria-label="Carrier status"
             size="sm"
-            tabs={CARRIER_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] }))}
+            tabs={[{ key: 'all', label: 'All statuses', count: carriers.length }, ...CARRIER_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] }))]}
             active={tab}
-            onSelect={(key) => setTab(key as CarrierTabKey)}
+            onSelect={(key) => setTab(key as CarrierTabKey | 'all')}
           />
+          <TmsButton size="sm" disabled={missingRemitCount === null} onClick={() => { setTab('all'); setColumnFilter('remitEmail', { values: ['MISSING', 'INVALID'] }) }}>Missing remit e-mail ({missingRemitCount ?? '…'})</TmsButton>
           <ClearFiltersButton count={filterCount} onClear={() => setFilters({})} />
           <span className="tms-dense-spacer" />
           <ColumnsButton
@@ -158,13 +176,14 @@ export function CarriersPage() {
           />
           <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
           <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
-          <TmsButton size="sm" aria-label="Refresh" onClick={() => { void refresh() }}><RefreshCw size={14} /></TmsButton>
+          <TmsButton size="sm" aria-label="Refresh" onClick={() => { void refresh(); setMethodsVersion((v) => v + 1) }}><RefreshCw size={14} /></TmsButton>
           <Link className="tms-btn tms-btn-secondary tms-btn-sm" to="/tms/carriers/find" data-testid="launch-find-invite">Find &amp; invite</Link>
           {isAdmin ? <TmsButton size="sm" aria-label="CSV" onClick={exportCsv}><Download size={14} /> CSV</TmsButton> : null}
           {/* Step AM: a carrier enters the directory only through MyCarrierPackets (Find & invite / Cover). This hand entry
               is an admin-only data fix, audited server-side; nobody else sees it. */}
           {isAdmin ? <TmsButton size="sm" variant="primary" onClick={() => setNewCarrierOpen(true)}>Carrier (admin data fix)</TmsButton> : null}
         </div>
+        {methodsError && <p role="alert">{methodsError}</p>}
         {error && <p style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
         <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
         <div className="tms-dense-body">
@@ -200,6 +219,7 @@ export function CarriersPage() {
           isAdmin={isAdmin}
           settings={settings}
           onClose={closeProfile}
+          onPaymentMethodsChanged={() => setMethodsVersion((v) => v + 1)}
           onChanged={replace}
         />
       )}

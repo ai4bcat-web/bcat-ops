@@ -1,8 +1,6 @@
 /**
- * Void — the only way a shipment leaves the working set (Ryne, 2026-10-28: "the most
- * important thing"). The PRO, the history, the documents and the money stay exactly
- * where they are; the Lambda re-checks that the caller is the owner or an ADMIN, so
- * this dialog is the explanation and the reason, never the permission.
+ * Void keeps the PRO, history, documents and money in place. Every shipments staff
+ * member may void; the Lambda enforces access from the caller's identity.
  */
 import { useState } from 'react'
 import { TmsButton, TmsDialog, TmsField, TmsTextarea } from '@/features/tms/kit'
@@ -49,7 +47,7 @@ export function VoidShipmentDialog({ shipment, open, onClose, onVoided }: {
       description={
         `${shipment.number} keeps its number, its history and its documents, and shows as VOIDED `
         + 'with who voided it, when and why. It cannot be invoiced, and the number is never reused '
-        + 'or given to another shipment. There is no un-void.'
+        + 'or given to another shipment. An owner or admin can unvoid with a reason.'
       }
       footer={
         <>

@@ -116,6 +116,16 @@ beforeEach(() => {
 })
 
 describe('CarrierProfile setup packet', () => {
+  it('shows missing remit and a contact suggestion without filling or saving a payee', async () => {
+    renderProfile()
+    expect(await screen.findByText('Missing remittance e-mail')).toBeInTheDocument()
+    expect(screen.getByText('Suggested: dispatch@bluesky.example')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /Payment/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add payment method' }))
+    expect(screen.getByLabelText('Payee email')).toHaveValue('')
+    expect(apiClient.upsertCarrierPaymentMethod).not.toHaveBeenCalled()
+  })
+
   it('opens a dialog pre-filled with the carrier email', async () => {
     await openSetupDialog()
     const emailInput = screen.getByLabelText('E-mail') as HTMLInputElement

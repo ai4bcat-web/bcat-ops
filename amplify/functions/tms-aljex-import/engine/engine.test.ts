@@ -600,7 +600,7 @@ describe('history window and carried-over marks (Step AW R19-R21)', () => {
 
     // Cutoff on the newest ship day: that day is "on or after the cutoff" and is kept, nothing is skipped.
     const cutoff = dates[dates.length - 1]
-    expect((await stage(store, fixture.csv, 'aljexrun:H1', { options: { cutoffDate: cutoff } })).status).toBe('READY')
+    expect((await stage(store, fixture.csv, 'aljexrun:H1', { options: { cutoffDate: cutoff, minShipDate: '' } })).status).toBe('READY')
     const idx = await readIdx('aljexrun:H1')
     expect(idx.history.beforeWindow).toBe(dates.filter((d) => d < idx.history.windowStart).length)
     expect(idx.history.afterCutoff).toBeUndefined()
@@ -610,7 +610,7 @@ describe('history window and carried-over marks (Step AW R19-R21)', () => {
 
     // Cutoff 24 months after the newest day: everything older than the newest day is before the window.
     const late = `${Number(cutoff.slice(0, 4)) + 2}${cutoff.slice(4)}`.replace(/-02-29$/, '-02-28')
-    expect((await stage(store, fixture.csv, 'aljexrun:H3', { options: { cutoffDate: late } })).status).toBe('READY')
+    expect((await stage(store, fixture.csv, 'aljexrun:H3', { options: { cutoffDate: late, minShipDate: '' } })).status).toBe('READY')
     const idx3 = await readIdx('aljexrun:H3')
     expect(idx3.history.windowStart).toBe(cutoff)
     expect(idx3.history.beforeWindow).toBe(dates.filter((d) => d < cutoff).length)
@@ -637,7 +637,7 @@ describe('history window and carried-over marks (Step AW R19-R21)', () => {
     await stage(store, fixture.csv, 'aljexrun:H3')
     const dates = await shipDates(store, 'aljexrun:H3')
     const cutoff = `${Number(dates[dates.length - 1].slice(0, 4)) + 1}-12-31`
-    await stage(store, fixture.csv, 'aljexrun:H5', { options: { cutoffDate: cutoff } })
+    await stage(store, fixture.csv, 'aljexrun:H5', { options: { cutoffDate: cutoff, minShipDate: '' } })
     await plan(store, 'aljexrun:H5')
     const done = await apply(store, 'aljexrun:H5', 'aljexrun:H6')
     expect(done.status).toBe('APPLIED')
@@ -648,6 +648,28 @@ describe('history window and carried-over marks (Step AW R19-R21)', () => {
     for (const i of invoices) expect(i).toMatchObject({ markedSentAt: i.issuedAt, markedSentNote: expect.stringMatching(/^Carried over from Aljex( \(cutoff \d{4}-\d{2}-\d{2}\))?$/) })
     for (const b of bills) expect(b).toMatchObject({ markedSentAt: expect.any(String), markedSentNote: expect.stringMatching(/^Carried over from Aljex/) })
     expect(invoices.some((i) => i.markedSentNote === `Carried over from Aljex (cutoff ${cutoff})`)).toBe(true)
+  })
+
+  it('never imports a row shipped before 2025-01-01 by default (the pre-2025 delete): skipped, counted and listed, with or without a cutoff', async () => {
+    const store = makeStore()
+    await stage(store, fixture.csv, 'aljexrun:M0')
+    const all = await shipDates(store, 'aljexrun:M0')
+    const old = all.filter((d) => d < '2025-01-01')
+    expect(old.length).toBeGreaterThan(0)
+    expect(all.length - old.length).toBeGreaterThan(0)
+    type Idx = { history: { minShipDate?: string; beforeMinShipDate?: number }; stagedSkips: Record<string, number> }
+    for (const [id, options] of [['aljexrun:M1', {}], ['aljexrun:M2', { cutoffDate: all[all.length - 1] }]] as const) {
+      expect((await stage(store, fixture.csv, id, { options })).status).toBe('READY')
+      const idx = JSON.parse(await readAll(store.getObject(`imports/jobs/${id}/stage-index.json`))) as Idx
+      expect(idx.history).toMatchObject({ minShipDate: '2025-01-01' })
+      expect((await shipDates(store, id)).every((d) => d >= '2025-01-01')).toBe(true)
+      expect(idx.stagedSkips.EXCLUDED_BEFORE_MIN_SHIP_DATE).toBe(idx.history.beforeMinShipDate)
+      const csv = (await readAll(store.getObject(`imports/jobs/${id}/history-skipped.csv`))).split('\n').filter(Boolean)
+      expect(csv.filter((l) => l.endsWith(',BEFORE_MIN_SHIP_DATE'))).toHaveLength(idx.history.beforeMinShipDate as number)
+    }
+    // a job-level override moves the floor
+    await stage(store, fixture.csv, 'aljexrun:M3', { options: { minShipDate: '2030-01-01' } })
+    expect(await shipDates(store, 'aljexrun:M3')).toEqual([])
   })
 })
 

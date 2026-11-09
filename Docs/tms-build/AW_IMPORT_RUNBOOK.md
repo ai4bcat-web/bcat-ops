@@ -15,6 +15,13 @@ FILES=/Users/adminoid/aljex-export
 - Set the cutoff first: Settings > Data > Aljex cutoff = **2026-11-07 00:00** (Chicago). **The cutoff means BOOKED**: Aljex is final as
   of then, so loads booked before it but shipping after it are carried over (never skipped). The 24-month window starts
   **2024-11-07** and applies to ship date only (lower bound); older loads/invoices are not imported; there is no upper bound.
+- **Ship-date floor (Ryne, 2026-11-08): no Aljex row shipped before 2025-01-01 is ever imported** (`ALJEX_MIN_SHIP_DATE` in
+  `amplify/functions/tms-aljex-import/engine/stage.ts`), with or without a cutoff, on top of the 24-month window. It applies only to
+  LOAD rows that carry a plausible ship date (a blank or junk date such as `01/01/70` is not excluded by the importer); excluded rows
+  are counted as `EXCLUDED_BEFORE_MIN_SHIP_DATE` in the stage skips (`history.beforeMinShipDate` in the stage index) and listed in
+  `history-skipped.csv` with reason `BEFORE_MIN_SHIP_DATE`. The pre-2025 rows already in production are removed by
+  `scripts/awPreDelete.mjs` (AW_PROD_DATA_RUNBOOK.md, "Pre-2025 delete"); this floor stops a re-run from bringing them back.
+  A job option `minShipDate` (YYYY-MM-DD) replaces the day; `''` disables it (only the synthetic-fixture tests do that).
 - The wizard (My Brokerage > Company > Aljex import) does the same per-file steps as the commands below: choose the CSV, upload,
   **Dry run**, then **Apply** (type a live tag). Use whichever is easier; both call the same router actions
   (`IMPORT_CUSTOMERS_MASTER`, `IMPORT_CARRIERS_MASTER`, `IMPORT_AP_FILES`, `IMPORT_AR_FILE`, `IMPORT_ACTIVE_SHIPMENTS_CHECK`).

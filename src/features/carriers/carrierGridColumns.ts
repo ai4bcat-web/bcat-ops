@@ -4,6 +4,7 @@
  * Every value comes off the carrier record the directory already holds, so nothing here reads
  * the network.
  */
+import { remitEmailLabels, type EmailState } from '@/lib/emailReadiness'
 import type { DenseColumn, DenseOption } from '@/features/tms/grid/denseGridModel'
 import { CARRIER_STATUSES, CARRIER_STATUS_LABELS, effectiveCarrierStatus } from '@/lib/carrierStatus'
 import { PACKET_LABELS } from '@/lib/integrations/mcpReview'
@@ -14,7 +15,7 @@ import type { CarrierRow } from './carrierViews'
 
 /** Visible out of the box; the rest wait in the Columns dialog. */
 export const CARRIER_DEFAULT_COLUMNS = [
-  'name', 'mcNumber', 'status', 'packet', 'riskScore', 'cargoExpiry', 'liabilityExpiry', 'authority', 'lastLoadAt',
+  'name', 'mcNumber', 'status', 'remitEmail', 'packet', 'riskScore', 'cargoExpiry', 'liabilityExpiry', 'authority', 'lastLoadAt',
 ]
 
 const lower = (s: string) => s.replace(/_/g, ' ').toLowerCase()
@@ -49,9 +50,11 @@ function dateText(iso: string | null | undefined): string {
 const single = (value: string | null | undefined, label: string = value ?? ''): DenseOption[] =>
   value ? [{ value, label }] : []
 
-export function carrierGridColumns(now: string): DenseColumn<CarrierRow>[] {
+export function carrierGridColumns(now: string, remitState?: (row: CarrierRow) => EmailState | null): DenseColumn<CarrierRow>[] {
   const status = (r: CarrierRow) => effectiveCarrierStatus(r, now).status
+  const remitText = (r: CarrierRow) => { const state = remitState?.(r); return state ? remitEmailLabels[state] : 'Remittance e-mail not loaded' }
   return [
+    { key: 'remitEmail', header: 'Remittance e-mail', group: 'Payment', text: remitText, filter: 'multi', optionsOf: (r) => single(remitState?.(r), remitText(r)) },
     { key: 'name', header: 'Carrier', group: 'Carrier', text: (r) => r.name, sortValue: (r) => r.name.toLowerCase() },
     { key: 'dba', header: 'DBA', group: 'Carrier', text: (r) => r.dbaName ?? '' },
     { key: 'type', header: 'Type', group: 'Carrier', text: (r) => r.type, filter: 'multi', optionsOf: (r) => single(r.type) },

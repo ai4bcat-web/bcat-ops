@@ -5,10 +5,10 @@
  *
  * A voided shipment keeps its PRO, its history and its documents and says so in the
  * header: VOIDED, by whom, when and why. That line is the record of why the number
- * stopped moving, and it is the only thing that replaces the delete that never existed.
+ * stopped moving. The owner's separate Delete exports rows before removing them.
  */
 import { ExternalLink, Truck } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { SHIPMENT_STATUS_LABELS } from '@/lib/shipmentStatus'
 import { formatDateTime } from '@/lib/date'
 import { customerDisplayName } from '@/lib/customerResolution'
@@ -89,6 +89,7 @@ export function ShipmentDrawer({ shipmentId, onClose, onChanged, ...options }: S
               isAdmin={options.isAdmin}
               cancelDeleteAdminOnly={ctx.cancelDeleteAdminOnly}
               handlers={ctx.actions.shipment}
+              onDeleted={() => { onClose(); onChanged() }}
             />
           )}
         </>
@@ -112,6 +113,7 @@ export function ShipmentPageBody({ shipmentId, options, initialTab }: {
   initialTab?: DetailTabKey
 }) {
   const ctx = useShipmentContext(shipmentId, options)
+  const navigate = useNavigate()
 
   if (ctx.loading) return <p className="tms-muted p-6 text-sm">Loading shipment…</p>
   if (ctx.error) return <p className="p-6 text-sm text-[color:var(--tms-badge-red)]">{ctx.error}</p>
@@ -139,6 +141,7 @@ export function ShipmentPageBody({ shipmentId, options, initialTab }: {
             isAdmin={options.isAdmin}
             cancelDeleteAdminOnly={ctx.cancelDeleteAdminOnly}
             handlers={ctx.actions.shipment}
+            onDeleted={() => navigate('/tms/shipments')}
           />
         )}
         columns={headerColumns(shipment)}

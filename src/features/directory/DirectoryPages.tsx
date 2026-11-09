@@ -1,3 +1,5 @@
+import { InvoiceEmailBadge } from './components/EmailReadinessBadge'
+import { customerInvoiceEmailState, invoiceEmailLabels } from '@/lib/emailReadiness'
 import { PossibleDuplicateBadge } from './components/PossibleDuplicateBadge'
 import { buildDuplicateIndex } from '@/lib/customerDuplicates'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -99,7 +101,7 @@ const billingEmailCount = (c: CustomerRecord) => (c.billingEmail ?? '').split(/[
 const yesNo = (v: boolean | null | undefined) => (v === true ? 'Yes' : 'No')
 const opt = (v: string | null | undefined) => (v ? [{ value: v, label: v }] : [])
 
-const DEFAULT_COLUMNS = ['name', 'status', 'owner', 'lastTouch', 'nextStep', 'credit', 'terms', 'contact', 'city']
+const DEFAULT_COLUMNS = ['name', 'status', 'invoiceEmail', 'owner', 'lastTouch', 'nextStep', 'credit', 'terms', 'contact', 'city']
 /** Columns fed by CRM_LIST_ACCOUNTS `withActivity`. */
 const ACTIVITY_COLUMN_KEYS = ['openAr', 'lastShipment']
 const ALL_COLUMN_KEYS = [
@@ -111,6 +113,7 @@ const ALL_COLUMN_KEYS = [
 const ACTIONS_KEY = 'actions'
 
 const gridCatalog: Array<DenseColumn<CustomerRow>> = [
+    { key: 'invoiceEmail', header: 'Invoice e-mail', group: 'Billing', text: (r) => invoiceEmailLabels[customerInvoiceEmailState(r.record)], filter: 'multi', optionsOf: (r) => [{ value: customerInvoiceEmailState(r.record), label: invoiceEmailLabels[customerInvoiceEmailState(r.record)] }] },
     { key: 'name', header: 'Customer', group: 'Account', text: (r) => r.record.name },
     {
       key: 'status', header: 'Status', group: 'Account', text: (r) => r.record.status ?? '', filter: 'multi',
@@ -254,7 +257,17 @@ export function CustomersPage() {
     inactive: rowsWithStatus.filter((r) => r.tab === 'inactive').length,
   }), [rowsWithStatus])
 
-  const [activeTab, setActiveTab] = useState<BoardTab>('active')
+  const [activeTab, setActiveTab] = useState<BoardTab | 'all'>('active')
+  const [includeFactored, setIncludeFactored] = useState(false)
+  const emailCounts = useMemo(() => {
+    const counts = { missing: 0, factored: 0 }
+    for (const row of rowsWithStatus) {
+      const state = customerInvoiceEmailState(row.record)
+      if (state === 'FACTORED_QUEUE_ONLY') counts.factored++
+      else if (state !== 'OK') counts.missing++
+    }
+    return counts
+  }, [rowsWithStatus])
 
   const gridColumns = useMemo(
     () => [
@@ -263,7 +276,7 @@ export function CustomersPage() {
     ],
     [prefs.columns],
   )
-  const tabRows = useMemo(() => rowsWithStatus.filter((r) => r.tab === activeTab), [rowsWithStatus, activeTab])
+  const tabRows = useMemo(() => rowsWithStatus.filter((r) => activeTab === 'all' || r.tab === activeTab), [rowsWithStatus, activeTab])
   const filteredRows = useMemo(() => filterRows(tabRows, gridCatalog, filters), [tabRows, filters])
   const sortedRows = useMemo(() => sortDenseRows(filteredRows, gridCatalog, prefs.sort), [filteredRows, prefs.sort])
   const pageRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
@@ -310,6 +323,7 @@ export function CustomersPage() {
   const renderCell = (row: CustomerRow, key: string) => {
     const { record: c, effective, crm: crmRow } = row
     switch (key) {
+      case 'invoiceEmail': return <InvoiceEmailBadge customer={c} />
       case 'name':
         return (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -317,6 +331,7 @@ export function CustomersPage() {
             {c.apptWorkflow === 'BATORY' && <TmsBadge tone="blue">BATORY</TmsBadge>}
             {c.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
             <PossibleDuplicateBadge info={duplicates.get(c.id)} />
+            {!prefs.columns.includes('invoiceEmail') && customerInvoiceEmailState(c) !== 'OK' && <InvoiceEmailBadge customer={c} />}
           </span>
         )
       case 'status':
@@ -390,13 +405,17 @@ export function CustomersPage() {
             aria-label="Customer board"
             size="sm"
             tabs={[
+              { key: 'all', label: 'All statuses', count: rowsWithStatus.length },
               { key: 'leads', label: 'Prospects', count: counts.leads },
               { key: 'active', label: 'Active', count: counts.active },
               { key: 'inactive', label: 'Inactive', count: counts.inactive },
             ]}
             active={activeTab}
-            onSelect={(key) => { setActiveTab(key as BoardTab); setPageSize(PAGE_SIZE) }}
+            onSelect={(key) => { setActiveTab(key as BoardTab | 'all'); setPageSize(PAGE_SIZE) }}
           />
+          <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: includeFactored ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }}>Missing invoice e-mail ({emailCounts.missing + (includeFactored ? emailCounts.factored : 0)})</TmsButton>
+          <label><input type="checkbox" checked={includeFactored} onChange={(e) => { setIncludeFactored(e.target.checked); if (filters.invoiceEmail?.values?.includes('MISSING')) setColumnFilter('invoiceEmail', { values: e.target.checked ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }} /> Include factored</label>
+          <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: ['FACTORED_QUEUE_ONLY'] }) }}>Factored: queue only ({emailCounts.factored})</TmsButton>
           {isManager && (
             <span role="group" aria-label="Account scope" style={{ display: 'inline-flex', gap: 4 }} data-testid="crm-scope">
               <TmsButton size="sm" variant={scope === 'mine' ? 'primary' : undefined} aria-pressed={scope === 'mine'} onClick={() => setScope('mine')} data-testid="crm-scope-mine">Mine</TmsButton>

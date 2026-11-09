@@ -14,6 +14,7 @@ import {
   tallyPlanned,
 } from './backfillShipments.mjs';
 import { normalizePro } from '../src/lib/proNumber.ts';
+import { backfillShipmentNumber } from '../src/lib/legacyShipmentNumber.ts';
 
 /**
  * A stand-in for the deployed router. The mapping itself is the Lambda's and is
@@ -77,7 +78,7 @@ function fakeClient(loads, customers = []) {
           loadId: id,
           shipmentId: `shp-${id}`,
           orderId: `ord-${id}`,
-          number: `L${load.aljexId}`,
+          number: backfillShipmentNumber(load.aljexId, id, false),
           loadStatus: delivered ? 'DELIVERED' : 'SOURCING',
           shipmentStatus: delivered ? 'DELIVERED' : 'OPEN',
           arStatus: 'DOCS_NEEDED',

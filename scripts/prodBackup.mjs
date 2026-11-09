@@ -42,9 +42,10 @@ export function resolveScripts(list) {
 export async function planBackups(client, { scripts, suffix, now }) {
   const jobs = [];
   for (const script of scripts) {
-    const tables = PROD_WRITE_SETS[script].models.map((m) => tableName(m, suffix));
+    const models = PROD_WRITE_SETS[script].models;
+    const tables = models.map((m) => tableName(m, suffix));
     const have = await checkBackups(client, { script, tables, now });
-    for (const table of have.missing) jobs.push({ script, table, backupName: `${backupPrefix(script)}${table.slice(0, table.indexOf(`-${suffix}`))}-${stamp(now)}` });
+    for (const table of have.missing) jobs.push({ script, table, backupName: `${backupPrefix(script)}${models[tables.indexOf(table)]}-${stamp(now)}` });
   }
   return jobs;
 }

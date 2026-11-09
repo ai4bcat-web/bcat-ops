@@ -192,7 +192,7 @@ export function scrub(text) {
     .replace(TAXLIKE, '[id]')
     .replace(PHONE, '[phone]')
     .replace(UUID, '[uuid]')
-    .replace(LONGDIGITS, '[digits]')
+    .replace(new RegExp(`aljexrun:\\d+|${LONGDIGITS.source}`, 'g'), (m) => (m.startsWith('aljexrun:') ? m : '[digits]'))
 }
 
 /** `***123`: the only form in which a PRO is ever logged. */

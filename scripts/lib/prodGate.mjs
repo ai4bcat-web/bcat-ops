@@ -83,7 +83,11 @@ export function classifySuffix(suffix, rehearsalSuffix = SELECTED_REHEARSAL_SUFF
 }
 
 /** The table `<Model>-<suffix>`. */
-export const tableName = (model, suffix) => `${model}-${suffix}`;
+/**
+ * `<Model>-<suffix>`. The one exception is CarrierTaxVault: it is NOT an Amplify model (its own CDK stack, amplify/backend.ts),
+ * so its table is `CarrierTaxVault-<apiId>` with no `-NONE`.
+ */
+export const tableName = (model, suffix) => (model === 'CarrierTaxVault' ? `${model}-${suffix.replace(/-NONE$/, '')}` : `${model}-${suffix}`);
 
 // ── the pure decision ────────────────────────────────────────────────────────────────────────────
 

@@ -82,8 +82,19 @@ describe('shipmentListCounts', () => {
   })
 })
 
+describe('the Voided list', () => {
+  const voided = row({ status: 'OPEN', voidedAt: '2026-02-01T00:00:00.000Z' })
+  it('holds voided shipments only, and Active and All never hold them', () => {
+    expect(inShipmentList(voided, 'voided')).toBe(true)
+    expect(inShipmentList(voided, 'active')).toBe(false)
+    expect(inShipmentList(voided, 'all')).toBe(false)
+    expect(inShipmentList(row({ status: 'OPEN' }), 'voided')).toBe(false)
+  })
+})
+
 describe('parseShipmentList', () => {
-  it('falls back to active for anything but "all"', () => {
+  it('falls back to active for anything but "all" or "voided"', () => {
+    expect(parseShipmentList('voided')).toBe('voided')
     expect(parseShipmentList('all')).toBe('all')
     expect(parseShipmentList('active')).toBe('active')
     expect(parseShipmentList('bogus')).toBe('active')

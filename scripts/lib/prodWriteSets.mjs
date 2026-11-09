@@ -39,4 +39,26 @@ export const PROD_WRITE_SETS = {
   backfillDriverDocScans: { models: ['DriverSubmissionDoc', 'DriverSubmission'] },
   // `awRelease.mjs --apply`: Order release fields (arStatus, arStatusChangedAt, readyToInvoiceAt, updatedBy/At, version) + one AuditLog row per shipment.
   awRelease: { models: ['Order', 'AuditLog'] },
+  // `awEquipRep.mjs --apply`: enrich-only Load.equipmentType, Order.equipmentType, Shipment.salesRepCode + one AuditLog row per shipment.
+  awEquipRep: { models: ['Shipment', 'Load', 'Order', 'AuditLog'] },
+  // `awSalesRepId.mjs --apply`: enrich-only Shipment.salesRepId + Order.customerRepId (where empty) + one AuditLog row per shipment.
+  awSalesRepId: { models: ['Shipment', 'Order', 'AuditLog'] },
+  // `awZakDriver.mjs --apply`: LoadCarrier.driverId/driverName/driverPhone on the own-asset leg of ZAK-coded PROs, only while empty + one AuditLog row per leg.
+  awZakDriver: { models: ['LoadCarrier', 'AuditLog'] },
+  awRenumberL: { models: ['Shipment', 'Load', 'Invoice', 'CarrierBill', 'SpotRequest', 'WorkflowRun', 'IntakeLoad', 'TrackingLink', 'Quote', 'LaneRateSample', 'Commission', 'AuditLog'] },
+  // `awPreDelete.mjs --apply`: pre-2025 (Ship Date < 2025-01-01) migrated Aljex shipments and their children are deleted,
+  // mixed ArPayment/ApPayment rows are edited, one AuditLog row per shipment is added. Never FactoringItem / TmsSettings.
+  awPreDelete: { models: ['Shipment', 'Order', 'Load', 'LoadCarrier', 'LoadFinancials', 'LoadCharge', 'Invoice', 'CarrierBill', 'ProClaim', 'LegacyAljexRow', 'ArPayment', 'ApPayment', 'AuditLog'] },
+  // `awDeletePayables.mjs --apply`: the 23 OPEN 2025 CarrierBill rows are deleted, ApPayment rows that paid them are edited/deleted (awPreDelete rule),
+  // their LoadCarrier legs are released (AWAITING_INVOICE, no bill), one AuditLog row per bill. Never AR/Invoice/Load/Shipment/Order.
+  awDeletePayables: { models: ['CarrierBill', 'ApPayment', 'LoadCarrier', 'AuditLog'] },
+  // `awCarriers.mjs activate|billing|delete --apply` (union; each subcommand's own subset is SUB_MODELS in the script):
+  // Carrier.status / billing fields / delete, CarrierPaymentMethod (billing), CarrierTaxVault (delete; NOT an Amplify model: `CarrierTaxVault-<apiId>`), one AuditLog row per carrier.
+  awCarriers: { models: ['Carrier', 'CarrierPaymentMethod', 'CarrierTaxVault', 'AuditLog'] },
+  // `awRestoreDeleted.mjs --apply`: put-if-absent of the rows DELETE_SHIPMENTS exported (the models it deletes) + one AuditLog row per restored shipment.
+  awRestoreDeleted: { models: ['ArPayment', 'ApPayment', 'LegacyAljexRow', 'Commission', 'FactoringItem', 'Invoice', 'CarrierBill', 'LaneRateSample', 'LoadFinancials', 'LoadCharge', 'LoadCheckCall', 'TrackingLink', 'ShipmentDocument', 'ShipmentNotice', 'ShipmentPosting', 'ShipmentMessage', 'LoadCarrier', 'Load', 'Order', 'Shipment', 'AuditLog'] },
+  // `awLocationRename.mjs --apply`: the two approved Location renames (name/street/city/state/zip + normalizedName/normalizedAddress, geocode cleared) + one AuditLog row per row.
+  awLocationRename: { models: ['Location', 'AuditLog'] },
+  // `awCustomerEmail.mjs --apply`: enrich-only Customer.apEmail / invoiceCopyEmails / contactEmail (where empty) + one AuditLog row per customer.
+  awCustomerEmail: { models: ['Customer', 'AuditLog'] },
 };

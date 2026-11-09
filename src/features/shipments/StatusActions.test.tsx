@@ -7,9 +7,8 @@
  *    rethrows after the handler has already toasted produced an unhandled rejection on
  *    every refused action. The dialog must also stay open, so the user can retry after
  *    reading the toast rather than watch it vanish on failure.
- * 2. A PRO number is permanent: there is no Delete and no Restore anywhere in the menu,
- *    Void is the only exit, only the owner or an admin is offered it, and a shipment
- *    that is already voided offers nothing at all.
+ * 2. Void follows the org restriction; management actions remain owner/admin-only
+ *    and hard Delete requires an owner with a host callback.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -18,6 +17,9 @@ import { AuthContext } from '@/hooks/useAuth'
 import type { ShipmentRecord } from '@/types/tms'
 
 vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+vi.mock('./components/DeleteShipmentsDialog', () => ({
+  DeleteShipmentsDialog: () => <div data-testid="delete-dialog" />,
+}))
 vi.mock('./components/VoidShipmentDialog', () => ({
   VoidShipmentDialog: ({ shipment }: { shipment: { number: string } }) => (
     <div data-testid="void-dialog">Void {shipment.number}</div>
@@ -88,38 +90,79 @@ describe('the PRO never leaves', () => {
     expect(screen.queryByText('Restore')).toBeNull()
   })
 
-  it('offers Void to an admin and opens the void dialog', async () => {
+  it.each([false, true])('offers Void to an admin with admin-only=%s', async (cancelDeleteAdminOnly) => {
     render(
-      <ShipmentRowActions shipment={shipment} isAdmin cancelDeleteAdminOnly={false} handlers={handlers()} />,
+      <ShipmentRowActions shipment={shipment} isAdmin cancelDeleteAdminOnly={cancelDeleteAdminOnly} handlers={handlers()} />,
     )
     openMenu()
     fireEvent.click(await screen.findByText('Void shipment…'))
     expect(await screen.findByTestId('void-dialog')).toBeTruthy()
   })
 
-  it('offers Void to the owner even when they are not flagged admin', async () => {
+  it('offers Void to any staff member, but not Unvoid, Re-point or Delete', async () => {
     render(
-      <AuthContext.Provider
-        value={{
-          user: null, loading: false, needsNewPassword: false,
-          login: vi.fn(), completeNewPassword: vi.fn(), logout: vi.fn(),
-          isAdmin: false, isOwner: true, hasPageAccess: () => true,
-        }}
-      >
+      <ShipmentRowActions
+        shipment={shipment} isAdmin={false} cancelDeleteAdminOnly={false}
+        handlers={handlers({ onRepointCustomer: vi.fn(), onUnvoid: vi.fn() })} onDeleted={vi.fn()}
+      />,
+    )
+    openMenu()
+    expect(await screen.findByText('Void shipment…')).toBeTruthy()
+    expect(screen.queryByText('Re-point customer…')).toBeNull()
+    expect(screen.queryByText('Delete shipment…')).toBeNull()
+  })
+  it('hides Void from staff when the org requires an admin', async () => {
+    render(<ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly handlers={handlers()} />)
+    openMenu()
+    await screen.findByText('Duplicate')
+    expect(screen.queryByText('Void shipment…')).toBeNull()
+    expect(screen.queryByTestId('void-dialog')).toBeNull()
+  })
+
+  it('closes the staff void entry when the org restriction changes', async () => {
+    const actions = handlers()
+    const { rerender } = render(
+      <ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly={false} handlers={actions} />,
+    )
+    openMenu()
+    fireEvent.click(await screen.findByText('Void shipment…'))
+    expect(await screen.findByTestId('void-dialog')).toBeTruthy()
+    rerender(<ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly handlers={actions} />)
+    expect(screen.queryByTestId('void-dialog')).toBeNull()
+  })
+
+  it.each([false, true])('offers Void to an owner with admin-only=%s', async (cancelDeleteAdminOnly) => {
+    const owner = { user: null, loading: false, needsNewPassword: false, login: vi.fn(), completeNewPassword: vi.fn(), logout: vi.fn(), isAdmin: false, isOwner: true, hasPageAccess: () => true }
+    render(
+      <AuthContext.Provider value={owner}>
+        <ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly={cancelDeleteAdminOnly} handlers={handlers()} />
+      </AuthContext.Provider>,
+    )
+    openMenu()
+    fireEvent.click(await screen.findByText('Void shipment…'))
+    expect(await screen.findByTestId('void-dialog')).toBeTruthy()
+  })
+
+  it('offers Delete to the owner only, and only where the host handles a delete', async () => {
+    const owner = { user: null, loading: false, needsNewPassword: false, login: vi.fn(), completeNewPassword: vi.fn(), logout: vi.fn(), isAdmin: false, isOwner: true, hasPageAccess: () => true }
+    const { unmount } = render(
+      <AuthContext.Provider value={owner}>
         <ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly={false} handlers={handlers()} />
       </AuthContext.Provider>,
     )
     openMenu()
-    expect(await screen.findByText('Void shipment…')).toBeTruthy()
-  })
+    await screen.findByText('Void shipment…')
+    expect(screen.queryByText('Delete shipment…')).toBeNull()
+    unmount()
 
-  it('hides Void from everybody else', async () => {
     render(
-      <ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly={false} handlers={handlers()} />,
+      <AuthContext.Provider value={owner}>
+        <ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly={false} handlers={handlers()} onDeleted={vi.fn()} />
+      </AuthContext.Provider>,
     )
     openMenu()
-    await waitFor(() => expect(screen.getByText('Duplicate')).toBeTruthy())
-    expect(screen.queryByText('Void shipment…')).toBeNull()
+    fireEvent.click(await screen.findByText('Delete shipment…'))
+    expect(await screen.findByTestId('delete-dialog')).toBeTruthy()
   })
 
   it('disables every action on a shipment that is already voided', async () => {

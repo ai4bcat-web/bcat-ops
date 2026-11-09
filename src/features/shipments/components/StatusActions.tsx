@@ -6,12 +6,11 @@
  * *allowed* is decided by the Lambda. Hiding an item the server would refuse keeps the
  * menu honest, but nothing here is a security boundary.
  *
- * A PRO number is permanent (Ryne): there is no Delete and no Restore on any path. The
- * only exit is Void, owner/ADMIN only, enforced in the router from the caller's token.
- * A voided shipment is read-only — every item in both menus is disabled on it.
+ * A PRO number is never reused. Staff can void; owners can delete after an export.
+ * Unvoid and customer re-point remain owner/ADMIN actions, enforced on the server.
  */
 import { useContext, useState } from 'react'
-import { MoreHorizontal, Copy, PauseCircle, PlayCircle, Ban, RotateCcw, Check, X, Truck, Building2, UserMinus, FileSignature, UserCog } from 'lucide-react'
+import { MoreHorizontal, Copy, PauseCircle, PlayCircle, Ban, RotateCcw, Check, X, Truck, Building2, UserMinus, FileSignature, UserCog, Trash2 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -27,6 +26,7 @@ import { type RemoveLoadCarrierReason } from '@/lib/apiClient'
 import { liveCarriersOf } from '@/lib/carrierTotals'
 import { MAX_LIVE_CARRIERS } from '@/lib/carrierLegs'
 import { VoidShipmentDialog } from './VoidShipmentDialog'
+import { DeleteShipmentsDialog } from './DeleteShipmentsDialog'
 import { AssignDriverDialog, type AssignDriverFields } from './AssignDriverDialog'
 import { OWN_ASSET_MESSAGES } from '@/lib/ownAssetDriver'
 import { isIvanCartageName } from '@/lib/ownFleetDrivers'
@@ -84,14 +84,17 @@ export type ShipmentActionTarget =
 type ShipmentDialog =
   | { kind: 'duplicate' }
   | { kind: 'void' }
+  | { kind: 'delete' }
   | { kind: 'reason'; title: string; label: string; required: boolean; run: (reason: string) => Promise<void> }
   | null
 
-export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, handlers, align = 'end' }: {
+export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, handlers, onDeleted, align = 'end' }: {
   shipment: ShipmentActionTarget
   isAdmin: boolean
   cancelDeleteAdminOnly: boolean
   handlers: ShipmentActionHandlers
+  /** Offers the owner's hard Delete; called after rows were deleted so the host can leave the shipment. */
+  onDeleted?: (outcome: { restored: boolean }) => void
   align?: 'start' | 'end'
 }) {
   const [dialog, setDialog] = useState<ShipmentDialog>(null)
@@ -100,7 +103,10 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
   // Same optional read as `useAuthUser`: row menus render in lists, drawers and tests
   // that do not always sit under AuthProvider, and the router is the real gate.
   const auth = useContext(AuthContext)
-  const mayVoid = isAdmin || (auth?.isOwner ?? false)
+  // Void is every staff member's unless the org switched cancel/void to admin-only (the Lambda decides);
+  // unvoid, re-point and delete are not (the Lambda decides each).
+  const mayManage = isAdmin || (auth?.isOwner ?? false)
+  const mayDelete = (auth?.isOwner ?? false) && onDeleted != null
 
   const status = shipment.status
   const voided = Boolean(shipment.voidedAt)
@@ -180,29 +186,32 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
             </DropdownMenuItem>
           )}
 
-          {mayVoid && (
-            <>
-              <DropdownMenuSeparator />
-              {voided && handlers.onUnvoid && (
-                <DropdownMenuItem onSelect={() => handlers.onUnvoid?.()}>
-                  <RotateCcw size={14} className="mr-2" />Unvoid shipment…
-                </DropdownMenuItem>
-              )}
-              {!voided && (
-                <DropdownMenuItem
-                  className="text-[color:var(--tms-badge-red)]"
-                  disabled={voided}
-                  onSelect={() => setDialog({ kind: 'void' })}
-                >
-                  <Ban size={14} className="mr-2" />Void shipment…
-                </DropdownMenuItem>
-              )}
-              {handlers.onRepointCustomer && (
-                <DropdownMenuItem onSelect={() => handlers.onRepointCustomer?.()}>
-                  <UserCog size={14} className="mr-2" />Re-point customer…
-                </DropdownMenuItem>
-              )}
-            </>
+          <DropdownMenuSeparator />
+          {voided && mayManage && handlers.onUnvoid && (
+            <DropdownMenuItem onSelect={() => handlers.onUnvoid?.()}>
+              <RotateCcw size={14} className="mr-2" />Unvoid shipment…
+            </DropdownMenuItem>
+          )}
+          {!voided && (mayCancel || mayManage) && (
+            <DropdownMenuItem
+              className="text-[color:var(--tms-badge-red)]"
+              onSelect={() => setDialog({ kind: 'void' })}
+            >
+              <Ban size={14} className="mr-2" />Void shipment…
+            </DropdownMenuItem>
+          )}
+          {mayManage && handlers.onRepointCustomer && (
+            <DropdownMenuItem onSelect={() => handlers.onRepointCustomer?.()}>
+              <UserCog size={14} className="mr-2" />Re-point customer…
+            </DropdownMenuItem>
+          )}
+          {mayDelete && (
+            <DropdownMenuItem
+              className="text-[color:var(--tms-badge-red)]"
+              onSelect={() => setDialog({ kind: 'delete' })}
+            >
+              <Trash2 size={14} className="mr-2" />Delete shipment…
+            </DropdownMenuItem>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -226,7 +235,14 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
           onConfirm={(copies) => run(() => handlers.onDuplicate(copies))}
         />
       )}
-      {dialog?.kind === 'void' && (
+      {dialog?.kind === 'delete' && (
+        <DeleteShipmentsDialog
+          shipments={[{ id: shipment.id, number: shipment.number }]}
+          onClose={() => setDialog(null)}
+          onDeleted={(outcome) => onDeleted?.(outcome)}
+        />
+      )}
+      {dialog?.kind === 'void' && !voided && (mayCancel || mayManage) && (
         <VoidShipmentDialog
           shipment={{ id: shipment.id, number: shipment.number, updatedAt: shipment.updatedAt }}
           open
