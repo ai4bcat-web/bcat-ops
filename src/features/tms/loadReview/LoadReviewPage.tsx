@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { Check, X } from 'lucide-react'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsListPage, TmsSelect, TmsStatRow, type ColumnDef } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
 import type { ShipmentListRow } from '@/hooks/useShipments'
@@ -125,7 +126,28 @@ export function LoadReviewPage() {
     { key: 'age', header: 'In review', render: ({ row }) => { const age = reviewAgeDays(row, now); return <TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'POD before delivery' : `${age} d`}</TmsBadge> } },
     { key: 'rep', header: 'Sales rep', render: ({ row }) => row.salesRepName ?? row.salesRepId ?? '—' },
     { key: 'division', header: 'Division', render: ({ row }) => row.revDivision ?? '—' },
-    { key: 'checks', header: 'Checks (preliminary)', render: ({ verdict }) => verdict && <span className="aa-review-checks" title="Cached checks are preliminary. The server re-checks before release.">{LOAD_REVIEW_CHECKS.map((key) => <span key={key} role="img" aria-label={`${LOAD_REVIEW_CHECK_LABEL[key]}: ${verdict.checks[key].ok ? 'Looks ready' : verdict.checks[key].reasons.map((reason) => reason.message).join('; ')}`}><TmsBadge tone={verdict.checks[key].ok ? 'green' : 'orange'}>●</TmsBadge></span>)}</span> },
+    // One column per check, each a clear pass (check mark) or fail (cross) with its reason on hover, plus a result column up front:
+    // "All passed" or how many need fixing.
+    { key: 'checks', header: 'Checks (preliminary)', render: ({ verdict }) => {
+      if (!verdict) return null
+      const failed = LOAD_REVIEW_CHECKS.filter((key) => !verdict.checks[key].ok)
+      return <TmsBadge tone={failed.length === 0 ? 'green' : 'red'} title="Cached checks are preliminary. The server re-checks before release.">{failed.length === 0 ? `All ${LOAD_REVIEW_CHECKS.length} passed` : `${failed.length} to fix`}</TmsBadge>
+    } },
+    ...LOAD_REVIEW_CHECKS.map((key): ColumnDef<ReviewEntry> => ({
+      key: `check-${key}`,
+      header: LOAD_REVIEW_CHECK_LABEL[key],
+      render: ({ verdict }) => {
+        if (!verdict) return null
+        const ok = verdict.checks[key].ok
+        const reasons = verdict.checks[key].reasons.map((reason) => reason.message).join('; ')
+        return (
+          <span className={`aa-check ${ok ? 'aa-check-pass' : 'aa-check-fail'}`} role="img" aria-label={`${LOAD_REVIEW_CHECK_LABEL[key]}: ${ok ? 'Passed' : reasons || 'Needs fixing'}`} title={ok ? 'Passed' : reasons || 'Needs fixing'}>
+            {ok ? <Check size={14} aria-hidden="true" /> : <X size={14} aria-hidden="true" />}
+            <span>{ok ? 'Pass' : 'Fix'}</span>
+          </span>
+        )
+      },
+    })),
     { key: 'revenue', header: 'Revenue', render: ({ row }) => formatCents(row.orderRevenueCents ?? row.revenueCents ?? 0) },
     { key: 'status', header: tab === 'released' ? 'Released by / at' : 'Status', render: ({ row, verdict }) => { if (tab === 'released') { const entry = audit[row.id] ?? (row.orderIds ?? []).map((id) => audit[id]).find(Boolean); return <>{entry?.user ?? 'Audit unavailable'} · {formatDateTime(entry?.at ?? row.readyToInvoiceAt)} {canOpen && <Link to={`/tms/shipments/${row.id}?tab=invoicing`}>Open invoicing</Link>}</> } return <TmsBadge tone={verdict?.ok ? 'green' : 'orange'}>{verdict?.ok ? 'Looks ready' : `${verdict ? failingReasons(verdict).length : 0} to fix`}</TmsBadge> } },
   ]

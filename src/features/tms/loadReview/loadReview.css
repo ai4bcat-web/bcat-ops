@@ -5,3 +5,8 @@
 /* The footer carries Previous/Next beside the page-size and key hints: wrap on a phone instead of widening the page. */
 .tms-shell .aa-load-review .tms-footer { flex-wrap: wrap; }
 .tms-shell .aa-load-review .tms-footer-hints { flex-wrap: wrap; }
+
+/* A pass is a check mark, a fail is a cross: readable at a glance, and never color alone. */
+.tms-shell .aa-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.tms-shell .aa-check-pass { color: var(--tms-badge-green); }
+.tms-shell .aa-check-fail { color: var(--tms-badge-red); }
