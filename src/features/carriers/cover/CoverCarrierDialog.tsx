@@ -21,7 +21,7 @@ import { CarrierLookupCard } from '@/features/carriers/lookup/CarrierLookupCard'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsInput, TmsMetaList } from '@/features/tms/kit'
 import { useCarriers } from '@/hooks/useCarriers'
 import { CoverTrackingStep } from './CoverTrackingStep'
-import { addCarrier, coverCarrier, getShipmentBundle, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
+import { addCarrier, carriersByDot, carriersByMc, coverCarrier, getShipmentBundle, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
 import type { McpLookupResult } from '@/lib/apiClient'
 import { CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
 import { formatDateTime } from '@/lib/date'
@@ -120,6 +120,15 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
     if (parsed.kind === 'NAME') { setNameMatches(searchDirectory(carriers, parsed.name ?? query)); return }
     const next: Ref = { ...(parsed.mcNumber ? { mcNumber: parsed.mcNumber } : {}), ...(parsed.dotNumber ? { dotNumber: parsed.dotNumber } : {}) }
     pick(findByNumber(carriers, parsed), next)
+    // The directory list is cached in the browser, so a carrier invited or activated a moment ago can look stale here (Pending, "Setup
+    // packet not sent"). Re-read this one carrier straight from the server and use that row.
+    void (async () => {
+      try {
+        const rows = parsed.mcNumber ? await carriersByMc(parsed.mcNumber) : parsed.dotNumber ? await carriersByDot(parsed.dotNumber) : []
+        const row = rows[0]
+        if (row) setSelected((cur) => (cur == null || cur.id === row.id ? row : cur))
+      } catch { /* the cached row stays */ }
+    })()
   }
 
   useEffect(() => {
