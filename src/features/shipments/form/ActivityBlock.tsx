@@ -1,7 +1,7 @@
 /**
  * The summary rail's Activity block (feedback 5): the shipment's stage (chip + compact stepper over
  * the one status ladder in `shipmentStage`) and the last eight audit entries, newest first, each
- * as "time · who · what · field: value". Create mode shows only the Draft chip until the row exists
+ * as "time · who · what" (the field-by-field detail is a hover). Create mode shows only the Draft chip until the row exists
  * (an intake pre-fill adds the extractor's own entry).
  */
 import { useMemo, useState } from 'react'
@@ -76,13 +76,13 @@ export function ActivityBlock({ bundle, staff, intakeId, intake }: ActivityBlock
       ) : (
         <ol className="tms-rail-acts" data-testid="rail-activity-rows">
           {shown.map((r) => (
-            <li key={r.id} className="tms-rail-act" data-testid="rail-activity-row" data-actor-kind={r.actor.kind}>
+            <li key={r.id} className="tms-rail-act" data-testid="rail-activity-row" data-actor-kind={r.actor.kind} title={r.detailTitle || r.detail || undefined}>
               <span className="tms-rail-act-time" title={r.timeTitle}>{r.time}</span>
               {' · '}
               <strong className="tms-rail-act-actor" data-testid="rail-activity-actor">{r.actor.label}</strong>
               {' '}
               <span>{r.action}</span>
-              {r.detail ? <span className="tms-rail-act-detail" data-testid="rail-activity-detail" title={r.detailTitle || undefined}> · {r.detail}</span> : null}
+              {/* High level only (Ryne 2026-11-09): who, what, when. The field-by-field detail is a hover, and the full audit has the rest. */}
             </li>
           ))}
         </ol>

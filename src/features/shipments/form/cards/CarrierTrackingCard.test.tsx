@@ -66,7 +66,7 @@ describe('CarrierTrackingCard edit mode', () => {
     expect(screen.getByTestId('strip-next-check')).toBeTruthy()
     expect(screen.getByTestId('strip-pod')).toBeTruthy()
     expect(screen.getByTestId('card-tracking-open').getAttribute('href')).toBe('/tms/tracking?shipment=shp-1')
-    expect(within(screen.getByTestId('card-tracking-updates')).getByTestId('history-feed')).toBeTruthy()
+    expect(screen.getByTestId('card-tracking-updates').textContent).toContain('Activity list on the right')
   })
 
   it('says Unassigned with no tracker and offers no entry form', () => {
