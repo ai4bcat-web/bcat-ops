@@ -94,6 +94,7 @@
   --tms-badge-gray-tint: #f3f4f6;
 
   /* Whole-row board tones. */
+  --tms-row-ink: #000000;
   --tms-row-delivered: #e8f7ef;
   --tms-row-delivered-text: #14532d;
   --tms-row-dispatched: #ffedd5;
@@ -193,6 +194,7 @@
   --tms-badge-gray: #a7a7a7;
   --tms-badge-gray-tint: #2a2a2a;
 
+  --tms-row-ink: var(--tms-text);
   --tms-row-delivered: #1a4d2e;
   --tms-row-delivered-text: #d4edda;
   --tms-row-dispatched: #7c3f0b;
