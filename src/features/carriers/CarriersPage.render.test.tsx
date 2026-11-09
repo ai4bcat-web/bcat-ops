@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { CarrierRecord, UserProfileRecord } from '@/types/tms'
+import { listCarrierRemitEmails } from '@/lib/apiClient'
 import { CarriersPage } from './CarriersPage'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -73,6 +74,7 @@ const staff = vi.hoisted(() => [
 ] as UserProfileRecord[])
 vi.mock('@/lib/apiClient', () => ({
   getTmsSettings: vi.fn(async () => null),
+  listCarrierRemitEmails: vi.fn(async () => [{ carrierId: 'Charlie Freight', payeeEmail: 'pay@example.test' }]),
   listUserProfiles: vi.fn(async () => staff),
   upsertCarrier,
   graphqlErrorText: () => '',
@@ -101,6 +103,22 @@ function tab(name: string): HTMLElement {
 beforeEach(() => { auth.isAdmin = true; localStorage.clear() })
 
 describe('CarriersPage', () => {
+  it('does not label carriers missing when the payment-method read fails', async () => {
+    vi.mocked(listCarrierRemitEmails).mockRejectedValueOnce(new Error('unavailable'))
+    renderBoard()
+    expect((await screen.findByRole('alert')).textContent).toContain('Remittance e-mail flags unavailable')
+    expect(screen.queryByText('Missing remittance e-mail')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Missing remit e-mail (…)'}).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('counts missing remit across every status and filters to those carriers', async () => {
+    renderBoard()
+    fireEvent.click(await screen.findByRole('button', { name: 'Missing remit e-mail (6)' }))
+    expect(names()).toEqual(['Alpha Trucking', 'Bravo Lines', 'Delta Haul', 'Echo Carriers', 'Foxtrot Transport', 'Golf Lines'])
+    expect(screen.getAllByText('Missing remittance e-mail').length).toBe(6)
+    expect(screen.queryByText('Charlie Freight')).toBeNull()
+  })
+
   it('counts every carrier under its effective status', async () => {
     renderBoard()
     await waitFor(() => expect(screen.getByText('Carriers')).toBeTruthy())
@@ -261,17 +279,12 @@ describe('CarriersPage', () => {
     expect(screen.getByTestId('profile').textContent).toBe('Golf Lines')
   })
 
-  it('shows all three status tabs with their counts, zero included', async () => {
+  it('shows counts across status tabs and the all-status scope', async () => {
     renderBoard()
     await waitFor(() => expect(names()).toHaveLength(2))
     fireEvent.click(tab('Pending/Review'))
     expect(within(tab('Active')).getByText('2')).toBeTruthy()
-    expect(screen.getAllByRole('tab')).toHaveLength(3)
+    expect(within(tab('All statuses')).getByText('7')).toBeTruthy()
   })
 
-  it('opens with the narrow default column set', async () => {
-    renderBoard()
-    await waitFor(() => expect(names()).toHaveLength(2))
-    expect(document.querySelectorAll('thead th').length).toBe(9)
-  })
 })

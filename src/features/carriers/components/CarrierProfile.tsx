@@ -6,6 +6,8 @@
  * The sheet carries `tms-portal` because Radix renders it into `document.body`, outside
  * `.tms-shell`, where the dark tokens would not otherwise reach.
  */
+import { RemitEmailBadge } from '@/features/directory/components/EmailReadinessBadge'
+import { carrierRemitEmailState } from '@/lib/emailReadiness'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -88,6 +90,7 @@ function saferUrl(dotNumber: string): string {
 }
 
 interface CarrierProfileProps {
+  onPaymentMethodsChanged?: () => void
   carrierId: string
   isAdmin: boolean
   settings: TmsSettings | null
@@ -99,7 +102,7 @@ function permitLabel(number: string | null | undefined, expiresAt: string | null
   return expiresAt ? `${number} (exp ${expiresAt.slice(0, 10)})` : `${number}`
 }
 
-export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChanged }: CarrierProfileProps) {
+export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChanged, onPaymentMethodsChanged }: CarrierProfileProps) {
   const navigate = useNavigate()
   const { bundle, loading, error, refresh, replaceCarrier } = useCarrier(carrierId)
   const [tab, setTab] = useState('profile')
@@ -179,6 +182,7 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
     if (!carrier) return
     await upsertCarrierPaymentMethod({ carrierId: carrier.id, ...draft })
     await refresh()
+    onPaymentMethodsChanged?.()
     toast.success('Payment method saved')
   }
 
@@ -231,6 +235,7 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
             as="h3"
             chips={
               <>
+                {carrier && bundle && <RemitEmailBadge state={carrierRemitEmailState(carrier, bundle.paymentMethods)} suggestion={carrier.email} />}
                 {effective && (
                   <TmsBadge tone={STATUS_TONE[effective.status]}>
                     {CARRIER_STATUS_LABELS[effective.status]}
@@ -393,6 +398,7 @@ export function CarrierProfile({ carrierId, isAdmin, settings, onClose, onChange
                     onArchive={async (method) => {
                       try {
                         await archiveCarrierPaymentMethod({ id: method.id, expectedUpdatedAt: method.updatedAt })
+                        onPaymentMethodsChanged?.()
                         await refresh()
                         toast.success('Payment method archived')
                       } catch (e) {

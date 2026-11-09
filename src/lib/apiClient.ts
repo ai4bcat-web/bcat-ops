@@ -3840,6 +3840,12 @@ export async function listCarrierDocuments(): Promise<CarrierDocumentRecord[]> {
   return listAll<CarrierDocumentRecord>('listCarrierDocuments', CARRIER_DOCUMENT_FIELDS, 1000)
 }
 
+/** One paginated directory read for remit flags; no bank details or per-carrier requests. */
+export async function listCarrierRemitEmails(): Promise<{ carrierId: string; payeeEmail?: string | null }[]> {
+  if (!modelAvailable('CarrierPaymentMethod')) throw new Error('Carrier payment methods are unavailable')
+  return listAll('listCarrierPaymentMethods', 'carrierId payeeEmail', 1000)
+}
+
 /** Everything one carrier profile renders, in one round trip's worth of parallel reads. */
 export async function getCarrierBundle(id: string): Promise<CarrierBundle> {
   const [carrier, contacts, paymentMethods, documents, loadCarriers] = await Promise.all([
