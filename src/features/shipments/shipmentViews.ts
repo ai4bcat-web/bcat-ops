@@ -544,10 +544,10 @@ function paymentTermsLabel(days: number | null | undefined): string {
 }
 
 /** The Carrier column's text for an own-fleet shipment nobody is driving. */
-export const OWN_FLEET_NO_DRIVER = 'Own fleet · no driver'
+export const OWN_FLEET_NO_DRIVER = 'Ivan Cartage · no driver'
 
 /** The Carrier column's text for imported own-fleet history, which never has a driver. */
-export const OWN_FLEET_HISTORY = 'Own fleet (history)'
+export const OWN_FLEET_HISTORY = 'Ivan Cartage (history)'
 
 /**
  * A live Ivan Cartage shipment with no driver on its active assignment (Step W).
@@ -567,12 +567,36 @@ export function needsDriver(row: ShipmentRow): boolean {
  * Who is hauling it, in MVMNT's words: the outside carrier's name, our own driver and
  * truck when the fleet has it, and "Need to cover" while nobody does.
  */
+const FLEET_GROUP_LABEL: Record<string, string> = {
+  OWNER_OPERATOR: 'Owner Operators', BOX_TRUCK: 'Box Trucks', LOCAL: 'Local Drivers', AMAZON: 'Amazon',
+}
+interface FleetDriver { id: string; name: string; fleetGroup?: string | null }
+let fleetById = new Map<string, FleetDriver>()
+let fleetByName = new Map<string, FleetDriver>()
+const nameKey = (n: string | null | undefined): string => (n ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+
+/** The driver files, so the Carrier column can say which Ivan Cartage group a driver is mapped to. Set by the board. */
+export function setFleetDrivers(drivers: readonly FleetDriver[]): void {
+  fleetById = new Map(drivers.map((d) => [d.id, d]))
+  fleetByName = new Map(drivers.map((d) => [nameKey(d.name), d]))
+}
+
+/** A carrier "name" that is really one of our drivers (Zak Pace, Lee Lara): the freight is Ivan Cartage's. */
+function carrierIsDriverName(row: ShipmentRow): boolean {
+  return !!row.carrierName && fleetByName.has(nameKey(row.carrierName))
+}
+
+function ivanCartageLabel(row: ShipmentRow): string {
+  const driver = (row.driverId ? fleetById.get(row.driverId) : undefined)
+    ?? fleetByName.get(nameKey(row.driverName)) ?? fleetByName.get(nameKey(row.carrierName))
+  const group = driver?.fleetGroup ? FLEET_GROUP_LABEL[driver.fleetGroup] : undefined
+  return group ? `Ivan Cartage (${group})` : 'Ivan Cartage'
+}
+
 export function carrierLabel(row: ShipmentRow): string {
-  if (row.assignmentType === 'OWN_ASSET') {
-    const own = [row.driverName, row.truckNumber ? `Truck ${row.truckNumber}` : null].filter(Boolean).join(' · ')
+  if (row.assignmentType === 'OWN_ASSET' || carrierIsDriverName(row)) {
     if (needsDriver(row)) return OWN_FLEET_NO_DRIVER
-    if (own) return own
-    return row.legacyImported === true ? OWN_FLEET_HISTORY : 'Own fleet'
+    return row.legacyImported === true && !row.driverId && !carrierIsDriverName(row) ? OWN_FLEET_HISTORY : ivanCartageLabel(row)
   }
   if (row.carriers && row.carriers.length >= 2) return `${row.carriers.length} carriers`
   if (row.carrierName) return row.carrierName
@@ -746,7 +770,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'equip', label: 'Equip', group: 'Order', value: (r) => r.equipmentType ?? '', width: 100 },
   { key: 'customerReference', label: 'Customer Reference Number', group: 'Order', value: (r) => r.customerReference ?? '', width: 180 },
   { key: 'description', label: 'Description', group: 'Order', value: (r) => r.commodity ?? '', width: 180 },
-  { key: 'revenueType', label: 'Revenue Type', group: 'Shipment', value: (r) => divisionLabel(r), width: 160 },
+  { key: 'revenueType', label: 'Revenue Type', group: 'Shipment', value: (r) => divisionLabel(r), sortKey: 'division', width: 160 },
   { key: 'salesRep', label: 'Sales Rep', group: 'Shipment', value: (r) => r.salesRepName ?? r.salesRepId ?? r.salesRepCode ?? '', width: 140 },
   { key: 'tracker', label: 'Tracker', group: 'Shipment', value: (r) => r.trackerName ?? '', width: 140 },
   // The typed text when there is one, "Customer not linked" when the row carries nothing:
@@ -765,7 +789,6 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'deliveryAppt', label: 'Delivery', group: 'Shipment', value: (r) => formatBoardDate(r.deliveryAppt), sortKey: 'deliveryAppt', width: 100 },
   { key: 'stops', label: 'Stops', group: 'Computed', value: (r) => (r.stopCount == null ? '' : String(r.stopCount)), width: 70 },
   { key: 'salesRepId', label: 'Customer rep', group: 'Order', value: (r) => r.salesRepName ?? r.customerRepName ?? r.salesRepId ?? r.customerRepId ?? r.salesRepCode ?? '', width: 140 },
-  { key: 'division', label: 'Division', group: 'Shipment', value: (r) => divisionLabel(r), sortKey: 'division', width: 160 },
   { key: 'driver', label: 'Driver', group: 'Load', value: (r) => r.driverName ?? '', width: 150 },
   { key: 'truck', label: 'Truck', group: 'Load', value: (r) => r.truckNumber ?? '', width: 100 },
   { key: 'arStatus', label: 'AR', group: 'Order', value: (r) => enumLabel(r.arStatus), width: 120 },
@@ -1049,7 +1072,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
 /** MVMNT's thirteen visible columns. */
 export const DEFAULT_COLUMN_KEYS = [
   'number', 'status', 'originCity', 'destinationCity', 'pickupAppt', 'deliveryAppt',
-  'stops', 'salesRepId', 'customerName', 'carrier', 'division', 'driver',
+  'stops', 'salesRepId', 'customerName', 'carrier', 'revenueType', 'driver',
 ]
 
 export function visibleColumns(keys: readonly string[]): BoardColumn[] {

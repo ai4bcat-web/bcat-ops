@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveTeamLayout, TEAM_DEFAULT_COLUMN_TEMPLATE_ID } from './teamColumnLayout'
+import { fitColumnWidths, resolveTeamLayout, TEAM_DEFAULT_COLUMN_TEMPLATE_ID } from './teamColumnLayout'
 
 const VALID = ['proNumber', 'status', 'originCity']
 const DEFAULTS = ['proNumber', 'status']
@@ -22,5 +22,18 @@ describe('resolveTeamLayout', () => {
 
   it('uses the defaults when every saved column is retired', () => {
     expect(resolveTeamLayout([row({ columns: ['gone'] })], VALID, DEFAULTS).columns).toEqual(DEFAULTS)
+  })
+})
+
+describe('fitColumnWidths', () => {
+  it('sizes each column to its longest value or header, clamped', () => {
+    const rows = [{ a: 'x', b: 'a much longer value here' }, { a: 'xyz', b: 'short' }]
+    const w = fitColumnWidths(
+      [{ key: 'a', header: 'A', text: (r: typeof rows[0]) => r.a }, { key: 'b', header: 'B', text: (r: typeof rows[0]) => r.b }, { key: 'n', header: 'Notes', text: () => 'z'.repeat(500) }],
+      rows,
+    )
+    expect(w.a).toBe(60) // 3 chars: below the minimum
+    expect(w.b).toBe(Math.round('a much longer value here'.length * 7.5 + 36))
+    expect(w.n).toBe(520) // capped
   })
 })

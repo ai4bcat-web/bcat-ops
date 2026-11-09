@@ -94,6 +94,7 @@ import {
   boardStatusOf,
   carrierHoverText,
   carrierLabel,
+  setFleetDrivers,
   matchesQuery,
   needsDriver,
   toCsv,
@@ -109,6 +110,7 @@ import {
   statusCellText,
 } from './shipmentGridColumns'
 import {
+  fitColumnWidths,
   resolveTeamLayout,
   TEAM_DEFAULT_COLUMN_TEMPLATE_ID,
   TEAM_DEFAULT_COLUMN_TEMPLATE_NAME,
@@ -485,6 +487,8 @@ function BoardPane({
   const { staff: staffProfiles } = staff
   const divisions = useOwnershipDivisions().divisions ?? SEED_DIVISIONS
   const { drivers } = useDrivers()
+  // Set during render so the Carrier column's text, sort and filter all see the mapping on the first paint.
+  useMemo(() => setFleetDrivers(drivers), [drivers])
   const { equipment } = useTrucks()
   // Step W: the roster the batch can book onto Ivan Cartage loads (active, not a broker placeholder).
   const ivanDrivers = useMemo(
@@ -1047,6 +1051,12 @@ function BoardPane({
             <span className="text-xs text-muted-foreground" role="status">Editing the team layout: drag headers, resize, or use Columns.</span>
             <TmsButton size="sm" variant="secondary" onClick={() => setColumnsOpen(true)}>
               <Columns3 size={14} aria-hidden="true" /> Columns
+            </TmsButton>
+            <TmsButton
+              size="sm" variant="secondary" title="Set every column to the width of its longest value"
+              onClick={() => setLayoutDraft((d) => (d ? { ...d, widths: fitColumnWidths(gridColumns.filter((c) => d.columns.includes(c.key)), filteredRows) } : d))}
+            >
+              Fit widths
             </TmsButton>
             <TmsButton size="sm" variant="primary" disabled={layoutSaving} onClick={() => void saveTeamLayout()}>
               Save as team default
