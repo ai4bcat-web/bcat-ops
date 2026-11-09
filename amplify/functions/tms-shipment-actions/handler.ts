@@ -6178,6 +6178,17 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
 
   await transact(transactionItems, 'rate confirmation')
 
+  // E-sign trail. The token left the row the moment it was overwritten, so the new link is recorded
+  // under its hash (the old link then answers "replaced" instead of "invalid"), and the link it killed is logged.
+  await writeAudit('RATE_CON_TOKEN', createHash('sha256').update(token).digest('hex'), 'rate_con_link_issued', caller, { loadCarrierId, loadId, version })
+  const previousVersion = numberOrNull(carrier.rateConVersion) ?? 0
+  if (previousVersion > 0) {
+    await writeAudit('LOAD_CARRIER', loadCarrierId, 'rate_con_link_superseded', caller, {
+      loadId, previousVersion, previousStatus: String(carrier.rateConStatus ?? 'NOT_SENT'), version,
+      note: `Version ${version} replaced version ${previousVersion}; the version ${previousVersion} link no longer opens for signing.`,
+    })
+  }
+
   const emailOutcome = await sendThreadMime({
     to,
     cc,

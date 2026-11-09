@@ -106,7 +106,7 @@ function bundle(invoiceId: string | null = null): ShipmentBundle {
   const load: ShipmentLoad = { id: 'load-1', orderId: 'ord-1', stops: [], status: 'DELIVERED', loadNumber: 'S000001-1', leg: 1 }
   const active: LoadCarrierRecord = {
     id: 'lc-1', loadId: 'load-1', shipmentId: 'shp-1', kind: 'CARRIER', status: 'ACTIVE', sequence: 2,
-    carrierName: 'Blue Sky Trucking', dispatcherEmail: 'dispatch@bluesky.example', rateConStatus: 'SIGNED',
+    carrierName: 'Blue Sky Trucking', dispatcherEmail: 'dispatch@bluesky.example', rateConStatus: 'SIGNED', rateConVersion: 2,
     createdBy: 'a@b.c', updatedBy: 'a@b.c', createdAt: WHEN, updatedAt: WHEN,
   }
   const bounced: LoadCarrierRecord = {
@@ -152,7 +152,7 @@ describe('DocumentsSection', () => {
     expect(within(carrier).getByText('blue-sky-invoice.pdf')).toBeTruthy()
     expect(within(carrier).getByText('Red Hill Transit')).toBeTruthy()
     expect(within(carrier).getAllByText('Rate confirmation')).toHaveLength(1)
-    expect(within(carrier).getByText('signed')).toBeTruthy()
+    expect(within(carrier).getByText(/Rate con: SIGNED v2/)).toBeTruthy()
   })
 
   it('shows the missing required document and offers no release: the way forward is Load Review', async () => {

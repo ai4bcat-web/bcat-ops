@@ -9,6 +9,7 @@
  * UpdateItem with ADD, and TransactWriteItems with the conditions it writes.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createHash } from 'node:crypto'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 // The rule the public offer page shows a carrier, used here to answer a link the
 // way a carrier would rather than by hard-coding the number we hope is on it.
@@ -2928,6 +2929,18 @@ describe('carrier booking', () => {
     const second = table(TABLES.carrier).get(loadCarrierId)!
     expect(second.rateConVersion).toBe(2)
     expect(second.rateConToken).not.toBe(first.rateConToken)
+
+    // The e-sign trail: each link is findable by its token hash (so the old one can say "replaced"),
+    // and the second send logs which link it killed.
+    const audits = [...table(TABLES.audit).values()]
+    const issued = audits.filter((r) => r.action === 'rate_con_link_issued' && r.entityType === 'RATE_CON_TOKEN')
+    const sha = (t: unknown) => createHash('sha256').update(String(t)).digest('hex')
+    expect(issued.map((r) => r.entityId).sort()).toEqual([sha(first.rateConToken), sha(second.rateConToken)].sort())
+    expect(JSON.parse(String(issued.find((r) => r.entityId === sha(first.rateConToken))!.changes))).toMatchObject({ loadCarrierId, version: 1 })
+    const superseded = audits.filter((r) => r.action === 'rate_con_link_superseded')
+    expect(superseded).toHaveLength(1)
+    expect(superseded[0]).toMatchObject({ entityType: 'LOAD_CARRIER', entityId: loadCarrierId })
+    expect(JSON.parse(String(superseded[0].changes))).toMatchObject({ previousVersion: 1, version: 2, previousStatus: 'SENT' })
   })
 
   it('refuses a recipient that is not an email address', async () => {

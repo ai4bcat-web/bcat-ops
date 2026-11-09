@@ -380,6 +380,22 @@ describe('defaultInvoiceAttachments', () => {
     )
     expect(ids).toEqual(['sdoc-pod', 'sdoc-bol'])
   })
+
+  it('takes the Public signed rate confirmation and never a superseded, private or carrier-only one', () => {
+    const signed = (over: Record<string, unknown>) => doc({ type: 'RATE_CON', name: 'Signed Rate Confirmation v2.pdf', audience: 'ALL', status: 'ACTIVE', ...over })
+    const ids = defaultInvoiceAttachments(
+      [
+        signed({ id: 'sdoc-signed-v2' }),
+        signed({ id: 'sdoc-signed-v1', status: 'SUPERSEDED' }),
+        signed({ id: 'sdoc-private', audience: 'INTERNAL' }),
+        signed({ id: 'sdoc-unsigned-carrier-copy', audience: 'CARRIER' }),
+      ],
+      { id: 'ord-1', loadIds: ['ld-1'] },
+      { requiredDocsForInvoice: ['RATE_CON'] },
+      { defaultRequiredDocs: null, invoiceAttachTypes: null },
+    )
+    expect(ids).toEqual(['sdoc-signed-v2'])
+  })
 })
 
 function dataInput(overrides: Partial<InvoiceDataInput> = {}): InvoiceDataInput {

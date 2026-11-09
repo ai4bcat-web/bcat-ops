@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react'
 import { listAuditLogsFor } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
+import { actionSentence } from '@/lib/auditActivity'
 import { TmsCard, TmsTimeline } from '@/features/tms/kit'
 import { ChangeTimeline } from '@/components/ChangeTimeline'
 import { entitiesWithSpellings } from '@/components/changeTimelineModel'
@@ -78,7 +79,7 @@ export function HistorySection({ bundle }: { bundle: ShipmentBundle }) {
           data-testid="shipment-history"
           items={rows.map((row) => ({
             id: row.id,
-            title: row.action,
+            title: row.action.startsWith('rate_con_') || row.action.endsWith('_RATE_CON') ? actionSentence(row.action, row.entityType) : row.action,
             description: (
               <>
                 <span>{row.user}</span>

@@ -2048,6 +2048,7 @@ const signCarrierDocTable   = stageTables['CarrierDocument']
 const signDivisionTable     = stageTables['Division']
 const signSettingsTable     = stageTables['TmsSettings']
 const signAuditLogTable     = stageTables['AuditLog']
+const signShipmentDocTable  = stageTables['ShipmentDocument']
 
 // The token is found by scanning LoadCarrier (the table may only gain one GSI
 // per deploy and carrierId is that one), exactly as validateInvite does.
@@ -2088,16 +2089,39 @@ rateConSignApiFn.addToRolePolicy(
     resources: [signLoadTable.tableArn, signShipmentTable.tableArn],
   })
 )
-// Signing writes exactly two new rows: the signed-copy CarrierDocument and the
-// audit trail of who typed their name into the page.
+// Signing writes new rows: the signed-copy CarrierDocument, the load's Documents row (ShipmentDocument,
+// the Public-folder signed rate con the invoice packet picks up) and the audit trail.
 rateConSignApiFn.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:PutItem'],
-    resources: [signCarrierDocTable.tableArn, signAuditLogTable.tableArn],
+    resources: [signCarrierDocTable.tableArn, signAuditLogTable.tableArn, signShipmentDocTable.tableArn],
   })
 )
-// Reads the unsigned PDF to presign a GET of it, writes the stamped copy back.
+// The previous signed version is flipped to SUPERSEDED (UpdateItem), and the shipment's documents are read
+// through the shipmentId index to find it. Nothing here can delete a document.
+rateConSignApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:UpdateItem'],
+    resources: [signShipmentDocTable.tableArn],
+  })
+)
+rateConSignApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [signShipmentDocTable.tableArn, `${signShipmentDocTable.tableArn}/index/*`, signAuditLogTable.tableArn, `${signAuditLogTable.tableArn}/index/*`],
+  })
+)
+// An old link finds the assignment it belonged to, to say the rate con was replaced.
+rateConSignApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem'],
+    resources: [signLoadCarrierTable.tableArn],
+  })
+)
+// Reads the unsigned PDF to presign a GET of it; writes the stamped copy under shipment-docs/ (the
+// document-upload convention) and reads it back only to heal a lost Documents row.
 backend.storage.resources.bucket.grantReadWrite(rateConSignApiFn, 'rate-confirms/*')
+backend.storage.resources.bucket.grantReadWrite(rateConSignApiFn, 'shipment-docs/*')
 
 rateConSignApiFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',    signLoadCarrierTable.tableName)
 rateConSignApiFn.addEnvironment('LOAD_TABLE_NAME',            signLoadTable.tableName)
@@ -2106,6 +2130,7 @@ rateConSignApiFn.addEnvironment('CARRIER_DOCUMENT_TABLE_NAME', signCarrierDocTab
 rateConSignApiFn.addEnvironment('DIVISION_TABLE_NAME',        signDivisionTable.tableName)
 rateConSignApiFn.addEnvironment('SETTINGS_TABLE_NAME',        signSettingsTable.tableName)
 rateConSignApiFn.addEnvironment('AUDIT_LOG_TABLE_NAME',       signAuditLogTable.tableName)
+rateConSignApiFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', signShipmentDocTable.tableName)
 rateConSignApiFn.addEnvironment('BUCKET_NAME',                backend.storage.resources.bucket.bucketName)
 
 const rateConSignApiUrl = new FunctionUrl(rateConSignApiFn.stack, 'RateConSignApiUrl', {

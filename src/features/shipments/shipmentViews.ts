@@ -10,6 +10,7 @@
  */
 import { deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
 import { phaseInputOfRow } from './deliveryPhaseInputs'
+import { rateConStatusText } from '@/lib/rateConLabel'
 import type { Stop } from '@/types'
 import type {
   ApStatus,
@@ -223,6 +224,7 @@ export type ShipmentRow = ShipmentRecord & {
   pickupEtaAt?: string | null
   deliveryEtaAt?: string | null
   rateConStatus?: RateConStatus | null
+  rateConVersion?: number | null
   rateConSentAt?: string | null
   rateConSignedAt?: string | null
   carrierRateCents?: number | null
@@ -945,7 +947,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'tripNumber', label: 'Trip #', group: 'Carrier leg', value: (r) => r.tripNumber ?? '', width: 110 },
   { key: 'pickupEta', label: 'Pickup ETA', group: 'Carrier leg', value: (r) => formatBoardDateTime(r.pickupEtaAt), width: 140 },
   { key: 'deliveryEta', label: 'Delivery ETA', group: 'Carrier leg', value: (r) => formatBoardDateTime(r.deliveryEtaAt), width: 140 },
-  { key: 'rateConStatus', label: 'Rate Con Status', group: 'Carrier leg', value: (r) => enumLabel(r.rateConStatus), width: 130 },
+  { key: 'rateConStatus', label: 'Rate Con Status', group: 'Carrier leg', value: (r) => (r.rateConStatus ? rateConStatusText(r.rateConStatus, r.rateConVersion) : enumLabel(r.rateConStatus)), width: 130 },
   { key: 'rateConSentAt', label: 'Rate Con Sent At', group: 'Carrier leg', value: (r) => formatBoardDateTime(r.rateConSentAt), width: 150 },
   { key: 'rateConSignedAt', label: 'Rate Con Signed At', group: 'Carrier leg', value: (r) => formatBoardDateTime(r.rateConSignedAt), width: 150 },
   { key: 'carrierRate', label: 'Carrier Rate', group: 'Carrier leg', value: (r) => formatCentsOrEmpty(r.carrierRateCents), width: 120 },
