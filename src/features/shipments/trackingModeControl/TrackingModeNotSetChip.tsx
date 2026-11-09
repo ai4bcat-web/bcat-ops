@@ -8,7 +8,7 @@ import { parseTrackingPrefs, trackingModeNotSet, type TrackingPrefsOverride } fr
 import { TRACKING_SET_PATH, isCoveredAndLive } from './trackingModeRow'
 import './trackingModeControl.css'
 
-export const TRACKING_NOT_SET_TEXT = 'Tracking mode not set'
+export const TRACKING_NOT_SET_TEXT = 'Tracking link not set'
 export const TRACKING_NOT_REQUIRED_TEXT = 'Tracking not required'
 
 export function TrackingModeNotSetChip({ shipment, hasCarrier, className }: {
@@ -46,7 +46,7 @@ export function TrackingModeNotSetRowChip({ row }: {
   }
   if (!trackingModeNotSet(row, true)) return null
   const className = 'tms-trk-notset tms-trk-notset-row'
-  const title = 'Covered, but no tracking mode yet. Click to set tracking or mark it not required.'
+  const title = 'Covered, but no tracking link sent yet. Click to send one or mark tracking not required.'
   if (!row.id) return <span className={className} data-testid="tracking-not-set" title={title}>{TRACKING_NOT_SET_TEXT}</span>
   const id = row.id
   const markNotRequired = async () => {

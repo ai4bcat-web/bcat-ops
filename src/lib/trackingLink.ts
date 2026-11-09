@@ -335,7 +335,7 @@ export interface CarrierViewInput {
 }
 
 /** How often the driver's page posts a fix while it is open. A server value, so it can change without shipping the page. */
-export const SHARE_EVERY_MIN = 5
+export const SHARE_EVERY_MIN = 15
 /** Bump when the consent wording changes; recorded with the consent. */
 export const CONSENT_VERSION = 'ao-1'
 /** The statuses at which a load is done as far as sharing goes. */

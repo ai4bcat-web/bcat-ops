@@ -15,7 +15,7 @@ function geoMessage(err: GeolocationPositionError): string {
 }
 
 /** A phone that has moved this far since the last post sends a fix without waiting out the cadence. */
-const MOVED_MILES = 0.62
+const MOVED_MILES = 3
 /** How often a quiet watch is checked against the cadence; a stationary phone raises no position events. */
 const CHECK_MS = 30_000
 const MINUTE_MS = 60_000

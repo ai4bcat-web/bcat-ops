@@ -123,7 +123,7 @@ describe('CarrierTrackingCard: the per-load tracking mode', () => {
   it('a booked, unconfirmed load shows the customer suggestion, the amber chip, and Confirm writes confirmed through SET_TRACKING_PREFS', async () => {
     const refreshBundle = vi.fn(async () => {})
     show({ bundle: booked() as never, customer, refreshBundle }, 'edit')
-    expect(screen.getByTestId('tracking-not-set').textContent).toBe('Tracking mode not set')
+    expect(screen.getByTestId('tracking-not-set').textContent).toBe('Tracking link not set')
     expect((screen.getByTestId('tracking-mode-AGENT') as HTMLInputElement).checked).toBe(true)
     expect(screen.getByTestId('tracking-mode-suggested').textContent).toContain('Suggested from the customer')
     fireEvent.click(screen.getByTestId('tracking-mode-MANUAL'))
