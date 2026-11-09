@@ -57,8 +57,9 @@ export const PROD_WRITE_SETS = {
   awCarriers: { models: ['Carrier', 'CarrierPaymentMethod', 'CarrierTaxVault', 'AuditLog'] },
   // `awRestoreDeleted.mjs --apply`: put-if-absent of the rows DELETE_SHIPMENTS exported (the models it deletes) + one AuditLog row per restored shipment.
   awRestoreDeleted: { models: ['ArPayment', 'ApPayment', 'LegacyAljexRow', 'Commission', 'FactoringItem', 'Invoice', 'CarrierBill', 'LaneRateSample', 'LoadFinancials', 'LoadCharge', 'LoadCheckCall', 'TrackingLink', 'ShipmentDocument', 'ShipmentNotice', 'ShipmentPosting', 'ShipmentMessage', 'LoadCarrier', 'Load', 'Order', 'Shipment', 'AuditLog'] },
-  // `awLocationRename.mjs --apply`: the two approved Location renames (name/street/city/state/zip + normalizedName/normalizedAddress, geocode cleared) + one AuditLog row per row.
-  awLocationRename: { models: ['Location', 'AuditLog'] },
+  // `awLocationRename.mjs --apply`: the approved Location renames (name/street/city/state/zip + normalizedName/normalizedAddress, geocode cleared) + one AuditLog row per row;
+  // `--with-stop-copies`: Load.stops[].name / originName / destinationName copies of the old name + one AuditLog row per Load.
+  awLocationRename: { models: ['Location', 'Load', 'AuditLog'] },
   // `awCustomerEmail.mjs --apply`: enrich-only Customer.apEmail / invoiceCopyEmails / contactEmail (where empty) + one AuditLog row per customer.
   awCustomerEmail: { models: ['Customer', 'AuditLog'] },
 };
