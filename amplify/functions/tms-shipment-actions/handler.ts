@@ -5583,7 +5583,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
 
   // Step AM. COVER_CARRIER is BOOK_CARRIER plus the MCP rules: UNACCEPTABLE blocks, MODERATE needs an
   // acknowledgement, and a carrier that is not yet ACTIVE is assigned in the setup-pending state.
-  const cover = options.cover === true ? applyCoverRules(carrier, evaluated) : null
+  const cover = options.cover === true ? applyCoverRules(carrier, evaluated, { isAdmin: caller.isAdmin }) : null
   const blocks = cover ? cover.blocks : evaluated.blocks
   const warnings = cover ? cover.warnings : evaluated.warnings
   if (blocks.length > 0) {

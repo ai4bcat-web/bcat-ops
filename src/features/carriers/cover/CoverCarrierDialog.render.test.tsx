@@ -43,6 +43,7 @@ vi.mock('@/features/shipments/trackingModeControl', () => ({
   ),
 }))
 vi.mock('sonner', () => ({ toast: mocks.toast }))
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isAdmin: false, isOwner: false }) }))
 
 const NOW = Date.parse('2026-11-03T12:00:00Z')
 const BODY = {

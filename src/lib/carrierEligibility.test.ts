@@ -338,6 +338,14 @@ describe('applyCoverRules (Step AM)', () => {
   const finding = (reason: BookingReason): BookingFinding => ({ reason, key: reason, detail: reason, adminOnly: false })
   const reasons = (list: BookingFinding[]) => list.map((f) => f.reason)
 
+  it('an admin gets an admin-only warning instead of a block for UNACCEPTABLE; a non-admin is still blocked', () => {
+    const asAdmin = applyCoverRules({ status: 'PENDING', mcpStatus: 'UNACCEPTABLE_REVIEW', mcpInvitedAt: '2026-11-09T00:00:00Z' }, { blocks: [], warnings: [] }, { isAdmin: true })
+    expect(reasons(asAdmin.blocks)).toEqual([])
+    expect(asAdmin.warnings.map((w) => [w.reason, w.adminOnly])).toEqual([['MCP_UNACCEPTABLE', true]])
+    const other = applyCoverRules({ status: 'ACTIVE', mcpStatus: 'UNACCEPTABLE' }, { blocks: [], warnings: [] })
+    expect(reasons(other.blocks)).toEqual(['MCP_UNACCEPTABLE'])
+  })
+
   it('blocks an UNACCEPTABLE packet, even on an ACTIVE carrier, and warns (acknowledgeable) on MODERATE', () => {
     expect(reasons(applyCoverRules({ status: 'ACTIVE', mcpStatus: 'UNACCEPTABLE' }, { blocks: [], warnings: [] }).blocks)).toEqual(['MCP_UNACCEPTABLE'])
     expect(reasons(applyCoverRules({ status: 'ACTIVE', mcpStatus: 'UNACCEPTABLE_REVIEW' }, { blocks: [], warnings: [] }).blocks)).toEqual(['MCP_UNACCEPTABLE'])
