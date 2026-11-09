@@ -5,6 +5,7 @@ import {
   planCarriers, refusalFor, verifyExport,
 } from './lib/carrierPlan.mjs';
 import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
+import { indexShipDates as preIndex, planPreDelete, selectShipments } from './lib/preDelete.mjs';
 import { resolveScripts } from './prodBackup.mjs';
 import { ALLOW_ENV, PROD_SUFFIX, DEV_SUFFIX, tableName } from './lib/prodGate.mjs';
 import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -65,6 +66,28 @@ describe('which shipments awPreDelete removes (retained set)', () => {
     const d = deletedByPreDelete({ shipmentInfo: info, ...data });
     expect([...d.deletedApPayments]).toEqual(['p1']);
     expect([...d.deletedBills]).toEqual(['b1']);
+  });
+});
+
+describe('retained set equals what awPreDelete deletes', () => {
+  it('same shipments, LoadCarriers, CarrierBills and ApPayments as preDelete.planPreDelete', () => {
+    const data = baseData({
+      loadCarriers: [lc('lc1', 's1', 'c1'), lc('lc2', 's2', 'c1'), lc('lc3', 's3', 'c2'), lc('lc4', 's5', 'c2')],
+      bills: [{ id: 'b1', shipmentId: 's1', loadCarrierId: 'lc1', loadId: 'l-s1' }, { id: 'b2', shipmentId: 's2', loadCarrierId: 'lc2', loadId: 'l-s2' }, { id: 'b3', shipmentId: 's3', loadCarrierId: 'lc3', loadId: 'l-s3' }],
+      apPayments: [
+        { id: 'p1', applications: [{ billId: 'b1', amountCents: 5 }], appliedCents: 5, amountCents: 5, unappliedCents: 0 },
+        { id: 'p2', applications: [{ billId: 'b1', amountCents: 5 }, { billId: 'b2', amountCents: 5 }], appliedCents: 10, amountCents: 10, unappliedCents: 0 },
+        { id: 'p3', applications: [{ billId: 'b3', amountCents: 5 }], appliedCents: 5, amountCents: 5, unappliedCents: 3 },
+      ],
+    });
+    const mine = run(data);
+    const sel = selectShipments({ shipments: data.shipments, shipDates: preIndex(exportRows), shipBefore: '2025-01-01' });
+    const theirs = planPreDelete({ Shipment: data.shipments, Load: data.loads, LoadCarrier: data.loadCarriers, CarrierBill: data.bills, ApPayment: data.apPayments }, sel);
+    const ids = (rows) => rows.map((r) => r.id).sort();
+    expect([...mine.shipmentInfo].filter(([, v]) => v.deleted).map(([id]) => id).sort()).toEqual(ids(sel.delete));
+    expect([...mine.deleted.deletedLoadCarriers].sort()).toEqual(ids(theirs.deletes.LoadCarrier));
+    expect([...mine.deleted.deletedBills].sort()).toEqual(ids(theirs.deletes.CarrierBill));
+    expect([...mine.deleted.deletedApPayments].sort()).toEqual(ids(theirs.deletes.ApPayment));
   });
 });
 
