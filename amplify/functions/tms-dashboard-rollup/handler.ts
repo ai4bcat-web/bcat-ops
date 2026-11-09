@@ -22,6 +22,7 @@ import {
   ROLLUP_SCHEMA_VERSION,
   rollupSourceEmpty,
   type LivePayload,
+  type RepSplit,
   type MonthPayload,
   type RollupSourceTable,
 } from '../../../src/lib/dashboardRollup'
@@ -33,7 +34,9 @@ import {
   kindOf,
   periodKeyOf,
   rollupSource,
+  repSinkS3,
   rollupStore,
+  type RepSink,
   type RollupRow,
   type RollupSource,
   type RollupStore,
@@ -79,7 +82,7 @@ export interface RollupSummary {
 
 /** The three pure computes, injectable so the engine is testable without the real lib. */
 export interface Computes {
-  month(src: RollupSource, month: string): Promise<MonthPayload>
+  month(src: RollupSource, month: string, repOut?: RepSplit): Promise<MonthPayload>
   live(src: RollupSource): Promise<LivePayload>
   legacy(src: RollupSource, month: string): Promise<LegacyMonthPayload>
 }
@@ -88,6 +91,8 @@ export interface RollupDeps {
   store: RollupStore
   source: RollupSource
   computes: Computes
+  /** Where a month's per-rep split goes (private S3); absent = not written (tests, local). */
+  repSink?: RepSink
   /** Source table name (from the stream ARN) → RollupSourceTable. */
   tableByName: Record<string, RollupSourceTable>
   now(): Date
@@ -96,7 +101,7 @@ export interface RollupDeps {
 }
 
 export const libComputes: Computes = {
-  month: (src, month) => computeMonth(src, month),
+  month: (src, month, repOut) => computeMonth(src, month, repOut),
   live: (src) => computeLive(src),
   legacy: (src, month) => computeLegacyMonth(src, month),
 }
@@ -175,7 +180,8 @@ export async function recomputeKey(
     const tally: Record<string, number> = {}
     const src = counted(deps.source, tally)
     let payload: MonthPayload | LivePayload | LegacyMonthPayload
-    if (kind === 'M') payload = await deps.computes.month(src, period)
+    const repSplit: RepSplit = {}
+    if (kind === 'M') payload = await deps.computes.month(src, period, repSplit)
     else if (kind === 'LG') payload = await deps.computes.legacy(src, period)
     else if (kind === 'L') payload = await deps.computes.live(src)
     else throw new Error(`not a computable rollup key: ${rowId}`)
@@ -211,6 +217,12 @@ export async function recomputeKey(
       updatedAt: stamp,
     }
     await store.put(row)
+    // The per-rep split is private (the DashboardRollup table is readable by every signed-in user): its own S3 object.
+    // A failed write is logged, never fails the row; the next recompute of the month rewrites it.
+    if (kind === 'M' && deps.repSink) {
+      await deps.repSink.put({ v: 1, month: period, computedAt: started.toISOString(), rep: repSplit })
+        .catch((err: unknown) => console.error('[rollup] BROKERAGE_REP_SINK_FAILED', period, err))
+    }
     if (seenDirty) await store.clearDirty(rowId, seenDirty)
     return tooLarge ? 'too-large' : 'written'
   } finally {
@@ -376,6 +388,7 @@ export function depsFromEnv(): RollupDeps {
     store: rollupStore(db, envName('DASHBOARD_ROLLUP_TABLE_NAME')),
     source: rollupSource(db, tables),
     computes: libComputes,
+    repSink: process.env.DATA_SAFETY_BUCKET_NAME ? repSinkS3(process.env.DATA_SAFETY_BUCKET_NAME) : undefined,
     tableByName: {
       [tables.shipment]: 'Shipment',
       [tables.order]: 'Order',
