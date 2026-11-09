@@ -301,7 +301,8 @@ describe('buildNavSections', () => {
 
   it('falls back to the seed divisions before the table has loaded', () => {
     const { sections } = buildNavSections({ divisions: null, hasPageAccess: () => true })
-    expect(sections.map((s) => s.key)).toEqual(['ASSETS', 'CAR_SHIPPING'])
+    // The Company section is always built (it does not depend on a Company division row).
+    expect(sections.map((s) => s.key)).toEqual(['ASSETS', 'CAR_SHIPPING', 'COMPANY'])
   })
 
   it('has a route behind every nav row (a row with no route is a dead link)', () => {
