@@ -3122,6 +3122,19 @@ async function archiveShipmentView(
   return archived
 }
 
+/** The one Shipments column layout everybody sees. Keep in step with src/features/shipments/teamColumnLayout.ts. */
+const TEAM_DEFAULT_COLUMN_TEMPLATE_ID = 'shipments-team-default'
+
+function isColumnLayoutAdmin(caller: Caller): boolean {
+  return caller.email === OWNER_EMAIL || (caller.groups ?? []).includes(ADMIN_GROUP)
+}
+
+function assertCanWriteTeamDefault(id: string, caller: Caller): void {
+  if (id === TEAM_DEFAULT_COLUMN_TEMPLATE_ID && !isColumnLayoutAdmin(caller)) {
+    throw new Error('Forbidden: only an admin can set the team default column layout')
+  }
+}
+
 function authorizeColumnTemplateMutation(
   existing: Record<string, unknown>,
   caller: Caller,
@@ -3167,12 +3180,14 @@ async function saveColumnTemplate(
   for (const key of pinned) {
     if (!columns.includes(key)) throw new Error(`"${key}" is pinned but is not one of the template's columns`)
   }
-  const shared = optionalBoolean(input.shared) ?? false
   const id = optionalString(input.id, 64) ?? newId()
+  assertCanWriteTeamDefault(id, caller)
+  // The team default is read by everyone by definition.
+  const shared = id === TEAM_DEFAULT_COLUMN_TEMPLATE_ID ? true : optionalBoolean(input.shared) ?? false
 
   const tableName = SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME
   const existing = await getById(tableName, id)
-  if (existing) {
+  if (existing && id !== TEAM_DEFAULT_COLUMN_TEMPLATE_ID) {
     authorizeColumnTemplateMutation(existing, caller)
   }
 
@@ -3207,10 +3222,11 @@ async function deleteColumnTemplate(
   caller: Caller,
 ): Promise<Record<string, unknown>> {
   const id = assertString(input.id, 'id')
+  assertCanWriteTeamDefault(id, caller)
   const tableName = SHIPMENT_COLUMN_TEMPLATE_TABLE_NAME
   const existing = await getById(tableName, id)
   if (!existing) throw new Error(`Column template not found: ${id}`)
-  authorizeColumnTemplateMutation(existing, caller)
+  if (id !== TEAM_DEFAULT_COLUMN_TEMPLATE_ID) authorizeColumnTemplateMutation(existing, caller)
 
   try {
     await dynamo.send(

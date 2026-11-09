@@ -2694,6 +2694,24 @@ describe('SAVE_COLUMN_TEMPLATE and DELETE_COLUMN_TEMPLATE', () => {
     expect(tables.templates.has('t-private')).toBe(true)
   })
 
+  it('refuses a non-admin write or delete of the team default layout; an admin may write it (forced shared)', async () => {
+    const tables = columnTemplateTables()
+    await expect(
+      handler(event('SAVE_COLUMN_TEMPLATE', { id: 'shipments-team-default', name: 'x', columns: ['status'], shared: true }, TMS_CALLER)),
+    ).rejects.toThrow('only an admin can set the team default column layout')
+    expect(tables.templates.size).toBe(0)
+
+    const saved = (await handler(event('SAVE_COLUMN_TEMPLATE', { id: 'shipments-team-default', name: 'Team', columns: ['status', 'proNumber'], shared: false }, ADMIN))) as Record<string, unknown>
+    expect(saved).toMatchObject({ shared: true, version: 1 })
+    // A second admin save updates the row; a non-admin who is its recorded owner still cannot.
+    await handler(event('SAVE_COLUMN_TEMPLATE', { id: 'shipments-team-default', name: 'Team', columns: ['status'] }, ADMIN))
+    expect(tables.templates.get('shipments-team-default')).toMatchObject({ version: 2, columns: ['status'] })
+    await expect(
+      handler(event('DELETE_COLUMN_TEMPLATE', { id: 'shipments-team-default' }, TMS_CALLER)),
+    ).rejects.toThrow('only an admin can set the team default column layout')
+    expect(tables.templates.has('shipments-team-default')).toBe(true)
+  })
+
   it('lets an admin update a shared template', async () => {
     const tables = columnTemplateTables({ 'ShipmentColumnTemplate-test': [template({ id: 't-shared', shared: true })] })
     const result = (await handler(event('SAVE_COLUMN_TEMPLATE', { id: 't-shared', name: 'Updated', columns: ['status'] }, ADMIN))) as Record<string, unknown>

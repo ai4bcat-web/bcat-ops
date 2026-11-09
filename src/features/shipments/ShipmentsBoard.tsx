@@ -61,7 +61,6 @@ import { useShipments } from '@/hooks/useShipments'
 import { useStaff } from '@/hooks/useStaff'
 import {
   batchShipmentTask,
-  deleteShipmentColumnTemplate,
   duplicateShipment,
   getTmsSettings,
   listShipmentColumnTemplates,
@@ -109,6 +108,12 @@ import {
   sentence,
   statusCellText,
 } from './shipmentGridColumns'
+import {
+  resolveTeamLayout,
+  TEAM_DEFAULT_COLUMN_TEMPLATE_ID,
+  TEAM_DEFAULT_COLUMN_TEMPLATE_NAME,
+  type TeamColumnLayout,
+} from './teamColumnLayout'
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { BOARD_FLAGS, BOARD_FLAG_LABELS, flagCounts, matchesFlags, type BoardFlag } from './boardChips'
 import { BatchActionBar } from './board/BatchActionBar'
@@ -184,13 +189,6 @@ function batchTaskOf(
     return { task: 'ASSIGN_DRIVER', params: driverParams ? driverParams(driverId) : { driverId } }
   }
   return null
-}
-
-function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false
-  const sa = [...a].sort()
-  const sb = [...b].sort()
-  return sa.every((v, i) => v === sb[i])
 }
 
 /** Step W: a live Ivan Cartage shipment nobody is driving. */
@@ -521,7 +519,8 @@ function BoardPane({
 
   const listRows = useMemo(() => allRows.filter((r) => inShipmentList(r, list, year)), [allRows, list, year])
 
-  // Columns, widths, density, sort and the summary strip persist per user and per pane.
+  // Density, sort and the summary strip persist per user and per pane. Columns, widths and pins do
+  // not: everybody sees the team default, which only an admin edits (see teamColumnLayout.ts).
   const prefs = useDenseGridPrefs({
     gridId: `shipments-${pane}`,
     email,
@@ -529,7 +528,15 @@ function BoardPane({
     validKeys: SHIPMENT_COLUMN_KEYS,
     defaultSort: DEFAULT_SORT,
   })
-  const columnKeys = prefs.columns
+  const teamLayout = useMemo(
+    () => resolveTeamLayout(columnTemplates, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS),
+    [columnTemplates],
+  )
+  // An admin's unsaved edit of the team layout; null outside edit mode.
+  const [layoutDraft, setLayoutDraft] = useState<TeamColumnLayout | null>(null)
+  const [layoutSaving, setLayoutSaving] = useState(false)
+  const layout = layoutDraft ?? teamLayout
+  const columnKeys = layout.columns
   const [columnsOpen, setColumnsOpen] = useState(false)
   const [filters, setFilters] = useState<DenseFilters>({})
   const [flags, setFlags] = useState<ReadonlySet<BoardFlag>>(() => new Set())
@@ -543,7 +550,6 @@ function BoardPane({
   const [batchAction, setBatchAction] = useState('')
   const [batchResults, setBatchResults] = useState<BatchTaskResult[] | undefined>()
   const [batchRunning, setBatchRunning] = useState(false)
-  const [columnTemplateId, setColumnTemplateId] = useState<string | null>(null)
   const [dialogShipment, setDialogShipment] = useState<ShipmentRow | null>(null)
   // Frozen when opened: the auto-refresh must not pull the rows (and this dialog's Restore) out from under it.
   const [deleteTargets, setDeleteTargets] = useState<Array<{ id: string; number: string }> | null>(null)
@@ -617,34 +623,27 @@ function BoardPane({
   const sortedRows = useMemo(() => sortDenseRows(filteredRows, gridColumns, prefs.sort), [filteredRows, gridColumns, prefs.sort])
   const shownRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
 
-  const activeTemplate = useMemo(
-    () => columnTemplates.find((ct) => ct.id === columnTemplateId) ?? null,
-    [columnTemplates, columnTemplateId],
-  )
-
-  const activeColumnTemplateId = useMemo(() => {
-    if (columnTemplateId) return columnTemplateId
-    const t = columnTemplates.find(
-      (ct) => ct.columns.length === columnKeys.length && arraysEqual(ct.columns, columnKeys),
-    )
-    return t?.id ?? null
-  }, [columnTemplateId, columnTemplates, columnKeys])
-
-  const columnTemplateOptions = useMemo(
-    () => columnTemplates.map((ct) => ({ id: ct.id, name: ct.name })),
-    [columnTemplates],
-  )
-
-  const handleSelectColumnTemplate = useCallback(
-    (id: string) => {
-      const t = columnTemplates.find((ct) => ct.id === id)
-      if (t) {
-        prefs.applyLayout({ columns: [...t.columns], widths: { ...(t.widths ?? {}) }, pinned: [...(t.pinned ?? [])] })
-        setColumnTemplateId(id)
-      }
-    },
-    [columnTemplates, prefs],
-  )
+  const saveTeamLayout = useCallback(async () => {
+    if (!layoutDraft) return
+    setLayoutSaving(true)
+    try {
+      await saveShipmentColumnTemplate({
+        id: TEAM_DEFAULT_COLUMN_TEMPLATE_ID,
+        name: TEAM_DEFAULT_COLUMN_TEMPLATE_NAME,
+        columns: layoutDraft.columns,
+        widths: layoutDraft.widths,
+        pinned: layoutDraft.pinned,
+        shared: true,
+      })
+      toast.success('Team default saved. Everyone sees it now.')
+      setLayoutDraft(null)
+      refreshTemplates()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Save failed')
+    } finally {
+      setLayoutSaving(false)
+    }
+  }, [layoutDraft, refreshTemplates])
 
   const exportCsv = useCallback(() => {
     const csv = toCsv(filteredRows, columnKeys)
@@ -1022,19 +1021,25 @@ function BoardPane({
         ))}
         <ClearFiltersButton count={activeFilterCount(filters) + flags.size} onClear={clearFilters} />
         <span className="tms-dense-spacer" />
-        {columnTemplateOptions.length > 0 && (
-          <TmsSelect
-            aria-label="Column template"
-            className="tms-dense-select"
-            value={activeColumnTemplateId ?? ''}
-            onChange={(e) => { if (e.target.value) handleSelectColumnTemplate(e.target.value) }}
-            options={columnTemplateOptions.map((ct) => ({ value: ct.id, label: ct.name }))}
-            placeholder="Column template"
-          />
+        {isAdmin && !layoutDraft && (
+          <TmsButton size="sm" variant="secondary" onClick={() => setLayoutDraft({ columns: [...teamLayout.columns], widths: { ...teamLayout.widths }, pinned: [...teamLayout.pinned] })}>
+            <Columns3 size={14} aria-hidden="true" /> Edit layout
+          </TmsButton>
         )}
-        <TmsButton size="sm" variant="secondary" onClick={() => setColumnsOpen(true)}>
-          <Columns3 size={14} aria-hidden="true" /> Columns
-        </TmsButton>
+        {isAdmin && layoutDraft && (
+          <>
+            <span className="text-xs text-muted-foreground" role="status">Editing the team layout: drag headers, resize, or use Columns.</span>
+            <TmsButton size="sm" variant="secondary" onClick={() => setColumnsOpen(true)}>
+              <Columns3 size={14} aria-hidden="true" /> Columns
+            </TmsButton>
+            <TmsButton size="sm" variant="primary" disabled={layoutSaving} onClick={() => void saveTeamLayout()}>
+              Save as team default
+            </TmsButton>
+            <TmsButton size="sm" variant="ghost" disabled={layoutSaving} onClick={() => setLayoutDraft(null)}>
+              Cancel
+            </TmsButton>
+          </>
+        )}
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
         <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
       </div>
@@ -1075,14 +1080,18 @@ function BoardPane({
             rowKey={(r) => r.id}
             renderCell={renderCellWithActions}
             density={prefs.density}
-            userWidths={prefs.widths}
-            stickyCount={Math.max(1, prefs.pinned.length)}
+            userWidths={layout.widths}
+            stickyCount={Math.max(1, layout.pinned.length)}
             sort={prefs.sort}
             onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
             filters={filters}
             onFilterChange={setColumnFilter}
-            onReorder={(from, to) => prefs.setColumns(reorderKeys(columnKeys, from, to))}
-            onResize={prefs.setWidth}
+            onReorder={layoutDraft ? (from, to) => setLayoutDraft((d) => {
+              if (!d) return d
+              const columns = reorderKeys(d.columns, from, to)
+              return { ...d, columns, pinned: d.pinned.filter((k) => columns.includes(k)) }
+            }) : undefined}
+            onResize={layoutDraft ? (key, width) => setLayoutDraft((d) => (d ? { ...d, widths: { ...d.widths, [key]: width } } : d)) : undefined}
             selectable
             selectedIds={selectedSet}
             toneOf={boardRowTone}
@@ -1139,49 +1148,17 @@ function BoardPane({
         results={batchResults}
       />
 
-      <ColumnsDialog
-        catalog={SHIPMENT_GRID_COLUMNS}
-        open={columnsOpen}
-        onOpenChange={setColumnsOpen}
-        columns={columnKeys}
-        widths={prefs.widths}
-        pinned={prefs.pinned}
-        onApply={(next) => {
-          prefs.applyLayout({ ...next, replaceWidths: true })
-          setColumnTemplateId(null)
-        }}
-        onSaveTemplate={async (next) => {
-          try {
-            await saveShipmentColumnTemplate({
-              id: activeColumnTemplateId ?? undefined,
-              name: next.name,
-              columns: next.columns,
-              widths: next.widths,
-              pinned: next.pinned,
-              shared: next.shared,
-            })
-            prefs.applyLayout({ columns: next.columns, widths: next.widths, pinned: next.pinned })
-            toast.success('Template saved')
-            refreshTemplates()
-          } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Save failed')
-          }
-        }}
-        onDeleteTemplate={
-          activeTemplate && (isOwner || isAdmin || activeTemplate.ownerEmail === email)
-            ? async () => {
-                try {
-                  await deleteShipmentColumnTemplate({ id: activeTemplate.id })
-                  toast.success('Template deleted')
-                  setColumnTemplateId(null)
-                  refreshTemplates()
-                } catch (err) {
-                  toast.error(err instanceof Error ? err.message : 'Delete failed')
-                }
-              }
-            : undefined
-        }
-      />
+      {isAdmin && layoutDraft && (
+        <ColumnsDialog
+          catalog={SHIPMENT_GRID_COLUMNS}
+          open={columnsOpen}
+          onOpenChange={setColumnsOpen}
+          columns={layoutDraft.columns}
+          widths={layoutDraft.widths}
+          pinned={layoutDraft.pinned}
+          onApply={(next) => setLayoutDraft({ columns: next.columns, widths: next.widths, pinned: next.pinned })}
+        />
+      )}
 
       {openDrawerId && (
         <ShipmentDrawer
