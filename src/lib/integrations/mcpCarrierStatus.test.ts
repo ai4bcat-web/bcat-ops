@@ -19,9 +19,10 @@ describe('mcpCarrierStatusPatch: MyCarrierPackets drives Carrier.status', () => 
     expect(mcpCarrierStatusPatch({ status: 'PENDING', mcpStatus }, NOW)).toEqual({})
   })
 
-  it('an UNACCEPTABLE review never activates, and switches an ACTIVE carrier off for safety', () => {
-    expect(mcpCarrierStatusPatch({ status: 'PENDING', mcpStatus: 'UNACCEPTABLE' }, NOW)).toEqual({})
-    expect(mcpCarrierStatusPatch({ status: 'ACTIVE', mcpStatus: 'UNACCEPTABLE_REVIEW' }, NOW)).toMatchObject({ status: 'INACTIVE', statusReason: 'SAFETY_ISSUES' })
+  it('a finished packet activates whatever its rating, and an UNACCEPTABLE rating never switches an Active carrier off (the rating gates assignment instead)', () => {
+    expect(mcpCarrierStatusPatch({ status: 'PENDING', mcpStatus: 'UNACCEPTABLE', insurancePolicies: GOOD_POLICIES }, NOW)).toMatchObject({ status: 'ACTIVE' })
+    expect(mcpCarrierStatusPatch({ status: 'PENDING', mcpStatus: 'UNACCEPTABLE_REVIEW', insurancePolicies: GOOD_POLICIES }, NOW)).toMatchObject({ status: 'ACTIVE' })
+    expect(mcpCarrierStatusPatch({ status: 'ACTIVE', mcpStatus: 'UNACCEPTABLE_REVIEW', insurancePolicies: GOOD_POLICIES }, NOW)).toEqual({})
   })
 
   it('a lapse flips an ACTIVE carrier INACTIVE with the reason: insurance, authority', () => {

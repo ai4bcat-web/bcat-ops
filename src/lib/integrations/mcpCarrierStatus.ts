@@ -22,8 +22,9 @@ export type McpLapseReason = 'EXPIRED_INSURANCE' | 'INACTIVE_AUTHORITY' | 'SAFET
 
 /** Why MCP's data says this carrier may not haul for us right now, or null when nothing does. */
 export function mcpLapseOf(carrier: Row, now: string): McpLapseReason | null {
-  const status = typeof carrier.mcpStatus === 'string' ? carrier.mcpStatus : ''
-  if (status === 'UNACCEPTABLE' || status === 'UNACCEPTABLE_REVIEW') return 'SAFETY_ISSUES'
+  // MyCarrierPackets' UNACCEPTABLE rating is NOT a lapse any more (Ryne 2026-11-09): a carrier that finished its packet is Active
+  // (setup is complete); the rating is enforced when it is assigned to a load (admin override with acknowledgement, everyone else
+  // blocked). Insurance and authority lapses still deactivate.
   if (carrier.authorityStatus === 'INACTIVE') return 'INACTIVE_AUTHORITY'
   const effective = effectiveCarrierStatus(
     { status: 'ACTIVE', statusReason: null, insurancePolicies: carrier.insurancePolicies as CarrierRecord['insurancePolicies'] },
