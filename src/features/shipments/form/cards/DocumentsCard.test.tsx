@@ -41,6 +41,23 @@ describe('DocumentsCard', () => {
     expect(names()).toEqual(['internal.pdf'])
   })
 
+  it('the POD and Rate confirmation slots show what is on file and where it came from, or offer an upload', () => {
+    const rc = { ...doc('9', 'Signed Rate Confirmation v1.pdf', 'ALL', 'RATE_CON'), uploadedBy: 'link:abcd1234', source: 'GENERATED' }
+    setup({ mode: 'edit', bundle: savedBundle({ documents: [rc] }) })
+    const rcSlot = screen.getByTestId('card-documents-slot-RATE_CON')
+    expect(rcSlot.getAttribute('data-on-file')).toBe('true')
+    expect(rcSlot.textContent).toContain('e-signed by the carrier')
+    const podSlot = screen.getByTestId('card-documents-slot-POD')
+    expect(podSlot.getAttribute('data-on-file')).toBe('false')
+    expect(podSlot.textContent).toContain('Missing')
+  })
+
+  it('uploading from the POD slot saves a public POD without touching the type picker', async () => {
+    const ctx = setup({ mode: 'edit', bundle: savedBundle({ documents: [] }) })
+    fireEvent.change(screen.getByLabelText('Upload Proof of delivery (POD)'), { target: { files: [pdf('pod.pdf')] } })
+    await waitFor(() => expect(ctx.actions.uploadDocument).toHaveBeenCalledWith(expect.any(File), 'ALL', 'POD'))
+  })
+
   it('on create, picked files are queued on the active tab audience and never uploaded', () => {
     const ctx = setup()
     pick(pdf('tender.pdf'), pdf('rc.pdf'))

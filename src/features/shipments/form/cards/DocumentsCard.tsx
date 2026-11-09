@@ -66,6 +66,18 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
     .map((q, index) => ({ q, index }))
     .filter(({ q }) => (tab === 'public' ? q.audience === 'ALL' : q.audience === 'INTERNAL'))
 
+  // The two documents everybody looks for get their own slot: on file (with where it came from) or an upload button.
+  const slotDoc = (docType: ShipmentDocumentType) => all.find((d) => d.type === docType && d.status === 'ACTIVE' && PUBLIC_AUDIENCES.includes(d.audience))
+  const slotQueued = (docType: ShipmentDocumentType) => queuedAll.find((q) => q.type === docType)
+  const slotOrigin = (d: { uploadedBy?: string | null; source?: string | null }): string => {
+    const by = d.uploadedBy ?? ''
+    if (by.startsWith('link:')) return 'e-signed by the carrier'
+    if (by.toLowerCase().includes('driver')) return 'from the driver'
+    if (d.source === 'GENERATED') return 'generated'
+    return 'uploaded'
+  }
+  const slotInputs = useRef<Record<string, HTMLInputElement | null>>({})
+
   const checklist = releaseDocItems({ customer: ctx.customer, settings: ctx.settings, bundle: ctx.bundle, queued: queuedAll })
 
   const preview = async (key: string) => {
@@ -74,7 +86,7 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
     }
   }
 
-  const take = async (files: FileList | File[] | null) => {
+  const take = async (files: FileList | File[] | null, asType: ShipmentDocumentType = type, asAudience: 'ALL' | 'INTERNAL' = audience) => {
     const list = Array.from(files ?? [])
     if (list.length === 0) return
     setProblem(null)
@@ -83,8 +95,8 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
       for (const file of list) {
         const bad = fileProblem(file)
         if (bad) { setProblem(bad); continue }
-        if (!saved) ctx.actions.queueDocument(file, audience, type)
-        else await ctx.actions.uploadDocument(file, audience, type)
+        if (!saved) ctx.actions.queueDocument(file, asAudience, asType)
+        else await ctx.actions.uploadDocument(file, asAudience, asType)
       }
     } catch (err) {
       setProblem(err instanceof Error ? err.message : 'The upload failed')
@@ -103,6 +115,47 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
   return (
     <div className="tms-card-body-stack" data-testid="card-documents-body">
       <GenerateRow ctx={ctx} />
+      <div className="tms-card-docslots" data-testid="card-documents-slots">
+        {([['POD', 'Proof of delivery (POD)', 'Fills in by itself when a driver uploads it in the app or the tracking agent files it.'], ['RATE_CON', 'Rate confirmation', 'Fills in by itself when the carrier e-signs it or it arrives from an intake e-mail.']] as const).map(([docType, label, hint]) => {
+          const doc = slotDoc(docType)
+          const queuedDoc = slotQueued(docType)
+          return (
+            <div key={docType} className="tms-card-docslot" data-testid={`card-documents-slot-${docType}`} data-on-file={doc ? 'true' : 'false'}>
+              <div className="tms-card-docslot-head">
+                {doc ? <Check size={14} aria-hidden /> : <Circle size={14} aria-hidden />}
+                <strong>{label}</strong>
+                <span className="tms-muted text-xs">{doc ? 'On file' : queuedDoc ? 'Queued' : 'Missing'}</span>
+              </div>
+              {doc ? (
+                <div className="text-xs">
+                  <button type="button" className="tms-link" onClick={() => void preview(doc.s3Key)}>{doc.name}</button>
+                  <span className="tms-muted">{` · ${slotOrigin(doc)} · ${formatBoardDateTime(doc.uploadedAt)}`}</span>
+                </div>
+              ) : (
+                <p className="tms-muted text-xs">{queuedDoc ? `${queuedDoc.file.name} will upload on create.` : hint}</p>
+              )}
+              <TmsButton
+                size="sm"
+                disabled={disabled}
+                data-testid={`card-documents-slot-${docType}-upload`}
+                onClick={() => slotInputs.current[docType]?.click()}
+              >
+                <Upload size={13} aria-hidden />{doc ? 'Replace' : 'Upload'}
+              </TmsButton>
+              <input
+                ref={(el) => { slotInputs.current[docType] = el }}
+                type="file"
+                className="tms-card-visually-hidden"
+                aria-label={`Upload ${label}`}
+                accept={ACCEPTED_CONTENT_TYPES.join(',')}
+                disabled={disabled}
+                onChange={(e) => { void take(e.target.files, docType, 'ALL'); e.target.value = '' }}
+              />
+            </div>
+          )
+        })}
+      </div>
+
       <TmsTabs
         tabs={[{ key: 'public', label: LABEL.documents.public.text }, { key: 'private', label: LABEL.documents.private.text }]}
         active={tab}
