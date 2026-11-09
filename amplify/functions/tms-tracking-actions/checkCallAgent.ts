@@ -214,6 +214,18 @@ export async function templateVarsFor(
 
 const HOUR_MS = 60 * 60 * 1000
 
+/** Sources that report a position without a person typing it: the driver's link or app, or the truck's ELD. */
+const AUTOMATIC_SOURCES = new Set(['LINK', 'DRIVER_APP', 'MOTIVE'])
+
+/** When the driver's last automatic update stops covering the cadence (ISO), or null when it is stale, absent or manual. */
+export function driverUpdateFreshUntil(load: Row, intervalMs: number, nowMs: number): string | null {
+  if (!AUTOMATIC_SOURCES.has(String(load.lastKnownSource ?? ''))) return null
+  const at = Date.parse(String(load.lastKnownAt ?? ''))
+  if (!Number.isFinite(at) || nowMs - at >= intervalMs) return null
+  return new Date(at + intervalMs).toISOString()
+}
+
+
 /**
  * The cadence slot `now` falls in. Slots are anchored to when the agent took the leg
  * (`checkCallPlanStartedAt`, else the last check call, else now), so they never drift
@@ -309,6 +321,12 @@ export async function runCheckCallPlan(
       continue
     }
     let tick = resolveTick(load, plan, messages, deps.now(), prefs.method)
+    // Optional (TmsSettings.checkCallSkipWhenDriverActive, off unless true): a cadence text is not needed while the driver's own
+    // link, app or ELD keeps the position fresh, so it waits until a full interval passes with no automatic update.
+    const quietUntil = settings?.checkCallSkipWhenDriverActive === true && tick.kind === 'CADENCE'
+      ? driverUpdateFreshUntil(load, Math.max(1, plan.intervalHours * HOUR_MS), Date.parse(deps.now()))
+      : null
+    if (quietUntil) tick = { ...tick, kind: 'NONE', channels: [], nextDueAt: quietUntil, reason: 'Driver updated recently, no text needed' }
     // A person's run after the method changed: the slot already went out on the other channel only, so the
     // channel that never did is still owed (the claim id keeps it to once per slot).
     if (!auto && carrier && tick.kind === 'NONE' && tick.reason === 'Not due yet') {

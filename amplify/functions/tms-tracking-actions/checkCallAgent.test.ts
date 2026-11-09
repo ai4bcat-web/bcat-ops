@@ -678,3 +678,18 @@ describe('runCheckCallPlan in AUTO mode', () => {
     expect(messagesForLoad(store, 'lod-1').map((m) => m.channel)).toEqual(['EMAIL'])
   })
 })
+
+import { driverUpdateFreshUntil } from './checkCallAgent'
+describe('driverUpdateFreshUntil', () => {
+  const now = Date.parse('2026-11-10T12:00:00Z')
+  const hour = 3_600_000
+  it('a recent automatic update covers the cadence until a full interval after it', () => {
+    expect(driverUpdateFreshUntil({ lastKnownSource: 'LINK', lastKnownAt: '2026-11-10T10:00:00Z' }, 4 * hour, now)).toBe('2026-11-10T14:00:00.000Z')
+    expect(driverUpdateFreshUntil({ lastKnownSource: 'MOTIVE', lastKnownAt: '2026-11-10T11:59:00Z' }, 4 * hour, now)).not.toBeNull()
+  })
+  it('stale, manual or absent updates do not', () => {
+    expect(driverUpdateFreshUntil({ lastKnownSource: 'LINK', lastKnownAt: '2026-11-10T07:00:00Z' }, 4 * hour, now)).toBeNull()
+    expect(driverUpdateFreshUntil({ lastKnownSource: 'MANUAL', lastKnownAt: '2026-11-10T11:00:00Z' }, 4 * hour, now)).toBeNull()
+    expect(driverUpdateFreshUntil({}, 4 * hour, now)).toBeNull()
+  })
+})
