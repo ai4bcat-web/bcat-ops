@@ -635,6 +635,7 @@ type Action =
   | 'MARK_RATE_CON_SIGNED'
   | 'SET_QUICK_PAY'
   | 'SEND_RATE_CON'
+  | 'GET_TRACKING_MAILBOX'
   | 'VOID_RATE_CON'
   | 'DISPATCH_LOAD'
   | 'REMOVE_LOAD_CARRIER'
@@ -8697,6 +8698,9 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return setQuickPay(input, caller)
     case 'SEND_RATE_CON':
       return sendRateCon(input, caller)
+    // The addresses a person needs to start the tracking thread by hand: the tracking mailbox and this shipment's thread address.
+    case 'GET_TRACKING_MAILBOX':
+      return { tracking: trackingMailbox(), thread: threadReplyAddress(assertString(input.shipmentId, 'shipmentId')) } as unknown as Row
     case 'VOID_RATE_CON':
       return voidRateCon(input, caller)
     case 'DISPATCH_LOAD':

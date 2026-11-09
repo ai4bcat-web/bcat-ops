@@ -17,7 +17,7 @@ describe('knownRecipientOptions', () => {
       { email: 'dana@swift.com', label: 'Dana · Dispatch' },
       { email: 'book@swift.com', label: 'Dispatcher on this booking' },
       { email: 'cd@swift.com', label: 'Carrier dispatcher' },
-      { email: 'main@swift.com', label: 'Carrier e-mail' },
+      { email: 'main@swift.com', label: 'MyCarrierPackets / FMCSA e-mail' },
     ])
   })
 
@@ -37,9 +37,16 @@ describe('knownRecipientOptions', () => {
 })
 
 describe('defaultSelection', () => {
-  it('picks flagged or DISPATCH contacts', () => {
+  it('defaults to the carrier\'s MyCarrierPackets / FMCSA e-mail alone', () => {
     expect(defaultSelection({
-      carrier: carrier({ email: 'main@swift.com' }),
+      carrier: carrier({ email: 'main@swift.com', dispatcherEmail: 'cd@swift.com' }),
+      contacts: [contact({ email: 'a@swift.com', types: ['DISPATCH'] })],
+    })).toEqual(['main@swift.com'])
+  })
+
+  it('without that e-mail, picks flagged or DISPATCH contacts, then the carrier dispatcher', () => {
+    expect(defaultSelection({
+      carrier: carrier({}),
       contacts: [
         contact({ email: 'a@swift.com', types: ['DISPATCH'] }),
         contact({ email: 'b@swift.com', rateConRecipient: true }),
@@ -47,13 +54,10 @@ describe('defaultSelection', () => {
         contact({ email: 'd@swift.com', types: ['DISPATCH'], active: false }),
       ],
     })).toEqual(['a@swift.com', 'b@swift.com'])
-  })
-
-  it('falls back to the carrier dispatcher and main e-mail when no contact qualifies', () => {
     expect(defaultSelection({
-      carrier: carrier({ dispatcherEmail: 'cd@swift.com', email: 'main@swift.com' }),
+      carrier: carrier({ dispatcherEmail: 'cd@swift.com' }),
       contacts: [contact({ email: 'c@swift.com', types: ['ACCOUNTING'] })],
-    })).toEqual(['cd@swift.com', 'main@swift.com'])
+    })).toEqual(['cd@swift.com'])
   })
 })
 

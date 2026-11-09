@@ -14,7 +14,7 @@ import { Ban, Copy, FileText, Send } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { TmsBadge, TmsButton, TmsField, TmsInput } from '@/features/tms/kit'
 import { toast } from 'sonner'
-import { getRateConfirmUrl, listUserProfiles } from '@/lib/apiClient'
+import { getRateConfirmUrl, getTrackingMailbox, listUserProfiles } from '@/lib/apiClient'
 import { buildRateConPdf, joinRateConNotes, rateConFilename, rateConPdfBase64, rateConRepOf } from '@/lib/carrierRateCon'
 import { useAuthUser } from '@/hooks/useAuth'
 import { dedupeEmails } from '@/lib/emailAddress'
@@ -69,8 +69,17 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
   const [cc, setCc] = useState('')
   const [expiryHours, setExpiryHours] = useState('')
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [mailboxes, setMailboxes] = useState<{ tracking: string; thread: string } | null>(null)
   const [working, setWorking] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const shipmentIdForMailbox = bundle.shipment?.id ?? ''
+  useEffect(() => {
+    if (!shipmentIdForMailbox) return undefined
+    let live = true
+    getTrackingMailbox(shipmentIdForMailbox).then((m) => { if (live) setMailboxes(m) }).catch(() => { /* the server still copies the tracking mailbox */ })
+    return () => { live = false }
+  }, [shipmentIdForMailbox])
 
   useEffect(() => {
     let live = true
@@ -279,9 +288,14 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
           />
         </TmsField>
       </div>
-      {user?.email && (
-        <p className="text-xs tms-muted">You ({user.email}) are copied automatically.</p>
-      )}
+      <dl className="tms-grid tms-grid-2 text-xs" data-testid="rate-con-routing">
+        <Fact label="From" value={user?.email ? `${user.email} (sent through BCAT Tracking; replies come back to the shipment thread)` : 'BCAT Tracking'} />
+        <Fact label="CC added automatically" value={[mailboxes?.tracking ?? 'The tracking mailbox', user?.email].filter(Boolean).join(', ')} />
+      </dl>
+      <p className="text-xs tms-muted">
+        The carrier gets an e-mail with a link to review and e-sign this rate confirmation. The e-mail starts the shipment's tracking thread,
+        and the signature is logged on that same thread. E-signature is the only way to send it from here.
+      </p>
 
       {blocked && carrier && standing && (
         <p role="status" className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>
@@ -307,7 +321,7 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
             ? 'This carrier is not Active: MyCarrierPackets has not confirmed its setup'
             : noRecipients ? 'Pick at least one recipient' : undefined}
         >
-          <Send size={14} />{version > 0 ? 'Re-send' : 'Send'}
+          <Send size={14} />{version > 0 ? 'Re-send for e-signature' : 'Send for e-signature'}
         </TmsButton>
         {sent && (
           <>
@@ -332,13 +346,26 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
             className="h-96 w-full"
             style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}
           />
-          <a
-            href={previewUrl}
-            download={rateConFilename(fileLoadNumber, version + 1)}
-            className="text-xs underline"
-          >
-            Download a copy
-          </a>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <a
+              href={previewUrl}
+              download={rateConFilename(fileLoadNumber, version + 1)}
+              className="tms-btn tms-btn-secondary tms-btn-sm"
+              data-testid="rate-con-download"
+            >
+              Download PDF
+            </a>
+            {mailboxes && (
+              <span className="tms-muted" data-testid="rate-con-manual-hint">
+                Sending it yourself? Put <strong>{mailboxes.tracking}</strong> on CC so the tracking system starts the thread.
+              </span>
+            )}
+            {mailboxes && (
+              <TmsButton size="sm" onClick={() => { void navigator.clipboard.writeText(mailboxes.tracking); toast.success('Tracking address copied') }}>
+                <Copy size={14} />Copy tracking address
+              </TmsButton>
+            )}
+          </div>
         </div>
       )}
     </div>

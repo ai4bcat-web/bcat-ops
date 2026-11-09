@@ -1605,6 +1605,11 @@ export async function updateCustomer(id: string, patch: Partial<Omit<CustomerRec
 export async function archiveCustomer(id: string, expectedUpdatedAt: string): Promise<CustomerRecord> {
   return rememberCustomerPolicy(await directoryAction<CustomerRecord>('ARCHIVE_CUSTOMER', { id, expectedUpdatedAt }))
 }
+/** The tracking mailbox and this shipment's thread address: what goes on CC when a rate con is sent by hand. */
+export async function getTrackingMailbox(shipmentId: string): Promise<{ tracking: string; thread: string }> {
+  return shipmentAction<{ tracking: string; thread: string }>('GET_TRACKING_MAILBOX', { shipmentId })
+}
+
 /** Status transitions go through a dedicated action so CAS and transition rules live server-side. */
 export async function setCustomerStatus(
   id: string,

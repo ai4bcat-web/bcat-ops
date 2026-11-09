@@ -38,7 +38,7 @@ export function knownRecipientOptions(args: {
       .map((c) => ({ email: (c.email as string).trim(), label: contactLabel(c) })),
     { email: (loadCarrier?.dispatcherEmail ?? '').trim(), label: 'Dispatcher on this booking' },
     { email: (carrier?.dispatcherEmail ?? '').trim(), label: 'Carrier dispatcher' },
-    { email: (carrier?.email ?? '').trim(), label: 'Carrier e-mail' },
+    { email: (carrier?.email ?? '').trim(), label: 'MyCarrierPackets / FMCSA e-mail' },
   ]
   const seen = new Set<string>()
   const out: RecipientOption[] = []
@@ -53,20 +53,20 @@ export function knownRecipientOptions(args: {
 }
 
 /**
- * Who is ticked before anyone touches the picker — contacts flagged as rate-con
- * recipients or typed DISPATCH; the carrier's own dispatcher/main e-mail when the profile
- * has none.
+ * Who is ticked before anyone touches the picker: the carrier's e-mail on file from MyCarrierPackets / FMCSA, alone (Ryne
+ * 2026-11-09). Without one: the contacts flagged as rate-con recipients or typed DISPATCH, then the carrier's dispatcher.
  */
 export function defaultSelection(args: {
   carrier: CarrierRecord | null
   contacts: CarrierContactRecord[]
 }): string[] {
   const { carrier, contacts } = args
+  if (carrier?.email && isEmailAddress(carrier.email.trim())) return [carrier.email.trim()]
   const picked = contacts
     .filter((c) => c.active !== false && c.email)
     .filter((c) => c.rateConRecipient || c.types?.includes('DISPATCH'))
     .map((c) => c.email as string)
-  const fallback = [carrier?.dispatcherEmail, carrier?.email].filter((e): e is string => !!e)
+  const fallback = [carrier?.dispatcherEmail].filter((e): e is string => !!e)
   return dedupeEmails(picked.length > 0 ? picked : fallback).filter(isEmailAddress)
 }
 

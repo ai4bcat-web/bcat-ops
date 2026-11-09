@@ -2049,6 +2049,7 @@ const signDivisionTable     = stageTables['Division']
 const signSettingsTable     = stageTables['TmsSettings']
 const signAuditLogTable     = stageTables['AuditLog']
 const signShipmentDocTable  = stageTables['ShipmentDocument']
+const signShipmentMessageTable = stageTables['ShipmentMessage']
 
 // The token is found by scanning LoadCarrier (the table may only gain one GSI
 // per deploy and carrierId is that one), exactly as validateInvite does.
@@ -2094,7 +2095,7 @@ rateConSignApiFn.addToRolePolicy(
 rateConSignApiFn.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:PutItem'],
-    resources: [signCarrierDocTable.tableArn, signAuditLogTable.tableArn, signShipmentDocTable.tableArn],
+    resources: [signCarrierDocTable.tableArn, signAuditLogTable.tableArn, signShipmentDocTable.tableArn, signShipmentMessageTable.tableArn],
   })
 )
 // The previous signed version is flipped to SUPERSEDED (UpdateItem), and the shipment's documents are read
@@ -2126,6 +2127,7 @@ backend.storage.resources.bucket.grantReadWrite(rateConSignApiFn, 'shipment-docs
 rateConSignApiFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',    signLoadCarrierTable.tableName)
 rateConSignApiFn.addEnvironment('LOAD_TABLE_NAME',            signLoadTable.tableName)
 rateConSignApiFn.addEnvironment('SHIPMENT_TABLE_NAME',        signShipmentTable.tableName)
+rateConSignApiFn.addEnvironment('SHIPMENT_MESSAGE_TABLE_NAME', signShipmentMessageTable.tableName)
 rateConSignApiFn.addEnvironment('CARRIER_DOCUMENT_TABLE_NAME', signCarrierDocTable.tableName)
 rateConSignApiFn.addEnvironment('DIVISION_TABLE_NAME',        signDivisionTable.tableName)
 rateConSignApiFn.addEnvironment('SETTINGS_TABLE_NAME',        signSettingsTable.tableName)
