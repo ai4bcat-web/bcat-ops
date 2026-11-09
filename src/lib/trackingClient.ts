@@ -85,6 +85,17 @@ export async function postTrackingPing(
   })
 }
 
+export type DriverStatusKey = 'EN_ROUTE' | 'ON_SITE_PICKUP' | 'DEPARTED_PICKUP' | 'ON_SITE_DELIVERY' | 'DELIVERED'
+
+/** The driver taps where they are; the tracker sees it in the shipment thread as an app update. */
+export async function postTrackingStatus(token: string, status: DriverStatusKey, etaAt?: string | null): Promise<{ ok: true; at: string }> {
+  return linkFetch<{ ok: true; at: string }>(`/l/${encodeURIComponent(token)}/status`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, ...(etaAt ? { etaAt } : {}) }),
+  })
+}
+
 /**
  * The carrier upload portal, step E's third tokenised link. Three calls in order: read
  * what the load still needs, ask for a presigned PUT, send the bytes with

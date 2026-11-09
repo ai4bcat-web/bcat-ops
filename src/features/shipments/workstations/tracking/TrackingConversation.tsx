@@ -7,7 +7,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bold, Italic, List, Link2, Mail, MessageSquare, Paperclip,
-  Phone, Send, AtSign, FileUp, X, ExternalLink,
+  Phone, Send, AtSign, FileUp, X, ExternalLink, Smartphone,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -231,13 +231,34 @@ function LoadSummaryCard({ bundle }: { bundle: ShipmentBundle }) {
 }
 
 function TrackingLinkSentCard({ message }: { message: ShipmentMessageRecord }) {
+  const failed = message.status === 'FAILED'
   return (
     <TmsCard className="tms-convo-card tms-convo-card-link" data-testid="convo-tracking-link-card">
       <div className="tms-convo-card-title">
-        <Link2 size={14} /> Tracking link sent
+        <Link2 size={14} /> Tracking link{failed ? ' not sent' : ' sent'}
+        <TmsBadge tone="blue">Link</TmsBadge>
       </div>
       <div className="tms-convo-card-body">
         <span className="tms-convo-card-time">{formatDateTime(message.at)}</span>
+        {message.body ? <span> · {message.body}</span> : null}
+      </div>
+    </TmsCard>
+  )
+}
+
+/** What the driver did in the tracking page (accepted the link, tapped a status): an app update, never a text. */
+const isAppUpdate = (message: ShipmentMessageRecord): boolean => message.from === 'Driver app'
+
+function AppUpdateCard({ message }: { message: ShipmentMessageRecord }) {
+  return (
+    <TmsCard className="tms-convo-card tms-convo-card-app" data-testid="convo-app-update-card">
+      <div className="tms-convo-card-title">
+        <Smartphone size={14} /> App update
+        <TmsBadge tone="green">App</TmsBadge>
+      </div>
+      <div className="tms-convo-card-body">
+        <span className="tms-convo-card-time">{formatDateTime(message.at)}</span>
+        <span> · {message.body}</span>
       </div>
     </TmsCard>
   )
@@ -274,6 +295,7 @@ const ThreadRow = memo(function ThreadRow({ message }: { message: ShipmentMessag
   const notSent = message.status === 'NOT_SENT'
   const author = authorBadge(message)
 
+  if (isAppUpdate(message)) return <AppUpdateCard message={message} />
   if (message.trackingLinkId) return <TrackingLinkSentCard message={message} />
   if (message.kind === 'POD_REPLY') return <PodReceivedCard message={message} />
 
@@ -307,6 +329,7 @@ const ThreadRow = memo(function ThreadRow({ message }: { message: ShipmentMessag
           <span className="tms-thread-party" title={author.title}>{partyLabel(message)}</span>
           <span className="tms-thread-time">{formatDateTime(message.at)}</span>
           {message.to && <span className="tms-thread-to">→ {message.to}</span>}
+          {message.channel === 'SMS' && <TmsBadge tone="gray" data-testid="thread-text-badge">Text</TmsBadge>}
           <TmsBadge tone="gray" title={author.title} data-testid="thread-author">
             {author.text}
           </TmsBadge>

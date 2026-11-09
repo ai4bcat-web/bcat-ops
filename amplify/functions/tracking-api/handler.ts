@@ -37,6 +37,7 @@ import { pendingDeliveryEta } from '../../../src/lib/stopEvents'
 import { CONSENT_VERSION, SHARE_EVERY_MIN, carrierView, customerView, isLinkToken, loadIsClosed, routeLoadOf, routeWaypoints } from '../../../src/lib/trackingLink'
 import { fixOfRow, loadPingKey, mergeFixes, resolveFixAt, routeKeyOf, ROUTE_ROW_PREFIX, type TrackingFix } from '../../../src/lib/trackingPings'
 import { putPing } from '../_shared/trackingPings'
+import { threadKeyFor } from '../../../src/lib/shipmentThread'
 import { etaToStop } from '../../../src/lib/trackingEta'
 import { buildTimeline, lastKnownPosition, thinPositions, trackingWindow, type TrackPosition } from '../../../src/lib/trackingTimeline'
 import { carrierUploadView, portalUploadAllowed, uploadLinkUsable } from '../../../src/lib/uploadPortal'
@@ -68,6 +69,7 @@ const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME!
 const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME!
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
 const LOAD_TABLE = process.env.LOAD_TABLE_NAME!
+const SHIPMENT_MESSAGE_TABLE = process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? ''
 // Step D
 const TRACKING_LINK_TABLE = process.env.TRACKING_LINK_TABLE_NAME!
 const LOAD_CHECK_CALL_TABLE = process.env.LOAD_CHECK_CALL_TABLE_NAME!
@@ -590,6 +592,61 @@ function readFix(body: unknown): { fix: PingFix } | { error: string } {
 
 const DONE_MESSAGE = 'Delivery is complete — sharing has stopped. Thank you.'
 
+/**
+ * One line in the shipment thread for something the driver did in the app (accepted the link, tapped a status), so the tracker
+ * sees it next to the texts. `from: 'Driver app'` is what tells the thread to draw it as an app update, not a text.
+ * Best effort: a thread write that fails never blocks the driver.
+ */
+async function logAppUpdate(link: TrackingLinkRecord, body: string, nowIso: string): Promise<void> {
+  if (!SHIPMENT_MESSAGE_TABLE || !link.shipmentId) return
+  try {
+    await ddb.send(new PutCommand({
+      TableName: SHIPMENT_MESSAGE_TABLE,
+      Item: {
+        id: `msg:${link.shipmentId}:${randomUUID()}`, __typename: 'ShipmentMessage',
+        shipmentId: link.shipmentId, threadKey: threadKeyFor(String(link.shipmentId)), loadId: link.loadId, loadCarrierId: link.loadCarrierId ?? null,
+        direction: 'IN', channel: 'SMS', kind: 'OTHER', party: 'DRIVER', to: null, from: 'Driver app', cc: null, subject: null, body,
+        status: 'RECEIVED', error: null, messageId: `<app-${randomUUID()}@bcat>`, inReplyTo: null, providerRef: null,
+        attachments: null, documentIds: null, trackingLinkId: link.id, workflowRunId: null, authorKind: 'PERSON', authorName: 'Driver',
+        at: nowIso, createdBy: `link:${String(link.id).slice(0, 8)}`, createdAt: nowIso, updatedAt: nowIso,
+      },
+    }))
+  } catch (err) {
+    console.error('[tracking-api] thread log failed', err instanceof Error ? err.message : String(err))
+  }
+}
+
+/** What the driver can tell us from the link, and the check-call type each files as. */
+const DRIVER_STATUSES: Record<string, { type: 'LOCATION_UPDATE' | 'ARRIVED' | 'DEPARTED'; text: string }> = {
+  EN_ROUTE: { type: 'LOCATION_UPDATE', text: 'En route to pickup' },
+  ON_SITE_PICKUP: { type: 'ARRIVED', text: 'On site at pickup' },
+  DEPARTED_PICKUP: { type: 'DEPARTED', text: 'Departed pickup, in transit' },
+  ON_SITE_DELIVERY: { type: 'ARRIVED', text: 'On site at delivery' },
+  DELIVERED: { type: 'DEPARTED', text: 'Delivered' },
+}
+
+/** `POST /l/<token>/status` — the driver taps where they are (en route with an ETA, on site, departed, delivered). */
+async function statusRoute(token: string, event: FnUrlEvent) {
+  const link = await activeLink(token, 'CARRIER_PING')
+  if (!link?.loadId || !link.consentAt) return reply(link?.loadId ? 403 : 404, { error: link?.loadId ? 'consent' : LINK_GONE })
+  const raw = parseJson<Record<string, unknown>>(event.isBase64Encoded && event.body ? Buffer.from(event.body, 'base64').toString('utf-8') : event.body)
+  const status = DRIVER_STATUSES[String(raw?.status ?? '')]
+  if (!status) return reply(400, { error: 'Unknown status' })
+  const etaRaw = typeof raw?.etaAt === 'string' ? Date.parse(raw.etaAt) : NaN
+  const etaAt = Number.isFinite(etaRaw) && etaRaw > Date.now() - 3_600_000 && etaRaw < Date.now() + 14 * 86_400_000 ? new Date(etaRaw).toISOString() : null
+  const nowIso = new Date().toISOString()
+  const text = `${status.text}${etaAt ? ` · ETA ${etaAt}` : ''}`
+  await ddb.send(new PutCommand({
+    TableName: LOAD_CHECK_CALL_TABLE,
+    Item: {
+      id: randomUUID(), loadId: link.loadId, shipmentId: link.shipmentId, loadCarrierId: link.loadCarrierId ?? null, at: nowIso,
+      type: status.type, source: 'LINK', note: `Driver app: ${text}`, createdBy: `link:${token.slice(0, 8)}`, createdAt: nowIso, updatedAt: nowIso,
+    },
+  }))
+  await logAppUpdate(link, text, nowIso)
+  return reply(200, { ok: true, at: nowIso })
+}
+
 /** `POST /l/<token>/ping` — one fix from the open page (a tap or the watch). */
 async function pingRoute(token: string, event: FnUrlEvent) {
   const link = await activeLink(token, 'CARRIER_PING')
@@ -661,6 +718,8 @@ async function pingRoute(token: string, event: FnUrlEvent) {
     }
     throw err
   }
+
+  if (firstConsent) await logAppUpdate(link, 'Driver accepted the tracking link and started sharing location', nowIso)
 
   const truckNumber = (loadRow as { truckNumber?: unknown } | null)?.truckNumber
   await putPing({ ddb, table: TRUCK_LOCATION_HISTORY_TABLE }, {
@@ -1187,6 +1246,7 @@ const TRUCK_PATH = /^\/t\/([A-Za-z0-9]{6,32})\/?$/
 const CUSTOMER_PATH = /^\/s\/([A-Za-z0-9_-]+)\/?$/
 const CARRIER_PATH = /^\/l\/([A-Za-z0-9_-]+)\/?$/
 const PING_PATH = /^\/l\/([A-Za-z0-9_-]+)\/ping\/?$/
+const STATUS_PATH = /^\/l\/([A-Za-z0-9_-]+)\/status\/?$/
 const UPLOAD_PATH = /^\/u\/([A-Za-z0-9_-]+)\/?$/
 const UPLOAD_PREPARE_PATH = /^\/u\/([A-Za-z0-9_-]+)\/upload\/?$/
 const UPLOAD_COMMIT_PATH = /^\/u\/([A-Za-z0-9_-]+)\/commit\/?$/
@@ -1227,6 +1287,8 @@ export const handler = async (event: FnUrlEvent) => {
   if (method === 'POST') {
     const ping = PING_PATH.exec(path)
     if (ping) return pingRoute(ping[1], event)
+    const driverStatus = STATUS_PATH.exec(path)
+    if (driverStatus) return statusRoute(driverStatus[1], event)
     const prepare = UPLOAD_PREPARE_PATH.exec(path)
     if (prepare) return uploadPrepareRoute(prepare[1], event)
     const commit = UPLOAD_COMMIT_PATH.exec(path)

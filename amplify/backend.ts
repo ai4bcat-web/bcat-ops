@@ -1692,8 +1692,10 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', stageTables['Load'].tableName)
     // A ping writes one event row. Load is deliberately NOT writable from here.
     // Step AO: and one breadcrumb row in TruckLocationHistory (truckId 'load:<loadId>').
     actions:   ['dynamodb:PutItem'],
-    resources: [loadCheckCallTable.tableArn, trackHistoryTable.tableArn],
+    resources: [loadCheckCallTable.tableArn, trackHistoryTable.tableArn, stageTables['ShipmentMessage'].tableArn],
   }))
+  // The driver's accept / status taps are logged in the shipment thread.
+  trackingApiFn.addEnvironment('SHIPMENT_MESSAGE_TABLE_NAME', stageTables['ShipmentMessage'].tableName)
   trackingApiFn.addToRolePolicy(new PolicyStatement({
     // Step AO: the history table is read by key for the cached route row.
     actions:   ['dynamodb:GetItem'],
