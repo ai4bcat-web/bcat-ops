@@ -52,4 +52,6 @@ export const PROD_WRITE_SETS = {
   // `awCarriers.mjs activate|billing|delete --apply` (union; each subcommand's own subset is SUB_MODELS in the script):
   // Carrier.status / billing fields / delete, CarrierPaymentMethod (billing), CarrierTaxVault (delete; NOT an Amplify model: `CarrierTaxVault-<apiId>`), one AuditLog row per carrier.
   awCarriers: { models: ['Carrier', 'CarrierPaymentMethod', 'CarrierTaxVault', 'AuditLog'] },
+  // `awRestoreDeleted.mjs --apply`: put-if-absent of the rows DELETE_SHIPMENTS exported (the models it deletes) + one AuditLog row per restored shipment.
+  awRestoreDeleted: { models: ['ArPayment', 'ApPayment', 'LegacyAljexRow', 'Commission', 'FactoringItem', 'Invoice', 'CarrierBill', 'LaneRateSample', 'LoadFinancials', 'LoadCharge', 'LoadCheckCall', 'TrackingLink', 'ShipmentDocument', 'ShipmentNotice', 'ShipmentPosting', 'ShipmentMessage', 'LoadCarrier', 'Load', 'Order', 'Shipment', 'AuditLog'] },
 };

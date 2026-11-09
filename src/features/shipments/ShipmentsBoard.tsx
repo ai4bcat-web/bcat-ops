@@ -6,7 +6,7 @@
  * what to fetch, what to filter, what to select and what to batch.
  *
  * A single pane handles the normal view. Split Screen renders two independent panes,
- * each with its own list (Active or All), filters and selection.
+ * each with its own list (Active, All or Voided), filters and selection.
  */
 import { deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
 import { phaseInputOfRow } from './deliveryPhaseInputs'
@@ -20,6 +20,7 @@ import {
   Columns3,
   FileX,
   Search,
+  Trash2,
   Truck,
   UserX,
 } from 'lucide-react'
@@ -82,6 +83,7 @@ import { SEED_DIVISIONS } from '@/lib/ownership'
 import { cn } from '@/lib/utils'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
+import { DeleteShipmentsDialog } from './components/DeleteShipmentsDialog'
 import { UnvoidShipmentDialog } from './components/UnvoidShipmentDialog'
 import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
 import { needsCover } from '@/features/tms/carrierSales/carrierSalesQueue'
@@ -243,9 +245,9 @@ export function ShipmentsBoard() {
   const list = parseShipmentList(params.get('list'))
   const [period, setPeriod] = useState<Period>({ key: 'this' })
   const [thisMonth] = useState(() => currentMonth(new Date()))
-  const [reports, setReports] = useState<Record<'left' | 'right', PaneReport>>({ left: { voided: false, query: '' }, right: { voided: false, query: '' } })
+  const [reports, setReports] = useState<Record<'left' | 'right', PaneReport>>({ left: { query: '' }, right: { query: '' } })
   const report = useCallback((pane: 'left' | 'right', next: PaneReport) => {
-    setReports((prev) => (prev[pane].voided === next.voided && prev[pane].query === next.query ? prev : { ...prev, [pane]: next }))
+    setReports((prev) => (prev[pane].query === next.query ? prev : { ...prev, [pane]: next }))
   }, [])
   const [columnTemplates, setColumnTemplates] = useState<ShipmentColumnTemplateRecord[]>([])
   const [settings, setSettings] = useState<TmsSettings | null>(null)
@@ -260,24 +262,27 @@ export function ShipmentsBoard() {
 
   const visiblePanes: Array<'left' | 'right'> = split ? ['left', 'right'] : ['left']
   const wantsAllList = visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'all')
-  const wantsVoided = visiblePanes.some((pane) => reports[pane].voided)
-  const needWindow = wantsAllList || wantsVoided
+  const wantsVoidedList = visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'voided')
+  const needWindow = wantsAllList || wantsVoidedList
   // The All list is scoped by year (default: this Chicago year). A specific year reads that year's
-  // twelve pickup months; All years reads the whole table. The month period only serves a VOIDED
-  // facet on panes that do not list All.
+  // twelve pickup months; All years reads the whole table. All never lists voided shipments: the
+  // Voided list reads its own pickup-month period with the void filter dropped.
   const [year, setYear] = useState<ShipmentYear>(() => chicagoYear())
   const [seenYears, setSeenYears] = useState<number[]>(() => [chicagoYear()])
   const months = useMemo(() => periodMonths(period, thisMonth), [period, thisMonth])
-  const windowMonths = !needWindow ? [] : wantsAllList ? (year === 'all' ? [] : monthsOfYear(year)) : months
+  const windowMonths = wantsAllList && year !== 'all' ? monthsOfYear(year) : []
   const { shipments: windowRows, loading: windowLoading, partial: windowPartial, error: windowError, refresh: refreshWindow } = useShipments({
-    kind: 'window', months: windowMonths, includeVoided: wantsVoided,
+    kind: 'window', months: windowMonths,
+  })
+  const { shipments: voidedRows, loading: voidedLoading, error: voidedError, refresh: refreshVoided } = useShipments({
+    kind: 'window', months: wantsVoidedList ? months : [], includeVoided: true,
   })
   const { shipments: allYearsRows, loading: allYearsLoading, error: allYearsError, refresh: refreshAllYears } = useShipments(
     wantsAllList && year === 'all' ? { kind: 'all' } : { kind: 'ids', ids: [] },
   )
 
-  // An exact PRO typed on an All pane adds that row from the number index, voided or
-  // not; the status facet still decides whether it shows. Debounced: one read per pause.
+  // An exact PRO typed on All adds its number-index match, but list scope still excludes
+  // every voided row. Debounced: one read per pause.
   const typedPro = wantsAllList ? visiblePanes.map((pane) => reports[pane].query.trim()).find((q) => PRO_PATTERN.test(q)) ?? '' : ''
   const [proIds, setProIds] = useState<{ query: string; ids: string[] }>({ query: '', ids: [] })
   useEffect(() => {
@@ -291,13 +296,13 @@ export function ShipmentsBoard() {
     return () => { live = false; clearTimeout(timer) }
   }, [typedPro])
   const { shipments: proRows, refresh: refreshPro } = useShipments({ kind: 'ids', ids: typedPro && proIds.query === typedPro ? proIds.ids : [] })
-  const loading = workingLoading || windowLoading || allYearsLoading
+  const loading = workingLoading || windowLoading || allYearsLoading || voidedLoading
   const partial = workingPartial || windowPartial
-  const error = workingError ?? windowError ?? allYearsError
+  const error = workingError ?? windowError ?? allYearsError ?? voidedError
 
   const refresh = useCallback(async () => {
-    await Promise.all([refreshWorking(), refreshWindow(), refreshAllYears(), refreshPro()])
-  }, [refreshWorking, refreshWindow, refreshAllYears, refreshPro])
+    await Promise.all([refreshWorking(), refreshWindow(), refreshAllYears(), refreshVoided(), refreshPro()])
+  }, [refreshWorking, refreshWindow, refreshAllYears, refreshVoided, refreshPro])
 
   const loadTemplates = useCallback(() => {
     listShipmentColumnTemplates()
@@ -307,13 +312,13 @@ export function ShipmentsBoard() {
 
   useEffect(() => { loadTemplates() }, [loadTemplates])
 
-  // The shell's cached working set, plus the picked period's pickup months when a pane
-  // lists All (or asks for VOIDED), plus an exact PRO match. One row per shipment id.
+  // Union of working rows, All's year, Voided's period and exact PRO matches.
+  // Each pane applies its own scope; voided rows can appear only in the Voided pane.
   const allRows = useMemo<ShipmentRow[]>(() => {
     const byId = new Map<string, ShipmentRow>()
-    for (const set of [workingRows, windowRows, allYearsRows, proRows]) for (const r of set) byId.set(r.id, r as ShipmentRow)
+    for (const set of [workingRows, windowRows, allYearsRows, voidedRows, proRows]) for (const r of set) byId.set(r.id, r as ShipmentRow)
     return [...byId.values()]
-  }, [workingRows, windowRows, allYearsRows, proRows])
+  }, [workingRows, windowRows, allYearsRows, voidedRows, proRows])
 
   const counts = useMemo(() => shipmentListCounts(allRows, year), [allRows, year])
 
@@ -342,7 +347,7 @@ export function ShipmentsBoard() {
               options={yearOptions}
             />
           )}
-          {needWindow && !wantsAllList && (
+          {wantsVoidedList && (
             <div className="flex items-center gap-1" role="group" aria-label="Period">
               <TmsButton size="sm" variant="ghost" aria-label="Previous month" onClick={() => setPeriod({ key: 'month', month: shiftMonth(months[0], -1) })}>‹</TmsButton>
               <TmsSegmentedTabs
@@ -428,7 +433,6 @@ interface StaffSnapshot {
 }
 
 interface PaneReport {
-  voided: boolean
   query: string
 }
 
@@ -541,13 +545,14 @@ function BoardPane({
   const [batchRunning, setBatchRunning] = useState(false)
   const [columnTemplateId, setColumnTemplateId] = useState<string | null>(null)
   const [dialogShipment, setDialogShipment] = useState<ShipmentRow | null>(null)
+  // Frozen when opened: the auto-refresh must not pull the rows (and this dialog's Restore) out from under it.
+  const [deleteTargets, setDeleteTargets] = useState<Array<{ id: string; number: string }> | null>(null)
   const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | 'cover' | null>(null)
 
-  // The page decides what to fetch, so it hears what this pane is asking for: the Status
-  // header's VOIDED option widens the query, and a typed PRO adds that exact row (R4, §4.3).
-  const statusFilter = filters.status
-  const wantsVoided = (statusFilter?.values?.includes('VOIDED') ?? false) && !statusFilter?.exclude
-  useEffect(() => { onReport?.(pane, { voided: wantsVoided, query }) }, [onReport, pane, wantsVoided, query])
+  // The page decides what to fetch, so it hears what this pane is asking for: a typed PRO
+  // adds that exact row (R4, §4.3). The Voided list is its own pane list, never a facet of All.
+  const wantsVoided = list === 'voided'
+  useEffect(() => { onReport?.(pane, { query }) }, [onReport, pane, query])
 
   // Countdown refetch.
   const [secondsToRefresh, setSecondsToRefresh] = useState(REFRESH_SECONDS)
@@ -1000,7 +1005,7 @@ function BoardPane({
             size="sm"
             active={list}
             onSelect={(key) => onListChange(parseShipmentList(key))}
-            tabs={[{ key: 'active', label: 'Active' }, { key: 'all', label: 'All' }]}
+            tabs={[{ key: 'active', label: 'Active' }, { key: 'all', label: 'All' }, { key: 'voided', label: 'Voided' }]}
           />
         )}
         <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={toggleDemo} />
@@ -1034,6 +1039,13 @@ function BoardPane({
         <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
       </div>
       <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+      {isOwner && selectedIds.length > 0 && (
+        <div className="tms-dense-bar" data-testid="delete-selected-bar">
+          <TmsButton size="sm" variant="destructive" data-testid="delete-selected" onClick={() => setDeleteTargets(selectedRows.map((r) => ({ id: r.id, number: r.number })))}>
+            <Trash2 size={14} aria-hidden="true" /> Delete selected ({selectedIds.length})
+          </TmsButton>
+        </div>
+      )}
       <BatchActionBar
         actionLabel="Push to Load Review"
         selectedCount={selectedIds.length}
@@ -1181,6 +1193,14 @@ function BoardPane({
           settings={settings}
           isAdmin={isAdmin}
           currentUser={currentUser}
+        />
+      )}
+
+      {deleteTargets && (
+        <DeleteShipmentsDialog
+          shipments={deleteTargets}
+          onClose={() => setDeleteTargets(null)}
+          onDeleted={() => { setSelectedIds([]); setCapRefusal(null); void handleRefresh() }}
         />
       )}
 

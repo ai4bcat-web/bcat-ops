@@ -1350,19 +1350,13 @@ function repointCall(shipmentId: string, customerId: string, reason = 'Customer 
 }
 
 describe('VOID_SHIPMENT', () => {
-  it('refuses every page key and accepts only the owner or ADMIN', async () => {
-    const a = await createDraft()
-    await expect(voidCall(a.shipmentId, DISPATCHER)).rejects.toThrow(/requires owner or ADMIN/)
-    await expect(voidCall(a.shipmentId, TMS_USER)).rejects.toThrow(/requires owner or ADMIN/)
-    expect(table(TABLES.shipment).get(a.shipmentId)!.voidedAt).toBeUndefined()
-
-    const byAdmin = (await voidCall(a.shipmentId, ADMIN)) as { shipment: Row }
-    expect(byAdmin.shipment.voidedAt).toBeTruthy()
-    expect(byAdmin.shipment.voidedBy).toBe('admin@bcatcorp.com')
-
-    const b = await createDraft()
-    const byOwner = (await voidCall(b.shipmentId, OWNER)) as { shipment: Row }
-    expect(byOwner.shipment.voidedBy).toBe('ryne@bcatcorp.com')
+  it('allows shipments staff to void and records their identity', async () => {
+    for (const identity of [DISPATCHER, TMS_USER, ADMIN, OWNER]) {
+      const { shipmentId } = await createDraft()
+      const result = await voidCall(shipmentId, identity) as { shipment: Row }
+      expect(result.shipment.voidedAt).toBeTruthy()
+      expect(result.shipment.voidedBy).toBe(identity.claims.email)
+    }
   })
 
   it('records the reason and refuses an empty one', async () => {

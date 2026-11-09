@@ -18,6 +18,9 @@ import { AuthContext } from '@/hooks/useAuth'
 import type { ShipmentRecord } from '@/types/tms'
 
 vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql: vi.fn(), models: {}, queries: {}, mutations: {} }) }))
+vi.mock('./components/DeleteShipmentsDialog', () => ({
+  DeleteShipmentsDialog: () => <div data-testid="delete-dialog" />,
+}))
 vi.mock('./components/VoidShipmentDialog', () => ({
   VoidShipmentDialog: ({ shipment }: { shipment: { number: string } }) => (
     <div data-testid="void-dialog">Void {shipment.number}</div>
@@ -97,29 +100,39 @@ describe('the PRO never leaves', () => {
     expect(await screen.findByTestId('void-dialog')).toBeTruthy()
   })
 
-  it('offers Void to the owner even when they are not flagged admin', async () => {
+  it('offers Void to any staff member, but not Unvoid, Re-point or Delete', async () => {
     render(
-      <AuthContext.Provider
-        value={{
-          user: null, loading: false, needsNewPassword: false,
-          login: vi.fn(), completeNewPassword: vi.fn(), logout: vi.fn(),
-          isAdmin: false, isOwner: true, hasPageAccess: () => true,
-        }}
-      >
+      <ShipmentRowActions
+        shipment={shipment} isAdmin={false} cancelDeleteAdminOnly={false}
+        handlers={handlers({ onRepointCustomer: vi.fn(), onUnvoid: vi.fn() })} onDeleted={vi.fn()}
+      />,
+    )
+    openMenu()
+    expect(await screen.findByText('Void shipment…')).toBeTruthy()
+    expect(screen.queryByText('Re-point customer…')).toBeNull()
+    expect(screen.queryByText('Delete shipment…')).toBeNull()
+  })
+
+  it('offers Delete to the owner only, and only where the host handles a delete', async () => {
+    const owner = { user: null, loading: false, needsNewPassword: false, login: vi.fn(), completeNewPassword: vi.fn(), logout: vi.fn(), isAdmin: false, isOwner: true, hasPageAccess: () => true }
+    const { unmount } = render(
+      <AuthContext.Provider value={owner}>
         <ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly={false} handlers={handlers()} />
       </AuthContext.Provider>,
     )
     openMenu()
-    expect(await screen.findByText('Void shipment…')).toBeTruthy()
-  })
+    await screen.findByText('Void shipment…')
+    expect(screen.queryByText('Delete shipment…')).toBeNull()
+    unmount()
 
-  it('hides Void from everybody else', async () => {
     render(
-      <ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly={false} handlers={handlers()} />,
+      <AuthContext.Provider value={owner}>
+        <ShipmentRowActions shipment={shipment} isAdmin={false} cancelDeleteAdminOnly={false} handlers={handlers()} onDeleted={vi.fn()} />
+      </AuthContext.Provider>,
     )
     openMenu()
-    await waitFor(() => expect(screen.getByText('Duplicate')).toBeTruthy())
-    expect(screen.queryByText('Void shipment…')).toBeNull()
+    fireEvent.click(await screen.findByText('Delete shipment…'))
+    expect(await screen.findByTestId('delete-dialog')).toBeTruthy()
   })
 
   it('disables every action on a shipment that is already voided', async () => {

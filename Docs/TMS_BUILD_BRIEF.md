@@ -42,14 +42,28 @@ no production infrastructure changes until Ryne merges `dev` → `main`.
   `aws amplify list-jobs --app-id d3dejqzs77khq6 --branch-name dev --max-results 1` is not
   RUNNING/PENDING (two concurrent deploys collide in CloudFormation). A failed deploy is
   yours to fix next, before any other work.
-- **PRO numbers are permanent (Ryne, 2026-10-28 — "the most important thing").** A shipment
-  and its PRO number can never be deleted, by anyone, through any path: no delete mutation
-  on Shipment/Load reachable from the client, no delete action in any router, no delete
-  button. The only way a shipment leaves the working set is **Void**, and only the owner or
-  a member of the ADMIN group may void, enforced in the Lambda from the caller's identity
-  (not from the UI). A voided shipment keeps its PRO, its history and its documents, shows as
-  VOIDED with who/when/why, cannot be invoiced, and the PRO is never reused. Audit every
-  void. If any existing TMS code (A–I) exposes a delete, remove it in Step R and log it.
+- **PRO numbers remain reserved; owner-only hard delete (Ryne, 2026-11-09, item 21).**
+  All staff with shipment access may Void. Voided rows appear only in the **Voided** tab beside Intake,
+  never Active or All. All retains its current-year default and year selector.
+  Only the owner (`ryne@bcatcorp.com`, not other ADMINs) can Delete singly or via Delete selected.
+  Type DELETE; billing requires the separate force checkbox and typed FORCE after reviewing exact rows.
+  Invoice, CarrierBill, Commission, FactoringItem and exclusive ArPayment/ApPayment rows require force.
+  Shared payments, remaining credit, reversal/credit links and BoxTruckTrip settlements refuse even force;
+  shared-payment changes require a separately reviewed offline awPreDelete-style split.
+  Every removed row is exported as JSONL per table with SHA-256/count manifest to the private DataSafety
+  bucket at `deletes/<timestamp>-<random>/`, verified before deletion. Export failure deletes nothing.
+  Child rows are conditionally removed against their exported values; the final Shipment removal and
+  its AuditLog row commit together. Batch failures name the export for recovery.
+  Deleted children: Order, Load (including embedded stops), LoadCarrier, LoadFinancials, LoadCharge,
+  LoadCheckCall (including claim incidents), TrackingLink, ShipmentDocument metadata, ShipmentNotice,
+  ShipmentPosting, ShipmentMessage, LaneRateSample and LegacyAljexRow, plus forced billing above.
+  ProClaim and the PRO counter stay untouched; AuditLog and all S3 objects stay. CarrierDocument,
+  Quote, IntakeLoad, SpotRequest, WorkflowRun, AmazonTrip, DriverSubmission, DriverLoadTime, PodDocument
+  and TruckLocationHistory retain independent operational history.
+  Owner-only `RESTORE_DELETED_SHIPMENTS` restores verified exports put-if-absent; existing rows are never
+  overwritten. Emergency CLI: `scripts/awRestoreDeleted.mjs --prefix deletes/<stamp>/` (dry by default),
+  or `--dir <downloaded-export>`. Production apply requires the existing prod gate and a fresh
+  `scripts/prodBackup.mjs --script awRestoreDeleted` backup. No objects are deleted from S3.
 - **Release to accounting is gated (Ryne).** A shipment reaches AR ("Docs needed" →
   "Unbilled" and onward, Step F) only when it meets every MVMNT requirement from the spec:
   delivered status, the customer's required document types all present (BOL, POD, rate

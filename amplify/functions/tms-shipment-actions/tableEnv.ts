@@ -2,6 +2,13 @@ import { applyDataTableSuffix } from '../_shared/dataTableEnv'
 
 /** Every `<X>_TABLE_NAME` this Lambda reads and the model behind it; backend.ts passes DATA_TABLE_SUFFIX instead of the names. */
 export const SHIPMENT_ACTIONS_TABLES = {
+  INVOICE_TABLE_NAME: 'Invoice',
+  CARRIER_BILL_TABLE_NAME: 'CarrierBill',
+  AR_PAYMENT_TABLE_NAME: 'ArPayment',
+  AP_PAYMENT_TABLE_NAME: 'ApPayment',
+  COMMISSION_TABLE_NAME: 'Commission',
+  FACTORING_ITEM_TABLE_NAME: 'FactoringItem',
+  LEGACY_ALJEX_ROW_TABLE_NAME: 'LegacyAljexRow',
   ALJEX_CODE_MAP_TABLE_NAME: 'AljexCodeMap',
   BOX_TRUCK_TRIP_TABLE_NAME: 'BoxTruckTrip',
   SHIPMENT_TABLE_NAME: 'Shipment',

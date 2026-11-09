@@ -2645,20 +2645,79 @@ export async function setLoadStatus(input: SetLoadStatusInput): Promise<Shipment
 }
 
 /**
- * Void — the ONLY way a shipment leaves the working set (Ryne, 2026-10-28).
+ * Void — how every staff member takes a shipment out of the working set (Ryne, 2026-10-28).
  *
- * There is no delete and no restore: the row, its PRO number, its history and its
- * documents all stay, the number is never reused, and a voided shipment can never
- * be invoiced. Who may void is decided in the Lambda from the caller's identity,
- * never from the UI.
+ * The row, its PRO number, its history and its documents all stay, the number is
+ * never reused, and a voided shipment can never be invoiced. It stays readable on the
+ * Shipments board's Voided tab. Who may void is decided in the Lambda from the
+ * caller's identity, never from the UI.
  */
 export async function voidShipment(input: { shipmentId: string; reason: string; expectedUpdatedAt?: string }): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('VOID_SHIPMENT', input)
 }
 
-/** The only way back from a void. Owner/ADMIN only. */
+/** The way back from a void. Owner/ADMIN only. */
 export async function unvoidShipment(input: { shipmentId: string; reason: string; expectedUpdatedAt?: string | null }): Promise<unknown> {
   return shipmentAction<unknown>('UNVOID_SHIPMENT', input)
+}
+
+export type DeleteShipmentOutcome = 'DELETED' | 'PREVIEW' | 'REFUSED_BILLING' | 'REFUSED_SETTLEMENT' | 'NOT_FOUND' | 'FAILED'
+
+/** What billing a shipment carries, row for row. Present on previews and refusals. */
+export interface DeleteBillingSummary {
+  invoices: Array<{ id: string; number: string | null; status: string | null; totalCents: number | null; balanceCents: number | null }>
+  carrierBills: Array<{ id: string; billNumber: string | null; status: string | null; netCents: number | null; paidCents: number | null }>
+  commissions: Array<{ id: string; repName: string | null; status: string | null; netCents: number | null }>
+  factoringItems: Array<{ id: string; proNumber: string | null; status: string | null }>
+  payments: Array<{ id: string; model: 'ArPayment' | 'ApPayment'; kind: string | null; amountCents: number | null }>
+  /** Order/leg fields that say money exists even when no row was found. */
+  markers: string[]
+}
+
+export interface DeleteShipmentResult {
+  shipmentId: string
+  number: string | null
+  ok: boolean
+  outcome: DeleteShipmentOutcome
+  message?: string
+  /** Rows per model that were (or, on a preview, would be) removed. */
+  counts: Record<string, number>
+  billing?: DeleteBillingSummary
+}
+
+export interface DeleteShipmentsInput {
+  shipmentIds: string[]
+  dryRun?: boolean
+  force?: boolean
+  confirm: 'DELETE'
+  forceConfirm?: 'FORCE'
+}
+
+export interface DeleteShipmentsResponse {
+  dryRun: boolean
+  force: boolean
+  /** Where the exported rows live; null on a preview or when nothing was deleted. */
+  exportPrefix: string | null
+  results: DeleteShipmentResult[]
+  deleted: number
+  failed: number
+}
+
+/** Hard delete, owner only (the Lambda checks the verified token). Exports every row first; `dryRun` previews. */
+export async function deleteShipments(input: DeleteShipmentsInput): Promise<DeleteShipmentsResponse> {
+  return shipmentAction<DeleteShipmentsResponse>('DELETE_SHIPMENTS', input)
+}
+
+export interface RestoreDeletedShipmentsResponse {
+  dryRun: boolean
+  exportPrefix: string
+  shipments: Array<{ id: string; number: string | null }>
+  tables: Record<string, { rows: number; restored: number; alreadyPresent: number; failed: number }>
+}
+
+/** Puts a delete's exported rows back, put-if-absent. Owner only. */
+export async function restoreDeletedShipments(input: { exportPrefix: string; dryRun?: boolean }): Promise<RestoreDeletedShipmentsResponse> {
+  return shipmentAction<RestoreDeletedShipmentsResponse>('RESTORE_DELETED_SHIPMENTS', input)
 }
 
 /** Re-point a linked shipment's customer. Owner/ADMIN only; throws INVOICED: when billed. */
