@@ -43,6 +43,8 @@ export const PROD_WRITE_SETS = {
   awEquipRep: { models: ['Shipment', 'Load', 'Order', 'AuditLog'] },
   // `awSalesRepId.mjs --apply`: enrich-only Shipment.salesRepId + Order.customerRepId (where empty) + one AuditLog row per shipment.
   awSalesRepId: { models: ['Shipment', 'Order', 'AuditLog'] },
+  // `awSalesRepFill.mjs --apply`: enrich-only Shipment.salesRepCode / salesRepId + Order.customerRepId on shipments with NO rep (from the Aljex Salesrep ID) + one AuditLog row per shipment.
+  awSalesRepFill: { models: ['Shipment', 'Order', 'AuditLog'] },
   // `awZakDriver.mjs --apply`: LoadCarrier.driverId/driverName/driverPhone on the own-asset leg of ZAK-coded PROs, only while empty + one AuditLog row per leg.
   awZakDriver: { models: ['LoadCarrier', 'AuditLog'] },
   awRenumberL: { models: ['Shipment', 'Load', 'Invoice', 'CarrierBill', 'SpotRequest', 'WorkflowRun', 'IntakeLoad', 'TrackingLink', 'Quote', 'LaneRateSample', 'Commission', 'AuditLog'] },

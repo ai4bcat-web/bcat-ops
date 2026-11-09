@@ -20,16 +20,27 @@ export const BOARD_FLAGS: readonly BoardFlag[] = [
 
 export const BOARD_FLAG_LABELS: Record<BoardFlag, string> = {
   missingReference: 'Missing reference #',
-  missingSalesRep: 'Missing sales rep',
+  missingSalesRep: 'Needs sales rep',
   missingRevDivision: 'Missing rev division',
   docsMissing: 'Missing documents',
   checkCallOverdue: 'Check call overdue',
 }
 
+const hasText = (v: string | null | undefined): boolean => typeof v === 'string' && v.trim() !== ''
+
+/**
+ * No rep at all: neither a profile id (`salesRepId`) nor the Aljex rep name kept as text (`salesRepCode`, which is how
+ * people without a login, and the BCAT division, stay on migrated shipments). Reads both because the profile ids only
+ * exist once the profile backfill has been applied.
+ */
+export function needsSalesRep(row: Pick<ShipmentRow, 'salesRepId' | 'salesRepCode'>): boolean {
+  return !hasText(row.salesRepId) && !hasText(row.salesRepCode)
+}
+
 export function matchesFlag(row: ShipmentRow, flag: BoardFlag, nowMs: number): boolean {
   switch (flag) {
     case 'missingReference': return !reviewFactsOfRow(row).referenceNumber
-    case 'missingSalesRep': return !row.salesRepId
+    case 'missingSalesRep': return needsSalesRep(row)
     case 'missingRevDivision': return !row.revDivision
     case 'docsMissing': return (row.docsMissing?.length ?? 0) > 0
     case 'checkCallOverdue': return checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, nowMs) === 'OVERDUE'

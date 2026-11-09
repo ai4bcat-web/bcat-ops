@@ -745,7 +745,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'customerReference', label: 'Customer Reference Number', group: 'Order', value: (r) => r.customerReference ?? '', width: 180 },
   { key: 'description', label: 'Description', group: 'Order', value: (r) => r.commodity ?? '', width: 180 },
   { key: 'revenueType', label: 'Revenue Type', group: 'Shipment', value: (r) => divisionLabel(r), width: 160 },
-  { key: 'salesRep', label: 'Sales Rep', group: 'Shipment', value: (r) => r.salesRepName ?? r.salesRepId ?? '', width: 140 },
+  { key: 'salesRep', label: 'Sales Rep', group: 'Shipment', value: (r) => r.salesRepName ?? r.salesRepId ?? r.salesRepCode ?? '', width: 140 },
   { key: 'tracker', label: 'Tracker', group: 'Shipment', value: (r) => r.trackerName ?? '', width: 140 },
   // The typed text when there is one, "Customer not linked" when the row carries nothing:
   // a blank cell would read as "no customer needed" rather than "nobody matched one yet".
@@ -762,7 +762,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'pickupAppt', label: 'Pick up', group: 'Shipment', value: (r) => formatBoardDate(r.pickupAppt), sortKey: 'pickupAppt', width: 100 },
   { key: 'deliveryAppt', label: 'Delivery', group: 'Shipment', value: (r) => formatBoardDate(r.deliveryAppt), sortKey: 'deliveryAppt', width: 100 },
   { key: 'stops', label: 'Stops', group: 'Computed', value: (r) => (r.stopCount == null ? '' : String(r.stopCount)), width: 70 },
-  { key: 'salesRepId', label: 'Customer rep', group: 'Order', value: (r) => r.salesRepName ?? r.customerRepName ?? r.salesRepId ?? r.customerRepId ?? '', width: 140 },
+  { key: 'salesRepId', label: 'Customer rep', group: 'Order', value: (r) => r.salesRepName ?? r.customerRepName ?? r.salesRepId ?? r.customerRepId ?? r.salesRepCode ?? '', width: 140 },
   { key: 'division', label: 'Division', group: 'Shipment', value: (r) => divisionLabel(r), sortKey: 'division', width: 160 },
   { key: 'driver', label: 'Driver', group: 'Load', value: (r) => r.driverName ?? '', width: 150 },
   { key: 'truck', label: 'Truck', group: 'Load', value: (r) => r.truckNumber ?? '', width: 100 },
