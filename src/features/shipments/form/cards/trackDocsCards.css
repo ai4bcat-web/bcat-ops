@@ -45,3 +45,9 @@
 .tms-shell .tms-trk-half-head { display: flex; align-items: center; gap: 8px; }
 .tms-shell .tms-trk-half-title { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tms-muted); }
 .tms-shell .tms-trk-greyed { opacity: 0.6; }
+
+/* The POD and Rate confirmation slots above the document list. */
+.tms-shell .tms-card-docslots { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.tms-shell .tms-card-docslot { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px 12px; border: 1px dashed var(--tms-border); border-radius: var(--tms-radius); background: var(--tms-card); }
+.tms-shell .tms-card-docslot[data-on-file='true'] { border-style: solid; border-color: var(--tms-badge-green); }
+.tms-shell .tms-card-docslot-head { display: flex; align-items: center; gap: 8px; }

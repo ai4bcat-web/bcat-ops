@@ -220,6 +220,29 @@ describe('CoverCarrierDialog', () => {
     expect(mocks.invite.mock.invocationCallOrder[0]).toBeLessThan(mocks.cover.mock.invocationCallOrder[0]!)
   })
 
+  it('after the packet goes out, a missing-documents warning is acknowledged and the footer assigns that carrier without sending a second packet', async () => {
+    mocks.carriers = [carrierRow()]
+    mocks.invite.mockResolvedValue({ mode: 'LIVE', sent: true, message: 'sent', carrierId: 'car-1', carrierLogged: true, threadLogged: true })
+    mocks.cover.mockRejectedValueOnce(new Error('Acknowledge these before booking: No W-9 is on file for this carrier. [ack:MISSING_DOC:W9,MISSING_DOC:COI_CARGO]'))
+    renderDialog()
+    await lookUp('MC 900001')
+    await screen.findByTestId('cover-mcp-card')
+    enterRate()
+    fireEvent.click(screen.getByTestId('cover-send-packet'))
+    fireEvent.click(await screen.findByLabelText('dispatch@zephyr.example'))
+    fireEvent.click(await screen.findByTestId('mcp-invite-send'))
+
+    expect((await screen.findByTestId('cover-server-warning')).textContent).toMatch(/No W-9 is on file/)
+    expect(screen.queryByTestId('cover-error')).toBeNull()
+    expect((screen.getByTestId('cover-assign-target') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByLabelText('Acknowledge the missing documents'))
+    fireEvent.click(screen.getByTestId('cover-assign-target'))
+
+    await waitFor(() => expect(mocks.cover).toHaveBeenCalledTimes(2))
+    expect(mocks.cover.mock.calls[1][0]).toMatchObject({ carrierId: 'car-1', acknowledgeWarnings: ['MISSING_DOC:W9', 'MISSING_DOC:COI_CARGO'] })
+    expect(mocks.invite).toHaveBeenCalledTimes(1)
+  })
+
   it('a carrier already invited but not yet set up is assigned as waiting for setup, with no second packet', async () => {
     mocks.carriers = [carrierRow({ mcpInvitedAt: '2026-11-01T10:00:00.000Z', mcpInvitedTo: 'ops@zephyr.example', mcpStatus: 'INVITED' })]
     renderDialog()

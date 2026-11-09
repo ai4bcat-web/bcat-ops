@@ -72,6 +72,8 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   // Warnings the server asks to be acknowledged (missing certificates, W-9, agreement...): shown with a checkbox, sent back by key.
   const [serverWarn, setServerWarn] = useState<{ keys: string[]; text: string } | null>(null)
   const [serverWarnOk, setServerWarnOk] = useState(false)
+  // Set once the setup packet has gone out and only the cover is left (a warning to acknowledge): the footer then retries the cover alone.
+  const [coverTarget, setCoverTarget] = useState<{ id: string; name: string } | null>(null)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [working, setWorking] = useState(false)
   // A lookup asked for while the directory is still loading waits for it, instead of the click doing nothing.
@@ -104,6 +106,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
     setAcked(false)
     setServerWarn(null)
     setServerWarnOk(false)
+    setCoverTarget(null)
     setError(null)
     setPreviewing(true)
     mcpPreviewCarrier(next)
@@ -165,6 +168,32 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
     return covered
   }
 
+  /** A server request to acknowledge warnings becomes a checkbox (and the keys it needs); anything else is the error. */
+  const reportCoverError = (e: unknown) => {
+    const text = messageOf(e)
+    const ask = /Acknowledge these before booking:\s*([\s\S]*?)\s*\[ack:([^\]]+)\]/.exec(text)
+    if (ask) {
+      setServerWarn({ keys: ask[2].split(',').map((k) => k.trim()).filter(Boolean), text: ask[1] })
+      setServerWarnOk(false)
+      setError(null)
+    } else setError(text)
+  }
+
+  const assignTarget = async () => {
+    if (!coverTarget) return
+    setWorking(true)
+    setError(null)
+    try {
+      const bundle = await cover(coverTarget.id)
+      toast.success(`${coverTarget.name} assigned`)
+      setCovered({ bundle, name: coverTarget.name })
+    } catch (e) {
+      reportCoverError(e)
+    } finally {
+      setWorking(false)
+    }
+  }
+
   const assign = async () => {
     if (!selected) return
     setWorking(true)
@@ -174,13 +203,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
       toast.success(route === 'ASSIGN_NOW' ? `${selected.name} assigned` : `${selected.name} assigned, waiting for carrier setup`)
       setCovered({ bundle, name: selected.name })
     } catch (e) {
-      const text = messageOf(e)
-      const ask = /Acknowledge these before booking:\s*(.*?)\s*\[ack:([^\]]+)\]/.exec(text)
-      if (ask) {
-        setServerWarn({ keys: ask[2].split(',').map((k) => k.trim()).filter(Boolean), text: ask[1] })
-        setServerWarnOk(false)
-        setError(null)
-      } else setError(text)
+      reportCoverError(e)
     } finally {
       setWorking(false)
     }
@@ -213,11 +236,12 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
         setError('The setup packet was sent, but the carrier is not in our directory yet. Look it up again in a moment and assign it.')
         return
       }
+      setCoverTarget({ id: carrierId, name: card.identity.legalName ?? selected?.name ?? 'The carrier' })
       const bundle = await cover(carrierId)
       toast.success('Setup packet sent. Carrier assigned, waiting for carrier setup')
       setCovered({ bundle, name: card.identity.legalName ?? selected?.name ?? 'The carrier' })
     } catch (e) {
-      setError(messageOf(e))
+      reportCoverError(e)
     } finally {
       setWorking(false)
     }
@@ -270,7 +294,12 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
         footer={
           <>
             <TmsButton variant="ghost" onClick={onClose} disabled={working}>Cancel</TmsButton>
-            {hasTarget && (route === 'INVITE_FIRST' ? (
+            {coverTarget && (
+              <TmsButton variant="primary" data-testid="cover-assign-target" disabled={working || (serverWarn != null && !serverWarnOk)} onClick={() => { void assignTarget() }}>
+                {working ? 'Assigning…' : `Assign ${coverTarget.name}`}
+              </TmsButton>
+            )}
+            {!coverTarget && hasTarget && (route === 'INVITE_FIRST' ? (
               <TmsButton
                 variant="primary"
                 data-testid="cover-send-packet"
@@ -311,7 +340,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
             <TmsAlert tone="orange" title="Review before assigning" role="status">
               <label className="flex items-start gap-2" data-testid="cover-server-warning">
                 <input type="checkbox" checked={serverWarnOk} onChange={(e) => setServerWarnOk(e.target.checked)} aria-label="Acknowledge the missing documents" />
-                <span>{serverWarn.text} I have reviewed this and want to assign the carrier anyway. Click Assign again after ticking.</span>
+                <span>{serverWarn.text} I have reviewed this and want to assign the carrier anyway. Tick it, then click Assign.</span>
               </label>
             </TmsAlert>
           )}
