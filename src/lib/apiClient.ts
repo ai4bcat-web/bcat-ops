@@ -3710,7 +3710,7 @@ let carriersHaveV2 = true
 const CARRIER_V3_FIELDS = ['mcpRiskScore']
 let carriersHaveV3 = true
 // Aljex-exit: CA Intrastate / TX PUC numbers + expiries and the legacy flag; MyCarrierPackets review status, packet completion and last sync.
-const CARRIER_V4_FIELDS = ['caIntrastateNumber', 'caIntrastateExpiresAt', 'txPucNumber', 'txPucExpiresAt', 'legacyImported', 'legacySource', 'mcpReviewStatus', 'mcpPacketCompletedAt', 'mcpSyncedAt']
+const CARRIER_V4_FIELDS = ['caIntrastateNumber', 'caIntrastateExpiresAt', 'txPucNumber', 'txPucExpiresAt', 'legacyImported', 'legacySource', 'mcpReviewStatus', 'mcpPacketCompletedAt', 'mcpSyncedAt', 'mcpInvitedAt', 'mcpInvitedTo', 'mcpInvitedBy']
 let carriersHaveV4 = true
 // Encrypted tax-ID vault mirror (masked last four, type, when it went on file). Dropped and retried if the backend predates it.
 const CARRIER_V5_FIELDS = ['taxIdLast4', 'taxIdType', 'taxIdOnFileAt']
