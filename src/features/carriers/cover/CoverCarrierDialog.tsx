@@ -69,6 +69,9 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   const [previewing, setPreviewing] = useState(false)
   const [rateCents, setRateCents] = useState<number | null>(initialRateCents && initialRateCents > 0 ? initialRateCents : null)
   const [acked, setAcked] = useState(false)
+  // Warnings the server asks to be acknowledged (missing certificates, W-9, agreement...): shown with a checkbox, sent back by key.
+  const [serverWarn, setServerWarn] = useState<{ keys: string[]; text: string } | null>(null)
+  const [serverWarnOk, setServerWarnOk] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [working, setWorking] = useState(false)
   // A lookup asked for while the directory is still loading waits for it, instead of the click doing nothing.
@@ -99,6 +102,8 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
     setRef(next)
     setPreview(null)
     setAcked(false)
+    setServerWarn(null)
+    setServerWarnOk(false)
     setError(null)
     setPreviewing(true)
     mcpPreviewCarrier(next)
@@ -148,7 +153,9 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
       expectedUpdatedAt: load.updatedAt ?? fresh.shipment.updatedAt,
       carrierId,
       carrierRateCents: rateCents ?? 0,
-      ...(gate.warning && acked ? { acknowledgeWarnings: [gate.ackKey ?? MODERATE_ACK_KEY] } : {}),
+      ...((gate.warning && acked) || (serverWarn && serverWarnOk)
+        ? { acknowledgeWarnings: [...(gate.warning && acked ? [gate.ackKey ?? MODERATE_ACK_KEY] : []), ...(serverWarn && serverWarnOk ? serverWarn.keys : [])] }
+        : {}),
     }
     // A load that already has a live carrier gets another one (default: every stop), never a replacement.
     const covered = liveCarriersOf(fresh.loadCarriers, load.id).length > 0
@@ -167,7 +174,13 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
       toast.success(route === 'ASSIGN_NOW' ? `${selected.name} assigned` : `${selected.name} assigned, waiting for carrier setup`)
       setCovered({ bundle, name: selected.name })
     } catch (e) {
-      setError(messageOf(e))
+      const text = messageOf(e)
+      const ask = /Acknowledge these before booking:\s*(.*?)\s*\[ack:([^\]]+)\]/.exec(text)
+      if (ask) {
+        setServerWarn({ keys: ask[2].split(',').map((k) => k.trim()).filter(Boolean), text: ask[1] })
+        setServerWarnOk(false)
+        setError(null)
+      } else setError(text)
     } finally {
       setWorking(false)
     }
@@ -294,6 +307,14 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
             </TmsButton>
           </form>
 
+          {serverWarn && (
+            <TmsAlert tone="orange" title="Review before assigning" role="status">
+              <label className="flex items-start gap-2" data-testid="cover-server-warning">
+                <input type="checkbox" checked={serverWarnOk} onChange={(e) => setServerWarnOk(e.target.checked)} aria-label="Acknowledge the missing documents" />
+                <span>{serverWarn.text} I have reviewed this and want to assign the carrier anyway. Click Assign again after ticking.</span>
+              </label>
+            </TmsAlert>
+          )}
           {error && <TmsAlert tone="red" title="Could not cover" role="alert"><span data-testid="cover-error">{error}</span></TmsAlert>}
 
           {nameMatches && (
