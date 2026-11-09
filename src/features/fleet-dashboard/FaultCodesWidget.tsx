@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { truckInFleet } from '@/lib/fleetGroups'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
@@ -80,7 +81,7 @@ export function FaultCodesWidget() {
        * than a known not-Ivan — hiding it would be acting on a guess, and the unfiled ones
        * are the reason this widget flags them in the first place.
        */
-      if (ivanOnly && eq?.fleetGroup && eq.fleetGroup !== 'LOCAL') continue
+      if (ivanOnly && eq?.fleetGroup && !truckInFleet(eq.fleetGroup, 'LOCAL')) continue
       const entry = grouped.get(f.truckId) ?? {
         truckId: f.truckId,
         unitNumber: eq?.unitNumber ?? f.unitNumber,

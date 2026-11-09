@@ -843,3 +843,9 @@ function trimZeros(s: string): string {
 }
 
 export type { ChargeCalc, ShipmentStatus }
+
+/** The form's revenue division is only the customer's default the form prefilled (the user never chose it). */
+export function isCustomerDefaultDivision(values: ShipmentFormValues, customer: { defaultDivisionKey?: string | null } | null): boolean {
+  const { revDivision, revSubdivision } = values.ship
+  return revSubdivision === '' && (revDivision === '' || revDivision === (customer?.defaultDivisionKey ?? ''))
+}

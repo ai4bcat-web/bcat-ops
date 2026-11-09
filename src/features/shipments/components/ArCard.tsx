@@ -34,6 +34,7 @@ import { AGING_BUCKET_LABEL, agingBucket, daysLate, type AgingBucket } from '@/l
 import { formatDateTime } from '@/lib/date'
 import { cn } from '@/lib/utils'
 import { GenerateInvoiceDialog } from '@/features/ar/components/GenerateInvoiceDialog'
+import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { EmailInvoiceDialog } from '@/features/ar/components/EmailInvoiceDialog'
 import { ReceivePaymentDialog } from '@/features/ar/components/ReceivePaymentDialog'
 import { SendToFactorDialog } from '@/features/ar/components/SendToFactorDialog'
@@ -72,6 +73,7 @@ export interface ArCardProps {
 }
 
 export function ArCard({ bundle, onReload }: ArCardProps) {
+  const canPost = useBillingGrant()
   const shipment = bundle.shipment
   const order = bundle.orders[0] ?? null
   const invoiceId = order?.invoiceId ?? null
@@ -254,7 +256,7 @@ export function ArCard({ bundle, onReload }: ArCardProps) {
           <PushToLoadReview shipmentId={shipment.id} onPushed={() => { void refresh() }} />
         ))}
         {arStatus === 'UNBILLED' && !invoiceId && (
-          <TmsButton variant="primary" size="sm" disabled={busy} onClick={() => setDialog({ kind: 'generate' })}>
+          <TmsButton variant="primary" size="sm" disabled={busy || !canPost} title={canPost ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setDialog({ kind: 'generate' })}>
             Generate invoice
           </TmsButton>
         )}

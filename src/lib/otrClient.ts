@@ -85,9 +85,36 @@ export function setOtrField(id: string, field: string, value: string): Promise<{
   return otrAction('setField', { id, field, value })
 }
 
-/** Take the row out of the OTR queue to be billed by hand. NO_BUY says OTR refused the broker. */
-export function markManualInvoice(id: string, opts: { apEmail?: string; reason?: 'NO_BUY' | 'MANUAL' } = {}): Promise<{ status: string }> {
-  return otrAction('manualInvoice', { id, ...(opts.apEmail ? { apEmail: opts.apEmail } : {}), ...(opts.reason ? { reason: opts.reason } : {}) })
+export interface ManualInvoiceOpts {
+  apEmail?: string
+  reason?: 'NO_BUY' | 'MANUAL'
+  /** Also switch the customer's default billing method FACTOR -> MANUAL (needs the billing release grant). */
+  changeCustomerDefault?: boolean
+  /** The customer's AP e-mail; the server saves it only when the customer has no valid one. */
+  customerApEmail?: string
+  /** Confirmed: the invoice is already submitted to OTR and not finished there. */
+  confirmSubmitted?: boolean
+}
+
+export interface ManualInvoiceResult {
+  status: string
+  reason?: 'NO_BUY' | 'MANUAL'
+  /** Nothing was left to change (a repeat click). */
+  alreadyDone?: boolean
+  customerChanged?: boolean
+  customer?: { id: string; name: string | null; oldMethod: string | null; newMethod: string }
+}
+
+/** Take the row out of the OTR queue to be billed by hand. NO_BUY says OTR refused the broker. Sends nothing. */
+export function markManualInvoice(id: string, opts: ManualInvoiceOpts = {}): Promise<ManualInvoiceResult> {
+  return otrAction('manualInvoice', {
+    id,
+    ...(opts.apEmail ? { apEmail: opts.apEmail } : {}),
+    ...(opts.reason ? { reason: opts.reason } : {}),
+    ...(opts.changeCustomerDefault ? { changeCustomerDefault: true } : {}),
+    ...(opts.customerApEmail ? { customerApEmail: opts.customerApEmail } : {}),
+    ...(opts.confirmSubmitted ? { confirmSubmitted: true } : {}),
+  })
 }
 
 /** Put a manually-invoiced row back in the OTR queue. */

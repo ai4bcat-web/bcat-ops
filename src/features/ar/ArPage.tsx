@@ -46,6 +46,7 @@ import {
 } from './arViews'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
 import { EmailInvoiceDialog } from './components/EmailInvoiceDialog'
+import { REVIEW_BILLING_LABEL, needsBillingReview, reviewBillingNote } from '@/lib/reviewBilling'
 import { GenerateInvoiceDialog } from './components/GenerateInvoiceDialog'
 import { ReasonDialog } from './components/ReasonDialog'
 import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
@@ -166,6 +167,11 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     () => docsNeeded.rows.filter((r) => r.deliveredAt || r.shipment?.status === 'DELIVERED' || r.order.invoiceEarly),
     [docsNeeded.rows],
   )
+  // "Review billing": pre-cutover shipments parked in Docs needed. Not narrowed by delivery:
+  // an imported shipment with no delivery stamp is exactly the one nobody will chase.
+  const [reviewOnly, setReviewOnly] = useState(false)
+  const reviewRows = useMemo(() => docsNeeded.rows.filter(rowNeedsBillingReview), [docsNeeded.rows])
+  const docsNeededShown = reviewOnly ? reviewRows : docsNeededRows
 
   /**
    * P10 — shipments whose paperwork is in but which have not been released to billing yet.
@@ -328,7 +334,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onBatchGenerate: runBatchGenerate,
       onBatchEmail: runBatchEmail,
     })
-    : tab === 'docs-needed' ? docsNeededView({ banner: errorBanner, rows: docsNeededRows })
+    : tab === 'docs-needed' ? docsNeededView({ banner: errorBanner, rows: docsNeededShown, reviewOnly, reviewCount: reviewRows.length, onReviewOnly: setReviewOnly })
     : tab === 'ready-for-billing' ? readyForBillingView({
       banner: errorBanner,
       ...readyBilling,
@@ -563,7 +569,8 @@ function toInvoiceView({
         <TmsButton
           size="sm"
           aria-label={`Generate invoice for ${row.shipmentNumber ?? row.orderId}`}
-          disabled={busy || row.reasons.length > 0}
+          disabled={busy || row.reasons.length > 0 || !canRelease}
+          title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
           onClick={() => onGenerate(row)}
         >
           Generate
@@ -581,7 +588,8 @@ function toInvoiceView({
         <TmsButton
           variant="primary"
           aria-label="Batch generate invoices"
-          disabled={busy || selected.length === 0 || selected.length > BATCH_GENERATE_LIMIT}
+          disabled={busy || selected.length === 0 || selected.length > BATCH_GENERATE_LIMIT || !canRelease}
+          title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
           onClick={onBatchGenerate}
         >
           Batch generate
@@ -607,13 +615,32 @@ function toInvoiceView({
 
 /* ── Docs needed ─────────────────────────────────────────────────────────── */
 
-function docsNeededView({ banner, rows }: { banner: ReactNode; rows: ArWorklistRow[] }): ListView {
+const reviewFacts = (row: ArWorklistRow) => ({
+  arStatus: row.order.arStatus,
+  legacyImported: row.shipment?.legacyImported,
+  source: row.shipment?.source,
+  number: row.shipmentNumber,
+})
+const rowNeedsBillingReview = (row: ArWorklistRow) => needsBillingReview(reviewFacts(row))
+
+function docsNeededView({ banner, rows, reviewOnly, reviewCount, onReviewOnly }: {
+  banner: ReactNode
+  rows: ArWorklistRow[]
+  reviewOnly: boolean
+  reviewCount: number
+  onReviewOnly: (on: boolean) => void
+}): ListView {
   const columns: ColumnDef<ArWorklistRow>[] = [
     {
       key: 'shipment',
       header: 'SHIPMENT',
       render: (row) => (
-        <Link to={`/tms/shipments/${row.shipmentId}?tab=documents`}>{row.shipmentNumber ?? row.shipmentId}</Link>
+        <>
+          <Link to={`/tms/shipments/${row.shipmentId}?tab=documents`}>{row.shipmentNumber ?? row.shipmentId}</Link>
+          {rowNeedsBillingReview(row) && (
+            <> <TmsBadge tone="orange" title={reviewBillingNote(reviewFacts(row))}>{REVIEW_BILLING_LABEL}</TmsBadge></>
+          )}
+        </>
       ),
     },
     { key: 'customer', header: 'CUSTOMER', render: (row) => row.customerName || '—' },
@@ -650,12 +677,22 @@ function docsNeededView({ banner, rows }: { banner: ReactNode; rows: ArWorklistR
   ]
 
   return view<ArWorklistRow>({
+    actions: (
+      <TmsButton
+        size="sm"
+        variant={reviewOnly ? 'primary' : 'secondary'}
+        aria-pressed={reviewOnly}
+        onClick={() => onReviewOnly(!reviewOnly)}
+      >
+        {REVIEW_BILLING_LABEL} ({reviewCount})
+      </TmsButton>
+    ),
     banner,
     columns,
     rows,
     rowKey: (row) => row.orderId,
     page: wholeList(rows.length),
-    emptyText: 'No shipment is waiting on paperwork.',
+    emptyText: reviewOnly ? 'No pre-cutover shipment is waiting on a billing review.' : 'No shipment is waiting on paperwork.',
   })
 }
 

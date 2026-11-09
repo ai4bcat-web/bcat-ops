@@ -67,13 +67,16 @@ export function DirectoryCreateDialog({
           <DialogTitle>{type === 'customer' ? 'Add customer' : 'Add location'}</DialogTitle>
         </DialogHeader>
         {type === 'customer' ? (
-          <CustomerForm value={customerForm.value} set={customerForm.set} errors={customerForm.errors} divisions={divisions} />
+          <CustomerForm value={customerForm.value} set={customerForm.set} errors={customerForm.errors} divisions={divisions} isNew={customerForm.isNew} />
         ) : (
           <LocationForm value={locationForm.value} set={locationForm.set} setAddressField={locationForm.setAddressField} errors={locationForm.errors} customers={customers} />
         )}
         <DialogFooter>
+          {type === 'customer' && customerForm.missing && (
+            <span role="status" data-testid="customer-missing" className="tms-field-error" style={{ marginRight: 'auto' }}>{customerForm.missing}</span>
+          )}
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+          <Button onClick={handleSave} disabled={saving || (type === 'customer' && customerForm.isNew && Object.keys(customerForm.errors).length > 0)}>{saving ? 'Saving…' : 'Save'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

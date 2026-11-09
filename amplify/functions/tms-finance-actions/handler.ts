@@ -45,6 +45,7 @@ import {
   sendRemittance,
 } from './apPayments'
 import { repointInvoicedCustomer } from './repoint'
+import { brokerageRepRollup } from './brokerageRep'
 import {
   acceptCommissionCounter,
   approveCommission,
@@ -118,6 +119,7 @@ type Action =
   | 'RELEASE_TO_BILLING'
   | 'SEND_INVOICE'
   | 'SYNC_FACTORING_CHANGE'
+  | 'BROKERAGE_REP_ROLLUP'
 
 /** The actions that move money and are owner/ADMIN while `arPostingAdminOnly` holds. */
 const POSTING_ACTIONS: Record<string, true> = {
@@ -200,8 +202,15 @@ const COMMISSION_ACTIONS: Record<string, true> = {
  * Step AW: release to billing, sending, queueing for the factor and marking sent are
  * granted per user (`page-billingRelease`) and to nobody else: no ADMIN, owner or
  * `page-tms`/`page-invoicing` bypass. Checked before every other rule.
+ *
+ * Posting an invoice is the same act: issuing it (GENERATE_INVOICE / BATCH_GENERATE turn
+ * UNBILLED into UNPAID and take the next invoice number) is behind the same grant, so
+ * "who may post" is exactly the members of `page-billingRelease` (Jenny and Ryne). Holding
+ * `page-invoicing` or `page-tms`, or ADMIN, opens the AR screens but never posts.
  */
 const BILLING_RELEASE_ACTIONS: Record<string, true> = {
+  GENERATE_INVOICE: true,
+  BATCH_GENERATE: true,
   RELEASE_TO_BILLING: true,
   SEND_INVOICE: true,
   SYNC_FACTORING_CHANGE: true,
@@ -275,6 +284,8 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
   const action = event.arguments.action as Action
+  // Its own door, decided by brokerageAccessOf inside the action (owner/ADMIN/page-dashboard or a sales rep), never by the AR page rule.
+  if (action === 'BROKERAGE_REP_ROLLUP') return brokerageRepRollup(event.identity, parseInput(event.arguments.input))
   const caller = await authorize(action, event.identity)
   const input = parseInput(event.arguments.input)
 

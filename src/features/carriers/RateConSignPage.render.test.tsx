@@ -6,20 +6,26 @@ import type { RateConSignState } from '@/lib/rateConSignClient'
 
 const getRateCon = vi.hoisted(() => vi.fn())
 const submitRateCon = vi.hoisted(() => vi.fn())
-const stampSignature = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/rateConSignClient', () => ({
   RATE_CON_SIGN_API_URL: 'https://rate-con.example',
   rateConSignAvailable: true,
-  RateConSignError: class RateConSignError extends Error {},
+  RateConSignError: class RateConSignError extends Error {
+    code?: string
+    fieldErrors?: Record<string, string>
+    constructor(public status: number, message: string, code?: string, fieldErrors?: Record<string, string>) {
+      super(message)
+      this.code = code
+      this.fieldErrors = fieldErrors
+    }
+  },
   getRateCon,
   submitRateCon,
   declineRateCon: vi.fn(),
 }))
-// The real module pulls in jspdf/pdf-lib, which this page only needs at signing time.
-vi.mock('@/lib/carrierRateCon', () => ({ stampSignature }))
 
 const { RateConSignPage } = await import('./RateConSignPage')
+const { RateConSignError } = await import('@/lib/rateConSignClient')
 
 const SENT: RateConSignState = {
   loadNumber: 'L-1001',
@@ -62,7 +68,7 @@ describe('RateConSignPage', () => {
     renderPage()
     await waitFor(() => expect(screen.getByLabelText('Driver name')).toBeTruthy())
     fireEvent.change(screen.getByLabelText('Driver name'), { target: { value: 'Dan Ruiz' } })
-    fireEvent.change(screen.getByLabelText('Driver phone'), { target: { value: '555-0101' } })
+    fireEvent.change(screen.getByLabelText('Driver phone'), { target: { value: '312-555-0101' } })
     fireEvent.change(screen.getByLabelText('Truck number'), { target: { value: '417' } })
     expect(signButton().disabled).toBe(true)
 
@@ -105,13 +111,11 @@ describe('RateConSignPage', () => {
 
   it('signs and enters the driver in one submit: the four fields go with the signature', async () => {
     getRateCon.mockResolvedValue({ ...SENT, requiredFields: ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER', 'TRAILER_NUMBER'] })
-    stampSignature.mockResolvedValue(new Uint8Array([1, 2, 3]))
-    submitRateCon.mockResolvedValue({ ok: true })
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(3) })))
+    submitRateCon.mockResolvedValue({ ok: true, alreadySigned: false })
     renderPage()
     await waitFor(() => expect(screen.getByLabelText('Trailer number')).toBeTruthy())
     fireEvent.change(screen.getByLabelText('Driver name'), { target: { value: ' Dan Ruiz ' } })
-    fireEvent.change(screen.getByLabelText('Driver phone'), { target: { value: '555-0101' } })
+    fireEvent.change(screen.getByLabelText('Driver phone'), { target: { value: '(312) 555-0101' } })
     fireEvent.change(screen.getByLabelText('Truck number'), { target: { value: '417' } })
     fireEvent.change(screen.getByLabelText('Trailer number'), { target: { value: 'T-88' } })
     fireEvent.change(screen.getByLabelText('Your full name'), { target: { value: 'Maria Lopez' } })
@@ -119,9 +123,80 @@ describe('RateConSignPage', () => {
     fireEvent.click(signButton())
 
     await waitFor(() => expect(submitRateCon).toHaveBeenCalledTimes(1))
-    expect(submitRateCon.mock.calls[0]![0].fields).toEqual({
-      DRIVER_NAME: 'Dan Ruiz', DRIVER_PHONE: '555-0101', TRUCK_NUMBER: '417', TRAILER_NUMBER: 'T-88',
+    // The browser sends the typed name, the tick and the fields: never a PDF.
+    expect(submitRateCon.mock.calls[0]![0]).toEqual({
+      token: 'tok-123', signerName: 'Maria Lopez', agreed: true,
+      fields: { DRIVER_NAME: 'Dan Ruiz', DRIVER_PHONE: '(312) 555-0101', TRUCK_NUMBER: '417', TRAILER_NUMBER: 'T-88' },
     })
-    vi.unstubAllGlobals()
+  })
+
+  it('blocks Sign on a malformed driver phone and says why, even with everything else filled', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Driver name')).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('Driver name'), { target: { value: 'Dan Ruiz' } })
+    fireEvent.change(screen.getByLabelText('Driver phone'), { target: { value: '555-0101' } })
+    fireEvent.change(screen.getByLabelText('Truck number'), { target: { value: '417' } })
+    fireEvent.change(screen.getByLabelText('Your full name'), { target: { value: 'Maria Lopez' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect(signButton().disabled).toBe(true)
+    expect(screen.getByTestId('error-DRIVER_PHONE').textContent).toMatch(/valid 10-digit/)
+
+    fireEvent.change(screen.getByLabelText('Driver phone'), { target: { value: '312-555-0101' } })
+    expect(signButton().disabled).toBe(false)
+  })
+
+  it('blocks Sign on a blank required field, on a name with no letters, and on an unticked agreement', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Driver name')).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('Driver name'), { target: { value: 'Dan Ruiz' } })
+    fireEvent.change(screen.getByLabelText('Driver phone'), { target: { value: '312-555-0101' } })
+    fireEvent.change(screen.getByLabelText('Your full name'), { target: { value: 'Maria Lopez' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect(signButton().disabled).toBe(true) // truck number blank
+
+    fireEvent.change(screen.getByLabelText('Truck number'), { target: { value: '417' } })
+    expect(signButton().disabled).toBe(false)
+    fireEvent.change(screen.getByLabelText('Your full name'), { target: { value: '12345' } })
+    expect(signButton().disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('Your full name'), { target: { value: 'Maria Lopez' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect(signButton().disabled).toBe(true)
+  })
+
+  it('shows the typed name as a signature before signing', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Your full name')).toBeTruthy())
+    expect(screen.queryByTestId('signature-preview')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Your full name'), { target: { value: 'Maria Lopez' } })
+    expect(screen.getByTestId('signature-preview').textContent).toContain('Maria Lopez')
+  })
+
+  it('shows the server\'s refusal and keeps the form when the server disagrees', async () => {
+    submitRateCon.mockRejectedValue(new RateConSignError(400, 'Driver phone must be a valid 10-digit US phone number', 'INVALID', { DRIVER_PHONE: 'Driver phone must be a valid 10-digit US phone number' }))
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Driver name')).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('Driver name'), { target: { value: 'Dan Ruiz' } })
+    fireEvent.change(screen.getByLabelText('Driver phone'), { target: { value: '312-555-0101' } })
+    fireEvent.change(screen.getByLabelText('Truck number'), { target: { value: '417' } })
+    fireEvent.change(screen.getByLabelText('Your full name'), { target: { value: 'Maria Lopez' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(signButton())
+    await waitFor(() => expect(screen.getAllByText(/valid 10-digit/).length).toBeGreaterThan(0))
+    expect(screen.getByLabelText('Driver name')).toBeTruthy()
+  })
+
+  it('on a link a newer version replaced, says so and offers no way to sign', async () => {
+    getRateCon.mockRejectedValue(new RateConSignError(410, 'This rate confirmation was replaced; use the newest link', 'REPLACED'))
+    renderPage()
+    await waitFor(() => expect(screen.getByText('This rate confirmation was replaced; use the newest link')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /Sign rate confirmation/ })).toBeNull()
+    expect(screen.queryByLabelText('Your full name')).toBeNull()
+  })
+
+  it('shows an already-signed link as signed, with no form', async () => {
+    getRateCon.mockResolvedValue({ ...SENT, status: 'SIGNED', requiredFields: [], pdfUrl: '' })
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/already been signed/i)).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /Sign rate confirmation/ })).toBeNull()
   })
 })

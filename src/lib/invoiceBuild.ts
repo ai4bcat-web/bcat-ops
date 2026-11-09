@@ -24,9 +24,12 @@ import type {
   CustomerRecord,
   Division,
   DocGateResult,
+  FreightItem,
   InvoiceBillTo,
   InvoiceLine,
   InvoiceRecord,
+  LoadCarrierRecord,
+  LocationRecord,
   LoadChargeRecord,
   OrderRecord,
   OrderReference,
@@ -390,8 +393,14 @@ export interface InvoiceStop {
   name?: string | null
   city?: string | null
   state?: string | null
+  street?: string | null
+  zip?: string | null
   /** ISO UTC, as the stop stored it — the renderer decides how a date looks. */
   apptAt?: string | null
+  /** FCFS/TBD appointments are a calendar date at 00:00 UTC, not an instant. */
+  apptType?: string | null
+  /** Customer-visible reference values at this stop (PO at the dock, delivery number…). */
+  refs?: string[]
 }
 
 export interface InvoiceBroker {
@@ -433,6 +442,19 @@ export interface InvoiceInput {
   /** The factor's assignment notice, when one applies. */
   factorNoticeText?: string | null
   termsText?: string | null
+  /** Shipment revenue division / subdivision: picks the letterhead (`invoiceBrandingFor`). */
+  divisionKey?: string | null
+  subdivisionKey?: string | null
+  /** The customer's account number with us (Aljex `Customer Account #`); the line is omitted when blank. */
+  accountNumber?: string | null
+  /** FTL / LTL / … from the order. */
+  shipmentType?: string | null
+  /** Container and trailer numbers, as printed in CONT / TRAILER #. */
+  contTrailer?: string | null
+  miles?: number | null
+  weightLbs?: number | null
+  /** What is on the truck, printed on the line-haul row. */
+  freightDescription?: string | null
 }
 
 export interface InvoiceDataInput {
@@ -455,10 +477,14 @@ export interface InvoiceDataInput {
     | 'factored'
   >
   bundle: {
-    shipment?: Pick<ShipmentRecord, 'number'> | null
-    loads?: readonly Pick<ShipmentLoad, 'id' | 'orderId' | 'stops'>[] | null
+    shipment?: Pick<ShipmentRecord, 'number'> & Partial<Pick<ShipmentRecord, 'revDivision' | 'revSubdivision'>> | null
+    loads?: readonly (Pick<ShipmentLoad, 'id' | 'orderId' | 'stops'> & Partial<Pick<ShipmentLoad, 'miles' | 'weight' | 'commodity' | 'freightDescription'>> & { trailerNumber?: string | null })[] | null
+    orders?: readonly Pick<OrderRecord, 'id' | 'mode' | 'freight'>[] | null
+    /** Stops booked from the directory carry only `locationId`; the street and zip live on the location. */
+    locations?: readonly Pick<LocationRecord, 'id' | 'street' | 'city' | 'state' | 'zip'>[] | null
+    loadCarriers?: readonly Pick<LoadCarrierRecord, 'loadId' | 'trailerNumber' | 'status'>[] | null
   }
-  customer?: Pick<CustomerRecord, 'name' | 'factored' | 'billingAddress' | 'billingEmail'> | null
+  customer?: (Pick<CustomerRecord, 'name' | 'factored' | 'billingAddress' | 'billingEmail'> & Partial<Pick<CustomerRecord, 'aljexCode'>>) | null
   division?: Pick<Division, 'name' | 'legalName' | 'mcNumber' | 'dotNumber' | 'remitToName' | 'remitToAddress' | 'remitToEmail'> | null
   settings?: Pick<TmsSettings, 'factorRemitTo' | 'invoiceTerms'> | null
 }
@@ -473,18 +499,58 @@ function cityStateOf(stop: Pick<Stop, 'city' | 'address'>): { city: string | nul
   return { city: trimmed(left), state: trimmed(right) }
 }
 
+const customerVisible = (ref: Pick<OrderReference, 'visibility'>): boolean =>
+  ref.visibility === 'CUSTOMER' || ref.visibility === 'ALL'
+
+/** Reference codes the stop boxes, CONT / TRAILER # and the references box each own. */
+const PICKUP_REF_CODE = 'PICKUP_REF'
+const CONSIGNEE_REF_CODE = 'CONSIGNEE_REF'
+const CONTAINER_REF_CODE = 'CONTAINER'
+
+/**
+ * `stops` and `freight` are AWSJSON columns: AppSync hands a client the parsed array, but the finance
+ * Lambda reads the raw DynamoDB row, where the same value is a JSON string. Both are accepted so the
+ * stored invoice and the browser preview print the same route.
+ */
+function jsonArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[]
+  if (typeof value !== 'string') return []
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return Array.isArray(parsed) ? (parsed as T[]) : []
+  } catch {
+    return []
+  }
+}
+
+/** The directory locations the loads' stops point at — what a caller must read for `bundle.locations`. */
+export function invoiceStopLocationIds(loads: readonly Pick<ShipmentLoad, 'stops'>[]): string[] {
+  const ids: string[] = []
+  for (const load of loads) {
+    for (const stop of jsonArray<Stop>(load.stops)) {
+      if (stop.locationId && !ids.includes(stop.locationId)) ids.push(stop.locationId)
+    }
+  }
+  return ids
+}
+
+function invoiceLoads(input: InvoiceDataInput) {
+  return (input.bundle.loads ?? []).filter(
+    (load) => load.orderId == null || load.orderId === input.invoice.orderId,
+  )
+}
+
 /**
  * The route as the bill states it: the first pickup through the last delivery, in
  * sequence. The legs between are the carrier's problem, not the customer's, so a
- * relay prints as one origin and one destination.
+ * relay prints as one origin and one destination. Each stop carries the reference
+ * numbers the customer may see: its own `refs`, the order's STOP-level references
+ * that name it, and the order-level pickup / consignee reference on the ends.
  */
 function invoiceStops(input: InvoiceDataInput): InvoiceStop[] {
-  const loads = (input.bundle.loads ?? []).filter(
-    (load) => load.orderId == null || load.orderId === input.invoice.orderId,
-  )
   const stops: Stop[] = []
-  for (const load of loads) {
-    for (const stop of load.stops ?? []) stops.push(stop)
+  for (const load of invoiceLoads(input)) {
+    for (const stop of jsonArray<Stop>(load.stops)) stops.push(stop)
   }
   stops.sort((a, b) => a.sequence - b.sequence)
 
@@ -495,16 +561,61 @@ function invoiceStops(input: InvoiceDataInput): InvoiceStop[] {
   }
   if (first < 0 || last < first) return []
 
-  return stops.slice(first, last + 1).map((stop) => {
+  const orderRefs = (input.invoice.references ?? []).filter(customerVisible)
+  const locationOf = (stop: Stop) => (stop.locationId ? (input.bundle.locations ?? []).find((row) => row.id === stop.locationId) : undefined)
+  const refValues = (stop: Stop, endCode: string | null): string[] => {
+    const out: string[] = []
+    const add = (value: string | null | undefined) => {
+      const v = trimmed(value)
+      if (v && !out.includes(v)) out.push(v)
+    }
+    for (const ref of stop.refs ?? []) if (customerVisible(ref)) add(ref.value)
+    for (const ref of orderRefs) if (ref.level === 'STOP' && ref.stopId === stop.id) add(ref.value)
+    if (endCode) for (const ref of orderRefs) if (ref.code === endCode) add(ref.value)
+    return out
+  }
+
+  return stops.slice(first, last + 1).map((stop, index, all) => {
+    const location = locationOf(stop)
     const { city, state } = cityStateOf(stop)
+    const endCode = index === 0 ? PICKUP_REF_CODE : index === all.length - 1 ? CONSIGNEE_REF_CODE : null
     return {
       kind: stop.type === 'pickup' ? ('PICKUP' as const) : ('DELIVERY' as const),
       name: trimmed(stop.name),
-      city,
-      state,
+      street: trimmed(stop.address?.street) ?? trimmed(location?.street),
+      city: city ?? trimmed(location?.city),
+      state: state ?? trimmed(location?.state),
+      zip: trimmed(stop.address?.zip) ?? trimmed(location?.zip),
       apptAt: trimmed(stop.appt),
+      apptType: stop.apptType ?? null,
+      refs: refValues(stop, endCode),
     }
   })
+}
+
+function sumOrNull(values: readonly (number | null | undefined)[]): number | null {
+  let total = 0
+  let any = false
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) { total += value; any = true }
+  }
+  return any ? total : null
+}
+
+/** "16 POD RCVD-TOTES": the freight lines as the line-haul row describes them. */
+function freightText(input: InvoiceDataInput, order: NonNullable<InvoiceDataInput['bundle']['orders']>[number] | undefined): string | null {
+  const parts: string[] = []
+  for (const item of jsonArray<FreightItem>(order?.freight)) {
+    const description = trimmed(item.description)
+    if (!description) continue
+    parts.push(item.qty > 0 ? `${item.qty} ${description}` : description)
+  }
+  if (parts.length > 0) return parts.join(' / ')
+  for (const load of invoiceLoads(input)) {
+    const text = trimmed(load.freightDescription) ?? trimmed(load.commodity)
+    if (text) return text
+  }
+  return null
 }
 
 /**
@@ -524,6 +635,23 @@ export function invoiceData(input: InvoiceDataInput): InvoiceInput {
   // The snapshot wins: a later edit to the org's terms must not change what a bill
   // already sent says it was issued on.
   const termsText = trimmed(invoice.termsText) ?? trimmed(settings?.invoiceTerms) ?? `Net ${invoice.termsDays}`
+  const order = (input.bundle.orders ?? []).find((row) => row.id === invoice.orderId)
+  const loads = invoiceLoads(input)
+  const loadIds = loads.map((load) => load.id)
+  const trailers: string[] = []
+  for (const load of loads) {
+    const number = trimmed(load.trailerNumber)
+    if (number && !trailers.includes(number)) trailers.push(number)
+  }
+  for (const carrier of input.bundle.loadCarriers ?? []) {
+    const number = trimmed(carrier.trailerNumber)
+    if (carrier.status === 'ACTIVE' && number && loadIds.includes(carrier.loadId) && !trailers.includes(number)) trailers.push(number)
+  }
+  const containers = (invoice.references ?? [])
+    .filter((ref) => customerVisible(ref) && ref.code === CONTAINER_REF_CODE)
+    .map((ref) => ref.value.trim())
+    .filter(Boolean)
+  const freightWeight = sumOrNull(jsonArray<FreightItem>(order?.freight).map((item) => item.weightLbs))
 
   return {
     broker: {
@@ -544,14 +672,20 @@ export function invoiceData(input: InvoiceDataInput): InvoiceInput {
     shipmentNumber: trimmed(invoice.shipmentNumber) ?? trimmed(input.bundle.shipment?.number),
     stops: invoiceStops(input),
     // INTERNAL and CARRIER notes never reach a page the customer sees.
-    references: (invoice.references ?? []).filter(
-      (ref) => ref.visibility === 'CUSTOMER' || ref.visibility === 'ALL',
-    ),
+    references: (invoice.references ?? []).filter(customerVisible),
     lines: invoice.lines ?? [],
     subtotalCents: invoice.subtotalCents,
     totalCents: invoice.totalCents,
     factored,
     factorNoticeText: factored ? trimmed(remitTo.noticeText) : null,
     termsText,
+    divisionKey: trimmed(input.bundle.shipment?.revDivision),
+    subdivisionKey: trimmed(input.bundle.shipment?.revSubdivision),
+    accountNumber: trimmed(customer?.aljexCode),
+    shipmentType: trimmed(order?.mode),
+    contTrailer: [...containers, ...trailers].join(' ') || null,
+    miles: sumOrNull(loads.map((load) => load.miles)),
+    weightLbs: freightWeight ?? sumOrNull(loads.map((load) => load.weight)),
+    freightDescription: freightText(input, order),
   }
 }

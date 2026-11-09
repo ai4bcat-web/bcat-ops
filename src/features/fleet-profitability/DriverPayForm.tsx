@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { PayModal } from '@/features/driver-pay/DriverPayForms'
 import { useDrivers } from '@/hooks/useDrivers'
 import { driverPaySchema } from '@/lib/schemas'
-import { combinedPayDriverId, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { combinedPayDriverId } from '@/lib/fleetGroups'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 import type { FleetGroup } from '@/types/equipment'
 import type { DriverPayPeriod } from '@/hooks/useDriverPay'
 import { errorText } from '@/lib/errorText'
@@ -22,6 +23,7 @@ const inputStyle: React.CSSProperties = { height: 36, width: '100%', borderRadiu
 
 /** Manual biweekly driver-pay entry. `source` is fixed to MANUAL (Paychex is the seam). */
 export function DriverPayForm({ onSave, onClose, defaultStart, defaultEnd, fleetGroup = 'LOCAL' }: Props) {
+  const { fleetGroupLabel } = useDriverTypes()
   const { drivers } = useDrivers()
   const [form, setForm] = useState({
     driverId:    '',
@@ -75,7 +77,7 @@ export function DriverPayForm({ onSave, onClose, defaultStart, defaultEnd, fleet
             <label style={labelStyle}>Driver / fleet *</label>
             <select value={form.driverId} onChange={(e) => set('driverId', e.target.value)} style={inputStyle}>
               <option value="">— Select driver —</option>
-              <option value={combinedPayDriverId(fleetGroup)}>All {FLEET_GROUP_LABELS[fleetGroup]} drivers (combined)</option>
+              <option value={combinedPayDriverId(fleetGroup)}>All {fleetGroupLabel(fleetGroup)} drivers (combined)</option>
               {activeDrivers.map((d) => (
                 <option key={d.id} value={d.id}>{d.name}{d.assignedTruckId ? '' : ' (no truck assigned)'}</option>
               ))}

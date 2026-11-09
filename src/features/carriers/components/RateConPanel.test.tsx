@@ -8,14 +8,15 @@ import { RateConPanel } from './RateConPanel'
 import type { CarrierContactRecord, CarrierRecord, LoadCarrierRecord, ShipmentBundle } from '@/types/tms'
 
 vi.mock('@/lib/apiClient', () => ({
-  listDivisions: vi.fn(async () => []),
+  listUserProfiles: vi.fn(async () => []),
   getRateConfirmUrl: vi.fn(async () => ''),
 }))
 vi.mock('@/lib/carrierRateCon', () => ({
-  buildRateConPdf: vi.fn(async () => ({ output: () => 'data:application/pdf;base64,AAAA' })),
+  buildRateConPdf: vi.fn(async () => new Uint8Array([1, 2, 3])),
   rateConPdfBase64: vi.fn(() => 'AAAA'),
   rateConFilename: vi.fn(() => 'rate-con.pdf'),
   joinRateConNotes: vi.fn(() => ''),
+  rateConRepOf: vi.fn(() => null),
 }))
 vi.mock('@/hooks/useAuth', () => ({
   useAuthUser: () => ({ email: 'dispatch@bcatcorp.com', userId: 'u1', groups: [] }),

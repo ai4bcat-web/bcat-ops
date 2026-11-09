@@ -38,6 +38,12 @@ import { RETIRED_SEED_VIEWS, SEED_VIEWS, slugify, validateView, BOARD_COLUMN_KEY
 import { validateAiAgents, validatePartyMemory } from '../../../src/lib/workflows/memory'
 import { BILLING_METHODS, validateBillingFields, type BillingMethod } from '../../../src/lib/billingMethod'
 import {
+  DEFAULT_NEW_CUSTOMER_CREDIT_LIMIT_CENTS,
+  DEFAULT_NEW_CUSTOMER_DIVISION,
+  newCustomerProblems,
+  withRequiredCopyEmail,
+} from '../../../src/lib/newCustomerRules'
+import {
   CHECK_CALL_CHANNELS,
   CHECK_CALL_MILESTONES,
   DEFAULT_CHECK_CALL_PLAN,
@@ -1056,7 +1062,47 @@ async function auditBillingChange(id: string, name: string, billing: { before: B
 }
 
 
-async function upsertCustomer(input: Record<string, unknown>, caller: Caller): Promise<Record<string, unknown>> {
+/**
+ * Ryne's New Customer rules, applied on CREATE only. A create must carry a name, an address, a billing
+ * method (no default), a default rev division (ASSETS when absent, and a real top-level OwnershipDivision), a valid
+ * AP e-mail 1 and valid copy-to e-mails; invoices@bcatcorp.com is forced into the stored copy list whatever the
+ * client sent. Lead-stage creates (the spot-quote prospect) and the CSV importer are exempt: they are not
+ * billable customers yet and bring their own defaults. Edits never come through here.
+ */
+async function applyNewCustomerRules(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = { ...input }
+  const division = typeof input.defaultDivisionKey === 'string' && input.defaultDivisionKey.trim()
+    ? input.defaultDivisionKey.trim()
+    : DEFAULT_NEW_CUSTOMER_DIVISION
+  out.defaultDivisionKey = division
+  const copy = Array.isArray(input.invoiceCopyEmails) ? input.invoiceCopyEmails.map((e) => String(e)) : []
+  out.invoiceCopyEmails = withRequiredCopyEmail(copy)
+  // An unknown method keeps its own enum error from resolveBillingFields' shared check.
+  const method = optionalEnumStrict(input.billingMethod, BILLING_METHODS, 'billingMethod')
+  const address = input.billingAddress
+  const problems = newCustomerProblems({
+    name: typeof input.name === 'string' ? input.name : null,
+    billingAddress: address && typeof address === 'object' && !Array.isArray(address) ? address as Record<string, string | null> : null,
+    billingMethod: method,
+    defaultDivisionKey: division,
+    apEmail: typeof input.apEmail === 'string' ? input.apEmail : null,
+    invoiceCopyEmails: out.invoiceCopyEmails as string[],
+  })
+  if (problems.length) throw new Error(`Missing or invalid customer fields: ${problems.map((p) => `${p.label} (${p.message})`).join('; ')}`)
+  const rows = await listDivisionRows()
+  const pool: Array<{ code: string; parentId?: string | null; active?: boolean }> = rows.length ? rows : SEED_DIVISIONS
+  if (!pool.some((d) => d.code === division && !d.parentId && d.active !== false)) {
+    throw new Error(`Default rev division must be an active top-level division: ${division}`)
+  }
+  return out
+}
+
+async function upsertCustomer(
+  rawInput: Record<string, unknown>,
+  caller: Caller,
+  opts: { imported?: boolean } = {},
+): Promise<Record<string, unknown>> {
+  let input = rawInput
   const name = assertString(input.name, 'name')
   const normalizedName = normalizeName(name)
   const aliases = optionalStringArray(input.aliases, 255)
@@ -1077,6 +1123,9 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     id = newId()
     isCreate = true
   }
+
+  const enforceNewRules = isCreate && !opts.imported && !isLeadStatus(optionalEnumStrict(rawInput.status, CUSTOMER_STATUSES, 'status'))
+  if (enforceNewRules) input = await applyNewCustomerRules(rawInput)
 
   const existingStatus = (existing?.status as CustomerStatus | undefined) ?? null
 
@@ -1130,7 +1179,9 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
   // credit manager who is not an admin sets limits, and nothing else admin-only.
   const mayEditCredit = isAdmin || (caller.groups ?? []).includes('claim-CREDIT_LIMIT_EDIT')
   for (const field of creditFields) {
-    if (input[field] !== undefined && !mayEditCredit) {
+    // The form's own default limit is not a privileged edit: a new customer gets it whoever creates it.
+    const isDefaultLimit = enforceNewRules && field === 'creditLimitCents' && input[field] === DEFAULT_NEW_CUSTOMER_CREDIT_LIMIT_CENTS
+    if (input[field] !== undefined && !mayEditCredit && !isDefaultLimit) {
       const existingValue = existing?.[field]
       const requestedValue = field === 'creditLimitCents'
         ? validateAwsIntegerCents(input[field], field)
@@ -1157,6 +1208,9 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     const requested = optionalEnumStrict(input.status, CUSTOMER_STATUSES, 'status')
     if (requested != null) {
       status = requested
+    } else if (input.active === false) {
+      // The form's Active switch, off: the customer is created inactive.
+      status = 'CLOSED'
     } else {
       // No status requested: default to ACTIVE, or PENDING if approval is required
       // and the caller is not an owner/admin or primary owner of this account.
@@ -1187,7 +1241,10 @@ async function upsertCustomer(input: Record<string, unknown>, caller: Caller): P
     billingPhone: optionalString(input.billingPhone, 50),
     billingAddress: optionalJsonObject(input.billingAddress),
     paymentTermsDays: optionalInteger(input.paymentTermsDays, { min: 0 }),
-    creditLimitCents: validateAwsIntegerCents(input.creditLimitCents, 'creditLimitCents'),
+    creditLimitCents: validateAwsIntegerCents(
+      input.creditLimitCents === undefined && enforceNewRules ? DEFAULT_NEW_CUSTOMER_CREDIT_LIMIT_CENTS : input.creditLimitCents,
+      'creditLimitCents',
+    ),
     creditHoldFlag: optionalBoolean(input.creditHoldFlag),
     requiredDocsForInvoice: optionalStringArray(input.requiredDocsForInvoice, 50),
     reviewRequirements: validateReviewRequirements(input.reviewRequirements),
@@ -2256,7 +2313,7 @@ async function runImport(input: Record<string, unknown>, caller: Caller): Promis
 
   for (const row of plan.create) {
     if (entity === 'CUSTOMER') {
-      await upsertCustomer(row, caller)
+      await upsertCustomer(row, caller, { imported: true })
     } else if (entity === 'LOCATION') {
       await upsertLocation(row, caller)
     }

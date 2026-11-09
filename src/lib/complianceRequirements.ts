@@ -74,7 +74,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverVisible: true,
     driverActionable: true,
     helpText: 'The signed employment agreement with the carrier.',
-    internalNotes: 'Required for Local (Ivan) and Box Truck drivers; Amazon drivers carry a lease agreement instead.',
+    internalNotes: 'Required for company drivers (the Local Drivers and Box Trucks types); owner operators carry a lease agreement instead.',
   },
   {
     key: 'cdl_copy',

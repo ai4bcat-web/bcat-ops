@@ -10,11 +10,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RateConPanel } from './RateConPanel'
 import type { LoadCarrierRecord, LoadChargeRecord, ShipmentBundle } from '@/types/tms'
 
-const build = vi.hoisted(() => vi.fn(async (_input: unknown) => ({ output: () => 'data:application/pdf;base64,AAAA' })))
+const build = vi.hoisted(() => vi.fn(async (_input: unknown) => new Uint8Array([1, 2, 3])))
 const filename = vi.hoisted(() => vi.fn((load: string, version: number) => `rate-con-${load}-v${version}.pdf`))
 
 vi.mock('@/lib/apiClient', () => ({
-  listDivisions: vi.fn(async () => []),
+  listUserProfiles: vi.fn(async () => []),
   getRateConfirmUrl: vi.fn(async () => ''),
 }))
 vi.mock('@/lib/carrierRateCon', () => ({
@@ -22,6 +22,7 @@ vi.mock('@/lib/carrierRateCon', () => ({
   rateConPdfBase64: vi.fn(() => 'AAAA'),
   rateConFilename: filename,
   joinRateConNotes: vi.fn(() => ''),
+  rateConRepOf: vi.fn(() => null),
 }))
 vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ email: 'dispatch@bcatcorp.com', userId: 'u1', groups: [] }) }))
 

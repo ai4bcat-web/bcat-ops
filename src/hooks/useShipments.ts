@@ -174,6 +174,7 @@ export interface ShipmentListRow extends ShipmentRecord {
   pickupEtaAt: string | null
   deliveryEtaAt: string | null
   rateConStatus: RateConStatus | null
+  rateConVersion?: number | null
   rateConSentAt: string | null
   rateConSignedAt: string | null
   carrierRateCents: number | null
@@ -778,6 +779,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         pickupEtaAt: active?.pickupEtaAt ?? null,
         deliveryEtaAt: active?.deliveryEtaAt ?? null,
         rateConStatus: active?.rateConStatus ?? null,
+        rateConVersion: active?.rateConVersion ?? null,
         rateConSentAt: active?.rateConSentAt ?? null,
         rateConSignedAt: active?.rateConSignedAt ?? null,
         carrierRateCents: active?.carrierRateCents ?? null,

@@ -19,6 +19,7 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ChevronLeft } from 'lucide-react'
 import { toast } from 'sonner'
+import { VERIFY_PAYMENT_LABEL, VERIFY_PAYMENT_NOTE, isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsMetaList, TmsPage, TmsTabs, TmsTimeline } from '@/features/tms/kit'
 import { useCarrierBill } from '@/hooks/useCarrierBill'
 import { graphqlErrorText, unapproveBill, voidBill } from '@/lib/apiClient'
@@ -141,6 +142,7 @@ export function BillDetail() {
           {label}
           <TmsBadge tone={STATUS_TONE[view.status]}>{BILL_STATUS_LABEL[view.status]}</TmsBadge>
           {view.aging.open && <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>}
+          {isVerifyPaymentBill(bill) && <TmsBadge tone="orange" title={VERIFY_PAYMENT_NOTE}>{VERIFY_PAYMENT_LABEL}</TmsBadge>}
         </span>
       }
       actions={
@@ -173,6 +175,7 @@ export function BillDetail() {
         </>
       }
     >
+      {isVerifyPaymentBill(bill) && <TmsAlert tone="orange">{VERIFY_PAYMENT_NOTE}</TmsAlert>}
       <TmsCard>
         {view.status !== 'VOID' && (
           <ol className="mb-3 flex flex-wrap items-center gap-1 text-xs" aria-label="Bill status">

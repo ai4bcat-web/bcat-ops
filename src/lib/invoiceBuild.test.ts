@@ -139,6 +139,21 @@ describe('dueDateFor', () => {
   })
 })
 
+describe('invoice due date = invoice date + the customer terms', () => {
+  const due = (customerDays: number | null, orgDays: number | null) =>
+    dueDateFor('2026-11-02', invoiceTermsDays({ paymentTermsDays: customerDays }, null, { defaultPaymentTermsDays: orgDays }))
+
+  it('uses the customer profile terms', () => {
+    expect(due(45, 30)).toBe('2026-12-17')
+    expect(due(120, 30)).toBe('2027-03-02')
+  })
+
+  it('uses the org default when the customer has no terms, and Net 30 when neither does', () => {
+    expect(due(null, 60)).toBe('2027-01-01')
+    expect(due(null, null)).toBe('2026-12-02')
+  })
+})
+
 describe('formatInvoiceNumber', () => {
   it('zero-pads the counter to the requested width', () => {
     expect(formatInvoiceNumber(DEFAULT_INVOICE_NUMBER_FORMAT, { prefix: 'INV-', n: 42, date: '2026-03-20' }))
@@ -380,6 +395,22 @@ describe('defaultInvoiceAttachments', () => {
     )
     expect(ids).toEqual(['sdoc-pod', 'sdoc-bol'])
   })
+
+  it('takes the Public signed rate confirmation and never a superseded, private or carrier-only one', () => {
+    const signed = (over: Record<string, unknown>) => doc({ type: 'RATE_CON', name: 'Signed Rate Confirmation v2.pdf', audience: 'ALL', status: 'ACTIVE', ...over })
+    const ids = defaultInvoiceAttachments(
+      [
+        signed({ id: 'sdoc-signed-v2' }),
+        signed({ id: 'sdoc-signed-v1', status: 'SUPERSEDED' }),
+        signed({ id: 'sdoc-private', audience: 'INTERNAL' }),
+        signed({ id: 'sdoc-unsigned-carrier-copy', audience: 'CARRIER' }),
+      ],
+      { id: 'ord-1', loadIds: ['ld-1'] },
+      { requiredDocsForInvoice: ['RATE_CON'] },
+      { defaultRequiredDocs: null, invoiceAttachTypes: null },
+    )
+    expect(ids).toEqual(['sdoc-signed-v2'])
+  })
 })
 
 function dataInput(overrides: Partial<InvoiceDataInput> = {}): InvoiceDataInput {
@@ -454,9 +485,9 @@ describe('invoiceData', () => {
     expect(data.broker.mcNumber).toBe('MC123456')
     expect(data.remitTo.name).toBe('BCAT Corp')
     expect(data.billTo.name).toBe('Acme Freight AP')
-    expect(data.stops).toEqual([
-      { kind: 'PICKUP', name: 'Acme Plant', city: 'Elgin', state: 'IL', apptAt: '2026-03-18T13:00:00.000Z' },
-      { kind: 'DELIVERY', name: 'Acme DC', city: 'Columbus', state: 'OH', apptAt: '2026-03-19T15:00:00.000Z' },
+    expect(data.stops.map((stop) => [stop.kind, stop.name, stop.city, stop.state, stop.apptAt])).toEqual([
+      ['PICKUP', 'Acme Plant', 'Elgin', 'IL', '2026-03-18T13:00:00.000Z'],
+      ['DELIVERY', 'Acme DC', 'Columbus', 'OH', '2026-03-19T15:00:00.000Z'],
     ])
     expect(data.references.map((ref) => ref.code)).toEqual(['PO'])
     expect(data.subtotalCents).toBe(120000)

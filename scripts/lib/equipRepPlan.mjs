@@ -18,7 +18,8 @@ export const SCOPE_FROM = '2025-01-01';
 
 /**
  * Equipment codes with a stored value. V/R/F/STRA use the app's own form suggestions (EQUIPMENT_SUGGESTIONS); the mode / vehicle
- * class codes (Ryne's decision) are stored as the literal free-text values 'FTL' (both FTL and TL), 'LTL', 'Ocean', 'Cargo Van'.
+ * class codes (Ryne's decision) are stored as the literal free-text values 'FTL' (FTL, TL, and the 2026-11-09 additions VM, FT, VH,
+ * SD, CONE, DD, HAND, TORD, VZ), 'LTL', 'Ocean', 'Cargo Van', 'Power Only' (PO).
  * The app treats equipment as free text everywhere; laneMatch.normalizeEquipment upper-cases unknown text ('FTL', 'LTL', 'OCEAN',
  * 'CARGO VAN'), so these never match a VAN/REEFER/FLATBED lane filter but nothing crashes or drops them.
  */
@@ -32,6 +33,16 @@ export const EQUIPMENT_MAP = Object.freeze({
   LTL: 'LTL',
   OCN: 'Ocean',
   CRGO: 'Cargo Van',
+  PO: 'Power Only',
+  VM: 'FTL',
+  FT: 'FTL',
+  VH: 'FTL',
+  SD: 'FTL',
+  CONE: 'FTL',
+  DD: 'FTL',
+  HAND: 'FTL',
+  TORD: 'FTL',
+  VZ: 'FTL',
 });
 
 /** Codes known to have no app value (code -> Aljex meaning). Left blank and listed unless --also-map. Currently none. */

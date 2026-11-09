@@ -1,155 +1,218 @@
-// @vitest-environment jsdom
-// jsPDF renders through a canvas/DOM shim, so these need a document.
-import { describe, it, expect, vi } from 'vitest'
-import type jsPDF from 'jspdf'
-import { PDFDocument } from 'pdf-lib'
-import { buildRateConPdf, joinRateConNotes, rateConFilename, stampSignature } from './carrierRateCon'
+// @vitest-environment node
+import { describe, it, expect } from 'vitest'
+import { PDFDocument, PDFRawStream, PDFArray, PDFRef, decodePDFRawStream } from 'pdf-lib'
+import {
+  buildRateConPdf, foldAscii, joinRateConNotes, rateConChargeLabel, rateConFilename, rateConRepOf, stampSignature,
+  RATE_CON_SIGNATURE_ANCHOR,
+} from './carrierRateCon'
 import type { RateConInput, RateConStop } from './carrierRateCon'
-import type { Division, LoadCarrierRecord } from '@/types/tms'
+import { RATE_CON_TERMS } from './carrierRateConTerms'
 
-const division: Division = {
-  id: 'd1', key: 'BCAT', name: 'BCAT', legalName: 'BCAT Logistics LLC',
-  mcNumber: '123456', dotNumber: '654321',
-  remitToName: 'BCAT Logistics LLC', remitToEmail: 'ap@bcat.test',
-  remitToAddress: { street: '1 Main St', city: 'Chicago', state: 'IL', zip: '60601' },
-  active: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+/** The text drawn on each page, one string per `Tj`, in draw order. */
+async function pagesText(bytes: Uint8Array): Promise<string[][]> {
+  const pdf = await PDFDocument.load(bytes)
+  return pdf.getPages().map((page) => {
+    const contents = page.node.Contents()
+    const refs = contents instanceof PDFArray ? contents.asArray() : [contents]
+    const out: string[] = []
+    for (const ref of refs) {
+      const stream = pdf.context.lookup(ref as PDFRef)
+      if (!(stream instanceof PDFRawStream)) continue
+      const source = Buffer.from(decodePDFRawStream(stream).decode()).toString('latin1')
+      for (const m of source.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) {
+        out.push(Buffer.from(m[1], 'hex').toString('latin1'))
+      }
+    }
+    return out
+  })
 }
+const allText = async (bytes: Uint8Array) => (await pagesText(bytes)).flat().join('\n')
 
 const loadCarrier = {
-  id: 'lc1', loadId: 'l1', shipmentId: 's1', kind: 'CARRIER', status: 'ACTIVE',
-  createdBy: 'a@b.test', updatedBy: 'a@b.test',
-  createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-} as LoadCarrierRecord
+  truckNumber: 'T-44', trailerNumber: 'TR-9', driverName: 'Dana Driver', driverPhone: '3125550199',
+}
 
-const pickup = (city: string): RateConStop => ({
-  kind: 'PICKUP', name: `${city} dock`, address: '10 Dock Rd', city, state: 'IL', zip: '60601',
-  apptAt: '2026-02-01T15:00:00.000Z', references: [{ label: 'PU', value: '99' }],
+const pickup = (over: Partial<RateConStop> = {}): RateConStop => ({
+  kind: 'PICKUP', name: 'Whimsy Intermodal', address: '5100 70th Pl A', city: 'Chicago', state: 'IL', zip: '60638',
+  // 11:00 Chicago (CDT) on 2026-10-29.
+  apptAt: '2026-10-29T16:00:00.000Z', references: [{ label: 'Ref', value: '1088817' }], ...over,
 })
-const delivery = (city: string): RateConStop => ({
-  kind: 'DELIVERY', name: `${city} DC`, address: '20 Depot Ave', city, state: 'MO', zip: '63101',
-  apptAt: '2026-02-02T15:00:00.000Z',
+const delivery = (over: Partial<RateConStop> = {}): RateConStop => ({
+  kind: 'DELIVERY', name: 'PSI', address: '1901 Gateway Blvd', city: 'Beloit', state: 'WI', zip: '53511',
+  apptAt: '2026-10-29T05:00:00.000Z', instructions: 'MUST DELIVER BY 2PM', hours: '0700-1400', ...over,
 })
 
 function input(overrides: Partial<RateConInput> = {}): RateConInput {
   return {
-    division,
-    carrier: { name: 'Acme Trucking', mcNumber: '777888', dotNumber: '999000', phone: '312-555-0100', email: 'dispatch@acme.test' },
+    carrier: { name: 'Arctic Horizon Inc', mcNumber: '755670', dotNumber: '2094732', phone: '815-260-3204', fax: '8479841264' },
     loadCarrier,
-    loadNumber: 'BC-1001',
-    equipmentType: 'VAN',
-    commodity: 'Paper goods',
-    weightLbs: 38000,
-    stops: [pickup('Chicago'), delivery('St Louis')],
-    charges: [{ label: 'Linehaul', amountCents: 150000 }, { label: 'Detention', amountCents: 7500 }],
-    totalCents: 157500,
-    quickPay: null,
-    paymentTermsDays: 30,
-    terms: 'Carrier agrees to the rate above. No double brokering. POD required within 24 hours of delivery.',
-    requiredFields: ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER'],
+    rep: { name: 'Ryne Bandolik', phone: '8474500899', email: 'ryne@bcatcorp.com' },
+    loadNumber: '14832',
+    issuedAt: new Date('2026-10-26T18:34:25.000Z'),
+    equipmentType: 'Flatbed',
+    commodity: 'Engines',
+    weightLbs: 37000,
+    miles: 107,
+    pieces: 2,
+    stops: [pickup(), delivery()],
+    charges: [{ label: 'Line haul rate', amountCents: 80000 }, { label: 'Macropoint acceptance', amountCents: 10000 }],
+    totalCents: 90000,
+    notes: 'ITL PU# 1088817: 1pc CMAU6278138 11AM',
     ...overrides,
   }
 }
 
 describe('buildRateConPdf', () => {
   it('refuses a document whose printed total is not the sum of its charge lines', async () => {
-    await expect(buildRateConPdf(input({ totalCents: 150000 }))).rejects.toThrow(/charge lines/)
+    await expect(buildRateConPdf(input({ totalCents: 80000 }))).rejects.toThrow(/charge lines/)
   })
 
-  it('accepts the total when it matches, including a zero-charge rate con', async () => {
-    const doc = await buildRateConPdf(input({ charges: [], totalCents: 0 }))
-    expect(doc.getNumberOfPages()).toBe(1)
+  it('accepts a zero-charge rate con', async () => {
+    const bytes = await buildRateConPdf(input({ charges: [], totalCents: 0 }))
+    expect((await PDFDocument.load(bytes)).getPageCount()).toBe(2)
   })
 
-  it('renders one page per leg and no blank trailing page', async () => {
-    const one = await buildRateConPdf(input())
-    expect(one.getNumberOfPages()).toBe(1)
+  it('prints the pulled fields the way the reference rate con does', async () => {
+    const text = await allText(await buildRateConPdf(input()))
+    for (const want of [
+      '14832', '10/26/26 14:34:25', '(EST)', 'RYNE BANDOLIK', '(847) 450-0899 (p)', 'ryne@bcatcorp.com',
+      'ARCTIC HORIZON INC', '(815) 260-3204 (p)', '(847) 984-1264 (f)', '755670', '2094732',
+      'T-44', 'TR-9', 'DANA DRIVER', '(312) 555-0199', 'FLATBED', 'ENGINES', '37000', '107',
+      'LINE HAUL RATE', '800.00', 'MACROPOINT ACCEPTANCE', '100.00', 'TOTAL RATE', '900.00',
+      'ITL PU# 1088817: 1pc CMAU6278138 11AM',
+      'WHIMSY INTERMODAL', '5100 70TH PL A', 'CHICAGO IL 60638', '10/29/26 @ 11:00', '1088817',
+      'PSI', '10/29/26', 'MUST DELIVER BY 2PM', 'Hours : 0700-1400',
+      'BCAT LOGISTICS', '1193 E HIGGINS RD', 'ELK GROVE VILLAGE IL 60007',
+      'Carrier Signature', 'Send Carrier Bills to the Address Above', 'must appear on all Invoices',
+    ]) expect(text, want).toContain(want)
+  })
 
-    const two = await buildRateConPdf(input({
-      stops: [pickup('Chicago'), delivery('St Louis'), pickup('St Louis'), delivery('Dallas')],
+  it('prints the legal terms verbatim, split across two pages with the continuation notice', async () => {
+    const pages = await pagesText(await buildRateConPdf(input()))
+    expect(pages).toHaveLength(2)
+    const terms = (page: string[]) => page.filter((t) => RATE_CON_TERMS.includes(t))
+    expect([...terms(pages[0]), ...terms(pages[1])]).toEqual([...RATE_CON_TERMS])
+    expect(terms(pages[0]).at(-1)).toBe('broker. Carrier agrees to hold broker harmless from and indemnify broker from')
+    expect(pages[0]).toContain('(Rate Confirmation Details on Next Page)')
+    expect(pages[1]).not.toContain('(Rate Confirmation Details on Next Page)')
+    for (const page of pages) expect(page).toContain('Carrier Signature')
+  })
+
+  it('numbers PICK and STOP blocks and prints every stop of a multi-stop load', async () => {
+    const text = await allText(await buildRateConPdf(input({
+      stops: [pickup(), pickup({ name: 'Joliet Yard' }), delivery(), delivery({ name: 'Springfield DC' })],
+    })))
+    expect(text.match(/^PICK$/gm)).toHaveLength(2)
+    expect(text.match(/^STOP$/gm)).toHaveLength(2)
+    for (const name of ['JOLIET YARD', 'SPRINGFIELD DC']) expect(text).toContain(name)
+  })
+
+  it('formats appointment windows, FCFS and date-only appointments', async () => {
+    const text = await allText(await buildRateConPdf(input({
+      stops: [
+        pickup({ apptType: 'range', apptEnd: '2026-10-29T18:00:00.000Z' }),
+        delivery({ apptType: 'fcfs' }),
+      ],
+    })))
+    expect(text).toContain('10/29/26 @ 11:00 - 13:00')
+    expect(text).toContain('10/29/26 FCFS')
+  })
+
+  it('wraps long dispatch notes and continues them on a following page', async () => {
+    const notes = Array.from({ length: 90 }, (_, i) => `NOTE LINE ${i + 1} PLEASE READ CAREFULLY`).join('\n')
+    const pages = await pagesText(await buildRateConPdf(input({ notes })))
+    expect(pages.length).toBeGreaterThan(2)
+    const text = pages.flat().join('\n')
+    expect(text).toContain('NOTE LINE 1 PLEASE READ CAREFULLY')
+    expect(text).toContain('NOTE LINE 90 PLEASE READ CAREFULLY')
+    expect(text).toContain('DISPATCH NOTES (CONT.)')
+    // The signing footer and the terms survive the overflow.
+    expect(pages.at(-1)).toContain('PLEASE EMAIL INVOICE AND POD TO BILLING@BCATCORP.COM FOR PAYMENT')
+  })
+
+  it('paginates a long run of stops without losing the terms', async () => {
+    const stops = Array.from({ length: 14 }, (_, i) => (i % 2 ? delivery({ name: `Drop ${i}` }) : pickup({ name: `Pick ${i}` })))
+    const pages = await pagesText(await buildRateConPdf(input({ stops })))
+    expect(pages.length).toBeGreaterThan(2)
+    expect(pages.flat().join('\n')).toContain('DROP 13')
+    expect(pages.flat()).toContain(RATE_CON_TERMS[0])
+    expect(pages.flat()).toContain(RATE_CON_TERMS.at(-1))
+  })
+
+  it('folds non-ASCII to ASCII instead of throwing', async () => {
+    const bytes = await buildRateConPdf(input({
+      carrier: { name: 'Transportes Mu\u00f1oz \u2013 S.A.', mcNumber: '1', dotNumber: '2', phone: null },
+      notes: 'Caf\u00e9 \u201cdock\u201d \u2014 call \u260e now',
     }))
-    expect(two.getNumberOfPages()).toBe(2)
+    const text = await allText(bytes)
+    expect(text).toContain('TRANSPORTES MUNOZ - S.A.')
+    expect(text).toContain('Cafe "dock" - call now')
+    expect(foldAscii('\u00c9l ni\u00f1o')).toBe('El nino')
   })
 
-  it('keeps a multi-pick, multi-drop run on one leg', async () => {
-    const doc = await buildRateConPdf(input({
-      stops: [pickup('Chicago'), pickup('Joliet'), delivery('St Louis'), delivery('Springfield')],
-    }))
-    expect(doc.getNumberOfPages()).toBe(1)
+  it('prints carrier money only: exactly the charge lines it is handed, nothing priced elsewhere', async () => {
+    const text = await allText(await buildRateConPdf(input()))
+    expect(text.match(/\d[\d,]*\.\d{2}/g)?.sort()).toEqual(['100.00', '800.00', '900.00'])
   })
 
-  it('still produces a page when the load has no stops yet', async () => {
-    const doc = await buildRateConPdf(input({ stops: [] }))
-    expect(doc.getNumberOfPages()).toBe(1)
+  it('leaves the FROM box and carrier blanks empty rather than printing "null"', async () => {
+    const text = await allText(await buildRateConPdf(input({
+      rep: null, loadCarrier: { truckNumber: null, trailerNumber: null, driverName: null, driverPhone: null },
+      carrier: { name: 'Solo Hauling', mcNumber: null, dotNumber: null, phone: null },
+    })))
+    expect(text).not.toMatch(/null|undefined/)
   })
 
-  it('prints the quick-pay net without changing the agreed total', async () => {
-    const doc = await buildRateConPdf(input({
-      quickPay: { days: 7, feeBps: 250, feeCents: 3938, netCents: 153562 },
-    }))
-    expect(doc.getNumberOfPages()).toBe(1)
+  it('shows a short Aljex charge code as words, never cut', async () => {
+    const text = await allText(await buildRateConPdf(input({
+      charges: [{ label: 'MAC', amountCents: 10000 }, { label: 'Some Unknown Accessorial', amountCents: 5000 }],
+      totalCents: 15000,
+    })))
+    expect(text).toContain('MACROPOINT ACCEPTANCE')
+    expect(rateConChargeLabel('detn')).toBe('DETENTION')
+    expect(rateConChargeLabel('Weird thing')).toBe('WEIRD THING')
   })
 
-  it('prints the order notes above the terms, and nothing when there are none', async () => {
-    const withNotes = (await buildRateConPdf(input({ notes: 'Call 30 min before arrival' }))).output()
-    expect(withNotes).toContain('Call 30 min before arrival')
-    expect(withNotes.indexOf('NOTES')).toBeLessThan(withNotes.indexOf('TERMS'))
-    expect((await buildRateConPdf(input({ notes: '  ' }))).output()).not.toContain('NOTES')
+  it('gives the FROM box the company phone and name when the rep has neither', async () => {
+    const text = await allText(await buildRateConPdf(input({ rep: { name: null, phone: null, email: 'ryne@bcatcorp.com' } })))
+    expect(text).toContain('(847) 450-0899 (p)')
+    expect(text).toContain('ryne@bcatcorp.com')
   })
+})
 
+describe('rateConRepOf', () => {
+  const profiles = [{ email: 'Ryne@bcatcorp.com', name: 'Ryne Bandolik', phone: '8474500899' }]
+  it('takes the first e-mail given and enriches it from the directory, case-insensitively', () => {
+    expect(rateConRepOf(profiles, null, 'ryne@bcatcorp.com', 'other@x.test')).toEqual({
+      name: 'Ryne Bandolik', phone: '8474500899', email: 'ryne@bcatcorp.com',
+    })
+  })
+  it('keeps the bare e-mail for an unknown user and is null with nobody', () => {
+    expect(rateConRepOf(profiles, 'new@bcatcorp.com')).toEqual({ name: null, phone: null, email: 'new@bcatcorp.com' })
+    expect(rateConRepOf(profiles, undefined, '')).toBeNull()
+  })
+  it('finds the rep by profile id when the load stores a Cognito username', () => {
+    const withId = [{ id: 'u-123', email: 'rep@bcatcorp.com', name: 'Rae Rep', phone: '8475550101' }]
+    expect(rateConRepOf(withId, 'u-123', 'someone@x.test')).toEqual({ name: 'Rae Rep', phone: '8475550101', email: 'rep@bcatcorp.com' })
+    expect(rateConRepOf(withId, 'u-unknown', 'rep@bcatcorp.com')?.name).toBe('Rae Rep')
+    expect(rateConRepOf(withId, 'u-unknown')).toBeNull()
+  })
+})
+
+describe('signature anchor', () => {
+  it('points at the signature and date lines the footer draws, on a letter page', () => {
+    const { signatureLine, dateLine } = RATE_CON_SIGNATURE_ANCHOR
+    expect(signatureLine.x + signatureLine.width).toBeLessThan(dateLine.x)
+    expect(dateLine.x + dateLine.width).toBeLessThan(612)
+    expect(signatureLine.y).toBeGreaterThan(0)
+  })
+})
+
+describe('joinRateConNotes', () => {
   it('joins special instructions and rate-con notes in print order, skipping blanks', () => {
     expect(joinRateConNotes(' A ', 'B')).toBe('A\n\nB')
     expect(joinRateConNotes(undefined, 'B')).toBe('B')
     expect(joinRateConNotes('', null)).toBe('')
-  })
-})
-
-describe('buildRateConPdf division logo', () => {
-  const PNG_1X1 =
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
-  const withLogo = input({ division: { ...division, logoKey: 'brand/logos/bcat.png' } })
-  const text = (doc: jsPDF): string => doc.output()
-  const imageCount = (doc: jsPDF) => (text(doc).match(/\/Subtype \/Image/g) ?? []).length
-
-  it('embeds the logo and keeps the legal name and MC number', async () => {
-    const doc = await buildRateConPdf(withLogo, { loadLogo: async () => PNG_1X1 })
-    expect(imageCount(doc)).toBeGreaterThan(0)
-    expect(text(doc)).toContain('BCAT Logistics LLC')
-    expect(text(doc)).toContain('MC 123456')
-  })
-
-  it('falls back to the text header when the loader returns null', async () => {
-    const plain = await buildRateConPdf(input())
-    const doc = await buildRateConPdf(withLogo, { loadLogo: async () => null })
-    expect(imageCount(doc)).toBe(0)
-    expect(text(doc)).toContain('BCAT Logistics LLC')
-    expect(doc.getNumberOfPages()).toBe(plain.getNumberOfPages())
-  })
-
-  it('never fails the build when the loader throws', async () => {
-    const doc = await buildRateConPdf(withLogo, { loadLogo: async () => { throw new Error('S3 down') } })
-    expect(imageCount(doc)).toBe(0)
-  })
-
-  it('ignores an undecodable image', async () => {
-    const doc = await buildRateConPdf(withLogo, { loadLogo: async () => 'data:image/png;base64,AAAA' })
-    expect(imageCount(doc)).toBe(0)
-  })
-
-  it('does not call the loader for a division without a logoKey', async () => {
-    const loadLogo = vi.fn(async () => PNG_1X1)
-    await buildRateConPdf(input(), { loadLogo })
-    expect(loadLogo).not.toHaveBeenCalled()
-  })
-
-  it('embeds the logo once across a two-leg document', async () => {
-    const doc = await buildRateConPdf(
-      { ...withLogo, stops: [pickup('Chicago'), delivery('St Louis'), pickup('St Louis'), delivery('Dallas')] },
-      { loadLogo: async () => PNG_1X1 },
-    )
-    // One embedded logo (plus its alpha mask) however many pages draw the header.
-    const single = await buildRateConPdf(withLogo, { loadLogo: async () => PNG_1X1 })
-    expect(imageCount(doc)).toBe(imageCount(single))
-    expect(imageCount(single)).toBeGreaterThan(0)
   })
 })
 
@@ -158,26 +221,22 @@ describe('stampSignature', () => {
     const fixture = await PDFDocument.create()
     fixture.addPage()
     fixture.addPage()
-    const bytes = await fixture.save()
-
-    const stamped = await stampSignature(bytes, {
+    const stamped = await stampSignature(await fixture.save(), {
       name: 'Dana Driver',
       ip: '203.0.113.9',
       at: '2026-02-01T12:00:00.000Z',
       fields: { 'Driver name': 'Dana Driver', 'Driver phone': '312-555-0199', 'Truck number': '4412' },
     })
-
-    const out = await PDFDocument.load(stamped)
-    expect(out.getPageCount()).toBe(fixture.getPageCount() + 1)
+    expect((await PDFDocument.load(stamped)).getPageCount()).toBe(3)
   })
 
-  it('appends one page even with no filled fields', async () => {
-    const fixture = await PDFDocument.create()
-    fixture.addPage()
-    const stamped = await stampSignature(await fixture.save(), {
+  it('appends one page even with no filled fields, onto a real rate con', async () => {
+    const built = await buildRateConPdf(input())
+    const pages = (await PDFDocument.load(built)).getPageCount()
+    const stamped = await stampSignature(built, {
       name: 'Dana Driver', ip: '203.0.113.9', at: '2026-02-01T12:00:00.000Z', fields: {},
     })
-    expect((await PDFDocument.load(stamped)).getPageCount()).toBe(2)
+    expect((await PDFDocument.load(stamped)).getPageCount()).toBe(pages + 1)
   })
 })
 

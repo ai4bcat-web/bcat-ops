@@ -35,6 +35,7 @@ vi.mock('@/hooks/useDirectory', () => ({
 }))
 vi.mock('@/hooks/useCarriers', () => ({ useCarriers: () => ({ carriers: [] }) }))
 vi.mock('@/hooks/useStaff', () => ({ useStaff: () => ({ staff: [] }) }))
+vi.mock('@/hooks/useOwnFleetRoster', () => ({ useOwnFleetRoster: () => [] }))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: null }) }))
 vi.mock('@/lib/apiClient', () => ({ getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations, linkIntakeShipment: h.linkIntakeShipment, listAuditLogsFor: vi.fn(async () => []) }))
 vi.mock('../intake/useIntakeLoads', () => ({ useIntakeLoad: () => ({ row: h.intakeRow, loading: false, error: null, reload: vi.fn(), setRow: vi.fn() }) }))

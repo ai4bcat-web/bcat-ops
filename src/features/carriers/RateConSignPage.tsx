@@ -9,7 +9,7 @@ import {
   RateConSignError,
   type RateConSignState,
 } from '@/lib/rateConSignClient'
-import { stampSignature } from '@/lib/carrierRateCon'
+import { cleanName, signErrors } from '@/lib/rateConSignValidation'
 import { formatCents } from '@/lib/tmsDirectory'
 import type { RateConRequiredField, RateConStatus } from '@/types/tms'
 import { TmsAlert, TmsButton, TmsCard, TmsInput, TmsMetaList, TmsPublicFrame, TmsTextarea } from '@/features/tms/kit'
@@ -47,21 +47,12 @@ function fieldInputType(field: RateConRequiredField): string {
   return 'text'
 }
 
-/** PDFs run to hundreds of kilobytes — convert in chunks so the spread stays inside
- *  the engine's argument limit. */
-function toBase64(bytes: Uint8Array): string {
-  const CHUNK = 0x8000
-  let binary = ''
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
-  }
-  return btoa(binary)
-}
-
 export function RateConSignPage() {
   const { token = '' } = useParams()
   const [state, setState] = useState<RateConSignState | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [replaced, setReplaced] = useState(false)
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(() => rateConSignAvailable && token !== '')
 
   const [fields, setFields] = useState<Record<string, string>>({})
@@ -91,6 +82,7 @@ export function RateConSignPage() {
         setLoadError(null)
       })
       .catch((err) => {
+        setReplaced(err instanceof RateConSignError && err.code === 'REPLACED')
         setLoadError(err instanceof RateConSignError ? err.message : 'Could not load this rate confirmation')
       })
       .finally(() => setLoading(false))
@@ -150,7 +142,9 @@ export function RateConSignPage() {
     return (
       <Shell>
         <Notice tone="warn" title={loadError ?? 'This rate confirmation link is not valid'}>
-          Ask your broker representative for a new link.
+          {replaced
+            ? 'Signing on this page is closed. Open the link in the newest e-mail from your broker representative.'
+            : 'Ask your broker representative for a new link.'}
         </Notice>
       </Shell>
     )
@@ -191,31 +185,21 @@ export function RateConSignPage() {
     )
   }
 
-  const fieldsComplete = requiredFields.every((field) => trimmedFields[field] !== '')
-  const canSign = !busy && fieldsComplete && signerName.trim() !== '' && agreed
+  // The same rules the server re-checks (rateConSignValidation): a blank or malformed value blocks the button.
+  const errors = signErrors({ signerName, agreed, fields: trimmedFields, required: requiredFields })
+  const fieldsComplete = requiredFields.every((field) => !errors[field])
+  const canSign = !busy && Object.keys(errors).length === 0
 
   const sign = async () => {
     setActionError(null)
     setBusy(true)
     try {
-      const response = await fetch(state.pdfUrl)
-      if (!response.ok) throw new Error('Could not download the rate confirmation to sign')
-      const original = new Uint8Array(await response.arrayBuffer())
-      const signed = await stampSignature(original, {
-        name: signerName.trim(),
-        // The authoritative signer IP is recorded server-side from the request context.
-        ip: '',
-        at: new Date().toISOString(),
-        fields: trimmedFields,
-      })
-      await submitRateCon({
-        token,
-        signerName: signerName.trim(),
-        fields: trimmedFields,
-        pdfBase64: toBase64(signed),
-      })
+      // The server stamps the PDF itself from the stored original; only the name, the tick and the fields go up.
+      await submitRateCon({ token, signerName: cleanName(signerName), agreed, fields: trimmedFields })
+      setServerErrors({})
       setOutcome('SIGNED')
     } catch (err) {
+      setServerErrors(err instanceof RateConSignError ? (err.fieldErrors ?? {}) : {})
       setActionError(err instanceof Error ? err.message : 'Could not submit your signature')
     } finally {
       setBusy(false)
@@ -287,6 +271,9 @@ export function RateConSignPage() {
                     value={valueOf(field)}
                     onChange={(e) => setFields((prev) => ({ ...prev, [field]: e.target.value }))}
                   />
+                  {(fields[field] ?? '') !== '' && (errors[field] ?? serverErrors[field]) && (
+                    <p className="tms-public-sub" role="alert" data-testid={`error-${field}`}>{errors[field] ?? serverErrors[field]}</p>
+                  )}
                 </div>
               ))}
             </div>
@@ -306,6 +293,9 @@ export function RateConSignPage() {
                     value={valueOf(field)}
                     onChange={(e) => setFields((prev) => ({ ...prev, [field]: e.target.value }))}
                   />
+                  {(fields[field] ?? '') !== '' && (errors[field] ?? serverErrors[field]) && (
+                    <p className="tms-public-sub" role="alert" data-testid={`error-${field}`}>{errors[field] ?? serverErrors[field]}</p>
+                  )}
                 </div>
               ))}
             </div>
@@ -318,7 +308,18 @@ export function RateConSignPage() {
             <label className="tms-public-label" htmlFor="rate-con-signer">Your full name</label>
             <TmsInput id="rate-con-signer" value={signerName} autoComplete="name"
               onChange={(e) => setSignerName(e.target.value)} />
+            {signerName.trim() !== '' && errors.signerName && (
+              <p className="tms-public-sub" role="alert" data-testid="error-signerName">{errors.signerName}</p>
+            )}
           </div>
+          {signerName.trim() !== '' && !errors.signerName && (
+            <div className="tms-public-field" data-testid="signature-preview">
+              <span className="tms-public-label">Your signature</span>
+              <span style={{ fontFamily: '"Snell Roundhand", "Brush Script MT", "Segoe Script", cursive', fontStyle: 'italic', fontSize: 28 }}>
+                {cleanName(signerName)}
+              </span>
+            </div>
+          )}
           <label className="tms-public-agree">
             <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
             <span>
@@ -339,7 +340,10 @@ export function RateConSignPage() {
               </TmsButton>
             )}
             {!fieldsComplete && requiredFields.length > 0 && (
-              <span className="tms-public-sub">Fill in every trip detail first.</span>
+              <span className="tms-public-sub">Fill in every required detail first.</span>
+            )}
+            {fieldsComplete && !canSign && !busy && (
+              <span className="tms-public-sub">Type your name and tick the agreement to sign.</span>
             )}
           </div>
 

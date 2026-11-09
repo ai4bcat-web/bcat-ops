@@ -170,6 +170,25 @@ describe('empty source (the stage-3 incident: rows computed from an empty Shipme
   }
   const existingRow = (id: string): RollupRow => ({ id, kind: id.split(':')[0]!, periodKey: id.split(':')[1]!, schemaVersion: 1, payload: '{"old":true}', computedAt: '2026-11-01T00:00:00.000Z', version: 3 })
 
+  it('writes the per-rep split of a month to the private sink, never into the DashboardRollup row; an empty source writes none; a failing sink does not fail the row', async () => {
+    const put = vi.fn(async () => undefined)
+    const split = { 'BROKERAGE|': { 'i:a': { n: 1, rev: 100, cost: 60, prof: 40 } } }
+    const month = vi.fn(async (_s: unknown, m: string, repOut?: Record<string, unknown>) => { Object.assign(repOut ?? {}, split); return monthPayload(m) })
+    const { deps, store } = harness({ computes: { month } })
+    expect(await recomputeKey({ ...deps, repSink: { put } }, 'M:2026-11', { respectMinInterval: false })).toBe('written')
+    expect(put).toHaveBeenCalledWith({ v: 1, month: '2026-11', computedAt: NOW.toISOString(), rep: split })
+    expect(store.rows.get('M:2026-11')?.payload).not.toContain('i:a')
+    await recomputeKey({ ...deps, repSink: { put } }, 'L:CURRENT', { respectMinInterval: false })
+    expect(put).toHaveBeenCalledTimes(1)
+    const failing = vi.fn(async () => { throw new Error('s3 down') })
+    expect(await recomputeKey({ ...deps, repSink: { put: failing } }, 'M:2026-11', { respectMinInterval: false })).toBe('written')
+
+    const emptyStore = fakeStore()
+    const emptyPut = vi.fn(async () => undefined)
+    expect(await recomputeKey({ ...withRealComputes(emptyStore, emptySource), repSink: { put: emptyPut } }, 'M:2026-11', { respectMinInterval: false })).toBe('empty-source')
+    expect(emptyPut).not.toHaveBeenCalled()
+  })
+
   it.each(['M:2026-11', 'LG:2026-11', 'L:CURRENT'])('%s: writes nothing, clears the marker, releases the lease, leaves an existing row alone', async (key) => {
     const store = fakeStore([existingRow(key)])
     await store.markDirty(key, '2026-11-04T14:59:00.000Z')
@@ -237,7 +256,7 @@ describe('processStream', () => {
     expect(response.batchItemFailures).toEqual([])
     expect(store.rows.get('M:2026-11')?.payload).toBeTruthy()
     expect(computes.month).toHaveBeenCalledTimes(1)
-    expect(computes.month).toHaveBeenCalledWith(expect.anything(), '2026-11')
+    expect(computes.month).toHaveBeenCalledWith(expect.anything(), '2026-11', expect.anything())
   })
 
   it('an invoice leaving the open set refreshes the live row', async () => {

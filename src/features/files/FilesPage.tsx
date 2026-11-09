@@ -11,7 +11,7 @@ import {
   slotsForDriver, slotsForAsset, readyScore, slotState, truckSlotState, driverExpiry, visibleSlots,
   type ReadyScore, type SlotState, type ExpiryInfo,
 } from '@/lib/fileHub'
-import { DRIVER_FLEET_LABELS } from '@/lib/fleetGroups'
+import { useDriverTypes } from '@/hooks/useDriverTypes'
 import { listAllOnboardingTasks } from '@/lib/complianceClient'
 import { listDriverPaySettings } from '@/lib/apiClient'
 import { onboardingProgress, driverStatus, DRIVER_STATUS_LABELS, resolveDriverEmail, type DriverStatus } from '@/lib/driverOnboarding'
@@ -119,6 +119,7 @@ function DriverPhoneLines({ driver, unitNumber }: { driver: Driver; unitNumber: 
 }
 
 export function FilesPage() {
+  const { driverTypeLabel } = useDriverTypes()
   const drivers = useAppStore((s) => s.drivers)
   const equipment = useAppStore((s) => s.equipment)
   const storeLoading = useAppStore((s) => s.isLoading)
@@ -234,10 +235,10 @@ export function FilesPage() {
     if (!q) return activeDrivers
     return activeDrivers.filter((d) => {
       const truck = trucks.find((t) => t.id === d.assignedTruckId)
-      const fleet = d.fleetGroup ? DRIVER_FLEET_LABELS[d.fleetGroup] : ''
+      const fleet = d.fleetGroup ? driverTypeLabel(d.fleetGroup) : ''
       return [d.name, d.phone, emailOf(d), d.cdl, truck?.unitNumber, fleet].some((v) => (v ?? '').toLowerCase().includes(q))
     })
-  }, [byStatus, trucks, q, emailOf])
+  }, [byStatus, trucks, q, emailOf, driverTypeLabel])
 
   const assetsForTab = tab === 'TRAILER' ? activeTrailers : trucks
 
@@ -382,7 +383,7 @@ export function FilesPage() {
                     </td>
                     <td style={{ ...TD }}>
                       {d.fleetGroup
-                        ? <TmsBadge tone="gray" style={{ whiteSpace: 'nowrap' }}>{DRIVER_FLEET_LABELS[d.fleetGroup]}</TmsBadge>
+                        ? <TmsBadge tone="gray" style={{ whiteSpace: 'nowrap' }}>{driverTypeLabel(d.fleetGroup)}</TmsBadge>
                         : <span style={{ color: 'var(--tms-muted)', fontSize: 12 }}>Unclassified</span>}
                     </td>
                     <td style={{ ...TD, maxWidth: 210 }}

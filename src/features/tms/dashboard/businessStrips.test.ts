@@ -40,7 +40,7 @@ const filters: DashboardFilters = {
 describe('buildBusinessStrips', () => {
   it('returns one strip per active top-level division, in sort order', () => {
     const strips = buildBusinessStrips(data(), filters, SEED_DIVISIONS)
-    expect(strips.map((s) => s.code)).toEqual(['BROKERAGE', 'ASSETS', 'CAR_SHIPPING', 'COMPANY'])
+    expect(strips.map((s) => s.code)).toEqual(['BROKERAGE', 'ASSETS', 'CAR_SHIPPING'])
     expect(strips[0]).toMatchObject({ code: 'BROKERAGE', name: 'BCAT Logistics', brand: 'BCAT Logistics' })
     expect(strips[1]).toMatchObject({ code: 'ASSETS', name: 'Ivan Cartage', brand: 'Ivan Cartage' })
   })

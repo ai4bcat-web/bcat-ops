@@ -11,6 +11,7 @@ export const FINANCE_ACTIONS_TABLES = {
   LOAD_FINANCIALS_TABLE_NAME: 'LoadFinancials',
   LOAD_CHARGE_TABLE_NAME: 'LoadCharge',
   CUSTOMER_TABLE_NAME: 'Customer',
+  LOCATION_TABLE_NAME: 'Location',
   DIVISION_TABLE_NAME: 'Division',
   SETTINGS_TABLE_NAME: 'TmsSettings',
   AUDIT_LOG_TABLE_NAME: 'AuditLog',

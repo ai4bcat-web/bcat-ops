@@ -1,25 +1,28 @@
 /**
  * Carrier Information (AH-plan §4.9). Inputs work in create mode (they live in the form and
- * the local draft); every button that talks to the server needs a saved shipment. Cover goes
- * through the existing BookCarrierDialog (own fleet: AssignDriverDialog) — this section only
- * opens it via `ctx.actions.cover()`. Step AR card 5: collapsed to "No carrier yet" + Cover/Assign
+ * the local draft). Picking an own-fleet driver queues ASSIGN_ASSET after creation; saved
+ * shipments use the existing BookCarrierDialog (own fleet: AssignDriverDialog) via
+ * ctx.actions.cover(). Step AR card 5: collapsed to "No carrier yet" + Cover/Assign
  * until a carrier is picked (or Ivan Cartage / a typed name is chosen).
  */
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { TmsBadge, TmsButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
 import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
+import { useDrivers } from '@/hooks/useDrivers'
+import { listOwnershipDivisions, listOwnershipRules } from '@/lib/apiClient'
+import { resolveDivision, shipmentContextFor } from '@/lib/ownership'
 import { CARRIER_STATUS_LABELS, effectiveCarrierStatus } from '@/lib/carrierStatus'
 import { isIvanCartageName, ownFleetDriverByName, ownFleetFill } from '@/lib/ownFleetDrivers'
 import { mcpPacketStanding } from '@/lib/mcpPacket'
 import { isTruckloadMode } from '@/lib/shipmentStatus'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
-import type { CarrierRecord, InsurancePolicyType, LoadCarrierRecord } from '@/types/tms'
+import type { CarrierRecord, InsurancePolicyType, LoadCarrierRecord, OwnershipDivisionRecord, OwnershipRuleRecord } from '@/types/tms'
 import { US_STATES } from '../constants'
 import { LABEL } from '../labels'
-import { activeLoadCarrier, isLocked, liveCarriers, lockReason } from '../model'
+import { activeLoadCarrier, isCustomerDefaultDivision, isLocked, liveCarriers, lockReason } from '../model'
 import type { SliceSectionProps } from '../sectionRegistry'
 import { Field, FieldGrid } from '../fieldGrid'
 import { validateCarrierAdd } from '@/lib/carrierLegs'
@@ -56,7 +59,7 @@ export interface CarrierSlotProps {
   legStopIds?: string[]
 }
 
-function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false, slotKey = 'c0', index = 0, loadCarrier, legStopIds = [] }: SliceSectionProps<'carrier'> & CarrierSlotProps & { expanded?: boolean }) {
+function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = false, slotKey = 'c0', index = 0, loadCarrier, legStopIds = [] }: SliceSectionProps<'carrier'> & CarrierSlotProps & { expanded?: boolean }) {
   const roster = useOwnFleetRoster()
   const [search, setSearch] = useState('')
   const [assigning, setAssigning] = useState(false)
@@ -79,6 +82,27 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false,
   // Step AQ: a directory carrier that is Ivan Cartage is own fleet too: its driver is picked from our
   // Driver records in "Enter driver info", never typed here.
   const typedLock = own || isIvanCartageName(carrier?.name ?? active?.carrierName)
+  const { drivers } = useDrivers()
+  const [ownership, setOwnership] = useState<{ divisions: OwnershipDivisionRecord[]; rules: OwnershipRuleRecord[] } | null>(null)
+  useEffect(() => {
+    if (!own || saved) return
+    let live = true
+    Promise.all([listOwnershipDivisions(), listOwnershipRules()]).then(([divisions, rules]) => {
+      if (live) setOwnership({ divisions, rules })
+    }).catch(() => { /* An unavailable preview must not block assignment. */ })
+    return () => { live = false }
+  }, [own, saved])
+  const pickedDriver = ownFleetDriverByName(roster, value.driver1.name)
+  const draft = form.getValues()
+  const driver = drivers.find((d) => d.id === pickedDriver?.id)
+  const predicted = !saved && own && driver && ownership && isCustomerDefaultDivision(draft, ctx.customer)
+    ? resolveDivision(ownership.divisions, ownership.rules, shipmentContextFor({
+      driver, loadCarrier: { kind: 'OWN_ASSET' },
+      shipment: { customerId: draft.customer.id },
+    })) : null
+  const divisionHint = predicted && ownership
+    ? [predicted.revDivision, predicted.revSubdivision].filter(Boolean).map((code) => ownership.divisions.find((d) => d.code === code)?.name ?? code).join(' > ')
+    : ''
   const set = (patch: Partial<typeof value>) => onChange(patch)
   const setBits = (key: 'dispatcher' | 'driver1' | 'driver2', patch: Partial<typeof value.dispatcher>) =>
     onChange((p) => ({ ...p, [key]: { ...p[key], ...patch } }))
@@ -119,7 +143,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false,
     )
   }
   const coverBlock = !saved
-    ? 'Save the draft first'
+    ? own && value.driver1.name.trim() ? 'Driver will be assigned when you create or save the shipment' : 'Save the draft first'
     : isLocked(ctx.locked, 'cover') ? lockReason(ctx.locked, 'cover') ?? 'Cover is locked'
     : extra
       ? active ? 'This carrier is already added'
@@ -338,6 +362,8 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, expanded = false,
                 }
               })}
             />
+            {!saved && divisionHint && <p className="tms-muted text-xs">Will count as {divisionHint}</p>}
+            {!saved && !isCustomerDefaultDivision(draft, ctx.customer) && <p className="tms-muted text-xs">The selected revenue division is retained; assigning a driver does not override a manual tag.</p>}
           </Field>
         ) : (
           <Field span={4} narrow={12} label={LABEL.carrier.driver1.text}>

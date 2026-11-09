@@ -127,7 +127,7 @@ const catalogSlot = (req: (typeof DRIVER_REQUIREMENTS)[number]): FileSlot => ({
 /**
  * Which DOT classification a fleet implies.
  *
- * Local (Ivan) and Box Truck drivers are company employees; Amazon drivers and the
+ * Local Drivers and Box Trucks (Ivan Cartage subsidiaries) are company employees; Amazon drivers and the
  * Owner Operator fleet run as owner-operators. Deriving it from the fleet keeps one source of truth — the
  * alternative is a separate driverType that can silently disagree and put lease and
  * escrow paperwork on a company driver's file.

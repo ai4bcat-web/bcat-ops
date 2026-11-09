@@ -2,8 +2,8 @@
  * The rate confirmation for one booked carrier: build it, look at it, send it, chase it
  * (spec §6.2 "Rate con").
  *
- * The PDF is built in the browser from what is on screen — the division letterhead (with
- * its logo), the stops, the CARRIER charge lines — and handed to the Lambda as base64, so
+ * The PDF is built in the browser from what is on screen — BCAT rate con layout (header,
+ * FROM / CARRIER boxes, charges, stops, legal terms), the CARRIER charge lines — and handed to the Lambda as base64, so
  * what the carrier opens is exactly the document the booker approved. The server owns the
  * token, the expiry and the status; this panel only reports them. Recipients are picked
  * from the carrier's known addresses (or typed), the sender is copied by the server, and
@@ -14,14 +14,13 @@ import { Ban, Copy, FileText, Send } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { TmsBadge, TmsButton, TmsField, TmsInput } from '@/features/tms/kit'
 import { toast } from 'sonner'
-import { getRateConfirmUrl, listDivisions } from '@/lib/apiClient'
-import { buildRateConPdf, joinRateConNotes, rateConFilename, rateConPdfBase64 } from '@/lib/carrierRateCon'
+import { getRateConfirmUrl, listUserProfiles } from '@/lib/apiClient'
+import { buildRateConPdf, joinRateConNotes, rateConFilename, rateConPdfBase64, rateConRepOf } from '@/lib/carrierRateCon'
 import { useAuthUser } from '@/hooks/useAuth'
 import { dedupeEmails } from '@/lib/emailAddress'
 import { mcpPacketStanding } from '@/lib/mcpPacket'
 import { RecipientPicker } from './RecipientPicker'
 import { commitAddress, defaultSelection, knownRecipientOptions, parseCcList } from './rateConRecipients'
-import { quickPayTiersOf, tierFor } from '@/lib/quickPay'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
 import { rateConLinesFor } from '@/lib/carrierBill'
@@ -29,8 +28,8 @@ import { liveCarriersOf, primaryCarrierOf } from '@/lib/carrierTotals'
 import type { RateConInput, RateConStop } from '@/lib/carrierRateCon'
 import { readExtras } from '@/features/shipments/form/model'
 import type {
-  CarrierContactRecord, CarrierRecord, Division, LoadCarrierRecord, RateConRequiredField, RateConStatus,
-  ShipmentBundle, TmsSettings,
+  CarrierContactRecord, CarrierRecord, LoadCarrierRecord, RateConStatus,
+  ShipmentBundle, TmsSettings, UserProfileRecord,
 } from '@/types/tms'
 
 /** The lifecycle the panel reports, in the order it happens. */
@@ -46,7 +45,6 @@ const STATUS_LABELS: Record<RateConStatus, string> = {
   EXPIRED: 'Expired',
 }
 
-const DEFAULT_REQUIRED_FIELDS: RateConRequiredField[] = ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER']
 
 export interface RateConPanelProps {
   bundle: ShipmentBundle
@@ -60,7 +58,7 @@ export interface RateConPanelProps {
 }
 
 export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings, busy, onSend, onVoid }: RateConPanelProps) {
-  const [divisions, setDivisions] = useState<Division[]>([])
+  const [profiles, setProfiles] = useState<UserProfileRecord[]>([])
   // The ticked list starts from the carrier profile and only becomes state once the
   // user edits it — mirroring the default into state would fight the carrier bundle
   // arriving a tick later.
@@ -76,7 +74,7 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
 
   useEffect(() => {
     let live = true
-    listDivisions().catch(() => []).then((d) => { if (live) setDivisions(d) })
+    listUserProfiles().catch(() => []).then((p) => { if (live) setProfiles(p) })
     return () => { live = false }
   }, [])
 
@@ -101,7 +99,6 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
   const blocked = (standing != null && !standing.completed) || notActive
 
   const load = bundle.loads[0]
-  const division = divisions.find((d) => d.key === load?.divisionKey) ?? null
   const status: RateConStatus = loadCarrier.rateConStatus ?? 'NOT_SENT'
   const sent = status === 'SENT' || status === 'OPENED'
   const version = loadCarrier.rateConVersion ?? 0
@@ -119,22 +116,21 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
     ? `${load?.loadNumber ?? 'load'}-${carrierSlug(carrier?.name ?? loadCarrier.carrierName)}`
     : load?.loadNumber ?? 'load'
 
-  const tier = loadCarrier.quickPayDays ? tierFor(loadCarrier.quickPayDays, quickPayTiersOf(settings)) : null
-
   const buildInput = (): RateConInput => ({
-    division,
     carrier: {
       name: carrier?.name ?? loadCarrier.carrierName ?? 'Carrier',
       mcNumber: carrier?.mcNumber ?? loadCarrier.carrierMc ?? null,
       dotNumber: carrier?.dotNumber ?? null,
       phone: carrier?.phone ?? null,
-      email: carrier?.email ?? null,
     },
     loadCarrier,
+    rep: rateConRepOf(profiles, loadCarrier.carrierRepId, load?.carrierRepId, user?.email),
     loadNumber: load?.loadNumber ?? load?.id ?? '',
     equipmentType: load?.equipmentType ?? null,
-    commodity: load?.commodity ?? null,
+    commodity: load?.commodity ?? load?.freightDescription ?? null,
     weightLbs: load?.weight ?? null,
+    miles: load?.miles ?? null,
+    pieces: load?.pieces ?? null,
     stops: (load?.stops ?? []).map<RateConStop>((s) => ({
       kind: s.type === 'pickup' ? 'PICKUP' : 'DELIVERY',
       name: s.name ?? null,
@@ -145,30 +141,20 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
       apptAt: s.appt ?? null,
       apptEnd: s.apptEnd ?? null,
       apptType: s.apptType ?? null,
-      // Only what the carrier is allowed to see — internal and customer-only references
+      // Only what the carrier is allowed to see - internal and customer-only references
       // never reach a rate con.
       references: (s.refs ?? [])
         .filter((r) => r.visibility === 'CARRIER' || r.visibility === 'ALL')
         .map((r) => ({ label: r.label || r.code, value: r.value })),
-      instructions: s.stopNotes ?? null,
+      instructions: [s.apptNote, s.stopNotes].filter(Boolean).join(' - ') || null,
+      hours: s.contact?.hours ?? null,
     })),
     charges,
     totalCents,
-    quickPay: tier && loadCarrier.quickPayFeeCents != null
-      ? {
-        days: tier.days,
-        feeBps: tier.feeBps,
-        feeCents: loadCarrier.quickPayFeeCents,
-        netCents: (loadCarrier.carrierRateCents ?? totalCents) - loadCarrier.quickPayFeeCents,
-      }
-      : null,
-    paymentTermsDays: loadCarrier.paymentTermsDays ?? settings?.defaultCarrierTermsDays ?? null,
-    terms: settings?.rateConTerms ?? '',
     notes: joinRateConNotes(
       readExtras(bundle.orders[0])?.instructions?.special,
       readExtras(bundle.orders[0])?.instructions?.rateCon,
     ),
-    requiredFields: (settings?.rateConRequiredFields as RateConRequiredField[] | null) ?? DEFAULT_REQUIRED_FIELDS,
   })
 
   const preview = async () => {
@@ -176,7 +162,7 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
     setError(null)
     try {
       const doc = await buildRateConPdf(buildInput())
-      setPreviewUrl(doc.output('datauristring'))
+      setPreviewUrl(`data:application/pdf;base64,${rateConPdfBase64(doc)}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not build the rate confirmation.')
     } finally {

@@ -28,7 +28,7 @@ describe('who the page is about', () => {
     const list = ivanDrivers([
       driver({ id: 'a', name: 'Anna' }),
       driver({ id: 'b', name: 'Bob', fleetGroup: 'AMAZON' }),       // owner operator
-      driver({ id: 'c', name: 'Cal', driverType: 'OWNER_OPERATOR' }), // owner operator
+      driver({ id: 'c', name: 'Cal', fleetGroup: null, driverType: 'OWNER_OPERATOR' }), // owner operator (no fleet: type decides)
       driver({ id: 'd', name: 'Dot', active: false }),               // gone
       driver({ id: 'e', name: 'BROKER COVERED', type: 'broker' }),   // not a person
     ])

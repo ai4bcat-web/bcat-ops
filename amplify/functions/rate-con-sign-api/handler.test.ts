@@ -7,6 +7,9 @@
  * once-only guard from a broken one.
  */
 import { vi, describe, it, expect, beforeAll, beforeEach } from 'vitest'
+import { createHash } from 'node:crypto'
+import { inflateSync } from 'node:zlib'
+import { PDFDocument } from 'pdf-lib'
 import type * as HandlerModule from './handler'
 
 type Row = Record<string, unknown>
@@ -24,6 +27,7 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
   ScanCommand: vi.fn(function (params: Row) { return { __type: 'Scan', ...params } }),
   GetCommand: vi.fn(function (params: Row) { return { __type: 'Get', ...params } }),
   PutCommand: vi.fn(function (params: Row) { return { __type: 'Put', ...params } }),
+  QueryCommand: vi.fn(function (params: Row) { return { __type: 'Query', ...params } }),
   UpdateCommand: vi.fn(function (params: Row) { return { __type: 'Update', ...params } }),
 }))
 
@@ -43,6 +47,7 @@ const TABLES = {
   division: 'Division-test',
   settings: 'TmsSettings-test',
   audit: 'AuditLog-test',
+  shipmentDoc: 'ShipmentDocument-test',
 }
 
 /** TableName -> primary key value -> row. Division is keyed by `key`, the rest by `id`. */
@@ -120,6 +125,16 @@ function runCommand(cmd: Row): unknown {
       const wanted = values[right]
       return { Items: [...table(String(cmd.TableName)).values()].filter((row) => row[field] === wanted) }
     }
+    case 'Query': {
+      const names = (cmd.ExpressionAttributeNames ?? {}) as Record<string, string>
+      const values = (cmd.ExpressionAttributeValues ?? {}) as Row
+      const keyField = names['#k']
+      const sortField = names['#s']
+      return {
+        Items: [...table(String(cmd.TableName)).values()].filter((row) =>
+          row[keyField] === values[':k'] && (!sortField || row[sortField] === values[':s'])),
+      }
+    }
     case 'Get':
       return { Item: table(String(cmd.TableName)).get(keyValue(cmd.Key as Row)) }
     case 'Put': {
@@ -153,12 +168,23 @@ beforeAll(async () => {
   process.env.DIVISION_TABLE_NAME = TABLES.division
   process.env.SETTINGS_TABLE_NAME = TABLES.settings
   process.env.AUDIT_LOG_TABLE_NAME = TABLES.audit
+  process.env.SHIPMENT_DOCUMENT_TABLE_NAME = TABLES.shipmentDoc
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   handler = (await import('./handler')).handler
 })
 
 const TOKEN = 'tok-abc123'
-const PDF_BASE64 = Buffer.from('%PDF-1.4 signed').toString('base64')
+const IP = '203.0.113.9'
+const UA = 'Mozilla/5.0 (TestBrowser)'
+
+/** A real two-page PDF: the unsigned rate con the Lambda reads back from S3. */
+let unsignedPdf: Uint8Array
+beforeAll(async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([612, 792])
+  doc.addPage([612, 792])
+  unsignedPdf = await doc.save()
+})
 
 function seedLoadCarrier(extra: Row = {}): Row {
   const row: Row = {
@@ -176,6 +202,8 @@ function seedLoadCarrier(extra: Row = {}): Row {
     rateConToken: TOKEN,
     rateConVersion: 1,
     rateConDocumentId: 'cdoc-1',
+    rateConSentAt: '2026-03-01T12:00:00.000Z',
+    rateConSentTo: 'dispatch@swift.example',
     rateConExpiresAt: '2099-01-01T00:00:00.000Z',
     updatedAt: '2026-03-01T00:00:00.000Z',
     ...extra,
@@ -193,7 +221,11 @@ function seedRest(): void {
 }
 
 function post(body: unknown, method = 'POST') {
-  return handler({ body: JSON.stringify(body), requestContext: { http: { method, sourceIp: '203.0.113.9' } } })
+  return handler({
+    body: JSON.stringify(body),
+    headers: { 'cloudfront-viewer-city': 'Chicago', 'cloudfront-viewer-country': 'US' },
+    requestContext: { http: { method, sourceIp: IP, userAgent: UA } },
+  })
 }
 
 async function json(res: Promise<{ statusCode: number; body: string }>) {
@@ -217,13 +249,38 @@ function raceAfterScan(patch: Row): void {
   })
 }
 
+const auditRows = () => [...table(TABLES.audit).values()]
+const auditActions = () => auditRows().map((r) => r.action)
+const docs = (type?: string) => [...table(TABLES.shipmentDoc).values()].filter((d) => !type || d.type === type)
+const puts = () => s3Send.mock.calls.map((c) => c[0] as Row).filter((c) => c.Body)
+
+/** Every flate stream of the PDF, inflated and joined: where pdf-lib keeps the text it drew (as hex strings). */
+function pdfText(bytes: Uint8Array): string {
+  const raw = Buffer.from(bytes)
+  const out: string[] = []
+  let from = 0
+  for (;;) {
+    const start = raw.indexOf('stream\n', from, 'latin1')
+    if (start < 0) break
+    const end = raw.indexOf('endstream', start, 'latin1')
+    try { out.push(inflateSync(raw.subarray(start + 7, end)).toString('latin1')) } catch { /* not a flate stream */ }
+    from = end + 9
+  }
+  return out.join('\n')
+}
+
+async function putPdf(): Promise<PDFDocument> {
+  return PDFDocument.load(puts()[0].Body as Uint8Array)
+}
+
 beforeEach(() => {
   store.clear()
   ddbSend.mockReset()
   s3Send.mockReset()
   getSignedUrl.mockReset()
   ddbSend.mockImplementation(async (cmd: Row) => runCommand(cmd))
-  s3Send.mockResolvedValue({})
+  s3Send.mockImplementation(async (cmd: Row) =>
+    cmd.Body ? {} : { Body: { transformToByteArray: async () => unsignedPdf } })
   getSignedUrl.mockResolvedValue('https://signed.example/rate-con.pdf')
   seedRest()
 })
@@ -236,7 +293,7 @@ describe('rate-con-sign-api', () => {
   })
 
   describe('get', () => {
-    it('returns the rate con and opens it on first read', async () => {
+    it('returns the rate con and opens it on first read, logging who opened it', async () => {
       seedLoadCarrier()
       const { status, body } = await json(post({ token: TOKEN, action: 'get' }))
 
@@ -246,6 +303,7 @@ describe('rate-con-sign-api', () => {
         carrierName: 'SWIFT TRANSPORTATION',
         brokerName: 'BCAT Logistics LLC',
         status: 'OPENED',
+        version: 1,
         totalCents: 180_000,
         // Step AM: the four driver fields are always asked for, and only those still empty.
         requiredFields: ['DRIVER_NAME', 'DRIVER_PHONE', 'TRUCK_NUMBER', 'TRAILER_NUMBER'],
@@ -255,6 +313,16 @@ describe('rate-con-sign-api', () => {
       const row = table(TABLES.loadCarrier).get('lcr-1')!
       expect(row.rateConStatus).toBe('OPENED')
       expect(row.rateConRequestCount).toBe(1)
+      const opened = auditRows().find((r) => r.action === 'rate_con_opened')!
+      expect(opened).toMatchObject({ entityType: 'LOAD_CARRIER', entityId: 'lcr-1', user: 'CARRIER_PORTAL' })
+      expect(JSON.parse(String(opened.changes))).toMatchObject({ version: 1, ip: IP, userAgent: UA, location: 'Chicago, US' })
+    })
+
+    it('logs the first open only', async () => {
+      seedLoadCarrier()
+      await post({ token: TOKEN, action: 'get' })
+      await post({ token: TOKEN, action: 'get' })
+      expect(auditActions().filter((a) => a === 'rate_con_opened')).toHaveLength(1)
     })
 
     it('asks for the settings\' extra fields on top of the four driver fields', async () => {
@@ -271,13 +339,41 @@ describe('rate-con-sign-api', () => {
       expect(body.driverInfo).toEqual({ driverName: 'Yuri Petrov', driverPhone: null, truckNumber: '4471', trailerNumber: null })
     })
 
-    it('is a 404 for a token nobody holds', async () => {
+    it('is a 404 for a token nobody ever held, and writes nothing about the guess', async () => {
       seedLoadCarrier()
       const { status } = await json(post({ token: 'nope', action: 'get' }))
       expect(status).toBe(404)
+      expect(auditRows()).toHaveLength(0)
     })
 
-    it('expires the link where it finds it', async () => {
+    it('says "replaced" on a link a newer send killed, and logs the attempt against the assignment', async () => {
+      // v2 was sent: the row now holds the v2 token, and the v1 token survives only as its issued-link audit row.
+      seedLoadCarrier({ rateConVersion: 2, rateConToken: 'tok-v2' })
+      const hash = createHash('sha256').update(TOKEN).digest('hex')
+      table(TABLES.audit).set('a1', { id: 'a1', entityType: 'RATE_CON_TOKEN', entityId: hash, action: 'rate_con_link_issued', changes: JSON.stringify({ loadCarrierId: 'lcr-1', version: 1 }) })
+
+      const { status, body } = await json(post({ token: TOKEN, action: 'get' }))
+      expect(status).toBe(410)
+      expect(body).toMatchObject({ code: 'REPLACED', error: 'This rate confirmation was replaced; use the newest link' })
+      const refused = auditRows().find((r) => r.action === 'rate_con_link_rejected')!
+      expect(refused).toMatchObject({ entityType: 'LOAD_CARRIER', entityId: 'lcr-1' })
+      expect(JSON.parse(String(refused.changes))).toMatchObject({ reason: 'SUPERSEDED', linkVersion: 1, currentVersion: 2, ip: IP })
+    })
+
+    it('cannot sign on a replaced link: nothing is written', async () => {
+      seedLoadCarrier({ rateConVersion: 2, rateConToken: 'tok-v2' })
+      const hash = createHash('sha256').update(TOKEN).digest('hex')
+      table(TABLES.audit).set('a1', { id: 'a1', entityType: 'RATE_CON_TOKEN', entityId: hash, action: 'rate_con_link_issued', changes: JSON.stringify({ loadCarrierId: 'lcr-1', version: 1 }) })
+
+      const { status, body } = await json(post({ token: TOKEN, action: 'submit', payload: validPayload() }))
+      expect(status).toBe(410)
+      expect(body.code).toBe('REPLACED')
+      expect(puts()).toHaveLength(0)
+      expect(docs()).toHaveLength(0)
+      expect(table(TABLES.loadCarrier).get('lcr-1')!.rateConStatus).toBe('SENT')
+    })
+
+    it('expires the link where it finds it, and logs the refusal', async () => {
       seedLoadCarrier({ rateConExpiresAt: '2026-01-01T00:00:00.000Z' })
       const { status, body } = await json(post({ token: TOKEN, action: 'get' }))
 
@@ -286,6 +382,7 @@ describe('rate-con-sign-api', () => {
       const row = table(TABLES.loadCarrier).get('lcr-1')!
       expect(row.rateConStatus).toBe('EXPIRED')
       expect(row.rateConToken).toBeNull()
+      expect(JSON.parse(String(auditRows().find((r) => r.action === 'rate_con_link_rejected')!.changes))).toMatchObject({ reason: 'EXPIRED' })
     })
 
     it('stops answering a token that has been hammered', async () => {
@@ -301,135 +398,233 @@ describe('rate-con-sign-api', () => {
       expect(status).toBe(409)
       expect(String(body.error)).toMatch(/ambiguous/)
     })
+
+    it('shows a signed link as signed: no form, no document link', async () => {
+      seedLoadCarrier({ rateConStatus: 'SIGNED', rateConSignerName: 'Yuri Petrov', rateConSignedAt: '2026-03-02T00:00:00.000Z' })
+      const { status, body } = await json(post({ token: TOKEN, action: 'get' }))
+      expect(status).toBe(200)
+      expect(body).toMatchObject({ status: 'SIGNED', requiredFields: [], pdfUrl: '', signerName: 'Yuri Petrov' })
+      expect(getSignedUrl).not.toHaveBeenCalled()
+    })
   })
 
-  describe('submit', () => {
-    const payload = {
+  function validPayload(over: Row = {}): Row {
+    return {
       signerName: 'Yuri Petrov',
-      fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: '312-555-0101', TRUCK_NUMBER: '4471', TRAILER_NUMBER: 'T-88' },
-      pdfBase64: PDF_BASE64,
+      agreed: true,
+      fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: '(312) 555-0101', TRUCK_NUMBER: '4471', TRAILER_NUMBER: 'T-88' },
+      ...over,
     }
+  }
 
-    it('signs once, stores the PDF and fills only what was still blank', async () => {
+  describe('submit', () => {
+    it('signs once: stamps server-side, files a Public Signed Rate Confirmation, fills only what was blank', async () => {
       seedLoadCarrier({ rateConStatus: 'OPENED', driverName: 'Dispatch Knew This' })
-      const { status, body } = await json(post({ token: TOKEN, action: 'submit', payload }))
+      const { status, body } = await json(post({ token: TOKEN, action: 'submit', payload: validPayload() }))
 
       expect(status).toBe(200)
-      expect(body).toEqual({ ok: true })
+      expect(body).toMatchObject({ ok: true, alreadySigned: false, signerName: 'Yuri Petrov', version: 1 })
       const row = table(TABLES.loadCarrier).get('lcr-1')!
       expect(row).toMatchObject({
         rateConStatus: 'SIGNED',
         rateConSignerName: 'Yuri Petrov',
-        rateConSignerIp: '203.0.113.9',
-        rateConKey: 'rate-confirms/carrier/lod-1/lcr-1-v1-signed.pdf',
-        rateConToken: null,
+        rateConSignerIp: IP,
         // The office's value is never overwritten by the signature page.
         driverName: 'Dispatch Knew This',
-        driverPhone: '312-555-0101',
+        // Normalized to E.164 before it is stored.
+        driverPhone: '+13125550101',
         truckNumber: '4471',
         trailerNumber: 'T-88',
         // Signing with all four driver fields in reaches the top rung, and the board mirrors it.
         assignmentStatus: 'DRIVER_INFO_ENTERED',
       })
+      expect(String(row.rateConKey)).toMatch(/^shipment-docs\/shp-1\/.+-signed-v1\.pdf$/)
       expect(table(TABLES.shipment).get('shp-1')!.carrierAssignmentStatus).toBe('DRIVER_INFO_ENTERED')
-      expect(table(TABLES.load).get('lod-1')!.carrierAssignmentStatus).toBe('DRIVER_INFO_ENTERED')
-      expect(s3Send).toHaveBeenCalledTimes(1)
-      const signed = [...table(TABLES.carrierDoc).values()].find((d) => d.source === 'SIGNED')!
-      expect(signed).toMatchObject({ carrierId: 'car-1', type: 'RATE_CON', loadCarrierId: 'lcr-1', uploadedBy: 'CARRIER_PORTAL' })
-      const audit = [...table(TABLES.audit).values()][0]
-      expect(audit).toMatchObject({ entityType: 'LOAD_CARRIER', entityId: 'lcr-1', action: 'rate_con_signed', user: 'CARRIER_PORTAL' })
-      // Field keys only: the driver's name and phone never reach the audit log.
-      expect(JSON.stringify(audit)).not.toMatch(/312-555-0101|Yuri Petrov"/)
+
+      // One PDF written, one page longer than the original (the certificate), at the key the row names.
+      expect(puts()).toHaveLength(1)
+      expect(puts()[0].Key).toBe(row.rateConKey)
+      expect((await putPdf()).getPageCount()).toBe(3)
+
+      // The load's Documents: Public folder (audience ALL), the type the invoice packet looks for.
+      const [signed] = docs('RATE_CON')
+      expect(signed).toMatchObject({
+        shipmentId: 'shp-1', loadId: 'lod-1', loadCarrierId: 'lcr-1', name: 'Signed Rate Confirmation v1.pdf',
+        audience: 'ALL', status: 'ACTIVE', version: 1, s3Key: row.rateConKey, pages: 3, source: 'GENERATED',
+      })
+      expect(signed.reviewStatus).toBeUndefined()
+
+      const audit = auditRows().find((r) => r.action === 'rate_con_signed')!
+      expect(audit).toMatchObject({ entityType: 'LOAD_CARRIER', entityId: 'lcr-1', user: 'CARRIER_PORTAL' })
+      expect(JSON.parse(String(audit.changes))).toMatchObject({
+        version: 1, signerName: 'Yuri Petrov', ip: IP, userAgent: UA, location: 'Chicago, US',
+        documentId: signed.id, unsignedSha256: createHash('sha256').update(unsignedPdf).digest('hex'),
+      })
+      // The driver's phone never reaches the audit log.
+      expect(JSON.stringify(audit)).not.toMatch(/555-0101|5550101/)
     })
 
-    it('refuses to sign while a driver field the office did not enter is still missing', async () => {
-      seedLoadCarrier({ rateConStatus: 'OPENED', driverName: 'Office Entered', driverPhone: '312-555-0000' })
-      const short = { ...payload, fields: { TRUCK_NUMBER: '4471' } }
-      const { status, body } = await json(post({ token: TOKEN, action: 'submit', payload: short }))
+    it('prints the cert evidence: unsigned-PDF hash, signer, IP, user agent and the SENT/VIEWED/SIGNED times', async () => {
+      seedLoadCarrier()
+      table(TABLES.audit).set('s1', { id: 's1', entityType: 'LOAD_CARRIER', entityId: 'lcr-1', action: 'SEND_RATE_CON', user: 'ryne@bcatcorp.com', createdAt: '2026-03-01T12:00:01.000Z', changes: JSON.stringify({ version: 1 }) })
+      await post({ token: TOKEN, action: 'get' })
+      await post({ token: TOKEN, action: 'submit', payload: validPayload() })
+      const stream = pdfText(puts()[0].Body as Uint8Array)
+      const hex = (t: string) => Buffer.from(t, 'latin1').toString('hex').toUpperCase()
+      for (const text of [createHash('sha256').update(unsignedPdf).digest('hex'), IP, UA, 'dispatch@swift.example', 'ryne@bcatcorp.com', 'Chicago, US', 'SIGNING CERTIFICATE']) {
+        expect(stream, text).toContain(hex(text))
+      }
+    })
+
+    // ── the server validation matrix: every row must refuse and write nothing ──
+    const bad: Array<[string, Row, string]> = [
+      ['blank name', { signerName: '   ' }, 'signerName'],
+      ['digits as a name', { signerName: '12345' }, 'signerName'],
+      ['one-letter name', { signerName: 'Y' }, 'signerName'],
+      ['name over the limit', { signerName: 'A'.repeat(121) }, 'signerName'],
+      ['unticked agreement', { agreed: false }, 'agreed'],
+      ['agreement as a string', { agreed: 'true' }, 'agreed'],
+      ['no agreement at all', { agreed: undefined }, 'agreed'],
+      ['no driver name', { fields: { DRIVER_PHONE: '312-555-0101', TRUCK_NUMBER: '4471', TRAILER_NUMBER: 'T-88' } }, 'DRIVER_NAME'],
+      ['no driver phone', { fields: { DRIVER_NAME: 'Yuri Petrov', TRUCK_NUMBER: '4471', TRAILER_NUMBER: 'T-88' } }, 'DRIVER_PHONE'],
+      ['phone too short', { fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: '555-0101', TRUCK_NUMBER: '4471', TRAILER_NUMBER: 'T-88' } }, 'DRIVER_PHONE'],
+      ['phone with letters', { fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: 'call me', TRUCK_NUMBER: '4471', TRAILER_NUMBER: 'T-88' } }, 'DRIVER_PHONE'],
+      ['area code starting 0', { fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: '012-555-0101', TRUCK_NUMBER: '4471', TRAILER_NUMBER: 'T-88' } }, 'DRIVER_PHONE'],
+      ['all-same-digit phone', { fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: '555-555-5555', TRUCK_NUMBER: '4471', TRAILER_NUMBER: 'T-88' } }, 'DRIVER_PHONE'],
+      ['no truck', { fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: '312-555-0101', TRAILER_NUMBER: 'T-88' } }, 'TRUCK_NUMBER'],
+      ['punctuation-only trailer', { fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: '312-555-0101', TRUCK_NUMBER: '4471', TRAILER_NUMBER: '---' } }, 'TRAILER_NUMBER'],
+      ['field over the limit', { fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: '312-555-0101', TRUCK_NUMBER: 'X'.repeat(121), TRAILER_NUMBER: 'T-88' } }, 'TRUCK_NUMBER'],
+      ['a field value that is not text', { fields: { DRIVER_NAME: 'Yuri Petrov', DRIVER_PHONE: 3125550101, TRUCK_NUMBER: '4471', TRAILER_NUMBER: 'T-88' } }, 'DRIVER_PHONE'],
+    ]
+    it.each(bad)('refuses %s with a specific error and writes nothing', async (_label, over, key) => {
+      seedLoadCarrier()
+      const { status, body } = await json(post({ token: TOKEN, action: 'submit', payload: validPayload(over) }))
+
       expect(status).toBe(400)
-      expect(String(body.error)).toMatch(/TRAILER_NUMBER/)
-      expect(table(TABLES.loadCarrier).get('lcr-1')!.rateConStatus).toBe('OPENED')
+      expect(body.code).toBe('INVALID')
+      expect(Object.keys(body.fieldErrors as Row)).toContain(key)
+      expect(String(body.error).length).toBeGreaterThan(5)
+      const row = table(TABLES.loadCarrier).get('lcr-1')!
+      expect(row.rateConStatus).toBe('SENT')
+      expect(row.driverPhone).toBeUndefined()
+      expect(puts()).toHaveLength(0)
+      expect(docs()).toHaveLength(0)
+      // The refusal itself is an audit row on the assignment, with the reasons but not the typed values.
+      const refused = auditRows().find((r) => r.action === 'rate_con_sign_rejected')!
+      expect(refused).toMatchObject({ entityId: 'lcr-1' })
+      expect(Object.keys(JSON.parse(String(refused.changes)).errors)).toContain(key)
+    })
+
+    it('refuses a phone the office already holds only when the carrier retypes it badly', async () => {
+      seedLoadCarrier({ driverName: 'Office Entered', driverPhone: '312-555-0000', truckNumber: '1', trailerNumber: '2' })
+      const ok = await json(post({ token: TOKEN, action: 'submit', payload: { signerName: 'Yuri Petrov', agreed: true, fields: {} } }))
+      expect(ok.status).toBe(200)
+    })
+
+    it('a bad optional value is refused too, not stored', async () => {
+      seedLoadCarrier({ driverName: 'Office Entered', driverPhone: '312-555-0000', truckNumber: '1', trailerNumber: '2' })
+      table(TABLES.settings).set('default', { id: 'default', rateConRequiredFields: ['PICKUP_ETA'] })
+      const { status, body } = await json(post({ token: TOKEN, action: 'submit', payload: { signerName: 'Yuri Petrov', agreed: true, fields: { PICKUP_ETA: 'whenever' } } }))
+      expect(status).toBe(400)
+      expect(Object.keys(body.fieldErrors as Row)).toEqual(['PICKUP_ETA'])
+    })
+
+    it('ignores any PDF the browser sends: the stored original is what gets stamped', async () => {
+      seedLoadCarrier()
+      await post({ token: TOKEN, action: 'submit', payload: validPayload({ pdfBase64: Buffer.from('%PDF-evil').toString('base64') }) })
+      expect((await putPdf()).getPageCount()).toBe(3)
+      expect(Buffer.from(puts()[0].Body as Uint8Array).toString('latin1')).not.toContain('evil')
     })
 
     it('an assignment at RATE_CON_SENT climbs to the top on signing and keeps its earlier timestamp', async () => {
       seedLoadCarrier({ rateConStatus: 'OPENED', assignmentStatus: 'RATE_CON_SENT', assignmentTimes: JSON.stringify({ RATE_CON_SENT: '2026-03-01T00:00:00.000Z' }) })
-      await post({ token: TOKEN, action: 'submit', payload })
+      await post({ token: TOKEN, action: 'submit', payload: validPayload() })
       const row = table(TABLES.loadCarrier).get('lcr-1')!
       expect(row.assignmentStatus).toBe('DRIVER_INFO_ENTERED')
       expect(JSON.parse(String(row.assignmentTimes))).toMatchObject({ RATE_CON_SENT: '2026-03-01T00:00:00.000Z', DRIVER_INFO_ENTERED: expect.any(String) })
     })
 
-    it('refuses a second signature on the same rate con', async () => {
-      seedLoadCarrier({ rateConStatus: 'SIGNED' })
-      const { status, body } = await json(post({ token: TOKEN, action: 'submit', payload }))
-      expect(status).toBe(409)
-      expect(String(body.error)).toMatch(/already been answered/)
-    })
+    it('is idempotent: a second POST after signing returns the first result and signs nothing again', async () => {
+      seedLoadCarrier()
+      const first = await json(post({ token: TOKEN, action: 'submit', payload: validPayload() }))
+      const second = await json(post({ token: TOKEN, action: 'submit', payload: validPayload({ signerName: 'Impostor Name' }) }))
 
-    it('writes neither a signed PDF nor a second document when the row is already signed', async () => {
-      seedLoadCarrier({ rateConStatus: 'SIGNED', rateConSignerName: 'Yuri Petrov' })
-      const { status } = await json(post({ token: TOKEN, action: 'submit', payload: { ...payload, signerName: 'Impostor' } }))
-
-      expect(status).toBe(409)
-      expect(s3Send).not.toHaveBeenCalled()
-      expect([...table(TABLES.carrierDoc).values()].filter((d) => d.source === 'SIGNED')).toHaveLength(0)
+      expect(first.body.alreadySigned).toBe(false)
+      expect(second.status).toBe(200)
+      expect(second.body).toMatchObject({ ok: true, alreadySigned: true, signerName: 'Yuri Petrov', signedAt: first.body.signedAt })
+      expect(puts()).toHaveLength(1)
+      expect(docs('RATE_CON')).toHaveLength(1)
+      expect(auditActions().filter((a) => a === 'rate_con_signed')).toHaveLength(1)
       expect(table(TABLES.loadCarrier).get('lcr-1')!.rateConSignerName).toBe('Yuri Petrov')
     })
 
-    it('refuses a signature another answer beat to the write, leaving nothing behind', async () => {
+    it('a lost race returns the winner\'s signature: still exactly one signed document', async () => {
       seedLoadCarrier({ rateConStatus: 'OPENED' })
-      // The rival signs while this request is still deciding what to upload.
-      raceAfterScan({ rateConStatus: 'SIGNED', rateConToken: null, rateConSignerName: 'First Signer' })
+      // The rival signs while this request is still deciding; the token stays on the row once signed.
+      raceAfterScan({ rateConStatus: 'SIGNED', rateConSignerName: 'First Signer', rateConSignedAt: '2026-03-02T00:00:00.000Z' })
 
-      const { status, body } = await json(post({ token: TOKEN, action: 'submit', payload: { ...payload, signerName: 'Second Signer' } }))
+      const { status, body } = await json(post({ token: TOKEN, action: 'submit', payload: validPayload({ signerName: 'Second Signer' }) }))
 
-      expect(status).toBe(409)
-      expect(String(body.error)).toMatch(/already been answered/)
+      expect(status).toBe(200)
+      expect(body).toMatchObject({ alreadySigned: true, signerName: 'First Signer' })
       expect(table(TABLES.loadCarrier).get('lcr-1')!.rateConSignerName).toBe('First Signer')
-      expect(s3Send).not.toHaveBeenCalled()
-      expect([...table(TABLES.carrierDoc).values()].filter((d) => d.source === 'SIGNED')).toHaveLength(0)
-      expect([...table(TABLES.audit).values()]).toHaveLength(0)
+      expect(auditActions()).not.toContain('rate_con_signed')
+    })
+
+    it('heals a signature whose Documents row was lost after the claim', async () => {
+      seedLoadCarrier({ rateConStatus: 'SIGNED', rateConSignerName: 'Yuri Petrov', rateConKey: 'shipment-docs/shp-1/x-signed-v1.pdf', rateConSignedAt: '2026-03-02T00:00:00.000Z' })
+      const { status } = await json(post({ token: TOKEN, action: 'submit', payload: validPayload() }))
+      expect(status).toBe(200)
+      expect(docs('RATE_CON')).toHaveLength(1)
+      expect(docs('RATE_CON')[0]).toMatchObject({ s3Key: 'shipment-docs/shp-1/x-signed-v1.pdf', status: 'ACTIVE', audience: 'ALL' })
+      // Replaying again does not mint a second one.
+      await post({ token: TOKEN, action: 'submit', payload: validPayload() })
+      expect(docs('RATE_CON')).toHaveLength(1)
+    })
+
+    it('the new signed version REPLACES the old one: old is SUPERSEDED (kept), new is ACTIVE', async () => {
+      seedLoadCarrier({ rateConVersion: 2, rateConToken: 'tok-v2', rateConStatus: 'SENT' })
+      table(TABLES.shipmentDoc).set('old-signed', { id: 'old-signed', shipmentId: 'shp-1', loadId: 'lod-1', loadCarrierId: 'lcr-1', type: 'RATE_CON', status: 'ACTIVE', version: 1, audience: 'ALL', s3Key: 'shipment-docs/shp-1/old-signed-v1.pdf' })
+      table(TABLES.shipmentDoc).set('other-carrier', { id: 'other-carrier', shipmentId: 'shp-1', loadId: 'lod-1', loadCarrierId: 'lcr-9', type: 'RATE_CON', status: 'ACTIVE', version: 1, audience: 'ALL', s3Key: 'shipment-docs/shp-1/other.pdf' })
+      table(TABLES.shipmentDoc).set('pod', { id: 'pod', shipmentId: 'shp-1', loadId: 'lod-1', type: 'POD', status: 'ACTIVE', audience: 'ALL', s3Key: 'shipment-docs/shp-1/pod.pdf' })
+
+      const { status } = await json(post({ token: 'tok-v2', action: 'submit', payload: validPayload() }))
+      expect(status).toBe(200)
+
+      expect(table(TABLES.shipmentDoc).get('old-signed')).toMatchObject({ status: 'SUPERSEDED' })
+      expect(table(TABLES.shipmentDoc).get('other-carrier')!.status).toBe('ACTIVE')
+      expect(table(TABLES.shipmentDoc).get('pod')!.status).toBe('ACTIVE')
+      const fresh = docs('RATE_CON').find((d) => d.version === 2)!
+      expect(fresh).toMatchObject({ status: 'ACTIVE', audience: 'ALL', supersedesId: 'old-signed', name: 'Signed Rate Confirmation v2.pdf' })
+      const superseded = auditRows().find((r) => r.action === 'rate_con_document_superseded')!
+      expect(JSON.parse(String(superseded.changes))).toMatchObject({ supersededDocumentId: 'old-signed', byDocumentId: fresh.id, version: 2 })
     })
 
     it('counts the request against the token', async () => {
       seedLoadCarrier({ rateConStatus: 'OPENED' })
-      await post({ token: TOKEN, action: 'submit', payload })
+      await post({ token: TOKEN, action: 'submit', payload: validPayload() })
       expect(table(TABLES.loadCarrier).get('lcr-1')!.rateConRequestCount).toBe(1)
     })
 
     it('stops answering a token that has been hammered', async () => {
       seedLoadCarrier({ rateConStatus: 'OPENED', rateConRequestCount: 201 })
-      const { status } = await json(post({ token: TOKEN, action: 'submit', payload }))
+      const { status } = await json(post({ token: TOKEN, action: 'submit', payload: validPayload() }))
       expect(status).toBe(429)
-      expect(s3Send).not.toHaveBeenCalled()
+      expect(puts()).toHaveLength(0)
     })
 
-    it('leaves the link dead once it has been signed', async () => {
-      seedLoadCarrier()
-      await post({ token: TOKEN, action: 'submit', payload })
-      const { status } = await json(post({ token: TOKEN, action: 'submit', payload }))
-      expect(status).toBe(404)
+    it('refuses a voided or expired link and logs it', async () => {
+      seedLoadCarrier({ rateConStatus: 'VOIDED' })
+      const { status } = await json(post({ token: TOKEN, action: 'submit', payload: validPayload() }))
+      expect(status).toBe(410)
+      expect(auditActions()).toContain('rate_con_link_rejected')
+      expect(puts()).toHaveLength(0)
     })
 
-    it('needs a typed name and every required field', async () => {
-      seedLoadCarrier()
-      const noName = await json(post({ token: TOKEN, action: 'submit', payload: { ...payload, signerName: '  ' } }))
-      expect(noName.status).toBe(400)
-
-      const missing = await json(post({
-        token: TOKEN,
-        action: 'submit',
-        payload: { ...payload, fields: { DRIVER_NAME: 'Yuri Petrov' } },
-      }))
-      expect(missing.status).toBe(400)
-      expect(String(missing.body.error)).toMatch(/DRIVER_PHONE, TRUCK_NUMBER, TRAILER_NUMBER/)
-      expect(table(TABLES.loadCarrier).get('lcr-1')!.rateConStatus).toBe('SENT')
-    })
-
-    it('refuses a body over the megabyte cap before it parses it', async () => {
+    it('refuses a body over the cap before it parses it', async () => {
       seedLoadCarrier()
       const res = await handler({
-        body: JSON.stringify({ token: TOKEN, action: 'submit', payload: { pdfBase64: 'A'.repeat(1_100_000) } }),
+        body: JSON.stringify({ token: TOKEN, action: 'submit', payload: { junk: 'A'.repeat(70_000) } }),
         requestContext: { http: { method: 'POST' } },
       })
       expect(res.statusCode).toBe(413)
@@ -445,7 +640,7 @@ describe('rate-con-sign-api', () => {
       const row = table(TABLES.loadCarrier).get('lcr-1')!
       expect(row.rateConStatus).toBe('DECLINED')
       expect(row.rateConToken).toBeNull()
-      const audit = [...table(TABLES.audit).values()][0]
+      const audit = auditRows()[0]
       expect(audit).toMatchObject({ action: 'rate_con_declined', user: 'CARRIER_PORTAL' })
       expect(String(audit.changes)).toMatch(/Rate too low/)
     })
@@ -459,12 +654,12 @@ describe('rate-con-sign-api', () => {
     it('refuses to decline a voided rate con', async () => {
       seedLoadCarrier({ rateConStatus: 'VOIDED' })
       const { status } = await json(post({ token: TOKEN, action: 'decline', payload: { reason: 'too late' } }))
-      expect(status).toBe(409)
+      expect(status).toBe(410)
     })
 
     it('cannot bury a signature that landed first', async () => {
       seedLoadCarrier({ rateConStatus: 'OPENED' })
-      raceAfterScan({ rateConStatus: 'SIGNED', rateConToken: null, rateConSignerName: 'Yuri Petrov' })
+      raceAfterScan({ rateConStatus: 'SIGNED', rateConSignerName: 'Yuri Petrov' })
 
       const { status } = await json(post({ token: TOKEN, action: 'decline', payload: { reason: 'Rate too low' } }))
 
@@ -472,7 +667,7 @@ describe('rate-con-sign-api', () => {
       const row = table(TABLES.loadCarrier).get('lcr-1')!
       expect(row.rateConStatus).toBe('SIGNED')
       expect(row.rateConSignerName).toBe('Yuri Petrov')
-      expect([...table(TABLES.audit).values()]).toHaveLength(0)
+      expect(auditActions()).not.toContain('rate_con_declined')
     })
 
     it('refuses to decline a rate con that was already signed', async () => {

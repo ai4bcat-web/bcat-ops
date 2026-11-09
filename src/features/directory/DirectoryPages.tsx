@@ -1,4 +1,5 @@
-import { InvoiceEmailBadge } from './components/EmailReadinessBadge'
+import { BillingMethodBadge, InvoiceEmailBadge } from './components/EmailReadinessBadge'
+import { stateOf as billingStateOf } from '@/lib/billingSetupCsv'
 import { customerInvoiceEmailState, invoiceEmailLabels } from '@/lib/emailReadiness'
 import { PossibleDuplicateBadge } from './components/PossibleDuplicateBadge'
 import { buildDuplicateIndex } from '@/lib/customerDuplicates'
@@ -106,14 +107,21 @@ const DEFAULT_COLUMNS = ['name', 'status', 'invoiceEmail', 'owner', 'lastTouch',
 const ACTIVITY_COLUMN_KEYS = ['openAr', 'lastShipment']
 const ALL_COLUMN_KEYS = [
   ...DEFAULT_COLUMNS,
-  'team', 'billingEmails', 'factored', 'email', 'state',
+  'team', 'billingEmails', 'billingMethod', 'factored', 'email', 'state',
   'division', 'stage', 'nextDue', 'openTasks', 'phone', 'mc', 'dot', 'archived', 'aljexCode', 'industry', 'leadSource', 'created',
   ...ACTIVITY_COLUMN_KEYS,
 ]
 const ACTIONS_KEY = 'actions'
+const billingMethodLabels = { FACTOR: 'Factor', MANUAL: 'Manual', NOT_SET: 'Not set' } as const
 
 const gridCatalog: Array<DenseColumn<CustomerRow>> = [
     { key: 'invoiceEmail', header: 'Invoice e-mail', group: 'Billing', text: (r) => invoiceEmailLabels[customerInvoiceEmailState(r.record)], filter: 'multi', optionsOf: (r) => [{ value: customerInvoiceEmailState(r.record), label: invoiceEmailLabels[customerInvoiceEmailState(r.record)] }] },
+    {
+      key: 'billingMethod', header: 'Billing method', group: 'Billing', filter: 'multi',
+      text: (r) => billingMethodLabels[billingStateOf(r.record)],
+      fixedOptions: (['FACTOR', 'MANUAL', 'NOT_SET'] as const).map((v) => ({ value: v, label: billingMethodLabels[v] })),
+      optionsOf: (r) => [{ value: billingStateOf(r.record), label: billingMethodLabels[billingStateOf(r.record)] }],
+    },
     { key: 'name', header: 'Customer', group: 'Account', text: (r) => r.record.name },
     {
       key: 'status', header: 'Status', group: 'Account', text: (r) => r.record.status ?? '', filter: 'multi',
@@ -269,6 +277,8 @@ export function CustomersPage() {
     return counts
   }, [rowsWithStatus])
 
+  const billingNotSetCount = useMemo(() => rowsWithStatus.filter((r) => billingStateOf(r.record) === 'NOT_SET').length, [rowsWithStatus])
+
   const gridColumns = useMemo(
     () => [
       ...prefs.columns.map((k) => gridCatalog.find((c) => c.key === k)).filter((c) => c != null),
@@ -324,6 +334,7 @@ export function CustomersPage() {
     const { record: c, effective, crm: crmRow } = row
     switch (key) {
       case 'invoiceEmail': return <InvoiceEmailBadge customer={c} />
+      case 'billingMethod': return <BillingMethodBadge customer={c} />
       case 'name':
         return (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -332,6 +343,7 @@ export function CustomersPage() {
             {c.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
             <PossibleDuplicateBadge info={duplicates.get(c.id)} />
             {!prefs.columns.includes('invoiceEmail') && customerInvoiceEmailState(c) !== 'OK' && <InvoiceEmailBadge customer={c} />}
+            {!prefs.columns.includes('billingMethod') && billingStateOf(c) === 'NOT_SET' && <BillingMethodBadge customer={c} />}
           </span>
         )
       case 'status':
@@ -416,6 +428,7 @@ export function CustomersPage() {
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: includeFactored ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }}>Missing invoice e-mail ({emailCounts.missing + (includeFactored ? emailCounts.factored : 0)})</TmsButton>
           <label><input type="checkbox" checked={includeFactored} onChange={(e) => { setIncludeFactored(e.target.checked); if (filters.invoiceEmail?.values?.includes('MISSING')) setColumnFilter('invoiceEmail', { values: e.target.checked ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }} /> Include factored</label>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: ['FACTORED_QUEUE_ONLY'] }) }}>Factored: queue only ({emailCounts.factored})</TmsButton>
+          <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('billingMethod', { values: ['NOT_SET'] }) }}>Billing method not set ({billingNotSetCount})</TmsButton>
           {isManager && (
             <span role="group" aria-label="Account scope" style={{ display: 'inline-flex', gap: 4 }} data-testid="crm-scope">
               <TmsButton size="sm" variant={scope === 'mine' ? 'primary' : undefined} aria-pressed={scope === 'mine'} onClick={() => setScope('mine')} data-testid="crm-scope-mine">Mine</TmsButton>
@@ -524,7 +537,7 @@ export function CustomersPage() {
 function CustomerModal({ open, initial, divisions, onClose, onSave }: {
   open: boolean; initial?: CustomerRecord; divisions: Division[]; onClose: () => void; onSave: (record: CustomerRecord) => Promise<void>
 }) {
-  const { value, set, toRecord, errors } = useCustomerForm(initial ?? null)
+  const { value, set, toRecord, errors, isNew, missing } = useCustomerForm(initial ?? null)
   const [saving, setSaving] = useState(false)
 
   const save = async () => {
@@ -542,12 +555,13 @@ function CustomerModal({ open, initial, divisions, onClose, onSave }: {
       title={initial ? 'Edit customer' : 'Add customer'}
       footer={
         <>
+          {missing && <span role="status" data-testid="customer-missing" className="tms-field-error" style={{ marginRight: 'auto' }}>{missing}</span>}
           <TmsButton onClick={onClose}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</TmsButton>
+          <TmsButton variant="primary" onClick={save} disabled={saving || (isNew && Object.keys(errors).length > 0)}>{saving ? 'Saving…' : 'Save'}</TmsButton>
         </>
       }
     >
-      <CustomerForm value={value} set={set} errors={errors} divisions={divisions} />
+      <CustomerForm value={value} set={set} errors={errors} divisions={divisions} isNew={isNew} />
     </TmsDialog>
   )
 }

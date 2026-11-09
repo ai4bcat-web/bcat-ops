@@ -920,13 +920,15 @@ describe('ShipmentsBoard', () => {
         deliveredRow('S001', complete),
         deliveredRow('S002', { ...complete, reference: null }),
         deliveredRow('S003', { ...complete, salesRepId: null, revDivision: null }),
+        deliveredRow('S004', { ...complete, salesRepId: null, salesRepCode: 'BCAT' }),
       ])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
       expect(chipNames()).toEqual([
         'Missing reference # (1)',
-        'Missing sales rep (1)',
+        'Needs sales rep (1)',
         'Missing rev division (1)',
         'Missing documents (0)',
+        'Review billing (0)',
         'Check call overdue (0)',
       ])
       expect(screen.queryByRole('button', { name: /Open exceptions/ })).toBeNull()

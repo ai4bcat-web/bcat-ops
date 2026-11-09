@@ -57,7 +57,7 @@ describe('buildNavSections', () => {
   it('gives the owner the whole rail in order: the pinned freight list, then Assets, Car shipping, Company', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     expect(labels(pinned)).toEqual([
-      'Dashboard', 'Active shipments', 'Customers', 'Carriers', 'Locations', 'Accounting', 'Settings',
+      'Dashboard', 'Brokerage Dashboard', 'Active shipments', 'Customers', 'Carriers', 'Locations', 'Accounting', 'Settings',
     ])
     const kids = (label: string) => labels(pinned.find((i) => i.label === label)?.children)
     // Dispatch and Calendar live under Active shipments; the Payroll pages are a labeled group under Accounting.
@@ -94,7 +94,7 @@ describe('buildNavSections', () => {
   it('opens the whole freight list on the one `tms` grant, minus the admin-only rows and the Dashboard', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
     expect(pinned.map((i) => i.to)).toEqual(
-      PINNED_ITEMS.filter((i) => i.to !== '/dashboard').map((i) => (i.group ? i.children?.find((c) => c.adminOnly !== true)?.to : i.to)),
+      PINNED_ITEMS.filter((i) => i.pageKey !== 'dashboard').map((i) => (i.group ? i.children?.find((c) => c.adminOnly !== true)?.to : i.to)),
     )
     const settings = pinned.find((i) => i.label === 'Settings')
     expect(labels(settings?.children)).toEqual(['General & automation', 'Commissions', 'Reports', 'Audit log', 'Demo'])
@@ -105,12 +105,13 @@ describe('buildNavSections', () => {
   it('hides the Dashboard row from everybody without the dashboard grant, tms included', () => {
     for (const keys of [['tms'], ['loads'], ['calendar'], ['fleetManagerDashboard']]) {
       expect(labels(pinnedOf(...keys)), keys.join()).not.toContain('Dashboard')
+      expect(labels(pinnedOf(...keys)), keys.join()).not.toContain('Brokerage Dashboard')
     }
   })
 
   it('shows the Dashboard first, at /dashboard, to a dashboard grant, an admin and the owner', () => {
     const granted = pinnedOf('dashboard')
-    expect(labels(granted)).toEqual(['Dashboard'])
+    expect(labels(granted)).toEqual(['Dashboard', 'Brokerage Dashboard'])
     expect(granted[0].to).toBe('/dashboard')
     for (const flags of [{ isAdmin: true }, { isOwner: true }]) {
       const { pinned } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, ...flags })
@@ -122,6 +123,7 @@ describe('buildNavSections', () => {
     const { pinned, sections } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     const hrefs = [...pinned, ...pinned.flatMap((i) => i.children ?? []), ...sections.flatMap((s) => s.items)].map((i) => i.to)
     expect(hrefs.filter((to) => to === '/dashboard')).toHaveLength(1)
+    expect(hrefs.filter((to) => to === '/brokerage-dashboard')).toHaveLength(1)
     expect(hrefs).not.toContain('/tms/dashboard')
   })
 
@@ -299,7 +301,7 @@ describe('buildNavSections', () => {
 
   it('falls back to the seed divisions before the table has loaded', () => {
     const { sections } = buildNavSections({ divisions: null, hasPageAccess: () => true })
-    expect(sections.map((s) => s.key)).toEqual(['ASSETS', 'CAR_SHIPPING', 'COMPANY'])
+    expect(sections.map((s) => s.key)).toEqual(['ASSETS', 'CAR_SHIPPING'])
   })
 
   it('has a route behind every nav row (a row with no route is a dead link)', () => {

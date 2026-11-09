@@ -8,7 +8,7 @@ import { useTruckMileage } from './useTruckMileage'
 import type { TruckMileage } from '@/lib/apiClient'
 import { useDriverPay } from './useDriverPay'
 import { driverForTruck } from '@/lib/assignments'
-import { ORPHAN_UNITS_BY_GROUP, orphanTruckId, combinedPayDriverId, isCombinedPayDriverId } from '@/lib/fleetGroups'
+import { ORPHAN_UNITS_BY_GROUP, truckInFleet, orphanTruckId, combinedPayDriverId, isCombinedPayDriverId } from '@/lib/fleetGroups'
 import { useCurrentInsurance } from './useCurrentInsurance'
 import { isPosted } from '@/lib/invoiceStatus'
 import { withResolvedTruckIds } from '@/lib/fuelTruckResolve'
@@ -71,7 +71,7 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
     //    (retired) trucks stay: they own their historical months, and retirement has
     //    no date. Stop a retired truck's costs by ending its RecurringExpenses.
     const equipMembers: MemberTruck[] = equipment
-      .filter((e) => e.type === 'truck' && e.fleetGroup === group)
+      .filter((e) => e.type === 'truck' && truckInFleet(e.fleetGroup, group))
       .map((e) => ({
         truckId:      e.id,
         unitNumber:   e.unitNumber,

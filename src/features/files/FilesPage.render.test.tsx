@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen, fireEvent as rawFireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { Driver } from '@/types'
+import { SEED_DIVISIONS } from '@/lib/ownership'
 import type { Equipment } from '@/types/equipment'
 
 // jsdom implements neither of these; Radix (used by the Sheet) needs both.
@@ -89,6 +90,8 @@ vi.mock('@/lib/apiClient', () => ({
   ]),
   uploadDriverPhoto: vi.fn(),
   deleteDriverPhoto: vi.fn(),
+  // The Type column names come from the ownership divisions; BOX_TRUCK is renamed here to prove it.
+  listOwnershipDivisions: vi.fn().mockResolvedValue(SEED_DIVISIONS.map((d) => (d.id === 'BOX_TRUCK' ? { ...d, name: 'Box Rigs' } : d))),
 }))
 
 const inactiveDriver: Driver = {
@@ -155,6 +158,13 @@ describe('Files hub renders', () => {
     await renderIn(<FilesPage />)
     // Stored lowercase in the fixture — proves formatVin is applied at the display site.
     expect(screen.getByText('1FUJGLD55LLAA3391')).toBeTruthy()
+  })
+
+  it('names the Type column and its search after the driver\'s division, not a hard-coded label', async () => {
+    await renderIn(<FilesPage />)
+    await fireEvent.click(screen.getByText('Drivers'))
+    expect(screen.getAllByText('Box Rigs').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Box Truck')).toBeNull()
   })
 
   it('shows each driver\'s email in the list', async () => {
