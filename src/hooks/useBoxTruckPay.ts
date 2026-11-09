@@ -18,6 +18,7 @@ import { compareByOrder } from '@/lib/calendarOrder'
 import { periodEnd, shiftPeriod } from '@/lib/biweekly'
 import type { Driver, Load } from '@/types'
 import { errorText } from '@/lib/errorText'
+import { boxTruckSettlementMembers } from '@/lib/boxTruckSettlement'
 
 export type { BoxTruckTrip, DriverPaySetting, DriverPayDeduction, DriverPayCredit, DriverPayCreditInput, FixedExpense, FuelTransaction }
 export { normalizeCard }
@@ -109,12 +110,8 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
   }, [loads, brokerIds, periodStart, end])
 
   const rows = useMemo<BoxTruckPayRow[]>(() => {
-    const driverById = new Map(drivers.map((d) => [d.id, d]))
-    return settings
-      .filter((s) => s.payGroup === 'BOX_TRUCK' && s.active !== false)
-      .map((setting): BoxTruckPayRow | null => {
-        const driver = driverById.get(setting.driverId)
-        if (!driver || brokerIds.has(driver.id)) return null
+    return boxTruckSettlementMembers(settings, drivers)
+      .map(({ setting, driver }): BoxTruckPayRow => {
 
         const driverTrips = trips
           .filter((t) => t.driverId === setting.driverId && t.periodStart === periodStart)
@@ -167,9 +164,8 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
 
         return { driver, setting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, pendingCredits, debits: driverDebits, fixedDebits, statement, unpulledLoadCount }
       })
-      .filter((r): r is BoxTruckPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
-  }, [settings, drivers, brokerIds, deliveredLoadsFor, trips, deductions, credits, fuelTxs, periodStart, end])
+  }, [settings, drivers, deliveredLoadsFor, trips, deductions, credits, fuelTxs, periodStart, end])
 
   const tripCount = useMemo(() => trips.filter((t) => t.periodStart === periodStart).length, [trips, periodStart])
 

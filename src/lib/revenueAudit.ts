@@ -3,7 +3,7 @@
 // so the buckets here always reconcile with the P&L "Revenue" number.
 import type { Equipment, FleetGroup } from '@/types/equipment'
 import type { Load, Driver } from '@/types'
-import { ORPHAN_UNITS_BY_GROUP, orphanTruckId } from './fleetGroups'
+import { ORPHAN_UNITS_BY_GROUP, orphanTruckId, truckInFleet } from './fleetGroups'
 import type { DateRange } from './fleetProfitability'
 
 export type AuditBucket =
@@ -52,7 +52,7 @@ export function auditFleetRevenue(params: {
   // ── Members of THIS fleet — same rule as useFleetProfitability ────────────────
   const memberIds = new Set<string>()
   for (const e of equipment) {
-    if (e.type === 'truck' && e.fleetGroup === group) memberIds.add(e.id)
+    if (e.type === 'truck' && truckInFleet(e.fleetGroup, group)) memberIds.add(e.id)
   }
   const equipTruckUnits = new Set(equipment.filter((e) => e.type === 'truck').map((e) => e.unitNumber))
   for (const unit of ORPHAN_UNITS_BY_GROUP[group] ?? []) {

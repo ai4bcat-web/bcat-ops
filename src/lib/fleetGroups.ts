@@ -27,6 +27,14 @@ export interface DriverTypeOption {
   label: string
 }
 
+/**
+ * Does a truck whose Equipment.fleetGroup is `truckFleet` belong to the `group` view? The Ivan LOCAL view
+ * includes the BOX_TRUCK truck (unit 3890): the box truck rides inside the LOCAL P&L, PM list and fixed-cost
+ * split — the same rule drivers already follow (a BOX_TRUCK driver counts as LOCAL). The BOX_TRUCK view is its own.
+ */
+export const truckInFleet = (truckFleet: string | null | undefined, group: FleetGroup): boolean =>
+  truckFleet === group || (group === 'LOCAL' && truckFleet === 'BOX_TRUCK')
+
 /** Legacy fleet value that means the owner-operator type (see driverOwnershipKind). */
 const LEGACY_DRIVER_TYPE_ALIAS: Record<string, string> = { AMAZON: 'OWNER_OPERATOR' }
 

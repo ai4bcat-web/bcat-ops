@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { truckInFleet } from '@/lib/fleetGroups'
 import { Link } from 'react-router-dom'
 import { Gauge, ChevronRight, Pencil } from 'lucide-react'
 import { TmsButton } from '@/features/tms/kit/TmsButton'
@@ -61,7 +62,7 @@ export function PmDueWidget() {
 
   const rows = useMemo<PmRow[]>(() => {
     return equipment
-      .filter((e) => e.type === 'truck' && e.active !== false && e.fleetGroup === 'LOCAL')
+      .filter((e) => e.type === 'truck' && e.active !== false && truckInFleet(e.fleetGroup, 'LOCAL'))
       .map((truck) => {
         // Current odometer is ALWAYS the Motive reading — never a manual/fuel value.
         const motive = locByTruck.get(truck.id)?.odometer

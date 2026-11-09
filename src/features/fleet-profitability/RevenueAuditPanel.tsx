@@ -8,6 +8,7 @@ import { auditFleetRevenue, type AuditBucket, type RevenueAudit } from '@/lib/re
 import type { DateRange } from '@/lib/fleetProfitability'
 import type { FleetGroup } from '@/types/equipment'
 import { useDriverTypes } from '@/hooks/useDriverTypes'
+import { truckInFleet } from '@/lib/fleetGroups'
 
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -97,7 +98,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
   // loads actually land in this fleet's revenue). Sorted by unit number.
   const fleetTrucks = useMemo(
     () => equipment
-      .filter((e) => e.type === 'truck' && e.fleetGroup === group)
+      .filter((e) => e.type === 'truck' && truckInFleet(e.fleetGroup, group))
       .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })),
     [equipment, group],
   )
