@@ -245,10 +245,14 @@ describe('buildNavSections', () => {
           createElement(TmsShell, { pinned, sections, activePath: path, breadcrumb: [{ label: 'Carriers' }], user: { initial: 'R', email: 'r@x.test' } }, createElement('div')),
         ),
       )
-      const row = screen.getByRole('link', { name: /^Carriers$/ })
-      expect(row, path).toHaveAttribute('href', '/tms/carriers')
-      expect(row, path).toHaveClass('tms-active')
-      expect(screen.getByRole('link', { name: /^Customers$/ })).not.toHaveClass('tms-active')
+      // The sidebar lists the sub-page and the tab strip repeats it: both lit, both linking straight to the Carrier list.
+      const rows = screen.getAllByRole('link', { name: /^Carriers$/ })
+      expect(rows.length, path).toBeGreaterThanOrEqual(1)
+      for (const row of rows) {
+        expect(row, path).toHaveAttribute('href', '/tms/carriers')
+        expect(row, path).toHaveClass('tms-active')
+      }
+      for (const customers of screen.getAllByRole('link', { name: /^Customers$/ })) expect(customers).not.toHaveClass('tms-active')
       view.unmount()
     }
   })

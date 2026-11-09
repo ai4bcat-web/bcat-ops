@@ -43,6 +43,8 @@ export interface DenseColumn<T> {
   numberUnit?: string
   /** A fixed pixel width instead of auto-fit (icon and action columns). */
   width?: number
+  /** Room for a chip drawn beside the text (tracking pill, Not linked badge): added to the auto-fit width. */
+  extraPx?: number
   /** A fixed column cannot be reordered, resized or hidden from the chooser. */
   fixed?: boolean
   /** The Columns dialog's section for this field (Shipment, Order, Carrier, ...). */
@@ -202,16 +204,40 @@ export function defaultColumnWidth<T>(col: DenseColumn<T>, font?: string): numbe
   return headerDefaultWidth(col.header, { sortable: col.sortable !== false, filterable: filterKindOf(col) != null }, font)
 }
 
-/** Effective pixel width per column: the user's saved width, else the header-measured default. */
+/** Capital letters are about this much wider than the mixed-case text the fit is measured for. */
+export const CAPS_WIDTH_FACTOR = 1.2
+const FIT_PX_PER_CHAR = 7.4
+const FIT_PADDING_PX = 30
+const FIT_MAX_PX = 520
+const FIT_SAMPLE_ROWS = 800
+
+/** Width that shows the longest value in the column (or its header) in full: by character count over the first rows, capped. */
+export function autoFitWidth<T>(col: DenseColumn<T>, rows: readonly T[], headerWidth: number, factor = 1): number {
+  let longest = 0
+  const n = Math.min(rows.length, FIT_SAMPLE_ROWS)
+  for (let i = 0; i < n; i += 1) {
+    const len = (col.text(rows[i]) ?? '').length
+    if (len > longest) longest = len
+  }
+  const fit = Math.round(longest * FIT_PX_PER_CHAR * factor + FIT_PADDING_PX + (col.extraPx ?? 0))
+  return clampWidth(Math.min(FIT_MAX_PX, Math.max(headerWidth, fit)))
+}
+
+/**
+ * Effective pixel width per column: a fixed `width`, else the user's saved width, else the width that shows the whole text
+ * of the column (never narrower than its header).
+ */
 export function columnWidths<T>(
   columns: readonly DenseColumn<T>[],
   userWidths: Record<string, number>,
+  rows: readonly T[] = [],
+  factor = 1,
 ): Record<string, number> {
   const out: Record<string, number> = {}
   const font = headerFont()
   for (const col of columns) {
     const user = userWidths[col.key]
-    out[col.key] = col.width != null ? col.width : user != null ? clampWidth(user) : defaultColumnWidth(col, font)
+    out[col.key] = col.width != null ? col.width : user != null ? clampWidth(user) : autoFitWidth(col, rows, defaultColumnWidth(col, font) * (factor > 1 ? 1.1 : 1), factor)
   }
   return out
 }
