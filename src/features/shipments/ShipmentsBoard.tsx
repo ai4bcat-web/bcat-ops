@@ -8,6 +8,7 @@
  * A single pane handles the normal view. Split Screen renders two independent panes,
  * each with its own list (Active, All or Voided), filters and selection.
  */
+import { CurrentlyViewing } from './components/CurrentlyViewing'
 import { deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
 import { phaseInputOfRow } from './deliveryPhaseInputs'
 import './deliveryTimeline.css'
@@ -1101,6 +1102,7 @@ function BoardPane({
         <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
       </div>
       <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+      <CurrentlyViewing rows={allRows} onOpen={(id) => setOpenDrawerId(id)} onChanged={handleRefresh} />
       {isOwner && selectedIds.length > 0 && (
         <div className="tms-dense-bar" data-testid="delete-selected-bar">
           <TmsButton size="sm" variant="destructive" data-testid="delete-selected" onClick={() => setDeleteTargets(selectedRows.map((r) => ({ id: r.id, number: r.number })))}>

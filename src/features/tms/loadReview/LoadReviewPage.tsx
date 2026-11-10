@@ -58,8 +58,8 @@ export function LoadReviewPage() {
       { key: 'lane', header: 'Lane', group: 'Shipment', text: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
       { key: 'delivered', header: 'Delivered', group: 'Shipment', text: ({ row }) => formatDateTime(row.deliveredAt), sortValue: ({ row }) => row.deliveredAt ?? '' },
       { key: 'age', header: 'In review', group: 'Review', text: ({ row }) => { const age = reviewAgeDays(row, now); return age == null ? 'POD before delivery' : `${age} d` }, extraPx: 24, sortValue: ({ row }) => reviewAgeDays(row, now) ?? -1 },
-      { key: 'rep', header: 'Sales rep', group: 'Review', text: ({ row }) => row.salesRepName ?? row.salesRepId ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.salesRepName ?? row.salesRepId) },
-      { key: 'division', header: 'Division', group: 'Review', text: ({ row }) => row.revDivision ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.revDivision) },
+      { key: 'rep', header: 'Sales rep', group: 'Review', text: ({ row }) => row.salesRepName ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.salesRepName) },
+      { key: 'division', header: 'Division', group: 'Review', text: ({ row }) => row.revDivision?.replace(/_/g, ' ') ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.revDivision?.replace(/_/g, ' ')) },
       { key: 'checks', header: 'Checks (preliminary)', group: 'Checks', text: (e) => (!e.verdict ? '' : failedOf(e) === 0 ? `All ${LOAD_REVIEW_CHECKS.length} passed` : `${failedOf(e)} to fix`), extraPx: 24 },
       ...LOAD_REVIEW_CHECKS.map((key): DenseColumn<ReviewEntry> => ({ key: `check-${key}`, header: LOAD_REVIEW_CHECK_LABEL[key], group: 'Checks', text: (e) => (!e.verdict ? '' : e.verdict.checks[key].ok ? 'Pass' : 'Fix'), extraPx: 40, filter: 'multi', optionsOf: (e) => (e.verdict ? [{ value: e.verdict.checks[key].ok ? 'Pass' : 'Fix', label: e.verdict.checks[key].ok ? 'Pass' : 'Fix' }] : []), fixedOptions: [{ value: 'Pass', label: 'Pass' }, { value: 'Fix', label: 'Fix' }] })),
       { key: 'revenue', header: 'Revenue', group: 'Review', text: ({ row }) => formatCents(row.orderRevenueCents ?? row.revenueCents ?? 0), align: 'right', sortValue: ({ row }) => row.orderRevenueCents ?? row.revenueCents ?? 0 },
@@ -168,8 +168,8 @@ export function LoadReviewPage() {
     { key: 'lane', header: 'Lane', render: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
     { key: 'delivered', header: 'Delivered', render: ({ row }) => formatDateTime(row.deliveredAt) },
     { key: 'age', header: 'In review', render: ({ row }) => { const age = reviewAgeDays(row, now); return <TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'POD before delivery' : `${age} d`}</TmsBadge> } },
-    { key: 'rep', header: 'Sales rep', render: ({ row }) => row.salesRepName ?? row.salesRepId ?? '—' },
-    { key: 'division', header: 'Division', render: ({ row }) => row.revDivision ?? '—' },
+    { key: 'rep', header: 'Sales rep', render: ({ row }) => row.salesRepName ?? '—' },
+    { key: 'division', header: 'Division', render: ({ row }) => row.revDivision?.replace(/_/g, ' ') ?? '—' },
     // One column per check, each a clear pass (check mark) or fail (cross) with its reason on hover, plus a result column up front:
     // "All passed" or how many need fixing.
     { key: 'checks', header: 'Checks (preliminary)', render: ({ verdict }) => {

@@ -2,7 +2,7 @@
  * The bottom action bar (feedback 19): always visible under the form, 48 px, card background, top
  * border. Left: status chip, "Last saved X ago" / "Unsaved changes", and "N / M required" (click
  * scrolls the rail checklist into view and focuses the first missing row). Right: Cancel, Save draft,
- * Create shipment (create); Save changes, Submit order, Discard (edit). Keeps the old rail test ids.
+ * Create shipment (create); Save changes, Save & exit, Submit order, Discard (edit). Keeps the old rail test ids.
  */
 import { TmsBadge, TmsButton } from '@/features/tms/kit'
 import { saveStateText } from './saveState'
@@ -21,10 +21,12 @@ export interface ActionBarProps {
   busy: boolean
   voided: boolean
   onRun: (kind: RunKind) => void
+  /** Edit mode: save, then release the lock and leave. A plain Save keeps the lock. */
+  onSaveExit?: () => void
   onDiscard: () => void
 }
 
-export function ActionBar({ createMode, status, dirty, savedAt, done, total, ready, busy, voided, onRun, onDiscard }: ActionBarProps) {
+export function ActionBar({ createMode, status, dirty, savedAt, done, total, ready, busy, voided, onRun, onSaveExit, onDiscard }: ActionBarProps) {
   const isDraft = status === 'NEW' || status === 'DRAFT'
   const [nowMs, setNowMs] = useState(() => Date.now())
   useEffect(() => {
@@ -65,6 +67,14 @@ export function ActionBar({ createMode, status, dirty, savedAt, done, total, rea
         >
           {createMode ? 'Create shipment' : 'Save changes'}
         </TmsButton>
+        {!createMode && onSaveExit ? (
+          <TmsButton
+            size="sm" variant="primary" data-testid="ship-form-save-exit" disabled={busy || voided} onClick={onSaveExit}
+            title="Saves, lets go of the edit lock right away and returns to Shipments"
+          >
+            Save &amp; exit
+          </TmsButton>
+        ) : null}
       </div>
     </div>
   )

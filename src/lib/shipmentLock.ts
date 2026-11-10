@@ -11,3 +11,11 @@ export function lockHeldByOther(row: LockFields | null | undefined, me: string |
   if (me && row.editLockUserId.toLowerCase() === me.toLowerCase()) return null
   return { by: row.editLockUserName || row.editLockUserId, until: row.editLockExpiresAt }
 }
+
+/** Whoever holds a live lock on this row (me included), or null when it is free or expired. */
+export function liveLockOf(row: LockFields | null | undefined, nowMs: number): { userId: string; by: string; until: string } | null {
+  if (!row?.editLockUserId || !row.editLockExpiresAt) return null
+  const until = Date.parse(row.editLockExpiresAt)
+  if (!Number.isFinite(until) || until <= nowMs) return null
+  return { userId: row.editLockUserId, by: row.editLockUserName || row.editLockUserId, until: row.editLockExpiresAt }
+}

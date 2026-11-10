@@ -155,7 +155,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     onBlocked: (issues) => { if (issues[0]) focusField(issues[0].fieldKey) },
   })
   const { values, update, getValues, bundle, mode, busy: pipelineBusy } = form
-  const { heldBy } = useShipmentLock(bundle?.shipment.id)
+  const { heldBy, release } = useShipmentLock(bundle?.shipment.id)
   useRequiredEmptyMarks(values)
 
   // Pre-fill once, when the intake row and the customer directory have both arrived.
@@ -256,12 +256,20 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   }, [form.issues])
 
   const togglePanel = useCallback(() => setPanelOpen((o) => !o), [])
-  const leave = useCallback(() => navigate(bundle ? `${NEW_PATH}/${bundle.shipment.id}` : NEW_PATH), [navigate, bundle])
+  // Leaving on purpose (Discard) lets go of the edit lock; a plain Save does not, so the shipment stays under Currently viewing.
+  const leave = useCallback(() => { void release(); navigate(bundle ? `${NEW_PATH}/${bundle.shipment.id}` : NEW_PATH) }, [navigate, bundle, release])
   const cancel = useCallback(() => {
     if (form.dirty) { setConfirmCancel(true); return }
     leave()
   }, [form.dirty, leave])
   const onRun = useCallback((kind: RunKind) => { void run(kind) }, [run])
+  // Save, then let go of the lock right away and go back to the list. A save that fails or is blocked stays on the form with its lock.
+  const onSaveExit = useCallback(async () => {
+    const saved = await run(isDraftStatus ? 'draft' : 'save')
+    if (!saved) return
+    await release()
+    navigate(NEW_PATH)
+  }, [run, isDraftStatus, release, navigate])
 
   useEffect(() => {
     if (!form.dirty || !bundle) return
@@ -380,7 +388,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
 
       <ActionBar
         createMode={mode === 'create'} status={status} dirty={form.dirty} savedAt={bundle?.shipment.updatedAt ?? form.savedAt}
-        done={progress.done} total={progress.total} ready={progress.ready} busy={busy} voided={voided} onRun={onRun} onDiscard={cancel}
+        done={progress.done} total={progress.total} ready={progress.ready} busy={busy} voided={voided} onRun={onRun} onSaveExit={() => { void onSaveExit() }} onDiscard={cancel}
       />
 
       {dialogs}
