@@ -138,15 +138,6 @@ function hexBg(hex: string, alpha: number): string {
 // ── Day entry type ────────────────────────────────────────────────────────────
 type Role = 'pickup' | 'delivery' | 'same-day'
 
-/** Built, not yet on the truck: nobody has arrived at the pickup and the load has not moved past dispatch. */
-function awaitingPickup(load: Load): boolean {
-  if (isLoadCanceled(load)) return false
-  const status = load.status ?? null
-  if (status !== null && !['SOURCING', 'BOOKED', 'PLANNED', 'DISPATCHED'].includes(status)) return false
-  const pickup = getStops(load).find((s) => s.type === 'pickup')
-  return !pickup?.arrivedAt && !pickup?.departedAt
-}
-
 interface DayEntry {
   load: Load
   role: Role
@@ -919,15 +910,12 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
       map.get(dayStr)!.push(entry)
     }
 
-    const today = chicagoDateStr(new Date().toISOString())
     for (const l of loads) {
         if (l.unscheduled) continue  // orphans live in the Unscheduled section, not on a day
         const puDay = chicagoDateStr(l.pickupAppt)
         if (!puDay) continue  // no usable pickup date: it is on the Unscheduled strip (see unscheduledEntries), never dropped
         const deDay = chicagoDateStr(l.deliveryAppt) ?? puDay
         const isMultiDay = puDay !== deDay
-        // A built load nobody has picked up yet whose pickup day has passed is still work for today: it also shows on today.
-        if (today && puDay < today && awaitingPickup(l)) add(today, { load: l, role: 'pickup', key: `${l.id}:pickup-overdue` })
 
         if (isMultiDay) {
           add(puDay, { load: l, role: 'pickup',   key: `${l.id}:pickup` })

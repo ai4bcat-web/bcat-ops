@@ -183,33 +183,24 @@ describe('PlannerView and a voided shipment', () => {
 describe('PlannerView always shows a built shipment', () => {
   const drivers = [{ id: 'd1', name: 'Zak Pace' }] as never
 
-  it('a built load nobody has picked up, whose pickup day has passed, shows on today as well as its delivery day', () => {
+  it('a load shows only on its own pickup and delivery days, never carried onto today', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-11-10T17:00:00.000Z'))
     try {
       const weekStart = new Date('2026-11-09T00:00:00-06:00')
-      const load = batoryLoad({
-        id: 'l9', aljexId: 'LATE-PU', status: 'SOURCING',
+      const old = batoryLoad({
+        id: 'l9', aljexId: 'OLD-OPEN', status: 'SOURCING',
+        pickupAppt: '2026-08-27T13:00:00.000Z', deliveryAppt: '2026-08-27T15:00:00.000Z',
+        stops: [pickupStop({ appt: '2026-08-27T13:00:00.000Z' }), deliveryStop({ appt: '2026-08-27T15:00:00.000Z', apptType: 'exact' })],
+      } as unknown as Partial<Load>)
+      const midWeek = batoryLoad({
+        id: 'l10', aljexId: 'SPANNING', status: 'SOURCING',
         pickupAppt: '2026-11-09T13:00:00.000Z', deliveryAppt: '2026-11-16T23:00:00.000Z',
         stops: [pickupStop({ appt: '2026-11-09T13:00:00.000Z' }), deliveryStop({ appt: '2026-11-16T23:00:00.000Z', apptType: 'exact' })],
       } as unknown as Partial<Load>)
-      render(<PlannerView loads={[load]} drivers={drivers} weekStart={weekStart} days={[new Date('2026-11-10T00:00:00-06:00')]} />)
-      expect(screen.getByText('LATE-PU')).toBeTruthy()
-    } finally { vi.useRealTimers() }
-  })
-
-  it('a load already on the truck is not repeated on today', () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-11-10T17:00:00.000Z'))
-    try {
-      const weekStart = new Date('2026-11-09T00:00:00-06:00')
-      const load = batoryLoad({
-        id: 'l10', aljexId: 'ON-TRUCK', status: 'IN_TRANSIT',
-        pickupAppt: '2026-11-09T13:00:00.000Z', deliveryAppt: '2026-11-16T23:00:00.000Z',
-        stops: [pickupStop({ appt: '2026-11-09T13:00:00.000Z', arrivedAt: '2026-11-09T13:05:00.000Z' }), deliveryStop({ appt: '2026-11-16T23:00:00.000Z', apptType: 'exact' })],
-      } as unknown as Partial<Load>)
-      render(<PlannerView loads={[load]} drivers={drivers} weekStart={weekStart} days={[new Date('2026-11-10T00:00:00-06:00')]} />)
-      expect(screen.queryByText('ON-TRUCK')).toBeNull()
+      render(<PlannerView loads={[old, midWeek]} drivers={drivers} weekStart={weekStart} days={[new Date('2026-11-10T00:00:00-06:00')]} />)
+      expect(screen.queryByText('OLD-OPEN')).toBeNull()
+      expect(screen.queryByText('SPANNING')).toBeNull()
     } finally { vi.useRealTimers() }
   })
 
