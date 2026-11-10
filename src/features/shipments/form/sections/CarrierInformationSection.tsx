@@ -24,7 +24,7 @@ import { US_STATES } from '../constants'
 import { LABEL } from '../labels'
 import { activeLoadCarrier, isCustomerDefaultDivision, isLocked, liveCarriers, lockReason } from '../model'
 import type { SliceSectionProps } from '../sectionRegistry'
-import { Field, FieldGrid } from '../fieldGrid'
+import { ColGroup, ColGroups, Field, FieldGrid } from '../fieldGrid'
 import { validateCarrierAdd } from '@/lib/carrierLegs'
 import { fieldAttrs } from './fieldAttrs'
 import { FindInvite } from './carrier/FindInvite'
@@ -329,22 +329,24 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
         {coverBlock && <span className="tms-muted text-xs" data-testid={x('carrier-cover-reason')}>{coverBlock}</span>}
       </div>
 
-      <FieldGrid>
-        <Field span={4} narrow={12} label={LABEL.carrier.dispatcher.text}>
+      <ColGroups testId={x('carrier-cols')}>
+        <ColGroup title="Dispatch & drivers">
+          <FieldGrid>
+        <Field span={12} label={LABEL.carrier.dispatcher.text}>
           <TmsInput {...fa(LABEL.carrier.dispatcher)} value={value.dispatcher.name} disabled={disabled || own}
             onChange={(e) => setBits('dispatcher', { name: e.target.value })} />
         </Field>
-        <Field span={4} narrow={6} label={LABEL.carrier.dispatcherPhone.text}>
+        <Field span={6} label={LABEL.carrier.dispatcherPhone.text}>
           <TmsInput {...fa(LABEL.carrier.dispatcherPhone)} type="tel" value={value.dispatcher.phone} disabled={disabled || own}
             onChange={(e) => setBits('dispatcher', { phone: e.target.value })} />
         </Field>
-        <Field span={4} narrow={6} label={LABEL.carrier.dispatcherEmail.text}>
+        <Field span={6} label={LABEL.carrier.dispatcherEmail.text}>
           <TmsInput {...fa(LABEL.carrier.dispatcherEmail)} type="email" value={value.dispatcher.email} disabled={disabled || own}
             onChange={(e) => setBits('dispatcher', { email: e.target.value })} />
         </Field>
 
         {own ? (
-          <Field span={4} narrow={12} label={LABEL.carrier.driver1.text} info="One driver per Ivan Cartage load">
+          <Field span={12} label={LABEL.carrier.driver1.text} info="One driver per Ivan Cartage load">
             <OwnFleetDriverPicker
               roster={roster}
               value={ownFleetDriverByName(roster, value.driver1.name)?.id ?? ''}
@@ -366,58 +368,62 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
             {!saved && !isCustomerDefaultDivision(draft, ctx.customer) && <p className="tms-muted text-xs">The selected revenue division is retained; assigning a driver does not override a manual tag.</p>}
           </Field>
         ) : (
-          <Field span={4} narrow={12} label={LABEL.carrier.driver1.text}>
+          <Field span={12} label={LABEL.carrier.driver1.text}>
             <TmsInput {...fa(LABEL.carrier.driver1)} value={value.driver1.name} disabled={disabled} readOnly={typedLock}
               onChange={(e) => setBits('driver1', { name: e.target.value })} />
           </Field>
         )}
-        <Field span={4} narrow={6} label={LABEL.carrier.driver1Cell.text}>
+        <Field span={6} label={LABEL.carrier.driver1Cell.text}>
           <TmsInput {...fa(LABEL.carrier.driver1Cell)} type="tel" value={value.driver1.phone} disabled={disabled} readOnly={typedLock}
             onChange={(e) => setBits('driver1', { phone: e.target.value })} />
         </Field>
-        <Field span={4} narrow={6} label={LABEL.carrier.driver1Email.text}>
+        <Field span={6} label={LABEL.carrier.driver1Email.text}>
           <TmsInput {...fa(LABEL.carrier.driver1Email)} type="email" value={value.driver1.email} disabled={disabled} readOnly={own}
             onChange={(e) => setBits('driver1', { email: e.target.value })} />
         </Field>
 
         {!own && (
           <>
-            <Field span={4} narrow={12} label={LABEL.carrier.driver2.text}>
+            <Field span={12} label={LABEL.carrier.driver2.text}>
               <TmsInput {...fa(LABEL.carrier.driver2)} value={value.driver2.name} disabled={disabled} readOnly={typedLock}
                 onChange={(e) => setBits('driver2', { name: e.target.value })} />
             </Field>
-            <Field span={4} narrow={6} label={LABEL.carrier.driver2Cell.text}>
+            <Field span={6} label={LABEL.carrier.driver2Cell.text}>
               <TmsInput {...fa(LABEL.carrier.driver2Cell)} type="tel" value={value.driver2.phone} disabled={disabled} readOnly={typedLock}
                 onChange={(e) => setBits('driver2', { phone: e.target.value })} />
             </Field>
-            <Field span={4} narrow={6} label={LABEL.carrier.driver2Email.text}>
+            <Field span={6} label={LABEL.carrier.driver2Email.text}>
               <TmsInput {...fa(LABEL.carrier.driver2Email)} type="email" value={value.driver2.email} disabled={disabled}
                 onChange={(e) => setBits('driver2', { email: e.target.value })} />
             </Field>
           </>
         )}
 
-        <Field span={3} label={LABEL.carrier.truckNo.text}>
+          </FieldGrid>
+        </ColGroup>
+        <ColGroup title="Equipment & trip">
+          <FieldGrid>
+        <Field span={6} label={LABEL.carrier.truckNo.text}>
           <TmsInput {...fa(LABEL.carrier.truckNo)} maxLength={40} value={value.truckNo} disabled={disabled} readOnly={typedLock}
             onChange={(e) => set({ truckNo: e.target.value })} />
         </Field>
-        <Field span={3} label={LABEL.carrier.trailerNo.text}>
+        <Field span={6} label={LABEL.carrier.trailerNo.text}>
           <TmsInput {...fa(LABEL.carrier.trailerNo)} maxLength={40} value={value.trailerNo} disabled={disabled} readOnly={typedLock}
             onChange={(e) => set({ trailerNo: e.target.value })} />
         </Field>
-        <Field span={3} label={LABEL.carrier.seal.text}>
+        <Field span={6} label={LABEL.carrier.seal.text}>
           <TmsInput {...fa(LABEL.carrier.seal)} maxLength={40} value={value.seal} disabled={disabled}
             onChange={(e) => set({ seal: e.target.value })} />
         </Field>
-        <Field span={3} label={LABEL.carrier.carrierRef.text}>
+        <Field span={6} label={LABEL.carrier.carrierRef.text}>
           <TmsInput {...fa(LABEL.carrier.carrierRef)} maxLength={40} value={value.carrierRef} disabled={disabled}
             onChange={(e) => set({ carrierRef: e.target.value })} />
         </Field>
-        <Field span={3} label={LABEL.carrier.originCity.text}>
+        <Field span={6} label={LABEL.carrier.originCity.text}>
           <TmsInput {...fa(LABEL.carrier.originCity)} value={value.originCity} disabled={disabled}
             onChange={(e) => set({ originCity: e.target.value })} />
         </Field>
-        <Field span={3} label={LABEL.carrier.originState.text}>
+        <Field span={6} label={LABEL.carrier.originState.text}>
           <TmsSelect
             {...fa(LABEL.carrier.originState)}
             value={value.originState}
@@ -427,15 +433,17 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
             options={US_STATES.map((s) => ({ value: s, label: s }))}
           />
         </Field>
-        <Field span={3} label={LABEL.carrier.emptyMiles.text}>
+        <Field span={6} label={LABEL.carrier.emptyMiles.text}>
           <TmsInput {...fa(LABEL.carrier.emptyMiles)} type="number" min={0} value={value.emptyMiles} disabled={disabled}
             onChange={(e) => set({ emptyMiles: e.target.value })} />
         </Field>
-        <Field span={3} label={LABEL.carrier.puEta.text}>
+        <Field span={6} label={LABEL.carrier.puEta.text}>
           <TmsInput {...fa(LABEL.carrier.puEta)} type="datetime-local" value={value.puEta} disabled={disabled}
             onChange={(e) => set({ puEta: e.target.value })} />
         </Field>
-      </FieldGrid>
+          </FieldGrid>
+        </ColGroup>
+      </ColGroups>
 
       <FieldGrid>
         <Static tag={tag} def={LABEL.carrier.confirmSent} narrow={12} text={dash(active?.rateConSentAt)} />

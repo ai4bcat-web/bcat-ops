@@ -19,7 +19,7 @@ import { LABEL, labelFor, type LabelDef } from '../labels'
 import { FromEmailContext } from '../fromEmail'
 import type { FormStop } from '../model'
 import type { FormCtx } from '../sectionProps'
-import { FieldGrid } from '../fieldGrid'
+import { ColGroup, ColGroups, FieldGrid } from '../fieldGrid'
 import { LField } from '../sections/formControls'
 import { type StopKey, ctl, digitsOnly, disabledState, issueFor, maskPhone, stopDef, stopPatchFromLocation } from '../sections/fieldUtil'
 import { pushRecent, rankWithRecents, readRecents, recentFirst } from './recents'
@@ -119,13 +119,13 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
     onChange: (e: { target: { value: string } }) => onChange({ [key]: clean(e.target.value) } as Partial<FormStop>),
   })
   const dtField = (def: LabelDef, key: 'ready' | 'appt' | 'mustDeliver', req?: boolean) => (
-    <LField span={3} def={def} required={req} error={err(def)}>
+    <LField span={6} def={def} required={req} error={err(def)}>
       <TmsInput {...ctl(def)} type="datetime-local" value={stop[key]} disabled={base.disabled} onChange={(e) => onChange({ [key]: e.target.value } as Partial<FormStop>)} />
     </LField>
   )
 
   const numField = (key: 'pieces' | 'weightLbs', testPart: 'pieces' | 'weight') => (
-    <LField span={3} def={LABEL.stop[key]}>
+    <LField span={6} def={LABEL.stop[key]}>
       <TmsInput
         inputMode="numeric" aria-label={`${LABEL.stop[key].text} (stop ${index + 1})`} data-testid={`f-picks-${testPart}-${index}`}
         value={stop[key]} disabled={base.disabled} onChange={(e) => onChange({ [key]: digitsOnly(e.target.value) } as Partial<FormStop>)}
@@ -162,71 +162,80 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
         </TmsIconButton>
       </div>
 
-      <FieldGrid>
-      <LField span={12} def={nameDef} required={first} error={err(nameDef)}>
-        <div className="ship-name-row">
-          <Typeahead
-            inputTestId={nameDef.testId} optionTestId={`${nameDef.testId}-option`} ariaLabel={labelFor(nameDef)}
-            placeholder="Search locations…" value={stop.name} onValueChange={typeName} items={items} onPick={choose}
-            disabled={placeLocked} title={stopLock} onFocus={() => ensureLocations?.()}
-            addRow={stop.name.trim().length >= 2 && items.length === 0 && !placeLocked ? { label: `+ Add ${stop.name.trim()} as a new location`, testId: `f-${prefix}-addRow`, onAdd: () => setAdding(draftFromStop(stop)) } : null}
-          />
-          <TmsIconButton aria-label={`Add location (${nameDef.text})`} data-testid={`f-${prefix}-addLocation`} disabled={placeLocked} onClick={() => setAdding(draftFromStop(stop))}>
-            <Pencil size={13} />
-          </TmsIconButton>
-        </div>
-      </LField>
-      </FieldGrid>
-
-      {!editAddr && !addressIssue ? (
-        <div className="tms-card-addr-line">
-          <span data-testid={`f-${prefix}-addressLine`}>{line || 'No address yet'}</span>
-          <button type="button" className="ship-link" data-testid={`f-${prefix}-editAddress`} disabled={base.disabled} onClick={() => setEditAddr(true)}>Edit address</button>
-        </div>
-      ) : (
+      <ColGroups testId={`stop-${prefix}-cols`}>
+        <ColGroup title="Location & contact">
         <FieldGrid>
-          <LField span={6} def={d('address1')}><TmsInput {...txt('address1')} /></LField>
-          <LField span={6} def={d('address2')}><TmsInput {...txt('address2')} /></LField>
-          <LField span={6} narrow={12} def={d('city')} error={err(d('city'))}><TmsInput {...txt('city')} /></LField>
-          <LField span={2} narrow={6} def={d('state')} error={err(d('state'))}>
-            <TmsSelect {...ctl(d('state'))} value={stop.state} disabled={base.disabled} onChange={(e) => onChange({ state: e.target.value })}>
-              <option value="" />
-              {stop.state && !(US_STATES as readonly string[]).includes(stop.state) && <option value={stop.state}>{stop.state}</option>}
-              {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </TmsSelect>
+        <LField span={12} def={nameDef} required={first} error={err(nameDef)}>
+          <div className="ship-name-row">
+            <Typeahead
+              inputTestId={nameDef.testId} optionTestId={`${nameDef.testId}-option`} ariaLabel={labelFor(nameDef)}
+              placeholder="Search locations…" value={stop.name} onValueChange={typeName} items={items} onPick={choose}
+              disabled={placeLocked} title={stopLock} onFocus={() => ensureLocations?.()}
+              addRow={stop.name.trim().length >= 2 && items.length === 0 && !placeLocked ? { label: `+ Add ${stop.name.trim()} as a new location`, testId: `f-${prefix}-addRow`, onAdd: () => setAdding(draftFromStop(stop)) } : null}
+            />
+            <TmsIconButton aria-label={`Add location (${nameDef.text})`} data-testid={`f-${prefix}-addLocation`} disabled={placeLocked} onClick={() => setAdding(draftFromStop(stop))}>
+              <Pencil size={13} />
+            </TmsIconButton>
+          </div>
+        </LField>
+        </FieldGrid>
+
+        {!editAddr && !addressIssue ? (
+          <div className="tms-card-addr-line">
+            <span data-testid={`f-${prefix}-addressLine`}>{line || 'No address yet'}</span>
+            <button type="button" className="ship-link" data-testid={`f-${prefix}-editAddress`} disabled={base.disabled} onClick={() => setEditAddr(true)}>Edit address</button>
+          </div>
+        ) : (
+          <FieldGrid>
+            <LField span={6} def={d('address1')}><TmsInput {...txt('address1')} /></LField>
+            <LField span={6} def={d('address2')}><TmsInput {...txt('address2')} /></LField>
+            <LField span={12} def={d('city')} error={err(d('city'))}><TmsInput {...txt('city')} /></LField>
+            <LField span={4} narrow={4} def={d('state')} error={err(d('state'))}>
+              <TmsSelect {...ctl(d('state'))} value={stop.state} disabled={base.disabled} onChange={(e) => onChange({ state: e.target.value })}>
+                <option value="" />
+                {stop.state && !(US_STATES as readonly string[]).includes(stop.state) && <option value={stop.state}>{stop.state}</option>}
+                {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </TmsSelect>
+            </LField>
+            <LField span={4} narrow={4} def={d('zip')} error={err(d('zip'))}><TmsInput {...txt('zip', (s) => digitsOnly(s).slice(0, 9))} inputMode="numeric" /></LField>
+            <LField span={4} narrow={4} def={d('country')}>
+              <TmsSelect {...ctl(d('country'))} value={stop.country || 'US'} disabled={base.disabled} onChange={(e) => onChange({ country: e.target.value })}>
+                {COUNTRIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </TmsSelect>
+            </LField>
+          </FieldGrid>
+        )}
+
+        <FieldGrid>
+          <LField span={12} def={d('contact')}><TmsInput {...txt('contact')} /></LField>
+          <LField span={6} def={d('phone')}>
+            <TmsInput {...ctl(d('phone'))} type="tel" placeholder="(XXX) XXX-XXXX" value={stop.phone} disabled={base.disabled} onChange={(e) => onChange({ phone: maskPhone(e.target.value) })} />
           </LField>
-          <LField span={2} narrow={6} def={d('zip')} error={err(d('zip'))}><TmsInput {...txt('zip', (s) => digitsOnly(s).slice(0, 9))} inputMode="numeric" /></LField>
-          <LField span={2} narrow={12} def={d('country')}>
-            <TmsSelect {...ctl(d('country'))} value={stop.country || 'US'} disabled={base.disabled} onChange={(e) => onChange({ country: e.target.value })}>
-              {COUNTRIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </TmsSelect>
+          <LField span={6} def={d('email')} error={err(d('email'))}><TmsInput {...txt('email')} type="email" /></LField>
+        </FieldGrid>
+        </ColGroup>
+        <ColGroup title="Schedule & freight">
+        <FieldGrid>
+          {delivery ? dtField(d('mustDeliver'), 'mustDeliver') : dtField(readyDef, 'ready', first)}
+          {dtField(d('appt'), 'appt')}
+          <LField span={6} def={d('refNo')}><TmsInput {...txt('refNo')} /></LField>
+          <LField span={6} def={d('hours')}><TmsInput {...txt('hours')} /></LField>
+        </FieldGrid>
+        {isBatory && (
+          <span className="ship-hint" data-testid={`f-${prefix}-batory`}>
+            <b>Batory load</b> — appointments are left blank on purpose; request them through the appointments page.
+          </span>
+        )}
+        <FieldGrid>
+          {numField('pieces', 'pieces')}
+          {numField('weightLbs', 'weight')}
+          <LField span={12} def={d('note')}>
+            <TmsTextarea {...ctl(d('note'))} rows={1} className="tms-fg-oneline" maxLength={MAX.stopNote} value={stop.note} disabled={base.disabled} onChange={(e) => onChange({ note: e.target.value })} />
           </LField>
         </FieldGrid>
-      )}
 
-      <FieldGrid>
-        {delivery ? dtField(d('mustDeliver'), 'mustDeliver') : dtField(readyDef, 'ready', first)}
-        {dtField(d('appt'), 'appt')}
-        <LField span={3} def={d('refNo')}><TmsInput {...txt('refNo')} /></LField>
-        <LField span={3} def={d('hours')}><TmsInput {...txt('hours')} /></LField>
-      </FieldGrid>
-      {isBatory && (
-        <span className="ship-hint" data-testid={`f-${prefix}-batory`}>
-          <b>Batory load</b> — appointments are left blank on purpose; request them through the appointments page.
-        </span>
-      )}
-      <FieldGrid>
-        <LField span={4} narrow={12} def={d('contact')}><TmsInput {...txt('contact')} /></LField>
-        <LField span={4} narrow={6} def={d('phone')}>
-          <TmsInput {...ctl(d('phone'))} type="tel" placeholder="(XXX) XXX-XXXX" value={stop.phone} disabled={base.disabled} onChange={(e) => onChange({ phone: maskPhone(e.target.value) })} />
-        </LField>
-        <LField span={4} narrow={6} def={d('email')} error={err(d('email'))}><TmsInput {...txt('email')} type="email" /></LField>
-        {numField('pieces', 'pieces')}
-        {numField('weightLbs', 'weight')}
-        <LField span={6} def={d('note')}>
-          <TmsTextarea {...ctl(d('note'))} rows={1} className="tms-fg-oneline" maxLength={MAX.stopNote} value={stop.note} disabled={base.disabled} onChange={(e) => onChange({ note: e.target.value })} />
-        </LField>
-      </FieldGrid>
+        </ColGroup>
+      </ColGroups>
 
       {form && (
         <NewLocationForm

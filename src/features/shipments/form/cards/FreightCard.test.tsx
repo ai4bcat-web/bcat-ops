@@ -82,3 +82,16 @@ describe('FreightCard', () => {
     expect(screen.queryByTestId('f-customer-refNo')).toBeNull()
   })
 })
+
+describe('FreightCard two-column layout', () => {
+  it('renders Load details and Quantities groups and keeps every field in one of them', () => {
+    renderCard(FreightCard)
+    const details = screen.getByTestId('f-shipping-col-details')
+    const qty = screen.getByTestId('f-shipping-col-quantities')
+    expect(screen.getByRole('group', { name: 'Load details' })).toBe(details)
+    expect(screen.getByRole('group', { name: 'Quantities' })).toBe(qty)
+    for (const id of ['revDivision', 'shipmentType', 'equipmentType', 'description']) expect(details.querySelector(`[data-testid="f-shipping-${id}"]`), id).not.toBeNull()
+    for (const id of ['weightLbs', 'pieces', 'footage', 'freightClass', 'declaredValue']) expect(qty.querySelector(`[data-testid="f-shipping-${id}"]`), id).not.toBeNull()
+    expect(screen.getByTestId('f-shipping-flags')).toBeTruthy()
+  })
+})
