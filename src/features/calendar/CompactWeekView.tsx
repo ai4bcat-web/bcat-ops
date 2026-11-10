@@ -67,8 +67,8 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
   }, [pickingDriver])
 
   const assignDriver = (driverId: string | null) => {
-    if (legMode) updateLoad(load.id, { stops: updateStop(load, fromStop!.id, { driverId }) })
-    else updateLoad(load.id, { pickupDriverId: driverId, deliveryDriverId: driverId })
+    if (legMode) updateLoad(load.id, { stops: updateStop(load, fromStop!.id, { driverId }) }).catch(() => {})
+    else updateLoad(load.id, { pickupDriverId: driverId, deliveryDriverId: driverId }).catch(() => {})
     setPickingDriver(false)
   }
 

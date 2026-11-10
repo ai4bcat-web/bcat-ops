@@ -5389,6 +5389,35 @@ describe('SET_SHIPMENT_CUSTOMER', () => {
   })
 })
 
+// ── SET_LOAD_REFS ────────────────────────────────────────────────────────────
+
+describe('SET_LOAD_REFS', () => {
+  async function leg(): Promise<string> {
+    const bundle = (await call('CREATE_SHIPMENT', { customerId: 'cus-1' })) as { loads: Row[] }
+    return String(bundle.loads[0].id)
+  }
+
+  it('sets the TMS # and PU # on the load', async () => {
+    const loadId = await leg()
+    await call('SET_LOAD_REFS', { loadId, tmsId: ' TMS-77 ', pickupNumber: 'PU-9' })
+    expect(table(TABLES.load).get(loadId)).toMatchObject({ tmsId: 'TMS-77', pickupNumber: 'PU-9' })
+  })
+
+  it('a blank value falls back to the PRO, and an untouched one is left alone', async () => {
+    const loadId = await leg()
+    await call('SET_LOAD_REFS', { loadId, tmsId: 'TMS-1', pickupNumber: 'PU-1' })
+    await call('SET_LOAD_REFS', { loadId, pickupNumber: '' })
+    const row = table(TABLES.load).get(loadId)!
+    expect(row.tmsId).toBe('TMS-1')
+    expect(row.pickupNumber).toBe(row.aljexId)
+  })
+
+  it('refuses a call that changes nothing', async () => {
+    const loadId = await leg()
+    await expect(call('SET_LOAD_REFS', { loadId })).rejects.toThrow(/Nothing to change/)
+  })
+})
+
 // ── SET_LOAD_PRO ─────────────────────────────────────────────────────────────
 
 describe('SET_LOAD_PRO', () => {

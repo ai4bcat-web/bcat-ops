@@ -27,7 +27,7 @@ import { CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
 import { formatDateTime } from '@/lib/date'
 import { PACKET_LABELS, parseSearch, refLabel, searchDirectory } from '@/lib/integrations/mcpReview'
 import type { McpCarrierStatus } from '@/lib/integrations/mcpAdapter'
-import { normalizeMcpStatus } from '@/lib/mcpPacket'
+import { effectiveMcpStatus, normalizeMcpStatus } from '@/lib/mcpPacket'
 import type { CarrierRecord, ShipmentBundle } from '@/types/tms'
 import { liveCarriersOf } from '@/lib/carrierTotals'
 import { MODERATE_ACK_KEY, UNACCEPTABLE_ACK_KEY, coverGate, coverRoute, directoryStanding, findByNumber } from './coverModel'
@@ -415,7 +415,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
                   { label: 'Carrier', value: selected.name },
                   { label: 'MC / DOT', value: [selected.mcNumber && `MC ${selected.mcNumber}`, selected.dotNumber && `DOT ${selected.dotNumber}`].filter(Boolean).join(' · ') || null },
                   { label: 'Directory status', value: <TmsBadge tone={selected.status === 'ACTIVE' ? 'green' : selected.status === 'DO_NOT_USE' ? 'red' : 'orange'}>{CARRIER_STATUS_LABELS[selected.status]}</TmsBadge> },
-                  { label: 'Packet status', value: <span data-testid="cover-packet-status">{packetLabel(selected.mcpStatus)}</span> },
+                  { label: 'Packet status', value: <span data-testid="cover-packet-status">{packetLabel(effectiveMcpStatus(selected.mcpStatus, selected.mcpRiskScore))}</span> },
                   { label: 'Setup packet sent', value: selected.mcpInvitedAt ? `${formatDateTime(selected.mcpInvitedAt)}${selected.mcpInvitedTo ? ` to ${selected.mcpInvitedTo}` : ''}` : 'Not sent' },
                 ]}
               />

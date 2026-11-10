@@ -280,7 +280,7 @@ export function SchedulerView({
           driverId: newDriverId,
           appt: deltaDays !== 0 ? shiftDays(stop.appt, deltaDays) : stop.appt,
         }),
-      })
+      }).catch(() => info.revert())
       const dest = drivers.find((d) => d.id === newDriverId)?.name ?? 'Unassigned'
       toast('Stop updated', {
         description: `${load.aljexId} ${stop.type} → ${dest}`,
@@ -308,7 +308,7 @@ export function SchedulerView({
       }
     }
 
-    updateLoad(load.id, patch)
+    updateLoad(load.id, patch).catch(() => info.revert())
     const dest = drivers.find((d) => d.id === newDriverId)?.name ?? 'Unassigned'
     const label = modifier === 'shift' ? 'Pickup driver updated'
       : modifier === 'alt' ? 'Delivery driver updated' : 'Load reassigned'
@@ -327,7 +327,7 @@ export function SchedulerView({
     if (info.event.extendedProps.stop) { info.revert(); return }
     const snapshot = { ...load }
     const newEnd = info.event.end?.toISOString() ?? load.deliveryAppt
-    updateLoad(load.id, { deliveryAppt: newEnd })
+    updateLoad(load.id, { deliveryAppt: newEnd }).catch(() => info.revert())
     toast('Delivery time updated', {
       description: `${load.aljexId} → ${formatTime(newEnd)}`,
       action: { label: 'Undo', onClick: () => updateLoad(load.id, snapshot) },
@@ -542,7 +542,7 @@ export function SchedulerView({
                 <DropdownMenuSubTrigger>Assign Pickup Driver</DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="w-44 max-h-64 overflow-y-auto">
                   <DropdownMenuItem
-                    onClick={() => { updateLoad(ctxLoad!.id, { pickupDriverId: null, deliveryDriverId: null }); setContextMenu(null) }}
+                    onClick={() => { updateLoad(ctxLoad!.id, { pickupDriverId: null, deliveryDriverId: null }).catch(() => {}); setContextMenu(null) }}
                   >
                     Unassigned
                   </DropdownMenuItem>
@@ -550,7 +550,7 @@ export function SchedulerView({
                   {drivers.filter((d) => d.active).map((d) => (
                     <DropdownMenuItem
                       key={d.id}
-                      onClick={() => { updateLoad(ctxLoad!.id, { pickupDriverId: d.id, deliveryDriverId: d.id }); setContextMenu(null) }}
+                      onClick={() => { updateLoad(ctxLoad!.id, { pickupDriverId: d.id, deliveryDriverId: d.id }).catch(() => {}); setContextMenu(null) }}
                     >
                       {d.name}
                     </DropdownMenuItem>

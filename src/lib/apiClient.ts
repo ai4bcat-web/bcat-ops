@@ -2607,6 +2607,11 @@ export async function setLoadPro(input: { loadId: string; pro: string; expectedU
   return shipmentAction<SetLoadProResult>('SET_LOAD_PRO', input)
 }
 
+/** The TMS # and PU # of a load: read-only to a direct Load write, so they go through `SET_LOAD_REFS`. A blank one falls back to the PRO. */
+export async function setLoadRefs(input: { loadId: string; tmsId?: string | null; pickupNumber?: string | null }): Promise<{ load: Load }> {
+  return shipmentAction<{ load: Load }>('SET_LOAD_REFS', input)
+}
+
 export interface SaveOrderFormInput {
   shipmentId: string
   expectedUpdatedAt: string

@@ -604,6 +604,8 @@ type Action =
   // to every client token now, so this is the only way one ever changes.
   | 'SET_SHIPMENT_CUSTOMER'
   | 'SET_LOAD_PRO'
+  // The TMS # and PU # a leg carries: read-only to client tokens (they fall back to the PRO), so this is how the calendar edits them.
+  | 'SET_LOAD_REFS'
   // Staff void; the owner alone may perform an exported hard delete or restore. PRO claims remain reserved.
   | 'VOID_SHIPMENT'
   | 'DELETE_SHIPMENTS'
@@ -4505,6 +4507,38 @@ async function setLoadPro(input: Row, caller: Caller): Promise<Row> {
     'Load update',
   )
   await writeAudit('LOAD', loadId, 'SET_LOAD_PRO', caller, { from: previous, to: pro.trim(), shipmentId })
+  return {
+    bundle: shipmentId ? await readBundle(shipmentId) : null,
+    load: await getById(LOAD_TABLE_NAME, loadId),
+  } as unknown as Row
+}
+
+// ── SET_LOAD_REFS ────────────────────────────────────────────────────────────
+
+/** TMS # and PU # of a leg (the calendar's two text columns). A blank one falls back to the PRO, as it does at create. */
+async function setLoadRefs(input: Row, caller: Caller): Promise<Row> {
+  const loadId = assertString(input.loadId, 'loadId')
+  const tmsId = input.tmsId === undefined ? undefined : optionalString(input.tmsId, 120) ?? ''
+  const pickupNumber = input.pickupNumber === undefined ? undefined : optionalString(input.pickupNumber, 120) ?? ''
+  if (tmsId === undefined && pickupNumber === undefined) throw new Error('Nothing to change: send tmsId and/or pickupNumber')
+
+  const load = await getById(LOAD_TABLE_NAME, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  assertNotVoided(load)
+  const shipmentId = optionalString(load.shipmentId, 100)
+  if (shipmentId) await requireLiveShipment(shipmentId)
+
+  const pro = optionalString(load.aljexId, 120) ?? ''
+  const patch: Row = { id: loadId, updatedBy: caller.email }
+  if (tmsId !== undefined) patch.tmsId = tmsId.trim() || pro
+  if (pickupNumber !== undefined) patch.pickupNumber = pickupNumber.trim() || pro
+  const client = await getDataClient()
+  assertLoadWriteOk(await client.models.Load.update(patch), 'Load update')
+  await writeAudit('LOAD', loadId, 'SET_LOAD_REFS', caller, {
+    ...(tmsId !== undefined ? { tmsId: { from: load.tmsId ?? null, to: patch.tmsId } } : {}),
+    ...(pickupNumber !== undefined ? { pickupNumber: { from: load.pickupNumber ?? null, to: patch.pickupNumber } } : {}),
+    shipmentId,
+  })
   return {
     bundle: shipmentId ? await readBundle(shipmentId) : null,
     load: await getById(LOAD_TABLE_NAME, loadId),
@@ -8859,6 +8893,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return setShipmentCustomer(input, caller)
     case 'SET_LOAD_PRO':
       return setLoadPro(input, caller)
+    case 'SET_LOAD_REFS':
+      return setLoadRefs(input, caller)
     case 'ASSIGN_ASSET':
       return assignAsset(input, caller)
     case 'ASSIGN_CARRIER':
