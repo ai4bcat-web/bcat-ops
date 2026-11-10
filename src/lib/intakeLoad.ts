@@ -224,10 +224,18 @@ export function buildIntakeDraft(input: {
   fields.pickupNumber = clean(t?.pickupNumber)
   fields.shipmentType = isShipmentTypeKey(t?.shipmentType) ? t.shipmentType : null
   fields.weightLb = typeof t?.weightLb === 'number' && Number.isFinite(t.weightLb) ? t.weightLb : null
+  fields.deliveryNumber = clean(t?.deliveryNumber)
+  fields.equipmentType = clean(t?.equipmentType)
+  fields.commodity = clean(t?.commodity)
+  fields.customerRateCents = typeof t?.customerRateCents === 'number' && Number.isFinite(t.customerRateCents) && t.customerRateCents >= 0 ? Math.round(t.customerRateCents) : null
   for (const [key, parserHas] of [
     ['reference', !!clean(parser?.reference)],
     ['pickupNumber', !!clean(parser?.pickupNumber)],
+    ['deliveryNumber', false],
     ['shipmentType', false],
+    ['equipmentType', false],
+    ['commodity', false],
+    ['customerRateCents', false],
     ['weightLb', typeof parser?.weightLb === 'number'],
   ] as const) {
     const s = sourceOfTender(key, parserHas)

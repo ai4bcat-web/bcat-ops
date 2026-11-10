@@ -40,6 +40,11 @@
 //       WORKFLOW_AGENT_SECRET = the INTAKE_WEBHOOK_SECRET value (optional — omit
 //                               it and the project's existing WEBHOOK_SECRET
 //                               constant is used instead).
+//       AGENT_LOOKBACK_DAYS   = optional, default 3: how many days back each run looks
+//                               (so turning an inbox on never replays its whole history).
+//       ivanloads@bcatcorp.com (Ivan Cartage) and bcatloads@bcatcorp.com (BCAT Logistics) are the divisions' intake addresses, so they
+//       are watched automatically (see DIVISION INTAKE ADDRESSES below) and each tender keeps its PDF for the Build screen. Do NOT also
+//       run loadsEmailBridge.gs on ivanloads@: two bridges would read the same mail.
 //       AGENT_INBOX_QUOTE / AGENT_INBOX_TENDER / AGENT_INBOX_AP /
 //       AGENT_INBOX_CAPACITY  = optional address overrides; empty string means
 //                               that inbox does not exist yet.
@@ -200,7 +205,18 @@ function agentGetConfig_() {
     url: (props.getProperty('WORKFLOW_AGENT_URL') || '').trim(),
     secret: props.getProperty('WORKFLOW_AGENT_SECRET') || agentGlobalSecret_(),
     inboxes: agentConfiguredInboxes_(props),
+    lookbackDays: agentLookbackDays_(props),
   };
+}
+
+/**
+ * How far back a run looks. Without a limit the first run walks the whole history of every watched address and posts every
+ * old message to the agent (each one a model call and a row on the Build queue). Default 3 days; AGENT_LOOKBACK_DAYS overrides it
+ * (a whole number of days, 1 to 60).
+ */
+function agentLookbackDays_(props) {
+  const n = parseInt(String(props.getProperty('AGENT_LOOKBACK_DAYS') || ''), 10);
+  return isNaN(n) || n < 1 ? 3 : Math.min(n, 60);
 }
 
 /**
@@ -266,7 +282,7 @@ function agentGlobalSecret_() {
 
 // ── Gmail search & pagination ───────────────────────────────────────────────
 
-function agentBuildGmailQuery_(inboxes) {
+function agentBuildGmailQuery_(inboxes, lookbackDays) {
   // Explicit operators cover To/Cc/Delivered-To/List-ID; the quoted address
   // fallback catches X-Original-To and any other indexed header. Never uses
   // is:unread / is:unseen so archived/read mail is included. The whole OR set is
@@ -282,11 +298,11 @@ function agentBuildGmailQuery_(inboxes) {
     clauses.push('list:' + listId);
     clauses.push('"' + email + '"');
   }
-  return '(' + clauses.join(' OR ') + ') -in:trash -in:spam';
+  return '(' + clauses.join(' OR ') + ') -in:trash -in:spam newer_than:' + (lookbackDays || 3) + 'd';
 }
 
 function agentProcessThreadPage_(start, max, cfg, props, startTime) {
-  const threads = GmailApp.search(agentBuildGmailQuery_(cfg.inboxes), start, max);
+  const threads = GmailApp.search(agentBuildGmailQuery_(cfg.inboxes, cfg.lookbackDays), start, max);
   let processedCount = 0;
   let newMatches = 0;
   let retryCount = 0;

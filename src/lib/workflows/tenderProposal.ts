@@ -34,6 +34,11 @@ export interface TenderModelFill {
   weightLb?: number | null
   /** A `SHIPMENT_TYPES` key; '' (or anything not on the list) means the message does not say. */
   shipmentType?: string | null
+  equipmentType?: string | null
+  commodity?: string | null
+  deliveryNumber?: string | null
+  /** What the load pays, in dollars, when the document states a total. */
+  rateDollars?: number | null
   stops?: TenderModelStop[] | null
 }
 
@@ -115,6 +120,15 @@ export function tenderFromParse(prefill: TenderPrefill, fill: TenderModelFill | 
           ? fill.weightLb
           : undefined,
     shipmentType: isShipmentTypeKey(fill.shipmentType) ? fill.shipmentType : prefill.shipmentType,
+    equipmentType: orFill(prefill.equipmentType, fill.equipmentType),
+    commodity: orFill(prefill.commodity, fill.commodity),
+    deliveryNumber: orFill(prefill.deliveryNumber, fill.deliveryNumber),
+    customerRateCents:
+      typeof prefill.customerRateCents === 'number'
+        ? prefill.customerRateCents
+        : typeof fill.rateDollars === 'number' && Number.isFinite(fill.rateDollars) && fill.rateDollars > 0
+          ? Math.round(fill.rateDollars * 100)
+          : undefined,
     stops,
   }
 }
