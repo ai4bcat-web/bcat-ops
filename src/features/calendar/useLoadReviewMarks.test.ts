@@ -2,9 +2,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 
-const rows = vi.hoisted(() => ({ working: [] as unknown[], windowed: [] as unknown[] }))
+const rows = vi.hoisted(() => ({ working: [] as unknown[], windowed: [] as unknown[], loading: false, error: null as string | null }))
 vi.mock('@/hooks/useShipments', () => ({
-  useShipments: (view: { kind: string }) => ({ shipments: view.kind === 'working' ? rows.working : rows.windowed }),
+  useShipments: (view: { kind: string }) => ({ shipments: view.kind === 'working' ? rows.working : rows.windowed, loading: rows.loading, partial: false, error: rows.error }),
 }))
 
 import { useLoadReviewMarks } from './useLoadReviewMarks'
@@ -44,5 +44,31 @@ describe('useLoadReviewMarks', () => {
       load('l6', 'b1'), load('l7', 'a1'), load('l8', 'b2'), load('l9', null), load('l10', 'c1'), load('l11', 'o1'), load('l12', 'n1'),
     ]))
     expect(result.current.map((l) => l.id)).toEqual(['l7', 'l9', 'l11', 'l12'])
+  })
+
+  it('the calendar is the same for everyone: a brokerage load is off it even when this browser has no shipment rows (lagging or failed read)', () => {
+    rows.working = []; rows.windowed = []; rows.loading = false
+    const { result } = renderHook(() => useLoadReviewMarks([
+      load('l20', 's20', { revDivision: 'BROKERAGE' }), load('l21', 's21', { revDivision: 'CAR_SHIPPING' }),
+      load('l22', 's22', { revDivision: 'ASSETS' }), load('l23', 's23', { revDivision: 'OWNER_OPERATOR' }),
+    ]))
+    expect(result.current.map((l) => l.id)).toEqual(['l22', 'l23'])
+  })
+
+  it('holds back a load whose division is not known yet while the shipment rows are still loading, then shows it once they say it belongs', () => {
+    rows.working = []; rows.windowed = []; rows.loading = true
+    const { result, rerender } = renderHook(() => useLoadReviewMarks([load('l30', 's30'), load('l31', 's31', { revDivision: 'ASSETS' })]))
+    expect(result.current.map((l) => l.id)).toEqual(['l31'])
+    rows.working = [{ id: 's30', revDivision: 'ASSETS' }]; rows.loading = false
+    rerender()
+    expect(result.current.map((l) => l.id)).toEqual(['l30', 'l31'])
+    rows.loading = false
+  })
+
+  it('a failed shipment read does not turn into "nothing is off the calendar": loads of unknown division are held back, known Ivan loads stay', () => {
+    rows.working = []; rows.windowed = []; rows.loading = false; rows.error = 'Network error'
+    const { result } = renderHook(() => useLoadReviewMarks([load('l40', 's40'), load('l41', 's41', { revDivision: 'ASSETS' })]))
+    expect(result.current.map((l) => l.id)).toEqual(['l41'])
+    rows.error = null
   })
 })
