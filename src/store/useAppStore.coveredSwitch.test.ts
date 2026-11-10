@@ -39,8 +39,11 @@ describe('a load an outside carrier covers', () => {
     expect(api.removeLoadCarrier).toHaveBeenCalledWith(expect.objectContaining({ loadCarrierId: 'lcr-1', outcome: 'BOUNCED' }))
     expect(api.assignAsset).toHaveBeenCalledWith({ loadId: 'l1', driverId: 'drv-1' })
     expect(api.removeLoadCarrier.mock.invocationCallOrder[0]).toBeLessThan(api.assignAsset.mock.invocationCallOrder[0])
-    // The client never writes the mirrors itself.
-    for (const call of api.updateLoad.mock.calls) expect(call[1]).not.toHaveProperty('pickupDriverId')
+    // The client never writes the mirrors itself, nor the old stops back over what the server wrote.
+    for (const call of api.updateLoad.mock.calls) {
+      expect(call[1]).not.toHaveProperty('pickupDriverId')
+      expect(call[1]).not.toHaveProperty('stops')
+    }
   })
 
   it('leaves the carrier alone after a no', async () => {

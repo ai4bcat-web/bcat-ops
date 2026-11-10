@@ -562,6 +562,8 @@ async function syncStopDrivers(before: Load, payload: Partial<Load>, rest: Parti
   }
   delete rest.pickupDriverId
   delete rest.deliveryDriverId
+  // The server wrote the stops' drivers (and, for a switch, the truck and trailer): never send the old stops back over them.
+  delete rest.stops
 }
 
 /**
@@ -661,6 +663,8 @@ async function syncThroughShipment(before: Load, payload: Partial<Load>): Promis
     await api.assignAsset({ loadId: before.id, ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}), driverId })
     delete rest.pickupDriverId
     delete rest.deliveryDriverId
+    // The server rewrote the stops (driver, truck, trailer); the copy in this write is the old one and must not go back over it.
+    delete rest.stops
   } else {
     await syncStopDrivers(before, payload, rest)
   }
