@@ -294,6 +294,9 @@ interface AddCarrierEvent { kind: 'ADD_CARRIER'; mcNumber?: string; dotNumber?: 
 interface ImportBatchEvent { kind: 'IMPORT_BATCH'; carrierIds?: string[]; maxLookups?: number; cursor?: { lastCarrierId?: string } | null }
 type Event = PullAllEvent | PullOneEvent | AddCarrierEvent | ImportBatchEvent | { kind?: undefined }
 
+/** How far back the first scheduled changes poll looks when no backfill has ever run. */
+const POLL_LOOKBACK_MS = 48 * 3_600_000
+
 /** A slice of the backfill (or a changes poll once it is done). Returns the state it saved. */
 async function pullSlice(started: { startedBy: string; restart: boolean } | null): Promise<McpPullState | { refused: string } | { busy: true }> {
   const g = await gate()
@@ -306,6 +309,12 @@ async function pullSlice(started: { startedBy: string; restart: boolean } | null
     if (started && (started.restart || !state || state.status === 'DONE' || state.status === 'ERROR')) {
       state = newPullState(randomUUID(), started.startedBy, now, state ?? undefined)
     }
+    // The scheduled run must never depend on someone pressing the backfill button first (Ryne 2026-11-10: a carrier that finishes its
+    // packet is pulled in and marked Active within minutes, always). With no state yet it starts in poll-only mode, looking back 48 hours.
+    if (!state && !started) {
+      state = { ...newPullState(randomUUID(), 'schedule', now), status: 'DONE', cursor: null, finishedAt: now, changesFrom: new Date(Date.now() - POLL_LOOKBACK_MS).toISOString() }
+    }
+    if (state && state.status === 'DONE' && !state.changesFrom) state = { ...state, changesFrom: new Date(Date.now() - POLL_LOOKBACK_MS).toISOString() }
     if (!state) {
       await releaseLock()
       return { refused: 'No backfill has been started. Press "Pull all monitored carriers now".' }
