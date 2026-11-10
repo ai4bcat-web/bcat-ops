@@ -13,6 +13,8 @@ const db = vi.hoisted(() => ({
   failPut: false,
   existing: null as Row | null,
   logged: [] as Row[],
+  enriched: [] as Row[],
+  failEnrich: false,
 }))
 
 vi.mock('./store', () => ({
@@ -23,6 +25,10 @@ vi.mock('./store', () => ({
   listDivisions: async () => db.divisions,
   findIntakeByReference: async () => db.existing,
   logRepeatEmail: async (row: Row, entry: Row) => { db.logged.push({ row, entry }) },
+  enrichIntakeLoad: async (row: Row, update: Row) => {
+    if (db.failEnrich) throw new Error('row changed')
+    db.enriched.push({ row, update })
+  },
   putIntakeLoadIfAbsent: async (row: Row) => {
     if (db.failPut) throw new Error('DynamoDB unavailable')
     if (db.intake.has(String(row.id))) return false
@@ -46,6 +52,8 @@ beforeEach(() => {
   db.failPut = false
   db.existing = null
   db.logged = []
+  db.enriched = []
+  db.failEnrich = false
   db.divisions = [
     { id: 'A', code: 'A', name: 'A', active: true, intakeEmail: 'tenders+a@bcatcorp.com' },
     { id: 'B', code: 'B', name: 'B', active: true, intakeEmail: 'tenders+b@bcatcorp.com' },
@@ -91,6 +99,42 @@ describe('stageIntake', () => {
     const out = await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), parsed)
     expect(out).toMatchObject({ staged: false })
     expect(out.detail).toContain('rolled into intake load il:wf:TENDER:first (reopened)')
+    expect(db.logged).toHaveLength(1)
+    expect(db.intake.size).toBe(0)
+  })
+
+  it('the original e-mail gives a row typed from a Slack forward its PDF and the fields it lacks, and never overwrites what is there', async () => {
+    const parsed = {
+      kind: 'PARSED', party: { kind: null, id: null, name: null, how: null }, candidates: [], stopFacilityHits: [],
+      parse: {
+        tender: { reference: '214129178', equipmentType: '53 dry van', commodity: 'Frozen foods', customerRateCents: 165000, weightLb: 40000, stops: [] },
+        parserTender: { stops: [] }, fillKind: 'RATECON', lowConfidence: [],
+      },
+    } as unknown as StageInput
+    db.existing = {
+      id: 'il:wf:TENDER:first', status: 'OPEN', updatedAt: 't0', fromEmail: 'USLACKBOT', attachments: [],
+      fields: JSON.stringify({ reference: '214129178', commodity: 'typed by Arcie', weightLb: null, stops: [] }), meta: JSON.stringify({}),
+    }
+    const withPdf: IntakeSourceMail = { ...mail(['tenders+a@bcatcorp.com']), attachments: [{ name: 'RC.pdf', contentType: 'application/pdf', size: 10, key: 'workflow-inbox/x/RC.pdf' }] }
+    const out = await stageIntake(run(), withPdf, parsed)
+    expect(out.detail).toContain('rolled into intake load')
+    expect(db.enriched).toHaveLength(1)
+    const update = db.enriched[0]!.update as { attachments: Row[]; fields: Row; meta: Row }
+    expect(update.attachments).toEqual([{ name: 'RC.pdf', contentType: 'application/pdf', size: 10, key: 'workflow-inbox/x/RC.pdf' }])
+    expect(update.fields).toMatchObject({ equipmentType: '53 dry van', customerRateCents: 165000, weightLb: 40000, commodity: 'typed by Arcie' })
+    expect(update.meta.customerRateCents).toMatchObject({ source: 'RATECON' })
+    expect(db.logged).toHaveLength(1)
+  })
+
+  it('a row that changed meanwhile is left alone: the e-mail is still logged and no second row appears', async () => {
+    const parsed = {
+      kind: 'PARSED', party: { kind: null, id: null, name: null, how: null }, candidates: [], stopFacilityHits: [],
+      parse: { tender: { reference: '214129178', equipmentType: 'reefer', stops: [] }, parserTender: { stops: [] }, fillKind: 'RATECON', lowConfidence: [] },
+    } as unknown as StageInput
+    db.existing = { id: 'il:wf:TENDER:first', status: 'OPEN', updatedAt: 't0', fields: JSON.stringify({ reference: '214129178', stops: [] }), attachments: [] }
+    db.failEnrich = true
+    const out = await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), parsed)
+    expect(out.detail).toContain('rolled into intake load')
     expect(db.logged).toHaveLength(1)
     expect(db.intake.size).toBe(0)
   })

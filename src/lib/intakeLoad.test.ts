@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { needsLine } from './flowDefaults'
 import { isDemoText } from './demoFlow'
 import {
-  buildIntakeDraft, canMarkReviewed, canMoveToActive, correctedKeys, customerDefaultsOf, emptyIntakeFields, fieldStatusOf, intakeCounts,
+  buildIntakeDraft, mergeIntakeFields, canMarkReviewed, canMoveToActive, correctedKeys, customerDefaultsOf, emptyIntakeFields, fieldStatusOf, intakeCounts,
   intakeMissing, intakeRequired, isDemoIntake, patchIntakeFields, toCreateShipmentInput, withCustomerDefaults,
 } from './intakeLoad'
 import type { TenderPrefill } from './intakeTender'
@@ -325,3 +325,27 @@ describe('a tender read from its rate confirmation PDF', () => {
     expect(d.fields).toMatchObject({ equipmentType: null, commodity: null, deliveryNumber: null, customerRateCents: null })
   })
 })
+
+describe('mergeIntakeFields', () => {
+  const stop = (type: 'pickup' | 'delivery', over: Partial<IntakeFields['stops'][number]> = {}) => ({ type, name: null, street: null, city: null, state: null, zip: null, date: null, time: null, instructions: null, ...over })
+  it('fills only what the row has no value for, scalars and stop fields alike', () => {
+    const existing: IntakeFields = { ...emptyIntakeFields(), reference: 'R1', commodity: 'typed', stops: [stop('pickup', { city: 'Joliet' }), stop('delivery')] }
+    const incoming: IntakeFields = {
+      ...emptyIntakeFields(), reference: 'OTHER', commodity: 'Frozen', equipmentType: '53 dry van', customerRateCents: 165000,
+      stops: [stop('pickup', { city: 'Elsewhere', zip: '60435', street: '1 Main' }), stop('delivery', { zip: '50208' })],
+    }
+    const { fields, filled } = mergeIntakeFields(existing, incoming)
+    expect(fields).toMatchObject({ reference: 'R1', commodity: 'typed', equipmentType: '53 dry van', customerRateCents: 165000 })
+    expect(fields.stops[0]).toMatchObject({ city: 'Joliet', zip: '60435', street: '1 Main' })
+    expect(fields.stops[1]).toMatchObject({ zip: '50208' })
+    expect(filled.sort()).toEqual(['customerRateCents', 'equipmentType', 'stops.0.street', 'stops.0.zip', 'stops.1.zip'])
+  })
+
+  it('takes the stops when the row has none, and leaves mismatched stop lists alone', () => {
+    const incoming: IntakeFields = { ...emptyIntakeFields(), stops: [stop('pickup', { city: 'A' }), stop('delivery', { city: 'B' })] }
+    expect(mergeIntakeFields(emptyIntakeFields(), incoming).fields.stops).toHaveLength(2)
+    const three: IntakeFields = { ...emptyIntakeFields(), stops: [stop('pickup'), stop('pickup'), stop('delivery')] }
+    expect(mergeIntakeFields(three, incoming).filled).toEqual([])
+  })
+})
+

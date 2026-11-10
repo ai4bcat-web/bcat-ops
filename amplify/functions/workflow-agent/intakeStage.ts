@@ -15,6 +15,7 @@ import {
   emptyIntakeFields,
   intakeMissing,
   intakeRequired,
+  mergeIntakeFields,
 } from '../../../src/lib/intakeLoad'
 import type { TenderPrefill } from '../../../src/lib/intakeTender'
 import type { IntakeCustomerCandidate, IntakeFields, IntakeMeta, IntakeParseState } from '../../../src/types/intake'
@@ -25,6 +26,7 @@ import {
   listDivisions,
   findIntakeByReference,
   logRepeatEmail,
+  enrichIntakeLoad,
   nowIso,
   putIntakeLoadIfAbsent,
   type Row,
@@ -105,6 +107,35 @@ function customerOf(row: Row | null): { defaultSalesRepId?: string | null; accou
     : null
 }
 
+function jsonish<T>(raw: unknown, fallback: T): T {
+  if (typeof raw !== 'string') return (raw as T | null | undefined) ?? fallback
+  try { return JSON.parse(raw) as T } catch { return fallback }
+}
+
+/**
+ * The original e-mail about a tender that already has an intake row (typically one typed from a Slack forward) gives that row what it
+ * lacks: its attachments (the rate confirmation PDF) when the row has none, and any field the row has no value for. A person's or the
+ * first read's values are never overwritten, and a row that changed since it was read is left as it is (the e-mail is still logged).
+ */
+async function enrichFromRepeat(existing: Row, mail: IntakeSourceMail, incoming: IntakeFields, incomingMeta: IntakeMeta, parsed: boolean): Promise<void> {
+  const have = jsonish<unknown[]>(existing.attachments, [])
+  const attachments = have.length === 0 && mail.attachments.length > 0
+    ? mail.attachments.map((a) => ({ name: a.name, contentType: a.contentType, size: a.size, key: a.key }))
+    : null
+  const current = jsonish<IntakeFields>(existing.fields, emptyIntakeFields())
+  const merged = parsed ? mergeIntakeFields({ ...emptyIntakeFields(), ...current, stops: current.stops ?? [] }, incoming) : null
+  const changed = merged != null && merged.filled.length > 0
+  if (!attachments && !changed) return
+  const meta = jsonish<IntakeMeta>(existing.meta, {})
+  if (merged && changed) for (const key of merged.filled) if (incomingMeta[key]) meta[key] = incomingMeta[key]!
+  await enrichIntakeLoad(existing, {
+    attachments,
+    fields: changed ? (merged!.fields as unknown as Row) : null,
+    meta: changed ? (meta as unknown as Row) : null,
+    at: nowIso(),
+  })
+}
+
 export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: StageInput): Promise<StageResult> {
   if (run.agent !== 'TENDER') return { staged: false, detail: 'not a tender run' }
   try {
@@ -156,6 +187,13 @@ export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: St
       const existing = await findIntakeByReference(String(fields.reference), mail.fromEmail ?? '')
       if (existing && existing.id !== `il:${run.id}`) {
         try {
+          // The original e-mail brings what the row lacks (its rate confirmation PDF, field values); a log entry alone when it brings nothing.
+          try {
+            await enrichFromRepeat(existing, mail, fields, meta, input.kind === 'PARSED')
+          } catch (err) {
+            // The row changed under us (a reviewer is editing it): leave it as it is; the e-mail is still logged on it below.
+            console.warn('[workflow-agent] could not enrich intake load', existing.id, err instanceof Error ? err.message : String(err))
+          }
           await logRepeatEmail(existing, { at: mail.receivedAt ?? nowIso(), subject: mail.subject ?? '', runId: run.id })
           return { staged: false, detail: `rolled into intake load ${String(existing.id)}${existing.status === 'DISMISSED' ? ' (reopened)' : ''}` }
         } catch (err) {
