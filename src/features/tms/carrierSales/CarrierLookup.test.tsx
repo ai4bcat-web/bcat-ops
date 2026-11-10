@@ -46,18 +46,18 @@ beforeEach(() => {
 
 describe('Carrier Sales MC lookup', () => {
   it('a carrier in the directory leads with Set up with us · ACTIVE and its packet standing, then covers the chosen load', async () => {
-    mocks.carriers = [{ id: 'car-1', name: 'Ivan Cartage', status: 'ACTIVE', mcNumber: 'MC274623', mcpStatus: 'ACCEPTABLE', lastLoadAt: '2026-10-30T12:00:00Z', loadCount: 14 }]
-    mocks.preview.mockResolvedValue({ mode: 'LIVE', reason: null, notFound: false, card: cardFor('MC274623', 'Ivan Cartage LLC', ['ops@ivan.example']) })
+    mocks.carriers = [{ id: 'car-1', name: 'Ivan Cartage', status: 'ACTIVE', mcNumber: 'MC900002', mcpStatus: 'ACCEPTABLE', lastLoadAt: '2026-10-30T12:00:00Z', loadCount: 14 }]
+    mocks.preview.mockResolvedValue({ mode: 'LIVE', reason: null, notFound: false, card: cardFor('MC900002', 'Ivan Cartage LLC', ['ops@ivan.example']) })
     renderLookup()
-    const card = await lookUp('MC 274623')
+    const card = await lookUp('MC 900002')
 
-    expect(mocks.preview).toHaveBeenCalledWith({ mcNumber: 'MC274623' })
+    expect(mocks.preview).toHaveBeenCalledWith({ mcNumber: 'MC900002' })
     expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toMatch(/^Set up with us · ACTIVEPacket complete/)
     expect(within(card).getByTestId('cs-lookup-card-active').textContent).toBe('Active with us — ready to cover')
     expect(within(card).getByTestId('cs-lookup-card-directory-line').textContent).toMatch(/14 loads/)
     fireEvent.click(within(card).getByTestId('cs-lookup-card-cover'))
     const dialog = await screen.findByTestId('cover-dialog')
-    expect(dialog.dataset).toMatchObject({ shipment: 's-1', query: 'MC 274623' })
+    expect(dialog.dataset).toMatchObject({ shipment: 's-1', query: 'MC 900002' })
   })
 
   it('a carrier not in the directory says Not in directory, lists MCP’s e-mails, and the invitation goes to the one address picked', async () => {

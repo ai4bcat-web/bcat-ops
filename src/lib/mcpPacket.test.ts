@@ -35,3 +35,17 @@ describe('rateConMcpRefusal', () => {
     expect(msg).toContain('was invited but has not started')
   })
 })
+
+import { effectiveMcpStatus, MCP_UNACCEPTABLE_ABOVE_POINTS } from './mcpPacket'
+describe('effectiveMcpStatus: unacceptable only above 10,000 risk points', () => {
+  it('a label of unacceptable with a score at or under the limit counts as acceptable', () => {
+    expect(MCP_UNACCEPTABLE_ABOVE_POINTS).toBe(10000)
+    expect(effectiveMcpStatus('UNACCEPTABLE_REVIEW', 3000)).toBe('ACCEPTABLE')
+    expect(effectiveMcpStatus('Unacceptable', 10000)).toBe('ACCEPTABLE')
+  })
+  it('above the limit, or with no score, the label stands', () => {
+    expect(effectiveMcpStatus('UNACCEPTABLE', 10001)).toBe('UNACCEPTABLE')
+    expect(effectiveMcpStatus('UNACCEPTABLE', null)).toBe('UNACCEPTABLE')
+    expect(effectiveMcpStatus('MODERATE', 50)).toBe('MODERATE')
+  })
+})

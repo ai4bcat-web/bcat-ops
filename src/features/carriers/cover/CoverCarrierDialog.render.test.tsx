@@ -76,7 +76,7 @@ function renderDialog() {
 }
 
 async function lookUp(text: string) {
-  fireEvent.change(screen.getByLabelText('Carrier MC or DOT'), { target: { value: text } })
+  fireEvent.change(screen.getByLabelText('Carrier name, MC or DOT'), { target: { value: text } })
   await act(async () => { fireEvent.click(screen.getByTestId('cover-lookup')) })
 }
 

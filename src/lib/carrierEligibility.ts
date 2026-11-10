@@ -19,7 +19,7 @@
  * its booking actions, so a `@/` alias would break the function build.
  */
 import { effectiveCarrierStatus } from './carrierStatus'
-import { MCP_PACKET_COMPLETED_STATUSES, normalizeMcpStatus } from './mcpPacket'
+import { MCP_PACKET_COMPLETED_STATUSES, effectiveMcpStatus, normalizeMcpStatus } from './mcpPacket'
 import type {
   CarrierDocumentRecord,
   CarrierDocumentType,
@@ -382,6 +382,8 @@ const SETUP_PENDING_KEEPS: readonly BookingReason[] = ['DO_NOT_USE', 'AUTHORITY_
 export interface CoverCarrierFacts {
   status?: string | null
   mcpStatus?: string | null
+  /** MyCarrierPackets risk points; UNACCEPTABLE only counts above 10,000. */
+  mcpRiskScore?: number | null
   mcpInvitedAt?: string | null
 }
 
@@ -413,7 +415,7 @@ export function applyCoverRules(carrier: CoverCarrierFacts, result: CarrierBooki
       blocks = [...blocks, finding('SETUP_NOT_STARTED', 'This carrier has not been sent a MyCarrierPackets setup packet. Send the packet first, then assign the carrier.')]
     }
   }
-  const mcp = normalizeMcpStatus(carrier.mcpStatus)
+  const mcp = effectiveMcpStatus(carrier.mcpStatus, carrier.mcpRiskScore)
   if (mcp === 'UNACCEPTABLE' || mcp === 'UNACCEPTABLE_REVIEW') {
     // Ryne 2026-11-09: an ADMIN may assign past MyCarrierPackets' UNACCEPTABLE rating after acknowledging it (the server requires the
     // acknowledgement key and records it in the audit trail). Everyone else stays blocked.

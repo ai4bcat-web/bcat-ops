@@ -41,12 +41,19 @@ export function CarrierLookupCard({ card, mode, carrier, nowIso, heading, busy =
   return (
     <div data-testid={testId} data-packet={s.packet.kind} data-in-directory={s.directory.inDirectory ? 'true' : 'false'}
       style={{ display: 'grid', gap: 8, border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: 10 }}>
-      {s.activeReady ? (
+      {/* The first answer: are they already active with us, and why (or why not). */}
+      {s.activeReady && !s.ownFleet ? (
         <div data-testid={`${testId}-active`}><TmsBadge tone="green">Active with us — ready to cover</TmsBadge></div>
       ) : null}
+      <div className="flex flex-wrap items-center gap-2" data-testid={`${testId}-active-answer`} data-active={s.activeWithUs.active ? 'true' : 'false'}>
+        {s.activeReady && !s.ownFleet ? null : <TmsBadge tone={s.activeWithUs.active ? 'green' : 'orange'}>{s.activeWithUs.label}</TmsBadge>}
+        <span className="tms-muted" style={{ fontSize: 12 }} data-testid={`${testId}-active-why`}>{s.activeWithUs.why}</span>
+      </div>
 
       <div className="flex flex-wrap items-center gap-2" data-testid={`${testId}-standing`}>
-        {s.directory.inDirectory ? (
+        {s.ownFleet ? (
+          <TmsBadge tone="green">Our own fleet · Active</TmsBadge>
+        ) : s.directory.inDirectory ? (
           <TmsBadge tone={s.directory.status === 'ACTIVE' ? 'green' : s.directory.status === 'DO_NOT_USE' ? 'red' : 'orange'}>Set up with us · {statusText}</TmsBadge>
         ) : (
           <TmsBadge tone="gray">Not in directory</TmsBadge>
