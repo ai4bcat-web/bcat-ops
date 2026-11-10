@@ -4614,7 +4614,16 @@ async function setStopDrivers(input: Row, caller: Caller): Promise<Row> {
     throw new Error('This load is covered by an outside carrier: its driver is edited on the carrier card, not on the calendar')
   }
 
-  const stops = readStops(load)
+  // An old load with no stored stops is read as a pickup and a delivery (the ids the calendar uses for it); its drivers live on the two
+  // mirrors only, so that is all that is written for it.
+  const stored = readStops(load)
+  const synthetic = stored.length === 0
+  const stops: Row[] = synthetic
+    ? [
+        { id: `${loadId}:pu`, type: 'pickup', sequence: 0, driverId: optionalString(load.pickupDriverId, 100) },
+        { id: `${loadId}:de`, type: 'delivery', sequence: 1, driverId: optionalString(load.deliveryDriverId, 100) },
+      ]
+    : (stored as unknown as Row[])
   for (const a of assignments) if (!stops.some((s) => String(s.id) === a.stopId)) throw new Error(`Stop not found on this load: ${a.stopId}`)
   for (const id of new Set(assignments.map((a) => a.driverId).filter((v): v is string => v != null))) {
     const problem = driverProblem(id, (await getById(DRIVER_TABLE_NAME, id)) as RosterDriverFacts | null)
@@ -4622,13 +4631,15 @@ async function setStopDrivers(input: Row, caller: Caller): Promise<Row> {
   }
   const byStop = new Map(assignments.map((a) => [a.stopId, a.driverId]))
   const nextStops = stops.map((s) => (byStop.has(String(s.id)) ? { ...s, driverId: byStop.get(String(s.id)) ?? null } : s))
-  const mirrors = deriveLegacyFields(nextStops as unknown as StopShape[])
+  const mirrors: Row = synthetic
+    ? { pickupDriverId: (nextStops[0]!.driverId as string | null) ?? null, deliveryDriverId: (nextStops[1]!.driverId as string | null) ?? null }
+    : deriveLegacyFields(nextStops as unknown as StopShape[])
 
   const client = await getDataClient()
   assertLoadWriteOk(
     await client.models.Load.update({
       id: loadId,
-      stops: JSON.stringify(nextStops),
+      ...(synthetic ? {} : { stops: JSON.stringify(nextStops) }),
       pickupDriverId: mirrors.pickupDriverId ?? null,
       deliveryDriverId: mirrors.deliveryDriverId ?? null,
       updatedBy: caller.email,

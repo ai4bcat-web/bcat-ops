@@ -7405,6 +7405,14 @@ describe('Ivan Cartage driver (Step W)', () => {
       expect(auditOf('SET_STOP_DRIVERS')).toHaveLength(2)
     })
 
+    it('an old load with no stored stops takes the driver on the two mirrors only', async () => {
+      const { loadId } = await openLoad()
+      table(TABLES.load).set(loadId, { ...loadRow(loadId), stops: null, pickupDriverId: null, deliveryDriverId: null })
+      await call('SET_STOP_DRIVERS', { loadId, assignments: [{ stopId: `${loadId}:pu`, driverId: 'drv-1' }, { stopId: `${loadId}:de`, driverId: 'drv-1' }] })
+      expect(loadRow(loadId)).toMatchObject({ pickupDriverId: 'drv-1', deliveryDriverId: 'drv-1' })
+      expect(loadRow(loadId).stops ?? null).toBeNull()
+    })
+
     it('refuses an unknown driver, an unknown stop, and an outside carrier’s load', async () => {
       const { loadId } = await openLoad()
       const [first] = stopsOf(loadId)

@@ -117,3 +117,23 @@ describe('the old BROKER placeholder rows on the calendar', () => {
     for (const call of api.updateLoad.mock.calls) expect(call[1]).not.toHaveProperty('stops')
   })
 })
+
+describe('an old load with no stored stops', () => {
+  it('a driver picked from the calendar goes to the server, never as a direct write of the two driver fields', async () => {
+    useAppStore.setState({ drivers: [], loads: [covered({ assignmentType: 'NEED_TO_COVER', activeLoadCarrierId: null, carrierName: null, stops: null }) as never] })
+    api.setStopDrivers.mockResolvedValue({})
+    await useAppStore.getState().updateLoad('l1', { pickupDriverId: 'drv-1', deliveryDriverId: 'drv-2' } as never)
+    expect(api.setStopDrivers).toHaveBeenCalledWith({ loadId: 'l1', assignments: [{ stopId: 'l1:pu', driverId: 'drv-1' }, { stopId: 'l1:de', driverId: 'drv-2' }] })
+    for (const call of api.updateLoad.mock.calls) {
+      expect(call[1]).not.toHaveProperty('pickupDriverId')
+      expect(call[1]).not.toHaveProperty('deliveryDriverId')
+    }
+  })
+
+  it('taking the driver off an old load does the same', async () => {
+    useAppStore.setState({ drivers: [], loads: [covered({ assignmentType: 'OWN_ASSET', activeLoadCarrierId: null, carrierName: null, stops: null, pickupDriverId: 'drv-1', deliveryDriverId: 'drv-1' }) as never] })
+    api.setStopDrivers.mockResolvedValue({})
+    await useAppStore.getState().updateLoad('l1', { pickupDriverId: null, deliveryDriverId: null } as never)
+    expect(api.setStopDrivers).toHaveBeenCalledWith({ loadId: 'l1', assignments: [{ stopId: 'l1:pu', driverId: null }, { stopId: 'l1:de', driverId: null }] })
+  })
+})
