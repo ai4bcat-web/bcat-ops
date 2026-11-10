@@ -508,3 +508,37 @@ export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: R
       return intakeLinkShipment(deps, input, caller)
   }
 }
+
+// ── Queue hygiene ────────────────────────────────────────────────────────────
+
+const refKey = (v: unknown): string => String(v ?? '').trim().toLowerCase()
+
+/**
+ * Ryne 2026-11-10: a shipment built from an intake row must always clear that row from the queue, even when the create form's own link
+ * call never landed. Any OPEN row whose reference, pickup or delivery number is one of this shipment's order references is linked to it
+ * (the same INTAKE_LINK_SHIPMENT path, so the files are filed and both audit rows are written). Returns how many rows it cleared. Never throws.
+ */
+export async function reconcileOpenIntake(deps: IntakeDeps, shipmentId: string, caller: Caller): Promise<number> {
+  try {
+    const orders = await deps.queryIndex(deps.tables.order, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+    const refs = new Set(orders.flatMap((o) => (Array.isArray(o.references) ? (o.references as Row[]) : []).map((r) => refKey(r.value))).filter(Boolean))
+    if (refs.size === 0) return 0
+    const open = await deps.queryIndex(deps.tables.intakeLoad, 'intakeLoadsByStatusAndReceivedAt', 'status', 'OPEN')
+    let cleared = 0
+    for (const row of open) {
+      const f = jsonOf<Partial<IntakeFields>>(row.fields, {})
+      const keys = [f.reference, f.pickupNumber, f.deliveryNumber].map(refKey).filter(Boolean)
+      if (!keys.some((k) => refs.has(k))) continue
+      try {
+        await intakeLinkShipment(deps, { intakeId: String(row.id), shipmentId }, caller)
+        cleared += 1
+      } catch (err) {
+        console.error('[intake] reconcile link failed', row.id, err instanceof Error ? err.message : String(err))
+      }
+    }
+    return cleared
+  } catch (err) {
+    console.error('[intake] reconcile failed', shipmentId, err instanceof Error ? err.message : String(err))
+    return 0
+  }
+}

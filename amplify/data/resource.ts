@@ -1910,6 +1910,8 @@ const schema = a.schema(stageTypes({
       meta:          a.json(),               // per-field { source, confidence }
       confirmed:     a.string().array(),
       missingFields: a.string().array(),
+      // Repeat e-mails for the same load roll up here: [{ at, subject, runId }] (Ryne 2026-11-10).
+      emailLog:      a.json(),
       shipmentId:    a.string(),             // set the moment createShipment returns
       shipmentNumber: a.string(),
       reviewedBy:    a.string(),

@@ -47,6 +47,8 @@ export interface IntakeLoadRecord {
   parseState: IntakeParseState; parseNote: string | null; format: string | null
   fields: IntakeFields; autoFields: IntakeFields & { customerCandidates?: IntakeCustomerCandidate[] }
   meta: IntakeMeta; confirmed: string[]; missingFields: string[]
+  /** Repeat e-mails for the same load roll up here instead of becoming new rows. */
+  emailLog?: { at: string; subject: string; runId: string }[] | null
   shipmentId: string | null; shipmentNumber: string | null
   reviewedBy: string | null; reviewedAt: string | null
   lastEditedBy: string | null; lastEditedAt: string | null

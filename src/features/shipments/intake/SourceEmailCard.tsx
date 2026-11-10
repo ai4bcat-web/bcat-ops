@@ -35,6 +35,14 @@ export function SourceEmailCard({ row }: { row: IntakeLoadRecord }) {
           {row.parseNote ?? 'Fill the fields below from the e-mail text.'}
         </TmsAlert>
       ) : null}
+      {row.emailLog && row.emailLog.length > 0 ? (
+        <div data-testid="intake-email-log" className="text-sm">
+          <strong>Repeat e-mails ({row.emailLog.length})</strong>
+          <ul>
+            {row.emailLog.map((e) => <li key={e.runId}>{formatDateTime(e.at)} · {e.subject}</li>)}
+          </ul>
+        </div>
+      ) : null}
       <dl className="tms-intake-email-meta">
         <dt className="tms-intake-email-key">From</dt>
         <dd>{from}</dd>

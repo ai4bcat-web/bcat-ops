@@ -23,6 +23,8 @@ import {
   getById,
   getSettings,
   listDivisions,
+  findIntakeByReference,
+  logRepeatEmail,
   nowIso,
   putIntakeLoadIfAbsent,
   type Row,
@@ -147,6 +149,20 @@ export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: St
       parseState = input.parseState
       parseNote = input.parseNote
       format = null
+    }
+
+    // A repeat e-mail for the same tender (same reference, same sender) rolls into the row it belongs to: logged there, never a second row.
+    if (fields.reference) {
+      const existing = await findIntakeByReference(String(fields.reference), mail.fromEmail ?? '')
+      if (existing && existing.id !== `il:${run.id}`) {
+        try {
+          await logRepeatEmail(existing, { at: mail.receivedAt ?? nowIso(), subject: mail.subject ?? '', runId: run.id })
+          return { staged: false, detail: `rolled into intake load ${String(existing.id)}${existing.status === 'DISMISSED' ? ' (reopened)' : ''}` }
+        } catch (err) {
+          // The row moved on while this ran: fall through and stage normally rather than lose the e-mail.
+          console.error('[workflow-agent] repeat e-mail log failed', existing.id, err instanceof Error ? err.message : String(err))
+        }
+      }
     }
 
     const settingsRow = await getSettings()
