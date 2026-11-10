@@ -12,11 +12,11 @@
  * Matching, equipment and statistics are `src/lib/laneMatch` / `laneIntel` — the same code the tests
  * and the browser's panel use.
  */
-import { QueryCommand, type DynamoDBClient } from '@aws-sdk/client-dynamodb'
+import { GetItemCommand, QueryCommand, type DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
 
 import { optionalString } from '../_shared/actionInputs'
-import type { Row } from '../_shared/shipmentStore'
+import { readStops, type Row } from '../_shared/shipmentStore'
 import {
   LANE_INTEL_LIST_LIMIT,
   LANE_INTEL_MONTHS,
@@ -41,7 +41,7 @@ const MAX_PAGES = 6
 const PAST_MONTH_TTL_MS = 10 * 60_000
 
 const SAMPLE_FIELDS = [
-  'id', 'laneKey', 'laneKey3', 'date', 'customerName', 'carrierName', 'assignmentKind', 'equipmentType',
+  'id', 'loadId', 'divisionKey', 'laneKey', 'laneKey3', 'date', 'customerName', 'carrierName', 'assignmentKind', 'equipmentType',
   'customerRateCents', 'revenueCents', 'carrierRateCents', 'costCents', 'profitCents', 'marginBps',
   'shipmentNumber', 'excluded', 'source',
 ]
@@ -52,7 +52,8 @@ const QUOTE_FIELDS = [
 
 export interface LaneIntelDeps {
   db: DynamoDBClient
-  tables: { quote: string; laneSample: string }
+  /** `load` is read (one GetItem per candidate) to compare exact ZIPs; without it the ZIP rule is skipped. */
+  tables: { quote: string; laneSample: string; load?: string }
   now(): string
 }
 
@@ -135,6 +136,58 @@ export function laneSpecFromInput(input: Row): LaneSpec {
   return spec
 }
 
+/** Which side of the business a sample was run on: BCAT Logistics (brokerage) or Ivan Cartage (own trucks). */
+export type LaneClass = 'BROKERAGE' | 'IVAN'
+
+export function laneClassOfSample(row: Pick<LaneRateSampleRecord, 'divisionKey' | 'assignmentKind'>): LaneClass | null {
+  if (row.divisionKey === 'BCAT_LOGISTICS') return 'BROKERAGE'
+  if (row.divisionKey === 'IVAN_CARTAGE') return 'IVAN'
+  // An older sample with no division: a carrier hauled it = brokerage, our own truck = Ivan.
+  if (row.assignmentKind === 'CARRIER') return 'BROKERAGE'
+  if (row.assignmentKind === 'OWN_ASSET') return 'IVAN'
+  return null
+}
+
+const zip5Of = (value: unknown): string | null => {
+  const m = String(value ?? '').trim().match(/^(\d{5})/)
+  return m ? m[1]! : null
+}
+
+/** The first pickup's and the last delivery's 5-digit ZIPs on a load's stops. */
+function endZipsOf(load: Row): { origin: string | null; destination: string | null } {
+  const stops = readStops(load)
+  const pickups = stops.filter((s) => s.type === 'pickup')
+  const deliveries = stops.filter((s) => s.type === 'delivery')
+  const first = pickups[0] ?? stops[0]
+  const last = deliveries[deliveries.length - 1] ?? stops[stops.length - 1]
+  const zipOf = (stop: unknown): string | null => zip5Of(((stop as { address?: { zip?: unknown } } | undefined)?.address ?? {}).zip ?? (stop as { zip?: unknown } | undefined)?.zip)
+  return { origin: zipOf(first), destination: zipOf(last) }
+}
+
+/** Keep only the samples whose load went from exactly this ZIP to exactly that one (a sample whose load cannot be read is not an exact match). */
+async function onlyExactZips(deps: LaneIntelDeps, rows: LaneRateSampleRecord[], originZip: string, destinationZip: string): Promise<LaneRateSampleRecord[]> {
+  const table = deps.tables.load
+  if (!table) return rows
+  const kept: LaneRateSampleRecord[] = []
+  const CHUNK = 25
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const slice = rows.slice(i, i + CHUNK)
+    const answers = await Promise.all(slice.map(async (row) => {
+      if (!row.loadId) return false
+      try {
+        const out = await deps.db.send(new GetItemCommand({ TableName: table, Key: { id: { S: row.loadId } }, ProjectionExpression: 'stops' }))
+        if (!out.Item) return false
+        const zips = endZipsOf(unmarshall(out.Item))
+        return zips.origin === originZip && zips.destination === destinationZip
+      } catch {
+        return false
+      }
+    }))
+    slice.forEach((row, j) => { if (answers[j]) kept.push(row) })
+  }
+  return kept
+}
+
 export async function getLaneIntelligence(deps: LaneIntelDeps, input: Row): Promise<LaneIntelligence> {
   const spec = laneSpecFromInput(input)
   const equipmentType = optionalString(input.equipmentType, 60)
@@ -159,7 +212,16 @@ export async function getLaneIntelligence(deps: LaneIntelDeps, input: Row): Prom
   const byId = new Map<string, LaneRateSampleRecord>()
   for (const row of [...exact.rows, ...zip3.rows]) byId.set(String(row.id), row as unknown as LaneRateSampleRecord)
 
-  const runAll = laneRunRows([...byId.values()], spec, { equipmentType, fromDate })
+  // This load's own side of the business: a brokerage load is compared with brokerage runs, an Ivan load with Ivan runs.
+  const laneClass: LaneClass | null = input.laneClass === 'BROKERAGE' || input.laneClass === 'IVAN' ? input.laneClass : null
+  let candidates = [...byId.values()]
+  if (laneClass) candidates = candidates.filter((row) => laneClassOfSample(row) === laneClass)
+  // With a full ZIP on both ends, only runs over exactly those ZIPs count.
+  const originZip = zip5Of(input.originZip)
+  const destinationZip = zip5Of(input.destinationZip)
+  if (originZip && destinationZip) candidates = await onlyExactZips(deps, candidates, originZip, destinationZip)
+
+  const runAll = laneRunRows(candidates, spec, { equipmentType, fromDate })
   const quoteAll = laneQuoteRows(monthResults.flatMap((r) => r.rows), spec, { equipmentType, fromDate, nowIso, excludeId: excludeQuoteId })
 
   const value: LaneIntelligence = {
