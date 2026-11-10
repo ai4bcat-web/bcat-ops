@@ -900,6 +900,8 @@ export const SYSTEM_CALLERS: Record<string, readonly Action[]> = {
   'carrier-inbox': ['FILE_INBOUND_OFFER'],
   // A driver's finished POD upload files its pages on the shipment (waiting for review).
   'driver-app-api': ['ATTACH_DRIVER_DOC'],
+  // A driver's "on site / departed / delivered" tap on the tracking link is filed as a stop event.
+  'tracking-api': ['LOG_CHECK_CALL'],
 }
 
 export async function authorize(action: Action, identity?: AppSyncIdentity | null, systemCaller?: string | null): Promise<Caller> {
@@ -8722,6 +8724,31 @@ async function unlockShipment(input: Row, caller: Caller): Promise<Row> {
   }
 }
 
+/**
+ * The edit lock (LOCK_SHIPMENT) is enforced where the form saves: while another person holds a live lock, these actions are refused for
+ * everyone but that person and ADMINs. A system caller and an action without a shipmentId are never refused.
+ */
+const LOCK_GUARDED_ACTIONS: ReadonlySet<string> = new Set([
+  'SAVE_ORDER_FORM', 'UPDATE_ORDER_DETAILS', 'UPDATE_STOP', 'UPDATE_CARRIER_CHARGES', 'UPDATE_LOAD_CARRIER_DETAILS',
+  'SET_SALES_REP', 'SET_REV_TAG', 'SET_SHIPMENT_CUSTOMER', 'SUBMIT_ORDER', 'SET_LOAD_PRO',
+])
+
+export function lockHeldAgainst(shipment: Row | null | undefined, caller: { email: string; isAdmin?: boolean }, nowMs: number): { by: string; until: string } | null {
+  if (!shipment || caller.isAdmin) return null
+  const holder = optionalString(shipment.editLockUserId, 200)
+  const until = optionalString(shipment.editLockExpiresAt, 40)
+  if (!holder || !until || Date.parse(until) <= nowMs || holder.toLowerCase() === caller.email.toLowerCase()) return null
+  return { by: optionalString(shipment.editLockUserName, 200) ?? holder, until }
+}
+
+async function assertNotLockedByOther(action: string, input: Row, caller: Caller): Promise<void> {
+  if (!LOCK_GUARDED_ACTIONS.has(action) || caller.email === SYSTEM_CALLER_EMAIL) return
+  const shipmentId = optionalString(input.shipmentId, 100)
+  if (!shipmentId) return
+  const held = lockHeldAgainst(await getById(SHIPMENT_TABLE_NAME, shipmentId), caller, Date.now())
+  if (held) throw new Error(`${held.by} is editing this shipment (locked until ${held.until}). Try again after they save and exit.`)
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
@@ -8731,6 +8758,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     ? BATCH_TASK_ACTIONS[assertEnum(input.task, Object.keys(BATCH_TASK_ACTIONS) as (keyof typeof BATCH_TASK_ACTIONS)[], 'task')]
     : action
   const caller = await authorize(authorizedAction, event.identity, event.systemCaller)
+
+  await assertNotLockedByOther(action, input, caller)
 
   if (isPostInvoiceGuarded(action)) return runPostInvoiceGuarded(action, input, caller)
 

@@ -38,6 +38,8 @@ import { CONSENT_VERSION, SHARE_EVERY_MIN, carrierView, customerView, isLinkToke
 import { fixOfRow, loadPingKey, mergeFixes, resolveFixAt, routeKeyOf, ROUTE_ROW_PREFIX, type TrackingFix } from '../../../src/lib/trackingPings'
 import { putPing } from '../_shared/trackingPings'
 import { threadKeyFor } from '../../../src/lib/shipmentThread'
+import { stopForDriverStatus, type DriverStatusKey } from '../../../src/lib/driverStatusStop'
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import { etaToStop } from '../../../src/lib/trackingEta'
 import { buildTimeline, lastKnownPosition, thinPositions, trackingWindow, type TrackPosition } from '../../../src/lib/trackingTimeline'
 import { carrierUploadView, portalUploadAllowed, uploadLinkUsable } from '../../../src/lib/uploadPortal'
@@ -70,6 +72,8 @@ const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME!
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
 const LOAD_TABLE = process.env.LOAD_TABLE_NAME!
 const SHIPMENT_MESSAGE_TABLE = process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? ''
+const SHIPMENT_ACTIONS_FUNCTION = process.env.TMS_SHIPMENT_ACTIONS_FUNCTION_NAME ?? ''
+const lambdaClient = new LambdaClient({})
 // Step D
 const TRACKING_LINK_TABLE = process.env.TRACKING_LINK_TABLE_NAME!
 const LOAD_CHECK_CALL_TABLE = process.env.LOAD_CHECK_CALL_TABLE_NAME!
@@ -636,13 +640,37 @@ async function statusRoute(token: string, event: FnUrlEvent) {
   const etaAt = Number.isFinite(etaRaw) && etaRaw > Date.now() - 3_600_000 && etaRaw < Date.now() + 14 * 86_400_000 ? new Date(etaRaw).toISOString() : null
   const nowIso = new Date().toISOString()
   const text = `${status.text}${etaAt ? ` · ETA ${etaAt}` : ''}`
-  await ddb.send(new PutCommand({
-    TableName: LOAD_CHECK_CALL_TABLE,
-    Item: {
-      id: randomUUID(), loadId: link.loadId, shipmentId: link.shipmentId, loadCarrierId: link.loadCarrierId ?? null, at: nowIso,
-      type: status.type, source: 'LINK', note: `Driver app: ${text}`, createdBy: `link:${token.slice(0, 8)}`, createdAt: nowIso, updatedAt: nowIso,
-    },
-  }))
+  const loadRow = await getRow(LOAD_TABLE, { id: link.loadId })
+  const stopTarget = loadRow ? stopForDriverStatus(parseJson<Stop[]>(loadRow.stops) ?? [], String(raw?.status) as DriverStatusKey) : null
+  let filedAsStopEvent = false
+  // An arrival or departure the driver taps becomes a real stop event (the stop clock and the load status follow it), filed by
+  // tms-shipment-actions; the tap itself never waits on it or fails because of it.
+  if (stopTarget && loadRow && SHIPMENT_ACTIONS_FUNCTION) {
+    try {
+      await lambdaClient.send(new InvokeCommand({
+        FunctionName: SHIPMENT_ACTIONS_FUNCTION,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({
+          systemCaller: 'tracking-api',
+          arguments: { action: 'LOG_CHECK_CALL', input: JSON.stringify({
+            loadId: link.loadId, expectedUpdatedAt: loadRow.updatedAt, at: nowIso, type: stopTarget.event, stopId: stopTarget.stopId, note: `Driver app: ${text}`,
+          }) },
+        })),
+      }))
+      filedAsStopEvent = true
+    } catch (err) {
+      console.error('[tracking-api] stop event hand-off failed', err instanceof Error ? err.message : String(err))
+    }
+  }
+  if (!filedAsStopEvent) {
+    await ddb.send(new PutCommand({
+      TableName: LOAD_CHECK_CALL_TABLE,
+      Item: {
+        id: randomUUID(), loadId: link.loadId, shipmentId: link.shipmentId, loadCarrierId: link.loadCarrierId ?? null, at: nowIso,
+        type: status.type === 'LOCATION_UPDATE' ? 'LOCATION_UPDATE' : 'NOTE', source: 'LINK', note: `Driver app: ${text}`, createdBy: `link:${token.slice(0, 8)}`, createdAt: nowIso, updatedAt: nowIso,
+      },
+    }))
+  }
   await logAppUpdate(link, text, nowIso)
   return reply(200, { ok: true, at: nowIso })
 }

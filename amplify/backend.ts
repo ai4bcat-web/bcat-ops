@@ -1717,6 +1717,12 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', stageTables['Load'].tableName)
       `${trackHistoryTable.tableArn}/index/*`,
     ],
   }))
+  // Driver stop taps are filed as stop events by tms-shipment-actions (plain identity grant).
+  trackingApiFn.addEnvironment('TMS_SHIPMENT_ACTIONS_FUNCTION_NAME', backend.tmsShipmentActions.resources.lambda.functionName)
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['lambda:InvokeFunction'],
+    resources: [backend.tmsShipmentActions.resources.lambda.functionArn],
+  }))
   trackingApiFn.addEnvironment('TRACKING_LINK_TABLE_NAME',   trackingLinkTable.tableName)
   trackingApiFn.addEnvironment('LOAD_CHECK_CALL_TABLE_NAME', loadCheckCallTable.tableName)
   trackingApiFn.addEnvironment('SHIPMENT_TABLE_NAME',        trackShipmentTable.tableName)
