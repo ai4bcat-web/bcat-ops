@@ -103,6 +103,7 @@ import {
 } from '../_shared/actionInputs'
 import {
   attachDriverDoc,
+  attachInvoiceDoc,
   LOAD_REVIEW_ONLY_MESSAGE,
   commitDocument,
   prepareDocumentUpload,
@@ -668,6 +669,8 @@ type Action =
   // AU-plan. Mail a stored (plain) bill of lading through the shipment thread.
   | 'EMAIL_BOL'
   | 'ATTACH_DRIVER_DOC'
+  // The invoice the accounting post generated, filed on its shipment as a document (system caller: tms-finance-actions).
+  | 'ATTACH_INVOICE_DOC'
   | 'REVIEW_DOCUMENT'
   | 'UPDATE_DOCUMENT'
   | 'VOID_DOCUMENT'
@@ -904,6 +907,8 @@ export const SYSTEM_CALLERS: Record<string, readonly Action[]> = {
   'carrier-inbox': ['FILE_INBOUND_OFFER'],
   // A driver's finished POD upload files its pages on the shipment (waiting for review).
   'driver-app-api': ['ATTACH_DRIVER_DOC'],
+  // A generated invoice's PDF is filed on its shipment as an INVOICE document.
+  'finance-actions': ['ATTACH_INVOICE_DOC'],
   // A driver's "on site / departed / delivered" tap on the tracking link is filed as a stop event.
   'tracking-api': ['LOG_CHECK_CALL'],
 }
@@ -9065,6 +9070,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return emailBol(input, caller)
     case 'ATTACH_DRIVER_DOC':
       return attachDriverDoc(documentDeps, input, caller)
+    case 'ATTACH_INVOICE_DOC':
+      return attachInvoiceDoc(documentDeps, input, caller)
     case 'REVIEW_DOCUMENT':
       return reviewDocument(documentDeps, input, caller)
     case 'UPDATE_DOCUMENT':

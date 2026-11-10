@@ -596,6 +596,56 @@ export async function saveGeneratedDocument(deps: DocumentDeps, input: Row, call
  * points at the driver store's key, and its deterministic id means a second
  * press, a retry or the backfill can never list the same file twice.
  */
+/**
+ * ATTACH_INVOICE_DOC — the invoice the accounting post just generated shows up on its shipment as a document (type INVOICE,
+ * customer audience). Called by tms-finance-actions after it stores the PDF; the bytes already sit under invoices/*, so this only
+ * writes the pointer row (id `inv:<invoiceId>`): a re-render points the same row at the new file as the next version, and voiding the
+ * invoice marks the row VOID. Idempotent.
+ */
+export async function attachInvoiceDoc(deps: DocumentDeps, input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const invoiceId = assertString(input.invoiceId, 'invoiceId')
+  const orderId = optionalString(input.orderId, 100)
+  const documentId = `inv:${invoiceId}`
+  const bundle = await readBundle(deps.store, shipmentId)
+  const existing = bundle.documents.find((doc) => doc.id === documentId) as unknown as Row | undefined
+  const now = nowIso()
+
+  if (input.void === true) {
+    if (!existing || existing.status === 'VOID') return { document: existing ?? null }
+    const voided: Row = { ...existing, status: 'VOID', voidedAt: now, voidedBy: caller.email, voidReason: 'Invoice voided', updatedAt: now }
+    await transact(deps.store.db, [putItem(deps.store.tables.shipmentDocument, voided, false)], 'invoice document void')
+    return { document: voided }
+  }
+
+  const s3Key = assertString(input.s3Key, 's3Key')
+  if (!s3Key.startsWith('invoices/')) throw new Error('An invoice document must point at the invoices/ folder')
+  const number = optionalString(input.number, 60) ?? invoiceId
+  const row: Row = {
+    id: documentId,
+    __typename: 'ShipmentDocument',
+    shipmentId,
+    ...(orderId ? { orderId } : {}),
+    type: 'INVOICE',
+    name: `Invoice ${number}.pdf`.slice(0, MAX_DOCUMENT_NAME),
+    s3Key,
+    contentType: PDF_CONTENT_TYPE,
+    sizeBytes: numberOrNull(input.sizeBytes) ?? 0,
+    source: 'GENERATED',
+    sourceRef: invoiceId,
+    audience: 'CUSTOMER',
+    status: 'ACTIVE',
+    version: existing ? (numberOrNull(existing.version) ?? 1) + 1 : 1,
+    uploadedBy: caller.email,
+    uploadedAt: now,
+    createdBy: existing ? String(existing.createdBy ?? caller.email) : caller.email,
+    createdAt: existing ? String(existing.createdAt ?? now) : now,
+    updatedAt: now,
+  }
+  await transact(deps.store.db, [putItem(deps.store.tables.shipmentDocument, row, false)], 'invoice document')
+  return { document: row }
+}
+
 export async function attachDriverDoc(deps: DocumentDeps, input: Row, caller: Caller): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
   const loadId = assertString(input.loadId, 'loadId')
