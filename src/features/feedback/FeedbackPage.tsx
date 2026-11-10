@@ -329,6 +329,8 @@ export function FeedbackPage() {
   }
 
   return (
+    // This page lives in a fixed-height host, so it owns its scroll container: without it only the first rows are reachable.
+    <div className="h-full overflow-auto" data-testid="feedback-scroll">
     <div className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
       <h1 className="text-xl font-semibold">Feedback</h1>
       <SubmitForm onCreated={load} />
@@ -388,6 +390,7 @@ export function FeedbackPage() {
           {lightbox && <Screenshots keys={lightbox} />}
         </DialogContent>
       </Dialog>
+    </div>
     </div>
   )
 }

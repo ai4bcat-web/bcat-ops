@@ -72,4 +72,13 @@ describe('FeedbackPage render', () => {
     expect(screen.getByText('My own report')).toBeTruthy()
     expect(screen.queryByText('Fake new report')).toBeNull()
   })
+
+  it('owns its scroll container, so every row is reachable in the fixed-height host', async () => {
+    render(<FeedbackPage />)
+    await screen.findByText('Fake new report')
+    const scroll = screen.getByTestId('feedback-scroll')
+    expect(scroll.className).toContain('overflow-auto')
+    expect(scroll.className).toContain('h-full')
+    expect(scroll.contains(screen.getByText('Fake new report'))).toBe(true)
+  })
 })

@@ -8,9 +8,10 @@
  */
 import { Field } from '../fieldGrid'
 import { memo, useRef, useState, type DragEvent } from 'react'
-import { Check, Circle, Download, Upload } from 'lucide-react'
+import { Check, Circle, Eye, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsIconButton, TmsSelect, TmsTabs } from '@/features/tms/kit'
+import { DocumentPreview } from '@/features/documents/DocumentPreview'
 import { getShipmentDocumentUrl } from '@/lib/apiClient'
 import { formatBoardDateTime } from '@/lib/date'
 import {
@@ -37,13 +38,8 @@ function fileProblem(file: File): string | null {
   return null
 }
 
-function openUrl(url: string) {
-  const a = document.createElement('a')
-  a.href = url
-  a.target = '_blank'
-  a.rel = 'noopener'
-  a.click()
-}
+/** What the preview dialog is showing: a saved document (its signed link is fetched) or a queued file (a local link). */
+interface Viewing { title: string; subtitle?: string; name: string; contentType: string; url: string | null; local: boolean }
 
 function DocumentsCardImpl({ values, ctx }: CardProps) {
   const [tab, setTab] = useState<Tab>('public')
@@ -52,6 +48,7 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
   const [working, setWorking] = useState(false)
   const [over, setOver] = useState(false)
   const [showOld, setShowOld] = useState(false)
+  const [viewing, setViewing] = useState<Viewing | null>(null)
   const input = useRef<HTMLInputElement>(null)
 
   const saved = ctx.mode === 'edit' && ctx.bundle != null
@@ -80,10 +77,24 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
 
   const checklist = releaseDocItems({ customer: ctx.customer, settings: ctx.settings, bundle: ctx.bundle, queued: queuedAll })
 
-  const preview = async (key: string) => {
-    try { openUrl(await getShipmentDocumentUrl(key)) } catch (err) {
+  /** Open a saved document in the page's own preview (not a new tab); its signed link arrives a moment later. */
+  const preview = async (doc: { name: string; s3Key: string; contentType?: string | null; type: ShipmentDocumentType; version?: number | null; uploadedBy?: string | null }) => {
+    const label = DOCUMENT_TYPE_LABELS[doc.type] ?? doc.type
+    setViewing({ title: `${label} · ${doc.name}`, subtitle: [doc.version ? `v${doc.version}` : null, doc.uploadedBy].filter(Boolean).join(' · ') || undefined, name: doc.name, contentType: doc.contentType ?? 'application/pdf', url: null, local: false })
+    try {
+      const url = await getShipmentDocumentUrl(doc.s3Key)
+      setViewing((open) => (open && open.name === doc.name && open.url === null ? { ...open, url } : open))
+    } catch (err) {
+      setViewing(null)
       toast.error(err instanceof Error ? err.message : 'Could not open that document')
     }
+  }
+  const previewQueued = (file: File, docType: ShipmentDocumentType) => {
+    setViewing({ title: `${DOCUMENT_TYPE_LABELS[docType] ?? docType} · ${file.name}`, subtitle: 'Will upload when the shipment is created', name: file.name, contentType: file.type || 'application/pdf', url: URL.createObjectURL(file), local: true })
+  }
+  const closePreview = () => {
+    if (viewing?.local && viewing.url) URL.revokeObjectURL(viewing.url)
+    setViewing(null)
   }
 
   const take = async (files: FileList | File[] | null, asType: ShipmentDocumentType = type, asAudience: 'ALL' | 'INTERNAL' = audience) => {
@@ -128,7 +139,7 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
               </div>
               {doc ? (
                 <div className="text-xs">
-                  <button type="button" className="tms-link" onClick={() => void preview(doc.s3Key)}>{doc.name}</button>
+                  <button type="button" className="tms-link" onClick={() => void preview(doc)}>{doc.name}</button>
                   <span className="tms-muted">{` · ${slotOrigin(doc)} · ${formatBoardDateTime(doc.uploadedAt)}`}</span>
                 </div>
               ) : (
@@ -221,7 +232,7 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
           )}
           {shown.map((d) => (
             <tr key={d.id} data-testid="card-documents-row">
-              <td>{d.name}</td>
+              <td><button type="button" className="tms-link" onClick={() => void preview(d)}>{d.name}</button></td>
               <td>
                 {DOCUMENT_TYPE_LABELS[d.type] ?? d.type}
                 {d.source === 'GENERATED' && <span className="tms-muted">{` v${d.version}`}</span>}
@@ -229,8 +240,8 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
               </td>
               <td className="tms-muted">{[d.uploadedBy, formatBoardDateTime(d.uploadedAt)].filter(Boolean).join(' · ')}</td>
               <td>
-                <TmsIconButton shape="plain" aria-label={`Preview ${d.name}`} onClick={() => void preview(d.s3Key)}>
-                  <Download size={14} />
+                <TmsIconButton shape="plain" aria-label={`Preview ${d.name}`} title="Preview" onClick={() => void preview(d)}>
+                  <Eye size={14} />
                 </TmsIconButton>
               </td>
             </tr>
@@ -242,10 +253,10 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
               <td className="tms-muted">will upload on create</td>
               <td className="tms-card-docs-actions">
                 <TmsIconButton
-                  shape="plain" aria-label={`Preview ${q.file.name}`}
-                  onClick={() => openUrl(URL.createObjectURL(q.file))}
+                  shape="plain" aria-label={`Preview ${q.file.name}`} title="Preview"
+                  onClick={() => previewQueued(q.file, q.type)}
                 >
-                  <Download size={14} />
+                  <Eye size={14} />
                 </TmsIconButton>
                 <TmsButton size="sm" variant="ghost" aria-label={`Remove ${q.file.name}`} onClick={() => ctx.actions.unqueueDocument(index)}>✕</TmsButton>
               </td>
@@ -279,6 +290,9 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
           ))}
         </ul>
       </div>
+      {viewing && (
+        <DocumentPreview open onClose={closePreview} title={viewing.title} subtitle={viewing.subtitle} url={viewing.url} contentType={viewing.contentType} downloadName={viewing.name} />
+      )}
     </div>
   )
 }

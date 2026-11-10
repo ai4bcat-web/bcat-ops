@@ -52,6 +52,23 @@ describe('DocumentsCard', () => {
     expect(podSlot.textContent).toContain('Missing')
   })
 
+  it('Preview opens the document in the page\'s own preview (with its signed link), not a new tab', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    setup({ mode: 'edit', bundle })
+    fireEvent.click(screen.getAllByLabelText('Preview customer-bol.pdf')[0]!)
+    expect(await screen.findByText(/Bill of lading · customer-bol\.pdf|BOL · customer-bol\.pdf|customer-bol\.pdf/, { selector: '[role="dialog"] *' })).toBeTruthy()
+    await waitFor(() => expect(document.querySelector('[role="dialog"] iframe, [role="dialog"] embed, [role="dialog"] object, [role="dialog"] img')).not.toBeNull())
+    expect(open).not.toHaveBeenCalled()
+    open.mockRestore()
+  })
+
+  it('a queued file previews in the same dialog, from the file itself', async () => {
+    setup({ mode: 'create' }, [{ file: pdf('queued.pdf'), audience: 'ALL', type: 'OTHER' }])
+    ;(URL as unknown as { createObjectURL: (f: File) => string }).createObjectURL = () => 'blob:queued'
+    fireEvent.click(screen.getByLabelText('Preview queued.pdf'))
+    expect(await screen.findByText(/Will upload when the shipment is created/)).toBeTruthy()
+  })
+
   it('uploading from the POD slot saves a public POD without touching the type picker', async () => {
     const ctx = setup({ mode: 'edit', bundle: savedBundle({ documents: [] }) })
     fireEvent.change(screen.getByLabelText('Upload Proof of delivery (POD)'), { target: { files: [pdf('pod.pdf')] } })
