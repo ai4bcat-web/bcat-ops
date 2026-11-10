@@ -641,7 +641,8 @@ export function carrierSortKey(row: ShipmentRow): string {
 
 /** `BROKERAGE` / `ASSETS (Box trucks)` — the division chip's text. */
 export function divisionLabel(row: ShipmentRow, nameOf?: (code: string) => string): string {
-  const name = (code: string) => (nameOf ? nameOf(code) : code)
+  // A division code reads as words: CAR_SHIPPING is CAR SHIPPING.
+  const name = (code: string) => (nameOf ? nameOf(code) : code.replace(/_/g, ' '))
   if (!row.revDivision) return ''
   return row.revSubdivision ? `${name(row.revDivision)} (${name(row.revSubdivision)})` : name(row.revDivision)
 }
@@ -804,7 +805,8 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'customerReference', label: 'Customer Reference Number', group: 'Order', value: (r) => r.customerReference ?? '', width: 180 },
   { key: 'description', label: 'Description', group: 'Order', value: (r) => r.commodity ?? '', width: 180 },
   { key: 'revenueType', label: 'Revenue Type', group: 'Shipment', value: (r) => divisionLabel(r), sortKey: 'division', width: 160 },
-  { key: 'salesRep', label: 'Sales Rep', group: 'Shipment', value: (r) => r.salesRepName ?? r.salesRepId ?? r.salesRepCode ?? '', width: 140 },
+  { key: 'salesRep', label: 'Sales Rep', group: 'Shipment', // The person's name only: while the staff directory is still loading (or when no profile claims the id) the cell is empty, never the raw id.
+    value: (r) => r.salesRepName ?? '', width: 140 },
   { key: 'tracker', label: 'Tracker', group: 'Shipment', value: (r) => r.trackerName ?? '', width: 140 },
   // The typed text when there is one, "Customer not linked" when the row carries nothing:
   // a blank cell would read as "no customer needed" rather than "nobody matched one yet".
@@ -824,7 +826,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'pickupApptStatus', label: 'Pickup Appt Status', group: 'Shipment', value: (r) => apptStatusText(r, 'pickup'), width: 150 },
   { key: 'deliveryApptStatus', label: 'Delivery Appt Status', group: 'Shipment', value: (r) => apptStatusText(r, 'delivery'), width: 150 },
   { key: 'stops', label: 'Stops', group: 'Computed', value: (r) => (r.stopCount == null ? '' : String(r.stopCount)), width: 70 },
-  { key: 'salesRepId', label: 'Customer rep', group: 'Order', value: (r) => r.salesRepName ?? r.customerRepName ?? r.salesRepId ?? r.customerRepId ?? r.salesRepCode ?? '', width: 140 },
+  { key: 'salesRepId', label: 'Customer rep', group: 'Order', value: (r) => r.salesRepName ?? r.customerRepName ?? '', width: 140 },
   { key: 'driver', label: 'Driver', group: 'Load', value: (r) => driverNamesOf(r).join(', '), width: 190 },
   { key: 'truck', label: 'Truck', group: 'Load', value: (r) => r.truckNumber ?? '', width: 100 },
   { key: 'arStatus', label: 'AR', group: 'Order', value: (r) => enumLabel(r.arStatus), width: 120 },

@@ -1,6 +1,5 @@
 import type { EffectiveTrackingPrefs } from '@/lib/trackingPrefs'
 import type { ShipmentRow } from '../../shipmentViews'
-import type { RecentShipment } from './useRecentlyViewed'
 import type { TrackingFocus } from './trackingTable'
 
 export type TrackingLifecycle = 'active' | 'pod' | 'closed'
@@ -56,7 +55,6 @@ export interface TrackingBoardProps {
   /** Persists the layout per user. */
   email: string | undefined
   nameOf: (id: string) => string
-  recent: RecentShipment[]
-  onOpenRecent: (id: string) => void
-  onRemoveRecent: (id: string) => void
+  /** A lock was let go from the Currently viewing strip: re-read the shipments. */
+  onLockReleased?: () => void
 }

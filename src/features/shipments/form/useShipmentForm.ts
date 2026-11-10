@@ -172,7 +172,7 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
   }, [email])
 
   // ── pipelines ──
-  const finish = useCallback(async (kind: RunKind, result: PipelineResult, wasCreate: boolean, draftSave: boolean) => {
+  const finish = useCallback(async (kind: RunKind, result: PipelineResult, wasCreate: boolean, draftSave: boolean): Promise<boolean> => {
     const next = result.bundle
     if (next) setBundle(next)
     if (!result.ok) {
@@ -192,10 +192,10 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
         })
       }
       toast.error(result.message ?? `${result.failedSteps.join(', ') || 'Save'} failed`)
-      return
+      return false
     }
     setPartial(null)
-    if (!next) return
+    if (!next) return false
     if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null }
     deleteDraft(email, clientDraftId.current)
     const queued = valuesRef.current.docs.queued
@@ -213,10 +213,12 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
     if (kind === 'submit') onSubmitted(next)
     else if (wasCreate) onCreated(next)
     else toast.success(kind === 'draft' ? 'Draft saved' : 'Changes saved')
+    return true
   }, [email, customerOf, staff, reseed, onCreated, onSubmitted])
 
-  const run = useCallback(async (kind: RunKind): Promise<void> => {
-    if (inFlight.current) return
+  /** Resolves true when the save went through (so Save & exit knows it may leave). */
+  const run = useCallback(async (kind: RunKind): Promise<boolean> => {
+    if (inFlight.current) return false
     inFlight.current = true
     setBusy(true)
     try {
@@ -229,7 +231,7 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
       if (blocking.length > 0) {
         if (kind === 'draft') toast.info('Kept as a local draft on this browser. Pick a customer to save it to the server.')
         onBlocked(blocking)
-        return
+        return false
       }
       const pctx = pipelineCtxFor(v)
       const wasCreate = !bundle
@@ -238,9 +240,10 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
       else if (kind === 'submit') result = await runSubmit(v, pctx, bundle as ShipmentBundle)
       else if (!bundle) result = await runCreate(v, pctx, { draftSave: false, resume: partial?.resume })
       else result = await runEditSave(v, pctx, bundle)
-      await finish(kind, result, wasCreate, kind === 'draft')
+      return await finish(kind, result, wasCreate, kind === 'draft')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Save failed')
+      return false
     } finally {
       inFlight.current = false
       setBusy(false)

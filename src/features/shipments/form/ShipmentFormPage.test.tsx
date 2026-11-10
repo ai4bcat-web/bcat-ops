@@ -20,7 +20,7 @@ const h = vi.hoisted(() => ({
   listLocations: vi.fn(async () => []),
 }))
 
-vi.mock('./useShipmentLock', () => ({ useShipmentLock: () => ({ heldBy: null }) }))
+vi.mock('./useShipmentLock', () => ({ useShipmentLock: () => ({ heldBy: null, release: async () => undefined }) }))
 vi.mock('./pipelines', () => ({
   runCreate: h.runCreate, runSaveDraft: h.runSaveDraft, runEditSave: h.runEditSave,
   runSubmit: h.runSubmit, runUploadQueued: h.runUploadQueued,

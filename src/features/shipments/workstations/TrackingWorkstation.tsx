@@ -52,7 +52,6 @@ import {
   type TrackingFocus,
 } from './tracking/trackingTable'
 import type { TrackingLifecycle } from './tracking/types'
-import { useRecentlyViewed } from './tracking/useRecentlyViewed'
 import { useTrackingFavorites } from './tracking/useTrackingFavorites'
 import { matchesQuery, type ShipmentRow } from '../shipmentViews'
 
@@ -107,7 +106,6 @@ export function TrackingWorkstation() {
   }, [])
 
   const { favorites, toggleFavorite } = useTrackingFavorites(user?.email)
-  const { recent, push: pushRecent, remove: removeRecent } = useRecentlyViewed(user?.email)
 
   // Clock refresh every minute so relative times stay honest.
   useEffect(() => {
@@ -162,15 +160,13 @@ export function TrackingWorkstation() {
 
   const openShipment = useCallback(
     (id: string) => {
-      const row = shipments.find((r) => r.id === id)
-      if (row) pushRecent(id, row.number)
       setSearchParams((prev) => {
         const params = new URLSearchParams(prev)
         params.set('shipment', id)
         return params
       })
     },
-    [shipments, pushRecent, setSearchParams],
+    [setSearchParams],
   )
 
   const closeDrawer = useCallback(() => {
@@ -307,9 +303,7 @@ export function TrackingWorkstation() {
           onAssignTracker={handleAssignTracker}
           email={user?.email}
           nameOf={staff.nameOf}
-          recent={recent}
-          onOpenRecent={openShipment}
-          onRemoveRecent={removeRecent}
+          onLockReleased={() => { void refreshShipments() }}
         />
       </div>
       {customerLinkTarget && (

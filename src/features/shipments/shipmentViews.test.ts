@@ -553,9 +553,10 @@ describe('R2 column catalog', () => {
   it('resolves rep ids to the names the data layer projected', () => {
     const r = row('r', { salesRepId: 'dennis@bcat.io', salesRepName: 'Dennis' })
     expect(visibleColumns(['salesRep'])[0]!.value(r)).toBe('Dennis')
-    // No projection, no guess: the raw id is still what the record holds.
+    // No projection (the staff directory has not answered): the cell is empty, never the raw id or a code like REP-IVAN-CARTAGE.
     const raw = row('r2', { salesRepId: 'dennis@bcat.io' })
-    expect(visibleColumns(['salesRep'])[0]!.value(raw)).toBe('dennis@bcat.io')
+    expect(visibleColumns(['salesRep'])[0]!.value(raw)).toBe('')
+    expect(visibleColumns(['salesRep'])[0]!.value(row('r3', { salesRepId: 'rep-ivan-cartage', salesRepCode: 'DB' }))).toBe('')
   })
 
   it('counts whole days in the current status', () => {
@@ -646,3 +647,12 @@ describe('driverNamesOf', () => {
     expect(driverNamesOf(row('2', { assignmentType: 'OWN_ASSET', driverName: null }))).toEqual([])
   })
 })
+
+describe('division label', () => {
+  it('reads a division code as words: CAR_SHIPPING is CAR SHIPPING', () => {
+    expect(divisionLabel(row('d1', { revDivision: 'CAR_SHIPPING' }))).toBe('CAR SHIPPING')
+    expect(divisionLabel(row('d2', { revDivision: 'ASSETS', revSubdivision: 'OWNER_OPERATOR' }))).toBe('ASSETS (OWNER OPERATOR)')
+    expect(divisionLabel(row('d3', { revDivision: 'BROKERAGE' }))).toBe('BROKERAGE')
+  })
+})
+

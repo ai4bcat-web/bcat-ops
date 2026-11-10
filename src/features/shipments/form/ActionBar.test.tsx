@@ -58,4 +58,15 @@ describe('ActionBar', () => {
     show({ busy: true })
     expect((screen.getByTestId('ship-form-create') as HTMLButtonElement).disabled).toBe(true)
   })
+  it('edit: Save & exit sits beside Save changes; a create form has none', () => {
+    const onSaveExit = vi.fn(); const onRun = vi.fn()
+    const { unmount } = show({ createMode: false, status: 'OPEN', onRun, onSaveExit })
+    fireEvent.click(screen.getByTestId('ship-form-save-exit'))
+    expect(onSaveExit).toHaveBeenCalledTimes(1)
+    expect(onRun).not.toHaveBeenCalled()
+    unmount()
+    show({ createMode: true, onSaveExit })
+    expect(screen.queryByTestId('ship-form-save-exit')).toBeNull()
+  })
 })
+

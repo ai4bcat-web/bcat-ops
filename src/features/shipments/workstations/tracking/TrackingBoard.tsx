@@ -8,9 +8,10 @@
  *   shipment page and this table can never drift. Rows are stamped with
  *   data-testid="tracking-row", data-status, data-shipment-id and data-tracker-id.
  */
+import { CurrentlyViewing } from '@/features/shipments/components/CurrentlyViewing'
 import { TrackingModeNotSetRowChip } from '../../trackingModeControl/TrackingModeNotSetChip'
 import { useCallback, useMemo, useState } from 'react'
-import { Heart, Link2, Lock, MoreHorizontal, Plus, Search, X } from 'lucide-react'
+import { Heart, Link2, Lock, MoreHorizontal, Plus, Search } from 'lucide-react'
 import { TrackerPicker } from '@/components/TrackerPicker'
 import { BoardMapView } from '../../board/BoardMapView'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
@@ -164,9 +165,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
     onAssignTracker,
     email,
     nameOf,
-    recent,
-    onOpenRecent,
-    onRemoveRecent,
+    onLockReleased,
   } = props
 
   const [favoritesOnly, setFavoritesOnly] = useState(false)
@@ -460,21 +459,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
         />
       </div>
       <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
-      {recent.length > 0 && (
-        <div className="tms-tracking-recent-row">
-          <span className="tms-tracking-recent-label">Recently viewed loads</span>
-          {recent.map((r) => (
-            <span key={r.id} className="tms-tracking-recent-chip">
-              <button type="button" className="tms-tracking-recent-pro" onClick={() => onOpenRecent(r.id)}>
-                {r.number}
-              </button>
-              <TmsIconButton shape="plain" aria-label={`Remove ${r.number} from recently viewed`} onClick={() => onRemoveRecent(r.id)}>
-                <X size={10} />
-              </TmsIconButton>
-            </span>
-          ))}
-        </div>
-      )}
+      <CurrentlyViewing rows={rows} onOpen={onOpenShipment} onChanged={onLockReleased} />
       {error && <p className="tms-tracking-error">{error}</p>}
       <div className="tms-dense-body" data-testid="tracking-list">
         {loading && rows.length === 0 ? (
