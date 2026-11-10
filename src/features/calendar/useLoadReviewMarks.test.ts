@@ -34,10 +34,15 @@ describe('useLoadReviewMarks', () => {
     expect(result.current[0]!.readyToInvoice).toBe(false)
   })
 
-  it('takes brokerage shipments off the calendar entirely, whether or not they need a carrier', () => {
-    rows.working = [{ id: 'b1', revDivision: 'BROKERAGE' }, { id: 'a1', revDivision: 'ASSETS' }]
+  it('shows only Ivan loads: Brokerage and Car Shipping are off the calendar, Assets and owner operators stay, an unset division stays', () => {
+    rows.working = [
+      { id: 'b1', revDivision: 'BROKERAGE' }, { id: 'a1', revDivision: 'ASSETS' },
+      { id: 'c1', revDivision: 'CAR_SHIPPING' }, { id: 'o1', revDivision: 'OWNER_OPERATOR' }, { id: 'n1', revDivision: null },
+    ]
     rows.windowed = [{ id: 'b2', revDivision: 'BROKERAGE' }]
-    const { result } = renderHook(() => useLoadReviewMarks([load('l6', 'b1'), load('l7', 'a1'), load('l8', 'b2'), load('l9', null)]))
-    expect(result.current.map((l) => l.id)).toEqual(['l7', 'l9'])
+    const { result } = renderHook(() => useLoadReviewMarks([
+      load('l6', 'b1'), load('l7', 'a1'), load('l8', 'b2'), load('l9', null), load('l10', 'c1'), load('l11', 'o1'), load('l12', 'n1'),
+    ]))
+    expect(result.current.map((l) => l.id)).toEqual(['l7', 'l9', 'l11', 'l12'])
   })
 })
