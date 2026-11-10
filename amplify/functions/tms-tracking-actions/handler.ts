@@ -962,14 +962,14 @@ async function sendTrackingLink(input: Row, caller: Caller): Promise<Row> {
   if (SHIPMENT_MESSAGE_TABLE_NAME) {
     const at = nowIso()
     try {
-      await putItem(SHIPMENT_MESSAGE_TABLE_NAME, {
+      await transact([putItem(SHIPMENT_MESSAGE_TABLE_NAME, {
       id: `msg:${shipmentId}:${randomUUID()}`, __typename: 'ShipmentMessage', shipmentId, threadKey: threadKeyFor(shipmentId), loadId, loadCarrierId,
       direction: 'OUT', channel: 'SMS', kind: 'OTHER', party: 'DRIVER', to: phone ?? null, from: caller.email, cc: null, subject: null,
       body: via === 'COPY' ? 'Tracking link created to copy' : sms.status === 'SENT' ? `Tracking link texted to ${phone}` : `Tracking link could not be texted to ${phone}`,
       status: sms.status === 'SENT' || via === 'COPY' ? 'SENT' : 'FAILED', error: sms.error ?? null, messageId: null, inReplyTo: null, providerRef: null,
       attachments: null, documentIds: null, trackingLinkId: token, workflowRunId: null, authorKind: 'PERSON', authorName: caller.email,
       at, createdBy: caller.email, createdAt: at, updatedAt: at,
-    }, null)
+    }, false)], 'tracking link thread')
     } catch (err) {
       console.error('[tracking] link thread log failed', err instanceof Error ? err.message : String(err))
     }
