@@ -11,7 +11,7 @@ import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import * as api from '@/lib/apiClient'
 import { inactiveChanges } from '@/lib/fleetActive'
 import { withDerivedLegacy, withoutUnchangedDriverMirrors, withStopsFromLegacy } from '@/lib/stops'
-import { changedApptStops, loadWideDriverChange, takesRosterDriver } from '@/lib/loadShipmentSync'
+import { changedApptStops, changedStopDrivers, loadWideDriverChange, takesRosterDriver } from '@/lib/loadShipmentSync'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import type { NewShipmentPrefill } from '@/features/shipments/components/NewShipmentDialog'
 
@@ -549,6 +549,23 @@ function writeAudit(
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
+/** Taking the driver off, or a different driver per stop: the server writes the stops' drivers and the two mirrors (a client write of the mirrors is refused). A load an outside carrier covers has no roster driver to change here. Edits `rest` in place. */
+async function syncStopDrivers(before: Load, payload: Partial<Load>, rest: Partial<Load>): Promise<void> {
+  const changes = changedStopDrivers(before.stops ?? [], payload.stops)
+  if (changes.length === 0) return
+  if (!takesRosterDriver(before)) throw new Error('This load is covered by an outside carrier: its driver is edited on the carrier card, not on the calendar')
+  await api.setStopDrivers({ loadId: before.id, assignments: changes })
+  delete rest.pickupDriverId
+  delete rest.deliveryDriverId
+}
+
+/** A load with no shipment: only the driver part goes through the server. */
+async function withoutShipmentDriverWrites(before: Load, payload: Partial<Load>): Promise<Partial<Load>> {
+  const rest: Partial<Load> = { ...payload }
+  await syncStopDrivers(before, payload, rest)
+  return rest
+}
+
 /** Date and driver changes of a shipment's load, applied through UPDATE_STOP / ASSIGN_ASSET. Returns what is left for the direct write. */
 async function syncThroughShipment(before: Load, payload: Partial<Load>): Promise<Partial<Load>> {
   const rest: Partial<Load> = { ...payload }
@@ -568,6 +585,8 @@ async function syncThroughShipment(before: Load, payload: Partial<Load>): Promis
     await api.assignAsset({ loadId: before.id, ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}), driverId })
     delete rest.pickupDriverId
     delete rest.deliveryDriverId
+  } else {
+    await syncStopDrivers(before, payload, rest)
   }
   return rest
 }
@@ -839,7 +858,7 @@ export const useAppStore = create<AppState>()(
             }, before)), before, direct)
             // A load that belongs to a shipment: its date and driver changes go through the shipment actions so the Shipment, Order and
             // carrier assignment change with it (the calendar and the Shipments page are one record); only the rest is written here.
-            const payload = before.shipmentId ? await syncThroughShipment(before, derived) : derived
+            const payload = before.shipmentId ? await syncThroughShipment(before, derived) : await withoutShipmentDriverWrites(before, derived)
             after = await api.updateLoad(id, payload)
           }
           if (hasRefs) {

@@ -7392,6 +7392,29 @@ describe('Ivan Cartage driver (Step W)', () => {
     })
   }
 
+  describe('SET_STOP_DRIVERS', () => {
+    it('puts a different driver on each stop and keeps the pickup/delivery mirrors in step; null takes the driver off', async () => {
+      const { loadId } = await openLoad()
+      seedDriver('drv-2', { name: 'Driver Two' })
+      const [first, last] = stopsOf(loadId)
+      await call('SET_STOP_DRIVERS', { loadId, assignments: [{ stopId: String(first.id), driverId: 'drv-1' }, { stopId: String(last.id), driverId: 'drv-2' }] })
+      expect(loadRow(loadId)).toMatchObject({ pickupDriverId: 'drv-1', deliveryDriverId: 'drv-2' })
+      expect(stopsOf(loadId).map((s) => s.driverId)).toEqual(['drv-1', 'drv-2'])
+      await call('SET_STOP_DRIVERS', { loadId, assignments: [{ stopId: String(first.id), driverId: null }, { stopId: String(last.id), driverId: null }] })
+      expect(loadRow(loadId)).toMatchObject({ pickupDriverId: null, deliveryDriverId: null })
+      expect(auditOf('SET_STOP_DRIVERS')).toHaveLength(2)
+    })
+
+    it('refuses an unknown driver, an unknown stop, and an outside carrier’s load', async () => {
+      const { loadId } = await openLoad()
+      const [first] = stopsOf(loadId)
+      await expect(call('SET_STOP_DRIVERS', { loadId, assignments: [{ stopId: String(first.id), driverId: 'drv-nope' }] })).rejects.toThrow('Driver not found: drv-nope')
+      await expect(call('SET_STOP_DRIVERS', { loadId, assignments: [{ stopId: 'nope', driverId: null }] })).rejects.toThrow(/Stop not found/)
+      table(TABLES.load).set(loadId, { ...loadRow(loadId), assignmentType: 'CARRIER' })
+      await expect(call('SET_STOP_DRIVERS', { loadId, assignments: [{ stopId: String(first.id), driverId: null }] })).rejects.toThrow(/outside carrier/)
+    })
+  })
+
   describe('ASSIGN_ASSET', () => {
     it('refuses an unknown, broker or inactive driver with the exact text and writes nothing', async () => {
       const { loadId } = await openLoad()

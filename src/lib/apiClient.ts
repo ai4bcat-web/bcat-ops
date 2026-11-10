@@ -2612,6 +2612,11 @@ export async function setLoadRefs(input: { loadId: string; tmsId?: string | null
   return shipmentAction<{ load: Load }>('SET_LOAD_REFS', input)
 }
 
+/** Driver (or none) per stop: unassign, or a relay. The whole-load single driver is `assignAsset`. */
+export async function setStopDrivers(input: { loadId: string; assignments: { stopId: string; driverId: string | null }[] }): Promise<{ load: Load }> {
+  return shipmentAction<{ load: Load }>('SET_STOP_DRIVERS', input)
+}
+
 export interface SaveOrderFormInput {
   shipmentId: string
   expectedUpdatedAt: string
