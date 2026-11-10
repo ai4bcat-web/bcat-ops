@@ -13,6 +13,8 @@ import { useStaff } from '@/hooks/useStaff'
 import { useCrmAccounts } from '@/features/crm/useCrmAccounts'
 import { isCrmManager, isOverdue, kindLabel, relativeDay } from '@/features/crm/format'
 import { useDirectory, type CustomerRecord, type LocationRecord } from '@/hooks/useDirectory'
+import { downloadCsv, recordsToFullCsv } from '@/lib/directoryCsv'
+import { listCustomers, listLocations } from '@/lib/apiClient'
 import {
   TmsBadge,
   TmsButton,
@@ -181,6 +183,17 @@ const gridCatalog: Array<DenseColumn<CustomerRow>> = [
     { key: 'dot', header: 'DOT', group: 'Authority', text: (r) => r.record.dotNumber ?? '' },
     { key: ACTIONS_KEY, header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 110 },
 ]
+
+/** The whole directory as one CSV, every field of every record (archived included), whatever the page's tab, search or filters show. */
+async function exportAll(kind: 'customers' | 'locations'): Promise<void> {
+  try {
+    const records = kind === 'customers' ? await listCustomers({ includeArchived: true }) : await listLocations({ includeArchived: true })
+    downloadCsv(`${kind}-all-${new Date().toISOString().slice(0, 10)}.csv`, recordsToFullCsv(records))
+    toast.success(`Exported ${records.length} ${kind}`)
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : `Could not export ${kind}`)
+  }
+}
 
 export function CustomersPage() {
   const navigate = useNavigate()
@@ -453,6 +466,9 @@ export function CustomersPage() {
               <Settings2 size={16} />
             </TmsIconButton>
           )}
+          {isAdmin && (
+            <TmsButton size="sm" variant="secondary" data-testid="export-all-customers" title="Every customer (archived too) with every field" onClick={() => void exportAll('customers')}>Export all (CSV)</TmsButton>
+          )}
           <TmsButton size="sm" variant="secondary" onClick={() => navigate('/tms/customers/billing-setup')}>Billing setup</TmsButton>
           <TmsButton size="sm" variant="primary" onClick={() => setEditing('new')}>Customer</TmsButton>
         </div>
@@ -696,6 +712,9 @@ export function LocationsPage() {
           <ColumnsButton catalog={catalog} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
           <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
           <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
+          {isAdmin && (
+            <TmsButton size="sm" variant="secondary" data-testid="export-all-locations" title="Every location (archived too) with every field" onClick={() => void exportAll('locations')}>Export all (CSV)</TmsButton>
+          )}
           {isAdmin && (
             <TmsIconButton aria-label="Merge locations" title="Merge locations" onClick={() => setMergeOpen(true)}><Merge size={16} /></TmsIconButton>
           )}

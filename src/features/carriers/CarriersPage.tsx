@@ -36,6 +36,7 @@ import { effectiveCarrierStatus } from '@/lib/carrierStatus'
 import { CarrierProfile } from './components/CarrierProfile'
 import { CARRIER_TYPES } from './components/carrierFormModel'
 import { CARRIER_DEFAULT_COLUMNS, carrierGridColumns, carriersToCsv } from './carrierGridColumns'
+import { downloadCsv, recordsToFullCsv } from '@/lib/directoryCsv'
 import {
   CARRIER_TABS, carrierTab, carrierTabCounts, matchesCarrierQuery,
   type CarrierRow, type CarrierTabKey,
@@ -143,6 +144,11 @@ export function CarriersPage() {
     URL.revokeObjectURL(url)
   }
 
+  const exportAllCsv = () => {
+    downloadCsv(`carriers-all-${now.slice(0, 10)}.csv`, recordsToFullCsv(carriers))
+    toast.success(`Exported ${carriers.length} carriers`)
+  }
+
   const filterCount = activeFilterCount(filters)
 
   return (
@@ -180,6 +186,7 @@ export function CarriersPage() {
           <TmsButton size="sm" aria-label="Refresh" onClick={() => { void refresh(); setMethodsVersion((v) => v + 1) }}><RefreshCw size={14} /></TmsButton>
           <Link className="tms-btn tms-btn-secondary tms-btn-sm" to="/tms/carriers/find" data-testid="launch-find-invite">Find &amp; invite</Link>
           {isAdmin ? <TmsButton size="sm" aria-label="CSV" onClick={exportCsv}><Download size={14} /> CSV</TmsButton> : null}
+          {isAdmin ? <TmsButton size="sm" data-testid="export-all-carriers" title="Every carrier with every field, whatever the tab or filters show" onClick={exportAllCsv}><Download size={14} /> Export all</TmsButton> : null}
           {/* Step AM: a carrier enters the directory only through MyCarrierPackets (Find & invite / Cover). This hand entry
               is an admin-only data fix, audited server-side; nobody else sees it. */}
           {isAdmin ? <TmsButton size="sm" variant="primary" onClick={() => setNewCarrierOpen(true)}>Carrier (admin data fix)</TmsButton> : null}

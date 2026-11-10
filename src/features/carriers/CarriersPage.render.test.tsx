@@ -163,6 +163,32 @@ describe('CarriersPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /CSV/ })).toBeTruthy())
   })
 
+  it('Export all is for admins, and writes every carrier with every field whatever the tab or search shows', async () => {
+    auth.isAdmin = false
+    const nonAdmin = renderBoard()
+    await waitFor(() => expect(screen.getByText('Carriers')).toBeTruthy())
+    expect(screen.queryByTestId('export-all-carriers')).toBeNull()
+    nonAdmin.unmount()
+
+    auth.isAdmin = true
+    const blobs: Blob[] = []
+    ;(URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = (b) => { blobs.push(b); return 'blob:all' }
+    ;(URL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = () => undefined
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    renderBoard()
+    await waitFor(() => expect(screen.getByText('Charlie Freight')).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: '333333' } })
+    fireEvent.click(screen.getByTestId('export-all-carriers'))
+    const text = await blobs[0]!.text()
+    const lines = text.replace('\ufeff', '').split('\r\n')
+    expect(lines).toHaveLength(carriers.length + 1)
+    expect(lines[0]).toContain('mcNumber')
+    expect(lines[0]).toContain('insurancePolicies')
+    expect(text).toContain('Alpha Trucking')
+    expect(text).toContain('Echo Carriers')
+    click.mockRestore()
+  })
+
   it('tells the user when the current view is empty', async () => {
     renderBoard()
     await waitFor(() => expect(screen.getByText('Charlie Freight')).toBeTruthy())
