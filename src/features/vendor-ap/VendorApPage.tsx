@@ -10,13 +10,19 @@ import { useMemo, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Loader2, AlertCircle, Trash2, Check, RotateCcw,
-  Mail, Wrench, FileText, ExternalLink, CreditCard, Pencil,
+  Mail, Wrench, FileText, ExternalLink, CreditCard, Pencil, Receipt, Search,
 } from 'lucide-react'
 import {
-  TmsBadge, TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsListPage,
+  TmsBadge, TmsButton, TmsDialog, TmsField, TmsIconButton, TmsInput, TmsSegmentedTabs,
 } from '@/features/tms/kit'
 import { TmsAlert, TmsMetaList } from '@/features/tms/kit'
-import type { ColumnDef } from '@/features/tms/kit'
+import { DenseGrid } from '@/features/tms/grid/DenseGrid'
+import { ClearFiltersButton, ColumnsButton, DensityToggle } from '@/features/tms/grid/DenseControls'
+import {
+  activeFilterCount, filterRows, nextSort, reorderKeys, sortDenseRows,
+  type DenseColumn, type DenseColumnFilter, type DenseFilters,
+} from '@/features/tms/grid/denseGridModel'
+import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useVendorPayables } from '@/hooks/useVendorPayables'
 import { findVendorApDuplicates } from '@/lib/vendorApDuplicates'
 import {
@@ -33,6 +39,8 @@ import { formatCents } from '@/features/maintenance/maintenanceUi'
 import { VENDOR_PAYMENT_METHODS, type VendorPayable, type VendorPayableDetails, type VendorPayment, type VendorApAttachment } from '@/types/vendorAp'
 
 // ── Constants ────────────────────────────────────────────────────────────────
+
+const PAGE_STEP = 50
 
 const STATUS_LABEL: Record<VendorPayable['status'], string> = {
   NEED_TO_PAY: 'Need to pay',
@@ -112,20 +120,27 @@ function StatusBadge({ status }: { status: VendorPayable['status'] }) {
 }
 
 /** The due date, red once it has passed on an unpaid row, with days to go while it has not. */
+function dueText(item: VendorPayable, today: string): string {
+  if (!item.dueDate) return '—'
+  const days = Math.round((Date.parse(`${item.dueDate}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000)
+  if (item.status === 'DONE') return item.dueDate
+  return `${item.dueDate} · ${days < 0 ? `${-days} day${days === -1 ? '' : 's'} overdue` : days === 0 ? 'due today' : `in ${days} day${days === 1 ? '' : 's'}`}`
+}
+
 function DueCell({ item, today }: { item: VendorPayable; today: string }) {
   if (!item.dueDate) return <span className="tms-muted">—</span>
   const days = Math.round((Date.parse(`${item.dueDate}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000)
   const open = item.status !== 'DONE'
   const overdue = open && days < 0
   return (
-    <div>
-      <div style={{ fontWeight: overdue ? 600 : undefined, color: overdue ? 'var(--tms-badge-red)' : undefined }}>{item.dueDate}</div>
+    <span style={{ whiteSpace: 'nowrap' }}>
+      <span style={{ fontWeight: overdue ? 600 : undefined, color: overdue ? 'var(--tms-badge-red)' : undefined }}>{item.dueDate}</span>
       {open ? (
-        <div style={{ fontSize: 11, color: overdue ? 'var(--tms-badge-red)' : 'var(--tms-muted)' }}>
+        <span style={{ fontSize: 11, marginLeft: 6, color: overdue ? 'var(--tms-badge-red)' : 'var(--tms-muted)' }}>
           {overdue ? `${-days} day${days === -1 ? '' : 's'} overdue` : days === 0 ? 'due today' : `in ${days} day${days === 1 ? '' : 's'}`}
-        </div>
+        </span>
       ) : null}
-    </div>
+    </span>
   )
 }
 
@@ -677,7 +692,9 @@ export function VendorApPage() {
   const [detailError, setDetailError] = useState<string | null>(null)
   const detailIdRef = useRef<string | null>(null)
   const [paymentItem, setPaymentItem] = useState<VendorPayable | null>(null)
-  const [pageSize, setPageSize] = useState(50)
+  const [pageSize, setPageSize] = useState(PAGE_STEP)
+  const [billFilters, setBillFilters] = useState<DenseFilters>({})
+  const [vendorFilters, setVendorFilters] = useState<DenseFilters>({})
 
   const canDelete = user?.groups.includes('ADMIN') ?? false
   const canSeeInvoices = hasPageAccess('invoices')
@@ -763,8 +780,6 @@ export function VendorApPage() {
     [items, source, search, today],
   )
 
-  const pageRows = useMemo(() => filtered.slice(0, pageSize), [filtered, pageSize])
-
   const handleSaveDetails = useCallback(
     async (patch: VendorPayableDetails) => {
       if (!detailListItem) return
@@ -844,111 +859,132 @@ export function VendorApPage() {
     [canDelete, closeDetails, removePayable],
   )
 
-  const columns: Array<ColumnDef<VendorPayable>> = [
+  const centsOf = (item: VendorPayable) => item.amount ?? null
+  const billCols = useMemo<Array<DenseColumn<VendorPayable>>>(() => [
     {
-      key: 'vendor',
-      header: 'VENDOR',
-      width: 200,
-      render: (item) => (
-        <div>
-          <div style={{ fontWeight: 600 }}>{item.vendor || '—'}</div>
-          {duplicates.has(item.id) ? (
-            <div
-              style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-badge-red)' }}
-              title={`Same ${duplicates.get(item.id)!.reason} as an earlier row. Delete this one.`}
-            >
-              Duplicate · same {duplicates.get(item.id)!.reason}
-            </div>
-          ) : null}
-        </div>
-      ),
+      key: 'vendor', header: 'Vendor', group: 'Bill', width: 200,
+      text: (i) => `${i.vendor || '—'}${duplicates.has(i.id) ? ` · Duplicate · same ${duplicates.get(i.id)!.reason}` : ''}`,
+      sortValue: (i) => (i.vendor ?? '').toLowerCase() || null,
     },
-    { key: 'invoice', header: 'INVOICE #', width: 160, render: (item) => <span className="tms-muted">{item.invoiceNumber || '—'}</span> },
+    { key: 'invoice', header: 'Invoice #', group: 'Bill', text: (i) => i.invoiceNumber || '—' },
     {
-      key: 'amount',
-      header: 'AMOUNT',
-      width: 130,
-      render: (item) => (
-        <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-          {formatAmount(item.amount)}
-          {item.amount == null && item.extractedAt ? (
-            <span className="tms-muted" style={{ display: 'block', fontSize: 11 }} title={item.extractionNote ?? undefined}>not on invoice</span>
-          ) : null}
-        </span>
-      ),
+      key: 'amount', header: 'Amount', group: 'Bill', align: 'right', extraPx: 70,
+      text: (i) => formatAmount(i.amount),
+      sortValue: centsOf, filter: 'number', numberUnit: '$', numberOf: (i) => (i.amount == null ? null : i.amount / 100),
     },
-    { key: 'due', header: 'DUE', width: 140, render: (item) => <DueCell item={item} today={today} /> },
-    { key: 'source', header: 'SOURCE', width: 130, render: (item) => <SourceBadge source={item.source} /> },
+    { key: 'due', header: 'Due', group: 'Bill', extraPx: 90, text: (i) => dueText(i, today), sortValue: (i) => i.dueDate ?? null, filter: 'date', dateOf: (i) => i.dueDate ?? null },
+    { key: 'source', header: 'Source', group: 'Bill', text: (i) => SOURCE_LABEL[i.source], filter: 'multi', extraPx: 30 },
     {
-      key: 'received',
-      header: 'RECEIVED',
-      width: 120,
-      render: (item) => <span className="tms-muted" title={formatReceivedAt(item.receivedAt)}>{relativeReceived(item.receivedAt)}</span>,
+      key: 'received', header: 'Received', group: 'Bill', text: (i) => relativeReceived(i.receivedAt),
+      sortValue: (i) => i.receivedAt, filter: 'date', dateOf: (i) => i.receivedAt,
     },
+    { key: 'status', header: 'Status', group: 'Payment', text: (i) => STATUS_LABEL[i.status], filter: 'multi', extraPx: 30 },
+    { key: 'method', header: 'Payment method', group: 'Payment', text: (i) => i.paymentMethod || '—', filter: 'multi' },
     {
-      key: 'status',
-      header: 'STATUS',
-      width: 150,
-      render: (item) => (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <StatusBadge status={item.status} />
-          {pendingIds.has(item.id) && <Loader2 size={13} className="tms-muted" />}
-        </span>
-      ),
+      key: 'date', header: 'Date', group: 'Payment',
+      text: (i) => `${i.paidAt ? formatReceivedAt(i.paidAt) : i.paymentDate || '—'}${i.confirmationSentAt ? ' ✉ confirmed' : ''}`,
+      sortValue: (i) => i.paidAt ?? i.paymentDate ?? null, filter: 'date', dateOf: (i) => i.paidAt ?? i.paymentDate ?? null,
     },
-    { key: 'method', header: 'PAYMENT METHOD', width: 150, render: (item) => <span className="tms-muted">{item.paymentMethod || '—'}</span> },
-    {
-      key: 'date',
-      header: 'DATE',
-      width: 150,
-      render: (item) => (
-        <span className="tms-muted" title={item.paidAt ? formatReceivedAt(item.paidAt) : undefined}>
-          {item.paidAt ? formatReceivedAt(item.paidAt) : item.paymentDate || '—'}
-          {item.confirmationSentAt ? <span style={{ display: 'block', fontSize: 11 }}>✉ confirmed</span> : null}
-        </span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '',
-      width: 300,
-      render: (item) => (
-        <RowActions
-          item={item}
-          pendingIds={pendingIds}
-          canDelete={canDelete}
-          onPay={openPayment}
-          onReopen={handleReopen}
-          onDelete={handleDelete}
-        />
-      ),
-    },
-  ]
+    { key: 'actions', header: 'Actions', group: 'Payment', text: () => '', fixed: true, filter: false, sortable: false, width: 290 },
+  ], [duplicates, today])
+  const billPrefs = useDenseGridPrefs({
+    gridId: 'vendor-ap', email: user?.email, defaultColumns: billCols.map((c) => c.key), validKeys: billCols.map((c) => c.key), defaultSort: null,
+  })
+  const billGridCols = useMemo(
+    () => billPrefs.columns.map((k) => billCols.find((c) => c.key === k)).filter((c): c is DenseColumn<VendorPayable> => c != null),
+    [billCols, billPrefs.columns],
+  )
+  const billRows = useMemo(() => sortDenseRows(filterRows(filtered, billCols, billFilters), billCols, billPrefs.sort), [filtered, billCols, billFilters, billPrefs.sort])
+  const shownBills = billRows.slice(0, pageSize)
 
-  const vendorColumns: Array<ColumnDef<VendorGroup>> = [
-    { key: 'vendor', header: 'VENDOR', width: 260, render: (g) => <strong>{g.vendor}</strong> },
-    { key: 'open', header: 'OPEN BILLS', width: 120, render: (g) => g.openCount },
-    {
-      key: 'owed',
-      header: 'OWED',
-      width: 140,
-      render: (g) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCents(g.owedCents)}</span>,
-    },
-    {
-      key: 'overdue',
-      header: 'OVERDUE',
-      width: 110,
-      render: (g) => (g.overdueCount > 0
+  const renderBillCell = (item: VendorPayable, key: string): React.ReactNode => {
+    switch (key) {
+      case 'vendor':
+        return (
+          <span style={{ whiteSpace: 'nowrap' }}>
+            <span style={{ fontWeight: 600 }}>{item.vendor || '—'}</span>
+            {duplicates.has(item.id) ? (
+              <span
+                style={{ fontSize: 11, fontWeight: 600, marginLeft: 6, color: 'var(--tms-badge-red)' }}
+                title={`Same ${duplicates.get(item.id)!.reason} as an earlier row. Delete this one.`}
+              >
+                Duplicate · same {duplicates.get(item.id)!.reason}
+              </span>
+            ) : null}
+          </span>
+        )
+      case 'invoice': return <span className="tms-muted">{item.invoiceNumber || '—'}</span>
+      case 'amount':
+        return (
+          <span style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+            {item.amount == null && item.extractedAt ? (
+              <span className="tms-muted" style={{ fontSize: 11, marginRight: 6 }} title={item.extractionNote ?? undefined}>not on invoice</span>
+            ) : null}
+            {formatAmount(item.amount)}
+          </span>
+        )
+      case 'due': return <DueCell item={item} today={today} />
+      case 'source': return <SourceBadge source={item.source} />
+      case 'received': return <span className="tms-muted" title={formatReceivedAt(item.receivedAt)}>{relativeReceived(item.receivedAt)}</span>
+      case 'status':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <StatusBadge status={item.status} />
+            {pendingIds.has(item.id) && <Loader2 size={13} className="tms-muted" />}
+          </span>
+        )
+      case 'method': return <span className="tms-muted">{item.paymentMethod || '—'}</span>
+      case 'date':
+        return (
+          <span className="tms-muted" title={item.paidAt ? formatReceivedAt(item.paidAt) : undefined} style={{ whiteSpace: 'nowrap' }}>
+            {item.paidAt ? formatReceivedAt(item.paidAt) : item.paymentDate || '—'}
+            {item.confirmationSentAt ? <span style={{ fontSize: 11, marginLeft: 6 }}>✉ confirmed</span> : null}
+          </span>
+        )
+      case 'actions':
+        return (
+          <RowActions item={item} pendingIds={pendingIds} canDelete={canDelete} onPay={openPayment} onReopen={handleReopen} onDelete={handleDelete} />
+        )
+      default: return null
+    }
+  }
+
+  const vendorCols = useMemo<Array<DenseColumn<VendorGroup>>>(() => [
+    { key: 'vendor', header: 'Vendor', text: (g) => g.vendor, width: 260 },
+    { key: 'open', header: 'Open bills', text: (g) => String(g.openCount), align: 'right', sortValue: (g) => g.openCount, filter: 'number', numberOf: (g) => g.openCount },
+    { key: 'owed', header: 'Owed', text: (g) => formatCents(g.owedCents), align: 'right', sortValue: (g) => g.owedCents, filter: 'number', numberUnit: '$', numberOf: (g) => g.owedCents / 100 },
+    { key: 'overdue', header: 'Overdue', text: (g) => String(g.overdueCount), align: 'right', sortValue: (g) => g.overdueCount, filter: 'number', numberOf: (g) => g.overdueCount },
+    { key: 'last', header: 'Last bill', text: (g) => relativeReceived(g.lastBillAt), sortValue: (g) => g.lastBillAt, filter: 'date', dateOf: (g) => g.lastBillAt },
+  ], [])
+  const vendorPrefs = useDenseGridPrefs({
+    gridId: 'vendor-ap-by-vendor', email: user?.email, defaultColumns: vendorCols.map((c) => c.key), validKeys: vendorCols.map((c) => c.key), defaultSort: null,
+  })
+  const vendorGridCols = useMemo(
+    () => vendorPrefs.columns.map((k) => vendorCols.find((c) => c.key === k)).filter((c): c is DenseColumn<VendorGroup> => c != null),
+    [vendorCols, vendorPrefs.columns],
+  )
+  const vendorRows = useMemo(() => sortDenseRows(filterRows(vendorGroups, vendorCols, vendorFilters), vendorCols, vendorPrefs.sort), [vendorGroups, vendorCols, vendorFilters, vendorPrefs.sort])
+  const shownVendors = vendorRows.slice(0, pageSize)
+  const renderVendorCell = (g: VendorGroup, key: string): React.ReactNode => {
+    switch (key) {
+      case 'vendor': return <strong>{g.vendor}</strong>
+      case 'owed': return <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCents(g.owedCents)}</span>
+      case 'overdue': return g.overdueCount > 0
         ? <span style={{ color: 'var(--tms-badge-red)', fontWeight: 600 }}>{g.overdueCount}</span>
-        : <span className="tms-muted">0</span>),
-    },
-    {
-      key: 'last',
-      header: 'LAST BILL',
-      width: 140,
-      render: (g) => <span className="tms-muted" title={formatReceivedAt(g.lastBillAt)}>{relativeReceived(g.lastBillAt)}</span>,
-    },
-  ]
+        : <span className="tms-muted">0</span>
+      case 'last': return <span className="tms-muted" title={formatReceivedAt(g.lastBillAt)}>{relativeReceived(g.lastBillAt)}</span>
+      default: return null
+    }
+  }
+  const setFilterIn = (set: React.Dispatch<React.SetStateAction<DenseFilters>>) => (key: string, next: DenseColumnFilter | null) => {
+    setPageSize(PAGE_STEP)
+    set((prev) => { const copy = { ...prev }; if (next) copy[key] = next; else delete copy[key]; return copy })
+  }
+  const byVendor = view === 'vendors'
+  const activePrefs = byVendor ? vendorPrefs : billPrefs
+  const filterCount = activeFilterCount(byVendor ? vendorFilters : billFilters) + (search.trim() ? 1 : 0) + (source !== 'ALL' ? 1 : 0) + (!byVendor && activeTab !== 'ALL' ? 1 : 0)
+  const shownCount = byVendor ? shownVendors.length : shownBills.length
+  const totalCount = byVendor ? vendorRows.length : billRows.length
 
   const refreshAll = () => { void (async () => { await refresh(); reloadDetails() })() }
   const queueError = error ? (
@@ -973,54 +1009,106 @@ export function VendorApPage() {
       </p>
     </>
   )
-  const searchProps = { value: search, onChange: setSearch, placeholder: 'Search vendor, invoice #, subject, or sender…' }
+  const emptyText = error
+    ? 'Couldn’t load queue. Try refreshing.'
+    : loading
+      ? 'Loading vendor AP queue…'
+      : byVendor ? 'No vendors match the current filters.' : 'No items match the current filters.'
 
   return (
     <>
-      {view === 'vendors' ? (
-        <TmsListPage<VendorGroup>
-          title="Vendors"
-          search={searchProps}
-          onRefresh={refreshAll}
-          banner={banner}
-          columns={vendorColumns}
-          rows={vendorGroups.slice(0, pageSize)}
-          rowKey={(g) => g.key || 'unknown'}
-          onRowClick={(g) => {
-            setSearch(g.key === '' ? '' : g.vendor)
-            setView('bills')
-            setActiveTab('ALL')
-          }}
-          page={{ from: vendorGroups.length === 0 ? 0 : 1, to: Math.min(pageSize, vendorGroups.length), total: vendorGroups.length, pageSize, onPageSize: setPageSize }}
-          emptyText={error ? 'Couldn’t load queue. Try refreshing.' : loading ? 'Loading vendor AP queue…' : 'No vendors match the current filters.'}
-          onClearFilters={() => { setSearch(''); setSource('ALL') }}
-        />
-      ) : (
-        <TmsListPage<VendorPayable>
-          title="Vendors"
-          search={searchProps}
-          onRefresh={refreshAll}
-          quickTabs={{
-            tabs: TABS.map(({ key, label }) => ({ key, label, count: counts[key] })),
-            active: activeTab,
-            onSelect: (key) => setActiveTab(key as 'ALL' | 'NEED_TO_PAY' | 'QUICKPAY' | 'DONE'),
-          }}
-          banner={banner}
-          columns={columns}
-          rows={pageRows}
-          rowKey={(item) => item.id}
-          onRowClick={openDetails}
-          page={{ from: pageRows.length === 0 ? 0 : 1, to: pageRows.length, total: filtered.length, pageSize, onPageSize: setPageSize }}
-          emptyText={
-            error
-              ? 'Couldn’t load queue. Try refreshing.'
-              : loading
-                ? 'Loading vendor AP queue…'
-                : 'No items match the current filters.'
-          }
-          onClearFilters={() => { setSearch(''); setActiveTab('ALL'); setSource('ALL') }}
-        />
-      )}
+      <div className="tms-dense-page">
+        <div className="tms-dense-bar">
+          <h1 className="tms-dense-title" style={{ margin: 0 }}><Receipt size={18} aria-hidden="true" /> Vendors</h1>
+          <Search size={14} className="tms-muted" aria-hidden="true" />
+          <TmsInput
+            className="tms-dense-search"
+            aria-label="Search"
+            placeholder="Search vendor, invoice #, subject, or sender…"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPageSize(PAGE_STEP) }}
+          />
+          {!byVendor && (
+            <TmsSegmentedTabs
+              aria-label="Payable status"
+              size="sm"
+              tabs={TABS.map(({ key, label }) => ({ key, label, count: counts[key] }))}
+              active={activeTab}
+              onSelect={(key) => { setActiveTab(key as 'ALL' | 'NEED_TO_PAY' | 'QUICKPAY' | 'DONE'); setPageSize(PAGE_STEP) }}
+            />
+          )}
+          <ClearFiltersButton
+            count={filterCount}
+            onClear={() => { setSearch(''); setSource('ALL'); if (!byVendor) setActiveTab('ALL'); setBillFilters({}); setVendorFilters({}); setPageSize(PAGE_STEP) }}
+          />
+          <span className="tms-dense-spacer" />
+          <TmsButton size="sm" variant="secondary" onClick={refreshAll}>Refresh</TmsButton>
+          {byVendor ? (
+            <ColumnsButton catalog={vendorCols} columns={vendorPrefs.columns} widths={vendorPrefs.widths} pinned={vendorPrefs.pinned} onApply={(next) => vendorPrefs.applyLayout({ ...next, replaceWidths: true })} />
+          ) : (
+            <ColumnsButton catalog={billCols} columns={billPrefs.columns} widths={billPrefs.widths} pinned={billPrefs.pinned} onApply={(next) => billPrefs.applyLayout({ ...next, replaceWidths: true })} />
+          )}
+          <DensityToggle density={activePrefs.density} onChange={(d) => { billPrefs.setDensity(d); vendorPrefs.setDensity(d) }} />
+        </div>
+        <div style={{ padding: '4px 8px' }}>{banner}</div>
+        <div className="tms-dense-body">
+          {byVendor ? (
+            <DenseGrid<VendorGroup>
+              aria-label="Vendors"
+              recentKey={`tms:vendor-ap-by-vendor:recent:${user?.email ?? 'anon'}`}
+              resetKey={`${search}|${source}|${JSON.stringify(vendorFilters)}|${JSON.stringify(vendorPrefs.sort)}`}
+              columns={vendorGridCols}
+              rows={shownVendors}
+              fitRows={vendorGroups}
+              rowKey={(g) => g.key || 'unknown'}
+              renderCell={renderVendorCell}
+              density={vendorPrefs.density}
+              userWidths={vendorPrefs.widths}
+              stickyCount={Math.max(1, vendorPrefs.pinned.length)}
+              sort={vendorPrefs.sort}
+              onSort={(key) => vendorPrefs.setSort(nextSort(vendorPrefs.sort, key))}
+              filters={vendorFilters}
+              onFilterChange={setFilterIn(setVendorFilters)}
+              onReorder={(from, to) => vendorPrefs.setColumns(reorderKeys(vendorPrefs.columns, from, to))}
+              onResize={vendorPrefs.setWidth}
+              onRowClick={(g) => {
+                setSearch(g.key === '' ? '' : g.vendor)
+                setView('bills')
+                setActiveTab('ALL')
+              }}
+              empty={emptyText}
+            />
+          ) : (
+            <DenseGrid<VendorPayable>
+              aria-label="Vendor bills"
+              recentKey={`tms:vendor-ap:recent:${user?.email ?? 'anon'}`}
+              resetKey={`${activeTab}|${search}|${source}|${JSON.stringify(billFilters)}|${JSON.stringify(billPrefs.sort)}`}
+              columns={billGridCols}
+              rows={shownBills}
+              fitRows={filtered}
+              rowKey={(item) => item.id}
+              renderCell={renderBillCell}
+              density={billPrefs.density}
+              userWidths={billPrefs.widths}
+              stickyCount={Math.max(1, billPrefs.pinned.length)}
+              sort={billPrefs.sort}
+              onSort={(key) => billPrefs.setSort(nextSort(billPrefs.sort, key))}
+              filters={billFilters}
+              onFilterChange={setFilterIn(setBillFilters)}
+              onReorder={(from, to) => billPrefs.setColumns(reorderKeys(billPrefs.columns, from, to))}
+              onResize={billPrefs.setWidth}
+              onRowClick={openDetails}
+              empty={emptyText}
+            />
+          )}
+          <div className="tms-dense-bar" data-testid="vendor-count">
+            <span className="tms-muted">Showing {shownCount} of {totalCount}</span>
+            {totalCount > shownCount && (
+              <TmsButton size="sm" variant="secondary" onClick={() => setPageSize((n) => n + PAGE_STEP)}>Show next {PAGE_STEP}</TmsButton>
+            )}
+          </div>
+        </div>
+      </div>
 
       {detailItem && (
         <DetailsDialog

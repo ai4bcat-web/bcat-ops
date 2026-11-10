@@ -34,7 +34,7 @@ export function FactoringRowFields({ readiness }: { readiness: OtrReadiness | nu
   const missing = new Set<OtrRequiredField>(readiness.missingFields)
 
   return (
-    <div className="flex max-w-[300px] flex-wrap gap-[3px]">
+    <div className="flex flex-nowrap gap-[3px]">
       {OTR_REQUIRED_FIELDS.map((field) => {
         const ok = !missing.has(field)
         const value = readiness.payload?.[field]
