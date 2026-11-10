@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   toastInfo: vi.fn(),
   intakeRow: null as unknown,
   linkIntakeShipment: vi.fn(async () => ({})),
+  heldBy: null as { by: string; until: string } | null,
+  takeOver: vi.fn(async () => true),
   runCreate: vi.fn(),
   runSaveDraft: vi.fn(),
   runEditSave: vi.fn(),
@@ -20,7 +22,7 @@ const h = vi.hoisted(() => ({
   listLocations: vi.fn(async () => []),
 }))
 
-vi.mock('./useShipmentLock', () => ({ useShipmentLock: () => ({ heldBy: null, release: async () => undefined }) }))
+vi.mock('./useShipmentLock', () => ({ useShipmentLock: () => ({ heldBy: h.heldBy, release: async () => undefined, takeOver: h.takeOver }) }))
 vi.mock('./pipelines', () => ({
   runCreate: h.runCreate, runSaveDraft: h.runSaveDraft, runEditSave: h.runEditSave,
   runSubmit: h.runSubmit, runUploadQueued: h.runUploadQueued,
@@ -38,7 +40,7 @@ vi.mock('@/hooks/useCarriers', () => ({ useCarriers: () => ({ carriers: [] }) })
 vi.mock('@/hooks/useStaff', () => ({ useStaff: () => ({ staff: [] }) }))
 vi.mock('@/hooks/useOwnFleetRoster', () => ({ useOwnFleetRoster: () => [] }))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: null }) }))
-vi.mock('@/lib/apiClient', () => ({ getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations, linkIntakeShipment: h.linkIntakeShipment, listAuditLogsFor: vi.fn(async () => []) }))
+vi.mock('@/lib/apiClient', () => ({ getShipmentBundle: vi.fn(async () => h.shipment.bundle), getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations, linkIntakeShipment: h.linkIntakeShipment, listAuditLogsFor: vi.fn(async () => []) }))
 vi.mock('../intake/useIntakeLoads', () => ({ useIntakeLoad: () => ({ row: h.intakeRow, loading: false, error: null, reload: vi.fn(), setRow: vi.fn() }) }))
 vi.mock('./useFormActions', () => ({
   useFormActions: (o: { busy: boolean }) => ({ actions: {}, dialogs: null, busy: o.busy }),
@@ -352,6 +354,18 @@ describe('ShipmentFormPage — from an intake load', () => {
     await waitFor(() => expect((screen.getByTestId('f-shipping-equipmentType') as HTMLInputElement).value).toBe('Dry Van'))
     fireEvent.click(screen.getByTestId('ship-form-save-draft'))
     await waitFor(() => expect(h.linkIntakeShipment).toHaveBeenCalledWith({ intakeId: 'il:r1', shipmentId: 'sh-1' }))
+  })
+
+  it('a form locked by someone else offers Take over, with a confirm step, and takes it', async () => {
+    h.shipment = { bundle: bundleOf('DRAFT'), loading: false, error: null }
+    h.heldBy = { by: 'ryne@bcatcorp.com', until: '2026-11-10T20:00:00.000Z' }
+    try {
+      renderForm('edit', { pathname: '/sh-1/edit' })
+      fireEvent.click(await screen.findByTestId('ship-form-take-over'))
+      expect(h.takeOver).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByTestId('ship-form-take-over-confirm'))
+      await waitFor(() => expect(h.takeOver).toHaveBeenCalledTimes(1))
+    } finally { h.heldBy = null }
   })
 
   it('does not look at an intake id on the edit route', () => {

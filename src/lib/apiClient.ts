@@ -2683,8 +2683,8 @@ export async function voidShipment(input: { shipmentId: string; reason: string; 
 export interface ShipmentLockResult { locked: boolean; lockedBy: string | null; expiresAt: string | null }
 
 /** Take (or refresh) the 10-minute edit lock. `locked: false` names who holds it. */
-export async function lockShipment(shipmentId: string): Promise<ShipmentLockResult> {
-  return shipmentAction<ShipmentLockResult>('LOCK_SHIPMENT', { shipmentId })
+export async function lockShipment(shipmentId: string, takeOver = false): Promise<ShipmentLockResult> {
+  return shipmentAction<ShipmentLockResult>('LOCK_SHIPMENT', { shipmentId, ...(takeOver ? { takeOver: true } : {}) })
 }
 
 /** Release the caller's lock (an ADMIN can `force` another person's). */
