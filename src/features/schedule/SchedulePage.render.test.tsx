@@ -11,6 +11,9 @@ vi.mock('@/hooks/useDrivers', () => ({
   useDrivers: () => ({ drivers: [] }),
 }))
 
+const refresh = vi.hoisted(() => vi.fn(async () => undefined))
+vi.mock('@/store/useAppStore', () => ({ useAppStore: { getState: () => ({ refreshCalendarData: refresh }) } }))
+
 import { SchedulePage } from './SchedulePage'
 
 afterEach(cleanup)
@@ -31,5 +34,15 @@ describe('SchedulePage renders', () => {
     expect(title()).not.toBe(today)
     fireEvent.click(screen.getByRole('button', { name: 'Today' }))
     expect(title()).toBe(today)
+  })
+
+  it('pulls the open loads and the day\'s window when it opens and when the day changes (so yard-pickup loads and fresh assignments show)', () => {
+    refresh.mockClear()
+    render(<SchedulePage />)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    const day = (refresh.mock.calls[0] as unknown as [{ from: string; to: string }])[0]
+    expect(day.from).toBe(day.to)
+    fireEvent.click(screen.getByRole('button', { name: 'Next day' }))
+    expect(refresh).toHaveBeenCalledTimes(2)
   })
 })

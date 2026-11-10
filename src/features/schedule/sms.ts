@@ -26,10 +26,28 @@ const ordinal = (i: number) => (i === 0 ? 'First' : (() => { const o = ORDINALS[
 
 // ── Legacy: one sentence per whole load ─────────────────────────────────────────
 
+/**
+ * Whose loads belong on a driver's run sheet for a day: every load the driver is on, whichever way that is recorded (a stop's driver, or
+ * the legacy pickup/delivery driver fields), that has one of the driver's stops on that day. The old test (legacy pickup driver AND the
+ * PICKUP on that day) dropped a load whose pickup is the yard or has no time, and one assigned only on its stops, which is why tomorrow's
+ * runs were missing. Sorted by the driver's first appointment of the day.
+ */
 export function loadsForDriverOnDay(loads: Load[], driverId: string, dateStr: string): Load[] {
+  const firstApptOnDay = (load: Load): string | null => {
+    const stops = getStops(load)
+    const stopDrivers = stops.some((s) => s.driverId)
+    const mine = stops.filter((s) => (stopDrivers ? s.driverId === driverId : false))
+    const candidates: (string | null | undefined)[] = mine.map((s) => s.appt)
+    if (load.pickupDriverId === driverId) candidates.push(load.pickupAppt)
+    if (load.deliveryDriverId === driverId) candidates.push(load.deliveryAppt)
+    const onDay = candidates.filter((a): a is string => !!a && chicagoDateStr(a) === dateStr).sort()
+    return onDay[0] ?? null
+  }
   return loads
-    .filter((l) => l.pickupDriverId === driverId && chicagoDateStr(l.pickupAppt) === dateStr)
-    .sort((a, b) => a.pickupAppt.localeCompare(b.pickupAppt))
+    .map((load) => ({ load, at: firstApptOnDay(load) }))
+    .filter((x): x is { load: Load; at: string } => x.at !== null)
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .map((x) => x.load)
 }
 
 export function buildSmsText(driver: Driver, loads: Load[], dateStr: string): string {

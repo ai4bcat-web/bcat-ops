@@ -40,10 +40,25 @@ describe('stopsForDriverOnDay (per-stop SMS selection)', () => {
     expect(stopsForDriverOnDay([load], 'drvC', '2026-06-16')).toHaveLength(1)
   })
 
-  it('legacy selection is unchanged (whole load by pickup driver + pickup day)', () => {
+  it('run sheet: the load is on the sheet of every driver who has a stop of it that day (pickup driver and delivery driver of a split load)', () => {
     const load = mkLoad()
     expect(loadsForDriverOnDay([load], 'drvA', '2026-06-15')).toHaveLength(1)
-    expect(loadsForDriverOnDay([load], 'drvB', '2026-06-15')).toHaveLength(0) // delivery driver, legacy ignores
+    expect(loadsForDriverOnDay([load], 'drvB', '2026-06-15')).toHaveLength(1)
+    expect(loadsForDriverOnDay([load], 'drvB', '2026-06-16')).toHaveLength(0)
+    expect(loadsForDriverOnDay([load], 'drvZ', '2026-06-15')).toHaveLength(0)
+  })
+
+  it('a load that starts at the yard (no pickup appointment) is still on the driver\'s sheet for the day it delivers, and one assigned only on its stops is found', () => {
+    const yard = mkLoad({ id: 'L2', pickupAppt: '', pickupDriverId: 'drvA', deliveryDriverId: 'drvA', deliveryAppt: '2026-11-11T14:00:00Z' })
+    expect(loadsForDriverOnDay([yard], 'drvA', '2026-11-11').map((l) => l.id)).toEqual(['L2'])
+    const stopOnly = mkLoad({ id: 'L3', pickupDriverId: null, deliveryDriverId: null, stops: stops.map((s) => ({ ...s, appt: s.appt.replace('2026-06-15', '2026-11-11') })) })
+    expect(loadsForDriverOnDay([stopOnly], 'drvC', '2026-11-11').map((l) => l.id)).toEqual(['L3'])
+  })
+
+  it('sorts by the driver\'s first appointment of the day', () => {
+    const late = mkLoad({ id: 'late', pickupAppt: '2026-11-11T20:00:00Z', pickupDriverId: 'drvA', deliveryDriverId: null, deliveryAppt: '2026-11-12T20:00:00Z' })
+    const early = mkLoad({ id: 'early', pickupAppt: '2026-11-11T13:00:00Z', pickupDriverId: 'drvA', deliveryDriverId: null, deliveryAppt: '2026-11-12T20:00:00Z' })
+    expect(loadsForDriverOnDay([late, early], 'drvA', '2026-11-11').map((l) => l.id)).toEqual(['early', 'late'])
   })
 })
 
