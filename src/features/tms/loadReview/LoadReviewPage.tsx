@@ -1,3 +1,4 @@
+import { ReviewBatchEdit } from './ReviewBatchEdit'
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Check, X } from 'lucide-react'
@@ -5,7 +6,7 @@ import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsListPage, TmsSelect, TmsSt
 import { useAuth } from '@/hooks/useAuth'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 import { isDemoShipment, matchesQuery } from '@/features/shipments/shipmentViews'
-import { batchShipmentTask, listAuditLogsFor, releaseToBilling } from '@/lib/apiClient'
+import { batchShipmentTask, listAuditLogsFor, pushReadyToLoadReview, releaseToBilling } from '@/lib/apiClient'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -19,7 +20,8 @@ type ReviewEntry = { row: ShipmentListRow; verdict?: LoadReviewVerdict }
 export function LoadReviewPage() {
   const [params, setParams] = useSearchParams()
   const { shipments, queue, target, loading, partial, error, refresh } = useLoadReviewQueue(params.get('tab') === 'released', params.get('shipment'))
-  const { hasPageAccess } = useAuth()
+  const { hasPageAccess, user } = useAuth()
+  const email = user?.email ?? ''
   const canOpen = hasPageAccess('loads') || hasPageAccess('tms')
   const canRelease = useBillingGrant()
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -46,6 +48,8 @@ export function LoadReviewPage() {
   const page = filtered.slice(pageNumber * 50, pageNumber * 50 + 50)
   const eligible = filtered.filter((entry) => entry.verdict?.ok)
   const chosen = eligible.filter(({ row }) => selected.has(row.id)).slice(0, MAX_REVIEW_BATCH).map(({ row }) => row.id)
+  // Any ticked row can be batch-edited (a row that still needs fixes is exactly the one you want to fix); only a clean one can be released.
+  const editChosen = filtered.filter(({ row }) => selected.has(row.id)).slice(0, MAX_REVIEW_BATCH).map(({ row }) => row.id)
   const openRow = shipments.find((row) => row.id === params.get('shipment')) ?? target
   function update(values: Record<string, string | null>) {
     setParams((previous) => {
@@ -114,7 +118,7 @@ export function LoadReviewPage() {
     finally { setBusy(false); setConfirm(false) }
   }
   const columns: ColumnDef<ReviewEntry>[] = [
-    { key: 'select', header: 'Select', render: ({ row, verdict }) => tab === 'released' ? null : <input type="checkbox" aria-label={`Select ${row.number}`} disabled={!verdict?.ok} title={verdict ? failingReasons(verdict)[0]?.message : undefined} checked={selected.has(row.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => {
+    { key: 'select', header: 'Select', render: ({ row, verdict }) => tab === 'released' ? null : <input type="checkbox" aria-label={`Select ${row.number}`} title={verdict && !verdict.ok ? failingReasons(verdict)[0]?.message : undefined} checked={selected.has(row.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => {
       if (event.target.checked && !selected.has(row.id) && selected.size >= MAX_REVIEW_BATCH) { setCapMessage(batchCapMessage()); return }
       setCapMessage(null)
       setSelected((old) => { const next = new Set(old); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next })
@@ -164,11 +168,12 @@ export function LoadReviewPage() {
         ...['division', 'rep', 'customer'].map((key) => ({ key, label: key === 'division' ? 'Revenue division' : key === 'rep' ? 'Sales rep' : 'Customer', value: params.get(key), onClick: () => setFilter(key) })),
         { key: 'demo', label: 'Demo', value: params.get('demo') === '1' ? 'only' : null, onClick: () => update({ demo: params.get('demo') === '1' ? null : '1', page: null }) },
       ]}
-      actions={tab !== 'released' && <TmsButton onClick={() => { setSelected(new Set(eligible.slice(0, MAX_REVIEW_BATCH).map(({ row }) => row.id))); setCapMessage(eligible.length > MAX_REVIEW_BATCH ? batchCapMessage() : null) }}>Select all looks ready (up to {MAX_REVIEW_BATCH})</TmsButton>}
+      actions={tab !== 'released' && <><TmsButton onClick={() => { setSelected(new Set(eligible.slice(0, MAX_REVIEW_BATCH).map(({ row }) => row.id))); setCapMessage(eligible.length > MAX_REVIEW_BATCH ? batchCapMessage() : null) }}>Select all looks ready (up to {MAX_REVIEW_BATCH})</TmsButton><TmsButton disabled={busy} data-testid="review-pull-ready" title="Delivered shipments with their references, sales rep, order details and documents move in by themselves; this sweeps any that are waiting" onClick={() => { setBusy(true); pushReadyToLoadReview().then((r) => { setNotice(`${r.pushed} delivered shipment${r.pushed === 1 ? '' : 's'} moved into Load Review (${r.checked} checked)`); void refresh() }).catch((e: unknown) => setNotice(e instanceof Error ? e.message : 'Could not sweep')).finally(() => setBusy(false)) }}>Move ready loads in</TmsButton></>}
       banner={<TmsStatRow columns={5} items={[{ label: 'In review', value: String(queue.length) }, { label: 'Looks ready', value: String(ready.length) }, { label: 'Needs fixes', value: String(needs.length) }, { label: 'Oldest', value: `${Math.max(0, ...queue.map(({ row }) => reviewAgeDays(row, now) ?? 0))} d` }, { label: 'Value in review', value: formatCents(queue.reduce((sum, { row }) => sum + (row.orderRevenueCents ?? row.revenueCents ?? 0), 0)) }]} />}
       page={{ from: filtered.length ? pageNumber * 50 + 1 : 0, to: pageNumber * 50 + page.length, total: filtered.length, pageSize: 50 }}
       footerExtra={<><TmsButton disabled={!pageNumber} onClick={() => update({ page: String(pageNumber - 1) })}>Previous</TmsButton><TmsButton disabled={(pageNumber + 1) * 50 >= filtered.length} onClick={() => update({ page: String(pageNumber + 1) })}>Next</TmsButton></>}
       emptyText={loading || partial ? 'Loading review queue…' : queue.length ? 'Nothing here.' : 'Nothing is waiting for review.'} />
+    {tab !== 'released' && <ReviewBatchEdit ids={editChosen} email={email} onDone={() => { setSelected(new Set()); void refresh() }} />}
     {!!chosen.length && <div className="aa-review-actions"><TmsButton variant="primary" disabled={!canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setConfirm(true)}>Move {chosen.length} to billing</TmsButton>{!canRelease && <p role="note" className="tms-muted">{BILLING_GRANT_MESSAGE}</p>}</div>}
     <TmsDialog open={confirm} onOpenChange={setConfirm} title={`Move ${chosen.length} to billing`} description={`These ${chosen.length} shipments go to accounting. The server re-checks each one.`} footer={<TmsButton disabled={busy || !chosen.length} variant="primary" onClick={() => void releaseBatch()}>Confirm move to billing</TmsButton>} />
     <TmsDialog open={!!filter} onOpenChange={(open) => { if (!open) setFilter(null) }} title="Filter review queue"><TmsSelect aria-label="Filter value" value={filter ? params.get(filter) ?? '' : ''} onChange={(event) => { if (filter) update({ [filter]: event.target.value, page: null }); setFilter(null) }}><option value="">All</option>{options.map((value) => <option key={value} value={value}>{value}</option>)}</TmsSelect></TmsDialog>

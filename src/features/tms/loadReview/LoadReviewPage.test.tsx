@@ -91,7 +91,8 @@ describe('LoadReviewPage inactive revenue division', () => {
   it('an inactive division blocks the row from Looks ready, with its reason, and the drawer refuses Move', async () => {
     mocks.divisions.mockReturnValue([{ ...DRY_DIVISION, active: false }])
     renderPage('/tms/load-review?tab=all')
-    expect(checkbox('S-1')!.disabled).toBe(true)
+    // Any row can be ticked for a batch edit; the reason it is not ready stays on the tick as a hover.
+    expect(checkbox('S-1')!.disabled).toBe(false)
     expect(checkbox('S-1')!.title).toBe('Revenue division is inactive')
     cleanup()
     renderPage('/tms/load-review?shipment=s-1')
@@ -106,13 +107,13 @@ describe('LoadReviewPage inactive revenue division', () => {
 })
 
 describe('LoadReviewPage', () => {
-  it('lists only rows in the queue and offers a checkbox only on Looks-ready rows', () => {
+  it('lists only rows in the queue and offers a checkbox on every row (batch edit), release only for Looks-ready ones', () => {
     renderPage('/tms/load-review?tab=all')
     for (const n of ['S-1', 'S-2', 'S-3']) expect(screen.getByRole('button', { name: n })).toBeTruthy()
     for (const n of ['S-4', 'S-5', 'S-6', 'S-7']) expect(screen.queryByRole('button', { name: n })).toBeNull()
     expect(checkbox('S-1')!.disabled).toBe(false)
     expect(checkbox('S-2')!.disabled).toBe(false)
-    expect(checkbox('S-3')!.disabled).toBe(true)
+    expect(checkbox('S-3')!.disabled).toBe(false)
     expect(checkbox('S-3')!.title).toBe('Missing document: POD')
   })
 
