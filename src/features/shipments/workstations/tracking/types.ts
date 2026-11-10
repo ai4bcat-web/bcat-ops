@@ -36,7 +36,10 @@ export interface TrackingBoardProps {
   setQuery: (value: string) => void
   favorites: Set<string>
   onToggleFavorite: (id: string) => void
+  /** Tracking info for the load (the drawer): a click on the row, or the pin beside the number. */
   onOpenShipment: (id: string) => void
+  /** The shipment's own page (the one the Shipments board opens): a click on the shipment number. */
+  onOpenShipmentPage?: (id: string) => void
   onCreateShipment: () => void
   /** Narrow to the old worklists: check calls due, documents to review, exceptions. Null = all. */
   focus: TrackingFocus | null

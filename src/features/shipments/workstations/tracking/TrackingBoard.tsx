@@ -11,7 +11,7 @@
 import { CurrentlyViewing } from '@/features/shipments/components/CurrentlyViewing'
 import { TrackingModeNotSetRowChip } from '../../trackingModeControl/TrackingModeNotSetChip'
 import { useCallback, useMemo, useState } from 'react'
-import { Heart, Link2, Lock, MoreHorizontal, Plus, Search } from 'lucide-react'
+import { Heart, Link2, Lock, MapPin, MoreHorizontal, Plus, Search } from 'lucide-react'
 import { TrackerPicker } from '@/components/TrackerPicker'
 import { BoardMapView } from '../../board/BoardMapView'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
@@ -151,6 +151,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
     favorites,
     onToggleFavorite,
     onOpenShipment,
+    onOpenShipmentPage,
     onCreateShipment,
     onCreateCustomerUrl,
     onRequestCheckCall,
@@ -254,6 +255,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
               row={row}
               nowMs={nowMs}
               onOpen={() => onOpenShipment(row.id)}
+              onOpenPage={onOpenShipmentPage ? () => onOpenShipmentPage(row.id) : undefined}
               favorites={favorites}
               onToggleFavorite={() => onToggleFavorite(row.id)}
             />
@@ -308,7 +310,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
           return null
       }
     },
-    [favorites, onOpenShipment, onToggleFavorite, onCreateCustomerUrl, onRequestCheckCall, onRequestPod, onLogCheckCall, onSnooze, onReviewDocs, onAssignTracker, nowMs, prefsOf],
+    [favorites, onOpenShipment, onOpenShipmentPage, onToggleFavorite, onCreateCustomerUrl, onRequestCheckCall, onRequestPod, onLogCheckCall, onSnooze, onReviewDocs, onAssignTracker, nowMs, prefsOf],
   )
 
   const kpis = useMemo<DenseKpi[]>(() => {
@@ -522,12 +524,16 @@ function ShipmentCell({
   nowMs,
   favorites,
   onOpen,
+  onOpenPage,
   onToggleFavorite,
 }: {
   row: ShipmentRow
   nowMs: number
   favorites: Set<string>
+  /** The tracking info for the load (the drawer on this page). */
   onOpen: () => void
+  /** The shipment's own page, the same one the Shipments board opens. */
+  onOpenPage?: () => void
   onToggleFavorite: () => void
 }) {
   return (
@@ -540,9 +546,22 @@ function ShipmentCell({
       >
         <Heart size={14} fill={favorites.has(row.id) ? 'currentColor' : 'none'} />
       </button>
-      <button type="button" className="tms-tracking-pro" onClick={(e) => { e.stopPropagation(); onOpen() }}>
+      <button
+        type="button" className="tms-tracking-pro" data-testid="tracking-open-shipment"
+        title={onOpenPage ? 'Open the shipment' : 'Open the tracking info'}
+        onClick={(e) => { e.stopPropagation(); (onOpenPage ?? onOpen)() }}
+      >
         {row.number}
       </button>
+      {onOpenPage ? (
+        <button
+          type="button" className="tms-tracking-favorited" data-testid="tracking-open-tracking"
+          aria-label={`Open tracking for ${row.number}`} title="Open the tracking info"
+          onClick={(e) => { e.stopPropagation(); onOpen() }}
+        >
+          <MapPin size={14} />
+        </button>
+      ) : null}
       {row.editLockUserId && Date.parse(row.editLockExpiresAt ?? '') > nowMs ? (
         <Lock size={12} aria-label={`${row.editLockUserName ?? 'Someone'} is editing`} data-testid="tracking-lock-icon"><title>{`${row.editLockUserName ?? 'Someone'} is editing this shipment`}</title></Lock>
       ) : null}

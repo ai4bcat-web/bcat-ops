@@ -219,6 +219,19 @@ describe('row actions', () => {
     expect(screen.getByTestId('tracking-drawer')).toHaveTextContent('S-ANN')
   })
 
+  it('the shipment number opens the shipment page; the pin beside it and a click on the row open the tracking info', async () => {
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    fireEvent.click(within(trackingRow('S-ANN')).getByTestId('tracking-open-tracking'))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tms/tracking?assignee=all&shipment=S-ANN'))
+    expect(screen.getByTestId('tracking-drawer')).toHaveTextContent('S-ANN')
+    cleanup()
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    fireEvent.click(within(trackingRow('S-LOOSE')).getByTestId('tracking-open-shipment'))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/tms\/shipments\/S-LOOSE$/))
+  })
+
   it('reassigns the selected rows of a section in one call', async () => {
     renderPage()
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
