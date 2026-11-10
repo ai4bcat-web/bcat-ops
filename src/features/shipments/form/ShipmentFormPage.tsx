@@ -20,6 +20,7 @@ import { useStaff } from '@/hooks/useStaff'
 import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
 import { getShipmentBundle, getTmsSettings, linkIntakeShipment, listLocations } from '@/lib/apiClient'
 import { useIntakeLoad } from '../intake/useIntakeLoads'
+import { AttachmentPreview } from '../intake/SourceEmailCard'
 import type { LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 import { CARD_ORDER, CARD_TITLE, type CardKey, type CardProps, type MoreTabKey } from './cards/cardRegistry'
 import { CARD_COMPONENTS, MORE_TAB_COMPONENTS, RAIL_RATE_HISTORY, RAIL_ROLES } from './defaultSections'
@@ -72,6 +73,12 @@ export function ShipmentFormPage({ mode }: { mode: 'create' | 'edit' }) {
 function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { initialBundle: ShipmentBundle | null; prefillCustomerId?: string; intakeId?: string }) {
   const navigate = useNavigate()
   const intake = useIntakeLoad(intakeId)
+  // The e-mail the load came from, for the side-by-side PDF: the one this create page was opened from, or (on an open draft built from
+  // intake) the one the shipment is tied to.
+  const tiedIntake = useIntakeLoad(intakeId ? undefined : initialBundle?.shipment.intakeLoadId ?? undefined)
+  const sourceRow = intake.row ?? tiedIntake.row
+  const sourceFiles = (sourceRow?.attachments ?? []).filter((a) => /^(application\/pdf|image\/)/.test(a.contentType))
+  const [showSource, setShowSource] = useState(true)
   const [fromEmail, setFromEmail] = useState<ReadonlySet<string>>(() => new Set())
   const seededFor = useRef<string | null>(null)
   const { user, isAdmin, isOwner, hasPageAccess } = useAuth()
@@ -378,13 +385,27 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
           </TmsAlert>
         ) : null}
 
+        {sourceFiles.length > 0 && !showSource ? (
+          <div className="tms-ship-banner">
+            <TmsButton size="sm" data-testid="ship-form-source-show" onClick={() => setShowSource(true)}>Show the source PDF next to the form</TmsButton>
+          </div>
+        ) : null}
         {intakeId && intake.error ? <TmsAlert tone="orange" className="tms-ship-banner">Could not load the e-mail to pre-fill from: {intake.error}</TmsAlert> : null}
         {fromEmail.size > 0 ? (
           <TmsAlert tone="blue" className="tms-ship-banner"><span data-testid="ship-form-intake-banner">Pre-filled from the e-mail / rate confirmation ({fromEmail.size} fields). Fields marked “from e-mail” need a look before you create.</span></TmsAlert>
         ) : null}
 
         <FromEmailContext.Provider value={fromEmail}>
-          <div className="tms-ship-layout">
+          <div className="tms-ship-layout" data-source={sourceFiles.length > 0 && showSource ? 'open' : undefined}>
+            {sourceFiles.length > 0 && showSource ? (
+              <aside className="tms-ship-source" data-testid="ship-form-source" aria-label="Source e-mail">
+                <div className="tms-ship-source-head">
+                  <strong>Source e-mail</strong>
+                  <TmsButton size="sm" variant="ghost" data-testid="ship-form-source-hide" onClick={() => setShowSource(false)}>Hide</TmsButton>
+                </div>
+                <AttachmentPreview attachments={sourceRow!.attachments} />
+              </aside>
+            ) : null}
             <div className="tms-ship-main">
               {CARD_ORDER.map((key, i) => {
                 const Card = CARD_COMPONENTS[key]

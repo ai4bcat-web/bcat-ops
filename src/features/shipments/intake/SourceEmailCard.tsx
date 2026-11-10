@@ -13,7 +13,7 @@ const PARSE_NOTES: Record<string, string> = {
 }
 
 /** The attachment the e-mail came with, shown in full beside the form so the load can be built straight from it (Ryne 2026-11-10). */
-function AttachmentPreview({ attachments }: { attachments: IntakeLoadRecord['attachments'] }) {
+export function AttachmentPreview({ attachments }: { attachments: IntakeLoadRecord['attachments'] }) {
   const viewable = attachments.filter((a) => /^(application\/pdf|image\/)/.test(a.contentType))
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [loaded, setLoaded] = useState<{ key: string; url: string } | { key: string; error: string } | null>(null)

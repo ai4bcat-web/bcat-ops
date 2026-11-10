@@ -40,7 +40,7 @@ vi.mock('@/hooks/useCarriers', () => ({ useCarriers: () => ({ carriers: [] }) })
 vi.mock('@/hooks/useStaff', () => ({ useStaff: () => ({ staff: [] }) }))
 vi.mock('@/hooks/useOwnFleetRoster', () => ({ useOwnFleetRoster: () => [] }))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: null }) }))
-vi.mock('@/lib/apiClient', () => ({ getShipmentBundle: vi.fn(async () => h.shipment.bundle), getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations, linkIntakeShipment: h.linkIntakeShipment, listAuditLogsFor: vi.fn(async () => []) }))
+vi.mock('@/lib/apiClient', () => ({ getIntakePdfUrl: vi.fn(async () => 'blob:pdf'), getShipmentBundle: vi.fn(async () => h.shipment.bundle), getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations, linkIntakeShipment: h.linkIntakeShipment, listAuditLogsFor: vi.fn(async () => []) }))
 vi.mock('../intake/useIntakeLoads', () => ({ useIntakeLoad: () => ({ row: h.intakeRow, loading: false, error: null, reload: vi.fn(), setRow: vi.fn() }) }))
 vi.mock('./useFormActions', () => ({
   useFormActions: (o: { busy: boolean }) => ({ actions: {}, dialogs: null, busy: o.busy }),
@@ -366,6 +366,28 @@ describe('ShipmentFormPage — from an intake load', () => {
       fireEvent.click(screen.getByTestId('ship-form-take-over-confirm'))
       await waitFor(() => expect(h.takeOver).toHaveBeenCalledTimes(1))
     } finally { h.heldBy = null }
+  })
+
+  it('shows the e-mail\'s PDF beside the form when building from intake, and Hide / Show toggles it', async () => {
+    h.intakeRow = { ...(row as object), attachments: [{ key: 'k1', name: 'rate-con.pdf', contentType: 'application/pdf', size: 10 }] }
+    try {
+      renderForm('create', { pathname: '/new', state: { intakeId: 'il:r1' } })
+      expect(await screen.findByTestId('ship-form-source')).toBeTruthy()
+      expect(await screen.findByTestId('intake-preview-frame')).toBeTruthy()
+      fireEvent.click(screen.getByTestId('ship-form-source-hide'))
+      expect(screen.queryByTestId('ship-form-source')).toBeNull()
+      fireEvent.click(screen.getByTestId('ship-form-source-show'))
+      expect(screen.getByTestId('ship-form-source')).toBeTruthy()
+    } finally { h.intakeRow = null }
+  })
+
+  it('shows no source panel when the e-mail has no viewable attachment', async () => {
+    h.intakeRow = row
+    try {
+      renderForm('create', { pathname: '/new', state: { intakeId: 'il:r1' } })
+      await waitFor(() => expect(screen.getByTestId('ship-form-intake-banner')).toBeTruthy())
+      expect(screen.queryByTestId('ship-form-source')).toBeNull()
+    } finally { h.intakeRow = null }
   })
 
   it('does not look at an intake id on the edit route', () => {
