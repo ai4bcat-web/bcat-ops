@@ -898,6 +898,8 @@ function isActionAuthorized(action: Action, caller: Caller): boolean {
 /** Internal Lambdas that may call this router without a user, and the only actions they may call. */
 export const SYSTEM_CALLERS: Record<string, readonly Action[]> = {
   'carrier-inbox': ['FILE_INBOUND_OFFER'],
+  // A driver's finished POD upload files its pages on the shipment (waiting for review).
+  'driver-app-api': ['ATTACH_DRIVER_DOC'],
 }
 
 export async function authorize(action: Action, identity?: AppSyncIdentity | null, systemCaller?: string | null): Promise<Caller> {

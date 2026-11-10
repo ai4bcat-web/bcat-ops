@@ -566,6 +566,12 @@ const driverApiWritableArns = [
   `${driverApiAvailabilityTable.tableArn}/index/*`,
 ]
 
+// A finished driver POD upload is filed on the shipment by tms-shipment-actions (plain identity grant, like the other Lambda-to-Lambda calls).
+driverApiFn.addEnvironment('TMS_SHIPMENT_ACTIONS_FUNCTION_NAME', backend.tmsShipmentActions.resources.lambda.functionName)
+driverApiFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['lambda:InvokeFunction'],
+  resources: [backend.tmsShipmentActions.resources.lambda.functionArn],
+}))
 driverApiFn.addToRolePolicy(
   new PolicyStatement({
     actions: ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Query', 'dynamodb:Scan'],

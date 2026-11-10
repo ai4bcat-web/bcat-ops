@@ -1702,11 +1702,40 @@ async function notifyForKind(
   }
 }
 
+const SHIPMENT_ACTIONS_FUNCTION = process.env.TMS_SHIPMENT_ACTIONS_FUNCTION_NAME ?? ''
+
+/**
+ * Ryne 2026-11-10: the PODs page left the sidebar, so a POD the driver uploads has to reach the shipment itself. Each page is filed on
+ * the shipment's Documents as a driver-app pointer row WAITING FOR REVIEW (it does not count as the POD until a reviewer accepts it in
+ * Load Review). Handed to tms-shipment-actions; fire and forget, so a filing problem never fails the driver's upload.
+ */
+async function fileDriverPodPages(loadId: string | null, docIds: string[]): Promise<void> {
+  if (!SHIPMENT_ACTIONS_FUNCTION || !loadId || docIds.length === 0) return
+  try {
+    const load = await getItem<{ shipmentId?: string | null }>(LOAD_TABLE_NAME, { id: loadId })
+    const shipmentId = load?.shipmentId
+    if (!shipmentId) return
+    const lambda = new LambdaClient({})
+    for (const submissionDocId of docIds) {
+      await lambda.send(new InvokeCommand({
+        FunctionName: SHIPMENT_ACTIONS_FUNCTION,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({
+          systemCaller: 'driver-app-api',
+          arguments: { action: 'ATTACH_DRIVER_DOC', input: JSON.stringify({ shipmentId, loadId, submissionDocId, type: 'POD', pending: true }) },
+        })),
+      }))
+    }
+  } catch (err) {
+    console.error('[driver-app-api] could not file the driver POD on the shipment', { loadId, error: err instanceof Error ? err.message : String(err) })
+  }
+}
+
 async function completeSubmission(
   driverId: string,
   submissionId: string,
   kind: DocKind,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; docIds?: string[] }> {
   const submission = await getOwnedSubmission(submissionId, driverId)
   const pending = submission.pendingUploads ?? {}
   const pages = pending[kind] ?? []
@@ -1803,7 +1832,8 @@ async function completeSubmission(
     ),
   )
 
-  return errors.length > 0 ? { ok: true, error: errors.join('; ') } : { ok: true }
+  const docIds = docs.map((d) => d.id)
+  return errors.length > 0 ? { ok: true, error: errors.join('; '), docIds } : { ok: true, docIds }
 }
 
 /**
@@ -3804,6 +3834,7 @@ export const handler = async (event: FnUrlEvent) => {
       if (kind === 'POD' && !result.error) {
         const sub = (await ddb.send(new GetCommand({ TableName: DRIVER_SUBMISSION_TABLE, Key: { id } }))).Item as DriverSubmissionRow | undefined
         await closeDeliveryOnPod(driver, driverId, sub ?? { loadId: null, referenceNumber: null, stopLabel: null }, nowIso())
+        await fileDriverPodPages(sub?.loadId ?? null, result.docIds ?? [])
       }
       return reply(200, result.error ? { ok: true, error: result.error } : { ok: true })
     }
