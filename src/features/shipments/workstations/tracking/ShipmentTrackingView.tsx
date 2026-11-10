@@ -80,10 +80,20 @@ export function ShipmentTrackingView({ bundle, customer, catalog = [], actions, 
     return () => { live = false }
   }, [shipment.id])
 
+  // An Ivan Cartage load is followed by the assigned driver's truck GPS (Motive breadcrumbs). When the assignment carries only the unit
+  // NUMBER (typed or imported), the truck is found by that number so the map still shows where it is.
+  const fleet = useAppStore((s) => s.equipment)
+  const ownTruckId = useMemo(() => {
+    if (loadCarrier?.truckId) return loadCarrier.truckId
+    // Only our own fleet: an outside carrier's "truck 743" is not our unit 743.
+    if (loadCarrier?.kind !== 'OWN_ASSET') return null
+    const unit = String(loadCarrier?.truckNumber ?? '').trim().toLowerCase()
+    return unit ? fleet.find((e) => String(e.unitNumber ?? '').trim().toLowerCase() === unit)?.id ?? null : null
+  }, [loadCarrier?.truckId, loadCarrier?.kind, loadCarrier?.truckNumber, fleet])
   const tracking = useLoadTracking({
     loadId: load?.id,
     shipmentId: shipment.id,
-    truckId: loadCarrier?.truckId ?? null,
+    truckId: ownTruckId,
     load: {
       pickupAppt: load?.pickupAppt,
       deliveredAt: load?.deliveredAt,
