@@ -95,20 +95,25 @@ export function withDerivedLegacy<T extends Partial<Load>>(patch: T): T {
   return { ...patch, ...deriveLegacyFields(patch.stops) }
 }
 
+/** The load fields a stops write re-derives (the legacy mirrors). */
+export const LEGACY_MIRROR_FIELDS = [
+  'pickupAppt', 'pickupApptEnd', 'pickupApptType', 'originName', 'originCity', 'pickupDriverId',
+  'deliveryAppt', 'deliveryApptEnd', 'deliveryApptType', 'destinationName', 'destinationCity', 'deliveryDriverId',
+] as const
+
 /**
- * A stops save re-derives pickupDriverId / deliveryDriverId even when no driver changed. Writing those two fields is refused
- * for some signed-in users ("Unauthorized on [deliveryDriverId, pickupDriverId]" when Dennis set an appointment to NEED),
- * so a write that did not set them and would not change them leaves them out.
+ * A stops save re-derives every legacy mirror even when none changed, and a write that carries a mirror a signed-in user may not
+ * set is refused WHOLE ("Unauthorized on [deliveryDriverId, pickupDriverId]", then "[deliveryApptEnd, pickupApptEnd]" for the same
+ * save). So a mirror that would not change is left out, whoever sent it: only what actually differs is written.
  */
 export function withoutUnchangedDriverMirrors<T extends Partial<Load>>(payload: T, before: Partial<Load>, _patch?: Partial<Load>): T {
-  const out = { ...payload }
-  for (const field of ['pickupDriverId', 'deliveryDriverId'] as const) {
-    // Unchanged is left out even when the caller sent it: the load drawer sends the whole derived mirror set on every save, and a
-    // user without driver-field write permission was refused ("Unauthorized on [deliveryDriverId, pickupDriverId]") on a save that
-    // changed nothing about the driver.
-    if ((out[field] ?? null) === (before[field] ?? null)) delete out[field]
+  const out = { ...payload } as Record<string, unknown>
+  const held = before as Record<string, unknown>
+  for (const field of LEGACY_MIRROR_FIELDS) {
+    if (!(field in out)) continue
+    if ((out[field] ?? null) === (held[field] ?? null)) delete out[field]
   }
-  return out
+  return out as T
 }
 
 /** Re-number sequence 0..n after add/remove/reorder. */

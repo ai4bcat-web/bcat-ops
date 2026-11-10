@@ -189,4 +189,10 @@ describe('withoutUnchangedDriverMirrors', () => {
     // Sent by the caller but unchanged: still left out (the drawer always sends the mirrors).
     expect(withoutUnchangedDriverMirrors({ pickupDriverId: null, deliveryDriverId: 'd-1' } as never, before, { pickupDriverId: null } as never)).toEqual({})
   })
+
+  it('leaves out every unchanged mirror (appointment end, type, names), not only the drivers', () => {
+    const before = { pickupAppt: 'A', pickupApptEnd: null, pickupApptType: undefined, deliveryAppt: 'B', deliveryApptEnd: undefined, originName: 'O' } as never
+    const derived = { pickupAppt: 'A2', pickupApptEnd: null, pickupApptType: null, deliveryAppt: 'B', deliveryApptEnd: null, originName: 'O' } as never
+    expect(withoutUnchangedDriverMirrors(derived, before)).toEqual({ pickupAppt: 'A2' })
+  })
 })
