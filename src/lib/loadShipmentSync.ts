@@ -36,6 +36,21 @@ export function changedStopDrivers(before: readonly Stop[], next: readonly Stop[
   return out
 }
 
+/**
+ * Every stop driver this write changes, whichever way it was written: a `stops` array, or only the two pickup/delivery mirrors
+ * (the calendar's context menu and drag), which land on the first pickup and the last delivery.
+ */
+export function driverChangesOfWrite(beforeStops: readonly Stop[], next: Partial<Load>): { stopId: string; driverId: string | null }[] {
+  if (next.stops) return changedStopDrivers(beforeStops, next.stops)
+  const ordered = [...beforeStops].sort((a, b) => a.sequence - b.sequence)
+  const first = ordered.find((s) => s.type === 'pickup') ?? ordered[0]
+  const last = [...ordered].reverse().find((s) => s.type === 'delivery') ?? ordered[ordered.length - 1]
+  const out: { stopId: string; driverId: string | null }[] = []
+  if (first && 'pickupDriverId' in next && (next.pickupDriverId ?? null) !== (first.driverId ?? null)) out.push({ stopId: first.id, driverId: next.pickupDriverId ?? null })
+  if (last && 'deliveryDriverId' in next && (next.deliveryDriverId ?? null) !== (last.driverId ?? null) && !out.some((o) => o.stopId === last.id)) out.push({ stopId: last.id, driverId: next.deliveryDriverId ?? null })
+  return out
+}
+
 /** The driver this write puts on the whole load, or null when the driver did not change (or pickup and delivery differ). */
 export function loadWideDriverChange(before: Partial<Load>, next: Partial<Load>): string | null {
   const p = next.pickupDriverId

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { changedApptStops, changedStopDrivers, loadWideDriverChange, takesRosterDriver } from './loadShipmentSync'
+import { changedApptStops, changedStopDrivers, driverChangesOfWrite, loadWideDriverChange, takesRosterDriver } from './loadShipmentSync'
 import type { Stop } from '@/types'
 
 const stop = (id: string, appt: string, extra: Partial<Stop> = {}): Stop => ({ id, sequence: 0, type: 'pickup', appt, ...extra }) as Stop
@@ -38,5 +38,17 @@ describe('changedStopDrivers', () => {
     const next = [stop('a', 'd9'), stop('b', null), stop('c', 'd2'), stop('new', 'd3')]
     expect(changedStopDrivers(before, next)).toEqual([{ stopId: 'a', driverId: 'd9' }, { stopId: 'b', driverId: null }])
     expect(changedStopDrivers(before, null)).toEqual([])
+  })
+})
+
+describe('driverChangesOfWrite', () => {
+  const stop = (id: string, type: 'pickup' | 'delivery', sequence: number, driverId: string | null) => ({ id, type, sequence, driverId } as never)
+  const stops = [stop('pu', 'pickup', 0, null), stop('de', 'delivery', 1, 'd1')]
+  it('reads a mirror-only write onto the first pickup and the last delivery', () => {
+    expect(driverChangesOfWrite(stops, { pickupDriverId: 'd2', deliveryDriverId: 'd1' })).toEqual([{ stopId: 'pu', driverId: 'd2' }])
+    expect(driverChangesOfWrite(stops, { pickupDriverId: null, deliveryDriverId: null })).toEqual([{ stopId: 'de', driverId: null }])
+  })
+  it('reads a stops write by the stops themselves', () => {
+    expect(driverChangesOfWrite(stops, { stops: [stop('pu', 'pickup', 0, 'd3'), stop('de', 'delivery', 1, 'd1')] } as never)).toEqual([{ stopId: 'pu', driverId: 'd3' }])
   })
 })

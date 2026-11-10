@@ -2,6 +2,7 @@ import { stopTapsLine, podSentAtFrom } from '@/lib/stopTimes'
 import { useLoadDriverDocs } from '@/hooks/useLoadDriverDocs'
 import { paperworkStatusLine } from '@/lib/paperworkLocation'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useInRouterContext, useNavigate } from 'react-router-dom'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import {
   useForm, Controller,
@@ -259,7 +260,23 @@ function EditLoadDialog({
 
 // ── Drawer (view / edit modes) ────────────────────────────────────────────────
 
+/**
+ * One shipments page. A load that belongs to a shipment is not edited in this drawer: whoever opened it (the calendar, Tasks, Appts,
+ * the driver app page...) is taken to the shipment itself, the same page the Shipments board opens, so there is one record and one
+ * place to change, void or cover it. Only a load with no shipment yet (old rows) still opens here.
+ */
+function OpenShipmentInstead({ shipmentId, mode, onDone }: { shipmentId: string; mode: 'view' | 'edit'; onDone: () => void }) {
+  const navigate = useNavigate()
+  useEffect(() => {
+    navigate(mode === 'edit' ? `/tms/shipments/${shipmentId}/edit` : `/tms/shipments/${shipmentId}`)
+    onDone()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shipmentId, mode])
+  return null
+}
+
 export function LoadDrawer() {
+  const inRouter = useInRouterContext()
   const selectedLoadId        = useAppStore((s) => s.selectedLoadId)
   const drawerMode            = useAppStore((s) => s.drawerMode)
   const setSelectedLoad       = useAppStore((s) => s.setSelectedLoad)
@@ -658,6 +675,9 @@ export function LoadDrawer() {
 
   // SidePanel has no `open` prop — the Sheet honoured one, and without this guard the
   // drawer renders as soon as it mounts and covers the loads list.
+  if (inRouter && isOpen && load?.shipmentId && (drawerMode === 'view' || drawerMode === 'edit')) {
+    return <OpenShipmentInstead shipmentId={load.shipmentId} mode={drawerMode} onDone={() => setSelectedLoad(null)} />
+  }
   if (!isOpen) return null
 
   // ── View mode → shared SidePanel ───────────────────────────────────────────

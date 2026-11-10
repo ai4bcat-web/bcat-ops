@@ -10,8 +10,8 @@ import { getMondayOf } from '@/lib/date'
 import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import * as api from '@/lib/apiClient'
 import { inactiveChanges } from '@/lib/fleetActive'
-import { withDerivedLegacy, withoutUnchangedDriverMirrors, withStopsFromLegacy } from '@/lib/stops'
-import { changedApptStops, changedStopDrivers, loadWideDriverChange, takesRosterDriver } from '@/lib/loadShipmentSync'
+import { getStops, withDerivedLegacy, withoutUnchangedDriverMirrors, withStopsFromLegacy } from '@/lib/stops'
+import { changedApptStops, driverChangesOfWrite, loadWideDriverChange, takesRosterDriver } from '@/lib/loadShipmentSync'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { BROKER_ROW_NO_SHIPMENT_MESSAGE, COVERED_LOAD_MESSAGE, OwnFleetSwitchCancelled, confirmOwnFleetSwitch, requestCover } from '@/lib/ownFleetSwitch'
 import type { NewShipmentPrefill } from '@/features/shipments/components/NewShipmentDialog'
@@ -552,7 +552,7 @@ function writeAudit(
 
 /** Taking the driver off, or a different driver per stop: the server writes the stops' drivers and the two mirrors (a client write of the mirrors is refused). A load an outside carrier covers has no roster driver to change here. Edits `rest` in place. */
 async function syncStopDrivers(before: Load, payload: Partial<Load>, rest: Partial<Load>): Promise<void> {
-  const changes = changedStopDrivers(before.stops ?? [], payload.stops)
+  const changes = driverChangesOfWrite(getStops(before), payload)
   if (changes.length === 0) return
   if (await routeBrokerRow(before, changes, rest)) return
   if (!takesRosterDriver(before)) {
@@ -598,7 +598,7 @@ async function routeBrokerRow(before: Load, changes: { stopId: string; driverId:
     })
   } else {
     // Nobody on a leg: only stray stop drivers to clear.
-    const held = (before.stops ?? []).filter((s) => s.driverId).map((s) => ({ stopId: s.id, driverId: null }))
+    const held = getStops(before).filter((s) => s.driverId).map((s) => ({ stopId: s.id, driverId: null }))
     if (held.length > 0) await api.setStopDrivers({ loadId: before.id, assignments: held })
   }
   return handled()
@@ -612,7 +612,7 @@ async function routeBrokerRow(before: Load, changes: { stopId: string; driverId:
 async function switchCoveredLoadToOwnFleet(before: Load, changes: { stopId: string; driverId: string | null }[]): Promise<void> {
   const driverIds = new Set(changes.map((c) => c.driverId))
   const driverId = driverIds.size === 1 ? [...driverIds][0] ?? null : null
-  const wholeLoad = changes.length === (before.stops ?? []).length
+  const wholeLoad = changes.length === getStops(before).length
   if (!driverId || !wholeLoad || !before.shipmentId || !before.activeLoadCarrierId) throw new Error(COVERED_LOAD_MESSAGE)
   const ok = await confirmOwnFleetSwitch({ loadId: before.id, loadLabel: before.aljexId, carrierName: before.carrierName ?? null, driverId })
   if (!ok) throw new OwnFleetSwitchCancelled()
@@ -650,7 +650,7 @@ async function syncThroughShipment(before: Load, payload: Partial<Load>): Promis
     })
     expectedUpdatedAt = bundle.loads[0]?.updatedAt ?? expectedUpdatedAt
   }
-  if (await routeBrokerRow(before, changedStopDrivers(before.stops ?? [], payload.stops), rest)) return rest
+  if (await routeBrokerRow(before, driverChangesOfWrite(getStops(before), payload), rest)) return rest
   const driverId = takesRosterDriver(before) ? loadWideDriverChange(before, payload) : null
   if (driverId) {
     await api.assignAsset({ loadId: before.id, ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}), driverId })
