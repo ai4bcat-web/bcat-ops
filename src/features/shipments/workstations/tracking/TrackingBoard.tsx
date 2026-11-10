@@ -10,7 +10,7 @@
  */
 import { TrackingModeNotSetRowChip } from '../../trackingModeControl/TrackingModeNotSetChip'
 import { useCallback, useMemo, useState } from 'react'
-import { Heart, Link2, MoreHorizontal, Plus, Search, X } from 'lucide-react'
+import { Heart, Link2, Lock, MoreHorizontal, Plus, Search, X } from 'lucide-react'
 import { TrackerPicker } from '@/components/TrackerPicker'
 import { BoardMapView } from '../../board/BoardMapView'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
@@ -253,6 +253,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
           return (
             <ShipmentCell
               row={row}
+              nowMs={nowMs}
               onOpen={() => onOpenShipment(row.id)}
               favorites={favorites}
               onToggleFavorite={() => onToggleFavorite(row.id)}
@@ -533,11 +534,13 @@ export function TrackingBoard(props: TrackingBoardProps) {
 
 function ShipmentCell({
   row,
+  nowMs,
   favorites,
   onOpen,
   onToggleFavorite,
 }: {
   row: ShipmentRow
+  nowMs: number
   favorites: Set<string>
   onOpen: () => void
   onToggleFavorite: () => void
@@ -555,6 +558,9 @@ function ShipmentCell({
       <button type="button" className="tms-tracking-pro" onClick={(e) => { e.stopPropagation(); onOpen() }}>
         {row.number}
       </button>
+      {row.editLockUserId && Date.parse(row.editLockExpiresAt ?? '') > nowMs ? (
+        <Lock size={12} aria-label={`${row.editLockUserName ?? 'Someone'} is editing`} data-testid="tracking-lock-icon"><title>{`${row.editLockUserName ?? 'Someone'} is editing this shipment`}</title></Lock>
+      ) : null}
     </div>
   )
 }

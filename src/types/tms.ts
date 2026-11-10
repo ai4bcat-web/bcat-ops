@@ -1957,6 +1957,10 @@ export interface ShipmentRecord {
   /** P9. The app refused a POD twice and asked for a person. */
   podFlaggedAt?: string | null
   podFlagReason?: string | null
+  /** The 10-minute edit lock: who is in the shipment's edit form (LOCK_SHIPMENT / UNLOCK_SHIPMENT write these). */
+  editLockUserId?: string | null
+  editLockUserName?: string | null
+  editLockExpiresAt?: string | null
   /** P8. The tracking agent's own flag, shown on the Tracking page. */
   trackingFlaggedAt?: string | null
   trackingFlagReason?: string | null

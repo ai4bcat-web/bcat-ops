@@ -2075,6 +2075,11 @@ const schema = a.schema(stageTypes({
       // P9. A human was asked to look at a POD the app refused twice.
       podFlaggedAt:    a.datetime(),
       podFlagReason:   a.string(),
+      // Ryne 2026-11-09: a person editing a shipment holds a 10-minute lock (refreshed while the form is open, released on save and exit).
+      // Written only by the LOCK_SHIPMENT / UNLOCK_SHIPMENT actions; clients read it to show the lock icon and the "X is editing" banner.
+      editLockUserId:    a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      editLockUserName:  a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      editLockExpiresAt: a.datetime().authorization((allow) => [allow.authenticated().to(['read'])]),
       // P8. The tracking agent raised a flag the Tracking page shows.
       trackingFlaggedAt: a.datetime(),
       trackingFlagReason: a.string(),

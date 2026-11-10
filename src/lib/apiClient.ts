@@ -2670,6 +2670,18 @@ export async function voidShipment(input: { shipmentId: string; reason: string; 
   return shipmentAction<ShipmentBundle>('VOID_SHIPMENT', input)
 }
 
+export interface ShipmentLockResult { locked: boolean; lockedBy: string | null; expiresAt: string | null }
+
+/** Take (or refresh) the 10-minute edit lock. `locked: false` names who holds it. */
+export async function lockShipment(shipmentId: string): Promise<ShipmentLockResult> {
+  return shipmentAction<ShipmentLockResult>('LOCK_SHIPMENT', { shipmentId })
+}
+
+/** Release the caller's lock (an ADMIN can `force` another person's). */
+export async function unlockShipment(shipmentId: string, force = false): Promise<{ released: boolean }> {
+  return shipmentAction<{ released: boolean }>('UNLOCK_SHIPMENT', { shipmentId, ...(force ? { force: true } : {}) })
+}
+
 /** The way back from a void. Owner/ADMIN only. */
 export async function unvoidShipment(input: { shipmentId: string; reason: string; expectedUpdatedAt?: string | null }): Promise<unknown> {
   return shipmentAction<unknown>('UNVOID_SHIPMENT', input)

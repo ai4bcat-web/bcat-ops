@@ -605,6 +605,8 @@ type Action =
   | 'RESTORE_DELETED_SHIPMENTS'
   | 'LATEST_DELETE_EXPORT'
   | 'UNVOID_SHIPMENT'
+  | 'LOCK_SHIPMENT'
+  | 'UNLOCK_SHIPMENT'
   | 'REPOINT_SHIPMENT_CUSTOMER'
   // Step R. Who earns the shipment: the rules' answer, a person's answer, and the
   // two reads that let an admin see what the rules would say before they say it.
@@ -8590,6 +8592,53 @@ async function runPostInvoiceGuarded(action: PostInvoiceGuardedAction, input: Ro
   return result
 }
 
+// ── Shipment edit lock ───────────────────────────────────────────────────────
+// A person in a shipment's edit form holds it for 10 minutes (the form refreshes it every few minutes and releases it on save and
+// exit). Another person gets the holder back instead of the lock. Neither action touches updatedAt, so a lock never makes a
+// save's expectedUpdatedAt stale.
+
+const EDIT_LOCK_MS = 10 * 60_000
+
+async function lockShipment(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const now = new Date()
+  const expiresAt = new Date(now.getTime() + EDIT_LOCK_MS).toISOString()
+  try {
+    await dynamo.send(new UpdateItemCommand({
+      TableName: SHIPMENT_TABLE_NAME,
+      Key: { id: { S: shipmentId } },
+      UpdateExpression: 'SET editLockUserId = :u, editLockUserName = :n, editLockExpiresAt = :e',
+      ConditionExpression: 'attribute_exists(id) AND (attribute_not_exists(editLockUserId) OR editLockUserId = :u OR editLockExpiresAt < :now)',
+      ExpressionAttributeValues: { ':u': { S: caller.email }, ':n': { S: caller.email }, ':e': { S: expiresAt }, ':now': { S: now.toISOString() } },
+    }))
+    return { locked: true, lockedBy: caller.email, expiresAt }
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name !== 'ConditionalCheckFailedException') throw err
+    const row = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+    if (!row) throw new Error('Shipment not found', { cause: err })
+    return { locked: false, lockedBy: optionalString(row.editLockUserName, 200), expiresAt: optionalString(row.editLockExpiresAt, 40) }
+  }
+}
+
+/** Release the caller's lock; an ADMIN may break someone else's (`force`). A lock that is not the caller's is left alone. */
+async function unlockShipment(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const force = input.force === true && caller.isAdmin
+  try {
+    await dynamo.send(new UpdateItemCommand({
+      TableName: SHIPMENT_TABLE_NAME,
+      Key: { id: { S: shipmentId } },
+      UpdateExpression: 'REMOVE editLockUserId, editLockUserName, editLockExpiresAt',
+      ConditionExpression: force ? 'attribute_exists(id)' : 'attribute_exists(id) AND editLockUserId = :u',
+      ...(force ? {} : { ExpressionAttributeValues: { ':u': { S: caller.email } } }),
+    }))
+    return { released: true }
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === 'ConditionalCheckFailedException') return { released: false }
+    throw err
+  }
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
@@ -8633,6 +8682,10 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return voidShipment(input, caller)
     case 'UNVOID_SHIPMENT':
       return unvoidShipment(input, caller)
+    case 'LOCK_SHIPMENT':
+      return lockShipment(input, caller)
+    case 'UNLOCK_SHIPMENT':
+      return unlockShipment(input, caller)
     case 'REPOINT_SHIPMENT_CUSTOMER':
       return repointShipmentCustomer(input, caller)
     case 'SET_REV_TAG':
