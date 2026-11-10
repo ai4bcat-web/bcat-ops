@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Copy, Check, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react'
 import { TmsEmptyState } from '@/features/tms/kit/TmsEmptyState'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { Avatar } from '@/components/ui/avatar'
 import { useLoads, useEnsureLoadRange } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
+import { useAppStore } from '@/store/useAppStore'
 import { chicagoDateStr, addDays, apptTimeLabel } from '@/lib/date'
 import { getColor } from '@/lib/driverColors'
 import type { Load, Driver } from '@/types'
@@ -173,6 +174,14 @@ export function SchedulePage() {
   const { drivers } = useDrivers()
   const [dateStr, setDateStr] = useState(todayStr)
   useEnsureLoadRange(dateStr, dateStr)
+  // Loads that start at the yard (no pickup date) or sit outside the month window come in with the open set; and the sheet follows the
+  // calendar as loads are assigned or re-timed, instead of staying as it was when the page opened.
+  useEffect(() => {
+    const refresh = () => { void useAppStore.getState().refreshCalendarData({ from: dateStr, to: dateStr }) }
+    refresh()
+    const timer = setInterval(refresh, 60_000)
+    return () => clearInterval(timer)
+  }, [dateStr])
 
   const activeDrivers = drivers.filter((d) => d.active)
 
