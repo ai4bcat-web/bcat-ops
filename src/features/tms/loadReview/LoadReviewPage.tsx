@@ -1,4 +1,5 @@
 import { ReviewBatchEdit } from './ReviewBatchEdit'
+import { PodPreviewButton } from './PodPreviewButton'
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Check, X } from 'lucide-react'
@@ -125,6 +126,7 @@ export function LoadReviewPage() {
     }} /> },
     { key: 'shipment', header: 'Shipment', render: ({ row }) => <><TmsButton variant="ghost" onClick={() => update({ shipment: row.id })}>{row.number}</TmsButton>{attempts[row.id] && <p>Last attempt: {attempts[row.id]}</p>}</> },
     { key: 'customer', header: 'Customer', render: ({ row }) => row.customerName ?? '—' },
+    { key: 'pod', header: 'POD', render: ({ row }) => <PodPreviewButton shipmentId={row.id} number={row.number ?? null} /> },
     { key: 'lane', header: 'Lane', render: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
     { key: 'delivered', header: 'Delivered', render: ({ row }) => formatDateTime(row.deliveredAt) },
     { key: 'age', header: 'In review', render: ({ row }) => { const age = reviewAgeDays(row, now); return <TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'POD before delivery' : `${age} d`}</TmsBadge> } },

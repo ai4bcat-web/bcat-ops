@@ -135,7 +135,6 @@ const FLEET_MANAGER_CHILDREN: NavChildDef[] = [
   { to: '/truck-docs', label: 'Asset documents', pageKey: 'truckDocs', badgeKey: 'truckDocs' },
   { to: '/fuel', label: 'Fuel', pageKey: 'fuel' },
   { to: '/files', label: 'Files', pageKey: 'files' },
-  { to: '/pods', label: 'PODs', pageKey: 'pods' },
   { to: '/ivan-driver-app', label: 'Ivan driver app', pageKey: 'ivanDriverApp' },
   { to: '/disputes', label: 'Amazon disputes', pageKey: 'disputes' },
   { to: '/expenses', label: 'Expenses', pageKey: 'finances' },
