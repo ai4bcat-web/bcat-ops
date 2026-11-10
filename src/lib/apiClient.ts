@@ -3139,6 +3139,11 @@ export async function batchShipmentTask(input: BatchShipmentTaskInput): Promise<
 // ── Step AP — board push to Load Review, Load Review batch release ───────────
 // Both are BATCH_SHIPMENT_TASK rows with per-row results (`ok`, `message`, `reasons`).
 // The server refuses more than MAX_REVIEW_BATCH ids with a thrown error.
+/** Move every delivered shipment that passes the Load Review requirement verdict into Load Review. */
+export async function pushReadyToLoadReview(): Promise<{ checked: number; pushed: number }> {
+  return shipmentAction<{ checked: number; pushed: number }>('PUSH_READY_TO_LOAD_REVIEW', {})
+}
+
 /** Push shipments into Load Review. A row that misses the customer's requirements comes back `ok: false` with `reasons`. */
 export async function pushToLoadReview(shipmentIds: string[]): Promise<BatchShipmentTaskResult> {
   return batchShipmentTask({ task: 'PUSH_TO_LOAD_REVIEW', shipmentIds })

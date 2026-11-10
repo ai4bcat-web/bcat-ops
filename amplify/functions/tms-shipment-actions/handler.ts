@@ -446,7 +446,11 @@ const batchGetByIds = (tableName: string, ids: string[]) => storeBatchGetByIds(d
 const transact = (items: TransactWriteItem[], label: string, options?: TransactOptions) =>
   storeTransact(dynamo, items, label, options)
 const readBundle = (shipmentId: string) => storeReadBundle(store, shipmentId)
-const rederiveShipmentStatus = (shipmentId: string, caller: Caller) => storeRederiveShipmentStatus(store, shipmentId, caller)
+const rederiveShipmentStatus = async (shipmentId: string, caller: Caller) => {
+  const result = await storeRederiveShipmentStatus(store, shipmentId, caller)
+  await autoPushToReview(shipmentId, caller)
+  return result
+}
 
 // ── Document actions (step E) ────────────────────────────────────────────────
 
@@ -606,6 +610,7 @@ type Action =
   | 'LATEST_DELETE_EXPORT'
   | 'UNVOID_SHIPMENT'
   | 'LOCK_SHIPMENT'
+  | 'PUSH_READY_TO_LOAD_REVIEW'
   | 'UNLOCK_SHIPMENT'
   | 'REPOINT_SHIPMENT_CUSTOMER'
   // Step R. Who earns the shipment: the rules' answer, a person's answer, and the
@@ -3279,6 +3284,47 @@ async function pushToReview(shipmentId: string, caller: Caller): Promise<{ reaso
   )
   await writeAudit('SHIPMENT', shipmentId, 'PUSH_TO_LOAD_REVIEW', caller, { pushedAt: now })
   return { reasons: [], already: false }
+}
+
+/**
+ * Ryne 2026-11-09: a shipment that is DELIVERED and passes the Load Review requirement verdict (reference numbers, sales rep, order details,
+ * documents) moves to Load Review by itself. Runs after every status re-derive; a failure or a not-ready shipment is silent, because the
+ * save that triggered it already succeeded and the verdict is re-read the next time anything changes.
+ */
+async function autoPushToReview(shipmentId: string, caller: Caller): Promise<boolean> {
+  try {
+    const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+    if (!shipment || shipment.status !== 'DELIVERED' || shipment.loadReviewPushedAt) return false
+    const done = await pushToReview(shipmentId, { ...caller, email: SYSTEM_CALLER_EMAIL })
+    return done.reasons.length === 0 && !done.already
+  } catch (err) {
+    console.error('[shipment-actions] auto push to Load Review failed', shipmentId, err instanceof Error ? err.message : String(err))
+    return false
+  }
+}
+
+/** PUSH_READY_TO_LOAD_REVIEW — sweep every delivered shipment not yet in Load Review and push the ones that pass the verdict. */
+async function pushReadyToReview(caller: Caller): Promise<Row> {
+  let pushed = 0
+  let checked = 0
+  let key: Record<string, AttributeValue> | undefined
+  do {
+    const page = await dynamo.send(new ScanCommand({
+      TableName: SHIPMENT_TABLE_NAME,
+      ExclusiveStartKey: key,
+      FilterExpression: '#s = :d AND attribute_not_exists(loadReviewPushedAt) AND attribute_not_exists(voidedAt)',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':d': { S: 'DELIVERED' } },
+      ProjectionExpression: 'id',
+    }))
+    for (const item of page.Items ?? []) {
+      checked += 1
+      if (await autoPushToReview(String(item.id?.S ?? ''), caller)) pushed += 1
+    }
+    key = page.LastEvaluatedKey
+  } while (key)
+  await writeAudit('SHIPMENT', 'batch', 'PUSH_READY_TO_LOAD_REVIEW', caller, { checked, pushed })
+  return { checked, pushed }
 }
 
 /** SET_REV_TAG — a person says who earned this load, and the rules stop arguing. */
@@ -8685,6 +8731,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return unvoidShipment(input, caller)
     case 'LOCK_SHIPMENT':
       return lockShipment(input, caller)
+    case 'PUSH_READY_TO_LOAD_REVIEW':
+      return pushReadyToReview(caller)
     case 'UNLOCK_SHIPMENT':
       return unlockShipment(input, caller)
     case 'REPOINT_SHIPMENT_CUSTOMER':
