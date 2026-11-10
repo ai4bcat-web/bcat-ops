@@ -13,6 +13,7 @@ import { inactiveChanges } from '@/lib/fleetActive'
 import { withDerivedLegacy, withoutUnchangedDriverMirrors, withStopsFromLegacy } from '@/lib/stops'
 import { changedApptStops, changedStopDrivers, loadWideDriverChange, takesRosterDriver } from '@/lib/loadShipmentSync'
 import { errorMessage } from '@/lib/utils/errorMessage'
+import { BROKER_ROW_NO_SHIPMENT_MESSAGE, COVERED_LOAD_MESSAGE, OwnFleetSwitchCancelled, confirmOwnFleetSwitch, requestCover } from '@/lib/ownFleetSwitch'
 import type { NewShipmentPrefill } from '@/features/shipments/components/NewShipmentDialog'
 
 // ── Equipment seed data (imported from bcat-command-center PostgreSQL) ─────────
@@ -553,10 +554,79 @@ function writeAudit(
 async function syncStopDrivers(before: Load, payload: Partial<Load>, rest: Partial<Load>): Promise<void> {
   const changes = changedStopDrivers(before.stops ?? [], payload.stops)
   if (changes.length === 0) return
-  if (!takesRosterDriver(before)) throw new Error('This load is covered by an outside carrier: its driver is edited on the carrier card, not on the calendar')
-  await api.setStopDrivers({ loadId: before.id, assignments: changes })
+  if (await routeBrokerRow(before, changes, rest)) return
+  if (!takesRosterDriver(before)) {
+    await switchCoveredLoadToOwnFleet(before, changes)
+  } else {
+    await api.setStopDrivers({ loadId: before.id, assignments: changes })
+  }
   delete rest.pickupDriverId
   delete rest.deliveryDriverId
+}
+
+/**
+ * The calendar still has the two old placeholder rows, BROKER NEED TO COVER and BROKER COVERED (drivers of type 'broker'). They are
+ * not people and the server refuses them as drivers; what they mean is what the Shipments page does:
+ *  - NEED TO COVER = remove the carrier (or own-fleet leg) on the load: the same REMOVE_LOAD_CARRIER the Carrier card uses, which
+ *    clears the driver and puts the load back to sourcing;
+ *  - COVERED = pick the carrier: the same Cover dialog as the Shipments page (a carrier is never invented here).
+ * Returns true when the pick was one of those rows (handled; `rest` no longer carries stops or driver mirrors).
+ */
+async function routeBrokerRow(before: Load, changes: { stopId: string; driverId: string | null }[], rest: Partial<Load>): Promise<boolean> {
+  const roster = useAppStore.getState().drivers
+  const broker = changes.map((c) => roster.find((d) => d.id === c.driverId)).find((d) => d?.type === 'broker')
+  if (!broker) return false
+  if (!before.shipmentId) throw new Error(BROKER_ROW_NO_SHIPMENT_MESSAGE)
+  const handled = () => { delete rest.stops; delete rest.pickupDriverId; delete rest.deliveryDriverId; return true }
+
+  if (!/need\s*to\s*cover/i.test(broker.name)) {
+    // BROKER COVERED: already covered by a carrier is already what the row says; otherwise choose the carrier.
+    if (before.assignmentType === 'CARRIER' && before.activeLoadCarrierId) return handled()
+    if (!requestCover({ shipmentId: before.shipmentId, shipmentNumber: before.aljexId })) throw new Error('Open the shipment and use Cover to choose the carrier.')
+    throw new OwnFleetSwitchCancelled()
+  }
+
+  // BROKER NEED TO COVER.
+  if (before.activeLoadCarrierId) {
+    const ok = await confirmOwnFleetSwitch({ kind: 'UNCOVER', loadId: before.id, loadLabel: before.aljexId, carrierName: before.carrierName ?? null, driverId: null })
+    if (!ok) throw new OwnFleetSwitchCancelled()
+    await api.removeLoadCarrier({
+      loadCarrierId: before.activeLoadCarrierId,
+      outcome: 'BOUNCED',
+      reason: 'OTHER',
+      note: 'Uncovered from the calendar (need to cover)',
+    })
+  } else {
+    // Nobody on a leg: only stray stop drivers to clear.
+    const held = (before.stops ?? []).filter((s) => s.driverId).map((s) => ({ stopId: s.id, driverId: null }))
+    if (held.length > 0) await api.setStopDrivers({ loadId: before.id, assignments: held })
+  }
+  return handled()
+}
+
+/**
+ * One of our drivers picked for the WHOLE of a load an outside carrier covers: after a yes, the carrier comes off (BOUNCED,
+ * through REMOVE_LOAD_CARRIER so the rate con is voided, the tracking link revoked and a recorded bill refuses it) and the
+ * driver is booked as Ivan Cartage. Anything else on a covered load (a relay, taking the driver off) is edited on the carrier card.
+ */
+async function switchCoveredLoadToOwnFleet(before: Load, changes: { stopId: string; driverId: string | null }[]): Promise<void> {
+  const driverIds = new Set(changes.map((c) => c.driverId))
+  const driverId = driverIds.size === 1 ? [...driverIds][0] ?? null : null
+  const wholeLoad = changes.length === (before.stops ?? []).length
+  if (!driverId || !wholeLoad || !before.shipmentId || !before.activeLoadCarrierId) throw new Error(COVERED_LOAD_MESSAGE)
+  const ok = await confirmOwnFleetSwitch({ loadId: before.id, loadLabel: before.aljexId, carrierName: before.carrierName ?? null, driverId })
+  if (!ok) throw new OwnFleetSwitchCancelled()
+  await api.removeLoadCarrier({
+    loadCarrierId: before.activeLoadCarrierId,
+    outcome: 'BOUNCED',
+    reason: 'OTHER',
+    note: 'Switched to Ivan Cartage (own fleet) from the calendar',
+  })
+  try {
+    await api.assignAsset({ loadId: before.id, driverId })
+  } catch (err) {
+    throw new Error(`The carrier was taken off, but the driver could not be assigned (${errorText(err)}). Assign a driver or a carrier on the load.`, { cause: err })
+  }
 }
 
 /** A load with no shipment: only the driver part goes through the server. */
@@ -580,6 +650,7 @@ async function syncThroughShipment(before: Load, payload: Partial<Load>): Promis
     })
     expectedUpdatedAt = bundle.loads[0]?.updatedAt ?? expectedUpdatedAt
   }
+  if (await routeBrokerRow(before, changedStopDrivers(before.stops ?? [], payload.stops), rest)) return rest
   const driverId = takesRosterDriver(before) ? loadWideDriverChange(before, payload) : null
   if (driverId) {
     await api.assignAsset({ loadId: before.id, ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}), driverId })
@@ -869,6 +940,7 @@ export const useAppStore = create<AppState>()(
           writeAudit(get().currentUserEmail, 'Load', id, 'update', diffChanges(before, after))
         } catch (err) {
           // A refused save used to vanish (the calendar fires these and forgets): say what was refused, then let a caller that awaits handle it too.
+          if (err instanceof OwnFleetSwitchCancelled) throw err
           toast.error('Could not save the change', { description: errorText(err) })
           throw err
         }
