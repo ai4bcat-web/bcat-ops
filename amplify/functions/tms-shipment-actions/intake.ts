@@ -60,6 +60,8 @@ export interface IntakeDeps {
   /** True when `code` is an active top-level ownership division. */
   isDivisionActive(code: string): Promise<boolean>
   writeAudit(entityType: string, entityId: string, action: string, caller: Caller, changes: Row): Promise<void>
+  /** Copy the intake e-mail's files onto the shipment as its customer rate confirmation documents. Never throws. */
+  attachFiles?(shipmentId: string, intakeId: string, attachments: { key: string; name: string; contentType: string; size: number }[], caller: Caller): Promise<number>
   actions: {
     createShipment(input: Row, caller: Caller): Promise<Row>
     setRevTag(input: Row, caller: Caller): Promise<Row>
@@ -278,7 +280,11 @@ export async function intakeLinkShipment(deps: IntakeDeps, input: Row, caller: C
   if (row.status !== 'OPEN' && row.status !== 'PROMOTING') throw new Error('Only an open intake load can be linked to a shipment')
   const shipmentNumber = String(shipment.number ?? '')
   const saved = await writeIntake(deps, row, { shipmentId, shipmentNumber, status: 'MOVED', updatedBy: caller.email }, [], false)
-  const changes: Row = { linkedBy: caller.email, runId: row.runId ?? null, via: 'CREATE_FORM' }
+  // The e-mail the load came in on (rate con / tender) lands in the shipment's Documents, so nobody re-uploads it by hand.
+  const files = jsonOf<{ key?: string; name?: string; contentType?: string; size?: number }[]>(row.attachments, [])
+    .filter((f): f is { key: string; name: string; contentType: string; size: number } => typeof f?.key === 'string' && typeof f?.name === 'string' && typeof f?.contentType === 'string')
+  const attached = deps.attachFiles && files.length ? await deps.attachFiles(shipmentId, intakeId, files, caller) : 0
+  const changes: Row = { linkedBy: caller.email, runId: row.runId ?? null, via: 'CREATE_FORM', ...(attached ? { documentsAttached: attached } : {}) }
   await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_LINK_SHIPMENT', caller, { ...changes, shipmentId })
   await deps.writeAudit('SHIPMENT', shipmentId, 'INTAKE_LINK_SHIPMENT', caller, { ...changes, intakeId })
   return intakeRecordOf(saved) as unknown as Row

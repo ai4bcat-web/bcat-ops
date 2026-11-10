@@ -2702,6 +2702,8 @@ shipmentActionsFn.addToRolePolicy(
   }),
 )
 backend.storage.resources.bucket.grantReadWrite(shipmentActionsFn, 'shipment-docs/*')
+// Intake e-mail files are copied onto the shipment when the load is linked.
+backend.storage.resources.bucket.grantRead(shipmentActionsFn, 'intake-attachments/*')
 
 // ── Step P: postings, carrier offers and the demo seed ──────────────────────
 // POST_LOAD / UNPOST_LOAD own ShipmentPosting outright. The demo seed owns
