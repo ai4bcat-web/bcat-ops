@@ -81,8 +81,9 @@ describe('every card lays out on flush 12-column rows with one rhythm', () => {
     assertGrids(); assertRhythm()
     for (const id of ['f-shipping-tempControl', 'f-shipping-palletExchange', 'f-shipping-tarps']) fireEvent.click(screen.getByTestId(id))
     assertGrids(); assertRhythm()
-    expect([...document.querySelectorAll('[data-testid="section-freight-body"] > .tms-fg > .tms-fg-field')].map((f) => (f as HTMLElement).dataset.span))
-      .toEqual(['3', '3', '3', '3', '3', '3', '3', '3', '12'])
+    const spans = (id: string) => [...document.querySelectorAll(`[data-testid="${id}"] .tms-fg > .tms-fg-field`)].map((f) => (f as HTMLElement).dataset.span)
+    expect(spans('f-shipping-col-details')).toEqual(['12', '12', '12', '12'])
+    expect(spans('f-shipping-col-quantities')).toEqual(['6', '6', '6', '6', '12'])
   })
   it('Route (three stops) and the header Customer ref', () => {
     card(RouteCard, { seed: (v) => ({ ...v, stops: [v.stops[0], { ...v.stops[0], id: 'mid', type: 'pickup' as const }, v.stops[1]] }) })

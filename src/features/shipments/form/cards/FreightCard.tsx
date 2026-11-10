@@ -17,7 +17,7 @@ import { SHIPMENT_TYPES } from '@/lib/shipmentTypes'
 import { activeLoadCarrier, isLocked, lockReason, type FlagKey, type ShipmentFormValues } from '../model'
 import { applyShipmentType, typeForDivisionChange } from '../shipmentType'
 import { ctl, digitsOnly, disabledState, dollarText, issueFor, signedDigits } from '../sections/fieldUtil'
-import { FieldGrid } from '../fieldGrid'
+import { ColGroup, ColGroups, FieldGrid } from '../fieldGrid'
 import { LField } from '../sections/formControls'
 import { type CardProps, sliceOf } from './cardRegistry'
 import './cards.css'
@@ -117,8 +117,10 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
   const tempOff = !value.temp.on
   return (
     <div className="tms-card-body-stack" data-testid="section-freight-body">
-      <FieldGrid>
-        <LField span={3} def={LABEL.shipping.revDivision} error={err(LABEL.shipping.revDivision.testId)} hint={LABEL.shipping.revDivision.help}>
+      <ColGroups testId="f-shipping-cols">
+        <ColGroup title="Load details" testId="f-shipping-col-details">
+          <FieldGrid>
+        <LField span={12} def={LABEL.shipping.revDivision} error={err(LABEL.shipping.revDivision.testId)} hint={LABEL.shipping.revDivision.help}>
           <TmsSelect {...ctl(LABEL.shipping.revDivision)} value={revCode} disabled={base.disabled} onChange={(e) => pickDivision(e.target.value)}>
             <option value="" />
             {rows.map((r) => (
@@ -126,7 +128,7 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
             ))}
           </TmsSelect>
         </LField>
-        <LField span={3} def={LABEL.shipping.shipmentType} error={err(LABEL.shipping.shipmentType.testId)}>
+        <LField span={12} def={LABEL.shipping.shipmentType} error={err(LABEL.shipping.shipmentType.testId)}>
           <TmsSelect
             {...ctl(LABEL.shipping.shipmentType)} aria-label={LABEL.shipping.shipmentType.text} value={values.shipmentType}
             disabled={base.disabled || typeLocked} title={typeLocked ? lockReason(ctx.locked, 'mode') : undefined}
@@ -140,32 +142,40 @@ export function FreightCard({ values, update, ctx, form }: CardProps) {
             ))}
           </TmsSelect>
         </LField>
-        <LField span={3} def={LABEL.shipping.equipmentType} error={err(LABEL.shipping.equipmentType.testId)}>
+        <LField span={12} def={LABEL.shipping.equipmentType} error={err(LABEL.shipping.equipmentType.testId)}>
           <TmsInput {...ctl(LABEL.shipping.equipmentType)} list={EQUIPMENT_LIST_ID} maxLength={MAX.equipment} value={value.equipmentType} disabled={equipLock.disabled} title={equipLock.title} onChange={txt('equipmentType')} />
         </LField>
         <datalist id={EQUIPMENT_LIST_ID}>{EQUIPMENT_SUGGESTIONS.map((e) => <option key={e} value={e} />)}</datalist>
-        <LField span={3} def={LABEL.shipping.weightLbs} error={err(LABEL.shipping.weightLbs.testId)}>
+        <LField span={12} def={LABEL.shipping.description} error={err(LABEL.shipping.description.testId)} hint={LABEL.shipping.description.help}>
+          <TmsInput {...ctl(LABEL.shipping.description)} maxLength={MAX.description} value={value.description} disabled={base.disabled} onChange={txt('description')} />
+        </LField>
+          </FieldGrid>
+        </ColGroup>
+        <ColGroup title="Quantities" testId="f-shipping-col-quantities">
+          <FieldGrid>
+        <LField span={6} def={LABEL.shipping.weightLbs} error={err(LABEL.shipping.weightLbs.testId)}>
           <TmsInput {...ctl(LABEL.shipping.weightLbs)} inputMode="numeric" value={value.weightLbs} disabled={weightLock.disabled} title={weightLock.title} onChange={txt('weightLbs', digitsOnly)} />
         </LField>
-        <LField span={3} def={LABEL.shipping.pieces}>
+        <LField span={6} def={LABEL.shipping.pieces}>
           <TmsInput {...ctl(LABEL.shipping.pieces)} inputMode="numeric" value={value.pieces} disabled={base.disabled} onChange={txt('pieces', digitsOnly)} />
         </LField>
-        <LField span={3} def={LABEL.shipping.footage}>
+        <LField span={6} def={LABEL.shipping.footage}>
           <TmsInput {...ctl(LABEL.shipping.footage)} inputMode="numeric" value={value.footage} disabled={base.disabled} onChange={txt('footage', digitsOnly)} />
         </LField>
-        <LField span={3} def={LABEL.shipping.freightClass}>
+        <LField span={6} def={LABEL.shipping.freightClass}>
           <TmsSelect {...ctl(LABEL.shipping.freightClass)} value={value.freightClass} disabled={base.disabled} onChange={(e) => set({ freightClass: e.target.value })}>
             <option value="" />
             {value.freightClass && !(FREIGHT_CLASSES as readonly string[]).includes(value.freightClass) && <option value={value.freightClass}>{value.freightClass}</option>}
             {FREIGHT_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
           </TmsSelect>
         </LField>
-        <LField span={3} def={LABEL.shipping.declaredValue}>
+        <LField span={12} def={LABEL.shipping.declaredValue}>
           <TmsInput {...ctl(LABEL.shipping.declaredValue)} inputMode="decimal" value={value.declaredValue} disabled={base.disabled} onChange={txt('declaredValue', dollarText)} />
         </LField>
-        <LField span={12} def={LABEL.shipping.description} error={err(LABEL.shipping.description.testId)} hint={LABEL.shipping.description.help}>
-          <TmsInput {...ctl(LABEL.shipping.description)} maxLength={MAX.description} value={value.description} disabled={base.disabled} onChange={txt('description')} />
-        </LField>
+          </FieldGrid>
+        </ColGroup>
+      </ColGroups>
+      <FieldGrid>
         <div className="tms-card-req tms-fg-chips" role="group" aria-label="Requirements" data-testid="f-shipping-flags">
           <span className="tms-card-req-title">Requirements</span>
           <div className="tms-card-chips">{CHIP_ORDER.map(chip)}</div>
