@@ -3203,6 +3203,12 @@ financeActionsFn.addToRolePolicy(
   })
 )
 financeActionsFn.addEnvironment('BUCKET_NAME',                   backend.storage.resources.bucket.bucketName)
+// A generated invoice is filed on its shipment as a document by tms-shipment-actions (the single writer of ShipmentDocument).
+financeActionsFn.addEnvironment('SHIPMENT_ACTIONS_FUNCTION_NAME', backend.tmsShipmentActions.resources.lambda.functionName)
+financeActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['lambda:InvokeFunction'],
+  resources: [backend.tmsShipmentActions.resources.lambda.functionArn],
+}))
 financeActionsFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
 financeActionsFn.addEnvironment('PORTAL_ORIGIN',                 PORTAL_ORIGIN)
 financeActionsFn.addEnvironment('FROM_ADDRESS',                  'ai4bcat@gmail.com')

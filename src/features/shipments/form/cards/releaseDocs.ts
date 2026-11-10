@@ -1,15 +1,12 @@
 /**
  * The "Required for release" checklist (Step AR, Documents card). INFO only: nothing here ever
  * blocks Create. The list follows the Load Review rules: the customer's invoice documents
- * (`requiredDocsForInvoice`, else the org default), the carrier paperwork the org asks for, the
+ * (`requiredDocsForInvoice`, else the org default), the
  * rate confirmation, and POD whenever the customer's / org's Load Review requirements include
  * "POD received". A document counts once it is on the shipment (or, on create, queued).
  */
 import { resolveReviewRequirements } from '@/lib/reviewRequirements'
-import {
-  DEFAULT_REQUIRED_CARRIER_UPLOAD_TYPES, SHIPMENT_DOCUMENT_TYPES, countsAsPresent, normalizeRequiredDocTypes,
-  requiredDocTypesFor, type ShipmentDocumentType,
-} from '@/lib/shipmentDocuments'
+import { SHIPMENT_DOCUMENT_TYPES, countsAsPresent, requiredDocTypesFor, type ShipmentDocumentType } from '@/lib/shipmentDocuments'
 import type { CustomerRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 import type { QueuedFile } from '../model'
 
@@ -29,14 +26,14 @@ export interface ReleaseDocItem {
 
 export function releaseDocItems(i: {
   customer: Pick<CustomerRecord, 'requiredDocsForInvoice' | 'reviewRequirements'> | null
-  settings: Pick<TmsSettings, 'defaultRequiredDocs' | 'requiredCarrierUploadTypes' | 'reviewRequirements'> | null
+  settings: Pick<TmsSettings, 'defaultRequiredDocs' | 'reviewRequirements'> | null
   bundle: Pick<ShipmentBundle, 'documents' | 'loadCarriers'> & { shipment?: Pick<ShipmentBundle['shipment'], 'updatedAt'> } | null
   queued: readonly QueuedFile[]
 }): ReleaseDocItem[] {
   const wanted = new Set<ShipmentDocumentType>(['RATE_CON'])
   for (const t of requiredDocTypesFor(i.customer, i.settings).types) wanted.add(t)
-  const carrier = normalizeRequiredDocTypes(i.settings?.requiredCarrierUploadTypes ?? [...DEFAULT_REQUIRED_CARRIER_UPLOAD_TYPES])
-  for (const t of carrier.types) wanted.add(t)
+  // The carrier's invoice is not needed to release a load: it is the carrier's bill, paid through accounts payable, and our own invoice
+  // is generated when accounting posts the batch (it then appears here as a document).
   if (resolveReviewRequirements(i.customer?.reviewRequirements, i.settings?.reviewRequirements).includes('podReceived')) wanted.add('POD')
 
   const have = new Set<ShipmentDocumentType>()

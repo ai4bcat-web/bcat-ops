@@ -122,15 +122,16 @@ describe('DocumentsCard', () => {
 })
 
 describe('releaseDocItems (Load Review rules)', () => {
+  // requiredCarrierUploadTypes (carrier invoice) is set on purpose: it is paperwork for paying the carrier, never a release requirement.
   const settings = { defaultRequiredDocs: ['BOL'], requiredCarrierUploadTypes: ['CARRIER_INVOICE'] } as unknown as TmsSettings
 
   it('customer list replaces the org default; POD joins via the podReceived review requirement; rate con always', () => {
     const customer = { requiredDocsForInvoice: ['POD'], reviewRequirements: [] } as unknown as CustomerRecord
     const types = releaseDocItems({ customer, settings, bundle: null, queued: [] }).map((i) => i.type)
-    expect(types).toEqual(['BOL', 'POD', 'RATE_CON', 'CARRIER_INVOICE'])
+    expect(types).toEqual(['BOL', 'POD', 'RATE_CON'])
     expect(releaseDocItems({ customer, settings, bundle: null, queued: [] }).find((i) => i.type === 'BOL')?.required).toBe(false)
     const noCustomer = releaseDocItems({ customer: null, settings, bundle: null, queued: [] }).map((i) => i.type)
-    expect(noCustomer).toEqual(['BOL', 'POD', 'RATE_CON', 'CARRIER_INVOICE'])
+    expect(noCustomer).toEqual(['BOL', 'POD', 'RATE_CON'])
     expect(releaseDocItems({ customer: null, settings, bundle: null, queued: [] }).find((i) => i.type === 'BOL')?.required).toBe(true)
   })
 
@@ -138,9 +139,11 @@ describe('releaseDocItems (Load Review rules)', () => {
     const items = releaseDocItems({
       customer: null, settings,
       bundle: { documents: [{ ...doc('9', 'b.pdf', 'ALL', 'BOL'), reviewStatus: 'PENDING' }], loadCarriers: [] } as never,
-      queued: [{ file: pdf(), audience: 'ALL', type: 'CARRIER_INVOICE' }],
+      queued: [{ file: pdf(), audience: 'ALL', type: 'RATE_CON' }],
     })
     expect(items.find((i) => i.type === 'BOL')).toMatchObject({ present: false, queued: false })
-    expect(items.find((i) => i.type === 'CARRIER_INVOICE')).toMatchObject({ present: false, queued: true })
+    expect(items.find((i) => i.type === 'RATE_CON')).toMatchObject({ present: false, queued: true })
+    // The carrier's invoice is never on the release list.
+    expect(items.some((i) => i.type === 'CARRIER_INVOICE')).toBe(false)
   })
 })

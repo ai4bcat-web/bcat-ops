@@ -5389,6 +5389,41 @@ describe('SET_SHIPMENT_CUSTOMER', () => {
   })
 })
 
+// ── ATTACH_INVOICE_DOC ───────────────────────────────────────────────────────
+
+describe('ATTACH_INVOICE_DOC', () => {
+  const asFinance = (input: Row) => handler({ arguments: { action: 'ATTACH_INVOICE_DOC', input: JSON.stringify(input) }, systemCaller: 'finance-actions' } as never)
+
+  async function shipment(): Promise<{ shipmentId: string; orderId: string }> {
+    const bundle = (await call('CREATE_SHIPMENT', { customerId: 'cus-1' })) as { shipment: Row; orders: Row[] }
+    return { shipmentId: String(bundle.shipment.id), orderId: String(bundle.orders[0].id) }
+  }
+
+  it('files the generated invoice on its shipment as a customer-facing INVOICE document, and a re-render is the next version of the same row', async () => {
+    const { shipmentId, orderId } = await shipment()
+    await asFinance({ shipmentId, orderId, invoiceId: 'inv-1', number: 'INV-1001', s3Key: 'invoices/c1/INV-1001-v1.pdf', sizeBytes: 4321 })
+    expect(table(TABLES.shipmentDocument).get('inv:inv-1')).toMatchObject({
+      shipmentId, orderId, type: 'INVOICE', name: 'Invoice INV-1001.pdf', s3Key: 'invoices/c1/INV-1001-v1.pdf', source: 'GENERATED', audience: 'CUSTOMER', status: 'ACTIVE', version: 1, sizeBytes: 4321,
+    })
+    await asFinance({ shipmentId, orderId, invoiceId: 'inv-1', number: 'INV-1001', s3Key: 'invoices/c1/INV-1001-v2.pdf', sizeBytes: 4400 })
+    expect(table(TABLES.shipmentDocument).get('inv:inv-1')).toMatchObject({ s3Key: 'invoices/c1/INV-1001-v2.pdf', version: 2, status: 'ACTIVE' })
+    expect([...table(TABLES.shipmentDocument).values()].filter((d) => d.type === 'INVOICE')).toHaveLength(1)
+  })
+
+  it('voiding the invoice marks its document VOID', async () => {
+    const { shipmentId, orderId } = await shipment()
+    await asFinance({ shipmentId, orderId, invoiceId: 'inv-2', number: 'INV-1002', s3Key: 'invoices/c1/INV-1002-v1.pdf' })
+    await asFinance({ shipmentId, invoiceId: 'inv-2', void: true })
+    expect(table(TABLES.shipmentDocument).get('inv:inv-2')).toMatchObject({ status: 'VOID', voidReason: 'Invoice voided' })
+  })
+
+  it('only the finance Lambda may call it, and only for a file in the invoices folder', async () => {
+    const { shipmentId } = await shipment()
+    await expect(call('ATTACH_INVOICE_DOC', { shipmentId, invoiceId: 'x', s3Key: 'invoices/a.pdf' })).rejects.toThrow()
+    await expect(asFinance({ shipmentId, invoiceId: 'x', s3Key: 'carrier-docs/evil.pdf' })).rejects.toThrow(/invoices/)
+  })
+})
+
 // ── SET_LOAD_REFS ────────────────────────────────────────────────────────────
 
 describe('SET_LOAD_REFS', () => {

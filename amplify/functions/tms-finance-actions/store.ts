@@ -21,6 +21,7 @@ import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/cli
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { SESv2Client } from '@aws-sdk/client-sesv2'
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { createHash, randomUUID } from 'crypto'
 import {
@@ -39,7 +40,28 @@ import { DEFAULT_INVOICE_NUMBER_FORMAT, formatInvoiceNumber } from '../../../src
 export const dynamo = new DynamoDBClient({})
 export const cognito = new CognitoIdentityProviderClient({})
 export const s3 = new S3Client({})
+const lambda = new LambdaClient({})
 export const ses = new SESv2Client({})
+
+/** tms-shipment-actions, which is the one writer of ShipmentDocument rows. */
+export const SHIPMENT_ACTIONS_FUNCTION_NAME = process.env.SHIPMENT_ACTIONS_FUNCTION_NAME ?? ''
+
+/**
+ * File (or void) an invoice's document on its shipment. Fire and forget: the invoice is already issued and its PDF stored, and a
+ * document row that fails to appear is put right the next time the PDF is rendered, so this never fails the invoice.
+ */
+export async function fileInvoiceDocument(input: { shipmentId: string; invoiceId: string; orderId?: string | null; number?: string | null; s3Key?: string | null; sizeBytes?: number | null; void?: boolean }): Promise<void> {
+  if (!SHIPMENT_ACTIONS_FUNCTION_NAME) return
+  try {
+    await lambda.send(new InvokeCommand({
+      FunctionName: SHIPMENT_ACTIONS_FUNCTION_NAME,
+      InvocationType: 'Event',
+      Payload: Buffer.from(JSON.stringify({ systemCaller: 'finance-actions', arguments: { action: 'ATTACH_INVOICE_DOC', input: JSON.stringify(input) } })),
+    }))
+  } catch (err) {
+    console.error('[tms-finance-actions] could not file the invoice document', input.invoiceId, err instanceof Error ? err.message : String(err))
+  }
+}
 
 export const INVOICE_TABLE_NAME = process.env.INVOICE_TABLE_NAME ?? ''
 export const AR_PAYMENT_TABLE_NAME = process.env.AR_PAYMENT_TABLE_NAME ?? ''
