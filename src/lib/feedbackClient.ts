@@ -1,10 +1,10 @@
 import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl } from 'aws-amplify/storage'
-import type { FeedbackItem, FeedbackStatus } from '@/features/feedback/feedbackLogic'
+import type { FeedbackItem, FeedbackPriority, FeedbackStatus } from '@/features/feedback/feedbackLogic'
 
 const client = generateClient()
 
-const FIELDS = 'id page summary details screenshotKeys status submittedBy submittedByName adminNotes resolvedAt createdAt updatedAt'
+const FIELDS = 'id page summary details screenshotKeys status priority submittedBy submittedByName adminNotes resolvedAt createdAt updatedAt'
 
 export async function listFeedback(): Promise<FeedbackItem[]> {
   const out: FeedbackItem[] = []
@@ -24,6 +24,7 @@ export async function createFeedback(input: {
   page: string
   summary: string
   details?: string
+  priority?: FeedbackPriority
   submittedBy: string
   submittedByName: string
 }): Promise<FeedbackItem> {
@@ -36,7 +37,7 @@ export async function createFeedback(input: {
 
 export async function updateFeedback(
   id: string,
-  patch: { screenshotKeys?: string[]; status?: FeedbackStatus; resolvedAt?: string | null; adminNotes?: string },
+  patch: { screenshotKeys?: string[]; status?: FeedbackStatus; priority?: FeedbackPriority; resolvedAt?: string | null; adminNotes?: string },
 ): Promise<FeedbackItem> {
   const r = (await client.graphql({
     query: `mutation UpdateFeedback($input: UpdateFeedbackInput!) { updateFeedback(input: $input) { ${FIELDS} } }`,
