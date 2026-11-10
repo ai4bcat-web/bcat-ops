@@ -46,6 +46,18 @@ describe('useShipmentLock', () => {
     await act(async () => { await result.current.release() })
     expect(api.unlock).not.toHaveBeenCalled()
   })
+  it('take over: when somebody else holds it (a stale tab), takeOver() asks the server for it, and the banner state clears', async () => {
+    api.lock.mockResolvedValueOnce({ locked: false, lockedBy: 'Ryne', expiresAt: '2026-11-10T20:00:00.000Z' })
+    const { result } = renderHook(() => useShipmentLock('shp-1'))
+    await waitFor(() => expect(result.current.heldBy).not.toBeNull())
+    api.lock.mockResolvedValueOnce({ locked: true })
+    let ok = false
+    await act(async () => { ok = await result.current.takeOver() })
+    expect(ok).toBe(true)
+    expect(api.lock).toHaveBeenLastCalledWith('shp-1', true)
+    expect(result.current.heldBy).toBeNull()
+  })
+
   describe('a form left open', () => {
     it('keeps renewing the lock while the person is working, and lets go of it once nobody has touched the form for the idle limit; touching it again takes it back', async () => {
       vi.useFakeTimers()

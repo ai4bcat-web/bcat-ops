@@ -162,7 +162,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     onBlocked: (issues) => { if (issues[0]) focusField(issues[0].fieldKey) },
   })
   const { values, update, getValues, bundle, mode, busy: pipelineBusy } = form
-  const { heldBy, release } = useShipmentLock(bundle?.shipment.id)
+  const { heldBy, release, takeOver } = useShipmentLock(bundle?.shipment.id)
+  const [confirmTakeOver, setConfirmTakeOver] = useState(false)
   useRequiredEmptyMarks(values)
 
   // Pre-fill once, when the intake row and the customer directory have both arrived.
@@ -320,6 +321,20 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
             <span data-testid="ship-form-locked">
               {heldBy.by} is editing this shipment{heldBy.until ? ` (locked until ${new Date(heldBy.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})` : ''}. Open it again once they save and exit.
             </span>
+            {' '}
+            {confirmTakeOver ? (
+              <>
+                <TmsButton size="sm" variant="primary" data-testid="ship-form-take-over-confirm"
+                  onClick={() => { void takeOver().then((ok) => { setConfirmTakeOver(false); if (ok) { toast.success('You now have this shipment'); void refreshBundle() } else toast.error('Could not take it over') }) }}>
+                  Yes, take it over
+                </TmsButton>
+                <TmsButton size="sm" variant="ghost" onClick={() => setConfirmTakeOver(false)}>Cancel</TmsButton>
+              </>
+            ) : (
+              <TmsButton size="sm" data-testid="ship-form-take-over" title="Use when they have left it open and walked away: anything they have not saved is lost" onClick={() => setConfirmTakeOver(true)}>
+                Take over
+              </TmsButton>
+            )}
           </TmsAlert>
         ) : null}
 

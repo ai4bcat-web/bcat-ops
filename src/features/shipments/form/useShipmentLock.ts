@@ -11,7 +11,7 @@ import { LOCK_IDLE_MS, LOCK_REFRESH_MS } from '@/lib/shipmentLock'
 
 const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const
 
-export function useShipmentLock(shipmentId: string | null | undefined): { heldBy: { by: string; until: string } | null; release: () => Promise<void> } {
+export function useShipmentLock(shipmentId: string | null | undefined): { heldBy: { by: string; until: string } | null; release: () => Promise<void>; takeOver: () => Promise<boolean> } {
   const [heldBy, setHeldBy] = useState<{ by: string; until: string } | null>(null)
   const mineRef = useRef(false)
   useEffect(() => {
@@ -61,5 +61,15 @@ export function useShipmentLock(shipmentId: string | null | undefined): { heldBy
     mineRef.current = false
     try { await unlockShipment(shipmentId) } catch { /* it lapses by itself in 10 minutes */ }
   }, [shipmentId])
-  return { heldBy, release }
+  /** The holder is not really there (a forgotten or stale tab): take the lock from them. Their next save is refused; ours goes through. */
+  const takeOver = useCallback(async (): Promise<boolean> => {
+    if (!shipmentId) return false
+    try {
+      const r = await lockShipment(shipmentId, true)
+      mineRef.current = r.locked
+      setHeldBy(r.locked ? null : { by: r.lockedBy ?? 'Someone', until: r.expiresAt ?? '' })
+      return r.locked
+    } catch { return false }
+  }, [shipmentId])
+  return { heldBy, release, takeOver }
 }

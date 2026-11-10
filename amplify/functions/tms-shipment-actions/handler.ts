@@ -8837,6 +8837,24 @@ async function lockShipment(input: Row, caller: Caller): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
   const now = new Date()
   const expiresAt = new Date(now.getTime() + EDIT_LOCK_MS).toISOString()
+  // "Take over": the holder's tab is stale or forgotten and somebody needs the shipment now. The previous holder's next save is
+  // refused by the guard like any other person's, so nothing they had unsaved can overwrite this person's work; it is audited.
+  if (input.takeOver === true) {
+    const before = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+    if (!before) throw new Error('Shipment not found')
+    await dynamo.send(new UpdateItemCommand({
+      TableName: SHIPMENT_TABLE_NAME,
+      Key: { id: { S: shipmentId } },
+      UpdateExpression: 'SET editLockUserId = :u, editLockUserName = :n, editLockExpiresAt = :e',
+      ConditionExpression: 'attribute_exists(id)',
+      ExpressionAttributeValues: { ':u': { S: caller.email }, ':n': { S: caller.email }, ':e': { S: expiresAt } },
+    }))
+    const previous = optionalString(before.editLockUserId, 200)
+    if (previous && previous.toLowerCase() !== caller.email.toLowerCase()) {
+      await writeAudit('SHIPMENT', shipmentId, 'LOCK_TAKEN_OVER', caller, { previousHolder: previous, previousExpiresAt: optionalString(before.editLockExpiresAt, 40) })
+    }
+    return { locked: true, lockedBy: caller.email, expiresAt }
+  }
   try {
     await dynamo.send(new UpdateItemCommand({
       TableName: SHIPMENT_TABLE_NAME,
