@@ -652,7 +652,9 @@ export async function attachDriverDoc(deps: DocumentDeps, input: Row, caller: Ca
     status: 'ACTIVE',
     version: nextVersion(bundle.documents as unknown as ShipmentDocumentRecord[], type, loadId),
     // A POD our own review approved is accepted by construction; leaving reviewStatus
-    // unset keeps it out of the sparse review queue.
+    // unset keeps it out of the sparse review queue. A page filed automatically from the driver app
+    // (`pending`) waits for a reviewer instead: it shows in Documents but does not count until accepted.
+    ...(input.pending === true ? { reviewStatus: 'PENDING' } : {}),
     uploadedBy: `driver:${String(submissionDoc.driverId ?? '')}`,
     uploadedAt: now,
     createdBy: caller.email,
@@ -680,7 +682,7 @@ export async function attachDriverDoc(deps: DocumentDeps, input: Row, caller: Ca
   await deps.writeAudit('SHIPMENT_DOCUMENT', documentId, 'ATTACH_DRIVER_DOC', caller, {
     shipmentId, loadId, submissionDocId, submissionId, type, s3Key,
   })
-  await stampPodReceived(deps, row)
+  if (input.pending !== true) await stampPodReceived(deps, row)
   return documentResult(deps, shipmentId, row)
 }
 
