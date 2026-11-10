@@ -101,11 +101,11 @@ describe('IntakeBoard', () => {
     expect(screen.getByTestId('where')).toHaveTextContent('/tms/shipments/intake/il%3Amoved')
   })
 
-  it('Create shipment on an open row opens the new-shipment form carrying that intake id, not the review page', async () => {
+  it('Create shipment on an open row opens that row\'s review screen (the e-mail and its PDF on the left, the fields on the right)', async () => {
     renderBoard('/tms/shipments/intake?division=BRK')
     await screen.findByText('First tender')
     fireEvent.click(screen.getAllByTestId('intake-create-shipment')[0])
-    expect(JSON.parse(screen.getByTestId('new-state').textContent ?? '{}')).toEqual({ intakeId: expect.stringMatching(/^il:/) })
+    expect(screen.getByTestId('where')).toHaveTextContent(/\/tms\/shipments\/intake\/il%3A/)
   })
 
   it('Mark done on an open row dismisses it (so it leaves Intake) and offers nothing on a moved row', async () => {

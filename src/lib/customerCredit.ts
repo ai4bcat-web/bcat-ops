@@ -42,8 +42,6 @@ export interface CreditSummary {
   blockReasons: CreditBlockReason[]
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000
-
 /**
  * Resolve effective credit policy: customer value first, then org default, then
  * built-in fallback. The `source` map tells the UI where each value came from.
@@ -333,23 +331,17 @@ export function summarizeCredit(
  *
  * - Legacy rows with no stored status map to ACTIVE unless they were archived
  *   (active === false), in which case they are BLOCKED.
- * - Stored ACTIVE rows go DORMANT when there has been no load activity for 90 days.
- *   DORMANT is never derived when `lastLoadAt` is unknown; we keep them ACTIVE.
+ * - A stored ACTIVE customer stays ACTIVE. (It used to turn DORMANT after 90 days without a load, which labelled most of the book
+ *   Dormant just because they ship seasonally; Ryne 2026-11-10: they are active unless someone marks them otherwise.) Only a stored
+ *   status moves a customer to DORMANT / CLOSED / BLOCKED.
  */
 export function effectiveCustomerStatus(
   c: Pick<CustomerRecord, 'status' | 'active' | 'createdAt'>,
-  lastLoadAt: string | null,
-  now: string,
+  _lastLoadAt: string | null,
+  _now: string,
 ): CustomerStatus {
   if (!c.status) {
     return c.active === false ? 'BLOCKED' : 'ACTIVE'
-  }
-  if (c.status === 'ACTIVE' && lastLoadAt != null) {
-    const lastActivity = Math.max(Date.parse(c.createdAt), Date.parse(lastLoadAt))
-    const nowMs = Date.parse(now)
-    if (Number.isFinite(lastActivity) && Number.isFinite(nowMs) && nowMs - lastActivity > 90 * DAY_MS) {
-      return 'DORMANT'
-    }
   }
   return c.status
 }

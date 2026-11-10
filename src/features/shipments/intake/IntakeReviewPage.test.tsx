@@ -46,7 +46,7 @@ function renderPage(canReview = true) {
   )
 }
 
-const moveButton = () => screen.getByRole('button', { name: 'Move to active' })
+const moveButton = () => screen.getByRole('button', { name: 'Create shipment' })
 
 describe('IntakeReviewPage', () => {
   beforeEach(() => {
@@ -115,7 +115,7 @@ describe('IntakeReviewPage', () => {
     renderPage(false)
     const reference = await screen.findByDisplayValue('PO-100')
     expect(reference).toBeDisabled()
-    expect(screen.queryByRole('button', { name: 'Move to active' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Mark reviewed' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()

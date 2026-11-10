@@ -22,5 +22,11 @@ describe('SourceEmailCard attachment preview', () => {
   it('shows nothing when the e-mail had no viewable attachment', () => {
     renderCard([{ key: 'k', name: 'notes.txt', contentType: 'text/plain', size: 10 }])
     expect(screen.queryByTestId('intake-attachment-preview')).toBeNull()
+    // ...and says why, instead of leaving an empty space where the PDF should be.
+    expect(screen.getByTestId('intake-no-pdf').textContent).toMatch(/no PDF to show/)
+  })
+  it('has no "no PDF" note when the PDF is there', async () => {
+    renderCard([{ key: 'k', name: 'ratecon.pdf', contentType: 'application/pdf', size: 10 }])
+    expect(screen.queryByTestId('intake-no-pdf')).toBeNull()
   })
 })
