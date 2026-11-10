@@ -103,6 +103,8 @@ export interface CarrierBlock {
   dispatcher: ContactBits
   driver1: ContactBits
   driver2: ContactBits
+  /** Own fleet: the roster driver id on the DELIVERY when it is a different person from Driver 1 on the pickup. '' = the same driver on both (the default). */
+  deliveryDriverId: string
   truckNo: string
   trailerNo: string
   seal: string
@@ -395,7 +397,7 @@ const emptyBits = (): ContactBits => ({ name: '', phone: '', email: '' })
 export function emptyCarrierBlock(): CarrierBlock {
   return {
     loadCarrierId: '', carrierId: '', typedName: '', useTyped: false, isOwnFleet: false,
-    dispatcher: emptyBits(), driver1: emptyBits(), driver2: emptyBits(),
+    dispatcher: emptyBits(), driver1: emptyBits(), driver2: emptyBits(), deliveryDriverId: '',
     truckNo: '', trailerNo: '', seal: '', carrierRef: '', originCity: '', originState: '', emptyMiles: '', puEta: '',
   }
 }
@@ -707,6 +709,7 @@ export function valuesFromBundle(bundle: ShipmentBundle, ctx: BundleSeedCtx = {}
     dispatcher: { name: str(lc?.dispatcherName), phone: str(lc?.dispatcherPhone), email: str(lc?.dispatcherEmail) },
     driver1: { name: str(lc?.driverName), phone: str(lc?.driverPhone), email: tied ? str(own?.driverEmail1) : '' },
     driver2: { name: str(lc?.driver2Name), phone: str(lc?.driver2Phone), email: tied ? str(own?.driverEmail2) : '' },
+    deliveryDriverId: '',
     truckNo: str(lc?.truckNumber),
     trailerNo: str(lc?.trailerNumber),
     seal: str(lc?.sealNumber),
@@ -742,6 +745,14 @@ export function valuesFromBundle(bundle: ShipmentBundle, ctx: BundleSeedCtx = {}
       ...blockOfLoadCarrier(null, e, true),
       slot: takeKey(e.slot), carrierName: '', legStopIds: [], rate: rateOf(undefined, e.draft, e.draft?.maxRateCents),
     })
+  }
+
+  // Own fleet: a different driver on the last delivery than on the first pickup shows as the delivery driver (same driver = the default, nothing shown).
+  if (carriers[0]?.isOwnFleet && load) {
+    const stops = (load.stops ?? []) as Stop[]
+    const pickup = stops.find((s) => s.type === 'pickup')
+    const delivery = [...stops].reverse().find((s) => s.type === 'delivery')
+    if (pickup?.driverId && delivery?.driverId && pickup.driverId !== delivery.driverId) carriers[0] = { ...carriers[0], deliveryDriverId: delivery.driverId }
   }
 
   const flags: Record<FlagKey, boolean> = {

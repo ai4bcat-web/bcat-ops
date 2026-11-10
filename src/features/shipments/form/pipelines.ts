@@ -8,7 +8,7 @@
 import {
   addCarrier, assignAsset, assignCarrierRep, clearRevTag, commitDocument, createLocation, createShipment, getShipmentBundle,
   prepareDocumentUpload, putPresignedFile, recalcCharges, saveOrderForm, setEta, setRevTag, setSalesRep, setShipmentCustomer,
-  submitOrder, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
+  setStopDrivers, submitOrder, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
   type UpdateLoadCarrierDetailsInput,
 } from '@/lib/apiClient'
 import { apptNotices } from '@/lib/apptNotify'
@@ -221,8 +221,34 @@ export async function runCreate(
       })
     })
     if (r.failed.includes('assignDriver')) r.message = `Shipment created, driver assignment failed: ${r.message}. Retry using Cover.`
+    else await applyDeliveryDriver(r, working, ctx)
   }
   return r.result({ createdShipmentId: createdId })
+}
+
+/**
+ * Own fleet: who drives the pickup and who drives the delivery. Driver 1 is on the whole load by default (ASSIGN_ASSET); a delivery
+ * driver picked on the form moves just the delivery stops to that person (SET_STOP_DRIVERS), and clearing it puts the delivery
+ * back on Driver 1. It compares with what the stops hold now, so a save that changes nothing makes no call.
+ */
+async function applyDeliveryDriver(r: Runner, values: ShipmentFormValues, ctx: PipelineCtx): Promise<void> {
+  const c = values.carrier
+  if (!c.isOwnFleet || !c.driver1.name.trim()) return
+  const roster = ctx.ownFleetRoster ?? []
+  const pickup = ownFleetDriverByName(roster, c.driver1.name)
+  if (!pickup) return
+  const wanted = c.deliveryDriverId && c.deliveryDriverId !== pickup.id ? c.deliveryDriverId : pickup.id
+  await r.run('deliveryDriver', async () => {
+    const load = r.bundle?.loads[0]
+    if (!load) return
+    if (wanted !== pickup.id && !roster.some((d) => d.id === wanted)) throw new Error('The selected delivery driver is no longer available. Pick another driver.')
+    const deliveries = ((load.stops ?? []) as Stop[]).filter((s) => s.type === 'delivery')
+    const assignments = deliveries.filter((s) => (s.driverId ?? null) !== wanted).map((s) => ({ stopId: s.id, driverId: wanted }))
+    if (assignments.length === 0) return
+    await setStopDrivers({ loadId: load.id, assignments })
+    return getShipmentBundle(r.bundle!.shipment.id)
+  })
+  if (r.failed.includes('deliveryDriver')) r.message = `Saved, but the delivery driver was not set: ${r.message}`
 }
 
 /** Upload files picked before the first save: PREPARE → S3 PUT → COMMIT, one result per file. */
@@ -257,22 +283,25 @@ async function assignPickedDriver(r: Runner, values: ShipmentFormValues, ctx: Pi
   const wanted = values.carrier.driver1.name.trim()
   if (!values.carrier.isOwnFleet || !wanted) return
   const was = valuesFromBundle(saved, { customer: ctx.customer }).carrier.driver1.name.trim()
-  if (was.toLowerCase() === wanted.toLowerCase()) return
-  await r.run('assignDriver', async () => {
-    const driver = ownFleetDriverByName(ctx.ownFleetRoster ?? [], wanted)
-    if (!driver) throw new Error('The selected driver is no longer available. Pick a driver using Cover.')
-    const load = r.bundle?.loads[0]
-    if (!load) return
-    return assignAsset({
-      loadId: load.id,
-      driverId: driver.id,
-      truckId: driver.truckId ?? undefined,
-      truckNumber: driver.truckNumber || undefined,
-      trailerId: driver.trailerId ?? undefined,
-      trailerNumber: driver.trailerNumber || undefined,
+  if (was.toLowerCase() !== wanted.toLowerCase()) {
+    await r.run('assignDriver', async () => {
+      const driver = ownFleetDriverByName(ctx.ownFleetRoster ?? [], wanted)
+      if (!driver) throw new Error('The selected driver is no longer available. Pick a driver using Cover.')
+      const load = r.bundle?.loads[0]
+      if (!load) return
+      return assignAsset({
+        loadId: load.id,
+        driverId: driver.id,
+        truckId: driver.truckId ?? undefined,
+        truckNumber: driver.truckNumber || undefined,
+        trailerId: driver.trailerId ?? undefined,
+        trailerNumber: driver.trailerNumber || undefined,
+      })
     })
-  })
-  if (r.failed.includes('assignDriver')) r.message = `Saved, but the driver was not assigned: ${r.message}`
+    if (r.failed.includes('assignDriver')) { r.message = `Saved, but the driver was not assigned: ${r.message}`; return }
+  }
+  // The delivery may have its own driver (or be put back on Driver 1): sort out the stops after Driver 1 is on the load.
+  await applyDeliveryDriver(r, values, ctx)
 }
 
 export async function runSaveDraft(
@@ -282,7 +311,7 @@ export async function runSaveDraft(
   if (bundle.shipment.status !== 'DRAFT') return runEditSave(values, ctx, bundle)
   const problem = precheck(values, ctx, 'draft', 'edit')
   if (problem) return fail(problem, bundle)
-  const r = new Runner(bundle, new Set(), ['save', 'revTag', 'salesRep', 'dispatcher', 'assignDriver'])
+  const r = new Runner(bundle, new Set(), ['save', 'revTag', 'salesRep', 'dispatcher', 'assignDriver', 'deliveryDriver'])
   await saveDraftBody(r, values, ctx, true)
   await assignPickedDriver(r, values, ctx, bundle)
   return r.result()
@@ -386,7 +415,7 @@ export async function runEditSave(values: ShipmentFormValues, ctx: PipelineCtx, 
   const problem = precheck(values, ctx, 'create', 'edit')
   if (problem) return fail(problem, bundle)
   if (bundle.shipment.status === 'DRAFT') {
-    const r = new Runner(bundle, new Set(), ['save', 'revTag', 'salesRep', 'dispatcher', 'assignDriver'])
+    const r = new Runner(bundle, new Set(), ['save', 'revTag', 'salesRep', 'dispatcher', 'assignDriver', 'deliveryDriver'])
     await saveDraftBody(r, values, ctx, false)
     await assignPickedDriver(r, values, ctx, bundle)
     return r.result()
@@ -394,7 +423,7 @@ export async function runEditSave(values: ShipmentFormValues, ctx: PipelineCtx, 
   const seed = { customer: ctx.customer }
   const before = valuesFromBundle(bundle, seed)
   const locks = lockedFields(bundle)
-  const r = new Runner(bundle, new Set(), ['order', 'stops', 'charges', 'revTag', 'salesRep', 'dispatcher', 'carrier', 'assignDriver', 'eta'])
+  const r = new Runner(bundle, new Set(), ['order', 'stops', 'charges', 'revTag', 'salesRep', 'dispatcher', 'carrier', 'assignDriver', 'deliveryDriver', 'eta'])
 
   await r.run('order', async () => {
     const next = toUpdateOrderDetailsInput(values, r.bundle!)
