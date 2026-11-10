@@ -1425,6 +1425,8 @@ const TMS_SETTINGS_V15_FIELDS = ['trackingAutomation']
 const TMS_SETTINGS_V16_FIELDS = ['reviewRequirements']
 // Step AW: company-wide invoice always-copy list, the Aljex cutoff and sales rep by division. Its own flag again.
 const TMS_SETTINGS_V17_FIELDS = ['invoiceAlwaysCopyEmails', 'aljexCutoffAt', 'divisionSalesReps']
+// Check-call cadence texts wait while the driver updates automatically. Its own flag again.
+const TMS_SETTINGS_V18_FIELDS = ['checkCallSkipWhenDriverActive']
 const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact', 'factorRemitTo', 'teams', 'commissionPlans', 'commissionPaySchedule', 'postalCodeAliases', 'aiAgents', 'marginTargetBpsByMode', 'defaultCheckCallPlan', 'brandSenders', 'whiteLabel', 'customerPortalDefaults', 'customerTags', 'rateConTemplate', 'carrierAgreementTemplate', 'consolidationRules', 'notificationSubscriptions', 'notificationWebhooks', 'notificationDefaults', 'paymentTerms', 'trackingAutomation', 'divisionSalesReps']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
@@ -1442,6 +1444,7 @@ let settingsHaveV14 = true
 let settingsHaveV15 = true
 let settingsHaveV16 = true
 let settingsHaveV17 = true
+let settingsHaveV18 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
@@ -1460,6 +1463,7 @@ const tmsSettingsFields = () => [
   settingsHaveV15 ? TMS_SETTINGS_V15_FIELDS.join(' ') : '',
   settingsHaveV16 ? TMS_SETTINGS_V16_FIELDS.join(' ') : '',
   settingsHaveV17 ? TMS_SETTINGS_V17_FIELDS.join(' ') : '',
+  settingsHaveV18 ? TMS_SETTINGS_V18_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1683,7 +1687,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 16) throw err
+      if (attempt >= 17) throw err
+      if (settingsHaveV18 && fieldNamed(TMS_SETTINGS_V18_FIELDS, err)) {
+        console.warn('[apiClient] backend has no skip-text setting yet — querying without it until deploy')
+        settingsHaveV18 = false
+        continue
+      }
       if (settingsHaveV17 && fieldNamed(TMS_SETTINGS_V17_FIELDS, err)) {
         console.warn('[apiClient] backend has no Step AW billing settings yet — querying without them until deploy')
         settingsHaveV17 = false
@@ -4294,6 +4303,7 @@ export interface TrackingSettingsPatch {
   customerLinkExpiryDays?: number | null
   customerLinkShowsCarrier?: boolean | null
   customerLinkShowsPosition?: boolean | null
+  checkCallSkipWhenDriverActive?: boolean | null
   trackingContact?: TrackingContact | null
   trackingSmsTemplate?: string | null
   /**

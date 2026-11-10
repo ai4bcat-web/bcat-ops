@@ -1390,6 +1390,9 @@ function trackingSettingsPatch(input: Row): Row {
   if ('customerLinkShowsCarrier' in input) {
     patch.customerLinkShowsCarrier = assertBoolean(input.customerLinkShowsCarrier, 'customerLinkShowsCarrier')
   }
+  if ('checkCallSkipWhenDriverActive' in input) {
+    patch.checkCallSkipWhenDriverActive = assertBoolean(input.checkCallSkipWhenDriverActive, 'checkCallSkipWhenDriverActive')
+  }
   if ('customerLinkShowsPosition' in input) {
     patch.customerLinkShowsPosition = assertBoolean(input.customerLinkShowsPosition, 'customerLinkShowsPosition')
   }
