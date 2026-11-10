@@ -12,6 +12,7 @@
 // person wrote (any other statusChangedBy) is not reactivated by MCP; only one MCP itself turned off.
 import { mcpPacketStanding } from '../mcpPacket'
 import { effectiveCarrierStatus } from '../carrierStatus'
+import { isOwnFleetMc } from '../ownFleet'
 import type { CarrierRecord } from '../../types/tms'
 
 type Row = Record<string, unknown>
@@ -47,14 +48,16 @@ export function mcpCarrierStatusPatch(carrier: Row, now: string, opts: { monitor
   const current = typeof carrier.status === 'string' && carrier.status ? carrier.status : 'PENDING'
   if (current === 'DO_NOT_USE') return {}
   const lapse = mcpLapseOf(carrier, now)
-  const complete = mcpPacketStanding(carrier as { mcpStatus?: string | null }).completed
+  // Our own fleet (Ivan Cartage) never sends a setup packet: its MyCarrierPackets profile (address, insurance, authority) is all there is.
+  const ownFleet = isOwnFleetMc(carrier.mcNumber)
+  const complete = ownFleet || mcpPacketStanding(carrier as { mcpStatus?: string | null }).completed
 
   if (complete && !lapse) {
     // A carrier on MCP's MONITORED list is Active with us (Ryne 2026-11-10), including one a person or the Aljex import had left Inactive;
     // an insurance / authority lapse above still keeps it off, and DO_NOT_USE was returned before this point.
     const mayActivate = current === 'PENDING' || current === 'REVIEW' || (current === 'INACTIVE' && (carrier.statusChangedBy === MCP_STATUS_ACTOR || opts.monitored === true))
     if (!mayActivate) return {}
-    return { status: 'ACTIVE', statusReason: null, statusNote: 'MyCarrierPackets: packet complete and monitored.', statusChangedAt: now, statusChangedBy: MCP_STATUS_ACTOR }
+    return { status: 'ACTIVE', statusReason: null, statusNote: ownFleet ? 'Ivan Cartage is our own fleet.' : 'MyCarrierPackets: packet complete and monitored.', statusChangedAt: now, statusChangedBy: MCP_STATUS_ACTOR }
   }
   if (lapse && current === 'ACTIVE') {
     return { status: 'INACTIVE', statusReason: lapse, statusNote: LAPSE_NOTE[lapse], statusChangedAt: now, statusChangedBy: MCP_STATUS_ACTOR }

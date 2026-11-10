@@ -88,3 +88,17 @@ describe('advanceAfterCarrierActive: assignments waiting on setup advance when M
     expect(h.mirror).not.toHaveBeenCalled()
   })
 })
+
+describe('our own fleet', () => {
+  const NOW = '2026-11-10T12:00:00.000Z'
+  const fresh = [{ type: 'CARGO', active: true, expiresAt: '2027-08-21T00:00:00.000Z' }]
+  it('Ivan Cartage is Active from its MyCarrierPackets profile alone, with no setup packet', () => {
+    const patch = mcpCarrierStatusPatch({ mcNumber: 'MC274623', status: 'PENDING', mcpStatus: 'NOT_INVITED', authorityStatus: 'ACTIVE', insurancePolicies: fresh }, NOW)
+    expect(patch).toMatchObject({ status: 'ACTIVE', statusNote: 'Ivan Cartage is our own fleet.', statusChangedBy: 'mcp-sync' })
+  })
+  it('a lapse (authority off) still keeps it from Active, and another carrier with no packet stays Pending', () => {
+    expect(mcpCarrierStatusPatch({ mcNumber: '274623', status: 'PENDING', mcpStatus: 'NOT_INVITED', authorityStatus: 'INACTIVE', insurancePolicies: fresh }, NOW)).toEqual({})
+    expect(mcpCarrierStatusPatch({ mcNumber: '111111', status: 'PENDING', mcpStatus: 'NOT_INVITED', authorityStatus: 'ACTIVE', insurancePolicies: fresh }, NOW)).toEqual({})
+  })
+})
+
