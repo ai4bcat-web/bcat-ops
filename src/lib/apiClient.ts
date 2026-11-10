@@ -3877,9 +3877,10 @@ export async function listCarrierDocuments(): Promise<CarrierDocumentRecord[]> {
 }
 
 /** One paginated directory read for remit flags; no bank details or per-carrier requests. */
-export async function listCarrierRemitEmails(): Promise<{ carrierId: string; payeeEmail?: string | null }[]> {
+export interface CarrierPayInfo { carrierId: string; payeeEmail?: string | null; recipientType?: string | null; factorName?: string | null; accountName?: string | null; method?: string | null; isPreferred?: boolean | null; status?: string | null }
+export async function listCarrierRemitEmails(): Promise<CarrierPayInfo[]> {
   if (!modelAvailable('CarrierPaymentMethod')) throw new Error('Carrier payment methods are unavailable')
-  return listAll('listCarrierPaymentMethods', 'carrierId payeeEmail', 1000)
+  return listAll('listCarrierPaymentMethods', 'carrierId payeeEmail recipientType factorName accountName method isPreferred status', 1000)
 }
 
 /** Everything one carrier profile renders, in one round trip's worth of parallel reads. */

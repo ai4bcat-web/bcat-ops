@@ -11,7 +11,7 @@
  * a link to a carrier lands somewhere you can keep working from.
  */
 import { RemitEmailBadge } from '@/features/directory/components/EmailReadinessBadge'
-import { carrierRemitEmailState, groupRemitMethods, type RemitEmailFields } from '@/lib/emailReadiness'
+import { carrierRemitEmailState, groupRemitMethods, carrierPayToText, type RemitEmailFields } from '@/lib/emailReadiness'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Download, RefreshCw, Search, Truck } from 'lucide-react'
@@ -76,7 +76,8 @@ export function CarriersPage() {
 
   useEffect(() => { getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [])
 
-  const catalog = useMemo(() => carrierGridColumns(now, remitState), [now, remitState])
+  const payTo = useCallback((row: CarrierRow) => (methodsByCarrier === null ? '' : carrierPayToText(row, methodsByCarrier.get(row.id) ?? [])), [methodsByCarrier])
+  const catalog = useMemo(() => carrierGridColumns(now, remitState, payTo), [now, remitState, payTo])
   const prefs = useDenseGridPrefs({
     gridId: 'carriers',
     email: user?.email,

@@ -1,3 +1,4 @@
+import { CustomerBulkEdit } from './CustomerBulkEdit'
 import { BillingMethodBadge, InvoiceEmailBadge } from './components/EmailReadinessBadge'
 import { stateOf as billingStateOf } from '@/lib/billingSetupCsv'
 import { customerInvoiceEmailState, invoiceEmailLabels } from '@/lib/emailReadiness'
@@ -5,7 +6,7 @@ import { PossibleDuplicateBadge } from './components/PossibleDuplicateBadge'
 import { buildDuplicateIndex } from '@/lib/customerDuplicates'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Archive, MessageSquarePlus, Merge, Pencil, Search, Settings2, Users } from 'lucide-react'
+import { Archive, MapPin, MessageSquarePlus, Merge, Pencil, Search, Settings2, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
 import { useStaff } from '@/hooks/useStaff'
@@ -20,10 +21,9 @@ import {
   TmsField,
   TmsIconButton,
   TmsInput,
-  TmsListPage,
   TmsSelect,
 } from '@/features/tms/kit'
-import type { ColumnDef, TmsTone } from '@/features/tms/kit'
+import type { TmsTone } from '@/features/tms/kit'
 import { TmsSegmentedTabs } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import { ClearFiltersButton, ColumnsButton, DensityToggle, DenseKpiStrip, SummaryToggle } from '@/features/tms/grid/DenseControls'
@@ -203,7 +203,7 @@ export function CustomersPage() {
   // Open AR and Last shipment cost server queries, so they are fetched only while a column shows them.
   const withActivity = prefs.columns.some((k) => ACTIVITY_COLUMN_KEYS.includes(k))
   const crm = useCrmAccounts(isManager ? scope : 'mine', withActivity)
-  const { nameOf } = useStaff(user?.email)
+  const { nameOf, staff } = useStaff(user?.email)
   const [noteFor, setNoteFor] = useState<CustomerRecord | null>(null)
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<DenseFilters>({})
@@ -220,6 +220,7 @@ export function CustomersPage() {
   const [settings, setSettings] = useState<TmsSettings | null>(null)
   const [showDefaults, setShowDefaults] = useState(false)
   const [pageSize, setPageSize] = useState(PAGE_SIZE)
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
 
   useEffect(() => {
     listDivisions().then(setDivisions).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load divisions'))
@@ -457,8 +458,20 @@ export function CustomersPage() {
         </div>
         <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
         <div className="tms-dense-body">
+          <CustomerBulkEdit
+            customers={sortedRows.filter((r) => selectedIds.has(r.record.id)).map((r) => r.record)}
+            divisions={divisions}
+            staff={staff}
+            save={(c, patch) => dir.saveCustomer(c, patch)}
+            onDone={() => setSelectedIds(new Set())}
+            onClear={() => setSelectedIds(new Set())}
+          />
           <DenseGrid<CustomerRow>
             aria-label="Customers"
+            selectable
+            selectedIds={selectedIds}
+            onToggle={(id) => setSelectedIds((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next })}
+            onToggleAll={() => setSelectedIds((prev) => (pageRows.every((r) => prev.has(r.record.id)) ? new Set() : new Set(pageRows.map((r) => r.record.id))))}
             recentKey={`tms:customers:recent:${user?.email ?? 'anon'}`}
             resetKey={`${activeTab}|${scope}|${query}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
             columns={gridColumns}
@@ -566,39 +579,73 @@ function CustomerModal({ open, initial, divisions, onClose, onSave }: {
   )
 }
 
-interface LocationFilters {
-  facilityType: string
-  apptRule: string
-  archived: '' | 'yes' | 'no'
-}
-
-const EMPTY_LOCATION_FILTERS: LocationFilters = { facilityType: '', apptRule: '', archived: '' }
 const FACILITY_TYPES = ['SHIPPER', 'RECEIVER', 'BOTH', 'YARD', 'TRUCK_STOP', 'OTHER']
 const APPT_RULES = ['FCFS', 'APPT', 'EITHER']
 
+const LOCATION_DEFAULT_COLUMNS = ['name', 'facility', 'address', 'appt', 'lead', 'hours', 'contact', 'customers', 'driverNotes']
+const LOCATION_ALL_COLUMNS = [...LOCATION_DEFAULT_COLUMNS, 'city', 'state', 'zip', 'archived']
+const LOCATION_ACTIONS_KEY = 'actions'
+
+const addressText = (l: LocationRecord) => [l.street, [l.city, l.state].filter(Boolean).join(', '), l.zip, l.country].filter(Boolean).join(' · ')
+const locationOpt = (v: string | null | undefined) => (v ? [{ value: v, label: v }] : [])
+
+/** Locations in the same dense table as Customers and Carriers: auto-fit columns, header filters, sort, the Columns dialog. */
 export function LocationsPage() {
   const dir = useDirectory()
-  const { isAdmin } = useAuth()
+  const { isAdmin, user } = useAuth()
   const [query, setQuery] = useState('')
-  const [filters, setFilters] = useState<LocationFilters>(EMPTY_LOCATION_FILTERS)
-  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [filters, setFilters] = useState<DenseFilters>({})
   const [editing, setEditing] = useState<LocationRecord | 'new' | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
-  const [pageSize, setPageSize] = useState(50)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE)
+  const prefs = useDenseGridPrefs({
+    gridId: 'locations',
+    email: user?.email,
+    defaultColumns: LOCATION_DEFAULT_COLUMNS,
+    validKeys: LOCATION_ALL_COLUMNS,
+    defaultSort: { key: 'name', dir: 'asc' },
+  })
+
+  const customerName = useMemo(() => new Map(dir.customers.map((c) => [c.id, c.name])), [dir.customers])
+  const catalog = useMemo<Array<DenseColumn<LocationRecord>>>(() => [
+    { key: 'name', header: 'Facility', group: 'Location', text: (l) => l.name, sortValue: (l) => l.name.toLowerCase(), extraPx: 90 },
+    { key: 'facility', header: 'Type', group: 'Location', text: (l) => l.facilityType ?? '', filter: 'multi', optionsOf: (l) => locationOpt(l.facilityType), fixedOptions: FACILITY_TYPES.map((t) => ({ value: t, label: t })) },
+    { key: 'address', header: 'Address', group: 'Location', text: (l) => addressText(l) || 'no address yet' },
+    { key: 'city', header: 'City', group: 'Location', text: (l) => l.city ?? '' },
+    { key: 'state', header: 'State', group: 'Location', text: (l) => l.state ?? '', filter: 'multi', optionsOf: (l) => locationOpt(l.state) },
+    { key: 'zip', header: 'Zip', group: 'Location', text: (l) => l.zip ?? '' },
+    { key: 'appt', header: 'Appt rule', group: 'Appointments', text: (l) => l.apptRule ?? '', filter: 'multi', optionsOf: (l) => locationOpt(l.apptRule), fixedOptions: APPT_RULES.map((t) => ({ value: t, label: t })) },
+    { key: 'lead', header: 'Lead time', group: 'Appointments', text: (l) => (l.apptLeadTimeHours != null ? `${l.apptLeadTimeHours}h` : ''), filter: 'number', numberOf: (l) => l.apptLeadTimeHours ?? null, numberUnit: 'h', align: 'right' },
+    { key: 'hours', header: 'Hours', group: 'Appointments', text: (l) => l.hours ?? '' },
+    { key: 'contact', header: 'Appt contact', group: 'Appointments', text: (l) => [l.apptContactName, l.apptContactEmail, l.apptContactPhone].filter(Boolean).join(' · ') },
+    { key: 'customers', header: 'Customers', group: 'Account', text: (l) => (l.customerIds ?? []).map((id) => customerName.get(id) ?? id).join(', ') },
+    { key: 'driverNotes', header: 'Driver notes', group: 'Account', text: (l) => { const { count } = driverNotesSummary(l.driverNotes); return count ? String(count) : '' }, align: 'right' },
+    { key: 'archived', header: 'Archived', group: 'Account', text: (l) => (l.active === false ? 'Yes' : 'No'), filter: 'multi' },
+    { key: LOCATION_ACTIONS_KEY, header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 90 },
+  ], [customerName])
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return dir.locations
-      .filter((l) =>
-        !q || [l.name, l.city, l.state, l.customerName, l.apptContactEmail, l.street, l.zip].some((v) => (v ?? '').toLowerCase().includes(q))
-      )
-      .filter((l) => (filters.facilityType ? l.facilityType === filters.facilityType : true))
-      .filter((l) => (filters.apptRule ? l.apptRule === filters.apptRule : true))
-      .filter((l) => (filters.archived ? (l.active === false) === (filters.archived === 'yes') : true))
-  }, [dir.locations, query, filters])
-
-  const pageRows = useMemo(() => rows.slice(0, pageSize), [rows, pageSize])
+    return dir.locations.filter((l) => !q || [l.name, l.city, l.state, l.customerName, l.apptContactEmail, l.street, l.zip].some((v) => (v ?? '').toLowerCase().includes(q)))
+  }, [dir.locations, query])
+  const gridColumns = useMemo(
+    () => [...prefs.columns.map((k) => catalog.find((c) => c.key === k)).filter((c) => c != null), ...catalog.filter((c) => c.key === LOCATION_ACTIONS_KEY)],
+    [prefs.columns, catalog],
+  )
+  const filteredRows = useMemo(() => filterRows(rows, catalog, filters), [rows, catalog, filters])
+  const sortedRows = useMemo(() => sortDenseRows(filteredRows, catalog, prefs.sort), [filteredRows, catalog, prefs.sort])
+  const pageRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
+  const setColumnFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
+    setPageSize(PAGE_SIZE)
+    setFilters((prev) => { const copy = { ...prev }; if (next) copy[key] = next; else delete copy[key]; return copy })
+  }, [])
+  const kpis = useMemo(() => [
+    { label: 'Locations', value: sortedRows.length },
+    { label: 'No address', value: sortedRows.filter((l) => !addressText(l)).length, tone: 'warn' as const },
+    { label: 'With appt rule', value: sortedRows.filter((l) => !!l.apptRule).length },
+    { label: 'Archived', value: sortedRows.filter((l) => l.active === false).length },
+  ], [sortedRows])
 
   useEffect(() => { if (dir.error) toast.error(dir.error) }, [dir.error])
 
@@ -609,138 +656,82 @@ export function LocationsPage() {
     try { await dir.archiveLocation(l); toast.success('Location archived') } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
   }
 
-  const columns: Array<ColumnDef<LocationRecord>> = [
-    {
-      key: 'name',
-      header: 'FACILITY',
-      width: 240,
-      render: (l) => (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontWeight: 600 }}>{l.name}</span>
-          {l.facilityType && <TmsBadge tone="blue">{l.facilityType}</TmsBadge>}
-          {l.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
-        </span>
-      ),
-    },
-    {
-      key: 'address',
-      header: 'ADDRESS',
-      width: 280,
-      render: (l) =>
-        [l.street, [l.city, l.state].filter(Boolean).join(', '), l.zip, l.country].filter(Boolean).join(' · ') || (
-          <span className="tms-muted">no address yet</span>
-        ),
-    },
-    { key: 'appt', header: 'APPT RULE', width: 120, render: (l) => l.apptRule ?? '—' },
-    { key: 'lead', header: 'LEAD TIME', width: 110, render: (l) => (l.apptLeadTimeHours != null ? `${l.apptLeadTimeHours}h` : '—') },
-    { key: 'hours', header: 'HOURS', width: 160, render: (l) => l.hours ?? '—' },
-    {
-      key: 'contact',
-      header: 'APPT CONTACT',
-      width: 220,
-      render: (l) => [l.apptContactName, l.apptContactEmail, l.apptContactPhone].filter(Boolean).join(' · ') || '—',
-    },
-    {
-      key: 'customers',
-      header: 'CUSTOMERS',
-      width: 220,
-      render: (l) => (l.customerIds && l.customerIds.length > 0
-        ? l.customerIds.map((id) => dir.customers.find((c) => c.id === id)?.name ?? id).join(', ')
-        : '—'),
-    },
-    {
-      key: 'driverNotes',
-      header: 'DRIVER NOTES',
-      width: 130,
-      render: (l) => {
-        const { count, newestAt } = driverNotesSummary(l.driverNotes)
-        return count ? (
-          <span title="Comments drivers left from the driver app">
-            <b>{count}</b>{newestAt ? ` · ${new Date(newestAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+  const renderCell = (l: LocationRecord, key: string) => {
+    switch (key) {
+      case 'name':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontWeight: 600 }}>{l.name}</span>
+            {l.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
           </span>
-        ) : '—'
-      },
-    },
-    {
-      key: 'actions',
-      header: '',
-      width: 80,
-      render: (l) => (
-        <span style={{ display: 'inline-flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
-          <TmsIconButton shape="plain" aria-label={`Edit ${l.name}`} title="Edit" onClick={() => setEditing(l)}><Pencil size={14} /></TmsIconButton>
-          {isAdmin && (
-            <TmsIconButton shape="plain" aria-label={`Archive ${l.name}`} title="Archive" onClick={() => void archive(l)}><Archive size={14} /></TmsIconButton>
-          )}
-        </span>
-      ),
-    },
-  ]
+        )
+      case LOCATION_ACTIONS_KEY:
+        return (
+          <span style={{ display: 'inline-flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+            <TmsIconButton shape="plain" aria-label={`Edit ${l.name}`} title="Edit" onClick={() => setEditing(l)}><Pencil size={14} /></TmsIconButton>
+            {isAdmin && <TmsIconButton shape="plain" aria-label={`Archive ${l.name}`} title="Archive" onClick={() => void archive(l)}><Archive size={14} /></TmsIconButton>}
+          </span>
+        )
+      default:
+        return catalog.find((col) => col.key === key)?.text(l) || <span className="tms-muted">—</span>
+    }
+  }
 
   return (
     <>
-      <TmsListPage<LocationRecord>
-        title="Locations"
-        primaryAction={{ label: 'Location', onClick: () => setEditing('new') }}
-        actions={isAdmin ? (
-          <TmsIconButton aria-label="Merge locations" title="Merge locations" onClick={() => setMergeOpen(true)}>
-            <Merge size={16} />
-          </TmsIconButton>
-        ) : null}
-        search={{ value: query, onChange: setQuery, placeholder: 'Search locations' }}
-        onRefresh={dir.refresh}
-        filterChips={[
-          { key: 'facility', label: 'Facility type is', value: filters.facilityType || null, onClick: () => setFiltersOpen(true) },
-          { key: 'appt', label: 'Appt rule is', value: filters.apptRule || null, onClick: () => setFiltersOpen(true) },
-          { key: 'archived', label: 'Archived is', value: filters.archived ? (filters.archived === 'yes' ? 'Yes' : 'No') : null, onClick: () => setFiltersOpen(true) },
-        ]}
-        onAddFilter={() => setFiltersOpen(true)}
-        columns={columns}
-        rows={pageRows}
-        rowKey={(l) => l.id}
-        onRowClick={(l) => setOpenId(l.id)}
-        page={{ from: pageRows.length === 0 ? 0 : 1, to: pageRows.length, total: rows.length, pageSize, onPageSize: setPageSize }}
-        emptyText={dir.loading ? 'Loading locations…' : 'No locations match these filters.'}
-        onClearFilters={() => { setQuery(''); setFilters(EMPTY_LOCATION_FILTERS) }}
-      />
-
-      <TmsDialog
-        open={filtersOpen}
-        onOpenChange={setFiltersOpen}
-        title="Filter locations"
-        footer={
-          <>
-            <TmsButton onClick={() => setFilters(EMPTY_LOCATION_FILTERS)}>Clear</TmsButton>
-            <TmsButton variant="primary" onClick={() => setFiltersOpen(false)}>Done</TmsButton>
-          </>
-        }
-      >
-        <div style={{ display: 'grid', gap: 14 }}>
-          <TmsField label="Facility type is">
-            <TmsSelect
-              value={filters.facilityType}
-              onChange={(e) => setFilters({ ...filters, facilityType: e.target.value })}
-              placeholder="Any"
-              options={FACILITY_TYPES.map((t) => ({ value: t, label: t }))}
-            />
-          </TmsField>
-          <TmsField label="Appointment rule is">
-            <TmsSelect
-              value={filters.apptRule}
-              onChange={(e) => setFilters({ ...filters, apptRule: e.target.value })}
-              placeholder="Any"
-              options={APPT_RULES.map((t) => ({ value: t, label: t }))}
-            />
-          </TmsField>
-          <TmsField label="Archived is">
-            <TmsSelect
-              value={filters.archived}
-              onChange={(e) => setFilters({ ...filters, archived: e.target.value as '' | 'yes' | 'no' })}
-              placeholder="Any"
-              options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]}
-            />
-          </TmsField>
+      <div className="tms-dense-page">
+        <div className="tms-dense-bar">
+          <span className="tms-dense-title"><MapPin size={18} aria-hidden="true" /> Locations</span>
+          <Search size={14} className="tms-muted" aria-hidden="true" />
+          <TmsInput
+            placeholder="Search locations"
+            aria-label="Search locations"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setPageSize(PAGE_SIZE) }}
+            className="tms-dense-search"
+          />
+          <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => { setFilters({}); setQuery(''); setPageSize(PAGE_SIZE) }} />
+          <span className="tms-dense-spacer" />
+          <TmsButton size="sm" variant="secondary" onClick={() => void dir.refresh()}>Refresh</TmsButton>
+          <ColumnsButton catalog={catalog} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
+          <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
+          <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
+          {isAdmin && (
+            <TmsIconButton aria-label="Merge locations" title="Merge locations" onClick={() => setMergeOpen(true)}><Merge size={16} /></TmsIconButton>
+          )}
+          <TmsButton size="sm" variant="primary" onClick={() => setEditing('new')}>Location</TmsButton>
         </div>
-      </TmsDialog>
+        <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+        <div className="tms-dense-body">
+          <DenseGrid<LocationRecord>
+            aria-label="Locations"
+            recentKey={`tms:locations:recent:${user?.email ?? 'anon'}`}
+            resetKey={`${query}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+            columns={gridColumns}
+            rows={pageRows}
+            fitRows={rows}
+            rowKey={(l) => l.id}
+            renderCell={renderCell}
+            density={prefs.density}
+            userWidths={prefs.widths}
+            stickyCount={Math.max(1, prefs.pinned.length)}
+            sort={prefs.sort}
+            onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
+            filters={filters}
+            onFilterChange={setColumnFilter}
+            onReorder={(from, to) => prefs.setColumns(reorderKeys(prefs.columns, from, to))}
+            onResize={prefs.setWidth}
+            onRowClick={(l) => setOpenId(l.id)}
+            empty={dir.loading ? 'Loading locations…' : 'No locations match these filters.'}
+          />
+          {sortedRows.length > pageRows.length && (
+            <div className="tms-dense-bar" data-testid="locations-more">
+              <span className="tms-muted">Showing {pageRows.length} of {sortedRows.length}</span>
+              <TmsButton size="sm" variant="secondary" onClick={() => setPageSize((n) => n + PAGE_SIZE)}>Show next {PAGE_SIZE}</TmsButton>
+            </div>
+          )}
+        </div>
+      </div>
 
       {open && (
         <TmsDialog

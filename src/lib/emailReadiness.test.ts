@@ -32,3 +32,22 @@ describe('email readiness', () => {
     expect(partitionForPostAll([])).toEqual({ ready: [], skipped: [] })
   })
 })
+
+import { carrierPayToText } from './emailReadiness'
+describe('carrierPayToText', () => {
+  const carrier = { name: 'Blue Star Express' }
+  it('names the factor when the preferred method pays a factor', () => {
+    expect(carrierPayToText(carrier, [{ carrierId: 'c', recipientType: 'FACTOR', factorName: 'OTR Solutions', isPreferred: true }])).toBe('Factor: OTR Solutions')
+  })
+  it('is Manual with the payee and method otherwise, skipping inactive methods', () => {
+    expect(carrierPayToText(carrier, [
+      { carrierId: 'c', recipientType: 'FACTOR', factorName: 'Old', status: 'INACTIVE' },
+      { carrierId: 'c', recipientType: 'CARRIER', accountName: 'Blue Star LLC', method: 'ACH' },
+    ])).toBe('Manual: Blue Star LLC (ACH)')
+    expect(carrierPayToText(carrier, [{ carrierId: 'c', recipientType: 'CARRIER' }])).toBe('Manual: Blue Star Express')
+  })
+  it('falls back to the carrier factor link, else blank', () => {
+    expect(carrierPayToText({ ...carrier, factorPaymentMethodId: 'x' }, [])).toBe('Factor')
+    expect(carrierPayToText(carrier, [])).toBe('')
+  })
+})

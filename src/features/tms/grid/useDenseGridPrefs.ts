@@ -17,6 +17,8 @@ export interface DensePrefs {
   sort: DenseSort | null
   groupBy: string | null
   kpiOpen: boolean
+  /** Which width rule the saved `widths` were made under; older ones are dropped once so every column starts fitted again. */
+  widthsFit?: number
 }
 
 export interface UseDensePrefsOptions {
@@ -47,6 +49,8 @@ export interface UseDensePrefsResult extends DensePrefs {
 }
 
 const VERSION = 1
+/** Bumped 2026-11-10 (columns must be wide enough to read everything): saved widths from before it are discarded one time. */
+const WIDTHS_FIT = 2
 
 export function densePrefsKey(gridId: string, email: string | null | undefined): string {
   return `tms:grid:${gridId}:${email ?? 'anon'}:v${VERSION}`
@@ -61,6 +65,7 @@ function read(key: string, opts: UseDensePrefsOptions): DensePrefs {
     sort: opts.defaultSort,
     groupBy: opts.defaultGroupBy ?? null,
     kpiOpen: false,
+    widthsFit: WIDTHS_FIT,
   }
   try {
     const raw = window.localStorage.getItem(key)
@@ -70,7 +75,8 @@ function read(key: string, opts: UseDensePrefsOptions): DensePrefs {
     const columns = Array.isArray(stored.columns) ? stored.columns.filter((k) => valid.has(k)) : []
     return {
       columns: columns.length > 0 ? columns : defaults.columns,
-      widths: stored.widths && typeof stored.widths === 'object' ? stored.widths : {},
+      widths: stored.widthsFit === WIDTHS_FIT && stored.widths && typeof stored.widths === 'object' ? stored.widths : {},
+      widthsFit: WIDTHS_FIT,
       pinned: Array.isArray(stored.pinned) ? stored.pinned.filter((k) => columns.includes(k)) : [],
       density: stored.density === 'comfortable' ? 'comfortable' : 'compact',
       sort: stored.sort === undefined ? defaults.sort : stored.sort,

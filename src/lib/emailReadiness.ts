@@ -3,7 +3,20 @@ import { isValidEmail } from './billingMethod'
 export type EmailState = 'OK' | 'MISSING' | 'INVALID'
 export type InvoiceEmailState = EmailState | 'FACTORED_QUEUE_ONLY'
 export interface InvoiceEmailFields { billingMethod?: string | null; apEmail?: string | null }
-export interface RemitEmailFields { carrierId: string; payeeEmail?: string | null }
+export interface RemitEmailFields { carrierId: string; payeeEmail?: string | null; recipientType?: string | null; factorName?: string | null; accountName?: string | null; method?: string | null; isPreferred?: boolean | null; status?: string | null }
+
+/**
+ * How a carrier is paid and to whom (Ryne 2026-11-10): "Factor: <factor name>" when the preferred (else first active) payment method pays a
+ * factor, else "Manual: <payee>" with the method (ACH, check ...). Falls back to the carrier's own factor link; blank when nothing is on file.
+ */
+export function carrierPayToText(carrier: { name: string; factorPaymentMethodId?: string | null }, methods: readonly RemitEmailFields[]): string {
+  const live = methods.filter((m) => m.status !== 'INACTIVE')
+  const m = live.find((x) => x.isPreferred) ?? live[0]
+  if (!m) return carrier.factorPaymentMethodId ? 'Factor' : ''
+  if (m.recipientType === 'FACTOR') return `Factor: ${m.factorName?.trim() || 'factoring company'}`
+  const payee = m.accountName?.trim() || carrier.name
+  return `Manual: ${payee}${m.method ? ` (${m.method})` : ''}`
+}
 
 function addressState(email: string | null | undefined): EmailState {
   if (!email?.trim()) return 'MISSING'

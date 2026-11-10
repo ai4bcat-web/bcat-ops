@@ -206,8 +206,8 @@ export function defaultColumnWidth<T>(col: DenseColumn<T>, font?: string): numbe
 
 /** Capital letters are about this much wider than the mixed-case text the fit is measured for. */
 export const CAPS_WIDTH_FACTOR = 1.2
-const FIT_PX_PER_CHAR = 7.4
-const FIT_PADDING_PX = 30
+const FIT_PX_PER_CHAR = 8
+const FIT_PADDING_PX = 36
 const FIT_MAX_PX = 520
 const FIT_SAMPLE_ROWS = 800
 
