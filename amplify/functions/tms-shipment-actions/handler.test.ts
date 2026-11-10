@@ -5416,6 +5416,19 @@ describe('SET_LOAD_REFS', () => {
     const loadId = await leg()
     await expect(call('SET_LOAD_REFS', { loadId })).rejects.toThrow(/Nothing to change/)
   })
+
+  it('writes the same numbers to the order references the Shipments page shows, and keeps the other references', async () => {
+    const loadId = await leg()
+    const orderId = String(table(TABLES.load).get(loadId)!.orderId)
+    await call('SET_LOAD_REFS', { loadId, tmsId: 'CUST-5', pickupNumber: 'PICK-6' })
+    const refs = table(TABLES.order).get(orderId)!.references as Row[]
+    expect(refs.find((r) => r.code === 'PO')).toMatchObject({ value: 'CUST-5', level: 'ORDER' })
+    expect(refs.find((r) => r.code === 'pickup')).toMatchObject({ value: 'PICK-6' })
+    await call('SET_LOAD_REFS', { loadId, pickupNumber: '' })
+    const after = table(TABLES.order).get(orderId)!.references as Row[]
+    expect(after.some((r) => r.code === 'pickup')).toBe(false)
+    expect(after.find((r) => r.code === 'PO')).toMatchObject({ value: 'CUST-5' })
+  })
 })
 
 // ── SET_LOAD_PRO ─────────────────────────────────────────────────────────────

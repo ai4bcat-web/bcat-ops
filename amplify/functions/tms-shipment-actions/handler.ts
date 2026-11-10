@@ -4515,7 +4515,38 @@ async function setLoadPro(input: Row, caller: Caller): Promise<Row> {
 
 // ── SET_LOAD_REFS ────────────────────────────────────────────────────────────
 
-/** TMS # and PU # of a leg (the calendar's two text columns). A blank one falls back to the PRO, as it does at create. */
+/** The two order references the shipment form owns: Customer Ref # (code PO, the calendar's TMS #) and Pickup # (code pickup, the calendar's PU #). */
+const REF_CUSTOMER_CODE = 'PO'
+const REF_PICKUP_CODE = 'pickup'
+
+/** Pure: the order's references with one managed code set to `value` (added when absent, dropped when blank). */
+export function withManagedReference(references: readonly Row[], code: string, value: string): Row[] {
+  const trimmed = value.trim()
+  const rest = references.filter((r) => String(r.code) !== code)
+  if (!trimmed) return rest
+  const label = code === REF_CUSTOMER_CODE ? 'Ref #' : 'Pickup #'
+  const existing = references.find((r) => String(r.code) === code)
+  const next: Row = existing ? { ...existing, value: trimmed } : { code, label, value: trimmed, level: 'ORDER', visibility: code === REF_CUSTOMER_CODE ? 'CUSTOMER' : 'ALL' }
+  const at = references.findIndex((r) => String(r.code) === code)
+  return at >= 0 ? [...rest.slice(0, at), next, ...rest.slice(at)] : [...rest, next]
+}
+
+/** The Load.tmsId / pickupNumber a set of order references implies (only for a code that is present). */
+export function loadRefsFromReferences(references: readonly Row[]): Row {
+  const out: Row = {}
+  for (const [code, field] of [[REF_CUSTOMER_CODE, 'tmsId'], [REF_PICKUP_CODE, 'pickupNumber']] as const) {
+    const hit = references.find((r) => String(r.code) === code && String(r.value ?? '').trim())
+    if (hit) out[field] = String(hit.value).trim()
+  }
+  return out
+}
+
+/**
+ * TMS # (the shipment's customer reference) and PU # (its pickup reference), edited from the calendar. Both are read-only to a
+ * client Load write, so they go through here: written to the order's references (what the Shipments page shows) AND to the
+ * load's own copy (what the calendar column reads), so the two never disagree. A blank one clears the reference; the load copy
+ * then falls back to the PRO, as it does at create.
+ */
 async function setLoadRefs(input: Row, caller: Caller): Promise<Row> {
   const loadId = assertString(input.loadId, 'loadId')
   const tmsId = input.tmsId === undefined ? undefined : optionalString(input.tmsId, 120) ?? ''
@@ -4532,6 +4563,16 @@ async function setLoadRefs(input: Row, caller: Caller): Promise<Row> {
   const patch: Row = { id: loadId, updatedBy: caller.email }
   if (tmsId !== undefined) patch.tmsId = tmsId.trim() || pro
   if (pickupNumber !== undefined) patch.pickupNumber = pickupNumber.trim() || pro
+
+  const orderId = optionalString(load.orderId, 100)
+  const order = orderId ? await getById(ORDER_TABLE_NAME, orderId) : null
+  if (order) {
+    if (order.invoiceId) throw new Error(`This order has invoice ${optionalString(order.invoiceNumber, 100) ?? String(order.invoiceId)}; its references can no longer be changed`)
+    let references: Row[] = Array.isArray(order.references) ? (order.references as Row[]) : []
+    if (tmsId !== undefined) references = withManagedReference(references, REF_CUSTOMER_CODE, tmsId)
+    if (pickupNumber !== undefined) references = withManagedReference(references, REF_PICKUP_CODE, pickupNumber)
+    await transact([updateItemTx(ORDER_TABLE_NAME, String(order.id), { references, updatedBy: caller.email, updatedAt: nowIso(), version: (numberOrNull(order.version) ?? 1) + 1 }, null)], 'order references')
+  }
   const client = await getDataClient()
   assertLoadWriteOk(await client.models.Load.update(patch), 'Load update')
   await writeAudit('LOAD', loadId, 'SET_LOAD_REFS', caller, {
@@ -7154,6 +7195,8 @@ async function updateOrderDetails(input: Row, caller: Caller): Promise<Row> {
     ...loadFields,
     ...('equipmentType' in orderIn ? { equipmentType: orderIn.equipmentType } : {}),
     ...(totals ? { rate: totals.revenueCents } : {}),
+    // The load keeps a copy of the customer ref # and pickup # (the calendar reads it): follow the order's references.
+    ...(references ? loadRefsFromReferences(references) : {}),
   }
   if (Object.keys(loadPatch).length > 0) {
     const client = await getDataClient()
