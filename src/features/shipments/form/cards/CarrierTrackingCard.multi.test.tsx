@@ -114,6 +114,9 @@ describe('CarrierTrackingCard: several carriers', () => {
 
   it('a booked block sends the rate con, dispatch and info for ITS assignment', () => {
     const { ctx } = show(two(), seed(true))
+    // These are not edits of the shipment: the lock (someone else has the form open) must not grey them out.
+    expect(screen.getByTestId(`${LABEL.carrier.sendRateConf.testId}-c1`).closest('.tms-lock-exempt')).not.toBeNull()
+    expect(screen.getByTestId('carrier-dispatch-c1').closest('.tms-lock-exempt')).not.toBeNull()
     fireEvent.click(screen.getByTestId(`${LABEL.carrier.sendRateConf.testId}-c1`))
     expect(ctx.actions.openFor).toHaveBeenLastCalledWith('rateCon', 'lc-b')
     fireEvent.click(screen.getByTestId('carrier-dispatch-c1'))

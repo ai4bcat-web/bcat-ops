@@ -739,3 +739,5 @@
 
 /* Someone else holds the edit lock: the form is read-only for everyone but the holder (the banner says who). */
 .tms-ship-form-scroll[data-locked='true'] > :not(.tms-ship-banner) { pointer-events: none; opacity: 0.6; }
+/* ...but what is done WITH the carrier (Dispatch, Send rate confirmation, Send info) is not editing the shipment: it stays usable while someone else has it open. */
+.tms-ship-form-scroll[data-locked='true'] .tms-lock-exempt { pointer-events: auto; }

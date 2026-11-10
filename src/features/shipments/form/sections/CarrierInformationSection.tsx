@@ -451,7 +451,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
         <Static tag={tag} def={LABEL.carrier.dispatched} text={dash(active?.dispatchedAt)} />
       </FieldGrid>
 
-      <div className="tms-fg-toolbar">
+      <div className="tms-fg-toolbar tms-lock-exempt">
         <TmsButton size="sm" data-testid={x('carrier-dispatch')} disabled={disabled || !active} title={active ? undefined : 'Cover a carrier first'} onClick={() => open('dispatch')}>
           Dispatch
         </TmsButton>

@@ -3,6 +3,12 @@ export interface LockFields { editLockUserId?: string | null; editLockUserName?:
 
 export const LOCK_REFRESH_MS = 4 * 60_000
 
+/**
+ * A form nobody has touched for this long no longer holds the lock: the refresh tick lets go of it instead of renewing it, so a tab
+ * left open (or forgotten) frees the shipment within LOCK_IDLE_MS + LOCK_REFRESH_MS, and taking it back is automatic when the person returns.
+ */
+export const LOCK_IDLE_MS = 3 * 60_000
+
 /** Who holds a live lock other than `me`, or null when it is free, expired or mine. */
 export function lockHeldByOther(row: LockFields | null | undefined, me: string | null | undefined, nowMs: number): { by: string; until: string } | null {
   if (!row?.editLockUserId || !row.editLockExpiresAt) return null
