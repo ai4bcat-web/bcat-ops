@@ -12,6 +12,7 @@
  *   • Order  — drag handle → reorders within day (session state)
  */
 
+import { tapOpensShipment } from './tapOpensShipment'
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { paperworkShortLabel, paperworkStatusLine } from '@/lib/paperworkLocation'
 import { GripVertical, X, Plus, Pencil, CheckCircle, Circle, AlertCircle } from 'lucide-react'
@@ -616,7 +617,11 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       onDragEnter={() => onDragEnter(entry.key)}
       onDragEnd={onDragEnd}
       onDragOver={(e) => e.preventDefault()}
-      onClick={(e) => { if (e.shiftKey || e.ctrlKey || e.metaKey) onSelect(load.id, e) }}
+      onClick={(e) => {
+        if (e.shiftKey || e.ctrlKey || e.metaKey) { onSelect(load.id, e); return }
+        // On a phone or tablet the PRO # column is usually scrolled out of sight, so a tap on the row itself opens the shipment.
+        if (tapOpensShipment(e.target)) useAppStore.getState().setSelectedLoad(load.id, 'edit')
+      }}
     >
 
       {/* Drag handle — first column */}

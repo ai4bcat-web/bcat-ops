@@ -221,3 +221,23 @@ describe('PlannerView always shows a built shipment', () => {
     expect(screen.getByText('· 1 load with no firm date')).toBeTruthy()
   })
 })
+
+describe('PlannerView on a phone', () => {
+  it('a tap on the row opens the shipment, a tap on a control does not', async () => {
+    const { tapOpensShipment } = await import('./tapOpensShipment')
+    const narrow = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(390)
+    try {
+      const row = document.createElement('div')
+      const cell = document.createElement('span'); row.appendChild(cell)
+      const button = document.createElement('button'); row.appendChild(button)
+      expect(tapOpensShipment(cell)).toBe(true)
+      expect(tapOpensShipment(button)).toBe(false)
+    } finally { narrow.mockRestore() }
+  })
+
+  it('does nothing on a wide pointer-driven screen', async () => {
+    const { tapOpensShipment } = await import('./tapOpensShipment')
+    const wide = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1440)
+    try { expect(tapOpensShipment(document.createElement('span'))).toBe(false) } finally { wide.mockRestore() }
+  })
+})
