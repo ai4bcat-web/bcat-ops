@@ -707,11 +707,15 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         />
         {(!stopMode || role === 'pickup') && (
           <button
-            className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-[color:var(--tms-overlay)] text-muted-foreground transition-opacity"
+            type="button"
+            aria-label="Edit pickup date and time"
+            data-testid="edit-pu-appt"
+            title="Edit date and time"
+            className="absolute inset-0 w-full cursor-pointer rounded hover:bg-[color:var(--tms-overlay)] text-muted-foreground"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); setEditingAppt('pu') }}
           >
-            <Pencil className="size-2" />
+            <Pencil className="size-2.5 absolute top-0.5 right-0.5 opacity-60 group-hover/appt:opacity-100" />
           </button>
         )}
         {editingAppt === 'pu' && (
@@ -735,11 +739,15 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         />
         {(!stopMode || role === 'delivery') && (
           <button
-            className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-[color:var(--tms-overlay)] text-muted-foreground transition-opacity"
+            type="button"
+            aria-label="Edit delivery date and time"
+            data-testid="edit-de-appt"
+            title="Edit date and time"
+            className="absolute inset-0 w-full cursor-pointer rounded hover:bg-[color:var(--tms-overlay)] text-muted-foreground"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); setEditingAppt('de') }}
           >
-            <Pencil className="size-2" />
+            <Pencil className="size-2.5 absolute top-0.5 right-0.5 opacity-60 group-hover/appt:opacity-100" />
           </button>
         )}
         {editingAppt === 'de' && (

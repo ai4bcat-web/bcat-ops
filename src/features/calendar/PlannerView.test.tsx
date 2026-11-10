@@ -142,6 +142,17 @@ describe('PlannerView and a load the Shipment page created', () => {
   })
 })
 
+describe('PlannerView date editing', () => {
+  it('the appointment cell itself is the way in: click it and the date/time editor opens (no hover-only pencil to find)', () => {
+    const weekStart = new Date('2026-08-17T00:00:00-05:00')
+    const load = batoryLoad({ id: 'l3', aljexId: 'S000071-1' } as unknown as Partial<Load>)
+    render(<PlannerView loads={[load]} drivers={[{ id: 'd1', name: 'Zak Pace' }]} weekStart={weekStart} numDays={7} />)
+    fireEvent.click(screen.getAllByTestId('edit-pu-appt')[0])
+    expect(screen.getByLabelText('Appointment date')).toBeTruthy()
+    expect(screen.getByLabelText('Appointment time')).toBeTruthy()
+  })
+})
+
 describe('PlannerView and a voided shipment', () => {
   const weekStart = new Date('2026-08-17T00:00:00-05:00')
   const drivers = [{ id: 'd1', name: 'Zak Pace' }] as never

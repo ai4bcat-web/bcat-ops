@@ -11,7 +11,7 @@ import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import * as api from '@/lib/apiClient'
 import { inactiveChanges } from '@/lib/fleetActive'
 import { LEGACY_MIRROR_FIELDS, getStops, withDerivedLegacy, withoutUnchangedDriverMirrors, withStopsFromLegacy } from '@/lib/stops'
-import { changedApptStops, driverChangesOfWrite, loadWideDriverChange, takesRosterDriver } from '@/lib/loadShipmentSync'
+import { apptChangesOfWrite, driverChangesOfWrite, loadWideDriverChange, takesRosterDriver } from '@/lib/loadShipmentSync'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { BROKER_ROW_NO_SHIPMENT_MESSAGE, COVERED_LOAD_MESSAGE, OwnFleetSwitchCancelled, confirmOwnFleetSwitch, requestCover } from '@/lib/ownFleetSwitch'
 import type { NewShipmentPrefill } from '@/features/shipments/components/NewShipmentDialog'
@@ -642,7 +642,7 @@ async function withoutShipmentDriverWrites(before: Load, payload: Partial<Load>)
 async function syncThroughShipment(before: Load, payload: Partial<Load>): Promise<Partial<Load>> {
   const rest: Partial<Load> = { ...payload }
   let expectedUpdatedAt = before.updatedAt
-  const apptChanges = changedApptStops(before.stops ?? [], payload.stops)
+  const apptChanges = apptChangesOfWrite(getStops(before), payload)
   for (const change of apptChanges) {
     const bundle = await api.updateStop({
       loadId: before.id,
@@ -653,10 +653,8 @@ async function syncThroughShipment(before: Load, payload: Partial<Load>): Promis
     })
     expectedUpdatedAt = bundle.loads[0]?.updatedAt ?? expectedUpdatedAt
   }
-  // The server wrote the appointment (and its mirrors) itself: do not send them again.
-  if (apptChanges.length > 0) {
-    for (const field of LEGACY_MIRROR_FIELDS) if (/Appt/.test(field)) delete (rest as Record<string, unknown>)[field]
-  }
+  // The server wrote the appointment (and its mirrors) itself, and a client write of those fields is refused either way: never send them.
+  for (const field of LEGACY_MIRROR_FIELDS) if (/Appt/.test(field)) delete (rest as Record<string, unknown>)[field]
   if (await routeBrokerRow(before, driverChangesOfWrite(getStops(before), payload), rest)) return rest
   const driverId = takesRosterDriver(before) ? loadWideDriverChange(before, payload) : null
   if (driverId) {
