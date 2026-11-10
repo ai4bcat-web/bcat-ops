@@ -1008,18 +1008,6 @@ function BoardPane({
     setFlags(new Set())
     resetPage()
   }, [resetPage])
-  const toggleFlag = useCallback(
-    (flag: BoardFlag) => {
-      setFlags((prev) => {
-        const next = new Set(prev)
-        if (next.has(flag)) next.delete(flag)
-        else next.add(flag)
-        return next
-      })
-      resetPage()
-    },
-    [resetPage],
-  )
 
   // The summary strip counts what the list shows now, so it follows every filter.
   const kpis = useMemo<DenseKpi[]>(() => {
@@ -1071,17 +1059,17 @@ function BoardPane({
           />
         )}
         <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={toggleDemo} />
-        {BOARD_FLAGS.map((flag) => (
-          <TmsButton
-            key={flag}
-            size="sm"
-            variant={flags.has(flag) ? 'primary' : 'secondary'}
-            aria-pressed={flags.has(flag)}
-            onClick={() => toggleFlag(flag)}
-          >
-            {BOARD_FLAG_LABELS[flag]} ({chipCounts[flag]})
-          </TmsButton>
-        ))}
+        {/* The filter strip, styled like Load Review's (Needs fixes / Looks ready / All in review): its own strip beside the list strip. */}
+        <TmsSegmentedTabs
+          aria-label="Shipment filters"
+          size="sm"
+          active={flags.size === 0 ? 'all' : flags.size === 1 ? [...flags][0] : ''}
+          onSelect={(key) => { setFlags(key === 'all' ? new Set() : new Set([key as BoardFlag])); resetPage() }}
+          tabs={[
+            { key: 'all', label: 'Any' },
+            ...BOARD_FLAGS.map((flag) => ({ key: flag, label: BOARD_FLAG_LABELS[flag], count: chipCounts[flag] })),
+          ]}
+        />
         <ClearFiltersButton count={activeFilterCount(filters) + flags.size} onClear={clearFilters} />
         <span className="tms-dense-spacer" />
         {isAdmin && !layoutDraft && (

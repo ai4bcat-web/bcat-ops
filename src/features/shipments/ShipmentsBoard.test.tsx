@@ -621,7 +621,7 @@ describe('ShipmentsBoard', () => {
     renderBoard('/tms/shipments', shipments)
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
 
-    fireEvent.click(screen.getByRole('button', { name: /^Missing documents/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Missing documents/ }))
 
     await waitFor(() => {
       expect(screen.getByText('S001')).toBeTruthy()
@@ -915,8 +915,11 @@ describe('ShipmentsBoard', () => {
   })
   describe('Step AP: chips and Push to Load Review', () => {
     const complete = { reference: 'PO-1', salesRepId: 'rep-1', revDivision: 'ASSETS', docsRequired: ['POD'], docsMissing: [] as string[] }
+    // The filters are a segmented strip now (Any + one tab per filter, each with its count): "Label (count)".
     const chipNames = () =>
-      screen.getAllByRole('button', { pressed: false }).map((b) => b.textContent ?? '').filter((t) => /\(\d+\)$/.test(t))
+      within(screen.getByRole('tablist', { name: 'Shipment filters' })).getAllByRole('tab')
+        .filter((tab) => tab.querySelector('.tms-seg-count'))
+        .map((tab) => `${(tab.firstChild?.textContent ?? '').trim()} (${tab.querySelector('.tms-seg-count')?.textContent})`)
 
     it('shows the missing-field chips with live counts, ends with Check call overdue, and has no Open exceptions chip', async () => {
       renderBoard('/tms/shipments', [
@@ -943,7 +946,7 @@ describe('ShipmentsBoard', () => {
         deliveredRow('S002', { ...complete, reference: null }),
       ])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-      fireEvent.click(screen.getByRole('button', { name: /^Missing reference #/ }))
+      fireEvent.click(screen.getByRole('tab', { name: /^Missing reference #/ }))
       await waitFor(() => expect(screen.queryByText('S001')).toBeNull())
       expect(screen.getByText('S002')).toBeTruthy()
     })
