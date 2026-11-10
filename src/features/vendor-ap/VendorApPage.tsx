@@ -47,6 +47,7 @@ const SOURCE_LABEL: Record<VendorPayable['source'], string> = {
 const TABS = [
   { key: 'ALL' as const, label: 'All' },
   { key: 'NEED_TO_PAY' as const, label: 'Need to pay' },
+  { key: 'QUICKPAY' as const, label: 'Quickpay' },
   { key: 'DONE' as const, label: 'Done' },
 ] as const
 
@@ -306,7 +307,7 @@ function DetailsDialog({
       open
       onOpenChange={(open) => { if (!open) onClose() }}
       className="tms-dialog-wide"
-      title={item.subject || '(no subject)'}
+      title={`${item.payAsap ? 'PAY ASAP · ' : ''}${item.subject || '(no subject)'}`}
       description={`${item.source} · ${formatReceivedAt(item.receivedAt)} · from ${item.fromEmail || 'unknown sender'}`}
       footer={
         <>
@@ -669,7 +670,7 @@ export function VendorApPage() {
   const [source, setSource] = useState<VendorSourceFilter>('ALL')
   const [view, setView] = useState<VendorView>('bills')
   // Opens on what is still owed: a paid row leaves this view, which is what "mark done" should look like.
-  const [activeTab, setActiveTab] = useState<'ALL' | 'NEED_TO_PAY' | 'DONE'>('NEED_TO_PAY')
+  const [activeTab, setActiveTab] = useState<'ALL' | 'NEED_TO_PAY' | 'QUICKPAY' | 'DONE'>('NEED_TO_PAY')
   const [detailId, setDetailId] = useState<string | null>(null)
   const [detailFull, setDetailFull] = useState<VendorPayable | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -737,6 +738,7 @@ export function VendorApPage() {
   const counts = useMemo(() => ({
     ALL: items.length,
     NEED_TO_PAY: items.filter((i) => i.status === 'NEED_TO_PAY').length,
+    QUICKPAY: items.filter((i) => i.payAsap && i.status === 'NEED_TO_PAY').length,
     DONE: items.filter((i) => i.status === 'DONE').length,
   }), [items])
 
@@ -749,9 +751,10 @@ export function VendorApPage() {
 
   const filtered = useMemo(() => {
     return filterBySource(items, source)
-      .filter((item) => activeTab === 'ALL' || item.status === activeTab)
+      .filter((item) => activeTab === 'ALL' || (activeTab === 'QUICKPAY' ? item.payAsap === true && item.status === 'NEED_TO_PAY' : item.status === activeTab))
       .filter((item) => matchesSearch(item, search))
-      .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
+      // Quickpay is a work queue: the one waiting longest is paid first. Every other tab shows the newest first.
+      .sort((a, b) => (activeTab === 'QUICKPAY' ? -1 : 1) * (new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()))
   }, [items, source, activeTab, search])
 
   // The by-vendor view ignores the status tab: Open bills / Owed already say what is unpaid.
@@ -1000,7 +1003,7 @@ export function VendorApPage() {
           quickTabs={{
             tabs: TABS.map(({ key, label }) => ({ key, label, count: counts[key] })),
             active: activeTab,
-            onSelect: (key) => setActiveTab(key as 'ALL' | 'NEED_TO_PAY' | 'DONE'),
+            onSelect: (key) => setActiveTab(key as 'ALL' | 'NEED_TO_PAY' | 'QUICKPAY' | 'DONE'),
           }}
           banner={banner}
           columns={columns}

@@ -1094,7 +1094,7 @@ export async function deleteFactoringItem(id: string): Promise<void> {
 
 const VENDOR_PAYABLE_FIELDS = `
   id status source sourceInvoiceId sourceMessageId subject vendor invoiceNumber
-  amount invoiceDate dueDate vendorEmail confirmationSentAt confirmationSentTo extractedAt extractionNote description fromEmail attachments receivedAt
+  amount invoiceDate dueDate vendorEmail confirmationSentAt confirmationSentTo extractedAt extractionNote description fromEmail attachments receivedAt payAsap
   paymentMethod paymentDate paymentReference paidBy paidAt apInboxItemId apInboxSourceUrl createdAt updatedAt
 `
 type VendorPayableRecord = Omit<VendorPayable, 'attachments'> & {
