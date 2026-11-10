@@ -819,21 +819,40 @@ export const useAppStore = create<AppState>()(
       updateLoad: async (id, patch) => {
         const before = get().loads.find((l) => l.id === id)
         if (!before) return
-        // Do NOT pass updatedAt — Amplify Gen 2 manages it server-side.
-        // The two directions of the dual-write, in order: a legacy-field write is first
-        // projected into `stops` (withStopsFromLegacy), then any `stops` write re-derives
-        // the legacy mirrors (withDerivedLegacy). Together they keep the canonical array
-        // and its mirrors from ever disagreeing, whichever side the caller wrote.
-        const derived = withoutUnchangedDriverMirrors(withDerivedLegacy(withStopsFromLegacy({
-          ...patch,
-          updatedBy: get().currentUserEmail,
-        }, before)), before, patch)
-        // A load that belongs to a shipment: its date and driver changes go through the shipment actions so the Shipment, Order and
-        // carrier assignment change with it (the calendar and the Shipments page are one record); only the rest is written here.
-        const payload = before.shipmentId ? await syncThroughShipment(before, derived) : derived
-        const after = await api.updateLoad(id, payload)
-        set((s) => ({ loads: s.loads.map((l) => (l.id === id ? after : l)) }))
-        writeAudit(get().currentUserEmail, 'Load', id, 'update', diffChanges(before, after))
+        try {
+          // TMS # and PU # are read-only to a direct Load write: they go through SET_LOAD_REFS.
+          const { tmsId, pickupNumber, ...direct } = patch as typeof patch & { tmsId?: string | null; pickupNumber?: string | null }
+          const refs: { tmsId?: string | null; pickupNumber?: string | null } = {}
+          if (tmsId !== undefined && (tmsId ?? '') !== (before.tmsId ?? '')) refs.tmsId = tmsId
+          if (pickupNumber !== undefined && (pickupNumber ?? '') !== (before.pickupNumber ?? '')) refs.pickupNumber = pickupNumber
+          const hasRefs = Object.keys(refs).length > 0
+          let after: Load = before
+          if (Object.keys(direct).length > 0 || !hasRefs) {
+            // Do NOT pass updatedAt — Amplify Gen 2 manages it server-side.
+            // The two directions of the dual-write, in order: a legacy-field write is first
+            // projected into `stops` (withStopsFromLegacy), then any `stops` write re-derives
+            // the legacy mirrors (withDerivedLegacy). Together they keep the canonical array
+            // and its mirrors from ever disagreeing, whichever side the caller wrote.
+            const derived = withoutUnchangedDriverMirrors(withDerivedLegacy(withStopsFromLegacy({
+              ...direct,
+              updatedBy: get().currentUserEmail,
+            }, before)), before, direct)
+            // A load that belongs to a shipment: its date and driver changes go through the shipment actions so the Shipment, Order and
+            // carrier assignment change with it (the calendar and the Shipments page are one record); only the rest is written here.
+            const payload = before.shipmentId ? await syncThroughShipment(before, derived) : derived
+            after = await api.updateLoad(id, payload)
+          }
+          if (hasRefs) {
+            const saved = (await api.setLoadRefs({ loadId: id, ...refs })).load
+            after = { ...after, tmsId: saved.tmsId, pickupNumber: saved.pickupNumber, updatedAt: saved.updatedAt ?? after.updatedAt }
+          }
+          set((s) => ({ loads: s.loads.map((l) => (l.id === id ? after : l)) }))
+          writeAudit(get().currentUserEmail, 'Load', id, 'update', diffChanges(before, after))
+        } catch (err) {
+          // A refused save used to vanish (the calendar fires these and forgets): say what was refused, then let a caller that awaits handle it too.
+          toast.error('Could not save the change', { description: errorText(err) })
+          throw err
+        }
       },
 
       // ── Equipment ──────────────────────────────────────────────────────────

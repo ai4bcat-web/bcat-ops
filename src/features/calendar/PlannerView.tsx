@@ -288,7 +288,7 @@ function DriverPicker({ loadId, load, stop, role, currentId, field, drivers, onC
       } else {
         await updateLoad(loadId, { [field]: driverId })
       }
-    } finally { setSaving(false) }
+    } catch { /* the store already told the user what was refused */ } finally { setSaving(false) }
     onClose()
   }, [updateLoad, loadId, load, stop, role, field, onClose])
 
@@ -345,7 +345,7 @@ function EditableTextCell({ load, field, width }: {
 
   const commit = () => {
     const trimmed = val.trim()
-    updateLoad(load.id, { [field]: trimmed || null })
+    updateLoad(load.id, { [field]: trimmed || null }).catch(() => {})
     setEditing(false)
   }
 
@@ -386,7 +386,7 @@ function NotesCell({ load }: { load: Load }) {
   const [val, setVal]         = useState('')
 
   const commit = () => {
-    updateLoad(load.id, { notes: val.trim() || null })
+    updateLoad(load.id, { notes: val.trim() || null }).catch(() => {})
     setEditing(false)
   }
 
@@ -431,8 +431,8 @@ function RateCell({ load }: { load: Load }) {
 
   const commit = () => {
     const dollars = parseFloat(val.replace(/[^0-9.]/g, ''))
-    if (!isNaN(dollars) && dollars >= 0) updateLoad(load.id, { rate: Math.round(dollars * 100) })
-    else if (val.trim() === '') updateLoad(load.id, { rate: null })
+    if (!isNaN(dollars) && dollars >= 0) updateLoad(load.id, { rate: Math.round(dollars * 100) }).catch(() => {})
+    else if (val.trim() === '') updateLoad(load.id, { rate: null }).catch(() => {})
     setEditing(false)
   }
 
@@ -472,7 +472,7 @@ function EditableSlotBadge({ load, hex, readOnly }: { load: Load; hex: string; r
 
   const commit = () => {
     const n = parseInt(val, 10)
-    if (!isNaN(n) && n > 0) updateLoad(load.id, { daySlot: n })
+    if (!isNaN(n) && n > 0) updateLoad(load.id, { daySlot: n }).catch(() => {})
     else if (val.trim() === '') updateLoad(load.id, { daySlot: null })
     setEditing(false)
   }
