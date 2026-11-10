@@ -5,6 +5,8 @@
 export function driverInfoText(info: {
   name: string
   phone?: string | null
+  /** The company phone the driver carries (its number is what a broker should call); shown instead of the personal cell. */
+  companyPhone?: string | null
   truck?: string | null
   vin?: string | null
   trailer?: string | null
@@ -12,7 +14,7 @@ export function driverInfoText(info: {
 }): string {
   const lines = [
     `Driver: ${info.name}`,
-    info.phone ? `Cell: ${info.phone}` : null,
+    info.companyPhone ? `Company phone: ${info.companyPhone}` : info.phone ? `Cell: ${info.phone}` : null,
     info.truck ? `Truck: ${info.truck}` : null,
     info.vin ? `VIN: ${info.vin}` : null,
     info.trailer ? `Trailer: ${info.trailer}` : null,

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { formatDistanceToNow, formatDistanceToNowStrict } from 'date-fns'
 import { MapPin, Plus, ClipboardCopy } from 'lucide-react'
 import { toast } from 'sonner'
-import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
+import { listCompanyPhones, listTruckLocations, type CompanyPhone, type TruckLocation } from '@/lib/apiClient'
+import { phoneOf } from '@/lib/companyPhones'
 import { isLoadVoided } from '@/lib/shipmentVoid'
 import { TrackingLinkCell } from './TrackingLinkCell'
 import { useAppStore } from '@/store/useAppStore'
@@ -88,6 +89,9 @@ export function TruckMapWidget() {
   const [locations, setLocations] = useState<TruckLocation[]>([])
   const [loading, setLoading] = useState(true)
   const [now, setNow] = useState(() => Date.now())
+  // The company phone each driver carries goes into the copied driver info (a broker should call that number).
+  const [companyPhones, setCompanyPhones] = useState<CompanyPhone[]>([])
+  useEffect(() => { listCompanyPhones().then(setCompanyPhones).catch(() => setCompanyPhones([])) }, [])
 
   const equipment           = useAppStore((s) => s.equipment)
   const drivers             = useAppStore((s) => s.drivers)
@@ -364,6 +368,7 @@ export function TruckMapWidget() {
                           const text = driverInfoText({
                             name: assigned.name,
                             phone: assigned.phone ? formatPhone(assigned.phone) : null,
+                            companyPhone: ((n) => (n ? formatPhone(n) : null))(phoneOf(companyPhones, assigned.id)?.number),
                             truck: unit,
                             vin: equip?.vin ?? null,
                             trailer: trailerOnDriver(assigned, loads, equipment),
