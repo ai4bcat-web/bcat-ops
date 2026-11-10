@@ -179,3 +179,45 @@ describe('PlannerView and a voided shipment', () => {
     expect(screen.getByText('· 1 load with no firm date')).toBeTruthy()
   })
 })
+
+describe('PlannerView always shows a built shipment', () => {
+  const drivers = [{ id: 'd1', name: 'Zak Pace' }] as never
+
+  it('a built load nobody has picked up, whose pickup day has passed, shows on today as well as its delivery day', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-10T17:00:00.000Z'))
+    try {
+      const weekStart = new Date('2026-11-09T00:00:00-06:00')
+      const load = batoryLoad({
+        id: 'l9', aljexId: 'LATE-PU', status: 'SOURCING',
+        pickupAppt: '2026-11-09T13:00:00.000Z', deliveryAppt: '2026-11-16T23:00:00.000Z',
+        stops: [pickupStop({ appt: '2026-11-09T13:00:00.000Z' }), deliveryStop({ appt: '2026-11-16T23:00:00.000Z', apptType: 'exact' })],
+      } as unknown as Partial<Load>)
+      render(<PlannerView loads={[load]} drivers={drivers} weekStart={weekStart} days={[new Date('2026-11-10T00:00:00-06:00')]} />)
+      expect(screen.getByText('LATE-PU')).toBeTruthy()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('a load already on the truck is not repeated on today', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-10T17:00:00.000Z'))
+    try {
+      const weekStart = new Date('2026-11-09T00:00:00-06:00')
+      const load = batoryLoad({
+        id: 'l10', aljexId: 'ON-TRUCK', status: 'IN_TRANSIT',
+        pickupAppt: '2026-11-09T13:00:00.000Z', deliveryAppt: '2026-11-16T23:00:00.000Z',
+        stops: [pickupStop({ appt: '2026-11-09T13:00:00.000Z', arrivedAt: '2026-11-09T13:05:00.000Z' }), deliveryStop({ appt: '2026-11-16T23:00:00.000Z', apptType: 'exact' })],
+      } as unknown as Partial<Load>)
+      render(<PlannerView loads={[load]} drivers={drivers} weekStart={weekStart} days={[new Date('2026-11-10T00:00:00-06:00')]} />)
+      expect(screen.queryByText('ON-TRUCK')).toBeNull()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('a load with no usable pickup date lands on the Unscheduled strip instead of vanishing', () => {
+    const weekStart = new Date('2026-08-17T00:00:00-05:00')
+    const load = batoryLoad({ id: 'l11', aljexId: 'NO-DATE', pickupAppt: '', stops: [] } as unknown as Partial<Load>)
+    render(<PlannerView loads={[load]} drivers={drivers} weekStart={weekStart} numDays={7} />)
+    expect(screen.getByText('NO-DATE')).toBeTruthy()
+    expect(screen.getByText('· 1 load with no firm date')).toBeTruthy()
+  })
+})
