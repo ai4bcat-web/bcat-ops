@@ -122,9 +122,15 @@ describe('RateConPanel recipients', () => {
 })
 
 describe('RateConPanel MyCarrierPackets gate', () => {
-  it('blocks Send and Re-send with a notice and a profile link, but keeps Preview', async () => {
-    const onSend = await setup({ carrier: carrier('INVITED'), rateConVersion: 1 })
+  it('an Active carrier can be sent the rate con whatever its MyCarrierPackets packet says (invited, not started)', async () => {
+    await setup({ carrier: carrier('INVITED'), rateConVersion: 1 })
     expect(sendButton()).toHaveTextContent('Re-send for e-signature')
+    expect(sendButton()).toBeEnabled()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('blocks Send and Re-send with a notice and a profile link when the carrier is not Active, but keeps Preview', async () => {
+    const onSend = await setup({ carrier: { ...carrier('ACCEPTABLE'), status: 'PENDING' } as CarrierRecord, rateConVersion: 1 })
     expect(sendButton()).toBeDisabled()
     expect(screen.getByRole('status')).toHaveTextContent('Swift')
     expect(screen.getByRole('link', { name: /open carrier profile/i })).toHaveAttribute('href', '/tms/carriers/car-1')

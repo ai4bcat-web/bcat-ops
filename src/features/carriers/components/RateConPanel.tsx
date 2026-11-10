@@ -18,7 +18,6 @@ import { getRateConfirmUrl, getTrackingMailbox, listUserProfiles } from '@/lib/a
 import { buildRateConPdf, joinRateConNotes, rateConFilename, rateConPdfBase64, rateConRepOf } from '@/lib/carrierRateCon'
 import { useAuthUser } from '@/hooks/useAuth'
 import { dedupeEmails } from '@/lib/emailAddress'
-import { mcpPacketStanding } from '@/lib/mcpPacket'
 import { RecipientPicker } from './RecipientPicker'
 import { commitAddress, defaultSelection, knownRecipientOptions, parseCcList } from './rateConRecipients'
 import { formatDateTime } from '@/lib/date'
@@ -99,13 +98,9 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
   // Text still in the "Add another address" box counts: Send commits it (or refuses it).
   const noRecipients = recipients.length === 0 && !draft.trim()
 
-  const standing = carrier ? mcpPacketStanding(carrier) : null
-  // When the carrier bundle has not loaded the server is the authority; only a loaded
-  // carrier known to lack a completed packet pre-blocks the button.
-  // Step AM: the rate con also waits for the carrier to be ACTIVE, which only MyCarrierPackets makes it
-  // (packet complete and monitored; a lapse flips it back to Inactive).
-  const notActive = carrier != null && carrier.status !== 'ACTIVE'
-  const blocked = (standing != null && !standing.completed) || notActive
+  // When the carrier bundle has not loaded the server is the authority. The one rule: the carrier is Active in the system
+  // (Ryne 2026-11-10); how far its MyCarrierPackets packet has got does not matter.
+  const blocked = carrier != null && carrier.status !== 'ACTIVE'
 
   const load = bundle.loads[0]
   const status: RateConStatus = loadCarrier.rateConStatus ?? 'NOT_SENT'
@@ -297,13 +292,10 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
         and the signature is logged on that same thread. E-signature is the only way to send it from here.
       </p>
 
-      {blocked && carrier && standing && (
+      {blocked && carrier && (
         <p role="status" className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>
-          Can't send yet — {carrier.name} {standing.completed
-            ? 'is not Active: MyCarrierPackets has not confirmed its setup, or has moved it out of compliance.'
-            : standing.reason}{' '}
+          Can't send yet — {carrier.name} is not Active in the system.{' '}
           <Link to={`/tms/carriers/${carrier.id}`} className="underline">Open carrier profile</Link>
-          {' '}(send a setup packet there).
         </p>
       )}
       {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
