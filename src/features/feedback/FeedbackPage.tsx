@@ -12,7 +12,7 @@ import {
   createFeedback, listFeedback, updateFeedback, uploadFeedbackScreenshot, getFeedbackScreenshotUrl,
 } from '@/lib/feedbackClient'
 import {
-  STATUSES, STATUS_LABEL, filterFeedback, groupByPage, screenshotsOf, sortFeedback, statusOf, statusPatch,
+  STATUSES, STATUS_LABEL, filterFeedback, groupByPage, isOwnFeedback, screenshotsOf, sortFeedback, statusOf, statusPatch,
   type FeedbackItem, type FeedbackStatus, type SortKey,
 } from './feedbackLogic'
 
@@ -151,19 +151,19 @@ function SubmitForm({ onCreated }: { onCreated: () => void }) {
   )
 }
 
-function DetailDialog({ item, isAdmin, onClose, onSaved }: {
-  item: FeedbackItem | null; isAdmin: boolean; onClose: () => void; onSaved: (f: FeedbackItem) => void
+function DetailDialog({ item, isAdmin, userEmail, onClose, onSaved }: {
+  item: FeedbackItem | null; isAdmin: boolean; userEmail: string | null | undefined; onClose: () => void; onSaved: (f: FeedbackItem) => void
 }) {
   return (
     <Dialog open={!!item} onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="max-w-2xl">
-        {item && <DetailBody key={item.id} item={item} isAdmin={isAdmin} onSaved={onSaved} />}
+        {item && <DetailBody key={item.id} item={item} isAdmin={isAdmin} userEmail={userEmail} onSaved={onSaved} />}
       </DialogContent>
     </Dialog>
   )
 }
 
-function DetailBody({ item, isAdmin, onSaved }: { item: FeedbackItem; isAdmin: boolean; onSaved: (f: FeedbackItem) => void }) {
+function DetailBody({ item, isAdmin, userEmail, onSaved }: { item: FeedbackItem; isAdmin: boolean; userEmail: string | null | undefined; onSaved: (f: FeedbackItem) => void }) {
   const [notes, setNotes] = useState(item?.adminNotes ?? '')
   const [busy, setBusy] = useState(false)
   const keys = useMemo(() => screenshotsOf(item), [item])
@@ -204,6 +204,13 @@ function DetailBody({ item, isAdmin, onSaved }: { item: FeedbackItem; isAdmin: b
       ) : (
         <div className="space-y-1 border-t pt-3 text-sm">
           <div>Status: <StatusBadge status={statusOf(item)} /></div>
+          {isOwnFeedback(item, userEmail) ? (
+            statusOf(item) === 'DONE' ? (
+              <Button size="sm" variant="outline" disabled={busy} data-testid="feedback-reopen" onClick={() => save(statusPatch('NEW'), 'Reopened')}>Reopen</Button>
+            ) : (
+              <Button size="sm" disabled={busy} data-testid="feedback-mark-done" onClick={() => save(statusPatch('DONE'), 'Marked Done')}>Mark as done</Button>
+            )
+          ) : null}
           {item.adminNotes && <p className="whitespace-pre-wrap text-muted-foreground">Notes: {item.adminNotes}</p>}
         </div>
       )}
@@ -237,7 +244,7 @@ function SortHead({ k, active, dir, onSort, children }: {
 }
 
 export function FeedbackPage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, user } = useAuth()
   const [items, setItems] = useState<FeedbackItem[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<FeedbackStatus | 'ALL'>('ALL')
@@ -339,7 +346,7 @@ export function FeedbackPage() {
         </div>
       </div>
 
-      <DetailDialog item={open} isAdmin={isAdmin} onClose={() => setOpenId(null)}
+      <DetailDialog item={open} isAdmin={isAdmin} userEmail={user?.email} onClose={() => setOpenId(null)}
         onSaved={(f) => setItems((prev) => prev.map((i) => (i.id === f.id ? { ...i, ...f } : i)))} />
       <Dialog open={!!lightbox} onOpenChange={(o) => { if (!o) setLightbox(null) }}>
         <DialogContent className="max-w-3xl">

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { statusPatch, sortFeedback, filterFeedback, groupByPage, type FeedbackItem } from './feedbackLogic'
+import { statusPatch, sortFeedback, filterFeedback, groupByPage, isOwnFeedback, type FeedbackItem } from './feedbackLogic'
 
 const mk = (o: Partial<FeedbackItem>): FeedbackItem => ({ id: 'x', page: 'Loads', summary: 's', createdAt: '2026-01-01T00:00:00Z', ...o })
 
@@ -29,3 +29,14 @@ describe('feedback logic', () => {
     expect(g.map((x) => [x.page, x.items.length])).toEqual([['Fuel', 1], ['Loads', 2]])
   })
 })
+
+describe('isOwnFeedback', () => {
+  it('matches the submitter by e-mail, ignoring case and spaces, and never an empty address', () => {
+    const f = { id: 'x', page: 'P', summary: 'S', submittedBy: 'Ryne@bcatcorp.com' } as FeedbackItem
+    expect(isOwnFeedback(f, ' ryne@bcatcorp.com ')).toBe(true)
+    expect(isOwnFeedback(f, 'ruben@bcatcorp.com')).toBe(false)
+    expect(isOwnFeedback(f, '')).toBe(false)
+    expect(isOwnFeedback({ ...f, submittedBy: null }, '')).toBe(false)
+  })
+})
+

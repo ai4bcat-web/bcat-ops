@@ -37,6 +37,12 @@ export function statusPatch(next: FeedbackStatus, now = new Date()): { status: F
   return { status: next, resolvedAt: next === 'DONE' ? now.toISOString() : null }
 }
 
+/** Whoever submitted a report may close it themselves ("I got it done") and reopen it; everyone else's stays read-only unless they are an admin. */
+export function isOwnFeedback(f: FeedbackItem, email: string | null | undefined): boolean {
+  const mine = (email ?? '').trim().toLowerCase()
+  return mine !== '' && (f.submittedBy ?? '').trim().toLowerCase() === mine
+}
+
 export function sortFeedback(items: FeedbackItem[], key: SortKey, dir: 'asc' | 'desc'): FeedbackItem[] {
   const sign = dir === 'asc' ? 1 : -1
   const val = (f: FeedbackItem): string | number =>
