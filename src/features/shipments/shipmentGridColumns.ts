@@ -133,7 +133,7 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
   }
   if (col.key === 'driver') {
     // One pill per driver (pickup and delivery can differ): each pill adds padding and a gap beyond the text.
-    return { ...base, filter: 'multi', extraPx: 56 }
+    return { ...base, filter: 'multi', extraPx: 100 }
   }
   if (col.key === 'customerName') {
     return { ...base, filter: 'multi', text: customerDisplayName, sortValue: customerDisplayName, extraPx: 90 } // the Not linked badge

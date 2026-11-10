@@ -266,7 +266,7 @@ describe('DirectoryPages', () => {
   })
 
   describe('dense grid', () => {
-    const names = () => Array.from(document.querySelectorAll('tbody tr:not(.tms-dg-spacer) td:first-child')).map((td) => customers.find((c) => within(td as HTMLElement).queryByText(c.name, { exact: true }))?.name)
+    const names = () => Array.from(document.querySelectorAll('tbody tr:not(.tms-dg-spacer) td:nth-child(2)')).map((td) => customers.find((c) => within(td as HTMLElement).queryByText(c.name, { exact: true }))?.name)
     const header = (name: string) => screen.getByRole('columnheader', { name: new RegExp(`^${name}`) })
 
     it('lists every active customer sorted by name, with the Customers columns', async () => {
