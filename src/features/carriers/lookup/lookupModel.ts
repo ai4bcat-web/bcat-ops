@@ -11,7 +11,8 @@ import { CARRIER_STATUS_LABELS, CARRIER_STATUS_REASON_LABELS } from '@/lib/carri
 import type { CarrierStatus, CarrierStatusReason } from '@/types/tms'
 
 /** Ivan Cartage's own authority: our own fleet is always Active and never goes through MyCarrierPackets vetting. */
-export const OWN_FLEET_MCS: readonly string[] = ['274623']
+export { OWN_FLEET_MCS } from '@/lib/ownFleet'
+import { OWN_FLEET_MCS } from '@/lib/ownFleet'
 
 export interface LookupDirectoryRow {
   id: string
