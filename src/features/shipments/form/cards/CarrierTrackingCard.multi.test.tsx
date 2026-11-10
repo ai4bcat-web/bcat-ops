@@ -19,6 +19,8 @@ const api = vi.hoisted(() => ({
   assignTracker: vi.fn(async () => ({ updated: [], skipped: [] })),
   updateLoadCarrierDetails: vi.fn(async () => ({})),
   removeLoadCarrier: vi.fn(async () => ({})),
+  listTrackingLinksByShipment: vi.fn(async () => []),
+  sendTrackingLink: vi.fn(async () => ({ smsStatus: 'SENT', smsError: null })),
 }))
 vi.mock('@/lib/apiClient', () => api)
 vi.mock('./CarrierCard', () => ({ CarrierCard: () => <div data-testid="carrier-card-first" /> }))
