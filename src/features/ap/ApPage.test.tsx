@@ -319,4 +319,60 @@ describe('the AP board', () => {
     expect(screen.getByText('Blue Line Trucking')).toBeTruthy()
     expect(screen.getByText('Red Line Freight')).toBeTruthy()
   })
+
+  describe('the dense grid', () => {
+    const two = () => {
+      const a = bill({ id: 'cb:lc1:1', billNumber: 'BL-1', balanceCents: 150_000 })
+      const b = bill({
+        id: 'cb:lc2:1', loadCarrierId: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight',
+        billNumber: 'RL-1', balanceCents: 80_000, grossCents: 80_000, netCents: 80_000, billedCents: 80_000,
+      })
+      return [a, b]
+    }
+    const order = () => within(screen.getByRole('table', { name: 'AP to-pay' })).getAllByRole('row')
+      .map((r) => r.textContent ?? '').filter((t) => /BL-1|RL-1/.test(t)).map((t) => (t.includes('BL-1') ? 'BL-1' : 'RL-1'))
+
+    it('draws every view as the shared dense table with the Columns, density and summary controls', async () => {
+      await setup({ bills: two() })
+      fireEvent.click(screen.getByRole('tab', { name: /^To be paid/ }))
+      expect(screen.getByRole('table', { name: 'AP to-pay' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /Columns/ })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /Summary/ })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Filter CARRIER' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy()
+      expect(screen.getByTestId('ap-count').textContent).toBe('2 items')
+    })
+
+    it('sorts a money column by its cents when the header is clicked', async () => {
+      await setup({ bills: two() })
+      fireEvent.click(screen.getByRole('tab', { name: /^To be paid/ }))
+      const header = within(screen.getByRole('table', { name: 'AP to-pay' })).getByRole('columnheader', { name: /BALANCE/ })
+      fireEvent.click(within(header).getAllByRole('button')[0])
+      expect(order()).toEqual(['RL-1', 'BL-1'])
+      fireEvent.click(within(header).getAllByRole('button')[0])
+      expect(order()).toEqual(['BL-1', 'RL-1'])
+    })
+
+    it('still pays a selection of one carrier from the grid checkboxes', async () => {
+      await setup({ bills: two() })
+      fireEvent.click(screen.getByRole('tab', { name: /^To be paid/ }))
+      expect((screen.getByRole('button', { name: 'Pay selected bills' }) as HTMLButtonElement).disabled).toBe(true)
+      fireEvent.click(screen.getByLabelText('Select bill BL-1'))
+      expect(screen.getByText('1 selected ($1,500.00)')).toBeTruthy()
+      expect((screen.getByRole('button', { name: 'Pay selected bills' }) as HTMLButtonElement).disabled).toBe(false)
+      fireEvent.click(screen.getByLabelText('Select bill RL-1'))
+      expect(screen.getByText(/One payment covers one carrier/)).toBeTruthy()
+      expect((screen.getByRole('button', { name: 'Pay selected bills' }) as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it('shows the summary strip figures in cents-exact dollars when opened', async () => {
+      await setup({ bills: two() })
+      fireEvent.click(screen.getByRole('tab', { name: /^To be paid/ }))
+      expect(screen.queryByRole('region', { name: 'Summary' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: /Summary/ }))
+      const strip = within(screen.getByRole('region', { name: 'Summary' }))
+      expect(strip.getAllByText('$2,300.00').length).toBeGreaterThan(0)
+      expect(strip.getByText('Bills to pay').previousElementSibling?.textContent).toBe('2')
+    })
+  })
 })

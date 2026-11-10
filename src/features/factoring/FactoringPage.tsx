@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
-import { Loader2, Trash2, FilePlus2 } from 'lucide-react'
+import { Loader2, Trash2, FilePlus2, Landmark, Search } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
-  TmsBadge, TmsButton, TmsCard, TmsCountBadge, TmsDialog, TmsIconButton, TmsListPage, TmsSelect, TmsStatRow,
+  TmsBadge, TmsButton, TmsCountBadge, TmsDialog, TmsIconButton, TmsInput, TmsSegmentedTabs, TmsStatRow,
   type ColumnDef, type TmsTone,
 } from '@/features/tms/kit'
+import { DenseGrid } from '@/features/tms/grid/DenseGrid'
+import { ClearFiltersButton, ColumnsButton, DensityToggle } from '@/features/tms/grid/DenseControls'
+import {
+  activeFilterCount, filterRows, nextSort, reorderKeys, sortDenseRows,
+  type DenseColumn, type DenseColumnFilter, type DenseFilters,
+} from '@/features/tms/grid/denseGridModel'
+import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import '@/features/tms/styles/directory.css'
 import { OtrPanel } from './OtrPanel'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
@@ -19,6 +26,7 @@ import { canDeleteFactoringItem } from '@/lib/auth/admin'
 import { toast } from 'sonner'
 import { FactoringRowFields } from './FactoringRowFields'
 import { fieldsReadyLabel, isReadyToSubmit } from './factoringFields'
+import { OTR_FIELD_LABEL, OTR_REQUIRED_FIELDS, type OtrRequiredField } from '@/lib/otrInvoice'
 import { invoiceAmountOf, totalsByStatus, money } from './factoringTotals'
 import { FactoringDocCell } from './FactoringDocCell'
 import { useResolveLoads } from '@/hooks/useResolveLoads'
@@ -55,6 +63,7 @@ const FILTER_ORDER = ['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'MANUAL_INVOICE', 'A
 type FilterKey = (typeof FILTER_ORDER)[number]
 
 const RED = { color: 'var(--tms-badge-red)' }
+const PAGE_STEP = 50
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -209,7 +218,7 @@ function StatusTotals({ items }: { items: FactoringItem[] }) {
   ] as const
 
   return (
-    <TmsCard title="What the queue is worth">
+    <div className="tms-factoring-totals" style={{ padding: '4px 8px' }}>
       <TmsStatRow
         aria-label="What the queue is worth, by status"
         columns={4}
@@ -226,7 +235,7 @@ function StatusTotals({ items }: { items: FactoringItem[] }) {
           }
         })}
       />
-    </TmsCard>
+    </div>
   )
 }
 
@@ -358,8 +367,8 @@ function SentByHandCell({ item }: { item: FactoringItem }) {
   const who = sent.by.split('@')[0] || 'unknown'
   return (
     <div className="whitespace-nowrap" aria-label={`PRO ${item.proNumber} sent by hand ${formatReceivedAt(sent.at)} by ${who}${sent.to ? ` to ${sent.to}` : ''}`}>
-      <div style={{ fontWeight: 600 }}>{formatReceivedAt(sent.at)}</div>
-      <div className="tms-muted" style={{ fontSize: 12 }}>by {who}{sent.to ? <> · to {sent.to}</> : ' · AP email not recorded'}</div>
+      <span style={{ fontWeight: 600 }}>{formatReceivedAt(sent.at)}</span>
+      <span className="tms-muted"> · by {who}{sent.to ? <> · to {sent.to}</> : ' · AP email not recorded'}</span>
     </div>
   )
 }
@@ -489,29 +498,13 @@ export function FactoringPage() {
       .sort((a, b) => Number(b.attention) - Number(a.attention) || b.count - a.count || a.label.localeCompare(b.label))
   }, [items])
 
-  /*
-   * Ten at a time: the queue runs to hundreds, and a page of ten is what somebody works
-   * through before refreshing.
-   */
-  const [perPage, setPerPage] = useState(10)
-  const pageCount = Math.max(1, Math.ceil(filtered.length / perPage))
-
-  /*
-   * The page number is remembered AGAINST the filter it belongs to, rather than reset by
-   * an effect. Changing tab, search or page size yields a different key, so page 1 is what
-   * this render reads — no second render, and no window where the table is empty because
-   * the rows are behind you.
-   */
-  const filterKey = `${activeTab}|${otrFilter ?? ''}|${search}|${perPage}`
-  const [pageState, setPageState] = useState({ key: filterKey, page: 1 })
-  const page = pageState.key === filterKey ? pageState.page : 1
-  const setPage = (next: number | ((p: number) => number)) =>
-    setPageState({ key: filterKey, page: typeof next === 'function' ? next(page) : next })
-  const safePage = Math.min(page, pageCount)
-  const paged = useMemo(
-    () => filtered.slice((safePage - 1) * perPage, safePage * perPage),
-    [filtered, safePage, perPage],
-  )
+  /* The grid scrolls (rows are virtualised); this only caps how many a very long queue mounts at once. */
+  const [pageSize, setPageSize] = useState(PAGE_STEP)
+  const [dense, setDense] = useState<DenseFilters>({})
+  const setDenseFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
+    setPageSize(PAGE_STEP)
+    setDense((prev) => { const copy = { ...prev }; if (next) copy[key] = next; else delete copy[key]; return copy })
+  }, [])
 
   const manualMoveItem = manualMoveId ? items.find((i) => i.id === manualMoveId) ?? null : null
   const openItem = openId ? items.find((i) => i.id === openId) ?? null : null
@@ -732,102 +725,146 @@ export function FactoringPage() {
     },
   ]
 
+  const sentAtOf = (item: FactoringItem) => manualSentInfo(item)?.at ?? ''
+  const resolvedCount = (item: FactoringItem) => { const r = readinessOf(item); return r ? OTR_REQUIRED_FIELDS.length - r.missingFields.length : -1 }
+  const denseCols = useMemo<Array<DenseColumn<FactoringItem>>>(() => [
+    { key: 'pro', header: 'PRO #', group: 'Invoice', text: (i) => i.proNumber, extraPx: 110 },
+    { key: 'po', header: 'PO #', group: 'Invoice', text: (i) => poOf(i) || 'missing' },
+    { key: 'customer', header: 'Customer', group: 'Invoice', text: (i) => customerOf(i).name || '\u2014', width: 190 },
+    {
+      key: 'amount', header: 'Amount', group: 'Invoice', align: 'right', extraPx: 24,
+      text: (i) => { const a = invoiceAmountOf(i); return a == null ? 'Add rate' : money(a) },
+      sortValue: (i) => { const a = invoiceAmountOf(i); return a == null ? null : Math.round(a * 100) },
+      filter: 'number', numberUnit: '$', numberOf: (i) => invoiceAmountOf(i),
+    },
+    { key: 'fields', header: 'Fields', group: 'OTR readiness', text: (i) => fieldsReadyLabel(readinessOf(i)), sortValue: (i) => resolvedCount(i) },
+    {
+      key: 'required', header: 'Required for OTR', group: 'OTR readiness', sortable: false,
+      text: (i) => { const r = readinessOf(i); return !r ? 'Not prepared yet' : r.missingFields.length ? `Missing: ${r.missingFields.map((f: OtrRequiredField) => OTR_FIELD_LABEL[f]).join(', ')}` : 'All fields resolved' },
+      extraPx: 120,
+    },
+    {
+      key: 'documents', header: 'Documents', group: 'OTR readiness', sortable: false, extraPx: 150,
+      text: (i) => { const m = missingDocs(i); return m.length ? `Missing: ${m.join(', ')}` : 'POD and rate con on file' },
+      filter: 'multi',
+      optionsOf: (i) => { const m = missingDocs(i); return m.length ? m.map((d) => ({ value: d, label: `${d} missing` })) : [{ value: 'complete', label: 'Complete' }] },
+    },
+    {
+      key: 'received', header: activeTab === 'INVOICED_MANUALLY' ? 'Sent' : 'Received', group: 'Status', extraPx: activeTab === 'INVOICED_MANUALLY' ? 200 : 0,
+      text: (i) => activeTab === 'INVOICED_MANUALLY' ? (manualSentInfo(i) ? formatReceivedAt(sentAtOf(i)) : '\u2014') : relativeReceived(i.receivedAt),
+      sortValue: (i) => (activeTab === 'INVOICED_MANUALLY' ? sentAtOf(i) : i.receivedAt) || null,
+      filter: 'date', dateOf: (i) => (activeTab === 'INVOICED_MANUALLY' ? sentAtOf(i) : i.receivedAt) || null,
+    },
+    {
+      key: 'status', header: 'Status', group: 'Status', extraPx: 130,
+      text: (i) => `${FACTORING_STATUS_LABEL[i.status]}${i.status === 'PENDING_WITH_OTR' ? ` \u00b7 OTR: ${otrLabelOf(i)}` : ''}${noBuyInfo(i).noBuy ? ' \u00b7 No buy' : ''}`,
+      filter: 'multi',
+      optionsOf: (i) => [{ value: i.status, label: FACTORING_STATUS_LABEL[i.status] }],
+      sortValue: (i) => FACTORING_STATUS_LABEL[i.status],
+    },
+    { key: 'actions', header: 'Actions', group: 'Status', text: () => '', fixed: true, filter: false, sortable: false, width: 170 },
+  ], [activeTab])
+  const prefs = useDenseGridPrefs({
+    gridId: 'factoring-queue',
+    email: user?.email,
+    defaultColumns: denseCols.map((c) => c.key),
+    validKeys: denseCols.map((c) => c.key),
+    defaultSort: null,
+  })
+  const gridColumns = useMemo(
+    () => prefs.columns.map((k) => denseCols.find((c) => c.key === k)).filter((c): c is DenseColumn<FactoringItem> => c != null),
+    [denseCols, prefs.columns],
+  )
+  const gridRows = useMemo(() => sortDenseRows(filterRows(filtered, denseCols, dense), denseCols, prefs.sort), [filtered, denseCols, dense, prefs.sort])
+  const shown = gridRows.slice(0, pageSize)
+  const renderFactoringCell = (item: FactoringItem, key: string) => columns.find((c) => c.key === key)?.render(item) ?? null
+  const filterCount = activeFilterCount(dense) + (search.trim() ? 1 : 0) + (otrFilter ? 1 : 0)
+  const resetPaging = () => setPageSize(PAGE_STEP)
+
   return (
     <>
-      <TmsListPage<FactoringItem>
-        title="Factoring"
-        quickTabs={{
-          tabs: FILTER_ORDER.map((key) => ({
-            key,
-            label: key === 'ALL' ? 'All' : FACTORING_STATUS_LABEL[key],
-            count: counts[key],
-          })),
-          active: activeTab,
-          onSelect: (key) => setActiveTab(key as FilterKey),
-        }}
-        search={{
-          value: search,
-          onChange: setSearch,
-          placeholder: 'Search PRO, subject, or sender…',
-        }}
-        onRefresh={() => { void refresh() }}
-        banner={
-          <>
-            {error && <p style={RED}>{error}</p>}
-            {activeTab === 'PENDING_WITH_OTR' && otrBreakdown.length > 0 && (
-              <div role="group" aria-label="OTR status" className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wider tms-muted">OTR says</span>
-                {otrBreakdown.map(({ label, count, attention }) => {
-                  const meta = label === OTR_UNREPORTED ? null : otrStatusMeta(label)
-                  const on = otrFilter === label
-                  return (
-                    <button
-                      key={label}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => setOtrFilter(on ? null : label)}
-                      title={attention ? 'OTR or the broker is waiting on us' : undefined}
-                      className={`tms-badge tms-badge-${meta ? meta.tone : 'gray'} tms-otr-chip${meta ? '' : ' tms-otr-chip-unreported'}${on ? ' tms-active' : ''}`}
-                    >
-                      {label}{attention ? ' ⚠' : ''}
-                      <TmsCountBadge count={count} />
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-            {/* What the queue is worth, not just how many rows are in it. */}
-            <StatusTotals items={items} />
-          </>
-        }
-        columns={columns}
-        rows={paged}
-        rowKey={(item) => item.id}
-        page={{
-          from: filtered.length === 0 ? 0 : (safePage - 1) * perPage + 1,
-          to: Math.min(safePage * perPage, filtered.length),
-          total: filtered.length,
-          pageSize: perPage,
-        }}
-        emptyText={
-          loading && items.length === 0
-            ? 'Loading factoring queue…'
-            : error ? 'Couldn’t load queue. Try refreshing.' : 'No items match the current filters.'
-        }
-        onClearFilters={() => { setSearch(''); setOtrFilter(null) }}
-        footerExtra={
-          <div className="flex items-center gap-2">
-            <label className="text-xs tms-muted">
-              Per page{' '}
-              <TmsSelect
-                aria-label="Invoices per page"
-                value={perPage}
-                onChange={(e) => setPerPage(Number(e.target.value))}
-                className="w-auto"
-              >
-                {[10, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
-              </TmsSelect>
-            </label>
-            <TmsButton
-              size="sm"
-              aria-label="Previous page"
-              disabled={safePage <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Prev
-            </TmsButton>
-            <span className="min-w-[76px] text-center text-xs tms-muted">Page {safePage} of {pageCount}</span>
-            <TmsButton
-              size="sm"
-              aria-label="Next page"
-              disabled={safePage >= pageCount}
-              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-            >
-              Next
-            </TmsButton>
+      <div className="tms-dense-page">
+        <div className="tms-dense-bar">
+          <h1 className="tms-dense-title" style={{ margin: 0 }}><Landmark size={18} aria-hidden="true" /> Factoring</h1>
+          <Search size={14} className="tms-muted" aria-hidden="true" />
+          <TmsInput
+            className="tms-dense-search"
+            aria-label="Search"
+            placeholder="Search PRO, subject, or sender\u2026"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); resetPaging() }}
+          />
+          <TmsSegmentedTabs
+            aria-label="Factoring status"
+            size="sm"
+            active={activeTab}
+            onSelect={(key) => { setActiveTab(key as FilterKey); resetPaging() }}
+            tabs={FILTER_ORDER.map((key) => ({ key, label: key === 'ALL' ? 'All' : FACTORING_STATUS_LABEL[key], count: counts[key] }))}
+          />
+          <ClearFiltersButton count={filterCount} onClear={() => { setSearch(''); setOtrFilter(null); setDense({}); resetPaging() }} />
+          <span className="tms-dense-spacer" />
+          <TmsButton size="sm" variant="secondary" onClick={() => { void refresh() }}>Refresh</TmsButton>
+          <ColumnsButton catalog={denseCols} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
+          <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
+        </div>
+        {error && <p style={RED}>{error}</p>}
+        {activeTab === 'PENDING_WITH_OTR' && otrBreakdown.length > 0 && (
+          <div role="group" aria-label="OTR status" className="flex flex-wrap items-center gap-2" style={{ padding: '4px 8px' }}>
+            <span className="text-[11px] font-semibold uppercase tracking-wider tms-muted">OTR says</span>
+            {otrBreakdown.map(({ label, count, attention }) => {
+              const meta = label === OTR_UNREPORTED ? null : otrStatusMeta(label)
+              const on = otrFilter === label
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => { setOtrFilter(on ? null : label); resetPaging() }}
+                  title={attention ? 'OTR or the broker is waiting on us' : undefined}
+                  className={`tms-badge tms-badge-${meta ? meta.tone : 'gray'} tms-otr-chip${meta ? '' : ' tms-otr-chip-unreported'}${on ? ' tms-active' : ''}`}
+                >
+                  {label}{attention ? ' \u26a0' : ''}
+                  <TmsCountBadge count={count} />
+                </button>
+              )
+            })}
           </div>
-        }
-      />
+        )}
+        {/* What the queue is worth, not just how many rows are in it. */}
+        <StatusTotals items={items} />
+        <div className="tms-dense-body">
+          <DenseGrid<FactoringItem>
+            aria-label="Factoring queue"
+            recentKey={`tms:factoring:recent:${user?.email ?? 'anon'}`}
+            resetKey={`${activeTab}|${otrFilter ?? ''}|${search}|${JSON.stringify(dense)}|${JSON.stringify(prefs.sort)}`}
+            columns={gridColumns}
+            rows={shown}
+            fitRows={filtered}
+            rowKey={(item) => item.id}
+            renderCell={renderFactoringCell}
+            density={prefs.density}
+            userWidths={prefs.widths}
+            stickyCount={Math.max(1, prefs.pinned.length)}
+            sort={prefs.sort}
+            onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
+            filters={dense}
+            onFilterChange={setDenseFilter}
+            onReorder={(from, to) => prefs.setColumns(reorderKeys(prefs.columns, from, to))}
+            onResize={prefs.setWidth}
+            empty={
+              loading && items.length === 0
+                ? 'Loading factoring queue\u2026'
+                : error ? 'Couldn\u2019t load queue. Try refreshing.' : 'No items match the current filters.'
+            }
+          />
+          <div className="tms-dense-bar" data-testid="factoring-count">
+            <span className="tms-muted">Showing {shown.length} of {gridRows.length}</span>
+            {gridRows.length > shown.length && (
+              <TmsButton size="sm" variant="secondary" onClick={() => setPageSize((n) => n + PAGE_STEP)}>Show next {PAGE_STEP}</TmsButton>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* The editor, over the queue rather than inside it. */}
       {openItem && (

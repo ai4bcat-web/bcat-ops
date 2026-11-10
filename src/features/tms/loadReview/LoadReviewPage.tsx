@@ -2,7 +2,9 @@ import { ReviewBatchEdit } from './ReviewBatchEdit'
 import { PodPreviewButton } from './PodPreviewButton'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Check, ClipboardCheck, Search, X } from 'lucide-react'
+import { Check, ClipboardCheck, Download, Search, X } from 'lucide-react'
+import { toast } from 'sonner'
+import { exportRecords, reviewExportRow } from '@/lib/opsExports'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsFilterChip, TmsInput, TmsSegmentedTabs, TmsStatRow, type ColumnDef } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import { ClearFiltersButton, ColumnsButton, DensityToggle } from '@/features/tms/grid/DenseControls'
@@ -217,6 +219,9 @@ export function LoadReviewPage() {
         <ClearFiltersButton count={activeFilterCount(dense)} onClear={() => { setDense({}); setPageSize(PAGE_STEP) }} />
         <span className="tms-dense-spacer" />
         <TmsButton size="sm" variant="secondary" onClick={() => void refresh()}>Refresh</TmsButton>
+        <TmsButton size="sm" variant="secondary" data-testid="export-load-review" title="Every shipment in Load Review with every field and each check" onClick={() => toast.success(`Exported ${exportRecords('load-review', queue.map((e) => reviewExportRow(e.row, e.verdict)))} shipments in Load Review`)}>
+          <Download size={14} aria-hidden="true" /> Export all
+        </TmsButton>
         <ColumnsButton catalog={denseCols.filter((c) => c.key !== 'select')} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
       </div>

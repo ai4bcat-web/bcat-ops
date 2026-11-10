@@ -18,14 +18,15 @@ import { Link } from 'react-router-dom'
 import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect, TmsListPage,
-  type ColumnDef, type TmsListPageProps, type TmsTabGroup,
+  TmsBadge, TmsButton, TmsCard, TmsField, TmsSelect, type TmsTabGroup,
 } from '@/features/tms/kit'
+import { ApChrome, ApDenseList, type ApColumn, type ApListConfig } from './ApDenseList'
 import { useAuth } from '@/hooks/useAuth'
 import { useApWorklist, type ApWorklistRow } from '@/hooks/useApWorklist'
 import { useCarrierAp } from '@/hooks/useCarrierAp'
 import { useCarriers } from '@/hooks/useCarriers'
 import { useOpenBills } from '@/hooks/useOpenBills'
+import { exportOutstandingPayables } from '@/lib/opsExports'
 import {
   getShipmentDocumentUrl, getTmsSettings, graphqlErrorText, listBillsByMonth, reverseApPayment, unapproveBill, voidBill,
 } from '@/lib/apiClient'
@@ -88,18 +89,13 @@ type ApDialog =
 
 const RIGHT = 'block text-right tabular-nums'
 
-/** The lists do not page: the footer counts what the view holds. */
-function wholeList(total: number) {
-  return { from: total === 0 ? 0 : 1, to: total, total, pageSize: total }
-}
-
 /**
  * One view's half of the list page. Columns, rows and `rowKey` are built together by the
  * view that owns them, so the row type is erased here and the page renders them all.
  */
-type ListView = Omit<TmsListPageProps<never>, 'title' | 'viewTabs' | 'quickTabs' | 'onRefresh'>
+type ListView = ApListConfig<never>
 
-function view<T>(config: Omit<TmsListPageProps<T>, 'title' | 'viewTabs' | 'quickTabs' | 'onRefresh'>): ListView {
+function view<T>(config: ApListConfig<T>): ListView {
   return config as unknown as ListView
 }
 
@@ -108,7 +104,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // same day, so a bill cannot read "Current" next to a 1–30 column it was counted in.
   const [asOf] = useState(() => chicagoDateStr(new Date()))
 
-  const { isAdmin } = useAuth()
+  const { isAdmin, user } = useAuth()
   const [tab, setTab] = useState<ApTabKey>('awaiting')
   const inboxStatus = useApInboxStatus()
   const [chip, setChip] = useState<InboxChip>('NEEDS_REVIEW')
@@ -410,7 +406,21 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         onReviewNow={reviewNow}
         onOpenQueue={() => { setChip('NEEDS_REVIEW'); setTab('inbox') }}
       />
-      <TmsListPage<never> {...chrome} {...current} />
+      <div className="tms-page">
+        <ApChrome
+          title={chrome.title}
+          viewTabs={chrome.viewTabs}
+          quickTabs={chrome.quickTabs}
+          actions={(
+            <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="export-outstanding-payables" title="Every open bill with every field"
+              onClick={() => { exportOutstandingPayables().then((n) => toast.success(`Exported ${n} outstanding payables`)).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not export')) }}>
+              <Download size={14} aria-hidden="true" /> Export outstanding
+            </button>
+          )}
+        />
+        {/* Keyed by grid so each view keeps its own saved columns, filters and sort. */}
+        <ApDenseList<never> key={current.gridId} config={current} email={user?.email} onRefresh={chrome.onRefresh} />
+      </div>
 
       {dialog?.kind === 'record' && (
         <RecordBillDialog
@@ -536,6 +546,64 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   )
 }
 
+/* ── Column helpers ──────────────────────────────────────────────────────── */
+
+/** A money column: integer cents drawn right-aligned, sorted and range-filtered by the cents themselves. */
+function moneyCol<T>(
+  key: string,
+  header: string,
+  centsOf: (row: T) => number,
+  render?: (row: T) => ReactNode,
+  empty?: (row: T) => boolean,
+): ApColumn<T> {
+  return {
+    key,
+    header,
+    align: 'right',
+    text: (row) => (empty?.(row) ? '—' : formatCents(centsOf(row))),
+    sortValue: centsOf,
+    filter: 'number',
+    numberOf: (row) => centsOf(row) / 100,
+    numberUnit: '$',
+    render: render ?? ((row) => <span className={RIGHT}>{empty?.(row) ? '—' : formatCents(centsOf(row))}</span>),
+  }
+}
+
+/** A date column: shown as "Oct 3, 2026", sorted by the ISO value, filtered by calendar day. */
+function dayCol<T>(key: string, header: string, valueOf: (row: T) => string | null | undefined): ApColumn<T> {
+  return {
+    key,
+    header,
+    text: (row) => formatDay(valueOf(row)),
+    sortValue: (row) => valueOf(row) ?? '',
+    filter: 'date',
+    dateOf: (row) => valueOf(row) ?? null,
+    render: (row) => formatDay(valueOf(row)),
+  }
+}
+
+/** A text column whose header filter offers the distinct values. */
+function facetCol<T>(
+  key: string,
+  header: string,
+  textOf: (row: T) => string,
+  render?: (row: T) => ReactNode,
+  extra: Partial<ApColumn<T>> = {},
+): ApColumn<T> {
+  return {
+    key,
+    header,
+    text: textOf,
+    filter: 'multi',
+    render: render ?? textOf,
+    ...extra,
+  }
+}
+
+const sumCents = <T,>(rows: T[], pick: (row: T) => number) => rows.reduce((sum, row) => sum + pick(row), 0)
+
+const ACTIONS = { filter: false, sortable: false, fixed: true } as const
+
 /* ── Awaiting invoice ────────────────────────────────────────────────────── */
 
 function awaitingView({ banner, rows, shared, busy, onRecord }: {
@@ -545,60 +613,53 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
   busy: boolean
   onRecord: (row: ApWorklistRow) => void
 }): ListView {
-  const columns: ColumnDef<ApWorklistRow>[] = [
+  const carrierText = (row: ApWorklistRow) => (isOwnFleet(row) ? row.assignment.driverName ?? 'Own asset' : row.carrierName || '—')
+  const columns: ApColumn<ApWorklistRow>[] = [
     {
       key: 'shipment',
       header: 'SHIPMENT',
+      text: (row) => row.shipmentNumber ?? row.shipmentId,
       render: (row) => <Link to={`/tms/shipments/${row.shipmentId}`}>{row.shipmentNumber ?? row.shipmentId}</Link>,
     },
     // The assignment carries the load's id, not its number; the shipment link is the readable handle.
-    { key: 'load', header: 'LOAD', render: (row) => <span className="text-xs tms-muted">{row.loadId}</span> },
+    { key: 'load', header: 'LOAD', text: (row) => row.loadId, render: (row) => <span className="text-xs tms-muted">{row.loadId}</span> },
+    facetCol('carrier', 'CARRIER', carrierText, (row) => {
+      const ownFleet = isOwnFleet(row)
+      const quickPay = quickPayLabel(row.assignment)
+      return (
+        <>
+          {carrierText(row)}
+          {quickPay && !ownFleet && <> <TmsBadge tone="gray">{quickPay}</TmsBadge></>}
+          {sharedProChip(shared, row.loadId)}
+        </>
+      )
+    }, { extraPx: 90 }),
     {
-      key: 'carrier',
-      header: 'CARRIER',
-      render: (row) => {
-        const ownFleet = isOwnFleet(row)
-        const quickPay = quickPayLabel(row.assignment)
-        return (
-          <>
-            {ownFleet ? row.assignment.driverName ?? 'Own asset' : row.carrierName || '—'}
-            {quickPay && !ownFleet && <> <TmsBadge tone="gray">{quickPay}</TmsBadge></>}
-            {sharedProChip(shared, row.loadId)}
-          </>
-        )
-      },
-    },
-    {
-      key: 'delivered',
-      header: 'DELIVERED',
+      ...dayCol<ApWorklistRow>('delivered', 'DELIVERED', (row) => row.deliveredAt),
+      text: (row) => (row.deliveredAt ? formatDay(row.deliveredAt) : 'Not delivered'),
       render: (row) => (row.deliveredAt ? formatDay(row.deliveredAt) : 'Not delivered'),
     },
-    {
-      key: 'rateCon',
-      header: 'RATE CON',
-      render: (row) => (
-        isOwnFleet(row)
-          ? <span className="tms-muted">—</span>
-          : row.rateConSigned
-            ? <span>✓</span>
-            : <span style={{ color: 'var(--tms-badge-red)' }}>✗ not signed</span>
-      ),
-    },
-    {
-      key: 'paperwork',
-      header: 'PAPERWORK',
-      render: (row) => (
-        isOwnFleet(row)
-          ? <span className="tms-muted">—</span>
-          : row.docsReady
-            ? <span>✓</span>
-            : <span style={{ color: 'var(--tms-badge-red)' }}>{row.docsMissing.join(', ') || 'Missing'}</span>
-      ),
-    },
-    { key: 'cost', header: 'COST', render: (row) => <span className={RIGHT}>{formatCents(row.costCents)}</span> },
+    facetCol('rateCon', 'RATE CON', (row) => (isOwnFleet(row) ? '—' : row.rateConSigned ? 'Signed' : 'Not signed'), (row) => (
+      isOwnFleet(row)
+        ? <span className="tms-muted">—</span>
+        : row.rateConSigned
+          ? <span>✓</span>
+          : <span style={{ color: 'var(--tms-badge-red)' }}>✗ not signed</span>
+    )),
+    facetCol('paperwork', 'PAPERWORK', (row) => (isOwnFleet(row) ? '—' : row.docsReady ? 'Ready' : row.docsMissing.join(', ') || 'Missing'), (row) => (
+      isOwnFleet(row)
+        ? <span className="tms-muted">—</span>
+        : row.docsReady
+          ? <span>✓</span>
+          : <span style={{ color: 'var(--tms-badge-red)' }}>{row.docsMissing.join(', ') || 'Missing'}</span>
+    ), { filter: 'text' }),
+    moneyCol<ApWorklistRow>('cost', 'COST', (row) => row.costCents),
     {
       key: 'record',
       header: '',
+      text: () => '',
+      width: 330,
+      ...ACTIONS,
       render: (row) => (
         isOwnFleet(row) ? (
           <span className="text-xs tms-muted">
@@ -624,13 +685,20 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
     },
   ]
 
+  const billable = rows.filter((row) => !isOwnFleet(row))
   return view<ApWorklistRow>({
+    gridId: 'ap-awaiting',
     banner,
     columns,
     rows,
     rowKey: (row) => row.loadCarrierId,
-    page: wholeList(rows.length),
     emptyText: 'No carrier owes us an invoice.',
+    kpis: [
+      { label: 'Awaiting', value: rows.length },
+      { label: 'To bill', value: billable.length },
+      { label: 'Agreed cost', value: formatCents(sumCents(rows, (row) => row.costCents)) },
+      { label: 'Missing paperwork', value: billable.filter((row) => !row.docsReady).length, tone: 'warn' },
+    ],
   })
 }
 
@@ -651,61 +719,58 @@ function reviewView({
   onCharges: (bill: CarrierBillRecord) => void
   onVoid: (bill: CarrierBillRecord) => void
 }): ListView {
-  const columns: ColumnDef<CarrierBillRecord>[] = [
+  const gatesOf = (bill: CarrierBillRecord) => billGates({
+    bill,
+    row: rows.get(bill.loadCarrierId),
+    carrier: carriersById.get(bill.carrierId) ?? null,
+    settings,
+    isAdmin,
+  })
+  const columns: ApColumn<CarrierBillRecord>[] = [
     {
       key: 'bill',
       header: 'BILL',
+      text: (bill) => bill.billNumber ?? bill.id,
+      extraPx: 40,
       render: (bill) => (
         <><Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link><VerifyPaymentBadge bill={bill} /></>
       ),
     },
-    { key: 'carrier', header: 'CARRIER', render: (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</> },
-    { key: 'billDate', header: 'BILL DATE', render: (bill) => formatDay(bill.billDate) },
-    { key: 'due', header: 'DUE', render: (bill) => formatDay(bill.dueAt) },
-    {
-      key: 'gross',
-      header: 'GROSS',
-      render: (bill) => (
-        <span className={RIGHT}>
-          {formatCents(bill.grossCents)}
-          {bill.varianceCents !== 0 && (
-            <> <TmsBadge tone="red">{formatCents(bill.varianceCents)} variance</TmsBadge></>
-          )}
-        </span>
-      ),
-    },
-    {
-      key: 'fee',
-      header: 'FEE',
-      render: (bill) => <span className={RIGHT}>{bill.quickPayFeeCents ? formatCents(bill.quickPayFeeCents) : '—'}</span>,
-    },
-    {
-      key: 'net',
-      header: 'NET',
-      render: (bill) => <span className={`${RIGHT} font-medium`}>{formatCents(bill.netCents)}</span>,
-    },
+    facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
+    dayCol<CarrierBillRecord>('billDate', 'BILL DATE', (bill) => bill.billDate),
+    dayCol<CarrierBillRecord>('due', 'DUE', (bill) => bill.dueAt),
+    moneyCol<CarrierBillRecord>('gross', 'GROSS', (bill) => bill.grossCents, (bill) => (
+      <span className={RIGHT}>
+        {formatCents(bill.grossCents)}
+        {bill.varianceCents !== 0 && (
+          <> <TmsBadge tone="red">{formatCents(bill.varianceCents)} variance</TmsBadge></>
+        )}
+      </span>
+    )),
+    moneyCol<CarrierBillRecord>('fee', 'FEE', (bill) => bill.quickPayFeeCents ?? 0, undefined, (bill) => !bill.quickPayFeeCents),
+    moneyCol<CarrierBillRecord>('net', 'NET', (bill) => bill.netCents, (bill) => <span className={`${RIGHT} font-medium`}>{formatCents(bill.netCents)}</span>),
     {
       key: 'gates',
       header: 'STANDING IN THE WAY',
+      text: (bill) => {
+        const gates = gatesOf(bill)
+        const all = [...gates.blocks, ...gates.warnings.map((w) => w.message)]
+        return all.length === 0 ? 'Nothing — ready to approve' : all.join(' · ')
+      },
+      extraPx: 40,
       render: (bill) => {
-        const gates = billGates({
-          bill,
-          row: rows.get(bill.loadCarrierId),
-          carrier: carriersById.get(bill.carrierId) ?? null,
-          settings,
-          isAdmin,
-        })
+        const gates = gatesOf(bill)
         return (
           <>
             {gates.blocks.length === 0 && gates.warnings.length === 0 && (
               <span className="tms-muted">Nothing — ready to approve</span>
             )}
-            <ul className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>
-              {gates.blocks.map((block) => <li key={block}>{block}</li>)}
-            </ul>
-            <ul className="text-xs tms-muted">
-              {gates.warnings.map((warning) => <li key={warning.key}>{warning.message}</li>)}
-            </ul>
+            {gates.blocks.map((block) => (
+              <span key={block} className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{block}{' '}</span>
+            ))}
+            {gates.warnings.map((warning) => (
+              <span key={warning.key} className="text-xs tms-muted">{warning.message}{' '}</span>
+            ))}
           </>
         )
       },
@@ -713,6 +778,9 @@ function reviewView({
     {
       key: 'actions',
       header: '',
+      text: () => '',
+      width: 300,
+      ...ACTIONS,
       render: (bill) => (
         <span className="flex justify-end gap-1 whitespace-nowrap">
           <TmsButton variant="ghost" size="sm" aria-label={`Approve bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onApprove(bill)}>Approve</TmsButton>
@@ -724,12 +792,17 @@ function reviewView({
   ]
 
   return view<CarrierBillRecord>({
+    gridId: 'ap-review',
     banner,
     columns,
     rows: bills,
     rowKey: (bill) => bill.id,
-    page: wholeList(bills.length),
     emptyText: 'No bill is waiting on review.',
+    kpis: [
+      { label: 'In review', value: bills.length },
+      { label: 'Net', value: formatCents(sumCents(bills, (bill) => bill.netCents)) },
+      { label: 'With variance', value: bills.filter((bill) => bill.varianceCents !== 0).length, tone: 'bad' },
+    ],
   })
 }
 
@@ -761,16 +834,21 @@ function toBePaidView({
   const carrierName = billCarrierOptions(allBills).find((c) => c.id === filters.carrierId)?.name ?? null
   const dueLabel: Record<string, string> = { OVERDUE: 'Overdue', WEEK: 'Due within 7 days', LATER: 'Later' }
 
-  const columns: ColumnDef<CarrierBillRecord>[] = [
+  const columns: ApColumn<CarrierBillRecord>[] = [
     {
       key: 'select',
       header: '',
-      width: 36,
+      text: () => '',
+      width: 40,
+      filter: false,
+      sortable: false,
+      fixed: true,
       render: (bill) => (
         <input
           type="checkbox"
           aria-label={`Select bill ${bill.billNumber ?? bill.id}`}
           checked={selected.includes(bill.id)}
+          onClick={(event) => event.stopPropagation()}
           onChange={() => onSelect(
             selected.includes(bill.id) ? selected.filter((id) => id !== bill.id) : [...selected, bill.id],
           )}
@@ -780,6 +858,8 @@ function toBePaidView({
     {
       key: 'bill',
       header: 'BILL',
+      text: (bill) => bill.billNumber ?? bill.id,
+      extraPx: 90,
       render: (bill) => (
         <>
           <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>
@@ -788,27 +868,32 @@ function toBePaidView({
         </>
       ),
     },
-    { key: 'carrier', header: 'CARRIER', render: (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</> },
-    { key: 'due', header: 'DUE', render: (bill) => formatDay(bill.dueAt) },
+    facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
+    dayCol<CarrierBillRecord>('due', 'DUE', (bill) => bill.dueAt),
     {
       key: 'age',
       header: 'AGE',
+      text: (bill) => agingChipFor(bill.dueAt, asOf).label,
+      sortValue: (bill) => agingChipFor(bill.dueAt, asOf).days,
+      filter: 'multi',
+      extraPx: 24,
       render: (bill) => {
         const chip = agingChipFor(bill.dueAt, asOf)
         return <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>
       },
     },
-    { key: 'net', header: 'NET', render: (bill) => <span className={RIGHT}>{formatCents(bill.netCents)}</span> },
-    { key: 'paid', header: 'PAID', render: (bill) => <span className={RIGHT}>{formatCents(bill.paidCents)}</span> },
-    {
-      key: 'balance',
-      header: 'BALANCE',
-      render: (bill) => <span className={`${RIGHT} font-medium`}>{formatCents(bill.balanceCents)}</span>,
-    },
-    { key: 'payee', header: 'PAYEE', render: (bill) => payeeLabel(bill) },
+    moneyCol<CarrierBillRecord>('net', 'NET', (bill) => bill.netCents),
+    moneyCol<CarrierBillRecord>('paid', 'PAID', (bill) => bill.paidCents),
+    moneyCol<CarrierBillRecord>('balance', 'BALANCE', (bill) => bill.balanceCents, (bill) => (
+      <span className={`${RIGHT} font-medium`}>{formatCents(bill.balanceCents)}</span>
+    )),
+    facetCol('payee', 'PAYEE', payeeLabel),
     {
       key: 'actions',
       header: '',
+      text: () => '',
+      width: 190,
+      ...ACTIONS,
       render: (bill) => (
         <span className="flex justify-end gap-1 whitespace-nowrap">
           <TmsButton variant="ghost" size="sm" aria-label={`Pay bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onPay(bill)}>Pay</TmsButton>
@@ -818,100 +903,108 @@ function toBePaidView({
     },
   ]
 
+  const overdue = bills.filter((bill) => agingChipFor(bill.dueAt, asOf).late)
   return view<CarrierBillRecord>({
+    gridId: 'ap-to-pay',
+    kpis: [
+      { label: 'Bills to pay', value: bills.length },
+      { label: 'Balance', value: formatCents(sumCents(bills, (bill) => bill.balanceCents)) },
+      { label: 'Overdue', value: overdue.length, tone: 'bad' },
+      { label: 'Overdue balance', value: formatCents(sumCents(overdue, (bill) => bill.balanceCents)), tone: 'bad' },
+    ],
     actions: (
-        <>
-          <span className="text-sm tms-muted">
-            {selected.length} selected ({formatCents(selectionBalanceCents(bills, selected))})
-          </span>
-          {selected.length > 0 && !payCarrierId && (
-            <span className="text-xs tms-muted">One payment covers one carrier; narrow the selection.</span>
-          )}
-          <TmsButton
-            variant="primary"
-            aria-label="Pay selected bills"
-            disabled={busy || selected.length === 0 || !payCarrierId}
-            onClick={() => { if (payCarrierId) onPaySelected(payCarrierId) }}
-          >
-            Pay selected
-          </TmsButton>
+      <>
+        <span className="text-sm tms-muted">
+          {selected.length} selected ({formatCents(selectionBalanceCents(bills, selected))})
+        </span>
+        {selected.length > 0 && !payCarrierId && (
+          <span className="text-xs tms-muted">One payment covers one carrier; narrow the selection.</span>
+        )}
+        <TmsButton
+          size="sm"
+          variant="primary"
+          aria-label="Pay selected bills"
+          disabled={busy || selected.length === 0 || !payCarrierId}
+          onClick={() => { if (payCarrierId) onPaySelected(payCarrierId) }}
+        >
+          Pay selected
+        </TmsButton>
       </>
     ),
     filterChips: [
-        { key: 'carrier', label: 'Carrier is', value: carrierName, onClick: onToggleFilters },
-        { key: 'due', label: 'Due is', value: filters.due ? dueLabel[filters.due] : null, onClick: onToggleFilters },
-        {
-          key: 'payee',
-          label: 'Payee is',
-          value: filters.payeeKind ? AP_PAYEE_KIND_LABEL[filters.payeeKind] : null,
-          onClick: onToggleFilters,
-        },
-        {
-          key: 'verifyPayment',
-          label: 'Verify payment',
-          value: filters.verifyPayment ? 'only' : null,
-          onClick: () => onFilters({ ...filters, verifyPayment: !filters.verifyPayment }),
-        },
+      { key: 'carrier', label: 'Carrier is', value: carrierName, onClick: onToggleFilters },
+      { key: 'due', label: 'Due is', value: filters.due ? dueLabel[filters.due] : null, onClick: onToggleFilters },
+      {
+        key: 'payee',
+        label: 'Payee is',
+        value: filters.payeeKind ? AP_PAYEE_KIND_LABEL[filters.payeeKind] : null,
+        onClick: onToggleFilters,
+      },
+      {
+        key: 'verifyPayment',
+        label: 'Verify payment',
+        value: filters.verifyPayment ? 'only' : null,
+        onClick: () => onFilters({ ...filters, verifyPayment: !filters.verifyPayment }),
+      },
     ],
     onAddFilter: onToggleFilters,
     banner: (
-        <>
-          {errorBanner}
-          {showFilters && (
-            <TmsCard title="Filters">
-              <div className="tms-grid tms-grid-3">
-                <TmsField label="Carrier">
-                  <TmsSelect
-                    aria-label="Filter carrier"
-                    value={filters.carrierId}
-                    onChange={(e) => onFilters({ ...filters, carrierId: e.target.value })}
-                  >
-                    <option value="">All</option>
-                    {billCarrierOptions(allBills).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </TmsSelect>
-                </TmsField>
-                <TmsField label="Due">
-                  <TmsSelect
-                    aria-label="Filter due"
-                    value={filters.due}
-                    onChange={(e) => onFilters({ ...filters, due: e.target.value as ToBePaidFilters['due'] })}
-                  >
-                    <option value="">All</option>
-                    <option value="OVERDUE">Overdue</option>
-                    <option value="WEEK">Due within 7 days</option>
-                    <option value="LATER">Later</option>
-                  </TmsSelect>
-                </TmsField>
-                <TmsField label="Payee">
-                  <TmsSelect
-                    aria-label="Filter payee kind"
-                    value={filters.payeeKind}
-                    onChange={(e) => onFilters({ ...filters, payeeKind: e.target.value as ToBePaidFilters['payeeKind'] })}
-                  >
-                    <option value="">All</option>
-                    <option value="CARRIER">{AP_PAYEE_KIND_LABEL.CARRIER}</option>
-                    <option value="FACTOR">{AP_PAYEE_KIND_LABEL.FACTOR}</option>
-                  </TmsSelect>
-                </TmsField>
-                <TmsField label="Verify payment">
-                  <TmsSelect
-                    aria-label="Filter verify payment"
-                    value={filters.verifyPayment ? 'only' : ''}
-                    onChange={(e) => onFilters({ ...filters, verifyPayment: e.target.value === 'only' })}
-                  >
-                    <option value="">All bills</option>
-                    <option value="only">Verify payment only ({allBills.filter(isVerifyPaymentBill).length})</option>
-                  </TmsSelect>
-                </TmsField>
-              </div>
-            </TmsCard>
-          )}
-        </>
+      <>
+        {errorBanner}
+        {showFilters && (
+          <TmsCard title="Filters">
+            <div className="tms-grid tms-grid-3">
+              <TmsField label="Carrier">
+                <TmsSelect
+                  aria-label="Filter carrier"
+                  value={filters.carrierId}
+                  onChange={(e) => onFilters({ ...filters, carrierId: e.target.value })}
+                >
+                  <option value="">All</option>
+                  {billCarrierOptions(allBills).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </TmsSelect>
+              </TmsField>
+              <TmsField label="Due">
+                <TmsSelect
+                  aria-label="Filter due"
+                  value={filters.due}
+                  onChange={(e) => onFilters({ ...filters, due: e.target.value as ToBePaidFilters['due'] })}
+                >
+                  <option value="">All</option>
+                  <option value="OVERDUE">Overdue</option>
+                  <option value="WEEK">Due within 7 days</option>
+                  <option value="LATER">Later</option>
+                </TmsSelect>
+              </TmsField>
+              <TmsField label="Payee">
+                <TmsSelect
+                  aria-label="Filter payee kind"
+                  value={filters.payeeKind}
+                  onChange={(e) => onFilters({ ...filters, payeeKind: e.target.value as ToBePaidFilters['payeeKind'] })}
+                >
+                  <option value="">All</option>
+                  <option value="CARRIER">{AP_PAYEE_KIND_LABEL.CARRIER}</option>
+                  <option value="FACTOR">{AP_PAYEE_KIND_LABEL.FACTOR}</option>
+                </TmsSelect>
+              </TmsField>
+              <TmsField label="Verify payment">
+                <TmsSelect
+                  aria-label="Filter verify payment"
+                  value={filters.verifyPayment ? 'only' : ''}
+                  onChange={(e) => onFilters({ ...filters, verifyPayment: e.target.value === 'only' })}
+                >
+                  <option value="">All bills</option>
+                  <option value="only">Verify payment only ({allBills.filter(isVerifyPaymentBill).length})</option>
+                </TmsSelect>
+              </TmsField>
+            </div>
+          </TmsCard>
+        )}
+      </>
     ),
     columns,
     rows: bills,
     rowKey: (bill) => bill.id,
-    page: wholeList(bills.length),
     emptyText: 'Nothing is approved and waiting in this view.',
     onClearFilters: () => onFilters(EMPTY_TO_BE_PAID_FILTERS),
   })
@@ -931,25 +1024,29 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
   verifyCount: number
   onVerifyOnly: (on: boolean) => void
 }): ListView {
-  const columns: ColumnDef<CarrierBillRecord>[] = [
+  const columns: ApColumn<CarrierBillRecord>[] = [
     {
       key: 'bill',
       header: 'BILL',
+      text: (bill) => bill.billNumber ?? bill.id,
+      extraPx: 40,
       render: (bill) => <><Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link><VerifyPaymentBadge bill={bill} /></>,
     },
-    { key: 'carrier', header: 'CARRIER', render: (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</> },
-    { key: 'billDate', header: 'BILL DATE', render: (bill) => formatDay(bill.billDate) },
-    { key: 'paid', header: 'PAID', render: (bill) => formatDay(bill.paidAt) },
-    { key: 'payee', header: 'PAYEE', render: (bill) => payeeLabel(bill) },
-    { key: 'net', header: 'NET', render: (bill) => <span className={RIGHT}>{formatCents(bill.netCents)}</span> },
-    {
-      key: 'credits',
-      header: 'CREDITS',
-      render: (bill) => <span className={RIGHT}>{bill.creditedCents ? formatCents(bill.creditedCents) : '—'}</span>,
-    },
+    facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
+    dayCol<CarrierBillRecord>('billDate', 'BILL DATE', (bill) => bill.billDate),
+    dayCol<CarrierBillRecord>('paid', 'PAID', (bill) => bill.paidAt),
+    facetCol('payee', 'PAYEE', payeeLabel),
+    moneyCol<CarrierBillRecord>('net', 'NET', (bill) => bill.netCents),
+    moneyCol<CarrierBillRecord>('credits', 'CREDITS', (bill) => bill.creditedCents ?? 0, undefined, (bill) => !bill.creditedCents),
   ]
 
   return view<CarrierBillRecord>({
+    gridId: 'ap-paid',
+    kpis: [
+      { label: `Paid in ${monthLabel(month)}`, value: bills.length },
+      { label: 'Net paid', value: formatCents(sumCents(bills, (bill) => bill.netCents)) },
+      { label: 'Verify payment', value: verifyCount, tone: 'warn' },
+    ],
     actions: (
       <>
         <TmsSelect aria-label="Bill month" value={month} onChange={(e) => onMonth(e.target.value)}>
@@ -970,7 +1067,6 @@ function paidView({ banner, bills, shared, months, month, loading, onMonth, veri
     columns,
     rows: bills,
     rowKey: (bill) => bill.id,
-    page: wholeList(bills.length),
     emptyText: `No carrier was paid off a ${monthLabel(month)} bill.`,
   })
 }
@@ -994,28 +1090,30 @@ function paymentsView({
   onRemittance: (payment: ApPaymentRecord) => void
   onReverse: (payment: ApPaymentRecord) => void
 }): ListView {
-  const columns: ColumnDef<ApPaymentRecord>[] = [
-    { key: 'kind', header: 'KIND', render: (p) => AP_PAYMENT_KIND_LABEL[p.kind] },
-    { key: 'date', header: 'DATE', render: (p) => formatDay(p.paidAt) },
-    { key: 'method', header: 'METHOD', render: (p) => (p.method ? AP_PAYMENT_METHOD_LABEL[p.method] : '—') },
-    { key: 'reference', header: 'REFERENCE', render: (p) => p.reference || '—' },
-    { key: 'amount', header: 'AMOUNT', render: (p) => <span className={RIGHT}>{formatCents(p.amountCents)}</span> },
-    { key: 'applied', header: 'APPLIED', render: (p) => <span className={RIGHT}>{formatCents(p.appliedCents)}</span> },
-    { key: 'unapplied', header: 'UNAPPLIED', render: (p) => <span className={RIGHT}>{formatCents(p.unappliedCents)}</span> },
-    {
-      key: 'remittance',
-      header: 'REMITTANCE',
-      render: (p) => (
-        p.remittanceSentAt
-          ? `Sent ${formatDay(p.remittanceSentAt)}`
-          : p.markedSentAt
-            ? `Marked sent ${formatDay(p.markedSentAt)}`
-            : <span className="tms-muted">Not sent</span>
-      ),
-    },
+  const remittanceText = (p: ApPaymentRecord) => (
+    p.remittanceSentAt
+      ? `Sent ${formatDay(p.remittanceSentAt)}`
+      : p.markedSentAt
+        ? `Marked sent ${formatDay(p.markedSentAt)}`
+        : 'Not sent'
+  )
+  const columns: ApColumn<ApPaymentRecord>[] = [
+    facetCol('kind', 'KIND', (p) => AP_PAYMENT_KIND_LABEL[p.kind]),
+    dayCol<ApPaymentRecord>('date', 'DATE', (p) => p.paidAt),
+    facetCol('method', 'METHOD', (p) => (p.method ? AP_PAYMENT_METHOD_LABEL[p.method] : '—')),
+    { key: 'reference', header: 'REFERENCE', text: (p) => p.reference || '—', render: (p) => p.reference || '—' },
+    moneyCol<ApPaymentRecord>('amount', 'AMOUNT', (p) => p.amountCents),
+    moneyCol<ApPaymentRecord>('applied', 'APPLIED', (p) => p.appliedCents),
+    moneyCol<ApPaymentRecord>('unapplied', 'UNAPPLIED', (p) => p.unappliedCents),
+    facetCol('remittance', 'REMITTANCE', remittanceText, (p) => (
+      p.remittanceSentAt || p.markedSentAt ? remittanceText(p) : <span className="tms-muted">Not sent</span>
+    ), { filter: 'text' }),
     {
       key: 'actions',
       header: '',
+      text: () => '',
+      width: 270,
+      ...ACTIONS,
       render: (p) => (
         <span className="flex justify-end gap-1 whitespace-nowrap">
           {p.kind === 'PAYMENT' && (
@@ -1047,6 +1145,7 @@ function paymentsView({
   ]
 
   return view<ApPaymentRecord>({
+    gridId: 'ap-payments',
     actions: (
       <>
         <TmsSelect
@@ -1061,8 +1160,8 @@ function paymentsView({
           <>
             <TmsBadge tone="gray">{formatCents(openCents)} open</TmsBadge>
             <TmsBadge tone="gray">{formatCents(unappliedCents)} credit held</TmsBadge>
-            <TmsButton variant="primary" aria-label="Pay carrier" disabled={busy} onClick={() => onPay(carrier.id)}>Pay carrier</TmsButton>
-            <TmsButton aria-label="New credit" disabled={busy} onClick={() => onCredit(carrier.id)}>New credit</TmsButton>
+            <TmsButton size="sm" variant="primary" aria-label="Pay carrier" disabled={busy} onClick={() => onPay(carrier.id)}>Pay carrier</TmsButton>
+            <TmsButton size="sm" aria-label="New credit" disabled={busy} onClick={() => onCredit(carrier.id)}>New credit</TmsButton>
           </>
         )}
       </>
@@ -1071,7 +1170,6 @@ function paymentsView({
     columns,
     rows: carrier ? payments : [],
     rowKey: (p) => p.id,
-    page: wholeList(carrier ? payments.length : 0),
     emptyText: carrier ? `Nothing has been posted for ${carrier.name}.` : 'Choose a carrier to see their posted rows.',
   })
 }
@@ -1088,25 +1186,39 @@ function agingView({ errorBanner, aging, awaitingCents, awaitingCount, avgDaysTo
   onCsv: () => void
 }): ListView {
   type Row = AgingPartySummary['byParty'][number]
-  const columns: ColumnDef<Row>[] = [
-    { key: 'carrier', header: 'CARRIER', render: (row) => row.partyName || row.partyId },
-    ...AGING_BUCKETS.map((b) => ({
-      key: b,
-      header: AGING_BUCKET_LABEL[b].toUpperCase(),
-      render: (row: Row) => <span className={RIGHT}>{formatCents(row.byBucket[b])}</span>,
-    })),
+  const columns: ApColumn<Row>[] = [
+    { key: 'carrier', header: 'CARRIER', text: (row) => row.partyName || row.partyId, render: (row) => row.partyName || row.partyId },
+    ...AGING_BUCKETS.map((b) => moneyCol<Row>(b, AGING_BUCKET_LABEL[b].toUpperCase(), (row) => row.byBucket[b])),
+    moneyCol<Row>('total', 'TOTAL', (row) => row.totalCents, (row) => (
+      <span className={`${RIGHT} font-medium`}>{formatCents(row.totalCents)}</span>
+    )),
     {
-      key: 'total',
-      header: 'TOTAL',
-      render: (row) => <span className={`${RIGHT} font-medium`}>{formatCents(row.totalCents)}</span>,
+      key: 'late',
+      header: 'LATE',
+      align: 'right',
+      text: (row) => String(row.lateCount || '—'),
+      sortValue: (row) => row.lateCount,
+      filter: 'number',
+      numberOf: (row) => row.lateCount,
+      render: (row) => <span className={RIGHT}>{row.lateCount || '—'}</span>,
     },
-    { key: 'late', header: 'LATE', render: (row) => <span className={RIGHT}>{row.lateCount || '—'}</span> },
-    { key: 'oldest', header: 'OLDEST', render: (row) => <span className={RIGHT}>{row.oldestDays ? `${row.oldestDays}d` : '—'}</span> },
+    {
+      key: 'oldest',
+      header: 'OLDEST',
+      align: 'right',
+      text: (row) => (row.oldestDays ? `${row.oldestDays}d` : '—'),
+      sortValue: (row) => row.oldestDays ?? 0,
+      filter: 'number',
+      numberOf: (row) => row.oldestDays ?? 0,
+      numberUnit: 'days',
+      render: (row) => <span className={RIGHT}>{row.oldestDays ? `${row.oldestDays}d` : '—'}</span>,
+    },
   ]
 
   return view<Row>({
+    gridId: 'ap-aging',
     actions: (
-      <TmsButton aria-label="Download AP aging CSV" onClick={onCsv}>
+      <TmsButton size="sm" aria-label="Download AP aging CSV" onClick={onCsv}>
         <Download size={14} /> CSV
       </TmsButton>
     ),
@@ -1127,7 +1239,6 @@ function agingView({ errorBanner, aging, awaitingCents, awaitingCount, avgDaysTo
     columns,
     rows: aging.byParty,
     rowKey: (row) => row.partyId,
-    page: wholeList(aging.byParty.length),
     emptyText: 'We owe nothing.',
   })
 }

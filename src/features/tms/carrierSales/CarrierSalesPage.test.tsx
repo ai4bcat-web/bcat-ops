@@ -144,4 +144,34 @@ describe('CarrierSalesPage', () => {
     await waitFor(() => expect(mocks.unpostQuoteLoad).toHaveBeenCalledWith({ quoteId: 'Q7', spotRequestId: null, providers: ['DAT'] }))
     await waitFor(() => expect(screen.queryByTestId('quote-postings')).toBeNull())
   })
+
+  it('draws the queue as the dense grid: sticky header, a row per load, click-to-sort, and a Columns control', async () => {
+    mocks.shipments.mockReturnValue({
+      shipments: [
+        shipment('s-1', { customerName: 'Zeta', customerRateCents: 100_000 }),
+        shipment('s-2', { customerName: 'Alpha', customerRateCents: 200_000 }),
+      ],
+      loading: false, error: null, refresh: vi.fn(),
+    })
+    await renderPage()
+    const grid = screen.getByRole('table', { name: 'Loads needing cover' })
+    const order = () => Array.from(grid.querySelectorAll('tbody tr:not(.tms-dg-spacer) strong')).map((e) => e.textContent)
+    expect(order()).toEqual(['S-1', 'S-2'])
+    fireEvent.click(within(within(grid).getByRole('columnheader', { name: /^Customer(?! rate)/ })).getByRole('button', { name: 'Customer' }))
+    expect(order()).toEqual(['S-2', 'S-1'])
+    expect(screen.getByRole('button', { name: /Columns/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Summary/ })).toBeTruthy()
+    expect(screen.getAllByTestId('cover-row')).toHaveLength(2)
+  })
+
+  it('the Covered tab is a dense grid too, with the Open action per row', async () => {
+    mocks.shipments.mockReturnValue({
+      shipments: [shipment('s-5', { assignmentType: 'CARRIER', carrierName: 'Hauler', carrierMc: '1' })],
+      loading: false, error: null, refresh: vi.fn(),
+    })
+    await renderPage(['/tms/carrier-sales?tab=covered'])
+    const grid = screen.getByRole('table', { name: 'Covered loads' })
+    expect(within(grid).getByText('Hauler')).toBeTruthy()
+    expect(within(grid).getByRole('link', { name: 'Open S-5' })).toBeTruthy()
+  })
 })

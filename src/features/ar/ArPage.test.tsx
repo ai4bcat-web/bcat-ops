@@ -323,6 +323,47 @@ describe('the AR board', () => {
   })
 })
 
+describe('the AR dense grid', () => {
+  const bodyRows = () => within(screen.getByRole('table', { name: 'Unbilled shipments' })).getAllByRole('row').slice(1)
+
+  it('draws the dense grid with its controls and sorts a money column by cents', async () => {
+    await setup({
+      UNBILLED: [
+        worklistRow({ orderId: 'o1', shipmentNumber: 'S-1', revenueCents: 250_000 }),
+        worklistRow({ orderId: 'o2', shipmentNumber: 'S-2', revenueCents: 9_900 }),
+        worklistRow({ orderId: 'o3', shipmentNumber: 'S-3', revenueCents: 1_000_000 }),
+      ],
+    })
+    expect(screen.getByRole('button', { name: /Columns/ })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Row density' })).toBeTruthy()
+    expect(screen.getByText('3 rows')).toBeTruthy()
+
+    fireEvent.click(screen.getByTitle('Sort by Revenue'))
+    expect(bodyRows().map((r) => within(r).getByRole('link').textContent)).toEqual(['S-2', 'S-1', 'S-3'])
+    fireEvent.click(screen.getByTitle('Sort by Revenue'))
+    expect(bodyRows().map((r) => within(r).getByRole('link').textContent)).toEqual(['S-3', 'S-1', 'S-2'])
+  })
+
+  it('keeps the row tick box and Generate button working inside the grid', async () => {
+    await setup({ UNBILLED: [worklistRow()] })
+    const box = screen.getByRole('checkbox', { name: 'Select S-1001' }) as HTMLInputElement
+    fireEvent.click(box)
+    expect(box.checked).toBe(true)
+    expect(screen.getByText(/1 selected/)).toBeTruthy()
+  })
+
+  it('gives each view its own grid, and the Unpaid grid keeps its invoice actions', async () => {
+    await setup({ UNBILLED: [worklistRow()] })
+    fireEvent.click(screen.getByRole('tab', { name: /^Unpaid/ }))
+    await settle()
+    const grid = screen.getByRole('table', { name: 'Unpaid invoices' })
+    expect(within(grid).getByRole('link', { name: 'INV-000123' })).toBeTruthy()
+    expect(within(grid).getByText('$2,500.00', { selector: 'span' })).toBeTruthy()
+    expect(within(grid).getByRole('button', { name: 'Void invoice INV-000123' })).toBeTruthy()
+    expect(screen.getByTestId('ar-grid-ar-unpaid')).toBeTruthy()
+  })
+})
+
 describe('one invoice', () => {
   /**
    * SES is denied on dev, so this is every e-mail the page will ever show there. A green

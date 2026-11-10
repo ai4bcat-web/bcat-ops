@@ -76,11 +76,6 @@ async function setup(items: FactoringItem[], email = 'ryne@bcatcorp.com') {
   return { refresh, removeItem }
 }
 
-/** The kit's list footer: "Showing 1 – 10 of 25 items". */
-function range(): string {
-  return screen.getByText(/^Showing/, { selector: '.tms-footer-count' }).textContent ?? ''
-}
-
 beforeEach(() => vi.clearAllMocks())
 
 describe('filters', () => {
@@ -226,53 +221,59 @@ describe('what the queue is worth', () => {
 })
 
 /*
- * A row here opens into eleven fields, two documents and a submit button, so ten of them
- * is already a long page — and the queue runs to hundreds. Expanding one row at the bottom
- * of all of them is a scroll nobody wants to repeat.
+ * The queue runs to hundreds. The grid scrolls and mounts only the rows in view; a very long
+ * queue is capped at one batch of fifty with a Show next button.
  */
-describe('paging through the queue', () => {
+describe('long queues', () => {
   const many = (n: number) =>
     Array.from({ length: n }, (_, i) =>
       item({ id: `p${i}`, proNumber: `${20000 + i}`, receivedAt: `2026-10-01T${String(i % 24).padStart(2, '0')}:00:00Z` }))
+  const count = () => screen.getByTestId('factoring-count').textContent ?? ''
 
-  it('shows ten by default', async () => {
-    await setup(many(25))
-    expect(range()).toContain('1 – 10 of 25')
-    expect(screen.getByText('Page 1 of 3')).toBeInTheDocument()
+  it('shows fifty at a time and loads the next batch on request', async () => {
+    await setup(many(120))
+    expect(count()).toContain('Showing 50 of 120')
+    fireEvent.click(screen.getByRole('button', { name: 'Show next 50' }))
+    expect(count()).toContain('Showing 100 of 120')
+    fireEvent.click(screen.getByRole('button', { name: 'Show next 50' }))
+    expect(count()).toContain('Showing 120 of 120')
+    expect(screen.queryByRole('button', { name: /Show next/ })).not.toBeInTheDocument()
   })
 
-  it('moves through the pages', async () => {
-    await setup(many(25))
-    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
-    expect(range()).toContain('11 – 20 of 25')
-    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
-    expect(range()).toContain('21 – 25 of 25')
-    fireEvent.click(screen.getByRole('button', { name: 'Previous page' }))
-    expect(range()).toContain('11 – 20 of 25')
-  })
-
-  it('offers 10, 50 and 100', async () => {
-    await setup(many(25))
-    const select = screen.getByLabelText('Invoices per page')
-    expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['10', '50', '100'])
-    fireEvent.change(select, { target: { value: '50' } })
-    expect(range()).toContain('1 – 25 of 25')
-    expect(screen.getByText('Page 1 of 1')).toBeInTheDocument()
-  })
-
-  it('goes back to the first page when the filter changes', async () => {
-    // Otherwise a narrower filter leaves an empty table with the rows behind you.
-    await setup(many(25))
-    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
-    expect(range()).toContain('11 – 20 of 25')
-    fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: '2000' } })
-    expect(range()).toMatch(/Showing 1 –/)
+  it('goes back to the first batch when the search changes', async () => {
+    await setup(many(120))
+    fireEvent.click(screen.getByRole('button', { name: 'Show next 50' }))
+    fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: '200' } })
+    // "200" matches the hundred PROs 20000-20099, and the batch is back to its first fifty.
+    expect(count()).toContain('Showing 50 of 100')
   })
 
   it('says so plainly when a filter matches nothing', async () => {
     await setup(many(3))
     fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: 'zzzzzz' } })
-    expect(range()).toContain('0 – 0 of 0')
+    expect(count()).toContain('Showing 0 of 0')
+    expect(screen.getByText('No items match the current filters.')).toBeInTheDocument()
+  })
+})
+
+describe('the dense grid', () => {
+  it('draws the queue as a dense grid with sortable, filterable headers', async () => {
+    await setup([item()])
+    const grid = screen.getByRole('table', { name: 'Factoring queue' })
+    expect(within(grid).getByRole('columnheader', { name: /PRO #/ })).toBeInTheDocument()
+    expect(within(grid).getByRole('button', { name: 'Filter Amount' })).toBeInTheDocument()
+    expect(within(grid).getByRole('button', { name: 'Amount'  })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Columns/ })).toBeInTheDocument()
+  })
+
+  it('sorts the amount column by value, not by text', async () => {
+    const priced = (id: string, amount: number) => item({ id, proNumber: id, otrReadiness: readiness({ payload: { InvoiceAmount: amount } }) })
+    await setup([priced('R9', 900), priced('R1000', 1000), priced('R50', 50)])
+    const proOrder = () => within(screen.getByRole('table', { name: 'Factoring queue' })).getAllByRole('row').slice(1).map((r) => r.textContent?.match(/R\d+/)?.[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Amount'  }))
+    expect(proOrder()).toEqual(['R50', 'R9', 'R1000'])
+    fireEvent.click(screen.getByRole('button', { name: 'Amount'  }))
+    expect(proOrder()).toEqual(['R1000', 'R9', 'R50'])
   })
 })
 

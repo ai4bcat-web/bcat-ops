@@ -7,12 +7,16 @@
  */
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { TmsBadge, TmsButton, TmsListPage, TmsPage, TmsSelect, TmsTabs } from '@/features/tms/kit'
+import { Search, Truck } from 'lucide-react'
+import { TmsBadge, TmsButton, TmsInput, TmsSegmentedTabs, TmsSelect } from '@/features/tms/kit'
+import { DenseGrid } from '@/features/tms/grid/DenseGrid'
+import { ClearFiltersButton, ColumnsButton, DenseKpiStrip, DensityToggle, SummaryToggle, type DenseKpi } from '@/features/tms/grid/DenseControls'
+import { activeFilterCount, filterRows, nextSort, reorderKeys, sortDenseRows, type DenseColumn, type DenseColumnFilter, type DenseFilters } from '@/features/tms/grid/denseGridModel'
+import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
 import { CarrierAssignmentChip } from '@/features/shipments/components/CarrierAssignmentChip'
 import { LADDER_FILTER_OPTIONS } from '@/features/shipments/carrierLadder'
 import type { CarrierAssignmentStatus } from '@/lib/carrierAssignment'
-import type { ColumnDef } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
 import { useQuoteWorklist } from '@/hooks/useQuoteWorklist'
 import { useShipments } from '@/hooks/useShipments'
@@ -43,7 +47,7 @@ const RATE_CON_LABEL: Record<RateConStatus, string> = {
   EXPIRED: 'Expired',
 }
 
-const MONEY_CELL: React.CSSProperties = { display: 'block', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }
+const PAGE_STEP = 50
 
 function carrierTabPath(shipmentId: string): string {
   return `/tms/shipments/${shipmentId}?tab=carrier`
@@ -91,7 +95,7 @@ export function CarrierSalesPage() {
 }
 
 function CarrierSalesView({ offers }: { offers: OffersState | null }) {
-  const { hasPageAccess } = useAuth()
+  const { hasPageAccess, user } = useAuth()
   const { shipments, loading: shipmentsLoading, partial, error, refresh } = useShipments({ kind: 'working' })
   // URL-owned: ?tab=offers&load=<PRO|shipmentId>, ?tab=unmatched
   const [params, setParams] = useSearchParams()
@@ -105,7 +109,8 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   // Step AM: Cover opens a dialog right here instead of hopping to the shipment, and the Covered tab filters by ladder rung.
   const [coverRow, setCoverRow] = useState<ShipmentListRow | null>(null)
   const [ladderFilter, setLadderFilter] = useState<CarrierAssignmentStatus | 'ALL'>('ALL')
-  const [pageSize, setPageSize] = useState(50)
+  const [pageSize, setPageSize] = useState(PAGE_STEP)
+  const [dense, setDense] = useState<DenseFilters>({})
   const [now] = useState(() => Date.now())
 
   const canOpenShipment = hasPageAccess('loads') || hasPageAccess('tms')
@@ -120,79 +125,80 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
     q === '' ||
     [r.number, r.customerName, r.carrierName, r.carrierMc, r.originCity, r.destinationCity, r.equipmentType]
       .some((v) => (v ?? '').toLowerCase().includes(q))
-  const needsColumns: Array<ColumnDef<ShipmentListRow>> = [
-    { key: 'shipment', header: 'SHIPMENT', width: 130, render: (r) => <strong>{r.number}</strong> },
-    { key: 'customer', header: 'CUSTOMER', width: 190, render: (r) => r.customerName || '—' },
-    { key: 'lane', header: 'LANE', width: 230, render: laneText },
-    { key: 'pickup', header: 'PICKUP', width: 190, render: (r) => <PickupCell iso={r.pickupAppt} now={now} /> },
-    { key: 'equipment', header: 'EQUIPMENT', width: 120, render: (r) => r.equipmentType || '—' },
-    {
-      key: 'rate',
-      header: 'CUSTOMER RATE',
-      width: 130,
-      render: (r) => <span style={MONEY_CELL}>{r.customerRateCents == null ? '—' : formatCents(r.customerRateCents)}</span>,
-    },
-    { key: 'posted', header: 'POSTED', width: 90, render: (r) => (r.datPostedAt ? <TmsBadge tone="blue">Posted</TmsBadge> : null) },
-    {
-      key: 'offers',
-      header: 'OFFERS',
-      width: 90,
-      render: (r) => (offers ? offerCounts.get(r.id) ?? 0 : <span className="tms-muted">—</span>),
-    },
-    {
-      key: 'cover',
-      header: '',
-      width: 100,
-      render: (r) => (canOpenShipment
-        ? <TmsButton variant="primary" size="sm" aria-label={`Cover ${r.number}`} data-testid="cover-row" onClick={() => setCoverRow(r)}>Cover</TmsButton>
-        : null),
-    },
-  ]
+  const ladderLabel = (r: ShipmentListRow) => LADDER_FILTER_OPTIONS.find((o) => o.value === r.carrierAssignmentStatus)?.label ?? ''
+  const rateConText = (r: ShipmentListRow) => (r.rateConSignedAt ? 'Signed' : RATE_CON_LABEL[r.rateConStatus ?? 'NOT_SENT'])
+  const pickupSort = (r: ShipmentListRow) => (r.pickupAppt ? Date.parse(r.pickupAppt) || null : null)
+  const opt = (v: string | null | undefined) => (v ? [{ value: v, label: v }] : [])
+  const actionCol = (key: string): DenseColumn<ShipmentListRow> => ({ key, header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 84 })
 
-  const coveredColumns: Array<ColumnDef<ShipmentListRow>> = [
-    { key: 'shipment', header: 'SHIPMENT', width: 130, render: (r) => <strong>{r.number}</strong> },
-    {
-      key: 'carrier',
-      header: 'CARRIER',
-      width: 240,
-      render: (r) => (
-        <span>
-          {r.carrierName || '—'}
-          {r.carrierMc ? <span className="tms-muted" style={{ marginLeft: 4, fontSize: 12 }}>MC {r.carrierMc}</span> : null}
-        </span>
-      ),
-    },
-    { key: 'pickup', header: 'PICKUP', width: 190, render: (r) => <PickupCell iso={r.pickupAppt} now={now} /> },
-    {
-      key: 'ratecon',
-      header: 'RATE CON',
-      width: 130,
-      render: (r) => (
-        <TmsBadge tone={r.rateConSignedAt ? 'green' : r.rateConStatus && r.rateConStatus !== 'NOT_SENT' ? 'orange' : 'gray'}>
-          {r.rateConSignedAt ? 'Signed' : RATE_CON_LABEL[r.rateConStatus ?? 'NOT_SENT']}
-        </TmsBadge>
-      ),
-    },
-    { key: 'sent', header: 'SENT', width: 190, render: (r) => formatDateTime(r.rateConSentAt) },
-    {
-      key: 'ladder',
-      header: 'CARRIER STATUS',
-      width: 290,
-      render: (r) => <CarrierAssignmentChip ladder={r.carrierAssignmentStatus} shipmentStatus={r.status} />,
-    },
-    { key: 'packet', header: 'PACKET', width: 140, render: (r) => <PacketChip row={r} /> },
-    {
-      key: 'open',
-      header: '',
-      width: 90,
-      render: (r) => (canOpenShipment
-        ? <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={carrierTabPath(r.id)} aria-label={`Open ${r.number}`}>Open</Link>
-        : null),
-    },
-  ]
+  const needsDense = useMemo<Array<DenseColumn<ShipmentListRow>>>(() => [
+    { key: 'shipment', header: 'Shipment', group: 'Shipment', text: (r) => r.number ?? '' },
+    { key: 'customer', header: 'Customer', group: 'Shipment', text: (r) => r.customerName || '—', filter: 'multi', optionsOf: (r) => opt(r.customerName) },
+    { key: 'lane', header: 'Lane', group: 'Shipment', text: laneText },
+    { key: 'pickup', header: 'Pickup', group: 'Shipment', text: (r) => (r.pickupAppt ? formatDateTime(r.pickupAppt) : '—'), sortValue: pickupSort, filter: 'date', dateOf: (r) => r.pickupAppt ?? null },
+    { key: 'equipment', header: 'Equipment', group: 'Shipment', text: (r) => r.equipmentType || '—', filter: 'multi', optionsOf: (r) => opt(r.equipmentType) },
+    { key: 'rate', header: 'Customer rate', group: 'Money', text: (r) => (r.customerRateCents == null ? '—' : formatCents(r.customerRateCents)), align: 'right', filter: 'number', numberOf: (r) => (r.customerRateCents == null ? null : r.customerRateCents / 100), numberUnit: '$' },
+    { key: 'posted', header: 'Posted', group: 'Offers', text: (r) => (r.datPostedAt ? 'Posted' : ''), extraPx: 16, filter: 'multi', fixedOptions: [{ value: 'Posted', label: 'Posted' }], optionsOf: (r) => (r.datPostedAt ? [{ value: 'Posted', label: 'Posted' }] : []) },
+    { key: 'offers', header: 'Offers', group: 'Offers', text: (r) => (offers ? String(offerCounts.get(r.id) ?? 0) : '—'), align: 'right', filter: 'number', numberOf: (r) => (offers ? offerCounts.get(r.id) ?? 0 : null) },
+  ], [offers, offerCounts])
+
+  const coveredDense = useMemo<Array<DenseColumn<ShipmentListRow>>>(() => [
+    { key: 'shipment', header: 'Shipment', group: 'Shipment', text: (r) => r.number ?? '' },
+    { key: 'carrier', header: 'Carrier', group: 'Carrier', text: (r) => `${r.carrierName || '—'}${r.carrierMc ? ` MC ${r.carrierMc}` : ''}`, extraPx: 8 },
+    { key: 'pickup', header: 'Pickup', group: 'Shipment', text: (r) => (r.pickupAppt ? formatDateTime(r.pickupAppt) : '—'), sortValue: pickupSort, filter: 'date', dateOf: (r) => r.pickupAppt ?? null },
+    { key: 'ratecon', header: 'Rate con', group: 'Carrier', text: rateConText, extraPx: 16, filter: 'multi' },
+    { key: 'sent', header: 'Sent', group: 'Carrier', text: (r) => formatDateTime(r.rateConSentAt), sortValue: (r) => r.rateConSentAt ?? '', filter: 'date', dateOf: (r) => r.rateConSentAt ?? null },
+    { key: 'ladder', header: 'Carrier status', group: 'Carrier', text: ladderLabel, extraPx: 40, filter: 'multi' },
+    { key: 'packet', header: 'Packet', group: 'Carrier', text: (r) => (!r.carrierMc ? '' : mcpPacketStanding({ mcpStatus: r.mcpStatus }).completed ? 'Packet complete' : 'No packet'), extraPx: 16, filter: 'multi' },
+  ], [])
+
+  const isCovered = tab === 'covered'
+  const catalog = isCovered ? coveredDense : needsDense
+  const prefs = useDenseGridPrefs({
+    gridId: isCovered ? 'carrier-sales-covered' : 'carrier-sales-needs',
+    email: user?.email ?? '',
+    defaultColumns: catalog.map((c) => c.key),
+    validKeys: catalog.map((c) => c.key),
+    defaultSort: null,
+  })
+  const gridColumns = useMemo(() => [
+    ...prefs.columns.map((k) => catalog.find((c) => c.key === k)).filter((c): c is DenseColumn<ShipmentListRow> => c != null),
+    ...(canOpenShipment ? [actionCol(isCovered ? 'open' : 'cover')] : []),
+  ], [catalog, prefs.columns, canOpenShipment, isCovered])
+
+  const renderCell = (r: ShipmentListRow, key: string): React.ReactNode => {
+    switch (key) {
+      case 'shipment': return <strong>{r.number}</strong>
+      case 'customer': return r.customerName || '—'
+      case 'lane': return laneText(r)
+      case 'pickup': return <PickupCell iso={r.pickupAppt} now={now} />
+      case 'equipment': return r.equipmentType || '—'
+      case 'rate': return r.customerRateCents == null ? '—' : formatCents(r.customerRateCents)
+      case 'posted': return r.datPostedAt ? <TmsBadge tone="blue">Posted</TmsBadge> : null
+      case 'offers': return offers ? offerCounts.get(r.id) ?? 0 : <span className="tms-muted">—</span>
+      case 'cover': return <TmsButton variant="primary" size="sm" aria-label={`Cover ${r.number}`} data-testid="cover-row" onClick={() => setCoverRow(r)}>Cover</TmsButton>
+      case 'carrier': return <span>{r.carrierName || '—'}{r.carrierMc ? <span className="tms-muted" style={{ marginLeft: 4, fontSize: 12 }}>MC {r.carrierMc}</span> : null}</span>
+      case 'ratecon': return <TmsBadge tone={r.rateConSignedAt ? 'green' : r.rateConStatus && r.rateConStatus !== 'NOT_SENT' ? 'orange' : 'gray'}>{rateConText(r)}</TmsBadge>
+      case 'sent': return formatDateTime(r.rateConSentAt)
+      case 'ladder': return <CarrierAssignmentChip ladder={r.carrierAssignmentStatus} shipmentStatus={r.status} />
+      case 'packet': return <PacketChip row={r} />
+      case 'open': return <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={carrierTabPath(r.id)} aria-label={`Open ${r.number}`}>Open</Link>
+      default: return null
+    }
+  }
 
   const needsFiltered = needs.filter(matchShipment)
   const coveredFiltered = covered.filter(matchShipment).filter((r) => ladderFilter === 'ALL' || r.carrierAssignmentStatus === ladderFilter)
+  const searched = isCovered ? coveredFiltered : needsFiltered
+  const filtered = sortDenseRows(filterRows(searched, catalog, dense), catalog, prefs.sort)
+  const page = filtered.slice(0, pageSize)
+
+  const setDenseFilter = (key: string, next: DenseColumnFilter | null) => {
+    setPageSize(PAGE_STEP)
+    setDense((prev) => { const copy = { ...prev }; if (next) copy[key] = next; else delete copy[key]; return copy })
+  }
+  const clearAll = () => { setSearch(''); setDense({}); setLadderFilter('ALL'); setPageSize(PAGE_STEP) }
+  const onTab = (key: string) => { setDense({}); setPageSize(PAGE_STEP); setTab(key as TabKey) }
 
   const tabs = [
     { key: 'needs-cover', label: 'Needs cover', count: needs.length },
@@ -201,79 +207,109 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
     { key: 'covered', label: 'Covered', count: covered.length },
   ]
 
-  const common = {
-    title: 'Book · Carrier sales',
-    search: { value: search, onChange: setSearch, placeholder: 'Search shipment, customer, carrier, lane…' },
-    onRefresh: () => { void refresh(); void offers?.refresh() },
-    quickTabs: { tabs, active: tab, onSelect: (key: string) => setTab(key as TabKey) },
-    banner: (
-      <>
-        <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
-          Need a carrier that is not in the directory?{' '}
-          <Link to="/tms/carriers/find?from=carrier-sales" data-testid="launch-find-invite">Find &amp; invite a carrier</Link>
-        </p>
-        {tab === 'covered' ? (
-          <label className="flex items-center gap-2" style={{ fontSize: 12 }}>
-            <span className="tms-muted">Carrier status</span>
-            <TmsSelect
-              aria-label="Carrier status filter"
-              value={ladderFilter}
-              onChange={(e) => setLadderFilter(e.target.value as CarrierAssignmentStatus | 'ALL')}
-            >
-              <option value="ALL">All</option>
-              {LADDER_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </TmsSelect>
-          </label>
-        ) : null}
-        <CarrierLookup needsCover={needs} onCovered={() => { void refresh() }} />
-        <QuotePostingsCard />
-      </>
-    ),
-    onClearFilters: () => setSearch(''),
-  }
+  const onRefresh = () => { void refresh(); void offers?.refresh() }
+  const gridTab = tab === 'needs-cover' || tab === 'covered'
+  const kpis: DenseKpi[] = isCovered
+    ? [
+        { label: 'Covered loads', value: covered.length },
+        { label: 'Rate con signed', value: covered.filter((r) => r.rateConSignedAt).length, tone: 'good' },
+        { label: 'No packet', value: covered.filter((r) => r.carrierMc && !mcpPacketStanding({ mcpStatus: r.mcpStatus }).completed).length, tone: 'warn' },
+      ]
+    : [
+        { label: 'Needs cover', value: needs.length },
+        { label: 'Pickup < 24 h', value: needs.filter((r) => r.pickupAppt && Date.parse(r.pickupAppt) - now < DAY_MS).length, tone: 'bad' },
+        { label: 'Posted', value: needs.filter((r) => r.datPostedAt).length },
+        { label: 'With offers', value: needs.filter((r) => (offerCounts.get(r.id) ?? 0) > 0).length, tone: 'good' },
+      ]
 
   const loadFailure = error ? 'Couldn’t load shipments. Try refreshing.' : null
   const emptyFor = (empty: string) => loadFailure ?? (shipmentsLoading || partial ? 'Loading…' : empty)
 
-  if (tab === 'offers' || tab === 'unmatched') {
-    return (
-      <TmsPage title={common.title}>
-        <TmsTabs tabs={tabs} active={tab} onSelect={(key) => setTab(key as TabKey)} />
-        <div style={{ display: 'grid', gap: 12 }}>
-          {common.banner}
-          {tab === 'offers' ? (
-            <OffersHub
-              shipments={shipments as ShipmentListRow[]}
-              loadParam={loadParam}
-              onLoadChange={setLoad}
-              openOffers={offers ? offers.open : null}
-              openOffersError={offers?.error ?? null}
-              onChanged={() => { void refresh(); void offers?.refresh() }}
-            />
-          ) : (
-            <UnmatchedOffers
-              rows={unmatched.data ?? []}
-              loading={unmatched.loading}
-              error={unmatched.error}
-              onChanged={unmatched.refresh}
-            />
-          )}
-        </div>
-      </TmsPage>
-    )
-  }
-
-  const rows = tab === 'needs-cover' ? needsFiltered : coveredFiltered
   return (
     <>
-      <TmsListPage<ShipmentListRow>
-        {...common}
-        columns={tab === 'needs-cover' ? needsColumns : coveredColumns}
-        rows={rows.slice(0, pageSize)}
-        rowKey={(r) => r.id}
-        page={{ from: rows.length === 0 ? 0 : 1, to: Math.min(pageSize, rows.length), total: rows.length, pageSize, onPageSize: setPageSize }}
-        emptyText={emptyFor(tab === 'needs-cover' ? 'Every live load has a carrier.' : 'No covered load is waiting on a rate confirmation.')}
-      />
+      <div className="tms-dense-page tms-caps">
+        <div className="tms-dense-bar">
+          <span className="tms-dense-title"><Truck size={18} aria-hidden="true" /> Book · Carrier sales</span>
+          <Search size={14} className="tms-muted" aria-hidden="true" />
+          <TmsInput className="tms-dense-search" aria-label="Search" placeholder="Search shipment, customer, carrier, lane…" value={search} onChange={(e) => { setSearch(e.target.value); setPageSize(PAGE_STEP) }} />
+          <TmsSegmentedTabs aria-label="Carrier sales tabs" size="sm" active={tab} onSelect={onTab} tabs={tabs} />
+          {isCovered && (
+            <label className="flex items-center gap-2" style={{ fontSize: 12 }}>
+              <span className="tms-muted">Carrier status</span>
+              <TmsSelect aria-label="Carrier status filter" value={ladderFilter} onChange={(e) => { setLadderFilter(e.target.value as CarrierAssignmentStatus | 'ALL'); setPageSize(PAGE_STEP) }}>
+                <option value="ALL">All</option>
+                {LADDER_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </TmsSelect>
+            </label>
+          )}
+          {gridTab && <ClearFiltersButton count={activeFilterCount(dense) + (search.trim() ? 1 : 0)} onClear={clearAll} />}
+          <span className="tms-dense-spacer" />
+          <TmsButton size="sm" variant="secondary" onClick={onRefresh}>Refresh</TmsButton>
+          {gridTab && (
+            <>
+              <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
+              <ColumnsButton catalog={catalog} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
+              <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
+            </>
+          )}
+        </div>
+        <div className="tms-dense-bar" style={{ display: 'grid', gap: 8 }}>
+          <p className="tms-muted" style={{ fontSize: 12, margin: 0 }}>
+            Need a carrier that is not in the directory?{' '}
+            <Link to="/tms/carriers/find?from=carrier-sales" data-testid="launch-find-invite">Find &amp; invite a carrier</Link>
+          </p>
+          <CarrierLookup needsCover={needs} onCovered={() => { void refresh() }} />
+          <QuotePostingsCard />
+        </div>
+        {gridTab ? (
+          <>
+            <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+            <div className="tms-dense-body">
+              <DenseGrid<ShipmentListRow>
+                aria-label={isCovered ? 'Covered loads' : 'Loads needing cover'}
+                recentKey={`tms:carrier-sales:${tab}:recent:${user?.email || 'anon'}`}
+                resetKey={`${tab}|${search}|${ladderFilter}|${JSON.stringify(dense)}`}
+                columns={gridColumns}
+                rows={page}
+                fitRows={searched}
+                rowKey={(r) => r.id}
+                renderCell={renderCell}
+                density={prefs.density}
+                userWidths={prefs.widths}
+                stickyCount={Math.max(1, prefs.pinned.length + 1)}
+                sort={prefs.sort}
+                onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
+                filters={dense}
+                onFilterChange={setDenseFilter}
+                onReorder={(from, to) => prefs.setColumns(reorderKeys(prefs.columns, from, to))}
+                onResize={prefs.setWidth}
+                empty={emptyFor(isCovered ? 'No covered load is waiting on a rate confirmation.' : 'Every live load has a carrier.')}
+              />
+              {filtered.length > page.length && (
+                <div className="tms-dense-bar" data-testid="carrier-sales-more">
+                  <span className="tms-muted">Showing {page.length} of {filtered.length}</span>
+                  <TmsButton size="sm" variant="secondary" onClick={() => setPageSize((n) => n + PAGE_STEP)}>Show next {PAGE_STEP}</TmsButton>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div style={{ display: 'grid', gap: 12, padding: 12 }}>
+            {tab === 'offers' ? (
+              <OffersHub
+                shipments={shipments as ShipmentListRow[]}
+                loadParam={loadParam}
+                onLoadChange={setLoad}
+                openOffers={offers ? offers.open : null}
+                openOffersError={offers?.error ?? null}
+                onChanged={onRefresh}
+              />
+            ) : (
+              <UnmatchedOffers rows={unmatched.data ?? []} loading={unmatched.loading} error={unmatched.error} onChanged={unmatched.refresh} />
+            )}
+          </div>
+        )}
+      </div>
       {coverRow && (
         <CoverCarrierDialog
           shipmentId={coverRow.id}
