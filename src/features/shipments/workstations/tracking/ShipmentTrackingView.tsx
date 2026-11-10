@@ -121,7 +121,12 @@ export function ShipmentTrackingView({ bundle, customer, catalog = [], actions, 
   const closeDialog = () => { setDialog(null); void tracking.refresh() }
 
   const send = async (input: { channel: 'EMAIL' | 'SMS'; to: string | null; subject: string | null; body: string; documentIds?: string[]; party?: 'DRIVER' | 'DISPATCHER' }) => {
-    await sendShipmentMessage({ shipmentId: shipment.id, ...input })
+    // The SMS pane leaves the number to the server (truck work phone first), which finds the driver's phone through the assignment: without it
+    // the server has nothing to look the number up on and refuses with "needs a driver phone number".
+    await sendShipmentMessage({
+      shipmentId: shipment.id, ...input,
+      ...(loadCarrier?.id ? { loadCarrierId: loadCarrier.id } : {}),
+    })
   }
   const refresh = async () => { await Promise.all([reloadMessages(), actions.reload()]) }
   const driverRecipient = { name: loadCarrier?.driverName, phone: smsTarget.to }

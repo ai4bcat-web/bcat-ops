@@ -196,9 +196,21 @@ export async function sendShipmentMessage(deps: ThreadDeps, input: Row, caller: 
   const isEmail = channel === 'EMAIL'
   const explicitTo = cleanRecipient(input.to)
   const cc = cleanRecipient(input.cc)
-  const subject = optionalString(input.subject, 1000)
+  let subject = optionalString(input.subject, 1000)
   const body = optionalString(input.body, 50000)
-  const inReplyTo = optionalString(input.inReplyTo, 500)
+  let inReplyTo = optionalString(input.inReplyTo, 500)
+  // An e-mail with no subject continues the shipment's own thread (Ryne 2026-11-10): the rate confirmation e-mail already carries the
+  // order number in its subject, so the reply is "Re: <that subject>" and answers the newest message that has a Message-ID.
+  if (isEmail && !subject) {
+    const thread = await deps.queryIndex(deps.tables.message, 'shipmentMessagesByShipmentIdAndAt', 'shipmentId', shipmentId)
+    const emails = thread.filter((m) => m.channel === 'EMAIL' && typeof m.subject === 'string' && m.subject).sort((a, b) => String(a.at).localeCompare(String(b.at)))
+    const first = emails[0]
+    if (first) {
+      const base = String(first.subject).replace(/^(re:\s*)+/i, '')
+      subject = `Re: ${base}`
+      inReplyTo ??= [...emails].reverse().map((m) => optionalString(m.messageId, 500)).find(Boolean) ?? null
+    }
+  }
   const replyParty = cleanParty(input.party) ?? (isEmail ? 'DISPATCHER' : 'DRIVER')
   // Step AK: a driver text with no explicit number goes to the truck's work phone (personal as the fallback),
   // per the customer / shipment override. An explicit `to` always wins.

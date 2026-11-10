@@ -674,7 +674,7 @@ export function TrackingConversation({
         </div>}
 
         {lockChannel === 'EMAIL' && (
-          <TmsInput aria-label="Subject" placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
+          <p className="tms-muted text-xs" data-testid="email-thread-note">Continues the signed rate confirmation thread (its subject carries the order number). No subject needed.</p>
         )}
         {!locked && <div className="tms-thread-composer-top">
           <TmsSelect
@@ -698,7 +698,7 @@ export function TrackingConversation({
           {channel === 'EMAIL' && (
             <TmsInput
               aria-label="Subject"
-              placeholder="Subject"
+              placeholder="Subject (optional, continues the thread)"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
             />

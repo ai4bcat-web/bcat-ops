@@ -177,6 +177,18 @@ describe('sendShipmentMessage', () => {
     expect(call.inReplyTo).toBeNull()
   })
 
+  it('an e-mail with no subject continues the thread: Re: the first e-mail subject, in reply to the newest Message-ID', async () => {
+    const store = new MemoryStore()
+    seedShipment(store, { threadKey: threadKeyFor('shp-1') })
+    store.seed({ id: 'm1', __typename: 'ShipmentMessage', shipmentId: 'shp-1', channel: 'EMAIL', subject: 'Rate confirmation — load 20002 [ref shp-1]', messageId: '<a@bcat>', at: '2026-01-02T10:00:00.000Z' })
+    store.seed({ id: 'm2', __typename: 'ShipmentMessage', shipmentId: 'shp-1', channel: 'EMAIL', subject: 'Re: Rate confirmation — load 20002 [ref shp-1]', messageId: '<b@carrier>', at: '2026-01-02T11:00:00.000Z' })
+    const deps = makeDeps(store)
+    await sendShipmentMessage(deps, { shipmentId: 'shp-1', channel: 'EMAIL', kind: 'CHECK_CALL', to: 'dispatch@swift.test', body: 'ETA?' }, CALLER)
+    const call = (deps.sendEmail as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(call.subject).toBe('Re: Rate confirmation — load 20002 [ref shp-1]')
+    expect(call.inReplyTo).toBe('<b@carrier>')
+  })
+
   it('sends an SMS to the driver', async () => {
     const store = new MemoryStore()
     seedShipment(store, { threadKey: threadKeyFor('shp-1') })
