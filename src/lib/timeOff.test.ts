@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { statusOf, isApproved, overlappingRequest, ptoDaysUsed, validateTimeOffRequest, addDaysISO, describeRange, ptoRowFor } from './timeOff'
+import { statusOf, isApproved, overlappingRequest, ptoDaysUsed, validateTimeOffRequest, addDaysISO, describeRange, ptoRowFor, timeOffSlackText } from './timeOff'
 
 const TODAY = '2026-11-06'
 const ok = (input: Record<string, unknown>, eligible = true) => validateTimeOffRequest(input, TODAY, eligible)
@@ -78,3 +78,12 @@ describe('helpers', () => {
     expect(ptoRowFor('d1', '2026-11-05', 'ryne@bcatcorp.com', 'id1', 'now')).toMatchObject({ driverId: 'd1', workDate: '2026-11-05', kind: 'PTO', minutes: 480, source: 'STAFF', clockInAt: null })
   })
 })
+
+describe('timeOffSlackText', () => {
+  it('tags the person, names the driver, the days and the hours, and carries a note when there is one', () => {
+    const base = { driverName: 'Charles Best', type: 'FULL_DAY_OFF' as const, startDate: '2026-11-12', endDate: '2026-11-13', hours: 16, mention: '<@U1>' }
+    expect(timeOffSlackText(base)).toBe('<@U1> Charles Best asked for time off Nov 12 – Nov 13 · 16h. Approve or deny it on the Time Off page.')
+    expect(timeOffSlackText({ ...base, type: 'PTO', endDate: '2026-11-12', hours: 8, note: ' dentist ' })).toContain('asked for PTO Nov 12 · 8h — "dentist"')
+  })
+})
+

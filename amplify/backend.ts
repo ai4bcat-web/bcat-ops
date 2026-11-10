@@ -496,6 +496,8 @@ backend.driverSignupGate.resources.lambda.addToRolePolicy(
 // ── driver-app-api Lambda (driver PWA HTTP API) ────────────────────────────
 
 const driverApiFn = backend.driverAppApi.resources.lambda as LambdaFunction
+// Time-off requests ping this channel (Ruben tagged); set in the Amplify Console env like the appt report's.
+driverApiFn.addEnvironment('SLACK_GLOBAL_CHANNEL_ID', process.env.SLACK_GLOBAL_CHANNEL_ID ?? '')
 const driverSubmissionTable = stageTables['DriverSubmission']
 const driverSubmissionDocTable = stageTables['DriverSubmissionDoc']
 // Detention times Ivan's drivers record for themselves. Writable by the driver API, which

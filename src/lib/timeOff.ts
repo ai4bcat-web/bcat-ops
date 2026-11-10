@@ -150,3 +150,11 @@ export function ptoRowFor(driverId: string, date: string, approvedBy: string, id
     updatedAt: now,
   }
 }
+
+
+/** The line the office reads in #bcat-global when a driver asks for time off (Ruben is tagged so it reaches him). */
+export function timeOffSlackText(input: { driverName: string; type: TimeOffType; startDate: string; endDate: string; hours: number; note?: string | null; mention: string }): string {
+  const what = input.type === 'PTO' ? 'PTO' : 'time off'
+  const note = input.note?.trim()
+  return `${input.mention} ${input.driverName} asked for ${what} ${describeRange(input.startDate, input.endDate)} · ${input.hours}h${note ? ` — "${note}"` : ''}. Approve or deny it on the Time Off page.`
+}
