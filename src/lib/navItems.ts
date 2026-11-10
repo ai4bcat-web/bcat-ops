@@ -53,7 +53,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/calendar',  label: 'Calendar',  icon: CalendarDays,    pageKey: 'calendar', section: 'ASSETS' },
   // Directly under Calendar — the queue is the worklist for the calendar's blanks.
   { to: '/appts',     label: 'Appts',     icon: CalendarClock,   pageKey: 'appts',  section: 'ASSETS', badgeKey: 'appts' },
-  { to: '/time-off',  label: 'Time Off',  icon: CalendarOff,     pageKey: 'timeOff', section: 'ASSETS' },
+  { to: '/time-off',  label: 'Time Off',  icon: CalendarOff,     pageKey: 'timeOff', section: 'ASSETS', badgeKey: 'timeOff' },
   { to: '/files',     label: 'Files',     icon: FolderOpen,      pageKey: 'files', section: 'ASSETS' },
   { to: '/intake',    label: 'Intake',    icon: Inbox,           pageKey: 'intake', section: 'ASSETS', badgeKey: 'intake' },
   { to: '/driver-pay-box-trucks', label: 'Box Truck Settlements',   icon: Boxes,  pageKey: 'driverPayBoxTrucks', section: 'ASSETS' },

@@ -23,7 +23,8 @@ import { useDocumentReviewQueue } from '@/hooks/useDocumentReviewQueue'
 import { useArToInvoiceCount } from '@/hooks/useArToInvoiceCount'
 import { useApToReviewCount } from '@/hooks/useApToReviewCount'
 import { useQuotesToReplyCount } from '@/hooks/useQuotesToReplyCount'
-import { countOpenIntakeLoads } from '@/lib/apiClient'
+import { countOpenIntakeLoads, listDriverAvailabilities } from '@/lib/apiClient'
+import { statusOf } from '@/lib/timeOff'
 import { modelsAvailable } from '@/lib/modelAvailability'
 import { useSpotNewCount } from '@/features/spot-quoter/useSpotRequests'
 import { loadReviewCount } from '@/lib/loadReview'
@@ -46,6 +47,25 @@ function useOpenIntakeLoadCount(enabled: boolean): number {
       if (document.visibilityState !== 'visible') return
       countOpenIntakeLoads()
         .then((n) => { if (alive) setCount(n) })
+        .catch(() => {})
+    }
+    load()
+    const t = setInterval(load, POLL_MS)
+    return () => { alive = false; clearInterval(t) }
+  }, [enabled])
+  return enabled ? count : 0
+}
+
+/** Time-off requests (drivers' days asked off) still waiting for the office, on the 60 s clock; a failed read keeps the last value. */
+function usePendingTimeOffCount(enabled: boolean): number {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    if (!enabled) return
+    let alive = true
+    const load = () => {
+      if (document.visibilityState !== 'visible') return
+      listDriverAvailabilities()
+        .then((rows) => { if (alive) setCount(rows.filter((r) => statusOf(r) === 'PENDING').length) })
         .catch(() => {})
     }
     load()
@@ -90,6 +110,9 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
     hasIntake && (hasPageAccess('loads') || hasPageAccess('tms') || hasPageAccess('intakeReview')),
   )
 
+  // Days drivers have asked off that nobody has approved or denied yet; same page gate as the Time Off page.
+  const timeOffPending = usePendingTimeOffCount(hasPageAccess('timeOff'))
+
   // Spot quote requests waiting on this rep (Quotes › Spot inbox); same page gate as the inbox.
   const spotNew = useSpotNewCount(hasSpot && (hasPageAccess('quotes') || hasPageAccess('tms')))
 
@@ -128,6 +151,7 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
       loadTracking: checkCallsDue + documentReviewCount,
       accounting: arToInvoiceCount + apToReviewCount,
       spotNew,
+      timeOff: timeOffPending,
     }
     const out: Record<string, number> = {}
     for (const [key, n] of Object.entries(counts)) if (n) out[key] = n
@@ -135,6 +159,6 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   }, [
     loads, maintenanceTasks, intakeItems, reviewCount, truckDocAlerts, dispatchUnread,
     checkCallsDue, documentReviewCount, arToInvoiceCount, apToReviewCount, quotesToReplyCount, intakeLoads,
-    loadReview, carrierSales, spotNew,
+    loadReview, carrierSales, spotNew, timeOffPending,
   ])
 }

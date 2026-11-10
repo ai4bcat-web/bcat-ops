@@ -114,7 +114,7 @@ const PAYROLL_CHILDREN: NavChildDef[] = [
 const CALENDAR_CHILDREN: NavChildDef[] = [
   { to: '/driver-info', label: 'Driver info', pageKey: 'dispatch' },
   { to: '/appts', label: 'Appts', pageKey: 'appts', badgeKey: 'appts' },
-  { to: '/time-off', label: 'Time off', pageKey: 'timeOff' },
+  { to: '/time-off', label: 'Time off', pageKey: 'timeOff', badgeKey: 'timeOff' },
 ]
 
 /** Customers, Carriers and Locations: one Profiles section. Carriers opens the Carrier list; Find & Invite is its other tab. */

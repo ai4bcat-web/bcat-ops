@@ -26,7 +26,8 @@ vi.mock('@/hooks/useArToInvoiceCount', () => ({ useArToInvoiceCount: () => 1 }))
 vi.mock('@/hooks/useApToReviewCount', () => ({ useApToReviewCount: () => 1 }))
 vi.mock('@/hooks/useQuotesToReplyCount', () => ({ useQuotesToReplyCount: () => 3 }))
 const intake = vi.hoisted(() => ({ count: vi.fn(async () => 2), spot: vi.fn(async () => ({ new: 2, needsInfo: 1, needsAttention: 1 })) }))
-vi.mock('@/lib/apiClient', () => ({ countOpenIntakeLoads: intake.count, spotAction: intake.spot }))
+const timeOff = vi.hoisted(() => ({ rows: vi.fn(async () => [{ status: 'PENDING' }, { status: 'PENDING' }, { status: 'APPROVED' }, { status: null }, { status: 'DENIED' }]) }))
+vi.mock('@/lib/apiClient', () => ({ countOpenIntakeLoads: intake.count, spotAction: intake.spot, listDriverAvailabilities: timeOff.rows }))
 vi.mock('@/lib/loadReview', () => ({ loadReviewCount: () => 4 }))
 vi.mock('@/features/tms/carrierSales/carrierSalesQueue', () => ({ needsCoverCount: () => 5 }))
 
@@ -69,6 +70,24 @@ describe('useShellBadgeCounts', () => {
     expect(result.current.intake).toBe(1)
     expect('myQueue' in result.current || 'teamQueue' in result.current).toBe(false)
     expect('tracking' in result.current).toBe(false)
+  })
+
+  it('badges Time Off with the days drivers asked off that nobody has answered yet (pending only)', async () => {
+    const { result } = renderHook(() => useShellBadgeCounts({ shipments: [] }))
+    await waitFor(() => expect(result.current.timeOff).toBe(2))
+  })
+
+  it('shows no Time Off badge to someone without the page, and none when nothing is pending', async () => {
+    auth.hasPageAccess = (key) => key !== 'timeOff'
+    try {
+      const { result } = renderHook(() => useShellBadgeCounts({ shipments: [] }))
+      await waitFor(() => expect(result.current.intakeLoads).toBe(2))
+      expect('timeOff' in result.current).toBe(false)
+    } finally { auth.hasPageAccess = () => true }
+    timeOff.rows.mockResolvedValueOnce([{ status: 'APPROVED' }] as never)
+    const { result } = renderHook(() => useShellBadgeCounts({ shipments: [] }))
+    await waitFor(() => expect(result.current.intakeLoads).toBe(2))
+    expect('timeOff' in result.current).toBe(false)
   })
 
   it('sums the parent rows from their children', async () => {
