@@ -85,7 +85,7 @@ import { matchLocation, newLocationItem, type LocationLike } from './locationFro
 import { chicagoDateStr } from '../../../src/lib/date'
 import { reorderedSortValues } from '../../../src/lib/loadReorder'
 import {
-  validateTimeOffRequest, overlappingRequest, addDaysISO, describeRange, ptoDaysUsed, ptoRowFor, statusOf, yearOf,
+  validateTimeOffRequest, overlappingRequest, addDaysISO, describeRange, ptoDaysUsed, ptoRowFor, statusOf, yearOf, timeOffSlackText,
   type TimeOffType, type TimeOffStatus,
 } from '../../../src/lib/timeOff'
 import { locateCity } from '../../../src/lib/eldRadius'
@@ -197,6 +197,32 @@ const MOTIVE_API_KEY = process.env.MOTIVE_API_KEY ?? ''
 const MOTIVE_BASE = 'https://api.gomotive.com/v1'
 const TIME_CLOCK_TABLE = process.env.TIME_CLOCK_TABLE_NAME ?? ''
 const DRIVER_AVAILABILITY_TABLE = process.env.DRIVER_AVAILABILITY_TABLE_NAME ?? ''
+/** Slack id for Ruben: the SLACK_RUBEN_USER_ID override, else looked up once by e-mail (users:read.email). */
+let rubenMentionCache: string | null = null
+async function rubenMention(): Promise<string> {
+  if (rubenMentionCache) return rubenMentionCache
+  const fixed = (process.env.SLACK_RUBEN_USER_ID ?? '').trim()
+  if (fixed) return (rubenMentionCache = `<@${fixed}>`)
+  try {
+    const found = await slackClient(SLACK_BOT_TOKEN_FOR_DISPATCH).call<{ user?: { id?: string } }>('users.lookupByEmail', { email: 'ruben@bcatcorp.com' })
+    if (found.user?.id) return (rubenMentionCache = `<@${found.user.id}>`)
+  } catch (err) {
+    console.warn('[driver-app-api] could not look Ruben up in Slack', err instanceof Error ? err.message : String(err))
+  }
+  return '@Ruben'
+}
+
+/** A driver's time-off request, in #bcat-global with Ruben tagged. Never throws: a failed ping must not fail the request. */
+async function pingTimeOffRequest(req: { driverName: string; type: TimeOffType; startDate: string; endDate: string; hours: number; note?: string | null }): Promise<void> {
+  const channel = (process.env.SLACK_GLOBAL_CHANNEL_ID ?? '').trim()
+  if (!channel || !SLACK_BOT_TOKEN_FOR_DISPATCH) return
+  try {
+    await slackClient(SLACK_BOT_TOKEN_FOR_DISPATCH).call('chat.postMessage', { channel, text: timeOffSlackText({ ...req, mention: await rubenMention() }) })
+  } catch (err) {
+    console.warn('[driver-app-api] time-off Slack ping failed', err instanceof Error ? err.message : String(err))
+  }
+}
+
 /** How far either way staff may enter a PTO day (a driver's own window is narrower: src/lib/timeOff.ts). */
 const STAFF_PTO_WINDOW_DAYS = 60
 const PAY_DEDUCTION_TABLE = process.env.DRIVER_PAY_DEDUCTION_TABLE_NAME!
@@ -2995,6 +3021,8 @@ export const handler = async (event: FnUrlEvent) => {
         await ddb.send(new PutCommand({ TableName: DRIVER_AVAILABILITY_TABLE, Item: item }))
         // The office sees the ask in the driver's Dispatch thread as well as on /time-off.
         await postDriverStatus(driver, `Asked for ${want.type === 'PTO' ? 'PTO' : 'time off'} ${describeRange(want.startDate, want.endDate)} · ${want.hours}h`, now)
+        // And a ping to the office channel with Ruben tagged. Best effort: the request is already saved.
+        await pingTimeOffRequest({ driverName: driver.name, type: want.type, startDate: want.startDate, endDate: want.endDate, hours: want.hours, note: want.note })
         return reply(200, { ok: true, request: timeOffView(item as unknown as AvailabilityRow) })
       }
 

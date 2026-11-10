@@ -1322,6 +1322,38 @@ describe('driver-app-api handler', () => {
       expect(JSON.parse(res.body).request).toMatchObject({ status: 'PENDING', hours: 3 })
     })
 
+    it('a request pings #bcat-global with Ruben tagged; a failed ping never fails the request, and no channel means no ping', async () => {
+      process.env.SLACK_GLOBAL_CHANNEL_ID = 'CGLOBAL'
+      process.env.SLACK_RUBEN_USER_ID = 'URUBEN'
+      try {
+        fetchMock.mockClear()
+        const res = await post('/time-off', { type: 'LATE_START', startDate: '2026-11-10', hours: 3, note: 'dentist' })
+        expect(res.statusCode).toBe(200)
+        const slackPosts = fetchMock.mock.calls
+          .filter(([url]) => String(url).endsWith('chat.postMessage'))
+          .map(([, init]) => new URLSearchParams(init?.body ?? ''))
+          .filter((form) => form.get('channel') === 'CGLOBAL')
+        expect(slackPosts).toHaveLength(1)
+        expect(slackPosts[0]!.get('text')).toContain('<@URUBEN>')
+        expect(slackPosts[0]!.get('text')).toContain('Driver A')
+        expect(slackPosts[0]!.get('text')).toContain('3h')
+
+        fetchMock.mockImplementation(async (url) => ({ json: async () => (String(url).endsWith('chat.postMessage') ? { ok: false, error: 'channel_not_found' } : { ok: true, ts: '1' }) }))
+        for (const id of Object.keys(rows())) delete rows()[id]
+        expect((await post('/time-off', { type: 'LATE_START', startDate: '2026-11-12', hours: 2 })).statusCode).toBe(200)
+
+        process.env.SLACK_GLOBAL_CHANNEL_ID = ''
+        fetchMock.mockClear()
+        for (const id of Object.keys(rows())) delete rows()[id]
+        expect((await post('/time-off', { type: 'LATE_START', startDate: '2026-11-13', hours: 2 })).statusCode).toBe(200)
+        expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('chat.postMessage'))).toBe(false)
+      } finally {
+        delete process.env.SLACK_GLOBAL_CHANNEL_ID
+        delete process.env.SLACK_RUBEN_USER_ID
+        fetchMock.mockImplementation(async () => ({ json: async () => ({ ok: true, ts: '1699999999.000100' }) }))
+      }
+    })
+
     it('PTO is eight hours whatever was sent, only for an eligible driver, never a second one for a day already on the clock', async () => {
       const res = await post('/time-off', { type: 'PTO', startDate: '2026-11-05', hours: 2 })
       expect(res.statusCode).toBe(200)
