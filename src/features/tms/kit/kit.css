@@ -660,12 +660,16 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  overflow-x: auto;
-  scrollbar-width: none;
+  /* Every tab stays on the page: a section with more tabs than fit one row wraps to a second row (Ryne 2026-11-10; Accounting hid four). */
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 
-.tms-shell .tms-lifecycle-list::-webkit-scrollbar {
-  display: none;
+/* The top bar grows with the wrapped strip instead of clipping it. */
+.tms-shell .tms-topbar:has(.tms-lifecycle) {
+  height: auto;
+  min-height: var(--tms-topbar-h);
+  padding-block: 8px;
 }
 
 .tms-shell .tms-lifecycle-item {
