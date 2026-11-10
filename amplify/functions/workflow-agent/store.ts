@@ -619,12 +619,38 @@ export async function findIntakeByReference(reference: string, fromEmail: string
       for (const item of page.Items ?? []) {
         const row = unmarshall(item)
         const fields = parseFields(row.fields)
-        if (String(fields.reference ?? '').trim().toLowerCase() === want && String(row.fromEmail ?? '').trim().toLowerCase() === sender) return row
+        // A row typed from a Slack forward has Slackbot as its sender: the original e-mail about the same reference is its source.
+        const rowSender = String(row.fromEmail ?? '').trim().toLowerCase()
+        if (String(fields.reference ?? '').trim().toLowerCase() === want && (rowSender === sender || rowSender === 'uslackbot')) return row
       }
       key = page.LastEvaluatedKey
     } while (key)
   }
   return null
+}
+
+/**
+ * A later e-mail about the same tender brings what the row lacks: its attachments (the rate confirmation PDF) when the row has none,
+ * and field values the row has no value for (`merged` is `mergeIntakeFields`' answer). Conditioned on the row not having changed since it
+ * was read, so a reviewer's edit in between is never overwritten; the caller falls back to just logging the e-mail.
+ */
+export async function enrichIntakeLoad(
+  row: Row,
+  update: { attachments: Row[] | null; fields: Row | null; meta: Row | null; missingFields?: string[] | null; at: string },
+): Promise<void> {
+  const sets: string[] = ['updatedAt = :now']
+  const values: Record<string, unknown> = { ':now': update.at, ':was': String(row.updatedAt ?? '') }
+  if (update.attachments) { sets.push('attachments = :att'); values[':att'] = update.attachments }
+  if (update.fields) { sets.push('fields = :fields'); values[':fields'] = update.fields }
+  if (update.meta) { sets.push('meta = :meta'); values[':meta'] = update.meta }
+  if (update.missingFields) { sets.push('missingFields = :missing'); values[':missing'] = update.missingFields }
+  await dynamo.send(new UpdateItemCommand({
+    TableName: INTAKE_LOAD_TABLE_NAME,
+    Key: marshall({ id: String(row.id) }),
+    UpdateExpression: `SET ${sets.join(', ')}`,
+    ConditionExpression: 'attribute_exists(id) AND updatedAt = :was',
+    ExpressionAttributeValues: marshall(values, { removeUndefinedValues: true }),
+  }))
 }
 
 /**

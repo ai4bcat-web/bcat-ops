@@ -166,6 +166,42 @@ export function isDemoIntake(row: Pick<IntakeLoadRecord, 'fields' | 'fromName' |
   return isDemoText(row.fields.customerName, row.fields.reference, row.fromName, row.subject, row.divisionCode)
 }
 
+const MERGE_SCALARS = ['customerName', 'reference', 'pickupNumber', 'deliveryNumber', 'shipmentType', 'equipmentType', 'commodity', 'weightLb', 'customerRateCents'] as const
+const MERGE_STOP_KEYS = ['name', 'street', 'city', 'state', 'zip', 'date', 'time', 'instructions'] as const
+
+/**
+ * What a later e-mail about the same tender (the original, with its rate confirmation) adds to an intake row that is already there
+ * (typed from a Slack forward, say): only values the row has NOT got. Nothing a person or the first read put on the row is ever
+ * overwritten. Returns the merged fields and the keys that were filled (`stops.<i>.<key>` for stop fields).
+ */
+export function mergeIntakeFields(existing: IntakeFields, incoming: IntakeFields): { fields: IntakeFields; filled: string[] } {
+  const fields: IntakeFields = { ...existing, stops: existing.stops.map((s) => ({ ...s })) }
+  const filled: string[] = []
+  for (const key of MERGE_SCALARS) {
+    if (!present(existing[key]) && present(incoming[key])) {
+      ;(fields as unknown as Record<string, unknown>)[key] = incoming[key]
+      filled.push(key)
+    }
+  }
+  if (existing.stops.length === 0) {
+    incoming.stops.forEach((stop, i) => {
+      fields.stops.push({ ...stop })
+      for (const k of MERGE_STOP_KEYS) if (present(stop[k])) filled.push(`stops.${i}.${k}`)
+    })
+  } else if (existing.stops.length === incoming.stops.length) {
+    incoming.stops.forEach((stop, i) => {
+      if (stop.type !== existing.stops[i]!.type) return
+      for (const k of MERGE_STOP_KEYS) {
+        if (!present(existing.stops[i]![k]) && present(stop[k])) {
+          ;(fields.stops[i] as unknown as Record<string, unknown>)[k] = stop[k]
+          filled.push(`stops.${i}.${k}`)
+        }
+      }
+    })
+  }
+  return { fields, filled }
+}
+
 export function buildIntakeDraft(input: {
   tender: TenderPrefill | null
   parserTender: TenderPrefill | null
