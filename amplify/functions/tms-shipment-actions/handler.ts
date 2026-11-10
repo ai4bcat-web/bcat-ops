@@ -174,7 +174,7 @@ import {
 import { salesRepForDivision } from '../../../src/lib/divisionSalesRep'
 import { LEAD_STAGES, promotionFor } from '../../../src/lib/crm/promote'
 import { batchShipmentTask, BATCH_TASK_ACTIONS } from './batch'
-import { INTAKE_ACTIONS, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
+import { INTAKE_ACTIONS, reconcileOpenIntake, runIntakeAction, type IntakeAction, type IntakeDeps } from './intake'
 // ── Step P ──────────────────────────────────────────────────────────────────
 // The demo flow's four shipment-side modules. Same bargain as the quote and
 // document modules above: they are handed this file's clients, tables and
@@ -449,6 +449,7 @@ const readBundle = (shipmentId: string) => storeReadBundle(store, shipmentId)
 const rederiveShipmentStatus = async (shipmentId: string, caller: Caller) => {
   const result = await storeRederiveShipmentStatus(store, shipmentId, caller)
   await autoPushToReview(shipmentId, caller)
+  await reconcileOpenIntake(intakeDeps, shipmentId, caller)
   return result
 }
 
@@ -8742,8 +8743,13 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
         ? { ...(await deleteShipments(store, input, caller)) }
         : { ...(await restoreDeleted(store, input, caller)) }
     }
-    case 'CREATE_SHIPMENT':
-      return createShipment(input, caller)
+    case 'CREATE_SHIPMENT': {
+      const created = await createShipment(input, caller)
+      // The queue must never keep a row for a load that now exists, whatever happens to the form's own link call afterwards.
+      const createdId = optionalString((created as { shipment?: { id?: unknown } }).shipment?.id, 100)
+      if (createdId) await reconcileOpenIntake(intakeDeps, createdId, caller)
+      return created
+    }
     case 'INTAKE_SAVE_DRAFT':
     case 'INTAKE_MOVE_TO_ACTIVE':
     case 'INTAKE_MARK_REVIEWED':

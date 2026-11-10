@@ -11,6 +11,8 @@ const db = vi.hoisted(() => ({
   divisions: [] as Row[],
   intake: new Map<string, Row>(),
   failPut: false,
+  existing: null as Row | null,
+  logged: [] as Row[],
 }))
 
 vi.mock('./store', () => ({
@@ -19,6 +21,8 @@ vi.mock('./store', () => ({
   getById: async () => null,
   getSettings: async () => null,
   listDivisions: async () => db.divisions,
+  findIntakeByReference: async () => db.existing,
+  logRepeatEmail: async (row: Row, entry: Row) => { db.logged.push({ row, entry }) },
   putIntakeLoadIfAbsent: async (row: Row) => {
     if (db.failPut) throw new Error('DynamoDB unavailable')
     if (db.intake.has(String(row.id))) return false
@@ -40,6 +44,8 @@ const BARE: StageInput = { kind: 'BARE', parseState: 'NOT_PARSED', parseNote: 'D
 beforeEach(() => {
   db.intake.clear()
   db.failPut = false
+  db.existing = null
+  db.logged = []
   db.divisions = [
     { id: 'A', code: 'A', name: 'A', active: true, intakeEmail: 'tenders+a@bcatcorp.com' },
     { id: 'B', code: 'B', name: 'B', active: true, intakeEmail: 'tenders+b@bcatcorp.com' },
@@ -74,6 +80,19 @@ describe('stageIntake', () => {
     expect(again.staged).toBe(false)
     expect(db.intake.size).toBe(1)
     expect(db.intake.get('il:wf:TENDER:abc')).toMatchObject({ commodity: 'edited', version: 4, divisionCode: 'A' })
+  })
+
+  it('a repeat e-mail for the same tender rolls into the existing row (reopening a dismissed one) and stages no second row', async () => {
+    const parsed = {
+      kind: 'PARSED', party: { kind: null, id: null, name: null, how: null }, candidates: [], stopFacilityHits: [],
+      parse: { tender: { reference: '214129178', stops: [] }, parserTender: { reference: '214129178', stops: [] }, fillKind: 'EMAIL', lowConfidence: [] },
+    } as unknown as StageInput
+    db.existing = { id: 'il:wf:TENDER:first', status: 'DISMISSED' }
+    const out = await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), parsed)
+    expect(out).toMatchObject({ staged: false })
+    expect(out.detail).toContain('rolled into intake load il:wf:TENDER:first (reopened)')
+    expect(db.logged).toHaveLength(1)
+    expect(db.intake.size).toBe(0)
   })
 
   it('a bare row keeps the e-mail and says why nothing was parsed', async () => {

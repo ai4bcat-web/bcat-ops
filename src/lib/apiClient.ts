@@ -2917,9 +2917,9 @@ const INTAKE_LOAD_FIELDS = `
   subject fromEmail fromName receivedAt bodyText attachments
   parseState parseNote format fields autoFields meta confirmed missingFields
   shipmentId shipmentNumber reviewedBy reviewedAt lastEditedBy lastEditedAt
-  dismissedBy dismissedAt dismissReason createdBy updatedBy version createdAt updatedAt
+  dismissedBy dismissedAt dismissReason emailLog createdBy updatedBy version createdAt updatedAt
 `
-const INTAKE_LOAD_JSON_FIELDS: (keyof IntakeLoadRecord)[] = ['attachments', 'fields', 'autoFields', 'meta']
+const INTAKE_LOAD_JSON_FIELDS: (keyof IntakeLoadRecord)[] = ['attachments', 'fields', 'autoFields', 'meta', 'emailLog']
 
 let intakeModelAvailable = modelAvailable('IntakeLoad')
 const isMissingIntakeModel = (err: unknown) =>

@@ -590,3 +590,55 @@ export async function signedPutUrl(key: string, contentType: string, size: numbe
 export async function headObject(key: string): Promise<{ ContentLength?: number; ContentType?: string }> {
   return s3.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: key }))
 }
+
+
+function parseFields(raw: unknown): Row {
+  if (typeof raw !== 'string') return (raw as Row | null | undefined) ?? {}
+  try { return JSON.parse(raw) as Row } catch { return {} }
+}
+
+/**
+ * The intake row (any status) an e-mail's reference and sender already belong to, or null. A second e-mail about the same tender
+ * (Batory's "about to expire" reminder) rolls into this row instead of creating a new one.
+ */
+export async function findIntakeByReference(reference: string, fromEmail: string): Promise<Row | null> {
+  const want = reference.trim().toLowerCase()
+  const sender = fromEmail.trim().toLowerCase()
+  if (!INTAKE_LOAD_TABLE_NAME || !want) return null
+  for (const status of ['OPEN', 'MOVED', 'DISMISSED']) {
+    let key: Record<string, AttributeValue> | undefined
+    do {
+      const page = await dynamo.send(new QueryCommand({
+        TableName: INTAKE_LOAD_TABLE_NAME,
+        IndexName: 'intakeLoadsByStatusAndReceivedAt',
+        KeyConditionExpression: '#s = :s',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: { ':s': { S: status } },
+        ExclusiveStartKey: key,
+      }))
+      for (const item of page.Items ?? []) {
+        const row = unmarshall(item)
+        const fields = parseFields(row.fields)
+        if (String(fields.reference ?? '').trim().toLowerCase() === want && String(row.fromEmail ?? '').trim().toLowerCase() === sender) return row
+      }
+      key = page.LastEvaluatedKey
+    } while (key)
+  }
+  return null
+}
+
+/**
+ * Record a repeat e-mail on an existing row. A dismissed row comes back to OPEN (a Batory tender always shows in the queue);
+ * a row already built (MOVED) just keeps the log. Conditioned on the row not having moved on meanwhile.
+ */
+export async function logRepeatEmail(row: Row, entry: { at: string; subject: string; runId: string }): Promise<void> {
+  const reopen = row.status === 'DISMISSED'
+  await dynamo.send(new UpdateItemCommand({
+    TableName: INTAKE_LOAD_TABLE_NAME,
+    Key: marshall({ id: String(row.id) }),
+    UpdateExpression: `SET emailLog = list_append(if_not_exists(emailLog, :empty), :e), updatedAt = :now${reopen ? ', #s = :open' : ''}${reopen ? ' REMOVE dismissedBy, dismissedAt, dismissReason' : ''}`,
+    ConditionExpression: 'attribute_exists(id) AND #s = :was',
+    ExpressionAttributeNames: { '#s': 'status' },
+    ExpressionAttributeValues: marshall({ ':empty': [], ':e': [entry], ':now': entry.at, ':was': String(row.status), ...(reopen ? { ':open': 'OPEN' } : {}) }),
+  }))
+}
