@@ -12,6 +12,7 @@ import type { McpCarrierStatus } from './mcpAdapter'
 import { dotKey, mcKey, normalizeMcpProfile } from './mcpProfile'
 import type { McpContact } from './mcpProfile'
 import { normalizeName } from '../tmsDirectory'
+import { MCP_UNACCEPTABLE_ABOVE_POINTS } from '../mcpPacket'
 
 export type ReviewTone = 'green' | 'amber' | 'red' | 'gray'
 
@@ -136,6 +137,14 @@ const num = (v: unknown): number | undefined => {
 }
 
 /** Free-text risk rating -> a colour. Unreadable text is gray, never green. */
+/** A rating MCP calls unacceptable but whose score is within the limit is not unacceptable here (see MCP_UNACCEPTABLE_ABOVE_POINTS). */
+export function capRisk<T extends { totalPoints?: number; overallRating?: string; tone: ReviewTone }>(risk: T): T {
+  if (risk.tone === 'red' && /unaccept/i.test(risk.overallRating ?? '') && typeof risk.totalPoints === 'number' && risk.totalPoints <= MCP_UNACCEPTABLE_ABOVE_POINTS) {
+    return { ...risk, overallRating: 'Acceptable (score within limit)', tone: 'green' }
+  }
+  return risk
+}
+
 export function riskTone(rating: string | undefined): ReviewTone {
   const r = flat(rating)
   if (!r) return 'gray'
@@ -355,7 +364,7 @@ export function buildReviewCard(
       ...(typeof field(root, 'IsIntrastateCarrier') === 'boolean' ? { intrastate: field(root, 'IsIntrastateCarrier') === true } : {}),
       ...(text(field(root, 'FreightValidateStatus')) ? { freightValidate: text(field(root, 'FreightValidateStatus'))! } : {}),
     },
-    risk: {
+    risk: capRisk({
       ...(carrier.riskAssessmentPoints != null ? { totalPoints: carrier.riskAssessmentPoints } : {}),
       ...(overall ? { overallRating: overall } : {}),
       tone: riskTone(overall),
@@ -368,7 +377,7 @@ export function buildReviewCard(
         ...(isoOf(field(review, 'ReviewExpirationDate')) ? { expires: isoOf(field(review, 'ReviewExpirationDate'))! } : {}),
       } } : {}),
       categories: riskCategories(details, summary),
-    },
+    }),
     insurance: insuranceRows(certData, nowMs),
     timeline,
     contacts: profile.contacts,
@@ -402,7 +411,7 @@ export function mergeReviewCards(preview: McpReviewCard | null, data: McpReviewC
     source: data.source,
     identity: { ...preview.identity, ...data.identity },
     operating: { ...preview.operating, ...data.operating },
-    risk: { ...data.risk, ...(data.risk.overallRating ? {} : { overallRating: preview.risk.overallRating, tone: preview.risk.tone }), ...(data.risk.totalPoints != null ? {} : preview.risk.totalPoints != null ? { totalPoints: preview.risk.totalPoints } : {}), categories: pick(data.risk.categories, preview.risk.categories) },
+    risk: capRisk({ ...data.risk, ...(data.risk.overallRating ? {} : { overallRating: preview.risk.overallRating, tone: preview.risk.tone }), ...(data.risk.totalPoints != null ? {} : preview.risk.totalPoints != null ? { totalPoints: preview.risk.totalPoints } : {}), categories: pick(data.risk.categories, preview.risk.categories)  }),
     insurance: pick(data.insurance, preview.insurance),
     timeline: pick(data.timeline, preview.timeline),
     contacts: pick(data.contacts, preview.contacts),

@@ -65,3 +65,13 @@ describe('findByNumber', () => {
     expect(findByNumber(carriers, parseSearch('Alpha'))).toBeNull()
   })
 })
+
+import { directoryStanding } from './coverModel'
+describe('directoryStanding', () => {
+  it('Active, or what the carrier is instead and why', () => {
+    expect(directoryStanding({ status: 'ACTIVE' })).toEqual({ active: true, label: 'Active', why: '' })
+    expect(directoryStanding({ status: 'INACTIVE', statusReason: 'EXPIRED_INSURANCE', statusNote: 'cargo lapsed' }).why).toBe('Expired insurance: cargo lapsed')
+    expect(directoryStanding({ status: 'PENDING', mcpInvitedAt: '2026-11-01T00:00:00Z' }).why).toBe('waiting on setup packet')
+    expect(directoryStanding({ status: 'PENDING' }).why).toBe('setup packet not sent')
+  })
+})

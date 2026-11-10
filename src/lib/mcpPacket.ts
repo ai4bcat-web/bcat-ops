@@ -32,6 +32,19 @@ export function normalizeMcpStatus(raw: unknown): string | null {
   return v === '' ? null : v
 }
 
+/**
+ * Ryne 2026-11-10: a carrier counts as UNACCEPTABLE only when its MyCarrierPackets risk score is ABOVE 10,000 (MCP's own label is not
+ * enough: Ivan Cartage reads "Unacceptable, under review" at 3,000). With no score on file the label stands.
+ */
+export const MCP_UNACCEPTABLE_ABOVE_POINTS = 10000
+
+/** The packet status to decide on: UNACCEPTABLE* with a score at or under the limit is treated as ACCEPTABLE. */
+export function effectiveMcpStatus(raw: unknown, points: number | null | undefined): string | null {
+  const status = normalizeMcpStatus(raw)
+  if ((status === 'UNACCEPTABLE' || status === 'UNACCEPTABLE_REVIEW') && typeof points === 'number' && points <= MCP_UNACCEPTABLE_ABOVE_POINTS) return 'ACCEPTABLE'
+  return status
+}
+
 function reasonFor(status: string | null): string {
   switch (status) {
     case null:

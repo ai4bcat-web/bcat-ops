@@ -7,7 +7,8 @@
  * MCP says the packet is done. A packet MCP rates UNACCEPTABLE blocks assignment; MODERATE allows it
  * with an acknowledged warning.
  */
-import { normalizeMcpStatus } from '@/lib/mcpPacket'
+import { effectiveMcpStatus } from '@/lib/mcpPacket'
+import { CARRIER_STATUS_LABELS, CARRIER_STATUS_REASON_LABELS } from '@/lib/carrierStatus'
 import { matchDirectoryCarrier, type DirectoryCarrierLike, type ParsedSearch } from '@/lib/integrations/mcpReview'
 
 /** The acknowledgement key COVER_CARRIER expects for a MODERATE packet. */
@@ -23,8 +24,9 @@ export interface CoverGate {
   ackKey?: string
 }
 
-export function coverGate(mcpStatus: string | null | undefined, carrierStatus?: string | null, isAdmin = false): CoverGate {
-  const status = normalizeMcpStatus(mcpStatus)
+export function coverGate(mcpStatus: string | null | undefined, carrierStatus?: string | null, isAdmin = false, riskPoints?: number | null): CoverGate {
+  // UNACCEPTABLE only counts above 10,000 risk points (Ryne 2026-11-10).
+  const status = effectiveMcpStatus(mcpStatus, riskPoints)
   if (carrierStatus === 'DO_NOT_USE') {
     return { blocked: 'This carrier is marked Do not use in our directory and cannot be assigned.', warning: null }
   }
@@ -60,4 +62,13 @@ export function findByNumber<T extends DirectoryCarrierLike>(carriers: readonly 
   if (parsed.kind !== 'MC' && parsed.kind !== 'DOT') return null
   const hit = matchDirectoryCarrier(carriers, { identity: { mcNumber: parsed.mcNumber, dotNumber: parsed.dotNumber } })
   return hit && hit.by !== 'NAME' ? hit.carrier : null
+}
+
+/** The directory standing of a carrier in one line, for a suggestion list: Active, or what it is instead and why. */
+export function directoryStanding(c: { status: string; statusReason?: string | null; statusNote?: string | null; mcpStatus?: string | null; mcpInvitedAt?: string | null }): { active: boolean; label: string; why: string } {
+  if (c.status === 'ACTIVE') return { active: true, label: 'Active', why: '' }
+  const reason = c.statusReason ? (CARRIER_STATUS_REASON_LABELS as Record<string, string>)[c.statusReason] ?? c.statusReason : null
+  const why = [reason, c.statusNote].filter(Boolean).join(': ') || (c.mcpInvitedAt ? 'waiting on setup packet' : c.status === 'DO_NOT_USE' ? 'marked Do not use' : 'setup packet not sent')
+  const label = (CARRIER_STATUS_LABELS as Record<string, string>)[c.status] ?? c.status
+  return { active: false, label, why }
 }

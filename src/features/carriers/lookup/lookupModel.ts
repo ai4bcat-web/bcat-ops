@@ -7,13 +7,18 @@
  */
 import type { McpReviewCard, McpReviewEmail } from '@/lib/integrations/mcpReview'
 import { mcpPacketStanding } from '@/lib/mcpPacket'
-import { CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
-import type { CarrierStatus } from '@/types/tms'
+import { CARRIER_STATUS_LABELS, CARRIER_STATUS_REASON_LABELS } from '@/lib/carrierStatus'
+import type { CarrierStatus, CarrierStatusReason } from '@/types/tms'
+
+/** Ivan Cartage's own authority: our own fleet is always Active and never goes through MyCarrierPackets vetting. */
+export const OWN_FLEET_MCS: readonly string[] = ['274623']
 
 export interface LookupDirectoryRow {
   id: string
   name: string
   status: CarrierStatus
+  statusReason?: CarrierStatusReason | null
+  statusNote?: string | null
   mcpStatus?: string | null
   mcpInvitedAt?: string | null
   mcpInvitedTo?: string | null
@@ -45,6 +50,10 @@ export interface LookupState {
   packet: { kind: PacketKind; label: string; invitedAt: string | null }
   /** Carrier.status ACTIVE and packet complete: the one-line "Active with us". */
   activeReady: boolean
+  /** The explicit answer to "are they already active with us?", with why. */
+  activeWithUs: { active: boolean; label: string; why: string }
+  /** Ivan Cartage (MC 274623): our own fleet, Active by definition. */
+  ownFleet: boolean
   emails: McpReviewEmail[]
   vetting: { failing: string[] }
   send: ActionState & { label: 'Send setup packet' | 'Re-send packet'; primary: boolean }
@@ -84,10 +93,26 @@ function failing(card: McpReviewCard | null): string[] {
   return out
 }
 
+function activeWithUsOf(input: { carrier: LookupDirectoryRow | null; packet: LookupState['packet']; ownFleet: boolean }): LookupState['activeWithUs'] {
+  const { carrier, packet, ownFleet } = input
+  if (ownFleet) return { active: true, label: 'Active with us', why: 'Ivan Cartage is our own fleet' }
+  if (!carrier) return { active: false, label: 'Not active with us', why: 'Not in our directory yet' }
+  if (carrier.status === 'ACTIVE') {
+    return packet.kind === 'COMPLETE'
+      ? { active: true, label: 'Active with us', why: 'Setup complete in MyCarrierPackets' }
+      : { active: false, label: 'Active in the directory, not set up', why: 'The MyCarrierPackets packet is not complete yet' }
+  }
+  const reason = carrier.statusReason ? CARRIER_STATUS_REASON_LABELS[carrier.statusReason] ?? String(carrier.statusReason) : null
+  const why = [reason, carrier.statusNote].filter(Boolean).join(': ')
+    || (packet.kind === 'INVITED' ? 'Waiting for the carrier to finish its setup packet' : packet.kind === 'NONE' ? 'Setup packet not sent yet' : CARRIER_STATUS_LABELS[carrier.status])
+  return { active: false, label: `Not active with us (${CARRIER_STATUS_LABELS[carrier.status]})`, why }
+}
+
 export function lookupState(input: LookupInput): LookupState {
   const { card, mode, carrier, nowIso } = input
-  const packet = packetOf(input)
-  const status = carrier?.status ?? null
+  const ownFleet = mode !== 'STUB' && OWN_FLEET_MCS.includes(String(card?.identity.mcNumber ?? '').replace(/^MC/i, '').replace(/\D/g, ''))
+  const packet = ownFleet ? { kind: 'COMPLETE' as const, label: 'Own fleet', invitedAt: null } : packetOf(input)
+  const status = ownFleet ? 'ACTIVE' as CarrierStatus : carrier?.status ?? null
   const activeReady = status === 'ACTIVE' && packet.kind === 'COMPLETE'
   const emails = mode === 'STUB' ? [] : card?.emails ?? []
 
@@ -96,12 +121,14 @@ export function lookupState(input: LookupInput): LookupState {
 
   let sendReason: string | undefined
   if (mode === 'STUB') sendReason = 'Stub, no MCP call: MyCarrierPackets is not connected here, so a packet cannot be sent.'
+  else if (ownFleet) sendReason = 'Own fleet: no setup packet is needed.'
   else if (!card) sendReason = 'MyCarrierPackets has no record of this carrier.'
   else if (status === 'DO_NOT_USE') sendReason = 'This carrier is marked Do not use.'
   else if (emails.length === 0) sendReason = 'MyCarrierPackets returned no e-mail address for this carrier.'
 
   let coverReason: string | undefined
-  if (status === 'DO_NOT_USE') coverReason = 'This carrier is marked Do not use.'
+  if (ownFleet) coverReason = 'Own fleet: assign a driver on the shipment instead (Carrier card, Ivan Cartage).'
+  else if (status === 'DO_NOT_USE') coverReason = 'This carrier is marked Do not use.'
   else if (!carrier) coverReason = 'Not in our directory: send the setup packet first.'
   else if (status !== 'ACTIVE') coverReason = `Directory status is ${CARRIER_STATUS_LABELS[status!]}: only an Active carrier can be covered directly.`
   else if (packet.kind !== 'COMPLETE') coverReason = 'The MyCarrierPackets packet is not complete yet.'
@@ -116,11 +143,13 @@ export function lookupState(input: LookupInput): LookupState {
         : { kind: 'add', enabled: true }
 
   return {
-    directory: { inDirectory: carrier != null, status, statusLabel: status ? CARRIER_STATUS_LABELS[status] : null },
+    directory: { inDirectory: carrier != null || ownFleet, status, statusLabel: status ? CARRIER_STATUS_LABELS[status] : null },
     packet,
     activeReady,
+    activeWithUs: activeWithUsOf({ carrier, packet, ownFleet }),
+    ownFleet,
     emails,
-    vetting: { failing: failing(card) },
+    vetting: { failing: ownFleet ? [] : failing(card) },
     send: { enabled: sendReason === undefined, ...(sendReason ? { reason: sendReason } : {}), label: stale ? 'Re-send packet' : 'Send setup packet', primary: sendPrimary },
     cover: { enabled: coverReason === undefined, ...(coverReason ? { reason: coverReason } : {}), primary: activeReady },
     directoryAction,

@@ -11,7 +11,7 @@
  * There is deliberately no "add to carriers" here: a carrier only enters our directory through MyCarrierPackets.
  */
 import { useAuth } from '@/hooks/useAuth'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { MoneyField } from '@/features/directory/components/MoneyField'
@@ -30,7 +30,7 @@ import type { McpCarrierStatus } from '@/lib/integrations/mcpAdapter'
 import { normalizeMcpStatus } from '@/lib/mcpPacket'
 import type { CarrierRecord, ShipmentBundle } from '@/types/tms'
 import { liveCarriersOf } from '@/lib/carrierTotals'
-import { MODERATE_ACK_KEY, UNACCEPTABLE_ACK_KEY, coverGate, coverRoute, findByNumber } from './coverModel'
+import { MODERATE_ACK_KEY, UNACCEPTABLE_ACK_KEY, coverGate, coverRoute, directoryStanding, findByNumber } from './coverModel'
 
 type Ref = { mcNumber?: string; dotNumber?: string }
 
@@ -90,10 +90,16 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
     label: `${i + 1}. ${s.type === 'pickup' ? 'Pickup' : 'Delivery'} ${s.name ?? s.city ?? ''}`.trim(),
   }))
   const card = preview?.card ?? null
+  // Typing a name (not an MC / DOT) lists the carriers we already have, with their standing, until one is picked.
+  const suggestions = useMemo(() => {
+    const q = query.trim()
+    if (selected || q.length < 2 || parseSearch(q).kind !== 'NAME') return []
+    return searchDirectory(carriers, q)
+  }, [query, selected, carriers])
   const stub = preview?.mode === 'STUB'
   const route = coverRoute(selected)
   const { isAdmin: callerIsAdmin, isOwner: callerIsOwner } = useAuth()
-  const gate = coverGate(selected ? selected.mcpStatus : card?.packet.status, selected?.status, callerIsAdmin || callerIsOwner)
+  const gate = coverGate(selected ? selected.mcpStatus : card?.packet.status, selected?.status, callerIsAdmin || callerIsOwner, selected?.mcpRiskScore ?? card?.risk.totalPoints)
   const needsMcp = !selected || selected.status !== 'ACTIVE'
   const rateOk = rateCents != null && rateCents > 0
   const ackOk = !gate.warning || acked
@@ -296,7 +302,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
         open
         onOpenChange={(open) => { if (!open && !working) onClose() }}
         title={title}
-        description="Look the carrier up by MC or DOT. Only carriers that went through MyCarrierPackets can be assigned."
+        description="Type the carrier name, MC or DOT. Carriers we already have set up fill in as you type, with whether they are active and why. Only carriers that went through MyCarrierPackets can be assigned."
         className="tms-dialog-wide"
         footer={
           <>
@@ -331,10 +337,10 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
             onSubmit={(e) => { e.preventDefault(); if (carriersLoading) setQueued(true); else lookUp() }}
           >
             <TmsInput
-              aria-label="Carrier MC or DOT"
+              aria-label="Carrier name, MC or DOT"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="MC 274623 or DOT 1234567"
+              onChange={(e) => { setQuery(e.target.value); setNameMatches(null) }}
+              placeholder="Carrier name, MC 274623 or DOT 1234567"
               style={{ minWidth: 280 }}
               autoFocus
             />
@@ -342,6 +348,24 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
               <Search size={14} /> {previewing || queued ? 'Looking up…' : 'Look up'}
             </TmsButton>
           </form>
+
+          {suggestions.length > 0 && (
+            <ul className="flex flex-col gap-1" style={{ listStyle: 'none', padding: 0, margin: 0 }} data-testid="cover-suggestions" aria-label="Carriers in our directory">
+              {suggestions.map((c) => {
+                const st = directoryStanding(c)
+                return (
+                  <li key={c.id}>
+                    <button type="button" className="tms-empty-action flex w-full flex-wrap items-center gap-2" data-testid={`cover-suggestion-${c.id}`} onClick={() => { setQuery(c.name); pick(c, refOf(c)); setLooked(true) }}>
+                      <strong>{c.name}</strong>
+                      <span className="tms-muted" style={{ fontSize: 12 }}>{[c.mcNumber && `MC ${c.mcNumber}`, c.dotNumber && `DOT ${c.dotNumber}`].filter(Boolean).join(' · ')}</span>
+                      <TmsBadge tone={st.active ? 'green' : c.status === 'DO_NOT_USE' ? 'red' : 'orange'}>{st.label}</TmsBadge>
+                      {st.why ? <span className="tms-muted" style={{ fontSize: 12 }}>{st.why}</span> : null}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
 
           {serverWarn && (
             <TmsAlert tone="orange" title="Review before assigning" role="status">

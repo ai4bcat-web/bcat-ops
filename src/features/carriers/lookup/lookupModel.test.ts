@@ -94,3 +94,23 @@ describe('recipients', () => {
     expect(chosenRecipients([], [])).toEqual([])
   })
 })
+
+describe('lookupState: active with us, own fleet and the risk limit', () => {
+  it('answers "active with us?" with the reason', () => {
+    expect(lookupState({ card: card(), mode: 'LIVE', carrier: row(), nowIso: NOW }).activeWithUs).toEqual({ active: true, label: 'Active with us', why: 'Setup complete in MyCarrierPackets' })
+    expect(lookupState({ card: card(), mode: 'LIVE', carrier: null, nowIso: NOW }).activeWithUs).toMatchObject({ active: false, why: 'Not in our directory yet' })
+    const inactive = lookupState({ card: card(), mode: 'LIVE', carrier: row({ status: 'INACTIVE', statusReason: 'EXPIRED_INSURANCE', statusNote: 'cargo lapsed 10/31' }), nowIso: NOW }).activeWithUs
+    expect(inactive.active).toBe(false)
+    expect(inactive.why).toBe('Expired insurance: cargo lapsed 10/31')
+    expect(lookupState({ card: card(), mode: 'LIVE', carrier: row({ status: 'PENDING', mcpStatus: 'INVITED', mcpInvitedAt: '2026-11-04T12:00:00Z' }), nowIso: NOW }).activeWithUs.why).toBe('Waiting for the carrier to finish its setup packet')
+  })
+  it('Ivan Cartage (MC 274623) is our own fleet: Active, no vetting flags, no packet, not coverable as a carrier', () => {
+    const ivan = card({ DocketNumber: 'MC274623', CompanyName: 'IVAN CARTAGE COMPANY' })
+    const s = lookupState({ card: ivan, mode: 'LIVE', carrier: null, nowIso: NOW })
+    expect(s.ownFleet).toBe(true)
+    expect(s.activeWithUs).toMatchObject({ active: true, why: 'Ivan Cartage is our own fleet' })
+    expect(s.vetting.failing).toEqual([])
+    expect(s.send.enabled).toBe(false)
+    expect(s.cover.enabled).toBe(false)
+  })
+})

@@ -8,6 +8,7 @@ import { TmsAlert, TmsBadge, TmsCard, TmsMetaList } from '@/features/tms/kit'
 import { TmsGauge } from '@/features/tms/kit/TmsGauge'
 import type { TmsTone } from '@/features/tms/kit'
 import { formatCents } from '@/lib/tmsDirectory'
+import { effectiveMcpStatus } from '@/lib/mcpPacket'
 import { refLabel, type McpReviewCard, type ReviewTone } from '@/lib/integrations/mcpReview'
 
 const BADGE: Record<ReviewTone, TmsTone> = { green: 'green', amber: 'orange', red: 'red', gray: 'gray' }
@@ -27,7 +28,8 @@ function statusTone(status: string | undefined): ReviewTone {
   return 'amber'
 }
 
-function packetTone(status: McpReviewCard['packet']['status']): ReviewTone {
+function packetTone(status: McpReviewCard['packet']['status'], points?: number | null): ReviewTone {
+  if (effectiveMcpStatus(status, points) === 'ACCEPTABLE' && status !== 'ACCEPTABLE' && /unaccept/i.test(String(status))) return 'green'
   if (status === 'ACCEPTABLE') return 'green'
   if (status === 'MODERATE' || status === 'PENDING_REVIEW' || status === 'IN_PROGRESS' || status === 'INVITED') return 'amber'
   if (status === 'UNACCEPTABLE' || status === 'UNACCEPTABLE_REVIEW') return 'red'
@@ -59,7 +61,7 @@ export function McpReviewCardView({ card, actions, banner }: { card: McpReviewCa
                 <TmsBadge tone={operating.authorityStatus === 'ACTIVE' ? 'green' : 'red'}>Authority {operating.authorityStatus.toLowerCase()}</TmsBadge>
               )}
               {operating.safetyRating && <TmsBadge tone="gray">Safety: {operating.safetyRating}</TmsBadge>}
-              <TmsBadge tone={BADGE[packetTone(packet.status)]}>{packet.label}</TmsBadge>
+              <TmsBadge tone={BADGE[packetTone(packet.status, risk.totalPoints)]}>{packet.label}</TmsBadge>
               {card.monitoring.monitored === true && <TmsBadge tone="blue">Monitored</TmsBadge>}
               {card.monitoring.monitored === false && <TmsBadge tone="gray">Not monitored</TmsBadge>}
               {card.monitoring.blocked === true && <TmsBadge tone="red">Blocked by us</TmsBadge>}
