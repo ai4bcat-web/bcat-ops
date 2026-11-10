@@ -7,6 +7,23 @@ import type { Load } from '@/types'
 export const CALENDAR_DIVISIONS: readonly string[] = ['ASSETS', 'OWNER_OPERATOR']
 
 /**
+ * Is this load kept off the calendar? Decided from facts that are the same for every signed-in person:
+ *  - the division the load itself carries (mirrored onto it from its shipment), so the answer never waits on, or depends on, a second
+ *    fetch of shipments that can lag or fail for one browser and leak brokerage freight onto that person's calendar; or
+ *  - the shipment's division, once the shipment rows are in.
+ * A load whose division is unknown everywhere is still shown, except while the shipment rows are not settled (loading, partly read, or
+ * the read failed): then it is held back rather than flashed onto the board and pulled off again (or, on a failed read, left there).
+ */
+export function loadOffCalendar(
+  load: Pick<Load, 'shipmentId' | 'revDivision'>,
+  shipments: { offCalendar: ReadonlySet<string>; known: ReadonlySet<string>; loading: boolean },
+): boolean {
+  if (load.revDivision) return !CALENDAR_DIVISIONS.includes(load.revDivision)
+  if (load.shipmentId != null && shipments.offCalendar.has(load.shipmentId)) return true
+  return shipments.loading && !(load.shipmentId != null && shipments.known.has(load.shipmentId))
+}
+
+/**
  * What the calendar shows, straight from the Shipments page's state.
  *
  * The calendar is for Ivan loads only (the ones sent to ivanloads@bcatcorp.com, revenue division Assets, owner operators included).
@@ -20,26 +37,32 @@ export const CALENDAR_DIVISIONS: readonly string[] = ['ASSETS', 'OWNER_OPERATOR'
  * its status says it was released to invoicing.
  */
 export function useLoadReviewMarks(loads: readonly Load[]): Load[] {
-  const working = useShipments({ kind: 'working' }).shipments
+  const workingRead = useShipments({ kind: 'working' })
+  const working = workingRead.shipments
   // The months the calendar actually holds: a shipment outside the working set (an older or later month) is read too, so its
   // division and Load Review state are known and it is not shown by mistake.
   const monthsKey = useMemo(() => [...new Set(loads.map((l) => (l.pickupAppt ?? '').slice(0, 7)).filter((m) => /^\d{4}-\d{2}$/.test(m)))].sort().join(','), [loads])
-  const windowed = useShipments({ kind: 'window', months: monthsKey ? monthsKey.split(',') : [] }).shipments
+  const windowRead = useShipments({ kind: 'window', months: monthsKey ? monthsKey.split(',') : [] })
+  const windowed = windowRead.shipments
+  // Not settled = still loading, only part read, or the read failed: in each case a missing row proves nothing, so it must not read as "no division".
+  const shipmentsLoading = [workingRead, windowRead].some((r) => r.loading || r.partial || r.error != null)
   const shipments = useMemo(() => [...working, ...windowed], [working, windowed])
-  const { marked, offCalendar } = useMemo(() => {
+  const { marked, offCalendar, known } = useMemo(() => {
     const ids = new Set<string>()
     const offCalendarIds = new Set<string>()
+    const knownIds = new Set<string>()
     for (const row of shipments) {
+      knownIds.add(row.id)
       if (row.loadReviewPushedAt || isReleasedToInvoicing(row)) ids.add(row.id)
       if (row.revDivision && !CALENDAR_DIVISIONS.includes(row.revDivision)) offCalendarIds.add(row.id)
     }
-    return { marked: ids, offCalendar: offCalendarIds }
+    return { marked: ids, offCalendar: offCalendarIds, known: knownIds }
   }, [shipments])
   return useMemo(
-    () => loads.filter((l) => !(l.shipmentId != null && offCalendar.has(l.shipmentId))).map((l) => {
+    () => loads.filter((l) => !loadOffCalendar(l, { offCalendar, known, loading: shipmentsLoading })).map((l) => {
       const green = (l.shipmentId != null && marked.has(l.shipmentId)) || l.status === 'INVOICING'
       return green === Boolean(l.readyToInvoice) ? l : { ...l, readyToInvoice: green }
     }),
-    [loads, marked, offCalendar],
+    [loads, marked, offCalendar, known, shipmentsLoading],
   )
 }
