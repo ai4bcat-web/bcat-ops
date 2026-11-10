@@ -1195,6 +1195,7 @@ const schema = a.schema(stageTypes({
       customerLinkExpiryDays:        a.integer(),   // 14
       customerLinkShowsCarrier:      a.boolean(),   // false
       customerLinkShowsPosition:     a.boolean(),   // true
+      checkCallSkipWhenDriverActive: a.boolean(),   // false — no cadence text while the driver's link/app/ELD updates on time
       // { mode: 'CUSTOMER_REP' | 'FIXED', name?, email?, phone? } — whose details
       // the public customer page prints as "who to call".
       trackingContact:               a.json(),

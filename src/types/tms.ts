@@ -483,6 +483,8 @@ export interface TmsSettings {
   customerLinkShowsCarrier?: boolean | null
   /** Whether the customer page shows the last known position. Default true. */
   customerLinkShowsPosition?: boolean | null
+  /** Cadence check-call texts wait while the driver's link, app or ELD keeps the position fresh. Off unless true. */
+  checkCallSkipWhenDriverActive?: boolean | null
   /** Who the customer page says to call. */
   trackingContact?: TrackingContact | null
   /** Body of the carrier ping text. Must contain `{url}`. */

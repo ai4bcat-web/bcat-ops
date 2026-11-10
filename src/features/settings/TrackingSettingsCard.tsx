@@ -51,6 +51,7 @@ export function TrackingSettingsCard() {
   const [customerLinkDays, setCustomerLinkDays] = useState('')
   const [showsCarrier, setShowsCarrier] = useState(false)
   const [showsPosition, setShowsPosition] = useState(true)
+  const [skipWhenActive, setSkipWhenActive] = useState(false)
   const [contactMode, setContactMode] = useState<TrackingContact['mode']>('CUSTOMER_REP')
   const [contactName, setContactName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
@@ -76,6 +77,7 @@ export function TrackingSettingsCard() {
         setShowsCarrier(s?.customerLinkShowsCarrier === true)
         // The house default is to show the position; only an explicit false hides it.
         setShowsPosition(s?.customerLinkShowsPosition !== false)
+        setSkipWhenActive(s?.checkCallSkipWhenDriverActive === true)
         setContactMode(s?.trackingContact?.mode ?? 'CUSTOMER_REP')
         setContactName(s?.trackingContact?.name ?? '')
         setContactEmail(s?.trackingContact?.email ?? '')
@@ -109,6 +111,7 @@ export function TrackingSettingsCard() {
         customerLinkExpiryDays: parseWhole(customerLinkDays, 'Customer link expiry', 1, 365),
         customerLinkShowsCarrier: showsCarrier,
         customerLinkShowsPosition: showsPosition,
+        checkCallSkipWhenDriverActive: skipWhenActive,
         trackingContact: contactMode === 'FIXED'
           ? { mode: 'FIXED', name: contactName.trim() || null, email: contactEmail.trim() || null, phone: contactPhone.trim() || null }
           : { mode: 'CUSTOMER_REP' },
@@ -214,6 +217,17 @@ export function TrackingSettingsCard() {
               onChange={setShowsPosition}
             />
             <Hint>Each link keeps whatever these said when it was minted, so turning one off never widens or narrows a link already sent.</Hint>
+          </Stack>
+
+          <Stack gap={8}>
+            <GroupLabel>Check-call texts</GroupLabel>
+            <CheckRow
+              ariaLabel="Skip check-call texts while the driver is updating"
+              label="Do not text a driver while their tracking link, app or ELD has reported within the check-call interval"
+              checked={skipWhenActive}
+              onChange={setSkipWhenActive}
+            />
+            <Hint>Off by default. When on, a text goes out only after a full interval passes with no automatic update.</Hint>
           </Stack>
 
           <Stack gap={8}>
