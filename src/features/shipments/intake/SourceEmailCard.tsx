@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsAlert, TmsCard } from '@/features/tms/kit'
@@ -10,6 +10,41 @@ import './intake.css'
 const PARSE_NOTES: Record<string, string> = {
   NOT_PARSED: 'The e-mail was saved but not read automatically',
   FAILED: 'Reading the e-mail failed',
+}
+
+/** The attachment the e-mail came with, shown in full beside the form so the load can be built straight from it (Ryne 2026-11-10). */
+function AttachmentPreview({ attachments }: { attachments: IntakeLoadRecord['attachments'] }) {
+  const viewable = attachments.filter((a) => /^(application\/pdf|image\/)/.test(a.contentType))
+  const [activeKey, setActiveKey] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState<{ key: string; url: string } | { key: string; error: string } | null>(null)
+  const active = viewable.find((a) => a.key === activeKey) ?? viewable[0] ?? null
+  const activeFile = active?.key ?? null
+  useEffect(() => {
+    if (!activeFile) return undefined
+    let live = true
+    getIntakePdfUrl(activeFile)
+      .then((url) => { if (live) setLoaded({ key: activeFile, url }) })
+      .catch((e: unknown) => { if (live) setLoaded({ key: activeFile, error: e instanceof Error ? e.message : 'Could not load the file' }) })
+    return () => { live = false }
+  }, [activeFile])
+  if (!active) return null
+  const shown = loaded?.key === active.key ? loaded : null
+  return (
+    <div data-testid="intake-attachment-preview" className="tms-intake-preview">
+      {viewable.length > 1 ? (
+        <div className="flex flex-wrap gap-1" role="tablist" aria-label="Attachments to preview">
+          {viewable.map((a) => (
+            <button key={a.key} type="button" role="tab" aria-selected={a.key === active.key} className="tms-empty-action" onClick={() => setActiveKey(a.key)}>{a.name}</button>
+          ))}
+        </div>
+      ) : null}
+      {shown && 'url' in shown ? (
+        active.contentType.startsWith('image/')
+          ? <img src={shown.url} alt={active.name} className="tms-intake-preview-frame" style={{ objectFit: 'contain' }} />
+          : <iframe title={active.name} src={shown.url} className="tms-intake-preview-frame" data-testid="intake-preview-frame" />
+      ) : shown && 'error' in shown ? <p role="alert">{shown.error}</p> : <p className="tms-muted">Loading {active.name}…</p>}
+    </div>
+  )
 }
 
 /** The tender e-mail as received: who, when, the text and its attachments, plus the link to the agent run. */
@@ -53,6 +88,7 @@ export function SourceEmailCard({ row }: { row: IntakeLoadRecord }) {
         <dt className="tms-intake-email-key">Subject</dt>
         <dd>{row.subject || '(no subject)'}</dd>
       </dl>
+      <AttachmentPreview attachments={row.attachments} />
       <div className="tms-intake-email-body" aria-label="E-mail body">{row.bodyText || 'No text in this e-mail.'}</div>
       {row.attachments.length > 0 ? (
         <ul className="tms-intake-attachments" aria-label="Attachments">

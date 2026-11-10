@@ -24,3 +24,6 @@
 .tms-intake-email-key { color: var(--tms-muted); }
 .tms-intake-attachments { margin: 8px 0 0; padding-left: 18px; }
 .tms-intake-row-actions { display: inline-flex; align-items: center; gap: 8px; }
+
+.tms-intake-preview { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.tms-intake-preview-frame { width: 100%; height: 78vh; min-height: 420px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); background: var(--tms-surface); }
