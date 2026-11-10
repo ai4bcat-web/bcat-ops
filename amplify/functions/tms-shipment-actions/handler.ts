@@ -277,7 +277,6 @@ import {
 import { customerDefaultsOf } from '../../../src/lib/intakeLoad'
 import { evaluateReleaseGate, releaseGateError } from '../../../src/lib/releaseGate'
 import { dedupeEmails, isEmailAddress } from '../../../src/lib/emailAddress'
-import { mcpPacketStanding, rateConMcpRefusal } from '../../../src/lib/mcpPacket'
 import { composeRateConCc } from './rateConRecipients'
 import { assertBolEmailable, bolEmailBody, bolEmailSubject, deliveryLabel, parseEmailBolInput } from './bolEmail'
 import { MAX_GENERATED_BYTES, documentKey } from '../../../src/lib/shipmentDocuments'
@@ -6190,8 +6189,7 @@ function trackingMailbox(): string {
  * fresh token — which is exactly what voids the previous link, since the token is
  * the only way into the signing page.
  *
- * Two rules: (1) the carrier must hold a completed MyCarrierPackets packet
- * (mcpPacketStanding) — checked before any side effect, on send and re-send; (2) the
+ * Two rules: (1) the carrier must be Active in the system — checked before any side effect, on send and re-send; (2) the
  * sender is always cc'd after the tracking mailbox and typed cc, deduped
  * case-insensitively and never duplicating a `to` address (composeRateConCc).
  */
@@ -6212,13 +6210,10 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   if (!carrierId) throw new Error('That assignment is not a directory carrier; book it with BOOK_CARRIER first')
   const directoryCarrier = await getById(CARRIER_TABLE_NAME, carrierId)
   if (!directoryCarrier) throw new Error(`Carrier not found: ${carrierId}`)
-  const standing = mcpPacketStanding(directoryCarrier)
-  if (!standing.completed) {
-    throw new Error(rateConMcpRefusal(String(directoryCarrier.name ?? carrier.carrierName ?? 'This carrier'), standing))
-  }
-  // Step AM. Setup complete is MyCarrierPackets' word alone: the directory carrier is ACTIVE.
+  // Ryne 2026-11-10: the only gate is that the carrier is Active in the system. Whether its MyCarrierPackets packet is finished is
+  // MyCarrierPackets' business: an Active carrier (even one still "invited" there) can be sent a rate confirmation.
   if (directoryCarrier.status !== 'ACTIVE') {
-    throw new Error(`${String(directoryCarrier.name ?? carrier.carrierName ?? 'This carrier')} is not set up yet (status ${String(directoryCarrier.status ?? 'PENDING')}). A rate confirmation can be sent only after MyCarrierPackets reports the carrier's setup complete.`)
+    throw new Error(`${String(directoryCarrier.name ?? carrier.carrierName ?? 'This carrier')} is not Active in the system (status ${String(directoryCarrier.status ?? 'PENDING')}). A rate confirmation can be sent only to an Active carrier.`)
   }
   const loadId = String(carrier.loadId)
   const shipmentId = String(carrier.shipmentId)
@@ -6458,7 +6453,7 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   }
 
   await writeAudit('LOAD_CARRIER', loadCarrierId, 'SEND_RATE_CON', caller, {
-    loadId, version, to, cc, senderCc: composed.senderCopied ? caller.email : null, mcpStatus: standing.status,
+    loadId, version, to, cc, senderCc: composed.senderCopied ? caller.email : null, mcpStatus: optionalString(directoryCarrier.mcpStatus, 100) ?? null,
     assignmentStatus: sentRung?.to ?? carrier.assignmentStatus ?? null,
     expiresAt, documentId, s3Key, threadKey, emailStatus: emailOutcome.status, sesMessageId: emailOutcome.sesMessageId,
     ...(multi ? { liveCarriers: liveRows.length, rateConGrossCents } : {}),

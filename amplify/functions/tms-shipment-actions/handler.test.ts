@@ -14,7 +14,6 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 // The rule the public offer page shows a carrier, used here to answer a link the
 // way a carrier would rather than by hard-coding the number we hope is on it.
 import { ourOfferCents } from '../../../src/lib/quotes'
-import { RATE_CON_MCP_ERROR_PREFIX } from '../../../src/lib/mcpPacket'
 
 type Row = Record<string, unknown>
 
@@ -2988,20 +2987,23 @@ describe('carrier booking', () => {
     }
 
     it.each([undefined, 'INVITED', 'IN_PROGRESS', 'NOT_INVITED', 'Ready'])(
-      'refuses a carrier whose mcpStatus is %s and writes nothing',
+      'sends to an Active carrier whose mcpStatus is %s (Active is the only gate; the packet is MyCarrierPackets\' business)',
       async (mcpStatus) => {
         const { loadCarrierId } = await booked({ mcpStatus })
-        await expect(send(loadCarrierId)).rejects.toThrow(
-          new RegExp(`^${RATE_CON_MCP_ERROR_PREFIX} SWIFT TRANSPORTATION`),
-        )
-        expect(s3Send).not.toHaveBeenCalled()
-        expect(sesSend).not.toHaveBeenCalled()
-        expect(table(TABLES.carrier).get(loadCarrierId)!.rateConToken ?? null).toBeNull()
-        expect(table(TABLES.carrier).get(loadCarrierId)!.rateConStatus ?? 'NOT_SENT').toBe('NOT_SENT')
-        expect([...table(TABLES.carrierDoc).values()].filter((d) => d.type === 'RATE_CON')).toHaveLength(0)
-        expect(table(TABLES.message).size).toBe(0)
+        await send(loadCarrierId)
+        expect(table(TABLES.carrier).get(loadCarrierId)!.rateConStatus).toBe('SENT')
       },
     )
+
+    it('refuses a carrier that is not Active, and writes nothing', async () => {
+      const { loadCarrierId } = await booked({ mcpStatus: 'ACCEPTABLE' })
+      table(TABLES.carrierDirectory).set('car-1', { ...table(TABLES.carrierDirectory).get('car-1')!, status: 'INACTIVE' })
+      await expect(send(loadCarrierId)).rejects.toThrow(/not Active in the system/)
+      expect(s3Send).not.toHaveBeenCalled()
+      expect(sesSend).not.toHaveBeenCalled()
+      expect(table(TABLES.carrier).get(loadCarrierId)!.rateConStatus ?? 'NOT_SENT').toBe('NOT_SENT')
+      expect(table(TABLES.message).size).toBe(0)
+    })
 
     it.each(['ACCEPTABLE', ' pending_review ', 'MODERATE'])('sends for completed status %s', async (mcpStatus) => {
       const { loadCarrierId } = await booked({ mcpStatus })
@@ -8341,18 +8343,21 @@ describe('Step AM — cover flow and assignment ladder', () => {
     })
   })
 
-  describe('rate con is gated on MyCarrierPackets setup', () => {
+  describe('rate con is gated on the carrier being Active', () => {
     it('refuses to send while the carrier is not ACTIVE, even when the packet reads complete', async () => {
       const { loadCarrierId } = await coveredPending()
       // The packet completed at MCP but the sync has not flipped the carrier yet.
       table(TABLES.carrierDirectory).set('car-1', { ...table(TABLES.carrierDirectory).get('car-1')!, mcpStatus: 'ACCEPTABLE' })
-      await expect(call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF, to: ['dispatch@swift.com'] })).rejects.toThrow(/not set up yet/)
+      await expect(call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF, to: ['dispatch@swift.com'] })).rejects.toThrow(/not Active in the system/)
       expect(table(TABLES.carrier).get(loadCarrierId)!.rateConStatus).toBe('NOT_SENT')
     })
 
-    it('refuses to send while the packet is not complete (the existing MCP message)', async () => {
+    it('sends to an Active carrier whose MyCarrierPackets packet is only invited (Active is the only gate)', async () => {
       const { loadCarrierId } = await coveredPending()
-      await expect(call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF, to: ['dispatch@swift.com'] })).rejects.toThrow(/needs a completed MyCarrierPackets packet/)
+      table(TABLES.carrierDirectory).set('car-1', { ...table(TABLES.carrierDirectory).get('car-1')!, mcpStatus: 'INVITED' })
+      mcpActivates()
+      await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF, to: ['dispatch@swift.com'] })
+      expect(table(TABLES.carrier).get(loadCarrierId)).toMatchObject({ rateConStatus: 'SENT' })
     })
 
     it('sends once MCP activates the carrier, climbing to RATE_CON_SENT and mirroring it', async () => {
