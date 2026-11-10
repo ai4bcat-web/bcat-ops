@@ -28,7 +28,7 @@ vi.mock('@/hooks/useArToInvoiceCount', () => ({ useArToInvoiceCount: () => 1 }))
 vi.mock('@/hooks/useApToReviewCount', () => ({ useApToReviewCount: () => 1 }))
 vi.mock('@/hooks/useQuotesToReplyCount', () => ({ useQuotesToReplyCount: () => 3 }))
 const reads = vi.hoisted(() => ({ intake: vi.fn(async () => 2), spot: vi.fn(async () => ({ new: 2, needsInfo: 1, needsAttention: 1 })) }))
-vi.mock('@/lib/apiClient', () => ({ countOpenIntakeLoads: reads.intake, spotAction: reads.spot }))
+vi.mock('@/lib/apiClient', () => ({ countOpenIntakeLoads: reads.intake, spotAction: reads.spot, listDriverAvailabilities: async () => [] }))
 vi.mock('@/lib/loadReview', () => ({ loadReviewCount: () => 4 }))
 vi.mock('@/features/tms/carrierSales/carrierSalesQueue', () => ({ needsCoverCount: () => 5 }))
 
