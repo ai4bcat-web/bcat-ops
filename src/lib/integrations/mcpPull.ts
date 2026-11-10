@@ -199,7 +199,7 @@ export async function applyProfileToCarrier(
   deps: McpPullDeps,
   carrier: Row,
   profile: McpProfile,
-  ctx: { runId: string; matchedBy: MatchedBy | 'CREATED'; now: string },
+  ctx: { runId: string; matchedBy: MatchedBy | 'CREATED'; now: string; monitored?: boolean },
   /** Changes feeds carry no contacts or payment; only a full GetCarrierData does. */
 ): Promise<Outcome> {
   let current: Row | null = carrier
@@ -208,7 +208,7 @@ export async function applyProfileToCarrier(
   for (let attempt = 0; attempt < 2 && current; attempt++) {
     const mapped = mapProfileToCarrier(current, profile)
     // Step AM. MCP drives Carrier.status: packet complete + monitored => ACTIVE, a lapse => INACTIVE.
-    const statusPatch = mcpCarrierStatusPatch({ ...current, ...mapped.patch }, ctx.now)
+    const statusPatch = mcpCarrierStatusPatch({ ...current, ...mapped.patch }, ctx.now, { monitored: ctx.monitored === true })
     if (statusPatch.status !== undefined) {
       mapped.changes.status = { before: current.status ?? null, after: statusPatch.status, kind: 'OVERWROTE' }
     }
@@ -273,7 +273,7 @@ export async function ingestProfile(
   profile: McpProfile,
   counts: McpPullCounts,
   unmatched: McpUnmatched[],
-  ctx: { runId: string; now: string; createUnmatched: boolean },
+  ctx: { runId: string; now: string; createUnmatched: boolean; /** Came from MCP's monitored list: the carrier is Active with us. */ monitored?: boolean },
   touched: Set<string>,
 ): Promise<void> {
   const match = matchCarrier(index, profile)
@@ -297,7 +297,7 @@ export async function ingestProfile(
   }
   for (const row of match.rows) {
     touched.add(String(row.id))
-    const outcome = await applyProfileToCarrier(deps, row, profile, { runId: ctx.runId, matchedBy: match.by, now: ctx.now })
+    const outcome = await applyProfileToCarrier(deps, row, profile, { runId: ctx.runId, matchedBy: match.by, now: ctx.now, monitored: ctx.monitored === true })
     if (outcome === 'UPDATED') counts.updated++
     else if (outcome === 'CONFLICT') counts.conflicts++
     else counts.unchanged++
@@ -344,7 +344,7 @@ export async function runBackfillSlice(deps: McpPullDeps, state: McpPullState, o
         if (!profile) next.counts.noData++
         else {
           try {
-            await ingestProfile(deps, index, profile, next.counts, next.unmatchedMcp, { runId: next.runId, now: new Date(deps.nowMs()).toISOString(), createUnmatched: options.createUnmatched }, touched)
+            await ingestProfile(deps, index, profile, next.counts, next.unmatchedMcp, { runId: next.runId, now: new Date(deps.nowMs()).toISOString(), createUnmatched: options.createUnmatched, monitored: true }, touched)
           } catch (err) {
             next.counts.errors++
             next.lastError = err instanceof Error ? err.message.slice(0, 300) : 'Write failed'

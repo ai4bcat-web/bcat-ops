@@ -40,6 +40,11 @@ describe('mcpCarrierStatusPatch: MyCarrierPackets drives Carrier.status', () => 
     const base = { mcpStatus: 'ACCEPTABLE', insurancePolicies: GOOD_POLICIES }
     expect(mcpCarrierStatusPatch({ ...base, status: 'INACTIVE', statusChangedBy: 'mcp-sync' }, NOW)).toMatchObject({ status: 'ACTIVE' })
     expect(mcpCarrierStatusPatch({ ...base, status: 'INACTIVE', statusChangedBy: 'ops@example.com' }, NOW)).toEqual({})
+    // On MCP's monitored list, a person's Inactive does not hold it off (Ryne 2026-11-10) ...
+    expect(mcpCarrierStatusPatch({ ...base, status: 'INACTIVE', statusChangedBy: 'ops@example.com' }, NOW, { monitored: true })).toMatchObject({ status: 'ACTIVE' })
+    // ... but Do not use is a human judgement, and a lapse still wins.
+    expect(mcpCarrierStatusPatch({ ...base, status: 'DO_NOT_USE' }, NOW, { monitored: true })).toEqual({})
+    expect(mcpCarrierStatusPatch({ ...base, status: 'INACTIVE', statusChangedBy: 'ops@example.com', authorityStatus: 'INACTIVE' }, NOW, { monitored: true })).toEqual({})
   })
 
   it('never touches DO_NOT_USE, and leaves a carrier with no MCP data (Aljex-imported) alone', () => {

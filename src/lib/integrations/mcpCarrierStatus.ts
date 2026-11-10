@@ -43,14 +43,16 @@ const LAPSE_NOTE: Record<McpLapseReason, string> = {
  * The status fields MCP writes for `carrier` (the row with this sync's patch already applied), or
  * `{}` when nothing changes. Pure: the caller stamps and writes.
  */
-export function mcpCarrierStatusPatch(carrier: Row, now: string): Row {
+export function mcpCarrierStatusPatch(carrier: Row, now: string, opts: { monitored?: boolean } = {}): Row {
   const current = typeof carrier.status === 'string' && carrier.status ? carrier.status : 'PENDING'
   if (current === 'DO_NOT_USE') return {}
   const lapse = mcpLapseOf(carrier, now)
   const complete = mcpPacketStanding(carrier as { mcpStatus?: string | null }).completed
 
   if (complete && !lapse) {
-    const mayActivate = current === 'PENDING' || current === 'REVIEW' || (current === 'INACTIVE' && carrier.statusChangedBy === MCP_STATUS_ACTOR)
+    // A carrier on MCP's MONITORED list is Active with us (Ryne 2026-11-10), including one a person or the Aljex import had left Inactive;
+    // an insurance / authority lapse above still keeps it off, and DO_NOT_USE was returned before this point.
+    const mayActivate = current === 'PENDING' || current === 'REVIEW' || (current === 'INACTIVE' && (carrier.statusChangedBy === MCP_STATUS_ACTOR || opts.monitored === true))
     if (!mayActivate) return {}
     return { status: 'ACTIVE', statusReason: null, statusNote: 'MyCarrierPackets: packet complete and monitored.', statusChangedAt: now, statusChangedBy: MCP_STATUS_ACTOR }
   }
