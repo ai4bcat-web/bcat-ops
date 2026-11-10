@@ -28,6 +28,7 @@ import { ArDenseTable, type ArGrid } from './components/ArDenseTable'
 import { useArWorklist, type ArWorklistRow } from '@/hooks/useArWorklist'
 import { useCustomerAr } from '@/hooks/useCustomerAr'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
+import { exportOutstandingReceivables } from '@/lib/opsExports'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import {
@@ -399,7 +400,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         <div className="tms-page-head">
           <h1>{chrome.title}</h1>
           {viewTabs ? <span className="tms-views-btn"><Eye size={15} aria-hidden="true" />Views</span> : null}
-          <div className="tms-page-actions">{current.actions}</div>
+          <div className="tms-page-actions">
+            <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="export-outstanding-receivables" title="Every open invoice with every field"
+              onClick={() => { exportOutstandingReceivables().then((n) => toast.success(`Exported ${n} outstanding receivables`)).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not export')) }}>
+              <Download size={14} aria-hidden="true" /> Export outstanding
+            </button>
+            {current.actions}
+          </div>
         </div>
         {viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
         <div className="tms-filter-row">

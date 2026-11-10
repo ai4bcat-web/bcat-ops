@@ -130,6 +130,14 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     }, 0)
   }, [])
 
+  /** Tie the intake row this shipment was pre-filled from to it (moves the row out of Intake). Best-effort: the shipment exists either way; the server call is idempotent. */
+  const linkIntake = (b: ShipmentBundle) => {
+    const from = intakeId ?? b.shipment.intakeLoadId ?? undefined
+    if (!from) return
+    linkIntakeShipment({ intakeId: from, shipmentId: b.shipment.id })
+      .then(() => toast.success('Intake load marked as moved'))
+      .catch((err: unknown) => toast.error(`Saved, but the intake load was not linked: ${err instanceof Error ? err.message : 'unknown error'}`))
+  }
   const form = useShipmentForm({
     email,
     initialBundle,
@@ -140,16 +148,15 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     prefillCustomerId,
     onCreated: (b) => {
       toast.success(`Shipment ${b.shipment.number} created`)
-      // The shipment exists whatever happens to the link; the intake row is tied to it best-effort.
-      if (intakeId) {
-        linkIntakeShipment({ intakeId, shipmentId: b.shipment.id })
-          .then(() => toast.success('Intake load marked as moved'))
-          .catch((err: unknown) => toast.error(`Created, but the intake load was not linked: ${err instanceof Error ? err.message : 'unknown error'}`))
-      }
+      linkIntake(b)
       navigate(`/tms/shipments/${b.shipment.id}/edit`, { replace: true })
     },
+    // A step after the create failed: the shipment exists, so the intake row it came from must still leave Intake.
+    onCreatedPartly: (b) => linkIntake(b),
     onSubmitted: (b) => {
       toast.success(`Shipment ${b.shipment.number} submitted`)
+      // Submitting a NEW shipment straight from the intake pre-fill is a create too: without this the intake row stayed in Intake.
+      linkIntake(b)
       navigate(`/tms/shipments/${b.shipment.id}`)
     },
     onBlocked: (issues) => { if (issues[0]) focusField(issues[0].fieldKey) },

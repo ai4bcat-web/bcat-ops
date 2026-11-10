@@ -26,6 +26,7 @@ import { useApWorklist, type ApWorklistRow } from '@/hooks/useApWorklist'
 import { useCarrierAp } from '@/hooks/useCarrierAp'
 import { useCarriers } from '@/hooks/useCarriers'
 import { useOpenBills } from '@/hooks/useOpenBills'
+import { exportOutstandingPayables } from '@/lib/opsExports'
 import {
   getShipmentDocumentUrl, getTmsSettings, graphqlErrorText, listBillsByMonth, reverseApPayment, unapproveBill, voidBill,
 } from '@/lib/apiClient'
@@ -406,7 +407,17 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         onOpenQueue={() => { setChip('NEEDS_REVIEW'); setTab('inbox') }}
       />
       <div className="tms-page">
-        <ApChrome title={chrome.title} viewTabs={chrome.viewTabs} quickTabs={chrome.quickTabs} />
+        <ApChrome
+          title={chrome.title}
+          viewTabs={chrome.viewTabs}
+          quickTabs={chrome.quickTabs}
+          actions={(
+            <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="export-outstanding-payables" title="Every open bill with every field"
+              onClick={() => { exportOutstandingPayables().then((n) => toast.success(`Exported ${n} outstanding payables`)).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not export')) }}>
+              <Download size={14} aria-hidden="true" /> Export outstanding
+            </button>
+          )}
+        />
         {/* Keyed by grid so each view keeps its own saved columns, filters and sort. */}
         <ApDenseList<never> key={current.gridId} config={current} email={user?.email} onRefresh={chrome.onRefresh} />
       </div>

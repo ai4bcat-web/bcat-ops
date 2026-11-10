@@ -344,6 +344,16 @@ describe('ShipmentFormPage — from an intake load', () => {
     await waitFor(() => expect(h.linkIntakeShipment).toHaveBeenCalledWith({ intakeId: 'il:r1', shipmentId: 'sh-1' }))
   })
 
+  it('still ties the intake load when a later step fails after the shipment was created (it must leave Intake either way)', async () => {
+    h.intakeRow = row
+    h.linkIntakeShipment.mockClear()
+    h.runSaveDraft.mockResolvedValue({ ok: false, bundle: bundleOf('DRAFT'), steps: [{ step: 'create', ok: true }], failedSteps: ['revTag'], createdShipmentId: 'sh-1', message: 'Tag failed' })
+    renderForm('create', { pathname: '/new', state: { intakeId: 'il:r1' } })
+    await waitFor(() => expect((screen.getByTestId('f-shipping-equipmentType') as HTMLInputElement).value).toBe('Dry Van'))
+    fireEvent.click(screen.getByTestId('ship-form-save-draft'))
+    await waitFor(() => expect(h.linkIntakeShipment).toHaveBeenCalledWith({ intakeId: 'il:r1', shipmentId: 'sh-1' }))
+  })
+
   it('does not look at an intake id on the edit route', () => {
     h.shipment = { bundle: bundleOf('DRAFT'), loading: false, error: null }
     renderForm('edit', { pathname: '/sh-1/edit', state: { intakeId: 'il:r1' } })

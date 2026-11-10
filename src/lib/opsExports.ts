@@ -3,7 +3,7 @@
  * Every stored field of every record (nested values become dotted columns), not the columns on screen and not the page's filters.
  * Open to anyone who can open the page the button sits on, so none of these checks the role.
  */
-import { listCustomers, listOpenBills, listOpenInvoices } from '@/lib/apiClient'
+import { listCustomers, listOpenBills, listOpenInvoices, listVendorPayables } from '@/lib/apiClient'
 import { downloadCsv, recordsToFullCsv } from '@/lib/directoryCsv'
 import { LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, failingReasons, type LoadReviewVerdict } from '@/lib/loadReview'
 
@@ -30,7 +30,14 @@ export async function exportOutstandingReceivables(): Promise<number> {
   return exportRecords('outstanding-receivables', invoices.map((inv) => ({ ...inv, customerName: names.get(inv.customerId ?? '') ?? '' })))
 }
 
-/** Every open carrier bill (money we still owe). */
+/**
+ * Everything we still owe: every open carrier bill and every vendor bill that still needs paying, one file, a `payableKind`
+ * column telling them apart (the two record types keep their own fields; a field a type lacks is blank).
+ */
 export async function exportOutstandingPayables(): Promise<number> {
-  return exportRecords('outstanding-payables', await listOpenBills())
+  const [carrier, vendor] = await Promise.all([listOpenBills(), listVendorPayables()])
+  return exportRecords('outstanding-payables', [
+    ...carrier.map((b) => ({ payableKind: 'Carrier bill', ...b })),
+    ...vendor.filter((v) => v.status === 'NEED_TO_PAY').map((v) => ({ payableKind: 'Vendor bill', ...v })),
+  ])
 }

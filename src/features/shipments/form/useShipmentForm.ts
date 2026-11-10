@@ -42,6 +42,8 @@ export interface UseShipmentFormOptions {
   prefillCustomerId?: string
   /** Fired when a create-mode run finished and the shipment exists: navigate to its edit URL. */
   onCreated: (bundle: ShipmentBundle) => void
+  /** The shipment exists but a later step failed (the create is only partly done): the caller can still tie it to what it came from. */
+  onCreatedPartly?: (bundle: ShipmentBundle) => void
   onSubmitted: (bundle: ShipmentBundle) => void
   /** Create/Submit refused by the client rules: the page expands those sections. */
   onBlocked: (issues: FormIssue[]) => void
@@ -54,7 +56,7 @@ export function officeLabelOf(staff: UserProfileRecord[], salesRepId: string): s
 
 export function useShipmentForm(opts: UseShipmentFormOptions) {
   const {
-    email, initialBundle, customers, staff, settings, pipelineCtx, onCreated, onSubmitted, onBlocked,
+    email, initialBundle, customers, staff, settings, pipelineCtx, onCreated, onCreatedPartly, onSubmitted, onBlocked,
   } = opts
   const customerOf = useCallback(
     (id: string) => customers.find((c) => c.id === id) ?? null, [customers],
@@ -177,6 +179,7 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
     if (next) setBundle(next)
     if (!result.ok) {
       if (next) reseed(valuesRef.current, true)
+      if (wasCreate && result.createdShipmentId && next) onCreatedPartly?.(next)
       if (result.createdShipmentId && next && result.failedSteps.length === 1 && result.failedSteps[0] === 'assignDriver') {
         // Cover owns assignment retries, including relay confirmations and pay overrides.
         setPartial(null)
@@ -214,7 +217,7 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
     else if (wasCreate) onCreated(next)
     else toast.success(kind === 'draft' ? 'Draft saved' : 'Changes saved')
     return true
-  }, [email, customerOf, staff, reseed, onCreated, onSubmitted])
+  }, [email, customerOf, staff, reseed, onCreated, onCreatedPartly, onSubmitted])
 
   /** Resolves true when the save went through (so Save & exit knows it may leave). */
   const run = useCallback(async (kind: RunKind): Promise<boolean> => {
