@@ -23,6 +23,34 @@ export function changedApptStops(before: readonly Stop[], next: readonly Stop[] 
   return out
 }
 
+/**
+ * Every appointment this write changes, whichever way it was written: a `stops` array, or only the legacy pickup/delivery mirrors
+ * (the calendar's date editor writes just those), which land on the first pickup and the last delivery, like the driver mirrors.
+ */
+export function apptChangesOfWrite(beforeStops: readonly Stop[], next: Partial<Load>): ApptChange[] {
+  if (next.stops) return changedApptStops(beforeStops, next.stops)
+  const ordered = [...beforeStops].sort((a, b) => a.sequence - b.sequence)
+  const first = ordered.find((s) => s.type === 'pickup') ?? ordered[0]
+  const last = [...ordered].reverse().find((s) => s.type === 'delivery') ?? ordered[ordered.length - 1]
+  const out: ApptChange[] = []
+  const edit = (stop: Stop | undefined, kind: 'pickup' | 'delivery') => {
+    if (!stop) return
+    const rec = next as Record<string, unknown>
+    const hasAppt = `${kind}Appt` in rec
+    const hasType = `${kind}ApptType` in rec
+    const hasEnd = `${kind}ApptEnd` in rec
+    if (!hasAppt && !hasType && !hasEnd) return
+    const appt = (hasAppt ? (rec[`${kind}Appt`] as string | null | undefined) : stop.appt) ?? stop.appt
+    if (!appt) return
+    const apptEnd = hasEnd ? ((rec[`${kind}ApptEnd`] as string | null | undefined) ?? null) : (stop.apptEnd ?? null)
+    const apptType = hasType ? ((rec[`${kind}ApptType`] as string | null | undefined) ?? null) : (stop.apptType ?? null)
+    if (stop.appt !== appt || (stop.apptEnd ?? null) !== apptEnd || (stop.apptType ?? null) !== apptType) out.push({ stopId: stop.id, appt, apptEnd, apptType })
+  }
+  edit(first, 'pickup')
+  if (last && last.id !== first?.id) edit(last, 'delivery')
+  return out
+}
+
 /** Stops whose driver differs from what the load held (a driver put on, changed or taken off). New and removed stops are not driver changes. */
 export function changedStopDrivers(before: readonly Stop[], next: readonly Stop[] | null | undefined): { stopId: string; driverId: string | null }[] {
   if (!next) return []

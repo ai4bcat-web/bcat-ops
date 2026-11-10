@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  updateLoad: vi.fn(), removeLoadCarrier: vi.fn(), assignAsset: vi.fn(), setStopDrivers: vi.fn(), createAuditLog: vi.fn(),
+  updateLoad: vi.fn(), updateStop: vi.fn(), removeLoadCarrier: vi.fn(), assignAsset: vi.fn(), setStopDrivers: vi.fn(), createAuditLog: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => api)
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }))
@@ -138,5 +138,15 @@ describe('an old load with no stored stops', () => {
     api.setStopDrivers.mockResolvedValue({})
     await useAppStore.getState().updateLoad('l1', { pickupDriverId: null, deliveryDriverId: null } as never)
     expect(api.setStopDrivers).toHaveBeenCalledWith({ loadId: 'l1', assignments: [{ stopId: 'l1:pu', driverId: null }, { stopId: 'l1:de', driverId: null }] })
+  })
+})
+
+describe('a date edited on the calendar (mirror fields only)', () => {
+  it('goes through UPDATE_STOP / SET_APPT and never sends the refused pickup/delivery date fields', async () => {
+    api.updateStop.mockResolvedValue({ loads: [{ updatedAt: 't1' }] })
+    useAppStore.setState({ loads: [covered({ assignmentType: 'OWN_ASSET', activeLoadCarrierId: null }) as never] })
+    await useAppStore.getState().updateLoad('l1', { pickupAppt: '2026-11-13T15:00:00.000Z', pickupApptType: 'exact' } as never)
+    expect(api.updateStop).toHaveBeenCalledWith(expect.objectContaining({ loadId: 'l1', op: 'SET_APPT', stopId: 'a', patch: expect.objectContaining({ appt: '2026-11-13T15:00:00.000Z' }) }))
+    for (const call of api.updateLoad.mock.calls) expect(call[1]).not.toHaveProperty('pickupAppt')
   })
 })

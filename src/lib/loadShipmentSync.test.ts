@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { changedApptStops, changedStopDrivers, driverChangesOfWrite, loadWideDriverChange, takesRosterDriver } from './loadShipmentSync'
+import { apptChangesOfWrite, changedApptStops, changedStopDrivers, driverChangesOfWrite, loadWideDriverChange, takesRosterDriver } from './loadShipmentSync'
 import type { Stop } from '@/types'
 
 const stop = (id: string, appt: string, extra: Partial<Stop> = {}): Stop => ({ id, sequence: 0, type: 'pickup', appt, ...extra }) as Stop
@@ -50,5 +50,26 @@ describe('driverChangesOfWrite', () => {
   })
   it('reads a stops write by the stops themselves', () => {
     expect(driverChangesOfWrite(stops, { stops: [stop('pu', 'pickup', 0, 'd3'), stop('de', 'delivery', 1, 'd1')] } as never)).toEqual([{ stopId: 'pu', driverId: 'd3' }])
+  })
+})
+
+describe('apptChangesOfWrite', () => {
+  const stops = [
+    { id: 'a', sequence: 0, type: 'pickup', appt: '2026-11-12T14:00:00.000Z', apptType: 'exact' },
+    { id: 'b', sequence: 1, type: 'delivery', appt: '2026-11-12T22:00:00.000Z', apptType: 'exact' },
+  ] as Stop[]
+
+  it('a write of only the pickup/delivery mirrors (the calendar date editor) lands on the first pickup and last delivery', () => {
+    expect(apptChangesOfWrite(stops, { pickupAppt: '2026-11-13T15:00:00.000Z' } as never)).toEqual([{ stopId: 'a', appt: '2026-11-13T15:00:00.000Z', apptEnd: null, apptType: 'exact' }])
+    expect(apptChangesOfWrite(stops, { deliveryAppt: '2026-11-13T20:00:00.000Z', deliveryApptType: 'fcfs' } as never)).toEqual([{ stopId: 'b', appt: '2026-11-13T20:00:00.000Z', apptEnd: null, apptType: 'fcfs' }])
+  })
+
+  it('a changed type or window end alone counts, and an unchanged value is not a change', () => {
+    expect(apptChangesOfWrite(stops, { pickupApptType: 'range', pickupApptEnd: '2026-11-12T18:00:00.000Z' } as never)).toEqual([{ stopId: 'a', appt: '2026-11-12T14:00:00.000Z', apptEnd: '2026-11-12T18:00:00.000Z', apptType: 'range' }])
+    expect(apptChangesOfWrite(stops, { pickupAppt: '2026-11-12T14:00:00.000Z' } as never)).toEqual([])
+  })
+
+  it('with a stops array it is the stop-by-stop diff', () => {
+    expect(apptChangesOfWrite(stops, { stops: [{ ...stops[0], appt: '2026-11-14T14:00:00.000Z' }, stops[1]] } as never).map((c) => c.stopId)).toEqual(['a'])
   })
 })
