@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import '@testing-library/jest-dom/vitest'
 import * as api from '@/lib/apiClient'
@@ -18,7 +18,7 @@ let divisions: OwnershipDivisionRecord[] = []
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({
   useOwnershipDivisions: () => ({ divisions, loading: false, error: null, refresh: () => undefined }),
 }))
-vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn() }))
+vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn() }))
 
 function Where() {
   const loc = useLocation()
@@ -106,6 +106,18 @@ describe('IntakeBoard', () => {
     await screen.findByText('First tender')
     fireEvent.click(screen.getAllByTestId('intake-create-shipment')[0])
     expect(JSON.parse(screen.getByTestId('new-state').textContent ?? '{}')).toEqual({ intakeId: expect.stringMatching(/^il:/) })
+  })
+
+  it('Mark done on an open row dismisses it (so it leaves Intake) and offers nothing on a moved row', async () => {
+    renderBoard('/tms/shipments/intake?division=BRK')
+    await screen.findByText('First tender')
+    vi.mocked(api.dismissIntake).mockResolvedValue(intakeRow({ status: 'DISMISSED' }))
+    fireEvent.click(screen.getAllByTestId('intake-mark-done')[0])
+    await waitFor(() => expect(api.dismissIntake).toHaveBeenCalledWith(expect.objectContaining({ intakeId: expect.stringMatching(/^il:/), reason: 'Marked done from the Intake list' })))
+    cleanup()
+    renderBoard('/tms/shipments/intake?division=BRK&status=moved')
+    await screen.findByText('Moved one')
+    expect(screen.queryByTestId('intake-mark-done')).toBeNull()
   })
 
   it('offers no Create shipment on a row that already moved', async () => {

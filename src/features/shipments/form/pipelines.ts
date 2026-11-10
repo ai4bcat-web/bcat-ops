@@ -248,6 +248,33 @@ export async function runUploadQueued(values: ShipmentFormValues, bundle: Shipme
 }
 
 /** Save draft: create when nothing exists yet, else a lenient SAVE_ORDER_FORM (or the non-draft edit path). */
+/**
+ * An Ivan Cartage (own fleet) driver picked on an EXISTING shipment. The typed carrier patch never carries an own-fleet driver, and
+ * assignment used to run only when the shipment was created, so a pick on an open shipment was dropped on save and the picker
+ * snapped back to "Pick a driver". Assign when the picked driver differs from the one the saved shipment shows.
+ */
+async function assignPickedDriver(r: Runner, values: ShipmentFormValues, ctx: PipelineCtx, saved: ShipmentBundle): Promise<void> {
+  const wanted = values.carrier.driver1.name.trim()
+  if (!values.carrier.isOwnFleet || !wanted) return
+  const was = valuesFromBundle(saved, { customer: ctx.customer }).carrier.driver1.name.trim()
+  if (was.toLowerCase() === wanted.toLowerCase()) return
+  await r.run('assignDriver', async () => {
+    const driver = ownFleetDriverByName(ctx.ownFleetRoster ?? [], wanted)
+    if (!driver) throw new Error('The selected driver is no longer available. Pick a driver using Cover.')
+    const load = r.bundle?.loads[0]
+    if (!load) return
+    return assignAsset({
+      loadId: load.id,
+      driverId: driver.id,
+      truckId: driver.truckId ?? undefined,
+      truckNumber: driver.truckNumber || undefined,
+      trailerId: driver.trailerId ?? undefined,
+      trailerNumber: driver.trailerNumber || undefined,
+    })
+  })
+  if (r.failed.includes('assignDriver')) r.message = `Saved, but the driver was not assigned: ${r.message}`
+}
+
 export async function runSaveDraft(
   values: ShipmentFormValues, ctx: PipelineCtx, bundle: ShipmentBundle | null,
 ): Promise<PipelineResult> {
@@ -255,8 +282,9 @@ export async function runSaveDraft(
   if (bundle.shipment.status !== 'DRAFT') return runEditSave(values, ctx, bundle)
   const problem = precheck(values, ctx, 'draft', 'edit')
   if (problem) return fail(problem, bundle)
-  const r = new Runner(bundle, new Set(), ['save', 'revTag', 'salesRep', 'dispatcher'])
+  const r = new Runner(bundle, new Set(), ['save', 'revTag', 'salesRep', 'dispatcher', 'assignDriver'])
   await saveDraftBody(r, values, ctx, true)
+  await assignPickedDriver(r, values, ctx, bundle)
   return r.result()
 }
 
@@ -358,14 +386,15 @@ export async function runEditSave(values: ShipmentFormValues, ctx: PipelineCtx, 
   const problem = precheck(values, ctx, 'create', 'edit')
   if (problem) return fail(problem, bundle)
   if (bundle.shipment.status === 'DRAFT') {
-    const r = new Runner(bundle, new Set(), ['save', 'revTag', 'salesRep', 'dispatcher'])
+    const r = new Runner(bundle, new Set(), ['save', 'revTag', 'salesRep', 'dispatcher', 'assignDriver'])
     await saveDraftBody(r, values, ctx, false)
+    await assignPickedDriver(r, values, ctx, bundle)
     return r.result()
   }
   const seed = { customer: ctx.customer }
   const before = valuesFromBundle(bundle, seed)
   const locks = lockedFields(bundle)
-  const r = new Runner(bundle, new Set(), ['order', 'stops', 'charges', 'revTag', 'salesRep', 'dispatcher', 'carrier', 'eta'])
+  const r = new Runner(bundle, new Set(), ['order', 'stops', 'charges', 'revTag', 'salesRep', 'dispatcher', 'carrier', 'assignDriver', 'eta'])
 
   await r.run('order', async () => {
     const next = toUpdateOrderDetailsInput(values, r.bundle!)
@@ -403,6 +432,7 @@ export async function runEditSave(values: ShipmentFormValues, ctx: PipelineCtx, 
       r.bundle = await updateLoadCarrierDetails({ loadCarrierId: lc.id, expectedUpdatedAt: lc.updatedAt, ...patch })
     }
   })
+  await assignPickedDriver(r, values, ctx, bundle)
   await r.run('eta', async () => {
     const slots = carrierSlotsOf(values)
     const was = carrierSlotsOf(before)
