@@ -64,14 +64,15 @@ export function ConversationList({ rows, selectedId, onSelect, now, subline, sta
               }}
             >
               <span aria-hidden="true" style={{ gridRow: '1 / span 2', alignSelf: 'center', width: 34, height: 34, borderRadius: 17, background: color.avatarBg, color: 'var(--tms-on-primary)', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: unread ? `0 0 0 2px ${color.border}` : 'none' }}>{initialsOf(title)}</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: unread ? 700 : 600, color: color.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+              {/* overflow hidden: the name shrinks with an ellipsis, the badges keep their size, and nothing paints under the time in the next column. */}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
+                <span style={{ fontSize: 14, fontWeight: unread ? 700 : 600, color: color.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: '0 1 auto' }}>{title}</span>
                 {unread ? <span aria-label={`${c.unreadCount} unread`} style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>NEW</span> : null}
-                {isDriver ? <span style={{ fontSize: 11, color: 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{prettyPhone(c.phone)}</span> : null}
-                {isDriver ? (() => { const k = unitTypeOf(drivers.find((d) => d.id === c.driverId)); return <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: k ? 'var(--tms-text-2)' : 'var(--tms-badge-orange)', background: 'var(--tms-surface)', borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap' }}>{unitKindLabel(k)}</span> })() : null}
+                {isDriver ? <span style={{ fontSize: 11, color: 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>{prettyPhone(c.phone)}</span> : null}
+                {isDriver ? (() => { const k = unitTypeOf(drivers.find((d) => d.id === c.driverId)); return <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: k ? 'var(--tms-text-2)' : 'var(--tms-badge-orange)', background: 'var(--tms-surface)', borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap' }}>{unitKindLabel(k)}</span> })() : null}
                 {c.status === 'ARCHIVED' ? <span style={{ fontSize: 10, color: 'var(--tms-muted)', border: '1px solid var(--tms-border)', borderRadius: 4, padding: '0 4px' }}>Archived</span> : null}
               </span>
-              <span style={{ fontSize: 11, color: unread ? color.border : 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{listTime(c.lastMessageAt, now)}</span>
+              <span style={{ fontSize: 11, color: unread ? color.border : 'var(--tms-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', alignSelf: 'center', justifySelf: 'end' }}>{listTime(c.lastMessageAt, now)}</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, fontSize: 12, color: unread ? 'var(--tms-text)' : 'var(--tms-muted)' }}>
                 <KindIcon kind={c.lastKind} />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
