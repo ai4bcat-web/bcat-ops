@@ -375,6 +375,8 @@ export const SYSTEM_CALLERS: Record<string, readonly Action[]> = {
   'tracking-automation': ['RUN_TRACKING_AUTOMATION'],
   'shipment-email-intake': ['INGEST_SHIPMENT_MESSAGE', 'INGEST_ATTACHMENT'],
   'dispatch-twilio-webhook': ['INGEST_SHIPMENT_MESSAGE'],
+  // The signing page's confirmation e-mail on the carrier thread (it holds no mail grants of its own).
+  'rate-con-sign-api': ['SEND_SHIPMENT_MESSAGE'],
 }
 
 export const SYSTEM_CALLER_EMAIL = 'system@bcatcorp.com'

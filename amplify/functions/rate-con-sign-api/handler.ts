@@ -20,6 +20,7 @@
  * folder), superseding the previous signed version. Everything is logged to AuditLog (entity LOAD_CARRIER,
  * user CARRIER_PORTAL), refused attempts included. Rate-limited per token via LoadCarrier.rateConRequestCount.
  */
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import {
   DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand,
@@ -46,6 +47,8 @@ const SETTINGS_TABLE = process.env.SETTINGS_TABLE_NAME!
 const AUDIT_TABLE = process.env.AUDIT_LOG_TABLE_NAME!
 const SHIPMENT_MESSAGE_TABLE = process.env.SHIPMENT_MESSAGE_TABLE_NAME ?? ''
 const BUCKET = process.env.BUCKET_NAME!
+const TRACKING_ACTIONS_FUNCTION = process.env.TMS_TRACKING_ACTIONS_FUNCTION_NAME ?? ''
+const lambdaClient = new LambdaClient({})
 
 const IDX_DOCUMENTS_BY_SHIPMENT = 'shipmentDocumentsByShipmentIdAndUploadedAt'
 const IDX_AUDIT_BY_ENTITY = 'auditLogsByEntityTypeAndEntityId'
@@ -636,6 +639,32 @@ export const handler = async (event: FnUrlEvent) => {
             }))
           } catch (err) {
             console.error('[rate-con-sign-api] thread log failed', row.id, err instanceof Error ? err.message : String(err))
+          }
+        }
+        // The full e-mail reply on that thread: a short confirmation to the carrier's dispatcher (tracking@ on CC) with the signed copy
+        // attached. Handed to the tracking-actions Lambda, which owns sending and the thread; fire and forget, so a mail problem can
+        // never undo or slow the signature.
+        if (TRACKING_ACTIONS_FUNCTION && row.shipmentId && row.dispatcherEmail) {
+          try {
+            await lambdaClient.send(new InvokeCommand({
+              FunctionName: TRACKING_ACTIONS_FUNCTION,
+              InvocationType: 'Event',
+              Payload: Buffer.from(JSON.stringify({
+                systemCaller: 'rate-con-sign-api',
+                arguments: {
+                  action: 'SEND_SHIPMENT_MESSAGE',
+                  input: JSON.stringify({
+                    shipmentId: row.shipmentId, loadCarrierId: row.id, loadId: row.loadId, channel: 'EMAIL', kind: 'RATE_CON', party: 'CARRIER',
+                    to: row.dispatcherEmail, cc: 'tracking@bcatcorp.com',
+                    subject: `Re: Rate confirmation, load ${pro}`,
+                    body: `Thank you, ${signerName}. We received the signed rate confirmation for load ${pro} (version ${version}) and a copy is attached. Please send the driver, truck and trailer details if you have not already, and reply here with any updates.`,
+                    documentIds: [filedDoc.documentId], authorKind: 'AGENT', authorName: 'BCAT Tracking',
+                  }),
+                },
+              })),
+            }))
+          } catch (err) {
+            console.error('[rate-con-sign-api] signed reply failed', row.id, err instanceof Error ? err.message : String(err))
           }
         }
         await audit(row.id, 'rate_con_signed', {

@@ -2130,6 +2130,12 @@ rateConSignApiFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',    signLoadCarrierTab
 rateConSignApiFn.addEnvironment('LOAD_TABLE_NAME',            signLoadTable.tableName)
 rateConSignApiFn.addEnvironment('SHIPMENT_TABLE_NAME',        signShipmentTable.tableName)
 rateConSignApiFn.addEnvironment('SHIPMENT_MESSAGE_TABLE_NAME', signShipmentMessageTable.tableName)
+// The signed-reply e-mail is sent by tracking-actions; the plain identity grant (not a resource policy) is what an IAM role needs.
+rateConSignApiFn.addEnvironment('TMS_TRACKING_ACTIONS_FUNCTION_NAME', backend.tmsTrackingActions.resources.lambda.functionName)
+backend.rateConSignApi.resources.lambda.addToRolePolicy(new PolicyStatement({
+  actions:   ['lambda:InvokeFunction'],
+  resources: [backend.tmsTrackingActions.resources.lambda.functionArn],
+}))
 rateConSignApiFn.addEnvironment('CARRIER_DOCUMENT_TABLE_NAME', signCarrierDocTable.tableName)
 rateConSignApiFn.addEnvironment('DIVISION_TABLE_NAME',        signDivisionTable.tableName)
 rateConSignApiFn.addEnvironment('SETTINGS_TABLE_NAME',        signSettingsTable.tableName)
