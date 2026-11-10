@@ -923,6 +923,7 @@ export async function authorize(action: Action, identity?: AppSyncIdentity | nul
     return { email: SYSTEM_CALLER_EMAIL, sub: systemCaller, groups: [], isAdmin: false }
   }
   if (action === 'FILE_INBOUND_OFFER') throw new Error('Forbidden: FILE_INBOUND_OFFER is for the carrier inbox only')
+  if (action === 'ATTACH_INVOICE_DOC') throw new Error('Forbidden: ATTACH_INVOICE_DOC is for the finance Lambda only')
   if (!identity) throw new Error('Unauthorized: missing identity')
   const email = await getCallerEmail(identity)
   if (!email) throw new Error('Unauthorized: could not resolve caller email')

@@ -100,6 +100,7 @@ import {
   ORDER_TABLE_NAME,
   SETTINGS_TABLE_NAME,
   SHIPMENT_DOCUMENT_TABLE_NAME,
+  fileInvoiceDocument,
   SHIPMENT_NOTICE_TABLE_NAME,
   SHIPMENT_TABLE_NAME,
   dynamo,
@@ -536,6 +537,8 @@ async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: C
       })],
       'invoice pdf',
     )
+    // The invoice shows on its shipment as a document the moment its PDF exists (and again, as the next version, when it is re-rendered).
+    await fileInvoiceDocument({ shipmentId: invoice.shipmentId, invoiceId: invoice.id, orderId: invoice.orderId, number: invoice.number, s3Key: key, sizeBytes: bytes.byteLength })
     return { ...invoice, pdfKey: key, pdfSizeBytes: bytes.byteLength, pdfVersion: version }
   } catch (err) {
     console.error('[tms-finance-actions] invoice PDF failed', invoice.id, String(err))
@@ -893,6 +896,8 @@ export async function voidInvoice(input: Row, caller: Caller): Promise<Row> {
 
   await transact(writes, 'void invoice')
   await writeAudit('Invoice', invoiceId, 'VOID_INVOICE', caller, { reason, orderId: invoice.orderId })
+  // The invoice's document on the shipment goes void with it.
+  await fileInvoiceDocument({ shipmentId: invoice.shipmentId, invoiceId, orderId: invoice.orderId, void: true })
   return { invoice: (await getById(INVOICE_TABLE_NAME, invoiceId)) ?? {} }
 }
 
