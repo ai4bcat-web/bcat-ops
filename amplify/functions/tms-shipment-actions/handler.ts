@@ -6149,7 +6149,8 @@ async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
   const bodyBase =
     `Attached is the rate confirmation for load ${loadNumber}.\r\n\r\n` +
     (signUrl ? `Review and sign it here: ${signUrl}\r\n\r\n` : '') +
-    `This link expires ${expiresAt}.`
+    `This link expires ${expiresAt}.\r\n\r\n` +
+    `This e-mail is the tracking thread for load ${loadNumber}. Please reply all (keep tracking@bcatcorp.com on every reply) for all tracking updates; they must stay in this thread.`
   const body = `${bodyBase}\r\n\r\n— ${firstName}, BCAT Tracking`
 
   const message: Row = {

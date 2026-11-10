@@ -657,7 +657,12 @@ export const handler = async (event: FnUrlEvent) => {
                     shipmentId: row.shipmentId, loadCarrierId: row.id, loadId: row.loadId, channel: 'EMAIL', kind: 'RATE_CON', party: 'CARRIER',
                     to: row.dispatcherEmail, cc: 'tracking@bcatcorp.com',
                     subject: `Re: Rate confirmation, load ${pro}`,
-                    body: `Thank you, ${signerName}. We received the signed rate confirmation for load ${pro} (version ${version}) and a copy is attached. Please send the driver, truck and trailer details if you have not already, and reply here with any updates.`,
+                    body: [
+                      `Thank you, ${signerName}. We received the signed rate confirmation for load ${pro} (version ${version}); a copy is attached.`,
+                      '',
+                      `THIS IS THE TRACKING THREAD FOR LOAD ${pro}. Please REPLY ALL to this e-mail (keep tracking@bcatcorp.com on every reply) for every update on this load: driver, truck and trailer details, pickup and delivery times, delays, and proof of delivery.`,
+                      'All tracking updates must stay in this thread. Please do not start a new e-mail for this load.',
+                    ].join('\n'),
                     documentIds: [filedDoc.documentId], authorKind: 'AGENT', authorName: 'BCAT Tracking',
                   }),
                 },

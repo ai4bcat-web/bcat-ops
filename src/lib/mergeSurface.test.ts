@@ -49,6 +49,7 @@ const PRODUCTION_PAGES: Array<{ page: string; to: string; pageKey?: string; rout
 const REHOMED_NAV_PATHS = new Set([
   '/loads', '/grid', // Step AV: the Load grid is retired; /loads -> /tms/shipments
   '/factoring', '/vendor-ap', // moved under /tms (pinned block); old paths redirect
+  '/pods', // 2026-11-10: POD review is part of Load Review (row POD button); the page stays reachable by link
   '/customers', '/locations', '/settings', '/audit-log', // Step AA: pinned block / Settings group under /tms/brokerage
 ])
 

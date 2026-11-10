@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, FileCheck2, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Package, PhoneCall, ClipboardList, Clock, FileSpreadsheet, CreditCard, BarChart3, UserCog, ShieldCheck, CircleDollarSign, WalletCards, Activity, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, FileCheck2, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, Package, PhoneCall, ClipboardList, Clock, FileSpreadsheet, CreditCard, BarChart3, UserCog, ShieldCheck, CircleDollarSign, WalletCards, Activity, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -56,7 +56,6 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/time-off',  label: 'Time Off',  icon: CalendarOff,     pageKey: 'timeOff', section: 'ASSETS' },
   { to: '/files',     label: 'Files',     icon: FolderOpen,      pageKey: 'files', section: 'ASSETS' },
   { to: '/intake',    label: 'Intake',    icon: Inbox,           pageKey: 'intake', section: 'ASSETS', badgeKey: 'intake' },
-  { to: '/pods',      label: 'PODs',      icon: PackageCheck,    pageKey: 'pods', section: 'ASSETS' },
   { to: '/driver-pay-box-trucks', label: 'Box Truck Settlements',   icon: Boxes,  pageKey: 'driverPayBoxTrucks', section: 'ASSETS' },
   { to: '/driver-pay',            label: 'Amazon Settlements',      icon: Wallet, pageKey: 'driverPay', section: 'ASSETS' },
   { to: '/owner-operator-pay',    label: 'Owner Operator Settlements', icon: Banknote, pageKey: 'ownerOperatorPay', section: 'ASSETS' },
@@ -160,6 +159,8 @@ const OFF_NAV_PERMISSION_PAGES: { key: string; label: string }[] = [
   { key: 'schedule', label: 'Schedule' },
   { key: 'intakeReview', label: 'Intake review' },
   { key: 'loadReview', label: 'Load review' },
+  // The PODs page left the sidebar: Load Review's POD button is the review now. The route and its grant stay for deep links.
+  { key: 'pods', label: 'PODs' },
   // Per-user grants for the two billing/reconciliation actions. Never implied by a role
   // (ADMIN included): the Lambdas check the `page-<key>` group alone, so only the Users
   // page checkbox (owner/admin) can hand them out.
