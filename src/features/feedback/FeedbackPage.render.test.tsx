@@ -53,7 +53,7 @@ describe('FeedbackPage render', () => {
     await waitFor(() => expect(screen.queryByTestId('feedback-mark-done')).toBeNull())
     fireEvent.click(await screen.findByText('My own report'))
     fireEvent.click(await screen.findByTestId('feedback-mark-done'))
-    await waitFor(() => expect(updateFeedback).toHaveBeenCalledWith('f-3', expect.objectContaining({ status: 'DONE', resolvedAt: expect.any(String) })))
+    await waitFor(() => expect(updateFeedback).toHaveBeenCalledWith('f-3', { status: 'DONE' }))
   })
 
   it('the form asks for a priority (defaulting to 2) and sends it; the list shows it and can filter by it', async () => {

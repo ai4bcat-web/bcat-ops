@@ -190,6 +190,34 @@ describe('edit pipelines', () => {
     expect(api.createShipment).not.toHaveBeenCalled()
   })
 
+  const pickedDriver = { id: 'driver-9', name: 'Pat Roe', email: '', phone: '', workPhone: '', truckId: 'truck-9', truckNumber: '9', trailerId: 'trailer-9', trailerNumber: 'T9' }
+
+  it('a driver picked on an open DRAFT shipment is assigned on save, not dropped (regression: the picker snapped back to "Pick a driver")', async () => {
+    const was = filledValues(); was.carrier.isOwnFleet = true
+    const b = storedBundle(was, { status: 'DRAFT' })
+    const v = filledValues(); v.carrier.isOwnFleet = true; v.carrier.driver1.name = pickedDriver.name
+    api.saveOrderForm.mockResolvedValue(b)
+    api.assignAsset.mockResolvedValue(b)
+    const res = await runSaveDraft(v, { ...ctx, ownFleetRoster: [pickedDriver] }, b)
+    expect(res.ok).toBe(true)
+    expect(api.assignAsset).toHaveBeenCalledExactlyOnceWith({ loadId: b.loads[0].id, driverId: 'driver-9', truckId: 'truck-9', truckNumber: '9', trailerId: 'trailer-9', trailerNumber: 'T9' })
+  })
+
+  it('a driver picked when editing a built shipment is assigned too, and an unchanged driver is not re-assigned', async () => {
+    const was = filledValues(); was.carrier.isOwnFleet = true
+    const b = storedBundle(was)
+    const v = filledValues(); v.carrier.isOwnFleet = true; v.carrier.driver1.name = pickedDriver.name
+    api.assignAsset.mockResolvedValue(b)
+    const res = await runEditSave(v, { ...ctx, ownFleetRoster: [pickedDriver] }, b)
+    expect(res.ok).toBe(true)
+    expect(api.assignAsset).toHaveBeenCalledTimes(1)
+    expect(api.assignAsset.mock.calls[0][0]).toMatchObject({ driverId: 'driver-9' })
+    api.assignAsset.mockClear()
+    const same = valuesFromBundle(b, { customer: CUSTOMER })
+    await runEditSave(same, { ...ctx, ownFleetRoster: [pickedDriver] }, b)
+    expect(api.assignAsset).not.toHaveBeenCalled()
+  })
+
   it('a DRAFT built on a typed customer name links the customer that is picked later, before it saves (regression: the pick was dropped)', async () => {
     const unlinked = filledValues(); unlinked.customer.id = ''; unlinked.customer.useTyped = true; unlinked.customer.typedName = 'Typed Co'
     const typed = storedBundle(unlinked, { status: 'DRAFT' })

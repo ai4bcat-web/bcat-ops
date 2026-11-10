@@ -4,10 +4,9 @@ import { statusPatch, sortFeedback, filterFeedback, groupByPage, isOwnFeedback, 
 const mk = (o: Partial<FeedbackItem>): FeedbackItem => ({ id: 'x', page: 'Loads', summary: 's', createdAt: '2026-01-01T00:00:00Z', ...o })
 
 describe('feedback logic', () => {
-  it('sets resolvedAt only for DONE', () => {
-    const now = new Date('2026-11-04T10:00:00Z')
-    expect(statusPatch('DONE', now)).toEqual({ status: 'DONE', resolvedAt: '2026-11-04T10:00:00.000Z' })
-    expect(statusPatch('IN_PROGRESS', now).resolvedAt).toBeNull()
+  it('writes the status only: the API refuses resolvedAt, so no status button may send it', () => {
+    expect(statusPatch('DONE')).toEqual({ status: 'DONE' })
+    expect(statusPatch('IN_PROGRESS')).toEqual({ status: 'IN_PROGRESS' })
   })
   it('sorts by status rank, treating missing status as NEW', () => {
     const a = mk({ id: 'a', status: 'DONE' }), b = mk({ id: 'b' }), c = mk({ id: 'c', status: 'IN_PROGRESS' })

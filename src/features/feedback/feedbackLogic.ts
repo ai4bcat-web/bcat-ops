@@ -48,9 +48,12 @@ export function screenshotsOf(f: FeedbackItem): string[] {
   return (f.screenshotKeys ?? []).filter((k): k is string => !!k)
 }
 
-/** Fields to write when moving a row to `next`: resolvedAt is set on DONE, cleared otherwise. */
-export function statusPatch(next: FeedbackStatus, now = new Date()): { status: FeedbackStatus; resolvedAt: string | null } {
-  return { status: next, resolvedAt: next === 'DONE' ? now.toISOString() : null }
+/**
+ * Fields to write when moving a row to `next`. Status only: the API refuses writes to `resolvedAt`
+ * ("Unauthorized on [resolvedAt]"), which made every status button fail, and nothing reads it (updatedAt dates the change).
+ */
+export function statusPatch(next: FeedbackStatus): { status: FeedbackStatus } {
+  return { status: next }
 }
 
 /** Whoever submitted a report may close it themselves ("I got it done") and reopen it; everyone else's stays read-only unless they are an admin. */
