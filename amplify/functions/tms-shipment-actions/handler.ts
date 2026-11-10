@@ -8614,10 +8614,11 @@ async function lockShipment(input: Row, caller: Caller): Promise<Row> {
     return { locked: true, lockedBy: caller.email, expiresAt }
   } catch (err) {
     if ((err as { name?: string } | null)?.name !== 'ConditionalCheckFailedException') throw err
-    const row = await getById(SHIPMENT_TABLE_NAME, shipmentId)
-    if (!row) throw new Error('Shipment not found', { cause: err })
-    return { locked: false, lockedBy: optionalString(row.editLockUserName, 200), expiresAt: optionalString(row.editLockExpiresAt, 40) }
   }
+  // The lock is held by someone else (or the shipment is gone): hand back who.
+  const row = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!row) throw new Error('Shipment not found')
+  return { locked: false, lockedBy: optionalString(row.editLockUserName, 200), expiresAt: optionalString(row.editLockExpiresAt, 40) }
 }
 
 /** Release the caller's lock; an ADMIN may break someone else's (`force`). A lock that is not the caller's is left alone. */
