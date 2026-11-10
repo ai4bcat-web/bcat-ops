@@ -1,8 +1,8 @@
 /**
  * The edit-form side of the 10-minute shipment lock: take it when the form opens on an existing shipment and refresh it while the form
- * stays open. A plain Save keeps it, and so does simply walking away (it then lapses by itself after 10 minutes and shows under
- * "Currently viewing" meanwhile, where its holder can let go of it); `release()` is Save & exit / Discard, and closing the tab also
- * lets go. Someone else holding it comes back as `heldBy`.
+ * stays open. A plain Save keeps it while the form stays open, and a form left open lapses by itself after 10 minutes (it shows under
+ * "Currently viewing" meanwhile, where its holder can let go of it); leaving the form in any way (Save & exit, Discard, back, another
+ * page) or closing the tab lets go at once. Someone else holding it comes back as `heldBy`.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { lockShipment, unlockShipment } from '@/lib/apiClient'
@@ -29,6 +29,9 @@ export function useShipmentLock(shipmentId: string | null | undefined): { heldBy
       alive = false
       clearInterval(timer)
       window.removeEventListener('pagehide', release)
+      // Leaving the form (back, another page, another shipment) lets go: the 10 minutes are only for a form left open.
+      release()
+      mineRef.current = false
     }
   }, [shipmentId])
   /** Let go of it now (Save & exit, Discard). The refresh timer has stopped or is about to, so nothing takes it back. */
