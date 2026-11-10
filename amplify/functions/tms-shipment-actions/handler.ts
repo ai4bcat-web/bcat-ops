@@ -41,7 +41,7 @@ import {
   type TransactWriteItem,
 } from '@aws-sdk/client-dynamodb'
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { CopyObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
@@ -279,7 +279,7 @@ import { dedupeEmails, isEmailAddress } from '../../../src/lib/emailAddress'
 import { mcpPacketStanding, rateConMcpRefusal } from '../../../src/lib/mcpPacket'
 import { composeRateConCc } from './rateConRecipients'
 import { assertBolEmailable, bolEmailBody, bolEmailSubject, deliveryLabel, parseEmailBolInput } from './bolEmail'
-import { MAX_GENERATED_BYTES } from '../../../src/lib/shipmentDocuments'
+import { MAX_GENERATED_BYTES, documentKey } from '../../../src/lib/shipmentDocuments'
 import {
   advanceTarget, deriveAssignmentStatus, driverInfoGaps, isCarrierAssignmentStatus, ladderPatch, rungOf,
   type AssignmentFacts, type CarrierAssignmentStatus,
@@ -8530,6 +8530,37 @@ const carrierInboundDeps: CarrierInboundDeps = {
   tables: { ...carrierOfferDeps.tables, message: SHIPMENT_MESSAGE_TABLE_NAME, proClaim: PRO_CLAIM_TABLE_NAME },
 }
 
+/** Intake e-mail files -> the shipment's customer rate con documents (S3 copy under shipment-docs/ + one row each; idempotent per file). */
+async function attachIntakeFiles(
+  shipmentId: string,
+  intakeId: string,
+  attachments: { key: string; name: string; contentType: string; size: number }[],
+  caller: Caller,
+): Promise<number> {
+  if (!BUCKET_NAME) return 0
+  const allowed = new Set(['application/pdf', 'image/png', 'image/jpeg'])
+  const order = (await queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId))[0]
+  let attached = 0
+  for (const [index, file] of attachments.entries()) {
+    if (!allowed.has(file.contentType) || !file.key.startsWith('intake-attachments/')) continue
+    const id = `intake-${intakeId}-${index}`
+    const key = documentKey(shipmentId, id, file.name, file.contentType)
+    try {
+      await s3.send(new CopyObjectCommand({ Bucket: BUCKET_NAME, CopySource: `${BUCKET_NAME}/${file.key}`, Key: key }))
+      const now = nowIso()
+      await transact([putItem(documentDeps.store.tables.shipmentDocument, {
+        id, __typename: 'ShipmentDocument', shipmentId, ...(order?.id ? { orderId: String(order.id) } : {}), type: 'CUSTOMER_RATE_CON',
+        name: file.name.slice(0, 200), s3Key: key, contentType: file.contentType, sizeBytes: Math.max(0, Math.trunc(file.size) || 0), source: 'UPLOAD',
+        audience: 'INTERNAL', status: 'ACTIVE', version: 1, uploadedBy: 'intake', uploadedAt: now, createdBy: caller.email, createdAt: now, updatedAt: now,
+      })], 'intake document')
+      attached += 1
+    } catch (err) {
+      console.error('[shipment-actions] intake file not attached', shipmentId, intakeId, err instanceof Error ? err.message : String(err))
+    }
+  }
+  return attached
+}
+
 const intakeDeps: IntakeDeps = {
   tables: { intakeLoad: INTAKE_LOAD_TABLE_NAME, shipment: SHIPMENT_TABLE_NAME, order: ORDER_TABLE_NAME, load: LOAD_TABLE_NAME },
   getById,
@@ -8539,6 +8570,7 @@ const intakeDeps: IntakeDeps = {
   getCustomer: (id) => getById(CUSTOMER_TABLE_NAME, id),
   isDivisionActive: (code) => assertTaggableDivision(code, null).then(() => true, () => false),
   writeAudit,
+  attachFiles: attachIntakeFiles,
   actions: { createShipment, setRevTag, setSalesRep },
   now: nowIso,
 }

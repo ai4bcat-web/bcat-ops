@@ -82,8 +82,10 @@ function seedIntake(over: Row = {}): void {
   })
 }
 
+let attachFiles: Mock
 const deps = (): IntakeDeps => ({
   tables: T,
+  attachFiles: (...args: unknown[]) => attachFiles(...args),
   getById: async (t, id) => rows(t).get(id) ?? null,
   queryIndex: async (t, _i, _k, v) => [...rows(t).values()].filter((r) => r.shipmentId === v),
   transact: async (items, label) => {
@@ -123,6 +125,7 @@ beforeEach(() => {
   })
   setRevTag = vi.fn(async () => ({}))
   setSalesRep = vi.fn(async () => ({}))
+  attachFiles = vi.fn(async () => 1)
   seedIntake()
 })
 
@@ -201,6 +204,15 @@ describe('INTAKE_LINK_SHIPMENT', () => {
     expect(intake()).toMatchObject({ status: 'MOVED', shipmentId: 'shp-1', shipmentNumber: 'S000123' })
     await run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1' })
     expect(audits.filter((a) => a.action === 'INTAKE_LINK_SHIPMENT')).toHaveLength(2) // intake + shipment, not four
+  })
+
+  it('copies the e-mail files onto the shipment as it links, and says how many in the audit', async () => {
+    rows(T.intakeLoad).get('il:r1')!.attachments = JSON.stringify([
+      { key: 'intake-attachments/a/ratecon.pdf', name: 'ratecon.pdf', contentType: 'application/pdf', size: 1200 },
+    ])
+    await run('INTAKE_LINK_SHIPMENT', { intakeId: 'il:r1', shipmentId: 'shp-1' })
+    expect(attachFiles).toHaveBeenCalledWith('shp-1', 'il:r1', [expect.objectContaining({ key: 'intake-attachments/a/ratecon.pdf' })], expect.anything())
+    expect(audits.find((a) => a.type === 'SHIPMENT')?.changes).toMatchObject({ documentsAttached: 1 })
   })
 
   it('refuses a missing shipment, a second shipment and a dismissed row', async () => {
