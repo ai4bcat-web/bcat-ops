@@ -11,6 +11,7 @@ import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDi
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { CalendarPaperworkProvider } from './CalendarPaperwork'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
+import { OwnFleetSwitchDialog } from './OwnFleetSwitchDialog'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
 import {
@@ -295,6 +296,8 @@ export function CalendarPage() {
         onClose={closeNewShipment}
         onCreated={closeNewShipment}
       />
+
+      <OwnFleetSwitchDialog />
 
       {showAvailModal && (
         <DriverAvailabilityModal
