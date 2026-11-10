@@ -33,9 +33,9 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
   const pickupDriverName   = pickupDriver?.name  ?? 'Unassigned'
   const deliveryDriverName = deliveryDriver?.name ?? 'Unassigned'
 
-  const borderColor = isConflict ? 'var(--tms-badge-red)' : isRTI ? 'var(--tms-primary-ink)' : color.border
-  const bgColor     = isConflict ? 'var(--tms-badge-red-tint)' : isRTI ? 'var(--tms-primary)' : color.bg
-  const textColor   = isRTI ? 'var(--tms-on-primary)' : color.text
+  const borderColor = isConflict ? 'var(--tms-badge-red)' : isRTI ? 'var(--tms-badge-green)' : color.border
+  const bgColor     = isConflict ? 'var(--tms-badge-red-tint)' : isRTI ? 'var(--tms-badge-green-tint)' : color.bg
+  const textColor   = isRTI ? 'var(--tms-text)' : color.text
 
   const puTime = stopMode
     ? formatApptTime(stop!.appt, stop!.apptType, stop!.apptEnd)
@@ -50,7 +50,7 @@ export function EventCard({ load, stop, drivers, color, isConflict, isSelected, 
         isConflict && 'animate-pulse-once',
       )}
       style={{
-        borderColor:     isConflict ? 'color-mix(in srgb, var(--tms-badge-red) 30%, transparent)' : isRTI ? 'var(--tms-primary-ink)' : 'var(--tms-text)',
+        borderColor:     isConflict ? 'color-mix(in srgb, var(--tms-badge-red) 30%, transparent)' : isRTI ? 'var(--tms-badge-green)' : 'var(--tms-text)',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
         ...(isSplit ? { borderRightColor: deliveryColor.border, borderRightWidth: 3 } : {}),

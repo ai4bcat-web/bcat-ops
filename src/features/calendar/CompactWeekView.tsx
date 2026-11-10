@@ -95,11 +95,11 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
   const color         = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
   const deliveryColor = deliveryDriver?.colorKey ? getColor(deliveryDriver.colorKey) : UNASSIGNED_COLOR
 
-  const borderColor = isConflict ? 'var(--tms-badge-red)' : isRTI ? 'var(--tms-primary-ink)' : color.border
+  const borderColor = isConflict ? 'var(--tms-badge-red)' : isRTI ? 'var(--tms-badge-green)' : color.border
   const bgColor     = isContinuation
     ? 'color-mix(in srgb, var(--tms-text) 2%, transparent)'
-    : isConflict ? 'var(--tms-badge-red-tint)' : isRTI ? 'var(--tms-primary)' : color.bg
-  const textColor   = isRTI ? 'var(--tms-on-primary)' : color.text
+    : isConflict ? 'var(--tms-badge-red-tint)' : isRTI ? 'var(--tms-badge-green-tint)' : color.bg
+  const textColor   = isRTI ? 'var(--tms-text)' : color.text
 
   const puApptIso = legMode ? fromStop!.appt : load.pickupAppt
   const deApptIso = legMode ? toStop!.appt   : load.deliveryAppt
@@ -112,7 +112,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fr
       style={{
         borderColor:     isContinuation
           ? 'color-mix(in srgb, var(--tms-text) 7%, transparent)'
-          : isConflict ? 'color-mix(in srgb, var(--tms-badge-red) 30%, transparent)' : isRTI ? 'var(--tms-primary-ink)' : 'var(--tms-text)',
+          : isConflict ? 'color-mix(in srgb, var(--tms-badge-red) 30%, transparent)' : isRTI ? 'var(--tms-badge-green)' : 'var(--tms-text)',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
         opacity: isContinuation ? 0.72 : 1,

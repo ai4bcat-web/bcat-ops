@@ -9,6 +9,7 @@
  * `source.loads[0]` server-side, which is the wrong leg whenever somebody right-clicked
  * the second one.
  */
+import { MemoryRouter } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { Load } from '@/types'
@@ -88,7 +89,7 @@ beforeEach(() => {
 
 const renderScheduler = () =>
   render(
-    <SchedulerView
+    <MemoryRouter><SchedulerView
       calendarRef={{ current: null }}
       loads={[legTwo]}
       drivers={[]}
@@ -97,7 +98,7 @@ const renderScheduler = () =>
       viewMode="week"
       weekStart="2026-10-12"
       onDatesSet={vi.fn()}
-    />,
+    /></MemoryRouter>,
   )
 
 const duplicateLeg = async () => {
