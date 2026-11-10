@@ -14,11 +14,21 @@ beforeEach(() => {
 })
 
 describe('useShipmentLock', () => {
-  it('takes the lock when the form opens and keeps it when the form is left (it lapses by itself, and shows under Currently viewing)', async () => {
+  it('takes the lock when the form opens and lets go the moment the form is left (back, another page), not 10 minutes later', async () => {
     const { unmount } = renderHook(() => useShipmentLock('shp-1'))
     await waitFor(() => expect(api.lock).toHaveBeenCalledWith('shp-1'))
-    unmount()
+    await act(async () => { await Promise.resolve() })
     expect(api.unlock).not.toHaveBeenCalled()
+    unmount()
+    expect(api.unlock).toHaveBeenCalledExactlyOnceWith('shp-1')
+  })
+
+  it('leaving after release() does not unlock twice', async () => {
+    const { result, unmount } = renderHook(() => useShipmentLock('shp-1'))
+    await waitFor(() => expect(api.lock).toHaveBeenCalled())
+    await act(async () => { await result.current.release() })
+    unmount()
+    expect(api.unlock).toHaveBeenCalledTimes(1)
   })
 
   it('release() lets go of it right away, once', async () => {
