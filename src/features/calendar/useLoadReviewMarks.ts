@@ -1,14 +1,17 @@
 import { useMemo } from 'react'
 import { useShipments } from '@/hooks/useShipments'
-import { BROKERAGE_DIVISION } from '@/lib/brokerageRevenue'
 import { isReleasedToInvoicing } from '@/lib/shipmentLists'
 import type { Load } from '@/types'
+
+/** The revenue divisions the calendar shows. */
+export const CALENDAR_DIVISIONS: readonly string[] = ['ASSETS', 'OWNER_OPERATOR']
 
 /**
  * What the calendar shows, straight from the Shipments page's state.
  *
- * Brokerage is not asset work: a shipment whose revenue division is Brokerage (need to cover or covered) is not on the calendar at all;
- * it lives on the Shipments page, where a brokerage load that needs a carrier shows as Need to cover.
+ * The calendar is for Ivan loads only (the ones sent to ivanloads@bcatcorp.com, revenue division Assets, owner operators included).
+ * A shipment in any other revenue division (Brokerage, Car Shipping...) is not on the calendar at all; it lives on the Shipments
+ * page, where a brokerage load that needs a carrier shows as Need to cover. A shipment with no division set is still shown.
  *
  * The calendar's green. A shipment is marked once it has everything it needs and has moved into Load Review (the push stamp), and
  * stays marked after it is released to invoicing. It is the Shipments page's own state, not a flag somebody sets on the calendar:
@@ -23,20 +26,20 @@ export function useLoadReviewMarks(loads: readonly Load[]): Load[] {
   const monthsKey = useMemo(() => [...new Set(loads.map((l) => (l.pickupAppt ?? '').slice(0, 7)).filter((m) => /^\d{4}-\d{2}$/.test(m)))].sort().join(','), [loads])
   const windowed = useShipments({ kind: 'window', months: monthsKey ? monthsKey.split(',') : [] }).shipments
   const shipments = useMemo(() => [...working, ...windowed], [working, windowed])
-  const { marked, brokerage } = useMemo(() => {
+  const { marked, offCalendar } = useMemo(() => {
     const ids = new Set<string>()
-    const brokerageIds = new Set<string>()
+    const offCalendarIds = new Set<string>()
     for (const row of shipments) {
       if (row.loadReviewPushedAt || isReleasedToInvoicing(row)) ids.add(row.id)
-      if (row.revDivision === BROKERAGE_DIVISION) brokerageIds.add(row.id)
+      if (row.revDivision && !CALENDAR_DIVISIONS.includes(row.revDivision)) offCalendarIds.add(row.id)
     }
-    return { marked: ids, brokerage: brokerageIds }
+    return { marked: ids, offCalendar: offCalendarIds }
   }, [shipments])
   return useMemo(
-    () => loads.filter((l) => !(l.shipmentId != null && brokerage.has(l.shipmentId))).map((l) => {
+    () => loads.filter((l) => !(l.shipmentId != null && offCalendar.has(l.shipmentId))).map((l) => {
       const green = (l.shipmentId != null && marked.has(l.shipmentId)) || l.status === 'INVOICING'
       return green === Boolean(l.readyToInvoice) ? l : { ...l, readyToInvoice: green }
     }),
-    [loads, marked, brokerage],
+    [loads, marked, offCalendar],
   )
 }
