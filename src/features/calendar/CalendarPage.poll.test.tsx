@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 
 const { refreshCalendarData, ensureLoadRange } = vi.hoisted(() => ({
   refreshCalendarData: vi.fn().mockResolvedValue(undefined),
@@ -29,7 +30,7 @@ vi.mock('./GridCalendarView', () => ({ GridCalendarView: () => null }))
 vi.mock('./DriverAvailabilityModal', () => ({ DriverAvailabilityModal: () => null }))
 vi.mock('./CalendarPaperwork', () => ({ CalendarPaperworkProvider: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
-vi.mock('@/features/shipments/components/NewShipmentDialog', () => ({ NewShipmentDialog: () => null }))
+vi.mock('./useLoadReviewMarks', () => ({ useLoadReviewMarks: (loads: unknown[]) => loads }))
 
 import { CalendarPage } from './CalendarPage'
 
@@ -38,7 +39,7 @@ describe('CalendarPage poll', () => {
   afterEach(() => { vi.useRealTimers() })
 
   it('refreshes only the visible day window, never the whole table', () => {
-    render(<CalendarPage />)
+    render(<MemoryRouter><CalendarPage /></MemoryRouter>)
     const [from, to] = ensureLoadRange.mock.calls[0] as [string, string]
     expect(from).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     act(() => { vi.advanceTimersByTime(60_000) })

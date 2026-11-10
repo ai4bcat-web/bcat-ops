@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, CircleDashed, HelpCircle, SplitSquareHorizontal, Search, AlertCircle } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppStore } from '@/store/useAppStore'
@@ -40,7 +41,7 @@ export function CalendarToolbar({
   const filters          = useAppStore((s) => s.filters)
   const setSearchQuery   = useAppStore((s) => s.setSearchQuery)
   const toggleFilter     = useAppStore((s) => s.toggleFilter)
-  const openNewShipment  = useAppStore((s) => s.openNewShipment)
+  const navigate         = useNavigate()
 
   return (
     <div style={{
@@ -175,7 +176,7 @@ export function CalendarToolbar({
 
       {/* ── New shipment ─────────────────────────────────────────────────── */}
       <button
-        onClick={() => openNewShipment()}
+        onClick={() => navigate('/tms/shipments/new')}
         style={{
           display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8,
           background: 'var(--tms-primary)', color: 'var(--tms-on-primary)', border: 'none', cursor: 'pointer',

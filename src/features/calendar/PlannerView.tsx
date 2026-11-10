@@ -12,6 +12,8 @@
  *   • Order  — drag handle → reorders within day (session state)
  */
 
+import { useInRouterContext, useNavigate } from 'react-router-dom'
+import { splitIntoSections } from './fleetSections'
 import { tapOpensShipment } from './tapOpensShipment'
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { paperworkShortLabel, paperworkStatusLine } from '@/lib/paperworkLocation'
@@ -526,7 +528,6 @@ interface PlannerRowProps {
 function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart, onDragEnter, onDragEnd, onSelect, selectedIds }: PlannerRowProps) {
   const { load, role, stop } = entry
   const stopMode = !!stop
-  const { updateLoad } = useLoads()
   const [showColor,   setShowColor]   = useState(false)
   const [showDriver,  setShowDriver]  = useState(false)
   const [editingAppt, setEditingAppt] = useState<'pu' | 'de' | null>(null)
@@ -590,14 +591,14 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         // clipped row was unreadable. Rows now grow to whatever their content needs.
         minHeight: ROW_H,
         background: load.readyToInvoice
-          ? (dragOver ? 'var(--tms-primary-hover)' : 'var(--tms-primary)')
+          ? (dragOver ? 'color-mix(in srgb, var(--tms-badge-green) 22%, var(--tms-card))' : 'var(--tms-badge-green-tint)')
           : dragOver    ? (highlightHex ? hexBg(highlightHex, 0.30) : 'color-mix(in srgb, var(--tms-muted) 30%, transparent)')
           : selected    ? (highlightHex ? hexBg(highlightHex, 0.28) : 'color-mix(in srgb, var(--tms-badge-purple) 28%, transparent)')
           : highlightHex
             ? hexBg(highlightHex, 0.28)
             : undefined,
         borderLeft: load.readyToInvoice
-          ? '3px solid var(--tms-primary-ink)'
+          ? '3px solid var(--tms-badge-green)'
           : highlightHex
             ? `3px solid ${highlightHex}`
             : '3px solid var(--tms-border)',
@@ -799,18 +800,16 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       {/* Rate — only for loads delivering to a real destination (not ending at yard) */}
       {role !== 'pickup' ? <RateCell load={load} /> : <div style={{ width: COL.rate }} className="shrink-0" />}
 
-      {/* Ready-to-invoice checkmark — only on final-destination rows */}
+      {/* Load Review mark — only on final-destination rows. Not a switch: it shows the shipment's own state (in Load Review = green). */}
       {isFinalDest ? (
-        <button
-          className="shrink-0 flex items-center justify-center px-2 hover:opacity-75 transition-opacity"
-          title={load.readyToInvoice ? 'Mark as not ready' : 'Mark as ready to invoice'}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); updateLoad(load.id, { readyToInvoice: !load.readyToInvoice }) }}
+        <span
+          className="shrink-0 flex items-center justify-center px-2"
+          title={load.readyToInvoice ? 'In Load Review' : 'Not in Load Review yet: it moves in on its own once it has everything it needs'}
         >
           {load.readyToInvoice
             ? <CheckCircle className="size-4 text-[color:var(--tms-badge-green)]" />
             : <Circle className="size-4 text-[color:var(--tms-disabled)]" />}
-        </button>
+        </span>
       ) : (
         <div className="shrink-0 px-2" style={{ width: 32 }} />
       )}
@@ -857,11 +856,27 @@ interface PlannerViewProps {
   availabilities?: DriverAvailability[]
 }
 
+/** The day header's "+": the same create page the Shipments page opens. (Router-aware, so it lives in its own component.) */
+function AddShipmentButton({ title }: { title: string }) {
+  const navigate = useNavigate()
+  return (
+    <button
+      className="ml-auto flex items-center justify-center size-4 rounded text-[color:var(--tms-on-primary)] transition-colors"
+      style={{ background: 'var(--tms-primary)', border: 'none', cursor: 'pointer' }}
+      title={title}
+      onClick={() => navigate('/tms/shipments/new')}
+    >
+      <Plus className="size-3" />
+    </button>
+  )
+}
+
 export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, days: daysProp, availabilities = [] }: PlannerViewProps) {
   // Void is the only way a shipment leaves the working set (Ryne), and the
   // calendar is a working set: a voided shipment's load has no lane here, not a
   // dated one and not the Unscheduled strip. It stays readable on the Shipments
   // board's Voided tab and in the shipment's own history.
+  const inRouter = useInRouterContext()
   const loads = useMemo(() => allLoads.filter((l) => !isLoadVoided(l)), [allLoads])
   const days = useMemo(
     () => daysProp ?? Array.from({ length: numDays }, (_, i) => addDays(weekStart, i)),
@@ -1226,14 +1241,7 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
                   {needsInvoiceCount} uninvoiced
                 </span>
               )}
-              <button
-                className="ml-auto flex items-center justify-center size-4 rounded text-[color:var(--tms-on-primary)] transition-colors"
-                style={{ background: 'var(--tms-primary)', border: 'none', cursor: 'pointer' }}
-                title={`Add a shipment for ${weekday}`}
-                onClick={() => useAppStore.getState().openNewShipment({ driverId: null, dateStr: dayStr! })}
-              >
-                <Plus className="size-3" />
-              </button>
+              {inRouter && <AddShipmentButton title={`Add a shipment for ${weekday}`} />}
             </div>
 
             {/* Availability strips for this day */}
@@ -1258,20 +1266,31 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
                 No loads
               </div>
             ) : (
-              entries.map((entry) => (
-                <PlannerRow
-                  key={entry.key}
-                  entry={entry}
-                  drivers={drivers}
-                  dragging={draggingKey === entry.key}
-                  dragOver={dragOverKey === entry.key}
-                  selected={selectedLoadIds.includes(entry.load.id)}
-                  selectedIds={selectedLoadIds}
-                  onDragStart={(k) => handleDragStart(dayStr ?? '', k)}
-                  onDragEnter={(k) => handleDragEnter(dayStr ?? '', k)}
-                  onDragEnd={handleDragEnd}
-                  onSelect={handleSelect}
-                />
+              splitIntoSections(entries, drivers).map((section) => (
+                <div key={section.key} data-testid={`fleet-section-${section.key}`}>
+                  <div
+                    className="flex items-center gap-2 px-2"
+                    style={{ height: 20, background: 'color-mix(in srgb, var(--tms-text) 4%, var(--tms-surface))', borderBottom: '1px solid var(--tms-border)', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--tms-text-2)' }}
+                  >
+                    {section.label}
+                    <span style={{ fontWeight: 500, color: 'var(--tms-muted)', letterSpacing: 0 }}>· {section.entries.length}</span>
+                  </div>
+                  {section.entries.map((entry) => (
+                    <PlannerRow
+                      key={entry.key}
+                      entry={entry}
+                      drivers={drivers}
+                      dragging={draggingKey === entry.key}
+                      dragOver={dragOverKey === entry.key}
+                      selected={selectedLoadIds.includes(entry.load.id)}
+                      selectedIds={selectedLoadIds}
+                      onDragStart={(k) => handleDragStart(dayStr ?? '', k)}
+                      onDragEnter={(k) => handleDragEnter(dayStr ?? '', k)}
+                      onDragEnd={handleDragEnd}
+                      onSelect={handleSelect}
+                    />
+                  ))}
+                </div>
               ))
             )}
           </div>

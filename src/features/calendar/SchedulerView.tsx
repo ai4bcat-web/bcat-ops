@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
 import FullCalendar from '@fullcalendar/react'
 import resourceTimelinePlugin from '@fullcalendar/resource-timeline'
@@ -5,7 +6,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import type { EventContentArg, EventDropArg, EventClickArg, DatesSetArg } from '@fullcalendar/core'
 import type { EventResizeDoneArg as EventResizeArg } from '@fullcalendar/interaction'
 import { toast } from 'sonner'
-import { UserCheck, Copy, X } from 'lucide-react'
+import { Copy, X } from 'lucide-react'
 import { useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -21,7 +22,6 @@ import type { TmsSettings } from '@/types/tms'
 import { formatTime } from '@/lib/date'
 import { prettyPhone } from '@/lib/dispatch'
 import { useDriverPhones } from '@/hooks/useTruckConfigs'
-import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -85,7 +85,9 @@ export function SchedulerView({
 }: SchedulerViewProps) {
   const { updateLoad } = useLoads()
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
-  const openNewShipment = useAppStore((s) => s.openNewShipment)
+  const navigate = useNavigate()
+  // One create page: the same form the Shipments page opens.
+  const openNewShipment = useCallback((_prefill?: { driverId: string | null; dateStr: string }) => navigate('/tms/shipments/new'), [navigate])
   const directory = useDirectory()
   const { user, isAdmin } = useAuth()
   // Where a duplicate lands: the copy's own shipment detail, never a load drawer.
@@ -401,14 +403,6 @@ export function SchedulerView({
 
   // ── Bulk actions ──────────────────────────────────────────────────────────
 
-  const selectedLoads = loads.filter((l) => selectedIds.has(l.id))
-
-  const bulkMarkRTI = () => {
-    selectedLoads.forEach((l) => updateLoad(l.id, { readyToInvoice: true }))
-    toast(`${selectedLoads.length} load(s) marked Ready to Invoice`)
-    setSelectedIds(new Set())
-  }
-
   // No bulk delete: a load carries a PRO number and a PRO number is permanent
   // (Ryne, 2026-10-28). A shipment leaves the working set by being voided.
 
@@ -416,12 +410,6 @@ export function SchedulerView({
 
   const ctxLoad = contextMenu?.load
 
-  const ctxMarkRTI = () => {
-    if (!ctxLoad) return
-    updateLoad(ctxLoad.id, { readyToInvoice: !ctxLoad.readyToInvoice })
-    toast(ctxLoad.readyToInvoice ? 'Marked not ready' : 'Marked ready to invoice')
-    setContextMenu(null)
-  }
 
   /*
    * Duplicate the shipment this leg belongs to, not the row.
@@ -558,9 +546,6 @@ export function SchedulerView({
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
 
-              <DropdownMenuItem onClick={ctxMarkRTI}>
-                {ctxLoad?.readyToInvoice ? 'Mark not ready' : 'Mark ready to invoice'}
-              </DropdownMenuItem>
               <DropdownMenuItem onClick={ctxDuplicate}>
                 <Copy className="size-3.5 mr-2" /> Duplicate
               </DropdownMenuItem>
@@ -574,14 +559,6 @@ export function SchedulerView({
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-[color:var(--tms-text)] text-[color:var(--tms-on-primary)] rounded-full px-4 py-2.5 shadow-2xl text-sm">
           <span className="font-semibold">{selectedIds.size} selected</span>
           <div className="w-px h-4 bg-[color:var(--tms-muted)] mx-1" />
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2.5 text-[color:var(--tms-on-primary)] hover:bg-[color:var(--tms-text)] hover:text-[color:var(--tms-on-primary)] text-xs gap-1"
-            onClick={bulkMarkRTI}
-          >
-            <UserCheck className="size-3.5" /> Mark RTI
-          </Button>
 
           <button
             className="ml-1 text-muted-foreground hover:text-[color:var(--tms-on-primary)]"

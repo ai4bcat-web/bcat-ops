@@ -232,3 +232,23 @@ describe('PlannerView on a phone', () => {
     try { expect(tapOpensShipment(document.createElement('span'))).toBe(false) } finally { wide.mockRestore() }
   })
 })
+
+describe('PlannerView sections', () => {
+  it('splits a day into Ivan drivers, owner operators and unassigned', () => {
+    const weekStart = new Date('2026-08-17T00:00:00-05:00')
+    const roster = [
+      { id: 'iv', name: 'Charles Best', type: 'driver', active: true },
+      { id: 'oo', name: 'Zak Pace', type: 'driver', active: true, fleetGroup: 'OWNER_OPERATOR' },
+    ] as never
+    const loads = [
+      batoryLoad({ id: 'a', aljexId: 'IVAN-1', pickupDriverId: 'iv', deliveryDriverId: 'iv', deliveryAppt: fromDateTimeInput('2026-08-21T10:00') } as unknown as Partial<Load>),
+      batoryLoad({ id: 'b', aljexId: 'OO-1', pickupDriverId: 'oo', deliveryDriverId: 'oo', deliveryAppt: fromDateTimeInput('2026-08-21T10:00') } as unknown as Partial<Load>),
+      batoryLoad({ id: 'c', aljexId: 'NONE-1', pickupDriverId: null, deliveryDriverId: null, deliveryAppt: fromDateTimeInput('2026-08-21T10:00') } as unknown as Partial<Load>),
+    ]
+    render(<PlannerView loads={loads} drivers={roster} weekStart={weekStart} numDays={7} />)
+    expect(screen.getByTestId('fleet-section-IVAN').textContent).toContain('IVAN-1')
+    expect(screen.getByTestId('fleet-section-OWNER_OP').textContent).toContain('OO-1')
+    expect(screen.getByTestId('fleet-section-UNASSIGNED').textContent).toContain('NONE-1')
+    expect(screen.getByText('Owner operators')).toBeTruthy()
+  })
+})

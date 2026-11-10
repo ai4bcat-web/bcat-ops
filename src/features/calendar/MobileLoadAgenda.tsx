@@ -21,7 +21,7 @@ function dayKey(iso?: string): string {
 }
 
 function statusOf(l: Load): { label: string; color: string } {
-  if (l.readyToInvoice) return { label: 'Ready', color: 'var(--tms-primary)' }
+  if (l.readyToInvoice) return { label: 'In Load Review', color: 'var(--tms-badge-green)' }
   if (l.pickupDriverId) return { label: 'In progress', color: 'var(--tms-primary)' }
   return { label: 'Unassigned', color: 'var(--tms-badge-orange)' }
 }

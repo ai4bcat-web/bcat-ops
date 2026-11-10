@@ -459,17 +459,13 @@ function LoadCard({
         {rateStr && (
           <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--tms-badge-green)', flexShrink: 0 }}>{rateStr}</span>
         )}
-        {/* RTI toggle — only on final destination rows */}
+        {/* Load Review mark — only on final destination rows; the shipment's own state, not a switch. */}
         {isFinalDest && (
-          <button
-            style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', flexShrink: 0 }}
-            title={rti ? 'Mark not ready' : 'Mark ready to invoice'}
-            onClick={(e) => { e.stopPropagation(); updateLoad(load.id, { readyToInvoice: !rti }) }}
-          >
+          <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }} title={rti ? 'In Load Review' : 'Not in Load Review yet'}>
             {rti
               ? <CheckCircle style={{ width: 13, height: 13, color: 'var(--tms-badge-green)' }} />
               : <Circle     style={{ width: 13, height: 13, color: 'var(--tms-input-border)' }} />}
-          </button>
+          </span>
         )}
         {/* Paint bucket — card highlight color picker */}
         <button

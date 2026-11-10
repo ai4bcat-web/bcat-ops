@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads, useEnsureLoadRange } from '@/hooks/useLoads'
@@ -7,7 +8,7 @@ import { CalendarToolbar } from './CalendarToolbar'
 import { PlannerView } from './PlannerView'
 import { GridCalendarView } from './GridCalendarView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
-import { NewShipmentDialog } from '@/features/shipments/components/NewShipmentDialog'
+import { useLoadReviewMarks } from './useLoadReviewMarks'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { CalendarPaperworkProvider } from './CalendarPaperwork'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
@@ -40,10 +41,11 @@ function ymd(d: Date): string {
 export function CalendarPage() {
   const searchQuery = useAppStore((s) => s.searchQuery)
   const filters     = useAppStore((s) => s.filters)
-  const newShipmentPrefill = useAppStore((s) => s.newShipmentPrefill)
-  const closeNewShipment   = useAppStore((s) => s.closeNewShipment)
 
-  const { loads }   = useLoads()
+  const navigate = useNavigate()
+  const { loads: rawLoads } = useLoads()
+  // Green = the shipment is in Load Review (or released), straight from the Shipments page's state.
+  const loads = useLoadReviewMarks(rawLoads)
   const { drivers } = useDrivers()
   const equipment   = useAppStore((s) => s.equipment)
   const { availabilities, refresh: refreshAvailability, createAvailability, deleteAvailability } = useDriverAvailability()
@@ -139,14 +141,14 @@ export function CalendarPage() {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); useAppStore.getState().openNewShipment() }
+      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); navigate('/tms/shipments/new') }
       if (e.key === 'ArrowLeft')  { e.preventDefault(); setStartDate((d) => addDays(d, -navDays)) }
       if (e.key === 'ArrowRight') { e.preventDefault(); setStartDate((d) => addDays(d, navDays))  }
       if (e.key === 'Escape')     { useAppStore.getState().setFilterDriver(null) }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [navDays])
+  }, [navDays, navigate])
 
   // ── Periodic refresh ────────────────────────────────────────────────────────
   // Real-time subscriptions keep clients in sync, but a periodic refetch of the visible window is a
@@ -290,13 +292,6 @@ export function CalendarPage() {
         scheduler's drag-create — raises this form. It writes nothing until Save, which is
         the point: a shipment number is permanent and can only be voided.
       */}
-      <NewShipmentDialog
-        open={newShipmentPrefill !== null}
-        prefill={newShipmentPrefill}
-        onClose={closeNewShipment}
-        onCreated={closeNewShipment}
-      />
-
       <OwnFleetSwitchDialog />
 
       {showAvailModal && (
