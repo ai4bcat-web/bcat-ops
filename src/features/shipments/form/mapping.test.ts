@@ -11,6 +11,8 @@ import { emptyValues, lockedFields, readExtras, valuesFromBundle, withExtras, ty
 import { diffStopOps } from './pipelines'
 import { applyShipmentType } from './shipmentType'
 import type { ShipmentBundle } from '@/types/tms'
+import { rateConLinesFor } from '@/lib/carrierBill'
+import { invoiceLinesFor } from '@/lib/invoiceBuild'
 
 const strip = (v: ShipmentFormValues) => ({
   ...v,
@@ -125,6 +127,27 @@ describe('special requirements', () => {
     const sr = withExtras({ fsma: true, form: { v: 1, ship: { footage: 4 }, roles: { tariff: 'T' } } }, { ship: { truckMiles: 9, footage: undefined } })
     expect(sr.fsma).toBe(true)
     expect(readExtras({ specialRequirements: sr })).toEqual({ v: 1, ship: { truckMiles: 9 }, roles: { tariff: 'T' } })
+  })
+})
+
+describe('accessorial row with both amounts', () => {
+  it('writes one CARRIER and one CUSTOMER charge; carrier lands on the rate con, customer on the invoice', () => {
+    const v = emptyValues()
+    v.rates.lines = [{ id: '', carrierLineId: '', release: '', paidTo: '', code: 'LUMPER', label: 'Lumper', carrierAmount: '40', customerAmount: '65', note: '' }]
+    const out = toCharges(v, { orderId: 'o1', loadId: 'l1', activeLoadCarrierId: 'lc-1' }).filter((l) => l.code === 'LUMPER')
+    expect(out.map((l) => [l.side, l.rateCents])).toEqual([['CUSTOMER', 6500], ['CARRIER', 4000]])
+    const stored = out.map((c, i) => ({ ...c, id: `c${i}`, amountCents: c.rateCents }))
+    const rc = rateConLinesFor(stored as never, { id: 'lc-1' }, 1, true)
+    expect(rc.lines.map((l) => [l.code, l.amountCents])).toEqual([['LUMPER', 4000]])
+    expect(rc.grossCents).toBe(4000)
+    const inv = invoiceLinesFor(stored as never, 'o1')
+    expect(inv.lines.map((l) => [l.code, l.amountCents])).toEqual([['LUMPER', 6500]])
+    expect(inv.subtotalCents).toBe(6500)
+  })
+  it('one-sided rows write only that side', () => {
+    const v = emptyValues()
+    v.rates.lines = [{ id: '', carrierLineId: '', release: '', paidTo: '', code: 'TONU', label: '', carrierAmount: '', customerAmount: '25', note: '' }]
+    expect(toCharges(v, { orderId: 'o', loadId: 'l', activeLoadCarrierId: 'lc-1' }).map((l) => l.side)).toEqual(['CUSTOMER'])
   })
 })
 

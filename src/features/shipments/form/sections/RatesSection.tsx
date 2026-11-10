@@ -135,6 +135,13 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form, carriers }: RatesS
     ]
   }
 
+  // Column sums come off the priced lines (the same ones the rate con and invoice read): rate lines vs the rest.
+  const sumSide = (side: 'CARRIER' | 'CUSTOMER', rate: boolean) =>
+    preview.totals.lines.filter((l) => l.side === side && l.isRate === rate).reduce((t, l) => t + l.amountCents, 0)
+  const accCarrierCents = sumSide('CARRIER', false)
+  const accCustomerCents = sumSide('CUSTOMER', false)
+  const fscCents = preview.totals.lines.filter((l) => l.side === 'CUSTOMER' && l.code === 'FSC').reduce((t, l) => t + l.amountCents, 0)
+
   const pctSum = slots.reduce((sum, s) => sum + (s.rate.rateType === 'PCT_OF_CUSTOMER' && Number(s.rate.payPct) > 0 ? Number(s.rate.payPct) : 0), 0)
 
   return (
@@ -162,98 +169,145 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form, carriers }: RatesS
         </p>
       )}
 
-      <div className="tms-card-lines" data-testid="rates-lines">
-        <div className="tms-card-line tms-card-line-head">
-          <span>{LABEL.rates.release.text}</span>
-          <span>{multi ? 'Paid to' : LABEL.rates.lineCarrier.text}</span>
-          <span>{LABEL.rates.lineAccessorial.text}</span>
-          <span>{LABEL.rates.lineCarrierAmount.text}</span>
-          <span>{LABEL.rates.lineCustomerAmount.text}</span>
-          <span />
-        </div>
-        <div className="tms-card-line" data-testid="rates-line-linehaul">
-          <span />
-          <span>{multi ? carrierLabel(slots[0], 0, ctx.directory.carriers, true) : carrierName}</span>
-          <span>Line Haul</span>
-          <span>{usd(preview.carriers[0]?.linehaulCents ?? 0)}</span>
-          <span>{usd(preview.customerTotalLhCents)}</span>
-          <span />
-        </div>
-        {slots.slice(1).map((s, k) => (
-          <div key={s.slot} className="tms-card-line" data-testid={`rates-line-linehaul-${s.slot}`}>
-            <span />
-            <span>{carrierLabel(s, k + 1, ctx.directory.carriers, true)}</span>
-            <span>Line Haul</span>
-            <span>{usd(preview.carriers.find((c) => c.slot === s.slot)?.linehaulCents ?? 0)}</span>
-            <span />
-            <span />
-          </div>
-        ))}
+      <div className="tms-acc-wrap" data-testid="rates-lines">
         <datalist id="rates-charge-codes">
           {codes.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
         </datalist>
-        {value.lines.map((line, i) => {
-          const target = paidSlotIndex(slots, paidToOf(line, slots))
-          const paidTo = target >= 0 ? optionOf(slots[target]) : PAID_TO_NONE
-          return (
-            <div key={i} className="tms-card-line" data-testid={`rates-line-${i}`}>
-              <TmsInput
-                aria-label={`${LABEL.rates.release.text} ${i + 1}`}
-                value={line.release}
-                disabled={disabled || ratesLocked}
-                onChange={(e) => setLine(i, { release: e.target.value })}
-              />
-              {multi ? (
-                <TmsSelect
-                  aria-label={`Paid to ${i + 1}`}
-                  data-testid={`line-paidTo-${i}`}
-                  value={paidTo}
-                  disabled={disabled || carrierLockedAll}
-                  onChange={(e) => setLine(i, e.target.value === PAID_TO_NONE
-                    ? { paidTo: PAID_TO_NONE, carrierAmount: '', carrierLineId: '' }
-                    : { paidTo: e.target.value, carrierLineId: e.target.value === paidTo ? line.carrierLineId : '' })}
-                  options={[
-                    ...slots.map((s, k) => ({ value: optionOf(s), label: carrierLabel(s, k, ctx.directory.carriers, true) })),
-                    { value: PAID_TO_NONE, label: 'Not paid to a carrier' },
-                  ]}
-                />
-              ) : <span>{carrierName}</span>}
-              <TmsInput
-                aria-label={`${LABEL.rates.lineAccessorial.text} ${i + 1}`}
-                list="rates-charge-codes"
-                value={line.code}
-                disabled={disabled || ratesLocked}
-                onChange={(e) => {
-                  const code = e.target.value.toUpperCase()
-                  const known = codes.find((c) => c.code === code)
-                  setLine(i, { code, label: known?.label ?? line.label })
-                }}
-              />
-              <TmsInput
-                aria-label={`${LABEL.rates.lineCarrierAmount.text} ${i + 1}`}
-                inputMode="decimal"
-                value={line.carrierAmount}
-                disabled={disabled || carrierLockedAll || (multi && paidTo === PAID_TO_NONE)}
-                onChange={(e) => setLine(i, { carrierAmount: e.target.value })}
-              />
-              <TmsInput
-                aria-label={`${LABEL.rates.lineCustomerAmount.text} ${i + 1}`}
-                inputMode="decimal"
-                value={line.customerAmount}
-                disabled={disabled || ratesLocked}
-                onChange={(e) => setLine(i, { customerAmount: e.target.value })}
-              />
-              <TmsIconButton
-                shape="plain"
-                aria-label={`Remove accessorial line ${i + 1}`}
-                disabled={disabled || ratesLocked}
-                onClick={() => onChange((p) => ({ ...p, lines: p.lines.filter((_, j) => j !== i) }))}
-              >
-                <Trash2 size={14} />
-              </TmsIconButton>
-            </div>
-          )
-        })}
+        <table className="tms-acc-table" aria-label="Accessorials: pay carrier and charge customer">
+          <thead>
+            <tr>
+              <th scope="col">{LABEL.rates.release.text}</th>
+              <th scope="col">{multi ? 'Paid to' : LABEL.rates.lineCarrier.text}</th>
+              <th scope="col">{LABEL.rates.lineAccessorial.text}</th>
+              <th scope="col" className="tms-acc-col-carrier" data-testid="rates-head-carrier">Pay carrier</th>
+              <th scope="col" className="tms-acc-col-customer" data-testid="rates-head-customer">Charge customer</th>
+              <th scope="col"><span className="tms-acc-sr">Remove</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-testid="rates-line-linehaul">
+              <td data-label={LABEL.rates.release.text} />
+              <td data-label="Carrier">{multi ? carrierLabel(slots[0], 0, ctx.directory.carriers, true) : carrierName}</td>
+              <td data-label="Accessorial">Line Haul</td>
+              <td className="tms-acc-col-carrier tms-acc-amt" data-label="Pay carrier">{usd(preview.carriers[0]?.linehaulCents ?? 0)}</td>
+              <td className="tms-acc-col-customer tms-acc-amt" data-label="Charge customer">{usd(preview.customerTotalLhCents)}</td>
+              <td />
+            </tr>
+            {slots.slice(1).map((s, k) => (
+              <tr key={s.slot} data-testid={`rates-line-linehaul-${s.slot}`}>
+                <td />
+                <td data-label="Carrier">{carrierLabel(s, k + 1, ctx.directory.carriers, true)}</td>
+                <td data-label="Accessorial">Line Haul</td>
+                <td className="tms-acc-col-carrier tms-acc-amt" data-label="Pay carrier">{usd(preview.carriers.find((c) => c.slot === s.slot)?.linehaulCents ?? 0)}</td>
+                <td className="tms-acc-col-customer" />
+                <td />
+              </tr>
+            ))}
+            {fscCents > 0 && (
+              <tr data-testid="rates-line-fsc">
+                <td /><td /><td data-label="Accessorial">Fuel surcharge</td>
+                <td className="tms-acc-col-carrier" />
+                <td className="tms-acc-col-customer tms-acc-amt" data-label="Charge customer">{usd(fscCents)}</td>
+                <td />
+              </tr>
+            )}
+            {value.lines.map((line, i) => {
+              const target = paidSlotIndex(slots, paidToOf(line, slots))
+              const paidTo = target >= 0 ? optionOf(slots[target]) : PAID_TO_NONE
+              return (
+                <tr key={i} data-testid={`rates-line-${i}`}>
+                  <td data-label={LABEL.rates.release.text}>
+                    <TmsInput
+                      aria-label={`${LABEL.rates.release.text} ${i + 1}`}
+                      value={line.release}
+                      disabled={disabled || ratesLocked}
+                      onChange={(e) => setLine(i, { release: e.target.value })}
+                    />
+                  </td>
+                  <td data-label={multi ? 'Paid to' : 'Carrier'}>
+                    {multi ? (
+                      <TmsSelect
+                        aria-label={`Paid to ${i + 1}`}
+                        data-testid={`line-paidTo-${i}`}
+                        value={paidTo}
+                        disabled={disabled || carrierLockedAll}
+                        onChange={(e) => setLine(i, e.target.value === PAID_TO_NONE
+                          ? { paidTo: PAID_TO_NONE, carrierAmount: '', carrierLineId: '' }
+                          : { paidTo: e.target.value, carrierLineId: e.target.value === paidTo ? line.carrierLineId : '' })}
+                        options={[
+                          ...slots.map((s, k) => ({ value: optionOf(s), label: carrierLabel(s, k, ctx.directory.carriers, true) })),
+                          { value: PAID_TO_NONE, label: 'Not paid to a carrier' },
+                        ]}
+                      />
+                    ) : carrierName}
+                  </td>
+                  <td data-label="Accessorial">
+                    <TmsInput
+                      aria-label={`${LABEL.rates.lineAccessorial.text} ${i + 1}`}
+                      list="rates-charge-codes"
+                      placeholder="Pick or type a code"
+                      value={line.code}
+                      disabled={disabled || ratesLocked}
+                      onChange={(e) => {
+                        const code = e.target.value.toUpperCase()
+                        const known = codes.find((c) => c.code === code)
+                        setLine(i, { code, label: known?.label ?? line.label })
+                      }}
+                    />
+                  </td>
+                  <td className="tms-acc-col-carrier" data-label="Pay carrier">
+                    <TmsInput
+                      aria-label={`${LABEL.rates.lineCarrierAmount.text} ${i + 1}`}
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      value={line.carrierAmount}
+                      disabled={disabled || carrierLockedAll || (multi && paidTo === PAID_TO_NONE)}
+                      onChange={(e) => setLine(i, { carrierAmount: e.target.value })}
+                    />
+                  </td>
+                  <td className="tms-acc-col-customer" data-label="Charge customer">
+                    <TmsInput
+                      aria-label={`${LABEL.rates.lineCustomerAmount.text} ${i + 1}`}
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      value={line.customerAmount}
+                      disabled={disabled || ratesLocked}
+                      onChange={(e) => setLine(i, { customerAmount: e.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <TmsIconButton
+                      shape="plain"
+                      aria-label={`Remove accessorial line ${i + 1}`}
+                      disabled={disabled || ratesLocked}
+                      onClick={() => onChange((p) => ({ ...p, lines: p.lines.filter((_, j) => j !== i) }))}
+                    >
+                      <Trash2 size={14} />
+                    </TmsIconButton>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+          <tfoot>
+            <tr data-testid="rates-acc-subtotal">
+              <th scope="row" colSpan={3}>Accessorials subtotal</th>
+              <td className="tms-acc-col-carrier tms-acc-amt" data-testid="rates-acc-subtotal-carrier">{usd(accCarrierCents)}</td>
+              <td className="tms-acc-col-customer tms-acc-amt" data-testid="rates-acc-subtotal-customer">{usd(accCustomerCents)}</td>
+              <td />
+            </tr>
+            <tr className="tms-acc-total" data-testid="rates-acc-total">
+              <th scope="row" colSpan={3}>Totals</th>
+              <td className="tms-acc-col-carrier tms-acc-amt" data-testid="rates-total-carrier">
+                <span className="tms-acc-total-label">Pay carrier total</span> {usd(preview.carrierTotalCents)}
+              </td>
+              <td className="tms-acc-col-customer tms-acc-amt" data-testid="rates-total-customer">
+                <span className="tms-acc-total-label">Charge customer total</span> {usd(preview.customerTotalCents)}
+              </td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
         <div>
           <TmsButton
             size="sm"
@@ -262,7 +316,7 @@ function RatesSectionImpl({ value, onChange, ctx, ship, form, carriers }: RatesS
             disabled={disabled || ratesLocked}
             onClick={() => onChange((p) => ({ ...p, lines: [...p.lines, emptyAccessorialLine()] }))}
           >
-            <Plus size={14} className="mr-1" /> {LABEL.rates.addLine.text}
+            <Plus size={14} className="mr-1" /> Add accessorial
           </TmsButton>
         </div>
       </div>

@@ -85,4 +85,48 @@ describe('RatesSection', () => {
     const patch = (onChange.mock.calls[0][0] as (p: ShipmentFormValues['rates']) => ShipmentFormValues['rates'])(two.rates)
     expect(patch.lines[0].paidTo).toBe('c1')
   })
+
+  it('one table with Pay carrier / Charge customer columns and running footer totals', () => {
+    const v = emptyValues()
+    v.rates.lines = [
+      { id: '', carrierLineId: '', release: '', paidTo: '', code: 'LUMPER', label: '', carrierAmount: '40', customerAmount: '65', note: '' },
+      { id: '', carrierLineId: '', release: '', paidTo: '', code: 'TONU', label: '', carrierAmount: '', customerAmount: '25', note: '' },
+    ]
+    v.rates.customer = { ...v.rates.customer, lhRate: '1000' }
+    v.rates.carrier = { ...v.rates.carrier, lhRate: '800' }
+    render(<RatesSection value={v.rates} onChange={vi.fn()} ctx={makeCtx()} ship={v.ship} form={makeForm(v)} carriers={v.carriers} />)
+    expect(screen.getByTestId('rates-head-carrier').textContent).toBe('Pay carrier')
+    expect(screen.getByTestId('rates-head-customer').textContent).toBe('Charge customer')
+    expect(screen.getByTestId('rates-acc-subtotal-carrier').textContent).toBe('$40.00')
+    expect(screen.getByTestId('rates-acc-subtotal-customer').textContent).toBe('$90.00')
+    expect(screen.getByTestId('rates-total-carrier').textContent).toContain('Pay carrier total')
+    expect(screen.getByTestId('rates-total-carrier').textContent).toContain('$840.00')
+    expect(screen.getByTestId('rates-total-customer').textContent).toContain('Charge customer total')
+    expect(screen.getByTestId('rates-total-customer').textContent).toContain('$1090.00')
+  })
+
+  it('removes a row', () => {
+    const v = emptyValues()
+    v.rates.lines = [
+      { id: '', carrierLineId: '', release: '', paidTo: '', code: 'A', label: '', carrierAmount: '1', customerAmount: '2', note: '' },
+      { id: '', carrierLineId: '', release: '', paidTo: '', code: 'B', label: '', carrierAmount: '3', customerAmount: '4', note: '' },
+    ]
+    const onChange = vi.fn()
+    render(<RatesSection value={v.rates} onChange={onChange} ctx={makeCtx()} ship={v.ship} form={makeForm(v)} carriers={v.carriers} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove accessorial line 1' }))
+    const next = (onChange.mock.calls[0][0] as (p: ShipmentFormValues['rates']) => ShipmentFormValues['rates'])(v.rates)
+    expect(next.lines.map((l) => l.code)).toEqual(['B'])
+  })
+
+  it('typing a carrier and a customer amount edits both sides of the same row', () => {
+    const v = emptyValues()
+    v.rates.lines = [{ id: '', carrierLineId: '', release: '', paidTo: '', code: 'LUMPER', label: '', carrierAmount: '', customerAmount: '', note: '' }]
+    const onChange = vi.fn()
+    render(<RatesSection value={v.rates} onChange={onChange} ctx={makeCtx()} ship={v.ship} form={makeForm(v)} carriers={v.carriers} />)
+    fireEvent.change(screen.getByLabelText('$Carrier 1'), { target: { value: '40' } })
+    fireEvent.change(screen.getByLabelText('$Customer 1'), { target: { value: '65' } })
+    const apply = (i: number) => (onChange.mock.calls[i][0] as (p: ShipmentFormValues['rates']) => ShipmentFormValues['rates'])(v.rates).lines[0]
+    expect(apply(0).carrierAmount).toBe('40')
+    expect(apply(1).customerAmount).toBe('65')
+  })
 })
