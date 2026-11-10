@@ -8811,3 +8811,18 @@ describe('several carriers on one load', () => {
     expect(table(TABLES.laneSample).get(`lrs:${single.loadId}`)!.excluded).toBe(false)
   })
 })
+
+import { lockHeldAgainst } from './handler'
+describe('lockHeldAgainst', () => {
+  const now = Date.parse('2026-11-10T12:00:00Z')
+  const shipment = { editLockUserId: 'dee@bcatcorp.com', editLockUserName: 'Dee', editLockExpiresAt: '2026-11-10T12:05:00Z' }
+  it('refuses another person while the lock is live', () => {
+    expect(lockHeldAgainst(shipment, { email: 'ryne@bcatcorp.com' }, now)).toEqual({ by: 'Dee', until: '2026-11-10T12:05:00Z' })
+  })
+  it('lets the holder, an admin, an expired lock and no lock through', () => {
+    expect(lockHeldAgainst(shipment, { email: 'DEE@bcatcorp.com' }, now)).toBeNull()
+    expect(lockHeldAgainst(shipment, { email: 'ryne@bcatcorp.com', isAdmin: true }, now)).toBeNull()
+    expect(lockHeldAgainst({ ...shipment, editLockExpiresAt: '2026-11-10T11:59:00Z' }, { email: 'ryne@bcatcorp.com' }, now)).toBeNull()
+    expect(lockHeldAgainst({}, { email: 'ryne@bcatcorp.com' }, now)).toBeNull()
+  })
+})
