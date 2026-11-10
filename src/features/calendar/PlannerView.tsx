@@ -612,7 +612,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       onClick={(e) => {
         if (e.shiftKey || e.ctrlKey || e.metaKey) { onSelect(load.id, e); return }
         // On a phone or tablet the PRO # column is usually scrolled out of sight, so a tap on the row itself opens the shipment.
-        if (tapOpensShipment(e.target)) useAppStore.getState().setSelectedLoad(load.id, 'edit')
+        if (tapOpensShipment(e.target)) useAppStore.getState().setSelectedLoad(load.id, 'view')
       }}
     >
 

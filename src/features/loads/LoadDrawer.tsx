@@ -38,6 +38,9 @@ import { getStops, deriveLegacyFields } from '@/lib/stops'
 import { apptNotices } from '@/lib/apptNotify'
 import { sendApptNotices } from '@/lib/sendApptNotices'
 import { useDirectory } from '@/hooks/useDirectory'
+import { ShipmentDrawer } from '@/features/shipments/components/ShipmentDrawer'
+import { getTmsSettings } from '@/lib/apiClient'
+import type { TmsSettings } from '@/types/tms'
 import {
   formatDateTime, formatDateTimeInput,
   formatDateShort, apptHasTime, PENDING_LABEL,
@@ -262,17 +265,35 @@ function EditLoadDialog({
 
 /**
  * One shipments page. A load that belongs to a shipment is not edited in this drawer: whoever opened it (the calendar, Tasks, Appts,
- * the driver app page...) is taken to the shipment itself, the same page the Shipments board opens, so there is one record and one
- * place to change, void or cover it. Only a load with no shipment yet (old rows) still opens here.
+ * the driver app page...) gets the shipment itself, shown exactly as the Shipments board shows it. A normal open is the board's own
+ * shipment drawer, in place; an explicit Edit goes to the edit form the board's PRO link opens. One record, one place to change, void
+ * or cover it. Only a load with no shipment yet (old rows) still opens here.
  */
 function OpenShipmentInstead({ shipmentId, mode, onDone }: { shipmentId: string; mode: 'view' | 'edit'; onDone: () => void }) {
   const navigate = useNavigate()
+  const { isAdmin, user } = useAuth()
+  const { customers, locations } = useDirectory()
+  const [settings, setSettings] = useState<TmsSettings | null>(null)
+  useEffect(() => { if (mode === 'view') getTmsSettings().then(setSettings).catch(() => setSettings(null)) }, [mode])
   useEffect(() => {
-    navigate(mode === 'edit' ? `/tms/shipments/${shipmentId}/edit` : `/tms/shipments/${shipmentId}`)
+    if (mode !== 'edit') return
+    navigate(`/tms/shipments/${shipmentId}/edit`)
     onDone()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shipmentId, mode])
-  return null
+  if (mode !== 'view') return null
+  return (
+    <ShipmentDrawer
+      shipmentId={shipmentId}
+      onClose={onDone}
+      onChanged={() => { void useAppStore.getState().refreshCalendarData() }}
+      customers={customers}
+      locations={locations}
+      settings={settings}
+      isAdmin={isAdmin}
+      currentUser={user?.email ?? ''}
+    />
+  )
 }
 
 export function LoadDrawer() {
