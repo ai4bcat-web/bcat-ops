@@ -12,8 +12,8 @@ import {
   createFeedback, listFeedback, updateFeedback, uploadFeedbackScreenshot, getFeedbackScreenshotUrl,
 } from '@/lib/feedbackClient'
 import {
-  STATUSES, STATUS_LABEL, filterFeedback, groupByPage, isOwnFeedback, screenshotsOf, sortFeedback, statusOf, statusPatch,
-  type FeedbackItem, type FeedbackStatus, type SortKey,
+  PRIORITIES, PRIORITY_LABEL, PRIORITY_SHORT, STATUSES, STATUS_LABEL, filterFeedback, groupByPage, isOwnFeedback, priorityOf, screenshotsOf, sortFeedback, statusOf, statusPatch,
+  type FeedbackItem, type FeedbackPriority, type FeedbackStatus, type SortKey,
 } from './feedbackLogic'
 
 const OTHER = 'Other'
@@ -23,6 +23,17 @@ const STATUS_CLS: Record<FeedbackStatus, string> = {
   NEW: 'tms-badge-red',
   IN_PROGRESS: 'tms-badge-orange',
   DONE: 'tms-badge-green',
+}
+
+const PRIORITY_CLS: Record<FeedbackPriority, string> = {
+  1: 'tms-badge-red',
+  2: 'tms-badge-orange',
+  3: 'tms-badge-gray',
+}
+
+function PriorityBadge({ priority }: { priority: FeedbackPriority | null }) {
+  if (!priority) return <span className="text-muted-foreground">—</span>
+  return <span className={cn('inline-block whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium', PRIORITY_CLS[priority])}>{PRIORITY_SHORT[priority]}</span>
 }
 
 function StatusBadge({ status }: { status: FeedbackStatus }) {
@@ -70,6 +81,7 @@ function SubmitForm({ onCreated }: { onCreated: () => void }) {
   const [page, setPage] = useState(PAGE_OPTIONS[0]!)
   const [summary, setSummary] = useState('')
   const [details, setDetails] = useState('')
+  const [priority, setPriority] = useState<FeedbackPriority>(2)
   const [files, setFiles] = useState<{ file: File; url: string }[]>([])
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -93,7 +105,7 @@ function SubmitForm({ onCreated }: { onCreated: () => void }) {
     setBusy(true)
     try {
       const email = user?.email ?? 'unknown'
-      const row = await createFeedback({ page, summary: summary.trim(), details: details.trim(), submittedBy: email, submittedByName: nameFromEmail(email) })
+      const row = await createFeedback({ page, summary: summary.trim(), details: details.trim(), priority, submittedBy: email, submittedByName: nameFromEmail(email) })
       if (files.length) {
         try {
           const keys = await Promise.all(files.map((f, i) => uploadFeedbackScreenshot(row.id, f.file, i)))
@@ -104,7 +116,7 @@ function SubmitForm({ onCreated }: { onCreated: () => void }) {
       }
       toast.success('Thanks — feedback submitted')
       files.forEach((f) => URL.revokeObjectURL(f.url))
-      setFiles([]); setSummary(''); setDetails(''); setPage(PAGE_OPTIONS[0]!)
+      setFiles([]); setSummary(''); setDetails(''); setPriority(2); setPage(PAGE_OPTIONS[0]!)
       onCreated()
     } catch {
       toast.error('Could not submit feedback')
@@ -126,6 +138,11 @@ function SubmitForm({ onCreated }: { onCreated: () => void }) {
           <Textarea aria-label="What is not working" required value={summary} onChange={(e) => setSummary(e.target.value)} rows={2} />
         </label>
       </div>
+      <label className="block space-y-1 text-sm font-medium">Priority
+        <select aria-label="Priority" value={priority} onChange={(e) => setPriority(Number(e.target.value) as FeedbackPriority)} className={cn(SELECT_CLS, 'w-full md:w-72')}>
+          {PRIORITIES.map((p) => <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>)}
+        </select>
+      </label>
       <label className="block space-y-1 text-sm font-medium">Details (optional)
         <Textarea aria-label="Details" value={details} onChange={(e) => setDetails(e.target.value)} rows={3} placeholder="What did you click? What did you expect to happen?" />
       </label>
@@ -187,6 +204,16 @@ function DetailBody({ item, isAdmin, userEmail, onSaved }: { item: FeedbackItem;
         <DialogDescription>{item.page} · {item.submittedByName || item.submittedBy} · {fmtDate(item.createdAt)}</DialogDescription>
       </DialogHeader>
       {item.details && <p className="whitespace-pre-wrap text-sm">{item.details}</p>}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span>Priority:</span>
+        {isAdmin || isOwnFeedback(item, userEmail) ? (
+          <select aria-label="Report priority" value={priorityOf(item) ?? ''} disabled={busy} className={SELECT_CLS}
+            onChange={(e) => save({ priority: Number(e.target.value) as FeedbackPriority }, 'Priority saved')}>
+            {priorityOf(item) === null && <option value="" disabled>Not set</option>}
+            {PRIORITIES.map((p) => <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>)}
+          </select>
+        ) : <PriorityBadge priority={priorityOf(item)} />}
+      </div>
       <Screenshots keys={keys} />
       {isAdmin ? (
         <div className="space-y-3 border-t pt-3">
@@ -224,7 +251,7 @@ function GroupRows({ page, count, isCollapsed, onToggle, children }: {
   return (
     <>
       <tr className="cursor-pointer border-t bg-muted" onClick={onToggle}>
-        <td colSpan={7} className="px-3 py-2 font-semibold">
+        <td colSpan={8} className="px-3 py-2 font-semibold">
           <span className="inline-flex items-center gap-1">{isCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}{page} ({count})</span>
         </td>
       </tr>
@@ -249,6 +276,7 @@ export function FeedbackPage() {
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<FeedbackStatus | 'ALL'>('ALL')
   const [pageFilter, setPageFilter] = useState('ALL')
+  const [priorityFilter, setPriorityFilter] = useState<FeedbackPriority | 'ALL'>('ALL')
   const [query, setQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('createdAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -267,8 +295,8 @@ export function FeedbackPage() {
 
   const pages = useMemo(() => [...new Set(items.map((i) => i.page))].sort(), [items])
   const visible = useMemo(
-    () => sortFeedback(filterFeedback(items, { status: statusFilter, page: pageFilter, query }), sortKey, sortDir),
-    [items, statusFilter, pageFilter, query, sortKey, sortDir],
+    () => sortFeedback(filterFeedback(items, { status: statusFilter, page: pageFilter, query, priority: priorityFilter }), sortKey, sortDir),
+    [items, statusFilter, pageFilter, priorityFilter, query, sortKey, sortDir],
   )
   const groups = useMemo(() => groupByPage(visible), [visible])
   const open = items.find((i) => i.id === openId) ?? null
@@ -287,6 +315,7 @@ export function FeedbackPage() {
         <td className="px-3 py-2">{f.page}</td>
         <td className="max-w-md px-3 py-2">{f.summary}</td>
         <td className="px-3 py-2">{f.submittedByName || f.submittedBy}</td>
+        <td className="px-3 py-2"><PriorityBadge priority={priorityOf(f)} /></td>
         <td className="px-3 py-2"><StatusBadge status={statusOf(f)} /></td>
         <td className="px-3 py-2">
           {keys.length > 0 && (
@@ -314,6 +343,10 @@ export function FeedbackPage() {
             <option value="ALL">All pages</option>
             {pages.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
+          <select aria-label="Filter by priority" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value === 'ALL' ? 'ALL' : (Number(e.target.value) as FeedbackPriority))} className={SELECT_CLS}>
+            <option value="ALL">All priorities</option>
+            {PRIORITIES.map((p) => <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>)}
+          </select>
           <Input aria-label="Search feedback" placeholder="Search…" value={query} onChange={(e) => setQuery(e.target.value)} className="h-9 w-48" />
           <label className="ml-auto flex items-center gap-2 text-sm"><input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} /> Group by page</label>
         </div>
@@ -326,14 +359,15 @@ export function FeedbackPage() {
                 <SortHead k="page" active={sortKey} dir={sortDir} onSort={toggleSort}>Page</SortHead>
                 <th className="px-3 py-2 text-left font-medium">Summary</th>
                 <th className="px-3 py-2 text-left font-medium">Submitted by</th>
+                <SortHead k="priority" active={sortKey} dir={sortDir} onSort={toggleSort}>Priority</SortHead>
                 <SortHead k="status" active={sortKey} dir={sortDir} onSort={toggleSort}>Status</SortHead>
                 <th className="px-3 py-2 text-left font-medium">Screenshots</th>
                 <th className="px-3 py-2 text-left font-medium">Notes</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">Loading…</td></tr>}
-              {!loading && visible.length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">No feedback yet.</td></tr>}
+              {loading && <tr><td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">Loading…</td></tr>}
+              {!loading && visible.length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">No feedback yet.</td></tr>}
               {grouped
                 ? groups.map((g) => (
                   <GroupRows key={g.page} page={g.page} count={g.items.length} isCollapsed={collapsed.has(g.page)} onToggle={() => toggleGroup(g.page)}>

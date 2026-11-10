@@ -3965,6 +3965,8 @@ const schema = a.schema(stageTypes({
       details:          a.string(),
       screenshotKeys:   a.string().array(),
       status:           a.enum(['NEW', 'IN_PROGRESS', 'DONE']),
+      // 1 = blocking me from working, 2 = need to fix but not ASAP, 3 = nice to have. Absent on older reports.
+      priority:         a.integer(),
       submittedBy:      a.string(),
       submittedByName:  a.string(),
       adminNotes:       a.string(),

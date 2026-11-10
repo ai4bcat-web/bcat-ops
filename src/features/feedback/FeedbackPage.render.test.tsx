@@ -10,7 +10,7 @@ import type { FeedbackItem } from './feedbackLogic'
 const items: FeedbackItem[] = [
   { id: 'f-1', page: 'Loads', summary: 'Fake new report', status: 'NEW', submittedBy: 'a.person@example.test', createdAt: '2026-01-02T12:00:00Z' },
   { id: 'f-2', page: 'Fleet', summary: 'Fake finished report', status: 'DONE', submittedBy: 'b.person@example.test', createdAt: '2026-01-01T12:00:00Z' },
-  { id: 'f-3', page: 'Calendar', summary: 'My own report', status: 'IN_PROGRESS', submittedBy: 'Staff@Example.test', createdAt: '2026-01-03T12:00:00Z' },
+  { id: 'f-3', page: 'Calendar', summary: 'My own report', status: 'IN_PROGRESS', priority: 1, submittedBy: 'Staff@Example.test', createdAt: '2026-01-03T12:00:00Z' },
 ]
 
 vi.mock('@/lib/feedbackClient', () => ({
@@ -25,7 +25,7 @@ vi.mock('@/hooks/useAuth', () => ({
 }))
 
 import { FeedbackPage } from './FeedbackPage'
-import { updateFeedback } from '@/lib/feedbackClient'
+import { createFeedback, updateFeedback } from '@/lib/feedbackClient'
 
 describe('FeedbackPage render', () => {
   it('shows the heading, the submit control, and the listed reports', async () => {
@@ -54,5 +54,22 @@ describe('FeedbackPage render', () => {
     fireEvent.click(await screen.findByText('My own report'))
     fireEvent.click(await screen.findByTestId('feedback-mark-done'))
     await waitFor(() => expect(updateFeedback).toHaveBeenCalledWith('f-3', expect.objectContaining({ status: 'DONE', resolvedAt: expect.any(String) })))
+  })
+
+  it('the form asks for a priority (defaulting to 2) and sends it; the list shows it and can filter by it', async () => {
+    vi.mocked(createFeedback).mockResolvedValue({ id: 'f-9', page: 'Loads', summary: 'x' } as never)
+    render(<FeedbackPage />)
+    await screen.findByText('My own report')
+    expect(screen.getByText('P1 Blocking')).toBeTruthy()
+    const priority = screen.getByLabelText('Priority') as HTMLSelectElement
+    expect(priority.value).toBe('2')
+    expect([...priority.options].map((o) => o.textContent)).toEqual(['1 · Blocking me from working', '2 · Need to fix, not ASAP', '3 · Nice to have'])
+    fireEvent.change(priority, { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('What is not working'), { target: { value: 'Cannot save a shipment' } })
+    fireEvent.click(screen.getByRole('button', { name: /Submit feedback/ }))
+    await waitFor(() => expect(createFeedback).toHaveBeenCalledWith(expect.objectContaining({ priority: 1, summary: 'Cannot save a shipment' })))
+    fireEvent.change(screen.getByLabelText('Filter by priority'), { target: { value: '1' } })
+    expect(screen.getByText('My own report')).toBeTruthy()
+    expect(screen.queryByText('Fake new report')).toBeNull()
   })
 })
