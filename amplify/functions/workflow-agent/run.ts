@@ -43,7 +43,6 @@ import { postingFrom, type CapacityEmailParse } from '../../../src/lib/workflows
 import { consumerFor } from '../../../src/lib/workflows/webhookConsumers'
 import { parseTender, type TenderPrefill } from '../../../src/lib/intakeTender'
 import type { AiAgentsSettings, PartyAiMemory, WorkflowOutcome } from '../../../src/types/tms'
-import { SCHEMA as RATECON_SCHEMA, blanksToNull } from '../ratecon-parser/handler'
 import {
   CAPACITY_SCHEMA,
   CLASSIFY_SCHEMA,
@@ -510,31 +509,6 @@ function resolveParty(
 
 // ── The pipeline ─────────────────────────────────────────────────────────────
 
-interface RateconRead {
-  invoice?: { brokerName?: string | null; poNumber?: string | null; originCity?: string | null; originState?: string | null; originZip?: string | null; destinationCity?: string | null; destinationState?: string | null; destinationZip?: string | null } | null
-  freight?: { weightLbs?: number | null } | null
-  pickup?: { date?: string | null; time?: string | null } | null
-  delivery?: { date?: string | null; time?: string | null } | null
-}
-
-function fillFromRatecon(read: RateconRead): TenderModelFill {
-  const invoice = read.invoice ?? {}
-  const stops: NonNullable<TenderModelFill['stops']> = []
-  if (invoice.originCity || invoice.originState) {
-    stops.push({ type: 'pickup', city: invoice.originCity ?? null, state: invoice.originState ?? null, zip: invoice.originZip ?? null, dateStr: read.pickup?.date ?? null, time: read.pickup?.time ?? null })
-  }
-  if (invoice.destinationCity || invoice.destinationState) {
-    stops.push({ type: 'delivery', city: invoice.destinationCity ?? null, state: invoice.destinationState ?? null, zip: invoice.destinationZip ?? null, dateStr: read.delivery?.date ?? null, time: read.delivery?.time ?? null })
-  }
-  return {
-    customer: invoice.brokerName ?? null,
-    reference: invoice.poNumber ?? null,
-    pickupNumber: null,
-    weightLb: read.freight?.weightLbs ?? null,
-    stops,
-  }
-}
-
 /**
  * The desks a classifier answer may move a run to. WEBHOOK is an agent key but
  * not a desk any e-mail belongs to, and routing to it would walk into a step
@@ -871,16 +845,27 @@ async function parseFor(run: RunRow, source: SourceData, files: FileBlock[], mem
       const prefill = parseTender(source.subject, source.bodyText)
       let fill: TenderModelFill | null
       let fillKind: TenderParse['fillKind']
-      let lowConfidence: string[] = []
+      let lowConfidence: string[]
       if (files.length > 0) {
-        // One pass over the document with the SAME schema the rate-con dialog
-        // uses, so the agent and the client can never disagree about one page.
-        const answer = await callModel<RateconRead>(RATECON_SCHEMA, [files[0]], [
-          'This is a freight rate confirmation or tender. Extract exactly what it states.',
-          memoryHint,
-        ].filter(Boolean).join('\n\n'), 2000)
-        fill = fillFromRatecon(blanksToNull(answer.value))
+        // The rate confirmation PDF is the guide the load is built from: one pass over the document AND the message, with the full
+        // tender schema (customer, references, equipment, commodity, the rate, and every stop's address, date, time and instructions).
+        // The PDF wins where the two disagree; the message only fills what the PDF does not state.
+        const answer = await callModel<TenderEmailFill>(
+          TENDER_FILL_SCHEMA,
+          [files[0]],
+          emailPrompt(
+            [
+              'This freight tender came with a rate confirmation (the attached document). Read the document first and return exactly what it states;',
+              'use the message only for what the document does not say. Null for anything neither states.',
+              memoryHint,
+            ].filter(Boolean).join('\n'),
+            { subject: source.subject, fromEmail: source.fromEmail, body: source.bodyText },
+          ),
+          2500,
+        )
+        fill = answer.value
         fillKind = 'RATECON'
+        lowConfidence = (answer.value.lowConfidence ?? []).filter((k): k is string => typeof k === 'string')
       } else {
         const answer = await callModel<TenderEmailFill>(
           TENDER_FILL_SCHEMA,

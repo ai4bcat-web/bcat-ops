@@ -118,12 +118,16 @@ export const CLASSIFY_SCHEMA = {
 export const TENDER_FILL_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['customer', 'reference', 'pickupNumber', 'weightLb', 'shipmentType', 'stops', 'lowConfidence'],
+  required: ['customer', 'reference', 'pickupNumber', 'deliveryNumber', 'weightLb', 'shipmentType', 'equipmentType', 'commodity', 'rateDollars', 'stops', 'lowConfidence'],
   properties: {
     customer: { type: ['string', 'null'], description: 'The broker or shipper offering the load.' },
     reference: { type: ['string', 'null'], description: 'The reference the broker will match on — TMS ID, load #, order #.' },
     pickupNumber: { type: ['string', 'null'], description: 'Shipment / SO / PU number at the pickup.' },
+    deliveryNumber: { type: ['string', 'null'], description: 'Reference / PO / appointment number at the delivery, when one is given.' },
     weightLb: { type: ['number', 'null'], description: 'Total weight in pounds.' },
+    equipmentType: { type: ['string', 'null'], description: 'The trailer asked for, as written (53 dry van, reefer, flatbed, 48 stepdeck, power only). Null when not stated.' },
+    commodity: { type: ['string', 'null'], description: 'What is being hauled, as the document names it. Null when not stated.' },
+    rateDollars: { type: ['number', 'null'], description: 'The TOTAL the load pays in dollars when the document states one (a rate confirmation states it). Never a per-mile figure and never your own estimate.' },
     shipmentType: { type: 'string', description: `The kind of shipment, exactly one of ${SHIPMENT_TYPE_KEYS.join(', ')}; empty string when the message does not say.` },
     lowConfidence: {
       type: 'array',
@@ -135,15 +139,17 @@ export const TENDER_FILL_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['type', 'name', 'city', 'state', 'zip', 'dateStr', 'time'],
+        required: ['type', 'name', 'street', 'city', 'state', 'zip', 'dateStr', 'time', 'instructions'],
         properties: {
           type: { type: 'string', description: 'pickup or delivery' },
           name: { type: ['string', 'null'], description: 'Facility name.' },
+          street: { type: ['string', 'null'], description: 'Street address line.' },
           city: { type: ['string', 'null'] },
           state: { type: ['string', 'null'], description: 'Two-letter state code.' },
           zip: { type: ['string', 'null'] },
           dateStr: { type: ['string', 'null'], description: 'YYYY-MM-DD.' },
           time: { type: ['string', 'null'], description: 'HH:mm 24h, only when a real appointment is stated.' },
+          instructions: { type: ['string', 'null'], description: 'Anything the driver must know at this stop (dock, check-in, hours, contact). Null when none.' },
         },
       },
     },

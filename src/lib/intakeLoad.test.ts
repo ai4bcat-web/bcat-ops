@@ -307,3 +307,21 @@ describe('intakeCounts', () => {
     expect(intakeCounts(row)).toMatchObject({ missing: 2, toCheck: 2 })
   })
 })
+
+describe('a tender read from its rate confirmation PDF', () => {
+  it('fills equipment, commodity, the delivery number and the customer rate, marked as read from the document', () => {
+    const tender: TenderPrefill = {
+      ...parserTender, format: null, reference: undefined, pickupNumber: undefined,
+      equipmentType: '53 dry van', commodity: 'Frozen foods', deliveryNumber: 'DEL-77', customerRateCents: 165000,
+    }
+    const d = draft({ tender, parserTender: { ...parserTender, format: null, reference: undefined, pickupNumber: undefined, weightLb: undefined, stops: [] }, fillKind: 'RATECON' })
+    expect(d.fields).toMatchObject({ equipmentType: '53 dry van', commodity: 'Frozen foods', deliveryNumber: 'DEL-77', customerRateCents: 165000 })
+    expect(d.meta.equipmentType).toMatchObject({ source: 'RATECON', confidence: 'high' })
+    expect(d.meta.customerRateCents).toMatchObject({ source: 'RATECON' })
+  })
+
+  it('leaves them blank when the document does not state them', () => {
+    const d = draft()
+    expect(d.fields).toMatchObject({ equipmentType: null, commodity: null, deliveryNumber: null, customerRateCents: null })
+  })
+})

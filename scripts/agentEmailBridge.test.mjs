@@ -372,8 +372,20 @@ describe('agentEmailBridge.gs', () => {
       '(to:quotes@bcatcorp.com OR cc:quotes@bcatcorp.com OR deliveredto:quotes@bcatcorp.com'
       + ' OR list:quotes.bcatcorp.com OR "quotes@bcatcorp.com"'
       + ' OR to:tenders@bcatcorp.com OR cc:tenders@bcatcorp.com OR deliveredto:tenders@bcatcorp.com'
-      + ' OR list:tenders.bcatcorp.com OR "tenders@bcatcorp.com") -in:trash -in:spam',
+      + ' OR list:tenders.bcatcorp.com OR "tenders@bcatcorp.com") -in:trash -in:spam newer_than:3d',
     );
+  });
+
+  it('limits the search to the last few days, and honours AGENT_LOOKBACK_DAYS (never unlimited, never over 60)', () => {
+    const run = (properties) => {
+      const { ctx, state } = makeBridge({ messages: [makeMessage({ id: 'lb' })], properties: { ...TWO_ROLE_PROPERTIES, ...properties } });
+      ctx.processAgentInboxEmails();
+      return state.searchCalls[0].query;
+    };
+    expect(run({})).toMatch(/ newer_than:3d$/);
+    expect(run({ AGENT_LOOKBACK_DAYS: '10' })).toMatch(/ newer_than:10d$/);
+    expect(run({ AGENT_LOOKBACK_DAYS: '0' })).toMatch(/ newer_than:3d$/);
+    expect(run({ AGENT_LOOKBACK_DAYS: '9999' })).toMatch(/ newer_than:60d$/);
   });
 
   it('honours an address override from script properties', () => {

@@ -111,3 +111,21 @@ describe('proposalToPrefill', () => {
     expect(seed.workflowRunId).toBe('wf:TENDER:xyz')
   })
 })
+
+describe('what the model reads from a rate confirmation', () => {
+  const BLANK: TenderPrefill = { format: null, stops: [] }
+  it('carries equipment, commodity, the delivery number and the rate (dollars to cents), and the stop address and instructions', () => {
+    const out = tenderFromParse(BLANK, {
+      equipmentType: '53 dry van', commodity: 'Frozen foods', deliveryNumber: 'D-9', rateDollars: 1650.5,
+      stops: [{ type: 'pickup', name: 'ACME', street: '1 Main St', city: 'Joliet', state: 'IL', zip: '60435', dateStr: '2026-11-11', time: '08:00', instructions: 'Dock 4' }],
+    })
+    expect(out).toMatchObject({ equipmentType: '53 dry van', commodity: 'Frozen foods', deliveryNumber: 'D-9', customerRateCents: 165050 })
+    expect(out.stops[0]).toMatchObject({ street: '1 Main St', instructions: 'Dock 4' })
+  })
+
+  it('never takes a zero or missing rate, and the parser still outranks the model', () => {
+    expect(tenderFromParse(BLANK, { rateDollars: 0 }).customerRateCents).toBeUndefined()
+    expect(tenderFromParse({ ...BLANK, equipmentType: 'reefer', customerRateCents: 100 }, { equipmentType: 'van', rateDollars: 5 })).toMatchObject({ equipmentType: 'reefer', customerRateCents: 100 })
+  })
+})
+

@@ -71,6 +71,12 @@ export interface TenderPrefill {
   weightLb?: number
   /** A `SHIPMENT_TYPES` key the model read from the e-mail; the parser never sets it. */
   shipmentType?: string
+  /** What the model read from the e-mail or its rate confirmation PDF; the parser never sets these. */
+  equipmentType?: string
+  commodity?: string
+  deliveryNumber?: string
+  /** What the load pays us, in cents, when the document states it. */
+  customerRateCents?: number
   stops: TenderStopPrefill[]
 }
 
