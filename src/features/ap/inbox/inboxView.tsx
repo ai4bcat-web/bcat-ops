@@ -3,7 +3,8 @@
  * Columns, the row's "why" and the per-row actions live here; the page owns the dialogs.
  */
 import type { ReactNode } from 'react'
-import { TmsBadge, TmsButton, type ColumnDef, type TmsListPageProps } from '@/features/tms/kit'
+import { TmsBadge, TmsButton } from '@/features/tms/kit'
+import type { ApColumn, ApListConfig } from '../ApDenseList'
 import { formatDay } from '@/features/ar/arViews'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { ApInboxAttachmentRef, ApInboxItemRecord } from '@/lib/apInbox/types'
@@ -12,7 +13,7 @@ import { ItemWhy } from './InboxParts'
 
 const RIGHT = 'block text-right tabular-nums'
 
-export type InboxViewConfig = Omit<TmsListPageProps<ApInboxItemRecord>, 'title' | 'viewTabs' | 'quickTabs' | 'onRefresh'>
+export type InboxViewConfig = ApListConfig<ApInboxItemRecord>
 
 export function inboxView({
   banner, rows, loading, busy, onLink, onCreate, onDismiss, onUndo, onOpenFile,
@@ -27,11 +28,21 @@ export function inboxView({
   onUndo: (item: ApInboxItemRecord) => void
   onOpenFile: (file: ApInboxAttachmentRef) => void
 }): InboxViewConfig {
-  const columns: ColumnDef<ApInboxItemRecord>[] = [
-    { key: 'received', header: 'RECEIVED', render: (r) => <span className="text-xs">{formatDay(r.receivedAt.slice(0, 10))}</span> },
+  const fromText = (r: ApInboxItemRecord) => [r.fromName, r.fromEmail].filter(Boolean).join(' ') || '—'
+  const issuerText = (r: ApInboxItemRecord) => {
+    const i = r.extraction.issuer
+    return [i.name, i.mc ? `MC ${i.mc}` : '', i.dot ? `DOT ${i.dot}` : ''].filter(Boolean).join(' · ') || '—'
+  }
+  const matchText = (r: ApInboxItemRecord) => (
+    r.status === 'NEEDS_REVIEW' || r.status === 'APPLIED' || r.status === 'LINKED' ? (suggestedLabel(r) ?? 'none') : STATUS_LABEL[r.status]
+  )
+  const columns: ApColumn<ApInboxItemRecord>[] = [
+    { key: 'received', header: 'RECEIVED', text: (r) => formatDay(r.receivedAt.slice(0, 10)), sortValue: (r) => r.receivedAt, filter: 'date', dateOf: (r) => r.receivedAt, render: (r) => <span className="text-xs">{formatDay(r.receivedAt.slice(0, 10))}</span> },
     {
       key: 'from',
       header: 'FROM',
+      text: fromText,
+      extraPx: 30,
       render: (r) => (
         <span className="text-xs">
           {r.fromName || r.fromEmail || '—'}
@@ -42,24 +53,34 @@ export function inboxView({
     {
       key: 'issuer',
       header: 'ISSUER',
+      text: issuerText,
+      extraPx: 30,
       render: (r) => {
         const i = r.extraction.issuer
         const ids = [i.mc ? `MC ${i.mc}` : '', i.dot ? `DOT ${i.dot}` : ''].filter(Boolean).join(' · ')
         return <span className="text-xs">{i.name || '—'}{ids ? <><br /><span className="tms-muted">{ids}</span></> : null}</span>
       },
     },
-    { key: 'invoice', header: 'INVOICE #', render: (r) => r.extraction.invoiceNumber ?? '—' },
-    { key: 'refs', header: 'PRO / REFS', render: (r) => <span className="text-xs">{itemRefs(r) || '—'}</span> },
-    { key: 'invDate', header: 'INVOICE DATE', render: (r) => formatDay(r.extraction.invoiceDate) },
-    { key: 'due', header: 'DUE', render: (r) => formatDay(r.extraction.dueDate) },
+    { key: 'invoice', header: 'INVOICE #', text: (r) => r.extraction.invoiceNumber ?? '—', render: (r) => r.extraction.invoiceNumber ?? '—' },
+    { key: 'refs', header: 'PRO / REFS', text: (r) => itemRefs(r) || '—', render: (r) => <span className="text-xs">{itemRefs(r) || '—'}</span> },
+    { key: 'invDate', header: 'INVOICE DATE', text: (r) => formatDay(r.extraction.invoiceDate), sortValue: (r) => r.extraction.invoiceDate ?? '', filter: 'date', dateOf: (r) => r.extraction.invoiceDate ?? null, render: (r) => formatDay(r.extraction.invoiceDate) },
+    { key: 'due', header: 'DUE', text: (r) => formatDay(r.extraction.dueDate), sortValue: (r) => r.extraction.dueDate ?? '', filter: 'date', dateOf: (r) => r.extraction.dueDate ?? null, render: (r) => formatDay(r.extraction.dueDate) },
     {
       key: 'amount',
       header: 'AMOUNT',
+      align: 'right',
+      text: (r) => (r.extraction.amountCents == null ? '—' : formatCents(r.extraction.amountCents)),
+      sortValue: (r) => r.extraction.amountCents ?? null,
+      filter: 'number',
+      numberOf: (r) => (r.extraction.amountCents == null ? null : r.extraction.amountCents / 100),
+      numberUnit: '$',
       render: (r) => <span className={RIGHT}>{r.extraction.amountCents == null ? '—' : formatCents(r.extraction.amountCents)}</span>,
     },
     {
       key: 'match',
       header: 'SUGGESTED MATCH',
+      text: matchText,
+      extraPx: 90,
       render: (r) => {
         const label = suggestedLabel(r)
         const vetoed = (r.match?.top?.vetoes.length ?? 0) > 0
@@ -75,6 +96,9 @@ export function inboxView({
     {
       key: 'files',
       header: 'FILES',
+      text: (r) => (r.attachments ?? []).map((f) => f.name).join(', ') || (r.sourceUrl ? 'Open in Gmail' : '—'),
+      filter: false,
+      sortable: false,
       render: (r) => (
         <span className="text-xs">
           {(r.attachments ?? []).map((f) => (
@@ -84,10 +108,15 @@ export function inboxView({
         </span>
       ),
     },
-    { key: 'why', header: 'WHY', render: (r) => <ItemWhy item={r} testId={`ap-inbox-why-${r.id}`} /> },
+    { key: 'why', header: 'WHY', text: (r) => (r.reviewReason ? (REASON_LABEL[r.reviewReason] ?? r.reviewReason) : ''), width: 360, filter: false, sortable: false, render: (r) => <ItemWhy item={r} testId={`ap-inbox-why-${r.id}`} /> },
     {
       key: 'actions',
       header: '',
+      text: () => '',
+      width: 330,
+      filter: false,
+      sortable: false,
+      fixed: true,
       render: (r) => {
         if (r.status === 'NEEDS_REVIEW') {
           return (
@@ -110,11 +139,11 @@ export function inboxView({
   ]
 
   return {
+    gridId: 'ap-inbox',
     banner,
     columns,
     rows,
     rowKey: (r) => r.id,
-    page: { from: rows.length === 0 ? 0 : 1, to: rows.length, total: rows.length, pageSize: rows.length },
     emptyText: loading ? 'Loading…' : 'Nothing here. Invoice e-mails the AP inbox finds will appear in this list.',
   }
 }
