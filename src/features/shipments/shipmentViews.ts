@@ -8,6 +8,7 @@
  * voided row keeps its PRO, and rows that were soft-deleted before Void existed are
  * read as voided for exactly the same reason — the PRO never leaves the book.
  */
+import { STATUS_META } from '@/lib/apptStatus'
 import { PHASE_LABEL, deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
 import { phaseInputOfRow } from './deliveryPhaseInputs'
 import { rateConStatusText } from '@/lib/rateConLabel'
@@ -650,6 +651,17 @@ export function statusLabel(row: ShipmentRow): string {
   return SHIPMENT_STATUS_LABELS[row.status]
 }
 
+/** The Appts-page workflow status of the first pickup / last delivery stop; blank when the stop carries none. */
+const APPT_STATUS_TEXT: Record<string, string> = Object.fromEntries(Object.entries(STATUS_META).map(([k, v]) => [k, v.label]))
+
+function apptStatusText(row: ShipmentRow, type: 'pickup' | 'delivery'): string {
+  const stops = (Array.isArray(row.stops) ? row.stops : []).filter((s) => s.type === type)
+  const stop = type === 'pickup' ? stops[0] : stops[stops.length - 1]
+  const status = stop?.apptStatus
+  return status ? (APPT_STATUS_TEXT[status] ?? String(status)) : ''
+}
+
+
 /**
  * The Status cell: `DELIVERED 2/2`, `DEPARTED 1/2`, `COVERED`.
  *
@@ -808,6 +820,9 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'destinationCity', label: 'Destination', group: 'Shipment', value: (r) => r.destinationCity ?? '', sortKey: 'destinationCity', width: 150 },
   { key: 'pickupAppt', label: 'Pick up', group: 'Shipment', value: (r) => formatBoardDate(r.pickupAppt), sortKey: 'pickupAppt', width: 100 },
   { key: 'deliveryAppt', label: 'Delivery', group: 'Shipment', value: (r) => formatBoardDate(r.deliveryAppt), sortKey: 'deliveryAppt', width: 100 },
+  // The appointment workflow status set on the Appts page, on the shipment itself (Ryne queue): first pickup and last delivery stop.
+  { key: 'pickupApptStatus', label: 'Pickup Appt Status', group: 'Shipment', value: (r) => apptStatusText(r, 'pickup'), width: 150 },
+  { key: 'deliveryApptStatus', label: 'Delivery Appt Status', group: 'Shipment', value: (r) => apptStatusText(r, 'delivery'), width: 150 },
   { key: 'stops', label: 'Stops', group: 'Computed', value: (r) => (r.stopCount == null ? '' : String(r.stopCount)), width: 70 },
   { key: 'salesRepId', label: 'Customer rep', group: 'Order', value: (r) => r.salesRepName ?? r.customerRepName ?? r.salesRepId ?? r.customerRepId ?? r.salesRepCode ?? '', width: 140 },
   { key: 'driver', label: 'Driver', group: 'Load', value: (r) => driverNamesOf(r).join(', '), width: 190 },

@@ -363,7 +363,7 @@ export const BOARD_COLUMN_KEYS = [
   'pickupApptEnd', 'pickupApptType', 'deliveryApptEnd', 'deliveryApptType',
   'pickupDriver', 'deliveryDriver', 'loadTrailer', 'loadRate', 'miles', 'hot',
   'loadCommodity', 'loadWeight', 'loadPieces', 'paperworkLocation', 'eldReviewedAt',
-  'eldReviewedBy', 'readyToInvoice', 'rateConOnFile', 'assignmentType', 'divisionKey',
+  'eldReviewedBy', 'readyToInvoice', 'rateConOnFile', 'pickupApptStatus', 'deliveryApptStatus', 'assignmentType', 'divisionKey',
   'trackingProvider', 'nextCheckCallNote', 'checkCallOpen', 'lastCheckCallAt',
   'lastCheckCallType', 'lastKnownAt', 'lastKnownCity', 'lastKnownState', 'lastKnownSource',
   'loadDeliveredAt', 'cargoValue', 'loadNotes', 'podNotes',
