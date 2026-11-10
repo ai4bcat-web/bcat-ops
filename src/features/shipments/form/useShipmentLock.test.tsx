@@ -46,4 +46,25 @@ describe('useShipmentLock', () => {
     await act(async () => { await result.current.release() })
     expect(api.unlock).not.toHaveBeenCalled()
   })
+  describe('a form left open', () => {
+    it('keeps renewing the lock while the person is working, and lets go of it once nobody has touched the form for the idle limit; touching it again takes it back', async () => {
+      vi.useFakeTimers()
+      try {
+        renderHook(() => useShipmentLock('shp-1'))
+        await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+        expect(api.lock).toHaveBeenCalledTimes(1)
+        // 4 minutes in, activity 1 minute ago: renewed.
+        await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60_000); window.dispatchEvent(new Event('keydown')); await vi.advanceTimersByTimeAsync(60_000) })
+        expect(api.lock).toHaveBeenCalledTimes(2)
+        expect(api.unlock).not.toHaveBeenCalled()
+        // Untouched for longer than the idle limit by the next tick: released, not renewed.
+        await act(async () => { await vi.advanceTimersByTimeAsync(4 * 60_000) })
+        expect(api.lock).toHaveBeenCalledTimes(2)
+        expect(api.unlock).toHaveBeenCalledExactlyOnceWith('shp-1')
+        // Back at the form: the lock is taken again.
+        await act(async () => { window.dispatchEvent(new Event('pointerdown')); await vi.advanceTimersByTimeAsync(0) })
+        expect(api.lock).toHaveBeenCalledTimes(3)
+      } finally { vi.useRealTimers() }
+    })
+  })
 })
