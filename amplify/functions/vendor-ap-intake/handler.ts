@@ -74,6 +74,7 @@ interface BasePayload {
   fromEmail: string | null
   receivedAt: string
   emailBody: string | null
+  payAsap: boolean
 }
 
 interface PreparePayload extends BasePayload {
@@ -218,6 +219,8 @@ function validateBasePayload(raw: unknown): ValidationResult<BasePayload> {
       fromEmail,
       receivedAt,
       emailBody,
+      // The bridge says which mailbox the message arrived in: quickpay@ mail is pay-as-soon-as-possible.
+      payAsap: raw.queue === 'QUICKPAY',
     },
   }
 }
@@ -387,6 +390,7 @@ async function handleCommit(payload: CommitPayload, dynamo: DynamoDBClient, s3: 
     emailBody: payload.emailBody,
     attachments: verified,
     receivedAt: parseISOOrNow(payload.receivedAt),
+    ...(payload.payAsap ? { payAsap: true } : {}),
     createdAt: now,
     updatedAt: now,
   }

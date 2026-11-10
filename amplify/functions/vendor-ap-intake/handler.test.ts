@@ -259,6 +259,21 @@ describe('vendor-ap-intake handler', () => {
       expect(attachments[0]).toMatchObject({ key: 'intake-pdfs/vendor-ap/abc/0-invoice.pdf', name: 'invoice.pdf', contentType: 'application/pdf', size: 12345 })
     })
 
+    it('marks mail from the quickpay mailbox pay-as-soon-as-possible, and ordinary mail not', async () => {
+      const commit = async (extra: Record<string, unknown>, id: string) => {
+        dynamoSend.mockResolvedValueOnce({ Item: undefined }).mockResolvedValueOnce({})
+        s3Send.mockResolvedValueOnce({ ContentLength: 10, ContentType: 'application/pdf' })
+        await handler(makeEvent({
+          action: 'commit', secret: 'intake-secret', messageId: id, subject: 'Quickpay request', from: 'carrier@example.com',
+          receivedAt: '2026-09-28T10:00:00Z', emailBody: 'Pay now', ...extra,
+          attachments: [{ s3Key: `intake-pdfs/vendor-ap/${id}/0-invoice.pdf`, name: 'invoice.pdf', contentType: 'application/pdf', size: 10 }],
+        }))
+        return lastCall(PutItemCommand as unknown as MockCommand).Item as Record<string, unknown>
+      }
+      expect(await commit({ queue: 'QUICKPAY' }, 'qp-1')).toMatchObject({ payAsap: true })
+      expect(await commit({}, 'qp-2')).not.toHaveProperty('payAsap')
+    })
+
     it('treats an existing row as a duplicate on commit', async () => {
       dynamoSend.mockResolvedValue({ Item: { id: 'email:msg-123' } })
 

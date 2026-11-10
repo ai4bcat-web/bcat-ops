@@ -3843,6 +3843,8 @@ const schema = a.schema(stageTypes({
       emailBody: a.string(),
       attachments: a.json(),
       receivedAt: a.datetime().required(),
+      // Mail that came in through quickpay@bcatcorp.com: pay as soon as possible (the Quickpay tab on Vendors).
+      payAsap: a.boolean(),
       paymentMethod: a.string(),
       paymentDate: a.date(),
       paymentReference: a.string(),

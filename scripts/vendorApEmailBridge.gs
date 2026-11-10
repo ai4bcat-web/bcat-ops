@@ -251,6 +251,7 @@ function vendorApProcessMessageInternal_(message, cfg, props, msgId) {
         from: preparePayload.from,
         receivedAt: preparePayload.receivedAt,
         emailBody: preparePayload.emailBody,
+        queue: preparePayload.queue,
         attachments: committedAttachments,
       };
 
@@ -327,6 +328,7 @@ function vendorApBuildPreparePayload_(message, cfg) {
     from: from,
     receivedAt: receivedAt,
     emailBody: emailBody,
+    queue: vendorApQueueOf_(message),
     attachments: attachmentMeta,
   };
 }
@@ -437,4 +439,12 @@ function vendorApPersistAck_(props, key, value) {
 function vendorApParseCursor_(raw) {
   const n = parseInt(raw || '0', 10);
   return isNaN(n) || n < 0 ? 0 : n;
+}
+
+
+// Mail sent to quickpay@bcatcorp.com (a group delivered into this mailbox) is pay-as-soon-as-possible: the Vendors page lists it
+// under the Quickpay tab. Everything else is the normal vendor queue.
+function vendorApQueueOf_(message) {
+  const addressed = ((message.getTo() || '') + ',' + (message.getCc() || '')).toLowerCase();
+  return addressed.indexOf('quickpay@bcatcorp.com') !== -1 ? 'QUICKPAY' : '';
 }

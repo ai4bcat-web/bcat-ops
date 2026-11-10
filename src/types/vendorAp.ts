@@ -10,6 +10,8 @@ export interface VendorApAttachment {
 
 export interface VendorPayable {
   id: string
+  /** Came in through quickpay@: pay as soon as possible. */
+  payAsap?: boolean | null
   status: VendorPayableStatus
   source: VendorPayableSource
   sourceInvoiceId?: string | null
