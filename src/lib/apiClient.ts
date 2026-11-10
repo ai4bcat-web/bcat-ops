@@ -8488,6 +8488,8 @@ export async function getLaneIntelligence(input: {
   equipmentType?: string | null
   /** The quote the panel sits on: it is not its own history. */
   excludeQuoteId?: string | null
+  /** BROKERAGE or IVAN: only runs on the same side of the business as the load being priced. */
+  laneClass?: 'BROKERAGE' | 'IVAN' | null
 }): Promise<LaneIntelligence> {
   return shipmentAction<LaneIntelligence>('LANE_INTELLIGENCE', input)
 }

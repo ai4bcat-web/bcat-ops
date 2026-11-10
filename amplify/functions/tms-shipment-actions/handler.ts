@@ -8584,7 +8584,7 @@ const postingDeps: PostingDeps = {
 
 const laneIntelDeps: LaneIntelDeps = {
   db: dynamo,
-  tables: { quote: QUOTE_TABLE_NAME, laneSample: LANE_RATE_SAMPLE_TABLE_NAME },
+  tables: { quote: QUOTE_TABLE_NAME, laneSample: LANE_RATE_SAMPLE_TABLE_NAME, load: LOAD_TABLE_NAME },
   now: nowIso,
 }
 

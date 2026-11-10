@@ -17,6 +17,7 @@ import type { LaneInput, LaneIntelligence, LaneRunStats } from '@/lib/laneIntel'
 import { centsToDollars, dollarsToCents, isLocked } from '../model'
 import type { CardProps } from './cardRegistry'
 import { cachedRead as cached, clearRateHistoryCache } from './rateHistoryCache'
+import { laneClassOfDivision } from './laneClass'
 import './rateHistoryCard.css'
 
 const DEBOUNCE_MS = 400
@@ -40,6 +41,8 @@ interface Input {
   lane: LaneInput | null
   equipmentType: string
   customerId: string
+  /** Brokerage loads are compared with brokerage runs and Ivan loads with Ivan runs (null: division not picked or neither). */
+  laneClass: 'BROKERAGE' | 'IVAN' | null
   /** City + state on both ends and an equipment: what DAT needs. */
   marketReady: boolean
 }
@@ -48,6 +51,7 @@ function RateHistoryCardImpl({ values, update, locked }: CardProps) {
   const { stops } = values
   const equipmentType = values.ship.equipmentType.trim()
   const customerId = values.customer.id
+  const laneClass = laneClassOfDivision(values.ship.revDivision)
 
   const live = useMemo<Input>(() => {
     const raw = laneInputOfStops(stops)
@@ -58,8 +62,8 @@ function RateHistoryCardImpl({ values, update, locked }: CardProps) {
     const marketReady = !!lane && !!equipmentType
       && !!lane.originCity?.trim() && hasState(lane.originState)
       && !!lane.destinationCity?.trim() && hasState(lane.destinationState)
-    return { key: lane ? `${laneInputKey(lane)}#${equipmentType.toUpperCase()}#${customerId}` : '', lane, equipmentType, customerId, marketReady }
-  }, [stops, equipmentType, customerId])
+    return { key: lane ? `${laneInputKey(lane)}#${equipmentType.toUpperCase()}#${customerId}#${laneClass ?? ''}` : '', lane, equipmentType, customerId, laneClass, marketReady }
+  }, [stops, equipmentType, customerId, laneClass])
 
   // First paint reads at once; every later change waits for 400 ms of quiet.
   const [input, setInput] = useState<Input>(live)
@@ -77,7 +81,7 @@ function RateHistoryCardImpl({ values, update, locked }: CardProps) {
     if (!input.key || !input.lane) return undefined
     const { lane, key } = input
     let alive = true
-    cached(`intel#${key}`, () => getLaneIntelligence({ ...lane, equipmentType: input.equipmentType || null }))
+    cached(`intel#${key}`, () => getLaneIntelligence({ ...lane, equipmentType: input.equipmentType || null, laneClass: input.laneClass }))
       .then((intel) => { if (alive) setIntelRead({ key, intel, error: null }) })
       .catch((err: unknown) => { if (alive) setIntelRead({ key, intel: null, error: graphqlErrorText(err) }) })
     return () => { alive = false }
