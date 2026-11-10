@@ -606,6 +606,8 @@ type Action =
   | 'SET_LOAD_PRO'
   // The TMS # and PU # a leg carries: read-only to client tokens (they fall back to the PRO), so this is how the calendar edits them.
   | 'SET_LOAD_REFS'
+  // Per-stop drivers (unassign, a relay, a split): the calendar's picker. The load's pickup/delivery driver mirrors are written here, not by the client.
+  | 'SET_STOP_DRIVERS'
   // Staff void; the owner alone may perform an exported hard delete or restore. PRO claims remain reserved.
   | 'VOID_SHIPMENT'
   | 'DELETE_SHIPMENTS'
@@ -4578,6 +4580,65 @@ async function setLoadRefs(input: Row, caller: Caller): Promise<Row> {
   await writeAudit('LOAD', loadId, 'SET_LOAD_REFS', caller, {
     ...(tmsId !== undefined ? { tmsId: { from: load.tmsId ?? null, to: patch.tmsId } } : {}),
     ...(pickupNumber !== undefined ? { pickupNumber: { from: load.pickupNumber ?? null, to: patch.pickupNumber } } : {}),
+    shipmentId,
+  })
+  return {
+    bundle: shipmentId ? await readBundle(shipmentId) : null,
+    load: await getById(LOAD_TABLE_NAME, loadId),
+  } as unknown as Row
+}
+
+// ── SET_STOP_DRIVERS ─────────────────────────────────────────────────────────
+
+/**
+ * Put a roster driver (or nobody) on individual stops of an own-fleet or unassigned load, and keep the load's pickup/delivery
+ * driver mirrors in step. The whole-load "one driver for everything" case is ASSIGN_ASSET (it books the truck and the
+ * leg); this is what remains: take the driver off, or a relay with a different driver per stop. The mirrors are read-only
+ * to a client Load write, so the client cannot do this itself.
+ */
+async function setStopDrivers(input: Row, caller: Caller): Promise<Row> {
+  const loadId = assertString(input.loadId, 'loadId')
+  const assignments = assertArrayOf(input.assignments, 'assignments', (item, i) => {
+    const r = assertRecord(item, `assignments[${i}]`)
+    return { stopId: assertString(r.stopId, `assignments[${i}].stopId`), driverId: optionalString(r.driverId, 100) }
+  }) as unknown as { stopId: string; driverId: string | null }[]
+  if (assignments.length === 0) throw new Error('Nothing to change: send assignments')
+
+  const load = await getById(LOAD_TABLE_NAME, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  assertNotVoided(load)
+  const shipmentId = optionalString(load.shipmentId, 100)
+  if (shipmentId) await requireLiveShipment(shipmentId)
+  const assignmentType = String(load.assignmentType ?? '')
+  if (assignmentType && assignmentType !== 'OWN_ASSET' && assignmentType !== 'NEED_TO_COVER') {
+    throw new Error('This load is covered by an outside carrier: its driver is edited on the carrier card, not on the calendar')
+  }
+
+  const stops = readStops(load)
+  for (const a of assignments) if (!stops.some((s) => String(s.id) === a.stopId)) throw new Error(`Stop not found on this load: ${a.stopId}`)
+  for (const id of new Set(assignments.map((a) => a.driverId).filter((v): v is string => v != null))) {
+    const problem = driverProblem(id, (await getById(DRIVER_TABLE_NAME, id)) as RosterDriverFacts | null)
+    if (problem) throw new Error(problem)
+  }
+  const byStop = new Map(assignments.map((a) => [a.stopId, a.driverId]))
+  const nextStops = stops.map((s) => (byStop.has(String(s.id)) ? { ...s, driverId: byStop.get(String(s.id)) ?? null } : s))
+  const mirrors = deriveLegacyFields(nextStops as unknown as StopShape[])
+
+  const client = await getDataClient()
+  assertLoadWriteOk(
+    await client.models.Load.update({
+      id: loadId,
+      stops: JSON.stringify(nextStops),
+      pickupDriverId: mirrors.pickupDriverId ?? null,
+      deliveryDriverId: mirrors.deliveryDriverId ?? null,
+      updatedBy: caller.email,
+    }),
+    'Load update',
+  )
+  await writeAudit('LOAD', loadId, 'SET_STOP_DRIVERS', caller, {
+    stops: assignments.map((a) => ({ stopId: a.stopId, driverId: a.driverId })),
+    pickupDriverId: mirrors.pickupDriverId ?? null,
+    deliveryDriverId: mirrors.deliveryDriverId ?? null,
     shipmentId,
   })
   return {
@@ -8938,6 +8999,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return setLoadPro(input, caller)
     case 'SET_LOAD_REFS':
       return setLoadRefs(input, caller)
+    case 'SET_STOP_DRIVERS':
+      return setStopDrivers(input, caller)
     case 'ASSIGN_ASSET':
       return assignAsset(input, caller)
     case 'ASSIGN_CARRIER':

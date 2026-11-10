@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { changedApptStops, loadWideDriverChange, takesRosterDriver } from './loadShipmentSync'
+import { changedApptStops, changedStopDrivers, loadWideDriverChange, takesRosterDriver } from './loadShipmentSync'
 import type { Stop } from '@/types'
 
 const stop = (id: string, appt: string, extra: Partial<Stop> = {}): Stop => ({ id, sequence: 0, type: 'pickup', appt, ...extra }) as Stop
@@ -28,5 +28,15 @@ describe('takesRosterDriver', () => {
     expect(takesRosterDriver({ assignmentType: 'NEED_TO_COVER' })).toBe(true)
     expect(takesRosterDriver({})).toBe(true)
     expect(takesRosterDriver({ assignmentType: 'CARRIER' })).toBe(false)
+  })
+})
+
+describe('changedStopDrivers', () => {
+  const stop = (id: string, driverId: string | null) => ({ id, driverId } as never)
+  it('reports a driver put on, changed or taken off, and ignores new stops and unchanged ones', () => {
+    const before = [stop('a', null), stop('b', 'd1'), stop('c', 'd2')]
+    const next = [stop('a', 'd9'), stop('b', null), stop('c', 'd2'), stop('new', 'd3')]
+    expect(changedStopDrivers(before, next)).toEqual([{ stopId: 'a', driverId: 'd9' }, { stopId: 'b', driverId: null }])
+    expect(changedStopDrivers(before, null)).toEqual([])
   })
 })

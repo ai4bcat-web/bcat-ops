@@ -23,6 +23,19 @@ export function changedApptStops(before: readonly Stop[], next: readonly Stop[] 
   return out
 }
 
+/** Stops whose driver differs from what the load held (a driver put on, changed or taken off). New and removed stops are not driver changes. */
+export function changedStopDrivers(before: readonly Stop[], next: readonly Stop[] | null | undefined): { stopId: string; driverId: string | null }[] {
+  if (!next) return []
+  const byId = new Map(before.map((s) => [s.id, s]))
+  const out: { stopId: string; driverId: string | null }[] = []
+  for (const s of next) {
+    const was = byId.get(s.id)
+    if (!was) continue
+    if ((was.driverId ?? null) !== (s.driverId ?? null)) out.push({ stopId: s.id, driverId: s.driverId ?? null })
+  }
+  return out
+}
+
 /** The driver this write puts on the whole load, or null when the driver did not change (or pickup and delivery differ). */
 export function loadWideDriverChange(before: Partial<Load>, next: Partial<Load>): string | null {
   const p = next.pickupDriverId

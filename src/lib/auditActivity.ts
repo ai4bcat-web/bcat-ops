@@ -47,6 +47,7 @@ export const ACTION_SENTENCE: Record<string, string> = {
   SET_LOAD_STATUS: 'changed the load status',
   SET_LOAD_PRO: 'set the load PRO',
   SET_LOAD_REFS: 'changed the TMS # / PU #',
+  SET_STOP_DRIVERS: 'changed the driver on a stop',
   SET_NEXT_CHECK_CALL: 'scheduled the next check call',
   REQUEST_OFFERS: 'requested carrier offers',
   RESOLVE_INCIDENT: 'resolved an incident',
