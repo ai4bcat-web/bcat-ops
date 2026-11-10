@@ -48,6 +48,8 @@ export const PROD_WRITE_SETS = {
   // `awSalesRepDivision.mjs --apply`: sales rep follows the revenue division (overwrites): Shipment.salesRepId/Code, Order.customerRepId, TmsSettings.divisionSalesReps + one AuditLog row per shipment.
   // `awIntakeClear.mjs --apply`: OPEN IntakeLoad rows whose shipment exists become MOVED (shipmentId/number) + one AuditLog row each.
   awIntakeClear: { models: ['IntakeLoad', 'Shipment', 'Order', 'AuditLog'] },
+  // `awCustomerSheet.mjs --apply`: Customer.billingMethod / apEmail / billingAddress (address only while empty) from Ryne's customer list sheet + one AuditLog row each.
+  awCustomerSheet: { models: ['Customer', 'AuditLog'] },
   awSalesRepDivision: { models: ['Shipment', 'Order', 'TmsSettings', 'AuditLog'] },
   // `awZakDriver.mjs --apply`: LoadCarrier.driverId/driverName/driverPhone on the own-asset leg of ZAK-coded PROs, only while empty + one AuditLog row per leg.
   awZakDriver: { models: ['LoadCarrier', 'AuditLog'] },
