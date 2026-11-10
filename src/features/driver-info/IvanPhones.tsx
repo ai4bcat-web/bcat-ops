@@ -80,8 +80,11 @@ export function IvanPhones() {
         <span style={{ fontSize: 12.5, color: 'var(--tms-muted)' }}>Their own number and the company phone they carry</span>
       </div>
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      {/* Same shape as the fleet card above: the table on the left, a fixed side panel on the right, so the two cards line up. */}
+      <div style={{ display: 'flex', alignItems: 'stretch' }}>
+      <div style={{ flex: '1 1 auto', minWidth: 0, overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+          <colgroup><col style={{ width: '27%' }} /><col style={{ width: '24%' }} /><col style={{ width: '29%' }} /><col style={{ width: '20%' }} /></colgroup>
           <thead>
             <tr><th style={TH}>Driver</th><th style={TH}>Personal phone</th><th style={TH}>Company phone</th><th style={TH}>Company number</th></tr>
           </thead>
@@ -111,20 +114,18 @@ export function IvanPhones() {
         </table>
       </div>
 
-      {phones && phones.length > 0 && (
-        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>Company phones</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 20px' }}>
-            {phones.map((p) => (
-              <label key={p.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                <span style={{ fontWeight: 600, color: 'var(--tms-text)', whiteSpace: 'nowrap' }}>{p.label}</span>
-                <input aria-label={`${p.label} number`} defaultValue={p.number ?? ''} placeholder="(000) 000-0000" onBlur={(e) => saveNumber(p.label, e.target.value)} style={{ ...INPUT, width: 140 }} />
-                <span style={{ fontSize: 12, color: 'var(--tms-muted)', whiteSpace: 'nowrap' }}>{p.assignedDriverId ? nameOf.get(p.assignedDriverId) ?? 'Assigned' : 'In the office'}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
+      <aside style={{ flex: '0 0 250px', borderLeft: '1px solid var(--tms-border)', background: 'var(--tms-bg)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }} aria-label="Company phones">
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tms-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Company phones</div>
+        {(phones ?? []).map((p) => (
+          <label key={p.label} style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 13 }}>
+            <span style={{ fontWeight: 600, color: 'var(--tms-text)' }}>{p.label}</span>
+            <input aria-label={`${p.label} number`} defaultValue={p.number ?? ''} placeholder="(000) 000-0000" onBlur={(e) => saveNumber(p.label, e.target.value)} style={{ ...INPUT, width: '100%' }} />
+            <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>{p.assignedDriverId ? nameOf.get(p.assignedDriverId) ?? 'Assigned' : 'In the office'}</span>
+          </label>
+        ))}
+        {phones && phones.length === 0 ? <span style={{ fontSize: 12, color: 'var(--tms-muted)' }}>No company phones set up yet.</span> : null}
+      </aside>
+      </div>
     </div>
   )
 }

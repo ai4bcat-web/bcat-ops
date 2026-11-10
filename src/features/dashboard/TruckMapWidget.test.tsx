@@ -19,7 +19,7 @@ const appStoreState = vi.hoisted(() => ({
   addEquipment: vi.fn(),
 }))
 
-vi.mock('@/lib/apiClient', () => ({ listTruckLocations: listTruckLocationsMock }))
+vi.mock('@/lib/apiClient', () => ({ listTruckLocations: listTruckLocationsMock, listCompanyPhones: vi.fn(async () => []) }))
 
 vi.mock('@/store/useAppStore', () => ({
   useAppStore: (sel: (s: typeof appStoreState) => unknown) => sel(appStoreState),

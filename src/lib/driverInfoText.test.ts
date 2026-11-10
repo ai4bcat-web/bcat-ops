@@ -8,3 +8,11 @@ describe('driverInfoText', () => {
     expect(driverInfoText({ name: 'Zak Pace', truck: '3890' })).toBe('Driver: Zak Pace\nTruck: 3890')
   })
 })
+
+describe('driverInfoText company phone', () => {
+  it('shows the company phone the driver carries instead of the personal cell', () => {
+    expect(driverInfoText({ name: 'Jason', phone: '(779) 537-9141', companyPhone: '(312) 608-8970', truck: '89510' }))
+      .toBe('Driver: Jason\nCompany phone: (312) 608-8970\nTruck: 89510')
+    expect(driverInfoText({ name: 'Jason', phone: '(779) 537-9141' })).toBe('Driver: Jason\nCell: (779) 537-9141')
+  })
+})
