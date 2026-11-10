@@ -736,3 +736,6 @@
 .tms-shell .tms-rail-key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 .tms-shell .tms-rail-key-cost { background: var(--tms-muted); }
 .tms-shell .tms-rail-key-profit { background: var(--tms-badge-green); }
+
+/* Someone else holds the edit lock: the form is read-only for everyone but the holder (the banner says who). */
+.tms-ship-form-scroll[data-locked='true'] > :not(.tms-ship-banner) { pointer-events: none; opacity: 0.6; }

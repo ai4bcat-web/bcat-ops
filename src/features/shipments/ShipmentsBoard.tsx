@@ -19,6 +19,7 @@ import {
   Clock,
   Columns3,
   FileX,
+  Lock,
   Search,
   Trash2,
   Truck,
@@ -53,6 +54,7 @@ import {
 } from '@/features/tms/grid/denseGridModel'
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
+import { lockHeldByOther } from '@/lib/shipmentLock'
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useCarriers } from '@/hooks/useCarriers'
@@ -848,7 +850,13 @@ function BoardPane({
         )
       }
       if (columnKey === 'proNumber') {
-        return <Link className="tms-link tms-board-link" to={`/tms/shipments/${row.id}/edit`} onClick={(e) => e.stopPropagation()}>{row.number ?? ''}</Link>
+        const held = lockHeldByOther(row, email, Date.now())
+        return (
+          <>
+            <Link className="tms-link tms-board-link" to={`/tms/shipments/${row.id}/edit`} onClick={(e) => e.stopPropagation()}>{row.number ?? ''}</Link>
+            {held ? <Lock size={12} aria-label={`${held.by} is editing`} data-testid="board-lock-icon" style={{ marginLeft: 4, verticalAlign: 'middle' }}><title>{`${held.by} is editing this shipment`}</title></Lock> : null}
+          </>
+        )
       }
       if (columnKey === 'status') {
         return <span className="flex items-center gap-1"><span className="font-medium">{statusCellText(row)}</span><TrackingModeNotSetRowChip row={row} /></span>
@@ -917,7 +925,7 @@ function BoardPane({
       const col = BOARD_COLUMNS.find((c) => c.key === columnKey)
       return col ? col.value(row) : null
     },
-    [directoryCarriers],
+    [directoryCarriers, email],
   )
 
   const rowHandlers = useCallback(

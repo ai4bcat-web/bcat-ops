@@ -3,6 +3,7 @@
  * strip (Instructions, References, Items, Notes), and the sticky summary rail. Route element for `/tms/shipments/new` (mode "create") and
  * `/tms/shipments/:id/edit` (mode "edit"). Fields, mapping, pipelines and validation are Step AH's.
  */
+import { useShipmentLock } from './useShipmentLock'
 import { useRequiredEmptyMarks } from './useRequiredEmptyMarks'
 import { findCustomerMatches } from '@/lib/tmsDirectory'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -154,6 +155,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     onBlocked: (issues) => { if (issues[0]) focusField(issues[0].fieldKey) },
   })
   const { values, update, getValues, bundle, mode, busy: pipelineBusy } = form
+  const { heldBy } = useShipmentLock(bundle?.shipment.id)
   useRequiredEmptyMarks(values)
 
   // Pre-fill once, when the intake row and the customer directory have both arrived.
@@ -295,8 +297,16 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
         common={common} panelOpen={panelOpen} onPanelToggle={togglePanel}
       />
 
-      <div className="tms-ship-form-scroll">
+      <div className="tms-ship-form-scroll" data-locked={heldBy ? 'true' : undefined}>
         {voided ? <TmsAlert tone="red" className="tms-ship-banner">{locked.fields.all}</TmsAlert> : null}
+
+        {heldBy ? (
+          <TmsAlert tone="orange" className="tms-ship-banner">
+            <span data-testid="ship-form-locked">
+              {heldBy.by} is editing this shipment{heldBy.until ? ` (locked until ${new Date(heldBy.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})` : ''}. Open it again once they save and exit.
+            </span>
+          </TmsAlert>
+        ) : null}
 
         {mode === 'create' && form.drafts.length > 0 ? (
           <div data-testid="ship-form-drafts">
