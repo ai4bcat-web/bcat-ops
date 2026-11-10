@@ -1,0 +1,104 @@
+/*
+ * Responsive layer (Ryne 2026-11-10: every page and module usable on tablets and phones). Loaded LAST so it wins the cascade; every rule is
+ * inside a width / pointer query, so desktop is untouched. Three breakpoints:
+ *   tablet  <= 1100px  two-pane layouts stack, toolbars wrap, dialogs use the screen
+ *   small   <=  900px  (the shell's own drawer breakpoint) tables scroll inside their card, forms go one column
+ *   phone   <=  640px  full-width dialogs and bars, larger touch targets, 16px inputs (no iOS zoom on focus)
+ */
+
+/* Nothing may widen the page itself: wide content scrolls in its own container. */
+@media (max-width: 1100px) {
+  .tms-shell, .tms-shell .tms-content { max-width: 100vw; overflow-x: clip; }
+  .tms-shell img, .tms-shell video, .tms-shell canvas { max-width: 100%; height: auto; }
+  .tms-shell .tms-dense-page, .tms-shell .tms-dense-body { min-width: 0; }
+}
+
+/* ── Tablet ──────────────────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  /* Two independent panes (SMS / e-mail), the shipment form rail, the Review / Customers side panels: one column. */
+  .tms-shell .tms-tracking-panes, .tms-portal .tms-tracking-panes { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .tms-shell .tms-tracking-pane, .tms-portal .tms-tracking-pane { min-height: 320px; max-height: 70vh; }
+  .tms-shell .tms-users-layout { grid-template-columns: minmax(0, 1fr); }
+  .tms-shell .aa-review-actions, .tms-shell .tms-dense-bar { flex-wrap: wrap; }
+  .tms-shell .tms-dense-bar .tms-dense-search { flex: 1 1 200px; min-width: 140px; max-width: 100%; }
+  .tms-shell .tms-dense-bar .tms-seg, .tms-shell .tms-dense-bar [role='tablist'] { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .tms-portal.tms-dialog-content.tms-dialog-wide, .tms-portal.tms-dialog-content.tms-dialog-xl { max-width: min(96vw, 920px); }
+}
+
+/* ── Small tablets and large phones ──────────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .tms-shell .tms-content { padding-left: 8px; padding-right: 8px; }
+  /* Tables keep their columns and scroll sideways inside the card that holds them. */
+  .tms-shell .tms-dg-scroll, .tms-shell .tms-table-wrap, .tms-shell .tms-card-body { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* The shipment form: sections stack, the right rail drops under the form, the action bar stays reachable. */
+  .tms-shell .tms-ship-form-scroll { padding-left: 8px; padding-right: 8px; }
+  .tms-shell .tms-ship-actionbar { flex-wrap: wrap; gap: 6px; }
+  .tms-shell .tms-ship-actionbar .tms-btn { flex: 1 1 auto; }
+  /* Detail splits, drawers and side panels use the full width. */
+  .tms-shell .tms-drawer, .tms-portal.tms-tracking-drawer { width: 100vw; max-width: 100vw; }
+  /* Fleet / driver info: table above, map or side panel below. */
+  .tms-shell .tms-dense-body > div[style*='display: flex'] { flex-wrap: wrap; }
+  /* Key/value lists and stat rows wrap instead of overflowing. */
+  .tms-shell .tms-meta-list, .tms-shell .tms-stat-row { flex-wrap: wrap; }
+}
+
+/* ── Phones ──────────────────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* Dialogs become full-width sheets that scroll, not floating cards cut off by the screen. */
+  .tms-portal.tms-dialog-content {
+    left: 0; top: auto; bottom: 0; transform: none; width: 100vw; max-width: 100vw; max-height: 92dvh;
+    border-radius: var(--tms-radius-card) var(--tms-radius-card) 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .tms-portal.tms-dialog-content.tms-dialog-wide, .tms-portal.tms-dialog-content.tms-dialog-xl { max-width: 100vw; }
+  .tms-portal .tms-dialog-foot, .tms-portal .tms-dialog-footer { flex-wrap: wrap; }
+  .tms-portal .tms-dialog-foot > *, .tms-portal .tms-dialog-footer > * { flex: 1 1 auto; }
+
+  /* Toolbars: title and search on their own lines, controls wrap under them. */
+  .tms-shell .tms-dense-bar { padding: 6px 8px; gap: 6px; }
+  .tms-shell .tms-dense-bar .tms-dense-title { flex: 1 1 100%; }
+  .tms-shell .tms-dense-bar .tms-dense-search { flex: 1 1 100%; }
+  .tms-shell .tms-dense-bar .tms-dense-spacer { display: none; }
+
+  /* Touch targets and iOS: inputs at 16px so focusing one does not zoom the page; controls at least 36px tall. */
+  .tms-shell input, .tms-shell select, .tms-shell textarea, .tms-portal input, .tms-portal select, .tms-portal textarea { font-size: 16px; }
+  .tms-shell .tms-dense-bar .tms-input, .tms-shell .tms-dense-bar .tms-btn-sm { height: 36px; min-height: 36px; }
+  .tms-shell .tms-btn, .tms-portal .tms-btn { min-height: 36px; }
+
+  /* Everything that was a multi-column grid goes to one column. */
+  .tms-shell .tms-grid-2, .tms-shell .tms-grid-3, .tms-shell .tms-grid-4, .tms-shell .tms-meta-cols-3, .tms-shell .tms-intake-grid { grid-template-columns: minmax(0, 1fr); }
+  .tms-shell .tms-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tms-shell .tms-topbar { padding-left: 8px; padding-right: 8px; }
+  .tms-shell .tms-topbar-icons { gap: 4px; }
+  .tms-shell .tms-page-title, .tms-shell h1 { font-size: 18px; }
+}
+
+/* Touch screens of any width: no hover-only affordances, comfortable hit areas on rows and tabs. */
+@media (pointer: coarse) {
+  .tms-shell .tms-seg-item, .tms-shell .tms-lifecycle-tab { min-height: 36px; }
+  .tms-shell .tms-dg-row, .tms-shell tbody tr { min-height: 40px; }
+}
+
+/* Landscape phones / short windows: keep dialogs inside the viewport. */
+@media (max-height: 520px) {
+  .tms-portal.tms-dialog-content { max-height: 96dvh; }
+}
+
+/* ── Public pages (driver tracking link, carrier upload, rate con signing, customer tracking) ──────── */
+@media (max-width: 640px) {
+  .tms-portal.tms-public { padding: 8px; align-items: stretch; }
+  .tms-portal .tms-public-card { padding: 16px; gap: 12px; border-radius: 12px; }
+  .tms-portal .tms-public-cta { width: 100%; min-height: 48px; font-size: 16px; }
+  .tms-portal .tms-public-title { font-size: 20px; }
+  .tms-portal .tms-public-grid-2 { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Pages built with inline fixed minimum widths (pricing, vehicle quote / confirmation, quotes): let those blocks shrink and wrap on a phone.
+   Tables keep their own min-width so they still scroll sideways inside their wrapper. */
+@media (max-width: 640px) {
+  .tms-shell div[style*='min-width'] { min-width: 0 !important; }
+  .tms-shell div[style*='width: 330px'] { width: 100% !important; }
+}
+@media (max-width: 900px) {
+  .tms-shell div[style*='position: sticky'] { position: static !important; }
+}
