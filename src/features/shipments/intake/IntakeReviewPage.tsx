@@ -407,7 +407,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             <TmsButton variant="destructive" disabled={busy} onClick={() => setDismissOpen(true)}>Dismiss</TmsButton>
             <TmsButton disabled={busy || !dirty} onClick={save}>Save</TmsButton>
             <TmsButton disabled={busy || !markGate.ok || reviewed} onClick={markReviewed}>Mark reviewed</TmsButton>
-            <TmsButton variant="primary" disabled={busy || !gate.ok} onClick={move}>Move to active</TmsButton>
+            <TmsButton variant="primary" disabled={busy || !gate.ok} onClick={move}>Create shipment</TmsButton>
           </div>
         ) : null}
         {row.status === 'OPEN' || row.reviewedAt != null ? <div className="tms-intake-review-line">{reviewLine}</div> : null}

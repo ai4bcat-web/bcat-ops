@@ -266,7 +266,7 @@ export function IntakeBoard() {
             <TmsButton
               size="sm"
               data-testid="intake-create-shipment"
-              onClick={(e) => { e.stopPropagation(); navigate('/tms/shipments/new', { state: { intakeId: row.id } }) }}
+              onClick={(e) => { e.stopPropagation(); navigate(`/tms/shipments/intake/${encodeURIComponent(row.id)}`) }}
             >
               Create shipment
             </TmsButton>

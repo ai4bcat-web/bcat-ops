@@ -52,6 +52,8 @@ export const PROD_WRITE_SETS = {
   awCustomerSheet: { models: ['Customer', 'AuditLog'] },
   // `awCompanyPhones.mjs --apply`: the three Ivan Cartage CompanyPhone rows (only labels that do not exist) + AuditLog.
   awCompanyPhones: { models: ['CompanyPhone', 'AuditLog'] },
+  // `awCustomersActivate.mjs --apply`: Customer.status DORMANT -> ACTIVE for stored-DORMANT customers that are not possible duplicates + one AuditLog row each.
+  awCustomersActivate: { models: ['Customer', 'AuditLog'] },
   // `awDriverDelete.mjs --apply`: deletes the given Driver rows (with --detach: clears Load/LoadCarrier driver ids and deletes the driver's submissions first; releases its company phone) with an AuditLog row holding the row.
   awDriverDelete: { models: ['Driver', 'Load', 'LoadCarrier', 'DriverSubmission', 'DriverSubmissionDoc', 'CompanyPhone', 'AuditLog'] },
   awSalesRepDivision: { models: ['Shipment', 'Order', 'TmsSettings', 'AuditLog'] },

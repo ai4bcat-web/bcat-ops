@@ -303,9 +303,10 @@ describe('effectiveCustomerStatus', () => {
     expect(effectiveCustomerStatus(baseCustomer({ status: 'PENDING', active: true }), null, '2026-10-27T00:00:00Z')).toBe('PENDING')
   })
 
-  it('moves ACTIVE to DORMANT after 90 days of no activity', () => {
+  it('an ACTIVE customer stays ACTIVE however long since its last load (only a stored status makes one Dormant)', () => {
     const c = baseCustomer({ status: 'ACTIVE', createdAt: '2026-01-01T00:00:00Z' })
-    expect(effectiveCustomerStatus(c, '2026-01-05T00:00:00Z', '2026-10-27T00:00:00Z')).toBe('DORMANT')
+    expect(effectiveCustomerStatus(c, '2026-01-05T00:00:00Z', '2026-10-27T00:00:00Z')).toBe('ACTIVE')
+    expect(effectiveCustomerStatus(baseCustomer({ status: 'DORMANT' }), '2026-10-25T00:00:00Z', '2026-10-27T00:00:00Z')).toBe('DORMANT')
   })
 
   it('keeps ACTIVE as ACTIVE when load activity is unknown', () => {

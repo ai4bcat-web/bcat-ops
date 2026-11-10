@@ -89,6 +89,14 @@ export function SourceEmailCard({ row }: { row: IntakeLoadRecord }) {
         <dd>{row.subject || '(no subject)'}</dd>
       </dl>
       <AttachmentPreview attachments={row.attachments} />
+      {!row.attachments.some((a) => /^(application\/pdf|image\/)/.test(a.contentType)) ? (
+        <TmsAlert tone="orange" title="No rate confirmation PDF on this e-mail" className="tms-intake-banner">
+          <span data-testid="intake-no-pdf">
+            Nothing viewable came in with it, so there is no PDF to show here. A forward through Slack leaves the attachment behind. The PDF appears on this
+            row once the original e-mail (the one the rate confirmation is attached to) comes into Intake through the Ivan Loads mail bridge.
+          </span>
+        </TmsAlert>
+      ) : null}
       <div className="tms-intake-email-body" aria-label="E-mail body">{row.bodyText || 'No text in this e-mail.'}</div>
       {row.attachments.length > 0 ? (
         <ul className="tms-intake-attachments" aria-label="Attachments">
