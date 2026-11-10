@@ -24,7 +24,7 @@ import {
 } from '../model'
 import { CarrierInformationSection } from '../sections/CarrierInformationSection'
 import { CarrierTrackingOverride } from '../../trackingModeControl/CarrierTrackingOverride'
-import { TrackingModeControl } from '../../trackingModeControl/TrackingModeControl'
+import { TrackingLinkPanel } from './TrackingLinkPanel'
 import { TrackingModeNotSetChip } from '../../trackingModeControl/TrackingModeNotSetChip'
 import type { CardProps } from './cardRegistry'
 import { CarrierCard } from './CarrierCard'
@@ -160,11 +160,9 @@ function CarrierTrackingCardImpl(props: CardProps) {
         </div>
         {bundle ? (
           <>
-            <TrackingModeControl
-              shipment={bundle.shipment} load={bundle.loads[0] ?? null} customer={ctx.customer} settings={ctx.settings}
-              disabled={!booked || ctx.locked.voided || ctx.busy} onSaved={onSaved}
+            <TrackingLinkPanel
+              shipment={bundle.shipment} loadCarrier={activeLoadCarrier(bundle)} disabled={ctx.locked.voided || ctx.busy} onSent={onSaved}
             />
-            {booked ? null : <p className="tms-muted text-sm" data-testid="card-tracking-after-create">Tracking is chosen when the carrier is booked.</p>}
             <TrackingReadout {...props} bundle={bundle} />
           </>
         ) : <TrackingPlanned {...props} />}

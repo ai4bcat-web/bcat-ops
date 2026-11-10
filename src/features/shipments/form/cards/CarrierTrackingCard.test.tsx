@@ -25,6 +25,8 @@ const api = vi.hoisted(() => ({
   setTrackingPrefs: vi.fn(async () => ({ shipment: {} })),
   saveLoadCheckCallPlan: vi.fn(async () => ({ plan: null })),
   assignTracker: vi.fn(async () => ({ updated: ['shp-1'], skipped: [] })),
+  listTrackingLinksByShipment: vi.fn(async () => []),
+  sendTrackingLink: vi.fn(async () => ({ smsStatus: 'SENT', smsError: null })),
 }))
 vi.mock('@/lib/apiClient', () => api)
 vi.mock('./CarrierCard', () => ({ CarrierCard: () => <div data-testid="carrier-block" /> }))
@@ -101,69 +103,40 @@ describe('CarrierTrackingCard create mode (planned setup)', () => {
   })
 })
 
-describe('CarrierTrackingCard: the per-load tracking mode', () => {
+describe('CarrierTrackingCard: the tracking link', () => {
   const after = '2026-11-07T00:00:00.000Z'
-  const customer = { id: 'c1', name: 'Acme', trackingMode: 'AGENT', trackingMethod: 'BOTH' } as unknown as CustomerRecord
-  const booked = (shipment: object = {}) => {
-    const b = savedBundle({ loadCarriers: [{ id: 'lc1', status: 'ACTIVE', kind: 'CARRIER', carrierName: 'Ivan' }] })
+  const customer = { id: 'c1', name: 'Acme' } as unknown as CustomerRecord
+  const booked = (carrier: object = {}, shipment: object = {}) => {
+    const b = savedBundle({ loadCarriers: [{ id: 'lc1', status: 'ACTIVE', kind: 'CARRIER', carrierName: 'Ivan', ...carrier }] })
     return { ...b, shipment: { ...b.shipment, createdAt: after, ...shipment } }
   }
   beforeEach(() => { vi.clearAllMocks() })
 
-  it('before a carrier is booked the control is read-only and the sentence says tracking is chosen at booking', () => {
+  it('before a carrier is booked it asks for the driver and offers no send', () => {
     const b = savedBundle()
     show({ bundle: { ...b, shipment: { ...b.shipment, createdAt: after } } as never, customer }, 'edit')
-    expect(screen.getByTestId('tracking-mode-control').getAttribute('data-disabled')).toBe('true')
-    expect((screen.getByTestId('tracking-mode-AGENT') as HTMLInputElement).disabled).toBe(true)
-    expect(screen.queryByTestId('tracking-confirm')).toBeNull()
-    expect(text('card-tracking-after-create')).toBe('Tracking is chosen when the carrier is booked.')
-    expect(screen.queryByTestId('tracking-not-set')).toBeNull()
+    expect(screen.queryByTestId('tracking-link-send')).toBeNull()
+    expect(screen.getByTestId('card-tracking-after-create')).toBeTruthy()
   })
 
-  it('a booked, unconfirmed load shows the customer suggestion, the amber chip, and Confirm writes confirmed through SET_TRACKING_PREFS', async () => {
-    const refreshBundle = vi.fn(async () => {})
-    show({ bundle: booked() as never, customer, refreshBundle }, 'edit')
-    expect(screen.getByTestId('tracking-not-set').textContent).toBe('Tracking link not set')
-    expect((screen.getByTestId('tracking-mode-AGENT') as HTMLInputElement).checked).toBe(true)
-    expect(screen.getByTestId('tracking-mode-suggested').textContent).toContain('Suggested from the customer')
-    fireEvent.click(screen.getByTestId('tracking-mode-MANUAL'))
-    fireEvent.click(screen.getByTestId('tracking-confirm'))
-    await waitFor(() => expect(api.setTrackingPrefs).toHaveBeenCalledWith({ shipmentId: 'shp-1', prefs: { mode: 'MANUAL', confirmed: true } }))
-    expect(api.saveLoadCheckCallPlan).not.toHaveBeenCalled()
-    expect(api.assignTracker).not.toHaveBeenCalled()
-    await waitFor(() => expect(refreshBundle).toHaveBeenCalled())
-  })
-
-  it('Automated writes method, cadence on the load plan and the assignee, each through its own existing action', async () => {
+  it('a booked load with no driver says the link is not set and names what is missing', async () => {
     show({ bundle: booked() as never, customer }, 'edit')
-    fireEvent.change(screen.getByTestId('tracking-method'), { target: { value: 'SMS' } })
-    fireEvent.change(screen.getByTestId('tracking-cadence'), { target: { value: '2' } })
-    fireEvent.change(screen.getByTestId('tracker-stub'), { target: { value: 'u9' } })
-    fireEvent.click(screen.getByTestId('tracking-confirm'))
-    await waitFor(() => expect(api.assignTracker).toHaveBeenCalledWith({ shipmentIds: ['shp-1'], trackerId: 'u9' }))
-    expect(api.setTrackingPrefs).toHaveBeenCalledWith({ shipmentId: 'shp-1', prefs: { mode: 'AGENT', method: 'SMS', confirmed: true } })
-    expect(api.saveLoadCheckCallPlan).toHaveBeenCalledWith({ loadId: 'load-1', plan: expect.objectContaining({ intervalHours: 2 }) })
+    expect((await screen.findByTestId('tracking-link-state')).textContent).toBe('Tracking link not set')
+    expect((screen.getByTestId('tracking-link-send') as HTMLButtonElement).disabled).toBe(true)
+    expect(text('tracking-link-missing')).toBe('Needs driver name, driver phone, truck number, trailer number')
   })
 
-  it('None needs no cadence or method and Confirm is blocked while the mode is unchosen', async () => {
-    show({ bundle: booked() as never, customer: { id: 'c2', name: 'Plain' } as unknown as CustomerRecord }, 'edit')
-    expect((screen.getByTestId('tracking-confirm') as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(screen.getByTestId('tracking-mode-NONE'))
-    expect(screen.queryByTestId('tracking-cadence')).toBeNull()
-    fireEvent.click(screen.getByTestId('tracking-confirm'))
-    await waitFor(() => expect(api.setTrackingPrefs).toHaveBeenCalledWith({ shipmentId: 'shp-1', prefs: { mode: 'NONE', confirmed: true } }))
+  it('with the driver, truck and trailer entered the link is sent to the driver phone', async () => {
+    show({ bundle: booked({ driverName: 'Tony', driverPhone: '+18392358582', truckNumber: '743', trailerNumber: 'T9' }) as never, customer }, 'edit')
+    const send = await screen.findByTestId('tracking-link-send')
+    expect((send as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(send)
+    await waitFor(() => expect(api.sendTrackingLink).toHaveBeenCalledWith({ loadCarrierId: 'lc1', via: 'SMS', to: '+18392358582' }))
   })
 
-  it('a confirmed load shows no chip and the load\'s own mode, not the customer\'s', () => {
-    show({ bundle: booked({ trackingPrefs: { mode: 'MANUAL', confirmedAt: after } }) as never, customer }, 'edit')
-    expect(screen.queryByTestId('tracking-not-set')).toBeNull()
-    expect((screen.getByTestId('tracking-mode-MANUAL') as HTMLInputElement).checked).toBe(true)
-    expect(screen.queryByTestId('tracking-mode-suggested')).toBeNull()
-    expect((screen.getByTestId('tracking-confirm') as HTMLButtonElement).disabled).toBe(true)
-  })
-
-  it('a pre-existing load keeps its behaviour: no chip for a shipment created before the cutoff', () => {
-    show({ bundle: booked({ createdAt: '2026-10-01T00:00:00.000Z' }) as never, customer }, 'edit')
-    expect(screen.queryByTestId('tracking-not-set')).toBeNull()
+  it('an Ivan Cartage load is followed by the driver GPS and needs no link', () => {
+    show({ bundle: booked({}, { revDivision: 'ASSETS' }) as never, customer }, 'edit')
+    expect(screen.getByTestId('tracking-gps-note')).toBeTruthy()
+    expect(screen.queryByTestId('tracking-link-send')).toBeNull()
   })
 })
