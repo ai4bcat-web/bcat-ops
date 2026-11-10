@@ -95,6 +95,24 @@ describe('CarrierInformationSection', () => {
     })
   })
 
+  it('the same driver is on pickup and delivery by default; "Different driver on the delivery" opens a delivery picker that sets the delivery driver, and unticking puts it back', () => {
+    const { onChange } = setup({ isOwnFleet: true, driver1: { name: 'Alvaro Ruiz', phone: '', email: '' } })
+    expect(screen.queryByLabelText('Delivery driver')).toBeNull()
+    fireEvent.click(screen.getByTestId('carrier-split-driver'))
+    const picker = screen.getByLabelText('Delivery driver') as HTMLSelectElement
+    fireEvent.change(picker, { target: { value: 'd1' } })
+    expect(onChange).toHaveBeenCalledWith({ deliveryDriverId: 'd1' })
+    fireEvent.click(screen.getByTestId('carrier-split-driver'))
+    expect(onChange).toHaveBeenLastCalledWith({ deliveryDriverId: '' })
+    expect(screen.queryByLabelText('Delivery driver')).toBeNull()
+  })
+
+  it('a load that already has two drivers opens with the delivery picker showing', () => {
+    setup({ isOwnFleet: true, driver1: { name: 'Alvaro Ruiz', phone: '', email: '' }, deliveryDriverId: 'd1' })
+    expect((screen.getByTestId('carrier-split-driver') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByLabelText('Delivery driver') as HTMLSelectElement).value).toBe('d1')
+  })
+
   it('own fleet: nothing about the driver, truck or trailer can be typed', () => {
     setup({ isOwnFleet: true, driver1: { name: 'Alvaro Ruiz', phone: '+13125550100', email: '' }, truckNo: '12', trailerNo: 'R-7' })
     expect(screen.queryByRole('textbox', { name: 'Driver 1' })).toBeNull()

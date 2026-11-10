@@ -4,7 +4,7 @@ import { CUSTOMER, filledValues, storedBundle } from './testFixtures'
 import { emptyValues, valuesFromBundle } from './model'
 
 const api = vi.hoisted(() => ({
-  assignAsset: vi.fn(), createShipment: vi.fn(), saveOrderForm: vi.fn(), getShipmentBundle: vi.fn(), setRevTag: vi.fn(), clearRevTag: vi.fn(),
+  assignAsset: vi.fn(), setStopDrivers: vi.fn(), createShipment: vi.fn(), saveOrderForm: vi.fn(), getShipmentBundle: vi.fn(), setRevTag: vi.fn(), clearRevTag: vi.fn(),
   setSalesRep: vi.fn(), setShipmentCustomer: vi.fn(), assignCarrierRep: vi.fn(), submitOrder: vi.fn(), updateOrderDetails: vi.fn(), updateStop: vi.fn(),
   updateStopDetails: vi.fn(), recalcCharges: vi.fn(), updateLoadCarrierDetails: vi.fn(), setEta: vi.fn(),
   prepareDocumentUpload: vi.fn(), commitDocument: vi.fn(), putPresignedFile: vi.fn(), createLocation: vi.fn(),
@@ -216,6 +216,64 @@ describe('edit pipelines', () => {
     const same = valuesFromBundle(b, { customer: CUSTOMER })
     await runEditSave(same, { ...ctx, ownFleetRoster: [pickedDriver] }, b)
     expect(api.assignAsset).not.toHaveBeenCalled()
+  })
+
+  describe('pickup and delivery drivers', () => {
+    const second = { id: 'driver-8', name: 'Sam Lee', email: '', phone: '', workPhone: '', truckId: 'truck-8', truckNumber: '8', trailerId: 'trailer-8', trailerNumber: 'T8' }
+    const withStopDrivers = (b: ShipmentBundle, pickup: string | null, delivery: string | null): ShipmentBundle => ({
+      ...b, loads: [{ ...b.loads[0], stops: (b.loads[0].stops ?? []).map((st) => ({ ...st, driverId: st.type === 'delivery' ? delivery : pickup })) }],
+    }) as ShipmentBundle
+    const ctx2 = { ...ctx, ownFleetRoster: [pickedDriver, second] }
+
+    it('by default one driver is on both: assigning Driver 1 makes no separate delivery call', async () => {
+      const was = filledValues(); was.carrier.isOwnFleet = true
+      const b = storedBundle(was)
+      const v = filledValues(); v.carrier.isOwnFleet = true; v.carrier.driver1.name = pickedDriver.name
+      api.assignAsset.mockResolvedValue(withStopDrivers(b, pickedDriver.id, pickedDriver.id))
+      const res = await runEditSave(v, ctx2, b)
+      expect(res.ok).toBe(true)
+      expect(api.assignAsset).toHaveBeenCalledTimes(1)
+      expect(api.setStopDrivers).not.toHaveBeenCalled()
+    })
+
+    it('a different delivery driver moves only the delivery stops to that person, after Driver 1 is on the load', async () => {
+      const was = filledValues(); was.carrier.isOwnFleet = true
+      const b = storedBundle(was)
+      const v = filledValues(); v.carrier.isOwnFleet = true; v.carrier.driver1.name = pickedDriver.name; v.carrier.deliveryDriverId = second.id
+      const assigned = withStopDrivers(b, pickedDriver.id, pickedDriver.id)
+      api.assignAsset.mockResolvedValue(assigned)
+      api.setStopDrivers.mockResolvedValue({ load: {} })
+      api.getShipmentBundle.mockResolvedValue(withStopDrivers(b, pickedDriver.id, second.id))
+      const res = await runEditSave(v, ctx2, b)
+      expect(res.ok).toBe(true)
+      const deliveries = (assigned.loads[0].stops ?? []).filter((st) => st.type === 'delivery')
+      expect(deliveries.length).toBeGreaterThan(0)
+      expect(api.setStopDrivers).toHaveBeenCalledExactlyOnceWith({ loadId: 'ld-1', assignments: deliveries.map((st) => ({ stopId: st.id, driverId: second.id })) })
+      expect(api.assignAsset.mock.invocationCallOrder[0]).toBeLessThan(api.setStopDrivers.mock.invocationCallOrder[0])
+    })
+
+    it('a saved load with different pickup and delivery drivers opens with the delivery driver filled; the same driver on both leaves it empty', () => {
+      const was = filledValues(); was.carrier.isOwnFleet = true
+      const lc = { id: 'lc-1', loadId: 'ld-1', status: 'ACTIVE', kind: 'OWN_ASSET', carrierName: 'Ivan Cartage', driverName: pickedDriver.name }
+      const base = storedBundle(was)
+      const open = (pickup: string, delivery: string) => valuesFromBundle({ ...withStopDrivers(base, pickup, delivery), loadCarriers: [lc] } as unknown as ShipmentBundle, { customer: CUSTOMER })
+      expect(open(pickedDriver.id, second.id).carrier.deliveryDriverId).toBe(second.id)
+      expect(open(pickedDriver.id, pickedDriver.id).carrier.deliveryDriverId).toBe('')
+    })
+
+    it('clearing the delivery driver puts the delivery back on Driver 1, and an unchanged pair makes no call', async () => {
+      const was = filledValues(); was.carrier.isOwnFleet = true; was.carrier.driver1.name = pickedDriver.name
+      const split = withStopDrivers(storedBundle(was), pickedDriver.id, second.id)
+      const v = filledValues(); v.carrier.isOwnFleet = true; v.carrier.driver1.name = pickedDriver.name; v.carrier.deliveryDriverId = ''
+      api.setStopDrivers.mockResolvedValue({ load: {} })
+      api.getShipmentBundle.mockResolvedValue(withStopDrivers(split, pickedDriver.id, pickedDriver.id))
+      await runEditSave(v, ctx2, split)
+      expect(api.setStopDrivers.mock.calls[0][0].assignments.every((a: { driverId: string }) => a.driverId === pickedDriver.id)).toBe(true)
+      api.setStopDrivers.mockClear()
+      const same = withStopDrivers(storedBundle(was), pickedDriver.id, pickedDriver.id)
+      await runEditSave(v, ctx2, same)
+      expect(api.setStopDrivers).not.toHaveBeenCalled()
+    })
   })
 
   it('a DRAFT built on a typed customer name links the customer that is picked later, before it saves (regression: the pick was dropped)', async () => {

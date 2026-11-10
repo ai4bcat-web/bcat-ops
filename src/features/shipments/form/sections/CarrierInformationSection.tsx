@@ -93,6 +93,9 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
     return () => { live = false }
   }, [own, saved])
   const pickedDriver = ownFleetDriverByName(roster, value.driver1.name)
+  // Same driver on pickup and delivery is the default; the picker only opens when asked for (or when the saved load already has two).
+  const [splitOpen, setSplitOpen] = useState(false)
+  const splitDriver = splitOpen || value.deliveryDriverId !== ''
   const draft = form.getValues()
   const driver = drivers.find((d) => d.id === pickedDriver?.id)
   const predicted = !saved && own && driver && ownership && isCustomerDefaultDivision(draft, ctx.customer)
@@ -364,6 +367,34 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
                 }
               })}
             />
+            <label className="tms-muted text-xs" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <input
+                type="checkbox"
+                data-testid={x('carrier-split-driver')}
+                checked={splitDriver}
+                disabled={disabled}
+                onChange={(e) => {
+                  setSplitOpen(e.target.checked)
+                  if (!e.target.checked) set({ deliveryDriverId: '' })
+                }}
+              />
+              Different driver on the delivery
+            </label>
+            {splitDriver ? (
+              <div style={{ marginTop: 6 }}>
+                <OwnFleetDriverPicker
+                  roster={roster}
+                  value={value.deliveryDriverId}
+                  ariaLabel="Delivery driver"
+                  testId={x('carrier-delivery-driver')}
+                  placeholder="Pick the delivery driver"
+                  disabled={disabled}
+                  showSummary={false}
+                  onChange={(d) => set({ deliveryDriverId: d?.id ?? '' })}
+                />
+                <p className="tms-muted text-xs">Driver 1 takes the pickup; this driver takes the delivery. Leave it empty to keep Driver 1 on both.</p>
+              </div>
+            ) : null}
             {!saved && divisionHint && <p className="tms-muted text-xs">Will count as {divisionHint}</p>}
             {!saved && !isCustomerDefaultDivision(draft, ctx.customer) && <p className="tms-muted text-xs">The selected revenue division is retained; assigning a driver does not override a manual tag.</p>}
           </Field>
