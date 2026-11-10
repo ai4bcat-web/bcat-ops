@@ -8557,6 +8557,7 @@ export async function sendShipmentMessage(input: {
   documentIds?: string[]
   party?: 'DRIVER' | 'DISPATCHER'
   kind?: string
+  loadCarrierId?: string | null
   to?: string | null
   subject?: string | null
   body: string

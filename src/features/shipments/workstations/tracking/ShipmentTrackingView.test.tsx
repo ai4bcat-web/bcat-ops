@@ -88,7 +88,7 @@ describe('ShipmentTrackingView', () => {
     fireEvent.click(within(pane).getByRole('button', { name: /Send/ }))
     await waitFor(() => expect(sendShipmentMessage).toHaveBeenCalled())
     expect(sendShipmentMessage).toHaveBeenCalledWith(expect.objectContaining({
-      shipmentId: 'S1', channel: 'SMS', to: null, party: 'DRIVER', body: 'Where are you?',
+      shipmentId: 'S1', channel: 'SMS', to: null, party: 'DRIVER', body: 'Where are you?', loadCarrierId: expect.any(String),
     }))
   })
 
@@ -108,15 +108,15 @@ describe('ShipmentTrackingView', () => {
     expect(within(pane).getByRole('button', { name: /Send/ })).toBeDisabled()
   })
 
-  it('sends e-mail to the dispatcher address with the subject', async () => {
+  it('sends e-mail to the dispatcher address with no subject, so it continues the rate confirmation thread', async () => {
     renderView()
     const pane = screen.getByTestId('pane-email')
-    fireEvent.change(within(pane).getByLabelText('Subject'), { target: { value: 'ETA?' } })
+    expect(within(pane).queryByLabelText('Subject')).toBeNull()
     fireEvent.change(within(pane).getByLabelText('E-mail body'), { target: { value: 'Please update' } })
     fireEvent.click(within(pane).getByRole('button', { name: /Send/ }))
     await waitFor(() => expect(sendShipmentMessage).toHaveBeenCalled())
     expect(sendShipmentMessage).toHaveBeenCalledWith(expect.objectContaining({
-      channel: 'EMAIL', to: 'dee@carrier.test', subject: 'ETA?', party: 'DISPATCHER',
+      channel: 'EMAIL', to: 'dee@carrier.test', subject: null, party: 'DISPATCHER',
     }))
   })
 

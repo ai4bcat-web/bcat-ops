@@ -656,7 +656,6 @@ export const handler = async (event: FnUrlEvent) => {
                   input: JSON.stringify({
                     shipmentId: row.shipmentId, loadCarrierId: row.id, loadId: row.loadId, channel: 'EMAIL', kind: 'RATE_CON', party: 'CARRIER',
                     to: row.dispatcherEmail, cc: 'tracking@bcatcorp.com',
-                    subject: `Re: Rate confirmation, load ${pro}`,
                     body: [
                       `Thank you, ${signerName}. We received the signed rate confirmation for load ${pro} (version ${version}); a copy is attached.`,
                       '',

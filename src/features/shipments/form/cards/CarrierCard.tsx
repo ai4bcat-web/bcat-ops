@@ -11,7 +11,9 @@ import { sliceOf, type CardProps } from './cardRegistry'
 function CarrierCardImpl({ values, update, ctx, form }: CardProps) {
   const code = values.ship.revSubdivision || values.ship.revDivision
   const division = ctx.divisions.find((d) => d.division.code === code)?.division
-  const ivan = isIvanCartageName(division?.name ?? code)
+  // A sub-division (Local, Box truck, Owner operator) is named for itself, so the TOP-LEVEL division decides: Ivan Cartage / ASSETS is the own fleet.
+  const topName = ctx.divisions.find((d) => d.division.code === values.ship.revDivision)?.division.name
+  const ivan = isIvanCartageName(division?.name ?? code) || isIvanCartageName(topName) || values.ship.revDivision === 'ASSETS'
   const onChange = useMemo(() => sliceOf(update, 'carrier'), [update])
   const v = values.carrier
   const unset = !v.carrierId && !v.useTyped && !v.loadCarrierId && !v.isOwnFleet
