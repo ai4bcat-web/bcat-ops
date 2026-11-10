@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Clock,
   Columns3,
+  Download,
   FileX,
   Lock,
   Search,
@@ -74,6 +75,7 @@ import {
   tenderRespond,
 } from '@/lib/apiClient'
 import { saveBlob } from '@/lib/download'
+import { exportRecords } from '@/lib/opsExports'
 import { activeUnits } from '@/lib/fleetActive'
 import { checkCallState } from '@/lib/checkCalls'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -680,6 +682,12 @@ function BoardPane({
     }
   }, [layoutDraft, refreshTemplates])
 
+  /** Every active shipment (the Active list, ignoring this page's tab, filters and columns) with every stored field. */
+  const exportAllActive = useCallback(() => {
+    const n = exportRecords('active-shipments', allRows.filter((r) => inShipmentList(r, 'active')))
+    toast.success(`Exported ${n} active shipments`)
+  }, [allRows])
+
   const exportCsv = useCallback(() => {
     const csv = toCsv(filteredRows, columnKeys)
     saveBlob(new Blob([csv], { type: 'text/csv' }), `shipments-${new Date().toISOString().slice(0, 10)}.csv`)
@@ -1073,6 +1081,9 @@ function BoardPane({
         />
         <ClearFiltersButton count={activeFilterCount(filters) + flags.size} onClear={clearFilters} />
         <span className="tms-dense-spacer" />
+        <TmsButton size="sm" variant="secondary" data-testid="export-active-shipments" title="Every active shipment with every field" onClick={exportAllActive}>
+          <Download size={14} aria-hidden="true" /> Export all active
+        </TmsButton>
         {isAdmin && !layoutDraft && (
           <TmsButton size="sm" variant="secondary" onClick={() => setLayoutDraft({ columns: [...teamLayout.columns], widths: { ...teamLayout.widths }, pinned: [...teamLayout.pinned] })}>
             <Columns3 size={14} aria-hidden="true" /> Edit layout
