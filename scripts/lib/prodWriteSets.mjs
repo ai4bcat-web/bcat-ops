@@ -52,8 +52,8 @@ export const PROD_WRITE_SETS = {
   awCustomerSheet: { models: ['Customer', 'AuditLog'] },
   // `awCompanyPhones.mjs --apply`: the three Ivan Cartage CompanyPhone rows (only labels that do not exist) + AuditLog.
   awCompanyPhones: { models: ['CompanyPhone', 'AuditLog'] },
-  // `awDriverDelete.mjs --apply`: deletes one UNREFERENCED Driver (+ releases its company phone) with an AuditLog row holding the row.
-  awDriverDelete: { models: ['Driver', 'CompanyPhone', 'AuditLog'] },
+  // `awDriverDelete.mjs --apply`: deletes the given Driver rows (with --detach: clears Load/LoadCarrier driver ids and deletes the driver's submissions first; releases its company phone) with an AuditLog row holding the row.
+  awDriverDelete: { models: ['Driver', 'Load', 'LoadCarrier', 'DriverSubmission', 'DriverSubmissionDoc', 'CompanyPhone', 'AuditLog'] },
   awSalesRepDivision: { models: ['Shipment', 'Order', 'TmsSettings', 'AuditLog'] },
   // `awZakDriver.mjs --apply`: LoadCarrier.driverId/driverName/driverPhone on the own-asset leg of ZAK-coded PROs, only while empty + one AuditLog row per leg.
   awZakDriver: { models: ['LoadCarrier', 'AuditLog'] },
