@@ -4336,6 +4336,7 @@ async function writeCustomerToBundle(
   customer: Row,
   caller: Caller,
   expectedUpdatedAt: string | null,
+  opts: { replaceBillTo?: boolean } = {},
 ): Promise<void> {
   const bundle = await readBundle(shipmentId)
   const { shipment } = bundle
@@ -4373,9 +4374,13 @@ async function writeCustomerToBundle(
         ...(defaultRepId != null && optionalString(order.customerRepId, 100) == null
           ? { customerRepId: defaultRepId }
           : {}),
-        ...(defaults.billToId != null && optionalString(order.billToId, 100) == null
-          ? { billToId: defaults.billToId }
-          : {}),
+        // A first link only fills a blank Bill to. Moving freight to ANOTHER customer re-points Bill to as well: the old customer's party must
+        // not stay on the order (Ryne 2026-11-11), so it becomes the new customer's default party, or none.
+        ...(opts.replaceBillTo
+          ? { billToId: defaults.billToId ?? null }
+          : defaults.billToId != null && optionalString(order.billToId, 100) == null
+            ? { billToId: defaults.billToId }
+            : {}),
         updatedBy: caller.email,
         updatedAt: now,
         version: (numberOrNull(order.version) ?? 1) + 1,
@@ -4474,7 +4479,7 @@ async function repointShipmentCustomer(input: Row, caller: Caller): Promise<Row>
   const fromCustomerName = optionalString(shipment.customerName, 200)
   const customer = await getActiveCustomer(customerId)
   const customerName = optionalString(customer.name, 200)
-  await writeCustomerToBundle(shipmentId, customer, caller, expectedUpdatedAt)
+  await writeCustomerToBundle(shipmentId, customer, caller, expectedUpdatedAt, { replaceBillTo: true })
   await writeAudit('SHIPMENT', shipmentId, 'REPOINT_SHIPMENT_CUSTOMER', caller, {
     fromCustomerId,
     fromCustomerName,

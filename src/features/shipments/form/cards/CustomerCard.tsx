@@ -14,6 +14,8 @@ import { toast } from 'sonner'
 import { DirectoryCreateDialog } from '@/components/directory-picker/DirectoryCreateDialog'
 import { TmsIconButton, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { useAuthUser } from '@/hooks/useAuth'
+import { OWNER_EMAIL } from '@/lib/crm/visibility'
+import { RepointCustomerDialog } from '@/features/shipments/components/RepointCustomerDialog'
 import { effectiveCustomerStatus } from '@/lib/customerCredit'
 import { findCustomerMatches } from '@/lib/tmsDirectory'
 import { formatPhone } from '@/lib/utils'
@@ -42,6 +44,10 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
   const base = disabledState(ctx)
   const customer = ctx.customer
   const nameLocked = isLocked(ctx.locked, 'customer')
+  // Re-pointing moves revenue, so the server only lets the owner or an ADMIN do it; everyone else keeps the link to the shipment page.
+  const authUser = useAuthUser()
+  const isAdmin = (authUser?.email ?? '').toLowerCase() === OWNER_EMAIL || (authUser?.groups ?? []).includes('ADMIN')
+  const [changing, setChanging] = useState(false)
   const err = (testId: string) => issueFor(ctx, 'customer', testId)
 
   const shippable = useMemo(() => {
@@ -93,7 +99,11 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
           {nameLocked ? (
             <div className="ship-inline">
               <TmsInput {...ctl(LABEL.customer.name)} readOnly value={customer?.name ?? value.typedName} title={lockReason(ctx.locked, 'customer')} />
-              {ctx.bundle && <Link className="ship-link" to={`/tms/shipments/${ctx.bundle.shipment.id}`}>Change customer…</Link>}
+              {ctx.bundle && isAdmin ? (
+                <button type="button" className="ship-link" data-testid="f-customer-change" onClick={() => setChanging(true)}>Change customer…</button>
+              ) : ctx.bundle ? (
+                <Link className="ship-link" to={`/tms/shipments/${ctx.bundle.shipment.id}`}>Change customer…</Link>
+              ) : null}
             </div>
           ) : (
             <div className="ship-inline">
@@ -111,6 +121,27 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
         </LField>
         </FieldGrid>
       </div>
+      {changing && ctx.bundle && (
+        <RepointCustomerDialog
+          shipment={ctx.bundle.shipment}
+          customers={shippable.map((c) => ({ id: c.id, name: c.name }))}
+          open
+          onOpenChange={(open) => { if (!open) setChanging(false) }}
+          onRepointed={async (customerId) => {
+            // The server moved the shipment and its Bill to the new customer; bring the form along (its customer, Bill to, contact and
+            // e-mails come from the new customer) so a later Save does not write the old customer back.
+            const picked = ctx.directory.customers.find((c) => c.id === customerId)
+            if (picked) {
+              form.update((prev) => applyCustomerDefaults(
+                { ...prev, customer: { ...prev.customer, id: '', contactId: '', billToId: '', emails: prev.customer.emails.map(() => '') } },
+                picked,
+              ))
+            }
+            await ctx.refreshBundle()
+            setChanging(false)
+          }}
+        />
+      )}
       {adding && (
         <DirectoryCreateDialog
           type="customer" open tmsTheme initial={{ name: typed }} onClose={() => setAdding(false)}
