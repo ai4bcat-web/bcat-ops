@@ -187,6 +187,15 @@ export function DenseFilterPopover<T>({ column, rows, value, onChange, recentKey
         </div>
       )}
 
+      {kind !== 'multi' && (
+        <BoardCheckbox
+          label="Blanks only"
+          aria-label={`${column.header}: blanks only`}
+          checked={current.blanks ?? false}
+          onChange={(blanks) => onChange(blanks ? { blanks: true } : {})}
+        />
+      )}
+
       <button type="button" className="tms-dg-filter-clear" onClick={() => onChange(null)}>
         Clear
       </button>
