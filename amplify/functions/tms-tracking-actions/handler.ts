@@ -260,6 +260,7 @@ import {
 } from './checkCallAgent'
 import { runTrackingAutomation, type AutomationDeps } from './automation'
 import { normalizeCheckCallPlan } from '../../../src/lib/checkCallPlan'
+import { imageToPdf, isPodImage, pdfKeyFor, pdfNameFor } from '../_shared/podPdf'
 import {
   normalizeTrackingAutomation,
   validateAutomationPatch,
@@ -2159,14 +2160,24 @@ async function ingestAttachments(
 
     const type = inferAttachmentType(name)
     const documentId = `sdoc-${randomUUID()}`
-    const s3Key = `shipment-docs/${shipmentId}/inbound/${messageIdForKey}/${documentId}-${name}`
+    const originalKey = `shipment-docs/${shipmentId}/inbound/${messageIdForKey}/${documentId}-${name}`
+
+    // Proof of delivery is always a PDF: a photo that comes in as a POD is wrapped on a letter page (the original stays in S3 too).
+    let podPdf: Uint8Array | null = null
+    if (type === 'POD' && isPodImage(contentType)) {
+      try { podPdf = await imageToPdf(bytes, contentType, pdfNameFor(name)) } catch (err) { console.warn('[tms-tracking-actions] POD kept as an image; conversion failed:', String(err)) }
+    }
+    const s3Key = podPdf ? pdfKeyFor(originalKey) : originalKey
 
     await s3.send(new PutObjectCommand({
       Bucket: BUCKET_NAME,
-      Key: s3Key,
+      Key: originalKey,
       Body: bytes,
       ContentType: contentType,
     }))
+    if (podPdf) {
+      await s3.send(new PutObjectCommand({ Bucket: BUCKET_NAME, Key: s3Key, Body: podPdf, ContentType: 'application/pdf' }))
+    }
 
     const row: Row = {
       id: documentId,
@@ -2176,10 +2187,10 @@ async function ingestAttachments(
       loadId,
       loadCarrierId: null,
       type,
-      name,
+      name: podPdf ? pdfNameFor(name) : name,
       s3Key,
-      contentType,
-      sizeBytes: bytes.length,
+      contentType: podPdf ? 'application/pdf' : contentType,
+      sizeBytes: podPdf ? podPdf.length : bytes.length,
       source: 'CARRIER_PORTAL',
       audience: DEFAULT_AUDIENCE[type],
       status: 'ACTIVE',
