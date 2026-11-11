@@ -160,4 +160,25 @@ describe('shipment tabs', () => {
     expect(await screen.findByTestId('ship-tab-s1')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByTestId('form-s1')).toBeInTheDocument())
   })
+
+  it('Create shipment sits on the tab row on the board, opens the new-shipment form, and is not shown on an open shipment', async () => {
+    render(
+      <MemoryRouter initialEntries={['/tms/shipments']}>
+        <ShipmentTabsProvider>
+          <ShipmentTabStrip />
+          <Routes>
+            <Route path="/tms/shipments" element={<Board />} />
+            <Route path="/tms/shipments/new" element={<div>new shipment form</div>} />
+            <Route path="/tms/shipments/:id/edit" element={<ShipmentTabAnchor />} />
+          </Routes>
+        </ShipmentTabsProvider>
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByText('open s1'))
+    await screen.findByTestId('ship-tab-s1')
+    expect(screen.queryByTestId('create-shipment')).toBeNull()
+    fireEvent.click(screen.getByTestId('ship-tab-section-active'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create shipment' }))
+    expect(await screen.findByText('new shipment form')).toBeInTheDocument()
+  })
 })
