@@ -192,11 +192,15 @@ describe('customer defaults for a new load', () => {
   it('takes the default rep, else the primary account owner, and the bill-to marked default', () => {
     expect(customerDefaultsOf({ defaultSalesRepId: 'rep1', ...owner, billToParties: [{ id: 'a' }, { id: 'b', isDefault: true }] })).toEqual({ salesRepId: 'rep1', billToId: 'b' })
     expect(customerDefaultsOf({ ...owner, billToParties: [{ id: 'a', isDefault: true }] })).toEqual({ salesRepId: 'owner@bcatcorp.com', billToId: 'a' })
+    // No party flagged default: the only party is the default; with several and none flagged, nothing is guessed.
+    expect(customerDefaultsOf({ ...owner, billToParties: [{ id: 'only' }] }).billToId).toBe('only')
+    expect(customerDefaultsOf({ ...owner, billToParties: [{ id: 'a' }, { id: 'b' }] }).billToId).toBeNull()
+    expect(customerDefaultsOf({ ...owner, billToParties: [] }).billToId).toBeNull()
     expect(customerDefaultsOf({ billToParties: JSON.stringify([{ id: 'j', isDefault: true }]) }).billToId).toBe('j')
   })
 
-  it('a customer without defaults leaves both empty, and parties with none marked default are no choice', () => {
-    expect(customerDefaultsOf({ billToParties: [{ id: 'only' }] }).billToId).toBeNull()
+  it('a customer without defaults leaves both empty, and several parties with none marked default are no choice', () => {
+    expect(customerDefaultsOf({ billToParties: [{ id: 'only' }] }).billToId).toBe('only')
     expect(customerDefaultsOf({ accountOwnerIds: [], billToParties: [] })).toEqual({ salesRepId: null, billToId: null })
     expect(customerDefaultsOf(null)).toEqual({ salesRepId: null, billToId: null })
     expect(customerDefaultsOf({ billToParties: [{ id: 'a' }, { id: 'b' }] }).billToId).toBeNull()
