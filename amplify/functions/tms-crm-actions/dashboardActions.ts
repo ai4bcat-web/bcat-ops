@@ -32,13 +32,19 @@ import type {
 import { makeVisibleReader } from '../../../src/lib/dashboards/visibleReader'
 import { canSeeCustomer, dataViewer, type DataViewer } from '../../../src/lib/dataVisibility'
 import type { Db, Row } from '../_shared/crmStore'
-import { chatTurn } from './dashChat'
+import { chatTurn, resolveNames } from './dashChat'
+import { assistantTurn, parseAssistantInput, type AssistantTools } from './assistant'
+import { anthropicAssistantModel, type AssistantModel } from './assistantModel'
+import { buildSpecFromModel, type ModelOut } from '../../../src/lib/dashboards/modelSchema'
+import { canSeeRow } from '../../../src/lib/dataVisibility'
+import { QueryCommand } from '@aws-sdk/lib-dynamodb'
 import { anthropicModel, type ModelPort } from './dashModel'
 import { dbSource, type DashSource } from './dashSources'
 import { CONFLICT_ERROR, MAX_ACTIVE_DASHBOARDS, MAX_PER_OWNER, dashStore, summaryOf, type DashStore, type StoredDashboard } from './dashStore'
 
 export const DASHBOARD_ACTION_NAMES = [
   'PREVIEW_DASHBOARD_CHAT',
+  'PREVIEW_ASSISTANT_CHAT',
   'PREVIEW_DASHBOARD',
   'LIST_DASHBOARDS',
   'GET_DASHBOARD',
@@ -55,6 +61,7 @@ export type DashboardActionName = (typeof DASHBOARD_ACTION_NAMES)[number]
  */
 export const DASHBOARD_AUTHZ: Record<DashboardActionName, { create: boolean }> = {
   PREVIEW_DASHBOARD_CHAT: { create: true },
+  PREVIEW_ASSISTANT_CHAT: { create: false },
   PREVIEW_DASHBOARD: { create: false },
   LIST_DASHBOARDS: { create: false },
   GET_DASHBOARD: { create: false },
@@ -77,6 +84,10 @@ export interface DashDeps {
   source: DashSource
   store: DashStore
   model: ModelPort
+  /** The ops assistant's tool-use model (separate port: it takes tools and returns blocks). */
+  assistantModel?: AssistantModel
+  /** One shipment row by its PRO number (raw, unfiltered: the caller's visibility is applied by the tool). */
+  shipmentByNumber?: (number: string) => Promise<Row | null>
   nowMs: () => number
   newId: () => string
 }
@@ -86,7 +97,27 @@ export type AuditFn = (entityType: string, entityId: string, action: string, cha
 export function defaultDashDeps(db: Db): DashDeps {
   const table = process.env.DASHBOARD_ROLLUP_TABLE_NAME
   if (!table) throw new Error('DASHBOARD_ROLLUP_TABLE_NAME is not configured')
-  return { source: dbSource(db), store: dashStore(db, table), model: anthropicModel(), nowMs: Date.now, newId: randomUUID }
+  return {
+    source: dbSource(db),
+    store: dashStore(db, table),
+    model: anthropicModel(),
+    assistantModel: anthropicAssistantModel(),
+    shipmentByNumber: async (number) => {
+      const shipmentTable = process.env.SHIPMENT_TABLE_NAME
+      if (!shipmentTable) throw new Error('SHIPMENT_TABLE_NAME is not configured')
+      const out = await db.send(new QueryCommand({
+        TableName: shipmentTable,
+        IndexName: 'shipmentsByNumber',
+        KeyConditionExpression: '#n = :n',
+        ExpressionAttributeNames: { '#n': 'number' },
+        ExpressionAttributeValues: { ':n': number },
+        Limit: 5,
+      }))
+      return (out.Items?.[0] as Row | undefined) ?? null
+    },
+    nowMs: Date.now,
+    newId: randomUUID,
+  }
 }
 
 /** Total time a data run may take (AppSync cuts at 30 s). */
@@ -236,6 +267,90 @@ async function previewChat(ctx: Ctx, input: Row): Promise<unknown> {
     specBuilt: result.spec !== null,
     modelError: result.modelError !== null,
     modelMs: result.modelMs,
+  })
+  return result
+}
+
+
+// ── Ops assistant (read-only tools under the caller's visibility) ────────────
+
+const SHIPMENT_FACTS = [
+  'number', 'status', 'statusChangedAt', 'customerName', 'mode', 'originCity', 'destinationCity', 'pickupAppt', 'deliveryAppt',
+  'deliveredAt', 'loadReviewPushedAt', 'carrierAssignmentStatus', 'holdReason', 'cancelReason', 'tenderRejectReason',
+  'voidedAt', 'voidReason', 'source', 'revDivision', 'datPostedAt', 'lastNoticeStatus',
+] as const
+
+function assistantTools(ctx: Ctx): AssistantTools {
+  return {
+    async runQuery(input) {
+      const { source } = ctx.deps
+      const [customers, divisions, staff] = await Promise.all([source.customers(), source.divisions(), source.staff()])
+      const text = (k: string): string => (typeof input[k] === 'string' ? (input[k] as string).trim() : '')
+      const list = (k: string): string[] => (Array.isArray(input[k]) ? (input[k] as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 5) : [])
+      const queryId = text('queryId')
+      if (!(QUERY_IDS as readonly string[]).includes(queryId)) return `Unknown query ${queryId || '(none)'}. Use one of: ${QUERY_IDS.join(', ')}`
+      const meta = QUERY_CATALOG[queryId as (typeof QUERY_IDS)[number]]
+      const out: ModelOut = {
+        reply: '', ready: true, questions: [], title: 'Assistant query', description: '',
+        window: text('window'), from: text('from'), to: text('to'),
+        divisionNames: list('divisionNames'), customerNames: list('customerNames'), repNames: list('repNames'), modes: list('modes'),
+        widgets: [{
+          type: meta.types[0]!, title: meta.label, queryId, metric: text('metric'), metrics: list('metrics'),
+          groupBy: text('groupBy'), grain: text('grain'), sort: text('sort'),
+          limit: typeof input.limit === 'number' ? input.limit : 0, size: 'M',
+        }],
+      }
+      const res = resolveNames(out, {
+        model: { complete: async () => '' }, viewer: ctx.viewer, customers, divisions, staff,
+        today: new Date(ctx.deps.nowMs()).toISOString().slice(0, 10), nowMs: ctx.deps.nowMs,
+      })
+      if (res.clarify.length > 0) return `Ambiguous name. Ask the user: ${res.clarify.map((q) => `${q.text} Options: ${q.choices.join(' | ')}`).join(' ')}`
+      if (res.resolved.unresolved.length > 0) return res.issues.join('. ')
+      const built = buildSpecFromModel(out, { scope: { kind: 'ME' }, divisionCodes: res.divisionCodes, customerIds: res.customerIds, repIds: res.repIds })
+      const parsed = parseSpec(built.raw)
+      if (!parsed.ok) return `That query is not valid: ${parsed.issues.slice(0, 4).join('; ')}`
+      const ran = await run(ctx, parsed.spec)
+      return JSON.stringify({ window: ran.resolved, asOf: ran.asOf, results: ran.results.map((r) => (r.ok ? { kind: r.kind, ...r.series } : { error: r.error })) })
+    },
+
+    async findShipment(input) {
+      const number = typeof input.number === 'string' ? input.number.trim().slice(0, 40) : ''
+      if (!number) return 'A shipment number is required.'
+      if (!ctx.deps.shipmentByNumber) return 'Shipment lookup is not available.'
+      const row = await ctx.deps.shipmentByNumber(number)
+      const { source } = ctx.deps
+      const customers = row ? await source.customers() : []
+      const byId = new Map(customers.map((c) => [c.id, c]))
+      // Not found and not visible read the same: neither reveals that the number exists.
+      const seen = row && canSeeRow(ctx.viewer, { customerId: (row.customerId as string | null) ?? null, salesRepId: (row.salesRepId as string | null) ?? null }, byId)
+      if (!row || !seen) return `No shipment ${number} that you can see.`
+      const staff = await source.staff()
+      const nameOf = (id: unknown): string | null => (typeof id === 'string' && id ? (staff.find((s) => norm(s.id) === norm(id))?.name ?? null) : null)
+      const facts: Record<string, unknown> = {}
+      for (const k of SHIPMENT_FACTS) if (row[k] != null && row[k] !== '') facts[k] = row[k]
+      facts.salesRep = nameOf(row.salesRepId)
+      facts.tracker = nameOf(row.trackerId)
+      return JSON.stringify(facts)
+    },
+  }
+}
+
+async function assistantChat(ctx: Ctx, input: Row): Promise<unknown> {
+  const parsed = parseAssistantInput(input)
+  if (!parsed.ok) throw new Error(`Invalid request: ${parsed.issues.slice(0, 3).join('; ')}`)
+  const model = ctx.deps.assistantModel
+  if (!model) throw new Error('The assistant is not configured')
+  const result = await assistantTurn(parsed.input, {
+    model,
+    tools: assistantTools(ctx),
+    today: new Date(ctx.deps.nowMs()).toISOString().slice(0, 10),
+    nowMs: ctx.deps.nowMs,
+  })
+  await ctx.audit('Assistant', 'chat', 'ASSISTANT_CHAT', {
+    messages: parsed.input.messages.length,
+    tools: result.toolsUsed,
+    modelError: result.modelError !== null,
+    ms: result.ms,
   })
   return result
 }
@@ -413,6 +528,7 @@ export async function runDashboardAction(
   const ctx: Ctx = { caller, deps, audit, access, viewer }
   switch (action) {
     case 'PREVIEW_DASHBOARD_CHAT': return previewChat(ctx, input)
+    case 'PREVIEW_ASSISTANT_CHAT': return assistantChat(ctx, input)
     case 'PREVIEW_DASHBOARD': return previewDashboard(ctx, input)
     case 'LIST_DASHBOARDS': return listDashboards(ctx)
     case 'GET_DASHBOARD': return getDashboard(ctx, input)
