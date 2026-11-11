@@ -640,11 +640,16 @@ export function carrierSortKey(row: ShipmentRow): string {
   return carrierLabel(row)
 }
 
-/** `BROKERAGE` / `ASSETS (Box trucks)` — the division chip's text. */
+/** `BROKERAGE` / `Assets Box Truck` — the division chip's text. */
 export function divisionLabel(row: ShipmentRow, nameOf?: (code: string) => string): string {
   // A division code reads as words: CAR_SHIPPING is CAR SHIPPING.
   const name = (code: string) => (nameOf ? nameOf(code) : code.replace(/_/g, ' '))
   if (!row.revDivision) return ''
+  // Ivan Cartage reads as "Assets", "Assets Local", "Assets Owner Operator", "Assets Box Truck" (Ryne 2026-11-11).
+  if (row.revDivision === 'ASSETS' && !nameOf) {
+    const words = (code: string) => code.toLowerCase().split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+    return row.revSubdivision ? `Assets ${words(row.revSubdivision)}` : 'Assets'
+  }
   return row.revSubdivision ? `${name(row.revDivision)} (${name(row.revSubdivision)})` : name(row.revDivision)
 }
 

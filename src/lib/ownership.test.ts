@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  holdDivision,
   OWN_FLEET_CARRIER_CODE,
   SEED_DIVISIONS,
   SEED_RULES,
@@ -302,5 +303,17 @@ describe('Aljex Rev Type rules', () => {
   })
   it('falls back to BROKERAGE with no Rev Type', () => {
     expect(tag([])).toBe('BROKERAGE')
+  })
+})
+
+describe('holdDivision (intake-routed shipments)', () => {
+  const resolved = (division: string | null, sub: string | null) => ({ revDivision: division, revSubdivision: sub, ruleId: 'r1' })
+  it('keeps the held division and takes the driver\'s subdivision when the rules agree', () => {
+    expect(holdDivision('ASSETS', resolved('ASSETS', 'LOCAL'))).toEqual({ revDivision: 'ASSETS', revSubdivision: 'LOCAL', ruleId: 'r1' })
+    expect(holdDivision('ASSETS', resolved('ASSETS', 'BOX_TRUCK')).revSubdivision).toBe('BOX_TRUCK')
+    expect(holdDivision('ASSETS', resolved('ASSETS', 'OWNER_OPERATOR')).revSubdivision).toBe('OWNER_OPERATOR')
+  })
+  it('holds ASSETS with no subdivision while there is no driver', () => {
+    expect(holdDivision('ASSETS', resolved('BROKERAGE', null))).toEqual({ revDivision: 'ASSETS', revSubdivision: null, ruleId: null })
   })
 })

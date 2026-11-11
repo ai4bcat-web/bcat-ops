@@ -262,7 +262,7 @@ import {
   unresolvedCustomerMessage,
   type CustomerResolvable,
 } from '../../../src/lib/customerResolution'
-import { topLevelOf } from '../../../src/lib/ownership'
+import { holdDivision, topLevelOf } from '../../../src/lib/ownership'
 import { normalizePro } from '../../../src/lib/proNumber'
 import { backfillShipmentNumber, digitsOnlyPro } from '../../../src/lib/legacyShipmentNumber'
 import type { ProScheme } from '../../../src/types/tms'
@@ -3178,14 +3178,21 @@ async function applyTag(
     const shipmentId = String(records.shipment.id)
     const { shipment, order } = records
     const hand = !opts.ignoreHand && shipment.revTagSource === 'HAND'
-    const source = hand ? 'HAND' : 'RULE'
+    const heldDivision = optionalString(shipment.revDivision, 60)
+    const intake = !hand && !opts.ignoreHand && shipment.revTagSource === 'INTAKE' && heldDivision != null
+    const source: 'HAND' | 'RULE' | 'INTAKE' = hand ? 'HAND' : intake ? 'INTAKE' : 'RULE'
+    const held = intake
+      ? holdDivision(heldDivision, { revDivision: tag.revDivision, revSubdivision: tag.revSubdivision, ruleId: tag.revRuleId })
+      : null
     const effective: ShipmentTag = hand
       ? {
         revDivision: optionalString(shipment.revDivision, 60),
         revSubdivision: optionalString(shipment.revSubdivision, 60),
         revRuleId: null,
       }
-      : tag
+      : held
+        ? { revDivision: held.revDivision, revSubdivision: held.revSubdivision, revRuleId: held.ruleId }
+        : tag
     const taggedBy = hand ? optionalString(shipment.revTaggedBy, 200) : null
     const settingsForRep = salesRepOf(shipment, order) == null ? await getSettings() : null
     const salesRepId = salesRepOf(shipment, order)
@@ -3359,10 +3366,12 @@ async function setRevTag(input: Row, caller: Caller): Promise<Row> {
   await assertTaggableDivision(divisionCode, subdivisionCode)
 
   const tag: ShipmentTag = { revDivision: divisionCode, revSubdivision: subdivisionCode, revRuleId: null }
+  // An intake promotion holds the division it arrived under but lets the driver decide the subdivision.
+  const source: 'HAND' | 'INTAKE' = input.source === 'INTAKE' && !subdivisionCode ? 'INTAKE' : 'HAND'
   const now = nowIso()
   await transact(
     [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
-      ...shipmentTagPatch(tag, 'HAND', caller.email),
+      ...shipmentTagPatch(tag, source, caller.email),
       updatedBy: caller.email,
       updatedAt: now,
       version: (numberOrNull(shipment.version) ?? 1) + 1,
@@ -3373,7 +3382,7 @@ async function setRevTag(input: Row, caller: Caller): Promise<Row> {
   const client = await getDataClient()
   for (const load of loads) {
     assertLoadWriteOk(
-      await client.models.Load.update({ id: String(load.id), ...tagPatch(tag, 'HAND'), updatedBy: caller.email }),
+      await client.models.Load.update({ id: String(load.id), ...tagPatch(tag, source), updatedBy: caller.email }),
       'Load update',
     )
   }
@@ -3947,29 +3956,37 @@ async function retagShipments(input: Row, caller: Caller): Promise<Row> {
     const load = loadOf.get(shipmentId) ?? null
     const leg = load ? legOf.get(String(load.id)) ?? null : null
     const driverId = typeof leg?.driverId === 'string' ? leg.driverId : ''
-    const { tag } = tagFor(taxonomy, contextOf({
+    const resolved = tagFor(taxonomy, contextOf({
       shipment,
       order: orderOf.get(shipmentId) ?? null,
       load,
       loadCarrier: leg,
       driver: driverId ? driverOf.get(driverId) ?? null : null,
-    }))
+    })).tag
+    const heldDivision = shipment.revTagSource === 'INTAKE' ? optionalString(shipment.revDivision, 60) : null
+    const tagSource: 'RULE' | 'INTAKE' = heldDivision ? 'INTAKE' : 'RULE'
+    const tag: ShipmentTag = heldDivision
+      ? (() => {
+        const h = holdDivision(heldDivision, { revDivision: resolved.revDivision, revSubdivision: resolved.revSubdivision, ruleId: resolved.revRuleId })
+        return { revDivision: h.revDivision, revSubdivision: h.revSubdivision, revRuleId: h.ruleId }
+      })()
+      : resolved
     if (tag.revDivision) report.byDivision[tag.revDivision] = (report.byDivision[tag.revDivision] ?? 0) + 1
     if (tag.revSubdivision) report.bySubdivision[tag.revSubdivision] = (report.bySubdivision[tag.revSubdivision] ?? 0) + 1
-    if (sameTag(shipment, tag, 'RULE') && (load == null || sameTag(load, tag, 'RULE'))) continue
+    if (sameTag(shipment, tag, tagSource) && (load == null || sameTag(load, tag, tagSource))) continue
 
     report.changed++
     if (dryRun) continue
     const now = nowIso()
     writes.push(updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
-      ...shipmentTagPatch(tag, 'RULE', null),
+      ...shipmentTagPatch(tag, tagSource, null),
       updatedBy: caller.email,
       updatedAt: now,
       version: (numberOrNull(shipment.version) ?? 1) + 1,
     }, null))
     if (load) {
       writes.push(updateItemTx(LOAD_TABLE_NAME, String(load.id), {
-        ...tagPatch(tag, 'RULE'),
+        ...tagPatch(tag, tagSource),
         updatedBy: caller.email,
         updatedAt: now,
       }, null))

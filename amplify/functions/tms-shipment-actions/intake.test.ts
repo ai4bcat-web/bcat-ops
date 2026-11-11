@@ -324,7 +324,7 @@ describe('INTAKE_MOVE_TO_ACTIVE', () => {
     expect(out).toMatchObject({ shipmentId: 'shp-1', shipmentNumber: 'S1', intake: { status: 'MOVED' } })
     expect(createShipment).toHaveBeenCalledTimes(1)
     expect(createShipment.mock.calls[0][0]).toMatchObject({ source: 'TENDER', workflowRunId: 'run-1', customerId: 'cus-1' })
-    expect(setRevTag).toHaveBeenCalledWith({ shipmentId: 'shp-1', divisionCode: 'BROKERAGE' }, caller)
+    expect(setRevTag).toHaveBeenCalledWith({ shipmentId: 'shp-1', divisionCode: 'BROKERAGE', source: 'INTAKE' }, caller)
     expect(setSalesRep).toHaveBeenCalledWith({ shipmentId: 'shp-1', repId: 'rep-1' }, caller)
     expect(rows(T.shipment).get('shp-1')).toMatchObject({ intakeLoadId: 'il:r1', intakeReviewedBy: 'reviewer@bcatcorp.com', intakeReviewedAt: REVIEWED.reviewedAt })
     const refs = rows(T.order).get('ord-1')!.references as Row[]

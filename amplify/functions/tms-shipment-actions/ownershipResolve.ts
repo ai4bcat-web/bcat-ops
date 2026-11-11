@@ -249,7 +249,7 @@ export async function resolveForShipment(
 }
 
 /** The tag as a Load carries it: the three columns plus where it came from. */
-export function tagPatch(tag: ShipmentTag, source: 'RULE' | 'HAND'): Row {
+export function tagPatch(tag: ShipmentTag, source: 'RULE' | 'HAND' | 'INTAKE'): Row {
   return {
     revDivision: tag.revDivision,
     revSubdivision: tag.revSubdivision,
@@ -263,7 +263,7 @@ export function tagPatch(tag: ShipmentTag, source: 'RULE' | 'HAND'): Row {
  * hand — the Load is a mirror of the answer, not of the conversation — and a rule
  * re-resolve clears the name, because no person is standing behind a rule's answer.
  */
-export function shipmentTagPatch(tag: ShipmentTag, source: 'RULE' | 'HAND', taggedBy: string | null): Row {
+export function shipmentTagPatch(tag: ShipmentTag, source: 'RULE' | 'HAND' | 'INTAKE', taggedBy: string | null): Row {
   return { ...tagPatch(tag, source), revTaggedBy: source === 'HAND' ? taggedBy : null }
 }
 
@@ -271,7 +271,7 @@ export function shipmentTagPatch(tag: ShipmentTag, source: 'RULE' | 'HAND', tagg
 export function sameTag(
   row: Row | null | undefined,
   tag: ShipmentTag,
-  source: 'RULE' | 'HAND',
+  source: 'RULE' | 'HAND' | 'INTAKE',
   taggedBy: string | null = null,
 ): boolean {
   if (!row) return false

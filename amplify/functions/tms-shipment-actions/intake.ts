@@ -397,9 +397,9 @@ async function finishShipment(
     'intake order',
   )
 
-  // The reviewer's explicit division beats the rules: a hand tag.
-  if (fields.divisionCode && !(shipment0.revTagSource === 'HAND' && shipment0.revDivision === fields.divisionCode)) {
-    await deps.actions.setRevTag({ shipmentId, divisionCode: fields.divisionCode }, caller)
+  // The division the load arrived under beats the rules (INTAKE tag); its subdivision still follows the driver.
+  if (fields.divisionCode && !(['HAND', 'INTAKE'].includes(String(shipment0.revTagSource)) && shipment0.revDivision === fields.divisionCode)) {
+    await deps.actions.setRevTag({ shipmentId, divisionCode: fields.divisionCode, source: 'INTAKE' }, caller)
   }
   if (fields.salesRepId && shipment0.salesRepId !== fields.salesRepId) {
     await deps.actions.setSalesRep({ shipmentId, repId: fields.salesRepId }, caller)
