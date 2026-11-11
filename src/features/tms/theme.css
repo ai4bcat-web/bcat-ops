@@ -32,6 +32,8 @@
   --tms-surface-selected: #e6f4fd;
   --tms-border: #e2e8f0;
   --tms-input: #ffffff;
+  /* Text boxes sit a shade off the white cards so a field reads as a field. Buttons and chips keep --tms-input. */
+  --tms-field: #ebf0f7;
   --tms-input-border: #cbd5e1;
   --tms-text: #111827;
   --tms-text-2: #4b5563;
@@ -148,6 +150,7 @@
   --tms-surface-selected: #0f2a40;
   --tms-border: #383838;
   --tms-input: #383838;
+  --tms-field: #383838;
   --tms-input-border: #656565;
   --tms-text: #fafaf9;
   --tms-text-2: #d4d4d4;
@@ -457,7 +460,7 @@
   width: 100%;
   height: var(--tms-control-h);
   padding: 0 10px;
-  background: var(--tms-input);
+  background: var(--tms-field);
   border: 1px solid var(--tms-input-border);
   border-radius: var(--tms-radius);
   color: var(--tms-text);
@@ -505,8 +508,26 @@
 .tms-portal .tms-select:focus,
 .tms-portal .tms-textarea:focus {
   outline: none;
+  background-color: var(--tms-input);
   border-color: var(--tms-primary);
   box-shadow: 0 0 0 2px var(--tms-primary-tint), 0 0 0 1px var(--tms-primary);
+}
+
+/* The shared shadcn inputs (dialogs, settings, directory) are transparent by design; inside the TMS they take the same field shade. */
+.tms-shell input.border-input:not([type='checkbox']):not([type='radio']):not([type='range']),
+.tms-shell textarea.border-input,
+.tms-shell button[role='combobox'].border-input,
+.tms-portal input.border-input:not([type='checkbox']):not([type='radio']):not([type='range']),
+.tms-portal textarea.border-input,
+.tms-portal button[role='combobox'].border-input {
+  background-color: var(--tms-field);
+}
+
+.tms-shell input.border-input:focus-visible,
+.tms-shell textarea.border-input:focus-visible,
+.tms-portal input.border-input:focus-visible,
+.tms-portal textarea.border-input:focus-visible {
+  background-color: var(--tms-input);
 }
 
 .tms-shell .tms-field,
@@ -852,7 +873,7 @@
   width: 56px;
   height: 26px;
   padding: 0 6px;
-  background: var(--tms-input);
+  background: var(--tms-field);
   border: 1px solid var(--tms-input-border);
   border-radius: var(--tms-radius-sm);
   color: var(--tms-text);
