@@ -52,13 +52,17 @@ export function lastApptAt(load: Load): string {
 export const CURRENT_LOAD_GRACE_HOURS = 36
 
 /**
+ * Every load a driver has open, soonest first: the first is the current one, the rest are what is still on their list (a second delivery
+ * today). The PWA used to show only the first, so a driver with two deliveries in a day could not see the second (Ryne 2026-11-11, Jason).
+ */
+/**
  * The one load a driver is working now: theirs, its last appointment not long past,
  * soonest first. Returns null when they have nothing open — which the PWA shows as a
  * rest state rather than an error.
  *
  * `now` is passed in rather than read from a clock so this stays pure and testable.
  */
-export function currentLoadForDriver(loads: Load[], driverId: string, now: number): Load | null {
+export function openLoadsForDriver(loads: Load[], driverId: string, now: number): Load[] {
   const cutoff = now - CURRENT_LOAD_GRACE_HOURS * 60 * 60 * 1000
   const open = loads.filter((l) => {
     if (!driverIsOnLoad(l, driverId)) return false
@@ -68,8 +72,11 @@ export function currentLoadForDriver(loads: Load[], driverId: string, now: numbe
     const at = Date.parse(last)
     return Number.isNaN(at) ? true : at >= cutoff
   })
-  if (!open.length) return null
-  return open.sort((a, b) => firstApptAt(a).localeCompare(firstApptAt(b)))[0]
+  return open.sort((a, b) => firstApptAt(a).localeCompare(firstApptAt(b)))
+}
+
+export function currentLoadForDriver(loads: Load[], driverId: string, now: number): Load | null {
+  return openLoadsForDriver(loads, driverId, now)[0] ?? null
 }
 
 /** Current load per driver, for the fleet dashboard. */

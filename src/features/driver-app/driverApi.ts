@@ -1008,6 +1008,12 @@ export async function fetchCurrentLoad(): Promise<CurrentLoad | null> {
   return out.load
 }
 
+/** The current load plus the rest of the driver's open loads, soonest first (a second delivery today). */
+export async function fetchOpenLoads(): Promise<{ load: CurrentLoad | null; alsoOpen: CurrentLoad[] }> {
+  const out = await request<{ load: CurrentLoad | null; alsoOpen?: CurrentLoad[] }>('/loads/current')
+  return { load: out.load, alsoOpen: out.alsoOpen ?? [] }
+}
+
 /** One of the driver's loads, as offered in the attach picker. */
 export interface RecentLoad {
   id: string
