@@ -42,6 +42,7 @@ import { chicagoDateStr } from '@/lib/date'
 import { saveBlob } from '@/lib/download'
 import { formatCents } from '@/lib/invoiceBuild'
 import { otrStatusLabel } from '@/lib/otrInvoiceStatus'
+import { otrRejection } from '@/lib/otrRejection'
 import { AgingStrip } from './AgingStrip'
 import {
   AR_PAYMENT_KIND_LABEL, AR_PAYMENT_METHOD_LABEL, BATCH_GENERATE_LIMIT, EMPTY_UNPAID_FILTERS,
@@ -857,6 +858,8 @@ function unpaidView({
   const customerName = invoiceCustomerOptions(allInvoices).find((c) => c.id === filters.customerId)?.name ?? null
   const factorText = (inv: InvoiceRecord) => {
     const item = inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : undefined
+    // An invoice OTR turned down has to be sent by hand: say so on the invoice, not only in the queue.
+    if (item && otrRejection(item)) return 'OTR rejected: invoice manually'
     const factor = otrStatusLabel(item?.otrStatus) ?? (inv.factoringItemId ? 'In the factoring queue' : null)
     return factor ?? (inv.factored ? 'Factored customer' : '—')
   }

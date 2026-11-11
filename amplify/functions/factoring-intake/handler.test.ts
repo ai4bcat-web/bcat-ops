@@ -324,6 +324,12 @@ describe('only mail addressed to the factoring group creates a row', () => {
     expect(isForFactoringQueue(['ryne@bcatcorp.com', 'ivanfactoring@bcatcorp.com'])).toBe(true)
   })
 
+  it('accepts the internal invoicefactoring@ group too (the original e-mail way)', () => {
+    expect(isForFactoringQueue(['invoicefactoring@bcatcorp.com'])).toBe(true)
+    expect(isForFactoringQueue(['InvoiceFactoring@BcatCorp.com'])).toBe(true)
+    expect(isForFactoringQueue(['notinvoicefactoring@bcatcorp.com'])).toBe(false)
+  })
+
   it('refuses mail merely sent to somebody else', () => {
     expect(isForFactoringQueue(['ryne@bcatcorp.com', 'dispatch@bcatcorp.com'])).toBe(false)
   })

@@ -252,7 +252,7 @@
  "wrong recipient is 422": {
   "statusCode": 422,
   "body": {
-   "error": "not addressed to ivanfactoring@bcatcorp.com"
+   "error": "not addressed to ivanfactoring@bcatcorp.com or invoicefactoring@bcatcorp.com"
   },
   "puts": [],
   "enrichment": []
@@ -260,7 +260,7 @@
  "group only quoted in a subject is not a recipient": {
   "statusCode": 422,
   "body": {
-   "error": "not addressed to ivanfactoring@bcatcorp.com"
+   "error": "not addressed to ivanfactoring@bcatcorp.com or invoicefactoring@bcatcorp.com"
   },
   "puts": [],
   "enrichment": []

@@ -108,6 +108,37 @@ describe('filters', () => {
   })
 })
 
+describe('invoices OTR turned down', () => {
+  it('points out which must be invoiced manually, and shows only them on request, across every tab', async () => {
+    await setup([
+      item({ id: 'ok', proNumber: 'OK1', status: 'NEED_TO_FACTOR' }),
+      item({ id: 'err', proNumber: 'ER2', status: 'NEED_TO_FACTOR', otrError: 'Amount does not match the rate con' }),
+      item({ id: 'dead', proNumber: 'DE3', status: 'PENDING_WITH_OTR', otrStatus: 4 as never, otrInvoiceId: 'x' }),
+      item({ id: 'done', proNumber: 'DO4', status: 'FACTORED', otrError: 'old' }),
+    ])
+    const strip = screen.getByTestId('otr-rejected-strip')
+    expect(strip.textContent).toContain('2')
+    expect(strip.textContent).toMatch(/turned down by OTR and must be invoiced manually/)
+    // On the landing tab the rejected row carries its own flag and OTR's words.
+    expect(within(screen.getByText('ER2').closest('tr') as HTMLElement).getByTestId('otr-rejected-flag').textContent).toBe('Invoice manually')
+    expect(screen.getByText(/OTR refused it: Amount does not match the rate con/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('otr-rejected-toggle'))
+    expect(screen.getByText('ER2')).toBeInTheDocument()
+    expect(screen.getByText('DE3')).toBeInTheDocument()
+    expect(screen.queryByText('OK1')).not.toBeInTheDocument()
+    expect(screen.queryByText('DO4')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('otr-rejected-toggle'))
+    expect(screen.getByText('OK1')).toBeInTheDocument()
+  })
+
+  it('shows no strip when OTR has turned nothing down', async () => {
+    await setup([item({ id: 'ok', proNumber: 'OK1' })])
+    expect(screen.queryByTestId('otr-rejected-strip')).not.toBeInTheDocument()
+  })
+})
+
 describe('required fields on the row', () => {
   it('counts what resolved and marks each field green or red', async () => {
     await setup([item({
