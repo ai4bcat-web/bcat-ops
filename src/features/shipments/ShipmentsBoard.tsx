@@ -1101,6 +1101,9 @@ function BoardPane({
         {isAdmin && layoutDraft && (
           <>
             <span className="text-xs text-muted-foreground" role="status">Editing the team layout: drag headers, resize, or use Columns.</span>
+            {JSON.stringify(layoutDraft) !== JSON.stringify(teamLayout) ? (
+              <TmsBadge tone="orange" data-testid="layout-unsaved" title="Apply only changes this editing view. Save as team default to keep it for everyone.">Not saved yet</TmsBadge>
+            ) : null}
             <TmsButton size="sm" variant="secondary" onClick={() => setColumnsOpen(true)}>
               <Columns3 size={14} aria-hidden="true" /> Columns
             </TmsButton>
@@ -1234,7 +1237,10 @@ function BoardPane({
           columns={layoutDraft.columns}
           widths={layoutDraft.widths}
           pinned={layoutDraft.pinned}
-          onApply={(next) => setLayoutDraft({ columns: next.columns, widths: next.widths, pinned: next.pinned })}
+          onApply={(next) => {
+            setLayoutDraft({ columns: next.columns, widths: next.widths, pinned: next.pinned })
+            toast.success(`Applied: ${next.columns.length} columns, ${next.pinned.length} frozen. Click Save as team default to keep it for everyone.`)
+          }}
         />
       )}
 

@@ -1099,6 +1099,21 @@ describe('ShipmentsBoard team column layout', () => {
     expect(saved.columns.slice(0, 2)).toEqual(['proNumber', 'originCity'])
   })
 
+  it('after Apply the layout shows Not saved yet until it is saved as the team default', async () => {
+    vi.mocked(saveShipmentColumnTemplate).mockResolvedValue({})
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'originCity'])])
+    renderBoard('/tms/shipments', [row('S001')])
+    await screen.findByText('S001')
+    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    expect(screen.queryByTestId('layout-unsaved')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Columns$/ }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Destination' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(screen.getByTestId('layout-unsaved')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Save as team default' }))
+    await waitFor(() => expect(saveShipmentColumnTemplate).toHaveBeenCalledTimes(1))
+  })
+
   it('Cancel drops the unsaved layout edit', async () => {
     renderBoard('/tms/shipments', [row('S001')])
     await screen.findByText('S001')
