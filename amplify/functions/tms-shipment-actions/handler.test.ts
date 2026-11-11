@@ -7659,7 +7659,7 @@ describe('Ivan Cartage driver (Step W)', () => {
       closeWeek()
       const before = snapshot()
       await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-2' }))
-        .rejects.toThrow("Delivered 2026-03-03: that pay week has closed. Changing the driver would move this load between Driver One's and Driver Two's settlements. An owner or ADMIN can do it with a reason.")
+        .rejects.toThrow("Delivered 2026-03-03: that pay week has closed. Changing the driver would move this load between Driver One's and Driver Two's settlements. An owner or ADMIN can do it.")
       expect(snapshot()).toBe(before)
       expect(loadRow(loadId).deliveryDriverId).toBe('drv-1')
     })
@@ -7670,16 +7670,21 @@ describe('Ivan Cartage driver (Step W)', () => {
       await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })).rejects.toThrow(/pay week has closed/)
     })
 
-    it('lets an admin through only with a reason, and audits it', async () => {
+    it('lets an admin through with or without a reason, and audits it', async () => {
       const { loadId } = await openLoad()
       await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
       closeWeek()
-      await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-2' }, ADMIN))
-        .rejects.toThrow('Give a reason (at least 10 characters) to change the driver on a load in a closed pay week.')
-      await expect(call('ASSIGN_ASSET', { loadId, driverId: 'drv-2', payOverrideReason: 'too short' }, ADMIN))
-        .rejects.toThrow(/at least 10 characters/)
-      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-2', payOverrideReason: 'Wrong driver was booked' }, ADMIN)
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-2' }, ADMIN)
       expect(loadRow(loadId).deliveryDriverId).toBe('drv-2')
+      const changes = JSON.parse(String(auditOf('CHANGE_ASSET_DRIVER')[0].changes)) as { payLock: Row }
+      expect(changes.payLock).toEqual({ state: 'CLOSED_WEEK_OVERRIDE', deliveryDate: '2026-03-03', reason: '(no reason given)' })
+    })
+
+    it('keeps a typed reason on the audit row', async () => {
+      const { loadId } = await openLoad()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
+      closeWeek()
+      await call('ASSIGN_ASSET', { loadId, driverId: 'drv-2', payOverrideReason: 'Wrong driver was booked' }, ADMIN)
       const changes = JSON.parse(String(auditOf('CHANGE_ASSET_DRIVER')[0].changes)) as { payLock: Row }
       expect(changes.payLock).toEqual({ state: 'CLOSED_WEEK_OVERRIDE', deliveryDate: '2026-03-03', reason: 'Wrong driver was booked' })
     })

@@ -118,9 +118,10 @@ describe('evaluatePayLock', () => {
       state: 'REFUSED', code: 'CLOSED_WEEK', message: M.payClosedWeek('2026-10-05', 'Old', 'New'),
     })
   })
-  it('admin needs a 10+ character reason (trimmed); with one it is an audited override', () => {
+  it('an admin may change it with or without a reason: always an audited override', () => {
     const args = { ...base, deliveryAppt: '2026-10-05T12:00:00Z', isAdmin: true }
-    expect(evaluatePayLock({ ...args, reason: '  short  ' })).toMatchObject({ state: 'REFUSED', code: 'REASON_REQUIRED' })
+    expect(evaluatePayLock({ ...args })).toEqual({ state: 'CLOSED_WEEK_OVERRIDE', deliveryDate: '2026-10-05', reason: '(no reason given)' })
+    expect(evaluatePayLock({ ...args, reason: '  short  ' })).toMatchObject({ state: 'CLOSED_WEEK_OVERRIDE', reason: 'short' })
     expect(evaluatePayLock({ ...args, reason: '  driver was wrong  ' }))
       .toEqual({ state: 'CLOSED_WEEK_OVERRIDE', deliveryDate: '2026-10-05', reason: 'driver was wrong' })
   })

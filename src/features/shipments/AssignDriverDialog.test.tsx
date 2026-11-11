@@ -140,14 +140,12 @@ describe('AssignDriverDialog', () => {
       expect(screen.queryByTestId('assign-driver-reason')).toBeNull()
     })
 
-    it('lets an admin through only with a reason, and sends it', async () => {
+    it('lets an admin through with or without a reason, and sends the reason when there is one', async () => {
       vi.useFakeTimers({ toFake: ['Date'] })
       vi.setSystemTime(new Date('2026-11-03T12:00:00.000Z'))
       const { onConfirm } = renderDialog({ load: closed, isAdmin: true })
       fireEvent.change(select(), { target: { value: 'pavel' } })
-      expect(confirm().disabled).toBe(true)
-      fireEvent.change(screen.getByTestId('assign-driver-reason'), { target: { value: 'too short' } })
-      expect(confirm().disabled).toBe(true)
+      expect(confirm().disabled).toBe(false)
       fireEvent.change(screen.getByTestId('assign-driver-reason'), { target: { value: 'Wrong driver was booked' } })
       expect(confirm().disabled).toBe(false)
       fireEvent.click(confirm())
