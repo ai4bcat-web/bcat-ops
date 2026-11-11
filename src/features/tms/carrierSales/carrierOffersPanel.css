@@ -1,0 +1,140 @@
+/*
+ * Carrier Sales offers panel + demo loads (DEMO feature; data is fabricated, see demoOffers.ts).
+ * Tokens only (no colour literals). Scoped under .tms-shell, and .tms-portal because drawers render in a portal.
+ */
+.tms-shell .cs-drawer-body,
+.tms-portal .cs-drawer-body { display: grid; gap: 14px; padding: 14px var(--tms-pad); align-content: start; }
+
+.tms-shell .cs-demo-badge,
+.tms-portal .cs-demo-badge { letter-spacing: 0.06em; font-weight: 700; white-space: nowrap; border: 1px dashed var(--tms-badge-orange); }
+.tms-shell .cs-demo-banner,
+.tms-portal .cs-demo-banner {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 13px;
+  color: var(--tms-text); background: var(--tms-badge-orange-tint);
+  border: 1px dashed var(--tms-badge-orange); border-radius: var(--tms-radius-card);
+}
+
+.tms-shell .cs-meta-grid,
+.tms-portal .cs-meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 16px; padding: 12px; background: var(--tms-surface-subtle); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-card); }
+.tms-shell .cs-meta,
+.tms-portal .cs-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tms-shell .cs-meta-label,
+.tms-portal .cs-meta-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tms-muted); }
+.tms-shell .cs-meta-value,
+.tms-portal .cs-meta-value { font-size: 14px; color: var(--tms-text); overflow-wrap: anywhere; }
+
+.tms-shell .cs-summary,
+.tms-portal .cs-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; padding: 12px 14px; background: var(--tms-card); border: 1px solid var(--tms-border); border-left: 4px solid var(--tms-primary); border-radius: var(--tms-radius-card); box-shadow: var(--tms-shadow); }
+.tms-shell .cs-summary-cell,
+.tms-portal .cs-summary-cell { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.tms-shell .cs-summary-rate,
+.tms-portal .cs-summary-rate { font-size: 22px; color: var(--tms-text); font-variant-numeric: tabular-nums; }
+.tms-shell .cs-summary-count,
+.tms-portal .cs-summary-count { font-size: 22px; color: var(--tms-text); }
+
+.tms-shell .cs-channel,
+.tms-portal .cs-channel { background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius-card); overflow: hidden; }
+.tms-shell .cs-channel-voice,
+.tms-portal .cs-channel-voice { border-top: 3px solid var(--tms-badge-turquoise); }
+.tms-shell .cs-channel-email,
+.tms-portal .cs-channel-email { border-top: 3px solid var(--tms-badge-purple); }
+.tms-shell .cs-channel-head,
+.tms-portal .cs-channel-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--tms-border); }
+.tms-shell .cs-channel-icon,
+.tms-portal .cs-channel-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--tms-radius-pill); }
+.tms-shell .cs-channel-voice .cs-channel-icon,
+.tms-portal .cs-channel-voice .cs-channel-icon { color: var(--tms-badge-turquoise); background: var(--tms-badge-turquoise-tint); }
+.tms-shell .cs-channel-email .cs-channel-icon,
+.tms-portal .cs-channel-email .cs-channel-icon { color: var(--tms-badge-purple); background: var(--tms-badge-purple-tint); }
+.tms-shell .cs-channel-titles,
+.tms-portal .cs-channel-titles { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+.tms-shell .cs-channel-title,
+.tms-portal .cs-channel-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--tms-text); }
+.tms-shell .cs-channel-sub,
+.tms-portal .cs-channel-sub { font-size: 12px; color: var(--tms-muted); }
+.tms-shell .cs-count-chip,
+.tms-portal .cs-count-chip { min-width: 24px; padding: 2px 9px; text-align: center; font-size: 13px; font-weight: 700; border-radius: var(--tms-radius-pill); color: var(--tms-count-ink); background: var(--tms-count-bg); }
+
+.tms-shell .cs-row-link,
+.tms-portal .cs-row-link { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 0; font: inherit; text-align: left; color: var(--tms-primary-ink); background: none; border: 0; cursor: pointer; }
+.tms-shell .cs-row-link:hover,
+.tms-portal .cs-row-link:hover { text-decoration: underline; }
+.tms-shell .cs-sub,
+.tms-portal .cs-sub { display: block; font-size: 12px; color: var(--tms-muted); }
+.tms-shell .cs-mono,
+.tms-portal .cs-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+.tms-shell .cs-num,
+.tms-portal .cs-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tms-shell .cs-agreed,
+.tms-portal .cs-agreed { color: var(--tms-badge-green); }
+
+.tms-shell .cs-trail,
+.tms-portal .cs-trail { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.tms-shell .cs-trail-step,
+.tms-portal .cs-trail-step { padding: 1px 8px; font-size: 12px; font-variant-numeric: tabular-nums; border-radius: var(--tms-radius-pill); border: 1px solid var(--tms-border); }
+.tms-shell .cs-trail-carrier,
+.tms-portal .cs-trail-carrier { color: var(--tms-text-2); background: var(--tms-surface-subtle); }
+.tms-shell .cs-trail-ai,
+.tms-portal .cs-trail-ai { color: var(--tms-badge-purple); background: var(--tms-badge-purple-tint); border-color: var(--tms-badge-purple); }
+
+.tms-shell .cs-quote-box,
+.tms-portal .cs-quote-box { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; background: var(--tms-badge-turquoise-tint); border-radius: var(--tms-radius-card); }
+.tms-shell .cs-quote-range,
+.tms-portal .cs-quote-range { font-size: 22px; font-weight: 700; color: var(--tms-badge-turquoise); font-variant-numeric: tabular-nums; }
+.tms-shell .cs-note p,
+.tms-portal .cs-note p { margin: 2px 0 0; font-size: 14px; color: var(--tms-text); }
+.tms-shell .cs-drawer-h,
+.tms-portal .cs-drawer-h { margin: 4px 0 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tms-muted); }
+
+.tms-shell .cs-transcript,
+.tms-portal .cs-transcript,
+.tms-shell .cs-thread,
+.tms-portal .cs-thread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.tms-shell .cs-bubble-row,
+.tms-portal .cs-bubble-row { display: flex; flex-direction: column; gap: 2px; max-width: 86%; }
+.tms-shell .cs-bubble-who,
+.tms-portal .cs-bubble-who { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: var(--tms-muted); }
+.tms-shell .cs-bubble,
+.tms-portal .cs-bubble { padding: 8px 12px; font-size: 14px; line-height: 1.4; border-radius: 12px; }
+.tms-shell .cs-bubble-aiden,
+.tms-portal .cs-bubble-aiden { align-self: flex-start; }
+.tms-shell .cs-bubble-aiden .cs-bubble,
+.tms-portal .cs-bubble-aiden .cs-bubble { color: var(--tms-text); background: var(--tms-badge-turquoise-tint); border-bottom-left-radius: 3px; }
+.tms-shell .cs-bubble-carrier,
+.tms-portal .cs-bubble-carrier { align-self: flex-end; align-items: flex-end; }
+.tms-shell .cs-bubble-carrier .cs-bubble,
+.tms-portal .cs-bubble-carrier .cs-bubble { color: var(--tms-text); background: var(--tms-surface-subtle); border: 1px solid var(--tms-border); border-bottom-right-radius: 3px; }
+
+.tms-shell .cs-mail,
+.tms-portal .cs-mail { padding: 10px 12px; background: var(--tms-card); border: 1px solid var(--tms-border); border-left-width: 4px; border-radius: var(--tms-radius-card); display: grid; gap: 2px; }
+.tms-shell .cs-mail-ai,
+.tms-portal .cs-mail-ai { border-left-color: var(--tms-badge-purple); background: var(--tms-badge-purple-tint); }
+.tms-shell .cs-mail-carrier,
+.tms-portal .cs-mail-carrier { border-left-color: var(--tms-badge-gray); }
+.tms-shell .cs-mail-head,
+.tms-portal .cs-mail-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.tms-shell .cs-mail-who,
+.tms-portal .cs-mail-who { font-weight: 600; color: var(--tms-text); }
+.tms-shell .cs-mail-time,
+.tms-portal .cs-mail-time,
+.tms-shell .cs-mail-addr,
+.tms-portal .cs-mail-addr { font-size: 12px; color: var(--tms-muted); }
+.tms-shell .cs-mail-subject,
+.tms-portal .cs-mail-subject { font-size: 13px; font-weight: 600; color: var(--tms-text-2); }
+.tms-shell .cs-mail-body,
+.tms-portal .cs-mail-body { margin: 4px 0; font-size: 14px; color: var(--tms-text); }
+.tms-shell .cs-mail-rate,
+.tms-portal .cs-mail-rate { justify-self: start; padding: 2px 10px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--tms-badge-orange); background: var(--tms-badge-orange-tint); border: 1px solid var(--tms-badge-orange); border-radius: var(--tms-radius-pill); }
+
+/* Demo loads section on the Carrier Sales page */
+.tms-shell .cs-demo-section { margin: 8px 12px; padding: 8px 12px; display: grid; gap: 8px; background: var(--tms-surface-subtle); border: 1px dashed var(--tms-badge-orange); border-radius: var(--tms-radius-card); }
+.tms-shell .cs-demo-section-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tms-shell .cs-demo-section-note { font-size: 12px; color: var(--tms-muted); }
+.tms-shell .cs-demo-list { display: grid; gap: 6px; }
+.tms-shell .cs-demo-row { display: grid; grid-template-columns: auto minmax(90px, 0.6fr) minmax(160px, 1.4fr) auto auto auto; gap: 12px; align-items: center; padding: 8px 10px; font: inherit; text-align: left; color: var(--tms-text); background: var(--tms-card); border: 1px solid var(--tms-border); border-radius: var(--tms-radius); cursor: pointer; }
+.tms-shell .cs-demo-row:hover { background: var(--tms-surface-hover); }
+.tms-shell .cs-demo-chips { display: inline-flex; gap: 6px; }
+.tms-shell .cs-demo-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 8px; border-radius: var(--tms-radius-pill); }
+.tms-shell .cs-demo-chip-voice { color: var(--tms-badge-turquoise); background: var(--tms-badge-turquoise-tint); }
+.tms-shell .cs-demo-chip-email { color: var(--tms-badge-purple); background: var(--tms-badge-purple-tint); }
+@media (max-width: 720px) { .tms-shell .cs-demo-row { grid-template-columns: 1fr 1fr; } }
