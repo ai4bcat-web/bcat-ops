@@ -350,7 +350,7 @@ describe('ShipmentsBoard', () => {
     const csv = await blob.text()
     expect(csv).toContain('Status')
     expect(csv).toContain('PRO #')
-    expect(csv).toContain('Customer Reference Number')
+    expect(csv).toContain('Customer Ref #')
     expect(csv).toContain('PO-123')
   })
 
@@ -799,14 +799,17 @@ describe('ShipmentsBoard', () => {
   })
 
   describe('dense grid', () => {
-    const pros = () => [...document.querySelectorAll('tbody tr[data-tone]')].map((tr) => tr.querySelectorAll('td')[1]?.textContent)
+    const pros = () => {
+      const at = [...document.querySelectorAll('thead th')].findIndex((th) => th.textContent === 'PRO #')
+      return [...document.querySelectorAll('tbody tr[data-tone]')].map((tr) => tr.querySelectorAll('td')[at]?.textContent)
+    }
 
-    it('opens with the PRO as the sticky first column, no side panel and the summary collapsed', async () => {
+    it('opens with Status, RC, POD, PRO # and Customer Ref # fixed on the left, no side panel and the summary collapsed', async () => {
       renderBoard('/tms/shipments', [row('S001')])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-      const first = document.querySelectorAll('thead th')[1]
-      expect(first).toHaveTextContent('PRO #')
-      expect(first).toHaveClass('tms-dg-sticky')
+      const heads = [...document.querySelectorAll('thead th')].slice(1, 6)
+      expect(heads.map((h) => h.textContent)).toEqual(['Status', 'RC', 'POD', 'PRO #', 'Customer Ref #'])
+      expect(heads[0]).toHaveClass('tms-dg-sticky')
       expect(screen.queryByText('Statuses')).toBeNull()
       expect(screen.queryByRole('region', { name: 'Summary' })).toBeNull()
       fireEvent.click(screen.getByRole('button', { name: /Summary/ }))
@@ -832,8 +835,8 @@ describe('ShipmentsBoard', () => {
       saveFullColumnLayout()
       renderBoard('/tms/shipments', [row('S001', { customerReference: 'PO-100' }), row('S002', { customerReference: 'PO-200' })])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-      fireEvent.click(screen.getByRole('button', { name: 'Filter Customer Reference Number' }))
-      fireEvent.change(screen.getByRole('textbox', { name: 'Filter Customer Reference Number' }), { target: { value: 'PO-2' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Filter Customer Ref #' }))
+      fireEvent.change(screen.getByRole('textbox', { name: 'Filter Customer Ref #' }), { target: { value: 'PO-2' } })
       expect(pros()).toEqual(['S002'])
     })
 
@@ -1016,7 +1019,7 @@ describe('ShipmentsBoard team column layout', () => {
     renderBoard('/tms/shipments', [row('S001')])
     await screen.findByText('S001')
     expect(headers().join('|')).toContain('Destination')
-    expect(headers().join('|')).toContain('Origin')
+    expect(headers().join('|')).toContain('Customer Ref #')
   })
 
   it('a non-admin gets no layout editing at all', async () => {

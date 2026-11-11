@@ -818,7 +818,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'delivery', label: 'Delivery', group: 'Computed', value: deliveryText, width: 170 },
   { key: 'proNumber', label: 'PRO #', group: 'Shipment', value: (r) => r.number ?? '', sortKey: 'number', width: 120 },
   { key: 'equip', label: 'Equip', group: 'Order', value: (r) => r.equipmentType ?? '', width: 100 },
-  { key: 'customerReference', label: 'Customer Reference Number', group: 'Order', value: (r) => r.customerReference ?? '', width: 180 },
+  { key: 'customerReference', label: 'Customer Ref #', group: 'Order', value: (r) => r.customerReference ?? '', width: 180 },
   { key: 'description', label: 'Description', group: 'Order', value: (r) => r.commodity ?? '', width: 180 },
   { key: 'revenueType', label: 'Revenue Type', group: 'Shipment', value: (r) => divisionLabel(r), sortKey: 'division', width: 160 },
   { key: 'salesRep', label: 'Sales Rep', group: 'Shipment', // The person's name only: while the staff directory is still loading (or when no profile claims the id) the cell is empty, never the raw id.
@@ -1099,25 +1099,23 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     width: 110,
   },
   { key: 'daysInStatus', label: 'Days In Status', group: 'Computed', value: daysInStatusOf, width: 120 },
-  { key: 'podStatus', label: 'POD', group: 'Computed', value: (r) => POD_STATUS_TEXT[podStatusOf(r)], width: 56 },
+  { key: 'podStatus', label: 'POD Status', group: 'Computed', value: (r) => POD_STATUS_TEXT[podStatusOf(r)], width: 56 },
   { key: 'docsNeededCount', label: 'Docs Needed', group: 'Computed', value: (r) => (r.docsMissing == null ? '' : String(r.docsMissing.length)), width: 110 },
   {
     key: 'podPresent',
-    label: 'POD Present',
+    // Ryne 2026-11-11: just "POD", with a Y when the POD is in and blank when it is not (or not known yet).
+    label: 'POD',
     group: 'Computed',
-    value: (r) => (r.docsMissing == null ? '' : r.docsMissing.includes('POD') ? 'No' : 'Yes'),
-    width: 110,
+    value: (r) => (r.docsMissing != null && !r.docsMissing.includes('POD') ? 'Y' : ''),
+    width: 56,
   },
   {
     key: 'rateConPresent',
-    label: 'Rate Con Present',
+    // Ryne 2026-11-11: "RC", a Y when the rate confirmation is on file or signed and blank otherwise, fixed beside POD.
+    label: 'RC',
     group: 'Computed',
-    value: (r) => {
-      if (r.rateConSignedAt || r.rateConStatus === 'SIGNED' || r.rateConOnFile === true) return 'Yes'
-      if (r.rateConStatus != null || r.rateConOnFile != null) return 'No'
-      return ''
-    },
-    width: 130,
+    value: (r) => (r.rateConSignedAt || r.rateConStatus === 'SIGNED' || r.rateConOnFile === true ? 'Y' : ''),
+    width: 56,
   },
   { key: 'postedBoards', label: 'Posted Boards', group: 'Computed', value: (r) => (r.datPostedAt ? 'DAT' : ''), width: 120 },
   { key: 'nextEvent', label: 'Next Event', group: 'Computed', value: nextEventOf, width: 160 },
