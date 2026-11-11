@@ -711,7 +711,7 @@ describe('driverNamesOf', () => {
 describe('division label', () => {
   it('reads a division code as words: CAR_SHIPPING is CAR SHIPPING', () => {
     expect(divisionLabel(row('d1', { revDivision: 'CAR_SHIPPING' }))).toBe('CAR SHIPPING')
-    expect(divisionLabel(row('d2', { revDivision: 'ASSETS', revSubdivision: 'OWNER_OPERATOR' }))).toBe('ASSETS (OWNER OPERATOR)')
+    expect(divisionLabel(row('d2', { revDivision: 'ASSETS', revSubdivision: 'OWNER_OPERATOR' }))).toBe('Assets Owner Operator')
     expect(divisionLabel(row('d3', { revDivision: 'BROKERAGE' }))).toBe('BROKERAGE')
   })
 })

@@ -1925,6 +1925,32 @@ describe('ownership tagging', () => {
     expect(tags.load).toMatchObject({ revDivision: 'CAR_SHIPPING', revTagSource: 'RULE' })
   })
 
+  it('an intake-held ASSETS tag follows the driver: Local, Owner Operator, Box Truck, and back to plain Assets', async () => {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SET_REV_TAG', { shipmentId: ids.shipmentId, divisionCode: 'ASSETS', source: 'INTAKE' }, ADMIN)
+    expect(tagsOf(ids.shipmentId, ids.loadId).shipment).toMatchObject({ revDivision: 'ASSETS', revSubdivision: null, revTagSource: 'INTAKE' })
+
+    seedDriver('drv-local', { fleetGroup: 'LOCAL' })
+    seedDriver('drv-box', { fleetGroup: 'BOX_TRUCK' })
+    seedDriver('drv-oo', { fleetGroup: 'OWNER_OPERATOR' })
+    for (const [driverId, sub] of [['drv-local', 'LOCAL'], ['drv-oo', 'OWNER_OPERATOR'], ['drv-box', 'BOX_TRUCK']] as const) {
+      await call('ASSIGN_ASSET', { loadId: ids.loadId, driverId })
+      const tags = tagsOf(ids.shipmentId, ids.loadId)
+      expect(tags.shipment).toMatchObject({ revDivision: 'ASSETS', revSubdivision: sub, revTagSource: 'INTAKE' })
+      expect(tags.load).toMatchObject({ revDivision: 'ASSETS', revSubdivision: sub, revTagSource: 'INTAKE' })
+    }
+  })
+
+  it('a hand-picked subdivision is not overwritten by a driver change', async () => {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SET_REV_TAG', { shipmentId: ids.shipmentId, divisionCode: 'ASSETS', subdivisionCode: 'BOX_TRUCK', source: 'INTAKE' }, ADMIN)
+    seedDriver('drv-local', { fleetGroup: 'LOCAL' })
+    await call('ASSIGN_ASSET', { loadId: ids.loadId, driverId: 'drv-local' })
+    expect(tagsOf(ids.shipmentId, ids.loadId).shipment).toMatchObject({ revDivision: 'ASSETS', revSubdivision: 'BOX_TRUCK', revTagSource: 'HAND' })
+  })
+
   it('keeps a hand tag through a carrier change, and CLEAR_REV_TAG gives the rules back', async () => {
     const ids = await createDraft()
     await saveForm(ids.shipmentId)

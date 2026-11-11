@@ -4098,7 +4098,8 @@ export interface ProfitReport {
  */
 
 /** A hand tag beats every rule and survives a carrier, driver or customer change. */
-export type RevTagSource = 'HAND' | 'RULE'
+/** INTAKE: the division an intake load arrived under (ivanloads@ -> ASSETS). The division is held; the subdivision still follows the driver. */
+export type RevTagSource = 'HAND' | 'RULE' | 'INTAKE'
 
 /** Which party owns each part of a division's work. Null = inherit from the parent. */
 export interface OwnershipOwners {

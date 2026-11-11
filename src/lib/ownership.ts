@@ -315,6 +315,20 @@ export function resolveDivision(
   return { revDivision: null, revSubdivision: null, ruleId: null }
 }
 
+/**
+ * A shipment that arrived through an intake address keeps its division (ivanloads@ is ASSETS) and only
+ * its subdivision follows the driver: Local, Owner Operator or Box Truck, by the same rules as ever.
+ * A resolution that lands in another division (no driver yet, an outside carrier) leaves no subdivision.
+ */
+export function holdDivision(held: string, resolved: Resolution): Resolution {
+  const same = resolved.revDivision === held
+  return {
+    revDivision: held,
+    revSubdivision: same ? resolved.revSubdivision : null,
+    ruleId: same ? resolved.ruleId : null,
+  }
+}
+
 /** What `shipmentContextFor` needs off each record. Every part is optional. */
 export interface ShipmentContextInput {
   shipment?: { customerId?: string | null; mode?: string | null; source?: string | null } | null
