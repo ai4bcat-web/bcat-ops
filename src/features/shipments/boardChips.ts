@@ -7,7 +7,7 @@
 import { checkCallState } from '@/lib/checkCalls'
 import { needsBillingReview, REVIEW_BILLING_LABEL } from '@/lib/reviewBilling'
 import { reviewFactsOfRow } from './batchReview'
-import type { ShipmentRow } from './shipmentViews'
+import { docsMissingOf, type ShipmentRow } from './shipmentViews'
 
 export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'reviewBilling' | 'checkCallOverdue'
 
@@ -45,7 +45,7 @@ export function matchesFlag(row: ShipmentRow, flag: BoardFlag, nowMs: number): b
     case 'missingReference': return !reviewFactsOfRow(row).referenceNumber
     case 'missingSalesRep': return needsSalesRep(row)
     case 'missingRevDivision': return !row.revDivision
-    case 'docsMissing': return (row.docsMissing?.length ?? 0) > 0
+    case 'docsMissing': return docsMissingOf(row).length > 0
     case 'reviewBilling': return needsBillingReview(row)
     case 'checkCallOverdue': return checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, nowMs) === 'OVERDUE'
   }

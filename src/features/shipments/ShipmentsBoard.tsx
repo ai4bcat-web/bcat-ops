@@ -107,6 +107,7 @@ import {
   toCsv,
   isDemoShipment,
   podStatusOf,
+  docsMissingOf,
   type ShipmentRow,
 } from './shipmentViews'
 import {
@@ -218,8 +219,9 @@ function exceptionIcons(row: ShipmentRow): Array<{ icon: ReactNode; meaning: str
       meaning: state === 'OVERDUE' ? 'Overdue check call' : 'Open check call',
     })
   }
-  if (row.docsMissing != null && row.docsMissing.length > 0) {
-    out.push({ icon: <FileX size={14} />, meaning: `Missing documents: ${row.docsMissing.join(', ')}` })
+  const missingDocs = docsMissingOf(row)
+  if (missingDocs.length > 0) {
+    out.push({ icon: <FileX size={14} />, meaning: `Missing documents: ${missingDocs.join(', ')}` })
   }
   if (isCustomerUnresolved(row)) {
     out.push({ icon: <UserX size={14} />, meaning: 'Customer not linked' })
@@ -1039,7 +1041,7 @@ function BoardPane({
       if (status === 'OPEN') open += 1
       else if (status === 'DISPATCHED' || status === 'ARRIVED' || status === 'DEPARTED') moving += 1
       else if (status === 'DELIVERED') delivered += 1
-      if ((r.docsMissing?.length ?? 0) > 0) docs += 1
+      if (docsMissingOf(r).length > 0) docs += 1
       revenue += r.revenueCents ?? 0
       profit += r.profitCents ?? 0
     }

@@ -24,6 +24,7 @@ import {
   needsDriver,
   stopProgressOf,
   podStatusOf,
+  docsMissingOf,
   toCsv,
   toViewRow,
   visibleColumns,
@@ -519,6 +520,30 @@ describe('POD column', () => {
   it('prints the words in the column', () => {
     expect(visibleColumns(['podStatus'])[0]!.value(r({ docsMissing: ['POD'] }))).toBe('No POD')
     expect(visibleColumns(['podStatus'])[0]!.value(r({ revDivision: 'CAR_SHIPPING' }))).toBe('NA')
+  })
+})
+
+describe('docsMissingOf: a delivered shipment needs a POD and an RC', () => {
+  const d = (over: Record<string, unknown>) => ({ status: 'DELIVERED', revDivision: 'BROKERAGE', docsMissing: [], rateConOnFile: true, ...over }) as never
+  it('is empty for a delivered shipment with both', () => {
+    expect(docsMissingOf(d({}))).toEqual([])
+  })
+  it('flags a missing POD, a missing RC, or both, once delivered', () => {
+    expect(docsMissingOf(d({ docsMissing: ['POD'] }))).toEqual(['POD'])
+    expect(docsMissingOf(d({ rateConOnFile: false }))).toEqual(['RC'])
+    expect(docsMissingOf(d({ docsMissing: ['POD'], rateConOnFile: false }))).toEqual(['POD', 'RC'])
+  })
+  it('counts a delivered shipment whose document check never ran as missing its POD', () => {
+    expect(docsMissingOf(d({ docsMissing: null }))).toEqual(['POD'])
+  })
+  it('does not add POD or RC before delivery, only what the gate already lists', () => {
+    expect(docsMissingOf(d({ status: 'IN_TRANSIT', docsMissing: [], rateConOnFile: false }))).toEqual([])
+    expect(docsMissingOf(d({ status: 'IN_TRANSIT', docsMissing: ['BOL'] }))).toEqual(['BOL'])
+  })
+  it('leaves out car shipping, a signed-off override, and the carrier RC on Ivan Cartage own fleet', () => {
+    expect(docsMissingOf(d({ revDivision: 'CAR_SHIPPING', docsMissing: ['POD'], rateConOnFile: false }))).toEqual(['POD'])
+    expect(docsMissingOf(d({ docsOverrideAt: '2026-11-10T00:00:00Z', docsMissing: null, rateConOnFile: false }))).toEqual([])
+    expect(docsMissingOf(d({ revDivision: 'ASSETS', rateConOnFile: false }))).toEqual([])
   })
 })
 
