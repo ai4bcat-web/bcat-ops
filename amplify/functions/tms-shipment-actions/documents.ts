@@ -22,6 +22,7 @@ import { marshall } from '@aws-sdk/util-dynamodb'
 import { HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'crypto'
+import { convertStoredPodImage, isPodImage, pdfKeyFor } from '../_shared/podPdf'
 
 import {
   getById,
@@ -401,7 +402,9 @@ export async function commitDocument(deps: DocumentDeps, input: Row, caller: Cal
   const bundle = await liveBundle(deps, shipmentId)
   // A client that retries the commit after a dropped response must not end up
   // with the same file listed twice.
-  const already = bundle.documents.find((doc) => doc.s3Key === s3Key)
+  // A POD photo is filed as the PDF made from it (below), so a retried commit finds it under that key.
+  const podPdfKey = type === 'POD' && isPodImage(contentType) ? pdfKeyFor(s3Key) : null
+  const already = bundle.documents.find((doc) => doc.s3Key === s3Key || (podPdfKey != null && doc.s3Key === podPdfKey))
   if (already) return { bundle, document: already }
 
   const orderId = optionalString(input.orderId, 100)
@@ -430,6 +433,10 @@ export async function commitDocument(deps: DocumentDeps, input: Row, caller: Cal
     throw new Error(`Document content type mismatch: expected ${contentType}, found ${head.ContentType ?? 'none'}`)
   }
 
+  // Proof of delivery is always a PDF: a photo or screenshot is wrapped on a letter page. The original object stays in S3; a failed
+  // conversion files the original as it came.
+  const converted = type === 'POD' ? await convertStoredPodImage(deps.s3, deps.bucket, { key: s3Key, contentType, name }) : null
+
   const now = nowIso()
   const row: Row = {
     id: documentId,
@@ -440,10 +447,10 @@ export async function commitDocument(deps: DocumentDeps, input: Row, caller: Cal
     loadCarrierId,
     stopId,
     type,
-    name,
-    s3Key,
-    contentType,
-    sizeBytes,
+    name: converted?.name ?? name,
+    s3Key: converted?.key ?? s3Key,
+    contentType: converted?.contentType ?? contentType,
+    sizeBytes: converted?.sizeBytes ?? sizeBytes,
     source: 'UPLOAD',
     audience,
     status: 'ACTIVE',

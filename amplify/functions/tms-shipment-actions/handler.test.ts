@@ -4416,6 +4416,35 @@ describe('documents', () => {
     expect(table(TABLES.shipmentDocument).size).toBe(1)
   })
 
+  it('files a POD photo as a PDF made from it, keeps the original in the bucket, and finds it again on a retried commit', async () => {
+    const { Jimp } = await import('jimp')
+    const photo = new Uint8Array(await new Jimp({ width: 128, height: 64, color: 0x336699ff }).getBuffer('image/jpeg'))
+    const ids = await delivered()
+    const prepared = await prepare(ids.shipmentId, { name: 'pod photo.jpg', contentType: 'image/jpeg', sizeBytes: photo.length })
+    putS3Object(prepared.s3Key, { ContentLength: photo.length, ContentType: 'image/jpeg', Bytes: photo })
+    const body = { name: 'pod photo.jpg', contentType: 'image/jpeg', sizeBytes: photo.length }
+
+    const first = (await commit(ids, prepared, body)) as { document: Row }
+    expect(first.document).toMatchObject({ type: 'POD', contentType: 'application/pdf', name: 'pod photo.pdf' })
+    expect(String(first.document.s3Key)).toMatch(/\.pdf$/)
+    expect(s3Objects.get(String(first.document.s3Key))?.ContentType).toBe('application/pdf')
+    expect(s3Objects.has(prepared.s3Key)).toBe(true)
+
+    const second = (await commit(ids, { ...prepared, documentId: 'sdoc-retry' }, body)) as { document: Row }
+    expect(second.document.id).toBe(first.document.id)
+    expect(table(TABLES.shipmentDocument).size).toBe(1)
+  })
+
+  it('keeps a non-POD photo as the image it is', async () => {
+    const { Jimp } = await import('jimp')
+    const photo = new Uint8Array(await new Jimp({ width: 128, height: 64, color: 0x336699ff }).getBuffer('image/jpeg'))
+    const ids = await delivered()
+    const prepared = await prepare(ids.shipmentId, { type: 'OTHER', name: 'dock.jpg', contentType: 'image/jpeg', sizeBytes: photo.length })
+    putS3Object(prepared.s3Key, { ContentLength: photo.length, ContentType: 'image/jpeg', Bytes: photo })
+    const res = (await commit(ids, prepared, { type: 'OTHER', name: 'dock.jpg', contentType: 'image/jpeg', sizeBytes: photo.length })) as { document: Row }
+    expect(res.document).toMatchObject({ contentType: 'image/jpeg', name: 'dock.jpg' })
+  })
+
   it('re-caches what the order still needs in the same write', async () => {
     seedCustomer({ requiredDocsForInvoice: ['POD', 'BOL'] })
     const ids = await delivered()
