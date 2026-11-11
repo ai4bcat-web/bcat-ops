@@ -48,7 +48,7 @@ afterEach(() => {
 const bodyRows = () => document.querySelectorAll('tbody tr:not(.tms-dg-spacer)')
 
 describe('DenseGrid', () => {
-  it('widens a column whose rendered cells clip their content, never one the person sized', async () => {
+  it('widens a column whose rendered cells clip their content, even over a saved width, but never one the person dragged this session', async () => {
     const proto = HTMLElement.prototype
     const orig = Object.getOwnPropertyDescriptor(proto, 'scrollWidth')
     // jsdom never lays out: pretend the City cells need 480px and every other cell fits.
@@ -59,10 +59,20 @@ describe('DenseGrid', () => {
       const colWidth = (i: number) => parseInt((document.querySelectorAll('colgroup col')[i] as HTMLElement).style.width, 10)
       expect(colWidth(1)).toBe(482)
       expect(colWidth(0)).toBeLessThan(200)
-      // A width the person dragged wins over the measurement.
+      // A width merely SAVED (from an earlier visit or a template) cannot make a column clip what it shows.
       rerender(<DenseGrid<Row> {...props} userWidths={{ city: 150 }} />)
       await act(async () => { await new Promise((r) => { requestAnimationFrame(() => r(null)) }) })
-      expect(colWidth(1)).toBe(150)
+      expect(colWidth(1)).toBe(482)
+      // A width the person drags in this session wins over the measurement.
+      const handle = document.querySelectorAll('.tms-dg-resize')[1] as HTMLElement
+      await act(async () => {
+        fireEvent.mouseDown(handle, { clientX: 500 })
+        fireEvent.mouseMove(document, { clientX: 300 })
+        fireEvent.mouseUp(document)
+      })
+      rerender(<DenseGrid<Row> {...props} userWidths={{ city: 282 }} />)
+      await act(async () => { await new Promise((r) => { requestAnimationFrame(() => r(null)) }) })
+      expect(colWidth(1)).toBe(282)
     } finally {
       if (orig) Object.defineProperty(proto, 'scrollWidth', orig)
       else delete (proto as unknown as Record<string, unknown>).scrollWidth
