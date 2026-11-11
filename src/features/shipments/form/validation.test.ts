@@ -22,8 +22,8 @@ describe('required fields by action', () => {
     const labels = new Set(issues.map((i) => `${i.section}:${i.label}`))
     expect(labels).toContain('pickup:Name')
     expect(labels).toContain('pickup:Ready')
-    expect(issues).toHaveLength(7)
-    expect(issueSummary(issues)).toMatch(/^7 required fields missing — /)
+    expect(issues).toHaveLength(8)
+    expect(issueSummary(issues)).toMatch(/^8 required fields missing — /)
   })
 
   it('a filled form passes Create; LTL does not need equipment', () => {

@@ -20,7 +20,6 @@ import { formatPhone } from '@/lib/utils'
 import type { CustomerRecord } from '@/types/tms'
 import { LABEL, labelFor } from '../labels'
 import { applyCustomerDefaults, isLocked, lockReason } from '../model'
-import { poReferenceRequired } from '../customerRef'
 import { ctl, disabledState, issueFor } from '../sections/fieldUtil'
 import { FieldGrid } from '../fieldGrid'
 import { LField } from '../sections/formControls'
@@ -128,15 +127,14 @@ export function CustomerPicker({ values, update, ctx, form }: CardProps) {
   )
 }
 
-/** The strip's Customer ref (PO): the same value as `customer.refNo` / REF_PO, shown in the header only. Green when this customer requires a PO. */
+/** The strip's Customer ref (PO): the same value as `customer.refNo` / REF_PO, shown in the header only. Always required at Create. */
 export function CustomerRef({ values, update, ctx }: CardProps) {
   const onChange = useMemo(() => sliceOf(update, 'customer'), [update])
   const refLocked = disabledState(ctx, 'references')
-  const required = poReferenceRequired(ctx.customer, ctx.settings)
   return (
     <div className="tms-ship-hdr-ref-wrap" data-testid="hdr-customer-ref">
       <FieldGrid>
-      <LField span={12} def={LABEL.customer.refNo} required={required} hint={LABEL.customer.refNo.help} error={issueFor(ctx, 'customer', LABEL.customer.refNo.testId)}>
+      <LField span={12} def={LABEL.customer.refNo} required hint={LABEL.customer.refNo.help} error={issueFor(ctx, 'customer', LABEL.customer.refNo.testId)}>
         <TmsInput {...ctl(LABEL.customer.refNo)} placeholder="PO #" title={refLocked.title ?? LABEL.customer.refNo.help} value={values.customer.refNo} disabled={refLocked.disabled} onChange={(e) => onChange({ refNo: e.target.value })} />
       </LField>
       </FieldGrid>

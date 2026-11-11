@@ -17,7 +17,6 @@ import { LABEL, SECTION_TITLE } from './labels'
 import { MAX } from './constants'
 import { carrierLinehaulLine, financialPreview, firstPickupIndex, lastDeliveryIndex } from './mapping'
 import { isShipmentTypeKey } from '@/lib/shipmentTypes'
-import { poReferenceRequired } from './customerRef'
 import { carrierSlotsOf, parseInteger, type CarrierSlot, type FormStop, type ShipmentFormValues } from './model'
 import type { FormIssue, SectionKey } from './sectionProps'
 
@@ -235,9 +234,9 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
     }
   }
 
-  // A customer whose review requirements demand a PO (Step AP) needs it before Create, like a required reference.
-  if (strictRed && o.customer && poReferenceRequired(o.customer, o.settings) && empty(values.customer.refNo) && !issues.some((i) => i.id === 'customer:ref:po')) {
-    push('customer', 'ref:po', LABEL.customer.refNo.testId, LABEL.customer.refNo.text, 'This customer requires a PO / reference number.')
+  // Every shipment needs its customer ref (PO) before Create, whatever the customer's own settings say. A draft save skips it.
+  if (strictRed && empty(values.customer.refNo) && !issues.some((i) => i.id === 'customer:ref:po')) {
+    push('customer', 'ref:po', LABEL.customer.refNo.testId, LABEL.customer.refNo.text, 'Enter the customer ref (PO / reference number).')
   }
 
   // Truckload only for Submit.
