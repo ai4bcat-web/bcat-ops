@@ -3,7 +3,7 @@ import { needsLine } from './flowDefaults'
 import { isDemoText } from './demoFlow'
 import {
   buildIntakeDraft, mergeIntakeFields, canMarkReviewed, canMoveToActive, correctedKeys, customerDefaultsOf, emptyIntakeFields, fieldStatusOf, intakeCounts,
-  intakeMissing, intakeRequired, isDemoIntake, patchIntakeFields, toCreateShipmentInput, withCustomerDefaults,
+  ensureRequiredStops, INTAKE_ALWAYS_REQUIRED, intakeMissing, intakeRequired, isDemoIntake, patchIntakeFields, toCreateShipmentInput, withCustomerDefaults,
 } from './intakeLoad'
 import type { TenderPrefill } from './intakeTender'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta } from '../types/intake'
@@ -27,7 +27,8 @@ const draft = (over: Partial<Parameters<typeof buildIntakeDraft>[0]> = {}) => bu
 function readyRow(): Pick<IntakeLoadRecord, 'fields' | 'meta' | 'confirmed' | 'reviewedBy' | 'reviewedAt'> {
   const d = draft({ customer: { defaultSalesRepId: 'rep1', defaultBillToId: 'bt1' } })
   return {
-    fields: { ...d.fields, customerRateCents: 150000, deliveryNumber: 'D1' },
+    // Every pickup / delivery carries a street, a date and a time: they are mandatory.
+    fields: { ...d.fields, customerRateCents: 150000, deliveryNumber: 'D1', stops: d.fields.stops.map((s, i) => ({ ...s, street: s.street ?? `${i + 1} Dock Rd`, time: s.time ?? '08:00', date: s.date ?? '2026-11-10' })) },
     meta: d.meta,
     confirmed: [],
     reviewedBy: 'rev@bcatcorp.com',
@@ -126,11 +127,48 @@ describe('fieldStatusOf', () => {
 describe('intakeRequired', () => {
   it('is defaults ∪ customer, drops carrierRep/bolNumber into deferred', () => {
     const r = intakeRequired({ defaultRequiredLoadFields: ['billTo'] }, { requiredLoadFields: ['carrierRep', 'bolNumber', 'weight'] })
-    expect(r.gated).toEqual(['billTo', 'weight'])
+    expect(r.gated).toEqual(['billTo', 'weight', ...INTAKE_ALWAYS_REQUIRED])
     expect(r.deferred).toEqual(['bolNumber', 'carrierRep'])
+  })
+  it('always gates the pickup / delivery address, appointment and numbers, even with no required-field list at all', () => {
+    expect(intakeRequired(null, null).gated).toEqual(expect.arrayContaining([...INTAKE_ALWAYS_REQUIRED]))
   })
   it('unknown stale keys are deferred, not gating', () => {
     expect(intakeRequired(null, { requiredLoadFields: ['nonsense'] }).deferred).toContain('nonsense')
+  })
+})
+
+describe('mandatory pickup and delivery', () => {
+  const base = () => readyRow()
+  const withStops = (patch: Partial<IntakeFields['stops'][number]>, index = 0) => {
+    const b = base()
+    return canMoveToActive({ ...b, fields: { ...b.fields, stops: b.fields.stops.map((s, i) => (i === index ? { ...s, ...patch } : s)) } }, ctx)
+  }
+  it('every stop needs a street, a date and a time', () => {
+    expect(withStops({ street: null }).problems).toContain('Stop 1 needs a street address')
+    expect(withStops({ date: null }).problems).toContain('Stop 1 needs a pickup date')
+    expect(withStops({ time: null }, 1).problems).toContain('Stop 2 needs a delivery time')
+  })
+  it('a pickup number and a delivery number are required', () => {
+    const b = base()
+    expect(canMoveToActive({ ...b, fields: { ...b.fields, pickupNumber: null } }, ctx).missing).toContain('Pickup number')
+    expect(canMoveToActive({ ...b, fields: { ...b.fields, deliveryNumber: null } }, ctx).missing).toContain('Delivery number')
+  })
+  it('ensureRequiredStops adds an empty pickup and delivery only when a kind is absent, and never moves an existing stop', () => {
+    const empty = ensureRequiredStops(emptyIntakeFields())
+    expect(empty.stops.map((s) => s.type)).toEqual(['pickup', 'delivery'])
+    const onlyDelivery = { ...emptyIntakeFields(), stops: [{ ...empty.stops[1]!, city: 'Dallas' }] }
+    const out = ensureRequiredStops(onlyDelivery)
+    expect(out.stops.map((s) => s.type)).toEqual(['delivery', 'pickup'])
+    expect(out.stops[0]!.city).toBe('Dallas')
+    const full = readyRow().fields
+    expect(ensureRequiredStops(full)).toBe(full)
+  })
+  it('a driver pick is a reviewer edit that is saved on the draft', () => {
+    const b = base()
+    const out = patchIntakeFields({ fields: b.fields, meta: b.meta, confirmed: [] }, { driverId: 'drv1' }, { add: [], remove: [] })
+    expect(out.fields.driverId).toBe('drv1')
+    expect(out.meta.driverId).toEqual({ source: 'REVIEWER', confidence: 'high' })
   })
 })
 

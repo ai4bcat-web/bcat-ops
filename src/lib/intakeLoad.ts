@@ -42,7 +42,7 @@ export type IntakeStopKey = (typeof INTAKE_STOP_KEYS)[number]
 const SCALAR_KEYS = [
   'customerId', 'customerName', 'billToId', 'salesRepId', 'divisionCode',
   'reference', 'pickupNumber', 'deliveryNumber', 'shipmentType', 'equipmentType', 'commodity',
-  'weightLb', 'customerRateCents',
+  'weightLb', 'customerRateCents', 'driverId',
 ] as const
 type ScalarKey = (typeof SCALAR_KEYS)[number]
 
@@ -50,7 +50,7 @@ const SCALAR_LABELS: Record<ScalarKey, string> = {
   customerId: 'Customer', customerName: 'Customer name', billToId: 'Bill-to party', salesRepId: 'Sales rep',
   divisionCode: 'Revenue division', reference: 'Reference (PO / TMS ID)', pickupNumber: 'Pickup number',
   deliveryNumber: 'Delivery number', shipmentType: 'Shipment type', equipmentType: 'Equipment type', commodity: 'Commodity',
-  weightLb: 'Weight', customerRateCents: 'Customer rate',
+  weightLb: 'Weight', customerRateCents: 'Customer rate', driverId: 'Driver',
 }
 const STOP_LABELS: Record<IntakeStopKey, string> = {
   name: 'name', street: 'street', city: 'city', state: 'state', zip: 'zip', date: 'date', time: 'time', instructions: 'instructions',
@@ -67,8 +67,19 @@ export function emptyIntakeFields(): IntakeFields {
   return {
     customerId: null, customerName: null, billToId: null, salesRepId: null, divisionCode: null,
     reference: null, pickupNumber: null, deliveryNumber: null, shipmentType: null, equipmentType: null, commodity: null,
-    weightLb: null, customerRateCents: null, stops: [],
+    weightLb: null, customerRateCents: null, driverId: null, stops: [],
   }
+}
+
+/**
+ * The page always shows a pickup and a delivery (Ryne 2026-11-11): a draft with none of one kind gets an empty stop of that kind
+ * appended, so a reviewer fills it in instead of having to add it. Existing stops keep their index (provenance is keyed by it).
+ */
+export function ensureRequiredStops(fields: IntakeFields): IntakeFields {
+  const stops = fields.stops.map((s) => ({ ...s }))
+  if (!stops.some((s) => s.type === 'pickup')) stops.push(emptyStop('pickup'))
+  if (!stops.some((s) => s.type === 'delivery')) stops.push(emptyStop('delivery'))
+  return stops.length === fields.stops.length ? fields : { ...fields, stops }
 }
 
 function emptyStop(type: IntakeStop['type']): IntakeStop {
@@ -362,11 +373,14 @@ export function intakeSubject(fields: IntakeFields): RequiredFieldSubject {
 
 const CATALOG_KEYS = new Set(REQUIRED_FIELD_CATALOG.map((f) => f.key))
 
+/** Whatever the company's required-field list says, a load cannot become a shipment without these (Ryne 2026-11-11). */
+export const INTAKE_ALWAYS_REQUIRED: readonly string[] = ['pickupAddress', 'pickupAppt', 'deliveryAddress', 'deliveryAppt', 'pickupNumber', 'deliveryNumber']
+
 export function intakeRequired(settings: unknown, customer: unknown): { gated: string[]; deferred: string[] } {
-  const all = resolveRequiredFields(
+  const all = [...new Set([...resolveRequiredFields(
     settings as Parameters<typeof resolveRequiredFields>[0],
     customer as Parameters<typeof resolveRequiredFields>[1],
-  )
+  ), ...INTAKE_ALWAYS_REQUIRED])]
   const gated: string[] = []
   const deferred: string[] = []
   for (const key of all) {
@@ -390,10 +404,13 @@ export function intakeProblems(fields: IntakeFields, ctx: { customerActive: bool
   if (!fields.stops.some((s) => s.type === 'delivery')) out.push('Add at least one delivery stop')
   fields.stops.forEach((s, i) => {
     const n = i + 1
+    if (!present(s.street)) out.push(`Stop ${n} needs a street address`)
     if (!present(s.city)) out.push(`Stop ${n} needs a city`)
     if (!present(s.state) || !formatOk(`stops.${i}.state`, s.state)) out.push(`Stop ${n} needs a two-letter state`)
     if (present(s.zip) && !formatOk(`stops.${i}.zip`, s.zip)) out.push(`Stop ${n} zip must be 5 or 9 digits`)
-    if (present(s.date) && !formatOk(`stops.${i}.date`, s.date)) out.push(`Stop ${n} date must be a valid YYYY-MM-DD`)
+    if (!present(s.date)) out.push(`Stop ${n} needs a ${s.type === 'delivery' ? 'delivery' : 'pickup'} date`)
+    else if (!formatOk(`stops.${i}.date`, s.date)) out.push(`Stop ${n} date must be a valid YYYY-MM-DD`)
+    if (!present(s.time)) out.push(`Stop ${n} needs a ${s.type === 'delivery' ? 'delivery' : 'pickup'} time`)
     if (present(s.time) && !formatOk(`stops.${i}.time`, s.time)) out.push(`Stop ${n} time must be HH:mm`)
   })
   if (fields.weightLb != null && !(typeof fields.weightLb === 'number' && fields.weightLb >= 0)) out.push('Weight must be a number')

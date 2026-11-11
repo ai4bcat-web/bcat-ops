@@ -23,6 +23,7 @@ let audits: Array<{ type: string; id: string; action: string; changes: Row }>
 let createShipment: Mock
 let setRevTag: Mock
 let setSalesRep: Mock
+let assignAsset: Mock
 let customer: Row | null
 let divisionActive: boolean
 
@@ -57,6 +58,7 @@ function seedIntake(over: Row = {}): void {
   fields.divisionCode = 'BROKERAGE'
   fields.reference = 'PO-77'
   fields.pickupNumber = 'PU-9'
+  fields.deliveryNumber = 'DL-9'
   fields.equipmentType = 'Dry van'
   fields.commodity = 'Paper'
   fields.weightLb = 20000
@@ -64,8 +66,8 @@ function seedIntake(over: Row = {}): void {
   fields.salesRepId = 'rep-1'
   fields.billToId = 'bill-1'
   fields.stops = [
-    { type: 'pickup', name: 'Mill', street: null, city: 'Chicago', state: 'IL', zip: '60601', date: '2026-11-10', time: '08:00', instructions: null },
-    { type: 'delivery', name: 'DC', street: null, city: 'Dallas', state: 'TX', zip: '75201', date: '2026-11-11', time: '09:00', instructions: null },
+    { type: 'pickup', name: 'Mill', street: '1 Mill Rd', city: 'Chicago', state: 'IL', zip: '60601', date: '2026-11-10', time: '08:00', instructions: null },
+    { type: 'delivery', name: 'DC', street: '2 Dock Ave', city: 'Dallas', state: 'TX', zip: '75201', date: '2026-11-11', time: '09:00', instructions: null },
   ]
   rows(T.intakeLoad).set('il:r1', {
     id: 'il:r1',
@@ -105,7 +107,7 @@ const deps = (): IntakeDeps => ({
   writeAudit: async (type, id, action, _c, changes) => {
     audits.push({ type, id, action, changes })
   },
-  actions: { createShipment: createShipment as never, setRevTag: setRevTag as never, setSalesRep: setSalesRep as never },
+  actions: { createShipment: createShipment as never, setRevTag: setRevTag as never, setSalesRep: setSalesRep as never, assignAsset: assignAsset as never },
   now: () => new Date(clock).toISOString(),
 })
 
@@ -125,6 +127,7 @@ beforeEach(() => {
   })
   setRevTag = vi.fn(async () => ({}))
   setSalesRep = vi.fn(async () => ({}))
+  assignAsset = vi.fn(async () => ({}))
   attachFiles = vi.fn(async () => 1)
   seedIntake()
 })
@@ -325,7 +328,7 @@ describe('INTAKE_MOVE_TO_ACTIVE', () => {
     expect(setSalesRep).toHaveBeenCalledWith({ shipmentId: 'shp-1', repId: 'rep-1' }, caller)
     expect(rows(T.shipment).get('shp-1')).toMatchObject({ intakeLoadId: 'il:r1', intakeReviewedBy: 'reviewer@bcatcorp.com', intakeReviewedAt: REVIEWED.reviewedAt })
     const refs = rows(T.order).get('ord-1')!.references as Row[]
-    expect(refs.map((r) => [r.code, r.value])).toEqual([['PO', 'PO-77'], ['pickup', 'PU-9']])
+    expect(refs.map((r) => [r.code, r.value])).toEqual([['PO', 'PO-77'], ['pickup', 'PU-9'], ['delivery', 'DL-9']])
     expect(intake()).toMatchObject({ status: 'MOVED', shipmentId: 'shp-1', reviewedBy: 'reviewer@bcatcorp.com', reviewedAt: REVIEWED.reviewedAt })
     expect(audits.find((a) => a.type === 'INTAKE_LOAD')!.changes).toMatchObject({ movedBy: caller.email, reviewedBy: 'reviewer@bcatcorp.com' })
     expect(audits.map((a) => `${a.type}:${a.action}`).sort()).toEqual([
@@ -333,6 +336,32 @@ describe('INTAKE_MOVE_TO_ACTIVE', () => {
       'SHIPMENT:INTAKE_MOVE_TO_ACTIVE',
     ])
     expect(audits[0].changes.corrected).toEqual(['commodity'])
+  })
+
+  it('books the draft\'s own-fleet driver on the new load; no driver picked means no booking', async () => {
+    await run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })
+    expect(assignAsset).not.toHaveBeenCalled()
+  })
+
+  it('assigns the picked driver to the shipment\'s load, and a refusal never undoes the move: it comes back as driverError', async () => {
+    const withDriver = (driverId: string) => {
+      const row = rows(T.intakeLoad).get('il:r1')!
+      const f = JSON.parse(String(row.fields)) as Row
+      rows(T.intakeLoad).set('il:r1', { ...row, fields: JSON.stringify({ ...f, driverId }) })
+    }
+    withDriver('drv-1')
+    rows(T.load).set('ld-1', { id: 'ld-1', shipmentId: 'shp-1' })
+    const out = (await run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })) as unknown as { intake: { status: string }; driverError?: string }
+    expect(assignAsset).toHaveBeenCalledWith({ loadId: 'ld-1', driverId: 'drv-1' }, caller)
+    expect(out.intake.status).toBe('MOVED')
+    expect(out.driverError).toBeUndefined()
+
+    seedIntake()
+    withDriver('drv-2')
+    assignAsset.mockRejectedValueOnce(new Error('Pat is inactive'))
+    const refused = (await run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })) as unknown as { intake: { status: string }; driverError?: string }
+    expect(refused.intake.status).toBe('MOVED')
+    expect(refused.driverError).toBe('Pat is inactive')
   })
 
   it('files the e-mail\'s rate confirmation PDF on the new shipment, and a failure to copy it does not undo the move', async () => {
@@ -365,7 +394,7 @@ describe('INTAKE_MOVE_TO_ACTIVE', () => {
     expect(createShipment).toHaveBeenCalledTimes(1)
     expect(intake().status).toBe('MOVED')
     const refs = rows(T.order).get('ord-1')!.references as Row[]
-    expect(refs).toHaveLength(2)
+    expect(refs).toHaveLength(3)
   })
 
   it('answers a stale version with the reload message', async () => {

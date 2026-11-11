@@ -66,6 +66,8 @@ export interface IntakeDeps {
     createShipment(input: Row, caller: Caller): Promise<Row>
     setRevTag(input: Row, caller: Caller): Promise<Row>
     setSalesRep(input: Row, caller: Caller): Promise<Row>
+    /** Books a roster driver on a load as Ivan Cartage (ASSIGN_ASSET). Optional: only used when the draft names a driver. */
+    assignAsset?(input: Row, caller: Caller): Promise<Row>
   }
   now(): string
 }
@@ -369,7 +371,7 @@ async function finishShipment(
   fields: IntakeFields,
   shipmentId: string,
   caller: Caller,
-): Promise<void> {
+): Promise<{ driverError: string | null }> {
   const shipment0 = await deps.getById(deps.tables.shipment, shipmentId)
   if (!shipment0) throw new Error(`Shipment not found: ${shipmentId}`)
   const orders = await deps.queryIndex(deps.tables.order, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId)
@@ -426,6 +428,19 @@ async function finishShipment(
     ],
     'intake shipment',
   )
+
+  // The reviewer picked an own-fleet driver: book them on the load now. A refusal (inactive driver, a leg already covered) never undoes
+  // the move; it comes back as `driverError` for the page to show, and assigning again later is one click on the shipment.
+  let driverError: string | null = null
+  if (fields.driverId && deps.actions.assignAsset && loads[0]) {
+    try {
+      await deps.actions.assignAsset({ loadId: String(loads[0].id), driverId: fields.driverId }, caller)
+    } catch (err) {
+      driverError = err instanceof Error ? err.message : String(err)
+      console.error('[tms-shipment-actions] intake driver not assigned', shipmentId, driverError)
+    }
+  }
+  return { driverError }
 }
 
 export async function intakeMoveToActive(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
@@ -491,7 +506,7 @@ export async function intakeMoveToActive(deps: IntakeDeps, input: Row, caller: C
   }
 
   const record = intakeRecordOf(row)
-  await finishShipment(deps, row, record.fields, shipmentId, caller)
+  const { driverError } = await finishShipment(deps, row, record.fields, shipmentId, caller)
   // The e-mail's rate confirmation PDF goes onto the shipment with it (any intake that comes over from the load inboxes). A failure to
   // copy a file never undoes the move: the shipment's Documents offers "Add the e-mail's rate confirmation" to retry.
   const moveFiles = attachmentFilesOf(row)
@@ -516,7 +531,7 @@ export async function intakeMoveToActive(deps: IntakeDeps, input: Row, caller: C
   await deps.writeAudit('SHIPMENT', shipmentId, 'INTAKE_MOVE_TO_ACTIVE', caller, changes)
   await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_MOVE_TO_ACTIVE', caller, { ...changes, shipmentId })
 
-  return { intake: intakeRecordOf(moved), shipmentId, shipmentNumber } as unknown as Row
+  return { intake: intakeRecordOf(moved), shipmentId, shipmentNumber, ...(driverError ? { driverError } : {}) } as unknown as Row
 }
 
 export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: Row, caller: Caller): Promise<Row> {

@@ -29,6 +29,8 @@ export interface IntakeFields {
   /** A key from `SHIPMENT_TYPES` (`src/lib/shipmentTypes.ts`); null when the e-mail does not say. */
   shipmentType: string | null
   weightLb: number | null;    customerRateCents: number | null
+  /** An own-fleet (Ivan Cartage) roster driver to book on the load when it is created. Optional; absent on older rows. */
+  driverId?: string | null
   stops: IntakeStop[]
 }
 

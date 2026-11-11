@@ -3010,8 +3010,8 @@ export async function markIntakeReviewed(input: { intakeId: string; expectedVers
 export async function moveIntakeToActive(input: {
   intakeId: string
   expectedVersion: number
-}): Promise<{ intake: IntakeLoadRecord; shipmentId: string; shipmentNumber: string }> {
-  const r = await shipmentAction<{ intake: IntakeLoadRecord; shipmentId: string; shipmentNumber: string }>('INTAKE_MOVE_TO_ACTIVE', input)
+}): Promise<{ intake: IntakeLoadRecord; shipmentId: string; shipmentNumber: string; /** Set when the picked driver could not be booked; the shipment was still created. */ driverError?: string }> {
+  const r = await shipmentAction<{ intake: IntakeLoadRecord; shipmentId: string; shipmentNumber: string; driverError?: string }>('INTAKE_MOVE_TO_ACTIVE', input)
   return { ...r, intake: intakeRow(r.intake) }
 }
 
