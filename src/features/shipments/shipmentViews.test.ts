@@ -493,12 +493,17 @@ describe('POD column', () => {
   it('flags a shipment whose POD is outstanding, for every revenue type except car shipping', () => {
     expect(podStatusOf(r({ docsMissing: ['POD'] }))).toBe('NO_POD')
     expect(podStatusOf(r({ revDivision: 'ASSETS', docsMissing: ['POD', 'BOL'] }))).toBe('NO_POD')
-    expect(podStatusOf(r({ revDivision: 'CAR_SHIPPING', docsMissing: ['POD'] }))).toBe('')
+    expect(podStatusOf(r({ revDivision: 'CAR_SHIPPING', docsMissing: ['POD'] }))).toBe('NA')
   })
-  it('says POD in only when the gate ran and requires a POD; blank when unknown or not required', () => {
+  it('every customer requires a POD (hard-coded): POD in when the gate ran and the POD is not missing, whatever the customer setting says; blank only when unknown', () => {
     expect(podStatusOf(r({ docsMissing: ['BOL'] }))).toBe('POD_IN')
     expect(podStatusOf(r({ docsMissing: null }))).toBe('')
-    expect(podStatusOf(r({ docsRequired: ['BOL'], docsMissing: [] }))).toBe('')
+    expect(podStatusOf(r({ docsRequired: ['BOL'], docsMissing: [] }))).toBe('POD_IN')
+  })
+  it('car shipping (auto shippers) is blank in the fixed POD and RC columns', () => {
+    const car = r({ revDivision: 'CAR_SHIPPING', docsMissing: [], rateConSignedAt: '2026-11-10T10:00:00Z' })
+    expect(visibleColumns(['podPresent'])[0]!.value(car)).toBe('')
+    expect(visibleColumns(['rateConPresent'])[0]!.value(car)).toBe('')
   })
   it('the POD column is a Y when the POD is in and blank when it is not or not known', () => {
     const pod = (over: Parameters<typeof r>[0]) => visibleColumns(['podPresent'])[0]!.value(r(over))
@@ -513,7 +518,7 @@ describe('POD column', () => {
   })
   it('prints the words in the column', () => {
     expect(visibleColumns(['podStatus'])[0]!.value(r({ docsMissing: ['POD'] }))).toBe('No POD')
-    expect(visibleColumns(['podStatus'])[0]!.value(r({ revDivision: 'CAR_SHIPPING' }))).toBe('')
+    expect(visibleColumns(['podStatus'])[0]!.value(r({ revDivision: 'CAR_SHIPPING' }))).toBe('NA')
   })
 })
 
