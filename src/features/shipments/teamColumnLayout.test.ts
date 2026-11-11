@@ -20,6 +20,15 @@ describe('resolveTeamLayout', () => {
     expect(layout).toEqual({ columns: ['originCity', 'proNumber'], widths: { originCity: 140 }, pinned: ['proNumber'] })
   })
 
+  it('the frozen columns are the pins that were saved, in their order; a layout saved with none starts from the built-in frozen set', () => {
+    const frozen = ['status', 'proNumber']
+    expect(resolveTeamLayout([], VALID, DEFAULTS, frozen).pinned).toEqual(['proNumber', 'status'].filter((k) => DEFAULTS.includes(k) && frozen.includes(k)))
+    const custom = resolveTeamLayout([row({ columns: ['originCity', 'proNumber', 'status'], pinned: ['originCity', 'status'] })], VALID, DEFAULTS, frozen)
+    expect(custom.pinned).toEqual(['originCity', 'status'])
+    const old = resolveTeamLayout([row({ columns: ['originCity', 'proNumber', 'status'], pinned: [] })], VALID, DEFAULTS, frozen)
+    expect(old.pinned).toEqual(['proNumber', 'status'])
+  })
+
   it('uses the defaults when every saved column is retired', () => {
     expect(resolveTeamLayout([row({ columns: ['gone'] })], VALID, DEFAULTS).columns).toEqual(DEFAULTS)
   })

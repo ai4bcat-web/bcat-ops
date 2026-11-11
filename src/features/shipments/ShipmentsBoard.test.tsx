@@ -1022,6 +1022,17 @@ describe('ShipmentsBoard team column layout', () => {
     expect(headers().join('|')).toContain('Customer Ref #')
   })
 
+  it('the frozen columns and their order come from the layout: pinned columns lead the grid and are sticky', async () => {
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'status', 'customerName', 'originCity'], {}, ['customerName', 'originCity'])])
+    renderBoard('/tms/shipments', [row('S001')])
+    await screen.findByText('S001')
+    const heads = [...document.querySelectorAll('thead th')].slice(1, 5)
+    expect(heads.map((h) => h.textContent)).toEqual(['Customer', 'Origin', 'PRO #', 'Status'])
+    expect(heads[0]).toHaveClass('tms-dg-sticky')
+    expect(heads[1]).toHaveClass('tms-dg-sticky')
+    expect(heads[2]).not.toHaveClass('tms-dg-sticky')
+  })
+
   it('a non-admin gets no layout editing at all', async () => {
     auth.isAdmin = false
     renderBoard('/tms/shipments', [row('S001')])
@@ -1069,6 +1080,22 @@ describe('ShipmentsBoard team column layout', () => {
     const widths = [...document.querySelectorAll('colgroup col')].map((c) => parseInt((c as HTMLElement).style.width, 10))
     expect(widths).toContain(321)
     expect(widths).toContain(77)
+  })
+
+  it('an admin pins a column in Edit layout > Columns, and the pin is saved with the team default', async () => {
+    vi.mocked(saveShipmentColumnTemplate).mockResolvedValue({})
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'status', 'originCity'], {}, ['proNumber'])])
+    renderBoard('/tms/shipments', [row('S001')])
+    await screen.findByText('S001')
+    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Columns$/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Pin Origin' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save as team default' }))
+    await waitFor(() => expect(saveShipmentColumnTemplate).toHaveBeenCalledTimes(1))
+    const saved = vi.mocked(saveShipmentColumnTemplate).mock.calls[0][0] as { pinned: string[]; columns: string[] }
+    expect(saved.pinned).toEqual(['proNumber', 'originCity'])
+    expect(saved.columns.slice(0, 2)).toEqual(['proNumber', 'originCity'])
   })
 
   it('Cancel drops the unsaved layout edit', async () => {

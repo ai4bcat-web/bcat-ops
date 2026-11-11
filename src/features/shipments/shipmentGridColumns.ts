@@ -159,6 +159,12 @@ export const SHIPMENT_DEFAULT_COLUMNS = [
   'status', 'rateConPresent', 'podPresent', 'proNumber', 'customerReference', 'customerName', 'carrier', 'destinationCity', 'deliveryAppt',
 ]
 
+/**
+ * The columns frozen on the left until the team default says otherwise, in this order (Ryne 2026-11-11). Edit layout > Columns changes which
+ * columns are frozen and their order; the choice is saved with the team default.
+ */
+export const SHIPMENT_DEFAULT_FROZEN = ['status', 'rateConPresent', 'podPresent', 'proNumber', 'customerReference']
+
 /** The Actions column the page appends after the chosen columns. */
 export const ACTIONS_COLUMN: DenseColumn<ShipmentRow> = {
   key: 'actions',

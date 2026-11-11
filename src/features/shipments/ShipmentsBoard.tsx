@@ -113,6 +113,7 @@ import {
   ACTIONS_COLUMN,
   SHIPMENT_COLUMN_KEYS,
   SHIPMENT_DEFAULT_COLUMNS,
+  SHIPMENT_DEFAULT_FROZEN,
   SHIPMENT_GRID_COLUMNS,
   sentence,
   statusCellText,
@@ -243,8 +244,6 @@ function toneRows(): BoardToneKey[] {
 }
 
 /** Columns locked to the left edge of the grid, whatever the team layout says. */
-// Fixed on the left, in this order (Ryne 2026-11-11): Status, RC, POD, PRO #, Customer Ref #.
-const LOCKED_KEYS = ['status', 'rateConPresent', 'podPresent', 'proNumber', 'customerReference']
 
 /** Status carries the tracking pill and Customer the Not linked badge beside their text: Fit widths leaves room for them. */
 function withChipRoom(widths: Record<string, number>): Record<string, number> {
@@ -562,7 +561,7 @@ function BoardPane({
     defaultSort: DEFAULT_SORT,
   })
   const teamLayout = useMemo(
-    () => resolveTeamLayout(columnTemplates, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS),
+    () => resolveTeamLayout(columnTemplates, SHIPMENT_COLUMN_KEYS, SHIPMENT_DEFAULT_COLUMNS, SHIPMENT_DEFAULT_FROZEN),
     [columnTemplates],
   )
   // An admin's unsaved edit of the team layout; null outside edit mode.
@@ -618,12 +617,10 @@ function BoardPane({
   // The "Demo" chip: only the ZZ DEMO walkthrough rows. It lives in the URL (`?demo=1`)
   // so the isolated view can be bookmarked or handed over as a link.
   const demoOnly = params.get('demo') === '1'
-  // Status, RC, POD, PRO # and Customer Ref # are locked to the left of the grid, in that order: they stay put while the rest scrolls sideways.
-  const lockedFirst = useMemo(() => {
-    const locked = LOCKED_KEYS.filter((k) => columnKeys.includes(k))
-    return [...locked, ...columnKeys.filter((k) => !LOCKED_KEYS.includes(k))]
-  }, [columnKeys])
-  const lockedCount = useMemo(() => columnKeys.filter((k) => LOCKED_KEYS.includes(k)).length, [columnKeys])
+  // The frozen columns are whatever the layout pins, in the order it pins them (Edit layout > Columns: pin, drag into order); they lead the grid
+  // and stay put while the rest scrolls sideways. The first column is always frozen.
+  const frozenKeys = useMemo(() => layout.pinned.filter((k) => columnKeys.includes(k)), [layout.pinned, columnKeys])
+  const lockedFirst = useMemo(() => [...frozenKeys, ...columnKeys.filter((k) => !frozenKeys.includes(k))], [frozenKeys, columnKeys])
   const gridColumns = useMemo(() => {
     const chosen = lockedFirst.map((k) => COLUMN_BY_KEY[k]).filter((c) => c != null)
     return [...chosen, ACTIONS_COLUMN]
@@ -1162,7 +1159,7 @@ function BoardPane({
             renderCell={renderCellWithActions}
             density={prefs.density}
             userWidths={layout.widths}
-            stickyCount={Math.max(1, lockedCount, layout.pinned.length)}
+            stickyCount={Math.max(1, frozenKeys.length)}
             sort={prefs.sort}
             onSort={(key) => prefs.setSort(nextSort(prefs.sort, key))}
             filters={filters}

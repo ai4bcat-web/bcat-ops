@@ -25,8 +25,9 @@ export function resolveTeamLayout(
   templates: readonly Pick<ShipmentColumnTemplateRecord, 'id' | 'columns' | 'widths' | 'pinned'>[],
   validKeys: readonly string[],
   defaultColumns: readonly string[],
+  defaultPinned: readonly string[] = [],
 ): TeamColumnLayout {
-  const fallback: TeamColumnLayout = { columns: [...defaultColumns], widths: {}, pinned: [] }
+  const fallback: TeamColumnLayout = { columns: [...defaultColumns], widths: {}, pinned: defaultColumns.filter((k) => defaultPinned.includes(k)) }
   const saved = templates.find((t) => t.id === TEAM_DEFAULT_COLUMN_TEMPLATE_ID)
   if (!saved || !Array.isArray(saved.columns)) return fallback
 
@@ -43,7 +44,10 @@ export function resolveTeamLayout(
       if (columns.includes(key) && typeof px === 'number' && Number.isFinite(px) && px > 0) widths[key] = px
     }
   }
-  const pinned = Array.isArray(saved.pinned) ? saved.pinned.filter((k) => columns.includes(k)) : []
+  // The frozen columns are data now: whatever the admin pinned in Edit layout. A layout saved before pins were editable has none, so it starts
+  // from the built-in frozen set (only the ones it shows) until somebody pins differently and saves.
+  const savedPins = Array.isArray(saved.pinned) ? saved.pinned.filter((k) => columns.includes(k)) : []
+  const pinned = savedPins.length > 0 ? savedPins : columns.filter((k) => defaultPinned.includes(k))
   return { columns, widths, pinned }
 }
 
