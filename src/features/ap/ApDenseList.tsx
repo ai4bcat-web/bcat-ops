@@ -6,14 +6,14 @@
  * row are the view's: nothing here decides what is owed or paid.
  */
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import { Eye, RefreshCw } from 'lucide-react'
-import { TmsButton, TmsFilterChip, TmsTabs, type TmsTabGroup } from '@/features/tms/kit'
+import { Eye, RefreshCw, Search } from 'lucide-react'
+import { TmsButton, TmsFilterChip, TmsInput, TmsTabs, type TmsTabGroup } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
   ClearFiltersButton, ColumnsButton, DensityToggle, DenseKpiStrip, SummaryToggle, type DenseKpi,
 } from '@/features/tms/grid/DenseControls'
 import {
-  activeFilterCount, filterRows, nextSort, reorderKeys, sortDenseRows,
+  activeFilterCount, filterRows, nextSort, reorderKeys, searchRows, sortDenseRows,
   type DenseColumn, type DenseColumnFilter, type DenseFilters,
 } from '@/features/tms/grid/denseGridModel'
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
@@ -94,6 +94,7 @@ export function ApDenseList<T>({ config, email, onRefresh }: {
     gridId, columns, rows, rowKey, emptyText, banner, actions, filterChips, onAddFilter, onClearFilters, kpis, onRowClick,
   } = config
   const [filters, setFilters] = useState<DenseFilters>({})
+  const [search, setSearch] = useState('')
 
   const catalog = useMemo(() => columns.filter((c) => !c.fixed), [columns])
   const prefs = useDenseGridPrefs({
@@ -121,8 +122,8 @@ export function ApDenseList<T>({ config, email, onRefresh }: {
   }, [])
 
   const shown = useMemo(
-    () => sortDenseRows(filterRows(rows, columns, filters), columns, prefs.sort),
-    [rows, columns, filters, prefs.sort],
+    () => sortDenseRows(filterRows(searchRows(rows, columns, search), columns, filters), columns, prefs.sort),
+    [rows, columns, filters, prefs.sort, search],
   )
   const renderCell = useCallback(
     (row: T, key: string) => columns.find((c) => c.key === key)?.render(row) ?? null,
@@ -133,6 +134,8 @@ export function ApDenseList<T>({ config, email, onRefresh }: {
   return (
     <div className="tms-dense-page tms-caps">
       <div className="tms-dense-bar">
+        <Search size={14} className="tms-muted" aria-hidden="true" />
+        <TmsInput className="tms-dense-search" aria-label="Search" data-testid="ap-search" placeholder="Search bill, carrier, payee, amount…" value={search} onChange={(e) => setSearch(e.target.value)} />
         {filterChips?.map((chip) => (
           <TmsFilterChip key={chip.key} label={chip.label} value={chip.value} onClick={chip.onClick} />
         ))}
@@ -167,7 +170,7 @@ export function ApDenseList<T>({ config, email, onRefresh }: {
         <DenseGrid<T>
           aria-label={`AP ${gridId.replace(/^ap-/, '')}`}
           recentKey={`tms:${gridId}:recent:${email || 'anon'}`}
-          resetKey={`${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+          resetKey={`${search}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
           columns={gridColumns}
           rows={shown}
           fitRows={rows}
