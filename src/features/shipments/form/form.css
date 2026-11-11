@@ -750,3 +750,19 @@
 .tms-ship-form-scroll[data-locked='true'] > :not(.tms-ship-banner) { pointer-events: none; opacity: 0.6; }
 /* ...but what is done WITH the carrier (Dispatch, Send rate confirmation, Send info) is not editing the shipment: it stays usable while someone else has it open. */
 .tms-ship-form-scroll[data-locked='true'] .tms-lock-exempt { pointer-events: auto; }
+
+/* Progress block: the steps a shipment goes through, who did each, and the one to do next. */
+.tms-shell .tms-rail-next { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 8px; padding: 6px 8px; border-radius: var(--tms-radius-sm); background: var(--tms-primary-tint); color: var(--tms-primary-ink); font-size: 12px; line-height: 1.35; }
+.tms-shell .tms-rail-next[data-done='true'] { background: var(--tms-badge-green-tint); color: var(--tms-badge-green); }
+.tms-shell .tms-rail-next svg { flex: none; margin-top: 2px; }
+.tms-shell .tms-rail-next em { font-style: normal; color: var(--tms-muted); }
+.tms-shell .tms-rail-prog { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tms-shell .tms-rail-prog-row { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; }
+.tms-shell .tms-rail-prog-mark { flex: none; display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border-radius: 999px; border: 1px solid var(--tms-input-border); color: var(--tms-disabled); margin-top: 1px; }
+.tms-shell .tms-rail-prog-row[data-state='done'] .tms-rail-prog-mark { background: var(--tms-badge-green); border-color: var(--tms-badge-green); color: var(--tms-on-primary); }
+.tms-shell .tms-rail-prog-row[data-state='next'] .tms-rail-prog-mark { border-color: var(--tms-primary); color: var(--tms-primary); box-shadow: 0 0 0 2px var(--tms-primary-tint); }
+.tms-shell .tms-rail-prog-body { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.tms-shell .tms-rail-prog-label { color: var(--tms-text); font-weight: 500; }
+.tms-shell .tms-rail-prog-row[data-state='todo'] .tms-rail-prog-label { color: var(--tms-muted); font-weight: 400; }
+.tms-shell .tms-rail-prog-meta { color: var(--tms-muted); font-size: 11px; overflow-wrap: anywhere; }
+.tms-shell .tms-ship-next { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: var(--tms-radius-pill); background: var(--tms-primary-tint); color: var(--tms-primary-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }

@@ -9,6 +9,7 @@ import { memo, useMemo, useState, type ComponentType } from 'react'
 import { formatCents } from '@/lib/invoiceBuild'
 import type { IntakeLoadRecord } from '@/types/intake'
 import { ActivityBlock } from './ActivityBlock'
+import { ProgressBlock } from './ProgressBlock'
 import { RateHistoryRail } from './RateHistoryRail'
 import { sliceOf, type CardProps } from './cards/cardRegistry'
 import { carrierBreakdown } from './cards/ratesSummary'
@@ -118,6 +119,8 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
             ))}
           </ul>
         </section>
+
+        <ProgressBlock bundle={ctx.bundle} staff={ctx.directory.staff} onUncover={ctx.actions.openUncover} disabled={ctx.busy || ctx.locked.voided} />
 
         <ActivityBlock bundle={ctx.bundle} staff={ctx.directory.staff} intakeId={intakeId} intake={intake} />
 

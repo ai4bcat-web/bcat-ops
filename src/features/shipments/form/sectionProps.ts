@@ -54,6 +54,8 @@ export interface FormActions {
   openSendInfo(): void
   /** Opens the existing RemoveCarrierDialog with outcome TONU. */
   openTonu(): void
+  /** Opens RemoveCarrierDialog with outcome BOUNCED: takes the carrier (or own-fleet leg) off so the load is open again. */
+  openUncover(): void
   openFor(kind: 'dispatch' | 'rateCon' | 'info' | 'tonu', loadCarrierId: string): void
   sendSetupPacket(carrierId: string, email: string): Promise<void>
   addCheckCall(draft: CheckCallDraft): Promise<void>

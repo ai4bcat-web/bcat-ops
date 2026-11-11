@@ -18,13 +18,13 @@ import {
 } from '@/lib/apiClient'
 import type { CarrierRecord, ShipmentBundle, ShipmentDocumentType, TmsSettings } from '@/types/tms'
 import { financialPreview } from './mapping'
-import { carrierSlotsOf, liveCarriers, type ShipmentFormValues } from './model'
+import { carrierSlotsOf, emptyCarrierBlock, emptyCarrierRate, liveCarriers, type ShipmentFormValues } from './model'
 import { RateConDialog } from './RateConDialog'
 import { toLogCheckCallInput } from './checkCallNote'
 import { runAddCarrier, runCover } from './pipelines'
 import type { FormActions } from './sectionProps'
 
-type DialogKind = 'book' | 'assign' | 'dispatch' | 'rateCon' | 'info' | 'tonu' | null
+type DialogKind = 'book' | 'assign' | 'dispatch' | 'rateCon' | 'info' | 'tonu' | 'uncover' | null
 
 const COMMIT_RETRY_MS = 1500
 
@@ -89,6 +89,7 @@ export function useFormActions(o: {
     openSendRateCon: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('rateCon') } },
     openSendInfo: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('info') } },
     openTonu: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('tonu') } },
+    openUncover: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('uncover') } },
     openFor: (kind, id) => { if (!ref.current.busy) { setTarget(id); setDialog(kind) } },
     async sendSetupPacket(carrierId, email) {
       const res = await sendCarrierSetupPacket({ carrierId, email })
@@ -185,6 +186,21 @@ export function useFormActions(o: {
       <RemoveCarrierDialog
         outcome="TONU" loadCarrier={active} busy={busy} onClose={close}
         onConfirm={(reason, note) => { void sa.load.onRemoveCarrier(active.id, 'TONU', reason, note).then(close).catch(() => { /* reported */ }) }}
+      />
+    )
+  } else if (dialog === 'uncover' && active) {
+    // Same as Bounce carrier: the assignment comes off (BOUNCED), its rate con is voided and any tracking link stops, and the load goes back to open.
+    node = (
+      <RemoveCarrierDialog
+        outcome="BOUNCED" loadCarrier={active} busy={busy} onClose={close}
+        onConfirm={(reason, note, repostToDat) => {
+          const onlyOne = live.length === 1
+          void sa.load.onRemoveCarrier(active.id, 'BOUNCED', reason, note, repostToDat).then(() => {
+            // The form keeps what it was typed with: clear the carrier it showed so a save cannot put it back.
+            if (onlyOne) update((p) => ({ ...p, carrier: emptyCarrierBlock(), rates: { ...p.rates, carrier: emptyCarrierRate() } }))
+            close()
+          }).catch(() => { /* reported */ })
+        }}
       />
     )
   } else if (dialog === 'info' && active && load) {
