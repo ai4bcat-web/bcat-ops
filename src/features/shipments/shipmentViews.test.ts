@@ -506,6 +506,9 @@ describe('POD column', () => {
     expect(pod({ docsMissing: [] })).toBe('Y')
     expect(pod({ docsMissing: ['BOL'] })).toBe('Y')
     expect(pod({ docsMissing: ['POD'] })).toBe('')
+    expect(visibleColumns(['rateConPresent'])[0]!.label).toBe('RC')
+    expect(visibleColumns(['rateConPresent'])[0]!.value(r({ rateConSignedAt: '2026-11-10T10:00:00Z' }))).toBe('Y')
+    expect(visibleColumns(['rateConPresent'])[0]!.value(r({ rateConOnFile: false }))).toBe('')
     expect(pod({ docsMissing: null })).toBe('')
   })
   it('prints the words in the column', () => {

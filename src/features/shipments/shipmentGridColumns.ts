@@ -36,7 +36,7 @@ export function statusSortKey(row: ShipmentRow): string {
 /** Facets: a header multi-select instead of a free-text box. */
 const MULTI_KEYS = new Set([
   'status', 'customerName', 'carrier', 'revenueType', 'salesRep', 'tracker', 'equip', 'mode', 'arStatus',
-  'apStatus', 'driver', 'truck', 'originState', 'destinationState', 'salesRepId', 'podStatus', 'podPresent',
+  'apStatus', 'driver', 'truck', 'originState', 'destinationState', 'salesRepId', 'podStatus', 'podPresent', 'rateConPresent',
 ])
 
 /** Date columns and the row field each one reads. */
@@ -140,8 +140,8 @@ export const SHIPMENT_GRID_COLUMNS: DenseColumn<ShipmentRow>[] = BOARD_COLUMNS.m
   }
   // Narrow on purpose: the chip is "No POD" or "POD in", and the default set has to fit the 1440 scroller.
   if (col.key === 'podStatus') return { ...base, filter: 'multi', width: 56 }
-  // The fixed POD column: a Y or blank, narrow enough to sit beside PRO # and Status.
-  if (col.key === 'podPresent') return { ...base, filter: 'multi', width: 56 }
+  // The fixed RC and POD columns: a Y or blank, narrow enough to sit beside Status and PRO #.
+  if (col.key === 'podPresent' || col.key === 'rateConPresent') return { ...base, filter: 'multi', width: 56 }
   if (MULTI_KEYS.has(col.key)) return { ...base, filter: 'multi' }
   return base
 })
@@ -156,7 +156,7 @@ export const SHIPMENT_COLUMN_KEYS = SHIPMENT_GRID_COLUMNS.map((c) => c.key)
  * Revert to the full Aljex set: `['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== 'proNumber')]`.
  */
 export const SHIPMENT_DEFAULT_COLUMNS = [
-  'proNumber', 'podPresent', 'status', 'equip', 'customerName', 'carrier', 'pickupShip', 'originCity', 'destinationCity', 'deliveryAppt',
+  'status', 'rateConPresent', 'podPresent', 'proNumber', 'customerReference', 'customerName', 'carrier', 'destinationCity', 'deliveryAppt',
 ]
 
 /** The Actions column the page appends after the chosen columns. */
