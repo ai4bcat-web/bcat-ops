@@ -485,6 +485,8 @@ export interface TmsSettings {
   customerLinkShowsPosition?: boolean | null
   /** Cadence check-call texts wait while the driver's link, app or ELD keeps the position fresh. Off unless true. */
   checkCallSkipWhenDriverActive?: boolean | null
+  /** Which progress steps each revenue division shows, per variant (src/lib/progressSteps.ts). Null = the built-in defaults. */
+  progressSteps?: Record<string, Record<string, Array<{ key: string; label: string; enabled: boolean }>>> | null
   /** Who the customer page says to call. */
   trackingContact?: TrackingContact | null
   /** Body of the carrier ping text. Must contain `{url}`. */

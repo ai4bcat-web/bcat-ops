@@ -11,6 +11,7 @@ import { DeliveryTimeline } from '../DeliveryTimeline'
 import { phaseInputOfBundle } from '../deliveryPhaseInputs'
 import { HEADER_PARTS } from './defaultSections'
 import { buildShipmentSteps, nextStepOf } from '@/lib/shipmentSteps'
+import { useAssetStepInputs } from './useAssetStepInputs'
 
 export interface FormHeaderProps {
   title: string
@@ -33,7 +34,9 @@ function FormHeaderImpl({ title, dirty, pro, mode, common, panelOpen, onPanelTog
     return () => clearInterval(t)
   }, [])
   const phase = useMemo(() => deliveryPhase(phaseInputOfBundle(bundle, nowMs)), [bundle, nowMs])
-  const next = useMemo(() => nextStepOf(buildShipmentSteps(bundle, [], [])), [bundle])
+  const asset = useAssetStepInputs(bundle, false)
+  const config = common.ctx.settings?.progressSteps as never
+  const next = useMemo(() => nextStepOf(buildShipmentSteps(bundle, [], [], { driverType: asset.driverType, config })), [bundle, asset.driverType, config])
   return (
     <header className="tms-ship-hdr" data-testid="ship-form-header">
       <h1 className="tms-ship-hdr-title" data-testid="ship-form-title">{title}</h1>

@@ -1479,6 +1479,31 @@ describe('SAVE_SETTINGS', () => {
     expect(put?.Item).toBeDefined()
   })
 
+  it('progressSteps: saves a valid per-division list, trimming labels', async () => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      if (cmd.__type === 'Put') return Promise.resolve({})
+      throw new Error('unexpected')
+    })
+    const result = await handler(event('SAVE_SETTINGS', {
+      progressSteps: { ASSETS: { LOCAL_DRIVER: [{ key: 'created', label: ' Entered ', enabled: true }, { key: 'delivered', label: '', enabled: true }] } },
+    }, identity({ groups: ['ADMIN'] })))
+    expect(result.progressSteps).toEqual({ ASSETS: { LOCAL_DRIVER: [{ key: 'created', label: 'Entered', enabled: true }, { key: 'delivered', label: 'Delivered', enabled: true }] } })
+  })
+
+  it.each([
+    [{ ASSETS: { LOCAL_DRIVER: [{ key: 'bogus', label: 'x', enabled: true }] } }, /not a known step/],
+    [{ ASSETS: { LOCAL_DRIVER: [{ key: 'assetLocated', label: 'x', enabled: true }] } }, /does not apply/],
+    [{ ASSETS: { LOCAL_DRIVER: [{ key: 'created', label: 'x', enabled: false }] } }, /at least one step/],
+    [{ ASSETS: { LOCAL_DRIVER: [{ key: 'created', label: 'x', enabled: true }, { key: 'created', label: 'y', enabled: true }] } }, /listed twice/],
+  ])('progressSteps: refuses an invalid list %#', async (progressSteps, message) => {
+    send.mockImplementation((cmd: MockCommand) => {
+      if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+      throw new Error('unexpected')
+    })
+    await expect(handler(event('SAVE_SETTINGS', { progressSteps }, identity({ groups: ['ADMIN'] })))).rejects.toThrow(message)
+  })
+
   it('keeps existing fields when not mentioned (keep semantics)', async () => {
     const existing = makeDynamoItem({
       id: 'default', marginFloorBps: 100, defaultCreditLimitCents: 50000, requireCustomerApproval: true,

@@ -1196,6 +1196,8 @@ const schema = a.schema(stageTypes({
       customerLinkShowsCarrier:      a.boolean(),   // false
       customerLinkShowsPosition:     a.boolean(),   // true
       checkCallSkipWhenDriverActive: a.boolean(),   // false — no cadence text while the driver's link/app/ELD updates on time
+      // Settings > Progress steps: { <revDivision code>: { CARRIER | LOCAL_DRIVER | OWNER_OPERATOR: [{ key, label, enabled }] } }. Null = built-in defaults. Validated by src/lib/progressSteps.ts.
+      progressSteps:                 a.json(),
       // { mode: 'CUSTOMER_REP' | 'FIXED', name?, email?, phone? } — whose details
       // the public customer page prints as "who to call".
       trackingContact:               a.json(),

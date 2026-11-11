@@ -120,7 +120,7 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
           </ul>
         </section>
 
-        <ProgressBlock bundle={ctx.bundle} staff={ctx.directory.staff} onUncover={ctx.actions.openUncover} disabled={ctx.busy || ctx.locked.voided} />
+        <ProgressBlock bundle={ctx.bundle} staff={ctx.directory.staff} config={ctx.settings?.progressSteps as never} onUncover={ctx.actions.openUncover} disabled={ctx.busy || ctx.locked.voided} />
 
         <ActivityBlock bundle={ctx.bundle} staff={ctx.directory.staff} intakeId={intakeId} intake={intake} />
 

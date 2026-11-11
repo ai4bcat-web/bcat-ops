@@ -26,6 +26,7 @@ import { InvoiceCopyCard } from './InvoiceCopyCard'
 import { QuoteSettingsCard } from './QuoteSettingsCard'
 import { ShipmentSettingsCard } from './ShipmentSettingsCard'
 import { ChargeCodesCard } from './ChargeCodesCard'
+import { ProgressStepsCard } from './ProgressStepsCard'
 import { TruckPhonesCard } from './TruckPhonesCard'
 import { CustomerSettingsCard } from './CustomerSettingsCard'
 import { CarrierDocumentsCard } from './CarrierDocumentsCard'
@@ -69,6 +70,7 @@ export function SettingsPage() {
           <TeamsCard />
           <CommissionSettingsCard />
           <ChargeCodesCard />
+          <ProgressStepsCard />
           <UsersRolesCard />
         </>
       )}

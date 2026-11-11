@@ -15,6 +15,7 @@ vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: 
 /** Every apiClient function the settings cards import; a missing one throws on render. */
 const api = vi.hoisted(() => ({
   listDivisions: vi.fn(async () => []),
+  listOwnershipDivisions: vi.fn(async () => []),
   saveDivision: vi.fn(),
   listUserProfiles: vi.fn(async () => []),
   getTmsSettings: vi.fn(),
