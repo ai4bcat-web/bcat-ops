@@ -19,8 +19,10 @@ describe('Shipments default columns', () => {
 
   it('are real columns that keep the Aljex board order', () => {
     for (const key of SHIPMENT_DEFAULT_COLUMNS) expect(SHIPMENT_COLUMN_KEYS).toContain(key)
+    // PRO #, POD and Status lead (Ryne 2026-11-11: fixed together); everything after keeps the Aljex order.
+    expect(SHIPMENT_DEFAULT_COLUMNS.slice(0, 3)).toEqual(['proNumber', 'podPresent', 'status'])
     const aljexOrder = ['proNumber', ...ALJEX_COLUMN_KEYS.filter((k) => k !== 'proNumber')]
-    const positions = SHIPMENT_DEFAULT_COLUMNS.map((k) => aljexOrder.indexOf(k))
+    const positions = SHIPMENT_DEFAULT_COLUMNS.slice(3).map((k) => aljexOrder.indexOf(k))
     expect(positions.every((p) => p >= 0)).toBe(true)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
   })

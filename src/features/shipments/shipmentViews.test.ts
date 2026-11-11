@@ -500,6 +500,14 @@ describe('POD column', () => {
     expect(podStatusOf(r({ docsMissing: null }))).toBe('')
     expect(podStatusOf(r({ docsRequired: ['BOL'], docsMissing: [] }))).toBe('')
   })
+  it('the POD column is a Y when the POD is in and blank when it is not or not known', () => {
+    const pod = (over: Parameters<typeof r>[0]) => visibleColumns(['podPresent'])[0]!.value(r(over))
+    expect(visibleColumns(['podPresent'])[0]!.label).toBe('POD')
+    expect(pod({ docsMissing: [] })).toBe('Y')
+    expect(pod({ docsMissing: ['BOL'] })).toBe('Y')
+    expect(pod({ docsMissing: ['POD'] })).toBe('')
+    expect(pod({ docsMissing: null })).toBe('')
+  })
   it('prints the words in the column', () => {
     expect(visibleColumns(['podStatus'])[0]!.value(r({ docsMissing: ['POD'] }))).toBe('No POD')
     expect(visibleColumns(['podStatus'])[0]!.value(r({ revDivision: 'CAR_SHIPPING' }))).toBe('')

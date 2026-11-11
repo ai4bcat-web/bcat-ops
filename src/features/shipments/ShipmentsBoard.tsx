@@ -243,7 +243,8 @@ function toneRows(): BoardToneKey[] {
 }
 
 /** Columns locked to the left edge of the grid, whatever the team layout says. */
-const LOCKED_KEYS = ['status', 'proNumber']
+// In this left-to-right order (Ryne 2026-11-11: PRO, POD and Status stay fixed together).
+const LOCKED_KEYS = ['proNumber', 'podPresent', 'status']
 
 /** Status carries the tracking pill and Customer the Not linked badge beside their text: Fit widths leaves room for them. */
 function withChipRoom(widths: Record<string, number>): Record<string, number> {
@@ -617,9 +618,9 @@ function BoardPane({
   // The "Demo" chip: only the ZZ DEMO walkthrough rows. It lives in the URL (`?demo=1`)
   // so the isolated view can be bookmarked or handed over as a link.
   const demoOnly = params.get('demo') === '1'
-  // Status and PRO # are locked to the left of the grid: they stay put while the rest scrolls sideways.
+  // PRO #, POD and Status are locked to the left of the grid, in that order: they stay put while the rest scrolls sideways.
   const lockedFirst = useMemo(() => {
-    const locked = columnKeys.filter((k) => LOCKED_KEYS.includes(k))
+    const locked = LOCKED_KEYS.filter((k) => columnKeys.includes(k))
     return [...locked, ...columnKeys.filter((k) => !LOCKED_KEYS.includes(k))]
   }, [columnKeys])
   const lockedCount = useMemo(() => columnKeys.filter((k) => LOCKED_KEYS.includes(k)).length, [columnKeys])
