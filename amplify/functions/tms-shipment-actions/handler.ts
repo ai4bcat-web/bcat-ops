@@ -280,6 +280,8 @@ import { dedupeEmails, isEmailAddress } from '../../../src/lib/emailAddress'
 import { composeRateConCc } from './rateConRecipients'
 import { assertBolEmailable, bolEmailBody, bolEmailSubject, deliveryLabel, parseEmailBolInput } from './bolEmail'
 import { MAX_GENERATED_BYTES, documentKey } from '../../../src/lib/shipmentDocuments'
+import { getStops } from '../../../src/lib/stops'
+import type { Load } from '../../../src/types'
 import {
   advanceTarget, deriveAssignmentStatus, driverInfoGaps, isCarrierAssignmentStatus, ladderPatch, rungOf,
   type AssignmentFacts, type CarrierAssignmentStatus,
@@ -4689,7 +4691,9 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
   const shipmentId = optionalString(load.shipmentId, 100)
   if (shipmentId) await requireLiveShipment(shipmentId)
 
+  // A legacy load with no stops array yet: the two stops the form shows (pickup and delivery from the old fields, ids `<loadId>:pu` / `:de`).
   let stops = readStops(load)
+  if (stops.length === 0) stops = getStops(load as unknown as Load) as unknown as typeof stops
   const indexOfStop = (): number => {
     if (!stopId) throw new Error('stopId is required for this stop change')
     const i = stops.findIndex((s) => s.id === stopId)
