@@ -331,7 +331,7 @@ export const ALJEX_COLUMN_KEYS = [
   'exceptions', 'status', 'proNumber', 'equip', 'customerReference', 'description',
   'revenueType', 'salesRep', 'customerName', 'carrier', 'carrierAssignment', 'customerTotalRate', 'carrierTotalRates',
   'grossProfit', 'netMargin', 'pickupShip', 'originCity', 'destinationCity', 'deliveryAppt', 'stops',
-  'driver', 'truck', 'arStatus', 'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'mode', 'docsMissing',
+  'driver', 'truck', 'arStatus', 'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'mode', 'docsMissing', 'podStatus',
 ]
 
 /**
@@ -384,7 +384,7 @@ export const BOARD_COLUMN_KEYS = [
   'rmisStatus', 'quickPayEligible', 'carrierTeam', 'carrierOwners', 'carrierLoadCount',
   'carrierLastLoadAt',
   // Computed.
-  'stopProgress', 'daysInStatus', 'docsNeededCount', 'podPresent', 'rateConPresent',
+  'stopProgress', 'daysInStatus', 'docsNeededCount', 'podStatus', 'podPresent', 'rateConPresent',
   'postedBoards', 'nextEvent', 'trackingMotion',
 ]
 

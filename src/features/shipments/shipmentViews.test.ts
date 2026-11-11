@@ -23,6 +23,7 @@ import {
   matchesQuery,
   needsDriver,
   stopProgressOf,
+  podStatusOf,
   toCsv,
   toViewRow,
   visibleColumns,
@@ -487,13 +488,31 @@ describe('board filter set helpers', () => {
   })
 })
 
+describe('POD column', () => {
+  const r = (over: Record<string, unknown>) => ({ revDivision: 'BROKERAGE', docsRequired: ['POD', 'BOL'], docsMissing: [], ...over }) as never
+  it('flags a shipment whose POD is outstanding, for every revenue type except car shipping', () => {
+    expect(podStatusOf(r({ docsMissing: ['POD'] }))).toBe('NO_POD')
+    expect(podStatusOf(r({ revDivision: 'ASSETS', docsMissing: ['POD', 'BOL'] }))).toBe('NO_POD')
+    expect(podStatusOf(r({ revDivision: 'CAR_SHIPPING', docsMissing: ['POD'] }))).toBe('')
+  })
+  it('says POD in only when the gate ran and requires a POD; blank when unknown or not required', () => {
+    expect(podStatusOf(r({ docsMissing: ['BOL'] }))).toBe('POD_IN')
+    expect(podStatusOf(r({ docsMissing: null }))).toBe('')
+    expect(podStatusOf(r({ docsRequired: ['BOL'], docsMissing: [] }))).toBe('')
+  })
+  it('prints the words in the column', () => {
+    expect(visibleColumns(['podStatus'])[0]!.value(r({ docsMissing: ['POD'] }))).toBe('No POD')
+    expect(visibleColumns(['podStatus'])[0]!.value(r({ revDivision: 'CAR_SHIPPING' }))).toBe('')
+  })
+})
+
 describe('Aljex column order', () => {
   it('lists the Active Shipments default columns in plan order', () => {
     expect(ALJEX_COLUMN_KEYS).toEqual([
       'exceptions', 'status', 'proNumber', 'equip', 'customerReference', 'description',
       'revenueType', 'salesRep', 'customerName', 'carrier', 'carrierAssignment', 'customerTotalRate', 'carrierTotalRates',
       'grossProfit', 'netMargin', 'pickupShip', 'originCity', 'destinationCity', 'deliveryAppt', 'stops',
-      'driver', 'truck', 'arStatus', 'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'mode', 'docsMissing',
+      'driver', 'truck', 'arStatus', 'apStatus', 'lastUpdateAt', 'nextCheckCallAt', 'mode', 'docsMissing', 'podStatus',
     ])
   })
 
