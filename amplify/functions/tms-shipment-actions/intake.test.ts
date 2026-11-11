@@ -286,14 +286,12 @@ describe('INTAKE_MARK_REVIEWED', () => {
 describe('INTAKE_MOVE_TO_ACTIVE', () => {
   beforeEach(() => seedIntake(REVIEWED))
 
-  it('refuses a complete, fully auto-filled load that nobody has marked reviewed', async () => {
+  it('moves a complete load nobody has marked reviewed: there is no review step, the mover is recorded', async () => {
     seedIntake()
-    const before = { ...intake() }
-    await expect(run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(
-      /^Not ready to move to active — still needs: review/,
-    )
-    expect(intake()).toEqual(before)
-    expect(createShipment).not.toHaveBeenCalled()
+    const out = (await run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })) as unknown as { intake: { status: string } }
+    expect(out.intake.status).toBe('MOVED')
+    expect(createShipment).toHaveBeenCalledTimes(1)
+    expect(rows(T.shipment).get('shp-1')).toMatchObject({ intakeLoadId: 'il:r1', intakeReviewedBy: caller.email })
   })
 
   it('refuses a load that is not ready and writes no state', async () => {

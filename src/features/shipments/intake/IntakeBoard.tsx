@@ -5,8 +5,7 @@
  */
 import { BatchActionBar } from '../board/BatchActionBar'
 import { outcomesFromServer, selectAllUpToCap, toggleSelection, type BatchOutcome } from '../batchReview'
-import { batchShipmentTask, dismissIntake } from '@/lib/apiClient'
-import { toast } from 'sonner'
+import { batchShipmentTask } from '@/lib/apiClient'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Mail, Truck } from 'lucide-react'
@@ -69,7 +68,7 @@ function rememberView(key: string, view: IntakeView): void {
   }
 }
 
-const DEFAULT_COLUMNS = ['received', 'from', 'customer', 'reference', 'route', 'completeness', 'review', 'source']
+const DEFAULT_COLUMNS = ['received', 'from', 'customer', 'reference', 'route', 'completeness', 'source']
 
 function reviewText(row: IntakeLoadRecord): string {
   if (row.reviewedAt && row.reviewedBy) return 'Reviewed'
@@ -108,7 +107,7 @@ export function IntakeBoard() {
   const [outcomes, setOutcomes] = useState<BatchOutcome[] | undefined>()
   const [pushing, setPushing] = useState(false)
   const { divisions } = useOwnershipDivisions()
-  const { isOwnerOrAdmin, canReview } = useIntakePermissions()
+  const { isOwnerOrAdmin } = useIntakePermissions()
 
   const chip: StatusChip = params.get('status') === 'moved' ? 'moved' : params.get('status') === 'dismissed' ? 'dismissed' : 'open'
   const open = useIntakeLoads({ status: 'OPEN' })
@@ -271,31 +270,10 @@ export function IntakeBoard() {
               Create shipment
             </TmsButton>
           ) : null}
-          {row.status === 'OPEN' && canReview ? (
-            <TmsButton
-              size="sm"
-              data-testid="intake-mark-done"
-              title="Already handled: take it off the Intake list"
-              onClick={(e) => { e.stopPropagation(); void markDone(row) }}
-            >
-              Mark done
-            </TmsButton>
-          ) : null}
           </span>
         )
       default:
         return columns.find((c) => c.key === key)?.text(row) ?? null
-    }
-  }
-
-  /** The load is handled (built by hand, a duplicate, already booked): clear it from Intake without building another shipment. */
-  async function markDone(row: IntakeLoadRecord) {
-    try {
-      await dismissIntake({ intakeId: row.id, expectedVersion: row.version, reason: 'Marked done from the Intake list' })
-      toast.success('Marked done')
-      open.refresh()
-    } catch (err) {
-      toast.error(`Could not mark done: ${err instanceof Error ? err.message : 'unknown error'}`)
     }
   }
 

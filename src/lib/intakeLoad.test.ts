@@ -169,14 +169,11 @@ describe('canMoveToActive', () => {
     expect(`Needs: ${result.missing.join(', ')}`).toBe(needsLine(keys))
   })
 
-  it('a complete, fully confirmed load still cannot move until a reviewer has marked it reviewed', () => {
+  it('a complete, fully confirmed load can move without anyone marking it reviewed (there is no review step)', () => {
     const base = readyRow()
     const unreviewed = { ...base, reviewedBy: null, reviewedAt: null }
-    expect(canMoveToActive(unreviewed, ctx)).toEqual({ ok: false, missing: [], problems: [], unconfirmed: [], needsReview: true })
-    expect(canMarkReviewed(unreviewed, ctx).ok).toBe(true)
-    // Either half of the stamp missing is not a review.
-    expect(canMoveToActive({ ...base, reviewedAt: null }, ctx).needsReview).toBe(true)
-    expect(canMoveToActive({ ...base, reviewedBy: null }, ctx).needsReview).toBe(true)
+    expect(canMoveToActive(unreviewed, ctx)).toEqual({ ok: true, missing: [], problems: [], unconfirmed: [], needsReview: false })
+    expect(canMoveToActive({ ...base, reviewedAt: null }, ctx).needsReview).toBe(false)
   })
 
   it('an incomplete load cannot be marked reviewed, and a review does not rescue it', () => {
@@ -205,12 +202,12 @@ describe('customer defaults for a new load', () => {
     expect(customerDefaultsOf({ billToParties: [{ id: 'a' }, { id: 'b' }] }).billToId).toBeNull()
   })
 
-  it('the staged draft starts with the defaults, marked DEFAULT, but is still blocked until reviewed', () => {
+  it('the staged draft starts with the defaults, marked DEFAULT, and no longer waits on a review', () => {
     const d = draft({ customer: { accountOwnerIds: ['owner@bcatcorp.com'], billToParties: [{ id: 'bt1', isDefault: true }] } })
     expect(d.fields).toMatchObject({ salesRepId: 'owner@bcatcorp.com', billToId: 'bt1' })
     expect(d.meta.salesRepId.source).toBe('DEFAULT')
     const row = { fields: { ...d.fields, customerRateCents: 150000, deliveryNumber: 'D1' }, meta: d.meta, confirmed: [], reviewedBy: null, reviewedAt: null }
-    expect(canMoveToActive(row, ctx)).toMatchObject({ ok: false, needsReview: true, missing: [] })
+    expect(canMoveToActive(row, ctx)).toMatchObject({ needsReview: false, missing: [] })
   })
 
   it('a customer without defaults leaves the fields empty and the gate still blocks on them', () => {

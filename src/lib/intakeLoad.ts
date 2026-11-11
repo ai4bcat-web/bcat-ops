@@ -424,14 +424,16 @@ export function canMarkReviewed(
   return { ok: !problems.length && !missing.length && !unconfirmed.length, missing, problems, unconfirmed }
 }
 
-/** A load becomes an Active shipment only when complete AND explicitly marked reviewed (Step AA). */
+/**
+ * A load becomes an Active shipment when it is complete. There is no separate review step any more (Ryne 2026-11-10): the person who
+ * presses Create shipment has looked at it. `needsReview` stays on the verdict (always false) so older callers keep compiling.
+ */
 export function canMoveToActive(
   row: Pick<IntakeLoadRecord, 'fields' | 'meta' | 'confirmed' | 'reviewedAt' | 'reviewedBy'>,
   ctx: IntakeReadinessCtx,
 ): IntakeVerdict {
   const base = canMarkReviewed(row, ctx)
-  const needsReview = !row.reviewedAt || !row.reviewedBy
-  return { ...base, ok: base.ok && !needsReview, needsReview }
+  return { ...base, needsReview: false }
 }
 
 // ── reviewer edits ───────────────────────────────────────────────────────────
