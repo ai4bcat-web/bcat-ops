@@ -125,7 +125,12 @@
 
 /* Users page: the add-user form beside the list on wide screens, stacked on narrow ones, so the list is never squeezed. */
 .tms-shell .tms-users-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
-@media (min-width: 1180px) { .tms-shell .tms-users-layout { grid-template-columns: 340px minmax(0, 1fr); } }
+/* Wide: the invite card holds the left column for the whole height; Roles and the All Users list stack in the right column under it. */
+@media (min-width: 1180px) {
+  .tms-shell .tms-users-layout { grid-template-columns: 340px minmax(0, 1fr); }
+  .tms-shell .tms-users-layout > :first-child { grid-column: 1; grid-row: 1 / span 2; }
+  .tms-shell .tms-users-layout > :nth-child(n + 2) { grid-column: 2; }
+}
 .tms-shell .tms-users-claims { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
 .tms-shell .tms-users-pagebar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
 .tms-shell .tms-users-pagebar > :first-child { max-width: 280px; }
