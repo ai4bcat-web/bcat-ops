@@ -30,6 +30,9 @@ import { coveredRows, needsCoverRows, offersByShipment, openOffers } from './car
 import { CarrierLookup } from './CarrierLookup'
 import { OffersHub } from './OffersHub'
 import { UnmatchedOffers } from './UnmatchedOffers'
+import { CarrierOffersPanel } from './CarrierOffersPanel'
+import { DemoLoads } from './DemoLoads'
+import { targetFromDemo, targetFromRow, type OffersTarget } from './offersTarget'
 import { useUnmatchedOffers } from './useUnmatchedOffers'
 
 type TabKey = 'needs-cover' | 'offers' | 'unmatched' | 'covered'
@@ -108,6 +111,8 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   const [search, setSearch] = useState('')
   // Step AM: Cover opens a dialog right here instead of hopping to the shipment, and the Covered tab filters by ladder rung.
   const [coverRow, setCoverRow] = useState<ShipmentListRow | null>(null)
+  // Click any load to see its offers by channel (voice + email). Only the labelled demo loads carry (fake) offers.
+  const [offersTarget, setOffersTarget] = useState<OffersTarget | null>(null)
   const [ladderFilter, setLadderFilter] = useState<CarrierAssignmentStatus | 'ALL'>('ALL')
   const [pageSize, setPageSize] = useState(PAGE_STEP)
   const [dense, setDense] = useState<DenseFilters>({})
@@ -176,13 +181,13 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
       case 'rate': return r.customerRateCents == null ? '—' : formatCents(r.customerRateCents)
       case 'posted': return r.datPostedAt ? <TmsBadge tone="blue">Posted</TmsBadge> : null
       case 'offers': return offers ? offerCounts.get(r.id) ?? 0 : <span className="tms-muted">—</span>
-      case 'cover': return <TmsButton variant="primary" size="sm" aria-label={`Cover ${r.number}`} data-testid="cover-row" onClick={() => setCoverRow(r)}>Cover</TmsButton>
+      case 'cover': return <TmsButton variant="primary" size="sm" aria-label={`Cover ${r.number}`} data-testid="cover-row" onClick={(e) => { e.stopPropagation(); setCoverRow(r) }}>Cover</TmsButton>
       case 'carrier': return <span>{r.carrierName || '—'}{r.carrierMc ? <span className="tms-muted" style={{ marginLeft: 4, fontSize: 12 }}>MC {r.carrierMc}</span> : null}</span>
       case 'ratecon': return <TmsBadge tone={r.rateConSignedAt ? 'green' : r.rateConStatus && r.rateConStatus !== 'NOT_SENT' ? 'orange' : 'gray'}>{rateConText(r)}</TmsBadge>
       case 'sent': return formatDateTime(r.rateConSentAt)
       case 'ladder': return <CarrierAssignmentChip ladder={r.carrierAssignmentStatus} shipmentStatus={r.status} />
       case 'packet': return <PacketChip row={r} />
-      case 'open': return <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={carrierTabPath(r.id)} aria-label={`Open ${r.number}`}>Open</Link>
+      case 'open': return <Link className="tms-btn tms-btn-secondary tms-btn-sm" to={carrierTabPath(r.id)} aria-label={`Open ${r.number}`} onClick={(e) => e.stopPropagation()}>Open</Link>
       default: return null
     }
   }
@@ -264,6 +269,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
         {gridTab ? (
           <>
             <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+            {!isCovered && <DemoLoads onOpen={(d) => setOffersTarget(targetFromDemo(d))} />}
             <div className="tms-dense-body">
               <DenseGrid<ShipmentListRow>
                 aria-label={isCovered ? 'Covered loads' : 'Loads needing cover'}
@@ -274,6 +280,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
                 fitRows={searched}
                 rowKey={(r) => r.id}
                 renderCell={renderCell}
+                onRowClick={(r) => setOffersTarget(targetFromRow(r))}
                 density={prefs.density}
                 userWidths={prefs.widths}
                 stickyCount={Math.max(1, prefs.pinned.length + 1)}
@@ -310,6 +317,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
           </div>
         )}
       </div>
+      <CarrierOffersPanel target={offersTarget} onClose={() => setOffersTarget(null)} />
       {coverRow && (
         <CoverCarrierDialog
           shipmentId={coverRow.id}

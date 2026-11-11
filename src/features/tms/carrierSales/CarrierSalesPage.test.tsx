@@ -174,4 +174,22 @@ describe('CarrierSalesPage', () => {
     expect(within(grid).getByText('Hauler')).toBeTruthy()
     expect(within(grid).getByRole('link', { name: 'Open S-5' })).toBeTruthy()
   })
+  it('clicking a real load opens the offers panel with a "No offers yet" empty state and no demo data', async () => {
+    await renderPage()
+    const grid = screen.getByRole('table', { name: 'Loads needing cover' })
+    fireEvent.click(within(grid).getByText('S-1'))
+    expect(screen.getByTestId('offers-panel')).toBeTruthy()
+    expect(screen.getByText('No offers yet')).toBeTruthy()
+    expect(screen.queryByTestId('channel-voice')).toBeNull()
+  })
+
+  it('lists the labelled Demo loads and a demo row opens the voice + email panel', async () => {
+    await renderPage()
+    const demo = screen.getByTestId('demo-loads')
+    expect(within(demo).getAllByText('DEMO DATA').length).toBeGreaterThan(1)
+    fireEvent.click(within(demo).getByRole('button', { name: 'Open offers for DEMO-4102' }))
+    expect(screen.getByTestId('channel-voice')).toBeTruthy()
+    expect(screen.getByTestId('channel-email')).toBeTruthy()
+    expect(screen.getByTestId('demo-banner')).toBeTruthy()
+  })
 })
