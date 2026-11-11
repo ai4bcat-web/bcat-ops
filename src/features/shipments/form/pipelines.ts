@@ -6,9 +6,9 @@
  * passes `resume` to re-run only what did not finish.
  */
 import {
-  addCarrier, assignAsset, assignCarrierRep, clearRevTag, commitDocument, createLocation, createShipment, getShipmentBundle,
+  addCarrier, assignAsset, assignCarrierRep, clearRevTag, commitDocument, createLocation, createShipment,
   prepareDocumentUpload, putPresignedFile, recalcCharges, saveOrderForm, setEta, setRevTag, setSalesRep, setShipmentCustomer,
-  setStopDrivers, submitOrder, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
+  getShipmentBundle, setStopDrivers, submitOrder, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
   type UpdateLoadCarrierDetailsInput,
 } from '@/lib/apiClient'
 import { apptNotices } from '@/lib/apptNotify'
@@ -431,8 +431,8 @@ export async function runEditSave(values: ShipmentFormValues, ctx: PipelineCtx, 
     if (eq({ ...next, expectedUpdatedAt: '' }, { ...prev, expectedUpdatedAt: '' })) return
     return updateOrderDetails(next)
   })
-  await r.run('stops', async () => {
-    for (const op of diffStopOps(before, values)) {
+  const runStopOps = async (from: ShipmentFormValues) => {
+    for (const op of diffStopOps(from, values)) {
       const b = r.bundle!
       const load = b.loads[0]
       if (!load) break
@@ -441,6 +441,18 @@ export async function runEditSave(values: ShipmentFormValues, ctx: PipelineCtx, 
       else if (op.op === 'REMOVE') r.bundle = await updateStop({ ...common, op: 'REMOVE', stopId: op.stopId })
       else if (op.op === 'SET_DETAILS') r.bundle = await updateStopDetails({ ...common, stopId: op.stopId, patch: op.patch })
       else r.bundle = await updateStop({ ...common, op: op.op, stopId: op.stopId, patch: op.patch })
+    }
+  }
+  await r.run('stops', async () => {
+    try {
+      await runStopOps(before)
+    } catch (err) {
+      // "Stop not found": the page's copy of the load named a stop the server no longer has (the load changed since the page read it).
+      // Read the load again, diff the form against what is really there and apply that once; anything else still fails as it did.
+      if (!/^Stop not found/i.test(errorMessage(err))) throw err
+      const fresh = await getShipmentBundle(bundle.shipment.id)
+      r.bundle = fresh
+      await runStopOps(valuesFromBundle(fresh, seed))
     }
   })
   await r.run('charges', async () => {

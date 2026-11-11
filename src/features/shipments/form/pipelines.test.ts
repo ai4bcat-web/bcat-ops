@@ -218,6 +218,32 @@ describe('edit pipelines', () => {
     expect(api.assignAsset).not.toHaveBeenCalled()
   })
 
+  it('Stop not found while saving: the load is read again and the form is applied against what is really there, once', async () => {
+    const b = storedBundle(filledValues(), { status: 'OPEN' })
+    const v = valuesFromBundle(b, { customer: CUSTOMER })
+    v.stops[0].city = 'Elm Springs' // a stop edit, so UPDATE_STOP has work to do
+    api.updateStop.mockRejectedValueOnce(new Error('Stop not found: stp-cca9b591-52f9-4c04-af08-7120fd8b82e0'))
+    api.updateStop.mockImplementation(async () => b)
+    api.getShipmentBundle.mockResolvedValue(b)
+    api.updateOrderDetails.mockResolvedValue(b)
+    const res = await runEditSave(v, ctx, b)
+    expect(api.getShipmentBundle).toHaveBeenCalledTimes(1)
+    expect(api.updateStop.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(res.steps.find((x) => x.step === 'stops')?.ok).toBe(true)
+  })
+
+  it('any other stop error still fails the save exactly as before, with no second read', async () => {
+    const b = storedBundle(filledValues(), { status: 'OPEN' })
+    const v = valuesFromBundle(b, { customer: CUSTOMER })
+    v.stops[0].city = 'Elm Springs'
+    api.updateStop.mockRejectedValue(new Error('A load must keep at least one pickup and one delivery'))
+    api.updateOrderDetails.mockResolvedValue(b)
+    const res = await runEditSave(v, ctx, b)
+    expect(res.ok).toBe(false)
+    expect(res.message).toContain('at least one pickup')
+    expect(api.getShipmentBundle).not.toHaveBeenCalled()
+  })
+
   describe('pickup and delivery drivers', () => {
     const second = { id: 'driver-8', name: 'Sam Lee', email: '', phone: '', workPhone: '', truckId: 'truck-8', truckNumber: '8', trailerId: 'trailer-8', trailerNumber: 'T8' }
     const withStopDrivers = (b: ShipmentBundle, pickup: string | null, delivery: string | null): ShipmentBundle => ({
