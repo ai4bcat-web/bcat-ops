@@ -54,6 +54,15 @@ describe('buildNavSections', () => {
   const labels = (items: Array<{ label: string }> | undefined) => (items ?? []).map((i) => i.label)
   const pinnedOf = (...keys: string[]) => buildNavSections({ divisions: FOUR, hasPageAccess: grants(...keys) }).pinned
 
+  it('a Payroll page alone (Box Truck Settlements, no accounting page) still gets its Accounting > Payroll menu entry', () => {
+    const accounting = pinnedOf('driverPayBoxTrucks').find((i) => i.label === 'Accounting')
+    expect(accounting?.children).toBeUndefined()
+    expect(accounting?.childGroups?.map((g) => [g.label, g.children.map((c) => c.label)])).toEqual([['Payroll', ['Box Truck Settlements']]])
+    expect(accounting?.to).toBe('/driver-pay-box-trucks')
+    // ...and nobody without a payroll or accounting page gets the row at all.
+    expect(pinnedOf('dashboard').find((i) => i.label === 'Accounting')).toBeUndefined()
+  })
+
   it('gives the owner the whole rail in order: the pinned freight list, then Assets, Car shipping, Company', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     expect(labels(pinned)).toEqual([

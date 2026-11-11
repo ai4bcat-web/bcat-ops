@@ -398,17 +398,17 @@ export function buildNavSections({
     if (def.showWithPath && !pinned.some((p) => p.to === def.showWithPath)) continue
     // A row that is a page in its own right only lists its children when the person can open that page.
     const children = (def.group || ownVisible ? def.children ?? [] : []).filter(visible).map<TmsNavChild>(toChild)
-    // A group (Accounting) lists its labeled sub-lists only when one of its plain children shows: the Payroll pages ride on that access.
-    const groups = (def.group && children.length === 0 ? [] : def.childGroups ?? [])
+    // A group (Accounting) lists its labeled sub-lists (Payroll) on their own page grants: someone with Box Truck Settlements and no accounting page still gets the entry (Ryne 2026-11-11, Ruben).
+    const groups = (def.group || ownVisible ? def.childGroups ?? [] : [])
       .map((g) => ({ label: g.label, children: g.children.filter(visible).map<TmsNavChild>(toChild) }))
       .filter((g) => g.children.length > 0)
     // A group is only as visible as its children; a page is visible by its own gate.
-    if (def.group ? children.length === 0 : !ownVisible) continue
+    if (def.group ? children.length === 0 && groups.length === 0 : !ownVisible) continue
     if (def.showWithPath) movedUnderPinned.add(def.to)
     for (const c of children) movedUnderPinned.add(c.to)
     for (const g of groups) for (const c of g.children) movedUnderPinned.add(c.to)
     pinned.push({
-      to: def.group ? children[0].to : def.to,
+      to: def.group ? (children[0]?.to ?? groups[0]!.children[0]!.to) : def.to,
       label: def.label,
       icon: def.icon,
       badge: def.badge ?? null,
