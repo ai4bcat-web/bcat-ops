@@ -2,10 +2,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { TmsButton, TmsDialog } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsDialog } from '@/features/tms/kit'
 import { setTrackingPrefs } from '@/lib/apiClient'
 import { parseTrackingPrefs, trackingModeNotSet, type TrackingPrefsOverride } from '@/lib/trackingPrefs'
-import { rowLinkSent } from '@/lib/trackingLinkState'
+import { rowLinkStage } from '@/lib/trackingLinkState'
 import { TRACKING_SET_PATH, isCoveredAndLive } from './trackingModeRow'
 import './trackingModeControl.css'
 
@@ -34,7 +34,7 @@ export function TrackingModeNotSetChip({ shipment, hasCarrier, className }: {
  * either or both) or mark tracking not required. A load marked not required shows a gray "Tracking not required" pill instead.
  */
 export function TrackingModeNotSetRowChip({ row }: {
-  row: { id?: string; revDivision?: string | null; number?: string | null; trackingPrefs?: unknown; createdAt?: string | null; assignmentType?: string | null; status?: string | null; voidedAt?: string | null; trackingStartedAt?: string | null; trackingStoppedAt?: string | null }
+  row: { id?: string; revDivision?: string | null; number?: string | null; trackingPrefs?: unknown; createdAt?: string | null; assignmentType?: string | null; status?: string | null; voidedAt?: string | null; trackingStartedAt?: string | null; trackingStoppedAt?: string | null; trackingAcceptedAt?: string | null }
 }) {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -46,7 +46,9 @@ export function TrackingModeNotSetRowChip({ row }: {
     return <span className="tms-trk-notreq tms-trk-notset-row" data-testid="tracking-not-required" title="Tracking is not required on this load.">{TRACKING_NOT_REQUIRED_TEXT}</span>
   }
   // The chip follows the link itself: once a link has gone out, "not sent" is false, whatever the old tracking-mode setting says.
-  if (rowLinkSent(row)) return <span className="tms-trk-notreq tms-trk-notset-row" data-testid="tracking-link-sent" title="A tracking link has been sent to the driver.">Tracking link sent</span>
+  const stage = rowLinkStage(row)
+  if (stage === 'ACCEPTED') return <TmsBadge tone="green" className="tms-trk-notset-row" data-testid="tracking-link-accepted" title="The driver accepted the tracking link and is sharing location.">Driver accepted</TmsBadge>
+  if (stage === 'SENT') return <TmsBadge tone="blue" className="tms-trk-notset-row" data-testid="tracking-link-sent" title="A tracking link has been sent to the driver; waiting for them to accept.">Tracking link sent</TmsBadge>
   const className = 'tms-trk-notset tms-trk-notset-row'
   const title = 'Covered, but no tracking link has been sent yet. Click to send one or mark tracking not required.'
   if (!row.id) return <span className={className} data-testid="tracking-not-set" title={title}>{TRACKING_NOT_SET_TEXT}</span>

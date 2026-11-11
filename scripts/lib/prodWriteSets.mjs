@@ -58,6 +58,8 @@ export const PROD_WRITE_SETS = {
   awCustomersActivate: { models: ['Customer', 'AuditLog'] },
   // `awPodToPdf.mjs --apply`: ACTIVE ShipmentDocument rows (any type) stored as JPEG/PNG point at a PDF made from the photo (new S3 object next to it, photo kept) + one AuditLog row each.
   awPodToPdf: { models: ['ShipmentDocument', 'AuditLog'] },
+  // `awTrackingAccepted.mjs --apply`: LoadCarrier.trackingAcceptedAt = the active tracking link's consentAt, only while empty (conditional update) + one AuditLog row each.
+  awTrackingAccepted: { models: ['LoadCarrier', 'AuditLog'] },
   // `awDriverDelete.mjs --apply`: deletes the given Driver rows (with --detach: clears Load/LoadCarrier driver ids and deletes the driver's submissions first; releases its company phone) with an AuditLog row holding the row.
   awDriverDelete: { models: ['Driver', 'Load', 'LoadCarrier', 'DriverSubmission', 'DriverSubmissionDoc', 'CompanyPhone', 'AuditLog'] },
   awSalesRepDivision: { models: ['Shipment', 'Order', 'TmsSettings', 'AuditLog'] },

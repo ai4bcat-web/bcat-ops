@@ -2278,6 +2278,9 @@ const schema = a.schema(stageTypes({
       trackingLinkId:    a.string(),
       trackingStartedAt: a.datetime(),
       trackingStoppedAt: a.datetime(),
+      // When the driver first accepted the tracking link and started sharing location (the link's consentAt, copied here so the boards
+      // can show sent / accepted without reading TrackingLink). Written once per sent link by tracking-api.
+      trackingAcceptedAt: a.datetime(),
       // ── Multiple carriers per load (AT-plan MC0) ───────────────────────
       // Stop.id values from Load.stops this carrier covers. Absent/empty = all stops.
       legStopIds:        a.string().array(),

@@ -749,6 +749,23 @@ async function pingRoute(token: string, event: FnUrlEvent) {
   }
 
   if (firstConsent) await logAppUpdate(link, 'Driver accepted the tracking link and started sharing location', nowIso)
+  // The boards read acceptance off the assignment: stamp it once per sent link (a re-sent link has a newer trackingStartedAt, so the old stamp
+  // no longer counts and the new acceptance writes again). A failure here never fails the ping: the link's own consentAt is the record.
+  if (firstConsent && link.loadCarrierId) {
+    try {
+      await ddb.send(new UpdateCommand({
+        TableName: LOAD_CARRIER_TABLE,
+        Key: { id: link.loadCarrierId },
+        UpdateExpression: 'SET trackingAcceptedAt = :at, updatedAt = :at',
+        ConditionExpression: 'attribute_not_exists(trackingAcceptedAt) OR trackingAcceptedAt < trackingStartedAt',
+        ExpressionAttributeValues: { ':at': nowIso },
+      }))
+    } catch (err) {
+      if ((err as { name?: string } | null)?.name !== 'ConditionalCheckFailedException') {
+        console.warn('[tracking-api] could not stamp trackingAcceptedAt', String(err))
+      }
+    }
+  }
 
   const truckNumber = (loadRow as { truckNumber?: unknown } | null)?.truckNumber
   await putPing({ ddb, table: TRUCK_LOCATION_HISTORY_TABLE }, {

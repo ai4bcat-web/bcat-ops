@@ -385,10 +385,25 @@ describe('POST /l/<token>/ping', () => {
     expect(linkUpdate()?.UpdateExpression).toContain('ADD pingCount :one')
     // Set once: a later consenting post cannot move the moment the driver agreed.
     expect(linkUpdate()?.UpdateExpression).toContain('consentAt = if_not_exists(consentAt, :now)')
-    const carrierUpdate = sent().find((c) => c.__cmd === 'Update' && c.TableName === TABLES.loadCarrier)
+    const carrierUpdate = sent().find((c) => c.__cmd === 'Update' && c.TableName === TABLES.loadCarrier && String(c.UpdateExpression).includes('deliveryEtaAt'))
     expect(carrierUpdate?.UpdateExpression).toContain('deliveryEtaAt')
     // The public role has no Load write; nothing here may try one.
     expect(writes().some((c) => c.TableName === TABLES.load)).toBe(false)
+  })
+
+  it('the first acceptance stamps trackingAcceptedAt on the assignment once per sent link; a later ping does not', async () => {
+    route({ link: carrierLink(), load: LOAD, carrier: { id: 'lc-1', loadId: 'ld-1', shipmentId: 'shp-1', status: 'ACTIVE' } })
+    expect((await post(`/l/${TOKEN}/ping`, fix)).statusCode).toBe(200)
+    const stamp = sent().find((c) => c.__cmd === 'Update' && c.TableName === TABLES.loadCarrier && String(c.UpdateExpression).includes('trackingAcceptedAt'))
+    expect(stamp?.Key).toEqual({ id: 'lc-1' })
+    // Once per link: a re-sent link (newer trackingStartedAt) is allowed to stamp again, the same link's repeats are not.
+    expect(stamp?.ConditionExpression).toBe('attribute_not_exists(trackingAcceptedAt) OR trackingAcceptedAt < trackingStartedAt')
+  })
+
+  it('an already-consented link stamps nothing on the assignment', async () => {
+    route({ link: consented(), load: LOAD, carrier: { id: 'lc-1', loadId: 'ld-1', shipmentId: 'shp-1', status: 'ACTIVE' } })
+    await post(`/l/${TOKEN}/ping`, { lat: 38.4, lng: -92.1, accuracyM: 12 })
+    expect(sent().some((c) => String(c.UpdateExpression).includes('trackingAcceptedAt'))).toBe(false)
   })
 
   it('403s a link nobody has agreed to, and writes nothing — not even the counter', async () => {

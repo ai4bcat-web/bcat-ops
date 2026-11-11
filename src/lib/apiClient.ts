@@ -2426,12 +2426,17 @@ let loadCarriersHaveAp = true
 // override. A fifth generation with its own flag, shipped with the schema.
 const LOAD_CARRIER_V5_FIELDS = ['legStopIds', 'trackingPrefs']
 let loadCarriersHaveLegs = true
+// The driver's tracking link on the assignment: sent, stopped and (new) accepted. The board chips read these; they were never in the board's
+// field list, so a row could not tell a sent link from none. Own flag, dropped and retried on a backend that predates trackingAcceptedAt.
+const LOAD_CARRIER_V6_FIELDS = ['trackingLinkId', 'trackingStartedAt', 'trackingStoppedAt', 'trackingAcceptedAt']
+let loadCarriersHaveTracking = true
 const loadCarrierFields = () => [
   LOAD_CARRIER_FIELDS,
   loadCarriersHaveCarrierV2 ? LOAD_CARRIER_V2_FIELDS.join(' ') : '',
   loadCarriersHaveDocuments ? LOAD_CARRIER_V3_FIELDS.join(' ') : '',
   loadCarriersHaveAp ? LOAD_CARRIER_V4_FIELDS.join(' ') : '',
   loadCarriersHaveLegs ? LOAD_CARRIER_V5_FIELDS.join(' ') : '',
+  loadCarriersHaveTracking ? LOAD_CARRIER_V6_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 
 /** Every LoadCarrier read, with a group dropped and retried if the backend predates it. */
@@ -2440,6 +2445,11 @@ async function readLoadCarriers<T>(run: (fields: string) => Promise<T>): Promise
     try {
       return withParsedPrefs(await run(loadCarrierFields()))
     } catch (err) {
+      if (loadCarriersHaveTracking && fieldNamed(LOAD_CARRIER_V6_FIELDS, err)) {
+        console.warn('[apiClient] backend has no tracking-link fields on LoadCarrier yet — querying without them until deploy')
+        loadCarriersHaveTracking = false
+        continue
+      }
       if (loadCarriersHaveLegs && fieldNamed(LOAD_CARRIER_V5_FIELDS, err)) {
         console.warn('[apiClient] backend has no leg fields on LoadCarrier yet — querying without them until deploy')
         loadCarriersHaveLegs = false
