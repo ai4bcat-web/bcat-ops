@@ -17,7 +17,7 @@ const fields = (over: Partial<IntakeFields> = {}): IntakeFields => ({
 describe('intakePrefill', () => {
   it('maps the extraction onto the form and marks exactly the fields it filled', () => {
     const { values, fromEmail } = intakePrefill({ fields: fields() }, null)
-    expect(values.customer).toMatchObject({ typedName: 'Acme Paper', useTyped: true, refNo: 'PO-77' })
+    expect(values.customer).toMatchObject({ typedName: 'Acme Paper', useTyped: true, refNo: '' })
     expect(values.ship).toMatchObject({ equipmentType: 'Dry Van', description: 'Paper', weightLbs: '20000' })
     expect(values.rates.customer).toMatchObject({ rateType: 'FLAT', lhRate: '1500.50' })
     // pickups first, whatever order the e-mail listed them in
@@ -25,7 +25,7 @@ describe('intakePrefill', () => {
     expect(values.stops[0]).toMatchObject({ refNo: 'PU-9', ready: '2026-11-10T08:30', appt: '2026-11-10T08:30' })
     expect(values.stops[1]).toMatchObject({ state: 'TX', refNo: 'DL-3', note: 'Call ahead', appt: '2026-11-11T00:00', ready: '' })
     expect(fromEmail).toEqual(expect.arrayContaining([
-      'f-customer-refNo', 'f-shipping-weightLbs', 'f-rates-customerLhRate', 'f-pickup-name', 'f-pickup-ready', 'f-consignee-city', 'f-consignee-note',
+      'f-shipping-weightLbs', 'f-rates-customerLhRate', 'f-pickup-name', 'f-pickup-ready', 'f-consignee-city', 'f-consignee-note',
     ]))
     expect(fromEmail).not.toContain('f-customer-name') // typed text, no directory record picked
     expect(fromEmail).not.toContain('f-pickup-contact')

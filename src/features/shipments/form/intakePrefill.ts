@@ -54,7 +54,7 @@ export function intakePrefill(row: Pick<IntakeLoadRecord, 'fields'>, customer: C
     v = { ...v, customer: { ...v.customer, typedName: text(f.customerName), useTyped: true } }
   }
   if (text(f.billToId)) { v = { ...v, customer: { ...v.customer, billToId: text(f.billToId) } }; mark('f-customer-billTo') }
-  if (text(f.reference)) { v = { ...v, customer: { ...v.customer, refNo: text(f.reference) } }; mark('f-customer-refNo') }
+  // Customer ref is typed by a person: the tender's extracted reference is never copied into it (it was landing on the wrong PO).
   if (text(f.salesRepId)) { v = { ...v, roles: { ...v.roles, salesRepId: text(f.salesRepId) } }; mark('f-roles-salesRepId') }
   if (text(f.divisionCode)) {
     v = typeForDivisionChange(v, { ...v, ship: { ...v.ship, revDivision: text(f.divisionCode) } })

@@ -141,20 +141,11 @@ describe('CustomerRef (header strip)', () => {
     expect(wrapper().querySelector('.tms-fg-label-text')!.textContent).toBe('Customer ref')
   })
 
-  it('is green only when the customer demands a PO (required reference, or a set review-requirements list)', () => {
+  it('is always required, whatever the customer settings say', () => {
     ref(ACME)
-    expect(wrapper().classList.contains('tms-field-req')).toBe(false)
-    cleanup()
-    ref(mk('c1', 'Needs PO', { requiredReferences: [{ code: 'PO', label: 'PO', level: 'ORDER', display: true, countOnNewOrder: 1 }] }))
     expect(wrapper().classList.contains('tms-field-req')).toBe(true)
     cleanup()
-    ref(mk('c2', 'Custom list', { reviewRequirements: ['salesRep', 'referenceNumber'] }))
-    expect(wrapper().classList.contains('tms-field-req')).toBe(true)
-    cleanup()
-    ref(mk('c3', 'Opted out', { reviewRequirements: ['salesRep'] }), { reviewRequirements: ['referenceNumber'] })
-    expect(wrapper().classList.contains('tms-field-req')).toBe(false)
-    cleanup()
-    ref(mk('c4', 'Org list'), { reviewRequirements: ['referenceNumber'] })
+    ref(mk('c3', 'Opted out', { reviewRequirements: ['salesRep'] }))
     expect(wrapper().classList.contains('tms-field-req')).toBe(true)
   })
 })

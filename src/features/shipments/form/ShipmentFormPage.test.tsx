@@ -215,9 +215,9 @@ describe('ShipmentFormPage — issues and rail', () => {
     renderForm('create')
     const count = screen.getByTestId('rail-required-count')
     // Shipment type defaults to Truckload, so that row starts done.
-    expect(count.textContent).toBe('1 / 8')
+    expect(count.textContent).toBe('1 / 9')
     fireEvent.change(screen.getByTestId('f-customer-name'), { target: { value: 'ZZ Customer' } })
-    expect(count.textContent).toBe('2 / 8')
+    expect(count.textContent).toBe('2 / 9')
     expect(screen.getByTestId('rail-req-customer').getAttribute('data-done')).toBe('true')
     expect(screen.getByTestId('rail-req-equipment').getAttribute('data-missing')).toBe('false')
     fireEvent.click(screen.getByTestId('rail-req-equipment'))
