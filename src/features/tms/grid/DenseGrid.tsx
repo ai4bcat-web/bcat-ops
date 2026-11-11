@@ -155,18 +155,21 @@ export function DenseGrid<T>({
   const [liveWidths, setLiveWidths] = useState<Record<string, number>>({})
   // Widths read off the rendered cells: a column that still clips its content grows to show all of it (see the effect below).
   const [measuredWidths, setMeasuredWidths] = useState<Record<string, number>>({})
+  // Columns the person dragged in this session: their width is deliberate, so auto-fit leaves them alone. A width merely SAVED from an earlier
+  // visit or set by a template is not: it can no longer clip what the column shows (Ryne 2026-11-11: full driver names must be visible).
+  const [draggedKeys, setDraggedKeys] = useState<ReadonlySet<string>>(() => new Set())
 
   const fit = fitRows ?? rows
   const widths = useMemo(() => {
     const base = columnWidths(columns, userWidths, fit, uppercase ? CAPS_WIDTH_FACTOR : 1)
-    // A measured width only widens a column nobody sized: never a fixed one, never one the person dragged.
+    // A measured width only widens a column that has no fixed width and was not dragged this session; saved or template widths do not block it.
     const grown: Record<string, number> = {}
     for (const col of columns) {
       const m = measuredWidths[col.key]
-      if (m != null && col.width == null && userWidths[col.key] == null && m > (base[col.key] ?? 0)) grown[col.key] = m
+      if (m != null && col.width == null && !draggedKeys.has(col.key) && m > (base[col.key] ?? 0)) grown[col.key] = m
     }
     return { ...base, ...grown, ...liveWidths }
-  }, [columns, userWidths, liveWidths, measuredWidths, fit, uppercase])
+  }, [columns, userWidths, liveWidths, measuredWidths, draggedKeys, fit, uppercase])
 
   // Auto-fit for real: the estimate above counts characters, so a cell with chips or wide letters can still clip. After each paint, read what
   // the rendered cells need (scrollWidth is the full content width even when the cell clips it) and widen the column to show it, up to the cap.
@@ -176,7 +179,7 @@ export function DenseGrid<T>({
     const frame = requestAnimationFrame(() => {
       const grown: Record<string, number> = {}
       for (const col of columns) {
-        if (col.width != null || col.fixed || userWidths[col.key] != null) continue
+        if (col.width != null || col.fixed || draggedKeys.has(col.key)) continue
         let need = 0
         root.querySelectorAll<HTMLElement>(`td[data-col="${col.key.replace(/"/g, '')}"]`).forEach((td) => {
           // The cell itself, or a chip or span inside it that clips its own text: whichever needs more room.
@@ -294,6 +297,7 @@ export function DenseGrid<T>({
         delete rest[col.key]
         return rest
       })
+      setDraggedKeys((prev) => new Set(prev).add(col.key))
       onResize?.(col.key, latest)
     }
     document.addEventListener('mousemove', move)

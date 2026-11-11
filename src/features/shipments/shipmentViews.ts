@@ -827,7 +827,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'deliveryApptStatus', label: 'Delivery Appt Status', group: 'Shipment', value: (r) => apptStatusText(r, 'delivery'), width: 150 },
   { key: 'stops', label: 'Stops', group: 'Computed', value: (r) => (r.stopCount == null ? '' : String(r.stopCount)), width: 70 },
   { key: 'salesRepId', label: 'Customer rep', group: 'Order', value: (r) => r.salesRepName ?? r.customerRepName ?? '', width: 140 },
-  { key: 'driver', label: 'Driver', group: 'Load', value: (r) => driverNamesOf(r).join(', '), width: 300 },
+  { key: 'driver', label: 'Driver', group: 'Load', value: (r) => driverNamesOf(r).join(', ') },
   { key: 'truck', label: 'Truck', group: 'Load', value: (r) => r.truckNumber ?? '', width: 100 },
   { key: 'arStatus', label: 'AR', group: 'Order', value: (r) => enumLabel(r.arStatus), width: 120 },
   { key: 'apStatus', label: 'AP', group: 'Carrier leg', value: (r) => enumLabel(r.apStatus), width: 120 },
