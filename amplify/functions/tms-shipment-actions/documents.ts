@@ -402,8 +402,8 @@ export async function commitDocument(deps: DocumentDeps, input: Row, caller: Cal
   const bundle = await liveBundle(deps, shipmentId)
   // A client that retries the commit after a dropped response must not end up
   // with the same file listed twice.
-  // A POD photo is filed as the PDF made from it (below), so a retried commit finds it under that key.
-  const podPdfKey = type === 'POD' && isPodImage(contentType) ? pdfKeyFor(s3Key) : null
+  // A photo or screenshot is filed as the PDF made from it (below), so a retried commit finds it under that key.
+  const podPdfKey = isPodImage(contentType) ? pdfKeyFor(s3Key) : null
   const already = bundle.documents.find((doc) => doc.s3Key === s3Key || (podPdfKey != null && doc.s3Key === podPdfKey))
   if (already) return { bundle, document: already }
 
@@ -433,9 +433,9 @@ export async function commitDocument(deps: DocumentDeps, input: Row, caller: Cal
     throw new Error(`Document content type mismatch: expected ${contentType}, found ${head.ContentType ?? 'none'}`)
   }
 
-  // Proof of delivery is always a PDF: a photo or screenshot is wrapped on a letter page. The original object stays in S3; a failed
+  // Every document is kept as a PDF: a JPEG or PNG is wrapped on a letter page. The original object stays in S3; a failed
   // conversion files the original as it came.
-  const converted = type === 'POD' ? await convertStoredPodImage(deps.s3, deps.bucket, { key: s3Key, contentType, name }) : null
+  const converted = await convertStoredPodImage(deps.s3, deps.bucket, { key: s3Key, contentType, name })
 
   const now = nowIso()
   const row: Row = {

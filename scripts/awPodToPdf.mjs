@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Turn every proof-of-delivery that is a JPEG or PNG into a PDF (Ryne 2026-11-10). Dry by default, prod-gated apply.
+ * Turn every document that is a JPEG or PNG into a PDF (Ryne 2026-11-10: PODs; 2026-11-11: every document type). Dry by default, prod-gated apply.
  *
- * For each ACTIVE ShipmentDocument of type POD whose content type is image/jpeg or image/png: read the photo from the document bucket, wrap it
+ * For each ACTIVE ShipmentDocument (any type) whose content type is image/jpeg or image/png: read the photo from the document bucket, wrap it
  * (upright, one letter page) as a PDF written NEXT TO it under the same key with .pdf (a new object; the photo is never touched or deleted),
  * then update the row (s3Key, contentType, name, sizeBytes) with a condition that the row still points at the photo, and add an AuditLog row
  * holding the old key. A document whose photo cannot be read or converted is listed and left exactly as it is.
@@ -24,9 +24,9 @@ import { imageToPdf, isPodImage, pdfKeyFor, pdfNameFor } from '../amplify/functi
 export const SCRIPT = 'awPodToPdf';
 export const PROD_BUCKET = 'amplify-d3dejqzs77khq6-ma-bcatrateconfirmsbucketf4-8peppeemuqmg';
 
-/** Pure: the ACTIVE POD documents still stored as a photo. */
+/** Pure: the ACTIVE documents (any type) still stored as a photo. */
 export function podPhotos(documents) {
-  return documents.filter((d) => d.type === 'POD' && d.status === 'ACTIVE' && typeof d.s3Key === 'string' && d.s3Key !== '' && isPodImage(d.contentType));
+  return documents.filter((d) => d.status === 'ACTIVE' && typeof d.s3Key === 'string' && d.s3Key !== '' && isPodImage(d.contentType));
 }
 
 async function scan(doc, table) { const rows = []; let key; do { const r = await doc.send(new ScanCommand({ TableName: table, ExclusiveStartKey: key, ConsistentRead: true })); rows.push(...(r.Items ?? [])); key = r.LastEvaluatedKey; } while (key); return rows; }
@@ -44,7 +44,7 @@ async function main() {
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
   const s3 = new S3Client({ region: REGION });
   const photos = podPhotos(await scan(doc, `ShipmentDocument-${suffix}`)).slice(0, limit);
-  console.log(`${photos.length} POD photo(s) to convert in ${bucket}${apply ? '' : ' (dry run)'}`);
+  console.log(`${photos.length} photo document(s) to convert in ${bucket}${apply ? '' : ' (dry run)'}`);
   const now = () => new Date().toISOString();
   let done = 0; let skipped = 0; let failed = 0;
   for (const d of photos) {
@@ -54,7 +54,7 @@ async function main() {
       if (!apply) { console.log(`WOULD ${label}: ${d.s3Key} -> ${newKey}`); continue; }
       assertWritableSuffix(suffix, 'POD to PDF');
       const got = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: d.s3Key }));
-      const pdf = await imageToPdf(await got.Body.transformToByteArray(), String(d.contentType), pdfNameFor(String(d.name ?? 'pod')));
+      const pdf = await imageToPdf(await got.Body.transformToByteArray(), String(d.contentType), pdfNameFor(String(d.name ?? 'document')));
       let exists = false;
       try { await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: newKey })); exists = true; } catch { /* not there yet */ }
       if (exists) { console.log(`SKIP  ${label}: ${newKey} already exists`); skipped += 1; continue; }
@@ -64,7 +64,7 @@ async function main() {
         UpdateExpression: 'SET s3Key = :k, contentType = :ct, #n = :name, sizeBytes = :size, updatedAt = :now',
         ConditionExpression: 's3Key = :old',
         ExpressionAttributeNames: { '#n': 'name' },
-        ExpressionAttributeValues: { ':k': newKey, ':ct': 'application/pdf', ':name': pdfNameFor(String(d.name ?? 'pod')), ':size': pdf.length, ':now': now(), ':old': d.s3Key },
+        ExpressionAttributeValues: { ':k': newKey, ':ct': 'application/pdf', ':name': pdfNameFor(String(d.name ?? 'document')), ':size': pdf.length, ':now': now(), ':old': d.s3Key },
       }));
       await doc.send(new PutCommand({ TableName: `AuditLog-${suffix}`, Item: { id: randomUUID(), __typename: 'AuditLog', entityType: 'SHIPMENT', entityId: String(d.shipmentId), action: 'AW_POD_TO_PDF', user: `system:${SCRIPT}`, changes: JSON.stringify({ documentId: d.id, from: d.s3Key, to: newKey, fromContentType: d.contentType }), createdAt: now(), updatedAt: now() } }));
       console.log(`DONE  ${label}`);

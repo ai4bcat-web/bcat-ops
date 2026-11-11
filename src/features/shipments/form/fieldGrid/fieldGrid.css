@@ -31,6 +31,7 @@
   white-space: nowrap; overflow: hidden;
 }
 .tms-shell .tms-fg-label-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tms-shell .tms-fg-star { flex: none; color: var(--tms-badge-red); font-weight: 700; }
 .tms-shell .tms-fg-info { flex: none; color: var(--tms-muted); cursor: help; }
 .tms-shell .tms-fg-control { display: flex; flex-direction: column; min-width: 0; }
 .tms-shell .tms-fg-control > input:not([type='checkbox']):not([type='radio']),

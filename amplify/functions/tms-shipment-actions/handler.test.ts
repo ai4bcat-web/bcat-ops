@@ -4435,14 +4435,14 @@ describe('documents', () => {
     expect(table(TABLES.shipmentDocument).size).toBe(1)
   })
 
-  it('keeps a non-POD photo as the image it is', async () => {
+  it('converts a photo of any document type to a PDF, not only a POD', async () => {
     const { Jimp } = await import('jimp')
     const photo = new Uint8Array(await new Jimp({ width: 128, height: 64, color: 0x336699ff }).getBuffer('image/jpeg'))
     const ids = await delivered()
     const prepared = await prepare(ids.shipmentId, { type: 'OTHER', name: 'dock.jpg', contentType: 'image/jpeg', sizeBytes: photo.length })
     putS3Object(prepared.s3Key, { ContentLength: photo.length, ContentType: 'image/jpeg', Bytes: photo })
     const res = (await commit(ids, prepared, { type: 'OTHER', name: 'dock.jpg', contentType: 'image/jpeg', sizeBytes: photo.length })) as { document: Row }
-    expect(res.document).toMatchObject({ contentType: 'image/jpeg', name: 'dock.jpg' })
+    expect(res.document).toMatchObject({ contentType: 'application/pdf', name: 'dock.pdf' })
   })
 
   it('re-caches what the order still needs in the same write', async () => {
