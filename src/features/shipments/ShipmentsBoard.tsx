@@ -106,6 +106,7 @@ import {
   needsDriver,
   toCsv,
   isDemoShipment,
+  podStatusOf,
   type ShipmentRow,
 } from './shipmentViews'
 import {
@@ -910,6 +911,13 @@ function BoardPane({
             )}
           </>
         )
+      }
+      if (columnKey === 'podStatus') {
+        const pod = podStatusOf(row)
+        if (!pod) return <span className="tms-muted">—</span>
+        return pod === 'NO_POD'
+          ? <TmsBadge tone="orange" title="No proof of delivery on file yet">No POD</TmsBadge>
+          : <span className="text-[color:var(--tms-badge-green)]">POD in</span>
       }
       if (columnKey === 'docsMissing') {
         if (row.docsMissing == null) return null

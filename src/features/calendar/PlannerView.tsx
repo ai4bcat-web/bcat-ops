@@ -26,6 +26,7 @@ import { updateStop, getStops } from '@/lib/stops'
 import { ApptEditPopover } from '@/components/ApptEditPopover'
 import { computeMoveDates, computeStopMove, type MoveRole } from '@/lib/calendarMoves'
 import { compareByOrder, persistDragOrder, groupRowsByDriver } from '@/lib/calendarOrder'
+import { loadStatusText } from './loadStatusText'
 import { cn } from '@/lib/utils'
 import type { Load, Driver, ColorKey, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
@@ -35,7 +36,7 @@ import { isLoadCanceled, isLoadVoided } from '@/lib/shipmentVoid'
 import { PodMark } from './CalendarPaperwork'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
-const COL = { color: 20, aljex: 60, pod: 40, tms: 80, pu: 72, trailer: 70, paperwork: 96, puAppt: 130, deAppt: 130, status: 100, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
+const COL = { color: 20, aljex: 60, pod: 40, shipStatus: 92, tms: 80, pu: 72, trailer: 70, paperwork: 96, puAppt: 130, deAppt: 130, status: 100, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
 const ROW_H = 28
 const DRAG_HANDLE_W = 16
 
@@ -656,6 +657,11 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         {isFinalDest && <PodMark load={load} />}
       </div>
 
+      {/* The shipment's current status, in the board's words. */}
+      <div className="shrink-0 flex items-center px-1.5 truncate" data-testid="planner-ship-status" style={{ width: COL.shipStatus, fontSize: 11.5, fontWeight: 600, color: 'var(--tms-text)' }} title={`Shipment status: ${loadStatusText(load) || 'not set'}`}>
+        {loadStatusText(load) || <span style={{ color: 'var(--tms-muted)', fontWeight: 400 }}>—</span>}
+      </div>
+
       {/* TMS + PU# — editable inline */}
       <EditableTextCell load={load} field="tmsId"        width={COL.tms} />
       <EditableTextCell load={load} field="pickupNumber" width={COL.pu} />
@@ -1126,6 +1132,7 @@ export function PlannerView({ loads: allLoads, drivers, weekStart, numDays = 7, 
       >
         <ColHeader width={COL.aljex}>Pro #</ColHeader>
         <ColHeader width={COL.pod}>POD</ColHeader>
+        <ColHeader width={COL.shipStatus}>Status</ColHeader>
         <ColHeader width={COL.tms}>TMS</ColHeader>
         <ColHeader width={COL.pu}>PU #</ColHeader>
         <ColHeader width={COL.trailer}>Trailer</ColHeader>

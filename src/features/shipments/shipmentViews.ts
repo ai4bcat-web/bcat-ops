@@ -718,6 +718,22 @@ function specialRequirementsLabel(req: SpecialRequirements | null | undefined): 
 }
 
 /** Whole days since the shipment entered its current status; '' when that is unknown. */
+/**
+ * Whether a shipment still waits on its POD (Ryne 2026-11-11), for every revenue type except car shipping. Read from the order's document
+ * gate (`docsMissing`), the same fact the dashboard's POD strip and the POD Present column use, so no extra read is needed.
+ * 'NO_POD' = the gate says the POD is outstanding; 'POD_IN' = the gate ran, POD is required and nothing is missing; '' = not applicable or
+ * not known (car shipping, the gate never ran, or this customer does not require a POD).
+ */
+export function podStatusOf(row: Pick<ShipmentRow, 'revDivision' | 'docsMissing' | 'docsRequired'>): 'NO_POD' | 'POD_IN' | '' {
+  if (row.revDivision === 'CAR_SHIPPING') return ''
+  if (row.docsMissing == null) return ''
+  if (row.docsMissing.includes('POD')) return 'NO_POD'
+  if (row.docsRequired != null && !row.docsRequired.includes('POD')) return ''
+  return 'POD_IN'
+}
+
+export const POD_STATUS_TEXT = { NO_POD: 'No POD', POD_IN: 'POD in', '': '' } as const
+
 function daysInStatusOf(row: ShipmentRow): string {
   if (!row.statusChangedAt) return ''
   const changed = new Date(row.statusChangedAt).getTime()
@@ -1083,6 +1099,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     width: 110,
   },
   { key: 'daysInStatus', label: 'Days In Status', group: 'Computed', value: daysInStatusOf, width: 120 },
+  { key: 'podStatus', label: 'POD', group: 'Computed', value: (r) => POD_STATUS_TEXT[podStatusOf(r)], width: 56 },
   { key: 'docsNeededCount', label: 'Docs Needed', group: 'Computed', value: (r) => (r.docsMissing == null ? '' : String(r.docsMissing.length)), width: 110 },
   {
     key: 'podPresent',
