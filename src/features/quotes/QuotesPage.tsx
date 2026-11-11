@@ -42,6 +42,7 @@ import { CounterDialog } from './components/CounterDialog'
 import { MarkLostDialog } from './components/MarkLostDialog'
 import { OutcomeBadge } from './components/OutcomeBadge'
 import { SendQuoteDialog } from './components/SendQuoteDialog'
+import { DemoCustomersView } from './demo/DemoCustomersView'
 import type { QuoteRecord } from '@/types/tms'
 
 /** Which dialog is open, and the one quote it is open about. */
@@ -111,6 +112,7 @@ export function QuotesPage() {
   const [query, setQuery] = useState('')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [pageSize, setPageSize] = useState(50)
+  const [customersDemo, setCustomersDemo] = useState(false)
 
   const months = useMemo(() => lastThreeMonths(asOf), [asOf])
   const [month, setMonth] = useState(() => months[0])
@@ -552,10 +554,13 @@ export function QuotesPage() {
         : []),
     ]
 
+  if (customersDemo) return <DemoCustomersView onBack={() => setCustomersDemo(false)} />
+
   return (
     <>
       <TmsListPage<QuoteRecord>
         title="Quote · Spot quotes"
+        actions={<TmsButton onClick={() => setCustomersDemo(true)}>Customers (demo)</TmsButton>}
         primaryAction={{ label: 'Quote', onClick: () => navigate('/tms/rates/new') }}
         search={{ value: query, onChange: setQuery, placeholder: 'Search quotes, customers, lanes' }}
         onRefresh={() => void refreshAll()}

@@ -156,4 +156,12 @@ describe('the quote board', () => {
     fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'WON' } })
     await waitFor(() => expect(screen.getAllByTestId('quote-outcome').map((n) => n.textContent)).toEqual(['Won']))
   })
+
+  it('opens the clearly-labelled demo Customers view and returns to the real list', async () => {
+    await setup()
+    fireEvent.click(screen.getByRole('button', { name: /customers \(demo\)/i }))
+    expect(screen.getAllByTestId('demo-badge').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: /back to spot quotes/i }))
+    expect(screen.getByRole('button', { name: /customers \(demo\)/i })).toBeTruthy()
+  })
 })

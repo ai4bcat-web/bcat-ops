@@ -1,0 +1,186 @@
+/* Demo "Customers" view of the Quotes page. Everything shown here is fabricated (see demoQuotes.ts).
+   Drawers render in a portal under .tms-portal, so each rule is scoped to both roots. */
+
+:is(.tms-shell, .tms-portal) .tms-qd-demo-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--tms-radius-pill);
+  border: 1px dashed var(--tms-badge-orange);
+  background: var(--tms-badge-orange-tint);
+  color: var(--tms-badge-orange);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-intro {
+  margin: 0 0 14px;
+  color: var(--tms-text-2);
+  font-size: 13px;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-card {
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  box-shadow: var(--tms-shadow);
+  overflow: hidden;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-name {
+  font-weight: 600;
+  color: var(--tms-text);
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-sub {
+  color: var(--tms-muted);
+  font-size: 12px;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-num {
+  display: block;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-rate-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-bar {
+  flex: 1;
+  height: 6px;
+  min-width: 48px;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-field);
+  overflow: hidden;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--tms-radius-pill);
+  background: var(--tms-badge-green);
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-bar-low > span { background: var(--tms-badge-red); }
+:is(.tms-shell, .tms-portal) .tms-qd-bar-mid > span { background: var(--tms-badge-orange); }
+
+:is(.tms-shell, .tms-portal) .tms-qd-pct {
+  min-width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-panel {
+  display: grid;
+  gap: 16px;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-titlerow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Conversation drawer */
+
+:is(.tms-shell, .tms-portal) .tms-qd-thread {
+  display: grid;
+  gap: 12px;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-msg {
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius);
+  padding: 12px 14px;
+  max-width: 92%;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-msg-customer { justify-self: start; }
+
+:is(.tms-shell, .tms-portal) .tms-qd-msg-agent,
+:is(.tms-shell, .tms-portal) .tms-qd-msg-sales {
+  justify-self: end;
+  background: var(--tms-primary-tint);
+  border-color: var(--tms-primary);
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-msg-sales {
+  background: var(--tms-surface);
+  border-color: var(--tms-primary);
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-msg-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--tms-muted);
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-from {
+  font-weight: 600;
+  color: var(--tms-text);
+  overflow-wrap: anywhere;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-subject {
+  margin-top: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--tms-text);
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-body {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--tms-text);
+  white-space: pre-wrap;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-rate {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 4px 12px;
+  border-radius: var(--tms-radius-sm);
+  background: var(--tms-badge-green-tint);
+  color: var(--tms-badge-green);
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-summary dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--tms-muted);
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-summary dd {
+  margin: 2px 0 0;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--tms-text);
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.tms-shell, .tms-portal) .tms-qd-good { color: var(--tms-badge-green) !important; }
+:is(.tms-shell, .tms-portal) .tms-qd-bad { color: var(--tms-badge-red) !important; }
