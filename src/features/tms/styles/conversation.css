@@ -554,3 +554,6 @@
 .tms-shell .tms-map-pulse,
 .tms-portal .tms-map-pulse { box-shadow: 0 0 0 5px var(--tms-badge-green-tint); }
 .tms-portal .tms-public-map { position: relative; height: 260px; }
+
+/* An e-mail in the conversation shows only what was written; the quoted thread and signature sit behind this link. */
+.tms-shell .tms-thread-more { display: inline-block; margin-top: 4px; padding: 0; border: 0; background: none; color: var(--tms-primary-ink); font-size: 11px; cursor: pointer; text-decoration: underline; }

@@ -15,6 +15,7 @@ import {
   type TmsTone,
 } from '@/features/tms/kit'
 import { formatDateTime } from '@/lib/date'
+import { cleanEmailBody } from '@/lib/emailBodyClean'
 import { prettyPhone } from '@/lib/dispatch'
 import { trackingThreadMessages } from '@/lib/shipmentThread'
 import type { SmsTarget } from '@/lib/workPhone'
@@ -294,6 +295,10 @@ const ThreadRow = memo(function ThreadRow({ message }: { message: ShipmentMessag
   const isOutbound = message.direction === 'OUT'
   const notSent = message.status === 'NOT_SENT'
   const author = authorBadge(message)
+  // An e-mail reads like a text message: only what the person wrote, with the quoted thread and signature one click away.
+  const [showFull, setShowFull] = useState(false)
+  const cleaned = useMemo(() => (message.channel === 'EMAIL' ? cleanEmailBody(message.body) : null), [message.channel, message.body])
+  const shownBody = cleaned && !showFull ? cleaned.text : message.body
 
   if (isAppUpdate(message)) return <AppUpdateCard message={message} />
   if (message.trackingLinkId) return <TrackingLinkSentCard message={message} />
@@ -306,8 +311,13 @@ const ThreadRow = memo(function ThreadRow({ message }: { message: ShipmentMessag
           {message.subject && <p className="tms-thread-subject">{message.subject}</p>}
           <p
             className="tms-thread-body"
-            dangerouslySetInnerHTML={{ __html: safeMarkdown(message.body) }}
+            dangerouslySetInnerHTML={{ __html: safeMarkdown(shownBody) }}
           />
+          {cleaned?.trimmed ? (
+            <button type="button" className="tms-thread-more" data-testid="thread-show-full" onClick={() => setShowFull((v) => !v)}>
+              {showFull ? 'Hide the rest' : 'Show full e-mail'}
+            </button>
+          ) : null}
           {message.attachments && message.attachments.length > 0 && (
             <div className="tms-convo-bubble-files">
               {message.attachments.map((att, i) => (
