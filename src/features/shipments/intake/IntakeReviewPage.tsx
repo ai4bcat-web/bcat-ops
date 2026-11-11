@@ -37,7 +37,7 @@ const CATALOG_FIELD: Record<string, string> = {
   billTo: 'billToId', customerRate: 'customerRateCents', poNumber: 'reference', pickupNumber: 'pickupNumber', deliveryNumber: 'deliveryNumber',
   salesRep: 'salesRepId', revenueDivision: 'divisionCode', equipmentType: 'equipmentType', commodity: 'commodity', weight: 'weightLb',
 }
-const STOP_REQUIRED = ['street', 'city', 'state', 'date', 'time']
+const STOP_REQUIRED = ['street', 'city', 'state', 'zip', 'date', 'time']
 const STOP_FIELDS: Array<{ key: 'name' | 'street' | 'city' | 'state' | 'zip' | 'date' | 'time'; label: string; type?: string }> = [
   { key: 'name', label: 'Facility' },
   { key: 'street', label: 'Street' },

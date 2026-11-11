@@ -164,8 +164,8 @@ describe('IntakeReviewPage', () => {
     vi.mocked(api.getIntakeLoad).mockResolvedValue(bare)
     renderPage()
     await screen.findByDisplayValue('PO-100')
-    for (const label of ['Pickup 1 street', 'Pickup 1 city', 'Pickup 1 state', 'Pickup 1 date', 'Pickup 1 appointment time', 'Pickup #',
-      'Delivery 1 street', 'Delivery 1 date', 'Delivery 1 appointment time', 'Delivery #']) {
+    for (const label of ['Pickup 1 street', 'Pickup 1 city', 'Pickup 1 state', 'Pickup 1 zip', 'Pickup 1 date', 'Pickup 1 appointment time', 'Pickup #',
+      'Delivery 1 street', 'Delivery 1 zip', 'Delivery 1 date', 'Delivery 1 appointment time', 'Delivery #']) {
       const row = screen.getByLabelText(label).closest('.tms-intake-row') as HTMLElement
       expect(within(row).getByText('Missing')).toBeInTheDocument()
       expect(row.querySelector('.tms-fg-star')).not.toBeNull()
@@ -175,8 +175,10 @@ describe('IntakeReviewPage', () => {
     expect(screen.getByText(/Needs: .*Pickup address/)).toBeInTheDocument()
     const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
     fill('Pickup #', 'PU-1'); fill('Delivery #', 'DL-1')
-    for (const [kind, street, city, state, date, time] of [['Pickup', '1 Dock Rd', 'Dallas', 'TX', '2026-11-10', '08:00'], ['Delivery', '9 Peach St', 'Atlanta', 'GA', '2026-11-12', '14:00']] as const) {
+    for (const [kind, street, city, state, zip, date, time] of [['Pickup', '1 Dock Rd', 'Dallas', 'TX', '75201', '2026-11-10', '08:00'], ['Delivery', '9 Peach St', 'Atlanta', 'GA', '30301', '2026-11-12', '14:00']] as const) {
       fill(`${kind} 1 street`, street); fill(`${kind} 1 city`, city); fill(`${kind} 1 state`, state); fill(`${kind} 1 date`, date)
+      expect(moveButton()).toBeDisabled()
+      fill(`${kind} 1 zip`, zip)
       expect(moveButton()).toBeDisabled()
       fill(`${kind} 1 appointment time`, time)
     }
