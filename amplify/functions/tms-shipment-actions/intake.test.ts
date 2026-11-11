@@ -225,6 +225,27 @@ describe('INTAKE_LINK_SHIPMENT', () => {
   })
 })
 
+describe('INTAKE_ATTACH_FILES', () => {
+  const pdf = JSON.stringify([{ key: 'intake-attachments/a/ratecon.pdf', name: 'ratecon.pdf', contentType: 'application/pdf', size: 1200 }])
+
+  it('files the e-mail\'s PDF on a shipment that was built from the row, and audits how many', async () => {
+    rows(T.shipment).set('shp-1', { id: 'shp-1', number: 'S1' })
+    seedIntake({ status: 'MOVED', shipmentId: 'shp-1', attachments: pdf })
+    const out = (await run('INTAKE_ATTACH_FILES', { intakeId: 'il:r1', shipmentId: 'shp-1' })) as unknown as { attached: number; available: number }
+    expect(out).toEqual({ attached: 1, available: 1 })
+    expect(attachFiles).toHaveBeenCalledWith('shp-1', 'il:r1', [expect.objectContaining({ key: 'intake-attachments/a/ratecon.pdf' })], expect.anything())
+    expect(audits.find((a) => a.action === 'INTAKE_ATTACH_FILES')?.changes).toMatchObject({ documentsAttached: 1 })
+  })
+
+  it('refuses a shipment the row was not built into, and does nothing when the e-mail has no file', async () => {
+    seedIntake({ status: 'MOVED', shipmentId: 'shp-1', attachments: pdf })
+    await expect(run('INTAKE_ATTACH_FILES', { intakeId: 'il:r1', shipmentId: 'shp-9' })).rejects.toThrow(/not the one this shipment was built from/)
+    seedIntake({ status: 'MOVED', shipmentId: 'shp-1' })
+    expect(await run('INTAKE_ATTACH_FILES', { intakeId: 'il:r1', shipmentId: 'shp-1' })).toEqual({ attached: 0, available: 0 })
+    expect(attachFiles).not.toHaveBeenCalled()
+  })
+})
+
 describe('INTAKE_MARK_REVIEWED', () => {
   it('records who reviewed and when, bumps the version and audits it', async () => {
     const out = (await run('INTAKE_MARK_REVIEWED', { intakeId: 'il:r1', expectedVersion: 3 })) as unknown as {
@@ -314,6 +335,16 @@ describe('INTAKE_MOVE_TO_ACTIVE', () => {
       'SHIPMENT:INTAKE_MOVE_TO_ACTIVE',
     ])
     expect(audits[0].changes.corrected).toEqual(['commodity'])
+  })
+
+  it('files the e-mail\'s rate confirmation PDF on the new shipment, and a failure to copy it does not undo the move', async () => {
+    seedIntake({ ...REVIEWED, attachments: JSON.stringify([{ key: 'intake-attachments/a/ratecon.pdf', name: 'ratecon.pdf', contentType: 'application/pdf', size: 1200 }]) })
+    await run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })
+    expect(attachFiles).toHaveBeenCalledWith('shp-1', 'il:r1', [expect.objectContaining({ key: 'intake-attachments/a/ratecon.pdf' })], expect.anything())
+    seedIntake({ ...REVIEWED, attachments: JSON.stringify([{ key: 'intake-attachments/a/ratecon.pdf', name: 'ratecon.pdf', contentType: 'application/pdf', size: 1200 }]) })
+    attachFiles.mockRejectedValueOnce(new Error('s3 down'))
+    const out = (await run('INTAKE_MOVE_TO_ACTIVE', { intakeId: 'il:r1', expectedVersion: 3 })) as unknown as { intake: { status: string } }
+    expect(out.intake.status).toBe('MOVED')
   })
 
   it('restores OPEN when the shipment cannot be created', async () => {

@@ -41,7 +41,7 @@ import {
 import { requiresApptProofs } from '../../../src/lib/apptQueue'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta } from '../../../src/types/intake'
 
-export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT'] as const
+export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES'] as const
 export type IntakeAction = (typeof INTAKE_ACTIONS)[number]
 
 /** A PROMOTING row with no shipment older than this was abandoned (Lambda timeout is shorter). */
@@ -261,6 +261,27 @@ export async function intakeDismiss(deps: IntakeDeps, input: Row, caller: Caller
   return intakeRecordOf(saved) as unknown as Row
 }
 
+/** The e-mail's stored attachments (the rate confirmation PDF), in the shape the shipment's Documents take. */
+export function attachmentFilesOf(row: Row): { key: string; name: string; contentType: string; size: number }[] {
+  return jsonOf<{ key?: string; name?: string; contentType?: string; size?: number }[]>(row.attachments, [])
+    .filter((f): f is { key: string; name: string; contentType: string; size: number } => typeof f?.key === 'string' && typeof f?.name === 'string' && typeof f?.contentType === 'string')
+}
+
+/**
+ * File the intake e-mail's attachments on a shipment that is tied to that row (built from it by any route, or built before the PDF
+ * reached the row). Idempotent: each file has a fixed document id, so a second call replaces rather than duplicates.
+ */
+export async function intakeAttachFiles(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const row = await loadRow(deps, intakeId)
+  if (row.shipmentId !== shipmentId) throw new Error('This intake load is not the one this shipment was built from')
+  const files = attachmentFilesOf(row)
+  const attached = deps.attachFiles && files.length ? await deps.attachFiles(shipmentId, intakeId, files, caller) : 0
+  if (attached) await deps.writeAudit('SHIPMENT', shipmentId, 'INTAKE_ATTACH_FILES', caller, { intakeId, documentsAttached: attached })
+  return { attached, available: files.length } as unknown as Row
+}
+
 // ── INTAKE_LINK_SHIPMENT ─────────────────────────────────────────────────────
 
 /**
@@ -281,8 +302,7 @@ export async function intakeLinkShipment(deps: IntakeDeps, input: Row, caller: C
   const shipmentNumber = String(shipment.number ?? '')
   const saved = await writeIntake(deps, row, { shipmentId, shipmentNumber, status: 'MOVED', updatedBy: caller.email }, [], false)
   // The e-mail the load came in on (rate con / tender) lands in the shipment's Documents, so nobody re-uploads it by hand.
-  const files = jsonOf<{ key?: string; name?: string; contentType?: string; size?: number }[]>(row.attachments, [])
-    .filter((f): f is { key: string; name: string; contentType: string; size: number } => typeof f?.key === 'string' && typeof f?.name === 'string' && typeof f?.contentType === 'string')
+  const files = attachmentFilesOf(row)
   const attached = deps.attachFiles && files.length ? await deps.attachFiles(shipmentId, intakeId, files, caller) : 0
   const changes: Row = { linkedBy: caller.email, runId: row.runId ?? null, via: 'CREATE_FORM', ...(attached ? { documentsAttached: attached } : {}) }
   await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_LINK_SHIPMENT', caller, { ...changes, shipmentId })
@@ -473,6 +493,12 @@ export async function intakeMoveToActive(deps: IntakeDeps, input: Row, caller: C
 
   const record = intakeRecordOf(row)
   await finishShipment(deps, row, record.fields, shipmentId, caller)
+  // The e-mail's rate confirmation PDF goes onto the shipment with it (any intake that comes over from the load inboxes). A failure to
+  // copy a file never undoes the move: the shipment's Documents offers "Add the e-mail's rate confirmation" to retry.
+  const moveFiles = attachmentFilesOf(row)
+  if (deps.attachFiles && moveFiles.length) {
+    await deps.attachFiles(shipmentId, intakeId, moveFiles, caller).catch((err: unknown) => console.error('[tms-shipment-actions] intake files not attached on move:', String(err)))
+  }
 
   // Step 7. reviewedBy/reviewedAt keep the reviewer's values; the mover goes in the audit payload.
   const moved = await writeIntake(deps, row, {
@@ -506,6 +532,8 @@ export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: R
       return intakeDismiss(deps, input, caller)
     case 'INTAKE_LINK_SHIPMENT':
       return intakeLinkShipment(deps, input, caller)
+    case 'INTAKE_ATTACH_FILES':
+      return intakeAttachFiles(deps, input, caller)
   }
 }
 
