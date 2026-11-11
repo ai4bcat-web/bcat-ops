@@ -48,6 +48,8 @@ export const PROD_WRITE_SETS = {
   // `awSalesRepDivision.mjs --apply`: sales rep follows the revenue division (overwrites): Shipment.salesRepId/Code, Order.customerRepId, TmsSettings.divisionSalesReps + one AuditLog row per shipment.
   // `awIntakeClear.mjs --apply`: OPEN IntakeLoad rows whose shipment exists become MOVED (shipmentId/number) + one AuditLog row each.
   awIntakeClear: { models: ['IntakeLoad', 'Shipment', 'Order', 'AuditLog'] },
+  // `awIntakeSweep.mjs --apply`: OPEN IntakeLoad rows for loads built today/yesterday become MOVED; the rest received on or before a cutoff become DISMISSED; one AuditLog row each.
+  awIntakeSweep: { models: ['IntakeLoad', 'Shipment', 'Order', 'AuditLog'] },
   // `awCustomerSheet.mjs --apply`: Customer.billingMethod / apEmail / billingAddress (address only while empty) from Ryne's customer list sheet + one AuditLog row each.
   awCustomerSheet: { models: ['Customer', 'AuditLog'] },
   // `awCompanyPhones.mjs --apply`: the three Ivan Cartage CompanyPhone rows (only labels that do not exist) + AuditLog.
