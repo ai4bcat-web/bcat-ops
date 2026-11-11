@@ -2,10 +2,12 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
+import { fireEvent } from '@testing-library/react'
+import * as api from '@/lib/apiClient'
 import type { IntakeLoadRecord } from '@/types/intake'
 import { SourceEmailCard } from './SourceEmailCard'
 
-vi.mock('@/lib/apiClient', () => ({ getIntakePdfUrl: vi.fn(async (key: string) => `https://files.test/${key}`) }))
+vi.mock('@/lib/apiClient', () => ({ getIntakePdfUrl: vi.fn(async (key: string) => `https://files.test/${key}`), rereadIntake: vi.fn(async () => ({})) }))
 
 const row = (attachments: IntakeLoadRecord['attachments']) => ({
   id: 'il:1', runId: 'r1', subject: 'Tender', fromEmail: 'a@b.test', fromName: '', toAddress: null, toAddresses: [], receivedAt: '2026-11-09T10:00:00Z',
@@ -28,5 +30,20 @@ describe('SourceEmailCard attachment preview', () => {
   it('has no "no PDF" note when the PDF is there', async () => {
     renderCard([{ key: 'k', name: 'ratecon.pdf', contentType: 'application/pdf', size: 10 }])
     expect(screen.queryByTestId('intake-no-pdf')).toBeNull()
+  })
+})
+
+describe('SourceEmailCard unread e-mail', () => {
+  const unread = { ...row([]), status: 'OPEN', parseState: 'NOT_PARSED', parseNote: 'DAILY_CAP' } as unknown as IntakeLoadRecord
+  it('offers to read it now, then reloads the row', async () => {
+    const reload = vi.fn()
+    render(<MemoryRouter><SourceEmailCard row={unread} onReread={reload} /></MemoryRouter>)
+    fireEvent.click(screen.getByTestId('intake-reread'))
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1))
+    expect(api.rereadIntake).toHaveBeenCalledWith('r1')
+  })
+  it('has no button once the e-mail is read, or on a row that is not open', () => {
+    render(<MemoryRouter><SourceEmailCard row={{ ...unread, status: 'MOVED' } as IntakeLoadRecord} /></MemoryRouter>)
+    expect(screen.queryByTestId('intake-reread')).toBeNull()
   })
 })

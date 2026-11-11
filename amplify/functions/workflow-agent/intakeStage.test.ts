@@ -15,12 +15,15 @@ const db = vi.hoisted(() => ({
   logged: [] as Row[],
   enriched: [] as Row[],
   failEnrich: false,
+  twin: null as Row | null,
 }))
 
 vi.mock('./store', () => ({
   CUSTOMER_TABLE_NAME: 'Customer-test',
   nowIso: () => '2026-11-03T10:00:00.000Z',
-  getById: async () => null,
+  INTAKE_LOAD_TABLE_NAME: 'IntakeLoad-test',
+  getById: async (table: string, id: string) => (table === 'IntakeLoad-test' ? db.intake.get(id) ?? null : null),
+  findIntakeDuplicate: async () => db.twin,
   getSettings: async () => null,
   listDivisions: async () => db.divisions,
   findIntakeByReference: async () => db.existing,
@@ -54,6 +57,7 @@ beforeEach(() => {
   db.logged = []
   db.enriched = []
   db.failEnrich = false
+  db.twin = null
   db.divisions = [
     { id: 'A', code: 'A', name: 'A', active: true, intakeEmail: 'tenders+a@bcatcorp.com' },
     { id: 'B', code: 'B', name: 'B', active: true, intakeEmail: 'tenders+b@bcatcorp.com' },
@@ -137,6 +141,33 @@ describe('stageIntake', () => {
     expect(out.detail).toContain('rolled into intake load')
     expect(db.logged).toHaveLength(1)
     expect(db.intake.size).toBe(0)
+  })
+
+  it('the same e-mail delivered twice (a different run) stages no second row, and gives the first row the PDF it lacks', async () => {
+    db.twin = { id: 'il:wf:TENDER:first', status: 'OPEN', attachments: '[]', fields: '{}', updatedAt: 'u1' }
+    const withPdf = { ...mail(['tenders+a@bcatcorp.com']), attachments: [{ key: 'k/a.pdf', name: 'a.pdf', contentType: 'application/pdf', size: 10 }] }
+    const out = await stageIntake(run(), withPdf, BARE)
+    expect(out).toMatchObject({ staged: false })
+    expect(out.detail).toContain('same e-mail as intake load il:wf:TENDER:first')
+    expect(db.intake.size).toBe(0)
+    expect(db.enriched).toHaveLength(1)
+    expect(db.logged).toHaveLength(0) // a twin never reopens a dismissed row
+  })
+
+  it('an e-mail that was saved unread is filled in when it is read later, keeping what a person typed', async () => {
+    await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), BARE)
+    const saved = db.intake.get('il:wf:TENDER:abc') as Row
+    db.intake.set('il:wf:TENDER:abc', { ...saved, status: 'OPEN', parseState: 'NOT_PARSED', fields: JSON.stringify({ commodity: 'typed by Ryne', stops: [] }) })
+    const parsed: StageInput = {
+      kind: 'PARSED',
+      parse: { tender: { format: 'BATORY', reference: 'REF1', commodity: 'Dressing', stops: [] } as never, parserTender: {} as never, fillKind: 'EMAIL', lowConfidence: [] },
+      party: { kind: null, id: null, name: null, how: null }, candidates: [], stopFacilityHits: [],
+    }
+    const out = await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), parsed)
+    expect(out.staged).toBe(true)
+    const update = db.enriched[0]!.update as { parse: Row; fields: Row }
+    expect(update.parse).toMatchObject({ parseState: 'PARSED', parseNote: null })
+    expect(update.fields).toMatchObject({ commodity: 'typed by Ryne' })
   })
 
   it('a bare row keeps the e-mail and says why nothing was parsed', async () => {

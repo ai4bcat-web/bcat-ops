@@ -22,6 +22,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'crypto'
+import { DUP_WINDOW_MS, isSameEmail } from '../../../src/lib/intakeDup'
 import type {
   WorkflowAgentKey,
   WorkflowOutcome,
@@ -316,10 +317,14 @@ export async function queryExceptions(limit = 200): Promise<Row[]> {
  * dismissal or a resolve touches `updatedAt` on a run from last week, and that
  * is not an agent spending money today.
  */
+/** The error codes of a run that ended at the spending gate without calling the model. */
+export const GATED_CODES: ReadonlySet<string> = new Set(['DAILY_CAP', 'AGENT_DISABLED'])
+
 export async function countRunsToday(agent: string, nowIsoValue = nowIso()): Promise<number> {
   const dayStart = `${nowIsoValue.slice(0, 10)}T00:00:00.000Z`
   const rows = await queryRuns(IDX_RUNS_BY_AGENT, 'agent', agent, { limit: 1000 })
-  return rows.filter((row) => String(row.lastAttemptAt ?? row.createdAt ?? '') >= dayStart).length
+  // A run the gate itself stopped spent nothing, so it must not count toward the cap that stopped it.
+  return rows.filter((row) => String(row.lastAttemptAt ?? row.createdAt ?? '') >= dayStart && !GATED_CODES.has(String(row.errorCode ?? ''))).length
 }
 
 /**
@@ -636,7 +641,11 @@ export async function findIntakeByReference(reference: string, fromEmail: string
  */
 export async function enrichIntakeLoad(
   row: Row,
-  update: { attachments: Row[] | null; fields: Row | null; meta: Row | null; missingFields?: string[] | null; at: string },
+  update: {
+    attachments: Row[] | null; fields: Row | null; meta: Row | null; missingFields?: string[] | null; at: string
+    /** A row that was saved unread and has now been read by the agent. */
+    parse?: { parseState: string; parseNote: string | null; format: string | null; autoFields: Row } | null
+  },
 ): Promise<void> {
   const sets: string[] = ['updatedAt = :now']
   const values: Record<string, unknown> = { ':now': update.at, ':was': String(row.updatedAt ?? '') }
@@ -644,13 +653,44 @@ export async function enrichIntakeLoad(
   if (update.fields) { sets.push('fields = :fields'); values[':fields'] = update.fields }
   if (update.meta) { sets.push('meta = :meta'); values[':meta'] = update.meta }
   if (update.missingFields) { sets.push('missingFields = :missing'); values[':missing'] = update.missingFields }
+  const removes: string[] = []
+  if (update.parse) {
+    sets.push('parseState = :ps', 'format = :fmt', 'autoFields = :auto')
+    values[':ps'] = update.parse.parseState; values[':fmt'] = update.parse.format; values[':auto'] = update.parse.autoFields
+    if (update.parse.parseNote == null) removes.push('parseNote'); else { sets.push('parseNote = :pn'); values[':pn'] = update.parse.parseNote }
+  }
   await dynamo.send(new UpdateItemCommand({
     TableName: INTAKE_LOAD_TABLE_NAME,
     Key: marshall({ id: String(row.id) }),
-    UpdateExpression: `SET ${sets.join(', ')}`,
+    UpdateExpression: `SET ${sets.join(', ')}${removes.length ? ` REMOVE ${removes.join(', ')}` : ''}`,
     ConditionExpression: 'attribute_exists(id) AND updatedAt = :was',
     ExpressionAttributeValues: marshall(values, { removeUndefinedValues: true }),
   }))
+}
+
+/**
+ * The OPEN / MOVED / DISMISSED row, if any, that is the same e-mail as `mail` (see src/lib/intakeDup.ts): read through the
+ * status + receivedAt index over the few minutes around it, so it never scans the table.
+ */
+export async function findIntakeDuplicate(mail: { subject: string | null; bodyText: string; receivedAt: string | null }, excludeId: string): Promise<Row | null> {
+  const at = Date.parse(String(mail.receivedAt ?? ''))
+  if (!INTAKE_LOAD_TABLE_NAME || !Number.isFinite(at)) return null
+  const from = new Date(at - DUP_WINDOW_MS).toISOString()
+  const to = new Date(at + DUP_WINDOW_MS).toISOString()
+  for (const status of ['OPEN', 'MOVED', 'DISMISSED']) {
+    const page = await dynamo.send(new QueryCommand({
+      TableName: INTAKE_LOAD_TABLE_NAME,
+      IndexName: 'intakeLoadsByStatusAndReceivedAt',
+      KeyConditionExpression: '#s = :s AND receivedAt BETWEEN :a AND :b',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':s': { S: status }, ':a': { S: from }, ':b': { S: to } },
+    }))
+    for (const item of page.Items ?? []) {
+      const row = unmarshall(item)
+      if (row.id !== excludeId && isSameEmail(mail, { subject: String(row.subject ?? ''), bodyText: String(row.bodyText ?? ''), receivedAt: String(row.receivedAt ?? '') })) return row
+    }
+  }
+  return null
 }
 
 /**

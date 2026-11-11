@@ -472,6 +472,20 @@ describe('runFor', () => {
     expect(modelPrompts).toHaveLength(0)
   })
 
+  it('does not count runs the cap itself stopped, so a capped day cannot keep itself capped', async () => {
+    table(TABLES.settings).set('default', { id: 'default', aiAgents: { dailyRunCap: 1 } })
+    for (const n of ['a', 'b', 'c']) {
+      table(TABLES.run).set(`wf:QUOTE:gated${n}`, {
+        id: `wf:QUOTE:gated${n}`, agent: 'QUOTE', status: 'COMPLETED', outcome: 'NO_ACTION', errorCode: 'DAILY_CAP',
+        createdAt: new Date().toISOString(), lastAttemptAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      })
+    }
+    seedInboxMessage('workflow-inbox/c3/message.json', { subject: 'Rate please', fromEmail: 'dispatch@batory.com', bodyText: 'What would you charge Chicago to Dallas?', attachments: [] })
+    modelReplies.push({ agent: 'QUOTE', confidence: 'high', reason: 'a rate request' }, { originCity: 'CHICAGO', originState: 'IL', destinationCity: 'DALLAS', destinationState: 'TX' })
+    const run = await runFor({ sourceKind: 'INBOX', sourceId: 'm3c', inboxRole: 'QUOTE', provider: 'INBOX', sourceKey: 'workflow-inbox/c3/message.json' })
+    expect(run.errorCode).not.toBe('DAILY_CAP')
+  })
+
   it('does not count an old run somebody left feedback on today', async () => {
     table(TABLES.settings).set('default', { id: 'default', aiAgents: { dailyRunCap: 1 } })
     // Ran last week; the row moved today because a person rated it. That is not an

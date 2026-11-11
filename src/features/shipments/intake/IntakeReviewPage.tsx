@@ -254,7 +254,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
     : !canReview ? 'You can look but not change intake loads.' : null
 
   return (
-    <TmsDetailSplit ratio="6/6" aside={<SourceEmailCard row={row} />} asideSide="left">
+    <TmsDetailSplit ratio="6/6" aside={<SourceEmailCard row={row} onReread={reload} />} asideSide="left">
       <div className="tms-intake-group">
         {readOnlyReason ? <TmsAlert tone="blue">{readOnlyReason}</TmsAlert> : null}
         <TmsCard title="Customer & billing">

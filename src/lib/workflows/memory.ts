@@ -24,7 +24,8 @@ import type {
 /** A memory block big enough to hold real instructions and small enough to prompt with. */
 export const MEMORY_MAX = 20_000
 
-export const DEFAULT_DAILY_RUN_CAP = 200
+/** Per agent per UTC day. A tender read costs cents, and the cutover sends far more than 200 mails a day through the Loads inboxes. */
+export const DEFAULT_DAILY_RUN_CAP = 1000
 
 /** The agents a person can configure. WEBHOOK has no inbox and no instructions. */
 const AI_AGENT_KEYS: readonly AiAgentKey[] = ['QUOTE', 'TENDER', 'AP', 'CAPACITY']

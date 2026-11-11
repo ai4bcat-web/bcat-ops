@@ -142,7 +142,8 @@ export function failRun<T extends RunStateRow>(run: T, code: string, message: st
 }
 
 export function retryable(run: RunStateRow): boolean {
-  const failed = run.status === 'FAILED' || run.outcome === 'UNKNOWN_PARTY'
+  // A run the spending gate stopped never read the e-mail: it may be read again once the gate allows it.
+  const failed = run.status === 'FAILED' || run.outcome === 'UNKNOWN_PARTY' || run.errorCode === 'DAILY_CAP'
   return failed && run.outcome !== 'APPLIED' && (run.attempts ?? 0) < MAX_ATTEMPTS
 }
 

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { TmsAlert, TmsCard } from '@/features/tms/kit'
-import { getIntakePdfUrl } from '@/lib/apiClient'
+import { TmsAlert, TmsButton, TmsCard } from '@/features/tms/kit'
+import { getIntakePdfUrl, rereadIntake } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import type { IntakeLoadRecord } from '@/types/intake'
 import './intake.css'
@@ -48,8 +48,22 @@ export function AttachmentPreview({ attachments }: { attachments: IntakeLoadReco
 }
 
 /** The tender e-mail as received: who, when, the text and its attachments, plus the link to the agent run. */
-export function SourceEmailCard({ row }: { row: IntakeLoadRecord }) {
+export function SourceEmailCard({ row, onReread }: { row: IntakeLoadRecord; onReread?: () => Promise<void> | void }) {
   const [opening, setOpening] = useState<string | null>(null)
+  const [reading, setReading] = useState(false)
+
+  async function readNow() {
+    setReading(true)
+    try {
+      await rereadIntake(row.runId)
+      await onReread?.()
+      toast.success('E-mail read')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not read the e-mail')
+    } finally {
+      setReading(false)
+    }
+  }
 
   async function open(key: string) {
     setOpening(key)
@@ -68,6 +82,11 @@ export function SourceEmailCard({ row }: { row: IntakeLoadRecord }) {
       {row.parseState !== 'PARSED' ? (
         <TmsAlert tone="orange" title={PARSE_NOTES[row.parseState] ?? 'Not parsed'} className="tms-intake-banner">
           {row.parseNote ?? 'Fill the fields below from the e-mail text.'}
+          {row.status === 'OPEN' ? (
+            <div>
+              <TmsButton size="sm" data-testid="intake-reread" disabled={reading} onClick={readNow}>{reading ? 'Reading…' : 'Read the e-mail now'}</TmsButton>
+            </div>
+          ) : null}
         </TmsAlert>
       ) : null}
       {row.emailLog && row.emailLog.length > 0 ? (
