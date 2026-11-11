@@ -21,7 +21,7 @@ export const OWN_ASSET_MESSAGES = {
   batchMultiLeg: 'Batch driver assignment handles one-leg shipments; open this shipment to assign each leg.',
   batchCovered: (carrier: string) => `This load is covered by ${carrier}. Bounce the carrier on the shipment first.`,
   payClosedWeek: (date: string, oldName: string, newName: string) =>
-    `Delivered ${date}: that pay week has closed. Changing the driver would move this load between ${oldName}'s and ${newName}'s settlements. An owner or ADMIN can do it with a reason.`,
+    `Delivered ${date}: that pay week has closed. Changing the driver would move this load between ${oldName}'s and ${newName}'s settlements. An owner or ADMIN can do it.`,
   payReasonRequired: 'Give a reason (at least 10 characters) to change the driver on a load in a closed pay week.',
   payBoxTrip: (driver: string, periodStart: string) =>
     `This load is already on ${driver}'s box-truck settlement (period starting ${periodStart}). Remove it from that settlement first, then change the driver.`,
@@ -136,6 +136,8 @@ export type PayLockResult =
   | { state: 'REFUSED'; code: 'BOX_TRUCK_TRIP' | 'CLOSED_WEEK' | 'REASON_REQUIRED'; message: string }
 
 export const PAY_OVERRIDE_REASON_MIN = 10
+/** What the audit row says when an owner or ADMIN changed a closed-week driver without typing a reason. */
+export const NO_REASON_GIVEN = '(no reason given)'
 
 export function evaluatePayLock(i: {
   deliveryAppt?: string | null; todayUtc: string
@@ -156,9 +158,8 @@ export function evaluatePayLock(i: {
       message: OWN_ASSET_MESSAGES.payClosedWeek(deliveryDate, i.oldDriverName, i.newDriverName),
     }
   }
-  const reason = (i.reason ?? '').trim()
-  if (reason.length < PAY_OVERRIDE_REASON_MIN) {
-    return { state: 'REFUSED', code: 'REASON_REQUIRED', message: OWN_ASSET_MESSAGES.payReasonRequired }
-  }
+  // An owner or ADMIN may change it with or without a reason (Ryne 2026-11-11: the required reason blocked assigning a driver). A reason, when
+  // given, is kept on the audit row; the override itself is always audited.
+  const reason = (i.reason ?? '').trim() || NO_REASON_GIVEN
   return { state: 'CLOSED_WEEK_OVERRIDE', deliveryDate, reason }
 }

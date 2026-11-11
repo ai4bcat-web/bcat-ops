@@ -11,7 +11,7 @@ import { useState } from 'react'
 import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
 import { TmsAlert, TmsButton, TmsDialog, TmsField, TmsSelect, TmsTextarea } from '@/features/tms/kit'
 import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
-import { PAY_OVERRIDE_REASON_MIN, distinctStopDrivers, evaluatePayLock } from '@/lib/ownAssetDriver'
+import { distinctStopDrivers, evaluatePayLock } from '@/lib/ownAssetDriver'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
 import type { LoadCarrierRecord, ShipmentLoad } from '@/types/tms'
@@ -193,8 +193,7 @@ export function AssignDriverDialog({
             {lock.state === 'REFUSED' && lock.code === 'CLOSED_WEEK' && lock.message}
             {isAdmin && (
               <div className="space-y-2">
-                {lock.state === 'REFUSED' && lock.code === 'REASON_REQUIRED' && <p>{lock.message}</p>}
-                <TmsField label={`Reason (at least ${PAY_OVERRIDE_REASON_MIN} characters)`}>
+                <TmsField label="Reason (optional)">
                   <TmsTextarea
                     aria-label="Pay override reason"
                     data-testid="assign-driver-reason"
