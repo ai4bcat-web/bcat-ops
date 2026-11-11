@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 
 const api = vi.hoisted(() => ({ lockShipment: vi.fn(), unlockShipment: vi.fn() }))
-vi.mock('@/lib/apiClient', () => api)
+vi.mock('@/lib/apiClient', () => ({ ...api, countOpenIntakeLoads: async () => 0 }))
 
 import { useShipmentLock } from '@/features/shipments/form/useShipmentLock'
 import { useShipmentTabs } from './shipmentTabsContext'
@@ -64,21 +64,22 @@ beforeEach(() => {
 describe('shipment tabs', () => {
   it('opening a shipment adds a tab and focuses it; opening it again does not duplicate', async () => {
     app()
-    expect(screen.queryByTestId('ship-tabs')).toBeNull()
+    for (const k of ['active', 'all', 'intake', 'voided']) expect(screen.getByTestId(`ship-tab-section-${k}`)).toBeInTheDocument()
+    expect(screen.queryByTestId('ship-tab-s1')).toBeNull()
     fireEvent.click(screen.getByText('open s1'))
     expect(await screen.findByTestId('ship-tab-s1')).toBeInTheDocument()
     expect(screen.getByTestId('ship-pane-s1')).toHaveAttribute('data-active', 'true')
-    fireEvent.click(screen.getByTestId('ship-tab-board'))
+    fireEvent.click(screen.getByTestId('ship-tab-section-active'))
     fireEvent.click(screen.getByText('open s1'))
     await waitFor(() => expect(screen.getByTestId('ship-pane-s1')).toHaveAttribute('data-active', 'true'))
-    expect(screen.getAllByRole('tab').filter((t) => t.getAttribute('data-testid')?.startsWith('ship-tab-s'))).toHaveLength(1)
+    expect(screen.getAllByRole('tab').filter((t) => t.getAttribute('data-testid')?.startsWith('ship-tab-s1'))).toHaveLength(1)
   })
 
   it('a draft typed in one tab is still there after working in another tab and coming back', async () => {
     app()
     fireEvent.click(screen.getByText('open s1'))
     fireEvent.change(await screen.findByLabelText('draft s1'), { target: { value: 'half typed' } })
-    fireEvent.click(screen.getByTestId('ship-tab-board'))
+    fireEvent.click(screen.getByTestId('ship-tab-section-active'))
     fireEvent.click(screen.getByText('open s2'))
     fireEvent.change(await screen.findByLabelText('draft s2'), { target: { value: 'other' } })
     expect(screen.getByTestId('ship-pane-s1')).toHaveAttribute('data-active', 'false')
@@ -102,7 +103,7 @@ describe('shipment tabs', () => {
     app()
     fireEvent.click(screen.getByText('open s1'))
     await waitFor(() => expect(api.lockShipment).toHaveBeenCalledWith('s1'))
-    fireEvent.click(screen.getByTestId('ship-tab-board'))
+    fireEvent.click(screen.getByTestId('ship-tab-section-active'))
     fireEvent.click(screen.getByText('open s2'))
     await waitFor(() => expect(api.lockShipment).toHaveBeenCalledWith('s2'))
     expect(api.unlockShipment).not.toHaveBeenCalled()
@@ -139,7 +140,7 @@ describe('shipment tabs', () => {
     app()
     fireEvent.click(screen.getByText('open s1'))
     await screen.findByTestId('ship-tab-s1')
-    fireEvent.click(screen.getByTestId('ship-tab-board'))
+    fireEvent.click(screen.getByTestId('ship-tab-section-active'))
     fireEvent.click(screen.getByText('open s2'))
     await screen.findByTestId('ship-tab-s2')
     fireEvent.click(screen.getByText('save and exit s2'))
