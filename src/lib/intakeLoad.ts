@@ -138,7 +138,10 @@ export function defaultBillToIdOf(customer: { billToParties?: unknown } | null |
   let raw = customer?.billToParties
   if (typeof raw === 'string') { try { raw = JSON.parse(raw) } catch { raw = null } }
   if (!Array.isArray(raw)) return null
-  const hit = raw.find((p) => p && typeof p === 'object' && (p as Row).isDefault === true && clean((p as Row).id))
+  const parties = raw.filter((p) => p && typeof p === 'object' && clean((p as Row).id))
+  const flagged = parties.find((p) => (p as Row).isDefault === true)
+  // No party flagged default: a customer with a single bill-to party bills that one (Ryne 2026-11-10: picking a customer left Bill to empty).
+  const hit = flagged ?? (parties.length === 1 ? parties[0] : null)
   return hit ? clean((hit as Row).id) : null
 }
 
