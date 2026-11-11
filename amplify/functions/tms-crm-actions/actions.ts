@@ -768,6 +768,7 @@ const HANDLERS: Record<CrmActionName, Handler> = {
   CRM_BACKFILL: backfill,
   // Step AI (conversational dashboards)
   PREVIEW_DASHBOARD_CHAT: dashboardHandler('PREVIEW_DASHBOARD_CHAT'),
+  PREVIEW_ASSISTANT_CHAT: dashboardHandler('PREVIEW_ASSISTANT_CHAT'),
   PREVIEW_DASHBOARD: dashboardHandler('PREVIEW_DASHBOARD'),
   LIST_DASHBOARDS: dashboardHandler('LIST_DASHBOARDS'),
   GET_DASHBOARD: dashboardHandler('GET_DASHBOARD'),

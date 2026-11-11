@@ -9382,6 +9382,19 @@ export async function dashboardChat(input: DashChatInput): Promise<DashChatResul
   return crmAction<DashChatResult>('PREVIEW_DASHBOARD_CHAT', input)
 }
 
+export interface AssistantReply {
+  reply: string
+  /** Names of the lookups the assistant ran for this answer. */
+  toolsUsed: string[]
+  modelError: string | null
+  ms: number
+}
+
+/** One turn of the ops assistant. Read-only; the server enforces the caller's own data visibility. */
+export async function askAssistant(messages: { role: 'user' | 'assistant'; text: string }[]): Promise<AssistantReply> {
+  return crmAction<AssistantReply>('PREVIEW_ASSISTANT_CHAT', { messages })
+}
+
 /** Runs a spec, a saved dashboard or the built-in Overview under the caller's own visibility. */
 export async function dashboardPreview(target: DashboardRunTarget): Promise<DashRunResult> {
   return crmAction<DashRunResult>('PREVIEW_DASHBOARD', target)

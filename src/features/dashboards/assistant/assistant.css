@@ -1,0 +1,46 @@
+/* Ask BCAT chat: theme tokens only. */
+.ast {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 860px;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card, var(--tms-radius));
+  padding: var(--tms-pad, 16px);
+}
+.ast-transcript { display: flex; flex-direction: column; gap: 10px; min-height: 320px; max-height: calc(100vh - 280px); overflow-y: auto; }
+.ast-bubble {
+  max-width: 94%;
+  padding: 8px 12px;
+  border-radius: var(--tms-radius);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--tms-text);
+  overflow-wrap: anywhere;
+}
+.ast-bubble p { margin: 0 0 6px; }
+.ast-bubble p:last-child { margin-bottom: 0; }
+.ast-bubble ul, .ast-bubble ol { margin: 4px 0 6px; padding-left: 20px; }
+.ast-bubble pre { margin: 4px 0; padding: 8px; overflow-x: auto; background: var(--tms-card); border-radius: var(--tms-radius); }
+.ast-h { font-weight: 600; }
+.ast-bubble-assistant { background: var(--tms-surface); align-self: flex-start; }
+.ast-bubble-user { background: var(--tms-primary-tint); color: var(--tms-primary-ink); align-self: flex-end; white-space: pre-wrap; }
+.ast-thinking { color: var(--tms-muted); font-style: italic; }
+.ast-lookups { margin-top: 6px; font-size: 11px; color: var(--tms-muted); }
+.ast-table { overflow-x: auto; margin: 4px 0; }
+.ast-table table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.ast-table th, .ast-table td { padding: 4px 10px; border-bottom: 1px solid var(--tms-border); text-align: left; white-space: nowrap; }
+.ast-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ast-chip {
+  font: inherit; font-size: 12px; cursor: pointer;
+  padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--tms-border); background: var(--tms-card); color: var(--tms-text);
+}
+.ast-chip:hover:not(:disabled) { background: var(--tms-surface); }
+.ast-composer { display: flex; gap: 8px; align-items: flex-end; }
+.ast-composer textarea { flex: 1; min-width: 0; }
+@media (max-width: 900px) {
+  .ast-transcript { max-height: none; }
+  .ast-composer { flex-direction: column; align-items: stretch; }
+}

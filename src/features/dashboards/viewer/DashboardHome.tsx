@@ -7,10 +7,11 @@ import { listDashboards } from '@/lib/apiClient'
 import type { DashboardSummary } from '@/lib/dashboards/types'
 import { DashboardCards } from './DashboardCards'
 import { ScopedOverview } from './ScopedOverview'
+import { AssistantChat } from '../assistant/AssistantChat'
 import { useDashboardAccess } from './useDashboardAccess'
 import './viewer.css'
 
-type TabKey = 'overview' | 'company' | 'mine'
+type TabKey = 'overview' | 'ask' | 'company' | 'mine'
 
 /**
  * `/tms/dashboard`: tabs above the untouched Company Dashboard. Viewers without "see all" never
@@ -21,7 +22,7 @@ export function DashboardHome() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const raw = params.get('tab')
-  const tab: TabKey = raw === 'company' || raw === 'mine' ? raw : 'overview'
+  const tab: TabKey = raw === 'company' || raw === 'mine' || raw === 'ask' ? raw : 'overview'
   const [lists, setLists] = useState<{ company: DashboardSummary[]; mine: DashboardSummary[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -45,6 +46,7 @@ export function DashboardHome() {
           onSelect={(key) => setParams(key === 'overview' ? {} : { tab: key }, { replace: true })}
           tabs={[
             { key: 'overview', label: 'Overview' },
+            { key: 'ask', label: 'Ask BCAT' },
             { key: 'company', label: 'Company dashboards', count: lists?.company.length },
             { key: 'mine', label: 'My dashboards', count: lists?.mine.length },
           ]}
@@ -55,7 +57,7 @@ export function DashboardHome() {
           </TmsButton>
         ) : null}
       </div>
-      {tab === 'overview' ? (access.viewAll ? <DashboardPage /> : <ScopedOverview />) : error ? (
+      {tab === 'ask' ? <AssistantChat /> : tab === 'overview' ? (access.viewAll ? <DashboardPage /> : <ScopedOverview />) : error ? (
         <TmsAlert tone="red" title="Could not load dashboards">{error}</TmsAlert>
       ) : !lists ? (
         <div className="dash-skeleton tms-chart-card" aria-busy="true" />
