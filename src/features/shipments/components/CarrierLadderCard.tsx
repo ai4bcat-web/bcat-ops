@@ -21,7 +21,7 @@ import { formatDateTime } from '@/lib/date'
 import { TRACKING_METHOD_LABELS, TRACKING_MODE_LABELS, parseTrackingPrefs } from '@/lib/trackingPrefs'
 import type { CarrierRecord, LoadCarrierRecord, ShipmentBundle } from '@/types/tms'
 import { dispatchBlock, ladderActions } from '../carrierLadder'
-import { TrackingModeNotSetChip } from '../trackingModeControl/TrackingModeNotSetChip'
+import { TrackingLinkStateChip } from '../trackingModeControl/TrackingLinkStateChip'
 import type { ShipmentActions } from '../useShipmentActions'
 import { CarrierAssignmentChip } from './CarrierAssignmentChip'
 import { isIvanCartageName } from '@/lib/ownFleetDrivers'
@@ -109,7 +109,7 @@ export function CarrierLadderCard({ bundle, loadCarrier, carrier, actions, onRem
 
   return (
     <TmsCard
-      title={<span className="flex items-center gap-2"><FileSignature size={14} />Carrier assignment<TrackingModeNotSetChip shipment={bundle.shipment} hasCarrier /></span>}
+      title={<span className="flex items-center gap-2"><FileSignature size={14} />Carrier assignment<TrackingLinkStateChip shipmentId={bundle.shipment.id} hasCarrier revDivision={bundle.shipment.revDivision} /></span>}
       actions={<CarrierAssignmentChip ladder={ladder} shipmentStatus={bundle.shipment.status} />}
     >
       <div data-testid="carrier-ladder" data-rung={ladder}>

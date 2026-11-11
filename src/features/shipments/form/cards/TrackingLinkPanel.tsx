@@ -33,6 +33,8 @@ export function TrackingLinkPanel({ shipment, loadCarrier, disabled, onSent }: {
 
   const phone = String(loadCarrier.driverPhone ?? '').trim()
   const link = links ? latestPingLink(links, loadCarrier.id) : null
+  // The link-state badge is for Brokerage loads only; the send button stays wherever the link flow is offered.
+  const showState = shipment.revDivision === 'BROKERAGE'
   const missing = [
     !loadCarrier.driverName && 'driver name', !phone && 'driver phone', !loadCarrier.truckNumber && 'truck number', !loadCarrier.trailerNumber && 'trailer number',
   ].filter(Boolean) as string[]
@@ -52,9 +54,9 @@ export function TrackingLinkPanel({ shipment, loadCarrier, disabled, onSent }: {
 
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="tracking-link-panel">
-      {!link ? <TmsBadge tone="orange" data-testid="tracking-link-state">Tracking link not set</TmsBadge> : null}
-      {link?.consentAt ? <TmsBadge tone="green" data-testid="tracking-link-state">Driver accepted · sharing location</TmsBadge> : null}
-      {link && !link.consentAt ? <TmsBadge tone="blue" data-testid="tracking-link-state">Link sent {link.sentAt ? formatDateTime(link.sentAt) : ''}, waiting for the driver</TmsBadge> : null}
+      {showState && !link ? <TmsBadge tone="orange" data-testid="tracking-link-state">Tracking link not sent</TmsBadge> : null}
+      {showState && link?.consentAt ? <TmsBadge tone="green" data-testid="tracking-link-state">Driver accepted · sharing location</TmsBadge> : null}
+      {showState && link && !link.consentAt ? <TmsBadge tone="blue" data-testid="tracking-link-state">Link sent {link.sentAt ? formatDateTime(link.sentAt) : ''}, waiting for the driver</TmsBadge> : null}
       <TmsButton
         size="sm" variant="primary" data-testid="tracking-link-send" disabled={disabled || busy || missing.length > 0}
         title={missing.length ? `Add the ${missing.join(', ')} first` : undefined} onClick={send}

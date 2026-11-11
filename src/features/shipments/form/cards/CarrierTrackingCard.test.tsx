@@ -108,7 +108,7 @@ describe('CarrierTrackingCard: the tracking link', () => {
   const customer = { id: 'c1', name: 'Acme' } as unknown as CustomerRecord
   const booked = (carrier: object = {}, shipment: object = {}) => {
     const b = savedBundle({ loadCarriers: [{ id: 'lc1', status: 'ACTIVE', kind: 'CARRIER', carrierName: 'Ivan', ...carrier }] })
-    return { ...b, shipment: { ...b.shipment, createdAt: after, ...shipment } }
+    return { ...b, shipment: { ...b.shipment, createdAt: after, revDivision: 'BROKERAGE', ...shipment } }
   }
   beforeEach(() => { vi.clearAllMocks() })
 
@@ -121,7 +121,7 @@ describe('CarrierTrackingCard: the tracking link', () => {
 
   it('a booked load with no driver says the link is not set and names what is missing', async () => {
     show({ bundle: booked() as never, customer }, 'edit')
-    expect((await screen.findByTestId('tracking-link-state')).textContent).toBe('Tracking link not set')
+    expect((await screen.findByTestId('tracking-link-state')).textContent).toBe('Tracking link not sent')
     expect((screen.getByTestId('tracking-link-send') as HTMLButtonElement).disabled).toBe(true)
     expect(text('tracking-link-missing')).toBe('Needs driver name, driver phone, truck number, trailer number')
   })
@@ -132,6 +132,12 @@ describe('CarrierTrackingCard: the tracking link', () => {
     expect((send as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(send)
     await waitFor(() => expect(api.sendTrackingLink).toHaveBeenCalledWith({ loadCarrierId: 'lc1', via: 'SMS', to: '+18392358582' }))
+  })
+
+  it('a car-shipping load shows no link-state badge (the indicator is Brokerage only)', async () => {
+    show({ bundle: booked({}, { revDivision: 'CAR_SHIPPING' }) as never, customer }, 'edit')
+    await screen.findByTestId('tracking-link-panel')
+    expect(screen.queryByTestId('tracking-link-state')).toBeNull()
   })
 
   it('an Ivan Cartage load is followed by the driver GPS and needs no link', () => {
