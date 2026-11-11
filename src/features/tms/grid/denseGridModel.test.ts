@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  searchRows,
   columnWidths,
   defaultColumnWidth,
   facetOptions,
@@ -164,5 +165,32 @@ describe('reorderKeys and orderByGroup', () => {
     )
     expect(grouped.rows).toEqual(['none1', 'a1', 'b1', 'b2', 'z1'])
     expect(grouped.groups.map((g) => [g.key, g.count])).toEqual([['none', 1], ['a', 1], ['b', 2], ['z', 1]])
+  })
+})
+
+describe('searchRows', () => {
+  type R = { bill: string; carrier: string; net: string }
+  const cols = [
+    { key: 'bill', header: 'Bill', text: (r: R) => r.bill },
+    { key: 'carrier', header: 'Carrier', text: (r: R) => r.carrier },
+    { key: 'net', header: 'Net', text: (r: R) => r.net },
+  ]
+  const rows: R[] = [
+    { bill: '12464', carrier: 'TEX-LA LOGISTICS INC', net: '$2,400.00' },
+    { bill: '12528', carrier: 'ROADMAX LLC', net: '$1,500.00' },
+    { bill: '13029', carrier: 'RATATATI INC', net: '$1,750.00' },
+  ]
+  it('returns everything for an empty query', () => {
+    expect(searchRows(rows, cols, '  ')).toHaveLength(3)
+  })
+  it('matches any column, case-insensitively, and every word must be present', () => {
+    expect(searchRows(rows, cols, 'roadmax').map((r) => r.bill)).toEqual(['12528'])
+    expect(searchRows(rows, cols, 'inc 13029').map((r) => r.bill)).toEqual(['13029'])
+    expect(searchRows(rows, cols, 'inc roadmax')).toEqual([])
+  })
+  it('finds an amount as printed or without the symbols', () => {
+    expect(searchRows(rows, cols, '$1,500.00').map((r) => r.bill)).toEqual(['12528'])
+    expect(searchRows(rows, cols, '1500').map((r) => r.bill)).toEqual(['12528'])
+    expect(searchRows(rows, cols, '2400').map((r) => r.bill)).toEqual(['12464'])
   })
 })

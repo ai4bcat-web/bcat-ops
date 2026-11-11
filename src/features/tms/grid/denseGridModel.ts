@@ -124,6 +124,20 @@ export function matchesColumnFilter<T>(row: T, col: DenseColumn<T>, f: DenseColu
   }
 }
 
+/**
+ * The search box: every word typed must appear (case-insensitive) somewhere in the row's visible text, any column. Money and dates are matched
+ * as they are printed (`$1,500.00`, `FEB 15, 2026`) and also with the symbols stripped, so `1500` finds `$1,500.00`. Empty query: the input.
+ */
+export function searchRows<T>(rows: readonly T[], columns: readonly DenseColumn<T>[], query: string): T[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return rows as T[]
+  return rows.filter((row) => {
+    const text = columns.map((c) => c.text(row)).join('\u0001').toLowerCase()
+    const bare = text.replace(/[$,]/g, '')
+    return words.every((w) => text.includes(w) || bare.includes(w.replace(/[$,]/g, '')))
+  })
+}
+
 /** Rows that satisfy every active header filter. Returns the input when nothing is active. */
 export function filterRows<T>(rows: readonly T[], columns: readonly DenseColumn<T>[], filters: DenseFilters): T[] {
   const active = columns.filter((c) => isFilterActive(filters[c.key]))

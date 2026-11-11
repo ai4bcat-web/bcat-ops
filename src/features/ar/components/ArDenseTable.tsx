@@ -7,12 +7,14 @@
  * Mount it with `key={view}`: filters belong to one view's columns and are dropped with it.
  */
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { Search } from 'lucide-react'
+import { TmsInput } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
   ClearFiltersButton, ColumnsButton, DenseKpiStrip, DensityToggle, SummaryToggle, type DenseKpi,
 } from '@/features/tms/grid/DenseControls'
 import {
-  activeFilterCount, filterRows, nextSort, reorderKeys, sortDenseRows,
+  activeFilterCount, filterRows, nextSort, reorderKeys, searchRows, sortDenseRows,
   type DenseColumn, type DenseColumnFilter, type DenseFilters,
 } from '@/features/tms/grid/denseGridModel'
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
@@ -36,6 +38,7 @@ export function ArDenseTable<T>({ grid }: { grid: ArGrid<T> }) {
   const email = useAuthUser()?.email ?? ''
   const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis } = grid
   const [filters, setFilters] = useState<DenseFilters>({})
+  const [search, setSearch] = useState('')
 
   // Fixed columns before the first movable one lead the grid; those after it trail it.
   const { leading, movable, trailing } = useMemo(() => {
@@ -71,13 +74,15 @@ export function ArDenseTable<T>({ grid }: { grid: ArGrid<T> }) {
   }, [])
 
   const filtered = useMemo(
-    () => sortDenseRows(filterRows(rows, catalogAll, filters), catalogAll, prefs.sort),
-    [rows, catalogAll, filters, prefs.sort],
+    () => sortDenseRows(filterRows(searchRows(rows, catalogAll, search), catalogAll, filters), catalogAll, prefs.sort),
+    [rows, catalogAll, filters, prefs.sort, search],
   )
 
   return (
     <div className="tms-dense-page tms-caps" data-testid={`ar-grid-${gridId}`}>
       <div className="tms-dense-bar">
+        <Search size={14} className="tms-muted" aria-hidden="true" />
+        <TmsInput className="tms-dense-search" aria-label="Search" data-testid="ar-search" placeholder="Search invoice, customer, PRO, amount…" value={search} onChange={(e) => setSearch(e.target.value)} />
         <span className="tms-muted">{filtered.length === rows.length ? `${rows.length} rows` : `${filtered.length} of ${rows.length} rows`}</span>
         <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => setFilters({})} />
         <span className="tms-dense-spacer" />
@@ -96,7 +101,7 @@ export function ArDenseTable<T>({ grid }: { grid: ArGrid<T> }) {
         <DenseGrid<T>
           aria-label={label}
           recentKey={`tms:${gridId}:recent:${email || 'anon'}`}
-          resetKey={`${gridId}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+          resetKey={`${gridId}|${search}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
           columns={gridColumns}
           rows={filtered}
           fitRows={rows}
