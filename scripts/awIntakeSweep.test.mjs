@@ -64,3 +64,21 @@ describe('planIntakeSweep', () => {
     expect(stays.map((r) => r.id).sort()).toEqual(['c', 'e']);
   });
 });
+
+describe('planIntakeSweep --dedupe', () => {
+  const now = new Date(2026, 10, 11, 12, 0, 0);
+  const mk = (id, receivedAt, over = {}) => ({ id, status: 'OPEN', subject: 'Fwd: Rate Confirmation for Load: 699', bodyText: 'Please see the attached rate confirmation for this load', receivedAt, ...over });
+  const intake = [
+    mk('b-later', '2026-11-11T14:19:30Z'), mk('a-first', '2026-11-11T14:19:00Z'),
+    mk('other-load', '2026-11-11T14:19:10Z', { subject: 'Fwd: Rate Confirmation for Load: 123' }),
+    mk('far', '2026-11-11T18:00:00Z'),
+  ];
+  it('keeps the earliest copy and dismisses the later one; nothing else', () => {
+    const { duplicates, stays } = planIntakeSweep({ intake, shipments: [], orders: [], now, dedupe: true });
+    expect(duplicates.map((d) => [d.row.id, d.of.id])).toEqual([['b-later', 'a-first']]);
+    expect(stays.map((r) => r.id).sort()).toEqual(['a-first', 'far', 'other-load']);
+  });
+  it('does nothing without --dedupe', () => {
+    expect(planIntakeSweep({ intake, shipments: [], orders: [], now }).duplicates).toEqual([]);
+  });
+});

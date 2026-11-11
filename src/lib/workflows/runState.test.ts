@@ -129,6 +129,8 @@ describe('retryable', () => {
     expect(retryable(row({ status: 'FAILED', attempts: 1 }))).toBe(true)
     expect(retryable(row({ status: 'COMPLETED', outcome: 'UNKNOWN_PARTY' }))).toBe(true)
     expect(retryable(row({ status: 'FAILED', outcome: 'APPLIED', attempts: 1 }))).toBe(false)
+    // A run the spending cap stopped never read the e-mail, so it can be read again.
+    expect(retryable(row({ status: 'COMPLETED', outcome: 'NO_ACTION', errorCode: 'DAILY_CAP', attempts: 1 }))).toBe(true)
     expect(retryable(row({ status: 'FAILED', attempts: MAX_ATTEMPTS }))).toBe(false)
     expect(retryable(row({ status: 'COMPLETED', outcome: 'PROPOSED' }))).toBe(false)
   })

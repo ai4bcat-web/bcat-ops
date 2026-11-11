@@ -9023,6 +9023,11 @@ export async function listWorkflowExceptions(): Promise<WorkflowRunRecord[]> {
  * Run it again from the top. The server refuses a run that is not retryable — one already
  * APPLIED, or past the five-attempt cap — and refuses a stale `expectedVersion`.
  */
+/** Intake: read an e-mail the agent saved without reading (spending cap, a failed read). The server finds the run's version itself. */
+export async function rereadIntake(runId: string): Promise<WorkflowRunRecord> {
+  return workflowAction<WorkflowRunRecord>('REREAD_INTAKE', { runId })
+}
+
 export async function retryWorkflowRun(id: string, expectedVersion: number): Promise<WorkflowRunRecord> {
   return workflowAction<WorkflowRunRecord>('RETRY_RUN', { id, expectedVersion })
 }

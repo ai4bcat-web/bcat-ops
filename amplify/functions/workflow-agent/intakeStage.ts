@@ -21,10 +21,12 @@ import type { TenderPrefill } from '../../../src/lib/intakeTender'
 import type { IntakeCustomerCandidate, IntakeFields, IntakeMeta, IntakeParseState } from '../../../src/types/intake'
 import {
   CUSTOMER_TABLE_NAME,
+  INTAKE_LOAD_TABLE_NAME,
   getById,
   getSettings,
   listDivisions,
   findIntakeByReference,
+  findIntakeDuplicate,
   logRepeatEmail,
   enrichIntakeLoad,
   nowIso,
@@ -205,6 +207,34 @@ export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: St
 
     const settingsRow = await getSettings()
     const required = intakeRequired(settingsRow, customerRow).gated
+
+    // This run's own row from an earlier pass that could not read the e-mail (spending cap, failure): reading it now fills the row in
+    // (a person's own entries stay) instead of leaving it unread. Anything else already staged is left exactly as it is.
+    const mine = await getById(INTAKE_LOAD_TABLE_NAME, `il:${run.id}`)
+    if (mine) {
+      if (input.kind === 'PARSED' && mine.parseState !== 'PARSED' && mine.status === 'OPEN') {
+        const current = jsonish<IntakeFields>(mine.fields, emptyIntakeFields())
+        const kept = Object.fromEntries(Object.entries(current).filter(([k, v]) => k !== 'stops' && v != null && v !== '' && !(Array.isArray(v) && v.length === 0)))
+        const filled = { ...fields, ...kept, stops: (current.stops ?? []).length > 0 ? current.stops : fields.stops } as IntakeFields
+        await enrichIntakeLoad(mine, {
+          attachments: null, fields: filled as unknown as Row, meta: { ...meta, ...jsonish<IntakeMeta>(mine.meta, {}) } as unknown as Row,
+          missingFields: intakeMissing(filled, required), at: nowIso(),
+          parse: { parseState: 'PARSED', parseNote: null, format, autoFields: { ...fields, customerCandidates } as unknown as Row },
+        })
+        return { staged: true, detail: 'read the e-mail and filled in its intake load' }
+      }
+      return { staged: false, detail: 'intake load already staged' }
+    }
+
+    // The same e-mail delivered twice (two group addresses, or a group re-send) has a different Gmail id each time and so a different run.
+    const twin = await findIntakeDuplicate({ subject: mail.subject, bodyText: mail.bodyText, receivedAt: mail.receivedAt }, `il:${run.id}`)
+    if (twin) {
+      try { await enrichFromRepeat(twin, mail, fields, meta, input.kind === 'PARSED') } catch (err) {
+        console.warn('[workflow-agent] could not enrich the twin intake load', twin.id, err instanceof Error ? err.message : String(err))
+      }
+      return { staged: false, detail: `same e-mail as intake load ${String(twin.id)}` }
+    }
+
     const now = nowIso()
     const created = await putIntakeLoadIfAbsent({
       id: `il:${run.id}`,

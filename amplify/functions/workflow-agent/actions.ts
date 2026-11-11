@@ -211,6 +211,19 @@ export async function dispatch(action: string, rawInput: unknown, identity?: App
       return after
     }
 
+    // Intake: read an e-mail the agent saved without reading (spending cap, a failed read). The run's version is read here, so the
+    // page only needs the intake row's run id.
+    case 'REREAD_INTAKE': {
+      const id = requireString(input.runId, 'runId')
+      const row = await getRun(id)
+      if (!row) throw new Error(`Run not found: ${id}`)
+      const run = row as unknown as RunRow
+      if (!retryable(run)) throw new Error('That e-mail was already read')
+      const after = await retryRun(id, typeof row.version === 'number' ? row.version : 0, caller)
+      await writeAudit('WorkflowRun', id, action, caller, { attempts: after.attempts, outcome: after.outcome ?? null })
+      return after
+    }
+
     case 'LINK_RUN': {
       const id = requireString(input.id, 'id')
       const expectedVersion = requireVersion(input.expectedVersion)
