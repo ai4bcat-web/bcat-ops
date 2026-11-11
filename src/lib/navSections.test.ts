@@ -74,9 +74,9 @@ describe('buildNavSections', () => {
     expect(pinned.find((i) => i.label === 'Accounting')?.childGroups?.map((g) => [g.label, g.children.map((c) => c.label)])).toEqual([
       ['Payroll', ['Box Truck Settlements', 'Amazon Settlements', 'Owner Operator Settlements', 'Employee Hours']],
     ])
-    // Calendar carries Driver info, Appts and Time off in that order; Profiles holds Customers, Carriers and Locations.
+    // Calendar carries Driver info, Appts and Time off in that order; Profiles holds Customers, Carriers, Locations and Drivers.
     expect(kids('Calendar')).toEqual(['Driver info', 'Appts', 'Time off'])
-    expect(kids('Profiles')).toEqual(['Customers', 'Carriers', 'Locations'])
+    expect(kids('Profiles')).toEqual(['Customers', 'Carriers', 'Locations', 'Drivers'])
     expect(kids('Fleet manager').slice(0, 5)).toEqual(['Fleet manager dashboard', 'Maintenance', 'Invoices', 'Asset documents', 'Fuel'])
     expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Factoring', 'Vendors'])
     expect(kids('Settings')).toEqual([
