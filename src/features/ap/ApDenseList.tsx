@@ -40,6 +40,9 @@ export interface ApListConfig<T> {
   onClearFilters?: () => void
   kpis?: DenseKpi[]
   onRowClick?: (row: T) => void
+  /** Reused by other lists (Drivers): the search box hint and the grid's accessible name. Default to the AP wording. */
+  searchPlaceholder?: string
+  ariaLabel?: string
 }
 
 /** The page head and the two tab strips: kept mounted while the views under them swap. */
@@ -91,7 +94,7 @@ export function ApDenseList<T>({ config, email, onRefresh }: {
   onRefresh?: () => void
 }) {
   const {
-    gridId, columns, rows, rowKey, emptyText, banner, actions, filterChips, onAddFilter, onClearFilters, kpis, onRowClick,
+    gridId, columns, rows, rowKey, emptyText, banner, actions, filterChips, onAddFilter, onClearFilters, kpis, onRowClick, searchPlaceholder, ariaLabel,
   } = config
   const [filters, setFilters] = useState<DenseFilters>({})
   const [search, setSearch] = useState('')
@@ -135,7 +138,7 @@ export function ApDenseList<T>({ config, email, onRefresh }: {
     <div className="tms-dense-page tms-caps">
       <div className="tms-dense-bar">
         <Search size={14} className="tms-muted" aria-hidden="true" />
-        <TmsInput className="tms-dense-search" aria-label="Search" data-testid="ap-search" placeholder="Search bill, carrier, payee, amount…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <TmsInput className="tms-dense-search" aria-label="Search" data-testid="ap-search" placeholder={searchPlaceholder ?? 'Search bill, carrier, payee, amount…'} value={search} onChange={(e) => setSearch(e.target.value)} />
         {filterChips?.map((chip) => (
           <TmsFilterChip key={chip.key} label={chip.label} value={chip.value} onClick={chip.onClick} />
         ))}
@@ -168,7 +171,7 @@ export function ApDenseList<T>({ config, email, onRefresh }: {
       {kpis && kpis.length > 0 ? <DenseKpiStrip open={prefs.kpiOpen} items={kpis} /> : null}
       <div className="tms-dense-body" style={{ minHeight: 320, maxHeight: 'calc(100vh - 280px)' }}>
         <DenseGrid<T>
-          aria-label={`AP ${gridId.replace(/^ap-/, '')}`}
+          aria-label={ariaLabel ?? `AP ${gridId.replace(/^ap-/, '')}`}
           recentKey={`tms:${gridId}:recent:${email || 'anon'}`}
           resetKey={`${search}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
           columns={gridColumns}

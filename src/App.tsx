@@ -54,6 +54,9 @@ import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManag
 import { DisputesPage } from '@/features/disputes/DisputesPage'
 import { DriverDisputesPage } from '@/features/disputes/DriverDisputesPage'
 import { FilesPage } from '@/features/files/FilesPage'
+import { DriversListPage } from '@/features/profiles/drivers/DriversListPage'
+import { DriverProfilePage } from '@/features/profiles/drivers/DriverProfilePage'
+import { NewDriverWizard } from '@/features/profiles/drivers/NewDriverWizard'
 import { FeedbackPage } from '@/features/feedback/FeedbackPage'
 import { ComplianceOverviewPage } from '@/features/compliance/overview/ComplianceOverviewPage'
 import { FinancialOperationsPage } from '@/features/financial-ops/FinancialOperationsPage'
@@ -241,6 +244,9 @@ export default function App() {
               <Route path="/driver-view/:driverId" element={<RequirePage page="ownerOperatorPay"><DriverAppViewPage /></RequirePage>} />
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
               <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
+              <Route path="/profiles/drivers" element={<RequirePage page="files"><DriversListPage /></RequirePage>} />
+              <Route path="/profiles/drivers/new" element={<RequirePage page="files"><NewDriverWizard /></RequirePage>} />
+              <Route path="/profiles/drivers/:id" element={<RequirePage page="files"><DriverProfilePage /></RequirePage>} />
               {/* Open to every signed-in user (no page grant) — it is where staff report problems. */}
               <Route path="/feedback" element={<FeedbackPage />} />
               <Route path="/settings" element={<ParamRedirect to="/tms/brokerage" />} />
