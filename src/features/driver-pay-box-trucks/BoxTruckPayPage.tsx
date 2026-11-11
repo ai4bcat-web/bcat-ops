@@ -421,8 +421,9 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onAdd
                   <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', color: 'var(--tms-text-2)', cursor: 'pointer' }}>{t.proNumber || '—'}</td>
                   <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', color: 'var(--tms-text-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>{t.customer || '—'}</td>
                   <td style={{ ...TD, textAlign: 'left', color: t.status === 'COVERED' ? 'var(--tms-badge-orange)' : 'var(--tms-text-2)' }}>{t.status || '—'}</td>
-                  <td style={TD}>{money(t.grossProfit)}</td>
-                  <td style={{ ...TD, fontWeight: 600 }}>{money(tripPayAmount(t.grossProfit, setting))}</td>
+                  {/* The money cells open the same editor: the amount is the gross profit entered there (Ryne 2026-11-11: could not edit it). */}
+                  <td onClick={() => onEditTrip(t)} title="Edit amount" data-testid="trip-gross-profit" style={{ ...TD, cursor: 'pointer' }}>{money(t.grossProfit)}</td>
+                  <td onClick={() => onEditTrip(t)} title="Edit amount" style={{ ...TD, fontWeight: 600, cursor: 'pointer' }}>{money(tripPayAmount(t.grossProfit, setting))}</td>
                   <td style={{ ...TD, padding: '7px 4px', whiteSpace: 'nowrap' }}>
                     <span draggable onDragStart={() => onTripDragStart(t.id)} onDragEnd={onTripDragEnd} title="Drag to reorder" aria-label="Drag to reorder" style={{ display: 'inline-flex', cursor: 'grab', color: 'var(--tms-muted)', padding: '0 2px', verticalAlign: 'middle' }}><GripVertical size={13} /></span>
                     <button onClick={() => onEditTrip(t)} title="Edit shipment" style={{ color: 'var(--tms-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Pencil size={13} /></button>

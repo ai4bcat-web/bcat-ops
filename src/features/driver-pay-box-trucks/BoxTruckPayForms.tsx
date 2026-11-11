@@ -45,7 +45,17 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
   })
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
+  // Gross profit follows Customer rate minus Carrier cost until the person types a profit of their own.
+  const [gpTyped, setGpTyped] = useState(initial != null && initial.grossProfit !== 0)
+  const set = (k: string, v: string) => setF((p) => {
+    const next = { ...p, [k]: v }
+    if ((k === 'customerRate' || k === 'carrierCost') && !gpTyped) {
+      const rate = num(next.customerRate)
+      const cost = num(next.carrierCost)
+      if (rate != null && cost != null) next.grossProfit = String(Math.round((rate - cost) * 100) / 100)
+    }
+    return next
+  })
 
   const save = async () => {
     const gp = num(f.grossProfit)
@@ -73,7 +83,7 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
         <Field l="Load description" half><input style={input} value={f.loadDesc} onChange={(e) => set('loadDesc', e.target.value)} placeholder="POD RCVD-FAK" /></Field>
         <Field l="Customer rate" half><input style={input} value={f.customerRate} onChange={(e) => set('customerRate', e.target.value)} placeholder="$1,150.00" /></Field>
         <Field l="Carrier cost" half><input style={input} value={f.carrierCost} onChange={(e) => set('carrierCost', e.target.value)} placeholder="$500.00" /></Field>
-        <Field l="Gross profit *" half><input style={input} value={f.grossProfit} onChange={(e) => set('grossProfit', e.target.value)} placeholder="$650.00" /></Field>
+        <Field l="Gross profit *" half><input style={input} value={f.grossProfit} onChange={(e) => { setGpTyped(true); set('grossProfit', e.target.value) }} placeholder="$650.00" /></Field>
         <Field l="Status" half>
           <select style={input} value={f.status} onChange={(e) => set('status', e.target.value)}>
             <option>RELEASED</option><option>COVERED</option>
