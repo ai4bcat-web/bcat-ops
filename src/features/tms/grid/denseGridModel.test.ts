@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   searchRows,
+  BLANK_VALUE,
+  matchesColumnFilter,
   columnWidths,
   defaultColumnWidth,
   facetOptions,
@@ -98,12 +100,20 @@ describe('sortDenseRows', () => {
 
 describe('facetOptions', () => {
   it('counts the values the rows carry, A to Z, and lists fixed options even at zero', () => {
-    expect(facetOptions(rows, carrier)).toEqual([
+    const real = (list: ReturnType<typeof facetOptions>) => list.filter((o) => o.value !== BLANK_VALUE)
+    expect(real(facetOptions(rows, carrier))).toEqual([
       { value: 'Knight', label: 'Knight', count: 1 },
       { value: 'Swift', label: 'Swift', count: 2 },
     ])
     const fixed = { ...carrier, fixedOptions: [{ value: 'Werner', label: 'Werner' }, { value: 'Swift', label: 'Swift' }] }
-    expect(facetOptions(rows, fixed).map((o) => [o.value, o.count])).toEqual([['Werner', 0], ['Swift', 2], ['Knight', 1]])
+    expect(real(facetOptions(rows, fixed)).map((o) => [o.value, o.count])).toEqual([['Werner', 0], ['Swift', 2], ['Knight', 1]])
+  })
+
+  it('offers (Blanks) first, with its count, only when some row has no value', () => {
+    const withBlank = [...rows, { ...rows[0]!, carrier: '' }] as typeof rows
+    const first = facetOptions(withBlank, carrier)[0]!
+    expect(first).toEqual({ value: BLANK_VALUE, label: '(Blanks)', count: withBlank.filter((r) => !carrier.text(r)).length })
+    expect(facetOptions(withBlank.filter((r) => carrier.text(r)), carrier).some((o) => o.value === BLANK_VALUE)).toBe(false)
   })
 })
 
@@ -192,5 +202,31 @@ describe('searchRows', () => {
     expect(searchRows(rows, cols, '$1,500.00').map((r) => r.bill)).toEqual(['12528'])
     expect(searchRows(rows, cols, '1500').map((r) => r.bill)).toEqual(['12528'])
     expect(searchRows(rows, cols, '2400').map((r) => r.bill)).toEqual(['12464'])
+  })
+})
+
+describe('blanks in a column filter', () => {
+  type R = { carrier: string; weight: number | null; day: string | null }
+  const rows: R[] = [{ carrier: 'Swift', weight: 10, day: '2026-11-01' }, { carrier: '', weight: null, day: null }, { carrier: 'Knight', weight: 5, day: '2026-11-02' }]
+  const multi = { key: 'carrier', header: 'Carrier', text: (r: R) => r.carrier, filter: 'multi' as const }
+  const textCol = { key: 'carrier', header: 'Carrier', text: (r: R) => r.carrier, filter: 'text' as const }
+  const numCol = { key: 'w', header: 'Weight', text: (r: R) => String(r.weight ?? ''), numberOf: (r: R) => r.weight, filter: 'number' as const }
+  const dateCol = { key: 'd', header: 'Day', text: (r: R) => r.day ?? '', dateOf: (r: R) => r.day, filter: 'date' as const }
+  const keep = (col: typeof multi | typeof textCol | typeof numCol | typeof dateCol, f: Parameters<typeof matchesColumnFilter>[2]) =>
+    rows.filter((r) => matchesColumnFilter(r, col as never, f)).map((r) => r.carrier || '(blank)')
+
+  it('a checklist with (Blanks) ticked keeps the blank rows, alone or with real values', () => {
+    expect(keep(multi, { values: [BLANK_VALUE] })).toEqual(['(blank)'])
+    expect(keep(multi, { values: [BLANK_VALUE, 'Swift'] })).toEqual(['Swift', '(blank)'])
+    expect(keep(multi, { values: ['Swift'] })).toEqual(['Swift'])
+  })
+  it('Exclude with (Blanks) drops the blank rows; excluding a value alone still keeps them', () => {
+    expect(keep(multi, { values: [BLANK_VALUE], exclude: true })).toEqual(['Swift', 'Knight'])
+    expect(keep(multi, { values: ['Swift'], exclude: true })).toEqual(['(blank)', 'Knight'])
+  })
+  it('text, number and date filters can show only the blanks', () => {
+    expect(keep(textCol, { blanks: true })).toEqual(['(blank)'])
+    expect(keep(numCol, { blanks: true })).toEqual(['(blank)'])
+    expect(keep(dateCol, { blanks: true })).toEqual(['(blank)'])
   })
 })

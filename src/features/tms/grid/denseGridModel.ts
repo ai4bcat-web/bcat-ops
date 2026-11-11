@@ -52,7 +52,13 @@ export interface DenseColumn<T> {
   align?: 'left' | 'right'
 }
 
+/** The checklist's "(Blanks)" entry: rows that have no value in the column. Never a real value. */
+export const BLANK_VALUE = '\u0000blank'
+export const BLANK_LABEL = '(Blanks)'
+
 export interface DenseColumnFilter {
+  /** Text, date and number filters: keep only the rows that are blank in this column (the other criteria are ignored). */
+  blanks?: boolean
   text?: string
   values?: string[]
   exclude?: boolean
@@ -73,7 +79,7 @@ export function filterKindOf<T>(col: DenseColumn<T>): DenseFilterKind | null {
 export function isFilterActive(f: DenseColumnFilter | undefined): boolean {
   if (!f) return false
   return Boolean(
-    (f.text && f.text.trim()) || (f.values && f.values.length > 0) || f.from || f.to || f.min != null || f.max != null,
+    f.blanks || (f.text && f.text.trim()) || (f.values && f.values.length > 0) || f.from || f.to || f.min != null || f.max != null,
   )
 }
 
@@ -96,6 +102,12 @@ function dayOf(value: string | null): string | null {
 export function matchesColumnFilter<T>(row: T, col: DenseColumn<T>, f: DenseColumnFilter): boolean {
   const kind = filterKindOf(col)
   if (!kind || !isFilterActive(f)) return true
+  if (f.blanks && kind !== 'multi') {
+    if (kind === 'text') return col.text(row).trim() === ''
+    if (kind === 'date') return !dayOf(col.dateOf ? col.dateOf(row) : null)
+    const n = col.numberOf ? col.numberOf(row) : null
+    return n == null || Number.isNaN(n)
+  }
   switch (kind) {
     case 'text': {
       const needle = (f.text ?? '').trim().toLowerCase()
@@ -104,10 +116,10 @@ export function matchesColumnFilter<T>(row: T, col: DenseColumn<T>, f: DenseColu
     case 'multi': {
       if (!f.values || f.values.length === 0) return true
       const values = optionsOfRow(col, row).map((o) => o.value)
-      const hit = values.some((v) => f.values!.includes(v))
-      // An exclusion keeps a row that has no value for the facet; an inclusion drops it.
-      if (f.exclude) return values.length === 0 || !hit
-      return hit
+      // "(Blanks)" picks the rows that have no value for the facet.
+      const hit = values.some((v) => f.values!.includes(v)) || (values.length === 0 && f.values.includes(BLANK_VALUE))
+      // An exclusion keeps a row that has no value for the facet (unless Blanks is excluded too); an inclusion drops it.
+      return f.exclude ? !hit : hit
     }
     case 'date': {
       if (!f.from && !f.to) return true
@@ -194,7 +206,10 @@ export function facetOptions<T>(rows: readonly T[], col: DenseColumn<T>): DenseF
     }
   }
   const all = [...map.values()]
-  return col.fixedOptions ? all : all.sort((a, b) => collator.compare(a.label, b.label))
+  const sorted = col.fixedOptions ? all : all.sort((a, b) => collator.compare(a.label, b.label))
+  // Blanks first, so "nothing here" is one click away (only when some row really is blank).
+  const blank = rows.reduce((n, row) => (optionsOfRow(col, row).length === 0 ? n + 1 : n), 0)
+  return blank > 0 ? [{ value: BLANK_VALUE, label: BLANK_LABEL, count: blank }, ...sorted] : sorted
 }
 
 /** The narrowest and widest a person can drag or type a column. */
