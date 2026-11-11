@@ -71,7 +71,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
-  for (const k of ['TABLE_NAME', 'SLACK_SIGNING_SECRET', 'SLACK_CHANNEL_MAPPING']) delete process.env[k]
+  for (const k of ['TABLE_NAME', 'SLACK_SIGNING_SECRET', 'SLACK_CHANNEL_MAPPING', 'WORKFLOW_AGENT_FUNCTION_NAME']) delete process.env[k]
 })
 
 describe('slack-intake-webhook smoke', () => {
@@ -172,6 +172,21 @@ describe('slack-intake-webhook smoke', () => {
       receivedAt: '2023-11-14T22:13:20.000Z',
     })
     expect(item.id).toMatch(/^slack-[0-9a-f]{20}$/)
+  })
+
+  it('never starts a tender run from a Slack e-mail forward, even when a workflow agent is configured', async () => {
+    const handler = await loadHandler({
+      SLACK_SIGNING_SECRET: SECRET,
+      TABLE_NAME: 'Intake-test',
+      SLACK_CHANNEL_MAPPING: '{"C111":"IVAN_CARTAGE"}',
+      WORKFLOW_AGENT_FUNCTION_NAME: 'workflow-agent-test',
+    })
+    const res = await handler(signedEvent({
+      type: 'event_callback',
+      event: { type: 'message', subtype: 'email', channel: 'C111', ts: '1700000000.000200', text: 'Load from A to B', files: [] },
+    }))
+    expect(res).toEqual({ statusCode: 200, body: 'ok' })
+    expect(lambdaSend).not.toHaveBeenCalled()
   })
 
   it('writes nothing for a signed message in an unmapped channel', async () => {
