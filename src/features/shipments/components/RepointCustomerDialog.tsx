@@ -10,8 +10,11 @@ export interface RepointCustomerDialogProps {
   customers: { id: string; name: string }[]
   open: boolean
   onOpenChange: (open: boolean) => void
-  onRepointed?: () => void | Promise<void>
+  /** Called with the customer the shipment now belongs to. */
+  onRepointed?: (customerId: string) => void | Promise<void>
 }
+
+const NO_REASON = '(no reason given)'
 
 function centsDisplay(cents: number): string {
   const sign = cents < 0 ? '-' : ''
@@ -115,13 +118,10 @@ export function RepointCustomerDialog({
   }, [open, creditPath?.loading, shipment.id, shipment.customerId, shipment.customerName, customers])
 
   const submit = async () => {
-    const trimmed = reason.trim()
+    // The reason is optional (Ryne 2026-11-11); the audit row says so when it is empty.
+    const trimmed = reason.trim() || NO_REASON
     if (!customerId) {
       setError('Choose a customer.')
-      return
-    }
-    if (!trimmed) {
-      setError('A reason is required.')
       return
     }
     setBusy(true)
@@ -135,7 +135,7 @@ export function RepointCustomerDialog({
       })
       toast.success(`${shipment.number} repointed`)
       reset()
-      if (onRepointed) await onRepointed()
+      if (onRepointed) await onRepointed(customerId)
       onOpenChange(false)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Re-point failed'
@@ -165,7 +165,7 @@ export function RepointCustomerDialog({
       await repointInvoicedCustomer({
         shipmentId: shipment.id,
         customerId,
-        reason: reason.trim(),
+        reason: reason.trim() || NO_REASON,
         idempotencyKey: creditPath.idempotencyKey,
         ...(acknowledge ? { acknowledgePaid: true } : {}),
       } as unknown as { shipmentId: string; customerId: string; reason: string; idempotencyKey: string; acknowledgePaid?: boolean })
@@ -179,7 +179,7 @@ export function RepointCustomerDialog({
       }
       toast.success(`${shipment.number} repointed and rebilled`)
       reset()
-      if (onRepointed) await onRepointed()
+      if (onRepointed) await onRepointed(customerId)
       onOpenChange(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Credit-and-rebill failed')
@@ -271,11 +271,11 @@ export function RepointCustomerDialog({
               options={customers.map((c) => ({ value: c.id, label: c.name }))}
             />
           </TmsField>
-          <TmsField label="Reason" error={error && customerId ? error : null}>
+          <TmsField label="Reason (optional)" error={error && customerId ? error : null}>
             <TmsInput
               value={reason}
               onChange={(e) => { setReason((e.target as HTMLInputElement).value); setError(null) }}
-              placeholder="Why is this customer being repointed?"
+              placeholder="Why is this customer being changed? (optional)"
             />
           </TmsField>
         </>

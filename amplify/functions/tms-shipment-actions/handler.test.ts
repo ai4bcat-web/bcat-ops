@@ -1768,6 +1768,18 @@ describe('REPOINT_SHIPMENT_CUSTOMER', () => {
     await expect(repointCall(shipmentId, 'cus-2')).rejects.toThrow(/^INVOICED:/)
   })
 
+  it("re-points Bill to with the customer: the old customer's party never stays on the order, the new customer's default takes its place (or none)", async () => {
+    const { shipmentId, orderId } = await createDraft()
+    await saveForm(shipmentId)
+    table(TABLES.order).set(orderId, { ...table(TABLES.order).get(orderId)!, billToId: 'old-customers-party' })
+    seedCustomer({ id: 'cus-2', name: 'SECOND CUSTOMER', status: 'ACTIVE', active: true, creditLimitCents: 10_000_00, billToParties: [{ id: 'bt-a', name: 'A' }, { id: 'bt-b', name: 'B', isDefault: true }] })
+    const moved = (await repointCall(shipmentId, 'cus-2')) as { orders: Row[] }
+    expect(moved.orders[0].billToId).toBe('bt-b')
+    seedCustomer({ id: 'cus-3', name: 'THIRD CUSTOMER', status: 'ACTIVE', active: true, creditLimitCents: 10_000_00 })
+    const third = (await repointCall(shipmentId, 'cus-3')) as { orders: Row[] }
+    expect(third.orders[0].billToId ?? null).toBeNull()
+  })
+
   it('moves Shipment, Order and Load to the new customer and writes one audit row', async () => {
     const { shipmentId } = await createDraft()
     await saveForm(shipmentId)

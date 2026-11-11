@@ -7,7 +7,8 @@ import { renderCard } from './cardTestKit'
 import { pushRecent } from './recents'
 
 vi.mock('@/hooks/useCustomerOrders', () => ({ useCustomerOrders: () => ({ orders: [], shipments: [], loads: [], loading: false }) }))
-vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ userId: 'u1', email: 'rep@bcat.test', groups: [] }) }))
+let authGroups: string[] = []
+vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ userId: 'u1', email: 'rep@bcat.test', groups: authGroups }) }))
 
 const base = { createdAt: '2020-01-01T00:00:00.000Z', updatedAt: '2020-01-01T00:00:00.000Z' }
 const mk = (id: string, name: string, extra: object = {}) => ({ ...base, id, name, status: 'ACTIVE', active: true, ...extra }) as unknown as CustomerRecord
@@ -126,6 +127,18 @@ describe('CustomerPicker — typed name, lock', () => {
     })
     expect((screen.getByTestId('f-customer-name') as HTMLInputElement).readOnly).toBe(true)
     expect(screen.getByText('Change customer…').getAttribute('href')).toBe('/tms/shipments/sh-9')
+  })
+
+  it('an owner/ADMIN changes the customer right there: the link becomes a button that opens the change dialog', () => {
+    authGroups = ['ADMIN']
+    set(customers, {
+      mode: 'edit', locked: { fields: { customer: 'Locked: customer is fixed once created' }, stops: {}, voided: false },
+      bundle: { shipment: { id: 'sh-9', number: 'S9', customerId: ACME.id, customerName: ACME.name, updatedAt: 't' } }, customer: ACME,
+    })
+    const change = screen.getByTestId('f-customer-change')
+    expect(change.tagName).toBe('BUTTON')
+    fireEvent.click(change)
+    expect(screen.getByText('Reason (optional)')).toBeTruthy()
   })
 })
 
