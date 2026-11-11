@@ -37,6 +37,7 @@ function deliveredRow(id: string, patch: Partial<ShipmentRow> = {}): ShipmentRow
   return row(id, {
     status: 'DELIVERED',
     docsMissing: [],
+    rateConOnFile: true, // a delivered shipment is only complete with a POD and an RC
     revenueCents: 100_000,
     costCents: 80_000,
     profitCents: 20_000,

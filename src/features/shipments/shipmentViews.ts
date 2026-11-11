@@ -732,6 +732,24 @@ export function podStatusOf(row: Pick<ShipmentRow, 'revDivision' | 'docsMissing'
   return row.docsMissing.includes('POD') ? 'NO_POD' : 'POD_IN'
 }
 
+/** The rate confirmation is on file or signed (the RC column's rule). */
+export function rateConIn(row: Pick<ShipmentRow, 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'>): boolean {
+  return Boolean(row.rateConSignedAt) || row.rateConStatus === 'SIGNED' || row.rateConOnFile === true
+}
+
+/**
+ * The documents a shipment is missing (Ryne 2026-11-11): whatever the order's document gate lists, plus, once it is DELIVERED, a POD and a rate
+ * confirmation (RC) that are not on it. Car shipping (auto shippers) has neither to chase; Ivan Cartage's own fleet has no carrier RC; a shipment
+ * whose documents were signed off by hand (`docsOverrideAt`) is not flagged again. A delivered shipment whose gate never ran counts as missing a POD.
+ */
+export function docsMissingOf(row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'deletedAt' | 'assignmentType' | 'revDivision' | 'docsMissing' | 'docsOverrideAt' | 'rateConSignedAt' | 'rateConStatus' | 'rateConOnFile'>): string[] {
+  const out = [...(row.docsMissing ?? [])]
+  if (row.revDivision === 'CAR_SHIPPING' || row.docsOverrideAt || boardStatusOf(row) !== 'DELIVERED') return out
+  if ((row.docsMissing == null || row.docsMissing.includes('POD')) && !out.includes('POD')) out.push('POD')
+  if (row.revDivision !== 'ASSETS' && !rateConIn(row) && !out.includes('RC')) out.push('RC')
+  return out
+}
+
 export const POD_STATUS_TEXT = { NO_POD: 'No POD', POD_IN: 'POD in', NA: 'NA', '': '' } as const
 
 function daysInStatusOf(row: ShipmentRow): string {
@@ -881,7 +899,10 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     key: 'docsMissing',
     label: 'Docs',
     group: 'Computed',
-    value: (r) => (r.docsMissing == null ? '' : r.docsMissing.length === 0 ? 'Complete' : `${r.docsMissing.length} missing`),
+    value: (r) => {
+      const missing = docsMissingOf(r)
+      return r.docsMissing == null && missing.length === 0 ? '' : missing.length === 0 ? 'Complete' : `${missing.length} missing`
+    },
     width: 120,
   },
   // ── Shipment ─────────────────────────────────────────────────────────────
@@ -1115,7 +1136,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     // Ryne 2026-11-11: "RC", a Y when the rate confirmation is on file or signed and blank otherwise, fixed beside POD.
     label: 'RC',
     group: 'Computed',
-    value: (r) => (r.revDivision !== 'CAR_SHIPPING' && (r.rateConSignedAt || r.rateConStatus === 'SIGNED' || r.rateConOnFile === true) ? 'Y' : ''),
+    value: (r) => (r.revDivision !== 'CAR_SHIPPING' && rateConIn(r) ? 'Y' : ''),
     width: 56,
   },
   { key: 'postedBoards', label: 'Posted Boards', group: 'Computed', value: (r) => (r.datPostedAt ? 'DAT' : ''), width: 120 },
