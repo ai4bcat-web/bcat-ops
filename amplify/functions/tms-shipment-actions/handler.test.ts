@@ -5245,6 +5245,22 @@ describe('DUPLICATE_SHIPMENT', () => {
     expect(stops.map((s) => s.appt)).toEqual(['2026-03-09T13:00:00.000Z', '2026-03-10T13:00:00.000Z'])
     expect(stops.every((s) => s.driverId === null && s.arrivedAt === null)).toBe(true)
   })
+  it('clearReference starts the copy with a blank PO and keeps the other references; without it the PO is copied as before', async () => {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    const order = table(TABLES.order).get(ids.orderId)!
+    order.references = [
+      { code: 'PO', label: 'Ref #', value: 'PO-1', level: 'ORDER', visibility: 'CUSTOMER' },
+      { code: 'BOL', label: 'BOL', value: 'B-9', level: 'ORDER', visibility: 'ALL' },
+    ]
+    const copyOrders = () => [...table(TABLES.order).values()].filter((o) => o.id !== ids.orderId)
+    await call('DUPLICATE_SHIPMENT', { shipmentId: ids.shipmentId, copies: [{}] })
+    expect((copyOrders()[0]!.references as Row[]).map((r) => r.code)).toEqual(['PO', 'BOL'])
+    await call('DUPLICATE_SHIPMENT', { shipmentId: ids.shipmentId, copies: [{}], clearReference: true })
+    const blanked = copyOrders()[1]!
+    expect((blanked.references as Row[]).map((r) => r.code)).toEqual(['BOL'])
+    expect((table(TABLES.order).get(ids.orderId)!.references as Row[]).map((r) => r.code)).toEqual(['PO', 'BOL'])
+  })
   it('copies invoiced, covered, POD-complete freight without its execution or accounting state', async () => {
     const ids = await createDraft()
     await saveForm(ids.shipmentId)
