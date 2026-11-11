@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Package, DollarSign, AlertCircle, CalendarClock,
-  RefreshCw, Plus, Handshake,
+  RefreshCw, Plus, Handshake, Sparkles,
 } from 'lucide-react'
 import { KpiCard } from '@/components/ui/kpi-card'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
@@ -24,6 +24,7 @@ import { useLegacyDashboardKpis, type DateRangeKey } from './useLegacyDashboardK
 import { useBatoryApptCount } from './useBatoryApptCount'
 import { BrokerageSection } from './BrokerageDashboardPage'
 import { LazyWidget } from './LazyWidget'
+import { AssistantChat } from '@/features/dashboards/assistant/AssistantChat'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -384,7 +385,10 @@ export function DashboardPage() {
     [factoringItems, loads],
   )
   const navigate = useNavigate()
-  const { hasPageAccess } = useAuth()
+  const { hasPageAccess, isAdmin } = useAuth()
+  // The assistant's door is the same as the dashboards' (owner, ADMIN or the TMS page); the Lambda enforces it again.
+  const canAsk = isAdmin || hasPageAccess('tms')
+  const [askOpen, setAskOpen] = useState(false)
   const isMobile = useIsMobile()
   const col1 = isMobile ? '1fr' : undefined   // stack any multi-col row on mobile
   // Sparkline paints an SVG stroke from a JS string, so the token is resolved to its value.
@@ -426,6 +430,23 @@ export function DashboardPage() {
               as of {asOfLabel(kpi.asOf)}
             </span>
           )}
+          {canAsk && (
+            <button
+              type="button"
+              data-testid="ask-bcat-toggle"
+              aria-pressed={askOpen}
+              onClick={() => setAskOpen((v) => !v)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7, cursor: 'pointer',
+                fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
+                border: '1px solid var(--tms-border)',
+                background: askOpen ? 'var(--tms-primary-tint)' : 'var(--tms-card)',
+                color: askOpen ? 'var(--tms-primary-ink)' : 'var(--tms-text)',
+              }}
+            >
+              <Sparkles size={13} /> Ask BCAT
+            </button>
+          )}
           <IconBtn label="Refresh"><RefreshCw size={13} /> Refresh</IconBtn>
           {hasPageAccess('loads') && (
             <button
@@ -443,6 +464,8 @@ export function DashboardPage() {
       )}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {canAsk && askOpen && <AssistantChat />}
 
         {/* ── KPI strip ────────────────────────────────────────────────────── */}
         {/* Six cards, one row on desktop. */}
