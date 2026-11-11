@@ -457,7 +457,6 @@ export async function intakeMoveToActive(deps: IntakeDeps, input: Row, caller: C
         ...verdict.missing,
         ...verdict.problems,
         ...verdict.unconfirmed.map((k) => `confirm ${k}`),
-        ...(verdict.needsReview ? ['review (open the load and press Mark reviewed)'] : []),
       ]
       throw new Error(`${INTAKE_NOT_READY_PREFIX} — still needs: ${parts.join(', ')}`)
     }

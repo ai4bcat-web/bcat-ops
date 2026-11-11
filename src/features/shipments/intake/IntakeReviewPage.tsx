@@ -14,14 +14,13 @@ import {
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import {
   dismissIntake, dismissWorkflowRun, getTmsSettings, getWorkflowRun, linkWorkflowRun, listCustomers,
-  markIntakeReviewed, moveIntakeToActive, saveIntakeDraft,
+  moveIntakeToActive, saveIntakeDraft,
 } from '@/lib/apiClient'
 import { requiredFieldLabel } from '@/lib/flowDefaults'
-import { formatDateTime } from '@/lib/date'
 import { findCustomerMatches } from '@/lib/tmsDirectory'
 import { Typeahead, type TypeaheadItem } from '@/features/shipments/form/cards/Typeahead'
 import { SHIPMENT_TYPES } from '@/lib/shipmentTypes'
-import { canMarkReviewed, canMoveToActive, fieldStatusOf, intakeFieldKeys, intakeRequired, patchIntakeFields, withCustomerDefaults } from '@/lib/intakeLoad'
+import { canMoveToActive, fieldStatusOf, intakeFieldKeys, intakeRequired, patchIntakeFields, withCustomerDefaults } from '@/lib/intakeLoad'
 import type { CustomerRecord, TmsSettings } from '@/types/tms'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeStop } from '@/types/intake'
 import { IntakeFieldRow } from './IntakeFieldRow'
@@ -79,28 +78,16 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
     || work.confirmed.length !== row.confirmed.length
     || work.confirmed.some((k) => !row.confirmed.includes(k))
 
-  // A reviewed load with unsaved edits is not reviewed any more: saving clears the review server-side.
-  const reviewed = !dirty && row.reviewedAt != null && row.reviewedBy != null
-  const { gate, markGate } = useMemo(() => {
+  const gate = useMemo(() => {
     const ctx = {
       settings,
       customer,
       customerActive: customer != null && customer.active !== false,
       divisionActive: activeDivisions.some((d) => d.code === work.fields.divisionCode),
     }
-    return {
-      gate: canMoveToActive({ ...work, reviewedBy: reviewed ? row.reviewedBy : null, reviewedAt: reviewed ? row.reviewedAt : null }, ctx),
-      markGate: canMarkReviewed(work, ctx),
-    }
+    return canMoveToActive({ ...work, reviewedBy: null, reviewedAt: null }, ctx)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [work, settings, customer, divisions, reviewed, row.reviewedBy, row.reviewedAt])
-  const reviewLine = reviewed
-    ? `Reviewed by ${row.reviewedBy} · ${formatDateTime(row.reviewedAt)}`
-    : row.reviewedAt != null || row.reviewedBy != null
-      ? 'Saving clears the review.'
-      : canReview
-        ? 'Needs review — check the fields, then Mark reviewed.'
-        : 'Not reviewed yet.'
+  }, [work, settings, customer, divisions])
   const deferred = useMemo(() => intakeRequired(settings, customer).deferred, [settings, customer])
 
   function edit(patch: Partial<Omit<IntakeFields, 'stops'>>) {
@@ -185,11 +172,6 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
     }
   }
 
-  async function save() {
-    const saved = await guarded(persist, 'Could not save')
-    if (saved) toast.success('Saved')
-  }
-
   async function move() {
     const done = await guarded(async () => {
       const current = dirty ? await persist() : row
@@ -209,16 +191,6 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
     }
     toast.success(`Moved to active as ${done.shipmentNumber}`)
     navigate(`/tms/shipments/${done.shipmentId}`)
-  }
-
-  async function markReviewed() {
-    const done = await guarded(async () => {
-      const current = dirty ? await persist() : row
-      return markIntakeReviewed({ intakeId: current.id, expectedVersion: current.version })
-    }, 'Could not mark reviewed')
-    if (!done) return
-    onRow(done)
-    toast.success('Marked reviewed')
   }
 
   async function dismiss() {
@@ -392,7 +364,6 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
                     {gate.unconfirmed.length > 0 ? <li>Check and confirm: {gate.unconfirmed.join(', ')}</li> : null}
                   </ul>
                 ) : null}
-                {markGate.ok && gate.needsReview ? <div>Needs review before it can move to active.</div> : null}
               </>
             )}
             {deferred.length > 0 ? <div>Checked later on the shipment: {deferred.map(requiredFieldLabel).join(', ')}</div> : null}
@@ -405,12 +376,9 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             <TmsButton size="sm" variant="ghost" disabled={busy} onClick={revert}>Revert to e-mail</TmsButton>
             <span className="tms-intake-footer-spacer" />
             <TmsButton variant="destructive" disabled={busy} onClick={() => setDismissOpen(true)}>Dismiss</TmsButton>
-            <TmsButton disabled={busy || !dirty} onClick={save}>Save</TmsButton>
-            <TmsButton disabled={busy || !markGate.ok || reviewed} onClick={markReviewed}>Mark reviewed</TmsButton>
             <TmsButton variant="primary" disabled={busy || !gate.ok} onClick={move}>Create shipment</TmsButton>
           </div>
         ) : null}
-        {row.status === 'OPEN' || row.reviewedAt != null ? <div className="tms-intake-review-line">{reviewLine}</div> : null}
       </div>
 
       <TmsDialog

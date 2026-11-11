@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import '@testing-library/jest-dom/vitest'
 import * as api from '@/lib/apiClient'
 import * as auth from '@/hooks/useAuth'
 import type { OwnershipDivisionRecord } from '@/types/tms'
 import { IntakeBoard } from './IntakeBoard'
-import { intakeFields, intakeRow, reviewed } from './testFixtures'
+import { intakeFields, intakeRow } from './testFixtures'
 
 const division = (code: string, name: string, over: Partial<OwnershipDivisionRecord> = {}): OwnershipDivisionRecord => ({
   id: code, code, name, brand: null, parentId: null, color: null, sortOrder: 0, active: true, owners: null, flows: null,
@@ -108,15 +108,9 @@ describe('IntakeBoard', () => {
     expect(screen.getByTestId('where')).toHaveTextContent(/\/tms\/shipments\/intake\/il%3A/)
   })
 
-  it('Mark done on an open row dismisses it (so it leaves Intake) and offers nothing on a moved row', async () => {
+  it('has no Mark done: a row leaves Intake when its shipment is created', async () => {
     renderBoard('/tms/shipments/intake?division=BRK')
     await screen.findByText('First tender')
-    vi.mocked(api.dismissIntake).mockResolvedValue(intakeRow({ status: 'DISMISSED' }))
-    fireEvent.click(screen.getAllByTestId('intake-mark-done')[0])
-    await waitFor(() => expect(api.dismissIntake).toHaveBeenCalledWith(expect.objectContaining({ intakeId: expect.stringMatching(/^il:/), reason: 'Marked done from the Intake list' })))
-    cleanup()
-    renderBoard('/tms/shipments/intake?division=BRK&status=moved')
-    await screen.findByText('Moved one')
     expect(screen.queryByTestId('intake-mark-done')).toBeNull()
   })
 
@@ -133,18 +127,12 @@ describe('IntakeBoard', () => {
     expect(row).toHaveTextContent('Dallas, TX → Atlanta, GA')
   })
 
-  it('marks open rows Reviewed or Needs review so unreviewed loads are visible', async () => {
-    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
-      intakeRow({ id: 'il:a', subject: 'First tender' }),
-      reviewed(intakeRow({ id: 'il:b', subject: 'Second tender' })),
-    ])
+  it('has no Review column: there is no review step', async () => {
     renderBoard('/tms/shipments/intake?division=BRK')
     const first = (await screen.findByText('First tender')).closest('tr') as HTMLElement
-    const second = (await screen.findByText('Second tender')).closest('tr') as HTMLElement
-    expect(first).toHaveTextContent('Needs review')
-    expect(second).toHaveTextContent('Reviewed')
-    expect(second).not.toHaveTextContent('Needs review')
+    expect(first).not.toHaveTextContent('Needs review')
   })
+
   describe('Intake tabs (Step AV feedback 3)', () => {
     beforeEach(() => {
       window.localStorage.clear()
