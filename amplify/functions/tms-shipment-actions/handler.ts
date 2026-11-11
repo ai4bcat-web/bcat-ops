@@ -4087,7 +4087,8 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
   const keepDriver = optionalBoolean(input.keepDriver) ?? false
   // The shipment form's Duplicate: the copy starts with a BLANK customer ref (PO), which a person must type. Off by default, so the
   // board's and the calendar's Duplicate behave as before.
-  const clearReference = optionalBoolean(input.clearReference) ?? false
+  // The customer ref (PO) is typed fresh on every copy (Ryne 2026-11-11): blank unless a caller explicitly asks to keep it.
+  const clearReference = optionalBoolean(input.clearReference) ?? true
   const copies = assertArrayOf(input.copies, 'copies', (item, i) => {
     const c = assertRecord(item, `copies[${i}]`)
     return {

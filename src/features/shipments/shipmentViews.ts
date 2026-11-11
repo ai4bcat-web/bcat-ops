@@ -721,18 +721,17 @@ function specialRequirementsLabel(req: SpecialRequirements | null | undefined): 
 /**
  * Whether a shipment still waits on its POD (Ryne 2026-11-11), for every revenue type except car shipping. Read from the order's document
  * gate (`docsMissing`), the same fact the dashboard's POD strip and the POD Present column use, so no extra read is needed.
- * 'NO_POD' = the gate says the POD is outstanding; 'POD_IN' = the gate ran, POD is required and nothing is missing; '' = not applicable or
- * not known (car shipping, the gate never ran, or this customer does not require a POD).
+ * Hard-coded for now (Ryne 2026-11-11): every customer requires a POD, whatever its own setting says; car shipping (auto shippers) shows 'NA'.
+ * 'NO_POD' = the gate says the POD is outstanding; 'POD_IN' = the gate ran and the POD is not among what is missing; '' = not known yet
+ * (the gate never ran for this shipment).
  */
-export function podStatusOf(row: Pick<ShipmentRow, 'revDivision' | 'docsMissing' | 'docsRequired'>): 'NO_POD' | 'POD_IN' | '' {
-  if (row.revDivision === 'CAR_SHIPPING') return ''
+export function podStatusOf(row: Pick<ShipmentRow, 'revDivision' | 'docsMissing'>): 'NO_POD' | 'POD_IN' | 'NA' | '' {
+  if (row.revDivision === 'CAR_SHIPPING') return 'NA'
   if (row.docsMissing == null) return ''
-  if (row.docsMissing.includes('POD')) return 'NO_POD'
-  if (row.docsRequired != null && !row.docsRequired.includes('POD')) return ''
-  return 'POD_IN'
+  return row.docsMissing.includes('POD') ? 'NO_POD' : 'POD_IN'
 }
 
-export const POD_STATUS_TEXT = { NO_POD: 'No POD', POD_IN: 'POD in', '': '' } as const
+export const POD_STATUS_TEXT = { NO_POD: 'No POD', POD_IN: 'POD in', NA: 'NA', '': '' } as const
 
 function daysInStatusOf(row: ShipmentRow): string {
   if (!row.statusChangedAt) return ''
@@ -1106,7 +1105,8 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     // Ryne 2026-11-11: just "POD", with a Y when the POD is in and blank when it is not (or not known yet).
     label: 'POD',
     group: 'Computed',
-    value: (r) => (r.docsMissing != null && !r.docsMissing.includes('POD') ? 'Y' : ''),
+    // Car shipping (auto shippers) has no POD or RC to chase: both columns stay blank for it (Ryne 2026-11-11).
+    value: (r) => (r.revDivision !== 'CAR_SHIPPING' && r.docsMissing != null && !r.docsMissing.includes('POD') ? 'Y' : ''),
     width: 56,
   },
   {
@@ -1114,7 +1114,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     // Ryne 2026-11-11: "RC", a Y when the rate confirmation is on file or signed and blank otherwise, fixed beside POD.
     label: 'RC',
     group: 'Computed',
-    value: (r) => (r.rateConSignedAt || r.rateConStatus === 'SIGNED' || r.rateConOnFile === true ? 'Y' : ''),
+    value: (r) => (r.revDivision !== 'CAR_SHIPPING' && (r.rateConSignedAt || r.rateConStatus === 'SIGNED' || r.rateConOnFile === true) ? 'Y' : ''),
     width: 56,
   },
   { key: 'postedBoards', label: 'Posted Boards', group: 'Computed', value: (r) => (r.datPostedAt ? 'DAT' : ''), width: 120 },

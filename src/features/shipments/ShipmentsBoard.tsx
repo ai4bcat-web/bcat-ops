@@ -916,6 +916,7 @@ function BoardPane({
       if (columnKey === 'podStatus') {
         const pod = podStatusOf(row)
         if (!pod) return <span className="tms-muted">—</span>
+        if (pod === 'NA') return <span className="tms-muted" title="Car shipping: no POD to chase">NA</span>
         return pod === 'NO_POD'
           ? <TmsBadge tone="orange" title="No proof of delivery on file yet">No POD</TmsBadge>
           : <span className="text-[color:var(--tms-badge-green)]">POD in</span>
