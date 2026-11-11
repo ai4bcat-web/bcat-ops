@@ -9,7 +9,7 @@
  * Auth: shared webhook secret (INTAKE_WEBHOOK_SECRET), surfaced here as
  * FACTORING_INTAKE_SECRET. Payload shape is validated here and the secret is never logged.
  *
- * The queue is for mail delivered to the ivanfactoring@bcatcorp.com group and nothing else.
+ * The queue is for mail delivered to the ivanfactoring@ or invoicefactoring@bcatcorp.com groups and nothing else.
  * That used to be the bridge's business alone — this Lambda took whatever it was handed and
  * never saw, let alone recorded, who the message was addressed to. So a row that should not
  * have been there could not even be explained after the fact: there was nothing on it to
@@ -36,8 +36,14 @@ interface LambdaFunctionUrlEvent {
   }
 }
 
-/** The one address that may create a factoring row. */
+/** The primary address (what Aljex bills factored customers to): the one a row's `toEmails` is checked against first. */
 export const FACTORING_RECIPIENT = 'ivanfactoring@bcatcorp.com'
+/**
+ * Every address that may create a factoring row. invoicefactoring@ is the internal group (Ryne 2026-11-10: "anything that comes to
+ * invoicefactoring@bcatcorp.com" still goes through the original e-mail way); it is the same queue and the same PRO-keyed row, so a bill
+ * that arrives at both lands once.
+ */
+export const FACTORING_RECIPIENTS: readonly string[] = [FACTORING_RECIPIENT, 'invoicefactoring@bcatcorp.com']
 
 type ValidatedPayload =
   | {
@@ -67,7 +73,7 @@ export function extractAddresses(headerValue: string): string[] {
  * net that includes full-text hits — so this is the check that has to be exact.
  */
 export function isForFactoringQueue(recipients: string[]): boolean {
-  return recipients.some((r) => r.trim().toLowerCase() === FACTORING_RECIPIENT)
+  return recipients.some((r) => FACTORING_RECIPIENTS.includes(r.trim().toLowerCase()))
 }
 
 /** Runtime boundary check: every field must be a string before .trim() or secrets use. */
@@ -233,7 +239,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
       messageId,
       recipients,
     })
-    return respond(422, { error: `not addressed to ${FACTORING_RECIPIENT}` })
+    return respond(422, { error: `not addressed to ${FACTORING_RECIPIENTS.join(' or ')}` })
   }
 
   if (!subject) {

@@ -1,6 +1,6 @@
 // ── Factoring Email Bridge ───────────────────────────────────────────────────
 // Standalone additive Apps Script for the existing BCAT Intake Bridge project.
-// Polls Gmail every 5 min for messages delivered to ivanfactoring@bcatcorp.com and
+// Polls Gmail every 5 min for messages delivered to ivanfactoring@bcatcorp.com or invoicefactoring@bcatcorp.com and
 // POSTs a minimal payload to the factoring-intake Lambda Function URL.
 //
 // Dedup is per-Gmail-message-id in PropertiesService (namespaced), so a new
@@ -10,6 +10,8 @@
 // backlog.
 
 const FACTORING_RECIPIENT = 'ivanfactoring@bcatcorp.com';
+// Both groups feed the one queue (the row is keyed by PRO, so a bill that arrives at both lands once).
+const FACTORING_RECIPIENTS = [FACTORING_RECIPIENT, 'invoicefactoring@bcatcorp.com'];
 const FACTORING_NEEDS_REVIEW_LABEL = 'factoring-needs-review';
 const FACTORING_PROCESS_FN = 'processFactoringEmails';
 const FACTORING_PROP_NS = 'factoring:msg:';
@@ -147,15 +149,12 @@ function factoringBuildGmailQuery_() {
   // spam meant that invoice never reached the queue and nothing said so (PROs
   // 14567, 14691, 14711, 14729 were lost that way). The recipient check below
   // still decides what counts, and a rescued message is moved back to the inbox.
-  const email = FACTORING_RECIPIENT;
-  const listId = email.replace('@', '.');
-  return '{' + [
-    'to:' + email,
-    'cc:' + email,
-    'deliveredto:' + email,
-    'list:' + listId,
-    '"' + email + '"',
-  ].join(' ') + '} in:anywhere -in:trash';
+  const clauses = [];
+  for (let i = 0; i < FACTORING_RECIPIENTS.length; i++) {
+    const email = FACTORING_RECIPIENTS[i];
+    clauses.push('to:' + email, 'cc:' + email, 'deliveredto:' + email, 'list:' + email.replace('@', '.'), '"' + email + '"');
+  }
+  return '{' + clauses.join(' ') + '} in:anywhere -in:trash';
 }
 
 function factoringProcessThreadPage_(start, max, cfg, props, startTime) {
@@ -279,12 +278,13 @@ function factoringIsForQueue_(message) {
     message.getHeader('Delivered-To'),
     message.getHeader('X-Original-To'),
   ];
-  for (let i = 0; i < emailHeaders.length; i++) {
-    if (factoringHeaderContainsEmail_(emailHeaders[i], FACTORING_RECIPIENT)) return true;
-  }
-
   const listId = message.getHeader('List-ID');
-  if (listId && factoringHeaderContainsListId_(listId, FACTORING_RECIPIENT)) return true;
+  for (let r = 0; r < FACTORING_RECIPIENTS.length; r++) {
+    for (let i = 0; i < emailHeaders.length; i++) {
+      if (factoringHeaderContainsEmail_(emailHeaders[i], FACTORING_RECIPIENTS[r])) return true;
+    }
+    if (listId && factoringHeaderContainsListId_(listId, FACTORING_RECIPIENTS[r])) return true;
+  }
 
   return false;
 }

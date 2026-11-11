@@ -40,6 +40,7 @@ import { loadFromFactoringItem } from './loadFromInvoice'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 import { manualSentInfo } from '@/lib/manualInvoice'
 import { noBuyInfo } from '@/lib/noBuy'
+import { needsManualInvoice, otrRejection } from '@/lib/otrRejection'
 import { BILLING_RELEASE_PAGE, holdsPerUserGrant } from '@/lib/navItems'
 import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
 
@@ -310,6 +311,18 @@ function NoBuyFlag({ item }: { item: FactoringItem }) {
   )
 }
 
+/** OTR turned this invoice down for a reason other than "will not buy" (that has its own flag): it has to go out by hand. */
+function RejectedFlag({ item }: { item: FactoringItem }) {
+  const rejection = otrRejection(item)
+  if (!rejection || rejection.kind === 'NO_BUY') return null
+  return (
+    <>
+      <TmsBadge tone="red" title={rejection.reason} data-testid="otr-rejected-flag">Invoice manually</TmsBadge>
+      <span className="max-w-[18rem] truncate text-xs tms-muted" title={rejection.reason}>{rejection.reason}</span>
+    </>
+  )
+}
+
 /** OTR's label for the row, or the stand-in for one OTR has not reported on. */
 function otrLabelOf(item: FactoringItem): string {
   return otrStatusMeta(item.otrStatus)?.label ?? OTR_UNREPORTED
@@ -430,6 +443,8 @@ export function FactoringPage() {
   const [activeTab, setActiveTab] = useState<FilterKey>('NEED_TO_FACTOR')
   /** On the Pending tab: one of OTR's own labels (or OTR_UNREPORTED) to narrow to, or null for all. */
   const [otrFilter, setOtrFilter] = useState<string | null>(null)
+  /** Show only the rows OTR turned down (they have to be invoiced by hand), across every tab. */
+  const [rejectedOnly, setRejectedOnly] = useState(false)
   /**
    * The row whose editor is open. One at a time and over the list, not inside it: the
    * panel is eleven fields, two documents and a submit button, and ten of those stacked
@@ -470,7 +485,7 @@ export function FactoringPage() {
        * nothing is actually lost.
        */
       .filter((item) =>
-        activeTab === 'ALL' ? item.status !== 'ARCHIVED' : item.status === activeTab,
+        rejectedOnly ? otrRejection(item) != null : activeTab === 'ALL' ? item.status !== 'ARCHIVED' : item.status === activeTab,
       )
       .filter((item) => activeTab !== 'PENDING_WITH_OTR' || !otrFilter || otrLabelOf(item) === otrFilter)
       .filter((item) => matchesSearch(item, search))
@@ -478,7 +493,7 @@ export function FactoringPage() {
       .sort((a, b) => activeTab === 'INVOICED_MANUALLY'
         ? (manualSentInfo(b)?.at ?? '').localeCompare(manualSentInfo(a)?.at ?? '')
         : new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
-  }, [items, activeTab, search, otrFilter])
+  }, [items, activeTab, search, otrFilter, rejectedOnly])
 
   /*
    * The Pending tab broken down by what OTR's board says — IssueClient, IssueFollowUp,
@@ -546,6 +561,7 @@ export function FactoringPage() {
           <ProLink loadId={item.loadId} proNumber={item.proNumber} />
           {/* Raised here rather than mailed in: the invoice it bills is ours, and the
               queue row is only the OTR half of it. */}
+          {item.source !== 'TMS' && <TmsBadge tone="gray" title="Came in by e-mail to the factoring address">E-mail</TmsBadge>}
           {item.source === 'TMS' && (
             <>
               <TmsBadge tone="blue">TMS</TmsBadge>
@@ -689,6 +705,7 @@ export function FactoringPage() {
           <StatusBadge item={item} />
           <OtrStatusFlag item={item} />
           <NoBuyFlag item={item} />
+          <RejectedFlag item={item} />
           <OtrDocsFlag item={item} onResent={refresh} />
           {pendingIds.has(item.id) && <Loader2 className="size-3.5 animate-spin tms-muted" />}
         </div>
@@ -757,7 +774,7 @@ export function FactoringPage() {
     },
     {
       key: 'status', header: 'Status', group: 'Status', extraPx: 130,
-      text: (i) => `${FACTORING_STATUS_LABEL[i.status]}${i.status === 'PENDING_WITH_OTR' ? ` \u00b7 OTR: ${otrLabelOf(i)}` : ''}${noBuyInfo(i).noBuy ? ' \u00b7 No buy' : ''}`,
+      text: (i) => `${FACTORING_STATUS_LABEL[i.status]}${i.status === 'PENDING_WITH_OTR' ? ` \u00b7 OTR: ${otrLabelOf(i)}` : ''}${noBuyInfo(i).noBuy ? ' \u00b7 No buy' : ''}${otrRejection(i) && !noBuyInfo(i).noBuy ? ' \u00b7 Invoice manually' : ''}`,
       filter: 'multi',
       optionsOf: (i) => [{ value: i.status, label: FACTORING_STATUS_LABEL[i.status] }],
       sortValue: (i) => FACTORING_STATUS_LABEL[i.status],
@@ -778,7 +795,8 @@ export function FactoringPage() {
   const gridRows = useMemo(() => sortDenseRows(filterRows(filtered, denseCols, dense), denseCols, prefs.sort), [filtered, denseCols, dense, prefs.sort])
   const shown = gridRows.slice(0, pageSize)
   const renderFactoringCell = (item: FactoringItem, key: string) => columns.find((c) => c.key === key)?.render(item) ?? null
-  const filterCount = activeFilterCount(dense) + (search.trim() ? 1 : 0) + (otrFilter ? 1 : 0)
+  const rejected = useMemo(() => needsManualInvoice(items), [items])
+  const filterCount = activeFilterCount(dense) + (search.trim() ? 1 : 0) + (otrFilter ? 1 : 0) + (rejectedOnly ? 1 : 0)
   const resetPaging = () => setPageSize(PAGE_STEP)
 
   return (
@@ -808,6 +826,17 @@ export function FactoringPage() {
           <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
         </div>
         {error && <p style={RED}>{error}</p>}
+        {rejected.length > 0 && (
+          <div role="status" data-testid="otr-rejected-strip" className="flex flex-wrap items-center gap-2" style={{ padding: '6px 8px', background: 'var(--tms-badge-red-tint, transparent)' }}>
+            <TmsBadge tone="red">{rejected.length}</TmsBadge>
+            <span className="text-sm">
+              {rejected.length === 1 ? 'invoice was' : 'invoices were'} turned down by OTR and must be invoiced manually.
+            </span>
+            <TmsButton size="sm" variant="secondary" aria-pressed={rejectedOnly} data-testid="otr-rejected-toggle" onClick={() => { setRejectedOnly((v) => !v); resetPaging() }}>
+              {rejectedOnly ? 'Show the whole queue' : 'Show them'}
+            </TmsButton>
+          </div>
+        )}
         {activeTab === 'PENDING_WITH_OTR' && otrBreakdown.length > 0 && (
           <div role="group" aria-label="OTR status" className="flex flex-wrap items-center gap-2" style={{ padding: '4px 8px' }}>
             <span className="text-[11px] font-semibold uppercase tracking-wider tms-muted">OTR says</span>
@@ -836,7 +865,7 @@ export function FactoringPage() {
           <DenseGrid<FactoringItem>
             aria-label="Factoring queue"
             recentKey={`tms:factoring:recent:${user?.email ?? 'anon'}`}
-            resetKey={`${activeTab}|${otrFilter ?? ''}|${search}|${JSON.stringify(dense)}|${JSON.stringify(prefs.sort)}`}
+            resetKey={`${activeTab}|${rejectedOnly}|${otrFilter ?? ''}|${search}|${JSON.stringify(dense)}|${JSON.stringify(prefs.sort)}`}
             columns={gridColumns}
             rows={shown}
             fitRows={filtered}

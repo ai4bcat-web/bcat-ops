@@ -204,6 +204,19 @@ describe('factoringEmailBridge.gs', () => {
     expect(state.searchCalls[0].query).not.toContain('-in:spam');
   });
 
+  it('also watches invoicefactoring@ and queues mail delivered to it (the original e-mail way)', () => {
+    const m = makeMessage({ id: 'inv1', to: 'invoicefactoring@bcatcorp.com' });
+    const { ctx, state } = makeBridge({ messages: [m] });
+
+    ctx.processFactoringEmails();
+
+    expect(state.searchCalls[0].query).toContain('to:invoicefactoring@bcatcorp.com');
+    expect(state.searchCalls[0].query).toContain('list:invoicefactoring.bcatcorp.com');
+    expect(state.fetched).toHaveLength(1);
+    expect(state.fetched[0].payload.messageId).toBe('inv1');
+    expect(state.properties['factoring:msg:inv1']).toMatch(/^ok:/);
+  });
+
   it('processes an invoice Gmail filed as spam and moves it back to the inbox', () => {
     const m = makeMessage({ id: 'spam1' });
     const { ctx, state } = makeBridge({ messages: [m] });
