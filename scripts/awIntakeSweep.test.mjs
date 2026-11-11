@@ -45,4 +45,22 @@ describe('planIntakeSweep', () => {
     const { dismissed } = planIntakeSweep({ intake, shipments, orders, now, through: '2026-10-31' });
     expect(dismissed.map((r) => r.id)).toEqual(['old-oct30', 'old-oct1', 'oct31']);
   });
+
+  it('moves rows by subject to the shipment number named, skips a row two subjects claim, and keeps the rest', () => {
+    const open = (id, subject, receivedAt = at(11, 9)) => ({ id, status: 'OPEN', subject, receivedAt, fields: { reference: null } });
+    const rows = [
+      open('a', 'Re: Load from MENASHA, WI to BRIDGEVIEW, IL'),
+      open('b', 'Fwd: Sussex to NY Shipping on Friday 11/13'),
+      open('c', 'driver chad'),
+      open('d', 'Untitled'),
+      open('e', 'Sussex to NY and Untitled'),
+    ];
+    const ships = [{ id: 'x1', number: '20022' }, { id: 'x2', number: '20011' }, { id: 'x3', number: '20000' }];
+    const { moved, stays } = planIntakeSweep({
+      intake: rows, shipments: ships, orders: [], now,
+      subjects: [{ text: 'menasha', number: '20022' }, { text: 'sussex to ny', number: '20011' }, { text: 'untitled', number: '20000' }],
+    });
+    expect(moved.map((e) => [e.row.id, e.shipment.number, e.how])).toEqual([['a', '20022', 'SUBJECT'], ['b', '20011', 'SUBJECT'], ['d', '20000', 'SUBJECT']]);
+    expect(stays.map((r) => r.id).sort()).toEqual(['c', 'e']);
+  });
 });

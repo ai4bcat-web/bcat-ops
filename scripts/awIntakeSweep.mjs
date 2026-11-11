@@ -4,10 +4,12 @@
  * yesterday"). Only OPEN rows are touched, one conditional UpdateItem each (only while still OPEN) and one AuditLog row each:
  *   - BUILT: a row whose reference / pickup / delivery number is an order reference of a shipment CREATED today or yesterday becomes
  *     MOVED with that shipment's id and number (the same result as awIntakeClear, limited to those shipments);
+ *   - SUBJECT: `--subject "<text>=<PRO>"` (repeatable) moves every OPEN row whose subject contains <text> (case-insensitive) to shipment <PRO>;
+ *     a row matching two different --subject texts is left alone;
  *   - OLD: every other row RECEIVED on or before --through (default 2026-10-30, local date) becomes DISMISSED with a reason.
  * Nothing is deleted: a dismissed or moved row stays in the Dismissed / Moved views. Dry by default, prod-gated apply.
  *
- *   dry run:  BCAT_ALLOW_PROD=$(date +%F) node scripts/awIntakeSweep.mjs --target prod --i-mean-production [--through 2026-10-30] [--pair il:wf:TENDER:fad9c...=20002]
+ *   dry run:  BCAT_ALLOW_PROD=$(date +%F) node scripts/awIntakeSweep.mjs --target prod --i-mean-production [--through 2026-10-30] [--pair il:wf:TENDER:fad9c...=20002] [--subject "Sussex to NY=20011"]
  *   backup:   BCAT_ALLOW_PROD=$(date +%F) node scripts/prodBackup.mjs --script awIntakeSweep --target prod --i-mean-production --apply
  *   apply:    BCAT_ALLOW_PROD=$(date +%F) AW_PROD_CONFIRM=$(date +%F)-intakesweep node scripts/awIntakeSweep.mjs --target prod --i-mean-production --apply --confirm-prod <account id>:5ucwdyvwivelbo4k4jomvrwel4-NONE
  */
@@ -30,24 +32,36 @@ const dateOf = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime
  * Pure: which OPEN rows are MOVED to a shipment built today or yesterday, and which of the rest are DISMISSED as old.
  * `through` is a local date (YYYY-MM-DD): a row received on that day or earlier is old.
  */
-export function planIntakeSweep({ intake, shipments, orders, now = new Date(), through = DEFAULT_THROUGH, pairs = {} }) {
+export function planIntakeSweep({ intake, shipments, orders, now = new Date(), through = DEFAULT_THROUGH, pairs = {}, subjects = [] }) {
   const recent = new Set([localDate(now), localDate(new Date(now.getTime() - DAY_MS))]);
   const builtRecently = shipments.filter((s) => recent.has(dateOf(s.createdAt)));
   const built = planIntakeClear({ intake, shipments: builtRecently, orders, pairs });
   const moved = built.entries;
   const movedIds = new Set(moved.map((e) => e.row.id));
+  // Subject matches: each OPEN row not already matched, to the one shipment number its subject names.
+  const byNumber = new Map(shipments.filter((s) => !s.voidedAt).map((s) => [String(s.number), s]));
+  const ambiguous = [];
+  for (const row of intake.filter((r) => r.status === 'OPEN' && !movedIds.has(r.id))) {
+    const subject = String(row.subject ?? '').toLowerCase();
+    const hits = subjects.filter((sj) => sj.text && subject.includes(sj.text.toLowerCase()));
+    const numbers = [...new Set(hits.map((h) => String(h.number)))];
+    if (numbers.length > 1) { ambiguous.push(row.id); movedIds.add(row.id); continue; }
+    const ship = numbers.length === 1 ? byNumber.get(numbers[0]) : null;
+    if (ship) { moved.push({ row, shipment: ship, how: 'SUBJECT' }); movedIds.add(row.id); }
+  }
   const dismissed = []; const stays = [];
   for (const row of intake.filter((r) => r.status === 'OPEN' && !movedIds.has(r.id))) {
     const received = dateOf(row.receivedAt || row.createdAt);
     if (received && received <= through) dismissed.push(row); else stays.push(row);
   }
-  return { moved, dismissed, stays, recentDays: [...recent] };
+  const staying = [...stays, ...intake.filter((r) => ambiguous.includes(r.id))];
+  return { moved, dismissed, stays: staying, recentDays: [...recent] };
 }
 
 async function scan(doc, table) { const rows = []; let key; do { const r = await doc.send(new ScanCommand({ TableName: table, ExclusiveStartKey: key, ConsistentRead: true })); rows.push(...(r.Items ?? [])); key = r.LastEvaluatedKey; } while (key); return rows; }
 
 async function main() {
-  const { values } = parseArgs({ options: { apply: { type: 'boolean' }, suffix: { type: 'string' }, through: { type: 'string' }, pair: { type: 'string', multiple: true }, ...PROD_GATE_OPTIONS } });
+  const { values } = parseArgs({ options: { apply: { type: 'boolean' }, suffix: { type: 'string' }, through: { type: 'string' }, pair: { type: 'string', multiple: true }, subject: { type: 'string', multiple: true }, ...PROD_GATE_OPTIONS } });
   const gate = await requireProd({ script: SCRIPT, values, tables: PROD_WRITE_SETS[SCRIPT].models });
   if (gate?.apply && process.env.AW_PROD_CONFIRM !== `${localDate(new Date())}-intakesweep`) throw new Error('AW_PROD_CONFIRM must be <today>-intakesweep');
   const through = values.through ?? DEFAULT_THROUGH;
@@ -58,7 +72,10 @@ async function main() {
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
   const pairs = Object.fromEntries((values.pair ?? []).map((p) => p.split('=')));
   const [intake, shipments, orders] = await Promise.all(['IntakeLoad', 'Shipment', 'Order'].map((m) => scan(doc, `${m}-${suffix}`)));
-  const plan = planIntakeSweep({ intake, shipments, orders, through, pairs });
+  const subjects = (values.subject ?? []).map((v) => { const i = v.lastIndexOf('='); return { text: v.slice(0, i).trim(), number: v.slice(i + 1).trim() }; });
+  for (const sj of subjects) if (!sj.text || !sj.number) throw new Error('--subject must be "<text>=<PRO>"');
+  const plan = planIntakeSweep({ intake, shipments, orders, through, pairs, subjects });
+  for (const sj of subjects) if (!shipments.some((s) => !s.voidedAt && String(s.number) === sj.number)) throw new Error(`--subject: no live shipment ${sj.number}`);
   const label = (r) => `${r.id} (${String(r.receivedAt ?? '').slice(0, 10)} ${String(r.subject ?? '').slice(0, 50)})`;
   for (const e of plan.moved) console.log(`BUILT   ${label(e.row)} -> ${e.shipment.number} via ${e.how}`);
   for (const r of plan.dismissed) console.log(`OLD     ${label(r)}`);
