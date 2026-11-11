@@ -25,6 +25,7 @@ import type { LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 import { CARD_ORDER, CARD_TITLE, type CardKey, type CardProps, type MoreTabKey } from './cards/cardRegistry'
 import { CARD_COMPONENTS, MORE_TAB_COMPONENTS, RAIL_RATE_HISTORY, RAIL_ROLES } from './defaultSections'
 import { ActionBar } from './ActionBar'
+import { DuplicateDialog } from './DuplicateDialog'
 import { FormHeader } from './FormHeader'
 import { FormSection } from './FormSection'
 import { FromEmailContext } from './fromEmail'
@@ -107,6 +108,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   }, [])
 
   const [confirmCancel, setConfirmCancel] = useState(false)
+  const [duplicating, setDuplicating] = useState(false)
   const [moreTab, setMoreTab] = useState<MoreTabKey>('instructions')
   // The Bill To panel under the header strip: collapsed until asked for (or until a field inside it is focused).
   const [panelOpen, setPanelOpen] = useState(false)
@@ -432,7 +434,14 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
       <ActionBar
         createMode={mode === 'create'} status={status} dirty={form.dirty} savedAt={bundle?.shipment.updatedAt ?? form.savedAt}
         done={progress.done} total={progress.total} ready={progress.ready} busy={busy} voided={voided} onRun={onRun} onSaveExit={() => { void onSaveExit() }} onDiscard={cancel}
+        onDuplicate={mode === 'edit' && bundle ? () => setDuplicating(true) : undefined}
       />
+      {duplicating && bundle ? (
+        <DuplicateDialog
+          shipmentId={bundle.shipment.id} number={bundle.shipment.number ?? bundle.shipment.id} onClose={() => setDuplicating(false)}
+          onDone={(ids) => { setDuplicating(false); void release(); navigate(`/tms/shipments/${ids[0]}/edit`) }}
+        />
+      ) : null}
 
       {dialogs}
       <TmsDialog

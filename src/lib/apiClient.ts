@@ -3124,6 +3124,8 @@ export interface DuplicateShipmentInput {
    * lane it was copied from.
    */
   keepDriver?: boolean
+  /** The copy starts with a blank customer ref (PO). */
+  clearReference?: boolean
 }
 /**
  * Returns the SOURCE shipment's bundle plus `created`, the new shipment ids in the order

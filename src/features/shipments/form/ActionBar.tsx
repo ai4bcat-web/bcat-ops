@@ -24,9 +24,11 @@ export interface ActionBarProps {
   /** Edit mode: save, then release the lock and leave. A plain Save keeps the lock. */
   onSaveExit?: () => void
   onDiscard: () => void
+  /** Edit mode: open the Duplicate dialog. Omitted on a create page. */
+  onDuplicate?: () => void
 }
 
-export function ActionBar({ createMode, status, dirty, savedAt, done, total, ready, busy, voided, onRun, onSaveExit, onDiscard }: ActionBarProps) {
+export function ActionBar({ createMode, status, dirty, savedAt, done, total, ready, busy, voided, onRun, onSaveExit, onDiscard, onDuplicate }: ActionBarProps) {
   const isDraft = status === 'NEW' || status === 'DRAFT'
   const [nowMs, setNowMs] = useState(() => Date.now())
   useEffect(() => {
@@ -49,6 +51,14 @@ export function ActionBar({ createMode, status, dirty, savedAt, done, total, rea
       </div>
       <div className="tms-ship-actionbar-right">
         <TmsButton size="sm" variant="ghost" data-testid="ship-form-cancel" onClick={onDiscard}>{createMode ? 'Cancel' : 'Discard'}</TmsButton>
+        {!createMode && onDuplicate ? (
+          <TmsButton
+            size="sm" data-testid="ship-form-duplicate" disabled={busy || voided || dirty} onClick={onDuplicate}
+            title={voided ? 'A voided shipment cannot be duplicated' : dirty ? 'Save your changes first: a copy is made from what is saved' : 'Make one or more copies of this shipment'}
+          >
+            Duplicate
+          </TmsButton>
+        ) : null}
         {isDraft ? (
           <TmsButton
             size="sm" data-testid="ship-form-save-draft" disabled={busy || voided} onClick={() => onRun('draft')}

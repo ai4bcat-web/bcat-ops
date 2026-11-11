@@ -4079,6 +4079,9 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
   // a dispatcher looking at their own fleet's lane.
   const sourceLoadId = optionalString(input.loadId, 100)
   const keepDriver = optionalBoolean(input.keepDriver) ?? false
+  // The shipment form's Duplicate: the copy starts with a BLANK customer ref (PO), which a person must type. Off by default, so the
+  // board's and the calendar's Duplicate behave as before.
+  const clearReference = optionalBoolean(input.clearReference) ?? false
   const copies = assertArrayOf(input.copies, 'copies', (item, i) => {
     const c = assertRecord(item, `copies[${i}]`)
     return {
@@ -4207,6 +4210,9 @@ async function duplicateShipment(input: Row, caller: Caller): Promise<Row> {
       id: newOrderId,
       __typename: 'Order',
       shipmentId: newShipmentId,
+      ...(clearReference
+        ? { references: (Array.isArray(sourceOrder.references) ? (sourceOrder.references as Row[]) : []).filter((r) => String(r?.code ?? '').trim().toUpperCase() !== 'PO') }
+        : {}),
       customerRateCents: totals.customerRateCents,
       revenueCents: totals.revenueCents,
       arStatus: 'DOCS_NEEDED',
