@@ -2412,6 +2412,22 @@ describe('UPDATE_STOP', () => {
     ).rejects.toThrow(/at least one pickup and one delivery/)
   })
 
+  it('a legacy load with no stops array: the pickup and delivery from its old fields are editable by their deterministic ids', async () => {
+    const { loadId } = await draftWithStops()
+    // Make it legacy: no stops array, the places live in the old fields only.
+    const load = table(TABLES.load).get(loadId)!
+    table(TABLES.load).set(loadId, { ...load, stops: undefined, originName: 'THE ROYAL GROUP', originCity: 'CICERO, IL', pickupAppt: '2026-03-02T13:00:00.000Z', destinationCity: 'JOLIET, IL', deliveryAppt: '2026-03-04T13:00:00.000Z' })
+    await call('UPDATE_STOP', {
+      loadId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+      op: 'SET_LOCATION',
+      stopId: `${loadId}:pu`,
+      patch: { name: 'THE ROYAL GROUP', city: 'SPRINGDALE, AR', locationId: null, address: null, contact: null },
+    })
+    const stops = JSON.parse(String(table(TABLES.load).get(loadId)!.stops)) as Row[]
+    expect(stops.map((x) => [x.id, x.type, x.city])).toEqual([[`${loadId}:pu`, 'pickup', 'SPRINGDALE, AR'], [`${loadId}:de`, 'delivery', 'JOLIET, IL']])
+  })
+
   it('adds a stop and renumbers the sequence', async () => {
     const { loadId } = await draftWithStops()
     await call('UPDATE_STOP', {

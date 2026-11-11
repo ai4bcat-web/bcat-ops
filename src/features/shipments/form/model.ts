@@ -6,11 +6,12 @@
  * pure and synchronous.
  */
 import { MAX_LIVE_CARRIERS } from '@/lib/carrierLegs'
+import { getStops } from '@/lib/stops'
 import { defaultBillToIdOf, customerDefaultsOf } from '@/lib/intakeLoad'
 import { formatDateTimeInput } from '@/lib/date'
 import { effectiveShipmentType, typeOfLegacyMode } from '@/lib/shipmentTypes'
 import { typeForDivisionChange } from './shipmentType'
-import type { Stop } from '@/types'
+import type { Load, Stop } from '@/types'
 import type {
   AljexCustomerRateKind, AljexFormExtras, ChargeCalc, CustomerRecord, FreightItem, LoadCarrierRecord,
   LoadChargeRecord, OrderRecord, OrderReference, ShipmentBundle, ShipmentDocumentType, ShipmentMode,
@@ -637,7 +638,10 @@ export function valuesFromBundle(bundle: ShipmentBundle, ctx: BundleSeedCtx = {}
   const de = pick(REF_DELIVERY)
   const consumed = new Set<OrderReference>([po, pu, de].filter((r): r is OrderReference => !!r))
 
-  const stopsIn = load?.stops ?? []
+  // A legacy load with no stored stops array has its pickup and delivery in the old fields: getStops reads them as two stops with the
+  // deterministic ids `<loadId>:pu` / `<loadId>:de`. Falling back to the empty form stops instead gave them fresh random ids on every read, so
+  // Save changes tried to remove stops that never existed ("Stop not found: stp-...") and nothing saved (PRO 10793).
+  const stopsIn = load ? getStops(load as unknown as Load) : []
   let lastDelivery = -1
   stopsIn.forEach((s, i) => { if (s.type === 'delivery') lastDelivery = i })
   const firstPickup = stopsIn.findIndex((s) => s.type === 'pickup')
