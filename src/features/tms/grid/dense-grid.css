@@ -288,8 +288,9 @@
   white-space: nowrap;
   background: var(--tms-row-bg);
   color: var(--tms-row-fg);
-  border-bottom: 1px solid var(--tms-border);
-  border-right: 1px solid color-mix(in srgb, var(--tms-border) 55%, transparent);
+  /* Each row is its own strip: a divider a step darker than the card border, so neighbouring rows of the same status colour never run together. */
+  border-bottom: 1px solid color-mix(in srgb, var(--tms-text) 16%, var(--tms-border));
+  border-right: 1px solid color-mix(in srgb, var(--tms-border) 70%, transparent);
   line-height: 1.2;
 }
 
