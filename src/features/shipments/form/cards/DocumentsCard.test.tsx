@@ -8,7 +8,12 @@ import type { FormCtx } from '../sectionProps'
 import { makeCtx, makeForm, savedBundle } from '../sections/ah5TestKit'
 import type { CustomerRecord, TmsSettings } from '@/types/tms'
 
-vi.mock('@/lib/apiClient', () => ({ getShipmentDocumentUrl: vi.fn(async () => 'https://example.invalid/doc') }))
+const api = vi.hoisted(() => ({
+  getShipmentDocumentUrl: vi.fn(async () => 'https://example.invalid/doc'),
+  getIntakeLoad: vi.fn(async () => ({ id: 'il:9', attachments: [{ key: 'k', name: 'ratecon.pdf', contentType: 'application/pdf', size: 5 }] })),
+  attachIntakeFiles: vi.fn(async () => ({ attached: 1, available: 1 })),
+}))
+vi.mock('@/lib/apiClient', () => api)
 vi.mock('@/features/shipments/components/BolDialog', () => ({ BolDialog: () => null }))
 
 const doc = (id: string, name: string, audience: string, type = 'OTHER', status = 'ACTIVE') => ({
@@ -50,6 +55,28 @@ describe('DocumentsCard', () => {
     const podSlot = screen.getByTestId('card-documents-slot-POD')
     expect(podSlot.getAttribute('data-on-file')).toBe('false')
     expect(podSlot.textContent).toContain('Missing')
+  })
+
+  it('a shipment built from an e-mail whose PDF never reached Documents offers to add it, once, and refreshes', async () => {
+    const tied = savedBundle({ documents: [] }) as never as { shipment: Record<string, unknown> }
+    tied.shipment.intakeLoadId = 'il:9'
+    api.attachIntakeFiles.mockClear()
+    const ctx = setup({ mode: 'edit', bundle: tied as never, refreshBundle: vi.fn(async () => undefined) })
+    // Opening the shipment files it by itself, once...
+    await waitFor(() => expect(api.attachIntakeFiles).toHaveBeenCalledTimes(1))
+    expect(api.attachIntakeFiles).toHaveBeenCalledWith({ intakeId: 'il:9', shipmentId: expect.any(String) })
+    await waitFor(() => expect(ctx.refreshBundle).toHaveBeenCalled())
+    // ...and the button is there to do it again by hand.
+    fireEvent.click(await screen.findByTestId('card-documents-add-email-pdf'))
+    await waitFor(() => expect(api.attachIntakeFiles).toHaveBeenCalledTimes(2))
+  })
+
+  it('no offer when the e-mail\'s PDF is already in Documents, or the shipment was not built from an e-mail', async () => {
+    const filed = savedBundle({ documents: [doc('intake-il:9-0', 'ratecon.pdf', 'INTERNAL', 'CUSTOMER_RATE_CON')] }) as never as { shipment: Record<string, unknown> }
+    filed.shipment.intakeLoadId = 'il:9'
+    setup({ mode: 'edit', bundle: filed as never })
+    await waitFor(() => expect(api.getIntakeLoad).toHaveBeenCalled())
+    expect(screen.queryByTestId('card-documents-add-email-pdf')).toBeNull()
   })
 
   it('Preview opens the document in the page\'s own preview (with its signed link), not a new tab', async () => {

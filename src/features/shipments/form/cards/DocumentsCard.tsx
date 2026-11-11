@@ -7,12 +7,12 @@
  * queued files (the drafted ones); saved documents are preview-only here.
  */
 import { Field } from '../fieldGrid'
-import { memo, useRef, useState, type DragEvent } from 'react'
+import { memo, useEffect, useRef, useState, type DragEvent } from 'react'
 import { Check, Circle, Eye, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsIconButton, TmsSelect, TmsTabs } from '@/features/tms/kit'
 import { DocumentPreview } from '@/features/documents/DocumentPreview'
-import { getShipmentDocumentUrl } from '@/lib/apiClient'
+import { attachIntakeFiles, getIntakeLoad, getShipmentDocumentUrl } from '@/lib/apiClient'
 import { formatBoardDateTime } from '@/lib/date'
 import {
   ACCEPTED_CONTENT_TYPES, DOCUMENT_TYPE_LABELS, MAX_DOCUMENT_BYTES, SHIPMENT_DOCUMENT_TYPES,
@@ -50,6 +50,18 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
   const [showOld, setShowOld] = useState(false)
   const [viewing, setViewing] = useState<Viewing | null>(null)
   const input = useRef<HTMLInputElement>(null)
+  // The e-mail this shipment was built from may hold a rate confirmation PDF that never reached the shipment's Documents (it arrived
+  // after the build, or the build went another way): offer to file it.
+  const tiedIntakeId = ctx.bundle?.shipment.intakeLoadId ?? null
+  const [intakePdfs, setIntakePdfs] = useState(0)
+  useEffect(() => {
+    if (!tiedIntakeId) return undefined
+    let live = true
+    getIntakeLoad(tiedIntakeId)
+      .then((row) => { if (live) setIntakePdfs((row?.attachments ?? []).filter((a) => /^(application\/pdf|image\/)/.test(a.contentType)).length) })
+      .catch(() => undefined)
+    return () => { live = false }
+  }, [tiedIntakeId])
 
   const saved = ctx.mode === 'edit' && ctx.bundle != null
   const audience: 'ALL' | 'INTERNAL' = tab === 'public' ? 'ALL' : 'INTERNAL'
@@ -75,6 +87,28 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
   }
   const slotInputs = useRef<Record<string, HTMLInputElement | null>>({})
 
+  const emailPdfMissing = !!tiedIntakeId && intakePdfs > 0 && !all.some((d) => d.id.startsWith(`intake-${tiedIntakeId}-`))
+  const fileEmailPdf = async () => {
+    if (!tiedIntakeId || !ctx.bundle) return
+    setWorking(true)
+    try {
+      const r = await attachIntakeFiles({ intakeId: tiedIntakeId, shipmentId: ctx.bundle.shipment.id })
+      toast.success(r.attached > 0 ? 'Added the e-mail\'s rate confirmation' : 'Nothing new to add')
+      await ctx.refreshBundle()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not add the e-mail\'s rate confirmation')
+    } finally {
+      setWorking(false)
+    }
+  }
+  // Opening a shipment whose e-mail PDF is missing files it by itself (once); the button stays as the retry if that fails.
+  const autoTried = useRef<string | null>(null)
+  useEffect(() => {
+    if (!emailPdfMissing || !tiedIntakeId || autoTried.current === tiedIntakeId || ctx.busy) return
+    autoTried.current = tiedIntakeId
+    void fileEmailPdf()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailPdfMissing, tiedIntakeId, ctx.busy])
   const checklist = releaseDocItems({ customer: ctx.customer, settings: ctx.settings, bundle: ctx.bundle, queued: queuedAll })
 
   /** Open a saved document in the page's own preview (not a new tab); its signed link arrives a moment later. */
@@ -265,6 +299,14 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
         </tbody>
       </table>
 
+      {emailPdfMissing ? (
+        <div className="tms-card-req" data-testid="card-documents-email-pdf">
+          <TmsButton size="sm" variant="primary" disabled={disabled} onClick={() => { void fileEmailPdf() }} data-testid="card-documents-add-email-pdf">
+            Add the e-mail&apos;s rate confirmation
+          </TmsButton>
+          <span className="tms-muted text-xs"> The e-mail this load came from has a PDF that is not in Documents yet.</span>
+        </div>
+      ) : null}
       <div className="tms-card-req" data-testid="card-documents-checklist">
         <div className="tms-card-req-title">Required for release</div>
         <ul className="tms-card-docs-checklist">

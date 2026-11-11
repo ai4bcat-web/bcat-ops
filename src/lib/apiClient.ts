@@ -3011,6 +3011,11 @@ export async function moveIntakeToActive(input: {
   return { ...r, intake: intakeRow(r.intake) }
 }
 
+/** File the intake e-mail's rate confirmation PDF on the shipment that was built from it (idempotent; for a shipment built before the PDF reached the row). */
+export async function attachIntakeFiles(input: { intakeId: string; shipmentId: string }): Promise<{ attached: number; available: number }> {
+  return shipmentAction<{ attached: number; available: number }>('INTAKE_ATTACH_FILES', input)
+}
+
 /** Step AH: the create form built a shipment from this intake load's pre-fill; link them and mark the row MOVED. */
 export async function linkIntakeShipment(input: { intakeId: string; shipmentId: string }): Promise<IntakeLoadRecord> {
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_LINK_SHIPMENT', input))
