@@ -458,6 +458,12 @@ describe('ShipmentsBoard', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('has no Demo chip', async () => {
+    renderBoard('/tms/shipments')
+    await screen.findByRole('textbox', { name: 'Search shipments' })
+    expect(screen.queryByText('Demo')).toBeNull()
+  })
+
   it('Unvoid requires a reason', async () => {
     const shipments = [row('S001', { status: 'CANCELED', voidedAt: '2026-02-01T00:00:00Z', voidedBy: 'admin', voidReason: 'test' })]
     renderBoard('/tms/shipments?list=voided', shipments)

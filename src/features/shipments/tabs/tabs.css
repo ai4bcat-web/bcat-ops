@@ -1,6 +1,13 @@
 /* Shipment tab strip: theme tokens only, scrolls sideways when there are many tabs. */
-.tms-shell .tms-ship-tabs {
+.tms-shell .tms-ship-tabs-row {
   flex: 0 0 auto;
+  display: flex;
+  min-width: 0;
+  background: var(--tms-surface);
+  border-bottom: 1px solid var(--tms-border);
+}
+.tms-shell .tms-ship-tabs {
+  flex: 1 1 auto;
   display: flex;
   align-items: flex-end;
   gap: 2px;
@@ -8,9 +15,9 @@
   padding: 4px 8px 0;
   overflow-x: auto;
   scrollbar-width: thin;
-  background: var(--tms-surface);
-  border-bottom: 1px solid var(--tms-border);
 }
+/* Stays put while the tabs scroll beside it. */
+.tms-shell .tms-ship-tabs-action { flex: none; align-self: center; margin: 3px 8px 0 0; }
 .tms-shell .tms-ship-tab {
   flex: 0 0 auto;
   display: inline-flex;

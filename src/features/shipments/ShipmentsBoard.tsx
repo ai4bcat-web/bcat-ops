@@ -14,7 +14,7 @@ import { phaseInputOfRow } from './deliveryPhaseInputs'
 import './deliveryTimeline.css'
 import { TrackingModeNotSetRowChip } from './trackingModeControl/TrackingModeNotSetChip'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   Clock,
@@ -24,7 +24,6 @@ import {
   Lock,
   Search,
   Trash2,
-  Truck,
   UserX,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -34,7 +33,7 @@ import { IconKeyDialog, type BoardToneKey, type BoardExceptionKey } from './boar
 import { BatchTaskDialog, type BatchTaskAction, type BatchTaskResult } from './board/BatchTaskDialog'
 import { BoardMapView } from './board/BoardMapView'
 import { ColumnsDialog } from '@/features/tms/grid/ColumnsDialog'
-import { TmsBadge, TmsButton, TmsFilterChip, TmsInput, TmsSegmentedTabs, TmsSelect, statusTone } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsInput, TmsSegmentedTabs, TmsSelect, statusTone } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
   ClearFiltersButton,
@@ -104,7 +103,6 @@ import {
   matchesQuery,
   needsDriver,
   toCsv,
-  isDemoShipment,
   podStatusOf,
   docsMissingOf,
   type ShipmentRow,
@@ -265,7 +263,6 @@ function carrierIdOfRow(row: ShipmentRow, carriers: readonly { id: string; name:
 
 export function ShipmentsBoard() {
   const { isAdmin, isOwner, user } = useAuth()
-  const navigate = useNavigate()
   const email = user?.email ?? ''
   const { shipments: workingRows, loading: workingLoading, partial: workingPartial, error: workingError, refresh: refreshWorking } = useShipments({ kind: 'working' })
   const { customers, locations } = useDirectory()
@@ -359,43 +356,41 @@ export function ShipmentsBoard() {
 
   return (
     <div className="tms-dense-page tms-caps">
-      <div className="tms-dense-bar">
-        <div className="flex items-center gap-3">
-          <Truck size={18} />
-          {partial && <TmsBadge tone="gray">Adding delivered loads…</TmsBadge>}
-          {wantsAllList && (
-            <TmsSelect
-              aria-label="Year"
-              className="tms-dense-select"
-              value={String(year)}
-              onChange={(e) => setYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-              options={yearOptions}
-            />
-          )}
-          {wantsVoidedList && (
-            <div className="flex items-center gap-1" role="group" aria-label="Period">
-              <TmsButton size="sm" variant="ghost" aria-label="Previous month" onClick={() => setPeriod({ key: 'month', month: shiftMonth(months[0], -1) })}>‹</TmsButton>
-              <TmsSegmentedTabs
-                aria-label="Period"
-                size="sm"
-                active={period.key}
-                onSelect={(key) => setPeriod(key === 'month' ? { key: 'month', month: months[0] } : { key: key as 'this' | 'last' | 'last3' })}
-                tabs={[
-                  { key: 'this', label: 'This month' },
-                  { key: 'last', label: 'Last month' },
-                  { key: 'last3', label: 'Last 3 months' },
-                  ...(period.key === 'month' ? [{ key: 'month', label: months[0] }] : []),
-                ]}
+      {/* Create shipment sits on the tab strip, so this row only appears when the All or Voided list has a year or period to pick. */}
+      {(partial || wantsAllList || wantsVoidedList) && (
+        <div className="tms-dense-bar">
+          <div className="flex items-center gap-3">
+            {partial && <TmsBadge tone="gray">Adding delivered loads…</TmsBadge>}
+            {wantsAllList && (
+              <TmsSelect
+                aria-label="Year"
+                className="tms-dense-select"
+                value={String(year)}
+                onChange={(e) => setYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                options={yearOptions}
               />
-              <TmsButton size="sm" variant="ghost" aria-label="Next month" disabled={months[months.length - 1] >= thisMonth} onClick={() => setPeriod({ key: 'month', month: shiftMonth(months[months.length - 1], 1) })}>›</TmsButton>
-            </div>
-          )}
+            )}
+            {wantsVoidedList && (
+              <div className="flex items-center gap-1" role="group" aria-label="Period">
+                <TmsButton size="sm" variant="ghost" aria-label="Previous month" onClick={() => setPeriod({ key: 'month', month: shiftMonth(months[0], -1) })}>‹</TmsButton>
+                <TmsSegmentedTabs
+                  aria-label="Period"
+                  size="sm"
+                  active={period.key}
+                  onSelect={(key) => setPeriod(key === 'month' ? { key: 'month', month: months[0] } : { key: key as 'this' | 'last' | 'last3' })}
+                  tabs={[
+                    { key: 'this', label: 'This month' },
+                    { key: 'last', label: 'Last month' },
+                    { key: 'last3', label: 'Last 3 months' },
+                    ...(period.key === 'month' ? [{ key: 'month', label: months[0] }] : []),
+                  ]}
+                />
+                <TmsButton size="sm" variant="ghost" aria-label="Next month" disabled={months[months.length - 1] >= thisMonth} onClick={() => setPeriod({ key: 'month', month: shiftMonth(months[months.length - 1], 1) })}>›</TmsButton>
+              </div>
+            )}
+          </div>
         </div>
-        <span className="tms-dense-spacer" />
-        <TmsButton size="sm" variant="primary" data-testid="create-shipment" onClick={() => navigate('/tms/shipments/new')}>
-          Create shipment
-        </TmsButton>
-      </div>
+      )}
 
       <div className={`flex min-h-0 flex-1 overflow-hidden ${split ? 'gap-1' : ''}`}>
         <BoardPane
@@ -611,9 +606,6 @@ function BoardPane({
     return refresh()
   }, [refresh])
 
-  // The "Demo" chip: only the ZZ DEMO walkthrough rows. It lives in the URL (`?demo=1`)
-  // so the isolated view can be bookmarked or handed over as a link.
-  const demoOnly = params.get('demo') === '1'
   // The frozen columns are whatever the layout pins, in the order it pins them (Edit layout > Columns: pin, drag into order); they lead the grid
   // and stay put while the rest scrolls sideways. The first column is always frozen.
   const frozenKeys = useMemo(() => layout.pinned.filter((k) => columnKeys.includes(k)), [layout.pinned, columnKeys])
@@ -626,16 +618,15 @@ function BoardPane({
   // List scope, then search, then the quick toggles, then voided rows (hidden unless the Status
   // header asks for them), then every header filter. `fitRows` is the list before the header
   // filters: the facet options and auto-fit widths are drawn from it so they do not shift as you filter.
-  // The chips count this base: the list after search, scope, voided and demo handling.
+  // The chips count this base: the list after search, scope and voided handling.
   const chipBase = useMemo(
     () =>
       listRows.filter(
         (r) =>
           (!query || matchesQuery(r, query))
-          && (wantsVoided || boardStatusOf(r) !== 'VOIDED')
-          && (!demoOnly || isDemoShipment(r)),
+          && (wantsVoided || boardStatusOf(r) !== 'VOIDED'),
       ),
-    [listRows, query, wantsVoided, demoOnly],
+    [listRows, query, wantsVoided],
   )
   const fitRows = useMemo(() => {
     if (flags.size === 0) return chipBase
@@ -643,15 +634,6 @@ function BoardPane({
     return chipBase.filter((r) => matchesFlags(r, flags, nowMs))
   }, [chipBase, flags])
   const filteredRows = useMemo(() => filterRows(fitRows, gridColumns, filters), [fitRows, gridColumns, filters])
-  const toggleDemo = useCallback(() => {
-    setPageSize(PAGE_SIZE_INITIAL)
-    setParams((prev) => {
-      const next = new URLSearchParams(prev)
-      if (next.get('demo') === '1') next.delete('demo')
-      else next.set('demo', '1')
-      return next
-    }, { replace: true })
-  }, [setParams])
   const sortedRows = useMemo(() => sortDenseRows(filteredRows, gridColumns, prefs.sort), [filteredRows, gridColumns, prefs.sort])
   const shownRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
 
@@ -1070,7 +1052,6 @@ function BoardPane({
             tabs={[{ key: 'active', label: 'Active' }, { key: 'all', label: 'All' }, { key: 'voided', label: 'Voided' }]}
           />
         )}
-        <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={toggleDemo} />
         <ClearFiltersButton count={activeFilterCount(filters) + flags.size} onClear={clearFilters} />
         <span className="tms-dense-spacer" />
         <TmsButton size="sm" variant="secondary" data-testid="export-active-shipments" title="Every active shipment with every field" onClick={exportAllActive}>
@@ -1139,7 +1120,7 @@ function BoardPane({
             uppercase
             aria-label="Shipments"
             recentKey={`tms:shipments:recent:${email}`}
-            resetKey={`${query}|${flags.size}|${demoOnly}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+            resetKey={`${query}|${flags.size}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
             columns={gridColumns}
             rows={shownRows}
             fitRows={fitRows}

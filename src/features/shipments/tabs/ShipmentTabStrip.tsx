@@ -20,7 +20,7 @@ const SECTIONS = [
 /**
  * The tab strip above the Shipments board and the shipment form (Ryne 2026-11-11): Active, All, Intake and Voided are the permanent first tabs, every shipment
  * opened for editing is another. Each open shipment keeps its form (and so its draft and its edit lock) until its tab is closed, it is
- * saved and exited, or discarded. Middle-click closes a tab; a dot marks unsaved edits.
+ * saved and exited, or discarded. Middle-click closes a tab; a dot marks unsaved edits. Create shipment sits at the right end on the board.
  */
 export function ShipmentTabStrip() {
   const tabsApi = useShipmentTabs()
@@ -50,30 +50,37 @@ export function ShipmentTabStrip() {
 
   return (
     <>
-      <div className="tms-ship-tabs" role="tablist" aria-label="Open shipments" data-testid="ship-tabs">
-        {SECTIONS.map((sec) => (
-          <button
-            key={sec.key} type="button" role="tab" aria-selected={section === sec.key}
-            className={`tms-ship-tab tms-ship-tab-board${section === sec.key ? ' tms-ship-tab-on' : ''}`}
-            data-testid={`ship-tab-section-${sec.key}`} onClick={() => navigate(sec.to)}
-          >
-            {sec.label}{sec.key === 'intake' && intakeCount ? <span className="tms-ship-tab-count">{intakeCount}</span> : null}
-          </button>
-        ))}
-        {tabs.map((t) => {
-          const on = t.id === activeId
-          return (
-            <span key={t.id} className={`tms-ship-tab${on ? ' tms-ship-tab-on' : ''}`} onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }} onAuxClick={(e) => aux(e, t.id)}>
-              <button type="button" role="tab" aria-selected={on} className="tms-ship-tab-main" data-testid={`ship-tab-${t.id}`} title={tabLabel(t)} onClick={() => navigate(`${BOARD}/${t.id}/edit`)}>
-                {dirty.has(t.id) ? <span className="tms-ship-tab-dot" role="img" aria-label="Unsaved changes" data-testid={`ship-tab-dirty-${t.id}`} /> : null}
-                <span className="tms-ship-tab-label">{tabLabel(t)}</span>
-              </button>
-              <button type="button" className="tms-ship-tab-x" aria-label={`Close ${tabLabel(t)}`} data-testid={`ship-tab-close-${t.id}`} onClick={() => requestClose(t.id)}>
-                <X size={12} aria-hidden="true" />
-              </button>
-            </span>
-          )
-        })}
+      <div className="tms-ship-tabs-row">
+        <div className="tms-ship-tabs" role="tablist" aria-label="Open shipments" data-testid="ship-tabs">
+          {SECTIONS.map((sec) => (
+            <button
+              key={sec.key} type="button" role="tab" aria-selected={section === sec.key}
+              className={`tms-ship-tab tms-ship-tab-board${section === sec.key ? ' tms-ship-tab-on' : ''}`}
+              data-testid={`ship-tab-section-${sec.key}`} onClick={() => navigate(sec.to)}
+            >
+              {sec.label}{sec.key === 'intake' && intakeCount ? <span className="tms-ship-tab-count">{intakeCount}</span> : null}
+            </button>
+          ))}
+          {tabs.map((t) => {
+            const on = t.id === activeId
+            return (
+              <span key={t.id} className={`tms-ship-tab${on ? ' tms-ship-tab-on' : ''}`} onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }} onAuxClick={(e) => aux(e, t.id)}>
+                <button type="button" role="tab" aria-selected={on} className="tms-ship-tab-main" data-testid={`ship-tab-${t.id}`} title={tabLabel(t)} onClick={() => navigate(`${BOARD}/${t.id}/edit`)}>
+                  {dirty.has(t.id) ? <span className="tms-ship-tab-dot" role="img" aria-label="Unsaved changes" data-testid={`ship-tab-dirty-${t.id}`} /> : null}
+                  <span className="tms-ship-tab-label">{tabLabel(t)}</span>
+                </button>
+                <button type="button" className="tms-ship-tab-x" aria-label={`Close ${tabLabel(t)}`} data-testid={`ship-tab-close-${t.id}`} onClick={() => requestClose(t.id)}>
+                  <X size={12} aria-hidden="true" />
+                </button>
+              </span>
+            )
+          })}
+        </div>
+        {onBoard && (
+          <TmsButton size="sm" variant="primary" className="tms-ship-tabs-action" data-testid="create-shipment" onClick={() => navigate(`${BOARD}/new`)}>
+            Create shipment
+          </TmsButton>
+        )}
       </div>
       <TmsDialog
         open={confirming != null}
