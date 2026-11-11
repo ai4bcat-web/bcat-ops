@@ -103,6 +103,7 @@ import {
 } from './integrations'
 import { MCP_FIND_ACTIONS, runMcpFindAction, type McpFindActionName, type McpFindDeps } from './mcpFind'
 import { parsePoints, routeMiles } from './routeMiles'
+import { validateProgressSteps } from '../../../src/lib/progressSteps'
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
@@ -2041,6 +2042,7 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
       if (bad.length) throw new Error(`divisionSalesReps: unknown division ${bad.join(', ')}`)
       return map
     }, 'divisionSalesReps'),
+    progressSteps: keep(input.progressSteps, validateProgressSteps, 'progressSteps'),
     paymentTerms: keep(input.paymentTerms, (v) => validatePaymentTerms(v, { defaultPaymentTermsDays: defaultPaymentTermsDays as number | undefined }), 'paymentTerms'),
 
     updatedBy: caller.email,

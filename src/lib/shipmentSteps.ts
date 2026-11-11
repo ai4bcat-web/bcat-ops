@@ -8,13 +8,13 @@
  * back to what the row itself records. Relative imports only.
  */
 import { CARRIER_ASSIGNMENT_STATUSES, driverInfoGaps, rungOf } from './carrierAssignment'
+import { assetModeOf, assetStepRows, isAssetShipment, type AssetContext } from './assetSteps'
+import { catalogStep, resolveSteps, type ProgressStepsConfig, type StepKey, type StepVariant } from './progressSteps'
 import { resolveActor, type StaffLike } from './auditActors'
 import { STAGE_LADDER, stageOfBundle, type LadderStage } from './shipmentStage'
 import type { LoadCarrierRecord, ShipmentBundle } from '../types/tms'
 
-export type StepKey =
-  | 'created' | 'covered' | 'setup' | 'rateConSent' | 'rateConSigned' | 'driverInfo'
-  | 'dispatched' | 'delivered' | 'loadReview' | 'billed' | 'paid'
+export type { StepKey } from './progressSteps'
 
 export type StepState = 'done' | 'next' | 'todo'
 
@@ -38,6 +38,7 @@ export interface ShipmentStep {
 const SHORT: Record<StepKey, string> = {
   created: 'Create it', covered: 'Cover it', setup: 'Carrier setup', rateConSent: 'Send rate con', rateConSigned: 'Rate con signature',
   driverInfo: 'Enter driver info', dispatched: 'Dispatch', delivered: 'Deliver and get the POD', loadReview: 'Send to Load Review', billed: 'Invoice', paid: 'Collect payment',
+  assetAssigned: 'Assign driver', assetStarted: 'Dispatch', assetLocated: 'Truck location', assetArrivedPickup: 'Arrive at pickup', assetLeftPickup: 'Leave pickup', assetArrivedDelivery: 'Arrive at delivery',
 }
 
 export interface AuditStepRow {
@@ -73,10 +74,19 @@ function carrierNameOf(lc: LoadCarrierRecord | null): string | null {
 interface Who { by: string | null; at: string | null }
 
 /** Build the step list. `staff` resolves login e-mails to names. */
+/** What an ASSETS load reads beyond the bundle: the driver's type and the check calls that say who tapped what. Both optional. */
+export interface AssetStepExtras {
+  driverType?: AssetContext['driverType']
+  checkCalls?: AssetContext['checkCalls']
+  /** `TmsSettings.progressSteps`: which steps, in what order and under what names, per revenue division. Absent = the built-in defaults. */
+  config?: ProgressStepsConfig | null
+}
+
 export function buildShipmentSteps(
   bundle: ShipmentBundle | null,
   audits: readonly AuditStepRow[],
   staff: readonly StaffLike[],
+  extras: AssetStepExtras = {},
 ): ShipmentStep[] {
   if (!bundle) return []
   const stage = stageOfBundle(bundle)
@@ -113,7 +123,7 @@ export function buildShipmentSteps(
   const delivered = who(auditFor(audits, ['SET_LOAD_STATUS'], bundle.loads.map((l) => l.id)), null, bundle.shipment.deliveredAt)
   const review = who(auditFor(audits, ['PUSH_TO_LOAD_REVIEW'], [bundle.shipment.id]), null, bundle.shipment.loadReviewPushedAt)
 
-  const raw: Array<Omit<ShipmentStep, 'state' | 'action' | 'waiting' | 'short'> & { done: boolean; action: string; waiting?: string | null; skip?: boolean }> = [
+  const generic: Array<Omit<ShipmentStep, 'state' | 'action' | 'waiting' | 'short'> & { done: boolean; action: string; waiting?: string | null; skip?: boolean }> = [
     { key: 'created', label: 'Created', done: true, carrier: null, by: created.by, at: created.at, action: 'Create the shipment' },
     {
       key: 'covered', label: own ? 'Covered by our own fleet' : 'Covered', done: !!lc, carrier, by: lc ? covered.by : null, at: lc ? covered.at : null,
@@ -150,6 +160,28 @@ export function buildShipmentSteps(
     { key: 'paid', label: 'Paid', done: pos >= idx('PAID'), carrier: null, by: null, at: null, action: 'Collect payment' },
   ]
 
+
+  const afterDelivered = pos >= idx('DELIVERED')
+  // A delivered shipment did every step before delivery, whether or not anybody recorded it.
+  const BEFORE_DELIVERY = new Set(['covered', 'setup', 'rateConSent', 'rateConSigned', 'driverInfo', 'dispatched'])
+  type Raw = Omit<ShipmentStep, 'state' | 'action' | 'waiting' | 'short'> & { done: boolean; action: string; waiting?: string | null; skip?: boolean; short?: string }
+  const rows = new Map<string, Raw>()
+  for (const r of generic) rows.set(r.key, afterDelivered && BEFORE_DELIVERY.has(r.key) && !r.done ? { ...r, done: true } : r)
+  const asset = isAssetShipment(bundle)
+  const variant: StepVariant = asset ? (assetModeOf(extras.driverType, bundle) === 'MOTIVE' ? 'OWNER_OPERATOR' : 'LOCAL_DRIVER') : 'CARRIER'
+  if (asset) {
+    for (const r of assetStepRows({ bundle, lc, driverType: extras.driverType, checkCalls: extras.checkCalls ?? [], delivered: afterDelivered })) rows.set(r.key, { ...r, key: r.key as StepKey })
+  }
+  // The steps Settings chose for this revenue division (else the defaults), in that order, under the names it gave them. A label left equal to the
+  // catalog name is not a rename, so the dynamic wording ("Covered by our own fleet") stays.
+  const raw: Raw[] = []
+  for (const setting of resolveSteps(extras.config, bundle.shipment.revDivision, variant)) {
+    const row = rows.get(setting.key)
+    if (!setting.enabled || !row) continue
+    const renamed = setting.label.trim() !== '' && setting.label !== catalogStep(setting.key)?.label
+    raw.push(renamed ? { ...row, label: setting.label } : row)
+  }
+
   let nextAssigned = false
   const steps: ShipmentStep[] = []
   for (const r of raw) {
@@ -157,7 +189,7 @@ export function buildShipmentSteps(
     const state: StepState = r.done ? 'done' : !nextAssigned ? 'next' : 'todo'
     if (state === 'next') nextAssigned = true
     steps.push({
-      key: r.key, label: r.label, state, carrier: r.carrier, by: r.by, at: r.at, short: SHORT[r.key],
+      key: r.key, label: r.label, state, carrier: r.carrier, by: r.by, at: r.at, short: r.short ?? SHORT[r.key],
       action: state === 'next' ? r.action : null, waiting: state === 'next' ? (r.waiting ?? null) : null,
     })
   }

@@ -69,3 +69,82 @@ describe('buildShipmentSteps', () => {
     expect(buildShipmentSteps(null, [], staff)).toEqual([])
   })
 })
+
+describe('ASSETS loads (Ryne 2026-11-11)', () => {
+  const stop = (type: string, over: object = {}) => ({ id: `${type}1`, type, ...over })
+  function assetBundle(over: { status?: string; driver?: object; stops?: object[]; lastKnown?: object } = {}): ShipmentBundle {
+    const lc = { id: 'lc1', status: 'ACTIVE', kind: 'OWN_ASSET', driverId: 'd1', driverName: 'Lee Lara', truckNumber: '118', createdBy: 'dee@bcatcorp.com', createdAt: '2026-11-10T11:00:00.000Z', ...over.driver }
+    return {
+      shipment: { id: 'shp-1', number: '20009', status: over.status ?? 'IN_TRANSIT', revDivision: 'ASSETS', createdBy: 'dee@bcatcorp.com', createdAt: '2026-11-10T10:00:00.000Z', deliveredAt: over.status === 'DELIVERED' ? '2026-11-10T20:00:00.000Z' : null },
+      orders: [{ id: 'o1' }],
+      loads: [{ id: 'l1', assignmentType: 'OWN_ASSET', status: over.status ?? 'IN_TRANSIT', stops: over.stops ?? [stop('pickup'), stop('delivery')], ...over.lastKnown }],
+      loadCarriers: [lc],
+    } as unknown as ShipmentBundle
+  }
+  const keys = (b: ShipmentBundle, extras = {}) => buildShipmentSteps(b, [], staff, extras).map((s) => s.key)
+
+  it('a local driver shows the driver-app steps, not carrier setup or rate confirmation', () => {
+    expect(keys(assetBundle(), { driverType: 'COMPANY' })).toEqual(['created', 'assetAssigned', 'assetStarted', 'assetArrivedPickup', 'assetLeftPickup', 'assetArrivedDelivery', 'delivered', 'loadReview', 'billed', 'paid'])
+  })
+
+  it('an owner operator shows the Motive location step instead of the driver-app dispatch', () => {
+    const k = keys(assetBundle(), { driverType: 'OWNER_OPERATOR' })
+    expect(k).toContain('assetLocated')
+    expect(k).not.toContain('assetStarted')
+  })
+
+  it('only recorded stop clocks are done; the next step is the next driver status, never "Cover it"', () => {
+    const b = assetBundle({ status: 'LOADING', driver: { dispatchedAt: '2026-11-10T12:00:00.000Z' }, stops: [stop('pickup', { arrivedAt: '2026-11-10T13:41:00.000Z' }), stop('delivery')] })
+    const steps = buildShipmentSteps(b, [], staff, { driverType: 'COMPANY' })
+    expect(steps.find((s) => s.key === 'assetArrivedPickup')).toMatchObject({ state: 'done', at: '2026-11-10T13:41:00.000Z', carrier: 'Lee Lara' })
+    expect(steps.find((s) => s.key === 'assetLeftPickup')?.state).not.toBe('done')
+    expect(nextStepOf(steps)).toMatchObject({ key: 'assetLeftPickup' })
+  })
+
+  it('names who tapped a driver-app update from its check call', () => {
+    const b = assetBundle({ stops: [stop('pickup', { arrivedAt: '2026-11-10T13:41:00.000Z' }), stop('delivery')] })
+    const calls = [{ stopId: 'pickup1', type: 'ARRIVED', source: 'DRIVER_APP', at: '2026-11-10T13:41:00.000Z', createdBy: 'driver:d1', personName: 'Lee Lara' }] as never
+    expect(buildShipmentSteps(b, [], staff, { driverType: 'COMPANY', checkCalls: calls }).find((s) => s.key === 'assetArrivedPickup')?.by).toBe('Lee Lara')
+  })
+
+  it('an owner operator is located only when the last fix came from Motive', () => {
+    const motive = assetBundle({ lastKnown: { lastKnownSource: 'MOTIVE', lastKnownAt: '2026-11-10T14:00:00.000Z' } })
+    expect(buildShipmentSteps(motive, [], staff, { driverType: 'OWNER_OPERATOR' }).find((s) => s.key === 'assetLocated')).toMatchObject({ state: 'done', by: 'Motive', at: '2026-11-10T14:00:00.000Z' })
+    const none = assetBundle()
+    expect(buildShipmentSteps(none, [], staff, { driverType: 'OWNER_OPERATOR' }).find((s) => s.key === 'assetLocated')?.state).not.toBe('done')
+  })
+
+  it('a DELIVERED asset load shows every earlier step as done, with nothing recorded, and no next chip before billing', () => {
+    const b = assetBundle({ status: 'DELIVERED' })
+    const steps = buildShipmentSteps(b, [], staff, { driverType: 'COMPANY' })
+    for (const key of ['created', 'assetAssigned', 'assetStarted', 'assetArrivedPickup', 'assetLeftPickup', 'assetArrivedDelivery', 'delivered']) {
+      expect(steps.find((s) => s.key === key)?.state, key).toBe('done')
+    }
+    expect(steps.find((s) => s.key === 'assetArrivedPickup')).toMatchObject({ at: null, by: null })
+    expect(nextStepOf(steps)?.key).toBe('loadReview')
+    expect(steps.some((s) => s.short === 'Cover it')).toBe(false)
+  })
+
+  it('a delivered asset load with no assignment recorded still shows the driver step done', () => {
+    const b = assetBundle({ status: 'DELIVERED' })
+    ;(b as unknown as { loadCarriers: unknown[] }).loadCarriers = []
+    expect(buildShipmentSteps(b, [], staff).find((s) => s.key === 'assetAssigned')?.state).toBe('done')
+  })
+
+  it('a saved configuration picks, orders and renames the steps; a rename shows, a default name keeps the dynamic wording', () => {
+    const config = { ASSETS: { LOCAL_DRIVER: [
+      { key: 'created', label: 'Created', enabled: true }, { key: 'assetArrivedDelivery', label: 'At the dock', enabled: true },
+      { key: 'assetArrivedPickup', label: 'Arrived at pickup', enabled: false }, { key: 'delivered', label: 'Delivered', enabled: true },
+    ] } }
+    const steps = buildShipmentSteps(assetBundle(), [], staff, { driverType: 'COMPANY', config })
+    expect(steps.map((s) => [s.key, s.label])).toEqual([['created', 'Created'], ['assetArrivedDelivery', 'At the dock'], ['delivered', 'Delivered']])
+  })
+
+  it('a delivered non-asset load with nobody recorded shows its steps before delivery as done', () => {
+    const b = bundle({ status: 'DELIVERED' })
+    ;(b.shipment as unknown as { deliveredAt: string }).deliveredAt = '2026-11-10T20:00:00.000Z'
+    const steps = buildShipmentSteps(b, [], staff)
+    expect(steps.find((s) => s.key === 'covered')?.state).toBe('done')
+    expect(steps.find((s) => s.key === 'dispatched')?.state).toBe('done')
+  })
+})

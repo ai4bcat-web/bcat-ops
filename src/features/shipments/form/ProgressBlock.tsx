@@ -9,20 +9,25 @@ import { buildShipmentSteps, nextStepOf, type AuditStepRow } from '@/lib/shipmen
 import { formatDateTime } from '@/lib/date'
 import type { ShipmentBundle, UserProfileRecord } from '@/types/tms'
 import { useShipmentActivity } from './useShipmentActivity'
+import { useAssetStepInputs } from './useAssetStepInputs'
+import type { ProgressStepsConfig } from '@/lib/progressSteps'
 
 export interface ProgressBlockProps {
   bundle: ShipmentBundle | null
   staff: readonly UserProfileRecord[]
+  /** `TmsSettings.progressSteps`; absent = the built-in steps. */
+  config?: ProgressStepsConfig | null
   /** Takes the carrier or own-fleet leg off (shown on the Covered step). */
   onUncover?: () => void
   disabled?: boolean
 }
 
-function ProgressBlockImpl({ bundle, staff, onUncover, disabled }: ProgressBlockProps) {
+function ProgressBlockImpl({ bundle, staff, config, onUncover, disabled }: ProgressBlockProps) {
   const data = useShipmentActivity(bundle)
+  const asset = useAssetStepInputs(bundle, true)
   const steps = useMemo(
-    () => buildShipmentSteps(bundle, (data?.entries ?? []) as unknown as AuditStepRow[], staff),
-    [bundle, data, staff],
+    () => buildShipmentSteps(bundle, (data?.entries ?? []) as unknown as AuditStepRow[], staff, { ...asset, config }),
+    [bundle, data, staff, asset, config],
   )
   if (!bundle || steps.length === 0) return null
   const next = nextStepOf(steps)
