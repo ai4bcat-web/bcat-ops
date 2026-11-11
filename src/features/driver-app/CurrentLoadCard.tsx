@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, Truck, FileText, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { fetchCurrentLoad, type CurrentLoad } from './driverApi'
+import { fetchOpenLoads, type CurrentLoad } from './driverApi'
 
 /** "Wed 1 Oct, 4:30 AM" — short enough for a phone, explicit about the day. */
 function apptLabel(iso: string | null): string {
@@ -27,14 +27,15 @@ function apptLabel(iso: string | null): string {
 
 export function CurrentLoadCard() {
   const [load, setLoad] = useState<CurrentLoad | null>(null)
+  const [alsoOpen, setAlsoOpen] = useState<CurrentLoad[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   // A promise chain, not an async function: the mount effect calls this directly and
   // every state write has to land after the fetch, never in the same synchronous tick.
   const refresh = useCallback(() =>
-    fetchCurrentLoad()
-      .then((next) => { setLoad(next); setError(null) })
+    fetchOpenLoads()
+      .then((next) => { setLoad(next.load); setAlsoOpen(next.alsoOpen); setError(null) })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Could not load your current job')
       })
@@ -100,6 +101,7 @@ export function CurrentLoadCard() {
   const podIn = load.hasPod
 
   return (
+    <div className="space-y-3">
     <div className="rounded-xl border border-[var(--tms-border)] bg-[var(--tms-card)] p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -144,6 +146,25 @@ export function CurrentLoadCard() {
           for you to do — send it from the Scan tab only if you have it.
         </p>
       )}
+    </div>
+    {alsoOpen.length > 0 && (
+      <section aria-label="Also on your list" data-testid="also-open-loads">
+        <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Also on your list</h3>
+        <ul className="mt-1.5 space-y-2">
+          {alsoOpen.map((l) => (
+            <li key={l.id} className="rounded-xl border border-[var(--tms-border)] bg-[var(--tms-card)] p-3 text-xs shadow-sm">
+              <p className="font-mono text-muted-foreground">PRO {l.proNumber || '—'}</p>
+              <p className="truncate text-sm font-semibold text-foreground">{l.lane}</p>
+              {l.customer && <p className="truncate text-muted-foreground">{l.customer}</p>}
+              <p className="mt-1 text-foreground">
+                <span className="text-muted-foreground">Pick up </span>{apptLabel(l.pickupAppt)}
+                <span className="text-muted-foreground"> · Deliver </span>{apptLabel(l.deliveryAppt)}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
     </div>
   )
 }

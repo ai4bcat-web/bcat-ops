@@ -484,7 +484,7 @@ describe('GET /loads/current', () => {
   it('is an empty rest state when the driver has nothing open', async () => {
     tables['Load-test'] = { 'load-b': shipmentLoad(FUTURE, { id: 'load-b', pickupDriverId: DRIVER_B_ID, deliveryDriverId: DRIVER_B_ID, stops: [{ id: 'b-p', type: 'pickup', sequence: 0, driverId: DRIVER_B_ID }] }), 'load-old': shipmentLoad(PAST, { id: 'load-old' }) }
     const res = await call('/loads/current')
-    expect(res).toEqual({ status: 200, body: { load: null } })
+    expect(res).toEqual({ status: 200, body: { load: null, alsoOpen: [] } })
   })
 
   it('shows the soonest open load with its lane, PRO and what still blocks invoicing, and nothing money-shaped', async () => {
@@ -507,6 +507,8 @@ describe('GET /loads/current', () => {
       hasRateConfirmation: true,
       hasPod: true,
     })
+    // The next open load rides along, so a second delivery today is not hidden behind the first.
+    expect((res.body.alsoOpen as Array<{ id: string; proNumber: string }>).map((l) => [l.id, l.proNumber])).toEqual([['load-later', '20002']])
     expect(JSON.stringify(res.body)).not.toContain('123400')
   })
 })

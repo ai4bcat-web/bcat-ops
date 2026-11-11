@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   driverIsOnLoad,
   currentLoadForDriver,
+  openLoadsForDriver,
   currentLoadByDriver,
   recentLoadsForDriver,
   lastApptAt,
@@ -61,6 +62,15 @@ describe('current load', () => {
       stops: [{ id: 'a', type: 'pickup', sequence: 0, driverId: DRIVER, appt: '2026-10-01T06:00:00.000Z' }] } as Partial<Load>)
     const later = load({ id: 'ld-later' })
     expect(currentLoadForDriver([later, soon], DRIVER, NOW)?.id).toBe('ld-soon')
+  })
+
+  it('lists every open load, soonest first, so a second delivery today is not hidden behind the first', () => {
+    const stopsOf = (appt: string) => [{ id: appt, type: 'delivery', sequence: 0, driverId: DRIVER, appt }]
+    const first = load({ id: 'ld-first', stops: stopsOf('2026-10-02T04:00:00.000Z') } as Partial<Load>)
+    const second = load({ id: 'ld-second', stops: stopsOf('2026-10-02T09:00:00.000Z') } as Partial<Load>)
+    const notMine = load({ id: 'ld-other', stops: [{ id: 'x', type: 'delivery', sequence: 0, driverId: OTHER, appt: '2026-10-02T05:00:00.000Z' }] } as Partial<Load>)
+    expect(openLoadsForDriver([second, notMine, first], DRIVER, NOW).map((l) => l.id)).toEqual(['ld-first', 'ld-second'])
+    expect(currentLoadForDriver([second, first], DRIVER, NOW)?.id).toBe('ld-first')
   })
 
   it('keeps a load through the grace window after its last appointment', () => {

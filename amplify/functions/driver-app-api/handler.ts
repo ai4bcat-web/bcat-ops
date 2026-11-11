@@ -47,7 +47,7 @@ import { splitCityState, normalizeZip } from '../../../src/lib/otrInvoice'
 import { buildPodIndex, loadHasPod, type PodIndex } from '../../../src/lib/podPresence'
 import { normalizePro } from '../../../src/lib/proNumber'
 import {
-  currentLoadForDriver,
+  openLoadsForDriver,
   driverIsOnLoad,
   laneLabel,
   lastApptAt,
@@ -3947,30 +3947,28 @@ export const handler = async (event: FnUrlEvent) => {
      */
     if (method === 'GET' && path === '/loads/current') {
       const loads = await scan<Record<string, unknown>>(LOAD_TABLE_NAME)
-      const current = currentLoadForDriver(loads as unknown as Load[], driverId, Date.now())
-      if (!current) return reply(200, { load: null })
+      const open = openLoadsForDriver(loads as unknown as Load[], driverId, Date.now())
+      const current = open[0]
+      if (!current) return reply(200, { load: null, alsoOpen: [] })
 
-      const pods = await scan<{ loadId?: string }>(
-        POD_DOCUMENT_TABLE_NAME,
-        'loadId = :l',
-        {},
-        { ':l': current.id },
-      )
-      return reply(200, {
-        load: {
-          id: current.id,
-          proNumber: (current.aljexId ?? '').trim(),
-          lane: laneLabel(current),
-          originCity: current.originCity ?? null,
-          destinationCity: current.destinationCity ?? null,
-          pickupAppt: current.pickupAppt ?? null,
-          deliveryAppt: current.deliveryAppt ?? null,
-          customer: current.customer ?? null,
+      const summary = async (l: Load) => {
+        const pods = await scan<{ loadId?: string }>(POD_DOCUMENT_TABLE_NAME, 'loadId = :l', {}, { ':l': l.id })
+        return {
+          id: l.id,
+          proNumber: (l.aljexId ?? '').trim(),
+          lane: laneLabel(l),
+          originCity: l.originCity ?? null,
+          destinationCity: l.destinationCity ?? null,
+          pickupAppt: l.pickupAppt ?? null,
+          deliveryAppt: l.deliveryAppt ?? null,
+          customer: l.customer ?? null,
           // What still blocks invoicing, so a driver sees why a load is held.
-          hasRateConfirmation: Boolean((current.rateConfirmKey ?? '').trim()),
+          hasRateConfirmation: Boolean((l.rateConfirmKey ?? '').trim()),
           hasPod: pods.length > 0,
-        },
-      })
+        }
+      }
+      // `alsoOpen`: the rest of the driver's open loads, soonest first (a second delivery today). Older clients ignore it.
+      return reply(200, { load: await summary(current), alsoOpen: await Promise.all(open.slice(1, 6).map(summary)) })
     }
 
     /**

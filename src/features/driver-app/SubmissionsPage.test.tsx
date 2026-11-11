@@ -46,6 +46,7 @@ const apiMocks = vi.hoisted(() => {
     // The page mounts the current-load card and the unattached-POD list alongside the
     // submissions, so their calls have to be mockable too.
     fetchCurrentLoad: vi.fn(),
+    fetchOpenLoads: vi.fn(),
     fetchRecentLoads: vi.fn(),
     attachSubmissionToLoad: vi.fn(),
     DriverApiError,
@@ -68,6 +69,7 @@ describe('SubmissionsPage', () => {
     apiMocks.fetchDocUrl.mockResolvedValue('https://example.com/doc.jpg')
     // Neutral defaults: no load running, no loads to pick. Each has its own tests.
     apiMocks.fetchCurrentLoad.mockResolvedValue(null)
+    apiMocks.fetchOpenLoads.mockResolvedValue({ load: null, alsoOpen: [] })
     apiMocks.fetchRecentLoads.mockResolvedValue([])
   })
 
