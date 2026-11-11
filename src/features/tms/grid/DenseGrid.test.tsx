@@ -48,6 +48,27 @@ afterEach(() => {
 const bodyRows = () => document.querySelectorAll('tbody tr:not(.tms-dg-spacer)')
 
 describe('DenseGrid', () => {
+  it('widens a column whose rendered cells clip their content, never one the person sized', async () => {
+    const proto = HTMLElement.prototype
+    const orig = Object.getOwnPropertyDescriptor(proto, 'scrollWidth')
+    // jsdom never lays out: pretend the City cells need 480px and every other cell fits.
+    Object.defineProperty(proto, 'scrollWidth', { configurable: true, get() { return (this as HTMLElement).getAttribute('data-col') === 'city' ? 480 : 0 } })
+    try {
+      const { rerender, props } = grid()
+      await act(async () => { await new Promise((r) => { requestAnimationFrame(() => r(null)) }) })
+      const colWidth = (i: number) => parseInt((document.querySelectorAll('colgroup col')[i] as HTMLElement).style.width, 10)
+      expect(colWidth(1)).toBe(482)
+      expect(colWidth(0)).toBeLessThan(200)
+      // A width the person dragged wins over the measurement.
+      rerender(<DenseGrid<Row> {...props} userWidths={{ city: 150 }} />)
+      await act(async () => { await new Promise((r) => { requestAnimationFrame(() => r(null)) }) })
+      expect(colWidth(1)).toBe(150)
+    } finally {
+      if (orig) Object.defineProperty(proto, 'scrollWidth', orig)
+      else delete (proto as unknown as Record<string, unknown>).scrollWidth
+    }
+  })
+
   it('mounts a bounded window of a long list and spaces out the rest', () => {
     grid({ rows: make(5000) })
     expect(bodyRows().length).toBeGreaterThan(0)

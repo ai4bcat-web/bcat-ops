@@ -49,8 +49,8 @@ export interface UseDensePrefsResult extends DensePrefs {
 }
 
 const VERSION = 1
-/** Bumped 2026-11-10 (columns must be wide enough to read everything): saved widths from before it are discarded one time. */
-const WIDTHS_FIT = 2
+/** Bumped 2026-11-10 (columns auto-fit to what their cells show, measured from the page): saved widths from before it are discarded one time. */
+const WIDTHS_FIT = 3
 
 export function densePrefsKey(gridId: string, email: string | null | undefined): string {
   return `tms:grid:${gridId}:${email ?? 'anon'}:v${VERSION}`

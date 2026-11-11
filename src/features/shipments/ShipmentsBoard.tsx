@@ -889,7 +889,7 @@ function BoardPane({
       if (columnKey === 'driver') {
         const names = driverNamesOf(row)
         if (names.length === 0) return null
-        return <span className="flex flex-wrap items-center gap-1">{names.map((n) => <TmsBadge key={n} tone="gray">{n}</TmsBadge>)}</span>
+        return <span className="flex flex-nowrap items-center gap-1">{names.map((n) => <TmsBadge key={n} tone="gray">{n}</TmsBadge>)}</span>
       }
       if (columnKey === 'carrier') {
         const label = carrierLabel(row)

@@ -43,6 +43,8 @@ import './dense-grid.css'
 
 /** Rows mounted above and below the viewport. */
 const OVERSCAN = 8
+/** A column grows to show its content, but never past this: the rest scrolls or truncates with a tooltip. */
+const MEASURED_MAX_PX = 640
 /** Used until the scroll container has been measured (and under jsdom, which never measures). */
 const FALLBACK_VIEWPORT = 720
 /** Matches `.tms-dg-popover` width in dense-grid.css. */
@@ -151,12 +153,52 @@ export function DenseGrid<T>({
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [dropKey, setDropKey] = useState<string | null>(null)
   const [liveWidths, setLiveWidths] = useState<Record<string, number>>({})
+  // Widths read off the rendered cells: a column that still clips its content grows to show all of it (see the effect below).
+  const [measuredWidths, setMeasuredWidths] = useState<Record<string, number>>({})
 
   const fit = fitRows ?? rows
   const widths = useMemo(() => {
     const base = columnWidths(columns, userWidths, fit, uppercase ? CAPS_WIDTH_FACTOR : 1)
-    return { ...base, ...liveWidths }
-  }, [columns, userWidths, liveWidths, fit, uppercase])
+    // A measured width only widens a column nobody sized: never a fixed one, never one the person dragged.
+    const grown: Record<string, number> = {}
+    for (const col of columns) {
+      const m = measuredWidths[col.key]
+      if (m != null && col.width == null && userWidths[col.key] == null && m > (base[col.key] ?? 0)) grown[col.key] = m
+    }
+    return { ...base, ...grown, ...liveWidths }
+  }, [columns, userWidths, liveWidths, measuredWidths, fit, uppercase])
+
+  // Auto-fit for real: the estimate above counts characters, so a cell with chips or wide letters can still clip. After each paint, read what
+  // the rendered cells need (scrollWidth is the full content width even when the cell clips it) and widen the column to show it, up to the cap.
+  useEffect(() => {
+    const root = scrollRef.current
+    if (!root) return undefined
+    const frame = requestAnimationFrame(() => {
+      const grown: Record<string, number> = {}
+      for (const col of columns) {
+        if (col.width != null || col.fixed || userWidths[col.key] != null) continue
+        let need = 0
+        root.querySelectorAll<HTMLElement>(`td[data-col="${col.key.replace(/"/g, '')}"]`).forEach((td) => {
+          // The cell itself, or a chip or span inside it that clips its own text: whichever needs more room.
+          let inner = 0
+          td.querySelectorAll<HTMLElement>('*').forEach((el) => { const d = el.scrollWidth - el.clientWidth; if (d > inner) inner = d })
+          const here = Math.max(td.scrollWidth, td.clientWidth + inner)
+          if (here > need) need = here
+        })
+        const have = widths[col.key] ?? 0
+        if (need > have + 1) grown[col.key] = Math.min(MEASURED_MAX_PX, need + 2)
+      }
+      const keys = Object.keys(grown)
+      if (keys.length === 0) return
+      setMeasuredWidths((prev) => {
+        const next = { ...prev }
+        let changed = false
+        for (const k of keys) if (grown[k] > (next[k] ?? 0)) { next[k] = grown[k]; changed = true }
+        return changed ? next : prev
+      })
+    })
+    return () => cancelAnimationFrame(frame)
+  })
 
   const items = useMemo(() => buildItems(rows, groupKeyOf), [rows, groupKeyOf])
   const win = virtualWindow(items.length, rowHeight, topRow * rowHeight, viewport, OVERSCAN)
@@ -441,6 +483,7 @@ export function DenseGrid<T>({
                           col.fixed ? 'tms-dg-fixed' : '',
                         ].filter(Boolean).join(' ') || undefined}
                         style={isSticky ? { left: stickyLeft[col.key] } : undefined}
+                        data-col={col.key}
                         title={col.fixed ? undefined : col.text(row)}
                       >
                         {renderCell ? renderCell(row, col.key) : col.text(row)}
