@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   listBoxTruckTrips, createBoxTruckTrip, updateBoxTruckTrip, deleteBoxTruckTrip,
   listDriverPaySettings, createDriverPaySetting, updateDriverPaySetting,
@@ -50,7 +50,7 @@ export interface BoxTruckPayState {
   unconfigured: Driver[]
   refresh:     () => void
   /** Materialize a driver's delivered loads for this period into editable rows (idempotent by loadId). Returns # created. */
-  pullFromCalendar: (driverId: string) => Promise<number>
+  pullFromCalendar: (driverId: string, skipLoadIds?: ReadonlySet<string>) => Promise<number>
   addTrip:        (input: Omit<BoxTruckTrip, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   updateTrip:     (id: string, patch: Partial<Omit<BoxTruckTrip, 'id' | 'createdAt' | 'updatedAt'>>) => Promise<void>
   removeTrip:     (id: string) => Promise<void>
@@ -66,6 +66,14 @@ export interface BoxTruckPayState {
   removeCredit:   (id: string) => Promise<void>
   /** Owner/ADMIN approval decision on a pending credit (enforced server-side). */
   decideCredit:   (id: string, action: 'APPROVE' | 'REJECT', reason?: string | null) => Promise<void>
+}
+
+const REMOVED_KEY = 'bt-removed-loads'
+function removedLoadIds(): Set<string> {
+  try { return new Set(JSON.parse(window.localStorage.getItem(REMOVED_KEY) ?? '[]') as string[]) } catch { return new Set() }
+}
+function rememberRemovedLoad(id: string): void {
+  try { window.localStorage.setItem(REMOVED_KEY, JSON.stringify([...removedLoadIds().add(id)].slice(-500))) } catch { /* private mode: it can come back on the next visit */ }
 }
 
 /** A load's delivery DATE (YYYY-MM-DD), tolerant of full ISO datetimes. */
@@ -184,23 +192,27 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
     setTrips((p) => p.map((t) => t.id === id ? updated : t))
   }, [])
   const removeTrip = useCallback(async (id: string) => {
+    const gone = trips.find((t) => t.id === id)
     await deleteBoxTruckTrip(id)
+    if (gone?.loadId) rememberRemovedLoad(gone.loadId)
     setTrips((p) => p.filter((t) => t.id !== id))
-  }, [])
+  }, [trips])
   const clearPeriod = useCallback(async () => {
-    const ids = trips.filter((t) => t.periodStart === periodStart).map((t) => t.id)
+    const inPeriod = trips.filter((t) => t.periodStart === periodStart)
+    const ids = inPeriod.map((t) => t.id)
     for (const id of ids) await deleteBoxTruckTrip(id)
+    for (const t of inPeriod) if (t.loadId) rememberRemovedLoad(t.loadId)
     setTrips((p) => p.filter((t) => t.periodStart !== periodStart))
     return ids.length
   }, [trips, periodStart])
 
   // Materialize a driver's delivered loads → editable BoxTruckTrip rows (skip already-pulled by loadId).
-  const pullFromCalendar = useCallback(async (driverId: string) => {
+  const pullFromCalendar = useCallback(async (driverId: string, skipLoadIds?: ReadonlySet<string>) => {
     const existing = trips.filter((t) => t.driverId === driverId && t.periodStart === periodStart)
     // Dedup across every period, not just this one — a shipment pushed forward to the
     // next check has already been pulled and must not reappear here.
     const pulledLoadIds = new Set(trips.filter((t) => t.driverId === driverId).map((t) => t.loadId).filter(Boolean) as string[])
-    const toCreate = deliveredLoadsFor(driverId).filter((l) => !pulledLoadIds.has(l.id))
+    const toCreate = deliveredLoadsFor(driverId).filter((l) => !pulledLoadIds.has(l.id) && !skipLoadIds?.has(l.id))
     let order = existing.reduce((m, t) => Math.max(m, t.sortOrder ?? 0), 0)
     const created: BoxTruckTrip[] = []
     for (const l of toCreate) {
@@ -224,6 +236,21 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
     if (created.length) setTrips((p) => [...p, ...created])
     return created.length
   }, [trips, periodStart, deliveredLoadsFor])
+
+  // Loads a driver delivered in the period land on the settlement by themselves: the button used to be the only way, so a load nobody pulled
+  // (20022, 14939) was simply missing. Idempotent by loadId; each driver/period/load-set is tried once so a failure cannot loop.
+  const autoPulled = useRef(new Set<string>())
+  useEffect(() => {
+    if (loading) return
+    for (const r of rows) {
+      if (r.unpulledLoadCount === 0) continue
+      const key = `${r.driver.id}|${periodStart}|${r.unpulledLoadCount}`
+      if (autoPulled.current.has(key)) continue
+      autoPulled.current.add(key)
+      // A load somebody removed from a settlement stays off it: only the Pull button brings it back.
+      pullFromCalendar(r.driver.id, removedLoadIds()).catch((err: unknown) => console.warn('[box-truck-pay] automatic pull failed', err))
+    }
+  }, [loading, rows, periodStart, pullFromCalendar])
 
   const saveSetting = useCallback(async (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>, expectedUpdatedAt: string | undefined) => {
     const existing = settings.find((s) => s.driverId === driverId && s.payGroup === 'BOX_TRUCK')

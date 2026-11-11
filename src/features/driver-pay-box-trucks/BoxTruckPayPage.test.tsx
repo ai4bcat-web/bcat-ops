@@ -81,3 +81,40 @@ describe('BoxTruckPayPage deductions', () => {
     }
   })
 })
+
+describe('BoxTruckPayPage trip amounts', () => {
+  const trip = { id: 't1', driverId: 'd1', periodStart: '2026-10-28', loadId: 'l1', date: '2026-11-03', aljexPro: '14906', proNumber: 'KJT2610082', customer: 'KROSLAND LOGISTICS', status: 'Delivered', grossProfit: 300, customerRate: null, carrierCost: null } as never
+
+  it('clicking the gross profit or amount opens the editor, and profit follows rate minus cost until it is typed', () => {
+    const updateTrip = vi.fn().mockResolvedValue(undefined)
+    useBoxTruckPayMock.mockReturnValue({ ...payState([row({ trips: [trip] })]), updateTrip })
+    render(<BoxTruckPayPage />)
+    fireEvent.click(screen.getByTestId('trip-gross-profit'))
+    expect(screen.getByText('Edit shipment')).toBeInTheDocument()
+    // An existing trip's profit is the person's number: typing a rate and cost does not overwrite it.
+    fireEvent.change(screen.getByPlaceholderText('$1,150.00'), { target: { value: '1150' } })
+    fireEvent.change(screen.getByPlaceholderText('$500.00'), { target: { value: '500' } })
+    expect((screen.getByPlaceholderText('$650.00') as HTMLInputElement).value).toBe('300')
+    fireEvent.change(screen.getByPlaceholderText('$650.00'), { target: { value: '450' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save shipment' }))
+    expect(updateTrip).toHaveBeenCalledWith('t1', expect.objectContaining({ grossProfit: 450, customerRate: 1150, carrierCost: 500 }))
+  })
+
+  it('a trip with a $0 profit (nothing entered yet) takes its profit from the rate and cost typed in', () => {
+    useBoxTruckPayMock.mockReturnValue(payState([row({ trips: [{ ...(trip as object), grossProfit: 0 } as never] })]))
+    render(<BoxTruckPayPage />)
+    fireEvent.click(screen.getByTestId('trip-gross-profit'))
+    fireEvent.change(screen.getByPlaceholderText('$1,150.00'), { target: { value: '1150' } })
+    fireEvent.change(screen.getByPlaceholderText('$500.00'), { target: { value: '500' } })
+    expect((screen.getByPlaceholderText('$650.00') as HTMLInputElement).value).toBe('650')
+  })
+
+  it('a new shipment fills gross profit from rate minus cost', () => {
+    useBoxTruckPayMock.mockReturnValue(payState([row()]))
+    render(<BoxTruckPayPage />)
+    fireEvent.click(screen.getByRole('button', { name: /Add shipment/ }))
+    fireEvent.change(screen.getByPlaceholderText('$1,150.00'), { target: { value: '1150' } })
+    fireEvent.change(screen.getByPlaceholderText('$500.00'), { target: { value: '500' } })
+    expect((screen.getByPlaceholderText('$650.00') as HTMLInputElement).value).toBe('650')
+  })
+})
