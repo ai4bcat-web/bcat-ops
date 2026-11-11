@@ -147,6 +147,15 @@ function CarrierTrackingCardImpl(props: CardProps) {
       {multi ? slots.map(renderBlock) : <CarrierCard {...props} />}
       {firstBooked ? (
         <div className="flex flex-wrap items-center gap-2">
+          {!multi ? (
+            <TmsButton
+              size="sm" data-testid="carrier-uncover" disabled={off}
+              title="Take the carrier or driver off so the load is open again"
+              onClick={() => ctx.actions.openUncover()}
+            >
+              Uncover
+            </TmsButton>
+          ) : null}
           <TmsButton size="sm" data-testid="carrier-add" title={addBlock ?? undefined} disabled={off || addBlock != null} onClick={addSlot}>
             + Add carrier
           </TmsButton>
