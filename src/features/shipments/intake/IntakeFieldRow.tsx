@@ -33,15 +33,17 @@ export interface IntakeFieldRowProps {
   /** A LOW field shows a confirm tick; called with the new ticked state. */
   onConfirm?: (checked: boolean) => void
   hint?: ReactNode
+  /** A field the load cannot be created without: a red asterisk after the label. */
+  required?: boolean
 }
 
 /** One labelled field with its status chip, a `title` naming where the value came from, and the confirm tick for LOW. */
-export function IntakeFieldRow({ label, status, source, children, disabled, onConfirm, hint }: IntakeFieldRowProps) {
+export function IntakeFieldRow({ label, status, source, children, disabled, onConfirm, hint, required }: IntakeFieldRowProps) {
   const chip = CHIPS[status]
   const title = source ? SOURCES[source] : status === 'MISSING' ? 'Nothing in the e-mail filled this' : undefined
   return (
     <div className="tms-intake-row" data-status={status}>
-      <TmsField label={label} hint={hint}>
+      <TmsField label={required ? <>{label}<span className="tms-fg-star" aria-hidden="true"> *</span></> : label} hint={hint}>
         {children}
       </TmsField>
       <div className="tms-intake-row-status">

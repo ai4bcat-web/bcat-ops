@@ -7,7 +7,9 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
+import { OwnFleetDriverPicker } from '@/components/OwnFleetDriverPicker'
 import { RepPicker } from '@/components/RepPicker'
+import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
 import {
   TmsAlert, TmsButton, TmsCard, TmsDetailSplit, TmsDialog, TmsField, TmsInput, TmsPage, TmsSelect, TmsTextarea,
 } from '@/features/tms/kit'
@@ -20,7 +22,7 @@ import { requiredFieldLabel } from '@/lib/flowDefaults'
 import { findCustomerMatches } from '@/lib/tmsDirectory'
 import { Typeahead, type TypeaheadItem } from '@/features/shipments/form/cards/Typeahead'
 import { SHIPMENT_TYPES } from '@/lib/shipmentTypes'
-import { canMoveToActive, fieldStatusOf, intakeFieldKeys, intakeRequired, patchIntakeFields, withCustomerDefaults } from '@/lib/intakeLoad'
+import { canMoveToActive, ensureRequiredStops, fieldStatusOf, intakeFieldKeys, intakeRequired, patchIntakeFields, withCustomerDefaults } from '@/lib/intakeLoad'
 import type { CustomerRecord, TmsSettings } from '@/types/tms'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeStop } from '@/types/intake'
 import { IntakeFieldRow } from './IntakeFieldRow'
@@ -30,6 +32,12 @@ import { useIntakePermissions } from './useIntakePermissions'
 import './intake.css'
 
 const CONFLICT = /changed while you were editing/i
+/** The required-field catalog key -> the draft field it is entered in. */
+const CATALOG_FIELD: Record<string, string> = {
+  billTo: 'billToId', customerRate: 'customerRateCents', poNumber: 'reference', pickupNumber: 'pickupNumber', deliveryNumber: 'deliveryNumber',
+  salesRep: 'salesRepId', revenueDivision: 'divisionCode', equipmentType: 'equipmentType', commodity: 'commodity', weight: 'weightLb',
+}
+const STOP_REQUIRED = ['street', 'city', 'state', 'date', 'time']
 const STOP_FIELDS: Array<{ key: 'name' | 'street' | 'city' | 'state' | 'zip' | 'date' | 'time'; label: string; type?: string }> = [
   { key: 'name', label: 'Facility' },
   { key: 'street', label: 'Street' },
@@ -37,7 +45,7 @@ const STOP_FIELDS: Array<{ key: 'name' | 'street' | 'city' | 'state' | 'zip' | '
   { key: 'state', label: 'State' },
   { key: 'zip', label: 'Zip' },
   { key: 'date', label: 'Date', type: 'date' },
-  { key: 'time', label: 'Time', type: 'time' },
+  { key: 'time', label: 'Appointment time', type: 'time' },
 ]
 interface Work { fields: IntakeFields; meta: IntakeMeta; confirmed: string[] }
 
@@ -64,7 +72,9 @@ interface FormProps {
 function ReviewForm({ row, customers, settings, canReview, onRow, reload }: FormProps) {
   const navigate = useNavigate()
   const { divisions } = useOwnershipDivisions()
-  const [work, setWork] = useState<Work>({ fields: row.fields, meta: row.meta, confirmed: row.confirmed })
+  const roster = useOwnFleetRoster()
+  // A pickup and a delivery are always on the page, even when the e-mail gave none.
+  const [work, setWork] = useState<Work>(() => ({ fields: ensureRequiredStops(row.fields), meta: row.meta, confirmed: row.confirmed }))
   const [busy, setBusy] = useState(false)
   const [customerQuery, setCustomerQuery] = useState<string | null>(null)
   const [dismissOpen, setDismissOpen] = useState(false)
@@ -89,6 +99,12 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [work, settings, customer, divisions])
   const deferred = useMemo(() => intakeRequired(settings, customer).deferred, [settings, customer])
+  const requiredFields = useMemo(() => {
+    const keys = new Set<string>(['customerId', 'divisionCode'])
+    for (const k of intakeRequired(settings, customer).gated) if (CATALOG_FIELD[k]) keys.add(CATALOG_FIELD[k]!)
+    return keys
+  }, [settings, customer])
+  const isRequired = (key: string) => requiredFields.has(key) || (/^stops\.\d+\.(\w+)$/.exec(key)?.[1] ? STOP_REQUIRED.includes(/^stops\.\d+\.(\w+)$/.exec(key)![1]!) : false)
 
   function edit(patch: Partial<Omit<IntakeFields, 'stops'>>) {
     setWork((w) => patchIntakeFields(w, patch, { add: [], remove: [] }))
@@ -122,6 +138,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
         status={statusOf(key)}
         source={sourceOf(key)}
         disabled={!editable}
+        required={isRequired(key)}
         onConfirm={(checked) => setConfirmed([key], checked)}
       >
         {control}
@@ -190,6 +207,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
       toast.error(`Moved, but the agent run was not linked: ${errorMessage(err, 'unknown error')}`)
     }
     toast.success(`Moved to active as ${done.shipmentNumber}`)
+    if (done.driverError) toast.error(`The shipment was created, but the driver was not booked: ${done.driverError}`)
     navigate(`/tms/shipments/${done.shipmentId}`)
   }
 
@@ -212,9 +230,12 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
 
   function revert() {
     const { customerCandidates: _c, ...auto } = row.autoFields
-    setWork({ fields: auto, meta: row.meta, confirmed: [] })
+    // The driver is the reviewer's own pick, not something the e-mail said: reverting keeps it.
+    setWork({ fields: ensureRequiredStops({ ...auto, driverId: work.fields.driverId ?? null }), meta: row.meta, confirmed: [] })
   }
 
+  // Pickups first, then deliveries; each stop keeps its index in the draft (provenance is keyed by it).
+  const stopOrder = [...work.fields.stops.keys()].sort((a, b) => (work.fields.stops[a]!.type === work.fields.stops[b]!.type ? a - b : work.fields.stops[a]!.type === 'pickup' ? -1 : 1))
   const candidates = row.autoFields.customerCandidates ?? []
   const customerOptions = customers.filter((c) => c.active !== false)
   // Search as you type: names that contain what was typed first, then the directory's fuzzy matches.
@@ -283,13 +304,23 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
               {activeDivisions.map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}
             </TmsSelect>,
           )}
+          <div className="tms-intake-row" data-testid="intake-driver-row">
+            <TmsField label="Driver (optional)" hint="Pick an Ivan Cartage driver to book on the load when the shipment is created.">
+              <OwnFleetDriverPicker
+                roster={roster}
+                value={work.fields.driverId ?? ''}
+                disabled={!editable}
+                placeholder="No driver yet"
+                testId="intake-driver"
+                onChange={(d) => edit({ driverId: d?.id ?? null })}
+              />
+            </TmsField>
+          </div>
         </TmsCard>
 
         <TmsCard title="Load">
           <div className="tms-intake-grid">
             {textField('reference', 'Reference / PO')}
-            {textField('pickupNumber', 'Pickup #')}
-            {textField('deliveryNumber', 'Delivery #')}
             {fieldRow(
               'shipmentType',
               'Shipment type',
@@ -318,17 +349,22 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
           </div>
         </TmsCard>
 
-        {work.fields.stops.map((stop, i) => {
-          const title = `${stop.type === 'pickup' ? 'Pickup' : 'Delivery'} ${work.fields.stops.filter((s, j) => s.type === stop.type && j <= i).length}`
+        {stopOrder.map((i) => {
+          const stop = work.fields.stops[i]!
+          const ordinal = work.fields.stops.filter((s, j) => s.type === stop.type && j <= i).length
+          const title = `${stop.type === 'pickup' ? 'Pickup' : 'Delivery'} ${ordinal}`
+          // The first pickup and the first delivery are mandatory: always on the page, never removable, and they carry the stop's reference number.
+          const mandatory = ordinal === 1
           return (
             <TmsCard
               key={i}
               title={title}
-              actions={editable ? (
+              actions={editable && !mandatory ? (
                 <TmsButton size="sm" variant="ghost" onClick={() => editStops(work.fields.stops.filter((_, j) => j !== i))}>Remove</TmsButton>
               ) : null}
             >
               <div className="tms-intake-grid">
+                {mandatory ? (stop.type === 'pickup' ? textField('pickupNumber', 'Pickup #') : textField('deliveryNumber', 'Delivery #')) : null}
                 {STOP_FIELDS.map((f) => fieldRow(
                   `stops.${i}.${f.key}`,
                   `${title} ${f.label.toLowerCase()}`,

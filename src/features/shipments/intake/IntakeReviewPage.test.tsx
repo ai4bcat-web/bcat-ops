@@ -7,7 +7,8 @@ import * as api from '@/lib/apiClient'
 import * as auth from '@/hooks/useAuth'
 import type { OwnershipDivisionRecord } from '@/types/tms'
 import { IntakeReviewPage } from './IntakeReviewPage'
-import { completeIntakeRow, intakeRow } from './testFixtures'
+import { toast } from 'sonner'
+import { completeIntakeRow, intakeFields, intakeRow } from './testFixtures'
 
 const BRK = {
   id: 'BRK', code: 'BRK', name: 'Brokerage', brand: null, parentId: null, color: null, sortOrder: 0, active: true,
@@ -22,6 +23,9 @@ vi.mock('@/lib/apiClient', () => ({
   getIntakeLoad: vi.fn(), saveIntakeDraft: vi.fn(), moveIntakeToActive: vi.fn(), dismissIntake: vi.fn(),
   listCustomers: vi.fn(), getTmsSettings: vi.fn(), getWorkflowRun: vi.fn(), linkWorkflowRun: vi.fn(),
   dismissWorkflowRun: vi.fn(), getIntakePdfUrl: vi.fn(),
+}))
+vi.mock('@/hooks/useOwnFleetRoster', () => ({
+  useOwnFleetRoster: () => [{ id: 'drv1', name: 'Pat Driver', email: '', truckId: 't1', truckNumber: '12', trailerId: null, trailerNumber: '', workPhone: '', phone: '' }],
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
@@ -153,5 +157,45 @@ describe('IntakeReviewPage', () => {
     expect(within(card).getByText(/ship@acme.example/)).toBeInTheDocument()
     expect(within(card).getByText('Please cover PO-100.')).toBeInTheDocument()
     expect(within(card).getByRole('link', { name: 'Open in Workflows' })).toHaveAttribute('href', '/tms/workflows/runs/run-1')
+  })
+
+  it('always shows a pickup and a delivery with their numbers, date and time, marked required, and blocks Create until they are filled', async () => {
+    const bare = intakeRow({ fields: intakeFields({ billToId: 'b1', pickupNumber: null, deliveryNumber: null, stops: [] }), confirmed: ['weightLb'], missingFields: [] })
+    vi.mocked(api.getIntakeLoad).mockResolvedValue(bare)
+    renderPage()
+    await screen.findByDisplayValue('PO-100')
+    for (const label of ['Pickup 1 street', 'Pickup 1 city', 'Pickup 1 state', 'Pickup 1 date', 'Pickup 1 appointment time', 'Pickup #',
+      'Delivery 1 street', 'Delivery 1 date', 'Delivery 1 appointment time', 'Delivery #']) {
+      const row = screen.getByLabelText(label).closest('.tms-intake-row') as HTMLElement
+      expect(within(row).getByText('Missing')).toBeInTheDocument()
+      expect(row.querySelector('.tms-fg-star')).not.toBeNull()
+    }
+    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
+    expect(moveButton()).toBeDisabled()
+    expect(screen.getByText(/Needs: .*Pickup address/)).toBeInTheDocument()
+    const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
+    fill('Pickup #', 'PU-1'); fill('Delivery #', 'DL-1')
+    for (const [kind, street, city, state, date, time] of [['Pickup', '1 Dock Rd', 'Dallas', 'TX', '2026-11-10', '08:00'], ['Delivery', '9 Peach St', 'Atlanta', 'GA', '2026-11-12', '14:00']] as const) {
+      fill(`${kind} 1 street`, street); fill(`${kind} 1 city`, city); fill(`${kind} 1 state`, state); fill(`${kind} 1 date`, date)
+      expect(moveButton()).toBeDisabled()
+      fill(`${kind} 1 appointment time`, time)
+    }
+    await waitFor(() => expect(moveButton()).toBeEnabled())
+  })
+
+  it('books the picked own-fleet driver: the choice is saved on the draft, and a refused booking is shown without losing the move', async () => {
+    const saved = completeIntakeRow({ version: 2 })
+    vi.mocked(api.getIntakeLoad).mockResolvedValue(completeIntakeRow())
+    vi.mocked(api.saveIntakeDraft).mockResolvedValue(saved)
+    vi.mocked(api.moveIntakeToActive).mockResolvedValue({ intake: saved, shipmentId: 'shp-9', shipmentNumber: 'PRO-9', driverError: 'Pat Driver is inactive' })
+    renderPage()
+    await screen.findByDisplayValue('PO-100')
+    expect(screen.getByText('Driver (optional)')).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId('intake-driver'), { target: { value: 'drv1' } })
+    fireEvent.click(moveButton())
+    await waitFor(() => expect(api.saveIntakeDraft).toHaveBeenCalledWith(expect.objectContaining({ fields: expect.objectContaining({ driverId: 'drv1' }) })))
+    await waitFor(() => expect(api.moveIntakeToActive).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith(expect.stringContaining('driver was not booked: Pat Driver is inactive')))
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/tms/shipments/shp-9'))
   })
 })

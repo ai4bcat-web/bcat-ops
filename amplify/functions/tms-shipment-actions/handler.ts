@@ -8728,7 +8728,7 @@ const intakeDeps: IntakeDeps = {
   isDivisionActive: (code) => assertTaggableDivision(code, null).then(() => true, () => false),
   writeAudit,
   attachFiles: attachIntakeFiles,
-  actions: { createShipment, setRevTag, setSalesRep },
+  actions: { createShipment, setRevTag, setSalesRep, assignAsset },
   now: nowIso,
 }
 
