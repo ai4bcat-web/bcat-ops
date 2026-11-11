@@ -85,6 +85,7 @@ import { BillingSetupPage } from '@/features/directory/BillingSetupPage'
 import { DriverRoutes } from '@/features/driver-app/DriverRoutes'
 
 // The Aljex create/edit form is ~150 controls; load it only when someone opens it.
+import { ShipmentTabAnchor } from '@/features/shipments/tabs/ShipmentTabAnchor'
 const ShipmentFormPage = lazy(() => import('@/features/shipments/form/ShipmentFormPage').then((m) => ({ default: m.ShipmentFormPage })))
 
 /** A retired saved-view URL: the all-shipments slug maps to the All list, the rest to Active. */
@@ -144,7 +145,7 @@ export default function App() {
                   <Route path="shipments/intake" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><DormantPage page="intake"><IntakeBoard /></DormantPage></RequirePage>} />
                   <Route path="shipments/intake/:intakeId" element={<RequirePage page={['loads', 'tms', 'intakeReview']}><DormantPage page="intake"><IntakeReviewPage /></DormantPage></RequirePage>} />
                   <Route path="shipments/new" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><Suspense fallback={null}><ShipmentFormPage mode="create" /></Suspense></DormantPage></RequirePage>} />
-                  <Route path="shipments/:id/edit" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><Suspense fallback={null}><ShipmentFormPage mode="edit" /></Suspense></DormantPage></RequirePage>} />
+                  <Route path="shipments/:id/edit" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><ShipmentTabAnchor /></DormantPage></RequirePage>} />
                   <Route path="shipments/:id" element={<RequirePage page={['loads', 'tms']}><DormantPage page="shipments"><ShipmentPage /></DormantPage></RequirePage>} />
                   {/* The old Dispatch "needs cover" workstation is Carrier Sales now. */}
                   <Route path="dispatch" element={<Navigate to="/tms/carrier-sales" replace />} />

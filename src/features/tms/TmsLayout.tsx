@@ -18,6 +18,9 @@ import { personName } from '@/lib/roles'
 import { useAppStore } from '@/store/useAppStore'
 import { DispatchDrawer } from '@/features/dispatch/DispatchDrawer'
 import { useShellBadgeCounts } from '@/features/tms/useShellBadgeCounts'
+import { ShipmentTabsProvider } from '@/features/shipments/tabs/ShipmentTabsProvider'
+import { ShipmentTabStrip } from '@/features/shipments/tabs/ShipmentTabStrip'
+import { ShipmentTabHost } from '@/features/shipments/tabs/ShipmentTabHost'
 
 /** The list pages that run edge to edge on an icon rail (Shipments Active / All / Intake, Load Tracking, Customers, Carriers). */
 const DENSE_PATHS = new Set(['/tms/shipments', '/tms/shipments/intake', '/tms/tracking', '/tms/shipments/new', '/tms/customers', '/tms/carriers'])
@@ -97,6 +100,7 @@ export function TmsLayout() {
   const dense = isDensePath(location.pathname) || scrollMain
   const initial = personName({ name: me?.name, email }, 'Team member').charAt(0).toUpperCase()
   return (
+    <ShipmentTabsProvider>
     <TmsShell
       pinned={pinned}
       canOpenPage={(pageKey) => isOwner || isAdmin || hasPageAccess(pageKey) || hasPageAccess(TMS_PAGE_KEY)}
@@ -127,10 +131,13 @@ export function TmsLayout() {
       ) : (
         <>
           <TmsReferenceData />
+          <ShipmentTabStrip />
+          <ShipmentTabHost />
           <Outlet />
         </>
       )}
       <NotificationsDrawer open={notificationsOpen} onOpenChange={setNotificationsOpen} groups={notificationGroups} />
     </TmsShell>
+    </ShipmentTabsProvider>
   )
 }

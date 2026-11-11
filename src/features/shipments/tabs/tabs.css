@@ -1,0 +1,43 @@
+/* Shipment tab strip: theme tokens only, scrolls sideways when there are many tabs. */
+.tms-shell .tms-ship-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 8px 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  background: var(--tms-surface);
+  border-bottom: 1px solid var(--tms-border);
+}
+.tms-shell .tms-ship-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  max-width: 260px;
+  min-height: 30px;
+  border: 1px solid var(--tms-border);
+  border-bottom: 0;
+  border-radius: var(--tms-radius) var(--tms-radius) 0 0;
+  background: var(--tms-bg);
+  color: var(--tms-muted);
+  font: inherit;
+  font-size: 12px;
+}
+.tms-shell .tms-ship-tab-board { padding: 0 12px; cursor: pointer; }
+.tms-shell .tms-ship-tab-on { background: var(--tms-card); color: var(--tms-text); font-weight: 600; margin-bottom: -1px; }
+.tms-shell .tms-ship-tab-main {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  padding: 0 4px 0 10px; height: 30px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.tms-shell .tms-ship-tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tms-shell .tms-ship-tab-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--tms-badge-orange); }
+.tms-shell .tms-ship-tab-x {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 20px; height: 20px; margin-right: 4px; border: 0; border-radius: 4px; background: none; color: var(--tms-muted); cursor: pointer;
+}
+.tms-shell .tms-ship-tab-x:hover { background: var(--tms-surface); color: var(--tms-text); }
+@media (max-width: 900px) {
+  .tms-shell .tms-ship-tab { max-width: 180px; }
+}

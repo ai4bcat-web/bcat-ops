@@ -4,6 +4,7 @@
  * `/tms/shipments/:id/edit` (mode "edit"). Fields, mapping, pipelines and validation are Step AH's.
  */
 import { useShipmentLock } from './useShipmentLock'
+import { useShipmentTabs } from '../tabs/shipmentTabsContext'
 import { useRequiredEmptyMarks } from './useRequiredEmptyMarks'
 import { findCustomerMatches } from '@/lib/tmsDirectory'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -49,8 +50,10 @@ function moreTabOfIssue(i: FormIssue): MoreTabKey {
   return i.fieldKey === LABEL.more.references.testId ? 'references' : 'instructions'
 }
 
-export function ShipmentFormPage({ mode }: { mode: 'create' | 'edit' }) {
-  const { id } = useParams()
+export function ShipmentFormPage({ mode, shipmentId }: { mode: 'create' | 'edit'; shipmentId?: string }) {
+  const params = useParams()
+  // A tab's form is drawn by the tab host, not by the route, so it is told which shipment it is for.
+  const id = shipmentId ?? params.id
   const location = useLocation()
   const { bundle, loading, error } = useShipment(mode === 'edit' ? (id ?? null) : null)
   const [search] = useSearchParams()
@@ -172,6 +175,15 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   })
   const { values, update, getValues, bundle, mode, busy: pipelineBusy } = form
   const { heldBy, release, takeOver } = useShipmentLock(bundle?.shipment.id)
+  const tabs = useShipmentTabs()
+  const tabId = bundle?.shipment.id
+  const tabsDirty = tabs?.setDirty
+  const tabsMeta = tabs?.setMeta
+  // The tab strip's label and unsaved dot come from this form.
+  useEffect(() => {
+    if (tabId) tabsMeta?.(tabId, { number: bundle?.shipment.number ?? null, customer: bundle?.shipment.customerName ?? null })
+  }, [tabId, tabsMeta, bundle?.shipment.number, bundle?.shipment.customerName])
+  useEffect(() => { if (tabId) tabsDirty?.(tabId, form.dirty) }, [tabId, tabsDirty, form.dirty])
   const [confirmTakeOver, setConfirmTakeOver] = useState(false)
   useRequiredEmptyMarks(values)
 
@@ -274,7 +286,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
 
   const togglePanel = useCallback(() => setPanelOpen((o) => !o), [])
   // Leaving on purpose (Discard) lets go of the edit lock; a plain Save does not, so the shipment stays under Currently viewing.
-  const leave = useCallback(() => { void release(); navigate(bundle ? `${NEW_PATH}/${bundle.shipment.id}` : NEW_PATH) }, [navigate, bundle, release])
+  const closeTab = tabs?.close
+  const leave = useCallback(() => { void release(); if (bundle) closeTab?.(bundle.shipment.id); navigate(bundle ? `${NEW_PATH}/${bundle.shipment.id}` : NEW_PATH) }, [navigate, bundle, release, closeTab])
   const cancel = useCallback(() => {
     if (form.dirty) { setConfirmCancel(true); return }
     leave()
@@ -285,8 +298,9 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     const saved = await run(isDraftStatus ? 'draft' : 'save')
     if (!saved) return
     await release()
+    if (bundle) closeTab?.(bundle.shipment.id)
     navigate(NEW_PATH)
-  }, [run, isDraftStatus, release, navigate])
+  }, [run, isDraftStatus, release, navigate, bundle, closeTab])
 
   useEffect(() => {
     if (!form.dirty || !bundle) return
