@@ -239,6 +239,7 @@ export type ShipmentRow = ShipmentRecord & {
   bookedAt?: string | null
   dispatchedAt?: string | null
   trackingStartedAt?: string | null
+  trackingAcceptedAt?: string | null
   trackingStoppedAt?: string | null
   podRequestedAt?: string | null
   /** Carrier-scope paperwork still outstanding (the leg's own gate, not the order's). */

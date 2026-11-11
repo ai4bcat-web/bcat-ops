@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import * as api from '@/lib/apiClient'
-import { rowLinkSent, trackingLinkStage } from '@/lib/trackingLinkState'
+import { rowLinkSent, rowLinkStage, trackingLinkStage } from '@/lib/trackingLinkState'
 import { TrackingLinkStateChip } from './TrackingLinkStateChip'
 
 vi.mock('@/lib/apiClient', () => ({ listTrackingLinksByShipment: vi.fn() }))
@@ -56,5 +56,18 @@ describe('TrackingLinkStateChip', () => {
     expect(a.container).toBeEmptyDOMElement()
     expect(b.container).toBeEmptyDOMElement()
     expect(c.container).toBeEmptyDOMElement()
+  })
+})
+
+describe('rowLinkStage (board rows)', () => {
+  const sentAt = '2026-11-11T14:00:00Z'
+  it('not sent / sent / accepted', () => {
+    expect(rowLinkStage({})).toBe('NOT_SENT')
+    expect(rowLinkStage({ trackingStartedAt: sentAt })).toBe('SENT')
+    expect(rowLinkStage({ trackingStartedAt: sentAt, trackingAcceptedAt: '2026-11-11T14:05:00Z' })).toBe('ACCEPTED')
+  })
+  it('a re-sent link resets accepted, and a revoked link is not accepted', () => {
+    expect(rowLinkStage({ trackingStartedAt: '2026-11-11T16:00:00Z', trackingAcceptedAt: '2026-11-11T14:05:00Z' })).toBe('SENT')
+    expect(rowLinkStage({ trackingStartedAt: sentAt, trackingAcceptedAt: '2026-11-11T14:05:00Z', trackingStoppedAt: '2026-11-11T15:00:00Z' })).toBe('NOT_SENT')
   })
 })

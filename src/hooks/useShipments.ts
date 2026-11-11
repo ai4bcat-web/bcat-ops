@@ -189,6 +189,7 @@ export interface ShipmentListRow extends ShipmentRecord {
   dispatchedAt: string | null
   trackingStartedAt: string | null
   trackingStoppedAt: string | null
+  trackingAcceptedAt: string | null
   podRequestedAt: string | null
   legDocsMissing: string[] | null
   ratingStars: number | null
@@ -794,6 +795,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
         dispatchedAt: active?.dispatchedAt ?? null,
         trackingStartedAt: active?.trackingStartedAt ?? null,
         trackingStoppedAt: active?.trackingStoppedAt ?? null,
+        trackingAcceptedAt: active?.trackingAcceptedAt ?? null,
         podRequestedAt: active?.podRequestedAt ?? null,
         legDocsMissing: active?.docsMissing ?? null,
         ratingStars: active?.ratingStars ?? null,
