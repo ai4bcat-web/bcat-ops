@@ -218,7 +218,7 @@ export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: St
         const filled = { ...fields, ...kept, stops: (current.stops ?? []).length > 0 ? current.stops : fields.stops } as IntakeFields
         await enrichIntakeLoad(mine, {
           attachments: null, fields: filled as unknown as Row, meta: { ...meta, ...jsonish<IntakeMeta>(mine.meta, {}) } as unknown as Row,
-          missingFields: intakeMissing(filled, required), at: nowIso(),
+          missingFields: intakeMissing(filled, required, customerRow), at: nowIso(),
           parse: { parseState: 'PARSED', parseNote: null, format, autoFields: { ...fields, customerCandidates } as unknown as Row },
         })
         return { staged: true, detail: 'read the e-mail and filled in its intake load' }
@@ -257,7 +257,7 @@ export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: St
       autoFields: { ...fields, customerCandidates },
       meta,
       confirmed: [],
-      missingFields: intakeMissing(fields, required),
+      missingFields: intakeMissing(fields, required, customerRow),
       createdBy: 'workflow-agent',
       updatedBy: 'workflow-agent',
       version: 1,

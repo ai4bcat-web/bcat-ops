@@ -18,7 +18,7 @@ import {
   dismissIntake, dismissWorkflowRun, getTmsSettings, getWorkflowRun, linkWorkflowRun, listCustomers,
   moveIntakeToActive, saveIntakeDraft,
 } from '@/lib/apiClient'
-import { requiredFieldLabel } from '@/lib/flowDefaults'
+import { hasBillToParties, requiredFieldLabel } from '@/lib/flowDefaults'
 import { findCustomerMatches } from '@/lib/tmsDirectory'
 import { Typeahead, type TypeaheadItem } from '@/features/shipments/form/cards/Typeahead'
 import { SHIPMENT_TYPES } from '@/lib/shipmentTypes'
@@ -104,7 +104,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
     for (const k of intakeRequired(settings, customer).gated) if (CATALOG_FIELD[k]) keys.add(CATALOG_FIELD[k]!)
     return keys
   }, [settings, customer])
-  const isRequired = (key: string) => requiredFields.has(key) || (/^stops\.\d+\.(\w+)$/.exec(key)?.[1] ? STOP_REQUIRED.includes(/^stops\.\d+\.(\w+)$/.exec(key)![1]!) : false)
+  const isRequired = (key: string) => (key === 'billToId' && billToNotApplicable ? false : requiredFields.has(key)) || (/^stops\.\d+\.(\w+)$/.exec(key)?.[1] ? STOP_REQUIRED.includes(/^stops\.\d+\.(\w+)$/.exec(key)![1]!) : false)
 
   function edit(patch: Partial<Omit<IntakeFields, 'stops'>>) {
     setWork((w) => patchIntakeFields(w, patch, { add: [], remove: [] }))
@@ -125,7 +125,10 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
   function setConfirmed(keys: string[], checked: boolean) {
     setWork((w) => patchIntakeFields(w, {}, checked ? { add: keys, remove: [] } : { add: [], remove: keys }))
   }
+  // A customer with no separate bill-to parties is billed itself: Bill to is not asked, and it never reads Missing.
+  const billToNotApplicable = customer != null && !hasBillToParties(customer.billToParties)
   function statusOf(key: string) {
+    if (key === 'billToId' && billToNotApplicable) return 'AUTO'
     return fieldStatusOf(key, work.fields, work.meta, work.confirmed)
   }
   const sourceOf = (key: string) => work.meta[key]?.source ?? null
@@ -286,7 +289,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
           {fieldRow(
             'billToId',
             'Bill to',
-            <TmsSelect aria-label="Bill to" disabled={!editable} value={work.fields.billToId ?? ''} onChange={(e) => edit({ billToId: text(e.target.value) })}>
+            <TmsSelect aria-label="Bill to" disabled={!editable || billToNotApplicable} title={billToNotApplicable ? 'This customer has no separate bill-to party: the customer itself is billed.' : undefined} value={work.fields.billToId ?? ''} onChange={(e) => edit({ billToId: text(e.target.value) })}>
               <option value="">— customer —</option>
               {(customer?.billToParties ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </TmsSelect>,

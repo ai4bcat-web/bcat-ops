@@ -72,6 +72,17 @@ describe('IntakeReviewPage', () => {
     expect(within(status('Commodity')).getByText('Confirmed')).toBeInTheDocument()
   })
 
+  it('a customer with no separate bill-to party is billed itself: Bill to is not required, not Missing and not selectable', async () => {
+    vi.mocked(api.listCustomers).mockResolvedValue([{ ...CUSTOMER, billToParties: [] }] as never)
+    renderPage()
+    await screen.findByDisplayValue('PO-100')
+    const row = screen.getByLabelText('Bill to').closest('.tms-intake-row') as HTMLElement
+    expect(within(row).queryByText('Missing')).toBeNull()
+    expect(row.querySelector('.tms-fg-star')).toBeNull()
+    expect(screen.getByLabelText('Bill to')).toBeDisabled()
+    expect(screen.queryByText(/Needs: .*Bill-to/)).toBeNull()
+  })
+
   it('keeps Create shipment disabled with the exact list until the missing field is filled and the low-confidence one confirmed', async () => {
     renderPage()
     await screen.findByDisplayValue('PO-100')

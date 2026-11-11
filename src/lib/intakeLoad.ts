@@ -22,6 +22,7 @@ import { isDemoText } from './demoFlow'
 import type { TenderPrefill, TenderStopPrefill } from './intakeTender'
 import {
   REQUIRED_FIELD_CATALOG,
+  hasBillToParties,
   missingRequiredFields,
   requiredFieldLabel,
   resolveRequiredFields,
@@ -353,7 +354,8 @@ export function fieldStatusOf(key: string, fields: IntakeFields, meta: IntakeMet
 
 // ── required-field gate ──────────────────────────────────────────────────────
 
-export function intakeSubject(fields: IntakeFields): RequiredFieldSubject {
+/** `customer` lets the gate know whether Bill to applies: a customer with no separate bill-to parties is billed itself, so nothing is asked (the shipment form's rule). */
+export function intakeSubject(fields: IntakeFields, customer?: { billToParties?: unknown } | null): RequiredFieldSubject {
   return {
     stops: fields.stops.map((s) => ({
       type: s.type,
@@ -362,6 +364,7 @@ export function intakeSubject(fields: IntakeFields): RequiredFieldSubject {
       appt: s.date ? (s.time ? `${s.date}T${s.time}` : s.date) : '',
     })),
     billToId: fields.billToId,
+    billToApplicable: customer ? hasBillToParties(customer.billToParties) : undefined,
     salesRepId: fields.salesRepId,
     revDivision: fields.divisionCode,
     customerRateCents: fields.customerRateCents,
@@ -390,8 +393,8 @@ export function intakeRequired(settings: unknown, customer: unknown): { gated: s
   return { gated, deferred }
 }
 
-export function intakeMissing(fields: IntakeFields, required: readonly string[]): string[] {
-  return missingRequiredFields(intakeSubject(fields), required)
+export function intakeMissing(fields: IntakeFields, required: readonly string[], customer?: { billToParties?: unknown } | null): string[] {
+  return missingRequiredFields(intakeSubject(fields, customer), required)
 }
 
 export function intakeProblems(fields: IntakeFields, ctx: { customerActive: boolean; divisionActive: boolean }): string[] {
@@ -435,7 +438,7 @@ export function canMarkReviewed(
 ): Omit<IntakeVerdict, 'needsReview'> {
   const { fields, meta, confirmed } = row
   const problems = intakeProblems(fields, ctx)
-  const missing = intakeMissing(fields, intakeRequired(ctx.settings, ctx.customer).gated).map(requiredFieldLabel)
+  const missing = intakeMissing(fields, intakeRequired(ctx.settings, ctx.customer).gated, ctx.customer as { billToParties?: unknown } | null).map(requiredFieldLabel)
   const unconfirmed: string[] = []
   for (const key of intakeFieldKeys(fields)) {
     const status = fieldStatusOf(key, fields, meta, confirmed)

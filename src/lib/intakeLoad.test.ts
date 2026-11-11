@@ -207,6 +207,16 @@ describe('canMoveToActive', () => {
     expect(`Needs: ${result.missing.join(', ')}`).toBe(needsLine(keys))
   })
 
+  it('Bill to is only asked when the customer has separate bill-to parties; a customer billed itself never reads Missing', () => {
+    const fields = { ...readyRow().fields, billToId: null }
+    const gated = intakeRequired(null, null).gated
+    expect(intakeMissing(fields, gated)).toContain('billTo')
+    expect(intakeMissing(fields, gated, { billToParties: [] })).not.toContain('billTo')
+    expect(intakeMissing(fields, gated, { billToParties: '[]' })).not.toContain('billTo')
+    expect(intakeMissing(fields, gated, { billToParties: [{ id: 'b1', name: 'AP' }] })).toContain('billTo')
+    expect(intakeMissing({ ...fields, billToId: 'b1' }, gated, { billToParties: [{ id: 'b1', name: 'AP' }] })).not.toContain('billTo')
+  })
+
   it('a complete, fully confirmed load can move without anyone marking it reviewed (there is no review step)', () => {
     const base = readyRow()
     const unreviewed = { ...base, reviewedBy: null, reviewedAt: null }
