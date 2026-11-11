@@ -1,0 +1,8 @@
+.tms-shell .tms-stop-actual { display: flex; flex-direction: column; gap: 8px; }
+.tms-shell .tms-stop-actual-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; }
+.tms-shell .tms-stop-actual-label { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tms-muted); }
+.tms-shell .tms-stop-actual-source { font-size: 11px; white-space: nowrap; }
+@media (max-width: 900px) { .tms-shell .tms-stop-actual-row { grid-template-columns: 76px minmax(0, 1fr) auto; } .tms-shell .tms-stop-actual-source { grid-column: 2 / -1; } }
+/* The Actual times group sits under both columns of the stop card. */
+.tms-shell .tms-fg-col:has(> .tms-stop-actual) { grid-column: 1 / -1; }
+.tms-shell .tms-stop-actual { max-width: 560px; }

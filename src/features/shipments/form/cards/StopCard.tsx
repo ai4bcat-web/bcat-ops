@@ -24,6 +24,7 @@ import { LField } from '../sections/formControls'
 import { type StopKey, ctl, digitsOnly, disabledState, issueFor, maskPhone, stopDef, stopPatchFromLocation } from '../sections/fieldUtil'
 import { pushRecent, rankWithRecents, readRecents, recentFirst } from './recents'
 import { Typeahead, type TypeaheadItem } from './Typeahead'
+import { StopActualTimes } from './StopActualTimes'
 
 export interface StopCardProps {
   stop: FormStop
@@ -235,6 +236,7 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
         </FieldGrid>
 
         </ColGroup>
+        <StopActualTimes stop={stop} ctx={ctx} onChange={onChange} isFinalDelivery={delivery && index === count - 1} disabled={base.disabled} />
       </ColGroups>
 
       {form && (

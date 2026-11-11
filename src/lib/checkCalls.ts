@@ -155,6 +155,8 @@ export interface StopStampLike {
   id: string
   arrivedAt?: string | null
   departedAt?: string | null
+  arrivedSource?: string | null
+  departedSource?: string | null
 }
 
 /**
@@ -169,6 +171,7 @@ export function stampStopEvent<S extends StopStampLike>(
   stopId: string,
   event: StopEventType,
   atIso: string,
+  source: string | null = null,
 ): { stops: S[]; stamped: boolean } {
   const index = stops.findIndex((s) => s.id === stopId)
   if (index < 0) return { stops, stamped: false }
@@ -177,7 +180,9 @@ export function stampStopEvent<S extends StopStampLike>(
   if (already.trim()) return { stops, stamped: false }
 
   const next = stops.slice()
-  next[index] = event === 'ARRIVED' ? { ...stop, arrivedAt: atIso } : { ...stop, departedAt: atIso }
+  next[index] = event === 'ARRIVED'
+    ? { ...stop, arrivedAt: atIso, ...(source ? { arrivedSource: source } : {}) }
+    : { ...stop, departedAt: atIso, ...(source ? { departedSource: source } : {}) }
   return { stops: next, stamped: true }
 }
 

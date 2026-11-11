@@ -1163,6 +1163,8 @@ function validateStop(item: unknown, index: number): StopShape {
     colorKey: optionalString(s.colorKey, 32),
     arrivedAt: optionalIso(s.arrivedAt, `stops[${index}].arrivedAt`),
     departedAt: optionalIso(s.departedAt, `stops[${index}].departedAt`),
+    arrivedSource: optionalEnum(s.arrivedSource, STOP_TIME_SOURCES, `stops[${index}].arrivedSource`),
+    departedSource: optionalEnum(s.departedSource, STOP_TIME_SOURCES, `stops[${index}].departedSource`),
     pieces: optionalInteger(s.pieces, { min: 0, label: `stops[${index}].pieces` }),
     weightLbs: optionalInteger(s.weightLbs, { min: 0, label: `stops[${index}].weightLbs` }),
     instructions: optionalString(s.instructions, 2000),
@@ -2804,6 +2806,8 @@ async function setShipmentStatus(input: Row, caller: Caller): Promise<Row> {
 }
 
 // ── SET_LOAD_STATUS ──────────────────────────────────────────────────────────
+
+const STOP_TIME_SOURCES = ['MANUAL', 'DRIVER_APP', 'TRACKING_LINK'] as const
 
 async function setLoadStatus(input: Row, caller: Caller): Promise<Row> {
   const loadId = assertString(input.loadId, 'loadId')
@@ -4766,6 +4770,15 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
       if (arrivedAt && departedAt && Date.parse(departedAt) < Date.parse(arrivedAt)) {
         throw new Error('A stop cannot be departed before it was arrived')
       }
+      // An actual time is something that already happened: a few minutes of clock skew, never the future.
+      for (const [label, value] of [['arrived', arrivedAt], ['departed', departedAt]] as const) {
+        if (value && Date.parse(value) > Date.now() + 5 * 60_000) throw new Error(`A stop cannot be ${label} in the future`)
+      }
+      // Against what is already on the stop: a new out time may not precede the stop's existing in time, and the reverse.
+      const existing = stops[i]
+      const inAt = arrivedAt ?? (patch.arrivedAt === null ? null : String(existing.arrivedAt ?? '') || null)
+      const outAt = departedAt ?? (patch.departedAt === null ? null : String(existing.departedAt ?? '') || null)
+      if (inAt && outAt && Date.parse(outAt) < Date.parse(inAt)) throw new Error('A stop cannot be departed before it was arrived')
       const before = stops[i]
       if (arrivedAt && !String(before.arrivedAt ?? '').trim()) {
         newStamps.push({ stopId: String(before.id), event: 'ARRIVED', at: arrivedAt })
@@ -4773,10 +4786,13 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
       if (departedAt && !String(before.departedAt ?? '').trim()) {
         newStamps.push({ stopId: String(before.id), event: 'DEPARTED', at: departedAt })
       }
+      // Whatever a person sets here is MANUAL, and the driver app / tracking link will not overwrite it; clearing a time clears its source.
       stops = stops.map((s, idx) => idx === i ? {
         ...s,
         arrivedAt: arrivedAt ?? (patch.arrivedAt === null ? null : s.arrivedAt ?? null),
         departedAt: departedAt ?? (patch.departedAt === null ? null : s.departedAt ?? null),
+        arrivedSource: arrivedAt ? 'MANUAL' : patch.arrivedAt === null ? null : s.arrivedSource ?? null,
+        departedSource: departedAt ? 'MANUAL' : patch.departedAt === null ? null : s.departedSource ?? null,
       } : s)
       break
     }
@@ -7619,6 +7635,8 @@ async function logCheckCall(input: Row, caller: Caller): Promise<Row> {
     codes: Array.isArray(settings?.chargeCodes) ? (settings?.chargeCodes as ChargeCodeDef[]) : null,
   })
 
+  // Who recorded the time: the tracking page's hand-off says so; a person logging a check call is MANUAL.
+  const stampSource = optionalEnum(input.stampSource, STOP_TIME_SOURCES, 'stampSource') ?? 'MANUAL'
   const eventId = stopEvent && stopId ? stopEventId(loadId, stopId, stopEvent) : null
   // The driver app's projector writes this same derived id. If it got there first
   // its stamp is the one that counts: the stop clock is left alone and this call is
@@ -7628,7 +7646,7 @@ async function logCheckCall(input: Row, caller: Caller): Promise<Row> {
   // Only a stop with an id can be stamped, and `stopId` was checked against them.
   const stamped = stops as (StopShape & { id: string })[]
   const stamp = stopEvent && stopId && !alreadyLogged
-    ? stampStopEvent(stamped, stopId, stopEvent, at)
+    ? stampStopEvent(stamped, stopId, stopEvent, at, stampSource)
     : { stops: stamped, stamped: false }
   const statusAfter = stamp.stamped ? statusAfterCheckCall(stopTimesOf(stamp.stops), statusBefore) : null
 

@@ -19,7 +19,7 @@
 import { getStops } from './stops'
 import { airMiles } from './eldRadius'
 import { chicagoDateStr } from './date'
-import type { Load, Stop } from '../types'
+import type { Load, Stop, StopTimeSource } from '../types'
 
 export type StopEvent = 'ARRIVED' | 'DEPARTED'
 
@@ -80,14 +80,16 @@ export function closeDeliveries(stops: Stop[], closing: readonly Pick<Stop, 'id'
 }
 
 /** The stops with one event stamped. Arrival is left alone on a departure: see loadStatus. */
-export function applyStopEvent(stops: Stop[], stopId: string, event: StopEvent, atIso: string, odometer: number | null = null, truckId: string | null = null): Stop[] {
+export function applyStopEvent(stops: Stop[], stopId: string, event: StopEvent, atIso: string, odometer: number | null = null, truckId: string | null = null, source: StopTimeSource = 'DRIVER_APP'): Stop[] {
   return stops.map((s) => {
     if (s.id !== stopId) return s
+    // A time a person entered by hand stands: the driver's tap never overwrites it.
+    if ((event === 'ARRIVED' ? s.arrivedSource : s.departedSource) === 'MANUAL' && (event === 'ARRIVED' ? s.arrivedAt : s.departedAt)) return s
     // The odometer and truck travel with the timestamp so the day's legs can be measured
     // later, and a leg that spans a truck change is never measured at all.
     return event === 'ARRIVED'
-      ? { ...s, arrivedAt: atIso, ...(odometer != null ? { arrivedOdometer: odometer } : {}), ...(truckId ? { arrivedTruckId: truckId } : {}) }
-      : { ...s, departedAt: atIso, ...(odometer != null ? { departedOdometer: odometer } : {}), ...(truckId ? { departedTruckId: truckId } : {}) }
+      ? { ...s, arrivedAt: atIso, arrivedSource: source, ...(odometer != null ? { arrivedOdometer: odometer } : {}), ...(truckId ? { arrivedTruckId: truckId } : {}) }
+      : { ...s, departedAt: atIso, departedSource: source, ...(odometer != null ? { departedOdometer: odometer } : {}), ...(truckId ? { departedTruckId: truckId } : {}) }
   })
 }
 

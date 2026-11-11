@@ -654,7 +654,7 @@ async function statusRoute(token: string, event: FnUrlEvent) {
         Payload: Buffer.from(JSON.stringify({
           systemCaller: 'tracking-api',
           arguments: { action: 'LOG_CHECK_CALL', input: JSON.stringify({
-            loadId: link.loadId, expectedUpdatedAt: loadRow.updatedAt, at: nowIso, type: stopTarget.event, stopId: stopTarget.stopId, note: `Driver app: ${text}`,
+            loadId: link.loadId, expectedUpdatedAt: loadRow.updatedAt, at: nowIso, type: stopTarget.event, stopId: stopTarget.stopId, note: `Driver app: ${text}`, stampSource: 'TRACKING_LINK',
           }) },
         })),
       }))
