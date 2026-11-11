@@ -27,6 +27,11 @@
 
 /* ── Small tablets and large phones ──────────────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
+  /* Phones: wide content can be panned. The 1100px rule above clipped everything past the screen edge, and a page whose content is not
+     inside a table or a card scroller had no way to reach it (Ryne 2026-11-10: could not swipe right to left on any page). The page itself
+     scrolls sideways now (the document, so sticky bars keep working); the fixed-height pages scroll sideways inside the shell. */
+  .tms-shell, .tms-shell .tms-content { max-width: none; overflow-x: visible; }
+  .tms-shell.tms-fill { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
   .tms-shell .tms-content { padding-left: 8px; padding-right: 8px; }
   /* Tables keep their columns and scroll sideways inside the card that holds them. */
   .tms-shell .tms-dg-scroll, .tms-shell .tms-table-wrap, .tms-shell .tms-card-body { overflow-x: auto; -webkit-overflow-scrolling: touch; }
