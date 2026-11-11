@@ -59,6 +59,7 @@ import type {
   IntakeFields, IntakeLoadRecord, IntakeStatus as IntakeLoadStatus,
 } from '@/types/intake'
 import { cachedList, invalidateLists } from '@/lib/listCache'
+import { withDefaultChargeCodes } from '@/lib/chargeCodeDefaults'
 import { parseTrackingPrefs, type TrackingPrefsOverride } from '@/lib/trackingPrefs'
 import { batchByIndex, batchByIndexPairs, batchGet, setDefaultGraphqlRunner } from '@/lib/aliasBatch'
 import { LOAD_WORKFLOW_STATUSES } from '@/lib/shipmentStatus'
@@ -1678,7 +1679,10 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     const r = await client.graphql({
       query: `query GetTmsSettings { getTmsSettings(id: "default") { ${tmsSettingsFields()} } }`,
     }) as { data: { getTmsSettings: TmsSettings | null } }
-    return r.data.getTmsSettings ? unwrapJsonFields(r.data.getTmsSettings, TMS_SETTINGS_JSON_FIELDS) : null
+    if (!r.data.getTmsSettings) return null
+    const settings = unwrapJsonFields(r.data.getTmsSettings, TMS_SETTINGS_JSON_FIELDS)
+    // The usual accessorial types are always on offer; whatever the company saved wins by code.
+    return { ...settings, chargeCodes: withDefaultChargeCodes(settings.chargeCodes) } as TmsSettings
   }
 
   // Each generation drops on its own, so a backend missing only the newest group

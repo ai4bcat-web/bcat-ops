@@ -2162,10 +2162,10 @@ async function ingestAttachments(
     const documentId = `sdoc-${randomUUID()}`
     const originalKey = `shipment-docs/${shipmentId}/inbound/${messageIdForKey}/${documentId}-${name}`
 
-    // Proof of delivery is always a PDF: a photo that comes in as a POD is wrapped on a letter page (the original stays in S3 too).
+    // Every document is kept as a PDF: an attached photo or screenshot is wrapped on a letter page (the original stays in S3 too).
     let podPdf: Uint8Array | null = null
-    if (type === 'POD' && isPodImage(contentType)) {
-      try { podPdf = await imageToPdf(bytes, contentType, pdfNameFor(name)) } catch (err) { console.warn('[tms-tracking-actions] POD kept as an image; conversion failed:', String(err)) }
+    if (isPodImage(contentType)) {
+      try { podPdf = await imageToPdf(bytes, contentType, pdfNameFor(name)) } catch (err) { console.warn('[tms-tracking-actions] kept as an image; conversion failed:', String(err)) }
     }
     const s3Key = podPdf ? pdfKeyFor(originalKey) : originalKey
 

@@ -40,6 +40,7 @@ export function Field({ label, span, narrow, info, aside, footer, error, require
     >
       <label className="tms-fg-label" htmlFor={controlId}>
         <span className="tms-fg-label-text">{label}</span>
+        {required ? <span className="tms-fg-star" aria-hidden="true">*</span> : null}
         {aside}
         {info ? <Info size={11} className="tms-fg-info" aria-hidden="true" /> : null}
       </label>

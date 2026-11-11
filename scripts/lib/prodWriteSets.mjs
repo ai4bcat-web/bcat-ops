@@ -56,7 +56,7 @@ export const PROD_WRITE_SETS = {
   awCompanyPhones: { models: ['CompanyPhone', 'AuditLog'] },
   // `awCustomersActivate.mjs --apply`: Customer.status DORMANT -> ACTIVE for stored-DORMANT customers that are not possible duplicates + one AuditLog row each.
   awCustomersActivate: { models: ['Customer', 'AuditLog'] },
-  // `awPodToPdf.mjs --apply`: ACTIVE POD ShipmentDocument rows stored as JPEG/PNG point at a PDF made from the photo (new S3 object next to it, photo kept) + one AuditLog row each.
+  // `awPodToPdf.mjs --apply`: ACTIVE ShipmentDocument rows (any type) stored as JPEG/PNG point at a PDF made from the photo (new S3 object next to it, photo kept) + one AuditLog row each.
   awPodToPdf: { models: ['ShipmentDocument', 'AuditLog'] },
   // `awDriverDelete.mjs --apply`: deletes the given Driver rows (with --detach: clears Load/LoadCarrier driver ids and deletes the driver's submissions first; releases its company phone) with an AuditLog row holding the row.
   awDriverDelete: { models: ['Driver', 'Load', 'LoadCarrier', 'DriverSubmission', 'DriverSubmissionDoc', 'CompanyPhone', 'AuditLog'] },

@@ -28,6 +28,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { convertStoredPodImage } from '../_shared/podPdf'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { SSMClient } from '@aws-sdk/client-ssm'
 import { currentLoadForDriver, laneLabel } from '../../../src/lib/driverJourney'
@@ -990,6 +991,10 @@ async function uploadCommitRoute(token: string, event: FnUrlEvent) {
     return reply(400, { error: 'That file does not match what was uploaded.' })
   }
 
+  // Every document is kept as a PDF: a photo from a phone is wrapped on a letter page (the original stays in S3). A failed
+  // conversion files the photo as it came.
+  const converted = await convertStoredPodImage(s3, DOCUMENT_BUCKET, { key: file.s3Key, contentType: file.contentType, name: file.name })
+
   const nowIso = new Date().toISOString()
   const by = `link:${token.slice(0, 8)}`
   try {
@@ -1001,10 +1006,10 @@ async function uploadCommitRoute(token: string, event: FnUrlEvent) {
         loadId: link.loadId ?? null,
         loadCarrierId: link.loadCarrierId,
         type: file.type,
-        name: file.name,
-        s3Key: file.s3Key,
-        contentType: file.contentType,
-        sizeBytes: file.sizeBytes,
+        name: converted?.name ?? file.name,
+        s3Key: converted?.key ?? file.s3Key,
+        contentType: converted?.contentType ?? file.contentType,
+        sizeBytes: converted?.sizeBytes ?? file.sizeBytes,
         source: 'CARRIER_PORTAL',
         // PENDING until staff accept it: nothing a carrier sends satisfies a
         // required document on its own.

@@ -306,7 +306,7 @@
   color: var(--tms-muted);
 }
 
-/* Required = green input while it is EMPTY (Ryne): once filled it is a normal white field. No asterisks anywhere.
+/* Required = green input while it is EMPTY (Ryne): once filled it is a normal white field. Every required field also carries a red asterisk after its label (Ryne 2026-11-11).
    Sections mark a required field with the `tms-field-req` class on its TmsField (LField does it) or an aria-label ending
    "(required)"; useRequiredEmptyMarks sets data-empty on the control from its live value. */
 .tms-shell .tms-ship-form .tms-field-req .tms-input[data-empty='true'],
