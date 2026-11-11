@@ -248,6 +248,8 @@ export type StopType = 'pickup' | 'delivery'
 
 // A single stop on a multi-stop load. Canonical scheduling unit (see src/lib/stops.ts).
 // Field names mirror the legacy load fields: appt↔pickupAppt, name↔originName, city↔originCity.
+export type StopTimeSource = 'MANUAL' | 'DRIVER_APP' | 'TRACKING_LINK'
+
 export interface Stop {
   id: string                 // stable id; deterministic for legacy synthesis (`${load.id}:pu|de`)
   type: StopType
@@ -259,6 +261,9 @@ export interface Stop {
   dwellAlertedAt?: string | null
   arrivedAt?: string | null  // actual facility events only — never inferred from the appointment
   departedAt?: string | null
+  /** Who recorded each time: a person (MANUAL) always wins over the driver app or the tracking link, and ingest never overwrites it. */
+  arrivedSource?: StopTimeSource | null
+  departedSource?: StopTimeSource | null
   /** Truck odometer (miles) at the tap, for loaded-vs-empty miles (src/lib/deadhead.ts). Absent when no truck/reading. */
   arrivedOdometer?: number | null
   departedOdometer?: number | null

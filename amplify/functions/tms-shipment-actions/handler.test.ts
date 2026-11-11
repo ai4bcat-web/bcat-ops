@@ -2461,6 +2461,38 @@ describe('UPDATE_STOP', () => {
     ).rejects.toThrow(/departed before it was arrived/)
   })
 
+  it('records a hand-entered stop time as MANUAL and clears the source with the time', async () => {
+    const { loadId } = await draftWithStops()
+    await call('UPDATE_STOP', {
+      loadId, expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt, op: 'SET_TIMES', stopId: 'stp-pu',
+      patch: { arrivedAt: '2026-03-02T13:05:00.000Z' },
+    })
+    const stopOf = () => (JSON.parse(String(table(TABLES.load).get(loadId)!.stops)) as Array<Record<string, unknown>>).find((s) => s.id === 'stp-pu')!
+    expect(stopOf()).toMatchObject({ arrivedAt: '2026-03-02T13:05:00.000Z', arrivedSource: 'MANUAL' })
+    await call('UPDATE_STOP', {
+      loadId, expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt, op: 'SET_TIMES', stopId: 'stp-pu',
+      patch: { arrivedAt: null },
+    })
+    expect(stopOf().arrivedAt ?? null).toBeNull()
+    expect(stopOf().arrivedSource ?? null).toBeNull()
+  })
+
+  it('refuses a time in the future, and an out time before the in time already on the stop', async () => {
+    const { loadId } = await draftWithStops()
+    await expect(call('UPDATE_STOP', {
+      loadId, expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt, op: 'SET_TIMES', stopId: 'stp-pu',
+      patch: { arrivedAt: new Date(Date.now() + 3_600_000).toISOString() },
+    })).rejects.toThrow(/in the future/)
+    await call('UPDATE_STOP', {
+      loadId, expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt, op: 'SET_TIMES', stopId: 'stp-pu',
+      patch: { arrivedAt: '2026-03-02T15:00:00.000Z' },
+    })
+    await expect(call('UPDATE_STOP', {
+      loadId, expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt, op: 'SET_TIMES', stopId: 'stp-pu',
+      patch: { departedAt: '2026-03-02T13:00:00.000Z' },
+    })).rejects.toThrow(/departed before it was arrived/)
+  })
+
   it('refuses a stale load', async () => {
     const { loadId } = await draftWithStops()
     await expect(
@@ -3638,6 +3670,17 @@ describe('check calls', () => {
     expect(result.event).toMatchObject({ statusBefore: 'BOOKED', statusAfter: 'LOADING' })
     expect(stopsOf(loadId)[0].arrivedAt).toBe('2026-03-02T13:05:00.000Z')
     expect(table(TABLES.load).get(loadId)).toMatchObject({ status: 'LOADING', statusSource: 'CHECK_CALL' })
+  })
+
+  it('records who the time came from: the tracking link when it says so, a person otherwise', async () => {
+    const { loadId } = await trackedLoad()
+    await call('LOG_CHECK_CALL', { loadId, expectedUpdatedAt: stamp(loadId), at: '2026-03-02T13:05:00.000Z', type: 'ARRIVED', stopId: 'stp-pu', stampSource: 'TRACKING_LINK' })
+    expect(stopsOf(loadId)[0]).toMatchObject({ arrivedAt: '2026-03-02T13:05:00.000Z', arrivedSource: 'TRACKING_LINK' })
+    await call('LOG_CHECK_CALL', { loadId, expectedUpdatedAt: stamp(loadId), at: '2026-03-02T15:00:00.000Z', type: 'DEPARTED', stopId: 'stp-pu' })
+    expect(stopsOf(loadId)[0]).toMatchObject({ departedAt: '2026-03-02T15:00:00.000Z', departedSource: 'MANUAL' })
+    // A later tracking-link tap does not move a time that is already there.
+    await call('LOG_CHECK_CALL', { loadId, expectedUpdatedAt: stamp(loadId), at: '2026-03-02T16:00:00.000Z', type: 'DEPARTED', stopId: 'stp-pu', stampSource: 'TRACKING_LINK' })
+    expect(stopsOf(loadId)[0]).toMatchObject({ departedAt: '2026-03-02T15:00:00.000Z', departedSource: 'MANUAL' })
   })
 
   it('delivers the load and stamps when it happened', async () => {
