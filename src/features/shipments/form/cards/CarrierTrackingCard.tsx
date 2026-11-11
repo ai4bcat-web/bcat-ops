@@ -9,7 +9,7 @@
  *  3. the high-level tracking read (status, method, assignee, last position, ETA, check calls, POD,
  *     Open in Load Tracking). Before a carrier is booked it says "Tracking is chosen when the
  *     carrier is booked" with the customer's suggestion greyed.
- * The amber "Tracking mode not set" chip shows in the card when a carrier is booked and nothing is confirmed.
+ * The link's state (not sent, sent, accepted) is the badge in the tracking panel; there is no separate tracking-mode chip.
  */
 import { memo, useCallback, useState } from 'react'
 import { toast } from 'sonner'
@@ -25,7 +25,6 @@ import {
 import { CarrierInformationSection } from '../sections/CarrierInformationSection'
 import { CarrierTrackingOverride } from '../../trackingModeControl/CarrierTrackingOverride'
 import { TrackingLinkPanel } from './TrackingLinkPanel'
-import { TrackingModeNotSetChip } from '../../trackingModeControl/TrackingModeNotSetChip'
 import type { CardProps } from './cardRegistry'
 import { CarrierCard } from './CarrierCard'
 import { LegsPicker } from './LegsPicker'
@@ -44,7 +43,6 @@ function loadCarrierOf(live: readonly LoadCarrierRecord[], slot: CarrierSlot, in
 function CarrierTrackingCardImpl(props: CardProps) {
   const { ctx, values, update } = props
   const bundle = ctx.mode === 'edit' ? ctx.bundle : null
-  const booked = bundle !== null && activeLoadCarrier(bundle) !== null
   const onSaved = useCallback(() => ctx.refreshBundle(), [ctx])
   const [removing, setRemoving] = useState<string | null>(null)
   const [removeBusy, setRemoveBusy] = useState(false)
@@ -165,7 +163,6 @@ function CarrierTrackingCardImpl(props: CardProps) {
       <div className="tms-trk-half" data-testid="card-tracking-body">
         <div className="tms-trk-half-head">
           <span className="tms-trk-half-title">Tracking</span>
-          {bundle ? <TrackingModeNotSetChip shipment={bundle.shipment} hasCarrier={booked} /> : null}
         </div>
         {bundle ? (
           <>
