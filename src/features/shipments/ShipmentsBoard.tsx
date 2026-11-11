@@ -34,7 +34,6 @@ import { IconKeyDialog, type BoardToneKey, type BoardExceptionKey } from './boar
 import { BatchTaskDialog, type BatchTaskAction, type BatchTaskResult } from './board/BatchTaskDialog'
 import { BoardMapView } from './board/BoardMapView'
 import { ColumnsDialog } from '@/features/tms/grid/ColumnsDialog'
-import { ShipmentsSectionTabs } from './ShipmentsSectionTabs'
 import { TmsBadge, TmsButton, TmsFilterChip, TmsInput, TmsSegmentedTabs, TmsSelect, statusTone } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
@@ -81,7 +80,7 @@ import { checkCallState } from '@/lib/checkCalls'
 import { formatCents } from '@/lib/invoiceBuild'
 import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { displayName } from '@/lib/roles'
-import { inShipmentList, monthsOfYear, parseShipmentList, shipmentListCounts, shipmentYears, type ShipmentList, type ShipmentYear } from '@/lib/shipmentLists'
+import { inShipmentList, monthsOfYear, parseShipmentList, shipmentYears, type ShipmentList, type ShipmentYear } from '@/lib/shipmentLists'
 import { chicagoYear } from '@/lib/date'
 import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import { SEED_DIVISIONS } from '@/lib/ownership'
@@ -128,7 +127,7 @@ import {
 } from './teamColumnLayout'
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { REVIEW_BILLING_LABEL, needsBillingReview, reviewBillingNote } from '@/lib/reviewBilling'
-import { BOARD_FLAGS, BOARD_FLAG_LABELS, flagCounts, matchesFlags, type BoardFlag } from './boardChips'
+import { matchesFlags, type BoardFlag } from './boardChips'
 import { BatchActionBar } from './board/BatchActionBar'
 import {
   outcomesFromServer,
@@ -293,7 +292,6 @@ export function ShipmentsBoard() {
   const visiblePanes: Array<'left' | 'right'> = split ? ['left', 'right'] : ['left']
   const wantsAllList = visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'all')
   const wantsVoidedList = visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'voided')
-  const needWindow = wantsAllList || wantsVoidedList
   // The All list is scoped by year (default: this Chicago year). A specific year reads that year's
   // twelve pickup months; All years reads the whole table. All never lists voided shipments: the
   // Voided list reads its own pickup-month period with the void filter dropped.
@@ -350,7 +348,6 @@ export function ShipmentsBoard() {
     return [...byId.values()]
   }, [workingRows, windowRows, allYearsRows, voidedRows, proRows])
 
-  const counts = useMemo(() => shipmentListCounts(allRows, year), [allRows, year])
 
   // Every year the data has shown so far, kept after a narrower year is picked so the selector does not shrink.
   const foundYears = useMemo(() => shipmentYears(allRows), [allRows])
@@ -365,8 +362,6 @@ export function ShipmentsBoard() {
       <div className="tms-dense-bar">
         <div className="flex items-center gap-3">
           <Truck size={18} />
-          <span className="font-semibold">View · Active shipments</span>
-          <ShipmentsSectionTabs current={list} activeCount={counts.active} allCount={needWindow && !windowLoading && !allYearsLoading ? counts.all : undefined} />
           {partial && <TmsBadge tone="gray">Adding delivered loads…</TmsBadge>}
           {wantsAllList && (
             <TmsSelect
@@ -642,7 +637,6 @@ function BoardPane({
       ),
     [listRows, query, wantsVoided, demoOnly],
   )
-  const chipCounts = useMemo(() => flagCounts(chipBase, Date.now()), [chipBase])
   const fitRows = useMemo(() => {
     if (flags.size === 0) return chipBase
     const nowMs = Date.now()
@@ -1077,17 +1071,6 @@ function BoardPane({
           />
         )}
         <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={toggleDemo} />
-        {/* The filter strip, styled like Load Review's (Needs fixes / Looks ready / All in review): its own strip beside the list strip. */}
-        <TmsSegmentedTabs
-          aria-label="Shipment filters"
-          size="sm"
-          active={flags.size === 0 ? 'all' : flags.size === 1 ? [...flags][0] : ''}
-          onSelect={(key) => { setFlags(key === 'all' ? new Set() : new Set([key as BoardFlag])); resetPage() }}
-          tabs={[
-            { key: 'all', label: 'Any' },
-            ...BOARD_FLAGS.map((flag) => ({ key: flag, label: BOARD_FLAG_LABELS[flag], count: chipCounts[flag] })),
-          ]}
-        />
         <ClearFiltersButton count={activeFilterCount(filters) + flags.size} onClear={clearFilters} />
         <span className="tms-dense-spacer" />
         <TmsButton size="sm" variant="secondary" data-testid="export-active-shipments" title="Every active shipment with every field" onClick={exportAllActive}>

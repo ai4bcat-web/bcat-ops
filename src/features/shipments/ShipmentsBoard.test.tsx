@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { ShipmentTabsProvider } from './tabs/ShipmentTabsProvider'
+import { ShipmentTabStrip } from './tabs/ShipmentTabStrip'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, within, fireEvent, waitFor, act, cleanup } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
@@ -158,6 +160,7 @@ vi.mock('@/features/tms/useOwnershipDivisions', () => ({
 vi.mock('./intake/useIntakeLoads', () => ({ useOpenIntakeCount: () => 0 }))
 
 vi.mock('@/lib/apiClient', () => ({
+  countOpenIntakeLoads: async () => 0,
   listShipmentColumnTemplates,
   listShipmentsByNumber: async () => [],
   saveShipmentView,
@@ -189,11 +192,14 @@ function renderBoard(path = '/tms/shipments', initialShipments: ShipmentRow[] = 
   __shipments = initialShipments
   return render(
     <MemoryRouter initialEntries={[path]}>
+      <ShipmentTabsProvider>
+      <ShipmentTabStrip />
       <Routes>
         <Route path="/tms/shipments" element={<ShipmentsBoard />} />
         <Route path="/tms/shipments/intake" element={<div>intake page</div>} />
         <Route path="/tms/shipments/new" element={<div>shipment form page</div>} />
       </Routes>
+      </ShipmentTabsProvider>
     </MemoryRouter>,
   )
 }
@@ -614,22 +620,6 @@ describe('ShipmentsBoard', () => {
     expect(within(row4).getByTitle('Customer not linked')).toBeTruthy()
   })
 
-  it('narrows rows when a needs-attention toggle is pressed', async () => {
-    const shipments = [
-      deliveredRow('S001', { docsMissing: ['POD'] }),
-      deliveredRow('S002', { docsMissing: [] }),
-    ]
-    renderBoard('/tms/shipments', shipments)
-    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-
-    fireEvent.click(screen.getByRole('tab', { name: /^Missing documents/ }))
-
-    await waitFor(() => {
-      expect(screen.getByText('S001')).toBeTruthy()
-      expect(screen.queryByText('S002')).toBeNull()
-    })
-  })
-
   it('Cancel shipment calls setShipmentStatus with reason', async () => {
     const shipments = [row('S001', { status: 'OPEN' })]
     renderBoard('/tms/shipments', shipments)
@@ -896,13 +886,11 @@ describe('ShipmentsBoard', () => {
       const select = screen.getByRole('combobox', { name: 'Year' }) as HTMLSelectElement
       expect([...select.options].map((o) => o.text)).toEqual(['All years', String(year), String(year - 2)])
       expect(select.value).toBe(String(year))
-      expect(screen.getByRole('tab', { name: /^All/ })).toHaveTextContent(/1$/)
 
       fireEvent.change(select, { target: { value: 'all' } })
       await waitFor(() => expect(screen.getByText('S900')).toBeTruthy())
       expect(screen.getByText('S901')).toBeTruthy()
       expect((__views as Array<{ kind: string }>).some((v) => v.kind === 'all')).toBe(true)
-      expect(screen.getByRole('tab', { name: /^All/ })).toHaveTextContent(/2$/)
 
       fireEvent.change(select, { target: { value: String(year - 2) } })
       await waitFor(() => expect(screen.queryByText('S901')).toBeNull())
@@ -919,42 +907,6 @@ describe('ShipmentsBoard', () => {
   })
   describe('Step AP: chips and Push to Load Review', () => {
     const complete = { reference: 'PO-1', salesRepId: 'rep-1', revDivision: 'ASSETS', docsRequired: ['POD'], docsMissing: [] as string[] }
-    // The filters are a segmented strip now (Any + one tab per filter, each with its count): "Label (count)".
-    const chipNames = () =>
-      within(screen.getByRole('tablist', { name: 'Shipment filters' })).getAllByRole('tab')
-        .filter((tab) => tab.querySelector('.tms-seg-count'))
-        .map((tab) => `${(tab.firstChild?.textContent ?? '').trim()} (${tab.querySelector('.tms-seg-count')?.textContent})`)
-
-    it('shows the missing-field chips with live counts, ends with Check call overdue, and has no Open exceptions chip', async () => {
-      renderBoard('/tms/shipments', [
-        deliveredRow('S001', complete),
-        deliveredRow('S002', { ...complete, reference: null }),
-        deliveredRow('S003', { ...complete, salesRepId: null, revDivision: null }),
-        deliveredRow('S004', { ...complete, salesRepId: null, salesRepCode: 'BCAT' }),
-      ])
-      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-      expect(chipNames()).toEqual([
-        'Missing reference # (1)',
-        'Needs sales rep (1)',
-        'Missing rev division (1)',
-        'Missing documents (0)',
-        'Review billing (0)',
-        'Check call overdue (0)',
-      ])
-      expect(screen.queryByRole('button', { name: /Open exceptions/ })).toBeNull()
-    })
-
-    it('clicking a chip filters the list to the rows missing that field', async () => {
-      renderBoard('/tms/shipments', [
-        deliveredRow('S001', complete),
-        deliveredRow('S002', { ...complete, reference: null }),
-      ])
-      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
-      fireEvent.click(screen.getByRole('tab', { name: /^Missing reference #/ }))
-      await waitFor(() => expect(screen.queryByText('S001')).toBeNull())
-      expect(screen.getByText('S002')).toBeTruthy()
-    })
-
     it('refuses the 10th selected row with a message and keeps nine', async () => {
       const rows = Array.from({ length: 10 }, (_, i) => deliveredRow(`S${String(i + 1).padStart(3, '0')}`, complete))
       renderBoard('/tms/shipments', rows)

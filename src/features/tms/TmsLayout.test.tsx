@@ -54,6 +54,7 @@ vi.mock('@/features/tms/useOwnershipDivisions', () => ({
   useOwnershipDivisions: () => ({ divisions: [], loading: false, error: null, refresh: vi.fn() }),
 }))
 vi.mock('@/lib/apiClient', () => ({
+  countOpenIntakeLoads: vi.fn(async () => 0),
   listUserProfiles: vi.fn(async () => data.profiles),
   listShipments: vi.fn(async () => []),
   listOrders: vi.fn(async () => []),

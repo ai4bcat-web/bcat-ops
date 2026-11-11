@@ -35,7 +35,6 @@ import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { formatDateTime } from '@/lib/date'
 import { intakeCounts, isDemoIntake } from '@/lib/intakeLoad'
 import type { IntakeLoadRecord, IntakeStatus } from '@/types/intake'
-import { ShipmentsSectionTabs } from '../ShipmentsSectionTabs'
 import {
   ALL_GROUP,
   UNASSIGNED,
@@ -337,7 +336,6 @@ export function IntakeBoard() {
         <span className="tms-dense-title">
           <Truck size={18} aria-hidden="true" /> Build · Intake
         </span>
-        <ShipmentsSectionTabs current="intake" />
         <TmsSegmentedTabs
           aria-label="Intake view"
           size="sm"

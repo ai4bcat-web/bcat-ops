@@ -41,3 +41,4 @@
 @media (max-width: 900px) {
   .tms-shell .tms-ship-tab { max-width: 180px; }
 }
+.tms-shell .tms-ship-tab-count { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--tms-surface); font-size: 11px; }
