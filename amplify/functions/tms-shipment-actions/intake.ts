@@ -217,7 +217,7 @@ export async function intakeSaveDraft(deps: IntakeDeps, input: Row, caller: Call
     deps.getSettings(),
     patched.fields.customerId ? deps.getCustomer(patched.fields.customerId) : Promise.resolve(null),
   ])
-  const missingFields = intakeMissing(patched.fields, intakeRequired(settings, customer).gated)
+  const missingFields = intakeMissing(patched.fields, intakeRequired(settings, customer).gated, customer as { billToParties?: unknown } | null)
   const changed =
     JSON.stringify(patched.fields) !== JSON.stringify(record.fields) ||
     JSON.stringify([...patched.confirmed].sort()) !== JSON.stringify([...record.confirmed].sort())
