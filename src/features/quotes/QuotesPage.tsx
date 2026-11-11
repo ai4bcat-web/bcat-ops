@@ -97,7 +97,7 @@ const EMPTY_TEXT: Record<QuoteTabKey, string> = {
   offers: 'No offer is out with a carrier.',
 }
 
-export function QuotesPage() {
+export function QuotesPage({ onRealCount }: { onRealCount?: (n: number | null) => void } = {}) {
   // One clock for the whole board: every chip, every gate and the strip answer as of the
   // same instant, so a row cannot read "Expires in 1h" beside a disabled Convert.
   const [now, setNow] = useState(() => new Date().toISOString())
@@ -130,6 +130,9 @@ export function QuotesPage() {
       .finally(() => setMonthLoading(false)),
   [month])
   useEffect(() => { loadMonth() }, [loadMonth])
+  // Tells the Quote page how many real quotes there are, so demo data can default on only when there are none.
+  const realCount = worklist.loading || monthLoading ? null : worklist.open.length + monthRows.length
+  useEffect(() => { onRealCount?.(realCount) }, [onRealCount, realCount])
 
   // The floor a quote's margin is read against; a failed read leaves the chip neutral
   // rather than inventing a threshold nobody configured.

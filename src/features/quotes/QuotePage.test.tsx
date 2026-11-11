@@ -8,6 +8,7 @@ const spot = vi.hoisted(() => ({ count: 0 }))
 vi.mock('@/features/spot-quoter/useSpotRequests', () => ({ useSpotNewCount: () => spot.count }))
 vi.mock('@/features/spot-quoter/SpotInboxPage', () => ({ SpotInboxPage: () => <div data-testid="body-inbox" /> }))
 vi.mock('./QuotesPage', () => ({ QuotesPage: () => <div data-testid="body-quotes" /> }))
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: { email: 'rep@example.test' } }) }))
 
 import { QuotePage } from './QuotePage'
 

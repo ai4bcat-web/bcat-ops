@@ -3,7 +3,7 @@
  * from each, a suggested rate and a suggested response. The mailbox is read-only: nothing
  * is sent or drafted from here; the rep copies the response and sends it from Gmail.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Settings } from 'lucide-react'
@@ -31,7 +31,7 @@ const STATUS_TONE: Record<string, 'blue' | 'green' | 'orange' | 'gray' | 'red'> 
 }
 const MATCH_CHIP: Record<string, string> = { EMAIL: 'Known contact', DOMAIN: 'Domain match', AMBIGUOUS: 'Ambiguous', NONE: 'Unknown sender' }
 
-export function SpotInboxPage() {
+export function SpotInboxPage({ onRealCount }: { onRealCount?: (n: number | null) => void } = {}) {
   const { status, loading: statusLoading, error: statusError, refresh: refreshStatus } = useSpotStatus()
   const [params, setParams] = useSearchParams()
   const [tabKey, setTabKey] = useState('new')
@@ -46,6 +46,9 @@ export function SpotInboxPage() {
   const [busy, setBusy] = useState(false)
   const [fixtureId, setFixtureId] = useState('')
   const openId = params.get('request')
+  // Tells the Quote page how many real requests there are, so demo data can default on only for an empty inbox.
+  const realCount = counts ? Math.max(rows.length, counts.new + counts.needsInfo) : null
+  useEffect(() => { onRealCount?.(realCount) }, [onRealCount, realCount])
 
   const select = (id: string | null) => {
     const next = new URLSearchParams(params)
