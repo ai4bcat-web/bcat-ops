@@ -52,6 +52,20 @@ describe('stop card: add a new location inline', () => {
     expect((screen.getByTestId('f-pickup-new-type') as HTMLSelectElement).value).toBe('SHIPPER')
   })
 
+  it('while the form is open the stop does not ask for the address and contact a second time', () => {
+    setup()
+    fireEvent.change(screen.getByTestId('f-pickup-name'), { target: { value: 'ZZ Brand New' } })
+    // A stop with an incomplete address shows its own address fields...
+    expect(screen.getByTestId('f-pickup-city')).toBeTruthy()
+    // ...which fold away while the new-location form (the one place the address is typed) is open.
+    fireEvent.click(screen.getByTestId('f-pickup-addRow'))
+    expect(screen.getByTestId('f-pickup-new-city')).toBeTruthy()
+    expect(screen.queryByTestId('f-pickup-city')).toBeNull()
+    expect(screen.queryByTestId('f-pickup-zip')).toBeNull()
+    expect(screen.queryByTestId('f-pickup-state')).toBeNull()
+    fireEvent.click(screen.getByTestId('f-pickup-new-cancel'))
+  })
+
   it('Enter on no match does the same; a delivery stop defaults to Receiver', () => {
     setup()
     fireEvent.change(screen.getByTestId('f-consignee-name'), { target: { value: 'ZZ Nowhere' } })

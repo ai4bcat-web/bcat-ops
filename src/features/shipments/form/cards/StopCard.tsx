@@ -181,10 +181,12 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
         </LField>
         </FieldGrid>
 
-        {!editAddr && !addressIssue ? (
+        {/* While the New location form is open it is the one place the address and contact are typed: the stop's own copies fold away so
+            zip, city and state are never asked for twice (and can never disagree, e.g. Elm Springs above, Springdale below). */}
+        {form || (!editAddr && !addressIssue) ? (
           <div className="tms-card-addr-line">
-            <span data-testid={`f-${prefix}-addressLine`}>{line || 'No address yet'}</span>
-            <button type="button" className="ship-link" data-testid={`f-${prefix}-editAddress`} disabled={base.disabled} onClick={() => setEditAddr(true)}>Edit address</button>
+            <span data-testid={`f-${prefix}-addressLine`}>{line || (form ? 'Enter the address in the new location below' : 'No address yet')}</span>
+            {form ? null : <button type="button" className="ship-link" data-testid={`f-${prefix}-editAddress`} disabled={base.disabled} onClick={() => setEditAddr(true)}>Edit address</button>}
           </div>
         ) : (
           <FieldGrid>
@@ -207,13 +209,13 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
           </FieldGrid>
         )}
 
-        <FieldGrid>
+        {form ? null : <FieldGrid>
           <LField span={12} def={d('contact')}><TmsInput {...txt('contact')} /></LField>
           <LField span={6} def={d('phone')}>
             <TmsInput {...ctl(d('phone'))} type="tel" placeholder="(XXX) XXX-XXXX" value={stop.phone} disabled={base.disabled} onChange={(e) => onChange({ phone: maskPhone(e.target.value) })} />
           </LField>
           <LField span={6} def={d('email')} error={err(d('email'))}><TmsInput {...txt('email')} type="email" /></LField>
-        </FieldGrid>
+        </FieldGrid>}
         </ColGroup>
         <ColGroup title="Schedule & freight">
         <FieldGrid>
