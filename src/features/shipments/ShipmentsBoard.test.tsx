@@ -1049,6 +1049,28 @@ describe('ShipmentsBoard team column layout', () => {
     })
   })
 
+  it('saves the column widths with the team default, and the saved widths are what the board shows', async () => {
+    vi.mocked(saveShipmentColumnTemplate).mockResolvedValue({})
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'originCity'])])
+    renderBoard('/tms/shipments', [row('S001')])
+    await screen.findByText('S001')
+    fireEvent.click(screen.getByRole('button', { name: /Edit layout/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Fit widths/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save as team default' }))
+    await waitFor(() => expect(saveShipmentColumnTemplate).toHaveBeenCalledTimes(1))
+    const saved = vi.mocked(saveShipmentColumnTemplate).mock.calls[0][0] as { widths: Record<string, number> }
+    expect(Object.keys(saved.widths).sort()).toEqual(['originCity', 'proNumber'])
+  })
+
+  it('a width saved in the team default is applied exactly, even narrower than the text', async () => {
+    vi.mocked(listShipmentColumnTemplates).mockResolvedValue([teamTemplate(['proNumber', 'originCity'], { originCity: 321, proNumber: 77 })])
+    renderBoard('/tms/shipments', [row('S001')])
+    await screen.findByText('S001')
+    const widths = [...document.querySelectorAll('colgroup col')].map((c) => parseInt((c as HTMLElement).style.width, 10))
+    expect(widths).toContain(321)
+    expect(widths).toContain(77)
+  })
+
   it('Cancel drops the unsaved layout edit', async () => {
     renderBoard('/tms/shipments', [row('S001')])
     await screen.findByText('S001')
