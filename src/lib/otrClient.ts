@@ -205,3 +205,20 @@ export interface ResubmitResult {
 export function resubmitToOtr(id: string): Promise<ResubmitResult> {
   return otrAction('resubmit', { id })
 }
+
+/** What OTR knows about an MC, for filling a new customer. Read-only. */
+export interface CustomerLookupResult {
+  found: boolean
+  mcNumber: string
+  name: string | null
+  /** OTR's verdict: APPROVED, NOT APPROVED, NO BUY, NOT FOUND or UNKNOWN. */
+  decision: string
+  noBuy: boolean
+  otrId: string | null
+  message: string
+}
+
+/** Ask OTR who an MC is (name, approval, No Buy). Open to anyone who may create customers. */
+export function lookupCustomerByMc(mc: string): Promise<CustomerLookupResult> {
+  return otrAction('customerLookup', { mc })
+}

@@ -5,6 +5,7 @@ import { SEED_DIVISIONS } from '@/lib/ownership'
 import { BILLING_METHOD_CHOICES } from '@/lib/newCustomerRules'
 import { MoneyField } from './MoneyField'
 import type { CustomerFormValue } from './useCustomerForm'
+import { CustomerMcLookup } from './NewCustomerGuard'
 
 const RED = 'var(--tms-badge-red)'
 
@@ -47,6 +48,7 @@ export function NewCustomerRequiredFields({ value, set, errors }: { value: Custo
 
   return (
     <div style={{ display: 'grid', gap: 12 }} data-testid="new-customer-required">
+      <CustomerMcLookup value={value} set={set} />
       <TmsField label={<RequiredLabel>Name</RequiredLabel>} error={shown('name')}>
         <TmsInput value={value.name} aria-label="Name" aria-required="true" onBlur={() => touch('name')} onChange={(e) => set('name', e.target.value)} />
       </TmsField>
