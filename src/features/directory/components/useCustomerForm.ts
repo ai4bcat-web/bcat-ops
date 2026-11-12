@@ -142,6 +142,7 @@ export interface CustomerFormValue {
   apEmail: string
   /** More To addresses for a manual invoice, one per line. */
   apEmailsExtraText: string
+  noaEmail: string
   /** One address per line or comma separated; the always-copy list is added on send. */
   invoiceCopyText: string
   /** Why the import flagged the row; the server clears it when billing fields are saved. */
@@ -234,6 +235,7 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     billingMethod: initial?.billingMethod ?? '',
     apEmail: initial?.apEmail ?? '',
     apEmailsExtraText: arrayToLines(initial?.apEmailsExtra),
+    noaEmail: initial?.noaEmail ?? '',
     invoiceCopyText: isNew ? REQUIRED_INVOICE_COPY_EMAIL : arrayToLines(initial?.invoiceCopyEmails),
     billingNeedsReview: initial?.billingNeedsReview ?? '',
   }
@@ -378,6 +380,7 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     billingMethod: value.billingMethod || null,
     apEmail: value.apEmail.trim() || null,
     apEmailsExtra: parseEmailList(value.apEmailsExtraText),
+    noaEmail: value.noaEmail.trim() || null,
     // A new customer's list always carries the company copy address; the server forces it too.
     invoiceCopyEmails: isNew ? withRequiredCopyEmail(parseEmailList(value.invoiceCopyText)) : parseEmailList(value.invoiceCopyText),
     billingNeedsReview: value.billingNeedsReview.trim() || null,
@@ -414,9 +417,10 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
       (value.billingMethod || null) !== (initial?.billingMethod ?? null) ||
       (apEmail || null) !== (initial?.apEmail?.trim().toLowerCase() || null) ||
       extra.join(',') !== (initial?.apEmailsExtra ?? []).join(',') ||
+      (value.noaEmail.trim().toLowerCase() || null) !== (initial?.noaEmail?.trim().toLowerCase() || null) ||
       copy.join(',') !== (initial?.invoiceCopyEmails ?? []).join(',')
     return changed
-      ? { ...base, ...validateBillingFields({ billingMethod: value.billingMethod || null, apEmail, apEmailsExtra: extra, invoiceCopyEmails: copy }) }
+      ? { ...base, ...validateBillingFields({ billingMethod: value.billingMethod || null, apEmail, apEmailsExtra: extra, noaEmail: value.noaEmail, invoiceCopyEmails: copy }) }
       : base
   }, [value, initial, isNew, problems])
   return { value, set, setPartial, toRecord, errors, isNew, missing }

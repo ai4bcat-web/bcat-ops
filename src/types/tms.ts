@@ -205,6 +205,8 @@ export interface CustomerRecord {
   apEmail?: string | null
   /** More To addresses for a manual invoice e-mail, after apEmail. */
   apEmailsExtra?: string[] | null
+  /** Notice-of-assignment e-mail. Informational only: never used to route invoices. */
+  noaEmail?: string | null
   /** Per-customer "copy on invoices" list (the company-wide always-copy list is added on send). */
   invoiceCopyEmails?: string[] | null
   /** Why the billing row needs a human look; cleared when a person saves the billing fields. */

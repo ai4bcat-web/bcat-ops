@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { driverNotesSummary, dwellMinutes, findCustomerMatches, findLocationMatches, formatCents, normalizeAddress, normalizeName, parseCents } from './tmsDirectory'
+import { driverNotesSummary, dwellMinutes, findCustomerMatches, findLocationMatches, formatCents, normalizeAddress, normalizeName, parseCents, tidyLocationSuggestions } from './tmsDirectory'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
 
 const customer = (over: Partial<CustomerRecord>): CustomerRecord =>
@@ -115,5 +115,24 @@ describe('driverNotesSummary', () => {
   it('is zero and null for none, and survives a non-array', () => {
     expect(driverNotesSummary(null)).toEqual({ count: 0, newestAt: null })
     expect(driverNotesSummary('x' as never)).toEqual({ count: 0, newestAt: null })
+  })
+})
+
+describe('tidyLocationSuggestions — a cleaner stop picker', () => {
+  const royal = (over: Partial<LocationRecord>) => location({ name: 'THE ROYAL GROUP', ...over })
+  const addison = royal({ id: 'a', street: '654 FACTORY RD', city: 'ADDISON', state: 'IL', zip: '60101' })
+  it('shows an exact repeat once', () => {
+    const twin = { ...addison, id: 'b' }
+    expect(tidyLocationSuggestions([addison, twin]).map(l => l.id)).toEqual(['a'])
+  })
+  it('keeps the same name at different addresses', () => {
+    const cicero = royal({ id: 'c', street: '1301 S 47TH AVE', city: 'CICERO', state: 'IL' })
+    expect(tidyLocationSuggestions([addison, cicero]).map(l => l.id)).toEqual(['a', 'c'])
+  })
+  it('hides a street-less twin of an addressed place, but keeps one that stands alone', () => {
+    const bare = royal({ id: 'z', city: 'ADDISON' })
+    expect(tidyLocationSuggestions([bare, addison]).map(l => l.id)).toEqual(['a'])
+    expect(tidyLocationSuggestions([bare]).map(l => l.id)).toEqual(['z'])
+    expect(tidyLocationSuggestions([royal({ id: 'y', city: 'CHICAGO' }), addison]).map(l => l.id)).toEqual(['y', 'a'])
   })
 })

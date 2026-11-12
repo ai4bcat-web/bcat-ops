@@ -940,6 +940,17 @@ describe('UPSERT_CUSTOMER', () => {
       }))).rejects.toThrow('Not a valid e-mail: nope')
     })
 
+    it('stores a notice-of-assignment e-mail lowercased, keeps it when absent, and rejects a bad one', async () => {
+      send.mockImplementation((cmd: MockCommand) => {
+        if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+        if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+        return Promise.resolve({})
+      })
+      const result = await handler(event('UPSERT_CUSTOMER', { name: 'Acme', billingMethod: 'FACTOR', noaEmail: 'NOA@Factor.com' }))
+      expect(result).toMatchObject({ noaEmail: 'noa@factor.com' })
+      await expect(handler(event('UPSERT_CUSTOMER', { name: 'Acme', billingMethod: 'FACTOR', noaEmail: 'nope' }))).rejects.toThrow('Enter a valid e-mail address')
+    })
+
     describe('New Customer rules (create only)', () => {
       const putOf = () => {
         const box: { item?: Record<string, { S?: string; N?: string; BOOL?: boolean; L?: Array<{ S: string }> }> } = {}

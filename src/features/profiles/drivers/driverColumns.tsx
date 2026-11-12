@@ -1,4 +1,5 @@
 import { TmsBadge } from '@/features/tms/kit'
+import { needsHireDate } from '@/lib/ptoAllowance'
 import type { ApColumn } from '@/features/ap/ApDenseList'
 import { fleetLabel, FLEET_OPTIONS, type DocsSummary } from '../driverProfileModel'
 import type { Driver } from '@/types'
@@ -70,7 +71,7 @@ export function driverColumns(): ApColumn<DriverRow>[] {
     {
       key: 'hired', header: 'Hired', group: 'Driver', filter: 'date',
       text: (r) => r.driver.hireDate ?? '', dateOf: (r) => r.driver.hireDate ?? null,
-      render: (r) => r.driver.hireDate ?? <span className="tms-muted">—</span>,
+      render: (r) => r.driver.hireDate ?? (needsHireDate(r.driver) ? <TmsBadge tone="orange">Needs hire date</TmsBadge> : <span className="tms-muted">—</span>),
     },
   ]
 }
