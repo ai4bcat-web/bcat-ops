@@ -84,7 +84,10 @@ export async function buildAgingStatementPdf(statement: AgingStatement): Promise
     y += 13
     text(statement.customerName, M, 12, bold)
     y += 22
-    for (const c of COLS) (c.right ? right(c.label, c.x + c.w, 8, bold) : text(c.label, c.x, 8, bold))
+    for (const c of COLS) {
+      if (c.right) right(c.label, c.x + c.w, 8, bold)
+      else text(c.label, c.x, 8, bold)
+    }
     y += 5
     line(y)
     y += ROW
