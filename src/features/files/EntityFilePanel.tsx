@@ -309,6 +309,9 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
             {entity.kind === 'DRIVER' && isAdmin && (
               <Link className="tms-link" to={`/profiles/drivers/${entity.driver.id}`} data-testid="open-driver-profile">Open profile</Link>
             )}
+            {entity.kind === 'TRUCK' && isAdmin && (
+              <Link className="tms-link" to={`/profiles/assets/${entity.truck.id}`} data-testid="open-asset-profile">Open profile</Link>
+            )}
             {entity.kind === 'DRIVER' && onEditDriver && (
               <TmsButton size="sm" onClick={() => onEditDriver(entity.driver)} title="Edit phone, CDL, truck, trailer and more">
                 <Pencil size={14} /> Edit

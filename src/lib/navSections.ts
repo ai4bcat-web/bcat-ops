@@ -124,6 +124,8 @@ const PROFILES_CHILDREN: NavChildDef[] = [
   { to: '/tms/locations', label: 'Locations', pageKey: 'locations', tms: true },
   // The fleet's people: pay, truck, documents and details in one profile (Phase 2 adds Assets: Trucks | Trailers).
   { to: '/profiles/drivers', label: 'Drivers', pageKey: 'files', adminOnly: true },
+  // Trucks and trailers: details, assignment and documents in one profile (tabs: Trucks | Trailers).
+  { to: '/profiles/assets', label: 'Assets', pageKey: 'trucks', adminOnly: true },
 ]
 
 /**
