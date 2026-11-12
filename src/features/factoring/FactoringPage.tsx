@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom'
 import {
   TmsBadge, TmsButton, TmsCountBadge, TmsDialog, TmsIconButton, TmsInput, TmsSegmentedTabs, TmsStatRow,
   type ColumnDef, type TmsTone,
+  TmsTabs,
+  type TmsTabGroup,
 } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import { ClearFiltersButton, ColumnsButton, DensityToggle } from '@/features/tms/grid/DenseControls'
@@ -440,7 +442,8 @@ function OtrStatusFlag({ item }: { item: FactoringItem }) {
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
-export function FactoringPage() {
+/** `viewTabs`: shown inside Invoicing as its Factored view (Receivable | Factored | Payable). */
+export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const { items, loading, error, pendingIds, refresh, removeItem } = useFactoringItems()
   useResolveLoads(items.map((i) => i.loadId))
   const { user, isAdmin } = useAuth()
@@ -838,8 +841,9 @@ export function FactoringPage() {
   return (
     <>
       <div className="tms-dense-page">
+        {viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
         <div className="tms-dense-bar">
-          <h1 className="tms-dense-title" style={{ margin: 0 }}><Landmark size={18} aria-hidden="true" /> Factoring</h1>
+          <h1 className="tms-dense-title" style={{ margin: 0 }}><Landmark size={18} aria-hidden="true" /> {viewTabs ? 'Invoicing · Factored' : 'Factoring'}</h1>
           <Search size={14} className="tms-muted" aria-hidden="true" />
           <TmsInput
             className="tms-dense-search"

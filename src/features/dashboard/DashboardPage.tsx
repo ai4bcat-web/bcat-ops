@@ -532,7 +532,7 @@ export function DashboardPage() {
             <FactoringCard
               totals={factoringTotalsValue}
               loading={factoringLoading}
-              onOpen={() => navigate('/tms/factors')}
+              onOpen={() => navigate('/tms/invoicing/factored')}
             />
           </Cell>
           {/* What we owe vendors, beside what we are owed. */}

@@ -29,6 +29,8 @@ export interface LoadDriverDoc extends DriverSubmissionDocRecord {
   source: SubmissionWithDocs['source']
   /** Where a photo was taken ("Pickup — KELLOGGS"), so a pickup photo is not read as the POD. */
   stopLabel?: string | null
+  /** What an additional document is (LUMPER_RECEIPT, ...), when the driver picked a type. */
+  docType?: string | null
   driverId: string
   submittedByEmail: SubmissionWithDocs['submittedByEmail']
   /**
@@ -138,6 +140,7 @@ const docs = useMemo<LoadDriverDoc[]>(
               driverName: sub.driverName,
               source: sub.source,
               stopLabel: sub.stopLabel ?? null,
+              docType: sub.docType ?? null,
               driverId: sub.driverId,
               submittedByEmail: sub.submittedByEmail,
               url: urls[key] ?? null,

@@ -52,7 +52,8 @@ export function useOpenInvoices(): OpenInvoices {
 
   // Aged against the moment of the read, not a fixed mount time: a page left open
   // overnight must not keep reporting yesterday's buckets.
-  const aging = useMemo(() => ageInvoices(invoices, new Date().toISOString()), [invoices])
+  // AR ages from the invoice date (0–30 / 31–60 / 61–90 / 90+); lateness still runs from the due date.
+  const aging = useMemo(() => ageInvoices(invoices, new Date().toISOString(), { fromInvoiceDate: true }), [invoices])
 
   const refresh = useCallback(async () => { setLoading(true); await load() }, [load])
 

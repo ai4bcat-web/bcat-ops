@@ -218,13 +218,19 @@ describe('avgDaysToInvoice / avgDaysToPay', () => {
 
   it('averages delivery → issue and ignores VOID and undelivered shipments', () => {
     const rows = [
-      invoice({ id: 'i1', issuedAt: '2026-09-03T09:00:00Z' }),            // 2
-      invoice({ id: 'i2', issuedAt: '2026-09-05T09:00:00Z' }),            // 4
-      invoice({ id: 'i3', issuedAt: '2026-09-30T09:00:00Z', status: 'VOID' }), // excluded
-      invoice({ id: 'i4', issuedAt: '2026-09-30T09:00:00Z' }),            // no delivery date
-      invoice({ id: 'i9', issuedAt: '2026-09-30T09:00:00Z' }),            // no shipment at all
+      invoice({ id: 'i1', issuedAt: '2026-09-03T09:00:00Z', invoiceDate: '2026-09-03' }),            // 2
+      invoice({ id: 'i2', issuedAt: '2026-09-05T09:00:00Z', invoiceDate: '2026-09-05' }),            // 4
+      invoice({ id: 'i3', issuedAt: '2026-09-30T09:00:00Z', invoiceDate: '2026-09-30', status: 'VOID' }), // excluded
+      invoice({ id: 'i4', issuedAt: '2026-09-30T09:00:00Z', invoiceDate: '2026-09-30' }),            // no delivery date
+      invoice({ id: 'i9', issuedAt: '2026-09-30T09:00:00Z', invoiceDate: '2026-09-30' }),            // no shipment at all
     ]
     expect(avgDaysToInvoice(rows, ships)).toBe(3)
+    // Dated before delivery (a data error) and Aljex carry-overs never pull the average negative.
+    expect(avgDaysToInvoice([
+      ...rows,
+      { ...invoice({ id: 'i1', issuedAt: '2026-09-03T09:00:00Z' }), invoiceDate: '2026-08-01' },
+      { ...invoice({ id: 'i2', issuedAt: '2026-09-05T09:00:00Z', invoiceDate: '2026-09-05' }), aljexDueDate: '2026-10-05' },
+    ], ships)).toBe(3)
   })
 
   it('is null when no pair qualifies', () => {
@@ -298,19 +304,21 @@ describe('agingCsv', () => {
   it('writes dollars from cents and escapes a customer name with a comma', () => {
     const { byCustomer } = ageInvoices(
       [
-        invoice({ id: 'i1', customerId: 'c2', customerName: 'Rev, Inc', dueAt: '2026-10-20', balanceCents: 125_050 }),
-        invoice({ id: 'i2', customerId: 'c2', customerName: 'Rev, Inc', dueAt: '2026-08-01', balanceCents: 7 }),
+        invoice({ id: 'i1', customerId: 'c2', customerName: 'Rev, Inc', invoiceDate: '2026-09-20', dueAt: '2026-10-20', balanceCents: 125_050 }),
+        invoice({ id: 'i2', customerId: 'c2', customerName: 'Rev, Inc', invoiceDate: '2026-07-02', dueAt: '2026-08-01', balanceCents: 7 }),
       ],
       '2026-10-15',
+      { fromInvoiceDate: true },
     )
     const csv = agingCsv(byCustomer)
     const lines = csv.split('\n')
     expect(lines[0]).toBe(
-      ['Customer', ...AGING_BUCKETS.map((b) => AGING_BUCKET_LABEL[b]), 'Total', 'Late invoices', 'Oldest days']
+      ['Customer', '0–30', '31–60', '61–90', '90+', 'Total', 'Late invoices', 'Oldest days']
         .map((h) => `"${h}"`)
         .join(','),
     )
-    expect(lines[1]).toBe('"Rev, Inc","1250.50","0.00","0.00","0.07","0.00","1250.57","1","75"')
+    // Aged from the invoice date: 25 days → 0–30, 105 days → 90+; lateness still from the due date.
+    expect(lines[1]).toBe('"Rev, Inc","1250.50","0.00","0.00","0.07","1250.57","1","75"')
   })
 
   it('doubles an embedded quote and renders a header for no rows', () => {

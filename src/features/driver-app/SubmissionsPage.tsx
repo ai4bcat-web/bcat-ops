@@ -13,6 +13,7 @@ import {
   type SubmissionSummary,
 } from './driverApi'
 import { type BadgeVariantProps } from '@/lib/ui/badge-variants'
+import { docTypeLabel } from '@/lib/loadRequiredDocs'
 import { CurrentLoadCard } from './CurrentLoadCard'
 import { UnattachedPods } from './UnattachedPods'
 
@@ -77,9 +78,12 @@ function allDocumentsOf(submission: SubmissionSummary): SubmissionDocument[] {
 function DocTile({
   submissionId,
   doc,
+  docType,
 }: {
   submissionId: string
   doc: SubmissionDocument
+  /** An additional document's type, so a lumper receipt is not shown as a "Photo". */
+  docType?: string | null
 }) {
   const [url, setUrl] = useState<string | null>(null)
   const isImage = doc.contentType.startsWith('image/')
@@ -98,7 +102,7 @@ function DocTile({
     }
   }, [submissionId, doc.docId])
 
-  const label = KIND_LABEL[doc.kind]
+  const label = doc.kind === 'MISC' && docType ? docTypeLabel(docType) : KIND_LABEL[doc.kind]
   const pages = doc.pageCount > 1 ? `${doc.pageCount} pages` : '1 page'
 
   if (isImage && url) {
@@ -163,7 +167,7 @@ function SubmissionCard({ submission }: { submission: SubmissionSummary }) {
       {documentsOf(submission).length > 0 && (
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
           {documentsOf(submission).map((doc) => (
-            <DocTile key={doc.docId} submissionId={submission.id} doc={doc} />
+            <DocTile key={doc.docId} submissionId={submission.id} doc={doc} docType={submission.docType} />
           ))}
         </div>
       )}

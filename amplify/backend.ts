@@ -3217,6 +3217,12 @@ financeActionsFn.addToRolePolicy(
     ],
   })
 )
+// OTR funded it, so the invoice is paid: every 30 minutes, post one FACTOR payment for each open
+// invoice whose factoring row OTR has approved (idempotent per invoice).
+new Rule(financeActionsFn.stack, 'SettleFactoredInvoicesRule', {
+  schedule: Schedule.rate(Duration.minutes(30)),
+  targets: [new EventsLambdaTarget(financeActionsFn)],
+})
 financeActionsFn.addEnvironment('BUCKET_NAME',                   backend.storage.resources.bucket.bucketName)
 // A generated invoice is filed on its shipment as a document by tms-shipment-actions (the single writer of ShipmentDocument).
 financeActionsFn.addEnvironment('SHIPMENT_ACTIONS_FUNCTION_NAME', backend.tmsShipmentActions.resources.lambda.functionName)

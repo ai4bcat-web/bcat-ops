@@ -720,6 +720,9 @@ const schema = a.schema(stageTypes({
       // driver sent it from a stop on their day sheet. Absent on PODs and rate cons.
       stopId:            a.string(),
       stopLabel:         a.string(),            // "Pickup — Batory Oakley", for the office
+      // What an 'Additional document' (a MISC upload) is, when the driver picked a type: one of
+      // LOAD_EXTRA_DOC_TYPES (LUMPER_RECEIPT, WEIGHT_TICKET, ...). Absent for photos and 'Other'.
+      docType:           a.string(),
       slackChannelId:    a.string(),            // captured from the parent Slack post
       slackMessageTs:    a.string(),            // parent ts — POD replies use this as thread_ts
       emailMessageId:    a.string(),            // RFC-822 msg id of the parent email, with angle brackets
@@ -901,6 +904,8 @@ const schema = a.schema(stageTypes({
   // Writes are routed through tmsDirectoryActions so links and archives stay valid.
   Customer: a
     .model({
+      agingStatementSentAt: a.datetime(),   // last aging statement e-mailed (AGING_STATEMENT)
+      agingStatementSentTo: a.string(),
       // Step AW stage D: how this customer is billed (Docs/tms-build/AW-CDE-plan.md D.1). Unset = release to billing is refused.
       billingMethod:        a.enum(['FACTOR', 'MANUAL']),
       apEmail:              a.string(),
@@ -3821,6 +3826,7 @@ const schema = a.schema(stageTypes({
       otrScheduleId:   a.string(),
       otrAmount:       a.integer(), // cents, as submitted
       otrStatusSyncedAt: a.datetime(),
+      factoredAt:      a.datetime(),   // when OTR's board first said Approved (funded); dates the FACTOR payment
       // ── Invoicing by hand ─────────────────────────────────────────────────
       manualReason:     a.string(),    // 'NO_BUY' | 'MANUAL'
       manualSteps:      a.json(),      // ManualInvoiceSteps — see src/lib/manualInvoice.ts

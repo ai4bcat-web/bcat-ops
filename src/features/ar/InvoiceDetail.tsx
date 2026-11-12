@@ -10,6 +10,7 @@
  * signed download. The E-mail tab reports exactly that and never claims a send that did
  * not happen.
  */
+import { isOwnerOrAdmin } from '@/lib/accountingAccess'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ChevronLeft, Copy, Download, ExternalLink, RefreshCw } from 'lucide-react'
@@ -67,7 +68,9 @@ export function InvoiceDetail() {
   // Groups, not `useAuth()`: this page is also mounted in tests and drawers that sit
   // outside the provider, and the commission card's two buttons are not worth throwing
   // the whole invoice away for. The server decides either way.
-  const groups = useAuthUser()?.groups ?? []
+  const authUser = useAuthUser()
+  const groups = authUser?.groups ?? []
+  const canVoid = isOwnerOrAdmin(groups, authUser?.email)
   const canRelease = useBillingGrant()
 
   const [tab, setTab] = useState('summary')
@@ -185,7 +188,13 @@ export function InvoiceDetail() {
           <TmsButton aria-label="Write off balance" disabled={busy} onClick={() => setDialog({ kind: 'writeOff' })}>
             Write off
           </TmsButton>
-          <TmsButton variant="destructive" aria-label="Void invoice" disabled={busy} onClick={() => setDialog({ kind: 'void' })}>
+          <TmsButton
+            variant="destructive"
+            aria-label="Void invoice"
+            disabled={busy || !canVoid}
+            title={canVoid ? undefined : 'Only an admin can void an invoice'}
+            onClick={() => setDialog({ kind: 'void' })}
+          >
             Void
           </TmsButton>
         </>
@@ -443,7 +452,7 @@ export function InvoiceDetail() {
         <TmsCard
           title="Factoring"
           actions={
-            <Link className="tms-btn tms-btn-ghost tms-btn-sm" to="/tms/factors" aria-label="Open the factoring queue">
+            <Link className="tms-btn tms-btn-ghost tms-btn-sm" to="/tms/invoicing/factored" aria-label="Open the factoring queue">
               Factoring queue <ExternalLink size={13} />
             </Link>
           }

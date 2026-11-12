@@ -88,7 +88,7 @@ export const handler = async () => {
           // its red status and its message; OTR's board status is recorded alongside.
           UpdateExpression: docsShort
             ? 'SET otrStatus = :s, otrScheduleId = :sch, otrStatusSyncedAt = :t, updatedAt = :t'
-            : 'SET otrStatus = :s, otrScheduleId = :sch, otrStatusSyncedAt = :t, #st = :local, updatedAt = :t, otrError = :null',
+            : `SET otrStatus = :s, otrScheduleId = :sch, otrStatusSyncedAt = :t, #st = :local, updatedAt = :t, otrError = :null${localStatusFor(d.status) === 'FACTORED' ? ', factoredAt = if_not_exists(factoredAt, :t)' : ''}`,
           // DynamoDB refuses a name the expression does not use.
           ...(docsShort ? {} : { ExpressionAttributeNames: { '#st': 'status' } }),
           ExpressionAttributeValues: {

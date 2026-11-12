@@ -1043,7 +1043,8 @@ describe('invoice documents packet', () => {
 
     await call('EMAIL_INVOICE', { invoiceId })
     const names = noticeNames()
-    expect(names[0]).toMatch(/^INV-000001/)
+    // Named for the customer: 'Invoice <PRO> <PO>.pdf'.
+    expect(names[0]).toMatch(/^Invoice S000001( .+)?\.pdf$/)
     expect(names.slice(1)).toEqual(['doc-ratecon.pdf', 'pod-seed.pdf', 'doc-scale.pdf', 'doc-lumper.pdf', 'doc-other.pdf', 'bol-seed.pdf'])
     expect(names).not.toContain('doc-private-lumper.pdf')
   })
@@ -1071,6 +1072,12 @@ describe('invoice documents packet', () => {
 })
 
 describe('VOID_INVOICE', () => {
+  it('is an admin act: Invoicing access alone cannot void', async () => {
+    const { invoiceId } = await generate()
+    await expect(call('VOID_INVOICE', { invoiceId, reason: 'duplicate' }, JENNY)).rejects.toThrow(/only an admin can void/)
+    expect(table(TABLES.invoice).get(invoiceId)!.status).not.toBe('VOID')
+  })
+
   it('puts the order back to UNBILLED, unfreezes the load and leaves the open book', async () => {
     const { invoiceId } = await generate()
     await call('VOID_INVOICE', { invoiceId, reason: 'duplicate' })
@@ -1367,6 +1374,30 @@ describe('REVERSE_PAYMENT', () => {
 })
 
 // ── factoring ───────────────────────────────────────────────────────────────
+
+describe('SETTLE_FACTORED_INVOICES', () => {
+  it('marks an invoice paid once OTR has funded it, dated the funding day, and only once', async () => {
+    const { invoiceId } = await generate()
+    await call('SEND_TO_FACTOR', { invoiceId })
+    const row = table(TABLES.factoring).get('S000001-1')!
+    // Still pending at OTR: nothing to settle.
+    table(TABLES.factoring).set('S000001-1', { ...row, status: 'PENDING_WITH_OTR', otrInvoiceId: '99123' })
+    let out = (await call('SETTLE_FACTORED_INVOICES', {})) as { settled: Row[] }
+    expect(out.settled).toHaveLength(0)
+
+    table(TABLES.factoring).set('S000001-1', { ...row, status: 'FACTORED', otrInvoiceId: '99123', factoredAt: '2026-11-03T15:00:00.000Z' })
+    out = (await call('SETTLE_FACTORED_INVOICES', {})) as { settled: Row[] }
+    expect(out.settled).toHaveLength(1)
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ status: 'PAID', balanceCents: 0 })
+    const payments = [...table(TABLES.arPayment).values()].filter((p) => p.kind === 'PAYMENT')
+    expect(payments).toHaveLength(1)
+    expect(payments[0]).toMatchObject({ method: 'FACTOR', reference: 'OTR 99123', receivedAt: '2026-11-03T12:00:00.000Z' })
+
+    out = (await call('SETTLE_FACTORED_INVOICES', {})) as { settled: Row[] }
+    expect(out.settled).toHaveLength(0)
+    expect([...table(TABLES.arPayment).values()].filter((p) => p.kind === 'PAYMENT')).toHaveLength(1)
+  })
+})
 
 describe('SEND_TO_FACTOR', () => {
   it('writes the queue row the intake e-mail would have written, and stops there', async () => {

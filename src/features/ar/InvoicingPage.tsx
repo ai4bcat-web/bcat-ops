@@ -11,6 +11,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import type { TmsTab } from '@/features/tms/kit'
 import { useAuth } from '@/hooks/useAuth'
 import { ApPage } from '@/features/ap/ApPage'
+import { FactoringPage } from '@/features/factoring/FactoringPage'
 import { ArPage } from './ArPage'
 
 export function InvoicingPage() {
@@ -19,21 +20,24 @@ export function InvoicingPage() {
   const { hasPageAccess } = useAuth()
 
   const payable = pathname.startsWith('/tms/invoicing/payable')
-  // The routes accept the original page key or `tms`, so the tabs do too — a `page-tms`
-  // user sees both sides, exactly as the guards let them.
-  const tms = hasPageAccess('tms')
+  // Factored invoices (sent to OTR) live in their own view; Receivable is what we invoice by hand.
+  const factored = pathname.startsWith('/tms/invoicing/factored')
+  // Accounting pages open only on their own grant (src/lib/accountingAccess.ts), so each view does too.
   const tabs: TmsTab[] = [
-    ...(tms || hasPageAccess('invoicing') ? [{ key: 'receivable', label: 'Receivable' }] : []),
-    ...(tms || hasPageAccess('carrierPay') ? [{ key: 'payable', label: 'Payable' }] : []),
+    ...(hasPageAccess('invoicing') ? [{ key: 'receivable', label: 'Receivable' }] : []),
+    ...(hasPageAccess('factoring') ? [{ key: 'factored', label: 'Factored' }] : []),
+    ...(hasPageAccess('carrierPay') ? [{ key: 'payable', label: 'Payable' }] : []),
   ]
 
   const viewTabs = {
     tabs,
-    active: payable ? 'payable' : 'receivable',
-    onSelect: (key: string) => navigate(key === 'payable' ? '/tms/invoicing/payable' : '/tms/invoicing'),
+    active: payable ? 'payable' : factored ? 'factored' : 'receivable',
+    onSelect: (key: string) => navigate(key === 'payable' ? '/tms/invoicing/payable' : key === 'factored' ? '/tms/invoicing/factored' : '/tms/invoicing'),
   }
 
-  return payable ? <ApPage viewTabs={viewTabs} /> : <ArPage viewTabs={viewTabs} />
+  if (payable) return <ApPage viewTabs={viewTabs} />
+  if (factored) return <FactoringPage viewTabs={viewTabs} />
+  return <ArPage viewTabs={viewTabs} />
 }
 
 export default InvoicingPage

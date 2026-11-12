@@ -37,7 +37,7 @@ import { monthsCovering } from '@/lib/shipmentWindows'
 import { useStaff } from '@/hooks/useStaff'
 import { getTmsSettings, graphqlErrorText } from '@/lib/apiClient'
 import {
-  AGING_BUCKETS, AGING_BUCKET_LABEL, apAgingCsv, avgDaysToInvoice, avgDaysToPay, deliveredNotInvoiced,
+  AGING_BUCKETS, AGING_BUCKET_LABEL, AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL, apAgingCsv, avgDaysToInvoice, avgDaysToPay, deliveredNotInvoiced,
 } from '@/lib/arAging'
 import { creditSummaryForCustomer } from '@/lib/customerCredit'
 import { chicagoDateStr } from '@/lib/date'
@@ -566,11 +566,11 @@ function ArPanel({ period, asOf, periodLabel, refreshKey }: {
           <TmsStatRow
             compact
             columns={5}
-            items={AGING_BUCKETS.map((b) => ({ key: b, label: AGING_BUCKET_LABEL[b], value: formatMoneyCents(open.aging.byBucket[b]) }))}
+            items={AR_AGING_BUCKETS.map((b) => ({ key: b, label: AR_AGING_BUCKET_LABEL[b], value: formatMoneyCents(open.aging.byBucket[b]) }))}
           />
           <TmsSegmentedBar
             ariaLabel="Aging share by bucket"
-            segments={AGING_BUCKETS.map((b) => ({ key: b, label: AGING_BUCKET_LABEL[b], value: open.aging.byBucket[b] }))}
+            segments={AR_AGING_BUCKETS.map((b) => ({ key: b, label: AR_AGING_BUCKET_LABEL[b], value: open.aging.byBucket[b] }))}
           />
         </section>
         {open.aging.byCustomer.length === 0 && !open.loading && <Empty>Nothing is owed to us.</Empty>}

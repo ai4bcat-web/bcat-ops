@@ -205,7 +205,7 @@ describe('App routes', () => {
       ['/customers', 'CustomersPage|/tms/customers'],
       ['/carriers/C1', 'CarriersPage|/tms/carriers/C1'],
       ['/ar/invoices/INV-1?tab=email', 'InvoiceDetail|/tms/invoicing/invoices/INV-1?tab=email'],
-      ['/factoring', 'FactoringPage|/tms/factors'],
+      ['/factoring', 'InvoicingPage|/tms/invoicing/factored'],
       ['/drivers', 'FilesPage|/files'],
       ['/audit', 'BrokeragePage|/tms/brokerage/audit'],
       ['/settings/integrations/gmail', 'BrokeragePage|/tms/brokerage/integrations/gmail'],

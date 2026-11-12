@@ -165,7 +165,7 @@ export function SendToFactorDialog({ invoiceId, busy, onClose, onDone }: {
           </div>
 
           {queuedPro && (
-            <Link to="/tms/factors" className="inline-flex items-center gap-1 font-medium">
+            <Link to="/tms/invoicing/factored" className="inline-flex items-center gap-1 font-medium">
               Open the factoring queue to submit it to OTR <ArrowRight size={14} />
             </Link>
           )}
