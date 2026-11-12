@@ -168,6 +168,11 @@
 .tms-shell .tms-dg-kpi-warn .tms-dg-kpi-value { color: var(--tms-badge-orange); }
 .tms-shell .tms-dg-kpi-bad .tms-dg-kpi-value { color: var(--tms-badge-red); }
 .tms-shell .tms-dg-kpi-good .tms-dg-kpi-value { color: var(--tms-badge-green); }
+/* A KPI that doubles as a quick filter (e.g. Past delivery date). */
+.tms-shell .tms-dg-kpi-toggle { font: inherit; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px 6px; margin: -3px -7px; cursor: pointer; }
+.tms-shell .tms-dg-kpi-toggle:hover { border-color: var(--tms-border); }
+.tms-shell .tms-dg-kpi-toggle:focus-visible { outline: 2px solid var(--tms-accent, currentColor); outline-offset: 1px; }
+.tms-shell .tms-dg-kpi-active { border-color: var(--tms-badge-red); background: color-mix(in srgb, var(--tms-badge-red) 8%, transparent); }
 
 /* ── The grid ─────────────────────────────────────────────────────────────── */
 

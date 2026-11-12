@@ -38,6 +38,12 @@ export interface DenseKpi {
   label: string
   value: ReactNode
   tone?: 'warn' | 'bad' | 'good'
+  /** Hover text. */
+  title?: string
+  /** Makes the item a toggle button (a quick filter). */
+  onClick?: () => void
+  /** Pressed state of a toggle item. */
+  active?: boolean
 }
 
 /** The KPI/summary strip above the table; renders nothing while collapsed. */
@@ -45,12 +51,18 @@ export function DenseKpiStrip({ open, items }: { open: boolean; items: DenseKpi[
   if (!open) return null
   return (
     <div id="tms-dg-kpi" className="tms-dg-kpis" role="region" aria-label="Summary">
-      {items.map((k) => (
-        <div key={k.label} className={`tms-dg-kpi${k.tone ? ` tms-dg-kpi-${k.tone}` : ''}`}>
-          <span className="tms-dg-kpi-value">{k.value}</span>
-          <span className="tms-dg-kpi-label">{k.label}</span>
-        </div>
-      ))}
+      {items.map((k) => {
+        const cls = `tms-dg-kpi${k.tone ? ` tms-dg-kpi-${k.tone}` : ''}${k.onClick ? ' tms-dg-kpi-toggle' : ''}${k.active ? ' tms-dg-kpi-active' : ''}`
+        const inner = (
+          <>
+            <span className="tms-dg-kpi-value">{k.value}</span>
+            <span className="tms-dg-kpi-label">{k.label}</span>
+          </>
+        )
+        return k.onClick
+          ? <button key={k.label} type="button" className={cls} title={k.title} aria-pressed={!!k.active} onClick={k.onClick}>{inner}</button>
+          : <div key={k.label} className={cls} title={k.title}>{inner}</div>
+      })}
     </div>
   )
 }

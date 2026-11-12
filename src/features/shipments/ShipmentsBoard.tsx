@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
+  CalendarX,
   Clock,
   Columns3,
   Download,
@@ -126,7 +127,7 @@ import {
 } from './teamColumnLayout'
 import type { BatchShipmentTask, CustomerRecord, LocationRecord, ShipmentColumnTemplateRecord, TmsSettings, UserProfileRecord } from '@/types/tms'
 import { REVIEW_BILLING_LABEL, needsBillingReview, reviewBillingNote } from '@/lib/reviewBilling'
-import { matchesFlags, type BoardFlag } from './boardChips'
+import { matchesFlags, pastDeliveryOf, type BoardFlag } from './boardChips'
 import { BatchActionBar } from './board/BatchActionBar'
 import {
   outcomesFromServer,
@@ -221,6 +222,10 @@ function exceptionIcons(row: ShipmentRow): Array<{ icon: ReactNode; meaning: str
       icon: <Clock size={14} />,
       meaning: state === 'OVERDUE' ? 'Overdue check call' : 'Open check call',
     })
+  }
+  const late = pastDeliveryOf(row, Date.now())
+  if (late) {
+    out.push({ icon: <CalendarX size={14} />, meaning: late.tooltip })
   }
   const missingDocs = docsMissingOf(row)
   if (missingDocs.length > 0) {
@@ -898,7 +903,8 @@ function BoardPane({
         )
       }
       if (columnKey === 'status') {
-        return <span className="flex items-center gap-1"><StatusPill row={row} /><TrackingModeNotSetRowChip row={row} /></span>
+        const late = pastDeliveryOf(row, Date.now())
+        return <span className="flex items-center gap-1"><StatusPill row={row} />{late && <TmsBadge tone="red" title={late.tooltip} data-testid="past-delivery-pill">Past delivery date</TmsBadge>}<TrackingModeNotSetRowChip row={row} /></span>
       }
       if (columnKey === 'delivery') {
         const r = deliveryPhase(phaseInputOfRow(row, Date.now()))
@@ -1064,7 +1070,9 @@ function BoardPane({
     let moving = 0
     let delivered = 0
     let docs = 0
+    let pastDelivery = 0
     let revenue = 0
+    const nowMs = Date.now()
     const deliveredRows: ShipmentRow[] = []
     for (const r of filteredRows) {
       const status = boardStatusOf(r)
@@ -1076,6 +1084,7 @@ function BoardPane({
         revenue += r.revenueCents ?? 0
       }
       if (docsMissingOf(r).length > 0) docs += 1
+      if (pastDeliveryOf(r, nowMs)) pastDelivery += 1
     }
     const split = profitByDivision(deliveredRows, (code) => topLevelOf(divisions, code))
     const margin = (d: { revenueCents: number; profitCents: number }) => (d.revenueCents > 0 ? ` (${Math.round((d.profitCents / d.revenueCents) * 100)}%)` : '')
@@ -1090,6 +1099,19 @@ function BoardPane({
       { label: 'In transit', value: moving },
       { label: 'Delivered', value: delivered },
       { label: 'Missing docs', value: docs, tone: docs > 0 ? 'warn' : undefined },
+      {
+        label: 'Past delivery date',
+        value: pastDelivery,
+        tone: pastDelivery > 0 ? 'bad' : undefined,
+        title: flags.has('pastDeliveryDate') ? 'Showing only shipments past their delivery date. Click to show all.' : 'Scheduled delivery day has passed and the shipment is not delivered. Click to show only these.',
+        active: flags.has('pastDeliveryDate'),
+        onClick: () => setFlags((prev) => {
+          const next = new Set(prev)
+          if (next.has('pastDeliveryDate')) next.delete('pastDeliveryDate')
+          else next.add('pastDeliveryDate')
+          return next
+        }),
+      },
       { label: 'Delivered revenue', value: <span title={DELIVERED_ONLY_TIP}>{formatCents(revenue)}</span> },
       {
         label: 'Delivered gross profit',
@@ -1103,7 +1125,7 @@ function BoardPane({
         ),
       },
     ]
-  }, [filteredRows, divisions])
+  }, [filteredRows, divisions, flags])
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
