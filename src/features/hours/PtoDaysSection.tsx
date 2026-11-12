@@ -5,6 +5,7 @@
  * and pay above; this section is where the days are recorded, corrected and removed, with the year's
  * days and hours per driver beside them. Each change is signed (who, and what the day said before).
  */
+import { DenseTable } from '@/features/tms/grid/DenseTable'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
@@ -276,37 +277,33 @@ export function PtoDaysSection({
         {(driverId || month || weekOf) && <TmsButton variant="ghost" onClick={() => { setDriverId(''); setMonth(''); setWeekOf('') }}>Clear filters</TmsButton>}
       </div>
 
-      <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full text-sm" aria-label="PTO days taken">
-          <thead>
-            <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-              <th className="px-3 py-2 font-medium">Date</th>
-              <th className="px-3 py-2 font-medium">Driver</th>
-              <th className="px-3 py-2 text-right font-medium">Hours</th>
-              <th className="px-3 py-2 font-medium">Note</th>
-              <th className="px-3 py-2 font-medium">Entered by</th>
-              <th className="px-3 py-2 font-medium"><span className="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows === null && !error && <tr><td className="px-3 py-3 text-muted-foreground" colSpan={6}>Loading…</td></tr>}
-            {rows !== null && shown.length === 0 && <tr><td className="px-3 py-3 text-muted-foreground" colSpan={6}>No PTO days match.</td></tr>}
-            {shown.map((r) => (
-              <tr key={r.id} className="border-b border-border/60">
-                <td className="whitespace-nowrap px-3 py-2">{dayLabel(r.workDate)}</td>
-                <td className="px-3 py-2">{names.get(r.driverId) ?? 'Driver'}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{decimalHours(r.minutes)}{r.corrected && <span className="ml-1 text-[10px] text-muted-foreground" title="Corrected">edited</span>}</td>
-                <td className="px-3 py-2 text-muted-foreground">{r.note.replace(/\s*\(?PTO (?:entered|approved) by \S+?\)?$/, '') || '—'}</td>
-                <td className="px-3 py-2 text-muted-foreground">{r.enteredBy || '—'}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right">
-                  <TmsButton size="sm" variant="ghost" aria-label={`Edit PTO ${r.workDate} ${names.get(r.driverId) ?? ''}`} onClick={() => setEditing(r)}>Edit</TmsButton>
-                  <TmsButton size="sm" variant="ghost" aria-label={`Remove PTO ${r.workDate} ${names.get(r.driverId) ?? ''}`} onClick={() => setRemoving(r)}>Remove</TmsButton>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DenseTable<(typeof shown)[number]>
+        gridId="pto-days"
+        aria-label="PTO days taken"
+        rows={shown}
+        rowKey={(r) => r.id}
+        maxHeight="480px"
+        empty={<span className="text-muted-foreground">{rows === null && !error ? 'Loading…' : 'No PTO days match.'}</span>}
+        columns={[
+          { key: 'date', header: 'Date', filter: 'date', dateOf: (r) => r.workDate || null, text: (r) => dayLabel(r.workDate) },
+          { key: 'driver', header: 'Driver', filter: 'multi', text: (r) => names.get(r.driverId) ?? 'Driver' },
+          {
+            key: 'hours', header: 'Hours', align: 'right', filter: 'number', numberOf: (r) => r.minutes / 60, text: (r) => String(decimalHours(r.minutes)),
+            render: (r) => <span className="tabular-nums">{decimalHours(r.minutes)}{r.corrected && <span className="ml-1 text-[10px] text-muted-foreground" title="Corrected">edited</span>}</span>,
+          },
+          { key: 'note', header: 'Note', text: (r) => r.note.replace(/\s*\(?PTO (?:entered|approved) by \S+?\)?$/, '') },
+          { key: 'enteredBy', header: 'Entered by', filter: 'multi', text: (r) => r.enteredBy ?? '' },
+          {
+            key: 'actions', header: '', fixed: true, width: 140, sortable: false, filter: false, text: () => '',
+            render: (r) => (
+              <span className="whitespace-nowrap">
+                <TmsButton size="sm" variant="ghost" aria-label={`Edit PTO ${r.workDate} ${names.get(r.driverId) ?? ''}`} onClick={() => setEditing(r)}>Edit</TmsButton>
+                <TmsButton size="sm" variant="ghost" aria-label={`Remove PTO ${r.workDate} ${names.get(r.driverId) ?? ''}`} onClick={() => setRemoving(r)}>Remove</TmsButton>
+              </span>
+            ),
+          },
+        ]}
+      />
 
       {adding && (
         <AddDialog
