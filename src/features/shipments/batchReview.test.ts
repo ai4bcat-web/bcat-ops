@@ -38,10 +38,24 @@ describe('review facts of a board row', () => {
     expect(reviewFactsOfRow(row('S1', { reference: null, customerReference: null })).referenceNumber).toBeNull()
   })
 
-  it('does not count POD received while the document gate has not run', () => {
-    expect(reviewFactsOfRow(row('S1', { docsMissing: null })).podReceived).toBe(false)
+  it('counts POD received only when the customer requires one and the gate does not list it missing', () => {
+    expect(reviewFactsOfRow(row('S1')).podReceived).toBe(true)
     expect(reviewFactsOfRow(row('S1', { docsMissing: ['POD'] })).podReceived).toBe(false)
-    expect(reviewFactsOfRow(row('S1', { docsRequired: ['BOL'], docsMissing: [] })).podReceived).toBe(false)
+  })
+
+  it('treats POD as unknown (null) when the gate has not run or POD is not on the customer\'s list', () => {
+    expect(reviewFactsOfRow(row('S1', { docsMissing: null })).podReceived).toBeNull()
+    expect(reviewFactsOfRow(row('S1', { docsRequired: ['BOL'], docsMissing: [] })).podReceived).toBeNull()
+  })
+
+  it('does not refuse a push on a POD the row cannot speak for: the server reads the documents', () => {
+    // 20027: delivered, POD column reads in, customer's document list does not include POD.
+    expect(pushRefusals([row('S1', { docsRequired: ['BOL'], docsMissing: [] })], none)).toEqual([])
+    expect(pushRefusals([row('S1', { docsMissing: null })], none)).toEqual([])
+    // Where POD is required and listed missing, it is still refused here with the sentence.
+    const out = pushRefusals([row('S1', { docsMissing: ['POD'] })], none)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.reasons).toContain('POD not received')
   })
 
   it('gives every reason a row fails, per row', () => {

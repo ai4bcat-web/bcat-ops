@@ -731,9 +731,11 @@ function specialRequirementsLabel(req: SpecialRequirements | null | undefined): 
  * 'NO_POD' = the gate says the POD is outstanding; 'POD_IN' = the gate ran and the POD is not among what is missing; '' = not known yet
  * (the gate never ran for this shipment).
  */
-export function podStatusOf(row: Pick<ShipmentRow, 'revDivision' | 'docsMissing'>): 'NO_POD' | 'POD_IN' | 'NA' | '' {
+export function podStatusOf(row: Pick<ShipmentRow, 'revDivision' | 'docsMissing'> & { docsRequired?: string[] | null }): 'NO_POD' | 'POD_IN' | 'NA' | '' {
   if (row.revDivision === 'CAR_SHIPPING') return 'NA'
   if (row.docsMissing == null) return ''
+  // `docsMissing` only lists what the customer requires: with POD off that list, "POD not missing" says nothing about a POD being on file.
+  if (Array.isArray(row.docsRequired) && !row.docsRequired.includes('POD')) return ''
   return row.docsMissing.includes('POD') ? 'NO_POD' : 'POD_IN'
 }
 
@@ -1133,7 +1135,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
     label: 'POD',
     group: 'Computed',
     // Car shipping (auto shippers) has no POD or RC to chase: both columns stay blank for it (Ryne 2026-11-11).
-    value: (r) => (r.revDivision !== 'CAR_SHIPPING' && r.docsMissing != null && !r.docsMissing.includes('POD') ? 'Y' : ''),
+    value: (r) => (podStatusOf(r) === 'POD_IN' ? 'Y' : ''),
     width: 56,
   },
   {

@@ -44,7 +44,10 @@ export function pushRefusals(
 ): BatchOutcome[] {
   const out: BatchOutcome[] = []
   for (const row of rows) {
-    const evaluation = evaluateReviewRequirements(requirementsForRow(row, src), reviewFactsOfRow(row))
+    const facts = reviewFactsOfRow(row)
+    // A POD the row cannot speak for is the server's call (it reads the documents), never a client refusal.
+    const requirements = requirementsForRow(row, src).filter((key) => key !== 'podReceived' || facts.podReceived != null)
+    const evaluation = evaluateReviewRequirements(requirements, facts)
     if (!evaluation.ok) {
       out.push({ rowId: row.id, rowLabel: row.number, ok: false, reasons: evaluation.failures.map((f) => f.message) })
     }

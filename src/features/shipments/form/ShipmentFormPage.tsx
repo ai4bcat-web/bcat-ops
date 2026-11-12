@@ -19,7 +19,7 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { useShipment } from '@/hooks/useShipment'
 import { useStaff } from '@/hooks/useStaff'
 import { useOwnFleetRoster } from '@/hooks/useOwnFleetRoster'
-import { getShipmentBundle, getTmsSettings, linkIntakeShipment, listLocations } from '@/lib/apiClient'
+import { getShipmentBundle, getTmsSettings, linkIntakeShipment, listLocations, pushToLoadReview } from '@/lib/apiClient'
 import { useIntakeLoad } from '../intake/useIntakeLoads'
 import { AttachmentPreview } from '../intake/SourceEmailCard'
 import type { LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
@@ -293,6 +293,30 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     leave()
   }, [form.dirty, leave])
   const onRun = useCallback((kind: RunKind) => { void run(kind) }, [run])
+  // Push to Load Review from inside the load: the board's action and gates (customer requirements, the server decides), after a save so the gate reads what is on screen.
+  const orderOf = bundle?.orders?.[0]
+  const canPushToReview = mode === 'edit' && !!bundle && !voided && !isDraftStatus
+    && status !== 'CANCELED' && bundle.shipment.legacyImported !== true && orderOf?.arStatus === 'DOCS_NEEDED'
+  const onPushToReview = useCallback(async () => {
+    if (!bundle) return
+    if (form.dirty || isDraftStatus) {
+      const saved = await run(isDraftStatus ? 'draft' : 'save')
+      if (!saved) return
+    }
+    try {
+      const { results } = await pushToLoadReview([bundle.shipment.id])
+      const row = results[0]
+      if (row?.ok) {
+        toast.success(row.message ?? `Shipment ${bundle.shipment.number ?? ''} pushed to Load Review`.trim())
+        await refreshBundle()
+      } else {
+        const reasons = row?.reasons?.length ? row.reasons : [row?.message ?? 'The push was refused']
+        toast.error('Not sent to Load Review', { description: reasons.join(' · '), duration: 10000 })
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'The push failed')
+    }
+  }, [bundle, form.dirty, isDraftStatus, run, refreshBundle])
   // Save, then let go of the lock right away and go back to the list. A save that fails or is blocked stays on the form with its lock.
   const onSaveExit = useCallback(async () => {
     const saved = await run(isDraftStatus ? 'draft' : 'save')
@@ -448,6 +472,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
       <ActionBar
         createMode={mode === 'create'} status={status} dirty={form.dirty} savedAt={bundle?.shipment.updatedAt ?? form.savedAt}
         done={progress.done} total={progress.total} ready={progress.ready} busy={busy} voided={voided} onRun={onRun} onSaveExit={() => { void onSaveExit() }} onDiscard={cancel}
+        onPushToReview={canPushToReview ? () => { void onPushToReview() } : undefined}
         onDuplicate={mode === 'edit' && bundle ? () => setDuplicating(true) : undefined}
       />
       {duplicating && bundle ? (

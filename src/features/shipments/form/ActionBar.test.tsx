@@ -68,5 +68,18 @@ describe('ActionBar', () => {
     show({ createMode: true, onSaveExit })
     expect(screen.queryByTestId('ship-form-save-exit')).toBeNull()
   })
-})
 
+  it('edit: Push to Load Review shows only when offered, and calls the handler', () => {
+    const onPushToReview = vi.fn()
+    const { unmount } = show({ createMode: false, status: 'DELIVERED' })
+    expect(screen.queryByTestId('ship-form-push-review')).toBeNull()
+    unmount()
+    show({ createMode: false, status: 'DELIVERED', onPushToReview })
+    fireEvent.click(screen.getByTestId('ship-form-push-review'))
+    expect(onPushToReview).toHaveBeenCalledTimes(1)
+  })
+  it('create mode never offers Push to Load Review', () => {
+    show({ onPushToReview: vi.fn() })
+    expect(screen.queryByTestId('ship-form-push-review')).toBeNull()
+  })
+})
