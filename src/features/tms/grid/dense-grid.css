@@ -168,6 +168,11 @@
 .tms-shell .tms-dg-kpi-warn .tms-dg-kpi-value { color: var(--tms-badge-orange); }
 .tms-shell .tms-dg-kpi-bad .tms-dg-kpi-value { color: var(--tms-badge-red); }
 .tms-shell .tms-dg-kpi-good .tms-dg-kpi-value { color: var(--tms-badge-green); }
+/* A KPI that doubles as a quick filter (e.g. Past delivery date). */
+.tms-shell .tms-dg-kpi-toggle { font: inherit; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px 6px; margin: -3px -7px; cursor: pointer; }
+.tms-shell .tms-dg-kpi-toggle:hover { border-color: var(--tms-border); }
+.tms-shell .tms-dg-kpi-toggle:focus-visible { outline: 2px solid var(--tms-accent, currentColor); outline-offset: 1px; }
+.tms-shell .tms-dg-kpi-active { border-color: var(--tms-badge-red); background: color-mix(in srgb, var(--tms-badge-red) 8%, transparent); }
 
 /* ── The grid ─────────────────────────────────────────────────────────────── */
 
@@ -611,4 +616,47 @@
 @media (max-width: 640px) {
   .tms-shell .tms-dense-page { padding: 8px; gap: 10px; }
   .tms-shell .tms-dense-bar + .tms-dense-body { margin-top: -10px; }
+}
+
+/* ── Every other table in the app: the same look as the View board grid ─────
+ * TmsTable (.tms-table) and the older hand-built <table>s in pages get the dense grid's header,
+ * row height, typography and dividers. :where() keeps these at one class of specificity, so inline
+ * styles (column widths, alignment, highlights) still win. */
+
+.tms-shell :where(.tms-table th:last-child),
+.tms-shell :where(.tms-table td:last-child),
+.tms-portal :where(.tms-table th:last-child),
+.tms-portal :where(.tms-table td:last-child) {
+  border-right: 0;
+}
+
+.tms-shell :where(.tms-main table:not(.tms-dg-table):not(.tms-table)) {
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell :where(.tms-main table:not(.tms-dg-table):not(.tms-table)) :where(thead th) {
+  height: 30px;
+  padding: 0 6px;
+  background: var(--tms-surface-subtle);
+  color: var(--tms-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--tms-border);
+}
+
+.tms-shell :where(.tms-main table:not(.tms-dg-table):not(.tms-table)) :where(tbody td) {
+  height: 30px;
+  padding: 0 6px;
+  line-height: 1.2;
+  border-bottom: 1px solid color-mix(in srgb, var(--tms-text) 16%, var(--tms-border));
+}
+
+.tms-shell :where(.tms-main table:not(.tms-dg-table):not(.tms-table)) :where(tbody tr:hover td) {
+  background: var(--tms-surface-hover);
 }

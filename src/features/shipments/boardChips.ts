@@ -5,11 +5,13 @@
  * Order is the display order: Check call overdue closes the row.
  */
 import { checkCallState } from '@/lib/checkCalls'
+import { chicagoDateStr, formatBoardDate } from '@/lib/date'
+import { boardStatusOf } from '@/lib/shipmentViewDefs'
 import { needsBillingReview, REVIEW_BILLING_LABEL } from '@/lib/reviewBilling'
 import { reviewFactsOfRow } from './batchReview'
 import { docsMissingOf, type ShipmentRow } from './shipmentViews'
 
-export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'reviewBilling' | 'checkCallOverdue'
+export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'reviewBilling' | 'checkCallOverdue' | 'pastDeliveryDate'
 
 export const BOARD_FLAGS: readonly BoardFlag[] = [
   'missingReference',
@@ -19,6 +21,7 @@ export const BOARD_FLAGS: readonly BoardFlag[] = [
   'reviewBilling',
   'checkCallOverdue',
 ]
+// pastDeliveryDate is a BoardFlag too, but it is toggled from the stats strip, not the chip row.
 
 export const BOARD_FLAG_LABELS: Record<BoardFlag, string> = {
   missingReference: 'Missing reference #',
@@ -27,6 +30,7 @@ export const BOARD_FLAG_LABELS: Record<BoardFlag, string> = {
   docsMissing: 'Missing documents',
   reviewBilling: REVIEW_BILLING_LABEL,
   checkCallOverdue: 'Check call overdue',
+  pastDeliveryDate: 'Past delivery date',
 }
 
 const hasText = (v: string | null | undefined): boolean => typeof v === 'string' && v.trim() !== ''
@@ -48,6 +52,7 @@ export function matchesFlag(row: ShipmentRow, flag: BoardFlag, nowMs: number): b
     case 'docsMissing': return docsMissingOf(row).length > 0
     case 'reviewBilling': return needsBillingReview(row)
     case 'checkCallOverdue': return checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, nowMs) === 'OVERDUE'
+    case 'pastDeliveryDate': return pastDeliveryOf(row, nowMs) != null
   }
 }
 
@@ -61,4 +66,42 @@ export function flagCounts(rows: readonly ShipmentRow[], nowMs: number): Record<
   const counts = Object.fromEntries(BOARD_FLAGS.map((f) => [f, 0])) as Record<BoardFlag, number>
   for (const row of rows) for (const flag of BOARD_FLAGS) if (matchesFlag(row, flag, nowMs)) counts[flag] += 1
   return counts
+}
+
+export interface PastDelivery {
+  /** The scheduled delivery day, YYYY-MM-DD in Chicago time. */
+  day: string
+  /** Whole days since that day (at least 1). */
+  daysLate: number
+  /** "Scheduled delivery Nov 10, 2026 — not marked delivered (2 days)" */
+  tooltip: string
+}
+
+function dayNumber(ymd: string): number {
+  const [y, m, d] = ymd.split('-').map(Number)
+  return Date.UTC(y, m - 1, d) / 86_400_000
+}
+
+/**
+ * A live shipment whose scheduled delivery day (the last delivery stop's appointment, or the end of its
+ * window) is before today in Chicago time and that is not delivered yet. Day-level on purpose: a load due
+ * at 8:00 today is not flagged until tomorrow, and a date-only appointment (stored as Chicago midnight)
+ * counts its whole day. Delivered, voided, canceled and draft shipments are never flagged.
+ */
+export function pastDeliveryOf(
+  row: Pick<ShipmentRow, 'status' | 'voidedAt' | 'deletedAt' | 'deliveryAppt' | 'deliveryApptEnd'>,
+  nowMs: number,
+): PastDelivery | null {
+  if (row.status === 'DRAFT') return null
+  const board = boardStatusOf(row)
+  if (board === 'DELIVERED' || board === 'VOIDED' || board === 'CANCELED') return null
+  const days = [row.deliveryAppt, row.deliveryApptEnd].map((v) => (v ? chicagoDateStr(v) : '')).filter(Boolean)
+  if (days.length === 0) return null
+  const day = days.sort()[days.length - 1]
+  const today = chicagoDateStr(new Date(nowMs))
+  const daysLate = dayNumber(today) - dayNumber(day)
+  if (daysLate < 1) return null
+  const [y, m, d] = day.split('-').map(Number)
+  const label = `${formatBoardDate(new Date(Date.UTC(y, m - 1, d, 18)).toISOString())}, ${y}`
+  return { day, daysLate, tooltip: `Scheduled delivery ${label} — not marked delivered (${daysLate} ${daysLate === 1 ? 'day' : 'days'})` }
 }

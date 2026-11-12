@@ -1931,6 +1931,8 @@ const schema = a.schema(stageTypes({
       // hold this e-mail's references (src/lib/intakeBuilt.ts). Advice only; nothing is deleted or dismissed because of it.
       alreadyBuilt:  a.json(),
       alreadyBuiltCheckedAt: a.datetime(),
+      // Team notes (Ryne 2026-11-12): [{ at, by, text }], newest last; written only by INTAKE_ADD_NOTE.
+      notes:         a.json(),
       shipmentId:    a.string(),             // set the moment createShipment returns
       shipmentNumber: a.string(),
       reviewedBy:    a.string(),

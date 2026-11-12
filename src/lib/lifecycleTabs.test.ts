@@ -10,7 +10,7 @@ describe('activeLifecycleTab', () => {
     ['/tms/shipments/intake', 'build'],
     ['/tms/shipments/intake/abc123', 'build'],
     ['/tms/shipments/new', 'build'],
-    ['/tms/shipments/SHP-1/edit', 'build'],
+    ['/tms/shipments/SHP-1/edit', 'view'],
     ['/tms/shipments', 'view'],
     ['/tms/shipments/', 'view'],
     ['/tms/shipments/SHP-1', 'view'],

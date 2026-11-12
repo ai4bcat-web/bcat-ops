@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import '@testing-library/jest-dom/vitest'
 import * as api from '@/lib/apiClient'
@@ -19,7 +19,7 @@ let divisions: OwnershipDivisionRecord[] = []
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({
   useOwnershipDivisions: () => ({ divisions, loading: false, error: null, refresh: () => undefined }),
 }))
-vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn(), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(), listShipmentsBySearchKeys: vi.fn() }))
+vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn(), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(), addIntakeNote: vi.fn(), listShipmentsBySearchKeys: vi.fn() }))
 
 function Where() {
   const loc = useLocation()
@@ -29,6 +29,12 @@ function Where() {
 function NewWhere() {
   const loc = useLocation()
   return <div data-testid="new-state">{JSON.stringify(loc.state)}</div>
+}
+
+/** Opens a row's flag dialog (duplicate, already built or notes) and returns the dialog. */
+async function openFlag(testId: 'intake-flag-dup' | 'intake-flag-built' | 'intake-flag-notes', index = 0) {
+  fireEvent.click((await screen.findAllByTestId(testId))[index]!)
+  return screen.findByRole('dialog')
 }
 
 function renderBoard(url = '/tms/shipments/intake', isOwner = true) {
@@ -79,27 +85,32 @@ describe('IntakeBoard', () => {
     expect(screen.queryByText('First tender')).not.toBeInTheDocument()
   })
 
-  it('explains a division with no intake address and lists it in the owner banner', async () => {
+  it('explains a division with no intake address and lists it in a compact owner notice that can be hidden', async () => {
+    window.localStorage.clear()
     renderBoard('/tms/shipments/intake?division=NOA')
     expect(await screen.findByText('No intake e-mail set for No address')).toBeInTheDocument()
-    expect(screen.getByText(/cannot receive tender e-mails yet/)).toHaveTextContent('No address')
+    expect(screen.getByTestId('intake-divisions-banner')).toHaveTextContent('No address')
+    fireEvent.click(screen.getByTestId('intake-divisions-banner-hide'))
+    expect(screen.queryByTestId('intake-divisions-banner')).toBeNull()
+    expect(window.localStorage.getItem('tms:intake:divisions-banner-hidden')).toBe('1')
   })
 
   it('hides the missing-address banner from a viewer who is not owner/ADMIN', async () => {
     renderBoard('/tms/shipments/intake?view=division', false)
     await screen.findByText('First tender')
-    expect(screen.queryByText(/cannot receive tender e-mails yet/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('intake-divisions-banner')).not.toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /Unassigned/ })).toBeInTheDocument()
   })
 
-  it('switches to Moved via the status chips and opens a row in the review page', async () => {
+  it('lists open loads only: no Open / Moved / Dismissed tabs, and a row opens the review page', async () => {
     renderBoard('/tms/shipments/intake?division=BRK')
     await screen.findByText('First tender')
-    fireEvent.click(screen.getByRole('tab', { name: 'Moved' }))
-    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('status=moved'))
-    expect(await screen.findByText('Moved one')).toBeInTheDocument()
-    fireEvent.click(within(screen.getByRole('table')).getByText('Moved one'))
-    expect(screen.getByTestId('where')).toHaveTextContent('/tms/shipments/intake/il%3Amoved')
+    expect(screen.queryByRole('tab', { name: /^Moved/ })).toBeNull()
+    expect(screen.queryByRole('tab', { name: /^Dismissed/ })).toBeNull()
+    expect(api.listIntakeLoads).not.toHaveBeenCalledWith({ status: 'MOVED' })
+    expect(screen.queryByText('Moved one')).toBeNull()
+    fireEvent.click(within(screen.getByRole('table')).getByText('First tender'))
+    expect(screen.getByTestId('where')).toHaveTextContent('/tms/shipments/intake/il%3Aa')
   })
 
   it('Create shipment on an open row opens that row\'s review screen (the e-mail and its PDF on the left, the fields on the right)', async () => {
@@ -115,10 +126,10 @@ describe('IntakeBoard', () => {
     expect(screen.queryByTestId('intake-mark-done')).toBeNull()
   })
 
-  it('offers no Create shipment on a row that already moved', async () => {
-    renderBoard('/tms/shipments/intake?division=BRK&status=moved')
-    await screen.findByText('Moved one')
-    expect(screen.queryByTestId('intake-create-shipment')).toBeNull()
+  it('keeps every row one line: no grown row height', async () => {
+    const { container } = renderBoard('/tms/shipments/intake?division=BRK')
+    await screen.findByText('First tender')
+    expect((container.querySelector('.tms-dg') as HTMLElement).style.getPropertyValue('--dg-row-h')).not.toBe('64px')
   })
 
   it('shows completeness text for each row', async () => {
@@ -245,55 +256,76 @@ describe('IntakeBoard: delete and duplicates', () => {
     ])
   })
 
-  it('badges both rows of a duplicate pair with the question, and not an unrelated row', async () => {
+  it('flags both rows of a duplicate pair with a compact badge, not an unrelated row; the badge opens the question', async () => {
     renderBoard()
     await screen.findByText('First tender')
-    const notices = screen.getAllByTestId('intake-dup-notice')
-    expect(notices).toHaveLength(2)
-    notices.forEach((n) => { expect(n).toHaveTextContent('Possible duplicate'); expect(n).toHaveTextContent('Delete this one?') })
+    const flags = screen.getAllByTestId('intake-flag-dup')
+    expect(flags).toHaveLength(2)
+    flags.forEach((f) => expect(f).toHaveTextContent('Possible duplicate'))
+    expect(screen.queryByTestId('intake-dup-notice')).toBeNull()
+    const dialog = await openFlag('intake-flag-dup')
+    expect(within(dialog).getByTestId('intake-dup-notice')).toHaveTextContent('Delete this one?')
   })
 
   it('an owner/ADMIN deletes a duplicate after a confirm that names the load and says Intake only', async () => {
     vi.mocked(api.deleteIntake).mockResolvedValue(intakeRow({ id: 'il:b', status: 'DISMISSED' }))
     renderBoard()
     await screen.findByText('Second tender')
-    fireEvent.click(screen.getAllByTestId('intake-dup-delete')[0]!)
-    const dialog = await screen.findByRole('dialog')
+    const item = await openFlag('intake-flag-dup')
+    fireEvent.click(within(item).getByTestId('intake-dup-delete'))
+    const dialog = await screen.findByRole('dialog', { name: /Delete this load/ })
     expect(dialog).toHaveTextContent('Acme Foods · PO-100')
     expect(dialog).toHaveTextContent('Intake only')
     fireEvent.click(within(dialog).getByTestId('intake-delete-confirm'))
     await waitFor(() => expect(api.deleteIntake).toHaveBeenCalledWith({ intakeId: 'il:b', expectedVersion: 1 }))
   })
 
-  it('shows the delete control on every open row for an owner/ADMIN and never for anyone else', async () => {
+  it('delete and "Not a duplicate" are admin-only: in the dialog for an owner/ADMIN, absent for anyone else, and never inline in the row', async () => {
     renderBoard()
     await screen.findByText('First tender')
-    expect(screen.getAllByTestId('intake-delete')).toHaveLength(3)
+    expect(screen.queryByTestId('intake-delete')).toBeNull()
+    let dialog = await openFlag('intake-flag-notes', 2)
+    expect(within(dialog).getByTestId('intake-dialog-delete')).toBeInTheDocument()
+    cleanup()
     vi.restoreAllMocks()
     vi.mocked(api.listIntakeLoads).mockImplementation(async () => [intakeRow({ id: 'il:a', subject: 'First tender' }), intakeRow({ id: 'il:b', subject: 'Second tender', fromEmail: 'o@acme.example' })])
-    document.body.innerHTML = ''
     renderBoard('/tms/shipments/intake', false)
     await screen.findByText('First tender')
-    expect(screen.queryByTestId('intake-delete')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('intake-dup-delete')).not.toBeInTheDocument()
-    expect(screen.getAllByTestId('intake-dup-notice')[0]).toHaveTextContent('Possible duplicate')
+    dialog = await openFlag('intake-flag-dup')
+    expect(within(dialog).queryByTestId('intake-dialog-delete')).toBeNull()
+    expect(within(dialog).queryByTestId('intake-dup-delete')).toBeNull()
+    expect(within(dialog).queryByTestId('intake-dup-not')).toBeNull()
+    expect(within(dialog).getByTestId('intake-note-input')).toBeInTheDocument()
   })
 
-  it('"Not a duplicate" is saved on the row', async () => {
+  it('"Not a duplicate" (admin) is saved on the row', async () => {
     vi.mocked(api.markIntakeNotDuplicate).mockResolvedValue(intakeRow({ id: 'il:b' }))
     renderBoard()
     await screen.findByText('Second tender')
-    fireEvent.click(screen.getAllByTestId('intake-dup-not')[0]!)
+    const dialog = await openFlag('intake-flag-dup')
+    fireEvent.click(within(dialog).getByTestId('intake-dup-not'))
     await waitFor(() => expect(api.markIntakeNotDuplicate).toHaveBeenCalledWith({ intakeId: 'il:b', expectedVersion: 1 }))
   })
 
-  it('a row an admin deleted is hidden from the Dismissed tab', async () => {
-    vi.mocked(api.listIntakeLoads).mockImplementation(async (opts) => opts?.status === 'DISMISSED'
-      ? [intakeRow({ id: 'il:d1', status: 'DISMISSED', subject: 'Plain dismiss', dismissReason: 'spam' }), intakeRow({ id: 'il:d2', status: 'DISMISSED', subject: 'Gone', dismissReason: 'Deleted by admin' })]
-      : [])
-    renderBoard('/tms/shipments/intake?status=dismissed')
-    await screen.findByText('Plain dismiss')
-    expect(screen.queryByText('Gone')).not.toBeInTheDocument()
+  it('anyone who reviews adds a note; the row shows the note count', async () => {
+    vi.mocked(api.addIntakeNote).mockResolvedValue(intakeRow({ id: 'il:z', subject: 'Unrelated', version: 2, notes: [{ at: '2026-11-12T15:00:00.000Z', by: 'kel@bcatcorp.com', text: 'Re-send of PRO 20028' }] }))
+    renderBoard('/tms/shipments/intake', false)
+    await screen.findByText('Unrelated')
+    const dialog = await openFlag('intake-flag-notes', 2)
+    expect(dialog).toHaveTextContent('No notes yet.')
+    fireEvent.change(within(dialog).getByTestId('intake-note-input'), { target: { value: 'Re-send of PRO 20028' } })
+    fireEvent.click(within(dialog).getByTestId('intake-note-add'))
+    await waitFor(() => expect(api.addIntakeNote).toHaveBeenCalledWith({ intakeId: 'il:z', expectedVersion: 1, text: 'Re-send of PRO 20028' }))
+    expect(await within(dialog).findByTestId('intake-note')).toHaveTextContent('kel')
+  })
+
+  it('shows the note count on a row that has notes', async () => {
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:z', subject: 'Unrelated', notes: [{ at: '2026-11-12T15:00:00.000Z', by: 'kel@bcatcorp.com', text: 'x' }, { at: '2026-11-12T16:00:00.000Z', by: 'ryne@bcatcorp.com', text: 'y' }] }),
+    ])
+    renderBoard()
+    await screen.findByText('Unrelated')
+    expect(screen.getByTestId('intake-flag-notes')).toHaveTextContent('2')
   })
 })
 
@@ -313,19 +345,14 @@ describe('IntakeBoard: already built as a PRO', () => {
 
   it('badges the row whose reference is already on a shipment with its PRO, links to it, and leaves the other row alone', async () => {
     renderBoard()
-    const notice = await screen.findByTestId('intake-built-notice')
+    const flag = await screen.findByTestId('intake-flag-built')
+    expect(flag).toHaveTextContent('Built: PRO 20043')
+    expect(screen.getAllByTestId('intake-flag-built')).toHaveLength(1)
+    const notice = within(await openFlag('intake-flag-built')).getByTestId('intake-built-notice')
     expect(notice).toHaveTextContent('Already built')
-    expect(notice).toHaveTextContent('PRO 20043')
     expect(notice).toHaveTextContent('Reference 573570079')
     expect(within(notice).getByTestId('intake-built-link')).toHaveAttribute('href', '/tms/shipments/shp-43')
-    expect(screen.getAllByTestId('intake-built-notice')).toHaveLength(1)
     expect(api.listShipmentsBySearchKeys).toHaveBeenCalledTimes(1)
-  })
-
-  it('grows the rows so the notice is not clipped, and only when a row has one', async () => {
-    const { container } = renderBoard()
-    await screen.findByTestId('intake-built-notice')
-    expect((container.querySelector('.tms-dg') as HTMLElement).style.getPropertyValue('--dg-row-h')).toBe('64px')
   })
 
   it('a reference only found in the subject says "May already be built"', async () => {
@@ -333,7 +360,8 @@ describe('IntakeBoard: already built as a PRO', () => {
       intakeRow({ id: 'il:a', subject: 'Rate Confirmation for Load: 573570079', fields: intakeFields({ reference: null, pickupNumber: null, deliveryNumber: null }) }),
     ])
     renderBoard()
-    expect(await screen.findByTestId('intake-built-notice')).toHaveTextContent('May already be built')
+    expect(await screen.findByTestId('intake-flag-built')).toHaveTextContent('May be built: PRO 20043')
+    expect(within(await openFlag('intake-flag-built')).getByTestId('intake-built-notice')).toHaveTextContent('May already be built')
   })
 
   it('does not flag a row whose customer is a different one than the shipment\'s', async () => {
@@ -343,17 +371,17 @@ describe('IntakeBoard: already built as a PRO', () => {
     renderBoard()
     await screen.findByText('Tender')
     await waitFor(() => expect(api.listShipmentsBySearchKeys).toHaveBeenCalled())
-    expect(screen.queryByTestId('intake-built-notice')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('intake-flag-built')).not.toBeInTheDocument()
   })
 
   it('"Not the same load" is saved on the row; the owner/ADMIN delete opens the Intake-only confirm', async () => {
-    vi.mocked(api.markIntakeNotDuplicate).mockResolvedValue(intakeRow({ id: 'il:a' }))
+    vi.mocked(api.markIntakeNotDuplicate).mockResolvedValue(intakeRow({ id: 'il:a', version: 2 }))
     renderBoard()
-    await screen.findByTestId('intake-built-notice')
-    fireEvent.click(screen.getByTestId('intake-built-not'))
+    const dialog = await openFlag('intake-flag-built')
+    fireEvent.click(within(dialog).getByTestId('intake-built-not'))
     await waitFor(() => expect(api.markIntakeNotDuplicate).toHaveBeenCalledWith({ intakeId: 'il:a', expectedVersion: 1 }))
-    fireEvent.click(screen.getByTestId('intake-built-delete'))
-    expect(await screen.findByRole('dialog')).toHaveTextContent('Intake only')
+    fireEvent.click(within(dialog).getByTestId('intake-built-delete'))
+    expect(await screen.findByRole('dialog', { name: /Delete this load/ })).toHaveTextContent('Intake only')
   })
 
   it('a row flagged when the e-mail arrived shows its PRO from the stored answer, with no shipment read', async () => {
@@ -362,9 +390,7 @@ describe('IntakeBoard: already built as a PRO', () => {
       intakeRow({ id: 'il:a', subject: 'Tender for Mesa', fields: intakeFields({ reference: '573570079' }), alreadyBuilt: stored, alreadyBuiltCheckedAt: '2026-11-12T10:00:00.000Z' }),
     ])
     renderBoard()
-    const notice = await screen.findByTestId('intake-built-notice')
-    expect(notice).toHaveTextContent('Already built')
-    expect(notice).toHaveTextContent('PRO 20043')
+    expect(await screen.findByTestId('intake-flag-built')).toHaveTextContent('Built: PRO 20043')
     expect(api.listShipmentsBySearchKeys).not.toHaveBeenCalled()
   })
 
@@ -374,9 +400,9 @@ describe('IntakeBoard: already built as a PRO', () => {
       intakeRow({ id: 'il:a', subject: 'Tender for Mesa', fields: intakeFields({ reference: '573570079' }), alreadyBuilt: stored, alreadyBuiltCheckedAt: '2026-11-12T10:00:00.000Z' }),
     ])
     renderBoard()
-    const notice = await screen.findByTestId('intake-built-notice')
-    expect(notice).toHaveTextContent('PRO 20043')
-    expect(notice).not.toHaveTextContent('19999')
+    const flag = await screen.findByTestId('intake-flag-built')
+    await waitFor(() => expect(flag).toHaveTextContent('PRO 20043'))
+    expect(flag).not.toHaveTextContent('19999')
   })
 
   it('a failed check leaves the queue unflagged and usable', async () => {
@@ -385,6 +411,6 @@ describe('IntakeBoard: already built as a PRO', () => {
     renderBoard()
     await screen.findByText('Tender for Mesa')
     await waitFor(() => expect(api.listShipmentsBySearchKeys).toHaveBeenCalled())
-    expect(screen.queryByTestId('intake-built-notice')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('intake-flag-built')).not.toBeInTheDocument()
   })
 })

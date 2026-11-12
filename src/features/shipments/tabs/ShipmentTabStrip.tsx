@@ -3,24 +3,22 @@ import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-route
 import { X } from 'lucide-react'
 import { TmsButton, TmsDialog } from '@/features/tms/kit'
 import { useShipmentTabs } from './shipmentTabsContext'
-import { useOpenIntakeCount } from '../intake/useIntakeLoads'
 import { parseShipmentList } from '@/lib/shipmentLists'
 import { neighbourAfterClose, tabLabel } from './tabsModel'
 import './tabs.css'
 
 const BOARD = '/tms/shipments'
-const INTAKE = `${BOARD}/intake`
 const SECTIONS = [
   { key: 'active', label: 'Active', to: BOARD },
   { key: 'all', label: 'All', to: `${BOARD}?list=all` },
-  { key: 'intake', label: 'Intake', to: INTAKE },
   { key: 'voided', label: 'Voided', to: `${BOARD}?list=voided` },
 ] as const
 
 /**
- * The tab strip above the Shipments board and the shipment form (Ryne 2026-11-11): Active, All, Intake and Voided are the permanent first tabs, every shipment
+ * The tab strip above the Shipments board and the shipment form (Ryne 2026-11-11): Active, All and Voided are the permanent first tabs, every shipment
  * opened for editing is another. Each open shipment keeps its form (and so its draft and its edit lock) until its tab is closed, it is
  * saved and exited, or discarded. Middle-click closes a tab; a dot marks unsaved edits. Create shipment is in the board toolbar.
+ * The strip belongs to View only (Ryne 2026-11-12): Intake is the whole Build page, with no tabs of its own.
  */
 export function ShipmentTabStrip() {
   const tabsApi = useShipmentTabs()
@@ -28,14 +26,12 @@ export function ShipmentTabStrip() {
   const { pathname } = useLocation()
   const editMatch = useMatch('/tms/shipments/:id/edit')
   const [params] = useSearchParams()
-  const intakeCount = useOpenIntakeCount()
   const [confirmId, setConfirmId] = useState<string | null>(null)
   if (!tabsApi) return null
   const path = pathname.replace(/\/+$/, '')
   const onBoard = path === BOARD
-  const onIntake = path === INTAKE
-  if (!onBoard && !onIntake && !editMatch) return null
-  const section = onIntake ? 'intake' : onBoard ? parseShipmentList(params.get('list')) : null
+  if (!onBoard && !editMatch) return null
+  const section = onBoard ? parseShipmentList(params.get('list')) : null
   const activeId = editMatch?.params.id ?? null
   const { tabs, dirty, close } = tabsApi
 
@@ -58,7 +54,7 @@ export function ShipmentTabStrip() {
               className={`tms-ship-tab tms-ship-tab-board${section === sec.key ? ' tms-ship-tab-on' : ''}`}
               data-testid={`ship-tab-section-${sec.key}`} onClick={() => navigate(sec.to)}
             >
-              {sec.label}{sec.key === 'intake' && intakeCount ? <span className="tms-ship-tab-count">{intakeCount}</span> : null}
+              {sec.label}
             </button>
           ))}
           {tabs.map((t) => {
