@@ -66,7 +66,9 @@ export function AgingStrip({
     <TmsCard title={labels.aria}>
       <TmsStatRow
         aria-label={labels.aria}
-        columns={cells.length as 4 | 5}
+        columns="auto"
+        compact
+        caps
         items={cells}
       />
     </TmsCard>

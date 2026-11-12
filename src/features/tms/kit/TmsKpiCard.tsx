@@ -1,5 +1,6 @@
 import { ArrowDownRight, ArrowRight, ArrowUpRight } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { TmsPeriodToggle } from './TmsPeriodToggle'
 import type { TmsPeriodToggleProps } from './TmsPeriodToggle'
 
@@ -8,7 +9,7 @@ export interface TmsKpiCardProps {
   /** 16px line icon, muted. */
   icon?: LucideIcon
   /** Preformatted; `null` renders an em dash (no data is never `$0.00`). */
-  value: string | null
+  value: ReactNode
   /** `pct` is in percentage points (40.93 → "+40.93%"). */
   delta?: { pct: number; label?: string } | null
   /** `false` for AR/AP/cost: flips the tone only, never the sign. */
@@ -21,11 +22,15 @@ export interface TmsKpiCardProps {
   compact?: boolean
   /** Renders the card as a button. */
   onClick?: () => void
+  /** Pressed state when the card is a filter toggle. */
+  active?: boolean
   /** Renders a D/W/M toggle top-right of the card. */
   period?: Pick<TmsPeriodToggleProps, 'value' | 'onChange' | 'options'>
   testId?: string
   /** Accessible name for the whole card, when the label + value alone are not enough. */
   ariaLabel?: string
+  /** Hover text. */
+  title?: string
   className?: string
 }
 
@@ -45,9 +50,11 @@ export function TmsKpiCard({
   tone: valueTone = 'default',
   compact,
   onClick,
+  active,
   period,
   testId,
   ariaLabel,
+  title,
   className,
 }: TmsKpiCardProps) {
   const showDelta = value != null && delta != null
@@ -60,9 +67,10 @@ export function TmsKpiCard({
     'tms-kpi-card',
     compact ? 'tms-kpi-card-compact' : '',
     onClick ? 'tms-kpi-card-button' : '',
+    active ? 'tms-kpi-card-active' : '',
     className ?? '',
   ].filter(Boolean).join(' ')
-  const rootProps = { className: classes, 'data-testid': testId, 'aria-label': ariaLabel }
+  const rootProps = { className: classes, 'data-testid': testId, 'aria-label': ariaLabel, title }
   const body = (
     <>
       <div className="tms-kpi-card-label">
@@ -92,7 +100,7 @@ export function TmsKpiCard({
   )
 
   return onClick ? (
-    <button type="button" onClick={onClick} {...rootProps}>
+    <button type="button" onClick={onClick} aria-pressed={active === undefined ? undefined : active} {...rootProps}>
       {body}
     </button>
   ) : (

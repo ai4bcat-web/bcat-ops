@@ -24,10 +24,13 @@ describe('computeArSummary', () => {
       divisionName: (c) => (c === 'ASSETS' ? 'Assets' : c === 'LOCAL' ? 'Local' : 'BCAT Logistics'),
       asOf: '2026-11-12',
     })
-    expect(s).toMatchObject({ pendingOtrCents: 5_000, pendingShippersCents: 10_000, lateCents: 5_000, otrDaysToPay: 2, shipperDaysToPay: 10 })
+    expect(s).toMatchObject({
+      pendingOtrCents: 5_000, pendingOtrCount: 1, pendingShippersCents: 10_000, pendingShippersCount: 1,
+      lateCents: 5_000, lateCount: 1, otrDaysToPay: 2, shipperDaysToPay: 10,
+    })
     expect(s.byDivision).toEqual([
-      { key: 'BROKERAGE', label: 'BCAT Logistics', cents: 10_000 },
-      { key: 'ASSETS/LOCAL', label: 'Assets · Local', cents: 5_000 },
+      { key: 'BROKERAGE', label: 'BCAT Logistics', cents: 10_000, division: 'BROKERAGE', divisionLabel: 'BCAT Logistics', subLabel: null, count: 1 },
+      { key: 'ASSETS/LOCAL', label: 'Assets · Local', cents: 5_000, division: 'ASSETS', divisionLabel: 'Assets', subLabel: 'Local', count: 1 },
     ])
   })
 })

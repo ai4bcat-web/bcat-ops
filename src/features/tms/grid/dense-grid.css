@@ -660,3 +660,6 @@
 .tms-shell :where(.tms-main table:not(.tms-dg-table):not(.tms-table)) :where(tbody tr:hover td) {
   background: var(--tms-surface-hover);
 }
+
+/* Summary as stat cards (Invoicing, Payables). */
+.tms-shell .tms-dg-kpi-cards { padding: 8px 0 4px; }

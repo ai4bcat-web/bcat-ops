@@ -102,7 +102,7 @@ export function ArDenseTable<T>({ grid }: { grid: ArGrid<T> }) {
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
         {kpis && kpis.length > 0 ? <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} /> : null}
       </div>
-      {kpis ? <DenseKpiStrip open={prefs.kpiOpen} items={kpis} /> : null}
+      {kpis ? <DenseKpiStrip open={prefs.kpiOpen} items={kpis} variant="cards" /> : null}
       <div className="tms-dense-body">
         <DenseGrid<T>
           aria-label={label}

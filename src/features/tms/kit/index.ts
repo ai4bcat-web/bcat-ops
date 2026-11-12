@@ -74,6 +74,9 @@ export { TmsKeyHint } from './TmsKeyHint'
 export { TmsStatRow } from './TmsStatRow'
 export type { TmsStat, TmsStatRowProps } from './TmsStatRow'
 
+export { TmsBreakdownCard } from './TmsBreakdownCard'
+export type { TmsBreakdownCardProps, TmsBreakdownRow } from './TmsBreakdownCard'
+
 export { TmsTabStrip } from './TmsTabStrip'
 export type { TmsTabStripProps } from './TmsTabStrip'
 export { TmsSegmentedTabs } from './TmsSegmentedTabs'

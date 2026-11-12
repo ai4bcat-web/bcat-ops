@@ -12,6 +12,8 @@ export interface TmsStat {
   positiveIsGood?: boolean
   tone?: TmsKpiCardProps['tone']
   onClick?: () => void
+  /** Pressed state when the tile is a filter toggle. */
+  active?: boolean
   period?: TmsKpiCardProps['period']
   testId?: string
   /** Accessible name for the tile when label + value alone are not enough. */
@@ -20,20 +22,23 @@ export interface TmsStat {
 
 export interface TmsStatRowProps {
   items: TmsStat[]
-  columns?: 2 | 3 | 4 | 5
+  /** Fixed column count, or `auto` to fit as many ~170px tiles as the row holds. */
+  columns?: 2 | 3 | 4 | 5 | 'auto'
   compact?: boolean
+  /** Small uppercase captions over large values (summary strips above tables). */
+  caps?: boolean
   className?: string
   'aria-label'?: string
 }
 
 /** A row of KPI tiles. `value: null` renders an em dash, never `$0.00`. */
-export function TmsStatRow({ items, columns, compact, className, 'aria-label': ariaLabel }: TmsStatRowProps) {
+export function TmsStatRow({ items, columns, compact, caps, className, 'aria-label': ariaLabel }: TmsStatRowProps) {
   const cols = columns ?? (Math.min(items.length, 4) || 1)
   return (
     <div
       role="group"
       aria-label={ariaLabel}
-      className={`tms-stat-row tms-stat-row-${cols}${className ? ` ${className}` : ''}`}
+      className={`tms-stat-row tms-stat-row-${cols}${caps ? ' tms-stat-row-caps' : ''}${className ? ` ${className}` : ''}`}
     >
       {items.map((item, index) => (
         <TmsKpiCard
@@ -46,6 +51,7 @@ export function TmsStatRow({ items, columns, compact, className, 'aria-label': a
           positiveIsGood={item.positiveIsGood}
           tone={item.tone}
           onClick={item.onClick}
+          active={item.active}
           period={item.period}
           testId={item.testId}
           ariaLabel={item.ariaLabel}

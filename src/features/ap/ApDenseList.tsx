@@ -171,7 +171,7 @@ export function ApDenseList<T>({ config, email, onRefresh }: {
         ) : null}
       </div>
       {banner}
-      {kpis && kpis.length > 0 ? <DenseKpiStrip open={prefs.kpiOpen} items={kpis} /> : null}
+      {kpis && kpis.length > 0 ? <DenseKpiStrip open={prefs.kpiOpen} items={kpis} variant="cards" /> : null}
       <div className="tms-dense-body" style={{ minHeight: 320, maxHeight: 'calc(100vh - 280px)' }}>
         <DenseGrid<T>
           aria-label={ariaLabel ?? `AP ${gridId.replace(/^ap-/, '')}`}
