@@ -38,6 +38,8 @@ import { normalizeName } from '../../../src/lib/tmsDirectory'
 import { isManualStepId, manualProgress, withManualStep } from '../../../src/lib/manualInvoice'
 import type { ManualInvoiceSteps } from '../../../src/types'
 import { localStatusFor } from '../../../src/lib/otrInvoiceStatus'
+import { decideResubmit, sameInvoiceBack, withPriorInvoice } from '../../../src/lib/factoringResubmit'
+import { canSetCustomerPaid } from '../../../src/lib/auth/admin'
 import { normalizePro } from '../../../src/lib/proNumber'
 import {
   OtrClient,
@@ -1598,6 +1600,143 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
           }
         }
         return ok({ synced: results })
+      }
+
+      /**
+       * When the customer paid this invoice (not when OTR funded it). A date, or '' to clear,
+       * and an optional check number / ACH trace. Finance only; every change is audited. The
+       * AR payment-received tab is expected to feed these two fields later.
+       */
+      case 'setCustomerPaid': {
+        if (!canSetCustomerPaid(caller)) return fail('Only an admin, Ryne or Jenny can set when the customer paid.')
+        const item = await getFactoringItem(String(input.id))
+        if (!item) return fail('factoring item not found')
+        const paidOn = trim(input.paidOn)
+        if (paidOn) {
+          const real = /^\d{4}-\d{2}-\d{2}$/.test(paidOn) && !Number.isNaN(Date.parse(`${paidOn}T00:00:00Z`)) && new Date(`${paidOn}T00:00:00Z`).toISOString().slice(0, 10) === paidOn
+          if (!real) return fail('Use a real date, YYYY-MM-DD.')
+          if (paidOn < '2000-01-01') return fail('That date is too far back.')
+          // One day of slack: today in Chicago can already be tomorrow in UTC.
+          if (paidOn > new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)) return fail('The customer cannot have paid in the future.')
+        }
+        const ref = paidOn ? trim(input.ref).slice(0, 80) : ''
+        await updateItem(String(item.id), {
+          customerPaidOn: paidOn || null,
+          customerPaymentRef: ref || null,
+          customerPaidSetBy: actor,
+          customerPaidSetAt: nowIso(),
+        })
+        await moveStore.audit('FactoringItem', String(item.id), 'SET_CUSTOMER_PAID', actor, {
+          by: actor, at: nowIso(), proNumber: item.proNumber ?? null,
+          oldPaidOn: item.customerPaidOn ?? null, newPaidOn: paidOn || null,
+          oldRef: item.customerPaymentRef ?? null, newRef: ref || null,
+        })
+        return ok({ customerPaidOn: paidOn || null, customerPaymentRef: ref || null })
+      }
+
+      /**
+       * "Send to OTR again" for a row OTR has turned down.
+       *
+       * Reads OTR's status for the invoice right now and decides (factoringResubmit.ts):
+       *   - OTR holds it as anything but Dead: nothing is created. Its status is refreshed and
+       *     any document still missing there is resent.
+       *   - OTR holds it as Dead: a new invoice is created with the same payload and documents.
+       *     The old invoice id moves to otrPriorInvoices. If OTR answers with the SAME invoice
+       *     id (it deduplicates on the invoice number) nothing changes on the row and the
+       *     caller is told OTR has to reopen or void the Dead one.
+       * A row that never reached OTR goes through `submit` instead; the queue does that routing.
+       */
+      case 'resubmit': {
+        const item = await getFactoringItem(String(input.id))
+        if (!item) return fail('factoring item not found')
+        const first = decideResubmit(item as never)
+        if (!first.ok) return fail(first.reason)
+        if (first.kind === 'SUBMIT') return fail('This row never reached OTR. Use Submit on the row.')
+
+        const client = otr()
+        const oldId = String(item.otrInvoiceId)
+        const live = await client.getInvoice(oldId)
+        const decision = decideResubmit(item as never, live.status)
+        if (!decision.ok) return fail(decision.reason)
+
+        if (decision.kind === 'REFRESH') {
+          const incomplete = otrDocsIncomplete({ otrInvoiceId: oldId, status: String(item.status) as FactoringItem['status'] })
+          const local = incomplete ? 'NEED_TO_FACTOR' : localStatusFor(live.status)
+          await updateItem(String(item.id), {
+            otrStatus: live.status, otrScheduleId: live.scheduleId, otrStatusSyncedAt: nowIso(), status: local,
+            ...(local === 'NEED_TO_FACTOR' ? {} : { otrError: null }),
+          })
+          let documentErrors: string[] = []
+          if (incomplete) {
+            const { load } = await buildReadiness(item)
+            if (load) {
+              const { uploaded, errors } = await uploadInvoiceDocuments(item, load, oldId)
+              documentErrors = errors
+              const outcome = afterOtrDocuments(errors)
+              await updateItem(String(item.id), {
+                otrDocsUploaded: { ...((item.otrDocsUploaded as Row) ?? {}), ...uploaded },
+                otrError: outcome.otrError,
+                status: outcome.status,
+              })
+            }
+          }
+          await moveStore.audit('FactoringItem', String(item.id), 'RESEND_TO_OTR', actor, {
+            by: actor, at: nowIso(), proNumber: item.proNumber ?? null, outcome: 'REFRESHED', otrInvoiceId: oldId, otrStatus: live.status, documentErrors,
+          })
+          return ok({ outcome: 'REFRESHED', invoiceId: oldId, otrStatus: live.status, documentErrors })
+        }
+
+        // OTR holds the invoice as Dead: a new one may be created.
+        const { readiness, load } = await buildReadiness(item)
+        if (!load) return fail('no load linked to this row')
+        const payload = toOtrPayload(readiness)
+        if (!payload) {
+          const gaps = [...readiness.missingFields, ...readiness.missingDocuments]
+          return fail(`not ready to send again: missing ${gaps.join(', ')}`)
+        }
+        const created = await client.createInvoice(payload as unknown as OtrInvoicePayload)
+        if (sameInvoiceBack(oldId, created.invoiceId)) {
+          await updateItem(String(item.id), { otrStatus: live.status, otrStatusSyncedAt: nowIso() })
+          await moveStore.audit('FactoringItem', String(item.id), 'RESEND_TO_OTR', actor, {
+            by: actor, at: nowIso(), proNumber: item.proNumber ?? null, outcome: 'SAME_INVOICE', otrInvoiceId: oldId, otrStatus: live.status,
+          })
+          return fail(
+            `OTR gave back the same invoice (${oldId}) and still holds it as Dead, so nothing new was created. ` +
+              `Ask OTR to reopen or void invoice ${oldId}, then send it again.`,
+          )
+        }
+        console.log('[otr-actions] invoice replaced', { pro: item.proNumber, oldInvoiceId: oldId, newInvoiceId: String(created.invoiceId), actor })
+        const { uploaded, errors } = await uploadInvoiceDocuments(item, load, created.invoiceId)
+        const outcome = afterOtrDocuments(errors)
+        const now = nowIso()
+        try {
+          await ddb.send(new UpdateCommand({
+            TableName: FACTORING_TABLE,
+            Key: { id: String(item.id) },
+            // Only if nobody swapped the invoice while OTR was answering: two clicks cannot both win.
+            ConditionExpression: 'otrInvoiceId = :old',
+            UpdateExpression: 'SET otrInvoiceId = :new, otrSubmittedAt = :at, otrSubmittedBy = :by, otrAmount = :amt, otrStatus = :nostatus, otrScheduleId = :nosched, otrStatusSyncedAt = :nosync, otrDocsUploaded = :docs, otrReadiness = :rd, #st = :st, otrError = :err, otrPriorInvoices = :prior, updatedAt = :u',
+            ExpressionAttributeNames: { '#st': 'status' },
+            ExpressionAttributeValues: {
+              ':old': oldId, ':new': String(created.invoiceId), ':at': now, ':by': actor,
+              ':amt': Math.round(Number(payload.InvoiceAmount) * 100),
+              ':nostatus': null, ':nosched': null, ':nosync': null,
+              ':docs': uploaded, ':rd': readiness, ':st': outcome.status, ':err': outcome.otrError,
+              ':prior': withPriorInvoice((item.otrPriorInvoices as never) ?? null, item as never, actor, now),
+              ':u': now,
+            },
+          }))
+        } catch (e) {
+          if (e instanceof Error && e.name === 'ConditionalCheckFailedException') {
+            return fail('Someone else already sent this invoice again. Refresh the queue.')
+          }
+          throw e
+        }
+        await moveStore.audit('FactoringItem', String(item.id), 'RESEND_TO_OTR', actor, {
+          by: actor, at: now, proNumber: item.proNumber ?? null, outcome: 'REPLACED',
+          oldOtrInvoiceId: oldId, newOtrInvoiceId: String(created.invoiceId), documentErrors: errors,
+        })
+        return ok({ outcome: 'REPLACED', invoiceId: String(created.invoiceId), oldInvoiceId: oldId, documentErrors: errors })
       }
 
       default:

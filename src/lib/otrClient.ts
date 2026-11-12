@@ -176,3 +176,32 @@ export function syncOtrStatus(
 ): Promise<{ synced: Array<{ id: string; status?: string; error?: string }> }> {
   return otrAction('syncStatus', { ids })
 }
+
+/**
+ * When the customer paid this row's invoice (not when OTR funded it). A YYYY-MM-DD date, or ''
+ * to clear, and an optional check number / ACH trace. Finance only; audited on the server.
+ */
+export function setCustomerPaid(
+  id: string,
+  paidOn: string,
+  ref?: string,
+): Promise<{ customerPaidOn: string | null; customerPaymentRef: string | null }> {
+  return otrAction('setCustomerPaid', { id, paidOn, ...(ref ? { ref } : {}) })
+}
+
+export interface ResubmitResult {
+  outcome: 'REFRESHED' | 'REPLACED'
+  invoiceId: string
+  oldInvoiceId?: string
+  otrStatus?: string
+  documentErrors: string[]
+}
+
+/**
+ * "Send to OTR again" for an invoice OTR holds. Dead: a new invoice is created and the old id is
+ * kept on the row. Anything else: nothing is created; the status is refreshed and missing
+ * documents are resent. Refuses, with OTR's reason, when OTR hands back the same Dead invoice.
+ */
+export function resubmitToOtr(id: string): Promise<ResubmitResult> {
+  return otrAction('resubmit', { id })
+}

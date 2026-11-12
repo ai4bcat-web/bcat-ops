@@ -1918,6 +1918,10 @@ const schema = a.schema(stageTypes({
       missingFields: a.string().array(),
       // Repeat e-mails for the same load roll up here: [{ at, subject, runId }] (Ryne 2026-11-10).
       emailLog:      a.json(),
+      // Found when the e-mail arrived: [{ shipmentId, number, customerName, value, source }] — shipments with a PRO that already
+      // hold this e-mail's references (src/lib/intakeBuilt.ts). Advice only; nothing is deleted or dismissed because of it.
+      alreadyBuilt:  a.json(),
+      alreadyBuiltCheckedAt: a.datetime(),
       shipmentId:    a.string(),             // set the moment createShipment returns
       shipmentNumber: a.string(),
       reviewedBy:    a.string(),
@@ -3825,6 +3829,17 @@ const schema = a.schema(stageTypes({
       invoiceId:       a.string(),
       orderId:         a.string(),
       shipmentId:      a.string(),
+      // ── When the customer paid the invoice (not when OTR funded it) ──────────────
+      // Set by hand through the otr-actions setCustomerPaid action, with an audit row. A
+      // payment-received tab in AR is expected to feed these two later; the reference is the
+      // check number or ACH trace the payment carried.
+      customerPaidOn:        a.date(),
+      customerPaymentRef:    a.string(),
+      customerPaidSetBy:     a.string(),
+      customerPaidSetAt:     a.datetime(),
+      // Earlier OTR invoices this row had before a 'Send to OTR again' made a new one:
+      // [{ otrInvoiceId, otrStatus, otrSubmittedAt, otrSubmittedBy, replacedAt, replacedBy }].
+      otrPriorInvoices:      a.json(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.

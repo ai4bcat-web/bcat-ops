@@ -3,7 +3,10 @@
  * numbers, and number-looking words in the subject) are compared with the shipments that already have a PRO. A shipment's `searchKey` is its
  * lower-cased PRO, customer, cities and every reference value joined by spaces, so the match is on whole words of that key, never a
  * substring ("12345" does not match inside "512345"). Punctuation is ignored ("FR-113188-3" = "fr1131883"). When both sides know the
- * customer and they differ, it is not the same load. Read-time only: nothing is stored on the intake row.
+ * customer and they differ, it is not the same load. The match also runs when the e-mail arrives (workflow-agent staging) and the result
+ * is stored on the row (`alreadyBuilt`); the screen prefers that stored answer while the row's references still hold what it matched,
+ * and checks again itself for older rows, edited rows and rows the server found nothing for (a shipment may be built after the e-mail).
+ * Pure: the Lambda and the client share it.
  */
 import { NOT_DUPLICATE_TOKEN, isDeletedIntake } from './intakeDup'
 import type { IntakeLoadRecord } from '../types/intake'
@@ -35,6 +38,9 @@ export interface BuiltMatch {
   value: string
   source: RefCandidate['source']
 }
+
+/** The most matches stored on a row. */
+export const MAX_STORED_MATCHES = 5
 
 const MIN_NORM_LENGTH = 5
 
@@ -116,4 +122,22 @@ export function builtMatchesFor(row: IntakeLoadRecord, shipments: readonly Built
   }
   // A parsed reference outranks a subject word; then newest PRO first.
   return [...found.values()].sort((a, b) => (a.source === b.source ? 0 : a.source === 'reference' ? -1 : 1) || b.number.localeCompare(a.number, undefined, { numeric: true }))
+}
+
+/**
+ * What staging stored on the row, when it is still true: the row is worth checking, a stored match exists, and every stored match's
+ * reference is still one of the row's references (an edit that removed it makes the stored answer stale, so the caller checks again).
+ * Null when there is nothing usable.
+ */
+export function storedBuiltMatches(row: Pick<IntakeLoadRecord, 'status' | 'shipmentId' | 'confirmed' | 'dismissReason' | 'fields' | 'subject'> & { alreadyBuilt?: unknown; alreadyBuiltCheckedAt?: string | null }): BuiltMatch[] | null {
+  if (!row.alreadyBuiltCheckedAt || !Array.isArray(row.alreadyBuilt) || row.alreadyBuilt.length === 0) return null
+  if (!needsBuiltCheck(row as IntakeLoadRecord)) return null
+  const current = new Set(refCandidates(row).map((c) => c.norm))
+  const out: BuiltMatch[] = []
+  for (const m of row.alreadyBuilt as Partial<BuiltMatch>[]) {
+    if (!m || typeof m.shipmentId !== 'string' || typeof m.number !== 'string' || typeof m.value !== 'string') return null
+    if (!current.has(normRef(m.value))) return null
+    out.push({ shipmentId: m.shipmentId, number: m.number, customerName: m.customerName ?? null, value: m.value, source: m.source === 'subject' ? 'subject' : 'reference' })
+  }
+  return out
 }

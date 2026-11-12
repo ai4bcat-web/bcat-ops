@@ -5274,6 +5274,20 @@ describe('READY_TO_INVOICE', () => {
         expect(pushed.results[0]).toMatchObject({ ok: false, reasons: ['Missing sales rep'] })
       })
 
+      it('refuses a push until the shipment has delivered, and says so first', async () => {
+        const ids = await reviewable({ rep: false, customer: { reviewRequirements: ['salesRep'] } })
+        const shipment = table(TABLES.shipment).get(ids.shipmentId)!
+        table(TABLES.shipment).set(ids.shipmentId, { ...shipment, status: 'IN_TRANSIT' })
+        const pushed = (await call('BATCH_SHIPMENT_TASK', { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: [ids.shipmentId] }, REVIEWER)) as { results: { ok: boolean; reasons?: string[] }[] }
+        expect(pushed.results[0].ok).toBe(false)
+        expect(pushed.results[0].reasons?.[0]).toMatch(/^Only delivered loads can go to Load review/)
+        expect(table(TABLES.shipment).get(ids.shipmentId)!.loadReviewPushedAt).toBeUndefined()
+        // Delivered again: the same row now reads its customer requirements instead.
+        table(TABLES.shipment).set(ids.shipmentId, { ...shipment, status: 'DELIVERED' })
+        const again = (await call('BATCH_SHIPMENT_TASK', { task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: [ids.shipmentId] }, REVIEWER)) as { results: { ok: boolean; reasons?: string[] }[] }
+        expect(again.results[0]).toMatchObject({ ok: false, reasons: ['Missing sales rep'] })
+      })
+
       it('pushes the clean rows, reports each refused row with its reasons, and stamps only the pushed', async () => {
         const good = await reviewable()
         const bad = await reviewable({ rep: false, division: false })
