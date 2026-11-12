@@ -2989,6 +2989,19 @@ describe('SEND_INVOICE', () => {
     expect(notice).toMatchObject({ to: 'ap@acme.test', cc: 'billing@acme.test, invoices@bcatcorp.com, ops@bcatcorp.com' })
   })
 
+  it('mails every To address: the primary first, then the extras, with no repeats and none copied twice', async () => {
+    seedMethod('MANUAL', {
+      apEmailsExtra: ['Second@Acme.test', 'ap@acme.test', 'third@acme.test'],
+      invoiceCopyEmails: ['second@acme.test', 'billing@acme.test'],
+    })
+    const released = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { invoice: Row }
+    const sent = (await call('SEND_INVOICE', { invoiceId: String(released.invoice.id) })) as { to: string[]; cc: string[]; emailStatus: string }
+    expect(sent.emailStatus).toBe('SENT')
+    expect(sent.to).toEqual(['ap@acme.test', 'second@acme.test', 'third@acme.test'])
+    expect(sent.cc).toEqual(['billing@acme.test', 'invoices@bcatcorp.com', 'ops@bcatcorp.com'])
+    expect(sesSend).toHaveBeenCalledTimes(1)
+  })
+
   it('never e-mails a FACTOR customer', async () => {
     seedMethod('FACTOR')
     const released = (await call('RELEASE_TO_BILLING', { orderId: ORDER_ID })) as { invoice: Row }

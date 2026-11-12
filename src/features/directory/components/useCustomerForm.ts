@@ -140,6 +140,8 @@ export interface CustomerFormValue {
   // Step AW stage D — how the customer is billed.
   billingMethod: BillingMethod | ''
   apEmail: string
+  /** More To addresses for a manual invoice, one per line. */
+  apEmailsExtraText: string
   /** One address per line or comma separated; the always-copy list is added on send. */
   invoiceCopyText: string
   /** Why the import flagged the row; the server clears it when billing fields are saved. */
@@ -231,6 +233,7 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
 
     billingMethod: initial?.billingMethod ?? '',
     apEmail: initial?.apEmail ?? '',
+    apEmailsExtraText: arrayToLines(initial?.apEmailsExtra),
     invoiceCopyText: isNew ? REQUIRED_INVOICE_COPY_EMAIL : arrayToLines(initial?.invoiceCopyEmails),
     billingNeedsReview: initial?.billingNeedsReview ?? '',
   }
@@ -374,6 +377,7 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
 
     billingMethod: value.billingMethod || null,
     apEmail: value.apEmail.trim() || null,
+    apEmailsExtra: parseEmailList(value.apEmailsExtraText),
     // A new customer's list always carries the company copy address; the server forces it too.
     invoiceCopyEmails: isNew ? withRequiredCopyEmail(parseEmailList(value.invoiceCopyText)) : parseEmailList(value.invoiceCopyText),
     billingNeedsReview: value.billingNeedsReview.trim() || null,
@@ -405,12 +409,14 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     // imported customer can still be edited for anything else.
     const apEmail = value.apEmail.trim().toLowerCase()
     const copy = parseEmailList(value.invoiceCopyText)
+    const extra = parseEmailList(value.apEmailsExtraText)
     const changed =
       (value.billingMethod || null) !== (initial?.billingMethod ?? null) ||
       (apEmail || null) !== (initial?.apEmail?.trim().toLowerCase() || null) ||
+      extra.join(',') !== (initial?.apEmailsExtra ?? []).join(',') ||
       copy.join(',') !== (initial?.invoiceCopyEmails ?? []).join(',')
     return changed
-      ? { ...base, ...validateBillingFields({ billingMethod: value.billingMethod || null, apEmail, invoiceCopyEmails: copy }) }
+      ? { ...base, ...validateBillingFields({ billingMethod: value.billingMethod || null, apEmail, apEmailsExtra: extra, invoiceCopyEmails: copy }) }
       : base
   }, [value, initial, isNew, problems])
   return { value, set, setPartial, toRecord, errors, isNew, missing }

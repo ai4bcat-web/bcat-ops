@@ -1,6 +1,7 @@
-import { TmsField, TmsInput, TmsSelect, TmsTextarea } from '@/features/tms/kit'
-import type { BillingMethod } from '@/lib/billingMethod'
+import { TmsField, TmsSelect } from '@/features/tms/kit'
+import { parseEmailList, type BillingMethod } from '@/lib/billingMethod'
 import type { RemitTo } from '@/types/tms'
+import { EmailListField } from './EmailListField'
 import type { CustomerFormValue } from './useCustomerForm'
 
 const BILLING_METHOD_OPTIONS: { value: BillingMethod | ''; label: string }[] = [
@@ -38,12 +39,24 @@ export function BillingMethodFields({
             aria-label="Billing method"
           />
         </TmsField>
-        {!isFactor && (
-          <TmsField label="AP e-mail (invoices go here)" error={errors.apEmail}>
-            <TmsInput value={value.apEmail} onChange={(e) => set('apEmail', e.target.value)} placeholder="ap@customer.com" aria-label="AP e-mail" />
-          </TmsField>
-        )}
       </div>
+      {!isFactor && (
+        <TmsField
+          label="AP e-mails (invoices go here)"
+          hint="The first address is the main one. Every address listed here receives the invoice."
+          error={errors.apEmail ?? errors.apEmailsExtra}
+        >
+          <EmailListField
+            initial={[value.apEmail, ...parseEmailList(value.apEmailsExtraText)]}
+            label="AP e-mail"
+            placeholder="ap@customer.com"
+            onChange={(rows) => {
+              set('apEmail', rows[0] ?? '')
+              set('apEmailsExtraText', rows.slice(1).join('\n'))
+            }}
+          />
+        </TmsField>
+      )}
       {isFactor && (
         <div style={{ fontSize: 13 }} data-testid="factor-remit">
           Invoices go to the factor, never to the customer.{' '}
@@ -52,11 +65,12 @@ export function BillingMethodFields({
       )}
       {!isFactor && (
         <TmsField label="Copy on invoices" error={errors.invoiceCopyEmails}>
-          <TmsTextarea
-            value={value.invoiceCopyText}
-            onChange={(e) => set('invoiceCopyText', e.target.value)}
-            placeholder="One address per line. The company-wide always-copy address is added automatically."
-            aria-label="Copy on invoices"
+          <EmailListField
+            initial={parseEmailList(value.invoiceCopyText)}
+            label="Copy on invoices"
+            placeholder="copy@customer.com"
+            addLabel="+ Add copy address"
+            onChange={(rows) => set('invoiceCopyText', rows.join('\n'))}
           />
         </TmsField>
       )}

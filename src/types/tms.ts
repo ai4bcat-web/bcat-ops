@@ -203,6 +203,8 @@ export interface CustomerRecord {
   billingMethod?: 'FACTOR' | 'MANUAL' | null
   /** The customer's accounts-payable address; required for MANUAL. */
   apEmail?: string | null
+  /** More To addresses for a manual invoice e-mail, after apEmail. */
+  apEmailsExtra?: string[] | null
   /** Per-customer "copy on invoices" list (the company-wide always-copy list is added on send). */
   invoiceCopyEmails?: string[] | null
   /** Why the billing row needs a human look; cleared when a person saves the billing fields. */

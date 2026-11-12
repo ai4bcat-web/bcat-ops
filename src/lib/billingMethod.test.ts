@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  allApEmails,
   billingIssues,
   isDanisco,
   parseEmailList,
@@ -82,5 +83,16 @@ describe('billingIssues / validateBillingFields', () => {
   })
   it('parseEmailList splits, lowercases and dedupes', () => {
     expect(parseEmailList('A@x.co, b@x.co;\na@x.co  c@x.co')).toEqual(['a@x.co', 'b@x.co', 'c@x.co'])
+  })
+})
+
+describe('allApEmails / extra To validation', () => {
+  it('lists the primary first, then the extras, lowercased and without repeats', () => {
+    expect(allApEmails({ apEmail: ' AP@Acme.com ', apEmailsExtra: ['b@acme.com', 'ap@acme.com', 'B@acme.com', ''] })).toEqual(['ap@acme.com', 'b@acme.com'])
+    expect(allApEmails({ apEmail: null, apEmailsExtra: ['x@acme.com'] })).toEqual(['x@acme.com'])
+    expect(allApEmails(null)).toEqual([])
+  })
+  it('flags an invalid extra address', () => {
+    expect(validateBillingFields({ billingMethod: 'MANUAL', apEmail: 'ap@acme.com', apEmailsExtra: ['ok@acme.com', 'nope'] }).apEmailsExtra).toBe('Not a valid e-mail: nope')
   })
 })

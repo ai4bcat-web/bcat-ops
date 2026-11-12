@@ -1013,6 +1013,7 @@ function deriveActiveFromStatus(status: CustomerStatus | null): boolean {
 interface BillingFieldsState {
   billingMethod: BillingMethod | null
   apEmail: string | null
+  apEmailsExtra: string[] | null
   invoiceCopyEmails: string[] | null
   billingNeedsReview: string | null
 }
@@ -1031,22 +1032,29 @@ function resolveBillingFields(
   const before: BillingFieldsState = {
     billingMethod: (existing?.billingMethod as BillingMethod | undefined) ?? null,
     apEmail: (existing?.apEmail as string | undefined) ?? null,
+    apEmailsExtra: (existing?.apEmailsExtra as string[] | undefined) ?? null,
     invoiceCopyEmails: (existing?.invoiceCopyEmails as string[] | undefined) ?? null,
     billingNeedsReview: (existing?.billingNeedsReview as string | undefined) ?? null,
   }
   const method = 'billingMethod' in input ? optionalEnumStrict(input.billingMethod, BILLING_METHODS, 'billingMethod') : before.billingMethod
   const apRaw = 'apEmail' in input ? optionalString(input.apEmail, 254) : before.apEmail
+  const extraRaw = 'apEmailsExtra' in input ? optionalStringArray(input.apEmailsExtra, 254) : before.apEmailsExtra
   const copyRaw = 'invoiceCopyEmails' in input ? optionalStringArray(input.invoiceCopyEmails, 254) : before.invoiceCopyEmails
   const copy = copyRaw ? [...new Set(copyRaw.map((e) => e.toLowerCase()))] : null
+  const apLower = apRaw ? apRaw.toLowerCase() : null
+  // Extras are lowercased and de-duplicated, and never repeat the primary address.
+  const extra = extraRaw ? [...new Set(extraRaw.map((e) => e.toLowerCase()))].filter((e) => e !== apLower) : null
   const after: BillingFieldsState = {
     billingMethod: method,
-    apEmail: apRaw ? apRaw.toLowerCase() : null,
+    apEmail: apLower,
+    apEmailsExtra: extra && extra.length > 0 ? extra : null,
     invoiceCopyEmails: copy && copy.length > 0 ? copy : null,
     billingNeedsReview: 'billingNeedsReview' in input ? optionalString(input.billingNeedsReview, 500) : before.billingNeedsReview,
   }
   const changed =
     after.billingMethod !== before.billingMethod ||
     after.apEmail !== before.apEmail ||
+    JSON.stringify(after.apEmailsExtra) !== JSON.stringify(before.apEmailsExtra) ||
     JSON.stringify(after.invoiceCopyEmails) !== JSON.stringify(before.invoiceCopyEmails)
   if (changed || (isCreate && (after.billingMethod || after.apEmail || after.invoiceCopyEmails))) {
     const errors = validateBillingFields(after)
@@ -1314,6 +1322,7 @@ async function upsertCustomer(
     // Step AW stage D — how this customer is billed. Absent keys keep what is stored.
     billingMethod: billing.after.billingMethod,
     apEmail: billing.after.apEmail,
+    apEmailsExtra: billing.after.apEmailsExtra,
     invoiceCopyEmails: billing.after.invoiceCopyEmails,
     billingNeedsReview: billing.after.billingNeedsReview,
 

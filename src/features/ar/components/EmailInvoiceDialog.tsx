@@ -26,6 +26,7 @@ import {
   listDivisions,
   type InvoiceEmailResult,
 } from '@/lib/apiClient'
+import { allApEmails } from '@/lib/billingMethod'
 import { billingRecipients, formatCents, invoiceCcRecipients } from '@/lib/invoiceBuild'
 import { renderInvoiceEmail } from '@/lib/shipmentNotices'
 import type { InvoiceRecord } from '@/types/tms'
@@ -115,8 +116,7 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
         const division = divisions.find((d) => d.key === row.divisionKey) ?? null
         setInvoice(row)
         if (customer?.billingMethod === 'MANUAL') {
-          const ap = customer.apEmail?.trim().toLowerCase()
-          const addressees = ap ? [ap] : []
+          const addressees = allApEmails(customer)
           const copies = [...(customer.invoiceCopyEmails ?? []), ...(settings?.invoiceAlwaysCopyEmails ?? [])]
             .map((email) => email.trim().toLowerCase())
           setManual(true)

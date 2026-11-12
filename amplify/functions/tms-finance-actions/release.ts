@@ -190,13 +190,14 @@ async function isInvoiceCarriedOver(invoiceId: string): Promise<boolean> {
   return row != null && isCarriedOver(row)
 }
 
-/** The e-mail set for one manual send: To = AP address; Cc = per-customer list + company always-copy, de-duplicated. */
+/** The e-mail set for one manual send: To = AP address plus any extra To addresses; Cc = per-customer list + company always-copy, de-duplicated. */
 export function manualInvoiceRecipients(
   customer: CustomerRecord | null,
   alwaysCopy: unknown,
 ): { to: string[]; cc: string[] } {
   const ap = apEmailOf(customer)
-  const to = ap ? [ap] : []
+  const extra = normalizeEmailList((customer as unknown as Row | null)?.apEmailsExtra ?? [], 'apEmailsExtra')
+  const to = [...(ap ? [ap] : []), ...extra].filter((email, index, all) => all.indexOf(email) === index)
   const own = normalizeEmailList((customer as unknown as Row | null)?.invoiceCopyEmails ?? [], 'invoiceCopyEmails')
   const company = normalizeEmailList(alwaysCopy ?? [], 'invoiceAlwaysCopyEmails')
   const cc = [...own, ...company].filter((email, index, all) => all.indexOf(email) === index && !to.includes(email))
