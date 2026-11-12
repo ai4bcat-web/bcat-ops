@@ -42,3 +42,19 @@
 .tms-portal .lr-doc-meta { grid-column: 1; font-size: 11px; }
 .tms-portal .lr-doc-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 @media (max-width: 520px) { .tms-portal .lr-doc-actions { grid-column: 1; grid-row: auto; justify-content: flex-start; } }
+.tms-portal .lr-charges { display: grid; gap: 10px; }
+.tms-portal .lr-charges-totals { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
+.tms-portal .lr-charges-group { display: grid; gap: 6px; padding: 8px 10px; border-radius: 8px; background: var(--tms-bg); }
+.tms-portal .lr-charges-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.tms-portal .lr-charges-title { margin: 0; font-weight: 600; font-size: 13px; }
+.tms-portal .lr-charge-lines { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.tms-portal .lr-charge-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+.tms-portal .lr-charge-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tms-portal .lr-charge-amount { margin-left: auto; font-variant-numeric: tabular-nums; }
+.tms-portal .lr-charge-code { width: 110px; }
+.tms-portal .lr-charge-label { flex: 1; min-width: 120px; }
+.tms-portal .lr-charge-rate { width: 90px; text-align: right; }
+.tms-portal .lr-charge-qty { width: 56px; text-align: right; }
+.tms-portal .lr-charges-warn { margin: 0; padding: 6px 8px; border-radius: 6px; background: var(--tms-badge-orange-tint, var(--tms-badge-red-tint)); }
+.tms-portal .lr-charges-actions { display: flex; gap: 8px; }
+.tms-portal .lr-charges-confirm { display: grid; gap: 8px; margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--tms-badge-red-tint); }
