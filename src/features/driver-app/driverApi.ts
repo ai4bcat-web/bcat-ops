@@ -1004,6 +1004,8 @@ export interface CurrentLoad {
   /** Documents the load still owes before it can be invoiced. */
   hasRateConfirmation: boolean
   hasPod: boolean
+  /** POD plus what the office ticked for this load (lumper receipt…). Older servers omit it. */
+  requiredDocs?: { type: string; label: string; done: boolean }[]
 }
 
 /** The driver's open load, or null when they have nothing running. */

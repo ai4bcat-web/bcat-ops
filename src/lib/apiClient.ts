@@ -4910,6 +4910,18 @@ export async function voidDocument(input: { documentId: string; reason: string }
   return shipmentAction<DocumentResult>('VOID_DOCUMENT', input)
 }
 
+/**
+ * The documents one load needs on top of the customer's list (POD and, with an outside carrier,
+ * the rate confirmation are defaults and are not sent here). An empty list clears the extras.
+ */
+export async function setLoadRequiredDocs(input: {
+  shipmentId: string
+  loadId: string
+  requiredDocTypes: string[]
+}): Promise<{ bundle: ShipmentBundle; unchanged?: boolean }> {
+  return shipmentAction<{ bundle: ShipmentBundle; unchanged?: boolean }>('SET_LOAD_REQUIRED_DOCS', input)
+}
+
 export interface ReadyToInvoiceInput {
   review?: { source: 'LOAD_REVIEW' }
   orderId: string

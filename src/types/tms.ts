@@ -2317,6 +2317,8 @@ export interface ShipmentLoadFields {
  */
 export interface ShipmentLoad extends ShipmentLoadFields {
   id: string
+  /** Extra documents this load needs beyond the customer's / default list (SET_LOAD_REQUIRED_DOCS). */
+  requiredDocTypes?: string[] | null
   aljexId?: string | null
   pickupAppt?: string | null
   deliveryAppt?: string | null

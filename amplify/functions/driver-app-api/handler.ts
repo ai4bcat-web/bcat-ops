@@ -47,6 +47,7 @@ import { weekStartOfISO } from '../../../src/features/driver-pay/week'
 import { splitCityState, normalizeZip } from '../../../src/lib/otrInvoice'
 import { buildPodIndex, loadHasPod, type PodIndex } from '../../../src/lib/podPresence'
 import { normalizePro } from '../../../src/lib/proNumber'
+import { docTypeLabel, isDriverDocType, loadExtraDocTypes } from '../../../src/lib/loadRequiredDocs'
 import {
   openLoadsForDriver,
   driverIsOnLoad,
@@ -189,6 +190,8 @@ const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME!
 const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? ''
 const LOCATION_TABLE_NAME = process.env.LOCATION_TABLE_NAME ?? ''
 const POD_DOCUMENT_TABLE_NAME = process.env.POD_DOCUMENT_TABLE_NAME ?? ''
+// Read-only: which shipment documents are filed, so a ticked lumper receipt shows as done.
+const SHIPMENT_DOCUMENT_TABLE_NAME = process.env.SHIPMENT_DOCUMENT_TABLE_NAME ?? ''
 const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME ?? ''
 /** Step AK: the truck's work phone. Unset = the app simply shows no work-phone line. */
 const TRUCK_CONFIG_TABLE = process.env.TRUCK_CONFIG_TABLE_NAME ?? ''
@@ -489,6 +492,43 @@ function assertArrayField(value: unknown, key: string): unknown[] | undefined {
     if (Array.isArray(v)) return v
   }
   return undefined
+}
+
+/** One line of "Documents needed for this load" in the driver app. */
+interface DriverRequiredDoc { type: string; label: string; done: boolean }
+
+/**
+ * POD always, then the extras the office ticked for this load (never the rate confirmation:
+ * that is the office's to collect). An extra counts as done once an active, accepted shipment
+ * document of that type is filed; when the documents cannot be read it shows as not done.
+ */
+async function driverRequiredDocs(load: Load, hasPod: boolean): Promise<DriverRequiredDoc[]> {
+  const out: DriverRequiredDoc[] = [{ type: 'POD', label: docTypeLabel('POD'), done: hasPod }]
+  const extras = loadExtraDocTypes([load]).filter((t) => isDriverDocType(t) && t !== 'POD')
+  if (extras.length === 0) return out
+  const filed = new Set<string>()
+  const shipmentId = (load.shipmentId ?? '').trim()
+  if (SHIPMENT_DOCUMENT_TABLE_NAME && shipmentId) {
+    try {
+      const res = await ddb.send(
+        new QueryCommand({
+          TableName: SHIPMENT_DOCUMENT_TABLE_NAME,
+          IndexName: 'shipmentDocumentsByShipmentIdAndUploadedAt',
+          KeyConditionExpression: 'shipmentId = :s',
+          ExpressionAttributeValues: { ':s': shipmentId },
+        }),
+      )
+      for (const doc of res.Items ?? []) {
+        if (doc.status !== 'ACTIVE' || doc.reviewStatus === 'PENDING' || doc.reviewStatus === 'REJECTED') continue
+        if (doc.loadId && doc.loadId !== load.id) continue
+        filed.add(String(doc.type ?? ''))
+      }
+    } catch (err) {
+      console.error('[driver-app-api] could not read shipment documents for required-docs', err)
+    }
+  }
+  for (const type of extras) out.push({ type, label: docTypeLabel(type), done: filed.has(type) })
+  return out
 }
 
 async function scan<T = Record<string, unknown>>(
@@ -3979,6 +4019,8 @@ export const handler = async (event: FnUrlEvent) => {
           // What still blocks invoicing, so a driver sees why a load is held.
           hasRateConfirmation: Boolean((l.rateConfirmKey ?? '').trim()),
           hasPod: pods.length > 0,
+          // Documents the driver owes for this load: POD always, plus what the office ticked for it.
+          requiredDocs: await driverRequiredDocs(l, pods.length > 0),
         }
       }
       // `alsoOpen`: the rest of the driver's open loads, soonest first (a second delivery today). Older clients ignore it.

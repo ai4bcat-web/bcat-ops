@@ -101,6 +101,8 @@ export interface ReleaseGateInput {
   order: ReleaseGateOrder
   /** The customer's list (or the org default); BOL, POD and RATE_CON are added here. */
   requiredDocTypes: string[]
+  /** Per-load additions (`Load.requiredDocTypes`): explicit, so they block as written. */
+  extraDocTypes?: string[] | null
   requiredReferenceCodes: string[]
   /** `PO` → `PO number`, when the customer's required-references config names one. */
   referenceLabels?: Record<string, string> | null
@@ -141,10 +143,14 @@ function countsAsPresent(doc: ReleaseGateDocument): boolean {
  * two that are never optional, and the rate confirmation once somebody else's
  * truck is on the load.
  */
-export function requiredDocTypesForRelease(requiredDocTypes: string[], legs: ReleaseGateLeg[]): string[] {
+export function requiredDocTypesForRelease(
+  requiredDocTypes: readonly string[],
+  legs: readonly ReleaseGateLeg[],
+  extraDocTypes: readonly string[] = [],
+): string[] {
   const hasCarrierLeg = legs.some((leg) => leg.status === 'ACTIVE' && leg.kind === 'CARRIER')
   const out: string[] = []
-  for (const type of [...requiredDocTypes, ...ALWAYS_REQUIRED_DOC_TYPES, ...(hasCarrierLeg ? ['RATE_CON'] : [])]) {
+  for (const type of [...requiredDocTypes, ...ALWAYS_REQUIRED_DOC_TYPES, ...(hasCarrierLeg ? ['RATE_CON'] : []), ...extraDocTypes]) {
     const trimmed = typeof type === 'string' ? type.trim() : ''
     if (trimmed && !out.includes(trimmed)) out.push(trimmed)
   }
@@ -188,7 +194,7 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
     if (!perCarrierRateCon && carrierLegs.some((leg) => leg.rateConStatus === 'SIGNED')) {
       present.add('RATE_CON')
     }
-    for (const type of requiredDocTypesForRelease(input.requiredDocTypes, legs)) {
+    for (const type of requiredDocTypesForRelease(input.requiredDocTypes, legs, input.extraDocTypes ?? [])) {
       if (type === 'RATE_CON' && perCarrierRateCon) {
         const unsigned = carrierLegs.filter((leg) => leg.rateConStatus !== 'SIGNED')
         if (unsigned.length > 0) {

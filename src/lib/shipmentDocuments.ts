@@ -458,6 +458,11 @@ export interface DocGateInput {
    * the gate reads as satisfied in both scopes. The caller passes the shipment's flag.
    */
   legacyImported?: boolean | null
+  /**
+   * CUSTOMER scope: documents the order's loads ask for on top of the customer's list
+   * (`Load.requiredDocTypes`, see loadRequiredDocs.ts). Added as written.
+   */
+  extraDocTypes?: readonly string[] | null
 }
 
 /**
@@ -476,6 +481,11 @@ export function evaluateDocGate(input: DocGateInput): DocGateResult {
           input.settings?.requiredCarrierUploadTypes ?? [...DEFAULT_REQUIRED_CARRIER_UPLOAD_TYPES],
         )
       : requiredDocTypesFor(input.customer, input.settings)
+  if (input.scope !== 'CARRIER') {
+    for (const type of normalizeRequiredDocTypes(input.extraDocTypes ?? []).types) {
+      if (!required.includes(type)) required.push(type)
+    }
+  }
 
   const present = presentDocTypes({
     documents: input.documents,
