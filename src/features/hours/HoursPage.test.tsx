@@ -60,6 +60,13 @@ describe('HoursPage', () => {
     expect(screen.getByRole('table', { name: 'Ann Lee day by day' })).toBeTruthy()
   })
 
+  it('has a PTO days section under the fortnight, listing the PTO day already on the books', async () => {
+    render(<HoursPage />)
+    const section = await screen.findByRole('region', { name: 'PTO days' })
+    expect(within(section).getByRole('button', { name: /Add PTO days/ })).toBeTruthy()
+    await waitFor(() => expect(within(section).getByLabelText('PTO used in 2026').textContent).toMatch(/Ann Lee: 1 day · 8 h/))
+  })
+
   it('without pay access it is hours only and no rate is ever requested', async () => {
     auth.pay = false
     render(<HoursPage />)
