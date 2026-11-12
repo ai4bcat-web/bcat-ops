@@ -455,3 +455,15 @@ describe('per-week pay mode (an owner operator can settle as Amazon one week and
     expect(factoringFeePctFor('OWNER_OPERATOR')).toBeGreaterThan(0)
   })
 })
+
+describe('Amazon-group drivers across the owner-operator changeover (2026-09-27)', () => {
+  const amazon = { payGroup: 'AMAZON', rateHistory: [] }
+  it('an unpinned Amazon-group week keeps settling as Amazon on both sides of the changeover; only a pin moves it', () => {
+    expect(payGroupForWeek(amazon, '2026-09-20')).toBe('AMAZON')
+    expect(payGroupForWeek(amazon, '2026-09-27')).toBe('AMAZON')
+    expect(payGroupForWeek(amazon, '2026-10-11')).toBe('AMAZON')
+    const pinned = { ...amazon, rateHistory: pinWeekPayMode([], '2026-10-11', 'OWNER_OPERATOR', { payPercent: 80, expensesBeforePercent: false }) }
+    expect(payGroupForWeek(pinned, '2026-10-11')).toBe('OWNER_OPERATOR')
+    expect(payGroupForWeek(pinned, '2026-10-04')).toBe('AMAZON')
+  })
+})
