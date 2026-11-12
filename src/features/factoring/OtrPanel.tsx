@@ -30,6 +30,7 @@ import { assembleInvoice, checkBroker, markManualInvoice, setBrokerMc, setOtrFie
 import { otrDocsIncomplete, otrDocsErrorMessage } from '@/lib/otrSubmitOutcome'
 import { FactoringDocCell } from './FactoringDocCell'
 import { useAuthUser } from '@/hooks/useAuth'
+import { mayInvoiceManually } from '@/lib/otrRejection'
 import { isReadyToSubmit, whatIsMissing } from './factoringFields'
 import type { FactoringItem } from '@/types'
 import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
@@ -83,7 +84,8 @@ interface Props {
 }
 
 export function OtrPanel({ item, onChanged }: Props) {
-  const staffEmail = useAuthUser()?.email ?? 'staff'
+  const authUser = useAuthUser()
+  const staffEmail = authUser?.email ?? 'staff'
   const [busy, setBusy] = useState<string | null>(null)
   // A field typed on a row that already bills an invoice waits here for its reason (D.4).
   const [pendingChange, setPendingChange] = useState<{ field: EditableField; label: string; value: string } | null>(null)
@@ -466,13 +468,13 @@ export function OtrPanel({ item, onChanged }: Props) {
           Submit to OTR
         </TmsButton>
 
-        {/* Billing it direct is always an option; No Buy is the version OTR chooses for us. */}
-        {item.status === 'NEED_TO_FACTOR' && (
+        {/* Invoice manually is the answer to No Buy; billing direct without it is an admin override. */}
+        {item.status === 'NEED_TO_FACTOR' && mayInvoiceManually(item, authUser).allowed && (
           <TmsButton
             size="sm"
             variant="ghost"
             disabled={busy !== null}
-            title="Take this row out of the OTR queue and bill the broker directly, with the steps to do it"
+            title={mayInvoiceManually(item, authUser).override ? 'Admin override: OTR has not said No buy. Takes this row out of the OTR queue and bills the broker directly' : 'Take this row out of the OTR queue and bill the broker directly, with the steps to do it'}
             onClick={() => run('manual', () => markManualInvoice(item.id), 'Moved to Invoice manually')}
           >
             Invoice manually instead

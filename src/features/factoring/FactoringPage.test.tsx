@@ -118,9 +118,10 @@ describe('invoices OTR turned down', () => {
     ])
     const strip = screen.getByTestId('otr-rejected-strip')
     expect(strip.textContent).toContain('2')
-    expect(strip.textContent).toMatch(/turned down by OTR and must be invoiced manually/)
+    expect(strip.textContent).toMatch(/2 invoices need attention at OTR \(Dead or refused\): resolve with OTR/)
+    expect(strip.textContent).not.toMatch(/invoice manually/)
     // On the landing tab the rejected row carries its own flag and OTR's words.
-    expect(within(screen.getByText('ER2').closest('tr') as HTMLElement).getByTestId('otr-rejected-flag').textContent).toBe('Invoice manually')
+    expect(within(screen.getByText('ER2').closest('tr') as HTMLElement).getByTestId('otr-rejected-flag').textContent).toBe('Needs attention')
     expect(screen.getByText(/OTR refused it: Amount does not match the rate con/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId('otr-rejected-toggle'))
@@ -131,6 +132,28 @@ describe('invoices OTR turned down', () => {
 
     fireEvent.click(screen.getByTestId('otr-rejected-toggle'))
     expect(screen.getByText('OK1')).toBeInTheDocument()
+  })
+
+  it('offers Invoice manually only on No buy rows; Dead and refused rows stay in the queue (admins can override)', async () => {
+    const rows = [
+      item({ id: 'dead', proNumber: 'DE3', status: 'PENDING_WITH_OTR', otrStatus: 4 as never, otrInvoiceId: 'x' }),
+      item({ id: 'err', proNumber: 'ER2', status: 'PENDING_WITH_OTR', otrError: '400: OTR auth failed (400)', otrInvoiceId: 'y' }),
+      item({ id: 'nb', proNumber: 'NB5', status: 'NEED_TO_FACTOR', brokerCheckResult: 'NO_BUY', manualReason: 'NO_BUY' }),
+    ]
+    await setup(rows, 'jenny@bcatcorp.com')
+    fireEvent.click(screen.getByRole('tab', { name: /^All/ }))
+    expect(screen.getByText('DE3')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Invoice manually for PRO DE3' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Invoice manually for PRO ER2' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Invoice manually for PRO NB5' })).toBeInTheDocument()
+    expect(screen.getByTestId('otr-rejected-strip').textContent).toMatch(/1 invoice OTR will not buy: invoice manually\. 2 invoices need attention at OTR/)
+  })
+
+  it('gives an admin the override on a Dead row, labelled as one', async () => {
+    await setup([item({ id: 'dead', proNumber: 'DE3', status: 'PENDING_WITH_OTR', otrStatus: 4 as never, otrInvoiceId: 'x' })], 'ryne@bcatcorp.com')
+    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    const btn = screen.getByRole('button', { name: 'Invoice manually for PRO DE3' })
+    expect(btn.getAttribute('title')).toMatch(/Admin override/)
   })
 
   it('shows no strip when OTR has turned nothing down', async () => {

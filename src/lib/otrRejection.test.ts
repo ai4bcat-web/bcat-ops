@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FactoringItem } from '@/types'
-import { needsManualInvoice, otrRejection } from './otrRejection'
+import { mayInvoiceManually, needsManualInvoice, otrRejection } from './otrRejection'
 
 const row = (over: Partial<FactoringItem>): FactoringItem => ({ id: 'p', proNumber: 'p', status: 'NEED_TO_FACTOR', ...over }) as FactoringItem
 
@@ -40,5 +40,20 @@ describe('otrRejection', () => {
   it('needsManualInvoice picks out only the rejected rows', () => {
     const items = [row({ id: 'a' }), row({ id: 'b', brokerCheckResult: 'NO_BUY' }), row({ id: 'c', status: 'PENDING_WITH_OTR', otrStatus: 4 as never })]
     expect(needsManualInvoice(items).map((i) => i.id)).toEqual(['b', 'c'])
+  })
+})
+
+describe('mayInvoiceManually', () => {
+  const base = { status: 'PENDING_WITH_OTR', brokerCheckResult: null, manualReason: null, otrError: null, otrStatus: null, brokerMcChecked: null } as never
+  const staff = { email: 'jenny@bcatcorp.com', groups: [] as string[] }
+  it('allows No buy for anyone, and nothing else for non-admins', () => {
+    expect(mayInvoiceManually({ ...(base as object), manualReason: 'NO_BUY' } as never, staff)).toEqual({ allowed: true, override: false })
+    expect(mayInvoiceManually({ ...(base as object), otrStatus: 4 } as never, staff).allowed).toBe(false)
+    expect(mayInvoiceManually({ ...(base as object), otrError: '400' } as never, staff).allowed).toBe(false)
+  })
+  it('gives admins an override on Dead / errors, never on a manual row that is not No buy or a finished row', () => {
+    expect(mayInvoiceManually({ ...(base as object), otrStatus: 4 } as never, { email: 'x@bcatcorp.com', groups: ['ADMIN'] })).toEqual({ allowed: true, override: true })
+    expect(mayInvoiceManually({ ...(base as object), status: 'MANUAL_INVOICE' } as never, { email: 'ryne@bcatcorp.com', groups: [] }).allowed).toBe(false)
+    expect(mayInvoiceManually({ ...(base as object), status: 'FACTORED' } as never, { email: 'ryne@bcatcorp.com', groups: [] }).allowed).toBe(false)
   })
 })

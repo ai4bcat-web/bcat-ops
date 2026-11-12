@@ -144,8 +144,25 @@ describe('Invoice manually on any other row', () => {
 
   it('changes the customer when the box is ticked', async () => {
     f.item = { ...f.item, status: 'NEED_TO_FACTOR', otrInvoiceId: undefined }
-    await manualInvoiceMove(f, { id: '14538', reason: 'MANUAL', changeCustomerDefault: true }, jenny)
+    await manualInvoiceMove(f, { id: '14538', reason: 'MANUAL', changeCustomerDefault: true }, { email: 'boss@bcatcorp.com', groups: ['ADMIN', 'page-billingRelease'] })
     expect(f.customer.billingMethod).toBe('MANUAL')
+  })
+
+  it('refuses a non-admin when OTR has not said No buy (Dead, an OTR error, or just queued), and writes nothing', async () => {
+    f.item = { ...f.item, status: 'PENDING_WITH_OTR', otrStatus: 4, otrError: null }
+    const dead = await manualInvoiceMove(f, { id: '14538', reason: 'MANUAL', confirmSubmitted: true }, jenny)
+    expect(dead).toMatchObject({ ok: false, error: expect.stringMatching(/has not said No buy/) })
+    f.item = { ...f.item, status: 'NEED_TO_FACTOR', otrInvoiceId: undefined, otrStatus: undefined, otrError: 'OTR auth failed (400)' }
+    const err = await manualInvoiceMove(f, { id: '14538', reason: 'MANUAL' }, jenny)
+    expect(err.ok).toBe(false)
+    expect(f.writes).toEqual([])
+    expect(f.invoice.factored).toBe(true)
+  })
+
+  it('lets a person who read OTR\u2019s refusal flag No buy, but not an admin-less plain move', async () => {
+    f.item = { ...f.item, status: 'PENDING_WITH_OTR', otrStatus: 1 }
+    const r = await manualInvoiceMove(f, { id: '14538', reason: 'NO_BUY' }, jenny)
+    expect(r.ok).toBe(true)
   })
 
   it('guards an invoice OTR is still working on until confirmed', async () => {

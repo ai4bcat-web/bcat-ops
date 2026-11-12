@@ -36,3 +36,21 @@ export function otrRejection(item: Pick<FactoringItem, 'status' | 'brokerCheckRe
 export function needsManualInvoice(items: readonly FactoringItem[]): FactoringItem[] {
   return items.filter((i) => otrRejection(i) != null)
 }
+
+/**
+ * Who may move a row to Invoice manually when OTR has NOT said No buy.
+ *
+ * "Invoice manually" is the answer to No buy and nothing else. A Dead invoice or one OTR
+ * refused with an error is still OTR's to sort out (resubmit, fix the documents, ask them),
+ * so those rows stay in the queue. Only an admin (ADMIN group or the owner) can override.
+ */
+export function mayInvoiceManually(
+  item: Pick<FactoringItem, 'status' | 'brokerCheckResult' | 'manualReason' | 'otrError' | 'otrStatus' | 'brokerMcChecked'>,
+  user: { email?: string | null; groups?: readonly string[] | null } | null,
+): { allowed: boolean; override: boolean } {
+  if (item.status !== 'NEED_TO_FACTOR' && item.status !== 'PENDING_WITH_OTR' && item.status !== 'MANUAL_INVOICE') return { allowed: false, override: false }
+  if (noBuyInfo(item).noBuy) return { allowed: true, override: false }
+  if (item.status === 'MANUAL_INVOICE') return { allowed: false, override: false }
+  const admin = (user?.groups ?? []).includes('ADMIN') || (user?.email ?? '').trim().toLowerCase() === 'ryne@bcatcorp.com'
+  return { allowed: admin, override: admin }
+}

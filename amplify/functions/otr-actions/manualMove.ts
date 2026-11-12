@@ -57,6 +57,9 @@ export interface Caller {
 
 export const BILLING_RELEASE_GROUP = 'page-billingRelease'
 
+const OWNER_EMAIL = 'ryne@bcatcorp.com'
+const isAdminCaller = (c: Caller) => c.groups.includes('ADMIN') || c.email.trim().toLowerCase() === OWNER_EMAIL
+
 type Result = { ok: true; data: Row } | { ok: false; error: string }
 const fail = (error: string): Result => ({ ok: false, error })
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
@@ -101,6 +104,16 @@ export async function manualInvoiceMove(store: MoveStore, input: ManualMoveInput
   const alreadyManual = MANUAL_STATUSES.includes(String(item.status))
 
   // ── 1. checks that write nothing ──────────────────────────────────────────
+  // Invoice manually is the answer to No buy. A Dead invoice or an OTR error is OTR's to
+  // sort out, so only an admin may take such a row out of the queue by hand.
+  const isNoBuy = wantReason === 'NO_BUY' || item.brokerCheckResult === 'NO_BUY'
+  if (!alreadyManual && !isNoBuy && !isAdminCaller(caller)) {
+    const meta = otrStatusMeta(item.otrStatus as number | string | null | undefined)
+    return fail(
+      `OTR has not said No buy${meta ? ` (OTR status ${meta.label})` : ''}, so this invoice stays in the factoring queue. ` +
+        'Resolve it with OTR, or ask an admin to invoice it manually.',
+    )
+  }
   if (!alreadyManual && item.otrInvoiceId && wantReason !== 'NO_BUY' && !input.confirmSubmitted) {
     const meta = otrStatusMeta(item.otrStatus as number | string | null | undefined)
     if (!meta?.terminal) {
