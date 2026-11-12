@@ -47,9 +47,14 @@ describe('LifecycleTabs', () => {
     setup('/tms/rates', () => true, { quotesToReply: 3, intakeLoads: 2, loadReview: 120, carrierSales: 0 })
     expect(screen.getByTestId('lifecycle-badge-quote')).toHaveTextContent('3')
     expect(screen.getByTestId('lifecycle-badge-build')).toHaveTextContent('2')
-    expect(screen.getByTestId('lifecycle-badge-review')).toHaveTextContent('99+')
+    expect(screen.getByTestId('lifecycle-badge-review')).toHaveTextContent('120')
     expect(screen.queryByTestId('lifecycle-badge-book')).not.toBeInTheDocument()
     expect(screen.queryByTestId('lifecycle-badge-view')).not.toBeInTheDocument()
+  })
+
+  it('badges View with the active shipment count', () => {
+    setup('/tms/shipments', () => true, { activeShipments: 123 })
+    expect(screen.getByTestId('lifecycle-badge-view')).toHaveTextContent('123')
   })
 
   it('draws five tabs for a user who may not open Load Review', () => {

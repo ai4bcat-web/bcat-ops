@@ -506,10 +506,22 @@ describe('GET /loads/current', () => {
       customer: 'Acme Test Co',
       hasRateConfirmation: true,
       hasPod: true,
+      requiredDocs: [{ type: 'POD', label: 'Proof of delivery', done: true }],
     })
     // The next open load rides along, so a second delivery today is not hidden behind the first.
     expect((res.body.alsoOpen as Array<{ id: string; proNumber: string }>).map((l) => [l.id, l.proNumber])).toEqual([['load-later', '20002']])
     expect(JSON.stringify(res.body)).not.toContain('123400')
+  })
+
+  it('lists the extra documents the office ticked for the load (never the rate confirmation)', async () => {
+    tables['Load-test'] = {
+      'load-1': shipmentLoad(FUTURE, { requiredDocTypes: ['LUMPER_RECEIPT', 'RATE_CON'] }),
+    }
+    const res = await call('/loads/current')
+    expect(res.status).toBe(200)
+    const docs = (res.body.load as { requiredDocs: { type: string; done: boolean }[] }).requiredDocs
+    expect(docs.map((d) => d.type)).toEqual(['POD', 'LUMPER_RECEIPT'])
+    expect(docs.every((d) => d.done === false)).toBe(true)
   })
 })
 

@@ -88,7 +88,7 @@ export function LifecycleTabs({ pathname, canOpenPage, badgeCounts }: LifecycleT
                   <span className="tms-lifecycle-caption">{tab.caption}</span>
                   {count > 0 ? (
                     <span data-testid={`lifecycle-badge-${tab.key}`}>
-                      <TmsCountBadge count={count} />
+                      <TmsCountBadge count={count} max={999} />
                     </span>
                   ) : null}
                 </Link>

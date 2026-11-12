@@ -23,6 +23,7 @@ import { HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/cli
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'crypto'
 import { convertStoredPodImage, isPodImage, pdfKeyFor } from '../_shared/podPdf'
+import { LOAD_EXTRA_DOC_TYPES, loadExtraDocTypes, validateLoadRequiredDocTypes } from '../../../src/lib/loadRequiredDocs'
 
 import {
   getById,
@@ -255,6 +256,10 @@ export function customerDocGate(args: {
     settings: args.settings as Pick<TmsSettings, 'defaultRequiredDocs' | 'requiredCarrierUploadTypes'> | null,
     scope: 'CUSTOMER',
     legacyImported: args.bundle.shipment?.legacyImported === true,
+    // What this order's loads ask for on top of the customer's list (SET_LOAD_REQUIRED_DOCS).
+    extraDocTypes: loadExtraDocTypes(
+      (args.bundle.loads as Row[]).filter((load) => loadIds.includes(String(load.id))) as { requiredDocTypes?: string[] | null }[],
+    ),
   })
 }
 
@@ -797,6 +802,51 @@ export async function reviewDocument(deps: DocumentDeps, input: Row, caller: Cal
   // for anything that arrived through the carrier portal and waited for review.
   await stampPodReceived(deps, next)
   return documentResult(deps, shipmentId, next)
+}
+
+// ── SET_LOAD_REQUIRED_DOCS ───────────────────────────────────────────────────
+
+/**
+ * Set the documents one load needs on top of the customer's list (POD and, with an outside
+ * carrier, the rate confirmation are defaults and are not stored here). The load's extras and
+ * the cached order gate move in one transaction, so the board's Docs column and Load review
+ * show the new requirement straight away. An empty list clears the extras.
+ */
+export async function setLoadRequiredDocs(deps: DocumentDeps, input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const loadId = assertString(input.loadId, 'loadId')
+  const requiredDocTypes = validateLoadRequiredDocTypes(input.requiredDocTypes)
+
+  const bundle = await liveBundle(deps, shipmentId)
+  const load = bundle.loads.find((l) => String(l.id) === loadId)
+  if (!load) throw new Error('That load is not on this shipment')
+  const before = LOAD_EXTRA_DOC_TYPES.filter((t) => ((load.requiredDocTypes as string[] | null | undefined) ?? []).includes(t))
+  if (before.length === requiredDocTypes.length && before.every((t, i) => t === requiredDocTypes[i])) {
+    return { bundle, unchanged: true }
+  }
+
+  const now = nowIso()
+  const nextBundle: Bundle = {
+    ...bundle,
+    loads: bundle.loads.map((l) => (String(l.id) === loadId ? { ...l, requiredDocTypes } : l)),
+  }
+  await transact(
+    deps.store.db,
+    [
+      updateItemTx(
+        deps.store.tables.load,
+        loadId,
+        { requiredDocTypes: requiredDocTypes.length > 0 ? requiredDocTypes : null, updatedAt: now, updatedBy: caller.email },
+        null,
+      ),
+      ...(await recacheDocGates(deps, nextBundle, bundle.documents, now)),
+    ],
+    'load',
+  )
+  await deps.writeAudit('LOAD', loadId, 'SET_LOAD_REQUIRED_DOCS', caller, {
+    shipmentId, before, after: requiredDocTypes,
+  })
+  return { bundle: await readBundle(deps.store, shipmentId) }
 }
 
 // ── UPDATE_DOCUMENT ──────────────────────────────────────────────────────────
