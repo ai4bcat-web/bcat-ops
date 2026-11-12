@@ -100,7 +100,8 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {/* Fleet group switcher (AMAZON stubbed) */}
           <div style={{ display: 'flex', gap: 2, background: 'var(--tms-bg)', borderRadius: 8, padding: 2 }}>
-            {FLEET_GROUPS.map((g) => {
+            {/* Amazon and standard owner operators are one group; the Owner operators panel shows both, week by week. */}
+            {FLEET_GROUPS.filter((g) => g !== 'AMAZON').map((g) => {
               const active = g === group
               return (
                 <button
@@ -142,7 +143,13 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
       </div>
 
       {group === 'AMAZON' && <AmazonProfitPanel />}
-      {group === 'OWNER_OPERATOR' && <OwnerOperatorProfitPanel />}
+      {group === 'OWNER_OPERATOR' && (
+        <>
+          <OwnerOperatorProfitPanel />
+          <div style={{ padding: '10px 20px', fontSize: 12, fontWeight: 700, color: 'var(--tms-muted)', borderTop: '1px solid var(--tms-border)' }}>Weeks settled as Amazon</div>
+          <AmazonProfitPanel />
+        </>
+      )}
 
       {!isDriverPanel && (<>
       {/* Roll-up strip */}

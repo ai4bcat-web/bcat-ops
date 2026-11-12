@@ -32,6 +32,7 @@ import { useLoads, useEnsureLoadRange } from './useLoads'
 import {
   calcDriverPay,
   effectivePayRate,
+  explicitWeekMode,
   effectiveFixedExpenses,
   fixedExpenseLineLabel,
   type DriverPayStatement,
@@ -255,7 +256,12 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
     const locationsById = new Map(locations.map((l) => [l.id, l]))
     const loadsById = new Map(loads.map((l) => [l.id, l]))
     return settings
-      .filter((s) => isOwnerOperatorGroup(s.payGroup) && s.active !== false)
+      // A week pinned to Amazon mode settles on the Amazon page; a week pinned to standard owner operator settles here even for a legacy
+      // Amazon-group driver. Unpinned weeks follow the pay group exactly as before.
+      .filter((s) => {
+        const pinned = explicitWeekMode(s, periodStart)
+        return (pinned ? pinned === 'OWNER_OPERATOR' : isOwnerOperatorGroup(s.payGroup)) && s.active !== false
+      })
       .map((baseSetting): OwnerOperatorPayRow | null => {
         const setting: DriverPaySetting = { ...baseSetting, ...effectivePayRate(baseSetting, periodStart) }
         const driver = driverById.get(setting.driverId)

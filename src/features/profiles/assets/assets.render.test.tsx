@@ -19,6 +19,7 @@ const zak: Driver = {
   id: 'd1', name: 'Zak Pace', phone: '(847) 293-6704', active: true, type: 'driver', fleetGroup: 'BOX_TRUCK',
   assignedTruckId: 't1', assignedTrailerId: 'r1', dispatcherPrimary: 'jason@bcatcorp.com', createdAt: '', updatedAt: '',
 }
+const omar: Driver = { id: 'd3', name: 'Omar Owner', phone: '(312) 555-0222', active: true, type: 'driver', fleetGroup: 'OWNER_OPERATOR', createdAt: '', updatedAt: '' }
 const amy: Driver = { id: 'd2', name: 'Amy Local', phone: '(312) 555-0111', active: true, type: 'driver', fleetGroup: 'LOCAL', createdAt: '', updatedAt: '' }
 const truck: Equipment = {
   id: 't1', type: 'truck', unitNumber: '214', make: 'Freightliner', model: 'Cascadia', year: 2021, vin: '1FUJGLDR7CLBP1234', plate: 'P123456',
@@ -35,7 +36,7 @@ const updateDriver = vi.fn(async () => {})
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: { email: 'ryne@bcatcorp.com' }, isAdmin: true }) }))
 vi.mock('@/store/useAppStore', () => {
   const state = {
-    drivers: [zak, amy], equipment: [truck, spare, trailer],
+    drivers: [zak, amy, omar], equipment: [truck, spare, trailer],
     maintenanceTasks: [{ id: 'mt1', equipmentId: 't1', title: 'Oil change', dueDate: '2026-12-01', priority: 'med', status: 'upcoming' }],
     maintenanceInvoices: [{ id: 'mi1', equipmentId: 't1', vendor: 'Pete Repair', date: '2026-10-01', amount: 125000, description: 'Brakes' }],
     addEquipment, updateEquipment, updateDriver, assignTruckToDriver,
@@ -134,9 +135,11 @@ describe('Asset profile', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     await settle()
     expect(updateDriver).toHaveBeenCalledWith('d1', { assignedTrailerId: null })
-    fireEvent.change(screen.getByLabelText('Assign to a driver'), { target: { value: 'd2' } })
+    // Trailers are a pool: only an owner operator who keeps one can be set as its standing driver (Amy, a company driver, is not offered).
+    expect(screen.queryByRole('option', { name: 'Amy Local' })).toBeNull()
+    fireEvent.change(screen.getByLabelText('Keep with an owner operator'), { target: { value: 'd3' } })
     await settle()
-    expect(updateDriver).toHaveBeenCalledWith('d2', { assignedTrailerId: 'r1', bobtail: false })
+    expect(updateDriver).toHaveBeenCalledWith('d3', { assignedTrailerId: 'r1', bobtail: false })
   })
 
   it('Documents tab lists the truck documents with upload buttons; Maintenance lists tasks and invoices', async () => {
@@ -193,19 +196,20 @@ describe('New asset wizard', () => {
     expect(screen.getByTestId('where').textContent).toBe('/profiles/assets/new1?tab=documents')
   })
 
-  it('a trailer pairs with the driver who pulls it and has no IFTA/IRP or fleet', async () => {
+  it('a trailer stays in the pool unless an owner operator keeps it, and has no IFTA/IRP or fleet', async () => {
     await mount('/profiles/assets/new?type=trailer')
     expect(screen.queryByRole('group', { name: 'Fleet' })).toBeNull()
     type('Unit number', 'T-77')
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     expect(screen.queryByLabelText('IFTA expires')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    type('Driver who pulls it', 'd2')
+    expect(screen.getByText(/keep this trailer in the pool/)).toBeTruthy()
+    type('Owner operator who keeps it', 'd3')
     for (let i = 0; i < 2; i += 1) fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     fireEvent.click(screen.getByRole('button', { name: 'Create trailer' }))
     await settle()
     expect(addEquipment).toHaveBeenCalledWith(expect.objectContaining({ type: 'trailer', unitNumber: 'T-77', fleetGroup: null }))
-    expect(updateDriver).toHaveBeenCalledWith('d2', { assignedTrailerId: 'new1', bobtail: false })
+    expect(updateDriver).toHaveBeenCalledWith('d3', { assignedTrailerId: 'new1', bobtail: false })
   })
 
   it('Cancel goes back to the matching tab of the list', async () => {

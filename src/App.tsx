@@ -81,7 +81,7 @@ import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { DispatchPage } from '@/features/dispatch/DispatchPage'
 import { PodsPage } from '@/features/pods/PodsPage'
-import { RequirePage, RequireAdmin, LandingRedirect } from '@/components/RequirePage'
+import { RequirePage, RequireAdmin, LandingRedirect, DriversAliasRedirect } from '@/components/RequirePage'
 import { DormantPage } from '@/components/RequireModels'
 import { BrokeragePage } from '@/features/tms/brokerage/BrokeragePage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
@@ -208,7 +208,7 @@ export default function App() {
               <Route path="/check-calls" element={<Navigate to={CHECK_CALLS_LANDING} replace />} />
               <Route path="/documents" element={<Navigate to={DOCS_LANDING} replace />} />
               {/* Retired: the driver roster and editor now live in the Files hub. */}
-              <Route path="/drivers" element={<Navigate to="/files" replace />} />
+              <Route path="/drivers" element={<DriversAliasRedirect />} />
               <Route path="/fleet-dashboard" element={<RequirePage page="fleetManagerDashboard"><FleetManagerDashboardPage /></RequirePage>} />
               <Route path="/trucks" element={<RequirePage page="trucks"><TrucksPage /></RequirePage>} />
               <Route path="/truck-docs" element={<RequirePage page="truckDocs"><TruckDocumentsPage /></RequirePage>} />

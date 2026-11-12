@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
+import { MemoryRouter } from 'react-router-dom'
 import { DriverPayPage } from './DriverPayPage'
 import type { DriverPayRow } from '@/hooks/useAmazonPay'
 import { FACTORING_FEE_LABEL, type DriverPayStatement } from '@/lib/driverPay'
@@ -84,7 +85,7 @@ beforeEach(() => { vi.clearAllMocks() })
 describe('DriverPayPage deductions', () => {
   it('shows NO factoring fee line on an Amazon week with no trips — Amazon is never factored', () => {
     useAmazonPayMock.mockReturnValue(payState([row()]))
-    render(<DriverPayPage />)
+    render(<MemoryRouter><DriverPayPage /></MemoryRouter>)
 
     expect(screen.queryByText(FACTORING_FEE_LABEL)).toBeNull()
     expect(screen.getByText(/No deductions\./)).toBeInTheDocument()
@@ -95,7 +96,7 @@ describe('DriverPayPage deductions', () => {
       deductions: [{ label: 'INSURANCE (weekly)', amount: 400 }],
       statement: statement({ gross: 2000, totalDeductions: 400, driverAmount: 672, checkAmount: 672 }),
     })]))
-    render(<DriverPayPage />)
+    render(<MemoryRouter><DriverPayPage /></MemoryRouter>)
 
     expect(screen.queryByText(FACTORING_FEE_LABEL)).toBeNull()
     expect(screen.getByText('INSURANCE (weekly)')).toBeInTheDocument()
@@ -104,7 +105,7 @@ describe('DriverPayPage deductions', () => {
 
   it('exports no factoring fee line for an Amazon statement', async () => {
     useAmazonPayMock.mockReturnValue(payState([row()]))
-    render(<DriverPayPage />)
+    render(<MemoryRouter><DriverPayPage /></MemoryRouter>)
 
     const csv = await csvFromExportClick()
     expect(csv).not.toContain('Factoring fee')

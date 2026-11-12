@@ -17,6 +17,7 @@ import { readTruckCosts } from '@/lib/truckCosts'
 import { getUnitPremiumCents } from '@/lib/insuranceClient'
 import { activeUnits, driversHoldingTrailer, reactivatePatch } from '@/lib/fleetActive'
 import { formatPhone, formatVin } from '@/lib/utils'
+import { trailerModeFor } from '../driverProfileModel'
 import { ProfileDocuments } from '../shared/ProfileDocuments'
 import { ProfileRows, ProfileSection } from '../shared/ProfileSection'
 import '../shared/profiles.css'
@@ -102,9 +103,8 @@ export function AssetProfilePage() {
     getUnitPremiumCents(equip.id).then((c) => setPremium(c / 100)).catch(() => {})
   }
 
-  const trucks = activeUnits(equipment, 'truck')
   const availableDrivers = drivers.filter((d) => d.active && (d.type ?? 'driver') !== 'broker').sort((a, b) => a.name.localeCompare(b.name))
-  const driversWithTrailers = availableDrivers.filter((d) => !holders.some((h) => h.id === d.id))
+  const driversWithTrailers = availableDrivers.filter((d) => trailerModeFor(d.fleetGroup) === 'standing' && !holders.some((h) => h.id === d.id))
 
   return (
     <TmsScrollPage
@@ -232,21 +232,26 @@ export function AssetProfilePage() {
                       placeholder="No driver"
                     />
                   </TmsField>
-                  <TmsField label="Trailer they pull" hint={driver ? undefined : 'Pick a driver first: a trailer is paired with the driver.'}>
+                  {trailerModeFor(driver?.fleetGroup) === 'none' && driver ? null : (
+                  <TmsField
+                    label={trailerModeFor(driver?.fleetGroup) === 'standing' ? 'Standing trailer' : 'Trailer today'}
+                    hint={driver ? (trailerModeFor(driver.fleetGroup) === 'standing' ? 'Optional. An owner operator generally keeps one trailer.' : 'Optional. Company drivers take a trailer from the pool each day.') : 'Optional. Pick a driver to set their trailer.'}
+                  >
                     <TmsSelect
                       value={driver?.assignedTrailerId ?? ''}
                       disabled={!driver}
                       onChange={(e) => driver && void setTrailerFor(driver.id, e.target.value || null)}
                       options={activeUnits(equipment, 'trailer').map((t) => ({ value: t.id, label: `Trailer ${t.unitNumber}` }))}
-                      placeholder={driver?.bobtail ? 'Bobtail (no trailer)' : 'No trailer set'}
+                      placeholder={driver?.bobtail ? 'Bobtail (no trailer)' : 'From the pool'}
                     />
                   </TmsField>
+                  )}
                 </div>
                 <div className="pf-row-sub" style={{ marginTop: 8 }}>Assignments are kept on the driver and the truck together, so Fuel, Files and Dispatch all agree. The system does not keep an assignment history.</div>
               </ProfileSection>
             ) : (
-              <ProfileSection title="Who pulls this trailer">
-                {holders.length === 0 ? <div className="pf-empty">No driver is pulling this trailer.</div> : (
+              <ProfileSection title="Standing driver">
+                {holders.length === 0 ? <div className="pf-empty">In the pool: no standing driver. Company drivers pick a trailer each day.</div> : (
                   <div className="pf-rows">
                     {holders.map((d) => (
                       <div className="pf-row" key={d.id}>
@@ -260,12 +265,12 @@ export function AssetProfilePage() {
                   </div>
                 )}
                 <div className="pf-form-grid" style={{ marginTop: 12 }}>
-                  <TmsField label="Assign to a driver" hint="Replaces whatever trailer that driver pulls now.">
+                  <TmsField label="Keep with an owner operator" hint="Optional. Only for an owner operator who keeps this trailer; it replaces the trailer they have now.">
                     <TmsSelect
                       value=""
                       onChange={(e) => e.target.value && void setTrailerFor(e.target.value, equip.id)}
                       options={driversWithTrailers.map((d) => ({ value: d.id, label: d.name }))}
-                      placeholder="Choose a driver"
+                      placeholder="Choose an owner operator"
                     />
                   </TmsField>
                 </div>
@@ -283,7 +288,7 @@ export function AssetProfilePage() {
             ) : null}
             {isTruck ? null : (
               <ProfileSection title="Trucks available">
-                <div className="pf-row-sub">{trucks.length} active trucks. Pair a trailer by choosing the driver above.</div>
+                <div className="pf-row-sub">Trailers are a shared pool. A trailer only has a standing driver when an owner operator keeps it.</div>
               </ProfileSection>
             )}
           </div>

@@ -10,7 +10,7 @@ import { useDriverTypes } from '@/hooks/useDriverTypes'
 import { weekRange } from './weekRange'
 import { useTmsTokens } from '@/features/tms/tmsTokens'
 
-type TrendTab = 'LOCAL' | 'AMAZON' | 'OWNER_OPERATOR' | 'COMBINED'
+type TrendTab = 'LOCAL' | 'OWNER_OPERATOR' | 'COMBINED'
 
 const WEEKS = 8
 const CHART_TOKENS = ['--tms-chart-5', '--tms-badge-red', '--tms-chart-1', '--tms-chart-axis', '--tms-chart-grid'] as const
@@ -30,7 +30,7 @@ export function FleetPLTrendChart() {
   const { fleetGroupLabel } = useDriverTypes()
   const TABS: { key: TrendTab; label: string }[] = [
     { key: 'LOCAL',          label: fleetGroupLabel('LOCAL') },
-    { key: 'AMAZON',         label: fleetGroupLabel('AMAZON') },
+    // Amazon-mode weeks are part of the Owner operators group: one tab, both statements summed.
     { key: 'OWNER_OPERATOR', label: fleetGroupLabel('OWNER_OPERATOR') },
     { key: 'COMBINED',       label: 'Combined' },
   ]
@@ -57,8 +57,11 @@ export function FleetPLTrendChart() {
       const ownerOp = { revenue: oo.revenue, expenses: oo.driverPay + oo.expenses, profit: oo.profit }
 
       const pick = tab === 'LOCAL' ? local
-        : tab === 'AMAZON' ? amazon
-        : tab === 'OWNER_OPERATOR' ? ownerOp
+        : tab === 'OWNER_OPERATOR' ? {
+            revenue: ownerOp.revenue + amazon.revenue,
+            expenses: ownerOp.expenses + amazon.expenses,
+            profit: ownerOp.profit + amazon.profit,
+          }
         : {
             // Amazon always counts; a month with none contributes zero on its own.
             revenue:  local.revenue  + ownerOp.revenue  + amazon.revenue,

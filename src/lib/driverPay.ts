@@ -71,6 +71,12 @@ export interface PayRateOverride {
   until: string
   payPercent: number
   expensesBeforePercent: boolean
+  /**
+   * The pay mode this window pins for its weeks: an owner operator settled as an Amazon driver ('AMAZON') or as a standard owner
+   * operator ('OWNER_OPERATOR'). Absent on every window written before per-week modes existed (they pin only the rate), so those
+   * weeks keep the setting's own pay group exactly as before.
+   */
+  payGroup?: 'AMAZON' | 'OWNER_OPERATOR'
 }
 
 export interface FixedExpenseMileage {
@@ -248,6 +254,83 @@ export function effectivePayRate(
   return hit
     ? { payPercent: hit.payPercent, expensesBeforePercent: hit.expensesBeforePercent }
     : { payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent }
+}
+
+/** The owner-operator pay modes a week can run in. */
+export type WeekPayMode = 'AMAZON' | 'OWNER_OPERATOR'
+
+type ModeSetting = { payGroup?: string | null; rateHistory?: PayRateOverride[] | null }
+
+/** The pinned window that covers this pay week, if any. */
+function windowFor(rateHistory: PayRateOverride[] | null | undefined, periodStart: string): PayRateOverride | undefined {
+  return (rateHistory ?? []).find((w) => w.from <= periodStart && periodStart < w.until)
+}
+
+/** The mode this exact week was set to by hand, or null when it simply follows the driver's pay group (every week before modes existed). */
+export function explicitWeekMode(setting: ModeSetting, periodStart: string): WeekPayMode | null {
+  return windowFor(setting.rateHistory, periodStart)?.payGroup ?? null
+}
+
+/**
+ * The pay group a week settles under: the week's own pinned mode if one was set, otherwise the setting's pay group. With no mode windows
+ * this is `setting.payGroup`, so every settlement written before per-week modes recomputes exactly as it did.
+ */
+export function payGroupForWeek(setting: ModeSetting, periodStart: string): string | null {
+  return explicitWeekMode(setting, periodStart) ?? setting.payGroup ?? null
+}
+
+function addWeek(weekStart: string, weeks: number): string {
+  const d = new Date(`${weekStart}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 7 * weeks)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Pin ONE pay week to a mode and a rate model, keeping every other week exactly as it was: any window that covers the week is split
+ * around it (its own rate and mode carried to both halves), so closed weeks never move. Returns the new, sorted window list.
+ */
+export function pinWeekPayMode(
+  rateHistory: PayRateOverride[] | null | undefined,
+  weekStart: string,
+  mode: WeekPayMode,
+  model: { payPercent: number; expensesBeforePercent: boolean },
+): PayRateOverride[] {
+  const end = addWeek(weekStart, 1)
+  const out: PayRateOverride[] = []
+  for (const w of rateHistory ?? []) {
+    if (w.until <= weekStart || w.from >= end) { out.push(w); continue }
+    if (w.from < weekStart) out.push({ ...w, until: weekStart })
+    if (w.until > end) out.push({ ...w, from: end })
+  }
+  out.push({ from: weekStart, until: end, payPercent: model.payPercent, expensesBeforePercent: model.expensesBeforePercent, payGroup: mode })
+  return out.sort((a, b) => a.from.localeCompare(b.from))
+}
+
+/** Every week-range pinned to a mode, oldest first: the "mode history" shown beside a driver's pay. */
+export function payModeHistory(setting: ModeSetting): Array<{ from: string; until: string; mode: WeekPayMode; payPercent: number; expensesBeforePercent: boolean }> {
+  return (setting.rateHistory ?? [])
+    .filter((w): w is PayRateOverride & { payGroup: WeekPayMode } => !!w.payGroup)
+    .map((w) => ({ from: w.from, until: w.until, mode: w.payGroup, payPercent: w.payPercent, expensesBeforePercent: w.expensesBeforePercent }))
+    .sort((a, b) => a.from.localeCompare(b.from))
+}
+
+/**
+ * Return one pinned week to the driver's own pay group by dropping its mode, keeping the pinned rate if there was one. A single-week
+ * window that now matches the base rate is dropped altogether.
+ */
+export function clearWeekPayMode(
+  rateHistory: PayRateOverride[] | null | undefined,
+  weekStart: string,
+  base: { payPercent: number; expensesBeforePercent: boolean },
+): PayRateOverride[] {
+  const out: PayRateOverride[] = []
+  for (const w of rateHistory ?? []) {
+    if (!(w.from <= weekStart && weekStart < w.until) || !w.payGroup) { out.push(w); continue }
+    const { payGroup: _mode, ...rate } = w
+    if (rate.payPercent === base.payPercent && rate.expensesBeforePercent === base.expensesBeforePercent) continue
+    out.push(rate)
+  }
+  return out
 }
 
 /** A deduction line — `amount` is the positive dollar figure subtracted from pay. */
