@@ -9,7 +9,7 @@ import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { ReleaseGateList } from '@/features/shipments/components/ReleaseGateCard'
 import { releaseGateMessages } from '@/features/shipments/components/releaseGateView'
 import { toast } from 'sonner'
-import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
+import { useBillingGrant, LOAD_REVIEW_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { reviewLoad, readyToInvoice, releaseToBilling, setSalesRep, setRevTag, type LoadReviewResult } from '@/lib/apiClient'
 import { DOCS_LANDING } from '@/features/shipments/workstations/tracking/legacyRoutes'
 import { NO_DELIVERY_TIME_TIP, evaluateLoadReview, pendingApRecordNotes, failingReasons, reviewAgeDays, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL } from '@/lib/loadReview'
@@ -29,7 +29,7 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
 }) {
   const { hasPageAccess } = useAuth()
   const canOpen = hasPageAccess('loads') || hasPageAccess('tms')
-  const canRelease = useBillingGrant()
+  const canRelease = useBillingGrant('loadReview')
   const { divisions } = useOwnershipDivisions()
   const [result, setResult] = useState<LoadReviewResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -124,9 +124,9 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
         <p className="lr-footer-title">{`Fix ${reasons.length} ${reasons.length === 1 ? 'item' : 'items'} first.`}</p>
         <ul>{reasons.map((reason, index) => <li key={`${reason.code}-${index}`}><XCircle size={14} aria-hidden className="lr-icon-bad" />{reason.message}</li>)}</ul>
       </div>}
-      {!canRelease && <p role="note" className="tms-muted text-xs">{BILLING_GRANT_MESSAGE}</p>}
+      {!canRelease && <p role="note" className="tms-muted text-xs">{LOAD_REVIEW_GRANT_MESSAGE}</p>}
       <div className="lr-footer-actions">
-        <TmsButton variant="primary" disabled={busy || !result || !verdict.ok || released || !!error || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => void move()}>Move to billing</TmsButton>
+        <TmsButton variant="primary" disabled={busy || !result || !verdict.ok || released || !!error || !canRelease} title={canRelease ? undefined : LOAD_REVIEW_GRANT_MESSAGE} onClick={() => void move()}>Move to billing</TmsButton>
         <span className="lr-footer-spacer" />
         {shipmentLink('overview', 'Open shipment')}
         <TmsButton variant="ghost" disabled={busy || !result} onClick={() => void rereview()}>Re-check</TmsButton>

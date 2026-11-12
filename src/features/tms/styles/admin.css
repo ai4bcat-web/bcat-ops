@@ -145,3 +145,7 @@
 .tms-shell .tms-users-page input { accent-color: var(--tms-primary); width: 15px; height: 15px; flex: 0 0 auto; margin: 0; }
 .tms-shell .tms-users-page-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .tms-shell .tms-users-page-tag { flex: 0 0 auto; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--tms-muted); }
+.tms-shell .tms-users-page-covers { display: block; margin-top: 2px; font-size: 11px; color: var(--tms-muted); }
+.tms-shell .tms-users-section-title { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--tms-muted); margin-bottom: 4px; }
+.tms-shell .tms-users-accounting { border: 1px solid var(--tms-border); border-radius: var(--tms-radius); padding: 10px 12px; margin-bottom: 4px; }
+.tms-shell .tms-users-accounting .tms-users-pages { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }

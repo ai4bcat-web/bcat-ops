@@ -15,7 +15,7 @@ import type { ShipmentListRow } from '@/hooks/useShipments'
 import { boardStatusOf, matchesQuery } from '@/features/shipments/shipmentViews'
 import { sentence } from '@/features/shipments/shipmentGridColumns'
 import { batchShipmentTask, listAuditLogsFor, pushReadyToLoadReview, releaseToBilling } from '@/lib/apiClient'
-import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
+import { useBillingGrant, LOAD_REVIEW_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { NO_DELIVERY_TIME_TIP, failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
@@ -34,7 +34,7 @@ export function LoadReviewPage() {
   const { hasPageAccess, user } = useAuth()
   const email = user?.email ?? ''
   const canOpen = hasPageAccess('loads') || hasPageAccess('tms')
-  const canRelease = useBillingGrant()
+  const canRelease = useBillingGrant('loadReview')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirm, setConfirm] = useState(false)
   const [capMessage, setCapMessage] = useState<string | null>(null)
@@ -266,7 +266,7 @@ export function LoadReviewPage() {
       </div>
     </div>
     {tab !== 'released' && <ReviewBatchEdit ids={editChosen} email={email} onDone={() => { setSelected(new Set()); void refresh() }} />}
-    {!!chosen.length && <div className="aa-review-actions"><TmsButton variant="primary" disabled={!canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => setConfirm(true)}>Move {chosen.length} to billing</TmsButton>{!canRelease && <p role="note" className="tms-muted">{BILLING_GRANT_MESSAGE}</p>}</div>}
+    {!!chosen.length && <div className="aa-review-actions"><TmsButton variant="primary" disabled={!canRelease} title={canRelease ? undefined : LOAD_REVIEW_GRANT_MESSAGE} onClick={() => setConfirm(true)}>Move {chosen.length} to billing</TmsButton>{!canRelease && <p role="note" className="tms-muted">{LOAD_REVIEW_GRANT_MESSAGE}</p>}</div>}
     <TmsDialog open={confirm} onOpenChange={setConfirm} title={`Move ${chosen.length} to billing`} description={`These ${chosen.length} shipments go to accounting. The server re-checks each one.`} footer={<TmsButton disabled={busy || !chosen.length} variant="primary" onClick={() => void releaseBatch()}>Confirm move to billing</TmsButton>} />
     {openRow && <LoadReviewDrawer key={openRow.id} row={openRow} onClose={() => update({ shipment: null })} onRefresh={refresh} onFailure={(message) => setAttempts((old) => ({ ...old, [openRow.id]: message }))} onMoved={() => { setNotice(`${openRow.number}: Moved to billing`); const index = filtered.findIndex(({ row }) => row.id === openRow.id); update({ shipment: filtered[index + 1]?.row.id ?? null }) }} />}
   </div>

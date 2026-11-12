@@ -24,7 +24,7 @@ import {
 import { INVOICE_EMAIL_BODY } from '@/lib/shipmentNotices'
 import type { InvoiceBatchEmailMode, TmsSettings } from '@/types/tms'
 import { invoiceSeriesStartProblem } from '@/lib/invoiceSeries'
-import { CheckRow, ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from './settingsKit'
+import { ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from './settingsKit'
 
 /** What `{prefix}` resolves to when no division has set one. */
 const FALLBACK_PREFIX = 'INV-'
@@ -50,7 +50,6 @@ export function ArSettingsCard() {
   const [factorZip, setFactorZip] = useState('')
   const [factorEmail, setFactorEmail] = useState('')
   const [factorNotice, setFactorNotice] = useState('')
-  const [postingAdminOnly, setPostingAdminOnly] = useState(true)
   const [seriesStart, setSeriesStart] = useState('')
   const [maxImported, setMaxImported] = useState<number | null>(null)
   const [plainNumbers, setPlainNumbers] = useState(false)
@@ -78,7 +77,6 @@ export function ArSettingsCard() {
         setFactorEmail(s?.factorRemitTo?.email ?? '')
         setFactorNotice(s?.factorRemitTo?.noticeText ?? '')
         // Posting money is admin-only unless somebody deliberately opened it up.
-        setPostingAdminOnly(s?.arPostingAdminOnly !== false)
         setBatchEmail(s?.invoiceBatchEmail ?? 'PER_INVOICE')
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not load settings'))
@@ -121,7 +119,6 @@ export function ArSettingsCard() {
         factorRemitTo: name
           ? { name, address, email: factorEmail.trim() || null, noticeText: factorNotice.trim() || null }
           : null,
-        arPostingAdminOnly: postingAdminOnly,
         invoiceBatchEmail: batchEmail,
         // Only a series start the person changed is sent: the Lambda moves the counter forward on it.
         ...(seriesStart.trim() !== '' && Number(seriesStart) !== (savedSeriesStart ?? -1)
@@ -280,14 +277,6 @@ export function ArSettingsCard() {
                 {BATCH_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </TmsSelect>
             </TmsField>
-            <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 6 }}>
-              <CheckRow
-                ariaLabel="AR posting admin only"
-                label="Only an admin may void, pay, credit, write off or reverse"
-                checked={postingAdminOnly}
-                onChange={setPostingAdminOnly}
-              />
-            </div>
           </div>
 
           {error && <ErrorText>{error}</ErrorText>}

@@ -356,12 +356,8 @@ export async function recordBill(input: Row, caller: Caller): Promise<Row> {
   const gate = carrierGateFor(context)
 
   if (approve) {
-    // "Record and approve" is still an approval: the same capability, the same
-    // acknowledgements. The router cannot gate it, because RECORD_BILL itself is
-    // open to any AP user, so the second half of the press is checked here.
-    if (!caller.isAdmin && context.settings.apApprovalAdminOnly !== false) {
-      throw new Error('Forbidden: approving a bill requires owner or ADMIN')
-    }
+    // "Record and approve" is still an approval, with the same acknowledgements. Whoever
+    // holds Accounts payable may approve (Ryne 2026-11-12: page access is every action).
     const check = approvalReadiness({
       bill,
       loadCarrier: context.loadCarrier,
@@ -370,7 +366,8 @@ export async function recordBill(input: Row, caller: Caller): Promise<Row> {
       gate,
       payee: { kind: bill.payeeKind, paymentMethodId: bill.paymentMethodId ?? null, remitTo: bill.remitTo ?? null },
       settings: context.settings,
-      isAdmin: caller.isAdmin,
+      // The router admitted this caller to Accounts payable, which is every action on it.
+    isAdmin: true,
     })
     if (check.blocks.length > 0) throw new Error(check.blocks.join(' '))
     const unacknowledged = check.warnings.filter((warning) => !acknowledged.includes(warning.key))
@@ -453,11 +450,10 @@ export async function approveBill(input: Row, caller: Caller): Promise<Row> {
   const gate = carrierGateFor(context)
   const now = nowIso()
 
-  // A paperwork override is an admin act with a reason on it, and it is applied to
-  // the bill BEFORE the gate is judged — otherwise the override could never clear
-  // the block it exists for.
+  // A paperwork override carries a reason, and it is applied to the bill BEFORE the gate
+  // is judged — otherwise the override could never clear the block it exists for. Anyone
+  // the router let onto Accounts payable may make it (page access is every action).
   const overriding = Boolean(docsOverrideNote) && gate.missing.length > 0
-  if (overriding && !caller.isAdmin) throw new Error('Overriding the paperwork gate requires owner or ADMIN')
   const judged: CarrierBillRecord = overriding ? { ...bill, docsOverrideAt: now } : bill
 
   const check = approvalReadiness({
@@ -468,7 +464,8 @@ export async function approveBill(input: Row, caller: Caller): Promise<Row> {
     gate,
     payee: { kind: bill.payeeKind, paymentMethodId: bill.paymentMethodId ?? null, remitTo: bill.remitTo ?? null },
     settings: context.settings,
-    isAdmin: caller.isAdmin,
+    // The router admitted this caller to Accounts payable, which is every action on it.
+    isAdmin: true,
   })
   if (check.blocks.length > 0) throw new Error(check.blocks.join(' '))
   const unacknowledged = check.warnings.filter((warning) => !acknowledged.includes(warning.key))

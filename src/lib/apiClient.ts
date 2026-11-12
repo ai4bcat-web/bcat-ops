@@ -7599,7 +7599,7 @@ export async function saveArSettings(input: Partial<ArSettings>): Promise<{ sett
 }
 
 // ── Step AW stage D: release to billing, send invoice, factoring-queue change sync ──
-// All three need owner, ADMIN or the per-user `page-billingRelease` grant; the Lambda refuses everyone else.
+// Release needs Load review or Invoicing access; sending and the factoring sync need Invoicing (src/lib/accountingAccess.ts).
 
 export interface ReleaseToBillingResult {
   invoice: InvoiceRecord

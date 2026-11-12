@@ -660,27 +660,16 @@ describe('authorization', () => {
     await expect(call('PREVIEW_INVOICE', { orderId: ORDER_ID }, null)).rejects.toThrow(/Unauthorized/)
   })
 
-  it('refuses a dispatcher who only holds page-loads', async () => {
-    await expect(call('PREVIEW_INVOICE', { orderId: ORDER_ID }, DISPATCHER)).rejects.toThrow(/page-invoicing/)
+  it('refuses a dispatcher who only holds page-loads, naming the page', async () => {
+    await expect(call('PREVIEW_INVOICE', { orderId: ORDER_ID }, DISPATCHER)).rejects.toThrow(/You need access to Accounts receivable \/ Invoicing/)
   })
 
-  it('lets a page-tms caller open AR, and keeps posting admin-only', async () => {
-    // Step R: Invoicing is a BROKERAGE page, so the one TMS grant opens the AR door
-    // `page-invoicing` opens — and no further: posting is still owner/ADMIN.
+  it('no longer opens AR on the broad page-tms grant (Ryne 2026-11-12: accounting pages are granted one by one)', async () => {
     const TMS_USER = { sub: 'sub-tms', username: 'tms', claims: { email: 'broker@bcatcorp.com', 'cognito:groups': ['page-tms'] } }
-    await expect(call('PREVIEW_INVOICE', { orderId: ORDER_ID }, TMS_USER)).resolves.toBeDefined()
-    await expect(call('SAVE_AR_SETTINGS', { invoiceTerms: 'Net 30' }, TMS_USER)).rejects.toThrow(/requires owner or ADMIN/)
+    await expect(call('PREVIEW_INVOICE', { orderId: ORDER_ID }, TMS_USER)).rejects.toThrow(/You need access to Accounts receivable/)
   })
 
-  it('lets page-invoicing issue a bill but not post money against it', async () => {
-    const { invoiceId } = await generate()
-    await expect(
-      call('RECORD_PAYMENT', { customerId: CUSTOMER_ID, receivedAt: '2026-10-25', method: 'CHECK', amountCents: 1, applications: [{ invoiceId, amountCents: 1 }], creditApplications: [] }, BILLER),
-    ).rejects.toThrow(/requires owner or ADMIN/)
-  })
-
-  it('lets page-invoicing post once the org turns the admin-only rule off', async () => {
-    table(TABLES.settings).set('default', { ...table(TABLES.settings).get('default')!, arPostingAdminOnly: false })
+  it('lets page-invoicing post money too: page access is every action on the page', async () => {
     const { invoiceId } = await generate()
     const posted = (await call(
       'RECORD_PAYMENT',
@@ -690,8 +679,7 @@ describe('authorization', () => {
     expect(posted.payment.createdBy).toBe('bill@bcatcorp.com')
   })
 
-  it('keeps settings admin-only whatever the posting rule says', async () => {
-    table(TABLES.settings).set('default', { ...table(TABLES.settings).get('default')!, arPostingAdminOnly: false })
+  it('keeps settings admin-only', async () => {
     await expect(call('SAVE_AR_SETTINGS', { invoiceTerms: 'Net 30' }, BILLER)).rejects.toThrow(/requires owner or ADMIN/)
   })
 
@@ -2309,38 +2297,15 @@ describe('SEND_REMITTANCE', () => {
 })
 
 describe('AP authorization', () => {
-  it('refuses every AP action to a user who may only invoice', async () => {
+  it('refuses every AP action to a user who may only invoice, naming the page', async () => {
     seedAssignment()
     await expect(call('PREVIEW_BILL', { loadCarrierId: LOAD_CARRIER_ID }, BILLER)).rejects.toThrow(
-      /page-carrierPay/,
+      /You need access to Accounts payable/,
     )
   })
 
-  it('lets an AP rep record a bill but not pay one', async () => {
+  it('lets an AP user record and approve a bill: page access is every action on the page', async () => {
     seedAssignment()
-    const bill = await recordBill({}, AP_USER)
-    expect(bill.status).toBe('IN_REVIEW')
-    await expect(
-      call('RECORD_AP_PAYMENT', {
-        carrierId: CARRIER_ID,
-        paidAt: '2026-10-25',
-        method: 'ACH',
-        amountCents: 1,
-        applications: [{ billId: bill.id, amountCents: 1 }],
-      }, AP_USER),
-    ).rejects.toThrow(/owner or ADMIN/)
-  })
-
-  it('refuses "Record and approve" to a rep while approval is admin-only', async () => {
-    seedAssignment()
-    await expect(recordBill({ approve: true }, AP_USER)).rejects.toThrow(/owner or ADMIN/)
-    // The bill is not quietly recorded unapproved either: the press is one act.
-    expect(table(TABLES.carrierBill).size).toBe(0)
-    expect((table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row).apStatus).toBe('AWAITING_INVOICE')
-  })
-
-  it('lets a rep record and approve once the org turns the toggle off', async () => {
-    seedAssignment({ settings: { apApprovalAdminOnly: false } })
     const bill = await recordBill({ approve: true }, AP_USER)
     expect(bill.status).toBe('TO_BE_PAID')
     expect(bill.approvedBy).toBe('ap@bcatcorp.com')
@@ -2420,7 +2385,7 @@ describe('commissions', () => {
 
   it('refuses the commission desk to a user who only holds page-invoicing', async () => {
     seedCommissions()
-    await expect(call('RUN_COMMISSIONS', { month: '2026-10' }, BILLER)).rejects.toThrow(/page-commissions/)
+    await expect(call('RUN_COMMISSIONS', { month: '2026-10' }, BILLER)).rejects.toThrow(/You need access to Commissions/)
   })
 
   it('refuses to compute before the invoice is paid when that is the trigger', async () => {
@@ -3098,16 +3063,29 @@ describe('SEND_INVOICE', () => {
   })
 })
 
-describe('billingRelease grant', () => {
+describe('accounting page access (Ryne 2026-11-12)', () => {
+  const DISPATCH_ONLY = { sub: 'd2', username: 'd2', claims: { email: 'd2@bcatcorp.com', 'cognito:groups': ['page-loads', 'page-tms'] } }
+
   it.each(['GENERATE_INVOICE', 'BATCH_GENERATE', 'RELEASE_TO_BILLING', 'SEND_INVOICE', 'EMAIL_INVOICE', 'BATCH_EMAIL', 'SEND_TO_FACTOR', 'MARK_SENT', 'SYNC_FACTORING_CHANGE'])(
-    '%s is refused for invoicing users without the grant (admins and the owner pass)',
+    '%s is refused without an accounting page, and names the page',
     async (action) => {
       seedMethod('MANUAL')
-      await expect(call(action, { orderId: ORDER_ID, invoiceId: 'x', proNumber: 'x', changeReason: 'x', changes: {}, invoiceIds: [] }, BILLER))
-        .rejects.toThrow(/Forbidden: .* requires owner, ADMIN, or the page-billingRelease grant/)
+      await expect(call(action, { orderId: ORDER_ID, invoiceId: 'x', proNumber: 'x', changeReason: 'x', changes: {}, invoiceIds: [] }, DISPATCH_ONLY))
+        .rejects.toThrow(/Forbidden: You need access to (Load review|Accounts receivable)/)
       expect(table(TABLES.invoice).size).toBe(0)
     },
   )
+
+  it('lets a Load review user move a load to billing', async () => {
+    seedMethod('MANUAL')
+    const reviewer = { sub: 'lr', username: 'lr', claims: { email: 'lr@bcatcorp.com', 'cognito:groups': ['page-loadReview'] } }
+    await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID }, reviewer)).resolves.toMatchObject({ billingMethod: 'MANUAL' })
+  })
+
+  it('lets an Invoicing user generate, release and send: every action on the page', async () => {
+    const { invoiceId } = await generate(BILLER)
+    expect(table(TABLES.invoice).get(invoiceId)).toBeDefined()
+  })
 
   it('lets ADMIN and the owner release without the per-user grant (Ryne 2026-11-12)', async () => {
     seedMethod('MANUAL')
@@ -3126,14 +3104,10 @@ describe('billingRelease grant', () => {
     await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID }, onlyGrant)).resolves.toMatchObject({ billingMethod: 'MANUAL' })
   })
 
-  it('lets a user holding only the grant post (generate) an invoice; broad page access without it cannot', async () => {
+  it('reads the old billing-release grant as Load review + Invoicing access', async () => {
     const onlyGrant = { sub: 'g', username: 'g', claims: { email: 'g@bcatcorp.com', 'cognito:groups': ['page-billingRelease'] } }
     const { invoiceId } = await generate(onlyGrant)
     expect(table(TABLES.invoice).get(invoiceId)).toBeDefined()
-    // Ruben-shaped users: broad page access, ADMIN or not, but no grant => cannot issue another.
-    seedSecondOrder('ord-2')
-    const broad = { sub: 'r', username: 'r', claims: { email: 'r@bcatcorp.com', 'cognito:groups': ['page-invoicing', 'page-tms', 'page-finances', 'page-customers'] } }
-    await expect(call('BATCH_GENERATE', { orderIds: ['ord-2'] }, broad)).rejects.toThrow(/requires owner, ADMIN, or the page-billingRelease grant/)
   })
 })
 

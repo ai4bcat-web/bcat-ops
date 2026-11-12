@@ -135,29 +135,21 @@ export const NAV_ITEMS: NavItem[] = [
  */
 const TMS_PERMISSION_PAGE = { key: 'tms', label: 'TMS (Brokerage section)' }
 
-/** Per-user grant keys: no role holds them, not even ADMIN. Group names are `page-<key>`. */
+/**
+ * Per-user grant keys: no role holds them, not even ADMIN. Group names are `page-<key>`.
+ * `billingRelease` was one until 2026-11-12; it is now read as Load review + Invoicing
+ * access (src/lib/accountingAccess.ts) and is no longer offered on the Users page.
+ */
 export const BILLING_RELEASE_PAGE = 'billingRelease'
 export const ALJEX_SIGNOFF_PAGE = 'aljexSignoff'
 /** Pages whose grant is never implied by a role. */
-export const PER_USER_GRANT_PAGES: readonly string[] = [BILLING_RELEASE_PAGE, ALJEX_SIGNOFF_PAGE]
+export const PER_USER_GRANT_PAGES: readonly string[] = [ALJEX_SIGNOFF_PAGE]
 
 /**
  * Whether a Cognito group list carries a per-user grant. Group-only by design: unlike
  * `hasPageAccess`, no ADMIN/owner status opens it, because the Lambdas check the
  * `page-<key>` group alone. A non-grant key is refused rather than guessed at.
  */
-/**
- * Release to billing / Send invoice: the owner, the ADMIN group, or the per-user grant
- * (Ryne 2026-11-12). Mirrors the finance Lambda's rule exactly.
- */
-export function canReleaseToBilling(
-  groups: readonly string[] | null | undefined,
-  email: string | null | undefined,
-): boolean {
-  const list = groups ?? []
-  return list.includes('ADMIN') || (email ?? '').trim().toLowerCase() === 'ryne@bcatcorp.com' || holdsPerUserGrant(list, BILLING_RELEASE_PAGE)
-}
-
 export function holdsPerUserGrant(groups: readonly string[] | null | undefined, key: string): boolean {
   return PER_USER_GRANT_PAGES.includes(key) && (groups ?? []).includes(`page-${key}`)
 }
@@ -173,10 +165,9 @@ const OFF_NAV_PERMISSION_PAGES: { key: string; label: string }[] = [
   { key: 'loadReview', label: 'Load review' },
   // The PODs page left the sidebar: Load Review's POD button is the review now. The route and its grant stay for deep links.
   { key: 'pods', label: 'PODs' },
-  // Per-user grants for the two billing/reconciliation actions. Never implied by a role
-  // (ADMIN included): the Lambdas check the `page-<key>` group alone, so only the Users
-  // page checkbox (owner/admin) can hand them out.
-  { key: BILLING_RELEASE_PAGE, label: 'Release to billing / Send invoice' },
+  // Per-user grant for the reconciliation sign-off. Never implied by a role (ADMIN
+  // included): the Lambda checks the `page-<key>` group alone, so only the Users page
+  // checkbox (owner/admin) can hand it out.
   { key: ALJEX_SIGNOFF_PAGE, label: 'Aljex import sign-off' },
 ]
 
