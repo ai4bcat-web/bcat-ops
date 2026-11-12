@@ -16,7 +16,7 @@ import { boardStatusOf, isDemoShipment, matchesQuery } from '@/features/shipment
 import { sentence } from '@/features/shipments/shipmentGridColumns'
 import { batchShipmentTask, listAuditLogsFor, pushReadyToLoadReview, releaseToBilling } from '@/lib/apiClient'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
-import { failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
+import { NO_DELIVERY_TIME_TIP, failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 import { useLoadReviewQueue } from './useLoadReviewQueue'
@@ -62,7 +62,7 @@ export function LoadReviewPage() {
       { key: 'lane', header: 'Lane', group: 'Shipment', text: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
       { key: 'loadStatus', header: 'Load status', group: 'Shipment', text: ({ row }) => reviewStatusText(row), filter: 'multi', optionsOf: ({ row }) => opt(boardStatusOf(row), sentence(boardStatusOf(row))), extraPx: 24 },
       { key: 'delivered', header: 'Delivered', group: 'Shipment', text: ({ row }) => deliveredText(row), sortValue: ({ row }) => deliveredTimeOf(row) ?? '' },
-      { key: 'age', header: 'In review', group: 'Review', text: ({ row }) => { const age = reviewAgeDays(row, now); return age == null ? 'POD before delivery' : `${age} d` }, extraPx: 24, sortValue: ({ row }) => reviewAgeDays(row, now) ?? -1 },
+      { key: 'age', header: 'In review', group: 'Review', text: ({ row }) => { const age = reviewAgeDays(row, now); return age == null ? 'No delivery time' : `${age} d` }, extraPx: 24, sortValue: ({ row }) => reviewAgeDays(row, now) ?? -1 },
       { key: 'rep', header: 'Sales rep', group: 'Review', text: ({ row }) => row.salesRepName ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.salesRepName) },
       { key: 'division', header: 'Division', group: 'Review', text: ({ row }) => row.revDivision?.replace(/_/g, ' ') ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.revDivision?.replace(/_/g, ' ')) },
       { key: 'checks', header: 'Checks (preliminary)', group: 'Checks', text: (e) => (!e.verdict ? '' : failedOf(e) === 0 ? `All ${LOAD_REVIEW_CHECKS.length} passed` : `${failedOf(e)} to fix`), extraPx: 24 },
@@ -173,7 +173,7 @@ export function LoadReviewPage() {
     { key: 'lane', header: 'Lane', render: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
     { key: 'loadStatus', header: 'Load status', render: ({ row }) => <TmsBadge tone={reviewStatusTone(row)}>{reviewStatusText(row)}</TmsBadge> },
     { key: 'delivered', header: 'Delivered', render: ({ row }) => deliveredText(row) },
-    { key: 'age', header: 'In review', render: ({ row }) => { const age = reviewAgeDays(row, now); return <TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'POD before delivery' : `${age} d`}</TmsBadge> } },
+    { key: 'age', header: 'In review', render: ({ row }) => { const age = reviewAgeDays(row, now); return <span title={age == null ? NO_DELIVERY_TIME_TIP : undefined}><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'No delivery time' : `${age} d`}</TmsBadge></span> } },
     { key: 'rep', header: 'Sales rep', render: ({ row }) => row.salesRepName ?? '—' },
     { key: 'division', header: 'Division', render: ({ row }) => row.revDivision?.replace(/_/g, ' ') ?? '—' },
     // One column per check, each a clear pass (check mark) or fail (cross) with its reason on hover, plus a result column up front:
