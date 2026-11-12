@@ -38,6 +38,7 @@ vi.mock('@/hooks/useFactoringItems', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock('@/lib/apiClient', () => ({
   graphqlErrorText: (e: unknown) => String(e),
+  getInvoiceAttachmentPlans: vi.fn().mockResolvedValue([]),
   listInvoicesByMonth: vi.fn().mockResolvedValue([]),
   listUserProfiles: vi.fn().mockResolvedValue([{ id: 'rep-1', email: 'jenny@bcatcorp.com', name: 'Jenny Rep' }]),
   batchGenerateInvoices: vi.fn(),

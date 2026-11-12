@@ -56,12 +56,24 @@ import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/li
 import { canEmailTo, evaluateDocGate, gateLoadIds } from '../../../src/lib/shipmentDocuments'
 import {
   assertNotSquareInvoiced,
-  customerPacketDocuments,
   customerPacketIds,
+  invoiceAttachmentPlan,
+  invoiceEmailDocuments,
+  isCustomerRateCon,
   SQUARE_INVOICED_CODE,
   SQUARE_INVOICED_MESSAGE,
   SquareInvoicedError,
+  type InvoiceAttachmentScope,
 } from '../../../src/lib/invoiceDelivery'
+import { invoiceBrandingFor } from '../../../src/lib/invoiceBranding'
+import {
+  carrierDocumentReason,
+  carrierPayAmounts,
+  carrierPayInText,
+  customerChargeAmounts,
+  type CarrierPayFlag,
+} from '../../../src/lib/carrierPayGuard'
+import { pdfText } from '../_shared/pdfText'
 import type {
   BillToParty,
   CustomerRecord,
@@ -383,9 +395,7 @@ export async function previewInvoice(input: Row, caller: Caller): Promise<Row> {
     gate,
     snapshot: invoice as unknown as Row,
     recipients: { to, cc },
-    attachments: attachDocumentIds
-      .map((id) => context.documents.find((doc) => doc.id === id))
-      .filter((doc): doc is ShipmentDocumentRecord => doc != null)
+    attachments: invoiceEmailDocuments(context.documents, attachmentScopeOf({ ...invoice, attachDocumentIds }, context))
       .map((doc) => ({ id: doc.id, type: doc.type, name: doc.name, sizeBytes: doc.sizeBytes })),
   }
 }
@@ -693,22 +703,78 @@ function attachmentNameOf(invoice: InvoiceRecord): string {
   return invoiceAttachmentName(invoice.shipmentNumber || invoice.number, invoicePoNumber(invoice.references))
 }
 
-async function attachmentsFor(invoice: InvoiceRecord, documents: ShipmentDocumentRecord[]): Promise<EmailAttachment[]> {
-  const keys: { name: string; contentType: string; key: string }[] = []
+/** Who the invoice's documents are for: its order, its loads, and whether it bills as Ivan Cartage. */
+function attachmentScopeOf(invoice: InvoiceRecord, context: Pick<OrderContext, 'shipment' | 'gateLoadIds'>): InvoiceAttachmentScope {
+  return {
+    attachIds: invoice.attachDocumentIds ?? [],
+    orderId: invoice.orderId,
+    loadIds: context.gateLoadIds,
+    ivan: invoiceBrandingFor(context.shipment?.revDivision, context.shipment?.revSubdivision).key === 'IVAN',
+  }
+}
+
+/** The documents one send carries: the rule, minus anything the sender took out of this e-mail. */
+function sendDocuments(documents: ShipmentDocumentRecord[], scope: InvoiceAttachmentScope, exclude: readonly string[]): ShipmentDocumentRecord[] {
+  const out = new Set(exclude)
+  return invoiceEmailDocuments(documents, scope).filter((doc) => !out.has(doc.id))
+}
+
+export class CarrierPayBlockedError extends Error {
+  readonly code = 'CARRIER_PAY_BLOCKED'
+  constructor(readonly flags: CarrierPayFlag[]) {
+    super(`CARRIER_PAY_BLOCKED: ${flags.map((f) => `${f.name} — ${f.reason}`).join('; ')}. Remove ${flags.length === 1 ? 'that file' : 'those files'} from this e-mail before sending.`)
+    this.name = 'CarrierPayBlockedError'
+  }
+}
+
+/**
+ * Ryne's hard rule: no attachment on a customer e-mail may show carrier pay. Check 1 (type /
+ * origin) always applies and cannot be overridden. Check 2 (the file's text holds the carrier pay
+ * amount or carrier-pay wording) applies to BCAT Logistics / brokerage invoices; a flag there
+ * blocks the send unless an admin overrides with a reason.
+ */
+export function carrierPayFlags(
+  files: { documentId: string | null; name: string; bytes: Uint8Array; contentType: string; doc: ShipmentDocumentRecord | null }[],
+  scope: InvoiceAttachmentScope,
+  context: Pick<OrderContext, 'charges'>,
+): { hard: CarrierPayFlag[]; content: CarrierPayFlag[] } {
+  const hard: CarrierPayFlag[] = []
+  const content: CarrierPayFlag[] = []
+  const carrierAmounts = carrierPayAmounts(context.charges, scope.loadIds)
+  const customerAmounts = customerChargeAmounts(context.charges)
+  for (const file of files) {
+    if (file.doc) {
+      const reason = carrierDocumentReason(file.doc, scope.ivan && isCustomerRateCon(file.doc))
+      if (reason) { hard.push({ documentId: file.documentId, name: file.name, reason }); continue }
+    }
+    // Our own invoice PDF carries no cost by construction (invoiceData reads the customer side only).
+    if (!file.doc || scope.ivan) continue
+    if (!/pdf/i.test(file.contentType)) continue
+    const found = carrierPayInText(pdfText(file.bytes), carrierAmounts, customerAmounts)
+    if (found) content.push({ documentId: file.documentId, name: file.name, reason: `Carrier pay detected: ${found}` })
+  }
+  return { hard, content }
+}
+
+async function attachmentsFor(
+  invoice: InvoiceRecord,
+  docs: ShipmentDocumentRecord[],
+): Promise<{ attachments: EmailAttachment[]; files: Parameters<typeof carrierPayFlags>[0] }> {
+  const keys: { name: string; contentType: string; key: string; doc: ShipmentDocumentRecord | null }[] = []
   if (invoice.pdfKey) {
     keys.push({
       name: attachmentNameOf(invoice),
       contentType: 'application/pdf',
       key: invoice.pdfKey,
+      doc: null,
     })
   }
   // Re-checked at SEND time, not only at issue: a document voided, retyped or made
-  // INTERNAL after the invoice was raised must not go out with a resend. The packet
-  // order is recomputed here too, so a stored list in another order still sends right.
-  const attachIds = new Set(invoice.attachDocumentIds ?? [])
-  for (const doc of customerPacketDocuments(documents.filter((row) => attachIds.has(row.id)))) {
+  // INTERNAL after the invoice was raised must not go out with a resend. The POD always
+  // goes; a rate con only as invoiceEmailDocuments allows (Ivan, the customer's own).
+  for (const doc of docs) {
     if (!doc.s3Key) continue
-    keys.push({ name: doc.name, contentType: doc.contentType ?? 'application/pdf', key: doc.s3Key })
+    keys.push({ name: doc.name, contentType: doc.contentType ?? 'application/pdf', key: doc.s3Key, doc })
   }
   for (const entry of keys) {
     if (!EMAILABLE_KEY_PREFIXES.some((prefix) => entry.key.startsWith(prefix))) {
@@ -717,6 +783,7 @@ async function attachmentsFor(invoice: InvoiceRecord, documents: ShipmentDocumen
   }
 
   const attachments: EmailAttachment[] = []
+  const files: Parameters<typeof carrierPayFlags>[0] = []
   let total = 0
   for (const entry of keys) {
     const { bytes, contentType } = await s3Bytes(entry.key)
@@ -728,8 +795,9 @@ async function attachmentsFor(invoice: InvoiceRecord, documents: ShipmentDocumen
       )
     }
     attachments.push({ filename: entry.name, contentType: entry.contentType || contentType, bytes })
+    files.push({ documentId: entry.doc?.id ?? null, name: entry.name, bytes, contentType: entry.contentType || contentType, doc: entry.doc })
   }
-  return attachments
+  return { attachments, files }
 }
 
 function emailList(value: unknown, label: string): string[] {
@@ -760,7 +828,22 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
     throw new Error('Nobody is listed to receive this invoice; add a billing contact or type an address')
   }
 
-  const attachments = await attachmentsFor(invoice, context.documents)
+  const scope = attachmentScopeOf(invoice, context)
+  const exclude = input.excludeDocumentIds == null ? [] : emailList(input.excludeDocumentIds, 'excludeDocumentIds')
+  const overrideReason = optionalString(input.carrierPayOverrideReason, 500)?.trim() || null
+  const sendDocs = sendDocuments(context.documents, scope, exclude)
+  const { attachments, files } = await attachmentsFor(invoice, sendDocs)
+  const flags = carrierPayFlags(files, scope, context)
+  if (flags.hard.length > 0 || flags.content.length > 0) {
+    const all = [...flags.hard, ...flags.content]
+    console.warn('[finance] CARRIER_PAY_GUARD', JSON.stringify({ invoiceId, shipmentId: invoice.shipmentId, flags: all, by: caller.email }))
+    const overridden = flags.hard.length === 0 && overrideReason != null && caller.isAdmin
+    await writeAudit('Invoice', invoiceId, overridden ? 'CARRIER_PAY_GUARD_OVERRIDE' : 'CARRIER_PAY_GUARD_BLOCKED', caller, {
+      flags: all,
+      ...(overridden ? { reason: overrideReason } : {}),
+    })
+    if (!overridden) throw new CarrierPayBlockedError(all)
+  }
   const rendered = renderInvoiceEmail({
     invoice,
     customerName: invoice.customerName ?? context.customer?.name ?? '',
@@ -817,11 +900,9 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
     : await Promise.all(
         (invoice.pdfKey ? [{ name: attachmentNameOf(invoice), key: invoice.pdfKey }] : [])
           .concat(
-            customerPacketDocuments(
-              (invoice.attachDocumentIds ?? [])
-                .map((id) => context.documents.find((doc) => doc.id === id))
-                .filter((doc): doc is ShipmentDocumentRecord => doc != null && Boolean(doc.s3Key)),
-            ).map((doc) => ({ name: doc.name, key: String(doc.s3Key) })),
+            sendDocs
+              .filter((doc) => Boolean(doc.s3Key))
+              .map((doc) => ({ name: doc.name, key: String(doc.s3Key) })),
           )
           .map(async (entry) => ({ name: entry.name, url: await signedDownload(entry.key) })),
       )
@@ -1091,4 +1172,67 @@ export async function saveArSettings(input: Row, caller: Caller): Promise<Row> {
   )
   await writeAudit('TmsSettings', 'default', 'SAVE_AR_SETTINGS', caller, patch)
   return { settings: await getSettings() }
+}
+
+// ── INVOICE_ATTACHMENTS ─────────────────────────────────────────────────────
+
+const MAX_PLAN_INVOICES = 100
+/** Files over this are not text-scanned in the list (the send scans every file). */
+const MAX_SCAN_BYTES = 5 * 1024 * 1024
+
+/**
+ * What each invoice's e-mail would carry right now — the send rule, read-only — for the
+ * review screen and the Invoice PDF / POD / RC columns. Reads only the shipment, its
+ * orders, loads and documents per invoice; nothing is written.
+ */
+export async function invoiceAttachmentPlans(input: Row): Promise<Row> {
+  const ids = assertArrayOf<string>(input.invoiceIds, 'invoiceIds', (item, index) =>
+    assertString(item, `invoiceIds[${index}]`), MAX_PLAN_INVOICES)
+  const plans: Row[] = []
+  const queue = [...new Set(ids)]
+  const worker = async (): Promise<void> => {
+    for (let id = queue.shift(); id != null; id = queue.shift()) {
+      try {
+        const row = await getById(INVOICE_TABLE_NAME, id)
+        if (!row) { plans.push({ invoiceId: id, error: 'Invoice not found' }); continue }
+        const invoice = row as unknown as InvoiceRecord
+        const [shipmentRow, orderRows, loadRows, documentRows, chargeRows] = await Promise.all([
+          getById(SHIPMENT_TABLE_NAME, invoice.shipmentId),
+          queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', invoice.shipmentId),
+          queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', invoice.shipmentId),
+          queryIndex(SHIPMENT_DOCUMENT_TABLE_NAME, IDX_DOCUMENTS_BY_SHIPMENT, 'shipmentId', invoice.shipmentId),
+          queryIndex(LOAD_CHARGE_TABLE_NAME, IDX_CHARGES_BY_SHIPMENT, 'shipmentId', invoice.shipmentId),
+        ])
+        const shipment = shipmentRow as unknown as ShipmentRecord
+        const loads = gateLoadIds(loadRows as unknown as ShipmentLoad[], orderRows as unknown as OrderRecord[], invoice.orderId)
+        const scope = attachmentScopeOf(invoice, { shipment, gateLoadIds: loads })
+        const plan = invoiceAttachmentPlan(
+          documentRows as unknown as ShipmentDocumentRecord[],
+          scope,
+          invoice.pdfKey ? { name: attachmentNameOf(invoice), sizeBytes: invoice.pdfSizeBytes ?? null } : null,
+        )
+        // The same carrier-pay guard the send runs, so the review and the list show it first.
+        const docs = invoiceEmailDocuments(documentRows as unknown as ShipmentDocumentRecord[], scope)
+        const files = await Promise.all(docs.map(async (doc) => {
+          const scan = !scope.ivan && /pdf/i.test(doc.contentType ?? 'application/pdf') && !!doc.s3Key
+            && EMAILABLE_KEY_PREFIXES.some((prefix) => String(doc.s3Key).startsWith(prefix))
+            && (doc.sizeBytes ?? 0) <= MAX_SCAN_BYTES
+          const bytes = scan ? (await s3Bytes(String(doc.s3Key)).catch(() => null))?.bytes ?? new Uint8Array() : new Uint8Array()
+          return { documentId: doc.id, name: doc.name, bytes, contentType: doc.contentType ?? 'application/pdf', doc }
+        }))
+        const flags = carrierPayFlags(files, scope, { charges: chargeRows as unknown as LoadChargeRecord[] })
+        plans.push({
+          invoiceId: id,
+          ivan: scope.ivan,
+          tooBig: plan.totalBytes > MAX_EMAIL_ATTACHMENT_BYTES,
+          carrierPayFlags: [...flags.hard.map((f) => ({ ...f, hard: true })), ...flags.content.map((f) => ({ ...f, hard: false }))],
+          ...plan,
+        } as unknown as Row)
+      } catch (err) {
+        plans.push({ invoiceId: id, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: 6 }, () => worker()))
+  return { plans, maxBytes: MAX_EMAIL_ATTACHMENT_BYTES }
 }

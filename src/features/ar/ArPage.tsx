@@ -65,6 +65,8 @@ import { ReasonDialog } from './components/ReasonDialog'
 import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
+import { attachmentStateText, useInvoiceAttachmentPlans } from './useInvoiceAttachmentPlans'
+import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 import type { FactoringItem } from '@/types'
 import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord, UserProfileRecord } from '@/types/tms'
 
@@ -271,6 +273,14 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     }
   }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId, divisionFilter])
 
+  // What each Ready / Invoiced invoice's e-mail carries (invoice PDF, POD, rate con), for the columns.
+  const planIds = useMemo(
+    () => (tab === 'ready' || tab === 'invoiced' ? queue[tab === 'ready' ? 'READY' : 'INVOICED'] : [])
+      .map((row) => row.invoiceId).filter((id): id is string => !!id),
+    [tab, queue],
+  )
+  const { plans: attachmentPlans } = useInvoiceAttachmentPlans(planIds)
+
   // Paid invoices over the last three months, for the days-to-pay figures (90-day window).
   const [recentPaid, setRecentPaid] = useState<InvoiceRecord[]>([])
   useEffect(() => {
@@ -452,6 +462,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       justGenerated,
       factorByItemId,
       customerById,
+      attachmentPlans,
       months,
       month,
       paidLoading,
@@ -562,6 +573,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           invoices={dialog.invoices}
           customerById={customerById}
           shipmentsById={lookups.shipmentsById}
+          isAdmin={canVoid}
           onClose={() => setDialog(null)}
           onDone={() => { setSelected([]); void refreshAll() }}
         />
@@ -667,13 +679,44 @@ const opt = (value: string | null | undefined) => (value ? [{ value, label: valu
 
 /* ── The queue: Ready to invoice / Invoiced / Paid ──────────────────────────── */
 
+function guardText(plan: InvoiceAttachmentPlanRow | undefined, invoiceId: string | null): string {
+  if (!invoiceId) return '—'
+  if (!plan || plan.error) return '…'
+  return (plan.carrierPayFlags ?? []).length > 0 ? 'Carrier pay found' : 'Clear'
+}
+
+/** Invoice PDF / POD / RC / Attachments: what each invoice's e-mail carries, at a glance for a batch. */
+function attachmentColumns(plans: Map<string, InvoiceAttachmentPlanRow>): Array<Col<ArQueueRow>> {
+  const stateOf = (row: ArQueueRow, pick: 'invoicePdf' | 'pod' | 'rateCon') =>
+    (row.invoiceId ? attachmentStateText(plans.get(row.invoiceId)?.[pick]) : '—')
+  const col = (key: string, header: string, pick: 'invoicePdf' | 'pod' | 'rateCon'): Col<ArQueueRow> => ({
+    key, header, group: 'Attachments', text: (row) => stateOf(row, pick),
+    filter: 'multi', optionsOf: (row) => opt(stateOf(row, pick)),
+  })
+  return [
+    col('attPdf', 'Invoice PDF', 'invoicePdf'),
+    col('attPod', 'POD', 'pod'),
+    col('attRc', 'RC', 'rateCon'),
+    {
+      key: 'attGuard', header: 'Carrier pay check', group: 'Attachments',
+      text: (row) => guardText(row.invoiceId ? plans.get(row.invoiceId) : undefined, row.invoiceId),
+      filter: 'multi', optionsOf: (row) => opt(guardText(row.invoiceId ? plans.get(row.invoiceId) : undefined, row.invoiceId)),
+    },
+    {
+      key: 'attCount', header: 'Attachments', group: 'Attachments', align: 'right',
+      text: (row) => String((row.invoiceId ? plans.get(row.invoiceId)?.count : null) ?? '—'),
+      sortValue: (row) => (row.invoiceId ? plans.get(row.invoiceId)?.count : null) ?? -1,
+    },
+  ]
+}
+
 function dateCol<T>(key: string, header: string, of: (row: T) => string | null, group = 'Dates'): Col<T> {
   return { key, header, group, text: (row) => formatDay(of(row)), filter: 'date', dateOf: (row) => of(row), sortValue: (row) => of(row) ?? '' }
 }
 
 function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, canVoid, selected, justGenerated, factorByItemId, customerById,
-  months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onBatchEmail, onPayment, onFactor, onVoid, onReview, onEdit,
+  attachmentPlans, months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onBatchEmail, onPayment, onFactor, onVoid, onReview, onEdit,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -687,6 +730,7 @@ function queueView({
   justGenerated: string[]
   factorByItemId: Map<string, FactoringItem>
   customerById: Map<string, CustomerRecord>
+  attachmentPlans: Map<string, InvoiceAttachmentPlanRow>
   months: string[]
   month: string
   paidLoading: boolean
@@ -760,6 +804,7 @@ function queueView({
       key: 'pastDue', header: 'Days past due', group: 'Invoice', align: 'right', text: pastDueText,
       sortValue: (row) => row.daysPastDue ?? -99999, filter: 'number', numberOf: (row) => row.daysPastDue ?? 0, numberUnit: 'days',
     },
+    ...(ready || invoiced ? attachmentColumns(attachmentPlans) : []),
     ...(status === 'PAID' ? [dateCol<ArQueueRow>('paidAt', 'Paid on', (row) => row.paidAt)] : []),
     ...(invoiced ? [{ key: 'factor', header: 'Factor', group: 'Invoice', text: factorText, filter: 'multi', optionsOf: (row: ArQueueRow) => opt(factorText(row)) } as Col<ArQueueRow>] : []),
     ...(ready || invoiced ? [{ key: 'actions', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: ready ? 104 : 400 } as Col<ArQueueRow>] : []),
@@ -813,6 +858,35 @@ function queueView({
         if (!invoiced || !row.dueAt) return <span className="tms-muted">—</span>
         const chip = agingChipFor(row.dueAt, asOf)
         return <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>
+      }
+      case 'attPdf':
+      case 'attPod':
+      case 'attRc': {
+        const plan = row.invoiceId ? attachmentPlans.get(row.invoiceId) : undefined
+        if (!row.invoiceId) return <span className="tms-muted">—</span>
+        if (plan?.error) return <span className="tms-muted" title={plan.error}>?</span>
+        const state = key === 'attPdf' ? plan?.invoicePdf : key === 'attPod' ? plan?.pod : plan?.rateCon
+        const tone = state === 'ATTACHED' ? 'green' : state === 'MISSING' ? (key === 'attRc' ? 'orange' : 'red') : 'gray'
+        const tip = key === 'attRc' && state === 'NOT_INCLUDED'
+          ? 'BCAT Logistics / brokerage invoices never carry a rate confirmation'
+          : key === 'attRc' && state === 'MISSING' ? 'Ivan Cartage invoice: no customer rate confirmation on file'
+            : key === 'attPod' && state === 'MISSING' ? 'No POD on file — the invoice will go without it' : undefined
+        return state ? <TmsBadge tone={tone} title={tip}>{attachmentStateText(state)}</TmsBadge> : <span className="tms-muted">…</span>
+      }
+      case 'attGuard': {
+        const plan = row.invoiceId ? attachmentPlans.get(row.invoiceId) : undefined
+        if (!row.invoiceId) return <span className="tms-muted">—</span>
+        if (!plan || plan.error) return <span className="tms-muted" title={plan?.error}>…</span>
+        const flags = plan.carrierPayFlags ?? []
+        return flags.length > 0
+          ? <TmsBadge tone="red" title={flags.map((f) => `${f.name}: ${f.reason}`).join('\n')}>Carrier pay found</TmsBadge>
+          : <TmsBadge tone="green">Clear</TmsBadge>
+      }
+      case 'attCount': {
+        const plan = row.invoiceId ? attachmentPlans.get(row.invoiceId) : undefined
+        if (!plan || plan.count == null) return <span className="tms-muted">{row.invoiceId ? '…' : '—'}</span>
+        const names = (plan.items ?? []).map((item) => item.name).join('\n')
+        return <span title={names} style={plan.tooBig ? { color: 'var(--tms-badge-red)' } : undefined}>{plan.count}{plan.tooBig ? ' (over 10 MB)' : ''}</span>
       }
       case 'actions': {
         const inv = row.invoice
