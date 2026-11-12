@@ -30,16 +30,19 @@ describe('ActionBar', () => {
     fireEvent.click(screen.getByTestId('ship-form-cancel')); expect(onDiscard).toHaveBeenCalled()
     expect(screen.queryByTestId('ship-form-save')).toBeNull()
   })
-  it('edit a DRAFT: Save changes and Discard, no Submit order; a submitted order has no Save draft', () => {
+  it('edit a DRAFT: Save changes, Discard and Open order (the way a draft becomes an order); a submitted order has no Save draft', () => {
     const onRun = vi.fn()
     const { unmount } = show({ createMode: false, status: 'DRAFT', onRun })
     expect(screen.getByTestId('ship-form-cancel').textContent).toBe('Discard')
     fireEvent.click(screen.getByTestId('ship-form-save')); expect(onRun).toHaveBeenCalledWith('save')
     expect(screen.queryByTestId('ship-form-submit')).toBeNull()
     expect(onRun).not.toHaveBeenCalledWith('submit')
+    expect(screen.getByTestId('ship-form-open-order').textContent).toBe('Open order')
+    fireEvent.click(screen.getByTestId('ship-form-open-order')); expect(onRun).toHaveBeenCalledWith('submit')
     unmount()
     show({ createMode: false, status: 'OPEN' })
     expect(screen.getByTestId('ship-form-status').textContent).toBe('OPEN')
+    expect(screen.queryByTestId('ship-form-open-order')).toBeNull()
     expect(screen.queryByTestId('ship-form-save-draft')).toBeNull()
     expect(screen.queryByTestId('ship-form-submit')).toBeNull()
   })
@@ -80,19 +83,19 @@ describe('ActionBar', () => {
     fireEvent.click(screen.getByTestId('ship-form-submit-review'))
     expect(onSubmitForReview).toHaveBeenCalledTimes(1)
   })
-  it('edit: a draft offers Submit for Review too, and no Push to Load Review or Submit order button remains', () => {
+  it('edit: a draft has Open order and no Submit for Review (a draft has not delivered), and no Push to Load Review or Submit order button remains', () => {
     show({ createMode: false, status: 'DRAFT', onSubmitForReview: vi.fn() })
-    expect(screen.getByTestId('ship-form-submit-review')).toBeTruthy()
-    expect(screen.queryByTestId('ship-form-push-review')).toBeNull()
+    expect(screen.queryByTestId('ship-form-submit-review')).toBeNull()
+    expect(screen.getByTestId('ship-form-open-order')).toBeTruthy()
     expect(screen.queryByTestId('ship-form-submit')).toBeNull()
     expect(screen.queryByText('Submit order')).toBeNull()
   })
   it('edit: Submit for Review is disabled with the reason when the load cannot go to review', () => {
     const onSubmitForReview = vi.fn()
-    show({ createMode: false, status: 'DELIVERED', onSubmitForReview, submitReviewBlocked: 'Already in Load Review' })
+    show({ createMode: false, status: 'IN_TRANSIT', onSubmitForReview, submitReviewBlocked: 'Only delivered loads can go to Load review — 1 of 2 stops delivered' })
     const btn = screen.getByTestId('ship-form-submit-review') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
-    expect(btn.title).toBe('Already in Load Review')
+    expect(btn.title).toBe('Only delivered loads can go to Load review — 1 of 2 stops delivered')
   })
   it('create mode never offers Submit for Review', () => {
     show({ onSubmitForReview: vi.fn() })

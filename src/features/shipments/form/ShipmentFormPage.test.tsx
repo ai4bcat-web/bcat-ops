@@ -102,6 +102,12 @@ function bundleOf(status: string): ShipmentBundle {
   } as unknown as ShipmentBundle
 }
 
+/** An order still waiting on Load Review (arStatus DOCS_NEEDED), so only the delivered rule decides Submit for Review. */
+function reviewableBundleOf(status: string): ShipmentBundle {
+  const b = bundleOf(status)
+  return { ...b, orders: b.orders.map((o) => ({ ...o, arStatus: 'DOCS_NEEDED' })) } as unknown as ShipmentBundle
+}
+
 function renderForm(mode: 'create' | 'edit', entry?: string | { pathname: string; state: unknown }) {
   return render(
     <MemoryRouter initialEntries={[entry ?? (mode === 'create' ? '/new' : '/sh-1/edit')]}>
@@ -304,13 +310,14 @@ describe('ShipmentFormPage — layout contract', () => {
 })
 
 describe('ShipmentFormPage — edit mode', () => {
-  it('a DRAFT shows Save changes and Submit for Review (no Submit order), and Save changes runs the edit pipeline', async () => {
+  it('a DRAFT shows Save changes and Open order (no Submit order, no Submit for Review), and Save changes runs the edit pipeline', async () => {
     h.shipment = { bundle: bundleOf('DRAFT'), loading: false, error: null }
     h.runEditSave.mockResolvedValue({ ok: true, bundle: bundleOf('DRAFT'), steps: [], failedSteps: [] })
     renderForm('edit')
     expect(screen.queryByTestId('ship-form-create')).toBeNull()
     expect(screen.queryByTestId('ship-form-submit')).toBeNull()
-    expect(screen.getByTestId('ship-form-submit-review').textContent).toBe('Submit for Review')
+    expect(screen.queryByTestId('ship-form-submit-review')).toBeNull()
+    expect(screen.getByTestId('ship-form-open-order').textContent).toBe('Open order')
     expect(screen.getByTestId('ship-form-title').textContent).toBe('Edit PRO S000123')
     // Strict level needs the required fields; fill nothing → blocked, nothing called.
     fireEvent.click(screen.getByTestId('ship-form-save'))
@@ -318,12 +325,21 @@ describe('ShipmentFormPage — edit mode', () => {
     expect(h.runEditSave).not.toHaveBeenCalled()
   })
 
-  it('a non-DRAFT shipment has no Save draft or Submit order, and still offers Submit for Review', () => {
-    h.shipment = { bundle: bundleOf('OPEN'), loading: false, error: null }
+  it('a DELIVERED shipment can Submit for Review', () => {
+    h.shipment = { bundle: reviewableBundleOf('DELIVERED'), loading: false, error: null }
+    renderForm('edit')
+    expect((screen.getByTestId('ship-form-submit-review') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('a non-DRAFT shipment has no Save draft or Submit order; Submit for Review is there but disabled until it has delivered', () => {
+    h.shipment = { bundle: reviewableBundleOf('OPEN'), loading: false, error: null }
     renderForm('edit')
     expect(screen.queryByTestId('ship-form-save-draft')).toBeNull()
     expect(screen.queryByTestId('ship-form-submit')).toBeNull()
-    expect(screen.getByTestId('ship-form-submit-review')).toBeTruthy()
+    expect(screen.queryByTestId('ship-form-open-order')).toBeNull()
+    const review = screen.getByTestId('ship-form-submit-review') as HTMLButtonElement
+    expect(review.disabled).toBe(true)
+    expect(review.title).toMatch(/^Only delivered loads can go to Load review/)
     expect(screen.getByTestId('ship-form-save').textContent).toBe('Save changes')
   })
 })
