@@ -24,6 +24,7 @@ import {
   listArPaymentsByCustomer,
   listInvoicesByCustomer,
   recordPayment,
+  writeOffInvoice,
 } from '@/lib/apiClient'
 import { formatCents } from '@/lib/invoiceBuild'
 import { planPayment, suggestAllocation, type PlanCredit, type PlanDocument } from '@/lib/paymentApply'
@@ -61,7 +62,11 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
   const [reference, setReference] = useState('')
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
-  const [keepRemainder, setKeepRemainder] = useState(true)
+  // Overpaid: keep the extra as customer credit (default) or accept the payment as paid in full.
+  const [overage, setOverage] = useState<'CREDIT' | 'ACCEPT'>('CREDIT')
+  const [overageReason, setOverageReason] = useState('')
+  // Short paid: the invoices whose unpaid rest is ignored (written off), each with its reason.
+  const [ignoreRest, setIgnoreRest] = useState<Record<string, string>>({})
   const [allocations, setAllocations] = useState<AmountDrafts>({})
   const [creditUses, setCreditUses] = useState<AmountDrafts>({})
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([])
@@ -155,7 +160,14 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
     return payments.find((row) => (row.reference ?? '').trim().toLowerCase() === typed) ?? null
   }, [reference, payments])
 
-  const remainderBlocked = !keepRemainder && plan.unappliedCents > 0
+  // Applied less than the invoice owes: the rest stays open to chase unless it is ignored.
+  const shortPaid = useMemo(() => applications.flatMap((row) => {
+    const invoice = invoices.find((candidate) => candidate.id === row.invoiceId)
+    const restCents = invoice ? invoice.balanceCents - row.amountCents : 0
+    return invoice && row.amountCents > 0 && restCents > 0 ? [{ invoice, restCents }] : []
+  }), [applications, invoices])
+  const ignoring = shortPaid.filter((row) => ignoreRest[row.invoice.id] !== undefined)
+  const ignoreBlocked = ignoring.some((row) => !ignoreRest[row.invoice.id]?.trim())
   const disabled = busy === true || posting || loading
 
   const autoAllocate = () => {
@@ -182,11 +194,24 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
       clientRequestId,
       reference: reference.trim() || undefined,
       note: note.trim() || undefined,
+      ...(plan.unappliedCents > 0 && overage === 'ACCEPT'
+        ? { acceptOverage: true, overageReason: overageReason.trim() || undefined }
+        : {}),
     })
-      .then((row) => {
+      .then(async (row) => {
+        // The ignored rest of each short-paid invoice is written off after the payment posts,
+        // each with its own request id so a retried Post never writes one off twice.
+        for (const { invoice, restCents } of ignoring) {
+          await writeOffInvoice({
+            invoiceId: invoice.id,
+            amountCents: restCents,
+            reason: ignoreRest[invoice.id].trim(),
+            clientRequestId: `${clientRequestId}-wo-${invoice.id}`.slice(0, 64),
+          })
+        }
         toast.success(row.duplicate
           ? 'That payment was already posted'
-          : `Posted ${formatCents(row.payment.amountCents)}`)
+          : `Posted ${formatCents(row.payment.amountCents)}${ignoring.length ? `; ignored the rest on ${ignoring.length} invoice${ignoring.length === 1 ? '' : 's'}` : ''}`)
         onDone()
       })
       .catch((err: unknown) => {
@@ -206,7 +231,7 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
       footer={
         <>
           <TmsButton variant="ghost" onClick={onClose} disabled={posting}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={submit} disabled={disabled || !plan.ok || remainderBlocked}>
+          <TmsButton variant="primary" onClick={submit} disabled={disabled || !plan.ok || ignoreBlocked}>
             {posting ? 'Posting…' : 'Post'}
           </TmsButton>
         </>
@@ -349,21 +374,70 @@ export function ReceivePaymentDialog({ customerId, customerName, invoiceId, meth
               <span>From credits <strong aria-label="From credits total">{formatCents(plan.fromCreditsCents)}</strong></span>
               <span>Unapplied <strong aria-label="Unapplied total">{formatCents(plan.unappliedCents)}</strong></span>
             </div>
-            <label className="mt-2 flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
-                aria-label="Keep the remainder as customer credit"
-                checked={keepRemainder}
-                disabled={disabled}
-                onChange={(e) => setKeepRemainder(e.target.checked)}
-              />
-              Keep the remainder as customer credit
-            </label>
-            {remainderBlocked && (
-              <p className="mt-1 text-xs" style={{ color: 'var(--tms-badge-red)' }}>
-                {formatCents(plan.unappliedCents)} is unapplied. Allocate it, or keep it as customer credit.
-              </p>
+            {plan.unappliedCents > 0 && (
+              <fieldset className="mt-2 flex flex-col gap-1 text-xs">
+                <legend className="sr-only">Overpayment</legend>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="overage"
+                    aria-label="Keep the extra as customer credit"
+                    checked={overage === 'CREDIT'}
+                    disabled={disabled}
+                    onChange={() => setOverage('CREDIT')}
+                  />
+                  Keep the extra {formatCents(plan.unappliedCents)} as customer credit
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="overage"
+                    aria-label="Accept as paid in full"
+                    checked={overage === 'ACCEPT'}
+                    disabled={disabled}
+                    onChange={() => setOverage('ACCEPT')}
+                  />
+                  Accept as paid in full — don&apos;t create a credit
+                </label>
+                {overage === 'ACCEPT' && (
+                  <TmsInput
+                    aria-label="Reason for accepting the overpayment"
+                    placeholder="Reason (optional)"
+                    value={overageReason}
+                    disabled={disabled}
+                    onChange={(e) => setOverageReason(e.target.value)}
+                  />
+                )}
+              </fieldset>
             )}
+            {shortPaid.map(({ invoice, restCents }) => (
+              <div key={invoice.id} className="mt-2 flex flex-col gap-1 text-xs">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`Ignore the rest of invoice ${invoice.number}`}
+                    checked={ignoreRest[invoice.id] !== undefined}
+                    disabled={disabled}
+                    onChange={(e) => setIgnoreRest((prev) => {
+                      const next = { ...prev }
+                      if (e.target.checked) next[invoice.id] = ''
+                      else delete next[invoice.id]
+                      return next
+                    })}
+                  />
+                  {invoice.number} is short paid: {formatCents(restCents)} stays open to chase. Ignore the rest and mark it paid
+                </label>
+                {ignoreRest[invoice.id] !== undefined && (
+                  <TmsInput
+                    aria-label={`Reason for ignoring the rest of invoice ${invoice.number}`}
+                    placeholder="Reason (required)"
+                    value={ignoreRest[invoice.id]}
+                    disabled={disabled}
+                    onChange={(e) => setIgnoreRest((prev) => ({ ...prev, [invoice.id]: e.target.value }))}
+                  />
+                )}
+              </div>
+            ))}
             {plan.errors.map((reason) => (
               <p key={reason} className="mt-1 text-xs" style={{ color: 'var(--tms-badge-red)' }}>{reason}</p>
             ))}

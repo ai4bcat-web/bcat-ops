@@ -1155,6 +1155,21 @@ describe('RECORD_PAYMENT', () => {
     expect(out.payment).toMatchObject({ appliedCents: 250_000, unappliedCents: 50_000 })
   })
 
+  it('accepts an overpayment as paid in full without creating credit, and can still reverse it', async () => {
+    const { invoiceId } = await generate()
+    const out = (await call('RECORD_PAYMENT', {
+      customerId: CUSTOMER_ID, receivedAt: '2026-10-25', method: 'CHECK', reference: '1001',
+      amountCents: 300_000, applications: [{ invoiceId, amountCents: 250_000 }], creditApplications: [],
+      acceptOverage: true, overageReason: 'customer rounded up',
+    })) as { payment: Row }
+    expect(out.payment).toMatchObject({
+      appliedCents: 250_000, unappliedCents: 0, overageAcceptedCents: 50_000, overageReason: 'customer rounded up',
+    })
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ status: 'PAID', balanceCents: 0 })
+    await call('REVERSE_PAYMENT', { paymentId: String(out.payment.id), reason: 'bounced' })
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ balanceCents: 250_000 })
+  })
+
   it('refuses to apply more than the invoice owes', async () => {
     const { invoiceId } = await generate()
     await expect(call('RECORD_PAYMENT', {

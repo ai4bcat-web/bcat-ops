@@ -2480,6 +2480,9 @@ const schema = a.schema(stageTypes({
       unappliedCents:  a.integer().required(),
       applications:    a.json(),                // [{ invoiceId, amountCents }]
       creditApplications: a.json(),             // [{ paymentId, amountCents }]
+      // An overpayment accepted as paid in full: the extra is recorded here and never becomes credit.
+      overageAcceptedCents: a.integer(),
+      overageReason:   a.string(),
       invoiceId:       a.string(),              // WRITE_OFF names its invoice
       reversesPaymentId:   a.string(),
       reversedByPaymentId: a.string(),
