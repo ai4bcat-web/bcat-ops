@@ -40,6 +40,7 @@ import type { ManualInvoiceSteps } from '../../../src/types'
 import { localStatusFor } from '../../../src/lib/otrInvoiceStatus'
 import { decideResubmit, sameInvoiceBack, withPriorInvoice } from '../../../src/lib/factoringResubmit'
 import { accountingAccessMessage, hasAccountingPage } from '../../../src/lib/accountingAccess'
+import { customerLookupFrom, type CustomerLookupResult } from './customerLookup'
 import { normalizePro } from '../../../src/lib/proNumber'
 import {
   OtrClient,
@@ -952,6 +953,25 @@ const moveStore: MoveStore = {
   now: nowIso,
 }
 
+/** The page groups that may create customers (UPSERT_CUSTOMER's own gate), plus the accounting pages. */
+function mayCreateCustomers(groups: readonly string[], email: string): boolean {
+  if (hasAccountingPage(groups, email, 'factoring')) return true
+  return ['page-customers', 'page-locations', 'page-loads', 'page-tms'].some((g) => groups.includes(g))
+}
+
+/**
+ * OTR's broker check, read as "who is this MC". OTR answers its own id, the name it bills
+ * under, the MC, its approval verdict and the No Buy flag — no address, phone or DOT (the
+ * logged replies show exactly id/Name/McNumber/BrokerTestResult/NoBuy).
+ */
+export async function customerLookup(rawMc: string): Promise<CustomerLookupResult> {
+  const mc = rawMc.replace(/\D/g, '').replace(/^0+(?=\d)/, '')
+  if (!mc) throw new Error('Enter an MC number')
+  const check = await otr().brokerCheck({ brokerMc: mc })
+  console.log('[otr-actions] customer lookup', { mc, raw: check.raw })
+  return customerLookupFrom(mc, check)
+}
+
 const ok = (data: unknown) => JSON.stringify({ ok: true, data })
 const fail = (error: string) => JSON.stringify({ ok: false, error })
 
@@ -966,6 +986,17 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
   const caller = { email: actor, groups }
   // The factoring queue is an accounting page: its grant (or Invoicing, which it is moving
   // into) opens every action here; nobody else may touch OTR (Ryne 2026-11-12).
+  // Looking a customer up by MC is part of creating a customer, not factoring work: whoever may
+  // create customers may ask OTR who an MC is. Read-only — nothing is written anywhere.
+  if (action === 'customerLookup') {
+    if (!mayCreateCustomers(groups, actor)) return fail('You need access to Customers, Loads or Shipments to look up a customer.')
+    try {
+      return ok(await customerLookup(String(input.mc ?? '')))
+    } catch (e) {
+      console.error('[otr-actions] customerLookup failed', e)
+      return fail(e instanceof Error ? e.message : String(e))
+    }
+  }
   if (!hasAccountingPage(groups, actor, 'factoring')) return fail(accountingAccessMessage('factoring'))
 
   try {

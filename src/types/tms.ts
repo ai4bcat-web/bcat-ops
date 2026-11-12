@@ -3100,6 +3100,16 @@ export interface InvoiceLine {
   amountCents: number
 }
 
+/** A credit or debit added to an invoice by hand (REVISE_INVOICE), with its reason. */
+export interface InvoiceAdjustment {
+  kind: 'CREDIT' | 'DEBIT'
+  description: string
+  amountCents: number
+  reason: string
+  by?: string | null
+  at?: string | null
+}
+
 /**
  * One issued bill for one order. `id` is the invoice number.
  *
@@ -3110,6 +3120,10 @@ export interface InvoiceLine {
 export interface InvoiceRecord {
   id: string
   number: string
+  /** 1 until the invoice is revised after it was sent; shown as 'Rev 2' etc. */
+  revision?: number | null
+  /** Hand-added credits and debits (REVISE_INVOICE); also carried as lines. */
+  adjustments?: InvoiceAdjustment[] | null
   orderId: string
   shipmentId: string
   shipmentNumber?: string | null

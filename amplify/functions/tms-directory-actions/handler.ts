@@ -85,6 +85,7 @@ import {
 import { validateWhiteLabel, type WhiteLabel } from '../../../src/lib/brokerage/whiteLabel'
 import { writeRawParameter, parameterNameFor } from '../_shared/integrationSecrets'
 import { normalizeAddress, normalizeName, type AddressShape } from '../_shared/directoryKeys'
+import { authorityDigits, duplicateCustomerMessage, findDuplicateCustomer, type CustomerDuplicate, type ExistingCustomerLike } from '../../../src/lib/customerCreateDuplicates'
 import type {
   CarrierAgreementTemplate,
   CommissionTrigger,
@@ -863,6 +864,33 @@ async function getSettings(): Promise<Record<string, unknown> | null> {
   return unmarshall(result.Item)
 }
 
+/** Every customer that has not been merged away, active or not: what a new customer may not duplicate. */
+async function scanUnmergedCustomers(): Promise<Record<string, unknown>[]> {
+  if (!CUSTOMER_TABLE_NAME) throw new Error('Customer table name is not configured')
+  const items: Record<string, unknown>[] = []
+  let lastKey: Record<string, AttributeValue> | undefined
+  do {
+    const result = await dynamo.send(
+      new ScanCommand({
+        TableName: CUSTOMER_TABLE_NAME,
+        FilterExpression: 'attribute_not_exists(mergedIntoId) OR mergedIntoId = :noMerge',
+        ExpressionAttributeValues: { ':noMerge': { NULL: true } },
+        ProjectionExpression: 'id, #n, aliases, mcNumber, dotNumber, mergedIntoId',
+        ExpressionAttributeNames: { '#n': 'name' },
+        ExclusiveStartKey: lastKey,
+        Limit: 500,
+      }),
+    )
+    if (result.Items) items.push(...result.Items.map((i) => unmarshall(i)))
+    lastKey = result.LastEvaluatedKey
+  } while (lastKey)
+  return items
+}
+
+function isOwnerOrAdminCaller(caller: Caller): boolean {
+  return caller.email === OWNER_EMAIL || (caller.groups ?? []).includes(ADMIN_GROUP)
+}
+
 async function scanActiveCustomers(): Promise<Record<string, unknown>[]> {
   if (!CUSTOMER_TABLE_NAME) throw new Error('Customer table name is not configured')
   const items: Record<string, unknown>[] = []
@@ -1160,7 +1188,35 @@ async function upsertCustomer(
     }
   }
 
-  const others = (await scanActiveCustomers()).filter((c) => c.id !== id)
+  // Ryne 2026-11-12: a create never makes a duplicate. MC, DOT and the suffix-blind name are
+  // checked against EVERY customer that is not merged away (inactive ones too); only an admin,
+  // giving a reason, may create a genuinely different company that shares a name.
+  const overrideReason = optionalString(rawInput.duplicateOverrideReason, 500)?.trim() || null
+  if (overrideReason && !isOwnerOrAdminCaller(caller)) throw new Error('Forbidden: creating a duplicate customer requires owner or ADMIN')
+  let duplicateOverridden: CustomerDuplicate | null = null
+  if (isCreate && !opts.imported) {
+    const dup = findDuplicateCustomer(
+      { name, mcNumber: optionalString(input.mcNumber, 50), dotNumber: optionalString(input.dotNumber, 50) },
+      (await scanUnmergedCustomers()) as unknown as ExistingCustomerLike[],
+    )
+    if (dup && !overrideReason) throw new Error(duplicateCustomerMessage(dup))
+    if (dup && dup.reason !== 'NAME') throw new Error(`${duplicateCustomerMessage(dup)} — an MC or DOT number cannot be shared`)
+    duplicateOverridden = dup
+  } else if (!isCreate && existing) {
+    // An edit may not move a customer onto another customer's MC or DOT.
+    const changedMc = optionalString(input.mcNumber, 50)
+    const changedDot = optionalString(input.dotNumber, 50)
+    const probe = {
+      mcNumber: changedMc && authorityDigits(changedMc) !== authorityDigits(existing.mcNumber as string | undefined) ? changedMc : null,
+      dotNumber: changedDot && authorityDigits(changedDot) !== authorityDigits(existing.dotNumber as string | undefined) ? changedDot : null,
+    }
+    if (probe.mcNumber || probe.dotNumber) {
+      const dup = findDuplicateCustomer(probe, (await scanUnmergedCustomers()) as unknown as ExistingCustomerLike[], { excludeId: id })
+      if (dup) throw new Error(duplicateCustomerMessage(dup))
+    }
+  }
+
+  const others = duplicateOverridden ? [] : (await scanActiveCustomers()).filter((c) => c.id !== id)
   for (const other of others) {
     const otherNames = [normalizeName(String(other.name ?? '')), ...((other.aliases as string[] | undefined) ?? []).map(normalizeName)]
     if (allNames.some((n) => otherNames.includes(n))) {
@@ -1347,6 +1403,14 @@ async function upsertCustomer(
       }),
     )
     await auditBillingChange(id, name, billing, caller)
+    if (duplicateOverridden && overrideReason) {
+      await writeAudit('CUSTOMER', id, 'DUPLICATE_CUSTOMER_OVERRIDE', caller, {
+        name,
+        matchedId: duplicateOverridden.id,
+        matchedName: duplicateOverridden.name,
+        reason: overrideReason,
+      })
+    }
     return item
   }
 

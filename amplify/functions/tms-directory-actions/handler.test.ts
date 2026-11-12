@@ -430,6 +430,58 @@ describe('UPSERT_CUSTOMER', () => {
     ).rejects.toThrow('Duplicate customer name')
   })
 
+  describe('duplicate prevention on create (Ryne 2026-11-12)', () => {
+    const others = [
+      makeDynamoItem({ id: 'c-addison', name: 'ADDISON TRANSPORTATION, INC.', mcNumber: '326834', active: false, updatedAt: '2025-01-02' }),
+      makeDynamoItem({ id: 'c-dot', name: 'Somebody Else', dotNumber: '0012345', active: true, updatedAt: '2025-01-02' }),
+    ]
+    const puts: string[] = []
+    const mock = () => withSettingsGet((cmd: MockCommand) => {
+      if (cmd.__type === 'Scan') return Promise.resolve({ Items: /Customer/.test(String((cmd.input as { TableName?: string }).TableName)) ? others : [], LastEvaluatedKey: undefined })
+      if (cmd.__type === 'Put') { puts.push(String((cmd.input as { TableName?: string }).TableName)); return Promise.resolve({}) }
+      throw new Error('unexpected')
+    })
+
+    it('refuses the same MC, naming the existing customer (inactive customers count)', async () => {
+      send.mockImplementation(mock())
+      await expect(handler(event('UPSERT_CUSTOMER', { name: 'Brand New Co', mcNumber: 'MC-326834' }))).rejects.toThrow(
+        'This customer already exists: ADDISON TRANSPORTATION, INC. (MC 326834) — same MC number [id c-addison]',
+      )
+    })
+
+    it('refuses the same DOT, ignoring leading zeros', async () => {
+      send.mockImplementation(mock())
+      await expect(handler(event('UPSERT_CUSTOMER', { name: 'Brand New Co', dotNumber: '12345' }))).rejects.toThrow('same DOT number [id c-dot]')
+    })
+
+    it('refuses the same name once suffixes and punctuation are ignored', async () => {
+      send.mockImplementation(mock())
+      await expect(handler(event('UPSERT_CUSTOMER', { name: 'Addison Transportation' }))).rejects.toThrow('same name [id c-addison]')
+    })
+
+    it('refuses an override from a non-admin', async () => {
+      send.mockImplementation(mock())
+      await expect(
+        handler(event('UPSERT_CUSTOMER', { name: 'Addison Transportation', duplicateOverrideReason: 'different company in Texas' })),
+      ).rejects.toThrow('requires owner or ADMIN')
+    })
+
+    it('lets an admin create a same-named company with a reason, and audits it', async () => {
+      puts.length = 0
+      send.mockImplementation(mock())
+      const result = await handler(event('UPSERT_CUSTOMER', { name: 'Addison Transportation', duplicateOverrideReason: 'different company in Texas' }, identity({ groups: ['ADMIN'] })))
+      expect(result.name).toBe('Addison Transportation')
+      expect(puts).toContain('AuditLog-test')
+    })
+
+    it('never lets an override share an MC', async () => {
+      send.mockImplementation(mock())
+      await expect(
+        handler(event('UPSERT_CUSTOMER', { name: 'Other', mcNumber: '326834', duplicateOverrideReason: 'different company' }, identity({ groups: ['ADMIN'] }))),
+      ).rejects.toThrow('an MC or DOT number cannot be shared')
+    })
+  })
+
   it('updates with CAS', async () => {
     const existing = makeDynamoItem({
       id: 'c-1', name: 'Batory Foods', normalizedName: 'batory foods', active: true,
