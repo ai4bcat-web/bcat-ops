@@ -42,14 +42,14 @@ const loadCarriers = [
   { id: 'lc-active', status: 'ACTIVE' },
   { id: 'lc-bounced', status: 'BOUNCED' },
 ] as LoadCarrierRecord[]
-const customer = { requiredDocsForInvoice: ['POD', 'BOL'] }
+const customer = { requiredDocsForInvoice: ['POD', 'LUMPER_RECEIPT'] }
 const settings = { requiredCarrierUploadTypes: ['POD', 'CARRIER_INVOICE'] }
 
 beforeEach(() => { listShipmentDocuments.mockReset() })
 afterEach(() => { vi.clearAllMocks() })
 
 describe('useShipmentDocuments', () => {
-  it('counts an accepted carrier POD for the order and still asks for the BOL', async () => {
+  it('counts an accepted carrier POD for the order and still asks for the lumper receipt', async () => {
     listShipmentDocuments.mockResolvedValue([
       doc({ id: 'sdoc-1', type: 'POD', loadId: 'lod-1', loadCarrierId: 'lc-active', source: 'CARRIER_PORTAL', reviewStatus: 'ACCEPTED' }),
     ])
@@ -61,7 +61,7 @@ describe('useShipmentDocuments', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.orderGates['ord-1'].present).toEqual(['POD'])
-    expect(result.current.orderGates['ord-1'].missing).toEqual(['BOL'])
+    expect(result.current.orderGates['ord-1'].missing).toEqual(['LUMPER_RECEIPT'])
     expect(result.current.orderGates['ord-1'].ready).toBe(false)
     // Carrier scope wants its own list, and that assignment has sent only the POD.
     expect(result.current.carrierGates['lc-active'].missing).toEqual(['CARRIER_INVOICE'])
@@ -86,7 +86,7 @@ describe('useShipmentDocuments', () => {
   it('does not let a pending upload or a bounced carrier satisfy the gate', async () => {
     listShipmentDocuments.mockResolvedValue([
       doc({ id: 'sdoc-2', type: 'POD', loadId: 'lod-1', loadCarrierId: 'lc-active', source: 'CARRIER_PORTAL', reviewStatus: 'PENDING' }),
-      doc({ id: 'sdoc-3', type: 'BOL', loadId: 'lod-1', loadCarrierId: 'lc-bounced' }),
+      doc({ id: 'sdoc-3', type: 'LUMPER_RECEIPT', loadId: 'lod-1', loadCarrierId: 'lc-bounced' }),
     ])
     const { result } = renderHook(() => useShipmentDocuments('shp-1', {
       bundle: { orders: [order], loads, loadCarriers },
@@ -95,14 +95,14 @@ describe('useShipmentDocuments', () => {
     }))
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.orderGates['ord-1'].missing).toEqual(['POD', 'BOL'])
+    expect(result.current.orderGates['ord-1'].missing).toEqual(['POD', 'LUMPER_RECEIPT'])
     expect(result.current.pendingCount).toBe(1)
   })
 
   it('keeps one order\u2019s documents out of another order\u2019s gate', async () => {
     listShipmentDocuments.mockResolvedValue([
       doc({ id: 'sdoc-4', type: 'POD', loadId: 'lod-1', orderId: 'ord-1' }),
-      doc({ id: 'sdoc-5', type: 'BOL', loadId: 'lod-1', orderId: 'ord-1' }),
+      doc({ id: 'sdoc-5', type: 'LUMPER_RECEIPT', loadId: 'lod-1', orderId: 'ord-1' }),
     ])
     const { result } = renderHook(() => useShipmentDocuments('shp-1', {
       bundle: { orders: [order, otherOrder], loads, loadCarriers },
@@ -112,7 +112,7 @@ describe('useShipmentDocuments', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.orderGates['ord-1'].ready).toBe(true)
-    expect(result.current.orderGates['ord-2'].missing).toEqual(['POD', 'BOL'])
+    expect(result.current.orderGates['ord-2'].missing).toEqual(['POD', 'LUMPER_RECEIPT'])
   })
 
   it('never reads anything without a shipment', async () => {

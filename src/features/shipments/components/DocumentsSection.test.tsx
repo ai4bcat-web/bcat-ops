@@ -115,7 +115,7 @@ function bundle(invoiceId: string | null = null): ShipmentBundle {
   return { shipment, orders: [order], loads: [load], loadCarriers: [bounced, active], charges: [], financials: [], documents: DOCUMENTS }
 }
 
-const CUSTOMER = { id: 'cust-1', name: 'Acme Freight', requiredDocsForInvoice: ['POD', 'BOL'] } as CustomerRecord
+const CUSTOMER = { id: 'cust-1', name: 'Acme Freight', requiredDocsForInvoice: ['POD', 'LUMPER_RECEIPT'] } as CustomerRecord
 
 function renderSection(isAdmin = false, invoiceId: string | null = null, onReload = vi.fn(async () => {})) {
   render(
@@ -157,21 +157,23 @@ describe('DocumentsSection', () => {
 
   it('shows the missing required document and offers no release: the way forward is Load Review', async () => {
     pushToLoadReview.mockResolvedValue({
-      results: [{ shipmentId: 'shp-1', number: 'S000001', ok: false, message: 'Missing document: BOL', reasons: ['Missing document: BOL'] }],
+      results: [{ shipmentId: 'shp-1', number: 'S000001', ok: false, message: 'Missing document: LUMPER_RECEIPT', reasons: ['Missing document: LUMPER_RECEIPT'] }],
     })
     renderSection()
     const strip = await screen.findByTestId('required-documents')
 
-    // POD is on file against the order; the customer also asks for a BOL, which is not.
+    // POD is on file against the order; the customer also asks for a lumper receipt, which is not.
     expect(within(strip).getByText('Proof of delivery')).toBeTruthy()
     expect(within(strip).getByText('pod-signed.pdf')).toBeTruthy()
-    expect(within(strip).getByText('Bill of lading')).toBeTruthy()
+    expect(within(strip).getByText('Lumper receipt')).toBeTruthy()
     expect(within(strip).getByText('missing')).toBeTruthy()
-    expect(within(strip).getByText(/1 still missing: Bill of lading/)).toBeTruthy()
+    expect(within(strip).getByText(/1 still missing: Lumper receipt/)).toBeTruthy()
+    // A BOL is optional (Ryne 2026-11-12): not in the required strip.
+    expect(within(strip).queryByText('Bill of lading')).toBeNull()
 
     expect(within(strip).queryByRole('button', { name: 'Ready to invoice' })).toBeNull()
     fireEvent.click(within(strip).getByRole('button', { name: 'Push to Load Review' }))
-    expect((await within(strip).findByTestId('push-to-load-review-reasons')).textContent).toContain('Missing document: BOL')
+    expect((await within(strip).findByTestId('push-to-load-review-reasons')).textContent).toContain('Missing document: LUMPER_RECEIPT')
     expect(readyToInvoice).not.toHaveBeenCalled()
   })
 
