@@ -31,6 +31,7 @@ import {
   nowIso,
   numberOrNull,
   putItem,
+  queryIndex,
   readBundle,
   readStops,
   transact,
@@ -73,6 +74,7 @@ import {
 import { isCarShipperLoad } from '../../../src/lib/carShipper'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { planPendingCarrierBills, readPendingBillContext, writePendingBill } from '../_shared/pendingCarrierBill'
+import { hasGap, isReleasedOrder, reconcileReleasedOrder, type ReconcileFinding } from '../../../src/lib/billingReconcile'
 import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '../../../src/lib/releaseGate'
 import { evaluateLoadReview, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
 import { profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
@@ -1142,6 +1144,113 @@ async function createCarrierApRecords(
     }
   }
   return result
+}
+
+// ── RECONCILE_BILLING ────────────────────────────────────────────────────────
+
+const IDX_ORDERS_BY_AR_STATUS = 'ordersByArStatusAndArStatusChangedAt'
+/** Released orders read per check; the page asks again after a fix. */
+const MAX_RECONCILE_ORDERS = 400
+
+export interface BillingGap extends ReconcileFinding {
+  orderId: string
+  shipmentId: string
+  shipmentNumber: string | null
+  customerName: string | null
+  releasedAt: string | null
+  arStatus: string | null
+}
+
+/** The AP half of one shipment's check: what the pending-bill plan would still create or cannot bill. */
+async function apPlanFor(deps: DocumentDeps, bundle: Bundle, settings: Row | null) {
+  const hasCarrierLeg = bundle.loadCarriers.some((lc) => lc.kind === 'CARRIER' && lc.status === 'ACTIVE')
+  if (!hasCarrierLeg) return { create: [], unbillable: [] }
+  const tables = {
+    carrier: process.env.CARRIER_TABLE_NAME ?? '',
+    carrierPaymentMethod: process.env.CARRIER_PAYMENT_METHOD_TABLE_NAME ?? '',
+    carrierBill: process.env.CARRIER_BILL_TABLE_NAME ?? '',
+    loadCarrier: deps.store.tables.loadCarrier,
+  }
+  const { carriersById, methodsByCarrierId } = await readPendingBillContext(deps.store.db, tables, bundle.loadCarriers)
+  const now = nowIso()
+  const plan = planPendingCarrierBills({
+    shipment: bundle.shipment, loads: bundle.loads, loadCarriers: bundle.loadCarriers, charges: bundle.charges,
+    carriersById, methodsByCarrierId, settings, today: now.slice(0, 10), now, actorEmail: 'system:reconcile',
+  })
+  return {
+    create: plan.create.filter((p) => p.grossCents > 0).map((p) => ({ loadCarrierId: p.loadCarrierId, carrierName: p.carrierName, grossCents: p.grossCents })),
+    unbillable: plan.skipped.filter((s) => s.kind === 'NOT_BILLABLE').map((s) => ({ loadCarrierId: s.loadCarrierId, carrierName: s.carrierName, reasons: s.reasons })),
+  }
+}
+
+async function gapFor(deps: DocumentDeps, order: Row, settings: Row | null): Promise<BillingGap | null> {
+  const shipmentId = String(order.shipmentId ?? '')
+  if (!shipmentId) return null
+  const bundle = await readBundle(deps.store, shipmentId)
+  if (bundle.shipment.legacyImported === true || isVoided(bundle.shipment)) return null
+  const ap = await apPlanFor(deps, bundle, settings)
+  const finding = reconcileReleasedOrder({
+    order: {
+      id: String(order.id),
+      arStatus: order.arStatus == null ? null : String(order.arStatus),
+      invoiceId: typeof order.invoiceId === 'string' ? order.invoiceId : null,
+      readyToInvoiceAt: typeof order.readyToInvoiceAt === 'string' ? order.readyToInvoiceAt : null,
+    },
+    apToCreate: ap.create,
+    apUnbillable: ap.unbillable,
+  })
+  if (!hasGap(finding)) return null
+  return {
+    ...finding,
+    orderId: String(order.id),
+    shipmentId,
+    shipmentNumber: bundle.shipment.number == null ? null : String(bundle.shipment.number),
+    customerName: typeof order.customerName === 'string' ? order.customerName : null,
+    releasedAt: typeof order.readyToInvoiceAt === 'string' ? order.readyToInvoiceAt : null,
+    arStatus: order.arStatus == null ? null : String(order.arStatus),
+  }
+}
+
+/**
+ * Read-only: every order released through Load Review that is missing from AR (released but
+ * neither waiting to invoice nor invoiced) or from AP (an outside carrier with pay and no bill).
+ * With `createMissingFor: orderId`, first creates that shipment's missing AP records with the
+ * same idempotent writer the release uses, then answers for that order alone.
+ */
+export async function reconcileBilling(deps: DocumentDeps, input: Row, caller: Caller): Promise<Row> {
+  const settings = await getSettings(deps)
+  const createFor = optionalString(input.createMissingFor, 200)
+  if (createFor) {
+    const order = await getById(deps.store.db, deps.store.tables.order, createFor)
+    if (!order) throw new Error(`Order not found: ${createFor}`)
+    if (!isReleasedOrder(order as never)) throw new Error('That order has not been moved to billing from Load Review')
+    const bundle = await readBundle(deps.store, String(order.shipmentId))
+    if (bundle.shipment.legacyImported === true) throw new Error('Imported history has no AP record to create')
+    const apRecords = await createCarrierApRecords(deps, bundle, settings, nowIso(), caller)
+    await deps.writeAudit('ORDER', createFor, 'RECONCILE_CREATE_AP', caller, { created: apRecords.created, skipped: apRecords.skipped })
+    const gap = await gapFor(deps, order, settings)
+    return { apRecords, gaps: gap ? [gap] : [], checked: 1 }
+  }
+
+  const orders: Row[] = []
+  for (const status of ['UNBILLED', 'UNPAID', 'PAID']) {
+    const rows = await queryIndex(deps.store.db, deps.store.tables.order, IDX_ORDERS_BY_AR_STATUS, 'arStatus', status)
+    orders.push(...rows.filter((o) => isReleasedOrder(o as never)))
+  }
+  orders.sort((a, b) => String(b.readyToInvoiceAt).localeCompare(String(a.readyToInvoiceAt)))
+  const checked = orders.slice(0, MAX_RECONCILE_ORDERS)
+  const gaps: BillingGap[] = []
+  for (const order of checked) {
+    const gap = await gapFor(deps, order, settings)
+    if (gap) gaps.push(gap)
+  }
+  if (gaps.length > 0) {
+    // A released load missing from AR or AP is money nobody will collect or pay: say so in the log too.
+    console.warn('[reconcile-billing] released loads missing from AR/AP', JSON.stringify(gaps.map((g) => ({
+      orderId: g.orderId, shipment: g.shipmentNumber, arMissing: g.arMissing, apMissing: g.apMissing.length, apUnbillable: g.apUnbillable.length,
+    }))))
+  }
+  return { gaps, checked: checked.length, truncated: orders.length > checked.length }
 }
 
 /**

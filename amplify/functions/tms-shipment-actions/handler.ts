@@ -109,6 +109,7 @@ import {
   prepareDocumentUpload,
   rateCarrier,
   readyToInvoice,
+  reconcileBilling,
   reviewLoad,
   pushToReviewVerdict,
   reviewDocument,
@@ -683,6 +684,8 @@ type Action =
   | 'SET_LOAD_REQUIRED_DOCS'
   | 'READY_TO_INVOICE'
   | 'REVIEW_LOAD'
+  // Released loads missing from AR or AP; read-only unless createMissingFor names an order.
+  | 'RECONCILE_BILLING'
   | 'RATE_CARRIER'
   // Step H — the sell side of a quote, which is the quotes page's own work.
   | 'SAVE_QUOTE'
@@ -824,6 +827,8 @@ const QUOTES_PAGE_GROUP = 'page-quotes'
 const LOADS_PAGE_GROUP = 'page-loads'
 const LOAD_REVIEW_PAGE_GROUP = 'page-loadReview'
 const LOAD_REVIEW_ACTIONS: Record<string, true> = { READY_TO_INVOICE: true, SET_SALES_REP: true, SET_REV_TAG: true, REVIEW_LOAD: true }
+/** The AR and AP pages ask whether every released load reached them; their own page grants may ask. */
+const BILLING_RECONCILE_GROUPS = ['page-invoicing', 'page-carrierPay', LOAD_REVIEW_PAGE_GROUP]
 /**
  * Step R. The BROKERAGE section's one grant. The TMS merged the loads page, the
  * quotes page and the carrier-pay card into `/tms/*`, so a user who holds this key
@@ -904,6 +909,7 @@ function isActionAuthorized(action: Action, caller: Caller): boolean {
   if (action === 'INTAKE_LINK_SHIPMENT' || action === 'INTAKE_ATTACH_FILES') return groups.includes(INTAKE_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (INTAKE_REVIEW_ACTIONS[action]) return groups.includes(INTAKE_REVIEW_PAGE_GROUP)
   if (LOAD_REVIEW_ACTIONS[action]) return groups.includes(LOAD_REVIEW_PAGE_GROUP) || groups.includes(LOADS_PAGE_GROUP) || tms
+  if (action === 'RECONCILE_BILLING') return BILLING_RECONCILE_GROUPS.some((g) => groups.includes(g)) || groups.includes(LOADS_PAGE_GROUP) || tms
   if (ADMIN_ONLY_ACTIONS[action]) return false
   if (action === 'UPDATE_CARRIER_CHARGES') {
     return groups.includes(LOADS_PAGE_GROUP) || tms || groups.includes('page-carrierPay')
@@ -9210,6 +9216,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return readyToInvoice(documentDeps, input, caller)
     case 'REVIEW_LOAD':
       return reviewLoad(documentDeps, input)
+    case 'RECONCILE_BILLING':
+      return reconcileBilling(documentDeps, input, caller)
     case 'RATE_CARRIER':
       return rateCarrier(documentDeps, input, caller)
     case 'SAVE_QUOTE':
