@@ -49,6 +49,7 @@ import {
 } from './apPayments'
 import { repointInvoicedCustomer } from './repoint'
 import { brokerageRepRollup } from './brokerageRep'
+import { agingStatement } from './statements'
 import { settleFactoredInvoices } from './settleFactored'
 import {
   acceptCommissionCounter,
@@ -123,6 +124,7 @@ type Action =
   | 'RELEASE_TO_BILLING'
   | 'SEND_INVOICE'
   | 'SYNC_FACTORING_CHANGE'
+  | 'AGING_STATEMENT'
   | 'SETTLE_FACTORED_INVOICES'
   | 'BROKERAGE_REP_ROLLUP'
 
@@ -267,6 +269,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return sendInvoice(input, caller)
     case 'SETTLE_FACTORED_INVOICES':
       return settleFactoredInvoices(caller) as unknown as Promise<Row>
+    case 'AGING_STATEMENT':
+      return agingStatement(input, caller)
     case 'SYNC_FACTORING_CHANGE':
       return syncFactoringChange(input, caller)
     case 'PREVIEW_FACTOR':
