@@ -41,7 +41,7 @@ describe('TmsListPage', () => {
 
   it('keeps the column headers visible while empty', () => {
     render(<TmsListPage<Row> title="Shipments" columns={COLUMNS} rows={[]} rowKey={(r) => r.id} />)
-    expect(screen.getByRole('columnheader', { name: 'Shipment ID' })).toBeInTheDocument()
+    expect(screen.getByText('Shipment ID').closest('th')).toBeInTheDocument()
   })
 
   it('counts the page in the footer', () => {
@@ -120,7 +120,7 @@ describe('TmsListPage', () => {
     expect(screen.getByText('AR Status is not Unbilled, Unpaid, Paid, Canceled')).toHaveClass('tms-chip-set')
 
     fireEvent.click(screen.getByText('13 Fields'))
-    fireEvent.click(screen.getByRole('button', { name: /Filter/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Filter$/ }))
     expect(onAddFilter).toHaveBeenCalledTimes(1)
   })
 })
