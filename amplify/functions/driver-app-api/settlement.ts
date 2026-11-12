@@ -11,7 +11,7 @@ import {
   factoringFeePctFor,
   tripPayAmount,
   effectivePayRate,
-  payGroupForWeek,
+  resolveWeekSettlement,
   effectiveFixedExpenses,
   fixedExpenseLineLabel,
   FACTORING_FEE_LABEL,
@@ -328,7 +328,7 @@ export function buildSettlement(
 
   const statement = calcDriverPay(
     tripInputs,
-    { ...(rateModel as DriverPaySettingInput), factoringFeePct: factoringFeePctFor(payGroupForWeek({ payGroup: setting.payGroup, rateHistory: parseJsonArray<PayRateOverride>(setting.rateHistory) }, periodStart)) },
+    { ...(rateModel as DriverPaySettingInput), factoringFeePct: factoringFeePctFor(resolveWeekSettlement({ payGroup: setting.payGroup, rateHistory: parseJsonArray<PayRateOverride>(setting.rateHistory) }, periodStart, trips.some((t) => !t.loadRowId)).group) },
     deductionLines,
     myCredits,
     [...fixedDebits, ...myDebits],

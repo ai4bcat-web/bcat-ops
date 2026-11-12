@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ArrowLeft, Pencil } from 'lucide-react'
@@ -15,6 +15,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
 import { activeUnits } from '@/lib/fleetActive'
 import { driverExpiryPatch, driverExpiry, slotsForDriver, visibleSlots } from '@/lib/fileHub'
+import * as api from '@/lib/apiClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
 import { ProfileDocuments } from '../shared/ProfileDocuments'
 import { ProfileRows, ProfileSection } from '../shared/ProfileSection'
@@ -45,6 +46,20 @@ export function DriverProfilePage() {
 
   const rawTab = params.get('tab') as TabKey | null
   const tab: TabKey = rawTab && TAB_KEYS.includes(rawTab) ? rawTab : 'overview'
+  // The pay weeks this driver still has Amazon trips in: the Pay mode section flags such a week from the changeover on (it needs a decision).
+  const [amazonWeeks, setAmazonWeeks] = useState<ReadonlySet<string>>(new Set())
+  const amazonDriverId = driver?.id
+  useEffect(() => {
+    if (!amazonDriverId || tab !== 'pay') return
+    let live = true
+    void (async () => {
+      try {
+        const trips = await api.listAmazonTrips()
+        if (live) setAmazonWeeks(new Set(trips.filter((t) => t.driverId === amazonDriverId).map((t) => t.periodStart)))
+      } catch { /* the flag is a courtesy; the section works without it */ }
+    })()
+    return () => { live = false }
+  }, [amazonDriverId, tab])
   const setTab = (next: string) => setParams(next === 'overview' ? {} : { tab: next }, { replace: true })
 
   const truck = driver?.assignedTruckId ? equipment.find((e) => e.id === driver.assignedTruckId) : undefined
@@ -218,7 +233,7 @@ export function DriverProfilePage() {
               ) : null}
             </ProfileSection>
             {setting && (driver.fleetGroup === 'OWNER_OPERATOR' || driver.fleetGroup === 'AMAZON' || setting.payGroup === 'OWNER_OPERATOR' || setting.payGroup === 'AMAZON') ? (
-              <PayModeSection setting={setting} today={today} onSave={savePayQuiet} />
+              <PayModeSection setting={setting} today={today} onSave={savePayQuiet} amazonWeeks={amazonWeeks} />
             ) : null}
             <ProfileSection title="Fixed weekly expenses">
               {fixed.length === 0

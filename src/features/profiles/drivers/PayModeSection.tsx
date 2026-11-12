@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { TmsButton, TmsField, TmsSelect } from '@/features/tms/kit'
 import { ProfileRows, ProfileSection } from '../shared/ProfileSection'
-import { clearWeekPayMode, explicitWeekMode, payGroupForWeek, payModeHistory, pinWeekPayMode, payModeChangeRefusal, effectivePayRate, type WeekPayMode } from '@/lib/driverPay'
+import { AMAZON_OVERLAP_NOTE, clearWeekPayMode, explicitWeekMode, resolveWeekSettlement, payModeHistory, pinWeekPayMode, payModeChangeRefusal, effectivePayRate, type WeekPayMode } from '@/lib/driverPay'
 import { useAuthUser } from '@/hooks/useAuth'
 import { OWNER_EMAIL } from '@/lib/crm/visibility'
 import { OWNER_OP_FIRST_PERIOD } from '@/lib/ownerOperatorTrips'
@@ -25,9 +25,11 @@ const pct = (n: number) => `${Math.round(n * 1000) / 10}%`
  * week. The mode of a week is pinned in the same rate windows the settlement pages already read (no new field), so changing one week
  * never moves another and a closed week only changes when it is picked here on purpose.
  */
-export function PayModeSection({ setting, today, onSave }: {
+export function PayModeSection({ setting, today, onSave, amazonWeeks }: {
   setting: DriverPaySetting
   today: string
+  /** Pay weeks that still have Amazon trips for this driver (any week not listed counts as no Amazon activity). */
+  amazonWeeks?: ReadonlySet<string>
   onSave: (patch: PaySettingPatch, expectedUpdatedAt: string | undefined) => Promise<unknown>
 }) {
   const thisWeek = weekStartOfISO(today)
@@ -37,8 +39,10 @@ export function PayModeSection({ setting, today, onSave }: {
     return out
   }, [thisWeek])
   const [week, setWeek] = useState(thisWeek)
-  const current = (payGroupForWeek(setting, week) === 'AMAZON' ? 'AMAZON' : 'OWNER_OPERATOR') as WeekPayMode
+  const resolved = resolveWeekSettlement(setting, week, amazonWeeks?.has(week) ?? false)
+  const current = (resolved.group === 'AMAZON' ? 'AMAZON' : 'OWNER_OPERATOR') as WeekPayMode
   const pinned = explicitWeekMode(setting, week)
+  const overlapWeeks = weeks.filter((w) => resolveWeekSettlement(setting, w, amazonWeeks?.has(w) ?? false).overlap)
   const [mode, setMode] = useState<WeekPayMode | ''>('')
   const [percent, setPercent] = useState('')
   const [afterExp, setAfterExp] = useState(false)
@@ -104,6 +108,8 @@ export function PayModeSection({ setting, today, onSave }: {
           <input className="tms-input" value={shownPercent} onChange={(e) => { setPercent(e.target.value); setAfterExp(shownAfterExp) }} aria-label="Pay percent for this week" />
         </TmsField>
       </div>
+      {resolved.overlap ? <div className="pf-row-sub" style={{ marginTop: 6, color: 'var(--tms-badge-orange)', fontWeight: 600 }} data-testid="pay-mode-overlap">{AMAZON_OVERLAP_NOTE}. It stays on the Amazon statement so no trip pay is lost; pick the mode above and save to settle it either way.</div> : null}
+      {overlapWeeks.length > 0 && !resolved.overlap ? <div className="pf-row-sub" style={{ marginTop: 6, color: 'var(--tms-badge-orange)' }} data-testid="pay-mode-overlap-weeks">{AMAZON_OVERLAP_NOTE}: {overlapWeeks.map(weekLabel).join(', ')}.</div> : null}
       {closed ? <div className="pf-row-sub" style={{ marginTop: 6 }}>This week is already closed. Saving recomputes that week’s statement.</div> : null}
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         <TmsButton size="sm" variant="primary" disabled={busy} onClick={() => void save()} data-testid="pay-mode-save">Save this week</TmsButton>

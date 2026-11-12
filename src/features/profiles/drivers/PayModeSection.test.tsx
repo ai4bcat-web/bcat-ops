@@ -53,4 +53,24 @@ describe('PayModeSection', () => {
     render(<PayModeSection setting={base()} today="2026-11-11" onSave={vi.fn(async () => {})} />)
     expect(screen.getByText(/Every week follows/)).toBeTruthy()
   })
+  it('flags a week that still has Amazon trips (overlap) for an Amazon-group driver, and says what it is; other weeks show a list', () => {
+    const amazon = base({ payGroup: 'AMAZON' })
+    render(<PayModeSection setting={amazon} today="2026-11-11" onSave={vi.fn(async () => {})} amazonWeeks={new Set(['2026-10-04'])} />)
+    // the open week (this week) has no Amazon trips: no inline note, but the overlap week is listed
+    expect(screen.queryByTestId('pay-mode-overlap')).toBeNull()
+    expect(screen.getByTestId('pay-mode-overlap-weeks').textContent).toContain('Amazon trips this week: confirm pay mode')
+    expect(screen.getByTestId('pay-mode-overlap-weeks').textContent).toContain('Oct 4, 2026')
+    fireEvent.change(screen.getByLabelText('Week'), { target: { value: '2026-10-04' } })
+    expect(screen.getByTestId('pay-mode-overlap').textContent).toContain('stays on the Amazon statement')
+    // an unflagged week defaults to the standard owner operator from the changeover
+    expect((screen.getByLabelText('Settles as') as HTMLSelectElement).value).toBe('AMAZON')
+    fireEvent.change(screen.getByLabelText('Week'), { target: { value: '2026-10-11' } })
+    expect((screen.getByLabelText('Settles as') as HTMLSelectElement).value).toBe('OWNER_OPERATOR')
+  })
+
+  it('never flags a pinned week or an owner-operator-group driver', () => {
+    const oo = base()
+    render(<PayModeSection setting={oo} today="2026-11-11" onSave={vi.fn(async () => {})} amazonWeeks={new Set(['2026-10-04'])} />)
+    expect(screen.queryByTestId('pay-mode-overlap-weeks')).toBeNull()
+  })
 })

@@ -9,7 +9,7 @@ import { useAmazonPay, periodEnd, type DriverPayRow, type AmazonTrip, type Drive
 import { useAmazonPayMasters, type AmazonPayMaster } from '@/hooks/useAmazonPayMasters'
 import { useAuth } from '@/hooks/useAuth'
 import { useDrivers } from '@/hooks/useDrivers'
-import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
+import { tripPayAmount, FACTORING_FEE_LABEL, AMAZON_OVERLAP_NOTE } from '@/lib/driverPay'
 import { persistDragOrder } from '@/lib/calendarOrder'
 import { buildPayStatementPdf, payPdfFilename, pdfToBase64 } from '@/lib/payPdf'
 import { sendDriverPayEmail, payCreditsDeployed } from '@/lib/apiClient'
@@ -261,6 +261,7 @@ export function DriverPayPage() {
                   <span style={{ fontSize: 13, fontWeight: active ? 700 : 600, color: 'var(--tms-text)' }}>{r.driver.name}</span>
                   <span style={{ fontSize: 12, fontWeight: 600, color: r.statement.checkAmount >= 0 ? 'var(--tms-badge-green)' : 'var(--tms-badge-red)', fontVariantNumeric: 'tabular-nums' }}>{money(r.statement.checkAmount)}</span>
                   {dups && <AlertTriangle size={12} style={{ color: 'var(--tms-badge-red)' }} aria-label="Has possible duplicate trips" />}
+                  {r.amazonOverlap && <AlertTriangle size={12} style={{ color: 'var(--tms-badge-orange)' }} aria-label={AMAZON_OVERLAP_NOTE} data-testid={`amazon-overlap-${r.driver.id}`} />}
                 </button>
               )
             })}
@@ -473,6 +474,7 @@ function StatementCard({ row, periodStart, onAddTrip, onImport, onAddDeduction, 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--tms-text)' }}>{driver.name}</div>
           <div style={{ fontSize: 12, color: 'var(--tms-muted)', marginTop: 1 }}>{modeLabel}{setting.email ? ` · ${setting.email}` : ''}</div>
+          {row.amazonOverlap && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--tms-badge-orange)', marginTop: 2 }} data-testid="amazon-overlap-note">{AMAZON_OVERLAP_NOTE}. Set it on the driver’s profile (Pay mode by week).</div>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
           <div style={{ textAlign: 'right' }}>
