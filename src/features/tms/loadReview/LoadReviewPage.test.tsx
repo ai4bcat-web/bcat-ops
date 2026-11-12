@@ -107,6 +107,17 @@ describe('LoadReviewPage inactive revenue division', () => {
 })
 
 describe('LoadReviewPage', () => {
+  it('clicking a column heading sorts the rows A to Z, then Z to A', () => {
+    try { window.localStorage.clear() } catch { /* ignore */ }
+    renderPage('/tms/load-review?tab=all')
+    const order = () => ['S-1', 'S-2', 'S-3'].map((n) => ({ n, el: screen.getByRole('button', { name: n }) }))
+      .sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)).map((x) => x.n)
+    fireEvent.click(screen.getByTitle('Sort by Shipment'))
+    expect(order()).toEqual(['S-1', 'S-2', 'S-3'])
+    fireEvent.click(screen.getByTitle('Sort by Shipment'))
+    expect(order()).toEqual(['S-3', 'S-2', 'S-1'])
+  })
+
   it('lists only rows in the queue and offers a checkbox on every row (batch edit), release only for Looks-ready ones', () => {
     renderPage('/tms/load-review?tab=all')
     for (const n of ['S-1', 'S-2', 'S-3']) expect(screen.getByRole('button', { name: n })).toBeTruthy()

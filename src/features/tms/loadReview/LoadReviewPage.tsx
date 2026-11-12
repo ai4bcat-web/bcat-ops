@@ -85,7 +85,7 @@ export function LoadReviewPage() {
   }, [])
   const searched = source.filter(({ row }) => matchesQuery(row, params.get('q') ?? '') && (params.get('demo') !== '1' || isDemoShipment(row)))
   // The table is the same dense grid as the Shipments board: header filters on division / rep / customer, sortable columns.
-  const filtered = sortDenseRows(filterRows(searched, denseCols, dense), denseCols, null)
+  const filtered = sortDenseRows(filterRows(searched, denseCols, dense), denseCols, prefs.sort)
   const page = filtered.slice(0, pageSize)
   const eligible = filtered.filter((entry) => entry.verdict?.ok)
   const chosen = eligible.filter(({ row }) => selected.has(row.id)).slice(0, MAX_REVIEW_BATCH).map(({ row }) => row.id)
