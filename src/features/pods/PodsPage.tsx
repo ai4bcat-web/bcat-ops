@@ -42,6 +42,7 @@ import {
   type ReviewSubmission,
 } from '@/lib/podReview'
 import { PodReviewPanel } from './PodReviewPanel'
+import { DenseTable } from '@/features/tms/grid/DenseTable'
 import type { Load } from '@/types'
 
 type Tab = PodReviewStatus | 'ALL'
@@ -193,65 +194,59 @@ export function PodsPage() {
           />
         )}
         {rows.length > 0 && (
-          <div style={{ border: '1px solid var(--tms-border)', borderRadius: 12, background: 'var(--tms-card)', overflowX: 'auto' }}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-muted-foreground border-b">
-                  <th className="px-4 py-2 font-semibold">PRO</th>
-                  <th className="px-4 py-2 font-semibold">Driver</th>
-                  <th className="px-4 py-2 font-semibold">Sent</th>
-                  <th className="px-4 py-2 font-semibold">Pages</th>
-                  <th className="px-4 py-2 font-semibold">Automated check</th>
-                  <th className="px-4 py-2 font-semibold">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((s) => {
-                  const load = loadFor(s)
-                  const driver = driverFor(s)
+          <DenseTable<ReviewSubmission>
+            gridId="pods"
+            aria-label="PODs"
+            testId="pods-grid"
+            rows={rows}
+            rowKey={(s) => s.id}
+            onRowClick={(s) => setOpenId(s.id)}
+            columns={[
+              { key: 'pro', header: 'PRO', text: (s) => proOf(s, loadFor(s)) ?? '', render: (s) => <span className="font-semibold">{proOf(s, loadFor(s)) ?? '—'}</span> },
+              { key: 'customer', header: 'Customer', text: (s) => { const load = loadFor(s); return load?.customer ?? (load ? '' : 'no load linked') } },
+              { key: 'driver', header: 'Driver', text: (s) => s.driverName ?? '' },
+              { key: 'app', header: 'App', filter: 'multi', text: (s) => appLabel(driverFor(s)) },
+              { key: 'sent', header: 'Sent', filter: 'date', dateOf: (s) => String(s.createdAt ?? '') || null, text: (s) => formatDateTime(s.createdAt) },
+              { key: 'pages', header: 'Pages', text: (s) => { const check = parseCheck(s); return pagesLabel(check?.pages.received ?? podPages(s).length, check) } },
+              {
+                key: 'check', header: 'Automated check', filter: false, extraPx: 120,
+                text: (s) => { const check = parseCheck(s); return check ? `Addresses ${check.addresses.verdict} · Pages ${check.pages.verdict} · Legible ${check.legibility.verdict}` : s.podCheckStatus === 'RUNNING' ? 'Checking…' : s.podCheckStatus === 'FAILED' ? 'Check failed' : 'Not checked' },
+                render: (s) => {
                   const check = parseCheck(s)
+                  return check ? (
+                    <span className="inline-flex gap-3">
+                      <Dot v={check.addresses.verdict} label="Addresses" />
+                      <Dot v={check.pages.verdict} label="Pages" />
+                      <Dot v={check.legibility.verdict} label="Legible" />
+                    </span>
+                  ) : s.podCheckStatus === 'RUNNING' ? (
+                    <span className="text-xs text-muted-foreground inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Checking…</span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">{s.podCheckStatus === 'FAILED' ? 'Check failed' : 'Not checked'}</span>
+                  )
+                },
+              },
+              {
+                key: 'status', header: 'Status', filter: 'multi', extraPx: 24,
+                text: (s) => { const st = reviewStatusOf(s); return st === 'APPROVED' ? 'Approved' : st === 'PENDING' ? 'To review' : 'New POD requested' },
+                render: (s) => {
                   const status = reviewStatusOf(s)
                   const newer = status === 'NEEDS_REPLACEMENT' ? supersededBy(s, queue) : null
                   return (
-                    <tr key={s.id} onClick={() => setOpenId(s.id)} className="border-b last:border-0 hover:bg-muted/40 cursor-pointer">
-                      <td className="px-4 py-2.5">
-                        <div className="font-semibold">{proOf(s, load) ?? '—'}</div>
-                        <div className="text-xs text-muted-foreground">{load?.customer ?? (load ? '' : 'no load linked')}</div>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <div>{s.driverName}</div>
-                        <div className="text-xs text-muted-foreground">{appLabel(driver)}</div>
-                      </td>
-                      <td className="px-4 py-2.5 whitespace-nowrap">{formatDateTime(s.createdAt)}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap">{pagesLabel(check?.pages.received ?? podPages(s).length, check)}</td>
-                      <td className="px-4 py-2.5">
-                        {check ? (
-                          <span className="inline-flex gap-3 flex-wrap">
-                            <Dot v={check.addresses.verdict} label="Addresses" />
-                            <Dot v={check.pages.verdict} label="Pages" />
-                            <Dot v={check.legibility.verdict} label="Legible" />
-                          </span>
-                        ) : s.podCheckStatus === 'RUNNING' ? (
-                          <span className="text-xs text-muted-foreground inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Checking…</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">{s.podCheckStatus === 'FAILED' ? 'Check failed' : 'Not checked'}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 whitespace-nowrap">
-                        {status === 'APPROVED' && <TmsBadge tone="green"><CheckCircle2 size={12} /> Approved</TmsBadge>}
-                        {status === 'PENDING' && <TmsBadge tone="orange"><Clock size={12} /> To review</TmsBadge>}
-                        {status === 'NEEDS_REPLACEMENT' && (
-                          <TmsBadge tone="red">
-                            {newer ? 'Driver resent — review the new one' : `New POD requested${s.podReplacementRequestedAt ? ` ${formatDateTime(s.podReplacementRequestedAt)}` : ''}`}
-                          </TmsBadge>
-                        )}
-                      </td>
-                    </tr>
+                    <>
+                      {status === 'APPROVED' && <TmsBadge tone="green"><CheckCircle2 size={12} /> Approved</TmsBadge>}
+                      {status === 'PENDING' && <TmsBadge tone="orange"><Clock size={12} /> To review</TmsBadge>}
+                      {status === 'NEEDS_REPLACEMENT' && (
+                        <TmsBadge tone="red">
+                          {newer ? 'Driver resent — review the new one' : `New POD requested${s.podReplacementRequestedAt ? ` ${formatDateTime(s.podReplacementRequestedAt)}` : ''}`}
+                        </TmsBadge>
+                      )}
+                    </>
                   )
-                })}
-              </tbody>
-            </table>
-          </div>
+                },
+              },
+            ]}
+          />
         )}
       </div>
 

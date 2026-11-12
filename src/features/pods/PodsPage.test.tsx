@@ -84,7 +84,7 @@ describe('PodsPage review queue', () => {
     expect(screen.queryByText('99999')).toBeNull()
     expect(screen.getByText('1 of 2 pages')).toBeTruthy()
     expect(screen.getByTitle('Pages: problem')).toBeTruthy()
-    expect(screen.getByText('Ivan driver app', { selector: 'div' })).toBeTruthy()
+    expect(screen.getByText('Ivan driver app', { selector: 'td' })).toBeTruthy()
   })
 
   it('will not approve a POD with an unticked box and no note', async () => {

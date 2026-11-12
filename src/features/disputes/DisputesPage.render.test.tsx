@@ -125,9 +125,9 @@ describe('DisputesPage ordering', () => {
     render(<DisputesPage />)
 
     await screen.findByText('Pay period')
-    const trips = screen.getAllByRole('row').slice(1).map((r) => r.cells[1].textContent)
+    const trips = screen.getAllByRole('row').slice(1).map((r) => r.cells[2].textContent)
     expect(trips).toEqual(['SAMEWEEK', 'NEWWEEK', 'OLDWEEK', 'LEGACY'])
-    expect(screen.getAllByRole('row')[1].cells[3].textContent).toBe('Feb 8 – Feb 14, 2026')
+    expect(screen.getAllByRole('row')[1].cells[4].textContent).toBe('Feb 8 – Feb 14, 2026')
   })
 })
 
