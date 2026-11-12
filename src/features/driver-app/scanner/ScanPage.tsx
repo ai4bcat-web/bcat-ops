@@ -5,6 +5,7 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  FilePlus2,
   FileText,
   Loader2,
   Package,
@@ -30,8 +31,12 @@ import {
 } from '../driverApi'
 import { PagePicker } from './PagePicker'
 import { useDriverProgram } from '../useDriverProgram'
+import { LOAD_EXTRA_DOC_TYPES, docTypeLabel, driverAdditionalDocType } from '@/lib/loadRequiredDocs'
 
-type Phase = 'choose' | 'select' | 'capture' | 'review' | 'submitting' | 'success' | 'error'
+type Phase = 'choose' | 'select' | 'doctype' | 'capture' | 'review' | 'submitting' | 'success' | 'error'
+
+/** 'Other' on the type list: sent untyped, for the office to file. */
+const OTHER_DOC = 'OTHER'
 
 export default function ScanPage() {
   const navigate = useNavigate()
@@ -51,9 +56,12 @@ export default function ScanPage() {
     // The driver app no longer takes rate confirmations (the office collects them); an old
     // link or a remembered scan for one opens the normal "what are you sending?" screen.
     if (raw === 'pod') return 'POD'
-    if (raw === 'misc') return 'MISC'
+    if (raw === 'misc' || raw === 'doc') return 'MISC'
     return null
   }, [searchParams])
+  /** An additional document (lumper receipt, scale ticket) rather than a stop photo. Both are MISC uploads. */
+  const initialAdditional = searchParams.get('kind') === 'doc'
+  const initialDocType = driverAdditionalDocType(searchParams.get('docType'))
   const initialSubmissionId = searchParams.get('submissionId')
   /**
    * The PRO this scan belongs to, when the driver came from a specific load on their
@@ -76,14 +84,21 @@ export default function ScanPage() {
   const initialStopLabel = (searchParams.get('stopLabel') ?? '').trim() || null
 
   const initialPhase: Phase = useMemo(() => {
+    // An additional document opened for a known type goes to the camera; otherwise the driver says what it is first.
+    if (initialAdditional) return initialDocType ? 'capture' : 'doctype'
     // Photos go straight to the camera: there is nothing to choose, they are for the stop they were started from.
     if (initialKind === 'MISC') return 'capture'
     if (initialKind === 'POD') return initialSubmissionId || initialPro || initialLoadId ? 'capture' : 'select'
     return 'choose'
-  }, [initialKind, initialSubmissionId, initialPro, initialLoadId])
+  }, [initialKind, initialSubmissionId, initialPro, initialLoadId, initialAdditional, initialDocType])
 
   const [phase, setPhase] = useState<Phase>(initialPhase)
   const [kind, setKind] = useState<SubmissionKind | null>(initialKind)
+  const [additional, setAdditional] = useState(initialAdditional)
+  /** The additional document's type, or OTHER_DOC when the driver chose 'Other'. */
+  const [docType, setDocType] = useState<string | null>(initialDocType)
+  /** What the office ticked for the load the driver is on, beyond the POD (lumper receipt…). */
+  const [loadExtras, setLoadExtras] = useState<{ type: string; label: string; done: boolean }[]>([])
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(initialSubmissionId)
   const [pages, setPages] = useState<PendingPage[]>([])
   const [referenceNumber, setReferenceNumber] = useState(initialPro)
@@ -125,21 +140,23 @@ export default function ScanPage() {
   useEffect(() => {
     if (!initialKind) return
     rememberScanIntent({
-      kind: initialKind === 'POD' ? 'pod' : initialKind === 'MISC' ? 'misc' : 'ratecon',
+      kind: initialKind === 'POD' ? 'pod' : initialAdditional ? 'doc' : initialKind === 'MISC' ? 'misc' : 'ratecon',
       pro: initialPro || undefined,
       submissionId: initialSubmissionId || undefined,
       loadId: initialLoadId || undefined,
       stopId: initialStopId || undefined,
       stopLabel: initialStopLabel || undefined,
     })
-  }, [initialKind, initialPro, initialSubmissionId, initialLoadId, initialStopId, initialStopLabel])
+  }, [initialKind, initialAdditional, initialPro, initialSubmissionId, initialLoadId, initialStopId, initialStopLabel])
 
   useEffect(() => {
     let cancelled = false
     void fetchCurrentLoad()
       .then((load) => {
+        if (cancelled) return
+        setLoadExtras((load?.requiredDocs ?? []).filter((d) => d.type !== 'POD' && driverAdditionalDocType(d.type)))
         const pro = (load?.proNumber ?? '').trim()
-        if (cancelled || !pro) return
+        if (!pro) return
         setCurrentPro(pro)
         // A PRO in the URL came from the load the driver tapped; never override it.
         setReferenceNumber((prev) => prev || pro)
@@ -208,6 +225,7 @@ export default function ScanPage() {
           note: note.trim() || undefined,
           stopId: initialStopId ?? undefined,
           stopLabel: initialStopLabel ?? undefined,
+          docType: additional ? driverAdditionalDocType(docType) ?? undefined : undefined,
           resumeFromId: resumeFromId ?? undefined,
         })
         if (initialLoadId) {
@@ -255,10 +273,12 @@ export default function ScanPage() {
     } finally {
       setBusy(false)
     }
-  }, [kind, pages, referenceNumber, note, resumeFromId, selectedSubmissionId, initialLoadId, initialStopId, initialStopLabel])
+  }, [kind, additional, docType, pages, referenceNumber, note, resumeFromId, selectedSubmissionId, initialLoadId, initialStopId, initialStopLabel])
 
   const reset = useCallback(() => {
     setKind(null)
+    setAdditional(false)
+    setDocType(null)
     setSelectedSubmissionId(null)
     setPages([])
     setReferenceNumber('')
@@ -305,6 +325,22 @@ export default function ScanPage() {
         >
           <Package className="h-6 w-6" />
           POD (delivery receipt)
+        </Button>
+
+        <Button
+          size="lg"
+          variant="outline"
+          className="h-24 flex-col gap-2 text-lg"
+          onClick={() => {
+            setKind('MISC')
+            setAdditional(true)
+            setDocType(null)
+            setPhase('doctype')
+          }}
+        >
+          <FilePlus2 className="h-6 w-6" />
+          Additional document
+          <span className="text-xs font-normal text-muted-foreground">Lumper receipt, scale ticket, other paperwork</span>
         </Button>
 
         <Button variant="ghost" className="mt-4" onClick={() => navigate(homePath)}>
@@ -420,11 +456,66 @@ export default function ScanPage() {
     )
   }
 
+  if (phase === 'doctype') {
+    const needed = loadExtras.map((d) => d.type)
+    const others = LOAD_EXTRA_DOC_TYPES.filter((t) => !needed.includes(t))
+    const pick = (type: string) => {
+      setDocType(type)
+      setPhase('capture')
+    }
+    const option = (type: string, hint?: string) => (
+      <button
+        key={type}
+        type="button"
+        onClick={() => pick(type)}
+        className="w-full rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-colors active:bg-muted"
+      >
+        <span className="font-medium text-foreground">{type === OTHER_DOC ? 'Other' : docTypeLabel(type)}</span>
+        {hint && <span className="mt-1 block text-xs text-muted-foreground">{hint}</span>}
+      </button>
+    )
+    return (
+      <div className="min-h-full bg-background p-4">
+        <div className="mb-4 flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Back"
+            onClick={() => {
+              if (initialAdditional) {
+                forgetScanIntent()
+                navigate(homePath)
+              } else {
+                setKind(null)
+                setAdditional(false)
+                setPhase('choose')
+              }
+            }}
+          >
+            <ArrowLeft className="h-6 w-6" />
+          </Button>
+          <h1 className="text-lg font-semibold">What is this document?</h1>
+        </div>
+        <div className="space-y-3">
+          {loadExtras.length > 0 && (
+            <>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Needed for this load</p>
+              {loadExtras.map((d) => option(d.type, d.done ? 'Already sent — send again if you have another' : 'The office is waiting on this'))}
+              <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Other documents</p>
+            </>
+          )}
+          {others.map((t) => option(t))}
+          {option(OTHER_DOC, 'Something else — add a note so the office knows what it is')}
+        </div>
+      </div>
+    )
+  }
+
   if (phase === 'capture' && kind) {
     return (
       <PagePicker
         initialPages={pages}
-        photos={kind === 'MISC'}
+        photos={kind === 'MISC' && !additional}
         onDone={handleCaptureDone}
         onCancel={() => {
           /*
@@ -435,6 +526,8 @@ export default function ScanPage() {
            */
           if (kind === 'POD' && !selectedSubmissionId && !initialPro) {
             setPhase('select')
+          } else if (additional && !initialDocType) {
+            setPhase('doctype')
           } else {
             // Backing out on purpose is not an interruption to resume.
             forgetScanIntent()
@@ -458,12 +551,41 @@ export default function ScanPage() {
             <ArrowLeft className="h-6 w-6" />
           </Button>
           <h1 className="text-lg font-semibold">
-            Review {kind === 'RATECON' ? 'rate confirmation' : kind === 'MISC' ? 'photos' : 'POD'}
+            Review {additional ? 'document' : kind === 'RATECON' ? 'rate confirmation' : kind === 'MISC' ? 'photos' : 'POD'}
           </h1>
         </div>
 
         <div className="space-y-4">
-          {kind === 'MISC' && (
+          {additional && (
+            <>
+              <div className="rounded-lg border border-border bg-card p-3 text-sm">
+                <span className="font-medium">Document:</span>{' '}
+                {docType && docType !== OTHER_DOC ? docTypeLabel(docType) : 'Other'}{' '}
+                <button type="button" className="ml-1 text-primary underline" onClick={() => setPhase('doctype')}>
+                  Change
+                </button>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reference">Load / PRO #</Label>
+                <Input
+                  id="reference"
+                  value={referenceNumber}
+                  onChange={(e) => setReferenceNumber(e.target.value)}
+                  placeholder="So the office knows which load this is for"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="note">{docType === OTHER_DOC ? 'What is it?' : 'Note (optional)'}</Label>
+                <Textarea
+                  id="note"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder={docType === OTHER_DOC ? 'e.g. gate pass, detention sheet' : 'Any extra details for the office'}
+                />
+              </div>
+            </>
+          )}
+          {kind === 'MISC' && !additional && (
             <>
               <div className="rounded-lg border border-border bg-card p-3 text-sm">
                 <span className="font-medium">For:</span>{' '}
@@ -585,7 +707,9 @@ export default function ScanPage() {
         <CheckCircle2 className="h-16 w-16 text-[color:var(--tms-badge-green)]" aria-hidden="true" />
         <h2 className="mt-4 text-2xl font-bold">Sent!</h2>
         <p className="mt-2 max-w-xs text-muted-foreground">
-          {kind === 'MISC'
+          {additional
+            ? `The office has your ${docType && docType !== OTHER_DOC ? docTypeLabel(docType).toLowerCase() : 'document'}.`
+            : kind === 'MISC'
             ? 'The office can see your photos on the load.'
             : sentUnattached
               ? 'The office has it and will attach it to your load. Nothing else for you to do.'

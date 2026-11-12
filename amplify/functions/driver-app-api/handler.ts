@@ -47,7 +47,7 @@ import { weekStartOfISO } from '../../../src/features/driver-pay/week'
 import { splitCityState, normalizeZip } from '../../../src/lib/otrInvoice'
 import { buildPodIndex, loadHasPod, type PodIndex } from '../../../src/lib/podPresence'
 import { normalizePro } from '../../../src/lib/proNumber'
-import { docTypeLabel, isDriverDocType, loadExtraDocTypes } from '../../../src/lib/loadRequiredDocs'
+import { docTypeLabel, driverAdditionalDocType, isDriverDocType, loadExtraDocTypes } from '../../../src/lib/loadRequiredDocs'
 import {
   openLoadsForDriver,
   driverIsOnLoad,
@@ -365,6 +365,8 @@ interface DriverPaySettingRow {
 interface DriverSubmissionRow {
   stopId?: string | null
   stopLabel?: string | null
+  /** What an additional document is (LUMPER_RECEIPT, ...), when the driver picked a type. */
+  docType?: string | null
   id: string
   driverId: string
   driverName: string
@@ -1764,6 +1766,7 @@ async function notifyForKind(
       const result = await notifyMiscAdded({
         driverName: submission.driverName, referenceNumber: submission.referenceNumber, note: submission.note,
         count: pages.length, stopLabel: submission.stopLabel ?? null,
+        docTypeLabel: submission.docType ? docTypeLabel(submission.docType) : null,
       })
       return { refs: {}, errors: result.error ? [result.error] : [] }
     }
@@ -3780,6 +3783,7 @@ export const handler = async (event: FnUrlEvent) => {
           loadId: s.loadId ?? null,
           stopId: s.stopId ?? null,
           stopLabel: s.stopLabel ?? null,
+          docType: s.docType ?? null,
           createdAt: s.createdAt,
           notifiedAt: s.notifiedAt ?? null,
           docs:
@@ -3885,6 +3889,9 @@ export const handler = async (event: FnUrlEvent) => {
             note: getStringOrNull(body, 'note'),
             // Where a MISC submission was taken, so the office sees "Pickup — Batory Oakley".
             ...(kind === 'MISC' ? { stopId: getStringOrNull(body, 'stopId'), stopLabel: getStringOrNull(body, 'stopLabel') } : {}),
+            // An 'Additional document' the driver typed (a lumper receipt, a scale ticket). Only a
+            // known extra type is kept; anything else (or 'Other') stays untyped for the office.
+            ...(kind === 'MISC' && driverAdditionalDocType(getStringOrNull(body, 'docType')) ? { docType: driverAdditionalDocType(getStringOrNull(body, 'docType')) } : {}),
             createdAt: now,
             updatedAt: now,
             pendingUploads: { [kind]: pagesWithKeys } satisfies PendingUploads,

@@ -843,6 +843,31 @@ describe('driver-app-api handler', () => {
       expect(item.pendingUploads).not.toHaveProperty('RATECON')
     })
 
+    it("keeps an additional document's type on a MISC submission, and drops one a driver cannot send", async () => {
+      const submissionItem = async (docType: string) => {
+        mockDynamoSend.mockClear()
+        const res = await handler(
+          baseEvent('/submissions', 'POST', {
+            body: {
+              kind: 'MISC',
+              referenceNumber: 'VRID-DOC',
+              docType,
+              pages: [{ fileName: 'lumper.jpg', contentType: 'image/jpeg', byteSize: 1000 }],
+            },
+          }),
+        )
+        expect(res.statusCode).toBe(200)
+        const put = mockDynamoSend.mock.calls
+          .filter((c) => c[0] instanceof PutCommand)
+          .find((c) => (c[0].input as MockDynamoPutInput).TableName === 'DriverSubmission-test')
+        return (put![0].input as MockDynamoPutInput).Item!
+      }
+      expect((await submissionItem('LUMPER_RECEIPT')).docType).toBe('LUMPER_RECEIPT')
+      // The rate confirmation is the office's to collect; 'Other' stays untyped.
+      expect(await submissionItem('RATE_CON')).not.toHaveProperty('docType')
+      expect(await submissionItem('OTHER')).not.toHaveProperty('docType')
+    })
+
     it('re-signs a submission’s saved RATECON pages so a retry can re-PUT them', async () => {
       const res = await handler(
         baseEvent(`/submissions/${SUBMISSION_A}/uploads`, 'GET', { query: { kind: 'RATECON' } }),

@@ -45,7 +45,11 @@ describe('CurrentLoadCard', () => {
     expect(list).toHaveTextContent('Documents needed for this load')
     expect(screen.getByTestId('load-required-doc-POD')).toHaveAttribute('data-done', 'true')
     expect(screen.getByTestId('load-required-doc-LUMPER_RECEIPT')).toHaveAttribute('data-done', 'false')
-    expect(list).toHaveTextContent('Send each one from the Scan tab')
+    expect(list).toHaveTextContent('Tap Send next to each one')
+    // A missing extra links straight to an additional-document scan of that type, for this load.
+    const send = screen.getByTestId('send-required-doc-LUMPER_RECEIPT')
+    expect(send.getAttribute('href')).toBe('/driver/scan?kind=doc&docType=LUMPER_RECEIPT&pro=20001&loadId=l1')
+    expect(screen.queryByTestId('send-required-doc-POD')).toBeNull()
   })
 
   it('keeps the POD-only notice when nothing extra was asked for', async () => {

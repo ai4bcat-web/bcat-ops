@@ -720,6 +720,9 @@ const schema = a.schema(stageTypes({
       // driver sent it from a stop on their day sheet. Absent on PODs and rate cons.
       stopId:            a.string(),
       stopLabel:         a.string(),            // "Pickup — Batory Oakley", for the office
+      // What an 'Additional document' (a MISC upload) is, when the driver picked a type: one of
+      // LOAD_EXTRA_DOC_TYPES (LUMPER_RECEIPT, WEIGHT_TICKET, ...). Absent for photos and 'Other'.
+      docType:           a.string(),
       slackChannelId:    a.string(),            // captured from the parent Slack post
       slackMessageTs:    a.string(),            // parent ts — POD replies use this as thread_ts
       emailMessageId:    a.string(),            // RFC-822 msg id of the parent email, with angle brackets
