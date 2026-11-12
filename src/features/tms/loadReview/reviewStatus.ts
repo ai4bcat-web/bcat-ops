@@ -1,4 +1,4 @@
-import { boardStatusOf, isVoided, statusWithProgress, type ShipmentRow } from '@/features/shipments/shipmentViews'
+import { boardStatusOf, statusWithProgress, type ShipmentRow } from '@/features/shipments/shipmentViews'
 import { formatDateTime } from '@/lib/date'
 
 type DeliveredSource = Pick<ShipmentRow, 'deliveredAt' | 'stops'> & { loadDeliveredAt?: string | null }
@@ -29,9 +29,4 @@ export function deliveredText(row: ShipmentRow & { loadDeliveredAt?: string | nu
 /** The shipment's status as the board prints it, "DELIVERED 2/2" style. */
 export function reviewStatusText(row: ShipmentRow): string {
   return statusWithProgress(row)
-}
-
-export function reviewStatusTone(row: ShipmentRow): 'gray' | 'green' | 'red' | 'blue' {
-  if (isVoided(row)) return 'red'
-  return boardStatusOf(row) === 'DELIVERED' ? 'green' : 'blue'
 }
