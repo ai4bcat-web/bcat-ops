@@ -62,6 +62,9 @@ import { BillDrawer } from './components/BillDrawer'
 import { ApReportDialog, CashRequirementsDialog } from './components/ApReportDialogs'
 import { estimatedDueAt, isAljexBill, payablesQueue, proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
 import { useBillFacts } from './useBillFacts'
+import { ApSummaryStrip } from './components/ApSummaryStrip'
+import { apSummary, inDivision } from './apQueue'
+import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import type { ApInboxItemRecord } from '@/lib/apInbox/types'
 import type { ApPaymentRecord, ApSettings, CarrierBillRecord, CarrierRecord } from '@/types/tms'
 import { ApInboxDigest } from './inbox/ApInboxDigest'
@@ -197,10 +200,36 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   // Ryne 2026-11-12: Payables is the bills Move to billing created, for delivered loads. The Aljex
   // bills are still owed and stay one toggle away.
-  const { facts } = useBillFacts(open.bills)
+  // Bills paid in the last three months: the strip's days-to-pay and this month's quick pay.
+  const [paidRecent, setPaidRecent] = useState<CarrierBillRecord[]>([])
+  useEffect(() => {
+    let alive = true
+    Promise.all(months.map((m) => listBillsByMonth(m)))
+      .then((sets) => { if (alive) setPaidRecent(sets.flat().filter((b) => b.status === 'PAID')) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [months])
+  const factBills = useMemo(() => [...open.bills, ...paidRecent], [open.bills, paidRecent])
+  const { facts } = useBillFacts(factBills)
+  const { divisions } = useOwnershipDivisions()
+  const divisionName = useMemo(() => {
+    const byCode = new Map((divisions ?? []).map((d) => [d.code, d.name]))
+    return (code: string | null) => (code ? byCode.get(code) ?? code : 'No division')
+  }, [divisions])
+  const [division, setDivision] = useState<string | null>(null)
   const [includeAljex, setIncludeAljex] = useState(false)
   const aljexOpen = useMemo(() => open.bills.filter((b) => isAljexBill(b) && b.status !== 'PAID' && b.status !== 'VOID').length, [open.bills])
-  const queueBills = useMemo(() => payablesQueue(open.bills, facts, { includeAljex }), [open.bills, facts, includeAljex])
+  const queueAll = useMemo(() => payablesQueue(open.bills, facts, { includeAljex }), [open.bills, facts, includeAljex])
+  const queueBills = useMemo(() => queueAll.filter((b) => inDivision(b, facts, division)), [queueAll, facts, division])
+  // The strip counts the whole queue (every division) so its division buttons always show the split.
+  const summary = useMemo(() => apSummary({
+    expected: billsExpected(queueAll),
+    aging: billsAging(queueAll),
+    selected: billsSelected(queueAll),
+    paidRecent,
+    facts,
+    asOf,
+  }), [queueAll, paidRecent, facts, asOf])
   const expectedBills = useMemo(() => billsExpected(queueBills), [queueBills])
   const agingBills = useMemo(() => billsAging(queueBills), [queueBills])
   const selectedBills = useMemo(() => billsSelected(queueBills), [queueBills])
@@ -510,6 +539,16 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           title={chrome.title}
           viewTabs={chrome.viewTabs}
           quickTabs={chrome.quickTabs}
+          summary={(
+            <ApSummaryStrip
+              summary={summary}
+              divisionName={divisionName}
+              division={division}
+              onDivision={setDivision}
+              onCashRequirements={() => setDialog({ kind: 'cash' })}
+              onTab={setTab}
+            />
+          )}
           actions={(
             <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="export-outstanding-payables" title="Every open bill with every field"
               onClick={() => { exportOutstandingPayables().then((n) => toast.success(`Exported ${n} outstanding payables`)).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not export')) }}>

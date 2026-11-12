@@ -46,8 +46,10 @@ export interface ApListConfig<T> {
 }
 
 /** The page head and the two tab strips: kept mounted while the views under them swap. */
-export function ApChrome({ title, viewTabs, quickTabs, actions }: {
+export function ApChrome({ title, viewTabs, quickTabs, actions, summary }: {
   title: string
+  /** Totals shown above the status tabs, on every tab. */
+  summary?: React.ReactNode
   /** Page-level buttons, on the right of the title. */
   actions?: React.ReactNode
   viewTabs?: TmsTabGroup
@@ -66,6 +68,7 @@ export function ApChrome({ title, viewTabs, quickTabs, actions }: {
         {actions ? <div className="tms-page-actions">{actions}</div> : null}
       </div>
       {viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
+      {summary}
       <div className="tms-quick-tabs" role="tablist">
         {quickTabs.tabs.map((tab) => (
           <button

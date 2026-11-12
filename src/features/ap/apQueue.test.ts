@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  apReportCsv, apReportRows, apReportTotals, billFactsIndex, cashRequirements, estimatedDueAt, isAljexBill, payablesQueue,
+  apReportCsv, apReportRows, apReportTotals, apSummary, billFactsIndex, inDivision, cashRequirements, estimatedDueAt, isAljexBill, payablesQueue,
   termsLabel, type BillShipmentFacts,
 } from './apQueue'
 import type { CarrierBillRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
@@ -40,7 +40,7 @@ describe('billFactsIndex', () => {
   it('reads the PO off the order and delivery off the shipment', () => {
     const shipments = [{ id: 's1', number: '20027', status: 'DELIVERED', deliveredAt: null } as unknown as ShipmentRecord]
     const orders = [{ id: 'o1', shipmentId: 's1', references: [{ code: 'PO', value: ' FR-1 ' }] } as unknown as OrderRecord]
-    expect(billFactsIndex(shipments, orders).get('s1')).toEqual({ shipmentNumber: '20027', po: 'FR-1', deliveredAt: null, delivered: true })
+    expect(billFactsIndex(shipments, orders).get('s1')).toEqual({ shipmentNumber: '20027', po: 'FR-1', deliveredAt: null, delivered: true, revDivision: null, revSubdivision: null })
   })
 })
 
@@ -90,5 +90,36 @@ describe('cashRequirements', () => {
     expect(cash.weeks[4]).toMatchObject({ from: '2026-12-10', to: '2026-12-11' })
     expect(cash.totalCents).toBe(150_000)
     expect(cash).toMatchObject({ laterCents: 60_000, laterCount: 1, estimatedCents: 40_000 })
+  })
+})
+
+describe('apSummary', () => {
+  it('totals the ladder, past due and next 7 days, factor vs direct, quick pay this month, days to pay, and division slices', () => {
+    const facts = new Map<string, BillShipmentFacts>([
+      ['s1', { ...delivered, revDivision: 'ASSETS', revSubdivision: 'OWNER_OPERATOR', deliveredAt: '2026-10-28T00:00:00Z' }],
+      ['s2', { ...delivered, revDivision: 'BROKERAGE', revSubdivision: null }],
+    ])
+    const expected = [bill({ id: 'e', datesPending: true, balanceCents: 10_000, shipmentId: 's2' })]
+    const aging = [
+      bill({ id: 'a1', dueAt: '2026-11-05', balanceCents: 20_000, billDate: '2026-11-01', quickPay: true, quickPayFeeBps: 600, quickPayFeeCents: 1_200 }),
+      bill({ id: 'a2', dueAt: '2026-11-15', balanceCents: 30_000, payeeKind: 'FACTOR' }),
+    ]
+    const selected = [bill({ id: 's', dueAt: '2026-11-30', balanceCents: 40_000, shipmentId: 's2' })]
+    const paidRecent = [bill({ id: 'p', status: 'PAID', billDate: '2026-10-01', paidAt: '2026-10-31T12:00:00Z', balanceCents: 0 })]
+    const s = apSummary({ expected, aging, selected, paidRecent, facts, asOf: '2026-11-12' })
+    expect(s.open).toEqual({ count: 4, cents: 100_000 })
+    expect(s.expected).toEqual({ count: 1, cents: 10_000 })
+    expect(s.pastDue).toEqual({ count: 1, cents: 20_000 })
+    expect(s.dueNext7).toEqual({ count: 1, cents: 30_000 })
+    expect(s.payToFactor.cents).toBe(30_000)
+    expect(s.payDirect.cents).toBe(70_000)
+    expect(s.quickPay).toEqual({ count: 1, feeCents: 1_200, fee6Cents: 1_200, fee3Cents: 0 })
+    expect(s.avgDaysToPay).toBe(30)
+    expect(s.avgDaysToInvoice).toBe(4)
+    expect(s.byDivision.map((d) => [d.key, d.cents])).toEqual([
+      ['ASSETS', 50_000], ['ASSETS/OWNER_OPERATOR', 50_000], ['BROKERAGE', 50_000],
+    ])
+    expect(inDivision(aging[0], facts, 'ASSETS/OWNER_OPERATOR')).toBe(true)
+    expect(inDivision(selected[0], facts, 'ASSETS')).toBe(false)
   })
 })

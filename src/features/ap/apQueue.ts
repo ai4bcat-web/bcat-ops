@@ -21,6 +21,9 @@ export interface BillShipmentFacts {
   /** YYYY-MM-DD or ISO; null when the load has not delivered. */
   deliveredAt: string | null
   delivered: boolean
+  /** Revenue division / sub-division codes off the shipment. */
+  revDivision?: string | null
+  revSubdivision?: string | null
 }
 
 export type BillFactsIndex = ReadonlyMap<string, BillShipmentFacts>
@@ -42,6 +45,8 @@ export function billFactsIndex(shipments: readonly ShipmentRecord[], orders: rea
       po: referenceValue(orderByShipment.get(shipment.id), 'PO'),
       deliveredAt,
       delivered: Boolean(deliveredAt) || shipment.status === 'DELIVERED',
+      revDivision: shipment.revDivision ?? null,
+      revSubdivision: shipment.revSubdivision ?? null,
     })
   }
   return out
@@ -292,4 +297,133 @@ export function cashRequirementsCsv(cash: CashRequirements): string {
     for (const r of b.rows) lines.push([b.label, r.pro, r.carrier, r.payTo, r.dueAt ?? '', r.dueEstimated ? 'Yes' : '', dollars(r.balanceCents)].map(csvCell).join(','))
   }
   return lines.join('\n') + '\n'
+}
+
+/* ── Summary strip ───────────────────────────────────────────────────────── */
+
+export interface ApMoney { count: number; cents: number }
+
+export interface ApDivisionSlice {
+  /** Filter key: `division` or `division/sub`. */
+  key: string
+  division: string | null
+  subdivision: string | null
+  count: number
+  cents: number
+}
+
+export interface ApSummary {
+  open: ApMoney
+  expected: ApMoney
+  aging: ApMoney
+  selected: ApMoney
+  pastDue: ApMoney
+  dueNext7: ApMoney
+  payToFactor: ApMoney
+  payDirect: ApMoney
+  /** Bills on quick pay invoiced this month, and the fees taken off them. */
+  quickPay: { count: number; feeCents: number; fee6Cents: number; fee3Cents: number }
+  /** Invoice date → paid, over bills paid in the last 90 days; null when none. */
+  avgDaysToPay: number | null
+  avgDaysToPayCount: number
+  /** Delivery → carrier invoice date, over bills with both; null when none. */
+  avgDaysToInvoice: number | null
+  avgDaysToInvoiceCount: number
+  byDivision: ApDivisionSlice[]
+}
+
+const dayDiff = (from: string, to: string): number =>
+  Math.round((Date.parse(`${to.slice(0, 10)}T00:00:00Z`) - Date.parse(`${from.slice(0, 10)}T00:00:00Z`)) / 86_400_000)
+
+const avg = (xs: number[]): number | null => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null)
+
+/** The division filter key a bill falls under, at division or sub-division level. */
+export function divisionKeysOf(bill: Pick<CarrierBillRecord, 'shipmentId' | 'divisionKey'>, facts: BillFactsIndex): { division: string | null; sub: string | null } {
+  const f = facts.get(bill.shipmentId)
+  return { division: f?.revDivision ?? bill.divisionKey ?? null, sub: f?.revSubdivision ?? null }
+}
+
+/** Does a bill sit under the chosen `division` or `division/sub` key? Null key = everything. */
+export function inDivision(bill: Pick<CarrierBillRecord, 'shipmentId' | 'divisionKey'>, facts: BillFactsIndex, key: string | null): boolean {
+  if (!key) return true
+  const { division, sub } = divisionKeysOf(bill, facts)
+  const [d, s] = key.split('/')
+  const dv = division ?? ''
+  return s === undefined ? dv === d : dv === d && (sub ?? '') === s
+}
+
+/**
+ * Everything the strip above the Payables tabs says, from the open bills in the queue (the same
+ * bills the tabs show) and the bills paid in the recent months the page has read.
+ */
+export function apSummary(input: {
+  expected: readonly CarrierBillRecord[]
+  aging: readonly CarrierBillRecord[]
+  selected: readonly CarrierBillRecord[]
+  paidRecent: readonly CarrierBillRecord[]
+  facts: BillFactsIndex
+  asOf: string
+}): ApSummary {
+  const { expected, aging, selected, paidRecent, facts, asOf } = input
+  const open = [...expected, ...aging, ...selected]
+  const money = (bills: readonly CarrierBillRecord[]): ApMoney => ({ count: bills.length, cents: bills.reduce((s, b) => s + b.balanceCents, 0) })
+  const rows = apReportRows(open, facts, [], asOf)
+  const in7 = addDays(asOf, 6)
+  const pastDueRows = rows.filter((r) => r.balanceCents > 0 && r.dueAt != null && r.dueAt < asOf)
+  const next7Rows = rows.filter((r) => r.balanceCents > 0 && r.dueAt != null && r.dueAt >= asOf && r.dueAt <= in7)
+  const sumRows = (rs: ApReportRow[]): ApMoney => ({ count: rs.length, cents: rs.reduce((s, r) => s + r.balanceCents, 0) })
+
+  const month = asOf.slice(0, 7)
+  const seen = new Set<string>()
+  const qp = { count: 0, feeCents: 0, fee6Cents: 0, fee3Cents: 0 }
+  for (const b of [...open, ...paidRecent]) {
+    if (seen.has(b.id)) continue
+    seen.add(b.id)
+    if (b.quickPay !== true || b.datesPending === true || b.billMonth !== month) continue
+    qp.count += 1
+    qp.feeCents += b.quickPayFeeCents ?? 0
+    if (b.quickPayFeeBps === 600) qp.fee6Cents += b.quickPayFeeCents ?? 0
+    if (b.quickPayFeeBps === 300) qp.fee3Cents += b.quickPayFeeCents ?? 0
+  }
+
+  const since = addDays(asOf, -90)
+  const toPay = paidRecent
+    .filter((b) => b.status === 'PAID' && b.paidAt && b.paidAt.slice(0, 10) >= since && b.billDate)
+    .map((b) => Math.max(0, dayDiff(b.billDate, b.paidAt!)))
+  const toInvoice: number[] = []
+  for (const b of [...open, ...paidRecent]) {
+    const delivered = facts.get(b.shipmentId)?.deliveredAt
+    if (b.datesPending === true || !delivered || !b.billDate) continue
+    // An invoice dated before the delivery is a data slip, not a fast carrier: left out of the average.
+    const d = dayDiff(delivered, b.billDate)
+    if (d >= 0) toInvoice.push(d)
+  }
+
+  const slices = new Map<string, ApDivisionSlice>()
+  for (const b of open) {
+    const { division, sub } = divisionKeysOf(b, facts)
+    for (const [key, d, s] of [[division ?? '', division, null], ...(sub ? [[`${division ?? ''}/${sub}`, division, sub]] : [])] as [string, string | null, string | null][]) {
+      const slice = slices.get(key) ?? { key, division: d, subdivision: s, count: 0, cents: 0 }
+      slice.count += 1
+      slice.cents += b.balanceCents
+      slices.set(key, slice)
+    }
+  }
+
+  return {
+    open: money(open),
+    expected: money(expected),
+    aging: money(aging),
+    selected: money(selected),
+    pastDue: sumRows(pastDueRows),
+    dueNext7: sumRows(next7Rows),
+    payToFactor: money(open.filter((b) => b.payeeKind === 'FACTOR')),
+    payDirect: money(open.filter((b) => b.payeeKind !== 'FACTOR')),
+    quickPay: qp,
+    avgDaysToPay: avg(toPay),
+    avgDaysToPayCount: toPay.length,
+    avgDaysToInvoice: avg(toInvoice),
+    avgDaysToInvoiceCount: toInvoice.length,
+    byDivision: [...slices.values()].sort((a, b) => (a.division ?? '').localeCompare(b.division ?? '') || (a.subdivision ? 1 : 0) - (b.subdivision ? 1 : 0) || (a.subdivision ?? '').localeCompare(b.subdivision ?? '')),
+  }
 }

@@ -48,6 +48,7 @@ vi.mock('@/lib/apiClient', () => ({
   graphqlErrorText: (e: unknown) => String(e),
   getTmsSettings: vi.fn().mockResolvedValue({ apRequireSignedRateCon: true }),
   listBillsByMonth: vi.fn().mockResolvedValue([]),
+  listOwnershipDivisions: vi.fn().mockResolvedValue([]),
   voidBill: vi.fn(),
   unapproveBill: vi.fn(),
   reverseApPayment: vi.fn(),
@@ -292,6 +293,9 @@ describe('the AP board', () => {
     expect(screen.queryByRole('tab', { name: /^Awaiting invoice/ })).toBeNull()
     expect(screen.getByRole('tab', { name: /^Expected/ }).getAttribute('aria-selected')).toBe('true')
     expect(screen.queryByRole('button', { name: /^Record bill/ })).toBeNull()
+    // The totals strip sits above the tabs on every tab.
+    expect(screen.getByRole('region', { name: 'Open payables' })).toBeTruthy()
+    expect(screen.getByText('Due next 7 days')).toBeTruthy()
   })
 
   it('pays, ages and shows each carrier bill of one load on its own row', async () => {
