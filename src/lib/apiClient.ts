@@ -2964,9 +2964,9 @@ const INTAKE_LOAD_FIELDS = `
   subject fromEmail fromName receivedAt bodyText attachments
   parseState parseNote format fields autoFields meta confirmed missingFields
   shipmentId shipmentNumber reviewedBy reviewedAt lastEditedBy lastEditedAt
-  dismissedBy dismissedAt dismissReason emailLog alreadyBuilt alreadyBuiltCheckedAt createdBy updatedBy version createdAt updatedAt
+  dismissedBy dismissedAt dismissReason emailLog alreadyBuilt alreadyBuiltCheckedAt notes createdBy updatedBy version createdAt updatedAt
 `
-const INTAKE_LOAD_JSON_FIELDS: (keyof IntakeLoadRecord)[] = ['attachments', 'fields', 'autoFields', 'meta', 'emailLog', 'alreadyBuilt']
+const INTAKE_LOAD_JSON_FIELDS: (keyof IntakeLoadRecord)[] = ['attachments', 'fields', 'autoFields', 'meta', 'emailLog', 'alreadyBuilt', 'notes']
 
 let intakeModelAvailable = modelAvailable('IntakeLoad')
 const isMissingIntakeModel = (err: unknown) =>
@@ -3066,6 +3066,11 @@ export async function deleteIntake(input: { intakeId: string; expectedVersion: n
 /** "Not a duplicate": the badge stays away from this row. */
 export async function markIntakeNotDuplicate(input: { intakeId: string; expectedVersion: number }): Promise<IntakeLoadRecord> {
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_NOT_DUPLICATE', input))
+}
+
+/** Leave a team note on an intake row (anyone who can review). */
+export async function addIntakeNote(input: { intakeId: string; expectedVersion: number; text: string }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_ADD_NOTE', input))
 }
 
 export async function dismissIntake(input: { intakeId: string; expectedVersion: number; reason: string }): Promise<IntakeLoadRecord> {

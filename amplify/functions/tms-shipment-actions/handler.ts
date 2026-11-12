@@ -601,6 +601,7 @@ type Action =
   | 'INTAKE_ATTACH_FILES'
   | 'INTAKE_DELETE'
   | 'INTAKE_NOT_DUPLICATE'
+  | 'INTAKE_ADD_NOTE'
   | 'SAVE_ORDER_FORM'
   | 'CHECK_CREDIT'
   | 'SUBMIT_ORDER'
@@ -808,6 +809,8 @@ const QUOTE_ADMIN_ONLY_ACTIONS: Record<string, true> = { SAVE_QUOTE_SETTINGS: tr
  */
 const ADMIN_ONLY_ACTIONS: Record<string, true> = {
   INTAKE_DELETE: true,
+  // Ryne 2026-11-12: clearing a duplicate/already-built flag is an admin call; the team leaves a note instead.
+  INTAKE_NOT_DUPLICATE: true,
   SAVE_SHIPMENT_SETTINGS: true,
   UNVOID_SHIPMENT: true,
   REPOINT_SHIPMENT_CUSTOMER: true,
@@ -840,8 +843,8 @@ const TMS_PAGE_GROUP = 'page-tms'
  * Brokerage": `page-tms` and `page-loads` do not pass, owner/ADMIN and this group do.
  */
 const INTAKE_REVIEW_PAGE_GROUP = 'page-intakeReview'
-// INTAKE_DELETE is owner/ADMIN only (ADMIN_ONLY_ACTIONS), not a review-group action.
-const INTAKE_REVIEW_ACTIONS: Record<string, true> = Object.fromEntries(INTAKE_ACTIONS.filter((a) => a !== 'INTAKE_DELETE').map((a) => [a, true]))
+// INTAKE_DELETE and INTAKE_NOT_DUPLICATE are owner/ADMIN only (ADMIN_ONLY_ACTIONS), not review-group actions.
+const INTAKE_REVIEW_ACTIONS: Record<string, true> = Object.fromEntries(INTAKE_ACTIONS.filter((a) => a !== 'INTAKE_DELETE' && a !== 'INTAKE_NOT_DUPLICATE').map((a) => [a, true]))
 
 interface AppSyncIdentity {
   sub: string
@@ -9022,6 +9025,7 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'INTAKE_ATTACH_FILES':
     case 'INTAKE_DELETE':
     case 'INTAKE_NOT_DUPLICATE':
+    case 'INTAKE_ADD_NOTE':
       return runIntakeAction(intakeDeps, action as IntakeAction, input, caller)
     case 'CHECK_CREDIT':
       return checkCredit(input)
