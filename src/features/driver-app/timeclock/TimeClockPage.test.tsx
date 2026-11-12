@@ -144,14 +144,21 @@ describe('holiday and PTO', () => {
     expect(screen.queryByText(/Use PTO for today/)).toBeNull()
   })
 
-  it('offers PTO to a driver who does', async () => {
+  it('hides PTO from an eligible driver who has no allowance this year', async () => {
     respond({ ptoEligible: true })
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText(/Add a paid holiday for today/)).toBeTruthy())
+    expect(screen.queryByText(/Use PTO for today/)).toBeNull()
+  })
+
+  it('offers PTO to a driver who does', async () => {
+    respond({ ptoEligible: true, ptoRemaining: { year: '2026', days: 5 } })
     render(<TimeClockPage />)
     await waitFor(() => expect(screen.getByText(/Use PTO for today/)).toBeTruthy())
   })
 
   it('files Use PTO for today as a request, never a punch', async () => {
-    respond({ ptoEligible: true })
+    respond({ ptoEligible: true, ptoRemaining: { year: '2026', days: 5 } })
     render(<TimeClockPage />)
     await waitFor(() => expect(screen.getByText(/Use PTO for today/)).toBeTruthy())
     await waitFor(() => expect(api.fetchTimeOff).toHaveBeenCalledTimes(1))
@@ -199,7 +206,7 @@ describe('when staff are viewing a driver’s app', () => {
      */
     api.fetchTimeClock.mockResolvedValue({
       today: '2026-10-05', week: WEEK, weeks: ['2026-10-05'], openShift: null,
-      ptoEligible: true, readOnly: true,
+      ptoEligible: true, ptoRemaining: { year: '2026', days: 5 }, readOnly: true,
     })
     render(<TimeClockPage />)
     await waitFor(() => expect(screen.getByText('Clock in')).toBeTruthy())
@@ -210,7 +217,7 @@ describe('when staff are viewing a driver’s app', () => {
   it('does not let staff add a holiday or PTO either', async () => {
     api.fetchTimeClock.mockResolvedValue({
       today: '2026-10-05', week: WEEK, weeks: ['2026-10-05'], openShift: null,
-      ptoEligible: true, readOnly: true,
+      ptoEligible: true, ptoRemaining: { year: '2026', days: 5 }, readOnly: true,
     })
     render(<TimeClockPage />)
     await waitFor(() => expect(screen.getByText(/Add a paid holiday/)).toBeTruthy())
