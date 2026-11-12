@@ -32,7 +32,10 @@ vi.mock('./ManualInvoicePanel', () => ({ ManualInvoicePanel: () => <div data-tes
 // The drawer the PRO column opens. Its own behaviour is covered by LoadDrawer's tests;
 // here it would only drag the whole load form into a test about the queue.
 vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
-vi.mock('@/lib/otrClient', () => ({ syncOtrStatus: vi.fn(), assembleInvoice, uploadOtrDocs: uploadOtrDocsMock }))
+const resubmitToOtr = vi.hoisted(() => vi.fn())
+const submitToOtr = vi.hoisted(() => vi.fn())
+const setCustomerPaid = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/otrClient', () => ({ syncOtrStatus: vi.fn(), assembleInvoice, uploadOtrDocs: uploadOtrDocsMock, resubmitToOtr, submitToOtr, setCustomerPaid }))
 vi.mock('@/hooks/useLoadDriverDocs', () => ({
   useLoadDriverDocs: () => ({ pods: [], ratecons: [], loading: false, error: null, refresh: vi.fn() }),
 }))
@@ -159,6 +162,84 @@ describe('invoices OTR turned down', () => {
   it('shows no strip when OTR has turned nothing down', async () => {
     await setup([item({ id: 'ok', proNumber: 'OK1' })])
     expect(screen.queryByTestId('otr-rejected-strip')).not.toBeInTheDocument()
+  })
+})
+
+describe('Send to OTR again', () => {
+  const dead = () => item({ id: 'dead', proNumber: 'DE3', status: 'PENDING_WITH_OTR', otrStatus: 4 as never, otrInvoiceId: '25884230' })
+
+  it('is offered on Dead and refused rows, and not on a healthy pending row', async () => {
+    await setup([
+      dead(),
+      item({ id: 'err', proNumber: 'ER2', status: 'NEED_TO_FACTOR', otrError: '400: OTR auth failed (400)' }),
+      item({ id: 'ok', proNumber: 'OK1', status: 'PENDING_WITH_OTR', otrStatus: 1 as never, otrInvoiceId: '77' }),
+    ])
+    fireEvent.click(screen.getByRole('tab', { name: /^All/ }))
+    expect(screen.getByRole('button', { name: 'Send PRO DE3 to OTR again' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send PRO ER2 to OTR again' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Send PRO OK1 to OTR again' })).not.toBeInTheDocument()
+  })
+
+  it('says what a Dead row will do, then creates the new submission only when confirmed', async () => {
+    resubmitToOtr.mockResolvedValue({ outcome: 'REPLACED', invoiceId: '999', oldInvoiceId: '25884230', documentErrors: [] })
+    const { refresh } = await setup([dead()])
+    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send PRO DE3 to OTR again' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.textContent).toMatch(/OTR holds invoice 25884230 as Dead/)
+    expect(dialog.textContent).toMatch(/new invoice at OTR/)
+    expect(resubmitToOtr).not.toHaveBeenCalled()
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Send to OTR again' })) })
+    expect(resubmitToOtr).toHaveBeenCalledWith('dead')
+    expect(refresh).toHaveBeenCalled()
+  })
+
+  it('sends a row that never reached OTR through the ordinary submit', async () => {
+    submitToOtr.mockResolvedValue({ invoiceId: 5, brokerName: '', isDuplicate: false, uploaded: {}, documentErrors: [] })
+    await setup([item({ id: 'err', proNumber: 'ER2', status: 'NEED_TO_FACTOR', otrError: 'OTR auth failed (400)' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Send PRO ER2 to OTR again' }))
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Send to OTR again' })) })
+    expect(submitToOtr).toHaveBeenCalledWith('err')
+    expect(resubmitToOtr).not.toHaveBeenCalled()
+  })
+
+  it('shows OTR\'s refusal in the dialog and leaves the row alone', async () => {
+    resubmitToOtr.mockRejectedValue(new Error('OTR gave back the same invoice (25884230) and still holds it as Dead'))
+    await setup([dead()])
+    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send PRO DE3 to OTR again' }))
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Send to OTR again' })) })
+    expect(within(screen.getByRole('dialog')).getByRole('alert').textContent).toMatch(/same invoice/)
+  })
+})
+
+describe('Customer paid', () => {
+  const paid = () => item({ id: '14749', proNumber: '14749', status: 'PENDING_WITH_OTR', customerPaidOn: '2026-10-30', customerPaymentRef: 'Check 2383731' })
+
+  it('shows the date the customer paid, with no timezone shift', async () => {
+    await setup([paid()])
+    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    expect(screen.getByTestId('customer-paid-14749').textContent).toMatch(/Oct 30, 2026/)
+    expect(screen.getByTestId('customer-paid-14749').textContent).toMatch(/Check 2383731/)
+  })
+
+  it('lets finance set it, and gives everyone else a read-only date', async () => {
+    setCustomerPaid.mockResolvedValue({ customerPaidOn: '2026-10-28', customerPaymentRef: null })
+    const { refresh } = await setup([item({ id: '14700', proNumber: '14700', status: 'PENDING_WITH_OTR' })], 'jenny@bcatcorp.com')
+    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Set the date the customer paid PRO 14700' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Customer paid on'), { target: { value: '2026-10-28' } })
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Save' })) })
+    expect(setCustomerPaid).toHaveBeenCalledWith('14700', '2026-10-28', '')
+    expect(refresh).toHaveBeenCalled()
+  })
+
+  it('hides the editor from someone who is not finance', async () => {
+    await setup([paid()], 'driver@bcatcorp.com')
+    fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
+    expect(screen.getByTestId('customer-paid-14749').textContent).toMatch(/Oct 30, 2026/)
+    expect(screen.queryByRole('button', { name: /the date the customer paid PRO 14749/ })).not.toBeInTheDocument()
   })
 })
 

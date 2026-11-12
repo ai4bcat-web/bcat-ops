@@ -3,6 +3,7 @@ import {
   isAdminEmail,
   isOwnerEmail,
   canDeleteFactoringItem,
+  canSetCustomerPaid,
   ADMIN_EMAILS,
   FACTORING_DELETE_EMAILS,
   OWNER_EMAIL,
@@ -56,5 +57,18 @@ describe('canDeleteFactoringItem', () => {
     expect(canDeleteFactoringItem(null)).toBe(false)
     expect(canDeleteFactoringItem(undefined)).toBe(false)
     expect(canDeleteFactoringItem('')).toBe(false)
+  })
+})
+
+describe('canSetCustomerPaid', () => {
+  it('allows the ADMIN group, the legacy admins and the people who run factoring', () => {
+    expect(canSetCustomerPaid({ email: 'x@bcatcorp.com', groups: ['ADMIN'] })).toBe(true)
+    expect(canSetCustomerPaid({ email: 'dennis@bcatcorp.com', groups: [] })).toBe(true)
+    expect(canSetCustomerPaid({ email: 'Jenny@bcatcorp.com', groups: [] })).toBe(true)
+  })
+  it('refuses everyone else', () => {
+    expect(canSetCustomerPaid({ email: 'ruben@bcatcorp.com', groups: ['DISPATCH'] })).toBe(false)
+    expect(canSetCustomerPaid({ email: null, groups: null })).toBe(false)
+    expect(canSetCustomerPaid(null)).toBe(false)
   })
 })

@@ -35,3 +35,13 @@ export function canDeleteFactoringItem(email: string | null | undefined): boolea
   if (!email) return false
   return (FACTORING_DELETE_EMAILS as readonly string[]).includes(email.toLowerCase().trim())
 }
+
+/**
+ * Who may set when a customer paid a factoring row: the ADMIN group, the legacy admin
+ * addresses, and the two people who run factoring. The server repeats this check.
+ */
+export function canSetCustomerPaid(user: { email?: string | null; groups?: readonly string[] | null } | null | undefined): boolean {
+  if (!user) return false
+  if ((user.groups ?? []).includes('ADMIN')) return true
+  return isAdminEmail(user.email) || canDeleteFactoringItem(user.email)
+}
