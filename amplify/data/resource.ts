@@ -902,6 +902,8 @@ const schema = a.schema(stageTypes({
       apEmail:              a.string(),
       // More To addresses for a manual invoice e-mail; apEmail stays the primary one.
       apEmailsExtra:        a.string().array(),
+      // Notice-of-assignment address (where a factor's NOA goes). Never used for invoice routing.
+      noaEmail:             a.string(),
       invoiceCopyEmails:    a.string().array(),
       billingNeedsReview:   a.string(),
       name:         a.string().required(),   // e.g. "BATORY FOODS" — matched against Load.customer
