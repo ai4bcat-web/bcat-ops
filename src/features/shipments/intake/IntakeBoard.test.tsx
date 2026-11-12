@@ -191,9 +191,9 @@ describe('IntakeBoard', () => {
       expect(screen.getByText('Stray tender')).toBeInTheDocument()
     })
 
-    it('column filters, search and status chips apply within the chosen tab; counts stay on the unfiltered queue', async () => {
-      renderBoard('/tms/shipments/intake?view=division&group=BRK&demo=1')
-      await screen.findByText(/No tender e-mails match|No tender e-mails waiting/)
+    it('column filters, search and status tabs apply within the chosen tab; counts stay on the unfiltered queue', async () => {
+      renderBoard('/tms/shipments/intake?view=division&group=BRK')
+      await screen.findByTestId('intake-group-count-BRK')
       expect(screen.getByTestId('intake-group-count-BRK')).toHaveTextContent('2')
       expect(screen.getByTestId('intake-group-count-all')).toHaveTextContent('4')
     })

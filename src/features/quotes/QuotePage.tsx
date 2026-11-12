@@ -5,7 +5,7 @@
  */
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { TmsTabs } from '@/features/tms/kit'
+import { TmsTabStrip } from '@/features/tms/kit'
 import { QuotesPage } from './QuotesPage'
 import { SpotInboxPage } from '@/features/spot-quoter/SpotInboxPage'
 import { useSpotNewCount } from '@/features/spot-quoter/useSpotRequests'
@@ -29,7 +29,8 @@ export function QuotePage({ tab }: { tab: QuoteTabKey }) {
   const demo = useQuoteDemo(real[tab])
   return (
     <div className="tms-page">
-      <TmsTabs
+      <TmsTabStrip
+        aria-label="Quote"
         tabs={QUOTE_PAGE_TABS.map((t) => ({
           key: t.key,
           label: t.label,

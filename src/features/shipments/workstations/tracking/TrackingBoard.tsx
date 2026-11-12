@@ -20,7 +20,6 @@ import {
   ColumnsButton,
   DensityToggle,
   DenseKpiStrip,
-  SummaryToggle,
   type DenseKpi,
 } from '@/features/tms/grid/DenseControls'
 import {
@@ -34,7 +33,7 @@ import {
   type DenseFilters,
 } from '@/features/tms/grid/denseGridModel'
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
-import { TmsBadge, TmsButton, TmsIconButton, TmsInput, TmsSegmentedTabs, TmsSelect, type TmsTone } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsIconButton, TmsInput, TmsSegmentedTabs, TmsSelect, TmsTabStrip, type TmsTone } from '@/features/tms/kit'
 import { formatBoardDateTime } from '@/lib/date'
 import { CHECK_CALL_TYPE_LABELS } from '@/lib/checkCalls'
 import type { EffectiveTrackingPrefs } from '@/lib/trackingPrefs'
@@ -314,7 +313,6 @@ export function TrackingBoard(props: TrackingBoardProps) {
   )
 
   const kpis = useMemo<DenseKpi[]>(() => {
-    if (!prefs.kpiOpen) return []
     let moving = 0
     let overdue = 0
     let late = 0
@@ -338,7 +336,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
       { label: 'POD needed', value: podNeeded, tone: podNeeded > 0 ? 'warn' : undefined },
       { label: 'Docs to review', value: docsReview, tone: docsReview > 0 ? 'warn' : undefined },
     ]
-  }, [prefs.kpiOpen, ordered, nowMs])
+  }, [ordered, nowMs])
 
   const groupLabels = useMemo(() => new Map(groups.map((g) => [g.key, g])), [groups])
   const renderGroupHeader = useCallback(
@@ -374,6 +372,14 @@ export function TrackingBoard(props: TrackingBoardProps) {
 
   return (
     <div className="tms-dense-page tms-tracking-board">
+      {!focus && (
+        <TmsTabStrip
+          aria-label="Shipment lifecycle"
+          tabs={LIFECYCLE_TABS}
+          active={lifecycle}
+          onSelect={(key) => onLifecycle(key as typeof lifecycle)}
+        />
+      )}
       <div className="tms-dense-bar">
         <span className="tms-dense-title">Track · Tracking</span>
         <Search size={14} className="tms-muted" aria-hidden="true" />
@@ -384,15 +390,6 @@ export function TrackingBoard(props: TrackingBoardProps) {
           onChange={(e) => { setQuery(e.target.value); setPageSize(PAGE_SIZE) }}
           className="tms-dense-search"
         />
-        {!focus && (
-          <TmsSegmentedTabs
-            aria-label="Shipment lifecycle"
-            size="sm"
-            tabs={LIFECYCLE_TABS}
-            active={lifecycle}
-            onSelect={(key) => onLifecycle(key as typeof lifecycle)}
-          />
-        )}
         <div data-testid="tracking-focus-tabs">
           <TmsSegmentedTabs
             aria-label="Focus"
@@ -450,7 +447,6 @@ export function TrackingBoard(props: TrackingBoardProps) {
           onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })}
         />
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
-        <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
         <TmsSegmentedTabs
           className="tms-tracking-view-toggle"
           aria-label="Table or map"
@@ -460,7 +456,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
           onSelect={(key) => setMapVisible(key === 'map')}
         />
       </div>
-      <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+      <DenseKpiStrip open items={kpis} />
       <CurrentlyViewing rows={rows} onOpen={onOpenShipment} onChanged={onLockReleased} />
       {error && <p className="tms-tracking-error">{error}</p>}
       <div className="tms-dense-body" data-testid="tracking-list">

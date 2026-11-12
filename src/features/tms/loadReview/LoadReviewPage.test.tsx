@@ -107,6 +107,18 @@ describe('LoadReviewPage inactive revenue division', () => {
 })
 
 describe('LoadReviewPage', () => {
+  it('filters by status in the folder tab strip, with no Demo chip and no stray expression text in the toolbar', () => {
+    renderPage('/tms/load-review?tab=all')
+    const strip = screen.getByRole('tablist', { name: 'Load review filters' })
+    expect(within(strip).getAllByRole('tab').map((t) => t.textContent?.replace(/\d+$/, ''))).toEqual(['Needs fixes', 'Looks ready', 'All in review', 'Released (14 d)'])
+    expect(within(strip).getByRole('tab', { name: /All in review/ }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByText(/demo/i)).toBeNull()
+    expect(screen.queryByText(/!==/)).toBeNull()
+    expect(screen.queryByText(/&&/)).toBeNull()
+    fireEvent.click(within(strip).getByRole('tab', { name: /Released/ }))
+    expect(screen.queryByRole('button', { name: /Select all looks ready/ })).toBeNull()
+  })
+
   it('clicking a column heading sorts the rows A to Z, then Z to A', () => {
     try { window.localStorage.clear() } catch { /* ignore */ }
     renderPage('/tms/load-review?tab=all')
