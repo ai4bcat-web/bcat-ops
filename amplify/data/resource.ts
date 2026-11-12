@@ -1916,6 +1916,10 @@ const schema = a.schema(stageTypes({
       missingFields: a.string().array(),
       // Repeat e-mails for the same load roll up here: [{ at, subject, runId }] (Ryne 2026-11-10).
       emailLog:      a.json(),
+      // Found when the e-mail arrived: [{ shipmentId, number, customerName, value, source }] — shipments with a PRO that already
+      // hold this e-mail's references (src/lib/intakeBuilt.ts). Advice only; nothing is deleted or dismissed because of it.
+      alreadyBuilt:  a.json(),
+      alreadyBuiltCheckedAt: a.datetime(),
       shipmentId:    a.string(),             // set the moment createShipment returns
       shipmentNumber: a.string(),
       reviewedBy:    a.string(),

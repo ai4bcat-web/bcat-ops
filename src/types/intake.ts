@@ -51,6 +51,9 @@ export interface IntakeLoadRecord {
   meta: IntakeMeta; confirmed: string[]; missingFields: string[]
   /** Repeat e-mails for the same load roll up here instead of becoming new rows. */
   emailLog?: { at: string; subject: string; runId: string }[] | null
+  /** Shipments with a PRO that this e-mail's references already belong to, found when the e-mail arrived (`intakeBuilt.ts`); null/absent = none found or never checked. */
+  alreadyBuilt?: { shipmentId: string; number: string; customerName: string | null; value: string; source: 'reference' | 'subject' }[] | null
+  alreadyBuiltCheckedAt?: string | null
   shipmentId: string | null; shipmentNumber: string | null
   reviewedBy: string | null; reviewedAt: string | null
   lastEditedBy: string | null; lastEditedAt: string | null
