@@ -118,16 +118,17 @@ describe('Drivers list', () => {
   })
 })
 
-describe('Hire date (needed for PTO)', () => {
-  it('the list flags Ivan drivers with no hire date: a Needs hire date tab with the count, and a badge in the Hired column', async () => {
+describe('Hire date (needed for every driver; PTO for Ivan drivers)', () => {
+  it('the list flags every active driver with no hire date: a Needs hire date tab with the count, and a badge in the Hired column', async () => {
     await mount('/profiles/drivers')
     const tab = screen.getByRole('tab', { name: /Needs hire date/ })
-    expect(tab.textContent).toMatch(/1/)
+    expect(tab.textContent).toMatch(/2/)
     fireEvent.click(tab)
     const grid = screen.getByRole('table', { name: 'Drivers' })
     expect(within(grid).getByText('Lee Local')).toBeTruthy()
-    expect(within(grid).queryByText('Zak Pace')).toBeNull()
-    expect(within(grid).getByText('Needs hire date')).toBeTruthy()
+    expect(within(grid).getByText('Zak Pace')).toBeTruthy()
+    expect(within(grid).queryByText('Amy Local')).toBeNull()
+    expect(within(grid).getAllByText('Needs hire date').length).toBe(2)
   })
 
   it('the profile warns that PTO needs a hire date and the button opens the editor; a contractor gets no warning', async () => {
@@ -137,12 +138,13 @@ describe('Hire date (needed for PTO)', () => {
     expect(screen.getByTestId('drawer-stub')).toBeTruthy()
   })
 
-  it('a contractor with no hire date is not flagged', async () => {
+  it('a contractor with no hire date is flagged without the PTO wording', async () => {
     await mount('/profiles/drivers/d1')
     expect(screen.queryByText('Hire date needed for PTO')).toBeNull()
+    expect(screen.getByText('Hire date needed')).toBeTruthy()
   })
 
-  it('the wizard requires the hire date for a Local (employee) driver, not for a contractor', async () => {
+  it('the wizard requires the hire date, and says PTO is counted from it for a Local (employee) driver', async () => {
     await mount('/profiles/drivers/new')
     type('Full name', 'Hourly Hank')
     type('Phone', '3125550101')
@@ -217,6 +219,9 @@ describe('New driver wizard', () => {
     type('Full name', 'New Person')
     type('Phone', '3125550100')
     fireEvent.click(screen.getByRole('button', { name: 'Box truck' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByText('Enter the hire date (first day of work).')).toBeTruthy()
+    type('Hire date', '2026-11-02')
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
 
     // Pay: box trucks start at 50%, after expenses

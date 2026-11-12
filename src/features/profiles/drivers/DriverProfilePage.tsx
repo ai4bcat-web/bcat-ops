@@ -14,7 +14,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
 import { activeUnits } from '@/lib/fleetActive'
-import { needsHireDate } from '@/lib/ptoAllowance'
+import { earnsPto, needsHireDate } from '@/lib/ptoAllowance'
 import { driverExpiryPatch, driverExpiry, slotsForDriver, visibleSlots } from '@/lib/fileHub'
 import * as api from '@/lib/apiClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
@@ -157,8 +157,10 @@ export function DriverProfilePage() {
       />
 
       {needsHireDate(driver) ? (
-        <TmsAlert tone="orange" title="Hire date needed for PTO" className="pf-hire-alert" >
-          PTO is counted from the hire date, so {driver.name.split(' ')[0]} has no PTO balance and no PTO in the driver app until it is filled in.{' '}
+        <TmsAlert tone="orange" title={earnsPto(driver) ? 'Hire date needed for PTO' : 'Hire date needed'} className="pf-hire-alert" >
+          {earnsPto(driver)
+            ? <>PTO is counted from the hire date, so {driver.name.split(' ')[0]} has no PTO balance and no PTO in the driver app until it is filled in.</>
+            : <>{driver.name.split(' ')[0]}'s file has no hire date (first day of work).</>}{' '}
           <button type="button" className="pf-link" onClick={() => setEditing(true)} data-testid="driver-add-hire-date">Add hire date</button>
         </TmsAlert>
       ) : null}
@@ -187,7 +189,7 @@ export function DriverProfilePage() {
                 { label: 'E-mail', value: driver.email ?? '' },
                 { label: 'Primary dispatcher', value: driver.dispatcherPrimary ?? '' },
                 { label: 'Backup dispatcher', value: driver.dispatcherBackup ?? '' },
-                { label: 'Hire date', value: driver.hireDate ?? '', hint: needsHireDate(driver) ? 'Needed for PTO' : undefined },
+                { label: 'Hire date', value: driver.hireDate ?? '', hint: needsHireDate(driver) ? (earnsPto(driver) ? 'Needed for PTO' : 'Needed') : undefined },
               ]} />
             </ProfileSection>
             <ProfileSection title="Licence & medical" action={<TmsButton size="sm" onClick={() => setEditing(true)}>Edit</TmsButton>}>

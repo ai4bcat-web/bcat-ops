@@ -16,9 +16,9 @@ describe('driver profile model', () => {
     expect(normalizePhone('555')).toBe('555')
   })
 
-  it('blocks the Basics step on a missing name, short phone, bad e-mail or no type', () => {
-    expect(Object.keys(basicsErrors({ name: '', phone: '12', email: 'nope', fleet: '' }))).toEqual(['name', 'phone', 'email', 'fleet'])
-    expect(basicsErrors({ name: 'Zak', phone: '312-555-0100', email: '', fleet: 'BOX_TRUCK' })).toEqual({})
+  it('blocks the Basics step on a missing name, short phone, bad e-mail, no type or no hire date', () => {
+    expect(Object.keys(basicsErrors({ name: '', phone: '12', email: 'nope', fleet: '' }))).toEqual(['name', 'phone', 'email', 'fleet', 'hireDate'])
+    expect(basicsErrors({ name: 'Zak', phone: '312-555-0100', email: '', fleet: 'BOX_TRUCK', hireDate: '2026-11-02' })).toEqual({})
   })
 
   it('defaults pay by type: box trucks and owner operators 50% after expenses, locals hourly', () => {
@@ -80,9 +80,9 @@ describe('driver types (Ryne 2026-11-11)', () => {
   it('validates the optional dates and a starting hourly rate', () => {
     expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'LOCAL', hireDate: 'nope' }).hireDate).toBeTruthy()
     expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'LOCAL', hireDate: '2026-11-02' }).hireDate).toBeUndefined()
-    // an Ivan driver is an employee: the hire date is required; contractors may leave it blank
-    expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'LOCAL' }).hireDate).toBeTruthy()
-    expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'OWNER_OPERATOR' }).hireDate).toBeUndefined()
+    // every driver needs a hire date; for an Ivan employee the message says PTO is counted from it
+    expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'LOCAL' }).hireDate).toMatch(/PTO/)
+    expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'OWNER_OPERATOR' }).hireDate).toBe('Enter the hire date (first day of work).')
     expect(hourlyRateError('')).toBeNull()
     expect(hourlyRateError('$25.50')).toBeNull()
     expect(hourlyRateError('0')).toBeTruthy()
