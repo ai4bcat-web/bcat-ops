@@ -1,8 +1,9 @@
+import { DenseTable } from '@/features/tms/grid/DenseTable'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import {
   Plus, Search, Trash2, Pencil, ExternalLink, FileWarning,
-  ChevronLeft, ChevronRight, RefreshCw, Link2, Paperclip, MessageSquare,
+  RefreshCw, Link2, Paperclip, MessageSquare,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/utils/errorMessage'
@@ -18,7 +19,7 @@ import { sundayOf, shiftWeek, weekLabel, weekLabelLong, weekStartOfISO } from '@
 import type { Driver } from '@/types'
 import type { AmazonDispute, DisputeEvidence, DisputeSource, DisputeStatus } from '@/types/dispute'
 import {
-  thBase, tdBase, iconBtnStyle,
+  iconBtnStyle,
   inputStyle, btnGhost, btnPrimary, btnDanger, Field, FormSection, Modal,
   Pill,
 } from '@/features/maintenance/maintenanceUi'
@@ -60,7 +61,6 @@ const SOURCE_TONE: Record<DisputeSource, 'blue' | 'neutral' | 'violet'> = {
   DRIVER_PORTAL: 'violet',
 }
 
-const PAGE_SIZE = 50
 const POLL_MS = 30_000
 
 function statusOf(d: AmazonDispute): DisputeStatus {
@@ -480,7 +480,6 @@ export function DisputesPage() {
   const [statusF, setStatusF]     = useState<StatusFilter>('ALL')
   const [newOpen, setNewOpen]     = useState(false)
   const [editItem, setEditItem]   = useState<AmazonDispute | null>(null)
-  const [page, setPage]           = useState(1)
   // A status change is where Amazon's reply belongs, so the row select opens the update
   // sheet with that status preselected rather than writing a bare status on its own.
   const [statusEdit, setStatusEdit] = useState<{ dispute: AmazonDispute; status: DisputeStatus } | null>(null)
@@ -648,11 +647,6 @@ export function DisputesPage() {
         (b.submittedAt ?? b.createdAt).localeCompare(a.submittedAt ?? a.createdAt))
   }, [amazonDisputes, statusF, search])
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const safePage = Math.min(page, pageCount)
-  const paged = useMemo(() => {
-    return filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
-  }, [filtered, safePage])
 
   // KPIs (over ALL disputes, not the current filter)
   const pendingCount   = amazonDisputes.filter((d) => statusOf(d) === 'PENDING').length
@@ -745,7 +739,7 @@ export function DisputesPage() {
               type="text"
               placeholder="Search driver, trip, description…"
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+              onChange={(e) => setSearch(e.target.value)}
               style={{ width: 280, height: 34, paddingLeft: 30, paddingRight: 10, boxSizing: 'border-box', background: 'var(--tms-card)', border: '1px solid var(--tms-border)', borderRadius: 7, fontSize: 12.5, color: 'var(--tms-text)', fontFamily: 'inherit', outline: 'none' }}
             />
           </div>
@@ -755,7 +749,7 @@ export function DisputesPage() {
               return (
                 <button
                   key={f}
-                  onClick={() => { setStatusF(f); setPage(1) }}
+                  onClick={() => setStatusF(f)}
                   style={{ height: 34, padding: '0 12px', borderRadius: 7, border: `1px solid ${active ? 'var(--tms-primary)' : 'var(--tms-border)'}`, background: active ? 'var(--tms-primary)' : 'var(--tms-card)', color: active ? 'var(--tms-on-primary)' : 'var(--tms-text-2)', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}
                 >
                   {f === 'ALL' ? 'All' : STATUS_LABEL[f]}
@@ -765,180 +759,106 @@ export function DisputesPage() {
           </div>
         </div>
 
-        <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
-          {filtered.length === 0 ? (
+        <DenseTable<AmazonDispute>
+          gridId="amazon-disputes"
+          aria-label="Amazon disputes"
+          rows={filtered}
+          rowKey={(d) => d.id}
+          empty={(
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
               <FileWarning className="size-8 opacity-20" />
               <p className="text-sm">No disputes found.</p>
               <p className="text-xs text-muted-foreground">Disputes arrive automatically when a driver submits the portal or Google Form, or add one manually.</p>
             </div>
-          ) : (
-            <>
-              <div style={{ maxHeight: 'calc(100vh - 340px)', overflow: 'auto' }}>
-                {/* Twelve columns sized to fit a 1440 window with the sidebar collapsed
-                    (~1290px); with it open the table scrolls sideways a little. The filing
-                    date rides under the source pill and the 7-day pay period has its own
-                    column beside the shipment date, so Status and the row actions stay on
-                    screen. Every fixed cell clips with an ellipsis and carries a title. */}
-                <table style={{ width: '100%', minWidth: 1240, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
-                  <colgroup>
-                    <col style={{ width: 116 }} />
-                    <col style={{ width: 100 }} />
-                    <col style={{ width: 96 }} />
-                    <col style={{ width: 156 }} />
-                    <col style={{ width: 120 }} />
-                    <col />
-                    <col style={{ width: 80 }} />
-                    <col style={{ width: 92 }} />
-                    <col style={{ width: 96 }} />
-                    <col style={{ width: 72 }} />
-                    <col style={{ width: 132 }} />
-                    <col style={{ width: 80 }} />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      {['Source', 'Trip #', 'Shipment', 'Pay period', 'Driver', 'Description', 'Paid', 'Requested', 'Recovered', 'Proof', 'Status', ''].map((h, i) => (
-                        <th key={i} style={{ ...thBase, textAlign: i >= 6 && i <= 8 ? 'right' : 'left' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paged.map((d) => {
-                      const st = statusOf(d)
-                      const src = sourceOf(d)
-                      const files = d.evidence ?? []
-                      const hasResponse = Boolean(d.amazonResponse) || responseEvidence(files).length > 0
-                      return (
-                        <tr key={d.id} className="maint-row">
-                          <td style={{ ...tdBase, verticalAlign: 'top' }}>
-                            <Pill tone={SOURCE_TONE[src]}>{SOURCE_LABEL[src]}</Pill>
-                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--tms-muted)', marginTop: 3 }}>
-                              {(d.submittedAt ?? d.createdAt).slice(0, 10)}
-                            </div>
-                          </td>
-                          <td title={d.tripNumber ?? undefined} style={{ ...tdBase, verticalAlign: 'top', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--tms-text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.tripNumber || '—'}</td>
-                          <td style={{ ...tdBase, verticalAlign: 'top', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>{d.shipmentDate || '—'}</td>
-                          <td title={d.payPeriod ? formatPayPeriod(d.payPeriod) : undefined} style={{ ...tdBase, verticalAlign: 'top', fontSize: 12, color: 'var(--tms-text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {d.payPeriod ? formatPayPeriod(d.payPeriod) : '—'}
-                          </td>
-                          <td title={d.driverName} style={{ ...tdBase, verticalAlign: 'top', fontWeight: 600, color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.driverName}</td>
-                          {/* Clamped to two lines so one wordy dispute can't stretch the
-                              whole row; the full text is on hover and in the edit sheet. */}
-                          <td title={d.description ?? undefined} style={{ ...tdBase, verticalAlign: 'top', fontSize: 12.5, color: 'var(--tms-muted)', lineHeight: 1.45 }}>
-                            {d.description
-                              ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{d.description}</span>
-                              : <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
-                          </td>
-                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--tms-text-2)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountPaid)}</td>
-                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--tms-text)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountRequested)}</td>
-                          {/* What Amazon actually sent back — blank until a recovery is keyed. */}
-                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 600, color: d.resolvedAmount ? 'var(--tms-badge-green)' : 'var(--tms-disabled)', whiteSpace: 'nowrap' }}>
-                            {d.resolvedAmount ? fmtMoney(d.resolvedAmount) : '—'}
-                          </td>
-                          <td style={{ ...tdBase, verticalAlign: 'top' }}>
-                            {/* A staff response screenshot must never push a legacy Drive
-                                link out of the column — a GOOGLE_FORM row's only proof. */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              {files.length > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => setEvidenceView(d)}
-                                  title="View and download the attached files"
-                                  style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 5, padding: 0,
-                                    background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
-                                    color: 'var(--tms-primary)', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
-                                  }}
-                                >
-                                  <Paperclip size={13} /> {files.length} file{files.length === 1 ? '' : 's'}
-                                </button>
-                              )}
-                              {d.photoUrl && (
-                                <a href={d.photoUrl} target="_blank" rel="noreferrer" aria-label="View proof" title="Legacy Drive proof" style={{ color: 'var(--tms-primary)', display: 'inline-flex' }}><ExternalLink size={15} /></a>
-                              )}
-                              {files.length === 0 && !d.photoUrl && <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
-                            </div>
-                          </td>
-                          <td style={{ ...tdBase, verticalAlign: 'top' }}>
-                            <StatusSelect status={st} onChange={(next) => setStatusEdit({ dispute: d, status: next })} />
-                            {d.settlementPeriodStart && (
-                              <div
-                                title={`Paid out as a DISPUTE shipment on the ${weekLabelLong(d.settlementPeriodStart)} settlement`}
-                                style={{ fontSize: 11, color: 'var(--tms-badge-green)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                              >
-                                → {weekLabel(d.settlementPeriodStart)} settlement
-                              </div>
-                            )}
-                          </td>
-                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                            <button
-                              type="button"
-                              aria-label="Record Amazon response"
-                              title={d.amazonResponse ? `Amazon: ${d.amazonResponse.slice(0, 160)}` : 'Record status, Amazon response and screenshot'}
-                              onClick={() => setStatusEdit({ dispute: d, status: st })}
-                              style={{ ...iconBtnStyle, color: hasResponse ? 'var(--tms-primary)' : 'var(--tms-muted)' }}
-                            >
-                              <MessageSquare size={13} />
-                            </button>
-                            <button aria-label="Edit dispute" disabled={deletingId === d.id} onClick={() => setEditItem(d)} style={{ ...iconBtnStyle, color: 'var(--tms-muted)', opacity: deletingId === d.id ? 0.5 : 1 }}><Pencil size={13} /></button>
-                            <button
-                              aria-label="Delete dispute"
-                              disabled={deletingId === d.id}
-                              onClick={() => {
-                                setDeletingId(d.id)
-                                removeDispute(d)
-                                  .then(() => toast.success('Dispute deleted'))
-                                  .catch((err) => toast.error(`Couldn't delete: ${errorMessage(err)}`))
-                                  .finally(() => setDeletingId(null))
-                              }}
-                              style={{ ...iconBtnStyle, color: 'var(--tms-badge-red)', opacity: deletingId === d.id ? 0.5 : 1, cursor: deletingId === d.id ? 'wait' : 'pointer' }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {pageCount > 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderTop: '1px solid var(--tms-border)', background: 'var(--tms-bg)' }}>
-                  <div style={{ fontSize: 12, color: 'var(--tms-muted)' }}>
-                    {filtered.length} dispute{filtered.length === 1 ? '' : 's'} · Page {safePage} of {pageCount}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      disabled={safePage <= 1}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 4, height: 30, padding: '0 10px',
-                        borderRadius: 7, border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
-                        color: 'var(--tms-text-2)', fontSize: 12.5, fontFamily: 'inherit',
-                        cursor: safePage <= 1 ? 'not-allowed' : 'pointer', opacity: safePage <= 1 ? 0.5 : 1,
-                      }}
-                    >
-                      <ChevronLeft size={14} /> Prev
-                    </button>
-                    <button
-                      onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-                      disabled={safePage >= pageCount}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 4, height: 30, padding: '0 10px',
-                        borderRadius: 7, border: '1px solid var(--tms-border)', background: 'var(--tms-card)',
-                        color: 'var(--tms-text-2)', fontSize: 12.5, fontFamily: 'inherit',
-                        cursor: safePage >= pageCount ? 'not-allowed' : 'pointer', opacity: safePage >= pageCount ? 0.5 : 1,
-                      }}
-                    >
-                      Next <ChevronRight size={14} />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
           )}
-        </div>
+          columns={[
+            { key: 'source', header: 'Source', filter: 'multi', extraPx: 16, text: (d) => SOURCE_LABEL[sourceOf(d)], render: (d) => <Pill tone={SOURCE_TONE[sourceOf(d)]}>{SOURCE_LABEL[sourceOf(d)]}</Pill> },
+            { key: 'filed', header: 'Filed', filter: 'date', dateOf: (d) => (d.submittedAt ?? d.createdAt) || null, text: (d) => (d.submittedAt ?? d.createdAt).slice(0, 10) },
+            { key: 'trip', header: 'Trip #', text: (d) => d.tripNumber ?? '' },
+            { key: 'shipmentDate', header: 'Shipment', filter: 'date', dateOf: (d) => d.shipmentDate || null, text: (d) => d.shipmentDate ?? '' },
+            { key: 'payPeriod', header: 'Pay period', filter: 'multi', sortValue: (d) => d.payPeriod ?? null, text: (d) => (d.payPeriod ? formatPayPeriod(d.payPeriod) : '') },
+            { key: 'driver', header: 'Driver', filter: 'multi', text: (d) => d.driverName ?? '', render: (d) => <span style={{ fontWeight: 600 }}>{d.driverName}</span> },
+            { key: 'description', header: 'Description', text: (d) => d.description ?? '' },
+            { key: 'paid', header: 'Paid', align: 'right', filter: 'number', numberOf: (d) => d.amountPaid ?? null, text: (d) => fmtMoney(d.amountPaid) },
+            { key: 'requested', header: 'Requested', align: 'right', filter: 'number', numberOf: (d) => d.amountRequested ?? null, text: (d) => fmtMoney(d.amountRequested), render: (d) => <span style={{ fontWeight: 600 }}>{fmtMoney(d.amountRequested)}</span> },
+            {
+              key: 'recovered', header: 'Recovered', align: 'right', filter: 'number', numberOf: (d) => d.resolvedAmount ?? null, text: (d) => (d.resolvedAmount ? fmtMoney(d.resolvedAmount) : ''),
+              render: (d) => (d.resolvedAmount ? <span style={{ fontWeight: 600, color: 'var(--tms-badge-green)' }}>{fmtMoney(d.resolvedAmount)}</span> : <span style={{ color: 'var(--tms-disabled)' }}>—</span>),
+            },
+            {
+              key: 'proof', header: 'Proof', filter: false, sortable: false, extraPx: 40,
+              text: (d) => { const n = (d.evidence ?? []).length; return n ? `${n} file${n === 1 ? '' : 's'}` : d.photoUrl ? 'Drive link' : '' },
+              render: (d) => {
+                const files = d.evidence ?? []
+                return (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    {files.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setEvidenceView(d)}
+                        title="View and download the attached files"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: 0, background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', color: 'var(--tms-primary)', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit' }}
+                      >
+                        <Paperclip size={13} /> {files.length} file{files.length === 1 ? '' : 's'}
+                      </button>
+                    )}
+                    {d.photoUrl && (
+                      <a href={d.photoUrl} target="_blank" rel="noreferrer" aria-label="View proof" title="Legacy Drive proof" style={{ color: 'var(--tms-primary)', display: 'inline-flex' }}><ExternalLink size={15} /></a>
+                    )}
+                    {files.length === 0 && !d.photoUrl && <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
+                  </span>
+                )
+              },
+            },
+            {
+              key: 'status', header: 'Status', filter: 'multi', extraPx: 40, text: (d) => STATUS_LABEL[statusOf(d)],
+              render: (d) => <StatusSelect status={statusOf(d)} onChange={(next) => setStatusEdit({ dispute: d, status: next })} />,
+            },
+            {
+              key: 'settlement', header: 'Settlement', filter: 'multi', text: (d) => (d.settlementPeriodStart ? `${weekLabel(d.settlementPeriodStart)} settlement` : ''),
+              render: (d) => (d.settlementPeriodStart ? (
+                <span title={`Paid out as a DISPUTE shipment on the ${weekLabelLong(d.settlementPeriodStart)} settlement`} style={{ color: 'var(--tms-badge-green)' }}>
+                  → {weekLabel(d.settlementPeriodStart)} settlement
+                </span>
+              ) : <span style={{ color: 'var(--tms-disabled)' }}>—</span>),
+            },
+            {
+              key: 'actions', header: '', fixed: true, width: 96, sortable: false, filter: false, text: () => '',
+              render: (d) => {
+                const st = statusOf(d)
+                const hasResponse = Boolean(d.amazonResponse) || responseEvidence(d.evidence ?? []).length > 0
+                return (
+                  <span style={{ whiteSpace: 'nowrap' }}>
+                    <button
+                      type="button"
+                      aria-label="Record Amazon response"
+                      title={d.amazonResponse ? `Amazon: ${d.amazonResponse.slice(0, 160)}` : 'Record status, Amazon response and screenshot'}
+                      onClick={() => setStatusEdit({ dispute: d, status: st })}
+                      style={{ ...iconBtnStyle, color: hasResponse ? 'var(--tms-primary)' : 'var(--tms-muted)' }}
+                    >
+                      <MessageSquare size={13} />
+                    </button>
+                    <button aria-label="Edit dispute" disabled={deletingId === d.id} onClick={() => setEditItem(d)} style={{ ...iconBtnStyle, color: 'var(--tms-muted)', opacity: deletingId === d.id ? 0.5 : 1 }}><Pencil size={13} /></button>
+                    <button
+                      aria-label="Delete dispute"
+                      disabled={deletingId === d.id}
+                      onClick={() => {
+                        setDeletingId(d.id)
+                        removeDispute(d)
+                          .then(() => toast.success('Dispute deleted'))
+                          .catch((err) => toast.error(`Couldn't delete: ${errorMessage(err)}`))
+                          .finally(() => setDeletingId(null))
+                      }}
+                      style={{ ...iconBtnStyle, color: 'var(--tms-badge-red)', opacity: deletingId === d.id ? 0.5 : 1, cursor: deletingId === d.id ? 'wait' : 'pointer' }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </span>
+                )
+              },
+            },
+          ]}
+        />
       </div>
 
       {newOpen && (

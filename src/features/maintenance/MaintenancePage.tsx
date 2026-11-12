@@ -1,3 +1,4 @@
+import { DenseTable } from '@/features/tms/grid/DenseTable'
 import { useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { TmsButton } from '@/features/tms/kit/TmsButton'
@@ -6,11 +7,11 @@ import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { TmsStatRow } from '@/features/tms/kit/TmsStatRow'
 import type { TmsStat } from '@/features/tms/kit/TmsStatRow'
 import { Avatar } from '@/components/ui/avatar'
-import { AlertTriangle, Wrench, CheckCircle2, Trash2, Pencil, Plus, Search, ArrowUp, ArrowDown, RotateCcw } from 'lucide-react'
+import { AlertTriangle, Wrench, CheckCircle2, Trash2, Pencil, Plus, Search, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Equipment, MaintenanceTask, TaskPriority, TaskStatus } from '@/types/equipment'
 import {
-  isOverdue, thBase, tdBase, equipChipStyle, iconBtnStyle,
+  isOverdue, equipChipStyle, iconBtnStyle,
   Pill, type PillTone, inputStyle, btnGhost, btnPrimary, btnDanger, Field, FormSection, Seg, Modal,
 } from './maintenanceUi'
 
@@ -120,7 +121,6 @@ function TaskModal({ task, equipment, onSave, onDelete, onClose }: {
 
 
 type Tab = 'tasks' | 'completed'
-type SortKey = 'title' | 'equipment' | 'dueDate' | 'completedDate' | 'createdAt' | 'priority' | 'status'
 
 export function MaintenancePage() {
   const equipment            = useAppStore((s) => s.equipment)
@@ -134,8 +134,6 @@ export function MaintenancePage() {
   const [priorityFilter, setPriority] = useState<'all' | TaskPriority>('all')
   const [equipFilter, setEquipFilter] = useState('')
   const [search, setSearch]           = useState('')
-  const [sortKey, setSortKey]         = useState<SortKey>('dueDate')
-  const [sortDir, setSortDir]         = useState<'asc' | 'desc'>('asc')
   const [editTask, setEditTask]       = useState<MaintenanceTask | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
 
@@ -148,11 +146,6 @@ export function MaintenancePage() {
   function equipUnit(id: string) {
     const e = equipment.find((eq) => eq.id === id)
     return e ? `#${e.unitNumber}` : id
-  }
-
-  function toggleSort(k: SortKey) {
-    if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    else { setSortKey(k); setSortDir('asc') }
   }
 
   const visibleTasks = maintenanceTasks
@@ -171,20 +164,8 @@ export function MaintenancePage() {
       }
       return true
     })
-    .sort((a, b) => {
-      const dir = sortDir === 'asc' ? 1 : -1
-      let cmp = 0
-      switch (sortKey) {
-        case 'title':     cmp = a.title.localeCompare(b.title); break
-        case 'equipment': cmp = equipUnit(a.equipmentId).localeCompare(equipUnit(b.equipmentId), undefined, { numeric: true }); break
-        case 'dueDate':   cmp = (a.dueDate ?? '').localeCompare(b.dueDate ?? ''); break
-        case 'completedDate': cmp = (a.completedDate ?? '').localeCompare(b.completedDate ?? ''); break
-        case 'createdAt': cmp = (a.createdAt ?? '').localeCompare(b.createdAt ?? ''); break
-        case 'priority':  cmp = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]; break
-        case 'status':    cmp = a.status.localeCompare(b.status); break
-      }
-      return cmp * dir
-    })
+    // Resting order: soonest due first; the grid's header sort takes over when a column is clicked.
+    .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''))
 
   const overdueCount   = maintenanceTasks.filter((t) => t.status === 'upcoming' && isOverdue(t.dueDate)).length
   const upcomingCount  = maintenanceTasks.filter((t) => t.status === 'upcoming').length
@@ -208,19 +189,6 @@ export function MaintenancePage() {
     height: 34, padding: '0 10px', background: 'var(--tms-card)',
     border: '1px solid var(--tms-border)', borderRadius: 7,
     fontSize: 12.5, color: 'var(--tms-text)', fontFamily: 'inherit', outline: 'none',
-  }
-
-  // Sortable header cell — plain render function (not a component) so it doesn't remount.
-  const sortTh = (label: string, k: SortKey) => {
-    const active = sortKey === k
-    return (
-      <th key={k} style={{ ...thBase, cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--tms-text)' : undefined }}>
-          {label}
-          {active && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
-        </span>
-      </th>
-    )
   }
 
   return (
@@ -305,124 +273,99 @@ export function MaintenancePage() {
           </select>
         </div>
 
-        <div style={{ borderRadius: 12, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', boxShadow: 'var(--tms-shadow)', overflow: 'hidden' }}>
-          {visibleTasks.length === 0 ? (
+        <DenseTable<MaintenanceTask>
+          key={isCompletedTab ? 'completed' : 'tasks'}
+          gridId={isCompletedTab ? 'maintenance-completed' : 'maintenance-tasks'}
+          aria-label={isCompletedTab ? 'Completed tasks' : 'Maintenance tasks'}
+          rows={visibleTasks}
+          rowKey={(t) => t.id}
+          toneOf={(t) => (t.status !== 'complete' && isOverdue(t.dueDate) ? 'red' : '')}
+          empty={(
             <TmsEmptyState
               compact
               title={isCompletedTab ? 'No completed tasks yet.' : 'No tasks found.'}
               message={isCompletedTab ? 'Tasks you mark complete show up here.' : 'Add a task with the New Task button, or from the Fleet page.'}
             />
-          ) : (
-            <div style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', overflowX: 'auto' }}>
-              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', minWidth: isCompletedTab ? 1040 : 940 }}>
-                <colgroup>
-                  <col style={{ width: 44 }} />
-                  <col style={{ width: 180 }} />
-                  <col />
-                  <col style={{ width: 112 }} />
-                  <col style={{ width: 104 }} />
-                  <col style={{ width: 110 }} />
-                  {isCompletedTab && <col style={{ width: 118 }} />}
-                  <col style={{ width: 112 }} />
-                  <col style={{ width: 120 }} />
-                  <col style={{ width: isCompletedTab ? 120 : 112 }} />
-                  <col style={{ width: 76 }} />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th style={{ ...thBase }}></th>
-                    {sortTh('Task', 'title')}
-                    <th style={{ ...thBase }}>Description</th>
-                    {sortTh('Equipment', 'equipment')}
-                    {sortTh('Created', 'createdAt')}
-                    {sortTh('Due', 'dueDate')}
-                    {isCompletedTab && sortTh('Completed', 'completedDate')}
-                    {sortTh('Priority', 'priority')}
-                    <th style={{ ...thBase }}>Assignee</th>
-                    {sortTh('Status', 'status')}
-                    <th style={{ ...thBase, textAlign: 'right' }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleTasks.map((t) => {
-                    const over = t.status !== 'complete' && isOverdue(t.dueDate)
-                    const accent = over ? 'var(--tms-badge-red)' : t.priority === 'high' ? 'var(--tms-badge-orange)' : 'transparent'
-                    const done = t.status === 'complete'
-                    return (
-                      <tr key={t.id} className="maint-row" style={{ opacity: done && !isCompletedTab ? 0.55 : 1 }}>
-                        <td style={{ ...tdBase, boxShadow: `inset 3px 0 0 ${accent}`, textAlign: 'center' }}>
-                          <input
-                            type="checkbox"
-                            checked={done}
-                            onChange={() => { const next = done ? 'upcoming' : 'complete'; updateMaintenanceTask(t.id, { status: next }); toast.success(next === 'complete' ? 'Task marked complete' : 'Task reopened') }}
-                            aria-label={done ? 'Unmark — reopen task' : 'Mark task complete'}
-                            title={done ? 'Unmark — reopen task' : 'Mark complete'}
-                            style={{ width: 16, height: 16, borderRadius: 4, accentColor: 'var(--tms-primary)', cursor: 'pointer', verticalAlign: 'middle' }}
-                          />
-                        </td>
-                        <td style={tdBase}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--tms-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
-                        </td>
-                        <td style={{ ...tdBase, fontSize: 12.5, color: 'var(--tms-muted)', lineHeight: 1.45 }}>
-                          {t.notes ? t.notes : <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
-                        </td>
-                        <td style={tdBase}><span style={equipChipStyle}>{equipUnit(t.equipmentId)}</span></td>
-                        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--tms-muted)', whiteSpace: 'nowrap' }}>
-                          {t.createdAt ? t.createdAt.slice(0, 10) : <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
-                        </td>
-                        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: over ? 'var(--tms-badge-red)' : 'var(--tms-text-2)', fontWeight: over ? 600 : 400, whiteSpace: 'nowrap' }}>
-                          {t.dueDate ? (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                              {over && <AlertTriangle size={11} />}{t.dueDate}
-                            </span>
-                          ) : <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
-                        </td>
-                        {isCompletedTab && (
-                          <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--tms-badge-green)', fontWeight: 500, whiteSpace: 'nowrap' }}>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                              <CheckCircle2 size={11} />{t.completedDate ?? <span style={{ color: 'var(--tms-disabled)' }}>—</span>}
-                            </span>
-                          </td>
-                        )}
-                        <td style={tdBase}><Pill tone={PRIORITY_TONE[t.priority]} dot>{PRIORITY_LABEL[t.priority]}</Pill></td>
-                        <td style={tdBase}>
-                          {t.assignee ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                              <Avatar initials={t.assignee[0].toUpperCase()} size="sm" style={{ background: 'var(--tms-badge-orange)', color: 'var(--tms-on-primary)' }} />
-                              <span style={{ fontSize: 12.5, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.assignee}</span>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => setEditTask(t)}
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--tms-muted)', border: '1px dashed var(--tms-input-border)', borderRadius: 6, padding: '4px 9px', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
-                            >
-                              <Plus size={12} /> Assign
-                            </button>
-                          )}
-                        </td>
-                        <td style={tdBase}>
-                          {done ? (
-                            <button
-                              onClick={() => { updateMaintenanceTask(t.id, { status: 'upcoming' }); toast.success('Task reopened') }}
-                              title="Unmark — move back to open tasks"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--tms-badge-green-tint)', color: 'var(--tms-badge-green)', border: 'none', borderRadius: 999, padding: '3px 9px', fontSize: 11.5, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer' }}
-                            >
-                              Completed <RotateCcw size={11} />
-                            </button>
-                          ) : over ? <Pill tone="bad">Overdue</Pill> : <Pill tone="blue">Upcoming</Pill>}
-                        </td>
-                        <td style={{ ...tdBase, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          <button aria-label="Edit task" onClick={() => setEditTask(t)} style={{ ...iconBtnStyle, color: 'var(--tms-muted)' }}><Pencil size={13} /></button>
-                          <button aria-label="Delete task" onClick={() => { deleteMaintenanceTask(t.id); toast.success('Task deleted') }} style={{ ...iconBtnStyle, color: 'var(--tms-badge-red)' }}><Trash2 size={13} /></button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
           )}
-        </div>
+          columns={[
+            {
+              key: 'done', header: '', fixed: true, width: 44, sortable: false, filter: false, text: (t) => (t.status === 'complete' ? 'Complete' : ''),
+              render: (t) => {
+                const done = t.status === 'complete'
+                return (
+                  <input
+                    type="checkbox"
+                    checked={done}
+                    onChange={() => { const next = done ? 'upcoming' : 'complete'; updateMaintenanceTask(t.id, { status: next }); toast.success(next === 'complete' ? 'Task marked complete' : 'Task reopened') }}
+                    aria-label={done ? 'Unmark — reopen task' : 'Mark task complete'}
+                    title={done ? 'Unmark — reopen task' : 'Mark complete'}
+                    style={{ width: 16, height: 16, borderRadius: 4, accentColor: 'var(--tms-primary)', cursor: 'pointer', verticalAlign: 'middle' }}
+                  />
+                )
+              },
+            },
+            { key: 'title', header: 'Task', text: (t) => t.title, render: (t) => <span style={{ fontWeight: 600 }}>{t.title}</span> },
+            { key: 'notes', header: 'Description', text: (t) => t.notes ?? '' },
+            { key: 'equipment', header: 'Equipment', filter: 'multi', text: (t) => equipUnit(t.equipmentId), render: (t) => <span style={equipChipStyle}>{equipUnit(t.equipmentId)}</span> },
+            { key: 'createdAt', header: 'Created', filter: 'date', dateOf: (t) => t.createdAt ?? null, text: (t) => (t.createdAt ? t.createdAt.slice(0, 10) : '') },
+            {
+              key: 'dueDate', header: 'Due', filter: 'date', dateOf: (t) => t.dueDate ?? null, text: (t) => t.dueDate ?? '',
+              render: (t) => {
+                const over = t.status !== 'complete' && isOverdue(t.dueDate)
+                return t.dueDate ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: over ? 'var(--tms-badge-red)' : undefined, fontWeight: over ? 600 : 400 }}>
+                    {over && <AlertTriangle size={11} />}{t.dueDate}
+                  </span>
+                ) : <span style={{ color: 'var(--tms-disabled)' }}>—</span>
+              },
+            },
+            ...(isCompletedTab ? [{
+              key: 'completedDate', header: 'Completed', filter: 'date' as const, dateOf: (t: MaintenanceTask) => t.completedDate ?? null, text: (t: MaintenanceTask) => t.completedDate ?? '',
+            }] : []),
+            {
+              key: 'priority', header: 'Priority', filter: 'multi', sortValue: (t) => PRIORITY_RANK[t.priority], text: (t) => PRIORITY_LABEL[t.priority],
+              render: (t) => <Pill tone={PRIORITY_TONE[t.priority]} dot>{PRIORITY_LABEL[t.priority]}</Pill>,
+            },
+            {
+              key: 'assignee', header: 'Assignee', filter: 'multi', text: (t) => t.assignee ?? '',
+              render: (t) => (t.assignee ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <Avatar initials={t.assignee[0].toUpperCase()} size="sm" style={{ background: 'var(--tms-badge-orange)', color: 'var(--tms-on-primary)' }} />
+                  <span style={{ textTransform: 'capitalize' }}>{t.assignee}</span>
+                </span>
+              ) : (
+                <button
+                  onClick={() => setEditTask(t)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--tms-muted)', border: '1px dashed var(--tms-input-border)', borderRadius: 6, padding: '2px 9px', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  <Plus size={12} /> Assign
+                </button>
+              )),
+            },
+            {
+              key: 'status', header: 'Status', filter: 'multi', extraPx: 20,
+              text: (t) => (t.status === 'complete' ? 'Completed' : isOverdue(t.dueDate) ? 'Overdue' : 'Upcoming'),
+              render: (t) => (t.status === 'complete' ? (
+                <button
+                  onClick={() => { updateMaintenanceTask(t.id, { status: 'upcoming' }); toast.success('Task reopened') }}
+                  title="Unmark — move back to open tasks"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--tms-badge-green-tint)', color: 'var(--tms-badge-green)', border: 'none', borderRadius: 999, padding: '2px 9px', fontSize: 11.5, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer' }}
+                >
+                  Completed <RotateCcw size={11} />
+                </button>
+              ) : isOverdue(t.dueDate) ? <Pill tone="bad">Overdue</Pill> : <Pill tone="blue">Upcoming</Pill>),
+            },
+            {
+              key: 'actions', header: '', fixed: true, width: 76, sortable: false, filter: false, text: () => '',
+              render: (t) => (
+                <span style={{ whiteSpace: 'nowrap' }}>
+                  <button aria-label="Edit task" onClick={() => setEditTask(t)} style={{ ...iconBtnStyle, color: 'var(--tms-muted)' }}><Pencil size={13} /></button>
+                  <button aria-label="Delete task" onClick={() => { deleteMaintenanceTask(t.id); toast.success('Task deleted') }} style={{ ...iconBtnStyle, color: 'var(--tms-badge-red)' }}><Trash2 size={13} /></button>
+                </span>
+              ),
+            },
+          ]}
+        />
       </div>
 
       {editTask && (
