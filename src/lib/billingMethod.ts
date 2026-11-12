@@ -148,12 +148,14 @@ export function billingIssues(c: BillingFields): BillingIssue[] {
 }
 
 /** Validation shared by the form and the Lambda: MANUAL needs a valid AP e-mail; every copy address must be valid. */
-export function validateBillingFields(c: BillingFields & { invoiceCopyEmails?: string[] | null; apEmailsExtra?: string[] | null }): Record<string, string> {
+export function validateBillingFields(c: BillingFields & { invoiceCopyEmails?: string[] | null; apEmailsExtra?: string[] | null; noaEmail?: string | null }): Record<string, string> {
   const errors: Record<string, string> = {}
   if (c.billingMethod && !BILLING_METHODS.includes(c.billingMethod)) errors.billingMethod = 'Choose Factor or Manual'
   const ap = (c.apEmail ?? '').trim()
   if (c.billingMethod === 'MANUAL' && !ap) errors.apEmail = 'Manual billing needs the customer’s AP e-mail'
   else if (ap && !isValidEmail(ap)) errors.apEmail = 'Enter a valid e-mail address'
+  const noa = (c.noaEmail ?? '').trim()
+  if (noa && !isValidEmail(noa)) errors.noaEmail = 'Enter a valid e-mail address'
   const badExtra = (c.apEmailsExtra ?? []).filter((e) => !isValidEmail(e))
   if (badExtra.length) errors.apEmailsExtra = `Not a valid e-mail: ${badExtra.join(', ')}`
   const bad = (c.invoiceCopyEmails ?? []).filter((e) => !isValidEmail(e))

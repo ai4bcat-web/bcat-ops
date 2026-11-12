@@ -515,7 +515,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
               <FormSection icon={<ShieldCheck size={15} />} title="Compliance" subtitle="Most of this comes from the driver's file" collapsible defaultOpen={false}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                   <Field label="CDL Number"><Input {...register('cdl')} placeholder="CDL-A IL-8823901" className="h-9" /></Field>
-                  <Field label="Hire Date"><Input {...register('hireDate')} placeholder="YYYY-MM-DD" className="h-9" type="date" /></Field>
+                  <Field label="Hire Date (first day of work, needed for PTO)"><Input {...register('hireDate')} placeholder="YYYY-MM-DD" className="h-9" type="date" /></Field>
                 </div>
 
                 {/* Derived, not entered. These used to be typed here AND set by uploading

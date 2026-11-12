@@ -1,4 +1,4 @@
-import { TmsField, TmsSelect } from '@/features/tms/kit'
+import { TmsField, TmsInput, TmsSelect } from '@/features/tms/kit'
 import { parseEmailList, type BillingMethod } from '@/lib/billingMethod'
 import type { RemitTo } from '@/types/tms'
 import { EmailListField } from './EmailListField'
@@ -62,6 +62,22 @@ export function BillingMethodFields({
           Invoices go to the factor, never to the customer.{' '}
           {factor?.name ? <>Factor: <strong>{factor.name}</strong>{factor.email ? ` (${factor.email})` : ''}.</> : 'No factor is set in Settings yet.'}
         </div>
+      )}
+      {(isFactor || !value.billingMethod || value.noaEmail.trim() !== '') && (
+        <TmsField
+          label="Notice of assignment email"
+          hint="Where this customer's notice of assignment goes. Not used to send invoices."
+          error={errors.noaEmail}
+        >
+          <TmsInput
+            type="email"
+            value={value.noaEmail}
+            onChange={(e) => set('noaEmail', e.target.value)}
+            placeholder="noa@factor.com"
+            aria-label="Notice of assignment email"
+            data-testid="billing-noa-email"
+          />
+        </TmsField>
       )}
       {!isFactor && (
         <TmsField label="Copy on invoices" error={errors.invoiceCopyEmails}>

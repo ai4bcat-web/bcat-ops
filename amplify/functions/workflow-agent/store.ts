@@ -462,6 +462,34 @@ export async function findShipmentByNumber(number: string): Promise<Row | null> 
   return item ? unmarshall(item) : null
 }
 
+/**
+ * Shipments whose search key holds any of `values` (lower case), as the narrow rows `src/lib/intakeBuilt.ts` matches on. The search key
+ * is not indexed, so this is a filtered table scan: one per staged e-mail that has references to check (at most 25 values, one filter).
+ * Throws on a failed read; the caller treats that as "nothing found" (the check is advice, never a gate on ingesting the e-mail).
+ */
+export async function findShipmentsBySearchKeys(values: readonly string[]): Promise<Row[]> {
+  const unique = [...new Set(values.map((v) => v.trim().toLowerCase()).filter((v) => v.length >= 5))].slice(0, 25)
+  if (!SHIPMENT_TABLE_NAME || unique.length === 0) return []
+  const out = new Map<string, Row>()
+  const names: Record<string, string> = { '#k': 'searchKey', '#n': 'number' }
+  const vals: Record<string, AttributeValue> = {}
+  const clauses = unique.map((v, i) => { vals[`:v${i}`] = { S: v }; return `contains(#k, :v${i})` })
+  let key: Record<string, AttributeValue> | undefined
+  do {
+    const page = await dynamo.send(new ScanCommand({
+      TableName: SHIPMENT_TABLE_NAME,
+      FilterExpression: clauses.join(' OR '),
+      ProjectionExpression: 'id, #n, customerId, customerName, #k, voidedAt, deletedAt',
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: vals,
+      ExclusiveStartKey: key,
+    }))
+    for (const item of page.Items ?? []) { const r = unmarshall(item); out.set(String(r.id), r) }
+    key = page.LastEvaluatedKey
+  } while (key)
+  return [...out.values()]
+}
+
 /** The old `{ all: true }` backfill: every e-mail payable nothing has read yet. */
 export async function scanVendorPayablesNeedingExtract(): Promise<string[]> {
   const ids: string[] = []
@@ -647,6 +675,8 @@ export async function enrichIntakeLoad(
     attachments: Row[] | null; fields: Row | null; meta: Row | null; missingFields?: string[] | null; at: string
     /** A row that was saved unread and has now been read by the agent. */
     parse?: { parseState: string; parseNote: string | null; format: string | null; autoFields: Row } | null
+    /** The already-built check for the references this update brought in. */
+    built?: { matches: Row[]; at: string } | null
   },
 ): Promise<void> {
   const sets: string[] = ['updatedAt = :now']
@@ -656,6 +686,7 @@ export async function enrichIntakeLoad(
   if (update.meta) { sets.push('meta = :meta'); values[':meta'] = update.meta }
   if (update.missingFields) { sets.push('missingFields = :missing'); values[':missing'] = update.missingFields }
   const removes: string[] = []
+  if (update.built) { sets.push('alreadyBuilt = :built', 'alreadyBuiltCheckedAt = :builtAt'); values[':built'] = update.built.matches; values[':builtAt'] = update.built.at }
   if (update.parse) {
     sets.push('parseState = :ps', 'format = :fmt', 'autoFields = :auto')
     values[':ps'] = update.parse.parseState; values[':fmt'] = update.parse.format; values[':auto'] = update.parse.autoFields

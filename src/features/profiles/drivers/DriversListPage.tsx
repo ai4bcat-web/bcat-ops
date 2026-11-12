@@ -10,8 +10,9 @@ import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
 import { useDriverPaySettings } from './useDriverPaySettings'
 import { docsSummary } from '../driverProfileModel'
+import { needsHireDate } from '@/lib/ptoAllowance'
 
-type StatusTab = 'active' | 'inactive' | 'all'
+type StatusTab = 'active' | 'inactive' | 'all' | 'needs-hire'
 
 /** Profiles ▸ Drivers: every driver in one searchable list. A row opens that driver's profile. */
 export function DriversListPage() {
@@ -41,9 +42,10 @@ export function DriversListPage() {
     active: rows.filter((r) => r.driver.active).length,
     inactive: rows.filter((r) => !r.driver.active).length,
     all: rows.length,
+    needsHire: rows.filter((r) => needsHireDate(r.driver)).length,
   }), [rows])
   const shown = useMemo(
-    () => rows.filter((r) => (tab === 'all' ? true : tab === 'active' ? r.driver.active : !r.driver.active)),
+    () => rows.filter((r) => (tab === 'all' ? true : tab === 'needs-hire' ? needsHireDate(r.driver) : tab === 'active' ? r.driver.active : !r.driver.active)),
     [rows, tab],
   )
   const columns = useMemo(() => driverColumns(), [])
@@ -68,6 +70,7 @@ export function DriversListPage() {
             { key: 'active', label: 'Active', count: counts.active },
             { key: 'inactive', label: 'Inactive', count: counts.inactive },
             { key: 'all', label: 'All', count: counts.all },
+            ...(counts.needsHire > 0 ? [{ key: 'needs-hire', label: 'Needs hire date', count: counts.needsHire }] : []),
           ]}
         />
       )}
