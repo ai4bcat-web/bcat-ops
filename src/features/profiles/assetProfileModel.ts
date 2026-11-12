@@ -15,11 +15,11 @@ import { summarizeScore, type DocsSummary } from './driverProfileModel'
 
 export type AssetTab = 'truck' | 'trailer'
 
-/** Equipment keeps the fleets its profitability grouping uses; Amazon stays Amazon here. */
+/** Equipment keeps the stored fleet values its profitability grouping uses; the Amazon fleet reads as Owner operator (grouped with them). */
 export const ASSET_FLEET_OPTIONS: Array<{ value: FleetGroup; label: string }> = [
   { value: 'LOCAL', label: 'Local' },
   { value: 'BOX_TRUCK', label: 'Box truck' },
-  { value: 'AMAZON', label: 'Amazon' },
+  { value: 'AMAZON', label: 'Owner operator' },
 ]
 
 export function assetFleetLabel(fleet: string | null | undefined): string {

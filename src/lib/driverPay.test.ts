@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcDriverPay, factoringFeePctFor, tripPayAmount, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel } from './driverPay'
+import { calcDriverPay, factoringFeePctFor, tripPayAmount, effectivePayRate, payGroupForWeek, explicitWeekMode, pinWeekPayMode, payModeHistory, clearWeekPayMode, effectiveFixedExpenses, fixedExpenseLineLabel } from './driverPay'
 import type { PayTripInput, PayDeductionInput, PayCreditInput, PayRateOverride, FixedExpenseInput } from './driverPay'
 
 const addDays = (iso: string, days: number): string => {
@@ -400,5 +400,58 @@ describe('effectiveFixedExpenses — companyAmount proration', () => {
     const rows: FixedExpenseInput[] = [{ label: 'ELD', amount: 20 }]
     const r = effectiveFixedExpenses(rows, '2026-09-06', addDays('2026-09-06', 6))
     expect(r[0].companyAmount).toBeUndefined()
+  })
+})
+
+describe('per-week pay mode (an owner operator can settle as Amazon one week and standard the next)', () => {
+  const base = { payGroup: 'OWNER_OPERATOR', payPercent: 0.88, expensesBeforePercent: true }
+  const old = [{ from: '2026-08-16', until: '2026-08-30', payPercent: 0.88, expensesBeforePercent: false }]
+
+  it('with no mode window every week follows the pay group and the rate it always had (history unchanged)', () => {
+    const setting = { ...base, rateHistory: old }
+    expect(payGroupForWeek(setting, '2026-08-23')).toBe('OWNER_OPERATOR')
+    expect(explicitWeekMode(setting, '2026-08-23')).toBeNull()
+    expect(effectivePayRate(setting, '2026-08-23')).toEqual({ payPercent: 0.88, expensesBeforePercent: false })
+    expect(effectivePayRate(setting, '2026-10-04')).toEqual({ payPercent: 0.88, expensesBeforePercent: true })
+    expect(payGroupForWeek({ payGroup: null }, '2026-10-04')).toBeNull()
+  })
+
+  it('pinning one week changes only that week; the weeks around it keep their own rate and (absent) mode', () => {
+    const next = pinWeekPayMode(old, '2026-08-23', 'AMAZON', { payPercent: 0.42, expensesBeforePercent: false })
+    const setting = { ...base, rateHistory: next }
+    expect(payGroupForWeek(setting, '2026-08-23')).toBe('AMAZON')
+    expect(effectivePayRate(setting, '2026-08-23')).toEqual({ payPercent: 0.42, expensesBeforePercent: false })
+    // the week before and the weeks after are exactly as before
+    expect(payGroupForWeek(setting, '2026-08-16')).toBe('OWNER_OPERATOR')
+    expect(effectivePayRate(setting, '2026-08-16')).toEqual(effectivePayRate({ ...base, rateHistory: old }, '2026-08-16'))
+    expect(payGroupForWeek(setting, '2026-08-30')).toBe('OWNER_OPERATOR')
+    expect(effectivePayRate(setting, '2026-08-30')).toEqual(effectivePayRate({ ...base, rateHistory: old }, '2026-08-30'))
+  })
+
+  it('pinning a week inside an existing window splits it without losing either half', () => {
+    const next = pinWeekPayMode([{ from: '2026-10-04', until: '2026-11-01', payPercent: 0.5, expensesBeforePercent: true }], '2026-10-11', 'AMAZON', { payPercent: 0.4, expensesBeforePercent: false })
+    expect(next.map((w) => [w.from, w.until, w.payGroup ?? null, w.payPercent])).toEqual([
+      ['2026-10-04', '2026-10-11', null, 0.5],
+      ['2026-10-11', '2026-10-18', 'AMAZON', 0.4],
+      ['2026-10-18', '2026-11-01', null, 0.5],
+    ])
+  })
+
+  it('lists the mode history oldest first and clears a week back to the pay group', () => {
+    let rh = pinWeekPayMode([], '2026-10-11', 'AMAZON', { payPercent: 0.4, expensesBeforePercent: false })
+    rh = pinWeekPayMode(rh, '2026-10-04', 'OWNER_OPERATOR', { payPercent: 0.88, expensesBeforePercent: true })
+    expect(payModeHistory({ rateHistory: rh }).map((h) => [h.from, h.mode])).toEqual([['2026-10-04', 'OWNER_OPERATOR'], ['2026-10-11', 'AMAZON']])
+    const cleared = clearWeekPayMode(rh, '2026-10-11', { payPercent: 0.88, expensesBeforePercent: true })
+    expect(payGroupForWeek({ ...base, rateHistory: cleared }, '2026-10-11')).toBe('OWNER_OPERATOR')
+    expect(payModeHistory({ rateHistory: cleared }).map((h) => h.from)).toEqual(['2026-10-04'])
+  })
+
+  it('the same gross settles differently by mode: Amazon is never factored, a standard owner operator is', () => {
+    const trips = [{ freightAmount: 2000, status: 'DELIVERED' }]
+    const amazon = calcDriverPay(trips as never, { payPercent: 0.42, expensesBeforePercent: false, factoringFeePct: factoringFeePctFor('AMAZON') }, [], [], [])
+    const standard = calcDriverPay(trips as never, { payPercent: 0.88, expensesBeforePercent: true, factoringFeePct: factoringFeePctFor('OWNER_OPERATOR') }, [], [], [])
+    expect(amazon.checkAmount).not.toBe(standard.checkAmount)
+    expect(factoringFeePctFor('AMAZON')).toBe(0)
+    expect(factoringFeePctFor('OWNER_OPERATOR')).toBeGreaterThan(0)
   })
 })

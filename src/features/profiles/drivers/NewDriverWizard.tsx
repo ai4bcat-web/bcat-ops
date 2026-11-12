@@ -13,7 +13,7 @@ import type { DriverFleet } from '@/types/equipment'
 import { WizardStepper, type WizardStep } from '../shared/WizardStepper'
 import '../shared/profiles.css'
 import {
-  basicsErrors, FLEET_OPTIONS, fleetLabel, hourlyRateError, normalizePhone, payError, requiredDocsFor, wizardPayDefaults,
+  basicsErrors, FLEET_OPTIONS, fleetLabel, hourlyRateError, normalizePhone, payError, requiredDocsFor, trailerModeFor, wizardPayDefaults,
 } from '../driverProfileModel'
 
 const STEPS: WizardStep[] = [
@@ -62,6 +62,7 @@ export function NewDriverWizard() {
   // Trucks already held by a driver are offered too: assigning moves the truck, exactly as the driver editor does.
   const trucks = activeUnits(equipment, 'truck')
   const trailers = activeUnits(equipment, 'trailer')
+  const trailerMode = trailerModeFor(fleet)
   const takenBy = (id: string) => drivers.find((d) => d.assignedTruckId === id)?.name
 
   const defaults = wizardPayDefaults(fleet || null)
@@ -126,7 +127,7 @@ export function NewDriverWizard() {
     if (truckId) {
       try { await state.assignTruckToDriver(truckId, driverId) } catch { problems.push('the truck') }
     }
-    if (trailerId) {
+    if (trailerId && trailerMode === 'standing') {
       try { await state.updateDriver(driverId, { assignedTrailerId: trailerId, bobtail: false }) } catch { problems.push('the trailer') }
     }
     if (problems.length > 0) toast.warning(`${name.trim()} was added, but ${problems.join(' and ')} could not be saved. Finish it on the profile.`)
@@ -196,10 +197,14 @@ export function NewDriverWizard() {
               <TmsSelect value={truckId} onChange={(e) => setTruckId(e.target.value)} placeholder="No truck yet"
                 options={trucks.map((t) => ({ value: t.id, label: `Truck ${t.unitNumber}${takenBy(t.id) ? ` (now ${takenBy(t.id)})` : ''}` }))} />
             </TmsField>
-            <TmsField label="Trailer" hint="Optional">
-              <TmsSelect value={trailerId} onChange={(e) => setTrailerId(e.target.value)} placeholder="No trailer yet"
-                options={trailers.map((t) => ({ value: t.id, label: `Trailer ${t.unitNumber}` }))} />
-            </TmsField>
+            {trailerMode === 'standing' ? (
+              <TmsField label="Standing trailer" hint="Optional. An owner operator generally keeps one trailer.">
+                <TmsSelect value={trailerId} onChange={(e) => setTrailerId(e.target.value)} placeholder="No trailer yet"
+                  options={trailers.map((t) => ({ value: t.id, label: `Trailer ${t.unitNumber}` }))} />
+              </TmsField>
+            ) : (
+              <div className="pf-row-sub pf-wide">{trailerMode === 'none' ? 'Box trucks do not use trailers.' : 'Company drivers take a trailer from the pool each day, so none is set here.'}</div>
+            )}
           </div>
         )}
 
@@ -224,7 +229,7 @@ export function NewDriverWizard() {
             <dt>Dispatcher</dt><dd>{dispatcher || 'None yet'}</dd>
             <dt>Pay</dt><dd>{defaults.percentPaid ? `${percent}% · ${afterExpenses ? 'after expenses' : 'of gross, then minus expenses'}${fuelCard.trim() ? ` · card ${fuelCard.trim()}` : ''}` : hourly.trim() ? `$${hourly.trim()}/hr (time card)` : 'Hourly (time card), rate not set yet'}</dd>
             <dt>Licence</dt><dd>{[cdl.trim() || null, cdlExpiration ? `CDL expires ${cdlExpiration}` : null, medCardExpiration ? `med card ${medCardExpiration}` : null, hireDate ? `hired ${hireDate}` : null].filter(Boolean).join(' · ') || 'Not entered'}</dd>
-            <dt>Equipment</dt><dd>{[truckId ? `Truck ${trucks.find((t) => t.id === truckId)?.unitNumber}` : null, trailerId ? `Trailer ${trailers.find((t) => t.id === trailerId)?.unitNumber}` : null].filter(Boolean).join(' · ') || 'None yet'}</dd>
+            <dt>Equipment</dt><dd>{[truckId ? `Truck ${trucks.find((t) => t.id === truckId)?.unitNumber}` : null, trailerId && trailerMode === 'standing' ? `Trailer ${trailers.find((t) => t.id === trailerId)?.unitNumber}` : null].filter(Boolean).join(' · ') || 'None yet'}</dd>
             <dt>Documents</dt><dd>{required.length} required, uploaded next</dd>
           </dl>
         )}

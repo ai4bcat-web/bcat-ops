@@ -20,7 +20,8 @@ import { ProfileDocuments } from '../shared/ProfileDocuments'
 import { ProfileRows, ProfileSection } from '../shared/ProfileSection'
 import '../shared/profiles.css'
 import { useDriverPaySettings, type PaySettingPatch } from './useDriverPaySettings'
-import { currentFixedExpenses, docsSummary, fleetLabel, payLines, settlementLink } from '../driverProfileModel'
+import { PayModeSection } from './PayModeSection'
+import { currentFixedExpenses, docsSummary, fleetLabel, payLines, settlementLink, trailerModeFor } from '../driverProfileModel'
 
 type TabKey = 'overview' | 'pay' | 'equipment' | 'documents' | 'activity'
 const TAB_KEYS: TabKey[] = ['overview', 'pay', 'equipment', 'documents', 'activity']
@@ -70,6 +71,7 @@ export function DriverProfilePage() {
   const cdl = driverExpiry(driver.cdlExpiration, hub.docFor('DRIVER', driver.id, 'cdl_copy'))
   const med = driverExpiry(driver.medCardExpiration, hub.docFor('DRIVER', driver.id, 'medical_card'))
   const settle = settlementLink(driver.fleetGroup)
+  const trailerMode = trailerModeFor(driver.fleetGroup)
   const trucks = activeUnits(equipment, 'truck')
   const trailers = activeUnits(equipment, 'trailer')
 
@@ -82,6 +84,9 @@ export function DriverProfilePage() {
     toast.success('Pay settings saved')
     setPayOpen(false)
   }
+
+  // Same save path, without the 'Pay settings saved' toast or closing the editor (the pay-mode section has its own message).
+  const savePayQuiet = (patch: PaySettingPatch, expectedUpdatedAt: string | undefined) => pay.save(driver.id, patch, expectedUpdatedAt)
 
   const assignTruck = async (truckId: string) => {
     try {
@@ -212,6 +217,9 @@ export function DriverProfilePage() {
                 <div className="pf-row-sub" style={{ marginTop: 8 }}>Local drivers are paid by the hour from their time card. The hourly rate is changed on <Link className="pf-link" to="/hours">Employee hours</Link>.</div>
               ) : null}
             </ProfileSection>
+            {setting && (driver.fleetGroup === 'OWNER_OPERATOR' || driver.fleetGroup === 'AMAZON' || setting.payGroup === 'OWNER_OPERATOR' || setting.payGroup === 'AMAZON') ? (
+              <PayModeSection setting={setting} today={today} onSave={savePayQuiet} />
+            ) : null}
             <ProfileSection title="Fixed weekly expenses">
               {fixed.length === 0
                 ? <div className="pf-empty">None in force today.</div>
@@ -232,7 +240,7 @@ export function DriverProfilePage() {
       {tab === 'equipment' && (
         <div className="pf-body">
           <div className="pf-main">
-            <ProfileSection title="Truck & trailer">
+            <ProfileSection title={trailerMode === 'none' ? 'Truck' : 'Truck & trailer'}>
               <div className="pf-form-grid">
                 <TmsField label="Truck">
                   <TmsSelect
@@ -242,15 +250,20 @@ export function DriverProfilePage() {
                     placeholder="No truck"
                   />
                 </TmsField>
-                <TmsField label="Trailer" hint={driverTrailerFieldDeployed() ? undefined : 'Trailer assignment is not switched on yet.'}>
+                {trailerMode === 'none' ? null : (
+                <TmsField
+                  label={trailerMode === 'standing' ? 'Standing trailer' : 'Trailer today'}
+                  hint={!driverTrailerFieldDeployed() ? 'Trailer assignment is not switched on yet.' : trailerMode === 'standing' ? 'Optional. An owner operator generally keeps one trailer.' : 'Optional. Company drivers take a trailer from the pool each day.'}
+                >
                   <TmsSelect
                     value={driver.assignedTrailerId ?? ''}
                     onChange={(e) => void assignTrailer(e.target.value)}
                     disabled={!driverTrailerFieldDeployed()}
                     options={trailers.map((t) => ({ value: t.id, label: `Trailer ${t.unitNumber}` }))}
-                    placeholder={driver.bobtail ? 'Bobtail (no trailer)' : 'No trailer set'}
+                    placeholder={driver.bobtail ? 'Bobtail (no trailer)' : trailerMode === 'pool' ? 'From the pool' : 'No trailer set'}
                   />
                 </TmsField>
+                )}
               </div>
             </ProfileSection>
             {truck ? (

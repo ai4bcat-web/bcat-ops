@@ -30,6 +30,17 @@ export function fleetLabel(fleet: string | null | undefined): string {
   return FLEET_OPTIONS.find((o) => o.value === shown)?.label ?? fleet
 }
 
+/**
+ * How a driver relates to trailers. Trailers are a pool: company (Local) drivers pull a different one each day, so nothing is paired
+ * by default; owner operators generally keep one; box trucks have none at all.
+ */
+export type TrailerMode = 'none' | 'pool' | 'standing'
+export function trailerModeFor(fleet: string | null | undefined): TrailerMode {
+  if (fleet === 'BOX_TRUCK') return 'none'
+  if (fleet === 'OWNER_OPERATOR' || fleet === 'AMAZON') return 'standing'
+  return 'pool'
+}
+
 /** Where a fleet's weekly/biweekly settlement lives today, for the "open settlements" links. */
 export function settlementLink(fleet: string | null | undefined): { to: string; label: string } | null {
   switch (fleet) {

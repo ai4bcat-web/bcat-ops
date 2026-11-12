@@ -1,3 +1,4 @@
+import { OwnerOperatorSettlementsSwitch } from './OwnerOperatorSettlementsSwitch'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -383,6 +384,7 @@ export function OwnerOperatorPayPage() {
         Weekly (Sun→Sat) — brokerage loads delivered by owner operators · % of freight
         {' · weekly expenses charged here from Sep 27'}
         <DriverAppLink />
+        <OwnerOperatorSettlementsSwitch active="standard" />
       </>}
       toolbar={
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

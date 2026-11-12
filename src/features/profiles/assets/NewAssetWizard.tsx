@@ -6,10 +6,10 @@ import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { formatVin } from '@/lib/utils'
-import { activeUnits } from '@/lib/fleetActive'
 import type { EquipmentType, FleetGroup, Ownership } from '@/types/equipment'
 import { WizardStepper, type WizardStep } from '../shared/WizardStepper'
 import '../shared/profiles.css'
+import { trailerModeFor } from '../driverProfileModel'
 import { ASSET_FLEET_OPTIONS, assetBasicsErrors, assetFleetLabel, assetNoun, assetSlots, OWNERSHIP_LABEL } from '../assetProfileModel'
 
 const STEPS: WizardStep[] = [
@@ -149,12 +149,12 @@ export function NewAssetWizard() {
         {step === 2 && (
           <div className="pf-form-grid">
             <TmsField
-              label={isTruck ? 'Driver' : 'Driver who pulls it'}
-              hint={isTruck ? 'Optional. Choosing a driver who has another truck moves them to this one.' : 'Optional. Replaces the trailer that driver pulls now.'}
+              label={isTruck ? 'Driver' : 'Owner operator who keeps it'}
+              hint={isTruck ? 'Optional. Choosing a driver who has another truck moves them to this one.' : 'Optional. Leave blank to keep this trailer in the pool that company drivers share each day.'}
             >
-              <TmsSelect value={driverId} onChange={(e) => setDriverId(e.target.value)} placeholder="Not assigned yet" options={activeDrivers.map((d) => ({ value: d.id, label: d.name }))} />
+              <TmsSelect value={driverId} onChange={(e) => setDriverId(e.target.value)} placeholder={isTruck ? 'Not assigned yet' : 'In the pool'} options={(isTruck ? activeDrivers : activeDrivers.filter((d) => trailerModeFor(d.fleetGroup) === 'standing')).map((d) => ({ value: d.id, label: d.name }))} />
             </TmsField>
-            {isTruck ? <div className="pf-row-sub pf-wide">{activeUnits(equipment, 'trailer').length} trailers are active. Pair a trailer with the driver from the driver’s profile or the trailer’s.</div> : null}
+            {isTruck ? <div className="pf-row-sub pf-wide">Trailers are a shared pool: company drivers pick one each day, owner operators generally keep theirs, and box trucks have none.</div> : null}
           </div>
         )}
 

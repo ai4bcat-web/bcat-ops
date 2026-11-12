@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
+import { OwnerOperatorSettlementsSwitch } from '@/features/owner-operator-pay/OwnerOperatorSettlementsSwitch'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { ownerOpCarriesWeeklyCharges } from '@/lib/ownerOperatorTrips'
 import { toast } from 'sonner'
@@ -191,7 +192,8 @@ export function DriverPayPage() {
       title="Driver Pay"
       subtitle={<>
         Amazon weekly pay — trips, expenses &amp; check amount
-        {ownerOpCarriesWeeklyCharges(periodStart) && ' · weekly expenses charged on Owner Operator Settlements from Sep 27'}
+        {ownerOpCarriesWeeklyCharges(periodStart) && ' · weekly expenses charged on Owner Operator Settlements from Sep 27, unless the week is set to Amazon'}
+        <OwnerOperatorSettlementsSwitch active="amazon" />
       </>}
       actions={<>
         <button onClick={() => setMasterOpen(true)}

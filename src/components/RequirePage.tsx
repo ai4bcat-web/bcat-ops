@@ -109,6 +109,15 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
   return fallback ? <Navigate to={fallback} replace /> : <NoAccess />
 }
 
+/**
+ * The old standalone /drivers address: an owner or ADMIN lands on the driver profiles; anyone else keeps going to Files, as before.
+ * (Files itself is part of Fleet management and is not redirected.)
+ */
+export function DriversAliasRedirect() {
+  const { isAdmin, isOwner } = useAuth()
+  return <Navigate to={isOwner || isAdmin ? '/profiles/drivers' : '/files'} replace />
+}
+
 /** Sends "/" and `/tms` to the user's landing page (see `LANDING_PRIORITY`). */
 export function LandingRedirect() {
   const { hasPageAccess } = useAuth()

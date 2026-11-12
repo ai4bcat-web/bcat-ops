@@ -147,6 +147,18 @@ describe('Driver profile', () => {
     expect(assignTruckToDriver).toHaveBeenCalledWith('t2', 'd1')
   })
 
+  it('a box truck driver has no trailer field at all (box trucks do not pull trailers)', async () => {
+    await mount('/profiles/drivers/d1?tab=equipment')
+    expect(screen.queryByLabelText('Trailer today')).toBeNull()
+    expect(screen.queryByLabelText('Standing trailer')).toBeNull()
+  })
+
+  it('a company (Local) driver gets today’s trailer from the pool, not a standing one', async () => {
+    await mount('/profiles/drivers/d2?tab=equipment')
+    expect(screen.getByLabelText('Trailer today')).toBeTruthy()
+    expect(screen.getByText(/take a trailer from the pool each day/)).toBeTruthy()
+  })
+
   it('Activity tab lists recent loads for the driver', async () => {
     await mount('/profiles/drivers/d1?tab=activity')
     expect(screen.getByText(/10793/)).toBeTruthy()

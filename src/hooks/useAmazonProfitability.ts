@@ -5,7 +5,7 @@ import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { periodEnd } from './useAmazonPay'
 import { matchedFuelForCard, sumFuel, effectiveFuelCard } from '@/lib/driverFuel'
-import { calcDriverPay, factoringFeePctFor, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
+import { calcDriverPay, factoringFeePctFor, effectivePayRate, payGroupForWeek, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { errorText } from '@/lib/errorText'
 
@@ -140,7 +140,8 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
 
   const { weeks, rows } = useMemo(() => {
     const driverById = new Map(drivers.map((d) => [d.id, d]))
-    const amazon = settings.filter((s) => (s.payGroup ?? 'AMAZON') === 'AMAZON' && s.active !== false)
+    // Includes owner operators with weeks pinned to Amazon mode; each week is checked below.
+    const amazon = settings.filter((s) => s.active !== false && ((s.payGroup ?? 'AMAZON') === 'AMAZON' || (s.rateHistory ?? []).some((w) => w.payGroup === 'AMAZON')))
     const amazonIds = new Set(amazon.map((s) => s.driverId))
 
     // Weeks that actually have trips for an Amazon driver.
@@ -152,6 +153,7 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
     for (const periodStart of weeks) {
       const end = periodEnd(periodStart)
       for (const setting of amazon) {
+        if ((payGroupForWeek(setting, periodStart) ?? 'AMAZON') !== 'AMAZON') continue
         const driverTrips = trips.filter((t) => t.driverId === setting.driverId && t.periodStart === periodStart)
         if (driverTrips.length === 0) continue
 

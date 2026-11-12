@@ -11,7 +11,7 @@ import {
 } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
-import { calcDriverPay, factoringFeePctFor, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
+import { calcDriverPay, factoringFeePctFor, effectivePayRate, explicitWeekMode, payGroupForWeek, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
 import { matchedFuelForCard, sumFuel, normalizeCard, effectiveFuelCard } from '@/lib/driverFuel'
 import { creditLineLabel } from '@/lib/payCredits'
 import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
@@ -142,7 +142,8 @@ export function useAmazonPay(requestedWeek: string | null): AmazonPayState {
   const rows = useMemo<DriverPayRow[]>(() => {
     const driverById = new Map(drivers.map((d) => [d.id, d]))
     return settings
-      .filter((s) => (s.payGroup ?? 'AMAZON') === 'AMAZON' && s.active !== false)
+      // The week's own pay mode decides which statement an owner operator is on; with no mode window this is the pay group, as before.
+      .filter((s) => (payGroupForWeek(s, periodStart) ?? 'AMAZON') === 'AMAZON' && s.active !== false)
       .map((baseSetting): DriverPayRow | null => {
         const driver = driverById.get(baseSetting.driverId)
         if (!driver) return null
@@ -163,7 +164,8 @@ export function useAmazonPay(requestedWeek: string | null): AmazonPayState {
         // From the first owner-operator week the weekly charges move to that statement.
         // They are per driver-week: charging them here as well would deduct one driver's
         // insurance, lease and fuel twice across the two pages.
-        const carriesCharges = !ownerOpCarriesWeeklyCharges(periodStart)
+        // A week the driver was set to run as Amazon keeps its charges here even after the changeover (the standard statement skips it).
+        const carriesCharges = !ownerOpCarriesWeeklyCharges(periodStart) || explicitWeekMode(baseSetting, periodStart) === 'AMAZON'
 
         // Fuel pulled live from the driver's EFS card for this 7-day window —
         // real fuel only, de-duplicated, itemized (see matchedFuelForCard).

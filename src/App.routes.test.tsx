@@ -50,6 +50,7 @@ vi.mock('@/features/calendar/CalendarPage', () => h.stub(['CalendarPage']))
 vi.mock('@/features/workflows/WorkflowsPage', () => h.stub(['WorkflowsPage']))
 vi.mock('@/features/workflows/RunTracePage', () => h.stub(['RunTracePage']))
 vi.mock('@/features/trucks/TrucksPage', () => h.stub(['TrucksPage']))
+vi.mock('@/features/profiles/drivers/DriversListPage', () => h.stub(['DriversListPage']))
 vi.mock('@/features/truck-docs/TruckDocumentsPage', () => h.stub(['TruckDocumentsPage']))
 vi.mock('@/features/fuel/FuelPage', () => h.stub(['FuelPage']))
 vi.mock('@/features/finances/FinancesPage', () => h.stub(['FinancesPage']))
@@ -208,6 +209,12 @@ describe('App routes', () => {
       h.auth.isAdmin = true
       await visit('/users')
       await landed('BrokeragePage|/tms/brokerage/users')
+    })
+
+    it('/drivers goes to the driver profiles for an admin (Files stays as the fallback above)', async () => {
+      h.auth.isAdmin = true
+      await visit('/drivers')
+      await landed('DriversListPage|/profiles/drivers')
     })
 
     it('/compliance opens on compliance or files, and is refused with neither', async () => {

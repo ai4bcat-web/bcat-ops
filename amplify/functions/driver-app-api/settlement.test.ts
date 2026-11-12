@@ -200,6 +200,22 @@ describe('buildSettlement', () => {
     )
   })
 
+  it('follows the WEEK\u2019s pay mode for factoring: an owner operator pinned to Amazon that week is not factored; every other week is exactly as before', () => {
+    const owner = { ...makeSetting(), payGroup: 'OWNER_OPERATOR' }
+    const pinned = {
+      ...owner,
+      rateHistory: [{ from: periodStart, until: '2026-09-28', payPercent: 0.88, expensesBeforePercent: owner.expensesBeforePercent, payGroup: 'AMAZON' }],
+    }
+    const plain = buildSettlement(periodStart, trips, owner, [], [], [], [])
+    const asAmazon = buildSettlement(periodStart, trips, pinned, [], [], [], [])
+    expect(plain.deductions.find((d) => d.label === FACTORING_FEE_LABEL)?.amount).toBe(30)
+    expect(asAmazon.deductions.find((d) => d.label === FACTORING_FEE_LABEL)).toBeUndefined()
+    // a week OUTSIDE the pinned window recomputes identically to the setting with no window at all
+    const nextWeek = '2026-09-28'
+    expect(buildSettlement(nextWeek, trips.map((t) => ({ ...t, periodStart: nextWeek })), pinned, [], [], [], []))
+      .toEqual(buildSettlement(nextWeek, trips.map((t) => ({ ...t, periodStart: nextWeek })), owner, [], [], [], []))
+  })
+
   it('still lists the factoring fee on a factored week with no loads', () => {
     // A driver opening an empty week must still see the fee exists; a missing line
     // reads as "the app lost my deductions" rather than "nothing was factored".
