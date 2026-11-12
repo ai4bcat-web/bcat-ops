@@ -919,6 +919,34 @@ describe('ShipmentsBoard', () => {
       expect([...select.options].map((o) => o.text)).toContain(String(year))
     })
 
+    it('a search typed on Active also finds released shipments, says so, and clearing it returns to plain Active', async () => {
+      renderBoard('/tms/shipments', [unreleased, released, canceled])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      expect(screen.queryByTestId('search-all-note')).toBeNull()
+      const box = screen.getByRole('textbox', { name: 'Search shipments' })
+      fireEvent.change(box, { target: { value: 'S002' } })
+      await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
+      expect(screen.queryByText('S001')).toBeNull()
+      expect(screen.getByTestId('search-all-note').textContent).toBe('Searching all shipments: 1 match, 1 not in Active')
+      fireEvent.change(box, { target: { value: '' } })
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      expect(screen.queryByText('S002')).toBeNull()
+      expect(screen.queryByTestId('search-all-note')).toBeNull()
+    })
+
+    it('a search typed on Active asks for the All list data, and a global-search link (?q=) does the same', async () => {
+      renderBoard('/tms/shipments?q=S002', [unreleased, released])
+      await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
+      const asked = (__views as Array<{ kind: string; months?: string[]; includeVoided?: boolean }>).filter((v) => v.kind === 'window' && v.months!.length > 0)
+      expect(asked.some((w) => w.months!.length === 12 && !w.includeVoided)).toBe(true)
+    })
+
+    it('a search on Active still never lists a voided shipment', async () => {
+      renderBoard('/tms/shipments?q=S00', [unreleased, row('S004', { status: 'OPEN', voidedAt: '2026-01-02T00:00:00Z' })])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      expect(screen.queryByText('S004')).toBeNull()
+    })
+
     it('falls back to Active on an unknown ?list=', async () => {
       renderBoard('/tms/shipments?list=bogus', [unreleased, released])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
