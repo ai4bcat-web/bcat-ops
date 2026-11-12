@@ -716,7 +716,7 @@
   width: 100%;
   max-width: none;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .tms-shell .tms-table thead th,
@@ -724,17 +724,18 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  height: 42px;
-  padding: 4px 12px;
+  height: 30px;
+  padding: 0 6px;
   background: var(--tms-surface-subtle);
   color: var(--tms-muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   text-align: left;
   white-space: nowrap;
   border-bottom: 1px solid var(--tms-border);
+  border-right: 1px solid var(--tms-border);
 }
 
 .tms-shell .tms-table th.tms-sortable,
@@ -756,11 +757,14 @@
 
 .tms-shell .tms-table tbody td,
 .tms-portal .tms-table tbody td {
-  height: var(--tms-row-h);
-  padding: 8px 12px;
-  font-size: 13px;
+  /* Same row as the View board's dense grid (dense-grid.css). */
+  height: 30px;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 1.2;
   color: var(--tms-text);
-  border-bottom: 1px solid var(--tms-border);
+  border-bottom: 1px solid color-mix(in srgb, var(--tms-text) 16%, var(--tms-border));
+  border-right: 1px solid color-mix(in srgb, var(--tms-border) 70%, transparent);
   white-space: nowrap;
 }
 
