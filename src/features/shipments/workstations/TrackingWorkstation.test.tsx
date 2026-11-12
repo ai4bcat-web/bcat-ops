@@ -472,14 +472,13 @@ describe('dense grid', () => {
     expect(screen.queryByRole('columnheader', { name: /Carrier DOT\/MC/ })).not.toBeInTheDocument()
   })
 
-  it('keeps the PRO column sticky and the summary strip collapsed until asked for', async () => {
+  it('keeps the PRO column sticky and always shows the summary strip', async () => {
     renderPage('/tms/tracking?assignee=all')
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
     const pro = screen.getByRole('columnheader', { name: /Shipment #/ })
     expect(pro).toHaveClass('tms-dg-sticky')
     expect(within(trackingRow('S-ANN')).getAllByRole('cell')[1]).toHaveClass('tms-dg-sticky')
-    expect(screen.queryByRole('region', { name: 'Summary' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Summary/ }))
+    expect(screen.queryByRole('button', { name: /Summary/ })).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Summary' })).toHaveTextContent('Loads')
   })
 

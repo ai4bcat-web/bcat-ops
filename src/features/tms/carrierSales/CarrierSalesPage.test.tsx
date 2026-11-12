@@ -160,7 +160,7 @@ describe('CarrierSalesPage', () => {
     fireEvent.click(within(within(grid).getByRole('columnheader', { name: /^Customer(?! rate)/ })).getByRole('button', { name: 'Customer' }))
     expect(order()).toEqual(['S-2', 'S-1'])
     expect(screen.getByRole('button', { name: /Columns/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Summary/ })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Summary' })).toBeTruthy()
     expect(screen.getAllByTestId('cover-row')).toHaveLength(2)
   })
 
