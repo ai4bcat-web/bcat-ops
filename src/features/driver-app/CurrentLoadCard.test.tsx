@@ -28,4 +28,34 @@ describe('CurrentLoadCard', () => {
     await screen.findByText('Joliet to Chicago')
     expect(screen.queryByTestId('also-open-loads')).toBeNull()
   })
+
+  it('lists the documents the office asked for on this load, with what is already in', async () => {
+    api.fetchOpenLoads.mockResolvedValue({
+      load: {
+        ...mk('l1', '20001', 'Joliet to Chicago'),
+        requiredDocs: [
+          { type: 'POD', label: 'Proof of delivery', done: true },
+          { type: 'LUMPER_RECEIPT', label: 'Lumper receipt', done: false },
+        ],
+      },
+      alsoOpen: [],
+    })
+    render(<CurrentLoadCard />)
+    const list = await screen.findByTestId('load-required-docs')
+    expect(list).toHaveTextContent('Documents needed for this load')
+    expect(screen.getByTestId('load-required-doc-POD')).toHaveAttribute('data-done', 'true')
+    expect(screen.getByTestId('load-required-doc-LUMPER_RECEIPT')).toHaveAttribute('data-done', 'false')
+    expect(list).toHaveTextContent('Send each one from the Scan tab')
+  })
+
+  it('keeps the POD-only notice when nothing extra was asked for', async () => {
+    api.fetchOpenLoads.mockResolvedValue({
+      load: { ...mk('l1', '20001', 'Joliet to Chicago'), requiredDocs: [{ type: 'POD', label: 'Proof of delivery', done: false }] },
+      alsoOpen: [],
+    })
+    render(<CurrentLoadCard />)
+    await screen.findByText('Joliet to Chicago')
+    expect(screen.queryByTestId('load-required-docs')).toBeNull()
+    expect(screen.getByText(/Send the POD for this load/)).toBeInTheDocument()
+  })
 })

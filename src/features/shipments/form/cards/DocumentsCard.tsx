@@ -24,6 +24,7 @@ import { fieldAttrs } from '../sections/fieldAttrs'
 import type { CardProps } from './cardRegistry'
 import { GenerateRow } from './GenerateRow'
 import { releaseDocItems } from './releaseDocs'
+import { LoadRequiredDocs } from './LoadRequiredDocs'
 import './trackDocsCards.css'
 
 type Tab = 'public' | 'private'
@@ -307,6 +308,13 @@ function DocumentsCardImpl({ values, ctx }: CardProps) {
           <span className="tms-muted text-xs"> The e-mail this load came from has a PDF that is not in Documents yet.</span>
         </div>
       ) : null}
+      <LoadRequiredDocs
+        bundle={saved ? ctx.bundle : null}
+        customer={ctx.customer}
+        settings={ctx.settings}
+        disabled={disabled}
+        refreshBundle={ctx.refreshBundle}
+      />
       <div className="tms-card-req" data-testid="card-documents-checklist">
         <div className="tms-card-req-title">Required for release</div>
         <ul className="tms-card-docs-checklist">
