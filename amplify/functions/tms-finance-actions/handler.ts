@@ -49,6 +49,7 @@ import {
 } from './apPayments'
 import { repointInvoicedCustomer } from './repoint'
 import { brokerageRepRollup } from './brokerageRep'
+import { settleFactoredInvoices } from './settleFactored'
 import {
   acceptCommissionCounter,
   approveCommission,
@@ -125,6 +126,7 @@ type Action =
   | 'RELEASE_TO_BILLING'
   | 'SEND_INVOICE'
   | 'SYNC_FACTORING_CHANGE'
+  | 'SETTLE_FACTORED_INVOICES'
   | 'BROKERAGE_REP_ROLLUP'
 
 /** The actions that move money and are owner/ADMIN while `arPostingAdminOnly` holds. */
@@ -225,6 +227,7 @@ const BILLING_RELEASE_ACTIONS: Record<string, true> = {
   RELEASE_TO_BILLING: true,
   SEND_INVOICE: true,
   SYNC_FACTORING_CHANGE: true,
+  SETTLE_FACTORED_INVOICES: true,
   EMAIL_INVOICE: true,
   BATCH_EMAIL: true,
   SEND_TO_FACTOR: true,
@@ -295,6 +298,10 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
 }
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
+  // The EventBridge schedule (no AppSync arguments): mark OTR-funded invoices paid.
+  if (!event.arguments && (event as unknown as { source?: string }).source === 'aws.events') {
+    return settleFactoredInvoices() as unknown as Row
+  }
   const action = event.arguments.action as Action
   // Its own door, decided by brokerageAccessOf inside the action (owner/ADMIN/page-dashboard or a sales rep), never by the AR page rule.
   if (action === 'BROKERAGE_REP_ROLLUP') return brokerageRepRollup(event.identity, parseInput(event.arguments.input))
@@ -332,6 +339,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return releaseToBilling(input, caller)
     case 'SEND_INVOICE':
       return sendInvoice(input, caller)
+    case 'SETTLE_FACTORED_INVOICES':
+      return settleFactoredInvoices(caller) as unknown as Promise<Row>
     case 'SYNC_FACTORING_CHANGE':
       return syncFactoringChange(input, caller)
     case 'PREVIEW_FACTOR':

@@ -96,7 +96,7 @@ describe('buildNavSections', () => {
     expect(kids('Fleet manager')).not.toContain('Ivan driver app')
     expect(kids('Profiles')).toEqual(['Customers', 'Carriers', 'Locations', 'Drivers', 'Assets'])
     expect(kids('Fleet manager').slice(0, 5)).toEqual(['Fleet manager dashboard', 'Maintenance', 'Invoices', 'Asset documents', 'Fuel'])
-    expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Factoring', 'Vendors'])
+    expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Vendors'])
     expect(kids('Settings')).toEqual([
       'General & automation', 'Company', 'Divisions & ownership', 'Users & roles', 'Integrations', 'AI agents',
       'Spot quoter & e-mail', 'Carrier Sales', 'Commissions', 'Reports', 'Audit log', 'Compliance', 'Platform health', 'Demo',
@@ -382,7 +382,7 @@ describe('tmsBreadcrumb', () => {
     expect(labels('/tms/invoicing/payable')).toEqual(['Accounting', 'Accounts Payable'])
     expect(labels('/tms/invoicing/payable/bills/B-1')).toEqual(['Accounting', 'Accounts Payable', 'Bill'])
     expect(labels('/tms/vendors')).toEqual(['Accounting', 'Vendors'])
-    expect(labels('/tms/factors')).toEqual(['Accounting', 'Factoring'])
+    expect(labels('/tms/invoicing/factored')).toEqual(['Accounting', 'Accounts Receivable', 'Factored'])
   })
 
   it('names the quote pages without leaking an id', () => {

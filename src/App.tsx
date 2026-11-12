@@ -72,7 +72,6 @@ import { LoadReviewPage } from '@/features/tms/loadReview/LoadReviewPage'
 import { CarrierSalesPage } from '@/features/tms/carrierSales/CarrierSalesPage'
 import { SpotCallbackPage } from '@/features/spot-quoter/SpotCallbackPage'
 import { QuoteRespondPage } from '@/features/quotes/public/QuoteRespondPage'
-import { FactoringPage } from '@/features/factoring/FactoringPage'
 import { InvoicingPage } from '@/features/ar/InvoicingPage'
 import { InvoiceDetail } from '@/features/ar/InvoiceDetail'
 import { BillDetail } from '@/features/ap/BillDetail'
@@ -184,7 +183,8 @@ export default function App() {
                   <Route path="carriers" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carriers"><CarriersHub tab="list" /></DormantPage></RequirePage>} />
                   <Route path="carriers/find" element={<RequirePage page={['carriers', 'loads', 'tms']}><DormantPage page="carriers"><CarriersHub tab="find" /></DormantPage></RequirePage>} />
                   <Route path="carriers/:id" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carrierProfile"><CarriersPage /></DormantPage></RequirePage>} />
-                  <Route path="factors" element={<RequirePage page={['factoring', 'tms']}><FactoringPage /></RequirePage>} />
+                  <Route path="invoicing/factored" element={<RequirePage page={['factoring', 'tms']}><DormantPage page="invoicingAr"><InvoicingPage /></DormantPage></RequirePage>} />
+                  <Route path="factors" element={<Navigate to="/tms/invoicing/factored" replace />} />
                   <Route path="customers" element={<RequirePage page={['customers', 'tms']}><CustomersPage /></RequirePage>} />
                   {/* Step AW D.2: who is billed how. Same grant as the Customers list. */}
                   <Route path="customers/billing-setup" element={<RequirePage page={['customers', 'tms']}><DormantPage page="billingSetup"><BillingSetupPage /></DormantPage></RequirePage>} />
@@ -227,7 +227,7 @@ export default function App() {
               <Route path="/finances" element={<RequirePage page="finances"><FinancesPage /></RequirePage>} />
               <Route path="/finances/review" element={<RequirePage page="finances"><ProfitReviewPage /></RequirePage>} />
               <Route path="/finance/cash-checkin" element={<RequirePage page="cashCheckIn"><WeeklyCashCheckInPage /></RequirePage>} />
-              <Route path="/factoring" element={<ParamRedirect to="/tms/factors" />} />
+              <Route path="/factoring" element={<ParamRedirect to="/tms/invoicing/factored" />} />
               <Route path="/ar" element={<ParamRedirect to="/tms/invoicing" />} />
               <Route path="/ar/invoices/:id" element={<ParamRedirect to="/tms/invoicing/invoices/:id" />} />
               <Route path="/ap" element={<ParamRedirect to="/tms/invoicing/payable" />} />

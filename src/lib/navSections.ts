@@ -100,7 +100,6 @@ export interface NavSectionsResult {
 const ACCOUNTING_CHILDREN: NavChildDef[] = [
   { to: '/tms/invoicing', label: 'Accounts Receivable', pageKey: 'invoicing', tms: true, badgeKey: 'arToInvoice', exclude: ['/tms/invoicing/payable'] },
   { to: '/tms/invoicing/payable', label: 'Accounts Payable', pageKey: 'carrierPay', tms: true, badgeKey: 'apToReview' },
-  { to: '/tms/factors', label: 'Factoring', pageKey: 'factoring', tms: true },
   { to: '/tms/vendors', label: 'Vendors', pageKey: 'vendorAp', tms: true },
 ]
 
@@ -262,7 +261,7 @@ const CRUMBS: CrumbRule[] = [
   { path: '/tms/invoicing/payable', crumbs: [ACCOUNTING, { label: 'Accounts Payable' }] },
   { path: '/tms/invoicing/payable/bills', prefix: true, crumbs: [ACCOUNTING, AP, { label: 'Bill' }] },
   { path: '/tms/vendors', crumbs: [ACCOUNTING, { label: 'Vendors' }] },
-  { path: '/tms/factors', crumbs: [ACCOUNTING, { label: 'Factoring' }] },
+  { path: '/tms/invoicing/factored', crumbs: [ACCOUNTING, AR, { label: 'Factored' }] },
   { path: '/tms/customers/billing-setup', crumbs: [{ label: 'Customers', to: '/tms/customers' }, { label: 'Billing setup' }] },
   { path: '/tms/brokerage/company/data/aljex-reconciliation', crumbs: [SETTINGS, { label: 'Company', to: '/tms/brokerage/company' }, { label: 'Aljex reconciliation' }] },
   { path: '/tms/brokerage', prefix: true, crumbs: [SETTINGS, { label: 'General & automation' }] },

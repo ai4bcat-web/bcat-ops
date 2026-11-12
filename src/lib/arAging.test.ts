@@ -298,19 +298,21 @@ describe('agingCsv', () => {
   it('writes dollars from cents and escapes a customer name with a comma', () => {
     const { byCustomer } = ageInvoices(
       [
-        invoice({ id: 'i1', customerId: 'c2', customerName: 'Rev, Inc', dueAt: '2026-10-20', balanceCents: 125_050 }),
-        invoice({ id: 'i2', customerId: 'c2', customerName: 'Rev, Inc', dueAt: '2026-08-01', balanceCents: 7 }),
+        invoice({ id: 'i1', customerId: 'c2', customerName: 'Rev, Inc', invoiceDate: '2026-09-20', dueAt: '2026-10-20', balanceCents: 125_050 }),
+        invoice({ id: 'i2', customerId: 'c2', customerName: 'Rev, Inc', invoiceDate: '2026-07-02', dueAt: '2026-08-01', balanceCents: 7 }),
       ],
       '2026-10-15',
+      { fromInvoiceDate: true },
     )
     const csv = agingCsv(byCustomer)
     const lines = csv.split('\n')
     expect(lines[0]).toBe(
-      ['Customer', ...AGING_BUCKETS.map((b) => AGING_BUCKET_LABEL[b]), 'Total', 'Late invoices', 'Oldest days']
+      ['Customer', '0–30', '31–60', '61–90', '90+', 'Total', 'Late invoices', 'Oldest days']
         .map((h) => `"${h}"`)
         .join(','),
     )
-    expect(lines[1]).toBe('"Rev, Inc","1250.50","0.00","0.00","0.07","0.00","1250.57","1","75"')
+    // Aged from the invoice date: 25 days → 0–30, 105 days → 90+; lateness still from the due date.
+    expect(lines[1]).toBe('"Rev, Inc","1250.50","0.00","0.00","0.07","1250.57","1","75"')
   })
 
   it('doubles an embedded quote and renders a header for no rows', () => {

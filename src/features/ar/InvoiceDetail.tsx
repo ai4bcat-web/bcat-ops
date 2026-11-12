@@ -443,7 +443,7 @@ export function InvoiceDetail() {
         <TmsCard
           title="Factoring"
           actions={
-            <Link className="tms-btn tms-btn-ghost tms-btn-sm" to="/tms/factors" aria-label="Open the factoring queue">
+            <Link className="tms-btn tms-btn-ghost tms-btn-sm" to="/tms/invoicing/factored" aria-label="Open the factoring queue">
               Factoring queue <ExternalLink size={13} />
             </Link>
           }
