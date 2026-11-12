@@ -20,7 +20,7 @@ const SECTIONS = [
 /**
  * The tab strip above the Shipments board and the shipment form (Ryne 2026-11-11): Active, All, Intake and Voided are the permanent first tabs, every shipment
  * opened for editing is another. Each open shipment keeps its form (and so its draft and its edit lock) until its tab is closed, it is
- * saved and exited, or discarded. Middle-click closes a tab; a dot marks unsaved edits. Create shipment sits at the right end on the board.
+ * saved and exited, or discarded. Middle-click closes a tab; a dot marks unsaved edits. Create shipment is in the board toolbar.
  */
 export function ShipmentTabStrip() {
   const tabsApi = useShipmentTabs()
@@ -76,11 +76,6 @@ export function ShipmentTabStrip() {
             )
           })}
         </div>
-        {onBoard && (
-          <TmsButton size="sm" variant="primary" className="tms-ship-tabs-action" data-testid="create-shipment" onClick={() => navigate(`${BOARD}/new`)}>
-            Create shipment
-          </TmsButton>
-        )}
       </div>
       <TmsDialog
         open={confirming != null}

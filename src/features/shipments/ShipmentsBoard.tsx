@@ -14,7 +14,7 @@ import { phaseInputOfRow } from './deliveryPhaseInputs'
 import './deliveryTimeline.css'
 import { TrackingModeNotSetRowChip } from './trackingModeControl/TrackingModeNotSetChip'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   Clock,
@@ -39,7 +39,6 @@ import {
   ClearFiltersButton,
   DensityToggle,
   DenseKpiStrip,
-  SummaryToggle,
   type DenseKpi,
 } from '@/features/tms/grid/DenseControls'
 import {
@@ -82,7 +81,7 @@ import { displayName } from '@/lib/roles'
 import { inShipmentList, monthsOfYear, parseShipmentList, shipmentYears, type ShipmentList, type ShipmentYear } from '@/lib/shipmentLists'
 import { chicagoYear } from '@/lib/date'
 import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
-import { SEED_DIVISIONS } from '@/lib/ownership'
+import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
 import { cn } from '@/lib/utils'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
@@ -106,6 +105,7 @@ import {
   podStatusOf,
   docsMissingOf,
   type ShipmentRow,
+  profitByDivision,
 } from './shipmentViews'
 import {
   ACTIONS_COLUMN,
@@ -356,7 +356,7 @@ export function ShipmentsBoard() {
 
   return (
     <div className="tms-dense-page tms-caps">
-      {/* Create shipment sits on the tab strip, so this row only appears when the All or Voided list has a year or period to pick. */}
+      {/* Create shipment sits in the toolbar below, so this row only appears when the All or Voided list has a year or period to pick. */}
       {(partial || wantsAllList || wantsVoidedList) && (
         <div className="tms-dense-bar">
           <div className="flex items-center gap-3">
@@ -501,6 +501,7 @@ function BoardPane({
   onSplit,
   onReport,
 }: BoardPaneProps) {
+  const navigate = useNavigate()
   const { staff: staffProfiles } = staff
   const divisions = useOwnershipDivisions().divisions ?? SEED_DIVISIONS
   const { drivers } = useDrivers()
@@ -1003,15 +1004,13 @@ function BoardPane({
     resetPage()
   }, [resetPage])
 
-  // The summary strip counts what the list shows now, so it follows every filter.
+  // The stats strip counts what the list shows now, so it follows every filter. It is always on.
   const kpis = useMemo<DenseKpi[]>(() => {
-    if (!prefs.kpiOpen) return []
     let open = 0
     let moving = 0
     let delivered = 0
     let docs = 0
     let revenue = 0
-    let profit = 0
     for (const r of filteredRows) {
       const status = boardStatusOf(r)
       if (status === 'OPEN') open += 1
@@ -1019,8 +1018,14 @@ function BoardPane({
       else if (status === 'DELIVERED') delivered += 1
       if (docsMissingOf(r).length > 0) docs += 1
       revenue += r.revenueCents ?? 0
-      profit += r.profitCents ?? 0
     }
+    const split = profitByDivision(filteredRows, (code) => topLevelOf(divisions, code))
+    const margin = (d: { revenueCents: number; profitCents: number }) => (d.revenueCents > 0 ? ` (${Math.round((d.profitCents / d.revenueCents) * 100)}%)` : '')
+    const part = (name: string, d: { revenueCents: number; profitCents: number }, muted = false) => (
+      <span key={name} className={`tms-dg-kpi-part${d.profitCents < 0 ? ' tms-dg-kpi-part-bad' : ''}${muted ? ' tms-dg-kpi-part-muted' : ''}`}>
+        <span className="tms-dg-kpi-part-name">{name}</span> {formatCents(d.profitCents)}{margin(d)}
+      </span>
+    )
     return [
       { label: 'Shipments', value: filteredRows.length },
       { label: 'Open', value: open },
@@ -1028,9 +1033,18 @@ function BoardPane({
       { label: 'Delivered', value: delivered },
       { label: 'Missing docs', value: docs, tone: docs > 0 ? 'warn' : undefined },
       { label: 'Revenue', value: formatCents(revenue) },
-      { label: 'Gross profit', value: formatCents(profit), tone: profit < 0 ? 'bad' : 'good' },
+      {
+        label: 'Gross profit',
+        value: (
+          <span className="tms-dg-kpi-split" title={`Total ${formatCents(split.total.profitCents)}${margin(split.total)}`}>
+            {part('Brokerage', split.brokerage)}
+            {part('Assets', split.assets)}
+            {split.other.count > 0 && split.other.profitCents !== 0 ? part('Other', split.other, true) : null}
+          </span>
+        ),
+      },
     ]
-  }, [prefs.kpiOpen, filteredRows])
+  }, [filteredRows, divisions])
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -1086,9 +1100,11 @@ function BoardPane({
           </>
         )}
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
-        <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
+        <TmsButton size="sm" variant="primary" data-testid="create-shipment" onClick={() => navigate('/tms/shipments/new')}>
+          Create shipment
+        </TmsButton>
       </div>
-      <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+      <DenseKpiStrip open items={kpis} />
       <CurrentlyViewing rows={allRows} onOpen={(id) => setOpenDrawerId(id)} onChanged={handleRefresh} />
       {isOwner && selectedIds.length > 0 && (
         <div className="tms-dense-bar" data-testid="delete-selected-bar">

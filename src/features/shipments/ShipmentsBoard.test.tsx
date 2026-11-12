@@ -458,6 +458,21 @@ describe('ShipmentsBoard', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('the stats strip compares gross profit for Brokerage and Assets, with Other only when it has some', async () => {
+    renderBoard('/tms/shipments', [
+      row('S001', { revDivision: 'BROKERAGE', revenueCents: 100_000, profitCents: 20_000 }),
+      row('S002', { revDivision: 'ASSETS', revSubdivision: 'LOCAL', revenueCents: 50_000, profitCents: 10_000 }),
+    ])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    const strip = screen.getByRole('region', { name: 'Summary' })
+    expect(strip).toHaveTextContent('Brokerage')
+    expect(strip).toHaveTextContent('$200.00 (20%)')
+    expect(strip).toHaveTextContent('Assets')
+    expect(strip).toHaveTextContent('$100.00 (20%)')
+    expect(strip).not.toHaveTextContent('Other')
+    expect(strip.querySelector('.tms-dg-kpi-split')?.getAttribute('title')).toContain('Total $300.00 (20%)')
+  })
+
   it('has no Demo chip', async () => {
     renderBoard('/tms/shipments')
     await screen.findByRole('textbox', { name: 'Search shipments' })
@@ -801,16 +816,16 @@ describe('ShipmentsBoard', () => {
       return [...document.querySelectorAll('tbody tr[data-tone]')].map((tr) => tr.querySelectorAll('td')[at]?.textContent)
     }
 
-    it('opens with Status, RC, POD, PRO # and Customer Ref # fixed on the left, no side panel and the summary collapsed', async () => {
+    it('opens with Status, RC, POD, PRO # and Customer Ref # fixed on the left, no side panel and the stats strip always on', async () => {
       renderBoard('/tms/shipments', [row('S001')])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
       const heads = [...document.querySelectorAll('thead th')].slice(1, 6)
       expect(heads.map((h) => h.textContent)).toEqual(['Status', 'RC', 'POD', 'PRO #', 'Customer Ref #'])
       expect(heads[0]).toHaveClass('tms-dg-sticky')
       expect(screen.queryByText('Statuses')).toBeNull()
-      expect(screen.queryByRole('region', { name: 'Summary' })).toBeNull()
-      fireEvent.click(screen.getByRole('button', { name: /Summary/ }))
       expect(screen.getByRole('region', { name: 'Summary' })).toHaveTextContent('Shipments')
+      expect(screen.queryByRole('button', { name: /Summary/ })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Create shipment' })).toBeTruthy()
     })
 
     it('sorts by any column on a header click, ascending then descending', async () => {

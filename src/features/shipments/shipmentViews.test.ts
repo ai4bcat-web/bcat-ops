@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { AssignmentType, BoardStatusKey } from '@/types/tms'
 import {
+  profitByDivision,
   ALJEX_COLUMN_KEYS,
   BOARD_COLUMNS,
   BOARD_COLUMN_GROUPS,
@@ -32,6 +33,7 @@ import {
   displayStatusOf,
 } from './shipmentViews'
 import { applyViewFilters } from '@/lib/shipmentViewDefs'
+import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
 
 function row(id: string, patch: Partial<ShipmentRow> = {}): ShipmentRow {
   return {
@@ -716,3 +718,30 @@ describe('division label', () => {
   })
 })
 
+
+describe('profitByDivision', () => {
+  const top = (code: string) => topLevelOf(SEED_DIVISIONS, code)
+  const rows = [
+    row('b1', { revDivision: 'BROKERAGE', revenueCents: 100_000, profitCents: 20_000 }),
+    row('b2', { revDivision: 'BROKERAGE', revenueCents: 50_000, profitCents: -5_000 }),
+    row('a1', { revDivision: 'ASSETS', revenueCents: 80_000, profitCents: 40_000 }),
+    row('a2', { revDivision: 'LOCAL', revSubdivision: null, revenueCents: 10_000, profitCents: 6_000 }),
+    row('a3', { revDivision: 'ASSETS', revSubdivision: 'OWNER_OPERATOR', revenueCents: 20_000, profitCents: 4_000 }),
+    row('a4', { revDivision: 'BOX_TRUCK', revenueCents: 30_000, profitCents: 9_000 }),
+    row('c1', { revDivision: 'CAR_SHIPPING', revenueCents: 60_000, profitCents: 12_000 }),
+    row('n1', { revDivision: null, revenueCents: 5_000, profitCents: 1_000 }),
+  ]
+
+  it('splits Brokerage, Assets (with every subdivision) and Other, and keeps the total', () => {
+    const out = profitByDivision(rows, top)
+    expect(out.brokerage).toEqual({ revenueCents: 150_000, profitCents: 15_000, count: 2 })
+    expect(out.assets).toEqual({ revenueCents: 140_000, profitCents: 59_000, count: 4 })
+    expect(out.other).toEqual({ revenueCents: 65_000, profitCents: 13_000, count: 2 })
+    expect(out.total).toEqual({ revenueCents: 355_000, profitCents: 87_000, count: 8 })
+  })
+
+  it('treats missing figures as zero and an empty list as all zeros', () => {
+    expect(profitByDivision([row('x', { revDivision: 'BROKERAGE', revenueCents: undefined, profitCents: undefined })], top).brokerage.profitCents).toBe(0)
+    expect(profitByDivision([], top).total).toEqual({ revenueCents: 0, profitCents: 0, count: 0 })
+  })
+})
