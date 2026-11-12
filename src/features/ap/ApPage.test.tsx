@@ -25,6 +25,13 @@ const carrierApMock = vi.hoisted(() => vi.fn())
 vi.mock('@/hooks/useApWorklist', () => ({ useApWorklist: worklistMock }))
 vi.mock('@/hooks/useOpenBills', () => ({ useOpenBills: openBillsMock }))
 vi.mock('@/hooks/useCarrierAp', () => ({ useCarrierAp: carrierApMock }))
+// Every bill in these tests is on a delivered load (the Payables rule); PO and delivery are fixed.
+vi.mock('./useBillFacts', () => ({
+  useBillFacts: () => ({
+    facts: { get: () => ({ shipmentNumber: 'S-1001', po: 'PO-77', deliveredAt: '2026-10-20T12:00:00.000Z', delivered: true }) },
+    loading: false,
+  }),
+}))
 vi.mock('@/hooks/useCarriers', () => ({
   useCarriers: () => ({ carriers: [], loading: false, error: null, refresh: vi.fn(), replace: vi.fn() }),
 }))
@@ -202,7 +209,7 @@ beforeEach(() => vi.clearAllMocks())
 describe('the AP board', () => {
   it('offers every view of the money, and each one renders', async () => {
     await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
-    for (const label of ['Awaiting invoice', 'Expected', 'Aging(?! report)', 'Selected', 'Paid', 'Payments & credits', 'Aging report', 'AP inbox']) {
+    for (const label of ['Expected', 'Aging(?! report)', 'Selected', 'Paid', 'Payments & credits', 'Aging report', 'AP inbox']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
       fireEvent.click(tab)
       expect(tab.getAttribute('aria-selected')).toBe('true')
@@ -240,10 +247,11 @@ describe('the AP board', () => {
     })
     fireEvent.click(screen.getByRole('tab', { name: /^Expected/ }))
 
-    expect(screen.getAllByText('Needs invoice date & due date').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Pending').length).toBe(2)
+    expect(screen.getAllByText('Needs invoice date').length).toBeGreaterThan(0)
+    // The invoice date is pending; the due date shows as an estimate from the delivery date and terms.
+    expect(screen.getAllByText('Pending').length).toBe(1)
     expect(screen.getByText(/Set the invoice date and due date from the carrier/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /^Set dates for bill/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Add invoice date for bill/ }))
     expect(screen.getByText(/dates dialog for/)).toBeTruthy()
   })
 
@@ -275,51 +283,15 @@ describe('the AP board', () => {
     expect(within(strip.getByText('Avg days to pay').closest('.tms-kpi-card') as HTMLElement).getByText('—')).toBeTruthy()
   })
 
-  it('offers to record a bill against an assignment nobody has invoiced', async () => {
+  /**
+   * Payables is the bills Move to billing created (Ryne 2026-11-12): a carrier leg with no bill yet is
+   * still Load review's work, so the board no longer has an Awaiting invoice tab.
+   */
+  it('has no Awaiting invoice tab and opens on Expected', async () => {
     await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
-
-    expect(screen.getByRole('button', { name: 'Record bill for S-1001' })).toBeTruthy()
-    expect(screen.getByText('$1,500.00')).toBeTruthy()
-  })
-
-  /**
-   * An own-fleet leg is paid through the driver's settlement. A Record button here would
-   * raise a carrier bill for freight the driver is already being paid for.
-   */
-  it('refuses to bill an own-fleet leg and points at driver pay instead', async () => {
-    await setup({
-      rowsByTab: {
-        AWAITING_INVOICE: [worklistRow({
-          assignment: assignment({ kind: 'OWN_ASSET', driverName: 'Ivan P.', carrierName: null }),
-        })],
-      },
-    })
-
-    expect(screen.getByText(/Settled through driver pay/)).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: /^Awaiting invoice/ })).toBeNull()
+    expect(screen.getByRole('tab', { name: /^Expected/ }).getAttribute('aria-selected')).toBe('true')
     expect(screen.queryByRole('button', { name: /^Record bill/ })).toBeNull()
-  })
-
-  /**
-   * One bill per carrier per load: a two-carrier load is two awaiting rows on one PRO. Each
-   * carries its own Record action (named for its carrier), and the single-carrier row beside
-   * them wears no chip.
-   */
-  it('lists a two-carrier load as two awaiting rows, each with its own Record bill', async () => {
-    const second = worklistRow({
-      assignment: assignment({ id: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight', costCents: 80_000 }),
-      loadCarrierId: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight', costCents: 80_000,
-    })
-    const solo = worklistRow({
-      assignment: assignment({ id: 'lc9', loadId: 'l9', shipmentId: 's9', carrierName: 'Solo Haul' }),
-      loadCarrierId: 'lc9', loadId: 'l9', shipmentId: 's9', shipmentNumber: 'S-2002', carrierName: 'Solo Haul',
-    })
-    await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow(), second, solo] }, bills: [] })
-
-    expect(screen.getAllByText('Shared PRO · 2 carriers')).toHaveLength(2)
-    expect(screen.getByRole('button', { name: 'Record bill for S-1001 — Blue Line Trucking' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Record bill for S-1001 — Red Line Freight' })).toBeTruthy()
-    // Byte-identical for a single-carrier load: same label, no chip.
-    expect(screen.getByRole('button', { name: 'Record bill for S-2002' })).toBeTruthy()
   })
 
   it('pays, ages and shows each carrier bill of one load on its own row', async () => {

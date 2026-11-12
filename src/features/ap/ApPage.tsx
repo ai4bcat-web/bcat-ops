@@ -1146,14 +1146,7 @@ function payableView({
       const chip = statusChip(bill)
       return <TmsBadge tone={chip.tone}>{chip.label}</TmsBadge>
     }),
-    moneyCol<CarrierBillRecord>('net', 'NET', (bill) => bill.netCents, (bill) => (
-      <span className={RIGHT}>
-        {formatCents(bill.netCents)}
-        {bill.varianceCents !== 0 && (
-          <> <TmsBadge tone="red">{formatCents(bill.varianceCents)} variance</TmsBadge></>
-        )}
-      </span>
-    )),
+    moneyCol<CarrierBillRecord>('net', 'NET', (bill) => bill.netCents),
     moneyCol<CarrierBillRecord>('paid', 'PAID', (bill) => bill.paidCents),
     moneyCol<CarrierBillRecord>('balance', 'BALANCE', (bill) => bill.balanceCents, (bill) => (
       <span className={`${RIGHT} font-medium`}>{formatCents(bill.balanceCents)}</span>

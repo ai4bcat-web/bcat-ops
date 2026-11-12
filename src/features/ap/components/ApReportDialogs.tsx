@@ -26,8 +26,8 @@ function printReport(): void {
 }
 
 const PRINT_CSS = `.ap-report-table { border-collapse: collapse; }
-.ap-report-table th, .ap-report-table td { padding: 4px 8px; border-bottom: 1px solid var(--tms-border, #e5e7eb); text-align: left; white-space: nowrap; }
-.ap-report-table th { font-weight: 600; color: var(--tms-muted, #6b7280); }
+.ap-report-table th, .ap-report-table td { padding: 4px 8px; border-bottom: 1px solid var(--tms-border); text-align: left; white-space: nowrap; }
+.ap-report-table th { font-weight: 600; color: var(--tms-muted); }
 .ap-report-table .text-right { text-align: right; }
 @media print {
   body.ap-printing > *:not(.tms-portal) { display: none !important; }
