@@ -182,7 +182,12 @@ export function reviewFactsOfRow(row: LoadReviewRow): ReviewFacts {
     revDivision: row.revDivision,
     salesRepId: row.salesRepId,
     referenceNumber: row.reference ?? row.customerReference ?? null,
-    podReceived: Array.isArray(row.docsMissing) && row.docsRequired?.includes('POD') === true && !row.docsMissing.includes('POD'),
+    // `docsMissing` only speaks about the types the customer requires. When POD is not on that list
+    // the row cannot say whether one is on file, so it is unknown (null), not "not received": the
+    // server reads the real documents and decides (see pushRefusals).
+    podReceived: !Array.isArray(row.docsMissing)
+      ? null
+      : row.docsRequired?.includes('POD') === true ? !row.docsMissing.includes('POD') : null,
     revenueCents,
     expenseCents,
     profitCents: profitFromFacts(revenueCents, expenseCents),

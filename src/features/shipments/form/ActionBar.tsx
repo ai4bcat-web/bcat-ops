@@ -26,9 +26,11 @@ export interface ActionBarProps {
   onDiscard: () => void
   /** Edit mode: open the Duplicate dialog. Omitted on a create page. */
   onDuplicate?: () => void
+  /** Edit mode, when the load can go to Load Review now: save any edits, then push. Omitted otherwise. */
+  onPushToReview?: () => void
 }
 
-export function ActionBar({ createMode, status, dirty, savedAt, done, total, ready, busy, voided, onRun, onSaveExit, onDiscard, onDuplicate }: ActionBarProps) {
+export function ActionBar({ createMode, status, dirty, savedAt, done, total, ready, busy, voided, onRun, onSaveExit, onDiscard, onDuplicate, onPushToReview }: ActionBarProps) {
   const isDraft = status === 'NEW' || status === 'DRAFT'
   const [nowMs, setNowMs] = useState(() => Date.now())
   useEffect(() => {
@@ -77,6 +79,14 @@ export function ActionBar({ createMode, status, dirty, savedAt, done, total, rea
         >
           {createMode ? 'Create shipment' : 'Save changes'}
         </TmsButton>
+        {!createMode && onPushToReview ? (
+          <TmsButton
+            size="sm" data-testid="ship-form-push-review" disabled={busy || voided} onClick={onPushToReview}
+            title="Saves your changes, then sends this load to Load Review. Billing release happens there."
+          >
+            Push to Load Review
+          </TmsButton>
+        ) : null}
         {!createMode && onSaveExit ? (
           <TmsButton
             size="sm" variant="primary" data-testid="ship-form-save-exit" disabled={busy || voided} onClick={onSaveExit}

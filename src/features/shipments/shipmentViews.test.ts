@@ -498,10 +498,10 @@ describe('POD column', () => {
     expect(podStatusOf(r({ revDivision: 'ASSETS', docsMissing: ['POD', 'BOL'] }))).toBe('NO_POD')
     expect(podStatusOf(r({ revDivision: 'CAR_SHIPPING', docsMissing: ['POD'] }))).toBe('NA')
   })
-  it('every customer requires a POD (hard-coded): POD in when the gate ran and the POD is not missing, whatever the customer setting says; blank only when unknown', () => {
+  it('POD in when the customer requires one and the gate does not list it missing; blank when unknown, including a customer whose document list has no POD (the gate says nothing about one)', () => {
     expect(podStatusOf(r({ docsMissing: ['BOL'] }))).toBe('POD_IN')
     expect(podStatusOf(r({ docsMissing: null }))).toBe('')
-    expect(podStatusOf(r({ docsRequired: ['BOL'], docsMissing: [] }))).toBe('POD_IN')
+    expect(podStatusOf(r({ docsRequired: ['BOL'], docsMissing: [] }))).toBe('')
   })
   it('car shipping (auto shippers) is blank in the fixed POD and RC columns', () => {
     const car = r({ revDivision: 'CAR_SHIPPING', docsMissing: [], rateConSignedAt: '2026-11-10T10:00:00Z' })
