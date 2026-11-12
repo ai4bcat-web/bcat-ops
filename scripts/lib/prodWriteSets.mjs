@@ -93,5 +93,7 @@ export const PROD_WRITE_SETS = {
   // `awShipmentNumber.mjs --apply`: renumber post-cutover shipments (99xxx -> 20000...) in every table awRenumberL moves + TmsSettings.nextShipmentNumber.
   // `awCustomerBilling.mjs --apply`: Customer.billingMethod / apEmail / paymentTermsDays (conditional per customer) + one AuditLog row per customer.
   awCustomerBilling: { models: ['Customer', 'AuditLog'] },
+  // `awCustomerBillingEmails.mjs --apply`: Customer.apEmail only (OTR billing list; blank + non-FACTOR only, conditional) + one AuditLog row per customer.
+  awCustomerBillingEmails: { models: ['Customer', 'AuditLog'] },
   awShipmentNumber: { models: ['Shipment', 'Load', 'Invoice', 'CarrierBill', 'SpotRequest', 'WorkflowRun', 'IntakeLoad', 'TrackingLink', 'Quote', 'LaneRateSample', 'Commission', 'AuditLog', 'TmsSettings'] },
 };
