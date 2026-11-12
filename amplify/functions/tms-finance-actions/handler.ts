@@ -7,10 +7,10 @@
  * router admits anybody holding `page-loads`, which is the right gate for building and
  * moving freight and the wrong one for a ledger.
  *
- * Two gates, not one. Reading and issuing is `page-invoicing` work; **posting** — void,
- * payment, credit, write-off, reversal — is owner/ADMIN while `TmsSettings
- * .arPostingAdminOnly` is true, which it is by default. The setting is read per call
- * rather than cached, because the point of it is that it can be turned off.
+ * One gate per accounting page (src/lib/accountingAccess.ts): holding the page's grant
+ * opens every action on it, posting included (Ryne 2026-11-12). The old
+ * `arPostingAdminOnly` / `apApprovalAdminOnly` / `apPostingAdminOnly` settings no longer
+ * restrict anything.
  */
 import './tableEnv'
 import { parseInput, type Caller } from '../_shared/actionInputs'
@@ -64,15 +64,12 @@ import {
   saveCommissionSettings,
   submitPayPeriod,
 } from './commissions'
+import { accountingAccessMessage, hasAccountingPage } from '../../../src/lib/accountingAccess'
 import {
   ADMIN_GROUP,
-  BILLING_RELEASE_PAGE_GROUP,
-  CARRIER_PAY_PAGE_GROUP,
-  INVOICING_PAGE_GROUP,
   OWNER_EMAIL,
   getCallerEmail,
   getGroups,
-  getSettings,
   type AppSyncIdentity,
   type Row,
 } from './store'
@@ -127,21 +124,11 @@ type Action =
   | 'SYNC_FACTORING_CHANGE'
   | 'BROKERAGE_REP_ROLLUP'
 
-/** The actions that move money and are owner/ADMIN while `arPostingAdminOnly` holds. */
-const POSTING_ACTIONS: Record<string, true> = {
-  VOID_INVOICE: true,
-  RECORD_PAYMENT: true,
-  CREATE_CREDIT: true,
-  WRITE_OFF: true,
-  REVERSE_PAYMENT: true,
-}
-
 /**
- * AP is a separate permission from AR, and separately switchable.
+ * AP is a separate page from AR.
  *
- * `page-invoicing` alone is refused on every one of these: billing a customer and
- * paying a carrier are different jobs with different consequences, and MVMNT treats
- * AP approval as its own capability.
+ * Accounts payable is its own page (`page-carrierPay`): billing a customer and paying a
+ * carrier are different jobs, so `page-invoicing` never opens these.
  */
 const AP_ACTIONS: Record<string, true> = {
   PREVIEW_BILL: true,
@@ -159,22 +146,6 @@ const AP_ACTIONS: Record<string, true> = {
   RENDER_REMITTANCE_PDF: true,
   MARK_REMITTANCE_SENT: true,
   SAVE_AP_SETTINGS: true,
-}
-
-/** Approving a bill is its own capability, behind `apApprovalAdminOnly`. */
-const AP_APPROVAL_ACTIONS: Record<string, true> = {
-  APPROVE_BILL: true,
-  UNAPPROVE_BILL: true,
-  SELECT_BILLS_FOR_PAYMENT: true,
-  UNSELECT_BILLS: true,
-}
-
-/** Money leaving the bank, behind `apPostingAdminOnly`. */
-const AP_POSTING_ACTIONS: Record<string, true> = {
-  VOID_BILL: true,
-  RECORD_AP_PAYMENT: true,
-  CREATE_AP_CREDIT: true,
-  REVERSE_AP_PAYMENT: true,
 }
 
 /** Settings are an admin act in every router here, posting rule or not. */
@@ -209,38 +180,26 @@ const COMMISSION_ACTIONS: Record<string, true> = {
   SAVE_COMMISSION_SETTINGS: true,
 }
 
-/**
- * Release to billing, sending, queueing for the factor and marking sent: the owner, the
- * ADMIN group, and users granted `page-billingRelease` (Ryne 2026-11-12; before that the
- * grant alone). No `page-tms`/`page-invoicing` bypass. Checked before every other rule.
- *
- * Posting an invoice is the same act: issuing it (GENERATE_INVOICE / BATCH_GENERATE turn
- * UNBILLED into UNPAID and take the next invoice number) is behind the same grant, so
- * "who may post" is the admins plus the members of `page-billingRelease`. Holding
- * `page-invoicing` or `page-tms` opens the AR screens but never posts.
- */
-const BILLING_RELEASE_ACTIONS: Record<string, true> = {
-  GENERATE_INVOICE: true,
-  BATCH_GENERATE: true,
-  RELEASE_TO_BILLING: true,
-  SEND_INVOICE: true,
-  SYNC_FACTORING_CHANGE: true,
-  EMAIL_INVOICE: true,
-  BATCH_EMAIL: true,
-  SEND_TO_FACTOR: true,
-  MARK_SENT: true,
-}
-
-const COMMISSIONS_PAGE_GROUP = 'page-commissions'
-/** Step R: the one BROKERAGE grant. Invoicing and carrier pay are BROKERAGE pages. */
-const TMS_PAGE_GROUP = 'page-tms'
-
 interface AppSyncEvent {
   arguments: {
     action: string
     input?: string | Record<string, unknown> | null
   }
   identity?: AppSyncIdentity | null
+}
+
+/**
+ * The accounting page an action belongs to (Ryne 2026-11-12): holding that page's grant
+ * opens the action, whatever it is. Release to billing is Load review's act; sending to the
+ * factor and syncing a factoring change belong to Invoicing or Factoring; carrier bills to
+ * Accounts payable; commissions to their own desk; everything else here is Invoicing.
+ */
+function accountingPagesFor(action: Action): readonly string[] {
+  if (action === 'RELEASE_TO_BILLING') return ['loadReview', 'invoicing']
+  if (action === 'SEND_TO_FACTOR' || action === 'SYNC_FACTORING_CHANGE') return ['invoicing', 'factoring']
+  if (COMMISSION_ACTIONS[action]) return ['commissions']
+  if (AP_ACTIONS[action]) return ['carrierPay']
+  return ['invoicing']
 }
 
 async function authorize(action: Action, identity?: AppSyncIdentity | null): Promise<Caller> {
@@ -250,46 +209,14 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   const groups = getGroups(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
 
-  // Ryne 2026-11-12: admins (ADMIN group, the owner) and anyone granted the page may release and send.
-  if (BILLING_RELEASE_ACTIONS[action] && !isAdmin && !groups.includes(BILLING_RELEASE_PAGE_GROUP)) {
-    throw new Error(`Forbidden: ${action} requires owner, ADMIN, or the ${BILLING_RELEASE_PAGE_GROUP} grant`)
-  }
-  if (BILLING_RELEASE_ACTIONS[action]) return { email, sub: identity.sub, groups, isAdmin }
-
-  // The commission desk is its own door, decided before the AR/AP page rule:
-  // a rep who may see their own commission is not thereby an invoicing user,
-  // and an invoicing user is not thereby on the commission ladder.
-  if (COMMISSION_ACTIONS[action]) {
-    if (!isAdmin && !groups.includes(COMMISSIONS_PAGE_GROUP)) {
-      throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${COMMISSIONS_PAGE_GROUP}`)
-    }
-    if (ADMIN_ONLY_ACTIONS[action] && !isAdmin) {
-      throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
-    }
-    return { email, sub: identity.sub, groups, isAdmin }
-  }
-
-  const isAp = AP_ACTIONS[action] === true
-  const pageGroup = isAp ? CARRIER_PAY_PAGE_GROUP : INVOICING_PAGE_GROUP
-  // Step R: Invoicing and carrier pay are BROKERAGE pages, so the one TMS grant
-  // opens the same AR/AP door its page group does. The commission desk above keeps
-  // its own door, and the posting gate below is unchanged.
-  if (!isAdmin && !groups.includes(pageGroup) && !groups.includes(TMS_PAGE_GROUP)) {
-    throw new Error(`Forbidden: ${action} requires owner, ADMIN, ${pageGroup}, or ${TMS_PAGE_GROUP}`)
-  }
+  // Settings and moving an invoiced shipment to another customer are not actions on a page.
   if (ADMIN_ONLY_ACTIONS[action] && !isAdmin) {
     throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
   }
-  if (!isAdmin && (POSTING_ACTIONS[action] || AP_APPROVAL_ACTIONS[action] || AP_POSTING_ACTIONS[action])) {
-    const settings = await getSettings()
-    const flag = AP_APPROVAL_ACTIONS[action]
-      ? settings.apApprovalAdminOnly
-      : AP_POSTING_ACTIONS[action]
-        ? settings.apPostingAdminOnly
-        : settings.arPostingAdminOnly
-    if (flag !== false) {
-      throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
-    }
+  // Page access is every action on the page: no separate posting, approval or send layer.
+  const pages = accountingPagesFor(action)
+  if (!pages.some((key) => hasAccountingPage(groups, email, key))) {
+    throw new Error(`Forbidden: ${accountingAccessMessage(pages[0])}`)
   }
   return { email, sub: identity.sub, groups, isAdmin }
 }

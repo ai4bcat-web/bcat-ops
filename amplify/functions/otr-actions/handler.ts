@@ -39,7 +39,7 @@ import { isManualStepId, manualProgress, withManualStep } from '../../../src/lib
 import type { ManualInvoiceSteps } from '../../../src/types'
 import { localStatusFor } from '../../../src/lib/otrInvoiceStatus'
 import { decideResubmit, sameInvoiceBack, withPriorInvoice } from '../../../src/lib/factoringResubmit'
-import { canSetCustomerPaid } from '../../../src/lib/auth/admin'
+import { accountingAccessMessage, hasAccountingPage } from '../../../src/lib/accountingAccess'
 import { normalizePro } from '../../../src/lib/proNumber'
 import {
   OtrClient,
@@ -964,6 +964,9 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
     ? rawGroups.filter((g): g is string => typeof g === 'string')
     : typeof rawGroups === 'string' ? rawGroups.split(',').map((g) => g.trim()).filter(Boolean) : []
   const caller = { email: actor, groups }
+  // The factoring queue is an accounting page: its grant (or Invoicing, which it is moving
+  // into) opens every action here; nobody else may touch OTR (Ryne 2026-11-12).
+  if (!hasAccountingPage(groups, actor, 'factoring')) return fail(accountingAccessMessage('factoring'))
 
   try {
     switch (action) {
@@ -1604,11 +1607,10 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: Re
 
       /**
        * When the customer paid this invoice (not when OTR funded it). A date, or '' to clear,
-       * and an optional check number / ACH trace. Finance only; every change is audited. The
+       * and an optional check number / ACH trace. Anyone on the factoring page; every change is audited. The
        * AR payment-received tab is expected to feed these two fields later.
        */
       case 'setCustomerPaid': {
-        if (!canSetCustomerPaid(caller)) return fail('Only an admin, Ryne or Jenny can set when the customer paid.')
         const item = await getFactoringItem(String(input.id))
         if (!item) return fail('factoring item not found')
         const paidOn = trim(input.paidOn)

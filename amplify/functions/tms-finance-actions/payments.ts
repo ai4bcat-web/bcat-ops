@@ -284,6 +284,8 @@ export async function recordPayment(input: Row, caller: Caller): Promise<PostedR
   const creditApplications = assertCreditApplications(input.creditApplications, 'creditApplications')
   const note = optionalString(input.note, MAX_NOTE)
   const clientRequestId = optionalString(input.clientRequestId, 64)
+  const acceptOverage = input.acceptOverage === true
+  const overageReason = optionalString(input.overageReason, MAX_NOTE)
 
   const id = paymentId('pay', customerId, clientRequestId)
   const existing = await alreadyPosted(id)
@@ -303,6 +305,10 @@ export async function recordPayment(input: Row, caller: Caller): Promise<PostedR
     credits,
   })
   if (!plan.ok) throw new Error(plan.errors.join('; '))
+  // Paid in full despite the overage: the extra is recorded on the payment and never becomes
+  // credit, so nothing can later spend it and a reversal has no credit to take back.
+  const overageAcceptedCents = acceptOverage ? plan.unappliedCents : 0
+  const unappliedCents = plan.unappliedCents - overageAcceptedCents
 
   const now = nowIso()
   const { writes, invoiceIds } = await ledgerWrites(plan, before, caller, now, 'APPLY')
@@ -317,7 +323,8 @@ export async function recordPayment(input: Row, caller: Caller): Promise<PostedR
       reference,
       amountCents,
       appliedCents: plan.appliedCents,
-      unappliedCents: plan.unappliedCents,
+      unappliedCents,
+      ...(overageAcceptedCents > 0 ? { overageAcceptedCents, overageReason: overageReason ?? null } : {}),
       applications,
       creditApplications,
       note,
@@ -333,7 +340,9 @@ export async function recordPayment(input: Row, caller: Caller): Promise<PostedR
       customerId,
       amountCents,
       appliedCents: plan.appliedCents,
-      unappliedCents: plan.unappliedCents,
+      unappliedCents,
+      overageAcceptedCents,
+      overageReason,
       applications,
       creditApplications,
     })
@@ -483,7 +492,9 @@ export async function reversePayment(input: Row, caller: Caller): Promise<Posted
       kind: (original.kind as ArPaymentKind) ?? 'PAYMENT',
       amountCents: numberOrNull(original.amountCents) ?? 0,
       appliedCents: numberOrNull(original.appliedCents) ?? 0,
-      unappliedCents: numberOrNull(original.unappliedCents) ?? 0,
+      // An overage accepted as paid in full never became credit, so nothing can have spent it:
+      // the planner should see it as still unapplied.
+      unappliedCents: (numberOrNull(original.unappliedCents) ?? 0) + (numberOrNull(original.overageAcceptedCents) ?? 0),
       applications: planApplicationsOf(applications),
       creditApplications,
       reversedByPaymentId: typeof original.reversedByPaymentId === 'string' ? original.reversedByPaymentId : null,

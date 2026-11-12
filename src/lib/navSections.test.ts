@@ -117,10 +117,11 @@ describe('buildNavSections', () => {
     expect(sections[0].brand).toBe('Best Care Auto Transport')
   })
 
-  it('opens the whole freight list on the one `tms` grant, minus the admin-only rows and the Dashboard', () => {
+  it('opens the whole freight list on the one `tms` grant, minus the admin-only rows, the Dashboard and the accounting pages', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: grants('tms') })
-    // The tms grant opens the freight pages; Calendar, Dispatch and the Fleet manager pages have their own grants.
-    expect(labels(pinned)).toEqual(['Active shipments', 'Profiles', 'Accounting', 'Settings'])
+    // The tms grant opens the freight pages; Calendar, Dispatch and the Fleet manager pages have their own grants,
+    // and the accounting pages are granted one by one (Ryne 2026-11-12).
+    expect(labels(pinned)).toEqual(['Active shipments', 'Profiles', 'Settings'])
     const settings = pinned.find((i) => i.label === 'Settings')
     expect(labels(settings?.children)).toEqual(['General & automation', 'Commissions', 'Reports', 'Audit log', 'Demo'])
     expect(sections).toEqual([])

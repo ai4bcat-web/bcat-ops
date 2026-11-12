@@ -1,4 +1,5 @@
-import { BILLING_RELEASE_PAGE, PER_USER_GRANT_PAGES, canReleaseToBilling, holdsPerUserGrant } from '@/lib/navItems'
+import { PER_USER_GRANT_PAGES, holdsPerUserGrant } from '@/lib/navItems'
+import { ACCOUNTING_PAGE_KEYS, hasAccountingPage } from '@/lib/accountingAccess'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import {
   signIn, signOut, getCurrentUser, fetchAuthSession,
@@ -110,10 +111,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // The owner and the Cognito ADMIN group (the Users page "Make admin" toggle)
       // bypass page grants. The legacy email allowlist behind `isAdmin` does not:
       // those accounts still need explicit `page-*` grants.
-      // aljexSignoff is a per-user grant (Step AW): no role implies it. billingRelease also opens for admins and the owner.
+      // aljexSignoff is a per-user grant (Step AW): no role implies it. Accounting pages follow
+      // src/lib/accountingAccess.ts, so an older grant that implies one (billingRelease) still opens it.
       hasPageAccess: (pageKey: string) =>
-        pageKey === BILLING_RELEASE_PAGE
-          ? canReleaseToBilling(user?.groups, user?.email)
+        ACCOUNTING_PAGE_KEYS.includes(pageKey)
+          ? hasAccountingPage(user?.groups, user?.email, pageKey)
           : PER_USER_GRANT_PAGES.includes(pageKey)
           ? holdsPerUserGrant(user?.groups, pageKey)
           : isOwner || (user?.groups.includes('ADMIN') ?? false) || (user?.groups.includes(`page-${pageKey}`) ?? false),

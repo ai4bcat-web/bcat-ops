@@ -16,15 +16,17 @@ globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObse
 if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false
 if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
 
-const { listInvoicesByCustomer, listArPaymentsByCustomer, recordPayment } = vi.hoisted(() => ({
+const { listInvoicesByCustomer, listArPaymentsByCustomer, recordPayment, writeOffInvoice } = vi.hoisted(() => ({
   listInvoicesByCustomer: vi.fn(),
   listArPaymentsByCustomer: vi.fn(),
   recordPayment: vi.fn(),
+  writeOffInvoice: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => ({
   listInvoicesByCustomer,
   listArPaymentsByCustomer,
   recordPayment,
+  writeOffInvoice,
   graphqlErrorText: (err: unknown) => (err instanceof Error ? err.message : 'failed'),
 }))
 
@@ -204,5 +206,40 @@ describe('ReceivePaymentDialog', () => {
     expect(screen.getByText('Credit CM-9 has been reversed; its money no longer exists')).toBeTruthy()
     expect(total('From credits total')).toBe('$0.00')
     expect(postButton().disabled).toBe(true)
+  })
+
+  it('keeps an overpayment as credit by default, or accepts it as paid in full', async () => {
+    recordPayment.mockResolvedValue({ payment: { amountCents: 300_000 }, invoices: [], duplicate: false })
+    renderDialog()
+    await openForm()
+    type('Payment amount', '3000.00')
+    type('Apply to invoice INV-000002', '2500.00')
+    await waitFor(() => expect(total('Unapplied total')).toBe('$500.00'))
+    expect((screen.getByLabelText('Keep the extra as customer credit') as HTMLInputElement).checked).toBe(true)
+
+    fireEvent.click(screen.getByLabelText('Accept as paid in full'))
+    type('Reason for accepting the overpayment', 'rounded up')
+    fireEvent.click(postButton())
+    await waitFor(() => expect(recordPayment).toHaveBeenCalled())
+    expect(recordPayment.mock.calls[0][0]).toMatchObject({ acceptOverage: true, overageReason: 'rounded up' })
+  })
+
+  it('leaves a short pay open by default, and ignores the rest only with a reason', async () => {
+    recordPayment.mockResolvedValue({ payment: { amountCents: 200_000 }, invoices: [], duplicate: false })
+    writeOffInvoice.mockResolvedValue({ payment: {}, invoices: [], duplicate: false })
+    renderDialog()
+    await openForm()
+    type('Payment amount', '2000.00')
+    type('Apply to invoice INV-000002', '2000.00')
+
+    fireEvent.click(await screen.findByLabelText('Ignore the rest of invoice INV-000002'))
+    await waitFor(() => expect(postButton().disabled).toBe(true))
+    type('Reason for ignoring the rest of invoice INV-000002', 'disputed lumper')
+    await waitFor(() => expect(postButton().disabled).toBe(false))
+    fireEvent.click(postButton())
+
+    await waitFor(() => expect(writeOffInvoice).toHaveBeenCalled())
+    expect(recordPayment.mock.calls[0][0].acceptOverage).toBeUndefined()
+    expect(writeOffInvoice.mock.calls[0][0]).toMatchObject({ invoiceId: 'inv-2', amountCents: 50_000, reason: 'disputed lumper' })
   })
 })

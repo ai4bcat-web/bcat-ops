@@ -122,6 +122,26 @@ describe('UsersPage', () => {
     expect(mocks.setUserPageGroups).toHaveBeenLastCalledWith('admin1', ['dashboard'])
   })
 
+  it('lists the accounting pages in their own Accounting access section and grants one per tick', async () => {
+    mocks.listCognitoUsers.mockResolvedValue([
+      { ...sampleUser(), username: 'admin1', email: 'admin@example.com' },
+    ])
+    mocks.getUserGroups.mockResolvedValue([])
+    mocks.setUserPageGroups.mockResolvedValue(undefined)
+
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/admin@example\.com/)).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('Toggle permissions'))
+
+    const section = await screen.findByTestId('user-accounting-access')
+    for (const label of ['Load review', 'Accounts receivable / Invoicing', 'Factoring', 'Accounts payable', 'Commissions']) {
+      expect(within(section).getByLabelText(label)).toBeInTheDocument()
+    }
+    expect(within(section).getByText(/opens every action on it/)).toBeInTheDocument()
+    fireEvent.click(within(section).getByLabelText('Accounts payable'))
+    await waitFor(() => expect(mocks.setUserPageGroups).toHaveBeenLastCalledWith('admin1', ['carrierPay']))
+  })
+
   it('lets a non-owner admin set a role but not grant admin or delete', async () => {
     auth.isOwner = false
     mocks.listCognitoUsers.mockResolvedValue([

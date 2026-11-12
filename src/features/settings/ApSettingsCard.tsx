@@ -29,8 +29,6 @@ export function ApSettingsCard() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  const [approvalAdminOnly, setApprovalAdminOnly] = useState(true)
-  const [postingAdminOnly, setPostingAdminOnly] = useState(true)
   const [requireSignedRateCon, setRequireSignedRateCon] = useState(true)
   const [billDocs, setBillDocs] = useState<string[]>([])
   const [remittanceTemplate, setRemittanceTemplate] = useState('')
@@ -41,8 +39,6 @@ export function ApSettingsCard() {
     getTmsSettings()
       .then((s: TmsSettings | null) => {
         // Approving and posting are admin-only unless somebody opened them up.
-        setApprovalAdminOnly(s?.apApprovalAdminOnly !== false)
-        setPostingAdminOnly(s?.apPostingAdminOnly !== false)
         setRequireSignedRateCon(s?.apRequireSignedRateCon !== false)
         setBillDocs(s?.apBillDocsRequired ?? [])
         setRemittanceTemplate(s?.remittanceEmailTemplate ?? '')
@@ -62,8 +58,6 @@ export function ApSettingsCard() {
     setSaving(true)
     try {
       await saveApSettings({
-        apApprovalAdminOnly: approvalAdminOnly,
-        apPostingAdminOnly: postingAdminOnly,
         apRequireSignedRateCon: requireSignedRateCon,
         // Nothing ticked means "whatever the carrier upload link asks for", not "nothing".
         apBillDocsRequired: billDocs.length > 0 ? billDocs : null,
@@ -79,25 +73,11 @@ export function ApSettingsCard() {
     <SettingsCard
       icon={Banknote}
       title="Carrier bills & AP"
-      description="Who may approve a bill, who may send money, what a bill needs on file before it is approved, and what the remittance says."
+      description="What a bill needs on file before it is approved, and what the remittance says. Who may approve and pay is set per user in Settings > Users (Accounts payable)."
     >
       {loading ? <Loading /> : (
         <Stack>
           <Stack gap={8}>
-            <CheckRow
-              ariaLabel="AP approval admin only"
-              align="start"
-              label="Only an admin may approve a bill for payment"
-              checked={approvalAdminOnly}
-              onChange={setApprovalAdminOnly}
-            />
-            <CheckRow
-              ariaLabel="AP posting admin only"
-              align="start"
-              label="Only an admin may pay, credit, reverse or void"
-              checked={postingAdminOnly}
-              onChange={setPostingAdminOnly}
-            />
             <CheckRow
               ariaLabel="Require signed rate confirmation"
               align="start"
@@ -105,7 +85,7 @@ export function ApSettingsCard() {
               checked={requireSignedRateCon}
               onChange={setRequireSignedRateCon}
             />
-            <Hint>An unsigned rate con blocks a rep outright; an admin may approve past it and the acknowledgement is kept on the bill.</Hint>
+            <Hint>An unsigned rate con is a warning to acknowledge before approving; the acknowledgement is kept on the bill.</Hint>
           </Stack>
 
           <DocumentTypesField
@@ -114,7 +94,7 @@ export function ApSettingsCard() {
             onChange={setBillDocs}
             disabled={saving}
             options={CARRIER_UPLOADABLE_TYPES}
-            help="Leave every box clear to follow whatever the carrier upload link already asks for. An admin can still approve past a missing document, with a written note."
+            help="Leave every box clear to follow whatever the carrier upload link already asks for. Anyone with Accounts payable access can approve past a missing document, with a written note."
           />
 
           <TmsField
