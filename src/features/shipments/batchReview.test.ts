@@ -15,6 +15,7 @@ function row(id: string, patch: Partial<ShipmentRow> = {}): ShipmentRow {
     id,
     number: id,
     customerId: 'c1',
+    status: 'DELIVERED',
     revDivision: 'DRY',
     salesRepId: 'rep-1',
     reference: 'PO-1',
@@ -27,6 +28,27 @@ function row(id: string, patch: Partial<ShipmentRow> = {}): ShipmentRow {
 }
 
 const none = { customers: [], orgDefault: null }
+
+describe('only delivered loads go to Load Review', () => {
+  it('refuses a shipment that has not delivered, first, with how far a multi-stop load got', () => {
+    const stops = [{ departedAt: '2026-11-10T10:00:00Z' }, { departedAt: null }] as ShipmentRow['stops']
+    const out = pushRefusals([row('S1', { status: 'IN_TRANSIT', stops })], none)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.reasons[0]).toBe('Only delivered loads can go to Load review — 1 of 2 stops delivered')
+  })
+
+  it('says it without a count when there is one stop or none, and stacks it with the other reasons', () => {
+    expect(pushRefusals([row('S1', { status: 'OPEN' })], none)[0]!.reasons).toEqual(['Only delivered loads can go to Load review'])
+    const both = pushRefusals([row('S1', { status: 'OPEN', docsMissing: ['POD'] })], none)[0]!.reasons
+    expect(both[0]).toBe('Only delivered loads can go to Load review')
+    expect(both).toContain('POD not received')
+  })
+
+  it('lets a DELIVERED shipment through whatever its stop stamps say (imported history has none)', () => {
+    const stops = [{ departedAt: null }, { departedAt: null }] as ShipmentRow['stops']
+    expect(pushRefusals([row('S1', { status: 'DELIVERED', stops })], none)).toEqual([])
+  })
+})
 
 describe('review facts of a board row', () => {
   it('reads a complete shipment as meeting every requirement', () => {

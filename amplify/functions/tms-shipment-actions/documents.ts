@@ -1165,6 +1165,15 @@ function reviewExtras(bundle: Bundle, order: Row, customer: Row | null, settings
   })
 }
 
+/** The sentence a push is refused with while the shipment has not fully delivered; null once it has. */
+export function notDeliveredReason(bundle: Pick<Bundle, 'shipment' | 'loads'>): string | null {
+  if (bundle.shipment.status === 'DELIVERED') return null
+  const loads = bundle.loads.filter((load) => !load.voidedAt && !load.deletedAt)
+  const delivered = loads.filter((load) => RATEABLE_LOAD_STATUSES.includes(load.status as LoadWorkflowStatus)).length
+  const progress = loads.length > 1 ? ` — ${delivered} of ${loads.length} loads delivered` : ''
+  return `Only delivered loads can go to Load review${progress}`
+}
+
 /**
  * PUSH_TO_LOAD_REVIEW's verdict for one shipment: the same requirement list and the same
  * extras REVIEW_LOAD and the review release read, plus the states that make a push
@@ -1178,6 +1187,10 @@ export async function pushToReviewVerdict(deps: DocumentDeps, shipmentId: string
   const order = bundle.orders[0]
   if (!order) return { shipment, reasons: ['Shipment has no order to review'] }
   if (order.arStatus !== 'DOCS_NEEDED') return { shipment, reasons: [`Already released (${String(order.arStatus ?? 'unset')})`] }
+  // Ryne 2026-11-12: only a delivered load goes to Load Review. The shipment status rolls up the least-advanced load, so DELIVERED
+  // means every load (every stop) delivered. The status, never a timestamp: legacy and imported history can be DELIVERED with no stamps.
+  const notDelivered = notDeliveredReason(bundle)
+  if (notDelivered) return { shipment, reasons: [notDelivered] }
   const settings = await getSettings(deps)
   const customerId = String(order.customerId ?? '')
   const customer = customerId && deps.customerTable ? await getById(deps.store.db, deps.customerTable, customerId) : null

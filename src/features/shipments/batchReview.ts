@@ -37,6 +37,14 @@ export interface BatchOutcome {
   note?: string
 }
 
+/** One sentence while the shipment has not fully delivered; the stops count shows how far a multi-stop load got. */
+function notDeliveredReasons(row: ShipmentRow): string[] {
+  if (row.status === 'DELIVERED') return []
+  const stops = Array.isArray(row.stops) ? row.stops : []
+  const progress = stops.length > 1 ? ` — ${stops.filter((s) => s.departedAt != null).length} of ${stops.length} stops delivered` : ''
+  return [`Only delivered loads can go to Load review${progress}`]
+}
+
 /** Rows that cannot be pushed to Load Review, each with every reason. */
 export function pushRefusals(
   rows: readonly ShipmentRow[],
@@ -48,9 +56,9 @@ export function pushRefusals(
     // A POD the row cannot speak for is the server's call (it reads the documents), never a client refusal.
     const requirements = requirementsForRow(row, src).filter((key) => key !== 'podReceived' || facts.podReceived != null)
     const evaluation = evaluateReviewRequirements(requirements, facts)
-    if (!evaluation.ok) {
-      out.push({ rowId: row.id, rowLabel: row.number, ok: false, reasons: evaluation.failures.map((f) => f.message) })
-    }
+    // Ryne 2026-11-12: only a delivered load goes to Load Review (the server refuses the same way, on the shipment status).
+    const reasons = [...notDeliveredReasons(row), ...(evaluation.ok ? [] : evaluation.failures.map((f) => f.message))]
+    if (reasons.length > 0) out.push({ rowId: row.id, rowLabel: row.number, ok: false, reasons })
   }
   return out
 }

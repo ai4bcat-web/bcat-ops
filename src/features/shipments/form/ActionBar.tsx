@@ -2,7 +2,7 @@
  * The bottom action bar (feedback 19): always visible under the form, 48 px, card background, top
  * border. Left: status chip, "Last saved X ago" / "Unsaved changes", and "N / M required" (click
  * scrolls the rail checklist into view and focuses the first missing row). Right: Cancel, Save draft,
- * Create shipment (create); Save changes, Save & exit, Submit for Review, Discard (edit). Keeps the old rail test ids.
+ * Create shipment (create); Save changes, Save & exit, Discard, and Submit for Review (edit; a Draft has Open order instead: only a delivered load goes to Load Review). Keeps the old rail test ids.
  */
 import { TmsBadge, TmsButton } from '@/features/tms/kit'
 import { saveStateText } from './saveState'
@@ -28,7 +28,7 @@ export interface ActionBarProps {
   onDuplicate?: () => void
   /** Edit mode: save any edits, then send the load to Load Review. Omitted on a create page. */
   onSubmitForReview?: () => void
-  /** Why Submit for Review is unavailable (voided, canceled, imported, already in or past Load Review); null when it can run. */
+  /** Why Submit for Review is unavailable (voided, canceled, imported, not delivered yet, already in or past Load Review); null when it can run. */
   submitReviewBlocked?: string | null
 }
 
@@ -78,7 +78,15 @@ export function ActionBar({ createMode, status, dirty, savedAt, done, total, rea
         >
           {createMode ? 'Create shipment' : 'Save changes'}
         </TmsButton>
-        {!createMode && onSubmitForReview ? (
+        {!createMode && isDraft ? (
+          <TmsButton
+            size="sm" data-testid="ship-form-open-order" disabled={busy || voided} onClick={() => onRun('submit')}
+            title="Checks the required fields and credit, then opens the order for dispatch. Send it to Load Review once it has delivered."
+          >
+            Open order
+          </TmsButton>
+        ) : null}
+        {!createMode && !isDraft && onSubmitForReview ? (
           <TmsButton
             size="sm" data-testid="ship-form-submit-review" disabled={busy || voided || !!submitReviewBlocked} onClick={onSubmitForReview}
             title={submitReviewBlocked ?? 'Saves your changes, then sends this load to Load Review. Billing release happens there.'}
