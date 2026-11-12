@@ -1333,6 +1333,9 @@ let customersHaveV7 = true
 // Step AP: the per-customer Load Review requirements.
 const CUSTOMER_V8_FIELDS = ['reviewRequirements']
 let customersHaveV8 = true
+// The billing setup the list, badges and chips read: never selected before, so every row looked unset.
+const CUSTOMER_V9_FIELDS = ['billingMethod', 'apEmail', 'apEmailsExtra', 'noaEmail', 'invoiceCopyEmails', 'billingNeedsReview']
+let customersHaveV9 = true
 const customerFields = () => [
   CUSTOMER_FIELDS_BASE,
   customersHaveV2 ? CUSTOMER_V2_FIELDS.join(' ') : '',
@@ -1342,6 +1345,7 @@ const customerFields = () => [
   customersHaveV6 ? CUSTOMER_V6_FIELDS.join(' ') : '',
   customersHaveV7 ? CUSTOMER_V7_FIELDS.join(' ') : '',
   customersHaveV8 ? CUSTOMER_V8_FIELDS.join(' ') : '',
+  customersHaveV9 ? CUSTOMER_V9_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 
 const LOCATION_FIELDS = `
@@ -1579,6 +1583,11 @@ async function fetchAllCustomers(): Promise<CustomerRecord[]> {
       return rows
     } catch (err) {
       if (attempt >= 8) throw err
+      if (customersHaveV9 && fieldNamed(CUSTOMER_V9_FIELDS, err)) {
+        console.warn('[apiClient] backend has no Customer billing setup fields yet — querying without them until deploy')
+        customersHaveV9 = false
+        continue
+      }
       if (customersHaveV8 && fieldNamed(CUSTOMER_V8_FIELDS, err)) {
         console.warn('[apiClient] backend has no Customer review requirements yet — querying without them until deploy')
         customersHaveV8 = false

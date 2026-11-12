@@ -119,6 +119,11 @@ describe('applyOne', () => {
     expect(calls[0].UpdateExpression).toBe('SET apEmail = :v');
     expect(calls[0].ConditionExpression).toContain('billingMethod <> :factor');
     expect(calls[1].Item.action).toBe(AUDIT_ACTION);
+    const factored = [];
+    await applyOne({ doc: { send: async (c) => { factored.push(c.input); return {}; } }, suffix: DEV_SUFFIX, customer: { id: 'c1' }, email: 'p@z.com', includeFactored: true });
+    expect(factored[0].ConditionExpression).not.toContain(':factor');
+    expect(factored[0].ConditionExpression).toContain('attribute_not_exists(apEmail)');
+    expect(factored[0].ExpressionAttributeValues).not.toHaveProperty(':factor');
   });
   it('writes noaEmail only, conditional on blank, plus one audit row', async () => {
     const calls = [];

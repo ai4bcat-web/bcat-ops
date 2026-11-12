@@ -187,10 +187,51 @@ describe('DirectoryPages', () => {
       expect(screen.getByText('Active Co')).toBeTruthy()
       fireEvent.click(screen.getByRole('button', { name: 'Factored: queue only (1)' }))
       expect(screen.queryByText('Lead Co')).toBeNull()
-      expect(screen.getByText('Factored: queue only').className).toContain('gray')
+      // A factored customer's invoice e-mail column reads as not used (invoices go to OTR), not as a flag.
+      expect(screen.getByText('Factored (OTR)').className).toContain('tms-muted')
       fireEvent.click(screen.getByText('Active Co'))
       const detail = await screen.findByRole('dialog', { name: 'Customer profile' })
       expect(within(detail).getByText('Factored: queue only')).toBeTruthy()
+    } finally {
+      customers.forEach((c, i) => Object.assign(c, previous[i]))
+    }
+  })
+
+  it('shows the AP address (+N extras), the NOA e-mail, and mutes a factored customer\'s address', async () => {
+    const previous = customers.map((c) => ({ billingMethod: c.billingMethod, apEmail: c.apEmail, apEmailsExtra: c.apEmailsExtra, noaEmail: c.noaEmail }))
+    customers[1].billingMethod = 'MANUAL'
+    customers[1].apEmail = 'ap@active.test'
+    customers[1].apEmailsExtra = ['two@active.test', 'three@active.test']
+    customers[2].billingMethod = 'FACTOR'
+    customers[2].apEmail = 'ap@pending.test'
+    customers[2].noaEmail = 'noa@factor.test'
+    try {
+      renderCustomers()
+      const active = (await screen.findByText('Active Co')).closest('tr') as HTMLElement
+      expect(within(active).getByTestId('invoice-email-c-active').textContent).toBe('ap@active.test +2')
+      const pending = screen.getByText('Pending Co').closest('tr') as HTMLElement
+      expect(within(pending).getByTestId('invoice-email-c-pending').className).toContain('tms-muted')
+      expect(pending.textContent).toContain('noa@factor.test')
+      expect(screen.getByRole('columnheader', { name: /^NOA e-mail/ })).toBeTruthy()
+    } finally {
+      customers.forEach((c, i) => Object.assign(c, previous[i]))
+    }
+  })
+
+  it('Possible duplicates shows only same-name accounts, each set together', async () => {
+    const previous = customers.map((c) => ({ name: c.name, aljexCode: c.aljexCode }))
+    customers[0].name = 'Zeta Active, Inc.'
+    customers[0].aljexCode = 'Z1'
+    const zeta = customers.find((c) => c.name === 'Zeta Active')!
+    zeta.aljexCode = 'Z2'
+    try {
+      renderCustomers()
+      await screen.findByText('Active Co')
+      fireEvent.click(screen.getByTestId('customers-duplicates-chip'))
+      await waitFor(() => expect(screen.queryByText('Active Co')).toBeNull())
+      expect(screen.getByText('Zeta Active')).toBeTruthy()
+      expect(screen.getByText('Zeta Active, Inc.')).toBeTruthy()
+      expect(screen.getByTestId('customers-duplicates-chip').textContent).toBe('Possible duplicates (2)')
     } finally {
       customers.forEach((c, i) => Object.assign(c, previous[i]))
     }
@@ -239,8 +280,8 @@ describe('DirectoryPages', () => {
       await waitFor(() => expect(screen.getByText('Active Co')).toBeTruthy())
       await waitFor(() => expect(screen.queryByText('Pending Co')).toBeNull())
       expect(screen.queryByTestId('crm-scope')).toBeNull()
-      expect(crmAction).toHaveBeenCalledWith('CRM_LIST_ACCOUNTS', { scope: 'mine' })
-      expect(crmAction).not.toHaveBeenCalledWith('CRM_LIST_ACCOUNTS', { scope: 'all' })
+      expect(crmAction).toHaveBeenCalledWith('CRM_LIST_ACCOUNTS', { scope: 'mine', withActivity: true })
+      expect(crmAction).not.toHaveBeenCalledWith('CRM_LIST_ACCOUNTS', expect.objectContaining({ scope: 'all' }))
     })
 
     it('a manager starts on All and Mine narrows the list to owned accounts', async () => {
@@ -293,11 +334,14 @@ describe('DirectoryPages', () => {
       await waitFor(() => expect(names()).toEqual(['Zeta Active']))
     })
 
-    it('Open AR and Last shipment are opt-in: no activity query by default, values, filter and sort once added', async () => {
+    it('Shipments shows by default (activity query on); Open AR and Last shipment are in the Columns dialog, with values and sort once added', async () => {
+      crmRows.value = [{ customerId: 'c-active', shipmentCount: 1234 }, { customerId: 'c-pending', shipmentCount: 7 }]
       renderCustomers()
       await screen.findByText('Zeta Active')
       for (const h of ['Open AR', 'Last shipment']) expect(screen.queryByRole('columnheader', { name: new RegExp(`^${h}`) })).toBeNull()
-      expect(crmAction.mock.calls.filter(([a, i]) => a === 'CRM_LIST_ACCOUNTS' && i.withActivity).length).toBe(0)
+      expect(header('Shipments')).toBeTruthy()
+      await waitFor(() => expect(crmAction).toHaveBeenCalledWith('CRM_LIST_ACCOUNTS', { scope: 'all', withActivity: true }))
+      await waitFor(() => expect((screen.getByText('Active Co').closest('tr') as HTMLElement).textContent).toContain('1,234'))
       cleanup()
 
       localStorage.setItem('tms:grid:customers:admin@bcatcorp.com:v1', JSON.stringify({ columns: ['name', 'openAr', 'lastShipment'] }))

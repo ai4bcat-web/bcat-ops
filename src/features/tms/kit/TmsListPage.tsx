@@ -1,9 +1,15 @@
-import type { ReactNode } from 'react'
+import { Children, isValidElement, useCallback, useMemo, useState, type ReactNode } from 'react'
 import { ChevronDown, Eye, Plus, RefreshCw, Search } from 'lucide-react'
+import { DenseGrid } from '@/features/tms/grid/DenseGrid'
+import { ClearFiltersButton, ColumnsButton, DensityToggle } from '@/features/tms/grid/DenseControls'
+import {
+  activeFilterCount, filterRows, nextSort, reorderKeys, sortDenseRows,
+  type DenseColumn, type DenseColumnFilter, type DenseFilters,
+} from '@/features/tms/grid/denseGridModel'
+import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { TmsEmptyState } from './TmsEmptyState'
 import { TmsFilterChip } from './TmsFilterChip'
 import { TmsKeyHint } from './TmsKeyHint'
-import { TmsTable } from './TmsTable'
 import type { ColumnDef, TmsSort } from './TmsTable'
 import { TmsTabs } from './TmsTabs'
 import { TmsTabStrip } from './TmsTabStrip'
@@ -54,6 +60,21 @@ export interface TmsListPageProps<T> {
    * table, footer — is identical, so an embedded list and a full one cannot drift apart.
    */
   embedded?: boolean
+  /** Names the saved column layout (which columns, widths, density, sort). Defaults to the title. */
+  gridId?: string
+}
+
+/** The words a rendered cell shows, for search, filters and the tooltip when a column gives no `text`. */
+function nodeText(node: ReactNode): string {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(nodeText).filter(Boolean).join(' ')
+  if (isValidElement<{ children?: ReactNode }>(node)) return Children.toArray(node.props.children).map(nodeText).filter(Boolean).join(' ')
+  return ''
+}
+
+function slug(value: ReactNode): string {
+  return nodeText(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'list'
 }
 
 const PAGE_SIZES = [20, 50, 100, 200]
@@ -86,7 +107,57 @@ export function TmsListPage<T>({
   footerExtra,
   banner,
   embedded,
+  gridId,
 }: TmsListPageProps<T>) {
+  // The layout is per browser (localStorage); list pages render in tests and drawers without an AuthProvider.
+  const email: string | null = null
+  const [filters, setFilters] = useState<DenseFilters>({})
+  const dense = useMemo<Array<DenseColumn<T> & { render: (row: T) => ReactNode }>>(
+    () => columns.map((col) => ({
+      key: col.key,
+      header: col.header,
+      render: col.render,
+      text: col.text ?? ((row: T) => nodeText(col.render(row))),
+      sortValue: col.sortValue,
+      // A page that sorts its own rows (server paging) only offers the columns it marks sortable.
+      sortable: onSort ? !!col.sortable : col.sortable !== false,
+      filter: col.filter,
+      width: col.width,
+      align: col.align,
+    })),
+    [columns, onSort],
+  )
+  const keys = useMemo(() => dense.map((c) => c.key), [dense])
+  // Pages that swap their column set (one list per tab) keep one saved layout per set.
+  const layoutId = `list:${gridId ?? slug(title)}:${[...keys].sort().join(',')}`
+  const prefs = useDenseGridPrefs({
+    gridId: layoutId,
+    email,
+    defaultColumns: keys,
+    validKeys: keys,
+    defaultSort: null,
+  })
+  const shownKeys = prefs.columns
+  const gridColumns = useMemo(
+    () => shownKeys.map((k) => dense.find((c) => c.key === k)).filter((c): c is (typeof dense)[number] => c != null),
+    [shownKeys, dense],
+  )
+  const setColumnFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
+    setFilters((prev) => {
+      const copy = { ...prev }
+      if (next) copy[key] = next
+      else delete copy[key]
+      return copy
+    })
+  }, [])
+  const activeSort = onSort ? (sort ?? null) : prefs.sort
+  const shown = useMemo(() => {
+    const filtered = filterRows(rows, dense, filters)
+    return onSort ? filtered : sortDenseRows(filtered, dense, prefs.sort)
+  }, [rows, dense, filters, onSort, prefs.sort])
+  const renderCell = useCallback((row: T, key: string) => dense.find((c) => c.key === key)?.render(row) ?? null, [dense])
+  const filterCount = activeFilterCount(filters)
+
   return (
     <div className="tms-page">
       {embedded ? null : (
@@ -174,23 +245,54 @@ export function TmsListPage<T>({
 
       {banner}
 
-      <TmsTable
-        columns={columns}
-        rows={rows}
-        rowKey={rowKey}
-        sort={sort}
-        onSort={onSort}
-        onRowClick={onRowClick}
-        onRowDoubleClick={onRowDoubleClick}
-        empty={
-          <TmsEmptyState
-            message={emptyText ?? 'Please try again using a different query.'}
-            actionLabel={onClearFilters ? 'Click here to clear all filters' : undefined}
-            onAction={onClearFilters}
-            actionKey="C"
+      <div className="tms-dense-page" data-testid="tms-list-grid">
+        <div className="tms-dense-bar">
+          <ClearFiltersButton count={filterCount} onClear={() => setFilters({})} />
+          <span className="tms-dense-spacer" />
+          <span className="tms-muted">
+            {shown.length === rows.length ? `${rows.length} items` : `${shown.length} of ${rows.length} items`}
+          </span>
+          <ColumnsButton
+            catalog={dense}
+            columns={shownKeys}
+            widths={prefs.widths}
+            pinned={prefs.pinned}
+            onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })}
           />
-        }
-      />
+          <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
+        </div>
+        <div className="tms-dense-body" style={{ minHeight: 240, maxHeight: 'calc(100vh - 280px)' }}>
+          <DenseGrid<T>
+            aria-label={nodeText(title) || 'List'}
+            recentKey={`tms:list:${gridId ?? slug(title)}:recent:${email || 'anon'}`}
+            resetKey={`${JSON.stringify(filters)}|${JSON.stringify(activeSort)}`}
+            columns={gridColumns}
+            rows={shown}
+            fitRows={rows}
+            rowKey={rowKey}
+            renderCell={renderCell}
+            density={prefs.density}
+            userWidths={prefs.widths}
+            stickyCount={Math.max(1, prefs.pinned.length)}
+            sort={activeSort}
+            onSort={(key) => (onSort ? onSort(key) : prefs.setSort(nextSort(prefs.sort, key)))}
+            filters={filters}
+            onFilterChange={setColumnFilter}
+            onReorder={(from, to) => prefs.setColumns(reorderKeys(shownKeys, from, to))}
+            onResize={prefs.setWidth}
+            onRowClick={onRowClick}
+            onRowDoubleClick={onRowDoubleClick}
+            empty={
+              <TmsEmptyState
+                message={emptyText ?? 'Please try again using a different query.'}
+                actionLabel={onClearFilters || filterCount ? 'Click here to clear all filters' : undefined}
+                onAction={() => { setFilters({}); onClearFilters?.() }}
+                actionKey="C"
+              />
+            }
+          />
+        </div>
+      </div>
 
       <div className="tms-footer">
         <span className="tms-footer-count">

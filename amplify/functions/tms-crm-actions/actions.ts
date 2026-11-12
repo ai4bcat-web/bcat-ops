@@ -252,10 +252,11 @@ async function listAccounts(db: Db, caller: Caller, input: Row): Promise<{ rows:
     })
   }
   if (input.withActivity === true) {
-    const { ar, last } = await activityFor(db, rows.map((r) => r.customerId))
+    const { ar, last, counts } = await activityFor(db, rows.map((r) => r.customerId))
     for (const row of rows) {
       row.openArCents = ar.get(row.customerId) ?? 0
       row.lastShipmentAt = last.get(row.customerId) ?? null
+      row.shipmentCount = counts.get(row.customerId) ?? 0
     }
   }
   return { rows }
@@ -266,12 +267,11 @@ async function listAccounts(db: Db, caller: Caller, input: Row): Promise<{ rows:
 const IDX_INVOICES_OPEN = 'invoicesByArOpenAndDueAt'
 /** In-container cache lifetime for the activity columns. */
 export const ACTIVITY_TTL_MS = 60_000
-/** Parallel last-shipment Queries in flight at once. */
-export const ACTIVITY_CONCURRENCY = 48
 
+interface ShipmentStats { counts: Map<string, number>; last: Map<string, string> }
 interface ActivityCache {
   ar?: { at: number; byCustomer: Map<string, number> }
-  lastShipment: Map<string, { at: number; value: string | null }>
+  shipments?: { at: number; stats: ShipmentStats }
 }
 // Keyed by the client so a test's fake db never sees another test's answers.
 const activityCaches = new WeakMap<Db, ActivityCache>()
@@ -294,51 +294,53 @@ async function openArByCustomer(db: Db): Promise<Map<string, number>> {
   return sums
 }
 
-async function lastShipmentOf(db: Db, customerId: string): Promise<string | null> {
-  const [row] = await queryAll<{ pickupAppt?: string }>(db, {
+/**
+ * Shipments done per customer, all-time (Aljex history included), and the newest pickup:
+ * ONE projected Scan of the whole Shipment table. Voided, canceled and deleted rows are left out.
+ */
+async function shipmentStatsByCustomer(db: Db): Promise<ShipmentStats> {
+  const shipments = await scanAll<{ customerId?: string; status?: string; deletedAt?: string; voidedAt?: string; pickupAppt?: string }>(db, {
     TableName: env('SHIPMENT_TABLE_NAME'),
-    IndexName: IDX_SHIPMENTS_BY_CUSTOMER,
-    KeyConditionExpression: 'customerId = :c',
-    ExpressionAttributeValues: { ':c': customerId },
-    ScanIndexForward: false,
-    Limit: 1,
-    ProjectionExpression: 'pickupAppt',
-  }, 1)
-  return row?.pickupAppt ? normalizeInstant(row.pickupAppt) : null
+    ProjectionExpression: 'customerId, #s, deletedAt, voidedAt, pickupAppt',
+    ExpressionAttributeNames: { '#s': 'status' },
+  })
+  const counts = new Map<string, number>()
+  const last = new Map<string, string>()
+  for (const s of shipments) {
+    if (!s.customerId || s.deletedAt || s.voidedAt || s.status === 'VOIDED' || s.status === 'CANCELED') continue
+    counts.set(s.customerId, (counts.get(s.customerId) ?? 0) + 1)
+    if (s.pickupAppt) {
+      const at = normalizeInstant(s.pickupAppt)
+      const seen = last.get(s.customerId)
+      if (!seen || at > seen) last.set(s.customerId, at)
+    }
+  }
+  return { counts, last }
 }
 
 /**
- * openArCents + lastShipmentAt for exactly the customers the caller may see (the list's
- * visibility filter has already run, so a rep never causes — or sees — another rep's data).
- * Cost: 1 paged open-invoice Query + 1 Limit-1 Shipment Query per visible customer not
- * cached in the last 60 s, run `ACTIVITY_CONCURRENCY` at a time.
+ * openArCents, lastShipmentAt and shipmentCount for exactly the customers the caller may see (the
+ * list's visibility filter has already run, so a rep never causes — or sees — another rep's data).
+ * Cost: 1 paged open-invoice Query + 1 projected Shipment Scan, each served 60 s from cache.
  */
-async function activityFor(db: Db, customerIds: string[], now = Date.now()): Promise<{ ar: Map<string, number>; last: Map<string, string | null> }> {
+async function activityFor(db: Db, customerIds: string[], now = Date.now()): Promise<{ ar: Map<string, number>; last: Map<string, string | null>; counts: Map<string, number> }> {
   let cache = activityCaches.get(db)
-  if (!cache) activityCaches.set(db, (cache = { lastShipment: new Map() }))
+  if (!cache) activityCaches.set(db, (cache = {}))
   const state = cache
   const arPromise = state.ar && now - state.ar.at < ACTIVITY_TTL_MS
     ? Promise.resolve(state.ar.byCustomer)
     : openArByCustomer(db).then((byCustomer) => { state.ar = { at: now, byCustomer }; return byCustomer })
-
+  const statsPromise = state.shipments && now - state.shipments.at < ACTIVITY_TTL_MS
+    ? Promise.resolve(state.shipments.stats)
+    : shipmentStatsByCustomer(db).then((stats) => { state.shipments = { at: now, stats }; return stats })
+  const [ar, stats] = await Promise.all([arPromise, statsPromise])
   const last = new Map<string, string | null>()
-  const stale: string[] = []
+  const counts = new Map<string, number>()
   for (const id of customerIds) {
-    const hit = state.lastShipment.get(id)
-    if (hit && now - hit.at < ACTIVITY_TTL_MS) last.set(id, hit.value)
-    else stale.push(id)
+    last.set(id, stats.last.get(id) ?? null)
+    counts.set(id, stats.counts.get(id) ?? 0)
   }
-  let next = 0
-  const worker = async (): Promise<void> => {
-    while (next < stale.length) {
-      const id = stale[next++]
-      const value = await lastShipmentOf(db, id)
-      state.lastShipment.set(id, { at: now, value })
-      last.set(id, value)
-    }
-  }
-  await Promise.all([arPromise, ...Array.from({ length: Math.min(ACTIVITY_CONCURRENCY, stale.length) }, worker)])
-  return { ar: await arPromise, last }
+  return { ar, last, counts }
 }
 
 const EMPTY_VIEW: CrmAccountView = {
