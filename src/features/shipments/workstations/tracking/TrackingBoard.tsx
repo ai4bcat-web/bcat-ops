@@ -58,6 +58,7 @@ import {
   focusRows,
   hasDocsToReview,
   hasException,
+  deliveryOverdueOf,
   isCheckCallDue,
   nextCheckCallStateOf,
   podStateOf,
@@ -116,6 +117,7 @@ const FOCUS_EMPTY: Record<TrackingFocus, string> = {
   checkcalls: 'No check calls are due.',
   docs: 'No carrier uploads are waiting on review.',
   exceptions: 'No open exceptions.',
+  overdue: 'No loads past their delivery date without a POD.',
 }
 
 function modeText(p: EffectiveTrackingPrefs): string {
@@ -196,6 +198,7 @@ export function TrackingBoard(props: TrackingBoardProps) {
       { key: 'checkcalls', label: 'Check calls due', count: rows.filter((r) => isCheckCallDue(r, nowMs, graceMinutes)).length },
       { key: 'docs', label: 'Docs to review', count: rows.filter(hasDocsToReview).length },
       { key: 'exceptions', label: 'Exceptions', count: rows.filter(hasException).length },
+      { key: 'overdue', label: 'Past delivery, no POD', count: rows.filter((r) => deliveryOverdueOf(r, nowMs) != null).length },
     ],
     [rows, nowMs, graceMinutes],
   )
@@ -568,6 +571,7 @@ function ShipmentCell({
 function StatusCell({ row, nowMs }: { row: ShipmentRow; nowMs: number }) {
   const status = boardStatusOf(row)
   const event = nextEventText(row, nowMs)
+  const overdue = deliveryOverdueOf(row, nowMs)
   return (
     <div className="tms-tracking-status-cell">
       <TmsBadge tone={row.trackingFlaggedAt ? 'red' : STATUS_TONES[status]}>{status}</TmsBadge>
@@ -576,6 +580,11 @@ function StatusCell({ row, nowMs }: { row: ShipmentRow; nowMs: number }) {
         <TmsBadge tone="red" title={row.trackingFlagReason ?? 'Tracking escalation'}>
           Tracking flag
         </TmsBadge>
+      )}
+      {overdue && (
+        <span data-testid="tracking-overdue-flag" title={overdue.tooltip}>
+          <TmsBadge tone="red">{overdue.label} · {overdue.daysLate} d</TmsBadge>
+        </span>
       )}
     </div>
   )

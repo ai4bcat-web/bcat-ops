@@ -48,8 +48,14 @@ describe('lifecycleRows', () => {
   })
 
   it('lists only rate-con-sent loads unless asked for the unsent ones', () => {
-    expect(ids(lifecycleRows(all, 'active', false))).toEqual(['IN-TRANSIT', 'SIGNED'])
-    expect(ids(lifecycleRows(all, 'active', true))).toEqual(['BOOKED-UNSENT', 'IN-TRANSIT', 'SIGNED'])
+    expect(ids(lifecycleRows(all, 'active', false))).toEqual(['DELIVERED-POD-DUE', 'DELIVERED-POD-UNCHECKED', 'IN-TRANSIT', 'SIGNED'])
+    expect(ids(lifecycleRows(all, 'active', true))).toEqual(['BOOKED-UNSENT', 'DELIVERED-POD-DUE', 'DELIVERED-POD-UNCHECKED', 'IN-TRANSIT', 'SIGNED'])
+  })
+
+  it('keeps a delivered load on Active until its POD is on file (Ryne 2026-11-12)', () => {
+    const active = ids(lifecycleRows(all, 'active', false))
+    expect(active).toContain('DELIVERED-POD-DUE')
+    expect(active).not.toContain('POD-IN')
   })
 
   it('keeps history out of Active and POD due, and shows it under Closed', () => {

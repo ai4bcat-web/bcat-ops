@@ -83,6 +83,25 @@ function dayNumber(ymd: string): number {
 }
 
 /**
+ * How many whole days ago the scheduled delivery day was (the last delivery stop's appointment, or the end of
+ * its window, as a Chicago calendar day), whatever the status; null when there is no appointment or the day
+ * has not passed. `label` reads "Nov 10, 2026".
+ */
+export function scheduledDeliveryLateOf(
+  row: Pick<ShipmentRow, 'deliveryAppt' | 'deliveryApptEnd'>,
+  nowMs: number,
+): { day: string; daysLate: number; label: string } | null {
+  const days = [row.deliveryAppt, row.deliveryApptEnd].map((v) => (v ? chicagoDateStr(v) : '')).filter(Boolean)
+  if (days.length === 0) return null
+  const day = days.sort()[days.length - 1]
+  const today = chicagoDateStr(new Date(nowMs))
+  const daysLate = dayNumber(today) - dayNumber(day)
+  if (daysLate < 1) return null
+  const [y, m, d] = day.split('-').map(Number)
+  return { day, daysLate, label: `${formatBoardDate(new Date(Date.UTC(y, m - 1, d, 18)).toISOString())}, ${y}` }
+}
+
+/**
  * A live shipment whose scheduled delivery day (the last delivery stop's appointment, or the end of its
  * window) is before today in Chicago time and that is not delivered yet. Day-level on purpose: a load due
  * at 8:00 today is not flagged until tomorrow, and a date-only appointment (stored as Chicago midnight)
@@ -95,13 +114,8 @@ export function pastDeliveryOf(
   if (row.status === 'DRAFT') return null
   const board = boardStatusOf(row)
   if (board === 'DELIVERED' || board === 'VOIDED' || board === 'CANCELED') return null
-  const days = [row.deliveryAppt, row.deliveryApptEnd].map((v) => (v ? chicagoDateStr(v) : '')).filter(Boolean)
-  if (days.length === 0) return null
-  const day = days.sort()[days.length - 1]
-  const today = chicagoDateStr(new Date(nowMs))
-  const daysLate = dayNumber(today) - dayNumber(day)
-  if (daysLate < 1) return null
-  const [y, m, d] = day.split('-').map(Number)
-  const label = `${formatBoardDate(new Date(Date.UTC(y, m - 1, d, 18)).toISOString())}, ${y}`
+  const late = scheduledDeliveryLateOf(row, nowMs)
+  if (!late) return null
+  const { day, daysLate, label } = late
   return { day, daysLate, tooltip: `Scheduled delivery ${label} — not marked delivered (${daysLate} ${daysLate === 1 ? 'day' : 'days'})` }
 }

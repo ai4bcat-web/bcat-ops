@@ -7,6 +7,7 @@ import { checkCallState } from '@/lib/checkCalls'
 import { isRateConSent } from '@/lib/trackingAutomation'
 import { trackingEtaEstimate } from '@/lib/trackingEta'
 import type { Stop } from '@/types'
+import { pastDeliveryOf, scheduledDeliveryLateOf } from '../../boardChips'
 import { boardStatusOf, type ShipmentRow } from '../../shipmentViews'
 import type { TrackingAssigneeTab, TrackingLifecycle } from './types'
 
@@ -22,17 +23,27 @@ export type PodState = 'NOT_DUE' | 'NEEDED' | 'REQUESTED' | 'IN_REVIEW' | 'RECEI
  * Where the proof of delivery stands. `docsMissing` null = documents never checked.
  * `pendingDocReviewCount` counts any carrier upload awaiting review, not only PODs —
  * accepted as the proxy for "a POD is in review".
+ * RECEIVED means the POD is really on file: the order's document gate ran with POD on its list
+ * and POD is not missing, or the documents were signed off by hand. Car shipping chases no POD,
+ * so it counts as received. A cached gate whose list leaves POD off says nothing about a POD
+ * being on file (Ryne 2026-11-12: POD is always required), so that reads UNKNOWN.
  */
 export function podStateOf(row: ShipmentRow): PodState {
   if (boardStatusOf(row) !== 'DELIVERED') return 'NOT_DUE'
+  if (row.revDivision === 'CAR_SHIPPING' || row.docsOverrideAt) return 'RECEIVED'
   if (row.docsMissing == null) return 'UNKNOWN'
-  if (!row.docsMissing.includes('POD')) return 'RECEIVED'
+  if (!row.docsMissing.includes('POD')) {
+    return Array.isArray(row.docsRequired) && !row.docsRequired.includes('POD') ? 'UNKNOWN' : 'RECEIVED'
+  }
   if ((row.pendingDocReviewCount ?? 0) > 0) return 'IN_REVIEW'
   if (row.podRequestedAt) return 'REQUESTED'
   return 'NEEDED'
 }
 
-/** Active = still moving; pod = delivered, POD not confirmed received; closed = the rest. */
+/**
+ * Active = still moving; pod = delivered, POD not confirmed received; closed = the rest.
+ * A load leaves Tracking only once it is delivered AND its POD is on file (Ryne 2026-11-12).
+ */
 export function lifecycleOf(row: ShipmentRow): TrackingLifecycle {
   const status = boardStatusOf(row)
   if (status === 'VOIDED' || status === 'CANCELED') return 'closed'
@@ -42,16 +53,55 @@ export function lifecycleOf(row: ShipmentRow): TrackingLifecycle {
 
 /**
  * The rows the Tracking desk lists for a lifecycle: a sent rate con (or any, with `includeUnsent`)
- * in that lifecycle. A pure filter, so the rows it keeps from the working set equal the rows it
- * would keep from every shipment ever (the working set holds every non-terminal and every
- * delivered-awaiting-POD shipment, which is all Active and POD-due can be).
+ * in that lifecycle. Active lists everything still on Tracking — moving loads and delivered loads
+ * whose POD is not on file yet; POD due is the delivered-awaiting-POD slice of it. A pure filter,
+ * so the rows it keeps from the working set equal the rows it would keep from every shipment ever
+ * (the working set holds every non-terminal and every delivered-awaiting-POD shipment).
  */
 export function lifecycleRows(
   rows: readonly ShipmentRow[],
   lifecycle: TrackingLifecycle,
   includeUnsent: boolean,
 ): ShipmentRow[] {
-  return rows.filter((r) => (includeUnsent || isRateConSent(r)) && lifecycleOf(r) === lifecycle)
+  return rows.filter((r) => {
+    if (!includeUnsent && !isRateConSent(r)) return false
+    const own = lifecycleOf(r)
+    return lifecycle === 'active' ? own === 'active' || own === 'pod' : own === lifecycle
+  })
+}
+
+export interface DeliveryOverdue {
+  /** PAST_DELIVERY = not delivered yet; NO_POD = delivered, POD not on file. */
+  kind: 'PAST_DELIVERY' | 'NO_POD'
+  daysLate: number
+  label: string
+  tooltip: string
+}
+
+/**
+ * A load on Tracking whose scheduled delivery day has passed (the board's #371 rule: last delivery
+ * stop's appointment or window end, Chicago day-level) and whose POD is not on file. Not delivered
+ * yet reads "Past delivery date"; delivered without a POD reads "No POD — delivery date passed".
+ * Voided, canceled, draft and POD-received loads are never flagged.
+ */
+export function deliveryOverdueOf(row: ShipmentRow, nowMs: number): DeliveryOverdue | null {
+  if (row.status === 'DRAFT') return null
+  const status = boardStatusOf(row)
+  if (status === 'VOIDED' || status === 'CANCELED') return null
+  if (status !== 'DELIVERED') {
+    const past = pastDeliveryOf(row, nowMs)
+    return past ? { kind: 'PAST_DELIVERY', daysLate: past.daysLate, label: 'Past delivery date', tooltip: past.tooltip } : null
+  }
+  if (podStateOf(row) === 'RECEIVED') return null
+  const late = scheduledDeliveryLateOf(row, nowMs)
+  if (!late) return null
+  const days = `${late.daysLate} ${late.daysLate === 1 ? 'day' : 'days'}`
+  return {
+    kind: 'NO_POD',
+    daysLate: late.daysLate,
+    label: 'No POD — delivery date passed',
+    tooltip: `Scheduled delivery ${late.label} — delivered, no POD on file (${days})`,
+  }
 }
 
 // ── Assignees ────────────────────────────────────────────────────────────────
@@ -167,11 +217,11 @@ export function durationText(minutes: number): string {
 
 // ── Focus (the old Check calls / Document review worklists, as filters of the same rows) ──
 
-export type TrackingFocus = 'checkcalls' | 'docs' | 'exceptions'
+export type TrackingFocus = 'checkcalls' | 'docs' | 'exceptions' | 'overdue'
 
 /** The `?focus=` URL value as a focus; anything else is "All". */
 export function parseFocus(value: string | null): TrackingFocus | null {
-  return value === 'checkcalls' || value === 'docs' || value === 'exceptions' ? value : null
+  return value === 'checkcalls' || value === 'docs' || value === 'exceptions' || value === 'overdue' ? value : null
 }
 
 /**
@@ -204,6 +254,7 @@ export function focusRows(
     case 'checkcalls': return rows.filter((r) => isCheckCallDue(r, nowMs, graceMinutes))
     case 'docs': return rows.filter(hasDocsToReview)
     case 'exceptions': return rows.filter(hasException)
+    case 'overdue': return rows.filter((r) => deliveryOverdueOf(r, nowMs) != null)
     default: return [...rows]
   }
 }

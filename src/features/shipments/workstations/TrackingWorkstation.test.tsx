@@ -144,10 +144,10 @@ describe('scope', () => {
     expect(ids()).toContain('S-UNSENT')
   })
 
-  it('keeps delivered shipments out of Active; POD due holds the ones without a POD, Closed the rest', async () => {
+  it('keeps delivered shipments without a POD on Active; POD due holds just those, Closed the rest', async () => {
     renderPage('/tms/tracking?assignee=all')
     await waitFor(() => expect(ids()).toContain('S-ANN'))
-    expect(ids()).not.toContain('S-PODDUE')
+    expect(ids()).toContain('S-PODDUE')
     expect(ids()).not.toContain('S-PODIN')
 
     fireEvent.click(screen.getByRole('tab', { name: 'POD due' }))
@@ -155,6 +155,20 @@ describe('scope', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Closed' }))
     expect(ids()).toEqual(['S-PODIN'])
+  })
+
+  it('flags loads past their delivery day without a POD, and the focus tab narrows to them', async () => {
+    const lateMoving = row('S-LATE', { status: 'IN_TRANSIT', deliveryAppt: '2026-10-27T15:00:00Z' })
+    const lateNoPod = row('S-NOPOD', { status: 'DELIVERED', docsMissing: ['POD'], deliveryAppt: '2026-10-26T15:00:00Z' })
+    shipments = [ann, lateMoving, lateNoPod, podIn]
+    renderPage('/tms/tracking?assignee=all')
+    await waitFor(() => expect(ids()).toContain('S-NOPOD'))
+    expect(within(trackingRow('S-LATE')).getByTestId('tracking-overdue-flag')).toHaveTextContent('Past delivery date · 2 d')
+    expect(within(trackingRow('S-NOPOD')).getByTestId('tracking-overdue-flag')).toHaveTextContent('No POD — delivery date passed · 3 d')
+    expect(within(trackingRow('S-ANN')).queryByTestId('tracking-overdue-flag')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: /Past delivery, no POD/ }))
+    await waitFor(() => expect(ids().sort()).toEqual(['S-LATE', 'S-NOPOD']))
   })
 })
 
@@ -185,7 +199,7 @@ describe('assignee navigation', () => {
       .map((el) => el.getAttribute('data-group-key') ?? `row:${el.getAttribute('data-tracker-id')}`)
     expect(order).toEqual([
       'unassigned', 'row:',
-      'u-ann', 'row:u-ann', 'row:u-ann',
+      'u-ann', 'row:u-ann', 'row:u-ann', 'row:u-ann',
       'u-me', 'row:u-me', 'row:u-me',
     ])
   })
@@ -194,10 +208,10 @@ describe('assignee navigation', () => {
     renderPage('/tms/tracking?assignee=all')
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
     fireEvent.change(screen.getByRole('combobox', { name: 'Group by' }), { target: { value: 'status' } })
-    expect(screen.getAllByTestId('dense-group').map((el) => el.getAttribute('data-group-key'))).toEqual(['DISPATCHED'])
+    expect(screen.getAllByTestId('dense-group').map((el) => el.getAttribute('data-group-key'))).toEqual(['DELIVERED', 'DISPATCHED'])
     fireEvent.change(screen.getByRole('combobox', { name: 'Group by' }), { target: { value: 'none' } })
     expect(screen.queryAllByTestId('dense-group')).toHaveLength(0)
-    expect(ids().length).toBe(5)
+    expect(ids().length).toBe(6)
   })
 
   it('says so when nothing is assigned to me', async () => {
@@ -428,7 +442,7 @@ describe('dense grid', () => {
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole('button', { name: 'Filter Tracker' }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'Tracker: Ann Lee' }))
-    expect(ids().sort()).toEqual(['S-ANN', 'S-OVERDUE'])
+    expect(ids().sort()).toEqual(['S-ANN', 'S-OVERDUE', 'S-PODDUE'])
   })
 
   it('the Next check numeric range keeps only overdue calls', async () => {
