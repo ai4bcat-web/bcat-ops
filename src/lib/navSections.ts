@@ -117,6 +117,8 @@ const CALENDAR_CHILDREN: NavChildDef[] = [
   { to: '/driver-info', label: 'Driver info', pageKey: 'dispatch' },
   { to: '/appts', label: 'Appts', pageKey: 'appts', badgeKey: 'appts' },
   { to: '/time-off', label: 'Time off', pageKey: 'timeOff', badgeKey: 'timeOff' },
+  // Moved up from Fleet manager so the driver sign-in invites are next to the people they are for (Ryne 2026-11-12).
+  { to: '/ivan-driver-app', label: 'Ivan driver app', pageKey: 'ivanDriverApp' },
 ]
 
 /** Customers, Carriers and Locations: one Profiles section. Carriers opens the Carrier list; Find & Invite is its other tab. */
@@ -141,7 +143,6 @@ const FLEET_MANAGER_CHILDREN: NavChildDef[] = [
   { to: '/truck-docs', label: 'Asset documents', pageKey: 'truckDocs', badgeKey: 'truckDocs' },
   { to: '/fuel', label: 'Fuel', pageKey: 'fuel' },
   { to: '/files', label: 'Files', pageKey: 'files' },
-  { to: '/ivan-driver-app', label: 'Ivan driver app', pageKey: 'ivanDriverApp' },
   { to: '/disputes', label: 'Amazon disputes', pageKey: 'disputes' },
   { to: '/expenses', label: 'Expenses', pageKey: 'finances' },
   { to: '/insurance', label: 'Insurance', pageKey: 'insurance' },
