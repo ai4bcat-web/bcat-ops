@@ -356,6 +356,29 @@ describe('IntakeBoard: already built as a PRO', () => {
     expect(await screen.findByRole('dialog')).toHaveTextContent('Intake only')
   })
 
+  it('a row flagged when the e-mail arrived shows its PRO from the stored answer, with no shipment read', async () => {
+    const stored = [{ shipmentId: 'shp-43', number: '20043', customerName: 'C.H. ROBINSON', value: '573570079', source: 'reference' as const }]
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:a', subject: 'Tender for Mesa', fields: intakeFields({ reference: '573570079' }), alreadyBuilt: stored, alreadyBuiltCheckedAt: '2026-11-12T10:00:00.000Z' }),
+    ])
+    renderBoard()
+    const notice = await screen.findByTestId('intake-built-notice')
+    expect(notice).toHaveTextContent('Already built')
+    expect(notice).toHaveTextContent('PRO 20043')
+    expect(api.listShipmentsBySearchKeys).not.toHaveBeenCalled()
+  })
+
+  it('a stored answer the row no longer holds (its reference was edited) is checked again by the screen', async () => {
+    const stored = [{ shipmentId: 'shp-99', number: '19999', customerName: 'Old', value: 'OLDREF-12345', source: 'reference' as const }]
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:a', subject: 'Tender for Mesa', fields: intakeFields({ reference: '573570079' }), alreadyBuilt: stored, alreadyBuiltCheckedAt: '2026-11-12T10:00:00.000Z' }),
+    ])
+    renderBoard()
+    const notice = await screen.findByTestId('intake-built-notice')
+    expect(notice).toHaveTextContent('PRO 20043')
+    expect(notice).not.toHaveTextContent('19999')
+  })
+
   it('a failed check leaves the queue unflagged and usable', async () => {
     vi.mocked(api.listShipmentsBySearchKeys).mockRejectedValue(new Error('boom'))
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
