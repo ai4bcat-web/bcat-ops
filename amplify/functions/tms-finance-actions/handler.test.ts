@@ -1368,6 +1368,30 @@ describe('REVERSE_PAYMENT', () => {
 
 // ── factoring ───────────────────────────────────────────────────────────────
 
+describe('SETTLE_FACTORED_INVOICES', () => {
+  it('marks an invoice paid once OTR has funded it, dated the funding day, and only once', async () => {
+    const { invoiceId } = await generate()
+    await call('SEND_TO_FACTOR', { invoiceId })
+    const row = table(TABLES.factoring).get('S000001-1')!
+    // Still pending at OTR: nothing to settle.
+    table(TABLES.factoring).set('S000001-1', { ...row, status: 'PENDING_WITH_OTR', otrInvoiceId: '99123' })
+    let out = (await call('SETTLE_FACTORED_INVOICES', {})) as { settled: Row[] }
+    expect(out.settled).toHaveLength(0)
+
+    table(TABLES.factoring).set('S000001-1', { ...row, status: 'FACTORED', otrInvoiceId: '99123', factoredAt: '2026-11-03T15:00:00.000Z' })
+    out = (await call('SETTLE_FACTORED_INVOICES', {})) as { settled: Row[] }
+    expect(out.settled).toHaveLength(1)
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ status: 'PAID', balanceCents: 0 })
+    const payments = [...table(TABLES.arPayment).values()].filter((p) => p.kind === 'PAYMENT')
+    expect(payments).toHaveLength(1)
+    expect(payments[0]).toMatchObject({ method: 'FACTOR', reference: 'OTR 99123', receivedAt: '2026-11-03T12:00:00.000Z' })
+
+    out = (await call('SETTLE_FACTORED_INVOICES', {})) as { settled: Row[] }
+    expect(out.settled).toHaveLength(0)
+    expect([...table(TABLES.arPayment).values()].filter((p) => p.kind === 'PAYMENT')).toHaveLength(1)
+  })
+})
+
 describe('SEND_TO_FACTOR', () => {
   it('writes the queue row the intake e-mail would have written, and stops there', async () => {
     const { invoiceId } = await generate()

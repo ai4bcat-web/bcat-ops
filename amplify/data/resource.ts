@@ -3821,6 +3821,7 @@ const schema = a.schema(stageTypes({
       otrScheduleId:   a.string(),
       otrAmount:       a.integer(), // cents, as submitted
       otrStatusSyncedAt: a.datetime(),
+      factoredAt:      a.datetime(),   // when OTR's board first said Approved (funded); dates the FACTOR payment
       // ── Invoicing by hand ─────────────────────────────────────────────────
       manualReason:     a.string(),    // 'NO_BUY' | 'MANUAL'
       manualSteps:      a.json(),      // ManualInvoiceSteps — see src/lib/manualInvoice.ts

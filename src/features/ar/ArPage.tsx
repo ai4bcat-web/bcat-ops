@@ -34,7 +34,7 @@ import {
 } from '@/lib/apiClient'
 import { loadWorklistShipments } from '@/lib/worklistShipments'
 import {
-  AGING_BUCKETS, AGING_BUCKET_LABEL, agingCsv, avgDaysToInvoice, avgDaysToPay, deliveredNotInvoiced,
+  AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL, agingCsv, avgDaysToInvoice, avgDaysToPay, deliveredNotInvoiced,
   type AgingSummary,
 } from '@/lib/arAging'
 import { chicagoDateStr } from '@/lib/date'
@@ -48,8 +48,8 @@ import {
   agingChipFor, formatDay, lastThreeMonths, monthLabel,
 } from './arViews'
 import {
-  AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, buildInvoicedRows, buildPaidRows, buildReadyRows, groupKeyOf, groupTotals,
-  orderByGroup, type ArGroupBy, type ArQueueLookups, type ArQueueRow, type ArQueueStatus,
+  AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, billedByMatches, buildInvoicedRows, buildPaidRows, buildReadyRows, groupKeyOf, groupTotals,
+  orderByGroup, type ArBilledBy, type ArGroupBy, type ArQueueLookups, type ArQueueRow, type ArQueueStatus,
 } from './arQueue'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
 import { EmailInvoiceDialog } from './components/EmailInvoiceDialog'
@@ -103,6 +103,16 @@ const QUEUE_TAB_STATUS: Record<'ready' | 'invoiced' | 'paid', ArQueueStatus> = {
 }
 
 const GROUP_BY_KEY = 'tms:ar:groupBy'
+const BILLED_BY_KEY = 'tms:ar:billedBy'
+
+function readBilledBy(): ArBilledBy {
+  try {
+    const v = localStorage.getItem(BILLED_BY_KEY)
+    return v === 'factored' || v === 'all' ? v : 'manual'
+  } catch {
+    return 'manual'
+  }
+}
 
 function readGroupBy(): ArGroupBy {
   try {
@@ -123,6 +133,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [busy, setBusy] = useState(false)
   const canRelease = useBillingGrant()
   const [groupBy, setGroupByState] = useState<ArGroupBy>(readGroupBy)
+  // Manually invoiced (the default) vs factored through OTR; the OTR queue itself is the Factored view.
+  const [billedBy, setBilledByState] = useState<ArBilledBy>(readBilledBy)
+  const setBilledBy = (next: ArBilledBy) => {
+    setBilledByState(next)
+    setSelected([])
+    try { localStorage.setItem(BILLED_BY_KEY, next) } catch { /* per-viewer convenience only */ }
+  }
   const setGroupBy = (next: ArGroupBy) => {
     setGroupByState(next)
     try { localStorage.setItem(GROUP_BY_KEY, next) } catch { /* per-viewer convenience only */ }
@@ -220,11 +237,14 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     [invoiced.rows],
   )
 
-  const queue: Record<ArQueueStatus, ArQueueRow[]> = useMemo(() => ({
-    READY: buildReadyRows(unbilled.rows, lookups),
-    INVOICED: buildInvoicedRows(open.invoices, lookups, releasedByOrder),
-    PAID: buildPaidRows(paidInvoices, lookups),
-  }), [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder])
+  const queue: Record<ArQueueStatus, ArQueueRow[]> = useMemo(() => {
+    const keep = (rows: ArQueueRow[]) => rows.filter((row) => billedByMatches(row, billedBy))
+    return {
+      READY: keep(buildReadyRows(unbilled.rows, lookups)),
+      INVOICED: keep(buildInvoicedRows(open.invoices, lookups, releasedByOrder)),
+      PAID: keep(buildPaidRows(paidInvoices, lookups)),
+    }
+  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy])
 
   const uninvoiced = useMemo(() => {
     const rows = unbilled.rows
@@ -338,12 +358,20 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const customer = customers.find((c) => c.id === arCustomerId) ?? null
 
   const groupControl = (
+    <>
+    <label className="flex items-center gap-1 text-sm">
+      <span className="tms-muted">Billed</span>
+      <TmsSelect aria-label="Billed" value={billedBy} onChange={(e) => setBilledBy(e.target.value as ArBilledBy)}>
+        {(Object.keys(AR_BILLED_BY_LABEL) as ArBilledBy[]).map((k) => <option key={k} value={k}>{AR_BILLED_BY_LABEL[k]}</option>)}
+      </TmsSelect>
+    </label>
     <label className="flex items-center gap-1 text-sm">
       <span className="tms-muted">Group by</span>
       <TmsSelect aria-label="Group by" value={groupBy} onChange={(e) => setGroupBy(e.target.value as ArGroupBy)}>
         {(Object.keys(AR_GROUP_BY_LABEL) as ArGroupBy[]).map((k) => <option key={k} value={k}>{AR_GROUP_BY_LABEL[k]}</option>)}
       </TmsSelect>
     </label>
+    </>
   )
 
   const current =
@@ -617,6 +645,11 @@ function queueView({
     { key: 'status', header: 'Status', group: 'Invoice', text: (row) => (row.shortPaid ? `Short paid ${formatCents(row.balanceCents)} open` : AR_QUEUE_STATUS_LABEL[row.status]), filter: 'multi', optionsOf: (row) => opt(AR_QUEUE_STATUS_LABEL[row.status]) },
     { key: 'sent', header: 'Sent', group: 'Invoice', text: sentText, sortValue: (row) => row.sentAt ?? '' },
     {
+      key: 'age', header: 'Days since invoice', group: 'Invoice', align: 'right',
+      text: (row) => (row.daysSinceInvoice == null ? '—' : `${row.daysSinceInvoice}d`),
+      sortValue: (row) => row.daysSinceInvoice ?? -1, filter: 'number', numberOf: (row) => row.daysSinceInvoice ?? 0, numberUnit: 'days',
+    },
+    {
       key: 'pastDue', header: 'Days past due', group: 'Invoice', align: 'right', text: pastDueText,
       sortValue: (row) => row.daysPastDue ?? -99999, filter: 'number', numberOf: (row) => row.daysPastDue ?? 0, numberUnit: 'days',
     },
@@ -884,7 +917,7 @@ function agingView({
   type Row = AgingSummary['byCustomer'][number]
   const columns: Array<Col<Row>> = [
     { key: 'customer', header: 'Customer', group: 'Customer', text: (row) => row.customerName || row.customerId },
-    ...AGING_BUCKETS.map((b) => moneyCol<Row>(b, AGING_BUCKET_LABEL[b], (row) => row.byBucket[b], 'Buckets')),
+    ...AR_AGING_BUCKETS.map((b) => moneyCol<Row>(b, AR_AGING_BUCKET_LABEL[b], (row) => row.byBucket[b], 'Buckets')),
     moneyCol<Row>('total', 'Total', (row) => row.totalCents, 'Buckets'),
     {
       key: 'late', header: 'Late', group: 'Late', align: 'right',

@@ -49,6 +49,7 @@ import {
 } from './apPayments'
 import { repointInvoicedCustomer } from './repoint'
 import { brokerageRepRollup } from './brokerageRep'
+import { settleFactoredInvoices } from './settleFactored'
 import {
   acceptCommissionCounter,
   approveCommission,
@@ -122,6 +123,7 @@ type Action =
   | 'RELEASE_TO_BILLING'
   | 'SEND_INVOICE'
   | 'SYNC_FACTORING_CHANGE'
+  | 'SETTLE_FACTORED_INVOICES'
   | 'BROKERAGE_REP_ROLLUP'
 
 /**
@@ -196,7 +198,7 @@ interface AppSyncEvent {
  */
 function accountingPagesFor(action: Action): readonly string[] {
   if (action === 'RELEASE_TO_BILLING') return ['loadReview', 'invoicing']
-  if (action === 'SEND_TO_FACTOR' || action === 'SYNC_FACTORING_CHANGE') return ['invoicing', 'factoring']
+  if (action === 'SEND_TO_FACTOR' || action === 'SYNC_FACTORING_CHANGE' || action === 'SETTLE_FACTORED_INVOICES') return ['invoicing', 'factoring']
   if (COMMISSION_ACTIONS[action]) return ['commissions']
   if (AP_ACTIONS[action]) return ['carrierPay']
   return ['invoicing']
@@ -222,6 +224,10 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
 }
 
 export const handler = async (event: AppSyncEvent): Promise<Row> => {
+  // The EventBridge schedule (no AppSync arguments): mark OTR-funded invoices paid.
+  if (!event.arguments && (event as unknown as { source?: string }).source === 'aws.events') {
+    return settleFactoredInvoices() as unknown as Row
+  }
   const action = event.arguments.action as Action
   // Its own door, decided by brokerageAccessOf inside the action (owner/ADMIN/page-dashboard or a sales rep), never by the AR page rule.
   if (action === 'BROKERAGE_REP_ROLLUP') return brokerageRepRollup(event.identity, parseInput(event.arguments.input))
@@ -259,6 +265,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return releaseToBilling(input, caller)
     case 'SEND_INVOICE':
       return sendInvoice(input, caller)
+    case 'SETTLE_FACTORED_INVOICES':
+      return settleFactoredInvoices(caller) as unknown as Promise<Row>
     case 'SYNC_FACTORING_CHANGE':
       return syncFactoringChange(input, caller)
     case 'PREVIEW_FACTOR':

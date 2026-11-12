@@ -10,7 +10,7 @@
  * Pure: the page passes the worklist rows, the invoices, the shipments it has read and the
  * name lookups; this file decides and the page renders.
  */
-import { daysLate } from '@/lib/arAging'
+import { daysLate, daysSinceInvoice } from '@/lib/arAging'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type { InvoiceRecord, ShipmentRecord } from '@/types/tms'
 
@@ -52,6 +52,10 @@ export interface ArQueueRow {
   daysPastDue: number | null
   /** Invoiced, something was paid, and a balance is still open. */
   shortPaid: boolean
+  /** Days since the invoice date (AR ages from the invoice date); null before invoicing. */
+  daysSinceInvoice: number | null
+  /** Billed through OTR (factored) rather than invoiced to the customer by hand. */
+  factored: boolean
   paidAt: string | null
   /** The cached-field blockers from the worklist (READY only). */
   reasons: string[]
@@ -111,6 +115,8 @@ export function readyRow(row: ArWorklistRow, l: ArQueueLookups): ArQueueRow {
     sentCount: 0,
     daysPastDue: null,
     shortPaid: false,
+    daysSinceInvoice: null,
+    factored: Boolean(row.order.factoringItemId),
     paidAt: null,
     reasons: row.reasons,
     invoice: null,
@@ -148,6 +154,8 @@ export function invoiceRow(inv: InvoiceRecord, l: ArQueueLookups, releasedAt?: s
     sentCount: inv.sentCount ?? 0,
     daysPastDue: late,
     shortPaid: status === 'INVOICED' && inv.paidCents > 0 && inv.balanceCents > 0,
+    daysSinceInvoice: status === 'INVOICED' ? daysSinceInvoice(inv.invoiceDate, l.asOf) : null,
+    factored: Boolean(inv.factored || inv.factoringItemId),
     paidAt: inv.paidAt ?? null,
     reasons: [],
     invoice: inv,
@@ -181,6 +189,19 @@ export function buildInvoicedRows(open: InvoiceRecord[], l: ArQueueLookups, rele
 /** PAID rows: invoices whose balance is zero. */
 export function buildPaidRows(invoices: InvoiceRecord[], l: ArQueueLookups): ArQueueRow[] {
   return invoices.filter((inv) => inv.status === 'PAID').map((inv) => invoiceRow(inv, l))
+}
+
+/** Receivable is split by how a load is billed: by hand to the customer, or factored through OTR. */
+export type ArBilledBy = 'manual' | 'factored' | 'all'
+
+export const AR_BILLED_BY_LABEL: Record<ArBilledBy, string> = {
+  manual: 'Manually invoiced',
+  factored: 'Factored',
+  all: 'All',
+}
+
+export function billedByMatches(row: ArQueueRow, by: ArBilledBy): boolean {
+  return by === 'all' || (by === 'factored') === row.factored
 }
 
 export type ArGroupBy = 'none' | 'division' | 'customer' | 'rep'

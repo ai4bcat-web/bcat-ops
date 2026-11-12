@@ -135,6 +135,33 @@ export function agingBucket(dueAt: string, asOf: string): AgingBucket {
   return 'D91_PLUS'
 }
 
+/**
+ * AR ages from the INVOICE date (Ryne, 2026-11-12): 0–30, 31–60, 61–90 and 90+ days since the
+ * invoice was dated. Lateness (the "Late" figures) still runs from the due date.
+ */
+export const AR_AGING_BUCKETS = ['D1_30', 'D31_60', 'D61_90', 'D91_PLUS'] as const
+export const AR_AGING_BUCKET_LABEL: Record<(typeof AR_AGING_BUCKETS)[number], string> = {
+  D1_30: '0–30',
+  D31_60: '31–60',
+  D61_90: '61–90',
+  D91_PLUS: '90+',
+}
+
+/** Which invoice-age column an invoice dated `invoiceDate` sits in on `asOf`. */
+export function invoiceAgeBucket(invoiceDate: string, asOf: string): AgingBucket {
+  const d = dayDiff(invoiceDate, asOf) ?? 0
+  if (d <= 30) return 'D1_30'
+  if (d <= 60) return 'D31_60'
+  if (d <= 90) return 'D61_90'
+  return 'D91_PLUS'
+}
+
+/** Whole days since the invoice date, or null when there is no usable date. */
+export function daysSinceInvoice(invoiceDate: string | null | undefined, asOf: string): number | null {
+  const d = dayDiff(invoiceDate, asOf)
+  return d == null ? null : Math.max(0, d)
+}
+
 const emptyBuckets = (): Record<AgingBucket, number> => ({
   CURRENT: 0,
   D1_30: 0,
@@ -154,6 +181,8 @@ export interface AgingOpenItem {
   partyName?: string | null
   dueAt: string
   balanceCents: number
+  /** When set, the bucket is the age since this date (AR: the invoice date) instead of days past due. */
+  agedFrom?: string | null
 }
 
 /**
@@ -170,7 +199,7 @@ export function ageOpenItems(items: AgingOpenItem[], asOf: string): AgingPartySu
   for (const item of items) {
     const balance = item.balanceCents
     const late = daysLate(item.dueAt, asOf)
-    const bucket = agingBucket(item.dueAt, asOf)
+    const bucket = item.agedFrom ? invoiceAgeBucket(item.agedFrom, asOf) : agingBucket(item.dueAt, asOf)
 
     totalCents += balance
     byBucket[bucket] += balance
@@ -215,7 +244,7 @@ export function ageOpenItems(items: AgingOpenItem[], asOf: string): AgingPartySu
  * The balance — not the total — is what is aged, so a part-paid invoice ages its
  * remainder.
  */
-export function ageInvoices(openInvoices: InvoiceRecord[], asOf: string): AgingSummary {
+export function ageInvoices(openInvoices: InvoiceRecord[], asOf: string, opts: { fromInvoiceDate?: boolean } = {}): AgingSummary {
   const items: AgingOpenItem[] = []
   for (const inv of openInvoices) {
     if (!OPEN_STATUS[inv.status]) continue
@@ -224,6 +253,7 @@ export function ageInvoices(openInvoices: InvoiceRecord[], asOf: string): AgingS
       partyName: inv.customerName,
       dueAt: inv.dueAt,
       balanceCents: inv.balanceCents,
+      ...(opts.fromInvoiceDate ? { agedFrom: inv.invoiceDate } : {}),
     })
   }
 
@@ -363,7 +393,7 @@ const dollars = (cents: number) => {
 
 export const AGING_CSV_HEADER = [
   'Customer',
-  ...AGING_BUCKETS.map((b) => AGING_BUCKET_LABEL[b]),
+  ...AR_AGING_BUCKETS.map((b) => AR_AGING_BUCKET_LABEL[b]),
   'Total',
   'Late invoices',
   'Oldest days',
@@ -374,13 +404,14 @@ function agingCsvOf<Row extends Omit<AgingPartyRow, 'partyId' | 'partyName'>>(
   header: readonly string[],
   rows: Row[],
   nameOf: (row: Row) => string,
+  buckets: readonly AgingBucket[] = AGING_BUCKETS,
 ): string {
   const lines = [header.map(q).join(',')]
   for (const r of rows) {
     lines.push(
       [
         nameOf(r),
-        ...AGING_BUCKETS.map((b) => dollars(r.byBucket[b])),
+        ...buckets.map((b) => dollars(r.byBucket[b])),
         dollars(r.totalCents),
         r.lateCount,
         r.oldestDays,
@@ -394,7 +425,7 @@ function agingCsvOf<Row extends Omit<AgingPartyRow, 'partyId' | 'partyName'>>(
 
 /** The aging table as a CSV, in the order given (i.e. `ageInvoices` order). */
 export function agingCsv(rows: AgingCustomerRow[]): string {
-  return agingCsvOf(AGING_CSV_HEADER, rows, (r) => r.customerName)
+  return agingCsvOf(AGING_CSV_HEADER, rows, (r) => r.customerName, AR_AGING_BUCKETS)
 }
 
 export const AP_AGING_CSV_HEADER = [
