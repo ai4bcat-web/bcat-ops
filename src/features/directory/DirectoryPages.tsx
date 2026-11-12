@@ -56,6 +56,8 @@ import { driverNotesSummary } from '@/lib/tmsDirectory'
 import type { Division, LocationMergeJob, LocationMergePreview, TmsSettings, ChargeCodeDef, CustomerStatus } from '@/types/tms'
 import { CustomerForm } from './components/CustomerForm'
 import { useCustomerForm } from './components/useCustomerForm'
+import { DuplicateCustomerNotice } from './components/NewCustomerGuard'
+import { useNewCustomerGuard } from './components/useNewCustomerGuard'
 import { LocationForm } from './components/LocationForm'
 import { useLocationForm } from './components/useLocationForm'
 import { LocationDetail } from './components/LocationDetail'
@@ -574,6 +576,9 @@ export function CustomersPage() {
         open={editing !== null}
         initial={editing === 'new' ? undefined : editing ?? undefined}
         divisions={divisions}
+        existingCustomers={dir.customers}
+        isAdmin={isAdmin}
+        onOpenExisting={(id) => { setEditing(null); setProfileId(id) }}
         onClose={() => setEditing(null)}
         onSave={async (record) => {
           if (editing === 'new') {
@@ -612,16 +617,24 @@ export function CustomersPage() {
   )
 }
 
-function CustomerModal({ open, initial, divisions, onClose, onSave }: {
-  open: boolean; initial?: CustomerRecord; divisions: Division[]; onClose: () => void; onSave: (record: CustomerRecord) => Promise<void>
+function CustomerModal({ open, initial, divisions, existingCustomers = [], isAdmin = false, onOpenExisting, onClose, onSave }: {
+  open: boolean; initial?: CustomerRecord; divisions: Division[]
+  existingCustomers?: CustomerRecord[]; isAdmin?: boolean; onOpenExisting?: (id: string) => void
+  onClose: () => void; onSave: (record: CustomerRecord) => Promise<void>
 }) {
   const { value, set, toRecord, errors, isNew, missing } = useCustomerForm(initial ?? null)
   const [saving, setSaving] = useState(false)
+  const guard = useNewCustomerGuard({ value, isNew, existing: existingCustomers, isAdmin })
 
   const save = async () => {
     if (Object.keys(errors).length > 0) { toast.error('Please fix the errors above'); return }
+    if (guard.blocked) { toast.error('This customer already exists'); return }
     setSaving(true)
-    try { await onSave(toRecord()); onClose() } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+    try {
+      const record = guard.overrideReason ? { ...toRecord(), duplicateOverrideReason: guard.overrideReason } : toRecord()
+      await onSave(record)
+      onClose()
+    } catch (e) { if (!guard.takeError(e)) toast.error(e instanceof Error ? e.message : String(e)) }
     finally { setSaving(false) }
   }
 
@@ -635,10 +648,11 @@ function CustomerModal({ open, initial, divisions, onClose, onSave }: {
         <>
           {missing && <span role="status" data-testid="customer-missing" className="tms-field-error" style={{ marginRight: 'auto' }}>{missing}</span>}
           <TmsButton onClick={onClose}>Cancel</TmsButton>
-          <TmsButton variant="primary" onClick={save} disabled={saving || (isNew && Object.keys(errors).length > 0)}>{saving ? 'Saving…' : 'Save'}</TmsButton>
+          <TmsButton variant="primary" onClick={save} disabled={saving || guard.blocked || (isNew && Object.keys(errors).length > 0)}>{saving ? 'Saving…' : 'Save'}</TmsButton>
         </>
       }
     >
+      {isNew && <DuplicateCustomerNotice guard={guard} onOpenExisting={(id) => onOpenExisting?.(id)} />}
       <CustomerForm value={value} set={set} errors={errors} divisions={divisions} isNew={isNew} />
     </TmsDialog>
   )
