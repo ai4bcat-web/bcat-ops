@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AUDIT_ACTION, applyOne, billingEmailsGate, buildReport } from './awCustomerBillingEmails.mjs';
-import { groupCompanies, normKey, normMc, planBillingEmails, prepareRows } from './lib/billingEmailsPlan.mjs';
+import { groupCompanies, isNoticeAddress, normKey, normMc, planBillingEmails, prepareRows } from './lib/billingEmailsPlan.mjs';
 import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 import { resolveScripts } from './prodBackup.mjs';
 import { DEV_SUFFIX } from './lib/prodGate.mjs';
@@ -59,8 +59,17 @@ describe('planBillingEmails', () => {
   });
   it('ignores merged / inactive customers and flags notice addresses and unset billing method', () => {
     expect(status([cust({ active: false })], [row({ name: 'Zipline Logistics', billingEmail: 'p@z.com' })])).toEqual(['UNMATCHED']);
-    const p = planBillingEmails([cust({ billingMethod: null })], prep([row({ name: 'Zipline Logistics', billingEmail: 'zip@noa.triumphpay.com' })]));
-    expect(p.results[0].flags).toEqual(['NOTICE_ADDRESS', 'BILLING_METHOD_UNSET']);
+    const p = planBillingEmails([cust({ billingMethod: null })], prep([row({ name: 'Zipline Logistics', billingEmail: 'ap@z.com' })]));
+    expect(p.results[0].flags).toEqual(['BILLING_METHOD_UNSET']);
+  });
+  it('keeps notice-of-assignment addresses out of apEmail', () => {
+    for (const a of ['x@noa.triumphpay.com', 'NOA@fitzmark.com', 'kofnoa@otrsolutions.com', 'Factor@shipqueen.com', 'factornotice@modetransportation.com', 'FactoringInvoices_NOA_ONLY@hdships.com', 'NOALOR@Spotinc.com', 'tlfactoring@bluegracegroup.com', 'apfactor@allenlund.com', 'support@payments.tfin.com', 'noa@relaypayments.com']) expect(isNoticeAddress(a.toLowerCase())).toBe(true);
+    for (const a of ['ap@z.com', 'accounting@factorylogistics.com']) expect(isNoticeAddress(a)).toBe(false);
+    const only = planBillingEmails([cust()], prep([row({ name: 'Zipline Logistics', billingEmail: 'zip@noa.triumphpay.com' })])).results[0];
+    expect(only.status).toBe('NOA_ONLY');
+    expect(only.company.noa).toEqual(['zip@noa.triumphpay.com']);
+    const both = planBillingEmails([cust()], prep([row({ name: 'Zipline Logistics', billingEmail: 'zip@noa.triumphpay.com ap@z.com' })])).results[0];
+    expect([both.status, both.email, both.company.noa]).toEqual(['FILL', 'ap@z.com', ['zip@noa.triumphpay.com']]);
   });
   it('report counts', () => {
     const rows = [row({ name: 'Zipline Logistics', billingEmail: 'p@z.com' })];

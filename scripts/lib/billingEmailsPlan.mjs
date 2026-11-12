@@ -17,8 +17,8 @@ export const normKey = (name) => {
 };
 export const normMc = (v) => { const d = String(v ?? '').replace(/\D/g, '').replace(/^0+/, ''); return d || ''; };
 
-/** NOA / factor-notice style addresses OTR lists as billing. Included but flagged so Ryne can decide. */
-export const isNoticeAddress = (a) => /@noa\.triumphpay\.com$|^(noa|factornotice|factor|tlfactoring|apfactor|factoringinvoices_noa_only|noalor|kofnoa)[a-z0-9._-]*@|^support@payments\.tfin\.com$|@relaypayments\.com$/i.test(a);
+/** Notice-of-assignment (factoring notice) addresses: kept OUT of the AP e-mail field (Ryne 2026-11-12). */
+export const isNoticeAddress = (a) => /@noa\.triumphpay\.com$|@relaypayments\.com$|noa@|factornotice|factor@|factoringinvoices_noa|noalor|kofnoa|tlfactoring|apfactor|^support@payments\.tfin\.com$/i.test(String(a));
 
 /** CSV rows -> [{name,key,mc,emails,notice,skipped}] (blank-email and skipped rows dropped, counted). */
 export function prepareRows(rows) {
@@ -31,7 +31,7 @@ export function prepareRows(rows) {
     const real = valid.filter((a) => !a.endsWith(INTERNAL_DOMAIN) && !FACTOR_ADDRESSES.has(a));
     if (valid.some((a) => a.endsWith(INTERNAL_DOMAIN))) bcatInternal.push(name);
     if (!real.length) { if (!bad.length && !valid.length) blankRows += 1; continue; }
-    out.push({ name, key: normKey(name), mc: normMc(r.mcNumber), emails: real, bad });
+    out.push({ name, key: normKey(name), mc: normMc(r.mcNumber), emails: real.filter((a) => !isNoticeAddress(a)), noa: real.filter(isNoticeAddress), bad });
   }
   return { rows: out, blankRows, skipped, bcatInternal };
 }
@@ -52,7 +52,8 @@ export function groupCompanies(rows) {
   rows.forEach((r, i) => { const g = find(i); groups.set(g, [...(groups.get(g) ?? []), r]); });
   return [...groups.values()].map((rs) => {
     const emails = [...new Set(rs.flatMap((r) => r.emails))];
-    return { names: [...new Set(rs.map((r) => r.name))], keys: new Set(rs.map((r) => r.key)), mcs: new Set(rs.map((r) => r.mc).filter(Boolean)), emails, conflict: emails.length > 1 };
+    const noa = [...new Set(rs.flatMap((r) => r.noa))];
+    return { noa, names: [...new Set(rs.map((r) => r.name))], keys: new Set(rs.map((r) => r.key)), mcs: new Set(rs.map((r) => r.mc).filter(Boolean)), emails, conflict: emails.length > 1 };
   });
 }
 
@@ -61,7 +62,8 @@ const isLive = (c) => c.active !== false && !c.mergedIntoId;
 /**
  * Plan against production Customers. Returns { companies, results, unmatched } where each result is
  * { company, customer?, status, email?, existing?, flags[] } and status is one of
- * FILL | ALREADY_HAS_EMAIL | SAME_EMAIL | DIFFERS | FACTOR_CUSTOMER | CONFLICT | AMBIGUOUS | UNMATCHED.
+ * FILL | SAME_EMAIL | DIFFERS | FACTOR_CUSTOMER | CONFLICT | AMBIGUOUS | UNMATCHED | NOA_ONLY (only a notice address; AP left blank).
+ * `noa` on each result lists the notice-of-assignment addresses, which are never written (no field for them yet).
  */
 export function planBillingEmails(customers, prepared) {
   const companies = groupCompanies(prepared.rows);
@@ -77,13 +79,13 @@ export function planBillingEmails(customers, prepared) {
     for (const m of company.mcs) for (const c of byMc.get(m) ?? []) found.set(c.id, c);
     if (!found.size) for (const k of company.keys) for (const c of byKey.get(k) ?? []) found.set(c.id, c);
     const flags = [];
-    if (company.emails.some(isNoticeAddress)) flags.push('NOTICE_ADDRESS');
     if (!found.size) { results.push({ company, status: 'UNMATCHED', flags }); continue; }
     if (found.size > 1) { results.push({ company, status: 'AMBIGUOUS', matches: [...found.values()], flags }); continue; }
     const customer = [...found.values()][0];
     if (claimed.has(customer.id)) { results.push({ company, customer, status: 'AMBIGUOUS', matches: [customer], flags: [...flags, 'CUSTOMER_MATCHED_BY_TWO_COMPANIES'] }); continue; }
     claimed.set(customer.id, company);
     if (company.conflict) { results.push({ company, customer, status: 'CONFLICT', flags }); continue; }
+    if (!company.emails.length) { results.push({ company, customer, status: 'NOA_ONLY', flags }); continue; }
     const email = company.emails[0];
     const existing = blank(customer.apEmail) ? null : String(customer.apEmail).trim();
     if (customer.billingMethod === 'FACTOR') { results.push({ company, customer, status: 'FACTOR_CUSTOMER', email, existing, flags }); continue; }
