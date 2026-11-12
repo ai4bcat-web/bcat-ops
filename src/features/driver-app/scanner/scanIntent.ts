@@ -22,7 +22,8 @@ const KEY = 'bcat.driver.scanIntent'
 const FRESH_FOR_MS = 15 * 60 * 1000
 
 export interface ScanIntent {
-  kind: 'pod' | 'ratecon' | 'misc'
+  /** 'doc' is an additional document (a lumper receipt, a scale ticket) for the load. */
+  kind: 'pod' | 'ratecon' | 'misc' | 'doc'
   pro?: string
   submissionId?: string
   /** The load the Ivan paperwork page handed over, so the resumed scan still links to it. */
@@ -57,7 +58,7 @@ export function readScanIntent(now = Date.now()): ScanIntent | null {
     const raw = sessionStorage.getItem(KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<ScanIntent>
-    if (parsed.kind !== 'pod' && parsed.kind !== 'ratecon' && parsed.kind !== 'misc') return null
+    if (parsed.kind !== 'pod' && parsed.kind !== 'ratecon' && parsed.kind !== 'misc' && parsed.kind !== 'doc') return null
     if (typeof parsed.at !== 'number' || now - parsed.at > FRESH_FOR_MS) return null
     return {
       kind: parsed.kind,

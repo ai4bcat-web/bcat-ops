@@ -30,6 +30,16 @@ export function isDriverDocType(type: string): boolean {
   return type !== 'RATE_CON'
 }
 
+/**
+ * The type a driver may tag an 'Additional document' with: a known extra that a driver can
+ * be asked for. Anything else (blank, 'OTHER', the rate confirmation, a typo) is null, so the
+ * upload stays untyped for the office rather than counting toward the wrong requirement.
+ */
+export function driverAdditionalDocType(value: string | null | undefined): (typeof LOAD_EXTRA_DOC_TYPES)[number] | null {
+  const type = (value ?? '').trim()
+  return isExtraType(type) && isDriverDocType(type) ? type : null
+}
+
 function isExtraType(type: string): type is (typeof LOAD_EXTRA_DOC_TYPES)[number] {
   return (LOAD_EXTRA_DOC_TYPES as readonly string[]).includes(type)
 }

@@ -24,6 +24,7 @@ import {
   fileDriverDocAsPod,
 } from '@/lib/driverSubmissionsClient'
 import { queueDriverDocScan } from '@/lib/podsClient'
+import { docTypeLabel } from '@/lib/loadRequiredDocs'
 import { useAuthUser } from '@/hooks/useAuth'
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -138,6 +139,8 @@ export function LoadDriverDocs({
       <ul className="space-y-1.5">
         {docs.map((doc) => {
           const name = doc.fileName?.trim() || `${doc.kind} page ${doc.pageNumber ?? 1}`
+          // The driver said what this is (a lumper receipt): say so, so it is filed under that type.
+          const typed = kind === 'MISC' && doc.docType ? docTypeLabel(doc.docType) : null
           const who = SOURCE_LABEL[doc.source ?? 'PWA'] ?? 'from the driver app'
           const note = describe(doc)
           return (
@@ -149,7 +152,7 @@ export function LoadDriverDocs({
                 className="flex w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-2.5 py-2 text-left transition-colors hover:bg-muted/60"
               >
                 <span className="min-w-0">
-                  <span className="block truncate text-xs font-medium text-foreground">{name}</span>
+                  <span className="block truncate text-xs font-medium text-foreground">{typed ? `${typed} · ${name}` : name}</span>
                   <span className="block truncate text-[11px] text-muted-foreground">
                     {doc.driverName} · {who}{doc.stopLabel ? ` · ${doc.stopLabel}` : ''} · {when(doc.uploadedAt)}
                     {note && (

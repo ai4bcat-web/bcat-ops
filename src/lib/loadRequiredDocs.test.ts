@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loadExtraDocTypes, validateLoadRequiredDocTypes } from './loadRequiredDocs'
+import { driverAdditionalDocType, loadExtraDocTypes, validateLoadRequiredDocTypes } from './loadRequiredDocs'
 import { requiredDocTypesForRelease } from './releaseGate'
 import { evaluateDocGate } from './shipmentDocuments'
 
@@ -52,5 +52,15 @@ describe('per-load required documents', () => {
     })
     expect(gate.required).toEqual(['POD'])
     expect(requiredDocTypesForRelease([], [], [], { carShipper: true })).toEqual(['POD'])
+  })
+})
+
+describe('driverAdditionalDocType', () => {
+  it('keeps a known extra a driver can send', () => {
+    expect(driverAdditionalDocType('LUMPER_RECEIPT')).toBe('LUMPER_RECEIPT')
+    expect(driverAdditionalDocType(' WEIGHT_TICKET ')).toBe('WEIGHT_TICKET')
+  })
+  it("drops the rate confirmation, 'Other', blanks and typos", () => {
+    for (const v of ['RATE_CON', 'OTHER', '', null, undefined, 'lumper', 'POD']) expect(driverAdditionalDocType(v)).toBeNull()
   })
 })

@@ -139,11 +139,21 @@ export function CurrentLoadCard() {
                   : <XCircle className="size-3.5 text-[color:var(--tms-badge-orange)]" aria-label="Still needed" />}
                 <span className="text-foreground">{d.label}</span>
                 <span className="text-muted-foreground">{d.done ? 'in' : 'still needed'}</span>
+                {/* The POD has its own button; an extra goes up as an additional document of its type. */}
+                {!d.done && d.type !== 'POD' && (
+                  <a
+                    href={`/driver/scan?${new URLSearchParams({ kind: 'doc', docType: d.type, pro: load.proNumber, loadId: load.id }).toString()}`}
+                    className="ml-auto font-semibold text-primary"
+                    data-testid={`send-required-doc-${d.type}`}
+                  >
+                    Send
+                  </a>
+                )}
               </li>
             ))}
           </ul>
           <p className="mt-1.5 text-muted-foreground">
-            {allDocsIn ? 'Everything is in. Nothing else needed from you.' : 'Send each one from the Scan tab. The load is not paid until all of them are in.'}
+            {allDocsIn ? 'Everything is in. Nothing else needed from you.' : 'Tap Send next to each one, or use Additional document on the Scan tab. The load is not paid until all of them are in.'}
           </p>
         </section>
       ) : podIn ? (
