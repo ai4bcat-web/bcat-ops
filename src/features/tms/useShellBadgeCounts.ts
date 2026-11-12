@@ -29,6 +29,7 @@ import { modelsAvailable } from '@/lib/modelAvailability'
 import { useSpotNewCount } from '@/features/spot-quoter/useSpotRequests'
 import { loadReviewCount } from '@/lib/loadReview'
 import { needsCoverCount } from '@/features/tms/carrierSales/carrierSalesQueue'
+import { shipmentListCounts } from '@/lib/shipmentLists'
 import type { ShipmentListRow } from '@/hooks/useShipments'
 
 const POLL_MS = 60_000
@@ -121,6 +122,8 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   const mayWorkLoads = hasPageAccess('loads') || hasPageAccess('tms')
   const loadReview = useMemo(() => (mayReviewLoads && hasShipments ? loadReviewCount(shipments) : 0), [mayReviewLoads, hasShipments, shipments])
   const carrierSales = useMemo(() => (mayWorkLoads && hasShipments ? needsCoverCount(shipments) : 0), [mayWorkLoads, hasShipments, shipments])
+  // The View tab: the board's Active list (not voided, canceled or released to invoicing).
+  const activeShipments = useMemo(() => (mayWorkLoads && hasShipments ? shipmentListCounts(shipments).active : 0), [mayWorkLoads, hasShipments, shipments])
   // The sub-hooks may answer from a stale cache or a mock; a missing table is always 0.
   const checkCallsDue = hasAssignments ? checkCallsDueRaw : 0
   const documentReviewCount = hasDocuments ? documentReviewRaw : 0
@@ -147,6 +150,7 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
       quotesToReply: quotesToReplyCount,
       loadReview,
       carrierSales,
+      activeShipments,
       // The parent rows' chores: Load Tracking is the check calls due plus the documents to review.
       loadTracking: checkCallsDue + documentReviewCount,
       accounting: arToInvoiceCount + apToReviewCount,
@@ -159,6 +163,6 @@ export function useShellBadgeCounts({ shipments }: ShellBadgeArgs): Record<strin
   }, [
     loads, maintenanceTasks, intakeItems, reviewCount, truckDocAlerts, dispatchUnread,
     checkCallsDue, documentReviewCount, arToInvoiceCount, apToReviewCount, quotesToReplyCount, intakeLoads,
-    loadReview, carrierSales, spotNew, timeOffPending,
+    loadReview, carrierSales, activeShipments, spotNew, timeOffPending,
   ])
 }
