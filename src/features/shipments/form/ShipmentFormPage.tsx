@@ -85,6 +85,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const [showSource, setShowSource] = useState(true)
   const [fromEmail, setFromEmail] = useState<ReadonlySet<string>>(() => new Set())
   const seededFor = useRef<string | null>(null)
+  // True while Submit for Review runs the order submit on a draft, so that submit does not redirect away from the form.
+  const sendingForReview = useRef(false)
   const { user, isAdmin, isOwner, hasPageAccess } = useAuth()
   // Same door as the directory's create action: owner, ADMIN, or the Shipments / Locations / Loads page grants.
   const canCreateLocation = Boolean(isAdmin || isOwner || hasPageAccess('tms') || hasPageAccess('loads') || hasPageAccess('locations'))
@@ -166,9 +168,11 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     // A step after the create failed: the shipment exists, so the intake row it came from must still leave Intake.
     onCreatedPartly: (b) => linkIntake(b),
     onSubmitted: (b) => {
-      toast.success(`Shipment ${b.shipment.number} submitted`)
       // Submitting a NEW shipment straight from the intake pre-fill is a create too: without this the intake row stayed in Intake.
       linkIntake(b)
+      // Submit for Review opened the order and goes on to push it: stay on the form and let that toast speak.
+      if (sendingForReview.current) return
+      toast.success(`Shipment ${b.shipment.number} submitted`)
       navigate(`/tms/shipments/${b.shipment.id}`)
     },
     onBlocked: (issues) => { if (issues[0]) focusField(issues[0].fieldKey) },
@@ -293,30 +297,44 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
     leave()
   }, [form.dirty, leave])
   const onRun = useCallback((kind: RunKind) => { void run(kind) }, [run])
-  // Push to Load Review from inside the load: the board's action and gates (customer requirements, the server decides), after a save so the gate reads what is on screen.
+  // Submit for Review: the board's Push to Load Review (same action, same gates: the server decides) after a save so the gate reads what is on screen.
+  // A draft first goes through the order submit (submit validation, credit check, Draft to Open), so the button is the one way a draft becomes an order.
   const orderOf = bundle?.orders?.[0]
-  const canPushToReview = mode === 'edit' && !!bundle && !voided && !isDraftStatus
-    && status !== 'CANCELED' && bundle.shipment.legacyImported !== true && orderOf?.arStatus === 'DOCS_NEEDED'
-  const onPushToReview = useCallback(async () => {
+  const submitReviewBlocked: string | null = !bundle ? null
+    : voided ? 'A voided shipment cannot go to Load Review'
+      : status === 'CANCELED' ? 'A canceled shipment cannot go to Load Review'
+        : bundle.shipment.legacyImported === true ? 'Imported history is not reviewed'
+          : orderOf && orderOf.arStatus !== 'DOCS_NEEDED' ? `Already released (${String(orderOf.arStatus)})`
+            : bundle.shipment.loadReviewPushedAt ? 'Already in Load Review'
+              : null
+  const onSubmitForReview = useCallback(async () => {
     if (!bundle) return
-    if (form.dirty || isDraftStatus) {
-      const saved = await run(isDraftStatus ? 'draft' : 'save')
-      if (!saved) return
+    if (isDraftStatus) {
+      // The submit's own redirect to the detail page would pull the user off the form before the push.
+      sendingForReview.current = true
+      let opened: boolean
+      try { opened = await run('submit') } finally { sendingForReview.current = false }
+      if (!opened) return
+    } else if (form.dirty) {
+      if (!await run('save')) return
     }
     try {
       const { results } = await pushToLoadReview([bundle.shipment.id])
       const row = results[0]
       if (row?.ok) {
-        toast.success(row.message ?? `Shipment ${bundle.shipment.number ?? ''} pushed to Load Review`.trim())
+        toast.success(row.message ?? `Shipment ${bundle.shipment.number ?? ''} sent to Load Review`.trim(), {
+          action: { label: 'Open Load review', onClick: () => navigate('/tms/load-review') },
+        })
         await refreshBundle()
       } else {
         const reasons = row?.reasons?.length ? row.reasons : [row?.message ?? 'The push was refused']
-        toast.error('Not sent to Load Review', { description: reasons.join(' · '), duration: 10000 })
+        toast.error(isDraftStatus ? 'Order submitted, but not sent to Load Review' : 'Not sent to Load Review', { description: reasons.join(' · '), duration: 10000 })
+        if (isDraftStatus) await refreshBundle()
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'The push failed')
     }
-  }, [bundle, form.dirty, isDraftStatus, run, refreshBundle])
+  }, [bundle, form.dirty, isDraftStatus, run, refreshBundle, navigate])
   // Save, then let go of the lock right away and go back to the list. A save that fails or is blocked stays on the form with its lock.
   const onSaveExit = useCallback(async () => {
     const saved = await run(isDraftStatus ? 'draft' : 'save')
@@ -472,7 +490,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
       <ActionBar
         createMode={mode === 'create'} status={status} dirty={form.dirty} savedAt={bundle?.shipment.updatedAt ?? form.savedAt}
         done={progress.done} total={progress.total} ready={progress.ready} busy={busy} voided={voided} onRun={onRun} onSaveExit={() => { void onSaveExit() }} onDiscard={cancel}
-        onPushToReview={canPushToReview ? () => { void onPushToReview() } : undefined}
+        onSubmitForReview={mode === 'edit' ? () => { void onSubmitForReview() } : undefined}
+        submitReviewBlocked={submitReviewBlocked}
         onDuplicate={mode === 'edit' && bundle ? () => setDuplicating(true) : undefined}
       />
       {duplicating && bundle ? (
