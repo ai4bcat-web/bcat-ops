@@ -83,6 +83,10 @@ const schema = a.schema(stageTypes({
       // Why this load's POD is what it is ("BOL is one page, no page 2"), written when the POD
       // is reviewed on the PODs page and shown with the load's paperwork.
       podNotes:        a.string(),
+      // Documents this one load needs on top of the customer's / default list (POD, and
+      // RATE_CON with an outside carrier): e.g. ['LUMPER_RECEIPT']. They block release like
+      // any required document and the driver app lists them. Written by SET_LOAD_REQUIRED_DOCS.
+      requiredDocTypes: a.string().array(),
       hot:             a.boolean(),  // urgent/"hot" load — flagged with 🔥 in schedule
       // ELD oversight: a run outside the 150 air-mile radius needs logs, and somebody has
       // to confirm they were kept. Set from the fleet manager dashboard. See src/lib/eldMonitor.ts.
@@ -2529,6 +2533,9 @@ const schema = a.schema(stageTypes({
       recordedBy:      a.string().required(),
       recordedEarly:   a.boolean(),            // recorded before the load delivered
       datesPending:    a.boolean(),            // created at Move to billing; invoice date + due date still to be set on the AP page
+      selectedForPayment: a.boolean(),         // chosen on the AP Aging tab for the next pay run; cleared on unapprove
+      selectedAt:      a.datetime(),
+      selectedBy:      a.string(),
       dueAt:           a.string().required(),  // YYYY-MM-DD
       termsDays:       a.integer().required(),
       quickPay:        a.boolean(),

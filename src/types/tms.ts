@@ -2317,6 +2317,8 @@ export interface ShipmentLoadFields {
  */
 export interface ShipmentLoad extends ShipmentLoadFields {
   id: string
+  /** Extra documents this load needs beyond the customer's / default list (SET_LOAD_REQUIRED_DOCS). */
+  requiredDocTypes?: string[] | null
   aljexId?: string | null
   pickupAppt?: string | null
   deliveryAppt?: string | null
@@ -3306,6 +3308,10 @@ export interface CarrierBillRecord {
    * until then.
    */
   datesPending?: boolean | null
+  /** Chosen on the AP Aging tab for the next pay run (approved bills only); cleared on unapprove. */
+  selectedForPayment?: boolean | null
+  selectedAt?: string | null
+  selectedBy?: string | null
   /** YYYY-MM-DD. */
   dueAt: string
   termsDays: number

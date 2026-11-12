@@ -1951,6 +1951,45 @@ describe('SET_BILL_DATES (bills created by Move to billing)', () => {
   })
 })
 
+describe('SELECT_BILLS_FOR_PAYMENT / UNSELECT_BILLS (the pay run)', () => {
+  it('puts an approved bill on the pay run, audits it, and takes it back off', async () => {
+    seedAssignment()
+    const bill = await recordBill({})
+    await call('APPROVE_BILL', { billId: bill.id })
+    const out = (await call('SELECT_BILLS_FOR_PAYMENT', { billIds: [bill.id] })) as { selected: string[]; skipped: unknown[] }
+    expect(out.selected).toEqual([bill.id])
+    expect(out.skipped).toEqual([])
+    expect(table(TABLES.carrierBill).get(String(bill.id))).toMatchObject({ selectedForPayment: true, status: 'TO_BE_PAID' })
+    expect([...table(TABLES.audit).values()].some((row) => row.action === 'SELECT_BILL_FOR_PAYMENT')).toBe(true)
+
+    const back = (await call('UNSELECT_BILLS', { billIds: [bill.id] })) as { unselected: string[] }
+    expect(back.unselected).toEqual([bill.id])
+    expect(table(TABLES.carrierBill).get(String(bill.id))!.selectedForPayment).toBeUndefined()
+  })
+
+  it('reports a bill still in review, or one waiting on its dates, instead of selecting it', async () => {
+    seedAssignment()
+    const inReview = await recordBill({})
+    const out = (await call('SELECT_BILLS_FOR_PAYMENT', { billIds: [inReview.id, 'nope'] })) as { selected: string[]; skipped: { billId: string; reason: string }[] }
+    expect(out.selected).toEqual([])
+    expect(out.skipped.map((x) => x.reason)).toEqual(['Only an approved bill can be selected for payment', 'Bill not found'])
+    expect(table(TABLES.carrierBill).get(String(inReview.id))!.selectedForPayment).toBeUndefined()
+  })
+
+  it('clears the selection when the bill is sent back to review', async () => {
+    seedAssignment()
+    const bill = await recordBill({})
+    await call('APPROVE_BILL', { billId: bill.id })
+    await call('SELECT_BILLS_FOR_PAYMENT', { billIds: [bill.id] })
+    await call('UNAPPROVE_BILL', { billId: bill.id, reason: 'wrong rate' })
+    expect(table(TABLES.carrierBill).get(String(bill.id))!.selectedForPayment).toBeUndefined()
+  })
+
+  it('needs AP access, like every other bill action', async () => {
+    await expect(call('SELECT_BILLS_FOR_PAYMENT', { billIds: ['x'] }, DISPATCHER)).rejects.toThrow(/Forbidden/)
+  })
+})
+
 describe('APPROVE_BILL', () => {
   it('refuses a bill whose amount disagrees with its lines', async () => {
     seedAssignment()

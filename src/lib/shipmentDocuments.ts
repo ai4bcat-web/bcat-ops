@@ -459,6 +459,11 @@ export interface DocGateInput {
    * the gate reads as satisfied in both scopes. The caller passes the shipment's flag.
    */
   legacyImported?: boolean | null
+  /**
+   * CUSTOMER scope: documents the order's loads ask for on top of the customer's list
+   * (`Load.requiredDocTypes`, see loadRequiredDocs.ts). Added as written.
+   */
+  extraDocTypes?: readonly string[] | null
 }
 
 /**
@@ -477,8 +482,14 @@ export function evaluateDocGate(input: DocGateInput): DocGateResult {
           input.settings?.requiredCarrierUploadTypes ?? [...DEFAULT_REQUIRED_CARRIER_UPLOAD_TYPES],
         )
       : requiredDocTypesFor(input.customer, input.settings)
-  // The customer gate follows the release gate: a BOL is optional and never holds an invoice.
+  // The customer gate follows the release gate: a BOL on the customer's list or the org default is
+  // optional and never holds an invoice. Per-load extras (`Load.requiredDocTypes`) are explicit and block as written.
   const gated = input.scope === 'CARRIER' ? required : required.filter((type) => !NEVER_BLOCKING_DOC_TYPES.includes(type))
+  if (input.scope !== 'CARRIER') {
+    for (const type of normalizeRequiredDocTypes(input.extraDocTypes ?? []).types) {
+      if (!gated.includes(type)) gated.push(type)
+    }
+  }
 
   const present = presentDocTypes({
     documents: input.documents,

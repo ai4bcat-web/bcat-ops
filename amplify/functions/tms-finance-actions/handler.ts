@@ -36,6 +36,8 @@ import {
   unapproveBill,
   voidBill,
   setBillDates,
+  selectBillsForPayment,
+  unselectBills,
 } from './bills'
 import {
   createApCredit,
@@ -97,6 +99,8 @@ type Action =
   | 'UNAPPROVE_BILL'
   | 'VOID_BILL'
   | 'SET_BILL_DATES'
+  | 'SELECT_BILLS_FOR_PAYMENT'
+  | 'UNSELECT_BILLS'
   | 'RECORD_AP_PAYMENT'
   | 'CREATE_AP_CREDIT'
   | 'REVERSE_AP_PAYMENT'
@@ -146,6 +150,8 @@ const AP_ACTIONS: Record<string, true> = {
   UNAPPROVE_BILL: true,
   VOID_BILL: true,
   SET_BILL_DATES: true,
+  SELECT_BILLS_FOR_PAYMENT: true,
+  UNSELECT_BILLS: true,
   RECORD_AP_PAYMENT: true,
   CREATE_AP_CREDIT: true,
   REVERSE_AP_PAYMENT: true,
@@ -159,6 +165,8 @@ const AP_ACTIONS: Record<string, true> = {
 const AP_APPROVAL_ACTIONS: Record<string, true> = {
   APPROVE_BILL: true,
   UNAPPROVE_BILL: true,
+  SELECT_BILLS_FOR_PAYMENT: true,
+  UNSELECT_BILLS: true,
 }
 
 /** Money leaving the bank, behind `apPostingAdminOnly`. */
@@ -344,6 +352,10 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return voidBill(input, caller)
     case 'SET_BILL_DATES':
       return setBillDates(input, caller)
+    case 'SELECT_BILLS_FOR_PAYMENT':
+      return selectBillsForPayment(input, caller)
+    case 'UNSELECT_BILLS':
+      return unselectBills(input, caller)
     case 'RECORD_AP_PAYMENT':
       return recordApPayment(input, caller) as unknown as Promise<Row>
     case 'CREATE_AP_CREDIT':

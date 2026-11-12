@@ -4694,6 +4694,28 @@ describe('documents', () => {
     expect(stored.filter((doc) => doc.reviewStatus === 'PENDING')).toEqual([])
   })
 
+  /**
+   * Per-load extras (Ryne, 2026-11-12): a document ticked for one load joins the customer's
+   * list in the cached gate straight away, and clearing it takes it back out.
+   */
+  it('adds and removes a per-load required document in the cached gate', async () => {
+    seedCustomer({ requiredDocsForInvoice: ['POD'] })
+    const ids = await delivered()
+    await expect(
+      call('SET_LOAD_REQUIRED_DOCS', { shipmentId: ids.shipmentId, loadId: ids.loadId, requiredDocTypes: ['INVOICE'] }),
+    ).rejects.toThrow(/must be one of/)
+
+    await call('SET_LOAD_REQUIRED_DOCS', { shipmentId: ids.shipmentId, loadId: ids.loadId, requiredDocTypes: ['LUMPER_RECEIPT'] })
+    expect(table(TABLES.load).get(ids.loadId)!.requiredDocTypes).toEqual(['LUMPER_RECEIPT'])
+    expect(table(TABLES.order).get(ids.orderId)!.docsRequired).toEqual(['POD', 'LUMPER_RECEIPT'])
+    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['POD', 'LUMPER_RECEIPT'])
+
+    await call('SET_LOAD_REQUIRED_DOCS', { shipmentId: ids.shipmentId, loadId: ids.loadId, requiredDocTypes: [] })
+    expect(table(TABLES.load).get(ids.loadId)!.requiredDocTypes ?? null).toBeNull()
+    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['POD'])
+  })
+
+
   it('refuses to review a document that is no longer active', async () => {
     const ids = await delivered()
     seedPortalUpload(ids, { id: 'sdoc-void', status: 'VOID', voidReason: 'filed on the wrong shipment' })

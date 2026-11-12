@@ -5,6 +5,7 @@
  * rate confirmation, and POD whenever the customer's / org's Load Review requirements include
  * "POD received". A document counts once it is on the shipment (or, on create, queued).
  */
+import { loadExtraDocTypes } from '@/lib/loadRequiredDocs'
 import { resolveReviewRequirements } from '@/lib/reviewRequirements'
 import { SHIPMENT_DOCUMENT_TYPES, countsAsPresent, requiredDocTypesFor, type ShipmentDocumentType } from '@/lib/shipmentDocuments'
 import type { CustomerRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
@@ -27,11 +28,13 @@ export interface ReleaseDocItem {
 export function releaseDocItems(i: {
   customer: Pick<CustomerRecord, 'requiredDocsForInvoice' | 'reviewRequirements'> | null
   settings: Pick<TmsSettings, 'defaultRequiredDocs' | 'reviewRequirements'> | null
-  bundle: Pick<ShipmentBundle, 'documents' | 'loadCarriers'> & { shipment?: Pick<ShipmentBundle['shipment'], 'updatedAt'> } | null
+  bundle: Pick<ShipmentBundle, 'documents' | 'loadCarriers'> & { loads?: ShipmentBundle['loads']; shipment?: Pick<ShipmentBundle['shipment'], 'updatedAt'> } | null
   queued: readonly QueuedFile[]
 }): ReleaseDocItem[] {
   const wanted = new Set<ShipmentDocumentType>(['RATE_CON'])
   for (const t of requiredDocTypesFor(i.customer, i.settings).types) wanted.add(t)
+  // What this load asks for on top of the customer's list (Documents required for this load).
+  for (const t of loadExtraDocTypes(i.bundle?.loads ?? [])) wanted.add(t)
   // The carrier's invoice is not needed to release a load: it is the carrier's bill, paid through accounts payable, and our own invoice
   // is generated when accounting posts the batch (it then appears here as a document).
   if (resolveReviewRequirements(i.customer?.reviewRequirements, i.settings?.reviewRequirements).includes('podReceived')) wanted.add('POD')

@@ -101,7 +101,7 @@ export interface ReleaseGateInput {
   order: ReleaseGateOrder
   /** The customer's list (or the org default); POD and RATE_CON are added here, BOL is dropped. */
   requiredDocTypes: string[]
-  /** Per-load additions (explicit, block as written). See requiredDocTypesForRelease. */
+  /** Per-load additions (`Load.requiredDocTypes`): explicit, so they block as written. */
   extraDocTypes?: string[] | null
   requiredReferenceCodes: string[]
   /** `PO` → `PO number`, when the customer's required-references config names one. */
