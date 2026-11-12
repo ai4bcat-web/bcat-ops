@@ -3202,6 +3202,9 @@ export interface ArPaymentRecord {
   unappliedCents: number
   applications?: PaymentApplication[] | null
   creditApplications?: CreditApplication[] | null
+  /** An overpayment accepted as paid in full: this much was received and never became credit. */
+  overageAcceptedCents?: number | null
+  overageReason?: string | null
   /** WRITE_OFF names the invoice it clears. */
   invoiceId?: string | null
   reversesPaymentId?: string | null

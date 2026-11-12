@@ -7539,6 +7539,9 @@ export async function recordPayment(input: {
   creditApplications: CreditApplication[]
   note?: string
   clientRequestId: string
+  /** Overpaid: record the extra as accepted instead of keeping it as customer credit. */
+  acceptOverage?: boolean
+  overageReason?: string
 }): Promise<PostedRow> {
   return financeAction<PostedRow>('RECORD_PAYMENT', input)
 }
