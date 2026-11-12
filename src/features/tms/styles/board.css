@@ -259,3 +259,30 @@
 /* The Shipments page is all capitals: headers, cells, tabs, filters and buttons (Ryne 2026-11-09). */
 .tms-shell .tms-caps, .tms-shell .tms-caps * { text-transform: uppercase; }
 .tms-shell .tms-caps ::placeholder { text-transform: uppercase; }
+
+/* Status pill: the row's tone, a step stronger than the row tint, with the tone's own ink. */
+.tms-shell .tms-status-pill, .tms-portal .tms-status-pill {
+  --pill-bg: var(--tms-row-open);
+  --pill-ink: var(--tms-row-open-text);
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--pill-ink) 28%, transparent);
+  background: color-mix(in srgb, var(--pill-ink) 14%, var(--pill-bg));
+  color: var(--pill-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.tms-shell .tms-status-pill[data-tone='delivered'], .tms-portal .tms-status-pill[data-tone='delivered'] { --pill-bg: var(--tms-row-delivered); --pill-ink: var(--tms-row-delivered-text); }
+.tms-shell .tms-status-pill[data-tone='dispatched'], .tms-portal .tms-status-pill[data-tone='dispatched'] { --pill-bg: var(--tms-row-dispatched); --pill-ink: var(--tms-row-dispatched-text); }
+.tms-shell .tms-status-pill[data-tone='departed'], .tms-portal .tms-status-pill[data-tone='departed'] { --pill-bg: var(--tms-row-departed); --pill-ink: var(--tms-row-departed-text); }
+.tms-shell .tms-status-pill[data-tone='arrived'], .tms-portal .tms-status-pill[data-tone='arrived'] { --pill-bg: var(--tms-row-arrived); --pill-ink: var(--tms-row-arrived-text); }
+.tms-shell .tms-status-pill[data-tone='covered'], .tms-portal .tms-status-pill[data-tone='covered'] { --pill-bg: var(--tms-row-covered); --pill-ink: var(--tms-row-covered-text); }
+.tms-shell .tms-status-pill[data-tone='hold'], .tms-portal .tms-status-pill[data-tone='hold'] { --pill-bg: var(--tms-row-hold); --pill-ink: var(--tms-row-hold-text); }
+.tms-shell .tms-status-pill[data-tone='reserved'], .tms-portal .tms-status-pill[data-tone='reserved'] { --pill-bg: var(--tms-row-reserved); --pill-ink: var(--tms-row-reserved-text); }
+.tms-shell .tms-status-pill[data-tone='voided'], .tms-portal .tms-status-pill[data-tone='voided'],
+.tms-shell .tms-status-pill[data-tone='canceled'], .tms-portal .tms-status-pill[data-tone='canceled'] { --pill-bg: var(--tms-row-voided); --pill-ink: var(--tms-row-voided-text); }

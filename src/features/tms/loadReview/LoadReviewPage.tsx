@@ -20,7 +20,8 @@ import { NO_DELIVERY_TIME_TIP, failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_C
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 import { useLoadReviewQueue } from './useLoadReviewQueue'
-import { deliveredText, deliveredTimeOf, reviewStatusText, reviewStatusTone } from './reviewStatus'
+import { deliveredText, deliveredTimeOf, reviewStatusText } from './reviewStatus'
+import { StatusPill } from '@/features/shipments/StatusPill'
 import { LoadReviewDrawer } from './LoadReviewDrawer'
 import { MAX_REVIEW_BATCH, batchCapMessage } from '@/lib/reviewRequirements'
 import './loadReview.css'
@@ -171,7 +172,7 @@ export function LoadReviewPage() {
     { key: 'customer', header: 'Customer', render: ({ row }) => row.customerName ?? '—' },
     { key: 'pod', header: 'POD', render: ({ row }) => <PodPreviewButton shipmentId={row.id} number={row.number ?? null} /> },
     { key: 'lane', header: 'Lane', render: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
-    { key: 'loadStatus', header: 'Load status', render: ({ row }) => <TmsBadge tone={reviewStatusTone(row)}>{reviewStatusText(row)}</TmsBadge> },
+    { key: 'loadStatus', header: 'Load status', render: ({ row }) => <StatusPill row={row} /> },
     { key: 'delivered', header: 'Delivered', render: ({ row }) => deliveredText(row) },
     { key: 'age', header: 'In review', render: ({ row }) => { const age = reviewAgeDays({ deliveredAt: deliveredTimeOf(row) }, now); return <span title={age == null ? NO_DELIVERY_TIME_TIP : undefined}><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'No delivery time' : `${age} d`}</TmsBadge></span> } },
     { key: 'rep', header: 'Sales rep', render: ({ row }) => row.salesRepName ?? '—' },
