@@ -233,7 +233,7 @@ import {
 } from '../../../src/lib/shipmentCharges'
 import { liveCarriersOf, type CarrierLike } from '../../../src/lib/carrierTotals'
 import { validateCarrierAdd, validateLegs, type LegStop } from '../../../src/lib/carrierLegs'
-import { rateConLinesFor } from '../../../src/lib/carrierBill'
+import { billLinesFor, billMoneyLockReason, rateConLinesFor, rebilledMoney } from '../../../src/lib/carrierBill'
 import {
   canTransitionLoadStatus,
   canTransitionShipmentStatus,
@@ -266,7 +266,7 @@ import {
 import { holdDivision, topLevelOf } from '../../../src/lib/ownership'
 import { normalizePro } from '../../../src/lib/proNumber'
 import { backfillShipmentNumber, digitsOnlyPro } from '../../../src/lib/legacyShipmentNumber'
-import type { ProScheme } from '../../../src/types/tms'
+import type { CarrierBillRecord, LoadChargeRecord, ProScheme } from '../../../src/types/tms'
 import {
   MAX_COUNTER_SKIPS,
   derivedLegPro,
@@ -6921,9 +6921,11 @@ function sameCharge(existing: Row | null, next: Row): boolean {
  * not be edited, dropped or added to by any path through here. Voiding the bill
  * clears the stamp and reopens them.
  */
-function assertFinalizedChargesUnchanged(bundle: Bundle, chargeRows: Row[]): void {
+function assertFinalizedChargesUnchanged(bundle: Bundle, chargeRows: Row[], reopened: string | null = null): void {
   const finalized = new Set(
-    bundle.loadCarriers.filter((c) => c.chargesFinalizedAt != null).map((c) => String(c.id)),
+    bundle.loadCarriers
+      .filter((c) => c.chargesFinalizedAt != null && String(c.id) !== reopened)
+      .map((c) => String(c.id)),
   )
   if (finalized.size === 0) return
   const theirs = (row: Row): boolean => row.side === 'CARRIER' && finalized.has(String(row.loadCarrierId ?? ''))
@@ -6976,6 +6978,11 @@ function repriceShipment(args: {
   /** Extra columns written in the same order / shipment update (UPDATE_ORDER_DETAILS). */
   orderPatch?: Row
   shipmentPatch?: Row
+  /**
+   * The one finalized assignment this call may reprice: UPDATE_CARRIER_CHARGES on a bill still in
+   * review, which re-snapshots that bill in the same transaction.
+   */
+  reopenedLoadCarrierId?: string | null
 }): { writes: TransactWriteItem[]; chargeRows: Row[]; totals: FinancialsTotals } {
   const { bundle, charges, customer, settings, caller } = args
   const { shipment } = bundle
@@ -7023,7 +7030,7 @@ function repriceShipment(args: {
   ))
   const keptIds = new Set(chargeRows.map((r) => String(r.id)))
   const removed = bundle.charges.filter((r) => !keptIds.has(String(r.id)))
-  assertFinalizedChargesUnchanged(bundle, chargeRows)
+  assertFinalizedChargesUnchanged(bundle, chargeRows, args.reopenedLoadCarrierId ?? null)
   // Every caller resubmits the whole shipment, so most lines come back exactly as
   // they were. Rewriting one of those would stamp an edit nobody made onto a line
   // this action never claimed to touch — and spend a transaction slot on it.
@@ -7127,6 +7134,36 @@ async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
  * load's cached cost, profit and margin are re-derived by the one pricing path
  * rather than patched here.
  */
+/**
+ * The bill re-snapshotted from the assignment's new lines: lines, gross, its own quick-pay fee, net,
+ * balance and variance. CAS on the bill's version and its review rung, so a bill approved, paid or
+ * put on a pay run in the meantime refuses the whole transaction.
+ */
+function rebillWrite(bill: Row, chargeRows: Row[], loadCarrierId: string, caller: Caller): TransactWriteItem {
+  const record = bill as unknown as CarrierBillRecord
+  const { lines, grossCents } = billLinesFor(chargeRows as unknown as LoadChargeRecord[], loadCarrierId)
+  const money = rebilledMoney(record, grossCents)
+  const tx = updateItemTx(CARRIER_BILL_TABLE(), String(bill.id), {
+    lines,
+    ...money,
+    updatedAt: nowIso(),
+    updatedBy: caller.email,
+    version: (numberOrNull(bill.version) ?? 1) + 1,
+  }, null)
+  const update = tx.Update!
+  update.ExpressionAttributeNames = { ...update.ExpressionAttributeNames, '#rbStatus': 'status', '#rbVersion': 'version', '#rbSel': 'selectedForPayment' }
+  update.ExpressionAttributeValues = {
+    ...update.ExpressionAttributeValues,
+    ':rbStatus': { S: 'IN_REVIEW' },
+    ':rbVersion': { N: String(numberOrNull(bill.version) ?? 1) },
+    ':rbTrue': { BOOL: true },
+  }
+  update.ConditionExpression = '#rbStatus = :rbStatus AND #rbVersion = :rbVersion AND (attribute_not_exists(#rbSel) OR #rbSel <> :rbTrue)'
+  return tx
+}
+
+const CARRIER_BILL_TABLE = (): string => process.env.CARRIER_BILL_TABLE_NAME ?? ''
+
 async function updateCarrierCharges(input: Row, caller: Caller): Promise<Row> {
   const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
   const expectedVersion = optionalInteger(input.expectedVersion, { min: 0, label: 'expectedVersion' })
@@ -7141,7 +7178,17 @@ async function updateCarrierCharges(input: Row, caller: Caller): Promise<Row> {
   if (status !== 'ACTIVE' && status !== 'TONU') {
     throw new Error('These charges belong to an assignment that is still owed money')
   }
-  if (assignment.chargesFinalizedAt) throw new Error(FINALIZED_CHARGES_MESSAGE)
+  // A recorded bill freezes the lines, except a bill still in review that no money has touched and
+  // no pay run holds: AP corrects the carrier pay there, and the bill is re-snapshotted below in the
+  // same transaction so the bill and the charges cannot disagree.
+  let openBill: Row | null = null
+  if (assignment.chargesFinalizedAt) {
+    const billTable = process.env.CARRIER_BILL_TABLE_NAME ?? ''
+    openBill = assignment.invoiceId && billTable ? await getById(billTable, String(assignment.invoiceId)) : null
+    if (!openBill) throw new Error(FINALIZED_CHARGES_MESSAGE)
+    const lock = billMoneyLockReason(openBill as unknown as CarrierBillRecord, { allowApproved: false })
+    if (lock) throw new Error(`${lock}, then change what the carrier is owed`)
+  }
 
   const shipmentId = String(assignment.shipmentId)
   const bundle = await readBundle(shipmentId)
@@ -7178,7 +7225,9 @@ async function updateCarrierCharges(input: Row, caller: Caller): Promise<Row> {
     settings,
     caller,
     expectedShipmentUpdatedAt: String(shipment.updatedAt ?? ''),
+    reopenedLoadCarrierId: openBill ? loadCarrierId : null,
   })
+  if (openBill) writes.push(rebillWrite(openBill, chargeRows, loadCarrierId, caller))
   const loadId = String(assignment.loadId)
   const liveIds = new Set(liveRowsOf(bundle.loadCarriers, loadId).map((c) => String(c.id)))
   // A TONU'd assignment is still owed its retained lines, and repricing only
@@ -7204,6 +7253,7 @@ async function updateCarrierCharges(input: Row, caller: Caller): Promise<Row> {
 
   await writeAudit('LOAD_CARRIER', loadCarrierId, 'UPDATE_CARRIER_CHARGES', caller, {
     loadId,
+    ...(openBill ? { billId: String(openBill.id), billGrossBeforeCents: numberOrNull(openBill.grossCents) } : {}),
     lines: requested.length,
     costCents: carrierOwnCostCents(chargeRows, loadCarrierId),
     loadCostCents: totals.costCents,

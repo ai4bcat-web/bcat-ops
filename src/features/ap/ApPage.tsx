@@ -58,6 +58,10 @@ import { RecordBillDialog, type RecordBillPrefill } from './components/RecordBil
 import { SendRemittanceDialog } from './components/SendRemittanceDialog'
 import { SetBillDatesDialog } from './components/SetBillDatesDialog'
 import { UpdateCarrierChargesDialog } from './components/UpdateCarrierChargesDialog'
+import { BillDrawer } from './components/BillDrawer'
+import { ApReportDialog, CashRequirementsDialog } from './components/ApReportDialogs'
+import { estimatedDueAt, isAljexBill, payablesQueue, proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
+import { useBillFacts } from './useBillFacts'
 import type { ApInboxItemRecord } from '@/lib/apInbox/types'
 import type { ApPaymentRecord, ApSettings, CarrierBillRecord, CarrierRecord } from '@/types/tms'
 import { ApInboxDigest } from './inbox/ApInboxDigest'
@@ -84,7 +88,7 @@ type ApDialog =
   | { kind: 'inbox-dismiss'; item: ApInboxItemRecord }
   | { kind: 'approve'; bill: CarrierBillRecord }
   | { kind: 'dates'; bill: CarrierBillRecord }
-  | { kind: 'charges'; loadCarrierId: string; shipmentId: string }
+  | { kind: 'charges'; loadCarrierId: string; shipmentId: string; bill?: CarrierBillRecord }
   | { kind: 'pay'; carrierId: string; billIds?: string[] }
   | { kind: 'credit'; carrierId: string }
   | { kind: 'remittance'; payment: ApPaymentRecord }
@@ -92,6 +96,8 @@ type ApDialog =
   | { kind: 'unapprove'; bill: CarrierBillRecord }
   | { kind: 'reverse'; payment: ApPaymentRecord }
   | { kind: 'payinfo'; bill: CarrierBillRecord }
+  | { kind: 'report'; report: ApReportKind }
+  | { kind: 'cash' }
 
 const RIGHT = 'block text-right tabular-nums'
 
@@ -111,7 +117,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [asOf] = useState(() => chicagoDateStr(new Date()))
 
   const { isAdmin, user } = useAuth()
-  const [tab, setTab] = useState<ApTabKey>('awaiting')
+  const [tab, setTab] = useState<ApTabKey>('expected')
   const inboxStatus = useApInboxStatus()
   const [chip, setChip] = useState<InboxChip>('NEEDS_REVIEW')
   const [historySince] = useState(() => new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString())
@@ -187,9 +193,18 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     return map
   }, [inReview.rows])
 
-  const expectedBills = useMemo(() => billsExpected(open.bills), [open.bills])
-  const agingBills = useMemo(() => billsAging(open.bills), [open.bills])
-  const selectedBills = useMemo(() => billsSelected(open.bills), [open.bills])
+  // Ryne 2026-11-12: Payables is the bills Move to billing created, for delivered loads. The Aljex
+  // bills are still owed and stay one toggle away.
+  const { facts } = useBillFacts(open.bills)
+  const [includeAljex, setIncludeAljex] = useState(false)
+  const aljexOpen = useMemo(() => open.bills.filter((b) => isAljexBill(b) && b.status !== 'PAID' && b.status !== 'VOID').length, [open.bills])
+  const queueBills = useMemo(() => payablesQueue(open.bills, facts, { includeAljex }), [open.bills, facts, includeAljex])
+  const expectedBills = useMemo(() => billsExpected(queueBills), [queueBills])
+  const agingBills = useMemo(() => billsAging(queueBills), [queueBills])
+  const selectedBills = useMemo(() => billsSelected(queueBills), [queueBills])
+  // The drawer stays open under the dialogs it opens (dates, carrier pay, payment info).
+  const [drawerId, setDrawerId] = useState<string | null>(null)
+  const drawerBill = drawerId ? open.bills.find((b) => b.id === drawerId) ?? null : null
   const agingRows = useMemo(() => applyToBePaidFilters(agingBills, filters, asOf), [agingBills, filters, asOf])
   const selectedRows = useMemo(() => applyToBePaidFilters(selectedBills, filters, asOf), [selectedBills, filters, asOf])
   const settled = useMemo(() => paidBills(monthBills), [monthBills])
@@ -347,6 +362,24 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const errorBanner = error
     ? <p style={{ color: 'var(--tms-badge-red)' }} className="text-sm">{error}</p>
     : null
+  const queueBanner = (
+    <>
+      {errorBanner}
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="tms-muted">Loads moved to billing from Load review, delivered loads only.</span>
+        {aljexOpen > 0 && (
+          <label className="flex items-center gap-1">
+            <input type="checkbox" checked={includeAljex} onChange={(e) => setIncludeAljex(e.target.checked)} />
+            Include {aljexOpen} open bill{aljexOpen === 1 ? '' : 's'} brought over from Aljex
+          </label>
+        )}
+        <TmsButton variant="ghost" size="sm" onClick={() => setDialog({ kind: 'report', report: tab === 'aging' ? 'aging' : tab === 'selected' ? 'selected' : 'expected' })}>Report</TmsButton>
+        <TmsButton variant="ghost" size="sm" onClick={() => setDialog({ kind: 'cash' })}>Cash requirements</TmsButton>
+      </div>
+    </>
+  )
+  const openDrawer = (bill: CarrierBillRecord) => setDrawerId(bill.id)
+  const chargesFor = (bill: CarrierBillRecord) => setDialog({ kind: 'charges', loadCarrierId: bill.loadCarrierId, shipmentId: bill.shipmentId, bill })
 
   const carrier = carriers.find((c) => c.id === apCarrierId) ?? null
 
@@ -361,8 +394,10 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onRecord: (row) => setDialog({ kind: 'record', loadCarrierId: row.loadCarrierId }),
     })
     : tab === 'expected' ? reviewView({
-      banner: errorBanner,
+      banner: queueBanner,
       bills: expectedBills,
+      facts,
+      onOpen: openDrawer,
       rows: reviewRows,
       shared,
       carriersById,
@@ -373,12 +408,14 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onInfo: (bill) => setDialog({ kind: 'payinfo', bill }),
       onApprove: (bill) => setDialog({ kind: 'approve', bill }),
       onDates: (bill) => setDialog({ kind: 'dates', bill }),
-      onCharges: (bill) => setDialog({ kind: 'charges', loadCarrierId: bill.loadCarrierId, shipmentId: bill.shipmentId }),
+      onCharges: chargesFor,
       onVoid: (bill) => setDialog({ kind: 'void', bill }),
     })
     : tab === 'aging' || tab === 'selected' ? payableView({
       mode: tab,
-      errorBanner,
+      errorBanner: queueBanner,
+      facts,
+      onOpen: openDrawer,
       bills: tab === 'aging' ? agingRows : selectedRows,
       allBills: tab === 'aging' ? agingBills : selectedBills,
       shared,
@@ -403,7 +440,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onPaySelected: (carrierId) => setDialog({ kind: 'pay', carrierId, billIds: selected }),
       onApprove: (bill) => setDialog({ kind: 'approve', bill }),
       onDates: (bill) => setDialog({ kind: 'dates', bill }),
-      onCharges: (bill) => setDialog({ kind: 'charges', loadCarrierId: bill.loadCarrierId, shipmentId: bill.shipmentId }),
+      onCharges: chargesFor,
       onVoid: (bill) => setDialog({ kind: 'void', bill }),
       onUnapprove: (bill) => setDialog({ kind: 'unapprove', bill }),
       onSelectForPayment: runSelect,
@@ -547,6 +584,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           open
           loadCarrierId={dialog.loadCarrierId}
           shipmentId={dialog.shipmentId}
+          bill={dialog.bill ?? null}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
           onDone={closeAndRefresh}
         />
@@ -606,6 +644,38 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           busy={busy}
           onClose={() => setDialog(null)}
           onConfirm={(reason) => runUnapprove(dialog.bill, reason)}
+        />
+      )}
+      {drawerBill && (
+        <BillDrawer
+          bill={drawerBill}
+          facts={facts}
+          infos={payInfos}
+          onClose={() => setDrawerId(null)}
+          onChanged={() => void refreshAll()}
+          onAdjustPay={chargesFor}
+          onSetDates={(bill) => setDialog({ kind: 'dates', bill })}
+          onPaymentInfo={(bill) => setDialog({ kind: 'payinfo', bill })}
+        />
+      )}
+      {dialog?.kind === 'report' && (
+        <ApReportDialog
+          kind={dialog.report}
+          bills={dialog.report === 'expected' ? expectedBills : dialog.report === 'aging' ? agingBills : selectedBills}
+          facts={facts}
+          infos={payInfos}
+          asOf={asOf}
+          onKind={(report) => setDialog({ kind: 'report', report })}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === 'cash' && (
+        <CashRequirementsDialog
+          bills={[...expectedBills, ...agingBills, ...selectedBills]}
+          facts={facts}
+          infos={payInfos}
+          asOf={asOf}
+          onClose={() => setDialog(null)}
         />
       )}
       {dialog?.kind === 'reverse' && (
@@ -716,6 +786,44 @@ function payeeColumns(infos: readonly CarrierPaymentInfo[], onInfo: (bill: Carri
   ]
 }
 
+/**
+ * PRO, PO # and delivery date: the load a payable pays for, read off its shipment and order. The PRO
+ * opens the bill's drawer; the shipment is one click further in.
+ */
+function loadColumns(facts: BillFactsIndex, onOpen: (bill: CarrierBillRecord) => void): ApColumn<CarrierBillRecord>[] {
+  return [
+    {
+      key: 'pro',
+      header: 'PRO',
+      text: (bill) => proOf(bill, facts),
+      render: (bill) => (
+        <button type="button" className="tms-link" aria-label={`Open PRO ${proOf(bill, facts)}`} onClick={(e) => { e.stopPropagation(); onOpen(bill) }}>
+          {proOf(bill, facts)}
+        </button>
+      ),
+    },
+    facetCol<CarrierBillRecord>('po', 'PO #', (bill) => facts.get(bill.shipmentId)?.po ?? '—', undefined, { filter: 'text' }),
+    dayCol<CarrierBillRecord>('delivered', 'DELIVERED', (bill) => facts.get(bill.shipmentId)?.deliveredAt ?? null),
+  ]
+}
+
+/** Carrier pay (gross) and the terms it is paid on — quick pay or standard. */
+function payColumns(): ApColumn<CarrierBillRecord>[] {
+  return [
+    moneyCol<CarrierBillRecord>('carrierPay', 'CARRIER PAY', (bill) => bill.grossCents, (bill) => (
+      <span className={RIGHT}>
+        {formatCents(bill.grossCents)}
+        {bill.varianceCents !== 0 && (
+          <> <TmsBadge tone="red">{formatCents(bill.varianceCents)} variance</TmsBadge></>
+        )}
+      </span>
+    )),
+    facetCol<CarrierBillRecord>('terms', 'TERMS', termsLabel, (bill) => (
+      bill.quickPay ? <TmsBadge tone="blue">{termsLabel(bill)}</TmsBadge> : <span className="tms-muted">{termsLabel(bill)}</span>
+    ), { extraPx: 30 }),
+  ]
+}
+
 /* ── Awaiting invoice ────────────────────────────────────────────────────── */
 
 function awaitingView({ banner, rows, shared, busy, onRecord }: {
@@ -817,10 +925,12 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
 /* ── In review ───────────────────────────────────────────────────────────── */
 
 function reviewView({
-  banner, bills, rows, shared, carriersById, settings, isAdmin, busy, infos, onInfo, onApprove, onDates, onCharges, onVoid,
+  banner, bills, facts, onOpen, rows, shared, carriersById, settings, isAdmin, busy, infos, onInfo, onApprove, onDates, onCharges, onVoid,
 }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
+  facts: BillFactsIndex
+  onOpen: (bill: CarrierBillRecord) => void
   rows: Map<string, ApWorklistRow>
   shared: SharedProIndex
   carriersById: Map<string, CarrierRecord>
@@ -846,28 +956,22 @@ function reviewView({
     {
       key: 'bill',
       header: 'BILL',
-      text: (bill) => `${bill.billNumber ?? bill.id}${pendingDates(bill) ? ' · Needs invoice date & due date' : ''}`,
+      text: (bill) => `${bill.billNumber ?? bill.id}${pendingDates(bill) ? ' · Needs invoice date' : ''}`,
       extraPx: 40,
       render: (bill) => (
         <>
           <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>
           <VerifyPaymentBadge bill={bill} />
-          {pendingDates(bill) && <> <TmsBadge tone="orange">Needs invoice date &amp; due date</TmsBadge></>}
+          {pendingDates(bill) && <> <TmsBadge tone="orange">Needs invoice date</TmsBadge></>}
         </>
       ),
     },
+    ...loadColumns(facts, onOpen),
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
+    ...payColumns(),
     { ...dayCol<CarrierBillRecord>('billDate', 'INVOICE DATE', (bill) => bill.billDate), render: (bill) => pendingDates(bill) ? <span className="tms-muted">Pending</span> : formatDay(bill.billDate) },
-    { ...dayCol<CarrierBillRecord>('due', 'DUE', (bill) => bill.dueAt), render: (bill) => pendingDates(bill) ? <span className="tms-muted">Pending</span> : formatDay(bill.dueAt) },
+    { ...dayCol<CarrierBillRecord>('due', 'DUE', (bill) => bill.dueAt), render: (bill) => pendingDates(bill) ? <span className="tms-muted" title="Estimated from the delivery date and the carrier's terms">~{formatDay(estimatedDueAt(bill, facts))}</span> : formatDay(bill.dueAt) },
     ...payeeColumns(infos, onInfo),
-    moneyCol<CarrierBillRecord>('gross', 'GROSS', (bill) => bill.grossCents, (bill) => (
-      <span className={RIGHT}>
-        {formatCents(bill.grossCents)}
-        {bill.varianceCents !== 0 && (
-          <> <TmsBadge tone="red">{formatCents(bill.varianceCents)} variance</TmsBadge></>
-        )}
-      </span>
-    )),
     moneyCol<CarrierBillRecord>('fee', 'FEE', (bill) => bill.quickPayFeeCents ?? 0, undefined, (bill) => !bill.quickPayFeeCents),
     moneyCol<CarrierBillRecord>('net', 'NET', (bill) => bill.netCents, (bill) => <span className={`${RIGHT} font-medium`}>{formatCents(bill.netCents)}</span>),
     {
@@ -904,7 +1008,7 @@ function reviewView({
       ...ACTIONS,
       render: (bill) => (
         <span className="flex justify-end gap-1 whitespace-nowrap">
-          <TmsButton variant={pendingDates(bill) ? 'primary' : 'ghost'} size="sm" aria-label={`Set dates for bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onDates(bill)}>{pendingDates(bill) ? 'Set dates' : 'Dates'}</TmsButton>
+          <TmsButton variant={pendingDates(bill) ? 'primary' : 'ghost'} size="sm" aria-label={`Add invoice date for bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onDates(bill)}>{pendingDates(bill) ? 'Add invoice date' : 'Dates'}</TmsButton>
           <TmsButton variant="ghost" size="sm" aria-label={`Approve bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onApprove(bill)}>Approve</TmsButton>
           <TmsButton variant="ghost" size="sm" aria-label={`Update carrier charges for bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onCharges(bill)}>Update charges</TmsButton>
           <TmsButton variant="ghost" size="sm" aria-label={`Void bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onVoid(bill)}>Void</TmsButton>
@@ -919,9 +1023,12 @@ function reviewView({
     columns,
     rows: bills,
     rowKey: (bill) => bill.id,
+    onRowClick: onOpen,
     emptyText: 'No bill is waiting on its invoice date. Loads moved to billing from Load review appear here.',
     kpis: [
       { label: 'Expected', value: bills.length },
+      { label: 'Need invoice date', value: bills.filter(pendingDates).length, tone: 'warn' as const },
+      { label: 'Carrier pay', value: formatCents(sumCents(bills, (bill) => bill.grossCents)) },
       { label: 'Net', value: formatCents(sumCents(bills, (bill) => bill.netCents)) },
       { label: 'With variance', value: bills.filter((bill) => bill.varianceCents !== 0).length, tone: 'bad' },
     ],
@@ -937,12 +1044,14 @@ function reviewView({
  * approval actions and no checkbox: it has gates to clear before it can be chosen.
  */
 function payableView({
-  mode, errorBanner, bills, allBills, shared, infos, gatesOf, filters, showFilters, selected, asOf, busy,
+  mode, errorBanner, facts, onOpen, bills, allBills, shared, infos, gatesOf, filters, showFilters, selected, asOf, busy,
   onToggleFilters, onFilters, onSelect, onInfo, onPay, onPaySelected, onApprove, onDates, onCharges, onVoid, onUnapprove,
   onSelectForPayment, onUnselect,
 }: {
   mode: 'aging' | 'selected'
   errorBanner: ReactNode
+  facts: BillFactsIndex
+  onOpen: (bill: CarrierBillRecord) => void
   bills: CarrierBillRecord[]
   allBills: CarrierBillRecord[]
   shared: SharedProIndex
@@ -1016,7 +1125,9 @@ function payableView({
         </>
       ),
     },
+    ...loadColumns(facts, onOpen),
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
+    ...payColumns(),
     dayCol<CarrierBillRecord>('billDate', 'INVOICE DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('due', 'DUE', (bill) => bill.dueAt),
     {
@@ -1124,6 +1235,7 @@ function payableView({
 
   return view<CarrierBillRecord>({
     gridId: mode === 'aging' ? 'ap-aging' : 'ap-selected',
+    onRowClick: onOpen,
     kpis,
     actions: (
       <>

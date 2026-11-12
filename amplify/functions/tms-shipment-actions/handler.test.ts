@@ -3508,6 +3508,44 @@ describe('UPDATE_CARRIER_CHARGES', () => {
     })
   })
 
+  it('lets AP correct the pay under a bill still in review, re-snapshotting the bill in the same write', async () => {
+    const { shipmentId, loadCarrierId } = await assignedLoad()
+    const lineId = String(carrierLines(loadCarrierId)[0].id)
+    const bill = {
+      id: 'cb-open', loadCarrierId, status: 'IN_REVIEW', version: 3, datesPending: true, payeeKind: 'CARRIER',
+      grossCents: 180_000, billedCents: 180_000, varianceCents: 0, quickPay: true, quickPayFeeBps: 300,
+      quickPayFeeCents: 5_400, netCents: 174_600, balanceCents: 174_600, paidCents: 0, creditedCents: 0,
+    }
+    table(TABLES.carrierBill).set('cb-open', bill)
+    table(TABLES.carrier).set(loadCarrierId, {
+      ...table(TABLES.carrier).get(loadCarrierId)!, chargesFinalizedAt: '2026-11-12T00:00:00.000Z', invoiceId: 'cb-open',
+    })
+
+    await update(loadCarrierId, shipmentId, [
+      { id: lineId, side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 150_000, sortOrder: 0 },
+    ])
+
+    expect(table(TABLES.carrier).get(loadCarrierId)!.costCents).toBe(150_000)
+    expect(table(TABLES.carrierBill).get('cb-open')).toMatchObject({
+      grossCents: 150_000, billedCents: 150_000, varianceCents: 0,
+      quickPayFeeCents: 4_500, netCents: 145_500, balanceCents: 145_500, version: 4,
+    })
+    expect((table(TABLES.carrierBill).get('cb-open')!.lines as Row[]).map((l) => l.amountCents)).toEqual([150_000])
+
+    // Approved, paid or on a pay run: the amount is frozen again.
+    for (const [patch, message] of [
+      [{ status: 'TO_BE_PAID' }, /back to review/],
+      [{ selectedForPayment: true }, /pay run/],
+      [{ paidCents: 100 }, /already been applied/],
+    ] as const) {
+      table(TABLES.carrierBill).set('cb-open', { ...table(TABLES.carrierBill).get('cb-open')!, status: 'IN_REVIEW', selectedForPayment: undefined, paidCents: 0, ...patch })
+      await expect(update(loadCarrierId, shipmentId, [
+        { id: lineId, side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 140_000, sortOrder: 0 },
+      ])).rejects.toThrow(message)
+    }
+    expect(table(TABLES.carrier).get(loadCarrierId)!.costCents).toBe(150_000)
+  })
+
   it('refuses a customer line and a line belonging to somebody else', async () => {
     const { shipmentId, loadCarrierId } = await assignedLoad()
     const customerId = String(customerLines()[0].id)

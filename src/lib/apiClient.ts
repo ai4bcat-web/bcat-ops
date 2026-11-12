@@ -7896,6 +7896,11 @@ export async function setBillDates(input: {
   return financeAction<{ bill: CarrierBillRecord }>('SET_BILL_DATES', input)
 }
 
+/** Put a bill on AP quick pay (2 days at 6%, 10 days at 3%), or back on standard terms with `quickPayDays: null`. */
+export async function setBillQuickPay(input: { billId: string; quickPayDays: 2 | 10 | null }): Promise<{ bill: CarrierBillRecord }> {
+  return financeAction<{ bill: CarrierBillRecord }>('SET_BILL_QUICK_PAY', input)
+}
+
 /** Put approved, dated bills on the next pay run. Bills that cannot go are returned with the reason. */
 export async function selectBillsForPayment(input: { billIds: string[] }): Promise<{ selected: string[]; skipped: { billId: string; reason: string }[] }> {
   return financeAction<{ selected: string[]; skipped: { billId: string; reason: string }[] }>('SELECT_BILLS_FOR_PAYMENT', input)
