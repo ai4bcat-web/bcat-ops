@@ -18,11 +18,11 @@ import { FileUp, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsAlert, TmsButton, TmsDialog, TmsSelect } from '@/features/tms/kit'
 import { Label } from '@/components/ui/label'
-import { commitDocument, prepareDocumentUpload, putPresignedFile } from '@/lib/apiClient'
+import { commitDocument, prepareDocumentUpload, putPresignedFile, voidDocument } from '@/lib/apiClient'
 import {
   ACCEPTED_CONTENT_TYPES, DEFAULT_AUDIENCE, DOCUMENT_TYPE_LABELS, MAX_DOCUMENT_BYTES, SHIPMENT_DOCUMENT_TYPES,
 } from '@/lib/shipmentDocuments'
-import type { ShipmentBundle, ShipmentDocumentAudience, ShipmentDocumentType } from '@/types/tms'
+import type { ShipmentBundle, ShipmentDocumentAudience, ShipmentDocumentRecord, ShipmentDocumentType } from '@/types/tms'
 
 const AUDIENCES: readonly ShipmentDocumentAudience[] = ['CUSTOMER', 'CARRIER', 'ALL', 'INTERNAL']
 
@@ -52,22 +52,34 @@ function fileProblem(file: File): string | null {
   return null
 }
 
-export function UploadDocumentDialog({ bundle, onClose, onSaved }: {
+export function UploadDocumentDialog({ bundle, onClose, onSaved, initialType, replaces }: {
   bundle: ShipmentBundle
   onClose: () => void
   /** The row landed: the tab re-reads its documents and the order's gate. */
   onSaved: () => void
+  /** Load Review: the type a missing-document button asks for. */
+  initialType?: ShipmentDocumentType
+  /**
+   * Replace mode: the new file goes in the same type and section, then the old row is voided (its bytes stay).
+   * The upload lands first, so the required type is never uncovered in between.
+   */
+  replaces?: ShipmentDocumentRecord | null
 }) {
   const order = bundle.orders[0] ?? null
   const assignments = bundle.loadCarriers
 
   const [file, setFile] = useState<File | null>(null)
-  const [type, setType] = useState<ShipmentDocumentType>('POD')
+  const [type, setType] = useState<ShipmentDocumentType>(replaces?.type ?? initialType ?? 'POD')
   // `ORDER:<id>` · `CARRIER:<id>` · `SHIPMENT` — the three places a row can land.
-  const [placement, setPlacement] = useState(order ? `ORDER:${order.id}` : 'SHIPMENT')
+  const [placement, setPlacement] = useState(
+    replaces?.loadCarrierId ? `CARRIER:${replaces.loadCarrierId}`
+      : replaces?.orderId ? `ORDER:${replaces.orderId}`
+        : replaces ? 'SHIPMENT'
+          : order ? `ORDER:${order.id}` : 'SHIPMENT',
+  )
   // Null until the user picks one, so changing the type keeps following the type's own
   // default instead of freezing whatever the first type happened to suggest.
-  const [audience, setAudience] = useState<ShipmentDocumentAudience | null>(null)
+  const [audience, setAudience] = useState<ShipmentDocumentAudience | null>(replaces?.audience ?? null)
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -129,7 +141,18 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved }: {
         await commit()
       }
 
-      toast.success(`${DOCUMENT_TYPE_LABELS[type]} uploaded`)
+      if (replaces) {
+        // Void the file this one replaces. Voiding is the filer's or an admin's call, so a refusal is said plainly
+        // and the new file stays: nothing is lost either way.
+        try {
+          await voidDocument({ documentId: replaces.id, reason: `Replaced by ${file.name}` })
+          toast.success(`${DOCUMENT_TYPE_LABELS[type]} replaced`)
+        } catch (err) {
+          toast.warning(`${DOCUMENT_TYPE_LABELS[type]} uploaded, but the old file ${replaces.name} could not be voided: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      } else {
+        toast.success(`${DOCUMENT_TYPE_LABELS[type]} uploaded`)
+      }
       onSaved()
       onClose()
     } catch (err) {
@@ -143,12 +166,12 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved }: {
     <TmsDialog
       open
       onOpenChange={(open) => { if (!open && !busy) onClose() }}
-      title="Upload a document"
+      title={replaces ? `Replace ${DOCUMENT_TYPE_LABELS[replaces.type].toLowerCase()}` : 'Upload a document'}
       footer={
         <>
           <TmsButton variant="ghost" onClick={onClose} disabled={busy}>Cancel</TmsButton>
           <TmsButton variant="primary" onClick={() => { void upload() }} disabled={busy || !file}>
-            <Upload size={14} className="mr-1" />{busy ? 'Uploading…' : 'Upload'}
+            <Upload size={14} className="mr-1" />{busy ? 'Uploading…' : replaces ? 'Replace' : 'Upload'}
           </TmsButton>
         </>
       }
@@ -185,7 +208,7 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved }: {
               aria-label="Document type"
               value={type}
               onChange={(e) => setType(e.target.value as ShipmentDocumentType)}
-              disabled={busy}
+              disabled={busy || !!replaces}
               className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
             >
               {SHIPMENT_DOCUMENT_TYPES.map((t) => (
@@ -200,7 +223,7 @@ export function UploadDocumentDialog({ bundle, onClose, onSaved }: {
               aria-label="Document section"
               value={placement}
               onChange={(e) => setPlacement(e.target.value)}
-              disabled={busy}
+              disabled={busy || !!replaces}
               className="mt-1 h-9 w-full rounded-md border border-[color:var(--tms-input-border)] bg-[color:var(--tms-input)] px-2 text-sm"
             >
               {order && <option value={`ORDER:${order.id}`}>Customer order</option>}
