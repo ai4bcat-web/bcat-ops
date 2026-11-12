@@ -178,6 +178,33 @@ export function isUnsent(row: Pick<ArQueueRow, 'sentAt' | 'sentCount'>): boolean
  * just-released load lands here, not in Ready to invoice: the unsent ones lead, newest release
  * first, then the rest in the order they came (oldest due first).
  */
+/**
+ * Sent: e-mailed to the customer (sentAt / sentCount / marked sent), or — factored — submitted to
+ * OTR. Until then an auto-generated invoice is a draft for review in Ready to invoice (Ryne 2026-11-12).
+ */
+export function isInvoiceSent(inv: InvoiceRecord, factorItem?: { otrInvoiceId?: string | null; otrSubmittedAt?: string | null; status?: string | null } | null): boolean {
+  if (inv.sentAt || inv.markedSentAt || (inv.sentCount ?? 0) > 0) return true
+  if (factorItem && (factorItem.otrInvoiceId || factorItem.otrSubmittedAt || factorItem.status === 'PENDING_WITH_OTR' || factorItem.status === 'FACTORED')) return true
+  return false
+}
+
+/** Open invoices split by sent: drafts go to Ready to invoice (newest release first), sent ones to Invoiced. */
+export function splitOpenInvoices(
+  open: InvoiceRecord[],
+  l: ArQueueLookups,
+  releasedByOrder: Map<string, string | null> | undefined,
+  sent: (inv: InvoiceRecord) => boolean,
+): { drafts: ArQueueRow[]; invoiced: ArQueueRow[] } {
+  const live = open.filter((inv) => inv.status === 'ISSUED' || inv.status === 'PARTIAL')
+  const drafts = live
+    .filter((inv) => !sent(inv) && inv.paidCents === 0)
+    .map((inv) => ({ ...invoiceRow(inv, l, releasedByOrder?.get(inv.orderId)), status: 'READY' as const, daysSinceInvoice: null, daysPastDue: null }))
+    .sort((a, b) => String(b.releasedAt ?? b.invoiceDate ?? '').localeCompare(String(a.releasedAt ?? a.invoiceDate ?? '')))
+  const draftIds = new Set(drafts.map((r) => r.invoiceId))
+  const invoiced = live.filter((inv) => !draftIds.has(inv.id)).map((inv) => invoiceRow(inv, l, releasedByOrder?.get(inv.orderId)))
+  return { drafts, invoiced }
+}
+
 export function buildInvoicedRows(open: InvoiceRecord[], l: ArQueueLookups, releasedByOrder?: Map<string, string | null>): ArQueueRow[] {
   const rows = open
     .filter((inv) => inv.status === 'ISSUED' || inv.status === 'PARTIAL')
