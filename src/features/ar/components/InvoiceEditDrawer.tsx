@@ -1,0 +1,190 @@
+/**
+ * View and edit one invoice in place (Ryne, 2026-11-12): the PDF, the e-mail exactly as it will
+ * go out (or, factored, where it stands with OTR), the lines, and hand credits/debits with
+ * reasons. "Save & regenerate" saves INTO this invoice (REVISE_INVOICE) — never a second one —
+ * and a sent invoice becomes 'Rev N'. Send / Resend hands it to the review carousel.
+ */
+import { useEffect, useMemo, useState } from 'react'
+import { Plus, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
+import { TmsBadge, TmsButton, TmsDrawer, TmsInput, TmsSelect } from '@/features/tms/kit'
+import { getInvoicePdfUrl, getTmsSettings, graphqlErrorText, reviseInvoice } from '@/lib/apiClient'
+import { formatCents } from '@/lib/invoiceBuild'
+import { invoiceAttachmentName, invoiceCompanyName, invoicePoNumber } from '@/lib/invoiceIdentity'
+import { renderInvoiceEmail } from '@/lib/shipmentNotices'
+import type { FactoringItem } from '@/types'
+import type { CustomerRecord, InvoiceAdjustment, InvoiceRecord, ShipmentRecord, TmsSettings } from '@/types/tms'
+import { centsFromInput, inputFromCents } from './money'
+import { INVOICE_FROM_ADDRESS, isFactoredInvoice, manualRecipients } from '../sendReview'
+
+interface Draft { kind: 'CREDIT' | 'DEBIT'; description: string; amount: string; reason: string }
+
+export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, canEdit, onClose, onSaved, onSend }: {
+  invoice: InvoiceRecord
+  customer: CustomerRecord | undefined
+  shipment: ShipmentRecord | undefined
+  factoringItem: FactoringItem | undefined
+  canEdit: boolean
+  onClose: () => void
+  onSaved: () => void
+  onSend: (invoice: InvoiceRecord) => void
+}) {
+  const [current, setCurrent] = useState(invoice)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [settings, setSettings] = useState<TmsSettings | null>(null)
+  const [drafts, setDrafts] = useState<Draft[]>(() => (invoice.adjustments ?? []).map((a) => ({
+    kind: a.kind, description: a.description, amount: inputFromCents(a.amountCents), reason: a.reason,
+  })))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    getTmsSettings().then((s) => { if (alive) setSettings(s) }).catch(() => undefined)
+    return () => { alive = false }
+  }, [])
+  useEffect(() => {
+    let alive = true
+    if (current.pdfKey) getInvoicePdfUrl(current.pdfKey).then((u) => { if (alive) setPdfUrl(u) }).catch(() => undefined)
+    return () => { alive = false }
+  }, [current.pdfKey])
+
+  const factored = isFactoredInvoice(current, customer)
+  const sent = Boolean(current.sentAt || current.markedSentAt || (current.sentCount ?? 0) > 0)
+  const locked = current.paidCents > 0 || current.writtenOffCents > 0 || Boolean(factoringItem?.otrInvoiceId) || current.status === 'VOID'
+  const po = invoicePoNumber(current.references)
+  const pro = current.shipmentNumber || current.number
+  const email = useMemo(() => renderInvoiceEmail({
+    invoice: current,
+    brokerName: 'BCAT',
+    po,
+    companyName: invoiceCompanyName(shipment?.revDivision, shipment?.revSubdivision),
+  }), [current, po, shipment])
+  const recipients = manualRecipients(customer, settings)
+
+  const adjustments: InvoiceAdjustment[] | null = useMemo(() => {
+    const out: InvoiceAdjustment[] = []
+    for (const d of drafts) {
+      const cents = centsFromInput(d.amount)
+      if (!cents || cents <= 0 || !d.description.trim() || !d.reason.trim()) return null
+      out.push({ kind: d.kind, description: d.description.trim(), amountCents: cents, reason: d.reason.trim() })
+    }
+    return out
+  }, [drafts])
+  const chargeTotal = (current.lines ?? []).filter((l) => l.code !== 'ADJUSTMENT').reduce((sum, l) => sum + l.amountCents, 0)
+  const newTotal = adjustments ? chargeTotal + adjustments.reduce((s, a) => s + (a.kind === 'CREDIT' ? -a.amountCents : a.amountCents), 0) : null
+
+  const save = () => {
+    if (!adjustments) return
+    setSaving(true)
+    setError(null)
+    reviseInvoice({ invoiceId: current.id, adjustments })
+      .then(({ invoice: fresh, revision }) => {
+        setCurrent(fresh)
+        toast.success(`Saved ${fresh.number}${revision > 1 ? ` Rev ${revision}` : ''} and regenerated the PDF`)
+        onSaved()
+      })
+      .catch((err: unknown) => setError(graphqlErrorText(err)))
+      .finally(() => setSaving(false))
+  }
+
+  const set = (i: number, patch: Partial<Draft>) => setDrafts((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  const rev = (current.revision ?? 1) > 1 ? ` Rev ${current.revision}` : ''
+
+  return (
+    <TmsDrawer
+      open
+      onOpenChange={(open) => { if (!open) onClose() }}
+      title={`Invoice ${current.number}${rev}`}
+      description={`${current.customerName ?? ''} · PRO ${pro}${po ? ` · PO ${po}` : ''} · ${formatCents(current.totalCents)} · balance ${formatCents(current.balanceCents)}`}
+      footer={
+        <>
+          {canEdit && !locked && (
+            <TmsButton variant="primary" aria-label="Save and regenerate" disabled={saving || !adjustments} onClick={save}>
+              {saving ? 'Saving…' : 'Save & regenerate'}
+            </TmsButton>
+          )}
+          {canEdit && current.status !== 'VOID' && current.status !== 'PAID' && (
+            <TmsButton aria-label={sent ? 'Resend invoice' : 'Send invoice'} onClick={() => onSend(current)}>
+              {factored ? 'Send to OTR' : sent ? 'Resend' : 'Send'}
+            </TmsButton>
+          )}
+          <Link className="tms-btn tms-btn-ghost tms-btn-sm" to={`/tms/invoicing/invoices/${current.id}`}>Full record</Link>
+          <TmsButton variant="ghost" onClick={onClose}>Close</TmsButton>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4 text-sm">
+        <div className="flex flex-wrap gap-2">
+          <TmsBadge tone={factored ? 'purple' : 'blue'}>{factored ? 'OTR' : 'Manual'}</TmsBadge>
+          <TmsBadge tone={sent ? 'green' : 'orange'}>{sent ? 'Sent' : 'Draft — not sent'}</TmsBadge>
+          {locked && <TmsBadge tone="gray">{current.paidCents > 0 ? 'Payment applied: use a credit memo' : factoringItem?.otrInvoiceId ? 'With OTR: edit from factoring' : 'Locked'}</TmsBadge>}
+        </div>
+
+        {factored ? (
+          <section aria-label="OTR submission">
+            <h3 className="font-semibold">OTR</h3>
+            {factoringItem
+              ? <p>Status {factoringItem.status}{factoringItem.otrStatus ? ` · OTR ${factoringItem.otrStatus}` : ''}{factoringItem.otrInvoiceId ? ` · OTR invoice ${factoringItem.otrInvoiceId}` : ''}{factoringItem.otrSubmittedAt ? ` · submitted ${factoringItem.otrSubmittedAt.slice(0, 10)}` : ' · not submitted yet'}</p>
+              : <p className="tms-muted">Not in the factoring queue yet — Send to OTR queues it.</p>}
+          </section>
+        ) : (
+          <section aria-label="E-mail preview">
+            <h3 className="font-semibold">E-mail</h3>
+            <dl className="grid gap-1" style={{ gridTemplateColumns: 'max-content 1fr' }}>
+              <dt className="tms-muted">From</dt><dd>{INVOICE_FROM_ADDRESS}</dd>
+              <dt className="tms-muted">To</dt><dd>{recipients.to.join(', ') || <span style={{ color: 'var(--tms-badge-red)' }}>No AP e-mail on file</span>}</dd>
+              <dt className="tms-muted">CC</dt><dd>{recipients.cc.join(', ') || '—'}</dd>
+              <dt className="tms-muted">Subject</dt><dd>{email.subject}</dd>
+              <dt className="tms-muted">Attachment</dt><dd>{invoiceAttachmentName(pro, po)}</dd>
+              <dt className="tms-muted">Body</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{email.body}</dd>
+            </dl>
+          </section>
+        )}
+
+        <section aria-label="Invoice lines">
+          <h3 className="font-semibold">Lines</h3>
+          <ul>
+            {(current.lines ?? []).filter((l) => l.code !== 'ADJUSTMENT').map((l) => (
+              <li key={l.chargeId} className="flex justify-between"><span>{l.label ?? l.code}</span><span>{formatCents(l.amountCents)}</span></li>
+            ))}
+          </ul>
+          <p className="tms-muted text-xs">Charges come from the shipment; change them there, then Save & regenerate here.</p>
+        </section>
+
+        <section aria-label="Adjustments">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold">Credits and debits</h3>
+            {canEdit && !locked && (
+              <TmsButton size="sm" aria-label="Add adjustment" onClick={() => setDrafts((rows) => [...rows, { kind: 'CREDIT', description: '', amount: '', reason: '' }])}>
+                <Plus size={12} /> Add
+              </TmsButton>
+            )}
+          </div>
+          {drafts.length === 0 && <p className="tms-muted text-xs">None.</p>}
+          {drafts.map((d, i) => (
+            <div key={i} className="mt-1 flex flex-wrap items-center gap-1">
+              <TmsSelect aria-label={`Adjustment ${i + 1} kind`} value={d.kind} disabled={locked} onChange={(e) => set(i, { kind: e.target.value as Draft['kind'] })}>
+                <option value="CREDIT">Credit</option>
+                <option value="DEBIT">Debit</option>
+              </TmsSelect>
+              <TmsInput aria-label={`Adjustment ${i + 1} description`} placeholder="Description" value={d.description} disabled={locked} onChange={(e) => set(i, { description: e.target.value })} />
+              <TmsInput aria-label={`Adjustment ${i + 1} amount`} placeholder="0.00" inputMode="decimal" className="w-24" value={d.amount} disabled={locked} onChange={(e) => set(i, { amount: e.target.value })} />
+              <TmsInput aria-label={`Adjustment ${i + 1} reason`} placeholder="Reason (required)" value={d.reason} disabled={locked} onChange={(e) => set(i, { reason: e.target.value })} />
+              {!locked && <TmsButton size="sm" variant="ghost" aria-label={`Remove adjustment ${i + 1}`} onClick={() => setDrafts((rows) => rows.filter((_, j) => j !== i))}><Trash2 size={12} /></TmsButton>}
+            </div>
+          ))}
+          {newTotal != null && <p className="mt-1">New total <strong aria-label="New total">{formatCents(newTotal)}</strong>{sent && !locked ? ` — saves as Rev ${(current.revision ?? 1) + 1}` : ''}</p>}
+          {adjustments == null && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>Each adjustment needs a description, an amount and a reason.</p>}
+        </section>
+
+        {error && <p className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{error}</p>}
+
+        {pdfUrl
+          ? <iframe title={`Invoice ${current.number} PDF`} src={pdfUrl} style={{ width: '100%', height: 520, border: '1px solid var(--tms-border)' }} />
+          : <p className="tms-muted">{current.pdfKey ? 'Loading the PDF…' : 'No PDF stored yet.'}</p>}
+      </div>
+    </TmsDrawer>
+  )
+}
