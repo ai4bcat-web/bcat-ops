@@ -207,6 +207,25 @@ describe('New driver wizard', () => {
     expect(createDriverPaySetting).not.toHaveBeenCalled()
   })
 
+  it("collects CDL, med card and hire date on step 1 and saves a local driver's starting hourly rate as the Employee hours page does", async () => {
+    await mount('/profiles/drivers/new')
+    type('Full name', 'Hourly Hank')
+    type('Phone', '3125550101')
+    type('CDL number', 'CDL-A IL-1')
+    type('CDL expires', '2027-05-01')
+    type('Med card expires', '2027-03-01')
+    type('Hire date', '2026-11-02')
+    expect(screen.queryByRole('button', { name: /Amazon/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Local driver' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    type('Starting hourly rate', '25')
+    for (let i = 0; i < 3; i += 1) fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create driver' }))
+    await settle()
+    expect(addDriver).toHaveBeenCalledWith(expect.objectContaining({ cdl: 'CDL-A IL-1', cdlExpiration: '2027-05-01', medCardExpiration: '2027-03-01', hireDate: '2026-11-02' }))
+    expect(createDriverPaySetting).toHaveBeenCalledWith(expect.objectContaining({ driverId: 'new1', payGroup: 'LOCAL', payPercent: 0, hourlyRate: 25 }))
+  })
+
   it('Cancel on the first step goes back to the list', async () => {
     await mount('/profiles/drivers/new')
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))

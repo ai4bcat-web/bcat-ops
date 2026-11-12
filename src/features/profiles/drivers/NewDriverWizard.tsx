@@ -7,12 +7,13 @@ import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { activeUnits } from '@/lib/fleetActive'
 import { createDriverPaySetting } from '@/lib/apiClient'
+import { withRateChange } from '@/lib/hoursPay'
 import type { ColorKey } from '@/types'
 import type { DriverFleet } from '@/types/equipment'
 import { WizardStepper, type WizardStep } from '../shared/WizardStepper'
 import '../shared/profiles.css'
 import {
-  basicsErrors, FLEET_OPTIONS, fleetLabel, normalizePhone, payError, requiredDocsFor, wizardPayDefaults,
+  basicsErrors, FLEET_OPTIONS, fleetLabel, hourlyRateError, normalizePhone, payError, requiredDocsFor, wizardPayDefaults,
 } from '../driverProfileModel'
 
 const STEPS: WizardStep[] = [
@@ -32,7 +33,7 @@ const COLORS: ColorKey[] = ['driver-1', 'driver-2', 'driver-3', 'driver-4', 'dri
  */
 export function NewDriverWizard() {
   const navigate = useNavigate()
-  const { isAdmin } = useAuth()
+  const { isAdmin, user } = useAuth()
   const drivers = useAppStore((s) => s.drivers)
   const equipment = useAppStore((s) => s.equipment)
 
@@ -44,6 +45,11 @@ export function NewDriverWizard() {
   const [email, setEmail] = useState('')
   const [fleet, setFleet] = useState<DriverFleet | ''>('')
   const [dispatcher, setDispatcher] = useState('')
+  const [cdl, setCdl] = useState('')
+  const [cdlExpiration, setCdlExpiration] = useState('')
+  const [hireDate, setHireDate] = useState('')
+  const [medCardExpiration, setMedCardExpiration] = useState('')
+  const [hourly, setHourly] = useState('')
   const [percent, setPercent] = useState('')
   const [afterExpenses, setAfterExpenses] = useState(false)
   const [fuelCard, setFuelCard] = useState('')
@@ -59,8 +65,8 @@ export function NewDriverWizard() {
   const takenBy = (id: string) => drivers.find((d) => d.assignedTruckId === id)?.name
 
   const defaults = wizardPayDefaults(fleet || null)
-  const errors = basicsErrors({ name, phone, email, fleet })
-  const payProblem = payError(fleet, percent)
+  const errors = basicsErrors({ name, phone, email, fleet, cdl, cdlExpiration, hireDate, medCardExpiration })
+  const payProblem = defaults.percentPaid ? payError(fleet, percent) : hourlyRateError(hourly)
   const required = requiredDocsFor(fleet || null, isAdmin)
 
   const pickFleet = (next: DriverFleet) => {
@@ -83,6 +89,8 @@ export function NewDriverWizard() {
         name: name.trim(), phone: normalizePhone(phone), active: true, type: 'driver',
         colorKey: COLORS[Math.floor(Math.random() * COLORS.length)],
         email: email.trim() || undefined, fleetGroup: fleet,
+        cdl: cdl.trim() || undefined, cdlExpiration: cdlExpiration || undefined,
+        hireDate: hireDate || undefined, medCardExpiration: medCardExpiration || undefined,
         dispatcherPrimary: dispatcher || null, assignedTruckId: null, assignedTrailerId: null,
         // NOT_STARTED marks a new hire as onboardable, as in the driver editor.
         onboardingStatus: 'NOT_STARTED',
@@ -103,6 +111,17 @@ export function NewDriverWizard() {
           email: email.trim() || null, fuelCardNumber: fuelCard.trim() || null, fixedExpenses: [], active: true, notes: null,
         })
       } catch { problems.push('pay settings') }
+    }
+    if (!defaults.percentPaid && hourly.trim()) {
+      // The same row and rate history the Employee hours page writes (useHourlyRates.saveRate for a first rate).
+      try {
+        const rate = parseFloat(hourly.replace(/[$,\s]/g, ''))
+        const startsOn = hireDate || new Date().toISOString().slice(0, 10)
+        await createDriverPaySetting({
+          driverId, payGroup: 'LOCAL', payPercent: 0, expensesBeforePercent: false, active: true,
+          ...withRateChange({}, rate, startsOn, user?.email ?? '', new Date().toISOString()),
+        })
+      } catch { problems.push('the hourly rate') }
     }
     if (truckId) {
       try { await state.assignTruckToDriver(truckId, driverId) } catch { problems.push('the truck') }
@@ -133,6 +152,10 @@ export function NewDriverWizard() {
             <TmsField label="Full name" error={tried ? errors.name : null}><TmsInput value={name} onChange={(e) => setName(e.target.value)} autoFocus /></TmsField>
             <TmsField label="Phone" error={tried ? errors.phone : null}><TmsInput value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(312) 555-0100" /></TmsField>
             <TmsField label="E-mail" hint="Where invites and settlement reports go" error={tried ? errors.email : null}><TmsInput value={email} onChange={(e) => setEmail(e.target.value)} /></TmsField>
+            <TmsField label="CDL number" hint="Optional"><TmsInput value={cdl} onChange={(e) => setCdl(e.target.value)} placeholder="CDL-A IL-8823901" /></TmsField>
+            <TmsField label="CDL expires" hint="Optional" error={tried ? errors.cdlExpiration : null}><TmsInput type="date" value={cdlExpiration} onChange={(e) => setCdlExpiration(e.target.value)} /></TmsField>
+            <TmsField label="Med card expires" hint="Optional" error={tried ? errors.medCardExpiration : null}><TmsInput type="date" value={medCardExpiration} onChange={(e) => setMedCardExpiration(e.target.value)} /></TmsField>
+            <TmsField label="Hire date" hint="Optional" error={tried ? errors.hireDate : null}><TmsInput type="date" value={hireDate} onChange={(e) => setHireDate(e.target.value)} /></TmsField>
             <TmsField label="Dispatcher" hint="Optional"><TmsSelect value={dispatcher} onChange={(e) => setDispatcher(e.target.value)} options={dispatchers.map((d) => ({ value: d, label: d }))} placeholder="None yet" /></TmsField>
             <div className="pf-wide">
               <div className="tms-field-label" style={{ marginBottom: 6 }}>Driver type</div>
@@ -160,7 +183,11 @@ export function NewDriverWizard() {
             <div className="pf-wide pf-row-sub">Fixed weekly expenses can be added on the Pay tab afterwards.</div>
           </div>
         ) : (
-          <div className="pf-empty">{fleetLabel(fleet)} drivers are paid by the hour from their time card, so there is nothing to set up here. The hourly rate is set on Employee hours.</div>
+          <div className="pf-form-grid">
+            <TmsField label="Starting hourly rate" hint={`Optional. Paid from the time card, starting ${hireDate || 'today'}. Change it later on Employee hours.`} error={tried ? payProblem : null}>
+              <TmsInput value={hourly} onChange={(e) => setHourly(e.target.value)} inputMode="decimal" placeholder="25.00" autoFocus />
+            </TmsField>
+          </div>
         ))}
 
         {step === 2 && (
@@ -195,7 +222,8 @@ export function NewDriverWizard() {
             <dt>Driver</dt><dd>{name.trim()} · {fleetLabel(fleet)}</dd>
             <dt>Contact</dt><dd>{normalizePhone(phone)}{email.trim() ? ` · ${email.trim()}` : ''}</dd>
             <dt>Dispatcher</dt><dd>{dispatcher || 'None yet'}</dd>
-            <dt>Pay</dt><dd>{defaults.percentPaid ? `${percent}% · ${afterExpenses ? 'after expenses' : 'of gross, then minus expenses'}${fuelCard.trim() ? ` · card ${fuelCard.trim()}` : ''}` : 'Hourly (time card)'}</dd>
+            <dt>Pay</dt><dd>{defaults.percentPaid ? `${percent}% · ${afterExpenses ? 'after expenses' : 'of gross, then minus expenses'}${fuelCard.trim() ? ` · card ${fuelCard.trim()}` : ''}` : hourly.trim() ? `$${hourly.trim()}/hr (time card)` : 'Hourly (time card), rate not set yet'}</dd>
+            <dt>Licence</dt><dd>{[cdl.trim() || null, cdlExpiration ? `CDL expires ${cdlExpiration}` : null, medCardExpiration ? `med card ${medCardExpiration}` : null, hireDate ? `hired ${hireDate}` : null].filter(Boolean).join(' · ') || 'Not entered'}</dd>
             <dt>Equipment</dt><dd>{[truckId ? `Truck ${trucks.find((t) => t.id === truckId)?.unitNumber}` : null, trailerId ? `Trailer ${trailers.find((t) => t.id === trailerId)?.unitNumber}` : null].filter(Boolean).join(' · ') || 'None yet'}</dd>
             <dt>Documents</dt><dd>{required.length} required, uploaded next</dd>
           </dl>

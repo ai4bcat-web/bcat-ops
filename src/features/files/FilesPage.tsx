@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Search, Users, Truck as TruckIcon, Container, FileStack, UserPlus, EyeOff } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
@@ -127,6 +128,7 @@ export function FilesPage() {
   const hub = useFileHub()
   // Private documents (pay terms) are admin-only — hidden entirely, not shown as missing.
   const { isAdmin } = useAuth()
+  const navigate = useNavigate()
   // Loading settings applies the configured private-document list app-wide.
   useComplianceSettings()
   const [privateDocsOpen, setPrivateDocsOpen] = useState(false)
@@ -312,9 +314,16 @@ export function FilesPage() {
           {tab === 'DRIVER' && (
             // Drivers are never created by hand — they're invited, and their own
             // application fills in the record.
-            <TmsButton variant="primary" onClick={() => setInviteOpen(true)} title="Send someone an application to fill in">
-              <UserPlus size={14} /> Invite driver
-            </TmsButton>
+            <>
+              {isAdmin && (
+                <TmsButton variant="primary" onClick={() => navigate('/profiles/drivers/new')} title="Set up a driver: basics, pay, truck and documents">
+                  <UserPlus size={14} /> Add driver
+                </TmsButton>
+              )}
+              <TmsButton variant={isAdmin ? undefined : 'primary'} onClick={() => setInviteOpen(true)} title="Send someone an application to fill in">
+                <UserPlus size={14} /> Invite driver
+              </TmsButton>
+            </>
           )}
           <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: 320 }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tms-muted)' }} />

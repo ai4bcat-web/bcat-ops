@@ -16,16 +16,18 @@ export function normalizePhone(raw: string): string {
   return raw
 }
 
+/** The types a new driver can be. Amazon drivers are owner operators (Ryne 2026-11-11), so it is not offered. */
 export const FLEET_OPTIONS: Array<{ value: DriverFleet; label: string }> = [
   { value: 'LOCAL', label: 'Local driver' },
   { value: 'OWNER_OPERATOR', label: 'Owner operator' },
   { value: 'BOX_TRUCK', label: 'Box truck' },
-  { value: 'AMAZON', label: 'Amazon (owner operator)' },
 ]
 
+/** An existing Amazon driver reads as an owner operator; the stored fleet group is not rewritten. */
 export function fleetLabel(fleet: string | null | undefined): string {
   if (!fleet) return 'Unassigned'
-  return FLEET_OPTIONS.find((o) => o.value === fleet)?.label ?? fleet
+  const shown = fleet === 'AMAZON' ? 'OWNER_OPERATOR' : fleet
+  return FLEET_OPTIONS.find((o) => o.value === shown)?.label ?? fleet
 }
 
 /** Where a fleet's weekly/biweekly settlement lives today, for the "open settlements" links. */
@@ -107,7 +109,11 @@ export function wizardPayDefaults(fleet: DriverFleet | null | undefined): Wizard
   }
 }
 
-export interface BasicsInput { name: string; phone: string; email: string; fleet: DriverFleet | '' }
+export interface BasicsInput {
+  name: string; phone: string; email: string; fleet: DriverFleet | ''
+  /** Optional. Dates are yyyy-mm-dd (a date input). */
+  cdl?: string; cdlExpiration?: string; hireDate?: string; medCardExpiration?: string
+}
 
 /** What blocks "Next" on the Basics step: a field → message map, empty when fine. */
 export function basicsErrors(b: BasicsInput): Partial<Record<keyof BasicsInput, string>> {
@@ -116,7 +122,18 @@ export function basicsErrors(b: BasicsInput): Partial<Record<keyof BasicsInput, 
   if (b.phone.replace(/\D/g, '').length < 10) errors.phone = 'Phone needs at least 10 digits.'
   if (b.email.trim() && !/^\S+@\S+\.\S+$/.test(b.email.trim())) errors.email = 'That e-mail does not look right.'
   if (!b.fleet) errors.fleet = 'Choose the driver type.'
+  for (const key of ['cdlExpiration', 'hireDate', 'medCardExpiration'] as const) {
+    const v = (b[key] ?? '').trim()
+    if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) errors[key] = 'Pick a date.'
+  }
   return errors
+}
+
+/** A Local driver's starting hourly rate: blank is allowed (set it later on Employee hours), otherwise above $0. */
+export function hourlyRateError(rate: string): string | null {
+  if (!rate.trim()) return null
+  const n = parseFloat(rate.replace(/[$,\s]/g, ''))
+  return isFinite(n) && n > 0 ? null : 'Enter a rate above $0 an hour.'
 }
 
 /** Pay step is valid when the fleet is hourly, or the percent is 1-100. */
