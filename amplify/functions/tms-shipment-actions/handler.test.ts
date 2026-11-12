@@ -5074,6 +5074,37 @@ describe('READY_TO_INVOICE', () => {
       expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('UNBILLED')
     })
 
+    it('RECONCILE_BILLING finds a released load with no AP record and creates it once', async () => {
+      const ids = await deliveredCarrierLoad()
+      await ready(ids.orderId, review)
+      expect(((await call('RECONCILE_BILLING', {}, ADMIN)) as { gaps: unknown[] }).gaps).toEqual([])
+      // Lose the bill: the assignment reads unbilled again, as if the write never happened.
+      const leg = [...table(TABLES.carrier).values()].find((row) => row.loadId === ids.loadId && row.status === 'ACTIVE')!
+      table(TABLES.carrier).set(String(leg.id), { ...leg, apStatus: 'AWAITING_INVOICE', invoiceId: null })
+      for (const id of [...table(TABLES.carrierBill).keys()]) table(TABLES.carrierBill).delete(id)
+      const check = await call('RECONCILE_BILLING', {}, ADMIN) as { gaps: { orderId: string; arMissing: boolean; apMissing: { carrierName: string; grossCents: number }[] }[] }
+      expect(check.gaps).toHaveLength(1)
+      expect(check.gaps[0]).toMatchObject({ orderId: ids.orderId, arMissing: false })
+      expect(check.gaps[0].apMissing.map((a) => [a.carrierName, a.grossCents])).toEqual([['SWIFT TRANSPORTATION', 140_000]])
+      const fixed = await call('RECONCILE_BILLING', { createMissingFor: ids.orderId }, ADMIN) as { gaps: unknown[]; apRecords: { created: unknown[] } }
+      expect(fixed.apRecords.created).toHaveLength(1)
+      expect(fixed.gaps).toEqual([])
+      expect(bills()).toHaveLength(1)
+      // Idempotent: asking again creates nothing.
+      const again = await call('RECONCILE_BILLING', { createMissingFor: ids.orderId }, ADMIN) as { apRecords: { created: unknown[] } }
+      expect(again.apRecords.created).toEqual([])
+      expect(bills()).toHaveLength(1)
+    })
+
+    it('RECONCILE_BILLING flags a released order that says invoiced but holds no invoice', async () => {
+      const ids = await deliveredCarrierLoad()
+      await ready(ids.orderId, review)
+      const order = table(TABLES.order).get(ids.orderId)!
+      table(TABLES.order).set(ids.orderId, { ...order, arStatus: 'UNPAID', invoiceId: null })
+      const check = await call('RECONCILE_BILLING', {}, ADMIN) as { gaps: { arMissing: boolean; arReason: string }[] }
+      expect(check.gaps.map((g) => [g.arMissing, g.arReason])).toEqual([[true, 'Order is UNPAID but has no invoice']])
+    })
+
     it('releases nothing, and leaves the order in review, when the AP record cannot be written', async () => {
       const ids = await deliveredCarrierLoad()
       // Every bill number this assignment could take is held by a voided bill, yet the assignment still reads unbilled.

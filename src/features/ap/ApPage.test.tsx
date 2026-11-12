@@ -277,6 +277,8 @@ describe('the AP board', () => {
 
   it('offers to record a bill against an assignment nobody has invoiced', async () => {
     await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow()] } })
+    // The page opens on Expected; the awaiting rung is one tab over.
+    fireEvent.click(screen.getByRole('tab', { name: /^Awaiting invoice/ }))
 
     expect(screen.getByRole('button', { name: 'Record bill for S-1001' })).toBeTruthy()
     expect(screen.getByText('$1,500.00')).toBeTruthy()
@@ -294,6 +296,8 @@ describe('the AP board', () => {
         })],
       },
     })
+    // The page opens on Expected; the awaiting rung is one tab over.
+    fireEvent.click(screen.getByRole('tab', { name: /^Awaiting invoice/ }))
 
     expect(screen.getByText(/Settled through driver pay/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Record bill/ })).toBeNull()
@@ -314,6 +318,8 @@ describe('the AP board', () => {
       loadCarrierId: 'lc9', loadId: 'l9', shipmentId: 's9', shipmentNumber: 'S-2002', carrierName: 'Solo Haul',
     })
     await setup({ rowsByTab: { AWAITING_INVOICE: [worklistRow(), second, solo] }, bills: [] })
+    // The page opens on Expected; the awaiting rung is one tab over.
+    fireEvent.click(screen.getByRole('tab', { name: /^Awaiting invoice/ }))
 
     expect(screen.getAllByText('Shared PRO · 2 carriers')).toHaveLength(2)
     expect(screen.getByRole('button', { name: 'Record bill for S-1001 — Blue Line Trucking' })).toBeTruthy()
