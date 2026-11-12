@@ -7,7 +7,7 @@
  *   (`?assignee=`: `me`, `all`, `unassigned`, or a user id). Column filters, sort, Group by
  *   and the layout live in the board's dense grid.
  * - `?focus=checkcalls|docs|exceptions` narrows the same rows to what the retired Check calls
- *   and Document review worklists listed; with a focus the lifecycle is Active + POD due.
+ *   and Document review worklists listed; with a focus the lifecycle is Active (which holds POD due).
  * - A row click opens the shipment's tracking drawer, driven by `?shipment=<id>`, so a
  *   deep link or a notification opens it on the grid.
  * - Log check call, Snooze and Review documents are row actions: the same dialogs and CAS
@@ -113,12 +113,10 @@ export function TrackingWorkstation() {
     return () => window.clearInterval(timer)
   }, [])
 
-  // A focus lists open work: the Active and POD-due lifecycles together (a delivered load with
-  // an upload in review is lifecycle `pod`). No Closed fetch.
+  // A focus lists open work: Active, which already holds the POD-due loads (a load stays on
+  // Tracking until it is delivered and its POD is on file). No Closed fetch.
   const lifecycleRows = useMemo(
-    () => focus
-      ? [...trackingLifecycleRows(shipments, 'active', includeUnsent), ...trackingLifecycleRows(shipments, 'pod', includeUnsent)]
-      : trackingLifecycleRows(shipments, lifecycle, includeUnsent),
+    () => trackingLifecycleRows(shipments, focus ? 'active' : lifecycle, includeUnsent),
     [shipments, includeUnsent, lifecycle, focus],
   )
 

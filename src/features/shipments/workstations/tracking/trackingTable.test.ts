@@ -3,6 +3,7 @@ import type { ShipmentRow } from '../../shipmentViews'
 import {
   assigneeTabs,
   defaultAssignee,
+  deliveryOverdueOf,
   etaOf,
   focusRows,
   isCheckCallDue,
@@ -44,6 +45,43 @@ describe('podStateOf', () => {
     expect(podStateOf(delivered({ docsMissing: ['POD'], podRequestedAt: '2026-10-29T10:00:00Z' }))).toBe('REQUESTED')
     expect(podStateOf(delivered({ docsMissing: ['POD'], podRequestedAt: '2026-10-29T10:00:00Z', pendingDocReviewCount: 1 }))).toBe('IN_REVIEW')
     expect(podStateOf(delivered({ docsMissing: ['RATE_CON'] }))).toBe('RECEIVED')
+  })
+
+  it('reads RECEIVED only when the POD is really on file', () => {
+    // A cached gate that never listed POD says nothing about a POD being on file.
+    expect(podStateOf(delivered({ docsMissing: [], docsRequired: ['BOL'] }))).toBe('UNKNOWN')
+    expect(podStateOf(delivered({ docsMissing: [], docsRequired: ['POD'] }))).toBe('RECEIVED')
+    // Signed off by hand, or car shipping (no POD to chase).
+    expect(podStateOf(delivered({ docsMissing: ['POD'], docsOverrideAt: '2026-10-29T10:00:00Z' }))).toBe('RECEIVED')
+    expect(podStateOf(delivered({ docsMissing: null, revDivision: 'CAR_SHIPPING' }))).toBe('RECEIVED')
+  })
+})
+
+describe('deliveryOverdueOf', () => {
+  const now = Date.parse('2026-11-12T18:00:00Z') // Nov 12 in Chicago
+  it('flags a moving load past its delivery day as Past delivery date', () => {
+    const flag = deliveryOverdueOf(row('A', { status: 'IN_TRANSIT', deliveryAppt: '2026-11-10T15:00:00Z' }), now)
+    expect(flag).toMatchObject({ kind: 'PAST_DELIVERY', daysLate: 2, label: 'Past delivery date' })
+  })
+
+  it('flags a delivered load with no POD once its delivery day has passed', () => {
+    const flag = deliveryOverdueOf(delivered({ docsMissing: ['POD'], deliveryAppt: '2026-11-09T15:00:00Z' }), now)
+    expect(flag).toMatchObject({ kind: 'NO_POD', daysLate: 3, label: 'No POD — delivery date passed' })
+    expect(flag?.tooltip).toBe('Scheduled delivery Nov 9, 2026 — delivered, no POD on file (3 days)')
+  })
+
+  it('does not flag before the day has passed, with a POD on file, or for voided and draft loads', () => {
+    expect(deliveryOverdueOf(row('A', { status: 'IN_TRANSIT', deliveryAppt: '2026-11-12T15:00:00Z' }), now)).toBeNull()
+    expect(deliveryOverdueOf(delivered({ docsMissing: [], deliveryAppt: '2026-11-01T15:00:00Z' }), now)).toBeNull()
+    expect(deliveryOverdueOf(row('V', { voidedAt: '2026-11-02T00:00:00Z', deliveryAppt: '2026-11-01T15:00:00Z' }), now)).toBeNull()
+    expect(deliveryOverdueOf(row('X', { status: 'DRAFT', deliveryAppt: '2026-11-01T15:00:00Z' }), now)).toBeNull()
+  })
+
+  it('backs the Past delivery, no POD focus', () => {
+    const late = row('L', { status: 'IN_TRANSIT', deliveryAppt: '2026-11-10T15:00:00Z' })
+    const fine = row('F', { status: 'IN_TRANSIT', deliveryAppt: '2026-11-20T15:00:00Z' })
+    expect(parseFocus('overdue')).toBe('overdue')
+    expect(focusRows([late, fine], 'overdue', now).map((r) => r.id)).toEqual(['L'])
   })
 })
 
