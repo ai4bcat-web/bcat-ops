@@ -14,6 +14,7 @@ import { reviewLoad, readyToInvoice, releaseToBilling, setSalesRep, setRevTag, t
 import { DOCS_LANDING } from '@/features/shipments/workstations/tracking/legacyRoutes'
 import { evaluateLoadReview, failingReasons, reviewAgeDays, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL } from '@/lib/loadReview'
 import { CarrierBillsPanel } from './CarrierBillsPanel'
+import { deliveredText, deliveredTimeOf, reviewStatusText, reviewStatusTone } from './reviewStatus'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 
@@ -99,8 +100,8 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
   const [now] = useState(() => Date.now())
   const age = reviewAgeDays(row, now)
   return <TmsDrawer open onOpenChange={(open) => { if (!open) onClose() }} title={shipmentLink('overview', row.number)}
-    description={`${row.customerName ?? '—'} · ${row.originCity ?? '—'} → ${row.destinationCity ?? '—'} · Delivered ${formatDateTime(row.deliveredAt)}`}
-    headerExtra={<><TmsBadge tone={verdict.ok ? 'green' : 'orange'}>{released ? 'Already released' : verdict.ok ? result ? 'Ready' : 'Looks ready' : `${reasons.length} to fix`}</TmsBadge><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'POD before delivery' : age + ' d'}</TmsBadge></>}
+    description={`${row.customerName ?? '—'} · ${row.originCity ?? '—'} → ${row.destinationCity ?? '—'} · ${deliveredTimeOf(row) ? `Delivered ${formatDateTime(deliveredTimeOf(row))}` : deliveredText(row) === '—' ? 'Delivered —' : deliveredText(row)}`}
+    headerExtra={<><TmsBadge tone={reviewStatusTone(row)}>{reviewStatusText(row)}</TmsBadge><TmsBadge tone={verdict.ok ? 'green' : 'orange'}>{released ? 'Already released' : verdict.ok ? result ? 'Ready' : 'Looks ready' : `${reasons.length} to fix`}</TmsBadge><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'POD before delivery' : age + ' d'}</TmsBadge></>}
     footer={<><TmsButton variant="primary" disabled={busy || !result || !verdict.ok || released || !!error || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => void move()}>Move to billing</TmsButton>{!canRelease && <p role="note" className="tms-muted">{BILLING_GRANT_MESSAGE}</p>}{shipmentLink('overview', 'Open shipment')}<TmsButton variant="ghost" onClick={onClose}>Close</TmsButton></>}>
     {!result && !error && <p role="status">Checking release requirements…</p>}
     {error && <ReleaseGateList messages={releaseGateMessages(error) ?? [error]} />}
