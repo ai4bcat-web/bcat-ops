@@ -7355,8 +7355,8 @@ export async function generateInvoice(input: {
   billToId?: string
   attachDocumentIds?: string[]
   note?: string
-}): Promise<{ invoice: InvoiceRecord; gate: DocGateResult }> {
-  return financeAction<{ invoice: InvoiceRecord; gate: DocGateResult }>('GENERATE_INVOICE', input)
+}): Promise<{ invoice: InvoiceRecord; gate: DocGateResult; documentFiled?: boolean }> {
+  return financeAction<{ invoice: InvoiceRecord; gate: DocGateResult; documentFiled?: boolean }>('GENERATE_INVOICE', input)
 }
 
 /** One row per order: the invoice it issued, or the reason it refused. Nothing throws. */
@@ -7367,8 +7367,8 @@ export async function batchGenerateInvoices(input: {
   return financeAction('BATCH_GENERATE', input)
 }
 
-export async function renderInvoicePdf(input: { invoiceId: string }): Promise<{ invoice: InvoiceRecord }> {
-  return financeAction<{ invoice: InvoiceRecord }>('RENDER_INVOICE_PDF', input)
+export async function renderInvoicePdf(input: { invoiceId: string }): Promise<{ invoice: InvoiceRecord; documentFiled?: boolean }> {
+  return financeAction<{ invoice: InvoiceRecord; documentFiled?: boolean }>('RENDER_INVOICE_PDF', input)
 }
 
 /**
