@@ -12,6 +12,7 @@ import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { approvalReadiness, PENDING_DATES_BLOCK, type ApprovalWarning } from '@/lib/carrierBill'
 import { daysLate } from '@/lib/arAging'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
+import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import type {
   ApPayeeKind,
   ApPaymentKind,
@@ -25,15 +26,21 @@ import type {
   ShipmentDocumentType,
 } from '@/types/tms'
 
-export type ApTabKey = 'awaiting' | 'review' | 'to-pay' | 'paid' | 'payments' | 'aging' | 'inbox'
+export type ApTabKey = 'awaiting' | 'expected' | 'aging' | 'selected' | 'paid' | 'payments' | 'report' | 'inbox'
 
+/**
+ * The payable ladder as Ryne reads it: a bill is Expected until somebody enters the carrier's invoice
+ * date and due date, Aging once it has them, and Selected once it is chosen for the next pay run.
+ * `report` is the by-carrier aging report that used to be called Aging.
+ */
 export const AP_TABS: { key: ApTabKey; label: string }[] = [
   { key: 'awaiting', label: 'Awaiting invoice' },
-  { key: 'review', label: 'In review' },
-  { key: 'to-pay', label: 'To be paid' },
+  { key: 'expected', label: 'Expected' },
+  { key: 'aging', label: 'Aging' },
+  { key: 'selected', label: 'Selected' },
   { key: 'paid', label: 'Paid' },
   { key: 'payments', label: 'Payments & credits' },
-  { key: 'aging', label: 'Aging' },
+  { key: 'report', label: 'Aging report' },
   { key: 'inbox', label: 'AP inbox' },
 ]
 
@@ -106,6 +113,86 @@ export function billsInReview(bills: readonly CarrierBillRecord[]): CarrierBillR
     .sort((a, b) =>
       (a.datesPending === true ? 0 : 1) - (b.datesPending === true ? 0 : 1)
       || String(a.recordedAt).localeCompare(String(b.recordedAt)))
+}
+
+/** Passed load review and waiting on the carrier's invoice date and due date, oldest recorded first. */
+export function billsExpected(bills: readonly CarrierBillRecord[]): CarrierBillRecord[] {
+  return bills
+    .filter((b) => b.status === 'IN_REVIEW' && b.datesPending === true)
+    .sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)))
+}
+
+const isApproved = (b: Pick<CarrierBillRecord, 'status'>) => b.status === 'TO_BE_PAID' || b.status === 'PARTIAL'
+
+/**
+ * Open bills that have their invoice date and are not on a pay run yet, soonest due first. A bill still in
+ * review shows here too (it has its dates) but cannot be selected until it is approved.
+ */
+export function billsAging(bills: readonly CarrierBillRecord[]): CarrierBillRecord[] {
+  return bills
+    .filter((b) => (b.status === 'IN_REVIEW' && b.datesPending !== true) || (isApproved(b) && b.selectedForPayment !== true))
+    .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
+}
+
+/** Approved bills chosen for the next pay run, soonest due first. */
+export function billsSelected(bills: readonly CarrierBillRecord[]): CarrierBillRecord[] {
+  return bills
+    .filter((b) => isApproved(b) && b.selectedForPayment === true)
+    .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
+}
+
+/** Only an approved bill can go on a pay run; a bill still in review has gates to clear first. */
+export function canSelectForPayment(bill: Pick<CarrierBillRecord, 'status' | 'datesPending'>): boolean {
+  return isApproved(bill) && bill.datesPending !== true
+}
+
+export interface InvoiceAgeBucket { key: 'D0_30' | 'D31_60' | 'D61_PLUS'; label: string; count: number; cents: number }
+
+/** Open balances by days since the carrier's invoice date: 0–30, 31–60, 61+. */
+export function invoiceAgeBuckets(bills: readonly CarrierBillRecord[], asOf: string): InvoiceAgeBucket[] {
+  const out: InvoiceAgeBucket[] = [
+    { key: 'D0_30', label: '0–30 days', count: 0, cents: 0 },
+    { key: 'D31_60', label: '31–60 days', count: 0, cents: 0 },
+    { key: 'D61_PLUS', label: '61+ days', count: 0, cents: 0 },
+  ]
+  for (const bill of bills) {
+    const age = Math.max(0, daysLate(bill.billDate, asOf))
+    const bucket = age <= 30 ? out[0]! : age <= 60 ? out[1]! : out[2]!
+    bucket.count += 1
+    bucket.cents += bill.balanceCents
+  }
+  return out
+}
+
+/** `Factor — Triumph` or `Direct`: who the money is paid to. */
+export function payToLabel(bill: Pick<CarrierBillRecord, 'payeeKind' | 'remitTo'>): string {
+  if (bill.payeeKind !== 'FACTOR') return 'Direct'
+  const factor = bill.remitTo?.factorName?.trim() || bill.remitTo?.name?.trim()
+  return factor ? `Factor — ${factor}` : 'Factor'
+}
+
+/**
+ * The carrier's payment method behind a bill: the one the bill was recorded against, else their preferred
+ * active method, else any active one. Null when the carrier has nothing on file.
+ */
+export function paymentInfoFor(
+  bill: Pick<CarrierBillRecord, 'carrierId' | 'paymentMethodId'>,
+  infos: readonly CarrierPaymentInfo[],
+): CarrierPaymentInfo | null {
+  if (bill.paymentMethodId) {
+    const exact = infos.find((i) => i.id === bill.paymentMethodId)
+    if (exact) return exact
+  }
+  const mine = infos.filter((i) => i.carrierId === bill.carrierId && i.status !== 'INACTIVE')
+  return mine.find((i) => i.isPreferred) ?? mine[0] ?? null
+}
+
+/** The e-mail remittance goes to: the address snapshotted on the bill, else the payment method's. */
+export function remitEmailOf(
+  bill: Pick<CarrierBillRecord, 'remitTo' | 'carrierId' | 'paymentMethodId'>,
+  infos: readonly CarrierPaymentInfo[],
+): string {
+  return bill.remitTo?.payeeEmail?.trim() || paymentInfoFor(bill, infos)?.payeeEmail?.trim() || ''
 }
 
 /** Approved bills waiting on cash — PARTIAL included — soonest due first. */
