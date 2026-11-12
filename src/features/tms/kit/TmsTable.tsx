@@ -6,6 +6,13 @@ export interface ColumnDef<T> {
   width?: number
   render: (row: T) => ReactNode
   sortable?: boolean
+  /** Plain text of the cell for the list page's search, header filter, tooltip and sort. Defaults to the text inside `render`. */
+  text?: (row: T) => string
+  /** Sort value when the text would sort wrongly (money, dates). */
+  sortValue?: (row: T) => string | number | null
+  /** The header filter kind; `false` removes it. Defaults to the text type-ahead. */
+  filter?: 'text' | 'multi' | 'date' | 'number' | false
+  align?: 'left' | 'right'
 }
 
 export interface TmsSort {

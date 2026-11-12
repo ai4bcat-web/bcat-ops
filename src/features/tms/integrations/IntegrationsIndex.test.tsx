@@ -96,7 +96,11 @@ describe('IntegrationsIndex', () => {
     ])
     draw()
 
+    // The grid mounts only the rows in view: narrow the list to the provider under test.
+    await waitFor(() => expect(api.listIntegrations).toHaveBeenCalled())
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'motive' } })
     await waitFor(() => expect(screen.getByText('Connected')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: '' } })
     expect(screen.getAllByText('Never').length).toBeGreaterThan(0)
   })
 
