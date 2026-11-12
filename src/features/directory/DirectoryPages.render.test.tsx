@@ -420,6 +420,33 @@ describe('DirectoryPages', () => {
     })
   })
 
+  it('status tabs: Active first with counts that ignore the search box, linkable and remembered', async () => {
+    renderCustomers()
+    await waitFor(() => expect(screen.getByText('Active Co')).toBeTruthy())
+    const tabs = within(screen.getByRole('tablist', { name: 'Customer status' })).getAllByRole('tab')
+    expect(tabs.map((t) => t.textContent?.replace(/\d+$/, ''))).toEqual(['Active', 'Prospects', 'Inactive', 'All'])
+    expect(tabs[0]?.getAttribute('aria-selected')).toBe('true')
+    const before = tabs.map((t) => t.textContent)
+    fireEvent.change(screen.getByLabelText('Search customers'), { target: { value: 'Pending' } })
+    await waitFor(() => expect(screen.queryByText('Active Co')).toBeNull())
+    expect(within(screen.getByRole('tablist', { name: 'Customer status' })).getAllByRole('tab').map((t) => t.textContent)).toEqual(before)
+    fireEvent.change(screen.getByLabelText('Search customers'), { target: { value: '' } })
+    fireEvent.click(screen.getByTestId('customers-tab-leads'))
+    await waitFor(() => expect(screen.getByTestId('search').textContent).toContain('status=leads'))
+    expect(localStorage.getItem('tms:customers:status-tab')).toBe('leads')
+  })
+
+  it('opens on the status in the link, else the last one used', async () => {
+    renderCustomers('/tms/customers?status=inactive')
+    await waitFor(() => expect(screen.getByText('Blocked Co')).toBeTruthy())
+    expect(screen.getByTestId('customers-tab-inactive').getAttribute('aria-selected')).toBe('true')
+    cleanup()
+    localStorage.setItem('tms:customers:status-tab', 'leads')
+    renderCustomers()
+    await waitFor(() => expect(screen.getByText('Lead Co')).toBeTruthy())
+    expect(screen.getByTestId('customers-tab-leads').getAttribute('aria-selected')).toBe('true')
+  })
+
   it('filters rows by board tab', async () => {
     renderCustomers()
     await waitFor(() => expect(screen.getByText('Active Co')).toBeTruthy())

@@ -26,7 +26,7 @@ import {
   TmsSelect,
 } from '@/features/tms/kit'
 import type { TmsTone } from '@/features/tms/kit'
-import { TmsSegmentedTabs } from '@/features/tms/kit'
+import { TmsTabStrip } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import { ClearFiltersButton, ColumnsButton, DensityToggle, DenseKpiStrip, SummaryToggle } from '@/features/tms/grid/DenseControls'
 import {
@@ -87,6 +87,17 @@ const CUSTOMER_STATUSES: CustomerStatus[] = ['NEW', 'CONTACTED', 'QUALIFIED', 'Q
 const PAGE_SIZE = 100
 
 type BoardTab = 'leads' | 'active' | 'inactive'
+type StatusTab = BoardTab | 'all'
+const STATUS_TABS: StatusTab[] = ['active', 'leads', 'inactive', 'all']
+const STATUS_TAB_KEY = 'tms:customers:status-tab'
+/** The status tab a visit opens on when the link has no `?status=`: the last one used, else Active. */
+function rememberedStatusTab(): StatusTab {
+  try {
+    const saved = window.localStorage.getItem(STATUS_TAB_KEY)
+    if (saved && (STATUS_TABS as string[]).includes(saved)) return saved as StatusTab
+  } catch { /* storage blocked: Active */ }
+  return 'active'
+}
 
 interface CustomerRow {
   record: CustomerRecord
@@ -250,14 +261,10 @@ export function CustomersPage() {
   const duplicates = useMemo(() => buildDuplicateIndex(dir.customers.filter((c) => c.active !== false)), [dir.customers])
 
   const rowsWithStatus = useMemo<CustomerRow[]>(() => {
-    const q = query.trim().toLowerCase()
     const visibleOnly = crm.loaded && (!isManager || scope === 'mine')
     const now = new Date().toISOString()
     return dir.customers
       .filter((c) => !visibleOnly || crm.byCustomer.has(c.id))
-      .filter((c) =>
-        !q || [c.name, c.contactName, c.contactEmail, c.mcNumber, c.dotNumber].some((v) => (v ?? '').toLowerCase().includes(q))
-      )
       .map((c) => {
         const effective = effectiveCustomerStatus(c, null, now)
         const row = crm.byCustomer.get(c.id)
@@ -271,7 +278,7 @@ export function CustomersPage() {
           divisionName: c.defaultDivisionKey ? (divisionNames.get(c.defaultDivisionKey) ?? c.defaultDivisionKey) : '',
         }
       })
-  }, [dir.customers, query, crm.loaded, crm.byCustomer, isManager, scope, nameOf, teamNames, divisionNames])
+  }, [dir.customers, crm.loaded, crm.byCustomer, isManager, scope, nameOf, teamNames, divisionNames])
 
   const counts = useMemo(() => ({
     leads: rowsWithStatus.filter((r) => r.tab === 'leads').length,
@@ -279,7 +286,18 @@ export function CustomersPage() {
     inactive: rowsWithStatus.filter((r) => r.tab === 'inactive').length,
   }), [rowsWithStatus])
 
-  const [activeTab, setActiveTab] = useState<BoardTab | 'all'>('active')
+  // The tab lives in `?status=` so it is linkable, and the last one used is remembered. Its counts ignore the search box.
+  const statusParam = params.get('status')
+  const [remembered] = useState<StatusTab>(() => rememberedStatusTab())
+  const activeTab: StatusTab = (STATUS_TABS as string[]).includes(statusParam ?? '') ? (statusParam as StatusTab) : remembered
+  const setActiveTab = useCallback((tab: StatusTab) => {
+    try { window.localStorage.setItem(STATUS_TAB_KEY, tab) } catch { /* not remembered */ }
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('status', tab)
+      return next
+    }, { replace: true })
+  }, [setParams])
   const [includeFactored, setIncludeFactored] = useState(false)
   const emailCounts = useMemo(() => {
     const counts = { missing: 0, factored: 0 }
@@ -300,7 +318,11 @@ export function CustomersPage() {
     ],
     [prefs.columns],
   )
-  const tabRows = useMemo(() => rowsWithStatus.filter((r) => activeTab === 'all' || r.tab === activeTab), [rowsWithStatus, activeTab])
+  const tabRows = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return rowsWithStatus.filter((r) => (activeTab === 'all' || r.tab === activeTab)
+      && (!q || [r.record.name, r.record.contactName, r.record.contactEmail, r.record.mcNumber, r.record.dotNumber].some((v) => (v ?? '').toLowerCase().includes(q))))
+  }, [rowsWithStatus, activeTab, query])
   const filteredRows = useMemo(() => filterRows(tabRows, gridCatalog, filters), [tabRows, filters])
   const sortedRows = useMemo(() => sortDenseRows(filteredRows, gridCatalog, prefs.sort), [filteredRows, prefs.sort])
   const pageRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
@@ -427,18 +449,6 @@ export function CustomersPage() {
             onChange={(e) => { setQuery(e.target.value); setPageSize(PAGE_SIZE) }}
             className="tms-dense-search"
           />
-          <TmsSegmentedTabs
-            aria-label="Customer board"
-            size="sm"
-            tabs={[
-              { key: 'all', label: 'All statuses', count: rowsWithStatus.length },
-              { key: 'leads', label: 'Prospects', count: counts.leads },
-              { key: 'active', label: 'Active', count: counts.active },
-              { key: 'inactive', label: 'Inactive', count: counts.inactive },
-            ]}
-            active={activeTab}
-            onSelect={(key) => { setActiveTab(key as BoardTab | 'all'); setPageSize(PAGE_SIZE) }}
-          />
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: includeFactored ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }}>Missing invoice e-mail ({emailCounts.missing + (includeFactored ? emailCounts.factored : 0)})</TmsButton>
           <label><input type="checkbox" checked={includeFactored} onChange={(e) => { setIncludeFactored(e.target.checked); if (filters.invoiceEmail?.values?.includes('MISSING')) setColumnFilter('invoiceEmail', { values: e.target.checked ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }} /> Include factored</label>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: ['FACTORED_QUEUE_ONLY'] }) }}>Factored: queue only ({emailCounts.factored})</TmsButton>
@@ -473,6 +483,17 @@ export function CustomersPage() {
           <TmsButton size="sm" variant="primary" onClick={() => setEditing('new')}>Customer</TmsButton>
         </div>
         <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+        <TmsTabStrip
+          aria-label="Customer status"
+          tabs={[
+            { key: 'active', label: 'Active', count: counts.active, testId: 'customers-tab-active' },
+            { key: 'leads', label: 'Prospects', count: counts.leads, testId: 'customers-tab-leads' },
+            { key: 'inactive', label: 'Inactive', count: counts.inactive, testId: 'customers-tab-inactive' },
+            { key: 'all', label: 'All', count: rowsWithStatus.length, testId: 'customers-tab-all' },
+          ]}
+          active={activeTab}
+          onSelect={(key) => { setActiveTab(key as StatusTab); setPageSize(PAGE_SIZE) }}
+        />
         <div className="tms-dense-body">
           <CustomerBulkEdit
             customers={sortedRows.filter((r) => selectedIds.has(r.record.id)).map((r) => r.record)}
