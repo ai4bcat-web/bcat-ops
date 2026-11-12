@@ -80,6 +80,9 @@ describe('driver types (Ryne 2026-11-11)', () => {
   it('validates the optional dates and a starting hourly rate', () => {
     expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'LOCAL', hireDate: 'nope' }).hireDate).toBeTruthy()
     expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'LOCAL', hireDate: '2026-11-02' }).hireDate).toBeUndefined()
+    // an Ivan driver is an employee: the hire date is required; contractors may leave it blank
+    expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'LOCAL' }).hireDate).toBeTruthy()
+    expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'OWNER_OPERATOR' }).hireDate).toBeUndefined()
     expect(hourlyRateError('')).toBeNull()
     expect(hourlyRateError('$25.50')).toBeNull()
     expect(hourlyRateError('0')).toBeTruthy()

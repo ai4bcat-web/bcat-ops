@@ -43,7 +43,7 @@ function startsText(hire: string | null | undefined, today: string): string | nu
 /** One line per calendar year the new days land in: "Uses 3 of 5 days in 2027, 2 left". */
 function balanceLines(driver: PtoDriver | undefined, add: readonly string[], minutes: number, existing: readonly PtoRow[], today: string): { text: string; warn: boolean }[] {
   if (!driver || add.length === 0) return []
-  if (!validHireDate(driver.hireDate)) return [{ text: 'No hire date in the driver file, so no PTO balance.', warn: false }]
+  if (!validHireDate(driver.hireDate)) return [{ text: 'Needs hire date: no hire date in the driver file, so no PTO balance. Add it on the driver profile.', warn: true }]
   const mine = existing.filter((r) => r.driverId === driver.id)
   const groups = new Map<string, string[]>()
   for (const d of add) {
@@ -222,7 +222,8 @@ export function PtoDaysSection({
     const used = new Map(totals.map((t) => [t.driverId, t]))
     return drivers
       .map((d) => ({ d, t: used.get(d.id), bal: ptoBalance(d.hireDate, asOf, all.filter((r) => r.driverId === d.id)) }))
-      .filter((x) => x.t || x.d.ptoEligible === true || (x.bal?.allowance ?? 0) > 0)
+      // A roster driver with no hire date always gets a chip, so it is visible who still needs one.
+      .filter((x) => x.t || x.d.ptoEligible === true || (x.bal?.allowance ?? 0) > 0 || !validHireDate(x.d.hireDate))
       .sort((a, b) => a.d.name.localeCompare(b.d.name))
   }, [drivers, totals, all, asOf])
   const years = useMemo(() => { const y = Number(today.slice(0, 4)); return [y + 1, y, y - 1, y - 2].map(String) }, [today])
@@ -249,7 +250,9 @@ export function PtoDaysSection({
             {d.name}: <b>{t?.days ?? 0}</b> {t?.days === 1 ? 'day' : 'days'} · {decimalHours(t?.minutes ?? 0)} h
             {bal && bal.allowance > 0
               ? <span className={bal.remaining < 0 ? 'text-[color:var(--tms-badge-red)]' : 'text-muted-foreground'}>{' '}· {formatDays(bal.used)} of {bal.allowance} used, {bal.remaining >= 0 ? `${formatDays(bal.remaining)} left` : `${formatDays(-bal.remaining)} over`}</span>
-              : <span className="text-muted-foreground">{' '}· {validHireDate(d.hireDate) ? (startsText(d.hireDate, today) ?? `no allowance in ${year}`) : 'No hire date'}</span>}
+              : validHireDate(d.hireDate)
+                ? <span className="text-muted-foreground">{' '}· {startsText(d.hireDate, today) ?? `no allowance in ${year}`}</span>
+                : <span>{' '}· <a href={`/profiles/drivers/${d.id}`} className="font-medium text-[color:var(--tms-badge-orange)] underline" data-testid={`pto-needs-hire-${d.id}`}>Needs hire date</a></span>}
           </span>
         ))}
       </div>

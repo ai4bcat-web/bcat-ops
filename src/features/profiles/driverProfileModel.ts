@@ -141,6 +141,8 @@ export function basicsErrors(b: BasicsInput): Partial<Record<keyof BasicsInput, 
     const v = (b[key] ?? '').trim()
     if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) errors[key] = 'Pick a date.'
   }
+  // Ivan drivers are employees who earn PTO from their hire date, so it is required for them.
+  if (b.fleet === 'LOCAL' && !(b.hireDate ?? '').trim()) errors.hireDate = 'Enter the hire date (first day of work). PTO is counted from it.'
   return errors
 }
 
