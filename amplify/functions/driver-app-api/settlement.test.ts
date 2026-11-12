@@ -216,6 +216,25 @@ describe('buildSettlement', () => {
       .toEqual(buildSettlement(nextWeek, trips.map((t) => ({ ...t, periodStart: nextWeek })), owner, [], [], [], []))
   })
 
+  it('from the owner-operator changeover an unpinned Amazon-group driver settles as an owner operator (factored); an overlap week with Amazon trips stays Amazon; weeks before are untouched', () => {
+    const amazonGroup = { ...makeSetting(), payGroup: 'AMAZON' }
+    const fee = (week: string, t: RawAmazonTrip[], setting = amazonGroup) =>
+      buildSettlement(week, t.map((x) => ({ ...x, periodStart: week })), setting, [], [], [], []).deductions.find((d) => d.label === FACTORING_FEE_LABEL)?.amount
+    const brokerage = trips.map((t) => ({ ...t, loadRowId: `load-${t.id}` }))
+    // before 2026-09-27: Amazon, never factored (history unchanged)
+    expect(fee('2026-09-20', trips)).toBeUndefined()
+    // from 2026-09-27, brokerage loads only: owner operator, factored like the staff owner-operator statement
+    expect(fee('2026-09-27', brokerage)).toBe(30)
+    expect(fee('2026-11-01', brokerage)).toBe(30)
+    // overlap week: an Amazon trip (no loadRowId) is in the week, so it stays Amazon and is not factored (no pay dropped)
+    expect(fee('2026-10-04', trips)).toBeUndefined()
+    // a pin beats the default in both directions
+    const pinOo = { ...amazonGroup, rateHistory: [{ from: '2026-09-20', until: '2026-09-27', payPercent: 0.88, expensesBeforePercent: amazonGroup.expensesBeforePercent, payGroup: 'OWNER_OPERATOR' }] }
+    expect(fee('2026-09-20', trips, pinOo)).toBe(30)
+    const pinAmazon = { ...amazonGroup, rateHistory: [{ from: '2026-10-04', until: '2026-10-11', payPercent: 0.88, expensesBeforePercent: amazonGroup.expensesBeforePercent, payGroup: 'AMAZON' }] }
+    expect(fee('2026-10-04', brokerage, pinAmazon)).toBeUndefined()
+  })
+
   it('still lists the factoring fee on a factored week with no loads', () => {
     // A driver opening an empty week must still see the fee exists; a missing line
     // reads as "the app lost my deductions" rather than "nothing was factored".

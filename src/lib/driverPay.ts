@@ -256,6 +256,8 @@ export function effectivePayRate(
     : { payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent }
 }
 
+import { OWNER_OP_FIRST_PERIOD, OWNER_OPERATOR_PAY_GROUPS, isOwnerOperatorGroup } from './ownerOperatorTrips'
+
 /** The owner-operator pay modes a week can run in. */
 export type WeekPayMode = 'AMAZON' | 'OWNER_OPERATOR'
 
@@ -277,6 +279,42 @@ export function explicitWeekMode(setting: ModeSetting, periodStart: string): Wee
  */
 export function payGroupForWeek(setting: ModeSetting, periodStart: string): string | null {
   return explicitWeekMode(setting, periodStart) ?? setting.payGroup ?? null
+}
+
+/**
+ * Which statement a week settles on, for the weeks the owner-operator changeover covers (Amazon stopped paying on OWNER_OP_FIRST_PERIOD, 2026-09-27).
+ *  - A week pinned by hand always wins.
+ *  - Before the changeover, or for any other pay group, nothing changes: the pay group decides, exactly as payGroupForWeek says.
+ *  - From the changeover, an unpinned AMAZON or OWNER_OPERATOR driver (a missing group counts as AMAZON, like the Amazon page) defaults to
+ *    standard OWNER_OPERATOR, UNLESS an Amazon-group driver still has Amazon activity that week (an Amazon trip row in the week). Amazon
+ *    activity = a trip in the AmazonTrip table for that driver and pay week (in the driver-app settlement: a trip with no `loadRowId`, i.e. not a
+ *    brokerage load). That OVERLAP week stays on the Amazon side so its trip pay is never dropped, and `overlap` is true so the people-facing
+ *    pages can ask for a decision (pin it either way). Weekly charges are unaffected: they already sit on the owner-operator statement from the
+ *    changeover, unless the week is pinned to Amazon.
+ */
+export interface WeekSettlement { group: string | null; overlap: boolean }
+export function resolveWeekSettlement(setting: ModeSetting, periodStart: string, hasAmazonActivity: boolean): WeekSettlement {
+  const pinned = explicitWeekMode(setting, periodStart)
+  if (pinned) return { group: pinned, overlap: false }
+  const group = setting.payGroup ?? null
+  const inOwnerOpGroups = (OWNER_OPERATOR_PAY_GROUPS as readonly string[]).includes(group ?? 'AMAZON')
+  if (periodStart < OWNER_OP_FIRST_PERIOD || !inOwnerOpGroups) return { group, overlap: false }
+  if ((group ?? 'AMAZON') === 'AMAZON' && hasAmazonActivity) return { group: 'AMAZON', overlap: true }
+  return { group: 'OWNER_OPERATOR', overlap: false }
+}
+
+/** The flag shown on an overlap week, on the Amazon page and in the driver profile. */
+export const AMAZON_OVERLAP_NOTE = 'Amazon trips this week: confirm pay mode'
+
+/** The Amazon statement lists this driver for the week. */
+export function onAmazonStatement(setting: ModeSetting, periodStart: string, hasAmazonActivity: boolean): boolean {
+  return (resolveWeekSettlement(setting, periodStart, hasAmazonActivity).group ?? 'AMAZON') === 'AMAZON'
+}
+
+/** The standard owner-operator statement lists this driver for the week (it carries the weekly charges; an overlap week appears on both). */
+export function onOwnerOperatorStatement(setting: ModeSetting, periodStart: string): boolean {
+  const pinned = explicitWeekMode(setting, periodStart)
+  return pinned ? pinned === 'OWNER_OPERATOR' : isOwnerOperatorGroup(setting.payGroup)
 }
 
 /** Why a week's pay mode cannot be changed by this person, or null. A closed week (before this pay week) is the owner's/ADMIN's call only. */

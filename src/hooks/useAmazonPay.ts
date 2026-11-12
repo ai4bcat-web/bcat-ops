@@ -11,7 +11,7 @@ import {
 } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
-import { calcDriverPay, factoringFeePctFor, effectivePayRate, explicitWeekMode, payGroupForWeek, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
+import { calcDriverPay, factoringFeePctFor, effectivePayRate, explicitWeekMode, onAmazonStatement, resolveWeekSettlement, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
 import { matchedFuelForCard, sumFuel, normalizeCard, effectiveFuelCard } from '@/lib/driverFuel'
 import { creditLineLabel } from '@/lib/payCredits'
 import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
@@ -41,6 +41,8 @@ export interface DriverPayRow {
   /** The stored setting (current base rate) — what the settings modal edits. */
   baseSetting: DriverPaySetting
   trips:      AmazonTrip[]
+  /** An unpinned Amazon-group driver with Amazon trips in a week from the owner-operator changeover: kept here so no trip pay drops; the week needs a pay-mode decision. */
+  amazonOverlap: boolean
   fuel:       number
   fuelTxns:   FuelTransaction[]      // the individual fuel lines that make up `fuel`
   deductions: PayDeductionInput[]   // fixed + fuel + one-offs, in display order
@@ -143,7 +145,8 @@ export function useAmazonPay(requestedWeek: string | null): AmazonPayState {
     const driverById = new Map(drivers.map((d) => [d.id, d]))
     return settings
       // The week's own pay mode decides which statement an owner operator is on; with no mode window this is the pay group, as before.
-      .filter((s) => (payGroupForWeek(s, periodStart) ?? 'AMAZON') === 'AMAZON' && s.active !== false)
+      // From the changeover an unpinned Amazon-group driver is on the owner-operator statement, unless Amazon trips still exist this week (overlap).
+      .filter((s) => onAmazonStatement(s, periodStart, trips.some((t) => t.driverId === s.driverId && t.periodStart === periodStart)) && s.active !== false)
       .map((baseSetting): DriverPayRow | null => {
         const driver = driverById.get(baseSetting.driverId)
         if (!driver) return null
@@ -205,7 +208,8 @@ export function useAmazonPay(requestedWeek: string | null): AmazonPayState {
           [...fixedDebits, ...driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode }))],
         )
 
-        return { driver, setting, baseSetting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, duplicateTripIds }
+        const amazonOverlap = resolveWeekSettlement(baseSetting, periodStart, driverTrips.length > 0).overlap
+        return { driver, setting, baseSetting, trips: driverTrips, amazonOverlap, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, duplicateTripIds }
       })
       .filter((r): r is DriverPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
