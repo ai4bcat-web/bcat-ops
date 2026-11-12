@@ -24,11 +24,9 @@ function Gate({ page, children }: { page: string; children: ReactNode }) {
   return <MemoryRouter><RequirePage page={page}>{children}</RequirePage></MemoryRouter>
 }
 
-describe('per-user grants billingRelease / aljexSignoff', () => {
-  it('are offered on the Users page as assignable pages', () => {
-    const keys = pageOptions().map((p) => p.key)
-    expect(keys).toContain(BILLING_RELEASE_PAGE)
-    expect(keys).toContain(ALJEX_SIGNOFF_PAGE)
+describe('per-user grant aljexSignoff', () => {
+  it('is offered on the Users page as an assignable page', () => {
+    expect(pageOptions().map((p) => p.key)).toContain(ALJEX_SIGNOFF_PAGE)
   })
 
   it('are held by no role, ADMIN included', () => {
@@ -47,20 +45,20 @@ describe('per-user grants billingRelease / aljexSignoff', () => {
   })
 
   it('holdsPerUserGrant ignores ADMIN and refuses non-grant keys', () => {
-    expect(holdsPerUserGrant(['ADMIN', 'role-ADMIN'], BILLING_RELEASE_PAGE)).toBe(false)
-    expect(holdsPerUserGrant(['page-billingRelease'], BILLING_RELEASE_PAGE)).toBe(true)
+    expect(holdsPerUserGrant(['ADMIN', 'role-ADMIN'], ALJEX_SIGNOFF_PAGE)).toBe(false)
+    expect(holdsPerUserGrant(['page-aljexSignoff'], ALJEX_SIGNOFF_PAGE)).toBe(true)
     expect(holdsPerUserGrant(['page-billingRelease'], ALJEX_SIGNOFF_PAGE)).toBe(false)
     expect(holdsPerUserGrant(['page-loads'], 'loads')).toBe(false)
   })
 
   it('RequirePage opens for the granted user and not for an ADMIN/owner without the grant', () => {
     groups = ['ADMIN', 'role-ADMIN']
-    const { unmount } = render(<Gate page={BILLING_RELEASE_PAGE}><p>release</p></Gate>)
-    expect(screen.queryByText('release')).toBeNull()
+    const { unmount } = render(<Gate page={ALJEX_SIGNOFF_PAGE}><p>signoff</p></Gate>)
+    expect(screen.queryByText('signoff')).toBeNull()
     unmount()
 
-    groups = ['page-billingRelease']
-    render(<Gate page={BILLING_RELEASE_PAGE}><p>release</p></Gate>)
-    expect(screen.getByText('release')).toBeInTheDocument()
+    groups = ['page-aljexSignoff']
+    render(<Gate page={ALJEX_SIGNOFF_PAGE}><p>signoff</p></Gate>)
+    expect(screen.getByText('signoff')).toBeInTheDocument()
   })
 })

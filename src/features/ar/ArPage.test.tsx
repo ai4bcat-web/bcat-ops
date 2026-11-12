@@ -268,10 +268,11 @@ describe('the AR board', () => {
     expect((select as HTMLInputElement).disabled).toBe(true)
   })
 
-  // Posting: admins and the page-billingRelease grant (Ryne 2026-11-12); page access alone never posts.
+  // Posting is an action on the Invoicing page: its grant opens it (Ryne 2026-11-12), the broad tms grant does not.
   it.each([
-    ['invoicing-only', ['page-invoicing', 'page-tms'], true],
-    ['ADMIN', ['ADMIN', 'page-invoicing', 'page-tms'], false],
+    ['tms-only', ['page-tms', 'page-loads'], true],
+    ['page-invoicing', ['page-invoicing'], false],
+    ['ADMIN', ['ADMIN'], false],
     ['page-billingRelease', ['page-billingRelease'], false],
   ])('Generate and Batch generate are %s-gated: disabled=%s', async (_label, groups, disabled) => {
     authGroups.current = groups
