@@ -1047,8 +1047,47 @@ describe('invoice documents packet', () => {
     const names = noticeNames()
     // Named for the customer: 'Invoice <PRO> <PO>.pdf'.
     expect(names[0]).toMatch(/^Invoice S000001( .+)?\.pdf$/)
-    expect(names.slice(1)).toEqual(['doc-ratecon.pdf', 'pod-seed.pdf', 'doc-scale.pdf', 'doc-lumper.pdf', 'doc-other.pdf', 'bol-seed.pdf'])
+    // A BCAT Logistics / brokerage invoice never carries a rate confirmation (Ryne, 2026-11-12).
+    expect(names.slice(1)).toEqual(['pod-seed.pdf', 'doc-scale.pdf', 'doc-lumper.pdf', 'doc-other.pdf', 'bol-seed.pdf'])
+    expect(names).not.toContain('doc-ratecon.pdf')
+    expect(names).not.toContain('doc-carrier-only.pdf')
     expect(names).not.toContain('doc-private-lumper.pdf')
+  })
+
+  it('an Ivan Cartage invoice carries the customer rate con, never the carrier one', async () => {
+    table(TABLES.shipment).set(SHIPMENT_ID, { ...table(TABLES.shipment).get(SHIPMENT_ID)!, revDivision: 'ASSETS' })
+    doc('doc-generated-rc', 'RATE_CON', { source: 'GENERATED', audience: 'ALL', loadCarrierId: 'lc-1', orderId: null })
+    doc('doc-legacy-rc', 'RATE_CON', { source: 'LEGACY', audience: 'ALL' })
+    const { invoiceId } = await generate()
+    await call('EMAIL_INVOICE', { invoiceId })
+    const names = noticeNames()
+    expect(names).toContain('doc-ratecon.pdf')
+    expect(names).toContain('pod-seed.pdf')
+    expect(names).not.toContain('doc-generated-rc.pdf')
+    expect(names).not.toContain('doc-legacy-rc.pdf')
+  })
+
+  it('always attaches the POD, even one the invoice did not pick at issue', async () => {
+    const { invoiceId } = await generate()
+    doc('doc-late-pod', 'POD', { uploadedAt: '2026-10-22T10:00:00.000Z' })
+    await call('EMAIL_INVOICE', { invoiceId })
+    expect(noticeNames()).toContain('doc-late-pod.pdf')
+  })
+
+  it('blocks a send whose attachment is a carrier document, and records it', async () => {
+    const { invoiceId } = await generate()
+    // Someone made a carrier invoice public and it was on the invoice's list: the guard still stops it.
+    doc('doc-bad', 'CARRIER_INVOICE', { audience: 'ALL' })
+    const stored = table(TABLES.invoice).get(invoiceId)!
+    table(TABLES.invoice).set(invoiceId, { ...stored, attachDocumentIds: [...(stored.attachDocumentIds as string[]), 'doc-bad'] })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(call('EMAIL_INVOICE', { invoiceId })).rejects.toThrow(/CARRIER_PAY_BLOCKED/)
+    expect(noticeNames()).not.toContain('doc-bad.pdf')
+    expect([...table(TABLES.audit).values()].some((row) => row.action === 'CARRIER_PAY_GUARD_BLOCKED')).toBe(true)
+    // Taken out of this e-mail in the review, it goes without it.
+    await call('EMAIL_INVOICE', { invoiceId, excludeDocumentIds: ['doc-bad'] })
+    expect(noticeNames()).not.toContain('doc-bad.pdf')
+    expect(noticeNames().length).toBeGreaterThan(0)
   })
 
   it('refuses to attach a private or carrier-only document by explicit id', async () => {
@@ -1069,7 +1108,7 @@ describe('invoice documents packet', () => {
 
   it('previews the same public-only, ordered list', async () => {
     const preview = (await call('PREVIEW_INVOICE', { orderId: ORDER_ID })) as { attachments: { id: string }[] }
-    expect(preview.attachments.map((a) => a.id)).toEqual(['doc-ratecon', 'doc-seed-pod', 'doc-scale', 'doc-lumper', 'doc-other', 'doc-seed-bol'])
+    expect(preview.attachments.map((a) => a.id)).toEqual(['doc-seed-pod', 'doc-scale', 'doc-lumper', 'doc-other', 'doc-seed-bol'])
   })
 })
 

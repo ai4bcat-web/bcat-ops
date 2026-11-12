@@ -6,6 +6,7 @@ import { modelAvailable, modelsAvailable } from '@/lib/modelAvailability'
 import type { TimeOffType, TimeOffStatus } from './timeOff'
 import type { Load, Stop, ApptType, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
+import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 import type { McpPullState } from '@/lib/integrations/mcpPull'
 import type { McpReviewCard } from '@/lib/integrations/mcpReview'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
@@ -7683,7 +7684,20 @@ export async function releaseToBilling(input: { orderId: string; clientRequestId
 }
 
 /** E-mails the PDF to the customer's AP address, the customer copy list and the company always-copy list. */
-export async function sendInvoice(input: { invoiceId: string; message?: string }): Promise<InvoiceEmailResult> {
+/** What each invoice's e-mail would carry right now (invoice PDF, POD, the customer's rate con on Ivan invoices). Read-only. */
+export async function getInvoiceAttachmentPlans(invoiceIds: string[]): Promise<InvoiceAttachmentPlanRow[]> {
+  const out = await financeAction<{ plans: InvoiceAttachmentPlanRow[] }>('INVOICE_ATTACHMENTS', { invoiceIds })
+  return out.plans ?? []
+}
+
+export async function sendInvoice(input: {
+  invoiceId: string
+  message?: string
+  /** Documents taken out of this e-mail in the review. */
+  excludeDocumentIds?: string[]
+  /** Admin only: send past a carrier-pay content flag (never a carrier-document flag). */
+  carrierPayOverrideReason?: string
+}): Promise<InvoiceEmailResult> {
   return financeAction<InvoiceEmailResult>('SEND_INVOICE', input)
 }
 

@@ -19,6 +19,7 @@ import {
   batchGenerate,
   emailInvoice,
   generateInvoice,
+  invoiceAttachmentPlans,
   markInvoiceSent,
   previewInvoice,
   renderInvoicePdf,
@@ -131,6 +132,7 @@ type Action =
   | 'REVISE_INVOICE'
   | 'SETTLE_FACTORED_INVOICES'
   | 'BROKERAGE_REP_ROLLUP'
+  | 'INVOICE_ATTACHMENTS'
 
 /**
  * AP is a separate page from AR.
@@ -278,6 +280,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return reviseInvoice(input, caller)
     case 'AGING_STATEMENT':
       return agingStatement(input, caller)
+    case 'INVOICE_ATTACHMENTS':
+      return invoiceAttachmentPlans(input)
     case 'SYNC_FACTORING_CHANGE':
       return syncFactoringChange(input, caller)
     case 'PREVIEW_FACTOR':

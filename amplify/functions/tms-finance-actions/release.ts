@@ -225,7 +225,15 @@ export async function sendInvoice(input: Row, caller: Caller): Promise<Row> {
   const { to, cc } = manualInvoiceRecipients(customer, settings.invoiceAlwaysCopyEmails)
   if (to.length === 0) refuse(RELEASE_REFUSALS.AP_EMAIL_MISSING, `${invoice.customerName ?? 'This customer'} has no AP e-mail; add one on the customer first.`)
 
-  const sent = await emailInvoice({ invoiceId, to, cc, ...(message ? { message } : {}) }, caller)
+  const sent = await emailInvoice({
+    invoiceId,
+    to,
+    cc,
+    ...(message ? { message } : {}),
+    // What the sender took out of this e-mail in the review, and an admin's reason to send past a content flag.
+    ...(input.excludeDocumentIds != null ? { excludeDocumentIds: input.excludeDocumentIds } : {}),
+    ...(input.carrierPayOverrideReason != null ? { carrierPayOverrideReason: input.carrierPayOverrideReason } : {}),
+  }, caller)
   await writeAudit('SHIPMENT', invoice.shipmentId, 'INVOICE_SENT', caller, {
     invoiceId,
     number: invoice.number,
