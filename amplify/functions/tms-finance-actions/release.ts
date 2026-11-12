@@ -13,7 +13,7 @@
  * order already pointing at an invoice is the idempotency key. Over the credit limit is a
  * warning and an audit line, never a refusal.
  *
- * The grant (`page-billingRelease`, no role bypass) is enforced by the router before any
+ * The permission (owner, ADMIN, or `page-billingRelease`) is enforced by the router before any
  * function here runs.
  */
 import { assertString, optionalString, assertRecord, type Caller } from '../_shared/actionInputs'

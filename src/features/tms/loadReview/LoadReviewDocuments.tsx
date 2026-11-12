@@ -8,7 +8,7 @@
  * A write here re-reads the documents and asks the drawer to run the review again.
  */
 import { useEffect, useState } from 'react'
-import { Check, Download, Eye, Plus, RefreshCw, Upload, X } from 'lucide-react'
+import { CheckCircle2, Download, Eye, Plus, RefreshCw, Upload, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsAlert, TmsBadge, TmsButton } from '@/features/tms/kit'
 import { DocumentPreview } from '@/features/documents/DocumentPreview'
@@ -90,21 +90,21 @@ export function LoadReviewDocuments({ shipmentId, readOnly = false, disabled = f
     const waiting = doc.reviewStatus === 'PENDING'
     const rejected = doc.reviewStatus === 'REJECTED'
     return (
-      <li key={doc.id} className="flex flex-wrap items-center gap-2 text-sm" data-testid={`lr-doc-${doc.id}`}>
-        <span className="min-w-0 flex-1 truncate">{doc.name}</span>
-        <span className="text-[11px] tms-muted">
-          v{doc.version} · {sizeLabel(doc.sizeBytes)} · {doc.uploadedBy} · {formatDateTime(doc.uploadedAt)}
-        </span>
-        {waiting && <TmsBadge tone="orange" className="text-[10px]">Waiting on review</TmsBadge>}
-        {rejected && <TmsBadge tone="red" className="text-[10px]">Rejected</TmsBadge>}
-        <span className="flex gap-1">
-          <TmsButton size="sm" className="h-7" onClick={() => { void open(doc) }}><Eye size={13} className="mr-1" />View</TmsButton>
-          <TmsButton size="sm" className="h-7" onClick={() => { void download(doc) }}><Download size={13} className="mr-1" />Download</TmsButton>
+      <li key={doc.id} className="lr-doc-row" data-testid={`lr-doc-${doc.id}`}>
+        <span className="lr-doc-name" title={doc.name}>{doc.name}</span>
+        <span className="lr-doc-actions">
+          <TmsButton size="sm" className="h-7" aria-label={`View ${doc.name}`} onClick={() => { void open(doc) }}><Eye size={13} className="mr-1" />View</TmsButton>
+          <TmsButton size="sm" className="h-7" aria-label={`Download ${doc.name}`} onClick={() => { void download(doc) }}><Download size={13} className="mr-1" />Download</TmsButton>
           {!readOnly && (
-            <TmsButton size="sm" className="h-7" disabled={disabled} onClick={() => setDialog({ replaces: doc })}>
+            <TmsButton size="sm" className="h-7" disabled={disabled} aria-label={`Replace ${doc.name}`} onClick={() => setDialog({ replaces: doc })}>
               <RefreshCw size={13} className="mr-1" />Replace
             </TmsButton>
           )}
+        </span>
+        <span className="lr-doc-meta tms-muted">
+          {DOCUMENT_TYPE_LABELS[doc.type]} · v{doc.version} · {sizeLabel(doc.sizeBytes)} · {doc.uploadedBy} · {formatDateTime(doc.uploadedAt)}
+          {waiting && <TmsBadge tone="orange" className="ml-1 text-[10px]">Waiting on review</TmsBadge>}
+          {rejected && <TmsBadge tone="red" className="ml-1 text-[10px]">Rejected</TmsBadge>}
         </span>
       </li>
     )
@@ -122,7 +122,7 @@ export function LoadReviewDocuments({ shipmentId, readOnly = false, disabled = f
             return (
               <li key={type} className="space-y-1">
                 <p className="flex items-center gap-2 text-sm font-medium">
-                  {present ? <Check size={14} className="text-[color:var(--tms-badge-green)]" /> : <X size={14} className="text-[color:var(--tms-badge-red)]" />}
+                  {present ? <CheckCircle2 size={15} aria-label="On file" className="text-[color:var(--tms-badge-green)]" /> : <XCircle size={15} aria-label="Missing" className="text-[color:var(--tms-badge-red)]" />}
                   {DOCUMENT_TYPE_LABELS[type]}
                   {!present && onFile.length === 0 && <TmsBadge tone="red" className="text-[10px]">Missing</TmsBadge>}
                   {!present && onFile.length > 0 && <TmsBadge tone="orange" className="text-[10px]">On file, not accepted yet</TmsBadge>}
@@ -138,7 +138,7 @@ export function LoadReviewDocuments({ shipmentId, readOnly = false, disabled = f
           })}
         </ul>
       )}
-      {required.length === 0 && gate?.legacy !== true && <p className="tms-muted text-sm">This customer asks for no documents before invoicing.</p>}
+      {required.length === 0 && gate?.legacy !== true && <p className="tms-muted text-sm">No documents required for this customer. BOL is optional.</p>}
       {other.length > 0 && (
         <div className="space-y-1">
           <p className="text-xs uppercase tracking-wider tms-muted">Other files</p>

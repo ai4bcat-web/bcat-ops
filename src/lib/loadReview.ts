@@ -22,6 +22,7 @@ import {
 } from './reviewRequirements'
 import { isReleasedToInvoicing } from './shipmentLists'
 import {
+  NEVER_BLOCKING_DOC_TYPES,
   releaseGateError,
   type ReleaseGateReasonCode,
   type ReleaseGateResult,
@@ -277,7 +278,8 @@ function gateFromRow(row: LoadReviewRow): LoadReviewReason[] {
   if (row.docsMissing == null) {
     out.push(reason('DOCS_UNCHECKED', 'Documents not checked yet', 'documents', GATE_CODE_TAB.DOC_MISSING))
   } else {
-    for (const type of row.docsMissing) {
+    // A cache written before BOL became optional may still list it; it never blocks.
+    for (const type of row.docsMissing.filter((t) => !NEVER_BLOCKING_DOC_TYPES.includes(t))) {
       out.push(reason('DOC_MISSING', `Missing document: ${type}`, 'documents', GATE_CODE_TAB.DOC_MISSING))
     }
   }

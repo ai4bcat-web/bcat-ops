@@ -96,7 +96,7 @@ describe('LoadReviewPage inactive revenue division', () => {
     expect(checkbox('S-1')!.title).toBe('Revenue division is inactive')
     cleanup()
     renderPage('/tms/load-review?shipment=s-1')
-    expect(await screen.findByText('Revenue division is inactive')).toBeTruthy()
+    expect((await screen.findAllByText('Revenue division is inactive')).length).toBeGreaterThan(0)
     expect(moveButton().disabled).toBe(true)
   })
 
@@ -228,9 +228,9 @@ describe('LoadReviewPage', () => {
     await waitFor(() => expect(mocks.release).toHaveBeenCalledWith(expect.objectContaining({ orderId: 'o-s-1' })))
   })
 
-  it('Move to billing is disabled with the grant message for an admin who does not hold the billing grant', async () => {
-    mocks.hasPageAccess.mockReturnValue(true) // ADMIN: every page, but not the per-user grant
-    mocks.groups.mockReturnValue(['ADMIN'])
+  it('Move to billing is disabled with the grant message for a non-admin without the billing grant', async () => {
+    mocks.hasPageAccess.mockReturnValue(true) // can open the page, but is neither admin nor granted
+    mocks.groups.mockReturnValue(['page-tms'])
     renderPage('/tms/load-review?tab=ready&shipment=s-1')
     await waitFor(() => expect(screen.getByText('Ready')).toBeTruthy())
     expect(moveButton().disabled).toBe(true)
@@ -266,7 +266,7 @@ describe('LoadReviewPage', () => {
       extras: [], salesRepId: 'rep-1', revDivision: 'DRY', revSubdivision: null, legacyImported: false,
     })
     renderPage('/tms/load-review?tab=ready&shipment=s-2')
-    expect(await screen.findByText('Missing reference: PO number')).toBeTruthy()
+    expect((await screen.findAllByText('Missing reference: PO number')).length).toBeGreaterThan(0)
     expect(moveButton().disabled).toBe(true)
     expect(screen.getByText('1 to fix')).toBeTruthy()
   })
@@ -278,7 +278,7 @@ describe('LoadReviewPage', () => {
       salesRepId: null, revDivision: 'DRY', revSubdivision: null, legacyImported: false,
     })
     renderPage('/tms/load-review?shipment=s-2')
-    expect(await screen.findByText('Missing sales rep')).toBeTruthy()
+    expect((await screen.findAllByText('Missing sales rep')).length).toBeGreaterThan(0)
     expect(moveButton().disabled).toBe(true)
   })
 
@@ -288,7 +288,7 @@ describe('LoadReviewPage', () => {
       salesRepId: 'rep-1', revDivision: 'DRY', revSubdivision: null, legacyImported: false,
     })
     renderPage('/tms/load-review?shipment=s-1')
-    expect(await screen.findByText('Already released')).toBeTruthy()
+    expect((await screen.findAllByText('Already released')).length).toBeGreaterThan(0)
     expect(moveButton().disabled).toBe(true)
   })
 
@@ -310,7 +310,7 @@ describe('LoadReviewPage', () => {
       extras: [], salesRepId: 'rep-1', revDivision: 'DRY', revSubdivision: null, legacyImported: false,
     })
     renderPage('/tms/load-review?shipment=s-3')
-    await screen.findByText('Missing document: POD')
+    await screen.findAllByText('Missing document: POD')
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).queryAllByRole('link')).toHaveLength(0)
     expect(within(dialog).getAllByTitle('Needs the Shipments grant').length).toBeGreaterThan(0)
@@ -323,7 +323,7 @@ describe('LoadReviewPage', () => {
       extras: [], salesRepId: 'rep-1', revDivision: 'DRY', revSubdivision: null, legacyImported: false,
     })
     renderPage('/tms/load-review?shipment=s-3')
-    await screen.findByText('Missing document: POD')
+    await screen.findAllByText('Missing document: POD')
     const hrefs = within(screen.getByRole('dialog')).getAllByRole('link').map((a) => a.getAttribute('href'))
     expect(hrefs).toContain('/tms/shipments/s-3?tab=documents')
     expect(hrefs).toContain('/tms/tracking?assignee=all&focus=docs')
@@ -353,9 +353,9 @@ describe('LoadReviewPage', () => {
       extras: [], salesRepId: 'rep-1', revDivision: 'DRY', revSubdivision: null, legacyImported: false,
     })
     renderPage('/tms/load-review?shipment=s-m')
-    expect(await screen.findByText('Carrier bill not recorded: Heartland')).toBeTruthy()
+    expect((await screen.findAllByText('Carrier bill not recorded: Heartland')).length).toBeGreaterThan(0)
     expect(screen.getByText(/^Fix \d+ items? first\.$/)).toBeTruthy()
-    expect(screen.getByText('Missing document: RATE_CON (unsigned: Heartland)')).toBeTruthy()
+    expect(screen.getAllByText('Missing document: RATE_CON (unsigned: Heartland)').length).toBeGreaterThan(0)
     expect(await screen.findByTestId('carrier-bill-lc-a')).toBeTruthy()
     expect(screen.getByTestId('carrier-bill-lc-b').textContent).toContain('Bill not recorded')
     expect(screen.getByText(/2 carriers/)).toBeTruthy()
@@ -365,7 +365,7 @@ describe('LoadReviewPage', () => {
   it('a server failure on open is shown in the drawer and Move stays disabled', async () => {
     mocks.review.mockRejectedValue(new Error('Forbidden: needs page-loadReview'))
     renderPage('/tms/load-review?shipment=s-1')
-    expect(await screen.findByText('Forbidden: needs page-loadReview')).toBeTruthy()
+    expect((await screen.findAllByText('Forbidden: needs page-loadReview')).length).toBeGreaterThan(0)
     expect(moveButton().disabled).toBe(true)
   })
 

@@ -109,15 +109,18 @@ describe('evaluateReleaseGate', () => {
     })
   })
 
-  it('requires the BOL and the POD even when the customer asks for neither', () => {
-    expect(messages(input({ documents: [] }))).toEqual(['Missing document: BOL', 'Missing document: POD'])
+  it('requires the POD even when the customer asks for nothing; a BOL is optional', () => {
+    expect(messages(input({ documents: [] }))).toEqual(['Missing document: POD'])
+  })
+
+  it('never blocks on a missing BOL, even when the customer list names it', () => {
+    expect(messages(input({ requiredDocTypes: ['BOL', 'POD'], documents: [] }))).toEqual(['Missing document: POD'])
   })
 
   it('asks for every type the customer bills on, in their order', () => {
     expect(messages(input({ requiredDocTypes: ['LUMPER_RECEIPT', 'POD'], documents: [] }))).toEqual([
       'Missing document: LUMPER_RECEIPT',
       'Missing document: POD',
-      'Missing document: BOL',
     ])
   })
 
@@ -225,7 +228,6 @@ describe('evaluateReleaseGate', () => {
       'NOT_DELIVERED',
       'DOC_MISSING',
       'DOC_MISSING',
-      'DOC_MISSING',
       'REFERENCE_MISSING',
       'DRIVER_MISSING',
       'OPEN_EXCEPTIONS',
@@ -268,9 +270,9 @@ describe('releaseGateError', () => {
     const { missing } = evaluateReleaseGate(input({ shipment: { status: 'BOOKED' }, documents: [] }))
     const err = releaseGateError(missing)
     expect(err.message).toBe(
-      'Not ready for accounting: Not delivered yet (status BOOKED); Missing document: BOL; Missing document: POD',
+      'Not ready for accounting: Not delivered yet (status BOOKED); Missing document: POD',
     )
-    expect(releaseGateOf(err)?.missing.map((m) => m.code)).toEqual(['NOT_DELIVERED', 'DOC_MISSING', 'DOC_MISSING'])
+    expect(releaseGateOf(err)?.missing.map((m) => m.code)).toEqual(['NOT_DELIVERED', 'DOC_MISSING'])
   })
 
   it('reads nothing structured off an ordinary error', () => {
@@ -290,7 +292,7 @@ describe('evaluateReleaseGate — imported Aljex history (legacyImported)', () =
     // the same shipment without the flag fails on all three kinds of check
     const live = bare({ legs: [own({ driverId: null, deliveryDriverId: null })] })
     expect(evaluateReleaseGate(live).missing.map((m) => m.code).sort())
-      .toEqual(['DOC_MISSING', 'DOC_MISSING', 'DRIVER_MISSING', 'REFERENCE_MISSING'])
+      .toEqual(['DOC_MISSING', 'DRIVER_MISSING', 'REFERENCE_MISSING'])
   })
 
   it('does not waive voided, canceled, undelivered, unassigned or excepted', () => {

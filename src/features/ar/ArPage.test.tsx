@@ -283,9 +283,10 @@ describe('the AR board', () => {
     expect(screen.getByText('8501')).toBeTruthy()
   })
 
-  // "Only Jenny and Ryne post invoices": posting is the page-billingRelease grant alone, never a role.
+  // Posting: admins and the page-billingRelease grant (Ryne 2026-11-12); page access alone never posts.
   it.each([
-    ['ADMIN', ['ADMIN', 'page-invoicing', 'page-tms'], true],
+    ['invoicing-only', ['page-invoicing', 'page-tms'], true],
+    ['ADMIN', ['ADMIN', 'page-invoicing', 'page-tms'], false],
     ['page-billingRelease', ['page-billingRelease'], false],
   ])('Generate and Batch generate are %s-gated: disabled=%s', async (_label, groups, disabled) => {
     authGroups.current = groups
