@@ -462,8 +462,8 @@ describe('ShipmentsBoard', () => {
 
   it('the stats strip compares gross profit for Brokerage and Assets, with Other only when it has some', async () => {
     renderBoard('/tms/shipments', [
-      row('S001', { revDivision: 'BROKERAGE', revenueCents: 100_000, profitCents: 20_000 }),
-      row('S002', { revDivision: 'ASSETS', revSubdivision: 'LOCAL', revenueCents: 50_000, profitCents: 10_000 }),
+      row('S001', { status: 'DELIVERED', revDivision: 'BROKERAGE', revenueCents: 100_000, profitCents: 20_000 }),
+      row('S002', { status: 'DELIVERED', revDivision: 'ASSETS', revSubdivision: 'LOCAL', revenueCents: 50_000, profitCents: 10_000 }),
     ])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
     const strip = screen.getByRole('region', { name: 'Summary' })
@@ -473,6 +473,23 @@ describe('ShipmentsBoard', () => {
     expect(strip).toHaveTextContent('$100.00 (20%)')
     expect(strip).not.toHaveTextContent('Other')
     expect(strip.querySelector('.tms-dg-kpi-split')?.getAttribute('title')).toContain('Total $300.00 (20%)')
+  })
+
+  it('revenue and gross profit count only delivered shipments, and the strip says so', async () => {
+    renderBoard('/tms/shipments', [
+      row('S001', { status: 'DELIVERED', revDivision: 'BROKERAGE', revenueCents: 100_000, profitCents: 20_000 }),
+      row('S002', { status: 'OPEN', revDivision: 'BROKERAGE', revenueCents: 900_000, profitCents: 300_000 }),
+      row('S003', { status: 'IN_TRANSIT', revDivision: 'ASSETS', revSubdivision: 'LOCAL', revenueCents: 50_000, profitCents: 10_000 }),
+    ])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    const strip = screen.getByRole('region', { name: 'Summary' })
+    expect(strip).toHaveTextContent('Delivered revenue')
+    expect(strip).toHaveTextContent('$1,000.00Delivered revenue')
+    expect(strip).toHaveTextContent('Delivered gross profit')
+    expect(strip).toHaveTextContent('$200.00 (20%)')
+    expect(strip).not.toHaveTextContent('$3,000.00')
+    expect(strip.querySelector('.tms-dg-kpi-split')?.getAttribute('title')).toContain('Counts only delivered shipments')
+    expect(strip).toHaveTextContent('3Shipments')
   })
 
   it('has no Demo chip', async () => {
