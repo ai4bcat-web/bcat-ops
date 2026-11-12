@@ -41,6 +41,7 @@ import { fetchMotiveDays, type MotiveDaysByDriver } from '@/lib/staffMotiveDays'
 import { errorText } from '@/lib/errorText'
 import { defaultHiddenDriverIds, readSavedHiddenIds, saveHiddenDriverIds, toggleHidden } from '@/lib/hoursDriverFilter'
 import { HoursPeriodView, type DayEdit } from './HoursPeriodView'
+import { PtoDaysSection } from './PtoDaysSection'
 
 function todayChicago(): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -273,6 +274,13 @@ export function HoursPage() {
           />
         )}
       </div>
+
+      <PtoDaysSection
+        drivers={roster}
+        staffEmail={staffEmail}
+        today={todayChicago()}
+        onChanged={() => load(periodStart)}
+      />
     </TmsScrollPage>
   )
 }
