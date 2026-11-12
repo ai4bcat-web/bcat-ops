@@ -9,7 +9,7 @@
  * an invoice 31 days late have to read the same.
  */
 import { isVerifyPaymentBill } from '@/lib/verifyPayment'
-import { approvalReadiness, type ApprovalWarning } from '@/lib/carrierBill'
+import { approvalReadiness, PENDING_DATES_BLOCK, type ApprovalWarning } from '@/lib/carrierBill'
 import { daysLate } from '@/lib/arAging'
 import type { ApWorklistRow } from '@/hooks/useApWorklist'
 import type {
@@ -96,11 +96,16 @@ export function isOwnFleet(row: Pick<ApWorklistRow, 'assignment'>): boolean {
   return row.assignment.kind !== 'CARRIER'
 }
 
-/** Bills on the review rung, oldest recorded first — the order the queue is worked. */
+/**
+ * Bills on the review rung, the order the queue is worked: bills still waiting on their invoice date and due date
+ * first (that is the next thing somebody has to do to them), then oldest recorded first.
+ */
 export function billsInReview(bills: readonly CarrierBillRecord[]): CarrierBillRecord[] {
   return bills
     .filter((b) => b.status === 'IN_REVIEW')
-    .sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)))
+    .sort((a, b) =>
+      (a.datesPending === true ? 0 : 1) - (b.datesPending === true ? 0 : 1)
+      || String(a.recordedAt).localeCompare(String(b.recordedAt)))
 }
 
 /** Approved bills waiting on cash — PARTIAL included — soonest due first. */
@@ -234,7 +239,7 @@ export function billGates(input: {
   isAdmin: boolean
 }): BillGates {
   const { bill, row, carrier, settings, isAdmin } = input
-  if (!row) return NO_GATES
+  if (!row) return bill.datesPending === true ? { blocks: [PENDING_DATES_BLOCK], warnings: [] } : NO_GATES
   return approvalReadiness({
     bill,
     loadCarrier: { status: row.assignment.status, rateConStatus: row.assignment.rateConStatus },

@@ -2522,6 +2522,7 @@ const schema = a.schema(stageTypes({
       recordedAt:      a.datetime().required(),
       recordedBy:      a.string().required(),
       recordedEarly:   a.boolean(),            // recorded before the load delivered
+      datesPending:    a.boolean(),            // created at Move to billing; invoice date + due date still to be set on the AP page
       dueAt:           a.string().required(),  // YYYY-MM-DD
       termsDays:       a.integer().required(),
       quickPay:        a.boolean(),

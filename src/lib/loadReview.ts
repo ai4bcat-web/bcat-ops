@@ -20,7 +20,6 @@ import {
   type ReviewFacts,
   type ReviewRequirement,
 } from './reviewRequirements'
-import { aggregateApStatus } from './carrierTotals'
 import { isReleasedToInvoicing } from './shipmentLists'
 import {
   releaseGateError,
@@ -93,6 +92,7 @@ export interface LoadReviewRow {
   salesRepId?: string | null
   revDivision?: string | null
   assignmentType?: AssignmentType | null
+  carrierName?: string | null
   apStatus?: ApStatus | null
   /** Every live carrier on the load (AT-plan); absent = read the single `apStatus`. */
   carriers?: { name?: string | null; apStatus?: ApStatus | null; costCents?: number | null }[] | null
@@ -138,7 +138,6 @@ export const GATE_CODE_CHECK: Record<ReleaseGateReasonCode, LoadReviewCheckKey> 
   CARRIER_NOT_ASSIGNED: 'details',
   DRIVER_MISSING: 'details',
   CARRIER_RATE_MISSING: 'charges',
-  CARRIER_CHARGES_UNSETTLED: 'charges',
   OPEN_EXCEPTIONS: 'details',
 }
 
@@ -151,7 +150,6 @@ const GATE_CODE_TAB: Record<ReleaseGateReasonCode, LoadReviewAction | null> = {
   CARRIER_NOT_ASSIGNED: { kind: 'OPEN_TAB', tab: 'carrier' },
   DRIVER_MISSING: { kind: 'OPEN_TAB', tab: 'carrier' },
   CARRIER_RATE_MISSING: { kind: 'OPEN_TAB', tab: 'carrierPay' },
-  CARRIER_CHARGES_UNSETTLED: { kind: 'OPEN_TAB', tab: 'carrierPay' },
   OPEN_EXCEPTIONS: { kind: 'OPEN_TAB', tab: 'tracking' },
 }
 
@@ -249,6 +247,27 @@ function stopSentences(stops: readonly LoadReviewStop[]): LoadReviewReason[] {
   return out
 }
 
+/**
+ * What moving the load to billing will do about the carrier's AP record, one sentence per outside carrier that has no bill
+ * yet. Information, never a reason: the release creates the record and AP sets its dates from the carrier's invoice.
+ */
+export function pendingApRecordNotes(row: Pick<LoadReviewRow, 'assignmentType' | 'apStatus' | 'carriers' | 'carrierName' | 'costCents'>): string[] {
+  const money = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const legs = row.carriers && row.carriers.length > 0
+    ? row.carriers.map((c) => ({ name: c.name, apStatus: c.apStatus, cents: c.costCents }))
+    : row.assignmentType === 'CARRIER'
+      ? [{ name: row.carrierName, apStatus: row.apStatus, cents: row.costCents }]
+      : []
+  return legs
+    .filter((leg) => leg.apStatus == null || leg.apStatus === 'AWAITING_INVOICE')
+    .map((leg) => {
+      const who = leg.name?.trim() || 'the carrier'
+      return typeof leg.cents === 'number' && leg.cents > 0
+        ? `AP record will be created for ${who} — ${money(leg.cents)} when moved to billing`
+        : `AP record will be created for ${who} when moved to billing`
+    })
+}
+
 /** What the cached row can say about the release gate; references and the driver rule it cannot see. */
 function gateFromRow(row: LoadReviewRow): LoadReviewReason[] {
   const out: LoadReviewReason[] = []
@@ -264,17 +283,6 @@ function gateFromRow(row: LoadReviewRow): LoadReviewReason[] {
   }
   if (row.assignmentType == null || row.assignmentType === 'NEED_TO_COVER') {
     out.push(reason('CARRIER_NOT_ASSIGNED', 'No carrier or driver assigned', 'details', GATE_CODE_TAB.CARRIER_NOT_ASSIGNED))
-  }
-  const apStatus = row.carriers && row.carriers.length > 0
-    ? aggregateApStatus(row.carriers.map((c, i) => ({ id: String(i), status: 'ACTIVE' as const, apStatus: c.apStatus })))
-    : row.apStatus
-  if (row.assignmentType === 'CARRIER' && (apStatus == null || apStatus === 'AWAITING_INVOICE')) {
-    out.push(reason(
-      'CARRIER_CHARGES_UNSETTLED',
-      'Carrier charges not settled — record the carrier bill first',
-      'charges',
-      GATE_CODE_TAB.CARRIER_CHARGES_UNSETTLED,
-    ))
   }
   const open = Math.max(0, Math.trunc(row.openIncidentCount ?? 0))
   if (open > 0) {

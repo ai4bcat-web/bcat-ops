@@ -53,6 +53,7 @@ import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { PayCarrierDialog } from './components/PayCarrierDialog'
 import { RecordBillDialog, type RecordBillPrefill } from './components/RecordBillDialog'
 import { SendRemittanceDialog } from './components/SendRemittanceDialog'
+import { SetBillDatesDialog } from './components/SetBillDatesDialog'
 import { UpdateCarrierChargesDialog } from './components/UpdateCarrierChargesDialog'
 import type { ApInboxItemRecord } from '@/lib/apInbox/types'
 import type { ApPaymentRecord, ApSettings, CarrierBillRecord, CarrierRecord } from '@/types/tms'
@@ -79,6 +80,7 @@ type ApDialog =
   | { kind: 'inbox-create'; item: ApInboxItemRecord }
   | { kind: 'inbox-dismiss'; item: ApInboxItemRecord }
   | { kind: 'approve'; bill: CarrierBillRecord }
+  | { kind: 'dates'; bill: CarrierBillRecord }
   | { kind: 'charges'; loadCarrierId: string; shipmentId: string }
   | { kind: 'pay'; carrierId: string; billIds?: string[] }
   | { kind: 'credit'; carrierId: string }
@@ -329,6 +331,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       isAdmin,
       busy,
       onApprove: (bill) => setDialog({ kind: 'approve', bill }),
+      onDates: (bill) => setDialog({ kind: 'dates', bill }),
       onCharges: (bill) => setDialog({ kind: 'charges', loadCarrierId: bill.loadCarrierId, shipmentId: bill.shipmentId }),
       onVoid: (bill) => setDialog({ kind: 'void', bill }),
     })
@@ -468,6 +471,14 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       )}
       {dialog?.kind === 'approve' && (
         <ApproveBillDialog
+          open
+          bill={dialog.bill}
+          onOpenChange={(o) => { if (!o) setDialog(null) }}
+          onDone={closeAndRefresh}
+        />
+      )}
+      {dialog?.kind === 'dates' && (
+        <SetBillDatesDialog
           open
           bill={dialog.bill}
           onOpenChange={(o) => { if (!o) setDialog(null) }}
@@ -705,7 +716,7 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
 /* ── In review ───────────────────────────────────────────────────────────── */
 
 function reviewView({
-  banner, bills, rows, shared, carriersById, settings, isAdmin, busy, onApprove, onCharges, onVoid,
+  banner, bills, rows, shared, carriersById, settings, isAdmin, busy, onApprove, onDates, onCharges, onVoid,
 }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
@@ -716,9 +727,11 @@ function reviewView({
   isAdmin: boolean
   busy: boolean
   onApprove: (bill: CarrierBillRecord) => void
+  onDates: (bill: CarrierBillRecord) => void
   onCharges: (bill: CarrierBillRecord) => void
   onVoid: (bill: CarrierBillRecord) => void
 }): ListView {
+  const pendingDates = (bill: CarrierBillRecord) => bill.datesPending === true
   const gatesOf = (bill: CarrierBillRecord) => billGates({
     bill,
     row: rows.get(bill.loadCarrierId),
@@ -730,15 +743,19 @@ function reviewView({
     {
       key: 'bill',
       header: 'BILL',
-      text: (bill) => bill.billNumber ?? bill.id,
+      text: (bill) => `${bill.billNumber ?? bill.id}${pendingDates(bill) ? ' · Needs invoice date & due date' : ''}`,
       extraPx: 40,
       render: (bill) => (
-        <><Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link><VerifyPaymentBadge bill={bill} /></>
+        <>
+          <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>
+          <VerifyPaymentBadge bill={bill} />
+          {pendingDates(bill) && <> <TmsBadge tone="orange">Needs invoice date &amp; due date</TmsBadge></>}
+        </>
       ),
     },
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
-    dayCol<CarrierBillRecord>('billDate', 'BILL DATE', (bill) => bill.billDate),
-    dayCol<CarrierBillRecord>('due', 'DUE', (bill) => bill.dueAt),
+    { ...dayCol<CarrierBillRecord>('billDate', 'BILL DATE', (bill) => bill.billDate), render: (bill) => pendingDates(bill) ? <span className="tms-muted">Pending</span> : formatDay(bill.billDate) },
+    { ...dayCol<CarrierBillRecord>('due', 'DUE', (bill) => bill.dueAt), render: (bill) => pendingDates(bill) ? <span className="tms-muted">Pending</span> : formatDay(bill.dueAt) },
     moneyCol<CarrierBillRecord>('gross', 'GROSS', (bill) => bill.grossCents, (bill) => (
       <span className={RIGHT}>
         {formatCents(bill.grossCents)}
@@ -779,10 +796,11 @@ function reviewView({
       key: 'actions',
       header: '',
       text: () => '',
-      width: 300,
+      width: 360,
       ...ACTIONS,
       render: (bill) => (
         <span className="flex justify-end gap-1 whitespace-nowrap">
+          <TmsButton variant={pendingDates(bill) ? 'primary' : 'ghost'} size="sm" aria-label={`Set dates for bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onDates(bill)}>{pendingDates(bill) ? 'Set dates' : 'Dates'}</TmsButton>
           <TmsButton variant="ghost" size="sm" aria-label={`Approve bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onApprove(bill)}>Approve</TmsButton>
           <TmsButton variant="ghost" size="sm" aria-label={`Update carrier charges for bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onCharges(bill)}>Update charges</TmsButton>
           <TmsButton variant="ghost" size="sm" aria-label={`Void bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onVoid(bill)}>Void</TmsButton>
@@ -802,6 +820,7 @@ function reviewView({
       { label: 'In review', value: bills.length },
       { label: 'Net', value: formatCents(sumCents(bills, (bill) => bill.netCents)) },
       { label: 'With variance', value: bills.filter((bill) => bill.varianceCents !== 0).length, tone: 'bad' },
+      { label: 'Needs invoice date & due date', value: bills.filter(pendingDates).length, tone: 'bad' },
     ],
   })
 }

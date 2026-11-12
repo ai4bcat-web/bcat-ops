@@ -30,11 +30,12 @@ import { agingChipFor, formatDay } from '@/features/ar/arViews'
 import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
 import { AP_PAYEE_KIND_LABEL, AP_PAYMENT_KIND_LABEL, BILL_STATUS_LABEL, paymentsForBill, siblingCarriers } from './apViews'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
+import { SetBillDatesDialog } from './components/SetBillDatesDialog'
 import { BillInboxStrip } from './inbox/BillInboxStrip'
 import type { CarrierBillStatus } from '@/types/tms'
 import type { TmsTone } from '@/features/tms/kit'
 
-type DetailDialog = { kind: 'approve' } | { kind: 'unapprove' } | { kind: 'void' }
+type DetailDialog = { kind: 'approve' } | { kind: 'unapprove' } | { kind: 'void' } | { kind: 'dates' }
 
 const STATUS_TONE: Record<CarrierBillStatus, TmsTone> = {
   IN_REVIEW: 'purple',
@@ -143,12 +144,21 @@ export function BillDetail() {
           <TmsBadge tone={STATUS_TONE[view.status]}>{BILL_STATUS_LABEL[view.status]}</TmsBadge>
           {view.aging.open && <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>}
           {isVerifyPaymentBill(bill) && <TmsBadge tone="orange" title={VERIFY_PAYMENT_NOTE}>{VERIFY_PAYMENT_LABEL}</TmsBadge>}
+          {bill.datesPending === true && <TmsBadge tone="orange">Needs invoice date &amp; due date</TmsBadge>}
         </span>
       }
       actions={
         <>
           <TmsButton
-            variant="primary"
+            variant={bill.datesPending === true ? 'primary' : undefined}
+            aria-label="Set bill dates"
+            disabled={busy || view.status !== 'IN_REVIEW'}
+            onClick={() => setDialog({ kind: 'dates' })}
+          >
+            {bill.datesPending === true ? 'Set dates' : 'Dates'}
+          </TmsButton>
+          <TmsButton
+            variant={bill.datesPending === true ? undefined : 'primary'}
             aria-label="Approve bill"
             disabled={busy || view.status !== 'IN_REVIEW'}
             onClick={() => setDialog({ kind: 'approve' })}
@@ -224,8 +234,8 @@ export function BillDetail() {
               ),
             },
             { label: 'Terms', value: view.quickPay ? `Quick pay, net ${view.termsDays}` : `Net ${view.termsDays}` },
-            { label: 'Bill date', value: formatDay(view.billDate) },
-            { label: 'Due', value: formatDay(view.dueAt) },
+            { label: 'Bill date', value: bill.datesPending === true ? 'Pending — from the carrier’s invoice' : formatDay(view.billDate) },
+            { label: 'Due', value: bill.datesPending === true ? 'Pending — from the carrier’s invoice' : formatDay(view.dueAt) },
             { label: 'Recorded', value: `${formatDateTime(view.recordedAt)} by ${view.recordedBy}` },
             { label: 'Balance', value: <span className="font-semibold">{formatCents(view.totals.balanceCents)}</span> },
             { label: 'Recorded early', value: 'Before the load delivered', hidden: !view.recordedEarly },
@@ -423,6 +433,14 @@ export function BillDetail() {
         </TmsCard>
       )}
 
+      {dialog?.kind === 'dates' && (
+        <SetBillDatesDialog
+          bill={bill}
+          open
+          onOpenChange={(next) => { if (!next) setDialog(null) }}
+          onDone={closeAndRefresh}
+        />
+      )}
       {dialog?.kind === 'approve' && (
         <ApproveBillDialog
           bill={bill}

@@ -9,6 +9,7 @@ import {
   loadReviewCount,
   loadReviewExtras,
   loadReviewRefusal,
+  pendingApRecordNotes,
   releasedWithin,
   reviewAgeDays,
   type LoadReviewCheckKey,
@@ -123,7 +124,7 @@ describe('gate code mapping', () => {
   // Typed as the full union: adding a gate code without extending this list fails to compile.
   const ALL: Record<ReleaseGateReasonCode, true> = {
     VOIDED: true, CANCELED: true, NOT_DELIVERED: true, DOC_MISSING: true, REFERENCE_MISSING: true,
-    CARRIER_NOT_ASSIGNED: true, DRIVER_MISSING: true, CARRIER_RATE_MISSING: true, CARRIER_CHARGES_UNSETTLED: true, OPEN_EXCEPTIONS: true,
+    CARRIER_NOT_ASSIGNED: true, DRIVER_MISSING: true, CARRIER_RATE_MISSING: true, OPEN_EXCEPTIONS: true,
   }
 
   it('maps every ReleaseGateReasonCode to a real check, and a supplied gate lands each under it', () => {
@@ -140,7 +141,7 @@ describe('gate code mapping', () => {
     const grouped: Record<LoadReviewCheckKey, ReleaseGateReasonCode[]> = { salesRep: [], revDivision: [], details: [], charges: [], documents: [] }
     for (const code of Object.keys(ALL) as ReleaseGateReasonCode[]) grouped[GATE_CODE_CHECK[code]].push(code)
     expect(grouped.documents).toEqual(['DOC_MISSING'])
-    expect(grouped.charges).toEqual(['CARRIER_RATE_MISSING', 'CARRIER_CHARGES_UNSETTLED'])
+    expect(grouped.charges).toEqual(['CARRIER_RATE_MISSING'])
     expect(grouped.salesRep).toEqual([])
     expect(grouped.revDivision).toEqual([])
   })
@@ -193,13 +194,11 @@ describe('loadReviewExtras', () => {
 })
 
 describe('evaluateLoadReview — cached row verdict', () => {
-  it('reads the least-advanced rung across several carriers', () => {
-    const unsettled = (carriers: { apStatus: 'AWAITING_INVOICE' | 'TO_BE_PAID' }[]) =>
+  it('does not hold a carrier load for a bill that is not recorded: the move to billing creates it', () => {
+    const verdict = (carriers: { apStatus: 'AWAITING_INVOICE' | 'TO_BE_PAID' }[]) =>
       evaluateLoadReview({ row: delivered({ assignmentType: 'CARRIER', apStatus: 'TO_BE_PAID', carriers }) })
-        .checks.details.reasons.length + evaluateLoadReview({ row: delivered({ assignmentType: 'CARRIER', apStatus: 'TO_BE_PAID', carriers }) })
-        .checks.charges.reasons.filter((r) => r.code === 'CARRIER_CHARGES_UNSETTLED').length
-    expect(unsettled([{ apStatus: 'TO_BE_PAID' }, { apStatus: 'TO_BE_PAID' }])).toBe(0)
-    expect(unsettled([{ apStatus: 'TO_BE_PAID' }, { apStatus: 'AWAITING_INVOICE' }])).toBe(1)
+    expect(verdict([{ apStatus: 'TO_BE_PAID' }, { apStatus: 'AWAITING_INVOICE' }]).checks.charges.ok).toBe(true)
+    expect(verdict([{ apStatus: 'AWAITING_INVOICE' }]).ok).toBe(true)
   })
 
   it('passes a clean delivered row', () => {
@@ -266,13 +265,24 @@ describe('evaluateLoadReview — cached row verdict', () => {
     ])
   })
 
-  it('hints at unsettled carrier charges only for carrier loads without a recorded bill', () => {
+  it('never fails the charges check on a missing carrier bill, whatever the rung', () => {
     const carrier = (apStatus: LoadReviewRow['apStatus']) =>
       evaluateLoadReview({ row: delivered({ assignmentType: 'CARRIER', apStatus }) }).checks.charges.reasons.map((r) => r.code)
-    expect(carrier(null)).toEqual(['CARRIER_CHARGES_UNSETTLED'])
-    expect(carrier('AWAITING_INVOICE')).toEqual(['CARRIER_CHARGES_UNSETTLED'])
+    expect(carrier(null)).toEqual([])
+    expect(carrier('AWAITING_INVOICE')).toEqual([])
     expect(carrier('APPROVED')).toEqual([])
-    expect(evaluateLoadReview({ row: delivered({ assignmentType: 'OWN_ASSET', apStatus: null }) }).checks.charges.ok).toBe(true)
+  })
+
+  it('says which AP records the move will create, one per carrier without a bill, and nothing for own trucks or billed carriers', () => {
+    expect(pendingApRecordNotes(delivered({ assignmentType: 'CARRIER', carrierName: 'SHERIFAJ TRUCKING INC', apStatus: 'AWAITING_INVOICE', costCents: 140_000 })))
+      .toEqual(['AP record will be created for SHERIFAJ TRUCKING INC — $1,400.00 when moved to billing'])
+    expect(pendingApRecordNotes(delivered({ assignmentType: 'CARRIER', apStatus: null, costCents: 0 }))).toEqual(['AP record will be created for the carrier when moved to billing'])
+    expect(pendingApRecordNotes(delivered({
+      assignmentType: 'CARRIER',
+      carriers: [{ name: 'Swift', apStatus: 'IN_REVIEW', costCents: 60_000 }, { name: 'Heartland', apStatus: 'AWAITING_INVOICE', costCents: 20_000 }],
+    }))).toEqual(['AP record will be created for Heartland — $200.00 when moved to billing'])
+    expect(pendingApRecordNotes(delivered({ assignmentType: 'OWN_ASSET', apStatus: null }))).toEqual([])
+    expect(pendingApRecordNotes(delivered({ assignmentType: 'CARRIER', apStatus: 'TO_BE_PAID' }))).toEqual([])
   })
 
   it('failingReasons follows the fixed checklist order', () => {

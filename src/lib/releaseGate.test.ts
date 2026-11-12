@@ -42,13 +42,11 @@ describe('evaluateReleaseGate — several carriers', () => {
     expect(messages(input({ legs: [A(), B({ chargesFinalizedAt: settled, carrierRateCents: 0 })] }))).toEqual([])
     expect(messages(input({ legs: [A(), B({ chargesFinalizedAt: null, carrierRateCents: 0 })] }))).toEqual([
       'Carrier rate missing: Beta — enter the carrier rate first',
-      'Carrier charges not settled: Beta — record the carrier bill first',
     ])
   })
 
-  it('names the carrier whose bill is not recorded', () => {
-    expect(messages(input({ legs: [A(), B({ chargesFinalizedAt: null })] })))
-      .toEqual(['Carrier charges not settled: Beta — record the carrier bill first'])
+  it('does not hold the release for a carrier whose bill is not recorded yet: the move creates the AP record', () => {
+    expect(evaluateReleaseGate(input({ legs: [A(), B({ chargesFinalizedAt: null })] }))).toEqual({ ok: true, missing: [] })
   })
 
   it('does not let A\'s signature, or a filed RATE_CON, waive B', () => {
@@ -70,8 +68,7 @@ describe('evaluateReleaseGate — several carriers', () => {
   })
 
   it('says nothing about a rate when the leg does not supply one', () => {
-    expect(messages(input({ legs: [outside({ carrierName: 'Zed', rateConStatus: 'SIGNED' })] })))
-      .toEqual(['Carrier charges not settled: Zed — record the carrier bill first'])
+    expect(messages(input({ legs: [outside({ carrierName: 'Zed', rateConStatus: 'SIGNED' })] }))).toEqual([])
   })
 })
 
@@ -181,7 +178,7 @@ describe('evaluateReleaseGate', () => {
     expect(messages(input({ legs: [] }))).toEqual(['No carrier or driver assigned'])
   })
 
-  it('refuses an outside carrier whose bill has not been recorded, and names them', () => {
+  it('releases an outside carrier whose bill has not been recorded: the move to billing creates it', () => {
     const gate = evaluateReleaseGate(
       input({
         documents: [
@@ -192,13 +189,7 @@ describe('evaluateReleaseGate', () => {
         legs: [outside({ carrierName: 'Wheeler Trucking', chargesFinalizedAt: null })],
       }),
     )
-    expect(gate.missing).toEqual([
-      {
-        code: 'CARRIER_CHARGES_UNSETTLED',
-        detail: 'Wheeler Trucking',
-        message: 'Carrier charges not settled: Wheeler Trucking — record the carrier bill first',
-      },
-    ])
+    expect(gate).toEqual({ ok: true, missing: [] })
   })
 
   it('ignores a bounced leg entirely: it is neither assigned nor owed', () => {
@@ -237,7 +228,6 @@ describe('evaluateReleaseGate', () => {
       'DOC_MISSING',
       'REFERENCE_MISSING',
       'DRIVER_MISSING',
-      'CARRIER_CHARGES_UNSETTLED',
       'OPEN_EXCEPTIONS',
     ])
   })
@@ -303,13 +293,11 @@ describe('evaluateReleaseGate — imported Aljex history (legacyImported)', () =
       .toEqual(['DOC_MISSING', 'DOC_MISSING', 'DRIVER_MISSING', 'REFERENCE_MISSING'])
   })
 
-  it('does not waive voided, canceled, undelivered, unassigned, unsettled or excepted', () => {
+  it('does not waive voided, canceled, undelivered, unassigned or excepted', () => {
     expect(messages(bare({ shipment: { ...legacyShipment, voidedAt: '2026-10-01T00:00:00Z' } }))).toEqual(['Voided shipment'])
     expect(messages(bare({ shipment: { ...legacyShipment, status: 'CANCELED' } }))).toEqual(['Canceled shipment'])
     expect(messages(bare({ shipment: { ...legacyShipment, status: 'BOOKED' } }))).toEqual(['Not delivered yet (status BOOKED)'])
     expect(messages(bare({ shipment: legacyShipment, legs: [] }))).toEqual(['No carrier or driver assigned'])
-    expect(messages(bare({ shipment: legacyShipment, legs: [outside({ carrierName: 'Zed', chargesFinalizedAt: null })] }))[0])
-      .toMatch(/^Carrier charges not settled/)
     expect(messages(bare({ shipment: legacyShipment, openIncidentCount: 2 }))).toEqual(['2 open exceptions'])
   })
 })

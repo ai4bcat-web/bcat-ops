@@ -28,7 +28,6 @@ export type ReleaseGateReasonCode =
   | 'CARRIER_NOT_ASSIGNED'
   | 'DRIVER_MISSING'
   | 'CARRIER_RATE_MISSING'
-  | 'CARRIER_CHARGES_UNSETTLED'
   | 'OPEN_EXCEPTIONS'
 
 export interface ReleaseGateReason {
@@ -236,19 +235,9 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
       ),
     )
   }
-  // An own-asset leg is already recorded: its cost is a driver settlement, and it
-  // never enters AP. Somebody else's truck has to have a bill against it first.
-  for (const leg of active) {
-    if (leg.kind !== 'CARRIER' || leg.chargesFinalizedAt) continue
-    const carrier = leg.carrierName?.trim() || 'the carrier'
-    missing.push(
-      reason(
-        'CARRIER_CHARGES_UNSETTLED',
-        leg.carrierName ?? null,
-        `Carrier charges not settled: ${carrier} — record the carrier bill first`,
-      ),
-    )
-  }
+  // A carrier leg's bill is not a release condition: moving the load to billing creates the carrier's
+  // AP record, and AP sets its invoice date and due date from the carrier's invoice afterwards
+  // (_shared/pendingCarrierBill). The rate check above is what keeps a $0 carrier out.
 
   const open = Number.isFinite(input.openIncidentCount) ? Math.max(0, Math.trunc(input.openIncidentCount)) : 0
   if (open > 0) {

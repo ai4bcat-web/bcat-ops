@@ -4,6 +4,7 @@ import { applyDataTableSuffix } from '../_shared/dataTableEnv'
 export const SHIPMENT_ACTIONS_TABLES = {
   INVOICE_TABLE_NAME: 'Invoice',
   CARRIER_BILL_TABLE_NAME: 'CarrierBill',
+  CARRIER_PAYMENT_METHOD_TABLE_NAME: 'CarrierPaymentMethod',
   AR_PAYMENT_TABLE_NAME: 'ArPayment',
   AP_PAYMENT_TABLE_NAME: 'ApPayment',
   COMMISSION_TABLE_NAME: 'Commission',
