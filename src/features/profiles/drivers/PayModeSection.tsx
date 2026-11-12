@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { TmsButton, TmsField, TmsSelect } from '@/features/tms/kit'
 import { ProfileRows, ProfileSection } from '../shared/ProfileSection'
-import { clearWeekPayMode, explicitWeekMode, payGroupForWeek, payModeHistory, pinWeekPayMode, effectivePayRate, type WeekPayMode } from '@/lib/driverPay'
+import { clearWeekPayMode, explicitWeekMode, payGroupForWeek, payModeHistory, pinWeekPayMode, payModeChangeRefusal, effectivePayRate, type WeekPayMode } from '@/lib/driverPay'
+import { useAuthUser } from '@/hooks/useAuth'
+import { OWNER_EMAIL } from '@/lib/crm/visibility'
 import { OWNER_OP_FIRST_PERIOD } from '@/lib/ownerOperatorTrips'
 import { weekStartOfISO } from '@/features/driver-pay/week'
 import type { DriverPaySetting } from '@/lib/apiClient'
@@ -43,6 +45,9 @@ export function PayModeSection({ setting, today, onSave }: {
   const [busy, setBusy] = useState(false)
   const closed = week < thisWeek
   const history = payModeHistory(setting)
+  const authUser = useAuthUser()
+  const isAdmin = (authUser?.email ?? '').toLowerCase() === OWNER_EMAIL || (authUser?.groups ?? []).includes('ADMIN')
+  const refusal = () => payModeChangeRefusal({ week, thisWeek, isAdmin })
 
   const choose = (w: string) => { setWeek(w); setMode(''); setPercent('') }
   const rate = effectivePayRate(setting, week)
@@ -51,6 +56,8 @@ export function PayModeSection({ setting, today, onSave }: {
 
   const save = async () => {
     const target = mode || current
+    const refused = refusal()
+    if (refused) { toast.error(refused); return }
     const p = Number(shownPercent)
     if (!Number.isFinite(p) || p <= 0 || p > 100) { toast.error('Enter a pay percent between 1 and 100'); return }
     setBusy(true)
@@ -63,6 +70,8 @@ export function PayModeSection({ setting, today, onSave }: {
     finally { setBusy(false) }
   }
   const clear = async () => {
+    const refused = refusal()
+    if (refused) { toast.error(refused); return }
     setBusy(true)
     try {
       await onSave({ payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent, rateHistory: clearWeekPayMode(setting.rateHistory, week, setting) }, setting.updatedAt)

@@ -279,6 +279,14 @@ export function payGroupForWeek(setting: ModeSetting, periodStart: string): stri
   return explicitWeekMode(setting, periodStart) ?? setting.payGroup ?? null
 }
 
+/** Why a week's pay mode cannot be changed by this person, or null. A closed week (before this pay week) is the owner's/ADMIN's call only. */
+export function payModeChangeRefusal(i: { week: string; thisWeek: string; isAdmin: boolean }): string | null {
+  if (i.week < i.thisWeek && !i.isAdmin) {
+    return 'This pay week is already closed. Only the owner or an admin can change its pay mode.'
+  }
+  return null
+}
+
 function addWeek(weekStart: string, weeks: number): string {
   const d = new Date(`${weekStart}T12:00:00Z`)
   d.setUTCDate(d.getUTCDate() + 7 * weeks)

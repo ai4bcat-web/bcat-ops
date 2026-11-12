@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcDriverPay, factoringFeePctFor, tripPayAmount, effectivePayRate, payGroupForWeek, explicitWeekMode, pinWeekPayMode, payModeHistory, clearWeekPayMode, effectiveFixedExpenses, fixedExpenseLineLabel } from './driverPay'
+import { calcDriverPay, factoringFeePctFor, tripPayAmount, effectivePayRate, payGroupForWeek, explicitWeekMode, payModeChangeRefusal, pinWeekPayMode, payModeHistory, clearWeekPayMode, effectiveFixedExpenses, fixedExpenseLineLabel } from './driverPay'
 import type { PayTripInput, PayDeductionInput, PayCreditInput, PayRateOverride, FixedExpenseInput } from './driverPay'
 
 const addDays = (iso: string, days: number): string => {
@@ -465,5 +465,14 @@ describe('Amazon-group drivers across the owner-operator changeover (2026-09-27)
     const pinned = { ...amazon, rateHistory: pinWeekPayMode([], '2026-10-11', 'OWNER_OPERATOR', { payPercent: 80, expensesBeforePercent: false }) }
     expect(payGroupForWeek(pinned, '2026-10-11')).toBe('OWNER_OPERATOR')
     expect(payGroupForWeek(pinned, '2026-10-04')).toBe('AMAZON')
+  })
+})
+
+describe('payModeChangeRefusal', () => {
+  it('lets anyone change an open week; a closed week only the owner or an admin', () => {
+    expect(payModeChangeRefusal({ week: '2026-11-08', thisWeek: '2026-11-08', isAdmin: false })).toBeNull()
+    expect(payModeChangeRefusal({ week: '2026-11-15', thisWeek: '2026-11-08', isAdmin: false })).toBeNull()
+    expect(payModeChangeRefusal({ week: '2026-11-01', thisWeek: '2026-11-08', isAdmin: false })).toMatch(/closed.*owner or an admin/)
+    expect(payModeChangeRefusal({ week: '2026-11-01', thisWeek: '2026-11-08', isAdmin: true })).toBeNull()
   })
 })
