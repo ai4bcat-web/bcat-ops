@@ -101,5 +101,8 @@ export const PROD_WRITE_SETS = {
   awInvoiceDocs: { models: ['ShipmentDocument'] },
   // `awFactoringCustomerPaid.mjs --apply`: FactoringItem.customerPaidOn / customerPaymentRef on PROs 14749, 14700, 14538 only (conditional: still Pending with OTR and empty) + one AuditLog row each. Never status, shipment, invoice or payment.
   awFactoringCustomerPaid: { models: ['FactoringItem', 'AuditLog'] },
+  // `awInvoiceRenumber.mjs --apply`: counter-numbered invoices (INV-…) re-keyed to the PRO # — new Invoice row, Order.invoiceId/Number,
+  // FactoringItem.invoiceId, the inv:<id> ShipmentDocument; old Invoice row left VOID "Renumbered to …". Nothing deleted.
+  awInvoiceRenumber: { models: ['Invoice', 'Order', 'FactoringItem', 'ShipmentDocument', 'AuditLog'] },
   awShipmentNumber: { models: ['Shipment', 'Load', 'Invoice', 'CarrierBill', 'SpotRequest', 'WorkflowRun', 'IntakeLoad', 'TrackingLink', 'Quote', 'LaneRateSample', 'Commission', 'AuditLog', 'TmsSettings'] },
 };

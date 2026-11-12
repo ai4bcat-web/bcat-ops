@@ -693,7 +693,8 @@ describe('authorization', () => {
 describe('GENERATE_INVOICE', () => {
   it('writes the invoice, moves the order to UNPAID and freezes the load in one go', async () => {
     const { invoiceId, number } = await generate()
-    expect(number).toBe('INV-000001')
+    // The invoice number is the shipment's PRO #.
+    expect(number).toBe('S000001')
 
     const invoice = table(TABLES.invoice).get(invoiceId)!
     expect(invoice).toMatchObject({
@@ -759,12 +760,12 @@ describe('GENERATE_INVOICE', () => {
     await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow()
     expect(table(TABLES.invoice).size).toBe(0)
 
-    // Repair the order and try again: the burnt number is gone for good.
+    // Repair the order and try again: the PRO is the number, so a failed transaction burns nothing.
     const order = table(TABLES.order).get(ORDER_ID)!
     delete order.invoiceId
     table(TABLES.order).set(ORDER_ID, order)
     const { number } = await generate()
-    expect(number).toBe('INV-000002')
+    expect(number).toBe('S000001')
   })
 
   it('leaves pdfKey null when the upload fails, and RENDER_INVOICE_PDF repairs it', async () => {
@@ -774,18 +775,18 @@ describe('GENERATE_INVOICE', () => {
     })
     const { invoiceId } = await generate()
     expect(table(TABLES.invoice).get(invoiceId)!.pdfKey).toBeUndefined()
-    expect(errorSpy).toHaveBeenCalledWith('[tms-finance-actions] invoice PDF failed', 'INV-000001', 'Error: S3 is down')
+    expect(errorSpy).toHaveBeenCalledWith('[tms-finance-actions] invoice PDF failed', 'S000001', 'Error: S3 is down')
 
     s3Send.mockImplementation(runS3)
     const repaired = (await call('RENDER_INVOICE_PDF', { invoiceId })) as { invoice: Row }
-    expect(String(repaired.invoice.pdfKey)).toMatch(/^invoices\/cus-1\/INV-000001-v1\.pdf$/)
+    expect(String(repaired.invoice.pdfKey)).toMatch(/^invoices\/cus-1\/S000001-v1\.pdf$/)
     expect(table(TABLES.invoice).get(invoiceId)!.pdfSizeBytes).toBeGreaterThan(0)
   })
 
   it('reports each order separately in a batch instead of failing all of them', async () => {
     table(TABLES.order).set('ord-2', { ...table(TABLES.order).get(ORDER_ID)!, id: 'ord-2', arStatus: 'PAID' })
     const out = (await call('BATCH_GENERATE', { orderIds: [ORDER_ID, 'ord-2'] })) as { results: Row[] }
-    expect(out.results[0]).toMatchObject({ orderId: ORDER_ID, number: 'INV-000001' })
+    expect(out.results[0]).toMatchObject({ orderId: ORDER_ID, number: 'S000001' })
     expect(String(out.results[1].error)).toMatch(/UNBILLED/i)
   })
 })
@@ -855,8 +856,9 @@ describe('release to accounting', () => {
 
     const out = (await call('BATCH_GENERATE', { orderIds: [ORDER_ID, 'ord-2', 'ord-3'] })) as { results: Row[] }
     expect(out.results.map((r) => r.orderId)).toEqual([ORDER_ID, 'ord-2', 'ord-3'])
-    expect(out.results[0].number).toBe('INV-000001')
-    expect(out.results[1].number).toBe('INV-000002')
+    // A second billable order on the same shipment takes a letter.
+    expect(out.results[0].number).toBe('S000001')
+    expect(out.results[1].number).toBe('S000001-B')
     expect(String(out.results[2].error)).toBe('Not ready for accounting: Missing document: POD')
     expect(out.results[2].releaseGate).toMatchObject({
       ok: false,
@@ -931,7 +933,7 @@ describe('EMAIL_INVOICE', () => {
     const sent = (await call('EMAIL_INVOICE', { invoiceId })) as { emailStatus: string; emailError: string; downloads: Row[] }
     expect(sent.emailStatus).toBe('NOT_SENT')
     expect(sent.emailError).toMatch(/Access denied/)
-    expect(errorSpy).toHaveBeenCalledWith('[shipmentNotices] send failed', 'inv:INV-000001:1', 'Access denied: ses:SendEmail')
+    expect(errorSpy).toHaveBeenCalledWith('[shipmentNotices] send failed', 'inv:S000001:1', 'Access denied: ses:SendEmail')
     expect(sent.downloads.length).toBeGreaterThan(0)
     // Nothing claims a send that did not happen.
     expect(table(TABLES.invoice).get(invoiceId)!.sentAt).toBeUndefined()
@@ -1068,6 +1070,14 @@ describe('invoice documents packet', () => {
   it('previews the same public-only, ordered list', async () => {
     const preview = (await call('PREVIEW_INVOICE', { orderId: ORDER_ID })) as { attachments: { id: string }[] }
     expect(preview.attachments.map((a) => a.id)).toEqual(['doc-ratecon', 'doc-seed-pod', 'doc-scale', 'doc-lumper', 'doc-other', 'doc-seed-bol'])
+  })
+})
+
+describe('invoice numbering', () => {
+  it('takes the next free suffix when the PRO is already an invoice number (imported or voided)', async () => {
+    table(TABLES.invoice).set('S000001', { id: 'S000001', number: 'S000001', status: 'VOID' })
+    const { number } = await generate()
+    expect(number).toBe('S000001-2')
   })
 })
 
@@ -1417,7 +1427,7 @@ describe('SEND_TO_FACTOR', () => {
       fromEmail: 'jenny@bcatcorp.com',
     })
     expect(row.otrManualFields).toMatchObject({
-      InvoiceNo: 'INV-000001',
+      InvoiceNo: 'S000001',
       InvoiceAmount: '2500.00',
       BrokerMC: '123456',
       FromCity: 'Chicago',
@@ -1468,7 +1478,8 @@ describe('SAVE_AR_SETTINGS', () => {
   it('stores what it accepts and uses it on the next invoice', async () => {
     await call('SAVE_AR_SETTINGS', { invoiceNumberFormat: 'B{yyyy}-{n:4}' })
     const { number } = await generate()
-    expect(number).toBe('B2026-0001')
+    // Numbering follows the PRO # now; the format setting is kept but no longer numbers invoices.
+    expect(number).toBe('S000001')
   })
 
   describe('invoice series start (Aljex-exit DECIDED-6)', () => {
@@ -1479,7 +1490,7 @@ describe('SAVE_AR_SETTINGS', () => {
       expect(settingsRow()).toMatchObject({ nextInvoiceNumber: 19999, invoiceSeriesStart: 20000, invoiceNumberFormat: '{n}' })
       expect(settingsRow().invoiceSeriesStartedAt).toBeTruthy()
       const { number } = await generate()
-      expect(number).toBe('20000')
+      expect(number).toBe('S000001')
     })
 
     it('refuses a start at or below the highest imported invoice number', async () => {

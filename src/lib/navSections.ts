@@ -50,6 +50,8 @@ export interface NavChildDef extends TmsNavChild {
   adminOnly?: boolean
   /** Other page grants that also open this entry. */
   alsoPageKeys?: string[]
+  /** Hidden when the viewer holds this grant (they reach the page another way); owners/admins never see it. */
+  hiddenWithPageKey?: string
 }
 
 export interface NavItemDef {
@@ -101,6 +103,8 @@ export interface NavSectionsResult {
 const ACCOUNTING_CHILDREN: NavChildDef[] = [
   { to: '/tms/invoicing', label: 'Accounts Receivable', pageKey: 'invoicing', badgeKey: 'arToInvoice', exclude: ['/tms/invoicing/payable'] },
   { to: '/tms/invoicing/payable', label: 'Accounts Payable', pageKey: 'carrierPay', badgeKey: 'apToReview' },
+  // Factoring lives inside Invoicing (the Factored view); this entry is only for Factoring-only users.
+  { to: '/tms/invoicing/factored', label: 'Factoring', pageKey: 'factoring', hiddenWithPageKey: 'invoicing' },
   { to: '/tms/vendors', label: 'Vendors', pageKey: 'vendorAp' },
 ]
 
@@ -385,8 +389,10 @@ export function buildNavSections({
       ]
   const everything = isOwner || isAdmin
   const canOpenTms = everything || hasPageAccess(TMS_PAGE_KEY)
-  const visible = (def: { pageKey: string; tms?: boolean; adminOnly?: boolean; alsoPageKeys?: string[] }): boolean =>
-    everything || (def.adminOnly !== true && (hasPageAccess(def.pageKey) || (def.alsoPageKeys ?? []).some(hasPageAccess) || (def.tms === true && canOpenTms)))
+  const visible = (def: { pageKey: string; tms?: boolean; adminOnly?: boolean; alsoPageKeys?: string[]; hiddenWithPageKey?: string }): boolean =>
+    def.hiddenWithPageKey && (everything || hasPageAccess(def.hiddenWithPageKey))
+      ? false
+      : everything || (def.adminOnly !== true && (hasPageAccess(def.pageKey) || (def.alsoPageKeys ?? []).some(hasPageAccess) || (def.tms === true && canOpenTms)))
 
   // Pinned items are never part of a business section; they render first and are gated
   // exactly like any other page, so a shared-loads grant keeps seeing Shipments.

@@ -40,9 +40,9 @@ import {
 } from '../../../src/lib/intakeLoad'
 import { requiresApptProofs } from '../../../src/lib/apptQueue'
 import { INTAKE_DELETED_REASON, NOT_DUPLICATE_TOKEN } from '../../../src/lib/intakeDup'
-import type { IntakeFields, IntakeLoadRecord, IntakeMeta } from '../../../src/types/intake'
+import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeNote } from '../../../src/types/intake'
 
-export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES', 'INTAKE_DELETE', 'INTAKE_NOT_DUPLICATE'] as const
+export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES', 'INTAKE_DELETE', 'INTAKE_NOT_DUPLICATE', 'INTAKE_ADD_NOTE'] as const
 export type IntakeAction = (typeof INTAKE_ACTIONS)[number]
 
 /** A PROMOTING row with no shipment older than this was abandoned (Lambda timeout is shorter). */
@@ -124,6 +124,7 @@ export function intakeRecordOf(row: Row): IntakeLoadRecord {
     dismissedBy: strOrNull(row.dismissedBy),
     dismissedAt: strOrNull(row.dismissedAt),
     dismissReason: strOrNull(row.dismissReason),
+    notes: jsonOf<IntakeNote[]>(row.notes, []),
     createdBy: String(row.createdBy ?? ''),
     updatedBy: String(row.updatedBy ?? ''),
     version: numberOrNull(row.version) ?? 1,
@@ -297,8 +298,9 @@ export async function intakeDelete(deps: IntakeDeps, input: Row, caller: Caller)
 
 // ── INTAKE_NOT_DUPLICATE ─────────────────────────────────────────────────────
 
-/** "Not a duplicate": remembered on the row (its `confirmed` list, which every save keeps) so the badge stays away. Anyone who can review. */
+/** "Not a duplicate": remembered on the row (its `confirmed` list, which every save keeps) so the badge stays away. Owner/ADMIN only. */
 export async function intakeNotDuplicate(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  if (!caller.isAdmin) throw new Error('Forbidden: INTAKE_NOT_DUPLICATE requires owner or ADMIN')
   const intakeId = assertString(input.intakeId, 'intakeId')
   const row = await loadRow(deps, intakeId)
   assertExpectedVersion(row, input)
@@ -306,6 +308,30 @@ export async function intakeNotDuplicate(deps: IntakeDeps, input: Row, caller: C
   if (confirmed.includes(NOT_DUPLICATE_TOKEN)) return intakeRecordOf(row) as unknown as Row
   const saved = await writeIntake(deps, row, { confirmed: [...confirmed, NOT_DUPLICATE_TOKEN], updatedBy: caller.email })
   await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_NOT_DUPLICATE', caller, { runId: row.runId ?? null })
+  return intakeRecordOf(saved) as unknown as Row
+}
+
+// ── INTAKE_ADD_NOTE ──────────────────────────────────────────────────────────
+
+/** Longest note a reviewer can leave; notes are short updates ("checked with the customer, this is a re-send"). */
+export const INTAKE_NOTE_MAX = 1000
+/** A row keeps its newest notes only; older ones stay in the audit log. */
+export const INTAKE_NOTES_KEPT = 50
+
+/**
+ * A team note on an intake row (Ryne 2026-11-12): anyone who can review leaves an update when they are not sure about a load.
+ * Appended to the row's `notes` list with who and when; any status, so a note can still explain a row after it left the queue.
+ */
+export async function intakeAddNote(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  const text = (optionalString(input.text, INTAKE_NOTE_MAX) ?? '').trim()
+  if (!text) throw new Error('Write a note first')
+  const row = await loadRow(deps, intakeId)
+  assertExpectedVersion(row, input)
+  const notes = jsonOf<IntakeNote[]>(row.notes, [])
+  const note: IntakeNote = { at: deps.now(), by: caller.email, text }
+  const saved = await writeIntake(deps, row, { notes: JSON.stringify([...notes, note].slice(-INTAKE_NOTES_KEPT)), updatedBy: caller.email })
+  await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_ADD_NOTE', caller, { text, runId: row.runId ?? null })
   return intakeRecordOf(saved) as unknown as Row
 }
 
@@ -598,6 +624,8 @@ export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: R
       return intakeDelete(deps, input, caller)
     case 'INTAKE_NOT_DUPLICATE':
       return intakeNotDuplicate(deps, input, caller)
+    case 'INTAKE_ADD_NOTE':
+      return intakeAddNote(deps, input, caller)
   }
 }
 

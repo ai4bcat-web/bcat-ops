@@ -28,7 +28,7 @@ import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeStop } from '@/t
 import { IntakeFieldRow } from './IntakeFieldRow'
 import { SourceEmailCard } from './SourceEmailCard'
 import { duplicateGroups } from '@/lib/intakeDuplicates'
-import { BuiltNotice, DeleteIntakeDialog, DuplicateNotice } from './DuplicateParts'
+import { BuiltNotice, DeleteIntakeDialog, DuplicateNotice, IntakeNotes } from './DuplicateParts'
 import { useBuiltMatches } from './useBuiltMatches'
 import { useIntakeLoad, useIntakeLoads } from './useIntakeLoads'
 import { useIntakePermissions } from './useIntakePermissions'
@@ -277,7 +277,6 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             row={row}
             info={dupInfo}
             isAdmin={isOwnerOrAdmin}
-            canReview={canReview}
             onDelete={() => setDeleteOpen(true)}
             onChanged={(next) => { onRow(next); queue.refresh() }}
           />
@@ -287,11 +286,11 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             row={row}
             matches={builtMatches}
             isAdmin={isOwnerOrAdmin}
-            canReview={canReview}
             onDelete={() => setDeleteOpen(true)}
             onChanged={(next) => { onRow(next); queue.refresh() }}
           />
         ) : null}
+        <IntakeNotes row={row} canReview={canReview} onChanged={(next) => onRow(next)} />
         <TmsCard title="Customer & billing">
           {fieldRow(
             'customerId',
