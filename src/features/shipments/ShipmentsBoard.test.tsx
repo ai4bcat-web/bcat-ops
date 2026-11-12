@@ -120,6 +120,7 @@ vi.mock('@/hooks/useDirectory', () => ({
 const refresh = vi.fn()
 let __shipments: ShipmentRow[] = []
 const __views: unknown[] = []
+const __searchIds = vi.fn(async (_term?: unknown, _limit?: unknown): Promise<{ ids: string[]; capped: boolean }> => ({ ids: [], capped: false }))
 vi.mock('@/hooks/useShipments', async () => {
   const React = await import('react')
   return {
@@ -163,6 +164,7 @@ vi.mock('@/lib/apiClient', () => ({
   countOpenIntakeLoads: async () => 0,
   listShipmentColumnTemplates,
   listShipmentsByNumber: async () => [],
+  listShipmentIdsBySearch: (...args: unknown[]) => __searchIds(...args),
   saveShipmentView,
   archiveShipmentView,
   saveShipmentColumnTemplate,
@@ -927,7 +929,7 @@ describe('ShipmentsBoard', () => {
       fireEvent.change(box, { target: { value: 'S002' } })
       await waitFor(() => expect(screen.getByText('S002')).toBeTruthy())
       expect(screen.queryByText('S001')).toBeNull()
-      expect(screen.getByTestId('search-all-note').textContent).toBe('Searching all shipments: 1 match, 1 not in Active')
+      expect(screen.getByTestId('search-all-note').textContent).toBe('Searching all shipments (all years, incl. voided): 1 match, 1 not in Active')
       fireEvent.change(box, { target: { value: '' } })
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
       expect(screen.queryByText('S002')).toBeNull()
@@ -941,10 +943,38 @@ describe('ShipmentsBoard', () => {
       expect(asked.some((w) => w.months!.length === 12 && !w.includeVoided)).toBe(true)
     })
 
-    it('a search on Active still never lists a voided shipment', async () => {
-      renderBoard('/tms/shipments?q=S00', [unreleased, row('S004', { status: 'OPEN', voidedAt: '2026-01-02T00:00:00Z' })])
+    it('a search on Active lists a voided shipment only when the all-years search found it, marked VOIDED', async () => {
+      const voided = row('S004', { status: 'OPEN', voidedAt: '2026-01-02T00:00:00Z' })
+      __searchIds.mockResolvedValueOnce({ ids: [], capped: false })
+      renderBoard('/tms/shipments?q=S00', [unreleased, voided])
       await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      await waitFor(() => expect(__searchIds).toHaveBeenCalledWith('S00', 300))
       expect(screen.queryByText('S004')).toBeNull()
+    })
+
+    it('shows the voided shipment the all-years search returns, and says the first 300 are shown when capped', async () => {
+      const voided = row('S004', { status: 'OPEN', voidedAt: '2026-01-02T00:00:00Z' })
+      __searchIds.mockResolvedValueOnce({ ids: ['S004'], capped: true })
+      renderBoard('/tms/shipments?q=S00', [unreleased, voided])
+      await waitFor(() => expect(screen.getByText('S004')).toBeTruthy())
+      expect(within(screen.getByText('S004').closest('tr')!).getByText(/VOIDED/)).toBeTruthy()
+      expect(screen.getByTestId('search-all-note').textContent).toMatch(/incl\. voided/)
+      expect(screen.getByTestId('search-all-note').textContent).toMatch(/first 300 — refine your search/)
+    })
+
+    it('does not run the all-years scan for a one- or two-character search, and asks once per term', async () => {
+      renderBoard('/tms/shipments', [unreleased])
+      await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+      const box = screen.getByRole('textbox', { name: 'Search shipments' })
+      fireEvent.change(box, { target: { value: 'S0' } })
+      await new Promise((r) => setTimeout(r, 700))
+      expect(__searchIds).not.toHaveBeenCalled()
+      fireEvent.change(box, { target: { value: 'S001' } })
+      await waitFor(() => expect(__searchIds).toHaveBeenCalledTimes(1))
+      fireEvent.change(box, { target: { value: '' } })
+      fireEvent.change(box, { target: { value: 'S001' } })
+      await new Promise((r) => setTimeout(r, 700))
+      expect(__searchIds).toHaveBeenCalledTimes(1)
     })
 
     it('falls back to Active on an unknown ?list=', async () => {

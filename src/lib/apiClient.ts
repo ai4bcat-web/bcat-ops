@@ -3636,6 +3636,28 @@ export async function listShipmentsBySearchKeys(values: readonly string[]): Prom
   }
   return [...out.values()]
 }
+/**
+ * Board search: ids of shipments whose search key contains `term` (lower-cased), every pickup year and voided ones included.
+ * The key is not indexed, so this is one filtered table scan per call; the board debounces it and caches per term. The scan stops
+ * once `limit` ids are in, and `capped` says there were more.
+ */
+export async function listShipmentIdsBySearch(term: string, limit = 300): Promise<{ ids: string[]; capped: boolean }> {
+  const needle = term.trim().toLowerCase()
+  if (!modelAvailable('Shipment') || needle.length < 3) return { ids: [], capped: false }
+  const ids: string[] = []
+  let nextToken: string | null = null
+  do {
+    const r = await client.graphql({
+      query: `query ShipmentIdsBySearch($filter: ModelShipmentFilterInput, $nextToken: String) { listShipments(filter: $filter, limit: 1000, nextToken: $nextToken) { items { id } nextToken } }`,
+      variables: { filter: { searchKey: { contains: needle } }, nextToken },
+    }) as { data: { listShipments: { items: ({ id: string } | null)[]; nextToken?: string | null } } }
+    const page = r.data.listShipments
+    for (const item of page.items) if (item) ids.push(item.id)
+    if (ids.length > limit) return { ids: ids.slice(0, limit), capped: true }
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return { ids, capped: false }
+}
 export type ShipmentKeyRow = {
   id: string; number: string | null; customerId: string | null; customerName?: string | null
   searchKey: string | null; voidedAt?: string | null; deletedAt?: string | null

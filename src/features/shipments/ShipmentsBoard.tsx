@@ -13,7 +13,7 @@ import { deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
 import { phaseInputOfRow } from './deliveryPhaseInputs'
 import './deliveryTimeline.css'
 import { TrackingModeNotSetRowChip } from './trackingModeControl/TrackingModeNotSetChip'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -67,6 +67,7 @@ import {
   getTmsSettings,
   listShipmentColumnTemplates,
   listShipmentsByNumber,
+  listShipmentIdsBySearch,
   saveShipmentColumnTemplate,
   setShipmentStatus,
   tenderRespond,
@@ -139,6 +140,9 @@ type Period = { key: 'this' | 'last' | 'last3' } | { key: 'month'; month: string
 
 /** An exact PRO or reference-sized token: shorter text is a filter, not a lookup. */
 const PRO_PATTERN = /^[A-Za-z0-9-]{5,}$/
+/** A search on Active reaches every year and voided shipments from this many characters; the scan returns at most this many. */
+const SEARCH_ALL_MIN = 3
+const SEARCH_ALL_CAP = 300
 
 /** The month `n` before (negative) or after (positive) `month`, 'YYYY-MM'. */
 function shiftMonth(month: string, n: number): string {
@@ -323,13 +327,38 @@ export function ShipmentsBoard() {
     return () => { live = false; clearTimeout(timer) }
   }, [typedPro])
   const { shipments: proRows, refresh: refreshPro } = useShipments({ kind: 'ids', ids: typedPro && proIds.query === typedPro ? proIds.ids : [] })
+
+  // A search typed on Active also reaches every pickup year and voided shipments: one debounced, per-term cached scan of the
+  // search key returns ids (capped), and their rows load by id. A stale answer is dropped when the term has moved on.
+  const typedSearch = searchesAll ? visiblePanes.filter((pane) => (pane === 'left' ? list : rightList) === 'active').map((pane) => reports[pane].query.trim()).find((q) => q.length >= SEARCH_ALL_MIN) ?? '' : ''
+  const searchCache = useRef(new Map<string, { ids: string[]; capped: boolean }>())
+  const [searchHits, setSearchHits] = useState<{ query: string; ids: string[]; capped: boolean }>({ query: '', ids: [], capped: false })
+  useEffect(() => {
+    if (!typedSearch) return undefined
+    const cached = searchCache.current.get(typedSearch.toLowerCase())
+    if (cached) { setSearchHits({ query: typedSearch, ...cached }); return undefined }
+    let live = true
+    const timer = setTimeout(() => {
+      listShipmentIdsBySearch(typedSearch, SEARCH_ALL_CAP)
+        .then((found) => {
+          searchCache.current.set(typedSearch.toLowerCase(), found)
+          if (live) setSearchHits({ query: typedSearch, ...found })
+        })
+        .catch(() => { /* the typed search still filters the rows already loaded */ })
+    }, 500)
+    return () => { live = false; clearTimeout(timer) }
+  }, [typedSearch])
+  const searchIds = useMemo(() => (typedSearch && searchHits.query === typedSearch ? searchHits.ids : []), [typedSearch, searchHits])
+  const searchCapped = !!typedSearch && searchHits.query === typedSearch && searchHits.capped
+  const searchIdSet = useMemo<ReadonlySet<string>>(() => new Set(searchIds), [searchIds])
+  const { shipments: searchRows, refresh: refreshSearch } = useShipments({ kind: 'ids', ids: searchIds })
   const loading = workingLoading || windowLoading || allYearsLoading || voidedLoading
   const partial = workingPartial || windowPartial
   const error = workingError ?? windowError ?? allYearsError ?? voidedError
 
   const refresh = useCallback(async () => {
-    await Promise.all([refreshWorking(), refreshWindow(), refreshAllYears(), refreshVoided(), refreshPro()])
-  }, [refreshWorking, refreshWindow, refreshAllYears, refreshVoided, refreshPro])
+    await Promise.all([refreshWorking(), refreshWindow(), refreshAllYears(), refreshVoided(), refreshPro(), refreshSearch()])
+  }, [refreshWorking, refreshWindow, refreshAllYears, refreshVoided, refreshPro, refreshSearch])
 
   const loadTemplates = useCallback(() => {
     listShipmentColumnTemplates()
@@ -343,9 +372,9 @@ export function ShipmentsBoard() {
   // Each pane applies its own scope; voided rows can appear only in the Voided pane.
   const allRows = useMemo<ShipmentRow[]>(() => {
     const byId = new Map<string, ShipmentRow>()
-    for (const set of [workingRows, windowRows, allYearsRows, voidedRows, proRows]) for (const r of set) byId.set(r.id, r as ShipmentRow)
+    for (const set of [workingRows, windowRows, allYearsRows, voidedRows, proRows, searchRows]) for (const r of set) byId.set(r.id, r as ShipmentRow)
     return [...byId.values()]
-  }, [workingRows, windowRows, allYearsRows, voidedRows, proRows])
+  }, [workingRows, windowRows, allYearsRows, voidedRows, proRows, searchRows])
 
 
   // Every year the data has shown so far, kept after a narrower year is picked so the selector does not shrink.
@@ -400,6 +429,8 @@ export function ShipmentsBoard() {
           pane="left"
           list={list}
           year={year}
+          searchIdSet={searchIdSet}
+          searchCapped={searchCapped}
           allRows={allRows}
           loading={loading}
           error={error}
@@ -423,6 +454,8 @@ export function ShipmentsBoard() {
             pane="right"
             list={rightList}
             year={year}
+            searchIdSet={searchIdSet}
+            searchCapped={searchCapped}
             onListChange={setRightList}
             allRows={allRows}
             loading={loading}
@@ -463,6 +496,10 @@ interface BoardPaneProps {
   list: ShipmentList
   /** The All list's year; Active ignores it. */
   year: ShipmentYear
+  /** Ids the board's all-years search found (voided included); only a search on Active shows them. */
+  searchIdSet?: ReadonlySet<string>
+  /** True when the search found more shipments than the cap and showed the first ones only. */
+  searchCapped?: boolean
   /** Only the split-screen's right pane picks its own list; the left one follows the URL. */
   onListChange?: (list: ShipmentList) => void
   allRows: ShipmentRow[]
@@ -487,6 +524,8 @@ function BoardPane({
   pane,
   list,
   year,
+  searchIdSet,
+  searchCapped,
   onListChange,
   allRows,
   refresh,
@@ -548,8 +587,8 @@ function BoardPane({
   // so a typed PRO or customer ref finds it whatever its status. Clearing the search returns to plain Active.
   const searchingAll = list === 'active' && query.trim() !== ''
   const listRows = useMemo(
-    () => allRows.filter((r) => (searchingAll ? inShipmentList(r, 'active') || inShipmentList(r, 'all', year) : inShipmentList(r, list, year))),
-    [allRows, list, year, searchingAll],
+    () => allRows.filter((r) => (searchingAll ? inShipmentList(r, 'active') || inShipmentList(r, 'all', year) || !!searchIdSet?.has(r.id) : inShipmentList(r, list, year))),
+    [allRows, list, year, searchingAll, searchIdSet],
   )
 
   // Density, sort and the summary strip persist per user and per pane. Columns, widths and pins do
@@ -627,15 +666,16 @@ function BoardPane({
   // List scope, then search, then the quick toggles, then voided rows (hidden unless the Status
   // header asks for them), then every header filter. `fitRows` is the list before the header
   // filters: the facet options and auto-fit widths are drawn from it so they do not shift as you filter.
-  // The chips count this base: the list after search, scope and voided handling.
+  // The chips count this base: the list after search, scope and voided handling (a search on Active lets the voided
+  // shipments its all-years scan found through; listRows already holds back every other voided row).
   const chipBase = useMemo(
     () =>
       listRows.filter(
         (r) =>
           (!query || matchesQuery(r, query))
-          && (wantsVoided || boardStatusOf(r) !== 'VOIDED'),
+          && (wantsVoided || searchingAll || boardStatusOf(r) !== 'VOIDED'),
       ),
-    [listRows, query, wantsVoided],
+    [listRows, query, wantsVoided, searchingAll],
   )
   // How many of a search's matches Active would not have shown (delivered, released, canceled), for the note by the search box.
   const outsideActive = useMemo(() => (searchingAll ? chipBase.filter((r) => !inShipmentList(r, 'active')).length : 0), [searchingAll, chipBase])
@@ -1068,8 +1108,8 @@ function BoardPane({
           className="tms-dense-search"
         />
         {searchingAll && (
-          <span className="text-xs text-muted-foreground" role="status" data-testid="search-all-note" title="A search looks through every shipment, not only Active. Clear it to go back to Active.">
-            Searching all shipments: {chipBase.length} {chipBase.length === 1 ? 'match' : 'matches'}{outsideActive > 0 ? `, ${outsideActive} not in Active` : ''}
+          <span className="text-xs text-muted-foreground" role="status" data-testid="search-all-note" title="A search looks through every shipment in every year, voided ones too. Clear it to go back to Active.">
+            Searching all shipments (all years, incl. voided): {chipBase.length} {chipBase.length === 1 ? 'match' : 'matches'}{outsideActive > 0 ? `, ${outsideActive} not in Active` : ''}{searchCapped ? `. Showing the first ${SEARCH_ALL_CAP} — refine your search` : ''}
           </span>
         )}
         {onListChange && (
