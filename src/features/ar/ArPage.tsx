@@ -1,14 +1,10 @@
 /**
  * The receivable half of `/tms/invoicing` (spec §3.6, §6.6; `TMS_DESIGN` §4.12).
  *
- * Six views that follow one shipment's money from delivered to banked: what is waiting on
- * paperwork, what is ready to bill, what is owed, what was collected, every cash row, and
- * the aging behind all of it. Every number on the page is integer cents formatted once,
- * by `formatCents`; the deciding lives in `arViews.ts` and `@/lib/arAging`.
- *
- * It renders as one MVMNT list page: the Receivable/Payable view tabs come from
- * `InvoicingPage`, the AR ladder is the status quick-tab strip, and each view swaps the
- * columns under it.
+ * The queue holds only shipments released to billing from Load Review, and follows each one
+ * to paid in three statuses: Ready to invoice, Invoiced, Paid (`arQueue.ts` decides which).
+ * Paperwork chasing lives in Load Review, not here. Payments & credits and Aging are the two
+ * ledger views after the queue. Every number is integer cents formatted once, by `formatCents`.
  *
  * On dev, SES is denied: an invoice e-mail comes back NOT_SENT with the refusal and a
  * signed download. The page reports exactly that and never claims a send that did not
@@ -18,22 +14,24 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Link } from 'react-router-dom'
 import { Download, Mail } from 'lucide-react'
 import { toast } from 'sonner'
-import { Eye, Plus, RefreshCw } from 'lucide-react'
+import { Eye, RefreshCw } from 'lucide-react'
 import {
-  TmsBadge, TmsButton, TmsCard, TmsField, TmsFilterChip, TmsSelect, TmsTabs,
+  TmsBadge, TmsButton, TmsCard, TmsSelect, TmsTabStrip, TmsTabs,
   type TmsTabGroup,
 } from '@/features/tms/kit'
 import type { DenseColumn } from '@/features/tms/grid/denseGridModel'
 import { ArDenseTable, type ArGrid } from './components/ArDenseTable'
-import { useArWorklist, type ArWorklistRow } from '@/hooks/useArWorklist'
+import { useArWorklist } from '@/hooks/useArWorklist'
 import { useCustomerAr } from '@/hooks/useCustomerAr'
 import { useOpenInvoices } from '@/hooks/useOpenInvoices'
 import { exportOutstandingReceivables } from '@/lib/opsExports'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
+import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import {
-  batchEmailInvoices, batchGenerateInvoices, graphqlErrorText, listInvoicesByMonth, reversePayment, voidInvoice,
+  batchEmailInvoices, batchGenerateInvoices, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
 } from '@/lib/apiClient'
+import { loadWorklistShipments } from '@/lib/worklistShipments'
 import {
   AGING_BUCKETS, AGING_BUCKET_LABEL, agingCsv, avgDaysToInvoice, avgDaysToPay, deliveredNotInvoiced,
   type AgingSummary,
@@ -45,22 +43,22 @@ import { otrStatusLabel } from '@/lib/otrInvoiceStatus'
 import { otrRejection } from '@/lib/otrRejection'
 import { AgingStrip } from './AgingStrip'
 import {
-  AR_PAYMENT_KIND_LABEL, AR_PAYMENT_METHOD_LABEL, BATCH_GENERATE_LIMIT, EMPTY_UNPAID_FILTERS,
-  agingChipFor, applyUnpaidFilters, billToLabel, formatDay, invoiceCustomerOptions, lastThreeMonths, monthLabel,
-  type ArTabKey, type UnpaidFilters,
+  AR_PAYMENT_KIND_LABEL, AR_PAYMENT_METHOD_LABEL, BATCH_GENERATE_LIMIT,
+  agingChipFor, formatDay, lastThreeMonths, monthLabel,
 } from './arViews'
+import {
+  AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, buildInvoicedRows, buildPaidRows, buildReadyRows, groupKeyOf, groupTotals,
+  orderByGroup, type ArGroupBy, type ArQueueLookups, type ArQueueRow, type ArQueueStatus,
+} from './arQueue'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
 import { EmailInvoiceDialog } from './components/EmailInvoiceDialog'
-import { REVIEW_BILLING_LABEL, needsBillingReview, reviewBillingNote } from '@/lib/reviewBilling'
 import { GenerateInvoiceDialog } from './components/GenerateInvoiceDialog'
 import { ReasonDialog } from './components/ReasonDialog'
 import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
 import { SendToFactorDialog } from './components/SendToFactorDialog'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
-import { useReadyForBilling, type ReadyRow } from './components/useReadyForBilling'
-import { ReadyForBillingReviewCell } from './components/ReadyForBillingReviewCell'
 import type { FactoringItem } from '@/types'
-import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord } from '@/types/tms'
+import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord, UserProfileRecord } from '@/types/tms'
 
 /** Which dialog is open, and the one thing it is open about. Mount is the `open` flag. */
 type ArDialog =
@@ -80,15 +78,13 @@ interface BatchRefusal {
 }
 
 /**
- * One view's half of the page: the head actions, the banner above the table, the filter
- * chips and the grid itself. Columns, rows and `rowKey` are built together by the view that
- * owns them, so the row type is erased here and the page renders them all.
+ * One view's half of the page: the head actions, the banner above the table and the grid
+ * itself. Columns, rows and `rowKey` are built together by the view that owns them, so the
+ * row type is erased here and the page renders them all.
  */
 interface ListView {
   actions?: ReactNode
   banner?: ReactNode
-  filterChips?: Array<{ key: string; label: string; value?: string | null; onClick?: () => void }>
-  onAddFilter?: () => void
   grid: ArGrid<never>
 }
 
@@ -96,35 +92,65 @@ function view<T>(config: Omit<ListView, 'grid'> & { grid: ArGrid<T> }): ListView
   return config as unknown as ListView
 }
 
-type ExtendedArTabKey = ArTabKey | 'ready-for-billing'
+/** The three queue statuses, then the two ledger views. */
+export type ArPageTab = 'ready' | 'invoiced' | 'paid' | 'payments' | 'aging'
+
+const QUEUE_TAB_STATUS: Record<'ready' | 'invoiced' | 'paid', ArQueueStatus> = {
+  ready: 'READY',
+  invoiced: 'INVOICED',
+  paid: 'PAID',
+}
+
+const GROUP_BY_KEY = 'tms:ar:groupBy'
+
+function readGroupBy(): ArGroupBy {
+  try {
+    const v = localStorage.getItem(GROUP_BY_KEY)
+    return v === 'division' || v === 'customer' || v === 'rep' ? v : 'none'
+  } catch {
+    return 'none'
+  }
+}
 
 export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // One clock for the whole page: the chips, the buckets and the CSV all answer as of the
   // same day, so a row cannot read "Current" next to a 1–30 column it was counted in.
   const [asOf] = useState(() => chicagoDateStr(new Date()))
 
-  const [tab, setTab] = useState<ExtendedArTabKey>('to-invoice')
+  const [tab, setTab] = useState<ArPageTab>('ready')
   const [dialog, setDialog] = useState<ArDialog | null>(null)
   const [busy, setBusy] = useState(false)
   const canRelease = useBillingGrant()
+  const [groupBy, setGroupByState] = useState<ArGroupBy>(readGroupBy)
+  const setGroupBy = (next: ArGroupBy) => {
+    setGroupByState(next)
+    try { localStorage.setItem(GROUP_BY_KEY, next) } catch { /* per-viewer convenience only */ }
+  }
 
+  // Released to billing from Load Review = Order.arStatus UNBILLED.
   const unbilled = useArWorklist('UNBILLED')
-  const docsNeeded = useArWorklist('DOCS_NEEDED')
-  // Invoiced-but-unpaid shipments carry the ones the open invoices were raised against;
-  // that pairing is the only way to measure delivery → invoice.
+  // Invoiced-but-unpaid orders: the shipments behind the open invoices, and their release dates.
   const invoiced = useArWorklist('UNPAID')
   const open = useOpenInvoices()
   const { customers } = useDirectory({ locations: false })
   const { items: factoringItems } = useFactoringItems()
+  const { divisions } = useOwnershipDivisions()
+
+  const [profiles, setProfiles] = useState<UserProfileRecord[]>([])
+  useEffect(() => {
+    let alive = true
+    Promise.resolve()
+      .then(() => listUserProfiles())
+      .then((rows) => { if (alive) setProfiles(rows ?? []) })
+      .catch(() => { /* names fall back to the id */ })
+    return () => { alive = false }
+  }, [])
 
   const [selected, setSelected] = useState<string[]>([])
   /** What the last batch generated, so "Batch e-mail" bills exactly those invoices. */
   const [justGenerated, setJustGenerated] = useState<string[]>([])
   /** What the last batch refused, with the release gate's own sentences. */
   const [refusals, setRefusals] = useState<BatchRefusal[]>([])
-
-  const [unpaidFilters, setUnpaidFilters] = useState<UnpaidFilters>(EMPTY_UNPAID_FILTERS)
-  const [showFilters, setShowFilters] = useState(false)
 
   const months = useMemo(() => lastThreeMonths(asOf), [asOf])
   const [month, setMonth] = useState(() => months[0])
@@ -144,11 +170,21 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   [month])
   useEffect(() => { loadMonth() }, [loadMonth])
 
-  const customersById = useMemo(() => {
-    const map = new Map<string, CustomerRecord>()
-    for (const c of customers) map.set(c.id, c)
-    return map
-  }, [customers])
+  // Shipments behind paid invoices are not in any worklist; read them by id for division and rep.
+  const [paidShipments, setPaidShipments] = useState<ShipmentRecord[]>([])
+  const paidShipmentIds = useMemo(
+    () => [...new Set(paidInvoices.filter((inv) => inv.status === 'PAID').map((inv) => inv.shipmentId))].sort().join(','),
+    [paidInvoices],
+  )
+  useEffect(() => {
+    let alive = true
+    const ids = paidShipmentIds.split(',').filter(Boolean)
+    Promise.resolve()
+      .then(() => (ids.length ? loadWorklistShipments(ids) : []))
+      .then((rows) => { if (alive) setPaidShipments(rows ?? []) })
+      .catch(() => { /* division and rep fall back to the invoice */ })
+    return () => { alive = false }
+  }, [paidShipmentIds])
 
   const factorByItemId = useMemo(() => {
     const map = new Map<string, FactoringItem>()
@@ -156,42 +192,44 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     return map
   }, [factoringItems])
 
-  const unpaidRows = useMemo(
-    () => applyUnpaidFilters(open.invoices, unpaidFilters, asOf),
-    [open.invoices, unpaidFilters, asOf],
+  const lookups: ArQueueLookups = useMemo(() => {
+    const shipmentsById = new Map<string, ShipmentRecord>()
+    for (const s of paidShipments) shipmentsById.set(s.id, s)
+    for (const r of [...unbilled.rows, ...invoiced.rows]) if (r.shipment) shipmentsById.set(r.shipmentId, r.shipment)
+    const divisionByCode = new Map((divisions ?? []).map((d) => [d.code, d.name]))
+    const profileById = new Map<string, UserProfileRecord>()
+    for (const p of profiles) {
+      if (p.id) profileById.set(p.id, p)
+      if (p.email) profileById.set(p.email, p)
+    }
+    return {
+      shipmentsById,
+      asOf,
+      divisionName: (code) => (code ? divisionByCode.get(code) ?? code : 'No division'),
+      repName: (id) => {
+        if (!id) return 'No sales rep'
+        const p = profileById.get(id)
+        return p?.name ?? p?.email ?? id
+      },
+    }
+  }, [paidShipments, unbilled.rows, invoiced.rows, divisions, profiles, asOf])
+
+  const releasedByOrder = useMemo(
+    () => new Map(invoiced.rows.map((r) => [r.orderId, r.order.readyToInvoiceAt ?? null])),
+    [invoiced.rows],
   )
 
-  /**
-   * A DOCS_NEEDED shipment whose freight has not moved yet is not a paperwork problem —
-   * nobody can upload a POD for it. The view is the chase list: delivered, or a customer
-   * that bills on pickup.
-   */
-  const docsNeededRows = useMemo(
-    () => docsNeeded.rows.filter((r) => r.deliveredAt || r.shipment?.status === 'DELIVERED' || r.order.invoiceEarly),
-    [docsNeeded.rows],
-  )
-  // "Review billing": pre-cutover shipments parked in Docs needed. Not narrowed by delivery:
-  // an imported shipment with no delivery stamp is exactly the one nobody will chase.
-  const [reviewOnly, setReviewOnly] = useState(false)
-  const reviewRows = useMemo(() => docsNeeded.rows.filter(rowNeedsBillingReview), [docsNeeded.rows])
-  const docsNeededShown = reviewOnly ? reviewRows : docsNeededRows
-
-  /**
-   * P10 — shipments whose paperwork is in but which have not been released to billing yet.
-   * They live between Docs needed and Unbilled because that is the actual AR ladder;
-   * once released they move to UNBILLED and show up on the next tab.
-   */
-  const readyRows = useMemo(
-    () => docsNeeded.rows.filter((r) => r.docsReady && !r.shipment?.podFlaggedAt),
-    [docsNeeded.rows],
-  )
-  const readyBilling = useReadyForBilling(readyRows, tab === 'ready-for-billing')
+  const queue: Record<ArQueueStatus, ArQueueRow[]> = useMemo(() => ({
+    READY: buildReadyRows(unbilled.rows, lookups),
+    INVOICED: buildInvoicedRows(open.invoices, lookups, releasedByOrder),
+    PAID: buildPaidRows(paidInvoices, lookups),
+  }), [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder])
 
   const uninvoiced = useMemo(() => {
-    const rows = [...unbilled.rows, ...docsNeeded.rows]
+    const rows = unbilled.rows
     const shipments = rows.map((r) => r.shipment).filter((s): s is ShipmentRecord => s !== null)
     return deliveredNotInvoiced(rows.map((r) => r.order), shipments, asOf)
-  }, [unbilled.rows, docsNeeded.rows, asOf])
+  }, [unbilled.rows, asOf])
 
   const lagDays = useMemo(() => {
     const shipments = invoiced.rows.map((r) => r.shipment).filter((s): s is ShipmentRecord => s !== null)
@@ -199,7 +237,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   }, [invoiced.rows, open.invoices, paidInvoices])
 
   const refreshAll = () =>
-    Promise.all([unbilled.refresh(), docsNeeded.refresh(), invoiced.refresh(), open.refresh(), customerAr.refresh(), loadMonth()])
+    Promise.all([unbilled.refresh(), invoiced.refresh(), open.refresh(), customerAr.refresh(), loadMonth()])
       .then(() => undefined)
 
   const closeAndRefresh = () => {
@@ -282,94 +320,66 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     saveBlob(new Blob([agingCsv(open.aging.byCustomer)], { type: 'text/csv' }), `ar-aging-${asOf}.csv`)
   }
 
-  const counts: Record<ExtendedArTabKey, number> = {
-    'docs-needed': docsNeededRows.length,
-    'ready-for-billing': readyRows.length,
-    'to-invoice': unbilled.rows.length,
-    unpaid: open.invoices.length,
-    paid: paidInvoices.filter((inv) => inv.status === 'PAID').length,
-    payments: customerAr.payments.length,
-    aging: open.aging.byCustomer.length,
-  }
-
-  const AR_TABS_EXTENDED: { key: ExtendedArTabKey; label: string }[] = [
-    { key: 'docs-needed', label: 'Docs needed' },
-    { key: 'ready-for-billing', label: 'Ready for billing' },
-    { key: 'to-invoice', label: 'Unbilled' },
-    { key: 'unpaid', label: 'Unpaid' },
-    { key: 'paid', label: 'Paid' },
-    { key: 'payments', label: 'Payments & credits' },
-    { key: 'aging', label: 'Aging' },
+  const queueTotal = (status: ArQueueStatus) => formatCents(queue[status].reduce((sum, r) => sum + (status === 'INVOICED' ? r.balanceCents : r.amountCents), 0))
+  const tabs = [
+    { key: 'ready', label: `${AR_QUEUE_STATUS_LABEL.READY} · ${queueTotal('READY')}`, count: queue.READY.length, testId: 'ar-tab-ready' },
+    { key: 'invoiced', label: `${AR_QUEUE_STATUS_LABEL.INVOICED} · ${queueTotal('INVOICED')} open`, count: queue.INVOICED.length, testId: 'ar-tab-invoiced' },
+    { key: 'paid', label: `${AR_QUEUE_STATUS_LABEL.PAID} · ${queueTotal('PAID')}`, count: queue.PAID.length, testId: 'ar-tab-paid' },
+    { key: 'payments', label: 'Payments & credits', count: customerAr.payments.length, testId: 'ar-tab-payments' },
+    { key: 'aging', label: 'Aging', count: open.aging.byCustomer.length, testId: 'ar-tab-aging' },
   ]
 
-  const error = unbilled.error ?? docsNeeded.error ?? open.error ?? customerAr.error
-
-  const chrome = {
-    title: 'Invoicing',
-    viewTabs,
-    quickTabs: {
-      tabs: AR_TABS_EXTENDED.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] })),
-      active: tab,
-      onSelect: (key: string) => setTab(key as ExtendedArTabKey),
-    },
-    onRefresh: () => void refreshAll(),
-  }
-
+  const error = unbilled.error ?? invoiced.error ?? open.error ?? customerAr.error
   const errorBanner = error
     ? <p style={{ color: 'var(--tms-badge-red)' }} className="text-sm">{error}</p>
     : null
 
   const customer = customers.find((c) => c.id === arCustomerId) ?? null
 
-  // One `TmsListPage` for all six views: switching view swaps the columns and the rows
-  // under the same chrome, so the tab strip itself is never torn down and remounted.
+  const groupControl = (
+    <label className="flex items-center gap-1 text-sm">
+      <span className="tms-muted">Group by</span>
+      <TmsSelect aria-label="Group by" value={groupBy} onChange={(e) => setGroupBy(e.target.value as ArGroupBy)}>
+        {(Object.keys(AR_GROUP_BY_LABEL) as ArGroupBy[]).map((k) => <option key={k} value={k}>{AR_GROUP_BY_LABEL[k]}</option>)}
+      </TmsSelect>
+    </label>
+  )
+
   const current =
-    tab === 'to-invoice' ? toInvoiceView({
-      banner: <>{errorBanner}<RefusalsCard refusals={refusals} onDismiss={() => setRefusals([])} /></>,
-      rows: unbilled.rows,
-      customersById,
-      selected,
-      justGenerated,
+    tab === 'ready' || tab === 'invoiced' || tab === 'paid' ? queueView({
+      status: QUEUE_TAB_STATUS[tab],
+      rows: queue[QUEUE_TAB_STATUS[tab]],
+      groupBy,
+      groupControl,
+      banner: (
+        <>
+          {errorBanner}
+          {tab === 'ready' && <RefusalsCard refusals={refusals} onDismiss={() => setRefusals([])} />}
+          {tab === 'ready' && (
+            <p className="text-sm tms-muted" data-testid="ar-ready-note">
+              Only shipments moved to billing from <Link to="/tms/load-review">Load Review</Link> appear here. Paperwork and undelivered loads stay in Load Review.
+            </p>
+          )}
+        </>
+      ),
+      asOf,
       busy,
       canRelease,
+      selected,
+      justGenerated,
+      factorByItemId,
+      months,
+      month,
+      paidLoading,
+      onMonth: (ym: string) => { setPaidLoading(true); setMonth(ym) },
       onSelect: setSelected,
       onGenerate: (row) => setDialog({ kind: 'generate', orderId: row.orderId, shipmentNumber: row.shipmentNumber }),
       onBatchGenerate: runBatchGenerate,
       onBatchEmail: runBatchEmail,
-    })
-    : tab === 'docs-needed' ? docsNeededView({ banner: errorBanner, rows: docsNeededShown, reviewOnly, reviewCount: reviewRows.length, onReviewOnly: setReviewOnly })
-    : tab === 'ready-for-billing' ? readyForBillingView({
-      banner: errorBanner,
-      ...readyBilling,
-    })
-    : tab === 'unpaid' ? unpaidView({
-      errorBanner,
-      invoices: unpaidRows,
-      allInvoices: open.invoices,
-      filters: unpaidFilters,
-      showFilters,
-      asOf,
-      busy,
-      factorByItemId,
-      onToggleFilters: () => setShowFilters((s) => !s),
-      onFilters: setUnpaidFilters,
       onEmail: (inv) => setDialog({ kind: 'email', invoiceId: inv.id }),
-      onPayment: (inv) => setDialog({
-        kind: 'payment',
-        customerId: inv.customerId,
-        customerName: inv.customerName ?? '',
-        invoiceId: inv.id,
-      }),
+      onPayment: (inv) => setDialog({ kind: 'payment', customerId: inv.customerId, customerName: inv.customerName ?? '', invoiceId: inv.id }),
       onFactor: (inv) => setDialog({ kind: 'factor', invoiceId: inv.id }),
       onVoid: (inv) => setDialog({ kind: 'void', invoice: inv }),
-    })
-    : tab === 'paid' ? paidView({
-      banner: errorBanner,
-      invoices: paidInvoices,
-      months,
-      month,
-      loading: paidLoading,
-      onMonth: (ym: string) => { setPaidLoading(true); setMonth(ym) },
     })
     : tab === 'payments' ? paymentsView({
       banner: errorBanner,
@@ -399,7 +409,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     <>
       <div className="tms-page">
         <div className="tms-page-head">
-          <h1>{chrome.title}</h1>
+          <h1>Invoicing</h1>
           {viewTabs ? <span className="tms-views-btn"><Eye size={15} aria-hidden="true" />Views</span> : null}
           <div className="tms-page-actions">
             <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="export-outstanding-receivables" title="Every open invoice with every field"
@@ -411,33 +421,11 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         </div>
         {viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
         <div className="tms-filter-row">
-          <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label="Refresh" onClick={chrome.onRefresh}>
+          <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label="Refresh" onClick={() => void refreshAll()}>
             <RefreshCw size={15} />
           </button>
-          {current.filterChips?.map((chip) => (
-            <TmsFilterChip key={chip.key} label={chip.label} value={chip.value} onClick={chip.onClick} />
-          ))}
         </div>
-        {current.onAddFilter ? (
-          <div>
-            <button type="button" className="tms-add-filter" onClick={current.onAddFilter}><Plus size={14} aria-hidden="true" />Filter</button>
-          </div>
-        ) : null}
-        <div className="tms-quick-tabs" role="tablist">
-          {chrome.quickTabs.tabs.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={t.key === chrome.quickTabs.active}
-              className={`tms-quick-tab${t.key === chrome.quickTabs.active ? ' tms-active' : ''}`}
-              onClick={() => chrome.quickTabs.onSelect(t.key)}
-            >
-              {t.label}
-              <span className="tms-quick-tab-count">{t.count}</span>
-            </button>
-          ))}
-        </div>
+        <TmsTabStrip aria-label="Invoicing status" tabs={tabs} active={tab} onSelect={(key) => { setSelected([]); setTab(key as ArPageTab) }} />
         {current.banner}
         <ArDenseTable<never> key={tab} grid={current.grid} />
       </div>
@@ -557,46 +545,85 @@ function moneyCol<T>(key: string, header: string, cents: (row: T) => number, gro
 
 const opt = (value: string | null | undefined) => (value ? [{ value, label: value }] : [])
 
-const sumCents = <T,>(rows: T[], cents: (row: T) => number) => rows.reduce((sum, row) => sum + cents(row), 0)
 
-function toInvoiceView({
-  banner, rows, customersById, selected, justGenerated, busy, canRelease, onSelect, onGenerate, onBatchGenerate, onBatchEmail,
+
+/* ── The queue: Ready to invoice / Invoiced / Paid ──────────────────────────── */
+
+function dateCol<T>(key: string, header: string, of: (row: T) => string | null, group = 'Dates'): Col<T> {
+  return { key, header, group, text: (row) => formatDay(of(row)), filter: 'date', dateOf: (row) => of(row), sortValue: (row) => of(row) ?? '' }
+}
+
+function queueView({
+  status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, justGenerated, factorByItemId,
+  months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onBatchEmail, onEmail, onPayment, onFactor, onVoid,
 }: {
+  status: ArQueueStatus
+  rows: ArQueueRow[]
+  groupBy: ArGroupBy
+  groupControl: ReactNode
   banner: ReactNode
-  rows: ArWorklistRow[]
-  customersById: Map<string, CustomerRecord>
-  selected: string[]
-  justGenerated: string[]
+  asOf: string
   busy: boolean
   canRelease: boolean
+  selected: string[]
+  justGenerated: string[]
+  factorByItemId: Map<string, FactoringItem>
+  months: string[]
+  month: string
+  paidLoading: boolean
+  onMonth: (ym: string) => void
   onSelect: (ids: string[]) => void
-  onGenerate: (row: ArWorklistRow) => void
+  onGenerate: (row: ArQueueRow) => void
   onBatchGenerate: () => void
   onBatchEmail: () => void
+  onEmail: (invoice: InvoiceRecord) => void
+  onPayment: (invoice: InvoiceRecord) => void
+  onFactor: (invoice: InvoiceRecord) => void
+  onVoid: (invoice: InvoiceRecord) => void
 }): ListView {
+  const ready = status === 'READY'
+  const invoiced = status === 'INVOICED'
   const toggle = (orderId: string) => {
     onSelect(selected.includes(orderId) ? selected.filter((id) => id !== orderId) : [...selected, orderId])
   }
-  const billTo = (row: ArWorklistRow) => billToLabel(row.customerId ? customersById.get(row.customerId) : undefined, row.billToId)
-  const docsText = (row: ArWorklistRow) => (row.docsReady ? '✓' : row.docsMissing.join(', ') || 'Missing')
+  const sentText = (row: ArQueueRow) =>
+    row.sentAt ? `${formatDay(row.sentAt)}${row.sentTo ? ` → ${row.sentTo}` : ''}` : row.invoiceId ? 'Not sent' : '—'
+  const pastDueText = (row: ArQueueRow) =>
+    row.dueAt && invoiced ? agingChipFor(row.dueAt, asOf).label : '—'
+  const factorText = (row: ArQueueRow) => {
+    const inv = row.invoice
+    if (!inv) return '—'
+    const item = inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : undefined
+    if (item && otrRejection(item)) return 'OTR rejected: invoice manually'
+    const factor = otrStatusLabel(item?.otrStatus) ?? (inv.factoringItemId ? 'In the factoring queue' : null)
+    return factor ?? (inv.factored ? 'Factored customer' : '—')
+  }
 
-  const columns: Array<Col<ArWorklistRow>> = [
-    { key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 40 },
-    { key: 'shipment', header: 'Shipment', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId, extraPx: 16 },
-    { key: 'customer', header: 'Customer', group: 'Shipment', text: (row) => row.customerName || '—', filter: 'multi', optionsOf: (row) => opt(row.customerName) },
-    { key: 'billTo', header: 'Bill-to', group: 'Shipment', text: billTo },
+  const columns: Array<Col<ArQueueRow>> = [
+    ...(ready ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 40 } as Col<ArQueueRow>] : []),
+    { key: 'shipment', header: 'PRO', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId, extraPx: 16 },
+    { key: 'invoice', header: 'Invoice #', group: 'Invoice', text: (row) => row.invoiceNumber ?? '—' },
+    { key: 'customer', header: 'Customer', group: 'Shipment', text: (row) => row.customerName, filter: 'multi', optionsOf: (row) => opt(row.customerName) },
+    { key: 'division', header: 'Rev division', group: 'Shipment', text: (row) => row.revDivisionName, filter: 'multi', optionsOf: (row) => opt(row.revDivisionName) },
+    { key: 'rep', header: 'Sales rep', group: 'Shipment', text: (row) => row.salesRepName, filter: 'multi', optionsOf: (row) => opt(row.salesRepName) },
+    dateCol<ArQueueRow>('delivered', 'Delivered', (row) => row.deliveredAt),
+    dateCol<ArQueueRow>('released', 'Released', (row) => row.releasedAt),
+    dateCol<ArQueueRow>('invoiceDate', 'Invoice date', (row) => row.invoiceDate),
+    dateCol<ArQueueRow>('due', 'Due', (row) => row.dueAt),
+    moneyCol<ArQueueRow>('amount', 'Amount', (row) => row.amountCents),
+    moneyCol<ArQueueRow>('balance', 'Balance', (row) => row.balanceCents),
+    { key: 'status', header: 'Status', group: 'Invoice', text: (row) => (row.shortPaid ? `Short paid ${formatCents(row.balanceCents)} open` : AR_QUEUE_STATUS_LABEL[row.status]), filter: 'multi', optionsOf: (row) => opt(AR_QUEUE_STATUS_LABEL[row.status]) },
+    { key: 'sent', header: 'Sent', group: 'Invoice', text: sentText, sortValue: (row) => row.sentAt ?? '' },
     {
-      key: 'delivered', header: 'Delivered', group: 'Shipment',
-      text: (row) => (row.deliveredAt ? formatDay(row.deliveredAt) : 'Not delivered'),
-      filter: 'date', dateOf: (row) => row.deliveredAt,
+      key: 'pastDue', header: 'Days past due', group: 'Invoice', align: 'right', text: pastDueText,
+      sortValue: (row) => row.daysPastDue ?? -99999, filter: 'number', numberOf: (row) => row.daysPastDue ?? 0, numberUnit: 'days',
     },
-    moneyCol('revenue', 'Revenue', (row) => row.revenueCents),
-    { key: 'docs', header: 'Docs', group: 'Billing', text: docsText },
-    { key: 'blockers', header: 'Why it cannot be billed', group: 'Billing', text: (row) => row.reasons.join('; '), extraPx: 24 },
-    { key: 'generate', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 96 },
+    ...(status === 'PAID' ? [dateCol<ArQueueRow>('paidAt', 'Paid on', (row) => row.paidAt)] : []),
+    ...(invoiced ? [{ key: 'factor', header: 'Factor', group: 'Invoice', text: factorText, filter: 'multi', optionsOf: (row: ArQueueRow) => opt(factorText(row)) } as Col<ArQueueRow>] : []),
+    ...(ready || invoiced ? [{ key: 'actions', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: ready ? 104 : 400 } as Col<ArQueueRow>] : []),
   ]
 
-  const renderCell = (row: ArWorklistRow, key: string): ReactNode => {
+  const renderCell = (row: ArQueueRow, key: string): ReactNode => {
     switch (key) {
       case 'select':
         return (
@@ -610,290 +637,42 @@ function toInvoiceView({
         )
       case 'shipment':
         return <Link to={`/tms/shipments/${row.shipmentId}`}>{row.shipmentNumber ?? row.shipmentId}</Link>
-      case 'docs':
-        return row.docsReady ? <span>✓</span> : <span style={{ color: 'var(--tms-badge-red)' }}>{docsText(row)}</span>
-      case 'blockers':
-        return row.reasons.length > 0 ? <span style={{ color: 'var(--tms-badge-red)' }}>{row.reasons.join('; ')}</span> : null
-      case 'generate':
-        return (
-          <TmsButton
-            size="sm"
-            aria-label={`Generate invoice for ${row.shipmentNumber ?? row.orderId}`}
-            disabled={busy || row.reasons.length > 0 || !canRelease}
-            title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
-            onClick={() => onGenerate(row)}
-          >
-            Generate
-          </TmsButton>
-        )
-      default:
-        return columns.find((c) => c.key === key)?.text(row) ?? null
-    }
-  }
-
-  return view<ArWorklistRow>({
-    actions: (
-      <>
-        <span className="text-sm tms-muted">
-          {selected.length} selected{selected.length > BATCH_GENERATE_LIMIT ? ` — ${BATCH_GENERATE_LIMIT} at a time` : ''}
-        </span>
-        <TmsButton
-          variant="primary"
-          aria-label="Batch generate invoices"
-          disabled={busy || selected.length === 0 || selected.length > BATCH_GENERATE_LIMIT || !canRelease}
-          title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
-          onClick={onBatchGenerate}
-        >
-          Batch generate
-        </TmsButton>
-        <TmsButton
-          aria-label="Batch e-mail generated invoices"
-          disabled={busy || justGenerated.length === 0 || !canRelease}
-          title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
-          onClick={onBatchEmail}
-        >
-          <Mail size={14} /> Batch e-mail ({justGenerated.length})
-        </TmsButton>
-      </>
-    ),
-    banner,
-    grid: {
-      gridId: 'ar-unbilled',
-      label: 'Unbilled shipments',
-      columns,
-      rows,
-      rowKey: (row) => row.orderId,
-      renderCell,
-      empty: 'Nothing is waiting to be billed.',
-      kpis: [
-        { label: 'Shipments', value: rows.length },
-        { label: 'Unbilled revenue', value: formatCents(sumCents(rows, (r) => r.revenueCents)) },
-        { label: 'Blocked', value: rows.filter((r) => r.reasons.length > 0).length, tone: 'warn' },
-      ],
-    },
-  })
-}
-
-/* ── Docs needed ─────────────────────────────────────────────────────────── */
-
-const reviewFacts = (row: ArWorklistRow) => ({
-  arStatus: row.order.arStatus,
-  legacyImported: row.shipment?.legacyImported,
-  source: row.shipment?.source,
-  number: row.shipmentNumber,
-})
-const rowNeedsBillingReview = (row: ArWorklistRow) => needsBillingReview(reviewFacts(row))
-
-function docsNeededView({ banner, rows, reviewOnly, reviewCount, onReviewOnly }: {
-  banner: ReactNode
-  rows: ArWorklistRow[]
-  reviewOnly: boolean
-  reviewCount: number
-  onReviewOnly: (on: boolean) => void
-}): ListView {
-  const deliveredText = (row: ArWorklistRow) =>
-    row.deliveredAt ? formatDay(row.deliveredAt) : row.order.invoiceEarly ? 'Bills early' : 'Not delivered'
-  const missingText = (row: ArWorklistRow) => (row.docsMissing.length > 0 ? row.docsMissing.join(', ') : 'Nothing — ready for review')
-
-  const columns: Array<Col<ArWorklistRow>> = [
-    { key: 'shipment', header: 'Shipment', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId, extraPx: 110 },
-    { key: 'customer', header: 'Customer', group: 'Shipment', text: (row) => row.customerName || '—', filter: 'multi', optionsOf: (row) => opt(row.customerName) },
-    { key: 'delivered', header: 'Delivered', group: 'Shipment', text: deliveredText, filter: 'date', dateOf: (row) => row.deliveredAt },
-    moneyCol('revenue', 'Revenue', (row) => row.revenueCents),
-    { key: 'missing', header: 'Still missing', group: 'Billing', text: missingText },
-    { key: 'documents', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 120 },
-  ]
-
-  const renderCell = (row: ArWorklistRow, key: string): ReactNode => {
-    switch (key) {
-      case 'shipment':
-        return (
-          <>
-            <Link to={`/tms/shipments/${row.shipmentId}?tab=documents`}>{row.shipmentNumber ?? row.shipmentId}</Link>
-            {rowNeedsBillingReview(row) && (
-              <> <TmsBadge tone="orange" title={reviewBillingNote(reviewFacts(row))}>{REVIEW_BILLING_LABEL}</TmsBadge></>
-            )}
-          </>
-        )
-      case 'missing':
-        return row.docsMissing.length > 0
-          ? <span style={{ color: 'var(--tms-badge-red)' }}>{row.docsMissing.join(', ')}</span>
-          : <span className="tms-muted">Nothing — ready for review</span>
-      case 'documents':
-        return (
-          <Link
-            className="tms-btn tms-btn-secondary tms-btn-sm"
-            aria-label={`Open documents for ${row.shipmentNumber ?? row.shipmentId}`}
-            to={`/tms/shipments/${row.shipmentId}?tab=documents`}
-          >
-            Documents
-          </Link>
-        )
-      default:
-        return columns.find((c) => c.key === key)?.text(row) ?? null
-    }
-  }
-
-  return view<ArWorklistRow>({
-    actions: (
-      <TmsButton
-        size="sm"
-        variant={reviewOnly ? 'primary' : 'secondary'}
-        aria-pressed={reviewOnly}
-        onClick={() => onReviewOnly(!reviewOnly)}
-      >
-        {REVIEW_BILLING_LABEL} ({reviewCount})
-      </TmsButton>
-    ),
-    banner,
-    grid: {
-      gridId: 'ar-docs-needed',
-      label: 'Shipments waiting on paperwork',
-      columns,
-      rows,
-      rowKey: (row) => row.orderId,
-      renderCell,
-      empty: reviewOnly ? 'No pre-cutover shipment is waiting on a billing review.' : 'No shipment is waiting on paperwork.',
-      kpis: [
-        { label: 'Shipments', value: rows.length },
-        { label: 'Revenue waiting', value: formatCents(sumCents(rows, (r) => r.revenueCents)) },
-        { label: 'Missing a document', value: rows.filter((r) => r.docsMissing.length > 0).length, tone: 'warn' },
-      ],
-    },
-  })
-}
-
-/* ── Ready for billing (P10) ─────────────────────────────────────────────── */
-
-function readyForBillingView({
-  banner,
-  rows,
-  loading,
-}: {
-  banner: ReactNode
-  rows: ReadyRow[]
-  loading: boolean
-}): ListView {
-  const gateMessages = (row: ReadyRow) => (row.gate && !row.gate.ok ? row.gate.missing.map((reason) => reason.message) : [])
-  const gateText = (row: ReadyRow) => (row.gate == null ? 'Checking…' : row.gate.ok ? 'Ready for billing' : gateMessages(row).join('; '))
-  const docsText = (row: ReadyRow) => (row.docsRequired.length === 0 ? 'No required docs' : row.docsRequired.join(', '))
-  const refsText = (row: ReadyRow) => {
-    const refs = row.order.references ?? []
-    return refs.length === 0 ? 'No references' : refs.map((ref) => `${ref.code}: ${ref.value || 'missing'}`).join('; ')
-  }
-
-  const columns: Array<Col<ReadyRow>> = [
-    { key: 'shipment', header: 'Shipment', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId },
-    { key: 'customer', header: 'Customer', group: 'Shipment', text: (row) => row.customerName || '—', filter: 'multi', optionsOf: (row) => opt(row.customerName) },
-    { key: 'delivered', header: 'Delivered', group: 'Shipment', text: (row) => (row.deliveredAt ? formatDay(row.deliveredAt) : 'Not delivered'), filter: 'date', dateOf: (row) => row.deliveredAt },
-    moneyCol('revenue', 'Revenue', (row) => row.revenueCents),
-    { key: 'docs', header: 'Docs', group: 'Billing', text: docsText, extraPx: 40 },
-    { key: 'refs', header: 'References', group: 'Billing', text: refsText },
-    { key: 'gate', header: 'Release gate', group: 'Billing', text: gateText, extraPx: 24 },
-    { key: 'review', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 150 },
-  ]
-
-  const renderCell = (row: ReadyRow, key: string): ReactNode => {
-    switch (key) {
-      case 'shipment':
-        return <Link to={`/tms/shipments/${row.shipmentId}?tab=documents`}>{row.shipmentNumber ?? row.shipmentId}</Link>
-      case 'docs':
-        return (
-          <span data-testid={`ready-docs-${row.orderId}`} className="flex gap-1 whitespace-nowrap">
-            {row.docsRequired.length === 0
-              ? <span className="tms-muted">No required docs</span>
-              : row.docsRequired.map((type) => (
-                <TmsBadge key={type} tone={row.docsMissing.includes(type) ? 'red' : 'green'}>{type}</TmsBadge>
-              ))}
-          </span>
-        )
-      case 'refs':
-        return <span data-testid={`ready-refs-${row.orderId}`}>{refsText(row)}</span>
-      case 'gate':
-        if (row.gate == null) return <span className="tms-muted">Checking…</span>
-        if (row.gate.ok) return <TmsBadge tone="green">Ready for billing</TmsBadge>
-        return <span data-testid={`ready-gate-${row.orderId}`} style={{ color: 'var(--tms-badge-red)' }}>{gateMessages(row).join('; ')}</span>
-      case 'review':
-        return <ReadyForBillingReviewCell row={row} />
-      default:
-        return columns.find((c) => c.key === key)?.text(row) ?? null
-    }
-  }
-
-  return view<ReadyRow>({
-    banner,
-    grid: {
-      gridId: 'ar-ready-for-billing',
-      label: 'Ready for billing',
-      columns,
-      rows,
-      rowKey: (row) => row.orderId,
-      renderCell,
-      empty: loading ? 'Checking the release gate…' : 'No shipments are ready for billing.',
-    },
-  })
-}
-
-/* ── Unpaid ──────────────────────────────────────────────────────────────── */
-
-function unpaidView({
-  errorBanner, invoices, allInvoices, filters, showFilters, asOf, busy, factorByItemId,
-  onToggleFilters, onFilters, onEmail, onPayment, onFactor, onVoid,
-}: {
-  errorBanner: ReactNode
-  invoices: InvoiceRecord[]
-  allInvoices: InvoiceRecord[]
-  filters: UnpaidFilters
-  showFilters: boolean
-  asOf: string
-  busy: boolean
-  factorByItemId: Map<string, FactoringItem>
-  onToggleFilters: () => void
-  onFilters: (filters: UnpaidFilters) => void
-  onEmail: (invoice: InvoiceRecord) => void
-  onPayment: (invoice: InvoiceRecord) => void
-  onFactor: (invoice: InvoiceRecord) => void
-  onVoid: (invoice: InvoiceRecord) => void
-}): ListView {
-  const customerName = invoiceCustomerOptions(allInvoices).find((c) => c.id === filters.customerId)?.name ?? null
-  const factorText = (inv: InvoiceRecord) => {
-    const item = inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : undefined
-    // An invoice OTR turned down has to be sent by hand: say so on the invoice, not only in the queue.
-    if (item && otrRejection(item)) return 'OTR rejected: invoice manually'
-    const factor = otrStatusLabel(item?.otrStatus) ?? (inv.factoringItemId ? 'In the factoring queue' : null)
-    return factor ?? (inv.factored ? 'Factored customer' : '—')
-  }
-
-  const columns: Array<Col<InvoiceRecord>> = [
-    { key: 'invoice', header: 'Invoice', group: 'Invoice', text: (inv) => inv.number, extraPx: 16 },
-    { key: 'customer', header: 'Customer', group: 'Invoice', text: (inv) => inv.customerName || '—', filter: 'multi', optionsOf: (inv) => opt(inv.customerName) },
-    { key: 'issued', header: 'Issued', group: 'Invoice', text: (inv) => formatDay(inv.invoiceDate), filter: 'date', dateOf: (inv) => inv.invoiceDate, sortValue: (inv) => inv.invoiceDate ?? '' },
-    { key: 'due', header: 'Due', group: 'Invoice', text: (inv) => formatDay(inv.dueAt), filter: 'date', dateOf: (inv) => inv.dueAt, sortValue: (inv) => inv.dueAt ?? '' },
-    {
-      key: 'age', header: 'Age', group: 'Invoice', extraPx: 24,
-      text: (inv) => agingChipFor(inv.dueAt, asOf).label,
-      filter: 'multi', optionsOf: (inv) => opt(agingChipFor(inv.dueAt, asOf).label),
-      sortValue: (inv) => inv.dueAt ?? '',
-    },
-    moneyCol('total', 'Total', (inv) => inv.totalCents),
-    moneyCol('paid', 'Paid', (inv) => inv.paidCents),
-    moneyCol('balance', 'Balance', (inv) => inv.balanceCents),
-    { key: 'sent', header: 'Sent', group: 'Invoice', text: (inv) => (inv.sentCount ? `✓ ${inv.sentCount}` : '—'), sortValue: (inv) => inv.sentCount ?? 0, filter: false },
-    { key: 'factor', header: 'Factor', group: 'Invoice', text: factorText, filter: 'multi', optionsOf: (inv) => opt(factorText(inv)), extraPx: 16 },
-    { key: 'actions', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 400 },
-  ]
-
-  const renderCell = (inv: InvoiceRecord, key: string): ReactNode => {
-    switch (key) {
       case 'invoice':
-        return <Link to={`/tms/invoicing/invoices/${inv.id}`}>{inv.number}</Link>
-      case 'age': {
-        const chip = agingChipFor(inv.dueAt, asOf)
+        return row.invoiceId ? <Link to={`/tms/invoicing/invoices/${row.invoiceId}`}>{row.invoiceNumber}</Link> : <span className="tms-muted">—</span>
+      case 'balance':
+        return <span className="font-medium">{formatCents(row.balanceCents)}</span>
+      case 'status':
+        if (row.shortPaid) return <TmsBadge tone="orange">Short paid {formatCents(row.balanceCents)} open</TmsBadge>
+        if (row.status === 'READY' && row.reasons.length > 0) {
+          return <span className="flex items-center gap-1"><TmsBadge tone="red">Blocked</TmsBadge><span style={{ color: 'var(--tms-badge-red)' }}>{row.reasons.join('; ')}</span></span>
+        }
+        return <TmsBadge tone={row.status === 'PAID' ? 'green' : row.status === 'INVOICED' ? 'blue' : 'gray'}>{AR_QUEUE_STATUS_LABEL[row.status]}</TmsBadge>
+      case 'sent':
+        if (!row.invoiceId) return <span className="tms-muted">—</span>
+        return row.sentAt
+          ? <span title={row.sentTo ?? undefined}>✓ {formatDay(row.sentAt)}{row.sentCount > 1 ? ` (${row.sentCount}×)` : ''}</span>
+          : <TmsBadge tone="orange">Not sent</TmsBadge>
+      case 'pastDue': {
+        if (!invoiced || !row.dueAt) return <span className="tms-muted">—</span>
+        const chip = agingChipFor(row.dueAt, asOf)
         return <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>
       }
-      case 'balance':
-        return <span className="font-medium">{formatCents(inv.balanceCents)}</span>
-      case 'actions':
+      case 'actions': {
+        if (ready) {
+          return (
+            <TmsButton
+              size="sm"
+              aria-label={`Generate invoice for ${row.shipmentNumber ?? row.orderId}`}
+              disabled={busy || row.reasons.length > 0 || !canRelease}
+              title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
+              onClick={() => onGenerate(row)}
+            >
+              Generate
+            </TmsButton>
+          )
+        }
+        const inv = row.invoice
+        if (!inv) return null
         return (
           <span className="flex justify-end gap-1 whitespace-nowrap">
             <TmsButton variant="ghost" size="sm" aria-label={`E-mail invoice ${inv.number}`} disabled={busy} onClick={() => onEmail(inv)}>E-mail</TmsButton>
@@ -902,141 +681,95 @@ function unpaidView({
             <TmsButton variant="ghost" size="sm" aria-label={`Void invoice ${inv.number}`} disabled={busy} onClick={() => onVoid(inv)}>Void</TmsButton>
           </span>
         )
+      }
       default:
-        return columns.find((c) => c.key === key)?.text(inv) ?? null
+        return columns.find((c) => c.key === key)?.text(row) ?? null
     }
   }
 
-  return view<InvoiceRecord>({
-    filterChips: [
-      { key: 'customer', label: 'Customer is', value: customerName, onClick: onToggleFilters },
-      {
-        key: 'bucket',
-        label: 'Aging is',
-        value: filters.bucket ? AGING_BUCKET_LABEL[filters.bucket] : null,
-        onClick: onToggleFilters,
-      },
-      {
-        key: 'factored',
-        label: 'Factored is',
-        value: filters.factored ? (filters.factored === 'YES' ? 'Factored' : 'Not factored') : null,
-        onClick: onToggleFilters,
-      },
-    ],
-    onAddFilter: onToggleFilters,
-    banner: (
-      <>
-        {errorBanner}
-        {showFilters && (
-          <TmsCard title="Filters">
-            <div className="tms-grid tms-grid-3">
-              <TmsField label="Customer">
-                <TmsSelect
-                  aria-label="Filter customer"
-                  value={filters.customerId}
-                  onChange={(e) => onFilters({ ...filters, customerId: e.target.value })}
-                >
-                  <option value="">All</option>
-                  {invoiceCustomerOptions(allInvoices).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </TmsSelect>
-              </TmsField>
-              <TmsField label="Aging">
-                <TmsSelect
-                  aria-label="Filter aging bucket"
-                  value={filters.bucket}
-                  onChange={(e) => onFilters({ ...filters, bucket: e.target.value as UnpaidFilters['bucket'] })}
-                >
-                  <option value="">All</option>
-                  {AGING_BUCKETS.map((b) => <option key={b} value={b}>{AGING_BUCKET_LABEL[b]}</option>)}
-                </TmsSelect>
-              </TmsField>
-              <TmsField label="Factored">
-                <TmsSelect
-                  aria-label="Filter factored"
-                  value={filters.factored}
-                  onChange={(e) => onFilters({ ...filters, factored: e.target.value as UnpaidFilters['factored'] })}
-                >
-                  <option value="">All</option>
-                  <option value="YES">Factored</option>
-                  <option value="NO">Not factored</option>
-                </TmsSelect>
-              </TmsField>
-            </div>
-          </TmsCard>
-        )}
-      </>
-    ),
-    grid: {
-      gridId: 'ar-unpaid',
-      label: 'Unpaid invoices',
-      columns,
-      rows: invoices,
-      rowKey: (inv) => inv.id,
-      renderCell,
-      empty: (
+  const actions = (
+    <>
+      {groupControl}
+      {ready && (
         <>
-          Nothing is owed in this view.{' '}
-          <button type="button" className="tms-add-filter" onClick={() => onFilters(EMPTY_UNPAID_FILTERS)}>Click here to clear all filters</button>
+          <span className="text-sm tms-muted">
+            {selected.length} selected{selected.length > BATCH_GENERATE_LIMIT ? ` — ${BATCH_GENERATE_LIMIT} at a time` : ''}
+          </span>
+          <TmsButton
+            variant="primary"
+            aria-label="Batch generate invoices"
+            disabled={busy || selected.length === 0 || selected.length > BATCH_GENERATE_LIMIT || !canRelease}
+            title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
+            onClick={onBatchGenerate}
+          >
+            Batch generate
+          </TmsButton>
+          <TmsButton
+            aria-label="Batch e-mail generated invoices"
+            disabled={busy || justGenerated.length === 0 || !canRelease}
+            title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
+            onClick={onBatchEmail}
+          >
+            <Mail size={14} /> Batch e-mail ({justGenerated.length})
+          </TmsButton>
         </>
-      ),
-      kpis: [
-        { label: 'Invoices', value: invoices.length },
-        { label: 'Open balance', value: formatCents(sumCents(invoices, (inv) => inv.balanceCents)) },
-        { label: 'Past due', value: invoices.filter((inv) => agingChipFor(inv.dueAt, asOf).late).length, tone: 'bad' },
-      ],
-    },
-  })
-}
+      )}
+      {status === 'PAID' && (
+        <>
+          <TmsSelect aria-label="Invoice month" value={month} onChange={(e) => onMonth(e.target.value)}>
+            {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
+          </TmsSelect>
+          {paidLoading && <span className="text-sm tms-muted">Loading…</span>}
+        </>
+      )}
+    </>
+  )
 
-/* ── Paid ────────────────────────────────────────────────────────────────── */
-
-function paidView({ banner, invoices, months, month, loading, onMonth }: {
-  banner: ReactNode
-  invoices: InvoiceRecord[]
-  months: string[]
-  month: string
-  loading: boolean
-  onMonth: (ym: string) => void
-}): ListView {
-  const paid = invoices.filter((inv) => inv.status === 'PAID')
-  const columns: Array<Col<InvoiceRecord>> = [
-    { key: 'invoice', header: 'Invoice', group: 'Invoice', text: (inv) => inv.number, extraPx: 16 },
-    { key: 'customer', header: 'Customer', group: 'Invoice', text: (inv) => inv.customerName || '—', filter: 'multi', optionsOf: (inv) => opt(inv.customerName) },
-    { key: 'issued', header: 'Issued', group: 'Invoice', text: (inv) => formatDay(inv.invoiceDate), filter: 'date', dateOf: (inv) => inv.invoiceDate, sortValue: (inv) => inv.invoiceDate ?? '' },
-    { key: 'paid', header: 'Paid', group: 'Invoice', text: (inv) => formatDay(inv.paidAt), filter: 'date', dateOf: (inv) => inv.paidAt ?? null, sortValue: (inv) => inv.paidAt ?? '' },
-    moneyCol('total', 'Total', (inv) => inv.totalCents),
-    moneyCol('writtenOff', 'Written off', (inv) => inv.writtenOffCents ?? 0),
+  const totals = groupTotals(rows)
+  const kpis = [
+    { label: ready ? 'Shipments' : 'Invoices', value: totals.count },
+    { label: ready ? 'To invoice' : 'Amount', value: formatCents(totals.amountCents) },
+    ...(invoiced
+      ? [
+        { label: 'Open balance', value: formatCents(totals.balanceCents) },
+        { label: 'Past due', value: rows.filter((r) => (r.daysPastDue ?? 0) > 0).length, tone: 'bad' as const },
+        { label: 'Short paid', value: rows.filter((r) => r.shortPaid).length, tone: 'warn' as const },
+        { label: 'Not sent', value: rows.filter((r) => !r.sentAt).length, tone: 'warn' as const },
+      ]
+      : []),
+    ...(ready ? [{ label: 'Blocked', value: rows.filter((r) => r.reasons.length > 0).length, tone: 'warn' as const }] : []),
   ]
 
-  const renderCell = (inv: InvoiceRecord, key: string): ReactNode => {
-    if (key === 'invoice') return <Link to={`/tms/invoicing/invoices/${inv.id}`}>{inv.number}</Link>
-    if (key === 'writtenOff') return inv.writtenOffCents ? formatCents(inv.writtenOffCents) : '—'
-    return columns.find((c) => c.key === key)?.text(inv) ?? null
-  }
-
-  return view<InvoiceRecord>({
-    actions: (
-      <>
-        <TmsSelect aria-label="Invoice month" value={month} onChange={(e) => onMonth(e.target.value)}>
-          {months.map((ym) => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
-        </TmsSelect>
-        {loading && <span className="text-sm tms-muted">Loading…</span>}
-      </>
-    ),
+  const gridId = ready ? 'ar-queue-ready' : invoiced ? 'ar-queue-invoiced' : 'ar-queue-paid'
+  return view<ArQueueRow>({
+    actions,
     banner,
     grid: {
-      gridId: 'ar-paid',
-      label: 'Paid invoices',
+      gridId,
+      label: AR_QUEUE_STATUS_LABEL[status],
       columns,
-      rows: paid,
-      rowKey: (inv) => inv.id,
+      rows,
+      rowKey: (row) => row.key,
       renderCell,
-      empty: `Nothing was collected in ${monthLabel(month)}.`,
-      kpis: [
-        { label: 'Invoices paid', value: paid.length },
-        { label: 'Invoiced total', value: formatCents(sumCents(paid, (inv) => inv.totalCents)) },
-        { label: 'Written off', value: formatCents(sumCents(paid, (inv) => inv.writtenOffCents ?? 0)) },
-      ],
+      empty: ready
+        ? 'Nothing released is waiting to be invoiced.'
+        : invoiced ? 'No invoice has an open balance.' : `Nothing was collected in ${monthLabel(month)}.`,
+      kpis,
+      group: groupBy === 'none' ? undefined : {
+        keyOf: (row) => groupKeyOf(row, groupBy),
+        order: (shown) => orderByGroup(shown, groupBy),
+        header: (key, shown) => {
+          const t = groupTotals(shown)
+          return (
+            <span className="flex items-center gap-3" data-testid="ar-group-head">
+              <strong>{key}</strong>
+              <span className="tms-muted">{t.count} {ready ? 'shipment' : 'invoice'}{t.count === 1 ? '' : 's'}</span>
+              <span>{formatCents(t.amountCents)}</span>
+              {invoiced && <span className="tms-muted">{formatCents(t.balanceCents)} open</span>}
+            </span>
+          )
+        },
+      },
     },
   })
 }
