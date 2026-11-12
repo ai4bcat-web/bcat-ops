@@ -1,7 +1,8 @@
 /**
  * Pure planning for scripts/awCustomerBillingEmails.mjs (Ryne 2026-11-12: "upload all these AP emails into all customers").
  * Source: the OTR billing-emails list (name, mcNumber, dotNumber, billingEmail, billingContactName, billingPhone).
- * Writes ONLY Customer.apEmail (the invoice "To"), only while empty, never for a FACTOR customer, never an @bcatcorp.com address.
+ * Writes Customer.apEmail (the invoice "To", only while empty), appends the company's other AP addresses to apEmailsExtra, and
+ * notice-of-assignment addresses to noaEmail. Never for a FACTOR customer's AP fields, never an @bcatcorp.com address, never a POD inbox.
  * Matching is exact on MC number first, then on the normalized name (case, punctuation, "(...)" notes and a trailing LLC/INC/CORP... dropped).
  */
 import { FACTOR_ADDRESSES, INTERNAL_DOMAIN, parseAddresses } from './customerBillingPlan.mjs';
@@ -19,6 +20,9 @@ export const normMc = (v) => { const d = String(v ?? '').replace(/\D/g, '').repl
 
 /** Notice-of-assignment (factoring notice) addresses: kept OUT of the AP e-mail field (Ryne 2026-11-12). */
 export const isNoticeAddress = (a) => /@noa\.triumphpay\.com$|@relaypayments\.com$|noa@|factornotice|factor@|factoringinvoices_noa|noalor|kofnoa|tlfactoring|apfactor|^support@payments\.tfin\.com$/i.test(String(a));
+
+/** Proof-of-delivery / paperwork inboxes: never an AP address (Ryne 2026-11-12); reported, not written. */
+export const isPodAddress = (a) => /^pod@|paperwork/i.test(String(a));
 
 /** CSV rows -> [{name,key,mc,emails,notice,skipped}] (blank-email and skipped rows dropped, counted). */
 export function prepareRows(rows) {
@@ -38,7 +42,8 @@ export function prepareRows(rows) {
 
 /**
  * Group prepared rows into companies: rows that share a normalized name or an MC number are one company.
- * A company whose rows carry different addresses is a CONFLICT (nothing is written for it).
+ * Several AP addresses are no longer a conflict (Ryne 2026-11-12): the first becomes apEmail, the rest go to apEmailsExtra.
+ * POD / paperwork inboxes are split out into `pod` and never written.
  */
 export function groupCompanies(rows) {
   const parent = rows.map((_, i) => i);
@@ -51,9 +56,11 @@ export function groupCompanies(rows) {
   const groups = new Map();
   rows.forEach((r, i) => { const g = find(i); groups.set(g, [...(groups.get(g) ?? []), r]); });
   return [...groups.values()].map((rs) => {
-    const emails = [...new Set(rs.flatMap((r) => r.emails))];
+    const all = [...new Set(rs.flatMap((r) => r.emails))];
+    const emails = all.filter((a) => !isPodAddress(a));
+    const pod = all.filter(isPodAddress);
     const noa = [...new Set(rs.flatMap((r) => r.noa))];
-    return { noa, names: [...new Set(rs.map((r) => r.name))], keys: new Set(rs.map((r) => r.key)), mcs: new Set(rs.map((r) => r.mc).filter(Boolean)), emails, conflict: emails.length > 1 };
+    return { noa, pod, names: [...new Set(rs.map((r) => r.name))], keys: new Set(rs.map((r) => r.key)), mcs: new Set(rs.map((r) => r.mc).filter(Boolean)), emails, conflict: false };
   });
 }
 
@@ -62,7 +69,8 @@ const isLive = (c) => c.active !== false && !c.mergedIntoId;
 /**
  * Plan against production Customers. Returns { companies, results, unmatched } where each result is
  * { company, customer?, status, email?, existing?, flags[] } and status is one of
- * FILL | SAME_EMAIL | DIFFERS | FACTOR_CUSTOMER | CONFLICT | AMBIGUOUS | UNMATCHED | NOA_ONLY (only a notice address; AP left blank).
+ * FILL | SAME_EMAIL | DIFFERS | FACTOR_CUSTOMER | AMBIGUOUS | UNMATCHED | NOA_ONLY (only a notice address; AP left blank) |
+ * POD_ONLY (only POD / paperwork inboxes). FILL and SAME_EMAIL carry `extrasAdded` (addresses to append to apEmailsExtra).
  * `noa` on each result lists the notice-of-assignment addresses. They go to Customer.noaEmail (never apEmail): `noaWrites` lists the
  * matched customers whose noaEmail is blank and whose company has exactly one notice address; the rest are reported in `noaOther`.
  */
@@ -86,13 +94,17 @@ export function planBillingEmails(customers, prepared) {
     if (claimed.has(customer.id)) { results.push({ company, customer, status: 'AMBIGUOUS', matches: [customer], flags: [...flags, 'CUSTOMER_MATCHED_BY_TWO_COMPANIES'] }); continue; }
     claimed.set(customer.id, company);
     if (company.conflict) { results.push({ company, customer, status: 'CONFLICT', flags }); continue; }
-    if (!company.emails.length) { results.push({ company, customer, status: 'NOA_ONLY', flags }); continue; }
+    if (!company.emails.length) { results.push({ company, customer, status: company.noa.length ? 'NOA_ONLY' : 'POD_ONLY', flags }); continue; }
     const email = company.emails[0];
     const existing = blank(customer.apEmail) ? null : String(customer.apEmail).trim();
     if (customer.billingMethod === 'FACTOR') { results.push({ company, customer, status: 'FACTOR_CUSTOMER', email, existing, flags }); continue; }
-    if (existing) { results.push({ company, customer, status: existing.toLowerCase() === email ? 'SAME_EMAIL' : 'DIFFERS', email, existing, flags }); continue; }
+    if (existing && existing.toLowerCase() !== email) { results.push({ company, customer, status: 'DIFFERS', email, existing, flags }); continue; }
+    // Extras: the company's other AP addresses, appended to what the customer already lists (never removed), minus the primary.
+    const current = (customer.apEmailsExtra ?? []).map((a) => String(a).trim().toLowerCase()).filter(Boolean);
+    const extrasAdded = company.emails.slice(1).filter((a) => a !== email && !current.includes(a));
+    if (existing) { results.push({ company, customer, status: 'SAME_EMAIL', email, existing, extrasAdded, extrasBefore: customer.apEmailsExtra ?? null, flags }); continue; }
     if (blank(customer.billingMethod)) flags.push('BILLING_METHOD_UNSET');
-    results.push({ company, customer, status: 'FILL', email, flags });
+    results.push({ company, customer, status: 'FILL', email, extrasAdded, extrasBefore: customer.apEmailsExtra ?? null, flags });
   }
   // NOA addresses are written independently of the AP result, but only for a single, unambiguous match with one address.
   const noaWrites = []; const noaOther = [];
