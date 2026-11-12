@@ -52,7 +52,7 @@ export const LIFECYCLE_TABS: readonly LifecycleTab[] = [
     to: '/tms/shipments',
     matches: ['/tms/shipments', '/tms/shipments/:id', '/tms/shipments/:id/*'],
     pageKey: 'loads',
-    badgeKey: null,
+    badgeKey: 'activeShipments',
   },
   {
     key: 'book',

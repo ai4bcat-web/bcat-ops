@@ -99,6 +99,12 @@ describe('useShellBadgeCounts', () => {
     expect(result.current.accounting).toBe(2)
   })
 
+  it('badges View with the board\'s Active count (voided rows left out)', async () => {
+    const { result } = renderHook(() => useShellBadgeCounts(args))
+    await waitFor(() => expect(result.current.intakeLoads).toBe(2))
+    expect(result.current.activeShipments).toBe(1)
+  })
+
   it('hides Load Review and Carrier Sales counts from a user without the grants', async () => {
     auth.hasPageAccess = (key) => key === 'quotes'
     try {
@@ -106,6 +112,7 @@ describe('useShellBadgeCounts', () => {
       await waitFor(() => expect(result.current.quotesToReply).toBe(3))
       expect('loadReview' in result.current).toBe(false)
       expect('carrierSales' in result.current).toBe(false)
+      expect('activeShipments' in result.current).toBe(false)
     } finally {
       auth.hasPageAccess = () => true
     }
