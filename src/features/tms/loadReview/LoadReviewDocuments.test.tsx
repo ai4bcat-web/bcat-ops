@@ -55,8 +55,10 @@ describe('LoadReviewDocuments', () => {
   it('lists what is on file for a required type and marks the missing one with an Upload button', async () => {
     render(<LoadReviewDocuments shipmentId="shp-1" onChanged={vi.fn(async () => {})} />)
     expect(await screen.findByText('pod-signed.pdf')).toBeTruthy()
-    expect(screen.getByText('Missing')).toBeTruthy()
+    // The lumper receipt and the rate confirmation (required on every non-car-shipping load) are missing.
+    expect(screen.getAllByText('Missing')).toHaveLength(2)
     expect(screen.getByRole('button', { name: /Upload lumper receipt/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Upload rate confirmation/i })).toBeTruthy()
     // A BOL is optional (Ryne 2026-11-12): not listed as required even when the org default names it.
     expect(screen.queryByRole('button', { name: /Upload bill of lading/i })).toBeNull()
     expect(screen.getAllByRole('button', { name: /Replace/ })).toHaveLength(1)

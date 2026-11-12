@@ -182,8 +182,8 @@ describe('SettlementPage', () => {
     // The row is keyed by PRO, and the POD cell is the action that fixes it.
     expect(screen.getByText('14452')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Send the POD for 14452' })).toBeTruthy()
-    // The rate con is already in, so that cell is a state, not a prompt.
-    expect(screen.getByLabelText('rate confirmation on file for 14452')).toBeTruthy()
+    // The rate confirmation is the office's: the driver app never shows it.
+    expect(screen.queryByLabelText('rate confirmation on file for 14452')).toBeNull()
   })
 
   it('does not blame the driver for a rate confirmation the office collects', async () => {
@@ -210,8 +210,9 @@ describe('SettlementPage', () => {
     // factored yet without the rate confirmation.
     await waitFor(() => expect(screen.getByLabelText('POD on file for 14452')).toBeTruthy(), { timeout: 5000 })
     expect(screen.queryByRole('button', { name: 'Send the POD for 14452' })).toBeNull()
-    // Offered, never demanded: the office normally supplies this one at factoring.
-    expect(screen.getByRole('button', { name: 'Send the rate confirmation for 14452' })).toBeTruthy()
+    // Not shown and not asked for: the office handles the rate confirmation.
+    expect(screen.queryByRole('button', { name: 'Send the rate confirmation for 14452' })).toBeNull()
+    expect(screen.queryByText(/rate confirmation/i)).toBeNull()
   })
 
   it('renders a retryable error when the weeks call fails', async () => {
@@ -241,7 +242,7 @@ describe('SettlementPage', () => {
 })
 
 describe('sending paperwork for a load that is not listed', () => {
-  it('offers both documents even with no shipments on the statement', async () => {
+  it('offers the POD even with no shipments on the statement, and never a rate confirmation', async () => {
     // A driver holding a signed POD for a load nobody has built yet cannot act from a row
     // that does not exist, so the way in lives on the page itself.
     driverApiMocks.fetchSettlement.mockResolvedValue({ ...baseSettlement, trips: [] })
@@ -249,7 +250,7 @@ describe('sending paperwork for a load that is not listed', () => {
 
     await waitFor(() => expect(screen.getByText('No trips this week')).toBeTruthy())
     expect(screen.getByRole('button', { name: /Send a POD/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Send a rate confirmation/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Send a rate confirmation/ })).toBeNull()
     expect(screen.getByText(/Paperwork for a load that is not listed/)).toBeTruthy()
   })
 

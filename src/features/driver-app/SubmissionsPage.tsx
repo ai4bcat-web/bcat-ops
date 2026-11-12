@@ -53,6 +53,16 @@ const KIND_LABEL: Record<SubmissionDocument['kind'], string> = {
  * pages so the card is never blank.
  */
 function documentsOf(submission: SubmissionSummary): SubmissionDocument[] {
+  return allDocumentsOf(submission).filter((d) => d.kind !== 'RATECON')
+}
+
+/** Every document on it is a rate confirmation, which the driver app does not show. */
+function isRateconOnly(submission: SubmissionSummary): boolean {
+  const all = allDocumentsOf(submission)
+  return all.length > 0 && all.every((d) => d.kind === 'RATECON')
+}
+
+function allDocumentsOf(submission: SubmissionSummary): SubmissionDocument[] {
   if (submission.documents) return submission.documents
   return submission.docs.map((d) => ({
     kind: d.kind,
@@ -184,7 +194,9 @@ export default function SubmissionsPage() {
     async function load() {
       try {
         const data = await fetchSubmissions()
-        const sorted = [...data].sort(
+        // Rate confirmations are the office's paperwork: the driver app does not show them,
+        // so a submission that holds nothing else is left out of the list.
+        const sorted = data.filter((s) => !isRateconOnly(s)).sort(
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         )
         if (!cancelled) {
@@ -220,11 +232,8 @@ export default function SubmissionsPage() {
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold">My submissions</h1>
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => navigate('/driver/scan?kind=pod')}>
+            <Button size="sm" onClick={() => navigate('/driver/scan?kind=pod')}>
               Scan POD
-            </Button>
-            <Button size="sm" onClick={() => navigate('/driver/scan?kind=ratecon')}>
-              Scan rate con
             </Button>
           </div>
         </div>
@@ -279,10 +288,10 @@ export default function SubmissionsPage() {
             <Package className="h-12 w-12 text-[color:var(--tms-disabled)]" aria-hidden="true" />
             <p className="mt-4 text-base font-medium text-foreground">No submissions yet</p>
             <p className="mt-1 px-6 text-sm text-muted-foreground">
-              Scan a rate confirmation and it will show up here.
+              Scan a POD and it will show up here.
             </p>
-            <Button className="mt-6" onClick={() => navigate('/driver/scan?kind=ratecon')}>
-              Scan a rate confirmation
+            <Button className="mt-6" onClick={() => navigate('/driver/scan?kind=pod')}>
+              Scan a POD
             </Button>
           </div>
         )}

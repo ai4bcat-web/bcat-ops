@@ -9,7 +9,6 @@ import {
   Loader2,
   Package,
   RotateCcw,
-  Truck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,7 +23,6 @@ import {
   fetchSubmissions,
   ResumableDriverApiError,
   submitPod,
-  submitRatecon,
   submitStandalonePod,
   type PendingPage,
   type SubmissionKind,
@@ -50,7 +48,8 @@ export default function ScanPage() {
 
   const initialKind: SubmissionKind | null = useMemo(() => {
     const raw = searchParams.get('kind')
-    if (raw === 'ratecon') return 'RATECON'
+    // The driver app no longer takes rate confirmations (the office collects them); an old
+    // link or a remembered scan for one opens the normal "what are you sending?" screen.
     if (raw === 'pod') return 'POD'
     if (raw === 'misc') return 'MISC'
     return null
@@ -77,7 +76,6 @@ export default function ScanPage() {
   const initialStopLabel = (searchParams.get('stopLabel') ?? '').trim() || null
 
   const initialPhase: Phase = useMemo(() => {
-    if (initialKind === 'RATECON') return 'capture'
     // Photos go straight to the camera: there is nothing to choose, they are for the stop they were started from.
     if (initialKind === 'MISC') return 'capture'
     if (initialKind === 'POD') return initialSubmissionId || initialPro || initialLoadId ? 'capture' : 'select'
@@ -203,14 +201,7 @@ export default function ScanPage() {
     setPhase('submitting')
 
     try {
-      if (kind === 'RATECON') {
-        await submitRatecon({
-          pages,
-          referenceNumber: referenceNumber.trim() || undefined,
-          note: note.trim() || undefined,
-          resumeFromId: resumeFromId ?? undefined,
-        })
-      } else if (kind === 'MISC') {
+      if (kind === 'MISC') {
         const submissionId = await submitMisc({
           pages,
           referenceNumber: referenceNumber.trim() || undefined,
@@ -301,19 +292,6 @@ export default function ScanPage() {
         </p>
 
         <Button
-          size="lg"
-          className="h-24 flex-col gap-2 text-lg"
-          onClick={() => {
-            setKind('RATECON')
-            setPhase('capture')
-          }}
-        >
-          <Truck className="h-6 w-6" />
-          Rate confirmation
-        </Button>
-
-        <Button
-          variant="outline"
           size="lg"
           className="h-24 flex-col gap-2 text-lg"
           onClick={() => {

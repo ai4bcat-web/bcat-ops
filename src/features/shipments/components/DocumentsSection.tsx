@@ -18,6 +18,7 @@
  *    voiding stops a row counting without deleting the file, and a pointer row cannot
  *    be renamed because its bytes belong to another store.
  */
+import { isCarShipperLoad } from '@/lib/carShipper'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, Archive, Ban, Check, ChevronDown, Copy, Download, Eye, FileSignature, FileText, Link2,
@@ -116,7 +117,7 @@ export function DocumentsSection({
   const [dialog, setDialog] = useState<DocDialog>(null)
   const [preview, setPreview] = useState<{ doc: ShipmentDocumentRecord; url: string | null } | null>(null)
 
-  const docs = useShipmentDocuments(shipment.id, { bundle, customer, settings, legacyImported: shipment.legacyImported })
+  const docs = useShipmentDocuments(shipment.id, { bundle, customer, settings, legacyImported: shipment.legacyImported, carShipper: isCarShipperLoad(shipment) })
 
   const divisionKey = load?.divisionKey ?? null
 

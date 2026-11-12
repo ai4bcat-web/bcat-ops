@@ -35,7 +35,22 @@ describe('per-load required documents', () => {
       settings: null,
       extraDocTypes: ['LUMPER_RECEIPT'],
     })
-    expect(gate.required).toEqual(['POD', 'LUMPER_RECEIPT'])
-    expect(gate.missing).toEqual(['POD', 'LUMPER_RECEIPT'])
+    expect(gate.required).toEqual(['POD', 'RATE_CON', 'LUMPER_RECEIPT'])
+    expect(gate.missing).toEqual(['POD', 'RATE_CON', 'LUMPER_RECEIPT'])
+  })
+
+  it('leaves the rate confirmation off a car-shipping load', () => {
+    const gate = evaluateDocGate({
+      scope: 'CUSTOMER',
+      order: { id: 'o1' },
+      loadIds: ['l1'],
+      loadCarriers: [],
+      documents: [],
+      customer: { requiredDocsForInvoice: ['POD'] },
+      settings: null,
+      carShipper: true,
+    })
+    expect(gate.required).toEqual(['POD'])
+    expect(requiredDocTypesForRelease([], [], [], { carShipper: true })).toEqual(['POD'])
   })
 })

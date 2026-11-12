@@ -23,11 +23,18 @@ describe('LoadRequiredDocs', () => {
     const box = screen.getByTestId('card-documents-load-required')
     expect(box).toHaveTextContent('Proof of delivery')
     expect(box).toHaveTextContent('Rate confirmation (RC)')
-    expect(box).toHaveTextContent('outside carrier')
+    expect(box).toHaveTextContent('always')
+    expect(box).not.toHaveTextContent('when an outside carrier hauls it')
     expect(box).toHaveTextContent('customer requires')
     // BOL is the customer's, so it is not offered again as an extra.
     expect(screen.queryByTestId('card-documents-load-required-BOL')).toBeNull()
     expect(screen.getByTestId('card-documents-load-required-LUMPER_RECEIPT')).not.toBeChecked()
+  })
+
+  it('shows the rate confirmation as not needed on a car-shipping load', () => {
+    const car = { ...bundle(null), shipment: { id: 'shp-1', revDivision: 'CAR_SHIPPING' } } as unknown as ShipmentBundle
+    render(<LoadRequiredDocs bundle={car} customer={null} settings={null} disabled={false} refreshBundle={vi.fn()} />)
+    expect(screen.getByTestId('card-documents-load-required')).toHaveTextContent('not needed for car shipping')
   })
 
   it('saves a ticked extra for the load and refreshes the shipment', async () => {

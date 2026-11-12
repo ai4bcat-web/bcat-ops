@@ -70,6 +70,7 @@ import {
   nextVersion,
   supersede,
 } from '../../../src/lib/shipmentDocuments'
+import { isCarShipperLoad } from '../../../src/lib/carShipper'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { planPendingCarrierBills, readPendingBillContext, writePendingBill } from '../_shared/pendingCarrierBill'
 import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '../../../src/lib/releaseGate'
@@ -256,6 +257,7 @@ export function customerDocGate(args: {
     settings: args.settings as Pick<TmsSettings, 'defaultRequiredDocs' | 'requiredCarrierUploadTypes'> | null,
     scope: 'CUSTOMER',
     legacyImported: args.bundle.shipment?.legacyImported === true,
+    carShipper: isCarShipperLoad(args.bundle.shipment as { revDivision?: string | null } | null),
     // What this order's loads ask for on top of the customer's list (SET_LOAD_REQUIRED_DOCS).
     extraDocTypes: loadExtraDocTypes(
       (args.bundle.loads as Row[]).filter((load) => loadIds.includes(String(load.id))) as { requiredDocTypes?: string[] | null }[],

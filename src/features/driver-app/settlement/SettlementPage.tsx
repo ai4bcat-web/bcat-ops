@@ -240,14 +240,6 @@ export function SettlementPage() {
               <FilePlus2 className="h-4 w-4" />
               Send a POD
             </Button>
-            <Button
-              variant="outline"
-              className="h-12 w-full justify-start gap-2 text-base"
-              onClick={() => navigate('/driver/scan?kind=ratecon')}
-            >
-              <FilePlus2 className="h-4 w-4" />
-              Send a rate confirmation
-            </Button>
           </div>
         </div>
       </div>

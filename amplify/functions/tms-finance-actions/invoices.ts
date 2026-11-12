@@ -50,6 +50,7 @@ import {
   releaseGateOf,
   type ReleaseGateResult,
 } from '../../../src/lib/releaseGate'
+import { isCarShipperLoad } from '../../../src/lib/carShipper'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
 import { isCustomerUnresolved, unresolvedCustomerMessage } from '../../../src/lib/customerResolution'
 import { canEmailTo, evaluateDocGate, gateLoadIds } from '../../../src/lib/shipmentDocuments'
@@ -227,6 +228,7 @@ function docGateFor(context: OrderContext): DocGateResult {
   return evaluateDocGate({
     scope: 'CUSTOMER',
     legacyImported: context.shipment?.legacyImported === true,
+    carShipper: isCarShipperLoad(context.shipment as { revDivision?: string | null } | null),
     documents: context.documents,
     order: context.order,
     loadIds: context.gateLoadIds,
