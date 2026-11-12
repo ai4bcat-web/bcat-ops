@@ -13,6 +13,7 @@
  * Step R re-skinned it onto the MVMNT kit as the Commissions tab of My Brokerage, so
  * the page is a body: `BrokeragePage` owns the h1.
  */
+import { DenseTable } from '@/features/tms/grid/DenseTable'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
@@ -704,39 +705,22 @@ function HistoryTab({ rows, month, statusFacet, kindFacet, onStatus, onKind, onC
         </TmsButton>
       </div>
 
-      <Table>
-        <thead>
-          <tr>
-            <th scope="col">Shipment</th>
-            <th scope="col">Customer</th>
-            <th scope="col">Rep</th>
-            <th scope="col">Role</th>
-            <th scope="col">Kind</th>
-            <th scope="col">Status</th>
-            <th scope="col" style={NUM}>Net</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={7} className="tms-muted" style={{ padding: '32px 0', textAlign: 'center' }}>
-                Nothing matches in {monthLabel(month)}.
-              </td>
-            </tr>
-          )}
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td>{row.shipmentNumber ?? row.orderId}</td>
-              <td>{row.customerName ?? '—'}</td>
-              <td>{row.repName ?? row.repId}</td>
-              <td>{roleLabel(row)}</td>
-              <td>{kindLabel(row.kind)}</td>
-              <td>{statusLabel(row.status)}</td>
-              <td style={NUM}>{formatCents(row.netCents)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
+      <DenseTable<CommissionRecord>
+        gridId="commissions-history"
+        aria-label="Commission history"
+        rows={rows}
+        rowKey={(row) => row.id}
+        empty={<span className="tms-muted">Nothing matches in {monthLabel(month)}.</span>}
+        columns={[
+          { key: 'shipment', header: 'Shipment', text: (row) => row.shipmentNumber ?? row.orderId ?? '' },
+          { key: 'customer', header: 'Customer', filter: 'multi', text: (row) => row.customerName ?? '' },
+          { key: 'rep', header: 'Rep', filter: 'multi', text: (row) => row.repName ?? row.repId ?? '' },
+          { key: 'role', header: 'Role', filter: 'multi', text: (row) => roleLabel(row) },
+          { key: 'kind', header: 'Kind', filter: 'multi', text: (row) => kindLabel(row.kind) },
+          { key: 'status', header: 'Status', filter: 'multi', text: (row) => statusLabel(row.status) },
+          { key: 'net', header: 'Net', align: 'right', filter: 'number', numberOf: (row) => (row.netCents ?? 0) / 100, text: (row) => formatCents(row.netCents) },
+        ]}
+      />
     </div>
   )
 }
