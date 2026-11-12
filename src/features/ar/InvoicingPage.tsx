@@ -22,13 +22,11 @@ export function InvoicingPage() {
   const payable = pathname.startsWith('/tms/invoicing/payable')
   // Factored invoices (sent to OTR) live in their own view; Receivable is what we invoice by hand.
   const factored = pathname.startsWith('/tms/invoicing/factored')
-  // The routes accept the original page key or `tms`, so the tabs do too — a `page-tms`
-  // user sees both sides, exactly as the guards let them.
-  const tms = hasPageAccess('tms')
+  // Accounting pages open only on their own grant (src/lib/accountingAccess.ts), so each view does too.
   const tabs: TmsTab[] = [
-    ...(tms || hasPageAccess('invoicing') ? [{ key: 'receivable', label: 'Receivable' }] : []),
-    ...(tms || hasPageAccess('factoring') ? [{ key: 'factored', label: 'Factored' }] : []),
-    ...(tms || hasPageAccess('carrierPay') ? [{ key: 'payable', label: 'Payable' }] : []),
+    ...(hasPageAccess('invoicing') ? [{ key: 'receivable', label: 'Receivable' }] : []),
+    ...(hasPageAccess('factoring') ? [{ key: 'factored', label: 'Factored' }] : []),
+    ...(hasPageAccess('carrierPay') ? [{ key: 'payable', label: 'Payable' }] : []),
   ]
 
   const viewTabs = {

@@ -24,7 +24,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { createShipment, getTmsSettings } from '@/lib/apiClient'
 import { errorMessage } from '@/lib/utils/errorMessage'
-import { canDeleteFactoringItem, canSetCustomerPaid } from '@/lib/auth/admin'
+import { canDeleteFactoringItem } from '@/lib/auth/admin'
+import { hasAccountingPage } from '@/lib/accountingAccess'
 import { toast } from 'sonner'
 import { FactoringRowFields } from './FactoringRowFields'
 import { fieldsReadyLabel, isReadyToSubmit } from './factoringFields'
@@ -43,7 +44,6 @@ import { ManualInvoicePanel } from './ManualInvoicePanel'
 import { manualSentInfo } from '@/lib/manualInvoice'
 import { noBuyInfo } from '@/lib/noBuy'
 import { mayInvoiceManually, needsManualInvoice, otrRejection } from '@/lib/otrRejection'
-import { canReleaseToBilling } from '@/lib/navItems'
 import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
 import { CustomerPaidCell, CustomerPaidDialog } from './CustomerPaidCell'
 import { formatPaidOn } from './formatPaidOn'
@@ -464,7 +464,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   /** The row whose Customer paid dialog / Send to OTR again confirmation is open. */
   const [paidEditId, setPaidEditId] = useState<string | null>(null)
   const [resendId, setResendId] = useState<string | null>(null)
-  const canEditPaid = canSetCustomerPaid(user)
+  const canEditPaid = hasAccountingPage(user?.groups, user?.email, 'factoring')
 
   // Deleting a row drops the record that a PRO was ever sent for factoring, so it is
   // limited to the two people who run factoring rather than every admin.
@@ -955,7 +955,7 @@ export function FactoringPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         <InvoiceManuallyDialog
           item={manualMoveItem}
           customer={customers.find((c) => c.id === manualMoveItem.customerId) ?? null}
-          canChangeDefault={canReleaseToBilling(user?.groups, user?.email)}
+          canChangeDefault={hasAccountingPage(user?.groups, user?.email, 'invoicing')}
           onClose={() => setManualMoveId(null)}
           onDone={refresh}
         />

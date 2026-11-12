@@ -97,10 +97,11 @@ export interface NavSectionsResult {
   businesses: Array<{ key: string }>
 }
 
+// Accounting pages open only on their own grant (or ADMIN/owner), never on the broad `tms` grant: src/lib/accountingAccess.ts.
 const ACCOUNTING_CHILDREN: NavChildDef[] = [
-  { to: '/tms/invoicing', label: 'Accounts Receivable', pageKey: 'invoicing', tms: true, badgeKey: 'arToInvoice', exclude: ['/tms/invoicing/payable'] },
-  { to: '/tms/invoicing/payable', label: 'Accounts Payable', pageKey: 'carrierPay', tms: true, badgeKey: 'apToReview' },
-  { to: '/tms/vendors', label: 'Vendors', pageKey: 'vendorAp', tms: true },
+  { to: '/tms/invoicing', label: 'Accounts Receivable', pageKey: 'invoicing', badgeKey: 'arToInvoice', exclude: ['/tms/invoicing/payable'] },
+  { to: '/tms/invoicing/payable', label: 'Accounts Payable', pageKey: 'carrierPay', badgeKey: 'apToReview' },
+  { to: '/tms/vendors', label: 'Vendors', pageKey: 'vendorAp' },
 ]
 
 /** Settlements and time cards: the pages the sidebar used to list under Ivan Cartage. Same paths and page grants. */

@@ -66,14 +66,14 @@ function item(over: Partial<FactoringItem> = {}): FactoringItem {
   } as FactoringItem
 }
 
-async function setup(items: FactoringItem[], email = 'ryne@bcatcorp.com') {
+async function setup(items: FactoringItem[], email = 'ryne@bcatcorp.com', groups: string[] = []) {
   const refresh = vi.fn()
   const removeItem = vi.fn().mockResolvedValue(undefined)
   hookMock.mockReturnValue({
     items, loading: false, error: null, pendingIds: new Set<string>(),
     refresh, updateStatus: vi.fn(), removeItem,
   })
-  authMock.mockReturnValue({ user: { email, groups: [] } })
+  authMock.mockReturnValue({ user: { email, groups } })
   // Let the mount-time settings read land inside act, before the test acts on the page.
   await act(async () => { render(<FactoringPage />) })
   return { refresh, removeItem }
@@ -223,9 +223,9 @@ describe('Customer paid', () => {
     expect(screen.getByTestId('customer-paid-14749').textContent).toMatch(/Check 2383731/)
   })
 
-  it('lets finance set it, and gives everyone else a read-only date', async () => {
+  it('lets anyone with the Factoring page set it (page access is every action on the page)', async () => {
     setCustomerPaid.mockResolvedValue({ customerPaidOn: '2026-10-28', customerPaymentRef: null })
-    const { refresh } = await setup([item({ id: '14700', proNumber: '14700', status: 'PENDING_WITH_OTR' })], 'jenny@bcatcorp.com')
+    const { refresh } = await setup([item({ id: '14700', proNumber: '14700', status: 'PENDING_WITH_OTR' })], 'kel@bcatcorp.com', ['page-factoring'])
     fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Set the date the customer paid PRO 14700' }))
     const dialog = screen.getByRole('dialog')
@@ -235,7 +235,7 @@ describe('Customer paid', () => {
     expect(refresh).toHaveBeenCalled()
   })
 
-  it('hides the editor from someone who is not finance', async () => {
+  it('hides the editor from someone without the Factoring page', async () => {
     await setup([paid()], 'driver@bcatcorp.com')
     fireEvent.click(screen.getByRole('tab', { name: /^Pending with OTR/ }))
     expect(screen.getByTestId('customer-paid-14749').textContent).toMatch(/Oct 30, 2026/)

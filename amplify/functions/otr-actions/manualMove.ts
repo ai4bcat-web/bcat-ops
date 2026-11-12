@@ -16,6 +16,7 @@
  */
 import { isValidEmail, type BillingMethod } from '../../../src/lib/billingMethod'
 import { otrStatusMeta } from '../../../src/lib/otrInvoiceStatus'
+import { accountingAccessMessage, hasAccountingPage } from '../../../src/lib/accountingAccess'
 
 export type Row = Record<string, unknown>
 
@@ -54,8 +55,6 @@ export interface Caller {
   email: string
   groups: string[]
 }
-
-export const BILLING_RELEASE_GROUP = 'page-billingRelease'
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const isAdminCaller = (c: Caller) => c.groups.includes('ADMIN') || c.email.trim().toLowerCase() === OWNER_EMAIL
@@ -127,9 +126,9 @@ export async function manualInvoiceMove(store: MoveStore, input: ManualMoveInput
   let customer: Row | null = null
   let customerPlan: { method: BillingMethod | null; apEmail: string | null; setApEmail: string | null } | null = null
   if (input.changeCustomerDefault) {
-    // The billing-release permission: admins (ADMIN group, the owner) or the per-user grant.
-    if (!isAdminCaller(caller) && !caller.groups.includes(BILLING_RELEASE_GROUP)) {
-      return fail('Changing a customer\'s default billing method needs the billing release permission (Release to billing / Send invoice).')
+    // Whoever may use Invoicing may change how its customers are billed (page access is every action).
+    if (!hasAccountingPage(caller.groups, caller.email, 'invoicing')) {
+      return fail(accountingAccessMessage('invoicing'))
     }
     customer = await customerFor(store, item, invoice)
     if (!customer) return fail('This row has no customer on file, so its default billing method cannot be changed. Link the customer first.')
