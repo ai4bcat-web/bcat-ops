@@ -102,6 +102,12 @@ function bundleOf(status: string): ShipmentBundle {
   } as unknown as ShipmentBundle
 }
 
+/** An order still waiting on Load Review (arStatus DOCS_NEEDED), so only the delivered rule decides Submit for Review. */
+function reviewableBundleOf(status: string): ShipmentBundle {
+  const b = bundleOf(status)
+  return { ...b, orders: b.orders.map((o) => ({ ...o, arStatus: 'DOCS_NEEDED' })) } as unknown as ShipmentBundle
+}
+
 function renderForm(mode: 'create' | 'edit', entry?: string | { pathname: string; state: unknown }) {
   return render(
     <MemoryRouter initialEntries={[entry ?? (mode === 'create' ? '/new' : '/sh-1/edit')]}>
@@ -320,13 +326,13 @@ describe('ShipmentFormPage — edit mode', () => {
   })
 
   it('a DELIVERED shipment can Submit for Review', () => {
-    h.shipment = { bundle: bundleOf('DELIVERED'), loading: false, error: null }
+    h.shipment = { bundle: reviewableBundleOf('DELIVERED'), loading: false, error: null }
     renderForm('edit')
     expect((screen.getByTestId('ship-form-submit-review') as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('a non-DRAFT shipment has no Save draft or Submit order; Submit for Review is there but disabled until it has delivered', () => {
-    h.shipment = { bundle: bundleOf('OPEN'), loading: false, error: null }
+    h.shipment = { bundle: reviewableBundleOf('OPEN'), loading: false, error: null }
     renderForm('edit')
     expect(screen.queryByTestId('ship-form-save-draft')).toBeNull()
     expect(screen.queryByTestId('ship-form-submit')).toBeNull()
