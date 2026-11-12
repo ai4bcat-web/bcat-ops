@@ -69,6 +69,8 @@ import type {
   LocationRecord,
   DocGateResult,
   InvoiceBillTo,
+  InvoiceAdjustment,
+  InvoiceLine,
   InvoiceRecord,
   LoadCarrierRecord,
   LoadChargeRecord,
@@ -562,6 +564,75 @@ async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: C
     console.error('[tms-finance-actions] invoice PDF failed', invoice.id, String(err))
     return { ...invoice, pdfKey: null, pdfSizeBytes: null, pdfVersion: null }
   }
+}
+
+/**
+ * REVISE_INVOICE — save edits INTO the existing invoice (never a second invoice): the lines are
+ * re-read from the shipment's current customer charges, the hand adjustments (credits/debits,
+ * each with a reason) replace the previous set, totals and balance are recomputed and the PDF
+ * re-rendered. A sent invoice becomes 'Rev N'; an unsent draft keeps its revision. Refused once
+ * money is applied (use a credit memo) or once a factored invoice is with OTR.
+ */
+export async function reviseInvoice(input: Row, caller: Caller): Promise<Row> {
+  const invoiceId = assertString(input.invoiceId, 'invoiceId')
+  const reason = optionalString(input.reason, MAX_NOTE)
+  const row = await getById(INVOICE_TABLE_NAME, invoiceId)
+  if (!row) throw new Error(`Invoice not found: ${invoiceId}`)
+  const invoice = row as unknown as InvoiceRecord
+  if (invoice.status === 'VOID') throw new Error('That invoice is void')
+  if (isCarriedOver(row)) throw new Error(CARRIED_OVER_MESSAGE)
+  if ((invoice.paidCents ?? 0) > 0 || (invoice.writtenOffCents ?? 0) > 0) {
+    throw new Error('Money has been applied to this invoice; issue a credit memo and a replacement invoice instead of revising it')
+  }
+  if (invoice.factoringItemId) {
+    const item = await getById(FACTORING_ITEM_TABLE_NAME, invoice.factoringItemId)
+    if (item?.otrInvoiceId) throw new Error('This invoice is already with OTR; change it from the factoring queue')
+  }
+  const rawAdjustments = Array.isArray(input.adjustments) ? input.adjustments : []
+  const now = nowIso()
+  const adjustments: InvoiceAdjustment[] = rawAdjustments.map((raw, i) => {
+    const a = raw as Row
+    const kind = a.kind === 'CREDIT' || a.kind === 'DEBIT' ? a.kind : null
+    const amountCents = typeof a.amountCents === 'number' && Number.isInteger(a.amountCents) && a.amountCents > 0 ? a.amountCents : null
+    const description = optionalString(a.description, 200)
+    const why = optionalString(a.reason, MAX_NOTE)
+    if (!kind || !amountCents || !description || !why) throw new Error(`Adjustment ${i + 1} needs CREDIT or DEBIT, a positive amount, a description and a reason`)
+    return { kind, amountCents, description, reason: why, by: optionalString(a.by, 200) ?? caller.email, at: optionalString(a.at, 40) ?? now }
+  })
+
+  const context = await readOrderContext(invoice.orderId)
+  assertNotSquareInvoiced(context.shipment, 'revising its invoice')
+  const { lines: chargeLines, subtotalCents } = invoiceLinesFor(context.charges, invoice.orderId)
+  const adjustmentLines: InvoiceLine[] = adjustments.map((a, i) => {
+    const signed = a.kind === 'CREDIT' ? -a.amountCents : a.amountCents
+    return { chargeId: `adj-${i + 1}`, code: 'ADJUSTMENT', label: `${a.kind === 'CREDIT' ? 'Credit' : 'Debit'}: ${a.description}`, rateCents: signed, count: 1, amountCents: signed }
+  })
+  const totalCents = subtotalCents + adjustmentLines.reduce((sum, l) => sum + l.amountCents, 0)
+  if (totalCents <= 0) throw new Error('The revised invoice total must be more than zero')
+  const sent = Boolean(invoice.sentAt || invoice.markedSentAt || (invoice.sentCount ?? 0) > 0)
+  const revision = sent ? (invoice.revision ?? 1) + 1 : (invoice.revision ?? 1)
+
+  await transact([
+    updateTx(INVOICE_TABLE_NAME, invoiceId, {
+      lines: [...chargeLines, ...adjustmentLines] as unknown as Row[],
+      adjustments: adjustments as unknown as Row[],
+      subtotalCents,
+      totalCents,
+      balanceCents: totalCents,
+      revision,
+      updatedAt: now,
+      updatedBy: caller.email,
+      version: (invoice.version ?? 1) + 1,
+    }, { condition: 'paidCents = :zero AND writtenOffCents = :zero', extraValues: { ':zero': { N: '0' } } }),
+    updateTx(ORDER_TABLE_NAME, invoice.orderId, { arBalanceCents: totalCents, updatedAt: now, updatedBy: caller.email }),
+  ], 'invoice revise')
+
+  const fresh = (await getById(INVOICE_TABLE_NAME, invoiceId)) as unknown as InvoiceRecord
+  const { documentFiled, ...stored } = await storePdf(fresh, context, caller)
+  await writeAudit('Invoice', invoiceId, 'REVISE_INVOICE', caller, {
+    reason, revision, before: { totalCents: invoice.totalCents, revision: invoice.revision ?? 1 }, after: { totalCents, revision }, adjustments,
+  })
+  return { invoice: stored as unknown as Row, documentFiled: documentFiled !== false, revision }
 }
 
 export async function renderInvoicePdf(input: Row, caller: Caller): Promise<Row> {

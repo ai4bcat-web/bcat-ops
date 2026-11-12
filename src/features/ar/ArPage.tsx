@@ -10,6 +10,7 @@
  * signed download. The page reports exactly that and never claims a send that did not
  * happen — a false "sent" here is a customer who never got their bill.
  */
+import { InvoiceEditDrawer } from './components/InvoiceEditDrawer'
 import { ArSummaryStrip } from './ArSummaryStrip'
 import { computeArSummary, divisionKeyOf } from './arSummary'
 import { SendReviewCarousel } from './components/SendReviewCarousel'
@@ -69,6 +70,7 @@ import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord, Us
 
 /** Which dialog is open, and the one thing it is open about. Mount is the `open` flag. */
 type ArDialog =
+  | { kind: 'edit'; invoice: InvoiceRecord }
   | { kind: 'review'; invoices: InvoiceRecord[] }
   | { kind: 'statement'; customerId: string; customerName: string }
   | { kind: 'generate'; orderId: string; shipmentNumber: string | null }
@@ -462,6 +464,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onPayment: (inv) => setDialog({ kind: 'payment', customerId: inv.customerId, customerName: inv.customerName ?? '', invoiceId: inv.id }),
       onFactor: (inv) => setDialog({ kind: 'factor', invoiceId: inv.id }),
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
+      onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
       onVoid: (inv) => setDialog({ kind: 'void', invoice: inv }),
     })
     : tab === 'payments' ? paymentsView({
@@ -540,6 +543,18 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           busy={busy}
           onClose={() => setDialog(null)}
           onDone={closeAndRefresh}
+        />
+      )}
+      {dialog?.kind === 'edit' && (
+        <InvoiceEditDrawer
+          invoice={dialog.invoice}
+          customer={customerById.get(dialog.invoice.customerId)}
+          shipment={lookups.shipmentsById.get(dialog.invoice.shipmentId)}
+          factoringItem={dialog.invoice.factoringItemId ? factorByItemId.get(dialog.invoice.factoringItemId) : undefined}
+          canEdit={canRelease}
+          onClose={() => setDialog(null)}
+          onSaved={() => void refreshAll()}
+          onSend={(inv) => setDialog({ kind: 'review', invoices: [inv] })}
         />
       )}
       {dialog?.kind === 'review' && (
@@ -658,7 +673,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 
 function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, canVoid, selected, justGenerated, factorByItemId, customerById,
-  months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onBatchEmail, onPayment, onFactor, onVoid, onReview,
+  months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onBatchEmail, onPayment, onFactor, onVoid, onReview, onEdit,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -684,6 +699,7 @@ function queueView({
   onPayment: (invoice: InvoiceRecord) => void
   onFactor: (invoice: InvoiceRecord) => void
   onReview: (invoices: InvoiceRecord[]) => void
+  onEdit: (invoice: InvoiceRecord) => void
   onVoid: (invoice: InvoiceRecord) => void
   canVoid: boolean
 }): ListView {
@@ -801,7 +817,7 @@ function queueView({
       case 'actions': {
         const inv = row.invoice
         const view = inv
-          ? <Link className="tms-icon-btn tms-icon-btn-plain" to={`/tms/invoicing/invoices/${inv.id}`} aria-label={`View or edit invoice ${inv.number}`} title="View / edit"><Eye size={15} /></Link>
+          ? <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label={`View or edit invoice ${inv.number}`} title="View / edit" onClick={() => onEdit(inv)}><Eye size={15} /></button>
           : null
         if (ready && !inv) {
           return (

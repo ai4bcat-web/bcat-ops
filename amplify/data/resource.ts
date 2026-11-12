@@ -2407,6 +2407,8 @@ const schema = a.schema(stageTypes({
       aljexDueDate:  a.string(),    // Step AW: the Aljex due date (YYYY-MM-DD) kept as a reference when a carried-over invoice is redated (Danisco 120 days)
       aljexTerms:    a.integer(),   // Step AW: the Aljex customer terms days kept as a reference
       number:          a.string().required(),   // same value as `id`
+      revision:        a.integer(),             // 1 until revised after sending ('Rev 2' …)
+      adjustments:     a.json(),                // InvoiceAdjustment[] — hand credits/debits with reasons
       orderId:         a.string().required(),
       shipmentId:      a.string().required(),
       shipmentNumber:  a.string(),

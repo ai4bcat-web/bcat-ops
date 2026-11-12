@@ -35,7 +35,7 @@ import type {
   TrackingContact, TrackingLinkRecord, CustomerNotification,
   ShipmentDocumentRecord, ShipmentDocumentType, ShipmentDocumentAudience,
   ShipmentNoticeRecord, DocGateResult,
-  InvoiceRecord, ArPaymentRecord, ArPaymentMethod, ArSettings, ArStatus,
+  InvoiceRecord, InvoiceAdjustment, ArPaymentRecord, ArPaymentMethod, ArSettings, ArStatus,
   BatchShipmentTask, BatchShipmentTaskResult,
   PaymentApplication, CreditApplication,
   ApStatus, CarrierBillRecord, ApPaymentRecord, ApPaymentMethod, ApPaymentApplication,
@@ -7240,7 +7240,7 @@ export async function uploadDispatchMedia(file: File): Promise<string> {
 // the page, the same bargain the document models strike above.
 
 export type {
-  InvoiceRecord, InvoiceLine, InvoiceStatus, InvoiceBillTo, InvoiceBatchEmailMode, RemitTo,
+  InvoiceRecord, InvoiceAdjustment, InvoiceLine, InvoiceStatus, InvoiceBillTo, InvoiceBatchEmailMode, RemitTo,
   ArPaymentRecord, ArPaymentKind, ArPaymentMethod, PaymentApplication, CreditApplication,
   ArSettings,
 } from '@/types/tms'
@@ -7616,6 +7616,11 @@ export interface AgingStatementResult {
   emailError?: string | null
   sentAt?: string | null
   statement: { rows: number; totalCents: number; companyName: string; byBucket: Record<string, number> }
+}
+
+/** Save edits into the existing invoice: re-read charges, replace hand adjustments, recompute, re-render (Rev N once sent). */
+export async function reviseInvoice(input: { invoiceId: string; adjustments: InvoiceAdjustment[]; reason?: string }): Promise<{ invoice: InvoiceRecord; revision: number }> {
+  return financeAction<{ invoice: InvoiceRecord; revision: number }>('REVISE_INVOICE', input)
 }
 
 /** A customer's aging statement: preview it (send false) or e-mail it (send true). */

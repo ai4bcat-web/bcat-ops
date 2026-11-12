@@ -22,6 +22,7 @@ import {
   markInvoiceSent,
   previewInvoice,
   renderInvoicePdf,
+  reviseInvoice,
   saveArSettings,
   voidInvoice,
 } from './invoices'
@@ -127,6 +128,7 @@ type Action =
   | 'SEND_INVOICE'
   | 'SYNC_FACTORING_CHANGE'
   | 'AGING_STATEMENT'
+  | 'REVISE_INVOICE'
   | 'SETTLE_FACTORED_INVOICES'
   | 'BROKERAGE_REP_ROLLUP'
 
@@ -272,6 +274,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return sendInvoice(input, caller)
     case 'SETTLE_FACTORED_INVOICES':
       return settleFactoredInvoices(caller) as unknown as Promise<Row>
+    case 'REVISE_INVOICE':
+      return reviseInvoice(input, caller)
     case 'AGING_STATEMENT':
       return agingStatement(input, caller)
     case 'SYNC_FACTORING_CHANGE':

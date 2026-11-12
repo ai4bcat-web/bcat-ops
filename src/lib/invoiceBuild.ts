@@ -470,6 +470,7 @@ export interface InvoiceDataInput {
     | 'customerName'
     | 'billTo'
     | 'remitTo'
+    | 'revision'
     | 'lines'
     | 'references'
     | 'subtotalCents'
@@ -664,7 +665,8 @@ export function invoiceData(input: InvoiceDataInput): InvoiceInput {
     },
     remitTo,
     billTo,
-    number: invoice.number,
+    // A revised invoice keeps its number and says which revision it is (Ryne 2026-11-12).
+    number: (invoice.revision ?? 1) > 1 ? `${invoice.number} Rev ${invoice.revision}` : invoice.number,
     invoiceDate: invoice.invoiceDate,
     dueAt: invoice.dueAt,
     termsDays: invoice.termsDays,

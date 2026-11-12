@@ -1081,6 +1081,35 @@ describe('invoice numbering', () => {
   })
 })
 
+describe('REVISE_INVOICE', () => {
+  it('saves credits and debits into the same invoice, recomputes and re-renders; a sent invoice becomes Rev 2', async () => {
+    const { invoiceId } = await generate()
+    const before = table(TABLES.invoice).size
+    const out = (await call('REVISE_INVOICE', {
+      invoiceId,
+      adjustments: [{ kind: 'CREDIT', description: 'Detention waived', amountCents: 10_000, reason: 'customer request' }],
+    })) as { revision: number }
+    expect(out.revision).toBe(1)
+    expect(table(TABLES.invoice).size).toBe(before)
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ totalCents: 240_000, balanceCents: 240_000 })
+
+    table(TABLES.invoice).set(invoiceId, { ...table(TABLES.invoice).get(invoiceId)!, sentCount: 1, sentAt: '2026-11-12T12:00:00.000Z' })
+    const again = (await call('REVISE_INVOICE', {
+      invoiceId,
+      adjustments: [{ kind: 'DEBIT', description: 'Lumper', amountCents: 5_000, reason: 'receipt attached' }],
+    })) as { revision: number }
+    expect(again.revision).toBe(2)
+    expect(table(TABLES.invoice).get(invoiceId)).toMatchObject({ totalCents: 255_000, revision: 2 })
+  })
+
+  it('refuses once money is applied, and refuses an adjustment without a reason', async () => {
+    const { invoiceId } = await generate()
+    await expect(call('REVISE_INVOICE', { invoiceId, adjustments: [{ kind: 'CREDIT', description: 'x', amountCents: 100 }] })).rejects.toThrow(/reason/)
+    await call('RECORD_PAYMENT', { customerId: CUSTOMER_ID, receivedAt: '2026-10-25', method: 'CHECK', amountCents: 100_000, applications: [{ invoiceId, amountCents: 100_000 }], creditApplications: [] })
+    await expect(call('REVISE_INVOICE', { invoiceId, adjustments: [] })).rejects.toThrow(/credit memo/)
+  })
+})
+
 describe('VOID_INVOICE', () => {
   it('is an admin act: Invoicing access alone cannot void', async () => {
     const { invoiceId } = await generate()
