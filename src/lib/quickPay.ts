@@ -23,6 +23,21 @@ export const DEFAULT_QUICK_PAY_TIERS: readonly QuickPayTier[] = [
   { days: 21, feeBps: 150 },
 ]
 
+/**
+ * The two quick-pay offers the AP desk makes on a recorded bill (Ryne 2026-11-12): paid in 2 days
+ * for 6%, or in 10 days for 3%. These are AP's own terms, separate from the booking ladder above,
+ * which prices quick pay when a carrier is booked.
+ */
+export const AP_QUICK_PAY_OPTIONS: readonly QuickPayTier[] = [
+  { days: 2, feeBps: 600 },
+  { days: 10, feeBps: 300 },
+]
+
+/** The AP offer for exactly this many days, or null. */
+export function apQuickPayOption(days: number): QuickPayTier | null {
+  return AP_QUICK_PAY_OPTIONS.find((t) => t.days === days) ?? null
+}
+
 /** The rung priced for exactly this many days, or null when nobody priced it. */
 export function tierFor(
   days: number,

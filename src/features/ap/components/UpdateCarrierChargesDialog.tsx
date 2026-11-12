@@ -12,6 +12,10 @@
  * rows and nothing else, so the arithmetic is `computeFinancials` exactly as it is on
  * the Financials tab. `UPDATE_CARRIER_CHARGES` takes this assignment's lines only and
  * re-derives the load's cached cost itself.
+ *
+ * The exception is a bill still in review that no money and no pay run has touched — the bills Move to
+ * billing creates. AP corrects the carrier pay there, and the Lambda re-snapshots the bill (gross,
+ * quick-pay fee, net) in the same write, so the shipment and the bill still agree.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
@@ -21,11 +25,14 @@ import { FinancialLines } from '@/features/shipments/components/FinancialLines'
 import {
   getShipmentBundle, getTmsSettings, graphqlErrorText, listCustomers, updateCarrierCharges,
 } from '@/lib/apiClient'
-import type { LoadChargeInput, PricingDefaults, ShipmentBundle, TmsSettings } from '@/types/tms'
+import { billMoneyLockReason } from '@/lib/carrierBill'
+import type { CarrierBillRecord, LoadChargeInput, PricingDefaults, ShipmentBundle, TmsSettings } from '@/types/tms'
 
-export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, open, onOpenChange, onDone }: {
+export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, bill, open, onOpenChange, onDone }: {
   loadCarrierId: string
   shipmentId: string
+  /** The bill recorded against this assignment, when there is one. */
+  bill?: CarrierBillRecord | null
   open: boolean
   onOpenChange: (open: boolean) => void
   onDone: () => void
@@ -75,7 +82,11 @@ export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, open, on
     onDone()
   }
 
-  const billed = assignment?.invoiceId != null || assignment?.chargesFinalizedAt != null
+  const recorded = assignment?.invoiceId != null || assignment?.chargesFinalizedAt != null
+  // A bill still in review with nothing applied to it can be corrected in place.
+  const lock = bill ? billMoneyLockReason(bill, { allowApproved: false }) : null
+  const reopened = recorded && bill != null && bill.id === assignment?.invoiceId && lock == null
+  const billed = recorded && !reopened
 
   return (
     <TmsDialog
@@ -106,14 +117,19 @@ export function UpdateCarrierChargesDialog({ loadCarrierId, shipmentId, open, on
 
       {!loading && assignment && assignment.kind === 'CARRIER' && billed && (
         <p className="tms-muted">
-          A bill is already recorded against this assignment, so its charges are final —
-          a bill names an exact amount and somebody is about to pay it. Void the bill first,
-          then fix the lines and record it again.
+          {lock && bill?.id === assignment.invoiceId
+            ? `${lock}, then change what the carrier is owed.`
+            : 'A bill is already recorded against this assignment, so its charges are final — a bill names an exact amount and somebody is about to pay it. Void the bill first, then fix the lines and record it again.'}
         </p>
       )}
 
       {!loading && assignment && assignment.kind === 'CARRIER' && !billed && (
         <div className="max-h-[70vh] overflow-auto">
+          {reopened && (
+            <p className="mb-2 text-xs tms-muted">
+              Saving changes the shipment's carrier charges and updates this bill to match (carrier pay, quick-pay fee and net).
+            </p>
+          )}
           <FinancialLines
             charges={ours}
             catalog={settings?.chargeCodes ?? []}
