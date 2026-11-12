@@ -136,6 +136,8 @@ import {
   type BatchOutcome,
 } from './batchReview'
 
+const DELIVERED_ONLY_TIP = 'Counts only delivered shipments in this list.'
+
 type Period = { key: 'this' | 'last' | 'last3' } | { key: 'month'; month: string }
 
 /** An exact PRO or reference-sized token: shorter text is a filter, not a lookup. */
@@ -1055,21 +1057,27 @@ function BoardPane({
   }, [resetPage])
 
   // The stats strip counts what the list shows now, so it follows every filter. It is always on.
+  // Revenue and gross profit count only delivered shipments (DELIVERED is the shipment's last
+  // status; released, invoiced and paid live on the order, so those loads are still DELIVERED here).
   const kpis = useMemo<DenseKpi[]>(() => {
     let open = 0
     let moving = 0
     let delivered = 0
     let docs = 0
     let revenue = 0
+    const deliveredRows: ShipmentRow[] = []
     for (const r of filteredRows) {
       const status = boardStatusOf(r)
       if (status === 'OPEN') open += 1
       else if (status === 'DISPATCHED' || status === 'ARRIVED' || status === 'DEPARTED') moving += 1
-      else if (status === 'DELIVERED') delivered += 1
+      else if (status === 'DELIVERED') {
+        delivered += 1
+        deliveredRows.push(r)
+        revenue += r.revenueCents ?? 0
+      }
       if (docsMissingOf(r).length > 0) docs += 1
-      revenue += r.revenueCents ?? 0
     }
-    const split = profitByDivision(filteredRows, (code) => topLevelOf(divisions, code))
+    const split = profitByDivision(deliveredRows, (code) => topLevelOf(divisions, code))
     const margin = (d: { revenueCents: number; profitCents: number }) => (d.revenueCents > 0 ? ` (${Math.round((d.profitCents / d.revenueCents) * 100)}%)` : '')
     const part = (name: string, d: { revenueCents: number; profitCents: number }, muted = false) => (
       <span key={name} className={`tms-dg-kpi-part${d.profitCents < 0 ? ' tms-dg-kpi-part-bad' : ''}${muted ? ' tms-dg-kpi-part-muted' : ''}`}>
@@ -1082,11 +1090,11 @@ function BoardPane({
       { label: 'In transit', value: moving },
       { label: 'Delivered', value: delivered },
       { label: 'Missing docs', value: docs, tone: docs > 0 ? 'warn' : undefined },
-      { label: 'Revenue', value: formatCents(revenue) },
+      { label: 'Delivered revenue', value: <span title={DELIVERED_ONLY_TIP}>{formatCents(revenue)}</span> },
       {
-        label: 'Gross profit',
+        label: 'Delivered gross profit',
         value: (
-          <span className="tms-dg-kpi-split" title={`Total ${formatCents(split.total.profitCents)}${margin(split.total)}`}>
+          <span className="tms-dg-kpi-split" title={`${DELIVERED_ONLY_TIP} Total ${formatCents(split.total.profitCents)}${margin(split.total)}`}>
             {part('Brokerage', split.brokerage)}
             {part('Assets', split.assets)}
             {split.other.count > 0 && split.other.profitCents !== 0 ? part('Other', split.other, true) : null}
