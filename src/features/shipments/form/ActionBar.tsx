@@ -2,7 +2,7 @@
  * The bottom action bar (feedback 19): always visible under the form, 48 px, card background, top
  * border. Left: status chip, "Last saved X ago" / "Unsaved changes", and "N / M required" (click
  * scrolls the rail checklist into view and focuses the first missing row). Right: Cancel, Save draft,
- * Create shipment (create); Save changes, Save & exit, Submit order, Discard (edit). Keeps the old rail test ids.
+ * Create shipment (create); Save changes, Save & exit, Submit for Review, Discard (edit). Keeps the old rail test ids.
  */
 import { TmsBadge, TmsButton } from '@/features/tms/kit'
 import { saveStateText } from './saveState'
@@ -26,11 +26,13 @@ export interface ActionBarProps {
   onDiscard: () => void
   /** Edit mode: open the Duplicate dialog. Omitted on a create page. */
   onDuplicate?: () => void
-  /** Edit mode, when the load can go to Load Review now: save any edits, then push. Omitted otherwise. */
-  onPushToReview?: () => void
+  /** Edit mode: save any edits, then send the load to Load Review. Omitted on a create page. */
+  onSubmitForReview?: () => void
+  /** Why Submit for Review is unavailable (voided, canceled, imported, already in or past Load Review); null when it can run. */
+  submitReviewBlocked?: string | null
 }
 
-export function ActionBar({ createMode, status, dirty, savedAt, done, total, ready, busy, voided, onRun, onSaveExit, onDiscard, onDuplicate, onPushToReview }: ActionBarProps) {
+export function ActionBar({ createMode, status, dirty, savedAt, done, total, ready, busy, voided, onRun, onSaveExit, onDiscard, onDuplicate, onSubmitForReview, submitReviewBlocked }: ActionBarProps) {
   const isDraft = status === 'NEW' || status === 'DRAFT'
   const [nowMs, setNowMs] = useState(() => Date.now())
   useEffect(() => {
@@ -69,9 +71,6 @@ export function ActionBar({ createMode, status, dirty, savedAt, done, total, rea
             Save draft
           </TmsButton>
         ) : null}
-        {!createMode && status === 'DRAFT' ? (
-          <TmsButton size="sm" data-testid="ship-form-submit" disabled={busy || voided} onClick={() => onRun('submit')}>Submit order</TmsButton>
-        ) : null}
         <TmsButton
           size="sm" variant="primary" data-testid={createMode ? 'ship-form-create' : 'ship-form-save'}
           aria-disabled={!ready} data-ready={ready} disabled={busy || voided} onClick={() => onRun(createMode ? 'create' : 'save')}
@@ -79,12 +78,12 @@ export function ActionBar({ createMode, status, dirty, savedAt, done, total, rea
         >
           {createMode ? 'Create shipment' : 'Save changes'}
         </TmsButton>
-        {!createMode && onPushToReview ? (
+        {!createMode && onSubmitForReview ? (
           <TmsButton
-            size="sm" data-testid="ship-form-push-review" disabled={busy || voided} onClick={onPushToReview}
-            title="Saves your changes, then sends this load to Load Review. Billing release happens there."
+            size="sm" data-testid="ship-form-submit-review" disabled={busy || voided || !!submitReviewBlocked} onClick={onSubmitForReview}
+            title={submitReviewBlocked ?? 'Saves your changes, then sends this load to Load Review. Billing release happens there.'}
           >
-            Push to Load Review
+            Submit for Review
           </TmsButton>
         ) : null}
         {!createMode && onSaveExit ? (

@@ -569,6 +569,7 @@ export function QuotesPage({ onRealCount }: { onRealCount?: (n: number | null) =
         onRefresh={() => void refreshAll()}
         filterChips={chips}
         onAddFilter={filterable ? () => setFiltersOpen(true) : undefined}
+        folderTabs
         quickTabs={{
           tabs: QUOTE_TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] })),
           active: tab,

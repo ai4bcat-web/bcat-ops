@@ -12,9 +12,10 @@ import { toast } from 'sonner'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { reviewLoad, readyToInvoice, releaseToBilling, setSalesRep, setRevTag, type LoadReviewResult } from '@/lib/apiClient'
 import { DOCS_LANDING } from '@/features/shipments/workstations/tracking/legacyRoutes'
-import { evaluateLoadReview, pendingApRecordNotes, failingReasons, reviewAgeDays, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL } from '@/lib/loadReview'
+import { NO_DELIVERY_TIME_TIP, evaluateLoadReview, pendingApRecordNotes, failingReasons, reviewAgeDays, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL } from '@/lib/loadReview'
 import { CarrierBillsPanel } from './CarrierBillsPanel'
 import { deliveredText, deliveredTimeOf, reviewStatusText, reviewStatusTone } from './reviewStatus'
+import { LoadReviewDocuments } from './LoadReviewDocuments'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 
@@ -64,6 +65,18 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
   async function rereview() {
     try { setResult(await reviewLoad({ shipmentId: row.id })) } catch (err) { setError(err instanceof Error ? err.message : String(err)) }
   }
+  // A file or bill landed: re-run the review here, then let the board's cached columns catch up.
+  async function changed() {
+    await rereview()
+    void onRefresh()
+  }
+  // Fixing something in the shipment's own tab (opened in a new browser tab) and coming back re-runs the review.
+  useEffect(() => {
+    const onFocus = () => { if (!busy) void rereview() }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, row.id])
   async function move() {
     if (!result || !verdict.ok || released) return
     setBusy(true)
@@ -86,8 +99,8 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
       onFailure(message)
     } finally { setBusy(false) }
   }
-  function shipmentLink(tab: string, label: string) {
-    return canOpen ? <Link to={`/tms/shipments/${row.id}?tab=${tab}`}>{label}</Link>
+  function shipmentLink(tab: string, label: string, newTab = false) {
+    return canOpen ? <Link to={`/tms/shipments/${row.id}?tab=${tab}`} {...(newTab ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{label}</Link>
       : <span title="Needs the Shipments grant">{label}</span>
   }
   const values = {
@@ -101,8 +114,8 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
   const age = reviewAgeDays(row, now)
   return <TmsDrawer open onOpenChange={(open) => { if (!open) onClose() }} title={shipmentLink('overview', row.number)}
     description={`${row.customerName ?? '—'} · ${row.originCity ?? '—'} → ${row.destinationCity ?? '—'} · ${deliveredTimeOf(row) ? `Delivered ${formatDateTime(deliveredTimeOf(row))}` : deliveredText(row) === '—' ? 'Delivered —' : deliveredText(row)}`}
-    headerExtra={<><TmsBadge tone={reviewStatusTone(row)}>{reviewStatusText(row)}</TmsBadge><TmsBadge tone={verdict.ok ? 'green' : 'orange'}>{released ? 'Already released' : verdict.ok ? result ? 'Ready' : 'Looks ready' : `${reasons.length} to fix`}</TmsBadge><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'POD before delivery' : age + ' d'}</TmsBadge></>}
-    footer={<><TmsButton variant="primary" disabled={busy || !result || !verdict.ok || released || !!error || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => void move()}>Move to billing</TmsButton>{!canRelease && <p role="note" className="tms-muted">{BILLING_GRANT_MESSAGE}</p>}{shipmentLink('overview', 'Open shipment')}<TmsButton variant="ghost" onClick={onClose}>Close</TmsButton></>}>
+    headerExtra={<><TmsBadge tone={reviewStatusTone(row)}>{reviewStatusText(row)}</TmsBadge><TmsBadge tone={verdict.ok ? 'green' : 'orange'}>{released ? 'Already released' : verdict.ok ? result ? 'Ready' : 'Looks ready' : `${reasons.length} to fix`}</TmsBadge><span title={age == null ? NO_DELIVERY_TIME_TIP : undefined}><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'No delivery time' : age + ' d'}</TmsBadge></span></>}
+    footer={<><TmsButton variant="primary" disabled={busy || !result || !verdict.ok || released || !!error || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => void move()}>Move to billing</TmsButton>{!released && !verdict.ok && <p role="note" className="tms-muted">{`Fix ${reasons.length} ${reasons.length === 1 ? 'item' : 'items'} first.`}</p>}{!canRelease && <p role="note" className="tms-muted">{BILLING_GRANT_MESSAGE}</p>}{shipmentLink('overview', 'Open shipment')}<TmsButton variant="ghost" disabled={busy || !result} onClick={() => void rereview()}>Re-check</TmsButton><TmsButton variant="ghost" onClick={onClose}>Close</TmsButton></>}>
     {!result && !error && <p role="status">Checking release requirements…</p>}
     {error && <ReleaseGateList messages={releaseGateMessages(error) ?? [error]} />}
     {LOAD_REVIEW_CHECKS.map((key) => <TmsCard key={key} title={LOAD_REVIEW_CHECK_LABEL[key]}>
@@ -115,7 +128,8 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
         <TmsSelect aria-label="Subdivision" value={subdivision} disabled={busy || !children.length} onChange={(event) => setSubdivision(event.target.value)}><option value="">Whole division</option>{children.map((d) => <option key={d.id} value={d.code}>{d.name}</option>)}</TmsSelect>
         <TmsButton disabled={busy || !division} onClick={() => void fix(() => setRevTag({ shipmentId: row.id, divisionCode: division, subdivisionCode: subdivision || undefined }))}>Set division</TmsButton>
       </div>}
-      {verdict.checks[key].reasons.map((reason, index) => reason.action?.kind === 'OPEN_TAB' ? <p key={`${reason.code}-${index}`}>{shipmentLink(reason.action.tab, `Open ${reason.action.tab}`)}</p> : null)}
+      {verdict.checks[key].reasons.map((reason, index) => reason.action?.kind === 'OPEN_TAB' ? <p key={`${reason.code}-${index}`}>{shipmentLink(reason.action.tab, `Fix in ${reason.action.tab} tab`, true)}</p> : null)}
+      {key === 'documents' && <LoadReviewDocuments shipmentId={row.id} readOnly={released} disabled={busy} onChanged={changed} />}
       {key === 'documents' && <p>{canOpen ? <Link to={DOCS_LANDING}>Review uploads</Link> : <span title="Needs the Shipments grant">Review uploads</span>}</p>}
     </TmsCard>)}
     {(row.carrierCount ?? 0) >= 2 && !released && <CarrierBillsPanel shipmentId={row.id} disabled={busy} canOpenAp={hasPageAccess('carrierPay') || hasPageAccess('tms')} onChanged={rereview} />}

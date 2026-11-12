@@ -9,14 +9,13 @@ import { batchShipmentTask } from '@/lib/apiClient'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Mail, Trash2, Truck } from 'lucide-react'
-import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsFilterChip, TmsSegmentedTabs } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsSegmentedTabs, TmsTabStrip } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
   ClearFiltersButton,
   ColumnsButton,
   DensityToggle,
   DenseKpiStrip,
-  SummaryToggle,
 } from '@/features/tms/grid/DenseControls'
 import {
   activeFilterCount,
@@ -33,10 +32,11 @@ import { useAuth } from '@/hooks/useAuth'
 import { flattenDivisions } from '@/features/tms/settings/taxonomyDrafts'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { formatDateTime } from '@/lib/date'
-import { intakeCounts, isDemoIntake } from '@/lib/intakeLoad'
+import { intakeCounts } from '@/lib/intakeLoad'
 import { isDeletedIntake } from '@/lib/intakeDup'
 import { duplicateGroups } from '@/lib/intakeDuplicates'
-import { DeleteIntakeDialog, DuplicateNotice } from './DuplicateParts'
+import { BuiltNotice, DeleteIntakeDialog, DuplicateNotice } from './DuplicateParts'
+import { useBuiltMatches } from './useBuiltMatches'
 import type { IntakeLoadRecord, IntakeStatus } from '@/types/intake'
 import {
   ALL_GROUP,
@@ -151,10 +151,10 @@ export function IntakeBoard() {
   }))
 
   const division = view === 'division' ? activeDivisions.find((d) => d.code === selected) : undefined
-  const demoOnly = params.get('demo') === '1'
   // Rows an admin deleted are out of every tab; duplicates are found among the open queue.
   const dups = useMemo(() => duplicateGroups(open.rows), [open.rows])
-  const rows = shown.rows.filter((r) => !isDeletedIntake(r) && rowInGroup(r, view, selected, activeCodes) && (!demoOnly || isDemoIntake(r)))
+  const { matches: built } = useBuiltMatches(open.rows)
+  const rows = shown.rows.filter((r) => !isDeletedIntake(r) && rowInGroup(r, view, selected, activeCodes))
   const missingAddress = activeDivisions.filter((d) => !d.intakeEmail)
 
   function update(next: Record<string, string | null>) {
@@ -178,6 +178,7 @@ export function IntakeBoard() {
         key: 'from',
         header: 'From / Subject',
         group: 'E-mail',
+        width: 640,
         text: (r) => `${r.fromName || r.fromEmail} ${r.subject || '(no subject)'}`,
         sortValue: (r) => r.fromName || r.fromEmail,
       },
@@ -224,6 +225,20 @@ export function IntakeBoard() {
   )
   const filteredRows = useMemo(() => filterRows(rows, columns, filters), [rows, columns, filters])
   const sortedRows = useMemo(() => sortDenseRows(filteredRows, columns, prefs.sort), [filteredRows, columns, prefs.sort])
+  // A row with a duplicate or already-built notice stacks a second line (a third when it has both): the page's rows grow to hold it,
+  // so nothing in the From / Subject cell is clipped. A queue with no notices keeps the grid's normal row height.
+  const rowHeights = useMemo(() => {
+    let notices = false
+    let both = false
+    for (const r of sortedRows) {
+      if (r.status !== 'OPEN') continue
+      const n = (dups.get(r.id) ? 1 : 0) + (built.get(r.id) ? 1 : 0)
+      if (n > 0) notices = true
+      if (n > 1) both = true
+    }
+    if (both) return { compact: 96, comfortable: 108 }
+    return notices ? { compact: 64, comfortable: 72 } : undefined
+  }, [sortedRows, dups, built])
   const setColumnFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
     setFilters((prev) => {
       const copy = { ...prev }
@@ -246,12 +261,24 @@ export function IntakeBoard() {
       case 'from':
         return (
           <div className="tms-intake-from">
-            <span className="tms-intake-from-name">{row.fromName || row.fromEmail}</span>
-            <span className="tms-intake-from-subject">{row.subject || '(no subject)'}</span>
+            <div className="tms-intake-from-head" title={`${row.fromName || row.fromEmail}: ${row.subject || '(no subject)'}`}>
+              <span className="tms-intake-from-name">{row.fromName || row.fromEmail}</span>
+              <span className="tms-intake-from-subject">{row.subject || '(no subject)'}</span>
+            </div>
             {row.status === 'OPEN' && dups.get(row.id) ? (
               <DuplicateNotice
                 row={row}
                 info={dups.get(row.id)!}
+                isAdmin={isOwnerOrAdmin}
+                canReview={canReview}
+                onDelete={() => setDeleting(row)}
+                onChanged={() => open.refresh()}
+              />
+            ) : null}
+            {row.status === 'OPEN' && built.get(row.id) ? (
+              <BuiltNotice
+                row={row}
+                matches={built.get(row.id)!}
                 isAdmin={isOwnerOrAdmin}
                 canReview={canReview}
                 onDelete={() => setDeleting(row)}
@@ -360,6 +387,16 @@ export function IntakeBoard() {
 
   return (
     <div className="tms-dense-page">
+      <TmsTabStrip
+        aria-label="Intake status"
+        active={chip}
+        onSelect={(key) => update({ status: key === 'open' ? null : key })}
+        tabs={[
+          { key: 'open', label: 'Open', count: open.rows.length },
+          { key: 'moved', label: 'Moved', count: chip === 'moved' ? shown.rows.filter((r) => !isDeletedIntake(r)).length : undefined },
+          { key: 'dismissed', label: 'Dismissed', count: chip === 'dismissed' ? shown.rows.filter((r) => !isDeletedIntake(r)).length : undefined },
+        ]}
+      />
       <div className="tms-dense-bar">
         <span className="tms-dense-title">
           <Truck size={18} aria-hidden="true" /> Build · Intake
@@ -384,18 +421,6 @@ export function IntakeBoard() {
             onSelect={(key) => update({ view, group: key === ALL_GROUP ? null : key, division: null })}
           />
         ) : null}
-        <TmsSegmentedTabs
-          aria-label="Intake status"
-          size="sm"
-          active={chip}
-          onSelect={(key) => update({ status: key === 'open' ? null : key })}
-          tabs={[
-            { key: 'open', label: 'Open' },
-            { key: 'moved', label: 'Moved' },
-            { key: 'dismissed', label: 'Dismissed' },
-          ]}
-        />
-        <TmsFilterChip label="Demo" value={demoOnly ? 'only' : null} onClick={() => update({ demo: demoOnly ? null : '1' })} />
         <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => setFilters({})} />
         <span className="tms-dense-spacer" />
         <ColumnsButton
@@ -406,7 +431,6 @@ export function IntakeBoard() {
           onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })}
         />
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
-        <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
       </div>
       {isOwnerOrAdmin && missingAddress.length > 0 ? (
         <TmsAlert tone="orange" title="Divisions without an intake e-mail" className="tms-intake-banner">
@@ -415,7 +439,7 @@ export function IntakeBoard() {
         </TmsAlert>
       ) : null}
       {shown.error ? <TmsAlert tone="red" title="Could not load intake">{shown.error}</TmsAlert> : null}
-      <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+      <DenseKpiStrip open items={kpis} />
       <BatchActionBar
         actionLabel="Push to Load Review"
         selectedCount={selectedIds.length}
@@ -429,7 +453,7 @@ export function IntakeBoard() {
         <DenseGrid<IntakeLoadRecord>
           aria-label="Intake"
           recentKey={`tms:intake:recent:${user?.email ?? 'anon'}`}
-          resetKey={`${view}|${selected}|${chip}|${demoOnly}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+          resetKey={`${view}|${selected}|${chip}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
           columns={gridColumns}
           rows={sortedRows}
           fitRows={rows}
@@ -444,6 +468,7 @@ export function IntakeBoard() {
           }}
           renderCell={renderCell}
           density={prefs.density}
+          rowHeights={rowHeights}
           userWidths={prefs.widths}
           stickyCount={Math.max(1, prefs.pinned.length)}
           sort={prefs.sort}

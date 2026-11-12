@@ -304,12 +304,13 @@ describe('ShipmentFormPage — layout contract', () => {
 })
 
 describe('ShipmentFormPage — edit mode', () => {
-  it('a DRAFT shows Save changes and Submit order, and Save changes runs the edit pipeline', async () => {
+  it('a DRAFT shows Save changes and Submit for Review (no Submit order), and Save changes runs the edit pipeline', async () => {
     h.shipment = { bundle: bundleOf('DRAFT'), loading: false, error: null }
     h.runEditSave.mockResolvedValue({ ok: true, bundle: bundleOf('DRAFT'), steps: [], failedSteps: [] })
     renderForm('edit')
     expect(screen.queryByTestId('ship-form-create')).toBeNull()
-    expect(screen.getByTestId('ship-form-submit')).toBeTruthy()
+    expect(screen.queryByTestId('ship-form-submit')).toBeNull()
+    expect(screen.getByTestId('ship-form-submit-review').textContent).toBe('Submit for Review')
     expect(screen.getByTestId('ship-form-title').textContent).toBe('Edit PRO S000123')
     // Strict level needs the required fields; fill nothing → blocked, nothing called.
     fireEvent.click(screen.getByTestId('ship-form-save'))
@@ -317,11 +318,12 @@ describe('ShipmentFormPage — edit mode', () => {
     expect(h.runEditSave).not.toHaveBeenCalled()
   })
 
-  it('a non-DRAFT shipment has neither Save draft nor Submit order', () => {
+  it('a non-DRAFT shipment has no Save draft or Submit order, and still offers Submit for Review', () => {
     h.shipment = { bundle: bundleOf('OPEN'), loading: false, error: null }
     renderForm('edit')
     expect(screen.queryByTestId('ship-form-save-draft')).toBeNull()
     expect(screen.queryByTestId('ship-form-submit')).toBeNull()
+    expect(screen.getByTestId('ship-form-submit-review')).toBeTruthy()
     expect(screen.getByTestId('ship-form-save').textContent).toBe('Save changes')
   })
 })

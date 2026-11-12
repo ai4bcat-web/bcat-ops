@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  INVOICE_EMAIL_BODY,
   milestoneRecipients,
   remittanceRecipients,
   renderInvoiceBatchEmail,
@@ -126,6 +127,19 @@ const INVOICE: InvoiceEmailInvoice = {
   balanceCents: 275_000,
 }
 
+const EXPECTED_INVOICE_BODY = [
+  'Your report is attached to this email.',
+  '',
+  'Please send remittance to billing@bcatcorp.com or provide any questions and',
+  'a representative will assist you.',
+  '',
+  'Please do not reply directly to this email.',
+  '',
+  'Thank you,',
+  '',
+  'BCAT Logistics & IVAN Cartage',
+].join('\n')
+
 describe('renderInvoiceEmail', () => {
   const email = (overrides: Partial<Parameters<typeof renderInvoiceEmail>[0]> = {}) =>
     renderInvoiceEmail({
@@ -140,36 +154,17 @@ describe('renderInvoiceEmail', () => {
     expect(email().subject).toBe('Invoice INV-000123 · BCAT Logistics')
   })
 
-  it('states the amount due and the due date whatever the template says', () => {
-    const { body } = email({ template: 'Invoice {number} attached.' })
-    expect(body).toContain('Amount due: $2750.00')
-    expect(body).toContain('Due 2026-04-03.')
+  it('is exactly the agreed body, whatever the contact, template or amounts', () => {
+    expect(email().body).toBe(EXPECTED_INVOICE_BODY)
+    expect(email({ contactName: null, template: 'Invoice {number} attached.' }).body).toBe(EXPECTED_INVOICE_BODY)
+    expect(INVOICE_EMAIL_BODY).toBe(EXPECTED_INVOICE_BODY)
   })
 
-  it('substitutes every token the caller may use', () => {
-    const { body } = email({
-      template: '{number}|{customer}|{contact}|{total}|{due}|{shipment}|{broker}',
-    })
-    expect(body).toContain(
-      'INV-000123|Acme Foods|Amy|$2750.00|2026-04-03|S-10042|BCAT Logistics',
-    )
-  })
-
-  it('leaves a token it does not know alone rather than blanking it', () => {
-    expect(email({ template: 'Invoice {number} — {mystery}' }).body).toContain(
-      'Invoice INV-000123 — {mystery}',
-    )
-  })
-
-  it('falls back to the default wording when the template cannot name the invoice', () => {
-    const { body } = email({ template: 'Your bill is attached.' })
-    expect(body).not.toContain('Your bill is attached.')
-    expect(body).toContain('Invoice INV-000123 for shipment S-10042 is attached.')
-  })
-
-  it('greets the customer by name only when there is one', () => {
-    expect(email().body.startsWith('Amy,')).toBe(true)
-    expect(email({ contactName: null }).body.startsWith('Hello,')).toBe(true)
+  it('does not restate the amount, the due date or a greeting', () => {
+    const { body } = email()
+    expect(body).not.toContain('Amount due')
+    expect(body).not.toContain('2026-04-03')
+    expect(body.startsWith('Your report is attached to this email.')).toBe(true)
   })
 })
 
@@ -192,17 +187,10 @@ describe('renderInvoiceBatchEmail', () => {
     expect(batch([INVOICE]).subject).toBe('1 invoice · $2750.00 · BCAT Logistics')
   })
 
-  it('lists every invoice with its shipment, due date and amount', () => {
+  it('carries the same fixed body as a single invoice, not a list of the bills', () => {
     const { body } = batch()
-    expect(body).toContain('  • INV-000123 — shipment S-10042 — due 2026-04-03 — $2750.00')
-    expect(body).toContain('  • INV-000124 — shipment S-10043 — due 2026-04-10 — $1000.00')
-    expect(body).toContain('  • INV-000125 — due 2026-04-17 — $500.00')
-    expect(body).toContain('Total due: $4250.00')
-  })
-
-  it('joins the numbers into a per-invoice template so a configured one still reads', () => {
-    const { body } = batch(INVOICES, { template: 'Invoice {number} is attached.' })
-    expect(body).toContain('Invoice INV-000123, INV-000124, INV-000125 is attached.')
+    expect(body).toBe(EXPECTED_INVOICE_BODY)
+    expect(body).not.toContain('INV-000124')
   })
 })
 

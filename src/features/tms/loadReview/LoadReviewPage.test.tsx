@@ -107,6 +107,18 @@ describe('LoadReviewPage inactive revenue division', () => {
 })
 
 describe('LoadReviewPage', () => {
+  it('filters by status in the folder tab strip, with no Demo chip and no stray expression text in the toolbar', () => {
+    renderPage('/tms/load-review?tab=all')
+    const strip = screen.getByRole('tablist', { name: 'Load review filters' })
+    expect(within(strip).getAllByRole('tab').map((t) => t.textContent?.replace(/\d+$/, ''))).toEqual(['Needs fixes', 'Looks ready', 'All in review', 'Released (14 d)'])
+    expect(within(strip).getByRole('tab', { name: /All in review/ }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByText(/demo/i)).toBeNull()
+    expect(screen.queryByText(/!==/)).toBeNull()
+    expect(screen.queryByText(/&&/)).toBeNull()
+    fireEvent.click(within(strip).getByRole('tab', { name: /Released/ }))
+    expect(screen.queryByRole('button', { name: /Select all looks ready/ })).toBeNull()
+  })
+
   it('clicking a column heading sorts the rows A to Z, then Z to A', () => {
     try { window.localStorage.clear() } catch { /* ignore */ }
     renderPage('/tms/load-review?tab=all')
@@ -123,9 +135,12 @@ describe('LoadReviewPage', () => {
     renderPage('/tms/load-review?tab=all')
     expect(screen.getAllByText('DELIVERED').length).toBeGreaterThan(0)
     expect(screen.getByText('Delivered (no time recorded)')).toBeTruthy()
+    expect(screen.getByText('No delivery time')).toBeTruthy()
+    expect(screen.queryByText('POD before delivery')).toBeNull()
     cleanup()
     renderPage('/tms/load-review?shipment=s-8')
     expect(await screen.findByText(/Delivered \(no time recorded\)/)).toBeTruthy()
+    expect(screen.getByTitle(/days in review can't be counted/)).toBeTruthy()
     expect(screen.getAllByText('DELIVERED').length).toBeGreaterThan(0)
   })
 
@@ -339,6 +354,7 @@ describe('LoadReviewPage', () => {
     })
     renderPage('/tms/load-review?shipment=s-m')
     expect(await screen.findByText('Carrier bill not recorded: Heartland')).toBeTruthy()
+    expect(screen.getByText(/^Fix \d+ items? first\.$/)).toBeTruthy()
     expect(screen.getByText('Missing document: RATE_CON (unsigned: Heartland)')).toBeTruthy()
     expect(await screen.findByTestId('carrier-bill-lc-a')).toBeTruthy()
     expect(screen.getByTestId('carrier-bill-lc-b').textContent).toContain('Bill not recorded')

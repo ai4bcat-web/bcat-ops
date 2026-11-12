@@ -354,8 +354,8 @@ export function TimeClockPage() {
             <PartyPopper className="mr-2 h-4 w-4" aria-hidden="true" />
             Add a paid holiday for today
           </Button>
-          {/* Only Jason and Chuck accrue PTO; everyone else never sees this. */}
-          {data.ptoEligible && (
+          {/* Only PTO-eligible drivers with an allowance this year see this; everyone else sees nothing about PTO. */}
+          {data.ptoEligible && data.ptoRemaining && (
             <Button
               variant="outline"
               className="h-12"

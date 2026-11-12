@@ -32,7 +32,7 @@ describe('the request form', () => {
   it('offers no PTO to a driver without it, but takes a day off in hours', async () => {
     await renderSection()
     expect(screen.queryByRole('option', { name: 'PTO' })).toBeNull()
-    expect(screen.getByText('PTO is not set up for you')).toBeTruthy()
+    expect(screen.queryByText(/PTO/)).toBeNull()
     set('First day', '2026-11-12')
     set('Last day', '2026-11-12')
     set('Hours', '4')
@@ -45,7 +45,7 @@ describe('the request form', () => {
   })
 
   it('sends PTO as one eight-hour day', async () => {
-    await renderSection(state({ ptoEligible: true }))
+    await renderSection(state({ ptoEligible: true, ptoRemaining: { year: '2026', days: 5 } }))
     set('Type', 'PTO')
     expect(screen.queryByLabelText('Last day')).toBeNull()
     expect((screen.getByLabelText('Hours') as HTMLInputElement).disabled).toBe(true)
@@ -87,6 +87,7 @@ describe('the list', () => {
     await renderSection(state({
       ptoEligible: true,
       ptoUsed: { year: '2026', days: 3 },
+      ptoRemaining: { year: '2026', days: 2 },
       requests: [
         row({ id: 'a', status: 'PENDING' }),
         row({ id: 'b', status: 'APPROVED', type: 'PTO', startDate: '2026-11-03', endDate: '2026-11-03' }),
@@ -97,11 +98,11 @@ describe('the list', () => {
     expect(screen.getByText('Approved')).toBeTruthy()
     expect(screen.getByText('Denied')).toBeTruthy()
     expect(screen.getByText(/Short on drivers that week/)).toBeTruthy()
-    expect(screen.getByText(/PTO used in 2026/).textContent).toBe('PTO used in 2026: 3 days')
+    expect(screen.getByText(/PTO left in 2026/).textContent).toBe('PTO left in 2026: 2 days')
   })
 
   it('hides the PTO count from a driver with no PTO', async () => {
     await renderSection()
-    expect(screen.queryByText(/PTO used in/)).toBeNull()
+    expect(screen.queryByText(/PTO left in|PTO used in/)).toBeNull()
   })
 })

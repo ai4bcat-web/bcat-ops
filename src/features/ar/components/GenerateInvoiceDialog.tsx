@@ -152,6 +152,9 @@ export function GenerateInvoiceDialog({ orderId, busy, onClose, onDone }: {
     })
       .then((result) => {
         toast.success(`Invoice ${result.invoice.number} issued`)
+        if (result.documentFiled === false) {
+          toast.warning(`Invoice ${result.invoice.number} is issued, but it did not file on the shipment's documents. Re-render its PDF from the invoice to file it.`)
+        }
         onDone(result.invoice.id)
       })
       .catch((err: unknown) => {

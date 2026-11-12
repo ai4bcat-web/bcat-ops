@@ -502,6 +502,8 @@ export interface TimeClockResponse {
   ptoEligible: boolean
   /** PTO days on the clock this calendar year (one row = one day). Optional: older API. */
   ptoUsed?: PtoUsed
+  /** PTO days left this calendar year. Present only when the driver has an allowance; absent means show nothing about PTO. */
+  ptoRemaining?: PtoRemaining
   /** True when staff are viewing a driver's app. Punching is refused server-side. */
   readOnly?: boolean
   /** The pay period's overnight runs. Absent on an API that predates them. */
@@ -509,6 +511,7 @@ export interface TimeClockResponse {
 }
 
 export interface PtoUsed { year: string; days: number }
+export interface PtoRemaining { year: string; days: number }
 
 export function fetchTimeClock(weekStart?: string): Promise<TimeClockResponse> {
   const q = weekStart ? `?week=${encodeURIComponent(weekStart)}` : ''
@@ -546,6 +549,7 @@ export interface TimeOffState {
   requests: TimeOffRequest[]
   ptoEligible: boolean
   ptoUsed: PtoUsed
+  ptoRemaining?: PtoRemaining
 }
 
 export function fetchTimeOff(): Promise<TimeOffState> {

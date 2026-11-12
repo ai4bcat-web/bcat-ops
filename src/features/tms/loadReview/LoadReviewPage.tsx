@@ -5,18 +5,18 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Check, ClipboardCheck, Download, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { exportRecords, reviewExportRow } from '@/lib/opsExports'
-import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsFilterChip, TmsInput, TmsSegmentedTabs, TmsStatRow, type ColumnDef } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsInput, TmsTabStrip, type ColumnDef } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
-import { ClearFiltersButton, ColumnsButton, DensityToggle } from '@/features/tms/grid/DenseControls'
+import { ClearFiltersButton, ColumnsButton, DenseKpiStrip, DensityToggle } from '@/features/tms/grid/DenseControls'
 import { activeFilterCount, filterRows, nextSort, reorderKeys, sortDenseRows, type DenseColumn, type DenseColumnFilter, type DenseFilters } from '@/features/tms/grid/denseGridModel'
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useAuth } from '@/hooks/useAuth'
 import type { ShipmentListRow } from '@/hooks/useShipments'
-import { boardStatusOf, isDemoShipment, matchesQuery } from '@/features/shipments/shipmentViews'
+import { boardStatusOf, matchesQuery } from '@/features/shipments/shipmentViews'
 import { sentence } from '@/features/shipments/shipmentGridColumns'
 import { batchShipmentTask, listAuditLogsFor, pushReadyToLoadReview, releaseToBilling } from '@/lib/apiClient'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
-import { failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
+import { NO_DELIVERY_TIME_TIP, failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 import { useLoadReviewQueue } from './useLoadReviewQueue'
@@ -62,7 +62,7 @@ export function LoadReviewPage() {
       { key: 'lane', header: 'Lane', group: 'Shipment', text: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
       { key: 'loadStatus', header: 'Load status', group: 'Shipment', text: ({ row }) => reviewStatusText(row), filter: 'multi', optionsOf: ({ row }) => opt(boardStatusOf(row), sentence(boardStatusOf(row))), extraPx: 24 },
       { key: 'delivered', header: 'Delivered', group: 'Shipment', text: ({ row }) => deliveredText(row), sortValue: ({ row }) => deliveredTimeOf(row) ?? '' },
-      { key: 'age', header: 'In review', group: 'Review', text: ({ row }) => { const age = reviewAgeDays(row, now); return age == null ? 'POD before delivery' : `${age} d` }, extraPx: 24, sortValue: ({ row }) => reviewAgeDays(row, now) ?? -1 },
+      { key: 'age', header: 'In review', group: 'Review', text: ({ row }) => { const age = reviewAgeDays(row, now); return age == null ? 'No delivery time' : `${age} d` }, extraPx: 24, sortValue: ({ row }) => reviewAgeDays(row, now) ?? -1 },
       { key: 'rep', header: 'Sales rep', group: 'Review', text: ({ row }) => row.salesRepName ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.salesRepName) },
       { key: 'division', header: 'Division', group: 'Review', text: ({ row }) => row.revDivision?.replace(/_/g, ' ') ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.revDivision?.replace(/_/g, ' ')) },
       { key: 'checks', header: 'Checks (preliminary)', group: 'Checks', text: (e) => (!e.verdict ? '' : failedOf(e) === 0 ? `All ${LOAD_REVIEW_CHECKS.length} passed` : `${failedOf(e)} to fix`), extraPx: 24 },
@@ -86,7 +86,7 @@ export function LoadReviewPage() {
     setPageSize(PAGE_STEP)
     setDense((prev) => { const copy = { ...prev }; if (next) copy[key] = next; else delete copy[key]; return copy })
   }, [])
-  const searched = source.filter(({ row }) => matchesQuery(row, params.get('q') ?? '') && (params.get('demo') !== '1' || isDemoShipment(row)))
+  const searched = source.filter(({ row }) => matchesQuery(row, params.get('q') ?? ''))
   // The table is the same dense grid as the Shipments board: header filters on division / rep / customer, sortable columns.
   const filtered = sortDenseRows(filterRows(searched, denseCols, dense), denseCols, prefs.sort)
   const page = filtered.slice(0, pageSize)
@@ -173,7 +173,7 @@ export function LoadReviewPage() {
     { key: 'lane', header: 'Lane', render: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
     { key: 'loadStatus', header: 'Load status', render: ({ row }) => <TmsBadge tone={reviewStatusTone(row)}>{reviewStatusText(row)}</TmsBadge> },
     { key: 'delivered', header: 'Delivered', render: ({ row }) => deliveredText(row) },
-    { key: 'age', header: 'In review', render: ({ row }) => { const age = reviewAgeDays(row, now); return <TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'POD before delivery' : `${age} d`}</TmsBadge> } },
+    { key: 'age', header: 'In review', render: ({ row }) => { const age = reviewAgeDays(row, now); return <span title={age == null ? NO_DELIVERY_TIME_TIP : undefined}><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'No delivery time' : `${age} d`}</TmsBadge></span> } },
     { key: 'rep', header: 'Sales rep', render: ({ row }) => row.salesRepName ?? '—' },
     { key: 'division', header: 'Division', render: ({ row }) => row.revDivision?.replace(/_/g, ' ') ?? '—' },
     // One column per check, each a clear pass (check mark) or fail (cross) with its reason on hover, plus a result column up front:
@@ -207,19 +207,17 @@ export function LoadReviewPage() {
     {capMessage && <TmsAlert tone="orange" title="Selection limit">{capMessage}</TmsAlert>}
     {notice && <div role="status" className="aa-review-results" style={{ whiteSpace: 'pre-line' }}>{notice}</div>}
     <div className="tms-dense-page tms-caps">
+      <TmsTabStrip
+        aria-label="Load review filters"
+        active={tab}
+        onSelect={(key) => { update({ tab: key, page: null }); setSelected(new Set()); setCapMessage(null); setPageSize(PAGE_STEP) }}
+        tabs={[{ key: 'fixes', label: 'Needs fixes', count: needs.length }, { key: 'ready', label: 'Looks ready', count: ready.length }, { key: 'all', label: 'All in review', count: queue.length }, { key: 'released', label: 'Released (14 d)', count: released.length }]}
+      />
       <div className="tms-dense-bar">
         <span className="tms-dense-title"><ClipboardCheck size={18} aria-hidden="true" /> Review · Load review</span>
         <Search size={14} className="tms-muted" aria-hidden="true" />
         <TmsInput className="tms-dense-search" aria-label="Search review queue" placeholder="Shipment, customer or reference" value={params.get('q') ?? ''} onChange={(e) => { update({ q: e.target.value, page: null }); setPageSize(PAGE_STEP) }} />
-        <TmsSegmentedTabs
-          aria-label="Load review filters"
-          size="sm"
-          active={tab}
-          onSelect={(key) => { update({ tab: key, page: null }); setSelected(new Set()); setCapMessage(null); setPageSize(PAGE_STEP) }}
-          tabs={[{ key: 'fixes', label: 'Needs fixes', count: needs.length }, { key: 'ready', label: 'Looks ready', count: ready.length }, { key: 'all', label: 'All in review', count: queue.length }, { key: 'released', label: 'Released (14 d)', count: released.length }]}
-        />
-        <TmsFilterChip label="Demo" value={params.get('demo') === '1' ? 'only' : null} onClick={() => update({ demo: params.get('demo') === '1' ? null : '1', page: null })} />
-        tab !== 'released' && <><TmsButton onClick={() => { setSelected(new Set(eligible.slice(0, MAX_REVIEW_BATCH).map(({ row }) => row.id))); setCapMessage(eligible.length > MAX_REVIEW_BATCH ? batchCapMessage() : null) }}>Select all looks ready (up to {MAX_REVIEW_BATCH})</TmsButton><TmsButton disabled={busy} data-testid="review-pull-ready" title="Delivered shipments with their references, sales rep, order details and documents move in by themselves; this sweeps any that are waiting" onClick={() => { setBusy(true); pushReadyToLoadReview().then((r) => { setNotice(`${r.pushed} delivered shipment${r.pushed === 1 ? '' : 's'} moved into Load Review (${r.checked} checked)`); void refresh() }).catch((e: unknown) => setNotice(e instanceof Error ? e.message : 'Could not sweep')).finally(() => setBusy(false)) }}>Move ready loads in</TmsButton></>
+        {tab !== 'released' && <><TmsButton onClick={() => { setSelected(new Set(eligible.slice(0, MAX_REVIEW_BATCH).map(({ row }) => row.id))); setCapMessage(eligible.length > MAX_REVIEW_BATCH ? batchCapMessage() : null) }}>Select all looks ready (up to {MAX_REVIEW_BATCH})</TmsButton><TmsButton disabled={busy} data-testid="review-pull-ready" title="Delivered shipments with their references, sales rep, order details and documents move in by themselves; this sweeps any that are waiting" onClick={() => { setBusy(true); pushReadyToLoadReview().then((r) => { setNotice(`${r.pushed} delivered shipment${r.pushed === 1 ? '' : 's'} moved into Load Review (${r.checked} checked)`); void refresh() }).catch((e: unknown) => setNotice(e instanceof Error ? e.message : 'Could not sweep')).finally(() => setBusy(false)) }}>Move ready loads in</TmsButton></>}
         <ClearFiltersButton count={activeFilterCount(dense)} onClear={() => { setDense({}); setPageSize(PAGE_STEP) }} />
         <span className="tms-dense-spacer" />
         <TmsButton size="sm" variant="secondary" onClick={() => void refresh()}>Refresh</TmsButton>
@@ -229,7 +227,13 @@ export function LoadReviewPage() {
         <ColumnsButton catalog={denseCols.filter((c) => c.key !== 'select')} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
       </div>
-      <TmsStatRow columns={5} items={[{ label: 'In review', value: String(queue.length) }, { label: 'Looks ready', value: String(ready.length) }, { label: 'Needs fixes', value: String(needs.length) }, { label: 'Oldest', value: `${Math.max(0, ...queue.map(({ row }) => reviewAgeDays(row, now) ?? 0))} d` }, { label: 'Value in review', value: formatCents(queue.reduce((sum, { row }) => sum + (row.orderRevenueCents ?? row.revenueCents ?? 0), 0)) }]} />
+      <DenseKpiStrip open items={[
+        { label: 'In review', value: queue.length },
+        { label: 'Looks ready', value: ready.length },
+        { label: 'Needs fixes', value: needs.length, tone: needs.length > 0 ? 'warn' : undefined },
+        { label: 'Oldest', value: `${Math.max(0, ...queue.map(({ row }) => reviewAgeDays(row, now) ?? 0))} d` },
+        { label: 'Value in review', value: formatCents(queue.reduce((sum, { row }) => sum + (row.orderRevenueCents ?? row.revenueCents ?? 0), 0)) },
+      ]} />
       <div className="tms-dense-body">
         <DenseGrid<ReviewEntry>
           aria-label="Load review"
