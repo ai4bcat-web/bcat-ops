@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Upload, Eye, Download, FileText, Image as ImageIcon, RefreshCw, FileStack, Pencil, Trash2 } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
@@ -60,7 +61,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
   /** False for non-admins: private documents are hidden completely, not shown missing. */
   canSeePrivate?: boolean
 }) {
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
   const drivers = useAppStore((s) => s.drivers)
   const equipment = useAppStore((s) => s.equipment)
   const updateDriver = useAppStore((s) => s.updateDriver)
@@ -305,6 +306,9 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
         description={entity.kind === 'DRIVER' ? 'Driver file' : 'Truck file'}
         headerExtra={(
           <>
+            {entity.kind === 'DRIVER' && isAdmin && (
+              <Link className="tms-link" to={`/profiles/drivers/${entity.driver.id}`} data-testid="open-driver-profile">Open profile</Link>
+            )}
             {entity.kind === 'DRIVER' && onEditDriver && (
               <TmsButton size="sm" onClick={() => onEditDriver(entity.driver)} title="Edit phone, CDL, truck, trailer and more">
                 <Pencil size={14} /> Edit

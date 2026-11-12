@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  basicsErrors, currentFixedExpenses, docsSummary, normalizePhone, payError, payLines, requiredDocsFor, settlementLink, wizardPayDefaults,
+  basicsErrors, classificationForFleet, currentFixedExpenses, docsSummary, FLEET_OPTIONS, fleetLabel, hourlyRateError, normalizePhone, payError, payLines, requiredDocsFor, settlementLink, wizardPayDefaults,
 } from './driverProfileModel'
 import type { DriverPaySetting } from '@/lib/apiClient'
 
@@ -65,5 +65,23 @@ describe('driver profile model', () => {
     expect(settlementLink('BOX_TRUCK')?.to).toBe('/driver-pay-box-trucks')
     expect(settlementLink('LOCAL')?.to).toBe('/hours')
     expect(settlementLink(null)).toBeNull()
+  })
+})
+
+describe('driver types (Ryne 2026-11-11)', () => {
+  it('offers Local, Owner operator and Box truck only, and reads an Amazon driver as an owner operator', () => {
+    expect(FLEET_OPTIONS.map((o) => o.value)).toEqual(['LOCAL', 'OWNER_OPERATOR', 'BOX_TRUCK'])
+    expect(fleetLabel('AMAZON')).toBe('Owner operator')
+  })
+  it('box truck drivers are employees: their documents are the company set', () => {
+    expect(classificationForFleet('BOX_TRUCK')).toBe('COMPANY')
+    expect(classificationForFleet('AMAZON')).toBe('OWNER_OPERATOR')
+  })
+  it('validates the optional dates and a starting hourly rate', () => {
+    expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'LOCAL', hireDate: 'nope' }).hireDate).toBeTruthy()
+    expect(basicsErrors({ name: 'A', phone: '3125550100', email: '', fleet: 'LOCAL', hireDate: '2026-11-02' }).hireDate).toBeUndefined()
+    expect(hourlyRateError('')).toBeNull()
+    expect(hourlyRateError('$25.50')).toBeNull()
+    expect(hourlyRateError('0')).toBeTruthy()
   })
 })

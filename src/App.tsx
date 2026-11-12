@@ -244,9 +244,9 @@ export default function App() {
               <Route path="/driver-view/:driverId" element={<RequirePage page="ownerOperatorPay"><DriverAppViewPage /></RequirePage>} />
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
               <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
-              <Route path="/profiles/drivers" element={<RequirePage page="files"><DriversListPage /></RequirePage>} />
-              <Route path="/profiles/drivers/new" element={<RequirePage page="files"><NewDriverWizard /></RequirePage>} />
-              <Route path="/profiles/drivers/:id" element={<RequirePage page="files"><DriverProfilePage /></RequirePage>} />
+              <Route path="/profiles/drivers" element={<RequireAdmin><DriversListPage /></RequireAdmin>} />
+              <Route path="/profiles/drivers/new" element={<RequireAdmin><NewDriverWizard /></RequireAdmin>} />
+              <Route path="/profiles/drivers/:id" element={<RequireAdmin><DriverProfilePage /></RequireAdmin>} />
               {/* Open to every signed-in user (no page grant) — it is where staff report problems. */}
               <Route path="/feedback" element={<FeedbackPage />} />
               <Route path="/settings" element={<ParamRedirect to="/tms/brokerage" />} />
