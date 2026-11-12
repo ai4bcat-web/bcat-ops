@@ -32,11 +32,17 @@ export interface ArGrid<T> {
   renderCell?: (row: T, key: string) => ReactNode
   empty: ReactNode
   kpis?: DenseKpi[]
+  /** Optional grouping: rows are re-ordered by group after sort and filter, a header row per group. */
+  group?: {
+    keyOf: (row: T) => string
+    order: (rows: T[]) => T[]
+    header: (key: string, rows: T[]) => ReactNode
+  }
 }
 
 export function ArDenseTable<T>({ grid }: { grid: ArGrid<T> }) {
   const email = useAuthUser()?.email ?? ''
-  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis } = grid
+  const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group } = grid
   const [filters, setFilters] = useState<DenseFilters>({})
   const [search, setSearch] = useState('')
 
@@ -73,10 +79,10 @@ export function ArDenseTable<T>({ grid }: { grid: ArGrid<T> }) {
     })
   }, [])
 
-  const filtered = useMemo(
-    () => sortDenseRows(filterRows(searchRows(rows, catalogAll, search), catalogAll, filters), catalogAll, prefs.sort),
-    [rows, catalogAll, filters, prefs.sort, search],
-  )
+  const filtered = useMemo(() => {
+    const sorted = sortDenseRows(filterRows(searchRows(rows, catalogAll, search), catalogAll, filters), catalogAll, prefs.sort)
+    return group ? group.order(sorted) : sorted
+  }, [rows, catalogAll, filters, prefs.sort, search, group])
 
   return (
     <div className="tms-dense-page tms-caps" data-testid={`ar-grid-${gridId}`}>
@@ -117,6 +123,8 @@ export function ArDenseTable<T>({ grid }: { grid: ArGrid<T> }) {
           onReorder={(from, to) => prefs.setColumns(reorderKeys(prefs.columns, from, to))}
           onResize={prefs.setWidth}
           empty={empty}
+          groupKeyOf={group?.keyOf}
+          renderGroupHeader={group?.header}
         />
       </div>
     </div>
