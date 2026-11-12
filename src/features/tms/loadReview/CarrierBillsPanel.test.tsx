@@ -91,4 +91,17 @@ describe('CarrierBillsPanel', () => {
     await waitFor(() => expect(mocks.bundle).toHaveBeenCalled())
     expect(screen.queryByTestId('carrier-bills')).toBeNull()
   })
+
+  it('with minCarriers 1 a single carrier can have its bill recorded in place, with the optional bill details', async () => {
+    mocks.bundle.mockResolvedValue(bundleWith([lc('lc-a', 'Swift', 1)], CHARGES.slice(0, 3)))
+    render(<MemoryRouter><CarrierBillsPanel shipmentId="shp-1" minCarriers={1} onChanged={onChanged} /></MemoryRouter>)
+    await screen.findByTestId('carrier-bill-lc-a')
+    fireEvent.change(screen.getByLabelText('Carrier bill number'), { target: { value: 'INV-77' } })
+    fireEvent.change(screen.getByLabelText('Carrier bill date'), { target: { value: '2026-11-10' } })
+    fireEvent.change(screen.getByLabelText('Carrier bill amount'), { target: { value: '650.50' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Record bill' }))
+    await waitFor(() => expect(mocks.record).toHaveBeenCalledTimes(1))
+    expect(mocks.record).toHaveBeenCalledWith({ loadCarrierId: 'lc-a', billNumber: 'INV-77', billDate: '2026-11-10', billedCents: 65050 })
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+  })
 })

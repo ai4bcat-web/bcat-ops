@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { TmsAlert, TmsBadge, TmsButton, TmsCard } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsCard, TmsInput } from '@/features/tms/kit'
 import { getShipmentBundle, recordBill } from '@/lib/apiClient'
 import { carrierTotals, liveCarriersOf, marginOf } from '@/lib/carrierTotals'
 import { formatCents } from '@/lib/invoiceBuild'
@@ -20,8 +20,10 @@ const OUTCOME_LABEL: Record<RecordOutcome['status'], string> = {
   skipped: 'Not attempted',
 }
 
-export function CarrierBillsPanel({ shipmentId, disabled = false, canOpenAp = false, onChanged }: {
+export function CarrierBillsPanel({ shipmentId, disabled = false, canOpenAp = false, minCarriers = 2, onChanged }: {
   shipmentId: string
+  /** Two carriers is the panel's own case; Load Review passes 1 so a single carrier's bill can be recorded in place too. */
+  minCarriers?: number
   disabled?: boolean
   /** Whether the viewer may follow the link to the bill. */
   canOpenAp?: boolean
@@ -33,6 +35,10 @@ export function CarrierBillsPanel({ shipmentId, disabled = false, canOpenAp = fa
   const [results, setResults] = useState<RecordOutcome[]>([])
   const [working, setWorking] = useState(false)
   const [stamp, setStamp] = useState(0)
+  // One carrier only: the optional bill details. Blank sends nothing and the server bills what the load's charges say.
+  const [billNumber, setBillNumber] = useState('')
+  const [billDate, setBillDate] = useState('')
+  const [billAmount, setBillAmount] = useState('')
 
   useEffect(() => {
     let live = true
@@ -45,7 +51,7 @@ export function CarrierBillsPanel({ shipmentId, disabled = false, canOpenAp = fa
   const load = bundle?.loads[0]
   const live = bundle ? liveCarriersOf(bundle.loadCarriers, load?.id ?? '').filter((lc) => lc.kind === 'CARRIER') : []
   if (error) return <TmsAlert tone="red">{error}</TmsAlert>
-  if (!bundle || live.length < 2) return null
+  if (!bundle || live.length < minCarriers || live.length === 0) return null
 
   const totals = carrierTotals(bundle.charges, live)
   const customerTotalCents = bundle.charges.filter((c) => c.side === 'CUSTOMER').reduce((sum, c) => sum + c.amountCents, 0)
@@ -56,7 +62,14 @@ export function CarrierBillsPanel({ shipmentId, disabled = false, canOpenAp = fa
     setWorking(true)
     setResults([])
     try {
-      setResults(await recordAllBills(unrecorded, (loadCarrierId) => recordBill({ loadCarrierId })))
+      const single = live.length === 1
+      const dollars = Number(billAmount)
+      setResults(await recordAllBills(unrecorded, (loadCarrierId) => recordBill({
+        loadCarrierId,
+        ...(single && billNumber.trim() ? { billNumber: billNumber.trim() } : {}),
+        ...(single && billDate ? { billDate } : {}),
+        ...(single && billAmount.trim() && Number.isFinite(dollars) && dollars >= 0 ? { billedCents: Math.round(dollars * 100) } : {}),
+      })))
     } finally {
       setWorking(false)
       setStamp((n) => n + 1)
@@ -77,7 +90,7 @@ export function CarrierBillsPanel({ shipmentId, disabled = false, canOpenAp = fa
           disabled={disabled || working || unrecorded.length === 0}
           onClick={() => { void run() }}
         >
-          {working ? 'Recording…' : 'Record all bills'}
+          {working ? 'Recording…' : live.length === 1 ? 'Record bill' : 'Record all bills'}
         </TmsButton>
       }
     >
@@ -104,6 +117,13 @@ export function CarrierBillsPanel({ shipmentId, disabled = false, canOpenAp = fa
           )
         })}
       </div>
+      {live.length === 1 && unrecorded.length === 1 && (
+        <div className="mt-2 flex flex-wrap gap-2" data-testid="single-bill-fields">
+          <TmsInput aria-label="Carrier bill number" placeholder="Bill / invoice #" value={billNumber} disabled={disabled || working} onChange={(e) => setBillNumber(e.target.value)} />
+          <TmsInput aria-label="Carrier bill date" type="date" value={billDate} disabled={disabled || working} onChange={(e) => setBillDate(e.target.value)} />
+          <TmsInput aria-label="Carrier bill amount" inputMode="decimal" placeholder={`Amount (${formatCents(totals.totalCents)})`} value={billAmount} disabled={disabled || working} onChange={(e) => setBillAmount(e.target.value)} />
+        </div>
+      )}
       <p className="mt-2 text-sm" data-testid="carrier-bills-margin">
         Customer {formatCents(customerTotalCents)} − carriers {formatCents(totals.totalCents)} = margin {formatCents(margin.marginCents)}
       </p>
