@@ -546,3 +546,10 @@
 .tms-shell .tms-batch-bar-results li[data-ok='false'] {
   color: var(--tms-danger);
 }
+
+/* Gross profit split (Brokerage | Assets | Other): one stat made of parts that wrap on a narrow row. */
+.tms-shell .tms-dg-kpi-split { display: inline-flex; flex-wrap: wrap; gap: 2px 14px; align-items: baseline; }
+.tms-shell .tms-dg-kpi-part { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--tms-badge-green); white-space: nowrap; }
+.tms-shell .tms-dg-kpi-part-bad { color: var(--tms-badge-red); }
+.tms-shell .tms-dg-kpi-part-muted { color: var(--tms-muted); font-weight: 600; }
+.tms-shell .tms-dg-kpi-part-name { font-size: 11px; font-weight: 500; color: var(--tms-muted); text-transform: uppercase; letter-spacing: 0.03em; }

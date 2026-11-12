@@ -14,10 +14,10 @@
   min-width: 0;
   padding: 4px 8px 0;
   overflow-x: auto;
-  scrollbar-width: thin;
+  /* Many tabs still scroll (wheel, touch, arrow keys); the bar itself stays hidden. */
+  scrollbar-width: none;
 }
-/* Stays put while the tabs scroll beside it. */
-.tms-shell .tms-ship-tabs-action { flex: none; align-self: center; margin: 3px 8px 0 0; }
+.tms-shell .tms-ship-tabs::-webkit-scrollbar { display: none; }
 .tms-shell .tms-ship-tab {
   flex: 0 0 auto;
   display: inline-flex;

@@ -1220,3 +1220,32 @@ export function toViewRow(row: ShipmentRow): ShipmentViewRow {
     commodity: row.commodity ?? null,
   }
 }
+
+
+export interface DivisionProfit { revenueCents: number; profitCents: number; count: number }
+export interface ProfitByDivision {
+  brokerage: DivisionProfit
+  assets: DivisionProfit
+  /** Car shipping, untagged and anything else. */
+  other: DivisionProfit
+  total: DivisionProfit
+}
+
+/**
+ * Revenue and gross profit of the rows split into Brokerage, Assets (Ivan Cartage and its Local / Owner Operator / Box Truck
+ * subdivisions) and Other, with the same per-row figures the stats strip already adds up.
+ */
+export function profitByDivision(rows: readonly ShipmentRow[], topLevel: (code: string) => string | null): ProfitByDivision {
+  const zero = (): DivisionProfit => ({ revenueCents: 0, profitCents: 0, count: 0 })
+  const out: ProfitByDivision = { brokerage: zero(), assets: zero(), other: zero(), total: zero() }
+  for (const r of rows) {
+    const top = r.revDivision ? (topLevel(r.revDivision) ?? r.revDivision) : null
+    const bucket = top === 'BROKERAGE' ? out.brokerage : top === 'ASSETS' ? out.assets : out.other
+    for (const b of [bucket, out.total]) {
+      b.revenueCents += r.revenueCents ?? 0
+      b.profitCents += r.profitCents ?? 0
+      b.count += 1
+    }
+  }
+  return out
+}
