@@ -3304,6 +3304,10 @@ export interface CarrierBillRecord {
    * until then.
    */
   datesPending?: boolean | null
+  /** Chosen on the AP Aging tab for the next pay run (approved bills only); cleared on unapprove. */
+  selectedForPayment?: boolean | null
+  selectedAt?: string | null
+  selectedBy?: string | null
   /** YYYY-MM-DD. */
   dueAt: string
   termsDays: number

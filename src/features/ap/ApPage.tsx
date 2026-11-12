@@ -28,7 +28,8 @@ import { useCarriers } from '@/hooks/useCarriers'
 import { useOpenBills } from '@/hooks/useOpenBills'
 import { exportOutstandingPayables } from '@/lib/opsExports'
 import {
-  getShipmentDocumentUrl, getTmsSettings, graphqlErrorText, listBillsByMonth, reverseApPayment, unapproveBill, voidBill,
+  getShipmentDocumentUrl, getTmsSettings, graphqlErrorText, listBillsByMonth, listCarrierPaymentInfo, reverseApPayment,
+  selectBillsForPayment, unapproveBill, unselectBills, voidBill, type CarrierPaymentInfo,
 } from '@/lib/apiClient'
 import {
   AGING_BUCKETS, AGING_BUCKET_LABEL, apAgingCsv, type AgingPartySummary,
@@ -43,7 +44,8 @@ import { agingChipFor, formatDay, lastThreeMonths, monthLabel } from '@/features
 import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
-  billGates, billsInReview, billsToPay, isOwnFleet, paidBills, payeeLabel, quickPayLabel, selectionBalanceCents,
+  billGates, type BillGates, billsAging, billsExpected, billsSelected, canSelectForPayment, invoiceAgeBuckets, isOwnFleet, paidBills,
+  payToLabel, paymentInfoFor, payeeLabel, quickPayLabel, remitEmailOf, selectionBalanceCents,
   selectionCarrierId, sharedProLabel, sharedProIndex, type ApTabKey, type SharedProIndex, type ToBePaidFilters,
 } from './apViews'
 import { ApCreditDialog } from './components/ApCreditDialog'
@@ -51,6 +53,7 @@ import { VerifyPaymentBadge } from './components/VerifyPaymentBadge'
 import { isVerifyPaymentBill } from '@/lib/verifyPayment'
 import { ApproveBillDialog } from './components/ApproveBillDialog'
 import { PayCarrierDialog } from './components/PayCarrierDialog'
+import { PaymentInfoDialog } from './components/PaymentInfoDialog'
 import { RecordBillDialog, type RecordBillPrefill } from './components/RecordBillDialog'
 import { SendRemittanceDialog } from './components/SendRemittanceDialog'
 import { SetBillDatesDialog } from './components/SetBillDatesDialog'
@@ -88,6 +91,7 @@ type ApDialog =
   | { kind: 'void'; bill: CarrierBillRecord }
   | { kind: 'unapprove'; bill: CarrierBillRecord }
   | { kind: 'reverse'; payment: ApPaymentRecord }
+  | { kind: 'payinfo'; bill: CarrierBillRecord }
 
 const RIGHT = 'block text-right tabular-nums'
 
@@ -128,6 +132,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [filters, setFilters] = useState<ToBePaidFilters>(EMPTY_TO_BE_PAID_FILTERS)
   const [showFilters, setShowFilters] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
+  // Masked payment details (bank name, last four digits, payee) for the Pay to / Payment info columns.
+  const [payInfos, setPayInfos] = useState<CarrierPaymentInfo[]>([])
 
   const months = useMemo(() => lastThreeMonths(asOf), [asOf])
   const [month, setMonth] = useState(() => months[0])
@@ -160,6 +166,15 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     return () => { alive = false }
   }, [])
 
+  // Masked on the way in (see `listCarrierPaymentInfo`); a failed read leaves the columns reading "Not on file".
+  useEffect(() => {
+    let alive = true
+    listCarrierPaymentInfo()
+      .then((rows) => { if (alive) setPayInfos(rows) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+
   const carriersById = useMemo(() => {
     const map = new Map<string, CarrierRecord>()
     for (const c of carriers) map.set(c.id, c)
@@ -172,9 +187,11 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     return map
   }, [inReview.rows])
 
-  const reviewBills = useMemo(() => billsInReview(open.bills), [open.bills])
-  const approved = useMemo(() => billsToPay(open.bills), [open.bills])
-  const payRows = useMemo(() => applyToBePaidFilters(approved, filters, asOf), [approved, filters, asOf])
+  const expectedBills = useMemo(() => billsExpected(open.bills), [open.bills])
+  const agingBills = useMemo(() => billsAging(open.bills), [open.bills])
+  const selectedBills = useMemo(() => billsSelected(open.bills), [open.bills])
+  const agingRows = useMemo(() => applyToBePaidFilters(agingBills, filters, asOf), [agingBills, filters, asOf])
+  const selectedRows = useMemo(() => applyToBePaidFilters(selectedBills, filters, asOf), [selectedBills, filters, asOf])
   const settled = useMemo(() => paidBills(monthBills), [monthBills])
   const [verifyOnlyPaid, setVerifyOnlyPaid] = useState(false)
   const settledShown = useMemo(() => (verifyOnlyPaid ? settled.filter(isVerifyPaymentBill) : settled), [settled, verifyOnlyPaid])
@@ -202,8 +219,29 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   // against a row nobody on this screen can see.
   const applyFilters = (next: ToBePaidFilters) => {
     setFilters(next)
-    const visible = applyToBePaidFilters(approved, next, asOf).map((b) => b.id)
+    const visible = [...applyToBePaidFilters(agingBills, next, asOf), ...applyToBePaidFilters(selectedBills, next, asOf)].map((b) => b.id)
     setSelected((prev) => prev.filter((id) => visible.includes(id)))
+  }
+
+  const reportSelection = (verb: string, done: string[], skipped: { billId: string; reason: string }[]) => {
+    if (done.length > 0) toast.success(`${done.length} bill${done.length === 1 ? '' : 's'} ${verb}`)
+    if (skipped.length > 0) toast.error(`${skipped.length} not moved: ${[...new Set(skipped.map((x) => x.reason))].join('; ')}`)
+  }
+
+  const runSelect = (ids: string[]) => {
+    setBusy(true)
+    selectBillsForPayment({ billIds: ids })
+      .then((r) => { reportSelection('selected for payment', r.selected, r.skipped); closeAndRefresh() })
+      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not select the bills'))
+      .finally(() => setBusy(false))
+  }
+
+  const runUnselect = (ids: string[]) => {
+    setBusy(true)
+    unselectBills({ billIds: ids })
+      .then((r) => { reportSelection('moved back to Aging', r.unselected, r.skipped); closeAndRefresh() })
+      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not move the bills back'))
+      .finally(() => setBusy(false))
   }
 
   const runVoid = (bill: CarrierBillRecord, reason: string) => {
@@ -245,11 +283,12 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   const counts: Record<ApTabKey, number> = {
     awaiting: awaiting.rows.length,
-    review: reviewBills.length,
-    'to-pay': approved.length,
+    expected: expectedBills.length,
+    aging: agingBills.length,
+    selected: selectedBills.length,
     paid: settled.length,
     payments: carrierAp.payments.length,
-    aging: open.aging.byParty.length,
+    report: open.aging.byParty.length,
     inbox: inboxStatus.status?.openCount ?? 0,
   }
 
@@ -321,25 +360,36 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       busy,
       onRecord: (row) => setDialog({ kind: 'record', loadCarrierId: row.loadCarrierId }),
     })
-    : tab === 'review' ? reviewView({
+    : tab === 'expected' ? reviewView({
       banner: errorBanner,
-      bills: reviewBills,
+      bills: expectedBills,
       rows: reviewRows,
       shared,
       carriersById,
       settings,
       isAdmin,
       busy,
+      infos: payInfos,
+      onInfo: (bill) => setDialog({ kind: 'payinfo', bill }),
       onApprove: (bill) => setDialog({ kind: 'approve', bill }),
       onDates: (bill) => setDialog({ kind: 'dates', bill }),
       onCharges: (bill) => setDialog({ kind: 'charges', loadCarrierId: bill.loadCarrierId, shipmentId: bill.shipmentId }),
       onVoid: (bill) => setDialog({ kind: 'void', bill }),
     })
-    : tab === 'to-pay' ? toBePaidView({
+    : tab === 'aging' || tab === 'selected' ? payableView({
+      mode: tab,
       errorBanner,
-      bills: payRows,
-      allBills: approved,
+      bills: tab === 'aging' ? agingRows : selectedRows,
+      allBills: tab === 'aging' ? agingBills : selectedBills,
       shared,
+      infos: payInfos,
+      gatesOf: (bill) => billGates({
+        bill,
+        row: reviewRows.get(bill.loadCarrierId),
+        carrier: carriersById.get(bill.carrierId) ?? null,
+        settings,
+        isAdmin,
+      }),
       filters,
       showFilters,
       selected,
@@ -348,9 +398,16 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onToggleFilters: () => setShowFilters((s) => !s),
       onFilters: applyFilters,
       onSelect: setSelected,
+      onInfo: (bill) => setDialog({ kind: 'payinfo', bill }),
       onPay: (bill) => setDialog({ kind: 'pay', carrierId: bill.carrierId, billIds: [bill.id] }),
       onPaySelected: (carrierId) => setDialog({ kind: 'pay', carrierId, billIds: selected }),
+      onApprove: (bill) => setDialog({ kind: 'approve', bill }),
+      onDates: (bill) => setDialog({ kind: 'dates', bill }),
+      onCharges: (bill) => setDialog({ kind: 'charges', loadCarrierId: bill.loadCarrierId, shipmentId: bill.shipmentId }),
+      onVoid: (bill) => setDialog({ kind: 'void', bill }),
       onUnapprove: (bill) => setDialog({ kind: 'unapprove', bill }),
+      onSelectForPayment: runSelect,
+      onUnselect: runUnselect,
     })
     : tab === 'paid' ? paidView({
       banner: errorBanner,
@@ -530,6 +587,15 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onConfirm={(reason) => runVoid(dialog.bill, reason)}
         />
       )}
+      {dialog?.kind === 'payinfo' && (
+        <PaymentInfoDialog
+          bill={dialog.bill}
+          info={paymentInfoFor(dialog.bill, payInfos)}
+          infos={payInfos}
+          open
+          onOpenChange={(openNow) => { if (!openNow) setDialog(null) }}
+        />
+      )}
       {dialog?.kind === 'unapprove' && (
         <ReasonDialog
           title={`Send bill ${dialog.bill.billNumber ?? dialog.bill.id} back to review`}
@@ -614,6 +680,41 @@ function facetCol<T>(
 const sumCents = <T,>(rows: T[], pick: (row: T) => number) => rows.reduce((sum, row) => sum + pick(row), 0)
 
 const ACTIONS = { filter: false, sortable: false, fixed: true } as const
+
+/**
+ * The three columns every payable row carries after its dates: the remittance e-mail, who is paid
+ * (the carrier directly or its factor), and a link to the payee's payment info. Only masked details
+ * are ever on a row; the dialog says where the full numbers live.
+ */
+function payeeColumns(infos: readonly CarrierPaymentInfo[], onInfo: (bill: CarrierBillRecord) => void): ApColumn<CarrierBillRecord>[] {
+  return [
+    facetCol<CarrierBillRecord>('remitEmail', 'REMIT E-MAIL', (bill) => remitEmailOf(bill, infos) || '—', undefined, { extraPx: 60 }),
+    facetCol<CarrierBillRecord>('payTo', 'PAY TO', payToLabel, (bill) => (
+      <TmsBadge tone={bill.payeeKind === 'FACTOR' ? 'blue' : 'gray'}>{payToLabel(bill)}</TmsBadge>
+    ), { extraPx: 30 }),
+    {
+      key: 'paymentInfo',
+      header: 'PAYMENT INFO',
+      text: (bill) => (paymentInfoFor(bill, infos)?.bankName ?? ''),
+      filter: false,
+      sortable: false,
+      render: (bill) => {
+        const info = paymentInfoFor(bill, infos)
+        return (
+          <button
+            type="button"
+            className="tms-link whitespace-nowrap"
+            aria-label={`Payment info for bill ${bill.billNumber ?? bill.id}`}
+            onClick={(event) => { event.stopPropagation(); onInfo(bill) }}
+          >
+            {info?.bankName || (info?.recipientType === 'FACTOR' ? 'Factor details' : 'View')}
+            {info?.accountLast4 ? ` ••${info.accountLast4}` : ''}
+          </button>
+        )
+      },
+    },
+  ]
+}
 
 /* ── Awaiting invoice ────────────────────────────────────────────────────── */
 
@@ -716,7 +817,7 @@ function awaitingView({ banner, rows, shared, busy, onRecord }: {
 /* ── In review ───────────────────────────────────────────────────────────── */
 
 function reviewView({
-  banner, bills, rows, shared, carriersById, settings, isAdmin, busy, onApprove, onDates, onCharges, onVoid,
+  banner, bills, rows, shared, carriersById, settings, isAdmin, busy, infos, onInfo, onApprove, onDates, onCharges, onVoid,
 }: {
   banner: ReactNode
   bills: CarrierBillRecord[]
@@ -726,6 +827,8 @@ function reviewView({
   settings: Pick<ApSettings, 'apRequireSignedRateCon'> | null
   isAdmin: boolean
   busy: boolean
+  infos: readonly CarrierPaymentInfo[]
+  onInfo: (bill: CarrierBillRecord) => void
   onApprove: (bill: CarrierBillRecord) => void
   onDates: (bill: CarrierBillRecord) => void
   onCharges: (bill: CarrierBillRecord) => void
@@ -754,8 +857,9 @@ function reviewView({
       ),
     },
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
-    { ...dayCol<CarrierBillRecord>('billDate', 'BILL DATE', (bill) => bill.billDate), render: (bill) => pendingDates(bill) ? <span className="tms-muted">Pending</span> : formatDay(bill.billDate) },
+    { ...dayCol<CarrierBillRecord>('billDate', 'INVOICE DATE', (bill) => bill.billDate), render: (bill) => pendingDates(bill) ? <span className="tms-muted">Pending</span> : formatDay(bill.billDate) },
     { ...dayCol<CarrierBillRecord>('due', 'DUE', (bill) => bill.dueAt), render: (bill) => pendingDates(bill) ? <span className="tms-muted">Pending</span> : formatDay(bill.dueAt) },
+    ...payeeColumns(infos, onInfo),
     moneyCol<CarrierBillRecord>('gross', 'GROSS', (bill) => bill.grossCents, (bill) => (
       <span className={RIGHT}>
         {formatCents(bill.grossCents)}
@@ -815,26 +919,35 @@ function reviewView({
     columns,
     rows: bills,
     rowKey: (bill) => bill.id,
-    emptyText: 'No bill is waiting on review.',
+    emptyText: 'No bill is waiting on its invoice date. Loads moved to billing from Load review appear here.',
     kpis: [
-      { label: 'In review', value: bills.length },
+      { label: 'Expected', value: bills.length },
       { label: 'Net', value: formatCents(sumCents(bills, (bill) => bill.netCents)) },
       { label: 'With variance', value: bills.filter((bill) => bill.varianceCents !== 0).length, tone: 'bad' },
-      { label: 'Needs invoice date & due date', value: bills.filter(pendingDates).length, tone: 'bad' },
     ],
   })
 }
 
-/* ── To be paid ──────────────────────────────────────────────────────────── */
+/* ── Aging and Selected ──────────────────────────────────────────────────── */
 
-function toBePaidView({
-  errorBanner, bills, allBills, shared, filters, showFilters, selected, asOf, busy,
-  onToggleFilters, onFilters, onSelect, onPay, onPaySelected, onUnapprove,
+/**
+ * The pay run, in two views of the same bills. Aging holds every open bill that has its invoice date and is
+ * not on a run yet: tick the approved ones and Select for payment. Selected holds the chosen bills with their
+ * batch total, and is where Pay selected posts the payment. A bill still in review shows in Aging with its
+ * approval actions and no checkbox: it has gates to clear before it can be chosen.
+ */
+function payableView({
+  mode, errorBanner, bills, allBills, shared, infos, gatesOf, filters, showFilters, selected, asOf, busy,
+  onToggleFilters, onFilters, onSelect, onInfo, onPay, onPaySelected, onApprove, onDates, onCharges, onVoid, onUnapprove,
+  onSelectForPayment, onUnselect,
 }: {
+  mode: 'aging' | 'selected'
   errorBanner: ReactNode
   bills: CarrierBillRecord[]
   allBills: CarrierBillRecord[]
   shared: SharedProIndex
+  infos: readonly CarrierPaymentInfo[]
+  gatesOf: (bill: CarrierBillRecord) => BillGates
   filters: ToBePaidFilters
   showFilters: boolean
   selected: string[]
@@ -843,15 +956,32 @@ function toBePaidView({
   onToggleFilters: () => void
   onFilters: (filters: ToBePaidFilters) => void
   onSelect: (ids: string[]) => void
+  onInfo: (bill: CarrierBillRecord) => void
   onPay: (bill: CarrierBillRecord) => void
   onPaySelected: (carrierId: string) => void
+  onApprove: (bill: CarrierBillRecord) => void
+  onDates: (bill: CarrierBillRecord) => void
+  onCharges: (bill: CarrierBillRecord) => void
+  onVoid: (bill: CarrierBillRecord) => void
   onUnapprove: (bill: CarrierBillRecord) => void
+  onSelectForPayment: (ids: string[]) => void
+  onUnselect: (ids: string[]) => void
 }): ListView {
   // One payment is one carrier's: a selection spanning two of them cannot be posted as
   // one row, and the button says so instead of failing in the dialog.
   const payCarrierId = selectionCarrierId(bills, selected)
   const carrierName = billCarrierOptions(allBills).find((c) => c.id === filters.carrierId)?.name ?? null
   const dueLabel: Record<string, string> = { OVERDUE: 'Overdue', WEEK: 'Due within 7 days', LATER: 'Later' }
+  const tickable = (bill: CarrierBillRecord) => mode === 'selected' || canSelectForPayment(bill)
+  const toggle = (bill: CarrierBillRecord) => onSelect(
+    selected.includes(bill.id) ? selected.filter((id) => id !== bill.id) : [...selected, bill.id],
+  )
+  const ticked = bills.filter((b) => selected.includes(b.id))
+  const statusChip = (bill: CarrierBillRecord) => {
+    if (bill.status === 'IN_REVIEW') return { label: 'In review', tone: 'orange' as const }
+    if (bill.status === 'PARTIAL') return { label: BILL_STATUS_LABEL.PARTIAL, tone: 'gray' as const }
+    return mode === 'selected' ? { label: 'Selected', tone: 'blue' as const } : { label: 'Approved', tone: 'green' as const }
+  }
 
   const columns: ApColumn<CarrierBillRecord>[] = [
     {
@@ -862,17 +992,17 @@ function toBePaidView({
       filter: false,
       sortable: false,
       fixed: true,
-      render: (bill) => (
+      render: (bill) => (tickable(bill) ? (
         <input
           type="checkbox"
           aria-label={`Select bill ${bill.billNumber ?? bill.id}`}
           checked={selected.includes(bill.id)}
           onClick={(event) => event.stopPropagation()}
-          onChange={() => onSelect(
-            selected.includes(bill.id) ? selected.filter((id) => id !== bill.id) : [...selected, bill.id],
-          )}
+          onChange={() => toggle(bill)}
         />
-      ),
+      ) : (
+        <input type="checkbox" disabled aria-label={`Bill ${bill.billNumber ?? bill.id} must be approved before it can be selected`} title="Approve this bill before it can be selected for payment" />
+      )),
     },
     {
       key: 'bill',
@@ -882,12 +1012,12 @@ function toBePaidView({
       render: (bill) => (
         <>
           <Link to={`/tms/invoicing/payable/bills/${bill.id}`}>{bill.billNumber ?? bill.id}</Link>
-          {bill.status === 'PARTIAL' && <> <TmsBadge tone="gray">{BILL_STATUS_LABEL.PARTIAL}</TmsBadge></>}
           <VerifyPaymentBadge bill={bill} />
         </>
       ),
     },
     facetCol('carrier', 'CARRIER', (bill) => bill.carrierName || '—', (bill) => <>{bill.carrierName || '—'}{sharedProChip(shared, bill.loadId)}</>, { extraPx: 90 }),
+    dayCol<CarrierBillRecord>('billDate', 'INVOICE DATE', (bill) => bill.billDate),
     dayCol<CarrierBillRecord>('due', 'DUE', (bill) => bill.dueAt),
     {
       key: 'age',
@@ -901,53 +1031,140 @@ function toBePaidView({
         return <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>
       },
     },
-    moneyCol<CarrierBillRecord>('net', 'NET', (bill) => bill.netCents),
+    facetCol<CarrierBillRecord>('status', 'STATUS', (bill) => statusChip(bill).label, (bill) => {
+      const chip = statusChip(bill)
+      return <TmsBadge tone={chip.tone}>{chip.label}</TmsBadge>
+    }),
+    moneyCol<CarrierBillRecord>('net', 'NET', (bill) => bill.netCents, (bill) => (
+      <span className={RIGHT}>
+        {formatCents(bill.netCents)}
+        {bill.varianceCents !== 0 && (
+          <> <TmsBadge tone="red">{formatCents(bill.varianceCents)} variance</TmsBadge></>
+        )}
+      </span>
+    )),
     moneyCol<CarrierBillRecord>('paid', 'PAID', (bill) => bill.paidCents),
     moneyCol<CarrierBillRecord>('balance', 'BALANCE', (bill) => bill.balanceCents, (bill) => (
       <span className={`${RIGHT} font-medium`}>{formatCents(bill.balanceCents)}</span>
     )),
-    facetCol('payee', 'PAYEE', payeeLabel),
+    ...payeeColumns(infos, onInfo),
+    {
+      key: 'gates',
+      header: 'STANDING IN THE WAY',
+      text: (bill) => {
+        if (bill.status !== 'IN_REVIEW') return '—'
+        const gates = gatesOf(bill)
+        const all = [...gates.blocks, ...gates.warnings.map((w) => w.message)]
+        return all.length === 0 ? 'Nothing — ready to approve' : all.join(' · ')
+      },
+      extraPx: 40,
+      render: (bill) => {
+        if (bill.status !== 'IN_REVIEW') return <span className="tms-muted">—</span>
+        const gates = gatesOf(bill)
+        return (
+          <>
+            {gates.blocks.length === 0 && gates.warnings.length === 0 && (
+              <span className="tms-muted">Nothing — ready to approve</span>
+            )}
+            {gates.blocks.map((block) => (
+              <span key={block} className="text-xs" style={{ color: 'var(--tms-badge-red)' }}>{block}{' '}</span>
+            ))}
+            {gates.warnings.map((warning) => (
+              <span key={warning.key} className="text-xs tms-muted">{warning.message}{' '}</span>
+            ))}
+          </>
+        )
+      },
+    },
     {
       key: 'actions',
       header: '',
       text: () => '',
-      width: 190,
+      width: mode === 'aging' ? 330 : 190,
       ...ACTIONS,
       render: (bill) => (
         <span className="flex justify-end gap-1 whitespace-nowrap">
-          <TmsButton variant="ghost" size="sm" aria-label={`Pay bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onPay(bill)}>Pay</TmsButton>
-          <TmsButton variant="ghost" size="sm" aria-label={`Unapprove bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onUnapprove(bill)}>Unapprove</TmsButton>
+          {bill.status === 'IN_REVIEW' ? (
+            <>
+              <TmsButton variant="ghost" size="sm" aria-label={`Change dates for bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onDates(bill)}>Dates</TmsButton>
+              <TmsButton variant="ghost" size="sm" aria-label={`Approve bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onApprove(bill)}>Approve</TmsButton>
+              <TmsButton variant="ghost" size="sm" aria-label={`Update carrier charges for bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onCharges(bill)}>Update charges</TmsButton>
+              <TmsButton variant="ghost" size="sm" aria-label={`Void bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onVoid(bill)}>Void</TmsButton>
+            </>
+          ) : (
+            <>
+              <TmsButton variant="ghost" size="sm" aria-label={`Pay bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onPay(bill)}>Pay</TmsButton>
+              {mode === 'selected' && (
+                <TmsButton variant="ghost" size="sm" aria-label={`Remove bill ${bill.billNumber ?? bill.id} from selected`} disabled={busy} onClick={() => onUnselect([bill.id])}>Remove</TmsButton>
+              )}
+              <TmsButton variant="ghost" size="sm" aria-label={`Unapprove bill ${bill.billNumber ?? bill.id}`} disabled={busy} onClick={() => onUnapprove(bill)}>Unapprove</TmsButton>
+            </>
+          )}
         </span>
       ),
     },
   ]
 
   const overdue = bills.filter((bill) => agingChipFor(bill.dueAt, asOf).late)
+  const buckets = invoiceAgeBuckets(bills, asOf)
+  const kpis = mode === 'aging'
+    ? [
+        { label: 'Aging', value: bills.length },
+        { label: 'Balance', value: formatCents(sumCents(bills, (bill) => bill.balanceCents)) },
+        ...buckets.map((b) => ({ label: `${b.label} old`, value: `${b.count} · ${formatCents(b.cents)}` })),
+        { label: 'Overdue', value: overdue.length, tone: 'bad' as const },
+      ]
+    : [
+        { label: 'Selected', value: bills.length },
+        { label: 'Batch total', value: formatCents(sumCents(bills, (bill) => bill.balanceCents)) },
+        { label: 'Carriers', value: new Set(bills.map((b) => b.carrierId)).size },
+        { label: 'Overdue', value: overdue.length, tone: 'bad' as const },
+      ]
+  const tickedCents = selectionBalanceCents(bills, selected)
+
   return view<CarrierBillRecord>({
-    gridId: 'ap-to-pay',
-    kpis: [
-      { label: 'Bills to pay', value: bills.length },
-      { label: 'Balance', value: formatCents(sumCents(bills, (bill) => bill.balanceCents)) },
-      { label: 'Overdue', value: overdue.length, tone: 'bad' },
-      { label: 'Overdue balance', value: formatCents(sumCents(overdue, (bill) => bill.balanceCents)), tone: 'bad' },
-    ],
+    gridId: mode === 'aging' ? 'ap-aging' : 'ap-selected',
+    kpis,
     actions: (
       <>
         <span className="text-sm tms-muted">
-          {selected.length} selected ({formatCents(selectionBalanceCents(bills, selected))})
+          {selected.length} selected ({formatCents(tickedCents)})
         </span>
-        {selected.length > 0 && !payCarrierId && (
-          <span className="text-xs tms-muted">One payment covers one carrier; narrow the selection.</span>
+        {mode === 'aging' ? (
+          <TmsButton
+            size="sm"
+            variant="primary"
+            aria-label="Select for payment"
+            disabled={busy || ticked.length === 0}
+            onClick={() => onSelectForPayment(ticked.map((b) => b.id))}
+          >
+            Select for payment
+          </TmsButton>
+        ) : (
+          <>
+            {selected.length > 0 && !payCarrierId && (
+              <span className="text-xs tms-muted">One payment covers one carrier; narrow the selection.</span>
+            )}
+            <TmsButton
+              size="sm"
+              variant="ghost"
+              aria-label="Remove selected from the pay run"
+              disabled={busy || ticked.length === 0}
+              onClick={() => onUnselect(ticked.map((b) => b.id))}
+            >
+              Remove from selected
+            </TmsButton>
+            <TmsButton
+              size="sm"
+              variant="primary"
+              aria-label="Pay selected bills"
+              disabled={busy || selected.length === 0 || !payCarrierId}
+              onClick={() => { if (payCarrierId) onPaySelected(payCarrierId) }}
+            >
+              Pay selected
+            </TmsButton>
+          </>
         )}
-        <TmsButton
-          size="sm"
-          variant="primary"
-          aria-label="Pay selected bills"
-          disabled={busy || selected.length === 0 || !payCarrierId}
-          onClick={() => { if (payCarrierId) onPaySelected(payCarrierId) }}
-        >
-          Pay selected
-        </TmsButton>
       </>
     ),
     filterChips: [
@@ -1024,7 +1241,9 @@ function toBePaidView({
     columns,
     rows: bills,
     rowKey: (bill) => bill.id,
-    emptyText: 'Nothing is approved and waiting in this view.',
+    emptyText: mode === 'aging'
+      ? 'No bill with an invoice date is waiting. Set dates on the Expected tab to move a bill here.'
+      : 'No bill is selected for payment. Tick bills on the Aging tab and choose Select for payment.',
     onClearFilters: () => onFilters(EMPTY_TO_BE_PAID_FILTERS),
   })
 }
