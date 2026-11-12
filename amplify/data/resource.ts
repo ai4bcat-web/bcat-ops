@@ -3826,6 +3826,17 @@ const schema = a.schema(stageTypes({
       invoiceId:       a.string(),
       orderId:         a.string(),
       shipmentId:      a.string(),
+      // ── When the customer paid the invoice (not when OTR funded it) ──────────────
+      // Set by hand through the otr-actions setCustomerPaid action, with an audit row. A
+      // payment-received tab in AR is expected to feed these two later; the reference is the
+      // check number or ACH trace the payment carried.
+      customerPaidOn:        a.date(),
+      customerPaymentRef:    a.string(),
+      customerPaidSetBy:     a.string(),
+      customerPaidSetAt:     a.datetime(),
+      // Earlier OTR invoices this row had before a 'Send to OTR again' made a new one:
+      // [{ otrInvoiceId, otrStatus, otrSubmittedAt, otrSubmittedBy, replacedAt, replacedBy }].
+      otrPriorInvoices:      a.json(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.

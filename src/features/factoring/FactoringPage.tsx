@@ -22,7 +22,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { createShipment, getTmsSettings } from '@/lib/apiClient'
 import { errorMessage } from '@/lib/utils/errorMessage'
-import { canDeleteFactoringItem } from '@/lib/auth/admin'
+import { canDeleteFactoringItem, canSetCustomerPaid } from '@/lib/auth/admin'
 import { toast } from 'sonner'
 import { FactoringRowFields } from './FactoringRowFields'
 import { fieldsReadyLabel, isReadyToSubmit } from './factoringFields'
@@ -43,6 +43,10 @@ import { noBuyInfo } from '@/lib/noBuy'
 import { mayInvoiceManually, needsManualInvoice, otrRejection } from '@/lib/otrRejection'
 import { BILLING_RELEASE_PAGE, holdsPerUserGrant } from '@/lib/navItems'
 import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
+import { CustomerPaidCell, CustomerPaidDialog } from './CustomerPaidCell'
+import { formatPaidOn } from './formatPaidOn'
+import { ResendToOtrDialog } from './ResendToOtrDialog'
+import { offersResend } from '@/lib/factoringResubmit'
 
 // ── Status labels ────────────────────────────────────────────────────────────
 
@@ -454,6 +458,10 @@ export function FactoringPage() {
   const [openId, setOpenId] = useState<string | null>(null)
   /** The row whose Invoice manually confirmation is open. */
   const [manualMoveId, setManualMoveId] = useState<string | null>(null)
+  /** The row whose Customer paid dialog / Send to OTR again confirmation is open. */
+  const [paidEditId, setPaidEditId] = useState<string | null>(null)
+  const [resendId, setResendId] = useState<string | null>(null)
+  const canEditPaid = canSetCustomerPaid(user)
 
   // Deleting a row drops the record that a PRO was ever sent for factoring, so it is
   // limited to the two people who run factoring rather than every admin.
@@ -523,6 +531,8 @@ export function FactoringPage() {
   }, [])
 
   const manualMoveItem = manualMoveId ? items.find((i) => i.id === manualMoveId) ?? null : null
+  const paidEditItem = paidEditId ? items.find((i) => i.id === paidEditId) ?? null : null
+  const resendItem = resendId ? items.find((i) => i.id === resendId) ?? null : null
   const openItem = openId ? items.find((i) => i.id === openId) ?? null : null
   const manualPanel = openItem?.status === 'MANUAL_INVOICE' || openItem?.status === 'INVOICED_MANUALLY'
 
@@ -688,6 +698,11 @@ export function FactoringPage() {
       ),
     },
     {
+      key: 'customerPaid',
+      header: 'CUSTOMER PAID',
+      render: (item) => <CustomerPaidCell item={item} canEdit={canEditPaid} onEdit={() => setPaidEditId(item.id)} />,
+    },
+    {
       key: 'received',
       header: activeTab === 'INVOICED_MANUALLY' ? 'SENT' : 'RECEIVED',
       render: (item) => activeTab === 'INVOICED_MANUALLY'
@@ -727,6 +742,17 @@ export function FactoringPage() {
               onClick={() => setManualMoveId(item.id)}
             >
               Invoice manually
+            </TmsButton>
+          )}
+          {offersResend(item) && !noBuyInfo(item).noBuy && (
+            <TmsButton
+              size="sm"
+              variant="secondary"
+              aria-label={`Send PRO ${item.proNumber} to OTR again`}
+              disabled={pendingIds.has(item.id)}
+              onClick={() => setResendId(item.id)}
+            >
+              Send to OTR again
             </TmsButton>
           )}
           {canDelete && (
@@ -769,6 +795,12 @@ export function FactoringPage() {
       optionsOf: (i) => { const m = missingDocs(i); return m.length ? m.map((d) => ({ value: d, label: `${d} missing` })) : [{ value: 'complete', label: 'Complete' }] },
     },
     {
+      key: 'customerPaid', header: 'Customer paid', group: 'Status', extraPx: 40,
+      text: (i) => formatPaidOn(i.customerPaidOn) || '\u2014',
+      sortValue: (i) => i.customerPaidOn ?? null,
+      filter: 'date', dateOf: (i) => i.customerPaidOn ?? null,
+    },
+    {
       key: 'received', header: activeTab === 'INVOICED_MANUALLY' ? 'Sent' : 'Received', group: 'Status', extraPx: activeTab === 'INVOICED_MANUALLY' ? 200 : 0,
       text: (i) => activeTab === 'INVOICED_MANUALLY' ? (manualSentInfo(i) ? formatReceivedAt(sentAtOf(i)) : '\u2014') : relativeReceived(i.receivedAt),
       sortValue: (i) => (activeTab === 'INVOICED_MANUALLY' ? sentAtOf(i) : i.receivedAt) || null,
@@ -781,7 +813,7 @@ export function FactoringPage() {
       optionsOf: (i) => [{ value: i.status, label: FACTORING_STATUS_LABEL[i.status] }],
       sortValue: (i) => FACTORING_STATUS_LABEL[i.status],
     },
-    { key: 'actions', header: 'Actions', group: 'Status', text: () => '', fixed: true, filter: false, sortable: false, width: 170 },
+    { key: 'actions', header: 'Actions', group: 'Status', text: () => '', fixed: true, filter: false, sortable: false, width: 280 },
   ], [activeTab])
   const prefs = useDenseGridPrefs({
     gridId: 'factoring-queue',
@@ -924,6 +956,9 @@ export function FactoringPage() {
           onDone={refresh}
         />
       )}
+
+      {paidEditItem && <CustomerPaidDialog item={paidEditItem} onClose={() => setPaidEditId(null)} onDone={refresh} />}
+      {resendItem && <ResendToOtrDialog item={resendItem} onClose={() => setResendId(null)} onDone={refresh} />}
 
       {/* Opened by the PRO column — the leg editor, for the documents on it. */}
       <LoadDrawer />
