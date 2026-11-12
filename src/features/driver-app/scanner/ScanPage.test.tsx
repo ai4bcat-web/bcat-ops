@@ -87,23 +87,16 @@ describe('ScanPage', () => {
     apiMocks.fetchCurrentLoad.mockResolvedValue(null)
   })
 
-  it('submits a multi-page ratecon with one API call', async () => {
-    apiMocks.submitRatecon.mockResolvedValue('ratecon-sub')
-
+  it('offers no rate confirmation: the office collects that one', async () => {
     renderAt('/driver/scan')
+    expect(screen.getByRole('button', { name: /POD/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Rate confirmation/i })).toBeNull()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: /Rate confirmation/i }))
-    fireEvent.click(await screen.findByTestId('capture-done'))
-
-    await screen.findByRole('button', { name: /Send to office/i })
-    fireEvent.change(screen.getByLabelText(/Reference #/i), { target: { value: 'RC-123' } })
-    fireEvent.click(screen.getByRole('button', { name: /Send to office/i }))
-
-    await waitFor(() => expect(apiMocks.submitRatecon).toHaveBeenCalledTimes(1))
-    const args = apiMocks.submitRatecon.mock.calls[0][0]
-    expect(args.pages).toHaveLength(2)
-    expect(args.referenceNumber).toBe('RC-123')
-    expect(args.resumeFromId).toBeUndefined()
+  it('opens the normal chooser for an old rate-confirmation link', async () => {
+    renderAt('/driver/scan?kind=ratecon')
+    expect(await screen.findByText(/What are you sending\?/i)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Rate confirmation/i })).toBeNull()
   })
 
   it('submits a standalone POD when the load is not listed', async () => {
@@ -136,26 +129,26 @@ describe('ScanPage', () => {
   })
 
   it('retries a failed upload without creating a second submission', async () => {
-    apiMocks.submitRatecon
-      .mockRejectedValueOnce(new apiMocks.ResumableDriverApiError(500, 'Upload failed', 'abc-123', 'RATECON'))
-      .mockResolvedValueOnce('ratecon-sub')
+    apiMocks.fetchSubmissions.mockResolvedValue([])
+    apiMocks.submitStandalonePod
+      .mockRejectedValueOnce(new apiMocks.ResumableDriverApiError(500, 'Upload failed', 'abc-123', 'POD'))
+      .mockResolvedValueOnce('pod-sub')
 
-    renderAt('/driver/scan')
+    renderAt('/driver/scan?kind=pod&pro=NEW-LOAD')
 
-    fireEvent.click(screen.getByRole('button', { name: /Rate confirmation/i }))
     fireEvent.click(await screen.findByTestId('capture-done'))
 
     await screen.findByRole('button', { name: /Send to office/i })
     fireEvent.click(screen.getByRole('button', { name: /Send to office/i }))
 
-    await waitFor(() => expect(apiMocks.submitRatecon).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(apiMocks.submitStandalonePod).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.getByRole('button', { name: /Retry upload/i })).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: /Retry upload/i }))
 
-    await waitFor(() => expect(apiMocks.submitRatecon).toHaveBeenCalledTimes(2))
-    const first = apiMocks.submitRatecon.mock.calls[0][0]
-    const second = apiMocks.submitRatecon.mock.calls[1][0]
+    await waitFor(() => expect(apiMocks.submitStandalonePod).toHaveBeenCalledTimes(2))
+    const first = apiMocks.submitStandalonePod.mock.calls[0][0]
+    const second = apiMocks.submitStandalonePod.mock.calls[1][0]
     expect(first.resumeFromId).toBeUndefined()
     expect(second.resumeFromId).toBe('abc-123')
   })

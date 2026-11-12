@@ -7,6 +7,7 @@
  * function the Lambda runs before it lets an order release), so this card and the release gate cannot disagree.
  * A write here re-reads the documents and asks the drawer to run the review again.
  */
+import { isCarShipperLoad } from '@/lib/carShipper'
 import { useEffect, useState } from 'react'
 import { CheckCircle2, Download, Eye, Plus, RefreshCw, Upload, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -53,7 +54,7 @@ export function LoadReviewDocuments({ shipmentId, readOnly = false, disabled = f
 
   const order = bundle?.orders?.[0] ?? null
   const customer = customers.find((c) => c.id === (order?.customerId ?? bundle?.shipment?.customerId)) ?? null
-  const docs = useShipmentDocuments(shipmentId, { bundle, customer, settings, legacyImported: bundle?.shipment?.legacyImported, enabled: !!bundle })
+  const docs = useShipmentDocuments(shipmentId, { bundle, customer, settings, legacyImported: bundle?.shipment?.legacyImported, carShipper: isCarShipperLoad(bundle?.shipment), enabled: !!bundle })
   const gate = order ? docs.orderGates[order.id] : undefined
 
   const filed = docs.documents.filter((d) => d.status === 'ACTIVE')

@@ -460,19 +460,19 @@ describe('ShipmentsBoard', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('the stats strip compares gross profit for Brokerage and Assets, with Other only when it has some', async () => {
+  it('the stats strip shows Brokerage gross profit and hides Assets until asset costs are attached', async () => {
     renderBoard('/tms/shipments', [
       row('S001', { status: 'DELIVERED', revDivision: 'BROKERAGE', revenueCents: 100_000, profitCents: 20_000 }),
-      row('S002', { status: 'DELIVERED', revDivision: 'ASSETS', revSubdivision: 'LOCAL', revenueCents: 50_000, profitCents: 10_000 }),
+      row('S002', { status: 'DELIVERED', revDivision: 'ASSETS', revSubdivision: 'LOCAL', revenueCents: 50_000, profitCents: 50_000 }),
     ])
     await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
     const strip = screen.getByRole('region', { name: 'Summary' })
     expect(strip).toHaveTextContent('Brokerage')
     expect(strip).toHaveTextContent('$200.00 (20%)')
-    expect(strip).toHaveTextContent('Assets')
-    expect(strip).toHaveTextContent('$100.00 (20%)')
+    expect(strip).not.toHaveTextContent('Assets $')
+    expect(strip).not.toHaveTextContent('(100%)')
     expect(strip).not.toHaveTextContent('Other')
-    expect(strip.querySelector('.tms-dg-kpi-split')?.getAttribute('title')).toContain('Total $300.00 (20%)')
+    expect(strip.querySelector('.tms-dg-kpi-split')?.getAttribute('title')).toContain('Assets is hidden until asset costs are attached')
   })
 
   it('revenue and gross profit count only delivered shipments, and the strip says so', async () => {

@@ -160,13 +160,6 @@ export function CurrentLoadCard() {
         </div>
       )}
 
-      {/* Stated, not asked for: the office adds this one when the load reaches factoring. */}
-      {!load.hasRateConfirmation && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          No rate confirmation on file yet. The office adds that one, so there is nothing
-          for you to do — send it from the Scan tab only if you have it.
-        </p>
-      )}
     </div>
     {alsoOpen.length > 0 && (
       <section aria-label="Also on your list" data-testid="also-open-loads">

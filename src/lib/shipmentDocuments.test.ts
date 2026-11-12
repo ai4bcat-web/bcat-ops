@@ -47,10 +47,15 @@ function carrier(id: string, overrides: Partial<GateCarrier> = {}): GateCarrier 
 }
 
 /** The Ready-to-invoice gate for a one-order, one-load, one-assignment shipment. */
+/**
+ * The customer gate with only the customer's list in play. `carShipper` defaults to true here so
+ * these tests read the list alone; the always-on rate confirmation has its own tests below.
+ */
 function customerGate(
   documents: ShipmentDocumentRecord[],
   required: string[] = ['POD'],
   loadCarriers: GateCarrier[] = [carrier('lc-1')],
+  carShipper = true,
 ) {
   return evaluateDocGate({
     order: { id: 'ord-1' },
@@ -59,6 +64,7 @@ function customerGate(
     documents,
     customer: { requiredDocsForInvoice: required },
     scope: 'CUSTOMER',
+    carShipper,
   })
 }
 
@@ -150,6 +156,19 @@ describe('evaluateDocGate — customer scope', () => {
     expect(
       customerGate([], ['Rate confirmation'], [carrier('lc-1', { rateConStatus: 'SENT' })]).missing,
     ).toEqual(['RATE_CON'])
+  })
+})
+
+describe('evaluateDocGate — the rate confirmation is always required except for car shipping', () => {
+  it('adds RATE_CON to every non-car-shipping load, own fleet included', () => {
+    const own = customerGate([doc('POD')], ['POD'], [carrier('lc-1', { kind: 'OWN_ASSET' } as Partial<GateCarrier>)], false)
+    expect(own.required).toEqual(['POD', 'RATE_CON'])
+    expect(own.missing).toEqual(['RATE_CON'])
+    expect(customerGate([doc('POD'), doc('RATE_CON')], ['POD'], [carrier('lc-1')], false).ready).toBe(true)
+  })
+
+  it('leaves it off a car-shipping load', () => {
+    expect(customerGate([doc('POD')], ['POD'], [carrier('lc-1')], true).required).toEqual(['POD'])
   })
 })
 

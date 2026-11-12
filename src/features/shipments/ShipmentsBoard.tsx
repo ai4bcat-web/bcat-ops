@@ -1094,9 +1094,10 @@ function BoardPane({
       {
         label: 'Delivered gross profit',
         value: (
-          <span className="tms-dg-kpi-split" title={`${DELIVERED_ONLY_TIP} Total ${formatCents(split.total.profitCents)}${margin(split.total)}`}>
+          // Assets is left out until asset costs (driver pay, fuel, truck) are on the shipment:
+          // with no carrier cost its profit equals its revenue, which read as a 100% margin.
+          <span className="tms-dg-kpi-split" title={`${DELIVERED_ONLY_TIP} Assets is hidden until asset costs are attached.`}>
             {part('Brokerage', split.brokerage)}
-            {part('Assets', split.assets)}
             {split.other.count > 0 && split.other.profitCents !== 0 ? part('Other', split.other, true) : null}
           </span>
         ),

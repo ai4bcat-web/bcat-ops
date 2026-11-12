@@ -464,6 +464,11 @@ export interface DocGateInput {
    * (`Load.requiredDocTypes`, see loadRequiredDocs.ts). Added as written.
    */
   extraDocTypes?: readonly string[] | null
+  /**
+   * CUSTOMER scope: a car-shipping load (isCarShipperLoad). Every other load needs the rate
+   * confirmation, own-fleet ones included (the office files it), so it is added unless this is true.
+   */
+  carShipper?: boolean | null
 }
 
 /**
@@ -486,6 +491,7 @@ export function evaluateDocGate(input: DocGateInput): DocGateResult {
   // optional and never holds an invoice. Per-load extras (`Load.requiredDocTypes`) are explicit and block as written.
   const gated = input.scope === 'CARRIER' ? required : required.filter((type) => !NEVER_BLOCKING_DOC_TYPES.includes(type))
   if (input.scope !== 'CARRIER') {
+    if (input.carShipper !== true && !gated.includes('RATE_CON')) gated.push('RATE_CON')
     for (const type of normalizeRequiredDocTypes(input.extraDocTypes ?? []).types) {
       if (!gated.includes(type)) gated.push(type)
     }

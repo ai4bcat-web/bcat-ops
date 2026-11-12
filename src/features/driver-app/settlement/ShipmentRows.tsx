@@ -2,13 +2,12 @@
  * The week's shipments, as rows a driver can act on.
  *
  * Each row answers three things at a glance: which load, what it pays, and what paperwork
- * it still needs. The POD and rate-con cells are the actions — tapping one opens the page
- * picker already pointed at that load, so a driver never types a PRO from memory and a
- * document never lands on the wrong shipment.
+ * it still needs. The POD cell is the action — tapping it opens the page picker already
+ * pointed at that load, so a driver never types a PRO from memory and a document never
+ * lands on the wrong shipment.
  *
- * Only the POD is required. The rate confirmation is the office's to collect at factoring,
- * so it is offered here but never demanded: a driver who has it can send it, and a driver
- * who does not is not being chased for someone else's paperwork.
+ * Only the POD is asked for. The rate confirmation is the office's to collect, so the
+ * driver app neither shows it nor asks for it.
  *
  * Built as a grid rather than a <table> because this is read on a phone. The columns still
  * line up down the list, which is the point of columns; a real table at 400px would need
@@ -168,7 +167,7 @@ export function ShipmentRows({
     )
   }
 
-  const send = (kind: 'pod' | 'ratecon', trip: Trip) => {
+  const send = (kind: 'pod', trip: Trip) => {
     const pro = trip.factoring?.invoiceNo?.trim() ?? ''
     navigate(`/driver/scan?kind=${kind}${pro ? `&pro=${encodeURIComponent(pro)}` : ''}`)
   }
@@ -208,7 +207,6 @@ export function ShipmentRows({
         const shipment = shipmentLabel(trip)
         const pro = f?.invoiceNo ?? null
         const podDoc = docs.find('POD', trip.loadId, pro)
-        const rcDoc = docs.find('RATECON', trip.loadId, pro)
         return (
           <div
             key={trip.id}
@@ -278,16 +276,6 @@ export function ShipmentRows({
                 onPress={() => send('pod', trip)}
                 onPreview={podDoc ? () => setOpen({ doc: podDoc, kind: 'POD', shipment }) : undefined}
               />
-              <DocCell
-                present={!!f?.rateconPresent}
-                readOnly={readOnly}
-                required={false}
-                label="rate confirmation"
-                shipment={shipment}
-                pageCount={rcDoc?.document.pageCount}
-                onPress={() => send('ratecon', trip)}
-                onPreview={rcDoc ? () => setOpen({ doc: rcDoc, kind: 'RATECON', shipment }) : undefined}
-              />
             </div>
           </div>
         )
@@ -331,7 +319,7 @@ export function ShipmentRows({
             setOpen(null)
             docs.refresh()
             navigate(
-              `/driver/scan?kind=${open.kind === 'POD' ? 'pod' : 'ratecon'}` +
+              `/driver/scan?kind=pod` +
                 `&pro=${encodeURIComponent(open.shipment)}`,
             )
           }}
@@ -340,7 +328,7 @@ export function ShipmentRows({
             // shipment already has, so the office still ends up with one document.
             setOpen(null)
             navigate(
-              `/driver/scan?kind=${open.kind === 'POD' ? 'pod' : 'ratecon'}` +
+              `/driver/scan?kind=pod` +
                 `&pro=${encodeURIComponent(open.shipment)}`,
             )
           }}

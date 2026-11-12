@@ -17,6 +17,7 @@
  * bundle this file by relative path.
  */
 
+import { isCarShipperLoad } from './carShipper'
 import { OWN_ASSET_MESSAGES } from './ownAssetDriver'
 
 export type ReleaseGateReasonCode =
@@ -48,6 +49,8 @@ export interface ReleaseGateShipment {
    * the document, reference and Step W driver checks do not apply. Nothing else is waived.
    */
   legacyImported?: boolean | null
+  /** Revenue division: car-shipping (CAR_SHIPPING) loads need no rate confirmation. */
+  revDivision?: string | null
 }
 
 export interface ReleaseGateOrderReference {
@@ -150,7 +153,8 @@ function countsAsPresent(doc: ReleaseGateDocument): boolean {
  *
  *   customer list (or the org default when the customer names none)  — BOL dropped: optional
  *   ∪ POD, always
- *   ∪ RATE_CON once an outside carrier is on the load
+ *   ∪ RATE_CON, always, except on car-shipping loads (Ryne, 2026-11-12: own-fleet loads too —
+ *     the office files it; Best Care Auto Transport work has none)
  *   ∪ `extraDocTypes`: per-load additions somebody ticked for this load. These are explicit,
  *     so they block as written (a ticked BOL is required for that load).
  *
@@ -160,8 +164,9 @@ export function requiredDocTypesForRelease(
   requiredDocTypes: readonly string[],
   legs: readonly ReleaseGateLeg[],
   extraDocTypes: readonly string[] = [],
+  opts: { carShipper?: boolean } = {},
 ): string[] {
-  const hasCarrierLeg = legs.some((leg) => leg.status === 'ACTIVE' && leg.kind === 'CARRIER')
+  void legs
   const out: string[] = []
   const add = (type: unknown) => {
     const trimmed = typeof type === 'string' ? type.trim() : ''
@@ -172,7 +177,7 @@ export function requiredDocTypesForRelease(
     add(type)
   }
   for (const type of ALWAYS_REQUIRED_DOC_TYPES) add(type)
-  if (hasCarrierLeg) add('RATE_CON')
+  if (!opts.carShipper) add('RATE_CON')
   for (const type of extraDocTypes) add(type)
   return out
 }
@@ -214,7 +219,7 @@ export function evaluateReleaseGate(input: ReleaseGateInput): ReleaseGateResult 
     if (!perCarrierRateCon && carrierLegs.some((leg) => leg.rateConStatus === 'SIGNED')) {
       present.add('RATE_CON')
     }
-    for (const type of requiredDocTypesForRelease(input.requiredDocTypes, legs, input.extraDocTypes ?? [])) {
+    for (const type of requiredDocTypesForRelease(input.requiredDocTypes, legs, input.extraDocTypes ?? [], { carShipper: isCarShipperLoad(shipment) })) {
       if (type === 'RATE_CON' && perCarrierRateCon) {
         const unsigned = carrierLegs.filter((leg) => leg.rateConStatus !== 'SIGNED')
         if (unsigned.length > 0) {
