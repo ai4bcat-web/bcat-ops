@@ -44,7 +44,7 @@ async function pageTexts(bytes: Uint8Array): Promise<string[]> {
  * Figures that must never reach a customer. They are handed to the renderer on the same
  * object as the invoice so a leak would be visible rather than merely impossible by type.
  */
-/** Pixel widths of the embedded images: BCAT's logo is 800 px wide, Ivan's 900. */
+/** Pixel widths of the embedded images: BCAT's logo is 800 px wide, Ivan's 820. */
 async function imageWidths(bytes: Uint8Array): Promise<number[]> {
   const doc = await PDFDocument.load(bytes)
   const widths: number[] = []
@@ -161,7 +161,7 @@ describe('buildInvoicePdf', () => {
       expect(lines).toContain('IVAN CARTAGE CO')
       expect(lines).toContain('ELK GROVE VILLAGE IL 60007')
       expect(lines).not.toContain('BCAT LOGISTICS')
-      expect(await imageWidths(bytes)).toEqual([900])
+      expect(await imageWidths(bytes)).toEqual([820])
     }
   })
 
