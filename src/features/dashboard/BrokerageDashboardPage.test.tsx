@@ -47,13 +47,15 @@ describe('Brokerage cards under the Dashboard', () => {
   })
 
   it('draws the month table with a totals row and the rep table that ties to it', async () => {
-    fetchRollup.mockResolvedValue(window(['2026-09', '2026-10', '2026-11'].map((m) => row(m))))
-    fetchRep.mockResolvedValue({ scope: 'ALL', repKey: null, months: ['2026-09', '2026-10', '2026-11'].map(repMonth) })
+    fetchRollup.mockResolvedValue(window(['2026-10', '2026-11'].map((m) => row(m))))
+    fetchRep.mockResolvedValue({ scope: 'ALL', repKey: null, months: ['2026-10', '2026-11'].map(repMonth) })
     render(<BrokerageSection />)
 
     const monthTable = await screen.findByTestId('brokerage-month-table')
-    expect(within(screen.getByTestId('brokerage-month-total')).getAllByRole('cell').map((c) => c.textContent)).toEqual(['Total', '6', '$9,000', '$7,200', '$1,800', '20.0%'])
-    expect(within(monthTable).getAllByRole('row').length).toBeGreaterThan(13)
+    expect(within(screen.getByTestId('brokerage-month-total')).getAllByRole('cell').map((c) => c.textContent)).toEqual(['Total', '4', '$6,000', '$4,800', '$1,200', '20.0%'])
+    // The month table starts at October 2026 (the new system's data start): October and November, no older months.
+    expect(within(monthTable).getAllByRole('row').length).toBeLessThan(8)
+    expect(screen.getByTestId('brokerage-data-start')).toHaveTextContent('Data starts October 2026')
 
     // Rep view defaults to last month (October): the other divisions' loads are not counted.
     await waitFor(() => expect(screen.getByTestId('brokerage-rep-widget')).toBeInTheDocument())
