@@ -14,7 +14,8 @@ import { reviewLoad, readyToInvoice, releaseToBilling, setSalesRep, setRevTag, t
 import { DOCS_LANDING } from '@/features/shipments/workstations/tracking/legacyRoutes'
 import { NO_DELIVERY_TIME_TIP, evaluateLoadReview, pendingApRecordNotes, failingReasons, reviewAgeDays, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL } from '@/lib/loadReview'
 import { CarrierBillsPanel } from './CarrierBillsPanel'
-import { deliveredText, deliveredTimeOf, reviewStatusText, reviewStatusTone } from './reviewStatus'
+import { deliveredText, deliveredTimeOf } from './reviewStatus'
+import { StatusPill } from '@/features/shipments/StatusPill'
 import { LoadReviewDocuments } from './LoadReviewDocuments'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
@@ -117,7 +118,7 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
   const passed = LOAD_REVIEW_CHECKS.filter((key) => verdict.checks[key].ok).length
   return <TmsDrawer open onOpenChange={(open) => { if (!open) onClose() }} title={shipmentLink('overview', row.number)}
     description={`${row.customerName ?? '—'} · ${row.originCity ?? '—'} → ${row.destinationCity ?? '—'} · ${deliveredTimeOf(row) ? `Delivered ${formatDateTime(deliveredTimeOf(row))}` : deliveredText(row) === '—' ? 'Delivered —' : deliveredText(row)}`}
-    headerExtra={<><TmsBadge tone={reviewStatusTone(row)}>{reviewStatusText(row)}</TmsBadge><TmsBadge tone={verdict.ok ? 'green' : 'orange'}>{released ? 'Already released' : verdict.ok ? result ? 'Ready' : 'Looks ready' : `${reasons.length} to fix`}</TmsBadge><span title={age == null ? NO_DELIVERY_TIME_TIP : undefined}><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'No delivery time' : age + ' d'}</TmsBadge></span></>}
+    headerExtra={<><StatusPill row={row} /><TmsBadge tone={verdict.ok ? 'green' : 'orange'}>{released ? 'Already released' : verdict.ok ? result ? 'Ready' : 'Looks ready' : `${reasons.length} to fix`}</TmsBadge><span title={age == null ? NO_DELIVERY_TIME_TIP : undefined}><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'No delivery time' : age + ' d'}</TmsBadge></span></>}
     footer={<div className="lr-footer">
       {!released && !verdict.ok && <div className="lr-footer-blockers" role="note">
         <p className="lr-footer-title">{`Fix ${reasons.length} ${reasons.length === 1 ? 'item' : 'items'} first.`}</p>

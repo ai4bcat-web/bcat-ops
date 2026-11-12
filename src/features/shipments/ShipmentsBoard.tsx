@@ -13,6 +13,7 @@ import { deliveryPhase, deliveryPhaseText } from '@/lib/deliveryPhase'
 import { phaseInputOfRow } from './deliveryPhaseInputs'
 import './deliveryTimeline.css'
 import { TrackingModeNotSetRowChip } from './trackingModeControl/TrackingModeNotSetChip'
+import { StatusPill } from './StatusPill'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -115,7 +116,6 @@ import {
   SHIPMENT_DEFAULT_FROZEN,
   SHIPMENT_GRID_COLUMNS,
   sentence,
-  statusCellText,
 } from './shipmentGridColumns'
 import {
   fitColumnWidths,
@@ -898,7 +898,7 @@ function BoardPane({
         )
       }
       if (columnKey === 'status') {
-        return <span className="flex items-center gap-1"><span className="font-medium">{statusCellText(row)}</span><TrackingModeNotSetRowChip row={row} /></span>
+        return <span className="flex items-center gap-1"><StatusPill row={row} /><TrackingModeNotSetRowChip row={row} /></span>
       }
       if (columnKey === 'delivery') {
         const r = deliveryPhase(phaseInputOfRow(row, Date.now()))
