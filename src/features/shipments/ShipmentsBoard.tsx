@@ -287,7 +287,9 @@ export function ShipmentsBoard() {
   }, [])
 
   const visiblePanes: Array<'left' | 'right'> = split ? ['left', 'right'] : ['left']
-  const wantsAllList = visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'all')
+  // A search typed on Active reaches every shipment (the All list's data), so All's rows load for it too.
+  const searchesAll = visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'active' && reports[pane].query.trim() !== '')
+  const wantsAllList = searchesAll || visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'all')
   const wantsVoidedList = visiblePanes.some((pane) => (pane === 'left' ? list : rightList) === 'voided')
   // The All list is scoped by year (default: this Chicago year). A specific year reads that year's
   // twelve pickup months; All years reads the whole table. All never lists voided shipments: the
@@ -542,7 +544,13 @@ function BoardPane({
     [urlQuery, setParams, setPageSize],
   )
 
-  const listRows = useMemo(() => allRows.filter((r) => inShipmentList(r, list, year)), [allRows, list, year])
+  // Searching on Active looks through every shipment (the All list's scope plus everything Active already shows),
+  // so a typed PRO or customer ref finds it whatever its status. Clearing the search returns to plain Active.
+  const searchingAll = list === 'active' && query.trim() !== ''
+  const listRows = useMemo(
+    () => allRows.filter((r) => (searchingAll ? inShipmentList(r, 'active') || inShipmentList(r, 'all', year) : inShipmentList(r, list, year))),
+    [allRows, list, year, searchingAll],
+  )
 
   // Density, sort and the summary strip persist per user and per pane. Columns, widths and pins do
   // not: everybody sees the team default, which only an admin edits (see teamColumnLayout.ts).
@@ -629,6 +637,8 @@ function BoardPane({
       ),
     [listRows, query, wantsVoided],
   )
+  // How many of a search's matches Active would not have shown (delivered, released, canceled), for the note by the search box.
+  const outsideActive = useMemo(() => (searchingAll ? chipBase.filter((r) => !inShipmentList(r, 'active')).length : 0), [searchingAll, chipBase])
   const fitRows = useMemo(() => {
     if (flags.size === 0) return chipBase
     const nowMs = Date.now()
@@ -1057,6 +1067,11 @@ function BoardPane({
           onChange={(e) => setQuery(e.target.value)}
           className="tms-dense-search"
         />
+        {searchingAll && (
+          <span className="text-xs text-muted-foreground" role="status" data-testid="search-all-note" title="A search looks through every shipment, not only Active. Clear it to go back to Active.">
+            Searching all shipments: {chipBase.length} {chipBase.length === 1 ? 'match' : 'matches'}{outsideActive > 0 ? `, ${outsideActive} not in Active` : ''}
+          </span>
+        )}
         {onListChange && (
           <TmsSegmentedTabs
             aria-label="Shipment list"

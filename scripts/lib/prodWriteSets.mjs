@@ -95,5 +95,7 @@ export const PROD_WRITE_SETS = {
   awCustomerBilling: { models: ['Customer', 'AuditLog'] },
   // `awCustomerBillingEmails.mjs --apply`: Customer.apEmail only (OTR billing list; blank + non-FACTOR only, conditional) + one AuditLog row per customer.
   awCustomerBillingEmails: { models: ['Customer', 'AuditLog'] },
+  // `awInvoiceDocs.mjs --apply`: adds the missing `inv:<invoiceId>` INVOICE ShipmentDocument rows (put, attribute_not_exists(id)); never touches an existing row.
+  awInvoiceDocs: { models: ['ShipmentDocument'] },
   awShipmentNumber: { models: ['Shipment', 'Load', 'Invoice', 'CarrierBill', 'SpotRequest', 'WorkflowRun', 'IntakeLoad', 'TrackingLink', 'Quote', 'LaneRateSample', 'Commission', 'AuditLog', 'TmsSettings'] },
 };

@@ -1315,6 +1315,20 @@ describe('driver-app-api handler', () => {
       expect(JSON.parse((await handler(baseEvent('/timeclock'))).body).ptoUsed).toEqual({ year: '2026', days: 1 })
     })
 
+    it('reports PTO days left only once the driver has an allowance this year', async () => {
+      tables['TimeClockEntry-test']['tc-1'] = pto()
+      const left = async (path: string) => JSON.parse((await handler(baseEvent(path))).body).ptoRemaining
+      // No hire date, or still inside the first calendar year after a year of service: nothing at all.
+      expect(await left('/time-off')).toBeUndefined()
+      tables['Driver-test'][DRIVER_A_ID].hireDate = '2025-06-10'
+      expect(await left('/time-off')).toBeUndefined()
+      expect(await left('/timeclock')).toBeUndefined()
+      // Hired 2024-06-10: a year done 2025-06-10, so 5 days from 2026-01-01; one is used.
+      tables['Driver-test'][DRIVER_A_ID].hireDate = '2024-06-10'
+      expect(await left('/time-off')).toEqual({ year: '2026', days: 4 })
+      expect(await left('/timeclock')).toEqual({ year: '2026', days: 4 })
+    })
+
     it('a request is stored PENDING from the driver, with the hours asked', async () => {
       const res = await post('/time-off', { type: 'LATE_START', startDate: '2026-11-10', hours: 3, note: ' dentist ' })
       expect(res.statusCode).toBe(200)

@@ -3612,6 +3612,36 @@ export async function listShipmentsByNumber(number: string): Promise<ShipmentRec
 }
 
 /**
+ * Shipments whose search key contains any of these reference values (lower-cased, 5+ characters): the Intake "already built" check.
+ * One filtered scan per chunk of 25 values (the key is not indexed, so DynamoDB reads the table once per chunk); the caller does the
+ * exact whole-word match. Narrow fields only; voided rows come back with `voidedAt` set and are dropped by the match.
+ */
+export async function listShipmentsBySearchKeys(values: readonly string[]): Promise<ShipmentKeyRow[]> {
+  if (!modelAvailable('Shipment')) return []
+  const unique = [...new Set(values.map((v) => v.trim().toLowerCase()).filter((v) => v.length >= 5))]
+  const out = new Map<string, ShipmentKeyRow>()
+  const fields = `${narrowShipmentFields()} customerName searchKey`
+  for (let i = 0; i < unique.length; i += 25) {
+    const filter = { or: unique.slice(i, i + 25).map((v) => ({ searchKey: { contains: v } })) }
+    let nextToken: string | null = null
+    do {
+      const r = await client.graphql({
+        query: `query ShipmentsBySearchKey($filter: ModelShipmentFilterInput, $nextToken: String) { listShipments(filter: $filter, limit: 1000, nextToken: $nextToken) { items { ${fields} } nextToken } }`,
+        variables: { filter, nextToken },
+      }) as { data: { listShipments: { items: (ShipmentKeyRow | null)[]; nextToken?: string | null } } }
+      const page = r.data.listShipments
+      for (const item of page.items) if (item) out.set(item.id, item)
+      nextToken = page.nextToken ?? null
+    } while (nextToken)
+  }
+  return [...out.values()]
+}
+export type ShipmentKeyRow = {
+  id: string; number: string | null; customerId: string | null; customerName?: string | null
+  searchKey: string | null; voidedAt?: string | null; deletedAt?: string | null
+}
+
+/**
  * Ids only of every shipment picked up in any of these months, voided ones dropped server-side unless asked for.
  * The legacy store's window read uses the default: a month of import debris is thousands of voided shipments whose
  * full loads nobody renders. Voided loads stay reachable by id / PRO on demand (`getLoads`, `proConflictAllHistory`).
@@ -7355,8 +7385,8 @@ export async function generateInvoice(input: {
   billToId?: string
   attachDocumentIds?: string[]
   note?: string
-}): Promise<{ invoice: InvoiceRecord; gate: DocGateResult }> {
-  return financeAction<{ invoice: InvoiceRecord; gate: DocGateResult }>('GENERATE_INVOICE', input)
+}): Promise<{ invoice: InvoiceRecord; gate: DocGateResult; documentFiled?: boolean }> {
+  return financeAction<{ invoice: InvoiceRecord; gate: DocGateResult; documentFiled?: boolean }>('GENERATE_INVOICE', input)
 }
 
 /** One row per order: the invoice it issued, or the reason it refused. Nothing throws. */
@@ -7367,8 +7397,8 @@ export async function batchGenerateInvoices(input: {
   return financeAction('BATCH_GENERATE', input)
 }
 
-export async function renderInvoicePdf(input: { invoiceId: string }): Promise<{ invoice: InvoiceRecord }> {
-  return financeAction<{ invoice: InvoiceRecord }>('RENDER_INVOICE_PDF', input)
+export async function renderInvoicePdf(input: { invoiceId: string }): Promise<{ invoice: InvoiceRecord; documentFiled?: boolean }> {
+  return financeAction<{ invoice: InvoiceRecord; documentFiled?: boolean }>('RENDER_INVOICE_PDF', input)
 }
 
 /**

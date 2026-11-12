@@ -28,7 +28,8 @@ import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeStop } from '@/t
 import { IntakeFieldRow } from './IntakeFieldRow'
 import { SourceEmailCard } from './SourceEmailCard'
 import { duplicateGroups } from '@/lib/intakeDuplicates'
-import { DeleteIntakeDialog, DuplicateNotice } from './DuplicateParts'
+import { BuiltNotice, DeleteIntakeDialog, DuplicateNotice } from './DuplicateParts'
+import { useBuiltMatches } from './useBuiltMatches'
 import { useIntakeLoad, useIntakeLoads } from './useIntakeLoads'
 import { useIntakePermissions } from './useIntakePermissions'
 import './intake.css'
@@ -85,6 +86,11 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
   const queue = useIntakeLoads({ status: 'OPEN', enabled: row.status === 'OPEN' })
   const dupInfo = useMemo(() => duplicateGroups(queue.rows).get(row.id), [queue.rows, row.id])
   const [reason, setReason] = useState('')
+  const [builtConfirmOpen, setBuiltConfirmOpen] = useState(false)
+  // Checked against what is on screen (a customer picked or a reference typed here counts), not only what was saved.
+  const checkRows = useMemo(() => [{ ...row, fields: work.fields }], [row, work.fields])
+  const { matches: builtById } = useBuiltMatches(checkRows)
+  const builtMatches = builtById.get(row.id) ?? []
 
   const editable = canReview && row.status === 'OPEN' && !busy
   const activeDivisions = (divisions ?? []).filter((d) => d.active)
@@ -276,6 +282,16 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             onChanged={(next) => { onRow(next); queue.refresh() }}
           />
         ) : null}
+        {row.status === 'OPEN' && builtMatches.length > 0 ? (
+          <BuiltNotice
+            row={row}
+            matches={builtMatches}
+            isAdmin={isOwnerOrAdmin}
+            canReview={canReview}
+            onDelete={() => setDeleteOpen(true)}
+            onChanged={(next) => { onRow(next); queue.refresh() }}
+          />
+        ) : null}
         <TmsCard title="Customer & billing">
           {fieldRow(
             'customerId',
@@ -432,7 +448,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             <span className="tms-intake-footer-spacer" />
             {isOwnerOrAdmin ? <TmsButton variant="destructive" data-testid="intake-delete" disabled={busy} onClick={() => setDeleteOpen(true)}>Delete</TmsButton> : null}
             <TmsButton variant="destructive" disabled={busy} onClick={() => setDismissOpen(true)}>Dismiss</TmsButton>
-            <TmsButton variant="primary" disabled={busy || !gate.ok} onClick={move}>Create shipment</TmsButton>
+            <TmsButton variant="primary" data-testid="intake-create" disabled={busy || !gate.ok} onClick={() => { if (builtMatches.length > 0) setBuiltConfirmOpen(true); else void move() }}>Create shipment</TmsButton>
           </div>
         ) : null}
       </div>
@@ -452,6 +468,20 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
         <TmsField label="Reason">
           <TmsTextarea value={reason} onChange={(e) => setReason(e.target.value)} />
         </TmsField>
+      </TmsDialog>
+      <TmsDialog
+        open={builtConfirmOpen}
+        onOpenChange={setBuiltConfirmOpen}
+        title="This may already be built"
+        description={`${builtMatches.slice(0, 5).map((m) => `PRO ${m.number}${m.customerName ? ` (${m.customerName})` : ''} has ${m.value}`).join('; ')}. Creating another shipment would book the same load twice.`}
+        footer={(
+          <div className="tms-intake-footer">
+            <TmsButton size="sm" onClick={() => setBuiltConfirmOpen(false)}>Cancel</TmsButton>
+            <TmsButton size="sm" variant="destructive" data-testid="intake-create-anyway" disabled={busy} onClick={() => { setBuiltConfirmOpen(false); void move() }}>Create anyway</TmsButton>
+          </div>
+        )}
+      >
+        {null}
       </TmsDialog>
       <DeleteIntakeDialog
         row={row}

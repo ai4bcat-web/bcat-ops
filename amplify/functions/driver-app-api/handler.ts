@@ -26,6 +26,7 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { DynamoDBClient as DispatchDynamo } from '@aws-sdk/client-dynamodb'
 import { DispatchStore, tablesFromEnv as dispatchTablesFromEnv, recordDriverStatus } from '../_shared/dispatchStore'
+import { ptoAllowanceForYear } from '../../../src/lib/ptoAllowance'
 import { dispatcherContactFor, toE164Strict } from '../../../src/lib/dispatch'
 import { slackClient } from '../_shared/slackApi'
 import { mirrorInbound, slackMirrorEnabled } from '../_shared/slackDispatch'
@@ -331,6 +332,17 @@ interface DriverRow {
   motiveDriverId?: number | string | null
   /** Whether this driver accrues PTO. Today only Jason Smith and Charles Best. */
   ptoEligible?: boolean | null
+  /** YYYY-MM-DD. With the PTO tiers in src/lib/ptoAllowance.ts it decides whether the driver has PTO this year. */
+  hireDate?: string | null
+}
+
+/**
+ * PTO days left this calendar year, present only when the driver has an allowance this year (a year
+ * of service done in an earlier calendar year). Absent otherwise: the app shows nothing about PTO then.
+ */
+function ptoRemainingFor(hireDate: string | null | undefined, year: string, used: number): { ptoRemaining?: { year: string; days: number } } {
+  const allowance = ptoAllowanceForYear(hireDate, year)
+  return allowance > 0 ? { ptoRemaining: { year, days: allowance - used } } : {}
 }
 
 interface DriverPaySettingRow {
@@ -2999,6 +3011,7 @@ export const handler = async (event: FnUrlEvent) => {
             ptoEligible: driver.ptoEligible === true,
             // Days of PTO on the clock this calendar year: one row is one day.
             ptoUsed: { year, days: ptoDaysUsed(rows, year) },
+            ...ptoRemainingFor(driver.hireDate, year, ptoDaysUsed(rows, year)),
           })
         }
         if (method !== 'POST') return reply(405, { error: 'method not allowed' })
@@ -3044,6 +3057,7 @@ export const handler = async (event: FnUrlEvent) => {
           ptoEligible: driver.ptoEligible === true,
           // PTO days used this calendar year, so the Hours tab can show it beside the week.
           ptoUsed: { year: yearOf(today), days: ptoDaysUsed(rows, yearOf(today)) },
+          ...ptoRemainingFor(driver.hireDate, yearOf(today), ptoDaysUsed(rows, yearOf(today))),
           /*
            * An admin viewing a driver's app must never punch their clock, so the punch
            * route refuses outright. Saying so here lets the app disable the button rather

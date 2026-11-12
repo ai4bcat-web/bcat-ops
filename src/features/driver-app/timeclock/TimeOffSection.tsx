@@ -74,7 +74,9 @@ export function TimeOffSection({ today, readOnly, refreshKey }: {
     )
   }
 
-  const { ptoEligible, ptoUsed, requests } = state
+  const { requests, ptoRemaining } = state
+  // PTO shows only for a driver with an allowance this year; without one the app says nothing about it.
+  const ptoEligible = state.ptoEligible && !!ptoRemaining
   const isPto = type === 'PTO'
 
   const pick = (t: TimeOffType) => {
@@ -121,9 +123,9 @@ export function TimeOffSection({ today, readOnly, refreshKey }: {
     <section className="mt-6" aria-label="Time off">
       <h2 className="mb-2 text-base font-semibold text-foreground">Time off</h2>
 
-      {(ptoEligible || ptoUsed.days > 0) && (
+      {ptoRemaining && (
         <p className="mb-3 text-sm text-muted-foreground">
-          PTO used in {ptoUsed.year}: <span className="font-semibold text-foreground">{dayCount(ptoUsed.days)}</span>
+          PTO left in {ptoRemaining.year}: <span className="font-semibold text-foreground">{dayCount(Math.max(0, ptoRemaining.days))}</span>
         </p>
       )}
 
@@ -136,7 +138,6 @@ export function TimeOffSection({ today, readOnly, refreshKey }: {
             <option value="LATE_START">{TYPE_LABEL.LATE_START}</option>
             {ptoEligible && <option value="PTO">{TYPE_LABEL.PTO}</option>}
           </select>
-          {!ptoEligible && <p className="mt-1 text-xs text-muted-foreground">PTO is not set up for you</p>}
         </div>
 
         <div className={isPto ? '' : 'grid grid-cols-2 gap-3'}>

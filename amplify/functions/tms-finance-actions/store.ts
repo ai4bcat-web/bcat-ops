@@ -47,19 +47,31 @@ export const ses = new SESv2Client({})
 export const SHIPMENT_ACTIONS_FUNCTION_NAME = process.env.SHIPMENT_ACTIONS_FUNCTION_NAME ?? ''
 
 /**
- * File (or void) an invoice's document on its shipment. Fire and forget: the invoice is already issued and its PDF stored, and a
- * document row that fails to appear is put right the next time the PDF is rendered, so this never fails the invoice.
+ * File (or void) an invoice's document on its shipment, and say whether it landed.
+ *
+ * The call waits for the answer (it used to be fire-and-forget, where a handler error came back as a
+ * success): the invoice is already issued and its PDF stored, so a failure here never fails the
+ * invoice. It is logged and reported to the caller as `false`, and a document row that is missing is put
+ * right by re-rendering the PDF or by the backfill script — the row id (`inv:<invoiceId>`) makes every
+ * run idempotent.
  */
-export async function fileInvoiceDocument(input: { shipmentId: string; invoiceId: string; orderId?: string | null; number?: string | null; s3Key?: string | null; sizeBytes?: number | null; void?: boolean }): Promise<void> {
-  if (!SHIPMENT_ACTIONS_FUNCTION_NAME) return
+export async function fileInvoiceDocument(input: { shipmentId: string; invoiceId: string; orderId?: string | null; number?: string | null; s3Key?: string | null; sizeBytes?: number | null; void?: boolean }): Promise<boolean> {
+  if (!SHIPMENT_ACTIONS_FUNCTION_NAME) return false
   try {
-    await lambda.send(new InvokeCommand({
+    const out = await lambda.send(new InvokeCommand({
       FunctionName: SHIPMENT_ACTIONS_FUNCTION_NAME,
-      InvocationType: 'Event',
+      InvocationType: 'RequestResponse',
       Payload: Buffer.from(JSON.stringify({ systemCaller: 'finance-actions', arguments: { action: 'ATTACH_INVOICE_DOC', input: JSON.stringify(input) } })),
     }))
+    if (out.FunctionError) {
+      const detail = out.Payload ? Buffer.from(out.Payload).toString('utf8').slice(0, 500) : out.FunctionError
+      console.error('[tms-finance-actions] the invoice document was refused', input.invoiceId, detail)
+      return false
+    }
+    return true
   } catch (err) {
     console.error('[tms-finance-actions] could not file the invoice document', input.invoiceId, err instanceof Error ? err.message : String(err))
+    return false
   }
 }
 

@@ -1,12 +1,10 @@
 /**
  * Invoicing & AR: the house rules every issued invoice is built from.
  *
- * Two of these settings are load-bearing enough to be refused here rather than
- * discovered later. A number format with no counter would hand every invoice the same
- * number, so it is checked through `invoiceNumberFormatError` — the same function
- * `GENERATE_INVOICE` refuses with, so the card and the Lambda cannot disagree. An
- * e-mail body with no `{number}` would arrive naming nothing, so it is checked through
- * `templateHasNumber`. The live example underneath the format box is rendered by the
+ * A number format with no counter would hand every invoice the same number, so it is
+ * refused here rather than discovered later: it is checked through `invoiceNumberFormatError`
+ * — the same function `GENERATE_INVOICE` refuses with, so the card and the Lambda cannot
+ * disagree. The invoice e-mail body is fixed (`INVOICE_EMAIL_BODY`) and shown read-only. The live example underneath the format box is rendered by the
  * real `formatInvoiceNumber` against the real next number, which is why the next number
  * is shown and never typed: it is taken with an atomic ADD, and a hand-edit would either
  * collide with an issued invoice or silently skip a block of numbers.
@@ -23,7 +21,7 @@ import { getTmsSettings, listDivisions, saveArSettings } from '@/lib/apiClient'
 import {
   DEFAULT_INVOICE_ATTACH_TYPES, DEFAULT_INVOICE_NUMBER_FORMAT, formatInvoiceNumber, invoiceNumberFormatError,
 } from '@/lib/invoiceBuild'
-import { DEFAULT_INVOICE_EMAIL_TEMPLATE, templateHasNumber } from '@/lib/shipmentNotices'
+import { INVOICE_EMAIL_BODY } from '@/lib/shipmentNotices'
 import type { InvoiceBatchEmailMode, TmsSettings } from '@/types/tms'
 import { invoiceSeriesStartProblem } from '@/lib/invoiceSeries'
 import { CheckRow, ErrorText, GroupLabel, Hint, Loading, Panel, SettingsCard, Stack } from './settingsKit'
@@ -44,7 +42,6 @@ export function ArSettingsCard() {
   const [nextNumber, setNextNumber] = useState<number | null>(null)
   const [prefix, setPrefix] = useState(FALLBACK_PREFIX)
   const [terms, setTerms] = useState('')
-  const [emailTemplate, setEmailTemplate] = useState('')
   const [attachTypes, setAttachTypes] = useState<string[]>([])
   const [factorName, setFactorName] = useState('')
   const [factorStreet, setFactorStreet] = useState('')
@@ -72,7 +69,6 @@ export function ArSettingsCard() {
         setMaxImported(s?.maxImportedInvoiceNumber ?? null)
         setPrefix(divisions.find((d) => d.invoicePrefix)?.invoicePrefix ?? FALLBACK_PREFIX)
         setTerms(s?.invoiceTerms ?? '')
-        setEmailTemplate(s?.invoiceEmailTemplate ?? '')
         setAttachTypes(s?.invoiceAttachTypes ?? [])
         setFactorName(s?.factorRemitTo?.name ?? '')
         setFactorStreet(s?.factorRemitTo?.address?.street ?? '')
@@ -104,11 +100,6 @@ export function ArSettingsCard() {
     setError(null)
     if (formatError) { setError(formatError); return }
     if (seriesProblem) { setError(seriesProblem); return }
-    const body = emailTemplate.trim()
-    if (body && !templateHasNumber(body)) {
-      setError('The invoice e-mail must contain {number} — without it the bill arrives naming nothing')
-      return
-    }
     // A factor remit-to with no name is not a remit-to; it clears the whole block.
     const name = factorName.trim()
     const address = [factorStreet, factorCity, factorState, factorZip].some((v) => v.trim())
@@ -125,7 +116,6 @@ export function ArSettingsCard() {
       await saveArSettings({
         invoiceNumberFormat: numberFormat.trim() || null,
         invoiceTerms: terms.trim() || null,
-        invoiceEmailTemplate: body || null,
         // Nothing ticked means the house list, not "attach nothing".
         invoiceAttachTypes: attachTypes.length > 0 ? attachTypes : null,
         factorRemitTo: name
@@ -226,14 +216,13 @@ export function ArSettingsCard() {
 
           <TmsField
             label="Invoice e-mail"
-            hint={<>{'{number}'}, {'{shipment}'}, {'{total}'} and {'{dueAt}'} are filled in. {'{number}'} is required.</>}
+            hint="Every invoice goes out with this message and the invoice PDF attached. It is the same for every customer."
           >
             <TmsTextarea
-              aria-label="Invoice email template"
-              rows={3}
-              value={emailTemplate}
-              onChange={(e) => setEmailTemplate(e.target.value)}
-              placeholder={DEFAULT_INVOICE_EMAIL_TEMPLATE}
+              aria-label="Invoice email body"
+              rows={10}
+              readOnly
+              value={INVOICE_EMAIL_BODY}
             />
           </TmsField>
 

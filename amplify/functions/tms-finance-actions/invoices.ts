@@ -42,7 +42,6 @@ import {
 } from '../../../src/lib/invoiceBuild'
 import { buildInvoicePdf, invoiceFilename } from '../../../src/lib/invoicePdf'
 import {
-  DEFAULT_INVOICE_EMAIL_TEMPLATE,
   renderInvoiceEmail,
 } from '../../../src/lib/shipmentNotices'
 import {
@@ -510,11 +509,13 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
   await runCommissionsAfter(invoice.id, caller, 'RUN')
 
   const stored = await storePdf(invoice, context, caller)
-  return { invoice: stored as unknown as Row, gate }
+  // `documentFiled: false` tells the screen the invoice is issued but its shipment document did not file; re-rendering the PDF files it.
+  const { documentFiled, ...issued } = stored
+  return { invoice: issued as unknown as Row, gate, documentFiled: documentFiled !== false }
 }
 
 /** Render the snapshot and put the bytes. A failure here leaves `pdfKey` null and says so. */
-async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: Caller): Promise<InvoiceRecord> {
+async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: Caller): Promise<InvoiceRecord & { documentFiled?: boolean }> {
   const version = (invoice.pdfVersion ?? 0) + 1
   const key = invoicePdfKey(invoice.customerId, invoice.number, version)
   try {
@@ -538,8 +539,8 @@ async function storePdf(invoice: InvoiceRecord, context: OrderContext, caller: C
       'invoice pdf',
     )
     // The invoice shows on its shipment as a document the moment its PDF exists (and again, as the next version, when it is re-rendered).
-    await fileInvoiceDocument({ shipmentId: invoice.shipmentId, invoiceId: invoice.id, orderId: invoice.orderId, number: invoice.number, s3Key: key, sizeBytes: bytes.byteLength })
-    return { ...invoice, pdfKey: key, pdfSizeBytes: bytes.byteLength, pdfVersion: version }
+    const documentFiled = await fileInvoiceDocument({ shipmentId: invoice.shipmentId, invoiceId: invoice.id, orderId: invoice.orderId, number: invoice.number, s3Key: key, sizeBytes: bytes.byteLength })
+    return { ...invoice, pdfKey: key, pdfSizeBytes: bytes.byteLength, pdfVersion: version, documentFiled }
   } catch (err) {
     console.error('[tms-finance-actions] invoice PDF failed', invoice.id, String(err))
     return { ...invoice, pdfKey: null, pdfSizeBytes: null, pdfVersion: null }
@@ -556,9 +557,9 @@ export async function renderInvoicePdf(input: Row, caller: Caller): Promise<Row>
   const invoice = row as unknown as InvoiceRecord
   const context = await readOrderContext(invoice.orderId)
   assertNotSquareInvoiced(context.shipment, 're-rendering its invoice')
-  const stored = await storePdf(invoice, context, caller)
+  const { documentFiled, ...stored } = await storePdf(invoice, context, caller)
   if (!stored.pdfKey) throw new Error('The invoice PDF could not be rendered; try again')
-  return { invoice: stored as unknown as Row }
+  return { invoice: stored as unknown as Row, documentFiled: documentFiled !== false }
 }
 
 /**
@@ -672,7 +673,6 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
     customerName: invoice.customerName ?? context.customer?.name ?? '',
     contactName: null,
     brokerName: context.division?.name ?? 'BCAT',
-    template: context.settings.invoiceEmailTemplate ?? DEFAULT_INVOICE_EMAIL_TEMPLATE,
   })
   const body = message ? `${message}\n\n${rendered.body}` : rendered.body
 

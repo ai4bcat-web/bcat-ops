@@ -16,8 +16,9 @@ import type { InvoiceEmailResult } from '@/lib/apiClient'
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
 
-const { getInvoice, listCustomers, listDivisions, getTmsSettings, emailInvoice } = vi.hoisted(() => ({
+const { getInvoice, getInvoicePdfUrl, listCustomers, listDivisions, getTmsSettings, emailInvoice } = vi.hoisted(() => ({
   getInvoice: vi.fn(),
+  getInvoicePdfUrl: vi.fn(),
   listCustomers: vi.fn(),
   listDivisions: vi.fn(),
   getTmsSettings: vi.fn(),
@@ -25,6 +26,7 @@ const { getInvoice, listCustomers, listDivisions, getTmsSettings, emailInvoice }
 }))
 vi.mock('@/lib/apiClient', () => ({
   getInvoice,
+  getInvoicePdfUrl,
   listCustomers,
   listDivisions,
   getTmsSettings,
@@ -102,5 +104,32 @@ describe('EmailInvoiceDialog', () => {
     expect(screen.getByLabelText('Copy e-mail subject')).toBeTruthy()
     const link = screen.getByLabelText('Download INV-000001.pdf') as HTMLAnchorElement
     expect(link.href).toBe('https://example.test/INV-000001.pdf')
+  })
+
+  it('previews the agreed e-mail body word for word', async () => {
+    renderDialog()
+    await screen.findByLabelText('Preview invoice PDF')
+    expect(screen.getByText(/Please send remittance to billing@bcatcorp\.com or provide any questions and/)).toBeTruthy()
+    expect(screen.getByText(/Please do not reply directly to this email\./)).toBeTruthy()
+    expect(screen.getByText(/BCAT Logistics & IVAN Cartage/)).toBeTruthy()
+  })
+
+  it('cannot preview an invoice that has no stored PDF yet', async () => {
+    renderDialog()
+    const button = await screen.findByLabelText('Preview invoice PDF') as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+  })
+
+  it('opens the stored PDF — the file that is attached — from Preview invoice', async () => {
+    getInvoice.mockResolvedValue({ ...INVOICE, pdfKey: 'invoices/cust-1/INV-000001-v1.pdf', pdfVersion: 1 })
+    getInvoicePdfUrl.mockResolvedValue('https://example.test/preview.pdf')
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    renderDialog()
+    const button = await screen.findByLabelText('Preview invoice PDF') as HTMLButtonElement
+    await waitFor(() => expect(button.disabled).toBe(false))
+    fireEvent.click(button)
+    await waitFor(() => expect(open).toHaveBeenCalledWith('https://example.test/preview.pdf', '_blank', 'noopener'))
+    expect(getInvoicePdfUrl).toHaveBeenCalledWith('invoices/cust-1/INV-000001-v1.pdf')
+    open.mockRestore()
   })
 })

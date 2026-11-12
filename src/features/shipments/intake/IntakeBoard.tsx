@@ -35,7 +35,8 @@ import { formatDateTime } from '@/lib/date'
 import { intakeCounts } from '@/lib/intakeLoad'
 import { isDeletedIntake } from '@/lib/intakeDup'
 import { duplicateGroups } from '@/lib/intakeDuplicates'
-import { DeleteIntakeDialog, DuplicateNotice } from './DuplicateParts'
+import { BuiltNotice, DeleteIntakeDialog, DuplicateNotice } from './DuplicateParts'
+import { useBuiltMatches } from './useBuiltMatches'
 import type { IntakeLoadRecord, IntakeStatus } from '@/types/intake'
 import {
   ALL_GROUP,
@@ -152,6 +153,7 @@ export function IntakeBoard() {
   const division = view === 'division' ? activeDivisions.find((d) => d.code === selected) : undefined
   // Rows an admin deleted are out of every tab; duplicates are found among the open queue.
   const dups = useMemo(() => duplicateGroups(open.rows), [open.rows])
+  const { matches: built } = useBuiltMatches(open.rows)
   const rows = shown.rows.filter((r) => !isDeletedIntake(r) && rowInGroup(r, view, selected, activeCodes))
   const missingAddress = activeDivisions.filter((d) => !d.intakeEmail)
 
@@ -176,6 +178,7 @@ export function IntakeBoard() {
         key: 'from',
         header: 'From / Subject',
         group: 'E-mail',
+        width: 640,
         text: (r) => `${r.fromName || r.fromEmail} ${r.subject || '(no subject)'}`,
         sortValue: (r) => r.fromName || r.fromEmail,
       },
@@ -222,6 +225,20 @@ export function IntakeBoard() {
   )
   const filteredRows = useMemo(() => filterRows(rows, columns, filters), [rows, columns, filters])
   const sortedRows = useMemo(() => sortDenseRows(filteredRows, columns, prefs.sort), [filteredRows, columns, prefs.sort])
+  // A row with a duplicate or already-built notice stacks a second line (a third when it has both): the page's rows grow to hold it,
+  // so nothing in the From / Subject cell is clipped. A queue with no notices keeps the grid's normal row height.
+  const rowHeights = useMemo(() => {
+    let notices = false
+    let both = false
+    for (const r of sortedRows) {
+      if (r.status !== 'OPEN') continue
+      const n = (dups.get(r.id) ? 1 : 0) + (built.get(r.id) ? 1 : 0)
+      if (n > 0) notices = true
+      if (n > 1) both = true
+    }
+    if (both) return { compact: 96, comfortable: 108 }
+    return notices ? { compact: 64, comfortable: 72 } : undefined
+  }, [sortedRows, dups, built])
   const setColumnFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
     setFilters((prev) => {
       const copy = { ...prev }
@@ -244,12 +261,24 @@ export function IntakeBoard() {
       case 'from':
         return (
           <div className="tms-intake-from">
-            <span className="tms-intake-from-name">{row.fromName || row.fromEmail}</span>
-            <span className="tms-intake-from-subject">{row.subject || '(no subject)'}</span>
+            <div className="tms-intake-from-head" title={`${row.fromName || row.fromEmail}: ${row.subject || '(no subject)'}`}>
+              <span className="tms-intake-from-name">{row.fromName || row.fromEmail}</span>
+              <span className="tms-intake-from-subject">{row.subject || '(no subject)'}</span>
+            </div>
             {row.status === 'OPEN' && dups.get(row.id) ? (
               <DuplicateNotice
                 row={row}
                 info={dups.get(row.id)!}
+                isAdmin={isOwnerOrAdmin}
+                canReview={canReview}
+                onDelete={() => setDeleting(row)}
+                onChanged={() => open.refresh()}
+              />
+            ) : null}
+            {row.status === 'OPEN' && built.get(row.id) ? (
+              <BuiltNotice
+                row={row}
+                matches={built.get(row.id)!}
                 isAdmin={isOwnerOrAdmin}
                 canReview={canReview}
                 onDelete={() => setDeleting(row)}
@@ -439,6 +468,7 @@ export function IntakeBoard() {
           }}
           renderCell={renderCell}
           density={prefs.density}
+          rowHeights={rowHeights}
           userWidths={prefs.widths}
           stickyCount={Math.max(1, prefs.pinned.length)}
           sort={prefs.sort}
