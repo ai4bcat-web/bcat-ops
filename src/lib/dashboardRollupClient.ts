@@ -5,7 +5,7 @@ import { batchGet } from '@/lib/aliasBatch'
 import { modelAvailable } from '@/lib/modelAvailability'
 import { peekList, readList } from '@/lib/listCache'
 import {
-  LIVE_ROW_ID, ROLLUP_SCHEMA_VERSION, rollupMonthsFor, rollupSourceEmpty,
+  DASHBOARD_DATA_START, LIVE_ROW_ID, ROLLUP_SCHEMA_VERSION, rollupMonthsFor, rollupSourceEmpty,
   type DivisionInput, type LivePayload, type MonthPayload, type RollupRow, type RollupWindow,
 } from '@/lib/dashboardRollup'
 
@@ -90,6 +90,8 @@ export function windowFromRows(rows: readonly RawRollupRow[], from: string, to: 
   const recent = new Set([current, previousMonth(current)])
   const months: RollupRow<MonthPayload>[] = []
   for (const month of rollupMonthsFor(from, to, 1)) {
+    // Months before the data start (including the pad month under October) are never required.
+    if (month < DASHBOARD_DATA_START) continue
     const row = byId.get(`M:${month}`)
     if (!row) {
       if (month > current) continue
@@ -110,7 +112,7 @@ export function windowFromRows(rows: readonly RawRollupRow[], from: string, to: 
 
 /** The ids `windowFromRows` needs for a window. */
 export function rollupIdsFor(from: string, to: string): string[] {
-  return [...rollupMonthsFor(from, to, 1).map((m) => `M:${m}`), LIVE_ROW_ID]
+  return [...rollupMonthsFor(from, to, 1).filter((m) => m >= DASHBOARD_DATA_START).map((m) => `M:${m}`), LIVE_ROW_ID]
 }
 
 /** `min(computedAt)` over the rows the label stands for (live row, current and previous month), ms epoch. */

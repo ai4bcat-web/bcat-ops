@@ -4,7 +4,7 @@ import { TZ } from '@/lib/date'
 import { BrokerageMonthWidget } from './BrokerageMonthWidget'
 import { BrokerageRepWidget } from './BrokerageRepWidget'
 import { RangePicker, type Preset } from './BrokerageRangePicker'
-import { clampRange, previousMonth, type MonthRange } from './brokerageFormat'
+import { FIRST_MONTH, clampRange, previousMonth, type MonthRange } from './brokerageFormat'
 import { useBrokerageDashboard } from './useBrokerageDashboard'
 
 const MONTH_PRESETS: Preset[] = [
@@ -73,6 +73,10 @@ export function BrokerageSection() {
             <li>Figures come from the dashboard rollup and are recomputed within minutes of a change; they are not a general-ledger close (an uninvoiced load counts at its customer rate, and a later invoice adjustment moves it).</li>
           </ul>
         </details>
+
+        {(monthRange.from <= FIRST_MONTH || repRange.from <= FIRST_MONTH) && (
+          <div data-testid="brokerage-data-start" style={{ fontSize: 12, color: 'var(--tms-muted)' }}>Data starts October 2026</div>
+        )}
 
         {data.state === 'unavailable' && (
           <div role="status" data-testid="brokerage-unavailable" className="tms-card" style={{ padding: 16, fontSize: 13, color: 'var(--tms-badge-orange)' }}>

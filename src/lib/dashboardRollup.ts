@@ -652,6 +652,12 @@ export function stripsFromRollup(
   return { strips: rollupStrips(strips), totals }
 }
 
+/**
+ * First month the new system holds data for (Ryne 2026-11-11: "start as of October"). No dashboard asks the rollup for an earlier
+ * month, and a window never needs one: months before this predate the shipment data and would otherwise hold the whole window back.
+ */
+export const DASHBOARD_DATA_START = '2026-10'
+
 /** Month keys a window reads: every month it touches plus one either side. */
 export function rollupMonthsFor(from: string, to: string, pad = 1): string[] {
   const [lo, hi] = from <= to ? [from, to] : [to, from]

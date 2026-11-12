@@ -1,9 +1,10 @@
 import { trailingMonths } from '@/lib/brokerageRevenue'
+import { DASHBOARD_DATA_START } from '@/lib/dashboardRollup'
 
 export interface MonthRange { from: string; to: string }
 
-/** First month the rollup holds (its backfill floor) and the longest range one view draws. */
-export const FIRST_MONTH = '2024-01'
+/** First month a Brokerage view draws (the new system's data start) and the longest range one view draws. */
+export const FIRST_MONTH = DASHBOARD_DATA_START
 export const MAX_RANGE_MONTHS = 36
 
 export const money0 = (cents: number) =>

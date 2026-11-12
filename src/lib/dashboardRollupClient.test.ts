@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 const batchGet = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/aliasBatch', () => ({ batchGet }))
 
-import { isUsableRow, readRollupRows, windowFromRows, type RawRollupRow } from './dashboardRollupClient'
+import { isUsableRow, readRollupRows, rollupIdsFor, windowFromRows, type RawRollupRow } from './dashboardRollupClient'
 
 const NOW = Date.parse('2026-11-15T12:00:00Z')
 const row = (id: string, ageMin: number, extra: Partial<RawRollupRow> = {}): RawRollupRow => ({
@@ -25,10 +25,12 @@ describe('windowFromRows', () => {
   })
 
   it('trusts history months of any age but not a stale current or previous month', () => {
-    const old = (m: string) => row(`M:${m}`, 60 * 24 * 20)
-    const history = [old('2026-07'), old('2026-08'), old('2026-09'), row('L:CURRENT', 2)]
-    expect(windowFromRows(history, '2026-08-01', '2026-08-31', NOW)).not.toBeNull()
-    expect(windowFromRows([...history, row('M:2026-10', 45), row('M:2026-11', 2)], '2026-10-01', '2026-10-31', NOW)).toBeNull()
+    const later = Date.parse('2027-01-20T12:00:00Z') // October and November are history by now
+    const aged = (id: string, ageMin: number) => row(id, ageMin, { computedAt: new Date(later - ageMin * 60_000).toISOString() })
+    const history = [aged('M:2026-10', 60 * 24 * 40), aged('M:2026-11', 60 * 24 * 40), aged('L:CURRENT', 2)]
+    expect(windowFromRows(history, '2026-10-01', '2026-10-31', later)).not.toBeNull()
+    // In mid-November, October is the previous month: a 45-minute-old row is not trusted.
+    expect(windowFromRows([row('M:2026-10', 45), row('M:2026-11', 2), row('L:CURRENT', 2)], '2026-10-01', '2026-10-31', NOW)).toBeNull()
   })
 
   it('rejects an old live row and an unknown schema', () => {
@@ -44,10 +46,33 @@ describe('isUsableRow and empty sources', () => {
     expect(isUsableRow(row('M:2026-11', 2, { sourceCounts: { shipments: 2, samples: 0, loads: 0 } }), NOW)).toBe(true)
   })
 
-  it('a window with one empty-source history month is not trusted, even though history age does not matter', () => {
-    const old = (m: string, extra: Partial<RawRollupRow> = {}) => row(`M:${m}`, 60 * 24 * 20, extra)
-    const history = [old('2026-07'), old('2026-08', { sourceCounts: { shipments: 0 } }), old('2026-09'), row('L:CURRENT', 2)]
-    expect(windowFromRows(history, '2026-08-01', '2026-08-31', NOW)).toBeNull()
+  it('a window with one empty-source month from October on is not trusted (the November 8 guard stays)', () => {
+    const history = [row('M:2026-10', 2, { sourceCounts: { shipments: 0 } }), row('M:2026-11', 2), row('L:CURRENT', 2)]
+    expect(windowFromRows(history, '2026-10-01', '2026-11-30', NOW)).toBeNull()
+  })
+})
+
+describe('the data start (2026-10)', () => {
+  const rows = [row('M:2026-10', 2), row('M:2026-11', 2), row('L:CURRENT', 2)]
+
+  it('never requires a month before October, the padding month under October included', () => {
+    expect(windowFromRows(rows, '2026-10-01', '2026-11-30', NOW)?.months.map((m) => m.id)).toEqual(['M:2026-10', 'M:2026-11'])
+  })
+
+  it('a range that reaches back before October reads only October on: the old months neither block it nor appear', () => {
+    expect(windowFromRows(rows, '2025-11-01', '2026-11-30', NOW)?.months.map((m) => m.id)).toEqual(['M:2026-10', 'M:2026-11'])
+  })
+
+  it('a range wholly before October has no window (the exact path answers it)', () => {
+    expect(windowFromRows(rows, '2026-03-01', '2026-06-30', NOW)).toBeNull()
+  })
+
+  it('a missing October (a month inside the data) still blocks the window', () => {
+    expect(windowFromRows(rows.filter((r) => r.id !== 'M:2026-10'), '2025-11-01', '2026-11-30', NOW)).toBeNull()
+  })
+
+  it('asks the store only for months from October on', () => {
+    expect(rollupIdsFor('2025-11-01', '2026-11-30')).toEqual(['M:2026-10', 'M:2026-11', 'M:2026-12', 'L:CURRENT'])
   })
 })
 
