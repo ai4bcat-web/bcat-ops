@@ -12,7 +12,7 @@ import { NewLocationForm } from './NewLocationForm'
 import { draftFromStop, onceStopPatch, type LocationDraft } from './newLocation'
 import { useAuthUser } from '@/hooks/useAuth'
 import { requiresApptProofs } from '@/lib/apptQueue'
-import { findLocationMatches } from '@/lib/tmsDirectory'
+import { findLocationMatches, tidyLocationSuggestions } from '@/lib/tmsDirectory'
 import type { LocationRecord } from '@/types/tms'
 import { COUNTRIES, MAX, US_STATES } from '../constants'
 import { LABEL, labelFor, type LabelDef } from '../labels'
@@ -88,7 +88,7 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
   const closeForm = () => { setAdding(null); setDismissed(true) }
 
   const items = useMemo<TypeaheadItem[]>(() => {
-    const sub = (r: LocationRecord) => [r.city, r.state].filter(Boolean).join(', ')
+    const sub = (r: LocationRecord) => [r.street, [r.city, r.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')
     const q = query.trim()
     if (q.length === 0) {
       return recentFirst(ctx.directory.locations, recent)
@@ -96,7 +96,7 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
         .map((r) => ({ id: r.id, label: r.name, sub: sub(r), recent: true }))
     }
     if (q.length < 2) return []
-    return rankWithRecents(findLocationMatches({ name: q, city: stop.city || undefined }, ctx.directory.locations), recent).slice(0, OFFERED).map((r) => ({ id: r.id, label: r.name, sub: sub(r), recent: recent.includes(r.id) }))
+    return tidyLocationSuggestions(rankWithRecents(findLocationMatches({ name: q, city: stop.city || undefined }, ctx.directory.locations), recent)).slice(0, OFFERED).map((r) => ({ id: r.id, label: r.name, sub: sub(r), recent: recent.includes(r.id) }))
   }, [query, stop.city, ctx.directory.locations, recent])
 
   const typeName = (text: string) => {

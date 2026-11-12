@@ -37,7 +37,7 @@ describe('RouteCard', () => {
     pushRecent('location', 'rep@bcat.test', 'l2')
     setup()
     fireEvent.focus(screen.getByTestId('f-pickup-name'))
-    expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Joliet DepotJoliet, IL'])
+    expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Joliet Depot5 Dock Rd · Joliet, IL'])
   })
 
   it('adds stops only where the route stays pickup-first, delivery-last', () => {
