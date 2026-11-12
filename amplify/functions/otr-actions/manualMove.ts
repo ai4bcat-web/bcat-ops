@@ -127,9 +127,8 @@ export async function manualInvoiceMove(store: MoveStore, input: ManualMoveInput
   let customer: Row | null = null
   let customerPlan: { method: BillingMethod | null; apEmail: string | null; setApEmail: string | null } | null = null
   if (input.changeCustomerDefault) {
-    // Stricter than customer editing (ADMIN / page-directory): the per-user billing-release
-    // grant, which no role (not even ADMIN or the owner) implies.
-    if (!caller.groups.includes(BILLING_RELEASE_GROUP)) {
+    // The billing-release permission: admins (ADMIN group, the owner) or the per-user grant.
+    if (!isAdminCaller(caller) && !caller.groups.includes(BILLING_RELEASE_GROUP)) {
       return fail('Changing a customer\'s default billing method needs the billing release permission (Release to billing / Send invoice).')
     }
     customer = await customerFor(store, item, invoice)

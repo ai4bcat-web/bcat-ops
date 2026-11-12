@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/apiClient', () => ({
   getShipmentBundle: mocks.bundle,
-  getTmsSettings: vi.fn(async () => ({ defaultRequiredDocs: ['BOL', 'POD'] })),
+  getTmsSettings: vi.fn(async () => ({ defaultRequiredDocs: ['BOL', 'POD', 'LUMPER_RECEIPT'] })),
   listShipmentDocuments: mocks.docs,
   getShipmentDocumentUrl: mocks.url,
   prepareDocumentUpload: mocks.prepare,
@@ -56,19 +56,21 @@ describe('LoadReviewDocuments', () => {
     render(<LoadReviewDocuments shipmentId="shp-1" onChanged={vi.fn(async () => {})} />)
     expect(await screen.findByText('pod-signed.pdf')).toBeTruthy()
     expect(screen.getByText('Missing')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Upload bill of lading/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Upload lumper receipt/i })).toBeTruthy()
+    // A BOL is optional (Ryne 2026-11-12): not listed as required even when the org default names it.
+    expect(screen.queryByRole('button', { name: /Upload bill of lading/i })).toBeNull()
     expect(screen.getAllByRole('button', { name: /Replace/ })).toHaveLength(1)
   })
 
   it('uploads the missing type, then tells the drawer to re-run the review', async () => {
     const onChanged = vi.fn(async () => {})
     render(<LoadReviewDocuments shipmentId="shp-1" onChanged={onChanged} />)
-    fireEvent.click(await screen.findByRole('button', { name: /Upload bill of lading/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Upload lumper receipt/i }))
     pick(pdf())
     fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
-    expect(mocks.prepare).toHaveBeenCalledWith(expect.objectContaining({ shipmentId: 'shp-1', type: 'BOL', name: 'bol.pdf' }))
-    expect(mocks.commit).toHaveBeenCalledWith(expect.objectContaining({ type: 'BOL', orderId: 'o-1' }))
+    expect(mocks.prepare).toHaveBeenCalledWith(expect.objectContaining({ shipmentId: 'shp-1', type: 'LUMPER_RECEIPT', name: 'bol.pdf' }))
+    expect(mocks.commit).toHaveBeenCalledWith(expect.objectContaining({ type: 'LUMPER_RECEIPT', orderId: 'o-1' }))
     expect(mocks.voidDoc).not.toHaveBeenCalled()
   })
 

@@ -99,7 +99,7 @@ export interface ReleaseGateInput {
    * caller never has to read the order twice.
    */
   order: ReleaseGateOrder
-  /** The customer's list (or the org default); BOL, POD and RATE_CON are added here. */
+  /** The customer's list (or the org default); POD and RATE_CON are added here, BOL is dropped. */
   requiredDocTypes: string[]
   /** Per-load additions (`Load.requiredDocTypes`): explicit, so they block as written. */
   extraDocTypes?: string[] | null
@@ -120,11 +120,17 @@ export interface ReleaseGateResult {
 export const RELEASE_GATE_ERROR_PREFIX = 'Not ready for accounting'
 
 /**
- * The two document types nobody bills without, whatever the customer's list says.
- * A customer may ask for less than the org default; they may not ask for less than
- * the bill of lading and the proof that it was delivered.
+ * The document type nobody bills without, whatever the customer's list says: the
+ * proof that it was delivered. A customer may ask for less than the org default;
+ * they may not ask for less than the POD.
  */
-const ALWAYS_REQUIRED_DOC_TYPES = ['BOL', 'POD']
+const ALWAYS_REQUIRED_DOC_TYPES = ['POD']
+
+/**
+ * Optional everywhere (Ryne, 2026-11-12): a missing BOL never blocks release, even when
+ * a customer's list or the org default names it. It still attaches to invoices when filed.
+ */
+export const NEVER_BLOCKING_DOC_TYPES: readonly string[] = ['BOL']
 
 /** Eight call sites build this shape; they stay in lockstep through here. */
 function reason(code: ReleaseGateReasonCode, detail: string | null, message: string): ReleaseGateReason {
@@ -139,9 +145,16 @@ function countsAsPresent(doc: ReleaseGateDocument): boolean {
 }
 
 /**
- * What this order has to show before it may be billed: the customer's list, the
- * two that are never optional, and the rate confirmation once somebody else's
- * truck is on the load.
+ * THE required-documents list for release, in one place: what this order has to show before
+ * it may be billed.
+ *
+ *   customer list (or the org default when the customer names none)  — BOL dropped: optional
+ *   ∪ POD, always
+ *   ∪ RATE_CON once an outside carrier is on the load
+ *   ∪ `extraDocTypes`: per-load additions somebody ticked for this load. These are explicit,
+ *     so they block as written (a ticked BOL is required for that load).
+ *
+ * Order is preserved and duplicates are dropped.
  */
 export function requiredDocTypesForRelease(
   requiredDocTypes: readonly string[],
@@ -150,10 +163,17 @@ export function requiredDocTypesForRelease(
 ): string[] {
   const hasCarrierLeg = legs.some((leg) => leg.status === 'ACTIVE' && leg.kind === 'CARRIER')
   const out: string[] = []
-  for (const type of [...requiredDocTypes, ...ALWAYS_REQUIRED_DOC_TYPES, ...(hasCarrierLeg ? ['RATE_CON'] : []), ...extraDocTypes]) {
+  const add = (type: unknown) => {
     const trimmed = typeof type === 'string' ? type.trim() : ''
     if (trimmed && !out.includes(trimmed)) out.push(trimmed)
   }
+  for (const type of requiredDocTypes) {
+    if (typeof type === 'string' && NEVER_BLOCKING_DOC_TYPES.includes(type.trim())) continue
+    add(type)
+  }
+  for (const type of ALWAYS_REQUIRED_DOC_TYPES) add(type)
+  if (hasCarrierLeg) add('RATE_CON')
+  for (const type of extraDocTypes) add(type)
   return out
 }
 

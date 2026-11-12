@@ -4312,7 +4312,7 @@ describe('SET_AR_STATUS', () => {
     await deliver(ids)
     // Delivered, but nothing else the gate asks for: both documents and a leg.
     await expect(call('SET_AR_STATUS', { orderId: ids.orderId, status: 'UNBILLED' }))
-      .rejects.toThrow(/Missing document: BOL; Missing document: POD; No carrier or driver assigned/)
+      .rejects.toThrow(/Missing document: POD; No carrier or driver assigned/)
     expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
   })
 
@@ -4566,15 +4566,15 @@ describe('documents', () => {
   })
 
   it('re-caches what the order still needs in the same write', async () => {
-    seedCustomer({ requiredDocsForInvoice: ['POD', 'BOL'] })
+    seedCustomer({ requiredDocsForInvoice: ['POD', 'LUMPER_RECEIPT'] })
     const ids = await delivered()
     const prepared = await prepare(ids.shipmentId)
     putS3Object(prepared.s3Key, { ContentLength: 1024, ContentType: 'application/pdf' })
     await commit(ids, prepared)
 
     const order = table(TABLES.order).get(ids.orderId)!
-    expect(order.docsRequired).toEqual(['POD', 'BOL'])
-    expect(order.docsMissing).toEqual(['BOL'])
+    expect(order.docsRequired).toEqual(['POD', 'LUMPER_RECEIPT'])
+    expect(order.docsMissing).toEqual(['LUMPER_RECEIPT'])
     expect(order.docsCheckedAt).toBeTruthy()
   })
 
@@ -5084,8 +5084,9 @@ describe('READY_TO_INVOICE', () => {
 
   it('lists exactly what accounting is still waiting on', async () => {
     const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'] })
+    // A BOL is optional (Ryne 2026-11-12) even when the customer list names it.
     await expect(ready(ids.orderId)).rejects.toThrow(
-      'Not ready for accounting: Missing document: POD; Missing document: BOL',
+      /^Not ready for accounting: Missing document: POD$/,
     )
     expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
   })
@@ -5378,7 +5379,7 @@ describe('READY_TO_INVOICE', () => {
 
     it('still lets the gate speak first when a marker-less call is also not ready', async () => {
       const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'] })
-      await expect(ready(ids.orderId)).rejects.toThrow(/^Not ready for accounting: Missing document: POD; Missing document: BOL$/)
+      await expect(ready(ids.orderId)).rejects.toThrow(/^Not ready for accounting: Missing document: POD$/)
     })
 
     it('exempts imported Aljex history: a legacy shipment releases without the marker', async () => {

@@ -105,8 +105,8 @@ describe('No buy -> Invoice manually (item and customer default)', () => {
     expect(f.writes).toEqual(['invoice.factored=false', 'customer:MANUAL'])
   })
 
-  it('needs the billing release grant for the customer default: ADMIN is not enough, and nothing is written', async () => {
-    const r = await manualInvoiceMove(f, { id: '14538', reason: 'NO_BUY', changeCustomerDefault: true }, admin)
+  it('needs the billing release permission for the customer default: an invoicing user without it writes nothing', async () => {
+    const r = await manualInvoiceMove(f, { id: '14538', reason: 'NO_BUY', changeCustomerDefault: true }, { email: 'bill@bcatcorp.com', groups: ['page-invoicing'] })
     expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/billing release permission/) })
     expect(f.writes).toEqual([])
     expect(f.item.status).toBe('PENDING_WITH_OTR')

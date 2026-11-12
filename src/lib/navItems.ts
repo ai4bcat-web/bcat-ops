@@ -146,6 +146,18 @@ export const PER_USER_GRANT_PAGES: readonly string[] = [BILLING_RELEASE_PAGE, AL
  * `hasPageAccess`, no ADMIN/owner status opens it, because the Lambdas check the
  * `page-<key>` group alone. A non-grant key is refused rather than guessed at.
  */
+/**
+ * Release to billing / Send invoice: the owner, the ADMIN group, or the per-user grant
+ * (Ryne 2026-11-12). Mirrors the finance Lambda's rule exactly.
+ */
+export function canReleaseToBilling(
+  groups: readonly string[] | null | undefined,
+  email: string | null | undefined,
+): boolean {
+  const list = groups ?? []
+  return list.includes('ADMIN') || (email ?? '').trim().toLowerCase() === 'ryne@bcatcorp.com' || holdsPerUserGrant(list, BILLING_RELEASE_PAGE)
+}
+
 export function holdsPerUserGrant(groups: readonly string[] | null | undefined, key: string): boolean {
   return PER_USER_GRANT_PAGES.includes(key) && (groups ?? []).includes(`page-${key}`)
 }

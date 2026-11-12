@@ -904,13 +904,13 @@ describe('release to accounting', () => {
   })
 
   it('hands the preview the same list the refusal would carry', async () => {
-    table(TABLES.document).delete('doc-seed-bol')
+    table(TABLES.document).delete('doc-seed-pod')
     const preview = (await call('PREVIEW_INVOICE', { orderId: ORDER_ID })) as {
       releaseGate: { ok: boolean; missing: { code: string; message: string }[] }
     }
     expect(preview.releaseGate).toEqual({
       ok: false,
-      missing: [{ code: 'DOC_MISSING', detail: 'BOL', message: 'Missing document: BOL' }],
+      missing: [{ code: 'DOC_MISSING', detail: 'POD', message: 'Missing document: POD' }],
     })
     // A preview writes nothing, whatever it finds.
     expect(table(TABLES.invoice).size).toBe(0)
@@ -3100,17 +3100,25 @@ describe('SEND_INVOICE', () => {
 
 describe('billingRelease grant', () => {
   it.each(['GENERATE_INVOICE', 'BATCH_GENERATE', 'RELEASE_TO_BILLING', 'SEND_INVOICE', 'EMAIL_INVOICE', 'BATCH_EMAIL', 'SEND_TO_FACTOR', 'MARK_SENT', 'SYNC_FACTORING_CHANGE'])(
-    '%s is refused for ADMIN, the owner and invoicing users without the grant',
+    '%s is refused for invoicing users without the grant (admins and the owner pass)',
     async (action) => {
       seedMethod('MANUAL')
-      const owner = { sub: 'o', username: 'ryne', claims: { email: 'ryne@bcatcorp.com', 'cognito:groups': ['ADMIN', 'page-invoicing', 'page-tms'] } }
-      for (const identity of [ADMIN_WITH_NO_GRANT, owner, BILLER]) {
-        await expect(call(action, { orderId: ORDER_ID, invoiceId: 'x', proNumber: 'x', changeReason: 'x', changes: {}, invoiceIds: [] }, identity))
-          .rejects.toThrow(/Forbidden: .* requires the page-billingRelease grant/)
-      }
+      await expect(call(action, { orderId: ORDER_ID, invoiceId: 'x', proNumber: 'x', changeReason: 'x', changes: {}, invoiceIds: [] }, BILLER))
+        .rejects.toThrow(/Forbidden: .* requires owner, ADMIN, or the page-billingRelease grant/)
       expect(table(TABLES.invoice).size).toBe(0)
     },
   )
+
+  it('lets ADMIN and the owner release without the per-user grant (Ryne 2026-11-12)', async () => {
+    seedMethod('MANUAL')
+    const owner = { sub: 'o', username: 'ryne', claims: { email: 'ryne@bcatcorp.com', 'cognito:groups': ['page-invoicing'] } }
+    await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID }, owner)).resolves.toMatchObject({ billingMethod: 'MANUAL' })
+  })
+
+  it('lets an ADMIN without the grant release', async () => {
+    seedMethod('MANUAL')
+    await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID }, ADMIN_WITH_NO_GRANT)).resolves.toMatchObject({ billingMethod: 'MANUAL' })
+  })
 
   it('lets a user holding only the grant release', async () => {
     seedMethod('MANUAL')
@@ -3118,15 +3126,14 @@ describe('billingRelease grant', () => {
     await expect(call('RELEASE_TO_BILLING', { orderId: ORDER_ID }, onlyGrant)).resolves.toMatchObject({ billingMethod: 'MANUAL' })
   })
 
-  it('lets a user holding only the grant post (generate) an invoice, and nobody else', async () => {
+  it('lets a user holding only the grant post (generate) an invoice; broad page access without it cannot', async () => {
     const onlyGrant = { sub: 'g', username: 'g', claims: { email: 'g@bcatcorp.com', 'cognito:groups': ['page-billingRelease'] } }
     const { invoiceId } = await generate(onlyGrant)
     expect(table(TABLES.invoice).get(invoiceId)).toBeDefined()
     // Ruben-shaped users: broad page access, ADMIN or not, but no grant => cannot issue another.
     seedSecondOrder('ord-2')
     const broad = { sub: 'r', username: 'r', claims: { email: 'r@bcatcorp.com', 'cognito:groups': ['page-invoicing', 'page-tms', 'page-finances', 'page-customers'] } }
-    await expect(call('BATCH_GENERATE', { orderIds: ['ord-2'] }, broad)).rejects.toThrow(/requires the page-billingRelease grant/)
-    await expect(call('GENERATE_INVOICE', { orderId: 'ord-2' }, ADMIN)).rejects.toThrow(/requires the page-billingRelease grant/)
+    await expect(call('BATCH_GENERATE', { orderIds: ['ord-2'] }, broad)).rejects.toThrow(/requires owner, ADMIN, or the page-billingRelease grant/)
   })
 })
 

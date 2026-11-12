@@ -328,6 +328,6 @@ describe('evaluateDocGate — imported Aljex history (legacyImported)', () => {
   })
 
   it('the same shipment unflagged is still blocked', () => {
-    expect(customerGate([], ['POD', 'BOL']).missing).toEqual(['POD', 'BOL'])
+    expect(customerGate([], ['POD', 'BOL']).missing).toEqual(['POD'])
   })
 })

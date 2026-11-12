@@ -210,14 +210,14 @@ const COMMISSION_ACTIONS: Record<string, true> = {
 }
 
 /**
- * Step AW: release to billing, sending, queueing for the factor and marking sent are
- * granted per user (`page-billingRelease`) and to nobody else: no ADMIN, owner or
- * `page-tms`/`page-invoicing` bypass. Checked before every other rule.
+ * Release to billing, sending, queueing for the factor and marking sent: the owner, the
+ * ADMIN group, and users granted `page-billingRelease` (Ryne 2026-11-12; before that the
+ * grant alone). No `page-tms`/`page-invoicing` bypass. Checked before every other rule.
  *
  * Posting an invoice is the same act: issuing it (GENERATE_INVOICE / BATCH_GENERATE turn
  * UNBILLED into UNPAID and take the next invoice number) is behind the same grant, so
- * "who may post" is exactly the members of `page-billingRelease` (Jenny and Ryne). Holding
- * `page-invoicing` or `page-tms`, or ADMIN, opens the AR screens but never posts.
+ * "who may post" is the admins plus the members of `page-billingRelease`. Holding
+ * `page-invoicing` or `page-tms` opens the AR screens but never posts.
  */
 const BILLING_RELEASE_ACTIONS: Record<string, true> = {
   GENERATE_INVOICE: true,
@@ -250,8 +250,9 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   const groups = getGroups(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
 
-  if (BILLING_RELEASE_ACTIONS[action] && !groups.includes(BILLING_RELEASE_PAGE_GROUP)) {
-    throw new Error(`Forbidden: ${action} requires the ${BILLING_RELEASE_PAGE_GROUP} grant`)
+  // Ryne 2026-11-12: admins (ADMIN group, the owner) and anyone granted the page may release and send.
+  if (BILLING_RELEASE_ACTIONS[action] && !isAdmin && !groups.includes(BILLING_RELEASE_PAGE_GROUP)) {
+    throw new Error(`Forbidden: ${action} requires owner, ADMIN, or the ${BILLING_RELEASE_PAGE_GROUP} grant`)
   }
   if (BILLING_RELEASE_ACTIONS[action]) return { email, sub: identity.sub, groups, isAdmin }
 

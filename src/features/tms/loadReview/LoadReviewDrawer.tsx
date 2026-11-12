@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, AlertTriangle } from 'lucide-react'
+import { CheckCircle2, XCircle } from 'lucide-react'
 import { RepPicker } from '@/components/RepPicker'
 import { useAuth } from '@/hooks/useAuth'
 import type { ShipmentListRow } from '@/hooks/useShipments'
@@ -108,19 +108,43 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
     revDivision: active.find((d) => d.code === (result?.revDivision ?? row.revDivision))?.name ?? result?.revDivision ?? row.revDivision ?? 'Unassigned',
     details: `Bill-to ${row.billToName ?? row.customerName ?? '—'} · PO ${row.refPo ?? '—'} · ${row.stops?.length ?? 0} stops · ${(row.carrierCount ?? 0) >= 2 ? `${row.carrierCount} carriers` : row.carrierName ?? row.driverName ?? 'Unassigned'}`,
     charges: `Customer ${formatCents(row.orderRevenueCents ?? row.revenueCents ?? 0)} · Cost ${formatCents(row.costCents ?? 0)} · Margin ${row.marginBps == null ? '—' : `${(row.marginBps / 100).toFixed(1)}%`}`,
-    documents: (row.docsRequired ?? []).map((type) => `${type}: ${row.docsMissing?.includes(type) ? 'missing' : row.docsMissing == null ? 'unchecked' : 'present'}`).join(' · ') || 'Documents not checked yet',
+    documents: row.docsMissing == null && !row.docsRequired?.length ? 'Required documents are checked below'
+      : (row.docsRequired ?? []).map((type) => `${type}: ${row.docsMissing?.includes(type) ? 'missing' : 'on file'}`).join(' · ') || 'No documents required beyond the POD',
   }
   const [now] = useState(() => Date.now())
-  const age = reviewAgeDays(row, now)
+  // Same delivered-time fallback as the header (shipment stamp, load stamp, last delivery stop time).
+  const age = reviewAgeDays({ deliveredAt: deliveredTimeOf(row) }, now)
+  const passed = LOAD_REVIEW_CHECKS.filter((key) => verdict.checks[key].ok).length
   return <TmsDrawer open onOpenChange={(open) => { if (!open) onClose() }} title={shipmentLink('overview', row.number)}
     description={`${row.customerName ?? '—'} · ${row.originCity ?? '—'} → ${row.destinationCity ?? '—'} · ${deliveredTimeOf(row) ? `Delivered ${formatDateTime(deliveredTimeOf(row))}` : deliveredText(row) === '—' ? 'Delivered —' : deliveredText(row)}`}
     headerExtra={<><TmsBadge tone={reviewStatusTone(row)}>{reviewStatusText(row)}</TmsBadge><TmsBadge tone={verdict.ok ? 'green' : 'orange'}>{released ? 'Already released' : verdict.ok ? result ? 'Ready' : 'Looks ready' : `${reasons.length} to fix`}</TmsBadge><span title={age == null ? NO_DELIVERY_TIME_TIP : undefined}><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'No delivery time' : age + ' d'}</TmsBadge></span></>}
-    footer={<><TmsButton variant="primary" disabled={busy || !result || !verdict.ok || released || !!error || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => void move()}>Move to billing</TmsButton>{!released && !verdict.ok && <p role="note" className="tms-muted">{`Fix ${reasons.length} ${reasons.length === 1 ? 'item' : 'items'} first.`}</p>}{!canRelease && <p role="note" className="tms-muted">{BILLING_GRANT_MESSAGE}</p>}{shipmentLink('overview', 'Open shipment')}<TmsButton variant="ghost" disabled={busy || !result} onClick={() => void rereview()}>Re-check</TmsButton><TmsButton variant="ghost" onClick={onClose}>Close</TmsButton></>}>
+    footer={<div className="lr-footer">
+      {!released && !verdict.ok && <div className="lr-footer-blockers" role="note">
+        <p className="lr-footer-title">{`Fix ${reasons.length} ${reasons.length === 1 ? 'item' : 'items'} first.`}</p>
+        <ul>{reasons.map((reason, index) => <li key={`${reason.code}-${index}`}><XCircle size={14} aria-hidden className="lr-icon-bad" />{reason.message}</li>)}</ul>
+      </div>}
+      {!canRelease && <p role="note" className="tms-muted text-xs">{BILLING_GRANT_MESSAGE}</p>}
+      <div className="lr-footer-actions">
+        <TmsButton variant="primary" disabled={busy || !result || !verdict.ok || released || !!error || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => void move()}>Move to billing</TmsButton>
+        <span className="lr-footer-spacer" />
+        {shipmentLink('overview', 'Open shipment')}
+        <TmsButton variant="ghost" disabled={busy || !result} onClick={() => void rereview()}>Re-check</TmsButton>
+        <TmsButton variant="ghost" onClick={onClose}>Close</TmsButton>
+      </div>
+    </div>}>
     {!result && !error && <p role="status">Checking release requirements…</p>}
     {error && <ReleaseGateList messages={releaseGateMessages(error) ?? [error]} />}
-    {LOAD_REVIEW_CHECKS.map((key) => <TmsCard key={key} title={LOAD_REVIEW_CHECK_LABEL[key]}>
-      <p className="flex items-center gap-2">{verdict.checks[key].ok ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}{values[key]}</p>
-      <ReleaseGateList messages={verdict.checks[key].reasons.map((reason) => reason.message)} />
+    {result && <div className={`lr-summary ${verdict.ok ? 'lr-summary-ok' : 'lr-summary-bad'}`} data-testid="lr-summary">
+      <p className="lr-summary-count">{verdict.ok ? <CheckCircle2 size={18} aria-hidden className="lr-icon-ok" /> : <XCircle size={18} aria-hidden className="lr-icon-bad" />}{`${passed} of ${LOAD_REVIEW_CHECKS.length} checks passed`}</p>
+      <ul className="lr-summary-chips">{LOAD_REVIEW_CHECKS.map((key) => <li key={key} className={verdict.checks[key].ok ? 'lr-chip-ok' : 'lr-chip-bad'}>
+        {verdict.checks[key].ok ? <CheckCircle2 size={13} aria-label="Passed" /> : <XCircle size={13} aria-label="Needs fixing" />}{LOAD_REVIEW_CHECK_LABEL[key]}
+      </li>)}</ul>
+    </div>}
+    {LOAD_REVIEW_CHECKS.map((key) => <TmsCard key={key} className={`lr-check ${verdict.checks[key].ok ? 'lr-check-ok' : 'lr-check-bad'}`}
+      title={<span className="lr-check-title">{verdict.checks[key].ok ? <CheckCircle2 size={16} aria-label="Passed" className="lr-icon-ok" /> : <XCircle size={16} aria-label="Needs fixing" className="lr-icon-bad" />}{LOAD_REVIEW_CHECK_LABEL[key]}</span>}
+      actions={<TmsBadge tone={verdict.checks[key].ok ? 'green' : 'red'}>{verdict.checks[key].ok ? 'OK' : `${verdict.checks[key].reasons.length} ${verdict.checks[key].reasons.length === 1 ? 'issue' : 'issues'}`}</TmsBadge>}>
+      <p className="lr-check-value">{values[key]}</p>
+      {verdict.checks[key].reasons.length > 0 && <ul className="lr-reasons">{verdict.checks[key].reasons.map((reason, index) => <li key={`${reason.code}-${index}`}><XCircle size={14} aria-hidden className="lr-icon-bad" />{reason.message}</li>)}</ul>}
       {key === 'charges' && !released && pendingApRecordNotes(row).map((note) => <p key={note} className="tms-muted">{note}</p>)}
       {key === 'salesRep' && !released && <RepPicker value={result?.salesRepId ?? row.salesRepId ?? ''} allowUnknown disabled={busy} placeholder="Pick a sales rep…" onChange={(repId) => void fix(() => setSalesRep({ shipmentId: row.id, repId: repId || null }))} />}
       {key === 'revDivision' && !released && <div className="flex flex-wrap gap-2">

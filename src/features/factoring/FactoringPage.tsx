@@ -41,7 +41,7 @@ import { ManualInvoicePanel } from './ManualInvoicePanel'
 import { manualSentInfo } from '@/lib/manualInvoice'
 import { noBuyInfo } from '@/lib/noBuy'
 import { mayInvoiceManually, needsManualInvoice, otrRejection } from '@/lib/otrRejection'
-import { BILLING_RELEASE_PAGE, holdsPerUserGrant } from '@/lib/navItems'
+import { canReleaseToBilling } from '@/lib/navItems'
 import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
 import { CustomerPaidCell, CustomerPaidDialog } from './CustomerPaidCell'
 import { formatPaidOn } from './formatPaidOn'
@@ -951,7 +951,7 @@ export function FactoringPage() {
         <InvoiceManuallyDialog
           item={manualMoveItem}
           customer={customers.find((c) => c.id === manualMoveItem.customerId) ?? null}
-          canChangeDefault={holdsPerUserGrant(user?.groups, BILLING_RELEASE_PAGE)}
+          canChangeDefault={canReleaseToBilling(user?.groups, user?.email)}
           onClose={() => setManualMoveId(null)}
           onDone={refresh}
         />
