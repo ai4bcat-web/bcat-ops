@@ -18,6 +18,7 @@ function input(overrides: Partial<ReleaseGateInput> = {}): ReleaseGateInput {
     documents: [
       { type: 'BOL', status: 'ACTIVE', reviewStatus: 'ACCEPTED' },
       { type: 'POD', status: 'ACTIVE', reviewStatus: 'ACCEPTED' },
+      { type: 'RATE_CON', status: 'ACTIVE', reviewStatus: 'ACCEPTED' },
     ],
     legs: [own()],
     openIncidentCount: 0,
@@ -64,7 +65,7 @@ describe('evaluateReleaseGate — several carriers', () => {
 
   it('ignores bounced legs and keeps the one-carrier sentence unchanged', () => {
     expect(evaluateReleaseGate(input({ legs: [A(), B({ status: 'BOUNCED', rateConStatus: 'SENT', chargesFinalizedAt: null })] })).ok).toBe(true)
-    expect(messages(input({ legs: [A({ rateConStatus: 'SENT' })] }))).toEqual(['Missing document: RATE_CON'])
+    expect(messages(input({ legs: [A({ rateConStatus: 'SENT' })], documents: input().documents.filter((d) => d.type !== 'RATE_CON') }))).toEqual(['Missing document: RATE_CON'])
   })
 
   it('says nothing about a rate when the leg does not supply one', () => {
@@ -110,15 +111,15 @@ describe('evaluateReleaseGate', () => {
   })
 
   it('requires the POD even when the customer asks for nothing; a BOL is optional', () => {
-    expect(messages(input({ documents: [] }))).toEqual(['Missing document: POD'])
+    expect(messages(input({ documents: [] }))).toEqual(['Missing document: POD', 'Missing document: RATE_CON'])
   })
 
   it('never blocks on a missing BOL, even when the customer list names it', () => {
-    expect(messages(input({ requiredDocTypes: ['BOL', 'POD'], documents: [] }))).toEqual(['Missing document: POD'])
+    expect(messages(input({ requiredDocTypes: ['BOL', 'POD'], documents: [{ type: 'RATE_CON', status: 'ACTIVE', reviewStatus: 'ACCEPTED' }] }))).toEqual(['Missing document: POD'])
   })
 
   it('asks for every type the customer bills on, in their order', () => {
-    expect(messages(input({ requiredDocTypes: ['LUMPER_RECEIPT', 'POD'], documents: [] }))).toEqual([
+    expect(messages(input({ requiredDocTypes: ['LUMPER_RECEIPT', 'POD'], documents: [{ type: 'RATE_CON', status: 'ACTIVE', reviewStatus: 'ACCEPTED' }] }))).toEqual([
       'Missing document: LUMPER_RECEIPT',
       'Missing document: POD',
     ])
@@ -131,6 +132,7 @@ describe('evaluateReleaseGate', () => {
           documents: [
             { type: 'BOL', status: 'ACTIVE', reviewStatus: 'ACCEPTED' },
             { type: 'POD', status: 'ACTIVE', reviewStatus: 'PENDING', audience: 'ALL' },
+            { type: 'RATE_CON', status: 'ACTIVE', reviewStatus: 'ACCEPTED' },
           ],
         }),
       ),
@@ -144,19 +146,29 @@ describe('evaluateReleaseGate', () => {
       { type: 'POD', status: 'VOID', reviewStatus: 'ACCEPTED' },
       { type: 'POD', status: 'SUPERSEDED', reviewStatus: 'ACCEPTED' },
     ]) {
-      expect(messages(input({ documents: [{ type: 'BOL', status: 'ACTIVE' }, doc] })))
+      expect(messages(input({ documents: [{ type: 'BOL', status: 'ACTIVE' }, { type: 'RATE_CON', status: 'ACTIVE', reviewStatus: 'ACCEPTED' }, doc] })))
         .toEqual(['Missing document: POD'])
     }
   })
 
-  it('wants a rate confirmation once somebody else’s truck is on the load', () => {
+  it('wants a rate confirmation once somebody else’s truck is on the load; a signature counts', () => {
     const carrierLeg = outside({ carrierName: 'Wheeler', chargesFinalizedAt: 'x' })
-    expect(messages(input({ legs: [carrierLeg] }))).toEqual(['Missing document: RATE_CON'])
-    expect(messages(input({ legs: [{ ...carrierLeg, rateConStatus: 'SIGNED' }] }))).toEqual([])
+    const noRateCon = input().documents.filter((d) => d.type !== 'RATE_CON')
+    expect(messages(input({ legs: [carrierLeg], documents: noRateCon }))).toEqual(['Missing document: RATE_CON'])
+    expect(messages(input({ legs: [{ ...carrierLeg, rateConStatus: 'SIGNED' }], documents: noRateCon }))).toEqual([])
   })
 
-  it('asks nothing extra of an own-fleet leg: no rate con, no carrier bill', () => {
+  it('wants a rate confirmation on an own-fleet load too: the office files it (Ryne, 2026-11-12)', () => {
+    const noRateCon = input().documents.filter((d) => d.type !== 'RATE_CON')
+    expect(messages(input({ legs: [own()], documents: noRateCon }))).toEqual(['Missing document: RATE_CON'])
     expect(evaluateReleaseGate(input({ legs: [own()] }))).toEqual({ ok: true, missing: [] })
+  })
+
+  it('asks no rate confirmation of a car-shipping load', () => {
+    const noRateCon = input().documents.filter((d) => d.type !== 'RATE_CON')
+    const carShipping = { status: 'DELIVERED', voidedAt: null, deletedAt: null, revDivision: 'CAR_SHIPPING' }
+    expect(evaluateReleaseGate(input({ shipment: carShipping, legs: [own()], documents: noRateCon }))).toEqual({ ok: true, missing: [] })
+    expect(messages(input({ shipment: carShipping, legs: [outside({ carrierName: 'Wheeler', chargesFinalizedAt: 'x' })], documents: noRateCon }))).toEqual([])
   })
 
   it('names a missing reference by the label the customer configured', () => {
@@ -270,9 +282,9 @@ describe('releaseGateError', () => {
     const { missing } = evaluateReleaseGate(input({ shipment: { status: 'BOOKED' }, documents: [] }))
     const err = releaseGateError(missing)
     expect(err.message).toBe(
-      'Not ready for accounting: Not delivered yet (status BOOKED); Missing document: POD',
+      'Not ready for accounting: Not delivered yet (status BOOKED); Missing document: POD; Missing document: RATE_CON',
     )
-    expect(releaseGateOf(err)?.missing.map((m) => m.code)).toEqual(['NOT_DELIVERED', 'DOC_MISSING'])
+    expect(releaseGateOf(err)?.missing.map((m) => m.code)).toEqual(['NOT_DELIVERED', 'DOC_MISSING', 'DOC_MISSING'])
   })
 
   it('reads nothing structured off an ordinary error', () => {
@@ -292,7 +304,7 @@ describe('evaluateReleaseGate — imported Aljex history (legacyImported)', () =
     // the same shipment without the flag fails on all three kinds of check
     const live = bare({ legs: [own({ driverId: null, deliveryDriverId: null })] })
     expect(evaluateReleaseGate(live).missing.map((m) => m.code).sort())
-      .toEqual(['DOC_MISSING', 'DRIVER_MISSING', 'REFERENCE_MISSING'])
+      .toEqual(['DOC_MISSING', 'DOC_MISSING', 'DRIVER_MISSING', 'REFERENCE_MISSING'])
   })
 
   it('does not waive voided, canceled, undelivered, unassigned or excepted', () => {

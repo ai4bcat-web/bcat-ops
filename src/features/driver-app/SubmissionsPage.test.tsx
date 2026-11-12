@@ -149,7 +149,18 @@ describe('SubmissionsPage', () => {
     renderWithRouter()
 
     await waitFor(() => expect(screen.getByText(/No submissions yet/i)).toBeTruthy())
-    expect(screen.getByRole('button', { name: /Scan a rate confirmation/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Scan a POD/i })).toBeTruthy()
+    expect(screen.queryByText(/rate con/i)).toBeNull()
+  })
+
+  it('leaves a rate-confirmation-only submission out of the list', async () => {
+    apiMocks.fetchSubmissions.mockResolvedValue([
+      { id: 'rc-only', status: 'NEW', referenceNumber: 'RC-1', createdAt: '2026-11-01T00:00:00.000Z', docs: [],
+        documents: [{ kind: 'RATECON', docId: 'combined-RATECON', pageCount: 1, enhanced: false, contentType: 'application/pdf' }] },
+    ])
+    renderWithRouter()
+    await waitFor(() => expect(screen.getByText(/No submissions yet/i)).toBeTruthy())
+    expect(screen.queryByText('RC-1')).toBeNull()
   })
 
   describe('a POD waiting for a load', () => {

@@ -26,6 +26,8 @@ export interface ShipmentDocumentsContext {
   settings?: Pick<TmsSettings, 'defaultRequiredDocs' | 'requiredCarrierUploadTypes'> | null
   /** The shipment is imported Aljex history: its paperwork lives in the Aljex archive. */
   legacyImported?: boolean | null
+  /** Car-shipping load (isCarShipperLoad): no rate confirmation required. */
+  carShipper?: boolean | null
   enabled?: boolean
 }
 
@@ -52,6 +54,7 @@ export function useShipmentDocuments(
   const customer = ctx?.customer ?? null
   const settings = ctx?.settings ?? null
   const legacyImported = ctx?.legacyImported === true
+  const carShipper = ctx?.carShipper === true
   const [documents, setDocuments] = useState<ShipmentDocumentRecord[]>([])
   // A disabled caller (a drawer with no shipment open) never fetches, so the hook
   // reports "not loading" from the start rather than writing state inside the effect.
@@ -97,10 +100,11 @@ export function useShipmentDocuments(
         settings,
         scope: 'CUSTOMER',
         legacyImported,
+        carShipper,
       })
     }
     return gates
-  }, [bundle, documents, customer, settings, legacyImported])
+  }, [bundle, documents, customer, settings, legacyImported, carShipper])
 
   const carrierGates = useMemo(() => {
     const gates: Record<string, DocGateResult> = {}

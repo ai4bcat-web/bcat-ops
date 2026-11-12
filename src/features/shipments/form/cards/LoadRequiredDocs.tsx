@@ -1,6 +1,6 @@
 /**
- * "Documents required for this load" (Documents card). POD is always required and the rate
- * confirmation once an outside carrier hauls the load; the customer's own list follows. Those are
+ * "Documents required for this load" (Documents card). POD is always required and so is the rate
+ * confirmation, except on car-shipping loads (isCarShipperLoad); the customer's own list follows. Those are
  * shown ticked and cannot be turned off for one load. Anything else ticked here (a lumper receipt,
  * a scale ticket) is saved straight away with SET_LOAD_REQUIRED_DOCS: it blocks Move to billing
  * until it is filed and the driver app lists it for the driver.
@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { setLoadRequiredDocs } from '@/lib/apiClient'
 import { LOAD_EXTRA_DOC_TYPES, docTypeLabel, loadExtraDocTypes } from '@/lib/loadRequiredDocs'
 import { requiredDocTypesFor } from '@/lib/shipmentDocuments'
+import { isCarShipperLoad } from '@/lib/carShipper'
 import type { CustomerRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 
 interface Props {
@@ -23,7 +24,7 @@ interface Props {
 export function LoadRequiredDocs({ bundle, customer, settings, disabled, refreshBundle }: Props) {
   const [saving, setSaving] = useState<string | null>(null)
   const loads = bundle?.loads ?? []
-  const outsideCarrier = (bundle?.loadCarriers ?? []).some((lc) => lc.status === 'ACTIVE' && lc.kind !== 'OWN_ASSET')
+  const carShipper = isCarShipperLoad(bundle?.shipment)
   const customerList = requiredDocTypesFor(customer, settings).types.filter((t) => t !== 'POD' && t !== 'RATE_CON')
 
   const toggle = async (loadId: string, current: string[], type: string, on: boolean) => {
@@ -46,7 +47,7 @@ export function LoadRequiredDocs({ bundle, customer, settings, disabled, refresh
       <div className="tms-card-req-title">Documents required for this load</div>
       {loads.length === 0 ? (
         <p className="tms-muted text-xs" data-testid="card-documents-load-required-unsaved">
-          POD and the rate confirmation are always required. Create the shipment to add more for this load.
+          POD and the rate confirmation are always required (no rate confirmation for car shipping). Create the shipment to add more for this load.
         </p>
       ) : (
         loads.map((load, i) => {
@@ -60,8 +61,8 @@ export function LoadRequiredDocs({ bundle, customer, settings, disabled, refresh
                   <span className="tms-muted">always</span>
                 </li>
                 <li>
-                  <label><input type="checkbox" checked={outsideCarrier} disabled readOnly /> {docTypeLabel('RATE_CON')}</label>
-                  <span className="tms-muted">{outsideCarrier ? 'outside carrier' : 'when an outside carrier hauls it'}</span>
+                  <label><input type="checkbox" checked={!carShipper} disabled readOnly /> {docTypeLabel('RATE_CON')}</label>
+                  <span className="tms-muted">{carShipper ? 'not needed for car shipping' : 'always'}</span>
                 </li>
                 {customerList.map((type) => (
                   <li key={`c-${type}`}>

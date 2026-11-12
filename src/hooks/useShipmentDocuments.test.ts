@@ -61,7 +61,8 @@ describe('useShipmentDocuments', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.orderGates['ord-1'].present).toEqual(['POD'])
-    expect(result.current.orderGates['ord-1'].missing).toEqual(['LUMPER_RECEIPT'])
+    // The rate confirmation is required on every load that is not car shipping.
+    expect(result.current.orderGates['ord-1'].missing).toEqual(['LUMPER_RECEIPT', 'RATE_CON'])
     expect(result.current.orderGates['ord-1'].ready).toBe(false)
     // Carrier scope wants its own list, and that assignment has sent only the POD.
     expect(result.current.carrierGates['lc-active'].missing).toEqual(['CARRIER_INVOICE'])
@@ -95,7 +96,7 @@ describe('useShipmentDocuments', () => {
     }))
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.orderGates['ord-1'].missing).toEqual(['POD', 'LUMPER_RECEIPT'])
+    expect(result.current.orderGates['ord-1'].missing).toEqual(['POD', 'LUMPER_RECEIPT', 'RATE_CON'])
     expect(result.current.pendingCount).toBe(1)
   })
 
@@ -103,6 +104,7 @@ describe('useShipmentDocuments', () => {
     listShipmentDocuments.mockResolvedValue([
       doc({ id: 'sdoc-4', type: 'POD', loadId: 'lod-1', orderId: 'ord-1' }),
       doc({ id: 'sdoc-5', type: 'LUMPER_RECEIPT', loadId: 'lod-1', orderId: 'ord-1' }),
+      doc({ id: 'sdoc-6', type: 'RATE_CON', loadId: 'lod-1', orderId: 'ord-1' }),
     ])
     const { result } = renderHook(() => useShipmentDocuments('shp-1', {
       bundle: { orders: [order, otherOrder], loads, loadCarriers },
@@ -112,7 +114,23 @@ describe('useShipmentDocuments', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.orderGates['ord-1'].ready).toBe(true)
-    expect(result.current.orderGates['ord-2'].missing).toEqual(['POD', 'LUMPER_RECEIPT'])
+    expect(result.current.orderGates['ord-2'].missing).toEqual(['POD', 'LUMPER_RECEIPT', 'RATE_CON'])
+  })
+
+  it('asks no rate confirmation of a car-shipping load', async () => {
+    listShipmentDocuments.mockResolvedValue([
+      doc({ id: 'sdoc-7', type: 'POD', loadId: 'lod-1', orderId: 'ord-1' }),
+      doc({ id: 'sdoc-8', type: 'LUMPER_RECEIPT', loadId: 'lod-1', orderId: 'ord-1' }),
+    ])
+    const { result } = renderHook(() => useShipmentDocuments('shp-1', {
+      bundle: { orders: [order], loads, loadCarriers },
+      customer,
+      settings,
+      carShipper: true,
+    }))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.orderGates['ord-1'].ready).toBe(true)
   })
 
   it('never reads anything without a shipment', async () => {

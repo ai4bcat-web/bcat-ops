@@ -4284,7 +4284,7 @@ describe('SET_AR_STATUS', () => {
       pickupDriverId: 'drv-1',
       deliveryDriverId: 'drv-1',
     })
-    for (const type of ['BOL', 'POD']) {
+    for (const type of ['BOL', 'POD', 'RATE_CON']) {
       table(TABLES.shipmentDocument).set(`doc-${type}`, {
         id: `doc-${type}`, shipmentId: ids.shipmentId, loadId: ids.loadId,
         type, status: 'ACTIVE', name: `${type}.pdf`,
@@ -4312,7 +4312,7 @@ describe('SET_AR_STATUS', () => {
     await deliver(ids)
     // Delivered, but nothing else the gate asks for: both documents and a leg.
     await expect(call('SET_AR_STATUS', { orderId: ids.orderId, status: 'UNBILLED' }))
-      .rejects.toThrow(/Missing document: POD; No carrier or driver assigned/)
+      .rejects.toThrow(/Missing document: POD; Missing document: RATE_CON; No carrier or driver assigned/)
     expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
   })
 
@@ -4573,8 +4573,9 @@ describe('documents', () => {
     await commit(ids, prepared)
 
     const order = table(TABLES.order).get(ids.orderId)!
-    expect(order.docsRequired).toEqual(['POD', 'LUMPER_RECEIPT'])
-    expect(order.docsMissing).toEqual(['LUMPER_RECEIPT'])
+    // The rate confirmation is required on every load that is not car shipping (Ryne, 2026-11-12).
+    expect(order.docsRequired).toEqual(['POD', 'LUMPER_RECEIPT', 'RATE_CON'])
+    expect(order.docsMissing).toEqual(['LUMPER_RECEIPT', 'RATE_CON'])
     expect(order.docsCheckedAt).toBeTruthy()
   })
 
@@ -4661,7 +4662,7 @@ describe('documents', () => {
       type: 'POD',
     })) as { document: Row }
     expect(reviewed.document.reviewStatus).toBe('ACCEPTED')
-    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual([])
+    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['RATE_CON'])
 
     // Nobody but an admin may take somebody else's upload off the shipment.
     await expect(call('VOID_DOCUMENT', { documentId: 'sdoc-portal', reason: 'wrong load' })).rejects.toThrow(
@@ -4672,7 +4673,7 @@ describe('documents', () => {
     }
     expect(voided.document.status).toBe('VOID')
     expect(voided.document.reviewStatus).toBe('ACCEPTED')
-    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['POD'])
+    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['POD', 'RATE_CON'])
   })
 
   /**
@@ -4707,12 +4708,12 @@ describe('documents', () => {
 
     await call('SET_LOAD_REQUIRED_DOCS', { shipmentId: ids.shipmentId, loadId: ids.loadId, requiredDocTypes: ['LUMPER_RECEIPT'] })
     expect(table(TABLES.load).get(ids.loadId)!.requiredDocTypes).toEqual(['LUMPER_RECEIPT'])
-    expect(table(TABLES.order).get(ids.orderId)!.docsRequired).toEqual(['POD', 'LUMPER_RECEIPT'])
-    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['POD', 'LUMPER_RECEIPT'])
+    expect(table(TABLES.order).get(ids.orderId)!.docsRequired).toEqual(['POD', 'RATE_CON', 'LUMPER_RECEIPT'])
+    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['POD', 'RATE_CON', 'LUMPER_RECEIPT'])
 
     await call('SET_LOAD_REQUIRED_DOCS', { shipmentId: ids.shipmentId, loadId: ids.loadId, requiredDocTypes: [] })
     expect(table(TABLES.load).get(ids.loadId)!.requiredDocTypes ?? null).toBeNull()
-    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['POD'])
+    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['POD', 'RATE_CON'])
   })
 
 
@@ -4826,7 +4827,8 @@ describe('bill of lading', () => {
       const before = table(TABLES.order).get(ids.orderId)!
       expect(before.docsMissing ?? ['BOL']).toEqual(['BOL'])
       const saved = (await saveBol(ids, { stopId: 'stp-de' })) as { document: Row }
-      expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual([])
+      // A BOL never blocks; what is left is the rate confirmation every non-car-shipping load needs.
+      expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['RATE_CON'])
       const audit = [...table(TABLES.audit).values()].find((r) => r.action === 'SAVE_GENERATED_DOCUMENT')!
       expect(audit.entityId).toBe(saved.document.id)
       expect(JSON.parse(String(audit.changes))).toMatchObject({ stopId: 'stp-de', rated: false, version: 1 })
@@ -4954,7 +4956,7 @@ describe('READY_TO_INVOICE', () => {
   }
 
   /** The paperwork in hand, filed as a staff upload already accepted. */
-  function seedDocs(ids: DocIds, types: string[] = ['BOL', 'POD']): void {
+  function seedDocs(ids: DocIds, types: string[] = ['BOL', 'POD', 'RATE_CON']): void {
     for (const type of types) {
       const id = `sdoc-${type.toLowerCase()}`
       table(TABLES.shipmentDocument).set(id, {
@@ -4990,7 +4992,7 @@ describe('READY_TO_INVOICE', () => {
     const shipments: DocIds[] = []
     for (let i = 0; i < 3; i += 1) {
       const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'], reviewRequirements: [] })
-      seedDocs(ids, i === 1 ? ['BOL'] : ['BOL', 'POD'])
+      seedDocs(ids, i === 1 ? ['BOL', 'RATE_CON'] : ['BOL', 'POD', 'RATE_CON'])
       for (const [id, doc] of table(TABLES.shipmentDocument)) {
         if (doc.shipmentId === ids.shipmentId && id.startsWith('sdoc-')) {
           table(TABLES.shipmentDocument).delete(id)
@@ -5086,7 +5088,7 @@ describe('READY_TO_INVOICE', () => {
     const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'] })
     // A BOL is optional (Ryne 2026-11-12) even when the customer list names it.
     await expect(ready(ids.orderId)).rejects.toThrow(
-      /^Not ready for accounting: Missing document: POD$/,
+      /^Not ready for accounting: Missing document: POD; Missing document: RATE_CON$/,
     )
     expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
   })
@@ -5120,7 +5122,7 @@ describe('READY_TO_INVOICE', () => {
     expect(saved.docsOverrideAt).toBeUndefined()
   })
 
-  it('releases an own-fleet load on its paperwork alone, with no rate confirmation', async () => {
+  it('releases an own-fleet load on its paperwork, the office-filed rate confirmation included', async () => {
     const ids = await reviewable()
     const before = table(TABLES.order).get(ids.orderId)!
     const result = (await ready(ids.orderId, { review: REVIEW })) as { bundle: { orders: Row[] }; releaseGate: { ok: boolean } }
@@ -5379,7 +5381,7 @@ describe('READY_TO_INVOICE', () => {
 
     it('still lets the gate speak first when a marker-less call is also not ready', async () => {
       const ids = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'] })
-      await expect(ready(ids.orderId)).rejects.toThrow(/^Not ready for accounting: Missing document: POD$/)
+      await expect(ready(ids.orderId)).rejects.toThrow(/^Not ready for accounting: Missing document: POD; Missing document: RATE_CON$/)
     })
 
     it('exempts imported Aljex history: a legacy shipment releases without the marker', async () => {
