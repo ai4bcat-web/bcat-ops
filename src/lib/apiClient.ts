@@ -7590,6 +7590,25 @@ export async function writeOffInvoice(input: {
   return financeAction<PostedRow>('WRITE_OFF', input)
 }
 
+export interface AgingStatementResult {
+  preview: boolean
+  to: string[]
+  cc: string[]
+  subject: string
+  body: string
+  filename: string
+  url: string
+  emailStatus?: string
+  emailError?: string | null
+  sentAt?: string | null
+  statement: { rows: number; totalCents: number; companyName: string; byBucket: Record<string, number> }
+}
+
+/** A customer's aging statement: preview it (send false) or e-mail it (send true). */
+export async function agingStatement(input: { customerId: string; send?: boolean }): Promise<AgingStatementResult> {
+  return financeAction<AgingStatementResult>('AGING_STATEMENT', input)
+}
+
 /** Nothing deletes a posted row; a mistake gets a REVERSAL that restores the balances. */
 export async function reversePayment(input: { paymentId: string; reason: string }): Promise<PostedRow> {
   return financeAction<PostedRow>('REVERSE_PAYMENT', input)

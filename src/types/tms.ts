@@ -182,6 +182,9 @@ export interface VisibilityPrefs {
 }
 
 export interface CustomerRecord {
+  /** Last aging statement e-mailed, and to whom (AGING_STATEMENT). */
+  agingStatementSentAt?: string | null
+  agingStatementSentTo?: string | null
   id: string
   /** Aljex `Customer Account #` (Phase 0 import). */
   aljexCode?: string | null

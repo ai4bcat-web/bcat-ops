@@ -10,6 +10,8 @@
  * signed download. The page reports exactly that and never claims a send that did not
  * happen — a false "sent" here is a customer who never got their bill.
  */
+import { SendReviewCarousel } from './components/SendReviewCarousel'
+import { AgingStatementDialog } from './components/AgingStatementDialog'
 import { allApEmails } from '@/lib/billingMethod'
 import { useAuthUser } from '@/hooks/useAuth'
 import { isOwnerOrAdmin } from '@/lib/accountingAccess'
@@ -33,7 +35,7 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import {
-  batchEmailInvoices, batchGenerateInvoices, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
+  agingStatement, batchEmailInvoices, batchGenerateInvoices, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
 } from '@/lib/apiClient'
 import { loadWorklistShipments } from '@/lib/worklistShipments'
 import {
@@ -51,7 +53,7 @@ import {
   agingChipFor, formatDay, lastThreeMonths, monthLabel,
 } from './arViews'
 import {
-  AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, billedByMatches, buildInvoicedRows, buildPaidRows, buildReadyRows, groupKeyOf, groupTotals,
+  AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, billedByMatches, isInvoiceSent, splitOpenInvoices, buildPaidRows, buildReadyRows, groupKeyOf, groupTotals,
   orderByGroup, type ArBilledBy, type ArGroupBy, type ArQueueLookups, type ArQueueRow, type ArQueueStatus,
 } from './arQueue'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
@@ -66,6 +68,8 @@ import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord, Us
 
 /** Which dialog is open, and the one thing it is open about. Mount is the `open` flag. */
 type ArDialog =
+  | { kind: 'review'; invoices: InvoiceRecord[] }
+  | { kind: 'statement'; customerId: string; customerName: string }
   | { kind: 'generate'; orderId: string; shipmentNumber: string | null }
   | { kind: 'email'; invoiceId: string }
   | { kind: 'payment'; customerId: string; customerName: string; invoiceId?: string }
@@ -171,6 +175,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   }, [])
 
   const [selected, setSelected] = useState<string[]>([])
+  /** Customers ticked on the Aging tab for a bulk statement send. */
+  const [statementSelected, setStatementSelected] = useState<string[]>([])
   /** What the last batch generated, so "Batch e-mail" bills exactly those invoices. */
   const [justGenerated, setJustGenerated] = useState<string[]>([])
   /** What the last batch refused, with the release gate's own sentences. */
@@ -244,13 +250,20 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   )
 
   const queue: Record<ArQueueStatus, ArQueueRow[]> = useMemo(() => {
+    // Auto-generated on release but not yet sent = a draft for review in Ready to invoice.
+    const split = splitOpenInvoices(open.invoices, lookups, releasedByOrder, (inv) =>
+      isInvoiceSent(inv, inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : null))
     const keep = (rows: ArQueueRow[]) => rows.filter((row) => billedByMatches(row, billedBy))
     return {
-      READY: keep(buildReadyRows(unbilled.rows, lookups)),
-      INVOICED: keep(buildInvoicedRows(open.invoices, lookups, releasedByOrder)),
+      READY: keep((() => {
+        const ready = buildReadyRows(unbilled.rows, lookups)
+        const readyOrders = new Set(ready.map((r) => r.orderId))
+        return [...split.drafts.filter((r) => !readyOrders.has(r.orderId)), ...ready]
+      })()),
+      INVOICED: keep(split.invoiced),
       PAID: keep(buildPaidRows(paidInvoices, lookups)),
     }
-  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy])
+  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId])
 
   const uninvoiced = useMemo(() => {
     const rows = unbilled.rows
@@ -363,6 +376,26 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   const customer = customers.find((c) => c.id === arCustomerId) ?? null
   const customerById = new Map(customers.map((c) => [c.id, c]))
+  const runBulkStatements = async () => {
+    setBusy(true)
+    let sent = 0
+    const failed: string[] = []
+    for (const id of statementSelected) {
+      const name = customerById.get(id)?.name ?? id
+      try {
+        const row = await agingStatement({ customerId: id, send: true })
+        if (row.emailStatus === 'SENT') sent++
+        else failed.push(`${name}: ${row.emailError || row.emailStatus}`)
+      } catch (err) {
+        failed.push(`${name}: ${graphqlErrorText(err)}`)
+      }
+    }
+    setBusy(false)
+    setStatementSelected([])
+    if (sent) toast.success(`Sent ${sent} aging report${sent === 1 ? '' : 's'}`)
+    if (failed.length) toast.error(`Not sent — ${failed.join('; ')}`)
+    void refreshAll()
+  }
 
   const groupControl = (
     <>
@@ -417,6 +450,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onEmail: (inv) => setDialog({ kind: 'email', invoiceId: inv.id }),
       onPayment: (inv) => setDialog({ kind: 'payment', customerId: inv.customerId, customerName: inv.customerName ?? '', invoiceId: inv.id }),
       onFactor: (inv) => setDialog({ kind: 'factor', invoiceId: inv.id }),
+      onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onVoid: (inv) => setDialog({ kind: 'void', invoice: inv }),
     })
     : tab === 'payments' ? paymentsView({
@@ -435,12 +469,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : agingView({
       errorBanner,
       aging: open.aging,
-      uninvoicedCents: uninvoiced.reduce((sum, r) => sum + r.revenueCents, 0),
-      uninvoicedCount: uninvoiced.length,
-      avgDaysToInvoice: lagDays,
-      avgDaysToPay: avgDaysToPay(paidInvoices),
-      paidMonthLabel: monthLabel(month),
       onCsv: downloadAgingCsv,
+      customerById,
+      statementSelected,
+      onStatementSelect: setStatementSelected,
+      onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
+      onBulkStatements: () => void runBulkStatements(),
+      busy,
     })
 
   return (
@@ -464,6 +499,15 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           </button>
         </div>
         <BillingGapsPanel onFixed={() => void refreshAll()} />
+        <AgingStrip
+          openCents={open.aging.totalCents}
+          lateCents={open.aging.lateCents}
+          deliveredNotInvoicedCents={uninvoiced.reduce((sum, r) => sum + r.revenueCents, 0)}
+          deliveredNotInvoicedCount={uninvoiced.length}
+          avgDaysToInvoice={lagDays}
+          avgDaysToPay={avgDaysToPay(paidInvoices)}
+          paidMonthLabel={monthLabel(month)}
+        />
         <TmsTabStrip aria-label="Invoicing status" tabs={tabs} active={tab} onSelect={(key) => { setSelected([]); setTab(key as ArPageTab) }} />
         {current.banner}
         <ArDenseTable<never> key={tab} grid={current.grid} />
@@ -493,6 +537,23 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           busy={busy}
           onClose={() => setDialog(null)}
           onDone={closeAndRefresh}
+        />
+      )}
+      {dialog?.kind === 'review' && (
+        <SendReviewCarousel
+          invoices={dialog.invoices}
+          customerById={customerById}
+          shipmentsById={lookups.shipmentsById}
+          onClose={() => setDialog(null)}
+          onDone={() => { setSelected([]); void refreshAll() }}
+        />
+      )}
+      {dialog?.kind === 'statement' && (
+        <AgingStatementDialog
+          customerId={dialog.customerId}
+          customerName={dialog.customerName}
+          onClose={() => setDialog(null)}
+          onSent={() => { setDialog(null); void refreshAll() }}
         />
       )}
       {dialog?.kind === 'credit' && (
@@ -594,7 +655,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 
 function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, canVoid, selected, justGenerated, factorByItemId, customerById,
-  months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onBatchEmail, onEmail, onPayment, onFactor, onVoid,
+  months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onBatchEmail, onPayment, onFactor, onVoid, onReview,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -619,6 +680,7 @@ function queueView({
   onEmail: (invoice: InvoiceRecord) => void
   onPayment: (invoice: InvoiceRecord) => void
   onFactor: (invoice: InvoiceRecord) => void
+  onReview: (invoices: InvoiceRecord[]) => void
   onVoid: (invoice: InvoiceRecord) => void
   canVoid: boolean
 }): ListView {
@@ -721,6 +783,7 @@ function queueView({
         if (row.status === 'READY' && row.reasons.length > 0) {
           return <span className="flex items-center gap-1"><TmsBadge tone="red">Blocked</TmsBadge><span style={{ color: 'var(--tms-badge-red)' }}>{row.reasons.join('; ')}</span></span>
         }
+        if (row.status === 'READY' && row.invoiceId) return <TmsBadge tone="orange">Draft — not sent</TmsBadge>
         return <TmsBadge tone={row.status === 'PAID' ? 'green' : row.status === 'INVOICED' ? 'blue' : 'gray'}>{AR_QUEUE_STATUS_LABEL[row.status]}</TmsBadge>
       case 'sent':
         if (!row.invoiceId) return <span className="tms-muted">—</span>
@@ -733,27 +796,46 @@ function queueView({
         return <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>
       }
       case 'actions': {
-        if (ready) {
+        const inv = row.invoice
+        const view = inv
+          ? <Link className="tms-icon-btn tms-icon-btn-plain" to={`/tms/invoicing/invoices/${inv.id}`} aria-label={`View or edit invoice ${inv.number}`} title="View / edit"><Eye size={15} /></Link>
+          : null
+        if (ready && !inv) {
           return (
-            <TmsButton
-              size="sm"
-              aria-label={`Generate invoice for ${row.shipmentNumber ?? row.orderId}`}
-              disabled={busy || row.reasons.length > 0 || !canRelease}
-              title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
-              onClick={() => onGenerate(row)}
-            >
+            <TmsButton size="sm" aria-label={`Generate invoice for ${row.shipmentNumber ?? row.orderId}`}
+              disabled={busy || row.reasons.length > 0 || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => onGenerate(row)}>
               Generate
             </TmsButton>
           )
         }
-        const inv = row.invoice
         if (!inv) return null
+        const more = (options: Array<[string, string, () => void]>) => options.length === 0 ? null : (
+          <TmsSelect aria-label={`More actions for invoice ${inv.number}`} value="" disabled={busy} className="w-12"
+            onChange={(e) => { options.find(([k]) => k === e.target.value)?.[2](); e.target.value = '' }}>
+            <option value="">…</option>
+            {options.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </TmsSelect>
+        )
+        if (ready) {
+          return (
+            <span className="flex items-center justify-end gap-1 whitespace-nowrap">
+              {view}
+              {row.factored
+                ? <TmsButton size="sm" aria-label={`Send invoice ${inv.number} to OTR`} disabled={busy || !canRelease} onClick={() => onReview([inv])}>Send to OTR</TmsButton>
+                : <TmsButton size="sm" variant="primary" aria-label={`Send invoice ${inv.number}`} disabled={busy || !canRelease} onClick={() => onReview([inv])}>Send</TmsButton>}
+              {more(row.factored ? [] : [['factor', 'Send to factor instead', () => onFactor(inv)]])}
+            </span>
+          )
+        }
+        if (status === 'PAID') return <span className="flex justify-end">{view}</span>
         return (
-          <span className="flex justify-end gap-1 whitespace-nowrap">
-            <TmsButton variant="ghost" size="sm" aria-label={`E-mail invoice ${inv.number}`} disabled={busy} onClick={() => onEmail(inv)}>E-mail</TmsButton>
+          <span className="flex items-center justify-end gap-1 whitespace-nowrap">
+            {view}
             <TmsButton variant="ghost" size="sm" aria-label={`Receive payment for invoice ${inv.number}`} disabled={busy} onClick={() => onPayment(inv)}>Receive payment</TmsButton>
-            <TmsButton variant="ghost" size="sm" aria-label={`Send invoice ${inv.number} to factor`} disabled={busy} onClick={() => onFactor(inv)}>Send to Factor</TmsButton>
-            <TmsButton variant="ghost" size="sm" aria-label={`Void invoice ${inv.number}`} disabled={busy || !canVoid} title={canVoid ? undefined : 'Only an admin can void an invoice'} onClick={() => onVoid(inv)}>Void</TmsButton>
+            {more([
+              ...(row.factored ? [] : [['resend', 'Resend', () => onReview([inv])] as [string, string, () => void]]),
+              ...(canVoid ? [['void', 'Void', () => onVoid(inv)] as [string, string, () => void]] : []),
+            ])}
           </span>
         )
       }
@@ -762,6 +844,8 @@ function queueView({
     }
   }
 
+  // Drafts (auto-generated, not sent) ticked in Ready to invoice: the review carousel's batch.
+  const selectedDrafts = rows.filter((row) => row.invoice && selected.includes(row.orderId)).map((row) => row.invoice as InvoiceRecord)
   const actions = (
     <>
       {groupControl}
@@ -778,6 +862,14 @@ function queueView({
             onClick={onBatchGenerate}
           >
             Batch generate
+          </TmsButton>
+          <TmsButton
+            variant="primary"
+            aria-label="Review and send selected invoices"
+            disabled={busy || !canRelease || selectedDrafts.length === 0}
+            onClick={() => onReview(selectedDrafts)}
+          >
+            Review &amp; send{selectedDrafts.length ? ` (${selectedDrafts.length})` : ''}
           </TmsButton>
           <TmsButton
             aria-label="Batch e-mail generated invoices"
@@ -942,20 +1034,21 @@ function paymentsView({
 /* ── Aging ───────────────────────────────────────────────────────────────── */
 
 function agingView({
-  errorBanner, aging, uninvoicedCents, uninvoicedCount, avgDaysToInvoice: lag, avgDaysToPay: dso,
-  paidMonthLabel, onCsv,
+  errorBanner, aging, onCsv, customerById, statementSelected, onStatementSelect, onStatement, onBulkStatements, busy,
 }: {
   errorBanner: ReactNode
   aging: AgingSummary
-  uninvoicedCents: number
-  uninvoicedCount: number
-  avgDaysToInvoice: number | null
-  avgDaysToPay: number | null
-  paidMonthLabel: string
   onCsv: () => void
+  customerById: Map<string, CustomerRecord>
+  statementSelected: string[]
+  onStatementSelect: (ids: string[]) => void
+  onStatement: (customerId: string, customerName: string) => void
+  onBulkStatements: () => void
+  busy: boolean
 }): ListView {
   type Row = AgingSummary['byCustomer'][number]
   const columns: Array<Col<Row>> = [
+    { key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 32 },
     { key: 'customer', header: 'Customer', group: 'Customer', text: (row) => row.customerName || row.customerId },
     ...AR_AGING_BUCKETS.map((b) => moneyCol<Row>(b, AR_AGING_BUCKET_LABEL[b], (row) => row.byBucket[b], 'Buckets')),
     moneyCol<Row>('total', 'Total', (row) => row.totalCents, 'Buckets'),
@@ -969,26 +1062,52 @@ function agingView({
       text: (row) => (row.oldestDays ? `${row.oldestDays}d` : '—'), sortValue: (row) => row.oldestDays,
       filter: 'number', numberOf: (row) => row.oldestDays, numberUnit: 'days',
     },
+    {
+      key: 'lastStatement', header: 'Last statement', group: 'Customer',
+      text: (row) => formatDay(customerById.get(row.customerId)?.agingStatementSentAt ?? null) || '—',
+      sortValue: (row) => customerById.get(row.customerId)?.agingStatementSentAt ?? '',
+    },
+    { key: 'statement', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 150 },
   ]
+  const renderCell = (row: Row, key: string): ReactNode => {
+    if (key === 'select') {
+      return (
+        <input
+          type="checkbox"
+          aria-label={`Select ${row.customerName || row.customerId}`}
+          checked={statementSelected.includes(row.customerId)}
+          onChange={() => onStatementSelect(statementSelected.includes(row.customerId)
+            ? statementSelected.filter((id) => id !== row.customerId)
+            : [...statementSelected, row.customerId])}
+        />
+      )
+    }
+    if (key === 'statement') {
+      return (
+        <TmsButton size="sm" aria-label={`Email aging report to ${row.customerName || row.customerId}`} disabled={busy}
+          onClick={() => onStatement(row.customerId, row.customerName || row.customerId)}>
+          <Mail size={12} /> Email aging report
+        </TmsButton>
+      )
+    }
+    return undefined
+  }
 
   return view<Row>({
     actions: (
-      <TmsButton aria-label="Download aging CSV" onClick={onCsv}>
-        <Download size={14} /> CSV
-      </TmsButton>
+      <>
+        <TmsButton aria-label="Email aging reports to selected" disabled={busy || statementSelected.length === 0} onClick={onBulkStatements}>
+          <Mail size={14} /> Email aging reports{statementSelected.length ? ` (${statementSelected.length})` : ''}
+        </TmsButton>
+        <TmsButton aria-label="Download aging CSV" onClick={onCsv}>
+          <Download size={14} /> CSV
+        </TmsButton>
+      </>
     ),
     banner: (
       <>
         {errorBanner}
-        <AgingStrip
-          openCents={aging.totalCents}
-          lateCents={aging.lateCents}
-          deliveredNotInvoicedCents={uninvoicedCents}
-          deliveredNotInvoicedCount={uninvoicedCount}
-          avgDaysToInvoice={lag}
-          avgDaysToPay={dso}
-          paidMonthLabel={paidMonthLabel}
-        />
+        <p className="text-sm tms-muted">Aged from the invoice date. Email aging report previews the statement and the e-mail before anything is sent.</p>
       </>
     ),
     grid: {
@@ -997,6 +1116,7 @@ function agingView({
       columns,
       rows: aging.byCustomer,
       rowKey: (row) => row.customerId,
+      renderCell,
       empty: 'Nothing is owed.',
     },
   })
