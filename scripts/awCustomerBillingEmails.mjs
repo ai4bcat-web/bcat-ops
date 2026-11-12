@@ -74,15 +74,18 @@ const line = (...c) => c.join(' | ');
 export function buildReport({ prepared, plan, rowCount, today }) {
   const t = tally(plan.results);
   const by = (s) => plan.results.filter((r) => r.status === s);
-  const notice = (r) => r.flags.includes('NOTICE_ADDRESS');
+  const noaRows = plan.results.filter((r) => r.customer && r.company.noa.length);
+  const noaAddrs = noaRows.reduce((n, r) => n + r.company.noa.length, 0);
   const L = [`# OTR billing emails -> Customer.apEmail (dry run ${today})`, '',
     `- CSV rows ${rowCount}; blank-email rows ${prepared.blankRows}; skipped by name ${prepared.skipped.length} (${prepared.skipped.join(', ') || 'none'}); rows with a usable address ${prepared.rows.length}`,
     `- Unique companies after merging name/MC variants: ${plan.companies.length}; live production customers ${plan.liveCount}`,
     `- MATCHED to a customer: ${plan.results.length - (t.UNMATCHED ?? 0) - (t.AMBIGUOUS ?? 0)}; unmatched companies ${t.UNMATCHED ?? 0}; ambiguous ${t.AMBIGUOUS ?? 0}`,
-    `- WOULD FILL apEmail (blank today): ${t.FILL ?? 0} (of which notice-of-assignment style addresses ${by('FILL').filter(notice).length}; billing method unset ${by('FILL').filter((r) => r.flags.includes('BILLING_METHOD_UNSET')).length})`,
+    `- WOULD FILL apEmail (blank today): ${t.FILL ?? 0} (billing method unset ${by('FILL').filter((r) => r.flags.includes('BILLING_METHOD_UNSET')).length})`,
+    `- NOTICE-OF-ASSIGNMENT addresses (NOT written; Customer has no field for them): ${noaRows.length} matched customers, ${noaAddrs} addresses; of those ${noaRows.filter((r) => r.status === 'NOA_ONLY').length} have ONLY a notice address (AP e-mail left blank); by billing method ${JSON.stringify(noaRows.reduce((m, r) => { const k = r.customer.billingMethod ?? 'NOT_SET'; m[k] = (m[k] ?? 0) + 1; return m; }, {}))}; customers already holding the address in apEmail ${noaRows.filter((r) => r.customer.apEmail && r.company.noa.some((a) => a === String(r.customer.apEmail).trim().toLowerCase())).length}`,
     `- Already had an e-mail: ${(t.SAME_EMAIL ?? 0) + (t.DIFFERS ?? 0)} (same address ${t.SAME_EMAIL ?? 0}; DIFFERS ${t.DIFFERS ?? 0}); FACTOR customers (not written) ${t.FACTOR_CUSTOMER ?? 0}; conflicting rows (not written) ${t.CONFLICT ?? 0}`, ''];
   const sect = (title, items) => { L.push(`## ${title} (${items.length})`, ...(items.length ? items : ['(none)']), ''); };
-  sect('Would fill', by('FILL').map((r) => `- ${line(r.customer.name, r.email, r.flags.join(','))}`));
+  sect('Would fill apEmail', by('FILL').map((r) => `- ${line(r.customer.name, r.email, r.flags.join(','))}`));
+  sect('NOTICE-OF-ASSIGNMENT addresses, not written (customer | billing method | existing apEmail | notice address(es) | AP-only?)', noaRows.map((r) => `- ${line(r.customer.name, r.customer.billingMethod ?? 'NOT_SET', r.customer.apEmail ?? '', r.company.noa.join(', '), r.status === 'NOA_ONLY' ? 'NOA only' : 'also has AP')}`));
   sect('Differs from what the customer already has (NOT overwritten): customer | existing | OTR list', by('DIFFERS').map((r) => `- ${line(r.customer.name, r.existing, r.email)}`));
   sect('FACTOR customers (no AP e-mail by design, not written): customer | OTR address', by('FACTOR_CUSTOMER').map((r) => `- ${line(r.customer.name, r.email)}`));
   sect('Conflicting addresses for one company (not written)', by('CONFLICT').map((r) => `- ${line(r.customer.name, r.company.emails.join(' / '))}`));
