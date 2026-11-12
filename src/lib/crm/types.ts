@@ -164,4 +164,6 @@ export interface CrmListAccountRow {
   /** Only when the list was asked `withActivity`: open invoice balance, and the newest shipment pickup. */
   openArCents?: number
   lastShipmentAt?: string | null
+  /** Only with `withActivity`: shipments done for the customer, all-time, voided/canceled left out. */
+  shipmentCount?: number
 }
