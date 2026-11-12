@@ -3999,6 +3999,31 @@ export async function listCarrierRemitEmails(): Promise<CarrierPayInfo[]> {
   return listAll('listCarrierPaymentMethods', 'carrierId payeeEmail recipientType factorName accountName method isPreferred status', 1000)
 }
 
+/**
+ * Where each carrier's money goes, for the AP board's Pay to and Payment info columns. Masked by
+ * design: the bank name and the last four of the account and routing numbers are all the app
+ * ever stores (`bankDetailsKey` is never read here), and MyCarrierPackets' full numbers are
+ * dropped before they reach a row.
+ */
+export interface CarrierPaymentInfo {
+  id: string
+  carrierId: string
+  method?: string | null
+  recipientType?: string | null
+  factorName?: string | null
+  bankName?: string | null
+  accountName?: string | null
+  accountLast4?: string | null
+  routingLast4?: string | null
+  payeeEmail?: string | null
+  isPreferred?: boolean | null
+  status?: string | null
+}
+export async function listCarrierPaymentInfo(): Promise<CarrierPaymentInfo[]> {
+  if (!modelAvailable('CarrierPaymentMethod')) throw new Error('Carrier payment methods are unavailable')
+  return listAll('listCarrierPaymentMethods', 'id carrierId method recipientType factorName bankName accountName accountLast4 routingLast4 payeeEmail isPreferred status', 1000)
+}
+
 /** Everything one carrier profile renders, in one round trip's worth of parallel reads. */
 export async function getCarrierBundle(id: string): Promise<CarrierBundle> {
   const [carrier, contacts, paymentMethods, documents, loadCarriers] = await Promise.all([
@@ -7611,7 +7636,7 @@ export type {
 const CARRIER_BILL_FIELDS = `
   id loadCarrierId loadId shipmentId shipmentNumber loadNumber
   carrierId carrierName carrierMc payeeKind paymentMethodId remitTo divisionKey
-  status billNumber billDate billMonth recordedAt recordedBy recordedEarly datesPending
+  status billNumber billDate billMonth recordedAt recordedBy recordedEarly datesPending selectedForPayment selectedAt selectedBy
   dueAt termsDays quickPay quickPayDays quickPayFeeBps
   lines grossCents quickPayFeeCents netCents billedCents varianceCents
   paidCents creditedCents balanceCents apOpen documentId
@@ -7857,6 +7882,16 @@ export async function setBillDates(input: {
   billNumber?: string | null
 }): Promise<{ bill: CarrierBillRecord }> {
   return financeAction<{ bill: CarrierBillRecord }>('SET_BILL_DATES', input)
+}
+
+/** Put approved, dated bills on the next pay run. Bills that cannot go are returned with the reason. */
+export async function selectBillsForPayment(input: { billIds: string[] }): Promise<{ selected: string[]; skipped: { billId: string; reason: string }[] }> {
+  return financeAction<{ selected: string[]; skipped: { billId: string; reason: string }[] }>('SELECT_BILLS_FOR_PAYMENT', input)
+}
+
+/** Take bills back off the pay run. */
+export async function unselectBills(input: { billIds: string[] }): Promise<{ unselected: string[]; skipped: { billId: string; reason: string }[] }> {
+  return financeAction<{ unselected: string[]; skipped: { billId: string; reason: string }[] }>('UNSELECT_BILLS', input)
 }
 
 /**

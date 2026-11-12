@@ -547,7 +547,7 @@ export async function unapproveBill(input: Row, caller: Caller): Promise<Row> {
           version: (bill.version ?? 1) + 1,
         },
         {
-          remove: ['approvedAt', 'approvedBy'],
+          remove: ['approvedAt', 'approvedBy', 'selectedForPayment', 'selectedAt', 'selectedBy'],
           condition: 'version = :expectedVersion AND paidCents = :paid AND creditedCents = :credited',
           extraValues: {
             ':expectedVersion': { N: String(bill.version ?? 1) },
@@ -700,6 +700,98 @@ export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
     to: { billDate, dueAt, billNumber: billNumber ?? bill.billNumber ?? null },
   })
   return { bill: (await getById(CARRIER_BILL_TABLE_NAME, billId)) ?? {} }
+}
+
+const MAX_SELECT_BILLS = 200
+
+/**
+ * Put approved bills on the next pay run. Only an approved, dated bill that still owes money
+ * can be chosen: an unapproved one has not cleared its gates and a bill still waiting on its
+ * invoice date has no due date to pay by. The rest are reported by id and reason rather than
+ * failing the whole batch, so a mixed selection moves what it can.
+ */
+export async function selectBillsForPayment(input: Row, caller: Caller): Promise<Row> {
+  const ids = assertArrayOf<string>(input.billIds, 'billIds', (item, index) => assertString(item, `billIds[${index}]`), MAX_SELECT_BILLS)
+  if (ids.length === 0) throw new Error('Choose at least one bill')
+  const selected: string[] = []
+  const skipped: { billId: string; reason: string }[] = []
+  for (const billId of [...new Set(ids)]) {
+    const bill = await getById(CARRIER_BILL_TABLE_NAME, billId) as CarrierBillRecord | null
+    const reason = !bill ? 'Bill not found'
+      : bill.status !== 'TO_BE_PAID' && bill.status !== 'PARTIAL' ? 'Only an approved bill can be selected for payment'
+        : bill.datesPending === true ? 'Set the invoice date and due date first'
+          : (bill.balanceCents ?? 0) <= 0 ? 'Nothing is owed on this bill'
+            : null
+    if (reason || !bill) { skipped.push({ billId, reason: reason ?? 'Bill not found' }); continue }
+    if (bill.selectedForPayment === true) { selected.push(billId); continue }
+    const now = nowIso()
+    try {
+      await transact(
+        [
+          updateTx(
+            CARRIER_BILL_TABLE_NAME,
+            billId,
+            {
+              selectedForPayment: true,
+              selectedAt: now,
+              selectedBy: caller.email,
+              // Written unchanged so the condition below can name it (`status` is a reserved word).
+              status: bill.status,
+              updatedAt: now,
+              updatedBy: caller.email,
+              version: (bill.version ?? 1) + 1,
+            },
+            {
+              condition: '#status = :status AND version = :expectedVersion',
+              extraValues: { ':expectedVersion': { N: String(bill.version ?? 1) } },
+            },
+          ),
+        ],
+        'bill selection',
+      )
+      await writeAudit('CarrierBill', billId, 'SELECT_BILL_FOR_PAYMENT', caller, { balanceCents: bill.balanceCents })
+      selected.push(billId)
+    } catch (err) {
+      skipped.push({ billId, reason: err instanceof Error ? err.message : 'Could not select the bill' })
+    }
+  }
+  return { selected, skipped }
+}
+
+/** Take bills back off the pay run. Idempotent: a bill that is not selected is already there. */
+export async function unselectBills(input: Row, caller: Caller): Promise<Row> {
+  const ids = assertArrayOf<string>(input.billIds, 'billIds', (item, index) => assertString(item, `billIds[${index}]`), MAX_SELECT_BILLS)
+  if (ids.length === 0) throw new Error('Choose at least one bill')
+  const unselected: string[] = []
+  const skipped: { billId: string; reason: string }[] = []
+  for (const billId of [...new Set(ids)]) {
+    const bill = await getById(CARRIER_BILL_TABLE_NAME, billId) as CarrierBillRecord | null
+    if (!bill) { skipped.push({ billId, reason: 'Bill not found' }); continue }
+    if (bill.selectedForPayment !== true) { unselected.push(billId); continue }
+    const now = nowIso()
+    try {
+      await transact(
+        [
+          updateTx(
+            CARRIER_BILL_TABLE_NAME,
+            billId,
+            { status: bill.status, updatedAt: now, updatedBy: caller.email, version: (bill.version ?? 1) + 1 },
+            {
+              remove: ['selectedForPayment', 'selectedAt', 'selectedBy'],
+              condition: '#status = :status AND version = :expectedVersion',
+              extraValues: { ':expectedVersion': { N: String(bill.version ?? 1) } },
+            },
+          ),
+        ],
+        'bill unselection',
+      )
+      await writeAudit('CarrierBill', billId, 'UNSELECT_BILL_FOR_PAYMENT', caller, {})
+      unselected.push(billId)
+    } catch (err) {
+      skipped.push({ billId, reason: err instanceof Error ? err.message : 'Could not unselect the bill' })
+    }
+  }
+  return { unselected, skipped }
 }
 
 export async function saveApSettings(input: Row, caller: Caller): Promise<Row> {
