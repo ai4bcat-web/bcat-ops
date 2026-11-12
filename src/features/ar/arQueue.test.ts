@@ -48,6 +48,14 @@ describe('the invoicing queue', () => {
     expect(rows[0].daysPastDue).toBe(11)
   })
 
+  it('leads Invoiced with invoices nobody has sent yet, newest release first', () => {
+    const sent = inv({ id: 'sent', sentAt: '2026-10-02T00:00:00Z', sentCount: 1, dueAt: '2026-10-15' })
+    const older = inv({ id: 'older', orderId: 'o-old', dueAt: '2026-12-01' })
+    const fresh = inv({ id: 'fresh', orderId: 'o-new', dueAt: '2026-12-12' })
+    const released = new Map([['o-old', '2026-11-01T00:00:00Z'], ['o-new', '2026-11-12T21:03:22Z']])
+    expect(buildInvoicedRows([sent, older, fresh], lookups, released).map((r) => r.invoiceId)).toEqual(['fresh', 'older', 'sent'])
+  })
+
   it('puts zero-balance invoices on Paid', () => {
     expect(buildPaidRows([inv(), inv({ id: 'i3', status: 'PAID', balanceCents: 0 })], lookups).map((r) => r.invoiceId)).toEqual(['i3'])
   })

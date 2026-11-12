@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Link } from 'react-router-dom'
 import { Download, Mail } from 'lucide-react'
 import { toast } from 'sonner'
+import { BillingGapsPanel } from './components/BillingGapsPanel'
 import { Eye, RefreshCw } from 'lucide-react'
 import {
   TmsBadge, TmsButton, TmsCard, TmsSelect, TmsTabStrip, TmsTabs,
@@ -453,6 +454,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             <RefreshCw size={15} />
           </button>
         </div>
+        <BillingGapsPanel onFixed={() => void refreshAll()} />
         <TmsTabStrip aria-label="Invoicing status" tabs={tabs} active={tab} onSelect={(key) => { setSelected([]); setTab(key as ArPageTab) }} />
         {current.banner}
         <ArDenseTable<never> key={tab} grid={current.grid} />
