@@ -677,7 +677,7 @@ function apptStatusText(row: ShipmentRow, type: 'pickup' | 'delivery'): string {
  * `DEL` while the checkbox beside it says `Delivered` is two names for one fact.
  * A row with no stop evidence shows the status alone.
  */
-function statusWithProgress(row: ShipmentRow): string {
+export function statusWithProgress(row: ShipmentRow): string {
   let label: string = isVoided(row) ? 'VOIDED' : displayStatusOf(row)
   if (label === RELEASED_LABEL) return label
   // A brokerage load that is covered but not moving yet reads where it stands on the carrier ladder (Ryne 2026-11-09):

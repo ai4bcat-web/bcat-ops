@@ -118,6 +118,17 @@ describe('LoadReviewPage', () => {
     expect(order()).toEqual(['S-3', 'S-2', 'S-1'])
   })
 
+  it('shows each load status, and says so when a Delivered load has no delivered time recorded', async () => {
+    mocks.shipments.mockReturnValue({ shipments: [...ROWS, shipment('s-8', { deliveredAt: null, stops: [] })], loading: false, error: null, refresh: mocks.refresh })
+    renderPage('/tms/load-review?tab=all')
+    expect(screen.getAllByText('DELIVERED').length).toBeGreaterThan(0)
+    expect(screen.getByText('Delivered (no time recorded)')).toBeTruthy()
+    cleanup()
+    renderPage('/tms/load-review?shipment=s-8')
+    expect(await screen.findByText(/Delivered \(no time recorded\)/)).toBeTruthy()
+    expect(screen.getAllByText('DELIVERED').length).toBeGreaterThan(0)
+  })
+
   it('lists only rows in the queue and offers a checkbox on every row (batch edit), release only for Looks-ready ones', () => {
     renderPage('/tms/load-review?tab=all')
     for (const n of ['S-1', 'S-2', 'S-3']) expect(screen.getByRole('button', { name: n })).toBeTruthy()

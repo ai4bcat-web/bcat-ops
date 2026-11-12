@@ -12,13 +12,15 @@ import { activeFilterCount, filterRows, nextSort, reorderKeys, sortDenseRows, ty
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { useAuth } from '@/hooks/useAuth'
 import type { ShipmentListRow } from '@/hooks/useShipments'
-import { isDemoShipment, matchesQuery } from '@/features/shipments/shipmentViews'
+import { boardStatusOf, isDemoShipment, matchesQuery } from '@/features/shipments/shipmentViews'
+import { sentence } from '@/features/shipments/shipmentGridColumns'
 import { batchShipmentTask, listAuditLogsFor, pushReadyToLoadReview, releaseToBilling } from '@/lib/apiClient'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { failingReasons, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL, releasedWithin, reviewAgeDays, type LoadReviewVerdict } from '@/lib/loadReview'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 import { useLoadReviewQueue } from './useLoadReviewQueue'
+import { deliveredText, deliveredTimeOf, reviewStatusText, reviewStatusTone } from './reviewStatus'
 import { LoadReviewDrawer } from './LoadReviewDrawer'
 import { MAX_REVIEW_BATCH, batchCapMessage } from '@/lib/reviewRequirements'
 import './loadReview.css'
@@ -58,7 +60,8 @@ export function LoadReviewPage() {
       { key: 'customer', header: 'Customer', group: 'Shipment', text: ({ row }) => row.customerName ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.customerName) },
       { key: 'pod', header: 'POD', group: 'Shipment', text: () => 'POD', sortable: false, filter: false },
       { key: 'lane', header: 'Lane', group: 'Shipment', text: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
-      { key: 'delivered', header: 'Delivered', group: 'Shipment', text: ({ row }) => formatDateTime(row.deliveredAt), sortValue: ({ row }) => row.deliveredAt ?? '' },
+      { key: 'loadStatus', header: 'Load status', group: 'Shipment', text: ({ row }) => reviewStatusText(row), filter: 'multi', optionsOf: ({ row }) => opt(boardStatusOf(row), sentence(boardStatusOf(row))), extraPx: 24 },
+      { key: 'delivered', header: 'Delivered', group: 'Shipment', text: ({ row }) => deliveredText(row), sortValue: ({ row }) => deliveredTimeOf(row) ?? '' },
       { key: 'age', header: 'In review', group: 'Review', text: ({ row }) => { const age = reviewAgeDays(row, now); return age == null ? 'POD before delivery' : `${age} d` }, extraPx: 24, sortValue: ({ row }) => reviewAgeDays(row, now) ?? -1 },
       { key: 'rep', header: 'Sales rep', group: 'Review', text: ({ row }) => row.salesRepName ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.salesRepName) },
       { key: 'division', header: 'Division', group: 'Review', text: ({ row }) => row.revDivision?.replace(/_/g, ' ') ?? '—', filter: 'multi', optionsOf: ({ row }) => opt(row.revDivision?.replace(/_/g, ' ')) },
@@ -168,7 +171,8 @@ export function LoadReviewPage() {
     { key: 'customer', header: 'Customer', render: ({ row }) => row.customerName ?? '—' },
     { key: 'pod', header: 'POD', render: ({ row }) => <PodPreviewButton shipmentId={row.id} number={row.number ?? null} /> },
     { key: 'lane', header: 'Lane', render: ({ row }) => `${row.originCity ?? '—'} → ${row.destinationCity ?? '—'}` },
-    { key: 'delivered', header: 'Delivered', render: ({ row }) => formatDateTime(row.deliveredAt) },
+    { key: 'loadStatus', header: 'Load status', render: ({ row }) => <TmsBadge tone={reviewStatusTone(row)}>{reviewStatusText(row)}</TmsBadge> },
+    { key: 'delivered', header: 'Delivered', render: ({ row }) => deliveredText(row) },
     { key: 'age', header: 'In review', render: ({ row }) => { const age = reviewAgeDays(row, now); return <TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'POD before delivery' : `${age} d`}</TmsBadge> } },
     { key: 'rep', header: 'Sales rep', render: ({ row }) => row.salesRepName ?? '—' },
     { key: 'division', header: 'Division', render: ({ row }) => row.revDivision?.replace(/_/g, ' ') ?? '—' },
