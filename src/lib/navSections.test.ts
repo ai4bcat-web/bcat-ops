@@ -80,6 +80,13 @@ describe('buildNavSections', () => {
     expect(profiles({ isAdmin: true })).toEqual(expect.arrayContaining(['Drivers', 'Assets']))
   })
 
+  it('offers a Factoring entry (the Factored view) only to someone with Factoring but not Invoicing', () => {
+    const accounting = (keys: string[]) =>
+      buildNavSections({ divisions: FOUR, hasPageAccess: (k: string) => keys.includes(k) }).pinned.find((i) => i.label === 'Accounting')?.children?.map((c) => [c.label, c.to]) ?? []
+    expect(accounting(['factoring'])).toContainEqual(['Factoring', '/tms/invoicing/factored'])
+    expect(accounting(['factoring', 'invoicing']).map(([l]) => l)).not.toContain('Factoring')
+  })
+
   it('gives the owner the whole rail in order: the pinned freight list, then Assets, Car shipping, Company', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     expect(labels(pinned)).toEqual([

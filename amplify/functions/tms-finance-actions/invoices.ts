@@ -27,7 +27,6 @@ import {
 } from '../_shared/actionInputs'
 import { deliverNotice, type EmailAttachment } from '../_shared/shipmentNotices'
 import {
-  DEFAULT_INVOICE_NUMBER_FORMAT,
   billingRecipients,
   defaultInvoiceAttachments,
   dueDateFor,
@@ -112,7 +111,6 @@ import {
   CARRIED_OVER_MESSAGE,
   isCarriedOver,
   invoicePdfKey,
-  nextInvoiceNumber,
   nowIso,
   numberOrNull,
   putPdf,
@@ -408,7 +406,7 @@ export async function previewInvoice(input: Row, caller: Caller): Promise<Row> {
 export async function proInvoiceNumber(context: Pick<OrderContext, 'order' | 'orders' | 'shipment'>): Promise<string> {
   const pro = String(context.shipment.number ?? '').trim()
   if (!pro) throw new Error('This shipment has no PRO number to invoice under')
-  const orders = [...context.orders].sort((a, b) => String(a.createdAt ?? a.id).localeCompare(String(b.createdAt ?? b.id)))
+  const orders = [...context.orders].sort((a, b) => `${a.createdAt ?? ''}|${a.id}`.localeCompare(`${b.createdAt ?? ''}|${b.id}`))
   const index = Math.max(0, orders.findIndex((o) => o.id === context.order.id))
   const base = index === 0 ? pro : `${pro}-${String.fromCharCode(65 + Math.min(index, 25))}`
   if (!(await getById(INVOICE_TABLE_NAME, base))) return base
@@ -462,10 +460,6 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
     }
   }
 
-  const prefix = context.division?.invoicePrefix?.trim() || 'INV-'
-  const format = context.settings.invoiceNumberFormat ?? DEFAULT_INVOICE_NUMBER_FORMAT
-  const formatError = invoiceNumberFormatError(format)
-  if (formatError) throw new Error(formatError)
 
   const now = nowIso()
   // Rendered before a number is taken: a renderer that throws must not burn one.
