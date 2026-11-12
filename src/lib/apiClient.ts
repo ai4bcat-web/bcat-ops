@@ -4982,6 +4982,30 @@ export interface LoadReviewResult {
   pendingDocReviewCount?: number
 }
 
+/** One released load missing from AR, AP, or both (see `src/lib/billingReconcile`). */
+export interface BillingGap {
+  orderId: string
+  shipmentId: string
+  shipmentNumber: string | null
+  customerName: string | null
+  releasedAt: string | null
+  arStatus: string | null
+  arMissing: boolean
+  arReason: string | null
+  apMissing: { loadCarrierId: string; carrierName: string; grossCents: number }[]
+  apUnbillable: { loadCarrierId: string; carrierName: string; reasons: string[] }[]
+}
+
+/** Every load moved to billing that has not reached AR or AP. Read-only. */
+export async function reconcileBilling(): Promise<{ gaps: BillingGap[]; checked: number; truncated?: boolean }> {
+  return shipmentAction('RECONCILE_BILLING', {})
+}
+
+/** Create one released order's missing carrier AP records (the same idempotent writer the release uses). */
+export async function createMissingApRecords(orderId: string): Promise<{ gaps: BillingGap[] }> {
+  return shipmentAction('RECONCILE_BILLING', { createMissingFor: orderId })
+}
+
 export async function reviewLoad(input: { shipmentId: string }): Promise<LoadReviewResult> {
   return shipmentAction<LoadReviewResult>('REVIEW_LOAD', input)
 }

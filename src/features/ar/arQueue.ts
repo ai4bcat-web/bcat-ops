@@ -160,11 +160,22 @@ export function buildReadyRows(unbilled: ArWorklistRow[], l: ArQueueLookups): Ar
   return unbilled.filter(isDelivered).map((row) => readyRow(row, l))
 }
 
-/** INVOICED rows: open invoices (ISSUED / PARTIAL). */
+/** Never e-mailed or marked sent: an invoice Release created that is still waiting to go out. */
+export function isUnsent(row: Pick<ArQueueRow, 'sentAt' | 'sentCount'>): boolean {
+  return !row.sentAt && row.sentCount === 0
+}
+
+/**
+ * INVOICED rows: open invoices (ISSUED / PARTIAL). Releasing a load invoices it at once, so a
+ * just-released load lands here, not in Ready to invoice: the unsent ones lead, newest release
+ * first, then the rest in the order they came (oldest due first).
+ */
 export function buildInvoicedRows(open: InvoiceRecord[], l: ArQueueLookups, releasedByOrder?: Map<string, string | null>): ArQueueRow[] {
-  return open
+  const rows = open
     .filter((inv) => inv.status === 'ISSUED' || inv.status === 'PARTIAL')
     .map((inv) => invoiceRow(inv, l, releasedByOrder?.get(inv.orderId)))
+  const unsent = rows.filter(isUnsent).sort((a, b) => String(b.releasedAt ?? b.invoiceDate ?? '').localeCompare(String(a.releasedAt ?? a.invoiceDate ?? '')))
+  return [...unsent, ...rows.filter((r) => !isUnsent(r))]
 }
 
 /** PAID rows: invoices whose balance is zero. */

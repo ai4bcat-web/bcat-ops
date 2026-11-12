@@ -69,6 +69,7 @@ import { INBOX_CHIPS, HISTORY_DAYS, type InboxChip } from './inbox/inboxModel'
 import { InboxChips } from './inbox/InboxParts'
 import { inboxView } from './inbox/inboxView'
 import { useApInboxItems, useApInboxStatus } from './inbox/useApInbox'
+import { BillingGapsPanel } from '@/features/ar/components/BillingGapsPanel'
 
 /** The "Shared PRO · 2 carriers" badge, or nothing when the load has one carrier. */
 function sharedProChip(shared: SharedProIndex, loadId: string): ReactNode {
@@ -111,7 +112,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [asOf] = useState(() => chicagoDateStr(new Date()))
 
   const { isAdmin, user } = useAuth()
-  const [tab, setTab] = useState<ApTabKey>('awaiting')
+  // Moving a load to billing creates its bill in Expected, so the page opens there.
+  const [tab, setTab] = useState<ApTabKey>('expected')
   const inboxStatus = useApInboxStatus()
   const [chip, setChip] = useState<InboxChip>('NEEDS_REVIEW')
   const [historySince] = useState(() => new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString())
@@ -478,6 +480,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             </button>
           )}
         />
+        <BillingGapsPanel onFixed={() => void refreshAll()} />
         {/* Keyed by grid so each view keeps its own saved columns, filters and sort. */}
         <ApDenseList<never> key={current.gridId} config={current} email={user?.email} onRefresh={chrome.onRefresh} />
       </div>
