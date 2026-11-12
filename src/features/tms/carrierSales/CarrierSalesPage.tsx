@@ -8,9 +8,9 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Search, Truck } from 'lucide-react'
-import { TmsBadge, TmsButton, TmsInput, TmsSegmentedTabs, TmsSelect } from '@/features/tms/kit'
+import { TmsBadge, TmsButton, TmsInput, TmsSelect, TmsTabStrip } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
-import { ClearFiltersButton, ColumnsButton, DenseKpiStrip, DensityToggle, SummaryToggle, type DenseKpi } from '@/features/tms/grid/DenseControls'
+import { ClearFiltersButton, ColumnsButton, DenseKpiStrip, DensityToggle, type DenseKpi } from '@/features/tms/grid/DenseControls'
 import { activeFilterCount, filterRows, nextSort, reorderKeys, sortDenseRows, type DenseColumn, type DenseColumnFilter, type DenseFilters } from '@/features/tms/grid/denseGridModel'
 import { useDenseGridPrefs } from '@/features/tms/grid/useDenseGridPrefs'
 import { CoverCarrierDialog } from '@/features/carriers/cover/CoverCarrierDialog'
@@ -233,11 +233,11 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
   return (
     <>
       <div className="tms-dense-page tms-caps">
+        <TmsTabStrip aria-label="Carrier sales tabs" active={tab} onSelect={onTab} tabs={tabs} />
         <div className="tms-dense-bar">
           <span className="tms-dense-title"><Truck size={18} aria-hidden="true" /> Book · Carrier sales</span>
           <Search size={14} className="tms-muted" aria-hidden="true" />
           <TmsInput className="tms-dense-search" aria-label="Search" placeholder="Search shipment, customer, carrier, lane…" value={search} onChange={(e) => { setSearch(e.target.value); setPageSize(PAGE_STEP) }} />
-          <TmsSegmentedTabs aria-label="Carrier sales tabs" size="sm" active={tab} onSelect={onTab} tabs={tabs} />
           {isCovered && (
             <label className="flex items-center gap-2" style={{ fontSize: 12 }}>
               <span className="tms-muted">Carrier status</span>
@@ -252,7 +252,6 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
           <TmsButton size="sm" variant="secondary" onClick={onRefresh}>Refresh</TmsButton>
           {gridTab && (
             <>
-              <SummaryToggle open={prefs.kpiOpen} onToggle={() => prefs.setKpiOpen(!prefs.kpiOpen)} />
               <ColumnsButton catalog={catalog} columns={prefs.columns} widths={prefs.widths} pinned={prefs.pinned} onApply={(next) => prefs.applyLayout({ ...next, replaceWidths: true })} />
               <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
             </>
@@ -268,7 +267,7 @@ function CarrierSalesView({ offers }: { offers: OffersState | null }) {
         </div>
         {gridTab ? (
           <>
-            <DenseKpiStrip open={prefs.kpiOpen} items={kpis} />
+            <DenseKpiStrip open items={kpis} />
             {!isCovered && <DemoLoads onOpen={(d) => setOffersTarget(targetFromDemo(d))} />}
             <div className="tms-dense-body">
               <DenseGrid<ShipmentListRow>

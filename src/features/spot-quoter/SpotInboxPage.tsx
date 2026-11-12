@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Settings } from 'lucide-react'
-import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsPage, TmsSelect, TmsTable, TmsTabs, type ColumnDef } from '@/features/tms/kit'
+import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsPage, TmsSelect, TmsTable, TmsTabStrip, type ColumnDef } from '@/features/tms/kit'
 import { spotAction } from '@/lib/apiClient'
 import { SPOT_FIXTURES } from '@/lib/spot/fixtures'
 import { resolveSpotSettings } from '@/lib/spot/settings'
@@ -263,7 +263,7 @@ export function SpotInboxPage({ onRealCount }: { onRealCount?: (n: number | null
 
       {live ? (
         <>
-          <TmsTabs tabs={tabs} active={tab.key} onSelect={setTabKey} />
+          <TmsTabStrip aria-label="Spot request status" tabs={tabs} active={tab.key} onSelect={setTabKey} />
           {error ? <TmsAlert tone="red">{error}</TmsAlert> : null}
           <TmsTable
             columns={columns}

@@ -369,6 +369,9 @@ export function loadReviewCount(rows: readonly LoadReviewRow[]): number {
   return n
 }
 
+/** Tooltip for the 'No delivery time' chip shown when reviewAgeDays() is null. */
+export const NO_DELIVERY_TIME_TIP = "No delivery time is recorded for this load, so days in review can't be counted."
+
 /** Days since delivery (whole days, floor). Null when the row carries no delivery time. */
 export function reviewAgeDays(row: Pick<LoadReviewRow, 'deliveredAt'>, now: number): number | null {
   if (!row.deliveredAt) return null

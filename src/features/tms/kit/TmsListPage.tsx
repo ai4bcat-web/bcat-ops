@@ -6,6 +6,7 @@ import { TmsKeyHint } from './TmsKeyHint'
 import { TmsTable } from './TmsTable'
 import type { ColumnDef, TmsSort } from './TmsTable'
 import { TmsTabs } from './TmsTabs'
+import { TmsTabStrip } from './TmsTabStrip'
 import type { TmsTab } from './TmsTabs'
 
 export interface TmsTabGroup {
@@ -22,6 +23,8 @@ export interface TmsListPageProps<T> {
   viewTabs?: TmsTabGroup
   /** Status quick-tabs with counts, directly above the table. */
   quickTabs?: TmsTabGroup
+  /** Draw the quick-tabs as the folder-tab strip (as on Shipments), right under the title row, instead of the pills above the table. */
+  folderTabs?: boolean
   filterChips?: Array<{ key: string; label: string; value?: string | null; onClick?: () => void }>
   onAddFilter?: () => void
   search?: { value: string; onChange: (value: string) => void; placeholder?: string }
@@ -62,6 +65,7 @@ export function TmsListPage<T>({
   primaryAction,
   viewTabs,
   quickTabs,
+  folderTabs,
   filterChips,
   onAddFilter,
   search,
@@ -106,6 +110,8 @@ export function TmsListPage<T>({
         </div>
       )}
 
+      {quickTabs && folderTabs ? <TmsTabStrip tabs={quickTabs.tabs} active={quickTabs.active} onSelect={quickTabs.onSelect} /> : null}
+
       {viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
 
       {search || onRefresh || filterChips?.length || fieldsLabel ? (
@@ -148,7 +154,7 @@ export function TmsListPage<T>({
         </div>
       ) : null}
 
-      {quickTabs ? (
+      {quickTabs && !folderTabs ? (
         <div className="tms-quick-tabs" role="tablist">
           {quickTabs.tabs.map((tab) => (
             <button
