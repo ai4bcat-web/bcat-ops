@@ -168,7 +168,7 @@ export default function App() {
                   <Route path="documents/*" element={<Navigate to={DOCS_LANDING} replace />} />
                   <Route path="check-calls" element={<Navigate to={CHECK_CALLS_LANDING} replace />} />
                   {/* Load Review: the pre-billing queue. `?shipment=<id>` opens a load's checklist. */}
-                  <Route path="load-review" element={<RequirePage page={['loadReview', 'tms']}><DormantPage page="loadReview"><LoadReviewPage /></DormantPage></RequirePage>} />
+                  <Route path="load-review" element={<RequirePage page={['loadReview']}><DormantPage page="loadReview"><LoadReviewPage /></DormantPage></RequirePage>} />
                   {/* Quotes (path stays /tms/rates): customer quotes and carrier offers, with the lane history behind them. */}
                   <Route path="rates" element={<RequirePage page={['quotes', 'tms']}><DormantPage page="quotes"><QuotePage tab="quotes" /></DormantPage></RequirePage>} />
                   {/* Step AB slots, declared before `rates/:id` so a static segment is never read as a quote id. */}
@@ -177,20 +177,20 @@ export default function App() {
                   <Route path="rates/new" element={<RequirePage page={['quotes', 'tms']}><DormantPage page="quotes"><QuoteDetail /></DormantPage></RequirePage>} />
                   <Route path="rates/:id" element={<RequirePage page={['quotes', 'tms']}><DormantPage page="quotes"><QuoteDetail /></DormantPage></RequirePage>} />
                   {/* Invoicing: what we are owed, with carrier pay as its payable side. */}
-                  <Route path="invoicing" element={<RequirePage page={['invoicing', 'tms']}><DormantPage page="invoicingAr"><InvoicingPage /></DormantPage></RequirePage>} />
-                  <Route path="invoicing/invoices/:id" element={<RequirePage page={['invoicing', 'tms']}><DormantPage page="invoicingAr"><InvoiceDetail /></DormantPage></RequirePage>} />
-                  <Route path="invoicing/payable" element={<RequirePage page={['carrierPay', 'tms']}><DormantPage page="invoicingAp"><InvoicingPage /></DormantPage></RequirePage>} />
-                  <Route path="invoicing/payable/bills/:id" element={<RequirePage page={['carrierPay', 'tms']}><DormantPage page="invoicingAp"><BillDetail /></DormantPage></RequirePage>} />
+                  <Route path="invoicing" element={<RequirePage page={['invoicing']}><DormantPage page="invoicingAr"><InvoicingPage /></DormantPage></RequirePage>} />
+                  <Route path="invoicing/invoices/:id" element={<RequirePage page={['invoicing']}><DormantPage page="invoicingAr"><InvoiceDetail /></DormantPage></RequirePage>} />
+                  <Route path="invoicing/payable" element={<RequirePage page={['carrierPay']}><DormantPage page="invoicingAp"><InvoicingPage /></DormantPage></RequirePage>} />
+                  <Route path="invoicing/payable/bills/:id" element={<RequirePage page={['carrierPay']}><DormantPage page="invoicingAp"><BillDetail /></DormantPage></RequirePage>} />
                   <Route path="carriers" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carriers"><CarriersHub tab="list" /></DormantPage></RequirePage>} />
                   <Route path="carriers/find" element={<RequirePage page={['carriers', 'loads', 'tms']}><DormantPage page="carriers"><CarriersHub tab="find" /></DormantPage></RequirePage>} />
                   <Route path="carriers/:id" element={<RequirePage page={['carriers', 'tms']}><DormantPage page="carrierProfile"><CarriersPage /></DormantPage></RequirePage>} />
-                  <Route path="factors" element={<RequirePage page={['factoring', 'tms']}><FactoringPage /></RequirePage>} />
+                  <Route path="factors" element={<RequirePage page={['factoring']}><FactoringPage /></RequirePage>} />
                   <Route path="customers" element={<RequirePage page={['customers', 'tms']}><CustomersPage /></RequirePage>} />
                   {/* Step AW D.2: who is billed how. Same grant as the Customers list. */}
                   <Route path="customers/billing-setup" element={<RequirePage page={['customers', 'tms']}><DormantPage page="billingSetup"><BillingSetupPage /></DormantPage></RequirePage>} />
                   <Route path="customers/follow-ups" element={<Navigate to="/tms/customers" replace />} />
                   <Route path="locations" element={<RequirePage page={['locations', 'tms']}><LocationsPage /></RequirePage>} />
-                  <Route path="vendors" element={<RequirePage page={['vendorAp', 'tms']}><VendorApPage /></RequirePage>} />
+                  <Route path="vendors" element={<RequirePage page={['vendorAp']}><VendorApPage /></RequirePage>} />
                   {/* Hidden, not removed: no nav item, but four live deep links land here. */}
                   <Route path="workflows" element={<RequirePage page="tms"><DormantPage page="workflows"><WorkflowsPage /></DormantPage></RequirePage>} />
                   <Route path="workflows/runs/:id" element={<RequirePage page="tms"><DormantPage page="workflows"><RunTracePage /></DormantPage></RequirePage>} />

@@ -34,6 +34,7 @@ import {
   type CognitoUser, deleteCognitoUser,
 } from '@/lib/apiClient'
 import { pageOptions } from '@/lib/navItems'
+import { ACCOUNTING_PAGES, ACCOUNTING_PAGE_KEYS } from '@/lib/accountingAccess'
 import {
   ROLES, ROLE_LABELS, ROLE_DESCRIPTIONS, rolePagesFor,
   CLAIMS, CLAIM_LABELS, isEnforcedClaim, isRoleKey, displayName,
@@ -45,6 +46,9 @@ import { AljexCodeMapCard } from './AljexCodeMapCard'
 
 const PAGE_OPTIONS = pageOptions()
 const TOTAL_PAGES = PAGE_OPTIONS.length
+/** Accounting pages are their own list (Ryne 2026-11-12): a page grant there opens every action on it. */
+const ACCOUNTING_OPTIONS = ACCOUNTING_PAGES.filter((page) => PAGE_OPTIONS.some((o) => o.key === page.key))
+const OTHER_PAGE_OPTIONS = PAGE_OPTIONS.filter((page) => !ACCOUNTING_PAGE_KEYS.includes(page.key))
 
 /** Shown after a role change: the token in the user's browser still has the old groups. */
 const SIGN_IN_NOTICE = 'New permissions apply the next time they sign in — their current session still carries the old groups.'
@@ -175,6 +179,31 @@ function UserCard({
   const isResetting = resettingId === user.username
   const isToggling = togglingId === user.username
   const isAdminBusy = busyAdminId === user.username
+  const renderPage = (key: string, label: string, covers?: string) => {
+    const fromRole = rolePages.includes(key)
+    const on = fromRole || extraPages.includes(key)
+    return (
+      <label
+        key={key}
+        className={`tms-users-page${on ? ' tms-users-page-on' : ''}${fromRole ? ' tms-users-page-role' : ''}`}
+        title={fromRole ? `Granted by the ${ROLE_LABELS[role]} role — change the role to remove it` : covers}
+      >
+        <input
+          type="checkbox"
+          data-testid="user-page-toggle"
+          aria-label={label}
+          checked={on}
+          disabled={savingPermissions || fromRole}
+          onChange={() => onTogglePage(user, key)}
+        />
+        <span className="tms-users-page-label">
+          {label}
+          {covers && <span className="tms-users-page-covers">{covers}</span>}
+        </span>
+        {fromRole ? <span className="tms-users-page-tag">from role</span> : on ? <span className="tms-users-page-tag">extra</span> : null}
+      </label>
+    )
+  }
 
   return (
     <div data-testid="user-card" className="tms-user-card">
@@ -400,29 +429,19 @@ function UserCard({
                   />
                   <span className="tms-muted" style={{ fontSize: 12 }}>{grantedCount} of {TOTAL_PAGES} pages</span>
                 </div>
+                <div data-testid="user-accounting-access" className="tms-users-accounting">
+                  <div className="tms-users-section-title">Accounting access</div>
+                  <p className="tms-field-hint" style={{ margin: '0 0 8px' }}>
+                    Tick the accounting pages this person may use. A ticked page opens every action on it — viewing,
+                    editing, sending and recording payments.
+                  </p>
+                  <div className="tms-users-pages">
+                    {ACCOUNTING_OPTIONS.map(({ key, label, covers }) => renderPage(key, label, covers))}
+                  </div>
+                </div>
+                <div className="tms-users-section-title" style={{ marginTop: 12 }}>Other pages</div>
                 <div className="tms-users-pages">
-                  {PAGE_OPTIONS.filter(({ label }) => label.toLowerCase().includes(pageFilter.trim().toLowerCase())).map(({ key, label }) => {
-                    const fromRole = rolePages.includes(key)
-                    const on = fromRole || extraPages.includes(key)
-                    return (
-                      <label
-                        key={key}
-                        className={`tms-users-page${on ? ' tms-users-page-on' : ''}${fromRole ? ' tms-users-page-role' : ''}`}
-                        title={fromRole ? `Granted by the ${ROLE_LABELS[role]} role — change the role to remove it` : undefined}
-                      >
-                        <input
-                          type="checkbox"
-                          data-testid="user-page-toggle"
-                          aria-label={label}
-                          checked={on}
-                          disabled={savingPermissions || fromRole}
-                          onChange={() => onTogglePage(user, key)}
-                        />
-                        <span className="tms-users-page-label">{label}</span>
-                        {fromRole ? <span className="tms-users-page-tag">from role</span> : on ? <span className="tms-users-page-tag">extra</span> : null}
-                      </label>
-                    )
-                  })}
+                  {OTHER_PAGE_OPTIONS.filter(({ label }) => label.toLowerCase().includes(pageFilter.trim().toLowerCase())).map(({ key, label }) => renderPage(key, label))}
                 </div>
                 <p className="tms-field-hint" style={{ margin: '8px 0 0' }}>
                   Pages marked <strong>from role</strong> come with {ROLE_LABELS[role]} and cannot be

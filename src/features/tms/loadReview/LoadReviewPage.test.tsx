@@ -228,13 +228,13 @@ describe('LoadReviewPage', () => {
     await waitFor(() => expect(mocks.release).toHaveBeenCalledWith(expect.objectContaining({ orderId: 'o-s-1' })))
   })
 
-  it('Move to billing is disabled with the grant message for a non-admin without the billing grant', async () => {
-    mocks.hasPageAccess.mockReturnValue(true) // can open the page, but is neither admin nor granted
+  it('Move to billing is disabled, naming the page, for someone without Load review or Invoicing access', async () => {
+    mocks.hasPageAccess.mockReturnValue(true) // can open the page, but holds neither accounting page
     mocks.groups.mockReturnValue(['page-tms'])
     renderPage('/tms/load-review?tab=ready&shipment=s-1')
     await waitFor(() => expect(screen.getByText('Ready')).toBeTruthy())
     expect(moveButton().disabled).toBe(true)
-    expect(screen.getAllByText(/Release to billing \/ Send invoice/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/You need access to Load review/).length).toBeGreaterThan(0)
     fireEvent.click(moveButton())
     expect(mocks.ready).not.toHaveBeenCalled()
     expect(mocks.release).not.toHaveBeenCalled()

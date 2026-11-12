@@ -107,15 +107,6 @@ export const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 
 export const OWNER_EMAIL = 'ryne@bcatcorp.com'
 export const ADMIN_GROUP = 'ADMIN'
-export const INVOICING_PAGE_GROUP = 'page-invoicing'
-/** AP is its own permission: the people who bill customers are not the people who pay carriers. */
-export const CARRIER_PAY_PAGE_GROUP = 'page-carrierPay'
-/**
- * Step AW: release to billing, sending an invoice, queueing it for the factor and
- * marking it sent are one person's job (Jenny), granted per user. Judged by this
- * Cognito group alone: ADMIN and the owner e-mail get no bypass.
- */
-export const BILLING_RELEASE_PAGE_GROUP = 'page-billingRelease'
 export const SETTINGS_ID = 'default'
 
 export const CARRIED_OVER_MESSAGE =

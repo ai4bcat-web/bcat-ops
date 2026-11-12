@@ -105,9 +105,9 @@ describe('No buy -> Invoice manually (item and customer default)', () => {
     expect(f.writes).toEqual(['invoice.factored=false', 'customer:MANUAL'])
   })
 
-  it('needs the billing release permission for the customer default: an invoicing user without it writes nothing', async () => {
-    const r = await manualInvoiceMove(f, { id: '14538', reason: 'NO_BUY', changeCustomerDefault: true }, { email: 'bill@bcatcorp.com', groups: ['page-invoicing'] })
-    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/billing release permission/) })
+  it('needs Invoicing access for the customer default: a factoring-only user writes nothing', async () => {
+    const r = await manualInvoiceMove(f, { id: '14538', reason: 'NO_BUY', changeCustomerDefault: true }, { email: 'fact@bcatcorp.com', groups: ['page-factoring'] })
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/You need access to Accounts receivable/) })
     expect(f.writes).toEqual([])
     expect(f.item.status).toBe('PENDING_WITH_OTR')
   })
