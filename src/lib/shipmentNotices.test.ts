@@ -150,13 +150,25 @@ describe('renderInvoiceEmail', () => {
       ...overrides,
     })
 
-  it('names the invoice and the broker in the subject', () => {
-    expect(email().subject).toBe('Invoice INV-000123 · BCAT Logistics')
+  it('names the PRO and the company in the subject', () => {
+    expect(email().subject).toBe('Invoice for Pro # S-10042 Attached from BCAT Logistics Corporation')
+    expect(email({ companyName: 'IVAN Cartage Co' }).subject).toBe('Invoice for Pro # S-10042 Attached from IVAN Cartage Co')
+  })
+
+  it('leads with the PRO and PO, then the agreed body word for word', () => {
+    expect(email({ po: 'FR-113188-3' }).body).toBe(`PRO # S-10042 · PO # FR-113188-3\n\n${EXPECTED_INVOICE_BODY}`)
+  })
+
+  it('never carries money: no amount, cost, carrier pay or margin', () => {
+    const { subject, body } = email({ po: 'PO-1' })
+    for (const text of [subject, body]) {
+      expect(text).not.toMatch(/\$|\d+\.\d{2}|carrier pay|cost|margin/i)
+    }
   })
 
   it('is exactly the agreed body, whatever the contact, template or amounts', () => {
-    expect(email().body).toBe(EXPECTED_INVOICE_BODY)
-    expect(email({ contactName: null, template: 'Invoice {number} attached.' }).body).toBe(EXPECTED_INVOICE_BODY)
+    expect(email().body).toBe(`PRO # S-10042\n\n${EXPECTED_INVOICE_BODY}`)
+    expect(email({ contactName: null, template: 'Invoice {number} attached.' }).body).toBe(`PRO # S-10042\n\n${EXPECTED_INVOICE_BODY}`)
     expect(INVOICE_EMAIL_BODY).toBe(EXPECTED_INVOICE_BODY)
   })
 
@@ -164,7 +176,7 @@ describe('renderInvoiceEmail', () => {
     const { body } = email()
     expect(body).not.toContain('Amount due')
     expect(body).not.toContain('2026-04-03')
-    expect(body.startsWith('Your report is attached to this email.')).toBe(true)
+    expect(body.split('\n\n')[1].startsWith('Your report is attached to this email.')).toBe(true)
   })
 })
 

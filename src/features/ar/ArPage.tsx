@@ -10,6 +10,9 @@
  * signed download. The page reports exactly that and never claims a send that did not
  * happen — a false "sent" here is a customer who never got their bill.
  */
+import { allApEmails } from '@/lib/billingMethod'
+import { useAuthUser } from '@/hooks/useAuth'
+import { isOwnerOrAdmin } from '@/lib/accountingAccess'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, Mail } from 'lucide-react'
@@ -132,6 +135,9 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [dialog, setDialog] = useState<ArDialog | null>(null)
   const [busy, setBusy] = useState(false)
   const canRelease = useBillingGrant()
+  const authUser = useAuthUser()
+  // Voiding is an admin act (owner or ADMIN); Invoicing access alone does not include it.
+  const canVoid = isOwnerOrAdmin(authUser?.groups, authUser?.email)
   const [groupBy, setGroupByState] = useState<ArGroupBy>(readGroupBy)
   // Manually invoiced (the default) vs factored through OTR; the OTR queue itself is the Factored view.
   const [billedBy, setBilledByState] = useState<ArBilledBy>(readBilledBy)
@@ -356,6 +362,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : null
 
   const customer = customers.find((c) => c.id === arCustomerId) ?? null
+  const customerById = new Map(customers.map((c) => [c.id, c]))
 
   const groupControl = (
     <>
@@ -394,9 +401,11 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       asOf,
       busy,
       canRelease,
+      canVoid,
       selected,
       justGenerated,
       factorByItemId,
+      customerById,
       months,
       month,
       paidLoading,
@@ -584,7 +593,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 }
 
 function queueView({
-  status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, justGenerated, factorByItemId,
+  status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, canVoid, selected, justGenerated, factorByItemId, customerById,
   months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onBatchEmail, onEmail, onPayment, onFactor, onVoid,
 }: {
   status: ArQueueStatus
@@ -598,6 +607,7 @@ function queueView({
   selected: string[]
   justGenerated: string[]
   factorByItemId: Map<string, FactoringItem>
+  customerById: Map<string, CustomerRecord>
   months: string[]
   month: string
   paidLoading: boolean
@@ -610,6 +620,7 @@ function queueView({
   onPayment: (invoice: InvoiceRecord) => void
   onFactor: (invoice: InvoiceRecord) => void
   onVoid: (invoice: InvoiceRecord) => void
+  canVoid: boolean
 }): ListView {
   const ready = status === 'READY'
   const invoiced = status === 'INVOICED'
@@ -620,6 +631,13 @@ function queueView({
     row.sentAt ? `${formatDay(row.sentAt)}${row.sentTo ? ` → ${row.sentTo}` : ''}` : row.invoiceId ? 'Not sent' : '—'
   const pastDueText = (row: ArQueueRow) =>
     row.dueAt && invoiced ? agingChipFor(row.dueAt, asOf).label : '—'
+  // Who the invoice is (or will be) e-mailed to: the customer's AP addresses, and the copy list.
+  const invoiceEmailsOf = (row: ArQueueRow): { to: string[]; cc: string[] } => {
+    const c = row.customerId ? customerById.get(row.customerId) : undefined
+    const to = allApEmails(c)
+    const cc = (c?.invoiceCopyEmails ?? []).map((e) => e.trim().toLowerCase()).filter((e) => e && !to.includes(e))
+    return { to, cc }
+  }
   const factorText = (row: ArQueueRow) => {
     const inv = row.invoice
     if (!inv) return '—'
@@ -633,6 +651,14 @@ function queueView({
     ...(ready ? [{ key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 40 } as Col<ArQueueRow>] : []),
     { key: 'shipment', header: 'PRO', group: 'Shipment', text: (row) => row.shipmentNumber ?? row.shipmentId, extraPx: 16 },
     { key: 'invoice', header: 'Invoice #', group: 'Invoice', text: (row) => row.invoiceNumber ?? '—' },
+    {
+      key: 'via', header: 'Invoiced via', group: 'Invoice', text: (row) => (row.factored ? 'OTR' : 'Manual'),
+      filter: 'multi', optionsOf: (row) => opt(row.factored ? 'OTR' : 'Manual'),
+    },
+    {
+      key: 'email', header: 'Invoice email', group: 'Invoice',
+      text: (row) => invoiceEmailsOf(row).to.join(', ') || (row.factored ? '' : 'No AP email'),
+    },
     { key: 'customer', header: 'Customer', group: 'Shipment', text: (row) => row.customerName, filter: 'multi', optionsOf: (row) => opt(row.customerName) },
     { key: 'division', header: 'Rev division', group: 'Shipment', text: (row) => row.revDivisionName, filter: 'multi', optionsOf: (row) => opt(row.revDivisionName) },
     { key: 'rep', header: 'Sales rep', group: 'Shipment', text: (row) => row.salesRepName, filter: 'multi', optionsOf: (row) => opt(row.salesRepName) },
@@ -674,6 +700,20 @@ function queueView({
         return <Link to={`/tms/shipments/${row.shipmentId}`}>{row.shipmentNumber ?? row.shipmentId}</Link>
       case 'invoice':
         return row.invoiceId ? <Link to={`/tms/invoicing/invoices/${row.invoiceId}`}>{row.invoiceNumber}</Link> : <span className="tms-muted">—</span>
+      case 'email': {
+        const { to, cc } = invoiceEmailsOf(row)
+        const tip = [to.length ? `To: ${to.join(', ')}` : '', cc.length ? `Copy: ${cc.join(', ')}` : ''].filter(Boolean).join('\n')
+        const factoredCustomer = row.customerId ? customerById.get(row.customerId)?.billingMethod === 'FACTOR' : false
+        if (row.factored || factoredCustomer) {
+          return <span className="tms-muted" title={`Not used — factored (OTR)${tip ? `\n${tip}` : ''}`}>{to[0] ?? '—'}{to.length > 1 ? ` +${to.length - 1}` : ''}</span>
+        }
+        if (to.length === 0) return <TmsBadge tone="red" title="This customer has no AP e-mail on file">No AP email</TmsBadge>
+        return <span title={tip}>{to[0]}{to.length > 1 ? ` +${to.length - 1}` : ''}</span>
+      }
+      case 'via':
+        return row.factored
+          ? <TmsBadge tone="purple" title="Factored: sent to OTR">OTR</TmsBadge>
+          : <TmsBadge tone="blue" title="Invoiced by hand: e-mailed to the customer">Manual</TmsBadge>
       case 'balance':
         return <span className="font-medium">{formatCents(row.balanceCents)}</span>
       case 'status':
@@ -713,7 +753,7 @@ function queueView({
             <TmsButton variant="ghost" size="sm" aria-label={`E-mail invoice ${inv.number}`} disabled={busy} onClick={() => onEmail(inv)}>E-mail</TmsButton>
             <TmsButton variant="ghost" size="sm" aria-label={`Receive payment for invoice ${inv.number}`} disabled={busy} onClick={() => onPayment(inv)}>Receive payment</TmsButton>
             <TmsButton variant="ghost" size="sm" aria-label={`Send invoice ${inv.number} to factor`} disabled={busy} onClick={() => onFactor(inv)}>Send to Factor</TmsButton>
-            <TmsButton variant="ghost" size="sm" aria-label={`Void invoice ${inv.number}`} disabled={busy} onClick={() => onVoid(inv)}>Void</TmsButton>
+            <TmsButton variant="ghost" size="sm" aria-label={`Void invoice ${inv.number}`} disabled={busy || !canVoid} title={canVoid ? undefined : 'Only an admin can void an invoice'} onClick={() => onVoid(inv)}>Void</TmsButton>
           </span>
         )
       }
