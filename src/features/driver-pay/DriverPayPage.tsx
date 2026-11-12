@@ -1,5 +1,4 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
-import { OwnerOperatorSettlementsSwitch } from '@/features/owner-operator-pay/OwnerOperatorSettlementsSwitch'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { ownerOpCarriesWeeklyCharges } from '@/lib/ownerOperatorTrips'
 import { toast } from 'sonner'
@@ -88,9 +87,22 @@ function download(name: string, text: string) {
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
-export function DriverPayPage() {
+/**
+ * Embedded in the merged Owner Operator Settlements page as its Amazon view: that page owns the week (null = follow the hook's default,
+ * the newest week with trips) and passes its Standard | Amazon toggle as `viewSwitch`. Standalone (no props) it keeps its own week.
+ */
+export interface DriverPayPageProps {
+  week?: string | null
+  onWeek?: (week: string) => void
+  viewSwitch?: React.ReactNode
+  initialDriverId?: string | null
+}
+
+export function DriverPayPage({ week, onWeek, viewSwitch, initialDriverId = null }: DriverPayPageProps = {}) {
   // null = follow the hook's default (newest week with trips) until staff pick a week.
-  const [pickedWeek, setPickedWeek] = useState<string | null>(null)
+  const [ownWeek, setOwnWeek] = useState<string | null>(null)
+  const pickedWeek = week !== undefined ? week : ownWeek
+  const setPickedWeek = (next: string) => { if (onWeek) onWeek(next); else setOwnWeek(next) }
   const pay = useAmazonPay(pickedWeek)
   const periodStart = pay.periodStart
   const masters = useAmazonPayMasters()
@@ -121,7 +133,7 @@ export function DriverPayPage() {
   const dragId = useRef<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
-  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null)
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(initialDriverId)
 
   const orderedRows = useMemo(() => {
     const idx = (id: string) => { const i = rowOrder.indexOf(id); return i === -1 ? Infinity : i }
@@ -189,11 +201,13 @@ export function DriverPayPage() {
 
   return (
     <TmsScrollPage
-      title="Driver Pay"
+      title={viewSwitch
+        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>Owner Operator Settlements <span data-testid="amazon-week-badge" style={{ borderRadius: 999, padding: '2px 10px', fontSize: 12, fontWeight: 700, background: 'var(--tms-badge-orange-tint)', color: 'var(--tms-badge-orange)' }}>Amazon week</span></span>
+        : 'Driver Pay'}
       subtitle={<>
         Amazon weekly pay — trips, expenses &amp; check amount
         {ownerOpCarriesWeeklyCharges(periodStart) && ' · weekly expenses charged on Owner Operator Settlements from Sep 27, unless the week is set to Amazon'}
-        <OwnerOperatorSettlementsSwitch active="amazon" />
+        {viewSwitch}
       </>}
       actions={<>
         <button onClick={() => setMasterOpen(true)}

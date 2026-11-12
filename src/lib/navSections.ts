@@ -48,6 +48,8 @@ export interface NavChildDef extends TmsNavChild {
   tms?: boolean
   /** Owner/ADMIN only (never opened by a page grant). */
   adminOnly?: boolean
+  /** Other page grants that also open this entry. */
+  alsoPageKeys?: string[]
 }
 
 export interface NavItemDef {
@@ -105,8 +107,8 @@ const ACCOUNTING_CHILDREN: NavChildDef[] = [
 /** Settlements and time cards: the pages the sidebar used to list under Ivan Cartage. Same paths and page grants. */
 const PAYROLL_CHILDREN: NavChildDef[] = [
   { to: '/driver-pay-box-trucks', label: 'Box Truck Settlements', pageKey: 'driverPayBoxTrucks' },
-  { to: '/driver-pay', label: 'Amazon Settlements', pageKey: 'driverPay' },
-  { to: '/owner-operator-pay', label: 'Owner Operator Settlements', pageKey: 'ownerOperatorPay' },
+  // Amazon settlements are the Amazon-week view of this page; someone who holds only the Amazon grant still gets the entry.
+  { to: '/owner-operator-pay', label: 'Owner Operator Settlements', pageKey: 'ownerOperatorPay', alsoPageKeys: ['driverPay'] },
   { to: '/hours', label: 'Employee Hours', pageKey: 'hours' },
 ]
 
@@ -353,7 +355,9 @@ type DivisionLike = Pick<OwnershipDivisionRecord, 'id' | 'code' | 'name' | 'bran
  * (they stay in `navItems.ts` because they are still the permission list), so they are not
  * rendered here.
  */
-const ITEM_POOL: NavItemDef[] = NAV_ITEMS.filter((i) => i.section !== BROKERAGE)
+/** Pages that live inside another page now (still in `navItems.ts` as a permission): Amazon Settlements is Owner Operator Settlements' Amazon weeks. */
+const FOLDED_PATHS = new Set(['/driver-pay'])
+const ITEM_POOL: NavItemDef[] = NAV_ITEMS.filter((i) => i.section !== BROKERAGE && !FOLDED_PATHS.has(i.to))
 
 export function buildNavSections({
   divisions,
@@ -380,8 +384,8 @@ export function buildNavSections({
       ]
   const everything = isOwner || isAdmin
   const canOpenTms = everything || hasPageAccess(TMS_PAGE_KEY)
-  const visible = (def: { pageKey: string; tms?: boolean; adminOnly?: boolean }): boolean =>
-    everything || (def.adminOnly !== true && (hasPageAccess(def.pageKey) || (def.tms === true && canOpenTms)))
+  const visible = (def: { pageKey: string; tms?: boolean; adminOnly?: boolean; alsoPageKeys?: string[] }): boolean =>
+    everything || (def.adminOnly !== true && (hasPageAccess(def.pageKey) || (def.alsoPageKeys ?? []).some(hasPageAccess) || (def.tms === true && canOpenTms)))
 
   // Pinned items are never part of a business section; they render first and are gated
   // exactly like any other page, so a shared-loads grant keeps seeing Shipments.

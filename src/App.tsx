@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { ParamRedirect } from '@/components/ParamRedirect'
 import { RETIRED_ROUTES } from '@/lib/retiredRoutes'
@@ -39,9 +39,8 @@ import CustomerLinksPage from '@/features/shipments/workstations/CustomerLinksPa
 import { InsurancePage } from '@/features/insurance/InsurancePage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
 import { TimeOffPage } from '@/features/time-off/TimeOffPage'
-import { DriverPayPage } from '@/features/driver-pay/DriverPayPage'
 import { BoxTruckPayPage } from '@/features/driver-pay-box-trucks/BoxTruckPayPage'
-import { OwnerOperatorPayPage } from '@/features/owner-operator-pay/OwnerOperatorPayPage'
+import { OwnerOperatorSettlementsPage } from '@/features/owner-operator-pay/OwnerOperatorSettlementsPage'
 import { DriverAppViewPage } from '@/features/owner-operator-pay/DriverAppViewPage'
 import { IvanDriverAppPage } from '@/features/ivan-driver-app/IvanDriverAppPage'
 import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
@@ -100,6 +99,13 @@ function SavedViewRedirect() {
   return <Navigate to={slug === 'all-shipments' ? '/tms/shipments?list=all' : '/tms/shipments'} replace />
 }
 
+/** The retired Amazon Settlements page: now the Amazon-week view of Owner Operator Settlements. `week` and `driver` links carry over. */
+function DriverPayRedirect() {
+  const { search } = useLocation()
+  const p = new URLSearchParams(search)
+  p.set('view', 'amazon')
+  return <Navigate to={`/owner-operator-pay?${p.toString()}`} replace />
+}
 
 export default function App() {
   return (
@@ -237,9 +243,10 @@ export default function App() {
               <Route path="/insurance" element={<RequirePage page="insurance"><InsurancePage /></RequirePage>} />
               <Route path="/schedule" element={<RequirePage page="schedule"><SchedulePage /></RequirePage>} />
               <Route path="/time-off" element={<RequirePage page="timeOff"><TimeOffPage /></RequirePage>} />
-              <Route path="/driver-pay" element={<RequirePage page="driverPay"><DriverPayPage /></RequirePage>} />
+              {/* Amazon settlements are the Amazon-week view of Owner Operator Settlements; old links and bookmarks land there. */}
+              <Route path="/driver-pay" element={<DriverPayRedirect />} />
               <Route path="/driver-pay-box-trucks" element={<RequirePage page="driverPayBoxTrucks"><BoxTruckPayPage /></RequirePage>} />
-              <Route path="/owner-operator-pay" element={<RequirePage page="ownerOperatorPay"><OwnerOperatorPayPage /></RequirePage>} />
+              <Route path="/owner-operator-pay" element={<RequirePage page={['ownerOperatorPay', 'driverPay']}><OwnerOperatorSettlementsPage /></RequirePage>} />
               <Route path="/ivan-driver-app" element={<RequirePage page="ivanDriverApp"><IvanDriverAppPage /></RequirePage>} />
               {/* A driver's own app, served by the driver API, for an admin to look at.
                   Behind the same page gate as the settlements it is reached from; the API

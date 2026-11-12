@@ -112,3 +112,18 @@ describe('DriverPayPage deductions', () => {
     expect(csv).toContain('"Total deductions","0"')
   })
 })
+
+describe('DriverPayPage as the Amazon-week view of Owner Operator Settlements', () => {
+  it('is titled Owner Operator Settlements with an Amazon week badge and the same statement as the standalone page', () => {
+    useAmazonPayMock.mockReturnValue(payState([row({ statement: statement({ gross: 1000, driverAmount: 420, checkAmount: 420 }) })]))
+    const standalone = render(<MemoryRouter><DriverPayPage /></MemoryRouter>)
+    const standaloneText = standalone.container.textContent ?? ''
+    standalone.unmount()
+    render(<MemoryRouter><DriverPayPage week={WEEK} onWeek={vi.fn()} viewSwitch={<span>switch</span>} /></MemoryRouter>)
+    expect(screen.getByTestId('amazon-week-badge')).toHaveTextContent('Amazon week')
+    expect(screen.getByText('switch')).toBeInTheDocument()
+    // Same money on screen: the check amount the standalone page shows is the one the merged page shows.
+    expect(standaloneText).toContain('$420.00')
+    expect(document.body.textContent).toContain('$420.00')
+  })
+})
