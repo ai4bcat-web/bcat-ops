@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { needsHireDate, ptoAllowanceForYear, ptoBalance, ptoStartDate, ptoStartYears, untilLabel, validHireDate, formatDays } from './ptoAllowance'
+import { earnsPto, needsHireDate, ptoAllowanceForYear, ptoBalance, ptoStartDate, ptoStartYears, untilLabel, validHireDate, formatDays } from './ptoAllowance'
 
 describe('calendar-year allowance', () => {
   it('hired 2025-06-10: nothing in 2026, 5 in 2027, 10 from 2028', () => {
@@ -51,16 +51,24 @@ describe('untilLabel', () => {
 })
 
 describe('needsHireDate', () => {
-  it('flags active Ivan (LOCAL) employees and PTO-eligible drivers with no usable hire date', () => {
+  it('flags every active driver with no usable hire date, whatever the type', () => {
     expect(needsHireDate({ active: true, fleetGroup: 'LOCAL', hireDate: '' })).toBe(true)
     expect(needsHireDate({ active: true, fleetGroup: 'LOCAL', hireDate: 'junk' })).toBe(true)
     expect(needsHireDate({ active: true, fleetGroup: 'OWNER_OPERATOR', ptoEligible: true })).toBe(true)
+    expect(needsHireDate({ active: true, fleetGroup: 'OWNER_OPERATOR', hireDate: '' })).toBe(true)
+    expect(needsHireDate({ active: true, fleetGroup: 'BOX_TRUCK' })).toBe(true)
   })
-  it('does not flag a driver who has one, contractors, inactive drivers or brokers', () => {
+  it('does not flag a driver who has one, inactive drivers or brokers', () => {
     expect(needsHireDate({ active: true, fleetGroup: 'LOCAL', hireDate: '2025-03-10' })).toBe(false)
-    expect(needsHireDate({ active: true, fleetGroup: 'OWNER_OPERATOR', hireDate: '' })).toBe(false)
-    expect(needsHireDate({ active: true, fleetGroup: 'BOX_TRUCK' })).toBe(false)
     expect(needsHireDate({ active: false, fleetGroup: 'LOCAL' })).toBe(false)
     expect(needsHireDate({ active: true, type: 'broker', fleetGroup: 'LOCAL' })).toBe(false)
+  })
+})
+
+describe('earnsPto', () => {
+  it('is true for Ivan (LOCAL) employees and anyone marked PTO eligible, false for contractors', () => {
+    expect(earnsPto({ fleetGroup: 'LOCAL' })).toBe(true)
+    expect(earnsPto({ fleetGroup: 'BOX_TRUCK', ptoEligible: true })).toBe(true)
+    expect(earnsPto({ fleetGroup: 'OWNER_OPERATOR' })).toBe(false)
   })
 })
