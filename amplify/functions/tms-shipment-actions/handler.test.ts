@@ -718,6 +718,12 @@ describe('intake authorization', () => {
     }
   })
 
+  it('INTAKE_DELETE is owner/ADMIN only: the intake reviewer is refused', async () => {
+    const reviewer = { sub: 'sub-rev', username: 'rev', claims: { email: 'reviewer@bcatcorp.com', 'cognito:groups': ['page-intakeReview'] } }
+    await expect(call('INTAKE_DELETE', { intakeId: 'il:none', expectedVersion: 1 }, reviewer)).rejects.toThrow('Forbidden: INTAKE_DELETE requires owner or ADMIN')
+    for (const who of [OWNER, ADMIN]) await expect(call('INTAKE_DELETE', { intakeId: 'il:none', expectedVersion: 1 }, who)).rejects.toThrow(/Intake load not found/)
+  })
+
   it.each(actions)('refuses page-tms, page-loads, page-quotes and no grant for %s', async (action) => {
     const loads = { sub: 's', username: 'l', claims: { email: 'l@bcatcorp.com', 'cognito:groups': ['page-loads'] } }
     const none = { sub: 's2', username: 'n', claims: { email: 'n@bcatcorp.com', 'cognito:groups': [] } }

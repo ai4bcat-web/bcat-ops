@@ -8,7 +8,7 @@ import { outcomesFromServer, selectAllUpToCap, toggleSelection, type BatchOutcom
 import { batchShipmentTask } from '@/lib/apiClient'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Mail, Truck } from 'lucide-react'
+import { Mail, Trash2, Truck } from 'lucide-react'
 import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsFilterChip, TmsSegmentedTabs } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
@@ -34,6 +34,9 @@ import { flattenDivisions } from '@/features/tms/settings/taxonomyDrafts'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { formatDateTime } from '@/lib/date'
 import { intakeCounts, isDemoIntake } from '@/lib/intakeLoad'
+import { isDeletedIntake } from '@/lib/intakeDup'
+import { duplicateGroups } from '@/lib/intakeDuplicates'
+import { DeleteIntakeDialog, DuplicateNotice } from './DuplicateParts'
 import type { IntakeLoadRecord, IntakeStatus } from '@/types/intake'
 import {
   ALL_GROUP,
@@ -106,7 +109,8 @@ export function IntakeBoard() {
   const [outcomes, setOutcomes] = useState<BatchOutcome[] | undefined>()
   const [pushing, setPushing] = useState(false)
   const { divisions } = useOwnershipDivisions()
-  const { isOwnerOrAdmin } = useIntakePermissions()
+  const { isOwnerOrAdmin, canReview } = useIntakePermissions()
+  const [deleting, setDeleting] = useState<IntakeLoadRecord | null>(null)
 
   const chip: StatusChip = params.get('status') === 'moved' ? 'moved' : params.get('status') === 'dismissed' ? 'dismissed' : 'open'
   const open = useIntakeLoads({ status: 'OPEN' })
@@ -148,7 +152,9 @@ export function IntakeBoard() {
 
   const division = view === 'division' ? activeDivisions.find((d) => d.code === selected) : undefined
   const demoOnly = params.get('demo') === '1'
-  const rows = shown.rows.filter((r) => rowInGroup(r, view, selected, activeCodes) && (!demoOnly || isDemoIntake(r)))
+  // Rows an admin deleted are out of every tab; duplicates are found among the open queue.
+  const dups = useMemo(() => duplicateGroups(open.rows), [open.rows])
+  const rows = shown.rows.filter((r) => !isDeletedIntake(r) && rowInGroup(r, view, selected, activeCodes) && (!demoOnly || isDemoIntake(r)))
   const missingAddress = activeDivisions.filter((d) => !d.intakeEmail)
 
   function update(next: Record<string, string | null>) {
@@ -242,6 +248,16 @@ export function IntakeBoard() {
           <div className="tms-intake-from">
             <span className="tms-intake-from-name">{row.fromName || row.fromEmail}</span>
             <span className="tms-intake-from-subject">{row.subject || '(no subject)'}</span>
+            {row.status === 'OPEN' && dups.get(row.id) ? (
+              <DuplicateNotice
+                row={row}
+                info={dups.get(row.id)!}
+                isAdmin={isOwnerOrAdmin}
+                canReview={canReview}
+                onDelete={() => setDeleting(row)}
+                onChanged={() => open.refresh()}
+              />
+            ) : null}
           </div>
         )
       case 'completeness':
@@ -267,6 +283,18 @@ export function IntakeBoard() {
               onClick={(e) => { e.stopPropagation(); navigate(`/tms/shipments/intake/${encodeURIComponent(row.id)}`) }}
             >
               Create shipment
+            </TmsButton>
+          ) : null}
+          {row.status === 'OPEN' && isOwnerOrAdmin ? (
+            <TmsButton
+              size="sm"
+              variant="ghost"
+              data-testid="intake-delete"
+              aria-label="Delete from Intake"
+              title="Delete from Intake"
+              onClick={(e) => { e.stopPropagation(); setDeleting(row) }}
+            >
+              <Trash2 size={14} aria-hidden="true" />
             </TmsButton>
           ) : null}
           </span>
@@ -428,6 +456,14 @@ export function IntakeBoard() {
           empty={shown.loading ? <TmsBadge tone="gray">Loading…</TmsBadge> : rows.length > 0 ? 'No tender e-mails match the column filters.' : emptyBody}
         />
       </div>
+      {deleting ? (
+        <DeleteIntakeDialog
+          row={deleting}
+          open
+          onOpenChange={(o) => { if (!o) setDeleting(null) }}
+          onDeleted={() => { setDeleting(null); open.refresh() }}
+        />
+      ) : null}
     </div>
   )
 }

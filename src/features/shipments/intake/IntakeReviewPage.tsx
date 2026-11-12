@@ -27,7 +27,9 @@ import type { CustomerRecord, TmsSettings } from '@/types/tms'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeStop } from '@/types/intake'
 import { IntakeFieldRow } from './IntakeFieldRow'
 import { SourceEmailCard } from './SourceEmailCard'
-import { useIntakeLoad } from './useIntakeLoads'
+import { duplicateGroups } from '@/lib/intakeDuplicates'
+import { DeleteIntakeDialog, DuplicateNotice } from './DuplicateParts'
+import { useIntakeLoad, useIntakeLoads } from './useIntakeLoads'
 import { useIntakePermissions } from './useIntakePermissions'
 import './intake.css'
 
@@ -78,6 +80,10 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
   const [busy, setBusy] = useState(false)
   const [customerQuery, setCustomerQuery] = useState<string | null>(null)
   const [dismissOpen, setDismissOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const { isOwnerOrAdmin } = useIntakePermissions()
+  const queue = useIntakeLoads({ status: 'OPEN', enabled: row.status === 'OPEN' })
+  const dupInfo = useMemo(() => duplicateGroups(queue.rows).get(row.id), [queue.rows, row.id])
   const [reason, setReason] = useState('')
 
   const editable = canReview && row.status === 'OPEN' && !busy
@@ -260,6 +266,16 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
     <TmsDetailSplit ratio="6/6" aside={<SourceEmailCard row={row} onReread={reload} />} asideSide="left">
       <div className="tms-intake-group">
         {readOnlyReason ? <TmsAlert tone="blue">{readOnlyReason}</TmsAlert> : null}
+        {row.status === 'OPEN' && dupInfo ? (
+          <DuplicateNotice
+            row={row}
+            info={dupInfo}
+            isAdmin={isOwnerOrAdmin}
+            canReview={canReview}
+            onDelete={() => setDeleteOpen(true)}
+            onChanged={(next) => { onRow(next); queue.refresh() }}
+          />
+        ) : null}
         <TmsCard title="Customer & billing">
           {fieldRow(
             'customerId',
@@ -414,6 +430,7 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
             <TmsButton size="sm" disabled={busy} onClick={confirmAll} title="Confirming fields does not review the load">Confirm all auto-filled</TmsButton>
             <TmsButton size="sm" variant="ghost" disabled={busy} onClick={revert}>Revert to e-mail</TmsButton>
             <span className="tms-intake-footer-spacer" />
+            {isOwnerOrAdmin ? <TmsButton variant="destructive" data-testid="intake-delete" disabled={busy} onClick={() => setDeleteOpen(true)}>Delete</TmsButton> : null}
             <TmsButton variant="destructive" disabled={busy} onClick={() => setDismissOpen(true)}>Dismiss</TmsButton>
             <TmsButton variant="primary" disabled={busy || !gate.ok} onClick={move}>Create shipment</TmsButton>
           </div>
@@ -436,6 +453,12 @@ function ReviewForm({ row, customers, settings, canReview, onRow, reload }: Form
           <TmsTextarea value={reason} onChange={(e) => setReason(e.target.value)} />
         </TmsField>
       </TmsDialog>
+      <DeleteIntakeDialog
+        row={row}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        onDeleted={() => navigate('/tms/shipments/intake')}
+      />
     </TmsDetailSplit>
   )
 }

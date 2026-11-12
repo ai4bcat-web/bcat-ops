@@ -22,7 +22,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'crypto'
-import { DUP_WINDOW_MS, isSameEmail } from '../../../src/lib/intakeDup'
+import { DUP_WINDOW_MS, isDeletedIntake, isSameEmail, isSameTender, type TenderProbe } from '../../../src/lib/intakeDup'
 import type {
   WorkflowAgentKey,
   WorkflowOutcome,
@@ -606,10 +606,9 @@ function parseFields(raw: unknown): Row {
  * The intake row (any status) an e-mail's reference and sender already belong to, or null. A second e-mail about the same tender
  * (Batory's "about to expire" reminder) rolls into this row instead of creating a new one.
  */
-export async function findIntakeByReference(reference: string, fromEmail: string): Promise<Row | null> {
-  const want = reference.trim().toLowerCase()
-  const sender = fromEmail.trim().toLowerCase()
-  if (!INTAKE_LOAD_TABLE_NAME || !want) return null
+export async function findIntakeByReference(reference: string, fromEmail: string, more: Omit<TenderProbe, 'reference' | 'fromEmail'> = {}): Promise<Row | null> {
+  const mine: TenderProbe = { reference, fromEmail, ...more }
+  if (!INTAKE_LOAD_TABLE_NAME || (!reference.trim() && !(more.attachments ?? []).length)) return null
   for (const status of ['OPEN', 'MOVED', 'DISMISSED']) {
     let key: Record<string, AttributeValue> | undefined
     do {
@@ -625,8 +624,11 @@ export async function findIntakeByReference(reference: string, fromEmail: string
         const row = unmarshall(item)
         const fields = parseFields(row.fields)
         // A row typed from a Slack forward has Slackbot as its sender: the original e-mail about the same reference is its source.
-        const rowSender = String(row.fromEmail ?? '').trim().toLowerCase()
-        if (String(fields.reference ?? '').trim().toLowerCase() === want && (rowSender === sender || rowSender === 'uslackbot')) return row
+        const theirs: TenderProbe = {
+          reference: String(fields.reference ?? ''), fromEmail: String(row.fromEmail ?? ''), customerId: String(fields.customerId ?? ''), customerName: String(fields.customerName ?? ''),
+          attachments: Array.isArray(row.attachments) ? (row.attachments as { name?: string; size?: number }[]) : [],
+        }
+        if (isSameTender(mine, theirs)) return row
       }
       key = page.LastEvaluatedKey
     } while (key)
@@ -698,7 +700,7 @@ export async function findIntakeDuplicate(mail: { subject: string | null; bodyTe
  * a row already built (MOVED) just keeps the log. Conditioned on the row not having moved on meanwhile.
  */
 export async function logRepeatEmail(row: Row, entry: { at: string; subject: string; runId: string }): Promise<void> {
-  const reopen = row.status === 'DISMISSED'
+  const reopen = row.status === 'DISMISSED' && !isDeletedIntake(row)
   await dynamo.send(new UpdateItemCommand({
     TableName: INTAKE_LOAD_TABLE_NAME,
     Key: marshall({ id: String(row.id) }),
