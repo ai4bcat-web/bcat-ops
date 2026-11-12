@@ -12,8 +12,9 @@
  *     BCAT_ALLOW_PROD=$(date +%F) AW_PROD_CONFIRM=$(date +%F)-billingemails node scripts/awCustomerBillingEmails.mjs <same args> \
  *       --apply --confirm-prod <account id>:5ucwdyvwivelbo4k4jomvrwel4-NONE
  *
- * Writes ONLY Customer.apEmail (conditional: still empty and billingMethod not FACTOR) and Customer.noaEmail (notice-of-assignment
- * addresses; conditional: still empty), each with one AuditLog row per customer. Never sends anything.
+ * Writes ONLY Customer.apEmail (conditional: still empty and billingMethod not FACTOR), Customer.apEmailsExtra (the company's other AP
+ * addresses, appended; conditional: unchanged since read) and Customer.noaEmail (notice-of-assignment addresses; conditional: still empty),
+ * each with one AuditLog row per customer. POD / paperwork inboxes are reported, never written. Never sends anything.
  */
 import { createReadStream, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -69,6 +70,28 @@ export async function applyNoa({ doc, suffix, customer, email, now = new Date() 
   return { written: 1, lost: 0 };
 }
 
+export async function applyExtras({ doc, suffix, customer, before, add, now = new Date() }) {
+  assertWritableSuffix(suffix, 'customer extra AP e-mail append');
+  const prev = (before ?? []).filter(Boolean);
+  const next = [...prev, ...add.filter((a) => !prev.map((p) => String(p).toLowerCase()).includes(a))];
+  if (next.length === prev.length) return { written: 0, lost: 0 };
+  const nowIso = now.toISOString();
+  try {
+    await doc.send(new UpdateCommand({
+      TableName: `Customer-${suffix}`, Key: { id: customer.id }, UpdateExpression: 'SET apEmailsExtra = :v',
+      ConditionExpression: prev.length
+        ? 'attribute_exists(id) AND apEmailsExtra = :prev AND (attribute_not_exists(billingMethod) OR attribute_type(billingMethod, :nul) OR billingMethod <> :factor)'
+        : 'attribute_exists(id) AND (attribute_not_exists(apEmailsExtra) OR attribute_type(apEmailsExtra, :nul)) AND (attribute_not_exists(billingMethod) OR attribute_type(billingMethod, :nul) OR billingMethod <> :factor)',
+      ExpressionAttributeValues: { ':v': next, ':nul': 'NULL', ':factor': 'FACTOR', ...(prev.length ? { ':prev': before } : {}) },
+    }));
+  } catch (err) {
+    if (err?.name === 'ConditionalCheckFailedException') return { written: 0, lost: 1 };
+    throw err;
+  }
+  await doc.send(new PutCommand({ TableName: `AuditLog-${suffix}`, Item: { id: randomUUID(), __typename: 'AuditLog', entityType: 'CUSTOMER', entityId: customer.id, action: AUDIT_ACTION, user: AUDIT_USER, changes: JSON.stringify({ previous: { apEmailsExtra: prev.length ? prev : null }, next: { apEmailsExtra: next }, source: 'OTR billing emails list (extra AP addresses)' }), createdAt: nowIso, updatedAt: nowIso } }));
+  return { written: 1, lost: 0 };
+}
+
 export async function applyOne({ doc, suffix, customer, email, now = new Date() }) {
   assertWritableSuffix(suffix, 'customer billing e-mail fill');
   const nowIso = now.toISOString();
@@ -99,17 +122,20 @@ export function buildReport({ prepared, plan, rowCount, today }) {
     `- Unique companies after merging name/MC variants: ${plan.companies.length}; live production customers ${plan.liveCount}`,
     `- MATCHED to a customer: ${plan.results.length - (t.UNMATCHED ?? 0) - (t.AMBIGUOUS ?? 0)}; unmatched companies ${t.UNMATCHED ?? 0}; ambiguous ${t.AMBIGUOUS ?? 0}`,
     `- WOULD FILL apEmail (blank today): ${t.FILL ?? 0} (billing method unset ${by('FILL').filter((r) => r.flags.includes('BILLING_METHOD_UNSET')).length})`,
+    `- EXTRA AP addresses to append to apEmailsExtra: ${plan.results.filter((r) => r.extrasAdded?.length).length} customers, ${plan.results.reduce((n, r) => n + (r.extrasAdded?.length ?? 0), 0)} addresses (of which on customers that already had the same apEmail: ${by('SAME_EMAIL').filter((r) => r.extrasAdded?.length).length})`,
+    `- POD / paperwork addresses (never written): ${plan.companies.filter((c) => c.pod.length).length} companies`,
     `- WOULD WRITE Customer.noaEmail (blank today, one notice address): ${plan.noaWrites.length}; NOA left alone (already set / several addresses / ambiguous): ${plan.noaOther.length}`,
     `- NOTICE-OF-ASSIGNMENT addresses (go to noaEmail, never apEmail): ${noaRows.length} matched customers, ${noaAddrs} addresses; of those ${noaRows.filter((r) => r.status === 'NOA_ONLY').length} have ONLY a notice address (AP e-mail left blank); by billing method ${JSON.stringify(noaRows.reduce((m, r) => { const k = r.customer.billingMethod ?? 'NOT_SET'; m[k] = (m[k] ?? 0) + 1; return m; }, {}))}; customers already holding the address in apEmail ${noaRows.filter((r) => r.customer.apEmail && r.company.noa.some((a) => a === String(r.customer.apEmail).trim().toLowerCase())).length}`,
-    `- Already had an e-mail: ${(t.SAME_EMAIL ?? 0) + (t.DIFFERS ?? 0)} (same address ${t.SAME_EMAIL ?? 0}; DIFFERS ${t.DIFFERS ?? 0}); FACTOR customers (not written) ${t.FACTOR_CUSTOMER ?? 0}; conflicting rows (not written) ${t.CONFLICT ?? 0}`, ''];
+    `- Already had an e-mail: ${(t.SAME_EMAIL ?? 0) + (t.DIFFERS ?? 0)} (same address ${t.SAME_EMAIL ?? 0}; DIFFERS ${t.DIFFERS ?? 0}); FACTOR customers (not written) ${t.FACTOR_CUSTOMER ?? 0}; POD-only companies ${t.POD_ONLY ?? 0}`, ''];
   const sect = (title, items) => { L.push(`## ${title} (${items.length})`, ...(items.length ? items : ['(none)']), ''); };
   sect('Would fill apEmail', by('FILL').map((r) => `- ${line(r.customer.name, r.email, r.flags.join(','))}`));
+  sect('Extra AP addresses to append (customer | primary | extras added)', plan.results.filter((r) => r.extrasAdded?.length).map((r) => `- ${line(r.customer.name, r.email, r.extrasAdded.join(', '))}`));
+  sect('POD / paperwork addresses, never written (company | address)', plan.companies.filter((c) => c.pod.length).map((c) => `- ${line(c.names.join(' / '), c.pod.join(', '))}`));
   sect('Would write noaEmail (customer | notice address)', plan.noaWrites.map((w) => `- ${line(w.customer.name, w.noa)}`));
   sect('NOA left alone (customer | why | existing | OTR list)', plan.noaOther.map((r) => `- ${line(r.customer.name ?? r.company.names.join(' / '), r.why, r.existing ?? '', r.noa ?? r.company.noa.join(', '))}`));
   sect('NOTICE-OF-ASSIGNMENT addresses in the list (customer | billing method | existing apEmail | notice address(es) | AP-only?)', noaRows.map((r) => `- ${line(r.customer.name, r.customer.billingMethod ?? 'NOT_SET', r.customer.apEmail ?? '', r.company.noa.join(', '), r.status === 'NOA_ONLY' ? 'NOA only' : 'also has AP')}`));
   sect('Differs from what the customer already has (NOT overwritten): customer | existing | OTR list', by('DIFFERS').map((r) => `- ${line(r.customer.name, r.existing, r.email)}`));
   sect('FACTOR customers (no AP e-mail by design, not written): customer | OTR address', by('FACTOR_CUSTOMER').map((r) => `- ${line(r.customer.name, r.email)}`));
-  sect('Conflicting addresses for one company (not written)', by('CONFLICT').map((r) => `- ${line(r.customer.name, r.company.emails.join(' / '))}`));
   sect('Ambiguous (more than one customer / two companies on one customer; not written)', by('AMBIGUOUS').map((r) => `- ${line(r.company.names.join(' / '), (r.matches ?? []).map((c) => c.name).join(' / '), r.flags.join(','))}`));
   sect('Unmatched companies (no customer by MC or exact name)', by('UNMATCHED').map((r) => `- ${line(r.company.names.join(' / '), r.company.emails.join(' / '))}`));
   sect('Rows with an @bcatcorp.com address (dropped)', prepared.bcatInternal.map((n) => `- ${n}`));
@@ -126,7 +152,7 @@ async function main() {
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), { marshallOptions: { removeUndefinedValues: true } });
   const csvRows = await readCsv(values.csv);
   const prepared = prepareRows(csvRows);
-  const customers = await scanAll(doc, `Customer-${suffix}`, ['id', 'name', 'mcNumber', 'billingMethod', 'mergedIntoId', 'active', 'apEmail', 'noaEmail']);
+  const customers = await scanAll(doc, `Customer-${suffix}`, ['id', 'name', 'mcNumber', 'billingMethod', 'mergedIntoId', 'active', 'apEmail', 'apEmailsExtra', 'noaEmail']);
   const plan = planBillingEmails(customers, prepared);
   const report = buildReport({ prepared, plan, rowCount: csvRows.length, today: localDate(new Date()) });
   const path = values.report ?? '/private/tmp/billmail-report.md';
@@ -134,13 +160,21 @@ async function main() {
   console.log(report.split('\n').filter((l) => l.startsWith('- ')).slice(0, 6).join('\n'));
   console.log(`report: ${path} (mode 0600)`);
   const toApply = plan.results.filter((r) => r.status === 'FILL');
-  if (!apply) { console.log(`DRY RUN: nothing written. ${toApply.length} customer(s) would get an apEmail; ${plan.noaWrites.length} would get a noaEmail.`); return; }
+  const extrasPlan = plan.results.filter((r) => (r.status === 'FILL' || r.status === 'SAME_EMAIL') && r.extrasAdded?.length);
+  if (!apply) { console.log(`DRY RUN: nothing written. ${toApply.length} customer(s) would get an apEmail; ${extrasPlan.length} would get extra AP addresses (${extrasPlan.reduce((n, r) => n + r.extrasAdded.length, 0)}); ${plan.noaWrites.length} would get a noaEmail.`); return; }
   const limit = values.limit ? Number(values.limit) : Infinity;
   const out = { written: 0, lost: 0 }; let n = 0;
-  for (const r of toApply) { if (n >= limit) break; n += 1; const x = await applyOne({ doc, suffix, customer: r.customer, email: r.email }); out.written += x.written; out.lost += x.lost; }
+  const primaryLost = new Set();
+  for (const r of toApply) { if (n >= limit) break; n += 1; const x = await applyOne({ doc, suffix, customer: r.customer, email: r.email }); out.written += x.written; out.lost += x.lost; if (x.lost) primaryLost.add(r.customer.id); }
+  const extOut = { written: 0, lost: 0, skipped: 0 }; let k = 0;
+  for (const r of extrasPlan) {
+    if (k >= limit) break; k += 1;
+    if (primaryLost.has(r.customer.id)) { extOut.skipped += 1; continue; }
+    const x = await applyExtras({ doc, suffix, customer: r.customer, before: r.extrasBefore, add: r.extrasAdded }); extOut.written += x.written; extOut.lost += x.lost;
+  }
   const noaOut = { written: 0, lost: 0 }; let m = 0;
   for (const w of plan.noaWrites) { if (m >= limit) break; m += 1; const x = await applyNoa({ doc, suffix, customer: w.customer, email: w.noa }); noaOut.written += x.written; noaOut.lost += x.lost; }
-  console.log('APPLIED apEmail', JSON.stringify(out), 'noaEmail', JSON.stringify(noaOut));
+  console.log('APPLIED apEmail', JSON.stringify(out), 'apEmailsExtra', JSON.stringify(extOut), 'noaEmail', JSON.stringify(noaOut));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
