@@ -70,6 +70,7 @@ import {
   supersede,
 } from '../../../src/lib/shipmentDocuments'
 import { loadReleaseGateInput } from '../_shared/releaseGateInput'
+import { planPendingCarrierBills, readPendingBillContext, writePendingBill } from '../_shared/pendingCarrierBill'
 import { evaluateReleaseGate, releaseGateError, type ReleaseGateResult } from '../../../src/lib/releaseGate'
 import { evaluateLoadReview, loadReviewExtras, loadReviewRefusal, type LoadReviewReason } from '../../../src/lib/loadReview'
 import { profitFromFacts, resolveReviewRequirements, type ReviewFacts, type ReviewRequirement } from '../../../src/lib/reviewRequirements'
@@ -976,6 +977,11 @@ export async function readyToInvoice(
 
   const gate = customerDocGate({ bundle, documents: bundle.documents, order, customer, settings })
   const now = nowIso()
+  // The carrier's AP record is made by the move itself, before the order leaves review: if it cannot
+  // be written, nothing is released and a second press picks up where this one stopped.
+  const apRecords = bundle.shipment.legacyImported === true
+    ? { created: [], skipped: [] }
+    : await createCarrierApRecords(deps, bundle, settings, now, caller)
   const patch: Row = {
     arStatus: 'UNBILLED',
     arStatusChangedAt: now,
@@ -1016,7 +1022,74 @@ export async function readyToInvoice(
   } else {
     await deps.writeAudit('ORDER', orderId, 'READY_TO_INVOICE', caller, { missing: gate.missing })
   }
-  return { bundle: await readBundle(deps.store, shipmentId), gate, releaseGate: release }
+  return { bundle: await readBundle(deps.store, shipmentId), gate, releaseGate: release, apRecords }
+}
+
+/** What moving a load to billing did about the carrier's AP record, for the toast and the audit. */
+export interface CarrierApRecordsResult {
+  created: { loadCarrierId: string; billId: string; carrierName: string; grossCents: number }[]
+  skipped: { loadCarrierId: string; carrierName: string; kind: 'ALREADY_BILLED' | 'NOT_BILLABLE'; reasons: string[] }[]
+}
+
+/**
+ * One pending CarrierBill per outside-carrier leg that has none yet (see `_shared/pendingCarrierBill`).
+ * A leg that cannot be billed (no charge lines, carrier not in the directory) is reported, never refused:
+ * the release gate already owns the refusals that should stop a release.
+ */
+async function createCarrierApRecords(
+  deps: DocumentDeps,
+  bundle: Bundle,
+  settings: Row | null,
+  now: string,
+  caller: Caller,
+): Promise<CarrierApRecordsResult> {
+  const tables = {
+    carrier: process.env.CARRIER_TABLE_NAME ?? '',
+    carrierPaymentMethod: process.env.CARRIER_PAYMENT_METHOD_TABLE_NAME ?? '',
+    carrierBill: process.env.CARRIER_BILL_TABLE_NAME ?? '',
+    loadCarrier: deps.store.tables.loadCarrier,
+  }
+  const result: CarrierApRecordsResult = { created: [], skipped: [] }
+  const hasCarrierLeg = bundle.loadCarriers.some((lc) => lc.kind === 'CARRIER' && lc.status === 'ACTIVE')
+  if (!hasCarrierLeg) return result
+  if (!tables.carrierBill || !tables.carrier || !tables.carrierPaymentMethod) {
+    throw new Error('The carrier AP record could not be created: AP tables are not configured on this function')
+  }
+  const { carriersById, methodsByCarrierId } = await readPendingBillContext(deps.store.db, tables, bundle.loadCarriers)
+  const plan = planPendingCarrierBills({
+    shipment: bundle.shipment,
+    loads: bundle.loads,
+    loadCarriers: bundle.loadCarriers,
+    charges: bundle.charges,
+    carriersById,
+    methodsByCarrierId,
+    settings,
+    today: now.slice(0, 10),
+    now,
+    actorEmail: caller.email,
+  })
+  result.skipped.push(...plan.skipped)
+  for (const item of plan.create) {
+    try {
+      const wrote = await writePendingBill(deps.store.db, tables, item, now, caller.email)
+      if (wrote) {
+        result.created.push({ loadCarrierId: item.loadCarrierId, billId: item.bill.id, carrierName: item.carrierName, grossCents: item.grossCents })
+        await deps.writeAudit('CARRIER_BILL', item.bill.id, 'RECORD_BILL_PENDING', caller, {
+          loadCarrierId: item.loadCarrierId, shipmentId: item.bill.shipmentId, carrierId: item.bill.carrierId,
+          grossCents: item.bill.grossCents, netCents: item.bill.netCents, datesPending: true,
+        })
+      } else {
+        result.skipped.push({ loadCarrierId: item.loadCarrierId, carrierName: item.carrierName, kind: 'ALREADY_BILLED', reasons: [] })
+      }
+    } catch (err) {
+      const failure = new Error(
+        `The AP record for ${item.carrierName} could not be created, so nothing was released: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      ;(failure as Error & { cause?: unknown }).cause = err
+      throw failure
+    }
+  }
+  return result
 }
 
 /**

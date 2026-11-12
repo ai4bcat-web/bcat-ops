@@ -3298,6 +3298,12 @@ export interface CarrierBillRecord {
   recordedBy: string
   /** Recorded before the load delivered — approval says so out loud. */
   recordedEarly?: boolean | null
+  /**
+   * Created by moving the load to billing, before the carrier's invoice arrived: `billDate` is the
+   * day it was created and `dueAt` a guess from terms. Cleared by SET_BILL_DATES; approval refuses
+   * until then.
+   */
+  datesPending?: boolean | null
   /** YYYY-MM-DD. */
   dueAt: string
   termsDays: number

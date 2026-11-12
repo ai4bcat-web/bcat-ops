@@ -2615,6 +2615,12 @@ shipmentActionsFn.addToRolePolicy(new PolicyStatement({
   actions: ['dynamodb:GetItem'],
   resources: [shipmentUserProfileTable.tableArn],
 }))
+// Moving a load to billing creates the carrier's AP record (_shared/pendingCarrierBill): the payee
+// snapshot reads the carrier's payment methods, read-only here — tmsCarrierActions owns them.
+shipmentActionsFn.addToRolePolicy(new PolicyStatement({
+  actions: ['dynamodb:GetItem', 'dynamodb:Query'],
+  resources: [stageTables['CarrierPaymentMethod'].tableArn, `${stageTables['CarrierPaymentMethod'].tableArn}/index/*`],
+}))
 // Aljex-exit: the code -> user crosswalk (SET_ALJEX_CODE_MAP, REASSIGN_SHIPMENTS_BY_REP_CODE).
 const shipmentAljexCodeMapTable = stageTables['AljexCodeMap']
 shipmentActionsFn.addToRolePolicy(new PolicyStatement({

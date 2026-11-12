@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ageOpenItems } from '@/lib/arAging'
-import { sharedProIndex, sharedProLabel, siblingCarriers, awaitingInvoiceTotals } from './apViews'
+import type { CarrierBillRecord } from '@/types/tms'
+import { billsInReview, sharedProIndex, sharedProLabel, siblingCarriers, awaitingInvoiceTotals } from './apViews'
 
 const lc = (id: string, over: Record<string, unknown> = {}) => ({
   id, loadId: 'l1', kind: 'CARRIER' as const, status: 'ACTIVE' as const, carrierName: `Carrier ${id}`, invoiceId: null, sequence: 1, ...over,
@@ -53,5 +54,15 @@ describe('a load with several carriers in AP (Step AT)', () => {
     expect(aged.byParty.map((p) => [p.partyId, p.totalCents])).toEqual([['car1', 150_000], ['car2', 80_000]])
     expect(aged.byBucket.D1_30).toBe(150_000)
     expect(aged.byBucket.D61_90).toBe(80_000)
+  })
+})
+
+describe('bills in review', () => {
+  const review = (id: string, recordedAt: string, datesPending = false) =>
+    ({ id, status: 'IN_REVIEW', recordedAt, datesPending }) as unknown as CarrierBillRecord
+
+  it('works the bills still waiting on their invoice date and due date first, then oldest recorded first', () => {
+    const rows = [review('old', '2026-11-01T00:00:00Z'), review('pending-new', '2026-11-10T00:00:00Z', true), review('pending-old', '2026-11-05T00:00:00Z', true), review('new', '2026-11-09T00:00:00Z')]
+    expect(billsInReview(rows).map((b) => b.id)).toEqual(['pending-old', 'pending-new', 'old', 'new'])
   })
 })

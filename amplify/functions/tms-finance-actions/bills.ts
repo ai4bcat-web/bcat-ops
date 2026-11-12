@@ -640,6 +640,68 @@ export async function voidBill(input: Row, caller: Caller): Promise<Row> {
   return { bill: (await getById(CARRIER_BILL_TABLE_NAME, billId)) ?? {} }
 }
 
+/**
+ * Set a bill's invoice date, due date and (optionally) the carrier's invoice number.
+ *
+ * This is how a bill created by Move to billing (`datesPending`) gets its real dates from the carrier's
+ * invoice, and it clears the pending flag, which is what lets approval go ahead. It also corrects the dates
+ * of any other bill still IN_REVIEW. Once a bill is approved or has money on it the dates are part of what
+ * was approved and paid against, so the way to change them is Unapprove (or Void and re-record).
+ */
+export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
+  const billId = assertString(input.billId, 'billId')
+  const billDate = dateOf(input.billDate, 'billDate', '')
+  const dueAt = dateOf(input.dueAt, 'dueAt', '')
+  if (!billDate) throw new Error('The invoice date is required')
+  if (!dueAt) throw new Error('The due date is required')
+  if (dueAt < billDate) throw new Error('The due date cannot be before the invoice date')
+  const billNumber = optionalString(input.billNumber, 64)
+
+  const bill = await readBill(billId)
+  if (bill.status !== 'IN_REVIEW') {
+    throw new Error(bill.status === 'VOID'
+      ? 'That bill is void'
+      : 'Only a bill in review can have its dates changed; unapprove it first')
+  }
+  if ((bill.paidCents ?? 0) + (bill.creditedCents ?? 0) > 0) {
+    throw new Error('Money has already been applied to this bill; its dates cannot change')
+  }
+
+  const now = nowIso()
+  await transact(
+    [
+      updateTx(
+        CARRIER_BILL_TABLE_NAME,
+        billId,
+        {
+          billDate,
+          billMonth: billDate.slice(0, 7),
+          dueAt,
+          ...(billNumber ? { billNumber } : {}),
+          datesPending: false,
+          // Written unchanged so the condition below can name it (`status` is a reserved word).
+          status: 'IN_REVIEW',
+          updatedAt: now,
+          updatedBy: caller.email,
+          version: (bill.version ?? 1) + 1,
+        },
+        {
+          condition: '#status = :status AND version = :expectedVersion',
+          extraValues: {
+            ':expectedVersion': { N: String(bill.version ?? 1) },
+          },
+        },
+      ),
+    ],
+    'bill dates',
+  )
+  await writeAudit('CarrierBill', billId, 'SET_BILL_DATES', caller, {
+    from: { billDate: bill.billDate, dueAt: bill.dueAt, billNumber: bill.billNumber ?? null, datesPending: bill.datesPending === true },
+    to: { billDate, dueAt, billNumber: billNumber ?? bill.billNumber ?? null },
+  })
+  return { bill: (await getById(CARRIER_BILL_TABLE_NAME, billId)) ?? {} }
+}
+
 export async function saveApSettings(input: Row, caller: Caller): Promise<Row> {
   const template = optionalString(input.remittanceEmailTemplate, 4000)
   if (template && !template.includes('{reference}')) {

@@ -330,7 +330,7 @@ export interface ApprovalWarning {
 export interface ApprovalReadinessInput {
   bill: Pick<
     CarrierBillRecord,
-    'status' | 'varianceCents' | 'billedCents' | 'grossCents' | 'recordedEarly' | 'docsOverrideAt'
+    'status' | 'varianceCents' | 'billedCents' | 'grossCents' | 'recordedEarly' | 'docsOverrideAt' | 'datesPending'
   >
   loadCarrier: Pick<LoadCarrierRecord, 'status' | 'rateConStatus'>
   load: Pick<ShipmentLoad, 'id' | 'status' | 'loadNumber'> | null | undefined
@@ -346,6 +346,8 @@ export interface ApprovalReadiness {
   blocks: string[]
   warnings: ApprovalWarning[]
 }
+
+export const PENDING_DATES_BLOCK = 'Set the invoice date and due date from the carrier’s invoice first.'
 
 export const APPROVAL_WARNING_KEYS = {
   rateConUnsigned: 'RATE_CON_UNSIGNED',
@@ -366,6 +368,9 @@ export function approvalReadiness(input: ApprovalReadinessInput): ApprovalReadin
   const { bill, loadCarrier, load, gate, payee, carrier, settings, isAdmin } = input
   const blocks: string[] = []
   const warnings: ApprovalWarning[] = []
+
+  // A bill made by Move to billing carries placeholder dates; paying on them would put the wrong due date on the book.
+  if (bill.datesPending === true) blocks.push(PENDING_DATES_BLOCK)
 
   const delivered = load?.status === 'DELIVERED'
   const tonu = loadCarrier.status === 'TONU'

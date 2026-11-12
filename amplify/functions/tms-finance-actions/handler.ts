@@ -35,6 +35,7 @@ import {
   saveApSettings,
   unapproveBill,
   voidBill,
+  setBillDates,
 } from './bills'
 import {
   createApCredit,
@@ -95,6 +96,7 @@ type Action =
   | 'APPROVE_BILL'
   | 'UNAPPROVE_BILL'
   | 'VOID_BILL'
+  | 'SET_BILL_DATES'
   | 'RECORD_AP_PAYMENT'
   | 'CREATE_AP_CREDIT'
   | 'REVERSE_AP_PAYMENT'
@@ -143,6 +145,7 @@ const AP_ACTIONS: Record<string, true> = {
   APPROVE_BILL: true,
   UNAPPROVE_BILL: true,
   VOID_BILL: true,
+  SET_BILL_DATES: true,
   RECORD_AP_PAYMENT: true,
   CREATE_AP_CREDIT: true,
   REVERSE_AP_PAYMENT: true,
@@ -338,6 +341,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return unapproveBill(input, caller)
     case 'VOID_BILL':
       return voidBill(input, caller)
+    case 'SET_BILL_DATES':
+      return setBillDates(input, caller)
     case 'RECORD_AP_PAYMENT':
       return recordApPayment(input, caller) as unknown as Promise<Row>
     case 'CREATE_AP_CREDIT':

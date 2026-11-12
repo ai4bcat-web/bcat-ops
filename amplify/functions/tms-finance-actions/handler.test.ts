@@ -833,14 +833,12 @@ describe('release to accounting', () => {
     await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/Missing document: POD/)
   })
 
-  it('refuses an outside carrier whose bill is not recorded, and names them', async () => {
+  it('does not hold an invoice for an outside carrier whose bill is not recorded yet: moving to billing creates it', async () => {
     const leg = table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)!
     delete leg.chargesFinalizedAt
     table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, leg)
-    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(
-      'Not ready for accounting: Carrier charges not settled: Wheeler Trucking — record the carrier bill first',
-    )
-    expect(table(TABLES.invoice).size).toBe(0)
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).resolves.toBeTruthy()
+    expect(table(TABLES.invoice).size).toBe(1)
   })
 
   it('refuses while an exception is still open on the load', async () => {
@@ -880,17 +878,14 @@ describe('release to accounting', () => {
     expect(table(TABLES.order).get('ord-3')!.arStatus).toBe('UNBILLED')
   })
 
-  it('refuses Send to Factor once the carrier bill behind the invoice is undone', async () => {
+  it('still sends to the factor when the carrier bill behind the invoice is undone: the carrier bill is no longer a release condition', async () => {
     const { invoiceId } = await generate()
     const leg = table(TABLES.loadCarrier).get(LOAD_CARRIER_ID)!
     delete leg.chargesFinalizedAt
     table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, leg)
 
-    await expect(call('SEND_TO_FACTOR', { invoiceId })).rejects.toThrow(
-      /Not ready for accounting: Carrier charges not settled: Wheeler Trucking/,
-    )
-    expect(table(TABLES.factoring).size).toBe(0)
-    expect(table(TABLES.invoice).get(invoiceId)!.factored).toBe(false)
+    await expect(call('SEND_TO_FACTOR', { invoiceId })).resolves.toBeTruthy()
+    expect(table(TABLES.factoring).size).toBe(1)
   })
 
   it('refuses Send to Factor on a voided shipment, and says so in the preview', async () => {
@@ -1905,10 +1900,54 @@ describe('imported Aljex history (legacyImported shipment)', () => {
     expect(approved.bill.status).toBe('TO_BE_PAID')
   })
 
-  it('still refuses what the flag does not waive: an unsettled carrier charge', async () => {
+  it('still refuses what the flag does not waive: an open exception', async () => {
     flag()
-    table(TABLES.loadCarrier).set(LOAD_CARRIER_ID, { ...(table(TABLES.loadCarrier).get(LOAD_CARRIER_ID) as Row), chargesFinalizedAt: null })
-    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/Carrier charges not settled/)
+    table(TABLES.load).set(LOAD_ID, { ...table(TABLES.load).get(LOAD_ID)!, openIncidentCount: 2 })
+    await expect(call('GENERATE_INVOICE', { orderId: ORDER_ID })).rejects.toThrow(/2 open exceptions/)
+  })
+})
+
+describe('SET_BILL_DATES (bills created by Move to billing)', () => {
+  /** A recorded bill made to look like the one Move to billing creates: placeholder dates, not yet approvable. */
+  async function pendingBill(): Promise<Row> {
+    seedAssignment()
+    const bill = await recordBill({ billDate: '2026-11-12' })
+    table(TABLES.carrierBill).set(String(bill.id), { ...table(TABLES.carrierBill).get(String(bill.id))!, datesPending: true, billNumber: null })
+    return bill
+  }
+
+  it('refuses to approve until the invoice date and due date are set', async () => {
+    const bill = await pendingBill()
+    await expect(call('APPROVE_BILL', { billId: bill.id })).rejects.toThrow(/invoice date and due date/)
+  })
+
+  it('stores the carrier invoice dates and number, clears the flag, and lets the bill be approved', async () => {
+    const bill = await pendingBill()
+    const out = (await call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-10-30', dueAt: '2026-11-29', billNumber: 'W-5512' })) as { bill: Row }
+    expect(out.bill).toMatchObject({ billDate: '2026-10-30', billMonth: '2026-10', dueAt: '2026-11-29', billNumber: 'W-5512', datesPending: false, status: 'IN_REVIEW' })
+    const approved = (await call('APPROVE_BILL', { billId: bill.id })) as { bill: Row }
+    expect(approved.bill.status).toBe('TO_BE_PAID')
+    const audit = [...table(TABLES.audit).values()].find((row) => row.action === 'SET_BILL_DATES')
+    expect(audit).toBeTruthy()
+  })
+
+  it('refuses a due date before the invoice date, and a missing date', async () => {
+    const bill = await pendingBill()
+    await expect(call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-10', dueAt: '2026-11-01' })).rejects.toThrow('The due date cannot be before the invoice date')
+    await expect(call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-11-10' })).rejects.toThrow('The due date is required')
+    expect(table(TABLES.carrierBill).get(String(bill.id))!.datesPending).toBe(true)
+  })
+
+  it('refuses once the bill is approved: unapprove it first', async () => {
+    seedAssignment()
+    const bill = await recordBill({})
+    await call('APPROVE_BILL', { billId: bill.id })
+    await expect(call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-10-30', dueAt: '2026-11-29' })).rejects.toThrow(/unapprove it first/)
+  })
+
+  it('needs AP access, like every other bill action', async () => {
+    const bill = await pendingBill()
+    await expect(call('SET_BILL_DATES', { billId: bill.id, billDate: '2026-10-30', dueAt: '2026-11-29' }, DISPATCHER)).rejects.toThrow(/Forbidden/)
   })
 })
 

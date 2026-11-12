@@ -45,6 +45,8 @@ const TABLES = {
   audit: 'AuditLog-test',
   carrierDirectory: 'Carrier-test',
   carrierDoc: 'CarrierDocument-test',
+  carrierBill: 'CarrierBill-test',
+  carrierPaymentMethod: 'CarrierPaymentMethod-test',
   driver: 'Driver-test',
   checkCall: 'LoadCheckCall-test',
   trackingLink: 'TrackingLink-test',
@@ -77,6 +79,8 @@ const store = vi.hoisted(() => {
   process.env.DRIVER_TABLE_NAME = 'Driver-test'
   process.env.CARRIER_TABLE_NAME = 'Carrier-test'
   process.env.CARRIER_DOCUMENT_TABLE_NAME = 'CarrierDocument-test'
+  process.env.CARRIER_BILL_TABLE_NAME = 'CarrierBill-test'
+  process.env.CARRIER_PAYMENT_METHOD_TABLE_NAME = 'CarrierPaymentMethod-test'
   process.env.LOAD_CHECK_CALL_TABLE_NAME = 'LoadCheckCall-test'
   process.env.TRACKING_LINK_TABLE_NAME = 'TrackingLink-test'
   process.env.SHIPMENT_DOCUMENT_TABLE_NAME = 'ShipmentDocument-test'
@@ -194,6 +198,12 @@ function termHolds(term: string, existing: Row | null, values: Row, names: Recor
   const read = (token: string): unknown =>
     token.startsWith(':') ? values[token] : existing?.[token.startsWith('#') ? names[token] : token]
 
+  const grouped = groupHolds(term, existing, values, names)
+  if (grouped !== null) return grouped
+  // `attribute_type(x, :nullType)`: the only type this engine is asked about is a stored NULL.
+  const typed = /^attribute_type\(([#\w]+),\s*:nullType\)$/.exec(term)
+  if (typed) return read(typed[1]) === null
+
   const exists = /^attribute_(not_)?exists\(([#\w]+)\)$/.exec(term)
   if (exists) {
     const present = read(exists[2]) != null
@@ -234,6 +244,13 @@ function conditionHolds(
     return String(values[':casExpectedUpdatedAt'] ?? '') === String(existing?.updatedAt ?? '')
   }
   return expression.split(' AND ').every((term) => termHolds(term.trim(), existing, values, names))
+}
+
+/** A parenthesised `(a OR b OR attribute_type(x, :nullType))` group, true when any alternative holds. */
+function groupHolds(term: string, existing: Row | null, values: Row, names: Record<string, string>): boolean | null {
+  const inner = /^\((.*)\)$/.exec(term)
+  if (!inner) return null
+  return inner[1].split(' OR ').some((alt) => termHolds(alt.trim(), existing, values, names))
 }
 
 /** Apply the `SET #a = :a, …`, `ADD counter :one` and `REMOVE #a, #b` shapes. */
@@ -4974,6 +4991,73 @@ describe('READY_TO_INVOICE', () => {
     expect(releaseAudits.map((row) => [row.entityType, row.entityId])).toEqual([
       ['ORDER', shipments[0].orderId], ['ORDER', shipments[2].orderId],
     ])
+  })
+
+  describe('the carrier AP record', () => {
+    /** A delivered load hauled by an outside carrier, rate con signed, paperwork in, no carrier bill recorded. */
+    async function deliveredCarrierLoad(): Promise<DocIds> {
+      seedCustomer({ requiredDocsForInvoice: ['POD', 'BOL'], reviewRequirements: [] })
+      seedBookableCarrier('car-1')
+      const ids = await createDraft()
+      await saveForm(ids.shipmentId)
+      await call('SUBMIT_ORDER', {
+        shipmentId: ids.shipmentId,
+        expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+        order: { equipmentType: "53' VAN" },
+        stops: [PICKUP, DELIVERY],
+      })
+      await call('BOOK_CARRIER', {
+        loadId: ids.loadId,
+        expectedUpdatedAt: table(TABLES.load).get(ids.loadId)!.updatedAt,
+        carrierId: 'car-1',
+        carrierRateCents: 140_000,
+      })
+      const leg = [...table(TABLES.carrier).values()].find((row) => row.loadId === ids.loadId && row.status === 'ACTIVE')!
+      table(TABLES.carrier).set(String(leg.id), { ...leg, rateConStatus: 'SIGNED' })
+      for (const status of ['DISPATCHED', 'LOADING', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
+        await call('SET_LOAD_STATUS', { loadId: ids.loadId, status })
+      }
+      seedDocs(ids, ['BOL', 'POD'])
+      return ids
+    }
+    const review = { review: { source: 'LOAD_REVIEW' } }
+    const bills = () => [...table(TABLES.carrierBill).values()]
+
+    it('is created by the move, with the invoice date and due date still pending, instead of refusing the release', async () => {
+      const ids = await deliveredCarrierLoad()
+      expect(bills()).toEqual([])
+      const result = await ready(ids.orderId, review) as { apRecords: { created: { carrierName: string; grossCents: number }[] } }
+      expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('UNBILLED')
+      expect(result.apRecords.created.map((c) => [c.carrierName, c.grossCents])).toEqual([['SWIFT TRANSPORTATION', 140_000]])
+      expect(bills()).toHaveLength(1)
+      expect(bills()[0]).toMatchObject({
+        status: 'IN_REVIEW', datesPending: true, billNumber: null, grossCents: 140_000, netCents: 140_000, carrierId: 'car-1', apOpen: 'OPEN',
+      })
+      const leg = [...table(TABLES.carrier).values()].find((row) => row.loadId === ids.loadId && row.status === 'ACTIVE')!
+      expect(leg).toMatchObject({ apStatus: 'IN_REVIEW', invoiceId: bills()[0].id, apBalanceCents: 140_000 })
+      expect(leg.chargesFinalizedAt).toBeTruthy()
+      expect([...table(TABLES.audit).values()].some((row) => row.action === 'RECORD_BILL_PENDING')).toBe(true)
+    })
+
+    it('is not created twice when the assignment already has a bill', async () => {
+      const ids = await deliveredCarrierLoad()
+      const leg = [...table(TABLES.carrier).values()].find((row) => row.loadId === ids.loadId && row.status === 'ACTIVE')!
+      table(TABLES.carrier).set(String(leg.id), { ...leg, apStatus: 'IN_REVIEW', invoiceId: 'cb:existing:1', chargesFinalizedAt: '2026-11-01T00:00:00.000Z' })
+      const result = await ready(ids.orderId, review) as { apRecords: { created: unknown[]; skipped: { kind: string }[] } }
+      expect(result.apRecords.created).toEqual([])
+      expect(result.apRecords.skipped.map((s) => s.kind)).toEqual(['ALREADY_BILLED'])
+      expect(bills()).toEqual([])
+      expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('UNBILLED')
+    })
+
+    it('releases nothing, and leaves the order in review, when the AP record cannot be written', async () => {
+      const ids = await deliveredCarrierLoad()
+      // Every bill number this assignment could take is held by a voided bill, yet the assignment still reads unbilled.
+      const leg = [...table(TABLES.carrier).values()].find((row) => row.loadId === ids.loadId && row.status === 'ACTIVE')!
+      for (let n = 1; n <= 5; n += 1) table(TABLES.carrierBill).set(`cb:${leg.id}:${n}`, { id: `cb:${leg.id}:${n}`, status: 'VOID' })
+      await expect(ready(ids.orderId, review)).rejects.toThrow(/could not be created, so nothing was released/)
+      expect(table(TABLES.order).get(ids.orderId)!.arStatus).toBe('DOCS_NEEDED')
+    })
   })
 
   it('lists exactly what accounting is still waiting on', async () => {

@@ -7545,7 +7545,7 @@ export type {
 const CARRIER_BILL_FIELDS = `
   id loadCarrierId loadId shipmentId shipmentNumber loadNumber
   carrierId carrierName carrierMc payeeKind paymentMethodId remitTo divisionKey
-  status billNumber billDate billMonth recordedAt recordedBy recordedEarly
+  status billNumber billDate billMonth recordedAt recordedBy recordedEarly datesPending
   dueAt termsDays quickPay quickPayDays quickPayFeeBps
   lines grossCents quickPayFeeCents netCents billedCents varianceCents
   paidCents creditedCents balanceCents apOpen documentId
@@ -7781,6 +7781,16 @@ export async function unapproveBill(input: { billId: string; reason: string }): 
 
 export async function voidBill(input: { billId: string; reason: string }): Promise<{ bill: CarrierBillRecord }> {
   return financeAction<{ bill: CarrierBillRecord }>('VOID_BILL', input)
+}
+
+/** The carrier invoice's own dates (and number) for a bill still in review; clears `datesPending`. */
+export async function setBillDates(input: {
+  billId: string
+  billDate: string
+  dueAt: string
+  billNumber?: string | null
+}): Promise<{ bill: CarrierBillRecord }> {
+  return financeAction<{ bill: CarrierBillRecord }>('SET_BILL_DATES', input)
 }
 
 /**

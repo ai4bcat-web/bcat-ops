@@ -53,6 +53,7 @@ vi.mock('./components/UpdateCarrierChargesDialog', () => ({ UpdateCarrierCharges
 vi.mock('./components/PayCarrierDialog', () => ({ PayCarrierDialog: () => null }))
 vi.mock('./components/ApCreditDialog', () => ({ ApCreditDialog: () => null }))
 vi.mock('./components/SendRemittanceDialog', () => ({ SendRemittanceDialog: () => null }))
+vi.mock('./components/SetBillDatesDialog', () => ({ SetBillDatesDialog: ({ bill }: { bill: { id: string } }) => <p>dates dialog for {bill.id}</p> }))
 
 /** Dates are relative to the day the suite runs, so no clock makes this flaky. */
 const TODAY = chicagoDateStr(new Date())
@@ -223,6 +224,24 @@ describe('the AP board', () => {
 
     expect(screen.getByText('$250.00 variance')).toBeTruthy()
     expect(screen.getByText(/fix the lines or void the bill/)).toBeTruthy()
+  })
+
+  /**
+   * Moving a load to billing creates the bill before the carrier's invoice exists, so its dates are placeholders. The
+   * review queue has to say so and offer the one thing that fixes it, or somebody approves on a made-up due date.
+   */
+  it('flags a bill created by Move to billing as needing its invoice date and due date, and offers to set them', async () => {
+    await setup({
+      rowsByTab: { IN_REVIEW: [worklistRow()] },
+      bills: [bill({ status: 'IN_REVIEW', datesPending: true, billNumber: null })],
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /^In review/ }))
+
+    expect(screen.getAllByText('Needs invoice date & due date').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Pending').length).toBe(2)
+    expect(screen.getByText(/Set the invoice date and due date from the carrier/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^Set dates for bill/ }))
+    expect(screen.getByText(/dates dialog for/)).toBeTruthy()
   })
 
   /** The pay run is worked oldest first, so how late a bill already is has to be on it. */
