@@ -489,7 +489,7 @@ export async function runEditSave(values: ShipmentFormValues, ctx: PipelineCtx, 
   return r.result()
 }
 
-/** Submit order: validate for Submit, save strictly, then SUBMIT_ORDER. A refusal leaves the saved draft. */
+/** Order submit, the first step of Submit for Review on a draft: validate for Submit, save strictly, then SUBMIT_ORDER. A refusal leaves the saved draft. */
 export async function runSubmit(values: ShipmentFormValues, ctx: PipelineCtx, bundle: ShipmentBundle): Promise<PipelineResult> {
   const problem = precheck(values, ctx, 'submit', 'edit')
   if (problem) return fail(problem, bundle)

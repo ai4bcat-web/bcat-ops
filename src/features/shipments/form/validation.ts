@@ -4,7 +4,7 @@
  *
  *   draft  — Save draft:   only a customer blocks; everything else is advisory.
  *   create — Create:       Aljex's red fields + customer's required references block.
- *   submit — Submit order: create + the org/customer required-field list + stop format rules.
+ *   submit — Submit for Review on a draft (the order submit): create + the org/customer required-field list + stop format rules.
  */
 import { validateCarrierAdd, validateLegs } from '@/lib/carrierLegs'
 import { fromDateTimeInput } from '@/lib/date'
