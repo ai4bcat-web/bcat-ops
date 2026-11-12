@@ -74,7 +74,9 @@ const isLive = (c) => c.active !== false && !c.mergedIntoId;
  * `noa` on each result lists the notice-of-assignment addresses. They go to Customer.noaEmail (never apEmail): `noaWrites` lists the
  * matched customers whose noaEmail is blank and whose company has exactly one notice address; the rest are reported in `noaOther`.
  */
-export function planBillingEmails(customers, prepared) {
+export function planBillingEmails(customers, prepared, opts = {}) {
+  // includeFactored (Ryne 2026-11-12): factored customers get their AP address too (a factored bill is never e-mailed, so it is reference only).
+  const includeFactored = opts.includeFactored === true;
   const companies = groupCompanies(prepared.rows);
   const live = customers.filter(isLive);
   const byKey = new Map(); const byMc = new Map();
@@ -97,7 +99,10 @@ export function planBillingEmails(customers, prepared) {
     if (!company.emails.length) { results.push({ company, customer, status: company.noa.length ? 'NOA_ONLY' : 'POD_ONLY', flags }); continue; }
     const email = company.emails[0];
     const existing = blank(customer.apEmail) ? null : String(customer.apEmail).trim();
-    if (customer.billingMethod === 'FACTOR') { results.push({ company, customer, status: 'FACTOR_CUSTOMER', email, existing, flags }); continue; }
+    if (customer.billingMethod === 'FACTOR') {
+      if (!includeFactored) { results.push({ company, customer, status: 'FACTOR_CUSTOMER', email, existing, flags }); continue; }
+      flags.push('FACTORED');
+    }
     if (existing && existing.toLowerCase() !== email) { results.push({ company, customer, status: 'DIFFERS', email, existing, flags }); continue; }
     // Extras: the company's other AP addresses, appended to what the customer already lists (never removed), minus the primary.
     const current = (customer.apEmailsExtra ?? []).map((a) => String(a).trim().toLowerCase()).filter(Boolean);

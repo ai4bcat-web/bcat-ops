@@ -196,11 +196,12 @@ describe('CRM_BACKFILL', () => {
 })
 
 describe('CRM_LIST_ACCOUNTS withActivity (Open AR + last shipment)', () => {
-  type Row = { customerId: string; openArCents?: number; lastShipmentAt?: string | null }
+  type Row = { customerId: string; openArCents?: number; lastShipmentAt?: string | null; shipmentCount?: number }
   const list = async (who: AppSyncIdentity, input: object = { withActivity: true }) =>
     ((await call(who, 'CRM_LIST_ACCOUNTS', input)) as { rows: Row[] }).rows
   const by = (rows: Row[], customerId: string) => rows.find((r) => r.customerId === customerId)
   const queries = (table: string) => db.log.filter((l) => l.op === 'QueryCommand' && l.table === table).length
+  const scans = (table: string) => db.log.filter((l) => l.op === 'ScanCommand' && l.table === table).length
 
   beforeEach(() => {
     process.env.INVOICE_TABLE_NAME = 'Invoice'
@@ -212,45 +213,49 @@ describe('CRM_LIST_ACCOUNTS withActivity (Open AR + last shipment)', () => {
     db.seed(T.shipment, { id: 's1', customerId: 'c-mine', pickupAppt: '2026-03-01T08:00:00.000Z' })
     db.seed(T.shipment, { id: 's2', customerId: 'c-mine', pickupAppt: '2026-05-09T08:00:00.000Z' })
     db.seed(T.shipment, { id: 's3', customerId: 'c-theirs', pickupAppt: '2026-06-01T08:00:00.000Z' })
+    // Voided and canceled shipments are not shipments done: not counted, not the newest pickup.
+    db.seed(T.shipment, { id: 's4', customerId: 'c-mine', pickupAppt: '2026-09-01T08:00:00.000Z', status: 'VOIDED' })
+    db.seed(T.shipment, { id: 's5', customerId: 'c-mine', pickupAppt: '2026-09-02T08:00:00.000Z', status: 'CANCELED' })
   })
 
   it('sums open balances and returns the newest pickup per customer; no activity is zero/null', async () => {
     const rows = await list(manager)
-    expect(by(rows, 'c-mine')).toMatchObject({ openArCents: 12_550, lastShipmentAt: '2026-05-09T08:00:00.000Z' })
-    expect(by(rows, 'c-theirs')).toMatchObject({ openArCents: 77_700, lastShipmentAt: '2026-06-01T08:00:00.000Z' })
-    expect(by(rows, 'c-free')).toMatchObject({ openArCents: 0, lastShipmentAt: null })
+    expect(by(rows, 'c-mine')).toMatchObject({ openArCents: 12_550, lastShipmentAt: '2026-05-09T08:00:00.000Z', shipmentCount: 2 })
+    expect(by(rows, 'c-theirs')).toMatchObject({ openArCents: 77_700, lastShipmentAt: '2026-06-01T08:00:00.000Z', shipmentCount: 1 })
+    expect(by(rows, 'c-free')).toMatchObject({ openArCents: 0, lastShipmentAt: null, shipmentCount: 0 })
   })
 
   it('adds nothing and queries nothing unless asked', async () => {
     const rows = await list(manager, {})
     expect(by(rows, 'c-mine')).not.toHaveProperty('openArCents')
     expect(by(rows, 'c-mine')).not.toHaveProperty('lastShipmentAt')
-    expect(queries('Invoice') + queries(T.shipment)).toBe(0)
+    expect(by(rows, 'c-mine')).not.toHaveProperty('shipmentCount')
+    expect(queries('Invoice') + queries(T.shipment) + scans(T.shipment)).toBe(0)
   })
 
-  it('a rep gets, and pays queries for, only the accounts they may see', async () => {
+  it('a rep gets only the accounts they may see', async () => {
     const rows = await list(rep1)
     expect(rows.map((r) => r.customerId).sort()).toEqual(['c-free', 'c-mine'])
     expect(JSON.stringify(rows)).not.toContain('777')
-    expect(queries(T.shipment)).toBe(2)
   })
 
-  it('costs one invoice query plus one shipment query per customer, then serves 60 s from cache', async () => {
+  it('costs one invoice query plus one shipment scan, then serves 60 s from cache', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     try {
       vi.setSystemTime(new Date('2026-07-01T00:00:00Z'))
       await list(manager)
       expect(queries('Invoice')).toBe(1)
-      expect(queries(T.shipment)).toBe(3)
+      expect(scans(T.shipment)).toBe(1)
+      expect(queries(T.shipment)).toBe(0)
       vi.setSystemTime(new Date('2026-07-01T00:00:30Z'))
       await list(manager)
       expect(queries('Invoice')).toBe(1)
-      expect(queries(T.shipment)).toBe(3)
+      expect(scans(T.shipment)).toBe(1)
       db.seed('Invoice', { id: 'i5', customerId: 'c-free', arOpen: 'OPEN', balanceCents: 500 })
       vi.setSystemTime(new Date('2026-07-01T00:01:01Z'))
       expect(by(await list(manager), 'c-free')?.openArCents).toBe(500)
       expect(queries('Invoice')).toBe(2)
-      expect(queries(T.shipment)).toBe(6)
+      expect(scans(T.shipment)).toBe(2)
     } finally {
       vi.useRealTimers()
     }
