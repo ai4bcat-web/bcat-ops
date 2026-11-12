@@ -3,7 +3,7 @@ import { BillingMethodBadge, InvoiceEmailBadge } from './components/EmailReadine
 import { stateOf as billingStateOf } from '@/lib/billingSetupCsv'
 import { customerInvoiceEmailState, invoiceEmailLabels } from '@/lib/emailReadiness'
 import { PossibleDuplicateBadge } from './components/PossibleDuplicateBadge'
-import { buildDuplicateIndex } from '@/lib/customerDuplicates'
+import { buildDuplicateIndex, normalizeCustomerName } from '@/lib/customerDuplicates'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Archive, MapPin, MessageSquarePlus, Merge, Pencil, Search, Settings2, Users } from 'lucide-react'
@@ -109,18 +109,20 @@ interface CustomerRow {
   divisionName: string
 }
 
+/** apEmail first, then the extra To addresses, de-duplicated. */
+const invoiceAddresses = (c: CustomerRecord): string[] => [...new Set([c.apEmail, ...(c.apEmailsExtra ?? [])].map((e) => (e ?? '').trim()).filter(Boolean))]
 const dollars = (cents: number) => `$${Math.round(cents / 100).toLocaleString('en-US')}`
 /** How many distinct billing addresses the customer has on file (the field holds a comma or semicolon list). */
 const billingEmailCount = (c: CustomerRecord) => (c.billingEmail ?? '').split(/[\s,;]+/).filter((s) => s.includes('@')).length
 const yesNo = (v: boolean | null | undefined) => (v === true ? 'Yes' : 'No')
 const opt = (v: string | null | undefined) => (v ? [{ value: v, label: v }] : [])
 
-const DEFAULT_COLUMNS = ['name', 'status', 'invoiceEmail', 'owner', 'lastTouch', 'nextStep', 'credit', 'terms', 'contact', 'city']
+const DEFAULT_COLUMNS = ['name', 'status', 'billingMethod', 'invoiceEmail', 'noaEmail', 'shipments', 'owner', 'lastTouch', 'nextStep', 'credit', 'terms', 'contact', 'city']
 /** Columns fed by CRM_LIST_ACCOUNTS `withActivity`. */
-const ACTIVITY_COLUMN_KEYS = ['openAr', 'lastShipment']
+const ACTIVITY_COLUMN_KEYS = ['openAr', 'lastShipment', 'shipments']
 const ALL_COLUMN_KEYS = [
   ...DEFAULT_COLUMNS,
-  'team', 'billingEmails', 'billingMethod', 'factored', 'email', 'state',
+  'team', 'billingEmails', 'factored', 'email', 'state',
   'division', 'stage', 'nextDue', 'openTasks', 'phone', 'mc', 'dot', 'archived', 'aljexCode', 'industry', 'leadSource', 'created',
   ...ACTIVITY_COLUMN_KEYS,
 ]
@@ -128,7 +130,15 @@ const ACTIONS_KEY = 'actions'
 const billingMethodLabels = { FACTOR: 'Factor', MANUAL: 'Manual', NOT_SET: 'Not set' } as const
 
 const gridCatalog: Array<DenseColumn<CustomerRow>> = [
-    { key: 'invoiceEmail', header: 'Invoice e-mail', group: 'Billing', text: (r) => invoiceEmailLabels[customerInvoiceEmailState(r.record)], filter: 'multi', optionsOf: (r) => [{ value: customerInvoiceEmailState(r.record), label: invoiceEmailLabels[customerInvoiceEmailState(r.record)] }] },
+    {
+      key: 'invoiceEmail', header: 'Invoice e-mail', group: 'Billing', text: (r) => invoiceAddresses(r.record).join(', '),
+      filter: 'multi', optionsOf: (r) => [{ value: customerInvoiceEmailState(r.record), label: invoiceEmailLabels[customerInvoiceEmailState(r.record)] }],
+    },
+    { key: 'noaEmail', header: 'NOA e-mail', group: 'Billing', text: (r) => r.record.noaEmail?.trim() ?? '' },
+    {
+      key: 'shipments', header: 'Shipments', group: 'Activity', text: (r) => (r.crm?.shipmentCount != null ? r.crm.shipmentCount.toLocaleString('en-US') : ''),
+      filter: 'number', numberOf: (r) => r.crm?.shipmentCount ?? null, align: 'right',
+    },
     {
       key: 'billingMethod', header: 'Billing method', group: 'Billing', filter: 'multi',
       text: (r) => billingMethodLabels[billingStateOf(r.record)],
@@ -299,6 +309,7 @@ export function CustomersPage() {
     }, { replace: true })
   }, [setParams])
   const [includeFactored, setIncludeFactored] = useState(false)
+  const [duplicatesOnly, setDuplicatesOnly] = useState(false)
   const emailCounts = useMemo(() => {
     const counts = { missing: 0, factored: 0 }
     for (const row of rowsWithStatus) {
@@ -321,10 +332,15 @@ export function CustomersPage() {
   const tabRows = useMemo(() => {
     const q = query.trim().toLowerCase()
     return rowsWithStatus.filter((r) => (activeTab === 'all' || r.tab === activeTab)
+      && (!duplicatesOnly || duplicates.has(r.record.id))
       && (!q || [r.record.name, r.record.contactName, r.record.contactEmail, r.record.mcNumber, r.record.dotNumber].some((v) => (v ?? '').toLowerCase().includes(q))))
-  }, [rowsWithStatus, activeTab, query])
+  }, [rowsWithStatus, activeTab, query, duplicatesOnly, duplicates])
   const filteredRows = useMemo(() => filterRows(tabRows, gridCatalog, filters), [tabRows, filters])
-  const sortedRows = useMemo(() => sortDenseRows(filteredRows, gridCatalog, prefs.sort), [filteredRows, prefs.sort])
+  // Duplicates only: each set of same-name accounts sits together, whatever the column sort.
+  const sortedRows = useMemo(() => (duplicatesOnly
+    ? [...filteredRows].sort((a, b) => normalizeCustomerName(a.record.name).localeCompare(normalizeCustomerName(b.record.name)) || a.record.name.localeCompare(b.record.name))
+    : sortDenseRows(filteredRows, gridCatalog, prefs.sort)), [filteredRows, prefs.sort, duplicatesOnly])
+  const duplicateCount = useMemo(() => rowsWithStatus.filter((r) => duplicates.has(r.record.id)).length, [rowsWithStatus, duplicates])
   const pageRows = useMemo(() => sortedRows.slice(0, pageSize), [sortedRows, pageSize])
   const setColumnFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
     setPageSize(PAGE_SIZE)
@@ -369,7 +385,18 @@ export function CustomersPage() {
   const renderCell = (row: CustomerRow, key: string) => {
     const { record: c, effective, crm: crmRow } = row
     switch (key) {
-      case 'invoiceEmail': return <InvoiceEmailBadge customer={c} />
+      case 'invoiceEmail': {
+        const addresses = invoiceAddresses(c)
+        const factored = c.billingMethod === 'FACTOR'
+        if (addresses.length === 0) return factored ? <span className="tms-muted" title="Factored: invoices go to OTR">Factored (OTR)</span> : <InvoiceEmailBadge customer={c} />
+        const title = [addresses.join(', '), c.invoiceCopyEmails?.length ? `Copy: ${c.invoiceCopyEmails.join(', ')}` : '', factored ? 'Not used: factored invoices go to OTR' : ''].filter(Boolean).join('\n')
+        return (
+          <span className={factored ? 'tms-muted' : undefined} title={title} data-testid={`invoice-email-${c.id}`}>
+            {addresses[0]}{addresses.length > 1 ? ` +${addresses.length - 1}` : ''}
+          </span>
+        )
+      }
+      case 'noaEmail': return c.noaEmail?.trim() ? <span title="Notice of assignment">{c.noaEmail}</span> : <span className="tms-muted">—</span>
       case 'billingMethod': return <BillingMethodBadge customer={c} />
       case 'name':
         return (
@@ -378,7 +405,7 @@ export function CustomersPage() {
             {c.apptWorkflow === 'BATORY' && <TmsBadge tone="blue">BATORY</TmsBadge>}
             {c.active === false && <TmsBadge>ARCHIVED</TmsBadge>}
             <PossibleDuplicateBadge info={duplicates.get(c.id)} />
-            {!prefs.columns.includes('invoiceEmail') && customerInvoiceEmailState(c) !== 'OK' && <InvoiceEmailBadge customer={c} />}
+            {!prefs.columns.includes('invoiceEmail') && ['MISSING', 'INVALID'].includes(customerInvoiceEmailState(c)) && <InvoiceEmailBadge customer={c} />}
             {!prefs.columns.includes('billingMethod') && billingStateOf(c) === 'NOT_SET' && <BillingMethodBadge customer={c} />}
           </span>
         )
@@ -453,6 +480,7 @@ export function CustomersPage() {
           <label><input type="checkbox" checked={includeFactored} onChange={(e) => { setIncludeFactored(e.target.checked); if (filters.invoiceEmail?.values?.includes('MISSING')) setColumnFilter('invoiceEmail', { values: e.target.checked ? ['MISSING', 'INVALID', 'FACTORED_QUEUE_ONLY'] : ['MISSING', 'INVALID'] }) }} /> Include factored</label>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('invoiceEmail', { values: ['FACTORED_QUEUE_ONLY'] }) }}>Factored: queue only ({emailCounts.factored})</TmsButton>
           <TmsButton size="sm" onClick={() => { setActiveTab('all'); setColumnFilter('billingMethod', { values: ['NOT_SET'] }) }}>Billing method not set ({billingNotSetCount})</TmsButton>
+          <TmsButton size="sm" variant={duplicatesOnly ? 'primary' : undefined} aria-pressed={duplicatesOnly} data-testid="customers-duplicates-chip" onClick={() => { setActiveTab('all'); setDuplicatesOnly((v) => !v); setPageSize(PAGE_SIZE) }}>Possible duplicates ({duplicateCount})</TmsButton>
           {isManager && (
             <span role="group" aria-label="Account scope" style={{ display: 'inline-flex', gap: 4 }} data-testid="crm-scope">
               <TmsButton size="sm" variant={scope === 'mine' ? 'primary' : undefined} aria-pressed={scope === 'mine'} onClick={() => setScope('mine')} data-testid="crm-scope-mine">Mine</TmsButton>
