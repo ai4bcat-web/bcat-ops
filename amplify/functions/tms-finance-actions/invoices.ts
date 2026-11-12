@@ -399,6 +399,26 @@ export async function previewInvoice(input: Row, caller: Caller): Promise<Row> {
  * invoice, and a freeze on every one of the order's loads. Either all of that is true
  * afterwards or none of it is.
  */
+/**
+ * The invoice number is the shipment's PRO # (as Aljex did). A second billable order on the same
+ * shipment takes a letter (20027-B, 20027-C); a number already used — an imported Aljex invoice, a
+ * voided one, or a replacement after a credit memo — takes the next free numeric suffix (20027-2,
+ * 20027-3). The Invoice id IS the number, so the put's not-exists condition still guards a race.
+ */
+export async function proInvoiceNumber(context: Pick<OrderContext, 'order' | 'orders' | 'shipment'>): Promise<string> {
+  const pro = String(context.shipment.number ?? '').trim()
+  if (!pro) throw new Error('This shipment has no PRO number to invoice under')
+  const orders = [...context.orders].sort((a, b) => String(a.createdAt ?? a.id).localeCompare(String(b.createdAt ?? b.id)))
+  const index = Math.max(0, orders.findIndex((o) => o.id === context.order.id))
+  const base = index === 0 ? pro : `${pro}-${String.fromCharCode(65 + Math.min(index, 25))}`
+  if (!(await getById(INVOICE_TABLE_NAME, base))) return base
+  for (let n = 2; n < 100; n++) {
+    const candidate = `${base}-${n}`
+    if (!(await getById(INVOICE_TABLE_NAME, candidate))) return candidate
+  }
+  throw new Error(`Every invoice number for PRO ${pro} up to ${base}-99 is taken`)
+}
+
 export async function generateInvoice(input: Row, caller: Caller): Promise<Row> {
   const orderId = assertString(input.orderId, 'orderId')
   const invoiceDate = optionalString(input.invoiceDate, 10) ?? nowIso().slice(0, 10)
@@ -458,7 +478,7 @@ export async function generateInvoice(input: Row, caller: Caller): Promise<Row> 
     settings: context.settings,
   }))
 
-  const number = await nextInvoiceNumber(caller, prefix, invoiceDate)
+  const number = await proInvoiceNumber(context)
   const { invoice } = buildSnapshot(context, { number, invoiceDate, dueAt, billToId, note, attachDocumentIds }, caller, now)
 
   const writes: TransactWriteItem[] = [
