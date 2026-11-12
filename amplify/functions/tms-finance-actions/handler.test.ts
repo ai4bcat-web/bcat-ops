@@ -1043,7 +1043,8 @@ describe('invoice documents packet', () => {
 
     await call('EMAIL_INVOICE', { invoiceId })
     const names = noticeNames()
-    expect(names[0]).toMatch(/^INV-000001/)
+    // Named for the customer: 'Invoice <PRO> <PO>.pdf'.
+    expect(names[0]).toMatch(/^Invoice S000001( .+)?\.pdf$/)
     expect(names.slice(1)).toEqual(['doc-ratecon.pdf', 'pod-seed.pdf', 'doc-scale.pdf', 'doc-lumper.pdf', 'doc-other.pdf', 'bol-seed.pdf'])
     expect(names).not.toContain('doc-private-lumper.pdf')
   })
@@ -1071,6 +1072,12 @@ describe('invoice documents packet', () => {
 })
 
 describe('VOID_INVOICE', () => {
+  it('is an admin act: Invoicing access alone cannot void', async () => {
+    const { invoiceId } = await generate()
+    await expect(call('VOID_INVOICE', { invoiceId, reason: 'duplicate' }, JENNY)).rejects.toThrow(/only an admin can void/)
+    expect(table(TABLES.invoice).get(invoiceId)!.status).not.toBe('VOID')
+  })
+
   it('puts the order back to UNBILLED, unfreezes the load and leaves the open book', async () => {
     const { invoiceId } = await generate()
     await call('VOID_INVOICE', { invoiceId, reason: 'duplicate' })

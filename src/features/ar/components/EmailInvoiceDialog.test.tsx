@@ -27,6 +27,7 @@ const { getInvoice, getInvoicePdfUrl, listCustomers, listDivisions, getTmsSettin
 vi.mock('@/lib/apiClient', () => ({
   getInvoice,
   getInvoicePdfUrl,
+  getShipment: () => Promise.resolve(null),
   listCustomers,
   listDivisions,
   getTmsSettings,

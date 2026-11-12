@@ -40,7 +40,8 @@ import {
   invoiceTermsDays,
   remitToFor,
 } from '../../../src/lib/invoiceBuild'
-import { buildInvoicePdf, invoiceFilename } from '../../../src/lib/invoicePdf'
+import { buildInvoicePdf } from '../../../src/lib/invoicePdf'
+import { invoiceAttachmentName, invoiceCompanyName, invoicePoNumber } from '../../../src/lib/invoiceIdentity'
 import {
   renderInvoiceEmail,
 } from '../../../src/lib/shipmentNotices'
@@ -602,11 +603,16 @@ export async function batchGenerate(input: Row, caller: Caller): Promise<Row> {
 
 // ── sending ─────────────────────────────────────────────────────────────────
 
+/** `Invoice 20027 FR-113188-3.pdf`: what the customer sees attached (the stored key keeps its version). */
+function attachmentNameOf(invoice: InvoiceRecord): string {
+  return invoiceAttachmentName(invoice.shipmentNumber || invoice.number, invoicePoNumber(invoice.references))
+}
+
 async function attachmentsFor(invoice: InvoiceRecord, documents: ShipmentDocumentRecord[]): Promise<EmailAttachment[]> {
   const keys: { name: string; contentType: string; key: string }[] = []
   if (invoice.pdfKey) {
     keys.push({
-      name: invoiceFilename(invoice.number, invoice.pdfVersion ?? 1),
+      name: attachmentNameOf(invoice),
       contentType: 'application/pdf',
       key: invoice.pdfKey,
     })
@@ -675,6 +681,8 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
     customerName: invoice.customerName ?? context.customer?.name ?? '',
     contactName: null,
     brokerName: context.division?.name ?? 'BCAT',
+    po: invoicePoNumber(invoice.references),
+    companyName: invoiceCompanyName(context.shipment?.revDivision, context.shipment?.revSubdivision),
   })
   const body = message ? `${message}\n\n${rendered.body}` : rendered.body
 
@@ -722,7 +730,7 @@ export async function emailInvoice(input: Row, caller: Caller): Promise<Row> {
   const downloads = delivered.status === 'SENT'
     ? []
     : await Promise.all(
-        (invoice.pdfKey ? [{ name: invoiceFilename(invoice.number, invoice.pdfVersion ?? 1), key: invoice.pdfKey }] : [])
+        (invoice.pdfKey ? [{ name: attachmentNameOf(invoice), key: invoice.pdfKey }] : [])
           .concat(
             customerPacketDocuments(
               (invoice.attachDocumentIds ?? [])
@@ -804,6 +812,8 @@ export async function markInvoiceSent(input: Row, caller: Caller): Promise<Row> 
  * out there has a copy of that document and the file is the record of what they got.
  */
 export async function voidInvoice(input: Row, caller: Caller): Promise<Row> {
+  // Ryne 2026-11-12: voiding an invoice is an admin act (owner or ADMIN). Invoicing page access does not include it.
+  if (!caller.isAdmin) throw new Error('Forbidden: only an admin can void an invoice')
   const invoiceId = assertString(input.invoiceId, 'invoiceId')
   const reason = optionalString(input.reason, MAX_NOTE)
   if (!reason) throw new Error('A void needs a reason')

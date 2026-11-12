@@ -20,6 +20,7 @@
  * Imports are relative and type-only where they can be: the tracking and notifier
  * Lambdas bundle this file by path, so a `@/` alias would break the function build.
  */
+import { invoiceEmailSubject, invoiceReferenceLine } from './invoiceIdentity'
 import type {
   ApPaymentRecord,
   CarrierBillRecord,
@@ -332,6 +333,10 @@ export interface InvoiceEmailInput {
   contactName?: string | null
   template?: string | null
   brokerName: string
+  /** The order's PO number, printed beside the PRO above the fixed body. */
+  po?: string | null
+  /** Who the invoice comes from: 'BCAT Logistics Corporation' or 'IVAN Cartage Co' (`invoiceCompanyName`). */
+  companyName?: string | null
 }
 
 /**
@@ -339,9 +344,11 @@ export interface InvoiceEmailInput {
  * The balance and due date live on the attached PDF, not in the message.
  */
 export function renderInvoiceEmail(input: InvoiceEmailInput): { subject: string; body: string } {
+  const pro = input.invoice.shipmentNumber || input.invoice.number
   return {
-    subject: `Invoice ${input.invoice.number} · ${input.brokerName}`,
-    body: INVOICE_EMAIL_BODY,
+    subject: invoiceEmailSubject(pro, input.companyName || 'BCAT Logistics Corporation'),
+    // The reference line is the only thing added above Ryne's fixed wording.
+    body: `${invoiceReferenceLine(pro, input.po)}\n\n${INVOICE_EMAIL_BODY}`,
   }
 }
 

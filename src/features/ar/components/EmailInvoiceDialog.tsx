@@ -20,6 +20,7 @@ import {
   emailInvoice,
   sendInvoice,
   getInvoice,
+  getShipment,
   getInvoicePdfUrl,
   getTmsSettings,
   graphqlErrorText,
@@ -30,6 +31,7 @@ import {
 import { allApEmails } from '@/lib/billingMethod'
 import { billingRecipients, formatCents, invoiceCcRecipients } from '@/lib/invoiceBuild'
 import { renderInvoiceEmail } from '@/lib/shipmentNotices'
+import { invoiceCompanyName, invoicePoNumber } from '@/lib/invoiceIdentity'
 import type { InvoiceRecord } from '@/types/tms'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from '../useBillingGrant'
 
@@ -111,7 +113,8 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
   // `async` function, so every state write lives in an explicit promise chain.
   const load = useCallback(() =>
     Promise.all([getInvoice(invoiceId), listCustomers(), listDivisions(), getTmsSettings()])
-      .then(([row, customers, divisions, settings]) => {
+      .then(async ([row, customers, divisions, settings]) => {
+        const shipment = row ? await getShipment(row.shipmentId).catch(() => null) : null
         if (!row) { setError('That invoice no longer exists.'); return }
         const customer = customers.find((c) => c.id === row.customerId) ?? null
         const division = divisions.find((d) => d.key === row.divisionKey) ?? null
@@ -133,6 +136,8 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
           invoice: row,
           customerName: row.customerName ?? customer?.name ?? null,
           brokerName: division?.name ?? division?.legalName ?? 'BCAT',
+          po: invoicePoNumber(row.references),
+          companyName: invoiceCompanyName(shipment?.revDivision, shipment?.revSubdivision),
         }))
         setError(null)
       })
