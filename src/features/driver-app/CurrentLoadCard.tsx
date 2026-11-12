@@ -10,7 +10,7 @@
  * ELD; this screen is documents only.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, Truck, FileText, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { Loader2, Truck, FileText, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { fetchOpenLoads, type CurrentLoad } from './driverApi'
 
@@ -91,7 +91,7 @@ export function CurrentLoadCard() {
   }
 
   /*
-   * The POD is the only thing the driver owes.
+   * The POD is what the driver owes, plus anything the office ticked for this load.
    *
    * A rate confirmation is the broker's paperwork and the office collects it in the
    * factoring queue. Listing it here asked a driver for something they often do not have
@@ -99,6 +99,9 @@ export function CurrentLoadCard() {
    * is genuinely theirs and genuinely holds their pay.
    */
   const podIn = load.hasPod
+  // The office can ask for more than the POD on a load (a lumper receipt, a scale ticket).
+  const extraDocsNeeded = (load.requiredDocs ?? []).length > 1
+  const allDocsIn = (load.requiredDocs ?? []).every((d) => d.done)
 
   return (
     <div className="space-y-3">
@@ -124,8 +127,26 @@ export function CurrentLoadCard() {
         </div>
       </dl>
 
-      {/* The one thing the driver owes, and what happens if it is missing. */}
-      {podIn ? (
+      {/* Extra paperwork the office asked for on this load: listed with what is already in. */}
+      {extraDocsNeeded ? (
+        <section aria-label="Documents needed for this load" data-testid="load-required-docs" className="mt-3 rounded-lg border border-[var(--tms-border)] p-2.5 text-xs">
+          <p className="font-medium text-foreground">Documents needed for this load</p>
+          <ul className="mt-1.5 space-y-1">
+            {(load.requiredDocs ?? []).map((d) => (
+              <li key={d.type} className="flex items-center gap-1.5" data-testid={`load-required-doc-${d.type}`} data-done={d.done ? 'true' : 'false'}>
+                {d.done
+                  ? <CheckCircle2 className="size-3.5 text-[color:var(--tms-badge-green)]" aria-label="In" />
+                  : <XCircle className="size-3.5 text-[color:var(--tms-badge-orange)]" aria-label="Still needed" />}
+                <span className="text-foreground">{d.label}</span>
+                <span className="text-muted-foreground">{d.done ? 'in' : 'still needed'}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-muted-foreground">
+            {allDocsIn ? 'Everything is in. Nothing else needed from you.' : 'Send each one from the Scan tab. The load is not paid until all of them are in.'}
+          </p>
+        </section>
+      ) : podIn ? (
         <p className="mt-3 flex items-center gap-1.5 text-xs text-[color:var(--tms-badge-green)]">
           <CheckCircle2 className="size-3.5" />
           POD is in. Nothing else needed from you.

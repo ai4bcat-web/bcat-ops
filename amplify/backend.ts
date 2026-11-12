@@ -519,6 +519,8 @@ const driverApiLoadTable = stageTables['Load']
 const driverApiCustomerTable = stageTables['Customer']
 const driverApiLocationTable = stageTables['Location']
 const driverApiPodDocumentTable = stageTables['PodDocument']
+// Read-only: the shipment documents filed for a load, so the app can tick off a ticked extra (lumper receipt).
+const driverApiShipmentDocumentTable = stageTables['ShipmentDocument']
 // The Ivan app shows a driver when their own truck's next PM falls due. Equipment holds the
 // last PM; TruckLocation holds Motive's odometer. Read-only — the app never edits either.
 const driverApiEquipmentTable = stageTables['Equipment']
@@ -549,6 +551,8 @@ const driverApiReadOnlyArns = [
   `${driverApiLocationTable.tableArn}/index/*`,
   driverApiPodDocumentTable.tableArn,
   `${driverApiPodDocumentTable.tableArn}/index/*`,
+  driverApiShipmentDocumentTable.tableArn,
+  `${driverApiShipmentDocumentTable.tableArn}/index/*`,
   driverApiEquipmentTable.tableArn,
   `${driverApiEquipmentTable.tableArn}/index/*`,
   driverApiTruckLocationTable.tableArn,
@@ -647,6 +651,7 @@ driverApiFn.addEnvironment('LOAD_TABLE_NAME', driverApiLoadTable.tableName)
 driverApiFn.addEnvironment('CUSTOMER_TABLE_NAME', driverApiCustomerTable.tableName)
 driverApiFn.addEnvironment('LOCATION_TABLE_NAME', driverApiLocationTable.tableName)
 driverApiFn.addEnvironment('POD_DOCUMENT_TABLE_NAME', driverApiPodDocumentTable.tableName)
+driverApiFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', driverApiShipmentDocumentTable.tableName)
 driverApiFn.addEnvironment('EQUIPMENT_TABLE_NAME', driverApiEquipmentTable.tableName)
 driverApiFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME', driverApiTruckLocationTable.tableName)
 driverApiFn.addEnvironment('MAINTENANCE_TASK_TABLE_NAME', driverApiMaintenanceTaskTable.tableName)

@@ -397,6 +397,8 @@ export interface Load extends ShipmentLoadFields {
   notes?: string | null       // short free-text notes
   /** Why the POD is what it is, written when it is reviewed on the PODs page. */
   podNotes?: string | null
+  /** Per-load extra required documents (SET_LOAD_REQUIRED_DOCS). */
+  requiredDocTypes?: string[] | null
   hot?: boolean | null        // urgent/"hot" load — flagged with 🔥 in schedule
   unscheduled?: boolean | null // true = orphan (no firm date) → calendar's Unscheduled lane
   stops?: Stop[] | null       // canonical multi-stop array; legacy pickup*/delivery* are derived mirrors

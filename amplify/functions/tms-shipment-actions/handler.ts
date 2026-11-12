@@ -115,6 +115,7 @@ import {
   saveGeneratedDocument,
   updateDocument,
   voidDocument,
+  setLoadRequiredDocs,
   type DocumentDeps,
 } from './documents'
 import {
@@ -678,6 +679,8 @@ type Action =
   | 'REVIEW_DOCUMENT'
   | 'UPDATE_DOCUMENT'
   | 'VOID_DOCUMENT'
+  // Extra documents one load needs on top of the customer's list (POD / RC are defaults).
+  | 'SET_LOAD_REQUIRED_DOCS'
   | 'READY_TO_INVOICE'
   | 'REVIEW_LOAD'
   | 'RATE_CARRIER'
@@ -9151,6 +9154,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return updateDocument(documentDeps, input, caller)
     case 'VOID_DOCUMENT':
       return voidDocument(documentDeps, input, caller)
+    case 'SET_LOAD_REQUIRED_DOCS':
+      return setLoadRequiredDocs(documentDeps, input, caller)
     case 'READY_TO_INVOICE':
       return readyToInvoice(documentDeps, input, caller)
     case 'REVIEW_LOAD':

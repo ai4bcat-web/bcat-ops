@@ -24,6 +24,7 @@ import {
   type Row,
 } from './shipmentStore'
 import { gateLoadIds, requiredDocTypesFor } from '../../../src/lib/shipmentDocuments'
+import { loadExtraDocTypes } from '../../../src/lib/loadRequiredDocs'
 import type {
   ReleaseGateDocument,
   ReleaseGateInput,
@@ -230,6 +231,8 @@ export async function loadReleaseGateInput(
       customer as Pick<CustomerRecord, 'requiredDocsForInvoice'> | null,
       settings as Pick<TmsSettings, 'defaultRequiredDocs'> | null,
     ).types,
+    // What this order's loads ask for on top of the customer's list (SET_LOAD_REQUIRED_DOCS).
+    extraDocTypes: loadExtraDocTypes(orderLoads as { requiredDocTypes?: string[] | null }[]),
     requiredReferenceCodes: codes,
     referenceLabels: labels,
     documents: scoped,
