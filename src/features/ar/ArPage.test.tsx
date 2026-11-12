@@ -224,8 +224,8 @@ describe('the AR board', () => {
       await settle()
       expect(tab.getAttribute('aria-selected')).toBe('true')
     }
-    // The last click landed on Aging, whose body is the strip.
-    expect(screen.getByLabelText('AR totals')).toBeTruthy()
+    // The summary strip sits above every tab.
+    expect(screen.getByLabelText('AR summary')).toBeTruthy()
   })
 
   /**
@@ -233,19 +233,14 @@ describe('the AR board', () => {
    * of `@/lib/arAging` — the page must not reach its own total, or the CSV and the screen
    * would disagree about what is owed.
    */
-  it('leads the aging view with the lib\'s own totals', async () => {
+  it('shows the summary above the tabs: pending with shippers and late money', async () => {
     await setup({ UNBILLED: [worklistRow()] })
-    fireEvent.click(screen.getByRole('tab', { name: /^Aging/ }))
     await settle()
-
-    // One open invoice of $2,500.00, eight days past a 2026-10-20 due date.
-    const strip = within(screen.getByLabelText('AR totals'))
-    expect(within(strip.getByText('Open AR').closest('.tms-kpi-card') as HTMLElement).getByText('$2,500.00')).toBeTruthy()
-    expect(within(strip.getByText('Late').closest('.tms-kpi-card') as HTMLElement).getByText('$2,500.00')).toBeTruthy()
-    // The delivered shipment nobody has billed, counted off the worklist rows.
-    expect(within(strip.getByText('Delivered, not invoiced').closest('.tms-kpi-card') as HTMLElement).getByText('1 shipment')).toBeTruthy()
-    // Nothing has been collected, so the lag is unmeasured — not zero.
-    expect(within(strip.getByText('Avg days to pay').closest('.tms-kpi-card') as HTMLElement).getByText('—')).toBeTruthy()
+    // One open, manually invoiced invoice of $2,500.00, past its 2026-10-20 due date.
+    const strip = within(screen.getByLabelText('AR summary'))
+    expect(strip.getByText('Pending with shippers').previousSibling?.textContent).toBe('$2,500.00')
+    expect(strip.getByText('Pending with OTR').previousSibling?.textContent).toBe('$0.00')
+    expect(strip.getByText('Late').previousSibling?.textContent).toBe('$2,500.00')
   })
 
   /**

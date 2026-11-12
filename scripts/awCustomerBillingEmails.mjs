@@ -8,6 +8,8 @@
  *     BCAT_ALLOW_PROD=$(date +%F) node scripts/awCustomerBillingEmails.mjs --target prod --i-mean-production --csv <BILLING_EMAILS_LIST_FROM_OTR.csv>
  *   backup (once, < 6 h before the apply):
  *     BCAT_ALLOW_PROD=$(date +%F) node scripts/prodBackup.mjs --script awCustomerBillingEmails --target prod --i-mean-production --apply
+ *   factored pass (Ryne 2026-11-12: factored customers get their AP address too, reference only): add --include-factored,
+ *     and the apply token becomes AW_PROD_CONFIRM=$(date +%F)-billingemails2.
  *   apply:
  *     BCAT_ALLOW_PROD=$(date +%F) AW_PROD_CONFIRM=$(date +%F)-billingemails node scripts/awCustomerBillingEmails.mjs <same args> \
  *       --apply --confirm-prod <account id>:5ucwdyvwivelbo4k4jomvrwel4-NONE
@@ -36,7 +38,8 @@ export const AUDIT_USER = 'system:awCustomerBillingEmails';
 export async function billingEmailsGate(values, deps = {}) {
   const gate = await requireProd({ script: SCRIPT, values, tables: PROD_WRITE_SETS.awCustomerBillingEmails.models, deps });
   if (gate?.apply && !gate.rehearsal) {
-    const want = `${localDate(deps.now ?? new Date())}-billingemails`;
+    // The factored pass is its own confirmation, so a token for the first pass cannot run it.
+    const want = `${localDate(deps.now ?? new Date())}-billingemails${values['include-factored'] ? '2' : ''}`;
     if ((deps.env ?? process.env).AW_PROD_CONFIRM !== want) throw new Error(`Production gate closed for ${SCRIPT}:\n  - (e) env AW_PROD_CONFIRM must equal ${want}`);
   }
   return gate;
@@ -70,7 +73,7 @@ export async function applyNoa({ doc, suffix, customer, email, now = new Date() 
   return { written: 1, lost: 0 };
 }
 
-export async function applyExtras({ doc, suffix, customer, before, add, now = new Date() }) {
+export async function applyExtras({ doc, suffix, customer, before, add, includeFactored = false, now = new Date() }) {
   assertWritableSuffix(suffix, 'customer extra AP e-mail append');
   const prev = (before ?? []).filter(Boolean);
   const next = [...prev, ...add.filter((a) => !prev.map((p) => String(p).toLowerCase()).includes(a))];
@@ -79,10 +82,11 @@ export async function applyExtras({ doc, suffix, customer, before, add, now = ne
   try {
     await doc.send(new UpdateCommand({
       TableName: `Customer-${suffix}`, Key: { id: customer.id }, UpdateExpression: 'SET apEmailsExtra = :v',
-      ConditionExpression: prev.length
-        ? 'attribute_exists(id) AND apEmailsExtra = :prev AND (attribute_not_exists(billingMethod) OR attribute_type(billingMethod, :nul) OR billingMethod <> :factor)'
-        : 'attribute_exists(id) AND (attribute_not_exists(apEmailsExtra) OR attribute_type(apEmailsExtra, :nul)) AND (attribute_not_exists(billingMethod) OR attribute_type(billingMethod, :nul) OR billingMethod <> :factor)',
-      ExpressionAttributeValues: { ':v': next, ':nul': 'NULL', ':factor': 'FACTOR', ...(prev.length ? { ':prev': before } : {}) },
+      ConditionExpression: (prev.length
+        ? 'attribute_exists(id) AND apEmailsExtra = :prev'
+        : 'attribute_exists(id) AND (attribute_not_exists(apEmailsExtra) OR attribute_type(apEmailsExtra, :nul))')
+        + (includeFactored ? '' : ' AND (attribute_not_exists(billingMethod) OR attribute_type(billingMethod, :nul) OR billingMethod <> :factor)'),
+      ExpressionAttributeValues: { ':v': next, ':nul': 'NULL', ...(includeFactored ? {} : { ':factor': 'FACTOR' }), ...(prev.length ? { ':prev': before } : {}) },
     }));
   } catch (err) {
     if (err?.name === 'ConditionalCheckFailedException') return { written: 0, lost: 1 };
@@ -92,14 +96,15 @@ export async function applyExtras({ doc, suffix, customer, before, add, now = ne
   return { written: 1, lost: 0 };
 }
 
-export async function applyOne({ doc, suffix, customer, email, now = new Date() }) {
+export async function applyOne({ doc, suffix, customer, email, includeFactored = false, now = new Date() }) {
   assertWritableSuffix(suffix, 'customer billing e-mail fill');
   const nowIso = now.toISOString();
   try {
     await doc.send(new UpdateCommand({
       TableName: `Customer-${suffix}`, Key: { id: customer.id }, UpdateExpression: 'SET apEmail = :v',
-      ConditionExpression: 'attribute_exists(id) AND (attribute_not_exists(apEmail) OR attribute_type(apEmail, :nul) OR apEmail = :blank) AND (attribute_not_exists(billingMethod) OR attribute_type(billingMethod, :nul) OR billingMethod <> :factor)',
-      ExpressionAttributeValues: { ':v': email, ':nul': 'NULL', ':blank': '', ':factor': 'FACTOR' },
+      ConditionExpression: 'attribute_exists(id) AND (attribute_not_exists(apEmail) OR attribute_type(apEmail, :nul) OR apEmail = :blank)'
+        + (includeFactored ? '' : ' AND (attribute_not_exists(billingMethod) OR attribute_type(billingMethod, :nul) OR billingMethod <> :factor)'),
+      ExpressionAttributeValues: { ':v': email, ':nul': 'NULL', ':blank': '', ...(includeFactored ? {} : { ':factor': 'FACTOR' }) },
     }));
   } catch (err) {
     if (err?.name === 'ConditionalCheckFailedException') return { written: 0, lost: 1 };
@@ -143,7 +148,7 @@ export function buildReport({ prepared, plan, rowCount, today }) {
 }
 
 async function main() {
-  const { values } = parseArgs({ options: { csv: { type: 'string' }, report: { type: 'string' }, apply: { type: 'boolean' }, limit: { type: 'string' }, suffix: { type: 'string' }, help: { type: 'boolean', short: 'h' }, ...PROD_GATE_OPTIONS }, allowPositionals: false });
+  const { values } = parseArgs({ options: { csv: { type: 'string' }, report: { type: 'string' }, apply: { type: 'boolean' }, 'include-factored': { type: 'boolean' }, limit: { type: 'string' }, suffix: { type: 'string' }, help: { type: 'boolean', short: 'h' }, ...PROD_GATE_OPTIONS }, allowPositionals: false });
   if (values.help || !values.csv) { console.log(`Usage: node scripts/awCustomerBillingEmails.mjs --csv <file> [--report <file.md>] [--limit N] [--apply] [--target prod --i-mean-production ...]\n${PROD_GATE_USAGE}\nDry run unless --apply.`); return; }
   const gate = await billingEmailsGate(values);
   let suffix;
@@ -153,7 +158,8 @@ async function main() {
   const csvRows = await readCsv(values.csv);
   const prepared = prepareRows(csvRows);
   const customers = await scanAll(doc, `Customer-${suffix}`, ['id', 'name', 'mcNumber', 'billingMethod', 'mergedIntoId', 'active', 'apEmail', 'apEmailsExtra', 'noaEmail']);
-  const plan = planBillingEmails(customers, prepared);
+  const includeFactored = values['include-factored'] === true;
+  const plan = planBillingEmails(customers, prepared, { includeFactored });
   const report = buildReport({ prepared, plan, rowCount: csvRows.length, today: localDate(new Date()) });
   const path = values.report ?? '/private/tmp/billmail-report.md';
   mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, `${report}\n`, { mode: 0o600 }); chmodSync(path, 0o600);
@@ -161,16 +167,16 @@ async function main() {
   console.log(`report: ${path} (mode 0600)`);
   const toApply = plan.results.filter((r) => r.status === 'FILL');
   const extrasPlan = plan.results.filter((r) => (r.status === 'FILL' || r.status === 'SAME_EMAIL') && r.extrasAdded?.length);
-  if (!apply) { console.log(`DRY RUN: nothing written. ${toApply.length} customer(s) would get an apEmail; ${extrasPlan.length} would get extra AP addresses (${extrasPlan.reduce((n, r) => n + r.extrasAdded.length, 0)}); ${plan.noaWrites.length} would get a noaEmail.`); return; }
+  if (!apply) { console.log(`DRY RUN: nothing written. ${toApply.length} customer(s) would get an apEmail (factored ${toApply.filter((r) => r.flags.includes('FACTORED')).length}); ${extrasPlan.length} would get extra AP addresses (${extrasPlan.reduce((n, r) => n + r.extrasAdded.length, 0)}); ${plan.noaWrites.length} would get a noaEmail.`); return; }
   const limit = values.limit ? Number(values.limit) : Infinity;
   const out = { written: 0, lost: 0 }; let n = 0;
   const primaryLost = new Set();
-  for (const r of toApply) { if (n >= limit) break; n += 1; const x = await applyOne({ doc, suffix, customer: r.customer, email: r.email }); out.written += x.written; out.lost += x.lost; if (x.lost) primaryLost.add(r.customer.id); }
+  for (const r of toApply) { if (n >= limit) break; n += 1; const x = await applyOne({ doc, suffix, customer: r.customer, email: r.email, includeFactored }); out.written += x.written; out.lost += x.lost; if (x.lost) primaryLost.add(r.customer.id); }
   const extOut = { written: 0, lost: 0, skipped: 0 }; let k = 0;
   for (const r of extrasPlan) {
     if (k >= limit) break; k += 1;
     if (primaryLost.has(r.customer.id)) { extOut.skipped += 1; continue; }
-    const x = await applyExtras({ doc, suffix, customer: r.customer, before: r.extrasBefore, add: r.extrasAdded }); extOut.written += x.written; extOut.lost += x.lost;
+    const x = await applyExtras({ doc, suffix, customer: r.customer, before: r.extrasBefore, add: r.extrasAdded, includeFactored }); extOut.written += x.written; extOut.lost += x.lost;
   }
   const noaOut = { written: 0, lost: 0 }; let m = 0;
   for (const w of plan.noaWrites) { if (m >= limit) break; m += 1; const x = await applyNoa({ doc, suffix, customer: w.customer, email: w.noa }); noaOut.written += x.written; noaOut.lost += x.lost; }
