@@ -53,7 +53,11 @@ export function docsSummary(
   stateOf: (slotKey: string) => SlotState,
   canSeePrivate: boolean,
 ): DocsSummary {
-  const score = readyScore(visibleSlots(slotsForDriver(fleet), canSeePrivate), stateOf)
+  return summarizeScore(readyScore(visibleSlots(slotsForDriver(fleet), canSeePrivate), stateOf))
+}
+
+/** One word for a list cell from a readiness score. Drivers and assets read their documents the same way. */
+export function summarizeScore(score: ReadyScore): DocsSummary {
   if (score.required === 0) return { ...score, label: 'None required', tone: 'gray' }
   if (score.missing > 0) return { ...score, label: `Missing ${score.missing}`, tone: 'red' }
   if (score.attention > 0) return { ...score, label: `Expiring ${score.attention}`, tone: 'orange' }

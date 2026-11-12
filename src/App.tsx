@@ -57,6 +57,9 @@ import { FilesPage } from '@/features/files/FilesPage'
 import { DriversListPage } from '@/features/profiles/drivers/DriversListPage'
 import { DriverProfilePage } from '@/features/profiles/drivers/DriverProfilePage'
 import { NewDriverWizard } from '@/features/profiles/drivers/NewDriverWizard'
+import { AssetsListPage } from '@/features/profiles/assets/AssetsListPage'
+import { AssetProfilePage } from '@/features/profiles/assets/AssetProfilePage'
+import { NewAssetWizard } from '@/features/profiles/assets/NewAssetWizard'
 import { FeedbackPage } from '@/features/feedback/FeedbackPage'
 import { ComplianceOverviewPage } from '@/features/compliance/overview/ComplianceOverviewPage'
 import { FinancialOperationsPage } from '@/features/financial-ops/FinancialOperationsPage'
@@ -247,6 +250,9 @@ export default function App() {
               <Route path="/profiles/drivers" element={<RequireAdmin><DriversListPage /></RequireAdmin>} />
               <Route path="/profiles/drivers/new" element={<RequireAdmin><NewDriverWizard /></RequireAdmin>} />
               <Route path="/profiles/drivers/:id" element={<RequireAdmin><DriverProfilePage /></RequireAdmin>} />
+              <Route path="/profiles/assets" element={<RequireAdmin><AssetsListPage /></RequireAdmin>} />
+              <Route path="/profiles/assets/new" element={<RequireAdmin><NewAssetWizard /></RequireAdmin>} />
+              <Route path="/profiles/assets/:id" element={<RequireAdmin><AssetProfilePage /></RequireAdmin>} />
               {/* Open to every signed-in user (no page grant) — it is where staff report problems. */}
               <Route path="/feedback" element={<FeedbackPage />} />
               <Route path="/settings" element={<ParamRedirect to="/tms/brokerage" />} />

@@ -63,6 +63,14 @@ describe('buildNavSections', () => {
     expect(pinnedOf('dashboard').find((i) => i.label === 'Accounting')).toBeUndefined()
   })
 
+  it('Profiles > Drivers and Assets are for the owner and ADMINs only, whatever page grants someone holds', () => {
+    const profiles = (opts: { isOwner?: boolean; isAdmin?: boolean }) =>
+      buildNavSections({ divisions: FOUR, hasPageAccess: () => true, ...opts }).pinned.find((i) => i.label === 'Profiles')?.children?.map((c) => c.label) ?? []
+    expect(profiles({})).not.toContain('Drivers')
+    expect(profiles({})).not.toContain('Assets')
+    expect(profiles({ isAdmin: true })).toEqual(expect.arrayContaining(['Drivers', 'Assets']))
+  })
+
   it('gives the owner the whole rail in order: the pinned freight list, then Assets, Car shipping, Company', () => {
     const { pinned, sections, businesses } = buildNavSections({ divisions: FOUR, hasPageAccess: () => false, isOwner: true })
     expect(labels(pinned)).toEqual([
@@ -76,7 +84,7 @@ describe('buildNavSections', () => {
     ])
     // Calendar carries Driver info, Appts and Time off in that order; Profiles holds Customers, Carriers, Locations and Drivers.
     expect(kids('Calendar')).toEqual(['Driver info', 'Appts', 'Time off'])
-    expect(kids('Profiles')).toEqual(['Customers', 'Carriers', 'Locations', 'Drivers'])
+    expect(kids('Profiles')).toEqual(['Customers', 'Carriers', 'Locations', 'Drivers', 'Assets'])
     expect(kids('Fleet manager').slice(0, 5)).toEqual(['Fleet manager dashboard', 'Maintenance', 'Invoices', 'Asset documents', 'Fuel'])
     expect(kids('Accounting')).toEqual(['Accounts Receivable', 'Accounts Payable', 'Factoring', 'Vendors'])
     expect(kids('Settings')).toEqual([

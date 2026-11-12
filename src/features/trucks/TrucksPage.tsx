@@ -1,6 +1,6 @@
 import { AssetPagesSwitch } from '@/features/truck-docs/AssetPagesSwitch'
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -10,13 +10,14 @@ import { useTruckConfigs } from '@/hooks/useTruckConfigs'
 import { useTrucksWithoutPhone } from '@/hooks/useTrucksWithoutPhone'
 import { formatPhone } from '@/lib/utils'
 import { TruckPhoneEditor } from './TruckPhoneEditor'
-import { provisionTruckCosts, applyTruckCosts, readTruckCosts, hasAnyTruckCost, type TruckCostInputs } from '@/lib/truckCosts'
-import { getUnitPremiumCents, setUnitPremiumCurrentPeriod } from '@/lib/insuranceClient'
+import { readTruckCosts, type TruckCostInputs } from '@/lib/truckCosts'
+import { getUnitPremiumCents } from '@/lib/insuranceClient'
 import { useExpenseData } from '@/hooks/useExpenseData'
 import { holdingArea } from '@/lib/truckInactive'
 import { activeUnits, driversHoldingTrailer, fleetCounts, reactivatePatch, unitsInTab, type FleetTab } from '@/lib/fleetActive'
 import { todayChicago } from '@/lib/recurringRevision'
 import { MarkInactiveDialog, HoldingArea } from './TruckParking'
+import { saveEquipment } from './saveEquipment'
 import { toast } from 'sonner'
 import { TmsButton } from '@/features/tms/kit/TmsButton'
 import { TmsDialog } from '@/features/tms/kit/TmsDialog'
@@ -173,7 +174,7 @@ function formatCents(cents: number) {
 
 // ── Equipment Form Modal ───────────────────────────────────────────────────────
 
-interface EquipmentFormProps {
+export interface EquipmentFormProps {
   initial?: Partial<Equipment>
   onSave: (data: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>, costs?: TruckCostInputs) => void
   onClose: () => void
@@ -181,7 +182,7 @@ interface EquipmentFormProps {
   initialCosts?: TruckCostInputs
 }
 
-function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: EquipmentFormProps) {
+export function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: EquipmentFormProps) {
   const { options: driverTypes, fleetGroupLabel } = useDriverTypes()
   // Truck fleets: the division-named ones (Local, Box Trucks) plus Amazon, which is truck-only. Keeps a stored value that is none of these.
   const truckFleetOptions = [
@@ -649,6 +650,7 @@ interface DetailPanelProps {
 }
 
 function DetailPanel({ equip, dates, tasks, invoices, driverName, onPark }: DetailPanelProps) {
+  const { isAdmin } = useAuth()
   const addMaintenanceTask    = useAppStore((s) => s.addMaintenanceTask)
   const updateMaintenanceTask = useAppStore((s) => s.updateMaintenanceTask)
   const deleteMaintenanceTask = useAppStore((s) => s.deleteMaintenanceTask)
@@ -706,6 +708,7 @@ function DetailPanel({ equip, dates, tasks, invoices, driverName, onPark }: Deta
         {!equip.active && (
           <span className="text-muted-foreground">Inactive{equip.inactiveSince ? ` from ${equip.inactiveSince}` : ''}</span>
         )}
+        {isAdmin && <Link to={`/profiles/assets/${equip.id}`} className="text-xs font-medium underline" data-testid="open-asset-profile">Open profile</Link>}
         <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => onPark(equip)}>
           {equip.active ? <PauseCircle className="size-3" /> : <PlayCircle className="size-3" />}
           {equip.active ? 'Mark inactive' : 'Reactivate'}
@@ -1168,39 +1171,7 @@ export function TrucksPage() {
   ]
 
   function handleSave(data: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>, costs?: TruckCostInputs) {
-    if (showForm && showForm !== 'new') {
-      const id = showForm.id
-      const unit = data.unitNumber
-      updateEquipment(id, data)
-      toast.success(`Unit ${unit} updated`)
-      // Upsert this truck's recurring operating costs (create / update amount / clear).
-      if (costs) {
-        const { existing } = readTruckCosts(id, expenseData.recurring, expenseData.allocations, expenseData.expenseTypes)
-        applyTruckCosts(id, unit, costs, existing)
-          .then(() => expenseData.refresh())
-          .catch((err) => console.error('[applyTruckCosts] failed', err))
-        // Insurance lives in the Insurance module (current period) — same record the
-        // Insurance page edits, so the two stay in sync and it feeds the P&L.
-        if (data.type === 'truck') {
-          setUnitPremiumCurrentPeriod('TRUCK', id, unit, Math.round((costs.insuranceAnnual ?? 0) * 100))
-            .catch((err) => console.error('[insurance save] failed', err))
-        }
-      }
-    } else {
-      const truck = addEquipment(data)
-      toast.success(`Unit ${truck.unitNumber} added`)
-      // Provision recurring costs captured on the add-truck form so they flow into
-      // Expenses + Profitability. Fire-and-forget.
-      if (costs && hasAnyTruckCost(costs)) {
-        provisionTruckCosts(truck.id, truck.unitNumber, costs)
-          .then((n) => { if (n > 0) { toast('Operating costs added', { description: `${n} recurring cost${n === 1 ? '' : 's'} created for unit ${truck.unitNumber}` }); expenseData.refresh() } })
-          .catch((err) => console.error('[provisionTruckCosts] failed', err))
-      }
-      if (costs && data.type === 'truck' && (costs.insuranceAnnual ?? 0) > 0) {
-        setUnitPremiumCurrentPeriod('TRUCK', truck.id, truck.unitNumber, Math.round((costs.insuranceAnnual ?? 0) * 100))
-          .catch((err) => console.error('[insurance save] failed', err))
-      }
-    }
+    saveEquipment({ existing: showForm && showForm !== 'new' ? showForm : null, data, costs, addEquipment, updateEquipment, expenseData })
     setShowForm(null)
   }
 
