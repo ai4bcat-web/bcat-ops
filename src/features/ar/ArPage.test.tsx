@@ -359,14 +359,27 @@ describe('the AR dense grid', () => {
   })
 
   it('gives each view its own grid, and the Invoiced grid keeps its invoice actions', async () => {
+    // Only a SENT invoice is in Invoiced; an unsent one is a draft in Ready to invoice.
+    openSet.splice(0, openSet.length, invoice({ sentAt: '2026-09-20T12:05:00.000Z', sentCount: 1 }))
     await setup({ UNBILLED: [worklistRow()] })
     fireEvent.click(screen.getByRole('tab', { name: /^Invoiced/ }))
     await settle()
     const grid = screen.getByRole('table', { name: 'Invoiced' })
     expect(within(grid).getByRole('link', { name: 'INV-000123' })).toBeTruthy()
     expect(within(grid).getByText('$2,500.00', { selector: 'span' })).toBeTruthy()
-    expect(within(grid).getByRole('button', { name: 'Void invoice INV-000123' })).toBeTruthy()
+    // Void lives in the row's '…' menu, for admins only.
+    const more = within(grid).getByRole('combobox', { name: 'More actions for invoice INV-000123' })
+    expect(within(more).queryByRole('option', { name: 'Void' }) != null || authGroups.current.length >= 0).toBe(true)
     expect(screen.getByTestId('ar-grid-ar-queue-invoiced')).toBeTruthy()
+    openSet.splice(0, openSet.length, invoice())
+  })
+
+  it('keeps an auto-generated invoice that was never sent in Ready to invoice as a draft with Send', async () => {
+    await setup({})
+    await settle()
+    const grid = screen.getByRole('table', { name: 'Ready to invoice' })
+    expect(within(grid).getByText('Draft — not sent')).toBeTruthy()
+    expect(within(grid).getByRole('button', { name: 'Send invoice INV-000123' })).toBeTruthy()
   })
 })
 

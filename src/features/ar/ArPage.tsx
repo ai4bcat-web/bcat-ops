@@ -10,6 +10,7 @@
  * signed download. The page reports exactly that and never claims a send that did not
  * happen — a false "sent" here is a customer who never got their bill.
  */
+import { SendReviewCarousel } from './components/SendReviewCarousel'
 import { AgingStatementDialog } from './components/AgingStatementDialog'
 import { allApEmails } from '@/lib/billingMethod'
 import { useAuthUser } from '@/hooks/useAuth'
@@ -52,7 +53,7 @@ import {
   agingChipFor, formatDay, lastThreeMonths, monthLabel,
 } from './arViews'
 import {
-  AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, billedByMatches, buildInvoicedRows, buildPaidRows, buildReadyRows, groupKeyOf, groupTotals,
+  AR_BILLED_BY_LABEL, AR_GROUP_BY_LABEL, AR_QUEUE_STATUS_LABEL, billedByMatches, isInvoiceSent, splitOpenInvoices, buildPaidRows, buildReadyRows, groupKeyOf, groupTotals,
   orderByGroup, type ArBilledBy, type ArGroupBy, type ArQueueLookups, type ArQueueRow, type ArQueueStatus,
 } from './arQueue'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
@@ -67,6 +68,7 @@ import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord, Us
 
 /** Which dialog is open, and the one thing it is open about. Mount is the `open` flag. */
 type ArDialog =
+  | { kind: 'review'; invoices: InvoiceRecord[] }
   | { kind: 'statement'; customerId: string; customerName: string }
   | { kind: 'generate'; orderId: string; shipmentNumber: string | null }
   | { kind: 'email'; invoiceId: string }
@@ -248,13 +250,20 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   )
 
   const queue: Record<ArQueueStatus, ArQueueRow[]> = useMemo(() => {
+    // Auto-generated on release but not yet sent = a draft for review in Ready to invoice.
+    const split = splitOpenInvoices(open.invoices, lookups, releasedByOrder, (inv) =>
+      isInvoiceSent(inv, inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : null))
     const keep = (rows: ArQueueRow[]) => rows.filter((row) => billedByMatches(row, billedBy))
     return {
-      READY: keep(buildReadyRows(unbilled.rows, lookups)),
-      INVOICED: keep(buildInvoicedRows(open.invoices, lookups, releasedByOrder)),
+      READY: keep((() => {
+        const ready = buildReadyRows(unbilled.rows, lookups)
+        const readyOrders = new Set(ready.map((r) => r.orderId))
+        return [...split.drafts.filter((r) => !readyOrders.has(r.orderId)), ...ready]
+      })()),
+      INVOICED: keep(split.invoiced),
       PAID: keep(buildPaidRows(paidInvoices, lookups)),
     }
-  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy])
+  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId])
 
   const uninvoiced = useMemo(() => {
     const rows = unbilled.rows
@@ -441,6 +450,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onEmail: (inv) => setDialog({ kind: 'email', invoiceId: inv.id }),
       onPayment: (inv) => setDialog({ kind: 'payment', customerId: inv.customerId, customerName: inv.customerName ?? '', invoiceId: inv.id }),
       onFactor: (inv) => setDialog({ kind: 'factor', invoiceId: inv.id }),
+      onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onVoid: (inv) => setDialog({ kind: 'void', invoice: inv }),
     })
     : tab === 'payments' ? paymentsView({
@@ -527,6 +537,15 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           busy={busy}
           onClose={() => setDialog(null)}
           onDone={closeAndRefresh}
+        />
+      )}
+      {dialog?.kind === 'review' && (
+        <SendReviewCarousel
+          invoices={dialog.invoices}
+          customerById={customerById}
+          shipmentsById={lookups.shipmentsById}
+          onClose={() => setDialog(null)}
+          onDone={() => { setSelected([]); void refreshAll() }}
         />
       )}
       {dialog?.kind === 'statement' && (
@@ -636,7 +655,7 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 
 function queueView({
   status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, canVoid, selected, justGenerated, factorByItemId, customerById,
-  months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onBatchEmail, onEmail, onPayment, onFactor, onVoid,
+  months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onBatchEmail, onPayment, onFactor, onVoid, onReview,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -661,6 +680,7 @@ function queueView({
   onEmail: (invoice: InvoiceRecord) => void
   onPayment: (invoice: InvoiceRecord) => void
   onFactor: (invoice: InvoiceRecord) => void
+  onReview: (invoices: InvoiceRecord[]) => void
   onVoid: (invoice: InvoiceRecord) => void
   canVoid: boolean
 }): ListView {
@@ -763,6 +783,7 @@ function queueView({
         if (row.status === 'READY' && row.reasons.length > 0) {
           return <span className="flex items-center gap-1"><TmsBadge tone="red">Blocked</TmsBadge><span style={{ color: 'var(--tms-badge-red)' }}>{row.reasons.join('; ')}</span></span>
         }
+        if (row.status === 'READY' && row.invoiceId) return <TmsBadge tone="orange">Draft — not sent</TmsBadge>
         return <TmsBadge tone={row.status === 'PAID' ? 'green' : row.status === 'INVOICED' ? 'blue' : 'gray'}>{AR_QUEUE_STATUS_LABEL[row.status]}</TmsBadge>
       case 'sent':
         if (!row.invoiceId) return <span className="tms-muted">—</span>
@@ -775,27 +796,46 @@ function queueView({
         return <TmsBadge tone={chip.late ? 'red' : 'gray'}>{chip.label}</TmsBadge>
       }
       case 'actions': {
-        if (ready) {
+        const inv = row.invoice
+        const view = inv
+          ? <Link className="tms-icon-btn tms-icon-btn-plain" to={`/tms/invoicing/invoices/${inv.id}`} aria-label={`View or edit invoice ${inv.number}`} title="View / edit"><Eye size={15} /></Link>
+          : null
+        if (ready && !inv) {
           return (
-            <TmsButton
-              size="sm"
-              aria-label={`Generate invoice for ${row.shipmentNumber ?? row.orderId}`}
-              disabled={busy || row.reasons.length > 0 || !canRelease}
-              title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
-              onClick={() => onGenerate(row)}
-            >
+            <TmsButton size="sm" aria-label={`Generate invoice for ${row.shipmentNumber ?? row.orderId}`}
+              disabled={busy || row.reasons.length > 0 || !canRelease} title={canRelease ? undefined : BILLING_GRANT_MESSAGE} onClick={() => onGenerate(row)}>
               Generate
             </TmsButton>
           )
         }
-        const inv = row.invoice
         if (!inv) return null
+        const more = (options: Array<[string, string, () => void]>) => options.length === 0 ? null : (
+          <TmsSelect aria-label={`More actions for invoice ${inv.number}`} value="" disabled={busy} className="w-12"
+            onChange={(e) => { options.find(([k]) => k === e.target.value)?.[2](); e.target.value = '' }}>
+            <option value="">…</option>
+            {options.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </TmsSelect>
+        )
+        if (ready) {
+          return (
+            <span className="flex items-center justify-end gap-1 whitespace-nowrap">
+              {view}
+              {row.factored
+                ? <TmsButton size="sm" aria-label={`Send invoice ${inv.number} to OTR`} disabled={busy || !canRelease} onClick={() => onReview([inv])}>Send to OTR</TmsButton>
+                : <TmsButton size="sm" variant="primary" aria-label={`Send invoice ${inv.number}`} disabled={busy || !canRelease} onClick={() => onReview([inv])}>Send</TmsButton>}
+              {more(row.factored ? [] : [['factor', 'Send to factor instead', () => onFactor(inv)]])}
+            </span>
+          )
+        }
+        if (status === 'PAID') return <span className="flex justify-end">{view}</span>
         return (
-          <span className="flex justify-end gap-1 whitespace-nowrap">
-            <TmsButton variant="ghost" size="sm" aria-label={`E-mail invoice ${inv.number}`} disabled={busy} onClick={() => onEmail(inv)}>E-mail</TmsButton>
+          <span className="flex items-center justify-end gap-1 whitespace-nowrap">
+            {view}
             <TmsButton variant="ghost" size="sm" aria-label={`Receive payment for invoice ${inv.number}`} disabled={busy} onClick={() => onPayment(inv)}>Receive payment</TmsButton>
-            <TmsButton variant="ghost" size="sm" aria-label={`Send invoice ${inv.number} to factor`} disabled={busy} onClick={() => onFactor(inv)}>Send to Factor</TmsButton>
-            <TmsButton variant="ghost" size="sm" aria-label={`Void invoice ${inv.number}`} disabled={busy || !canVoid} title={canVoid ? undefined : 'Only an admin can void an invoice'} onClick={() => onVoid(inv)}>Void</TmsButton>
+            {more([
+              ...(row.factored ? [] : [['resend', 'Resend', () => onReview([inv])] as [string, string, () => void]]),
+              ...(canVoid ? [['void', 'Void', () => onVoid(inv)] as [string, string, () => void]] : []),
+            ])}
           </span>
         )
       }
@@ -804,6 +844,8 @@ function queueView({
     }
   }
 
+  // Drafts (auto-generated, not sent) ticked in Ready to invoice: the review carousel's batch.
+  const selectedDrafts = rows.filter((row) => row.invoice && selected.includes(row.orderId)).map((row) => row.invoice as InvoiceRecord)
   const actions = (
     <>
       {groupControl}
@@ -820,6 +862,14 @@ function queueView({
             onClick={onBatchGenerate}
           >
             Batch generate
+          </TmsButton>
+          <TmsButton
+            variant="primary"
+            aria-label="Review and send selected invoices"
+            disabled={busy || !canRelease || selectedDrafts.length === 0}
+            onClick={() => onReview(selectedDrafts)}
+          >
+            Review &amp; send{selectedDrafts.length ? ` (${selectedDrafts.length})` : ''}
           </TmsButton>
           <TmsButton
             aria-label="Batch e-mail generated invoices"

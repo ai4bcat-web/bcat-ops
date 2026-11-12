@@ -34,7 +34,8 @@ export type ApTabKey = 'awaiting' | 'expected' | 'aging' | 'selected' | 'paid' |
  * `report` is the by-carrier aging report that used to be called Aging.
  */
 export const AP_TABS: { key: ApTabKey; label: string }[] = [
-  { key: 'awaiting', label: 'Awaiting invoice' },
+  // 'awaiting' (carrier legs with no bill yet) left the strip on 2026-11-12: a bill is now created when
+  // the load moves to billing from Load review, so a leg without one is still Load review's work.
   { key: 'expected', label: 'Expected' },
   { key: 'aging', label: 'Aging' },
   { key: 'selected', label: 'Selected' },
