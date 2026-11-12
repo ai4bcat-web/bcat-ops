@@ -904,6 +904,8 @@ const schema = a.schema(stageTypes({
   // Writes are routed through tmsDirectoryActions so links and archives stay valid.
   Customer: a
     .model({
+      agingStatementSentAt: a.datetime(),   // last aging statement e-mailed (AGING_STATEMENT)
+      agingStatementSentTo: a.string(),
       // Step AW stage D: how this customer is billed (Docs/tms-build/AW-CDE-plan.md D.1). Unset = release to billing is refused.
       billingMethod:        a.enum(['FACTOR', 'MANUAL']),
       apEmail:              a.string(),

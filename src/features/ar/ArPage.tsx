@@ -10,6 +10,7 @@
  * signed download. The page reports exactly that and never claims a send that did not
  * happen — a false "sent" here is a customer who never got their bill.
  */
+import { AgingStatementDialog } from './components/AgingStatementDialog'
 import { allApEmails } from '@/lib/billingMethod'
 import { useAuthUser } from '@/hooks/useAuth'
 import { isOwnerOrAdmin } from '@/lib/accountingAccess'
@@ -33,7 +34,7 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import {
-  batchEmailInvoices, batchGenerateInvoices, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
+  agingStatement, batchEmailInvoices, batchGenerateInvoices, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
 } from '@/lib/apiClient'
 import { loadWorklistShipments } from '@/lib/worklistShipments'
 import {
@@ -66,6 +67,7 @@ import type { ArPaymentRecord, CustomerRecord, InvoiceRecord, ShipmentRecord, Us
 
 /** Which dialog is open, and the one thing it is open about. Mount is the `open` flag. */
 type ArDialog =
+  | { kind: 'statement'; customerId: string; customerName: string }
   | { kind: 'generate'; orderId: string; shipmentNumber: string | null }
   | { kind: 'email'; invoiceId: string }
   | { kind: 'payment'; customerId: string; customerName: string; invoiceId?: string }
@@ -171,6 +173,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   }, [])
 
   const [selected, setSelected] = useState<string[]>([])
+  /** Customers ticked on the Aging tab for a bulk statement send. */
+  const [statementSelected, setStatementSelected] = useState<string[]>([])
   /** What the last batch generated, so "Batch e-mail" bills exactly those invoices. */
   const [justGenerated, setJustGenerated] = useState<string[]>([])
   /** What the last batch refused, with the release gate's own sentences. */
@@ -363,6 +367,26 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
 
   const customer = customers.find((c) => c.id === arCustomerId) ?? null
   const customerById = new Map(customers.map((c) => [c.id, c]))
+  const runBulkStatements = async () => {
+    setBusy(true)
+    let sent = 0
+    const failed: string[] = []
+    for (const id of statementSelected) {
+      const name = customerById.get(id)?.name ?? id
+      try {
+        const row = await agingStatement({ customerId: id, send: true })
+        if (row.emailStatus === 'SENT') sent++
+        else failed.push(`${name}: ${row.emailError || row.emailStatus}`)
+      } catch (err) {
+        failed.push(`${name}: ${graphqlErrorText(err)}`)
+      }
+    }
+    setBusy(false)
+    setStatementSelected([])
+    if (sent) toast.success(`Sent ${sent} aging report${sent === 1 ? '' : 's'}`)
+    if (failed.length) toast.error(`Not sent — ${failed.join('; ')}`)
+    void refreshAll()
+  }
 
   const groupControl = (
     <>
@@ -435,12 +459,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     : agingView({
       errorBanner,
       aging: open.aging,
-      uninvoicedCents: uninvoiced.reduce((sum, r) => sum + r.revenueCents, 0),
-      uninvoicedCount: uninvoiced.length,
-      avgDaysToInvoice: lagDays,
-      avgDaysToPay: avgDaysToPay(paidInvoices),
-      paidMonthLabel: monthLabel(month),
       onCsv: downloadAgingCsv,
+      customerById,
+      statementSelected,
+      onStatementSelect: setStatementSelected,
+      onStatement: (customerId, customerName) => setDialog({ kind: 'statement', customerId, customerName }),
+      onBulkStatements: () => void runBulkStatements(),
+      busy,
     })
 
   return (
@@ -464,6 +489,15 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           </button>
         </div>
         <BillingGapsPanel onFixed={() => void refreshAll()} />
+        <AgingStrip
+          openCents={open.aging.totalCents}
+          lateCents={open.aging.lateCents}
+          deliveredNotInvoicedCents={uninvoiced.reduce((sum, r) => sum + r.revenueCents, 0)}
+          deliveredNotInvoicedCount={uninvoiced.length}
+          avgDaysToInvoice={lagDays}
+          avgDaysToPay={avgDaysToPay(paidInvoices)}
+          paidMonthLabel={monthLabel(month)}
+        />
         <TmsTabStrip aria-label="Invoicing status" tabs={tabs} active={tab} onSelect={(key) => { setSelected([]); setTab(key as ArPageTab) }} />
         {current.banner}
         <ArDenseTable<never> key={tab} grid={current.grid} />
@@ -493,6 +527,14 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           busy={busy}
           onClose={() => setDialog(null)}
           onDone={closeAndRefresh}
+        />
+      )}
+      {dialog?.kind === 'statement' && (
+        <AgingStatementDialog
+          customerId={dialog.customerId}
+          customerName={dialog.customerName}
+          onClose={() => setDialog(null)}
+          onSent={() => { setDialog(null); void refreshAll() }}
         />
       )}
       {dialog?.kind === 'credit' && (
@@ -942,20 +984,21 @@ function paymentsView({
 /* ── Aging ───────────────────────────────────────────────────────────────── */
 
 function agingView({
-  errorBanner, aging, uninvoicedCents, uninvoicedCount, avgDaysToInvoice: lag, avgDaysToPay: dso,
-  paidMonthLabel, onCsv,
+  errorBanner, aging, onCsv, customerById, statementSelected, onStatementSelect, onStatement, onBulkStatements, busy,
 }: {
   errorBanner: ReactNode
   aging: AgingSummary
-  uninvoicedCents: number
-  uninvoicedCount: number
-  avgDaysToInvoice: number | null
-  avgDaysToPay: number | null
-  paidMonthLabel: string
   onCsv: () => void
+  customerById: Map<string, CustomerRecord>
+  statementSelected: string[]
+  onStatementSelect: (ids: string[]) => void
+  onStatement: (customerId: string, customerName: string) => void
+  onBulkStatements: () => void
+  busy: boolean
 }): ListView {
   type Row = AgingSummary['byCustomer'][number]
   const columns: Array<Col<Row>> = [
+    { key: 'select', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 32 },
     { key: 'customer', header: 'Customer', group: 'Customer', text: (row) => row.customerName || row.customerId },
     ...AR_AGING_BUCKETS.map((b) => moneyCol<Row>(b, AR_AGING_BUCKET_LABEL[b], (row) => row.byBucket[b], 'Buckets')),
     moneyCol<Row>('total', 'Total', (row) => row.totalCents, 'Buckets'),
@@ -969,26 +1012,52 @@ function agingView({
       text: (row) => (row.oldestDays ? `${row.oldestDays}d` : '—'), sortValue: (row) => row.oldestDays,
       filter: 'number', numberOf: (row) => row.oldestDays, numberUnit: 'days',
     },
+    {
+      key: 'lastStatement', header: 'Last statement', group: 'Customer',
+      text: (row) => formatDay(customerById.get(row.customerId)?.agingStatementSentAt ?? null) || '—',
+      sortValue: (row) => customerById.get(row.customerId)?.agingStatementSentAt ?? '',
+    },
+    { key: 'statement', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: 150 },
   ]
+  const renderCell = (row: Row, key: string): ReactNode => {
+    if (key === 'select') {
+      return (
+        <input
+          type="checkbox"
+          aria-label={`Select ${row.customerName || row.customerId}`}
+          checked={statementSelected.includes(row.customerId)}
+          onChange={() => onStatementSelect(statementSelected.includes(row.customerId)
+            ? statementSelected.filter((id) => id !== row.customerId)
+            : [...statementSelected, row.customerId])}
+        />
+      )
+    }
+    if (key === 'statement') {
+      return (
+        <TmsButton size="sm" aria-label={`Email aging report to ${row.customerName || row.customerId}`} disabled={busy}
+          onClick={() => onStatement(row.customerId, row.customerName || row.customerId)}>
+          <Mail size={12} /> Email aging report
+        </TmsButton>
+      )
+    }
+    return undefined
+  }
 
   return view<Row>({
     actions: (
-      <TmsButton aria-label="Download aging CSV" onClick={onCsv}>
-        <Download size={14} /> CSV
-      </TmsButton>
+      <>
+        <TmsButton aria-label="Email aging reports to selected" disabled={busy || statementSelected.length === 0} onClick={onBulkStatements}>
+          <Mail size={14} /> Email aging reports{statementSelected.length ? ` (${statementSelected.length})` : ''}
+        </TmsButton>
+        <TmsButton aria-label="Download aging CSV" onClick={onCsv}>
+          <Download size={14} /> CSV
+        </TmsButton>
+      </>
     ),
     banner: (
       <>
         {errorBanner}
-        <AgingStrip
-          openCents={aging.totalCents}
-          lateCents={aging.lateCents}
-          deliveredNotInvoicedCents={uninvoicedCents}
-          deliveredNotInvoicedCount={uninvoicedCount}
-          avgDaysToInvoice={lag}
-          avgDaysToPay={dso}
-          paidMonthLabel={paidMonthLabel}
-        />
+        <p className="text-sm tms-muted">Aged from the invoice date. Email aging report previews the statement and the e-mail before anything is sent.</p>
       </>
     ),
     grid: {
@@ -997,6 +1066,7 @@ function agingView({
       columns,
       rows: aging.byCustomer,
       rowKey: (row) => row.customerId,
+      renderCell,
       empty: 'Nothing is owed.',
     },
   })

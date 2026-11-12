@@ -303,6 +303,16 @@ function meanDays(days: number[]): number | null {
  * invoice whose shipment has no delivery date: invoice-early customers are billed before
  * delivery and would otherwise report a lag that never happened.
  */
+/**
+ * Carried over from Aljex: issued and (often) marked paid by the import, so its timestamps are
+ * the import's, not the business's. Excluded from the timing averages.
+ */
+export function isImportedInvoice(inv: Pick<InvoiceRecord, 'markedSentNote' | 'aljexDueDate'> & { legacyImported?: boolean | null }): boolean {
+  return inv.legacyImported === true
+    || Boolean(inv.aljexDueDate)
+    || (typeof inv.markedSentNote === 'string' && inv.markedSentNote.startsWith('Carried over from Aljex'))
+}
+
 export function avgDaysToInvoice(invoices: InvoiceRecord[], shipments: ShipmentRecord[]): number | null {
   const deliveredAtById = new Map<string, string>()
   for (const s of shipments) {
@@ -310,11 +320,13 @@ export function avgDaysToInvoice(invoices: InvoiceRecord[], shipments: ShipmentR
   }
   const days: number[] = []
   for (const inv of invoices) {
-    if (inv.status === 'VOID') continue
+    if (inv.status === 'VOID' || isImportedInvoice(inv)) continue
     const delivered = deliveredAtById.get(inv.shipmentId)
     if (!delivered) continue
-    const d = dayDiff(delivered, inv.issuedAt)
-    if (d !== null) days.push(d)
+    // The invoice DATE, not when the row was written; an invoice dated before its delivery is a
+    // data error (or carried-over history), not negative lag, so it is left out.
+    const d = dayDiff(delivered, inv.invoiceDate || inv.issuedAt)
+    if (d !== null && d >= 0) days.push(d)
   }
   return meanDays(days)
 }
@@ -327,9 +339,9 @@ export function avgDaysToInvoice(invoices: InvoiceRecord[], shipments: ShipmentR
 export function avgDaysToPay(invoices: InvoiceRecord[]): number | null {
   const days: number[] = []
   for (const inv of invoices) {
-    if (inv.status !== 'PAID') continue
-    const d = dayDiff(inv.issuedAt, inv.paidAt)
-    if (d !== null) days.push(d)
+    if (inv.status !== 'PAID' || isImportedInvoice(inv)) continue
+    const d = dayDiff(inv.invoiceDate || inv.issuedAt, inv.paidAt)
+    if (d !== null && d >= 0) days.push(d)
   }
   return meanDays(days)
 }

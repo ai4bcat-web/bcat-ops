@@ -218,13 +218,19 @@ describe('avgDaysToInvoice / avgDaysToPay', () => {
 
   it('averages delivery → issue and ignores VOID and undelivered shipments', () => {
     const rows = [
-      invoice({ id: 'i1', issuedAt: '2026-09-03T09:00:00Z' }),            // 2
-      invoice({ id: 'i2', issuedAt: '2026-09-05T09:00:00Z' }),            // 4
-      invoice({ id: 'i3', issuedAt: '2026-09-30T09:00:00Z', status: 'VOID' }), // excluded
-      invoice({ id: 'i4', issuedAt: '2026-09-30T09:00:00Z' }),            // no delivery date
-      invoice({ id: 'i9', issuedAt: '2026-09-30T09:00:00Z' }),            // no shipment at all
+      invoice({ id: 'i1', issuedAt: '2026-09-03T09:00:00Z', invoiceDate: '2026-09-03' }),            // 2
+      invoice({ id: 'i2', issuedAt: '2026-09-05T09:00:00Z', invoiceDate: '2026-09-05' }),            // 4
+      invoice({ id: 'i3', issuedAt: '2026-09-30T09:00:00Z', invoiceDate: '2026-09-30', status: 'VOID' }), // excluded
+      invoice({ id: 'i4', issuedAt: '2026-09-30T09:00:00Z', invoiceDate: '2026-09-30' }),            // no delivery date
+      invoice({ id: 'i9', issuedAt: '2026-09-30T09:00:00Z', invoiceDate: '2026-09-30' }),            // no shipment at all
     ]
     expect(avgDaysToInvoice(rows, ships)).toBe(3)
+    // Dated before delivery (a data error) and Aljex carry-overs never pull the average negative.
+    expect(avgDaysToInvoice([
+      ...rows,
+      { ...invoice({ id: 'i1', issuedAt: '2026-09-03T09:00:00Z' }), invoiceDate: '2026-08-01' },
+      { ...invoice({ id: 'i2', issuedAt: '2026-09-05T09:00:00Z', invoiceDate: '2026-09-05' }), aljexDueDate: '2026-10-05' },
+    ], ships)).toBe(3)
   })
 
   it('is null when no pair qualifies', () => {
