@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { DriverAuthProvider } from './DriverAuthContext'
 import { isTokenRejection } from './tokenRejection'
-import { useDriverAuth } from './useDriverAuth'
+import { NewPasswordRequiredError, useDriverAuth } from './useDriverAuth'
 
 const mockSend = vi.fn()
 
@@ -16,6 +16,7 @@ vi.mock('@aws-sdk/client-cognito-identity-provider', () => ({
   ResendConfirmationCodeCommand: vi.fn(function (input) { return { ...input, Command: 'ResendConfirmationCode' } }),
   ForgotPasswordCommand: vi.fn(function (input) { return { ...input, Command: 'ForgotPassword' } }),
   ConfirmForgotPasswordCommand: vi.fn(function (input) { return { ...input, Command: 'ConfirmForgotPassword' } }),
+  RespondToAuthChallengeCommand: vi.fn(function (input) { return { ...input, Command: 'RespondToAuthChallenge' } }),
 }))
 
 function b64url(obj: object): string {
@@ -140,6 +141,30 @@ describe('DriverAuthContext', () => {
     await expect(result.current.signUp('unknown@example.com', 'password123!')).rejects.toThrow(
       /^No driver record matches this email\. Contact dispatch\.$/,
     )
+  })
+
+  it('turns a temporary password into a new-password challenge, then signs in with the new one', async () => {
+    mockSend.mockResolvedValueOnce({ ChallengeName: 'NEW_PASSWORD_REQUIRED', Session: 'sess-1' })
+    const { result } = renderHook(() => useDriverAuth(), { wrapper })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    const err = await result.current.signIn('Chuck@Example.com', 'temp2026x').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(NewPasswordRequiredError)
+    expect((err as NewPasswordRequiredError).session).toBe('sess-1')
+
+    mockSend.mockResolvedValueOnce({
+      AuthenticationResult: { IdToken: makeIdToken({ email: 'chuck@example.com' }), AccessToken: 'a', RefreshToken: 'r', ExpiresIn: 3600 },
+    })
+    await act(async () => {
+      await result.current.completeNewPassword('chuck@example.com', 'sess-1', 'mine2026x')
+    })
+    const respond = mockSend.mock.calls.find((call) => call[0].Command === 'RespondToAuthChallenge')
+    expect(respond?.[0]).toMatchObject({
+      ChallengeName: 'NEW_PASSWORD_REQUIRED',
+      Session: 'sess-1',
+      ChallengeResponses: { USERNAME: 'chuck@example.com', NEW_PASSWORD: 'mine2026x' },
+    })
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true))
   })
 
   it('sends an unknown email to Cognito rather than asking the API whether it is a driver', async () => {

@@ -425,7 +425,9 @@ backend.userManagement.resources.lambda.addToRolePolicy(
 // user overview). A separate statement; the staff-pool grant above is unchanged.
 backend.userManagement.resources.lambda.addToRolePolicy(
   new PolicyStatement({
-    actions: ['cognito-idp:ListUsers'],
+    // ListUsers: the roll call. The two Admin*Password actions: an admin gets a driver back
+    // into the Ivan driver app (manageUsers driverLogin / resetDriverPassword).
+    actions: ['cognito-idp:ListUsers', 'cognito-idp:AdminResetUserPassword', 'cognito-idp:AdminSetUserPassword'],
     resources: [driverPool.userPoolArn],
   }),
 )

@@ -20,6 +20,7 @@ import {
   AdminAddUserToGroupCommand,
   AdminRemoveUserFromGroupCommand,
   AdminResetUserPasswordCommand,
+  AdminSetUserPasswordCommand,
   AdminUserGlobalSignOutCommand,
   AdminGetUserCommand,
   CreateGroupCommand,
@@ -69,6 +70,13 @@ const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const FORBIDDEN_NOT_ADMIN = 'Forbidden: only the owner may view or manage users.'
 /** Promoting to ADMIN hands out the ADMIN group, so only the owner may do it. */
 const FORBIDDEN_GRANT_ADMIN = 'Forbidden: only the owner may grant the ADMIN role.'
+/**
+ * Driver-app password help. The one exception to the owner-only gate: an ADMIN may get a
+ * driver back into the Ivan driver app. These act on the DRIVER pool only, never on staff.
+ */
+const DRIVER_LOGIN_ACTIONS = new Set(['driverLogin', 'resetDriverPassword'])
+const FORBIDDEN_DRIVER_LOGIN = 'Forbidden: only an admin may reset a driver\'s app password.'
+
 const OWNER_ONLY_ACTIONS: Record<string, string> = {
   setAdmin: 'Forbidden: only the owner may grant or revoke admin.',
   delete: 'Forbidden: only the owner may delete a user.',
@@ -81,7 +89,7 @@ type Row = Record<string, unknown>
 interface Args {
   action:
     | 'list' | 'create' | 'disable' | 'enable' | 'delete' | 'getGroups' | 'setPageGroups'
-    | 'resetPassword' | 'setAdmin' | 'listDriverPool'
+    | 'resetPassword' | 'setAdmin' | 'listDriverPool' | 'driverLogin' | 'resetDriverPassword'
     | 'setRole' | 'setTeams' | 'setDivisions' | 'setClaims' | 'updateProfile' | 'reinvite' | 'forceSignOut'
   email?: string
   username?: string
@@ -503,6 +511,112 @@ async function applyRoleChange(
   return { profile, added: add, removed: remove }
 }
 
+
+// ── Driver-app logins (the DRIVER pool) ─────────────────────────────────────
+
+export interface DriverLoginInfo {
+  exists: boolean
+  email: string
+  status?: string
+  enabled?: boolean
+  emailVerified?: boolean
+}
+
+function driverPoolId(): string {
+  const poolId = process.env.DRIVER_USER_POOL_ID
+  if (!poolId) throw new Error('Driver app logins are not configured on this deploy (DRIVER_USER_POOL_ID is missing).')
+  return poolId
+}
+
+function requireEmail(value: unknown): string {
+  const email = typeof value === 'string' ? value.toLowerCase().trim() : ''
+  if (!email || !/^[^\s@"]+@[^\s@"]+\.[^\s@"]+$/.test(email)) throw new Error('A valid driver email is required.')
+  return email
+}
+
+/** The driver pool signs in by email; find the account (its Cognito username is a uuid). */
+async function findDriverLogin(email: string): Promise<{ username: string; info: DriverLoginInfo } | null> {
+  const page = await cognito.send(new ListUsersCommand({
+    UserPoolId: driverPoolId(),
+    Filter: `email = "${email}"`,
+    Limit: 2,
+  }))
+  const u = page.Users?.[0]
+  if (!u?.Username) return null
+  const attr = (name: string) => u.Attributes?.find((a) => a.Name === name)?.Value
+  return {
+    username: u.Username,
+    info: {
+      exists: true,
+      email,
+      status: u.UserStatus ?? 'UNKNOWN',
+      enabled: u.Enabled !== false,
+      emailVerified: attr('email_verified') === 'true',
+    },
+  }
+}
+
+/** Same rules as the driver pool's password policy (backend.ts): 8+, a lowercase letter, a digit. */
+export function driverPasswordProblem(password: string): string | null {
+  if (password.length < 8) return 'The temporary password must be at least 8 characters.'
+  if (password.length > 128) return 'The temporary password is too long.'
+  if (!/[a-z]/.test(password)) return 'The temporary password needs a lowercase letter.'
+  if (!/[0-9]/.test(password)) return 'The temporary password needs a number.'
+  if (/\s/.test(password)) return 'The temporary password cannot contain spaces.'
+  return null
+}
+
+/** Plain words for the Cognito errors an admin can actually hit here. */
+function driverResetErrorText(err: unknown): string {
+  const name = (err as { name?: string })?.name ?? ''
+  const message = err instanceof Error ? err.message : String(err)
+  if (name === 'UserNotFoundException') return 'No app account — send a sign-in invite instead.'
+  if (name === 'InvalidPasswordException') return 'Cognito refused that temporary password: it does not meet the password rules.'
+  if (name === 'NotAuthorizedException') return 'Cognito refused the reset for this account (it may be disabled).'
+  if (name === 'LimitExceededException' || name === 'TooManyRequestsException') return 'Too many resets for this driver right now. Wait a few minutes and try again.'
+  if (name === 'InvalidParameterException') return `Cognito could not reset this account: ${message}`
+  return `Could not reset the password: ${message}`
+}
+
+/**
+ * Get a driver back into the app. `code`: Cognito emails them a reset code (needs a verified
+ * email). `temporary`: the admin sets a one-time password the driver must change at next
+ * sign-in. The password is never logged, audited or returned.
+ */
+async function resetDriverPassword(input: Row, callerEmail: string): Promise<Row> {
+  const email = requireEmail(input.email)
+  const method = input.method === 'temporary' ? 'temporary' : input.method === 'code' ? 'code' : null
+  if (!method) throw new Error('Choose how to reset: send a code, or set a temporary password.')
+  const password = method === 'temporary' ? (typeof input.password === 'string' ? input.password : '') : ''
+  if (method === 'temporary') {
+    const problem = driverPasswordProblem(password)
+    if (problem) throw new Error(problem)
+  }
+  const found = await findDriverLogin(email)
+  if (!found) throw new Error('No app account — send a sign-in invite instead.')
+  const { username, info } = found
+  if (info.enabled === false) throw new Error('This driver\'s app login is disabled. Enable it before resetting the password.')
+  if (method === 'code' && !info.emailVerified) {
+    throw new Error('This driver\'s email is not verified, so Cognito cannot email a code. Set a temporary password instead.')
+  }
+  // Cognito's own error can echo the request; only the mapped text leaves this function.
+  const failure = await (method === 'code'
+    ? cognito.send(new AdminResetUserPasswordCommand({ UserPoolId: driverPoolId(), Username: username }))
+    : cognito.send(new AdminSetUserPasswordCommand({
+        UserPoolId: driverPoolId(), Username: username, Password: password, Permanent: false,
+      }))
+  ).then(() => null, (err: unknown) => err)
+  if (failure) {
+    console.warn('[userManagement] driver password reset failed:', (failure as { name?: string })?.name ?? 'Error')
+    throw new Error(driverResetErrorText(failure))
+  }
+  await writeAudit('DriverLogin', email, 'RESET_DRIVER_PASSWORD', callerEmail, {
+    method,
+    previousStatus: info.status ?? null,
+  })
+  return { success: true, method, email }
+}
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 export const handler = async (event: { arguments: Args; identity?: AppSyncIdentity | null }) => {
@@ -539,8 +653,22 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
       : []
 
   // Owner-only, exactly as on production main: the ADMIN group does NOT open user management (Ryne, 2026-11-07).
-  void callerGroups
+  // The one exception is driver-app password help, which an ADMIN may also do (Ryne, 2026-11-12).
   const isOwner = callerEmail === OWNER_EMAIL
+  const requestedAction = event.arguments?.action
+  if (DRIVER_LOGIN_ACTIONS.has(requestedAction)) {
+    if (!isOwner && !callerGroups.includes('ADMIN')) {
+      console.warn('[userManagement] forbidden driver-login caller:', callerEmail || '(unresolved)')
+      throw new Error(FORBIDDEN_DRIVER_LOGIN)
+    }
+    const driverInput = parseInput(event.arguments.input)
+    if (requestedAction === 'driverLogin') {
+      const email = requireEmail(driverInput.email)
+      const found = await findDriverLogin(email)
+      return JSON.stringify(found ? found.info : { exists: false, email })
+    }
+    return JSON.stringify(await resetDriverPassword(driverInput, callerEmail))
+  }
   if (!isOwner) {
     console.warn('[userManagement] forbidden caller:', callerEmail || '(unresolved)', '| identity:', JSON.stringify(event.identity))
     throw new Error(FORBIDDEN_NOT_ADMIN)

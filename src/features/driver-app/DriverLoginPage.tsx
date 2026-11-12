@@ -4,12 +4,12 @@ import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useDriverAuth } from './useDriverAuth'
+import { useDriverAuth, NewPasswordRequiredError, isPasswordResetRequired } from './useDriverAuth'
 import { InstallHintSection } from './InstallHintSection'
 import { TmsAlert } from '@/features/tms/kit/TmsAlert'
 import { useTmsTheme } from '@/features/tms/tmsTheme'
 
-type Mode = 'signin' | 'forgot' | 'reset'
+type Mode = 'signin' | 'forgot' | 'reset' | 'newpass'
 
 function humanizeLoginError(raw: string): string {
   const lower = raw.toLowerCase()
@@ -47,6 +47,9 @@ function humanizeForgotError(raw: string): string {
 
 function humanizeResetError(raw: string): string {
   const lower = raw.toLowerCase()
+  if (lower.includes('password does not conform') || lower.includes('password not long enough') || lower.includes('password must')) {
+    return "That password is too simple. Use at least 8 characters with a lowercase letter and a number."
+  }
   if (lower.includes('code mismatch') || lower.includes('invalid code')) {
     return "That code didn't match. Check your email and try again."
   }
@@ -62,7 +65,7 @@ function humanizeResetError(raw: string): string {
 export default function DriverLoginPage() {
   useTmsTheme()
   const navigate = useNavigate()
-  const { signIn, forgotPassword, confirmForgotPassword } = useDriverAuth()
+  const { signIn, forgotPassword, confirmForgotPassword, completeNewPassword } = useDriverAuth()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -73,6 +76,9 @@ export default function DriverLoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  // Set when dispatch gave this driver a temporary password: the challenge session to answer.
+  const [challengeSession, setChallengeSession] = useState<string | null>(null)
+  const [confirmPassword, setConfirmPassword] = useState('')
 
   async function handleSignIn(e: FormEvent) {
     e.preventDefault()
@@ -88,7 +94,18 @@ export default function DriverLoginPage() {
       // home. An Ivan driver sent straight to the settlement got a 409 and a Retry button.
       navigate('/driver')
     } catch (err) {
-      setError(humanizeLoginError(err instanceof Error ? err.message : 'Sign in failed.'))
+      if (err instanceof NewPasswordRequiredError) {
+        setChallengeSession(err.session)
+        setMessage('Dispatch gave you a temporary password. Choose your own to finish signing in.')
+        setNewPassword('')
+        setConfirmPassword('')
+        setMode('newpass')
+      } else if (isPasswordResetRequired(err)) {
+        setMessage('Dispatch reset your password. Enter the code we emailed you and choose a new password.')
+        setMode('reset')
+      } else {
+        setError(humanizeLoginError(err instanceof Error ? err.message : 'Sign in failed.'))
+      }
     } finally {
       setLoading(false)
     }
@@ -136,6 +153,40 @@ export default function DriverLoginPage() {
     }
   }
 
+  async function handleNewPassword(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    if (!newPassword || newPassword !== confirmPassword) {
+      setError(newPassword ? "The two passwords don't match." : 'Choose a new password.')
+      return
+    }
+    if (!challengeSession) {
+      setError('Sign in again with the temporary password.')
+      setMode('signin')
+      return
+    }
+    setLoading(true)
+    try {
+      await completeNewPassword(email.trim(), challengeSession, newPassword)
+      navigate('/driver')
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : ''
+      // A stale or expired challenge: the temporary password still works, so start over.
+      if (/session|expired|invalid session/i.test(raw)) {
+        setChallengeSession(null)
+        setMode('signin')
+        setPassword('')
+        setError('That took too long. Sign in again with the temporary password.')
+      } else {
+        setError(humanizeResetError(raw || 'Could not set the password.'))
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const onSubmit = mode === 'signin' ? handleSignIn : mode === 'forgot' ? handleForgot : mode === 'newpass' ? handleNewPassword : handleReset
+
   return (
     <div className="tms-driver tms-driver-inset flex flex-col justify-center px-6 py-12">
       <div className="mx-auto w-full max-w-sm">
@@ -146,7 +197,7 @@ export default function DriverLoginPage() {
           <h1 className="text-2xl font-semibold tracking-tight">
             {mode === 'signin' && 'Driver sign in'}
             {mode === 'forgot' && 'Reset password'}
-            {mode === 'reset' && 'Choose a new password'}
+            {(mode === 'reset' || mode === 'newpass') && 'Choose a new password'}
           </h1>
         </div>
 
@@ -157,7 +208,7 @@ export default function DriverLoginPage() {
           <TmsAlert tone="green" className="mb-6">{message}</TmsAlert>
         )}
 
-        <form onSubmit={mode === 'signin' ? handleSignIn : mode === 'forgot' ? handleForgot : handleReset} className="space-y-5">
+        <form onSubmit={onSubmit} className="space-y-5">
           <div className="space-y-2">
             <Label htmlFor="driver-email" className="text-sm font-medium text-foreground">
               Email
@@ -238,6 +289,42 @@ export default function DriverLoginPage() {
             </>
           )}
 
+          {mode === 'newpass' && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="driver-choose-password" className="text-sm font-medium text-foreground">
+                  New password
+                </Label>
+                <Input
+                  id="driver-choose-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="••••••••"
+                  disabled={loading}
+                  className="h-14 rounded-xl px-4 text-base"
+                />
+                <p className="text-xs text-muted-foreground">At least 8 characters, with a lowercase letter and a number.</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="driver-confirm-password" className="text-sm font-medium text-foreground">
+                  Type it again
+                </Label>
+                <Input
+                  id="driver-confirm-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="••••••••"
+                  disabled={loading}
+                  className="h-14 rounded-xl px-4 text-base"
+                />
+              </div>
+            </>
+          )}
+
           <Button
             type="submit"
             disabled={loading}
@@ -247,6 +334,7 @@ export default function DriverLoginPage() {
             {mode === 'signin' && 'Sign in'}
             {mode === 'forgot' && 'Send reset code'}
             {mode === 'reset' && 'Reset password'}
+            {mode === 'newpass' && 'Save password and sign in'}
           </Button>
         </form>
 

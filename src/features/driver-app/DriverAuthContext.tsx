@@ -10,6 +10,7 @@ import {
   ResendConfirmationCodeCommand,
   ForgotPasswordCommand,
   ConfirmForgotPasswordCommand,
+  RespondToAuthChallengeCommand,
 } from '@aws-sdk/client-cognito-identity-provider'
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import {
@@ -20,7 +21,7 @@ import {
 import { isTokenRejection } from './tokenRejection'
 import { clearCachedProgram } from './useDriverProgram'
 import { clearCachedShift } from './timeclock/useOpenShift'
-import { DriverAuthContext, type DriverAuthContextValue, type DriverUser } from './useDriverAuth'
+import { DriverAuthContext, NewPasswordRequiredError, type DriverAuthContextValue, type DriverUser } from './useDriverAuth'
 
 const STORAGE_KEY = 'bcat:driver:tokens'
 
@@ -266,6 +267,10 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
             AuthParameters: { USERNAME: email, PASSWORD: password },
           }),
         )
+        // Dispatch set a temporary password: Cognito wants a new one before it hands out tokens.
+        if (res.ChallengeName === 'NEW_PASSWORD_REQUIRED' && res.Session) {
+          throw new NewPasswordRequiredError(email, res.Session)
+        }
         const auth = res.AuthenticationResult
         if (!auth?.IdToken || !auth.AccessToken || !auth.RefreshToken || typeof auth.ExpiresIn !== 'number') {
           throw new Error('Cognito did not return a complete session.')
@@ -278,6 +283,7 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
         }
         commitTokensRef.current(tokens)
       } catch (err) {
+        if (err instanceof NewPasswordRequiredError) throw err
         throw new Error(cognitoErrorMessage(err), { cause: err })
       }
     },
@@ -289,6 +295,35 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
       await performSignIn(email.toLowerCase().trim(), password)
     },
     [performSignIn],
+  )
+
+  // The second half of a sign-in with a temporary password: the driver picks their own.
+  const completeNewPassword = useCallback(
+    async (email: string, session: string, newPassword: string) => {
+      try {
+        const res = await cognitoClient.send(
+          new RespondToAuthChallengeCommand({
+            ClientId: DRIVER_USER_POOL_CLIENT_ID,
+            ChallengeName: 'NEW_PASSWORD_REQUIRED',
+            Session: session,
+            ChallengeResponses: { USERNAME: email.toLowerCase().trim(), NEW_PASSWORD: newPassword },
+          }),
+        )
+        const auth = res.AuthenticationResult
+        if (!auth?.IdToken || !auth.AccessToken || !auth.RefreshToken || typeof auth.ExpiresIn !== 'number') {
+          throw new Error('Cognito did not return a complete session.')
+        }
+        commitTokensRef.current({
+          idToken: auth.IdToken,
+          accessToken: auth.AccessToken,
+          refreshToken: auth.RefreshToken,
+          expiresAt: Date.now() + auth.ExpiresIn * 1000,
+        })
+      } catch (err) {
+        throw new Error(cognitoErrorMessage(err), { cause: err })
+      }
+    },
+    [cognitoClient],
   )
 
   const signUp = useCallback(
@@ -492,9 +527,10 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
       signIn,
       forgotPassword,
       confirmForgotPassword,
+      completeNewPassword,
       signOut,
     }),
-    [user, loading, signUp, confirmSignUp, resendConfirmationCode, signIn, forgotPassword, confirmForgotPassword, signOut],
+    [user, loading, signUp, confirmSignUp, resendConfirmationCode, signIn, forgotPassword, confirmForgotPassword, completeNewPassword, signOut],
   )
 
   return <DriverAuthContext.Provider value={value}>{children}</DriverAuthContext.Provider>
