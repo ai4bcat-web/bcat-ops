@@ -5,7 +5,7 @@
  */
 import { Fragment, useMemo, useState } from 'react'
 import { Download, Printer } from 'lucide-react'
-import { TmsButton, TmsDialog } from '@/features/tms/kit'
+import { TmsButton, TmsDialog, TmsStatRow } from '@/features/tms/kit'
 import { saveBlob } from '@/lib/download'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDay } from '@/features/ar/arViews'
@@ -71,6 +71,22 @@ export function ApReportDialog({ kind, bills, facts, infos, asOf, onKind, onClos
           </TmsButton>
         ))}
       </div>
+      {rows.length > 0 && (
+        <div className="mb-3">
+          <TmsStatRow
+            aria-label="Report totals"
+            columns="auto"
+            compact
+            caps
+            items={[
+              { key: 'bills', label: 'Bills', value: String(total.count), sub: `${byCarrier.length} ${byCarrier.length === 1 ? 'carrier' : 'carriers'}` },
+              { key: 'gross', label: 'Carrier pay', value: formatCents(total.grossCents) },
+              { key: 'fees', label: 'Quick pay fees', value: formatCents(total.feeCents) },
+              { key: 'balance', label: 'Balance', value: formatCents(total.balanceCents) },
+            ]}
+          />
+        </div>
+      )}
       {rows.length === 0 ? <p className="tms-muted">No bills in this report.</p> : (
         <div className="overflow-x-auto">
           <table className="ap-report-table w-full text-xs tabular-nums">
@@ -145,6 +161,19 @@ export function CashRequirementsDialog({ bills, facts, infos, asOf, onClose }: {
         Every open payable (Expected, Aging and Selected) by due date, at what we still owe after quick-pay fees.
         Bills still waiting on the carrier's invoice date are placed by an estimated due date (delivery date + terms).
       </p>
+      <div className="mb-3">
+        <TmsStatRow
+          aria-label="Cash requirements totals"
+          columns="auto"
+          compact
+          caps
+          items={[
+            { key: 'past-due', label: 'Past due', value: formatCents(cash.pastDue.cents), sub: `${cash.pastDue.count} ${cash.pastDue.count === 1 ? 'bill' : 'bills'}`, tone: cash.pastDue.cents > 0 ? 'bad' : 'default' },
+            ...cash.weeks.map((w, i) => ({ key: w.key, label: `Week ${i + 1}`, value: formatCents(w.cents), sub: w.label.replace(/^Week \d+ · /, '') })),
+            { key: 'total', label: 'Next 30 days', value: formatCents(cash.totalCents), sub: `${cash.totalCount} ${cash.totalCount === 1 ? 'bill' : 'bills'}${cash.estimatedCents ? ` · ${formatCents(cash.estimatedCents)} estimated` : ''}` },
+          ]}
+        />
+      </div>
       <table className="ap-report-table w-full text-sm tabular-nums">
         <thead><tr><th>Period</th><th className="text-right">Bills</th><th className="text-right">Amount</th><th className="text-right">Of which estimated</th></tr></thead>
         <tbody>

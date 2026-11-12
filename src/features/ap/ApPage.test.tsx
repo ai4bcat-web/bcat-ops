@@ -394,7 +394,7 @@ describe('the AP board', () => {
       fireEvent.click(screen.getByRole('button', { name: /Summary/ }))
       const strip = within(screen.getByRole('region', { name: 'Summary' }))
       expect(strip.getAllByText('$2,300.00').length).toBeGreaterThan(0)
-      expect(strip.getByText('Aging').previousElementSibling?.textContent).toBe('2')
+      expect(strip.getByText('Aging').closest('.tms-kpi-card')?.querySelector('.tms-kpi-card-value')?.textContent).toBe('2')
     })
   })
 })

@@ -228,8 +228,9 @@ function StatusTotals({ items }: { items: FactoringItem[] }) {
     <div className="tms-factoring-totals" style={{ padding: '4px 8px' }}>
       <TmsStatRow
         aria-label="What the queue is worth, by status"
-        columns={4}
+        columns="auto"
         compact
+        caps
         items={buckets.map(([key, label]) => {
           const t = totals[key]
           return {

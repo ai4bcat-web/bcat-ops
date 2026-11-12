@@ -14,12 +14,22 @@ export interface ArDivisionSlice {
   key: string
   label: string
   cents: number
+  /** The division code (the part before `/`), for grouping sub-divisions under it. */
+  division: string
+  /** The division's own name, for the group header. */
+  divisionLabel: string
+  /** The sub-division's own name; null for a division-level slice. */
+  subLabel: string | null
+  count: number
 }
 
 export interface ArSummary {
   pendingOtrCents: number
+  pendingOtrCount: number
   pendingShippersCents: number
+  pendingShippersCount: number
   lateCents: number
+  lateCount: number
   otrDaysToPay: number | null
   shipperDaysToPay: number | null
   byDivision: ArDivisionSlice[]
@@ -52,21 +62,34 @@ export function computeArSummary(input: {
 }): ArSummary {
   const { open, paid, factorByItemId, shipmentsById, divisionName, asOf } = input
   let pendingOtrCents = 0
+  let pendingOtrCount = 0
   let pendingShippersCents = 0
+  let pendingShippersCount = 0
   let lateCents = 0
+  let lateCount = 0
   const slices = new Map<string, ArDivisionSlice>()
   for (const inv of open) {
     if (inv.status !== 'ISSUED' && inv.status !== 'PARTIAL') continue
-    if (isFactored(inv)) pendingOtrCents += inv.balanceCents
-    else pendingShippersCents += inv.balanceCents
-    if (inv.dueAt && daysLate(inv.dueAt, asOf) > 0) lateCents += inv.balanceCents
+    if (isFactored(inv)) { pendingOtrCents += inv.balanceCents; pendingOtrCount += 1 }
+    else { pendingShippersCents += inv.balanceCents; pendingShippersCount += 1 }
+    if (inv.dueAt && daysLate(inv.dueAt, asOf) > 0) { lateCents += inv.balanceCents; lateCount += 1 }
     const shipment = shipmentsById.get(inv.shipmentId)
     const key = divisionKeyOf(shipment)
     const label = shipment?.revSubdivision
       ? `${divisionName(shipment.revDivision)} · ${divisionName(shipment.revSubdivision)}`
       : shipment?.revDivision ? divisionName(shipment.revDivision) : 'No division'
-    const slice = slices.get(key) ?? { key, label, cents: 0 }
+    const division = shipment?.revDivision ?? 'NONE'
+    const slice = slices.get(key) ?? {
+      key,
+      label,
+      cents: 0,
+      division,
+      divisionLabel: shipment?.revDivision ? divisionName(shipment.revDivision) : 'No division',
+      subLabel: shipment?.revSubdivision ? divisionName(shipment.revSubdivision) : null,
+      count: 0,
+    }
     slice.cents += inv.balanceCents
+    slice.count += 1
     slices.set(key, slice)
   }
 
@@ -91,8 +114,11 @@ export function computeArSummary(input: {
   }
   return {
     pendingOtrCents,
+    pendingOtrCount,
     pendingShippersCents,
+    pendingShippersCount,
     lateCents,
+    lateCount,
     otrDaysToPay: mean(otr),
     shipperDaysToPay: mean(shippers),
     byDivision: [...slices.values()].sort((a, b) => b.cents - a.cents),

@@ -4,7 +4,7 @@
  */
 import { useState, type ReactNode } from 'react'
 import { BarChart3, Columns3, FilterX } from 'lucide-react'
-import { TmsButton } from '@/features/tms/kit'
+import { TmsButton, TmsKpiCard } from '@/features/tms/kit'
 import { ColumnsDialog, type ColumnsDialogResult } from './ColumnsDialog'
 import type { DenseColumn, DenseDensity } from './denseGridModel'
 
@@ -46,9 +46,32 @@ export interface DenseKpi {
   active?: boolean
 }
 
-/** The KPI/summary strip above the table; renders nothing while collapsed. */
-export function DenseKpiStrip({ open, items }: { open: boolean; items: DenseKpi[] }) {
+/**
+ * The KPI/summary strip above the table; renders nothing while collapsed. `variant="cards"`
+ * draws the same items as compact stat cards (Invoicing, Payables).
+ */
+export function DenseKpiStrip({ open, items, variant = 'strip' }: { open: boolean; items: DenseKpi[]; variant?: 'strip' | 'cards' }) {
   if (!open) return null
+  if (variant === 'cards') {
+    return (
+      <div id="tms-dg-kpi" role="region" aria-label="Summary" className="tms-dg-kpi-cards">
+        <div className="tms-stat-row tms-stat-row-auto tms-stat-row-caps">
+          {items.map((k) => (
+            <TmsKpiCard
+              key={k.label}
+              label={k.label}
+              value={k.value}
+              title={k.title}
+              tone={k.tone ?? 'default'}
+              compact
+              onClick={k.onClick}
+              active={k.onClick ? !!k.active : undefined}
+            />
+          ))}
+        </div>
+      </div>
+    )
+  }
   return (
     <div id="tms-dg-kpi" className="tms-dg-kpis" role="region" aria-label="Summary">
       {items.map((k) => {

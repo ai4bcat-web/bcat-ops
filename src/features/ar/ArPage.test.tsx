@@ -239,9 +239,11 @@ describe('the AR board', () => {
     await settle()
     // One open, manually invoiced invoice of $2,500.00, past its 2026-10-20 due date.
     const strip = within(screen.getByLabelText('AR summary'))
-    expect(strip.getByText('Pending with shippers').previousSibling?.textContent).toBe('$2,500.00')
-    expect(strip.getByText('Pending with OTR').previousSibling?.textContent).toBe('$0.00')
-    expect(strip.getByText('Late').previousSibling?.textContent).toBe('$2,500.00')
+    const card = (label: string) => strip.getByText(label).closest('.tms-kpi-card')?.querySelector('.tms-kpi-card-value')?.textContent
+    expect(card('Pending with shippers')).toBe('$2,500.00')
+    expect(card('Pending with OTR')).toBe('$0.00')
+    expect(card('Late')).toBe('$2,500.00')
+    expect(strip.getAllByText('1 invoice').length).toBeGreaterThan(0)
   })
 
   /**
