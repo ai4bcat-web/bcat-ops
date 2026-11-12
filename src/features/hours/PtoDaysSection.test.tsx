@@ -19,7 +19,8 @@ const { PtoDaysSection } = await import('./PtoDaysSection')
 
 const drivers = [
   { id: 'a', name: 'Ann Lee', ptoEligible: false },
-  { id: 'j', name: 'Jason Smith', ptoEligible: true },
+  { id: 'j', name: 'Jason Smith', ptoEligible: true, hireDate: '2024-06-10' },
+  { id: 'n', name: 'New Hire', ptoEligible: true, hireDate: '2026-01-05' },
 ]
 const pto = (id: string, driverId: string, workDate: string, minutes = 480, note = 'PTO entered by ruben@bcatcorp.com') =>
   ({ id, driverId, workDate, kind: 'PTO', minutes, note, source: 'STAFF', clockInAt: null, clockOutAt: null })
@@ -53,6 +54,30 @@ describe('PtoDaysSection', () => {
     expect(rows[0].textContent).toMatch(/Oct 13, 2026.*Ann Lee/)
     expect(screen.getByLabelText('PTO used in 2026').textContent).toMatch(/Jason Smith: 2 days · 12 h/)
     expect(screen.getByLabelText('PTO used in 2026').textContent).toMatch(/Ann Lee: 1 day · 8 h/)
+  })
+
+  it('shows each driver\'s allowance by tenure beside the days taken', async () => {
+    renderIt()
+    await screen.findByRole('table', { name: 'PTO days taken' })
+    const chips = screen.getByLabelText('PTO used in 2026').textContent ?? ''
+    expect(chips).toMatch(/Jason Smith: 2 days · 12 h · 0 of 10 used, 10 left/)
+    expect(chips).toMatch(/Ann Lee: 1 day · 8 h · No hire date/)
+    expect(chips).toMatch(/New Hire: 0 days · 0 h · no allowance yet \(first year\)/)
+  })
+
+  it('previews the balance in the add dialog, warns (without blocking) for a first-year driver and for no hire date', async () => {
+    renderIt()
+    await screen.findByRole('table', { name: 'PTO days taken' })
+    fireEvent.click(screen.getByRole('button', { name: /Add PTO days/ }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: '2026-11-16' } })
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: '2026-11-16' } })
+    expect(within(dialog).getByTestId('pto-balance').textContent).toMatch(/Uses 1 of 10 days.*9 left/)
+    fireEvent.change(within(dialog).getByLabelText('Driver'), { target: { value: 'n' } })
+    expect(within(dialog).getByTestId('pto-balance').textContent).toMatch(/first year of service.*no PTO allowance yet.*You can still add it/)
+    expect((within(dialog).getByRole('button', { name: 'Add day' }) as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.change(within(dialog).getByLabelText('Driver'), { target: { value: 'a' } })
+    expect(within(dialog).getByTestId('pto-balance').textContent).toMatch(/No hire date/)
   })
 
   it('filters by driver and by month', async () => {

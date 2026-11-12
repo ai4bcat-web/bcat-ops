@@ -22,13 +22,40 @@ import {
   type PtoRow,
 } from '@/lib/ptoDays'
 import { addPtoDays, editPtoDay, removePtoDay } from '@/lib/ptoDaysApi'
+import { benefitYearOf, formatDays, ptoBalance, validHireDate } from '@/lib/ptoAllowance'
 
-export interface PtoDriver { id: string; name: string; ptoEligible?: boolean | null }
+export interface PtoDriver { id: string; name: string; ptoEligible?: boolean | null; hireDate?: string | null }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 function dayLabel(iso: string): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+}
+
+/** One line per benefit year the new days land in: "Uses 3 of 5 (Jun 10 2026 – Jun 9 2027), 2 left". */
+function balanceLines(driver: PtoDriver | undefined, add: readonly string[], minutes: number, existing: readonly PtoRow[]): { text: string; warn: boolean }[] {
+  if (!driver || add.length === 0) return []
+  if (!validHireDate(driver.hireDate)) return [{ text: 'No hire date in the driver file, so no PTO balance.', warn: false }]
+  const mine = existing.filter((r) => r.driverId === driver.id)
+  const groups = new Map<string, string[]>()
+  for (const d of add) {
+    const by = benefitYearOf(driver.hireDate, d)
+    const key = by ? by.start : 'before'
+    groups.set(key, [...(groups.get(key) ?? []), d])
+  }
+  const out: { text: string; warn: boolean }[] = []
+  for (const [key, dates] of groups) {
+    if (key === 'before') { out.push({ text: `${dates.length === 1 ? 'A day is' : `${dates.length} days are`} before the hire date.`, warn: true }); continue }
+    const bal = ptoBalance(driver.hireDate, dates[0], mine)!
+    const after = bal.used + (dates.length * minutes) / 480
+    const range = `${dayLabel(bal.start).replace(/^\w+, /, '')} – ${dayLabel(bal.end).replace(/^\w+, /, '')}`
+    if (bal.allowance === 0) out.push({ text: `Still in the first year of service (${range}): no PTO allowance yet.`, warn: true })
+    else {
+      const left = Math.round((bal.allowance - after) * 100) / 100
+      out.push({ text: `Uses ${formatDays(after)} of ${bal.allowance} days (${range}), ${left >= 0 ? `${formatDays(left)} left` : `${formatDays(-left)} over`}.`, warn: left < 0 })
+    }
+  }
+  return out
 }
 
 function parseExtra(text: string): string[] {
@@ -59,6 +86,7 @@ function AddDialog({
   const have = useMemo(() => new Set(existing.filter((r) => r.driverId === driverId).map((r) => r.workDate)), [existing, driverId])
   const plan = planPtoDays(requested, have)
   const minutes = ptoMinutesFor(Number(hours))
+  const balance = useMemo(() => balanceLines(driver, plan.add, minutes, existing), [driver, plan.add, minutes, existing])
   const bad = parseExtra(extra).filter((d) => !/^\d{4}-\d{2}-\d{2}$/.test(d))
   const problem = !driverId ? 'Choose a driver.' : minutes <= 0 ? 'Hours per day must be more than zero.' : plan.error ?? (plan.add.length === 0 ? 'No new days to add.' : null)
 
@@ -114,6 +142,9 @@ function AddDialog({
           {problem && plan.add.length === 0 && !plan.error ? problem : plan.error ? plan.error : `Adds ${plan.add.length} ${plan.add.length === 1 ? 'day' : 'days'} · ${decimalHours(minutes * plan.add.length)} h`}
           {plan.skipped.length > 0 && ` · skipping ${plan.skipped.length} that already ${plan.skipped.length === 1 ? 'has' : 'have'} PTO`}
         </p>
+        {balance.map((b) => (
+          <p key={b.text} className={`text-sm ${b.warn ? 'text-[color:var(--tms-badge-red)]' : 'text-muted-foreground'}`} aria-live="polite" data-testid="pto-balance">{b.text} {b.warn && 'You can still add it.'}</p>
+        ))}
       </div>
     </TmsDialog>
   )
@@ -166,7 +197,7 @@ export function PtoDaysSection({
   const [removing, setRemoving] = useState<PtoRow | null>(null)
 
   const load = useCallback(() => {
-    listTimeClockEntries({ from: `${year}-01-01`, to: `${year}-12-31` })
+    listTimeClockEntries({ from: `${Number(year) - 2}-01-01`, to: `${year}-12-31` })
       .then((r) => { setRows(r.filter((e) => e.kind === 'PTO')); setError(null) })
       .catch((e) => setError(errorText(e)))
   }, [year])
@@ -174,8 +205,17 @@ export function PtoDaysSection({
 
   const names = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers])
   const all = useMemo(() => ptoRowsOf((rows ?? []) as unknown as TimeClockRow[] as never), [rows])
-  const shown = useMemo(() => filterPtoRows(all, { driverId: driverId || undefined, month: month ? `${year}-${month}` : undefined, weekOf: weekOf || undefined }), [all, driverId, month, year, weekOf])
+  const shown = useMemo(() => filterPtoRows(all.filter((r) => r.workDate.startsWith(year)), { driverId: driverId || undefined, month: month ? `${year}-${month}` : undefined, weekOf: weekOf || undefined }), [all, driverId, month, year, weekOf])
   const totals = useMemo(() => ptoTotalsByDriver(all, year).sort((a, b) => (names.get(a.driverId) ?? '').localeCompare(names.get(b.driverId) ?? '')), [all, year, names])
+  // Balance as of today for the current year, else the year's last day. A benefit year can start in an earlier calendar year, hence the wider load above.
+  const asOf = year === today.slice(0, 4) ? today : `${year}-12-31`
+  const balances = useMemo(() => {
+    const used = new Map(totals.map((t) => [t.driverId, t]))
+    return drivers
+      .map((d) => ({ d, t: used.get(d.id), bal: ptoBalance(d.hireDate, asOf, all.filter((r) => r.driverId === d.id)) }))
+      .filter((x) => x.t || x.d.ptoEligible === true || (x.bal?.allowance ?? 0) > 0)
+      .sort((a, b) => a.d.name.localeCompare(b.d.name))
+  }, [drivers, totals, all, asOf])
   const years = useMemo(() => { const y = Number(today.slice(0, 4)); return [y + 1, y, y - 1, y - 2].map(String) }, [today])
   const entryOf = (id: string) => (rows ?? []).find((r) => r.id === id)
 
@@ -195,9 +235,12 @@ export function PtoDaysSection({
 
       <div className="flex flex-wrap gap-2" aria-label={`PTO used in ${year}`}>
         {totals.length === 0 && rows !== null && <span className="text-sm text-muted-foreground">No PTO days recorded for {year}.</span>}
-        {totals.map((t) => (
-          <span key={t.driverId} className="rounded-full border border-border px-3 py-1 text-sm">
-            {names.get(t.driverId) ?? 'Driver'}: <b>{t.days}</b> {t.days === 1 ? 'day' : 'days'} · {decimalHours(t.minutes)} h
+        {balances.map(({ d, t, bal }) => (
+          <span key={d.id} className="rounded-full border border-border px-3 py-1 text-sm">
+            {d.name}: <b>{t?.days ?? 0}</b> {t?.days === 1 ? 'day' : 'days'} · {decimalHours(t?.minutes ?? 0)} h
+            {bal
+              ? <span className={bal.remaining < 0 ? 'text-[color:var(--tms-badge-red)]' : 'text-muted-foreground'} title={`Benefit year ${bal.start} to ${bal.end}`}>{' '}· {bal.allowance === 0 ? 'no allowance yet (first year)' : `${formatDays(bal.used)} of ${bal.allowance} used, ${bal.remaining >= 0 ? `${formatDays(bal.remaining)} left` : `${formatDays(-bal.remaining)} over`}`}</span>
+              : <span className="text-muted-foreground">{' '}· {validHireDate(d.hireDate) ? 'not hired yet' : 'No hire date'}</span>}
           </span>
         ))}
       </div>
