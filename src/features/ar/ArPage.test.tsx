@@ -28,6 +28,10 @@ vi.mock('@/hooks/useOpenInvoices', () => ({ useOpenInvoices: openInvoicesMock })
 vi.mock('@/hooks/useCustomerAr', () => ({ useCustomerAr: customerArMock }))
 vi.mock('@/hooks/useInvoice', () => ({ useInvoice: invoiceMock }))
 vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [], locations: [] }) }))
+vi.mock('@/features/tms/useOwnershipDivisions', () => ({
+  useOwnershipDivisions: () => ({ divisions: [{ code: 'BROKERAGE', name: 'BCAT Logistics' }], loading: false, error: null, refresh: vi.fn() }),
+}))
+vi.mock('@/lib/worklistShipments', () => ({ loadWorklistShipments: vi.fn().mockResolvedValue([]) }))
 vi.mock('@/hooks/useFactoringItems', () => ({
   useFactoringItems: () => ({ items: [], loading: false, error: null, refresh: vi.fn() }),
 }))
@@ -35,6 +39,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: v
 vi.mock('@/lib/apiClient', () => ({
   graphqlErrorText: (e: unknown) => String(e),
   listInvoicesByMonth: vi.fn().mockResolvedValue([]),
+  listUserProfiles: vi.fn().mockResolvedValue([{ id: 'rep-1', email: 'jenny@bcatcorp.com', name: 'Jenny Rep' }]),
   batchGenerateInvoices: vi.fn(),
   batchEmailInvoices: vi.fn(),
   voidInvoice: vi.fn(),
@@ -209,9 +214,11 @@ beforeEach(() => {
 })
 
 describe('the AR board', () => {
-  it('offers every view of the money, and each one renders', async () => {
-    await setup({ UNBILLED: [worklistRow()], DOCS_NEEDED: [worklistRow({ docsMissing: ['POD'], docsReady: false })] })
-    for (const label of ['Docs needed', 'Ready for billing', 'Unbilled', 'Unpaid', 'Paid', 'Payments & credits', 'Aging']) {
+  it('offers the three statuses and the two ledger views, and each one renders', async () => {
+    await setup({ UNBILLED: [worklistRow()] })
+    expect(screen.queryByRole('tab', { name: /^Docs needed/ })).toBeNull()
+    expect(screen.queryByRole('tab', { name: /^Ready for billing/ })).toBeNull()
+    for (const label of ['Ready to invoice', 'Invoiced', 'Paid', 'Payments & credits', 'Aging']) {
       const tab = screen.getByRole('tab', { name: new RegExp(`^${label}`) })
       fireEvent.click(tab)
       await settle()
@@ -261,28 +268,6 @@ describe('the AR board', () => {
     expect((select as HTMLInputElement).disabled).toBe(true)
   })
 
-  it('badges pre-cutover shipments in Docs needed and filters to them', async () => {
-    const old = worklistRow({
-      orderId: 'o-old', shipmentId: 's-old', shipmentNumber: '8501', docsReady: false,
-      order: order({ id: 'o-old', arStatus: 'DOCS_NEEDED' }),
-      shipment: shipment({ id: 's-old', number: '8501', legacyImported: true, source: 'BACKFILL' } as Partial<ShipmentRecord>),
-    })
-    const fresh = worklistRow({
-      orderId: 'o-new', shipmentId: 's-new', shipmentNumber: 'S-2002', docsReady: false,
-      order: order({ id: 'o-new', arStatus: 'DOCS_NEEDED' }),
-      shipment: shipment({ id: 's-new', number: 'S-2002' }),
-    })
-    await setup({ DOCS_NEEDED: [old, fresh] })
-    fireEvent.click(screen.getByRole('tab', { name: /^Docs needed/ }))
-    await settle()
-    expect(screen.getAllByText('Review billing').length).toBe(1)
-    expect(screen.getByText('S-2002')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /Review billing \(1\)/ }))
-    await settle()
-    expect(screen.queryByText('S-2002')).toBeNull()
-    expect(screen.getByText('8501')).toBeTruthy()
-  })
-
   // Posting is an action on the Invoicing page: its grant opens it (Ryne 2026-11-12), the broad tms grant does not.
   it.each([
     ['tms-only', ['page-tms', 'page-loads'], true],
@@ -299,34 +284,53 @@ describe('the AR board', () => {
     authGroups.current = []
   })
 
-  it('shows the release gate verdict on the Ready for billing tab', async () => {
-    ;(apiClient.previewInvoice as Mock).mockResolvedValue({
-      releaseGate: {
-        ok: false,
-        missing: [{ code: 'CARRIER_CHARGES_UNSETTLED', message: 'Carrier charges not settled: Acme Trucking — record the carrier bill first' }],
-      },
-    })
+  it('never lists a released order whose shipment has not delivered', async () => {
     await setup({
-      DOCS_NEEDED: [worklistRow({ arStatus: 'DOCS_NEEDED', docsReady: true, docsMissing: [] })],
+      UNBILLED: [
+        worklistRow(),
+        worklistRow({
+          orderId: 'o2', shipmentId: 's2', shipmentNumber: 'S-2002', deliveredAt: null,
+          shipment: shipment({ id: 's2', number: 'S-2002', status: 'OPEN', deliveredAt: null }),
+        }),
+      ],
     })
-    fireEvent.click(screen.getByRole('tab', { name: /^Ready for billing/ }))
-    expect(await screen.findByTestId('ready-gate-o1')).toHaveTextContent('Carrier charges not settled: Acme Trucking — record the carrier bill first')
+    expect(screen.getByText('S-1001')).toBeTruthy()
+    expect(screen.queryByText('S-2002')).toBeNull()
+    expect(screen.getByTestId('ar-ready-note')).toHaveTextContent('Load Review')
   })
 
-  it('opens a ready shipment in Load Review instead of releasing it from the AR page', async () => {
+  it('shows rev division and sales rep, and groups with subtotals', async () => {
     await setup({
-      DOCS_NEEDED: [worklistRow({ arStatus: 'DOCS_NEEDED', docsReady: true, docsMissing: [] })],
+      UNBILLED: [
+        worklistRow({ shipment: shipment({ revDivision: 'BROKERAGE', salesRepId: 'rep-1' } as Partial<ShipmentRecord>) }),
+        worklistRow({
+          orderId: 'o2', shipmentId: 's2', shipmentNumber: 'S-2002', customerName: 'Zeta Co', revenueCents: 10_000,
+          shipment: shipment({ id: 's2', number: 'S-2002' }),
+        }),
+      ],
     })
-    fireEvent.click(screen.getByRole('tab', { name: /^Ready for billing/ }))
-    const link = await screen.findByRole('link', { name: 'Open S-1001 in Load Review' })
-    expect(link.getAttribute('href')).toMatch(/^\/tms\/load-review\?shipment=/)
-    expect(screen.queryByRole('button', { name: /Release to billing/ })).toBeNull()
-    expect(apiClient.readyToInvoice).not.toHaveBeenCalled()
+    const grid = screen.getByRole('table', { name: 'Ready to invoice' })
+    expect(within(grid).getByText('BCAT Logistics')).toBeTruthy()
+    expect(within(grid).getByText('Jenny Rep')).toBeTruthy()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Group by' }), { target: { value: 'customer' } })
+    await settle()
+    const heads = screen.getAllByTestId('ar-group-head').map((h) => h.textContent)
+    expect(heads).toEqual(['Acme Foods1 shipment$2,500.00', 'Zeta Co1 shipment$100.00'])
+    fireEvent.change(screen.getByRole('combobox', { name: 'Group by' }), { target: { value: 'none' } })
+  })
+
+  it('keeps a short-paid invoice on Invoiced with what is still open', async () => {
+    openSet.splice(0, openSet.length, invoice({ status: 'PARTIAL', paidCents: 200_000, balanceCents: 50_000 }))
+    await setup()
+    fireEvent.click(screen.getByRole('tab', { name: /^Invoiced/ }))
+    await settle()
+    expect(screen.getByText('Short paid $500.00 open')).toBeTruthy()
+    openSet.splice(0, openSet.length, invoice())
   })
 })
 
 describe('the AR dense grid', () => {
-  const bodyRows = () => within(screen.getByRole('table', { name: 'Unbilled shipments' })).getAllByRole('row').slice(1)
+  const bodyRows = () => within(screen.getByRole('table', { name: 'Ready to invoice' })).getAllByRole('row').slice(1)
 
   it('draws the dense grid with its controls and sorts a money column by cents', async () => {
     await setup({
@@ -340,9 +344,9 @@ describe('the AR dense grid', () => {
     expect(screen.getByRole('group', { name: 'Row density' })).toBeTruthy()
     expect(screen.getByText('3 rows')).toBeTruthy()
 
-    fireEvent.click(screen.getByTitle('Sort by Revenue'))
+    fireEvent.click(screen.getByTitle('Sort by Amount'))
     expect(bodyRows().map((r) => within(r).getByRole('link').textContent)).toEqual(['S-2', 'S-1', 'S-3'])
-    fireEvent.click(screen.getByTitle('Sort by Revenue'))
+    fireEvent.click(screen.getByTitle('Sort by Amount'))
     expect(bodyRows().map((r) => within(r).getByRole('link').textContent)).toEqual(['S-3', 'S-1', 'S-2'])
   })
 
@@ -354,15 +358,15 @@ describe('the AR dense grid', () => {
     expect(screen.getByText(/1 selected/)).toBeTruthy()
   })
 
-  it('gives each view its own grid, and the Unpaid grid keeps its invoice actions', async () => {
+  it('gives each view its own grid, and the Invoiced grid keeps its invoice actions', async () => {
     await setup({ UNBILLED: [worklistRow()] })
-    fireEvent.click(screen.getByRole('tab', { name: /^Unpaid/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Invoiced/ }))
     await settle()
-    const grid = screen.getByRole('table', { name: 'Unpaid invoices' })
+    const grid = screen.getByRole('table', { name: 'Invoiced' })
     expect(within(grid).getByRole('link', { name: 'INV-000123' })).toBeTruthy()
     expect(within(grid).getByText('$2,500.00', { selector: 'span' })).toBeTruthy()
     expect(within(grid).getByRole('button', { name: 'Void invoice INV-000123' })).toBeTruthy()
-    expect(screen.getByTestId('ar-grid-ar-unpaid')).toBeTruthy()
+    expect(screen.getByTestId('ar-grid-ar-queue-invoiced')).toBeTruthy()
   })
 })
 

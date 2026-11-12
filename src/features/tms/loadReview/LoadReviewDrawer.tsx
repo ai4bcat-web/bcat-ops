@@ -12,11 +12,12 @@ import { toast } from 'sonner'
 import { useBillingGrant, LOAD_REVIEW_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
 import { reviewLoad, readyToInvoice, releaseToBilling, setSalesRep, setRevTag, type LoadReviewResult } from '@/lib/apiClient'
 import { DOCS_LANDING } from '@/features/shipments/workstations/tracking/legacyRoutes'
-import { NO_DELIVERY_TIME_TIP, evaluateLoadReview, pendingApRecordNotes, failingReasons, reviewAgeDays, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL } from '@/lib/loadReview'
+import { NO_DELIVERY_TIME_TIP, evaluateLoadReview, failingReasons, reviewAgeDays, LOAD_REVIEW_CHECKS, LOAD_REVIEW_CHECK_LABEL } from '@/lib/loadReview'
 import { CarrierBillsPanel } from './CarrierBillsPanel'
 import { deliveredText, deliveredTimeOf } from './reviewStatus'
 import { StatusPill } from '@/features/shipments/StatusPill'
 import { LoadReviewDocuments } from './LoadReviewDocuments'
+import { LoadReviewCharges } from './LoadReviewCharges'
 import { formatCents } from '@/lib/invoiceBuild'
 import { formatDateTime } from '@/lib/date'
 
@@ -144,9 +145,9 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
     {LOAD_REVIEW_CHECKS.map((key) => <TmsCard key={key} className={`lr-check ${verdict.checks[key].ok ? 'lr-check-ok' : 'lr-check-bad'}`}
       title={<span className="lr-check-title">{verdict.checks[key].ok ? <CheckCircle2 size={16} aria-label="Passed" className="lr-icon-ok" /> : <XCircle size={16} aria-label="Needs fixing" className="lr-icon-bad" />}{LOAD_REVIEW_CHECK_LABEL[key]}</span>}
       actions={<TmsBadge tone={verdict.checks[key].ok ? 'green' : 'red'}>{verdict.checks[key].ok ? 'OK' : `${verdict.checks[key].reasons.length} ${verdict.checks[key].reasons.length === 1 ? 'issue' : 'issues'}`}</TmsBadge>}>
-      <p className="lr-check-value">{values[key]}</p>
+      {key !== 'charges' && <p className="lr-check-value">{values[key]}</p>}
       {verdict.checks[key].reasons.length > 0 && <ul className="lr-reasons">{verdict.checks[key].reasons.map((reason, index) => <li key={`${reason.code}-${index}`}><XCircle size={14} aria-hidden className="lr-icon-bad" />{reason.message}</li>)}</ul>}
-      {key === 'charges' && !released && pendingApRecordNotes(row).map((note) => <p key={note} className="tms-muted">{note}</p>)}
+      {key === 'charges' && <LoadReviewCharges shipmentId={row.id} readOnly={released} disabled={busy} onChanged={changed} />}
       {key === 'salesRep' && !released && <RepPicker value={result?.salesRepId ?? row.salesRepId ?? ''} allowUnknown disabled={busy} placeholder="Pick a sales rep…" onChange={(repId) => void fix(() => setSalesRep({ shipmentId: row.id, repId: repId || null }))} />}
       {key === 'revDivision' && !released && <div className="flex flex-wrap gap-2">
         <TmsSelect aria-label="Revenue division" value={division} disabled={busy} onChange={(event) => { setDivision(event.target.value); setSubdivision('') }}><option value="">Select division</option>{active.filter((d) => !d.parentId).map((d) => <option key={d.id} value={d.code}>{d.name}</option>)}</TmsSelect>
