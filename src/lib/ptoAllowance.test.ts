@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ptoAllowanceForYear, ptoBalance, ptoStartDate, ptoStartYears, untilLabel, validHireDate, formatDays } from './ptoAllowance'
+import { needsHireDate, ptoAllowanceForYear, ptoBalance, ptoStartDate, ptoStartYears, untilLabel, validHireDate, formatDays } from './ptoAllowance'
 
 describe('calendar-year allowance', () => {
   it('hired 2025-06-10: nothing in 2026, 5 in 2027, 10 from 2028', () => {
@@ -47,5 +47,20 @@ describe('untilLabel', () => {
     expect(untilLabel('2026-11-12', '2026-11-13')).toBe('in 1 day')
     expect(untilLabel('2026-11-12', '2027-01-01')).toBe('in 7 weeks')
     expect(untilLabel('2026-05-12', '2027-01-01')).toBe('in 8 months')
+  })
+})
+
+describe('needsHireDate', () => {
+  it('flags active Ivan (LOCAL) employees and PTO-eligible drivers with no usable hire date', () => {
+    expect(needsHireDate({ active: true, fleetGroup: 'LOCAL', hireDate: '' })).toBe(true)
+    expect(needsHireDate({ active: true, fleetGroup: 'LOCAL', hireDate: 'junk' })).toBe(true)
+    expect(needsHireDate({ active: true, fleetGroup: 'OWNER_OPERATOR', ptoEligible: true })).toBe(true)
+  })
+  it('does not flag a driver who has one, contractors, inactive drivers or brokers', () => {
+    expect(needsHireDate({ active: true, fleetGroup: 'LOCAL', hireDate: '2025-03-10' })).toBe(false)
+    expect(needsHireDate({ active: true, fleetGroup: 'OWNER_OPERATOR', hireDate: '' })).toBe(false)
+    expect(needsHireDate({ active: true, fleetGroup: 'BOX_TRUCK' })).toBe(false)
+    expect(needsHireDate({ active: false, fleetGroup: 'LOCAL' })).toBe(false)
+    expect(needsHireDate({ active: true, type: 'broker', fleetGroup: 'LOCAL' })).toBe(false)
   })
 })

@@ -20,6 +20,7 @@ const zak: Driver = {
   fleetGroup: 'BOX_TRUCK', assignedTruckId: 't1', dispatcherPrimary: 'jason@bcatcorp.com', createdAt: '', updatedAt: '',
 }
 const amy: Driver = { id: 'd2', name: 'Amy Local', phone: '(312) 555-0111', active: false, type: 'driver', fleetGroup: 'LOCAL', createdAt: '', updatedAt: '' }
+const lee: Driver = { id: 'd3', name: 'Lee Local', phone: '(312) 555-0122', active: true, type: 'driver', fleetGroup: 'LOCAL', createdAt: '', updatedAt: '' }
 const truck: Equipment = {
   id: 't1', type: 'truck', unitNumber: '214', make: 'Freightliner', model: 'Cascadia', ownership: 'owned', insured: true,
   active: true, onTollwayAccount: false, createdAt: '', updatedAt: '',
@@ -34,7 +35,7 @@ const createDriverPaySetting = vi.fn(async () => ({}))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: { email: 'ryne@bcatcorp.com' }, isAdmin: true }) }))
 vi.mock('@/store/useAppStore', () => {
   const state = {
-    drivers: [zak, amy], equipment: [truck, spare], loads: [{ id: 'l1', aljexId: '10793', customer: 'Acme', pickupDriverId: 'd1', deliveryDriverId: 'd1', originCity: 'Chicago, IL', destinationCity: 'Gary, IN', deliveryAppt: '2026-11-10T15:00:00Z' }],
+    drivers: [zak, amy, lee], equipment: [truck, spare], loads: [{ id: 'l1', aljexId: '10793', customer: 'Acme', pickupDriverId: 'd1', deliveryDriverId: 'd1', originCity: 'Chicago, IL', destinationCity: 'Gary, IN', deliveryAppt: '2026-11-10T15:00:00Z' }],
     addDriver, updateDriver, assignTruckToDriver,
   }
   const useAppStore = (sel: (s: typeof state) => unknown) => sel(state)
@@ -81,6 +82,8 @@ const mount = async (path: string) => {
   return out
 }
 
+const type = (label: RegExp | string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
+
 beforeEach(() => { vi.clearAllMocks(); localStorage.clear() })
 
 describe('Drivers list', () => {
@@ -112,6 +115,40 @@ describe('Drivers list', () => {
     await mount('/profiles/drivers')
     fireEvent.click(screen.getByTestId('drivers-add'))
     expect(screen.getByTestId('where').textContent).toBe('/profiles/drivers/new')
+  })
+})
+
+describe('Hire date (needed for PTO)', () => {
+  it('the list flags Ivan drivers with no hire date: a Needs hire date tab with the count, and a badge in the Hired column', async () => {
+    await mount('/profiles/drivers')
+    const tab = screen.getByRole('tab', { name: /Needs hire date/ })
+    expect(tab.textContent).toMatch(/1/)
+    fireEvent.click(tab)
+    const grid = screen.getByRole('table', { name: 'Drivers' })
+    expect(within(grid).getByText('Lee Local')).toBeTruthy()
+    expect(within(grid).queryByText('Zak Pace')).toBeNull()
+    expect(within(grid).getByText('Needs hire date')).toBeTruthy()
+  })
+
+  it('the profile warns that PTO needs a hire date and the button opens the editor; a contractor gets no warning', async () => {
+    await mount('/profiles/drivers/d3')
+    expect(screen.getByText('Hire date needed for PTO')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('driver-add-hire-date'))
+    expect(screen.getByTestId('drawer-stub')).toBeTruthy()
+  })
+
+  it('a contractor with no hire date is not flagged', async () => {
+    await mount('/profiles/drivers/d1')
+    expect(screen.queryByText('Hire date needed for PTO')).toBeNull()
+  })
+
+  it('the wizard requires the hire date for a Local (employee) driver, not for a contractor', async () => {
+    await mount('/profiles/drivers/new')
+    type('Full name', 'Hourly Hank')
+    type('Phone', '3125550101')
+    fireEvent.click(screen.getByRole('button', { name: 'Local driver' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByText(/Enter the hire date \(first day of work\)/)).toBeTruthy()
   })
 })
 
@@ -171,7 +208,6 @@ describe('Driver profile', () => {
 })
 
 describe('New driver wizard', () => {
-  const type = (label: RegExp | string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
 
   it('blocks Next until the basics are valid, then walks the five steps and creates driver, pay and equipment', async () => {
     await mount('/profiles/drivers/new')
@@ -211,6 +247,7 @@ describe('New driver wizard', () => {
     await mount('/profiles/drivers/new')
     type('Full name', 'Hourly Hank')
     type('Phone', '3125550101')
+    type('Hire date', '2026-11-02')
     fireEvent.click(screen.getByRole('button', { name: 'Local driver' }))
     for (let i = 0; i < 4; i += 1) fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     fireEvent.click(screen.getByRole('button', { name: 'Create driver' }))

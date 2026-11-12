@@ -61,7 +61,7 @@ describe('PtoDaysSection', () => {
     await screen.findByRole('table', { name: 'PTO days taken' })
     const chips = screen.getByLabelText('PTO used in 2026').textContent ?? ''
     expect(chips).toMatch(/Jason Smith: 2 days · 12 h · 1.5 of 5 used, 3.5 left/)
-    expect(chips).toMatch(/Ann Lee: 1 day · 8 h · No hire date/)
+    expect(chips).toMatch(/Ann Lee: 1 day · 8 h · Needs hire date/)
     expect(chips).toMatch(/New Hire: 0 days · 0 h · PTO starts Jan 1, 2028 \(in 14 months\)/)
   })
 
@@ -77,7 +77,15 @@ describe('PtoDaysSection', () => {
     expect(within(dialog).getByTestId('pto-balance').textContent).toMatch(/No PTO allowance in 2026 yet\. PTO starts Jan 1, 2028 \(in 14 months\)\..*You can still add it/)
     expect((within(dialog).getByRole('button', { name: 'Add day' }) as HTMLButtonElement).disabled).toBe(false)
     fireEvent.change(within(dialog).getByLabelText('Driver'), { target: { value: 'a' } })
-    expect(within(dialog).getByTestId('pto-balance').textContent).toMatch(/No hire date/)
+    expect(within(dialog).getByTestId('pto-balance').textContent).toMatch(/Needs hire date/)
+  })
+
+  it('links a driver with no hire date to their profile', async () => {
+    renderIt()
+    await screen.findByRole('table', { name: 'PTO days taken' })
+    const link = screen.getByTestId('pto-needs-hire-a') as HTMLAnchorElement
+    expect(link.textContent).toBe('Needs hire date')
+    expect(link.getAttribute('href')).toBe('/profiles/drivers/a')
   })
 
   it('filters by driver and by month', async () => {
