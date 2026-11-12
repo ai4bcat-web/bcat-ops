@@ -65,6 +65,7 @@ vi.mock('@aws-sdk/client-cognito-identity-provider', () => {
     AdminAddUserToGroupCommand: make('AdminAddUserToGroup'),
     AdminRemoveUserFromGroupCommand: make('AdminRemoveUserFromGroup'),
     AdminResetUserPasswordCommand: make('AdminResetUserPassword'),
+    AdminSetUserPasswordCommand: make('AdminSetUserPassword'),
     AdminUserGlobalSignOutCommand: make('AdminUserGlobalSignOut'),
     AdminGetUserCommand: make('AdminGetUser'),
     CreateGroupCommand: make('CreateGroup'),
@@ -931,5 +932,101 @@ describe('listDriverPool', () => {
     const result = await call({ action: 'listDriverPool' })
     expect(result.users).toEqual([])
     expect(result.reason).toMatch(/DRIVER_USER_POOL_ID/)
+  })
+})
+
+describe('driver app password reset (driver pool)', () => {
+  const DRIVER_POOL = 'us-east-1_DRIVER'
+  const CHUCK = 'chuck@example.com'
+  let driverCalls: MockCommand[]
+
+  function driverPool(user: { status?: string; verified?: boolean; enabled?: boolean } | null, fail?: { name: string }) {
+    driverCalls = []
+    cognitoSend.mockImplementation((cmd: MockCommand) => {
+      if (cmd.input.UserPoolId === DRIVER_POOL) {
+        driverCalls.push(cmd)
+        if (cmd.__type === 'ListUsers') {
+          return Promise.resolve({
+            Users: user ? [{
+              Username: 'uuid-chuck',
+              Attributes: [{ Name: 'email', Value: CHUCK }, { Name: 'email_verified', Value: String(user.verified ?? true) }],
+              UserStatus: user.status ?? 'CONFIRMED',
+              Enabled: user.enabled ?? true,
+            }] : [],
+          })
+        }
+        if (fail) return Promise.reject(Object.assign(new Error('boom'), { name: fail.name }))
+        return Promise.resolve({})
+      }
+      return Promise.resolve(runCognito(cmd))
+    })
+  }
+
+  beforeEach(() => { process.env.DRIVER_USER_POOL_ID = DRIVER_POOL })
+
+  it('lets an ADMIN (not only the owner) look up and reset a driver login', async () => {
+    driverPool({ status: 'CONFIRMED' })
+    const info = await call({ action: 'driverLogin', input: JSON.stringify({ email: CHUCK }) }, admin)
+    expect(info).toEqual({ exists: true, email: CHUCK, status: 'CONFIRMED', enabled: true, emailVerified: true })
+    const out = await call({ action: 'resetDriverPassword', input: JSON.stringify({ email: CHUCK, method: 'code' }) }, admin)
+    expect(out).toMatchObject({ success: true, method: 'code' })
+    const reset = driverCalls.find((c) => c.__type === 'AdminResetUserPassword')
+    expect(reset?.input).toEqual({ UserPoolId: DRIVER_POOL, Username: 'uuid-chuck' })
+  })
+
+  it('refuses staff who are neither owner nor ADMIN, and never touches the pool', async () => {
+    driverPool({})
+    await expect(call({ action: 'resetDriverPassword', input: JSON.stringify({ email: CHUCK, method: 'code' }) }, staff))
+      .rejects.toThrow("Forbidden: only an admin may reset a driver's app password.")
+    expect(driverCalls).toHaveLength(0)
+  })
+
+  it('sets a temporary password the driver must change, and never audits or returns it', async () => {
+    driverPool({ status: 'CONFIRMED', verified: false })
+    const out = await call({ action: 'resetDriverPassword', input: JSON.stringify({ email: CHUCK, method: 'temporary', password: 'truck2026x' }) })
+    expect(JSON.stringify(out)).not.toContain('truck2026x')
+    const set = driverCalls.find((c) => c.__type === 'AdminSetUserPassword')
+    expect(set?.input).toEqual({ UserPoolId: DRIVER_POOL, Username: 'uuid-chuck', Password: 'truck2026x', Permanent: false })
+    const audit = auditRows().find((r) => r.action === 'RESET_DRIVER_PASSWORD')
+    expect(audit).toMatchObject({ entityType: 'DriverLogin', entityId: CHUCK })
+    expect(JSON.stringify(auditRows())).not.toContain('truck2026x')
+  })
+
+  it('refuses a weak temporary password before calling Cognito', async () => {
+    driverPool({})
+    await expect(call({ action: 'resetDriverPassword', input: JSON.stringify({ email: CHUCK, method: 'temporary', password: 'short1' }) }))
+      .rejects.toThrow('at least 8 characters')
+    await expect(call({ action: 'resetDriverPassword', input: JSON.stringify({ email: CHUCK, method: 'temporary', password: 'NODIGITSHERE' }) }))
+      .rejects.toThrow('lowercase')
+    expect(driverCalls.some((c) => c.__type === 'AdminSetUserPassword')).toBe(false)
+  })
+
+  it('says to send an invite when the driver has no app account', async () => {
+    driverPool(null)
+    await expect(call({ action: 'resetDriverPassword', input: JSON.stringify({ email: CHUCK, method: 'code' }) }))
+      .rejects.toThrow('No app account — send a sign-in invite instead.')
+    const info = await call({ action: 'driverLogin', input: JSON.stringify({ email: CHUCK }) })
+    expect(info).toEqual({ exists: false, email: CHUCK })
+  })
+
+  it('will not email a code to an unverified address, or reset a disabled login', async () => {
+    driverPool({ verified: false })
+    await expect(call({ action: 'resetDriverPassword', input: JSON.stringify({ email: CHUCK, method: 'code' }) }))
+      .rejects.toThrow('not verified')
+    driverPool({ enabled: false })
+    await expect(call({ action: 'resetDriverPassword', input: JSON.stringify({ email: CHUCK, method: 'temporary', password: 'truck2026x' }) }))
+      .rejects.toThrow('disabled')
+  })
+
+  it('maps a Cognito refusal to plain words', async () => {
+    driverPool({}, { name: 'InvalidPasswordException' })
+    await expect(call({ action: 'resetDriverPassword', input: JSON.stringify({ email: CHUCK, method: 'temporary', password: 'truck2026x' }) }))
+      .rejects.toThrow('does not meet the password rules')
+  })
+
+  it('leaves the staff pool alone', async () => {
+    driverPool({})
+    await call({ action: 'resetDriverPassword', input: JSON.stringify({ email: CHUCK, method: 'code' }) })
+    expect(pool.calls.some((c) => c.type === 'AdminResetUserPassword')).toBe(false)
   })
 })

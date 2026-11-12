@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { Smartphone } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { SendDriverInvite } from '@/features/owner-operator-pay/SendDriverInvite'
+import { ResetDriverPassword } from './ResetDriverPassword'
 import { RouteStrip } from '@/features/dispatch/RouteStrip'
 import { StateIcon, Progress } from '@/features/dispatch/DriverSchedulePanel'
 import { ivanWeekSchedule } from '@/lib/driverSchedule'
@@ -60,6 +61,7 @@ export function IvanDriverWeek({ driver, loads, weekStart, today, truck, now, on
           </div>
         </div>
         <SendDriverInvite driver={driver} email={driver.email ?? ''} />
+        <ResetDriverPassword driver={driver} />
         <button
           onClick={() => navigate(`/driver-view/${driver.id}`)}
           title={`Open ${driver.name}'s own app — read only, and recorded`}

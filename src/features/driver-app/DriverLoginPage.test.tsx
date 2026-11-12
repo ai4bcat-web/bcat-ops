@@ -22,9 +22,11 @@ if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => 
 const signIn = vi.fn()
 const forgotPassword = vi.fn()
 const confirmForgotPassword = vi.fn()
+const completeNewPassword = vi.fn()
 
-vi.mock('./useDriverAuth', () => ({
-  useDriverAuth: () => ({ signIn, forgotPassword, confirmForgotPassword }),
+vi.mock('./useDriverAuth', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./useDriverAuth')>()),
+  useDriverAuth: () => ({ signIn, forgotPassword, confirmForgotPassword, completeNewPassword }),
 }))
 
 function renderLogin(ua = '', standalone = false) {
@@ -120,5 +122,39 @@ describe('DriverLoginPage', () => {
       expect(screen.getByText(/We don't recognize that email or password/i)).toBeInTheDocument()
     })
     expect(screen.queryByText(/User does not exist/i)).not.toBeInTheDocument()
+  })
+
+  it('asks for a new password after a temporary one set by dispatch, then finishes the sign-in', async () => {
+    const { NewPasswordRequiredError } = await import('./useDriverAuth')
+    signIn.mockRejectedValue(new NewPasswordRequiredError('chuck@example.com', 'sess-1'))
+    completeNewPassword.mockResolvedValue(undefined)
+    renderLogin()
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'chuck@example.com' } })
+    fireEvent.change(document.getElementById('driver-password')!, { target: { value: 'temp2026x' } })
+    fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
+
+    await waitFor(() => expect(screen.getByText(/Dispatch gave you a temporary password/i)).toBeInTheDocument())
+    fireEvent.change(document.getElementById('driver-choose-password')!, { target: { value: 'mine2026x' } })
+    fireEvent.change(document.getElementById('driver-confirm-password')!, { target: { value: 'mine2026y' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save password and sign in/i }))
+    expect(await screen.findByText(/The two passwords don't match/i)).toBeInTheDocument()
+    expect(completeNewPassword).not.toHaveBeenCalled()
+
+    fireEvent.change(document.getElementById('driver-confirm-password')!, { target: { value: 'mine2026x' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save password and sign in/i }))
+    await waitFor(() => expect(completeNewPassword).toHaveBeenCalledWith('chuck@example.com', 'sess-1', 'mine2026x'))
+  })
+
+  it('sends a driver whose password dispatch reset to the code screen', async () => {
+    signIn.mockRejectedValue(new Error('Password reset required for the user', { cause: { name: 'PasswordResetRequiredException' } }))
+    renderLogin()
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'chuck@example.com' } })
+    fireEvent.change(document.getElementById('driver-password')!, { target: { value: 'old2026x' } })
+    fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
+
+    await waitFor(() => expect(screen.getByText(/Dispatch reset your password/i)).toBeInTheDocument())
+    expect(document.getElementById('driver-code')).toBeInTheDocument()
   })
 })
