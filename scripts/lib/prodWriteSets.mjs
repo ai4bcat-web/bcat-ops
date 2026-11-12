@@ -83,6 +83,8 @@ export const PROD_WRITE_SETS = {
   // `awLocationRename.mjs --apply`: the approved Location renames (name/street/city/state/zip + normalizedName/normalizedAddress, geocode cleared) + one AuditLog row per row;
   // `--with-stop-copies`: Load.stops[].name / originName / destinationName copies of the old name + one AuditLog row per Load.
   awLocationRename: { models: ['Location', 'Load', 'AuditLog'] },
+  // `awLocationCleanup.mjs --apply`: Location.active=false for address-less unused rows (ARCHIVE); exact-duplicate Locations enriched/frozen (mergedIntoId, mergeJobId, active=false) and Load.stops[].locationId repointed to the survivor; one AuditLog row per write. `--rollback` reverses them from those rows.
+  awLocationCleanup: { models: ['Location', 'Load', 'AuditLog'] },
   // `awCustomerEmail.mjs --apply`: enrich-only Customer.apEmail / invoiceCopyEmails / contactEmail (where empty) + one AuditLog row per customer.
   // `awDivisions.mjs drivers|retire-company|restore --apply` (union; per-subcommand subsets are SUB_MODELS in the script): Driver.driverType only (one AuditLog row per driver),
   // delete of the COMPANY OwnershipDivision row (exported first, refuses while referenced) + restore of it.
@@ -93,7 +95,7 @@ export const PROD_WRITE_SETS = {
   // `awShipmentNumber.mjs --apply`: renumber post-cutover shipments (99xxx -> 20000...) in every table awRenumberL moves + TmsSettings.nextShipmentNumber.
   // `awCustomerBilling.mjs --apply`: Customer.billingMethod / apEmail / paymentTermsDays (conditional per customer) + one AuditLog row per customer.
   awCustomerBilling: { models: ['Customer', 'AuditLog'] },
-  // `awCustomerBillingEmails.mjs --apply`: Customer.apEmail only (OTR billing list; blank + non-FACTOR only, conditional) + one AuditLog row per customer.
+  // `awCustomerBillingEmails.mjs --apply`: Customer.apEmail (OTR billing list; blank + non-FACTOR only) and Customer.noaEmail (notice-of-assignment; blank only), both conditional, + one AuditLog row per customer.
   awCustomerBillingEmails: { models: ['Customer', 'AuditLog'] },
   // `awInvoiceDocs.mjs --apply`: adds the missing `inv:<invoiceId>` INVOICE ShipmentDocument rows (put, attribute_not_exists(id)); never touches an existing row.
   awInvoiceDocs: { models: ['ShipmentDocument'] },

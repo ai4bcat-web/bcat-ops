@@ -98,6 +98,24 @@ export function findLocationMatches(query: LocationQuery, locations: LocationRec
   }).sort((a, b) => b.score - a.score)
 }
 
+/**
+ * Tidy a ranked list of location suggestions for the stop picker: an exact repeat (same name and same address) is shown once, and a
+ * street-less entry is dropped when an addressed entry of the same name and city is also on offer (it stays when it is the only
+ * one). Order is kept; this never changes which record a match refers to.
+ */
+export function tidyLocationSuggestions<T extends LocationRecord>(records: readonly T[]): T[] {
+  const seen = new Set<string>()
+  const unique = records.filter(record => {
+    const key = `${normalizeName(record.name)}|${normalizeAddress(locationAddress(record))}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  const cityOf = (record: T) => normalizeName(record.city ?? '')
+  const addressed = new Set(unique.filter(record => (record.street ?? '').trim() !== '').map(record => `${normalizeName(record.name)}|${cityOf(record)}`))
+  return unique.filter(record => (record.street ?? '').trim() !== '' || !addressed.has(`${normalizeName(record.name)}|${cityOf(record)}`))
+}
+
 export function locationMatches(query: LocationQuery, record: LocationRecord): boolean {
   return findLocationMatches(query, [record]).length > 0
 }

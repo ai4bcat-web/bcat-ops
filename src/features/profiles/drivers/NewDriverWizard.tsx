@@ -156,7 +156,7 @@ export function NewDriverWizard() {
             <TmsField label="CDL number" hint="Optional"><TmsInput value={cdl} onChange={(e) => setCdl(e.target.value)} placeholder="CDL-A IL-8823901" /></TmsField>
             <TmsField label="CDL expires" hint="Optional" error={tried ? errors.cdlExpiration : null}><TmsInput type="date" value={cdlExpiration} onChange={(e) => setCdlExpiration(e.target.value)} /></TmsField>
             <TmsField label="Med card expires" hint="Optional" error={tried ? errors.medCardExpiration : null}><TmsInput type="date" value={medCardExpiration} onChange={(e) => setMedCardExpiration(e.target.value)} /></TmsField>
-            <TmsField label="Hire date" hint="Optional" error={tried ? errors.hireDate : null}><TmsInput type="date" value={hireDate} onChange={(e) => setHireDate(e.target.value)} /></TmsField>
+            <TmsField label="Hire date" hint={fleet === 'LOCAL' ? 'First day of work. Required, PTO is counted from it' : 'First day of work. Optional'} error={tried ? errors.hireDate : null}><TmsInput type="date" value={hireDate} onChange={(e) => setHireDate(e.target.value)} /></TmsField>
             <TmsField label="Dispatcher" hint="Optional"><TmsSelect value={dispatcher} onChange={(e) => setDispatcher(e.target.value)} options={dispatchers.map((d) => ({ value: d, label: d }))} placeholder="None yet" /></TmsField>
             <div className="pf-wide">
               <div className="tms-field-label" style={{ marginBottom: 6 }}>Driver type</div>

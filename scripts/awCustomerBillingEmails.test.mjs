@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTION, applyOne, billingEmailsGate, buildReport } from './awCustomerBillingEmails.mjs';
+import { AUDIT_ACTION, applyNoa, applyOne, billingEmailsGate, buildReport } from './awCustomerBillingEmails.mjs';
 import { groupCompanies, isNoticeAddress, normKey, normMc, planBillingEmails, prepareRows } from './lib/billingEmailsPlan.mjs';
 import { PROD_WRITE_SETS } from './lib/prodWriteSets.mjs';
 import { resolveScripts } from './prodBackup.mjs';
@@ -71,6 +71,24 @@ describe('planBillingEmails', () => {
     const both = planBillingEmails([cust()], prep([row({ name: 'Zipline Logistics', billingEmail: 'zip@noa.triumphpay.com ap@z.com' })])).results[0];
     expect([both.status, both.email, both.company.noa]).toEqual(['FILL', 'ap@z.com', ['zip@noa.triumphpay.com']]);
   });
+  it('plans noaEmail writes for blank, single-address, unambiguous matches only (any billing method)', () => {
+    const noaRow = (name, e) => row({ name, billingEmail: e });
+    const one = planBillingEmails([cust({ billingMethod: 'FACTOR' })], prep([noaRow('Zipline Logistics', 'zip@noa.triumphpay.com')]));
+    expect(one.noaWrites.map((w) => [w.customer.id, w.noa])).toEqual([['c1', 'zip@noa.triumphpay.com']]);
+    const same = planBillingEmails([cust({ noaEmail: 'ZIP@noa.triumphpay.com' })], prep([noaRow('Zipline Logistics', 'zip@noa.triumphpay.com')]));
+    expect(same.noaWrites).toEqual([]);
+    expect(same.noaOther.map((r) => r.why)).toEqual(['NOA_SAME']);
+    const differs = planBillingEmails([cust({ noaEmail: 'old@noa.triumphpay.com' })], prep([noaRow('Zipline Logistics', 'zip@noa.triumphpay.com')]));
+    expect(differs.noaWrites).toEqual([]);
+    expect(differs.noaOther.map((r) => r.why)).toEqual(['NOA_DIFFERS']);
+    const many = planBillingEmails([cust()], prep([noaRow('Zipline Logistics', 'a@noa.triumphpay.com b@noa.triumphpay.com')]));
+    expect(many.noaWrites).toEqual([]);
+    expect(many.noaOther.map((r) => r.why)).toEqual(['MULTIPLE_NOA']);
+    const amb = planBillingEmails([cust(), cust({ id: 'c2', name: 'ZIPLINE LOGISTICS INC' })], prep([noaRow('Zipline Logistics', 'zip@noa.triumphpay.com')]));
+    expect(amb.noaWrites).toEqual([]);
+    const both = planBillingEmails([cust()], prep([noaRow('Zipline Logistics', 'zip@noa.triumphpay.com ap@z.com')]));
+    expect([both.results[0].status, both.noaWrites.length]).toEqual(['FILL', 1]);
+  });
   it('report counts', () => {
     const rows = [row({ name: 'Zipline Logistics', billingEmail: 'p@z.com' })];
     const prepared = prep(rows);
@@ -88,6 +106,18 @@ describe('applyOne', () => {
     expect(calls[0].UpdateExpression).toBe('SET apEmail = :v');
     expect(calls[0].ConditionExpression).toContain('billingMethod <> :factor');
     expect(calls[1].Item.action).toBe(AUDIT_ACTION);
+  });
+  it('writes noaEmail only, conditional on blank, plus one audit row', async () => {
+    const calls = [];
+    const doc = { send: async (c) => { calls.push(c.input); return {}; } };
+    const r = await applyNoa({ doc, suffix: DEV_SUFFIX, customer: { id: 'c1' }, email: 'zip@noa.triumphpay.com' }).catch((e) => e);
+    if (r instanceof Error) throw r;
+    expect(r.written).toBe(1);
+    expect(calls[0].UpdateExpression).toBe('SET noaEmail = :v');
+    expect(calls[0].ConditionExpression).toContain('attribute_not_exists(noaEmail)');
+    expect(calls[0].ConditionExpression).not.toContain('apEmail');
+    expect(calls[1].Item.action).toBe(AUDIT_ACTION);
+    expect(JSON.parse(calls[1].Item.changes).next).toEqual({ noaEmail: 'zip@noa.triumphpay.com' });
   });
   it('is registered for backup and gated', async () => {
     expect(PROD_WRITE_SETS.awCustomerBillingEmails.models).toEqual(['Customer', 'AuditLog']);
