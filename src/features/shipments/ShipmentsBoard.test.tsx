@@ -492,6 +492,23 @@ describe('ShipmentsBoard', () => {
     expect(strip).toHaveTextContent('3Shipments')
   })
 
+  it('flags live shipments past their delivery date and the strip count filters to them', async () => {
+    const past = new Date(Date.now() - 3 * 86_400_000).toISOString()
+    renderBoard('/tms/shipments', [
+      row('S001', { status: 'IN_TRANSIT', deliveryAppt: past }),
+      row('S002', { status: 'DELIVERED', deliveryAppt: past }),
+      row('S003', { status: 'OPEN', deliveryAppt: new Date(Date.now() + 3 * 86_400_000).toISOString() }),
+    ])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    expect(screen.getAllByTestId('past-delivery-pill')).toHaveLength(1)
+    const toggle = screen.getByRole('button', { name: /Past delivery date/ })
+    expect(toggle).toHaveTextContent('1')
+    fireEvent.click(toggle)
+    await waitFor(() => expect(screen.queryByText('S003')).toBeNull())
+    expect(screen.getByText('S001')).toBeTruthy()
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  })
+
   it('has no Demo chip', async () => {
     renderBoard('/tms/shipments')
     await screen.findByRole('textbox', { name: 'Search shipments' })
