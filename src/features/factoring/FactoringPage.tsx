@@ -40,7 +40,7 @@ import { loadFromFactoringItem } from './loadFromInvoice'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 import { manualSentInfo } from '@/lib/manualInvoice'
 import { noBuyInfo } from '@/lib/noBuy'
-import { needsManualInvoice, otrRejection } from '@/lib/otrRejection'
+import { mayInvoiceManually, needsManualInvoice, otrRejection } from '@/lib/otrRejection'
 import { BILLING_RELEASE_PAGE, holdsPerUserGrant } from '@/lib/navItems'
 import { InvoiceManuallyDialog } from './InvoiceManuallyDialog'
 
@@ -291,12 +291,13 @@ const STATUS_TONE: Record<FactoringItemStatus, TmsTone> = {
 }
 
 /**
- * Rows the Invoice manually button applies to: anything still in the OTR queue, and a No
- * buy row that already sits under Invoice manually (the button then finishes the move:
- * Invoice.factored and the customer's default). Repeating it changes nothing.
+ * Rows the Invoice manually button applies to: No buy rows, in the queue or already under
+ * Invoice manually (the button then finishes the move: Invoice.factored and the customer's
+ * default; repeating it changes nothing). Any other row (Dead, an OTR error, just queued)
+ * stays with OTR; only an admin gets the button there.
  */
-function canMoveManually(item: FactoringItem): boolean {
-  return item.status === 'NEED_TO_FACTOR' || item.status === 'PENDING_WITH_OTR' || (item.status === 'MANUAL_INVOICE' && noBuyInfo(item).noBuy)
+function canMoveManually(item: FactoringItem, user: { email?: string | null; groups?: readonly string[] | null } | null): boolean {
+  return mayInvoiceManually(item, user).allowed
 }
 
 /** OTR will not buy this paper. Said on the row, with OTR's reason, not only in the panel. */
@@ -311,13 +312,13 @@ function NoBuyFlag({ item }: { item: FactoringItem }) {
   )
 }
 
-/** OTR turned this invoice down for a reason other than "will not buy" (that has its own flag): it has to go out by hand. */
+/** OTR turned this invoice down for a reason other than "will not buy" (that has its own flag). It stays in the queue until it is resolved with OTR. */
 function RejectedFlag({ item }: { item: FactoringItem }) {
   const rejection = otrRejection(item)
   if (!rejection || rejection.kind === 'NO_BUY') return null
   return (
     <>
-      <TmsBadge tone="red" title={rejection.reason} data-testid="otr-rejected-flag">Invoice manually</TmsBadge>
+      <TmsBadge tone="red" title={`${rejection.reason}. Stays in the factoring queue: resolve it with OTR.`} data-testid="otr-rejected-flag">Needs attention</TmsBadge>
       <span className="max-w-[18rem] truncate text-xs tms-muted" title={rejection.reason}>{rejection.reason}</span>
     </>
   )
@@ -716,11 +717,12 @@ export function FactoringPage() {
       header: 'ACTIONS',
       render: (item: FactoringItem) => (
         <div className="flex items-center gap-2 whitespace-nowrap">
-          {canMoveManually(item) && (
+          {canMoveManually(item, user) && (
             <TmsButton
               size="sm"
               variant="ghost"
               aria-label={`Invoice manually for PRO ${item.proNumber}`}
+              title={mayInvoiceManually(item, user).override ? 'Admin override: OTR has not said No buy for this invoice' : undefined}
               disabled={pendingIds.has(item.id)}
               onClick={() => setManualMoveId(item.id)}
             >
@@ -774,7 +776,7 @@ export function FactoringPage() {
     },
     {
       key: 'status', header: 'Status', group: 'Status', extraPx: 130,
-      text: (i) => `${FACTORING_STATUS_LABEL[i.status]}${i.status === 'PENDING_WITH_OTR' ? ` \u00b7 OTR: ${otrLabelOf(i)}` : ''}${noBuyInfo(i).noBuy ? ' \u00b7 No buy' : ''}${otrRejection(i) && !noBuyInfo(i).noBuy ? ' \u00b7 Invoice manually' : ''}`,
+      text: (i) => `${FACTORING_STATUS_LABEL[i.status]}${i.status === 'PENDING_WITH_OTR' ? ` \u00b7 OTR: ${otrLabelOf(i)}` : ''}${noBuyInfo(i).noBuy ? ' \u00b7 No buy' : ''}${otrRejection(i) && !noBuyInfo(i).noBuy ? ' \u00b7 Needs attention' : ''}`,
       filter: 'multi',
       optionsOf: (i) => [{ value: i.status, label: FACTORING_STATUS_LABEL[i.status] }],
       sortValue: (i) => FACTORING_STATUS_LABEL[i.status],
@@ -796,6 +798,8 @@ export function FactoringPage() {
   const shown = gridRows.slice(0, pageSize)
   const renderFactoringCell = (item: FactoringItem, key: string) => columns.find((c) => c.key === key)?.render(item) ?? null
   const rejected = useMemo(() => needsManualInvoice(items), [items])
+  const rejectedNoBuy = rejected.filter((i) => otrRejection(i)?.kind === 'NO_BUY').length
+  const rejectedAttention = rejected.length - rejectedNoBuy
   const filterCount = activeFilterCount(dense) + (search.trim() ? 1 : 0) + (otrFilter ? 1 : 0) + (rejectedOnly ? 1 : 0)
   const resetPaging = () => setPageSize(PAGE_STEP)
 
@@ -830,7 +834,9 @@ export function FactoringPage() {
           <div role="status" data-testid="otr-rejected-strip" className="flex flex-wrap items-center gap-2" style={{ padding: '6px 8px', background: 'var(--tms-badge-red-tint, transparent)' }}>
             <TmsBadge tone="red">{rejected.length}</TmsBadge>
             <span className="text-sm">
-              {rejected.length === 1 ? 'invoice was' : 'invoices were'} turned down by OTR and must be invoiced manually.
+              {rejectedNoBuy > 0 && <>{rejectedNoBuy} {rejectedNoBuy === 1 ? 'invoice' : 'invoices'} OTR will not buy: invoice manually.</>}
+              {rejectedNoBuy > 0 && rejectedAttention > 0 && ' '}
+              {rejectedAttention > 0 && <>{rejectedAttention} {rejectedAttention === 1 ? 'invoice needs' : 'invoices need'} attention at OTR (Dead or refused): resolve with OTR.</>}
             </span>
             <TmsButton size="sm" variant="secondary" aria-pressed={rejectedOnly} data-testid="otr-rejected-toggle" onClick={() => { setRejectedOnly((v) => !v); resetPaging() }}>
               {rejectedOnly ? 'Show the whole queue' : 'Show them'}

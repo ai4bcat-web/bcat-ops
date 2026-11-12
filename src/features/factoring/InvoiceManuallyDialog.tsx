@@ -94,6 +94,11 @@ export function InvoiceManuallyDialog({ item, customer, canChangeDefault, onClos
             <strong>No buy.</strong> {reason}
           </p>
         )}
+        {!noBuy && (
+          <p className="text-[color:var(--tms-badge-red)]">
+            Admin override: OTR has not said No buy for this invoice. Normally only a No buy invoice is invoiced manually; Dead or refused invoices are resolved with OTR.
+          </p>
+        )}
         <p>
           This invoice leaves the factoring queue and goes onto the manual path. Nothing is e-mailed now: you post and send it
           afterwards, like any manual invoice (it goes to the customer's AP e-mail, with invoices@bcatcorp.com copied).
