@@ -69,7 +69,25 @@ export const DEFAULT_MILESTONE_TEMPLATE =
 export const DEFAULT_POD_REQUEST_TEMPLATE =
   'Load {loadNumber} has delivered. Please send the paperwork listed below.\n\nUpload here: {url}'
 
-/** The covering note for one issued invoice. Must carry `{number}`. */
+/**
+ * The body of every invoice e-mail, word for word. The PDF is the bill; the body says where
+ * remittance goes and that replies are not read. It is fixed on purpose: no per-company
+ * template, balance line or greeting is added to it.
+ */
+export const INVOICE_EMAIL_BODY = [
+  'Your report is attached to this email.',
+  '',
+  'Please send remittance to billing@bcatcorp.com or provide any questions and',
+  'a representative will assist you.',
+  '',
+  'Please do not reply directly to this email.',
+  '',
+  'Thank you,',
+  '',
+  'BCAT Logistics & IVAN Cartage',
+].join('\n')
+
+/** The covering note for one issued invoice. Must carry `{number}`. Kept for the settings validator; the e-mail body is `INVOICE_EMAIL_BODY`. */
 export const DEFAULT_INVOICE_EMAIL_TEMPLATE =
   'Invoice {number} for shipment {shipment} is attached.'
 
@@ -317,42 +335,14 @@ export interface InvoiceEmailInput {
 }
 
 /**
- * The covering note for one invoice. The PDF is the bill, so the body stays short —
- * but the balance and the due date are stated here whatever the template says,
- * because a customer should never have to open an attachment to learn what is owed.
- *
- * `{total}` is the invoice total; the stated amount due is the balance, which is
- * the same number until a payment has been applied.
+ * The e-mail for one invoice: the subject names the invoice, the body is the fixed `INVOICE_EMAIL_BODY`.
+ * The balance and due date live on the attached PDF, not in the message.
  */
 export function renderInvoiceEmail(input: InvoiceEmailInput): { subject: string; body: string } {
-  const invoice = input.invoice
-  const subject = `Invoice ${invoice.number} · ${input.brokerName}`
-  const template = templateHasNumber(input.template)
-    ? (input.template as string)
-    : DEFAULT_INVOICE_EMAIL_TEMPLATE
-
-  const lines: string[] = []
-  lines.push(input.contactName ? `${input.contactName},` : 'Hello,')
-  lines.push('')
-  lines.push(
-    applyTemplate(template, {
-      number: invoice.number,
-      customer: input.customerName ?? '',
-      contact: input.contactName ?? '',
-      total: `$${formatCents(invoice.totalCents)}`,
-      due: invoice.dueAt,
-      shipment: invoice.shipmentNumber ?? '',
-      broker: input.brokerName,
-    }),
-  )
-
-  lines.push('')
-  lines.push(`Amount due: $${formatCents(invoice.balanceCents)}`)
-  lines.push(`Due ${invoice.dueAt}.`)
-  lines.push('')
-  lines.push(input.brokerName)
-
-  return { subject, body: lines.join('\n').slice(0, MAX_NOTICE_BODY_CHARS) }
+  return {
+    subject: `Invoice ${input.invoice.number} · ${input.brokerName}`,
+    body: INVOICE_EMAIL_BODY,
+  }
 }
 
 export interface InvoiceBatchEmailInput {
@@ -364,55 +354,19 @@ export interface InvoiceBatchEmailInput {
 
 /**
  * One e-mail for several invoices of the same customer and bill-to — the
- * PER_BILL_TO half of a batch run.
- *
- * Every invoice is listed, so nothing is sent that the body does not name. The
- * total is what is still owed across the batch, not what was originally billed.
- * `{number}` joins the numbers, so the per-invoice template a stack has already
- * configured still reads correctly here.
+ * PER_BILL_TO half of a batch run. The subject counts them and totals what is still
+ * owed; the body is the same fixed `INVOICE_EMAIL_BODY` as a single invoice.
  */
 export function renderInvoiceBatchEmail(
   invoices: InvoiceEmailInvoice[],
   input: InvoiceBatchEmailInput,
 ): { subject: string; body: string } {
   const totalCents = invoices.reduce((sum, invoice) => sum + invoice.balanceCents, 0)
-  const total = `$${formatCents(totalCents)}`
   const counted = `${invoices.length} ${invoices.length === 1 ? 'invoice' : 'invoices'}`
-  const subject = `${counted} · ${total} · ${input.brokerName}`
-  const template = input.template?.trim() || DEFAULT_INVOICE_BATCH_TEMPLATE
-
-  const lines: string[] = []
-  lines.push(input.contactName ? `${input.contactName},` : 'Hello,')
-  lines.push('')
-  lines.push(
-    applyTemplate(template, {
-      count: String(invoices.length),
-      invoices: counted,
-      number: invoices.map((invoice) => invoice.number).join(', '),
-      customer: input.customerName ?? '',
-      contact: input.contactName ?? '',
-      total,
-      broker: input.brokerName,
-    }),
-  )
-
-  if (invoices.length > 0) {
-    lines.push('')
-    for (const invoice of invoices) {
-      const parts = [invoice.number]
-      if (invoice.shipmentNumber) parts.push(`shipment ${invoice.shipmentNumber}`)
-      parts.push(`due ${invoice.dueAt}`)
-      parts.push(`$${formatCents(invoice.balanceCents)}`)
-      lines.push(`  • ${parts.join(' — ')}`)
-    }
+  return {
+    subject: `${counted} · $${formatCents(totalCents)} · ${input.brokerName}`,
+    body: INVOICE_EMAIL_BODY,
   }
-
-  lines.push('')
-  lines.push(`Total due: ${total}`)
-  lines.push('')
-  lines.push(input.brokerName)
-
-  return { subject, body: lines.join('\n').slice(0, MAX_NOTICE_BODY_CHARS) }
 }
 
 /** What a remittance has to say about each bill it settles. */

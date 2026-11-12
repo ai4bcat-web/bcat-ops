@@ -9,17 +9,18 @@
  * and body to paste into a mail client, and offers the attachments for download.
  * Nothing here ever claims a send the server did not make.
  *
- * The template preview is `renderInvoiceEmail` — the same pure renderer the Lambda uses
+ * The message preview is `renderInvoiceEmail` — the same pure renderer the Lambda uses
  * — so what is read here is what is sent, not an approximation of it.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Copy, Download, Loader2, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Copy, Download, Eye, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { TmsButton, TmsDialog, TmsField, TmsInput, TmsTextarea } from '@/features/tms/kit'
 import {
   emailInvoice,
   sendInvoice,
   getInvoice,
+  getInvoicePdfUrl,
   getTmsSettings,
   graphqlErrorText,
   listCustomers,
@@ -131,7 +132,6 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
         setPreview(renderInvoiceEmail({
           invoice: row,
           customerName: row.customerName ?? customer?.name ?? null,
-          template: settings?.invoiceEmailTemplate ?? null,
           brokerName: division?.name ?? division?.legalName ?? 'BCAT',
         }))
         setError(null)
@@ -163,6 +163,15 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
         toast.error(text)
       })
       .finally(() => setSending(false))
+  }
+
+  // The stored PDF is exactly what goes out as the attachment, so previewing it is previewing the invoice.
+  const openPreview = () => {
+    const key = invoice?.pdfKey
+    if (!key) return
+    getInvoicePdfUrl(key)
+      .then((url) => { window.open(url, '_blank', 'noopener') })
+      .catch((err: unknown) => toast.error(graphqlErrorText(err)))
   }
 
   const copy = (text: string, what: string) => {
@@ -212,7 +221,7 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
               rows={2}
               value={message}
               disabled={disabled}
-              placeholder="optional — replaces the covering line"
+              placeholder="optional — added above the standard message"
               onChange={(e) => setMessage(e.target.value)}
             />
           </TmsField>
@@ -221,8 +230,14 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
             <div className="p-2" style={{ border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)' }}>
               <p className="text-xs font-medium">{preview.subject}</p>
               <pre className="mt-1 whitespace-pre-wrap text-xs tms-muted">
-                {message.trim() ? `${preview.body.split('\n')[0]}\n\n${message.trim()}` : preview.body}
+                {message.trim() ? `${message.trim()}\n\n${preview.body}` : preview.body}
               </pre>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="tms-muted">Attached: {invoice.pdfKey ? `${invoice.number}.pdf` : 'no PDF yet'}</span>
+                <TmsButton size="sm" aria-label="Preview invoice PDF" disabled={!invoice.pdfKey} onClick={openPreview}>
+                  <Eye size={12} /> Preview invoice
+                </TmsButton>
+              </div>
             </div>
           )}
 
