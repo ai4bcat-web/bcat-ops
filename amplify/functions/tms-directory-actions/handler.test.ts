@@ -923,6 +923,23 @@ describe('UPSERT_CUSTOMER', () => {
       expect(JSON.parse(rows[0].changes.S)).toMatchObject({ before: { billingMethod: null }, after: { billingMethod: 'MANUAL', apEmail: 'ap@acme.com' } })
     })
 
+    it('stores extra To addresses lowercased, de-duplicated and without the primary, and rejects a bad one', async () => {
+      const cmds: MockCommand[] = []
+      send.mockImplementation((cmd: MockCommand) => {
+        cmds.push(cmd)
+        if (cmd.__type === 'Scan') return Promise.resolve({ Items: [], LastEvaluatedKey: undefined })
+        if (cmd.__type === 'Get') return Promise.resolve({ Item: undefined })
+        return Promise.resolve({})
+      })
+      const result = await handler(event('UPSERT_CUSTOMER', {
+        name: 'Acme', billingMethod: 'MANUAL', apEmail: 'ap@acme.com', apEmailsExtra: ['B@Acme.com', 'b@acme.com', 'AP@acme.com', 'c@acme.com'],
+      }))
+      expect(result).toMatchObject({ apEmail: 'ap@acme.com', apEmailsExtra: ['b@acme.com', 'c@acme.com'] })
+      await expect(handler(event('UPSERT_CUSTOMER', {
+        name: 'Acme', billingMethod: 'MANUAL', apEmail: 'ap@acme.com', apEmailsExtra: ['nope'],
+      }))).rejects.toThrow('Not a valid e-mail: nope')
+    })
+
     describe('New Customer rules (create only)', () => {
       const putOf = () => {
         const box: { item?: Record<string, { S?: string; N?: string; BOOL?: boolean; L?: Array<{ S: string }> }> } = {}

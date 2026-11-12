@@ -36,6 +36,16 @@ export function parseEmailList(text: string): string[] {
   return out
 }
 
+/** Every To address for a manual invoice: the primary AP e-mail first, then the extras, lowercased and de-duplicated. */
+export function allApEmails(c: { apEmail?: string | null; apEmailsExtra?: string[] | null } | null | undefined): string[] {
+  const out: string[] = []
+  for (const raw of [c?.apEmail, ...(c?.apEmailsExtra ?? [])]) {
+    const e = String(raw ?? '').trim().toLowerCase()
+    if (e && !out.includes(e)) out.push(e)
+  }
+  return out
+}
+
 export function isInternalEmail(email: string): boolean {
   return email.trim().toLowerCase().endsWith(INTERNAL_EMAIL_DOMAIN)
 }
@@ -138,12 +148,14 @@ export function billingIssues(c: BillingFields): BillingIssue[] {
 }
 
 /** Validation shared by the form and the Lambda: MANUAL needs a valid AP e-mail; every copy address must be valid. */
-export function validateBillingFields(c: BillingFields & { invoiceCopyEmails?: string[] | null }): Record<string, string> {
+export function validateBillingFields(c: BillingFields & { invoiceCopyEmails?: string[] | null; apEmailsExtra?: string[] | null }): Record<string, string> {
   const errors: Record<string, string> = {}
   if (c.billingMethod && !BILLING_METHODS.includes(c.billingMethod)) errors.billingMethod = 'Choose Factor or Manual'
   const ap = (c.apEmail ?? '').trim()
   if (c.billingMethod === 'MANUAL' && !ap) errors.apEmail = 'Manual billing needs the customer’s AP e-mail'
   else if (ap && !isValidEmail(ap)) errors.apEmail = 'Enter a valid e-mail address'
+  const badExtra = (c.apEmailsExtra ?? []).filter((e) => !isValidEmail(e))
+  if (badExtra.length) errors.apEmailsExtra = `Not a valid e-mail: ${badExtra.join(', ')}`
   const bad = (c.invoiceCopyEmails ?? []).filter((e) => !isValidEmail(e))
   if (bad.length) errors.invoiceCopyEmails = `Not a valid e-mail: ${bad.join(', ')}`
   return errors

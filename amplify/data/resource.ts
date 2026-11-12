@@ -900,6 +900,8 @@ const schema = a.schema(stageTypes({
       // Step AW stage D: how this customer is billed (Docs/tms-build/AW-CDE-plan.md D.1). Unset = release to billing is refused.
       billingMethod:        a.enum(['FACTOR', 'MANUAL']),
       apEmail:              a.string(),
+      // More To addresses for a manual invoice e-mail; apEmail stays the primary one.
+      apEmailsExtra:        a.string().array(),
       invoiceCopyEmails:    a.string().array(),
       billingNeedsReview:   a.string(),
       name:         a.string().required(),   // e.g. "BATORY FOODS" — matched against Load.customer
