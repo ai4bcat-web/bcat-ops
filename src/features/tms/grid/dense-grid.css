@@ -3,17 +3,37 @@
  * one-line header bar and a spreadsheet grid. Tokens come from theme.css; no colour literals.
  */
 
-/* ── Page frame: no gutters, no card padding ──────────────────────────────── */
+/* ── Page frame: sections on the page background, the table in its own card ──
+ * Same section layout as the Spot inbox (TmsPage + TmsTable): toolbars, KPI strips and banners
+ * sit on the shell's tinted background with a --tms-gap between them, and the grid body is a
+ * bordered, rounded card like .tms-table-wrap. The grid inside keeps its dense styling. */
 
 .tms-shell .tms-dense-page {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
+  gap: var(--tms-gap);
   min-width: 0;
   min-height: 0;
-  background: var(--tms-card);
-  border-top: 1px solid var(--tms-border);
+  padding: var(--tms-gap);
+  background: transparent;
   font-size: 13px;
+}
+
+/* A wrapper between the page and its sections (the board's list column) spaces them the same way. */
+.tms-shell .tms-dense-page > :has(> .tms-dense-body) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tms-gap);
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Already inside a padded page (Invoicing, Payables, Quote/Book/Review scroll pages): no second gutter. */
+.tms-shell .tms-page .tms-dense-page,
+.tms-shell.tms-scroll-main .tms-dense-page,
+.tms-shell .tms-card .tms-dense-page {
+  padding: 0;
 }
 
 .tms-shell .tms-dense-bar {
@@ -21,9 +41,18 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--tms-border);
+  padding: 0;
+  background: transparent;
+}
+
+/* The toolbar right above the table is the card's header row. */
+.tms-shell .tms-dense-bar:has(+ .tms-dense-body) {
+  padding: 8px 12px;
   background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-bottom-color: var(--tms-border);
+  border-radius: var(--tms-radius-card) var(--tms-radius-card) 0 0;
+  box-shadow: var(--tms-shadow);
 }
 
 .tms-shell .tms-dense-bar .tms-dense-title {
@@ -50,12 +79,38 @@
   height: 28px;
 }
 
+/* The table section: its own card. */
 .tms-shell .tms-dense-body {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
+  background: var(--tms-card);
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  box-shadow: var(--tms-shadow);
+}
+
+.tms-shell .tms-dense-bar + .tms-dense-body {
+  margin-top: calc(-1 * var(--tms-gap));
+  border-top: 0;
+  border-radius: 0 0 var(--tms-radius-card) var(--tms-radius-card);
+}
+
+/* Bars inside the card (load more, footers) keep a hairline and the card's padding. */
+.tms-shell .tms-dense-body .tms-dense-bar {
+  padding: 6px 12px;
+  border-top: 1px solid var(--tms-border);
+}
+
+/* No card inside a card: a dense page placed in a TmsCard lets the outer card frame it. */
+.tms-shell .tms-card .tms-dense-body,
+.tms-shell .tms-card .tms-dense-bar:has(+ .tms-dense-body) {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 /* ── Density toggle + KPI strip ───────────────────────────────────────────── */
@@ -87,9 +142,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px 20px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--tms-border);
-  background: var(--tms-surface-subtle);
+  padding: 0 4px;
+  background: transparent;
 }
 
 .tms-shell .tms-dg-kpi {
@@ -553,3 +607,8 @@
 .tms-shell .tms-dg-kpi-part-bad { color: var(--tms-badge-red); }
 .tms-shell .tms-dg-kpi-part-muted { color: var(--tms-muted); font-weight: 600; }
 .tms-shell .tms-dg-kpi-part-name { font-size: 11px; font-weight: 500; color: var(--tms-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+
+@media (max-width: 640px) {
+  .tms-shell .tms-dense-page { padding: 8px; gap: 10px; }
+  .tms-shell .tms-dense-bar + .tms-dense-body { margin-top: -10px; }
+}

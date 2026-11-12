@@ -19,6 +19,7 @@
  */
 import { agingBucket, daysLate } from './arAging'
 import { dueDateFor } from './invoiceBuild'
+import { quickPayFee } from './quickPay'
 import { DOCUMENT_TYPE_LABELS } from './shipmentDocuments'
 import type { PlanApplication } from './paymentApply'
 import type { AgingBucket } from './arAging'
@@ -239,6 +240,58 @@ export function billTotals(input: BillTotalsInput): BillTotals {
   const quickPayFeeCents = fee > 0 ? fee : 0
   const netCents = Math.max(0, grossCents - quickPayFeeCents)
   return { quickPayFeeCents, netCents }
+}
+
+/**
+ * Why a bill's money cannot be changed in place right now (its quick-pay choice, or the carrier pay
+ * under it), or null when it can. Once money has moved, or the bill is on a pay run, the number
+ * somebody is about to pay is frozen. Carrier pay is stricter than quick pay: an approved bill was
+ * approved at its amount, so it goes back to review before the amount moves.
+ */
+export function billMoneyLockReason(
+  bill: Pick<CarrierBillRecord, 'status' | 'paidCents' | 'creditedCents' | 'selectedForPayment'>,
+  opts: { allowApproved: boolean },
+): string | null {
+  if (bill.status === 'VOID') return 'That bill is void'
+  if (bill.status === 'PAID') return 'That bill is paid'
+  if ((bill.paidCents ?? 0) + (bill.creditedCents ?? 0) > 0) return 'Money has already been applied to this bill'
+  if (bill.selectedForPayment === true) return 'Take the bill off the pay run first'
+  if (!opts.allowApproved && bill.status !== 'IN_REVIEW') return 'Send the bill back to review first'
+  return null
+}
+
+export interface RebilledMoney {
+  grossCents: number
+  quickPayFeeCents: number
+  netCents: number
+  billedCents: number
+  varianceCents: number
+  balanceCents: number
+}
+
+/**
+ * A bill's money re-derived from a gross and the bill's own quick-pay choice. A factor is never
+ * discounted (see `billTotals`). `billedCents` follows the gross while it still equals the old
+ * gross (nobody has typed the carrier's own invoice amount); a typed amount stays and the
+ * variance says how far apart they are.
+ */
+export function rebilledMoney(
+  bill: Pick<CarrierBillRecord, 'grossCents' | 'billedCents' | 'quickPay' | 'quickPayFeeBps' | 'payeeKind' | 'paidCents' | 'creditedCents'>,
+  grossCents: number,
+): RebilledMoney {
+  const gross = Math.max(0, Math.trunc(grossCents))
+  const bps = bill.quickPay === true && bill.payeeKind !== 'FACTOR' ? (bill.quickPayFeeBps ?? 0) : 0
+  const fee = bps > 0 ? quickPayFee(gross, bps) : 0
+  const net = Math.max(0, gross - fee)
+  const billed = bill.billedCents === bill.grossCents ? gross : bill.billedCents
+  return {
+    grossCents: gross,
+    quickPayFeeCents: fee,
+    netCents: net,
+    billedCents: billed,
+    varianceCents: billed - gross,
+    balanceCents: Math.max(0, net - (bill.paidCents ?? 0) - (bill.creditedCents ?? 0)),
+  }
 }
 
 export interface BillReadinessInput {

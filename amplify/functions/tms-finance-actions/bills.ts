@@ -31,9 +31,12 @@ import {
   billLinesFor,
   billPayee,
   billReadiness,
+  billMoneyLockReason,
   billTermsDays,
   billTotals,
+  rebilledMoney,
 } from '../../../src/lib/carrierBill'
+import { apQuickPayOption } from '../../../src/lib/quickPay'
 import { evaluateDocGate } from '../../../src/lib/shipmentDocuments'
 import type { DocGateResult } from '../../../src/types/tms'
 import type {
@@ -695,6 +698,86 @@ export async function setBillDates(input: Row, caller: Caller): Promise<Row> {
   await writeAudit('CarrierBill', billId, 'SET_BILL_DATES', caller, {
     from: { billDate: bill.billDate, dueAt: bill.dueAt, billNumber: bill.billNumber ?? null, datesPending: bill.datesPending === true },
     to: { billDate, dueAt, billNumber: billNumber ?? bill.billNumber ?? null },
+  })
+  return { bill: (await getById(CARRIER_BILL_TABLE_NAME, billId)) ?? {} }
+}
+
+/**
+ * Put a bill on AP quick pay (2 days at 6%, 10 days at 3%) or back on the carrier's standard terms.
+ *
+ * The fee comes off what we pay the carrier: net = gross − fee. Terms become the quick-pay days, so
+ * the due date is the invoice date plus 2 or 10; back on standard terms they are the carrier's own
+ * (assignment, then carrier, then org default). A bill still waiting on its invoice date keeps a
+ * placeholder due date that follows the new terms. Refused once money has moved or the bill is on a
+ * pay run, and for a factored carrier, whom we never discount. The assignment's quick-pay cache is
+ * written in the same transaction so the rate con and a later charge change agree with the bill.
+ */
+export async function setBillQuickPay(input: Row, caller: Caller): Promise<Row> {
+  const billId = assertString(input.billId, 'billId')
+  const days = optionalInteger(input.quickPayDays, { min: 0, label: 'quickPayDays' })
+  const option = days ? apQuickPayOption(days) : null
+  if (days && !option) throw new Error(`${days} days is not one of the quick-pay options (2 days at 6%, 10 days at 3%)`)
+
+  const bill = await readBill(billId)
+  const lock = billMoneyLockReason(bill, { allowApproved: true })
+  if (lock) throw new Error(lock)
+  if (option && bill.payeeKind === 'FACTOR') {
+    throw new Error('This carrier is paid through a factor; quick pay does not apply to a factored bill')
+  }
+
+  const context = await readAssignmentContext(bill.loadCarrierId)
+  const quickPay = option != null
+  const termsDays = option
+    ? option.days
+    : billTermsDays({ ...context.loadCarrier, quickPay: false }, context.carrier, context.settings)
+  const money = rebilledMoney({ ...bill, quickPay, quickPayFeeBps: option?.feeBps ?? null }, bill.grossCents)
+  const dueAt = billDueDate(bill.billDate, termsDays)
+
+  const now = nowIso()
+  await transact(
+    [
+      updateTx(
+        CARRIER_BILL_TABLE_NAME,
+        billId,
+        {
+          quickPay,
+          quickPayDays: option?.days ?? null,
+          quickPayFeeBps: option?.feeBps ?? null,
+          quickPayFeeCents: money.quickPayFeeCents,
+          netCents: money.netCents,
+          balanceCents: money.balanceCents,
+          termsDays,
+          dueAt,
+          // Written unchanged so the condition below can name it (`status` is a reserved word).
+          status: bill.status,
+          updatedAt: now,
+          updatedBy: caller.email,
+          version: (bill.version ?? 1) + 1,
+        },
+        {
+          condition: '#status = :status AND version = :expectedVersion',
+          extraValues: { ':expectedVersion': { N: String(bill.version ?? 1) } },
+        },
+      ),
+      updateTx(
+        LOAD_CARRIER_TABLE_NAME,
+        bill.loadCarrierId,
+        {
+          quickPay,
+          quickPayDays: option?.days ?? null,
+          quickPayFeeBps: option?.feeBps ?? null,
+          quickPayFeeCents: option ? money.quickPayFeeCents : null,
+          updatedAt: now,
+          updatedBy: caller.email,
+        },
+        { condition: 'attribute_exists(id)' },
+      ),
+    ],
+    'bill quick pay',
+  )
+  await writeAudit('CarrierBill', billId, 'SET_BILL_QUICK_PAY', caller, {
+    from: { quickPay: bill.quickPay === true, quickPayDays: bill.quickPayDays ?? null, feeCents: bill.quickPayFeeCents, netCents: bill.netCents, dueAt: bill.dueAt },
+    to: { quickPay, quickPayDays: option?.days ?? null, feeCents: money.quickPayFeeCents, netCents: money.netCents, dueAt },
   })
   return { bill: (await getById(CARRIER_BILL_TABLE_NAME, billId)) ?? {} }
 }
