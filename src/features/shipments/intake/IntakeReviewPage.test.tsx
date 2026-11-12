@@ -9,6 +9,7 @@ import type { OwnershipDivisionRecord } from '@/types/tms'
 import { IntakeReviewPage } from './IntakeReviewPage'
 import { toast } from 'sonner'
 import { completeIntakeRow, intakeFields, intakeRow } from './testFixtures'
+import { resetBuiltMatchCache } from './useBuiltMatches'
 
 const BRK = {
   id: 'BRK', code: 'BRK', name: 'Brokerage', brand: null, parentId: null, color: null, sortOrder: 0, active: true,
@@ -22,7 +23,7 @@ vi.mock('@/components/RepPicker', () => ({ RepPicker: ({ value }: { value: strin
 vi.mock('@/lib/apiClient', () => ({
   getIntakeLoad: vi.fn(), saveIntakeDraft: vi.fn(), moveIntakeToActive: vi.fn(), dismissIntake: vi.fn(),
   listCustomers: vi.fn(), getTmsSettings: vi.fn(), getWorkflowRun: vi.fn(), linkWorkflowRun: vi.fn(),
-  dismissWorkflowRun: vi.fn(), getIntakePdfUrl: vi.fn(), listIntakeLoads: vi.fn().mockResolvedValue([]), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(),
+  dismissWorkflowRun: vi.fn(), listShipmentsBySearchKeys: vi.fn(), getIntakePdfUrl: vi.fn(), listIntakeLoads: vi.fn().mockResolvedValue([]), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(),
 }))
 vi.mock('@/hooks/useOwnFleetRoster', () => ({
   useOwnFleetRoster: () => [{ id: 'drv1', name: 'Pat Driver', email: '', truckId: 't1', truckNumber: '12', trailerId: null, trailerNumber: '', workPhone: '', phone: '' }],
@@ -55,6 +56,7 @@ const moveButton = () => screen.getByRole('button', { name: 'Create shipment' })
 describe('IntakeReviewPage', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    resetBuiltMatchCache()
     vi.mocked(api.getIntakeLoad).mockResolvedValue(intakeRow())
     vi.mocked(api.listCustomers).mockResolvedValue([CUSTOMER] as never)
     vi.mocked(api.getTmsSettings).mockResolvedValue(null)
@@ -118,6 +120,40 @@ describe('IntakeReviewPage', () => {
     }))
     expect(api.moveIntakeToActive).toHaveBeenCalledWith({ intakeId: 'il:run-1', expectedVersion: 2 })
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/tms/shipments/shp-9'))
+  })
+
+  describe('when the reference is already on a shipment with a PRO', () => {
+    async function readyToCreate() {
+      const saved = completeIntakeRow({ version: 2 })
+      vi.mocked(api.saveIntakeDraft).mockResolvedValue(saved)
+      vi.mocked(api.moveIntakeToActive).mockResolvedValue({ intake: saved, shipmentId: 'shp-9', shipmentNumber: 'PRO-9' })
+      vi.mocked(api.listShipmentsBySearchKeys).mockResolvedValue([
+        { id: 'shp-43', number: '20043', customerId: 'c1', customerName: 'Acme Foods', searchKey: '20043 acme foods dallas po-100', voidedAt: null, deletedAt: null },
+      ])
+      renderPage()
+      await screen.findByDisplayValue('PO-100')
+      fireEvent.change(screen.getByLabelText('Bill to'), { target: { value: 'b1' } })
+      fireEvent.click(screen.getByLabelText('Confirm Weight (lb)'))
+      await waitFor(() => expect(moveButton()).toBeEnabled())
+      await screen.findByTestId('intake-built-notice')
+    }
+    it('shows the notice, and Create shipment asks first, naming the PRO; Cancel creates nothing', async () => {
+      await readyToCreate()
+      expect(screen.getByTestId('intake-built-notice')).toHaveTextContent('PRO 20043')
+      fireEvent.click(moveButton())
+      const dialog = await screen.findByRole('dialog')
+      expect(dialog).toHaveTextContent('PRO 20043')
+      expect(dialog).toHaveTextContent('twice')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+      expect(api.moveIntakeToActive).not.toHaveBeenCalled()
+    })
+
+    it('"Create anyway" then creates the shipment', async () => {
+      await readyToCreate()
+      fireEvent.click(moveButton())
+      fireEvent.click(await screen.findByTestId('intake-create-anyway'))
+      await waitFor(() => expect(api.moveIntakeToActive).toHaveBeenCalledTimes(1))
+    })
   })
 
   it('shows a non-reviewer the fields disabled and no Create shipment or Dismiss', async () => {

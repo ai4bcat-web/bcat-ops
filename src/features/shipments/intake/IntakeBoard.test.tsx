@@ -8,6 +8,7 @@ import * as auth from '@/hooks/useAuth'
 import type { OwnershipDivisionRecord } from '@/types/tms'
 import { IntakeBoard } from './IntakeBoard'
 import { intakeFields, intakeRow } from './testFixtures'
+import { resetBuiltMatchCache } from './useBuiltMatches'
 
 const division = (code: string, name: string, over: Partial<OwnershipDivisionRecord> = {}): OwnershipDivisionRecord => ({
   id: code, code, name, brand: null, parentId: null, color: null, sortOrder: 0, active: true, owners: null, flows: null,
@@ -18,7 +19,7 @@ let divisions: OwnershipDivisionRecord[] = []
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({
   useOwnershipDivisions: () => ({ divisions, loading: false, error: null, refresh: () => undefined }),
 }))
-vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn(), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn() }))
+vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn(), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(), listShipmentsBySearchKeys: vi.fn() }))
 
 function Where() {
   const loc = useLocation()
@@ -293,5 +294,74 @@ describe('IntakeBoard: delete and duplicates', () => {
     renderBoard('/tms/shipments/intake?status=dismissed')
     await screen.findByText('Plain dismiss')
     expect(screen.queryByText('Gone')).not.toBeInTheDocument()
+  })
+})
+
+describe('IntakeBoard: already built as a PRO', () => {
+  const SHIPMENT = { id: 'shp-43', number: '20043', customerId: 'c1', customerName: 'C.H. ROBINSON', searchKey: '20043 c.h. robinson mesa az 573570079', voidedAt: null, deletedAt: null }
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    resetBuiltMatchCache()
+    divisions = [division('BRK', 'Brokerage')]
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:a', subject: 'Tender for Mesa', fields: intakeFields({ reference: '573570079' }) }),
+      intakeRow({ id: 'il:b', subject: 'Other load', fromEmail: 'o@acme.example', fields: intakeFields({ reference: 'NOPE-99999', pickupNumber: null, deliveryNumber: null }) }),
+    ])
+    vi.mocked(api.listShipmentsBySearchKeys).mockClear()
+    vi.mocked(api.listShipmentsBySearchKeys).mockResolvedValue([SHIPMENT])
+  })
+
+  it('badges the row whose reference is already on a shipment with its PRO, links to it, and leaves the other row alone', async () => {
+    renderBoard()
+    const notice = await screen.findByTestId('intake-built-notice')
+    expect(notice).toHaveTextContent('Already built')
+    expect(notice).toHaveTextContent('PRO 20043')
+    expect(notice).toHaveTextContent('Reference 573570079')
+    expect(within(notice).getByTestId('intake-built-link')).toHaveAttribute('href', '/tms/shipments/shp-43')
+    expect(screen.getAllByTestId('intake-built-notice')).toHaveLength(1)
+    expect(api.listShipmentsBySearchKeys).toHaveBeenCalledTimes(1)
+  })
+
+  it('grows the rows so the notice is not clipped, and only when a row has one', async () => {
+    const { container } = renderBoard()
+    await screen.findByTestId('intake-built-notice')
+    expect((container.querySelector('.tms-dg') as HTMLElement).style.getPropertyValue('--dg-row-h')).toBe('64px')
+  })
+
+  it('a reference only found in the subject says "May already be built"', async () => {
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:a', subject: 'Rate Confirmation for Load: 573570079', fields: intakeFields({ reference: null, pickupNumber: null, deliveryNumber: null }) }),
+    ])
+    renderBoard()
+    expect(await screen.findByTestId('intake-built-notice')).toHaveTextContent('May already be built')
+  })
+
+  it('does not flag a row whose customer is a different one than the shipment\'s', async () => {
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:a', subject: 'Tender', fields: intakeFields({ reference: '573570079', customerId: 'c9', customerName: 'Other Co' }) }),
+    ])
+    renderBoard()
+    await screen.findByText('Tender')
+    await waitFor(() => expect(api.listShipmentsBySearchKeys).toHaveBeenCalled())
+    expect(screen.queryByTestId('intake-built-notice')).not.toBeInTheDocument()
+  })
+
+  it('"Not the same load" is saved on the row; the owner/ADMIN delete opens the Intake-only confirm', async () => {
+    vi.mocked(api.markIntakeNotDuplicate).mockResolvedValue(intakeRow({ id: 'il:a' }))
+    renderBoard()
+    await screen.findByTestId('intake-built-notice')
+    fireEvent.click(screen.getByTestId('intake-built-not'))
+    await waitFor(() => expect(api.markIntakeNotDuplicate).toHaveBeenCalledWith({ intakeId: 'il:a', expectedVersion: 1 }))
+    fireEvent.click(screen.getByTestId('intake-built-delete'))
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Intake only')
+  })
+
+  it('a failed check leaves the queue unflagged and usable', async () => {
+    vi.mocked(api.listShipmentsBySearchKeys).mockRejectedValue(new Error('boom'))
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    renderBoard()
+    await screen.findByText('Tender for Mesa')
+    await waitFor(() => expect(api.listShipmentsBySearchKeys).toHaveBeenCalled())
+    expect(screen.queryByTestId('intake-built-notice')).not.toBeInTheDocument()
   })
 })
