@@ -18,7 +18,7 @@ let divisions: OwnershipDivisionRecord[] = []
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({
   useOwnershipDivisions: () => ({ divisions, loading: false, error: null, refresh: () => undefined }),
 }))
-vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn() }))
+vi.mock('@/lib/apiClient', () => ({ listIntakeLoads: vi.fn(), countOpenIntakeLoads: vi.fn().mockResolvedValue(0), batchShipmentTask: vi.fn(), dismissIntake: vi.fn(), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn() }))
 
 function Where() {
   const loc = useLocation()
@@ -230,5 +230,68 @@ describe('IntakeBoard', () => {
       await waitFor(() => expect(screen.getByTestId('batch-result-il:moved')).toHaveTextContent('Missing sales rep'))
       expect(api.batchShipmentTask).toHaveBeenCalledWith({ task: 'PUSH_TO_LOAD_REVIEW', shipmentIds: ['s-9'], params: {} })
     })
+  })
+})
+
+describe('IntakeBoard: delete and duplicates', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    divisions = [division('BRK', 'Brokerage')]
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [
+      intakeRow({ id: 'il:a', subject: 'First tender', receivedAt: '2026-11-03T15:00:00.000Z' }),
+      intakeRow({ id: 'il:b', subject: 'Second tender', receivedAt: '2026-11-03T16:00:00.000Z', fromEmail: 'other@acme.example' }),
+      intakeRow({ id: 'il:z', subject: 'Unrelated', fields: intakeFields({ reference: 'ZZ-1', customerId: 'c9', customerName: 'Zed' }) }),
+    ])
+  })
+
+  it('badges both rows of a duplicate pair with the question, and not an unrelated row', async () => {
+    renderBoard()
+    await screen.findByText('First tender')
+    const notices = screen.getAllByTestId('intake-dup-notice')
+    expect(notices).toHaveLength(2)
+    notices.forEach((n) => { expect(n).toHaveTextContent('Possible duplicate'); expect(n).toHaveTextContent('Delete this one?') })
+  })
+
+  it('an owner/ADMIN deletes a duplicate after a confirm that names the load and says Intake only', async () => {
+    vi.mocked(api.deleteIntake).mockResolvedValue(intakeRow({ id: 'il:b', status: 'DISMISSED' }))
+    renderBoard()
+    await screen.findByText('Second tender')
+    fireEvent.click(screen.getAllByTestId('intake-dup-delete')[0]!)
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Acme Foods · PO-100')
+    expect(dialog).toHaveTextContent('Intake only')
+    fireEvent.click(within(dialog).getByTestId('intake-delete-confirm'))
+    await waitFor(() => expect(api.deleteIntake).toHaveBeenCalledWith({ intakeId: 'il:b', expectedVersion: 1 }))
+  })
+
+  it('shows the delete control on every open row for an owner/ADMIN and never for anyone else', async () => {
+    renderBoard()
+    await screen.findByText('First tender')
+    expect(screen.getAllByTestId('intake-delete')).toHaveLength(3)
+    vi.restoreAllMocks()
+    vi.mocked(api.listIntakeLoads).mockImplementation(async () => [intakeRow({ id: 'il:a', subject: 'First tender' }), intakeRow({ id: 'il:b', subject: 'Second tender', fromEmail: 'o@acme.example' })])
+    document.body.innerHTML = ''
+    renderBoard('/tms/shipments/intake', false)
+    await screen.findByText('First tender')
+    expect(screen.queryByTestId('intake-delete')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('intake-dup-delete')).not.toBeInTheDocument()
+    expect(screen.getAllByTestId('intake-dup-notice')[0]).toHaveTextContent('Possible duplicate')
+  })
+
+  it('"Not a duplicate" is saved on the row', async () => {
+    vi.mocked(api.markIntakeNotDuplicate).mockResolvedValue(intakeRow({ id: 'il:b' }))
+    renderBoard()
+    await screen.findByText('Second tender')
+    fireEvent.click(screen.getAllByTestId('intake-dup-not')[0]!)
+    await waitFor(() => expect(api.markIntakeNotDuplicate).toHaveBeenCalledWith({ intakeId: 'il:b', expectedVersion: 1 }))
+  })
+
+  it('a row an admin deleted is hidden from the Dismissed tab', async () => {
+    vi.mocked(api.listIntakeLoads).mockImplementation(async (opts) => opts?.status === 'DISMISSED'
+      ? [intakeRow({ id: 'il:d1', status: 'DISMISSED', subject: 'Plain dismiss', dismissReason: 'spam' }), intakeRow({ id: 'il:d2', status: 'DISMISSED', subject: 'Gone', dismissReason: 'Deleted by admin' })]
+      : [])
+    renderBoard('/tms/shipments/intake?status=dismissed')
+    await screen.findByText('Plain dismiss')
+    expect(screen.queryByText('Gone')).not.toBeInTheDocument()
   })
 })

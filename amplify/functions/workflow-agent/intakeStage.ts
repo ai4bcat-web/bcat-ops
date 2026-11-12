@@ -9,6 +9,7 @@
  *     detail, and the run's outcome is whatever the pipeline decided;
  *   - only a TENDER run stages (intake follows `run.agent`, not the inbox the mail arrived in).
  */
+import { isDeletedIntake } from '../../../src/lib/intakeDup'
 import { matchDivisionByAddresses } from '../../../src/lib/intakeMail'
 import {
   buildIntakeDraft,
@@ -185,8 +186,12 @@ export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: St
     }
 
     // A repeat e-mail for the same tender (same reference, same sender) rolls into the row it belongs to: logged there, never a second row.
-    if (fields.reference) {
-      const existing = await findIntakeByReference(String(fields.reference), mail.fromEmail ?? '')
+    // Also the same file again (a resend with another subject) or the same reference from the customer's other sender.
+    if (fields.reference || mail.attachments.length > 0) {
+      const existing = await findIntakeByReference(String(fields.reference ?? ''), mail.fromEmail ?? '', {
+        customerId: fields.customerId, customerName: fields.customerName,
+        attachments: mail.attachments.map((a) => ({ name: a.name, size: a.size })),
+      })
       if (existing && existing.id !== `il:${run.id}`) {
         try {
           // The original e-mail brings what the row lacks (its rate confirmation PDF, field values); a log entry alone when it brings nothing.
@@ -197,7 +202,7 @@ export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: St
             console.warn('[workflow-agent] could not enrich intake load', existing.id, err instanceof Error ? err.message : String(err))
           }
           await logRepeatEmail(existing, { at: mail.receivedAt ?? nowIso(), subject: mail.subject ?? '', runId: run.id })
-          return { staged: false, detail: `rolled into intake load ${String(existing.id)}${existing.status === 'DISMISSED' ? ' (reopened)' : ''}` }
+          return { staged: false, detail: `rolled into intake load ${String(existing.id)}${existing.status === 'DISMISSED' && !isDeletedIntake(existing) ? ' (reopened)' : ''}` }
         } catch (err) {
           // The row moved on while this ran: fall through and stage normally rather than lose the e-mail.
           console.error('[workflow-agent] repeat e-mail log failed', existing.id, err instanceof Error ? err.message : String(err))

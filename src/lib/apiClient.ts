@@ -3044,6 +3044,16 @@ export async function linkIntakeShipment(input: { intakeId: string; shipmentId: 
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_LINK_SHIPMENT', input))
 }
 
+/** Owner/ADMIN: remove a load from the Intake queue (it never touches a shipment built from it). */
+export async function deleteIntake(input: { intakeId: string; expectedVersion: number; reason?: string }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_DELETE', input))
+}
+
+/** "Not a duplicate": the badge stays away from this row. */
+export async function markIntakeNotDuplicate(input: { intakeId: string; expectedVersion: number }): Promise<IntakeLoadRecord> {
+  return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_NOT_DUPLICATE', input))
+}
+
 export async function dismissIntake(input: { intakeId: string; expectedVersion: number; reason: string }): Promise<IntakeLoadRecord> {
   return intakeRow(await shipmentAction<IntakeLoadRecord>('INTAKE_DISMISS', input))
 }

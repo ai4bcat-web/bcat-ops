@@ -22,7 +22,7 @@ vi.mock('@/components/RepPicker', () => ({ RepPicker: ({ value }: { value: strin
 vi.mock('@/lib/apiClient', () => ({
   getIntakeLoad: vi.fn(), saveIntakeDraft: vi.fn(), moveIntakeToActive: vi.fn(), dismissIntake: vi.fn(),
   listCustomers: vi.fn(), getTmsSettings: vi.fn(), getWorkflowRun: vi.fn(), linkWorkflowRun: vi.fn(),
-  dismissWorkflowRun: vi.fn(), getIntakePdfUrl: vi.fn(),
+  dismissWorkflowRun: vi.fn(), getIntakePdfUrl: vi.fn(), listIntakeLoads: vi.fn().mockResolvedValue([]), deleteIntake: vi.fn(), markIntakeNotDuplicate: vi.fn(),
 }))
 vi.mock('@/hooks/useOwnFleetRoster', () => ({
   useOwnFleetRoster: () => [{ id: 'drv1', name: 'Pat Driver', email: '', truckId: 't1', truckNumber: '12', trailerId: null, trailerNumber: '', workPhone: '', phone: '' }],
@@ -59,6 +59,7 @@ describe('IntakeReviewPage', () => {
     vi.mocked(api.listCustomers).mockResolvedValue([CUSTOMER] as never)
     vi.mocked(api.getTmsSettings).mockResolvedValue(null)
     vi.mocked(api.getWorkflowRun).mockResolvedValue(null)
+    vi.mocked(api.listIntakeLoads).mockResolvedValue([])
   })
 
   it('labels each field by what automation knew: auto-filled, check this, missing', async () => {
@@ -210,5 +211,42 @@ describe('IntakeReviewPage', () => {
     await waitFor(() => expect(api.moveIntakeToActive).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledWith(expect.stringContaining('driver was not booked: Pat Driver is inactive')))
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/tms/shipments/shp-9'))
+  })
+})
+
+describe('IntakeReviewPage: delete and duplicate', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.getIntakeLoad).mockResolvedValue(intakeRow({ id: 'il:run-1' }))
+    vi.mocked(api.listCustomers).mockResolvedValue([CUSTOMER] as never)
+    vi.mocked(api.getTmsSettings).mockResolvedValue(null)
+    vi.mocked(api.getWorkflowRun).mockResolvedValue(null)
+    vi.mocked(api.listIntakeLoads).mockResolvedValue([
+      intakeRow({ id: 'il:run-1', receivedAt: '2026-11-03T16:00:00.000Z' }),
+      intakeRow({ id: 'il:run-0', receivedAt: '2026-11-03T15:00:00.000Z', fromEmail: 'other@acme.example' }),
+    ])
+  })
+
+  function renderReview(isOwner: boolean) {
+    vi.spyOn(auth, 'useAuth').mockReturnValue({ isOwner, isAdmin: false, hasPageAccess: () => true } as unknown as auth.AuthContextValue)
+    return render(
+      <MemoryRouter initialEntries={['/tms/shipments/intake/il:run-1']}>
+        <Routes><Route path="/tms/shipments/intake/:intakeId" element={<IntakeReviewPage />} /></Routes>
+      </MemoryRouter>,
+    )
+  }
+
+  it('shows the duplicate question with a link to the original, and Delete to an owner/ADMIN only', async () => {
+    renderReview(true)
+    expect(await screen.findByTestId('intake-dup-notice')).toHaveTextContent('Delete this one?')
+    expect(screen.getByTestId('intake-delete')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'See the original' }).getAttribute('href')).toContain('il%3Arun-0')
+  })
+
+  it('a reviewer who is not owner/ADMIN sees the badge but no delete', async () => {
+    renderReview(false)
+    expect(await screen.findByTestId('intake-dup-notice')).toBeInTheDocument()
+    expect(screen.queryByTestId('intake-delete')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('intake-dup-delete')).not.toBeInTheDocument()
   })
 })

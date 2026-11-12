@@ -27,3 +27,7 @@
 
 .tms-intake-preview { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .tms-intake-preview-frame { width: 100%; height: 78vh; min-height: 420px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius-sm); background: var(--tms-surface); }
+
+.tms-intake-dup { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 4px; font-size: 12px; }
+.tms-intake-dup-q { color: var(--tms-text-2); }
+.tms-intake-dup-link { font-size: 12px; }

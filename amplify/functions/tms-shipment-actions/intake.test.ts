@@ -199,6 +199,42 @@ describe('INTAKE_DISMISS', () => {
   })
 })
 
+describe('INTAKE_DELETE', () => {
+  const admin: Caller = { email: 'ryne@bcatcorp.com', sub: 'sub-admin', groups: ['ADMIN'], isAdmin: true }
+
+  it('is owner/ADMIN only, even for a reviewer who can dismiss', async () => {
+    await expect(run('INTAKE_DELETE', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/Forbidden: INTAKE_DELETE requires owner or ADMIN/)
+    expect(intake().status).toBe('OPEN')
+  })
+
+  it('soft-deletes an open row: dismissed with the admin-delete reason, audited, not reopened by a repeat', async () => {
+    await runIntakeAction(deps(), 'INTAKE_DELETE', { intakeId: 'il:r1', expectedVersion: 3, reason: 'duplicate of r0' }, admin)
+    expect(intake()).toMatchObject({ status: 'DISMISSED', dismissedBy: admin.email, dismissReason: 'Deleted by admin: duplicate of r0' })
+    expect(audits.map((a) => a.action)).toEqual(['INTAKE_DELETE'])
+    await runIntakeAction(deps(), 'INTAKE_DELETE', { intakeId: 'il:r1', expectedVersion: 4 }, admin)
+    expect(audits).toHaveLength(1)
+  })
+
+  it('refuses a row that already became a shipment and points at it', async () => {
+    seedIntake({ status: 'MOVED', shipmentId: 'shp-1', shipmentNumber: 'S000123' })
+    await expect(runIntakeAction(deps(), 'INTAKE_DELETE', { intakeId: 'il:r1', expectedVersion: 3 }, admin)).rejects.toThrow(/shipment S000123/)
+    expect(intake().status).toBe('MOVED')
+  })
+
+  it('needs the current version', async () => {
+    await expect(runIntakeAction(deps(), 'INTAKE_DELETE', { intakeId: 'il:r1', expectedVersion: 1 }, admin)).rejects.toThrow(INTAKE_CONFLICT_MESSAGE)
+  })
+})
+
+describe('INTAKE_NOT_DUPLICATE', () => {
+  it('remembers the answer on the row (its confirmed list) once, audited', async () => {
+    await run('INTAKE_NOT_DUPLICATE', { intakeId: 'il:r1', expectedVersion: 3 })
+    expect(intake().confirmed).toContain('notDuplicate')
+    await run('INTAKE_NOT_DUPLICATE', { intakeId: 'il:r1', expectedVersion: 4 })
+    expect(audits.filter((a) => a.action === 'INTAKE_NOT_DUPLICATE')).toHaveLength(1)
+  })
+})
+
 describe('INTAKE_LINK_SHIPMENT', () => {
   beforeEach(() => { rows(T.shipment).set('shp-1', { id: 'shp-1', number: 'S000123' }) })
 

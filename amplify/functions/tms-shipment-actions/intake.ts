@@ -39,9 +39,10 @@ import {
   toCreateShipmentInput,
 } from '../../../src/lib/intakeLoad'
 import { requiresApptProofs } from '../../../src/lib/apptQueue'
+import { INTAKE_DELETED_REASON, NOT_DUPLICATE_TOKEN } from '../../../src/lib/intakeDup'
 import type { IntakeFields, IntakeLoadRecord, IntakeMeta } from '../../../src/types/intake'
 
-export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES'] as const
+export const INTAKE_ACTIONS = ['INTAKE_SAVE_DRAFT', 'INTAKE_MARK_REVIEWED', 'INTAKE_MOVE_TO_ACTIVE', 'INTAKE_DISMISS', 'INTAKE_LINK_SHIPMENT', 'INTAKE_ATTACH_FILES', 'INTAKE_DELETE', 'INTAKE_NOT_DUPLICATE'] as const
 export type IntakeAction = (typeof INTAKE_ACTIONS)[number]
 
 /** A PROMOTING row with no shipment older than this was abandoned (Lambda timeout is shorter). */
@@ -260,6 +261,51 @@ export async function intakeDismiss(deps: IntakeDeps, input: Row, caller: Caller
     updatedBy: caller.email,
   })
   await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_DISMISS', caller, { reason, runId: row.runId ?? null })
+  return intakeRecordOf(saved) as unknown as Row
+}
+
+// ── INTAKE_DELETE (owner/ADMIN) ──────────────────────────────────────────────
+
+/**
+ * Remove a load from the Intake queue. It is a soft delete in the app's own vocabulary: the row becomes DISMISSED with the reason
+ * `Deleted by admin`, so the audit trail and the e-mail stay, the Dismissed tab hides it, and a repeat e-mail for it is logged on
+ * the row but never reopens it (a plain dismissal does reopen). A row that already became a shipment is refused: delete the shipment
+ * there, not its intake record.
+ */
+export async function intakeDelete(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  if (!caller.isAdmin) throw new Error('Forbidden: INTAKE_DELETE requires owner or ADMIN')
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  const note = optionalString(input.reason, 500)
+  const row = await loadRow(deps, intakeId)
+  assertExpectedVersion(row, input)
+  if (row.shipmentId || row.status === 'MOVED' || row.status === 'PROMOTING') {
+    const number = optionalString(row.shipmentNumber, 100)
+    throw new Error(`This load already became ${number ? `shipment ${number}` : 'a shipment'}: delete or void it on the Shipments page, not from Intake`)
+  }
+  if (row.status === 'DISMISSED' && String(row.dismissReason ?? '').startsWith(INTAKE_DELETED_REASON)) return intakeRecordOf(row) as unknown as Row
+  const now = deps.now()
+  const saved = await writeIntake(deps, row, {
+    status: 'DISMISSED',
+    dismissedBy: caller.email,
+    dismissedAt: now,
+    dismissReason: note ? `${INTAKE_DELETED_REASON}: ${note}` : INTAKE_DELETED_REASON,
+    updatedBy: caller.email,
+  })
+  await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_DELETE', caller, { reason: note, runId: row.runId ?? null, previousStatus: row.status ?? null })
+  return intakeRecordOf(saved) as unknown as Row
+}
+
+// ── INTAKE_NOT_DUPLICATE ─────────────────────────────────────────────────────
+
+/** "Not a duplicate": remembered on the row (its `confirmed` list, which every save keeps) so the badge stays away. Anyone who can review. */
+export async function intakeNotDuplicate(deps: IntakeDeps, input: Row, caller: Caller): Promise<Row> {
+  const intakeId = assertString(input.intakeId, 'intakeId')
+  const row = await loadRow(deps, intakeId)
+  assertExpectedVersion(row, input)
+  const confirmed = Array.isArray(row.confirmed) ? (row.confirmed as unknown[]).map(String) : []
+  if (confirmed.includes(NOT_DUPLICATE_TOKEN)) return intakeRecordOf(row) as unknown as Row
+  const saved = await writeIntake(deps, row, { confirmed: [...confirmed, NOT_DUPLICATE_TOKEN], updatedBy: caller.email })
+  await deps.writeAudit('INTAKE_LOAD', intakeId, 'INTAKE_NOT_DUPLICATE', caller, { runId: row.runId ?? null })
   return intakeRecordOf(saved) as unknown as Row
 }
 
@@ -548,6 +594,10 @@ export function runIntakeAction(deps: IntakeDeps, action: IntakeAction, input: R
       return intakeLinkShipment(deps, input, caller)
     case 'INTAKE_ATTACH_FILES':
       return intakeAttachFiles(deps, input, caller)
+    case 'INTAKE_DELETE':
+      return intakeDelete(deps, input, caller)
+    case 'INTAKE_NOT_DUPLICATE':
+      return intakeNotDuplicate(deps, input, caller)
   }
 }
 

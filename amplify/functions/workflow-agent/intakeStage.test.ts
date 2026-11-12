@@ -107,6 +107,26 @@ describe('stageIntake', () => {
     expect(db.intake.size).toBe(0)
   })
 
+  it('a resend with no reference still rolls into the row when it carries the same rate-confirmation file', async () => {
+    db.existing = { id: 'il:wf:TENDER:first', status: 'OPEN', updatedAt: 't0', fromEmail: 'dispatch@batory.com', attachments: [{ name: 'RC.pdf', size: 10 }], fields: JSON.stringify({ stops: [] }), meta: '{}' }
+    const withPdf: IntakeSourceMail = { ...mail(['tenders+a@bcatcorp.com']), attachments: [{ name: 'RC.pdf', contentType: 'application/pdf', size: 10, key: 'k' }] }
+    const out = await stageIntake(run(), withPdf, BARE)
+    expect(out).toMatchObject({ staged: false })
+    expect(out.detail).toContain('rolled into intake load il:wf:TENDER:first')
+    expect(db.intake.size).toBe(0)
+  })
+
+  it('a repeat for a row an admin deleted is logged but does not say it reopened', async () => {
+    const parsed = {
+      kind: 'PARSED', party: { kind: null, id: null, name: null, how: null }, candidates: [], stopFacilityHits: [],
+      parse: { tender: { reference: '214129178', stops: [] }, parserTender: { reference: '214129178', stops: [] }, fillKind: 'EMAIL', lowConfidence: [] },
+    } as unknown as StageInput
+    db.existing = { id: 'il:wf:TENDER:first', status: 'DISMISSED', dismissReason: 'Deleted by admin' }
+    const out = await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), parsed)
+    expect(out.detail).not.toContain('reopened')
+    expect(db.intake.size).toBe(0)
+  })
+
   it('the original e-mail gives a row typed from a Slack forward its PDF and the fields it lacks, and never overwrites what is there', async () => {
     const parsed = {
       kind: 'PARSED', party: { kind: null, id: null, name: null, how: null }, candidates: [], stopFacilityHits: [],
