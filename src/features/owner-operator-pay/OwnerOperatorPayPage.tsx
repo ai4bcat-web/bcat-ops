@@ -1,4 +1,3 @@
-import { OwnerOperatorSettlementsSwitch } from './OwnerOperatorSettlementsSwitch'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -316,8 +315,25 @@ function download(name: string, text: string) {
   URL.revokeObjectURL(url)
 }
 
-export function OwnerOperatorPayPage() {
-  const [periodStart, setPeriodStart] = useState(initialPeriodStart)
+/**
+ * Embedded in the merged Owner Operator Settlements page (OwnerOperatorSettlementsPage): the week is owned by that page so the Standard and
+ * Amazon views stay on the same week, and `viewSwitch` is its Standard | Amazon toggle. Standalone (no props) it keeps its own week.
+ */
+export interface OwnerOperatorPayPageProps {
+  week?: string | null
+  onWeek?: (week: string) => void
+  viewSwitch?: React.ReactNode
+  initialDriverId?: string | null
+}
+
+export function OwnerOperatorPayPage({ week, onWeek, viewSwitch, initialDriverId = null }: OwnerOperatorPayPageProps = {}) {
+  const [ownWeek, setOwnWeek] = useState(initialPeriodStart)
+  const periodStart = week ?? ownWeek
+  const setPeriodStart = (next: string | ((p: string) => string)) => {
+    const value = typeof next === 'function' ? next(periodStart) : next
+    if (onWeek) onWeek(value)
+    else setOwnWeek(value)
+  }
   const pay = useOwnerOperatorPay(periodStart)
   const { user } = useAuth()
 
@@ -354,10 +370,11 @@ export function OwnerOperatorPayPage() {
     toast.success(`Sent to ${fields.to}${fields.cc ? ` (cc ${fields.cc})` : ''}`)
     setEmailFor(null)
   }
-  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null)
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(initialDriverId)
 
   const isThisWeek = periodStart === sundayOf()
-  const isFirstWeek = periodStart === OWNER_OP_FIRST_PERIOD
+  // Embedded, going back past the first owner-operator week moves to the Amazon view instead of stopping.
+  const isFirstWeek = periodStart === OWNER_OP_FIRST_PERIOD && !onWeek
   /*
    * A week that has not finished yet.
    *
@@ -384,7 +401,7 @@ export function OwnerOperatorPayPage() {
         Weekly (Sun→Sat) — brokerage loads delivered by owner operators · % of freight
         {' · weekly expenses charged here from Sep 27'}
         <DriverAppLink />
-        <OwnerOperatorSettlementsSwitch active="standard" />
+        {viewSwitch}
       </>}
       toolbar={
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

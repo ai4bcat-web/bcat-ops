@@ -63,6 +63,15 @@ describe('buildNavSections', () => {
     expect(pinnedOf('dashboard').find((i) => i.label === 'Accounting')).toBeUndefined()
   })
 
+  it('Amazon Settlements is not a nav entry any more; someone holding only that grant still gets Owner Operator Settlements', () => {
+    const payroll = (...keys: string[]) => buildNavSections({ divisions: FOUR, hasPageAccess: grants(...keys) }).pinned
+      .find((i) => i.label === 'Accounting')?.childGroups?.find((g) => g.label === 'Payroll')?.children.map((c) => c.label)
+    expect(payroll('driverPay', 'ownerOperatorPay')).toEqual(['Owner Operator Settlements'])
+    expect(payroll('driverPay')).toEqual(['Owner Operator Settlements'])
+    const all = buildNavSections({ divisions: FOUR, hasPageAccess: grants('driverPay', 'ownerOperatorPay') })
+    expect(JSON.stringify(all)).not.toContain('Amazon Settlements')
+  })
+
   it('Profiles > Drivers and Assets are for the owner and ADMINs only, whatever page grants someone holds', () => {
     const profiles = (opts: { isOwner?: boolean; isAdmin?: boolean }) =>
       buildNavSections({ divisions: FOUR, hasPageAccess: () => true, ...opts }).pinned.find((i) => i.label === 'Profiles')?.children?.map((c) => c.label) ?? []
@@ -80,7 +89,7 @@ describe('buildNavSections', () => {
     // Dispatch and Calendar are pages of their own right under Active shipments; the Payroll pages are a labeled group under Accounting.
     expect(pinned.find((i) => i.label === 'Active shipments')?.children).toBeUndefined()
     expect(pinned.find((i) => i.label === 'Accounting')?.childGroups?.map((g) => [g.label, g.children.map((c) => c.label)])).toEqual([
-      ['Payroll', ['Box Truck Settlements', 'Amazon Settlements', 'Owner Operator Settlements', 'Employee Hours']],
+      ['Payroll', ['Box Truck Settlements', 'Owner Operator Settlements', 'Employee Hours']],
     ])
     // Calendar carries Driver info, Appts and Time off in that order; Profiles holds Customers, Carriers, Locations and Drivers.
     expect(kids('Calendar')).toEqual(['Driver info', 'Appts', 'Time off'])
@@ -416,7 +425,7 @@ describe('tmsBreadcrumb', () => {
 
   it('names legacy pages by their nav item or an explicit trail, never TMS', () => {
     expect(labels('/trucks')).toEqual(['Fleet'])
-    expect(labels('/driver-pay')).toEqual(['Amazon Settlements'])
+    expect(labels('/owner-operator-pay')).toEqual(['Owner Operator Settlements'])
     expect(labels('/finances/review')).toEqual(['Finances', 'Profit review'])
     expect(labels('/driver-view/abc')).toEqual(['Owner operator pay', 'Driver app'])
     expect(labels('/some-new-page/x')).toEqual(['Some new page'])

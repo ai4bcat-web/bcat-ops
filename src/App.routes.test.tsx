@@ -77,7 +77,7 @@ vi.mock('@/features/schedule/SchedulePage', () => h.stub(['SchedulePage']))
 vi.mock('@/features/time-off/TimeOffPage', () => h.stub(['TimeOffPage']))
 vi.mock('@/features/driver-pay/DriverPayPage', () => h.stub(['DriverPayPage']))
 vi.mock('@/features/driver-pay-box-trucks/BoxTruckPayPage', () => h.stub(['BoxTruckPayPage']))
-vi.mock('@/features/owner-operator-pay/OwnerOperatorPayPage', () => h.stub(['OwnerOperatorPayPage']))
+vi.mock('@/features/owner-operator-pay/OwnerOperatorSettlementsPage', () => h.stub(['OwnerOperatorSettlementsPage']))
 vi.mock('@/features/owner-operator-pay/DriverAppViewPage', () => h.stub(['DriverAppViewPage']))
 vi.mock('@/features/ivan-driver-app/IvanDriverAppPage', () => h.stub(['IvanDriverAppPage']))
 vi.mock('@/features/maintenance/MaintenancePage', () => h.stub(['MaintenancePage']))
@@ -134,6 +134,20 @@ describe('App routes', () => {
     h.auth.isAdmin = false
     h.getLoads.mockReset()
     h.toastError.mockReset()
+  })
+
+  describe('Amazon Settlements is the Amazon-week view of Owner Operator Settlements', () => {
+    it('/driver-pay opens it on the Amazon view and keeps the week and driver of an old link', async () => {
+      grants('ownerOperatorPay')
+      await visit('/driver-pay?week=2026-03-29&driver=drv-9')
+      await landed('OwnerOperatorSettlementsPage|/owner-operator-pay?week=2026-03-29&driver=drv-9&view=amazon')
+    })
+
+    it('someone holding only the Amazon grant can open the page', async () => {
+      grants('driverPay')
+      await visit('/owner-operator-pay?view=amazon')
+      await landed('OwnerOperatorSettlementsPage|/owner-operator-pay?view=amazon')
+    })
   })
 
   describe('Loads URLs land on the Shipment', () => {
