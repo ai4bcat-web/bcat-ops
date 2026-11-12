@@ -1,15 +1,16 @@
 /**
  * Shipments › Intake: the tender e-mails that arrived at a division's intake address and became
  * partially built loads. Opens on All loads; "By rev division" / "By customer" split the queue into sub-tabs
- * (?view=&group=), status chips, a table; a row opens the review page.
+ * (?view=&group=), a table; a row opens the review page. Only open loads are listed (Ryne 2026-11-12): moved
+ * and dismissed ones simply leave. Rows stay one line; duplicate / already-built flags and team notes open in a dialog.
  */
 import { BatchActionBar } from '../board/BatchActionBar'
 import { outcomesFromServer, selectAllUpToCap, toggleSelection, type BatchOutcome } from '../batchReview'
 import { batchShipmentTask } from '@/lib/apiClient'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Mail, Trash2, Truck } from 'lucide-react'
-import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsSegmentedTabs, TmsTabStrip } from '@/features/tms/kit'
+import { Mail, Truck, X } from 'lucide-react'
+import { TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsSegmentedTabs } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
   ClearFiltersButton,
@@ -35,9 +36,9 @@ import { formatDateTime } from '@/lib/date'
 import { intakeCounts } from '@/lib/intakeLoad'
 import { isDeletedIntake } from '@/lib/intakeDup'
 import { duplicateGroups } from '@/lib/intakeDuplicates'
-import { BuiltNotice, DeleteIntakeDialog, DuplicateNotice } from './DuplicateParts'
+import { DeleteIntakeDialog, IntakeItemDialog, IntakeRowFlags } from './DuplicateParts'
 import { useBuiltMatches } from './useBuiltMatches'
-import type { IntakeLoadRecord, IntakeStatus } from '@/types/intake'
+import type { IntakeLoadRecord } from '@/types/intake'
 import {
   ALL_GROUP,
   UNASSIGNED,
@@ -77,8 +78,15 @@ function reviewText(row: IntakeLoadRecord): string {
   return row.status === 'OPEN' ? 'Needs review' : ''
 }
 
-type StatusChip = 'open' | 'moved' | 'dismissed'
-const CHIP_STATUS: Record<StatusChip, IntakeStatus> = { open: 'OPEN', moved: 'MOVED', dismissed: 'DISMISSED' }
+const BANNER_KEY = 'tms:intake:divisions-banner-hidden'
+
+function bannerHidden(): boolean {
+  try {
+    return window.localStorage.getItem(BANNER_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 function cityState(stop: { city: string | null; state: string | null } | undefined): string {
   if (!stop) return '—'
@@ -111,11 +119,10 @@ export function IntakeBoard() {
   const { divisions } = useOwnershipDivisions()
   const { isOwnerOrAdmin, canReview } = useIntakePermissions()
   const [deleting, setDeleting] = useState<IntakeLoadRecord | null>(null)
+  const [itemId, setItemId] = useState<string | null>(null)
+  const [hideBanner, setHideBanner] = useState(bannerHidden)
 
-  const chip: StatusChip = params.get('status') === 'moved' ? 'moved' : params.get('status') === 'dismissed' ? 'dismissed' : 'open'
   const open = useIntakeLoads({ status: 'OPEN' })
-  const other = useIntakeLoads({ status: CHIP_STATUS[chip], enabled: chip !== 'open' })
-  const shown = chip === 'open' ? open : other
 
   const activeDivisions = useMemo(
     () => flattenDivisions(divisions ?? []).filter((r) => r.division.active).map((r) => r.division),
@@ -124,7 +131,7 @@ export function IntakeBoard() {
   const activeCodes = useMemo(() => new Set(activeDivisions.map((d) => d.code)), [activeDivisions])
   const isUnrouted = (row: IntakeLoadRecord) => row.divisionCode == null || !activeCodes.has(row.divisionCode)
 
-  const unroutedShown = isOwnerOrAdmin || open.rows.some(isUnrouted) || (chip !== 'open' && other.rows.some(isUnrouted))
+  const unroutedShown = isOwnerOrAdmin || open.rows.some(isUnrouted)
   const viewKey = `tms:intake:view:${user?.email ?? 'anon'}`
   const rawView = params.get('view')
   const legacyDivision = params.get('division')
@@ -154,7 +161,7 @@ export function IntakeBoard() {
   // Rows an admin deleted are out of every tab; duplicates are found among the open queue.
   const dups = useMemo(() => duplicateGroups(open.rows), [open.rows])
   const { matches: built } = useBuiltMatches(open.rows)
-  const rows = shown.rows.filter((r) => !isDeletedIntake(r) && rowInGroup(r, view, selected, activeCodes))
+  const rows = open.rows.filter((r) => !isDeletedIntake(r) && rowInGroup(r, view, selected, activeCodes))
   const missingAddress = activeDivisions.filter((d) => !d.intakeEmail)
 
   function update(next: Record<string, string | null>) {
@@ -225,20 +232,6 @@ export function IntakeBoard() {
   )
   const filteredRows = useMemo(() => filterRows(rows, columns, filters), [rows, columns, filters])
   const sortedRows = useMemo(() => sortDenseRows(filteredRows, columns, prefs.sort), [filteredRows, columns, prefs.sort])
-  // A row with a duplicate or already-built notice stacks a second line (a third when it has both): the page's rows grow to hold it,
-  // so nothing in the From / Subject cell is clipped. A queue with no notices keeps the grid's normal row height.
-  const rowHeights = useMemo(() => {
-    let notices = false
-    let both = false
-    for (const r of sortedRows) {
-      if (r.status !== 'OPEN') continue
-      const n = (dups.get(r.id) ? 1 : 0) + (built.get(r.id) ? 1 : 0)
-      if (n > 0) notices = true
-      if (n > 1) both = true
-    }
-    if (both) return { compact: 96, comfortable: 108 }
-    return notices ? { compact: 64, comfortable: 72 } : undefined
-  }, [sortedRows, dups, built])
   const setColumnFilter = useCallback((key: string, next: DenseColumnFilter | null) => {
     setFilters((prev) => {
       const copy = { ...prev }
@@ -265,26 +258,7 @@ export function IntakeBoard() {
               <span className="tms-intake-from-name">{row.fromName || row.fromEmail}</span>
               <span className="tms-intake-from-subject">{row.subject || '(no subject)'}</span>
             </div>
-            {row.status === 'OPEN' && dups.get(row.id) ? (
-              <DuplicateNotice
-                row={row}
-                info={dups.get(row.id)!}
-                isAdmin={isOwnerOrAdmin}
-                canReview={canReview}
-                onDelete={() => setDeleting(row)}
-                onChanged={() => open.refresh()}
-              />
-            ) : null}
-            {row.status === 'OPEN' && built.get(row.id) ? (
-              <BuiltNotice
-                row={row}
-                matches={built.get(row.id)!}
-                isAdmin={isOwnerOrAdmin}
-                canReview={canReview}
-                onDelete={() => setDeleting(row)}
-                onChanged={() => open.refresh()}
-              />
-            ) : null}
+            <IntakeRowFlags row={row} dup={dups.get(row.id)} built={built.get(row.id)} onOpen={() => setItemId(row.id)} />
           </div>
         )
       case 'completeness':
@@ -310,18 +284,6 @@ export function IntakeBoard() {
               onClick={(e) => { e.stopPropagation(); navigate(`/tms/shipments/intake/${encodeURIComponent(row.id)}`) }}
             >
               Create shipment
-            </TmsButton>
-          ) : null}
-          {row.status === 'OPEN' && isOwnerOrAdmin ? (
-            <TmsButton
-              size="sm"
-              variant="ghost"
-              data-testid="intake-delete"
-              aria-label="Delete from Intake"
-              title="Delete from Intake"
-              onClick={(e) => { e.stopPropagation(); setDeleting(row) }}
-            >
-              <Trash2 size={14} aria-hidden="true" />
             </TmsButton>
           ) : null}
           </span>
@@ -382,21 +344,11 @@ export function IntakeBoard() {
       }
     />
   ) : (
-    <TmsEmptyState compact title="No tender e-mails waiting." message={chip === 'open' ? null : `Nothing ${chip} here.`} />
+    <TmsEmptyState compact title="No tender e-mails waiting." message={null} />
   )
 
   return (
     <div className="tms-dense-page">
-      <TmsTabStrip
-        aria-label="Intake status"
-        active={chip}
-        onSelect={(key) => update({ status: key === 'open' ? null : key })}
-        tabs={[
-          { key: 'open', label: 'Open', count: open.rows.length },
-          { key: 'moved', label: 'Moved', count: chip === 'moved' ? shown.rows.filter((r) => !isDeletedIntake(r)).length : undefined },
-          { key: 'dismissed', label: 'Dismissed', count: chip === 'dismissed' ? shown.rows.filter((r) => !isDeletedIntake(r)).length : undefined },
-        ]}
-      />
       <div className="tms-dense-bar">
         <span className="tms-dense-title">
           <Truck size={18} aria-hidden="true" /> Build · Intake
@@ -432,13 +384,25 @@ export function IntakeBoard() {
         />
         <DensityToggle density={prefs.density} onChange={prefs.setDensity} />
       </div>
-      {isOwnerOrAdmin && missingAddress.length > 0 ? (
-        <TmsAlert tone="orange" title="Divisions without an intake e-mail" className="tms-intake-banner">
-          {missingAddress.map((d) => d.name).join(', ')} cannot receive tender e-mails yet.{' '}
+      {isOwnerOrAdmin && missingAddress.length > 0 && !hideBanner ? (
+        <p className="tms-intake-banner-compact" data-testid="intake-divisions-banner">
+          <span>No intake e-mail yet: {missingAddress.map((d) => d.name).join(', ')}.</span>{' '}
           <Link to="/tms/brokerage/divisions">Open Divisions</Link>
-        </TmsAlert>
+          <button
+            type="button"
+            className="tms-intake-banner-x"
+            aria-label="Hide this notice"
+            data-testid="intake-divisions-banner-hide"
+            onClick={() => {
+              setHideBanner(true)
+              try { window.localStorage.setItem(BANNER_KEY, '1') } catch { /* storage unavailable: hidden until reload */ }
+            }}
+          >
+            <X size={12} aria-hidden="true" />
+          </button>
+        </p>
       ) : null}
-      {shown.error ? <TmsAlert tone="red" title="Could not load intake">{shown.error}</TmsAlert> : null}
+      {open.error ? <TmsAlert tone="red" title="Could not load intake">{open.error}</TmsAlert> : null}
       <DenseKpiStrip open items={kpis} />
       <BatchActionBar
         actionLabel="Push to Load Review"
@@ -453,7 +417,7 @@ export function IntakeBoard() {
         <DenseGrid<IntakeLoadRecord>
           aria-label="Intake"
           recentKey={`tms:intake:recent:${user?.email ?? 'anon'}`}
-          resetKey={`${view}|${selected}|${chip}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
+          resetKey={`${view}|${selected}|${JSON.stringify(filters)}|${JSON.stringify(prefs.sort)}`}
           columns={gridColumns}
           rows={sortedRows}
           fitRows={rows}
@@ -468,7 +432,6 @@ export function IntakeBoard() {
           }}
           renderCell={renderCell}
           density={prefs.density}
-          rowHeights={rowHeights}
           userWidths={prefs.widths}
           stickyCount={Math.max(1, prefs.pinned.length)}
           sort={prefs.sort}
@@ -478,15 +441,30 @@ export function IntakeBoard() {
           onReorder={(from, to) => prefs.setColumns(reorderKeys(prefs.columns, from, to))}
           onResize={prefs.setWidth}
           onRowClick={(r) => navigate(`/tms/shipments/intake/${encodeURIComponent(r.id)}`)}
-          empty={shown.loading ? <TmsBadge tone="gray">Loading…</TmsBadge> : rows.length > 0 ? 'No tender e-mails match the column filters.' : emptyBody}
+          empty={open.loading ? <TmsBadge tone="gray">Loading…</TmsBadge> : rows.length > 0 ? 'No tender e-mails match the column filters.' : emptyBody}
         />
       </div>
+      {itemId && !deleting ? (() => {
+        const item = open.rows.find((r) => r.id === itemId)
+        return item ? (
+          <IntakeItemDialog
+            row={item}
+            dup={dups.get(item.id)}
+            built={built.get(item.id)}
+            isAdmin={isOwnerOrAdmin}
+            canReview={canReview}
+            onClose={() => setItemId(null)}
+            onDelete={() => setDeleting(item)}
+            onChanged={() => open.refresh()}
+          />
+        ) : null
+      })() : null}
       {deleting ? (
         <DeleteIntakeDialog
           row={deleting}
           open
           onOpenChange={(o) => { if (!o) setDeleting(null) }}
-          onDeleted={() => { setDeleting(null); open.refresh() }}
+          onDeleted={() => { setDeleting(null); setItemId(null); open.refresh() }}
         />
       ) : null}
     </div>

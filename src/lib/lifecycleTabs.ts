@@ -41,7 +41,7 @@ export const LIFECYCLE_TABS: readonly LifecycleTab[] = [
     label: 'Build',
     caption: 'Intake',
     to: '/tms/shipments/intake',
-    matches: ['/tms/shipments/intake', '/tms/shipments/intake/*', '/tms/shipments/new', '/tms/shipments/:id/edit'],
+    matches: ['/tms/shipments/intake', '/tms/shipments/intake/*', '/tms/shipments/new'],
     pageKey: 'loads',
     badgeKey: 'intakeLoads',
   },

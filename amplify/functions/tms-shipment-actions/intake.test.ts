@@ -227,11 +227,34 @@ describe('INTAKE_DELETE', () => {
 })
 
 describe('INTAKE_NOT_DUPLICATE', () => {
+  const owner: Caller = { email: 'ryne@bcatcorp.com', sub: 'sub-admin', groups: ['ADMIN'], isAdmin: true }
+  const asAdmin = (input: Row) => runIntakeAction(deps(), 'INTAKE_NOT_DUPLICATE', input, owner)
+
   it('remembers the answer on the row (its confirmed list) once, audited', async () => {
-    await run('INTAKE_NOT_DUPLICATE', { intakeId: 'il:r1', expectedVersion: 3 })
+    await asAdmin({ intakeId: 'il:r1', expectedVersion: 3 })
     expect(intake().confirmed).toContain('notDuplicate')
-    await run('INTAKE_NOT_DUPLICATE', { intakeId: 'il:r1', expectedVersion: 4 })
+    await asAdmin({ intakeId: 'il:r1', expectedVersion: 4 })
     expect(audits.filter((a) => a.action === 'INTAKE_NOT_DUPLICATE')).toHaveLength(1)
+  })
+
+  it('is refused for a reviewer who is not owner/ADMIN (they leave a note instead)', async () => {
+    await expect(run('INTAKE_NOT_DUPLICATE', { intakeId: 'il:r1', expectedVersion: 3 })).rejects.toThrow(/owner or ADMIN/)
+    expect(intake().confirmed ?? []).not.toContain('notDuplicate')
+  })
+})
+
+describe('INTAKE_ADD_NOTE', () => {
+  it('appends who, when and the text to the row, audited; any status', async () => {
+    const out = await run('INTAKE_ADD_NOTE', { intakeId: 'il:r1', expectedVersion: 3, text: '  Checked with the customer, this is a re-send  ' })
+    expect((out as { notes: unknown[] }).notes).toEqual([{ at: new Date(clock).toISOString(), by: caller.email, text: 'Checked with the customer, this is a re-send' }])
+    await run('INTAKE_ADD_NOTE', { intakeId: 'il:r1', expectedVersion: 4, text: 'Second' })
+    expect(JSON.parse(String(intake().notes))).toHaveLength(2)
+    expect(audits.filter((a) => a.action === 'INTAKE_ADD_NOTE')).toHaveLength(2)
+  })
+
+  it('refuses an empty note and a stale version', async () => {
+    await expect(run('INTAKE_ADD_NOTE', { intakeId: 'il:r1', expectedVersion: 3, text: '   ' })).rejects.toThrow(/Write a note/)
+    await expect(run('INTAKE_ADD_NOTE', { intakeId: 'il:r1', expectedVersion: 1, text: 'x' })).rejects.toThrow(/changed/)
   })
 })
 

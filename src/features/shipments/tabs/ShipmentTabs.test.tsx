@@ -64,7 +64,8 @@ beforeEach(() => {
 describe('shipment tabs', () => {
   it('opening a shipment adds a tab and focuses it; opening it again does not duplicate', async () => {
     app()
-    for (const k of ['active', 'all', 'intake', 'voided']) expect(screen.getByTestId(`ship-tab-section-${k}`)).toBeInTheDocument()
+    for (const k of ['active', 'all', 'voided']) expect(screen.getByTestId(`ship-tab-section-${k}`)).toBeInTheDocument()
+    expect(screen.queryByTestId('ship-tab-section-intake')).toBeNull()
     expect(screen.queryByTestId('ship-tab-s1')).toBeNull()
     fireEvent.click(screen.getByText('open s1'))
     expect(await screen.findByTestId('ship-tab-s1')).toBeInTheDocument()

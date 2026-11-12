@@ -40,6 +40,9 @@ export type IntakeMeta = Record<string, IntakeFieldMeta>
 export interface IntakeAttachment { name: string; contentType: string; size: number; key: string }
 export interface IntakeCustomerCandidate { id: string; name: string; how: string }
 
+/** A team note on an intake row: who wrote it, when, and the update (Ryne 2026-11-12). */
+export interface IntakeNote { at: string; by: string; text: string }
+
 export interface IntakeLoadRecord {
   id: string; status: IntakeStatus
   divisionCode: string | null; toAddress: string | null; toAddresses: string[]
@@ -54,6 +57,8 @@ export interface IntakeLoadRecord {
   /** Shipments with a PRO that this e-mail's references already belong to, found when the e-mail arrived (`intakeBuilt.ts`); null/absent = none found or never checked. */
   alreadyBuilt?: { shipmentId: string; number: string; customerName: string | null; value: string; source: 'reference' | 'subject' }[] | null
   alreadyBuiltCheckedAt?: string | null
+  /** Team notes, newest last. */
+  notes?: IntakeNote[] | null
   shipmentId: string | null; shipmentNumber: string | null
   reviewedBy: string | null; reviewedAt: string | null
   lastEditedBy: string | null; lastEditedAt: string | null
