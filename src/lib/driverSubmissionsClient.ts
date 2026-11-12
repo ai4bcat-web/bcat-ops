@@ -52,6 +52,8 @@ export interface DriverSubmissionRecord {
   /** Where a stop photo was taken, as the driver app files it. */
   stopId?: string | null
   stopLabel?: string | null
+  /** What an additional document is (LUMPER_RECEIPT, ...), when the driver picked a type. */
+  docType?: string | null
   slackChannelId?: string | null
   slackMessageTs?: string | null
   emailMessageId?: string | null
@@ -166,7 +168,7 @@ export function driverDocValidationError(files: File[]): string | null {
 
 export const SUBMISSION_FIELDS = `
   id driverId driverName status source submittedByEmail externalMessageId loadId
-  referenceNumber note stopId stopLabel slackChannelId slackMessageTs emailMessageId emailSubject
+  referenceNumber note stopId stopLabel docType slackChannelId slackMessageTs emailMessageId emailSubject
   notifiedAt combinedPodKey combinedRateconKey combinedAt createdAt updatedAt
 `
 

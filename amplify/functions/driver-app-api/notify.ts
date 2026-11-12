@@ -302,10 +302,12 @@ export async function notifyRateconSubmitted(n: SubmissionNotice): Promise<Notif
  * office knows it is on the load.
  */
 export async function notifyMiscAdded(
-  n: Pick<SubmissionNotice, 'driverName' | 'referenceNumber' | 'note'> & { count: number; stopLabel?: string | null },
+  n: Pick<SubmissionNotice, 'driverName' | 'referenceNumber' | 'note'> & { count: number; stopLabel?: string | null; docTypeLabel?: string | null },
 ): Promise<NotifyResult> {
   const channel = process.env.INTAKE_PODS_CHANNEL_ID ?? 'C0C6ZT55R0T'
-  const what = `${n.count} ${n.count === 1 ? 'photo/document' : 'photos/documents'}`
+  const what = n.docTypeLabel
+    ? `a ${n.docTypeLabel.toLowerCase()} (${n.count} ${n.count === 1 ? 'page' : 'pages'})`
+    : `${n.count} ${n.count === 1 ? 'photo/document' : 'photos/documents'}`
   const where = n.stopLabel ? ` · ${n.stopLabel}` : ''
   const pro = n.referenceNumber ? ` for PRO ${n.referenceNumber}` : ''
   const note = n.note ? ` — ${n.note}` : ''

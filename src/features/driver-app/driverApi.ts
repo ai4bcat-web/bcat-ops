@@ -272,6 +272,8 @@ export interface SubmissionSummary {
   /** Where a MISC submission was taken. */
   stopId?: string | null
   stopLabel?: string | null
+  /** What an additional document is (LUMPER_RECEIPT, ...), when the driver picked a type. */
+  docType?: string | null
   createdAt: string
   notifiedAt?: string | null
   docs: SubmissionDoc[]
@@ -861,6 +863,7 @@ export async function createSubmission(input: {
   note?: string
   stopId?: string
   stopLabel?: string
+  docType?: string
   resumeFromId?: string
 }): Promise<CreateSubmissionResponse> {
   if (input.resumeFromId) {
@@ -878,6 +881,7 @@ export async function createSubmission(input: {
       note: input.note,
       stopId: input.stopId,
       stopLabel: input.stopLabel,
+      docType: input.docType,
       pages: pageMeta(input.pages),
     }),
   })
@@ -939,6 +943,8 @@ export async function submitMisc(input: {
   note?: string
   stopId?: string
   stopLabel?: string
+  /** An additional document's type (LUMPER_RECEIPT, ...); omitted for photos and 'Other'. */
+  docType?: string
   resumeFromId?: string
 }): Promise<string> {
   const { pages } = input
