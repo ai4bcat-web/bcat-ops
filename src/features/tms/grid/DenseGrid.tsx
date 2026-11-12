@@ -53,6 +53,8 @@ const POPOVER_WIDTH = 280
 export interface DenseGridProps<T> {
   /** The page shows every word in capitals: auto-fit widths allow for the wider letters. */
   uppercase?: boolean
+  /** A page whose cells stack lines (Intake) sets its own fixed row heights; the list still virtualises on them. */
+  rowHeights?: Partial<Record<DenseDensity, number>>
   /** The visible columns, in order. */
   columns: DenseColumn<T>[]
   /** The rows to draw: already filtered, sorted and paged. */
@@ -144,8 +146,9 @@ export function DenseGrid<T>({
   'aria-label': ariaLabel,
   testId,
   uppercase = false,
+  rowHeights,
 }: DenseGridProps<T>) {
-  const rowHeight = ROW_HEIGHT[density]
+  const rowHeight = rowHeights?.[density] ?? ROW_HEIGHT[density]
   const scrollRef = useRef<HTMLDivElement>(null)
   const [topRow, setTopRow] = useState(0)
   const [viewport, setViewport] = useState(FALLBACK_VIEWPORT)
