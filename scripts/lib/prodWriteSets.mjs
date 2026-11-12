@@ -95,9 +95,11 @@ export const PROD_WRITE_SETS = {
   // `awShipmentNumber.mjs --apply`: renumber post-cutover shipments (99xxx -> 20000...) in every table awRenumberL moves + TmsSettings.nextShipmentNumber.
   // `awCustomerBilling.mjs --apply`: Customer.billingMethod / apEmail / paymentTermsDays (conditional per customer) + one AuditLog row per customer.
   awCustomerBilling: { models: ['Customer', 'AuditLog'] },
-  // `awCustomerBillingEmails.mjs --apply`: Customer.apEmail only (OTR billing list; blank + non-FACTOR only, conditional) + one AuditLog row per customer.
+  // `awCustomerBillingEmails.mjs --apply`: Customer.apEmail (OTR billing list; blank + non-FACTOR only) and Customer.noaEmail (notice-of-assignment; blank only), both conditional, + one AuditLog row per customer.
   awCustomerBillingEmails: { models: ['Customer', 'AuditLog'] },
   // `awInvoiceDocs.mjs --apply`: adds the missing `inv:<invoiceId>` INVOICE ShipmentDocument rows (put, attribute_not_exists(id)); never touches an existing row.
   awInvoiceDocs: { models: ['ShipmentDocument'] },
+  // `awFactoringCustomerPaid.mjs --apply`: FactoringItem.customerPaidOn / customerPaymentRef on PROs 14749, 14700, 14538 only (conditional: still Pending with OTR and empty) + one AuditLog row each. Never status, shipment, invoice or payment.
+  awFactoringCustomerPaid: { models: ['FactoringItem', 'AuditLog'] },
   awShipmentNumber: { models: ['Shipment', 'Load', 'Invoice', 'CarrierBill', 'SpotRequest', 'WorkflowRun', 'IntakeLoad', 'TrackingLink', 'Quote', 'LaneRateSample', 'Commission', 'AuditLog', 'TmsSettings'] },
 };

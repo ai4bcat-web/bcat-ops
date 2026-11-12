@@ -36,6 +36,17 @@ export function validHireDate(hire: string | null | undefined): hire is string {
   return !Number.isNaN(new Date(`${hire}T12:00:00Z`).getTime())
 }
 
+/**
+ * A driver whose file still needs a hire date: active, not a broker, no usable date, and one who earns PTO
+ * (an employee on the Ivan roster, fleetGroup LOCAL, or anyone marked PTO eligible). Contractors
+ * (Amazon, owner operator, box truck) do not earn PTO, so they are never flagged unless marked eligible.
+ */
+export function needsHireDate(d: { active?: boolean | null; type?: string | null; fleetGroup?: string | null; ptoEligible?: boolean | null; hireDate?: string | null }): boolean {
+  if (d.active === false || d.type === 'broker') return false
+  if (validHireDate(d.hireDate)) return false
+  return d.fleetGroup === 'LOCAL' || d.ptoEligible === true
+}
+
 /** First calendar year with 5 days and first with 10, or null without a usable hire date. */
 export function ptoStartYears(hire: string | null | undefined): { five: number; ten: number } | null {
   if (!validHireDate(hire)) return null

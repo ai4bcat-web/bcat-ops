@@ -983,13 +983,27 @@ const FACTORING_ITEM_FIELDS = `
 // throw on a backend that predates the deploy empties the whole factoring queue.
 const FACTORING_ITEM_V2_FIELDS = ['source', 'invoiceId', 'orderId', 'shipmentId']
 let factoringItemsHaveTms = true
+// When the customer paid, and the OTR invoices a resend replaced. Same idiom, own flag, so a
+// browser ahead of the backend deploy still lists the queue.
+const FACTORING_ITEM_V3_FIELDS = ['customerPaidOn', 'customerPaymentRef', 'customerPaidSetBy', 'customerPaidSetAt', 'otrPriorInvoices']
+let factoringItemsHavePaid = true
 
-/** Every FactoringItem read or write, with step F's group dropped and retried pre-deploy. */
+/** Every FactoringItem read or write, with each optional field group dropped and retried pre-deploy. */
 async function readFactoring<T>(run: (fields: string) => Promise<T>): Promise<T> {
   for (;;) {
+    const selection = [
+      FACTORING_ITEM_FIELDS,
+      factoringItemsHaveTms ? FACTORING_ITEM_V2_FIELDS.join(' ') : '',
+      factoringItemsHavePaid ? FACTORING_ITEM_V3_FIELDS.join(' ') : '',
+    ].filter(Boolean).join(' ')
     try {
-      return await run(factoringItemsHaveTms ? `${FACTORING_ITEM_FIELDS} ${FACTORING_ITEM_V2_FIELDS.join(' ')}` : FACTORING_ITEM_FIELDS)
+      return await run(selection)
     } catch (err) {
+      if (factoringItemsHavePaid && fieldNamed(FACTORING_ITEM_V3_FIELDS, err)) {
+        console.warn('[apiClient] backend has no customer-paid fields on FactoringItem yet — querying without them until deploy')
+        factoringItemsHavePaid = false
+        continue
+      }
       if (!factoringItemsHaveTms || !fieldNamed(FACTORING_ITEM_V2_FIELDS, err)) throw err
       console.warn('[apiClient] backend has no TMS fields on FactoringItem yet — querying without them until deploy')
       factoringItemsHaveTms = false
@@ -1003,7 +1017,7 @@ async function readFactoring<T>(run: (fields: string) => Promise<T>): Promise<T>
  * A column that will not parse is dropped rather than thrown: one malformed cached
  * readiness must not blank the whole factoring queue.
  */
-const FACTORING_JSON_FIELDS = ['otrManualFields', 'otrReadiness', 'otrDocsUploaded', 'manualSteps'] as const
+const FACTORING_JSON_FIELDS = ['otrManualFields', 'otrReadiness', 'otrDocsUploaded', 'manualSteps', 'otrPriorInvoices'] as const
 
 function parseFactoringJson(item: FactoringItem): FactoringItem {
   const out = { ...item } as unknown as Record<string, unknown>
@@ -2950,9 +2964,9 @@ const INTAKE_LOAD_FIELDS = `
   subject fromEmail fromName receivedAt bodyText attachments
   parseState parseNote format fields autoFields meta confirmed missingFields
   shipmentId shipmentNumber reviewedBy reviewedAt lastEditedBy lastEditedAt
-  dismissedBy dismissedAt dismissReason emailLog createdBy updatedBy version createdAt updatedAt
+  dismissedBy dismissedAt dismissReason emailLog alreadyBuilt alreadyBuiltCheckedAt createdBy updatedBy version createdAt updatedAt
 `
-const INTAKE_LOAD_JSON_FIELDS: (keyof IntakeLoadRecord)[] = ['attachments', 'fields', 'autoFields', 'meta', 'emailLog']
+const INTAKE_LOAD_JSON_FIELDS: (keyof IntakeLoadRecord)[] = ['attachments', 'fields', 'autoFields', 'meta', 'emailLog', 'alreadyBuilt']
 
 let intakeModelAvailable = modelAvailable('IntakeLoad')
 const isMissingIntakeModel = (err: unknown) =>

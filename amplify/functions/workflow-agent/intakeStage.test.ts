@@ -16,6 +16,9 @@ const db = vi.hoisted(() => ({
   enriched: [] as Row[],
   failEnrich: false,
   twin: null as Row | null,
+  shipments: [] as Row[],
+  failShipments: false,
+  scannedFor: [] as string[][],
 }))
 
 vi.mock('./store', () => ({
@@ -24,6 +27,11 @@ vi.mock('./store', () => ({
   INTAKE_LOAD_TABLE_NAME: 'IntakeLoad-test',
   getById: async (table: string, id: string) => (table === 'IntakeLoad-test' ? db.intake.get(id) ?? null : null),
   findIntakeDuplicate: async () => db.twin,
+  findShipmentsBySearchKeys: async (values: string[]) => {
+    db.scannedFor.push(values)
+    if (db.failShipments) throw new Error('scan failed')
+    return db.shipments
+  },
   getSettings: async () => null,
   listDivisions: async () => db.divisions,
   findIntakeByReference: async () => db.existing,
@@ -58,6 +66,9 @@ beforeEach(() => {
   db.enriched = []
   db.failEnrich = false
   db.twin = null
+  db.shipments = []
+  db.failShipments = false
+  db.scannedFor = []
   db.divisions = [
     { id: 'A', code: 'A', name: 'A', active: true, intakeEmail: 'tenders+a@bcatcorp.com' },
     { id: 'B', code: 'B', name: 'B', active: true, intakeEmail: 'tenders+b@bcatcorp.com' },
@@ -220,5 +231,52 @@ describe('cleanToAddresses', () => {
     expect(out).toHaveLength(20)
     expect(out.slice(0, 2)).toEqual(['a@x.com', 'b@x.com'])
     expect(cleanToAddresses('nope')).toEqual([])
+  })
+
+  describe('the already-built check at ingest', () => {
+    const parsedRef = (reference: string) => ({
+      kind: 'PARSED', party: { kind: null, id: null, name: null, how: null }, candidates: [], stopFacilityHits: [],
+      parse: { tender: { reference, stops: [] }, parserTender: { reference, stops: [] }, fillKind: 'EMAIL', lowConfidence: [] },
+    }) as unknown as StageInput
+    const built = { id: 's1', number: '20043', customerId: null, customerName: 'C.H. ROBINSON', searchKey: '20043 c.h. robinson 573570079', voidedAt: null, deletedAt: null }
+
+    it('stores the matching PRO on the row when its reference is already on a shipment', async () => {
+      db.shipments = [built]
+      await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), parsedRef('573570079'))
+      const row = db.intake.get('il:wf:TENDER:abc') as Row
+      expect(row.alreadyBuilt).toEqual([{ shipmentId: 's1', number: '20043', customerName: 'C.H. ROBINSON', value: '573570079', source: 'reference' }])
+      expect(row.alreadyBuiltCheckedAt).toBe('2026-11-03T10:00:00.000Z')
+      expect(row.status).toBe('OPEN')
+      expect(db.scannedFor[0]).toContain('573570079')
+    })
+
+    it('stores an empty answer (checked, nothing found) and still stages the row', async () => {
+      await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), parsedRef('111222333'))
+      const row = db.intake.get('il:wf:TENDER:abc') as Row
+      expect(row.alreadyBuilt).toEqual([])
+      expect(row.alreadyBuiltCheckedAt).toBeTruthy()
+    })
+
+    it('does not read shipments when the e-mail carries no reference at all', async () => {
+      await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), BARE)
+      expect(db.scannedFor).toHaveLength(0)
+      expect((db.intake.get('il:wf:TENDER:abc') as Row).alreadyBuilt).toEqual([])
+    })
+
+    it('fails open: a failed shipment read stages the e-mail unflagged', async () => {
+      db.failShipments = true
+      const out = await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), parsedRef('573570079'))
+      expect(out.staged).toBe(true)
+      const row = db.intake.get('il:wf:TENDER:abc') as Row
+      expect(row).toBeTruthy()
+      expect(row.alreadyBuilt).toBeUndefined()
+      expect(row.alreadyBuiltCheckedAt).toBeUndefined()
+    })
+
+    it('a voided shipment is not "already built"', async () => {
+      db.shipments = [{ ...built, voidedAt: '2026-11-01T00:00:00.000Z' }]
+      await stageIntake(run(), mail(['tenders+a@bcatcorp.com']), parsedRef('573570079'))
+      expect((db.intake.get('il:wf:TENDER:abc') as Row).alreadyBuilt).toEqual([])
+    })
   })
 })

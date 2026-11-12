@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ArrowLeft, Pencil } from 'lucide-react'
 import {
-  TmsBadge, TmsButton, TmsEmptyState, TmsField, TmsProfileHeader, TmsSegmentedTabs, TmsSelect,
+  TmsAlert, TmsBadge, TmsButton, TmsEmptyState, TmsField, TmsProfileHeader, TmsSegmentedTabs, TmsSelect,
 } from '@/features/tms/kit'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { DriverDrawer } from '@/features/drivers/DriverDrawer'
@@ -14,6 +14,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
 import { activeUnits } from '@/lib/fleetActive'
+import { needsHireDate } from '@/lib/ptoAllowance'
 import { driverExpiryPatch, driverExpiry, slotsForDriver, visibleSlots } from '@/lib/fileHub'
 import * as api from '@/lib/apiClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
@@ -141,6 +142,7 @@ export function DriverProfilePage() {
             <TmsBadge tone={driver.active ? 'green' : 'gray'}>{driver.active ? 'Active' : 'Inactive'}</TmsBadge>
             <TmsBadge tone="blue">{fleetLabel(driver.fleetGroup)}</TmsBadge>
             <TmsBadge tone={docs.tone}>Docs: {docs.label}</TmsBadge>
+            {needsHireDate(driver) ? <TmsBadge tone="orange">Needs hire date</TmsBadge> : null}
           </>
         )}
         subtitle={(
@@ -153,6 +155,13 @@ export function DriverProfilePage() {
         )}
         actions={<TmsButton onClick={() => setEditing(true)} data-testid="driver-edit"><Pencil size={14} /> Edit details</TmsButton>}
       />
+
+      {needsHireDate(driver) ? (
+        <TmsAlert tone="orange" title="Hire date needed for PTO" className="pf-hire-alert" >
+          PTO is counted from the hire date, so {driver.name.split(' ')[0]} has no PTO balance and no PTO in the driver app until it is filled in.{' '}
+          <button type="button" className="pf-link" onClick={() => setEditing(true)} data-testid="driver-add-hire-date">Add hire date</button>
+        </TmsAlert>
+      ) : null}
 
       <div className="pf-tabs" style={{ marginTop: 16 }}>
         <TmsSegmentedTabs
@@ -178,7 +187,7 @@ export function DriverProfilePage() {
                 { label: 'E-mail', value: driver.email ?? '' },
                 { label: 'Primary dispatcher', value: driver.dispatcherPrimary ?? '' },
                 { label: 'Backup dispatcher', value: driver.dispatcherBackup ?? '' },
-                { label: 'Hire date', value: driver.hireDate ?? '' },
+                { label: 'Hire date', value: driver.hireDate ?? '', hint: needsHireDate(driver) ? 'Needed for PTO' : undefined },
               ]} />
             </ProfileSection>
             <ProfileSection title="Licence & medical" action={<TmsButton size="sm" onClick={() => setEditing(true)}>Edit</TmsButton>}>

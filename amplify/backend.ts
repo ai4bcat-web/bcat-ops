@@ -1884,8 +1884,7 @@ const workflowAuditLogTable    = stageTables['AuditLog']
 // Step U: the tender e-mails a division's intake address received are staged as IntakeLoad
 // rows (conditional put, so a re-run never overwrites a row a reviewer started editing),
 // and the e-mail bridge asks which addresses to watch, so the division table is read-only
-// here. Put + Get only on IntakeLoad: staging can add a row and see one, never change or
-// remove one — editing and promoting are tmsShipmentActions'.
+// here. Get/Put/Query/UpdateItem on IntakeLoad (see the policy below), never Delete — editing and promoting are tmsShipmentActions'.
 const workflowIntakeLoadTable  = stageTables['IntakeLoad']
 const workflowDivisionTable    = stageTables['OwnershipDivision']
 
@@ -1923,9 +1922,12 @@ workflowAgentFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
   resources: [workflowRunTable.tableArn, `${workflowRunTable.tableArn}/index/*`],
 }))
+// Query (through the status index) and UpdateItem too: the repeat-e-mail roll-up (findIntakeByReference / findIntakeDuplicate / logRepeatEmail /
+// enrichIntakeLoad) and the already-built flag write need them, and without them every staging with a reference failed AccessDenied. No
+// DeleteItem: a row is never removed here, and a person's edits are protected by the conditions on those writes.
 workflowAgentFn.addToRolePolicy(new PolicyStatement({
-  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem'],
-  resources: [workflowIntakeLoadTable.tableArn],
+  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+  resources: [workflowIntakeLoadTable.tableArn, `${workflowIntakeLoadTable.tableArn}/index/*`],
 }))
 workflowAgentFn.addToRolePolicy(new PolicyStatement({
   actions:   ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan'],

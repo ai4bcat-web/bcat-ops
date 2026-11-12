@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { builtMatchesFor, keyTokens, needsBuiltCheck, normRef, refCandidates, subjectTokens, type BuiltShipment } from './intakeBuilt'
+import { builtMatchesFor, keyTokens, needsBuiltCheck, normRef, refCandidates, storedBuiltMatches, subjectTokens, type BuiltShipment } from './intakeBuilt'
 import { NOT_DUPLICATE_TOKEN } from './intakeDup'
 import type { IntakeLoadRecord } from '../types/intake'
 
@@ -79,5 +79,25 @@ describe('which rows are checked', () => {
     expect(needsBuiltCheck(row({ shipmentId: 's1' }))).toBe(false)
     expect(needsBuiltCheck(row({ confirmed: [NOT_DUPLICATE_TOKEN] }))).toBe(false)
     expect(needsBuiltCheck(row({ status: 'DISMISSED' as never, dismissReason: 'Deleted by admin' }))).toBe(false)
+  })
+})
+
+describe('the answer staging stored on the row', () => {
+  const stored = [{ shipmentId: 's1', number: '20043', customerName: 'C.H. ROBINSON', value: '573570079', source: 'reference' as const }]
+  const at = '2026-11-12T10:00:00.000Z'
+
+  it('is used while the row still holds the reference it matched', () => {
+    const m = storedBuiltMatches(row({ reference: '573570079', alreadyBuilt: stored, alreadyBuiltCheckedAt: at }))
+    expect(m).toEqual(stored)
+  })
+  it('is stale once an edit removed that reference (the screen checks again)', () => {
+    expect(storedBuiltMatches(row({ reference: '999888777', subject: 'Tender', alreadyBuilt: stored, alreadyBuiltCheckedAt: at }))).toBeNull()
+  })
+  it('is nothing when never checked, empty, malformed, dismissed as "not a duplicate", or already a shipment', () => {
+    expect(storedBuiltMatches(row({ reference: '573570079', alreadyBuilt: stored }))).toBeNull()
+    expect(storedBuiltMatches(row({ reference: '573570079', alreadyBuilt: [], alreadyBuiltCheckedAt: at }))).toBeNull()
+    expect(storedBuiltMatches(row({ reference: '573570079', alreadyBuilt: [{ number: '1' }] as never, alreadyBuiltCheckedAt: at }))).toBeNull()
+    expect(storedBuiltMatches(row({ reference: '573570079', alreadyBuilt: stored, alreadyBuiltCheckedAt: at, confirmed: [NOT_DUPLICATE_TOKEN] }))).toBeNull()
+    expect(storedBuiltMatches(row({ reference: '573570079', alreadyBuilt: stored, alreadyBuiltCheckedAt: at, shipmentId: 'sh-9' }))).toBeNull()
   })
 })

@@ -63,7 +63,8 @@ const isLive = (c) => c.active !== false && !c.mergedIntoId;
  * Plan against production Customers. Returns { companies, results, unmatched } where each result is
  * { company, customer?, status, email?, existing?, flags[] } and status is one of
  * FILL | SAME_EMAIL | DIFFERS | FACTOR_CUSTOMER | CONFLICT | AMBIGUOUS | UNMATCHED | NOA_ONLY (only a notice address; AP left blank).
- * `noa` on each result lists the notice-of-assignment addresses, which are never written (no field for them yet).
+ * `noa` on each result lists the notice-of-assignment addresses. They go to Customer.noaEmail (never apEmail): `noaWrites` lists the
+ * matched customers whose noaEmail is blank and whose company has exactly one notice address; the rest are reported in `noaOther`.
  */
 export function planBillingEmails(customers, prepared) {
   const companies = groupCompanies(prepared.rows);
@@ -93,5 +94,16 @@ export function planBillingEmails(customers, prepared) {
     if (blank(customer.billingMethod)) flags.push('BILLING_METHOD_UNSET');
     results.push({ company, customer, status: 'FILL', email, flags });
   }
-  return { companies, results, liveCount: live.length };
+  // NOA addresses are written independently of the AP result, but only for a single, unambiguous match with one address.
+  const noaWrites = []; const noaOther = [];
+  for (const r of results) {
+    if (!r.customer || !r.company.noa.length) continue;
+    if (r.status === 'AMBIGUOUS' || r.status === 'CONFLICT') { noaOther.push({ ...r, why: r.status }); continue; }
+    if (r.company.noa.length > 1) { noaOther.push({ ...r, why: 'MULTIPLE_NOA' }); continue; }
+    const noa = r.company.noa[0];
+    const existing = blank(r.customer.noaEmail) ? null : String(r.customer.noaEmail).trim();
+    if (!existing) noaWrites.push({ customer: r.customer, noa, company: r.company });
+    else noaOther.push({ ...r, why: existing.toLowerCase() === noa ? 'NOA_SAME' : 'NOA_DIFFERS', existing, noa });
+  }
+  return { companies, results, noaWrites, noaOther, liveCount: live.length };
 }

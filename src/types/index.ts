@@ -582,6 +582,24 @@ export interface FactoringItem {
   invoiceId?: string | null
   orderId?: string | null
   shipmentId?: string | null
+  // ── When the customer paid (not when OTR funded) ──────────────────────────
+  /** YYYY-MM-DD the customer's payment arrived. */
+  customerPaidOn?: string | null
+  /** Check number or ACH trace that payment carried. */
+  customerPaymentRef?: string | null
+  customerPaidSetBy?: string | null
+  customerPaidSetAt?: string | null
+  /** OTR invoices this row had before a "Send to OTR again" created a new one. */
+  otrPriorInvoices?: OtrPriorInvoice[] | null
+}
+
+export interface OtrPriorInvoice {
+  otrInvoiceId: string
+  otrStatus?: string | null
+  otrSubmittedAt?: string | null
+  otrSubmittedBy?: string | null
+  replacedAt: string
+  replacedBy: string
 }
 
 

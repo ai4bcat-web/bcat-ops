@@ -10,6 +10,7 @@
  *   - only a TENDER run stages (intake follows `run.agent`, not the inbox the mail arrived in).
  */
 import { isDeletedIntake } from '../../../src/lib/intakeDup'
+import { MAX_STORED_MATCHES, builtMatchesFor, refCandidates } from '../../../src/lib/intakeBuilt'
 import { matchDivisionByAddresses } from '../../../src/lib/intakeMail'
 import {
   buildIntakeDraft,
@@ -19,7 +20,7 @@ import {
   mergeIntakeFields,
 } from '../../../src/lib/intakeLoad'
 import type { TenderPrefill } from '../../../src/lib/intakeTender'
-import type { IntakeCustomerCandidate, IntakeFields, IntakeMeta, IntakeParseState } from '../../../src/types/intake'
+import type { IntakeCustomerCandidate, IntakeFields, IntakeLoadRecord, IntakeMeta, IntakeParseState } from '../../../src/types/intake'
 import {
   CUSTOMER_TABLE_NAME,
   INTAKE_LOAD_TABLE_NAME,
@@ -28,6 +29,7 @@ import {
   listDivisions,
   findIntakeByReference,
   findIntakeDuplicate,
+  findShipmentsBySearchKeys,
   logRepeatEmail,
   enrichIntakeLoad,
   nowIso,
@@ -139,6 +141,30 @@ async function enrichFromRepeat(existing: Row, mail: IntakeSourceMail, incoming:
   })
 }
 
+/**
+ * The already-built check for an e-mail as it arrives: its parsed references and subject numbers against shipments that already have a PRO
+ * (the same matcher the Intake screen runs, `src/lib/intakeBuilt.ts`). Advice only: the result is stored on the row and nothing is
+ * deleted or dismissed because of it. Fails open: a failed read logs and the e-mail stages unflagged (the screen checks again itself).
+ */
+export async function builtCheckFor(fields: IntakeFields, subject: string | null | undefined, at: string): Promise<{ matches: Row[]; at: string } | null> {
+  try {
+    const probe = { status: 'OPEN', shipmentId: null, confirmed: [] as string[], fields, subject: subject ?? '' } as unknown as IntakeLoadRecord
+    const cands = refCandidates(probe)
+    if (cands.length === 0) return { matches: [], at }
+    const shipments = await findShipmentsBySearchKeys(cands.map((c) => c.value.toLowerCase()))
+    const matches = builtMatchesFor(probe, shipments.map((r) => ({
+      id: String(r.id), number: typeof r.number === 'string' ? r.number : null,
+      customerId: typeof r.customerId === 'string' ? r.customerId : null, customerName: typeof r.customerName === 'string' ? r.customerName : null,
+      searchKey: typeof r.searchKey === 'string' ? r.searchKey : null,
+      voidedAt: typeof r.voidedAt === 'string' ? r.voidedAt : null, deletedAt: typeof r.deletedAt === 'string' ? r.deletedAt : null,
+    })))
+    return { matches: matches.slice(0, MAX_STORED_MATCHES) as unknown as Row[], at }
+  } catch (err) {
+    console.warn('[workflow-agent] already-built check failed', err instanceof Error ? err.message : String(err))
+    return null
+  }
+}
+
 export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: StageInput): Promise<StageResult> {
   if (run.agent !== 'TENDER') return { staged: false, detail: 'not a tender run' }
   try {
@@ -224,6 +250,7 @@ export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: St
         await enrichIntakeLoad(mine, {
           attachments: null, fields: filled as unknown as Row, meta: { ...meta, ...jsonish<IntakeMeta>(mine.meta, {}) } as unknown as Row,
           missingFields: intakeMissing(filled, required, customerRow), at: nowIso(),
+          built: await builtCheckFor(filled, mine.subject as string | undefined, nowIso()),
           parse: { parseState: 'PARSED', parseNote: null, format, autoFields: { ...fields, customerCandidates } as unknown as Row },
         })
         return { staged: true, detail: 'read the e-mail and filled in its intake load' }
@@ -241,6 +268,7 @@ export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: St
     }
 
     const now = nowIso()
+    const built = await builtCheckFor(fields, mail.subject, now)
     const created = await putIntakeLoadIfAbsent({
       id: `il:${run.id}`,
       status: 'OPEN',
@@ -263,6 +291,7 @@ export async function stageIntake(run: RunRow, mail: IntakeSourceMail, input: St
       meta,
       confirmed: [],
       missingFields: intakeMissing(fields, required, customerRow),
+      ...(built ? { alreadyBuilt: built.matches, alreadyBuiltCheckedAt: built.at } : {}),
       createdBy: 'workflow-agent',
       updatedBy: 'workflow-agent',
       version: 1,
