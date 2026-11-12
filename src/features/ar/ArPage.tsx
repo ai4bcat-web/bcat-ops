@@ -10,6 +10,8 @@
  * signed download. The page reports exactly that and never claims a send that did not
  * happen — a false "sent" here is a customer who never got their bill.
  */
+import { ArSummaryStrip } from './ArSummaryStrip'
+import { computeArSummary, divisionKeyOf } from './arSummary'
 import { SendReviewCarousel } from './components/SendReviewCarousel'
 import { AgingStatementDialog } from './components/AgingStatementDialog'
 import { allApEmails } from '@/lib/billingMethod'
@@ -39,7 +41,7 @@ import {
 } from '@/lib/apiClient'
 import { loadWorklistShipments } from '@/lib/worklistShipments'
 import {
-  AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL, agingCsv, avgDaysToInvoice, avgDaysToPay, deliveredNotInvoiced,
+  AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL, agingCsv,
   type AgingSummary,
 } from '@/lib/arAging'
 import { chicagoDateStr } from '@/lib/date'
@@ -47,7 +49,6 @@ import { saveBlob } from '@/lib/download'
 import { formatCents } from '@/lib/invoiceBuild'
 import { otrStatusLabel } from '@/lib/otrInvoiceStatus'
 import { otrRejection } from '@/lib/otrRejection'
-import { AgingStrip } from './AgingStrip'
 import {
   AR_PAYMENT_KIND_LABEL, AR_PAYMENT_METHOD_LABEL, BATCH_GENERATE_LIMIT,
   agingChipFor, formatDay, lastThreeMonths, monthLabel,
@@ -175,6 +176,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   }, [])
 
   const [selected, setSelected] = useState<string[]>([])
+  /** A division chip from the summary strip: `BROKERAGE` or `ASSETS/LOCAL`. */
+  const [divisionFilter, setDivisionFilter] = useState<string | null>(null)
   /** Customers ticked on the Aging tab for a bulk statement send. */
   const [statementSelected, setStatementSelected] = useState<string[]>([])
   /** What the last batch generated, so "Batch e-mail" bills exactly those invoices. */
@@ -253,7 +256,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     // Auto-generated on release but not yet sent = a draft for review in Ready to invoice.
     const split = splitOpenInvoices(open.invoices, lookups, releasedByOrder, (inv) =>
       isInvoiceSent(inv, inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : null))
-    const keep = (rows: ArQueueRow[]) => rows.filter((row) => billedByMatches(row, billedBy))
+    const keep = (rows: ArQueueRow[]) => rows.filter((row) => billedByMatches(row, billedBy)
+      && (!divisionFilter || divisionKeyOf(lookups.shipmentsById.get(row.shipmentId) ?? { revDivision: row.revDivision }) === divisionFilter))
     return {
       READY: keep((() => {
         const ready = buildReadyRows(unbilled.rows, lookups)
@@ -263,18 +267,25 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       INVOICED: keep(split.invoiced),
       PAID: keep(buildPaidRows(paidInvoices, lookups)),
     }
-  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId])
+  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId, divisionFilter])
 
-  const uninvoiced = useMemo(() => {
-    const rows = unbilled.rows
-    const shipments = rows.map((r) => r.shipment).filter((s): s is ShipmentRecord => s !== null)
-    return deliveredNotInvoiced(rows.map((r) => r.order), shipments, asOf)
-  }, [unbilled.rows, asOf])
+  // Paid invoices over the last three months, for the days-to-pay figures (90-day window).
+  const [recentPaid, setRecentPaid] = useState<InvoiceRecord[]>([])
+  useEffect(() => {
+    let alive = true
+    Promise.all(months.map((m) => listInvoicesByMonth(m).catch(() => [] as InvoiceRecord[])))
+      .then((sets) => { if (alive) setRecentPaid(sets.flat()) })
+    return () => { alive = false }
+  }, [months])
+  const summary = useMemo(() => computeArSummary({
+    open: open.invoices,
+    paid: recentPaid,
+    factorByItemId,
+    shipmentsById: lookups.shipmentsById,
+    divisionName: lookups.divisionName,
+    asOf,
+  }), [open.invoices, recentPaid, factorByItemId, lookups, asOf])
 
-  const lagDays = useMemo(() => {
-    const shipments = invoiced.rows.map((r) => r.shipment).filter((s): s is ShipmentRecord => s !== null)
-    return avgDaysToInvoice([...open.invoices, ...paidInvoices], shipments)
-  }, [invoiced.rows, open.invoices, paidInvoices])
 
   const refreshAll = () =>
     Promise.all([unbilled.refresh(), invoiced.refresh(), open.refresh(), customerAr.refresh(), loadMonth()])
@@ -499,15 +510,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           </button>
         </div>
         <BillingGapsPanel onFixed={() => void refreshAll()} />
-        <AgingStrip
-          openCents={open.aging.totalCents}
-          lateCents={open.aging.lateCents}
-          deliveredNotInvoicedCents={uninvoiced.reduce((sum, r) => sum + r.revenueCents, 0)}
-          deliveredNotInvoicedCount={uninvoiced.length}
-          avgDaysToInvoice={lagDays}
-          avgDaysToPay={avgDaysToPay(paidInvoices)}
-          paidMonthLabel={monthLabel(month)}
-        />
+        <ArSummaryStrip summary={summary} division={divisionFilter} onDivision={(key) => { setSelected([]); setDivisionFilter(key) }} />
         <TmsTabStrip aria-label="Invoicing status" tabs={tabs} active={tab} onSelect={(key) => { setSelected([]); setTab(key as ArPageTab) }} />
         {current.banner}
         <ArDenseTable<never> key={tab} grid={current.grid} />
