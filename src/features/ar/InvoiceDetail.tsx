@@ -207,8 +207,9 @@ export function InvoiceDetail() {
             { label: 'Customer', value: invoice.customerName ?? invoice.customerId },
             { label: 'Bill-to', value: invoice.billTo?.name ?? invoice.customerName },
             {
-              label: 'Shipment',
-              value: <Link to={`/tms/shipments/${invoice.shipmentId}`}>{invoice.shipmentNumber ?? invoice.shipmentId}</Link>,
+              // Invoicing never links out to the shipment (Ryne, 2026-11-12).
+              label: 'PRO',
+              value: invoice.shipmentNumber ?? invoice.shipmentId,
             },
             { label: 'Terms', value: `Net ${invoice.termsDays}` },
             { label: 'Issued', value: formatDay(invoice.invoiceDate) },

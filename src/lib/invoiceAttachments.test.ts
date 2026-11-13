@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { invoiceAttachmentPlan, invoiceEmailDocuments, isCustomerRateCon } from './invoiceDelivery'
+import { invoiceAttachmentPlan, invoiceEmailDocuments, isCustomerRateCon, isMergeablePodType } from './invoiceDelivery'
 import { carrierDocumentReason, carrierPayAmounts, carrierPayInText } from './carrierPayGuard'
 import type { ShipmentDocumentRecord } from '../types/tms'
 
@@ -58,9 +58,29 @@ describe('invoice e-mail attachments (Ryne, 2026-11-12)', () => {
 
   it('plan: brokerage RC is not included, Ivan RC missing is flagged, POD missing is flagged', () => {
     const pdf = { name: 'Invoice 1.pdf', sizeBytes: 500 }
-    expect(invoiceAttachmentPlan([pod], { ivan: false }, pdf)).toMatchObject({ invoicePdf: 'ATTACHED', pod: 'ATTACHED', rateCon: 'NOT_INCLUDED', count: 2, totalBytes: 1500 })
+    expect(invoiceAttachmentPlan([pod], { ivan: false }, pdf)).toMatchObject({ invoicePdf: 'ATTACHED', pod: 'ATTACHED', rateCon: 'NOT_INCLUDED', count: 1, totalBytes: 1500 })
     expect(invoiceAttachmentPlan([], { ivan: true }, pdf)).toMatchObject({ pod: 'MISSING', rateCon: 'MISSING', count: 1 })
     expect(invoiceAttachmentPlan([customerRc], { ivan: true }, null)).toMatchObject({ invoicePdf: 'MISSING', rateCon: 'ATTACHED' })
+  })
+
+  it('plan: PODs ride inside the invoice PDF; the BOL and a customer rate con stay separate files', () => {
+    const pdf = { name: 'Invoice 20027 PO1.pdf', sizeBytes: 500 }
+    const plan = invoiceAttachmentPlan([pod, bol, customerRc], { attachIds: [bol.id], ivan: true }, pdf)
+    expect(plan.items.find((i) => i.documentId === pod.id)?.inInvoicePdf).toBe(true)
+    expect(plan.items.find((i) => i.documentId === bol.id)?.inInvoicePdf).toBeUndefined()
+    expect(plan.items.find((i) => i.documentId === customerRc.id)?.inInvoicePdf).toBeUndefined()
+    expect(plan.count).toBe(3)
+    // No invoice PDF to merge into: the POD goes as its own file.
+    expect(invoiceAttachmentPlan([pod], { ivan: false }, null).items[0].inInvoicePdf).toBeUndefined()
+  })
+
+  it('plan: a POD that cannot be merged is named before anyone presses Send', () => {
+    const heic = doc({ type: 'POD', name: 'IMG_0042.HEIC', contentType: 'image/heic' })
+    const phone = doc({ type: 'POD', name: 'pod.jpg', contentType: 'application/octet-stream' })
+    const plan = invoiceAttachmentPlan([heic, phone, pod], { ivan: false }, { name: 'Invoice 1.pdf', sizeBytes: 1 })
+    expect(plan.unmergeablePods).toEqual(['IMG_0042.HEIC'])
+    expect(isMergeablePodType('image/png', 'x.png')).toBe(true)
+    expect(isMergeablePodType('application/msword', 'pod.doc')).toBe(false)
   })
 
   it('isCustomerRateCon follows the OTR submit rule', () => {

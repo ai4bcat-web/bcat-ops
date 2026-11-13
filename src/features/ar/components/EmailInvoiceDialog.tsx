@@ -21,7 +21,7 @@ import {
   sendInvoice,
   getInvoice,
   getShipment,
-  getInvoicePdfUrl,
+  previewInvoicePacket,
   getTmsSettings,
   graphqlErrorText,
   listCustomers,
@@ -170,12 +170,14 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
       .finally(() => setSending(false))
   }
 
-  // The stored PDF is exactly what goes out as the attachment, so previewing it is previewing the invoice.
+  // The invoice as it goes out: the stored PDF with every POD merged in as pages (PREVIEW_INVOICE_PACKET).
   const openPreview = () => {
-    const key = invoice?.pdfKey
-    if (!key) return
-    getInvoicePdfUrl(key)
-      .then((url) => { window.open(url, '_blank', 'noopener') })
+    if (!invoice?.pdfKey) return
+    previewInvoicePacket({ invoiceId: invoice.id })
+      .then((p) => {
+        if (p.error) toast.error(p.error)
+        if (p.url) window.open(p.url, '_blank', 'noopener')
+      })
       .catch((err: unknown) => toast.error(graphqlErrorText(err)))
   }
 
@@ -238,7 +240,7 @@ export function EmailInvoiceDialog({ invoiceId, busy, onClose, onDone }: {
                 {message.trim() ? `${message.trim()}\n\n${preview.body}` : preview.body}
               </pre>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                <span className="tms-muted">Attached: {invoice.pdfKey ? `${invoice.number}.pdf` : 'no PDF yet'}</span>
+                <span className="tms-muted">Attached: {invoice.pdfKey ? `${invoice.number}.pdf — the invoice with its POD pages, one PDF` : 'no PDF yet'}</span>
                 <TmsButton size="sm" aria-label="Preview invoice PDF" disabled={!invoice.pdfKey} onClick={openPreview}>
                   <Eye size={12} /> Preview invoice
                 </TmsButton>

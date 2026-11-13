@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
+import { PDFDocument } from 'pdf-lib'
 
 type Row = Record<string, unknown>
 
@@ -410,12 +411,15 @@ function runCommand(cmd: MockCommand): unknown {
   }
 }
 
+/** Every stored file reads back as a real one-page PDF, so the invoice + POD packet can be merged. */
+const MINI_PDF = await (async () => { const d = await PDFDocument.create(); d.addPage([612, 792]); return d.save() })()
+
 function runS3(cmd: MockCommand): unknown {
   if (cmd.__type === 'PutObject') return {}
   if (cmd.__type === 'GetObject') {
     return {
       ContentType: 'application/pdf',
-      Body: { transformToByteArray: async () => new Uint8Array([1, 2, 3]) },
+      Body: { transformToByteArray: async () => MINI_PDF },
     }
   }
   throw new Error(`unsupported s3 command: ${cmd.__type}`)
@@ -1048,7 +1052,8 @@ describe('invoice documents packet', () => {
     // Named for the customer: 'Invoice <PRO> <PO>.pdf'.
     expect(names[0]).toMatch(/^Invoice S000001( .+)?\.pdf$/)
     // A BCAT Logistics / brokerage invoice never carries a rate confirmation (Ryne, 2026-11-12).
-    expect(names.slice(1)).toEqual(['pod-seed.pdf', 'doc-scale.pdf', 'doc-lumper.pdf', 'doc-other.pdf', 'bol-seed.pdf'])
+    // The POD rides as pages inside the invoice PDF, not as its own file.
+    expect(names.slice(1)).toEqual(['doc-scale.pdf', 'doc-lumper.pdf', 'doc-other.pdf', 'bol-seed.pdf'])
     expect(names).not.toContain('doc-ratecon.pdf')
     expect(names).not.toContain('doc-carrier-only.pdf')
     expect(names).not.toContain('doc-private-lumper.pdf')
@@ -1062,16 +1067,36 @@ describe('invoice documents packet', () => {
     await call('EMAIL_INVOICE', { invoiceId })
     const names = noticeNames()
     expect(names).toContain('doc-ratecon.pdf')
-    expect(names).toContain('pod-seed.pdf')
+    expect(names).not.toContain('pod-seed.pdf') // merged into the invoice PDF
     expect(names).not.toContain('doc-generated-rc.pdf')
     expect(names).not.toContain('doc-legacy-rc.pdf')
   })
 
-  it('always attaches the POD, even one the invoice did not pick at issue', async () => {
+  it('always includes the POD, even one the invoice did not pick at issue — as pages of the invoice PDF', async () => {
     const { invoiceId } = await generate()
     doc('doc-late-pod', 'POD', { uploadedAt: '2026-10-22T10:00:00.000Z' })
+    const preview = (await call('PREVIEW_INVOICE_PACKET', { invoiceId })) as Row
+    expect(preview.error).toBeNull()
+    const parts = (preview.pages as { name: string; pages: number }[]).map((p) => p.name)
+    expect(parts[0]).toMatch(/^Invoice S000001/)
+    expect(parts.slice(1).sort()).toEqual(['doc-late-pod.pdf', 'pod-seed.pdf'])
     await call('EMAIL_INVOICE', { invoiceId })
-    expect(noticeNames()).toContain('doc-late-pod.pdf')
+    expect(noticeNames()).not.toContain('doc-late-pod.pdf')
+    expect(noticeNames()[0]).toMatch(/^Invoice S000001/)
+  })
+
+  it('refuses the send, naming the POD, when a POD cannot be merged into the invoice PDF', async () => {
+    const { invoiceId } = await generate()
+    doc('doc-heic', 'POD', { name: 'IMG_0042.HEIC', contentType: 'image/heic', s3Key: `shipment-docs/${SHIPMENT_ID}/heic` })
+    s3Send.mockImplementation(async (cmd: MockCommand) =>
+      cmd.__type === 'GetObject' && String(cmd.input.Key).endsWith('/heic')
+        ? { ContentType: 'image/heic', Body: { transformToByteArray: async () => new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]) } }
+        : runS3(cmd))
+    await expect(call('EMAIL_INVOICE', { invoiceId })).rejects.toThrow(/POD_MERGE_FAILED: The POD "IMG_0042.HEIC"/)
+    expect(noticeNames()).toEqual([])
+    const preview = (await call('PREVIEW_INVOICE_PACKET', { invoiceId })) as Row
+    expect(preview.url).toBeNull()
+    expect(String(preview.error)).toMatch(/IMG_0042.HEIC/)
   })
 
   it('blocks a send whose attachment is a carrier document, and records it', async () => {

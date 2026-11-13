@@ -172,14 +172,38 @@ export interface InvoiceAttachmentItem {
   name: string
   type: ShipmentDocumentType | 'INVOICE_PDF'
   sizeBytes: number | null
+  /** A POD that travels as pages inside the invoice PDF, not as its own attachment. */
+  inInvoicePdf?: boolean
+}
+
+/**
+ * Whether a POD of this type can be merged into the invoice PDF (PDF, JPG, PNG). The send
+ * reads the bytes and decides for certain; this lets the review flag a HEIC or a Word file
+ * before anyone presses Send.
+ */
+export function isMergeablePodType(contentType: string | null | undefined, name: string | null | undefined): boolean {
+  const type = (contentType || '').toLowerCase()
+  const n = (name || '').toLowerCase()
+  if (type.includes('pdf') || /jpe?g/.test(type) || type.includes('png')) return true
+  if (!type || type === 'application/octet-stream' || type === 'binary/octet-stream') {
+    return !/\.(heic|heif|tiff?|webp|gif|bmp|docx?|xlsx?)$/.test(n)
+  }
+  return false
+}
+
+/** PODs are merged into the invoice PDF whenever there is an invoice PDF to merge them into. */
+export function mergesIntoInvoicePdf(doc: Pick<ShipmentDocumentRecord, 'type'>, hasInvoicePdf: boolean): boolean {
+  return hasInvoicePdf && doc.type === 'POD'
 }
 
 export interface InvoiceAttachmentPlan {
   invoicePdf: InvoiceAttachmentState
   pod: InvoiceAttachmentState
   rateCon: InvoiceAttachmentState
-  /** Invoice PDF included. */
+  /** Separate files on the e-mail, the invoice PDF (with its POD pages) included. */
   count: number
+  /** PODs that cannot be merged into the invoice PDF: the send is refused until each is replaced. */
+  unmergeablePods?: string[]
   totalBytes: number
   items: InvoiceAttachmentItem[]
 }
@@ -193,12 +217,21 @@ export function invoiceAttachmentPlan(
   const docs = invoiceEmailDocuments(documents, scope)
   const items: InvoiceAttachmentItem[] = []
   if (invoicePdf) items.push({ documentId: null, name: invoicePdf.name, type: 'INVOICE_PDF', sizeBytes: invoicePdf.sizeBytes })
-  for (const doc of docs) items.push({ documentId: doc.id, name: doc.name, type: doc.type, sizeBytes: doc.sizeBytes ?? null })
+  for (const doc of docs) {
+    items.push({
+      documentId: doc.id, name: doc.name, type: doc.type, sizeBytes: doc.sizeBytes ?? null,
+      ...(mergesIntoInvoicePdf(doc, invoicePdf != null) ? { inInvoicePdf: true } : {}),
+    })
+  }
+  const unmergeablePods = invoicePdf
+    ? docs.filter((doc) => doc.type === 'POD' && !isMergeablePodType(doc.contentType, doc.name)).map((doc) => doc.name)
+    : []
   return {
     invoicePdf: invoicePdf ? 'ATTACHED' : 'MISSING',
     pod: docs.some((doc) => doc.type === 'POD') ? 'ATTACHED' : 'MISSING',
     rateCon: !scope.ivan ? 'NOT_INCLUDED' : docs.some((doc) => isRateConType(doc.type)) ? 'ATTACHED' : 'MISSING',
-    count: items.length,
+    count: items.filter((item) => !item.inInvoicePdf).length,
+    ...(unmergeablePods.length > 0 ? { unmergeablePods } : {}),
     totalBytes: items.reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0),
     items,
   }

@@ -38,7 +38,7 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import {
-  agingStatement, batchEmailInvoices, batchGenerateInvoices, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
+  agingStatement, batchGenerateInvoices, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
 } from '@/lib/apiClient'
 import { loadWorklistShipments } from '@/lib/worklistShipments'
 import {
@@ -59,7 +59,6 @@ import {
   orderByGroup, type ArBilledBy, type ArGroupBy, type ArQueueLookups, type ArQueueRow, type ArQueueStatus,
 } from './arQueue'
 import { CreditMemoDialog } from './components/CreditMemoDialog'
-import { EmailInvoiceDialog } from './components/EmailInvoiceDialog'
 import { GenerateInvoiceDialog } from './components/GenerateInvoiceDialog'
 import { ReasonDialog } from './components/ReasonDialog'
 import { ReceivePaymentDialog } from './components/ReceivePaymentDialog'
@@ -76,7 +75,6 @@ type ArDialog =
   | { kind: 'review'; invoices: InvoiceRecord[] }
   | { kind: 'statement'; customerId: string; customerName: string }
   | { kind: 'generate'; orderId: string; shipmentNumber: string | null }
-  | { kind: 'email'; invoiceId: string }
   | { kind: 'payment'; customerId: string; customerName: string; invoiceId?: string }
   | { kind: 'credit'; customerId: string; customerName: string }
   | { kind: 'factor'; invoiceId: string }
@@ -185,7 +183,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   /** Customers ticked on the Aging tab for a bulk statement send. */
   const [statementSelected, setStatementSelected] = useState<string[]>([])
   /** What the last batch generated, so "Batch e-mail" bills exactly those invoices. */
-  const [justGenerated, setJustGenerated] = useState<string[]>([])
   /** What the last batch refused, with the release gate's own sentences. */
   const [refusals, setRefusals] = useState<BatchRefusal[]>([])
 
@@ -315,8 +312,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       .then(({ results }) => {
         const made = results.flatMap((r) => (r.invoiceId ? [r.invoiceId] : []))
         const failed = results.filter((r) => r.error)
-        setJustGenerated(made)
-        setSelected([])
+        // What was just generated stays ticked, so "Send N invoices" reviews exactly that batch next.
+        setSelected(results.flatMap((r) => (r.invoiceId ? [r.orderId] : [])))
         // The gate's own sentences, row by row — a toast per refusal scrolls away before
         // anybody can act on eleven of them.
         setRefusals(failed.map((f) => ({
@@ -336,26 +333,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       .finally(() => setBusy(false))
   }
 
-  const runBatchEmail = () => {
-    setBusy(true)
-    batchEmailInvoices({ invoiceIds: justGenerated })
-      .then(({ results }) => {
-        const sent = results.filter((r) => r.emailStatus === 'SENT').length
-        const notSent = results.filter((r) => r.emailStatus === 'NOT_SENT').length
-        const refused = results.filter((r) => r.error).length
-        if (sent > 0) toast.success(`${sent} invoice${sent === 1 ? '' : 's'} e-mailed`)
-        if (notSent > 0) {
-          toast.warning(
-            `${notSent} not sent (SES is off on dev) — open each invoice to copy the body or download the PDF.`,
-          )
-        }
-        if (refused > 0) toast.error(`${refused} could not be queued`)
-        setJustGenerated([])
-        return refreshAll()
-      })
-      .catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Batch e-mail failed'))
-      .finally(() => setBusy(false))
-  }
+
 
   const runVoid = (invoice: InvoiceRecord, reason: string) => {
     setBusy(true)
@@ -457,9 +435,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       asOf,
       busy,
       canRelease,
-      canVoid,
       selected,
-      justGenerated,
       factorByItemId,
       customerById,
       attachmentPlans,
@@ -470,13 +446,8 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       onSelect: setSelected,
       onGenerate: (row) => setDialog({ kind: 'generate', orderId: row.orderId, shipmentNumber: row.shipmentNumber }),
       onBatchGenerate: runBatchGenerate,
-      onBatchEmail: runBatchEmail,
-      onEmail: (inv) => setDialog({ kind: 'email', invoiceId: inv.id }),
-      onPayment: (inv) => setDialog({ kind: 'payment', customerId: inv.customerId, customerName: inv.customerName ?? '', invoiceId: inv.id }),
-      onFactor: (inv) => setDialog({ kind: 'factor', invoiceId: inv.id }),
       onReview: (invs) => setDialog({ kind: 'review', invoices: invs }),
       onEdit: (inv) => setDialog({ kind: 'edit', invoice: inv }),
-      onVoid: (inv) => setDialog({ kind: 'void', invoice: inv }),
     })
     : tab === 'payments' ? paymentsView({
       banner: errorBanner,
@@ -538,14 +509,6 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           onDone={() => closeAndRefresh()}
         />
       )}
-      {dialog?.kind === 'email' && (
-        <EmailInvoiceDialog
-          invoiceId={dialog.invoiceId}
-          busy={busy}
-          onClose={() => setDialog(null)}
-          onDone={closeAndRefresh}
-        />
-      )}
       {dialog?.kind === 'payment' && (
         <ReceivePaymentDialog
           customerId={dialog.customerId}
@@ -563,9 +526,13 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           shipment={lookups.shipmentsById.get(dialog.invoice.shipmentId)}
           factoringItem={dialog.invoice.factoringItemId ? factorByItemId.get(dialog.invoice.factoringItemId) : undefined}
           canEdit={canRelease}
+          canVoid={canVoid}
           onClose={() => setDialog(null)}
           onSaved={() => void refreshAll()}
           onSend={(inv) => setDialog({ kind: 'review', invoices: [inv] })}
+          onFactor={(inv) => setDialog({ kind: 'factor', invoiceId: inv.id })}
+          onPayment={(inv) => setDialog({ kind: 'payment', customerId: inv.customerId, customerName: inv.customerName ?? '', invoiceId: inv.id })}
+          onVoid={(inv) => setDialog({ kind: 'void', invoice: inv })}
         />
       )}
       {dialog?.kind === 'review' && (
@@ -715,8 +682,8 @@ function dateCol<T>(key: string, header: string, of: (row: T) => string | null, 
 }
 
 function queueView({
-  status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, canVoid, selected, justGenerated, factorByItemId, customerById,
-  attachmentPlans, months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onBatchEmail, onPayment, onFactor, onVoid, onReview, onEdit,
+  status, rows, groupBy, groupControl, banner, asOf, busy, canRelease, selected, factorByItemId, customerById,
+  attachmentPlans, months, month, paidLoading, onMonth, onSelect, onGenerate, onBatchGenerate, onReview, onEdit,
 }: {
   status: ArQueueStatus
   rows: ArQueueRow[]
@@ -727,7 +694,6 @@ function queueView({
   busy: boolean
   canRelease: boolean
   selected: string[]
-  justGenerated: string[]
   factorByItemId: Map<string, FactoringItem>
   customerById: Map<string, CustomerRecord>
   attachmentPlans: Map<string, InvoiceAttachmentPlanRow>
@@ -738,14 +704,8 @@ function queueView({
   onSelect: (ids: string[]) => void
   onGenerate: (row: ArQueueRow) => void
   onBatchGenerate: () => void
-  onBatchEmail: () => void
-  onEmail: (invoice: InvoiceRecord) => void
-  onPayment: (invoice: InvoiceRecord) => void
-  onFactor: (invoice: InvoiceRecord) => void
   onReview: (invoices: InvoiceRecord[]) => void
   onEdit: (invoice: InvoiceRecord) => void
-  onVoid: (invoice: InvoiceRecord) => void
-  canVoid: boolean
 }): ListView {
   const ready = status === 'READY'
   const invoiced = status === 'INVOICED'
@@ -807,7 +767,7 @@ function queueView({
     ...(ready || invoiced ? attachmentColumns(attachmentPlans) : []),
     ...(status === 'PAID' ? [dateCol<ArQueueRow>('paidAt', 'Paid on', (row) => row.paidAt)] : []),
     ...(invoiced ? [{ key: 'factor', header: 'Factor', group: 'Invoice', text: factorText, filter: 'multi', optionsOf: (row: ArQueueRow) => opt(factorText(row)) } as Col<ArQueueRow>] : []),
-    ...(ready || invoiced ? [{ key: 'actions', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: ready ? 104 : 400 } as Col<ArQueueRow>] : []),
+    { key: 'actions', header: '', text: () => '', fixed: true, filter: false, sortable: false, width: ready ? 96 : 48 } as Col<ArQueueRow>,
   ]
 
   const renderCell = (row: ArQueueRow, key: string): ReactNode => {
@@ -822,10 +782,19 @@ function queueView({
             onChange={() => toggle(row.orderId)}
           />
         )
-      case 'shipment':
-        return <Link to={`/tms/shipments/${row.shipmentId}`}>{row.shipmentNumber ?? row.shipmentId}</Link>
-      case 'invoice':
-        return row.invoiceId ? <Link to={`/tms/invoicing/invoices/${row.invoiceId}`}>{row.invoiceNumber}</Link> : <span className="tms-muted">—</span>
+      // PRO and Invoice # open the invoice (Ryne, 2026-11-12) — never the shipment from here.
+      case 'shipment': {
+        const inv = row.invoice
+        return inv
+          ? <button type="button" className="tms-link" aria-label={`Open invoice for PRO ${row.shipmentNumber ?? row.shipmentId}`} onClick={() => onEdit(inv)}>{row.shipmentNumber ?? row.shipmentId}</button>
+          : <span>{row.shipmentNumber ?? row.shipmentId}</span>
+      }
+      case 'invoice': {
+        const inv = row.invoice
+        return inv
+          ? <button type="button" className="tms-link" aria-label={`Open invoice ${row.invoiceNumber}`} onClick={() => onEdit(inv)}>{row.invoiceNumber}</button>
+          : <span className="tms-muted">—</span>
+      }
       case 'email': {
         const { to, cc } = invoiceEmailsOf(row)
         const tip = [to.length ? `To: ${to.join(', ')}` : '', cc.length ? `Copy: ${cc.join(', ')}` : ''].filter(Boolean).join('\n')
@@ -889,10 +858,8 @@ function queueView({
         return <span title={names} style={plan.tooBig ? { color: 'var(--tms-badge-red)' } : undefined}>{plan.count}{plan.tooBig ? ' (over 10 MB)' : ''}</span>
       }
       case 'actions': {
+        // Sending, payments, factoring and void live in the invoice drawer; the row only opens it (or generates a missing invoice).
         const inv = row.invoice
-        const view = inv
-          ? <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label={`View or edit invoice ${inv.number}`} title="View / edit" onClick={() => onEdit(inv)}><Eye size={15} /></button>
-          : null
         if (ready && !inv) {
           return (
             <TmsButton size="sm" aria-label={`Generate invoice for ${row.shipmentNumber ?? row.orderId}`}
@@ -902,33 +869,9 @@ function queueView({
           )
         }
         if (!inv) return null
-        const more = (options: Array<[string, string, () => void]>) => options.length === 0 ? null : (
-          <TmsSelect aria-label={`More actions for invoice ${inv.number}`} value="" disabled={busy} className="w-12"
-            onChange={(e) => { options.find(([k]) => k === e.target.value)?.[2](); e.target.value = '' }}>
-            <option value="">…</option>
-            {options.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-          </TmsSelect>
-        )
-        if (ready) {
-          return (
-            <span className="flex items-center justify-end gap-1 whitespace-nowrap">
-              {view}
-              {row.factored
-                ? <TmsButton size="sm" aria-label={`Send invoice ${inv.number} to OTR`} disabled={busy || !canRelease} onClick={() => onReview([inv])}>Send to OTR</TmsButton>
-                : <TmsButton size="sm" variant="primary" aria-label={`Send invoice ${inv.number}`} disabled={busy || !canRelease} onClick={() => onReview([inv])}>Send</TmsButton>}
-              {more(row.factored ? [] : [['factor', 'Send to factor instead', () => onFactor(inv)]])}
-            </span>
-          )
-        }
-        if (status === 'PAID') return <span className="flex justify-end">{view}</span>
         return (
-          <span className="flex items-center justify-end gap-1 whitespace-nowrap">
-            {view}
-            <TmsButton variant="ghost" size="sm" aria-label={`Receive payment for invoice ${inv.number}`} disabled={busy} onClick={() => onPayment(inv)}>Receive payment</TmsButton>
-            {more([
-              ...(row.factored ? [] : [['resend', 'Resend', () => onReview([inv])] as [string, string, () => void]]),
-              ...(canVoid ? [['void', 'Void', () => onVoid(inv)] as [string, string, () => void]] : []),
-            ])}
+          <span className="flex justify-end">
+            <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label={`View or edit invoice ${inv.number}`} title="Open invoice" onClick={() => onEdit(inv)}><Eye size={15} /></button>
           </span>
         )
       }
@@ -960,17 +903,10 @@ function queueView({
             variant="primary"
             aria-label="Review and send selected invoices"
             disabled={busy || !canRelease || selectedDrafts.length === 0}
+            title={selectedDrafts.length === 0 ? 'Tick invoices to send; you review each one before anything goes out' : undefined}
             onClick={() => onReview(selectedDrafts)}
           >
-            Review &amp; send{selectedDrafts.length ? ` (${selectedDrafts.length})` : ''}
-          </TmsButton>
-          <TmsButton
-            aria-label="Batch e-mail generated invoices"
-            disabled={busy || justGenerated.length === 0 || !canRelease}
-            title={canRelease ? undefined : BILLING_GRANT_MESSAGE}
-            onClick={onBatchEmail}
-          >
-            <Mail size={14} /> Batch e-mail ({justGenerated.length})
+            <Mail size={14} /> Send {selectedDrafts.length || ''} invoice{selectedDrafts.length === 1 ? '' : 's'}
           </TmsButton>
         </>
       )}

@@ -12,6 +12,10 @@ vi.mock('@/lib/apiClient', () => ({
   sendInvoice,
   sendToFactor,
   getInvoiceAttachmentPlans,
+  previewInvoicePacket: (input: { invoiceId: string }) => Promise.resolve({
+    invoiceId: input.invoiceId, name: `Invoice ${input.invoiceId}.pdf`, url: 'blob:packet',
+    pages: [{ name: `Invoice ${input.invoiceId}.pdf`, pages: 1 }, { name: 'POD.pdf', pages: 2 }], separate: [{ name: 'BOL.pdf', sizeBytes: 2048 }], error: null,
+  }),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 import { SendReviewCarousel } from './SendReviewCarousel'
@@ -26,6 +30,7 @@ const inv = (id: string, customerId: string): InvoiceRecord => ({
 const customers = new Map<string, CustomerRecord>([
   ['royal', { id: 'royal', name: 'Royal', apEmail: 'ap@royal.test', billingMethod: 'MANUAL' } as CustomerRecord],
   ['tql', { id: 'tql', name: 'TQL', billingMethod: 'FACTOR' } as CustomerRecord],
+  ['noap', { id: 'noap', name: 'No AP Co', billingMethod: 'MANUAL' } as CustomerRecord],
 ])
 
 describe('SendReviewCarousel', () => {
@@ -71,5 +76,39 @@ describe('SendReviewCarousel', () => {
     expect(screen.queryByLabelText('Carrier pay detected')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Send invoices' }))
     await waitFor(() => expect(sendInvoice).toHaveBeenCalledWith({ invoiceId: '20027', excludeDocumentIds: ['d9'] }))
+  })
+
+  it('shows the invoice as one PDF with its POD pages, and the files that ride separately', async () => {
+    getInvoiceAttachmentPlans.mockResolvedValue([
+      { invoiceId: '20027', invoicePdf: 'ATTACHED', pod: 'ATTACHED', rateCon: 'NOT_INCLUDED', count: 2, totalBytes: 3000, carrierPayFlags: [],
+        items: [{ documentId: null, name: 'Invoice 20027.pdf', type: 'INVOICE_PDF', sizeBytes: 1000 }, { documentId: 'd1', name: 'POD.pdf', type: 'POD', sizeBytes: 1000, inInvoicePdf: true }, { documentId: 'd2', name: 'BOL.pdf', type: 'BOL', sizeBytes: 1000 }] },
+    ])
+    render(<MemoryRouter><SendReviewCarousel invoices={[inv('20027', 'royal')]} customerById={customers}
+      shipmentsById={new Map()} onClose={vi.fn()} onDone={vi.fn()} /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByLabelText('What the customer receives').textContent).toContain('POD · 2 pages'))
+    expect(screen.getByLabelText('What the customer receives').textContent).toContain('POD included')
+    expect(screen.getByLabelText('Separate attachments').textContent).toContain('BOL.pdf')
+    expect(screen.getByTitle('Invoice 20027.pdf preview').getAttribute('src')).toBe('blob:packet')
+    await waitFor(() => expect(screen.getByLabelText('Attachment list').textContent).toContain('pages inside the invoice PDF'))
+  })
+
+  it('leaves an invoice that cannot go out of the send, with its reason, and sends the rest', async () => {
+    sendInvoice.mockReset()
+    sendInvoice.mockResolvedValue({ emailStatus: 'SENT', to: ['ap@royal.test'] })
+    getInvoiceAttachmentPlans.mockResolvedValue([
+      { invoiceId: '20027', invoicePdf: 'ATTACHED', pod: 'ATTACHED', rateCon: 'NOT_INCLUDED', count: 1, totalBytes: 1000, carrierPayFlags: [], items: [] },
+      { invoiceId: '20030', invoicePdf: 'ATTACHED', pod: 'MISSING', rateCon: 'NOT_INCLUDED', count: 1, totalBytes: 1000, carrierPayFlags: [], items: [] },
+    ])
+    render(<MemoryRouter><SendReviewCarousel invoices={[inv('20027', 'royal'), inv('20030', 'noap')]} customerById={customers}
+      shipmentsById={new Map()} onClose={vi.fn()} onDone={vi.fn()} /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send invoices' }).textContent).toBe('Send 1 invoice'))
+    fireEvent.click(screen.getByRole('button', { name: 'Next invoice' }))
+    expect(screen.getByLabelText('Cannot send').textContent).toContain('No AP e-mail on file')
+    expect(screen.getByLabelText('Cannot send').textContent).toContain('No POD on file')
+    fireEvent.click(screen.getByRole('button', { name: 'Send invoices' }))
+    await waitFor(() => expect(screen.getAllByLabelText('Send results').length).toBeGreaterThan(0))
+    expect(sendInvoice).toHaveBeenCalledTimes(1)
+    expect(sendInvoice).toHaveBeenCalledWith({ invoiceId: '20027' })
+    expect(screen.getAllByLabelText('Send results').map((el) => el.textContent).join(' ')).toContain('Left out: No AP e-mail on file; No POD on file')
   })
 })
