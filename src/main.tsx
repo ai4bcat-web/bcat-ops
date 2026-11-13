@@ -3,11 +3,7 @@ import { cognitoUserPoolsTokenProvider } from 'aws-amplify/auth/cognito'
 import { defaultStorage } from 'aws-amplify/utils'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-// Public pages and the driver app keep the pre-restyle look (tokens remapped to --tms-legacy-*).
-import './styles/legacy-skin.css'
 import App from './App'
-// Office restyle layer (Ryne's visual-system guide, 2026-11): after the kit and grid sheets, before responsive.
-import './features/tms/restyle.css'
 // Loaded after every other stylesheet so its width queries win: the responsive layer for tablets and phones.
 import './features/tms/responsive.css'
 import { registerDriverServiceWorker } from './lib/swUpdate'

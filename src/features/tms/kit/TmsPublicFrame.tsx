@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import { useLegacySkin } from '@/lib/legacySkin'
 
 export interface TmsPublicFrameProps {
   title?: ReactNode
@@ -13,7 +12,6 @@ export interface TmsPublicFrameProps {
 
 /** Light canvas + centred card for tokenised public pages (outside the shell, never dark). */
 export function TmsPublicFrame({ title, subtitle, brand = 'BCAT', width = 'md', footer, children }: TmsPublicFrameProps) {
-  useLegacySkin()
   return (
     <div className="tms-portal tms-public">
       <div className={`tms-public-card tms-public-${width}`}>

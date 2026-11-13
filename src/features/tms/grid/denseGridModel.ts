@@ -217,8 +217,7 @@ export const MIN_USER_WIDTH = 60
 export const MAX_USER_WIDTH = 800
 export const CHECK_COLUMN_WIDTH = 30
 /** Fixed row heights (px): the list is virtualised on them, and the CSS reads the same number. */
-/** Compact: 13px text with 9px above and below; Comfortable: 15px (restyle guide, 2026-11). */
-export const ROW_HEIGHT: Record<DenseDensity, number> = { compact: 36, comfortable: 48 }
+export const ROW_HEIGHT: Record<DenseDensity, number> = { compact: 30, comfortable: 40 }
 
 export function clampWidth(px: number): number {
   return Math.round(Math.min(MAX_USER_WIDTH, Math.max(MIN_USER_WIDTH, px)))

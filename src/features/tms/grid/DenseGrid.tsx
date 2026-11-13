@@ -145,7 +145,7 @@ export function DenseGrid<T>({
   recentKey,
   'aria-label': ariaLabel,
   testId,
-  uppercase = true,
+  uppercase = false,
   rowHeights,
 }: DenseGridProps<T>) {
   const rowHeight = rowHeights?.[density] ?? ROW_HEIGHT[density]
@@ -439,7 +439,7 @@ export function DenseGrid<T>({
                 <td colSpan={columns.length + (selectable ? 1 : 0)} />
               </tr>
             )}
-            {mounted.map((item, offset) => {
+            {mounted.map((item) => {
               if (item.kind === 'group') {
                 return (
                   <tr key={`g:${item.key}`} className="tms-dg-group" data-testid="dense-group" data-group-key={item.key}>
@@ -456,7 +456,6 @@ export function DenseGrid<T>({
                 <tr
                   key={id}
                   data-tone={toneOf?.(row)}
-                  data-alt={(win.start + offset) % 2 === 1 ? 'true' : undefined}
                   data-selected={selected}
                   {...rowAttrs?.(row)}
                   className={onRowClick ? 'tms-dg-clickable' : undefined}
