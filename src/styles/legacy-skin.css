@@ -1,0 +1,122 @@
+/*
+ * Legacy skin: the public pages (TmsPublicFrame: rate-con signing, quote reply, tracking links,
+ * driver onboarding, Amazon disputes) and the driver PWA keep the look they had before the
+ * November 2026 office restyle. theme.css keeps every pre-restyle value as a --tms-legacy-*
+ * token; this sheet points the live tokens back at them. No colour literals here.
+ *
+ * Applied by `data-tms-skin="legacy"` on <html> (set by TmsPublicFrame and DriverApp while
+ * mounted, so Radix portals and toasts follow) and, for the first paint, by the public frame's
+ * own `.tms-portal.tms-public` root.
+ */
+html:root[data-tms-skin='legacy'],
+html:root[data-tms-skin='legacy'] .tms-shell,
+html:root[data-tms-skin='legacy'] .tms-portal,
+html .tms-portal.tms-public,
+html:root[data-tms-theme] .tms-portal.tms-public {
+  --tms-bg: var(--tms-legacy-bg);
+  --tms-sidebar: var(--tms-legacy-sidebar);
+  --tms-topbar: var(--tms-legacy-topbar);
+  --tms-card: var(--tms-legacy-card);
+  --tms-card-body: var(--tms-legacy-card-body);
+  --tms-bg-elevated: var(--tms-legacy-bg-elevated);
+  --tms-surface: var(--tms-legacy-surface);
+  --tms-surface-subtle: var(--tms-legacy-surface-subtle);
+  --tms-surface-hover: var(--tms-legacy-surface-hover);
+  --tms-surface-selected: var(--tms-legacy-surface-selected);
+  --tms-border: var(--tms-legacy-border);
+  --tms-input: var(--tms-legacy-input);
+  --tms-field: var(--tms-legacy-field);
+  --tms-input-border: var(--tms-legacy-input-border);
+  --tms-text: var(--tms-legacy-text);
+  --tms-text-2: var(--tms-legacy-text-2);
+  --tms-muted: var(--tms-legacy-muted);
+  --tms-disabled: var(--tms-legacy-disabled);
+  --tms-primary: var(--tms-legacy-primary);
+  --tms-primary-hover: var(--tms-legacy-primary-hover);
+  --tms-primary-tint: var(--tms-legacy-primary-tint);
+  --tms-primary-ink: var(--tms-legacy-primary-ink);
+  --tms-on-primary: var(--tms-legacy-on-primary);
+  --tms-destructive: var(--tms-legacy-destructive);
+  --tms-destructive-hover: var(--tms-legacy-destructive-hover);
+  --tms-on-destructive: var(--tms-legacy-on-destructive);
+  --tms-radius: var(--tms-legacy-radius);
+  --tms-radius-card: var(--tms-legacy-radius-card);
+  --tms-radius-sm: var(--tms-legacy-radius-sm);
+  --tms-radius-pill: var(--tms-legacy-radius-pill);
+  --tms-gap: var(--tms-legacy-gap);
+  --tms-gutter: var(--tms-legacy-gutter);
+  --tms-pad: var(--tms-legacy-pad);
+  --tms-shell-gap: var(--tms-legacy-shell-gap);
+  --tms-sidebar-w: var(--tms-legacy-sidebar-w);
+  --tms-sidebar-collapsed-w: var(--tms-legacy-sidebar-collapsed-w);
+  --tms-topbar-h: var(--tms-legacy-topbar-h);
+  --tms-row-h: var(--tms-legacy-row-h);
+  --tms-control-h: var(--tms-legacy-control-h);
+  --tms-shadow: var(--tms-legacy-shadow);
+  --tms-th-bg: var(--tms-legacy-th-bg);
+  --tms-th-ink: var(--tms-legacy-th-ink);
+  --tms-disabled-bg: var(--tms-legacy-disabled-bg);
+  --tms-shadow-pop: var(--tms-legacy-shadow-pop);
+  --tms-shadow-modal: var(--tms-legacy-shadow-modal);
+  --tms-overlay: var(--tms-legacy-overlay);
+  --tms-paper: var(--tms-legacy-paper);
+  --tms-scroll-track: var(--tms-legacy-scroll-track);
+  --tms-scroll-thumb: var(--tms-legacy-scroll-thumb);
+  --tms-scroll-thumb-hover: var(--tms-legacy-scroll-thumb-hover);
+  --tms-count-bg: var(--tms-legacy-count-bg);
+  --tms-count-ink: var(--tms-legacy-count-ink);
+  --tms-tooltip-bg: var(--tms-legacy-tooltip-bg);
+  --tms-tooltip-ink: var(--tms-legacy-tooltip-ink);
+  --tms-badge-green: var(--tms-legacy-badge-green);
+  --tms-badge-green-tint: var(--tms-legacy-badge-green-tint);
+  --tms-badge-orange: var(--tms-legacy-badge-orange);
+  --tms-badge-orange-tint: var(--tms-legacy-badge-orange-tint);
+  --tms-badge-red: var(--tms-legacy-badge-red);
+  --tms-badge-red-tint: var(--tms-legacy-badge-red-tint);
+  --tms-badge-blue: var(--tms-legacy-badge-blue);
+  --tms-badge-blue-tint: var(--tms-legacy-badge-blue-tint);
+  --tms-badge-purple: var(--tms-legacy-badge-purple);
+  --tms-badge-purple-tint: var(--tms-legacy-badge-purple-tint);
+  --tms-badge-pink: var(--tms-legacy-badge-pink);
+  --tms-badge-pink-tint: var(--tms-legacy-badge-pink-tint);
+  --tms-badge-turquoise: var(--tms-legacy-badge-turquoise);
+  --tms-badge-turquoise-tint: var(--tms-legacy-badge-turquoise-tint);
+  --tms-badge-gray: var(--tms-legacy-badge-gray);
+  --tms-badge-gray-tint: var(--tms-legacy-badge-gray-tint);
+  --tms-row-ink: var(--tms-legacy-row-ink);
+  --tms-row-delivered: var(--tms-legacy-row-delivered);
+  --tms-row-delivered-text: var(--tms-legacy-row-delivered-text);
+  --tms-row-dispatched: var(--tms-legacy-row-dispatched);
+  --tms-row-dispatched-text: var(--tms-legacy-row-dispatched-text);
+  --tms-row-departed: var(--tms-legacy-row-departed);
+  --tms-row-departed-text: var(--tms-legacy-row-departed-text);
+  --tms-row-arrived: var(--tms-legacy-row-arrived);
+  --tms-row-arrived-text: var(--tms-legacy-row-arrived-text);
+  --tms-row-covered: var(--tms-legacy-row-covered);
+  --tms-row-covered-text: var(--tms-legacy-row-covered-text);
+  --tms-row-open: var(--tms-legacy-row-open);
+  --tms-row-open-text: var(--tms-legacy-row-open-text);
+  --tms-row-hold: var(--tms-legacy-row-hold);
+  --tms-row-hold-text: var(--tms-legacy-row-hold-text);
+  --tms-row-reserved: var(--tms-legacy-row-reserved);
+  --tms-row-reserved-text: var(--tms-legacy-row-reserved-text);
+  --tms-row-voided: var(--tms-legacy-row-voided);
+  --tms-row-voided-text: var(--tms-legacy-row-voided-text);
+  --tms-chart-1: var(--tms-legacy-chart-1);
+  --tms-chart-2: var(--tms-legacy-chart-2);
+  --tms-chart-3: var(--tms-legacy-chart-3);
+  --tms-chart-4: var(--tms-legacy-chart-4);
+  --tms-chart-5: var(--tms-legacy-chart-5);
+  --tms-chart-6: var(--tms-legacy-chart-6);
+  --tms-chart-7: var(--tms-legacy-chart-7);
+  --tms-chart-8: var(--tms-legacy-chart-8);
+  --tms-chart-9: var(--tms-legacy-chart-9);
+  --tms-chart-10: var(--tms-legacy-chart-10);
+  --tms-chart-11: var(--tms-legacy-chart-11);
+  --tms-chart-12: var(--tms-legacy-chart-12);
+  --tms-chart-axis: var(--tms-legacy-chart-axis);
+  --tms-chart-grid: var(--tms-legacy-chart-grid);
+  --tms-font-sans: var(--tms-legacy-font-sans);
+  --tms-font-mono: var(--tms-legacy-font-mono);
+  --background: var(--tms-card); --foreground: var(--tms-text); --card: var(--tms-card); --card-foreground: var(--tms-text); --popover: var(--tms-bg-elevated); --popover-foreground: var(--tms-text); --primary: var(--tms-primary); --primary-foreground: var(--tms-on-primary); --secondary: var(--tms-surface); --secondary-foreground: var(--tms-text); --muted: var(--tms-surface); --muted-foreground: var(--tms-muted); --accent: var(--tms-surface-hover); --accent-foreground: var(--tms-text); --destructive: var(--tms-destructive); --destructive-foreground: var(--tms-on-destructive); --border: var(--tms-border); --input: var(--tms-input-border); --ring: var(--tms-primary); --radius: var(--tms-radius);
+}
