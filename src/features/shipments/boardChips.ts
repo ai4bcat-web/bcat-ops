@@ -5,13 +5,14 @@
  * Order is the display order: Check call overdue closes the row.
  */
 import { checkCallState } from '@/lib/checkCalls'
+import { parseDetentionFlag } from '@/lib/detentionFlag'
 import { chicagoDateStr, formatBoardDate } from '@/lib/date'
 import { boardStatusOf } from '@/lib/shipmentViewDefs'
 import { needsBillingReview, REVIEW_BILLING_LABEL } from '@/lib/reviewBilling'
 import { reviewFactsOfRow } from './batchReview'
 import { docsMissingOf, type ShipmentRow } from './shipmentViews'
 
-export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'reviewBilling' | 'checkCallOverdue' | 'pastDeliveryDate'
+export type BoardFlag = 'missingReference' | 'missingSalesRep' | 'missingRevDivision' | 'docsMissing' | 'reviewBilling' | 'checkCallOverdue' | 'pastDeliveryDate' | 'detention'
 
 export const BOARD_FLAGS: readonly BoardFlag[] = [
   'missingReference',
@@ -21,7 +22,7 @@ export const BOARD_FLAGS: readonly BoardFlag[] = [
   'reviewBilling',
   'checkCallOverdue',
 ]
-// pastDeliveryDate is a BoardFlag too, but it is toggled from the stats strip, not the chip row.
+// pastDeliveryDate and detention are BoardFlags too, but they are toggled from the stats strip, not the chip row.
 
 export const BOARD_FLAG_LABELS: Record<BoardFlag, string> = {
   missingReference: 'Missing reference #',
@@ -31,6 +32,7 @@ export const BOARD_FLAG_LABELS: Record<BoardFlag, string> = {
   reviewBilling: REVIEW_BILLING_LABEL,
   checkCallOverdue: 'Check call overdue',
   pastDeliveryDate: 'Past delivery date',
+  detention: 'Detention',
 }
 
 const hasText = (v: string | null | undefined): boolean => typeof v === 'string' && v.trim() !== ''
@@ -53,6 +55,7 @@ export function matchesFlag(row: ShipmentRow, flag: BoardFlag, nowMs: number): b
     case 'reviewBilling': return needsBillingReview(row)
     case 'checkCallOverdue': return checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, nowMs) === 'OVERDUE'
     case 'pastDeliveryDate': return pastDeliveryOf(row, nowMs) != null
+    case 'detention': return parseDetentionFlag(row.detentionFlag) != null
   }
 }
 

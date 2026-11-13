@@ -87,6 +87,8 @@ import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import { SEED_DIVISIONS, topLevelOf } from '@/lib/ownership'
 import { cn } from '@/lib/utils'
 import { ShipmentDrawer } from './components/ShipmentDrawer'
+import { DetentionDialog, DetentionPill } from './components/Detention'
+import { detentionStopGuess } from './detentionStop'
 import { ShipmentRowActions, type ShipmentActionHandlers } from './components/StatusActions'
 import { DeleteShipmentsDialog } from './components/DeleteShipmentsDialog'
 import { UnvoidShipmentDialog } from './components/UnvoidShipmentDialog'
@@ -633,7 +635,7 @@ function BoardPane({
   const [dialogShipment, setDialogShipment] = useState<ShipmentRow | null>(null)
   // Frozen when opened: the auto-refresh must not pull the rows (and this dialog's Restore) out from under it.
   const [deleteTargets, setDeleteTargets] = useState<Array<{ id: string; number: string }> | null>(null)
-  const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | 'cover' | null>(null)
+  const [dialogKind, setDialogKind] = useState<'unvoid' | 'repoint' | 'cover' | 'detention' | null>(null)
 
   // The page decides what to fetch, so it hears what this pane is asking for: a typed PRO
   // adds that exact row (R4, §4.3). The Voided list is its own pane list, never a facet of All.
@@ -905,7 +907,13 @@ function BoardPane({
       }
       if (columnKey === 'status') {
         const late = pastDeliveryOf(row, Date.now())
-        return <span className="flex items-center gap-1"><StatusPill row={row} />{late && <TmsBadge tone="red" title={late.tooltip} data-testid="past-delivery-pill">Past delivery date</TmsBadge>}</span>
+        return (
+          <span className="flex items-center gap-1">
+            <StatusPill row={row} />
+            {late && <TmsBadge tone="red" title={late.tooltip} data-testid="past-delivery-pill">Past delivery date</TmsBadge>}
+            <DetentionPill flag={row.detentionFlag} onClick={() => { setDialogShipment(row); setDialogKind('detention') }} />
+          </span>
+        )
       }
       if (columnKey === 'delivery') {
         const r = deliveryPhase(phaseInputOfRow(row, Date.now()))
@@ -1010,6 +1018,8 @@ function BoardPane({
         onRepointCustomer: () => { setDialogShipment(row); setDialogKind('repoint') },
         // Step AM: a load that still needs a truck offers Cover right on its row.
         ...(needsCover(row) ? { onCover: () => { setDialogShipment(row); setDialogKind('cover') } } : {}),
+        onDetention: () => { setDialogShipment(row); setDialogKind('detention') },
+        detentionFlagged: row.detentionFlag != null,
       }
     },
     [refresh],
@@ -1073,6 +1083,7 @@ function BoardPane({
     let delivered = 0
     let docs = 0
     let pastDelivery = 0
+    let detention = 0
     let revenue = 0
     const nowMs = Date.now()
     const deliveredRows: ShipmentRow[] = []
@@ -1087,6 +1098,7 @@ function BoardPane({
       }
       if (docsMissingOf(r).length > 0) docs += 1
       if (pastDeliveryOf(r, nowMs)) pastDelivery += 1
+      if (r.detentionFlag != null) detention += 1
     }
     const split = profitByDivision(deliveredRows, (code) => topLevelOf(divisions, code))
     const margin = (d: { revenueCents: number; profitCents: number }) => (d.revenueCents > 0 ? ` (${Math.round((d.profitCents / d.revenueCents) * 100)}%)` : '')
@@ -1111,6 +1123,19 @@ function BoardPane({
           const next = new Set(prev)
           if (next.has('pastDeliveryDate')) next.delete('pastDeliveryDate')
           else next.add('pastDeliveryDate')
+          return next
+        }),
+      },
+      {
+        label: 'Detention',
+        value: detention,
+        tone: detention > 0 ? 'warn' : undefined,
+        title: flags.has('detention') ? 'Showing only shipments flagged for detention. Click to show all.' : 'Shipments flagged as needing detention. Click to show only these.',
+        active: flags.has('detention'),
+        onClick: () => setFlags((prev) => {
+          const next = new Set(prev)
+          if (next.has('detention')) next.delete('detention')
+          else next.add('detention')
           return next
         }),
       },
@@ -1348,6 +1373,14 @@ function BoardPane({
           shipmentNumber={dialogShipment.number}
           onClose={() => setDialogShipment(null)}
           onCovered={() => { void handleRefresh() }}
+        />
+      )}
+
+      {dialogShipment && dialogKind === 'detention' && (
+        <DetentionDialog
+          target={{ ...dialogShipment, defaultStop: detentionStopGuess(dialogShipment) }}
+          onClose={() => setDialogShipment(null)}
+          onSaved={() => { void handleRefresh() }}
         />
       )}
 

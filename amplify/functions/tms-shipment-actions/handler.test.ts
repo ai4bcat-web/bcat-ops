@@ -2265,6 +2265,30 @@ describe('tracker assignee', () => {
     expect(audits).toContainEqual({ from: { method: 'EMAIL' }, to: null })
   })
 
+  it('flags and clears detention: the server stamps who and when, works out hours, and logs both in Activity', async () => {
+    const a = await createDraft()
+    const other = await createDraft()
+    const set = (await call('SET_DETENTION_FLAG', {
+      shipmentId: a.shipmentId,
+      flag: { stopType: 'delivery', stopLabel: 'Delivery · IFF - GENECOR', arrivedAt: '2026-11-16T13:00:00.000Z', departedAt: '2026-11-16T16:30:00.000Z', note: 'No door', flaggedBy: 'spoof@x.com' },
+    }, TMS_USER)) as { shipment: Row }
+    const stored = set.shipment.detentionFlag as Record<string, unknown>
+    expect(stored).toMatchObject({ stopType: 'delivery', stopLabel: 'Delivery · IFF - GENECOR', hours: 3.5, note: 'No door' })
+    expect(stored.flaggedBy).not.toBe('spoof@x.com')
+    expect(typeof stored.flaggedAt).toBe('string')
+    expect(table(TABLES.shipment).get(other.shipmentId)!.detentionFlag ?? null).toBeNull()
+
+    await expect(call('SET_DETENTION_FLAG', { shipmentId: a.shipmentId, flag: { stopType: 'dock' } }, TMS_USER)).rejects.toThrow(/pickup or the delivery/)
+    await expect(call('SET_DETENTION_FLAG', { shipmentId: a.shipmentId }, TMS_USER)).rejects.toThrow(/flag is required/)
+
+    await call('SET_DETENTION_FLAG', { shipmentId: a.shipmentId, flag: null }, TMS_USER)
+    expect(table(TABLES.shipment).get(a.shipmentId)!.detentionFlag ?? null).toBeNull()
+
+    const actions = [...table(TABLES.audit).values()].filter((row) => row.entityId === a.shipmentId).map((row) => row.action)
+    expect(actions).toContain('FLAG_DETENTION')
+    expect(actions).toContain('CLEAR_DETENTION')
+  })
+
   it('confirms a load\'s tracking mode: the server stamps who and when, later edits keep it, clearing drops it, NONE is allowed', async () => {
     const a = await createDraft()
     const done = (await call('SET_TRACKING_PREFS', { shipmentId: a.shipmentId, prefs: { mode: 'NONE', confirmed: true } }, TMS_USER)) as { shipment: Row }

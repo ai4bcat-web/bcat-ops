@@ -18,6 +18,7 @@ export type {
   QuietHours, TrackingAutomationSettings,
 } from '../lib/trackingAutomation'
 import type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
+import type { DetentionFlag } from '../lib/detentionFlag'
 export type { DriverSmsTarget, TrackingMethod, TrackingMode, TrackingPrefsOverride } from '../lib/trackingPrefs'
 export type { RateViewAnswer } from '../lib/integrations/rateView'
 // Step AL: the Carrier Sales inbox shapes ride ShipmentMessage.offer and SpotSettings. Type-only cycle.
@@ -1977,6 +1978,8 @@ export interface ShipmentRecord {
   financeReviewAt?: string | null
   financeReviewReason?: string | null
   financeReviewApNote?: string | null
+  /** Detention flag (Ryne 2026-11-13); null = not flagged. Parse with `parseDetentionFlag`. */
+  detentionFlag?: DetentionFlag | null
   /** Step AJ. Per-shipment tracking override; absent/null = inherit the customer (`effectiveTrackingPrefs`). */
   trackingPrefs?: TrackingPrefsOverride | null
   createdBy: string

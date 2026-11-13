@@ -509,6 +509,25 @@ describe('ShipmentsBoard', () => {
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('shows a Detention pill beside status on flagged shipments and the Detention count filters to them', async () => {
+    const flag = { stopType: 'delivery', stopLabel: 'Delivery · IFF - GENECOR', hours: 3, note: 'No door', flaggedAt: '2026-11-13T18:00:00.000Z', flaggedBy: 'ryne@bcatcorp.com' }
+    renderBoard('/tms/shipments', [
+      row('S001', { status: 'IN_TRANSIT', detentionFlag: flag }),
+      row('S002', { status: 'IN_TRANSIT' }),
+    ])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    const pills = screen.getAllByTestId('detention-pill')
+    expect(pills).toHaveLength(1)
+    expect(pills[0].closest('td')?.getAttribute('data-col')).toBe('status')
+    expect(pills[0].getAttribute('title')).toContain('Delivery · IFF - GENECOR · 3 hrs')
+    expect(pills[0].getAttribute('title')).toContain('ryne@bcatcorp.com')
+    const toggle = screen.getByRole('button', { name: /^1\s*Detention|Detention/ })
+    expect(toggle).toHaveTextContent('1')
+    fireEvent.click(toggle)
+    await waitFor(() => expect(screen.queryByText('S002')).toBeNull())
+    expect(screen.getByText('S001')).toBeTruthy()
+  })
+
   it('shows the tracking chip beside the carrier name and keeps past delivery beside status', async () => {
     const past = new Date(Date.now() - 3 * 86_400_000).toISOString()
     renderBoard('/tms/shipments', [

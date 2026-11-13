@@ -62,6 +62,7 @@ import type {
 import { cachedList, invalidateLists } from '@/lib/listCache'
 import { withDefaultChargeCodes } from '@/lib/chargeCodeDefaults'
 import { parseTrackingPrefs, type TrackingPrefsOverride } from '@/lib/trackingPrefs'
+import { parseDetentionFlag, type DetentionFlagInput } from '@/lib/detentionFlag'
 import { batchByIndex, batchByIndexPairs, batchGet, setDefaultGraphqlRunner } from '@/lib/aliasBatch'
 import { LOAD_WORKFLOW_STATUSES } from '@/lib/shipmentStatus'
 
@@ -2325,11 +2326,17 @@ let shipmentsHaveTracker = true
 // Step AJ: the per-shipment tracking override (one JSON field). Own flag, same reason.
 const SHIPMENT_TRACKING_PREFS_FIELDS = ['trackingPrefs']
 let shipmentsHaveTrackingPrefs = true
+// Detention flag (Ryne 2026-11-13): one JSON field. Own flag, same reason.
+const SHIPMENT_DETENTION_FIELDS = ['detentionFlag']
+let shipmentsHaveDetention = true
 /** AppSync hands the AWSJSON back as a string, the Lambda bundle as an object: normalise both so consumers see `TrackingPrefsOverride | null`. */
 function withParsedPrefs<T>(result: T): T {
   const fix = (row: unknown) => {
     if (row && typeof row === 'object' && 'trackingPrefs' in row) {
       row.trackingPrefs = parseTrackingPrefs(row.trackingPrefs)
+    }
+    if (row && typeof row === 'object' && 'detentionFlag' in row) {
+      row.detentionFlag = parseDetentionFlag(row.detentionFlag)
     }
   }
   if (Array.isArray(result)) result.forEach(fix)
@@ -2353,6 +2360,7 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
         shipmentsHaveDelivery ? SHIPMENT_DELIVERY_FIELDS.join(' ') : '',
         shipmentsHaveTracker ? SHIPMENT_TRACKER_FIELDS.join(' ') : '',
         shipmentsHaveTrackingPrefs ? SHIPMENT_TRACKING_PREFS_FIELDS.join(' ') : '',
+        shipmentsHaveDetention ? SHIPMENT_DETENTION_FIELDS.join(' ') : '',
         shipmentsHaveRevTag ? SHIPMENT_REV_FIELDS.join(' ') : '',
         shipmentsHaveCoverage ? SHIPMENT_COVERAGE_FIELDS.join(' ') : '',
         shipmentsHaveAssignment ? SHIPMENT_ASSIGNMENT_FIELDS.join(' ') : '',
@@ -2369,6 +2377,10 @@ async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T>
       if (shipmentsHaveAljexCodes && fieldNamed(SHIPMENT_ALJEX_FIELDS, err)) {
         console.warn('[apiClient] backend has no Aljex code fields on Shipment yet — querying without them until deploy')
         shipmentsHaveAljexCodes = false
+        continue
+      }
+      if (shipmentsHaveDetention && fieldNamed(SHIPMENT_DETENTION_FIELDS, err)) {
+        shipmentsHaveDetention = false
         continue
       }
       if (shipmentsHaveTrackingPrefs && fieldNamed(SHIPMENT_TRACKING_PREFS_FIELDS, err)) {
@@ -9595,6 +9607,14 @@ export async function setTrackingPrefs(
 ): Promise<{ shipment: ShipmentRecord; loadCarrier?: LoadCarrierRecord }> {
   const r = await shipmentAction<{ shipment: ShipmentRecord; loadCarrier?: LoadCarrierRecord }>('SET_TRACKING_PREFS', input)
   return { shipment: withParsedPrefs(r.shipment), ...(r.loadCarrier ? { loadCarrier: withParsedPrefs(r.loadCarrier) } : {}) }
+}
+
+/** Flag a shipment for detention (or clear it with `flag: null`). The Lambda stamps who and when and logs it in Activity. */
+export async function setDetentionFlag(
+  input: { shipmentId: string; flag: DetentionFlagInput | null },
+): Promise<{ shipment: ShipmentRecord }> {
+  const r = await shipmentAction<{ shipment: ShipmentRecord }>('SET_DETENTION_FLAG', input)
+  return { shipment: withParsedPrefs(r.shipment) }
 }
 
 // ── Step AM · cover flow and the carrier assignment ladder ────────────────────
