@@ -20,11 +20,12 @@ import type { CarrierRecord, ShipmentBundle, ShipmentDocumentType, TmsSettings }
 import { financialPreview } from './mapping'
 import { carrierSlotsOf, coveredCarrierBlock, emptyCarrierBlock, emptyCarrierRate, liveCarriers, type ShipmentFormValues } from './model'
 import { RateConDialog } from './RateConDialog'
+import { AddressDetailsDialog } from './AddressDetailsDialog'
 import { toLogCheckCallInput } from './checkCallNote'
 import { runAddCarrier, runCover } from './pipelines'
 import type { FormActions } from './sectionProps'
 
-type DialogKind = 'book' | 'assign' | 'dispatch' | 'rateCon' | 'info' | 'tonu' | 'uncover' | null
+type DialogKind = 'book' | 'assign' | 'dispatch' | 'rateCon' | 'info' | 'address' | 'tonu' | 'uncover' | null
 
 const COMMIT_RETRY_MS = 1500
 
@@ -99,6 +100,12 @@ export function useFormActions(o: {
       void (save ? save() : Promise.resolve(true)).then((ok) => { if (ok) { setTarget(undefined); setDialog('rateCon') } })
     },
     openSendInfo: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('info') } },
+    openSendAddressDetails: () => {
+      if (ref.current.busy) return
+      // The e-mail is built from the saved stops: save unsaved edits first, like the rate con.
+      const save = ref.current.saveFirst
+      void (save ? save() : Promise.resolve(true)).then((ok) => { if (ok) { setTarget(undefined); setDialog('address') } })
+    },
     openTonu: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('tonu') } },
     openUncover: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('uncover') } },
     openFor: (kind, id) => { if (!ref.current.busy) { setTarget(id); setDialog(kind) } },
@@ -226,6 +233,14 @@ export function useFormActions(o: {
       <TrackingLinkDialog
         loadCarrier={active} loadNumber={load.loadNumber ?? load.aljexId ?? ''} link={null} settings={settings}
         brokerName={brokerName} onClose={close} onChanged={() => { void sa.reload() }}
+      />
+    )
+  } else if (dialog === 'address' && active && load) {
+    const directory = carriers.find((c) => c.id === active.carrierId)
+    node = (
+      <AddressDetailsDialog
+        loadCarrier={active} load={load} defaultTo={active.dispatcherEmail || directory?.dispatcherEmail || directory?.email || ''}
+        onClose={close}
       />
     )
   } else if (dialog === 'rateCon' && bundle && active) {

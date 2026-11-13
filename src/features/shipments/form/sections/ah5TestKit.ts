@@ -7,7 +7,7 @@ import type { ShipmentBundle } from '@/types/tms'
 
 export function makeActions() {
   return {
-    cover: vi.fn(), openDispatch: vi.fn(), openSendRateCon: vi.fn(), openSendInfo: vi.fn(), openTonu: vi.fn(), openUncover: vi.fn(), openFor: vi.fn(),
+    cover: vi.fn(), openDispatch: vi.fn(), openSendRateCon: vi.fn(), openSendInfo: vi.fn(), openSendAddressDetails: vi.fn(), openTonu: vi.fn(), openUncover: vi.fn(), openFor: vi.fn(),
     sendSetupPacket: vi.fn(async () => {}), addCheckCall: vi.fn(async () => {}),
     uploadDocument: vi.fn(async () => {}), queueDocument: vi.fn(), unqueueDocument: vi.fn(),
   }

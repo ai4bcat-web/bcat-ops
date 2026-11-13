@@ -212,6 +212,7 @@ export const LABEL = {
     dispatched: def('carrier', 'dispatched', 'Dispatched'),
     sendRateConf: def('carrier', 'sendRateConf', 'Send Rate Confirmation'),
     sendInfo: def('carrier', 'sendInfo', 'Send Tracking Link'),
+    sendAddressDetails: def('carrier', 'sendAddressDetails', 'Send Address Details'),
   },
   picks: {
     insertPick: def('picks', 'insertPick', 'Insert Pick'),

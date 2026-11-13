@@ -153,9 +153,9 @@ describe('CarrierInformationSection', () => {
     expect(screen.queryByTestId('carrier-find-invite')).toBeNull()
   })
 
-  it('Dispatch / Send Rate Conf / Send Info need a booked carrier', () => {
+  it('Dispatch / Send Rate Conf / Send Info / Send Address Details need a booked carrier', () => {
     setup({ carrierId: 'car-1' }, { mode: 'edit', bundle: savedBundle() })
-    for (const id of ['carrier-dispatch', 'f-carrier-sendRateConf', 'f-carrier-sendInfo']) {
+    for (const id of ['carrier-dispatch', 'f-carrier-sendRateConf', 'f-carrier-sendInfo', 'f-carrier-sendAddressDetails']) {
       expect((screen.getByTestId(id) as HTMLButtonElement).disabled).toBe(true)
     }
   })

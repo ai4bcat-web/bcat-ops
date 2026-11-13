@@ -81,6 +81,7 @@ export const ACTION_SENTENCE: Record<string, string> = {
   ATTACH_DRIVER_DOC: 'attached a driver document',
   SAVE_GENERATED_DOCUMENT: 'generated a document',
   EMAIL_BOL: 'e-mailed the bill of lading',
+  SEND_ADDRESS_DETAILS: 'sent the address details to the dispatcher',
   REVIEW_DOCUMENT: 'reviewed a document',
   UPDATE_DOCUMENT: 'updated a document',
   VOID_DOCUMENT: 'voided a document',

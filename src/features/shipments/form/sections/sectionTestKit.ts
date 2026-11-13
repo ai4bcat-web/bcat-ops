@@ -7,7 +7,7 @@ import { NO_LOCKS, type ShipmentFormValues } from '../model'
 import type { FormActions, FormCtx } from '../sectionProps'
 
 export const noopActions = (): FormActions => ({
-  cover: vi.fn(), openDispatch: vi.fn(), openSendRateCon: vi.fn(), openSendInfo: vi.fn(), openTonu: vi.fn(), openUncover: vi.fn(), openFor: vi.fn(),
+  cover: vi.fn(), openDispatch: vi.fn(), openSendRateCon: vi.fn(), openSendInfo: vi.fn(), openSendAddressDetails: vi.fn(), openTonu: vi.fn(), openUncover: vi.fn(), openFor: vi.fn(),
   sendSetupPacket: vi.fn(async () => {}), addCheckCall: vi.fn(async () => {}), uploadDocument: vi.fn(async () => {}),
   queueDocument: vi.fn(), unqueueDocument: vi.fn(),
 })
