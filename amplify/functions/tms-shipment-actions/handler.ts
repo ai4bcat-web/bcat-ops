@@ -337,6 +337,7 @@ import type {
   StopEventType,
   TmsSettings as TmsSettingsRecord,
 } from '../../../src/types/tms'
+import { carryStopState } from './stopCarry'
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
@@ -2485,9 +2486,11 @@ async function saveOrderForm(input: Row, caller: Caller): Promise<SavedForm> {
     throw new Error('A truckload order needs an equipment type')
   }
 
+  // The form only sends the fields it edits; carryStopState keeps the rest of each
+  // stop (Appts screenshots and status, ETA, odometers) instead of wiping it.
   const stops = input.stops == null
     ? readStops(load)
-    : resequence(assertArrayOf(input.stops, 'stops', validateStop))
+    : carryStopState(resequence(assertArrayOf(input.stops, 'stops', validateStop)), readStops(load))
   assertStopShape(stops, false)
 
   const rules = chargeCodeRules(settings, customer)
