@@ -852,7 +852,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   // The typed text when there is one, "Customer not linked" when the row carries nothing:
   // a blank cell would read as "no customer needed" rather than "nobody matched one yet".
   { key: 'customerName', label: 'Customer', group: 'Customer', value: customerDisplayName, sortKey: 'customerName', width: 240 },
-  { key: 'carrier', label: 'Carrier', group: 'Carrier leg', value: carrierLabel, width: 180 },
+  { key: 'carrier', label: 'Carrier', group: 'Carrier leg', value: carrierLabel, width: 250 },
   { key: 'customerTotalRate', label: 'Customer Total Rate', group: 'Order', value: (r) => formatCentsOrEmpty(r.revenueCents), width: 150 },
   { key: 'carrierTotalRates', label: 'Carrier Total Rates', group: 'Carrier leg', value: (r) => formatCentsOrEmpty(r.costCents), width: 150 },
   { key: 'grossProfit', label: 'Gross Profit', group: 'Computed', value: (r) => formatCentsOrEmpty(r.profitCents), width: 130 },

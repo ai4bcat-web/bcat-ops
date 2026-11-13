@@ -255,10 +255,11 @@ function toneRows(): BoardToneKey[] {
 
 /** Columns locked to the left edge of the grid, whatever the team layout says. */
 
-/** Status carries the tracking pill and Customer the Not linked badge beside their text: Fit widths leaves room for them. */
+/** Status carries the past-delivery pill, Carrier the tracking pill and Customer the Not linked badge beside their text: Fit widths leaves room for them. */
 function withChipRoom(widths: Record<string, number>): Record<string, number> {
   const out = { ...widths }
   if (out.status != null) out.status = Math.max(out.status, 240)
+  if (out.carrier != null) out.carrier = Math.max(out.carrier, 260)
   if (out.customerName != null) out.customerName = Math.max(out.customerName, 240)
   return out
 }
@@ -904,7 +905,7 @@ function BoardPane({
       }
       if (columnKey === 'status') {
         const late = pastDeliveryOf(row, Date.now())
-        return <span className="flex items-center gap-1"><StatusPill row={row} />{late && <TmsBadge tone="red" title={late.tooltip} data-testid="past-delivery-pill">Past delivery date</TmsBadge>}<TrackingModeNotSetRowChip row={row} /></span>
+        return <span className="flex items-center gap-1"><StatusPill row={row} />{late && <TmsBadge tone="red" title={late.tooltip} data-testid="past-delivery-pill">Past delivery date</TmsBadge>}</span>
       }
       if (columnKey === 'delivery') {
         const r = deliveryPhase(phaseInputOfRow(row, Date.now()))
@@ -930,10 +931,11 @@ function BoardPane({
       if (columnKey === 'carrier') {
         const label = carrierLabel(row)
         const carrierId = carrierIdOfRow(row, directoryCarriers)
-        if (carrierId) {
-          return <Link className="tms-link tms-board-link" to={`/tms/carriers/${carrierId}`} title={carrierHoverText(row)} onClick={(e) => e.stopPropagation()}>{label}</Link>
-        }
-        return <span className={cn(label === 'Need to cover' && 'tms-muted')} title={carrierHoverText(row)}>{label}</span>
+        // The tracking-link chip rides beside the carrier name (Ryne 2026-11-12); Status keeps only the past-delivery flag.
+        const name = carrierId
+          ? <Link className="tms-link tms-board-link" to={`/tms/carriers/${carrierId}`} title={carrierHoverText(row)} onClick={(e) => e.stopPropagation()}>{label}</Link>
+          : <span className={cn(label === 'Need to cover' && 'tms-muted')} title={carrierHoverText(row)}>{label}</span>
+        return <span className="flex items-center gap-1" data-testid="carrier-cell">{name}<TrackingModeNotSetRowChip row={row} /></span>
       }
       if (columnKey === 'arStatus' || columnKey === 'apStatus') {
         const value = columnKey === 'arStatus' ? row.arStatus : row.apStatus

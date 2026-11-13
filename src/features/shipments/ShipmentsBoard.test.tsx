@@ -509,6 +509,18 @@ describe('ShipmentsBoard', () => {
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('shows the tracking chip beside the carrier name and keeps past delivery beside status', async () => {
+    const past = new Date(Date.now() - 3 * 86_400_000).toISOString()
+    renderBoard('/tms/shipments', [
+      row('S001', { status: 'DISPATCHED', revDivision: 'BROKERAGE', assignmentType: 'CARRIER', carrierName: 'Swift', deliveryAppt: past }),
+    ])
+    await waitFor(() => expect(screen.getByText('S001')).toBeTruthy())
+    const chip = screen.getByTestId('tracking-not-set')
+    expect(chip.closest('td')?.getAttribute('data-col')).toBe('carrier')
+    expect(within(chip.closest('td') as HTMLElement).getByText('Swift')).toBeTruthy()
+    expect(screen.getByTestId('past-delivery-pill').closest('td')?.getAttribute('data-col')).toBe('status')
+  })
+
   it('has no Demo chip', async () => {
     renderBoard('/tms/shipments')
     await screen.findByRole('textbox', { name: 'Search shipments' })
