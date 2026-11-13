@@ -10,6 +10,7 @@ import { formatCents } from '@/lib/invoiceBuild'
 import type { IntakeLoadRecord } from '@/types/intake'
 import { ActivityBlock } from './ActivityBlock'
 import { ProgressBlock } from './ProgressBlock'
+import { RailTrackingBlock } from './RailTrackingBlock'
 import { RateHistoryRail } from './RateHistoryRail'
 import { sliceOf, type CardProps } from './cards/cardRegistry'
 import { carrierBreakdown } from './cards/ratesSummary'
@@ -99,6 +100,8 @@ function SummaryRailImpl({ common, summary, rows, attempted, Roles, RateHistory,
             </span>
           </div>
         </section>
+
+        <RailTrackingBlock bundle={ctx.bundle} onSendTrackingLink={ctx.actions.openSendInfo} />
 
         <RateHistoryRail common={common} Body={RateHistory} />
 

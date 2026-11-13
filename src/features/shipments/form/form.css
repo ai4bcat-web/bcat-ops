@@ -549,6 +549,76 @@
 .tms-shell .tms-rail-dot[data-tone='amber'] { background: var(--tms-badge-orange); }
 .tms-shell .tms-rail-dot[data-tone='red'] { background: var(--tms-badge-red); }
 
+.tms-shell .tms-rail-tracking-kind {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--tms-text-2);
+}
+
+.tms-shell .tms-rail-tracking-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--tms-text);
+}
+
+.tms-shell .tms-rail-tracking-muted {
+  font-size: 12px;
+  color: var(--tms-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tms-shell .tms-rail-tracking-place {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tms-shell .tms-rail-tracking-fix {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tms-shell .tms-rail-tracking-maps {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--tms-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.tms-shell .tms-rail-tracking-sub {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tms-muted);
+}
+
+.tms-shell .tms-rail-tracking-checkins ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tms-shell .tms-rail-tracking-checkins li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--tms-text-2);
+}
+
+.tms-shell .tms-rail-tracking-ci-label {
+  overflow-wrap: anywhere;
+}
+
 .tms-shell .tms-rail-reqs {
   display: flex;
   flex-wrap: wrap;
