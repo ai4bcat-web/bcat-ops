@@ -19,6 +19,7 @@
  */
 import { agingBucket, daysLate } from './arAging'
 import { dueDateFor } from './invoiceBuild'
+import { liveCarriersOf, primaryCarrierOf } from './carrierTotals'
 import { quickPayFee } from './quickPay'
 import { DOCUMENT_TYPE_LABELS } from './shipmentDocuments'
 import type { PlanApplication } from './paymentApply'
@@ -127,6 +128,23 @@ export function rateConLinesFor(
     charges.map((charge) => (charge.side === 'CARRIER' && charge.loadCarrierId == null ? { ...charge, loadCarrierId: loadCarrier.id } : charge)),
     loadCarrier.id,
   )
+}
+
+/**
+ * The CHARGES box of one carrier's rate confirmation: linehaul, fuel and every accessorial
+ * paid to that carrier (`rateConLinesFor`), labelled as the charges tab labels them. Both the
+ * rate con that is sent and a saved copy print from this, so they cannot disagree with the
+ * bill. Customer-side lines never appear.
+ */
+export function rateConChargesFor(
+  charges: readonly LoadChargeRecord[],
+  loadCarriers: readonly LoadCarrierRecord[],
+  loadCarrier: Pick<LoadCarrierRecord, 'id' | 'loadId'>,
+): { label: string; amountCents: number }[] {
+  const live = liveCarriersOf(loadCarriers, String(loadCarrier.loadId ?? ''))
+  const isPrimary = primaryCarrierOf(live)?.id === loadCarrier.id
+  return rateConLinesFor(charges, loadCarrier, live.length, isPrimary).lines
+    .map((line) => ({ label: line.label?.trim() || line.code.replace(/_/g, ' '), amountCents: line.amountCents }))
 }
 
 /**

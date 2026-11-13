@@ -633,21 +633,32 @@ export interface BookCarrierDraft extends Pick<BookCarrierInput,
   carrierName: string
   maxRateCents: number | null
 }
+/**
+ * The accessorial lines the form says one carrier slot is paid (`$Carrier`), as CARRIER charge inputs.
+ * The same rows `toBookCarrierDraft` sends with a booking; the Cover dialog books with the rate alone,
+ * so `runCover` writes these afterwards (the rate con then prints them).
+ */
+export function carrierAccessorialInputs(values: ShipmentFormValues, slotIndex = 0): LoadChargeInput[] {
+  const slots = carrierSlotsOf(values)
+  const out: LoadChargeInput[] = []
+  values.rates.lines.forEach((row, i) => {
+    const k = dollarsToCents(row.carrierAmount)
+    if (!row.code.trim() || k === undefined || paidSlotIndex(slots, row.paidTo) !== slotIndex) return
+    out.push({
+      side: 'CARRIER', code: row.code.trim(), label: row.label.trim() || null, calculatedBy: 'FLAT', rateCents: k, count: 1,
+      isRate: isRateCode(row.code), release: row.release.trim() || null, note: row.note.trim() || null, sortOrder: 10 + i,
+    })
+  })
+  return out
+}
+
 /** `slotIndex` 0 = the first carrier (legacy `values.carrier`); another index books that slot. */
 export function toBookCarrierDraft(values: ShipmentFormValues, slotIndex = 0): BookCarrierDraft {
   const slots = carrierSlotsOf(values)
   const c = slots[slotIndex] ?? slots[0]
   const lh = carrierLinehaulLine(values, c.rate)
   const ctx = ctxOf(values)
-  const extra: LoadChargeInput[] = []
-  values.rates.lines.forEach((row, i) => {
-    const k = dollarsToCents(row.carrierAmount)
-    if (!row.code.trim() || k === undefined || paidSlotIndex(slots, row.paidTo) !== slotIndex) return
-    extra.push({
-      side: 'CARRIER', code: row.code.trim(), label: row.label.trim() || null, calculatedBy: 'FLAT', rateCents: k, count: 1,
-      isRate: isRateCode(row.code), release: row.release.trim() || null, note: row.note.trim() || null, sortOrder: 10 + i,
-    })
-  })
+  const extra = carrierAccessorialInputs(values, slotIndex)
   return {
     carrierId: c.carrierId,
     carrierName: c.typedName,

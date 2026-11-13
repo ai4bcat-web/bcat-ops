@@ -22,7 +22,7 @@ import { RecipientPicker } from './RecipientPicker'
 import { commitAddress, defaultSelection, knownRecipientOptions, parseCcList } from './rateConRecipients'
 import { formatDateTime } from '@/lib/date'
 import { formatCents } from '@/lib/tmsDirectory'
-import { rateConLinesFor } from '@/lib/carrierBill'
+import { rateConChargesFor } from '@/lib/carrierBill'
 import { liveCarriersOf, primaryCarrierOf } from '@/lib/carrierTotals'
 import type { RateConInput, RateConStop } from '@/lib/carrierRateCon'
 import { readExtras } from '@/features/shipments/form/model'
@@ -114,8 +114,7 @@ export function RateConPanel({ bundle, loadCarrier, carrier, contacts, settings,
   const live = liveCarriersOf(bundle.loadCarriers, loadCarrier.loadId)
   const liveCount = live.length
   const isPrimary = primaryCarrierOf(live)?.id === loadCarrier.id
-  const charges = rateConLinesFor(bundle.charges, loadCarrier, liveCount, isPrimary).lines
-    .map((line) => ({ label: line.label || line.code, amountCents: line.amountCents }))
+  const charges = rateConChargesFor(bundle.charges, bundle.loadCarriers, loadCarrier)
   const totalCents = charges.reduce((sum, c) => sum + c.amountCents, 0)
   // Two rate cons on one load must not share a file name.
   const fileLoadNumber = liveCount > 1

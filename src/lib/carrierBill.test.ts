@@ -10,6 +10,7 @@ import {
   billTermsDays,
   billTotals,
   billData,
+  rateConChargesFor,
 } from './carrierBill'
 import type { ApprovalReadinessInput, BillReadinessInput } from './carrierBill'
 import type {
@@ -533,5 +534,37 @@ describe('billData', () => {
 
     const paid = billData({ bill: bill({ status: 'PAID', balanceCents: 0 }), bundle: {}, asOf: '2026-05-01' })
     expect(paid.aging).toMatchObject({ open: false, pastDue: false })
+  })
+})
+
+describe('rateConChargesFor', () => {
+  const line = (over: Record<string, unknown>) => ({
+    id: String(over.id), side: 'CARRIER', loadId: 'ld-1', loadCarrierId: 'lc-1', code: 'LINEHAUL', label: null,
+    calculatedBy: 'FLAT', rateCents: 0, count: 1, amountCents: 0, isRate: false, sortOrder: 0, ...over,
+  }) as unknown as Parameters<typeof rateConChargesFor>[0][number]
+  const carriers = [{ id: 'lc-1', loadId: 'ld-1', status: 'ACTIVE', sequence: 1 }] as unknown as Parameters<typeof rateConChargesFor>[1]
+
+  it('prints linehaul, fuel and every accessorial paid to the carrier, never the customer\'s lines', () => {
+    const charges = [
+      line({ id: 'a', label: 'Linehaul', amountCents: 120000, sortOrder: 0 }),
+      line({ id: 'b', code: 'FSC', label: 'Fuel surcharge', amountCents: 15000, sortOrder: 1 }),
+      line({ id: 'c', code: 'DETENTION', label: null, amountCents: 7500, sortOrder: 10 }),
+      line({ id: 'd', code: 'STOP_OFF', label: null, loadCarrierId: null, amountCents: 5000, sortOrder: 11 }),
+      line({ id: 'e', side: 'CUSTOMER', loadCarrierId: null, code: 'DETENTION', amountCents: 10000, sortOrder: 12 }),
+    ]
+    const out = rateConChargesFor(charges, carriers, { id: 'lc-1', loadId: 'ld-1' })
+    expect(out).toEqual([
+      { label: 'Linehaul', amountCents: 120000 },
+      { label: 'Fuel surcharge', amountCents: 15000 },
+      { label: 'DETENTION', amountCents: 7500 },
+      { label: 'STOP OFF', amountCents: 5000 },
+    ])
+    expect(out.reduce((t, c) => t + c.amountCents, 0)).toBe(147500)
+  })
+
+  it('leaves another carrier\'s lines off', () => {
+    const two = [...carriers, { id: 'lc-2', loadId: 'ld-1', status: 'ACTIVE', sequence: 2 }] as unknown as Parameters<typeof rateConChargesFor>[1]
+    const charges = [line({ id: 'a', amountCents: 100 }), line({ id: 'b', loadCarrierId: 'lc-2', code: 'LUMPER', amountCents: 50 })]
+    expect(rateConChargesFor(charges, two, { id: 'lc-1', loadId: 'ld-1' })).toEqual([{ label: 'LINEHAUL', amountCents: 100 }])
   })
 })
