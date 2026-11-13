@@ -1130,7 +1130,8 @@ async function createCarrierApRecords(
         result.created.push({ loadCarrierId: item.loadCarrierId, billId: item.bill.id, carrierName: item.carrierName, grossCents: item.grossCents })
         await deps.writeAudit('CARRIER_BILL', item.bill.id, 'RECORD_BILL_PENDING', caller, {
           loadCarrierId: item.loadCarrierId, shipmentId: item.bill.shipmentId, carrierId: item.bill.carrierId,
-          grossCents: item.bill.grossCents, netCents: item.bill.netCents, datesPending: true,
+          grossCents: item.bill.grossCents, netCents: item.bill.netCents, datesPending: item.bill.datesPending === true,
+          ...(item.bill.datesPending === true ? {} : { billDate: item.bill.billDate, dueAt: item.bill.dueAt, termsDays: item.bill.termsDays }),
         })
       } else {
         result.skipped.push({ loadCarrierId: item.loadCarrierId, carrierName: item.carrierName, kind: 'ALREADY_BILLED', reasons: [] })
