@@ -351,7 +351,7 @@ export function diffStopOps(before: ShipmentFormValues, after: ShipmentFormValue
     if (!eq(pick(was, ['locationId', 'name', 'city', 'address', 'contact']), pick(s, ['locationId', 'name', 'city', 'address', 'contact']))) {
       ops.push({ op: 'SET_LOCATION', stopId: s.id, patch: { locationId: s.locationId ?? null, name: s.name, city: s.city, address: s.address ?? null, contact: s.contact ?? null } })
     }
-    if (!eq(pick(was, ['appt', 'apptType']), pick(s, ['appt', 'apptType']))) {
+    if (!eq(pick(was, ['appt', 'apptType', 'apptEnd']), pick(s, ['appt', 'apptType', 'apptEnd']))) {
       ops.push({ op: 'SET_APPT', stopId: s.id, patch: { appt: s.appt, apptType: s.apptType, apptEnd: s.apptEnd, apptNote: s.apptNote } })
     }
     if (!eq(pick(was, ['requestedStart', 'requestedEnd']), pick(s, ['requestedStart', 'requestedEnd']))) {

@@ -118,6 +118,13 @@ describe('buildRateConPdf', () => {
     expect(text).toContain('10/29/26 FCFS')
   })
 
+  it('prints an FCFS window when the stop has one', async () => {
+    const text = await allText(await buildRateConPdf(input({
+      stops: [pickup({ apptType: 'fcfs', apptEnd: '2026-10-29T21:00:00.000Z' }), delivery({})],
+    })))
+    expect(text).toContain('10/29/26 FCFS 11:00 - 16:00')
+  })
+
   it('wraps long dispatch notes and continues them on a following page', async () => {
     const notes = Array.from({ length: 90 }, (_, i) => `NOTE LINE ${i + 1} PLEASE READ CAREFULLY`).join('\n')
     const pages = await pagesText(await buildRateConPdf(input({ notes })))

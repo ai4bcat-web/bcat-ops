@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { formatDateTime, formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
+import { formatDateTime, formatDateTimeInput, formatTime, fromDateTimeInput } from '@/lib/date'
 import type { Stop, StopType } from '@/types'
 import type { LocationRecord } from '@/types/tms'
 
@@ -76,7 +76,9 @@ function StopCard({ stop, index, total, readOnly, onOpen, onSwap, onRemove }: {
                 {
                   label: 'Appointment',
                   value: stop.appt
-                    ? `${formatDateTime(stop.appt)}${stop.apptType && stop.apptType !== 'exact' ? ` (${stop.apptType.toUpperCase()})` : ''}`
+                    ? stop.apptType === 'fcfs' && stop.apptEnd
+                      ? `${formatDateTime(stop.appt)}–${formatTime(stop.apptEnd)} (FCFS)`
+                      : `${formatDateTime(stop.appt)}${stop.apptType && stop.apptType !== 'exact' ? ` (${stop.apptType.toUpperCase()})` : ''}`
                     : null,
                 },
                 {

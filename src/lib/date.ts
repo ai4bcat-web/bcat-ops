@@ -91,7 +91,7 @@ export function apptTimeLabel(
 ): string {
   if (!iso) return '—'
   if (type === 'tbd') return needLabel(iso)
-  if (type === 'fcfs') return 'FCFS'
+  if (type === 'fcfs') return apptEnd ? `FCFS ${formatTime(iso)}–${formatTime(apptEnd)}` : 'FCFS'
   if (type === 'range' && apptEnd) return `${formatTime(iso)}–${formatTime(apptEnd)}`
   return apptHasTime(iso) ? formatTime(iso) : PENDING_LABEL
 }
@@ -263,7 +263,7 @@ export function formatApptTime(
   apptEnd?: string,
 ): string {
   if (type === 'tbd') return 'TBD'
-  if (type === 'fcfs') return 'FCFS'
+  if (type === 'fcfs') return apptEnd ? `FCFS ${formatTime(appt)}–${formatTime(apptEnd)}` : 'FCFS'
   if (type === 'range' && apptEnd) return `${formatTime(appt)}–${formatTime(apptEnd)}`
   return formatTime(appt)
 }

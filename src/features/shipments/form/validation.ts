@@ -135,9 +135,12 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
     const when = s.appt || s.ready
     if (when) {
       // FCFS windows may overlap on the same day (src/lib/stopOrder); an earlier day still warns.
-      const cur: StopOrderInput = { appt: when, hours: s.hours }
+      const cur: StopOrderInput = { appt: when, hours: s.hours, apptType: s.fcfs ? 'fcfs' : null }
       if (prev && stopsOutOfOrder(prev, cur)) push(kind, `order:${i}`, `${prefix}-appt`, LABEL.stop.appt.text, `${where} is scheduled before the stop ahead of it. Check the dates.`, 'warn')
       prev = cur
+    }
+    if (s.fcfs && s.appt && s.apptEnd && s.apptEnd <= s.appt) {
+      push(kind, `fcfsWindow:${i}`, `${prefix}-appt`, LABEL.stop.appt.text, `${where} FCFS window must end after it opens.`, 'error')
     }
     if (s.mustDeliver && s.type === 'delivery' && fp >= 0) {
       const start = values.stops[fp].appt || values.stops[fp].ready

@@ -25,6 +25,8 @@ import { type StopKey, ctl, digitsOnly, disabledState, issueFor, maskPhone, stop
 import { pushRecent, rankWithRecents, readRecents, recentFirst } from './recents'
 import { Typeahead, type TypeaheadItem } from './Typeahead'
 import { StopActualTimes } from './StopActualTimes'
+import { DateTime24Input } from '../DateTime24Input'
+import { parseHoursRange, splitLocal } from '@/lib/dateTime24'
 
 export interface StopCardProps {
   stop: FormStop
@@ -121,7 +123,41 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
   })
   const dtField = (def: LabelDef, key: 'ready' | 'appt' | 'mustDeliver', req?: boolean) => (
     <LField span={6} def={def} required={req} error={err(def)}>
-      <TmsInput {...ctl(def)} type="datetime-local" value={stop[key]} disabled={base.disabled} onChange={(e) => onChange({ [key]: e.target.value } as Partial<FormStop>)} />
+      <DateTime24Input inputProps={ctl(def)} value={stop[key]} disabled={base.disabled} onChange={(v) => onChange({ [key]: v } as Partial<FormStop>)} />
+    </LField>
+  )
+
+  // Appt = one booked time; FCFS = a first-come window on one day (From–To), prefilled from the hours when they read as one.
+  const setFcfs = (fcfs: boolean) => onChange((prev) => {
+    if (fcfs === prev.fcfs) return prev
+    if (!fcfs) return { ...prev, fcfs: false, apptEnd: '' }
+    const day = splitLocal(prev.appt || prev.ready).date
+    const win = parseHoursRange(prev.hours)
+    if (day && win && !prev.appt) return { ...prev, fcfs: true, appt: `${day}T${win.from}`, apptEnd: `${day}T${win.to}` }
+    if (day && win && !prev.apptEnd) return { ...prev, fcfs: true, apptEnd: `${day}T${win.to}` }
+    return { ...prev, fcfs: true }
+  })
+  const apptDef = d('appt')
+  const apptKind = (
+    <span className="ship-appt-kind" role="group" aria-label={`Appointment type (stop ${index + 1})`}>
+      {([['Appt', false], ['FCFS', true]] as const).map(([text, on]) => (
+        <button
+          key={text} type="button" aria-pressed={stop.fcfs === on} disabled={base.disabled}
+          data-testid={`f-${prefix}-apptKind-${on ? 'fcfs' : 'appt'}`} onClick={() => setFcfs(on)}
+        >{text}</button>
+      ))}
+    </span>
+  )
+  const apptField = (
+    <LField span={6} def={apptDef} error={err(apptDef)} hint={apptKind}>
+      {stop.fcfs ? (
+        <DateTime24Input
+          inputProps={ctl(apptDef)} value={stop.appt} endValue={stop.apptEnd} disabled={base.disabled}
+          onChange={(v) => onChange({ appt: v })} onEndChange={(v) => onChange({ apptEnd: v })}
+        />
+      ) : (
+        <DateTime24Input inputProps={ctl(apptDef)} value={stop.appt} disabled={base.disabled} onChange={(v) => onChange({ appt: v })} />
+      )}
     </LField>
   )
 
@@ -220,7 +256,7 @@ export function StopCard({ stop, index, count, prefix, onChange, ctx, onRemove, 
         <ColGroup title="Schedule & freight">
         <FieldGrid>
           {delivery ? dtField(d('mustDeliver'), 'mustDeliver') : dtField(readyDef, 'ready', first)}
-          {dtField(d('appt'), 'appt')}
+          {apptField}
           <LField span={6} def={d('refNo')}><TmsInput {...txt('refNo')} /></LField>
           <LField span={6} def={d('hours')}><TmsInput {...txt('hours')} /></LField>
         </FieldGrid>
