@@ -172,7 +172,7 @@ function bill(patch: Partial<CarrierBillRecord> = {}): CarrierBillRecord {
   }
 }
 
-async function setup(options: { rowsByTab?: Partial<Record<string, ApWorklistRow[]>>; bills?: CarrierBillRecord[] } = {}) {
+async function setup(options: { rowsByTab?: Partial<Record<string, ApWorklistRow[]>>; bills?: CarrierBillRecord[]; url?: string } = {}) {
   const bills = options.bills ?? [bill()]
   worklistMock.mockImplementation((tab: string) => ({
     rows: options.rowsByTab?.[tab] ?? [],
@@ -201,7 +201,7 @@ async function setup(options: { rowsByTab?: Partial<Record<string, ApWorklistRow
     refresh: vi.fn().mockResolvedValue(undefined),
   })
   let view!: ReturnType<typeof render>
-  await act(async () => { view = render(<MemoryRouter><ApPage /></MemoryRouter>) })
+  await act(async () => { view = render(<MemoryRouter initialEntries={[options.url ?? '/']}><ApPage /></MemoryRouter>) })
   return view
 }
 
@@ -316,6 +316,20 @@ describe('the AP board', () => {
     expect(within(strip.getByText('Open AP').closest('.tms-kpi-card') as HTMLElement).getByText('$2,300.00')).toBeTruthy()
     expect(screen.getByText('Blue Line Trucking')).toBeTruthy()
     expect(screen.getByText('Red Line Freight')).toBeTruthy()
+  })
+
+  it('filters by carrier from the URL and shows what that carrier is owed by due date', async () => {
+    const a = bill({ id: 'cb:lc1:1', billNumber: 'BL-1', dueAt: daysAgo(10), balanceCents: 150_000 })
+    const b = bill({
+      id: 'cb:lc2:1', loadCarrierId: 'lc2', carrierId: 'car2', carrierName: 'Red Line Freight',
+      billNumber: 'RL-1', dueAt: daysAgo(45), balanceCents: 80_000, grossCents: 80_000, netCents: 80_000, billedCents: 80_000,
+    })
+    await setup({ bills: [a, b], url: '/?carrier=car2' })
+    const owed = within(screen.getByLabelText('Owed by Red Line Freight'))
+    expect(owed.getByText('Past due').closest('.tms-list-row')?.querySelector('.tms-list-row-value')?.textContent).toBe('$800.00')
+    fireEvent.click(screen.getByRole('tab', { name: /^Aging(?! report)/ }))
+    expect(screen.getByRole('button', { name: 'Pay bill RL-1' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Pay bill BL-1' })).toBeNull()
   })
 
   describe('the dense grid', () => {
