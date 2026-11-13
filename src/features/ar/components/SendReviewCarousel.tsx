@@ -8,7 +8,7 @@
  * reason; "Send N invoices" sends the rest and lists every result. Nothing goes before that.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, ExternalLink, Loader2, X } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, FileSearch, Loader2, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { TmsBadge, TmsButton, TmsDialog } from '@/features/tms/kit'
@@ -22,6 +22,7 @@ import { INVOICE_FROM_ADDRESS, isFactoredInvoice, manualRecipients, sendBlockers
 import { attachmentStateText, useInvoiceAttachmentPlans } from '../useInvoiceAttachmentPlans'
 import { DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import type { InvoiceAttachmentItem } from '@/lib/invoiceDelivery'
+import { AttachmentInfo, AttachmentRow, AttachmentsSection, InvoiceEmailSection, InvoiceEnvelope, MessageSection } from './InvoiceEmailSections'
 
 
 interface Result { invoiceId: string; number: string; ok: boolean; text: string }
@@ -99,7 +100,8 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
       po,
       companyName: invoiceCompanyName(shipment?.revDivision, shipment?.revSubdivision),
     })
-    return { customer, factored, email, attachment: invoiceAttachmentName(pro, po), ...manualRecipients(customer, settings) }
+    const company = invoiceCompanyName(shipment?.revDivision, shipment?.revSubdivision)
+    return { customer, factored, email, company, po, pro, attachment: invoiceAttachmentName(pro, po), ...manualRecipients(customer, settings) }
   }, [current, customerById, shipmentsById, settings])
 
   const skip = () => {
@@ -158,15 +160,19 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
       open
       onOpenChange={(open) => { if (!open) onClose() }}
       title="Review and send invoices"
-      className="tms-dialog-wide"
+      className="tms-dialog-wide send-review-dialog"
       footer={
         <>
+          <span className="mr-auto flex flex-wrap items-center gap-2 text-sm" role="status" aria-label="Batch summary">
+            <TmsBadge tone="green">{sendable.length} ready</TmsBadge>
+            {blocked.length > 0 && (
+              <span style={{ color: 'var(--tms-badge-red)' }}>
+                <TmsBadge tone="red">{blocked.length} blocked</TmsBadge> {blocked.map((inv) => inv.number).join(', ')} — left out
+              </span>
+            )}
+            {invoices.length - batch.length > 0 && <TmsBadge tone="gray">{invoices.length - batch.length} skipped</TmsBadge>}
+          </span>
           <TmsButton variant="ghost" onClick={onClose} disabled={sending}>Cancel</TmsButton>
-          {blocked.length > 0 && (
-            <span className="text-sm" role="status" style={{ color: 'var(--tms-badge-red)' }}>
-              {blocked.length} can't go: {blocked.map((inv) => inv.number).join(', ')}
-            </span>
-          )}
           <TmsButton variant="primary" aria-label="Send invoices" disabled={sending || sendable.length === 0}
             title={blocked.length > 0 ? `${blocked.map((inv) => `${inv.number}: ${blockersOf(inv).join('; ')}`).join('\n')}\nThese are left out of the send.` : undefined}
             onClick={() => void sendAll()}>
@@ -177,57 +183,69 @@ export function SendReviewCarousel({ invoices, customerById, shipmentsById, isAd
     >
       {!current || !page ? <p className="tms-muted">Nothing left in this batch.</p> : (
         <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <TmsButton size="sm" variant="ghost" aria-label="Previous invoice" disabled={index === 0} onClick={() => go(-1)}><ChevronLeft size={16} /></TmsButton>
-            <span aria-label="Page" className="text-sm">{index + 1} of {batch.length}</span>
-            <TmsButton size="sm" variant="ghost" aria-label="Next invoice" disabled={index >= batch.length - 1} onClick={() => go(1)}><ChevronRight size={16} /></TmsButton>
-            <strong className="ml-2">{current.number}</strong>
-            <span className="tms-muted text-sm">{current.customerName} · {formatCents(current.totalCents)}</span>
-            <span className="ml-auto flex gap-1">
+          <div className="send-review-head">
+            <span className="send-review-nav">
+              <TmsButton size="sm" variant="ghost" aria-label="Previous invoice" disabled={index === 0} onClick={() => go(-1)}><ChevronLeft size={16} /></TmsButton>
+              <span aria-label="Page" className="send-review-page">{index + 1} of {batch.length}</span>
+              <TmsButton size="sm" variant="ghost" aria-label="Next invoice" disabled={index >= batch.length - 1} onClick={() => go(1)}><ChevronRight size={16} /></TmsButton>
+            </span>
+            <span className="send-review-id">
+              <span className="send-review-number">Invoice {current.number}</span>
+              <span className="send-review-meta">
+                <span>{current.customerName}</span>
+                <span aria-hidden="true">·</span>
+                <span className="send-review-amount">{formatCents(current.totalCents)}</span>
+                {page.company && <><span aria-hidden="true">·</span><span>{page.company}</span></>}
+                {page.po && <><span aria-hidden="true">·</span><span>PO {page.po}</span></>}
+                <TmsBadge tone={page.factored ? 'purple' : 'blue'}>{page.factored ? 'OTR' : 'Manual'}</TmsBadge>
+              </span>
+            </span>
+            <span className="send-review-actions">
               <Link className="tms-btn tms-btn-ghost tms-btn-sm" to={`/tms/invoicing/invoices/${current.id}`} target="_blank" aria-label={`Edit invoice ${current.number}`}>
-                <ExternalLink size={13} /> Edit
+                <ExternalLink size={13} /> Edit invoice
               </Link>
-              <TmsButton size="sm" variant="ghost" aria-label={`Skip invoice ${current.number}`} onClick={skip}><X size={13} /> Skip</TmsButton>
+              <TmsButton size="sm" variant="ghost" aria-label={`Skip invoice ${current.number}`} onClick={skip}><X size={13} /> Skip this one</TmsButton>
             </span>
           </div>
           {blockersOf(current).length > 0 && (
-            <div role="alert" aria-label="Cannot send" className="rounded p-2 text-sm" style={{ border: '1px solid var(--tms-badge-red)', color: 'var(--tms-badge-red)' }}>
-              <strong>Will not be sent:</strong> {blockersOf(current).join('; ')}. Fix it, or Skip it — the rest still go.
+            <div role="alert" aria-label="Cannot send" className="send-review-blockers">
+              <AlertTriangle size={16} style={{ flex: 'none', marginTop: 1 }} />
+              <span><strong>Will not be sent:</strong> {blockersOf(current).join('; ')}. Fix it, or Skip it — the rest still go.</span>
             </div>
           )}
           {page.factored ? (
             <p className="text-sm" aria-label="Goes to OTR"><TmsBadge tone="purple">Goes to OTR</TmsBadge> Factored customer: this invoice is queued for OTR, not e-mailed.</p>
           ) : (
-            <dl className="grid gap-1 text-sm" style={{ gridTemplateColumns: 'max-content 1fr' }}>
-              <dt className="tms-muted">From</dt><dd>{INVOICE_FROM_ADDRESS}</dd>
-              <dt className="tms-muted">To</dt><dd aria-label="Invoice to">{page.to.join(', ') || <span style={{ color: 'var(--tms-badge-red)' }}>No AP e-mail on file</span>}</dd>
-              <dt className="tms-muted">CC</dt><dd aria-label="Invoice cc">{page.cc.join(', ') || '—'}</dd>
-              <dt className="tms-muted">Subject</dt><dd aria-label="Invoice subject">{page.email.subject}</dd>
-              <dt className="tms-muted">Attachments</dt>
-              <dd aria-label="Invoice attachments">
-                <AttachmentList plan={plans.get(current.id)} fallback={page.attachment} excluded={excluded[current.id] ?? []} />
-                <CarrierPayFlags
-                  flags={plans.get(current.id)?.carrierPayFlags ?? []}
-                  excluded={excluded[current.id] ?? []}
-                  isAdmin={isAdmin}
-                  override={overrides[current.id] ?? ''}
-                  onRemove={(docId) => setExcluded((prev) => ({ ...prev, [current.id]: [...(prev[current.id] ?? []), docId] }))}
-                  onOverride={(text) => setOverrides((prev) => ({ ...prev, [current.id]: text }))}
-                />
-              </dd>
-              <dt className="tms-muted">Body</dt><dd aria-label="Invoice body" style={{ whiteSpace: 'pre-wrap' }}>{page.email.body}</dd>
-            </dl>
+            <div className="send-review-grid">
+              <div className="send-review-col">
+                <InvoiceEnvelope from={INVOICE_FROM_ADDRESS} to={page.to} cc={page.cc} subject={page.email.subject} />
+                <AttachmentsSection>
+                  <AttachmentList plan={plans.get(current.id)} fallback={page.attachment} excluded={excluded[current.id] ?? []} />
+                  <CarrierPayFlags
+                    flags={plans.get(current.id)?.carrierPayFlags ?? []}
+                    excluded={excluded[current.id] ?? []}
+                    isAdmin={isAdmin}
+                    override={overrides[current.id] ?? ''}
+                    onRemove={(docId) => setExcluded((prev) => ({ ...prev, [current.id]: [...(prev[current.id] ?? []), docId] }))}
+                    onOverride={(text) => setOverrides((prev) => ({ ...prev, [current.id]: text }))}
+                  />
+                </AttachmentsSection>
+                <MessageSection body={page.email.body} />
+              </div>
+              <div className="send-review-col send-review-pdf">
+                <InvoiceEmailSection title="PDF the customer opens" icon={<FileSearch size={14} />} label="PDF preview">
+                  <InvoicePacketFrame
+                    key={current.id}
+                    invoiceId={current.id}
+                    pdfKey={current.pdfKey}
+                    excludeDocumentIds={excluded[current.id]}
+                    height={640}
+                    onLoaded={(p) => setPacketErrors((prev) => ({ ...prev, [p.invoiceId]: p.error }))}
+                  />
+                </InvoiceEmailSection>
+              </div>
+            </div>
           )}
-          {page.factored
-            ? null
-            : <InvoicePacketFrame
-                key={current.id}
-                invoiceId={current.id}
-                pdfKey={current.pdfKey}
-                excludeDocumentIds={excluded[current.id]}
-                height={480}
-                onLoaded={(p) => setPacketErrors((prev) => ({ ...prev, [p.invoiceId]: p.error }))}
-              />}
         </div>
       )}
     </TmsDialog>
@@ -249,25 +267,31 @@ function AttachmentList({ plan, fallback, excluded }: {
   fallback: string
   excluded: readonly string[]
 }) {
-  if (!plan) return <span className="tms-muted">{fallback} · checking documents…</span>
-  if (plan.error) return <span>{fallback} <span className="tms-muted">({plan.error})</span></span>
+  if (!plan) return <AttachmentInfo>{fallback} · checking documents…</AttachmentInfo>
+  if (plan.error) return <AttachmentInfo tone="warn">{fallback} ({plan.error})</AttachmentInfo>
+  const items = (plan.items ?? []).filter((item) => !item.documentId || !excluded.includes(item.documentId))
   return (
-    <div className="flex flex-col gap-1">
-      <ul className="flex flex-col gap-0.5" aria-label="Attachment list">
-        {(plan.items ?? []).filter((item) => !item.documentId || !excluded.includes(item.documentId)).map((item) => (
-          <li key={item.documentId ?? item.name} style={item.inInvoicePdf ? { paddingLeft: 16 } : undefined}>
-            {item.inInvoicePdf ? '↳ ' : ''}{item.name} <span className="tms-muted">· {typeLabel(item)}{item.inInvoicePdf ? ' · pages inside the invoice PDF' : ''}{item.sizeBytes != null ? ` · ${sizeText(item.sizeBytes)}` : ''}</span>
-          </li>
+    <div className="flex flex-col gap-2">
+      <ul className="inv-email-files" aria-label="Attachment list">
+        {items.map((item) => (
+          <AttachmentRow
+            key={item.documentId ?? item.name}
+            name={item.name}
+            type={typeLabel(item)}
+            nested={item.inInvoicePdf}
+            note={item.inInvoicePdf ? 'pages inside the invoice PDF' : undefined}
+            size={item.sizeBytes != null ? sizeText(item.sizeBytes) : undefined}
+          />
         ))}
       </ul>
-      <span className="flex flex-wrap gap-1 text-xs">
+      <span className="inv-email-badges">
         <TmsBadge tone={plan.pod === 'ATTACHED' ? 'green' : 'red'}>POD {attachmentStateText(plan.pod)}</TmsBadge>
         <TmsBadge tone={plan.rateCon === 'ATTACHED' ? 'green' : plan.rateCon === 'MISSING' ? 'orange' : 'gray'}>RC {attachmentStateText(plan.rateCon)}</TmsBadge>
       </span>
-      {plan.pod === 'MISSING' && <span role="alert" style={{ color: 'var(--tms-badge-red)' }}>No POD on file — file one before this invoice can go.</span>}
-      {plan.rateCon === 'NOT_INCLUDED' && <span className="tms-muted text-xs">BCAT Logistics invoices never carry a rate confirmation.</span>}
-      {plan.rateCon === 'MISSING' && <span className="text-xs" style={{ color: 'var(--tms-badge-orange)' }}>Ivan Cartage invoice: no customer rate confirmation on file.</span>}
-      {plan.tooBig && <span role="alert" style={{ color: 'var(--tms-badge-red)' }}>Over 10 MB — this e-mail will be refused. Remove a document first.</span>}
+      {plan.pod === 'MISSING' && <AttachmentInfo tone="error">No POD on file — file one before this invoice can go.</AttachmentInfo>}
+      {plan.rateCon === 'NOT_INCLUDED' && <AttachmentInfo>Rate confirmation not included: BCAT Logistics invoices never carry a rate confirmation.</AttachmentInfo>}
+      {plan.rateCon === 'MISSING' && <AttachmentInfo tone="warn">Ivan Cartage invoice: no customer rate confirmation on file.</AttachmentInfo>}
+      {plan.tooBig && <AttachmentInfo tone="error">Over 10 MB — this e-mail will be refused. Remove a document first.</AttachmentInfo>}
     </div>
   )
 }

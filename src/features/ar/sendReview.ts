@@ -6,6 +6,11 @@ import type { InvoiceAttachmentPlanRow } from '@/lib/invoiceDelivery'
 /** The address SES sends from (amplify/backend.ts FROM_ADDRESS). */
 export const INVOICE_FROM_ADDRESS = 'billing@bcatcorp.com'
 
+/** Our own mailboxes: shown as internal copies, apart from the customer's addresses. */
+export function isInternalAddress(address: string): boolean {
+  return address.trim().toLowerCase().endsWith('@bcatcorp.com')
+}
+
 export function isFactoredInvoice(inv: InvoiceRecord, customer: CustomerRecord | undefined): boolean {
   return Boolean(inv.factored || inv.factoringItemId || customer?.billingMethod === 'FACTOR')
 }

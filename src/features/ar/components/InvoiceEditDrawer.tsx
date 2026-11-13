@@ -23,6 +23,7 @@ import type { CustomerRecord, InvoiceAdjustment, InvoiceRecord, ShipmentRecord, 
 import { centsFromInput, inputFromCents } from './money'
 import { InvoicePacketFrame } from './InvoicePacketFrame'
 import { INVOICE_FROM_ADDRESS, isFactoredInvoice, manualRecipients } from '../sendReview'
+import { AttachmentInfo, AttachmentRow, AttachmentsSection, InvoiceEnvelope, MessageSection } from './InvoiceEmailSections'
 
 interface Draft { kind: 'CREDIT' | 'DEBIT'; description: string; amount: string; reason: string }
 
@@ -164,16 +165,15 @@ export function InvoiceEditDrawer({ invoice, customer, shipment, factoringItem, 
               : <p className="tms-muted">Not in the factoring queue yet — Send to OTR queues it.</p>}
           </section>
         ) : (
-          <section aria-label="E-mail preview">
-            <h3 className="font-semibold">E-mail</h3>
-            <dl className="grid gap-1" style={{ gridTemplateColumns: 'max-content 1fr' }}>
-              <dt className="tms-muted">From</dt><dd>{INVOICE_FROM_ADDRESS}</dd>
-              <dt className="tms-muted">To</dt><dd>{recipients.to.join(', ') || <span style={{ color: 'var(--tms-badge-red)' }}>No AP e-mail on file</span>}</dd>
-              <dt className="tms-muted">CC</dt><dd>{recipients.cc.join(', ') || '—'}</dd>
-              <dt className="tms-muted">Subject</dt><dd>{email.subject}</dd>
-              <dt className="tms-muted">Attachment</dt><dd>{invoiceAttachmentName(pro, po)} <span className="tms-muted">(invoice + POD pages, one PDF)</span></dd>
-              <dt className="tms-muted">Body</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{email.body}</dd>
-            </dl>
+          <section aria-label="E-mail preview" className="flex flex-col gap-3">
+            <InvoiceEnvelope from={INVOICE_FROM_ADDRESS} to={recipients.to} cc={recipients.cc} subject={email.subject} />
+            <AttachmentsSection>
+              <ul className="inv-email-files" aria-label="Attachment list">
+                <AttachmentRow name={invoiceAttachmentName(pro, po)} type="Invoice + POD" note="one PDF: the invoice, then every POD page" />
+              </ul>
+              <AttachmentInfo>The BOL, and the customer rate confirmation on Ivan Cartage loads, go as separate files — Review &amp; send lists each one.</AttachmentInfo>
+            </AttachmentsSection>
+            <MessageSection body={email.body} />
           </section>
         )}
 

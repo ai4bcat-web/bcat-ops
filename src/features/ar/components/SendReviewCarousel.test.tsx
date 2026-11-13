@@ -46,7 +46,11 @@ describe('SendReviewCarousel', () => {
       shipmentsById={new Map()} onClose={vi.fn()} onDone={vi.fn()} /></MemoryRouter>)
     expect(screen.getByLabelText('Page').textContent).toBe('1 of 2')
     expect(screen.getByLabelText('Invoice to').textContent).toBe('ap@royal.test')
-    await waitFor(() => expect(screen.getByLabelText('Invoice cc').textContent).toBe('invoices@bcatcorp.com'))
+    await waitFor(() => expect(screen.getByLabelText('Invoice cc').textContent).toContain('invoices@bcatcorp.com'))
+    // Our own mailbox reads as an internal copy, the customer's AP address does not.
+    expect(screen.getByLabelText('Invoice cc').textContent).toContain('Internal')
+    expect(screen.getByLabelText('Invoice to').querySelector('.inv-email-chip-to')).toBeTruthy()
+    expect(screen.getByLabelText('Email envelope').textContent).toContain('billing@bcatcorp.com')
     expect(screen.getByLabelText('Invoice subject').textContent).toBe('Invoice for Pro # 20027 Attached from BCAT Logistics Corporation')
     await waitFor(() => expect(screen.getByLabelText('Attachment list').textContent).toContain('POD 20027.pdf'))
     expect(screen.getByLabelText('Attachment list').textContent).toContain('Invoice 20027 FR-113188-3.pdf')
