@@ -9,6 +9,7 @@ import {
   addCarrier, assignAsset, assignCarrierRep, clearRevTag, commitDocument, createLocation, createShipment,
   prepareDocumentUpload, putPresignedFile, recalcCharges, saveOrderForm, setEta, setRevTag, setSalesRep, setShipmentCustomer,
   getShipmentBundle, setStopDrivers, submitOrder, updateCarrierCharges, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
+  type UpdateStopChange,
   type UpdateLoadCarrierDetailsInput,
 } from '@/lib/apiClient'
 import { apptNotices } from '@/lib/apptNotify'
@@ -376,6 +377,18 @@ export function diffStopOps(before: ShipmentFormValues, after: ShipmentFormValue
   return ops
 }
 
+/** The UPDATE_STOP changes of a diff, in order, as one batch (stop details go through their own action). */
+export function stopBatch(ops: StopWireOp[]): UpdateStopChange[] {
+  const out: UpdateStopChange[] = []
+  for (const op of ops) {
+    if (op.op === 'SET_DETAILS') continue
+    if (op.op === 'ADD') out.push({ op: 'ADD', patch: op.stop })
+    else if (op.op === 'REMOVE') out.push({ op: 'REMOVE', stopId: op.stopId })
+    else out.push({ op: op.op, stopId: op.stopId, patch: op.patch })
+  }
+  return out
+}
+
 /** The assignment a slot shows: by its booked id; slot 0 falls back to the primary assignment. */
 function loadCarrierOfSlot(bundle: ShipmentBundle, slot: CarrierSlot, index: number): LoadCarrierRecord | null {
   const live = liveCarriers(bundle)
@@ -432,15 +445,22 @@ export async function runEditSave(values: ShipmentFormValues, ctx: PipelineCtx, 
     return updateOrderDetails(next)
   })
   const runStopOps = async (from: ShipmentFormValues) => {
-    for (const op of diffStopOps(from, values)) {
-      const b = r.bundle!
-      const load = b.loads[0]
-      if (!load) break
-      const common = { loadId: load.id, expectedUpdatedAt: load.updatedAt ?? '' }
-      if (op.op === 'ADD') r.bundle = await updateStop({ ...common, op: 'ADD', patch: op.stop })
-      else if (op.op === 'REMOVE') r.bundle = await updateStop({ ...common, op: 'REMOVE', stopId: op.stopId })
-      else if (op.op === 'SET_DETAILS') r.bundle = await updateStopDetails({ ...common, stopId: op.stopId, patch: op.patch })
-      else r.bundle = await updateStop({ ...common, op: op.op, stopId: op.stopId, patch: op.patch })
+    const ops = diffStopOps(from, values)
+    const common = () => {
+      const load = r.bundle!.loads[0]
+      return load ? { loadId: load.id, expectedUpdatedAt: load.updatedAt ?? '' } : null
+    }
+    // Every stop change but the details goes in ONE call, so the order of the stops is
+    // checked on the result: moving all the dates forward is never refused halfway through.
+    const batch = stopBatch(ops)
+    const first = common()
+    if (!first) return
+    if (batch.length > 0) r.bundle = await updateStop({ ...first, ops: batch })
+    for (const op of ops) {
+      if (op.op !== 'SET_DETAILS') continue
+      const c = common()
+      if (!c) break
+      r.bundle = await updateStopDetails({ ...c, stopId: op.stopId, patch: op.patch })
     }
   }
   await r.run('stops', async () => {

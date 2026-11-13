@@ -232,6 +232,20 @@ describe('edit pipelines', () => {
     expect(res.steps.find((x) => x.step === 'stops')?.ok).toBe(true)
   })
 
+  it('moving both appointments sends every stop change in ONE update, pickup and delivery together', async () => {
+    const b = storedBundle(filledValues(), { status: 'OPEN' })
+    const v = valuesFromBundle(b, { customer: CUSTOMER })
+    v.stops[0].appt = '2026-11-16T09:00'
+    v.stops[v.stops.length - 1].appt = '2026-11-16T10:00'
+    api.updateStop.mockResolvedValue(b)
+    api.updateOrderDetails.mockResolvedValue(b)
+    const res = await runEditSave(v, ctx, b)
+    expect(res.steps.find((x) => x.step === 'stops')?.ok).toBe(true)
+    expect(api.updateStop).toHaveBeenCalledTimes(1)
+    const sent = api.updateStop.mock.calls[0][0] as { ops: { op: string; stopId: string }[] }
+    expect(sent.ops.filter((o) => o.op === 'SET_APPT').map((o) => o.stopId)).toEqual([v.stops[0].id, v.stops[v.stops.length - 1].id])
+  })
+
   it('any other stop error still fails the save exactly as before, with no second read', async () => {
     const b = storedBundle(filledValues(), { status: 'OPEN' })
     const v = valuesFromBundle(b, { customer: CUSTOMER })

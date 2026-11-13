@@ -4760,33 +4760,21 @@ async function setStopDrivers(input: Row, caller: Caller): Promise<Row> {
 
 // ── UPDATE_STOP ──────────────────────────────────────────────────────────────
 
-async function updateStop(input: Row, caller: Caller): Promise<Row> {
-  const loadId = assertString(input.loadId, 'loadId')
-  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
-  const op = assertEnum(input.op, STOP_OPS, 'op') as StopOp
-  const stopId = optionalString(input.stopId, 100)
-  const patch = assertRecord(input.patch ?? {}, 'patch')
+type StopRow = ReturnType<typeof readStops>[number]
+type StopStamp = { stopId: string; event: StopEventType; at: string }
 
-  const load = await getById(LOAD_TABLE_NAME, loadId)
-  if (!load) throw new Error(`Load not found: ${loadId}`)
-  if (String(load.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('load', null)
-  const shipmentId = optionalString(load.shipmentId, 100)
-  if (shipmentId) await requireLiveShipment(shipmentId)
-
-  // A legacy load with no stops array yet: the two stops the form shows (pickup and delivery from the old fields, ids `<loadId>:pu` / `:de`).
-  let stops = readStops(load)
-  if (stops.length === 0) stops = getStops(load as unknown as Load) as unknown as typeof stops
+/**
+ * One UPDATE_STOP change applied to the in-memory stops. Pure apart from `newStamps`, which
+ * collects the arrive/depart stamps this change sets for the first time.
+ */
+function applyStopOp(stopsIn: StopRow[], op: StopOp, stopId: string | null, patch: Row, newStamps: StopStamp[]): StopRow[] {
+  let stops = stopsIn
   const indexOfStop = (): number => {
     if (!stopId) throw new Error('stopId is required for this stop change')
     const i = stops.findIndex((s) => s.id === stopId)
     if (i === -1) throw new Error(`Stop not found: ${stopId}`)
     return i
   }
-
-  // Step D: the stamps this call sets for the first time. Each one is a stop event
-  // the tracking log has to carry, exactly as the driver app's would be.
-  const newStamps: { stopId: string; event: StopEventType; at: string }[] = []
-
   switch (op) {
     case 'ADD': {
       const added = validateStop({ ...patch, sequence: stops.length }, stops.length)
@@ -4913,11 +4901,43 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
     }
   }
 
-  stops = resequence(stops)
+  return resequence(stops)
+}
+
+async function updateStop(input: Row, caller: Caller): Promise<Row> {
+  const loadId = assertString(input.loadId, 'loadId')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  // `ops` applies several changes in one read-modify-write: the stop order is checked once,
+  // on the final stops, so moving every date forward (pickup first) is not refused halfway.
+  const changes: { op: StopOp; stopId: string | null; patch: Row }[] = input.ops != null
+    ? assertArrayOf(input.ops, 'ops', (raw, i) => {
+      const r = assertRecord(raw, `ops[${i}]`)
+      return { op: assertEnum(r.op, STOP_OPS, `ops[${i}].op`) as StopOp, stopId: optionalString(r.stopId, 100), patch: assertRecord(r.patch ?? {}, `ops[${i}].patch`) }
+    })
+    : [{ op: assertEnum(input.op, STOP_OPS, 'op') as StopOp, stopId: optionalString(input.stopId, 100), patch: assertRecord(input.patch ?? {}, 'patch') }]
+  if (changes.length === 0) throw new Error('ops must name at least one stop change')
+  if (changes.length > 50) throw new Error('Too many stop changes in one save (50 at most)')
+  const opsDone = new Set(changes.map((c) => c.op))
+
+  const load = await getById(LOAD_TABLE_NAME, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  if (String(load.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('load', null)
+  const shipmentId = optionalString(load.shipmentId, 100)
+  if (shipmentId) await requireLiveShipment(shipmentId)
+
+  // A legacy load with no stops array yet: the two stops the form shows (pickup and delivery from the old fields, ids `<loadId>:pu` / `:de`).
+  let stops = readStops(load)
+  if (stops.length === 0) stops = getStops(load as unknown as Load) as unknown as typeof stops
+
+  // Step D: the stamps this call sets for the first time. Each one is a stop event
+  // the tracking log has to carry, exactly as the driver app's would be.
+  const newStamps: StopStamp[] = []
+  for (const c of changes) stops = applyStopOp(stops, c.op, c.stopId, c.patch, newStamps)
+
   // Step W. A stop added, removed, retyped or swapped on an Ivan Cartage load that has not
   // been delivered yet inherits the leg's driver and truck, so the mirrors the Schedule and
   // pay read do not lose the driver. Delivered history is never touched.
-  if (['ADD', 'REMOVE', 'SET_TYPE', 'SWAP'].includes(op) && String(load.assignmentType ?? '') === 'OWN_ASSET'
+  if ((['ADD', 'REMOVE', 'SET_TYPE', 'SWAP'] as StopOp[]).some((o) => opsDone.has(o)) && String(load.assignmentType ?? '') === 'OWN_ASSET'
     && !isDeliveredOrLater(load.status) && !load.voidedAt) {
     const legs = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
     const leg = legs.find((c) => c.status === 'ACTIVE' && c.kind === 'OWN_ASSET') ?? null
@@ -4932,12 +4952,12 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
   // Stop times are the one thing that moves a load forward on its own: a truck that
   // has left the pickup is in transit whatever anybody typed.
   const currentStatus = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
-  const derivedStatus = op === 'SET_TIMES'
+  const derivedStatus = opsDone.has('SET_TIMES')
     ? loadStatusFromStopTimes(stopTimesOf(stops), currentStatus)
     : currentStatus
   // Step W. Departing the last delivery with nobody on the truck is a delivery no
   // settlement would pick up: refuse before any tracking row is written.
-  if (op === 'SET_TIMES' && derivedStatus === 'DELIVERED' && currentStatus !== 'DELIVERED') {
+  if (opsDone.has('SET_TIMES') && derivedStatus === 'DELIVERED' && currentStatus !== 'DELIVERED') {
     const legs = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
     await assertOwnAssetDriver(load, legs.find((c) => c.status === 'ACTIVE') ?? null, 'DELIVERED', optionalString(legacy.deliveryDriverId, 100))
   }
@@ -4980,7 +5000,9 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
     'Load update',
   )
 
-  await writeAudit('LOAD', loadId, `UPDATE_STOP:${op}`, caller, { stopId, stops: stops.length, status: derivedStatus })
+  for (const c of changes) {
+    await writeAudit('LOAD', loadId, `UPDATE_STOP:${c.op}`, caller, { stopId: c.stopId, stops: stops.length, status: derivedStatus, ...(changes.length > 1 ? { batch: changes.length } : {}) })
+  }
   if (!shipmentId) return { id: loadId, stops } as unknown as Row
   return rederiveShipmentStatus(shipmentId, caller)
 }

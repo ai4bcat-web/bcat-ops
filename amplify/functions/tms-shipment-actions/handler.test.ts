@@ -2513,6 +2513,34 @@ describe('UPDATE_STOP', () => {
     expect(stops.map((x) => [x.id, x.type, x.city])).toEqual([[`${loadId}:pu`, 'pickup', 'SPRINGDALE, AR'], [`${loadId}:de`, 'delivery', 'JOLIET, IL']])
   })
 
+  it('ops: moving every appointment ten days forward, pickup first, checks the order once on the result (PRO 20058)', async () => {
+    const { loadId } = await draftWithStops()
+    const at = () => table(TABLES.load).get(loadId)!.updatedAt
+    await call('UPDATE_STOP', { loadId, expectedUpdatedAt: at(), ops: [
+      { op: 'SET_APPT', stopId: 'stp-pu', patch: { appt: '2026-11-06T15:00:00.000Z', apptType: 'exact' } },
+      { op: 'SET_APPT', stopId: 'stp-de', patch: { appt: '2026-11-06T14:00:00.000Z', apptEnd: '2026-11-06T20:00:00.000Z', apptType: 'fcfs' } },
+    ] })
+    // One at a time, the pickup moving first would leave the delivery ten days behind it.
+    await expect(call('UPDATE_STOP', { loadId, expectedUpdatedAt: at(), op: 'SET_APPT', stopId: 'stp-pu', patch: { appt: '2026-11-16T15:00:00.000Z', apptType: 'exact' } }))
+      .rejects.toThrow(/chronological order/)
+    await call('UPDATE_STOP', { loadId, expectedUpdatedAt: at(), ops: [
+      { op: 'SET_APPT', stopId: 'stp-pu', patch: { appt: '2026-11-16T15:00:00.000Z', apptType: 'exact' } },
+      { op: 'SET_APPT', stopId: 'stp-de', patch: { appt: '2026-11-16T16:00:00.000Z', apptEnd: '2026-11-16T20:00:00.000Z', apptType: 'fcfs' } },
+    ] })
+    const stops = JSON.parse(String(table(TABLES.load).get(loadId)!.stops)) as Row[]
+    expect(stops.map((x) => x.appt)).toEqual(['2026-11-16T15:00:00.000Z', '2026-11-16T16:00:00.000Z'])
+  })
+
+  it('ops: an out-of-order result is still refused, and nothing from the batch is written', async () => {
+    const { loadId } = await draftWithStops()
+    const before = table(TABLES.load).get(loadId)!.stops
+    await expect(call('UPDATE_STOP', { loadId, expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt, ops: [
+      { op: 'SET_APPT', stopId: 'stp-pu', patch: { appt: '2026-11-16T15:00:00.000Z', apptType: 'exact' } },
+      { op: 'SET_APPT', stopId: 'stp-de', patch: { appt: '2026-11-10T15:00:00.000Z', apptType: 'exact' } },
+    ] })).rejects.toThrow(/chronological order/)
+    expect(table(TABLES.load).get(loadId)!.stops).toBe(before)
+  })
+
   it('adds a stop and renumbers the sequence', async () => {
     const { loadId } = await draftWithStops()
     await call('UPDATE_STOP', {
