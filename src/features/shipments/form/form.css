@@ -830,3 +830,17 @@
 .tms-shell .ship-cal-day[data-today='true'] { box-shadow: inset 0 0 0 1px var(--tms-primary); font-weight: 600; }
 .tms-shell .ship-cal-day[aria-selected='true'] { background: var(--tms-primary); color: var(--tms-on-primary); font-weight: 600; }
 .tms-shell .ship-cal-day:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: 1px; }
+
+/* Rates: the LH rate box is where the rate goes; the Total LH beside it is calculated, shown as plain text. */
+.tms-input.tms-rate-entry:not(:disabled) {
+  border-color: var(--tms-primary);
+  background: var(--tms-card);
+}
+.tms-rate-calculated {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--tms-text-2);
+}
