@@ -314,6 +314,7 @@ import {
   type RosterDriverFacts,
 } from '../../../src/lib/ownAssetDriver'
 import { isIvanCartageName, resolveOwnFleetDriver, type OwnFleetDriverSource } from '../../../src/lib/ownFleetDrivers'
+import { stopsOutOfOrder, type StopOrderInput } from '../../../src/lib/stopOrder'
 import type { Load as LoadForCredit } from '../../../src/types'
 import type {
   ArStatus,
@@ -1224,12 +1225,14 @@ function assertStopShape(stops: StopShape[], requireBoth = true): void {
     if (!stops.some((s) => s.type === 'pickup')) throw new Error('A shipment needs at least one pickup')
     if (!stops.some((s) => s.type === 'delivery')) throw new Error('A shipment needs at least one delivery')
   }
+  // FCFS stops may overlap on the same day; an earlier day is still refused (src/lib/stopOrder).
   const timed = stops.filter((s) => !!s.appt)
   for (let i = 1; i < timed.length; i++) {
-    const prev = Date.parse(timed[i - 1].appt as string)
-    const next = Date.parse(timed[i].appt as string)
-    if (Number.isFinite(prev) && Number.isFinite(next) && next < prev) {
-      throw new Error('Stop appointments must run in chronological order')
+    if (stopsOutOfOrder(timed[i - 1] as StopOrderInput, timed[i] as StopOrderInput)) {
+      const label = (s: StopShape) => (s.type === 'pickup' ? 'Pickup' : s.type === 'delivery' ? 'Delivery' : 'Stop')
+      throw new Error(
+        `Stop appointments must run in chronological order: the ${label(timed[i])} appointment is before the ${label(timed[i - 1])}. Check the dates.`,
+      )
     }
   }
 }

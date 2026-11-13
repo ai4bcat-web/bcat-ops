@@ -8,6 +8,7 @@
  */
 import { validateCarrierAdd, validateLegs } from '@/lib/carrierLegs'
 import { fromDateTimeInput } from '@/lib/date'
+import { stopsOutOfOrder, type StopOrderInput } from '@/lib/stopOrder'
 import {
   hasBillToParties, missingRequiredFields, requiredFieldLabel, resolveRequiredFields, type RequiredFieldSubject,
 } from '@/lib/flowDefaults'
@@ -119,7 +120,7 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
   if (submit && ld >= 0 && empty(values.stops[ld].name)) push('consignee', 'name', 'f-consignee-name', LABEL.stop.name.text, 'Consignee needs a name before Submit.')
 
   // Stop format rules (intakeProblems): city + two-letter state, zip 5/9, chronological.
-  let prev = ''
+  let prev: StopOrderInput | null = null
   values.stops.forEach((s, i) => {
     const kind: SectionKey = i === fp ? 'pickup' : i === ld ? 'consignee' : 'picks'
     const prefix = kind === 'picks' ? `f-stop-${i}` : `f-${kind === 'pickup' ? 'pickup' : 'consignee'}`
@@ -133,8 +134,10 @@ export function validateForm(values: ShipmentFormValues, o: ValidateOpts): FormI
     if (!empty(s.email) && !EMAIL.test(s.email.trim())) push(kind, `email:${i}`, `${prefix}-email`, LABEL.stop.email.text, `${where} email is not valid.`, 'warn')
     const when = s.appt || s.ready
     if (when) {
-      if (prev && when < prev) push(kind, `order:${i}`, `${prefix}-appt`, LABEL.stop.appt.text, `${where} is scheduled before the stop ahead of it.`, 'warn')
-      prev = when
+      // FCFS windows may overlap on the same day (src/lib/stopOrder); an earlier day still warns.
+      const cur: StopOrderInput = { appt: when, hours: s.hours }
+      if (prev && stopsOutOfOrder(prev, cur)) push(kind, `order:${i}`, `${prefix}-appt`, LABEL.stop.appt.text, `${where} is scheduled before the stop ahead of it. Check the dates.`, 'warn')
+      prev = cur
     }
     if (s.mustDeliver && s.type === 'delivery' && fp >= 0) {
       const start = values.stops[fp].appt || values.stops[fp].ready
