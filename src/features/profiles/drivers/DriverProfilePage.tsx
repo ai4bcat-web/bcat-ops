@@ -7,6 +7,7 @@ import {
 } from '@/features/tms/kit'
 import { TmsScrollPage } from '@/features/tms/kit/TmsScrollPage'
 import { DriverDrawer } from '@/features/drivers/DriverDrawer'
+import { ResetDriverPassword } from '@/features/driver-login/ResetDriverPassword'
 import { SettingsModal as AmazonPaySettings } from '@/features/driver-pay/DriverPayForms'
 import { SettingsModal as BoxTruckPaySettings } from '@/features/driver-pay-box-trucks/BoxTruckPayForms'
 import { SettingsModal as OwnerOperatorPaySettings } from '@/features/owner-operator-pay/OwnerOperatorPayForms'
@@ -157,7 +158,12 @@ export function DriverProfilePage() {
             {trailer ? <span>Trailer <strong>{trailer.unitNumber}</strong></span> : driver.bobtail ? <span>Bobtail</span> : null}
           </span>
         )}
-        actions={<TmsButton onClick={() => setEditing(true)} data-testid="driver-edit"><Pencil size={14} /> Edit details</TmsButton>}
+        actions={(
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <ResetDriverPassword driver={driver} />
+            <TmsButton onClick={() => setEditing(true)} data-testid="driver-edit"><Pencil size={14} /> Edit details</TmsButton>
+          </span>
+        )}
       />
 
       {needsHireDate(driver) ? (

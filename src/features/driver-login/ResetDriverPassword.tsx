@@ -1,5 +1,6 @@
 /**
- * Reset a driver's Ivan driver app password, from the staff page. Owner and ADMIN only —
+ * Reset a driver's app password (the Ivan driver app and the owner-operator PWA share one
+ * driver pool), from the Ivan week page and the office driver profile. Owner and ADMIN only —
  * the server refuses everyone else, this only hides the button.
  *
  * Two ways back in:
@@ -32,13 +33,17 @@ export function ResetDriverPassword({ driver }: Props) {
   const isAdmin = (authUser?.email ?? '').toLowerCase() === OWNER_EMAIL || (authUser?.groups ?? []).includes('ADMIN')
   const [open, setOpen] = useState(false)
   if (!isAdmin) return null
+  // The driver pool is keyed by e-mail, so there is nothing to look up without one.
+  const hasEmail = !!driver.email?.trim()
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title={`Reset ${driver.name}'s driver app password`}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+        disabled={!hasEmail}
+        data-testid="driver-reset-password"
+        title={hasEmail ? `Reset ${driver.name}'s driver app password` : 'Add an e-mail to this driver first'}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid var(--tms-border)', background: 'var(--tms-card)', color: 'var(--tms-text-2)', fontSize: 12, fontWeight: 600, cursor: hasEmail ? 'pointer' : 'not-allowed', opacity: hasEmail ? 1 : 0.55, fontFamily: 'inherit' }}
       >
         <KeyRound size={13} /> Reset password
       </button>
