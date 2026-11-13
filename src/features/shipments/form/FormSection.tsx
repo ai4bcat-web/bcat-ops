@@ -14,7 +14,7 @@ export interface FormSectionProps {
   title: string
   /** Count of blocking issues inside; 0 hides the badge. */
   errorCount: number
-  /** `complete`: required fields filled and saved (the card turns green); `unsaved`: edited since the last save. */
+  /** `complete`: only Carrier & Tracking, once the saved load is covered (the card turns green). */
   state?: SectionState
   children: ReactNode
 }
@@ -32,9 +32,7 @@ function FormSectionImpl({ id, number, title, errorCount, state = 'neutral', chi
           </span>
         ) : null}
         {state === 'complete' ? (
-          <span className="tms-ship-card-state tms-ship-card-state--saved" data-testid={`section-${id}-saved`}>✓ Saved</span>
-        ) : state === 'unsaved' ? (
-          <span className="tms-ship-card-state tms-ship-card-state--unsaved" data-testid={`section-${id}-unsaved`}>Unsaved</span>
+          <span className="tms-ship-card-state tms-ship-card-state--saved" data-testid={`section-${id}-saved`}>✓ Covered</span>
         ) : null}
       </h2>
       <div id={`section-${id}-body`} className="tms-ship-card-body">

@@ -168,10 +168,11 @@ describe('CarrierInformationSection', () => {
     })
     expect(screen.getByTestId('carrier-covered-card-name').textContent).toBe('Reliable Freight')
     expect(screen.getByTestId('carrier-covered-card-ids').textContent).toContain('MC 123456 · DOT 7654321')
-    expect(screen.getByTestId('carrier-covered-card-insurance-CARGO').textContent).toBe('Cargo $100,000 · active to 01/01/2031')
+    expect(screen.getByTestId('carrier-covered-card-insurance-CARGO').textContent).toBe('Cargo $100K · exp 01/01/31')
     expect(screen.getByTestId('carrier-covered-card-insurance-AUTO_LIABILITY').textContent).toContain('not on file')
-    expect(screen.getByTestId('carrier-covered-card-vetting').textContent).toContain('Risk 29500 pts')
-    expect(screen.getByTestId('carrier-covered-card-status').textContent).toBe('Set up · Active')
+    expect(screen.queryByTestId('carrier-covered-card-vetting')).toBeNull()
+    expect(screen.queryByTestId('carrier-covered-card-trip')).toBeNull()
+    expect(screen.getByTestId('carrier-covered-card-status').textContent).toBe('Active')
     expect(screen.queryByLabelText('MC #')).toBeNull()
     expect(screen.queryByPlaceholderText('Name, MC, DOT or SCAC')).toBeNull()
     expect(api.pullMcpCarrier).not.toHaveBeenCalled()
@@ -184,7 +185,7 @@ describe('CarrierInformationSection', () => {
       directory: { customers: [], locations: [], staff: [], carriers: [carrier({ mcpStatus: 'ACCEPTABLE' })] },
     })
     expect(screen.getByTestId('carrier-covered-card-ratecon').textContent).toContain('Rate con sent')
-    expect(screen.getByTestId('carrier-covered-card-trip').textContent).toBe('Driver Roberto Rodriguez (262) 359-0348 · Truck 30 · Trailer 06')
+    expect(screen.getByTestId('carrier-covered-card-trip').textContent).toBe('Driver Roberto Rodriguez · (262) 359-0348 · Truck 30 · Trailer 06')
   })
 
   it('a covered carrier MyCarrierPackets never synced is pulled once and the card fills in', async () => {
@@ -198,7 +199,7 @@ describe('CarrierInformationSection', () => {
       mode: 'edit', bundle: savedBundle({ loadStatus: 'BOOKED', loadCarriers: booked }),
       directory: { customers: [], locations: [], staff: [], carriers: [carrier({ insurancePolicies: [] })] },
     })
-    await waitFor(() => expect(screen.getByTestId('carrier-covered-card-insurance-AUTO_LIABILITY').textContent).toBe('Auto liability $1,000,000 · active to 06/01/2027'))
+    await waitFor(() => expect(screen.getByTestId('carrier-covered-card-insurance-AUTO_LIABILITY').textContent).toBe('Auto $1M · exp 06/01/27'))
     expect(api.pullMcpCarrier).toHaveBeenCalledTimes(1)
     expect(api.pullMcpCarrier).toHaveBeenCalledWith('car-1')
   })

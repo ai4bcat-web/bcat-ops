@@ -271,8 +271,8 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const rows = useMemo(() => requiredRows(values, mode, { customer: form.customer, settings }), [values, mode, form.customer, settings])
   const progress = useMemo(() => requiredProgress(rows), [rows])
   const sectionStates = useMemo(
-    () => Object.fromEntries(CARD_ORDER.map((k) => [k, sectionState(k, values, form.savedValues, rows, bundle ?? null)])) as Record<CardKey, SectionState>,
-    [values, form.savedValues, rows, bundle],
+    () => Object.fromEntries(CARD_ORDER.map((k) => [k, sectionState(k, values, form.savedValues, bundle ?? null)])) as Record<CardKey, SectionState>,
+    [values, form.savedValues, bundle],
   )
   const summary = useMemo(() => railSummary(values, form.customer, settings), [values, form.customer, settings])
 
