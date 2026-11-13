@@ -119,7 +119,7 @@ export class FakeDynamo {
       if (condition.includes(':expectedUpdatedAt') && row.updatedAt !== values[':expectedUpdatedAt']) throw conditionFailed()
       if (condition.includes('attribute_not_exists(updatedAt)') && row.updatedAt !== undefined) throw conditionFailed()
     }
-    if (condition.includes('attribute_not_exists(deliveredAt)') && row.deliveredAt !== undefined) throw conditionFailed()
+    if (condition.includes('attribute_not_exists(#deliveredAt)') && row.deliveredAt !== undefined && row.deliveredAt !== null) throw conditionFailed()
     for (const [, nameRef, valueRef] of String(input.UpdateExpression ?? '').matchAll(/(#\w+) = (:\w+)/g)) {
       row[names[nameRef] ?? nameRef.slice(1)] = values[valueRef]
     }

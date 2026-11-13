@@ -21,6 +21,7 @@ import { loadDocsNeededWorklist, loadWorklistShipments } from '@/lib/worklistShi
 import { customerDisplayName, isCustomerUnresolved } from '@/lib/customerResolution'
 import { isShipmentVoided } from '@/lib/shipmentVoid'
 import type { OrderRecord, ShipmentRecord } from '@/types/tms'
+import { deliveredTimeOf } from '@/lib/deliveredAt'
 
 const POLL_MS = 60_000
 
@@ -131,7 +132,7 @@ export function useArWorklist(tab: ArWorklistTab): ArWorklist {
             customerName: order.customerName ?? shipment?.customerName,
           }),
           billToId: order.billToId ?? null,
-          deliveredAt: shipment?.deliveredAt ?? null,
+          deliveredAt: deliveredTimeOf(shipment),
           arStatusChangedAt: order.arStatusChangedAt ?? null,
           revenueCents,
           docsRequired,

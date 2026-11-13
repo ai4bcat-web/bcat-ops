@@ -24,6 +24,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 
 import { shipmentStatusFromLoads } from '../../../src/lib/shipmentStatus'
 import type { LoadCarrierStatus, LoadWorkflowStatus, ShipmentStatus } from '../../../src/types/tms'
+import { deliveredAtFor } from './deliveredAtStamp'
 
 export type Row = Record<string, unknown>
 
@@ -497,6 +498,11 @@ export async function rederiveShipmentStatus(
     patch.previousStatus = current
     patch.statusChangedAt = now
     patch.statusChangedBy = caller.email
+  }
+  // Landing on DELIVERED stamps when, once: the loads' stamps, else the last delivery stop's actual
+  // departure / arrival, else now. An existing stamp is never overwritten (20027, Ryne 2026-11-12).
+  if (derived === 'DELIVERED' && !(typeof shipment.deliveredAt === 'string' && shipment.deliveredAt)) {
+    patch.deliveredAt = deliveredAtFor(bundle.loads, now)
   }
   await transact(deps.db, [updateItemTx(deps.tables.shipment, shipmentId, patch, null)], 'shipment')
   return readBundle(deps, shipmentId) as unknown as Row

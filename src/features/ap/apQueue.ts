@@ -13,6 +13,7 @@ import { billDueDate } from '@/lib/carrierBill'
 import { payToLabel, remitEmailOf } from './apViews'
 import type { CarrierPaymentInfo } from '@/lib/apiClient'
 import type { CarrierBillRecord, OrderRecord, ShipmentRecord } from '@/types/tms'
+import { deliveredTimeOf } from '@/lib/deliveredAt'
 
 /** The load facts a bill row shows, read once per shipment. */
 export interface BillShipmentFacts {
@@ -39,7 +40,7 @@ export function billFactsIndex(shipments: readonly ShipmentRecord[], orders: rea
   for (const order of orders) if (order.shipmentId && !orderByShipment.has(order.shipmentId)) orderByShipment.set(order.shipmentId, order)
   const out = new Map<string, BillShipmentFacts>()
   for (const shipment of shipments) {
-    const deliveredAt = shipment.deliveredAt ?? null
+    const deliveredAt = deliveredTimeOf(shipment)
     out.set(shipment.id, {
       shipmentNumber: shipment.number ?? null,
       po: referenceValue(orderByShipment.get(shipment.id), 'PO'),

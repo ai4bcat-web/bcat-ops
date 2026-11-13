@@ -11,6 +11,7 @@
  * name lookups; this file decides and the page renders.
  */
 import { daysLate, daysSinceInvoice } from '@/lib/arAging'
+import { deliveredTimeOf } from '@/lib/deliveredAt'
 import type { ArWorklistRow } from '@/hooks/useArWorklist'
 import type { InvoiceRecord, ShipmentRecord } from '@/types/tms'
 
@@ -103,7 +104,7 @@ export function readyRow(row: ArWorklistRow, l: ArQueueLookups): ArQueueRow {
     customerId: row.customerId,
     customerName: row.customerName || '—',
     ...common(shipment, l),
-    deliveredAt: row.deliveredAt ?? shipment?.deliveredAt ?? null,
+    deliveredAt: row.deliveredAt ?? deliveredTimeOf(shipment),
     releasedAt: row.order.readyToInvoiceAt ?? row.arStatusChangedAt ?? null,
     invoiceDate: null,
     dueAt: null,
@@ -142,7 +143,7 @@ export function invoiceRow(inv: InvoiceRecord, l: ArQueueLookups, releasedAt?: s
     ...common(shipment, l),
     revDivision,
     revDivisionName: revDivision ? l.divisionName(revDivision) : UNTAGGED,
-    deliveredAt: shipment?.deliveredAt ?? null,
+    deliveredAt: deliveredTimeOf(shipment),
     releasedAt: releasedAt ?? null,
     invoiceDate: inv.invoiceDate ?? null,
     dueAt: inv.dueAt ?? null,

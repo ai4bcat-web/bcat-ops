@@ -89,6 +89,7 @@ import type {
   TrackingLinkStatus,
   VisibilityPrefs,
 } from '../../../src/types/tms'
+import { deliveredAtFor, deliveredAtUnsetGuard } from '../_shared/deliveredAtStamp'
 
 const dynamo = new DynamoDBClient({})
 const sesClient = new SESv2Client({})
@@ -272,8 +273,7 @@ async function stampDeliveredAt(deps: NotifierDeps, shipmentId: string, at: stri
     await deps.db.send(new UpdateItemCommand({
       TableName: deps.tables.shipment,
       Key: marshall({ id: shipmentId }),
-      ...setExpression({ deliveredAt: at, updatedAt: now, updatedBy: NOTIFIER_ACTOR }),
-      ConditionExpression: 'attribute_not_exists(deliveredAt)',
+      ...deliveredAtUnsetGuard(setExpression({ deliveredAt: at, updatedAt: now, updatedBy: NOTIFIER_ACTOR })),
     }))
     return true
   } catch (err) {
@@ -384,15 +384,13 @@ function allLegsDelivered(legs: Row[], loadId: string, streamStatus: string): bo
     .every((status) => status === 'DELIVERED')
 }
 
-/** The latest delivery across the shipment's legs, or now when none was stamped. */
+/**
+ * The latest delivery across the shipment's legs (this record's image of `load` replaces its stale
+ * row): the legs' stamps, else the latest actual time at a delivery stop, else now.
+ */
 function deliveredAtOf(legs: Row[], load: Row, fallback: string): string {
-  const stamps = legs
-    .filter((leg) => text(leg.id) !== text(load.id))
-    .map((leg) => text(leg.deliveredAt))
-    .concat(text(load.deliveredAt))
-    .filter(Boolean)
-    .sort()
-  return stamps.length > 0 ? stamps[stamps.length - 1] : fallback
+  const current = legs.filter((leg) => text(leg.id) !== text(load.id)).concat(load)
+  return deliveredAtFor(current, fallback)
 }
 
 async function notifyRecord(record: StreamRecord, deps: NotifierDeps): Promise<NotifierSummary | null> {
