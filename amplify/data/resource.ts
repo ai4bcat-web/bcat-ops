@@ -2853,6 +2853,12 @@ const schema = a.schema(stageTypes({
       messageId:     a.string(),
       sentAt:        a.datetime(),
       trackingLinkId: a.string(),
+      // What SES reported after accepting it (ses-delivery-events): DELIVERED | DELAYED | BOUNCED | COMPLAINT | REJECTED.
+      deliveryStatus: a.string(),
+      deliveredAt:   a.datetime(),
+      deliveryError: a.string(),
+      // { type, at, recipients[], reason }[]
+      deliveryLog:   a.json(),
       createdBy:     a.string().required(),
       // When the send was attempted. Amplify's own createdAt cannot be a sort key.
       at:            a.datetime().required(),

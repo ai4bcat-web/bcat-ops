@@ -30,7 +30,7 @@ import { formatCents } from '@/lib/invoiceBuild'
 import { otrStatusLabel } from '@/lib/otrInvoiceStatus'
 import { InvoiceCommissionCard } from '@/features/commissions/CommissionsPage'
 import {
-  NOTICE_STATUS_LABEL, agingChipFor, appliedToInvoice, formatDay, noticeStatusDetail, recipientList,
+  agingChipFor, appliedToInvoice, formatDay, noticeDelivery, recipientList,
 } from './arViews'
 import { EmailInvoiceDialog } from './components/EmailInvoiceDialog'
 import { useBillingGrant, BILLING_GRANT_MESSAGE } from './useBillingGrant'
@@ -360,22 +360,19 @@ export function InvoiceDetail() {
           {notices.length === 0 && <p className="tms-muted">This invoice has never been e-mailed from here.</p>}
           <TmsTimeline
             items={notices.map((notice) => {
-              const detail = noticeStatusDetail(notice)
+              const delivery = noticeDelivery(notice)
+              const detail = delivery.detail
               return {
                 id: notice.id,
-                tone: notice.status === 'SENT' ? 'green' : 'red',
+                tone: delivery.tone,
                 title: recipientList(notice.to) || 'no recipients',
-                tag: (
-                  <TmsBadge tone={notice.status === 'SENT' ? 'green' : 'red'}>
-                    {NOTICE_STATUS_LABEL[notice.status]}
-                  </TmsBadge>
-                ),
+                tag: <TmsBadge tone={delivery.tone}>{delivery.label}</TmsBadge>,
                 at: formatDateTime(notice.at),
                 description: (
                   <>
                     {notice.cc && <p className="text-xs tms-muted">cc {recipientList(notice.cc)}</p>}
                     <p className="mt-1 text-xs">{notice.subject}</p>
-                    {detail && <p className="mt-1 text-xs" style={RED}>{detail}</p>}
+                    {detail && <p className="mt-1 text-xs" style={delivery.tone === 'red' ? RED : undefined}>{detail}</p>}
                     <TmsButton
                       variant="ghost"
                       size="sm"

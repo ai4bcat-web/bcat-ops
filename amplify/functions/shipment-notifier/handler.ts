@@ -47,6 +47,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { randomBytes } from 'crypto'
 
 import { deliverNotice } from '../_shared/shipmentNotices'
+import { threadReplyAddress } from '../../../src/lib/shipmentThread'
 import {
   IDX_LOADS_BY_SHIPMENT,
   IDX_ORDERS_BY_SHIPMENT,
@@ -507,6 +508,8 @@ async function notifyRecord(record: StreamRecord, deps: NotifierDeps): Promise<N
         ses: deps.ses,
         tableName: deps.tables.shipmentNotice,
         from: deps.from,
+        // From is the bcatcorp.com sender; a reply still threads onto the shipment.
+        replyTo: threadReplyAddress(shipmentId),
         draft: {
           id: noticeId('MILESTONE', shipmentId, milestone),
           shipmentId,
@@ -581,6 +584,7 @@ async function notifyRecord(record: StreamRecord, deps: NotifierDeps): Promise<N
           ses: deps.ses,
           tableName: deps.tables.shipmentNotice,
           from: deps.from,
+          replyTo: threadReplyAddress(shipmentId),
           draft: {
             id: noticeId('POD_REQUEST', loadCarrierId),
             shipmentId,
@@ -669,7 +673,7 @@ export function notifierDepsFromEnv(env: NodeJS.ProcessEnv = process.env): Notif
     },
     now: nowIso,
     portalOrigin: env.PORTAL_ORIGIN ?? '',
-    from: env.FROM_ADDRESS ?? 'ai4bcat@gmail.com',
+    from: env.FROM_ADDRESS ?? 'notifications@bcatcorp.com',
   }
 }
 

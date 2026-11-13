@@ -61,6 +61,8 @@ import { tripScreenshotParser } from './functions/trip-screenshot-parser/resourc
 import { BlockPublicAccess, Bucket, BucketEncryption, HttpMethods, ObjectOwnership } from 'aws-cdk-lib/aws-s3'
 import { rateconParser } from './functions/ratecon-parser/resource'
 import { apptReport } from './functions/appt-report/resource'
+import { sesDeliveryEvents } from './functions/ses-delivery-events/resource'
+import { CfnConfigurationSet, CfnConfigurationSetEventDestination } from 'aws-cdk-lib/aws-ses'
 import { cashCheckinReminder } from './functions/cash-checkin-reminder/resource'
 import { apptRequestEmailer } from './functions/appt-request-emailer/resource'
 import { tmsDirectoryActions } from './functions/tms-directory-actions/resource'
@@ -165,6 +167,7 @@ const backend = defineBackend({
   rateconAssignedText,
   rateconParser,
   apptReport,
+  sesDeliveryEvents,
   cashCheckinReminder,
   apptRequestEmailer,
   amazonDisputeIntake,
@@ -2271,7 +2274,8 @@ const payEmailerFn = backend.driverPayEmailer.resources.lambda as LambdaFunction
 backend.driverPayEmailer.resources.lambda.addToRolePolicy(
   new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
 )
-payEmailerFn.addEnvironment('FROM_ADDRESS', process.env.DRIVER_PAY_FROM_ADDRESS ?? 'ai4bcat@gmail.com')
+// bcatcorp.com sender (DKIM-aligned); a gmail.com From through SES fails alignment and is dropped.
+payEmailerFn.addEnvironment('FROM_ADDRESS', process.env.DRIVER_PAY_FROM_ADDRESS ?? 'notifications@bcatcorp.com')
 
 // ── vehicleQuoteEmailer Lambda (SES — HTML vehicle-transport quote) ─────────
 // Sends the customer-facing Best Care Auto Transport quote from ruben@bcatcorp.com
@@ -3070,7 +3074,8 @@ trackingActionsFn.addToRolePolicy(
 )
 trackingActionsFn.addEnvironment('USER_POOL_ID',                backend.auth.resources.userPool.userPoolId)
 trackingActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_ORIGIN)
-trackingActionsFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
+// bcatcorp.com sender (DKIM-aligned), like shipmentActionsFn above; replies go to the thread plus-address via Reply-To.
+trackingActionsFn.addEnvironment('FROM_ADDRESS',                'notifications@bcatcorp.com')
 // ── Step AO (append-only block): load-keyed breadcrumbs and the cached route ──
 // tmsTrackingActions files shared-pin / geocoded-reply fixes and the route cache row in
 // TruckLocationHistory, and reads TruckLocation to decide whether an own-asset leg still has
@@ -3284,7 +3289,10 @@ financeActionsFn.addToRolePolicy(new PolicyStatement({
 }))
 financeActionsFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
 financeActionsFn.addEnvironment('PORTAL_ORIGIN',                 PORTAL_ORIGIN)
-financeActionsFn.addEnvironment('FROM_ADDRESS',                  'ai4bcat@gmail.com')
+// Invoices, statements and remittances go out from billing@bcatcorp.com: the verified, DKIM-signed domain, and the
+// mailbox customers remit to. From ai4bcat@gmail.com through SES they failed DMARC alignment and never arrived
+// (invoice 20027, 2026-11-13: SES accepted it, nobody - customer or the invoices@ cc - received it).
+financeActionsFn.addEnvironment('FROM_ADDRESS',                  'billing@bcatcorp.com')
 financeActionsFn.addToRolePolicy(
   new PolicyStatement({
     // The caller's e-mail is the signature on every posted row.
@@ -3694,7 +3702,8 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
   notifyFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME',  shipmentNoticeTable.tableName)
   notifyFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', shipmentDocumentTable.tableName)
   notifyFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_ORIGIN)
-  notifyFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
+  // bcatcorp.com sender (DKIM-aligned); replies thread back through the Reply-To plus-address.
+  notifyFn.addEnvironment('FROM_ADDRESS',                'notifications@bcatcorp.com')
   notifyFn.addToRolePolicy(
     new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
   )
@@ -4485,6 +4494,50 @@ if (tableOrNull('DashboardRollup')) {
     description: 'Recompute dirty dashboard rollup rows, the live row and the current months',
   })
   rollupSweepRule.addTarget(new EventsLambdaTarget(rollupFn, { event: RuleTargetInput.fromObject({ sweep: true }) }))
+}
+
+// ── SES delivery events (invoice 20027, 2026-11-13) ──────────────────────────
+// SES "accepted" is not "delivered": 20027 was accepted and nobody received it. Every send through
+// deliverNotice / the tracking thread carries this configuration set and a noticeId tag; the set
+// publishes Delivery / Bounce / Complaint / Reject / DeliveryDelay to the default EventBridge bus and
+// ses-delivery-events writes the outcome onto the ShipmentNotice row (the invoice's e-mail history).
+// The set lives in its own stack with no inputs, so the data-stack Lambdas can reference it (and so
+// deploy after it) without a cycle; the consumer Lambda sits in its own resource group because the
+// data stack is at its CloudFormation size limit.
+{
+  const sesConfigStack = backend.createStack('SesConfig')
+  const branchSlug = (process.env.AWS_BRANCH ?? 'sandbox').replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 40)
+  const configSet = new CfnConfigurationSet(sesConfigStack, 'NoticeConfigSet', { name: `bcat-notices-${branchSlug}` })
+  const eventDest = new CfnConfigurationSetEventDestination(sesConfigStack, 'NoticeEventsToEventBridge', {
+    configurationSetName: configSet.ref,
+    eventDestination: {
+      name: 'eventbridge',
+      enabled: true,
+      matchingEventTypes: ['DELIVERY', 'BOUNCE', 'COMPLAINT', 'REJECT', 'DELIVERY_DELAY'],
+      eventBridgeDestination: {
+        eventBusArn: Stack.of(sesConfigStack).formatArn({ service: 'events', resource: 'event-bus', resourceName: 'default' }),
+      },
+    },
+  })
+  eventDest.addDependency(configSet)
+  for (const fn of [financeActionsFn, trackingActionsFn, shipmentActionsFn, backend.shipmentNotifier.resources.lambda as LambdaFunction]) {
+    fn.addEnvironment('SES_CONFIGURATION_SET', configSet.ref)
+  }
+
+  const sesEventsFn = backend.sesDeliveryEvents.resources.lambda as LambdaFunction
+  sesEventsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME', shipmentNoticeTable.tableName)
+  sesEventsFn.addToRolePolicy(new PolicyStatement({
+    actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+    resources: [shipmentNoticeTable.tableArn],
+  }))
+  new Rule(Stack.of(sesEventsFn), 'SesNoticeDeliveryEvents', {
+    eventPattern: {
+      source: ['aws.ses'],
+      detailType: ['Email Delivered', 'Email Bounced', 'Email Complaint Received', 'Email Rejected', 'Email Delivery Delayed'],
+      detail: { mail: { tags: { 'ses:configuration-set': [configSet.ref] } } },
+    },
+    targets: [new EventsLambdaTarget(sesEventsFn, { retryAttempts: 4 })],
+  })
 }
 
 // ── Dev stack guard (ops-dev.bcatcorp.com) ──────────────────────────────────

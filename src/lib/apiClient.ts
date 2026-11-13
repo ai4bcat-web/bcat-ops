@@ -4731,9 +4731,10 @@ const SHIPMENT_DOCUMENT_FIELDS = `
 const SHIPMENT_NOTICE_FIELDS = `
   id shipmentId loadId loadCarrierId kind milestone channel
   to cc subject body attachments status error messageId sentAt trackingLinkId
+  deliveryStatus deliveredAt deliveryError deliveryLog
   at createdBy createdAt updatedAt
 `
-const SHIPMENT_NOTICE_JSON_FIELDS: (keyof ShipmentNoticeRecord)[] = ['attachments']
+const SHIPMENT_NOTICE_JSON_FIELDS: (keyof ShipmentNoticeRecord)[] = ['attachments', 'deliveryLog']
 
 // Both models arrive with step E's deploy, and until it lands AppSync has no such
 // query at all — the error names the query, not a field, so the field-level self-heal

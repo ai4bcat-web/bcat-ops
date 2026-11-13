@@ -19,6 +19,7 @@ import {
   type DynamoDBClient,
 } from '@aws-sdk/client-dynamodb'
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
+import { NOTICE_TAG, encodeNoticeTag } from '../ses-delivery-events/deliveryEvent'
 import { marshall } from '@aws-sdk/util-dynamodb'
 
 import type { Row } from './shipmentStore'
@@ -45,9 +46,22 @@ export interface SendEmailArgs {
   from: string
   to: string[]
   cc?: string[]
+  /** Where a reply should go when it is not the From mailbox (the shipment's thread plus-address). */
+  replyTo?: string | null
+  /** Tags the send so its SES delivery / bounce events find the ShipmentNotice row again. */
+  noticeId?: string | null
   subject: string
   body: string
   attachments?: EmailAttachment[]
+}
+
+/**
+ * SES configuration set the send is tagged with, so delivery / bounce / complaint events
+ * come back to the ShipmentNotice row (ses-delivery-events). Unset on dev and in tests.
+ */
+export function sesConfigurationSet(): string | undefined {
+  const name = process.env.SES_CONFIGURATION_SET?.trim()
+  return name ? name : undefined
 }
 
 /**
@@ -65,6 +79,7 @@ export async function sendNoticeEmail(ses: SESv2Client, args: SendEmailArgs): Pr
     `From: ${args.from}\r\n` +
     `To: ${args.to.join(', ')}\r\n` +
     (cc.length > 0 ? `Cc: ${cc.join(', ')}\r\n` : '') +
+    (args.replyTo ? `Reply-To: ${args.replyTo.replace(/[\r\n]+/g, '')}\r\n` : '') +
     `Subject: ${subject}\r\n` +
     `MIME-Version: 1.0\r\n`
 
@@ -102,6 +117,8 @@ export async function sendNoticeEmail(ses: SESv2Client, args: SendEmailArgs): Pr
       FromEmailAddress: args.from,
       Destination: { ToAddresses: args.to, CcAddresses: cc.length > 0 ? cc : undefined },
       Content: { Raw: { Data: new TextEncoder().encode(raw) } },
+      ConfigurationSetName: sesConfigurationSet(),
+      EmailTags: args.noticeId ? [{ Name: NOTICE_TAG, Value: encodeNoticeTag(args.noticeId) }] : undefined,
     }),
   )
   return out.MessageId ?? null
@@ -219,6 +236,8 @@ export interface DeliverNoticeArgs {
   tableName: string
   draft: NoticeDraft
   from: string
+  /** Reply-To header; leave unset when replies should go to `from`. */
+  replyTo?: string | null
   attachments?: EmailAttachment[]
 }
 
@@ -256,6 +275,8 @@ export async function deliverNotice(args: DeliverNoticeArgs): Promise<DeliveredN
       from: args.from,
       to: args.draft.to,
       cc: args.draft.cc,
+      replyTo: args.replyTo,
+      noticeId: args.draft.id,
       subject: args.draft.subject,
       body: args.draft.body,
       attachments: args.attachments,
