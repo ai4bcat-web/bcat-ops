@@ -30,6 +30,13 @@ describe('ResetDriverPassword', () => {
     expect(screen.queryByRole('button', { name: /Reset password/i })).not.toBeInTheDocument()
   })
 
+  it('is disabled with a hint when the driver has no e-mail', () => {
+    render(<ResetDriverPassword driver={{ ...chuck, email: '' }} />)
+    const button = screen.getByRole('button', { name: /Reset password/i })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', 'Add an e-mail to this driver first')
+  })
+
   it('shows to an ADMIN and sets a temporary password the driver must change', async () => {
     authUser.current = { email: 'dennis@bcatcorp.com', groups: ['ADMIN'] }
     getDriverLogin.mockResolvedValue({ exists: true, email: 'chuck@example.com', status: 'CONFIRMED', enabled: true, emailVerified: true })

@@ -60,6 +60,7 @@ vi.mock('@/features/driver-pay/DriverPayForms', () => ({ SettingsModal: () => <d
 vi.mock('@/features/driver-pay-box-trucks/BoxTruckPayForms', () => ({ SettingsModal: () => <div data-testid="box-pay-stub" /> }))
 vi.mock('@/features/owner-operator-pay/OwnerOperatorPayForms', () => ({ SettingsModal: () => <div data-testid="oo-pay-stub" /> }))
 vi.mock('@/features/files/DocumentPreviewModal', () => ({ DocumentPreviewModal: () => null }))
+vi.mock('@/features/driver-login/ResetDriverPassword', () => ({ ResetDriverPassword: ({ driver }: { driver: { name: string } }) => <div data-testid="reset-pw-stub">{driver.name}</div> }))
 
 const { DriversListPage } = await import('./DriversListPage')
 const { DriverProfilePage } = await import('./DriverProfilePage')
@@ -163,6 +164,7 @@ describe('Driver profile', () => {
     await mount('/profiles/drivers/d1')
     expect(screen.getByRole('heading', { name: 'Zak Pace' })).toBeTruthy()
     expect(screen.getAllByText('jason@bcatcorp.com').length).toBeGreaterThan(0)
+    expect(screen.getByTestId('reset-pw-stub').textContent).toBe('Zak Pace')
     fireEvent.click(screen.getByTestId('driver-edit'))
     expect(screen.getByTestId('drawer-stub')).toBeTruthy()
   })
