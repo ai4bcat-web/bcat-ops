@@ -1,5 +1,7 @@
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb'
 import { unmarshall } from '@aws-sdk/util-dynamodb'
+import { handleIntakeThreadStream, type StreamRecord } from './intakeThread'
+import { liveIntakeThreadDeps } from './intakeThreadDeps'
 
 const dynamo          = new DynamoDBClient({})
 const TABLE_NAME      = process.env.TABLE_NAME!
@@ -43,7 +45,19 @@ async function postSlackReply(channel: string, threadTs: string, text: string) {
   }
 }
 
-export const handler = async (event: AppSyncEvent) => {
+let threadDeps: ReturnType<typeof liveIntakeThreadDeps> | null = null
+
+export const handler = async (event: AppSyncEvent | { Records: StreamRecord[] }) => {
+  // DynamoDB streams (IntakeLoad, Shipment, ShipmentDocument, Invoice): process updates in the intake Slack threads.
+  if ('Records' in event) {
+    const result = await handleIntakeThreadStream(
+      (threadDeps ??= liveIntakeThreadDeps()),
+      event.Records,
+      (img) => unmarshall(img as Parameters<typeof unmarshall>[0]),
+    )
+    console.log('[intake-thread] batch', JSON.stringify(result))
+    return result
+  }
   const { intakeItemId, oldStatus, newStatus, actorName, proNumber, reassignedTo } = event.arguments
 
   // Fetch the item to get Slack thread context

@@ -1942,6 +1942,10 @@ const schema = a.schema(stageTypes({
       dismissedBy:   a.string(),
       dismissedAt:   a.datetime(),
       dismissReason: a.string(),
+      // The Slack message this e-mail arrived as in #intake-ivan / #intake-bcat, found by the intake-thread notifier (Ryne 2026-11-12).
+      // Process updates are posted under it; the per-line claims live in an unmodelled `slackPosted` map on the same row.
+      slackChannelId: a.string(),
+      slackThreadTs:  a.string(),
       createdBy:     a.string().required(),
       updatedBy:     a.string().required(),
       version:       a.integer().required(),  // CAS token for every write
@@ -2078,6 +2082,9 @@ const schema = a.schema(stageTypes({
       // Step U. The IntakeLoad this shipment was moved from and who reviewed it, when.
       // Read-only to a client (the `workflowRunId` pattern): INTAKE_MOVE_TO_ACTIVE writes them.
       intakeLoadId:     a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      // The intake e-mail's Slack thread, copied from the IntakeLoad row when the shipment is created from it (intake-thread notifier).
+      slackChannelId:   a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
+      slackThreadTs:    a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
       intakeReviewedBy: a.string().authorization((allow) => [allow.authenticated().to(['read'])]),
       intakeReviewedAt: a.datetime().authorization((allow) => [allow.authenticated().to(['read'])]),
 
