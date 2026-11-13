@@ -50,6 +50,7 @@ import { normalizePaperworkLocation, paperworkLocationLabel } from '../../../src
 import { splitCityState } from '../../../src/lib/locationAutoSave'
 import { LOAD_WORKFLOW_STATUSES, type StopTimesLike } from '../../../src/lib/shipmentStatus'
 import type { LoadStatusSource, LoadWorkflowStatus, StopEventType } from '../../../src/types/tms'
+import { deliveredAtUnsetGuard } from '../_shared/deliveredAtStamp'
 
 const dynamo = new DynamoDBClient({})
 
@@ -356,8 +357,7 @@ async function stampDelivered(deps: ProjectorDeps, bundle: { shipment: Row; load
     await deps.store.db.send(new UpdateItemCommand({
       TableName: deps.store.tables.shipment,
       Key: marshall({ id: String(bundle.shipment.id) }),
-      ...setExpression({ deliveredAt: at, updatedAt: deps.store.now(), updatedBy: PROJECTOR_ACTOR }),
-      ConditionExpression: 'attribute_not_exists(deliveredAt)',
+      ...deliveredAtUnsetGuard(setExpression({ deliveredAt: at, updatedAt: deps.store.now(), updatedBy: PROJECTOR_ACTOR })),
     }))
   } catch (err) {
     // The notifier stamped it first: same value, nothing to do.

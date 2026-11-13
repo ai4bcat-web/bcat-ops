@@ -86,8 +86,12 @@ class FakeDynamo {
         const row = this.get(tableName, id) ?? { id }
         const names = (input.ExpressionAttributeNames ?? {}) as Record<string, string>
         const values = unmarshall(input.ExpressionAttributeValues as Record<string, never>)
-        const absent = /attribute_not_exists\((\w+)\)/.exec(String(input.ConditionExpression ?? ''))
-        if (absent && row[absent[1]] !== undefined && row[absent[1]] !== null) {
+        // As DynamoDB reads it: a NULL attribute exists, unless the condition also accepts attribute_type NULL.
+        const condition = String(input.ConditionExpression ?? '')
+        const absent = /attribute_not_exists\((#?\w+)\)/.exec(condition)
+        const field = absent ? (names[absent[1]] ?? absent[1].replace(/^#/, '')) : ''
+        const nullAccepted = condition.includes('attribute_type(') && row[field] === null
+        if (absent && row[field] !== undefined && !nullAccepted) {
           throw new ConditionalCheckFailedException({ message: 'already set', $metadata: {} })
         }
         for (const [, nameRef, valueRef] of String(input.UpdateExpression ?? '').matchAll(/(#?\w+) = (:\w+)/g)) {
@@ -115,7 +119,7 @@ class FakeSes {
   }
 }
 
-type Stop = { id: string; type: 'pickup' | 'delivery'; sequence: number; city?: string; appt?: string }
+type Stop = { id: string; type: 'pickup' | 'delivery'; sequence: number; city?: string; appt?: string; arrivedAt?: string; departedAt?: string }
 
 const stops = (...list: Stop[]) => JSON.stringify(list)
 
@@ -247,6 +251,29 @@ describe('notifyLoadStream', () => {
     expect(result).toMatchObject({ considered: 1, milestones: 0, sent: 0, podRequests: 0 })
     expect(ses.sent).toHaveLength(0)
     expect(db.all(TABLES.shipmentNotice)).toHaveLength(0)
+  })
+
+  it('stamps deliveredAt on a shipment created with deliveredAt: null, from the delivery stop actual', async () => {
+    // 20027 (Ryne 2026-11-12): the row carried deliveredAt NULL, so attribute_not_exists refused the stamp.
+    const { db, deps } = setup()
+    db.seed(TABLES.shipment, { ...db.get(TABLES.shipment, 'ship-1'), deliveredAt: null })
+    const delivered = loadRow({
+      status: 'DELIVERED',
+      stops: stops(
+        { id: 'st-1', type: 'pickup', sequence: 0, city: 'JOLIET, IL', appt: '2026-10-26 08:00', departedAt: '2026-10-26T15:00:00.000Z' },
+        { id: 'st-2', type: 'delivery', sequence: 1, city: 'MESA, AZ', appt: '2026-10-28 09:00', arrivedAt: '2026-10-28T16:00:00.000Z', departedAt: '2026-10-28T16:30:00.000Z' },
+      ),
+    })
+    const result = await notifyLoadStream(moved(loadRow({ status: 'UNLOADING' }), delivered), deps)
+    expect(result).toMatchObject({ deliveries: 1 })
+    expect(db.get(TABLES.shipment, 'ship-1')).toMatchObject({ deliveredAt: '2026-10-28T16:30:00.000Z' })
+  })
+
+  it('never overwrites a delivered stamp that is already there', async () => {
+    const { db, deps } = setup()
+    db.seed(TABLES.shipment, { ...db.get(TABLES.shipment, 'ship-1'), deliveredAt: '2026-10-27T10:00:00.000Z' })
+    await notifyLoadStream(moved(loadRow({ status: 'UNLOADING' }), loadRow({ status: 'DELIVERED', deliveredAt: '2026-10-28T09:40:00.000Z' })), deps)
+    expect(db.get(TABLES.shipment, 'ship-1')).toMatchObject({ deliveredAt: '2026-10-27T10:00:00.000Z' })
   })
 
   it('holds the customer milestone and the delivery stamp until the last leg has delivered', async () => {

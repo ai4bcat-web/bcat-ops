@@ -104,5 +104,7 @@ export const PROD_WRITE_SETS = {
   // `awInvoiceRenumber.mjs --apply`: counter-numbered invoices (INV-…) re-keyed to the PRO # — new Invoice row, Order.invoiceId/Number,
   // FactoringItem.invoiceId, the inv:<id> ShipmentDocument; old Invoice row left VOID "Renumbered to …". Nothing deleted.
   awInvoiceRenumber: { models: ['Invoice', 'Order', 'FactoringItem', 'ShipmentDocument', 'AuditLog'] },
+  // `awDeliveredAtBackfill.mjs --apply`: Shipment.deliveredAt (+ updatedAt/By) on DELIVERED shipments still unstamped (conditional), + one AuditLog row each.
+  awDeliveredAtBackfill: { models: ['Shipment', 'AuditLog'] },
   awShipmentNumber: { models: ['Shipment', 'Load', 'Invoice', 'CarrierBill', 'SpotRequest', 'WorkflowRun', 'IntakeLoad', 'TrackingLink', 'Quote', 'LaneRateSample', 'Commission', 'AuditLog', 'TmsSettings'] },
 };

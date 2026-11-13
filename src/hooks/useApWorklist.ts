@@ -20,6 +20,7 @@ import { listOpenApAssignments } from '@/lib/apiClient'
 import { loadWorklistShipments } from '@/lib/worklistShipments'
 import { isShipmentVoided } from '@/lib/shipmentVoid'
 import type { LoadCarrierRecord, ShipmentRecord } from '@/types/tms'
+import { deliveredTimeOf } from '@/lib/deliveredAt'
 
 const POLL_MS = 60_000
 
@@ -122,7 +123,7 @@ export function useApWorklist(tab: ApWorklistTab): ApWorklist {
           carrierId: assignment.carrierId ?? null,
           carrierName: assignment.carrierName ?? '',
           billId: assignment.invoiceId ?? null,
-          deliveredAt: shipment?.deliveredAt ?? null,
+          deliveredAt: deliveredTimeOf(shipment),
           apStatusChangedAt: assignment.apStatusChangedAt ?? null,
           costCents,
           apBalanceCents: assignment.apBalanceCents ?? null,
