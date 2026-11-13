@@ -10,7 +10,7 @@
  * Unvoid and customer re-point remain owner/ADMIN actions, enforced on the server.
  */
 import { useContext, useState } from 'react'
-import { MoreHorizontal, Copy, PauseCircle, PlayCircle, Ban, RotateCcw, Check, X, Truck, Building2, UserMinus, FileSignature, UserCog, Trash2 } from 'lucide-react'
+import { MoreHorizontal, Copy, PauseCircle, PlayCircle, Ban, RotateCcw, Check, X, Truck, Building2, UserMinus, FileSignature, UserCog, Trash2, Hourglass } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -74,6 +74,9 @@ export interface ShipmentActionHandlers {
   onRepointCustomer?: () => void
   /** Step AM: open the Cover dialog for this shipment (the board offers it only for a load that needs a carrier). */
   onCover?: () => void
+  /** Detention flag (Ryne 2026-11-13): open the flag dialog. `detentionFlagged` relabels the item. */
+  onDetention?: () => void
+  detentionFlagged?: boolean
 }
 
 /** Everything the row menu needs to read, including what the void dialog stamps. */
@@ -133,6 +136,11 @@ export function ShipmentRowActions({ shipment, isAdmin, cancelDeleteAdminOnly, h
           {handlers.onCover && (
             <DropdownMenuItem disabled={voided} data-testid="row-cover" onSelect={() => handlers.onCover?.()}>
               <Building2 size={14} className="mr-2" />Cover…
+            </DropdownMenuItem>
+          )}
+          {handlers.onDetention && (
+            <DropdownMenuItem disabled={voided} data-testid="row-detention" onSelect={() => handlers.onDetention?.()}>
+              <Hourglass size={14} className="mr-2" />{handlers.detentionFlagged ? 'Edit detention…' : 'Flag detention…'}
             </DropdownMenuItem>
           )}
           <DropdownMenuItem disabled={voided} onSelect={() => setDialog({ kind: 'duplicate' })}>

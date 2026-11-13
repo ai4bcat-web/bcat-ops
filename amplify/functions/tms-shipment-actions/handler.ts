@@ -170,6 +170,7 @@ import { deleteShipments, latestDeleteExport, restoreDeleted } from './shipmentD
 import { shipmentDeleteStore } from './shipmentDeleteStore'
 import { SHIPMENT_ACTIONS_TABLES } from './tableEnv'
 import { parseTrackingPrefs, validateTrackingPrefsOverride, type TrackingPrefsOverride } from '../../../src/lib/trackingPrefs'
+import { parseDetentionFlag, validateDetentionInput, type DetentionFlag } from '../../../src/lib/detentionFlag'
 import {
   buildPostInvoiceEntry, cleanGuardedInput, diffSnapshots, isInvoicedOrder, isPostInvoiceGuarded, POST_INVOICE_ACTION,
   postInvoiceCleared, readChangeReason, REASON_REQUIRED_MESSAGE, snapshotOf, type PostInvoiceGuardedAction,
@@ -640,6 +641,7 @@ type Action =
   | 'ASSIGN_CARRIER_REP'
   | 'ASSIGN_TRACKER'
   | 'SET_TRACKING_PREFS'
+  | 'SET_DETENTION_FLAG'
   | 'BATCH_SHIPMENT_TASK'
   | 'TEST_OWNERSHIP_RULES'
   | 'RETAG_SHIPMENTS'
@@ -3834,6 +3836,37 @@ async function setTrackingPrefs(input: Row, caller: Caller): Promise<Row> {
     shipment: await getById(SHIPMENT_TABLE_NAME, shipmentId),
     ...(target ? { loadCarrier: await getById(LOAD_CARRIER_TABLE_NAME, String(target.id)) } : {}),
   } as unknown as Row
+}
+
+/**
+ * SET_DETENTION_FLAG (Ryne 2026-11-13) — flag a shipment as needing detention, or clear it (`flag: null`).
+ * Any office user may flag. Stamps who and when (never client-supplied), logs it in Activity, charges nothing:
+ * billing adds the accessorial by hand from Load Review. Refused on a voided shipment.
+ */
+async function setDetentionFlag(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  if (!('flag' in input)) throw new Error('flag is required; send null to clear it')
+  const sent = input.flag == null ? null : validateDetentionInput(input.flag)
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  assertNotVoided(shipment)
+  const prior = parseDetentionFlag(shipment.detentionFlag)
+  if (!sent && !prior) return { shipment }
+  const flag: DetentionFlag | null = sent ? { ...sent, flaggedAt: nowIso(), flaggedBy: caller.email } : null
+  await transact(
+    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+      detentionFlag: flag,
+      updatedBy: caller.email,
+      updatedAt: nowIso(),
+      version: (numberOrNull(shipment.version) ?? 1) + 1,
+    }, null)],
+    'shipment',
+  )
+  await writeAudit('SHIPMENT', shipmentId, flag ? 'FLAG_DETENTION' : 'CLEAR_DETENTION', caller, {
+    from: prior,
+    to: flag,
+  })
+  return { shipment: await getById(SHIPMENT_TABLE_NAME, shipmentId) } as unknown as Row
 }
 
 /**
@@ -9160,6 +9193,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return assignTracker(input, caller)
     case 'SET_TRACKING_PREFS':
       return setTrackingPrefs(input, caller)
+    case 'SET_DETENTION_FLAG':
+      return setDetentionFlag(input, caller)
     case 'ASSIGN_CARRIER_REP':
       return assignCarrierRep(input, caller)
     case 'BATCH_SHIPMENT_TASK':

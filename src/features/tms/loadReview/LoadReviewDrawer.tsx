@@ -7,6 +7,7 @@ import type { ShipmentListRow } from '@/hooks/useShipments'
 import { TmsBadge, TmsButton, TmsCard, TmsDrawer, TmsSelect } from '@/features/tms/kit'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import { ReleaseGateList } from '@/features/shipments/components/ReleaseGateCard'
+import { DetentionPill, DetentionSection } from '@/features/shipments/components/Detention'
 import { releaseGateMessages } from '@/features/shipments/components/releaseGateView'
 import { toast } from 'sonner'
 import { useBillingGrant, LOAD_REVIEW_GRANT_MESSAGE } from '@/features/ar/useBillingGrant'
@@ -119,7 +120,7 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
   const passed = LOAD_REVIEW_CHECKS.filter((key) => verdict.checks[key].ok).length
   return <TmsDrawer open onOpenChange={(open) => { if (!open) onClose() }} title={shipmentLink('overview', row.number)}
     description={`${row.customerName ?? '—'} · ${row.originCity ?? '—'} → ${row.destinationCity ?? '—'} · ${deliveredTimeOf(row) ? `Delivered ${formatDateTime(deliveredTimeOf(row))}` : deliveredText(row) === '—' ? 'Delivered —' : deliveredText(row)}`}
-    headerExtra={<><StatusPill row={row} /><TmsBadge tone={verdict.ok ? 'green' : 'orange'}>{released ? 'Already released' : verdict.ok ? result ? 'Ready' : 'Looks ready' : `${reasons.length} to fix`}</TmsBadge><span title={age == null ? NO_DELIVERY_TIME_TIP : undefined}><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'No delivery time' : age + ' d'}</TmsBadge></span></>}
+    headerExtra={<><StatusPill row={row} /><DetentionPill flag={row.detentionFlag} /><TmsBadge tone={verdict.ok ? 'green' : 'orange'}>{released ? 'Already released' : verdict.ok ? result ? 'Ready' : 'Looks ready' : `${reasons.length} to fix`}</TmsBadge><span title={age == null ? NO_DELIVERY_TIME_TIP : undefined}><TmsBadge tone={age != null && age >= 7 ? 'red' : age != null && age >= 3 ? 'orange' : 'gray'}>{age == null ? 'No delivery time' : age + ' d'}</TmsBadge></span></>}
     footer={<div className="lr-footer">
       {!released && !verdict.ok && <div className="lr-footer-blockers" role="note">
         <p className="lr-footer-title">{`Fix ${reasons.length} ${reasons.length === 1 ? 'item' : 'items'} first.`}</p>
@@ -134,6 +135,7 @@ export function LoadReviewDrawer({ row, onClose, onRefresh, onMoved, onFailure }
         <TmsButton variant="ghost" onClick={onClose}>Close</TmsButton>
       </div>
     </div>}>
+    <DetentionSection shipment={row} onChanged={() => { void onRefresh() }} />
     {!result && !error && <p role="status">Checking release requirements…</p>}
     {error && <ReleaseGateList messages={releaseGateMessages(error) ?? [error]} />}
     {result && <div className={`lr-summary ${verdict.ok ? 'lr-summary-ok' : 'lr-summary-bad'}`} data-testid="lr-summary">

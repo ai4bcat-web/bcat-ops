@@ -2118,6 +2118,9 @@ const schema = a.schema(stageTypes({
       financeReviewAt:     a.datetime(),
       financeReviewReason: a.string(),
       financeReviewApNote: a.string(),
+      // Detention flag (Ryne 2026-11-13): { stopType, stopId?, stopLabel?, arrivedAt?, departedAt?, hours?, note?,
+      // flaggedAt, flaggedBy } (src/lib/detentionFlag.ts). Written only by tms-shipment-actions SET_DETENTION_FLAG.
+      detentionFlag:   a.json(),
       // Step AJ. Per-shipment override { mode?, method?, driverSms? }; null/absent = inherit the customer.
       trackingPrefs:   a.json(),
       createdBy:       a.string().required(),

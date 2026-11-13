@@ -52,6 +52,7 @@ import { ApCard } from './ApCard'
 import { DivisionCard } from './DivisionCard'
 import { TrackerCard } from './TrackerCard'
 import { ReleaseGateCard } from './ReleaseGateCard'
+import { DetentionSection } from './Detention'
 import { HistorySection } from './HistorySection'
 import { LoadActions } from './StatusActions'
 import { DraftOrderEditor } from './DraftOrderEditor'
@@ -248,6 +249,7 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
         </div>
       )}
       <BuildingBanner shipment={shipment} onReload={actions.reload} />
+      <DetentionSection shipment={shipment} onChanged={actions.reload} canEdit={!voided} />
       <div className="flex items-center gap-2">
         <TmsTabs
           tabs={visibleTabs.map((t) => ({ key: t.key, label: t.label }))}

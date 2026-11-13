@@ -31,6 +31,8 @@ export const ACTION_SENTENCE: Record<string, string> = {
   RESOLVE_REV_TAG: 'resolved the revenue tag',
   CLEAR_REV_TAG: 'cleared the revenue tag',
   SET_TRACKING_PREFS: 'changed the tracking preferences',
+  FLAG_DETENTION: 'flagged detention',
+  CLEAR_DETENTION: 'cleared the detention flag',
   RECALC_CHARGES: 'recalculated the charges',
   PUSH_TO_LOAD_REVIEW: 'pushed the shipment to Load Review',
   LOAD_REVIEW_RELEASED: 'released the shipment from Load Review',
