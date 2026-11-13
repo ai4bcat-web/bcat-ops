@@ -273,6 +273,11 @@ function carrierIdOfRow(row: ShipmentRow, carriers: readonly { id: string; name:
   return (byMc ?? carriers.find((c) => c.name.trim().toLowerCase() === name))?.id ?? null
 }
 
+/** Past delivery date and not delivered: an exception row (red tint + red left edge, restyle.css). */
+function exceptionRowAttrs(row: ShipmentRow): Record<string, string> {
+  return pastDeliveryOf(row, Date.now()) ? { 'data-exception': 'true' } : {}
+}
+
 export function ShipmentsBoard() {
   const { isAdmin, isOwner, user } = useAuth()
   const email = user?.email ?? ''
@@ -1246,6 +1251,7 @@ function BoardPane({
             selectable
             selectedIds={selectedSet}
             toneOf={boardRowTone}
+            rowAttrs={exceptionRowAttrs}
             onToggle={toggleRow}
             onToggleAll={() => {
               const next = selectAllUpToCap(selectedIds, shownRows.map((r) => r.id))

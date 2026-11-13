@@ -82,7 +82,7 @@ describe('DenseGrid', () => {
     grid({ rows: make(5000) })
     const scroll = document.querySelector('.tms-dg-scroll') as HTMLElement
     expect(screen.getByText('Row 0')).toBeInTheDocument()
-    scroll.scrollTop = 30 * 2000
+    scroll.scrollTop = 36 * 2000
     fireEvent.scroll(scroll)
     expect(screen.queryByText('Row 0')).not.toBeInTheDocument()
     expect(screen.getByText('Row 2000')).toBeInTheDocument()
@@ -91,7 +91,7 @@ describe('DenseGrid', () => {
   it('uses the density row height and keeps the header and first column sticky', () => {
     const { container } = grid({ density: 'comfortable', selectable: true, selectedIds: new Set(), onToggle: vi.fn(), onToggleAll: vi.fn() })
     expect(container.querySelector('.tms-dg')).toHaveAttribute('data-density', 'comfortable')
-    expect((container.querySelector('.tms-dg') as HTMLElement).style.getPropertyValue('--dg-row-h')).toBe('40px')
+    expect((container.querySelector('.tms-dg') as HTMLElement).style.getPropertyValue('--dg-row-h')).toBe('48px')
     expect(screen.getByRole('columnheader', { name: /^Name/ })).toHaveClass('tms-dg-sticky')
     expect(screen.getByRole('columnheader', { name: /City/ })).not.toHaveClass('tms-dg-sticky')
     // The first data column sits right of the 30px checkbox column.

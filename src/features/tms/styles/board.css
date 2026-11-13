@@ -256,9 +256,7 @@
 .tms-shell .tms-board-link:hover { text-decoration: underline; }
 .tms-shell .tms-dg-table tbody tr[data-tone] td a.tms-board-link { color: var(--tms-primary-ink); }
 
-/* The Shipments page is all capitals: headers, cells, tabs, filters and buttons (Ryne 2026-11-09). */
-.tms-shell .tms-caps, .tms-shell .tms-caps * { text-transform: uppercase; }
-.tms-shell .tms-caps ::placeholder { text-transform: uppercase; }
+/* Capitals live in the tables only (restyle 2026-11, restyle.css); `.tms-caps` on a page root no longer uppercases the whole page. */
 
 /* Status pill: the row's tone, a step stronger than the row tint, with the tone's own ink. */
 .tms-shell .tms-status-pill, .tms-portal .tms-status-pill {
