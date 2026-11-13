@@ -187,8 +187,8 @@ describe('DirectoryPages', () => {
       expect(screen.getByText('Active Co')).toBeTruthy()
       fireEvent.click(screen.getByRole('button', { name: 'Factored: queue only (1)' }))
       expect(screen.queryByText('Lead Co')).toBeNull()
-      // A factored customer's invoice e-mail column reads as not used (invoices go to OTR), not as a flag.
-      expect(screen.getByText('Factored (OTR)').className).toContain('tms-muted')
+      // A factored customer with no invoice address is flagged like any other.
+      expect(within(screen.getByText('Active Co').closest('tr') as HTMLElement).getByText('Missing invoice e-mail')).toBeTruthy()
       fireEvent.click(screen.getByText('Active Co'))
       const detail = await screen.findByRole('dialog', { name: 'Customer profile' })
       expect(within(detail).getByText('Factored: queue only')).toBeTruthy()
@@ -197,7 +197,7 @@ describe('DirectoryPages', () => {
     }
   })
 
-  it('shows the AP address (+N extras), the NOA e-mail, and mutes a factored customer\'s address', async () => {
+  it('shows the AP address (+N extras), the NOA e-mail, and shows a factored customer\'s address', async () => {
     const previous = customers.map((c) => ({ billingMethod: c.billingMethod, apEmail: c.apEmail, apEmailsExtra: c.apEmailsExtra, noaEmail: c.noaEmail }))
     customers[1].billingMethod = 'MANUAL'
     customers[1].apEmail = 'ap@active.test'
@@ -210,7 +210,7 @@ describe('DirectoryPages', () => {
       const active = (await screen.findByText('Active Co')).closest('tr') as HTMLElement
       expect(within(active).getByTestId('invoice-email-c-active').textContent).toBe('ap@active.test +2')
       const pending = screen.getByText('Pending Co').closest('tr') as HTMLElement
-      expect(within(pending).getByTestId('invoice-email-c-pending').className).toContain('tms-muted')
+      expect(within(pending).getByTestId('invoice-email-c-pending').textContent).toBe('ap@pending.test')
       expect(pending.textContent).toContain('noa@factor.test')
       expect(screen.getByRole('columnheader', { name: /^NOA e-mail/ })).toBeTruthy()
     } finally {
