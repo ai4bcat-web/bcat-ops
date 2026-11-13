@@ -26,7 +26,7 @@ const NOW = '2026-11-05T12:00:00.000Z'
 const cardFor = (mc: string, name: string, emails: string[]) => buildReviewCard({
   DotNumber: 7000001, DocketNumber: mc, CompanyName: name, Status: 'ACTIVE',
   Emails: emails.map((Email) => ({ Email })),
-  CertData: { Certificates: [{ Coverages: [{ Type: 'Cargo', ExpirationDate: '2099-01-01T00:00:00', CoverageLimit: '$100,000' }] }] },
+  CertData: { Certificates: [{ Coverages: [{ Type: 'Auto', ExpirationDate: '2099-01-01T00:00:00', CoverageLimit: '$1,000,000' }, { Type: 'Cargo', ExpirationDate: '2099-01-01T00:00:00', CoverageLimit: '$100,000' }] }] },
 }, {}, 'preview', NOW_MS)!
 
 const NEEDS = [{ id: 's-1', number: 'L100' }] as never
@@ -45,28 +45,27 @@ beforeEach(() => {
 })
 
 describe('Carrier Sales MC lookup', () => {
-  it('a carrier in the directory leads with Set up with us · ACTIVE and its packet standing, then covers the chosen load', async () => {
+  it('a carrier in the directory leads with Set up · Active, then covers the chosen load', async () => {
     mocks.carriers = [{ id: 'car-1', name: 'Ivan Cartage', status: 'ACTIVE', mcNumber: 'MC900002', mcpStatus: 'ACCEPTABLE', lastLoadAt: '2026-10-30T12:00:00Z', loadCount: 14 }]
     mocks.preview.mockResolvedValue({ mode: 'LIVE', reason: null, notFound: false, card: cardFor('MC900002', 'Ivan Cartage LLC', ['ops@ivan.example']) })
     renderLookup()
     const card = await lookUp('MC 900002')
 
     expect(mocks.preview).toHaveBeenCalledWith({ mcNumber: 'MC900002' })
-    expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toMatch(/^Set up with us · ACTIVEPacket complete/)
-    expect(within(card).getByTestId('cs-lookup-card-active').textContent).toBe('Active with us — ready to cover')
+    expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toBe('Set up · ActiveReady to cover')
     expect(within(card).getByTestId('cs-lookup-card-directory-line').textContent).toMatch(/14 loads/)
     fireEvent.click(within(card).getByTestId('cs-lookup-card-cover'))
     const dialog = await screen.findByTestId('cover-dialog')
     expect(dialog.dataset).toMatchObject({ shipment: 's-1', query: 'MC 900002' })
   })
 
-  it('a carrier not in the directory says Not in directory, lists MCP’s e-mails, and the invitation goes to the one address picked', async () => {
+  it('a carrier not in the directory says Not set up yet, lists MCP’s e-mails, and the invitation goes to the one address picked', async () => {
     mocks.preview.mockResolvedValue({ mode: 'LIVE', reason: null, notFound: false, card: cardFor('MC900001', 'Small Hauler LLC', ['a@small.example', 'b@small.example']) })
     mocks.invite.mockResolvedValue({ mode: 'LIVE', sent: true, message: 'sent', carrierLogged: false, threadLogged: false })
     renderLookup()
     const card = await lookUp('900001')
 
-    expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toMatch(/^Not in directory/)
+    expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toMatch(/^Not set up yet/)
     expect(within(card).getByTestId('cs-lookup-card-emails').textContent).toMatch(/a@small.example, b@small.example/)
     const send = within(card).getByTestId('cs-lookup-card-send') as HTMLButtonElement
     expect(send.disabled).toBe(false)

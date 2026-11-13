@@ -46,7 +46,23 @@ export interface ActionState {
   reason?: string
 }
 
+/**
+ * Ryne 2026-11-13: one answer, never a pile of contradicting badges. A carrier is either set up with us
+ * (Active, or not active and why), not set up yet, or not someone we should set up because MyCarrierPackets
+ * says it fails a requirement. An Active carrier is set up, whatever its packet says.
+ */
+export type StandingKind = 'OWN_FLEET' | 'SETUP_ACTIVE' | 'SETUP_INACTIVE' | 'NOT_SETUP' | 'DO_NOT_SETUP'
+
+export interface Standing {
+  kind: StandingKind
+  label: string
+  detail: string
+  tone: 'green' | 'orange' | 'red'
+}
+
 export interface LookupState {
+  /** The one status line the card shows. */
+  standing: Standing
   directory: { inDirectory: boolean; statusLabel: string | null; status: CarrierStatus | null }
   packet: { kind: PacketKind; label: string; invitedAt: string | null }
   /** Carrier.status ACTIVE and packet complete: the one-line "Active with us". */
@@ -56,6 +72,7 @@ export interface LookupState {
   /** Ivan Cartage (MC 274623): our own fleet, Active by definition. */
   ownFleet: boolean
   emails: McpReviewEmail[]
+  /** MyCarrierPackets' own red flags, shown as plain information (and the reasons behind DO_NOT_SETUP). */
   vetting: { failing: string[] }
   send: ActionState & { label: 'Send setup packet' | 'Re-send packet'; primary: boolean }
   cover: ActionState & { primary: boolean }
@@ -87,6 +104,12 @@ function failing(card: McpReviewCard | null): string[] {
   if (!card) return []
   const out: string[] = []
   if (card.operating.authorityStatus === 'INACTIVE') out.push('Authority inactive')
+  // The cover we insist on for every load (carrierEligibility REQUIRED_INSURANCE): auto liability and cargo. Judged only when MCP
+  // has certificates on file at all: a brand-new carrier often has none until its packet brings them in.
+  if (card.insurance.length > 0) {
+    if (!card.insurance.some((r) => isAuto(r.type) && r.state === 'ACTIVE')) out.push('No active auto liability')
+    if (!card.insurance.some((r) => isCargo(r.type) && r.state === 'ACTIVE')) out.push('No active cargo insurance')
+  }
   for (const r of card.insurance) if (r.state === 'EXPIRED' || r.state === 'CANCELLED') out.push(`${r.type} ${r.state === 'EXPIRED' ? 'expired' : 'cancelled'}`)
   if (card.risk.tone === 'red') out.push(`Risk ${card.risk.overallRating ?? 'high'}`)
   if (card.operating.nonCooperative === true) out.push('Insurance non-coop')
@@ -94,15 +117,44 @@ function failing(card: McpReviewCard | null): string[] {
   return out
 }
 
+const isAuto = (type: string): boolean => /auto|bipd|liab/i.test(type) && !/general/i.test(type)
+const isCargo = (type: string): boolean => /cargo/i.test(type)
+
+/** Auto liability and cargo first (what the booking gate checks), then the rest in MCP's order. */
+export function insuranceInOrder<T extends { type: string }>(rows: readonly T[]): T[] {
+  const rank = (r: T) => (isAuto(r.type) ? 0 : isCargo(r.type) ? 1 : 2)
+  return rows.map((r, i) => ({ r, i })).sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i).map(({ r }) => r)
+}
+
+/** Directory statuses of a carrier that has been through setup (with us or in Aljex before us). */
+const SET_UP_STATUSES: readonly CarrierStatus[] = ['ACTIVE', 'INACTIVE', 'DO_NOT_USE']
+
+export function standingOf(input: { carrier: LookupDirectoryRow | null; packet: LookupState['packet']; ownFleet: boolean; failing: string[]; mode: 'LIVE' | 'STUB' }): Standing {
+  const { carrier, packet, ownFleet, failing: flags, mode } = input
+  if (ownFleet) return { kind: 'OWN_FLEET', label: 'Our own fleet · Active', detail: 'Ivan Cartage is our own fleet', tone: 'green' }
+  if (carrier && carrier.status === 'ACTIVE') return { kind: 'SETUP_ACTIVE', label: 'Set up · Active', detail: 'Ready to cover', tone: 'green' }
+  if (carrier && SET_UP_STATUSES.includes(carrier.status)) {
+    const reason = carrier.statusReason ? CARRIER_STATUS_REASON_LABELS[carrier.statusReason] ?? String(carrier.statusReason) : null
+    const detail = [reason, carrier.statusNote].filter(Boolean).join(': ') || CARRIER_STATUS_LABELS[carrier.status]
+    return { kind: 'SETUP_INACTIVE', label: carrier.status === 'DO_NOT_USE' ? 'Set up · Do not use' : 'Set up · Not active', detail, tone: carrier.status === 'DO_NOT_USE' ? 'red' : 'orange' }
+  }
+  if (mode === 'LIVE' && flags.length > 0) {
+    return { kind: 'DO_NOT_SETUP', label: 'Do not set up · Doesn\'t meet requirements', detail: flags.join(' · '), tone: 'red' }
+  }
+  const detail = mode === 'STUB'
+    ? 'Stub, no MCP call'
+    : packet.kind === 'INVITED'
+      ? `${packet.label}; waiting for the carrier to finish it`
+      : 'Setup packet not sent yet'
+  return { kind: 'NOT_SETUP', label: 'Not set up yet', detail, tone: 'orange' }
+}
+
 function activeWithUsOf(input: { carrier: LookupDirectoryRow | null; packet: LookupState['packet']; ownFleet: boolean }): LookupState['activeWithUs'] {
   const { carrier, packet, ownFleet } = input
   if (ownFleet) return { active: true, label: 'Active with us', why: 'Ivan Cartage is our own fleet' }
   if (!carrier) return { active: false, label: 'Not active with us', why: 'Not in our directory yet' }
-  if (carrier.status === 'ACTIVE') {
-    return packet.kind === 'COMPLETE'
-      ? { active: true, label: 'Active with us', why: 'Setup complete in MyCarrierPackets' }
-      : { active: false, label: 'Active in the directory, not set up', why: 'The MyCarrierPackets packet is not complete yet' }
-  }
+  // Ryne 2026-11-13: an Active carrier is set up with us, whatever its MyCarrierPackets packet says.
+  if (carrier.status === 'ACTIVE') return { active: true, label: 'Active with us', why: 'Set up with us' }
   const reason = carrier.statusReason ? CARRIER_STATUS_REASON_LABELS[carrier.statusReason] ?? String(carrier.statusReason) : null
   const why = [reason, carrier.statusNote].filter(Boolean).join(': ')
     || (packet.kind === 'INVITED' ? 'Waiting for the carrier to finish its setup packet' : packet.kind === 'NONE' ? 'Setup packet not sent yet' : CARRIER_STATUS_LABELS[carrier.status])
@@ -114,7 +166,7 @@ export function lookupState(input: LookupInput): LookupState {
   const ownFleet = mode !== 'STUB' && OWN_FLEET_MCS.includes(String(card?.identity.mcNumber ?? '').replace(/^MC/i, '').replace(/\D/g, ''))
   const packet = ownFleet ? { kind: 'COMPLETE' as const, label: 'Own fleet', invitedAt: null } : packetOf(input)
   const status = ownFleet ? 'ACTIVE' as CarrierStatus : carrier?.status ?? null
-  const activeReady = status === 'ACTIVE' && packet.kind === 'COMPLETE'
+  const activeReady = status === 'ACTIVE'
   const emails = mode === 'STUB' ? [] : card?.emails ?? []
 
   const stale = packet.kind === 'INVITED' && packet.invitedAt != null
@@ -132,7 +184,6 @@ export function lookupState(input: LookupInput): LookupState {
   else if (status === 'DO_NOT_USE') coverReason = 'This carrier is marked Do not use.'
   else if (!carrier) coverReason = 'Not in our directory: send the setup packet first.'
   else if (status !== 'ACTIVE') coverReason = `Directory status is ${CARRIER_STATUS_LABELS[status!]}: only an Active carrier can be covered directly.`
-  else if (packet.kind !== 'COMPLETE') coverReason = 'The MyCarrierPackets packet is not complete yet.'
 
   const sendPrimary = !activeReady && (packet.kind === 'NONE' || stale)
   const directoryAction: LookupState['directoryAction'] = carrier
@@ -143,14 +194,16 @@ export function lookupState(input: LookupInput): LookupState {
         ? { kind: 'add', enabled: false, reason: 'MyCarrierPackets has no record of this carrier.' }
         : { kind: 'add', enabled: true }
 
+  const flags = ownFleet ? [] : failing(card)
   return {
+    standing: standingOf({ carrier, packet, ownFleet, failing: flags, mode }),
     directory: { inDirectory: carrier != null || ownFleet, status, statusLabel: status ? CARRIER_STATUS_LABELS[status] : null },
     packet,
     activeReady,
     activeWithUs: activeWithUsOf({ carrier, packet, ownFleet }),
     ownFleet,
     emails,
-    vetting: { failing: ownFleet ? [] : failing(card) },
+    vetting: { failing: flags },
     send: { enabled: sendReason === undefined, ...(sendReason ? { reason: sendReason } : {}), label: stale ? 'Re-send packet' : 'Send setup packet', primary: sendPrimary },
     cover: { enabled: coverReason === undefined, ...(coverReason ? { reason: coverReason } : {}), primary: activeReady },
     directoryAction,

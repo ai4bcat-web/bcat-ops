@@ -115,7 +115,7 @@ describe('OffersHub', () => {
 
     const card = await screen.findByTestId('cs-lookup-card')
     expect(card.dataset.inDirectory).toBe('false')
-    expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toMatch(/^Not in directory/)
+    expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toMatch(/^Not set up yet/)
     expect(within(card).getByTestId('cs-lookup-card-emails').textContent).toMatch(/dispatch@hauler.example, owner@hauler.example/)
     fireEvent.click(within(card).getByTestId('cs-lookup-card-send'))
     fireEvent.click(await screen.findByLabelText('dispatch@hauler.example')) // nothing is pre-selected
@@ -134,8 +134,7 @@ describe('OffersHub', () => {
     render(<Harness initial="L100" />)
     fireEvent.click(await screen.findByTestId('cs-offer-setup-packet-Q4'))
     const card = await screen.findByTestId('cs-lookup-card')
-    expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toMatch(/^Set up with us · ACTIVEPacket complete/)
-    expect(within(card).getByTestId('cs-lookup-card-active').textContent).toBe('Active with us — ready to cover')
+    expect(within(card).getByTestId('cs-lookup-card-standing').textContent).toBe('Set up · ActiveReady to cover')
     expect(within(card).getByTestId('cs-lookup-card-open').getAttribute('href')).toBe('/tms/carriers/car-1')
     mocks.carriers = []
   })

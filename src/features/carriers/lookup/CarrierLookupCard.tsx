@@ -9,7 +9,7 @@ import { Link } from 'react-router-dom'
 import { TmsBadge, TmsButton } from '@/features/tms/kit'
 import type { McpReviewCard } from '@/lib/integrations/mcpReview'
 import { InviteDialog } from '@/features/carriers/find/InviteDialog'
-import { lookupState } from './lookupModel'
+import { insuranceInOrder, lookupState } from './lookupModel'
 import type { LookupDirectoryRow } from './lookupModel'
 import { formatBoardDate } from '@/lib/date'
 
@@ -29,40 +29,23 @@ export interface CarrierLookupCardProps {
   testId?: string
 }
 
-const BADGE_FOR_PACKET = { COMPLETE: 'green', INVITED: 'blue', NONE: 'orange', STUB: 'gray' } as const
-
 export function CarrierLookupCard({ card, mode, carrier, nowIso, heading, busy = false, onSendPacket, onCover, onAddToDirectory, testId = 'carrier-lookup' }: CarrierLookupCardProps) {
   const [popover, setPopover] = useState(false)
   const s = lookupState({ card, mode, carrier, nowIso })
   const name = card?.identity.legalName ?? carrier?.name ?? heading ?? 'Carrier'
-  const statusText = s.directory.status ? s.directory.status.replace(/_/g, ' ') : ''
   const id = card?.identity
 
   return (
     <div data-testid={testId} data-packet={s.packet.kind} data-in-directory={s.directory.inDirectory ? 'true' : 'false'}
       style={{ display: 'grid', gap: 8, border: '1px solid var(--tms-border)', borderRadius: 'var(--tms-radius)', padding: 10 }}>
-      {/* The first answer: are they already active with us, and why (or why not). */}
-      {s.activeReady && !s.ownFleet ? (
-        <div data-testid={`${testId}-active`}><TmsBadge tone="green">Active with us — ready to cover</TmsBadge></div>
+      {/* One answer (Ryne 2026-11-13): set up and Active / not active, not set up yet, or do not set up. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid={`${testId}-standing`} data-standing={s.standing.kind}>
+        <TmsBadge tone={s.standing.tone}>{s.standing.label}</TmsBadge>
+        <span className="tms-muted" style={{ fontSize: 12 }} data-testid={`${testId}-standing-detail`}>{s.standing.detail}</span>
+      </div>
+      {s.standing.kind !== 'DO_NOT_SETUP' && s.vetting.failing.length > 0 ? (
+        <span className="tms-muted" style={{ fontSize: 12 }} data-testid={`${testId}-flags`}>MyCarrierPackets flags: {s.vetting.failing.join(' · ')}</span>
       ) : null}
-      <div className="flex flex-wrap items-center gap-2" data-testid={`${testId}-active-answer`} data-active={s.activeWithUs.active ? 'true' : 'false'}>
-        {s.activeReady && !s.ownFleet ? null : <TmsBadge tone={s.activeWithUs.active ? 'green' : 'orange'}>{s.activeWithUs.label}</TmsBadge>}
-        <span className="tms-muted" style={{ fontSize: 12 }} data-testid={`${testId}-active-why`}>{s.activeWithUs.why}</span>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2" data-testid={`${testId}-standing`}>
-        {s.ownFleet ? (
-          <TmsBadge tone="green">Our own fleet · Active</TmsBadge>
-        ) : s.directory.inDirectory ? (
-          <TmsBadge tone={s.directory.status === 'ACTIVE' ? 'green' : s.directory.status === 'DO_NOT_USE' ? 'red' : 'orange'}>Set up with us · {statusText}</TmsBadge>
-        ) : (
-          <TmsBadge tone="gray">Not in directory</TmsBadge>
-        )}
-        <TmsBadge tone={BADGE_FOR_PACKET[s.packet.kind]} title={s.packet.kind === 'STUB' ? 'No MyCarrierPackets call was made' : undefined}>{s.packet.label}</TmsBadge>
-        {s.vetting.failing.length > 0
-          ? s.vetting.failing.map((f) => <TmsBadge key={f} tone="red">{f}</TmsBadge>)
-          : card && mode === 'LIVE' ? <TmsBadge tone="green">MCP vetting clear</TmsBadge> : null}
-      </div>
 
       <div style={{ display: 'grid', gap: 2, fontSize: 13 }}>
         <strong data-testid={`${testId}-name`}>{name}</strong>
@@ -84,7 +67,7 @@ export function CarrierLookupCard({ card, mode, carrier, nowIso, heading, busy =
               id?.address,
               id?.phone,
               card.operating.authorityStatus && `Authority ${card.operating.authorityStatus.toLowerCase()}`,
-              ...card.insurance.slice(0, 3).map((r) => `${r.type} ${r.limitText ?? ''} ${r.state.toLowerCase()}${r.expiresAt ? ` ${r.expiresAt.slice(0, 10)}` : ''}`.replace(/\s+/g, ' ')),
+              ...insuranceInOrder(card.insurance).map((r) => `${r.type} ${r.limitText ?? ''} ${r.state.toLowerCase()}${r.expiresAt ? ` ${r.expiresAt.slice(0, 10)}` : ''}`.replace(/\s+/g, ' ')),
               card.operating.safetyRating && `Safety ${card.operating.safetyRating}`,
               card.risk.totalPoints != null && `Risk ${card.risk.totalPoints} pts`,
             ].filter(Boolean).join(' · ')}
@@ -99,7 +82,7 @@ export function CarrierLookupCard({ card, mode, carrier, nowIso, heading, busy =
       </div>
 
       <div className="flex flex-wrap items-center gap-2" data-testid={`${testId}-actions`}>
-        <TmsButton size="sm" variant={s.send.primary ? 'primary' : undefined} data-testid={`${testId}-send`}
+        <TmsButton size="sm" variant={s.send.primary && s.standing.kind === 'NOT_SETUP' ? 'primary' : undefined} data-testid={`${testId}-send`}
           disabled={busy || !s.send.enabled} title={s.send.enabled ? undefined : s.send.reason} onClick={() => setPopover(true)}>
           {s.send.label}
         </TmsButton>

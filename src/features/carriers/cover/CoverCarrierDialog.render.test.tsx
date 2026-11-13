@@ -106,8 +106,8 @@ describe('CoverCarrierDialog', () => {
     renderDialog()
     await lookUp('MC 900001')
 
-    expect((await screen.findByTestId('cover-packet-status')).textContent).toBe('Packet complete, acceptable')
-    expect((await screen.findByTestId('cover-lookup-card-active')).textContent).toBe('Active with us — ready to cover')
+    expect((await screen.findByTestId('cover-packet-status')).textContent).toBe('Set up · Active')
+    expect((await screen.findByTestId('cover-lookup-card-standing')).textContent).toBe('Set up · ActiveReady to cover')
     enterRate()
     fireEvent.click(screen.getByTestId('cover-assign'))
 
@@ -181,7 +181,7 @@ describe('CoverCarrierDialog', () => {
     renderDialog()
     await lookUp('MC 900001')
     await waitFor(() => expect(mocks.pull).toHaveBeenCalledWith('car-1'))
-    expect((await screen.findByTestId('cover-lookup-card-active')).textContent).toBe('Active with us — ready to cover')
+    expect((await screen.findByTestId('cover-lookup-card-standing')).textContent).toBe('Set up · ActiveReady to cover')
   })
 
   it('a load that already has a live carrier gets another one through addCarrier, with the legs the rep ticks, never a replacement', async () => {
