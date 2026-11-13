@@ -1973,6 +1973,10 @@ export interface ShipmentRecord {
   /** P8. The tracking agent's own flag, shown on the Tracking page. */
   trackingFlaggedAt?: string | null
   trackingFlagReason?: string | null
+  /** Needs review on the AR/AP pages (Ryne 2026-11-13). `financeReviewApNote` carries carrier detail: AP page only. */
+  financeReviewAt?: string | null
+  financeReviewReason?: string | null
+  financeReviewApNote?: string | null
   /** Step AJ. Per-shipment tracking override; absent/null = inherit the customer (`effectiveTrackingPrefs`). */
   trackingPrefs?: TrackingPrefsOverride | null
   createdBy: string

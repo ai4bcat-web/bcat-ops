@@ -70,6 +70,7 @@ import {
   saveCommissionSettings,
   submitPayPeriod,
 } from './commissions'
+import { clearFinanceReview } from './financeReview'
 import { accountingAccessMessage, hasAccountingPage } from '../../../src/lib/accountingAccess'
 import {
   ADMIN_GROUP,
@@ -81,6 +82,7 @@ import {
 } from './store'
 
 type Action =
+  | 'CLEAR_FINANCE_REVIEW'
   | 'PREVIEW_INVOICE'
   | 'GENERATE_INVOICE'
   | 'BATCH_GENERATE'
@@ -209,6 +211,7 @@ interface AppSyncEvent {
  */
 function accountingPagesFor(action: Action): readonly string[] {
   if (action === 'RELEASE_TO_BILLING') return ['loadReview', 'invoicing']
+  if (action === 'CLEAR_FINANCE_REVIEW') return ['invoicing', 'carrierPay']
   if (action === 'SEND_TO_FACTOR' || action === 'SYNC_FACTORING_CHANGE' || action === 'SETTLE_FACTORED_INVOICES') return ['invoicing', 'factoring']
   if (COMMISSION_ACTIONS[action]) return ['commissions']
   if (AP_ACTIONS[action]) return ['carrierPay']
@@ -246,6 +249,8 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
   const input = parseInput(event.arguments.input)
 
   switch (action) {
+    case 'CLEAR_FINANCE_REVIEW':
+      return clearFinanceReview(input, caller)
     case 'PREVIEW_INVOICE':
       return previewInvoice(input, caller)
     case 'GENERATE_INVOICE':
