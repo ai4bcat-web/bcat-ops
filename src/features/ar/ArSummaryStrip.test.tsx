@@ -46,3 +46,22 @@ describe('ArSummaryStrip', () => {
     expect(onDivision).toHaveBeenCalledWith('BROKERAGE')
   })
 })
+
+describe('ArSummaryStrip list cards', () => {
+  it('shows two list cards, marks the active division, and toggles it off', () => {
+    const onDivision = vi.fn()
+    render(<div className="tms-shell"><ArSummaryStrip summary={summary([
+      slice({ key: 'BROKERAGE', cents: 600_00 }),
+      slice({ key: 'ASSETS/LOCAL', division: 'ASSETS', divisionLabel: 'Ivan Cartage', subLabel: 'Local drivers', cents: 400_00 }),
+    ])} division="BROKERAGE" onDivision={onDivision} /></div>)
+    expect(screen.getByRole('region', { name: 'Receivables totals' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Open AR by division' })).toBeTruthy()
+    expect(screen.getByText('$1,000.00')).toBeTruthy()
+    // The Ivan Cartage group has no division-only slice, so it is not a button.
+    expect(screen.queryByRole('button', { name: /Ivan Cartage/ })).toBeNull()
+    const active = screen.getByRole('button', { name: /BCAT Logistics/ })
+    expect(active.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(active)
+    expect(onDivision).toHaveBeenCalledWith(null)
+  })
+})

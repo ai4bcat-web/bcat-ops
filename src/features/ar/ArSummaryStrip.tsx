@@ -1,5 +1,5 @@
-/** The Invoicing summary above the tabs, as stat cards; a division row filters the list. */
-import { TmsBreakdownCard, TmsStatRow } from '@/features/tms/kit'
+/** The Invoicing summary as two list cards beside the tabs; a division row filters the list. */
+import { TmsListCard, breakdownListRows } from '@/features/tms/kit'
 import { formatCents } from '@/lib/invoiceBuild'
 import { divisionRows } from './arDivisionRows'
 import { PAY_WINDOW_DAYS, type ArSummary } from './arSummary'
@@ -15,29 +15,27 @@ export function ArSummaryStrip({ summary, division, onDivision }: {
   const openCents = summary.byDivision.reduce((n, s) => n + s.cents, 0)
   const rows = divisionRows(summary.byDivision, openCents)
   return (
-    <div className="flex flex-col gap-3" aria-label="AR summary" data-testid="ar-summary">
-      <TmsStatRow
-        columns="auto"
-        compact
-        caps
+    <>
+      <TmsListCard
+        title="Receivables"
         aria-label="Receivables totals"
-        items={[
+        testId="ar-summary"
+        rows={[
           { key: 'otr', label: 'Pending with OTR', value: formatCents(summary.pendingOtrCents), sub: invoices(summary.pendingOtrCount) },
           { key: 'shippers', label: 'Pending with shippers', value: formatCents(summary.pendingShippersCents), sub: invoices(summary.pendingShippersCount) },
           { key: 'late', label: 'Late', value: formatCents(summary.lateCents), sub: invoices(summary.lateCount), tone: summary.lateCents > 0 ? 'bad' : 'default' },
-          { key: 'otr-days', label: 'Days to pay · OTR', value: days(summary.otrDaysToPay), sub: `submitted → funded · last ${PAY_WINDOW_DAYS} days` },
-          { key: 'ship-days', label: 'Days to pay · shippers', value: days(summary.shipperDaysToPay), sub: `invoice → paid · last ${PAY_WINDOW_DAYS} days` },
+          { key: 'otr-days', label: 'Days to pay · OTR', value: days(summary.otrDaysToPay), sub: `last ${PAY_WINDOW_DAYS} d`, title: `Submitted → funded, last ${PAY_WINDOW_DAYS} days` },
+          { key: 'ship-days', label: 'Days to pay · shippers', value: days(summary.shipperDaysToPay), sub: `last ${PAY_WINDOW_DAYS} d`, title: `Invoice → paid, last ${PAY_WINDOW_DAYS} days` },
         ]}
       />
       {rows.length > 0 && (
-        <TmsBreakdownCard
+        <TmsListCard
           title="Open AR by division"
           total={formatCents(openCents)}
-          rows={rows}
-          selected={division}
-          onSelect={onDivision}
+          testId="ar-division-card"
+          rows={breakdownListRows(rows, division, onDivision)}
         />
       )}
-    </div>
+    </>
   )
 }
