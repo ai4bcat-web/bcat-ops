@@ -272,6 +272,58 @@ export function driverExpiryPatch(
   return { [field.recordField]: date }
 }
 
+/**
+ * Which document backs each dated field on a truck or trailer record. The uploaded
+ * certificate and the typed date on the Equipment record describe the same expiry, so
+ * an edit to either one writes both (Ryne 2026-11-12: trailer insurance could not be
+ * edited because a typed date was silently ignored once a certificate was on file).
+ */
+export const ASSET_EXPIRY_FIELDS = [
+  { key: 'insurance_cert', label: 'Insurance expires', recordField: 'insuranceExpirationDate' as const },
+  { key: 'ifta_decals',    label: 'IFTA expires',      recordField: 'iftaExpirationDate' as const },
+  { key: 'irp_cab_card',   label: 'IRP expires',       recordField: 'irpExpirationDate' as const },
+]
+
+export type AssetExpiryField = (typeof ASSET_EXPIRY_FIELDS)[number]['recordField']
+
+/** The Equipment field that holds this document's expiry, or null when it has none. */
+export function assetExpiryField(documentType: string): AssetExpiryField | null {
+  return ASSET_EXPIRY_FIELDS.find((f) => f.key === documentType)?.recordField ?? null
+}
+
+/** The Equipment patch for a dated asset document, or null when the type isn't dated on the record. `null` clears. */
+export function assetExpiryPatch(
+  documentType: string,
+  expiration: string | null | undefined,
+): Partial<Record<AssetExpiryField, string | null>> | null {
+  const field = ASSET_EXPIRY_FIELDS.find((f) => f.key === documentType)
+  if (!field) return null
+  return { [field.recordField]: expiration?.slice(0, 10) || null }
+}
+
+/**
+ * The certificate dates to rewrite after the Equipment form saved new compliance dates:
+ * one entry per uploaded (not waived) document whose expiry differs from the date just
+ * typed. A field the form didn't touch, or left blank, never overwrites a certificate.
+ */
+export function assetDocExpiryUpdates(
+  before: Partial<Record<AssetExpiryField, string | null | undefined>>,
+  after: Partial<Record<AssetExpiryField, string | null | undefined>>,
+  docFor: (documentType: string) => ComplianceDocument | undefined,
+): { doc: ComplianceDocument; date: string }[] {
+  const out: { doc: ComplianceDocument; date: string }[] = []
+  for (const f of ASSET_EXPIRY_FIELDS) {
+    const next = after[f.recordField]?.slice(0, 10) || null
+    const prev = before[f.recordField]?.slice(0, 10) || null
+    if (!next || next === prev) continue
+    const doc = docFor(f.key)
+    if (!doc || doc.status === 'WAIVED' || !doc.s3Key) continue
+    if ((doc.expirationDate?.slice(0, 10) || null) === next) continue
+    out.push({ doc, date: next })
+  }
+  return out
+}
+
 export interface ExpiryInfo {
   date:   string | null
   state:  SlotState

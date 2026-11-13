@@ -20,6 +20,8 @@ import { formatPhone, formatVin } from '@/lib/utils'
 import { trailerModeFor } from '../driverProfileModel'
 import { ProfileDocuments } from '../shared/ProfileDocuments'
 import { ProfileRows, ProfileSection } from '../shared/ProfileSection'
+import { DraftDateField } from '@/features/files/DraftDateField'
+import { saveAssetExpiry } from '@/features/files/saveAssetExpiry'
 import '../shared/profiles.css'
 import {
   assetDates, assetDocsSummary, assetFleetLabel, assetNoun, assetSlots, assetSlotState, assetTitle, assignedTo, makeModel,
@@ -73,6 +75,15 @@ export function AssetProfilePage() {
   const isTruck = equip.type === 'truck'
   const docs = assetDocsSummary(equip, hub.docFor, isAdmin)
   const dates = assetDates(equip, hub.docFor)
+  // Insurance / IFTA / IRP are edited right on the row; the save writes the unit record and
+  // any uploaded certificate, so this and Asset Documents always show the same date.
+  const expiryField = (documentType: string, label: string, value: string | undefined) => (
+    <div style={{ maxWidth: 200 }}>
+      <DraftDateField compact value={value} label={label} title={label}
+        successMessage={`${label} updated`} clearedMessage={`${label} cleared`}
+        onSave={(date) => saveAssetExpiry({ assetId: equip.id, documentType, date, doc: hub.docFor('TRUCK', equip.id, documentType), setExpiration: hub.setExpiration })} />
+    </div>
+  )
   const config = truckConfigs.get(equip.id)
   const nextPm = nextPmMileage(equip)
   const driver = isTruck ? holders[0] : undefined
@@ -173,10 +184,10 @@ export function AssetProfilePage() {
             <ProfileSection title="Compliance dates" action={<TmsButton size="sm" onClick={() => setEditing(true)}>Edit</TmsButton>}>
               <ProfileRows rows={[
                 { label: 'DOT inspection', value: dates.dot ?? '' },
-                { label: 'Insurance expires', value: dates.ins ?? '' },
+                { label: 'Insurance expires', value: expiryField('insurance_cert', 'Insurance expiration', dates.ins) },
                 ...(isTruck ? [
-                  { label: 'IFTA expires', value: dates.ifta ?? '' },
-                  { label: 'IRP expires', value: dates.irp ?? '' },
+                  { label: 'IFTA expires', value: expiryField('ifta_decals', 'IFTA expiration', dates.ifta) },
+                  { label: 'IRP expires', value: expiryField('irp_cab_card', 'IRP expiration', dates.irp) },
                 ] : []),
                 { label: 'Bobtail insurance', value: dates.bobtail ?? '' },
                 { label: 'Insured', value: equip.insured ? 'Yes' : 'No' },
@@ -344,8 +355,15 @@ export function AssetProfilePage() {
       {editing ? (
         <EquipmentForm
           initial={equip}
+          effectiveDates={{ ins: dates.ins, ifta: dates.ifta, irp: dates.irp }}
           initialCosts={readTruckCosts(equip.id, expenseData.recurring, expenseData.allocations, expenseData.expenseTypes).inputs}
-          onSave={(data, costs) => { saveEquipment({ existing: equip, data, costs, addEquipment, updateEquipment, expenseData }); setEditing(false) }}
+          onSave={(data, costs) => {
+            saveEquipment({
+              existing: equip, data, costs, addEquipment, updateEquipment, expenseData,
+              certificates: { docFor: (unitId, type) => hub.docFor('TRUCK', unitId, type), setExpiration: hub.setExpiration },
+            })
+            setEditing(false)
+          }}
           onClose={() => setEditing(false)}
         />
       ) : null}

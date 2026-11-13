@@ -10,7 +10,7 @@ import { ACCEPTED_DOC_EXT } from '@/lib/complianceClient'
 import { driverTrailerFieldDeployed, updateEquipment as apiUpdateEquipment } from '@/lib/apiClient'
 import { activeUnits } from '@/lib/fleetActive'
 import {
-  slotsForAsset, slotsForDriver, slotState, docOutsideSlots, DRIVER_FILE_SLOTS, driverExpiryPatch,
+  slotsForAsset, slotsForDriver, slotState, docOutsideSlots, DRIVER_FILE_SLOTS, driverExpiryPatch, assetExpiryPatch, assetExpiryField,
   visibleSlots, visibleDocs, responsibilityFor, RESPONSIBILITY_LABELS, type FileSlot, type SlotState,
 } from '@/lib/fileHub'
 import { evaluateTruckDoc, TRUCK_DOC_SPECS } from '@/lib/truckDocs'
@@ -27,6 +27,7 @@ import { TmsDrawer } from '@/features/tms/kit/TmsDrawer'
 import { TmsInput } from '@/features/tms/kit/TmsInput'
 import { PacketPickerModal } from './PacketPickerModal'
 import { DraftDateField } from './DraftDateField'
+import { saveAssetExpiry } from './saveAssetExpiry'
 import { DocumentPreviewModal } from './DocumentPreviewModal'
 import { packetItems } from './entityPacket'
 import { approveDocument, rejectDocument } from '@/lib/documentReview'
@@ -73,7 +74,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
 
   const entityType = entity.kind
   const entityId = entity.kind === 'DRIVER' ? entity.driver.id : entity.truck.id
-  const title = entity.kind === 'DRIVER' ? entity.driver.name : `Truck ${entity.truck.unitNumber}`
+  const title = entity.kind === 'DRIVER' ? entity.driver.name : `${entity.truck.type === 'trailer' ? 'Trailer' : 'Truck'} ${entity.truck.unitNumber}`
 
   const allSlots = useMemo(() => (entity.kind === 'TRUCK'
     ? slotsForAsset(entity.truck.type, entity.truck.fleetGroup)
@@ -161,6 +162,18 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
         expirationDate: expiration,
         uploadedByUser: user?.email ?? null,
       })
+
+      // A truck's / trailer's insurance, IFTA or IRP certificate carries the unit's date.
+      const assetPatch = entity.kind === 'TRUCK' && expiration ? assetExpiryPatch(slot.key, expiration) : null
+      if (assetPatch && entity.kind === 'TRUCK') {
+        try {
+          await useAppStore.getState().saveEquipmentDates(entity.truck.id, assetPatch)
+        } catch (err) {
+          toast.warning(`${slot.label} uploaded, but the unit's date could not be updated: ${err instanceof Error ? err.message : 'unknown error'}`)
+          setPending(null)
+          return
+        }
+      }
 
       // Keep the driver record's copy of this date in step with the document.
       const driverId = entity.kind === 'DRIVER' ? entity.driver.id : null
@@ -303,7 +316,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
             <span>{title}</span>
           </span>
         ) : title}
-        description={entity.kind === 'DRIVER' ? 'Driver file' : 'Truck file'}
+        description={entity.kind === 'DRIVER' ? 'Driver file' : entity.truck.type === 'trailer' ? 'Trailer file' : 'Truck file'}
         headerExtra={(
           <>
             {entity.kind === 'DRIVER' && isAdmin && (
@@ -428,7 +441,14 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
 
                 {/* Expiration is editable for dated paperwork (not photos, and not
                     DOT — whose date comes from the truck field above). */}
-                {doc?.s3Key && slot.expires && !TRUCK_DOC_SPECS.find((s) => s.key === slot.key)?.dot && (
+                {entity.kind === 'TRUCK' && assetExpiryPatch(slot.key, null) && state !== 'WAIVED' ? (
+                  // Insurance / IFTA / IRP on a truck or trailer: editable with or without a
+                  // file, and the save writes the unit record and the certificate together.
+                  <DraftDateField compact value={doc?.s3Key ? doc.expirationDate : (entity.truck[assetExpiryField(slot.key)!] ?? null)}
+                    onSave={(d) => saveAssetExpiry({ assetId: entity.truck.id, documentType: slot.key, date: d, doc, setExpiration: hub.setExpiration })}
+                    label={`${slot.label} expiration`} title={doc?.s3Key ? 'Expiration date' : 'Expiration date (no file uploaded yet)'}
+                    successMessage="Expiration updated" clearedMessage="Expiration cleared" />
+                ) : doc?.s3Key && slot.expires && !TRUCK_DOC_SPECS.find((s) => s.key === slot.key)?.dot && (
                   <DraftDateField compact value={doc.expirationDate} onSave={async (d) => { await hub.setExpiration(doc, d) }}
                     label={`${slot.label} expiration`} title="Expiration date"
                     successMessage="Expiration updated" clearedMessage="Expiration cleared" />
