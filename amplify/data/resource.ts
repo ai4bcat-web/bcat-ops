@@ -2113,6 +2113,11 @@ const schema = a.schema(stageTypes({
       // P8. The tracking agent raised a flag the Tracking page shows.
       trackingFlaggedAt: a.datetime(),
       trackingFlagReason: a.string(),
+      // Needs review (Ryne 2026-11-13): AR/AP should check this shipment; reason shown on both pages,
+      // the AP note (carrier detail) on the AP page only. Cleared by tms-finance-actions CLEAR_FINANCE_REVIEW.
+      financeReviewAt:     a.datetime(),
+      financeReviewReason: a.string(),
+      financeReviewApNote: a.string(),
       // Step AJ. Per-shipment override { mode?, method?, driverSms? }; null/absent = inherit the customer.
       trackingPrefs:   a.json(),
       createdBy:       a.string().required(),

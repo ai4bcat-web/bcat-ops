@@ -41,6 +41,8 @@ import { AgingStrip } from '@/features/ar/AgingStrip'
 import { AP_STRIP_LABELS } from '@/features/ar/agingStripLabels'
 import { ReasonDialog } from '@/features/ar/components/ReasonDialog'
 import { agingChipFor, formatDay, lastThreeMonths, monthLabel } from '@/features/ar/arViews'
+import { NeedsReviewList } from '@/features/finance/NeedsReview'
+import { useNeedsReview } from '@/features/finance/useNeedsReview'
 import {
   AP_PAYMENT_KIND_LABEL, AP_PAYMENT_METHOD_LABEL, AP_PAYEE_KIND_LABEL, AP_TABS, BILL_STATUS_LABEL,
   EMPTY_TO_BE_PAID_FILTERS, applyToBePaidFilters, avgDaysToPayBills, awaitingInvoiceTotals, billCarrierOptions,
@@ -129,6 +131,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const { isAdmin, user } = useAuth()
   // Moving a load to billing creates its bill in Expected, so the page opens there.
   const [tab, setTab] = useState<ApTabKey>('expected')
+  const needsReview = useNeedsReview()
   const inboxStatus = useApInboxStatus()
   const [chip, setChip] = useState<InboxChip>('NEEDS_REVIEW')
   const [historySince] = useState(() => new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString())
@@ -381,6 +384,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     payments: carrierAp.payments.length,
     report: open.aging.byParty.length,
     inbox: inboxStatus.status?.openCount ?? 0,
+    review: needsReview.rows.length,
   }
 
   const reviewNow = () => {
@@ -616,8 +620,12 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         />
         <BillingGapsPanel onFixed={() => void refreshAll()} />
         {/* Keyed by grid so each view keeps its own saved columns, filters and sort. */}
-        <ApDenseList<never> key={current.gridId} config={current} email={user?.email} onRefresh={chrome.onRefresh}
-          pageFilters={{ count: owedFilterCount(owed), onClear: () => setOwed({ parties: [], divisions: [], due: null }) }} />
+        {tab === 'review' ? (
+          <NeedsReviewList side="AP" rows={needsReview.rows} error={needsReview.error} onCleared={needsReview.refresh} />
+        ) : (
+          <ApDenseList<never> key={current.gridId} config={current} email={user?.email} onRefresh={chrome.onRefresh}
+            pageFilters={{ count: owedFilterCount(owed), onClear: () => setOwed({ parties: [], divisions: [], due: null }) }} />
+        )}
       </div>
 
       {dialog?.kind === 'record' && (

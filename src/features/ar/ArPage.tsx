@@ -50,6 +50,8 @@ import {
   agingStatement, batchGenerateInvoices, graphqlErrorText, listInvoicesByMonth, listUserProfiles, reversePayment, voidInvoice,
 } from '@/lib/apiClient'
 import { loadWorklistShipments } from '@/lib/worklistShipments'
+import { NeedsReviewList } from '@/features/finance/NeedsReview'
+import { useNeedsReview } from '@/features/finance/useNeedsReview'
 import {
   AR_AGING_BUCKETS, AR_AGING_BUCKET_LABEL, agingCsv,
   type AgingSummary,
@@ -113,7 +115,7 @@ function view<T>(config: Omit<ListView, 'grid'> & { grid: ArGrid<T> }): ListView
 }
 
 /** The three queue statuses, then the two ledger views. */
-export type ArPageTab = 'ready' | 'invoiced' | 'paid' | 'payments' | 'aging'
+export type ArPageTab = 'ready' | 'invoiced' | 'paid' | 'payments' | 'aging' | 'review'
 
 const QUEUE_TAB_STATUS: Record<'ready' | 'invoiced' | 'paid', ArQueueStatus> = {
   ready: 'READY',
@@ -148,6 +150,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const [asOf] = useState(() => chicagoDateStr(new Date()))
 
   const [tab, setTab] = useState<ArPageTab>('ready')
+  const needsReview = useNeedsReview()
   const [dialog, setDialog] = useState<ArDialog | null>(null)
   const [busy, setBusy] = useState(false)
   const canRelease = useBillingGrant()
@@ -430,6 +433,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     { key: 'paid', label: `${AR_QUEUE_STATUS_LABEL.PAID} · ${queueTotal('PAID')}`, count: queue.PAID.length, testId: 'ar-tab-paid' },
     { key: 'payments', label: 'Payments & credits', count: customerAr.payments.length, testId: 'ar-tab-payments' },
     { key: 'aging', label: 'Aging', count: aging.byCustomer.length, testId: 'ar-tab-aging' },
+    { key: 'review', label: 'Needs review', count: needsReview.rows.length, testId: 'ar-tab-review' },
   ]
 
   const error = unbilled.error ?? invoiced.error ?? open.error ?? customerAr.error
@@ -549,7 +553,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
               onClick={() => { exportOutstandingReceivables().then((n) => toast.success(`Exported ${n} outstanding receivables`)).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not export')) }}>
               <Download size={14} aria-hidden="true" /> Export outstanding
             </button>
-            {current.actions}
+            {tab !== 'review' && current.actions}
           </div>
         </div>
         <TmsHeadBand
@@ -586,8 +590,14 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           )}
           bottom={<TmsTabStrip aria-label="Invoicing status" tabs={tabs} active={tab} onSelect={(key) => { setSelected([]); setTab(key as ArPageTab) }} />}
         />
-        {current.banner}
-        <ArDenseTable<never> key={tab} grid={current.grid} pageFilters={{ count: owedFilterCount(owed), onClear: () => setOwed({ parties: [], divisions: [], due: null }) }} />
+        {tab === 'review' ? (
+          <NeedsReviewList side="AR" rows={needsReview.rows} error={needsReview.error} onCleared={needsReview.refresh} />
+        ) : (
+          <>
+            {current.banner}
+            <ArDenseTable<never> key={tab} grid={current.grid} pageFilters={{ count: owedFilterCount(owed), onClear: () => setOwed({ parties: [], divisions: [], due: null }) }} />
+          </>
+        )}
       </div>
 
       {dialog?.kind === 'generate' && (
