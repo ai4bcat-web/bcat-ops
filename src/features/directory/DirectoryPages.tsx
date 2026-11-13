@@ -6,7 +6,8 @@ import { PossibleDuplicateBadge } from './components/PossibleDuplicateBadge'
 import { buildDuplicateIndex, normalizeCustomerName } from '@/lib/customerDuplicates'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Archive, MapPin, MessageSquarePlus, Merge, Pencil, Search, Settings2, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, MapPin, MessageSquarePlus, Merge, Pencil, Search, Settings2, Trash2, Users } from 'lucide-react'
+import { CustomerRemoveDialog } from './components/CustomerRemoveDialog'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
 import { useStaff } from '@/hooks/useStaff'
@@ -257,6 +258,8 @@ export function CustomersPage() {
   const [showDefaults, setShowDefaults] = useState(false)
   const [pageSize, setPageSize] = useState(PAGE_SIZE)
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
+  // Admin delete / merge / archive, one customer at a time (a bulk selection steps through).
+  const [removeQueue, setRemoveQueue] = useState<CustomerRecord[]>([])
 
   useEffect(() => {
     listDivisions().then(setDivisions).catch((e: unknown) => toast.error(graphqlErrorText(e) || 'Could not load divisions'))
@@ -377,6 +380,10 @@ export function CustomersPage() {
     try { await dir.archiveCustomer(c); toast.success('Customer archived') } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
   }
 
+  const restore = async (c: CustomerRecord) => {
+    try { await dir.restoreCustomer(c); toast.success(`Restored ${c.name}`) } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+  }
+
   const saveSettings = async (patch: Parameters<typeof saveTmsSettings>[0]) => {
     if (!isAdmin) throw new Error('Admin only')
     const next = await saveTmsSettings(patch, settings?.updatedAt)
@@ -455,8 +462,14 @@ export function CustomersPage() {
           <span style={{ display: 'inline-flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
             <TmsIconButton shape="plain" aria-label={`Add note to ${c.name}`} title="Add note" onClick={() => setNoteFor(c)}><MessageSquarePlus size={14} /></TmsIconButton>
             <TmsIconButton shape="plain" aria-label={`Edit ${c.name}`} title="Edit" onClick={() => setEditing(c)}><Pencil size={14} /></TmsIconButton>
-            {isAdmin && (
+            {isAdmin && c.active !== false && (
               <TmsIconButton shape="plain" aria-label={`Archive ${c.name}`} title="Archive" onClick={() => void archive(c)}><Archive size={14} /></TmsIconButton>
+            )}
+            {isAdmin && c.active === false && (
+              <TmsIconButton shape="plain" aria-label={`Restore ${c.name}`} title="Restore" onClick={() => void restore(c)}><ArchiveRestore size={14} /></TmsIconButton>
+            )}
+            {isAdmin && (
+              <TmsIconButton shape="plain" aria-label={`Delete or merge ${c.name}`} title="Delete or merge" onClick={() => setRemoveQueue([c])}><Trash2 size={14} /></TmsIconButton>
             )}
           </span>
         )
@@ -533,6 +546,13 @@ export function CustomersPage() {
             onDone={() => setSelectedIds(new Set())}
             onClear={() => setSelectedIds(new Set())}
           />
+          {isAdmin && selectedIds.size > 0 && (
+            <div className="tms-dense-bar" data-testid="customer-bulk-remove">
+              <TmsButton size="sm" variant="destructive" onClick={() => setRemoveQueue(sortedRows.filter((r) => selectedIds.has(r.record.id)).map((r) => r.record))}>
+                Delete / merge {selectedIds.size} selected…
+              </TmsButton>
+            </div>
+          )}
           <DenseGrid<CustomerRow>
             aria-label="Customers"
             selectable
@@ -566,6 +586,20 @@ export function CustomersPage() {
           )}
         </div>
       </div>
+
+      {removeQueue.length > 0 && (
+        <CustomerRemoveDialog
+          queue={removeQueue}
+          customers={dir.customers}
+          onArchive={(c) => dir.archiveCustomer(c)}
+          onRemoved={(id) => {
+            dir.dropCustomer(id)
+            setSelectedIds((prev) => { const next = new Set(prev); next.delete(id); return next })
+            void dir.refresh()
+          }}
+          onClose={() => setRemoveQueue([])}
+        />
+      )}
 
       {noteFor && <AddNoteDialog customerId={noteFor.id} customerName={noteFor.name} onClose={() => setNoteFor(null)} onSaved={() => void crm.refresh()} />}
 
@@ -602,6 +636,7 @@ export function CustomersPage() {
           isAdmin={isAdmin}
           currentUser={user?.email ?? ''}
           activeCustomers={dir.customers.filter((c) => c.id !== profileCustomer.id && c.active !== false && c.status !== 'BLOCKED')}
+          onRemove={isAdmin ? () => { const c = profileCustomer; setProfileId(null); setRemoveQueue([c]) } : undefined}
           onClose={() => { setProfileId(null); void crm.refresh() }}
           onSave={async (current, next) => {
             await dir.saveCustomer(current, next)

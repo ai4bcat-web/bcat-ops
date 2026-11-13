@@ -19,6 +19,7 @@ import {
   DeleteItemCommand,
   GetItemCommand,
   PutItemCommand,
+  QueryCommand,
   UpdateItemCommand,
   ScanCommand,
   type AttributeValue,
@@ -104,6 +105,7 @@ import {
 } from './integrations'
 import { MCP_FIND_ACTIONS, runMcpFindAction, type McpFindActionName, type McpFindDeps } from './mcpFind'
 import { parsePoints, routeMiles } from './routeMiles'
+import { deleteCustomer, mergeCustomer, previewDeleteCustomer, restoreCustomer, type DeleteDeps } from './customerDelete'
 import { validateProgressSteps } from '../../../src/lib/progressSteps'
 
 const dynamo = new DynamoDBClient({})
@@ -211,6 +213,11 @@ type Action =
   | McpFindActionName
   // Step AH — road miles for the shipment form (Distance Matrix, else a labelled estimate).
   | 'GET_ROUTE_MILES'
+  // Ryne 2026-11-12 — admins delete customers: preview the links, hard delete, merge, restore.
+  | 'PREVIEW_DELETE_CUSTOMER'
+  | 'DELETE_CUSTOMER'
+  | 'MERGE_CUSTOMER'
+  | 'RESTORE_CUSTOMER'
 
 interface AppSyncIdentity {
   sub: string
@@ -304,6 +311,11 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
     PREVIEW_MERGE_LOCATIONS: true,
     MERGE_LOCATIONS: true,
     RESUME_MERGE: true,
+    // Removing a customer rewrites history across shipments, invoices and payments: owner/ADMIN only.
+    PREVIEW_DELETE_CUSTOMER: true,
+    DELETE_CUSTOMER: true,
+    MERGE_CUSTOMER: true,
+    RESTORE_CUSTOMER: true,
   }
   // The Academy Ask assistant answers questions from any user who can open the Academy.
   const assistantActions: Partial<Record<Action, true>> = {
@@ -3590,9 +3602,77 @@ const mcpFindDeps: McpFindDeps = {
   shipmentMessageTableName: SHIPMENT_MESSAGE_TABLE_NAME,
 }
 
+// ── Customer delete / merge / restore (customerDelete.ts) ────────────────────
+
+async function queryAll(table: string, index: string, key: string, value: string): Promise<Record<string, unknown>[]> {
+  const items: Record<string, unknown>[] = []
+  let startKey: Record<string, AttributeValue> | undefined
+  do {
+    const page = await dynamo.send(new QueryCommand({
+      TableName: table,
+      IndexName: index,
+      KeyConditionExpression: '#k = :v',
+      ExpressionAttributeNames: { '#k': key },
+      ExpressionAttributeValues: { ':v': { S: value } },
+      ExclusiveStartKey: startKey,
+    }))
+    for (const item of page.Items ?? []) items.push(unmarshall(item))
+    startKey = page.LastEvaluatedKey
+  } while (startKey)
+  return items
+}
+
+async function updateIf(table: string, id: string, set: Record<string, unknown>, field: string, expected: unknown): Promise<boolean> {
+  const names: Record<string, string> = { '#cf': field }
+  const values: Record<string, AttributeValue> = {}
+  const parts: string[] = []
+  Object.entries(set).forEach(([k, v], i) => {
+    names[`#f${i}`] = k
+    values[`:v${i}`] = v == null ? { NULL: true } : marshall({ x: v }, { removeUndefinedValues: true }).x
+    parts.push(`#f${i} = :v${i}`)
+  })
+  let condition = 'attribute_exists(id) AND '
+  if (expected == null) condition += '(attribute_not_exists(#cf) OR #cf = :nullv)'
+  else condition += '#cf = :cv'
+  if (expected == null) values[':nullv'] = { NULL: true }
+  else values[':cv'] = marshall({ x: expected }).x
+  try {
+    await dynamo.send(new UpdateItemCommand({
+      TableName: table,
+      Key: marshall({ id }),
+      UpdateExpression: `SET ${parts.join(', ')}`,
+      ConditionExpression: condition,
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+    }))
+    return true
+  } catch (err) {
+    if (isConditionalCheckFailed(err)) return false
+    throw err
+  }
+}
+
+function customerDeleteDeps(caller: Caller, timeLeftMs?: () => number): DeleteDeps {
+  return {
+    tableOf: (model) => {
+      const name = tableOf(`${model.replace(/([a-z])([A-Z])/g, '$1_$2').toUpperCase()}_TABLE_NAME`, model)
+      if (!name) throw new Error(`${model} table is not configured`)
+      return name
+    },
+    get: getById,
+    queryIndex: queryAll,
+    scan: scanTable,
+    updateIf,
+    remove: async (table, id) => { await dynamo.send(new DeleteItemCommand({ TableName: table, Key: marshall({ id }) })) },
+    audit: (entityId, action, changes) => writeAudit('Customer', entityId, action, caller, changes),
+    now: nowIso,
+    timeLeftMs,
+  }
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────────
 
-export const handler = async (event: AppSyncEvent): Promise<Record<string, unknown>> => {
+export const handler = async (event: AppSyncEvent, context?: { getRemainingTimeInMillis?: () => number }): Promise<Record<string, unknown>> => {
   const action = event.arguments.action as Action
   const caller = await authorize(action, event.identity)
   const input = parseInput(event.arguments.input)
@@ -3662,6 +3742,19 @@ export const handler = async (event: AppSyncEvent): Promise<Record<string, unkno
       return deleteColumnTemplate(input, caller)
     case 'ENSURE_OWNERSHIP_SEED':
       return ensureOwnershipSeed(caller)
+    case 'PREVIEW_DELETE_CUSTOMER':
+      return { ...(await previewDeleteCustomer(customerDeleteDeps(caller), assertString(input.id, 'id'))) }
+    case 'DELETE_CUSTOMER':
+      return deleteCustomer(customerDeleteDeps(caller), assertString(input.id, 'id'), input.confirmName)
+    case 'MERGE_CUSTOMER':
+      return { ...(await mergeCustomer(
+        customerDeleteDeps(caller, context?.getRemainingTimeInMillis ? () => context.getRemainingTimeInMillis!() : undefined),
+        assertString(input.sourceId, 'sourceId'),
+        assertString(input.targetId, 'targetId'),
+        input.confirmName,
+      )) }
+    case 'RESTORE_CUSTOMER':
+      return restoreCustomer(customerDeleteDeps(caller), assertString(input.id, 'id'))
     case 'GET_ROUTE_MILES':
       return { ...(await routeMiles(parsePoints(input.stops), {
         apiKey: process.env.GOOGLE_MAPS_API_KEY ?? '',

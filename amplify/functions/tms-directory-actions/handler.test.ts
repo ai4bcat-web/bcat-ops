@@ -105,7 +105,15 @@ vi.mock('@aws-sdk/client-dynamodb', () => {
       this.input = input
     }
   }
+  class QueryCommand {
+    input: unknown
+    __type = 'Query'
+    constructor(input: unknown) {
+      this.input = input
+    }
+  }
   return {
+    QueryCommand,
     DynamoDBClient,
     GetItemCommand,
     PutItemCommand,
@@ -3798,5 +3806,31 @@ describe('REMOVE_DRIVER_NOTE', () => {
 
   it('is refused for a user with no directory access', async () => {
     await expect(handler(event('REMOVE_DRIVER_NOTE', { id: 'l-1', at: 'x' }, identity({ groups: [] })))).rejects.toThrow('Forbidden')
+  })
+})
+
+describe('customer delete / merge / restore — permissions', () => {
+  beforeEach(() => { send.mockReset(); cognitoSend.mockReset() })
+
+  for (const action of ['PREVIEW_DELETE_CUSTOMER', 'DELETE_CUSTOMER', 'MERGE_CUSTOMER', 'RESTORE_CUSTOMER']) {
+    it(`${action} refuses a non-admin with page-customers`, async () => {
+      await expect(handler(rawEvent(action, { id: 'c1', sourceId: 'c1', targetId: 'c2', confirmName: 'X' }))).rejects.toThrow('requires owner or ADMIN')
+      expect(send).not.toHaveBeenCalled()
+    })
+  }
+
+  it('lets an ADMIN preview a delete (queries by customerId)', async () => {
+    for (const m of ['SHIPMENT', 'ORDER', 'INVOICE', 'AR_PAYMENT', 'FACTORING_ITEM', 'QUOTE', 'LANE_RATE_SAMPLE', 'COMMISSION', 'TRACKING_LINK', 'SPOT_REQUEST', 'CRM_CONTACT', 'CRM_DOMAIN', 'CRM_ACTIVITY']) {
+      vi.stubEnv(`${m}_TABLE_NAME`, `${m}-test`)
+    }
+    send.mockImplementation(async (cmd: { __type: string; input: Record<string, unknown> }) => {
+      if (cmd.__type === 'Get') return { Item: marshall({ id: 'c1', name: 'Acme', active: true }) }
+      return { Items: [] }
+    })
+    const out = await handler(rawEvent('PREVIEW_DELETE_CUSTOMER', { id: 'c1' }, identity({ email: 'jenny@bcatcorp.com', groups: ['ADMIN'] })))
+    expect(out.canHardDelete).toBe(true)
+    const queries = (send.mock.calls as [{ __type: string; input: Record<string, unknown> }][]).filter(([c]) => c.__type === 'Query')
+    expect(queries.some(([c]) => c.input.IndexName === 'shipmentsByCustomerIdAndPickupAppt')).toBe(true)
+    vi.unstubAllEnvs()
   })
 })

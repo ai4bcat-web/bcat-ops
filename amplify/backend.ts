@@ -2422,6 +2422,30 @@ directoryActionsFn.addToRolePolicy(
   }),
 )
 
+// Admin customer delete / merge (customerDelete.ts, Ryne 2026-11-12). Reading every record that
+// points at a customer, and on a merge moving its customerId (+ name snapshot) to the target. No
+// PutItem here: the merge only rewrites a pointer, and only the customer's own CRM rows are ever
+// deleted. Invoice/ArPayment/FactoringItem are reachable for that one pointer write; the integration
+// actions in this Lambda still never touch them (they never name these tables).
+const CUSTOMER_LINK_MODELS = [
+  'Shipment', 'Order', 'Load', 'Invoice', 'ArPayment', 'FactoringItem', 'Quote',
+  'LaneRateSample', 'Commission', 'TrackingLink', 'SpotRequest',
+]
+const CUSTOMER_OWNED_MODELS = ['CrmContact', 'CrmDomain', 'CrmActivity']
+directoryActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:Query', 'dynamodb:Scan', 'dynamodb:UpdateItem'],
+    resources: [...CUSTOMER_LINK_MODELS, ...CUSTOMER_OWNED_MODELS, 'Customer', 'Location']
+      .flatMap((m) => [stageTables[m].tableArn, `${stageTables[m].tableArn}/index/*`]),
+  }),
+)
+directoryActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:DeleteItem'],
+    resources: CUSTOMER_OWNED_MODELS.map((m) => stageTables[m].tableArn),
+  }),
+)
+
 // One suffix instead of a full name per table: Lambda caps environment variables at 4 KB and 17
 // table names took tms-directory-actions over it (deploy 158). The handler derives `<Model>-<suffix>`.
 // The api id is cut out of a table name (no reference to the API construct: that would close a cycle).
