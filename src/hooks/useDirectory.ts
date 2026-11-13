@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   listCustomers, createCustomer, updateCustomer, archiveCustomer, setCustomerStatus as setCustomerStatusAction,
+  restoreCustomer as restoreCustomerAction,
   listLocations, createLocation, updateLocation, archiveLocation, removeLocationDriverNote,
 } from '@/lib/apiClient'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
@@ -55,6 +56,12 @@ export function useDirectory(opts?: { includeArchived?: boolean; locations?: boo
       if (includeArchived) replaceCustomer(c); else setCustomers((p) => p.filter((x) => x.id !== c.id))
       return c
     },
+    /** Admin restore of an archived customer. */
+    restoreCustomer: async (current: CustomerRecord) => {
+      const c = await restoreCustomerAction(current.id); replaceCustomer(c); return c
+    },
+    /** After an admin delete or merge: the row is gone server-side. */
+    dropCustomer: (id: string) => setCustomers((p) => p.filter((x) => x.id !== id)),
     /** Status transitions are CAS-checked server-side; here we just refresh the local row. */
     setCustomerStatus: async (current: CustomerRecord, input: Parameters<typeof setCustomerStatusAction>[2]) => {
       const c = await setCustomerStatusAction(current.id, current.updatedAt, input)

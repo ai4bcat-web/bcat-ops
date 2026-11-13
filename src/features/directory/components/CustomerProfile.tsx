@@ -77,6 +77,8 @@ interface CustomerProfileProps {
   onClose: () => void
   onSave: (current: CustomerRecord, next: Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   onStatusChange: (current: CustomerRecord, input: { status: CustomerStatus; reason?: string; replacementCustomerId?: string }) => Promise<void>
+  /** Admins: open delete / merge / archive for this customer. */
+  onRemove?: () => void
 }
 
 const tabs = [
@@ -125,6 +127,7 @@ export function CustomerProfile({
   onClose,
   onSave,
   onStatusChange,
+  onRemove,
 }: CustomerProfileProps) {
   const { value, set, setPartial, toRecord, errors } = useCustomerForm(customer)
   const duplicates = useMemo(
@@ -230,6 +233,7 @@ export function CustomerProfile({
               )}
               {canClose && <TmsButton size="sm" onClick={() => setStatusAction('close')}>Close lead</TmsButton>}
               <TmsButton size="sm" onClick={() => setStatusAction('deactivate')}>Deactivate</TmsButton>
+              {onRemove && <TmsButton size="sm" variant="destructive" data-testid="customer-profile-remove" onClick={onRemove}>Delete / merge…</TmsButton>}
             </>
           }
           columns={[

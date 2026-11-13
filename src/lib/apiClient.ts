@@ -1638,6 +1638,32 @@ export async function updateCustomer(id: string, patch: Partial<Omit<CustomerRec
 export async function archiveCustomer(id: string, expectedUpdatedAt: string): Promise<CustomerRecord> {
   return rememberCustomerPolicy(await directoryAction<CustomerRecord>('ARCHIVE_CUSTOMER', { id, expectedUpdatedAt }))
 }
+// Admin customer removal (tms-directory-actions/customerDelete.ts): owner/ADMIN only, enforced server-side.
+export interface CustomerLinkCount { key: string; label: string; count: number; blocking: boolean }
+export interface CustomerDeletePreview {
+  customer: { id: string; name: string; active: boolean }
+  links: CustomerLinkCount[]
+  blockingTotal: number
+  canHardDelete: boolean
+}
+export async function previewDeleteCustomer(id: string): Promise<CustomerDeletePreview> {
+  return directoryAction<CustomerDeletePreview>('PREVIEW_DELETE_CUSTOMER', { id })
+}
+export async function deleteCustomer(id: string, confirmName: string): Promise<{ deleted: boolean; id: string }> {
+  return directoryAction<{ deleted: boolean; id: string }>('DELETE_CUSTOMER', { id, confirmName })
+}
+export interface CustomerMergeResult { status: 'DONE' | 'PARTIAL'; sourceId: string; targetId: string; moved: Record<string, number> }
+/** Repeats the server's resumable merge until it reports DONE (each call stops before AppSync's 30 s limit). */
+export async function mergeCustomer(sourceId: string, targetId: string, confirmName: string): Promise<CustomerMergeResult> {
+  for (let attempt = 0; attempt < 25; attempt++) {
+    const out = await directoryAction<CustomerMergeResult>('MERGE_CUSTOMER', { sourceId, targetId, confirmName })
+    if (out.status === 'DONE') return out
+  }
+  throw new Error('The merge is still moving records — run it again to finish')
+}
+export async function restoreCustomer(id: string): Promise<CustomerRecord> {
+  return rememberCustomerPolicy(await directoryAction<CustomerRecord>('RESTORE_CUSTOMER', { id }))
+}
 /** The tracking mailbox and this shipment's thread address: what goes on CC when a rate con is sent by hand. */
 export async function getTrackingMailbox(shipmentId: string): Promise<{ tracking: string; thread: string }> {
   return shipmentAction<{ tracking: string; thread: string }>('GET_TRACKING_MAILBOX', { shipmentId })
