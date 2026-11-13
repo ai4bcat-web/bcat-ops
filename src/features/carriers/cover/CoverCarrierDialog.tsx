@@ -18,16 +18,15 @@ import { MoneyField } from '@/features/directory/components/MoneyField'
 import { InviteDialog } from '@/features/carriers/find/InviteDialog'
 import { McpReviewCardView } from '@/features/carriers/find/McpReviewCardView'
 import { CarrierLookupCard } from '@/features/carriers/lookup/CarrierLookupCard'
+import { lookupState } from '@/features/carriers/lookup/lookupModel'
 import { TmsAlert, TmsBadge, TmsButton, TmsDialog, TmsInput, TmsMetaList } from '@/features/tms/kit'
 import { useCarriers } from '@/hooks/useCarriers'
 import { CoverTrackingStep } from './CoverTrackingStep'
 import { addCarrier, carriersByDot, carriersByMc, coverCarrier, getShipmentBundle, pullMcpCarrier, mcpPreviewCarrier, mcpSendInvite } from '@/lib/apiClient'
 import type { McpLookupResult } from '@/lib/apiClient'
-import { CARRIER_STATUS_LABELS } from '@/lib/carrierStatus'
 import { formatDateTime } from '@/lib/date'
-import { PACKET_LABELS, parseSearch, refLabel, searchDirectory } from '@/lib/integrations/mcpReview'
-import type { McpCarrierStatus } from '@/lib/integrations/mcpAdapter'
-import { effectiveMcpStatus, normalizeMcpStatus } from '@/lib/mcpPacket'
+import { parseSearch, refLabel, searchDirectory } from '@/lib/integrations/mcpReview'
+import { mcpPacketStanding } from '@/lib/mcpPacket'
 import type { CarrierRecord, ShipmentBundle } from '@/types/tms'
 import { liveCarriersOf } from '@/lib/carrierTotals'
 import { MODERATE_ACK_KEY, UNACCEPTABLE_ACK_KEY, coverGate, coverRoute, directoryStanding, findByNumber } from './coverModel'
@@ -35,11 +34,6 @@ import { MODERATE_ACK_KEY, UNACCEPTABLE_ACK_KEY, coverGate, coverRoute, director
 type Ref = { mcNumber?: string; dotNumber?: string }
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : 'Something went wrong')
-
-const packetLabel = (status: string | null | undefined): string => {
-  const key = normalizeMcpStatus(status)
-  return key ? (PACKET_LABELS[key as McpCarrierStatus] ?? key) : 'No packet on file'
-}
 
 const refOf = (c: CarrierRecord): Ref => ({
   ...(c.mcNumber ? { mcNumber: c.mcNumber.replace(/^MC/i, '') } : {}),
@@ -153,7 +147,8 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
         // its packet is Active, filled in and assignable the moment someone looks it up, not at the next scheduled sync.
         // Never pulled at all (no MCP status: an Aljex carrier MCP does not monitor for us, so the scheduled sync never reaches it):
         // pull it too, or its insurance is missing and the booking gate refuses a carrier MCP has certificates for.
-        if (row && ((row.status !== 'ACTIVE' && row.mcpInvitedAt) || !row.mcpStatus) && (row.mcNumber || row.dotNumber)) {
+        // An Active carrier whose packet is not complete is not one MCP monitors for us either: refresh it on lookup the same way.
+        if (row && ((row.status !== 'ACTIVE' && row.mcpInvitedAt) || !mcpPacketStanding(row).completed) && (row.mcNumber || row.dotNumber)) {
           await pullMcpCarrier(row.id)
           const fresh = await read()
           if (fresh) { row = fresh; setSelected((cur) => (cur == null || cur.id === fresh.id ? fresh : cur)) }
@@ -275,6 +270,7 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
   }
 
   const [nowIso] = useState(() => new Date().toISOString())
+  const standing = lookupState({ card, mode: preview?.mode ?? 'LIVE', carrier: selected, nowIso }).standing
   const needRate = 'Enter the carrier rate first: the carrier is assigned right after the setup packet is sent.'
   const requestInvite = (emails: string[]) => {
     if (!rateOk) { setError(needRate); return }
@@ -461,13 +457,15 @@ export function CoverCarrierDialog({ shipmentId, shipmentNumber, initialQuery = 
                 items={[
                   { label: 'Carrier', value: selected.name },
                   { label: 'MC / DOT', value: [selected.mcNumber && `MC ${selected.mcNumber}`, selected.dotNumber && `DOT ${selected.dotNumber}`].filter(Boolean).join(' · ') || null },
-                  { label: 'Directory status', value: <TmsBadge tone={selected.status === 'ACTIVE' ? 'green' : selected.status === 'DO_NOT_USE' ? 'red' : 'orange'}>{CARRIER_STATUS_LABELS[selected.status]}</TmsBadge> },
-                  { label: 'Packet status', value: <span data-testid="cover-packet-status">{packetLabel(effectiveMcpStatus(selected.mcpStatus, selected.mcpRiskScore))}</span> },
-                  { label: 'Setup packet sent', value: selected.mcpInvitedAt ? `${formatDateTime(selected.mcpInvitedAt)}${selected.mcpInvitedTo ? ` to ${selected.mcpInvitedTo}` : ''}` : 'Not sent' },
+                  { label: 'Status', value: <span data-testid="cover-packet-status"><TmsBadge tone={standing.tone}>{standing.label}</TmsBadge></span> },
+                  // The packet date only matters while the carrier is not set up yet.
+                  ...(standing.kind === 'NOT_SETUP'
+                    ? [{ label: 'Setup packet sent', value: selected.mcpInvitedAt ? `${formatDateTime(selected.mcpInvitedAt)}${selected.mcpInvitedTo ? ` to ${selected.mcpInvitedTo}` : ''}` : 'Not sent' }]
+                    : []),
                 ]}
               />
               {route === 'ASSIGN_NOW' && (
-                <TmsAlert tone="green" title="Setup complete" role="status">MyCarrierPackets reports this carrier’s packet complete and is monitoring it. The rate con can be sent right after assigning.</TmsAlert>
+                <TmsAlert tone="green" title="Set up · Active" role="status">This carrier is set up with us. Assign it; the rate con can be sent right after assigning.</TmsAlert>
               )}
               {pending && route === 'ASSIGN_WAITING' && (
                 <TmsAlert tone="orange" title="Waiting for carrier setup" role="status">The setup packet was sent. The carrier is assigned now and the load waits on MyCarrierPackets; the rate con can only go out once MyCarrierPackets confirms the packet.</TmsAlert>

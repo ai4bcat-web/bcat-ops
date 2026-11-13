@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildReviewCard, stubReviewCard } from '@/lib/integrations/mcpReview'
 import type { McpReviewCard } from '@/lib/integrations/mcpReview'
-import { chosenRecipients, defaultRecipients, lookupState } from './lookupModel'
+import { chosenRecipients, defaultRecipients, insuranceInOrder, lookupState } from './lookupModel'
 import type { LookupDirectoryRow } from './lookupModel'
 
 const NOW_MS = Date.parse('2026-11-05T12:00:00Z')
@@ -10,7 +10,10 @@ const NOW = '2026-11-05T12:00:00.000Z'
 const BODY = {
   DotNumber: 7000001, DocketNumber: 'MC900001', CompanyName: 'Zephyr Test Freight LLC', Status: 'ACTIVE',
   Emails: [{ Description: 'Dispatch', Email: 'dispatch@zephyr.example' }, { Email: 'owner@zephyr.example' }],
-  CertData: { Certificates: [{ Coverages: [{ Type: 'Cargo', ExpirationDate: '2099-01-01T00:00:00', CoverageLimit: '$100,000' }] }] },
+  CertData: { Certificates: [{ Coverages: [
+    { Type: 'Auto', ExpirationDate: '2099-01-01T00:00:00', CoverageLimit: '$1,000,000' },
+    { Type: 'Cargo', ExpirationDate: '2099-01-01T00:00:00', CoverageLimit: '$100,000' },
+  ] }] },
 }
 const card = (extra: Record<string, unknown> = {}): McpReviewCard => buildReviewCard({ ...BODY, ...extra }, {}, 'preview', NOW_MS)!
 const row = (over: Partial<LookupDirectoryRow> = {}): LookupDirectoryRow => ({ id: 'car-1', name: 'Zephyr', status: 'ACTIVE', mcpStatus: 'ACCEPTABLE', ...over })
@@ -19,14 +22,15 @@ describe('lookupState: directory × packet matrix', () => {
   const cases: Array<[string, Partial<LookupDirectoryRow> | null, 'LIVE' | 'STUB', string, boolean, boolean, boolean]> = [
     // label, directory row, mode, packet kind, activeReady, send enabled, cover enabled
     ['directory ACTIVE + packet complete', {}, 'LIVE', 'COMPLETE', true, true, true],
-    ['directory ACTIVE + invited', { mcpStatus: 'INVITED', mcpInvitedAt: '2026-11-04T12:00:00Z' }, 'LIVE', 'INVITED', false, true, false],
-    ['directory ACTIVE + no packet', { mcpStatus: null }, 'LIVE', 'NONE', false, true, false],
+    // Ryne 2026-11-13: Active with us is set up and coverable, whatever the packet says.
+    ['directory ACTIVE + invited', { mcpStatus: 'INVITED', mcpInvitedAt: '2026-11-04T12:00:00Z' }, 'LIVE', 'INVITED', true, true, true],
+    ['directory ACTIVE + no packet', { mcpStatus: null }, 'LIVE', 'NONE', true, true, true],
     ['directory INACTIVE + packet complete', { status: 'INACTIVE' }, 'LIVE', 'COMPLETE', false, true, false],
     ['directory PENDING + invited', { status: 'PENDING', mcpStatus: 'INVITED', mcpInvitedAt: '2026-11-04T12:00:00Z' }, 'LIVE', 'INVITED', false, true, false],
     ['directory INACTIVE + no packet', { status: 'INACTIVE', mcpStatus: 'NOT_INVITED' }, 'LIVE', 'NONE', false, true, false],
     ['not in directory + no packet', null, 'LIVE', 'NONE', false, true, false],
     ['stub, in directory with a packet on our record', {}, 'STUB', 'COMPLETE', true, false, true],
-    ['stub, in directory with no packet on our record', { mcpStatus: null }, 'STUB', 'STUB', false, false, false],
+    ['stub, in directory with no packet on our record', { mcpStatus: null }, 'STUB', 'STUB', true, false, true],
     ['stub, not in directory', null, 'STUB', 'STUB', false, false, false],
   ]
   it.each(cases)('%s', (_label, dir, mode, packet, activeReady, send, cover) => {
@@ -85,6 +89,44 @@ describe('lookupState: send action', () => {
   })
 })
 
+describe('lookupState: one standing (Ryne 2026-11-13)', () => {
+  const standing = (dir: Partial<LookupDirectoryRow> | null, c: McpReviewCard | null = card(), mode: 'LIVE' | 'STUB' = 'LIVE') =>
+    lookupState({ card: c, mode, carrier: dir ? row(dir) : null, nowIso: NOW }).standing
+  /** LANDSTAR RANGER INC.: Active with us, never had a packet with us, MCP rates the risk UnacceptableFail. */
+  const landstar = card({ RiskAssessmentDetails: { TotalPoints: 29500, OverallRating: 'UnacceptableFail' }, RiskAssessment: { Overall: 'Unacceptable' } })
+
+  it('an Active carrier is "Set up · Active" whatever its packet or MCP risk says', () => {
+    for (const dir of [{}, { mcpStatus: null }, { mcpStatus: 'NOT_INVITED' }, { mcpStatus: 'INVITED', mcpInvitedAt: '2026-11-04T12:00:00Z' }]) {
+      expect(standing(dir, landstar)).toMatchObject({ kind: 'SETUP_ACTIVE', label: 'Set up · Active', tone: 'green' })
+    }
+    // MCP's flags stay as plain information, they do not change the answer.
+    expect(lookupState({ card: landstar, mode: 'LIVE', carrier: row({ mcpStatus: null }), nowIso: NOW }).vetting.failing.join(' ')).toMatch(/Risk/)
+  })
+
+  it('a carrier set up before but switched off is "Set up · Not active", with why', () => {
+    expect(standing({ status: 'INACTIVE', statusReason: 'EXPIRED_INSURANCE', statusNote: 'cargo lapsed 10/31' })).toEqual({ kind: 'SETUP_INACTIVE', label: 'Set up · Not active', detail: 'Expired insurance: cargo lapsed 10/31', tone: 'orange' })
+    expect(standing({ status: 'DO_NOT_USE' })).toMatchObject({ kind: 'SETUP_INACTIVE', label: 'Set up · Do not use', tone: 'red' })
+  })
+
+  it('a carrier not set up and meeting the requirements is "Not set up yet", with the packet stage', () => {
+    expect(standing(null)).toEqual({ kind: 'NOT_SETUP', label: 'Not set up yet', detail: 'Setup packet not sent yet', tone: 'orange' })
+    expect(standing({ status: 'PENDING', mcpStatus: 'INVITED', mcpInvitedAt: '2026-11-04T12:00:00Z' }).detail).toBe('Packet invited 2026-11-04; waiting for the carrier to finish it')
+    expect(standing(null, stubReviewCard({ mcNumber: 'MC900001' }, NOW_MS), 'STUB')).toMatchObject({ kind: 'NOT_SETUP', detail: 'Stub, no MCP call' })
+  })
+
+  it('a carrier not set up that fails a requirement is "Do not set up", naming what failed', () => {
+    const s = standing(null, landstar)
+    expect(s).toMatchObject({ kind: 'DO_NOT_SETUP', label: 'Do not set up · Doesn\'t meet requirements', tone: 'red' })
+    expect(s.detail).toMatch(/Risk/)
+    const noAuto = card({ CertData: { Certificates: [{ Coverages: [{ Type: 'Cargo', ExpirationDate: '2099-01-01T00:00:00' }] }] } })
+    expect(standing({ status: 'PENDING', mcpStatus: 'NOT_INVITED' }, noAuto)).toMatchObject({ kind: 'DO_NOT_SETUP', detail: 'No active auto liability' })
+  })
+
+  it('lists auto liability and cargo first among the insurance', () => {
+    expect(insuranceInOrder([{ type: 'General' }, { type: 'WorkersCompensation' }, { type: 'Cargo' }, { type: 'Auto' }]).map((r) => r.type)).toEqual(['Auto', 'Cargo', 'General', 'WorkersCompensation'])
+  })
+})
+
 describe('recipients', () => {
   it('default is every MCP address; an unticked one is dropped; a typed one is additive; nothing ticked is an empty list', () => {
     const emails = card().emails
@@ -97,7 +139,7 @@ describe('recipients', () => {
 
 describe('lookupState: active with us, own fleet and the risk limit', () => {
   it('answers "active with us?" with the reason', () => {
-    expect(lookupState({ card: card(), mode: 'LIVE', carrier: row(), nowIso: NOW }).activeWithUs).toEqual({ active: true, label: 'Active with us', why: 'Setup complete in MyCarrierPackets' })
+    expect(lookupState({ card: card(), mode: 'LIVE', carrier: row(), nowIso: NOW }).activeWithUs).toEqual({ active: true, label: 'Active with us', why: 'Set up with us' })
     expect(lookupState({ card: card(), mode: 'LIVE', carrier: null, nowIso: NOW }).activeWithUs).toMatchObject({ active: false, why: 'Not in our directory yet' })
     const inactive = lookupState({ card: card(), mode: 'LIVE', carrier: row({ status: 'INACTIVE', statusReason: 'EXPIRED_INSURANCE', statusNote: 'cargo lapsed 10/31' }), nowIso: NOW }).activeWithUs
     expect(inactive.active).toBe(false)

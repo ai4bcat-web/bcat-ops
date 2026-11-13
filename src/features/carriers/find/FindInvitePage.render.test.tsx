@@ -38,7 +38,7 @@ const BODY = {
   CompanyName: 'Zephyr Test Freight LLC',
   Status: 'ACTIVE',
   RiskAssessmentDetails: { TotalPoints: 450, OverallRating: 'Moderate', Insurance: { TotalPoints: 300, OverallRating: 'Moderate', Infractions: [{ Description: 'Cargo limit below $100,000', Points: 300 }] } },
-  CertData: { Certificates: [{ Coverages: [{ InsurerName: 'Fake Mutual', Type: 'Cargo', PolicyNumber: 'P-1', ExpirationDate: '2099-01-01T00:00:00', CoverageLimit: '$100,000' }] }] },
+  CertData: { Certificates: [{ Coverages: [{ InsurerName: 'Fake Casualty', Type: 'Auto', PolicyNumber: 'P-0', ExpirationDate: '2099-01-01T00:00:00', CoverageLimit: '$1,000,000' }, { InsurerName: 'Fake Mutual', Type: 'Cargo', PolicyNumber: 'P-1', ExpirationDate: '2099-01-01T00:00:00', CoverageLimit: '$100,000' }] }] },
   Emails: [{ Description: 'Dispatch', Email: 'dispatch@zephyr.example' }, { Email: 'owner@zephyr.example' }],
 }
 const liveCard = () => buildReviewCard(BODY, {}, 'preview', NOW)!
@@ -103,8 +103,7 @@ describe('FindInvitePage', () => {
 
     const card = screen.getByTestId('find-lookup-card')
     expect(card.dataset.inDirectory).toBe('true')
-    expect(within(card).getByTestId('find-lookup-card-standing').textContent).toMatch(/^Set up with us · ACTIVEPacket complete/)
-    expect(within(card).getByTestId('find-lookup-card-active').textContent).toBe('Active with us — ready to cover')
+    expect(within(card).getByTestId('find-lookup-card-standing').textContent).toBe('Set up · ActiveReady to cover')
     expect(within(card).getByTestId('find-lookup-card-open').getAttribute('href')).toBe('/tms/carriers/car-1')
     expect(within(card).queryByTestId('find-lookup-card-add')).toBeNull()
   })
@@ -114,7 +113,7 @@ describe('FindInvitePage', () => {
     await search('MC 900001')
     const card = screen.getByTestId('find-lookup-card')
     expect(card.dataset.inDirectory).toBe('false')
-    expect(within(card).getByTestId('find-lookup-card-standing').textContent).toMatch(/^Not in directory/)
+    expect(within(card).getByTestId('find-lookup-card-standing').textContent).toMatch(/^Not set up yet/)
     expect(within(card).getByTestId('find-lookup-card-emails').textContent).toMatch(/dispatch@zephyr.example, owner@zephyr.example/)
     expect((within(card).getByTestId('find-lookup-card-send') as HTMLButtonElement).disabled).toBe(false)
     expect((within(card).getByTestId('find-lookup-card-add') as HTMLButtonElement).disabled).toBe(false)
