@@ -8,7 +8,6 @@ import type { DriverProgram } from '@/lib/driverProgram'
 import DriverLoginPage from '@/features/driver-app/DriverLoginPage'
 import DriverSignupPage from '@/features/driver-app/DriverSignupPage'
 import { useTmsTheme } from '@/features/tms/tmsTheme'
-import { useLegacySkin } from '@/lib/legacySkin'
 import './driver.css'
 
 function DriverLoading() {
@@ -77,7 +76,6 @@ function DriverProfileError({ message, onRetry }: { message: string; onRetry: ()
 }
 
 export function DriverRoutes() {
-  useLegacySkin()
   const { loading, isAuthenticated } = useDriverAuth()
   // Ask for the profile only once the session is known good; see useDriverProgram.
   const { program, error, retry } = useDriverProgramStatus(!loading && isAuthenticated)
