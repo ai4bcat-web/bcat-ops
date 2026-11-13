@@ -21,6 +21,9 @@ const api = vi.hoisted(() => ({
   removeLoadCarrier: vi.fn(async () => ({})),
   listTrackingLinksByShipment: vi.fn(async () => []),
   sendTrackingLink: vi.fn(async () => ({ smsStatus: 'SENT', smsError: null })),
+  // The covered-carrier card reads a carrier missing from the directory and pulls a never-synced one from MyCarrierPackets.
+  getCarrier: vi.fn(async () => null),
+  pullMcpCarrier: vi.fn(async () => ({ carrierId: '', result: null })),
 }))
 vi.mock('@/lib/apiClient', () => api)
 vi.mock('./CarrierCard', () => ({ CarrierCard: () => <div data-testid="carrier-card-first" /> }))

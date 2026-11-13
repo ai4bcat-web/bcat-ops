@@ -8,6 +8,9 @@ import type { FormCtx } from '../sectionProps'
 import type { CarrierRecord } from '@/types/tms'
 import { makeCtx, makeForm, savedBundle } from './ah5TestKit'
 
+const api = vi.hoisted(() => ({ getCarrier: vi.fn(), pullMcpCarrier: vi.fn() }))
+vi.mock('@/lib/apiClient', async (orig) => ({ ...(await orig<object>()), getCarrier: api.getCarrier, pullMcpCarrier: api.pullMcpCarrier }))
+
 vi.mock('@/hooks/useDrivers', () => ({
   useDrivers: () => ({
     drivers: [
@@ -155,5 +158,38 @@ describe('CarrierInformationSection', () => {
     for (const id of ['carrier-dispatch', 'f-carrier-sendRateConf', 'f-carrier-sendInfo']) {
       expect((screen.getByTestId(id) as HTMLButtonElement).disabled).toBe(true)
     }
+  })
+
+  it('a covered load shows the covering carrier as a card even when the form value was never set (Cover ran from the dialog)', () => {
+    const booked = [{ id: 'lc-1', loadId: 'load-1', kind: 'CARRIER', status: 'ACTIVE', carrierId: 'car-1', carrierName: 'Reliable Freight' }]
+    setup({}, {
+      mode: 'edit', bundle: savedBundle({ loadStatus: 'BOOKED', loadCarriers: booked }),
+      directory: { customers: [], locations: [], staff: [], carriers: [carrier({ mcpStatus: 'ACCEPTABLE', mcpSyncedAt: '2026-11-13T20:15:35.758Z', safetyRating: 'SATISFACTORY', mcpRiskScore: 29500 })] },
+    })
+    expect(screen.getByTestId('carrier-covered-card-name').textContent).toBe('Reliable Freight')
+    expect(screen.getByTestId('carrier-covered-card-ids').textContent).toContain('MC 123456 · DOT 7654321')
+    expect(screen.getByTestId('carrier-covered-card-insurance-CARGO').textContent).toBe('Cargo $100,000 · active to 01/01/2031')
+    expect(screen.getByTestId('carrier-covered-card-insurance-AUTO_LIABILITY').textContent).toContain('not on file')
+    expect(screen.getByTestId('carrier-covered-card-vetting').textContent).toContain('Risk 29500 pts')
+    expect(screen.getByTestId('carrier-covered-card-status').textContent).toBe('Set up · Active')
+    expect(screen.queryByLabelText('MC #')).toBeNull()
+    expect(screen.queryByPlaceholderText('Name, MC, DOT or SCAC')).toBeNull()
+    expect(api.pullMcpCarrier).not.toHaveBeenCalled()
+  })
+
+  it('a covered carrier MyCarrierPackets never synced is pulled once and the card fills in', async () => {
+    const booked = [{ id: 'lc-1', loadId: 'load-1', kind: 'CARRIER', status: 'ACTIVE', carrierId: 'car-1', carrierName: 'Reliable Freight' }]
+    api.pullMcpCarrier.mockResolvedValue({ carrierId: 'car-1', result: 'SYNCED' })
+    api.getCarrier.mockResolvedValue(carrier({
+      mcpStatus: 'NOT_INVITED', mcpSyncedAt: '2026-11-13T20:15:35.758Z', updatedAt: '2026-11-13T20:15:35.759Z',
+      insurancePolicies: [{ id: 'a', type: 'AUTO_LIABILITY', limitCents: 100_000_000, expiresAt: '2027-06-01T00:00:00.000Z' }],
+    }))
+    setup({}, {
+      mode: 'edit', bundle: savedBundle({ loadStatus: 'BOOKED', loadCarriers: booked }),
+      directory: { customers: [], locations: [], staff: [], carriers: [carrier({ insurancePolicies: [] })] },
+    })
+    await waitFor(() => expect(screen.getByTestId('carrier-covered-card-insurance-AUTO_LIABILITY').textContent).toBe('Auto liability $1,000,000 · active to 06/01/2027'))
+    expect(api.pullMcpCarrier).toHaveBeenCalledTimes(1)
+    expect(api.pullMcpCarrier).toHaveBeenCalledWith('car-1')
   })
 })

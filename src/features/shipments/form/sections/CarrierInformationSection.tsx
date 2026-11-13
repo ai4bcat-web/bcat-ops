@@ -29,6 +29,8 @@ import { ColGroup, ColGroups, Field, FieldGrid } from '../fieldGrid'
 import { validateCarrierAdd } from '@/lib/carrierLegs'
 import { fieldAttrs } from './fieldAttrs'
 import { FindInvite } from './carrier/FindInvite'
+import { CoveredCarrierCard } from './carrier/CoveredCarrierCard'
+import { coveringCarrierId, useCoveringCarrier } from './carrier/useCoveringCarrier'
 import '../cards/moneyCards.css'
 
 
@@ -78,7 +80,8 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
   const saved = ctx.mode === 'edit' && bundle != null
   const disabled = ctx.busy || isLocked(ctx.locked, 'all')
   const pickerLocked = isLocked(ctx.locked, 'carrierPicker') || active != null
-  const carrier = ctx.directory.carriers.find((c) => c.id === value.carrierId) ?? null
+  // Covered: the assignment's carrier, even when Cover ran from the dialog and the form value was never set.
+  const carrier = useCoveringCarrier(coveringCarrierId(value.carrierId, active?.carrierId), ctx.directory.carriers, active != null)
   const own = value.isOwnFleet
   // Step AQ: a directory carrier that is Ivan Cartage is own fleet too: its driver is picked from our
   // Driver records in "Enter driver info", never typed here.
@@ -203,6 +206,9 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
         <p className="tms-muted text-xs" data-testid={x('carrier-not-covered')}>Carrier selected — not covered yet</p>
       )}
 
+      {active && carrier && !own ? (
+        <CoveredCarrierCard carrier={carrier} testId={x('carrier-covered-card')} />
+      ) : (
       <div className="tms-card-carrier-grid">
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-sm">
@@ -318,6 +324,7 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
           <Static tag={tag} def={LABEL.carrier.phone} text={carrier?.phone ?? '—'} />
         </FieldGrid>
       </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <TmsButton
