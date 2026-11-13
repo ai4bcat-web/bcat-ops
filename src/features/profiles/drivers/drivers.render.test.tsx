@@ -119,16 +119,20 @@ describe('Drivers list', () => {
 })
 
 describe('Hire date (needed for every driver; PTO for Ivan drivers)', () => {
-  it('the list flags every active driver with no hire date: a Needs hire date tab with the count, and a badge in the Hired column', async () => {
+  it('the list has no Needs hire date tab; each active driver missing info is flagged on its row, and the Missing info toggle filters to them', async () => {
     await mount('/profiles/drivers')
-    const tab = screen.getByRole('tab', { name: /Needs hire date/ })
-    expect(tab.textContent).toMatch(/2/)
-    fireEvent.click(tab)
+    expect(screen.queryByRole('tab', { name: /Needs hire date/ })).toBeNull()
+    const toggle = screen.getByTestId('drivers-missing-filter')
+    expect(toggle.textContent).toMatch(/Missing info \(2\)/)
     const grid = screen.getByRole('table', { name: 'Drivers' })
-    expect(within(grid).getByText('Lee Local')).toBeTruthy()
-    expect(within(grid).getByText('Zak Pace')).toBeTruthy()
-    expect(within(grid).queryByText('Amy Local')).toBeNull()
-    expect(within(grid).getAllByText('Needs hire date').length).toBe(2)
+    expect(within(grid).getByTestId('driver-missing-d1').getAttribute('title')).toMatch(/hire date/)
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    const filtered = screen.getByRole('table', { name: 'Drivers' })
+    expect(within(filtered).getByText('Lee Local')).toBeTruthy()
+    expect(within(filtered).getByText('Zak Pace')).toBeTruthy()
+    expect(within(filtered).queryByText('Amy Local')).toBeNull()
+    expect(within(filtered).getAllByText('Needs hire date').length).toBe(2)
   })
 
   it('the profile warns that PTO needs a hire date and the button opens the editor; a contractor gets no warning', async () => {

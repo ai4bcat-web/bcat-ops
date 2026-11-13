@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  missingDriverFields,
   basicsErrors, classificationForFleet, currentFixedExpenses, docsSummary, FLEET_OPTIONS, fleetLabel, hourlyRateError, normalizePhone, payError, payLines, requiredDocsFor, settlementLink, wizardPayDefaults,
 } from './driverProfileModel'
 import type { DriverPaySetting } from '@/lib/apiClient'
@@ -86,5 +87,19 @@ describe('driver types (Ryne 2026-11-11)', () => {
     expect(hourlyRateError('')).toBeNull()
     expect(hourlyRateError('$25.50')).toBeNull()
     expect(hourlyRateError('0')).toBeTruthy()
+  })
+})
+
+describe('missingDriverFields', () => {
+  const base = { name: 'Zak Pace', phone: '(847) 293-6704', fleetGroup: 'BOX_TRUCK', active: true, type: 'driver', hireDate: '2024-03-01' }
+  it('is empty for a complete active driver', () => {
+    expect(missingDriverFields(base)).toEqual([])
+  })
+  it('lists each missing field by the wizard rules', () => {
+    expect(missingDriverFields({ ...base, phone: '555', fleetGroup: null, hireDate: null })).toEqual(['phone', 'driver type', 'hire date'])
+  })
+  it('never flags inactive drivers or brokers', () => {
+    expect(missingDriverFields({ ...base, active: false, hireDate: null })).toEqual([])
+    expect(missingDriverFields({ ...base, type: 'broker', hireDate: null })).toEqual([])
   })
 })
