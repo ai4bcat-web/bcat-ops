@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { PENDING_DATES_BLOCK, approvalReadiness } from '../../../src/lib/carrierBill'
-import { pendingBillId, planPendingCarrierBills, writePendingBill, type PendingBillInput } from './pendingCarrierBill'
+import { carShippingBillDates, pendingBillId, planPendingCarrierBills, writePendingBill, type PendingBillInput } from './pendingCarrierBill'
 
 const NOW = '2026-11-12T15:00:00.000Z'
 const TODAY = '2026-11-12'
@@ -100,6 +100,59 @@ describe('planPendingCarrierBills', () => {
 
   it('names the bill the way RECORD_BILL numbers the first one', () => {
     expect(pendingBillId('lc-9')).toBe('cb:lc-9:1')
+  })
+})
+
+describe('car shipping: carrier paid 2 days after delivery', () => {
+  const car = (shipment: Record<string, unknown> = {}) => input({
+    shipment: { id: 'shp-1', number: '14619', revDivision: 'CAR_SHIPPING', deliveredAt: '2026-11-09T22:30:00.000Z', ...shipment },
+  })
+
+  it('bills on the delivered day (Chicago) with the due date two days later, not pending, so it lands in Aging', () => {
+    const { create } = planPendingCarrierBills(car())
+    expect(create[0].bill).toMatchObject({
+      datesPending: false, billDate: '2026-11-09', billMonth: '2026-11', dueAt: '2026-11-11', termsDays: 2,
+    })
+    // Payables: Expected is IN_REVIEW with dates pending; Aging is IN_REVIEW with its dates (src/features/ap/apViews.ts).
+    expect(create[0].bill.status).toBe('IN_REVIEW')
+  })
+
+  it('uses the Chicago calendar day, not UTC, for an evening delivery', () => {
+    // 2026-11-10T03:00Z is 9pm on Nov 9 in Chicago.
+    expect(carShippingBillDates({ revDivision: 'CAR_SHIPPING', deliveredAt: '2026-11-10T03:00:00.000Z' }, null))
+      .toEqual({ billDate: '2026-11-09', dueAt: '2026-11-11' })
+  })
+
+  it('falls back to the load, then the last delivery stop, for the delivered time', () => {
+    expect(carShippingBillDates({ revDivision: 'CAR_SHIPPING' }, { deliveredAt: '2026-10-13T15:00:00.000Z' })?.dueAt).toBe('2026-10-15')
+    expect(carShippingBillDates({
+      revDivision: 'CAR_SHIPPING', stops: [{ type: 'pickup', departedAt: '2026-10-01T15:00:00.000Z' }, { type: 'delivery', arrivedAt: '2026-10-03T15:00:00.000Z' }],
+    }, null)?.billDate).toBe('2026-10-03')
+    expect(carShippingBillDates({ revDivision: 'CAR_SHIPPING' }, {
+      stops: JSON.stringify([{ type: 'delivery', departedAt: '2026-10-05T15:00:00.000Z' }]),
+    })?.dueAt).toBe('2026-10-07')
+  })
+
+  it('keeps the dates pending when nothing says when it delivered', () => {
+    const { create } = planPendingCarrierBills(car({ deliveredAt: null }))
+    expect(create[0].bill.datesPending).toBe(true)
+    expect(create[0].bill.billDate).toBe(TODAY)
+  })
+
+  it('leaves every other division on the carrier’s own terms with the dates pending', () => {
+    const { create } = planPendingCarrierBills(input({ shipment: { id: 'shp-1', number: '20027', revDivision: 'BROKERAGE', deliveredAt: '2026-11-09T22:30:00.000Z' } }))
+    expect(create[0].bill).toMatchObject({ datesPending: true, termsDays: 30, billDate: TODAY })
+  })
+
+  it('never bills a car-shipping leg twice, and still skips a leg with no carrier charges', () => {
+    const billed = planPendingCarrierBills(car({}))
+    expect(billed.create).toHaveLength(1)
+    const again = planPendingCarrierBills({ ...car(), loadCarriers: [carrierLeg({ invoiceId: 'cb:lc-1:1', apStatus: 'IN_REVIEW' })] })
+    expect(again.create).toEqual([])
+    expect(again.skipped[0].kind).toBe('ALREADY_BILLED')
+    const empty = planPendingCarrierBills({ ...car(), charges: [] })
+    expect(empty.create).toEqual([])
+    expect(empty.skipped[0].kind).toBe('NOT_BILLABLE')
   })
 })
 

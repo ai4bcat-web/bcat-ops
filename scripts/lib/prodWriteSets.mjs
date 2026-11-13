@@ -106,6 +106,8 @@ export const PROD_WRITE_SETS = {
   awInvoiceRenumber: { models: ['Invoice', 'Order', 'FactoringItem', 'ShipmentDocument', 'AuditLog'] },
   // `awDeliveredAtBackfill.mjs --apply`: Shipment.deliveredAt (+ updatedAt/By) on DELIVERED shipments still unstamped (conditional), + one AuditLog row each.
   awDeliveredAtBackfill: { models: ['Shipment', 'AuditLog'] },
+  // `awAutoCarrierBillBackfill.mjs --apply`: CarrierBill billDate/billMonth/dueAt/termsDays/datesPending on car-shipping bills still IN_REVIEW with pending dates (conditional), + one AuditLog row each.
+  awAutoCarrierBillBackfill: { models: ['CarrierBill', 'AuditLog'] },
   // `awCustomerDuplicateMerge.mjs --apply`: the app's MERGE_CUSTOMER for each "Possible duplicate" group — every customerId pointer moved to the
   // survivor (name snapshots where they carried the old name; invoice/payment content untouched), survivor enriched, Location.customerIds
   // repointed, source CRM rows moved, source Customer deleted last; AuditLog snapshot before anything moves.

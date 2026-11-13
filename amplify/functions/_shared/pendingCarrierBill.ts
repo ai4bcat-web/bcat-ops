@@ -13,6 +13,10 @@
  * skipped, and the write is conditioned on exactly that, so two releases racing cannot both bill it.
  *
  * Own-fleet legs are never billed here; they are paid through driver settlements.
+ *
+ * Car shipping (Best Care Auto Transport) is the exception to "dates pending": its carriers are paid
+ * two days after delivery (Ryne, 2026-11-13), so the bill takes the delivered day as its bill date and
+ * delivered + 2 as its due date and goes straight to Aging instead of waiting in Expected.
  */
 import { TransactWriteItemsCommand, type AttributeValue, type DynamoDBClient, type TransactWriteItem } from '@aws-sdk/client-dynamodb'
 import { marshall } from '@aws-sdk/util-dynamodb'
@@ -24,6 +28,8 @@ import {
   billTermsDays,
   billTotals,
 } from '../../../src/lib/carrierBill'
+import { isCarShipperLoad } from '../../../src/lib/carShipper'
+import { deliveredTimeOf } from '../../../src/lib/deliveredAt'
 import type {
   CarrierBillRecord,
   CarrierPaymentMethodRecord,
@@ -74,6 +80,47 @@ export interface PendingBillPlanResult {
 
 const trimmed = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
 
+/** Car-shipping carriers are paid this many days after the freight delivers. */
+export const CAR_SHIPPING_CARRIER_TERMS_DAYS = 2
+
+const chicagoDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' })
+
+type ActualStop = { type?: string | null; arrivedAt?: string | null; departedAt?: string | null }
+
+/** Stops as stored: an array, or (on the Load row) its JSON text. */
+function stopsOf(raw: unknown): ActualStop[] | null {
+  if (Array.isArray(raw)) return raw as ActualStop[]
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      return Array.isArray(parsed) ? (parsed as ActualStop[]) : null
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+/**
+ * A car-shipping leg's real bill dates: the delivered day (America/Chicago) and two days after it.
+ * Null for any other division, or when nothing says when the freight delivered — that bill keeps
+ * its placeholder dates and waits in Expected like any other.
+ */
+export function carShippingBillDates(shipment: Row, load: Row | null): { billDate: string; dueAt: string } | null {
+  if (!isCarShipperLoad(shipment as { revDivision?: string | null }) && !isCarShipperLoad(load as { revDivision?: string | null } | null)) return null
+  const delivered = deliveredTimeOf({
+    deliveredAt: trimmed(shipment.deliveredAt) || null,
+    loadDeliveredAt: trimmed(load?.deliveredAt) || null,
+    stops: stopsOf(shipment.stops) ?? stopsOf(load?.stops),
+    status: trimmed(shipment.status) || null,
+    statusChangedAt: trimmed(shipment.statusChangedAt) || null,
+  })
+  const at = delivered ? new Date(delivered) : null
+  if (!at || Number.isNaN(at.getTime())) return null
+  const billDate = chicagoDay.format(at)
+  return { billDate, dueAt: billDueDate(billDate, CAR_SHIPPING_CARRIER_TERMS_DAYS) }
+}
+
 /** `cb:<loadCarrierId>:1` — the first bill an assignment ever has; RECORD_BILL numbers later ones from the count. */
 export function pendingBillId(loadCarrierId: string): string {
   return `cb:${loadCarrierId}:1`
@@ -111,7 +158,9 @@ export function planPendingCarrierBills(input: PendingBillInput): PendingBillPla
     const { lines, grossCents } = billLinesFor(charges, loadCarrier.id)
     const payee = billPayee(carrier, methods)
     const { quickPayFeeCents, netCents } = billTotals({ grossCents, loadCarrier, payeeKind: payee.kind })
-    const termsDays = billTermsDays(loadCarrier, carrier, settings)
+    const carDates = carShippingBillDates(input.shipment, (load as unknown as Row | null) ?? null)
+    const termsDays = carDates ? CAR_SHIPPING_CARRIER_TERMS_DAYS : billTermsDays(loadCarrier, carrier, settings)
+    const billDate = carDates?.billDate ?? input.today
     const id = pendingBillId(loadCarrier.id)
 
     create.push({
@@ -134,13 +183,13 @@ export function planPendingCarrierBills(input: PendingBillInput): PendingBillPla
         divisionKey: load?.divisionKey ?? null,
         status: 'IN_REVIEW',
         billNumber: null,
-        billDate: input.today,
-        billMonth: input.today.slice(0, 7),
+        billDate,
+        billMonth: billDate.slice(0, 7),
         recordedAt: input.now,
         recordedBy: input.actorEmail,
         recordedEarly: load?.status !== 'DELIVERED',
-        datesPending: true,
-        dueAt: billDueDate(input.today, termsDays),
+        datesPending: carDates == null,
+        dueAt: carDates?.dueAt ?? billDueDate(input.today, termsDays),
         termsDays,
         quickPay: loadCarrier.quickPay ?? false,
         quickPayDays: loadCarrier.quickPayDays ?? null,
@@ -158,7 +207,9 @@ export function planPendingCarrierBills(input: PendingBillInput): PendingBillPla
         apOpen: 'OPEN',
         documentId: null,
         approvalWarnings: [],
-        note: 'Created when the load moved to billing. Set the invoice date and due date from the carrier’s invoice.',
+        note: carDates
+          ? 'Created when the load moved to billing. Car shipping: billed on the delivered day, due 2 days after delivery.'
+          : 'Created when the load moved to billing. Set the invoice date and due date from the carrier’s invoice.',
         createdBy: input.actorEmail,
         updatedBy: input.actorEmail,
         version: 1,
