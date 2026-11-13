@@ -4244,6 +4244,8 @@ export interface BookCarrierInput {
   paymentTermsDays?: number | null
   /** The `key` of every warning the booker ticked off. Blocks can never be acknowledged. */
   acknowledgeWarnings?: string[]
+  /** Admin only: book past the insurance / packet / risk blocks; the reason is kept in the audit trail. */
+  overrideReason?: string
 }
 export async function bookCarrier(input: BookCarrierInput): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('BOOK_CARRIER', input)

@@ -54,6 +54,7 @@ export const ACTION_SENTENCE: Record<string, string> = {
   CHANGE_ASSET_DRIVER: 'changed the driver',
   // Carrier assignment
   ASSIGN_CARRIER: 'covered the load with a carrier',
+  OVERRIDE_CARRIER_COMPLIANCE: 'overrode the carrier compliance check',
   ASSIGN_ASSET: 'assigned an own-fleet asset',
   RATE_CARRIER: 'set the carrier rate',
   UPDATE_CARRIER_CHARGES: 'updated the carrier charges',

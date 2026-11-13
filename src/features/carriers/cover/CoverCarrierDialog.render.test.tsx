@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   carriers: [] as unknown[],
   loading: false,
+  admin: false,
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
@@ -48,7 +49,7 @@ vi.mock('@/features/shipments/trackingModeControl', () => ({
   ),
 }))
 vi.mock('sonner', () => ({ toast: mocks.toast }))
-vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isAdmin: false, isOwner: false }) }))
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isAdmin: mocks.admin, isOwner: false }) }))
 
 const NOW = Date.parse('2026-11-03T12:00:00Z')
 const BODY = {
@@ -92,6 +93,7 @@ beforeEach(() => {
   mocks.pull.mockResolvedValue({ carrierId: 'car-1', result: 'SYNCED' })
   mocks.carriers = []
   mocks.loading = false
+  mocks.admin = false
   mocks.preview.mockResolvedValue(live())
   mocks.refresh.mockResolvedValue(undefined)
   mocks.bundle.mockResolvedValue({ shipment: { id: 'shp-1', updatedAt: 'S-UPD' }, loads: [{ id: 'load-1', updatedAt: 'L-UPD' }], loadCarriers: [] })
@@ -130,6 +132,46 @@ describe('CoverCarrierDialog', () => {
 
     await waitFor(() => expect(mocks.cover).toHaveBeenCalledTimes(2))
     expect(mocks.cover.mock.calls[1][0]).toMatchObject({ carrierId: 'car-1', acknowledgeWarnings: ['NO_CARGO_CERT', 'NO_W9'] })
+  })
+
+  it('a blocked cover offers an admin "Override and cover", which needs a reason and sends it', async () => {
+    mocks.admin = true
+    mocks.carriers = [carrierRow({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })]
+    mocks.cover.mockRejectedValueOnce(new Error('Zephyr cannot be assigned: No cargo insurance covering the pickup date is on file. [override:INSURANCE_EXPIRED:CARGO]'))
+    renderDialog()
+    await lookUp('MC 900001')
+    enterRate()
+    fireEvent.click(screen.getByTestId('cover-assign'))
+
+    expect((await screen.findByTestId('cover-error')).textContent).toBe('Zephyr cannot be assigned: No cargo insurance covering the pickup date is on file.')
+    const submit = screen.getByTestId('cover-override-submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('Override reason'), { target: { value: 'COI checked with the agent' } })
+    fireEvent.click(submit)
+
+    await waitFor(() => expect(mocks.cover).toHaveBeenCalledTimes(2))
+    expect(mocks.cover.mock.calls[1][0]).toMatchObject({ carrierId: 'car-1', overrideReason: 'COI checked with the agent' })
+  })
+
+  it('a non-admin sees the refusal but no override', async () => {
+    mocks.carriers = [carrierRow({ status: 'ACTIVE', mcpStatus: 'ACCEPTABLE' })]
+    mocks.cover.mockRejectedValueOnce(new Error('Zephyr cannot be assigned: No cargo insurance covering the pickup date is on file. [override:INSURANCE_EXPIRED:CARGO]'))
+    renderDialog()
+    await lookUp('MC 900001')
+    enterRate()
+    fireEvent.click(screen.getByTestId('cover-assign'))
+
+    await screen.findByTestId('cover-error')
+    expect(screen.queryByTestId('cover-override')).toBeNull()
+  })
+
+  it('a directory carrier MyCarrierPackets never synced (no MCP status) is pulled on lookup', async () => {
+    const aljex = carrierRow({ status: 'ACTIVE', mcpStatus: null })
+    mocks.carriers = [aljex]
+    mocks.byMc.mockResolvedValue([aljex])
+    renderDialog()
+    await lookUp('MC 900001')
+    await waitFor(() => expect(mocks.pull).toHaveBeenCalledWith('car-1'))
   })
 
   it('a carrier invited but not Active yet is pulled from MyCarrierPackets on lookup and shows Active at once', async () => {

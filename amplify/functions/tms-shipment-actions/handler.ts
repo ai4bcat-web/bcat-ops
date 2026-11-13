@@ -5752,6 +5752,21 @@ function assertAdditionalCarrier(args: {
   return legStopIds
 }
 
+/** Booking findings an admin may override with a reason: paperwork and risk, never the flat refusals. */
+const COMPLIANCE_OVERRIDABLE: ReadonlySet<string> = new Set([
+  'INSURANCE_EXPIRED', 'INSURANCE_UNVERIFIED', 'CARGO_VALUE_EXCEEDS_INSURANCE', 'MCP_UNACCEPTABLE', 'SETUP_NOT_STARTED',
+])
+
+/** The admin's reason for booking past the compliance findings, or null when none was asked for. */
+export function complianceOverrideReason(input: Row, caller: Pick<Caller, 'isAdmin'>): string | null {
+  if (input.overrideReason == null) return null
+  if (!caller.isAdmin) throw new Error('Forbidden: only an admin can override the carrier compliance check')
+  const why = typeof input.overrideReason === 'string' ? input.overrideReason.trim() : ''
+  if (why.length < 3) throw new Error('An override needs a reason')
+  if (why.length > 500) throw new Error('The override reason is too long (500 characters at most)')
+  return why
+}
+
 /**
  * Book a directory carrier onto a load.
  *
@@ -5863,8 +5878,19 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
   const cover = options.cover === true ? applyCoverRules(carrier, evaluated, { isAdmin: caller.isAdmin }) : null
   const blocks = cover ? cover.blocks : evaluated.blocks
   const warnings = cover ? cover.warnings : evaluated.warnings
+  const overrideWhy = complianceOverrideReason(input, caller)
+  let overridden: typeof blocks = []
   if (blocks.length > 0) {
-    throw new Error(`${carrierName ?? 'That carrier'} cannot be ${cover ? 'assigned' : 'booked'}: ${blocks.map((b) => b.detail).join(' ')}`)
+    // Ryne 2026-11-13: an admin may book past the insurance / packet / risk findings with a typed reason. The flat refusals
+    // (do not use, inactive authority or status, already covered, a negative buy) stay hard for everybody.
+    const hard = blocks.filter((b) => !COMPLIANCE_OVERRIDABLE.has(b.reason))
+    if (overrideWhy && hard.length === 0) {
+      overridden = blocks
+    } else {
+      // The trailing [override:KEY,KEY] is machine-readable: the Cover dialog offers an admin "Override and cover".
+      const marker = caller.isAdmin && hard.length === 0 ? ` [override:${blocks.map((b) => b.key).join(',')}]` : ''
+      throw new Error(`${carrierName ?? 'That carrier'} cannot be ${cover ? 'assigned' : 'booked'}: ${blocks.map((b) => b.detail).join(' ')}${marker}`)
+    }
   }
   const acknowledgedKeys = new Set(acknowledged)
   const unacknowledged = warnings.filter((w) => !acknowledgedKeys.has(w.key))
@@ -6002,7 +6028,7 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
     rateConStatus: 'NOT_SENT',
     rateConVersion: 0,
     bookedAt: now,
-    bookingWarnings: warnings.map((w) => w.key),
+    bookingWarnings: [...warnings.map((w) => w.key), ...overridden.map((b) => `OVERRIDE:${b.key}`)],
     carrierRateCents,
     costCents: carrierCostCents,
     apStatus: 'AWAITING_INVOICE',
@@ -6095,7 +6121,16 @@ async function bookCarrier(input: Row, caller: Caller, extra?: BookCarrierExtra,
     warnings: warnings.map((w) => w.key),
     acknowledged,
     ...(additional ? { legStopIds: legIds } : {}),
+    ...(overridden.length > 0 ? { overridden: overridden.map((b) => b.key), overrideWhy } : {}),
   })
+  if (overridden.length > 0) {
+    // On the shipment too, so the Activity rail says who waved what through and why.
+    await writeAudit('SHIPMENT', shipmentId, 'OVERRIDE_CARRIER_COMPLIANCE', caller, {
+      carrier: carrierName ?? carrierId,
+      overridden: overridden.map((b) => b.detail).join(' '),
+      why: overrideWhy,
+    })
+  }
   // Step H. A covered load never shows a live request. ACCEPT_OFFER's own winner
   // is already WON by the transaction above, so this only closes the rest.
   await cancelOpenOffers(quoteDeps, loadId, caller)
