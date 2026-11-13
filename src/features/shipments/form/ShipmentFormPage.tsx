@@ -30,6 +30,7 @@ import { ActionBar } from './ActionBar'
 import { DuplicateDialog } from './DuplicateDialog'
 import { FormHeader } from './FormHeader'
 import { FormSection } from './FormSection'
+import { sectionState, type SectionState } from './sectionSaved'
 import { FromEmailContext } from './fromEmail'
 import { intakePrefill } from './intakePrefill'
 import { LABEL } from './labels'
@@ -220,6 +221,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const { actions, dialogs, busy } = useFormActions({
     values, update, bundle, setBundle: form.setBundle, busy: pipelineBusy, settings, carriers, isAdmin, brokerName: 'BCAT Logistics',
     saveFirst: async () => (form.dirty ? form.run('save') : true),
+    updateSaved: form.updateSaved,
   })
 
   const formApi = useMemo<FormApi>(() => ({
@@ -268,6 +270,10 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
   const attempted = form.attempt !== null && blocking.length > 0
   const rows = useMemo(() => requiredRows(values, mode, { customer: form.customer, settings }), [values, mode, form.customer, settings])
   const progress = useMemo(() => requiredProgress(rows), [rows])
+  const sectionStates = useMemo(
+    () => Object.fromEntries(CARD_ORDER.map((k) => [k, sectionState(k, values, form.savedValues, rows, bundle ?? null)])) as Record<CardKey, SectionState>,
+    [values, form.savedValues, rows, bundle],
+  )
   const summary = useMemo(() => railSummary(values, form.customer, settings), [values, form.customer, settings])
 
   const errorsByCard = useMemo(() => {
@@ -464,7 +470,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
                 const Card = CARD_COMPONENTS[key]
                 return (
                   <Fragment key={key}>
-                    <FormSection id={key} number={i + 1} title={CARD_TITLE[key]} errorCount={errorsByCard[key] ?? 0}>
+                    <FormSection id={key} number={i + 1} title={CARD_TITLE[key]} errorCount={errorsByCard[key] ?? 0} state={sectionStates[key]}>
                       <Card {...common} />
                     </FormSection>
                     {key === 'carrier' ? (

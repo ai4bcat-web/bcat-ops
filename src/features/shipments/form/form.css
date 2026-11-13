@@ -238,6 +238,38 @@
   border-radius: var(--tms-radius-sm);
 }
 
+.tms-shell .tms-ship-card.tms-ship-card--saved {
+  background: var(--tms-section-saved-bg);
+  border-color: var(--tms-section-saved-border);
+}
+
+.tms-shell .tms-ship-card--saved .tms-ship-card-num {
+  background: var(--tms-badge-green);
+  color: var(--tms-card);
+}
+
+.tms-shell .tms-ship-card-state {
+  margin-left: auto;
+  padding: 0 8px;
+  border-radius: var(--tms-radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.tms-shell .tms-ship-card-state--saved {
+  background: var(--tms-badge-green-tint);
+  color: var(--tms-badge-green);
+  border: 1px solid var(--tms-section-saved-border);
+}
+
+.tms-shell .tms-ship-card-state--unsaved {
+  background: var(--tms-badge-orange-tint);
+  color: var(--tms-badge-orange);
+}
+
 .tms-shell .tms-ship-card-head {
   display: flex;
   align-items: center;

@@ -177,6 +177,16 @@ describe('CarrierInformationSection', () => {
     expect(api.pullMcpCarrier).not.toHaveBeenCalled()
   })
 
+  it('the covered card shows the rate con status and the trip the form holds', () => {
+    const booked = [{ id: 'lc-1', loadId: 'load-1', kind: 'CARRIER', status: 'ACTIVE', carrierId: 'car-1', carrierName: 'Reliable Freight', rateConSentAt: '2026-11-13T20:00:00.000Z' }]
+    setup({ driver1: { name: 'Roberto Rodriguez', phone: '(262) 359-0348', email: '' }, truckNo: '30', trailerNo: '06' }, {
+      mode: 'edit', bundle: savedBundle({ loadStatus: 'BOOKED', loadCarriers: booked }),
+      directory: { customers: [], locations: [], staff: [], carriers: [carrier({ mcpStatus: 'ACCEPTABLE' })] },
+    })
+    expect(screen.getByTestId('carrier-covered-card-ratecon').textContent).toContain('Rate con sent')
+    expect(screen.getByTestId('carrier-covered-card-trip').textContent).toBe('Driver Roberto Rodriguez (262) 359-0348 · Truck 30 · Trailer 06')
+  })
+
   it('a covered carrier MyCarrierPackets never synced is pulled once and the card fills in', async () => {
     const booked = [{ id: 'lc-1', loadId: 'load-1', kind: 'CARRIER', status: 'ACTIVE', carrierId: 'car-1', carrierName: 'Reliable Freight' }]
     api.pullMcpCarrier.mockResolvedValue({ carrierId: 'car-1', result: 'SYNCED' })

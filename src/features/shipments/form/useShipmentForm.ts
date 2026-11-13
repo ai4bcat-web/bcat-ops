@@ -76,6 +76,8 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
   })
   const valuesRef = useRef(values)
   const [dirty, setDirty] = useState(false)
+  /** The values as last saved to the server (null before the first save); cards compare against it. */
+  const [savedValues, setSavedValues] = useState<ShipmentFormValues | null>(() => (initialBundle ? values : null))
   /** When the local draft was last written (create mode); the action bar's "Last saved". */
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [attempt, setAttempt] = useState<ValidationLevel | null>(null)
@@ -127,11 +129,15 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
     setDirty(true)
   }, [])
   const getValues = useCallback(() => valuesRef.current, [])
+  const updateSaved = useCallback((fn: (prev: ShipmentFormValues) => ShipmentFormValues) => {
+    setSavedValues((prev) => (prev ? syncCarrierSlots(prev, fn(prev)) : prev))
+  }, [])
 
   const reseed = useCallback((next: ShipmentFormValues, isDirty: boolean) => {
     valuesRef.current = next
     setValuesState(next)
     setDirty(isDirty)
+    if (!isDirty) setSavedValues(next)
   }, [])
 
   // ── issues: nothing is shown until the first Save/Create/Submit attempt, then live ──
@@ -272,7 +278,7 @@ export function useShipmentForm(opts: UseShipmentFormOptions) {
   }, [partial, pipelineCtxFor, finish])
 
   return {
-    values, update, getValues, dirty, savedAt, mode, bundle, setBundle, customer,
+    values, update, getValues, dirty, savedValues, updateSaved, savedAt, mode, bundle, setBundle, customer,
     issues, attempt, busy, partial, retry,
     drafts, resumeDraft, discardDraft, seedValues: reseed,
     run,

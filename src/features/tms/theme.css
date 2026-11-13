@@ -85,6 +85,9 @@
 
   --tms-badge-green: #15803d;
   --tms-badge-green-tint: #e8f7ef;
+  /* Shipment form: a card whose required fields are filled and saved. */
+  --tms-section-saved-bg: #f0faf4;
+  --tms-section-saved-border: #7cc49a;
   --tms-badge-orange: #b45309;
   --tms-badge-orange-tint: #fff4d6;
   --tms-badge-red: #b91c1c;
@@ -190,6 +193,8 @@
 
   --tms-badge-green: #4ade80;
   --tms-badge-green-tint: #123524;
+  --tms-section-saved-bg: #0f2419;
+  --tms-section-saved-border: #2f7a4f;
   --tms-badge-orange: #fbbf24;
   --tms-badge-orange-tint: #3a2a08;
   --tms-badge-red: #f87171;

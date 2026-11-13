@@ -45,6 +45,8 @@ export function useFormActions(o: {
    * typed but not saved would otherwise be missing from what the carrier gets. False = do not open.
    */
   saveFirst?: () => Promise<boolean>
+  /** Apply a change the server already holds to the saved baseline too (so the card does not read as unsaved). */
+  updateSaved?: (fn: (prev: ShipmentFormValues) => ShipmentFormValues) => void
 }): { actions: FormActions; dialogs: ReactNode; busy: boolean } {
   const { values, update, bundle, setBundle, settings, carriers, isAdmin, brokerName } = o
   // The bundle BOOK_CARRIER answered with: runCover applies the form's seal / PU ETA on top of it.
@@ -174,7 +176,10 @@ export function useFormActions(o: {
           // The dialog books the load without touching the form: point the carrier block at what was covered,
           // so it shows the carrier straight away and a later save cannot send an empty carrier back.
           const booked = liveCarriers(after.bundle ?? covered)[0]
-          if (booked) update((p) => ({ ...p, carrier: coveredCarrierBlock(p.carrier, booked) }))
+          if (booked) {
+            update((p) => ({ ...p, carrier: coveredCarrierBlock(p.carrier, booked) }))
+            o.updateSaved?.((p) => ({ ...p, carrier: coveredCarrierBlock(p.carrier, booked) }))
+          }
           close()
         }}
       />
