@@ -5,6 +5,7 @@
  * ctx.actions.cover(). Step AR card 5: collapsed to "No carrier yet" + Cover/Assign
  * until a carrier is picked (or Ivan Cartage / a typed name is chosen).
  */
+import { DateTime24Input } from '../DateTime24Input'
 import { memo, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { TmsBadge, TmsButton, TmsInput, TmsSelect } from '@/features/tms/kit'
@@ -469,8 +470,8 @@ function CarrierInformationSectionImpl({ value, onChange, ctx, form, expanded = 
             onChange={(e) => set({ emptyMiles: e.target.value })} />
         </Field>
         <Field span={6} label={LABEL.carrier.puEta.text}>
-          <TmsInput {...fa(LABEL.carrier.puEta)} type="datetime-local" value={value.puEta} disabled={disabled}
-            onChange={(e) => set({ puEta: e.target.value })} />
+          <DateTime24Input inputProps={fa(LABEL.carrier.puEta)} value={value.puEta} disabled={disabled}
+            onChange={(v) => set({ puEta: v })} />
         </Field>
           </FieldGrid>
         </ColGroup>

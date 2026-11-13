@@ -66,6 +66,10 @@ export interface FormStop {
   /** `YYYY-MM-DDTHH:mm` (Chicago), the datetime-local value. */
   ready: string
   appt: string
+  /** First-come-first-served: `appt` is the window start and `apptEnd` its end (same day). */
+  fcfs: boolean
+  /** `YYYY-MM-DDTHH:mm` (Chicago): the FCFS window end, or a range end another screen set ('' = none). */
+  apptEnd: string
   mustDeliver: string
   note: string
   pieces: string
@@ -380,7 +384,7 @@ export function lockedFields(bundle: ShipmentBundle | null): LockSet {
 export function emptyStop(type: 'pickup' | 'delivery'): FormStop {
   return {
     id: newStopId(), type, name: '', locationId: '', address1: '', address2: '', city: '', state: '', zip: '',
-    country: 'US', contact: '', phone: '', hours: '', email: '', refNo: '', ready: '', appt: '', mustDeliver: '',
+    country: 'US', contact: '', phone: '', hours: '', email: '', refNo: '', ready: '', appt: '', fcfs: false, apptEnd: '', mustDeliver: '',
     note: '', pieces: '', weightLbs: '', arrivedAt: '', departedAt: '', geo: null, extra: null,
   }
 }
@@ -567,7 +571,7 @@ function referenceCode(r: OrderReference): string {
 }
 
 function stopFromRecord(s: Stop, order: OrderRecord | undefined, role: 'first-pickup' | 'last-delivery' | 'other'): FormStop {
-  const { id, type, name, city, locationId, address, appt, apptType, requestedStart, requestedEnd, contact,
+  const { id, type, name, city, locationId, address, appt, apptType, apptEnd, requestedStart, requestedEnd, contact,
     instructions, pieces, weightLbs, arrivedAt, departedAt, refs, sequence: _sequence, ...rest } = s
   void _sequence
   const addr = address ?? {}
@@ -583,7 +587,6 @@ function stopFromRecord(s: Stop, order: OrderRecord | undefined, role: 'first-pi
   const extra: Partial<Stop> = { ...rest }
   const otherRefs = (refs ?? []).filter((r) => !(role === 'other' && r.code.toUpperCase() === (type === 'pickup' ? 'PICKUP' : 'DELIVERY')))
   if (otherRefs.length > 0) extra.refs = otherRefs
-  if (apptType && apptType !== 'exact' && apptType !== 'tbd') extra.apptType = apptType
   const geo = addr.lat != null || addr.lng != null || addr.timezone || addr.geocodeExpiresAt
     ? { lat: addr.lat ?? null, lng: addr.lng ?? null, timezone: addr.timezone ?? null, geocodeExpiresAt: addr.geocodeExpiresAt ?? null }
     : null
@@ -605,6 +608,8 @@ function stopFromRecord(s: Stop, order: OrderRecord | undefined, role: 'first-pi
     refNo: own(type === 'pickup' ? 'PICKUP' : 'DELIVERY'),
     ready,
     appt: tbd ? '' : isoToInput(apptIso),
+    fcfs: apptType === 'fcfs',
+    apptEnd: tbd ? '' : isoToInput(apptEnd),
     mustDeliver: isoToInput(requestedEnd),
     note: str(instructions),
     pieces: numStr(pieces),

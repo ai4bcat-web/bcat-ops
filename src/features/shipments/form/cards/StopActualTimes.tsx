@@ -6,13 +6,14 @@
  */
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { TmsButton, TmsInput } from '@/features/tms/kit'
+import { TmsButton } from '@/features/tms/kit'
 import { updateStop } from '@/lib/apiClient'
 import { formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import { STOP_TIME_SOURCE_LABEL, stopTimesOf } from '@/lib/stopActualTimes'
 import type { FormStop } from '../model'
 import type { FormCtx } from '../sectionProps'
 import { ColGroup } from '../fieldGrid'
+import { DateTime24Input } from '../DateTime24Input'
 import './stopActualTimes.css'
 
 type Kind = 'arrivedAt' | 'departedAt'
@@ -67,9 +68,9 @@ export function StopActualTimes({ stop, ctx, onChange, isFinalDelivery, disabled
     return (
       <div className="tms-stop-actual-row" key={kind}>
         <label className="tms-stop-actual-label" htmlFor={testId}>{labels[kind]}</label>
-        <TmsInput
-          id={testId} data-testid={testId} type="datetime-local" value={shown(kind)} disabled={off}
-          onChange={(e) => setDraft((d) => ({ ...d, [kind]: e.target.value }))}
+        <DateTime24Input
+          inputProps={{ id: testId, 'data-testid': testId, 'aria-label': `${labels[kind]} date` }} value={shown(kind)} disabled={off}
+          onChange={(v) => setDraft((d) => ({ ...d, [kind]: v }))}
         />
         <TmsButton size="sm" data-testid={`${testId}-now`} disabled={off} onClick={() => void save(kind, new Date().toISOString())}>Now</TmsButton>
         {dirty ? (

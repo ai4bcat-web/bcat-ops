@@ -177,4 +177,21 @@ describe('RouteCard', () => {
     expect((screen.getByTestId('f-route-remove-1') as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByTestId('f-stop-1-name') as HTMLInputElement).disabled).toBe(true)
   })
+
+  it('typed 24-hour times, no picker; FCFS takes a From–To window prefilled from the hours', () => {
+    const host = setup((v) => ({ ...v, stops: [{ ...v.stops[0], hours: 'FCFS 0700 TO 1600' }, v.stops[1]] }))
+    const ready = screen.getByTestId('f-pickup-ready') as HTMLInputElement
+    expect(ready.type).toBe('text')
+    fireEvent.change(ready, { target: { value: '11/16/2026' } })
+    fireEvent.change(screen.getByTestId('f-pickup-ready-time'), { target: { value: '0700' } })
+    expect(host.current!.getValues().stops[0].ready).toBe('2026-11-16T07:00')
+    fireEvent.click(screen.getByTestId('f-pickup-apptKind-fcfs'))
+    expect(host.current!.getValues().stops[0]).toMatchObject({ fcfs: true, appt: '2026-11-16T07:00', apptEnd: '2026-11-16T16:00' })
+    expect((screen.getByTestId('f-pickup-appt-end') as HTMLInputElement).value).toBe('16:00')
+    fireEvent.change(screen.getByTestId('f-pickup-appt-end'), { target: { value: '1500' } })
+    expect(host.current!.getValues().stops[0].apptEnd).toBe('2026-11-16T15:00')
+    fireEvent.click(screen.getByTestId('f-pickup-apptKind-appt'))
+    expect(host.current!.getValues().stops[0]).toMatchObject({ fcfs: false, apptEnd: '' })
+    expect(screen.queryByTestId('f-pickup-appt-end')).toBeNull()
+  })
 })

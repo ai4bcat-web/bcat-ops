@@ -1160,6 +1160,10 @@ function validateStop(item: unknown, index: number): StopShape {
   const type = assertEnum(s.type, STOP_TYPES, `stops[${index}].type`)
   const appt = typeof s.appt === 'string' ? s.appt.trim() : ''
   if (appt && Number.isNaN(Date.parse(appt))) throw new Error(`stops[${index}].appt must be an ISO timestamp`)
+  const apptEnd = optionalIso(s.apptEnd, `stops[${index}].apptEnd`)
+  if (s.apptType === 'fcfs' && appt && apptEnd && Date.parse(apptEnd) <= Date.parse(appt)) {
+    throw new Error(`Stop ${index + 1}: the FCFS window must end after it opens`)
+  }
   return {
     id: optionalString(s.id, 100) ?? `stp-${randomUUID()}`,
     type,
@@ -1169,7 +1173,7 @@ function validateStop(item: unknown, index: number): StopShape {
     address: s.address == null ? null : assertRecord(s.address, `stops[${index}].address`),
     appt,
     apptType: optionalString(s.apptType, 32),
-    apptEnd: optionalIso(s.apptEnd, `stops[${index}].apptEnd`),
+    apptEnd,
     requestedStart: optionalIso(s.requestedStart, `stops[${index}].requestedStart`),
     requestedEnd: optionalIso(s.requestedEnd, `stops[${index}].requestedEnd`),
     apptRequestedBy: optionalEnum(s.apptRequestedBy, APPT_REQUESTED_BY, `stops[${index}].apptRequestedBy`),

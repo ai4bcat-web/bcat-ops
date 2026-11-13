@@ -216,7 +216,7 @@ function stampOf(at: Date): string {
   return `${p.month}/${p.day}/${p.year} ${p.hour}:${p.minute}:${p.second}`
 }
 
-/** `10/29/26 @ 11:00`, `10/29/26` (date-only), `10/29/26 @ 08:00 - 12:00`, `10/29/26 FCFS`, `TBD`. */
+/** `10/29/26 @ 11:00`, `10/29/26` (date-only), `10/29/26 @ 08:00 - 12:00`, `10/29/26 FCFS`, `10/29/26 FCFS 07:00 - 16:00`, `TBD`. */
 function apptOf(stop: RateConStop): string {
   if (!stop.apptAt) return stop.apptType === 'tbd' ? 'TBD' : ''
   const start = new Date(stop.apptAt)
@@ -224,10 +224,14 @@ function apptOf(stop: RateConStop): string {
   const s = zonedParts(start, APPT_TZ)
   const date = `${s.month}/${s.day}/${s.year}`
   if (stop.apptType === 'tbd') return `${date} TBD`
-  if (stop.apptType === 'fcfs') return `${date} FCFS`
   const time = `${s.hour}:${s.minute}`
+  const end = (stop.apptType === 'range' || stop.apptType === 'fcfs') && stop.apptEnd ? new Date(stop.apptEnd) : null
+  if (stop.apptType === 'fcfs') {
+    if (!end || Number.isNaN(end.getTime())) return `${date} FCFS`
+    const e = zonedParts(end, APPT_TZ)
+    return `${date} FCFS ${time} - ${e.hour}:${e.minute}`
+  }
   if (time === '00:00') return date
-  const end = stop.apptType === 'range' && stop.apptEnd ? new Date(stop.apptEnd) : null
   if (end && !Number.isNaN(end.getTime())) {
     const e = zonedParts(end, APPT_TZ)
     return `${date} @ ${time} - ${e.hour}:${e.minute}`

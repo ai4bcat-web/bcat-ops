@@ -767,3 +767,20 @@
 .tms-shell .tms-rail-prog-row[data-state='todo'] .tms-rail-prog-label { color: var(--tms-muted); font-weight: 400; }
 .tms-shell .tms-rail-prog-meta { color: var(--tms-muted); font-size: 11px; overflow-wrap: anywhere; }
 .tms-shell .tms-ship-next { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: var(--tms-radius-pill); background: var(--tms-primary-tint); color: var(--tms-primary-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
+
+/* Typed date + 24-hour time (DateTime24Input) and the Appt / FCFS switch on a stop. */
+.tms-shell .ship-dt24 { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tms-shell .ship-dt24-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tms-shell .ship-dt24-date { flex: 1 1 110px; min-width: 0; font-variant-numeric: tabular-nums; }
+.tms-shell .ship-dt24-time { flex: 0 0 72px; width: 72px; font-variant-numeric: tabular-nums; text-align: center; }
+.tms-shell .ship-dt24-dash { color: var(--tms-muted); }
+.tms-shell .ship-dt24 input[aria-invalid='true'] { border-color: var(--tms-destructive); }
+.tms-shell .ship-dt24-problem { font-size: 11px; color: var(--tms-destructive); }
+.tms-shell .ship-appt-kind { display: inline-flex; border: 1px solid var(--tms-border); border-radius: 6px; overflow: hidden; }
+.tms-shell .ship-appt-kind button {
+  border: 0; background: transparent; color: var(--tms-text-2); font: inherit; font-size: 11px; font-weight: 600;
+  padding: 1px 8px; cursor: pointer;
+}
+.tms-shell .ship-appt-kind button[aria-pressed='true'] { background: var(--tms-primary); color: var(--tms-on-primary); }
+.tms-shell .ship-appt-kind button:disabled { cursor: default; opacity: 0.6; }
+.tms-shell .ship-appt-kind button:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: -2px; }

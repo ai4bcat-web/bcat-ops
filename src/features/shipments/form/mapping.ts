@@ -66,7 +66,10 @@ export function toStop(s: FormStop, index: number, role: 'first-pickup' | 'last-
     }
     : null
   out.appt = apptValue
-  out.apptType = apptIso ? 'exact' : 'tbd'
+  // FCFS is a window: appt is when it opens, apptEnd when it closes. Anything else stays 'exact' as before
+  // (an end another screen set rides along untouched).
+  out.apptType = apptIso ? (s.fcfs ? 'fcfs' : 'exact') : 'tbd'
+  out.apptEnd = (apptIso && toIso(s.apptEnd)) || null
   if (readyIso) out.requestedStart = readyIso
   if (mustIso) out.requestedEnd = mustIso
   if (hasContact) out.contact = contact
