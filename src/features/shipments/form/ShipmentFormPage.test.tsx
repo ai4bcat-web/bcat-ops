@@ -40,7 +40,7 @@ vi.mock('@/hooks/useCarriers', () => ({ useCarriers: () => ({ carriers: [] }) })
 vi.mock('@/hooks/useStaff', () => ({ useStaff: () => ({ staff: [] }) }))
 vi.mock('@/hooks/useOwnFleetRoster', () => ({ useOwnFleetRoster: () => [] }))
 vi.mock('@/features/tms/useOwnershipDivisions', () => ({ useOwnershipDivisions: () => ({ divisions: null }) }))
-vi.mock('@/lib/apiClient', () => ({ getIntakePdfUrl: vi.fn(async () => 'blob:pdf'), getShipmentBundle: vi.fn(async () => h.shipment.bundle), getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations, linkIntakeShipment: h.linkIntakeShipment, listAuditLogsFor: vi.fn(async () => []) }))
+vi.mock('@/lib/apiClient', () => ({ getIntakePdfUrl: vi.fn(async () => 'blob:pdf'), getShipmentBundle: vi.fn(async () => h.shipment.bundle), getTmsSettings: vi.fn(async () => null), listLocations: h.listLocations, linkIntakeShipment: h.linkIntakeShipment, listAuditLogsFor: vi.fn(async () => []), listTruckLocations: vi.fn(async () => []), listCheckCallsByLoad: vi.fn(async () => []), listTrackingLinksByShipment: vi.fn(async () => []) }))
 vi.mock('../intake/useIntakeLoads', () => ({ useIntakeLoad: () => ({ row: h.intakeRow, loading: false, error: null, reload: vi.fn(), setRow: vi.fn() }) }))
 vi.mock('./useFormActions', () => ({
   useFormActions: (o: { busy: boolean }) => ({ actions: {}, dialogs: null, busy: o.busy }),
