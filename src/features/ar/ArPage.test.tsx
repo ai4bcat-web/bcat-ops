@@ -229,8 +229,8 @@ describe('the AR board', () => {
       await settle()
       expect(tab.getAttribute('aria-selected')).toBe('true')
     }
-    // The summary strip sits above every tab.
-    expect(screen.getByLabelText('AR summary')).toBeTruthy()
+    // The summary cards sit beside the tabs on every tab.
+    expect(screen.getByLabelText('Receivables totals')).toBeTruthy()
   })
 
   /**
@@ -238,12 +238,12 @@ describe('the AR board', () => {
    * of `@/lib/arAging` — the page must not reach its own total, or the CSV and the screen
    * would disagree about what is owed.
    */
-  it('shows the summary above the tabs: pending with shippers and late money', async () => {
+  it('shows the summary beside the tabs: pending with shippers and late money', async () => {
     await setup({ UNBILLED: [worklistRow()] })
     await settle()
     // One open, manually invoiced invoice of $2,500.00, past its 2026-10-20 due date.
-    const strip = within(screen.getByLabelText('AR summary'))
-    const card = (label: string) => strip.getByText(label).closest('.tms-kpi-card')?.querySelector('.tms-kpi-card-value')?.textContent
+    const strip = within(screen.getByLabelText('Receivables totals'))
+    const card = (label: string) => strip.getByText(label).closest('.tms-list-row')?.querySelector('.tms-list-row-value')?.textContent
     expect(card('Pending with shippers')).toBe('$2,500.00')
     expect(card('Pending with OTR')).toBe('$0.00')
     expect(card('Late')).toBe('$2,500.00')

@@ -842,3 +842,85 @@
 .tms-portal .tms-breakdown-row-sub .tms-breakdown-value { font-weight: 500; color: var(--tms-text-2); }
 .tms-shell .tms-breakdown-row-sub .tms-breakdown-bar > span,
 .tms-portal .tms-breakdown-row-sub .tms-breakdown-bar > span { background: color-mix(in srgb, var(--tms-primary) 55%, transparent); }
+
+/* List cards: a compact titled card of label · value rows (TmsListCard). */
+.tms-shell .tms-list-card,
+.tms-portal .tms-list-card { display: flex; flex-direction: column; min-width: 0; padding: 10px 12px; border: 1px solid var(--tms-border); border-radius: var(--tms-radius); background: var(--tms-card); box-shadow: var(--tms-shadow); }
+.tms-shell .tms-list-card-head,
+.tms-portal .tms-list-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 0 6px 7px; border-bottom: 1px solid var(--tms-border); }
+.tms-shell .tms-list-card-title,
+.tms-portal .tms-list-card-title { color: var(--tms-text-2); font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+.tms-shell .tms-list-card-total,
+.tms-portal .tms-list-card-total { color: var(--tms-text); font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.tms-shell .tms-list-card-rows,
+.tms-portal .tms-list-card-rows { display: flex; flex-direction: column; margin: 4px 0 0; padding: 0; list-style: none; }
+.tms-shell .tms-list-card-rows > li + li,
+.tms-portal .tms-list-card-rows > li + li { border-top: 1px solid color-mix(in srgb, var(--tms-border) 60%, transparent); }
+.tms-shell .tms-list-row,
+.tms-portal .tms-list-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 12px; width: 100%; padding: 5px 6px; border: 0; border-radius: var(--tms-radius-sm); background: none; color: var(--tms-text); font: inherit; font-size: 13px; text-align: left; font-variant-numeric: tabular-nums; }
+.tms-shell .tms-list-card-shares .tms-list-row,
+.tms-portal .tms-list-card-shares .tms-list-row { grid-template-columns: minmax(0, 1fr) auto 36px; padding-bottom: 7px; }
+.tms-shell button.tms-list-row,
+.tms-portal button.tms-list-row { cursor: pointer; }
+.tms-shell button.tms-list-row:hover,
+.tms-portal button.tms-list-row:hover { background: var(--tms-surface-hover); }
+.tms-shell .tms-list-row:focus-visible,
+.tms-portal .tms-list-row:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: 1px; }
+.tms-shell .tms-list-row[aria-pressed='true'],
+.tms-portal .tms-list-row[aria-pressed='true'] { background: var(--tms-surface-selected); box-shadow: inset 0 0 0 1.5px var(--tms-primary); }
+.tms-shell .tms-list-row-label,
+.tms-portal .tms-list-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.tms-shell .tms-list-row-sub-text,
+.tms-portal .tms-list-row-sub-text { margin-left: 8px; color: var(--tms-text-2); font-size: 11.5px; font-weight: 500; }
+.tms-shell .tms-list-row-value,
+.tms-portal .tms-list-row-value { font-weight: 800; text-align: right; white-space: nowrap; }
+.tms-shell .tms-list-row-share,
+.tms-portal .tms-list-row-share { color: var(--tms-text-2); font-size: 12px; text-align: right; }
+.tms-shell .tms-list-row-bar,
+.tms-portal .tms-list-row-bar { position: absolute; left: 6px; right: 6px; bottom: 2px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--tms-text) 8%, transparent); overflow: hidden; }
+.tms-shell .tms-list-row-bar > span,
+.tms-portal .tms-list-row-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--tms-primary); }
+.tms-shell .tms-list-row-group .tms-list-row-label,
+.tms-portal .tms-list-row-group .tms-list-row-label { font-weight: 800; }
+.tms-shell .tms-list-row-sub,
+.tms-portal .tms-list-row-sub { padding-left: 22px; font-size: 12.5px; }
+.tms-shell .tms-list-row-sub::before,
+.tms-portal .tms-list-row-sub::before { content: ''; position: absolute; left: 10px; top: 0; bottom: 0; border-left: 2px solid var(--tms-border); }
+.tms-shell .tms-list-row-sub .tms-list-row-label,
+.tms-portal .tms-list-row-sub .tms-list-row-label,
+.tms-shell .tms-list-row-sub .tms-list-row-value,
+.tms-portal .tms-list-row-sub .tms-list-row-value { font-weight: 500; color: var(--tms-text-2); }
+.tms-shell .tms-list-row-sub .tms-list-row-bar,
+.tms-portal .tms-list-row-sub .tms-list-row-bar { left: 22px; }
+.tms-shell .tms-list-row-sub .tms-list-row-bar > span,
+.tms-portal .tms-list-row-sub .tms-list-row-bar > span { background: color-mix(in srgb, var(--tms-primary) 55%, transparent); }
+/* A toned row (Late, Past due, Expected): coloured value and a left edge. */
+.tms-shell .tms-list-row-tone-bad,
+.tms-portal .tms-list-row-tone-bad { --row-tone: var(--tms-badge-red); }
+.tms-shell .tms-list-row-tone-warn,
+.tms-portal .tms-list-row-tone-warn { --row-tone: var(--tms-badge-orange); }
+.tms-shell .tms-list-row-tone-good,
+.tms-portal .tms-list-row-tone-good { --row-tone: var(--tms-badge-green); }
+.tms-shell .tms-list-row[class*='tms-list-row-tone-'],
+.tms-portal .tms-list-row[class*='tms-list-row-tone-'] { box-shadow: inset 3px 0 0 var(--row-tone); background: color-mix(in srgb, var(--row-tone) 6%, transparent); }
+.tms-shell .tms-list-row[class*='tms-list-row-tone-'] .tms-list-row-value,
+.tms-portal .tms-list-row[class*='tms-list-row-tone-'] .tms-list-row-value { color: var(--row-tone); }
+
+/* Page-head band: view tabs over status tabs on the left, list cards right-aligned beside both; when
+   narrow the cards drop between the view tabs and the status tabs, full width. */
+.tms-shell .tms-head-band,
+.tms-portal .tms-head-band { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'top cards' 'bottom cards'; grid-template-rows: auto 1fr; column-gap: 16px; row-gap: 8px; margin-bottom: 8px; }
+.tms-shell .tms-head-band-top,
+.tms-portal .tms-head-band-top { grid-area: top; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tms-shell .tms-head-band-bottom,
+.tms-portal .tms-head-band-bottom { grid-area: bottom; align-self: end; min-width: 0; }
+.tms-shell .tms-head-band-cards,
+.tms-portal .tms-head-band-cards { grid-area: cards; display: grid; grid-template-columns: repeat(2, minmax(280px, 340px)); gap: 12px; align-items: start; justify-self: end; }
+.tms-shell .tms-head-band-plain,
+.tms-portal .tms-head-band-plain { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'top' 'bottom'; }
+@media (max-width: 1180px) {
+  .tms-shell .tms-head-band,
+  .tms-portal .tms-head-band { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'top' 'cards' 'bottom'; grid-template-rows: auto; }
+  .tms-shell .tms-head-band-cards,
+  .tms-portal .tms-head-band-cards { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); justify-self: stretch; }
+}

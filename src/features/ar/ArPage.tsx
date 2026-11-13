@@ -25,7 +25,7 @@ import { toast } from 'sonner'
 import { BillingGapsPanel } from './components/BillingGapsPanel'
 import { Eye, RefreshCw } from 'lucide-react'
 import {
-  TmsBadge, TmsButton, TmsCard, TmsSelect, TmsTabStrip, TmsTabs,
+  TmsBadge, TmsButton, TmsCard, TmsHeadBand, TmsSelect, TmsTabStrip, TmsTabs,
   type TmsTabGroup,
 } from '@/features/tms/kit'
 import type { DenseColumn } from '@/features/tms/grid/denseGridModel'
@@ -500,15 +500,21 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
             {current.actions}
           </div>
         </div>
-        {viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
-        <div className="tms-filter-row">
-          <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label="Refresh" onClick={() => void refreshAll()}>
-            <RefreshCw size={15} />
-          </button>
-        </div>
-        <BillingGapsPanel onFixed={() => void refreshAll()} />
-        <ArSummaryStrip summary={summary} division={divisionFilter} onDivision={(key) => { setSelected([]); setDivisionFilter(key) }} />
-        <TmsTabStrip aria-label="Invoicing status" tabs={tabs} active={tab} onSelect={(key) => { setSelected([]); setTab(key as ArPageTab) }} />
+        <TmsHeadBand
+          top={(
+            <>
+              {viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
+              <div className="tms-filter-row">
+                <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label="Refresh" onClick={() => void refreshAll()}>
+                  <RefreshCw size={15} />
+                </button>
+              </div>
+              <BillingGapsPanel onFixed={() => void refreshAll()} />
+            </>
+          )}
+          cards={<ArSummaryStrip summary={summary} division={divisionFilter} onDivision={(key) => { setSelected([]); setDivisionFilter(key) }} />}
+          bottom={<TmsTabStrip aria-label="Invoicing status" tabs={tabs} active={tab} onSelect={(key) => { setSelected([]); setTab(key as ArPageTab) }} />}
+        />
         {current.banner}
         <ArDenseTable<never> key={tab} grid={current.grid} />
       </div>

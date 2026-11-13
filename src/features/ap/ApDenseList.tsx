@@ -7,7 +7,7 @@
  */
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { Eye, RefreshCw, Search } from 'lucide-react'
-import { TmsButton, TmsFilterChip, TmsInput, TmsTabs, type TmsTabGroup } from '@/features/tms/kit'
+import { TmsButton, TmsFilterChip, TmsHeadBand, TmsInput, TmsTabs, type TmsTabGroup } from '@/features/tms/kit'
 import { DenseGrid } from '@/features/tms/grid/DenseGrid'
 import {
   ClearFiltersButton, ColumnsButton, DensityToggle, DenseKpiStrip, SummaryToggle, type DenseKpi,
@@ -48,7 +48,7 @@ export interface ApListConfig<T> {
 /** The page head and the two tab strips: kept mounted while the views under them swap. */
 export function ApChrome({ title, viewTabs, quickTabs, actions, summary }: {
   title: string
-  /** Totals shown above the status tabs, on every tab. */
+  /** Totals cards, right-aligned beside the tabs on every tab. */
   summary?: React.ReactNode
   /** Page-level buttons, on the right of the title. */
   actions?: React.ReactNode
@@ -67,23 +67,27 @@ export function ApChrome({ title, viewTabs, quickTabs, actions, summary }: {
         ) : null}
         {actions ? <div className="tms-page-actions">{actions}</div> : null}
       </div>
-      {viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
-      {summary}
-      <div className="tms-quick-tabs" role="tablist">
-        {quickTabs.tabs.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            role="tab"
-            aria-selected={tab.key === quickTabs.active}
-            className={`tms-quick-tab${tab.key === quickTabs.active ? ' tms-active' : ''}`}
-            onClick={() => quickTabs.onSelect(tab.key)}
-          >
-            {tab.label}
-            {tab.count === undefined ? null : <span className="tms-quick-tab-count">{tab.count}</span>}
-          </button>
-        ))}
-      </div>
+      <TmsHeadBand
+        top={viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
+        cards={summary}
+        bottom={(
+          <div className="tms-quick-tabs" role="tablist">
+            {quickTabs.tabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={tab.key === quickTabs.active}
+                className={`tms-quick-tab${tab.key === quickTabs.active ? ' tms-active' : ''}`}
+                onClick={() => quickTabs.onSelect(tab.key)}
+              >
+                {tab.label}
+                {tab.count === undefined ? null : <span className="tms-quick-tab-count">{tab.count}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      />
     </>
   )
 }
