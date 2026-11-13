@@ -59,3 +59,21 @@ export function inactiveChanges(
   }
   return out
 }
+
+const COMPLIANCE_DATE_FIELDS = ['dotInspectionDate', 'insuranceExpirationDate', 'iftaExpirationDate', 'irpExpirationDate', 'bobtailInsuranceDate'] as const
+type ComplianceDateField = (typeof COMPLIANCE_DATE_FIELDS)[number]
+
+/** The audit diff for a patch's compliance dates (DOT, insurance, IFTA, IRP, bobtail); empty when none change. */
+export function complianceDateChanges(
+  before: Partial<Record<ComplianceDateField, string | null | undefined>>,
+  patch: Partial<Record<ComplianceDateField, string | null | undefined>>,
+): Record<string, { from: unknown; to: unknown }> {
+  const out: Record<string, { from: unknown; to: unknown }> = {}
+  for (const f of COMPLIANCE_DATE_FIELDS) {
+    if (patch[f] === undefined) continue
+    const from = before[f]?.slice(0, 10) || null
+    const to = patch[f]?.slice(0, 10) || null
+    if (from !== to) out[f] = { from, to }
+  }
+  return out
+}

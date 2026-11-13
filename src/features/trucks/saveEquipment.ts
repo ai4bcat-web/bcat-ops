@@ -3,6 +3,8 @@ import { provisionTruckCosts, applyTruckCosts, readTruckCosts, hasAnyTruckCost, 
 import { setUnitPremiumCurrentPeriod } from '@/lib/insuranceClient'
 import type { ExpenseDataState } from '@/hooks/useExpenseData'
 import type { Equipment } from '@/types/equipment'
+import type { ComplianceDocument } from '@/types'
+import { assetDocExpiryUpdates } from '@/lib/fileHub'
 
 type EquipmentData = Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>
 
@@ -11,19 +13,37 @@ type EquipmentData = Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>
  * The Trucks page and the asset profile both call this, so an edit lands in the same records either way.
  * Returns the saved unit (the new one on an add).
  */
-export function saveEquipment({ existing, data, costs, addEquipment, updateEquipment, expenseData }: {
+export function saveEquipment({ existing, data, costs, addEquipment, updateEquipment, expenseData, certificates }: {
   existing: Equipment | null
   data: EquipmentData
   costs?: TruckCostInputs
   addEquipment: (e: EquipmentData) => Equipment
   updateEquipment: (id: string, patch: Partial<EquipmentData>) => void
   expenseData: Pick<ExpenseDataState, 'recurring' | 'allocations' | 'expenseTypes' | 'refresh'>
+  /**
+   * The unit's uploaded certificates. An uploaded insurance / IFTA / IRP certificate is what
+   * the app judges the unit on, so a new date typed here is written to it as well — otherwise
+   * the edit saved but nothing on screen changed.
+   */
+  certificates?: {
+    docFor: (unitId: string, documentType: string) => ComplianceDocument | undefined
+    setExpiration: (doc: ComplianceDocument, date: string) => Promise<unknown>
+  }
 }): Equipment | null {
   if (existing) {
     const id = existing.id
     const unit = data.unitNumber
     updateEquipment(id, data)
-    toast.success(`Unit ${unit} updated`)
+    const certUpdates = certificates
+      ? assetDocExpiryUpdates(existing, data, (type) => certificates.docFor(id, type))
+      : []
+    if (certUpdates.length === 0) {
+      toast.success(`Unit ${unit} updated`)
+    } else {
+      Promise.all(certUpdates.map(({ doc, date }) => certificates!.setExpiration(doc, date)))
+        .then(() => toast.success(`Unit ${unit} updated · ${certUpdates.map((u) => u.doc.title || u.doc.documentType).join(', ')} certificate date updated`))
+        .catch((err) => toast.warning(`Unit ${unit} updated, but the uploaded certificate's date could not be changed: ${err instanceof Error ? err.message : 'unknown error'}`))
+    }
     // Upsert this truck's recurring operating costs (create / update amount / clear).
     if (costs) {
       const { existing: current } = readTruckCosts(id, expenseData.recurring, expenseData.allocations, expenseData.expenseTypes)

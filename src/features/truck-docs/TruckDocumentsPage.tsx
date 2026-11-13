@@ -22,7 +22,9 @@ import { useFileHub } from '@/hooks/useFileHub'
 import { formatVin } from '@/lib/utils'
 import { useDriverTypes } from '@/hooks/useDriverTypes'
 import { TRUCK_DOC_SPECS, specsForAssetType, evaluateTruckDoc, type DocState } from '@/lib/truckDocs'
-import { slotsForAsset, readyScore, truckSlotState, visibleSlots, type ReadyScore } from '@/lib/fileHub'
+import { slotsForAsset, readyScore, truckSlotState, visibleSlots, assetExpiryField, type ReadyScore } from '@/lib/fileHub'
+import { DraftDateField } from '@/features/files/DraftDateField'
+import { saveAssetExpiry } from '@/features/files/saveAssetExpiry'
 import { EntityFilePanel } from '@/features/files/EntityFilePanel'
 import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } from '@/features/files/entityPacket'
 import type { Equipment } from '@/types/equipment'
@@ -74,6 +76,25 @@ function DocCell({ asset, specKey, hub }: { asset: Equipment; specKey: string; h
   const doc = hub.docFor('TRUCK', asset.id, specKey)
   const { state, expiration } = evaluateTruckDoc(asset, spec, doc)
   const style = STATUS_STYLE[state]
+  const field = assetExpiryField(specKey)
+  // Insurance / IFTA / IRP: the date is edited right in the cell (with or without a file);
+  // the save writes the unit record and the uploaded certificate together.
+  if (field && state !== 'WAIVED') {
+    const value = doc?.s3Key ? doc.expirationDate : (asset[field] ?? null)
+    return (
+      <td style={{ ...TD, whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+        <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: 6 }}>
+          <TmsBadge tone={style.tone}>{style.label}</TmsBadge>
+          <span style={{ width: 132 }}>
+            <DraftDateField compact value={value} label={`#${asset.unitNumber} ${spec.label} expiration`}
+              title={doc?.s3Key ? `${spec.label} expiration` : `${spec.label} expiration (no file uploaded yet)`}
+              successMessage={`${spec.label} expiration updated`} clearedMessage={`${spec.label} expiration cleared`}
+              onSave={(date) => saveAssetExpiry({ assetId: asset.id, documentType: specKey, date, doc, setExpiration: hub.setExpiration })} />
+          </span>
+        </span>
+      </td>
+    )
+  }
   return (
     <td style={{ ...TD, whiteSpace: 'nowrap' }}>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -162,7 +183,7 @@ export function TruckDocumentsPage() {
   return (
     <TmsScrollPage
       title="Asset Documents"
-      subtitle="Insurance, IFTA, registration, DOT inspection and truck photos. Click any row to open its file and upload. Same records as the Files page — upload once and it shows in both."
+      subtitle="Insurance, IFTA, registration, DOT inspection and truck photos. Change an expiration date right in its cell; click a row to open its file and upload. Same records as the Files page — upload once and it shows in both."
       stickyHead
       toolbar={
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

@@ -25,9 +25,9 @@ export interface Equipment {
   /** The day the truck or trailer was marked inactive (YYYY-MM-DD). */
   inactiveSince?: string | null
   dotInspectionDate?: string | null // YYYY-MM-DD; null clears it
-  iftaExpirationDate?: string
-  irpExpirationDate?: string
-  insuranceExpirationDate?: string
+  iftaExpirationDate?: string | null // null clears it
+  irpExpirationDate?: string | null
+  insuranceExpirationDate?: string | null
   bobtailInsuranceDate?: string
   assignedDriverId?: string | null
   fleetManagerAssignee?: string     // 'jason' | 'ryne' | ''

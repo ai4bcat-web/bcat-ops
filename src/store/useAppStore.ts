@@ -9,7 +9,7 @@ import type { AmazonDispute } from '@/types/dispute'
 import { getMondayOf } from '@/lib/date'
 import { currentMonth, monthsCovering } from '@/lib/shipmentWindows'
 import * as api from '@/lib/apiClient'
-import { inactiveChanges } from '@/lib/fleetActive'
+import { complianceDateChanges, inactiveChanges } from '@/lib/fleetActive'
 import { LEGACY_MIRROR_FIELDS, getStops, withDerivedLegacy, withoutUnchangedDriverMirrors, withStopsFromLegacy } from '@/lib/stops'
 import { apptChangesOfWrite, driverChangesOfWrite, loadWideDriverChange, takesRosterDriver } from '@/lib/loadShipmentSync'
 import { errorMessage } from '@/lib/utils/errorMessage'
@@ -490,6 +490,11 @@ interface AppState {
   // ── Equipment actions (optimistic local update + write-through to backend) ──
   addEquipment: (e: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>) => Equipment
   updateEquipment: (id: string, patch: Partial<Omit<Equipment, 'id' | 'createdAt'>>) => void
+  /**
+   * Save compliance dates on a truck/trailer and wait for the write: unlike updateEquipment
+   * (fire-and-forget), a failure rejects so the date field can say so. Audited.
+   */
+  saveEquipmentDates: (id: string, patch: Partial<Pick<Equipment, 'dotInspectionDate' | 'insuranceExpirationDate' | 'iftaExpirationDate' | 'irpExpirationDate'>>) => Promise<void>
   deleteEquipment: (id: string) => void
 
   // ── Maintenance actions (optimistic local update + write-through to backend) ─
@@ -976,8 +981,18 @@ export const useAppStore = create<AppState>()(
         set((s) => ({ equipment: s.equipment.map((e) => e.id === id ? { ...e, ...patch, updatedAt: nowIso() } : e) }))
         api.updateEquipment(id, patch as Partial<Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>>)
           .catch((err) => console.error('[store] updateEquipment failed', err))
-        // Parking / reactivating a truck or trailer is a fleet decision worth a trail.
-        const changes = before ? inactiveChanges(before, patch) : {}
+        // Parking / reactivating a truck or trailer, and its compliance dates (insurance,
+        // DOT, IFTA, IRP), are fleet decisions worth a trail.
+        const changes = before
+          ? { ...inactiveChanges(before, patch), ...complianceDateChanges(before, patch) }
+          : {}
+        if (Object.keys(changes).length > 0) writeAudit(get().currentUserEmail, 'Equipment', id, 'update', changes)
+      },
+      saveEquipmentDates: async (id, patch) => {
+        const before = get().equipment.find((e) => e.id === id)
+        await api.updateEquipment(id, patch)
+        set((s) => ({ equipment: s.equipment.map((e) => e.id === id ? { ...e, ...patch, updatedAt: nowIso() } : e) }))
+        const changes = before ? complianceDateChanges(before, patch) : {}
         if (Object.keys(changes).length > 0) writeAudit(get().currentUserEmail, 'Equipment', id, 'update', changes)
       },
       deleteEquipment: (id) => {

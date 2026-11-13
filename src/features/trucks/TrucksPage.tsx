@@ -5,7 +5,9 @@ import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
-import { effectiveExpiration } from '@/lib/truckDocs'
+import { effectiveExpiration, statusFromExpiration } from '@/lib/truckDocs'
+import { updateComplianceDocument } from '@/lib/complianceClient'
+import type { ComplianceDocument } from '@/types'
 import { useTruckConfigs } from '@/hooks/useTruckConfigs'
 import { useTrucksWithoutPhone } from '@/hooks/useTrucksWithoutPhone'
 import { formatPhone } from '@/lib/utils'
@@ -180,9 +182,15 @@ export interface EquipmentFormProps {
   onClose: () => void
   onDelete?: () => void
   initialCosts?: TruckCostInputs
+  /**
+   * The insurance / IFTA / IRP dates the asset is actually judged on (an uploaded
+   * certificate wins over the typed field). The form opens on these so it shows the
+   * date the rest of the app shows; saving a change rewrites the certificate too.
+   */
+  effectiveDates?: ComplianceDates
 }
 
-export function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: EquipmentFormProps) {
+export function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts, effectiveDates }: EquipmentFormProps) {
   const { options: driverTypes, fleetGroupLabel } = useDriverTypes()
   // Truck fleets: the division-named ones (Local, Box Trucks) plus Amazon, which is truck-only. Keeps a stored value that is none of these.
   const truckFleetOptions = [
@@ -204,9 +212,9 @@ export function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts
     active:                  initial?.active ?? true,
     onTollwayAccount:        initial?.onTollwayAccount ?? false,
     dotInspectionDate:       initial?.dotInspectionDate ?? '',
-    insuranceExpirationDate: initial?.insuranceExpirationDate ?? '',
-    iftaExpirationDate:      initial?.iftaExpirationDate ?? '',
-    irpExpirationDate:       initial?.irpExpirationDate ?? '',
+    insuranceExpirationDate: effectiveDates?.ins ?? initial?.insuranceExpirationDate ?? '',
+    iftaExpirationDate:      effectiveDates?.ifta ?? initial?.iftaExpirationDate ?? '',
+    irpExpirationDate:       effectiveDates?.irp ?? initial?.irpExpirationDate ?? '',
     bobtailInsuranceDate:    initial?.bobtailInsuranceDate ?? '',
     fleetManagerAssignee:    initial?.fleetManagerAssignee ?? '',
     eldSource:               (initial?.eldSource ?? 'motive') as EldSource,
@@ -257,9 +265,10 @@ export function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts
       active: form.active,
       onTollwayAccount: form.onTollwayAccount,
       dotInspectionDate: form.dotInspectionDate || null,
-      insuranceExpirationDate: form.insuranceExpirationDate || undefined,
-      iftaExpirationDate: isTruck ? (form.iftaExpirationDate || undefined) : undefined,
-      irpExpirationDate: isTruck ? (form.irpExpirationDate || undefined) : undefined,
+      // null (not undefined) so clearing a date actually clears it.
+      insuranceExpirationDate: form.insuranceExpirationDate || null,
+      iftaExpirationDate: isTruck ? (form.iftaExpirationDate || null) : undefined,
+      irpExpirationDate: isTruck ? (form.irpExpirationDate || null) : undefined,
       bobtailInsuranceDate: form.bobtailInsuranceDate || undefined,
       fleetManagerAssignee: form.fleetManagerAssignee || undefined,
       // ELD source applies to trucks only; manual keeps an optional serial.
@@ -434,8 +443,8 @@ export function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts
                   )}
                 </div>
                 <p style={{ fontSize: 11.5, color: 'var(--tms-muted)', marginTop: 10 }}>
-                  Insurance, IFTA and IRP dates from a certificate uploaded on Asset Documents take
-                  precedence over what is typed here — these fields are the fallback when nothing is on file.
+                  Insurance, IFTA and IRP open on the date the unit is tracked on. When a certificate is
+                  uploaded on Asset Documents, changing the date here updates that certificate too.
                 </p>
               </FormSection>
 
@@ -1094,6 +1103,12 @@ export function TrucksPage() {
 
   // Per-truck values used for both display and column sorting.
   const complianceDatesOf = useComplianceDates()
+  // The equipment form rewrites an uploaded certificate's date when its expiry is edited.
+  const complianceDocs = useAllComplianceDocuments()
+  const setCertificateExpiration = async (doc: ComplianceDocument, date: string) => {
+    await updateComplianceDocument(doc.id, { expirationDate: date, status: statusFromExpiration(date) as ComplianceDocument['status'] })
+    await complianceDocs.refresh()
+  }
   const taskCountOf = (e: Equipment) => maintenanceTasks.filter((t) => t.equipmentId === e.id && t.status === 'upcoming').length
   const repairOf    = (e: Equipment) => maintenanceInvoices.filter((inv) => inv.equipmentId === e.id && isPosted(inv)).reduce((s, inv) => s + inv.amount, 0)
   const driverNameOf = (e: Equipment) => driverForTruck(e.id, drivers)?.name ?? ''
@@ -1171,7 +1186,10 @@ export function TrucksPage() {
   ]
 
   function handleSave(data: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>, costs?: TruckCostInputs) {
-    saveEquipment({ existing: showForm && showForm !== 'new' ? showForm : null, data, costs, addEquipment, updateEquipment, expenseData })
+    saveEquipment({
+      existing: showForm && showForm !== 'new' ? showForm : null, data, costs, addEquipment, updateEquipment, expenseData,
+      certificates: { docFor: (unitId, type) => complianceDocs.docFor('TRUCK', unitId, type), setExpiration: setCertificateExpiration },
+    })
     setShowForm(null)
   }
 
@@ -1397,6 +1415,7 @@ export function TrucksPage() {
       {showForm !== null && (
         <EquipmentForm
           initial={showForm === 'new' ? undefined : showForm}
+          effectiveDates={showForm === 'new' ? undefined : complianceDatesOf(showForm)}
           initialCosts={showForm !== 'new' && showForm.id
             ? readTruckCosts(showForm.id, expenseData.recurring, expenseData.allocations, expenseData.expenseTypes).inputs
             : undefined}
