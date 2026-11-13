@@ -210,8 +210,8 @@ export const LABEL = {
     confirmSent: def('carrier', 'confirmSent', 'Confirm Sent'),
     confirmRec: def('carrier', 'confirmRec', 'Confirm Rec'),
     dispatched: def('carrier', 'dispatched', 'Dispatched'),
-    sendRateConf: def('carrier', 'sendRateConf', 'Send Rate Conf'),
-    sendInfo: def('carrier', 'sendInfo', 'Send Info'),
+    sendRateConf: def('carrier', 'sendRateConf', 'Send Rate Confirmation'),
+    sendInfo: def('carrier', 'sendInfo', 'Send Tracking Link'),
   },
   picks: {
     insertPick: def('picks', 'insertPick', 'Insert Pick'),
@@ -223,7 +223,7 @@ export const LABEL = {
     upload: def('documents', 'upload', 'Upload'),
     generateBol: def('documents', 'generateBol', 'Generate BOL'),
     rateCon: def('documents', 'rateCon', 'Rate Con'),
-    sendInfo: def('documents', 'sendInfo', 'Send Info'),
+    sendInfo: def('documents', 'sendInfo', 'Send Tracking Link'),
     fileType: def('documents', 'fileType', 'File Type'),
   },
   checkCalls: {
