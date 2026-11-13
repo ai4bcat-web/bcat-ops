@@ -397,10 +397,11 @@ export function CustomersPage() {
       case 'invoiceEmail': {
         const addresses = invoiceAddresses(c)
         const factored = c.billingMethod === 'FACTOR'
-        if (addresses.length === 0) return factored ? <span className="tms-muted" title="Factored: invoices go to OTR">Factored (OTR)</span> : <InvoiceEmailBadge customer={c} />
-        const title = [addresses.join(', '), c.invoiceCopyEmails?.length ? `Copy: ${c.invoiceCopyEmails.join(', ')}` : '', factored ? 'Not used: factored invoices go to OTR' : ''].filter(Boolean).join('\n')
+        // Factored or not, the customer's own invoice address is shown: it's still who to talk to about the bill.
+        if (addresses.length === 0) return <TmsBadge tone="orange">Missing invoice e-mail</TmsBadge>
+        const title = [addresses.join(', '), c.invoiceCopyEmails?.length ? `Copy: ${c.invoiceCopyEmails.join(', ')}` : '', factored ? 'Factored: invoices are submitted through OTR' : ''].filter(Boolean).join('\n')
         return (
-          <span className={factored ? 'tms-muted' : undefined} title={title} data-testid={`invoice-email-${c.id}`}>
+          <span title={title} data-testid={`invoice-email-${c.id}`}>
             {addresses[0]}{addresses.length > 1 ? ` +${addresses.length - 1}` : ''}
           </span>
         )
