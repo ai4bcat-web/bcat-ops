@@ -1,0 +1,60 @@
+/* Who-owes filters (Receivable / Payable). Colors come from the TMS tokens only. */
+.tms-owed-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.tms-owed-ms { position: relative; }
+.tms-owed-ms-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--tms-input-border);
+  border-radius: var(--tms-radius);
+  background: var(--tms-input);
+  color: var(--tms-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tms-owed-ms-btn:hover { border-color: var(--tms-primary); }
+.tms-owed-ms-btn:focus-visible { outline: 2px solid var(--tms-primary); outline-offset: 1px; }
+.tms-owed-ms-btn.is-set { border-color: var(--tms-primary); background: var(--tms-primary-tint); }
+.tms-owed-ms-label { color: var(--tms-text-2); font-weight: 600; }
+.tms-owed-ms-value { font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tms-owed-ms-panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 8px;
+  border: 1px solid var(--tms-border);
+  border-radius: var(--tms-radius-card);
+  background: var(--tms-card);
+}
+.tms-owed-ms-search { width: 100%; }
+.tms-owed-ms-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.tms-owed-ms-list li label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--tms-radius-sm);
+  font-size: 13px;
+  color: var(--tms-text);
+  cursor: pointer;
+}
+.tms-owed-ms-list li label:hover { background: var(--tms-surface-hover); }
+.tms-owed-ms-list li.is-sub label { padding-left: 24px; color: var(--tms-text-2); }
+.tms-owed-ms-empty { padding: 8px; font-size: 13px; }
+.tms-owed-ms-foot { display: flex; justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--tms-border); margin-top: 6px; }

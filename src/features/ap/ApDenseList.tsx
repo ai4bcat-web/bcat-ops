@@ -46,8 +46,10 @@ export interface ApListConfig<T> {
 }
 
 /** The page head and the two tab strips: kept mounted while the views under them swap. */
-export function ApChrome({ title, viewTabs, quickTabs, actions, summary }: {
+export function ApChrome({ title, viewTabs, quickTabs, actions, summary, filters }: {
   title: string
+  /** Page filters (carrier, division) under the view tabs. */
+  filters?: React.ReactNode
   /** Totals cards, right-aligned beside the tabs on every tab. */
   summary?: React.ReactNode
   /** Page-level buttons, on the right of the title. */
@@ -68,7 +70,12 @@ export function ApChrome({ title, viewTabs, quickTabs, actions, summary }: {
         {actions ? <div className="tms-page-actions">{actions}</div> : null}
       </div>
       <TmsHeadBand
-        top={viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
+        top={viewTabs || filters ? (
+          <>
+            {viewTabs ? <TmsTabs tabs={viewTabs.tabs} active={viewTabs.active} onSelect={viewTabs.onSelect} /> : null}
+            {filters ? <div className="tms-filter-row">{filters}</div> : null}
+          </>
+        ) : null}
         cards={summary}
         bottom={(
           <div className="tms-quick-tabs" role="tablist">
@@ -95,10 +102,12 @@ export function ApChrome({ title, viewTabs, quickTabs, actions, summary }: {
 /** Leading selection column and trailing action column stay out of the Columns chooser. */
 const isLead = (c: { key: string }) => c.key === 'select'
 
-export function ApDenseList<T>({ config, email, onRefresh }: {
+export function ApDenseList<T>({ config, email, onRefresh, pageFilters }: {
   config: ApListConfig<T>
   email: string | null | undefined
   onRefresh?: () => void
+  /** Filters the page holds outside the grid (carrier, division, due); Clear filters clears them too. */
+  pageFilters?: { count: number; onClear: () => void }
 }) {
   const {
     gridId, columns, rows, rowKey, emptyText, banner, actions, filterChips, onAddFilter, onClearFilters, kpis, onRowClick, searchPlaceholder, ariaLabel,
@@ -155,7 +164,10 @@ export function ApDenseList<T>({ config, email, onRefresh }: {
         {onClearFilters ? (
           <TmsButton size="sm" variant="secondary" onClick={onClearFilters}>Clear page filters</TmsButton>
         ) : null}
-        <ClearFiltersButton count={filterCount} onClear={() => setFilters({})} />
+        <ClearFiltersButton
+          count={filterCount + (pageFilters?.count ?? 0)}
+          onClear={() => { setFilters({}); pageFilters?.onClear() }}
+        />
         {actions}
         <span className="tms-dense-spacer" />
         <span className="tms-muted" data-testid="ap-count">

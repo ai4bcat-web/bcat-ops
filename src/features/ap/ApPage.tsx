@@ -14,7 +14,7 @@
  * settlements, and the Awaiting view says so instead of offering a Record button.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -63,6 +63,12 @@ import { ApReportDialog, CashRequirementsDialog } from './components/ApReportDia
 import { estimatedDueAt, isAljexBill, payablesQueue, proOf, termsLabel, type ApReportKind, type BillFactsIndex } from './apQueue'
 import { useBillFacts } from './useBillFacts'
 import { ApSummaryStrip } from './components/ApSummaryStrip'
+import { OwedFilterBar } from '@/features/ar/components/OwedFilterBar'
+import { OwedSummary } from '@/features/ar/components/OwedSummary'
+import {
+  inDueBucket, owedFilterActive, owedFilterCount, owedSelectionLabel, partyOptions,
+  readOwedFilter, summarizeOwed, writeOwedFilter, type OwedFilter, type OwedOption,
+} from '@/features/ar/owedFilters'
 import { apSummary, inDivision } from './apQueue'
 import { useOwnershipDivisions } from '@/features/tms/useOwnershipDivisions'
 import type { ApInboxItemRecord } from '@/lib/apInbox/types'
@@ -216,20 +222,59 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     const byCode = new Map((divisions ?? []).map((d) => [d.code, d.name]))
     return (code: string | null) => (code ? byCode.get(code) ?? code : 'No division')
   }, [divisions])
-  const [division, setDivision] = useState<string | null>(null)
+  // Carrier / rev division / due filters live in the URL (`?carrier=…&div=…&due=…`) so a filtered
+  // view can be shared; the division card writes the same state.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const owed = useMemo(() => readOwedFilter(searchParams, 'carrier'), [searchParams])
+  const setOwed = useCallback((next: OwedFilter) => {
+    setSelected([])
+    setSearchParams((prev) => writeOwedFilter(prev, next, 'carrier'), { replace: true })
+  }, [setSearchParams, setSelected])
+  const byParty = useCallback((b: CarrierBillRecord) => owed.parties.length === 0 || owed.parties.includes(b.carrierId),
+    [owed.parties])
+  const byDivision = useCallback((b: CarrierBillRecord) => owed.divisions.length === 0 || owed.divisions.some((key) => inDivision(b, facts, key)),
+    [owed.divisions, facts])
   const [includeAljex, setIncludeAljex] = useState(false)
   const aljexOpen = useMemo(() => open.bills.filter((b) => isAljexBill(b) && b.status !== 'PAID' && b.status !== 'VOID').length, [open.bills])
   const queueAll = useMemo(() => payablesQueue(open.bills, facts, { includeAljex }), [open.bills, facts, includeAljex])
-  const queueBills = useMemo(() => queueAll.filter((b) => inDivision(b, facts, division)), [queueAll, facts, division])
-  // The strip counts the whole queue (every division) so its division buttons always show the split.
-  const summary = useMemo(() => apSummary({
-    expected: billsExpected(queueAll),
-    aging: billsAging(queueAll),
-    selected: billsSelected(queueAll),
-    paidRecent,
-    facts,
-    asOf,
-  }), [queueAll, paidRecent, facts, asOf])
+  const partyQueue = useMemo(() => queueAll.filter(byParty), [queueAll, byParty])
+  const ownedQueue = useMemo(() => partyQueue.filter(byDivision), [partyQueue, byDivision])
+  const queueBills = useMemo(() => ownedQueue.filter((b) => inDueBucket(b.dueAt, asOf, owed.due)), [ownedQueue, asOf, owed.due])
+  // The totals follow the carrier and division filters; the division card keeps every division's
+  // share (of the selected carriers) so there is always a division to pick.
+  const summary = useMemo(() => {
+    const narrowed = apSummary({
+      expected: billsExpected(ownedQueue),
+      aging: billsAging(ownedQueue),
+      selected: billsSelected(ownedQueue),
+      paidRecent: paidRecent.filter((b) => byParty(b) && byDivision(b)),
+      facts,
+      asOf,
+    })
+    const shares = apSummary({
+      expected: billsExpected(partyQueue),
+      aging: billsAging(partyQueue),
+      selected: billsSelected(partyQueue),
+      paidRecent: [],
+      facts,
+      asOf,
+    })
+    return { ...narrowed, byDivision: shares.byDivision }
+  }, [ownedQueue, partyQueue, paidRecent, byParty, byDivision, facts, asOf])
+  const owedSummary = useMemo(() => summarizeOwed(ownedQueue, asOf), [ownedQueue, asOf])
+  const carrierOptions: OwedOption[] = useMemo(() => partyOptions([
+    ...open.bills.map((b) => ({ id: b.carrierId, name: b.carrierName })),
+    ...monthBills.map((b) => ({ id: b.carrierId, name: b.carrierName })),
+  ]), [open.bills, monthBills])
+  const divisionOptions: OwedOption[] = useMemo(() => {
+    const all = apSummary({ expected: billsExpected(queueAll), aging: billsAging(queueAll), selected: billsSelected(queueAll), paidRecent: [], facts, asOf })
+    return [...all.byDivision]
+      .sort((a, b) => divisionName(a.division).localeCompare(divisionName(b.division)) || (a.subdivision ? 1 : 0) - (b.subdivision ? 1 : 0)
+        || divisionName(a.subdivision).localeCompare(divisionName(b.subdivision)))
+      .map((slice) => ({ key: slice.key, label: divisionName(slice.subdivision ?? slice.division), sub: Boolean(slice.subdivision) }))
+  }, [queueAll, facts, asOf, divisionName])
+  const carrierLabel = (id: string) => carrierOptions.find((o) => o.key === id)?.label ?? id
+  const divisionLabel = (key: string) => divisionOptions.find((o) => o.key === key)?.label ?? key
   const expectedBills = useMemo(() => billsExpected(queueBills), [queueBills])
   const agingBills = useMemo(() => billsAging(queueBills), [queueBills])
   const selectedBills = useMemo(() => billsSelected(queueBills), [queueBills])
@@ -238,7 +283,7 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   const drawerBill = drawerId ? open.bills.find((b) => b.id === drawerId) ?? null : null
   const agingRows = useMemo(() => applyToBePaidFilters(agingBills, filters, asOf), [agingBills, filters, asOf])
   const selectedRows = useMemo(() => applyToBePaidFilters(selectedBills, filters, asOf), [selectedBills, filters, asOf])
-  const settled = useMemo(() => paidBills(monthBills), [monthBills])
+  const settled = useMemo(() => paidBills(monthBills).filter((b) => byParty(b) && byDivision(b)), [monthBills, byParty, byDivision])
   const [verifyOnlyPaid, setVerifyOnlyPaid] = useState(false)
   const settledShown = useMemo(() => (verifyOnlyPaid ? settled.filter(isVerifyPaymentBill) : settled), [settled, verifyOnlyPaid])
   const awaitingTotals = useMemo(() => awaitingInvoiceTotals(awaiting.rows), [awaiting.rows])
@@ -539,15 +584,28 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
           title={chrome.title}
           viewTabs={chrome.viewTabs}
           quickTabs={chrome.quickTabs}
+          filters={<OwedFilterBar partyLabel="Carrier" parties={carrierOptions} divisions={divisionOptions} filter={owed} onChange={setOwed} testId="ap-owed-filters" />}
           summary={(
+            <>
             <ApSummaryStrip
               summary={summary}
               divisionName={divisionName}
-              division={division}
-              onDivision={setDivision}
+              division={owed.divisions.length === 1 ? owed.divisions[0] : null}
+              onDivision={(key) => setOwed({ ...owed, divisions: key ? [key] : [] })}
               onCashRequirements={() => setDialog({ kind: 'cash' })}
               onTab={setTab}
             />
+            {owedFilterActive(owed) && (
+              <OwedSummary
+                title={owedSelectionLabel(owed, carrierLabel, divisionLabel)}
+                summary={owedSummary}
+                unit="bill"
+                due={owed.due}
+                onDue={(due) => setOwed({ ...owed, due })}
+                testId="ap-owed-summary"
+              />
+            )}
+            </>
           )}
           actions={(
             <button type="button" className="tms-btn tms-btn-secondary tms-btn-sm" data-testid="export-outstanding-payables" title="Every open bill with every field"
@@ -558,7 +616,8 @@ export function ApPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         />
         <BillingGapsPanel onFixed={() => void refreshAll()} />
         {/* Keyed by grid so each view keeps its own saved columns, filters and sort. */}
-        <ApDenseList<never> key={current.gridId} config={current} email={user?.email} onRefresh={chrome.onRefresh} />
+        <ApDenseList<never> key={current.gridId} config={current} email={user?.email} onRefresh={chrome.onRefresh}
+          pageFilters={{ count: owedFilterCount(owed), onClear: () => setOwed({ parties: [], divisions: [], due: null }) }} />
       </div>
 
       {dialog?.kind === 'record' && (

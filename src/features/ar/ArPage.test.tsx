@@ -184,7 +184,7 @@ const openSet = [invoice()]
 /** Let the page's mocked fetches resolve inside act, so their state updates are not reported as stray. */
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
 
-async function setup(rowsByTab: Partial<Record<string, ArWorklistRow[]>> = {}) {
+async function setup(rowsByTab: Partial<Record<string, ArWorklistRow[]>> = {}, url = '/') {
   worklistMock.mockImplementation((tab: string) => ({
     rows: rowsByTab[tab] ?? [],
     loading: false,
@@ -207,7 +207,7 @@ async function setup(rowsByTab: Partial<Record<string, ArWorklistRow[]>> = {}) {
     error: null,
     refresh: vi.fn().mockResolvedValue(undefined),
   })
-  const view = render(<MemoryRouter><ArPage /></MemoryRouter>)
+  const view = render(<MemoryRouter initialEntries={[url]}><ArPage /></MemoryRouter>)
   await settle()
   return view
 }
@@ -328,6 +328,34 @@ describe('the AR board', () => {
     await settle()
     expect(screen.getByText('Short paid $500.00 open')).toBeTruthy()
     openSet.splice(0, openSet.length, invoice())
+  })
+})
+
+describe('owed by customer or division', () => {
+  it('a customer in the URL narrows the totals and shows what they owe by due date', async () => {
+    await setup({}, '/?customer=c1')
+    const owed = within(screen.getByLabelText('Owed by Acme Foods'))
+    const value = (label: string) => owed.getByText(label).closest('.tms-list-row')?.querySelector('.tms-list-row-value')?.textContent
+    expect(value('Past due')).toBe('$2,500.00')
+    expect(value('Not yet due')).toBe('$0.00')
+    expect(screen.getByRole('button', { name: 'Customer: Acme Foods' })).toBeTruthy()
+  })
+
+  it('a customer with nothing open zeroes the totals and empties Invoiced', async () => {
+    await setup({}, '/?customer=nobody')
+    const strip = within(screen.getByLabelText('Receivables totals'))
+    expect(strip.getByText('Pending with shippers').closest('.tms-list-row')?.querySelector('.tms-list-row-value')?.textContent).toBe('$0.00')
+    fireEvent.click(screen.getByRole('tab', { name: /^Invoiced/ }))
+    await settle()
+    expect(screen.getByRole('tab', { name: /^Invoiced/ }).textContent).toContain('$0.00')
+  })
+
+  it('Clear filters clears the customer filter too', async () => {
+    await setup({}, '/?customer=c1')
+    fireEvent.click(screen.getByRole('button', { name: /^Clear 1 filter/ }))
+    await settle()
+    expect(screen.queryByLabelText('Owed by Acme Foods')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Customer: All' })).toBeTruthy()
   })
 })
 

@@ -40,7 +40,11 @@ export interface ArGrid<T> {
   }
 }
 
-export function ArDenseTable<T>({ grid }: { grid: ArGrid<T> }) {
+export function ArDenseTable<T>({ grid, pageFilters }: {
+  grid: ArGrid<T>
+  /** Filters the page holds outside the grid (customer, division, due); Clear filters clears them too. */
+  pageFilters?: { count: number; onClear: () => void }
+}) {
   const email = useAuthUser()?.email ?? ''
   const { gridId, label, columns: catalogAll, rows, rowKey, renderCell, empty, kpis, group } = grid
   const [filters, setFilters] = useState<DenseFilters>({})
@@ -90,7 +94,10 @@ export function ArDenseTable<T>({ grid }: { grid: ArGrid<T> }) {
         <Search size={14} className="tms-muted" aria-hidden="true" />
         <TmsInput className="tms-dense-search" aria-label="Search" data-testid="ar-search" placeholder="Search invoice, customer, PRO, amount…" value={search} onChange={(e) => setSearch(e.target.value)} />
         <span className="tms-muted">{filtered.length === rows.length ? `${rows.length} rows` : `${filtered.length} of ${rows.length} rows`}</span>
-        <ClearFiltersButton count={activeFilterCount(filters)} onClear={() => setFilters({})} />
+        <ClearFiltersButton
+          count={activeFilterCount(filters) + (pageFilters?.count ?? 0)}
+          onClear={() => { setFilters({}); pageFilters?.onClear() }}
+        />
         <span className="tms-dense-spacer" />
         <ColumnsButton
           catalog={movable}

@@ -13,13 +13,20 @@
 import { InvoiceEditDrawer } from './components/InvoiceEditDrawer'
 import { ArSummaryStrip } from './ArSummaryStrip'
 import { computeArSummary, divisionKeyOf } from './arSummary'
+import { ageInvoices } from '@/lib/arAging'
+import { OwedFilterBar } from './components/OwedFilterBar'
+import { OwedSummary } from './components/OwedSummary'
+import {
+  divisionMatches, inDueBucket, owedFilterActive, owedFilterCount, owedSelectionLabel, partyOptions,
+  readOwedFilter, summarizeOwed, writeOwedFilter, type OwedFilter, type OwedOption,
+} from './owedFilters'
 import { SendReviewCarousel } from './components/SendReviewCarousel'
 import { AgingStatementDialog } from './components/AgingStatementDialog'
 import { allApEmails } from '@/lib/billingMethod'
 import { useAuthUser } from '@/hooks/useAuth'
 import { isOwnerOrAdmin } from '@/lib/accountingAccess'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Download, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 import { BillingGapsPanel } from './components/BillingGapsPanel'
@@ -180,8 +187,14 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   }, [])
 
   const [selected, setSelected] = useState<string[]>([])
-  /** A division chip from the summary strip: `BROKERAGE` or `ASSETS/LOCAL`. */
-  const [divisionFilter, setDivisionFilter] = useState<string | null>(null)
+  // Customer / rev division / due filters live in the URL (`?customer=…&div=…&due=…`) so a
+  // filtered view can be shared; the division card writes the same state.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const owed = useMemo(() => readOwedFilter(searchParams, 'customer'), [searchParams])
+  const setOwed = useCallback((next: OwedFilter) => {
+    setSelected([])
+    setSearchParams((prev) => writeOwedFilter(prev, next, 'customer'), { replace: true })
+  }, [setSearchParams, setSelected])
   /** Customers ticked on the Aging tab for a bulk statement send. */
   const [statementSelected, setStatementSelected] = useState<string[]>([])
   /** What the last batch generated, so "Batch e-mail" bills exactly those invoices. */
@@ -259,8 +272,11 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     // Auto-generated on release but not yet sent = a draft for review in Ready to invoice.
     const split = splitOpenInvoices(open.invoices, lookups, releasedByOrder, (inv) =>
       isInvoiceSent(inv, inv.factoringItemId ? factorByItemId.get(inv.factoringItemId) : null))
-    const keep = (rows: ArQueueRow[]) => rows.filter((row) => billedByMatches(row, billedBy)
-      && (!divisionFilter || divisionKeyOf(lookups.shipmentsById.get(row.shipmentId) ?? { revDivision: row.revDivision }) === divisionFilter))
+    const keepAll = (rows: ArQueueRow[], due: boolean) => rows.filter((row) => billedByMatches(row, billedBy)
+      && (owed.parties.length === 0 || owed.parties.includes(row.customerId ?? ''))
+      && divisionMatches(divisionKeyOf(lookups.shipmentsById.get(row.shipmentId) ?? { revDivision: row.revDivision }), owed.divisions)
+      && (!due || inDueBucket(row.dueAt, asOf, owed.due)))
+    const keep = (rows: ArQueueRow[]) => keepAll(rows, true)
     return {
       READY: keep((() => {
         const ready = buildReadyRows(unbilled.rows, lookups)
@@ -268,9 +284,10 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
         return [...split.drafts.filter((r) => !readyOrders.has(r.orderId)), ...ready]
       })()),
       INVOICED: keep(split.invoiced),
-      PAID: keep(buildPaidRows(paidInvoices, lookups)),
+      // Paid rows owe nothing, so the due bucket does not narrow them.
+      PAID: keepAll(buildPaidRows(paidInvoices, lookups), false),
     }
-  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId, divisionFilter])
+  }, [unbilled.rows, open.invoices, paidInvoices, lookups, releasedByOrder, billedBy, factorByItemId, owed, asOf])
 
   // Ready to invoice reads each shipment's board row for its reference, lane, carrier and carrier pay (internal only).
   const readyShipmentIds = useMemo(
@@ -296,14 +313,49 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
       .then((sets) => { if (alive) setRecentPaid(sets.flat()) })
     return () => { alive = false }
   }, [months])
-  const summary = useMemo(() => computeArSummary({
-    open: open.invoices,
-    paid: recentPaid,
+  // The customer filter narrows every figure; the division filter narrows the totals card while the
+  // division card keeps showing each division's share (of the selected customers) to pick from.
+  const byParty = useCallback((inv: InvoiceRecord) => owed.parties.length === 0 || owed.parties.includes(inv.customerId),
+    [owed.parties])
+  const byDivision = useCallback((inv: InvoiceRecord) => divisionMatches(divisionKeyOf(lookups.shipmentsById.get(inv.shipmentId)), owed.divisions),
+    [owed.divisions, lookups])
+  const partyOpen = useMemo(() => open.invoices.filter(byParty), [open.invoices, byParty])
+  const filteredOpen = useMemo(() => partyOpen.filter(byDivision), [partyOpen, byDivision])
+  const summarize = useCallback((openInvoices: InvoiceRecord[], paid: InvoiceRecord[]) => computeArSummary({
+    open: openInvoices,
+    paid,
     factorByItemId,
     shipmentsById: lookups.shipmentsById,
     divisionName: lookups.divisionName,
     asOf,
-  }), [open.invoices, recentPaid, factorByItemId, lookups, asOf])
+  }), [factorByItemId, lookups, asOf])
+  const summaryAll = useMemo(() => summarize(open.invoices, recentPaid), [summarize, open.invoices, recentPaid])
+  const summary = useMemo(() => ({
+    ...summarize(filteredOpen, recentPaid.filter((inv) => byParty(inv) && byDivision(inv))),
+    byDivision: summarize(partyOpen, []).byDivision,
+  }), [summarize, filteredOpen, partyOpen, recentPaid, byParty, byDivision])
+  const owedSummary = useMemo(() => summarizeOwed(filteredOpen, asOf), [filteredOpen, asOf])
+  // Aging re-ages only the selected customers' / divisions' invoices.
+  const aging = useMemo(
+    () => (owed.parties.length || owed.divisions.length ? ageInvoices(filteredOpen, new Date().toISOString(), { fromInvoiceDate: true }) : open.aging),
+    [owed.parties.length, owed.divisions.length, filteredOpen, open.aging],
+  )
+  const customerOptions: OwedOption[] = useMemo(() => partyOptions([
+    ...open.invoices.map((inv) => ({ id: inv.customerId, name: inv.customerName })),
+    ...unbilled.rows.map((row) => ({ id: row.customerId, name: row.customerName })),
+    ...paidInvoices.map((inv) => ({ id: inv.customerId, name: inv.customerName })),
+  ]), [open.invoices, unbilled.rows, paidInvoices])
+  const divisionOptions: OwedOption[] = useMemo(() => {
+    const out: OwedOption[] = []
+    const seen = new Set<string>()
+    for (const slice of [...summaryAll.byDivision].sort((a, b) => a.divisionLabel.localeCompare(b.divisionLabel) || (a.subLabel ?? '').localeCompare(b.subLabel ?? ''))) {
+      if (!seen.has(slice.division)) { seen.add(slice.division); out.push({ key: slice.division, label: slice.divisionLabel }) }
+      if (slice.key.includes('/')) out.push({ key: slice.key, label: slice.subLabel ?? slice.label, sub: true })
+    }
+    return out
+  }, [summaryAll.byDivision])
+  const customerLabel = (id: string) => customerOptions.find((o) => o.key === id)?.label ?? id
+  const divisionLabel = (key: string) => divisionOptions.find((o) => o.key === key)?.label ?? key
 
 
   const refreshAll = () =>
@@ -368,7 +420,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
   }
 
   const downloadAgingCsv = () => {
-    saveBlob(new Blob([agingCsv(open.aging.byCustomer)], { type: 'text/csv' }), `ar-aging-${asOf}.csv`)
+    saveBlob(new Blob([agingCsv(aging.byCustomer)], { type: 'text/csv' }), `ar-aging-${asOf}.csv`)
   }
 
   const queueTotal = (status: ArQueueStatus) => formatCents(queue[status].reduce((sum, r) => sum + (status === 'INVOICED' ? r.balanceCents : r.amountCents), 0))
@@ -377,7 +429,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     { key: 'invoiced', label: `${AR_QUEUE_STATUS_LABEL.INVOICED} · ${queueTotal('INVOICED')} open`, count: queue.INVOICED.length, testId: 'ar-tab-invoiced' },
     { key: 'paid', label: `${AR_QUEUE_STATUS_LABEL.PAID} · ${queueTotal('PAID')}`, count: queue.PAID.length, testId: 'ar-tab-paid' },
     { key: 'payments', label: 'Payments & credits', count: customerAr.payments.length, testId: 'ar-tab-payments' },
-    { key: 'aging', label: 'Aging', count: open.aging.byCustomer.length, testId: 'ar-tab-aging' },
+    { key: 'aging', label: 'Aging', count: aging.byCustomer.length, testId: 'ar-tab-aging' },
   ]
 
   const error = unbilled.error ?? invoiced.error ?? open.error ?? customerAr.error
@@ -476,7 +528,7 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
     })
     : agingView({
       errorBanner,
-      aging: open.aging,
+      aging,
       onCsv: downloadAgingCsv,
       customerById,
       statementSelected,
@@ -508,15 +560,34 @@ export function ArPage({ viewTabs }: { viewTabs?: TmsTabGroup } = {}) {
                 <button type="button" className="tms-icon-btn tms-icon-btn-plain" aria-label="Refresh" onClick={() => void refreshAll()}>
                   <RefreshCw size={15} />
                 </button>
+                <OwedFilterBar partyLabel="Customer" parties={customerOptions} divisions={divisionOptions} filter={owed} onChange={setOwed} testId="ar-owed-filters" />
               </div>
               <BillingGapsPanel onFixed={() => void refreshAll()} />
             </>
           )}
-          cards={<ArSummaryStrip summary={summary} division={divisionFilter} onDivision={(key) => { setSelected([]); setDivisionFilter(key) }} />}
+          cards={(
+            <>
+              <ArSummaryStrip
+                summary={summary}
+                division={owed.divisions.length === 1 ? owed.divisions[0] : null}
+                onDivision={(key) => setOwed({ ...owed, divisions: key ? [key] : [], due: owed.due })}
+              />
+              {owedFilterActive(owed) && (
+                <OwedSummary
+                  title={owedSelectionLabel(owed, customerLabel, divisionLabel)}
+                  summary={owedSummary}
+                  unit="invoice"
+                  due={owed.due}
+                  onDue={(due) => setOwed({ ...owed, due })}
+                  testId="ar-owed-summary"
+                />
+              )}
+            </>
+          )}
           bottom={<TmsTabStrip aria-label="Invoicing status" tabs={tabs} active={tab} onSelect={(key) => { setSelected([]); setTab(key as ArPageTab) }} />}
         />
         {current.banner}
-        <ArDenseTable<never> key={tab} grid={current.grid} />
+        <ArDenseTable<never> key={tab} grid={current.grid} pageFilters={{ count: owedFilterCount(owed), onClear: () => setOwed({ parties: [], divisions: [], due: null }) }} />
       </div>
 
       {dialog?.kind === 'generate' && (
