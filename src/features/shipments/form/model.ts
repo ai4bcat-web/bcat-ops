@@ -407,6 +407,27 @@ export function emptyCarrierBlock(): CarrierBlock {
   }
 }
 
+/**
+ * The carrier block after Cover booked `lc`: the assignment and its carrier, with the dispatcher the
+ * booking recorded filling only what the form left blank. Everything typed for the trip stays.
+ */
+export function coveredCarrierBlock(block: CarrierBlock, lc: Pick<LoadCarrierRecord, 'id' | 'carrierId' | 'carrierName' | 'kind' | 'dispatcherName' | 'dispatcherPhone' | 'dispatcherEmail'>): CarrierBlock {
+  const own = lc.kind === 'OWN_ASSET'
+  return {
+    ...block,
+    loadCarrierId: lc.id,
+    carrierId: lc.carrierId ?? '',
+    typedName: !own && !lc.carrierId ? (lc.carrierName ?? '') : '',
+    useTyped: !own && !lc.carrierId,
+    isOwnFleet: own,
+    dispatcher: {
+      name: block.dispatcher.name || (lc.dispatcherName ?? ''),
+      phone: block.dispatcher.phone || (lc.dispatcherPhone ?? ''),
+      email: block.dispatcher.email || (lc.dispatcherEmail ?? ''),
+    },
+  }
+}
+
 export function emptyCarrierRate(): CarrierRate {
   return { rateType: 'FLAT', hours: '', lhRate: '', lineId: '', payPct: '', maxRate: '' }
 }

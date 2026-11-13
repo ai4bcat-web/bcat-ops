@@ -18,7 +18,7 @@ import {
 } from '@/lib/apiClient'
 import type { CarrierRecord, ShipmentBundle, ShipmentDocumentType, TmsSettings } from '@/types/tms'
 import { financialPreview } from './mapping'
-import { carrierSlotsOf, emptyCarrierBlock, emptyCarrierRate, liveCarriers, type ShipmentFormValues } from './model'
+import { carrierSlotsOf, coveredCarrierBlock, emptyCarrierBlock, emptyCarrierRate, liveCarriers, type ShipmentFormValues } from './model'
 import { RateConDialog } from './RateConDialog'
 import { toLogCheckCallInput } from './checkCallNote'
 import { runAddCarrier, runCover } from './pipelines'
@@ -162,6 +162,10 @@ export function useFormActions(o: {
           const after = await runCover(ref.current.values, covered)
           if (after.bundle) track(after.bundle)
           if (!after.ok) toast.error(after.message ?? 'Covered, but the carrier details did not all save')
+          // The dialog books the load without touching the form: point the carrier block at what was covered,
+          // so it shows the carrier straight away and a later save cannot send an empty carrier back.
+          const booked = liveCarriers(after.bundle ?? covered)[0]
+          if (booked) update((p) => ({ ...p, carrier: coveredCarrierBlock(p.carrier, booked) }))
           close()
         }}
       />
