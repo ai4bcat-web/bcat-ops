@@ -35,15 +35,14 @@ describe('requiredRows', () => {
     expect(requiredProgress(rows).ready).toBe(false)
   })
 
-  it('a blocking issue with no fixed row (carrier origin) joins as an extra undone row', () => {
+  it('a blank carrier origin adds no required row', () => {
     const v = filledValues()
     v.carrier.originCity = ''
     v.carrier.originState = ''
     v.carrier.carrierId = 'car-1'
     const rows = requiredRows(v, 'create', { customer: CUSTOMER })
-    expect(gate(v)).toBe(2)
-    expect(rows.filter((r) => !r.done)).toHaveLength(2)
-    expect(rows.filter((r) => !r.done).every((r) => r.card === 'carrier')).toBe(true)
+    expect(gate(v)).toBe(0)
+    expect(rows.filter((r) => !r.done)).toHaveLength(0)
   })
 
   it('does not require equipment on LTL', () => {
