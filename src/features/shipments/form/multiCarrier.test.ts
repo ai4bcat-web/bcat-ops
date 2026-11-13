@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LoadCarrierRecord, ShipmentBundle } from '@/types/tms'
 
 const api = vi.hoisted(() => ({
-  addCarrier: vi.fn(), updateLoadCarrierDetails: vi.fn(), setEta: vi.fn(), updateOrderDetails: vi.fn(),
+  addCarrier: vi.fn(), updateLoadCarrierDetails: vi.fn(), setEta: vi.fn(), updateOrderDetails: vi.fn(), updateCarrierCharges: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => api)
 vi.mock('../newShipmentEffects', () => ({}))
@@ -162,12 +162,18 @@ describe('ADD_CARRIER from a slot', () => {
     const input = toAddCarrierInput(v, 'c1', before)
     expect(input).toMatchObject({ loadId: 'ld-1', carrierId: 'car-b', carrierRateCents: 30000, legStopIds: ['stp-c'] })
     expect(input.charges?.map((c) => [c.code, c.rateCents])).toEqual([['LUMPER', 4000]])
-    const after = { ...before, loadCarriers: [lc('lc-a', 1), lc('lc-b', 2, { carrierId: 'car-b' })] } as unknown as ShipmentBundle
+    // ADD_CARRIER writes the slot's own charges, so the follow-up does not write them again.
+    const after = {
+      ...before,
+      loadCarriers: [lc('lc-a', 1), lc('lc-b', 2, { carrierId: 'car-b' })],
+      charges: [...before.charges, { id: 'ch-l', side: 'CARRIER', loadId: 'ld-1', loadCarrierId: 'lc-b', code: 'LUMPER', calculatedBy: 'FLAT', rateCents: 4000, count: 1, amountCents: 4000, isRate: false, sortOrder: 10 }],
+    } as unknown as ShipmentBundle
     api.addCarrier.mockResolvedValue(after)
     api.updateOrderDetails.mockResolvedValue(after)
     const res = await runAddCarrier(v, before, 'c1')
     expect(res.ok).toBe(true)
     expect(api.addCarrier).toHaveBeenCalledTimes(1)
+    expect(api.updateCarrierCharges).not.toHaveBeenCalled()
     const sr = api.updateOrderDetails.mock.calls[0][0].order.specialRequirements
     expect(sr.form.carriers.find((c: { slot: string }) => c.slot === 'c1')).toMatchObject({ loadCarrierId: 'lc-b' })
   })

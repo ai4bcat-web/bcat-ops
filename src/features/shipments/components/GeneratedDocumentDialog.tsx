@@ -20,6 +20,7 @@ import { loadSummaryData } from '@/lib/documentData'
 import { buildLoadSummaryPdf, loadSummaryFilename } from '@/lib/loadSummaryPdf'
 import { buildRateConPdf, joinRateConNotes, rateConPdfBase64, rateConRepOf, type RateConInput, type RateConStop } from '@/lib/carrierRateCon'
 import { readExtras } from '../form/model'
+import { rateConChargesFor } from '@/lib/carrierBill'
 import { generatedFilename, nextVersion, DOCUMENT_TYPE_LABELS } from '@/lib/shipmentDocuments'
 import type {
   ChargeCodeDef, CustomerRecord, LoadCheckCallRecord, LocationRecord,
@@ -96,9 +97,7 @@ export function GeneratedDocumentDialog({
    */
   const rateConInput = (): RateConInput => {
     if (!assignment) throw new Error('A rate confirmation needs the carrier that is currently on the load')
-    const charges = bundle.charges
-      .filter((c) => c.side === 'CARRIER' && (c.loadCarrierId == null || c.loadCarrierId === assignment.id))
-      .map((c) => ({ label: c.label || c.code, amountCents: c.amountCents }))
+    const charges = rateConChargesFor(bundle.charges, bundle.loadCarriers, assignment)
     const totalCents = charges.reduce((sum, c) => sum + c.amountCents, 0)
     return {
       carrier: {

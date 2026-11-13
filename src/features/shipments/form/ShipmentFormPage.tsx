@@ -219,6 +219,7 @@ function ShipmentFormInner({ initialBundle, prefillCustomerId, intakeId }: { ini
 
   const { actions, dialogs, busy } = useFormActions({
     values, update, bundle, setBundle: form.setBundle, busy: pipelineBusy, settings, carriers, isAdmin, brokerName: 'BCAT Logistics',
+    saveFirst: async () => (form.dirty ? form.run('save') : true),
   })
 
   const formApi = useMemo<FormApi>(() => ({

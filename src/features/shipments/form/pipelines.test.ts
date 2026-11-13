@@ -6,7 +6,7 @@ import { emptyValues, valuesFromBundle } from './model'
 const api = vi.hoisted(() => ({
   assignAsset: vi.fn(), setStopDrivers: vi.fn(), createShipment: vi.fn(), saveOrderForm: vi.fn(), getShipmentBundle: vi.fn(), setRevTag: vi.fn(), clearRevTag: vi.fn(),
   setSalesRep: vi.fn(), setShipmentCustomer: vi.fn(), assignCarrierRep: vi.fn(), submitOrder: vi.fn(), updateOrderDetails: vi.fn(), updateStop: vi.fn(),
-  updateStopDetails: vi.fn(), recalcCharges: vi.fn(), updateLoadCarrierDetails: vi.fn(), setEta: vi.fn(),
+  updateStopDetails: vi.fn(), recalcCharges: vi.fn(), updateLoadCarrierDetails: vi.fn(), setEta: vi.fn(), updateCarrierCharges: vi.fn(),
   prepareDocumentUpload: vi.fn(), commitDocument: vi.fn(), putPresignedFile: vi.fn(), createLocation: vi.fn(),
 }))
 vi.mock('@/lib/apiClient', () => api)
@@ -407,5 +407,34 @@ describe('submit and cover', () => {
     const sr = api.updateOrderDetails.mock.calls[0][0].order.specialRequirements
     expect(sr.form.carrier.loadCarrierId).toBe('lc-1')
     expect(sr.form.rates?.carrierDraft).toBeUndefined()
+  })
+  it('Cover writes the carrier accessorials typed on the form onto the booked assignment, once', async () => {
+    const v = filledValues()
+    v.rates.lines = [
+      { id: '', carrierLineId: '', release: '', paidTo: '', code: 'DETENTION', label: 'Detention', carrierAmount: '75', customerAmount: '100', note: '' },
+      { id: '', carrierLineId: '', release: '', paidTo: '', code: 'LUMPER', label: 'Lumper', carrierAmount: '', customerAmount: '50', note: '' },
+    ]
+    const b = storedBundle(v, { status: 'OPEN' })
+    ;(b as { loadCarriers: unknown[] }).loadCarriers = [{ id: 'lc-1', loadId: 'ld-1', status: 'ACTIVE', kind: 'CARRIER', updatedAt: 'lu' }]
+    ;(b as { charges: unknown[] }).charges = [
+      { id: 'ch-lh', side: 'CARRIER', loadId: 'ld-1', loadCarrierId: 'lc-1', code: 'LINEHAUL', label: 'Linehaul', calculatedBy: 'FLAT', rateCents: 120000, count: 1, amountCents: 120000, isRate: true, sortOrder: 0 },
+      { id: 'ch-cust', side: 'CUSTOMER', loadId: 'ld-1', code: 'DETENTION', calculatedBy: 'FLAT', rateCents: 10000, count: 1, amountCents: 10000, isRate: false, sortOrder: 10 },
+    ]
+    api.updateLoadCarrierDetails.mockResolvedValue(b)
+    api.setEta.mockResolvedValue({ bundle: b })
+    api.updateOrderDetails.mockResolvedValue(b)
+    api.updateCarrierCharges.mockResolvedValue(b)
+    const res = await runCover(v, b)
+    expect(res.ok).toBe(true)
+    expect(api.updateCarrierCharges).toHaveBeenCalledTimes(1)
+    const input = api.updateCarrierCharges.mock.calls[0][0]
+    expect(input.loadCarrierId).toBe('lc-1')
+    expect(input.charges.map((c: { code: string; rateCents: number }) => [c.code, c.rateCents])).toEqual([['LINEHAUL', 120000], ['DETENTION', 7500]])
+    expect(input.charges.every((c: { side: string }) => c.side === 'CARRIER')).toBe(true)
+
+    api.updateCarrierCharges.mockClear()
+    ;(b as { charges: unknown[] }).charges.push({ id: 'ch-det', side: 'CARRIER', loadId: 'ld-1', loadCarrierId: 'lc-1', code: 'DETENTION', calculatedBy: 'FLAT', rateCents: 7500, count: 1, amountCents: 7500, isRate: false, sortOrder: 10 })
+    await runCover(v, b)
+    expect(api.updateCarrierCharges).not.toHaveBeenCalled()
   })
 })

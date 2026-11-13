@@ -40,6 +40,11 @@ export function useFormActions(o: {
   carriers: CarrierRecord[]
   isAdmin: boolean
   brokerName: string
+  /**
+   * Save unsaved edits before the rate con opens: it prints the saved charges, so an accessorial
+   * typed but not saved would otherwise be missing from what the carrier gets. False = do not open.
+   */
+  saveFirst?: () => Promise<boolean>
 }): { actions: FormActions; dialogs: ReactNode; busy: boolean } {
   const { values, update, bundle, setBundle, settings, carriers, isAdmin, brokerName } = o
   // The bundle BOOK_CARRIER answered with: runCover applies the form's seal / PU ETA on top of it.
@@ -54,8 +59,8 @@ export function useFormActions(o: {
   const { drivers } = useDrivers()
   const { equipment } = useTrucks()
 
-  const ref = useRef({ values, bundle, busy })
-  useEffect(() => { ref.current = { values, bundle, busy } })
+  const ref = useRef({ values, bundle, busy, saveFirst: o.saveFirst })
+  useEffect(() => { ref.current = { values, bundle, busy, saveFirst: o.saveFirst } })
 
   const load = bundle?.loads[0]
   const live = liveCarriers(bundle)
@@ -86,7 +91,11 @@ export function useFormActions(o: {
       }).finally(() => setAdding(false))
     },
     openDispatch: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('dispatch') } },
-    openSendRateCon: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('rateCon') } },
+    openSendRateCon: () => {
+      if (ref.current.busy) return
+      const save = ref.current.saveFirst
+      void (save ? save() : Promise.resolve(true)).then((ok) => { if (ok) { setTarget(undefined); setDialog('rateCon') } })
+    },
     openSendInfo: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('info') } },
     openTonu: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('tonu') } },
     openUncover: () => { if (!ref.current.busy) { setTarget(undefined); setDialog('uncover') } },

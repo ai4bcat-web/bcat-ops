@@ -8,7 +8,7 @@
 import {
   addCarrier, assignAsset, assignCarrierRep, clearRevTag, commitDocument, createLocation, createShipment,
   prepareDocumentUpload, putPresignedFile, recalcCharges, saveOrderForm, setEta, setRevTag, setSalesRep, setShipmentCustomer,
-  getShipmentBundle, setStopDrivers, submitOrder, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
+  getShipmentBundle, setStopDrivers, submitOrder, updateCarrierCharges, updateLoadCarrierDetails, updateOrderDetails, updateStop, updateStopDetails,
   type UpdateLoadCarrierDetailsInput,
 } from '@/lib/apiClient'
 import { apptNotices } from '@/lib/apptNotify'
@@ -19,7 +19,7 @@ import type { Stop } from '@/types'
 import type { CustomerRecord, LoadCarrierRecord, LocationRecord, ShipmentBundle, TmsSettings } from '@/types/tms'
 import { applyNewShipmentEffects, linkStopsToDirectory } from '../newShipmentEffects'
 import {
-  chargesForBundle, firstPickupIndex, lastDeliveryIndex, rebaseCharges, toAddCarrierInput, toCreateInput, toSaveOrderFormInput, toStop, toStops,
+  carrierAccessorialInputs, chargesForBundle, firstPickupIndex, lastDeliveryIndex, rebaseCharges, toAddCarrierInput, toCreateInput, toSaveOrderFormInput, toStop, toStops,
   toUpdateOrderDetailsInput,
 } from './mapping'
 import {
@@ -518,7 +518,7 @@ export async function runCover(values: ShipmentFormValues, booked: ShipmentBundl
   const lc = index === 0 ? live[0] : live.find((l) => !known.has(l.id))
   if (!lc) return fail('The carrier is not booked yet.', booked)
   const slot = slots[index]
-  const r = new Runner(booked, new Set(), ['carrier', 'eta', 'extras'])
+  const r = new Runner(booked, new Set(), ['carrier', 'eta', 'accessorials', 'extras'])
   await r.run('carrier', async () => {
     const patch = carrierDetailsPatch(slot, lc, slots.length > 1)
     if (!patch) return
@@ -531,6 +531,30 @@ export async function runCover(values: ShipmentFormValues, booked: ShipmentBundl
     return (await setEta({
       loadCarrierId: active.id, expectedUpdatedAt: active.updatedAt, pickupEtaAt: fromDateTimeInput(slot.puEta),
     })).bundle
+  })
+  // The Cover dialog books with the rate alone: the accessorials this carrier is paid on the form are written
+  // onto the new assignment here, so the rate con (and the bill) carry them. A line already on it is not added twice.
+  await r.run('accessorials', async () => {
+    const b = r.bundle!
+    const mine = b.charges.filter((c) => c.side === 'CARRIER' && c.loadCarrierId === lc.id)
+    const unclaimed = [...mine]
+    const missing = carrierAccessorialInputs(values, index).filter((want) => {
+      const at = unclaimed.findIndex((c) => c.code === want.code && c.amountCents === want.rateCents && (c.release ?? null) === (want.release ?? null))
+      if (at < 0) return true
+      unclaimed.splice(at, 1)
+      return false
+    })
+    if (missing.length === 0) return
+    const keep = mine.map((c) => ({
+      id: c.id, side: c.side, loadId: c.loadId, loadCarrierId: c.loadCarrierId, code: c.code, label: c.label ?? null,
+      calculatedBy: c.calculatedBy, rateCents: c.rateCents, count: c.count ?? 1, isRate: c.isRate, release: c.release ?? null,
+      sortOrder: c.sortOrder, note: c.note ?? null,
+    }))
+    return updateCarrierCharges({
+      loadCarrierId: lc.id,
+      expectedVersion: b.shipment.version ?? 1,
+      charges: [...keep, ...missing.map((m) => ({ ...m, loadId: lc.loadId, loadCarrierId: lc.id }))],
+    })
   })
   await r.run('extras', async () => {
     const b = r.bundle!
