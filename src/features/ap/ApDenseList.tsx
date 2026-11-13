@@ -138,7 +138,7 @@ export function ApDenseList<T>({ config, email, onRefresh }: {
   const filterCount = activeFilterCount(filters)
 
   return (
-    <div className="tms-dense-page tms-caps">
+    <div className="tms-dense-page">
       <div className="tms-dense-bar">
         <Search size={14} className="tms-muted" aria-hidden="true" />
         <TmsInput className="tms-dense-search" aria-label="Search" data-testid="ap-search" placeholder={searchPlaceholder ?? 'Search bill, carrier, payee, amount…'} value={search} onChange={(e) => setSearch(e.target.value)} />

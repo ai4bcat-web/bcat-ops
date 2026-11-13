@@ -85,7 +85,7 @@ export function ArDenseTable<T>({ grid }: { grid: ArGrid<T> }) {
   }, [rows, catalogAll, filters, prefs.sort, search, group])
 
   return (
-    <div className="tms-dense-page tms-caps" data-testid={`ar-grid-${gridId}`}>
+    <div className="tms-dense-page" data-testid={`ar-grid-${gridId}`}>
       <div className="tms-dense-bar">
         <Search size={14} className="tms-muted" aria-hidden="true" />
         <TmsInput className="tms-dense-search" aria-label="Search" data-testid="ar-search" placeholder="Search invoice, customer, PRO, amount…" value={search} onChange={(e) => setSearch(e.target.value)} />

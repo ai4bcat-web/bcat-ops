@@ -68,6 +68,7 @@ export function TmsKpiCard({
     compact ? 'tms-kpi-card-compact' : '',
     onClick ? 'tms-kpi-card-button' : '',
     active ? 'tms-kpi-card-active' : '',
+    valueTone === 'default' ? '' : `tms-kpi-card-tone-${valueTone}`,
     className ?? '',
   ].filter(Boolean).join(' ')
   const rootProps = { className: classes, 'data-testid': testId, 'aria-label': ariaLabel, title }

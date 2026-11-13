@@ -209,16 +209,17 @@
   z-index: 3;
   height: 30px;
   padding: 0 6px;
-  background: var(--tms-surface-subtle);
-  color: var(--tms-muted);
+  /* A darker band with dark, bold labels so the header never reads as a data row. */
+  background: var(--tms-th-bg);
+  color: var(--tms-th-ink);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
   text-align: left;
   white-space: nowrap;
-  border-bottom: 1px solid var(--tms-border);
-  border-right: 1px solid var(--tms-border);
+  border-bottom: 2px solid color-mix(in srgb, var(--tms-text) 22%, var(--tms-border));
+  border-right: 1px solid color-mix(in srgb, var(--tms-text) 8%, var(--tms-border));
 }
 
 .tms-shell .tms-dg-table thead th.tms-dg-sticky {
@@ -255,7 +256,7 @@
 }
 
 .tms-shell .tms-dg-sort:hover {
-  color: var(--tms-text);
+  color: var(--tms-primary-ink);
 }
 
 .tms-shell .tms-dg-th-label {
@@ -280,8 +281,8 @@
   border: 0;
   border-radius: 3px;
   background: none;
-  color: var(--tms-muted);
-  opacity: 0.55;
+  color: var(--tms-th-ink);
+  opacity: 0.45;
   cursor: pointer;
 }
 

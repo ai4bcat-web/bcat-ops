@@ -33,36 +33,55 @@ export interface TmsBreakdownCardProps {
 
 const pct = (share: number) => `${Math.round(share * 100)}%`
 
+/** Rows grouped into blocks: a group or plain row starts a block, sub-rows join the block above. */
+function blocksOf(rows: TmsBreakdownRow[]): TmsBreakdownRow[][] {
+  const blocks: TmsBreakdownRow[][] = []
+  for (const row of rows) {
+    const last = blocks[blocks.length - 1]
+    if (row.kind === 'sub' && last) last.push(row)
+    else blocks.push([row])
+  }
+  return blocks
+}
+
 export function TmsBreakdownCard({ title, total, rows, selected = null, onSelect, 'aria-label': ariaLabel, testId }: TmsBreakdownCardProps) {
+  const renderRow = (row: TmsBreakdownRow) => {
+    const cls = `tms-breakdown-row${row.kind === 'group' ? ' tms-breakdown-row-group' : row.kind === 'sub' ? ' tms-breakdown-row-sub' : ''}`
+    const inner = (
+      <>
+        <span className="tms-breakdown-label">{row.label}</span>
+        <span className="tms-breakdown-value">{row.value}</span>
+        <span className="tms-breakdown-share">{row.share == null ? '' : pct(row.share)}</span>
+        {row.share == null ? null : (
+          <span className="tms-breakdown-bar" aria-hidden="true">
+            <span style={{ width: `${Math.max(0, Math.min(1, row.share)) * 100}%` }} />
+          </span>
+        )}
+      </>
+    )
+    return onSelect && !row.readOnly ? (
+      <button
+        key={row.key}
+        type="button"
+        className={cls}
+        title={row.title}
+        aria-pressed={selected === row.key}
+        onClick={() => onSelect(selected === row.key ? null : row.key)}
+      >
+        {inner}
+      </button>
+    ) : <div key={row.key} className={cls} title={row.title}>{inner}</div>
+  }
   return (
     <section className="tms-breakdown" aria-label={ariaLabel ?? title} data-testid={testId}>
       <div className="tms-breakdown-head">
         <span className="tms-breakdown-title">{title}</span>
-        {total ? <strong className="text-sm" style={{ fontVariantNumeric: 'tabular-nums' }}>{total}</strong> : null}
+        {total ? <strong className="tms-breakdown-total">{total}</strong> : null}
       </div>
       <div className="tms-breakdown-rows" role="group" aria-label={ariaLabel ?? title}>
-        {rows.map((row) => {
-          const cls = `tms-breakdown-row${row.kind === 'group' ? ' tms-breakdown-row-group' : row.kind === 'sub' ? ' tms-breakdown-row-sub' : ''}`
-          const inner = (
-            <>
-              <span className="tms-breakdown-label">{row.label}</span>
-              <span>{row.value}</span>
-              <span className="tms-breakdown-share">{row.share == null ? '' : pct(row.share)}</span>
-            </>
-          )
-          return onSelect && !row.readOnly ? (
-            <button
-              key={row.key}
-              type="button"
-              className={cls}
-              title={row.title}
-              aria-pressed={selected === row.key}
-              onClick={() => onSelect(selected === row.key ? null : row.key)}
-            >
-              {inner}
-            </button>
-          ) : <div key={row.key} className={cls} title={row.title}>{inner}</div>
-        })}
+        {blocksOf(rows).map((block) => (
+          <div key={block[0].key} className="tms-breakdown-block">{block.map(renderRow)}</div>
+        ))}
       </div>
     </section>
   )

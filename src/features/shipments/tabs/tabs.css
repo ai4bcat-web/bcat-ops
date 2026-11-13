@@ -28,12 +28,16 @@
   border-bottom: 0;
   border-radius: var(--tms-radius) var(--tms-radius) 0 0;
   background: var(--tms-bg);
-  color: var(--tms-muted);
+  color: var(--tms-text-2);
   font: inherit;
   font-size: 12px;
+  font-weight: 500;
 }
+.tms-shell .tms-ship-tab-board:hover { background: var(--tms-surface-hover); color: var(--tms-text); }
 .tms-shell .tms-ship-tab-board { padding: 0 12px; cursor: pointer; }
-.tms-shell .tms-ship-tab-on { background: var(--tms-card); color: var(--tms-text); font-weight: 600; margin-bottom: -1px; }
+/* The open tab: white, bold, a primary bar along its top edge, joined to the panel below. */
+.tms-shell .tms-ship-tab-on,
+.tms-shell .tms-ship-tab-board.tms-ship-tab-on:hover { background: var(--tms-card); color: var(--tms-text); font-weight: 700; margin-bottom: -1px; box-shadow: inset 0 3px 0 0 var(--tms-primary); }
 .tms-shell .tms-ship-tab-main {
   display: inline-flex; align-items: center; gap: 6px; min-width: 0;
   padding: 0 4px 0 10px; height: 30px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer;
@@ -48,4 +52,5 @@
 @media (max-width: 900px) {
   .tms-shell .tms-ship-tab { max-width: 180px; }
 }
-.tms-shell .tms-ship-tab-count { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--tms-surface); font-size: 11px; }
+.tms-shell .tms-ship-tab-count { margin-left: 6px; min-width: 20px; padding: 1px 6px; border-radius: var(--tms-radius-pill); background: color-mix(in srgb, var(--tms-text) 10%, transparent); color: var(--tms-text); font-size: 11px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+.tms-shell .tms-ship-tab-on .tms-ship-tab-count { background: var(--tms-primary); color: var(--tms-on-primary); }
